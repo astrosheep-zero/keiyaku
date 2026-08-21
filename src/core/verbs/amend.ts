@@ -16,7 +16,11 @@ export type AmendRefusal = Readonly<{
   contractId: ContractId;
 }>;
 
-export function decideAmend<Failure>({ input, attempt, observation }: DecideInput<AmendInput<Failure>>): OfferDecision<AmendRefusal | Failure> {
+export function decideAmend<Failure>({
+  input,
+  attempt,
+  observation,
+}: DecideInput<AmendInput<Failure>>): OfferDecision<AmendRefusal | Failure> {
   const id = input.contractId;
   const current = activeContract(observation, id);
   if ("kind" in current) return { kind: "refused", refusal: current };
@@ -24,12 +28,13 @@ export function decideAmend<Failure>({ input, attempt, observation }: DecideInpu
     throw new Error("existing contract requires an amend preparation and source terms");
   }
   const source = input.source;
-  const termsCurrent = source.document.key === current.terms.document.key
-    && source.segments.length === current.terms.segments.length
-    && source.segments.every((value, index) => value === current.terms.segments[index])
-    && source.gates.length === current.terms.gates.length
-    && source.gates.every((value, index) => value === current.terms.gates[index])
-    && samePrerequisites(source.after, current.terms.after);
+  const termsCurrent =
+    source.document.key === current.terms.document.key &&
+    source.segments.length === current.terms.segments.length &&
+    source.segments.every((value, index) => value === current.terms.segments[index]) &&
+    source.gates.length === current.terms.gates.length &&
+    source.gates.every((value, index) => value === current.terms.gates[index]) &&
+    samePrerequisites(source.after, current.terms.after);
   if (!termsCurrent) {
     return { kind: "refused", refusal: { kind: "terms-moved", contractId: id } };
   }

@@ -45,7 +45,6 @@ export class SettingsError extends Error {
   }
 }
 
-
 type LoadedScope = Readonly<{
   state: SettingsScopeState;
   root?: Readonly<Record<string, unknown>>;
@@ -73,8 +72,9 @@ function bounded(error: unknown): string {
 
 async function readScope(path: string): Promise<LoadedScope> {
   let bytes: string;
-  try { bytes = await readFile(path, "utf8"); }
-  catch (error) {
+  try {
+    bytes = await readFile(path, "utf8");
+  } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return { state: { kind: "absent", path } };
     return { state: { kind: "failed", path, diagnostic: bounded(error) } };
   }
@@ -102,12 +102,14 @@ function namespaceEntries(
     return { entries: [], failure: { scope, diagnostic: `${name} must be an object of named values` } };
   }
   return {
-    entries: Object.keys(value).sort().map((entryName) => ({
-      name: entryName,
-      value: value[entryName],
-      source: scope,
-      shadows: false,
-    })),
+    entries: Object.keys(value)
+      .sort()
+      .map((entryName) => ({
+        name: entryName,
+        value: value[entryName],
+        source: scope,
+        shadows: false,
+      })),
   };
 }
 
@@ -115,20 +117,25 @@ function settingsFromScopes(project: LoadedScope, user: LoadedScope): Settings {
   return Object.freeze({
     scopes: Object.freeze({ project: project.state, user: user.state }),
     namespace(name: string): SettingsNamespaceView {
-      if (typeof name !== "string" || name.trim().length === 0) throw new TypeError("settings namespace must be nonblank");
+      if (typeof name !== "string" || name.trim().length === 0)
+        throw new TypeError("settings namespace must be nonblank");
       const fromUser = namespaceEntries(name, "user", user);
       const fromProject = namespaceEntries(name, "project", project);
       const userByName = new Map(fromUser.entries.map((entry) => [entry.name, entry]));
       const projectByName = new Map(fromProject.entries.map((entry) => [entry.name, entry]));
       const names = [...new Set([...userByName.keys(), ...projectByName.keys()])].sort();
-      const entries = Object.freeze(names.map((entryName) => {
-        const higher = projectByName.get(entryName);
-        if (higher !== undefined) return Object.freeze({ ...higher, shadows: userByName.has(entryName) });
-        return userByName.get(entryName)!;
-      }));
-      const failures = Object.freeze([fromUser.failure, fromProject.failure].filter(
-        (failure): failure is SettingsNamespaceFailure => failure !== undefined,
-      ));
+      const entries = Object.freeze(
+        names.map((entryName) => {
+          const higher = projectByName.get(entryName);
+          if (higher !== undefined) return Object.freeze({ ...higher, shadows: userByName.has(entryName) });
+          return userByName.get(entryName)!;
+        }),
+      );
+      const failures = Object.freeze(
+        [fromUser.failure, fromProject.failure].filter(
+          (failure): failure is SettingsNamespaceFailure => failure !== undefined,
+        ),
+      );
       return failures.length === 0
         ? Object.freeze({ kind: "read" as const, name, entries })
         : Object.freeze({ kind: "failed" as const, name, entries, failures });
@@ -144,18 +151,19 @@ export async function settings(input: SettingsInput = {}): Promise<Settings> {
   if (input.home !== undefined && (typeof input.home !== "string" || input.home.trim().length === 0)) {
     throw new TypeError("settings home must be a nonblank string");
   }
-  const project = input.root === undefined
-    ? { state: { kind: "absent" as const } }
-    : await readScope(join(resolve(input.root), ".keiyaku", "settings.json"));
+  const project =
+    input.root === undefined
+      ? { state: { kind: "absent" as const } }
+      : await readScope(join(resolve(input.root), ".keiyaku", "settings.json"));
   const user = await readScope(join(resolve(input.home ?? join(homedir(), ".keiyaku")), "settings.json"));
   return settingsFromScopes(project, user);
 }
 
 /** Read only the project scope owned by a materialized candidate snapshot. */
 export async function projectSettings(root: string): Promise<Settings> {
-  if (typeof root !== "string" || root.trim().length === 0) throw new TypeError("settings root must be a nonblank string");
-  return settingsFromScopes(
-    await readScope(join(resolve(root), ".keiyaku", "settings.json")),
-    { state: { kind: "absent" } },
-  );
+  if (typeof root !== "string" || root.trim().length === 0)
+    throw new TypeError("settings root must be a nonblank string");
+  return settingsFromScopes(await readScope(join(resolve(root), ".keiyaku", "settings.json")), {
+    state: { kind: "absent" },
+  });
 }

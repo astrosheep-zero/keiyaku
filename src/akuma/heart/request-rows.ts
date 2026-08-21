@@ -1,10 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { AkuId } from "../identity.js";
-import type {
-  RequestFact,
-  RequestInput,
-  UpstreamRequestService,
-} from "./facts.js";
+import type { RequestFact, RequestInput, UpstreamRequestService } from "./facts.js";
 import { isTaskMutationAction } from "../../task/mutation.js";
 
 type RequestRow = Readonly<{
@@ -43,23 +39,25 @@ export function requestPayloadJson(input: RequestInput): string {
     evidence: _evidence,
     refusal: _refusal,
     ...payload
-  } = input as RequestInput & Readonly<{
-    requester?: AkuId;
-    admittedAt?: string;
-    state?: RequestFact["state"];
-    child?: AkuId;
-    service?: UpstreamRequestService;
-    diagnostic?: string;
-    evidence?: string;
-    refusal?: string;
-  }>;
+  } = input as RequestInput &
+    Readonly<{
+      requester?: AkuId;
+      admittedAt?: string;
+      state?: RequestFact["state"];
+      child?: AkuId;
+      service?: UpstreamRequestService;
+      diagnostic?: string;
+      evidence?: string;
+      refusal?: string;
+    }>;
   return json(payload);
 }
 
 function decodeRequestRow(row: RequestRow): RequestFact {
-  const knownAction = [
-    "akuma.call", "akuma.wait", "akuma.tell", "akuma.kill", "contract.deliver", "contract.review",
-  ].includes(row.action) || isTaskMutationAction(row.action);
+  const knownAction =
+    ["akuma.call", "akuma.wait", "akuma.tell", "akuma.kill", "contract.deliver", "contract.review"].includes(
+      row.action,
+    ) || isTaskMutationAction(row.action);
   if (!knownAction) throw new Error(`Akuma authority contains an unknown request action: ${row.action}`);
   const payload = parsed<Omit<RequestInput, "action" | "id">>(row.payload_json);
   const input = {
@@ -99,17 +97,21 @@ export function insertRequestFact(
   input: RequestInput & Readonly<{ requester: AkuId; admittedAt: string; refusal?: string }>,
 ): void {
   const { id, action, requester, admittedAt, refusal } = input;
-  database.prepare(`INSERT OR IGNORE INTO requests(
+  database
+    .prepare(
+      `INSERT OR IGNORE INTO requests(
     id, requester, action, payload_json, admitted_at, state, diagnostic
-  ) VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
-    id,
-    requester,
-    action,
-    requestPayloadJson(input),
-    admittedAt,
-    refusal === undefined ? "admitted" : "refused",
-    refusal ?? null,
-  );
+  ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      id,
+      requester,
+      action,
+      requestPayloadJson(input),
+      admittedAt,
+      refusal === undefined ? "admitted" : "refused",
+      refusal ?? null,
+    );
 }
 
 export function requestFact(database: DatabaseSync, id: string): RequestFact | null {
@@ -118,32 +120,53 @@ export function requestFact(database: DatabaseSync, id: string): RequestFact | n
 }
 
 export function nonterminalRequestFacts(database: DatabaseSync): readonly RequestFact[] {
-  const rows = database.prepare(`SELECT ${REQUEST_COLUMNS} FROM requests
-    WHERE state IN ('admitted', 'reserved') ORDER BY sequence`).all() as unknown as readonly RequestRow[];
+  const rows = database
+    .prepare(
+      `SELECT ${REQUEST_COLUMNS} FROM requests
+    WHERE state IN ('admitted', 'reserved') ORDER BY sequence`,
+    )
+    .all() as unknown as readonly RequestRow[];
   return rows.map(decodeRequestRow);
 }
 
 export function updateRequestReserved(database: DatabaseSync, id: string, child: AkuId): void {
-  database.prepare("UPDATE requests SET state = 'reserved', child = ? WHERE id = ? AND state = 'admitted'")
+  database
+    .prepare("UPDATE requests SET state = 'reserved', child = ? WHERE id = ? AND state = 'admitted'")
     .run(child, id);
 }
 
 export function updateRequestServed(database: DatabaseSync, id: string, child: AkuId): void {
-  database.prepare(`UPDATE requests SET state = 'served', child = ?
-    WHERE id = ? AND state = 'reserved'`).run(child, id);
+  database
+    .prepare(
+      `UPDATE requests SET state = 'served', child = ?
+    WHERE id = ? AND state = 'reserved'`,
+    )
+    .run(child, id);
 }
 
 export function updateUpstreamRequestServed(database: DatabaseSync, id: string, service: unknown): void {
-  database.prepare(`UPDATE requests SET state = 'served', service_json = ?
-    WHERE id = ? AND state = 'admitted' AND action != 'akuma.call'`).run(json(service), id);
+  database
+    .prepare(
+      `UPDATE requests SET state = 'served', service_json = ?
+    WHERE id = ? AND state = 'admitted' AND action != 'akuma.call'`,
+    )
+    .run(json(service), id);
 }
 
 export function updateRequestRefused(database: DatabaseSync, id: string, diagnostic: string): void {
-  database.prepare(`UPDATE requests SET state = 'refused', diagnostic = ?
-    WHERE id = ? AND state = 'admitted'`).run(diagnostic, id);
+  database
+    .prepare(
+      `UPDATE requests SET state = 'refused', diagnostic = ?
+    WHERE id = ? AND state = 'admitted'`,
+    )
+    .run(diagnostic, id);
 }
 
 export function updateRequestVoided(database: DatabaseSync, id: string, evidence: string): void {
-  database.prepare(`UPDATE requests SET state = 'voided', child = NULL, service_json = NULL, evidence = ?
-    WHERE id = ? AND state IN ('admitted', 'reserved')`).run(evidence, id);
+  database
+    .prepare(
+      `UPDATE requests SET state = 'voided', child = NULL, service_json = NULL, evidence = ?
+    WHERE id = ? AND state IN ('admitted', 'reserved')`,
+    )
+    .run(evidence, id);
 }

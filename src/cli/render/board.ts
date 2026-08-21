@@ -4,12 +4,12 @@ export function worldObservationFailureText(result: ObservationResult): string |
   if (result.command !== "reconcile") return undefined;
   const report = result.report;
   if (
-    typeof report !== "object"
-    || report === null
-    || !("kind" in report)
-    || report.kind !== "world-observation-failed"
-    || !("diagnostic" in report)
-    || typeof report.diagnostic !== "string"
+    typeof report !== "object" ||
+    report === null ||
+    !("kind" in report) ||
+    report.kind !== "world-observation-failed" ||
+    !("diagnostic" in report) ||
+    typeof report.diagnostic !== "string"
   ) {
     return undefined;
   }

@@ -26,11 +26,13 @@ export type VerificationDeclarationPreparation = Preparation<
 
 export const VERIFIED = gate("verified");
 
-export function prepareVerificationDeclaration(input: Readonly<{
-  gates: readonly Gate[];
-  definition: VerificationDefinition | null;
-  contractId?: ContractId;
-}>): VerificationDeclarationPreparation {
+export function prepareVerificationDeclaration(
+  input: Readonly<{
+    gates: readonly Gate[];
+    definition: VerificationDefinition | null;
+    contractId?: ContractId;
+  }>,
+): VerificationDeclarationPreparation {
   if (input.definition !== null || !input.gates.includes(VERIFIED)) {
     return { kind: "prepared", data: input.definition };
   }

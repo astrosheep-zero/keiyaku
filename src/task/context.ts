@@ -3,29 +3,48 @@ import { dirname, join, resolve } from "node:path";
 import { repairDerivedFile, replaceFileDurably } from "../coordination/durable-file.js";
 import { normalizeIdentityStem } from "../identity/normalize.js";
 
-export type NamespaceContextRead = readonly string[] | "absent" | Readonly<{
-  kind: "malformed";
-  path: string;
-}>;
+export type NamespaceContextRead =
+  | readonly string[]
+  | "absent"
+  | Readonly<{
+      kind: "malformed";
+      path: string;
+    }>;
 export type NamespaceContextInput = Readonly<{
   directory: string;
   boundary: string;
 }>;
 
-function directory(root: string): string { return join(root, ".keiyaku", "namespace"); }
-function currentPath(root: string): string { return join(directory(root), "current"); }
-function ignorePath(root: string): string { return join(directory(root), ".gitignore"); }
+function directory(root: string): string {
+  return join(root, ".keiyaku", "namespace");
+}
+function currentPath(root: string): string {
+  return join(directory(root), "current");
+}
+function ignorePath(root: string): string {
+  return join(directory(root), ".gitignore");
+}
 
 function validNamespaceSegments(value: unknown): value is readonly string[] {
-  return Array.isArray(value) && value.every((segment) => typeof segment === "string"
-    && segment.length > 0 && normalizeIdentityStem({ source: segment }) === segment
-    && !segment.includes("/") && segment !== "." && segment !== "..");
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (segment) =>
+        typeof segment === "string" &&
+        segment.length > 0 &&
+        normalizeIdentityStem({ source: segment }) === segment &&
+        !segment.includes("/") &&
+        segment !== "." &&
+        segment !== "..",
+    )
+  );
 }
 
 async function readAt(root: string): Promise<NamespaceContextRead> {
   let bytes: string;
   try {
-    const path = currentPath(root), stat = await lstat(path);
+    const path = currentPath(root),
+      stat = await lstat(path);
     if (!stat.isFile() || stat.isSymbolicLink()) return { kind: "malformed", path };
     bytes = await readFile(path, "utf8");
   } catch (error) {
@@ -40,9 +59,7 @@ async function readAt(root: string): Promise<NamespaceContextRead> {
   return validNamespaceSegments(segments) ? segments : { kind: "malformed", path: currentPath(root) };
 }
 
-export async function readNamespaceContext(
-  coordinates: NamespaceContextInput,
-): Promise<NamespaceContextRead> {
+export async function readNamespaceContext(coordinates: NamespaceContextInput): Promise<NamespaceContextRead> {
   let current = coordinates.directory;
   for (;;) {
     const selected = await readAt(current);
@@ -76,10 +93,15 @@ export async function repairNamespaceContext(root: string, segments: readonly st
   return "installed";
 }
 
-export async function resolveTaskNamespaceContext(input: NamespaceContextInput): Promise<readonly string[] | Readonly<{ kind: "invalid-namespace-context"; path: string }>> {
+export async function resolveTaskNamespaceContext(
+  input: NamespaceContextInput,
+): Promise<readonly string[] | Readonly<{ kind: "invalid-namespace-context"; path: string }>> {
   const selected = await readNamespaceContext(input);
-  return selected === "absent" ? [] : typeof selected === "object" && "kind" in selected
-    ? { kind: "invalid-namespace-context", path: selected.path } : selected;
+  return selected === "absent"
+    ? []
+    : typeof selected === "object" && "kind" in selected
+      ? { kind: "invalid-namespace-context", path: selected.path }
+      : selected;
 }
 
 export async function writeTaskNamespaceContext(directory: string, value: readonly string[]): Promise<void> {

@@ -64,7 +64,8 @@ class Parser {
       if (this.options.mode === "document" && isSection(token)) blocks.push(this.parseSection());
       else if (token.type === "fence") blocks.push(this.parseCodeBlock());
       else if (token.type === "header") blocks.push(this.parseHeading());
-      else if (token.type === "list_marker" && (this.options.mode === "item" || token.indent <= 3)) blocks.push(this.parseList(token.indent, token.ordered));
+      else if (token.type === "list_marker" && (this.options.mode === "item" || token.indent <= 3))
+        blocks.push(this.parseList(token.indent, token.ordered));
       else if (token.type === "blockquote") blocks.push(this.parseBlockquote());
       else if (token.type === "frontmatter") this.consume();
       else blocks.push(this.parseText(stop));
@@ -161,12 +162,14 @@ class Parser {
 
   private parseListItem(marker: ListMarkerToken, indent: number): ListItemNode {
     const bodyOffset = marker.bodyStart - marker.span.start;
-    const itemTokens: MarkdownToken[] = [{
-      type: "text",
-      raw: marker.raw.slice(bodyOffset),
-      span: { start: marker.bodyStart, end: marker.span.end },
-      leadingSpaces: 0,
-    }];
+    const itemTokens: MarkdownToken[] = [
+      {
+        type: "text",
+        raw: marker.raw.slice(bodyOffset),
+        span: { start: marker.bodyStart, end: marker.span.end },
+        leadingSpaces: 0,
+      },
+    ];
     let end = marker.span.end;
     while (!this.done()) {
       const token = this.peek();
@@ -180,8 +183,7 @@ class Parser {
       end = token.span.end;
     }
     const childSpan = { start: itemTokens[0]!.span.start, end: itemTokens.at(-1)!.span.end };
-    const children = new Parser(itemTokens, { mode: "item" })
-      .parseDocument("", childSpan, 0).children;
+    const children = new Parser(itemTokens, { mode: "item" }).parseDocument("", childSpan, 0).children;
     return { type: "list_item", span: { start: marker.span.start, end }, marker: marker.marker, indent, children };
   }
 
@@ -189,7 +191,14 @@ class Parser {
     const tokens: MarkdownToken[] = [];
     while (!this.done() && !stop()) {
       const token = this.peek();
-      if (token === undefined || token.type === "fence" || token.type === "header" || token.type === "blockquote" || token.type === "frontmatter") break;
+      if (
+        token === undefined ||
+        token.type === "fence" ||
+        token.type === "header" ||
+        token.type === "blockquote" ||
+        token.type === "frontmatter"
+      )
+        break;
       if (token.type === "list_marker" && (this.options.mode === "item" || token.indent <= 3)) break;
       tokens.push(token);
       this.consume();
@@ -225,6 +234,9 @@ class Parser {
 
 export function parseToAST(source: string): DocumentNode {
   const bomLength: 0 | 1 = source.startsWith("\uFEFF") ? 1 : 0;
-  return new Parser(lexMarkdown(source), { mode: "document" })
-    .parseDocument(source, { start: 0, end: source.length }, bomLength);
+  return new Parser(lexMarkdown(source), { mode: "document" }).parseDocument(
+    source,
+    { start: 0, end: source.length },
+    bomLength,
+  );
 }

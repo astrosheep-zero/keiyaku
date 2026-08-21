@@ -13,13 +13,15 @@ export type AcceptedObligations = Readonly<{
 }>;
 
 export type IntentOutcome<Value, Refusal = never> =
-  | Readonly<{
-      kind: "accepted";
-      facts: readonly JournalEntry[];
-      head: ContractHead;
-      value: Value;
-      physical?: ReconcileResult;
-    } & AcceptedObligations>
+  | Readonly<
+      {
+        kind: "accepted";
+        facts: readonly JournalEntry[];
+        head: ContractHead;
+        value: Value;
+        physical?: ReconcileResult;
+      } & AcceptedObligations
+    >
   | Readonly<{ kind: "refused"; refusal: Refusal }>
   | Readonly<{ kind: "retry"; reason: ProtocolTerminal }>;
 
@@ -42,7 +44,10 @@ export function accepted<Value, Refusal = never>(
   };
 }
 
-export function admitted<Value, Refusal = never>(admission: AcceptedProtocolStep, value: Value): IntentOutcome<Value, Refusal> {
+export function admitted<Value, Refusal = never>(
+  admission: AcceptedProtocolStep,
+  value: Value,
+): IntentOutcome<Value, Refusal> {
   return accepted(admission.state, admission.facts, value, admission.physical);
 }
 

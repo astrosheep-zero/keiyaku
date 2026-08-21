@@ -2,17 +2,8 @@ import type { Preparation } from "../core/decide.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { ChangeId, ContractCoordinates, ContractId, SnapshotId } from "../core/facts/types.js";
 import { gitObjectId, gitObjectIdForSnapshot, mintChangeId, mintSnapshotId, type GitObjectId } from "./identity.js";
-import {
-  decodeGitNameOnly,
-  decodeGitNumstat,
-  readRef,
-} from "./repository.js";
-import {
-  GitPlumbingError,
-  runGit,
-  runGitWithEnvironment,
-  type GitRepository,
-} from "./process.js";
+import { decodeGitNameOnly, decodeGitNumstat, readRef } from "./repository.js";
+import { GitPlumbingError, runGit, runGitWithEnvironment, type GitRepository } from "./process.js";
 import type { DeliveryCommitMetadata, TenderCapture } from "./tender.js";
 import { workspaceMergeStatePresent } from "./workspace.js";
 
@@ -22,9 +13,14 @@ type IntegrationTender = Pick<TenderCapture, "head" | "tree">;
 
 const REQUIRED_GIT = "2.38" as const;
 
-async function runAllowingNonzero(repository: GitRepository, args: readonly string[], input?: string): Promise<Readonly<{ stdout: Buffer; stderr: Buffer; status: number | null }>> {
-  try { return { stdout: await runGit(repository, args, input), stderr: Buffer.alloc(0), status: 0 }; }
-  catch (error) {
+async function runAllowingNonzero(
+  repository: GitRepository,
+  args: readonly string[],
+  input?: string,
+): Promise<Readonly<{ stdout: Buffer; stderr: Buffer; status: number | null }>> {
+  try {
+    return { stdout: await runGit(repository, args, input), stderr: Buffer.alloc(0), status: 0 };
+  } catch (error) {
     if (!(error instanceof GitPlumbingError)) throw error;
     return { stdout: error.stdout, stderr: error.stderr, status: error.status };
   }
@@ -61,12 +57,18 @@ export async function worktreeChangeId(
   tender: TenderCapture,
 ): Promise<ChangeId> {
   const patch = await runGit(repository, [
-    "-c", "core.quotePath=false",
-    "-c", "core.abbrev=40",
-    "-c", "diff.algorithm=myers",
-    "-c", "diff.renames=false",
-    "-c", "diff.indentHeuristic=false",
-    "-c", "diff.suppressBlankEmpty=false",
+    "-c",
+    "core.quotePath=false",
+    "-c",
+    "core.abbrev=40",
+    "-c",
+    "diff.algorithm=myers",
+    "-c",
+    "diff.renames=false",
+    "-c",
+    "diff.indentHeuristic=false",
+    "-c",
+    "diff.suppressBlankEmpty=false",
     "diff",
     "--no-ext-diff",
     "--no-textconv",
@@ -86,7 +88,8 @@ export async function worktreeChangeId(
     gitObjectIdForSnapshot(input.coordinates.start),
     tender.tree,
   ]);
-  const id = (await runGit(repository, ["patch-id", "--verbatim"], patch)).toString("utf8").trim().split(/\s/, 1)[0] ?? "";
+  const id =
+    (await runGit(repository, ["patch-id", "--verbatim"], patch)).toString("utf8").trim().split(/\s/, 1)[0] ?? "";
   return mintChangeId(id === "" ? "0000000000000000000000000000000000000000" : id);
 }
 
@@ -97,26 +100,27 @@ export async function materializeIntegrationSnapshot(
   parent: SnapshotId,
   metadata: DeliveryCommitMetadata,
 ): Promise<SnapshotId> {
-  const commit = (await runGitWithEnvironment(
-    repository,
-    ["commit-tree", tree, "-p", gitObjectIdForSnapshot(parent)],
-    metadata.message,
-    {
-      GIT_AUTHOR_NAME: metadata.identity.name,
-      GIT_AUTHOR_EMAIL: metadata.identity.email,
-      GIT_COMMITTER_NAME: metadata.identity.name,
-      GIT_COMMITTER_EMAIL: metadata.identity.email,
-      GIT_AUTHOR_DATE: metadata.at,
-      GIT_COMMITTER_DATE: metadata.at,
-    },
-  )).toString("utf8").trim();
+  const commit = (
+    await runGitWithEnvironment(
+      repository,
+      ["commit-tree", tree, "-p", gitObjectIdForSnapshot(parent)],
+      metadata.message,
+      {
+        GIT_AUTHOR_NAME: metadata.identity.name,
+        GIT_AUTHOR_EMAIL: metadata.identity.email,
+        GIT_COMMITTER_NAME: metadata.identity.name,
+        GIT_COMMITTER_EMAIL: metadata.identity.email,
+        GIT_AUTHOR_DATE: metadata.at,
+        GIT_COMMITTER_DATE: metadata.at,
+      },
+    )
+  )
+    .toString("utf8")
+    .trim();
   return mintSnapshotId(commit);
 }
 
-export async function persistedTender(
-  repository: GitRepository,
-  snapshot: SnapshotId,
-): Promise<IntegrationTender> {
+export async function persistedTender(repository: GitRepository, snapshot: SnapshotId): Promise<IntegrationTender> {
   const tree = (await runGit(repository, ["show", "-s", "--format=%T", gitObjectIdForSnapshot(snapshot)]))
     .toString("ascii")
     .trim();
@@ -140,16 +144,16 @@ export async function materializeReintegrationSnapshot(
     throw error;
   }
   const separator = raw.indexOf(Buffer.from("\n\n"));
-  if (separator < 0) throw new AuthorityCorruptionError(`recorded delivery snapshot has no commit message: ${template}`);
+  if (separator < 0)
+    throw new AuthorityCorruptionError(`recorded delivery snapshot has no commit message: ${template}`);
   const message = raw.subarray(separator + 2);
   let fields: readonly string[];
   try {
-    const formatted = (await runGit(repository, [
-      "show",
-      "-s",
-      "--format=%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI",
-      templateObject,
-    ])).toString("utf8").replace(/\n$/u, "");
+    const formatted = (
+      await runGit(repository, ["show", "-s", "--format=%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI", templateObject])
+    )
+      .toString("utf8")
+      .replace(/\n$/u, "");
     fields = formatted.split("\0");
   } catch (error) {
     if (error instanceof GitPlumbingError) {
@@ -161,19 +165,18 @@ export async function materializeReintegrationSnapshot(
     throw new AuthorityCorruptionError(`recorded delivery snapshot metadata is malformed: ${template}`);
   }
   const [authorName, authorEmail, authorDate, committerName, committerEmail, committerDate] = fields;
-  const commit = (await runGitWithEnvironment(
-    repository,
-    ["commit-tree", tree, "-p", gitObjectIdForSnapshot(parent)],
-    message!,
-    {
+  const commit = (
+    await runGitWithEnvironment(repository, ["commit-tree", tree, "-p", gitObjectIdForSnapshot(parent)], message!, {
       GIT_AUTHOR_NAME: authorName!,
       GIT_AUTHOR_EMAIL: authorEmail!,
       GIT_AUTHOR_DATE: authorDate!,
       GIT_COMMITTER_NAME: committerName!,
       GIT_COMMITTER_EMAIL: committerEmail!,
       GIT_COMMITTER_DATE: committerDate!,
-    },
-  )).toString("utf8").trim();
+    })
+  )
+    .toString("utf8")
+    .trim();
   return mintSnapshotId(commit);
 }
 
@@ -193,7 +196,11 @@ async function isAncestor(repository: GitRepository, ancestor: SnapshotId, desce
   });
 }
 
-async function commonAncestor(repository: GitRepository, left: SnapshotId, right: SnapshotId): Promise<SnapshotId | null> {
+async function commonAncestor(
+  repository: GitRepository,
+  left: SnapshotId,
+  right: SnapshotId,
+): Promise<SnapshotId | null> {
   const result = await runAllowingNonzero(repository, [
     "merge-base",
     gitObjectIdForSnapshot(left),
@@ -293,7 +300,12 @@ export async function planIntegration(
   input: IntegrationCoordinates,
   tender: IntegrationTender,
   requireBranchesToBeUpToDate: boolean,
-): Promise<Preparation<IntegrationPlan, Readonly<{ kind: "target-missing"; contractId: ContractId }> | IntegrationPreparationRefusal>> {
+): Promise<
+  Preparation<
+    IntegrationPlan,
+    Readonly<{ kind: "target-missing"; contractId: ContractId }> | IntegrationPreparationRefusal
+  >
+> {
   const target = input.coordinates.target;
   if (target === undefined) {
     return {
@@ -336,13 +348,7 @@ export async function planIntegration(
         },
       };
     }
-    const merged = await mergedTree(
-      repository,
-      input.contractId,
-      base,
-      targetHead,
-      tender.tree,
-    );
+    const merged = await mergedTree(repository, input.contractId, base, targetHead, tender.tree);
     if (merged.kind === "refused") return merged;
     tree = merged.data;
   }
@@ -361,11 +367,13 @@ async function deliverySnapshotAvailability(
   candidate: SnapshotId,
 ): Promise<"available" | "unavailable"> {
   const objects = [gitObjectIdForSnapshot(predecessor), gitObjectIdForSnapshot(candidate)] as const;
-  const types = (await runGit(
-    repository,
-    ["cat-file", "--batch-check=%(objectname) %(objecttype)"],
-    `${objects.join("\n")}\n`,
-  )).toString("ascii").trimEnd().split("\n").map((record) => record.split(" ")[1]);
+  const types = (
+    await runGit(repository, ["cat-file", "--batch-check=%(objectname) %(objecttype)"], `${objects.join("\n")}\n`)
+  )
+    .toString("ascii")
+    .trimEnd()
+    .split("\n")
+    .map((record) => record.split(" ")[1]);
   if (types.includes("missing")) return "unavailable";
   if (types.some((type) => type !== "commit")) {
     throw new AuthorityCorruptionError("recorded delivery snapshot is not a Git commit");
@@ -387,40 +395,50 @@ export async function readDeliveryScope(
   candidate: SnapshotId,
   includePaths: boolean,
 ): Promise<DeliveryDiffScope> {
-  const scope = decodeGitNumstat(await runGit(repository, [
-    "diff",
-    "--numstat",
-    "-z",
-    gitObjectIdForSnapshot(predecessor),
-    gitObjectIdForSnapshot(candidate),
-  ]));
-  if (!includePaths) return scope;
-  return {
-    ...scope,
-    paths: decodeGitNameOnly(await runGit(repository, [
+  const scope = decodeGitNumstat(
+    await runGit(repository, [
       "diff",
-      "--name-only",
-      "--no-renames",
+      "--numstat",
       "-z",
       gitObjectIdForSnapshot(predecessor),
       gitObjectIdForSnapshot(candidate),
-    ])),
+    ]),
+  );
+  if (!includePaths) return scope;
+  return {
+    ...scope,
+    paths: decodeGitNameOnly(
+      await runGit(repository, [
+        "diff",
+        "--name-only",
+        "--no-renames",
+        "-z",
+        gitObjectIdForSnapshot(predecessor),
+        gitObjectIdForSnapshot(candidate),
+      ]),
+    ),
   };
 }
 
 /** Read a recorded integration pair's patch, or null when Git no longer has it. */
-export async function readDeliveryDiff(repository: GitRepository, predecessor: SnapshotId, candidate: SnapshotId): Promise<string | null> {
-  if (await deliverySnapshotAvailability(repository, predecessor, candidate) === "unavailable") return null;
+export async function readDeliveryDiff(
+  repository: GitRepository,
+  predecessor: SnapshotId,
+  candidate: SnapshotId,
+): Promise<string | null> {
+  if ((await deliverySnapshotAvailability(repository, predecessor, candidate)) === "unavailable") return null;
   try {
-    return (await runGit(repository, [
-      "diff",
-      "--no-ext-diff",
-      "--no-color",
-      gitObjectIdForSnapshot(predecessor),
-      gitObjectIdForSnapshot(candidate),
-    ])).toString("utf8");
+    return (
+      await runGit(repository, [
+        "diff",
+        "--no-ext-diff",
+        "--no-color",
+        gitObjectIdForSnapshot(predecessor),
+        gitObjectIdForSnapshot(candidate),
+      ])
+    ).toString("utf8");
   } catch (error) {
-    if (await deliverySnapshotAvailability(repository, predecessor, candidate) === "unavailable") return null;
+    if ((await deliverySnapshotAvailability(repository, predecessor, candidate)) === "unavailable") return null;
     throw error;
   }
 }

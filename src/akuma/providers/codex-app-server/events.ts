@@ -119,7 +119,7 @@ export const CODEX_ITEM_DISPOSITIONS = {
 
 export function codexObject(value: unknown): Readonly<Record<string, unknown>> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Readonly<Record<string, unknown>>
+    ? (value as Readonly<Record<string, unknown>>)
     : undefined;
 }
 
@@ -137,11 +137,16 @@ function turnError(value: unknown): string | undefined {
 
 function itemNote(item: Readonly<Record<string, unknown>>, kind: string): string {
   switch (kind) {
-    case "enteredReviewMode": return "Entered review mode";
-    case "exitedReviewMode": return "Exited review mode";
-    case "sleep": return "Waiting";
-    case "subAgentActivity": return `Agent activity: ${codexText(item.kind) ?? "updated"}`;
-    default: return kind;
+    case "enteredReviewMode":
+      return "Entered review mode";
+    case "exitedReviewMode":
+      return "Exited review mode";
+    case "sleep":
+      return "Waiting";
+    case "subAgentActivity":
+      return `Agent activity: ${codexText(item.kind) ?? "updated"}`;
+    default:
+      return kind;
   }
 }
 
@@ -157,9 +162,7 @@ function itemToolName(item: Readonly<Record<string, unknown>>, kind: string): st
 function fileChangeOp(value: unknown): "add" | "update" | "delete" | undefined {
   if (value === "add" || value === "update" || value === "delete") return value;
   const record = codexObject(value);
-  return record?.type === "add" || record?.type === "update" || record?.type === "delete"
-    ? record.type
-    : undefined;
+  return record?.type === "add" || record?.type === "update" || record?.type === "delete" ? record.type : undefined;
 }
 
 function itemChanges(item: Readonly<Record<string, unknown>>): Extract<ToolCall, { kind: "fileChange" }>["changes"] {
@@ -170,22 +173,28 @@ function itemChanges(item: Readonly<Record<string, unknown>>): Extract<ToolCall,
     const op = fileChangeOp(change?.kind);
     if (path === undefined || op === undefined) return [];
     const diffstat = typeof change?.diff === "string" ? diffstatFromUnifiedPatch(change.diff) : undefined;
-    return [{
-      op,
-      path,
-      ...(diffstat === undefined ? {} : { diffstat }),
-    }];
+    return [
+      {
+        op,
+        path,
+        ...(diffstat === undefined ? {} : { diffstat }),
+      },
+    ];
   });
 }
 
 function reasoningSummary(item: Readonly<Record<string, unknown>>): string | undefined {
   if (typeof item.summary === "string") return codexText(item.summary);
   if (!Array.isArray(item.summary)) return undefined;
-  return codexText(item.summary.map((part) => {
-    if (typeof part === "string") return part;
-    const value = codexObject(part);
-    return value?.type === "summary_text" || value?.type === "text" ? codexText(value.text) ?? "" : "";
-  }).join("\n"));
+  return codexText(
+    item.summary
+      .map((part) => {
+        if (typeof part === "string") return part;
+        const value = codexObject(part);
+        return value?.type === "summary_text" || value?.type === "text" ? (codexText(value.text) ?? "") : "";
+      })
+      .join("\n"),
+  );
 }
 
 function itemToolCall(item: Readonly<Record<string, unknown>>, kind: string): ToolCall {
@@ -198,9 +207,7 @@ function itemToolCall(item: Readonly<Record<string, unknown>>, kind: string): To
   }
   if (kind === "webSearch") {
     const query = codexText(item.query);
-    return query === undefined
-      ? { kind: "other", display: "web search" }
-      : { kind: "search", query, scope: "web" };
+    return query === undefined ? { kind: "other", display: "web search" } : { kind: "search", query, scope: "web" };
   }
   if (kind === "fileChange") {
     const changes = itemChanges(item);
@@ -222,7 +229,12 @@ function itemToolResult(item: Readonly<Record<string, unknown>>): ToolResult {
   };
 }
 
-function emitItem(item: Readonly<Record<string, unknown>>, completed: boolean, events: AgentEventChannel, state: CodexTurnState): void {
+function emitItem(
+  item: Readonly<Record<string, unknown>>,
+  completed: boolean,
+  events: AgentEventChannel,
+  state: CodexTurnState,
+): void {
   const kind = codexText(item.type) ?? "unknown";
   if (!Object.hasOwn(CODEX_ITEM_DISPOSITIONS, kind)) {
     events.emit(unknownEvent(kind));
@@ -276,28 +288,50 @@ function emitItem(item: Readonly<Record<string, unknown>>, completed: boolean, e
 function notificationAction(method: string, params: Readonly<Record<string, unknown>>): string {
   const message = codexText(params.message) ?? codexText(params.reason) ?? codexText(params.error);
   switch (method) {
-    case "configWarning": return `Configuration warning: ${message ?? "unknown warning"}`;
-    case "deprecationNotice": return `Deprecation warning: ${message ?? "deprecated behavior"}`;
-    case "externalAgentConfig/import/completed": return "External agent configuration import completed";
-    case "externalAgentConfig/import/progress": return "External agent configuration import updated";
-    case "fs/changed": return "Filesystem changed";
-    case "guardianWarning": return `Guardian warning: ${message ?? "action warned"}`;
-    case "hook/started": return `Hook ${codexText(params.name) ?? codexText(params.hookName) ?? "unknown"} started`;
-    case "item/autoApprovalReview/completed": return "Action approval review completed";
-    case "item/autoApprovalReview/started": return "Action approval review started";
-    case "model/rerouted": return `Model rerouted${message === undefined ? "" : `: ${message}`}`;
-    case "thread/goal/cleared": return "Goal cleared";
-    case "thread/goal/updated": return "Goal updated";
-    case "thread/realtime/error": return `Realtime warning: ${message ?? "unknown error"}`;
-    case "turn/moderationMetadata": return "Moderation updated";
-    case "warning": return `Warning: ${message ?? "unknown warning"}`;
-    case "windows/worldWritableWarning": return `Filesystem warning: ${message ?? "world-writable path"}`;
-    case "windowsSandbox/setupCompleted": return "Windows sandbox setup completed";
-    default: return method;
+    case "configWarning":
+      return `Configuration warning: ${message ?? "unknown warning"}`;
+    case "deprecationNotice":
+      return `Deprecation warning: ${message ?? "deprecated behavior"}`;
+    case "externalAgentConfig/import/completed":
+      return "External agent configuration import completed";
+    case "externalAgentConfig/import/progress":
+      return "External agent configuration import updated";
+    case "fs/changed":
+      return "Filesystem changed";
+    case "guardianWarning":
+      return `Guardian warning: ${message ?? "action warned"}`;
+    case "hook/started":
+      return `Hook ${codexText(params.name) ?? codexText(params.hookName) ?? "unknown"} started`;
+    case "item/autoApprovalReview/completed":
+      return "Action approval review completed";
+    case "item/autoApprovalReview/started":
+      return "Action approval review started";
+    case "model/rerouted":
+      return `Model rerouted${message === undefined ? "" : `: ${message}`}`;
+    case "thread/goal/cleared":
+      return "Goal cleared";
+    case "thread/goal/updated":
+      return "Goal updated";
+    case "thread/realtime/error":
+      return `Realtime warning: ${message ?? "unknown error"}`;
+    case "turn/moderationMetadata":
+      return "Moderation updated";
+    case "warning":
+      return `Warning: ${message ?? "unknown warning"}`;
+    case "windows/worldWritableWarning":
+      return `Filesystem warning: ${message ?? "world-writable path"}`;
+    case "windowsSandbox/setupCompleted":
+      return "Windows sandbox setup completed";
+    default:
+      return method;
   }
 }
 
-function observeError(params: Readonly<Record<string, unknown>>, state: CodexTurnState, events: AgentEventChannel): void {
+function observeError(
+  params: Readonly<Record<string, unknown>>,
+  state: CodexTurnState,
+  events: AgentEventChannel,
+): void {
   const detail = turnError(params.error) ?? codexText(params.message) ?? "codex app-server error";
   state.error = detail;
   events.emit(noteEvent(params.willRetry === true ? `Retrying after error: ${detail}` : `Error: ${detail}`));
@@ -328,7 +362,8 @@ export function codexNotificationResult(
   const disposition = CODEX_NOTIFICATION_DISPOSITIONS[method as keyof typeof CODEX_NOTIFICATION_DISPOSITIONS];
   const params = codexObject(notification.params) ?? {};
   switch (disposition) {
-    case "drop": return undefined;
+    case "drop":
+      return undefined;
     case "note":
       events.emit(noteEvent(notificationAction(method, params)));
       return undefined;
@@ -347,6 +382,7 @@ export function codexNotificationResult(
     case "error":
       observeError(params, state, events);
       return undefined;
-    case "terminal": return terminalResult(params, state);
+    case "terminal":
+      return terminalResult(params, state);
   }
 }

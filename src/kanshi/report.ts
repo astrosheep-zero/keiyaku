@@ -25,36 +25,41 @@ export type ContractFleetAttachment = Readonly<{
 
 export type { CurrentPhysicalIssue };
 
-export type ContractKanshiRow = ContractBoard["rows"][number] & Readonly<{
-  holder: ContractHolderObservation;
-  fleet: readonly ContractFleetAttachment[];
-  namespaceTasks: Section<readonly TaskRow[]>;
-  issue?: CurrentPhysicalIssue;
-}>;
+export type ContractKanshiRow = ContractBoard["rows"][number] &
+  Readonly<{
+    holder: ContractHolderObservation;
+    fleet: readonly ContractFleetAttachment[];
+    namespaceTasks: Section<readonly TaskRow[]>;
+    issue?: CurrentPhysicalIssue;
+  }>;
 
-export type ContractKanshiBoard = Omit<ContractBoard, "rows"> & Readonly<{
-  rows: readonly ContractKanshiRow[];
-}>;
+export type ContractKanshiBoard = Omit<ContractBoard, "rows"> &
+  Readonly<{
+    rows: readonly ContractKanshiRow[];
+  }>;
 
-export type TaskKanshiRow = TaskRow & Readonly<{
-  contract?: Readonly<{ id: string; observed: ContractEndpointObservation }>;
-  blockers?: readonly TaskRef[];
-}>;
+export type TaskKanshiRow = TaskRow &
+  Readonly<{
+    contract?: Readonly<{ id: string; observed: ContractEndpointObservation }>;
+    blockers?: readonly TaskRef[];
+  }>;
 
 export type TaskKanshiWorld = Readonly<{
   root: WorldRoot;
   rows: readonly TaskKanshiRow[];
 }>;
 
-export type AkumaKanshiRow = (AkumaListRow | UnbornAkumaListRow) & Readonly<{
-  aliases: readonly AkumaAlias[];
-  contract?: Readonly<{ id: string; observed: ContractEndpointObservation }>;
-  snapshot?: ActivitySnapshot;
-}>;
+export type AkumaKanshiRow = (AkumaListRow | UnbornAkumaListRow) &
+  Readonly<{
+    aliases: readonly AkumaAlias[];
+    contract?: Readonly<{ id: string; observed: ContractEndpointObservation }>;
+    snapshot?: ActivitySnapshot;
+  }>;
 
-export type AkumaKanshiWorld = Omit<AkumaList, "rows"> & Readonly<{
-  rows: readonly AkumaKanshiRow[];
-}>;
+export type AkumaKanshiWorld = Omit<AkumaList, "rows"> &
+  Readonly<{
+    rows: readonly AkumaKanshiRow[];
+  }>;
 
 export type KanshiRegionSelection =
   | Readonly<{ kind: "declarations" }>

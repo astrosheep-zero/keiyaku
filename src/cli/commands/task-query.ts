@@ -10,14 +10,20 @@ import {
 
 export type { TaskQueryExpression } from "../../task/query.js";
 
-type Token = Readonly<{ kind: "word" | "string" | "operator" | "left" | "right" | "end"; value: string; offset: number }>;
+type Token = Readonly<{
+  kind: "word" | "string" | "operator" | "left" | "right" | "end";
+  value: string;
+  offset: number;
+}>;
 
-function syntax(message: string, offset: number): never { throw new Error(`${message} at column ${offset + 1}`); }
+function syntax(message: string, offset: number): never {
+  throw new Error(`${message} at column ${offset + 1}`);
+}
 
 function scanString(source: string, offset: number): Readonly<{ token: Token; next: number }> {
   let index = offset + 1;
   let value = "";
-  while (index < source.length && source[index] !== "\"") {
+  while (index < source.length && source[index] !== '"') {
     const character = source[index]!;
     if (character !== "\\") {
       value += character;
@@ -26,11 +32,11 @@ function scanString(source: string, offset: number): Readonly<{ token: Token; ne
     }
     const escaped = source[index + 1];
     if (escaped === undefined) syntax("unterminated string", offset);
-    if (escaped !== "\\" && escaped !== "\"") syntax("only \\\\ and \\\" escapes are supported", index);
+    if (escaped !== "\\" && escaped !== '"') syntax('only \\\\ and \\" escapes are supported', index);
     value += escaped;
     index += 2;
   }
-  if (source[index] !== "\"") syntax("unterminated string", offset);
+  if (source[index] !== '"') syntax("unterminated string", offset);
   return { token: { kind: "string", value, offset }, next: index + 1 };
 }
 
@@ -55,11 +61,23 @@ function lex(source: string): readonly Token[] {
   const tokens: Token[] = [];
   let index = 0;
   while (index < source.length) {
-    if (/\s/u.test(source[index]!)) { index += 1; continue; }
-    const offset = index, character = source[index]!;
-    if (character === "(") { tokens.push({ kind: "left", value: character, offset }); index += 1; continue; }
-    if (character === ")") { tokens.push({ kind: "right", value: character, offset }); index += 1; continue; }
-    if (character === "\"") {
+    if (/\s/u.test(source[index]!)) {
+      index += 1;
+      continue;
+    }
+    const offset = index,
+      character = source[index]!;
+    if (character === "(") {
+      tokens.push({ kind: "left", value: character, offset });
+      index += 1;
+      continue;
+    }
+    if (character === ")") {
+      tokens.push({ kind: "right", value: character, offset });
+      index += 1;
+      continue;
+    }
+    if (character === '"') {
       const scanned = scanString(source, offset);
       tokens.push(scanned.token);
       index = scanned.next;
@@ -84,7 +102,13 @@ function canonicalTaskId(token: Token, field: string): TaskId {
   return token.value as TaskId;
 }
 function state(token: Token): TaskState {
-  if (token.value !== "open" && token.value !== "in_progress" && token.value !== "on_hold" && token.value !== "done" && token.value !== "drop") {
+  if (
+    token.value !== "open" &&
+    token.value !== "in_progress" &&
+    token.value !== "on_hold" &&
+    token.value !== "done" &&
+    token.value !== "drop"
+  ) {
     return syntax(`invalid state ${JSON.stringify(token.value)}`, token.offset);
   }
   return token.value;
@@ -101,7 +125,8 @@ function boolean(token: Token): boolean {
 }
 function timestamp(token: Token, field: string): string {
   const milliseconds = Date.parse(token.value);
-  if (!Number.isFinite(milliseconds) || new Date(milliseconds).toISOString() !== token.value) return syntax(`${field} requires a canonical UTC ISO timestamp`, token.offset);
+  if (!Number.isFinite(milliseconds) || new Date(milliseconds).toISOString() !== token.value)
+    return syntax(`${field} requires a canonical UTC ISO timestamp`, token.offset);
   return token.value;
 }
 
@@ -129,11 +154,7 @@ function parseTextPredicate(field: "title" | "id", operator: Token, value: Token
   return { field, operator: selected, value: value.value };
 }
 
-function parseRelationPredicate(
-  field: Token,
-  operator: Token,
-  value: Token,
-): TaskQueryPredicate {
+function parseRelationPredicate(field: Token, operator: Token, value: Token): TaskQueryPredicate {
   const relationField = TASK_RELATION_PREDICATE_FIELDS.find((candidate) => candidate === field.value);
   if (relationField === undefined) {
     syntax(`unknown query field ${JSON.stringify(field.value)}`, field.offset);
@@ -156,26 +177,44 @@ function parseTimestampPredicate(field: "created" | "updated", operator: Token, 
 class Parser {
   private index = 0;
   constructor(private readonly tokens: readonly Token[]) {}
-  private current(): Token { return this.tokens[this.index]!; }
-  private take(): Token { const token = this.current(); this.index += 1; return token; }
-  private word(value: string): boolean { return this.current().kind === "word" && this.current().value === value; }
+  private current(): Token {
+    return this.tokens[this.index]!;
+  }
+  private take(): Token {
+    const token = this.current();
+    this.index += 1;
+    return token;
+  }
+  private word(value: string): boolean {
+    return this.current().kind === "word" && this.current().value === value;
+  }
   parse(): TaskQueryExpression {
     const value = this.or();
-    if (this.current().kind !== "end") syntax(`unexpected ${JSON.stringify(this.current().value)}`, this.current().offset);
+    if (this.current().kind !== "end")
+      syntax(`unexpected ${JSON.stringify(this.current().value)}`, this.current().offset);
     return value;
   }
   private or(): TaskQueryExpression {
     const terms = [this.and()];
-    while (this.word("or")) { this.take(); terms.push(this.and()); }
+    while (this.word("or")) {
+      this.take();
+      terms.push(this.and());
+    }
     return terms.length === 1 ? terms[0]! : { kind: "or", terms };
   }
   private and(): TaskQueryExpression {
     const terms = [this.not()];
-    while (this.word("and")) { this.take(); terms.push(this.not()); }
+    while (this.word("and")) {
+      this.take();
+      terms.push(this.not());
+    }
     return terms.length === 1 ? terms[0]! : { kind: "and", terms };
   }
   private not(): TaskQueryExpression {
-    if (this.word("not")) { this.take(); return { kind: "not", term: this.not() }; }
+    if (this.word("not")) {
+      this.take();
+      return { kind: "not", term: this.not() };
+    }
     return this.primary();
   }
   private primary(): TaskQueryExpression {
@@ -183,7 +222,8 @@ class Parser {
       const opening = this.take();
       const value = this.or();
       if (this.current().kind !== "right") syntax("missing closing parenthesis", opening.offset);
-      this.take(); return value;
+      this.take();
+      return value;
     }
     return { kind: "predicate", predicate: this.predicate() };
   }
@@ -201,20 +241,30 @@ class Parser {
   }
   private typedPredicate(field: Token, operator: Token, value: Token): TaskQueryPredicate {
     switch (field.value) {
-      case "state": return { field: "state", operator: equalityOperator(operator, "state"), value: state(value) };
-      case "priority": return { field: "priority", operator: orderedOperator(operator, "priority"), value: priority(value) };
-      case "title": return parseTextPredicate("title", operator, value);
-      case "id": return parseTextPredicate("id", operator, value);
-      case "parent": return {
-        field: "parent",
-        operator: equalityOperator(operator, "parent"),
-        value: value.value === "none" ? null : canonicalTaskId(value, "parent"),
-      };
-      case "ready": return parseBooleanPredicate("ready", operator, value);
-      case "blocked": return parseBooleanPredicate("blocked", operator, value);
-      case "created": return parseTimestampPredicate("created", operator, value);
-      case "updated": return parseTimestampPredicate("updated", operator, value);
-      default: return parseRelationPredicate(field, operator, value);
+      case "state":
+        return { field: "state", operator: equalityOperator(operator, "state"), value: state(value) };
+      case "priority":
+        return { field: "priority", operator: orderedOperator(operator, "priority"), value: priority(value) };
+      case "title":
+        return parseTextPredicate("title", operator, value);
+      case "id":
+        return parseTextPredicate("id", operator, value);
+      case "parent":
+        return {
+          field: "parent",
+          operator: equalityOperator(operator, "parent"),
+          value: value.value === "none" ? null : canonicalTaskId(value, "parent"),
+        };
+      case "ready":
+        return parseBooleanPredicate("ready", operator, value);
+      case "blocked":
+        return parseBooleanPredicate("blocked", operator, value);
+      case "created":
+        return parseTimestampPredicate("created", operator, value);
+      case "updated":
+        return parseTimestampPredicate("updated", operator, value);
+      default:
+        return parseRelationPredicate(field, operator, value);
     }
   }
 }

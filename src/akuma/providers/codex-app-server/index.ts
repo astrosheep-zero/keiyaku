@@ -7,12 +7,7 @@ import {
   type TurnResult,
 } from "../../provider.js";
 import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
-import {
-  codexNotificationResult,
-  codexObject,
-  codexText,
-  type CodexTurnState,
-} from "./events.js";
+import { codexNotificationResult, codexObject, codexText, type CodexTurnState } from "./events.js";
 
 export { CODEX_ITEM_DISPOSITIONS, CODEX_NOTIFICATION_DISPOSITIONS } from "./events.js";
 
@@ -54,7 +49,8 @@ async function steerTurn(
   tell: Readonly<{ id: string; text: string }>,
 ): ReturnType<NonNullable<Session["tell"]>> {
   if (state.settled) return { kind: "turn-ended" };
-  if (state.threadId === undefined || state.turnId === undefined) throw new Error("codex app-server turn is not admitted");
+  if (state.threadId === undefined || state.turnId === undefined)
+    throw new Error("codex app-server turn is not admitted");
   const request = server.request("turn/steer", {
     threadId: state.threadId,
     expectedTurnId: state.turnId,
@@ -68,7 +64,11 @@ async function steerTurn(
   return { kind: "accepted", fence: `${accepted}:${tell.id}` };
 }
 
-function sandbox(cwd: string, options: ProviderOptions, requests?: Readonly<{ dir: string }>): Readonly<Record<string, unknown>> {
+function sandbox(
+  cwd: string,
+  options: ProviderOptions,
+  requests?: Readonly<{ dir: string }>,
+): Readonly<Record<string, unknown>> {
   if (options.readonly === true) {
     return { type: "readOnly", networkAccess: options.network === "enabled" };
   }
@@ -102,24 +102,38 @@ async function admitTurn(
   if (input.session.kind === "fresh") {
     state.threadId = threadId(await server.request("thread/start", threadParams));
   } else {
-    state.threadId = threadId(await server.request("thread/resume", {
-      threadId: input.session.coordinate.sessionId,
-      ...threadParams,
-    }), input.session.coordinate.sessionId);
+    state.threadId = threadId(
+      await server.request("thread/resume", {
+        threadId: input.session.coordinate.sessionId,
+        ...threadParams,
+      }),
+      input.session.coordinate.sessionId,
+    );
   }
   events.emit({ type: "session", coordinate: { sessionId: state.threadId } });
-  state.turnId = turnId(await server.request("turn/start", {
-    threadId: state.threadId,
-    input: [{ type: "text", text: [input.body, ...input.launchTells.map((tell) => tell.text)]
-      .filter((part) => part.length > 0).join("\n\n") }],
-    ...(input.options.model === undefined ? {} : { model: input.options.model }),
-    ...(input.options.effort === undefined ? {} : { effort: input.options.effort }),
-    approvalPolicy: "never",
-    sandboxPolicy: sandbox(input.cwd, input.options, input.requests),
-  }));
+  state.turnId = turnId(
+    await server.request("turn/start", {
+      threadId: state.threadId,
+      input: [
+        {
+          type: "text",
+          text: [input.body, ...input.launchTells.map((tell) => tell.text)]
+            .filter((part) => part.length > 0)
+            .join("\n\n"),
+        },
+      ],
+      ...(input.options.model === undefined ? {} : { model: input.options.model }),
+      ...(input.options.effort === undefined ? {} : { effort: input.options.effort }),
+      approvalPolicy: "never",
+      sandboxPolicy: sandbox(input.cwd, input.options, input.requests),
+    }),
+  );
 }
 
-async function forkCodex(execution: ProviderExecution, input: ForkInput): Promise<Readonly<{ session: { sessionId: string } }>> {
+async function forkCodex(
+  execution: ProviderExecution,
+  input: ForkInput,
+): Promise<Readonly<{ session: { sessionId: string } }>> {
   if (!("sessionId" in input.session)) throw new Error("Codex app-server fork requires sessionId");
   const server = new LineRpcProcess({
     argv: [execution.executable ?? "codex", "app-server", "--listen", "stdio://"],
@@ -128,40 +142,47 @@ async function forkCodex(execution: ProviderExecution, input: ForkInput): Promis
   });
   try {
     await initialize(server);
-    const child = threadId(await server.request("thread/fork", {
-      threadId: input.session.sessionId,
-      lastTurnId: input.at,
-    }));
+    const child = threadId(
+      await server.request("thread/fork", {
+        threadId: input.session.sessionId,
+        lastTurnId: input.at,
+      }),
+    );
     if (child === input.session.sessionId) throw new Error("Codex app-server fork reused the source thread id");
     return { session: { sessionId: child } };
-  } finally { await server.close(); }
+  } finally {
+    await server.close();
+  }
 }
 
-async function abortTurn(
-  server: LineRpcProcess,
-  state: CodexTurnState,
-  settle: Finish,
-): Promise<void> {
+async function abortTurn(server: LineRpcProcess, state: CodexTurnState, settle: Finish): Promise<void> {
   if (!state.settled) settle({ kind: "failed", diagnostic: "codex app-server interrupted" });
   await server.close(true);
 }
 
 async function startCodex(execution: ProviderExecution, input: StartInput): Promise<Session> {
   const signal = input.signal ?? new AbortController().signal;
-  if (input.session.kind === "resume" && !("sessionId" in input.session.coordinate)) throw new Error("Codex app-server resume requires sessionId");
+  if (input.session.kind === "resume" && !("sessionId" in input.session.coordinate))
+    throw new Error("Codex app-server resume requires sessionId");
   const events = new AgentEventChannel();
   const server = new LineRpcProcess({
     argv: [execution.executable ?? "codex", "app-server", "--listen", "stdio://"],
     cwd: input.cwd,
-    ...((execution.env === undefined && input.requests === undefined) ? {} : { env: {
-      ...process.env,
-      ...execution.env,
-      ...(input.requests === undefined ? {} : { [AKUMA_REQUESTS_ENV]: input.requests.dir }),
-    } }),
+    ...(execution.env === undefined && input.requests === undefined
+      ? {}
+      : {
+          env: {
+            ...process.env,
+            ...execution.env,
+            ...(input.requests === undefined ? {} : { [AKUMA_REQUESTS_ENV]: input.requests.dir }),
+          },
+        }),
   });
   const state: CodexTurnState = { settled: false, tools: new Map() };
   let settle!: (result: TurnResult) => void;
-  const completion = new Promise<TurnResult>((resolve) => { settle = resolve; });
+  const completion = new Promise<TurnResult>((resolve) => {
+    settle = resolve;
+  });
   let terminal: TurnResult | undefined;
   const finish: Finish = (result) => {
     if (terminal !== undefined) return;
@@ -182,28 +203,34 @@ async function startCodex(execution: ProviderExecution, input: StartInput): Prom
     const result = codexNotificationResult(notification, state, events);
     if (result !== undefined) finish(result);
   });
-  server.onExit(({ code, signal, stderr }) => finish({
-    kind: "failed",
-    diagnostic: stderr || `codex app-server exited before completion (${code ?? signal ?? "unknown"})`,
-  }));
-  server.onServerRequest((request) => finish({
-    kind: "failed",
-    diagnostic: `codex app-server made forbidden interactive request ${request.method}`,
-  }));
-  const abortSetup = () => { void server.close(true); };
+  server.onExit(({ code, signal, stderr }) =>
+    finish({
+      kind: "failed",
+      diagnostic: stderr || `codex app-server exited before completion (${code ?? signal ?? "unknown"})`,
+    }),
+  );
+  server.onServerRequest((request) =>
+    finish({
+      kind: "failed",
+      diagnostic: `codex app-server made forbidden interactive request ${request.method}`,
+    }),
+  );
+  const abortSetup = () => {
+    void server.close(true);
+  };
   signal.addEventListener("abort", abortSetup, { once: true });
   try {
     signal.throwIfAborted();
     await admitTurn(server, input, state, events, execution.config);
-  }
-  catch (error) {
+  } catch (error) {
     if (signal.aborted) {
       await server.close(true);
       throw signal.reason;
     }
     finish({ kind: "failed", diagnostic: diagnostic(error) });
+  } finally {
+    signal.removeEventListener("abort", abortSetup);
   }
-  finally { signal.removeEventListener("abort", abortSetup); }
   if (state.turnId === undefined) throw new Error("codex app-server did not admit a turn");
   return {
     admission: { fence: state.turnId },
@@ -219,9 +246,8 @@ async function startCodex(execution: ProviderExecution, input: StartInput): Prom
 }
 
 export function createCodexAppServerProvider(input: string | ProviderExecution = "codex"): ProviderAdapter {
-  const execution: ProviderExecution = typeof input === "string"
-    ? { name: "codex-app-server", kind: "codex-app-server", executable: input }
-    : input;
+  const execution: ProviderExecution =
+    typeof input === "string" ? { name: "codex-app-server", kind: "codex-app-server", executable: input } : input;
   return {
     admitOptions(options) {
       return {

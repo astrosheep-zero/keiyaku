@@ -36,7 +36,11 @@ type ExistingCommand = Exclude<
   | { command: "history" }
   | { command: "bind" | "nuke" | "status" | "show" | "ls" | "reconcile" | "settings" | "region" | "task" | "install" }
 >;
-type NonInstallExecution = Readonly<{ cwd?: string; repo?: string; command: Exclude<ParsedCommand, { command: "install" }> }>;
+type NonInstallExecution = Readonly<{
+  cwd?: string;
+  repo?: string;
+  command: Exclude<ParsedCommand, { command: "install" }>;
+}>;
 type InvocationEdge = Readonly<{
   environment: NodeJS.ProcessEnv;
   readStdin: () => Promise<string>;
@@ -62,12 +66,18 @@ function selectedStdinDiagnostic(command: Exclude<ParsedCommand, { command: "ins
       return command.prompt.kind === "stdin" ? `${command.command} requires a nonblank prompt` : undefined;
     case "task":
       switch (command.stdin) {
-        case "document": return "task add requires a nonblank stdin document";
-        case "compose": return "task compose requires a nonblank stdin document";
-        case "body": return "task update --body requires a nonblank value";
-        case "append": return "task update --append requires a nonblank value";
-        case "note": return "task update --note requires a nonblank value";
-        default: return undefined;
+        case "document":
+          return "task add requires a nonblank stdin document";
+        case "compose":
+          return "task compose requires a nonblank stdin document";
+        case "body":
+          return "task update --body requires a nonblank value";
+        case "append":
+          return "task update --append requires a nonblank value";
+        case "note":
+          return "task update --note requires a nonblank value";
+        default:
+          return undefined;
       }
     default:
       return undefined;
@@ -104,7 +114,10 @@ function consumeSettings<T>(run: () => T, ErrorType: new (message: string) => Er
 
 async function selectedGates(value: Settings, names?: readonly string[]) {
   const { gatesFrom, SettingsError } = await import("../library/configuration.js");
-  return consumeSettings(() => gatesFrom({ settings: value, ...(names === undefined ? {} : { names }) }), SettingsError);
+  return consumeSettings(
+    () => gatesFrom({ settings: value, ...(names === undefined ? {} : { names }) }),
+    SettingsError,
+  );
 }
 
 async function selectedGitPolicy(value: Settings): Promise<boolean> {
@@ -155,7 +168,14 @@ async function bindDraftReceipt(establishWorld: () => Promise<WorldRoot>, markdo
   }
 }
 
-async function invokeBind({ parsed, repo, edge, configuration, hooks, establishWorld }: BindInvocation): Promise<InvocationResult> {
+async function invokeBind({
+  parsed,
+  repo,
+  edge,
+  configuration,
+  hooks,
+  establishWorld,
+}: BindInvocation): Promise<InvocationResult> {
   const markdown = await edge.readStdin();
   const gates = await selectedGates(configuration, parsed.gates);
   const actor = actorFromEdge(parsed.actor, edge.environment);
@@ -164,14 +184,15 @@ async function invokeBind({ parsed, repo, edge, configuration, hooks, establishW
   try {
     const result = await resultFromMutationCall(
       "bind",
-      () => bindFromCommand({
-        command: parsed,
-        repo,
-        markdown,
-        gates,
-        ...(actor === undefined ? {} : { actor }),
-        hooks,
-      }),
+      () =>
+        bindFromCommand({
+          command: parsed,
+          repo,
+          markdown,
+          gates,
+          ...(actor === undefined ? {} : { actor }),
+          hooks,
+        }),
       (accepted) => {
         const bound = accepted.facts.find((fact) => fact.kind === "bind");
         if (bound === undefined || bound.kind !== "bind") throw new Error("accepted bind is missing its bind fact");
@@ -238,12 +259,18 @@ async function invokeReview(
 ): Promise<InvocationResult> {
   const summary = parsed.summaryFromStdin === true ? await readStdin() : parsed.summary;
   const { acceptedReview, resultFromMutationCall } = await import("./accepted.js");
-  return resultFromMutationCall("review", () => seat.contract.review({
-    verdict: parsed.verdict,
-    ...(seat.actor === undefined ? {} : { actor: seat.actor }),
-    ...(summary === undefined ? {} : { summary }),
-    hooks: seat.hooks,
-  }), (result) => acceptedReview(result, seat.id), { coordinate: seat.id });
+  return resultFromMutationCall(
+    "review",
+    () =>
+      seat.contract.review({
+        verdict: parsed.verdict,
+        ...(seat.actor === undefined ? {} : { actor: seat.actor }),
+        ...(summary === undefined ? {} : { summary }),
+        hooks: seat.hooks,
+      }),
+    (result) => acceptedReview(result, seat.id),
+    { coordinate: seat.id },
+  );
 }
 
 async function invokeAudit(
@@ -254,13 +281,14 @@ async function invokeAudit(
   const { acceptedAudit, resultFromMutationCall } = await import("./accepted.js");
   return resultFromMutationCall(
     "audit",
-    () => seat.contract.audit({
-      ...(seat.actor === undefined ? {} : { actor: seat.actor }),
-      includeDirty: parsed.includeDirty,
-      showDiff: parsed.showDiff,
-      requireBranchesToBeUpToDate,
-      hooks: seat.hooks,
-    }),
+    () =>
+      seat.contract.audit({
+        ...(seat.actor === undefined ? {} : { actor: seat.actor }),
+        includeDirty: parsed.includeDirty,
+        showDiff: parsed.showDiff,
+        requireBranchesToBeUpToDate,
+        hooks: seat.hooks,
+      }),
     (result) => acceptedAudit(result, seat.id),
     { coordinate: seat.id },
   );
@@ -275,9 +303,13 @@ type ExistingInvocation = Readonly<{
   hooks: WorktreeHooks;
 }>;
 
-async function existingSeat(
-  { parsed, repo, edge, scope, hooks }: Omit<ExistingInvocation, "configuration">,
-): Promise<ExistingSeat> {
+async function existingSeat({
+  parsed,
+  repo,
+  edge,
+  scope,
+  hooks,
+}: Omit<ExistingInvocation, "configuration">): Promise<ExistingSeat> {
   const { id, contract } = await selectContract(repo, parsed.contract, scope);
   const actor = actorFromEdge(parsed.actor, edge.environment);
   return { contract, id, ...(actor === undefined ? {} : { actor }), hooks };
@@ -291,22 +323,21 @@ async function invokeExisting(input: ExistingInvocation): Promise<InvocationResu
   switch (parsed.command) {
     case "amend": {
       const markdown = parsed.stdin === true ? await edge.readStdin() : undefined;
-      const gates = parsed.gates === undefined
-        ? undefined
-        : await selectedGates(configuration, parsed.gates);
+      const gates = parsed.gates === undefined ? undefined : await selectedGates(configuration, parsed.gates);
       const { amendFromCommand } = await import("./commands/amend.js");
       const { acceptedAmend, resultFromMutationCall } = await import("./accepted.js");
       return resultFromMutationCall(
         "amend",
-        () => amendFromCommand({
-          command: parsed,
-          repo,
-          contract,
-          ...(markdown === undefined ? {} : { markdown }),
-          gates,
-          ...(actor === undefined ? {} : { actor }),
-          hooks,
-        }),
+        () =>
+          amendFromCommand({
+            command: parsed,
+            repo,
+            contract,
+            ...(markdown === undefined ? {} : { markdown }),
+            gates,
+            ...(actor === undefined ? {} : { actor }),
+            hooks,
+          }),
         (result) => acceptedAmend(result, id),
         { coordinate: id },
       );
@@ -318,19 +349,31 @@ async function invokeExisting(input: ExistingInvocation): Promise<InvocationResu
     case "arc": {
       const markdown = await edge.readStdin();
       const { acceptedArc, resultFromMutationCall } = await import("./accepted.js");
-      return resultFromMutationCall("arc", () => contract.arc({
-          markdown,
-          ...(actor === undefined ? {} : { actor }),
-          hooks,
-        }), (result) => acceptedArc(result, id), { coordinate: id });
+      return resultFromMutationCall(
+        "arc",
+        () =>
+          contract.arc({
+            markdown,
+            ...(actor === undefined ? {} : { actor }),
+            hooks,
+          }),
+        (result) => acceptedArc(result, id),
+        { coordinate: id },
+      );
     }
     case "abandon": {
       const { acceptedAbandon, resultFromMutationCall } = await import("./accepted.js");
-      return resultFromMutationCall("abandon", () => contract.abandon({
-        ...(actor === undefined ? {} : { actor }),
-        ...(parsed.note === undefined ? {} : { note: parsed.note }),
-        hooks,
-      }), (result) => acceptedAbandon(result, id), { coordinate: id });
+      return resultFromMutationCall(
+        "abandon",
+        () =>
+          contract.abandon({
+            ...(actor === undefined ? {} : { actor }),
+            ...(parsed.note === undefined ? {} : { note: parsed.note }),
+            hooks,
+          }),
+        (result) => acceptedAbandon(result, id),
+        { coordinate: id },
+      );
     }
     case "audit":
       return invokeAudit(parsed, seat, await selectedGitPolicy(configuration));
@@ -359,15 +402,16 @@ async function invokeAkumaFromEdge(parsed: InvokedAkumaCommand, input: AkumaEdge
       throw new Error("call with Contract requires a resolved Repo");
     }
     const { invokeAkuma } = await import("./commands/akuma-invoke.js");
-    const contract = parsed.command === "call" && parsed.contract !== undefined
-      ? (await import("./selectors.js")).contractFromInput(repo as Repo, parsed.contract).contract
-      : undefined;
+    const contract =
+      parsed.command === "call" && parsed.contract !== undefined
+        ? (await import("./selectors.js")).contractFromInput(repo as Repo, parsed.contract).contract
+        : undefined;
     return await invokeAkuma(parsed, {
       path,
       ...(statedCwd === undefined ? {} : { statedCwd }),
       ...(home === undefined ? {} : { home }),
       ...(configuration === undefined ? {} : { settings: configuration }),
-      ...(contract === undefined ? repo === undefined ? {} : { repo } : { contract }),
+      ...(contract === undefined ? (repo === undefined ? {} : { repo }) : { contract }),
       readStdin: edge.readStdin,
     });
   } catch (error) {
@@ -384,7 +428,7 @@ async function akumaWorldFor(
   candidate: WorldRoot | null,
   establish: () => Promise<WorldRoot>,
 ): Promise<WorldRoot> {
-  const world = parsed.command === "call" ? candidate ?? await establish() : located;
+  const world = parsed.command === "call" ? (candidate ?? (await establish())) : located;
   if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
   return world;
 }
@@ -479,27 +523,42 @@ async function invokeRegion(
 ): Promise<RegionResult> {
   const { kanshi, selectRegion } = await import("../kanshi/index.js");
   const read = async (region: KanshiRegionSelection) => {
-    try { return await kanshi({ world, repo, region }); }
-    catch (error) { if (error instanceof TypeError) throw new CliUsageError(error.message); throw error; }
+    try {
+      return await kanshi({ world, repo, region });
+    } catch (error) {
+      if (error instanceof TypeError) throw new CliUsageError(error.message);
+      throw error;
+    }
   };
   if (parsed.contract === undefined) {
-    const selection: KanshiRegionSelection = parsed.path !== undefined
-      ? { kind: "path", path: parsed.path }
-      : parsed.overlap ? { kind: "overlap" } : { kind: "declarations" };
+    const selection: KanshiRegionSelection =
+      parsed.path !== undefined
+        ? { kind: "path", path: parsed.path }
+        : parsed.overlap
+          ? { kind: "overlap" }
+          : { kind: "declarations" };
     const report = await read(selection);
     return { kind: "region", region: report.region ?? { kind: "absent" } };
   }
   const report = await read({ kind: "declarations" });
   const { resolveKanshiContract } = await import("./selectors.js");
   const contract = resolveKanshiContract(report, parsed.contract) as ContractId;
-  if (report.contracts.kind !== "present" || report.contracts.value.rows.every((row) => row.id !== contract || row.disposition !== "active")) {
+  if (
+    report.contracts.kind !== "present" ||
+    report.contracts.value.rows.every((row) => row.id !== contract || row.disposition !== "active")
+  ) {
     throw new CliUsageError(`unknown contract selector: ${parsed.contract}`);
   }
   if (report.region?.kind !== "present" || report.region.value.kind !== "declarations") {
     return { kind: "region", region: report.region ?? { kind: "absent" } };
   }
-  const selection: KanshiRegionSelection = parsed.overlap ? { kind: "overlap", contract } : { kind: "contract", contract };
-  return { kind: "region", region: { kind: "present", value: selectRegion({ declarations: report.region.value.declarations, selection }) } };
+  const selection: KanshiRegionSelection = parsed.overlap
+    ? { kind: "overlap", contract }
+    : { kind: "contract", contract };
+  return {
+    kind: "region",
+    region: { kind: "present", value: selectRegion({ declarations: report.region.value.declarations, selection }) },
+  };
 }
 
 async function invokeContractHistory(repo: Repo | undefined, contract: string): Promise<InvocationResult> {
@@ -519,7 +578,8 @@ async function invokeContractHistory(repo: Repo | undefined, contract: string): 
 }
 
 async function resolveInvocationCoordinates(invocation: NonInstallExecution, runtime: InvokeRuntime) {
-  const environment = runtime.environment ?? process.env, gitPath = gitPathFromEdge(environment);
+  const environment = runtime.environment ?? process.env,
+    gitPath = gitPathFromEdge(environment);
   const { resolveCliCoordinates } = await import("./coordinates.js");
   return resolveCliCoordinates({
     ...(runtime.cwd === undefined ? {} : { processCwd: runtime.cwd }),
@@ -545,11 +605,12 @@ async function invokeParsed(
   if (parsed.command === "settings") return { kind: "settings", value: await settingsAt(world ?? undefined, home) };
   if (parsed.command === "nuke") return await (await import("./commands/nuke.js")).invokeNuke(parsed, world);
   if (parsed.command === "task") {
-    const actor = runtime.actor ?? actorFromEdge(
-      typeof parsed.flags.actor === "string" ? parsed.flags.actor : undefined,
-      edge.environment,
-    );
-    return await (await import("./commands/task-invoke.js")).invokeTaskFromEdge({
+    const actor =
+      runtime.actor ??
+      actorFromEdge(typeof parsed.flags.actor === "string" ? parsed.flags.actor : undefined, edge.environment);
+    return await (
+      await import("./commands/task-invoke.js")
+    ).invokeTaskFromEdge({
       parsed,
       world,
       context: taskContext,
@@ -575,7 +636,10 @@ async function invokeParsed(
   if (repo === undefined) throw new Error(`${parsed.command} requires a resolved Repo`);
   if (parsed.command === "region") return invokeRegion(parsed, world, repo);
   const scope = cwd;
-  if ((parsed.command === "deliver" || parsed.command === "review") && (await import("../akuma/requests.js")).injectedBodyRequests() !== null) {
+  if (
+    (parsed.command === "deliver" || parsed.command === "review") &&
+    (await import("../akuma/requests.js")).injectedBodyRequests() !== null
+  ) {
     const { EMPTY_WORKTREE_HOOKS } = await import("../library/configuration.js");
     const seat = await existingSeat({ parsed, repo, edge, scope, hooks: EMPTY_WORKTREE_HOOKS });
     return parsed.command === "deliver"
@@ -593,10 +657,18 @@ async function invokeParsed(
   switch (parsed.command) {
     case "reconcile": {
       if (parsed.contract === undefined) {
-        return { kind: "observation", command: "reconcile", report: await repo.reconcile({ hooks, retryHooks: parsed.retryHooks }) };
+        return {
+          kind: "observation",
+          command: "reconcile",
+          report: await repo.reconcile({ hooks, retryHooks: parsed.retryHooks }),
+        };
       }
       const { contract } = await selectContract(repo, parsed.contract, scope);
-      return { kind: "observation", command: "reconcile", ...await contract.reconcile({ hooks, retryHooks: parsed.retryHooks }) };
+      return {
+        kind: "observation",
+        command: "reconcile",
+        ...(await contract.reconcile({ hooks, retryHooks: parsed.retryHooks })),
+      };
     }
     case "bind":
       return invokeBind({ parsed, repo, edge, configuration, hooks, establishWorld });
@@ -607,25 +679,39 @@ async function invokeParsed(
 
 function withResolvedTaskActor(command: ParsedCommand, runtime: InvokeRuntime): InvokeRuntime {
   if (command.command !== "task" || (command.action !== "add" && command.action !== "compose")) return runtime;
-  const actor = actorFromEdge(typeof command.flags.actor === "string" ? command.flags.actor : undefined, runtime.environment ?? process.env);
+  const actor = actorFromEdge(
+    typeof command.flags.actor === "string" ? command.flags.actor : undefined,
+    runtime.environment ?? process.env,
+  );
   return actor === undefined ? runtime : { ...runtime, actor };
 }
 
-export async function invoke(invocation: ParsedExecution, runtime: InvokeRuntime = {}): Promise<InvocationResult | TaskInvocationResult | AkumaInvocationResult | SettingsInvocationResult | InstallInvocationResult> {
+export async function invoke(
+  invocation: ParsedExecution,
+  runtime: InvokeRuntime = {},
+): Promise<
+  InvocationResult | TaskInvocationResult | AkumaInvocationResult | SettingsInvocationResult | InstallInvocationResult
+> {
   try {
     const command = invocation.command;
     assertExplicitRepoUse(command, invocation.repo);
     if (command.command === "install") {
       runtime.onOperationStart?.();
-      return (await import("./commands/install.js")).installHarnesses(command.harnesses, runtime.environment ?? process.env);
+      return (await import("./commands/install.js")).installHarnesses(
+        command.harnesses,
+        runtime.environment ?? process.env,
+      );
     }
     const acquiredRuntime = await withAcquiredStdin(command, withResolvedTaskActor(command, runtime));
     runtime.onOperationStart?.();
-    return await invokeParsed({
-      ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
-      ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),
-      command,
-    }, acquiredRuntime);
+    return await invokeParsed(
+      {
+        ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
+        ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),
+        command,
+      },
+      acquiredRuntime,
+    );
   } catch (error) {
     if (error instanceof CliUsageError && error.projection === undefined) {
       throw new CliUsageError(error.diagnostic, renderCommandUsage(invocation.command));

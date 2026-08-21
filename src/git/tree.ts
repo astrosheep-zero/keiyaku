@@ -15,9 +15,13 @@ export type PreparedTree = Readonly<{ oid: string; records: string }>;
 
 export function validPath(path: string): void {
   if (
-    path.length === 0 || path.startsWith("/") || path.endsWith("/") || path.includes("\0")
-    || path.split("/").some((part) => part.length === 0 || part === "." || part === "..")
-  ) throw new Error(`invalid Git path: ${path}`);
+    path.length === 0 ||
+    path.startsWith("/") ||
+    path.endsWith("/") ||
+    path.includes("\0") ||
+    path.split("/").some((part) => part.length === 0 || part === "." || part === "..")
+  )
+    throw new Error(`invalid Git path: ${path}`);
 }
 
 function addEntry(root: MutableTreeNode, path: string, change: TreeChange): void {
@@ -85,7 +89,8 @@ function sortName(name: string, type: string): Buffer {
 
 function objectId(entries: ReadonlyMap<string, TreeEntry>, oidBytes: number): string {
   const sorted = [...entries].sort((left, right) =>
-    sortName(left[0], left[1].type).compare(sortName(right[0], right[1].type)));
+    sortName(left[0], left[1].type).compare(sortName(right[0], right[1].type)),
+  );
   const parts = sorted.flatMap(([name, entry]) => [
     Buffer.from(`${entry.mode === "040000" ? "40000" : entry.mode} ${name}\0`),
     Buffer.from(entry.oid, "hex"),
@@ -136,11 +141,13 @@ function prepareNode(
   return oid;
 }
 
-export function prepareTreeUpdate(input: Readonly<{
-  update: TreeUpdate;
-  bases: ReadonlyMap<string, ReadonlyMap<string, TreeEntry>>;
-  oidBytes: number;
-}>): Readonly<{ root: string; trees: readonly PreparedTree[] }> {
+export function prepareTreeUpdate(
+  input: Readonly<{
+    update: TreeUpdate;
+    bases: ReadonlyMap<string, ReadonlyMap<string, TreeEntry>>;
+    oidBytes: number;
+  }>,
+): Readonly<{ root: string; trees: readonly PreparedTree[] }> {
   const trees: PreparedTree[] = [];
   const root = prepareNode(input.update.root, "", input.bases, input.oidBytes, trees);
   return { root, trees };

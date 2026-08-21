@@ -33,9 +33,12 @@ type MutationCallOptions = Readonly<{
 }>;
 
 function acceptedFacts(result: MutationObservation): readonly AcceptedFact[] {
-  return result.facts.map((fact): AcceptedFact => fact.kind === "reintegrated"
-    ? { contract: fact.contract, entry: fact.entry, kind: fact.kind, data: fact.data }
-    : { contract: fact.contract, entry: fact.entry, kind: fact.kind });
+  return result.facts.map(
+    (fact): AcceptedFact =>
+      fact.kind === "reintegrated"
+        ? { contract: fact.contract, entry: fact.entry, kind: fact.kind, data: fact.data }
+        : { contract: fact.contract, entry: fact.entry, kind: fact.kind },
+  );
 }
 
 function attestationFor(
@@ -43,15 +46,11 @@ function attestationFor(
   gate: "reviewed" | "verified",
 ): Extract<Fact, { kind: "attestation" }> | undefined {
   return facts.findLast(
-    (fact): fact is Extract<Fact, { kind: "attestation" }> =>
-      fact.kind === "attestation" && fact.data.gate === gate,
+    (fact): fact is Extract<Fact, { kind: "attestation" }> => fact.kind === "attestation" && fact.data.gate === gate,
   );
 }
 
-function acceptedEnvelope(
-  result: MutationObservation,
-  coordinate: ContractId | undefined,
-): AcceptedEnvelope {
+function acceptedEnvelope(result: MutationObservation, coordinate: ContractId | undefined): AcceptedEnvelope {
   const contract = coordinate ?? result.facts[0]?.contract;
   if (contract === undefined) throw new Error("accepted mutation is missing its contract identity");
   const firstLag = result.lags[0];
@@ -99,10 +98,7 @@ export function acceptedAmend(result: AmendResult, coordinate: ContractId): Acce
   };
 }
 
-export function acceptedDeliver(
-  result: MutationResult<Delivery>,
-  coordinate: ContractId,
-): AcceptedDeliverResult {
+export function acceptedDeliver(result: MutationResult<Delivery>, coordinate: ContractId): AcceptedDeliverResult {
   const value = result.value;
   const attestation = attestationFor(result.facts, "verified");
   const verificationVerdict = attestation?.data.verdict ?? value.verificationReuse?.verdict;
@@ -121,10 +117,7 @@ export function acceptedDeliver(
   };
 }
 
-export function acceptedReview(
-  result: MutationResult<Review>,
-  coordinate: ContractId,
-): AcceptedReviewResult {
+export function acceptedReview(result: MutationResult<Review>, coordinate: ContractId): AcceptedReviewResult {
   const value = result.value;
   const reviewAttestation = attestationFor(result.facts, "reviewed");
   if (reviewAttestation === undefined) throw new Error("accepted review is missing its attestation fact");
@@ -167,10 +160,7 @@ export function acceptedAbandon(result: MutationResult<void>, coordinate: Contra
   };
 }
 
-export function acceptedAudit(
-  result: MutationResult<AuditReport>,
-  coordinate: ContractId,
-): AcceptedAuditResult {
+export function acceptedAudit(result: MutationResult<AuditReport>, coordinate: ContractId): AcceptedAuditResult {
   return {
     ...acceptedEnvelope(result, coordinate),
     verb: "audit",

@@ -17,7 +17,9 @@ type ReconcileOptions = Readonly<{
   places?: ReadonlyMap<ContractId, string>;
 }>;
 
-export async function reconcileOperation(input: MutationOperationInput & ReconcileOptions): Promise<ReconcileObservation> {
+export async function reconcileOperation(
+  input: MutationOperationInput & ReconcileOptions,
+): Promise<ReconcileObservation> {
   try {
     const observation = await reconcile({
       repository: input.scope,
@@ -41,8 +43,12 @@ type RepoReconcileReport = Readonly<{ contracts: readonly RepoReconcileItem[] }>
 export async function worldContractStates(
   input: Readonly<{ scope: RepositoryScope; channel: GitDecodeChannel }>,
 ): Promise<readonly ContractState[]> {
-  const observation = await withGitReadObservation(input.scope, input.channel, async (read) => await observeContractWorld(read));
-  return [...observation.contracts.values()].flatMap((value) => value.state === null ? [] : [value.state]);
+  const observation = await withGitReadObservation(
+    input.scope,
+    input.channel,
+    async (read) => await observeContractWorld(read),
+  );
+  return [...observation.contracts.values()].flatMap((value) => (value.state === null ? [] : [value.state]));
 }
 
 export async function reconcileAllOperation(
@@ -50,22 +56,27 @@ export async function reconcileAllOperation(
     scope: RepositoryScope;
     channel: GitDecodeChannel;
     states: readonly ContractState[];
-  }> & ReconcileOptions,
+  }> &
+    ReconcileOptions,
 ): Promise<RepoReconcileReport> {
-  const contracts = (await reconcileBatch(
-    input.scope,
-    input.channel,
-    input.states.map((state) => state.id),
-    {
-      hooks: input.hooks,
-      retryHooks: input.retryHooks,
-      retainTerminalWorktree: input.retainTerminalWorktree ?? false,
-      ...(input.places === undefined ? {} : { places: input.places }),
-    },
-  )).map((item): RepoReconcileItem => ({
-    contractId: item.contract,
-    state: item.state,
-    report: item.result,
-  }));
+  const contracts = (
+    await reconcileBatch(
+      input.scope,
+      input.channel,
+      input.states.map((state) => state.id),
+      {
+        hooks: input.hooks,
+        retryHooks: input.retryHooks,
+        retainTerminalWorktree: input.retainTerminalWorktree ?? false,
+        ...(input.places === undefined ? {} : { places: input.places }),
+      },
+    )
+  ).map(
+    (item): RepoReconcileItem => ({
+      contractId: item.contract,
+      state: item.state,
+      report: item.result,
+    }),
+  );
   return { contracts };
 }

@@ -26,15 +26,16 @@ export async function admitRequest(
       const action = input.action;
       const parentAllowed = soul.allowed;
       const permitted = action === "akuma.wait" || parentAllowed.includes(action);
-      const normalized: RequestInput = input.action === "akuma.call"
-        ? {
-            ...input,
-            recipe: {
-              ...input.recipe,
-              allowed: permitted ? clipAllowedActions(input.recipe.allowed, parentAllowed) : input.recipe.allowed,
-            },
-          }
-        : input;
+      const normalized: RequestInput =
+        input.action === "akuma.call"
+          ? {
+              ...input,
+              recipe: {
+                ...input.recipe,
+                allowed: permitted ? clipAllowedActions(input.recipe.allowed, parentAllowed) : input.recipe.allowed,
+              },
+            }
+          : input;
       insertRequestFact(heart, {
         ...normalized,
         requester: soul.id,
@@ -44,15 +45,16 @@ export async function admitRequest(
       const fact = requestFact(heart, input.id);
       if (fact === null) throw new Error(`Akuma request ${input.id} was not admitted`);
       if (
-        fact.requester !== soul.id
-        || fact.id !== normalized.id
-        || fact.action !== normalized.action
-        || requestPayloadJson(fact) !== requestPayloadJson(normalized)
+        fact.requester !== soul.id ||
+        fact.id !== normalized.id ||
+        fact.action !== normalized.action ||
+        requestPayloadJson(fact) !== requestPayloadJson(normalized)
       ) {
         throw new Error(`Akuma request ${input.id} reused different input`);
       }
       return fact;
-    }));
+    }),
+  );
 }
 
 export async function reserveRequest(paths: AkumaPaths, id: string, child: AkuId): Promise<RequestFact> {
@@ -66,7 +68,8 @@ export async function reserveRequest(paths: AkumaPaths, id: string, child: AkuId
         throw new Error(`Akuma request ${id} cannot reserve ${child}`);
       }
       return requestFact(heart, id)!;
-    }));
+    }),
+  );
 }
 
 export async function serveRequest(paths: AkumaPaths, id: string, child: AkuId): Promise<RequestFact> {
@@ -80,7 +83,8 @@ export async function serveRequest(paths: AkumaPaths, id: string, child: AkuId):
         throw new Error(`Akuma request ${id} cannot serve ${child}`);
       }
       return requestFact(heart, id)!;
-    }));
+    }),
+  );
 }
 
 export async function serveUpstreamRequest(
@@ -100,7 +104,8 @@ export async function serveUpstreamRequest(
         throw new Error(`Akuma request ${id} cannot be served as ${service.action}`);
       }
       return requestFact(heart, id)!;
-    }));
+    }),
+  );
 }
 
 export async function refuseRequest(paths: AkumaPaths, id: string, diagnostic: string): Promise<RequestFact> {
@@ -113,7 +118,8 @@ export async function refuseRequest(paths: AkumaPaths, id: string, diagnostic: s
         throw new Error(`Akuma request ${id} cannot be refused`);
       }
       return requestFact(heart, id)!;
-    }));
+    }),
+  );
 }
 
 export async function voidRequest(paths: AkumaPaths, id: string, evidence: string): Promise<RequestFact> {
@@ -127,7 +133,8 @@ export async function voidRequest(paths: AkumaPaths, id: string, evidence: strin
         throw new Error(`Akuma request ${id} cannot be voided`);
       }
       return requestFact(heart, id)!;
-    }));
+    }),
+  );
 }
 
 export async function readRequest(paths: AkumaPaths, id: string): Promise<RequestFact | null> {

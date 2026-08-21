@@ -15,9 +15,15 @@ export type TaskRow = Readonly<{
 }>;
 export type BlockedTaskRow = TaskRow & Readonly<{ blockers: readonly TaskRef[] }>;
 export type TaskDetailFacts = Readonly<{
-  task: TaskDocument; needs: readonly (TaskRef & Readonly<{ released: boolean }>)[]; blockers: readonly TaskRef[];
-  blocks: readonly TaskRef[]; parent: TaskRef | null; children: readonly TaskRef[];
-  supersedes: readonly TaskRef[]; supersededBy: readonly TaskRef[]; related: readonly TaskRef[];
+  task: TaskDocument;
+  needs: readonly (TaskRef & Readonly<{ released: boolean }>)[];
+  blockers: readonly TaskRef[];
+  blocks: readonly TaskRef[];
+  parent: TaskRef | null;
+  children: readonly TaskRef[];
+  supersedes: readonly TaskRef[];
+  supersededBy: readonly TaskRef[];
+  related: readonly TaskRef[];
 }>;
 export type TaskTreeNode = Readonly<{
   task: TaskRef & Readonly<{ priority: TaskPriority | null }>;
@@ -33,7 +39,8 @@ export type TaskDoctorIssue =
 
 const terminal = (state: TaskState): boolean => state === "done" || state === "drop";
 const none: readonly TaskRef[] = Object.freeze([]);
-const sorted = <T extends { id: string }>(values: Iterable<T>): readonly T[] => [...values].sort((a, b) => Buffer.compare(Buffer.from(a.id), Buffer.from(b.id)));
+const sorted = <T extends { id: string }>(values: Iterable<T>): readonly T[] =>
+  [...values].sort((a, b) => Buffer.compare(Buffer.from(a.id), Buffer.from(b.id)));
 export function taskRef(board: TaskBoard, id: TaskId): TaskRef {
   const task = board.tasks.get(id);
   return task === undefined ? { id, title: null, state: "missing" } : { id, title: task.title, state: task.state };
@@ -101,19 +108,24 @@ export function projectDetailFacts(
   id: TaskId,
   relations: TaskRelationProjection,
 ): TaskDetailFacts | null {
-  const task = board.tasks.get(id); if (task === undefined) return null;
+  const task = board.tasks.get(id);
+  if (task === undefined) return null;
   const needs = task.needs.map((need) => ({ ...taskRef(board, need), released: needReleased(board, need) }));
   return {
     task,
     needs,
     blockers: needs.filter((need) => !need.released).map(({ released: _released, ...ref }) => ref),
     blocks: relations.blocks(id),
-    parent: task.parent === null ? null : taskRef(board, task.parent), children: relations.children(id),
-    supersedes: task.supersedes.map((target) => taskRef(board, target)), supersededBy: relations.supersededBy(id),
+    parent: task.parent === null ? null : taskRef(board, task.parent),
+    children: relations.children(id),
+    supersedes: task.supersedes.map((target) => taskRef(board, target)),
+    supersededBy: relations.supersededBy(id),
     related: relations.related(id),
   };
 }
-function inScope(task: TaskDocument, scope: readonly string[] | null): boolean { return scope === null || sameNamespace(parseTaskId(task.id).namespace, scope); }
+function inScope(task: TaskDocument, scope: readonly string[] | null): boolean {
+  return scope === null || sameNamespace(parseTaskId(task.id).namespace, scope);
+}
 export function projectTaskRow(board: TaskBoard, relations: TaskRelationProjection, task: TaskDocument): TaskRow {
   const children = relations.children(task.id);
   const total = children.length;
@@ -135,8 +147,10 @@ export function projectRows(
   scope: readonly string[] | null,
   selection: "active" | "closed" | "all",
 ): readonly TaskRow[] {
-  return [...board.tasks.values()].filter((task) => inScope(task, scope)).filter((task) => selection === "all"
-    || (selection === "closed") === terminal(task.state)).map((task) => projectTaskRow(board, relations, task))
+  return [...board.tasks.values()]
+    .filter((task) => inScope(task, scope))
+    .filter((task) => selection === "all" || (selection === "closed") === terminal(task.state))
+    .map((task) => projectTaskRow(board, relations, task))
     .sort((a, b) => a.priority - b.priority || Buffer.compare(Buffer.from(a.id), Buffer.from(b.id)));
 }
 export function projectBlocked(
@@ -150,7 +164,11 @@ export function projectBlocked(
   });
 }
 
-export function projectStatusRows(board: TaskBoard, relations: TaskRelationProjection, scope: readonly string[] | null) {
+export function projectStatusRows(
+  board: TaskBoard,
+  relations: TaskRelationProjection,
+  scope: readonly string[] | null,
+) {
   const blockers = new Map(projectBlocked(board, scope, relations).map((row) => [row.id, row.blockers]));
   return projectRows(board, relations, scope, "all").map((row) => {
     const unresolved = blockers.get(row.id);
@@ -175,7 +193,7 @@ export function projectTaskBoardObservation(board: TaskBoard): TaskBoardObservat
 }
 
 function relationIds(task: TaskDocument, relation: TaskRelation): readonly TaskId[] {
-  return relation === "parent" ? task.parent === null ? [] : [task.parent] : task[relation];
+  return relation === "parent" ? (task.parent === null ? [] : [task.parent]) : task[relation];
 }
 export function relationProblem(board: TaskBoard, before: TaskDocument | null, after: TaskDocument): string | null {
   for (const relation of ["needs", "parent", "supersedes", "relates"] as const) {
@@ -189,33 +207,54 @@ export function relationProblem(board: TaskBoard, before: TaskDocument | null, a
   return null;
 }
 
-function cycleComponents(board: TaskBoard, relation: "needs" | "parent" | "supersedes"): readonly (readonly TaskId[])[] {
+function cycleComponents(
+  board: TaskBoard,
+  relation: "needs" | "parent" | "supersedes",
+): readonly (readonly TaskId[])[] {
   const ids = sorted([...board.tasks.keys()].map((id) => ({ id }))).map(({ id }) => id as TaskId);
-  const edges = new Map(ids.map((id) => [id, relationIds(board.tasks.get(id)!, relation).filter((target) => board.tasks.has(target))]));
+  const edges = new Map(
+    ids.map((id) => [id, relationIds(board.tasks.get(id)!, relation).filter((target) => board.tasks.has(target))]),
+  );
   const reverse = new Map(ids.map((id) => [id, [] as TaskId[]]));
   for (const [id, targets] of edges) for (const target of targets) reverse.get(target)!.push(id);
 
-  const visited = new Set<TaskId>(), finished: TaskId[] = [];
+  const visited = new Set<TaskId>(),
+    finished: TaskId[] = [];
   for (const root of ids) {
     if (visited.has(root)) continue;
     visited.add(root);
     const stack: { id: TaskId; index: number }[] = [{ id: root, index: 0 }];
     while (stack.length > 0) {
-      const frame = stack.at(-1)!, targets = edges.get(frame.id)!;
+      const frame = stack.at(-1)!,
+        targets = edges.get(frame.id)!;
       if (frame.index < targets.length) {
         const target = targets[frame.index++]!;
-        if (!visited.has(target)) { visited.add(target); stack.push({ id: target, index: 0 }); }
-      } else { finished.push(frame.id); stack.pop(); }
+        if (!visited.has(target)) {
+          visited.add(target);
+          stack.push({ id: target, index: 0 });
+        }
+      } else {
+        finished.push(frame.id);
+        stack.pop();
+      }
     }
   }
 
-  const assigned = new Set<TaskId>(), components: TaskId[][] = [];
+  const assigned = new Set<TaskId>(),
+    components: TaskId[][] = [];
   for (const root of finished.reverse()) {
     if (assigned.has(root)) continue;
-    const component: TaskId[] = [], stack = [root]; assigned.add(root);
+    const component: TaskId[] = [],
+      stack = [root];
+    assigned.add(root);
     while (stack.length > 0) {
-      const id = stack.pop()!; component.push(id);
-      for (const target of reverse.get(id)!) if (!assigned.has(target)) { assigned.add(target); stack.push(target); }
+      const id = stack.pop()!;
+      component.push(id);
+      for (const target of reverse.get(id)!)
+        if (!assigned.has(target)) {
+          assigned.add(target);
+          stack.push(target);
+        }
     }
     if (component.length > 1) components.push(sorted(component.map((id) => ({ id }))).map(({ id }) => id as TaskId));
   }
@@ -224,12 +263,13 @@ function cycleComponents(board: TaskBoard, relation: "needs" | "parent" | "super
 
 export function diagnoseBoard(board: TaskBoard): readonly TaskDoctorIssue[] {
   const issues: TaskDoctorIssue[] = [];
-  for (const task of sorted(board.tasks.values())) for (const relation of ["needs", "parent", "supersedes", "relates"] as const) {
-    for (const target of relationIds(task, relation)) {
-      if (target === task.id) issues.push({ kind: "self-relation", taskId: task.id, relation });
-      else if (!board.tasks.has(target)) issues.push({ kind: "missing-target", taskId: task.id, relation, target });
+  for (const task of sorted(board.tasks.values()))
+    for (const relation of ["needs", "parent", "supersedes", "relates"] as const) {
+      for (const target of relationIds(task, relation)) {
+        if (target === task.id) issues.push({ kind: "self-relation", taskId: task.id, relation });
+        else if (!board.tasks.has(target)) issues.push({ kind: "missing-target", taskId: task.id, relation, target });
+      }
     }
-  }
   for (const relation of ["needs", "parent", "supersedes"] as const) {
     for (const tasks of cycleComponents(board, relation)) issues.push({ kind: "cycle", relation, tasks });
   }

@@ -1,16 +1,12 @@
 import type { DatabaseSync } from "node:sqlite";
 import { parseAkuId, type AkuId } from "../identity.js";
-import {
-  decodeProviderOptions,
-  decodeProviderRecipe,
-  decodeReadonlyRestraint,
-} from "../provider-recipe.js";
+import { decodeProviderOptions, decodeProviderRecipe, decodeReadonlyRestraint } from "../provider-recipe.js";
 import type { AkumaOrigin, Soul, SoulRow } from "./facts.js";
 import { effectiveAllowedActions } from "../allowed.js";
 
 function record(value: unknown): Readonly<Record<string, unknown>> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Readonly<Record<string, unknown>>
+    ? (value as Readonly<Record<string, unknown>>)
     : null;
 }
 

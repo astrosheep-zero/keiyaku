@@ -7,7 +7,7 @@ export type LineRpcExit = StdioProcessExit;
 
 function object(value: unknown): Readonly<Record<string, unknown>> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Readonly<Record<string, unknown>>
+    ? (value as Readonly<Record<string, unknown>>)
     : undefined;
 }
 
@@ -34,9 +34,15 @@ export class LineRpcProcess {
     });
   }
 
-  onNotification(listener: (value: LineRpcNotification) => void): void { this.notifications.add(listener); }
-  onServerRequest(listener: (value: LineRpcServerRequest) => void): void { this.serverRequests.add(listener); }
-  onExit(listener: (value: LineRpcExit) => void): void { void this.process.exited.then(listener); }
+  onNotification(listener: (value: LineRpcNotification) => void): void {
+    this.notifications.add(listener);
+  }
+  onServerRequest(listener: (value: LineRpcServerRequest) => void): void {
+    this.serverRequests.add(listener);
+  }
+  onExit(listener: (value: LineRpcExit) => void): void {
+    void this.process.exited.then(listener);
+  }
 
   private consume(chunk: string): void {
     this.stdout += chunk;
@@ -51,7 +57,11 @@ export class LineRpcProcess {
 
   private receive(line: string): void {
     let decoded: unknown;
-    try { decoded = JSON.parse(line); } catch { return; }
+    try {
+      decoded = JSON.parse(line);
+    } catch {
+      return;
+    }
     const message = object(decoded);
     if (message === undefined) return;
     if (typeof message.id === "number" && ("result" in message || "error" in message)) {
@@ -67,7 +77,8 @@ export class LineRpcProcess {
     if (method === undefined) return;
     const params = object(message.params);
     if (typeof message.id === "number" || typeof message.id === "string") {
-      for (const listener of this.serverRequests) listener({ id: message.id, method, ...(params === undefined ? {} : { params }) });
+      for (const listener of this.serverRequests)
+        listener({ id: message.id, method, ...(params === undefined ? {} : { params }) });
       return;
     }
     for (const listener of this.notifications) listener({ method, ...(params === undefined ? {} : { params }) });
@@ -83,11 +94,14 @@ export class LineRpcProcess {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
-      this.process.input.write(`${JSON.stringify({ id, method, ...(params === undefined ? {} : { params }) })}\n`, (error) => {
-        if (error === null || error === undefined) return;
-        this.pending.delete(id);
-        reject(error);
-      });
+      this.process.input.write(
+        `${JSON.stringify({ id, method, ...(params === undefined ? {} : { params }) })}\n`,
+        (error) => {
+          if (error === null || error === undefined) return;
+          this.pending.delete(id);
+          reject(error);
+        },
+      );
     });
   }
 
@@ -96,14 +110,20 @@ export class LineRpcProcess {
   }
 
   async endInputAndDrain(timeoutMs?: number): Promise<void> {
-    if (this.closed) { await this.process.exited; return; }
+    if (this.closed) {
+      await this.process.exited;
+      return;
+    }
     this.closed = true;
     this.fail(new Error("line RPC process is closed"));
     await this.process.endInputAndDrain(timeoutMs);
   }
 
   async close(force = false): Promise<void> {
-    if (this.closed) { await this.process.exited; return; }
+    if (this.closed) {
+      await this.process.exited;
+      return;
+    }
     this.closed = true;
     this.fail(new Error("line RPC process is closed"));
     await this.process.close(force);

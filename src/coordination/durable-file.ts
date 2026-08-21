@@ -1,11 +1,5 @@
 import { randomBytes } from "node:crypto";
-import {
-  closeSync,
-  fsyncSync,
-  openSync,
-  renameSync,
-  writeFileSync,
-} from "node:fs";
+import { closeSync, fsyncSync, openSync, renameSync, writeFileSync } from "node:fs";
 import { lstat, mkdir, readFile, unlink } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
@@ -35,7 +29,11 @@ export async function replaceFileDurably(path: string, bytes: string | Uint8Arra
       return;
     } catch (error) {
       if (descriptor !== undefined) closeSync(descriptor);
-      try { await unlink(temporary); } catch { /* renamed, absent, or best-effort cleanup */ }
+      try {
+        await unlink(temporary);
+      } catch {
+        /* renamed, absent, or best-effort cleanup */
+      }
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
   }
@@ -62,7 +60,11 @@ export async function createFileDurablyExclusive(
   } catch (error) {
     if (descriptor !== undefined) closeSync(descriptor);
     if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
-    try { await unlink(path); } catch { /* absent or best-effort cleanup */ }
+    try {
+      await unlink(path);
+    } catch {
+      /* absent or best-effort cleanup */
+    }
     throw error;
   }
 }

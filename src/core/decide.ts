@@ -14,8 +14,7 @@ export type DecideInput<Input> = Readonly<{
 
 /** The protocol's mechanical or declaration result supplied to a legal decision. */
 export type Preparation<Data, Refusal> = Readonly<
-  | { kind: "prepared"; data: Data; refusal?: never }
-  | { kind: "refused"; refusal: Refusal; data?: never }
+  { kind: "prepared"; data: Data; refusal?: never } | { kind: "refused"; refusal: Refusal; data?: never }
 >;
 
 /** A document-derived preparation whose stamp is unavailable only with contract absence. */

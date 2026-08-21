@@ -9,22 +9,26 @@ import type { TaskHolderAdmission } from "../settlement/holder.js";
 import type { WorktreeHooks } from "./configuration.js";
 import { completeReconcile, type ReconcileCompletion } from "./reconcile.js";
 
-export type AcceptedIntent<Value> = Readonly<{
-  kind: "accepted";
-  facts: readonly JournalEntry[];
-  head: ContractHead;
-  value: Value;
-  physical?: ReconcileReport;
-} & AcceptedObligations>;
+export type AcceptedIntent<Value> = Readonly<
+  {
+    kind: "accepted";
+    facts: readonly JournalEntry[];
+    head: ContractHead;
+    value: Value;
+    physical?: ReconcileReport;
+  } & AcceptedObligations
+>;
 
-export type MutationResult<Value> = Readonly<{
-  facts: readonly JournalEntry[];
-  head: ContractHead;
-  value: Value;
-  effects: ReconcileCompletion["effects"];
-  lags: ReconcileCompletion["lag"];
-  settlement: SettlementReport;
-} & AcceptedObligations>;
+export type MutationResult<Value> = Readonly<
+  {
+    facts: readonly JournalEntry[];
+    head: ContractHead;
+    value: Value;
+    effects: ReconcileCompletion["effects"];
+    lags: ReconcileCompletion["lag"];
+    settlement: SettlementReport;
+  } & AcceptedObligations
+>;
 
 type Completion<Value, PublicValue> = Readonly<{
   scope: RepositoryScope;
@@ -72,11 +76,13 @@ export async function completeMutation<Value, PublicValue>(
   };
 }
 
-export async function completeHolderMutation<Value, PublicValue, Refusal>(input: Readonly<{
-  completion: Omit<Completion<Value, PublicValue>, "accepted">;
-  admission: TaskHolderAdmission<IntentOutcome<Value, Refusal>>;
-  requireAccepted: (result: IntentOutcome<Value, Refusal>) => AcceptedIntent<Value>;
-}>): Promise<MutationResult<PublicValue>> {
+export async function completeHolderMutation<Value, PublicValue, Refusal>(
+  input: Readonly<{
+    completion: Omit<Completion<Value, PublicValue>, "accepted">;
+    admission: TaskHolderAdmission<IntentOutcome<Value, Refusal>>;
+    requireAccepted: (result: IntentOutcome<Value, Refusal>) => AcceptedIntent<Value>;
+  }>,
+): Promise<MutationResult<PublicValue>> {
   const accepted = input.requireAccepted(input.admission.result);
   const completed = await completeMutation({ ...input.completion, accepted });
   if (input.admission.kind === "completed") return completed;

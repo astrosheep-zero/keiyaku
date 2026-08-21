@@ -29,15 +29,16 @@ export function decideDeliver<Failure>({
   }
   if (input.preparation.kind === "refused") return { kind: "refused", refusal: input.preparation.refusal };
   const entries: JournalEntry[] = [];
-  if (state.bound === null) entries.push({
-    v: 1,
-    kind: "bound",
-    contract: input.contractId,
-    entry: attempt.entryUlids[0]!,
-    at: input.at,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
-    data: {},
-  });
+  if (state.bound === null)
+    entries.push({
+      v: 1,
+      kind: "bound",
+      contract: input.contractId,
+      entry: attempt.entryUlids[0]!,
+      at: input.at,
+      ...(input.actor === undefined ? {} : { actor: input.actor }),
+      data: {},
+    });
   const deliver: JournalEntry = {
     v: 1,
     kind: "deliver",

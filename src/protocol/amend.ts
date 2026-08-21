@@ -13,16 +13,16 @@ import type { GitDecodeChannel } from "../git/read-observation.js";
 import type { MutationOperationInput, IntentOutcome } from "./operations.js";
 import { timestamp } from "./operations.js";
 
-type AmendOperationInput = MutationOperationInput & Readonly<{
-  source?: ContractTerms;
-  deriveAmendment?: (source: ContractTerms) => Readonly<{
-    terms: AmendData;
-    verification: VerificationDeclarationPreparation;
+type AmendOperationInput = MutationOperationInput &
+  Readonly<{
+    source?: ContractTerms;
+    deriveAmendment?: (source: ContractTerms) => Readonly<{
+      terms: AmendData;
+      verification: VerificationDeclarationPreparation;
+    }>;
   }>;
-}>;
 
-type Amendment = Readonly<{ source: ContractTerms }>
-  & ReturnType<NonNullable<AmendOperationInput["deriveAmendment"]>>;
+type Amendment = Readonly<{ source: ContractTerms }> & ReturnType<NonNullable<AmendOperationInput["deriveAmendment"]>>;
 
 async function extendPrerequisiteClosureAt(
   channel: GitDecodeChannel,
@@ -55,21 +55,21 @@ export async function amendOperation(
     let observation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
     const state = contractState(observation.decision, input.contractId);
     if (source === undefined && state !== null) source = state.terms;
-    const amendment = source === undefined || input.deriveAmendment === undefined
-      ? undefined
-      : { source, ...input.deriveAmendment(source) };
+    const amendment =
+      source === undefined || input.deriveAmendment === undefined
+        ? undefined
+        : { source, ...input.deriveAmendment(source) };
     if (amendment !== undefined) {
-      observation = await extendPrerequisiteClosureAt(
-        input.channel,
-        observation,
-        [...new Set([...(state?.terms.after ?? []), ...amendment.terms.after])],
-      );
+      observation = await extendPrerequisiteClosureAt(input.channel, observation, [
+        ...new Set([...(state?.terms.after ?? []), ...amendment.terms.after]),
+      ]);
     }
-    const preparation: AmendInput<VerificationDeclarationRefusal>["preparation"] = amendment === undefined
-      ? undefined
-      : amendment.verification.kind === "prepared"
-        ? { kind: "prepared", data: amendment.terms }
-        : { kind: "refused", refusal: amendment.verification.refusal };
+    const preparation: AmendInput<VerificationDeclarationRefusal>["preparation"] =
+      amendment === undefined
+        ? undefined
+        : amendment.verification.kind === "prepared"
+          ? { kind: "prepared", data: amendment.terms }
+          : { kind: "refused", refusal: amendment.verification.refusal };
     const decision = decideAmend({
       input: {
         contractId: input.contractId,

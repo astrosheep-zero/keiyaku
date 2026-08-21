@@ -12,10 +12,17 @@ type AmendCommandInput = Readonly<{
   hooks?: WorktreeHooks;
 }>;
 
-export function amendFromCommand({ command, repo, contract, markdown, gates, actor, hooks }: AmendCommandInput): ReturnType<Keiyaku["amend"]> {
-  const after: readonly ContractId[] | undefined = command.clearAfter === true
-    ? []
-    : command.after?.map((id) => contractFromInput(repo, id).id);
+export function amendFromCommand({
+  command,
+  repo,
+  contract,
+  markdown,
+  gates,
+  actor,
+  hooks,
+}: AmendCommandInput): ReturnType<Keiyaku["amend"]> {
+  const after: readonly ContractId[] | undefined =
+    command.clearAfter === true ? [] : command.after?.map((id) => contractFromInput(repo, id).id);
   return contract.amend({
     ...(markdown === undefined ? {} : { markdown }),
     ...(actor === undefined ? {} : { actor }),

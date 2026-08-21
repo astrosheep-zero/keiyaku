@@ -32,10 +32,11 @@ export type ArchetypeCatalogRow = Readonly<{
 }>;
 
 type ArchetypeDefinition = DecodedArchetype & Readonly<{ adapter: ProviderAdapter }>;
-type AdmittedArchetype = Omit<ArchetypeDefinition, "provider" | "readonly"> & Readonly<{
-  provider: ProviderExecution;
-  readonly?: ReadonlyRestraint;
-}>;
+type AdmittedArchetype = Omit<ArchetypeDefinition, "provider" | "readonly"> &
+  Readonly<{
+    provider: ProviderExecution;
+    readonly?: ReadonlyRestraint;
+  }>;
 
 export class AkumaArchetypeError extends Error {
   readonly kind = "akuma-archetype";
@@ -61,8 +62,11 @@ async function archetypePaths(home?: string): Promise<readonly Readonly<{ name: 
       .flatMap((entry) => {
         if (!entry.isFile() || !entry.name.endsWith(".md")) return [];
         const name = entry.name.slice(0, -3);
-        try { return [{ name: archetypeName(name), path: join(directory, entry.name) }]; }
-        catch { return []; }
+        try {
+          return [{ name: archetypeName(name), path: join(directory, entry.name) }];
+        } catch {
+          return [];
+        }
       })
       .sort((left, right) => Buffer.compare(Buffer.from(left.name), Buffer.from(right.name)));
   } catch (error) {
@@ -75,11 +79,7 @@ export async function listArchetypes(input: Readonly<{ home?: string }> = {}): P
   return (await archetypePaths(input.home)).map(({ name }) => name);
 }
 
-function archetypeField(
-  values: Readonly<Record<string, unknown>>,
-  key: string,
-  required = false,
-): string | undefined {
+function archetypeField(values: Readonly<Record<string, unknown>>, key: string, required = false): string | undefined {
   const value = values[key];
   if (value === undefined && !required) return undefined;
   if (typeof value !== "string" || value.trim().length === 0) {
@@ -139,10 +139,12 @@ function decodeArchetype(name: string, path: string, markdown: string): DecodedA
       ...(model === undefined ? {} : { model }),
       ...(effort === undefined ? {} : { effort }),
       ...(network === undefined ? {} : { network }),
-      ...(systemPrompt.length === 0 ? {} : {
-        systemPrompt,
-        systemPromptMode: systemPromptMode ?? "append",
-      }),
+      ...(systemPrompt.length === 0
+        ? {}
+        : {
+            systemPrompt,
+            systemPromptMode: systemPromptMode ?? "append",
+          }),
     }),
     ...(readonly === undefined ? {} : { readonly }),
     allowed,
@@ -154,22 +156,24 @@ export async function listArchetypeDefinitions(
 ): Promise<readonly ArchetypeCatalogRow[]> {
   // Reads still run concurrently, but the reported failure is the first invalid
   // definition in catalog byte order, not whichever read happened to finish first.
-  const settled = await Promise.allSettled((await archetypePaths(input.home)).map(async ({ name, path }) => {
-    try {
-      const definition = decodeArchetype(name, path, await readFile(path, "utf8"));
-      return Object.freeze({
-        name: definition.name,
-        ...(definition.options.model === undefined ? {} : { model: definition.options.model }),
-        ...(definition.description === undefined ? {} : { description: definition.description }),
-      });
-    } catch (error) {
-      throw new AkumaArchetypeError(
-        name,
-        [path],
-        `is invalid: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  }));
+  const settled = await Promise.allSettled(
+    (await archetypePaths(input.home)).map(async ({ name, path }) => {
+      try {
+        const definition = decodeArchetype(name, path, await readFile(path, "utf8"));
+        return Object.freeze({
+          name: definition.name,
+          ...(definition.options.model === undefined ? {} : { model: definition.options.model }),
+          ...(definition.description === undefined ? {} : { description: definition.description }),
+        });
+      } catch (error) {
+        throw new AkumaArchetypeError(
+          name,
+          [path],
+          `is invalid: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }),
+  );
   const firstInvalid = settled.find((result) => result.status === "rejected");
   if (firstInvalid !== undefined) throw firstInvalid.reason;
   return settled.map((result) => (result as PromiseFulfilledResult<ArchetypeCatalogRow>).value);
@@ -177,10 +181,15 @@ export async function listArchetypeDefinitions(
 
 function record(value: unknown): Readonly<Record<string, unknown>> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Readonly<Record<string, unknown>> : null;
+    ? (value as Readonly<Record<string, unknown>>)
+    : null;
 }
 
-function optionalProviderText(value: Readonly<Record<string, unknown>>, name: string, field: "description"): string | undefined {
+function optionalProviderText(
+  value: Readonly<Record<string, unknown>>,
+  name: string,
+  field: "description",
+): string | undefined {
   const selected = value[field];
   if (selected === undefined) return undefined;
   if (typeof selected !== "string" || selected.trim().length === 0) {
@@ -192,7 +201,9 @@ function optionalProviderText(value: Readonly<Record<string, unknown>>, name: st
 function configuredProvider(name: string, selected: unknown): ProviderExecution {
   const value = record(selected);
   if (value === null) throw new TypeError(`provider ${name} must be an object`);
-  const unknown = Object.keys(value).find((key) => !["kind", "description", "executable", "config", "env"].includes(key));
+  const unknown = Object.keys(value).find(
+    (key) => !["kind", "description", "executable", "config", "env"].includes(key),
+  );
   if (unknown !== undefined) throw new TypeError(`provider ${name} has unknown field ${unknown}`);
   optionalProviderText(value, name, "description");
   return decodeProviderRecipe({
@@ -217,7 +228,8 @@ const BUILTIN_EXECUTIONS = {
 
 function providerExecution(settings: Settings, name: string): ProviderExecution {
   const view = settings.namespace("providers");
-  if (view.kind === "failed") throw new TypeError(view.failures.map((failure) => `${failure.scope}: ${failure.diagnostic}`).join("; "));
+  if (view.kind === "failed")
+    throw new TypeError(view.failures.map((failure) => `${failure.scope}: ${failure.diagnostic}`).join("; "));
   const selected = view.entries.find((entry) => entry.name === name)?.value;
   if (selected !== undefined) return configuredProvider(name, selected);
   const builtin = BUILTIN_EXECUTIONS[name as keyof typeof BUILTIN_EXECUTIONS];
@@ -231,9 +243,11 @@ async function admitArchetype(
   callReadonly: true | undefined,
 ): Promise<AdmittedArchetype> {
   let selected: Awaited<ReturnType<typeof resolveProviderExecution>>;
-  try { selected = await resolveProviderExecution(providerExecution(settings, archetype.provider)); }
-  catch (error) {
-    if (error instanceof TypeError) throw new AkumaArchetypeError(archetype.name, [archetype.path], `uses ${error.message}`);
+  try {
+    selected = await resolveProviderExecution(providerExecution(settings, archetype.provider));
+  } catch (error) {
+    if (error instanceof TypeError)
+      throw new AkumaArchetypeError(archetype.name, [archetype.path], `uses ${error.message}`);
     throw error;
   }
   const execution = selected.execution;
@@ -262,23 +276,27 @@ export async function loadArchetype(
   const name = archetypeName(input.name);
   const directory = archetypeDirectory(input.home);
   const path = join(directory, `${name}.md`);
-  const missing = () => new AkumaArchetypeError(
-    name,
-    [path],
-    "was not found",
-    "use `keiyaku ls aku/` to list available Akuma",
-  );
+  const missing = () =>
+    new AkumaArchetypeError(name, [path], "was not found", "use `keiyaku ls aku/` to list available Akuma");
   let markdown: string;
   try {
     markdown = await readFile(path, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") throw missing();
-    throw new AkumaArchetypeError(name, [path], `could not be read: ${error instanceof Error ? error.message : String(error)}`);
+    throw new AkumaArchetypeError(
+      name,
+      [path],
+      `could not be read: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
   try {
     return await admitArchetype(decodeArchetype(name, path, markdown), input.settings, input.readonly);
   } catch (error) {
     if (error instanceof AkumaArchetypeError) throw error;
-    throw new AkumaArchetypeError(name, [path], `is invalid: ${error instanceof Error ? error.message : String(error)}`);
+    throw new AkumaArchetypeError(
+      name,
+      [path],
+      `is invalid: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }

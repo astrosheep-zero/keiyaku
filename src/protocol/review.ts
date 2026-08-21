@@ -27,17 +27,19 @@ import type {
 import { timestamp } from "./operations.js";
 
 const REVIEWED = gate("reviewed");
-type ReviewPreparationRefusal = Readonly<{
-  kind: "worktree-missing";
-  contractId: import("../core/facts/types.js").ContractId;
-}>
+type ReviewPreparationRefusal =
+  | Readonly<{
+      kind: "worktree-missing";
+      contractId: import("../core/facts/types.js").ContractId;
+    }>
   | import("../git/tender.js").DirtyWorkspaceRefusal;
 type ReviewRefusal = AttestationRefusal | ReviewPreparationRefusal;
-type ReviewOperationInput = MutationOperationInput & Readonly<{
-  verdict: AttestationData["verdict"];
-  summary?: string;
-  deriveDocument?: (state: ContractState) => DocumentDerivation;
-}>;
+type ReviewOperationInput = MutationOperationInput &
+  Readonly<{
+    verdict: AttestationData["verdict"];
+    summary?: string;
+    deriveDocument?: (state: ContractState) => DocumentDerivation;
+  }>;
 export type ReviewValue = CompletionEvidence & Readonly<{ workspace?: WorkspaceDirtyDelta }>;
 type PreparedReview = Readonly<{
   workspace?: WorkspaceDirtyDelta;
@@ -52,14 +54,21 @@ async function captureReviewableWorktree(
     coordinates: ContractState["coordinates"];
     workspacePath?: string;
   }>,
-): Promise<{ kind: "prepared"; data: Readonly<{
-  changeId: DeliverData["integration"]["changeId"];
-  tender: TenderCapture;
-  workspace?: WorkspaceDirtyDelta;
-}> } | { kind: "refused"; refusal: ReviewPreparationRefusal }> {
-  const appointed = stage.coordinates.workspace === "worktree"
-    ? appointmentFor(await readPlaceRegister(repository), stage.contractId)
-    : undefined;
+): Promise<
+  | {
+      kind: "prepared";
+      data: Readonly<{
+        changeId: DeliverData["integration"]["changeId"];
+        tender: TenderCapture;
+        workspace?: WorkspaceDirtyDelta;
+      }>;
+    }
+  | { kind: "refused"; refusal: ReviewPreparationRefusal }
+> {
+  const appointed =
+    stage.coordinates.workspace === "worktree"
+      ? appointmentFor(await readPlaceRegister(repository), stage.contractId)
+      : undefined;
   const tender = await captureTender(repository, {
     ...stage,
     ...(appointed === undefined ? {} : { place: appointed.place }),
@@ -87,10 +96,16 @@ export async function prepareReview(
     coordinates: ContractState["coordinates"];
     workspacePath?: string;
   }>,
-): Promise<{ kind: "prepared"; data: Readonly<{
-  changeId: DeliverData["integration"]["changeId"];
-  workspace?: WorkspaceDirtyDelta;
-}> } | { kind: "refused"; refusal: ReviewPreparationRefusal }> {
+): Promise<
+  | {
+      kind: "prepared";
+      data: Readonly<{
+        changeId: DeliverData["integration"]["changeId"];
+        workspace?: WorkspaceDirtyDelta;
+      }>;
+    }
+  | { kind: "refused"; refusal: ReviewPreparationRefusal }
+> {
   const prepared = await captureReviewableWorktree(repository, stage);
   if (prepared.kind === "refused") return prepared;
   return {
@@ -120,28 +135,30 @@ async function reviewAttempt(
   let tender: TenderCapture | undefined;
   let workspacePath: string | undefined;
   if (state !== null) {
-    workspacePath = state.terminal === null && state.coordinates.workspace === "here"
-      ? await input.resolveHereWorkspace?.(state.id)
-      : undefined;
+    workspacePath =
+      state.terminal === null && state.coordinates.workspace === "here"
+        ? await input.resolveHereWorkspace?.(state.id)
+        : undefined;
     const prepared = await captureReviewableWorktree(input.scope, {
       contractId: state.id,
       coordinates: state.coordinates,
       ...(workspacePath === undefined ? {} : { workspacePath }),
     });
-    preparation = prepared.kind === "refused"
-      ? { kind: "refused", refusal: prepared.refusal }
-      : {
-        kind: "prepared",
-        data: {
-          gate: REVIEWED,
-          subject: dependencyKeySet([
-            { kind: "document", value: state.terms.document.key },
-            { kind: "change", value: prepared.data.changeId },
-          ]),
-          verdict: input.verdict,
-          ...(input.summary === undefined ? {} : { summary: input.summary }),
-        },
-      };
+    preparation =
+      prepared.kind === "refused"
+        ? { kind: "refused", refusal: prepared.refusal }
+        : {
+            kind: "prepared",
+            data: {
+              gate: REVIEWED,
+              subject: dependencyKeySet([
+                { kind: "document", value: state.terms.document.key },
+                { kind: "change", value: prepared.data.changeId },
+              ]),
+              verdict: input.verdict,
+              ...(input.summary === undefined ? {} : { summary: input.summary }),
+            },
+          };
     if (prepared.kind === "prepared") {
       workspace = prepared.data.workspace;
       tender = prepared.data.tender;
@@ -166,14 +183,15 @@ async function reviewAttempt(
     offer: decision.offer,
     primaryContract: input.contractId,
   });
-  if (admission.kind === "accepted") return {
-    ...admission,
-    value: {
-      ...(workspace === undefined ? {} : { workspace }),
-      ...(tender === undefined ? {} : { tender }),
-      ...(workspacePath === undefined ? {} : { workspacePath }),
-    },
-  };
+  if (admission.kind === "accepted")
+    return {
+      ...admission,
+      value: {
+        ...(workspace === undefined ? {} : { workspace }),
+        ...(tender === undefined ? {} : { tender }),
+        ...(workspacePath === undefined ? {} : { workspacePath }),
+      },
+    };
   return admission;
 }
 

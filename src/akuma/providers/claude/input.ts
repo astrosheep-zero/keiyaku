@@ -80,8 +80,12 @@ export function createClaudeInput(): ClaudeInput {
   };
 
   return {
-    get closed() { return closed; },
-    get pending() { return queue.length + (previous === undefined ? 0 : 1); },
+    get closed() {
+      return closed;
+    },
+    get pending() {
+      return queue.length + (previous === undefined ? 0 : 1);
+    },
     push(message, onPulled) {
       if (closed) return Promise.reject(failure ?? ended());
       const entry = { message, pulled: deferred(), ...(onPulled === undefined ? {} : { onPulled }) };

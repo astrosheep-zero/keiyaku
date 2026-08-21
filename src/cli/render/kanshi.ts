@@ -1,11 +1,5 @@
 import type { ContractGateReport } from "../../index.js";
-import type {
-  AkumaKanshiRow,
-  ContractKanshiRow,
-  KanshiReport,
-  Section,
-  TaskKanshiRow,
-} from "../../kanshi/index.js";
+import type { AkumaKanshiRow, ContractKanshiRow, KanshiReport, Section, TaskKanshiRow } from "../../kanshi/index.js";
 import { akumaHot, visibleFleetRows } from "../../kanshi/fleet.js";
 import {
   abbreviateGitIds,
@@ -27,7 +21,9 @@ function contractMark(row: ContractKanshiRow): string {
   if (row.phase === "claimed") return "✓";
   if (row.phase === "abandoned") return "×";
   if (row.title === null) return "?";
-  if (row.gates.reports.some((report) => report.current.kind === "attested" && report.current.verdict === "unsatisfied")) {
+  if (
+    row.gates.reports.some((report) => report.current.kind === "attested" && report.current.verdict === "unsatisfied")
+  ) {
     return "!";
   }
   if (row.targetLag.kind === "unknown") return "?";
@@ -113,7 +109,11 @@ function mergeFacts(
 ): readonly string[] {
   const observation = row.workspaceObservation;
   const summary = mergeSummary(observation);
-  if (summary === undefined || (observation.kind !== "clean" && observation.kind !== "dirty") || observation.merge === null) {
+  if (
+    summary === undefined ||
+    (observation.kind !== "clean" && observation.kind !== "dirty") ||
+    observation.merge === null
+  ) {
     return [];
   }
   if (!selected) return [summary];
@@ -135,7 +135,8 @@ function contractObservationFacts(
   abbreviations: ReadonlyMap<string, string>,
 ): readonly string[] {
   const facts = [...(selection === "contract" ? worldAfterFacts(row) : [])];
-  if (selection === "contract" && row.dependents.length > 0) facts.push(`dependents ${row.dependents.map(dependentWording).join(" · ")}`);
+  if (selection === "contract" && row.dependents.length > 0)
+    facts.push(`dependents ${row.dependents.map(dependentWording).join(" · ")}`);
   return [...facts, ...mergeFacts(row, selection === "contract", abbreviations)];
 }
 
@@ -156,10 +157,12 @@ function contractHot(row: ContractKanshiRow): boolean {
     return true;
   }
   if (row.after.some((edge) => edge.endpoint.kind !== "claimed")) return true;
-  return row.gates.reports.some((report) =>
-    report.current.kind === "stale"
-    || report.current.kind === "missing"
-    || (report.current.kind === "attested" && report.current.verdict === "unsatisfied"));
+  return row.gates.reports.some(
+    (report) =>
+      report.current.kind === "stale" ||
+      report.current.kind === "missing" ||
+      (report.current.kind === "attested" && report.current.verdict === "unsatisfied"),
+  );
 }
 
 function taskHot(row: TaskKanshiRow): boolean {
@@ -169,15 +172,23 @@ function taskHot(row: TaskKanshiRow): boolean {
 function activitySnapshotLine(row: AkumaKanshiRow): string | undefined {
   const snapshot = row.snapshot;
   if (snapshot === undefined) return undefined;
-  const entries = snapshot.entries.flatMap((entry) => entry.kind === "row" ? [entry.row] : []);
+  const entries = snapshot.entries.flatMap((entry) => (entry.kind === "row" ? [entry.row] : []));
   const latest = entries.at(-1);
   if (latest === undefined) {
     if (snapshot.kind === "idle" && snapshot.outcome !== undefined) {
-      return snapshot.outcome.outcome.kind === "answered" ? snapshot.outcome.outcome.answer : snapshot.outcome.outcome.diagnostic;
+      return snapshot.outcome.outcome.kind === "answered"
+        ? snapshot.outcome.outcome.answer
+        : snapshot.outcome.outcome.diagnostic;
     }
     return "empty";
   }
-  if (latest.kind === "said" || latest.kind === "thought" || latest.kind === "note" || latest.kind === "call" || latest.kind === "tell") {
+  if (
+    latest.kind === "said" ||
+    latest.kind === "thought" ||
+    latest.kind === "note" ||
+    latest.kind === "call" ||
+    latest.kind === "tell"
+  ) {
     return latest.text;
   }
   if (latest.kind === "tool") return latest.name;
@@ -219,9 +230,19 @@ function renderGates(
   includeSummaries: boolean,
 ): readonly string[] {
   if (reports.length === 0) return [];
-  const lines = [...plumbFacts([`gates: ${reports.map((report) =>
-    `${gateGlyph(report)} ${report.gate} ${formatAge(report.current.kind === "attested" ? report.current.at : null, observedAt)}`
-  ).join(" · ")}`], columns)];
+  const lines = [
+    ...plumbFacts(
+      [
+        `gates: ${reports
+          .map(
+            (report) =>
+              `${gateGlyph(report)} ${report.gate} ${formatAge(report.current.kind === "attested" ? report.current.at : null, observedAt)}`,
+          )
+          .join(" · ")}`,
+      ],
+      columns,
+    ),
+  ];
   if (!includeSummaries) return lines;
   for (const report of reports) {
     if (report.current.kind !== "attested" || report.current.summary === undefined) continue;
@@ -240,9 +261,9 @@ function fieldLine(label: string, value: string): string {
 
 function fieldBlock(label: string, value: string, columns: number): readonly string[] {
   const continuation = " ".repeat(fieldPrefix(label).length);
-  return renderTextBlock(value, continuation, columns).map((line, index) => index === 0
-    ? `${fieldPrefix(label)}${line.slice(continuation.length)}`
-    : line);
+  return renderTextBlock(value, continuation, columns).map((line, index) =>
+    index === 0 ? `${fieldPrefix(label)}${line.slice(continuation.length)}` : line,
+  );
 }
 
 function renderWorldGates(reports: readonly ContractGateReport[]): readonly string[] {
@@ -250,7 +271,11 @@ function renderWorldGates(reports: readonly ContractGateReport[]): readonly stri
   return [fieldLine("GATES", reports.map((report) => `${gateGlyph(report)} ${report.gate}`).join("   "))];
 }
 
-function failure(name: string, section: Extract<Section<unknown>, { kind: "failed" }>, context: TextRenderContext): readonly string[] {
+function failure(
+  name: string,
+  section: Extract<Section<unknown>, { kind: "failed" }>,
+  context: TextRenderContext,
+): readonly string[] {
   return [`[ ${name} ]`, "", `${tone(`! ${safeText(section.failure.message)}`, "alert", context.color)}`];
 }
 
@@ -299,21 +324,26 @@ function renderContractRow(
   const lines = [identityLine(contractMark(row), row.id)];
   if (selection === "contract") {
     const state = report.contracts.kind === "present" ? report.contracts.value.state : null;
-    lines.push(...plumbFacts([
-      state === null
-        ? `observedAt ${report.observedAt}`
-        : `contract state ${displayGitId(state, abbreviations)} · observedAt ${report.observedAt}`,
-    ], context.columns));
+    lines.push(
+      ...plumbFacts(
+        [
+          state === null
+            ? `observedAt ${report.observedAt}`
+            : `contract state ${displayGitId(state, abbreviations)} · observedAt ${report.observedAt}`,
+        ],
+        context.columns,
+      ),
+    );
   }
   lines.push(...plumbFacts(compact ? [title, phase, journal, ...targetFacts(row)] : [title], context.columns));
   if (!compact) lines.push(...plumbFacts([phase, journal, ...targetFacts(row)], context.columns));
   lines.push(...plumbFacts(contractObservationFacts(row, selection, abbreviations), context.columns));
   lines.push(...plumbFacts([workspaceState(row)], context.columns));
   if (
-    showWorkspacePath(row, hot || selection === "contract")
-    && row.workspaceObservation.kind !== "unappointed"
-    && row.workspaceObservation.kind !== "failed"
-    && row.workspaceObservation.location.kind === "worktree"
+    showWorkspacePath(row, hot || selection === "contract") &&
+    row.workspaceObservation.kind !== "unappointed" &&
+    row.workspaceObservation.kind !== "failed" &&
+    row.workspaceObservation.location.kind === "worktree"
   ) {
     lines.push(plumbPath(row.workspaceObservation.location.path));
   }
@@ -326,9 +356,8 @@ function renderContractRow(
   }
   if (selection === "contract") {
     if (row.issue !== undefined) {
-      const detail = row.issue.kind === "hook-failure"
-        ? row.issue.diagnostic
-        : `target-checkout-retained ${row.issue.target}`;
+      const detail =
+        row.issue.kind === "hook-failure" ? row.issue.diagnostic : `target-checkout-retained ${row.issue.target}`;
       lines.push(...plumbFacts([`lag (observed now): ${detail}`], context.columns));
     }
     lines.push(...renderNamespaceTasks(row, context));
@@ -344,24 +373,36 @@ function isTerminalTask(row: TaskKanshiRow): boolean {
   return row.disposition === "done" || row.disposition === "drop";
 }
 
-function renderWorldContractRow(row: ContractKanshiRow, report: KanshiReport, context: TextRenderContext): readonly string[] {
+function renderWorldContractRow(
+  row: ContractKanshiRow,
+  report: KanshiReport,
+  context: TextRenderContext,
+): readonly string[] {
   const hot = contractHot(row);
   const title = row.title ?? "title unavailable";
   const phase = `${row.phase} · ${formatAge(row.phaseAt, report.observedAt)}`;
   const after = worldAfterFacts(row);
   if (!hot) {
-    return [identityLine(contractMark(row), row.id, `· "${title}" · ${phase} · ${[...targetFacts(row), ...after].join(" · ")}`)];
+    return [
+      identityLine(
+        contractMark(row),
+        row.id,
+        `· "${title}" · ${phase} · ${[...targetFacts(row), ...after].join(" · ")}`,
+      ),
+    ];
   }
 
   const lines = [identityLine(contractMark(row), row.id)];
   lines.push(...fieldBlock("TITLE", title, context.columns));
   lines.push(fieldLine("STATE", phase));
-  lines.push(fieldLine("GIT", [...targetFacts(row), workspaceState(row), ...mergeFacts(row, false, new Map())].join(" · ")));
+  lines.push(
+    fieldLine("GIT", [...targetFacts(row), workspaceState(row), ...mergeFacts(row, false, new Map())].join(" · ")),
+  );
   if (
-    showWorkspacePath(row, hot)
-    && row.workspaceObservation.kind !== "unappointed"
-    && row.workspaceObservation.kind !== "failed"
-    && row.workspaceObservation.location.kind === "worktree"
+    showWorkspacePath(row, hot) &&
+    row.workspaceObservation.kind !== "unappointed" &&
+    row.workspaceObservation.kind !== "failed" &&
+    row.workspaceObservation.location.kind === "worktree"
   ) {
     lines.push(fieldLine("DIR", row.workspaceObservation.location.path));
   }
@@ -385,7 +426,13 @@ function selectRows<T>(rows: readonly T[], isHot: (row: T) => boolean): readonly
   return [...rows.filter(isHot), ...rows.filter((row) => !isHot(row))].slice(0, MAX_VISIBLE_ROWS);
 }
 
-function sectionFooter({ visible, total, unit, selector, neutral }: Readonly<{
+function sectionFooter({
+  visible,
+  total,
+  unit,
+  selector,
+  neutral,
+}: Readonly<{
   visible: number;
   total: number;
   unit: string;
@@ -396,7 +443,14 @@ function sectionFooter({ visible, total, unit, selector, neutral }: Readonly<{
   return [`  + ${total - visible} more${neutral ? "" : " live"} ${unit} not shown`, `    keiyaku ls ${selector}/`];
 }
 
-function sectionBlock({ name, unit, selector, rows, total, neutral = false }: Readonly<{
+function sectionBlock({
+  name,
+  unit,
+  selector,
+  rows,
+  total,
+  neutral = false,
+}: Readonly<{
   name: string;
   unit: string;
   selector: string;
@@ -415,7 +469,13 @@ function renderContracts(report: KanshiReport, context: TextRenderContext): read
   if (section.kind === "failed") return failure("KEIYAKU", section, context);
   const live = section.value.rows.filter((row) => !isTerminalContract(row));
   const rows = selectRows(live, contractHot);
-  return sectionBlock({ name: "KEIYAKU", unit: "keiyaku", selector: "kei", rows: rows.map((row) => renderWorldContractRow(row, report, context)), total: live.length });
+  return sectionBlock({
+    name: "KEIYAKU",
+    unit: "keiyaku",
+    selector: "kei",
+    rows: rows.map((row) => renderWorldContractRow(row, report, context)),
+    total: live.length,
+  });
 }
 
 function renderSelectedContract(report: KanshiReport, context: TextRenderContext): readonly string[] {
@@ -436,10 +496,15 @@ function renderTasks(report: KanshiReport, context: TextRenderContext): readonly
   const rows = selectRows(live, taskHot);
   const rowLines: readonly string[][] = rows.map((row) => {
     const compact = !taskHot(row);
-    const relation = row.contract === undefined
-      ? ["unbound"]
-      : [endpointFact(row.contract.id, row.contract.observed)];
-    if (compact) return [identityLine(taskMark(row), row.id, `· "${row.title}" · ${row.disposition} · P${row.priority} · ${relation.join(" · ")}`)];
+    const relation = row.contract === undefined ? ["unbound"] : [endpointFact(row.contract.id, row.contract.observed)];
+    if (compact)
+      return [
+        identityLine(
+          taskMark(row),
+          row.id,
+          `· "${row.title}" · ${row.disposition} · P${row.priority} · ${relation.join(" · ")}`,
+        ),
+      ];
     const lines = [identityLine(taskMark(row), row.id)];
     lines.push(...fieldBlock("TITLE", row.title, context.columns));
     lines.push(fieldLine("STATE", `${row.disposition} · P${row.priority}`));
@@ -463,24 +528,38 @@ function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly
   const rowLines: readonly string[][] = rows.map((row) => {
     const lifeAt = "lifeAt" in row ? row.lifeAt : null;
     const life = `${row.life} · ${formatAge(lifeAt, report.observedAt)}`;
-    const activity = "lastActivityAt" in row && row.lastActivityAt !== null
-      ? [`activity ${formatAge(row.lastActivityAt, report.observedAt)}`]
-      : [];
-    const key = row.life === "stranded" && "strandedReason" in row && row.strandedReason === "resume-unsupported"
-      ? [life, ...activity, "resume unsupported"]
-      : [life, ...activity];
-    const relation = row.contract === undefined
-      ? ["unbound"]
-      : [endpointFact(row.contract.id, row.contract.observed)];
+    const activity =
+      "lastActivityAt" in row && row.lastActivityAt !== null
+        ? [`activity ${formatAge(row.lastActivityAt, report.observedAt)}`]
+        : [];
+    const key =
+      row.life === "stranded" && "strandedReason" in row && row.strandedReason === "resume-unsupported"
+        ? [life, ...activity, "resume unsupported"]
+        : [life, ...activity];
+    const relation = row.contract === undefined ? ["unbound"] : [endpointFact(row.contract.id, row.contract.observed)];
     const snapshot = activitySnapshotLine(row);
-    if (!akumaHot(row)) return [identityLine(akumaMark(row.life), row.id, `${akumaLabel(row)} · ${[...key, ...relation, ...(snapshot === undefined ? [] : [snapshot])].join(" · ")}`.trim())];
+    if (!akumaHot(row))
+      return [
+        identityLine(
+          akumaMark(row.life),
+          row.id,
+          `${akumaLabel(row)} · ${[...key, ...relation, ...(snapshot === undefined ? [] : [snapshot])].join(" · ")}`.trim(),
+        ),
+      ];
     const lines = [identityLine(akumaMark(row.life), row.id, akumaLabel(row))];
     lines.push(fieldLine("LIFE", key.join(" · ")));
     if (snapshot !== undefined) lines.push(fieldLine("SNAPSHOT", snapshot));
     lines.push(fieldLine("LINKED", relation.join(" · ")));
     return lines;
   });
-  return sectionBlock({ name: "FLEET", unit: "akuma", selector: "aku", rows: rowLines, total: section.value.rows.length, neutral: true });
+  return sectionBlock({
+    name: "FLEET",
+    unit: "akuma",
+    selector: "aku",
+    rows: rowLines,
+    total: section.value.rows.length,
+    neutral: true,
+  });
 }
 
 export function renderKanshiText(
@@ -491,9 +570,11 @@ export function renderKanshiText(
   if (selection === "contract") return renderSelectedContract(report, context).join("\n");
   return [
     ...renderContracts(report, context),
-    "", "",
+    "",
+    "",
     ...renderAkuma(report, context),
-    "", "",
+    "",
+    "",
     ...renderTasks(report, context),
   ].join("\n");
 }

@@ -11,22 +11,31 @@ export type RegionOverlap = Readonly<{
 }>;
 
 export type RegionObservation = Readonly<
-  | { overlaps: readonly RegionOverlap[]; overlapFailure?: never }
-  | { overlapFailure: string; overlaps?: never }
+  { overlaps: readonly RegionOverlap[]; overlapFailure?: never } | { overlapFailure: string; overlaps?: never }
 >;
 
-export type AmendRegionObservation = RegionObservation | Readonly<{
-  overlaps?: never;
-  overlapFailure?: never;
-}>;
+export type AmendRegionObservation =
+  | RegionObservation
+  | Readonly<{
+      overlaps?: never;
+      overlapFailure?: never;
+    }>;
 
 export type RegionDeclarationRead = Readonly<{ contract: ContractId; patterns: readonly string[] }>;
 
-export function readRegionDeclarations(documents: readonly ContractDocumentProjection[]): readonly RegionDeclarationRead[] {
-  return documents.map((document) => ({ contract: document.contract, patterns: decodeContractDocument(document.documentBytes).region }));
+export function readRegionDeclarations(
+  documents: readonly ContractDocumentProjection[],
+): readonly RegionDeclarationRead[] {
+  return documents.map((document) => ({
+    contract: document.contract,
+    patterns: decodeContractDocument(document.documentBytes).region,
+  }));
 }
 
-export function regionIntersections(left: readonly string[], right: readonly string[]): readonly Readonly<{ left: string; right: string }>[] {
+export function regionIntersections(
+  left: readonly string[],
+  right: readonly string[],
+): readonly Readonly<{ left: string; right: string }>[] {
   return regionsOverlap(left, right).map(([leftPattern, rightPattern]) => ({ left: leftPattern, right: rightPattern }));
 }
 
@@ -55,10 +64,11 @@ export async function observeRegion(
       if (peer.contract === self) continue;
       try {
         const pairs = regionsOverlap(mine, decodeContractDocument(peer.documentBytes).region);
-        if (pairs.length > 0) overlaps.push({
-          contract: peer.contract,
-          patterns: pairs.map(([minePattern, theirsPattern]) => ({ mine: minePattern, theirs: theirsPattern })),
-        });
+        if (pairs.length > 0)
+          overlaps.push({
+            contract: peer.contract,
+            patterns: pairs.map(([minePattern, theirsPattern]) => ({ mine: minePattern, theirs: theirsPattern })),
+          });
       } catch (error) {
         return { overlapFailure: `${peer.contract}: ${diagnostic(error)}` };
       }

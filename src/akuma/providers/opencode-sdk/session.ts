@@ -5,13 +5,20 @@ import type { OpencodeClient } from "@opencode-ai/sdk";
 import type { ResumeCoordinate } from "../../heart/index.js";
 import type { ProviderExecution } from "../../provider-recipe.js";
 
-export type OpencodeSdkSession = Pick<OpencodeClient["session"],
-  "create" | "get" | "fork" | "abort" | "promptAsync" | "messages">;
+export type OpencodeSdkSession = Pick<
+  OpencodeClient["session"],
+  "create" | "get" | "fork" | "abort" | "promptAsync" | "messages"
+>;
 export type OpencodeSdkEvent = Pick<OpencodeClient["event"], "subscribe">;
-export type OpencodeSdkLoader = (cwd: string, execution: ProviderExecution) => Promise<Readonly<{
-  client: { session: OpencodeSdkSession; event: OpencodeSdkEvent };
-  close?: () => Promise<void> | void;
-}>>;
+export type OpencodeSdkLoader = (
+  cwd: string,
+  execution: ProviderExecution,
+) => Promise<
+  Readonly<{
+    client: { session: OpencodeSdkSession; event: OpencodeSdkEvent };
+    close?: () => Promise<void> | void;
+  }>
+>;
 
 export const OPENCODE_SDK_PROVIDER = "opencode-sdk" as const;
 
@@ -50,7 +57,7 @@ async function availablePort(): Promise<number> {
         reject(new Error("OpenCode port unavailable"));
         return;
       }
-      server.close((error) => error === undefined ? resolve(address.port) : reject(error));
+      server.close((error) => (error === undefined ? resolve(address.port) : reject(error)));
     });
   });
 }
@@ -63,7 +70,12 @@ export async function loadOpencode(
 ): Promise<OpencodeRuntime> {
   if (loader) {
     const loaded = await loader(cwd, execution);
-    return { client: loaded.client, close: async () => { await loaded.close?.(); } };
+    return {
+      client: loaded.client,
+      close: async () => {
+        await loaded.close?.();
+      },
+    };
   }
   const port = await availablePort();
   const owned = await spawnDetachedProcess({
@@ -80,7 +92,14 @@ export async function loadOpencode(
     await owned.terminate();
     throw error;
   }
-  return { client, close: async () => { await owned.terminate(); } };
+  return {
+    client,
+    close: async () => {
+      await owned.terminate();
+    },
+  };
 }
 
-export function coordinate(sessionId: string): ResumeCoordinate { return { sessionId }; }
+export function coordinate(sessionId: string): ResumeCoordinate {
+  return { sessionId };
+}

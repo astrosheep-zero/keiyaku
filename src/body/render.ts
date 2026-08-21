@@ -19,10 +19,13 @@ function fenced(value: string, info = ""): string {
   const marker = (["`", "~"] as const)
     .map((delimiter) => ({
       delimiter,
-      length: Math.max(3, ...value.split("\n").map((line) => {
-        const match = new RegExp(`^ {0,3}\\${delimiter}+`).exec(line);
-        return (match?.[0].trim().length ?? 0) + 1;
-      })),
+      length: Math.max(
+        3,
+        ...value.split("\n").map((line) => {
+          const match = new RegExp(`^ {0,3}\\${delimiter}+`).exec(line);
+          return (match?.[0].trim().length ?? 0) + 1;
+        }),
+      ),
     }))
     .sort((left, right) => left.length - right.length)[0]!;
   const boundary = marker.delimiter.repeat(marker.length);
@@ -30,7 +33,10 @@ function fenced(value: string, info = ""): string {
 }
 
 function verificationFence(declaration: VerificationDeclaration): string {
-  return fenced(declaration.script, `${declaration.executor}${declaration.timeoutMs === undefined ? "" : ` timeout=${formatDuration(declaration.timeoutMs)}`}`);
+  return fenced(
+    declaration.script,
+    `${declaration.executor}${declaration.timeoutMs === undefined ? "" : ` timeout=${formatDuration(declaration.timeoutMs)}`}`,
+  );
 }
 
 function arcSection(arc: ArcData): string {
@@ -48,7 +54,9 @@ function arcSection(arc: ArcData): string {
 }
 
 export function renderContractBody(body: ContractBody, currentArc?: ArcData): string {
-  const criteria = body.criteria.map((criterion) => `### ${criterion.title}\n\n${content(criterion.body)}`).join("\n\n");
+  const criteria = body.criteria
+    .map((criterion) => `### ${criterion.title}\n\n${content(criterion.body)}`)
+    .join("\n\n");
   const verification = body.verification.map(verificationFence).join("\n\n");
   return [
     `# ${body.title}`,
@@ -60,12 +68,15 @@ export function renderContractBody(body: ContractBody, currentArc?: ArcData): st
     ...(verification.length === 0 ? [] : [section(CONTRACT_SECTIONS.verification.title, verification)]),
     ...body.extensions.map((extension) => section(extension.title, extension.content)),
     ...(currentArc === undefined ? [] : [arcSection(currentArc)]),
-  ].join("\n\n").concat("\n");
+  ]
+    .join("\n\n")
+    .concat("\n");
 }
 
 function sections(document: DocumentNode): readonly SectionNode[] {
-  return indexedHeadings(indexDocument(document), { level: 2 })
-    .filter((node): node is SectionNode => node.type === "section");
+  return indexedHeadings(indexDocument(document), { level: 2 }).filter(
+    (node): node is SectionNode => node.type === "section",
+  );
 }
 
 export function renderAmendedContractBody(
@@ -77,14 +88,18 @@ export function renderAmendedContractBody(
   const renderedSource = renderContractBody(body);
   const rendered = parseToAST(renderedSource);
   const currentSections = sections(current);
-  const preserved = new Map(currentSections.map((node) => [
-    normalizeTitle(node.title),
-    rawSlice(current, node.span),
-  ]));
+  const preserved = new Map(currentSections.map((node) => [normalizeTitle(node.title), rawSlice(current, node.span)]));
   const first = currentSections[0];
   const prefix = first === undefined ? currentSource : currentSource.slice(0, first.span.start);
-  return prefix + sections(rendered).map((node) => {
-    const name = normalizeTitle(node.title);
-    return changedSections.has(name) ? rawSlice(rendered, node.span) : preserved.get(name) ?? rawSlice(rendered, node.span);
-  }).join("");
+  return (
+    prefix +
+    sections(rendered)
+      .map((node) => {
+        const name = normalizeTitle(node.title);
+        return changedSections.has(name)
+          ? rawSlice(rendered, node.span)
+          : (preserved.get(name) ?? rawSlice(rendered, node.span));
+      })
+      .join("")
+  );
 }

@@ -18,23 +18,29 @@ export type VerificationTerminalOutcome = Readonly<{
   summary?: string;
 }>;
 
-export type VerificationNonterminalOutcome = Readonly<{
-  kind: "unknown-exit";
-}> | Readonly<{
-  kind: "cancelled";
-}> | Readonly<{
-  kind: "spawn-error";
-  diagnostic: string;
-}>;
+export type VerificationNonterminalOutcome =
+  | Readonly<{
+      kind: "unknown-exit";
+    }>
+  | Readonly<{
+      kind: "cancelled";
+    }>
+  | Readonly<{
+      kind: "spawn-error";
+      diagnostic: string;
+    }>;
 
-export type VerificationExecutionStop = VerificationNonterminalOutcome | Readonly<{
-  kind: "candidate-unavailable" | "environment-failure";
-  diagnostic: string;
-}> | Readonly<{
-  kind: "environment-failure";
-  command: number;
-  detail: HookFailure;
-}>;
+export type VerificationExecutionStop =
+  | VerificationNonterminalOutcome
+  | Readonly<{
+      kind: "candidate-unavailable" | "environment-failure";
+      diagnostic: string;
+    }>
+  | Readonly<{
+      kind: "environment-failure";
+      command: number;
+      detail: HookFailure;
+    }>;
 
 export type VerificationExecution = Readonly<{
   outcome: VerificationTerminalOutcome | VerificationExecutionStop;
@@ -85,12 +91,14 @@ function appendSummary(current: string | undefined, diagnostic: string | null): 
   return Buffer.concat([marker, combined.subarray(start)]).toString("utf8");
 }
 
-async function executeDeclarations(input: Readonly<{
-  declarations: readonly VerificationDeclaration[];
-  cwd: string;
-  environment: NodeJS.ProcessEnv;
-  signal?: AbortSignal;
-}>): Promise<VerificationTerminalOutcome | VerificationNonterminalOutcome> {
+async function executeDeclarations(
+  input: Readonly<{
+    declarations: readonly VerificationDeclaration[];
+    cwd: string;
+    environment: NodeJS.ProcessEnv;
+    signal?: AbortSignal;
+  }>,
+): Promise<VerificationTerminalOutcome | VerificationNonterminalOutcome> {
   let verdict: VerificationVerdict = "satisfied";
   let passed = 0;
   const total = input.declarations.length;
@@ -105,10 +113,14 @@ async function executeDeclarations(input: Readonly<{
     });
     if (outcome.kind === "timeout") {
       verdict = "unsatisfied";
-      summary = appendSummary(summary, `[${index + 1} ${declaration.executor} timeout after ${declaration.timeoutMs}ms]`);
+      summary = appendSummary(
+        summary,
+        `[${index + 1} ${declaration.executor} timeout after ${declaration.timeoutMs}ms]`,
+      );
       continue;
     }
-    if (outcome.kind === "spawn-error" || outcome.kind === "unknown-exit" || outcome.kind === "cancelled") return outcome;
+    if (outcome.kind === "spawn-error" || outcome.kind === "unknown-exit" || outcome.kind === "cancelled")
+      return outcome;
     if (outcome.code === 0) passed += 1;
     else verdict = "unsatisfied";
     summary = appendSummary(summary, processDiagnostic(declaration, index, outcome));
@@ -122,7 +134,9 @@ export async function executeVerification(input: ExecuteVerificationInput): Prom
   try {
     scratch = await input.materializeScratchCandidate(input.repository, input.candidate);
   } catch (error) {
-    return { outcome: { kind: "candidate-unavailable", diagnostic: error instanceof Error ? error.message : String(error) } };
+    return {
+      outcome: { kind: "candidate-unavailable", diagnostic: error instanceof Error ? error.message : String(error) },
+    };
   }
   let outcome: VerificationTerminalOutcome | VerificationExecutionStop | undefined;
   let cleanup: VerificationExecution["cleanup"];
@@ -133,16 +147,17 @@ export async function executeVerification(input: ExecuteVerificationInput): Prom
       const hooks = worktreeHooksFrom({ settings: await input.projectSettings(scratch.cwd) });
       destroy = hooks.destroy;
       const readiness = await runHookCommands(scratch.cwd, hooks.create, input.signal);
-      outcome = readiness.kind === "cancelled"
-        ? { kind: "cancelled" }
-        : readiness.kind === "failed"
-          ? { kind: "environment-failure", command: readiness.command, detail: readiness.failure }
-          : await executeDeclarations({
-            declarations: input.declarations,
-            cwd: scratch.cwd,
-            environment: input.environment,
-            ...(input.signal === undefined ? {} : { signal: input.signal }),
-          });
+      outcome =
+        readiness.kind === "cancelled"
+          ? { kind: "cancelled" }
+          : readiness.kind === "failed"
+            ? { kind: "environment-failure", command: readiness.command, detail: readiness.failure }
+            : await executeDeclarations({
+                declarations: input.declarations,
+                cwd: scratch.cwd,
+                environment: input.environment,
+                ...(input.signal === undefined ? {} : { signal: input.signal }),
+              });
     } catch (error) {
       outcome = { kind: "environment-failure", diagnostic: error instanceof Error ? error.message : String(error) };
     }

@@ -26,30 +26,29 @@ export type AuditReport = Readonly<{
   candidate:
     | Readonly<{ kind: "blocked"; refusal: DeliveryPreparationRefusal }>
     | Readonly<{
-      kind: "ready";
-      workspace: AuditWorkspace;
-      identity: DeliverData;
-      scope: DiffScope;
-      diff?: string;
-    }>;
+        kind: "ready";
+        workspace: AuditWorkspace;
+        identity: DeliverData;
+        scope: DiffScope;
+        diff?: string;
+      }>;
   verification:
     | Readonly<{ kind: "not-run" }>
     | Readonly<{ kind: "satisfied"; passed: number; total: number; summary?: string }>
     | Readonly<{ kind: "unsatisfied"; passed: number; total: number; summary?: string }>
     | Readonly<{ kind: "stopped"; stop: VerificationStop }>;
-  target:
-    | Readonly<{ kind: "not-observed" }>
-    | AuditTargetAnswer;
+  target: Readonly<{ kind: "not-observed" }> | AuditTargetAnswer;
   delivery?: Readonly<{ changeId: ChangeId; relation: "identical" | "differs" }>;
 }>;
 
-type AuditOperationInput = MutationOperationInput & Readonly<{
-  deriveDocument?: (state: ContractState) => DocumentDerivation;
-  requireBranchesToBeUpToDate?: boolean;
-  includeDirty?: boolean;
-  showDiff?: boolean;
-  signal?: AbortSignal;
-}>;
+type AuditOperationInput = MutationOperationInput &
+  Readonly<{
+    deriveDocument?: (state: ContractState) => DocumentDerivation;
+    requireBranchesToBeUpToDate?: boolean;
+    includeDirty?: boolean;
+    showDiff?: boolean;
+    signal?: AbortSignal;
+  }>;
 
 async function auditWorkspace(
   repository: RepositoryScope,
@@ -57,19 +56,15 @@ async function auditWorkspace(
   resolveHereWorkspace?: import("./operations.js").HereWorkspaceResolver,
 ): Promise<
   | Readonly<{
-    kind: "ready";
-    answer: AuditWorkspace;
-    appointment?: Extract<ManagedWorktreeAppointment, { kind: "appointed" }>;
-  }>
+      kind: "ready";
+      answer: AuditWorkspace;
+      appointment?: Extract<ManagedWorktreeAppointment, { kind: "appointed" }>;
+    }>
   | Readonly<{ kind: "unappointed" }>
 > {
   if (state.coordinates.workspace === "here") {
-    const path = resolveHereWorkspace === undefined
-      ? repository.effectiveCwd
-      : await resolveHereWorkspace(state.id);
-    return path === undefined
-      ? { kind: "unappointed" }
-      : { kind: "ready", answer: { kind: "here", path } };
+    const path = resolveHereWorkspace === undefined ? repository.effectiveCwd : await resolveHereWorkspace(state.id);
+    return path === undefined ? { kind: "unappointed" } : { kind: "ready", answer: { kind: "here", path } };
   }
   const appointed = await readManagedWorktreeAppointment(repository, state.id);
   if (appointed.kind === "failed") throw new Error(appointed.diagnostic);
@@ -190,35 +185,46 @@ export async function auditOperation(input: AuditOperationInput): Promise<Intent
   if (workspace.kind === "unappointed") {
     return accepted(state, [], blockedAudit({ kind: "worktree-missing", contractId: state.id }));
   }
-  const prepared = await prepareDelivery(input.scope, {
-    contractId: state.id,
-    coordinates: state.coordinates,
-    ...(workspace.appointment === undefined ? {} : { appointment: workspace.appointment }),
-    ...(workspace.answer.kind === "here" ? { workspacePath: workspace.answer.path } : {}),
-  }, {
-    title: derivation.title,
-    document: derivation.bytes,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
-    requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate ?? false,
-    includeDirty: input.includeDirty ?? false,
-  });
+  const prepared = await prepareDelivery(
+    input.scope,
+    {
+      contractId: state.id,
+      coordinates: state.coordinates,
+      ...(workspace.appointment === undefined ? {} : { appointment: workspace.appointment }),
+      ...(workspace.answer.kind === "here" ? { workspacePath: workspace.answer.path } : {}),
+    },
+    {
+      title: derivation.title,
+      document: derivation.bytes,
+      ...(input.actor === undefined ? {} : { actor: input.actor }),
+      requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate ?? false,
+      includeDirty: input.includeDirty ?? false,
+    },
+  );
   if (prepared.kind === "refused") return accepted(state, [], blockedAudit(prepared.refusal));
-  const verified = derivation.verification.data === null
-    ? undefined
-    : await auditCandidateVerification(input, state, prepared.data.integration.snapshot, derivation.verification.data);
+  const verified =
+    derivation.verification.data === null
+      ? undefined
+      : await auditCandidateVerification(
+          input,
+          state,
+          prepared.data.integration.snapshot,
+          derivation.verification.data,
+        );
   const verification = auditVerificationAnswer(verified);
   const delivery = auditDeliveryRelation(state, prepared.data);
   const value: AuditReport = {
     candidate: await readyAuditCandidate(input.scope, prepared.data, workspace.answer, input.showDiff === true),
     verification,
-    target: verification.kind === "stopped"
-      ? { kind: "not-observed" }
-      : await auditTargetAnswer(
-        input.scope,
-        state,
-        prepared.data,
-        workspace.answer.kind === "here" ? workspace.answer.path : undefined,
-      ),
+    target:
+      verification.kind === "stopped"
+        ? { kind: "not-observed" }
+        : await auditTargetAnswer(
+            input.scope,
+            state,
+            prepared.data,
+            workspace.answer.kind === "here" ? workspace.answer.path : undefined,
+          ),
     ...(delivery === undefined ? {} : { delivery }),
   };
   return completedAudit(state, verified, value);

@@ -44,10 +44,7 @@ export function contractJournalPath(contract: ContractId, journalClass: Contract
 }
 
 export function contractJournalPaths(contract: ContractId): readonly string[] {
-  return [
-    contractJournalPath(contract, "active"),
-    contractJournalPath(contract, "terminal"),
-  ];
+  return [contractJournalPath(contract, "active"), contractJournalPath(contract, "terminal")];
 }
 
 export function gitObjectId(value: string, label = "Git object ID"): GitObjectId {

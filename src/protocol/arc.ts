@@ -9,12 +9,17 @@ export async function arcOperation(
   input: MutationOperationInput & Readonly<{ chapter: Omit<ArcData, "seq"> }>,
 ): Promise<IntentOutcome<void, ArcRefusal>> {
   return complete(
-    await admitIntent(input.channel, input.scope, {
-      contractId: input.contractId,
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
-      at: timestamp(),
-      data: input.chapter,
-    }, decideArc),
+    await admitIntent(
+      input.channel,
+      input.scope,
+      {
+        contractId: input.contractId,
+        ...(input.actor === undefined ? {} : { actor: input.actor }),
+        at: timestamp(),
+        data: input.chapter,
+      },
+      decideArc,
+    ),
     undefined,
   );
 }

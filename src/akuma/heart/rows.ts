@@ -86,8 +86,16 @@ function resumeCoordinate(value: unknown): ResumeCoordinate {
   return coordinate;
 }
 
-export function encodeSessionRow(session: Omit<SessionFact, "sequence">): readonly [string, string, string, string, string] {
-  return [session.provider, encodeResumeCoordinate(session.coordinate), session.cwd, json(session.options), session.admittedAt];
+export function encodeSessionRow(
+  session: Omit<SessionFact, "sequence">,
+): readonly [string, string, string, string, string] {
+  return [
+    session.provider,
+    encodeResumeCoordinate(session.coordinate),
+    session.cwd,
+    json(session.options),
+    session.admittedAt,
+  ];
 }
 
 export function encodeResumeCoordinate(coordinate: ResumeCoordinate): string {
@@ -127,14 +135,15 @@ export function decodeTurnRow(row: TurnRow): TurnFact {
     kind: "turn-end",
     sequence: row.end_sequence!,
     turnSequence: row.sequence,
-    outcome: row.outcome === "answered"
-      ? {
-          kind: "answered",
-          ...(row.history_id === null ? {} : { historyId: row.history_id }),
-          session: resumeCoordinate(parsed<unknown>(row.session_json)),
-          answer: row.answer!,
-        }
-      : { kind: "failed", diagnostic: row.diagnostic! },
+    outcome:
+      row.outcome === "answered"
+        ? {
+            kind: "answered",
+            ...(row.history_id === null ? {} : { historyId: row.history_id }),
+            session: resumeCoordinate(parsed<unknown>(row.session_json)),
+            answer: row.answer!,
+          }
+        : { kind: "failed", diagnostic: row.diagnostic! },
     completedAt: row.completed_at!,
   };
   return { ...start, end };
@@ -163,7 +172,8 @@ export function sealExists(database: DatabaseSync): boolean {
 }
 
 export function insertSealFact(database: DatabaseSync, input: Readonly<{ evidence: string; at: string }>): void {
-  database.prepare("INSERT OR IGNORE INTO seal(singleton, evidence, at) VALUES (1, ?, ?)")
+  database
+    .prepare("INSERT OR IGNORE INTO seal(singleton, evidence, at) VALUES (1, ?, ?)")
     .run(input.evidence, input.at);
 }
 
@@ -180,10 +190,7 @@ export function sealFact(database: DatabaseSync): Readonly<{ evidence: string; a
   return row === undefined ? null : { evidence: row.evidence, at: row.at };
 }
 
-export function insertBodyFact(
-  database: DatabaseSync,
-  input: Readonly<{ leashTakenAt: string }>,
-): number {
+export function insertBodyFact(database: DatabaseSync, input: Readonly<{ leashTakenAt: string }>): number {
   if (latestBodyFact(database)?.hung !== undefined) {
     throw new Error("Akuma successor is permanently gated by hung custody");
   }
@@ -192,8 +199,12 @@ export function insertBodyFact(
 }
 
 export function insertSessionFact(database: DatabaseSync, input: Omit<SessionFact, "sequence">): number {
-  const result = database.prepare(`INSERT INTO sessions(provider, coordinate_json, cwd, options_json, admitted_at)
-    VALUES (?, ?, ?, ?, ?)`).run(...encodeSessionRow(input));
+  const result = database
+    .prepare(
+      `INSERT INTO sessions(provider, coordinate_json, cwd, options_json, admitted_at)
+    VALUES (?, ?, ?, ?, ?)`,
+    )
+    .run(...encodeSessionRow(input));
   return Number(result.lastInsertRowid);
 }
 
@@ -202,25 +213,30 @@ export function insertActivityFact(
   input: Readonly<{ turnSequence: number; event: unknown; at: string }>,
 ): number {
   const sequence = Number(database.prepare("INSERT INTO timeline(kind) VALUES ('activity')").run().lastInsertRowid);
-  database.prepare("INSERT INTO activity(sequence, turn_sequence, event_json, at) VALUES (?, ?, ?, ?)")
+  database
+    .prepare("INSERT INTO activity(sequence, turn_sequence, event_json, at) VALUES (?, ?, ?, ?)")
     .run(sequence, input.turnSequence, encodeActivityEvent(input.event), input.at);
   return sequence;
 }
 
 export function insertStopControl(database: DatabaseSync, bodySequence: number, at: string): void {
-  database.prepare("INSERT OR IGNORE INTO control(kind, value_json, at) VALUES ('stop', ?, ?)")
+  database
+    .prepare("INSERT OR IGNORE INTO control(kind, value_json, at) VALUES ('stop', ?, ?)")
     .run(json({ bodySequence }), at);
 }
 
 export function insertPauseControl(database: DatabaseSync, at: string): void {
   const body = latestBodyFact(database);
   if (body === null) throw new Error("Akuma has no Body to interrupt");
-  database.prepare("INSERT OR IGNORE INTO control(kind, value_json, at) VALUES ('pause', ?, ?)")
+  database
+    .prepare("INSERT OR IGNORE INTO control(kind, value_json, at) VALUES ('pause', ?, ?)")
     .run(json({ bodySequence: body.sequence }), at);
 }
 
 export function stopFact(database: DatabaseSync): StopFact | null {
-  const row = database.prepare("SELECT value_json, at FROM control WHERE kind = 'stop'").get() as ControlRow | undefined;
+  const row = database.prepare("SELECT value_json, at FROM control WHERE kind = 'stop'").get() as
+    | ControlRow
+    | undefined;
   if (row === undefined) return null;
   const value = parsed<{ bodySequence: unknown }>(row.value_json);
   if (!Number.isSafeInteger(value.bodySequence) || (value.bodySequence as number) <= 0) {
@@ -230,7 +246,9 @@ export function stopFact(database: DatabaseSync): StopFact | null {
 }
 
 export function pauseFact(database: DatabaseSync): PauseFact | null {
-  const row = database.prepare("SELECT value_json, at FROM control WHERE kind = 'pause'").get() as ControlRow | undefined;
+  const row = database.prepare("SELECT value_json, at FROM control WHERE kind = 'pause'").get() as
+    | ControlRow
+    | undefined;
   if (row === undefined) return null;
   const value = parsed<{ bodySequence: unknown }>(row.value_json);
   if (!Number.isSafeInteger(value.bodySequence) || (value.bodySequence as number) <= 0) {
@@ -240,7 +258,8 @@ export function pauseFact(database: DatabaseSync): PauseFact | null {
 }
 
 export function insertKillFact(database: DatabaseSync, bodySequence: number, at: string): void {
-  database.prepare("INSERT OR IGNORE INTO kills(body_sequence, evidence, at) VALUES (?, 'killed', ?)")
+  database
+    .prepare("INSERT OR IGNORE INTO kills(body_sequence, evidence, at) VALUES (?, 'killed', ?)")
     .run(bodySequence, at);
 }
 
@@ -248,7 +267,8 @@ export function endBodyFact(
   database: DatabaseSync,
   input: Readonly<{ sequence: number; end: BodyEnd; at: string }>,
 ): void {
-  database.prepare("UPDATE bodies SET end = ?, ended_at = ? WHERE sequence = ? AND end IS NULL")
+  database
+    .prepare("UPDATE bodies SET end = ?, ended_at = ? WHERE sequence = ? AND end IS NULL")
     .run(input.end, input.at, input.sequence);
 }
 
@@ -256,8 +276,11 @@ export function markBodyHung(
   database: DatabaseSync,
   input: Readonly<{ sequence: number; diagnostic: string; at: string }>,
 ): void {
-  const result = database.prepare(`UPDATE bodies SET hung_diagnostic = ?, hung_at = ?
-    WHERE sequence = ? AND hung_diagnostic IS NULL`)
+  const result = database
+    .prepare(
+      `UPDATE bodies SET hung_diagnostic = ?, hung_at = ?
+    WHERE sequence = ? AND hung_diagnostic IS NULL`,
+    )
     .run(input.diagnostic, input.at, input.sequence);
   if (result.changes !== 1) throw new Error(`Akuma Body ${input.sequence} cannot record hung custody`);
 }
@@ -267,11 +290,13 @@ export function insertTurnStartFact(
   input: Readonly<{ bodySequence: number; startedAt: string; call?: string }>,
 ): TurnStartFact {
   const sequence = Number(database.prepare("INSERT INTO timeline(kind) VALUES ('turn-start')").run().lastInsertRowid);
-  database.prepare("INSERT INTO turns(sequence, body_sequence, started_at) VALUES (?, ?, ?)")
+  database
+    .prepare("INSERT INTO turns(sequence, body_sequence, started_at) VALUES (?, ?, ?)")
     .run(sequence, input.bodySequence, input.startedAt);
   if (input.call !== undefined) {
     const callSequence = Number(database.prepare("INSERT INTO timeline(kind) VALUES ('call')").run().lastInsertRowid);
-    database.prepare("INSERT INTO calls(sequence, turn_sequence, body, at) VALUES (?, ?, ?, ?)")
+    database
+      .prepare("INSERT INTO calls(sequence, turn_sequence, body, at) VALUES (?, ?, ?, ?)")
       .run(callSequence, sequence, input.call, input.startedAt);
   }
   return { kind: "turn-start", sequence, bodySequence: input.bodySequence, startedAt: input.startedAt };
@@ -279,75 +304,117 @@ export function insertTurnStartFact(
 
 export function insertTurnEndFact(database: DatabaseSync, input: Omit<TurnEndFact, "sequence">): TurnEndFact {
   const sequence = Number(database.prepare("INSERT INTO timeline(kind) VALUES ('turn-end')").run().lastInsertRowid);
-  const result = input.outcome.kind === "answered"
-    ? database.prepare(`UPDATE turns SET end_sequence = ?, outcome = 'answered', history_id = ?,
-        session_json = ?, answer = ?, completed_at = ? WHERE sequence = ? AND end_sequence IS NULL`).run(
-        sequence, input.outcome.historyId ?? null, encodeResumeCoordinate(input.outcome.session), input.outcome.answer,
-        input.completedAt, input.turnSequence,
-      )
-    : database.prepare(`UPDATE turns SET end_sequence = ?, outcome = 'failed', diagnostic = ?, completed_at = ?
-        WHERE sequence = ? AND end_sequence IS NULL`).run(
-        sequence, input.outcome.diagnostic, input.completedAt, input.turnSequence,
-      );
+  const result =
+    input.outcome.kind === "answered"
+      ? database
+          .prepare(
+            `UPDATE turns SET end_sequence = ?, outcome = 'answered', history_id = ?,
+        session_json = ?, answer = ?, completed_at = ? WHERE sequence = ? AND end_sequence IS NULL`,
+          )
+          .run(
+            sequence,
+            input.outcome.historyId ?? null,
+            encodeResumeCoordinate(input.outcome.session),
+            input.outcome.answer,
+            input.completedAt,
+            input.turnSequence,
+          )
+      : database
+          .prepare(
+            `UPDATE turns SET end_sequence = ?, outcome = 'failed', diagnostic = ?, completed_at = ?
+        WHERE sequence = ? AND end_sequence IS NULL`,
+          )
+          .run(sequence, input.outcome.diagnostic, input.completedAt, input.turnSequence);
   if (result.changes !== 1) throw new Error(`Akuma Turn ${input.turnSequence} is not open`);
   return { ...input, kind: "turn-end", sequence };
 }
 
 export function finishBodyFact(database: DatabaseSync, input: Readonly<{ sequence: number; at: string }>): void {
-  database.prepare("UPDATE bodies SET end = 'exited', ended_at = ? WHERE sequence = ? AND end IS NULL")
+  database
+    .prepare("UPDATE bodies SET end = 'exited', ended_at = ? WHERE sequence = ? AND end IS NULL")
     .run(input.at, input.sequence);
 }
 
 export function latestBodyFact(database: DatabaseSync): BodyFact | null {
-  const row = database.prepare(`SELECT sequence, leash_taken_at, hung_diagnostic, hung_at, end, ended_at
-    FROM bodies ORDER BY sequence DESC LIMIT 1`).get() as BodyRow | undefined;
+  const row = database
+    .prepare(
+      `SELECT sequence, leash_taken_at, hung_diagnostic, hung_at, end, ended_at
+    FROM bodies ORDER BY sequence DESC LIMIT 1`,
+    )
+    .get() as BodyRow | undefined;
   return row === undefined ? null : decodeBodyRow(row);
 }
 
 export function latestSessionFact(database: DatabaseSync): SessionFact | null {
-  const row = database.prepare(`SELECT sequence, provider, coordinate_json, cwd, options_json, admitted_at
-    FROM sessions ORDER BY sequence DESC LIMIT 1`).get() as SessionRow | undefined;
+  const row = database
+    .prepare(
+      `SELECT sequence, provider, coordinate_json, cwd, options_json, admitted_at
+    FROM sessions ORDER BY sequence DESC LIMIT 1`,
+    )
+    .get() as SessionRow | undefined;
   return row === undefined ? null : decodeSessionRow(row);
 }
 
 export function sessionFactForCoordinate(database: DatabaseSync, coordinate: ResumeCoordinate): SessionFact | null {
-  const row = database.prepare(`SELECT sequence, provider, coordinate_json, cwd, options_json, admitted_at
-    FROM sessions WHERE coordinate_json = ? ORDER BY sequence DESC LIMIT 1`)
+  const row = database
+    .prepare(
+      `SELECT sequence, provider, coordinate_json, cwd, options_json, admitted_at
+    FROM sessions WHERE coordinate_json = ? ORDER BY sequence DESC LIMIT 1`,
+    )
     .get(encodeResumeCoordinate(coordinate)) as SessionRow | undefined;
   return row === undefined ? null : decodeSessionRow(row);
 }
 
 export function latestKillFact(database: DatabaseSync): KillFact | null {
-  const row = database.prepare(`SELECT sequence, body_sequence, evidence, at
-    FROM kills ORDER BY sequence DESC LIMIT 1`).get() as KillRow | undefined;
-  return row === undefined ? null : {
-    sequence: row.sequence,
-    bodySequence: row.body_sequence,
-    evidence: row.evidence,
-    at: row.at,
-  };
+  const row = database
+    .prepare(
+      `SELECT sequence, body_sequence, evidence, at
+    FROM kills ORDER BY sequence DESC LIMIT 1`,
+    )
+    .get() as KillRow | undefined;
+  return row === undefined
+    ? null
+    : {
+        sequence: row.sequence,
+        bodySequence: row.body_sequence,
+        evidence: row.evidence,
+        at: row.at,
+      };
 }
 
 export function killFactForBody(database: DatabaseSync, bodySequence: number): KillFact | null {
-  const row = database.prepare(`SELECT sequence, body_sequence, evidence, at
-    FROM kills WHERE body_sequence = ?`).get(bodySequence) as KillRow | undefined;
-  return row === undefined ? null : {
-    sequence: row.sequence,
-    bodySequence: row.body_sequence,
-    evidence: row.evidence,
-    at: row.at,
-  };
+  const row = database
+    .prepare(
+      `SELECT sequence, body_sequence, evidence, at
+    FROM kills WHERE body_sequence = ?`,
+    )
+    .get(bodySequence) as KillRow | undefined;
+  return row === undefined
+    ? null
+    : {
+        sequence: row.sequence,
+        bodySequence: row.body_sequence,
+        evidence: row.evidence,
+        at: row.at,
+      };
 }
 
 export function lastAnsweredTurnFact(database: DatabaseSync): TurnFact | null {
-  const row = database.prepare(`SELECT sequence, body_sequence, started_at, end_sequence, outcome, history_id,
-    session_json, answer, diagnostic, completed_at FROM turns WHERE outcome = 'answered' ORDER BY end_sequence DESC LIMIT 1`)
+  const row = database
+    .prepare(
+      `SELECT sequence, body_sequence, started_at, end_sequence, outcome, history_id,
+    session_json, answer, diagnostic, completed_at FROM turns WHERE outcome = 'answered' ORDER BY end_sequence DESC LIMIT 1`,
+    )
     .get() as TurnRow | undefined;
   return row === undefined ? null : decodeTurnRow(row);
 }
 
 export function answeredTurnFact(database: DatabaseSync, historyId: string): TurnFact | null {
-  const row = database.prepare(`SELECT sequence, body_sequence, started_at, end_sequence, outcome, history_id,
-    session_json, answer, diagnostic, completed_at FROM turns WHERE outcome = 'answered' AND history_id = ?`).get(historyId) as TurnRow | undefined;
+  const row = database
+    .prepare(
+      `SELECT sequence, body_sequence, started_at, end_sequence, outcome, history_id,
+    session_json, answer, diagnostic, completed_at FROM turns WHERE outcome = 'answered' AND history_id = ?`,
+    )
+    .get(historyId) as TurnRow | undefined;
   return row === undefined ? null : decodeTurnRow(row);
 }

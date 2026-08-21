@@ -2,46 +2,35 @@ import { LEASH_HELD_EXIT, runAkumaBody, type BodyLaunch } from "./akuma/body.js"
 import { worldRootForAkumaPaths } from "./akuma/identity.js";
 import type { UpstreamExecutionPort } from "./akuma/request-serve.js";
 import type { WorldRoot } from "./world.js";
-import {
-  executeKillAkuma,
-  executeTellAkuma,
-  executeWaitAkuma,
-} from "./library/fleet.js";
-import {
-  requireBranchesToBeUpToDateFrom,
-  worktreeHooksFrom,
-} from "./library/configuration.js";
-import {
-  executeForwardedDeliver,
-  executeForwardedReview,
-} from "./library/contract.js";
+import { executeKillAkuma, executeTellAkuma, executeWaitAkuma } from "./library/fleet.js";
+import { requireBranchesToBeUpToDateFrom, worktreeHooksFrom } from "./library/configuration.js";
+import { executeForwardedDeliver, executeForwardedReview } from "./library/contract.js";
 import { Repo } from "./library/repo.js";
 import { settings } from "./settings.js";
 import { executeTaskMutation } from "./task/mutation.js";
 
 type BodyProcessConfiguration = Readonly<{ home?: string; gitPath?: string }>;
 
-export function upstreamFor(
-  launch: BodyLaunch,
-  processConfiguration: BodyProcessConfiguration,
-): UpstreamExecutionPort {
+export function upstreamFor(launch: BodyLaunch, processConfiguration: BodyProcessConfiguration): UpstreamExecutionPort {
   const path = worldRootForAkumaPaths(launch.paths) as WorldRoot;
   return {
-    wait: async (input) => await executeWaitAkuma({
-      path,
-      ids: input.targets,
-      completion: input.completion,
-      ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
-      signal: input.signal,
-    }),
-    tell: async (input) => await executeTellAkuma({
-      path,
-      id: input.target,
-      body: input.body,
-      tellId: input.tellId,
-      recordedAt: input.recordedAt,
-      signal: input.signal,
-    }),
+    wait: async (input) =>
+      await executeWaitAkuma({
+        path,
+        ids: input.targets,
+        completion: input.completion,
+        ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+        signal: input.signal,
+      }),
+    tell: async (input) =>
+      await executeTellAkuma({
+        path,
+        id: input.target,
+        body: input.body,
+        tellId: input.tellId,
+        recordedAt: input.recordedAt,
+        signal: input.signal,
+      }),
     kill: async (input) => {
       const result = await executeKillAkuma({ path, ids: input.targets, signal: input.signal });
       return {
@@ -92,12 +81,13 @@ export function upstreamFor(
         hooks: worktreeHooksFrom({ settings: configuration }),
       });
     },
-    task: async (input) => await executeTaskMutation({
-      world: input.world as WorldRoot,
-      request: input.request,
-      requester: input.requester,
-      signal: input.signal,
-    }),
+    task: async (input) =>
+      await executeTaskMutation({
+        world: input.world as WorldRoot,
+        request: input.request,
+        requester: input.requester,
+        signal: input.signal,
+      }),
   };
 }
 
@@ -113,4 +103,4 @@ const configuration = {
   ...(mappedHome === undefined || mappedHome.length === 0 ? {} : { home: mappedHome }),
   ...(mappedGitPath === undefined ? {} : { gitPath: mappedGitPath }),
 };
-if (await runAkumaBody(launch, upstreamFor(launch, configuration)) === "held") process.exitCode = LEASH_HELD_EXIT;
+if ((await runAkumaBody(launch, upstreamFor(launch, configuration))) === "held") process.exitCode = LEASH_HELD_EXIT;

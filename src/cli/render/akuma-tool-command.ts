@@ -5,13 +5,11 @@
 
 const HORIZONTAL_WHITESPACE = new Set([" ", "\t"]);
 const UNSUPPORTED_UNQUOTED = new Set(["$", "`", "|", "&", ";", "<", ">", "(", ")"]);
-const DOUBLE_QUOTE_ESCAPES = new Set(["\"", "\\", "$", "`"]);
+const DOUBLE_QUOTE_ESCAPES = new Set(['"', "\\", "$", "`"]);
 const POWERSHELL_OPTION_FLAGS = new Set(["-nologo", "-noprofile"]);
 const POWERSHELL_COMMAND_FLAGS = new Set(["-command", "-c"]);
 
-type Scan =
-  | { readonly ok: true; readonly index: number; readonly value: string }
-  | { readonly ok: false };
+type Scan = { readonly ok: true; readonly index: number; readonly value: string } | { readonly ok: false };
 
 const SCAN_FAIL: Scan = { ok: false };
 
@@ -34,14 +32,15 @@ function executableName(value: string): string {
 
 function isBashOrZsh(value: string): boolean {
   const name = executableName(value);
-  return (value === "bash" || value === "zsh" || isAbsoluteExecutable(value))
-    && (name === "bash" || name === "zsh");
+  return (value === "bash" || value === "zsh" || isAbsoluteExecutable(value)) && (name === "bash" || name === "zsh");
 }
 
 function isPowerShell(value: string): boolean {
   const name = executableName(value);
-  return (value.toLowerCase() === "powershell" || value.toLowerCase() === "pwsh" || isAbsoluteExecutable(value))
-    && (name === "powershell" || name === "powershell.exe" || name === "pwsh" || name === "pwsh.exe");
+  return (
+    (value.toLowerCase() === "powershell" || value.toLowerCase() === "pwsh" || isAbsoluteExecutable(value)) &&
+    (name === "powershell" || name === "powershell.exe" || name === "pwsh" || name === "pwsh.exe")
+  );
 }
 
 function scanSingleQuoted(command: string, index: number): Scan {
@@ -60,7 +59,7 @@ function scanDoubleQuoted(command: string, index: number): Scan {
   let value = "";
   while (cursor < command.length) {
     const quoted = command[cursor]!;
-    if (quoted === "\"") return scanned(cursor + 1, value);
+    if (quoted === '"') return scanned(cursor + 1, value);
     if (quoted === "$" || quoted === "`") return SCAN_FAIL;
     if (quoted === "\\") {
       const escaped = scanDoubleQuotedEscape(command, cursor);
@@ -85,7 +84,7 @@ function scanTokenSegment(command: string, index: number): Scan {
   const character = command[index]!;
   if (isLineBoundary(character) || UNSUPPORTED_UNQUOTED.has(character)) return SCAN_FAIL;
   if (character === "'") return scanSingleQuoted(command, index);
-  if (character === "\"") return scanDoubleQuoted(command, index);
+  if (character === '"') return scanDoubleQuoted(command, index);
   if (character === "\\") return scanUnquotedEscape(command, index);
   return scanned(index + 1, character);
 }

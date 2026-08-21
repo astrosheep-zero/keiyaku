@@ -123,7 +123,10 @@ function validateTimestamp(value: unknown, path: string): string {
   }
   const milliseconds = Date.parse(text);
   const canonical = Number.isFinite(milliseconds) ? new Date(milliseconds).toISOString() : "";
-  if (!Number.isFinite(milliseconds) || (text.includes(".") ? canonical !== text : canonical.replace(".000Z", "Z") !== text)) {
+  if (
+    !Number.isFinite(milliseconds) ||
+    (text.includes(".") ? canonical !== text : canonical.replace(".000Z", "Z") !== text)
+  ) {
     fail(path, "expected a real canonical UTC timestamp");
   }
   return text;
@@ -301,7 +304,8 @@ export function encodeEntry(entry: JournalEntry): string {
 }
 
 function decodeEntry(line: string): JournalEntry {
-  if (line.includes("\r") || line.includes("\n\n")) throw new AuthorityCorruptionError("journal entry must be one LF-delimited JSON value");
+  if (line.includes("\r") || line.includes("\n\n"))
+    throw new AuthorityCorruptionError("journal entry must be one LF-delimited JSON value");
   const body = line.endsWith("\n") ? line.slice(0, -1) : line;
   if (body.length === 0) throw new AuthorityCorruptionError("journal entry cannot be empty");
   let value: unknown;
@@ -317,6 +321,10 @@ function decodeEntry(line: string): JournalEntry {
 
 export function decodeJournal(journal: string): JournalEntry[] {
   if (journal.length === 0) return [];
-  if (journal.includes("\r") || !journal.endsWith("\n")) throw new AuthorityCorruptionError("journal must use LF lines and end with LF");
-  return journal.slice(0, -1).split("\n").map((line) => decodeEntry(line));
+  if (journal.includes("\r") || !journal.endsWith("\n"))
+    throw new AuthorityCorruptionError("journal must use LF lines and end with LF");
+  return journal
+    .slice(0, -1)
+    .split("\n")
+    .map((line) => decodeEntry(line));
 }

@@ -55,9 +55,5 @@ export type {
 } from "./akuma.js";
 export type { AgentEvent, ToolCall, ToolEvent, ToolResult } from "./provider.js";
 export type { AkuId } from "./identity.js";
-export type {
-  KillEvidence,
-  ResumeCoordinate,
-  TurnFact,
-} from "./heart/index.js";
+export type { KillEvidence, ResumeCoordinate, TurnFact } from "./heart/index.js";
 export type { ProviderOptions, ReadonlyRestraint } from "./provider-recipe.js";

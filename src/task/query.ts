@@ -28,13 +28,14 @@ export type TaskQueryExpression =
   | Readonly<{ kind: "predicate"; predicate: TaskQueryPredicate }>;
 
 export type TaskQuerySort = "priority" | "created" | "updated" | "id";
-export type TaskQueryRow = TaskRow & Readonly<{
-  parent: TaskId | null;
-  needs: readonly TaskRef[];
-  blocks: readonly TaskRef[];
-  createdAt: string;
-  updatedAt: string;
-}>;
+export type TaskQueryRow = TaskRow &
+  Readonly<{
+    parent: TaskId | null;
+    needs: readonly TaskRef[];
+    blocks: readonly TaskRef[];
+    createdAt: string;
+    updatedAt: string;
+  }>;
 export type TaskPage<Row> = Readonly<{
   rows: readonly Row[];
   total: number;
@@ -45,7 +46,9 @@ export type TaskPage<Row> = Readonly<{
 const states: readonly TaskState[] = ["open", "in_progress", "on_hold", "done", "drop"];
 const comparisons: readonly TaskQueryComparison[] = ["=", "!=", "<", "<=", ">", ">=", "~"];
 
-function fail(message: string): never { throw new TypeError(message); }
+function fail(message: string): never {
+  throw new TypeError(message);
+}
 function object(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) fail(`${label} must be an object`);
   return value as Record<string, unknown>;
@@ -58,15 +61,22 @@ function taskId(value: unknown, label: string): TaskId {
   try {
     const coordinate = parseTaskId(value);
     if (formatTaskId(coordinate) !== value) fail(`${label} must be a canonical TaskId`);
-  } catch { fail(`${label} must be a canonical TaskId`); }
+  } catch {
+    fail(`${label} must be a canonical TaskId`);
+  }
   return value as TaskId;
 }
 function comparison(value: unknown): TaskQueryComparison {
-  if (typeof value !== "string" || !comparisons.includes(value as TaskQueryComparison)) fail("query operator is invalid");
+  if (typeof value !== "string" || !comparisons.includes(value as TaskQueryComparison))
+    fail("query operator is invalid");
   return value as TaskQueryComparison;
 }
 function timestamp(value: unknown, field: string): string {
-  if (typeof value !== "string" || !Number.isFinite(Date.parse(value)) || new Date(Date.parse(value)).toISOString() !== value) {
+  if (
+    typeof value !== "string" ||
+    !Number.isFinite(Date.parse(value)) ||
+    new Date(Date.parse(value)).toISOString() !== value
+  ) {
     fail(`${field} must be a canonical UTC ISO timestamp`);
   }
   return value;
@@ -77,26 +87,17 @@ function equalityOperator(operator: TaskQueryComparison, field: string): "=" | "
   return operator;
 }
 
-function orderedOperator(
-  operator: TaskQueryComparison,
-  field: string,
-): Exclude<TaskQueryComparison, "~"> {
+function orderedOperator(operator: TaskQueryComparison, field: string): Exclude<TaskQueryComparison, "~"> {
   if (operator === "~") fail(`${field} does not support ~`);
   return operator;
 }
 
-function normalizeStatePredicate(
-  input: Record<string, unknown>,
-  operator: TaskQueryComparison,
-): TaskQueryPredicate {
+function normalizeStatePredicate(input: Record<string, unknown>, operator: TaskQueryComparison): TaskQueryPredicate {
   if (typeof input.value !== "string" || !states.includes(input.value as TaskState)) fail("state value is invalid");
   return { field: "state", operator: equalityOperator(operator, "state"), value: input.value as TaskState };
 }
 
-function normalizePriorityPredicate(
-  input: Record<string, unknown>,
-  operator: TaskQueryComparison,
-): TaskQueryPredicate {
+function normalizePriorityPredicate(input: Record<string, unknown>, operator: TaskQueryComparison): TaskQueryPredicate {
   if (typeof input.value !== "number" || !Number.isInteger(input.value) || input.value < 0 || input.value > 3) {
     fail("priority value must be 0..3");
   }
@@ -114,10 +115,7 @@ function normalizeTextPredicate(
   return { field, operator, value: input.value };
 }
 
-function normalizeParentPredicate(
-  input: Record<string, unknown>,
-  operator: TaskQueryComparison,
-): TaskQueryPredicate {
+function normalizeParentPredicate(input: Record<string, unknown>, operator: TaskQueryComparison): TaskQueryPredicate {
   const value = input.value === null ? null : taskId(input.value, "parent value");
   return { field: "parent", operator: equalityOperator(operator, "parent"), value };
 }
@@ -154,15 +152,24 @@ function predicate(value: unknown): TaskQueryPredicate {
   if (typeof field !== "string") fail("query predicate field is required");
   const operator = comparison(input.operator);
   switch (field) {
-    case "state": return normalizeStatePredicate(input, operator);
-    case "priority": return normalizePriorityPredicate(input, operator);
-    case "title": return normalizeTextPredicate(input, "title", operator);
-    case "id": return normalizeTextPredicate(input, "id", operator);
-    case "parent": return normalizeParentPredicate(input, operator);
-    case "ready": return normalizeBooleanPredicate(input, "ready", operator);
-    case "blocked": return normalizeBooleanPredicate(input, "blocked", operator);
-    case "created": return normalizeTimestampPredicate(input, "created", operator);
-    case "updated": return normalizeTimestampPredicate(input, "updated", operator);
+    case "state":
+      return normalizeStatePredicate(input, operator);
+    case "priority":
+      return normalizePriorityPredicate(input, operator);
+    case "title":
+      return normalizeTextPredicate(input, "title", operator);
+    case "id":
+      return normalizeTextPredicate(input, "id", operator);
+    case "parent":
+      return normalizeParentPredicate(input, operator);
+    case "ready":
+      return normalizeBooleanPredicate(input, "ready", operator);
+    case "blocked":
+      return normalizeBooleanPredicate(input, "blocked", operator);
+    case "created":
+      return normalizeTimestampPredicate(input, "created", operator);
+    case "updated":
+      return normalizeTimestampPredicate(input, "updated", operator);
     default:
       if (isTaskRelationPredicateField(field)) return normalizeRelationPredicate(input, field, operator);
       return fail(`unknown query field: ${field}`);
@@ -171,8 +178,14 @@ function predicate(value: unknown): TaskQueryPredicate {
 
 export function normalizeTaskQuery(value: unknown): TaskQueryExpression {
   const input = object(value, "query expression");
-  if (input.kind === "predicate") { closed(input, ["kind", "predicate"], "query expression"); return { kind: "predicate", predicate: predicate(input.predicate) }; }
-  if (input.kind === "not") { closed(input, ["kind", "term"], "query expression"); return { kind: "not", term: normalizeTaskQuery(input.term) }; }
+  if (input.kind === "predicate") {
+    closed(input, ["kind", "predicate"], "query expression");
+    return { kind: "predicate", predicate: predicate(input.predicate) };
+  }
+  if (input.kind === "not") {
+    closed(input, ["kind", "term"], "query expression");
+    return { kind: "not", term: normalizeTaskQuery(input.term) };
+  }
   if (input.kind === "and" || input.kind === "or") {
     closed(input, ["kind", "terms"], "query expression");
     if (!Array.isArray(input.terms) || input.terms.length === 0) fail(`${input.kind} query requires terms`);
@@ -189,10 +202,13 @@ function compare(left: string | number, operator: Exclude<TaskQueryComparison, "
   if (operator === ">") return left > right;
   return left >= right;
 }
-function membership(left: boolean, operator: "=" | "!=", right: boolean): boolean { return operator === "=" ? left === right : left !== right; }
+function membership(left: boolean, operator: "=" | "!=", right: boolean): boolean {
+  return operator === "=" ? left === right : left !== right;
+}
 
 function descendants(relations: TaskRelationProjection, parent: TaskId): Set<TaskId> {
-  const result = new Set<TaskId>(), pending = [parent];
+  const result = new Set<TaskId>(),
+    pending = [parent];
   while (pending.length > 0) {
     const current = pending.shift()!;
     for (const child of relations.children(current)) {
@@ -231,18 +247,30 @@ function matchesPredicate(
   under: ReadonlyMap<TaskId, Set<TaskId>>,
 ): boolean {
   switch (value.field) {
-    case "state": return compare(task.state, value.operator, value.value);
-    case "priority": return compare(task.priority, value.operator, value.value);
-    case "title": return matchText(task.title, value.operator, value.value);
-    case "id": return matchText(task.id, value.operator, value.value);
-    case "parent": return compare(task.parent ?? "", value.operator, value.value ?? "");
-    case "under": return matchRelation(under.get(value.value)?.has(task.id) === true, value.operator);
-    case "needs": return matchRelation(relation(board, relations, task.id, "needs", value.value), value.operator);
-    case "blocks": return matchRelation(relation(board, relations, task.id, "blocks", value.value), value.operator);
-    case "ready": return membership(taskDisposition(board, task) === "ready", value.operator, value.value);
-    case "blocked": return membership(taskBlocked(board, task), value.operator, value.value);
-    case "created": return compare(task.createdAt, value.operator, value.value);
-    case "updated": return compare(task.updatedAt, value.operator, value.value);
+    case "state":
+      return compare(task.state, value.operator, value.value);
+    case "priority":
+      return compare(task.priority, value.operator, value.value);
+    case "title":
+      return matchText(task.title, value.operator, value.value);
+    case "id":
+      return matchText(task.id, value.operator, value.value);
+    case "parent":
+      return compare(task.parent ?? "", value.operator, value.value ?? "");
+    case "under":
+      return matchRelation(under.get(value.value)?.has(task.id) === true, value.operator);
+    case "needs":
+      return matchRelation(relation(board, relations, task.id, "needs", value.value), value.operator);
+    case "blocks":
+      return matchRelation(relation(board, relations, task.id, "blocks", value.value), value.operator);
+    case "ready":
+      return membership(taskDisposition(board, task) === "ready", value.operator, value.value);
+    case "blocked":
+      return membership(taskBlocked(board, task), value.operator, value.value);
+    case "created":
+      return compare(task.createdAt, value.operator, value.value);
+    case "updated":
+      return compare(task.updatedAt, value.operator, value.value);
   }
 }
 
@@ -267,7 +295,8 @@ function row(board: TaskBoard, relations: TaskRelationProjection, task: TaskDocu
     parent: task.parent,
     needs: task.needs.map((need) => taskRef(board, need)),
     blocks: relations.blocks(task.id),
-    createdAt: task.createdAt, updatedAt: task.updatedAt,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
   };
 }
 function sortTasks(tasks: readonly TaskDocument[], sort: TaskQuerySort): readonly TaskDocument[] {
@@ -275,7 +304,9 @@ function sortTasks(tasks: readonly TaskDocument[], sort: TaskQuerySort): readonl
     const tie = Buffer.compare(Buffer.from(left.id), Buffer.from(right.id));
     if (sort === "id") return tie;
     if (sort === "priority") return left.priority - right.priority || tie;
-    const compared = left[sort === "created" ? "createdAt" : "updatedAt"].localeCompare(right[sort === "created" ? "createdAt" : "updatedAt"]);
+    const compared = left[sort === "created" ? "createdAt" : "updatedAt"].localeCompare(
+      right[sort === "created" ? "createdAt" : "updatedAt"],
+    );
     return (sort === "updated" ? -compared : compared) || tie;
   });
 }
@@ -291,8 +322,12 @@ export function projectQuery(
 ): TaskPage<TaskQueryRow> {
   const { scope, expression, sort = "priority", limit = DEFAULT_TASK_LIMIT } = input;
   const under = new Map(queryUnderTargets(expression).map((target) => [target, descendants(relations, target)]));
-  const selected = sortTasks([...board.tasks.values()].filter((task) => scope === null || sameNamespace(parseTaskId(task.id).namespace, scope))
-    .filter((task) => matches(board, relations, task, expression, under)), sort);
+  const selected = sortTasks(
+    [...board.tasks.values()]
+      .filter((task) => scope === null || sameNamespace(parseTaskId(task.id).namespace, scope))
+      .filter((task) => matches(board, relations, task, expression, under)),
+    sort,
+  );
   const rows = selected.slice(0, limit).map((task) => row(board, relations, task));
   return { rows, total: selected.length, returned: rows.length, truncated: rows.length < selected.length };
 }

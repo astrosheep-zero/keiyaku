@@ -1,7 +1,4 @@
-import {
-  decodeJournal,
-  encodeEntry,
-} from "../core/facts/codec.js";
+import { decodeJournal, encodeEntry } from "../core/facts/codec.js";
 import type { ContractJournalAppend, Offer, RefOperation, TreeUpdate } from "../core/facts/offer.js";
 import type { GitAdmissionSnapshot } from "./observe.js";
 import {
@@ -17,10 +14,7 @@ import {
   writeCommit,
 } from "./repository.js";
 import type { GitRepository } from "./process.js";
-import {
-  type ContractHead,
-  type ContractId,
-} from "../core/facts/types.js";
+import { type ContractHead, type ContractId } from "../core/facts/types.js";
 import {
   contractJournalPath,
   contractJournalPaths,
@@ -46,9 +40,7 @@ export type Admission = Accepted | PublicationFailed | Unknown;
 
 const CONTRACT_JOURNAL_PATH = /^contracts\/(?:active|terminal)\/[0-9a-f]{2}\/[0-9a-f]{2}\/[0-9a-f]{60}\.jsonl$/u;
 
-function assertAppendStructure(
-  appends: readonly ContractJournalAppend[],
-): readonly ContractJournalAppend[] {
+function assertAppendStructure(appends: readonly ContractJournalAppend[]): readonly ContractJournalAppend[] {
   const seen = new Set<ContractId>();
   for (const append of appends) {
     if (!append || typeof append !== "object") throw new Error("invalid contract append");
@@ -72,7 +64,8 @@ function assertCompanionStructure(
   for (const companion of companions) {
     if (!companion || typeof companion !== "object") throw new Error("invalid companion update");
     validPath(companion.path);
-    if (!(companion.bytes instanceof Uint8Array)) throw new Error(`companion bytes must be Uint8Array: ${companion.path}`);
+    if (!(companion.bytes instanceof Uint8Array))
+      throw new Error(`companion bytes must be Uint8Array: ${companion.path}`);
     if (seen.has(companion.path)) throw new Error(`duplicate companion path: ${companion.path}`);
     if (reserved.has(companion.path) || CONTRACT_JOURNAL_PATH.test(companion.path)) {
       throw new Error(`companion path collides with admission-owned path: ${companion.path}`);
@@ -103,7 +96,10 @@ async function buildOffer(
   admission: GitAdmissionSnapshot,
   appends: readonly ContractJournalAppend[],
   companions: readonly TreeUpdate[],
-): Promise<{ readonly changes: ReadonlyMap<string, TreeChange>; readonly heads: Readonly<Record<string, ContractHead>> }> {
+): Promise<{
+  readonly changes: ReadonlyMap<string, TreeChange>;
+  readonly heads: Readonly<Record<string, ContractHead>>;
+}> {
   const snapshot = admission.snapshot;
   const changes = new Map<string, TreeChange>();
   const heads: Record<string, ContractHead> = {};
@@ -150,21 +146,29 @@ async function publishOffer(
     admission.treeDirectories,
     changes,
   );
-  const gitCommit = mintSnapshotId(await writeCommit({
+  const gitCommit = mintSnapshotId(
+    await writeCommit({
+      repository,
+      tree: gitTree,
+      parent: snapshot.commit,
+    }),
+  );
+  return await updateRefsAtomically(
     repository,
-    tree: gitTree,
-    parent: snapshot.commit,
-  }));
-  return await updateRefsAtomically(repository, [
-    { ref: GIT_REF, newOid: gitObjectIdForSnapshot(gitCommit), expectedOid: snapshot.commit },
-    ...(target === null
-      ? []
-      : [{
-          ref: target.target,
-          newOid: gitObjectIdForSnapshot(target.newOid),
-          expectedOid: gitObjectIdForSnapshot(target.expectedOid),
-        }]),
-  ], assertions);
+    [
+      { ref: GIT_REF, newOid: gitObjectIdForSnapshot(gitCommit), expectedOid: snapshot.commit },
+      ...(target === null
+        ? []
+        : [
+            {
+              ref: target.target,
+              newOid: gitObjectIdForSnapshot(target.newOid),
+              expectedOid: gitObjectIdForSnapshot(target.expectedOid),
+            },
+          ]),
+    ],
+    assertions,
+  );
 }
 
 export async function admit(

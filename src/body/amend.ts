@@ -2,13 +2,24 @@ import type { ContractBody, ContractCriterion, ContractExtension, DecodedContrac
 import type { VerificationDeclaration } from "../verification/declaration.js";
 import { decodeVerificationDeclarations, VerificationDocumentError } from "./verification.js";
 import { parseToAST } from "../markdown/parse.js";
-import { directChildren, indexDocument, indexedHeadings, normalizeTitle, rawSlice, sectionContent } from "../markdown/query.js";
+import {
+  directChildren,
+  indexDocument,
+  indexedHeadings,
+  normalizeTitle,
+  rawSlice,
+  sectionContent,
+} from "../markdown/query.js";
 import type { DocumentNode, MarkdownBlockNode, SectionNode } from "../markdown/types.js";
 import { decodeRegion, RegionDocumentError } from "./region.js";
 import { contractSectionName, RESERVED_SECTIONS } from "./shape.js";
 import { renderAmendedContractBody } from "./render.js";
 
-type Operation = Readonly<{ kind: "Add" | "Update" | "Replace" | "Append" | "Remove"; target: string; section: SectionNode }>;
+type Operation = Readonly<{
+  kind: "Add" | "Update" | "Replace" | "Append" | "Remove";
+  target: string;
+  section: SectionNode;
+}>;
 
 type MutableBody = {
   title: string;
@@ -32,13 +43,15 @@ function nonblank(document: DocumentNode, node: MarkdownBlockNode): boolean {
 }
 
 function sections(document: DocumentNode): readonly SectionNode[] {
-  return indexedHeadings(indexDocument(document), { level: 2 })
-    .filter((node): node is SectionNode => node.type === "section");
+  return indexedHeadings(indexDocument(document), { level: 2 }).filter(
+    (node): node is SectionNode => node.type === "section",
+  );
 }
 
 function operationSections(document: DocumentNode): readonly Operation[] {
   if (document.frontmatter !== undefined) refusal("amend operations may not contain frontmatter");
-  if (indexedHeadings(indexDocument(document), { level: 1 }).length > 0) refusal("amend operations may contain H2 sections only");
+  if (indexedHeadings(indexDocument(document), { level: 1 }).length > 0)
+    refusal("amend operations may contain H2 sections only");
   if (document.children.some((node) => node.type !== "section" && nonblank(document, node))) {
     refusal("amend operations contain bytes outside H2 sections");
   }
@@ -75,7 +88,10 @@ function criteria(document: DocumentNode, section: SectionNode): readonly Contra
     const key = normalizeTitle(title);
     if (title.length === 0 || seen.has(key)) refusal("criteria operation contains duplicate or empty titles");
     seen.add(key);
-    const body = rawSlice(document, { start: heading.span.end, end: headings[index + 1]?.span.start ?? section.span.end });
+    const body = rawSlice(document, {
+      start: heading.span.end,
+      end: headings[index + 1]?.span.start ?? section.span.end,
+    });
     if (body.trim().length === 0) refusal(`criterion '${title}' operation body is empty`);
     return { title, body };
   });
@@ -216,7 +232,10 @@ function applyAppend(body: MutableBody, operation: Operation, document: Document
   const index = extensionIndex(body, operation.target);
   if (index < 0) refusal(`unknown extension '${operation.target}'`);
   const extension = body.extensions[index]!;
-  body.extensions[index] = { ...extension, content: appendText(extension.content, prose(document, operation.section, "extension")) };
+  body.extensions[index] = {
+    ...extension,
+    content: appendText(extension.content, prose(document, operation.section, "extension")),
+  };
 }
 
 function applyReplace(body: MutableBody, operation: Operation, document: DocumentNode): void {
@@ -248,11 +267,21 @@ function applyReplace(body: MutableBody, operation: Operation, document: Documen
 
 function applyOperation(body: MutableBody, operation: Operation, document: DocumentNode): void {
   switch (operation.kind) {
-    case "Add": applyAdd(body, operation, document); return;
-    case "Update": applyUpdate(body, operation, document); return;
-    case "Replace": applyReplace(body, operation, document); return;
-    case "Append": applyAppend(body, operation, document); return;
-    case "Remove": applyRemove(body, operation, document); return;
+    case "Add":
+      applyAdd(body, operation, document);
+      return;
+    case "Update":
+      applyUpdate(body, operation, document);
+      return;
+    case "Replace":
+      applyReplace(body, operation, document);
+      return;
+    case "Append":
+      applyAppend(body, operation, document);
+      return;
+    case "Remove":
+      applyRemove(body, operation, document);
+      return;
   }
 }
 

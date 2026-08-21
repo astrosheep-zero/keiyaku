@@ -12,8 +12,16 @@ import type {
 import type { TaskId } from "./identity.js";
 
 export const TASK_MUTATION_ACTIONS = Object.freeze([
-  "task.add", "task.addDocument", "task.compose", "task.done", "task.drop",
-  "task.hold", "task.resume", "task.start", "task.stop", "task.update",
+  "task.add",
+  "task.addDocument",
+  "task.compose",
+  "task.done",
+  "task.drop",
+  "task.hold",
+  "task.resume",
+  "task.start",
+  "task.stop",
+  "task.update",
 ] as const);
 
 export type TaskMutationAction = (typeof TASK_MUTATION_ACTIONS)[number];
@@ -24,16 +32,25 @@ export function isTaskMutationAction(value: unknown): value is TaskMutationActio
 }
 
 export type TaskMutationRequest =
-  | Readonly<{ action: "task.add"; input: Omit<AddTaskInput, "actor" | "signal" | "namespace"> & Readonly<{ namespace: readonly string[] }> }>
-  | Readonly<{ action: "task.addDocument"; input: Omit<AddTaskDocumentInput, "actor" | "signal" | "namespace"> & Readonly<{ namespace: readonly string[] }> }>
+  | Readonly<{
+      action: "task.add";
+      input: Omit<AddTaskInput, "actor" | "signal" | "namespace"> & Readonly<{ namespace: readonly string[] }>;
+    }>
+  | Readonly<{
+      action: "task.addDocument";
+      input: Omit<AddTaskDocumentInput, "actor" | "signal" | "namespace"> & Readonly<{ namespace: readonly string[] }>;
+    }>
   | Readonly<{ action: "task.compose"; markdown: string; namespace: readonly string[] }>
   | Readonly<{ action: "task.update"; id: TaskId; input: Omit<UpdateTaskInput, "signal"> }>
   | Readonly<{ action: "task.start" | "task.stop" | "task.resume"; id: TaskId }>
   | Readonly<{ action: "task.hold"; ids: readonly TaskId[] }>
   | Readonly<{ action: "task.done" | "task.drop"; ids: readonly TaskId[]; note?: string }>;
 
-export type TaskMutationExecutionResult = TaskMutationResult | TaskUpdateResult
-  | TaskBatchResult | TaskCompositionResult;
+export type TaskMutationExecutionResult =
+  | TaskMutationResult
+  | TaskUpdateResult
+  | TaskBatchResult
+  | TaskCompositionResult;
 
 function mutationObject(value: unknown, keys: readonly string[], label: string): Record<string, unknown> {
   const decoded = record(value, label);
@@ -45,9 +62,11 @@ export function decodeTaskMutationRequest(action: TaskMutationAction, value: unk
   switch (action) {
     case "task.add": {
       const input = mutationObject(value, ["input"], "task.add request");
-      const raw = mutationObject(input.input, [
-        "title", "namespace", "body", "note", "state", "priority", "needs", "parent", "supersedes", "relates",
-      ], "task.add input");
+      const raw = mutationObject(
+        input.input,
+        ["title", "namespace", "body", "note", "state", "priority", "needs", "parent", "supersedes", "relates"],
+        "task.add input",
+      );
       const decoded = addInput(raw);
       if (decoded.namespace === undefined) throw new TypeError("task.add request namespace is required");
       return { action, input: { ...decoded, namespace: decoded.namespace } };
@@ -71,10 +90,27 @@ export function decodeTaskMutationRequest(action: TaskMutationAction, value: unk
     }
     case "task.update": {
       const request = mutationObject(value, ["id", "input"], "task.update request");
-      const raw = mutationObject(request.input, [
-        "title", "body", "appendBody", "note", "priority", "needs", "addNeeds", "dropNeeds", "parent",
-        "supersedes", "addSupersedes", "dropSupersedes", "relates", "addRelates", "dropRelates",
-      ], "task.update input");
+      const raw = mutationObject(
+        request.input,
+        [
+          "title",
+          "body",
+          "appendBody",
+          "note",
+          "priority",
+          "needs",
+          "addNeeds",
+          "dropNeeds",
+          "parent",
+          "supersedes",
+          "addSupersedes",
+          "dropSupersedes",
+          "relates",
+          "addRelates",
+          "dropRelates",
+        ],
+        "task.update input",
+      );
       return { action, id: taskId(request.id), input: updateInput(raw) };
     }
     case "task.start":
@@ -96,28 +132,53 @@ export function decodeTaskMutationRequest(action: TaskMutationAction, value: unk
   }
 }
 
-export async function executeTaskMutation(input: Readonly<{
-  world: WorldRoot;
-  request: TaskMutationRequest;
-  requester: string;
-  signal?: AbortSignal;
-}>): Promise<TaskMutationExecutionResult> {
+export async function executeTaskMutation(
+  input: Readonly<{
+    world: WorldRoot;
+    request: TaskMutationRequest;
+    requester: string;
+    signal?: AbortSignal;
+  }>,
+): Promise<TaskMutationExecutionResult> {
   const { Tasks } = await import("./index.js");
   const tasks = Tasks.of(input.world);
   const { request, signal } = input;
   const withSignal = signal === undefined ? {} : { signal };
   switch (request.action) {
-    case "task.add": return await tasks.add({ ...request.input, actor: input.requester, ...withSignal });
-    case "task.addDocument": return await tasks.addDocument({ ...request.input, actor: input.requester, ...withSignal });
-    case "task.compose": return await tasks.compose({ markdown: request.markdown, namespace: request.namespace, actor: input.requester, ...withSignal });
-    case "task.update": return await tasks.task({ id: request.id }).update({ ...request.input, ...withSignal });
-    case "task.start": return await tasks.task({ id: request.id }).start(withSignal);
-    case "task.stop": return await tasks.task({ id: request.id }).stop(withSignal);
-    case "task.resume": return await tasks.task({ id: request.id }).resume(withSignal);
-    case "task.hold": return await tasks.batch({ verb: "hold", ids: request.ids, ...withSignal });
-    case "task.done": return await tasks.batch({ verb: "done", ids: request.ids, ...withSignal,
-      ...(request.note === undefined ? {} : { note: request.note }) });
-    case "task.drop": return await tasks.batch({ verb: "drop", ids: request.ids, ...withSignal,
-      ...(request.note === undefined ? {} : { note: request.note }) });
+    case "task.add":
+      return await tasks.add({ ...request.input, actor: input.requester, ...withSignal });
+    case "task.addDocument":
+      return await tasks.addDocument({ ...request.input, actor: input.requester, ...withSignal });
+    case "task.compose":
+      return await tasks.compose({
+        markdown: request.markdown,
+        namespace: request.namespace,
+        actor: input.requester,
+        ...withSignal,
+      });
+    case "task.update":
+      return await tasks.task({ id: request.id }).update({ ...request.input, ...withSignal });
+    case "task.start":
+      return await tasks.task({ id: request.id }).start(withSignal);
+    case "task.stop":
+      return await tasks.task({ id: request.id }).stop(withSignal);
+    case "task.resume":
+      return await tasks.task({ id: request.id }).resume(withSignal);
+    case "task.hold":
+      return await tasks.batch({ verb: "hold", ids: request.ids, ...withSignal });
+    case "task.done":
+      return await tasks.batch({
+        verb: "done",
+        ids: request.ids,
+        ...withSignal,
+        ...(request.note === undefined ? {} : { note: request.note }),
+      });
+    case "task.drop":
+      return await tasks.batch({
+        verb: "drop",
+        ids: request.ids,
+        ...withSignal,
+        ...(request.note === undefined ? {} : { note: request.note }),
+      });
   }
 }

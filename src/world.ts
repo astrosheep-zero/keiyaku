@@ -25,7 +25,11 @@ export class WorldError extends Error {
 }
 
 async function homeRoot(): Promise<string> {
-  try { return await realpath(resolve(homedir())); } catch { return resolve(homedir()); }
+  try {
+    return await realpath(resolve(homedir()));
+  } catch {
+    return resolve(homedir());
+  }
 }
 
 async function directory(input: string, label: string): Promise<string> {
@@ -34,20 +38,29 @@ async function directory(input: string, label: string): Promise<string> {
   }
   const path = resolve(input);
   let real: string;
-  try { real = await realpath(path); }
-  catch (error) { throw new WorldError("invalid-world", `world path is not an existing directory: ${path}`); }
+  try {
+    real = await realpath(path);
+  } catch (error) {
+    throw new WorldError("invalid-world", `world path is not an existing directory: ${path}`);
+  }
   try {
     if (!(await stat(real)).isDirectory()) throw new Error("not a directory");
-  } catch { throw new WorldError("invalid-world", `world path is not a directory: ${real}`); }
+  } catch {
+    throw new WorldError("invalid-world", `world path is not a directory: ${real}`);
+  }
   return real;
 }
 
-function brand(path: string): WorldRoot { return path as WorldRoot; }
+function brand(path: string): WorldRoot {
+  return path as WorldRoot;
+}
 
-function marker(root: string): string { return join(root, ".keiyaku"); }
+function marker(root: string): string {
+  return join(root, ".keiyaku");
+}
 
 async function rejectReservedRoot(root: string): Promise<void> {
-  if (root === await homeRoot()) {
+  if (root === (await homeRoot())) {
     throw new WorldError("home-world", "the user home directory cannot be a Keiyaku world");
   }
   if (root === parse(root).root) {
@@ -70,7 +83,10 @@ async function ensureMarker(root: string): Promise<void> {
 
 type WorldInput = string | WorldResolutionInput;
 
-async function inputValues(input: WorldInput, label: string): Promise<Readonly<{ cwd: string; repositoryRoot?: string }>> {
+async function inputValues(
+  input: WorldInput,
+  label: string,
+): Promise<Readonly<{ cwd: string; repositoryRoot?: string }>> {
   if (typeof input === "string") return { cwd: await directory(input, label) };
   if (input === null || typeof input !== "object") throw new TypeError(`${label} must be a path or resolution input`);
   const cwd = await directory(input.cwd, `${label} cwd`);
@@ -133,7 +149,13 @@ async function resolved(input: WorldInput): Promise<WorldResolution> {
 }
 
 export const World = Object.freeze({
-  resolve(input: WorldInput): Promise<WorldResolution> { return resolved(input); },
-  async locate(input: WorldInput): Promise<WorldRoot | null> { return (await resolved(input)).root; },
-  at(input: string): Promise<WorldRoot> { return exact(input); },
+  resolve(input: WorldInput): Promise<WorldResolution> {
+    return resolved(input);
+  },
+  async locate(input: WorldInput): Promise<WorldRoot | null> {
+    return (await resolved(input)).root;
+  },
+  at(input: string): Promise<WorldRoot> {
+    return exact(input);
+  },
 });

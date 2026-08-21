@@ -17,12 +17,7 @@ import {
   type Soul,
   type UpstreamRequestService,
 } from "./heart/index.js";
-import {
-  pathsForAkuId,
-  worldRootForAkumaPaths,
-  type AkuId,
-  type AkumaPaths,
-} from "./identity.js";
+import { pathsForAkuId, worldRootForAkumaPaths, type AkuId, type AkumaPaths } from "./identity.js";
 import { BIRTH_TIMEOUT_MS, publishAkuma } from "./publication.js";
 import {
   atomicJson,
@@ -50,35 +45,68 @@ type UpstreamCall = Readonly<{ signal: AbortSignal }>;
 type RequesterCall = UpstreamCall & Readonly<{ requester: AkuId }>;
 type ContractCall = RequesterCall & Readonly<{ repoRoot: string; contractId: string }>;
 export type UpstreamExecutionPort = Readonly<{
-  wait(input: UpstreamCall & Readonly<{
-    targets: readonly AkuId[]; completion: "any" | "all"; timeoutMs?: number;
-  }>): Promise<unknown>;
-  tell(input: UpstreamCall & Readonly<{
-    target: AkuId; body: string; tellId: string; recordedAt: string;
-  }>): Promise<unknown>;
-  kill(input: Readonly<{ targets: readonly AkuId[]; signal: AbortSignal }>): Promise<Readonly<{
-    result: unknown; service: readonly Readonly<{ id: AkuId; evidence: KillEvidence }>[];
-  }>>;
-  deliver(input: ContractCall & Readonly<{
-    message?: string; includeDirty: boolean; materializeConflict: boolean;
-  }>): Promise<Readonly<{ result: unknown; deliveryFactId?: string }>>;
-  review(input: ContractCall & Readonly<{
-    verdict: "satisfied" | "unsatisfied"; summary?: string;
-  }>): Promise<Readonly<{ result: unknown; reviewFactId?: string }>>;
-  task(input: RequesterCall & Readonly<{
-    world: string; request: TaskMutationRequest;
-  }>): Promise<unknown>;
+  wait(
+    input: UpstreamCall &
+      Readonly<{
+        targets: readonly AkuId[];
+        completion: "any" | "all";
+        timeoutMs?: number;
+      }>,
+  ): Promise<unknown>;
+  tell(
+    input: UpstreamCall &
+      Readonly<{
+        target: AkuId;
+        body: string;
+        tellId: string;
+        recordedAt: string;
+      }>,
+  ): Promise<unknown>;
+  kill(input: Readonly<{ targets: readonly AkuId[]; signal: AbortSignal }>): Promise<
+    Readonly<{
+      result: unknown;
+      service: readonly Readonly<{ id: AkuId; evidence: KillEvidence }>[];
+    }>
+  >;
+  deliver(
+    input: ContractCall &
+      Readonly<{
+        message?: string;
+        includeDirty: boolean;
+        materializeConflict: boolean;
+      }>,
+  ): Promise<Readonly<{ result: unknown; deliveryFactId?: string }>>;
+  review(
+    input: ContractCall &
+      Readonly<{
+        verdict: "satisfied" | "unsatisfied";
+        summary?: string;
+      }>,
+  ): Promise<Readonly<{ result: unknown; reviewFactId?: string }>>;
+  task(
+    input: RequesterCall &
+      Readonly<{
+        world: string;
+        request: TaskMutationRequest;
+      }>,
+  ): Promise<unknown>;
 }>;
 
 type PumpInput = Readonly<{
-  paths: AkumaPaths; parent: Soul; bodySequence: number; now(): string;
+  paths: AkumaPaths;
+  parent: Soul;
+  bodySequence: number;
+  now(): string;
   spawn(launch: RequestChildLaunch): Promise<void>;
-  upstream?: UpstreamExecutionPort; signal: AbortSignal;
+  upstream?: UpstreamExecutionPort;
+  signal: AbortSignal;
 }>;
-type ServeInput = Omit<PumpInput, "bodySequence"> & Readonly<{
-  directory: string; claim: StructuralRequestClaim;
-  admissionOpen(): boolean;
-}>;
+type ServeInput = Omit<PumpInput, "bodySequence"> &
+  Readonly<{
+    directory: string;
+    claim: StructuralRequestClaim;
+    admissionOpen(): boolean;
+  }>;
 type UpstreamFact = Exclude<
   Extract<RequestFact, { state: "admitted" }>,
   Extract<RequestFact, { action: "akuma.call" }>
@@ -94,27 +122,31 @@ function isTask(value: Readonly<{ action: string }>): value is TaskRequestClaim 
 
 function acceptedReceipt(
   fact: Extract<RequestFact, { state: "served" }>,
-  service: Extract<UpstreamRequestService, {
-    action: "contract.deliver" | "contract.review";
-  }>,
+  service: Extract<
+    UpstreamRequestService,
+    {
+      action: "contract.deliver" | "contract.review";
+    }
+  >,
 ): RequestReceipt {
   return {
     id: fact.id,
     action: fact.action as "contract.deliver" | "contract.review",
     state: fact.state,
-    reference: service.action === "contract.deliver"
-      ? {
-          kind: "accepted-reference",
-          repoRoot: service.repoRoot,
-          contractId: service.contractId,
-          deliveryFactId: service.deliveryFactId,
-        }
-      : {
-          kind: "accepted-reference",
-          repoRoot: service.repoRoot,
-          contractId: service.contractId,
-          reviewFactId: service.reviewFactId,
-        },
+    reference:
+      service.action === "contract.deliver"
+        ? {
+            kind: "accepted-reference",
+            repoRoot: service.repoRoot,
+            contractId: service.contractId,
+            deliveryFactId: service.deliveryFactId,
+          }
+        : {
+            kind: "accepted-reference",
+            repoRoot: service.repoRoot,
+            contractId: service.contractId,
+            reviewFactId: service.reviewFactId,
+          },
   } as RequestReceipt;
 }
 
@@ -130,16 +162,10 @@ function receiptFor(fact: RequestFact): RequestReceipt | null {
   }
   if (fact.state !== "served") return null;
   if (fact.action === "contract.deliver") {
-    return acceptedReceipt(fact, fact.service as Extract<
-      UpstreamRequestService,
-      { action: "contract.deliver" }
-    >);
+    return acceptedReceipt(fact, fact.service as Extract<UpstreamRequestService, { action: "contract.deliver" }>);
   }
   if (fact.action === "contract.review") {
-    return acceptedReceipt(fact, fact.service as Extract<
-      UpstreamRequestService,
-      { action: "contract.review" }
-    >);
+    return acceptedReceipt(fact, fact.service as Extract<UpstreamRequestService, { action: "contract.review" }>);
   }
   if (isTask(fact)) {
     return {
@@ -152,16 +178,13 @@ function receiptFor(fact: RequestFact): RequestReceipt | null {
   return null;
 }
 
-async function projectReceipt(
-  directory: string,
-  fact: RequestFact,
-  outcome?: UpstreamRequestOutcome,
-): Promise<void> {
-  const receipt = outcome === undefined
-    ? receiptFor(fact)
-    : fact.action === "akuma.call"
-      ? null
-      : { id: fact.id, action: fact.action, state: "served" as const, outcome };
+async function projectReceipt(directory: string, fact: RequestFact, outcome?: UpstreamRequestOutcome): Promise<void> {
+  const receipt =
+    outcome === undefined
+      ? receiptFor(fact)
+      : fact.action === "akuma.call"
+        ? null
+        : { id: fact.id, action: fact.action, state: "served" as const, outcome };
   if (receipt === null) return;
   try {
     await atomicJson(receiptPath(directory, fact.id), receipt);
@@ -171,9 +194,10 @@ async function projectReceipt(
 }
 
 async function serveCall(
-  input: ServeInput & Readonly<{
-    claim: Extract<StructuralRequestClaim, { action: "akuma.call" }>;
-  }>,
+  input: ServeInput &
+    Readonly<{
+      claim: Extract<StructuralRequestClaim, { action: "akuma.call" }>;
+    }>,
 ): Promise<void> {
   input.signal.throwIfAborted();
   if (!input.admissionOpen()) return;
@@ -216,14 +240,10 @@ async function serveCall(
           seed: {
             id: allocated.id,
             archetype: allocated.archetype,
-            ...(request.recipe.description === undefined
-              ? {}
-              : { description: request.recipe.description }),
+            ...(request.recipe.description === undefined ? {} : { description: request.recipe.description }),
             provider: request.recipe.provider,
             options: request.recipe.options,
-            ...(request.recipe.readonly === undefined
-              ? {}
-              : { readonly: request.recipe.readonly }),
+            ...(request.recipe.readonly === undefined ? {} : { readonly: request.recipe.readonly }),
             allowed: request.recipe.allowed,
             cwd: request.cwd ?? input.parent.cwd,
             origin: {
@@ -240,15 +260,16 @@ async function serveCall(
   } catch (error) {
     const current = await readRequest(input.paths, request.id);
     if (current === null) throw error;
-    fact = current.state === "admitted" || current.state === "reserved"
-      ? await voidRequest(input.paths, request.id, diagnostic(error))
-      : current;
+    fact =
+      current.state === "admitted" || current.state === "reserved"
+        ? await voidRequest(input.paths, request.id, diagnostic(error))
+        : current;
   }
   await projectReceipt(input.directory, fact);
 }
 
 function failure(error: unknown): UpstreamRequestFailure {
-  const value = error !== null && typeof error === "object" ? error as Readonly<Record<string, unknown>> : null;
+  const value = error !== null && typeof error === "object" ? (error as Readonly<Record<string, unknown>>) : null;
   if (value?.kind === "akuma-not-born") {
     const id = canonicalAkuId(value.id);
     if (id !== null) return { kind: "akuma-not-born", id };
@@ -325,14 +346,16 @@ async function executeDeliver(
   });
   return {
     result: served.result,
-    ...(served.deliveryFactId === undefined ? {} : {
-      service: {
-        action: request.action,
-        repoRoot: request.repoRoot,
-        contractId: request.contractId,
-        deliveryFactId: served.deliveryFactId,
-      },
-    }),
+    ...(served.deliveryFactId === undefined
+      ? {}
+      : {
+          service: {
+            action: request.action,
+            repoRoot: request.repoRoot,
+            contractId: request.contractId,
+            deliveryFactId: served.deliveryFactId,
+          },
+        }),
   };
 }
 
@@ -351,14 +374,16 @@ async function executeReview(
   });
   return {
     result: served.result,
-    ...(served.reviewFactId === undefined ? {} : {
-      service: {
-        action: request.action,
-        repoRoot: request.repoRoot,
-        contractId: request.contractId,
-        reviewFactId: served.reviewFactId,
-      },
-    }),
+    ...(served.reviewFactId === undefined
+      ? {}
+      : {
+          service: {
+            action: request.action,
+            repoRoot: request.repoRoot,
+            contractId: request.contractId,
+            reviewFactId: served.reviewFactId,
+          },
+        }),
   };
 }
 
@@ -371,9 +396,10 @@ function pendingService(request: UpstreamFact): UpstreamRequestService | undefin
 }
 
 async function serveUpstream(
-  input: ServeInput & Readonly<{
-    claim: Exclude<StructuralRequestClaim, { action: "akuma.call" }>;
-  }>,
+  input: ServeInput &
+    Readonly<{
+      claim: Exclude<StructuralRequestClaim, { action: "akuma.call" }>;
+    }>,
 ): Promise<void> {
   input.signal.throwIfAborted();
   let fact = await admitRequest(input.paths, {
@@ -412,21 +438,14 @@ async function serveUpstream(
     if (served.service !== undefined) service = served.service;
   } catch (error) {
     outcome = { kind: "failed", failure: failure(error) };
-    fact = await voidRequest(
-      input.paths,
-      request.id,
-      "body failed before serving the request",
-    );
+    fact = await voidRequest(input.paths, request.id, "body failed before serving the request");
     await projectReceipt(input.directory, fact);
     return;
   }
-  fact = service === undefined
-    ? await voidRequest(
-        input.paths,
-        request.id,
-        "body completed without a durable Contract fact reference",
-      )
-    : await serveUpstreamRequest(input.paths, request.id, service);
+  fact =
+    service === undefined
+      ? await voidRequest(input.paths, request.id, "body completed without a durable Contract fact reference")
+      : await serveUpstreamRequest(input.paths, request.id, service);
   await projectReceipt(input.directory, fact, outcome);
 }
 
@@ -438,9 +457,7 @@ async function serve(input: ServeInput): Promise<void> {
 
 async function requestFiles(directory: string): Promise<readonly string[]> {
   try {
-    return (await readdir(directory))
-      .filter((name) => name.endsWith(".request.json"))
-      .sort();
+    return (await readdir(directory)).filter((name) => name.endsWith(".request.json")).sort();
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw error;
@@ -535,9 +552,7 @@ export async function clearBodyRequestTransport(paths: AkumaPaths): Promise<void
 }
 
 function matchingRequestOrigin(soul: Soul, parent: AkuId, id: string): boolean {
-  return soul.origin.kind === "request"
-    && soul.origin.parent === parent
-    && soul.origin.requestId === id;
+  return soul.origin.kind === "request" && soul.origin.parent === parent && soul.origin.requestId === id;
 }
 
 async function settleReservedSoul(
@@ -548,11 +563,7 @@ async function settleReservedSoul(
 ): Promise<void> {
   await (matchingRequestOrigin(soul, parent.id, request.id)
     ? serveRequest(paths, request.id, request.child)
-    : voidRequest(
-        paths,
-        request.id,
-        "reserved child origin does not match the request",
-      ));
+    : voidRequest(paths, request.id, "reserved child origin does not match the request"));
 }
 
 async function settleReserved(
@@ -566,7 +577,12 @@ async function settleReserved(
   const deadline = performance.now() + BIRTH_TIMEOUT_MS;
   for (;;) {
     signal?.throwIfAborted();
-    if (!await access(childPaths.directory).then(() => true, () => false)) {
+    if (
+      !(await access(childPaths.directory).then(
+        () => true,
+        () => false,
+      ))
+    ) {
       await voidRequest(paths, request.id, "reserved child directory is absent");
       return true;
     }
@@ -609,10 +625,8 @@ export async function settleBodyRequests(
     signal?.throwIfAborted();
     if (request.state === "admitted") {
       await voidRequest(paths, request.id, "body died before serving the request");
-    } else if (
-      request.state === "reserved"
-      && !await settleReserved(paths, parent, request, now, signal)
-    ) pending = true;
+    } else if (request.state === "reserved" && !(await settleReserved(paths, parent, request, now, signal)))
+      pending = true;
   }
   return pending ? "pending" : "settled";
 }

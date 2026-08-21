@@ -10,8 +10,7 @@ export type ProviderOptions = Readonly<{
 }>;
 
 export type ReadonlyRestraint = Readonly<
-  | { enforcement: "native"; diagnostic?: never }
-  | { enforcement: "none"; diagnostic: string }
+  { enforcement: "native"; diagnostic?: never } | { enforcement: "none"; diagnostic: string }
 >;
 
 export type ProviderExecution = Readonly<{
@@ -24,7 +23,7 @@ export type ProviderExecution = Readonly<{
 
 function record(value: unknown): Readonly<Record<string, unknown>> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Readonly<Record<string, unknown>>
+    ? (value as Readonly<Record<string, unknown>>)
     : null;
 }
 
@@ -86,16 +85,25 @@ export function decodeReadonlyRestraint(value: unknown): ReadonlyRestraint {
   if (restraint.enforcement === "native") {
     return Object.freeze({ enforcement: "native" });
   }
-  if (restraint.enforcement === "none"
-    && typeof restraint.diagnostic === "string" && restraint.diagnostic.trim().length > 0) {
+  if (
+    restraint.enforcement === "none" &&
+    typeof restraint.diagnostic === "string" &&
+    restraint.diagnostic.trim().length > 0
+  ) {
     return Object.freeze({ enforcement: "none", diagnostic: restraint.diagnostic });
   }
   throw new TypeError("readonly restraint must be native or none with a diagnostic");
 }
 
 function providerKind(value: unknown): value is ProviderExecution["kind"] {
-  return value === "acp" || value === "claude-agent-sdk" || value === "codex-app-server" || value === "grok-build"
-    || value === "opencode-sdk" || value === "pi";
+  return (
+    value === "acp" ||
+    value === "claude-agent-sdk" ||
+    value === "codex-app-server" ||
+    value === "grok-build" ||
+    value === "opencode-sdk" ||
+    value === "pi"
+  );
 }
 
 export function decodeProviderRecipe(input: unknown): ProviderExecution {
@@ -105,7 +113,10 @@ export function decodeProviderRecipe(input: unknown): ProviderExecution {
     throw new TypeError("provider execution name must be a nonblank string");
   }
   if (!providerKind(value.kind)) throw new TypeError("provider execution has unknown kind");
-  if (value.executable !== undefined && (typeof value.executable !== "string" || value.executable.trim().length === 0)) {
+  if (
+    value.executable !== undefined &&
+    (typeof value.executable !== "string" || value.executable.trim().length === 0)
+  ) {
     throw new TypeError("provider execution executable must be a nonblank string");
   }
   const config = value.config === undefined ? undefined : record(value.config);

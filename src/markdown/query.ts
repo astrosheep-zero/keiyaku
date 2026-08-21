@@ -1,11 +1,4 @@
-import type {
-  DocumentNode,
-  HeadingNode,
-  MarkdownBlockNode,
-  MarkdownNode,
-  SectionNode,
-  SourceSpan,
-} from "./types.js";
+import type { DocumentNode, HeadingNode, MarkdownBlockNode, MarkdownNode, SectionNode, SourceSpan } from "./types.js";
 
 type HeadingLike = SectionNode | HeadingNode;
 
@@ -61,9 +54,12 @@ export function indexedHeadings(
   index: DocumentIndex,
   query: Readonly<{ title?: string; level?: number }>,
 ): readonly HeadingLike[] {
-  const candidates = query.title === undefined
-    ? query.level === undefined ? [] : index.byLevel.get(query.level) ?? []
-    : index.byTitle.get(normalizeTitle(query.title)) ?? [];
+  const candidates =
+    query.title === undefined
+      ? query.level === undefined
+        ? []
+        : (index.byLevel.get(query.level) ?? [])
+      : (index.byTitle.get(normalizeTitle(query.title)) ?? []);
   return query.level === undefined ? candidates : candidates.filter((node) => node.level === query.level);
 }
 

@@ -4,13 +4,7 @@ import { withGitDecodeChannel } from "../git/read-observation.js";
 import { auditOperation, type AuditReport } from "../protocol/audit.js";
 import type { RepositoryScope } from "../protocol/operations.js";
 import { worktreeHooksOption, type WorktreeHooks } from "./configuration.js";
-import {
-  actorOption,
-  documentDerivation,
-  optionalBoolean,
-  optionalSignal,
-  requireInput,
-} from "./input.js";
+import { actorOption, documentDerivation, optionalBoolean, optionalSignal, requireInput } from "./input.js";
 import { completeMutation, type MutationResult } from "./mutation.js";
 import { requireAccepted } from "./refusal.js";
 
@@ -31,39 +25,38 @@ function normalizeAuditInput(input?: AuditInput) {
     ...actorOption(values?.actor),
     includeDirty: optionalBoolean(values?.includeDirty, "includeDirty") ?? false,
     showDiff: optionalBoolean(values?.showDiff, "showDiff") ?? false,
-    requireBranchesToBeUpToDate: optionalBoolean(
-      values?.requireBranchesToBeUpToDate,
-      "requireBranchesToBeUpToDate",
-    ) ?? false,
+    requireBranchesToBeUpToDate:
+      optionalBoolean(values?.requireBranchesToBeUpToDate, "requireBranchesToBeUpToDate") ?? false,
     ...(signal === undefined ? {} : { signal }),
   };
 }
 
 /** Normalize public audit input and project the protocol audit operation. */
-export async function auditContract(input: Readonly<{
-  scope: RepositoryScope;
-  contractId: ContractId;
-  input?: AuditInput;
-  resolveHereWorkspace?: (contractId: ContractId) => Promise<string | undefined>;
-}>): Promise<MutationResult<AuditReport>> {
+export async function auditContract(
+  input: Readonly<{
+    scope: RepositoryScope;
+    contractId: ContractId;
+    input?: AuditInput;
+    resolveHereWorkspace?: (contractId: ContractId) => Promise<string | undefined>;
+  }>,
+): Promise<MutationResult<AuditReport>> {
   const normalized = normalizeAuditInput(input.input);
   return withGitDecodeChannel(input.scope, async (channel) => {
-    const accepted = requireAccepted(await auditOperation({
-      scope: input.scope,
-      channel,
-      contractId: input.contractId,
-      deriveDocument: (state) => documentDerivation(
-        decodeContractDocument(state.terms.document.bytes),
-        state.terms.gates,
-        state.id,
-      ),
-      includeDirty: normalized.includeDirty,
-      showDiff: normalized.showDiff,
-      requireBranchesToBeUpToDate: normalized.requireBranchesToBeUpToDate,
-      ...(normalized.signal === undefined ? {} : { signal: normalized.signal }),
-      ...(normalized.actor === undefined ? {} : { actor: normalized.actor }),
-      ...(input.resolveHereWorkspace === undefined ? {} : { resolveHereWorkspace: input.resolveHereWorkspace }),
-    }));
+    const accepted = requireAccepted(
+      await auditOperation({
+        scope: input.scope,
+        channel,
+        contractId: input.contractId,
+        deriveDocument: (state) =>
+          documentDerivation(decodeContractDocument(state.terms.document.bytes), state.terms.gates, state.id),
+        includeDirty: normalized.includeDirty,
+        showDiff: normalized.showDiff,
+        requireBranchesToBeUpToDate: normalized.requireBranchesToBeUpToDate,
+        ...(normalized.signal === undefined ? {} : { signal: normalized.signal }),
+        ...(normalized.actor === undefined ? {} : { actor: normalized.actor }),
+        ...(input.resolveHereWorkspace === undefined ? {} : { resolveHereWorkspace: input.resolveHereWorkspace }),
+      }),
+    );
     return completeMutation({
       scope: input.scope,
       channel,

@@ -2,7 +2,12 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { analyzeModelImpact, type FieldSnapshot, type ModelImpactReport, type ModelSource } from "./model-impact/engine.js";
+import {
+  analyzeModelImpact,
+  type FieldSnapshot,
+  type ModelImpactReport,
+  type ModelSource,
+} from "./model-impact/engine.js";
 import { MODEL_IMPACT_POLICY } from "./model-impact/policy.js";
 
 type Options = Readonly<{ base: string; head: string; json: boolean }>;
@@ -54,16 +59,22 @@ function snapshotLines(label: "before" | "after", value: FieldSnapshot | undefin
   if (!value) return [];
   const consumers = value.usages.filter((usage) => usage.kind !== "declaration");
   const lines = [`  ${label}: ${value.signature}`];
-  for (const usage of consumers) lines.push(`    ${usage.kind.padEnd(11)} ${usage.owner.padEnd(16)} ${usage.file}:${usage.line}:${usage.column}`);
+  for (const usage of consumers)
+    lines.push(`    ${usage.kind.padEnd(11)} ${usage.owner.padEnd(16)} ${usage.file}:${usage.line}:${usage.column}`);
   return lines;
 }
 
 export function renderModelImpact(report: ModelImpactReport): string {
-  const lines = [`model-impact: ${report.base} -> ${report.head} (${report.fields.length} exported fields changed)`, "report-only: fan-out never changes the exit code"];
+  const lines = [
+    `model-impact: ${report.base} -> ${report.head} (${report.fields.length} exported fields changed)`,
+    "report-only: fan-out never changes the exit code",
+  ];
   for (const field of report.fields) {
     lines.push("");
     lines.push(`${field.owners.length > 1 ? "!" : "-"} ${field.change} ${field.key}`);
-    lines.push(`  reach: ${field.files.length} consumer files / ${field.owners.length} owners${field.owners.length ? ` (${field.owners.join(", ")})` : ""}`);
+    lines.push(
+      `  reach: ${field.files.length} consumer files / ${field.owners.length} owners${field.owners.length ? ` (${field.owners.join(", ")})` : ""}`,
+    );
     lines.push(...snapshotLines("before", field.before));
     lines.push(...snapshotLines("after", field.after));
   }

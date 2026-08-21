@@ -32,9 +32,7 @@ export function mergeSummary(observation: ContractWorkspaceObservation): string 
   if (observation.kind !== "clean" && observation.kind !== "dirty") return undefined;
   if (observation.merge === null) return undefined;
   const count = observation.merge.unmergedPaths.length;
-  return count > 0
-    ? `merge conflict in worktree (${count} paths)`
-    : "merge in progress (resolution staged)";
+  return count > 0 ? `merge conflict in worktree (${count} paths)` : "merge in progress (resolution staged)";
 }
 
 export function abbreviateGitIds(ids: readonly string[]): ReadonlyMap<string, string> {

@@ -32,15 +32,27 @@ function isBusy(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false;
   const value = error as { code?: unknown; errcode?: unknown; message?: unknown };
   const message = String(value.message ?? "").toLowerCase();
-  return value.errcode === SQLITE_BUSY || value.code === "ERR_SQLITE_BUSY"
-    || value.code === "ERR_SQLITE_LOCKED" || message.includes("database is locked")
-    || message.includes("database is busy");
+  return (
+    value.errcode === SQLITE_BUSY ||
+    value.code === "ERR_SQLITE_BUSY" ||
+    value.code === "ERR_SQLITE_LOCKED" ||
+    message.includes("database is locked") ||
+    message.includes("database is busy")
+  );
 }
 
 function closeDatabase(database: DatabaseSync): unknown {
   let failure: unknown;
-  try { database.exec("ROLLBACK"); } catch (error) { failure = error; }
-  try { database.close(); } catch (error) { failure ??= error; }
+  try {
+    database.exec("ROLLBACK");
+  } catch (error) {
+    failure = error;
+  }
+  try {
+    database.close();
+  } catch (error) {
+    failure ??= error;
+  }
   return failure;
 }
 
@@ -56,7 +68,9 @@ async function openLock(path: string, mode: SqliteTransactionLockMode): Promise<
     await mkdir(dirname(path), { recursive: true });
   } catch (error) {
     if (error instanceof SqliteTransactionLockError) throw error;
-    throw new SqliteTransactionLockError(`cannot prepare SQLite lock: ${detail(error)}`, "open-failed", { cause: error });
+    throw new SqliteTransactionLockError(`cannot prepare SQLite lock: ${detail(error)}`, "open-failed", {
+      cause: error,
+    });
   }
 
   let database: DatabaseSync | undefined;
@@ -70,25 +84,38 @@ async function openLock(path: string, mode: SqliteTransactionLockMode): Promise<
   } catch (error) {
     if (database) closeDatabase(database);
     if (isBusy(error)) throw error;
-    throw new SqliteTransactionLockError(`cannot acquire SQLite lock: ${detail(error)}`, "open-failed", { cause: error });
+    throw new SqliteTransactionLockError(`cannot acquire SQLite lock: ${detail(error)}`, "open-failed", {
+      cause: error,
+    });
   }
 
   let closed = false;
-  return { close(): void {
-    if (closed) return;
-    closed = true;
-    const failure = closeDatabase(database!);
-    if (failure !== undefined) {
-      throw new SqliteTransactionLockError(`cannot release SQLite lock: ${detail(failure)}`, "release-failed", { cause: failure });
-    }
-  } };
+  return {
+    close(): void {
+      if (closed) return;
+      closed = true;
+      const failure = closeDatabase(database!);
+      if (failure !== undefined) {
+        throw new SqliteTransactionLockError(`cannot release SQLite lock: ${detail(failure)}`, "release-failed", {
+          cause: failure,
+        });
+      }
+    },
+  };
 }
 
 function wait(milliseconds: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
-    const finish = (): void => { signal?.removeEventListener("abort", abort); resolve(); };
+    const finish = (): void => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    };
     const timer = setTimeout(finish, milliseconds);
-    const abort = (): void => { clearTimeout(timer); signal?.removeEventListener("abort", abort); reject(signal?.reason); };
+    const abort = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+      reject(signal?.reason);
+    };
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) abort();
   });
@@ -100,19 +127,27 @@ export async function acquireSqliteTransactionLock(input: {
   timeoutMs?: number;
   signal?: AbortSignal;
 }): Promise<HeldSqliteTransactionLock> {
-  if (input.path.length === 0 || (input.timeoutMs !== undefined
-    && (!Number.isSafeInteger(input.timeoutMs) || input.timeoutMs < 0))) {
+  if (
+    input.path.length === 0 ||
+    (input.timeoutMs !== undefined && (!Number.isSafeInteger(input.timeoutMs) || input.timeoutMs < 0))
+  ) {
     throw new SqliteTransactionLockError("SQLite lock path and timeout must be valid", "invalid");
   }
   const started = performance.now();
   let cap = INITIAL_RETRY_MS;
   for (;;) {
     input.signal?.throwIfAborted();
-    try { return await openLock(input.path, input.mode); } catch (error) {
+    try {
+      return await openLock(input.path, input.mode);
+    } catch (error) {
       if (!isBusy(error)) throw error;
       const elapsed = performance.now() - started;
       if (input.timeoutMs !== undefined && elapsed >= input.timeoutMs) {
-        throw new SqliteTransactionLockError(`SQLite lock timed out after ${input.timeoutMs}ms: ${input.path}`, "timeout", { cause: error });
+        throw new SqliteTransactionLockError(
+          `SQLite lock timed out after ${input.timeoutMs}ms: ${input.path}`,
+          "timeout",
+          { cause: error },
+        );
       }
       const delay = randomInt(Math.ceil(cap / 2), cap + 1);
       const remaining = input.timeoutMs === undefined ? delay : Math.min(delay, input.timeoutMs - elapsed);

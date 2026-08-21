@@ -50,13 +50,13 @@ export type UnknownAttemptClassification =
   | Readonly<{ kind: "accepted" }>
   | Readonly<{ kind: "redecide" }>
   | Readonly<{
-    kind: "collision";
-    contractId: ContractId;
-    planned: JournalEntry;
-    observed: JournalEntry;
-    plannedBytes: string;
-    observedBytes: string;
-  }>;
+      kind: "collision";
+      contractId: ContractId;
+      planned: JournalEntry;
+      observed: JournalEntry;
+      plannedBytes: string;
+      observedBytes: string;
+    }>;
 
 export type AcceptedAdmission = Readonly<{
   kind: "accepted";
@@ -134,22 +134,23 @@ async function publicationPremiseMoved(
   offer: Offer,
   assertions: readonly GitRefAssertion[],
 ): Promise<boolean> {
-  if (await readRef(repository, GIT_REF) !== observation.admission.snapshot.commit) return true;
-  for (const assertion of assertions) if (await readRef(repository, assertion.ref) !== assertion.oid) return true;
-  return offer.target !== undefined
-    && await readRef(repository, offer.target.target) !== offer.target.expectedOid;
+  if ((await readRef(repository, GIT_REF)) !== observation.admission.snapshot.commit) return true;
+  for (const assertion of assertions) if ((await readRef(repository, assertion.ref)) !== assertion.oid) return true;
+  return offer.target !== undefined && (await readRef(repository, offer.target.target)) !== offer.target.expectedOid;
 }
 
 /** Admit one decided offer without making another legal decision. */
-export async function admitDecidedOffer(input: Readonly<{
-  channel: GitDecodeChannel;
-  repository: GitRepository;
-  decisionObservation: GitDecisionObservation;
-  attempt: AttemptContext;
-  offer: Offer;
-  primaryContract: ContractId;
-  assertions?: readonly GitRefAssertion[];
-}>): Promise<DecidedOfferResult> {
+export async function admitDecidedOffer(
+  input: Readonly<{
+    channel: GitDecodeChannel;
+    repository: GitRepository;
+    decisionObservation: GitDecisionObservation;
+    attempt: AttemptContext;
+    offer: Offer;
+    primaryContract: ContractId;
+    assertions?: readonly GitRefAssertion[];
+  }>,
+): Promise<DecidedOfferResult> {
   const { channel, repository, decisionObservation, attempt, offer, primaryContract } = input;
   const assertions = input.assertions ?? [];
   validateOffer(offer, attempt);
@@ -164,13 +165,18 @@ export async function admitDecidedOffer(input: Readonly<{
     };
   }
   if (admission.kind === "publication-failed") {
-    return await publicationPremiseMoved(repository, decisionObservation, offer, assertions)
+    return (await publicationPremiseMoved(repository, decisionObservation, offer, assertions))
       ? { kind: "redecide" }
       : admission;
   }
-  const recovered = await observeContractsForAdmissionAt(repository, channel, offer.facts.map((append) => append.contractId));
+  const recovered = await observeContractsForAdmissionAt(
+    repository,
+    channel,
+    offer.facts.map((append) => append.contractId),
+  );
   const classification = classifyUnknownAttempt({ contracts: recovered.journals }, offer);
-  if (classification.kind === "accepted") return recoveredAcceptance({ contracts: recovered.journals }, offer, primaryContract);
+  if (classification.kind === "accepted")
+    return recoveredAcceptance({ contracts: recovered.journals }, offer, primaryContract);
   return classification.kind === "collision" ? { kind: "collision" } : { kind: "redecide" };
 }
 

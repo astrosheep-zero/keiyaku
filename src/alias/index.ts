@@ -28,10 +28,12 @@ function paths(world: WorldRoot): Readonly<{ authority: string; lock: string }> 
 }
 
 function canonical(bindings: readonly AliasBinding[]): string {
-  const aliases = Object.fromEntries(bindings
-    .slice()
-    .sort((left, right) => Buffer.compare(Buffer.from(left.alias), Buffer.from(right.alias)))
-    .map((binding) => [binding.alias, binding.akuId]));
+  const aliases = Object.fromEntries(
+    bindings
+      .slice()
+      .sort((left, right) => Buffer.compare(Buffer.from(left.alias), Buffer.from(right.alias)))
+      .map((binding) => [binding.alias, binding.akuId]),
+  );
   const file: AliasFile = { version: VERSION, aliases };
   return `${JSON.stringify(file)}\n`;
 }
@@ -125,11 +127,13 @@ export async function resolveAlias(world: WorldRoot, value: AkumaAlias): Promise
   return (await readAliases(world)).find((binding) => binding.alias === alias)?.akuId ?? null;
 }
 
-export async function moveAlias(input: Readonly<{
-  world: WorldRoot;
-  alias: AkumaAlias;
-  akuId: AkuId;
-}>): Promise<AliasMove> {
+export async function moveAlias(
+  input: Readonly<{
+    world: WorldRoot;
+    alias: AkumaAlias;
+    akuId: AkuId;
+  }>,
+): Promise<AliasMove> {
   const alias = parseAkumaAlias(input.alias);
   const akuId = parseAkuId(input.akuId).id;
   const location = paths(input.world);

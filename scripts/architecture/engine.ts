@@ -114,7 +114,12 @@ export type ArchitectureResult = Readonly<{
   diagnostics: readonly Diagnostic[];
 }>;
 
-function normalized(value: string): string { return value.replaceAll("\\", "/").replace(/^\.\//, "").replace(/^src\//, ""); }
+function normalized(value: string): string {
+  return value
+    .replaceAll("\\", "/")
+    .replace(/^\.\//, "")
+    .replace(/^src\//, "");
+}
 
 function matches(pattern: string, candidate: string): boolean {
   const patternSegments = pattern.split("/");
@@ -122,17 +127,25 @@ function matches(pattern: string, candidate: string): boolean {
   const visit = (patternIndex: number, candidateIndex: number): boolean => {
     const segment = patternSegments[patternIndex];
     if (segment === undefined) return candidateIndex === candidateSegments.length;
-    if (segment !== "**") return segment === candidateSegments[candidateIndex] && visit(patternIndex + 1, candidateIndex + 1);
+    if (segment !== "**")
+      return segment === candidateSegments[candidateIndex] && visit(patternIndex + 1, candidateIndex + 1);
     if (patternIndex === patternSegments.length - 1) return true;
-    return candidateSegments.slice(candidateIndex).some((_, offset) => visit(patternIndex + 1, candidateIndex + offset))
-      || visit(patternIndex + 1, candidateSegments.length);
+    return (
+      candidateSegments.slice(candidateIndex).some((_, offset) => visit(patternIndex + 1, candidateIndex + offset)) ||
+      visit(patternIndex + 1, candidateSegments.length)
+    );
   };
   return visit(0, 0);
 }
 
-function location(sourceFile: ts.SourceFile, node: ts.Node): Readonly<{ line: number; column: number }> { const result = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)); return { line: result.line + 1, column: result.character + 1 }; }
+function location(sourceFile: ts.SourceFile, node: ts.Node): Readonly<{ line: number; column: number }> {
+  const result = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+  return { line: result.line + 1, column: result.character + 1 };
+}
 
-function pushSymbol(target: string[], symbol: string): void { if (!target.includes(symbol)) target.push(symbol); }
+function pushSymbol(target: string[], symbol: string): void {
+  if (!target.includes(symbol)) target.push(symbol);
+}
 
 function importDeclarationSymbols(node: ts.ImportDeclaration): ImportedSymbols {
   const runtime: string[] = [];
@@ -159,7 +172,10 @@ function exportDeclarationSymbols(node: ts.ExportDeclaration): ImportedSymbols {
   if (!node.exportClause || !ts.isNamedExports(node.exportClause)) pushSymbol(target, "*");
   else {
     for (const element of node.exportClause.elements) {
-      pushSymbol(element.isTypeOnly || node.isTypeOnly ? types : runtime, element.propertyName?.text ?? element.name.text);
+      pushSymbol(
+        element.isTypeOnly || node.isTypeOnly ? types : runtime,
+        element.propertyName?.text ?? element.name.text,
+      );
     }
   }
   return { runtime, types };
@@ -172,14 +188,18 @@ function importSymbols(node: ts.Node): ImportedSymbols {
 }
 
 function moduleSpecifier(node: ts.Node): string | null {
-  if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+  if (
+    (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
+    node.moduleSpecifier &&
+    ts.isStringLiteral(node.moduleSpecifier)
+  ) {
     return node.moduleSpecifier.text;
   }
   if (
-    ts.isImportEqualsDeclaration(node)
-    && ts.isExternalModuleReference(node.moduleReference)
-    && node.moduleReference.expression
-    && ts.isStringLiteral(node.moduleReference.expression)
+    ts.isImportEqualsDeclaration(node) &&
+    ts.isExternalModuleReference(node.moduleReference) &&
+    node.moduleReference.expression &&
+    ts.isStringLiteral(node.moduleReference.expression)
   ) {
     return node.moduleReference.expression.text;
   }
@@ -206,7 +226,7 @@ function resolveRelative(from: string, specifier: string, known: ReadonlySet<str
 }
 
 function modifiers(node: ts.Node): readonly ts.Modifier[] {
-  return ts.canHaveModifiers(node) ? ts.getModifiers(node) ?? [] : [];
+  return ts.canHaveModifiers(node) ? (ts.getModifiers(node) ?? []) : [];
 }
 
 function declarationOf(node: ts.Node, sourceFile: ts.SourceFile): Declaration | null {
@@ -214,7 +234,13 @@ function declarationOf(node: ts.Node, sourceFile: ts.SourceFile): Declaration | 
   let functionDeclaration = false;
   let runtime = false;
   let functionInitializer: ts.ArrowFunction | ts.FunctionExpression | undefined;
-  if (ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node) || ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node) || ts.isEnumDeclaration(node)) {
+  if (
+    ts.isFunctionDeclaration(node) ||
+    ts.isClassDeclaration(node) ||
+    ts.isInterfaceDeclaration(node) ||
+    ts.isTypeAliasDeclaration(node) ||
+    ts.isEnumDeclaration(node)
+  ) {
     name = node.name;
     functionDeclaration = ts.isFunctionDeclaration(node);
     runtime = !ts.isInterfaceDeclaration(node) && !ts.isTypeAliasDeclaration(node);
@@ -227,9 +253,12 @@ function declarationOf(node: ts.Node, sourceFile: ts.SourceFile): Declaration | 
     }
   }
   if (!name || !ts.isIdentifier(name)) return null;
-  const owner = ts.isVariableDeclaration(node) && ts.isVariableDeclarationList(node.parent) && ts.isVariableStatement(node.parent.parent)
-    ? node.parent.parent
-    : node;
+  const owner =
+    ts.isVariableDeclaration(node) &&
+    ts.isVariableDeclarationList(node.parent) &&
+    ts.isVariableStatement(node.parent.parent)
+      ? node.parent.parent
+      : node;
   const nodeModifiers = modifiers(owner);
   const at = location(sourceFile, node);
   return {
@@ -237,8 +266,10 @@ function declarationOf(node: ts.Node, sourceFile: ts.SourceFile): Declaration | 
     exported: nodeModifiers.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword),
     runtime,
     function: functionDeclaration,
-    async: nodeModifiers.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword)
-      || (functionInitializer !== undefined && modifiers(functionInitializer).some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword)),
+    async:
+      nodeModifiers.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword) ||
+      (functionInitializer !== undefined &&
+        modifiers(functionInitializer).some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword)),
     line: at.line,
     column: at.column,
   };
@@ -252,16 +283,20 @@ function runtimeReExport(node: ts.Node, sourceFile: ts.SourceFile): Readonly<{ l
 }
 
 function isProcessReference(node: ts.Expression): boolean {
-  return ts.isIdentifier(node) && node.text === "process"
-    || ts.isPropertyAccessExpression(node)
-      && ts.isIdentifier(node.expression)
-      && node.expression.text === "globalThis"
-      && node.name.text === "process";
+  return (
+    (ts.isIdentifier(node) && node.text === "process") ||
+    (ts.isPropertyAccessExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === "globalThis" &&
+      node.name.text === "process")
+  );
 }
 
 function propertyCapability(node: ts.PropertyAccessExpression): Capability | null {
-  if (ts.isIdentifier(node.expression) && node.expression.text === "Date" && node.name.text === "now") return "date-now";
-  if (ts.isIdentifier(node.expression) && node.expression.text === "Math" && node.name.text === "random") return "math-random";
+  if (ts.isIdentifier(node.expression) && node.expression.text === "Date" && node.name.text === "now")
+    return "date-now";
+  if (ts.isIdentifier(node.expression) && node.expression.text === "Math" && node.name.text === "random")
+    return "math-random";
   if (!isProcessReference(node.expression)) return null;
   if (node.name.text === "env") return "process-environment";
   if (node.name.text === "argv") return "process-argv";
@@ -274,10 +309,14 @@ function propertyCapability(node: ts.PropertyAccessExpression): Capability | nul
 function calledGlobalCapability(node: ts.CallExpression): Capability | null {
   if (!ts.isIdentifier(node.expression)) return null;
   switch (node.expression.text) {
-    case "eval": return "eval";
-    case "require": return "require";
-    case "Function": return "function-constructor";
-    default: return null;
+    case "eval":
+      return "eval";
+    case "require":
+      return "require";
+    case "Function":
+      return "function-constructor";
+    default:
+      return null;
   }
 }
 
@@ -298,10 +337,11 @@ function capabilityOf(node: ts.Node): Capability | null {
   }
   if (ts.isCallExpression(node)) return calledGlobalCapability(node);
   if (
-    ts.isVariableStatement(node)
-    && ts.isSourceFile(node.parent)
-    && (node.declarationList.flags & ts.NodeFlags.Const) === 0
-  ) return "module-mutable-state";
+    ts.isVariableStatement(node) &&
+    ts.isSourceFile(node.parent) &&
+    (node.declarationList.flags & ts.NodeFlags.Const) === 0
+  )
+    return "module-mutable-state";
   return null;
 }
 
@@ -376,53 +416,62 @@ function referenceDiagnostics(
   zone: DependencyZone | undefined,
   policy: ArchitecturePolicy,
 ): readonly Diagnostic[] {
-  if (reference.relative && reference.target === null) return [{
-    rule: "architecture/unresolved-import",
-    file: unit.path,
-    line: reference.line,
-    column: reference.column,
-    detail: `cannot resolve ${reference.specifier}`,
-  }];
+  if (reference.relative && reference.target === null)
+    return [
+      {
+        rule: "architecture/unresolved-import",
+        file: unit.path,
+        line: reference.line,
+        column: reference.column,
+        detail: `cannot resolve ${reference.specifier}`,
+      },
+    ];
   const diagnostics: Diagnostic[] = [];
   const providerSdk = policy.providerSdkRoots.find((candidate) => candidate.module === reference.specifier);
-  if (providerSdk && reference.symbols.runtime.length > 0 && !matches(`${providerSdk.root}/**`, unit.path)) diagnostics.push({
-    rule: "architecture/provider-sdk-boundary",
-    file: unit.path,
-    line: reference.line,
-    column: reference.column,
-    detail: `${reference.specifier} may be loaded only inside ${providerSdk.root}/`,
-  });
-  if (reference.target && zone && !zone.allow.some((allowance) => allowanceMatches(reference, allowance))) diagnostics.push({
-    rule: "architecture/dependency-direction",
-    file: unit.path,
-    line: reference.line,
-    column: reference.column,
-    detail: `${unit.path} -> ${reference.target} imports ${importedSymbols(reference).join(", ") || "<none>"}`,
-  });
+  if (providerSdk && reference.symbols.runtime.length > 0 && !matches(`${providerSdk.root}/**`, unit.path))
+    diagnostics.push({
+      rule: "architecture/provider-sdk-boundary",
+      file: unit.path,
+      line: reference.line,
+      column: reference.column,
+      detail: `${reference.specifier} may be loaded only inside ${providerSdk.root}/`,
+    });
+  if (reference.target && zone && !zone.allow.some((allowance) => allowanceMatches(reference, allowance)))
+    diagnostics.push({
+      rule: "architecture/dependency-direction",
+      file: unit.path,
+      line: reference.line,
+      column: reference.column,
+      detail: `${unit.path} -> ${reference.target} imports ${importedSymbols(reference).join(", ") || "<none>"}`,
+    });
   if (reference.relative) return diagnostics;
-  if (policy.forbiddenModules.some((module) => moduleMatches(module, reference.specifier))) diagnostics.push({
-    rule: "architecture/forbidden-module",
-    file: unit.path,
-    line: reference.line,
-    column: reference.column,
-    detail: `forbidden module ${reference.specifier}`,
-  });
+  if (policy.forbiddenModules.some((module) => moduleMatches(module, reference.specifier)))
+    diagnostics.push({
+      rule: "architecture/forbidden-module",
+      file: unit.path,
+      line: reference.line,
+      column: reference.column,
+      detail: `forbidden module ${reference.specifier}`,
+    });
   const sensitive = policy.sensitiveImports.find((rule) => rule.module === reference.specifier);
   if (!sensitive) return diagnostics;
   const symbols = importedSymbols(reference);
   const allowed = sensitive.owners.some((owner) => {
     const permitted = new Set(owner.symbols);
-    return matches(owner.source, unit.path)
-      && (owner.mode !== "type-only" || reference.symbols.runtime.length === 0)
-      && symbols.every((symbol) => permitted.has(symbol));
+    return (
+      matches(owner.source, unit.path) &&
+      (owner.mode !== "type-only" || reference.symbols.runtime.length === 0) &&
+      symbols.every((symbol) => permitted.has(symbol))
+    );
   });
-  if (!allowed) diagnostics.push({
-    rule: "architecture/capability-import",
-    file: unit.path,
-    line: reference.line,
-    column: reference.column,
-    detail: `${reference.specifier} imports ${symbols.join(", ") || "<none>"}`,
-  });
+  if (!allowed)
+    diagnostics.push({
+      rule: "architecture/capability-import",
+      file: unit.path,
+      line: reference.line,
+      column: reference.column,
+      detail: `${reference.specifier} imports ${symbols.join(", ") || "<none>"}`,
+    });
   return diagnostics;
 }
 
@@ -430,14 +479,30 @@ function dependencyDiagnostics(units: readonly ParsedSource[], policy: Architect
   const diagnostics: Diagnostic[] = [];
   for (const unit of units) {
     const zone = policy.zones.find((candidate) => matches(candidate.source, unit.path));
-    if (!zone) diagnostics.push({ rule: "architecture/unowned-source", file: unit.path, line: 1, column: 1, detail: "source file has no declared owner zone" });
+    if (!zone)
+      diagnostics.push({
+        rule: "architecture/unowned-source",
+        file: unit.path,
+        line: 1,
+        column: 1,
+        detail: "source file has no declared owner zone",
+      });
     for (const reference of unit.references) diagnostics.push(...referenceDiagnostics(unit, reference, zone, policy));
   }
   return diagnostics;
 }
 
 function stronglyConnected(units: readonly ParsedSource[]): readonly (readonly string[])[] {
-  const graph = new Map(units.map((unit) => [unit.path, new Set(unit.references.flatMap((reference) => reference.target && reference.symbols.runtime.length > 0 ? [reference.target] : []))]));
+  const graph = new Map(
+    units.map((unit) => [
+      unit.path,
+      new Set(
+        unit.references.flatMap((reference) =>
+          reference.target && reference.symbols.runtime.length > 0 ? [reference.target] : [],
+        ),
+      ),
+    ]),
+  );
   let index = 0;
   const indices = new Map<string, number>();
   const low = new Map<string, number>();
@@ -467,7 +532,9 @@ function stronglyConnected(units: readonly ParsedSource[]): readonly (readonly s
     components.push(component.sort());
   };
   for (const unit of units) if (!indices.has(unit.path)) connect(unit.path);
-  return components.filter((component) => component.length > 1 || (graph.get(component[0]!)?.has(component[0]!) ?? false));
+  return components.filter(
+    (component) => component.length > 1 || (graph.get(component[0]!)?.has(component[0]!) ?? false),
+  );
 }
 
 function runtimeGraphDiagnostics(units: readonly ParsedSource[], policy: ArchitecturePolicy): Diagnostic[] {
@@ -484,13 +551,14 @@ function runtimeGraphDiagnostics(units: readonly ParsedSource[], policy: Archite
     for (const reference of unit.references) {
       if (reference.symbols.runtime.length === 0) continue;
       const providerSdk = policy.providerSdkRoots.find((candidate) => candidate.module === reference.specifier);
-      if (providerSdk) diagnostics.push({
-        rule: "architecture/provider-sdk-reachable-from-cli",
-        file: unit.path,
-        line: reference.line,
-        column: reference.column,
-        detail: `${reference.specifier} is reachable from ${policy.runtimeGraphRoots.join(", ")}`,
-      });
+      if (providerSdk)
+        diagnostics.push({
+          rule: "architecture/provider-sdk-reachable-from-cli",
+          file: unit.path,
+          line: reference.line,
+          column: reference.column,
+          detail: `${reference.specifier} is reachable from ${policy.runtimeGraphRoots.join(", ")}`,
+        });
       if (reference.target) queue.push(reference.target);
     }
   }
@@ -505,7 +573,8 @@ function verbOwnerDiagnostic(unit: ParsedSource, policy: ArchitecturePolicy): Di
   const decision = runtimeExports.find((declaration) => declaration.name === expected);
   const invalidExport = runtimeExports.find((declaration) => !declaration.function || declaration.async);
   const reExport = unit.runtimeReExports[0];
-  if (reExport === undefined && decision?.function === true && !decision.async && invalidExport === undefined) return null;
+  if (reExport === undefined && decision?.function === true && !decision.async && invalidExport === undefined)
+    return null;
   const location = reExport ?? invalidExport ?? decision ?? runtimeExports[0];
   return {
     rule: "architecture/verb-owner",
@@ -520,21 +589,23 @@ function structureDiagnostics(units: readonly ParsedSource[], policy: Architectu
   const diagnostics: Diagnostic[] = [];
   for (const unit of units) {
     const basename = path.posix.basename(unit.path);
-    if (policy.forbiddenFileNames.includes(basename)) diagnostics.push({
-      rule: "architecture/removed-owner",
-      file: unit.path,
-      line: 1,
-      column: 1,
-      detail: `removed owner ${basename} must not exist`,
-    });
-    for (const declaration of unit.declarations) {
-      if (policy.forbiddenDeclarations.some((pattern) => pattern.test(declaration.name))) diagnostics.push({
-        rule: "architecture/removed-declaration",
+    if (policy.forbiddenFileNames.includes(basename))
+      diagnostics.push({
+        rule: "architecture/removed-owner",
         file: unit.path,
-        line: declaration.line,
-        column: declaration.column,
-        detail: `removed declaration ${declaration.name}`,
+        line: 1,
+        column: 1,
+        detail: `removed owner ${basename} must not exist`,
       });
+    for (const declaration of unit.declarations) {
+      if (policy.forbiddenDeclarations.some((pattern) => pattern.test(declaration.name)))
+        diagnostics.push({
+          rule: "architecture/removed-declaration",
+          file: unit.path,
+          line: declaration.line,
+          column: declaration.column,
+          detail: `removed declaration ${declaration.name}`,
+        });
     }
     for (const rule of policy.forbiddenSourcePatterns.filter((candidate) => matches(candidate.source, unit.path))) {
       const flags = rule.pattern.flags.includes("g") ? rule.pattern.flags : `${rule.pattern.flags}g`;
@@ -553,13 +624,14 @@ function structureDiagnostics(units: readonly ParsedSource[], policy: Architectu
     if (verbOwner) diagnostics.push(verbOwner);
     for (const use of unit.capabilities) {
       const rule = policy.capabilityRules.find((candidate) => candidate.capability === use.capability);
-      if (rule && !rule.owners.some((owner) => matches(owner, unit.path))) diagnostics.push({
-        rule: "architecture/capability-use",
-        file: unit.path,
-        line: use.line,
-        column: use.column,
-        detail: `${use.capability} is not owned here`,
-      });
+      if (rule && !rule.owners.some((owner) => matches(owner, unit.path)))
+        diagnostics.push({
+          rule: "architecture/capability-use",
+          file: unit.path,
+          line: use.line,
+          column: use.column,
+          detail: `${use.capability} is not owned here`,
+        });
     }
   }
   return diagnostics;
@@ -572,17 +644,21 @@ export function checkArchitecture(inputs: readonly SourceInput[], policy: Archit
     ...structureDiagnostics(units, policy),
     ...runtimeGraphDiagnostics(units, policy),
   ];
-  for (const component of stronglyConnected(units)) diagnostics.push({
-    rule: "architecture/dependency-cycle",
-    file: component[0]!,
-    line: 1,
-    column: 1,
-    detail: component.join(" -> "),
-  });
-  diagnostics.sort((left, right) => left.file.localeCompare(right.file)
-    || left.line - right.line
-    || left.column - right.column
-    || left.rule.localeCompare(right.rule)
-    || left.detail.localeCompare(right.detail));
+  for (const component of stronglyConnected(units))
+    diagnostics.push({
+      rule: "architecture/dependency-cycle",
+      file: component[0]!,
+      line: 1,
+      column: 1,
+      detail: component.join(" -> "),
+    });
+  diagnostics.sort(
+    (left, right) =>
+      left.file.localeCompare(right.file) ||
+      left.line - right.line ||
+      left.column - right.column ||
+      left.rule.localeCompare(right.rule) ||
+      left.detail.localeCompare(right.detail),
+  );
   return { files: units.map((unit) => unit.path).sort(), diagnostics };
 }

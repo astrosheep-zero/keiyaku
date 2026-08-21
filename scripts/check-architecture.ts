@@ -44,22 +44,18 @@ function retiredModelDiagnostics(inputs: readonly SourceInput[]): readonly Diagn
 }
 
 export function runArchitectureCheck(root: string): number {
-  const inputs = [
-    ...sourceInputs(path.join(root, "src")),
-    ...sourceInputs(path.join(root, "scripts"), "scripts"),
-  ];
+  const inputs = [...sourceInputs(path.join(root, "src")), ...sourceInputs(path.join(root, "scripts"), "scripts")];
   const result = checkArchitecture(inputs, KEIYAKU_ARCHITECTURE_POLICY);
-  const diagnostics = [
-    ...result.diagnostics,
-    ...retiredModelDiagnostics(inputs),
-  ];
+  const diagnostics = [...result.diagnostics, ...retiredModelDiagnostics(inputs)];
   if (diagnostics.length === 0) {
     console.log(`architecture: ok (${result.files.length} files)`);
     return 0;
   }
   console.error("architecture: failed");
   for (const diagnostic of diagnostics) {
-    console.error(`${diagnostic.file}:${diagnostic.line}:${diagnostic.column} [${diagnostic.rule}] ${diagnostic.detail}`);
+    console.error(
+      `${diagnostic.file}:${diagnostic.line}:${diagnostic.column} [${diagnostic.rule}] ${diagnostic.detail}`,
+    );
   }
   return 1;
 }

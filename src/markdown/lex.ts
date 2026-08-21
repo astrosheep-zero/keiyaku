@@ -53,7 +53,11 @@ function header(line: string): Readonly<{ level: number; text: string }> | null 
   let level = 0;
   while (line[level] === "#") level += 1;
   if (level === 0 || (line[level] !== " " && line[level] !== "\t")) return null;
-  const text = line.slice(level).trim().replace(/[ \t]+#+[ \t]*$/, "").trimEnd();
+  const text = line
+    .slice(level)
+    .trim()
+    .replace(/[ \t]+#+[ \t]*$/, "")
+    .trimEnd();
   return text.length === 0 ? null : { level, text };
 }
 
@@ -142,7 +146,10 @@ function frontmatter(lines: readonly SourceLine[]): Readonly<{ token: MarkdownTo
   let closing = 1;
   while (closing < lines.length && lines[closing]!.text.trim() !== "---") closing += 1;
   if (closing >= lines.length) return null;
-  const yaml = lines.slice(1, closing).map((line) => line.text).join("\n");
+  const yaml = lines
+    .slice(1, closing)
+    .map((line) => line.text)
+    .join("\n");
   const entries = parseFrontmatter(yaml);
   const selected = lines.slice(0, closing + 1);
   return {

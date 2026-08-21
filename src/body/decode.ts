@@ -1,12 +1,7 @@
 import { mintDocumentKey, mintDocumentSegmentKey } from "./keys.js";
 import type { ContractBody, ContractCriterion, DecodedContractDocument } from "./types.js";
 import { decodeDocumentEnvelope } from "./envelope.js";
-import {
-  directChildren,
-  normalizeTitle,
-  rawSlice,
-  sectionContent,
-} from "../markdown/query.js";
+import { directChildren, normalizeTitle, rawSlice, sectionContent } from "../markdown/query.js";
 import type { DocumentNode, SectionNode } from "../markdown/types.js";
 import { CONTRACT_SECTIONS, RESERVED_SECTIONS, type ContractSectionName } from "./shape.js";
 import { decodeRegion, RegionDocumentError } from "./region.js";
@@ -14,7 +9,7 @@ import { decodeVerificationDeclarations, VerificationDocumentError } from "./ver
 import type { VerificationDefinition } from "../verification/declaration.js";
 
 type RequiredSectionName = {
-  [Name in ContractSectionName]: typeof CONTRACT_SECTIONS[Name]["required"] extends true ? Name : never;
+  [Name in ContractSectionName]: (typeof CONTRACT_SECTIONS)[Name]["required"] extends true ? Name : never;
 }[ContractSectionName];
 
 function refusal(message: string): never {
@@ -110,9 +105,8 @@ export function decodeContractDocument(source: string): DecodedContractDocument 
     ...body,
     document: { bytes: source, key: mintDocumentKey(source) },
     segments,
-    verificationSegment: verificationSection === undefined
-      ? null
-      : mintDocumentSegmentKey(document.source, verificationSection.span),
+    verificationSegment:
+      verificationSection === undefined ? null : mintDocumentSegmentKey(document.source, verificationSection.span),
   };
 }
 

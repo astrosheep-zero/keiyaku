@@ -14,7 +14,11 @@ export type BindRefusal = Readonly<{
   contractId: ContractId;
 }>;
 
-export function decideBind<Failure>({ input, attempt, observation }: DecideInput<BindInput<Failure>>): OfferDecision<BindRefusal | Failure> {
+export function decideBind<Failure>({
+  input,
+  attempt,
+  observation,
+}: DecideInput<BindInput<Failure>>): OfferDecision<BindRefusal | Failure> {
   const id = input.contractId;
   const current = contractState(observation, id);
   if (current !== null) return { kind: "refused", refusal: { kind: "contract-exists", contractId: id } };

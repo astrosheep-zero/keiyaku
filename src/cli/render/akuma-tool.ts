@@ -25,9 +25,12 @@ function duration(milliseconds: number): string {
 
 function result(row: ToolRow): string | undefined {
   if (row.state === "active" || row.state === "unsettled") return undefined;
-  const disposition = row.state.exitCode !== undefined
-    ? row.state.exitCode === 0 ? "ok" : `exit ${row.state.exitCode}`
-    : row.state.status;
+  const disposition =
+    row.state.exitCode !== undefined
+      ? row.state.exitCode === 0
+        ? "ok"
+        : `exit ${row.state.exitCode}`
+      : row.state.status;
   const parts = [
     ...(row.call.kind === "run" && row.durationMs !== undefined ? [duration(row.durationMs)] : []),
     ...(row.call.kind === "fileChange" && disposition === "ok" ? [] : [disposition]),
@@ -63,12 +66,10 @@ function searchText(call: Extract<ToolRow["call"], { kind: "search" }>): string 
 function fileChange(call: Extract<ToolRow["call"], { kind: "fileChange" }>): ToolRepr {
   const first = call.changes[0];
   if (first === undefined) return { label: "edit", text: "files" };
-  const label = call.changes.length === 1
-    ? first.op === "add" ? "write" : first.op === "delete" ? "delete" : "edit"
-    : "edit";
-  const subject = call.changes.length === 1
-    ? oneLine(first.path)
-    : `${call.changes.length} files · ${oneLine(first.path)} ...`;
+  const label =
+    call.changes.length === 1 ? (first.op === "add" ? "write" : first.op === "delete" ? "delete" : "edit") : "edit";
+  const subject =
+    call.changes.length === 1 ? oneLine(first.path) : `${call.changes.length} files · ${oneLine(first.path)} ...`;
   const complete = call.changes.every((change) => change.diffstat !== undefined);
   if (!complete) return { label, text: subject };
   const totals = call.changes.reduce(
@@ -85,11 +86,25 @@ function fileChange(call: Extract<ToolRow["call"], { kind: "fileChange" }>): Too
 export function toolRepr(row: ToolRow): ToolRepr {
   let core: ToolRepr;
   switch (row.call.kind) {
-    case "run": core = { label: "run", text: `$ ${oneLine(normalizeToolCommand(row.call.command))}`, overflow: "middle-ellipsis" }; break;
-    case "read": core = { label: "read", text: readText(row.call) }; break;
-    case "search": core = { label: searchLabel(row.call.scope), text: searchText(row.call) }; break;
-    case "fileChange": core = fileChange(row.call); break;
-    case "other": core = { label: "use", text: oneLine(row.call.display || row.name) }; break;
+    case "run":
+      core = {
+        label: "run",
+        text: `$ ${oneLine(normalizeToolCommand(row.call.command))}`,
+        overflow: "middle-ellipsis",
+      };
+      break;
+    case "read":
+      core = { label: "read", text: readText(row.call) };
+      break;
+    case "search":
+      core = { label: searchLabel(row.call.scope), text: searchText(row.call) };
+      break;
+    case "fileChange":
+      core = fileChange(row.call);
+      break;
+    case "other":
+      core = { label: "use", text: oneLine(row.call.display || row.name) };
+      break;
   }
   const suffix = result(row);
   if (suffix === undefined) return core;

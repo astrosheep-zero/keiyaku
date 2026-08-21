@@ -138,7 +138,8 @@ export async function appendActivity(
       const sequence = insertActivityFact(heart, input);
       pruneActivityFacts(heart, ACTIVITY_LIMIT);
       return sequence;
-    }));
+    }),
+  );
 }
 
 export type ActivitySlice = ActivityFactSlice;
@@ -166,13 +167,11 @@ export async function recordTell(
       const sequence = insertTellFact(heart, tell);
       pruneActivityFacts(heart, ACTIVITY_LIMIT);
       return { kind: "recorded", tell: { sequence, ...tell, state: "pending", deliveries: [] } };
-    }));
+    }),
+  );
 }
 
-export async function recordTellDeliveries(
-  paths: AkumaPaths,
-  inputs: readonly TellDeliveryInput[],
-): Promise<void> {
+export async function recordTellDeliveries(paths: AkumaPaths, inputs: readonly TellDeliveryInput[]): Promise<void> {
   await withHeart(paths, (heart) =>
     transaction(heart, () => {
       for (const input of inputs) {
@@ -181,22 +180,20 @@ export async function recordTellDeliveries(
       }
       for (const input of inputs) insertTellDeliveryFact(heart, input);
       pruneActivityFacts(heart, ACTIVITY_LIMIT);
-    }));
+    }),
+  );
 }
 
-export async function recordTellReceipt(
-  paths: AkumaPaths,
-  input: TellReceiptInput,
-): Promise<void> {
+export async function recordTellReceipt(paths: AkumaPaths, input: TellReceiptInput): Promise<void> {
   await withHeart(paths, (heart) =>
     transaction(heart, () => {
-      const tellIds = input.evidence === "exact"
-        ? [input.tellId]
-        : tellIdsForFence(heart, input.turnSequence, input.fence);
+      const tellIds =
+        input.evidence === "exact" ? [input.tellId] : tellIdsForFence(heart, input.turnSequence, input.fence);
       if (tellIds.length === 0) throw new Error("tell receipt has no delivery mapping");
       insertTellReceiptFact(heart, input);
       pruneActivityFacts(heart, ACTIVITY_LIMIT);
-    }));
+    }),
+  );
 }
 
 export async function readKill(paths: AkumaPaths, bodySequence: number): Promise<KillFact | null> {
@@ -206,8 +203,10 @@ export async function readKill(paths: AkumaPaths, bodySequence: number): Promise
 export async function requestStop(
   paths: AkumaPaths,
   at: string,
-): Promise<Readonly<{ kind: "requested"; body: BodyFact }>
-  | Readonly<{ kind: "already-killed" | "already-stopped"; body: BodyFact }>> {
+): Promise<
+  | Readonly<{ kind: "requested"; body: BodyFact }>
+  | Readonly<{ kind: "already-killed" | "already-stopped"; body: BodyFact }>
+> {
   return await withHeart(paths, (heart) =>
     transaction(heart, () => {
       const body = latestBodyFact(heart);
@@ -220,7 +219,8 @@ export async function requestStop(
       }
       insertStopControl(heart, body.sequence, at);
       return { kind: "requested", body };
-    }));
+    }),
+  );
 }
 
 export async function requestPause(
@@ -234,7 +234,8 @@ export async function requestPause(
       if (body === null) throw new Error("Akuma has no Body to interrupt");
       insertPauseControl(heart, at);
       return { kind: "requested", body };
-    }));
+    }),
+  );
 }
 
 export async function stopRequested(paths: AkumaPaths, bodySequence?: number): Promise<boolean> {
@@ -251,7 +252,10 @@ export async function pauseRequested(paths: AkumaPaths, bodySequence?: number): 
   });
 }
 
-export async function breakBody(paths: AkumaPaths, input: Readonly<{ sequence: number; end: Exclude<BodyEnd, "exited">; at: string }>): Promise<void> {
+export async function breakBody(
+  paths: AkumaPaths,
+  input: Readonly<{ sequence: number; end: Exclude<BodyEnd, "exited">; at: string }>,
+): Promise<void> {
   await withHeart(paths, (heart) => endBodyFact(heart, input));
 }
 
@@ -259,26 +263,32 @@ export async function beginTurn(
   paths: AkumaPaths,
   input: Readonly<{ bodySequence: number; startedAt: string; call?: string }>,
 ): Promise<TurnStartFact> {
-  return await withHeart(paths, (heart) => transaction(heart, () => {
-    const fact = insertTurnStartFact(heart, input);
-    pruneActivityFacts(heart, ACTIVITY_LIMIT);
-    return fact;
-  }));
+  return await withHeart(paths, (heart) =>
+    transaction(heart, () => {
+      const fact = insertTurnStartFact(heart, input);
+      pruneActivityFacts(heart, ACTIVITY_LIMIT);
+      return fact;
+    }),
+  );
 }
 
 export async function endTurn(
   paths: AkumaPaths,
   input: Readonly<{ turnSequence: number; outcome: TurnOutcome; completedAt: string }>,
 ): Promise<TurnEndFact> {
-  return await withHeart(paths, (heart) => transaction(heart, () => {
-    const fact = insertTurnEndFact(heart, { kind: "turn-end", ...input });
-    pruneActivityFacts(heart, ACTIVITY_LIMIT);
-    return fact;
-  }));
+  return await withHeart(paths, (heart) =>
+    transaction(heart, () => {
+      const fact = insertTurnEndFact(heart, { kind: "turn-end", ...input });
+      pruneActivityFacts(heart, ACTIVITY_LIMIT);
+      return fact;
+    }),
+  );
 }
 
-export async function finishBodyIfIdle(paths: AkumaPaths, input: Readonly<{ sequence: number; at: string }>):
-Promise<Readonly<{ kind: "controlled" | "finished" } | { kind: "pending"; tells: readonly string[] }>> {
+export async function finishBodyIfIdle(
+  paths: AkumaPaths,
+  input: Readonly<{ sequence: number; at: string }>,
+): Promise<Readonly<{ kind: "controlled" | "finished" } | { kind: "pending"; tells: readonly string[] }>> {
   return await withHeart(paths, (heart) =>
     transaction(heart, () => {
       if (stopFact(heart)?.bodySequence === input.sequence || pauseFact(heart)?.bodySequence === input.sequence) {
@@ -289,12 +299,14 @@ Promise<Readonly<{ kind: "controlled" | "finished" } | { kind: "pending"; tells:
       if (pending.length > 0) return { kind: "pending", tells: pending.map((tell) => tell.id) };
       finishBodyFact(heart, input);
       return { kind: "finished" };
-    }));
+    }),
+  );
 }
 
 export async function readHeart(paths: AkumaPaths): Promise<HeartSnapshot> {
   try {
-    return await withHeart(paths, (heart) => readTransaction(heart, () => ({
+    return await withHeart(paths, (heart) =>
+      readTransaction(heart, () => ({
         soul: soulFact(heart),
         latestBody: latestBodyFact(heart),
         latestSession: latestSessionFact(heart),
@@ -303,7 +315,8 @@ export async function readHeart(paths: AkumaPaths): Promise<HeartSnapshot> {
         stop: stopFact(heart),
         pause: pauseFact(heart),
         lastActivityAt: readLastActivityAt(heart),
-    })));
+      })),
+    );
   } catch (error) {
     if (isHeartAbsent(error)) {
       return {
@@ -325,10 +338,7 @@ export async function readLastAnsweredTurn(paths: AkumaPaths): Promise<TurnFact 
   return await withHeart(paths, lastAnsweredTurnFact);
 }
 
-export async function readForkPoint(
-  paths: AkumaPaths,
-  historyId: string,
-): Promise<ForkPoint | null> {
+export async function readForkPoint(paths: AkumaPaths, historyId: string): Promise<ForkPoint | null> {
   try {
     return await withHeart(paths, (heart) => {
       const turn = answeredTurnFact(heart, historyId);

@@ -67,8 +67,12 @@ function queryValue(value: unknown): CatalogQuery {
 export async function listCatalog(input: CatalogInput): Promise<Catalog> {
   const values = requireInput(input, "Keiyaku.ls input");
   const query = queryValue(values.query);
-  const allowed = query.kind === "contracts" ? ["query", "repo"]
-    : query.kind === "archetypes" ? ["query", "home"] : ["query", "path"];
+  const allowed =
+    query.kind === "contracts"
+      ? ["query", "repo"]
+      : query.kind === "archetypes"
+        ? ["query", "home"]
+        : ["query", "path"];
   for (const key of Object.keys(values)) {
     if (!allowed.includes(key)) throw new TypeError(`Keiyaku.ls input has unknown field: ${key}`);
   }
@@ -88,9 +92,7 @@ export async function listCatalog(input: CatalogInput): Promise<Catalog> {
   if (query.kind === "tasks") {
     return { kind: "tasks", root: path, rows: await observeTaskCatalogRows(path) };
   }
-  const listed = await Akuma.of(path).list(
-    query.archetype === undefined ? undefined : { archetype: query.archetype },
-  );
+  const listed = await Akuma.of(path).list(query.archetype === undefined ? undefined : { archetype: query.archetype });
   return {
     kind: "akuma",
     root: path,

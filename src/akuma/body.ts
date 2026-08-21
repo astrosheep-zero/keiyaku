@@ -73,7 +73,6 @@ type BodyRuntime = Readonly<{
   upstream?: UpstreamExecutionPort;
 }>;
 
-
 function missing(error: unknown): boolean {
   return isHeartAbsent(error) || (error as NodeJS.ErrnoException).code === "ENOENT";
 }
@@ -84,7 +83,7 @@ async function putDownIfControlled(
   bodySequence: number,
   now: () => string,
 ): Promise<void> {
-  if (supervisor.reason === "control" && await heartExists(paths)) {
+  if (supervisor.reason === "control" && (await heartExists(paths))) {
     await breakBody(paths, { sequence: bodySequence, end: "put-down", at: now() });
   }
 }
@@ -108,7 +107,7 @@ async function bornSoul(launch: BodyLaunch, leash: HeldAkumaLeash, now: string):
   if (before.soul !== null) return before.soul;
   if (launch.seed === undefined) throw new Error("Akuma wake has no born soul");
   const candidate: Soul = { ...launch.seed, createdAt: now };
-  if (await leash.birth(launch.paths, candidate, launch.birthSession) === "sealed") return null;
+  if ((await leash.birth(launch.paths, candidate, launch.birthSession)) === "sealed") return null;
   const born = (await readHeart(launch.paths)).soul;
   if (born === null || born.id !== candidate.id) {
     throw new Error("Akuma birth identity does not match its directory");
@@ -131,16 +130,17 @@ async function persistTurn(
 ): Promise<"answered" | "failed"> {
   await endTurn(paths, {
     turnSequence,
-    outcome: result.kind === "answered" && result.session !== undefined
-      ? {
-          kind: "answered",
-          session: result.session,
-          answer: result.answer,
-          ...(result.historyId === undefined ? {} : { historyId: result.historyId }),
-        }
-      : result.kind === "answered"
-        ? { kind: "failed", diagnostic: "Provider answered without a resumable session" }
-      : { kind: "failed", diagnostic: result.diagnostic },
+    outcome:
+      result.kind === "answered" && result.session !== undefined
+        ? {
+            kind: "answered",
+            session: result.session,
+            answer: result.answer,
+            ...(result.historyId === undefined ? {} : { historyId: result.historyId }),
+          }
+        : result.kind === "answered"
+          ? { kind: "failed", diagnostic: "Provider answered without a resumable session" }
+          : { kind: "failed", diagnostic: result.diagnostic },
     completedAt,
   });
   return result.kind === "answered" && result.session === undefined ? "failed" : result.kind;
@@ -193,12 +193,7 @@ async function prepareBodyStart(paths: AkumaPaths, leash: HeldAkumaLeash): Promi
 async function recoverBodyRequests(input: BodyExecution): Promise<boolean> {
   const { launch, soul, bodySequence, supervisor, runtime } = input;
   try {
-    const result = await settleBodyRequests(
-      launch.paths,
-      soul,
-      runtime.now,
-      supervisor.signal,
-    );
+    const result = await settleBodyRequests(launch.paths, soul, runtime.now, supervisor.signal);
     await clearBodyRequestTransport(launch.paths);
     if (result === "settled") return true;
     await breakBody(launch.paths, { sequence: bodySequence, end: "broke-off", at: runtime.now() });
@@ -250,8 +245,10 @@ async function runBodyTurns(input: BodyExecution): Promise<void> {
       await breakBody(launch.paths, { sequence: bodySequence, end: "put-down", at: runtime.now() });
       return;
     }
-    if (result.kind === "resume-unsupported"
-      || await persistTurn(launch.paths, result.turnSequence, result, runtime.now()) === "failed") {
+    if (
+      result.kind === "resume-unsupported" ||
+      (await persistTurn(launch.paths, result.turnSequence, result, runtime.now())) === "failed"
+    ) {
       await breakBody(launch.paths, { sequence: bodySequence, end: "broke-off", at: runtime.now() });
       return;
     }
@@ -274,14 +271,11 @@ export async function driveAkumaBody(
     const soul = await bornSoul(launch, leash, runtime.now());
     if (soul === null) return;
     if (launch.seed === undefined && launch.initialBody === undefined) {
-      const [heart, requests] = await Promise.all([
-        readHeart(launch.paths),
-        readNonterminalRequests(launch.paths),
-      ]);
+      const [heart, requests] = await Promise.all([readHeart(launch.paths), readNonterminalRequests(launch.paths)]);
       if (heart.pending.length === 0 && requests.length === 0) return;
     }
     const selected = adapter ?? (await resolveProviderExecution(soul.provider)).adapter;
-    if (!await prepareBodyStart(launch.paths, leash)) return;
+    if (!(await prepareBodyStart(launch.paths, leash))) return;
     const body = await leash.recordBody(launch.paths, { leashTakenAt: runtime.now() });
     bodyStarted = true;
     const supervisor = await BodySupervisor.open(launch.paths, body.sequence, leash);
@@ -292,13 +286,15 @@ export async function driveAkumaBody(
       await supervisor.close();
     }
   } catch (error) {
-    if (!await heartExists(launch.paths)) return;
+    if (!(await heartExists(launch.paths))) return;
     try {
       await leash.sealIfUnborn(launch.paths, {
         evidence: error instanceof Error ? error.message : String(error),
         at: runtime.now(),
       });
-    } catch { /* the original Body failure remains authoritative */ }
+    } catch {
+      /* the original Body failure remains authoritative */
+    }
     throw error;
   } finally {
     leash.release();
@@ -328,9 +324,7 @@ function diagnostic(error: unknown): string {
 }
 
 function preAdmissionDiagnostic(exit: DetachedProcessExit): string {
-  return exit.code === null
-    ? `pre-admission signal ${exit.signal ?? "unknown"}`
-    : `pre-admission exit ${exit.code}`;
+  return exit.code === null ? `pre-admission signal ${exit.signal ?? "unknown"}` : `pre-admission exit ${exit.code}`;
 }
 
 async function settledWake(
@@ -370,7 +364,7 @@ async function awaitWake(
     }
     const winner = await Promise.race([
       nextChange.then(
-        ({ done }) => ({ kind: done ? "closed" as const : "changed" as const }),
+        ({ done }) => ({ kind: done ? ("closed" as const) : ("changed" as const) }),
         (error) => ({ kind: "observer-failed" as const, error }),
       ),
       child.exited.then((exit) => ({ kind: "exited" as const, exit })),
@@ -385,9 +379,7 @@ async function awaitWake(
       return final;
     }
     if (winner.kind === "exited") {
-      return winner.exit.code === LEASH_HELD_EXIT
-        ? { kind: "held" }
-        : failedChild(winner.exit);
+      return winner.exit.code === LEASH_HELD_EXIT ? { kind: "held" } : failedChild(winner.exit);
     }
     await child.terminate();
     await child.exited;

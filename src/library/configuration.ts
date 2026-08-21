@@ -83,13 +83,21 @@ function command(value: unknown, coordinate: string, ErrorType: typeof TypeError
     throw new ErrorType(`${coordinate}.argv must be a nonempty string array`);
   }
   if (value.argv[0]!.trim().length === 0) throw new ErrorType(`${coordinate}.argv[0] must be nonblank`);
-  if (!Number.isSafeInteger(value.timeoutMs) || (value.timeoutMs as number) < 1 || (value.timeoutMs as number) > 2_147_483_647) {
+  if (
+    !Number.isSafeInteger(value.timeoutMs) ||
+    (value.timeoutMs as number) < 1 ||
+    (value.timeoutMs as number) > 2_147_483_647
+  ) {
     throw new ErrorType(`${coordinate}.timeoutMs must be an integer from 1 through 2147483647`);
   }
   return Object.freeze({ argv: Object.freeze([...value.argv]), timeoutMs: value.timeoutMs as number });
 }
 
-function commands(value: unknown, coordinate: string, ErrorType: typeof TypeError | typeof SettingsError): readonly HookCommand[] {
+function commands(
+  value: unknown,
+  coordinate: string,
+  ErrorType: typeof TypeError | typeof SettingsError,
+): readonly HookCommand[] {
   if (!Array.isArray(value)) throw new ErrorType(`${coordinate} must be an array`);
   return Object.freeze(value.map((item, index) => command(item, `${coordinate}[${index}]`, ErrorType)));
 }

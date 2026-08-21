@@ -49,10 +49,11 @@ export type AkumaUnobserved = Readonly<{
   diagnostic: string;
 }>;
 
-export type AkumaWaitInput = AkumaSetAddressInput & Readonly<{
-  completion?: "any" | "all";
-  timeoutMs?: number;
-}>;
+export type AkumaWaitInput = AkumaSetAddressInput &
+  Readonly<{
+    completion?: "any" | "all";
+    timeoutMs?: number;
+  }>;
 
 export type AkumaWaitResult = Readonly<{
   completion: "any" | "all";
@@ -77,12 +78,13 @@ export type AkumaInterruptResult = Readonly<{
   receipt: InterruptReceipt;
   observation: AkumaObservationStage;
 }>;
-export type AkumaHistoryInput = AkumaAddressInput & Readonly<{
-  before?: number;
-  since?: number;
-  limit?: number;
-  last?: boolean;
-}>;
+export type AkumaHistoryInput = AkumaAddressInput &
+  Readonly<{
+    before?: number;
+    since?: number;
+    limit?: number;
+    last?: boolean;
+  }>;
 export type AkumaHistoryResult =
   | Readonly<{ kind: "history"; id: AkumaStatus["id"]; history: ActivityHistory; contract: DispatchAssociation }>
   | Readonly<{ kind: "last"; id: AkumaStatus["id"]; answer: string; contract: DispatchAssociation }>
@@ -98,10 +100,7 @@ function observationDiagnostic(error: unknown): string {
 
 const NO_DISPATCH: DispatchAssociation = { kind: "none" };
 
-async function dispatchAssociation(
-  repo: Repo | undefined,
-  id: AkumaStatus["id"],
-): Promise<DispatchAssociation> {
+async function dispatchAssociation(repo: Repo | undefined, id: AkumaStatus["id"]): Promise<DispatchAssociation> {
   if (repo === undefined) return NO_DISPATCH;
   try {
     const dispatch = await readDispatch(scopeForRepo(repo), id);
@@ -133,13 +132,9 @@ async function observeAkuma(status: AkumaStatus, path: WorldRoot, repo?: Repo): 
   return (await observeAkumaSet([status], path, repo))[0]!;
 }
 
-async function observeAkumaStage(
-  path: WorldRoot,
-  id: AkumaStatus["id"],
-  repo?: Repo,
-): Promise<AkumaObservationStage> {
+async function observeAkumaStage(path: WorldRoot, id: AkumaStatus["id"], repo?: Repo): Promise<AkumaObservationStage> {
   try {
-    return { kind: "observed", ...await observeAkuma(await source(path).of({ id }).status(), path, repo) };
+    return { kind: "observed", ...(await observeAkuma(await source(path).of({ id }).status(), path, repo)) };
   } catch (error) {
     if (error instanceof AkumaNotBornError) throw error;
     return { kind: "unobserved", diagnostic: observationDiagnostic(error) };
@@ -152,11 +147,13 @@ async function observeAkumaSet(
   repo?: Repo,
 ): Promise<readonly AkumaObservation[]> {
   const created = await createdTasksFor(path, statuses);
-  return await Promise.all(statuses.map(async (status, index) => ({
-    status,
-    contract: await dispatchAssociation(repo, status.id),
-    createdTasks: created[index]!,
-  })));
+  return await Promise.all(
+    statuses.map(async (status, index) => ({
+      status,
+      contract: await dispatchAssociation(repo, status.id),
+      createdTasks: created[index]!,
+    })),
+  );
 }
 
 function timeout(value: unknown): number | undefined {
@@ -236,17 +233,19 @@ export async function executeWaitAkuma(input: WaitExecutionInput): Promise<Akuma
   for (;;) {
     const round = await observeWaitRound(input.path, input.ids, input.signal);
     const settled = round.statuses.map(defaultWaitComplete);
-    const completed = round.statuses.length > 0
-      && (input.completion === "any" ? settled.some(Boolean) : settled.every(Boolean));
-    if (completed
-      || (deadline !== undefined && performance.now() >= deadline)) {
+    const completed =
+      round.statuses.length > 0 && (input.completion === "any" ? settled.some(Boolean) : settled.every(Boolean));
+    if (completed || (deadline !== undefined && performance.now() >= deadline)) {
       return {
         completion: input.completion,
         observations: await observeAkumaSet(round.statuses, input.path, input.repo),
         unobserved: round.unobserved,
       };
     }
-    await delay(deadline === undefined ? POLL_MS : Math.min(POLL_MS, Math.max(0, deadline - performance.now())), input.signal);
+    await delay(
+      deadline === undefined ? POLL_MS : Math.min(POLL_MS, Math.max(0, deadline - performance.now())),
+      input.signal,
+    );
   }
 }
 
@@ -263,15 +262,16 @@ type TellExecutionInput = Readonly<{
 export async function executeTellAkuma(input: TellExecutionInput): Promise<AkumaTellResult> {
   input.signal?.throwIfAborted();
   const handle = source(input.path).of({ id: input.id });
-  const tell = input.tellId === undefined
-    ? await handle.tell(input.body)
-    : await tellAkumaWithId({
-      worldPath: input.path,
-      id: input.id,
-      body: input.body,
-      tellId: input.tellId,
-      ...(input.recordedAt === undefined ? {} : { recordedAt: input.recordedAt }),
-    });
+  const tell =
+    input.tellId === undefined
+      ? await handle.tell(input.body)
+      : await tellAkumaWithId({
+          worldPath: input.path,
+          id: input.id,
+          body: input.body,
+          tellId: input.tellId,
+          ...(input.recordedAt === undefined ? {} : { recordedAt: input.recordedAt }),
+        });
   input.signal?.throwIfAborted();
   return {
     akuma: input.id,
@@ -293,11 +293,13 @@ export async function executeKillAkuma(input: KillExecutionInput): Promise<Akuma
   const evidence = await Promise.all(handles.map(async (handle) => await handle.kill()));
   input.signal?.throwIfAborted();
   return {
-    results: await Promise.all(input.ids.map(async (id, index) => ({
-      id,
-      evidence: evidence[index]!,
-      observation: await observeAkumaStage(input.path, id, input.repo),
-    }))),
+    results: await Promise.all(
+      input.ids.map(async (id, index) => ({
+        id,
+        evidence: evidence[index]!,
+        observation: await observeAkumaStage(input.path, id, input.repo),
+      })),
+    ),
   };
 }
 
@@ -311,12 +313,18 @@ function needsDispatchAttach(association: DispatchAssociation): boolean {
   return association.kind === "none";
 }
 
-async function attachObservationContract(repo: Repo | undefined, observation: AkumaObservation): Promise<AkumaObservation> {
+async function attachObservationContract(
+  repo: Repo | undefined,
+  observation: AkumaObservation,
+): Promise<AkumaObservation> {
   if (repo === undefined || !needsDispatchAttach(observation.contract)) return observation;
   return { ...observation, contract: await dispatchAssociation(repo, observation.status.id) };
 }
 
-async function attachObservationStage(repo: Repo | undefined, observation: AkumaObservationStage): Promise<AkumaObservationStage> {
+async function attachObservationStage(
+  repo: Repo | undefined,
+  observation: AkumaObservationStage,
+): Promise<AkumaObservationStage> {
   if (repo === undefined || observation.kind !== "observed") return observation;
   return { ...observation, ...(await attachObservationContract(repo, observation)) };
 }
@@ -326,12 +334,16 @@ async function attachWaitContracts(repo: Repo | undefined, result: AkumaWaitResu
     ? result
     : {
         ...result,
-        observations: await Promise.all(result.observations.map((observation) => attachObservationContract(repo, observation))),
+        observations: await Promise.all(
+          result.observations.map((observation) => attachObservationContract(repo, observation)),
+        ),
       };
 }
 
 async function attachTellContract(repo: Repo | undefined, result: AkumaTellResult): Promise<AkumaTellResult> {
-  return repo === undefined ? result : { ...result, observation: await attachObservationStage(repo, result.observation) };
+  return repo === undefined
+    ? result
+    : { ...result, observation: await attachObservationStage(repo, result.observation) };
 }
 
 async function attachKillContracts(repo: Repo | undefined, result: AkumaKillResult): Promise<AkumaKillResult> {
@@ -339,10 +351,12 @@ async function attachKillContracts(repo: Repo | undefined, result: AkumaKillResu
     ? result
     : {
         ...result,
-        results: await Promise.all(result.results.map(async (entry) => ({
-          ...entry,
-          observation: await attachObservationStage(repo, entry.observation),
-        }))),
+        results: await Promise.all(
+          result.results.map(async (entry) => ({
+            ...entry,
+            observation: await attachObservationStage(repo, entry.observation),
+          })),
+        ),
       };
 }
 

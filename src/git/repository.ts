@@ -19,11 +19,13 @@ export const GIT_FORMAT_PATH = "meta/format.json";
 const CURRENT_FORMAT_VERSION = 4;
 export const GIT_FORMAT_BYTES = `{"version":${CURRENT_FORMAT_VERSION}}\n`;
 export function isKeiyakuOwnedRef(ref: string): boolean {
-  return ref === GIT_REF
-    || ref === DELIVERY_REF_NAMESPACE
-    || ref.startsWith(`${DELIVERY_REF_NAMESPACE}/`)
-    || ref === CANDIDATE_PIN_REF_NAMESPACE
-    || ref.startsWith(`${CANDIDATE_PIN_REF_NAMESPACE}/`);
+  return (
+    ref === GIT_REF ||
+    ref === DELIVERY_REF_NAMESPACE ||
+    ref.startsWith(`${DELIVERY_REF_NAMESPACE}/`) ||
+    ref === CANDIDATE_PIN_REF_NAMESPACE ||
+    ref.startsWith(`${CANDIDATE_PIN_REF_NAMESPACE}/`)
+  );
 }
 
 export type GitOid = string;
@@ -65,7 +67,8 @@ function worktreesFromPorcelain(output: Buffer): readonly RegisteredWorktree[] {
     if (path.length === 0) throw new Error("Git worktree porcelain output has an empty worktree path");
     const branchField = record.find((field) => field.startsWith("branch "));
     const branch = branchField === undefined ? null : branchField.slice("branch ".length);
-    if (branch !== null && !branch.startsWith("refs/")) throw new Error("Git worktree porcelain output has an invalid branch");
+    if (branch !== null && !branch.startsWith("refs/"))
+      throw new Error("Git worktree porcelain output has an invalid branch");
     worktrees.push({ path: resolve(path), branch });
     record = [];
   };
@@ -171,7 +174,8 @@ function parseTreeEntries(output: Buffer): Map<string, TreeEntry> {
   for (const record of output.toString("utf8").split("\0")) {
     if (record.length === 0) continue;
     const separator = record.indexOf("\t");
-    if (separator < 0) throw new GitPlumbingError({ stderr: record, status: null, message: `malformed ls-tree record: ${record}` });
+    if (separator < 0)
+      throw new GitPlumbingError({ stderr: record, status: null, message: `malformed ls-tree record: ${record}` });
     const [mode, type, oid] = record.slice(0, separator).split(" ");
     const path = record.slice(separator + 1);
     if (mode === undefined || type === undefined || oid === undefined || path.length === 0) {
@@ -201,24 +205,15 @@ export async function readGit(repository: GitRepository): Promise<GitSnapshot> {
 }
 
 /** Read only the requested private Git paths from one immutable Git tree. */
-export async function readGitPaths(
-  repository: GitRepository,
-  requestedPaths: readonly string[],
-): Promise<GitSnapshot> {
+export async function readGitPaths(repository: GitRepository, requestedPaths: readonly string[]): Promise<GitSnapshot> {
   for (const path of requestedPaths) validPath(path);
   const commit = await readRef(repository, GIT_REF);
   if (commit === null) return { commit: null, tree: null, paths: new Map() };
 
   const tree = await readTreeForCommit(repository, commit);
-  const paths = parseTreeEntries(await runGit(repository, [
-    "ls-tree",
-    "-z",
-    "--full-tree",
-    tree,
-    "--",
-    GIT_FORMAT_PATH,
-    ...requestedPaths,
-  ]));
+  const paths = parseTreeEntries(
+    await runGit(repository, ["ls-tree", "-z", "--full-tree", tree, "--", GIT_FORMAT_PATH, ...requestedPaths]),
+  );
   await validateGitFormat(repository, paths);
   return { commit, tree, paths };
 }
@@ -244,7 +239,10 @@ function malformedBatchOutput(detail: string): never {
 
 type GitObject = Readonly<{ type: string; bytes: Buffer }>;
 
-async function readObjects(repository: GitRepository, oids: readonly GitOid[]): Promise<ReadonlyMap<GitOid, GitObject>> {
+async function readObjects(
+  repository: GitRepository,
+  oids: readonly GitOid[],
+): Promise<ReadonlyMap<GitOid, GitObject>> {
   const unique = [...new Set(oids)];
   for (const oid of unique) assertOid(oid, "Git object");
   if (unique.length === 0) return new Map();
@@ -301,16 +299,18 @@ async function baseTreeEntries(
   const byPath = new Map<string, Map<string, TreeEntry>>();
   if (baseTree === null) return byPath;
 
-  const ancestry = parseTreeEntries(await runGit(repository, [
-    "ls-tree",
-    "-z",
-    "-t",
-    "-r",
-    "--full-tree",
-    baseTree,
-    "--",
-    ...changedPaths.map((path) => `:(literal)${path}`),
-  ]));
+  const ancestry = parseTreeEntries(
+    await runGit(repository, [
+      "ls-tree",
+      "-z",
+      "-t",
+      "-r",
+      "--full-tree",
+      baseTree,
+      "--",
+      ...changedPaths.map((path) => `:(literal)${path}`),
+    ]),
+  );
   const treeByPath = new Map<string, GitOid>([["", baseTree]]);
   for (const path of nodePaths) {
     if (path.length === 0) continue;
@@ -333,7 +333,11 @@ async function baseTreeEntries(
 }
 
 async function writePreparedTrees(repository: GitRepository, prepared: readonly PreparedTree[]): Promise<void> {
-  const output = await runGit(repository, ["mktree", "--batch"], prepared.map(({ records }) => `${records}\n`).join(""));
+  const output = await runGit(
+    repository,
+    ["mktree", "--batch"],
+    prepared.map(({ records }) => `${records}\n`).join(""),
+  );
   const written = output.toString("ascii").trimEnd().split("\n");
   if (written.length !== prepared.length) {
     throw new GitPlumbingError({ stderr: output, status: null, message: "malformed mktree --batch output" });
@@ -382,46 +386,47 @@ export async function updateGitTreeFromFrozenDirectories(
   return prepared.root;
 }
 
-async function writeCommitObject(input: Readonly<{
-  repository: GitRepository;
-  tree: GitOid;
-  parents: readonly GitOid[];
-  message: string;
-  actor: string;
-  email: string;
-  at?: string;
-}>): Promise<GitOid> {
+async function writeCommitObject(
+  input: Readonly<{
+    repository: GitRepository;
+    tree: GitOid;
+    parents: readonly GitOid[];
+    message: string;
+    actor: string;
+    email: string;
+    at?: string;
+  }>,
+): Promise<GitOid> {
   const { repository, tree, parents, message, actor, email, at } = input;
   assertOid(tree, "commit tree");
   for (const parent of parents) assertOid(parent, "commit parent");
   const args = ["commit-tree", tree];
   for (const parent of parents) args.push("-p", parent);
-  const commit = (await runGitWithEnvironment(
-    repository,
-    args,
-    `${message}\n`,
-    {
+  const commit = (
+    await runGitWithEnvironment(repository, args, `${message}\n`, {
       GIT_AUTHOR_NAME: actor,
       GIT_AUTHOR_EMAIL: email,
       GIT_COMMITTER_NAME: actor,
       GIT_COMMITTER_EMAIL: email,
       ...(at === undefined ? {} : { GIT_AUTHOR_DATE: at, GIT_COMMITTER_DATE: at }),
-    },
-  ))
+    })
+  )
     .toString("utf8")
     .trim();
   assertOid(commit, "written Git commit");
   return commit;
 }
 
-export async function writeCommit(input: Readonly<{
-  repository: GitRepository;
-  tree: GitOid;
-  parent: GitOid | null;
-  message?: string;
-  actor?: string;
-  at?: string;
-}>): Promise<GitOid> {
+export async function writeCommit(
+  input: Readonly<{
+    repository: GitRepository;
+    tree: GitOid;
+    parent: GitOid | null;
+    message?: string;
+    actor?: string;
+    at?: string;
+  }>,
+): Promise<GitOid> {
   return await writeCommitObject({
     repository: input.repository,
     tree: input.tree,
@@ -465,14 +470,7 @@ export async function updateRefsAtomically(
   if (git === undefined || git.ref !== GIT_REF) {
     throw new Error(`the first atomic update must be the Git ref: ${GIT_REF}`);
   }
-  const lines = [
-    "start",
-    ...assertions.map(refAssertionLine),
-    ...updates.map(refUpdateLine),
-    "prepare",
-    "commit",
-    "",
-  ];
+  const lines = ["start", ...assertions.map(refAssertionLine), ...updates.map(refUpdateLine), "prepare", "commit", ""];
   try {
     await runGit(repository, ["update-ref", "--stdin"], lines.join("\n"));
     return { kind: "published" };

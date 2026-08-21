@@ -6,29 +6,29 @@ import { decodeAllowedActions, type AllowedActions } from "../../akuma/allowed.j
 
 type Output = Readonly<{ output: "text" | "json" }>;
 type Addressed = Readonly<{ akuma: string }>;
-export type AkumaPromptSource =
-  | Readonly<{ kind: "argument"; value: string }>
-  | Readonly<{ kind: "stdin" }>;
+export type AkumaPromptSource = Readonly<{ kind: "argument"; value: string }> | Readonly<{ kind: "stdin" }>;
 type Prompted = Readonly<{ prompt: AkumaPromptSource }>;
 
-export type ParsedAkumaCommand = Output & (
-  | (Readonly<{
-      command: "call";
-      archetype: string;
-      contract?: string;
-      alias?: AkumaAlias;
-      mode: "wait" | "detach";
-      timeoutMs?: number;
-      readonly?: true;
-      allowed?: AllowedActions;
-    }> & Prompted)
-  | Readonly<{ command: "kill"; akuma: readonly string[] }>
-  | Readonly<{ command: "wait"; akuma: readonly string[]; completion?: "any" | "all"; timeoutMs?: number }>
-  | (Readonly<{ command: "tell"; interrupt: boolean }> & Addressed & Prompted)
-  | (Readonly<{ command: "history"; last: boolean; before?: number; since?: number; limit?: number }> & Addressed)
-  | Readonly<{ command: "history"; contract: string }>
-  | (Readonly<{ command: "fork"; at: string }> & Addressed)
-);
+export type ParsedAkumaCommand = Output &
+  (
+    | (Readonly<{
+        command: "call";
+        archetype: string;
+        contract?: string;
+        alias?: AkumaAlias;
+        mode: "wait" | "detach";
+        timeoutMs?: number;
+        readonly?: true;
+        allowed?: AllowedActions;
+      }> &
+        Prompted)
+    | Readonly<{ command: "kill"; akuma: readonly string[] }>
+    | Readonly<{ command: "wait"; akuma: readonly string[]; completion?: "any" | "all"; timeoutMs?: number }>
+    | (Readonly<{ command: "tell"; interrupt: boolean }> & Addressed & Prompted)
+    | (Readonly<{ command: "history"; last: boolean; before?: number; since?: number; limit?: number }> & Addressed)
+    | Readonly<{ command: "history"; contract: string }>
+    | (Readonly<{ command: "fork"; at: string }> & Addressed)
+  );
 
 export type InvokedAkumaCommand = Exclude<ParsedAkumaCommand, { command: "history"; contract: string }>;
 
@@ -56,7 +56,8 @@ const AKUMA_COMMAND_SPECS = {
       allowed: "repeatable",
       json: "boolean",
     },
-    usage: "call <akuma-name> [--contract <kei/...>] [--alias @name] [--readonly] [--allowed <product.action>]... [--wait <duration> | -d | --detach] (<prompt> | -)",
+    usage:
+      "call <akuma-name> [--contract <kei/...>] [--alias @name] [--readonly] [--allowed <product.action>]... [--wait <duration> | -d | --detach] (<prompt> | -)",
     purpose: "Birth an Akuma from <akuma-name> with one prompt.",
     details: [
       "Give <prompt> as one argument, or use final - to read stdin.",
@@ -130,7 +131,9 @@ export function renderAkumaUsage(action: AkumaAction): string {
   return usageLine(AKUMA_COMMAND_SPECS[action].usage);
 }
 
-export function parseAkumaCatalogPath(value: string): Readonly<{ kind: "archetypes" } | { kind: "akuma"; archetype?: string }> | null {
+export function parseAkumaCatalogPath(
+  value: string,
+): Readonly<{ kind: "archetypes" } | { kind: "akuma"; archetype?: string }> | null {
   if (value === "aku" || value === "aku/") return { kind: "archetypes" };
   if (value === "aku/*/*") return { kind: "akuma" };
   const match = /^aku\/([^/]+)\/?$/u.exec(value);
@@ -177,9 +180,7 @@ function scanNamedOption(
     fail(`${token} requires a value`);
   }
   if (isBlankInput(value)) fail(`${token} requires a nonblank value`);
-  flags[name] = kind === "repeatable"
-    ? [...(Array.isArray(flags[name]) ? flags[name] : []), value]
-    : value;
+  flags[name] = kind === "repeatable" ? [...(Array.isArray(flags[name]) ? flags[name] : []), value] : value;
   return input.index + 1;
 }
 
@@ -227,8 +228,11 @@ function validateDirect(value: string, fail: (message: string) => never): string
 function validateSet(value: string, fail: (message: string) => never): string {
   if (value.startsWith("kei/")) return value;
   if (value.includes("*")) {
-    try { parseAkumaGlob(value); }
-    catch (error) { fail(error instanceof Error ? error.message : `invalid Akuma glob: ${value}`); }
+    try {
+      parseAkumaGlob(value);
+    } catch (error) {
+      fail(error instanceof Error ? error.message : `invalid Akuma glob: ${value}`);
+    }
     return value;
   }
   return validateDirect(value, fail);
@@ -244,7 +248,7 @@ function parseWait(
   if (rawSelectors.length > 1 && flags.any !== true && flags.all !== true) {
     fail("wait requires --any or --all when selecting multiple Akuma");
   }
-  const completion = flags.any === true ? "any" as const : flags.all === true ? "all" as const : undefined;
+  const completion = flags.any === true ? ("any" as const) : flags.all === true ? ("all" as const) : undefined;
   return {
     command: "wait",
     akuma: rawSelectors.map((value) => validateSet(value, fail)),
@@ -266,7 +270,8 @@ function parseHistory(
     }
     return { command: "history", contract: selector, output };
   }
-  if (flags.before !== undefined && flags.since !== undefined) fail("history --before and --since are mutually exclusive");
+  if (flags.before !== undefined && flags.since !== undefined)
+    fail("history --before and --since are mutually exclusive");
   if (flags.last === true && (flags.before !== undefined || flags.since !== undefined || flags.limit !== undefined)) {
     fail("history --last cannot be combined with --before, --since, or --limit");
   }
@@ -290,7 +295,8 @@ function parseAddressed(
   output: "text" | "json",
   fail: (message: string) => never,
 ): ParsedAkumaCommand {
-  if (action === "kill") return { command: action, akuma: rawSelectors.map((value) => validateSet(value, fail)), output };
+  if (action === "kill")
+    return { command: action, akuma: rawSelectors.map((value) => validateSet(value, fail)), output };
   if (action === "wait") return parseWait(rawSelectors, flags, output, fail);
   if (action === "history") {
     const selector = rawSelectors[0]!;
@@ -328,15 +334,15 @@ function parseTell(
   return { command: "tell", akuma: validateDirect(subject, fail), interrupt: flags.interrupt === true, prompt, output };
 }
 
-function parseAllowedFlag(
-  raw: FlagValue | undefined,
-  fail: (message: string) => never,
-): AllowedActions | undefined {
+function parseAllowedFlag(raw: FlagValue | undefined, fail: (message: string) => never): AllowedActions | undefined {
   if (raw === undefined) return undefined;
   if (!Array.isArray(raw)) fail("--allowed requires a value");
   const selected = raw as readonly string[];
-  try { return decodeAllowedActions(selected, "--allowed"); }
-  catch (error) { fail(error instanceof Error ? error.message : "invalid --allowed action"); }
+  try {
+    return decodeAllowedActions(selected, "--allowed");
+  } catch (error) {
+    fail(error instanceof Error ? error.message : "invalid --allowed action");
+  }
 }
 
 function parseCall(
@@ -348,11 +354,14 @@ function parseCall(
 ): Extract<ParsedAkumaCommand, { command: "call" }> {
   let alias: AkumaAlias | undefined;
   if (flags.alias !== undefined) {
-    try { alias = parseAkumaAlias(stringFlag(flags.alias, "--alias requires @name", fail)); }
-    catch (error) { fail(error instanceof Error ? error.message : "invalid Akuma alias"); }
+    try {
+      alias = parseAkumaAlias(stringFlag(flags.alias, "--alias requires @name", fail));
+    } catch (error) {
+      fail(error instanceof Error ? error.message : "invalid Akuma alias");
+    }
   }
   if (flags.detach === true && flags.wait !== undefined) fail("call --wait and --detach are mutually exclusive");
-  const mode = flags.detach === true ? "detach" as const : "wait" as const;
+  const mode = flags.detach === true ? ("detach" as const) : ("wait" as const);
   const timeoutMs = flags.wait === undefined ? undefined : parseDuration(flags.wait, "--wait", fail);
   const allowed = parseAllowedFlag(flags.allowed, fail);
   return {
@@ -374,9 +383,11 @@ export function parseAkumaCommand(argv: readonly string[]): ParsedAkumaCommand {
   if (!isAkumaAction(candidate)) throw new CliUsageError(`unknown command: ${candidate ?? ""}`);
   const action = candidate;
   const spec = AKUMA_COMMAND_SPECS[action];
-  const fail = (message: string): never => { throw new CliUsageError(message, renderAkumaUsage(action)); };
+  const fail = (message: string): never => {
+    throw new CliUsageError(message, renderAkumaUsage(action));
+  };
   const { flags, positionals, stdin } = scanAkuma(action, argv, fail);
-  const output = flags.json === true ? "json" as const : "text" as const;
+  const output = flags.json === true ? ("json" as const) : ("text" as const);
   if (action === "call" || action === "tell") {
     const parsed = parsePrompted(action, positionals, stdin, fail);
     return action === "call"

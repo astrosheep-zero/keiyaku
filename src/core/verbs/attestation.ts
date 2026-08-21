@@ -9,8 +9,7 @@ export type AttestationInput<Failure = never> = Readonly<{
   preparation?: Preparation<AttestationData, Failure>;
 }>;
 
-export type AttestationRefusal =
-  Readonly<{ kind: "contract-missing" | "terminal"; contractId: ContractId }>;
+export type AttestationRefusal = Readonly<{ kind: "contract-missing" | "terminal"; contractId: ContractId }>;
 
 export function decideAttestation<Failure>({
   input,
@@ -32,5 +31,8 @@ export function decideAttestation<Failure>({
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     data: input.preparation.data,
   };
-  return { kind: "offer", offer: { facts: [{ contractId: input.contractId, expectedHead: state.head, entries: [attestation] }] } };
+  return {
+    kind: "offer",
+    offer: { facts: [{ contractId: input.contractId, expectedHead: state.head, entries: [attestation] }] },
+  };
 }

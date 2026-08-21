@@ -36,9 +36,15 @@ export type ManagedWorktreeFollow =
       reason: "head-moved" | "head-attached" | "operation-in-progress" | "unsupported-parent-shape";
     }>;
 
-async function workspaceRevision(repository: GitRepository, workspace: string, revision: string): Promise<SnapshotId | null> {
+async function workspaceRevision(
+  repository: GitRepository,
+  workspace: string,
+  revision: string,
+): Promise<SnapshotId | null> {
   try {
-    const value = (await runGit(repository, ["-C", workspace, "rev-parse", "--verify", "--quiet", revision])).toString("utf8").trim();
+    const value = (await runGit(repository, ["-C", workspace, "rev-parse", "--verify", "--quiet", revision]))
+      .toString("utf8")
+      .trim();
     return value.length === 0 ? null : mintSnapshotId(value);
   } catch (error) {
     if (error instanceof GitPlumbingError && error.status === 1) return null;
@@ -46,42 +52,67 @@ async function workspaceRevision(repository: GitRepository, workspace: string, r
   }
 }
 
-async function workspaceOperationState(repository: GitRepository, workspace: string, gitDirectory: string): Promise<Readonly<{ other: boolean; unmerged: boolean }>> {
+async function workspaceOperationState(
+  repository: GitRepository,
+  workspace: string,
+  gitDirectory: string,
+): Promise<Readonly<{ other: boolean; unmerged: boolean }>> {
   const paths = ["rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "REVERT_HEAD"];
-  const other = await Promise.all(paths.map(async (path) => {
-    try { await access(join(gitDirectory, path)); return true; } catch { return false; }
-  }));
+  const other = await Promise.all(
+    paths.map(async (path) => {
+      try {
+        await access(join(gitDirectory, path));
+        return true;
+      } catch {
+        return false;
+      }
+    }),
+  );
   const unmerged = (await runGit(repository, ["-C", workspace, "ls-files", "--unmerged", "-z"])).length > 0;
   return { other: other.some(Boolean), unmerged };
 }
 
 /** Follow an accepted tender only through the native index-and-HEAD transition. */
-export async function followManagedWorktree(repository: GitRepository, workspace: string, tender: SnapshotId): Promise<ManagedWorktreeFollow> {
+export async function followManagedWorktree(
+  repository: GitRepository,
+  workspace: string,
+  tender: SnapshotId,
+): Promise<ManagedWorktreeFollow> {
   const head = await workspaceRevision(repository, workspace, "HEAD");
   if (head === null) throw new Error("managed worktree HEAD is missing");
-  const attached = await runGit(repository, ["-C", workspace, "symbolic-ref", "--quiet", "HEAD"])
-    .then(() => true, (error: unknown) => {
+  const attached = await runGit(repository, ["-C", workspace, "symbolic-ref", "--quiet", "HEAD"]).then(
+    () => true,
+    (error: unknown) => {
       if (error instanceof GitPlumbingError && error.status === 1) return false;
       throw error;
-    });
+    },
+  );
   if (attached) return { kind: "retained", head, reason: "head-attached" };
   if (head === tender) return { kind: "unchanged" };
   const parents = (await runGit(repository, ["show", "-s", "--format=%P", gitObjectId(tender)]))
-    .toString("utf8").trim().split(" ").filter((parent) => parent.length > 0).map((parent) => mintSnapshotId(parent));
+    .toString("utf8")
+    .trim()
+    .split(" ")
+    .filter((parent) => parent.length > 0)
+    .map((parent) => mintSnapshotId(parent));
   if (parents.length > 0 && head !== parents[0]) return { kind: "retained", head, reason: "head-moved" };
-  if (parents.length !== 1 && parents.length !== 2) return { kind: "retained", head, reason: "unsupported-parent-shape" };
+  if (parents.length !== 1 && parents.length !== 2)
+    return { kind: "retained", head, reason: "unsupported-parent-shape" };
   const gitDirectory = await worktreeGitDirectory(repository, workspace);
   const mergeHead = await workspaceRevision(repository, workspace, "MERGE_HEAD");
   const operation = await workspaceOperationState(repository, workspace, gitDirectory);
-  const admitted = parents.length === 1
-    ? mergeHead === null && !operation.other && !operation.unmerged
-    : mergeHead === parents[1] && !operation.other && !operation.unmerged;
+  const admitted =
+    parents.length === 1
+      ? mergeHead === null && !operation.other && !operation.unmerged
+      : mergeHead === parents[1] && !operation.other && !operation.unmerged;
   if (!admitted) return { kind: "retained", head, reason: "operation-in-progress" };
   await runGit(repository, ["-C", workspace, "reset", "--mixed", gitObjectId(tender)]);
   return { kind: "followed", before: head, after: tender };
 }
 
-export async function withPrivateGitIndex<Value>(action: (environment: Readonly<{ GIT_INDEX_FILE: string }>) => Value | PromiseLike<Value>): Promise<Value> {
+export async function withPrivateGitIndex<Value>(
+  action: (environment: Readonly<{ GIT_INDEX_FILE: string }>) => Value | PromiseLike<Value>,
+): Promise<Value> {
   const directory = await mkdtemp(join(tmpdir(), "keiyaku-v4-index-"));
   try {
     return await action({ GIT_INDEX_FILE: join(directory, "index") });
@@ -106,10 +137,19 @@ function fields(record: string, count: number): readonly string[] {
 type WorkspaceStatus = WorkspaceChanges & Readonly<{ unmergedPaths: readonly string[] }>;
 
 async function workspaceStatus(repository: GitRepository, workspace: string): Promise<WorkspaceStatus> {
-  const records = (await runGit(repository, [
-    "-C", workspace,
-    "status", "--porcelain=v2", "-z", "--untracked-files=all", "--ignore-submodules=none",
-  ])).toString("utf8").split("\0");
+  const records = (
+    await runGit(repository, [
+      "-C",
+      workspace,
+      "status",
+      "--porcelain=v2",
+      "-z",
+      "--untracked-files=all",
+      "--ignore-submodules=none",
+    ])
+  )
+    .toString("utf8")
+    .split("\0");
   const staged = new Set<string>();
   const unstaged = new Set<string>();
   const untracked = new Set<string>();
@@ -159,11 +199,16 @@ async function workspaceChanges(repository: GitRepository, workspace: string): P
 }
 
 /** Observe MERGE_HEAD in an appointed workspace, or undefined when absent. */
-export async function workspaceMergeHead(repository: GitRepository, workspace: string): Promise<SnapshotId | undefined> {
+export async function workspaceMergeHead(
+  repository: GitRepository,
+  workspace: string,
+): Promise<SnapshotId | undefined> {
   try {
-    return mintSnapshotId((await runGit(repository, ["-C", workspace, "rev-parse", "-q", "--verify", "MERGE_HEAD"]))
-      .toString("utf8")
-      .trim());
+    return mintSnapshotId(
+      (await runGit(repository, ["-C", workspace, "rev-parse", "-q", "--verify", "MERGE_HEAD"]))
+        .toString("utf8")
+        .trim(),
+    );
   } catch (error) {
     if (error instanceof GitPlumbingError && error.status === 1) return undefined;
     throw error;
@@ -171,10 +216,7 @@ export async function workspaceMergeHead(repository: GitRepository, workspace: s
 }
 
 /** True when the appointed workspace already has Git MERGE_HEAD. */
-export async function workspaceMergeStatePresent(
-  repository: GitRepository,
-  workspace: string,
-): Promise<boolean> {
+export async function workspaceMergeStatePresent(repository: GitRepository, workspace: string): Promise<boolean> {
   return (await workspaceMergeHead(repository, workspace)) !== undefined;
 }
 
@@ -190,9 +232,7 @@ export type WorkspaceChangeCounts = Readonly<{
   submodules: number;
 }>;
 
-export type ContractWorkspaceLocation =
-  | Readonly<{ kind: "worktree"; path: string }>
-  | Readonly<{ kind: "here" }>;
+export type ContractWorkspaceLocation = Readonly<{ kind: "worktree"; path: string }> | Readonly<{ kind: "here" }>;
 
 export type ContractWorkspaceMerge = Readonly<{
   head: SnapshotId;
@@ -265,11 +305,11 @@ export async function captureWorkspaceTree(repository: GitRepository, workspace:
     .toString("utf8")
     .split("\n");
   if (
-    identities.length !== 4
-    || identities[0] === undefined
-    || identities[1] === undefined
-    || identities[2] === undefined
-    || identities[3] !== ""
+    identities.length !== 4 ||
+    identities[0] === undefined ||
+    identities[1] === undefined ||
+    identities[2] === undefined ||
+    identities[3] !== ""
   ) {
     throw new Error("workspace HEAD/tree/time resolution returned an unexpected shape");
   }
@@ -286,7 +326,9 @@ export async function captureWorkspaceTree(repository: GitRepository, workspace:
     await runGitWithEnvironment(repository, ["-C", workspace, "add", "--all"], undefined, environment);
     return {
       tree: gitObjectId(
-        (await runGitWithEnvironment(repository, ["-C", workspace, "write-tree"], undefined, environment)).toString("utf8").trim(),
+        (await runGitWithEnvironment(repository, ["-C", workspace, "write-tree"], undefined, environment))
+          .toString("utf8")
+          .trim(),
         "workspace tree",
       ),
       head,

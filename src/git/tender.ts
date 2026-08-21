@@ -2,22 +2,9 @@ import { access } from "node:fs/promises";
 import type { Preparation } from "../core/decide.js";
 import type { ActorId, ContractCoordinates, ContractId, SnapshotId } from "../core/facts/types.js";
 import { gitObjectIdForSnapshot, mintSnapshotId, type GitObjectId } from "./identity.js";
-import {
-  decodeGitNumstat,
-  registeredWorktreePaths,
-} from "./repository.js";
-import {
-  GitPlumbingError,
-  runGit,
-  runGitWithEnvironment,
-  type GitRepository,
-} from "./process.js";
-import {
-  captureWorkspaceTree,
-  unmergedWorkspacePaths,
-  workspaceMergeHead,
-  worktreePath,
-} from "./workspace.js";
+import { decodeGitNumstat, registeredWorktreePaths } from "./repository.js";
+import { GitPlumbingError, runGit, runGitWithEnvironment, type GitRepository } from "./process.js";
+import { captureWorkspaceTree, unmergedWorkspacePaths, workspaceMergeHead, worktreePath } from "./workspace.js";
 
 export type TenderCaptureCoordinates = Readonly<{
   contractId: ContractId;
@@ -33,11 +20,13 @@ export type WorktreeMissingRefusal = Readonly<{
   contractId: ContractId;
 }>;
 
-export type TenderCaptureRefusal = WorktreeMissingRefusal | Readonly<{
-  kind: "unmerged-paths";
-  contractId: ContractId;
-  paths: readonly string[];
-}>;
+export type TenderCaptureRefusal =
+  | WorktreeMissingRefusal
+  | Readonly<{
+      kind: "unmerged-paths";
+      contractId: ContractId;
+      paths: readonly string[];
+    }>;
 
 export type WorkspaceDirtyDelta = Readonly<{
   staged: readonly string[];
@@ -65,10 +54,16 @@ export type TenderCapture = Readonly<{
   changes: Awaited<ReturnType<typeof captureWorkspaceTree>>["changes"];
 }>;
 
-async function workspaceExists(repository: GitRepository, workspace: "worktree" | "here", path: string): Promise<boolean> {
-  const exists = await access(path).then(() => true, () => false);
-  return workspace === "here"
-    || (exists && (await registeredWorktreePaths(repository)).includes(path));
+async function workspaceExists(
+  repository: GitRepository,
+  workspace: "worktree" | "here",
+  path: string,
+): Promise<boolean> {
+  const exists = await access(path).then(
+    () => true,
+    () => false,
+  );
+  return workspace === "here" || (exists && (await registeredWorktreePaths(repository)).includes(path));
 }
 
 function workspaceFor(repository: GitRepository, input: TenderCaptureCoordinates): string | undefined {
@@ -95,26 +90,24 @@ export async function captureTender(
   }
   if (input.rejectUnmerged === true) {
     const paths = await unmergedWorkspacePaths(repository, workspace);
-    if (paths.length > 0) return { kind: "refused", refusal: { kind: "unmerged-paths", contractId: input.contractId, paths } };
+    if (paths.length > 0)
+      return { kind: "refused", refusal: { kind: "unmerged-paths", contractId: input.contractId, paths } };
   }
   const captured = await captureWorkspaceTree(repository, workspace);
-  const mergeHead = input.captureMergeState === true
-    ? await workspaceMergeHead(repository, workspace)
-    : undefined;
+  const mergeHead = input.captureMergeState === true ? await workspaceMergeHead(repository, workspace) : undefined;
   return {
     kind: "prepared",
     data: { ...captured, ...(mergeHead === undefined ? {} : { mergeHead }) },
   };
 }
 
-async function dirtyShortStat(repository: GitRepository, tender: TenderCapture): Promise<WorkspaceDirtyDelta["shortStat"]> {
-  return decodeGitNumstat(await runGit(repository, [
-    "diff",
-    "--numstat",
-    "-z",
-    gitObjectIdForSnapshot(tender.head),
-    tender.tree,
-  ]));
+async function dirtyShortStat(
+  repository: GitRepository,
+  tender: TenderCapture,
+): Promise<WorkspaceDirtyDelta["shortStat"]> {
+  return decodeGitNumstat(
+    await runGit(repository, ["diff", "--numstat", "-z", gitObjectIdForSnapshot(tender.head), tender.tree]),
+  );
 }
 
 export async function dirtyTenderRefusal(
@@ -130,7 +123,10 @@ export async function dirtyTenderRefusal(
   };
 }
 
-export async function dirtyTenderDelta(repository: GitRepository, tender: TenderCapture): Promise<WorkspaceDirtyDelta | undefined> {
+export async function dirtyTenderDelta(
+  repository: GitRepository,
+  tender: TenderCapture,
+): Promise<WorkspaceDirtyDelta | undefined> {
   if (!tender.dirty) return undefined;
   const { staged, unstaged, untracked } = tender.changes;
   return { staged, unstaged, untracked, shortStat: await dirtyShortStat(repository, tender) };
@@ -180,9 +176,8 @@ export async function prepareDeliveryCommitMetadata(
       effectiveConfig(repository, "user.name"),
       effectiveConfig(repository, "user.email"),
     ]);
-    identity = name !== undefined && email !== undefined
-      ? { name, email }
-      : { name: "Keiyaku", email: "keiyaku@localhost" };
+    identity =
+      name !== undefined && email !== undefined ? { name, email } : { name: "Keiyaku", email: "keiyaku@localhost" };
   }
   const subject = input.message ?? `${input.contractId}: ${input.title}`;
   return {
@@ -201,18 +196,17 @@ export async function materializeTenderSnapshot(
   if (!tender.dirty && tender.mergeHead === undefined) return tender.head;
   const parents = ["-p", gitObjectIdForSnapshot(tender.head)];
   if (tender.mergeHead !== undefined) parents.push("-p", gitObjectIdForSnapshot(tender.mergeHead));
-  const oid = (await runGitWithEnvironment(
-    repository,
-    ["commit-tree", tender.tree, ...parents],
-    commit.message,
-    {
+  const oid = (
+    await runGitWithEnvironment(repository, ["commit-tree", tender.tree, ...parents], commit.message, {
       GIT_AUTHOR_NAME: commit.identity.name,
       GIT_AUTHOR_EMAIL: commit.identity.email,
       GIT_COMMITTER_NAME: commit.identity.name,
       GIT_COMMITTER_EMAIL: commit.identity.email,
       GIT_AUTHOR_DATE: commit.at,
       GIT_COMMITTER_DATE: commit.at,
-    },
-  )).toString("utf8").trim();
+    })
+  )
+    .toString("utf8")
+    .trim();
   return mintSnapshotId(oid);
 }

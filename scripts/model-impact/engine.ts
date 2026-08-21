@@ -68,15 +68,23 @@ function ownerOf(file: string, policy: ModelImpactPolicy): string {
 }
 
 function exported(node: ts.Node): boolean {
-  return ts.canHaveModifiers(node)
-    && (ts.getModifiers(node) ?? []).some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword);
+  return (
+    ts.canHaveModifiers(node) &&
+    (ts.getModifiers(node) ?? []).some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)
+  );
 }
 
-function declarationsOf(program: ts.Program, root: string, sourceFile: ts.SourceFile, file: string): readonly FieldDeclaration[] {
+function declarationsOf(
+  program: ts.Program,
+  root: string,
+  sourceFile: ts.SourceFile,
+  file: string,
+): readonly FieldDeclaration[] {
   const checker = program.getTypeChecker();
   const grouped = new Map<string, FieldDeclaration>();
   for (const statement of sourceFile.statements) {
-    if (!exported(statement) || (!ts.isInterfaceDeclaration(statement) && !ts.isTypeAliasDeclaration(statement))) continue;
+    if (!exported(statement) || (!ts.isInterfaceDeclaration(statement) && !ts.isTypeAliasDeclaration(statement)))
+      continue;
     const model = statement.name.text;
     const modelType = checker.getTypeAtLocation(statement.name);
     for (const property of checker.getPropertiesOfType(modelType)) {
@@ -87,8 +95,9 @@ function declarationsOf(program: ts.Program, root: string, sourceFile: ts.Source
       if (members.length === 0) continue;
       const field = property.getName();
       const key = `${file}#${model}.${field}`;
-      const readonly = members.some((member) => (ts.getModifiers(member) ?? [])
-        .some((modifier) => modifier.kind === ts.SyntaxKind.ReadonlyKeyword));
+      const readonly = members.some((member) =>
+        (ts.getModifiers(member) ?? []).some((modifier) => modifier.kind === ts.SyntaxKind.ReadonlyKeyword),
+      );
       const optional = (property.flags & ts.SymbolFlags.Optional) !== 0;
       const propertyType = checker.getTypeOfSymbolAtLocation(property, statement);
       const type = checker.typeToString(propertyType, statement, ts.TypeFormatFlags.NoTruncation);
@@ -103,8 +112,12 @@ function declarationsOf(program: ts.Program, root: string, sourceFile: ts.Source
         model,
         field,
         signature: `${readonly ? "readonly " : ""}${optional ? "optional " : ""}${type}`,
-        locations: [...(existing?.locations ?? []), ...locations]
-          .filter((location, index, all) => all.findIndex((candidate) => candidate.file === location.file && candidate.position === location.position) === index),
+        locations: [...(existing?.locations ?? []), ...locations].filter(
+          (location, index, all) =>
+            all.findIndex(
+              (candidate) => candidate.file === location.file && candidate.position === location.position,
+            ) === index,
+        ),
       });
     }
   }
@@ -171,9 +184,19 @@ function usageKind(node: ts.Node): UsageKind {
   if (ts.isPropertySignature(node.parent)) return "declaration";
   if (ts.isPropertyAssignment(node.parent) || ts.isShorthandPropertyAssignment(node.parent)) return "construct";
   if (ts.isBindingElement(node.parent)) return "destructure";
-  const access = ts.isPropertyAccessExpression(node.parent) || ts.isElementAccessExpression(node.parent) ? node.parent : node;
-  if (ts.isBinaryExpression(access.parent) && access.parent.left === access && ASSIGNMENTS.has(access.parent.operatorToken.kind)) return "write";
-  if ((ts.isPrefixUnaryExpression(access.parent) || ts.isPostfixUnaryExpression(access.parent)) && access.parent.operand === access) return "write";
+  const access =
+    ts.isPropertyAccessExpression(node.parent) || ts.isElementAccessExpression(node.parent) ? node.parent : node;
+  if (
+    ts.isBinaryExpression(access.parent) &&
+    access.parent.left === access &&
+    ASSIGNMENTS.has(access.parent.operatorToken.kind)
+  )
+    return "write";
+  if (
+    (ts.isPrefixUnaryExpression(access.parent) || ts.isPostfixUnaryExpression(access.parent)) &&
+    access.parent.operand === access
+  )
+    return "write";
   return "read";
 }
 
@@ -205,20 +228,27 @@ function referenceUsages(
   policy: ModelImpactPolicy,
 ): readonly FieldUsage[] {
   const collected = new Map<string, FieldUsage>();
-  const declarationLocations = new Set(declaration.locations.map((location) => `${path.resolve(root, location.file)}:${location.position}`));
+  const declarationLocations = new Set(
+    declaration.locations.map((location) => `${path.resolve(root, location.file)}:${location.position}`),
+  );
   for (const location of declaration.locations) {
     const declarationFile = path.resolve(root, location.file);
-    const references = (service.findReferences(declarationFile, location.position) ?? []).flatMap((group) => group.references);
+    const references = (service.findReferences(declarationFile, location.position) ?? []).flatMap(
+      (group) => group.references,
+    );
     for (const reference of references) {
       const isDefinition = declarationLocations.has(`${path.resolve(reference.fileName)}:${reference.textSpan.start}`);
       const usage = fieldUsage(service, root, reference, policy, isDefinition);
       if (usage) collected.set(`${usage.file}:${usage.line}:${usage.column}:${usage.kind}`, usage);
     }
   }
-  return [...collected.values()].sort((left, right) => left.file.localeCompare(right.file)
-    || left.line - right.line
-    || left.column - right.column
-    || left.kind.localeCompare(right.kind));
+  return [...collected.values()].sort(
+    (left, right) =>
+      left.file.localeCompare(right.file) ||
+      left.line - right.line ||
+      left.column - right.column ||
+      left.kind.localeCompare(right.kind),
+  );
 }
 
 function analyzeSnapshot(sources: readonly ModelSource[], policy: ModelImpactPolicy): SnapshotAnalysis {
@@ -240,7 +270,9 @@ function analyzeSnapshot(sources: readonly ModelSource[], policy: ModelImpactPol
   return { fields };
 }
 
-function snapshot(field: Readonly<{ declaration: FieldDeclaration; usages: readonly FieldUsage[] }> | undefined): FieldSnapshot | undefined {
+function snapshot(
+  field: Readonly<{ declaration: FieldDeclaration; usages: readonly FieldUsage[] }> | undefined,
+): FieldSnapshot | undefined {
   return field ? { signature: field.declaration.signature, usages: field.usages } : undefined;
 }
 

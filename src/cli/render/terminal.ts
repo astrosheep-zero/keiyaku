@@ -19,9 +19,17 @@ export function gitShortStat(stat: GitShortStat): string {
 const GRAPHEMES = new Intl.Segmenter("und", { granularity: "grapheme" });
 
 const WIDE_RANGES = [
-  [0x1100, 0x115f], [0x2329, 0x232a], [0x2e80, 0xa4cf], [0xac00, 0xd7a3],
-  [0xf900, 0xfaff], [0xfe10, 0xfe19], [0xfe30, 0xfe6f], [0xff00, 0xff60],
-  [0xffe0, 0xffe6], [0x1f300, 0x1faff], [0x20000, 0x3fffd],
+  [0x1100, 0x115f],
+  [0x2329, 0x232a],
+  [0x2e80, 0xa4cf],
+  [0xac00, 0xd7a3],
+  [0xf900, 0xfaff],
+  [0xfe10, 0xfe19],
+  [0xfe30, 0xfe6f],
+  [0xff00, 0xff60],
+  [0xffe0, 0xffe6],
+  [0x1f300, 0x1faff],
+  [0x20000, 0x3fffd],
 ] as const;
 
 function characterColumns(character: string): number {
@@ -111,11 +119,14 @@ export function renderBoundedTextBlock(
 }
 
 export function safeText(value: string): string {
-  return value.replaceAll(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (character) => /\s/u.test(character) ? " " : "�");
+  return value.replaceAll(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (character) => (/\s/u.test(character) ? " " : "�"));
 }
 
 export function renderTextBlock(value: string, indent: string, columns: number): readonly string[] {
-  const words = safeText(value).trim().split(/\s+/u).filter((word) => word.length > 0);
+  const words = safeText(value)
+    .trim()
+    .split(/\s+/u)
+    .filter((word) => word.length > 0);
   if (words.length === 0) return [indent];
   const lines: string[] = [];
   let current = indent;

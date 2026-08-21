@@ -87,23 +87,31 @@ export function resolveNamedAddress(input: NamedAddressInput): NamedAddress {
   if (input.aliases.kind === "failed") {
     throw new TypeError("cannot resolve a named selector while Alias authority is failed");
   }
-  const contractMatches = (input.report.contracts.kind === "present" ? input.report.contracts.value.rows : []).filter((row) => row.disposition === "active"
-    && row.workspace === "worktree" && row.worktreePath !== null
-    && `@${row.id.slice("kei/".length)}` === alias);
-  const aliasId = input.aliases.kind === "present"
-    ? input.aliases.value.find((binding) => binding.alias === alias)?.akuId ?? null
-    : null;
-  if (contractMatches.length > 0 && aliasId !== null) throw new TypeError(`ambiguous selector matches Contract and Akuma: ${selector}`);
+  const contractMatches = (input.report.contracts.kind === "present" ? input.report.contracts.value.rows : []).filter(
+    (row) =>
+      row.disposition === "active" &&
+      row.workspace === "worktree" &&
+      row.worktreePath !== null &&
+      `@${row.id.slice("kei/".length)}` === alias,
+  );
+  const aliasId =
+    input.aliases.kind === "present"
+      ? (input.aliases.value.find((binding) => binding.alias === alias)?.akuId ?? null)
+      : null;
+  if (contractMatches.length > 0 && aliasId !== null)
+    throw new TypeError(`ambiguous selector matches Contract and Akuma: ${selector}`);
   if (contractMatches.length === 1) return { kind: "contract", id: contractMatches[0]!.id };
   if (contractMatches.length > 1) throw new TypeError(`ambiguous Contract selector: ${selector}`);
   if (aliasId !== null) return { kind: "akuma", id: aliasId };
   throw new TypeError(`unknown selector: ${selector}`);
 }
 
-export async function addressAkuma(input: AkumaAddressInput): Promise<Readonly<{
-  path: WorldRoot;
-  id: AkuId;
-}>> {
+export async function addressAkuma(input: AkumaAddressInput): Promise<
+  Readonly<{
+    path: WorldRoot;
+    id: AkuId;
+  }>
+> {
   const values = requireInput(input, "Akuma address input");
   for (const key of Object.keys(values)) {
     if (!["path", "akuma", "repo"].includes(key)) {
@@ -140,7 +148,11 @@ function hasSelectorKind(selectors: readonly ParsedSetSelector[], kind: ParsedSe
 
 function addSelectorIds(
   selector: ParsedSetSelector,
-  sources: Readonly<{ fleetIds: readonly AkuId[]; aliases: ReadonlyMap<AkumaAlias, AkuId>; dispatches: readonly DispatchFact[] }>,
+  sources: Readonly<{
+    fleetIds: readonly AkuId[];
+    aliases: ReadonlyMap<AkumaAlias, AkuId>;
+    dispatches: readonly DispatchFact[];
+  }>,
   selected: Set<AkuId>,
   contractMembers: Set<AkuId>,
 ): void {
@@ -174,33 +186,38 @@ async function contractMemberInWorld(path: WorldRoot, id: AkuId): Promise<boolea
   }
 }
 
-async function refuseForeignContractMembers(path: WorldRoot, ids: readonly AkuId[], contractMembers: ReadonlySet<AkuId>): Promise<void> {
+async function refuseForeignContractMembers(
+  path: WorldRoot,
+  ids: readonly AkuId[],
+  contractMembers: ReadonlySet<AkuId>,
+): Promise<void> {
   const foreign: AkuId[] = [];
   for (const id of ids) {
-    if (contractMembers.has(id) && !await contractMemberInWorld(path, id)) foreign.push(id);
+    if (contractMembers.has(id) && !(await contractMemberInWorld(path, id))) foreign.push(id);
   }
   if (foreign.length > 0) throw new AkumaWorldScopeError({ kind: "akuma-not-in-world", ids: foreign, world: path });
 }
 
-export async function addressAkumaSet(input: AkumaSetAddressInput): Promise<Readonly<{
-  path: WorldRoot;
-  ids: readonly AkuId[];
-}>> {
+export async function addressAkumaSet(input: AkumaSetAddressInput): Promise<
+  Readonly<{
+    path: WorldRoot;
+    ids: readonly AkuId[];
+  }>
+> {
   const values = requireInput(input, "Akuma set address input");
   for (const key of Object.keys(values)) {
     if (!["path", "akuma", "repo"].includes(key)) {
       throw new TypeError(`Akuma set address input has unknown field: ${key}`);
     }
   }
-  if (!Array.isArray(values.akuma) || values.akuma.length === 0) throw new TypeError("akuma must be a nonempty selector array");
+  if (!Array.isArray(values.akuma) || values.akuma.length === 0)
+    throw new TypeError("akuma must be a nonempty selector array");
   const path = nonblank(values.path, "path") as WorldRoot;
   const selectors = values.akuma.map(parseSetSelector);
   if (hasSelectorKind(selectors, "contract") && values.repo === undefined) {
     throw new TypeError("Contract Akuma selector requires repo");
   }
-  const fleetIds = hasSelectorKind(selectors, "glob")
-    ? idsFromFleet(await world(path).list())
-    : [];
+  const fleetIds = hasSelectorKind(selectors, "glob") ? idsFromFleet(await world(path).list()) : [];
   const aliases = hasSelectorKind(selectors, "alias")
     ? new Map((await readAliases(path)).map((binding) => [binding.alias, binding.akuId]))
     : new Map<AkumaAlias, AkuId>();

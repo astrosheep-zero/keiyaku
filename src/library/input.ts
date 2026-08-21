@@ -66,11 +66,7 @@ export function optionalSignal(value: unknown): AbortSignal | undefined {
   return value;
 }
 
-export function normalizedList<T>(
-  values: unknown,
-  label: string,
-  brand: (value: string) => T,
-): readonly T[] {
+export function normalizedList<T>(values: unknown, label: string, brand: (value: string) => T): readonly T[] {
   if (values === undefined) return [];
   if (!Array.isArray(values)) throw new TypeError(`${label} must be an array`);
   return values.map((value, index) => {

@@ -5,16 +5,8 @@ import {
   withContractReadObservationAt,
 } from "../../git/observe.js";
 import { decodeContractDocument } from "../../body/decode.js";
-import {
-  observeTargetLag,
-  observeWorkspace,
-  worktreePath,
-} from "../../git/workspace.js";
-import {
-  appointmentFor,
-  readPlaceRegister,
-  type PlaceRegister,
-} from "../../workspace-place.js";
+import { observeTargetLag, observeWorkspace, worktreePath } from "../../git/workspace.js";
+import { appointmentFor, readPlaceRegister, type PlaceRegister } from "../../workspace-place.js";
 import type { ContractTargetLag, ContractWorkspaceObservation } from "../../git/workspace.js";
 import type { GitRepository } from "../../git/process.js";
 import type { GitDecodeChannel, GitReadObservation } from "../../git/read-observation.js";
@@ -101,10 +93,7 @@ function phaseFor(state: ContractState): ContractPhase {
   return "waiting";
 }
 
-export function phaseAtFor(
-  state: Pick<ContractState, "terminal" | "delivery" | "bound">,
-  bindAt: string,
-): string {
+export function phaseAtFor(state: Pick<ContractState, "terminal" | "delivery" | "bound">, bindAt: string): string {
   return state.terminal?.at ?? state.delivery?.at ?? state.bound?.at ?? bindAt;
 }
 
@@ -119,11 +108,13 @@ async function managedWorkspaceFacts(
   state: ContractState,
   register: PlaceRegister,
   targetObservation: ContractRow["targetObservation"],
-): Promise<Readonly<{
-  appointed: ReturnType<typeof appointmentFor>;
-  workspaceObservation: ContractWorkspaceObservation;
-  targetLag: ContractTargetLag;
-}>> {
+): Promise<
+  Readonly<{
+    appointed: ReturnType<typeof appointmentFor>;
+    workspaceObservation: ContractWorkspaceObservation;
+    targetLag: ContractTargetLag;
+  }>
+> {
   const appointed = appointmentFor(register, state.id);
   if (appointed === undefined) {
     return {
@@ -145,14 +136,15 @@ async function hereWorkspaceFacts(
   contractId: ContractId,
   targetObservation: ContractRow["targetObservation"],
   resolveHereWorkspace?: HereWorkspaceObservationResolver,
-): Promise<Readonly<{
-  appointed: undefined;
-  workspaceObservation: ContractWorkspaceObservation;
-  targetLag: ContractTargetLag;
-}>> {
-  const resolved = resolveHereWorkspace === undefined
-    ? { kind: "unappointed" } as const
-    : await resolveHereWorkspace(contractId);
+): Promise<
+  Readonly<{
+    appointed: undefined;
+    workspaceObservation: ContractWorkspaceObservation;
+    targetLag: ContractTargetLag;
+  }>
+> {
+  const resolved =
+    resolveHereWorkspace === undefined ? ({ kind: "unappointed" } as const) : await resolveHereWorkspace(contractId);
   if (resolved.kind === "failed") {
     return {
       appointed: undefined,
@@ -205,7 +197,12 @@ function afterEdges(
 
 function reverseDependents(
   id: ContractId,
-  rows: readonly Readonly<{ id: ContractId; phase: ContractPhase; disposition: ContractDisposition; after: readonly ContractAfterEdge[] }>[],
+  rows: readonly Readonly<{
+    id: ContractId;
+    phase: ContractPhase;
+    disposition: ContractDisposition;
+    after: readonly ContractAfterEdge[];
+  }>[],
 ): readonly ContractDependent[] {
   return rows
     .filter((row) => row.disposition === "active" && row.after.some((edge) => edge.contractId === id))
@@ -227,9 +224,10 @@ async function rowFor(input: ContractRowInput): Promise<ContractRow> {
   } = input;
   const workspace = state.coordinates.workspace;
   const gates = gateReports(state);
-  const { appointed, workspaceObservation, targetLag } = workspace === "worktree"
-    ? await managedWorkspaceFacts(repository, state, register, targetObservation)
-    : await hereWorkspaceFacts(repository, state.id, targetObservation, resolveHereWorkspace);
+  const { appointed, workspaceObservation, targetLag } =
+    workspace === "worktree"
+      ? await managedWorkspaceFacts(repository, state, register, targetObservation)
+      : await hereWorkspaceFacts(repository, state.id, targetObservation, resolveHereWorkspace);
   return {
     id: state.id,
     title: titleFor(state),
@@ -242,9 +240,10 @@ async function rowFor(input: ContractRowInput): Promise<ContractRow> {
     workspaceObservation,
     target: state.coordinates.target ?? null,
     targetLag,
-    delivery: state.delivery === null || state.currentIntegration === null
-      ? null
-      : { ...state.delivery.data, integration: state.currentIntegration },
+    delivery:
+      state.delivery === null || state.currentIntegration === null
+        ? null
+        : { ...state.delivery.data, integration: state.currentIntegration },
     targetObservation,
     gates: {
       reports: gates.reports.map((report) => ({ gate: report.gate, current: report.current })),
@@ -287,21 +286,27 @@ export async function readContractBoard(
     }
   }
   const register = await readPlaceRegister(observation.repository);
-  const projected = await Promise.all([...contracts.values()].flatMap((value) => {
-    if (value.state === null) return [];
-    const state = value.state;
-    return [observeDeliveryTargetAt(observation, state).then((target) => rowFor({
-      repository: observation.repository,
-      state,
-      bindAt: value.entries[0]!.at,
-      lastJournalAt: lastJournalAtFor(value.entries),
-      targetObservation: target,
-      register,
-      after: afterEdges(state, endpoints),
-      dependents: [],
-      ...(resolveHereWorkspace === undefined ? {} : { resolveHereWorkspace }),
-    }))];
-  }));
+  const projected = await Promise.all(
+    [...contracts.values()].flatMap((value) => {
+      if (value.state === null) return [];
+      const state = value.state;
+      return [
+        observeDeliveryTargetAt(observation, state).then((target) =>
+          rowFor({
+            repository: observation.repository,
+            state,
+            bindAt: value.entries[0]!.at,
+            lastJournalAt: lastJournalAtFor(value.entries),
+            targetObservation: target,
+            register,
+            after: afterEdges(state, endpoints),
+            dependents: [],
+            ...(resolveHereWorkspace === undefined ? {} : { resolveHereWorkspace }),
+          }),
+        ),
+      ];
+    }),
+  );
   const rows = projected.map((row) => ({ ...row, dependents: reverseDependents(row.id, projected) }));
   return {
     root: observation.repository.primaryWorktree,
@@ -322,11 +327,7 @@ export async function readContractObservation(
   if (record === undefined) throw new Error(`missing requested Contract observation: ${id}`);
   const state = record.state;
   if (state === null) return { kind: "missing", id };
-  const endpoints = await afterEndpointMap(
-    observation,
-    new Map([[id, state]]),
-    state.terms.after,
-  );
+  const endpoints = await afterEndpointMap(observation, new Map([[id, state]]), state.terms.after);
   return {
     kind: "present",
     row: await rowFor({

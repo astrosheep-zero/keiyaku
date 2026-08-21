@@ -336,7 +336,7 @@ async function mutatePlaceRegister(
     const next = mutate(current);
     const bytes = canonicalPlaceRegister(next);
     try {
-      if (await readFile(location.authority, "utf8") === bytes) return next;
+      if ((await readFile(location.authority, "utf8")) === bytes) return next;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
@@ -428,7 +428,7 @@ export async function readManagedWorktreeAppointment(
   register?: PlaceRegister,
 ): Promise<ManagedWorktreeAppointment> {
   try {
-    const snapshot = register ?? await readPlaceRegister(repository);
+    const snapshot = register ?? (await readPlaceRegister(repository));
     const appointed = appointmentFor(snapshot, contract);
     return appointed === undefined
       ? { kind: "unappointed" }

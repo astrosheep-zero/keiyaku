@@ -39,7 +39,9 @@ function ownershipLockPath(path: string): string | null {
   return match === null ? null : join(SCRATCH_ROOT, `.${SCRATCH_PREFIX}${match[1]}.owner.sqlite`);
 }
 
-export async function collectableScratchWorktrees(paths: Iterable<string>): Promise<readonly CollectableScratchWorktree[]> {
+export async function collectableScratchWorktrees(
+  paths: Iterable<string>,
+): Promise<readonly CollectableScratchWorktree[]> {
   const collectable: CollectableScratchWorktree[] = [];
   for (const path of paths) {
     const lockPath = ownershipLockPath(path);

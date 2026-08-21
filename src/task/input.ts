@@ -91,8 +91,7 @@ export function sort(value: unknown): TaskQuerySort | undefined {
 
 export function state(value: unknown): TaskState | undefined {
   if (value === undefined) return undefined;
-  if (value !== "open" && value !== "in_progress" && value !== "on_hold"
-    && value !== "done" && value !== "drop") {
+  if (value !== "open" && value !== "in_progress" && value !== "on_hold" && value !== "done" && value !== "drop") {
     throw new TypeError("state is invalid");
   }
   return value;
@@ -104,10 +103,24 @@ function nullableId(value: unknown): TaskId | null | undefined {
 
 export function addInput(input: unknown): AddTaskInput {
   const value = record(input, "add input");
-  closed(value, [
-    "title", "namespace", "body", "note", "state", "priority", "needs", "parent",
-    "supersedes", "relates", "actor", "signal",
-  ], "add input");
+  closed(
+    value,
+    [
+      "title",
+      "namespace",
+      "body",
+      "note",
+      "state",
+      "priority",
+      "needs",
+      "parent",
+      "supersedes",
+      "relates",
+      "actor",
+      "signal",
+    ],
+    "add input",
+  );
   const title = text(value.title, "title");
   if (title === undefined || title.trim() === "") throw new TypeError("title is required");
   const selectedNamespace = namespace(value.namespace);
@@ -139,11 +152,28 @@ export function addInput(input: unknown): AddTaskInput {
 
 export function updateInput(input: unknown): UpdateTaskInput {
   const value = record(input, "update input");
-  closed(value, [
-    "title", "body", "appendBody", "note", "priority", "needs", "addNeeds", "dropNeeds",
-    "parent", "supersedes", "addSupersedes", "dropSupersedes", "relates", "addRelates",
-    "dropRelates", "signal",
-  ], "update input");
+  closed(
+    value,
+    [
+      "title",
+      "body",
+      "appendBody",
+      "note",
+      "priority",
+      "needs",
+      "addNeeds",
+      "dropNeeds",
+      "parent",
+      "supersedes",
+      "addSupersedes",
+      "dropSupersedes",
+      "relates",
+      "addRelates",
+      "dropRelates",
+      "signal",
+    ],
+    "update input",
+  );
   if (value.body !== undefined && value.appendBody !== undefined) {
     throw new TypeError("body and appendBody are mutually exclusive");
   }
@@ -153,10 +183,14 @@ export function updateInput(input: unknown): UpdateTaskInput {
     if (title.trim().length === 0) throw new TypeError("title must be nonblank");
     result.title = title;
   }
-  const body = text(value.body, "body"); if (body !== undefined) result.body = body;
-  const appendBody = text(value.appendBody, "appendBody"); if (appendBody !== undefined) result.appendBody = appendBody;
-  const note = text(value.note, "note"); if (note !== undefined) result.note = note;
-  const selectedPriority = priority(value.priority); if (selectedPriority !== undefined) result.priority = selectedPriority;
+  const body = text(value.body, "body");
+  if (body !== undefined) result.body = body;
+  const appendBody = text(value.appendBody, "appendBody");
+  if (appendBody !== undefined) result.appendBody = appendBody;
+  const note = text(value.note, "note");
+  if (note !== undefined) result.note = note;
+  const selectedPriority = priority(value.priority);
+  if (selectedPriority !== undefined) result.priority = selectedPriority;
   for (const [key, ids] of [
     ["needs", taskIds(value.needs, "needs")],
     ["addNeeds", taskIds(value.addNeeds, "addNeeds")],
@@ -167,9 +201,12 @@ export function updateInput(input: unknown): UpdateTaskInput {
     ["relates", taskIds(value.relates, "relates")],
     ["addRelates", taskIds(value.addRelates, "addRelates")],
     ["dropRelates", taskIds(value.dropRelates, "dropRelates")],
-  ] as const) if (ids !== undefined) result[key] = ids;
-  const parent = nullableId(value.parent); if (parent !== undefined) result.parent = parent;
-  const abort = signal(value.signal); if (abort !== undefined) result.signal = abort;
+  ] as const)
+    if (ids !== undefined) result[key] = ids;
+  const parent = nullableId(value.parent);
+  if (parent !== undefined) result.parent = parent;
+  const abort = signal(value.signal);
+  if (abort !== undefined) result.signal = abort;
   if (Object.keys(result).filter((key) => key !== "signal").length === 0) {
     throw new TypeError("update requires at least one field change");
   }

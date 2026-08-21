@@ -18,9 +18,7 @@ export type SpawnLaunchPolicy = Readonly<{
   shell: false;
 }>;
 
-export type PlatformLaunchPolicy =
-  | Readonly<{ kind: "windows-launcher" }>
-  | SpawnLaunchPolicy;
+export type PlatformLaunchPolicy = Readonly<{ kind: "windows-launcher" }> | SpawnLaunchPolicy;
 
 export function platformLaunchPolicy(
   intent: LaunchIntent,
@@ -73,12 +71,15 @@ function envRecord(env: NodeJS.ProcessEnv | undefined): Readonly<Record<string, 
 }
 
 export function encodeLaunchSpec(input: DetachedProcessInput): Buffer {
-  return Buffer.from(JSON.stringify({
-    argv: input.argv,
-    cwd: input.cwd,
-    env: envRecord(input.env),
-    log: input.log,
-  }), "utf8");
+  return Buffer.from(
+    JSON.stringify({
+      argv: input.argv,
+      cwd: input.cwd,
+      env: envRecord(input.env),
+      log: input.log,
+    }),
+    "utf8",
+  );
 }
 
 function launchFailure(command: string, diagnostic: string): NodeJS.ErrnoException {
@@ -101,7 +102,11 @@ async function waitSpawned(child: ChildProcess): Promise<void> {
 export async function spawnLoggedProcess(input: DetachedProcessInput, intent: LaunchIntent): Promise<ChildProcess> {
   const log = await open(input.log, "a");
   try {
-    const child = spawn(input.argv[0]!, input.argv.slice(1), spawnOptionsFor(intent, input, ["ignore", log.fd, log.fd]));
+    const child = spawn(
+      input.argv[0]!,
+      input.argv.slice(1),
+      spawnOptionsFor(intent, input, ["ignore", log.fd, log.fd]),
+    );
     await waitSpawned(child);
     return child;
   } finally {
@@ -122,7 +127,9 @@ export async function handoffWindowsLaunch(
   });
   let stderr = "";
   child.stderr?.setEncoding("utf8");
-  child.stderr?.on("data", (chunk: string) => { stderr = `${stderr}${chunk}`.slice(-4_000); });
+  child.stderr?.on("data", (chunk: string) => {
+    stderr = `${stderr}${chunk}`.slice(-4_000);
+  });
   const closed = new Promise<number | null>((resolve) => {
     child.once("close", (exitCode) => resolve(exitCode));
   });

@@ -4,10 +4,7 @@ import { noteEvent, unknownEvent, type AgentEvent, type ToolCall } from "../../p
 type OpenBlock = Readonly<{ type: "assistant" | "thought"; text: string }> | null;
 
 export type AcpToolObservation = Readonly<{ name: string; call: ToolCall }>;
-export type AcpToolUpdate = Extract<
-  SessionUpdate,
-  { sessionUpdate: "tool_call" | "tool_call_update" }
->;
+export type AcpToolUpdate = Extract<SessionUpdate, { sessionUpdate: "tool_call" | "tool_call_update" }>;
 export type AcpToolInterpreter = (update: AcpToolUpdate) => ToolCall | undefined;
 
 export type AcpEventState = Readonly<{
@@ -39,22 +36,18 @@ function appendBlock(
   text: string,
   messageId?: string,
 ): AcpEventMapping {
-  const newAssistantMessage = type === "assistant"
-    && messageId !== undefined
-    && state.assistantMessageId !== messageId;
-  const flushed = state.open === null || (state.open.type === type && !newAssistantMessage)
-    ? { events: [], state }
-    : flushAcpEvents(state);
+  const newAssistantMessage = type === "assistant" && messageId !== undefined && state.assistantMessageId !== messageId;
+  const flushed =
+    state.open === null || (state.open.type === type && !newAssistantMessage)
+      ? { events: [], state }
+      : flushAcpEvents(state);
   return {
     events: flushed.events,
     state: {
       ...flushed.state,
-      answer: type === "assistant"
-        ? `${newAssistantMessage ? "" : flushed.state.answer}${text}`
-        : flushed.state.answer,
-      assistantMessageId: type === "assistant" && messageId !== undefined
-        ? messageId
-        : flushed.state.assistantMessageId,
+      answer: type === "assistant" ? `${newAssistantMessage ? "" : flushed.state.answer}${text}` : flushed.state.answer,
+      assistantMessageId:
+        type === "assistant" && messageId !== undefined ? messageId : flushed.state.assistantMessageId,
       open: { type, text: `${flushed.state.open?.text ?? ""}${text}` },
     },
   };
@@ -66,14 +59,12 @@ function nonblank(value: unknown): string | undefined {
 
 function object(value: unknown): Readonly<Record<string, unknown>> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Readonly<Record<string, unknown>>
+    ? (value as Readonly<Record<string, unknown>>)
     : undefined;
 }
 
 function positiveLine(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1
-    ? value
-    : undefined;
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 ? value : undefined;
 }
 
 function otherCall(name: string): ToolCall {
@@ -100,10 +91,10 @@ function standardCall(update: AcpToolUpdate, name: string): ToolCall {
     return location.path === undefined
       ? otherCall(name)
       : {
-        kind: "read",
-        path: location.path,
-        ...(location.offset === undefined ? {} : { offset: location.offset }),
-      };
+          kind: "read",
+          path: location.path,
+          ...(location.offset === undefined ? {} : { offset: location.offset }),
+        };
   }
   const input = object(update.rawInput);
   if (update.kind === "execute") {
@@ -116,9 +107,7 @@ function standardCall(update: AcpToolUpdate, name: string): ToolCall {
     const path = nonblank(input?.path);
     const glob = nonblank(input?.glob);
     const scope = input?.scope;
-    const searchScope = scope === "content" || scope === "files" || scope === "web"
-      ? scope
-      : undefined;
+    const searchScope = scope === "content" || scope === "files" || scope === "web" ? scope : undefined;
     return {
       kind: "search",
       query,
@@ -155,39 +144,59 @@ export function mapAcpUpdate(
     case "agent_message_chunk":
     case "agent_thought_chunk": {
       const text = update.content.type === "text" ? update.content.text : undefined;
-      if (text === undefined) return flushAcpEvents(previous, [unknownEvent(`${update.sessionUpdate}/${update.content.type}`)]);
+      if (text === undefined)
+        return flushAcpEvents(previous, [unknownEvent(`${update.sessionUpdate}/${update.content.type}`)]);
       return appendBlock(
         previous,
         update.sessionUpdate === "agent_message_chunk" ? "assistant" : "thought",
         text,
-        update.sessionUpdate === "agent_message_chunk" && update.messageId !== null
-          ? update.messageId
-          : undefined,
+        update.sessionUpdate === "agent_message_chunk" && update.messageId !== null ? update.messageId : undefined,
       );
     }
-    case "user_message_chunk": return flushAcpEvents(previous);
+    case "user_message_chunk":
+      return flushAcpEvents(previous);
     case "tool_call":
     case "tool_call_update": {
       const observed = observeTool(update, previous.tools.get(update.toolCallId), interpret);
       const tools = new Map(previous.tools);
       if (update.status === "completed" || update.status === "failed") {
         tools.delete(update.toolCallId);
-        return flushAcpEvents({ ...previous, tools }, [{ type: "tool", phase: "completed", id: update.toolCallId, ...observed, result: { status: update.status === "completed" ? "ok" : "error" } }]);
+        return flushAcpEvents({ ...previous, tools }, [
+          {
+            type: "tool",
+            phase: "completed",
+            id: update.toolCallId,
+            ...observed,
+            result: { status: update.status === "completed" ? "ok" : "error" },
+          },
+        ]);
       }
       const started = tools.has(update.toolCallId);
       tools.set(update.toolCallId, observed);
       return started
         ? flushAcpEvents({ ...previous, tools })
-        : flushAcpEvents({ ...previous, tools }, [{ type: "tool", phase: "started", id: update.toolCallId, ...observed }]);
+        : flushAcpEvents({ ...previous, tools }, [
+            { type: "tool", phase: "started", id: update.toolCallId, ...observed },
+          ]);
     }
-    case "plan": return flushAcpEvents(previous, [noteEvent(`Plan updated: ${update.entries.map((entry) => entry.content).join("; ")}`)]);
-    case "available_commands_update": return flushAcpEvents(previous, [noteEvent("ACP commands updated")]);
-    case "current_mode_update": return flushAcpEvents(previous, [noteEvent("ACP mode updated")]);
-    case "config_option_update": return flushAcpEvents(previous, [noteEvent("ACP configuration updated")]);
-    case "session_info_update": return flushAcpEvents(previous, [noteEvent("ACP session metadata updated")]);
-    case "usage_update": return flushAcpEvents(previous);
+    case "plan":
+      return flushAcpEvents(previous, [
+        noteEvent(`Plan updated: ${update.entries.map((entry) => entry.content).join("; ")}`),
+      ]);
+    case "available_commands_update":
+      return flushAcpEvents(previous, [noteEvent("ACP commands updated")]);
+    case "current_mode_update":
+      return flushAcpEvents(previous, [noteEvent("ACP mode updated")]);
+    case "config_option_update":
+      return flushAcpEvents(previous, [noteEvent("ACP configuration updated")]);
+    case "session_info_update":
+      return flushAcpEvents(previous, [noteEvent("ACP session metadata updated")]);
+    case "usage_update":
+      return flushAcpEvents(previous);
     case "plan_update":
-    case "plan_removed": return flushAcpEvents(previous, [unknownEvent(update.sessionUpdate)]);
-    default: return { events: [unknownEvent(String((update as { sessionUpdate?: unknown }).sessionUpdate))], state: previous };
+    case "plan_removed":
+      return flushAcpEvents(previous, [unknownEvent(update.sessionUpdate)]);
+    default:
+      return { events: [unknownEvent(String((update as { sessionUpdate?: unknown }).sessionUpdate))], state: previous };
   }
 }

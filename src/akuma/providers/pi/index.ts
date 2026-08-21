@@ -30,10 +30,13 @@ type PiThinkingLevel = NonNullable<CreateAgentSessionOptions["thinkingLevel"]>;
 const PI_THINKING_LEVELS = new Set<PiThinkingLevel>(["minimal", "low", "medium", "high", "xhigh", "max"]);
 const MODEL_PATTERN = /^[^/\s]+\/[^\s]+$/u;
 
-function diagnostic(error: unknown): string { return error instanceof Error ? error.message : String(error); }
+function diagnostic(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 function admitPiOptions(options: ProviderOptions): ReturnType<ProviderAdapter["admitOptions"]> {
-  if (options.network !== undefined) return { kind: "refused", diagnostic: "Pi provider does not support the network option" };
+  if (options.network !== undefined)
+    return { kind: "refused", diagnostic: "Pi provider does not support the network option" };
   if (options.model !== undefined && !MODEL_PATTERN.test(options.model)) {
     return { kind: "refused", diagnostic: "Pi provider model must use <provider>/<id>" };
   }
@@ -56,27 +59,36 @@ async function piCreateOptions(sdk: PiSdk, input: PiDriveInput): Promise<CreateA
     model = modelRuntime.getModel(input.options.model.slice(0, slash), input.options.model.slice(slash + 1));
     if (model === undefined) throw new Error(`Pi model '${input.options.model}' is unavailable`);
   }
-  const resourceLoader = input.options.systemPrompt === undefined ? undefined : new sdk.DefaultResourceLoader({
-    cwd: input.cwd,
-    agentDir: sdk.getAgentDir(),
-    ...(input.options.systemPromptMode === "append"
-      ? { appendSystemPromptOverride: (base: string[]) => [...base, input.options.systemPrompt!] }
-      : { systemPromptOverride: () => input.options.systemPrompt }),
-  });
+  const resourceLoader =
+    input.options.systemPrompt === undefined
+      ? undefined
+      : new sdk.DefaultResourceLoader({
+          cwd: input.cwd,
+          agentDir: sdk.getAgentDir(),
+          ...(input.options.systemPromptMode === "append"
+            ? { appendSystemPromptOverride: (base: string[]) => [...base, input.options.systemPrompt!] }
+            : { systemPromptOverride: () => input.options.systemPrompt }),
+        });
   await resourceLoader?.reload();
-  const sessionManager = input.session.kind === "fresh"
-    ? sdk.SessionManager.create(input.cwd)
-    : "sessionFile" in input.session.coordinate
-      ? sdk.SessionManager.open(input.session.coordinate.sessionFile)
-      : (() => { throw new Error("Pi resume requires sessionFile"); })();
-  const customTools = input.requests === undefined || input.options.readonly === true
-    ? undefined
-    : [(await import("@earendil-works/pi-coding-agent")).createBashToolDefinition(input.cwd, {
-        spawnHook: (context) => ({
-          ...context,
-          env: { ...context.env, [AKUMA_REQUESTS_ENV]: input.requests.dir },
-        }),
-      }) as NonNullable<CreateAgentSessionOptions["customTools"]>[number]];
+  const sessionManager =
+    input.session.kind === "fresh"
+      ? sdk.SessionManager.create(input.cwd)
+      : "sessionFile" in input.session.coordinate
+        ? sdk.SessionManager.open(input.session.coordinate.sessionFile)
+        : (() => {
+            throw new Error("Pi resume requires sessionFile");
+          })();
+  const customTools =
+    input.requests === undefined || input.options.readonly === true
+      ? undefined
+      : [
+          (await import("@earendil-works/pi-coding-agent")).createBashToolDefinition(input.cwd, {
+            spawnHook: (context) => ({
+              ...context,
+              env: { ...context.env, [AKUMA_REQUESTS_ENV]: input.requests.dir },
+            }),
+          }) as NonNullable<CreateAgentSessionOptions["customTools"]>[number],
+        ];
   return {
     cwd: input.cwd,
     sessionManager,
@@ -129,8 +141,14 @@ async function drivePi(sdk: PiSdk, input: PiDriveInput, signal: AbortSignal): Pr
   const dispose = (): void => {
     if (disposed) return;
     disposed = true;
-    try { unsubscribe(); } finally {
-      try { native.dispose(); } finally { events.end(); }
+    try {
+      unsubscribe();
+    } finally {
+      try {
+        native.dispose();
+      } finally {
+        events.end();
+      }
     }
   };
   const unsubscribe = native.subscribe((event) => {
@@ -139,7 +157,9 @@ async function drivePi(sdk: PiSdk, input: PiDriveInput, signal: AbortSignal): Pr
   });
   events.emit({ type: "session", coordinate: { sessionFile: native.sessionFile, sessionId: native.sessionId } });
   let settleCompletion!: (result: TurnResult) => void;
-  const completion = new Promise<TurnResult>((resolve) => { settleCompletion = resolve; });
+  const completion = new Promise<TurnResult>((resolve) => {
+    settleCompletion = resolve;
+  });
   const settle = (result: TurnResult): void => {
     if (settled) return;
     settled = true;
@@ -168,23 +188,34 @@ async function drivePi(sdk: PiSdk, input: PiDriveInput, signal: AbortSignal): Pr
         ...(historyId === null ? {} : { historyId }),
       });
     } catch (error) {
-      settle(aborting
-        ? { kind: "failed", diagnostic: "Pi session aborted" }
-        : { kind: "failed", diagnostic: diagnostic(error) });
+      settle(
+        aborting
+          ? { kind: "failed", diagnostic: "Pi session aborted" }
+          : { kind: "failed", diagnostic: diagnostic(error) },
+      );
     }
   })();
   return {
-    admission: { fence: native.sessionId }, events, completion,
+    admission: { fence: native.sessionId },
+    events,
+    completion,
     abort: () => {
       abortRequest ??= (async () => {
         if (settled) return;
         aborting = true;
-        try { await native.abort(); } catch { /* prompt settlement still proves local cleanup */ }
+        try {
+          await native.abort();
+        } catch {
+          /* prompt settlement still proves local cleanup */
+        }
         settle({ kind: "failed", diagnostic: "Pi session aborted" });
       })();
       return abortRequest;
     },
-    forceDispose: () => forceDisposePi(dispose, settle, () => { aborting = true; }),
+    forceDispose: () =>
+      forceDisposePi(dispose, settle, () => {
+        aborting = true;
+      }),
   };
 }
 
@@ -197,7 +228,8 @@ async function forkPi(sdk: PiSdk, input: Parameters<NonNullable<ProviderAdapter[
   const sessionFile = piSessionFile(input.session);
   const manager = sdk.SessionManager.open(sessionFile);
   const child = manager.createBranchedSession(input.at);
-  if (child === undefined || child === sessionFile) throw new Error("Pi fork did not create a distinct child session file");
+  if (child === undefined || child === sessionFile)
+    throw new Error("Pi fork did not create a distinct child session file");
   return { session: { sessionFile: child } };
 }
 

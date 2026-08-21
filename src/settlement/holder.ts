@@ -3,13 +3,7 @@ import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { TreeUpdate } from "../core/facts/offer.js";
 import { contractId, type ContractId } from "../core/facts/types.js";
 import type { GitDecisionObservation } from "../git/observe.js";
-import {
-  GIT_REF,
-  updateGitTree,
-  updateRefsAtomically,
-  writeBlob,
-  writeCommit,
-} from "../git/repository.js";
+import { GIT_REF, updateGitTree, updateRefsAtomically, writeBlob, writeCommit } from "../git/repository.js";
 import type { GitRepository } from "../git/process.js";
 import {
   withGitTargetedReadObservation,
@@ -52,13 +46,15 @@ function decodeHolder(path: string, bytes: Uint8Array): TaskHolder {
   let value: unknown;
   try {
     const text = Buffer.from(bytes).toString("utf8");
-    if (!text.endsWith("\n") || text.slice(0, -1).includes("\n")) corruption(`TaskHolder is not one canonical JSON line: ${path}`);
+    if (!text.endsWith("\n") || text.slice(0, -1).includes("\n"))
+      corruption(`TaskHolder is not one canonical JSON line: ${path}`);
     value = JSON.parse(text);
   } catch (error) {
     if (error instanceof AuthorityCorruptionError) throw error;
     return corruption(`invalid TaskHolder JSON: ${path}`, error);
   }
-  if (typeof value !== "object" || value === null || Array.isArray(value)) corruption(`TaskHolder must be an object: ${path}`);
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    corruption(`TaskHolder must be an object: ${path}`);
   const record = value as Record<string, unknown>;
   const keys = Object.keys(record);
   if (keys.length !== 4 || keys.some((key) => !["version", "taskId", "contractId", "disposition"].includes(key))) {
@@ -81,7 +77,8 @@ function decodeHolder(path: string, bytes: Uint8Array): TaskHolder {
   }
   const holder: TaskHolder = { version: 1, taskId, contractId: owner, disposition: record.disposition };
   if (holderPath(taskId) !== path) corruption(`TaskHolder path does not match taskId: ${path}`);
-  if (!Buffer.from(canonicalBytes(holder)).equals(Buffer.from(bytes))) corruption(`TaskHolder bytes are not canonical: ${path}`);
+  if (!Buffer.from(canonicalBytes(holder)).equals(Buffer.from(bytes)))
+    corruption(`TaskHolder bytes are not canonical: ${path}`);
   return holder;
 }
 
@@ -145,7 +142,11 @@ async function admitWithTaskHolderFence<T extends AdmissionOutcome>(
   try {
     result = await action();
   } catch (error) {
-    try { held.close(); } catch { /* The operation failure remains decisive before admission. */ }
+    try {
+      held.close();
+    } catch {
+      /* The operation failure remains decisive before admission. */
+    }
     throw error;
   }
   return finishTaskHolderAdmission(taskId, result, () => held.close());
@@ -165,9 +166,7 @@ export async function releaseTaskHolder(
   owner: ContractId,
 ): Promise<TreeUpdate | null> {
   const current = (await readTaskHolderProjectionFromDecision(channel, observation)).get(owner) ?? null;
-  return current === null || current.disposition !== "held"
-    ? null
-    : update({ ...current, disposition: "released" });
+  return current === null || current.disposition !== "held" ? null : update({ ...current, disposition: "released" });
 }
 
 export type TaskHolderReleasePublication =
@@ -184,22 +183,31 @@ export async function publishTaskHolderRelease(
 ): Promise<TaskHolderReleasePublication> {
   const release = await releaseTaskHolder(channel, observation, owner);
   if (release === null) return { kind: "not-held" };
-  const tree = await updateGitTree(repository, observation.admission.snapshot.tree, new Map([[release.path, { oid: await writeBlob(repository, release.bytes) }]]));
+  const tree = await updateGitTree(
+    repository,
+    observation.admission.snapshot.tree,
+    new Map([[release.path, { oid: await writeBlob(repository, release.bytes) }]]),
+  );
   const commit = await writeCommit({
     repository,
     tree,
     parent: observation.admission.snapshot.commit,
     message: `release held Task completion: ${owner}`,
   });
-  const publication = await updateRefsAtomically(repository, [{
-    ref: GIT_REF,
-    newOid: commit,
-    expectedOid: observation.admission.snapshot.commit,
-  }]);
+  const publication = await updateRefsAtomically(repository, [
+    {
+      ref: GIT_REF,
+      newOid: commit,
+      expectedOid: observation.admission.snapshot.commit,
+    },
+  ]);
   if (publication.kind === "published") return { kind: "released" };
   return {
     kind: "non-published",
-    diagnostic: publication.kind === "non-published" ? detail(publication.error) : "Task holder release publication state is unknown",
+    diagnostic:
+      publication.kind === "non-published"
+        ? detail(publication.error)
+        : "Task holder release publication state is unknown",
   };
 }
 
@@ -237,7 +245,11 @@ export function observeTaskHolderProjection(
   );
 }
 
-async function heldTaskForContract(repository: GitRepository, channel: GitDecodeChannel, owner: ContractId): Promise<TaskId | null> {
+async function heldTaskForContract(
+  repository: GitRepository,
+  channel: GitDecodeChannel,
+  owner: ContractId,
+): Promise<TaskId | null> {
   const holder = (await observeTaskHolderProjection(repository, channel)).get(owner) ?? null;
   return holder?.disposition === "held" ? holder.taskId : null;
 }
@@ -257,8 +269,9 @@ export async function releaseTaskHolderWithFence<T extends AdmissionOutcome>(
 export async function readTaskHoldersAt(
   observation: Pick<GitReadObservation, "snapshot" | "readBlobs">,
 ): Promise<readonly TaskHolder[]> {
-  const entries = [...observation.snapshot.paths]
-    .filter(([path, entry]) => path.startsWith(HOLDER_PREFIX) && entry.type === "blob");
+  const entries = [...observation.snapshot.paths].filter(
+    ([path, entry]) => path.startsWith(HOLDER_PREFIX) && entry.type === "blob",
+  );
   const blobs = await observation.readBlobs(entries.map(([, entry]) => entry.oid));
   const holders: TaskHolder[] = [];
   const seen = new Set<TaskId>();

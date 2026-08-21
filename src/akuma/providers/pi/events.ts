@@ -28,24 +28,30 @@ export const PI_EVENT_DISPOSITIONS = {
 
 function record(value: unknown): Readonly<Record<string, unknown>> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Readonly<Record<string, unknown>> : null;
+    ? (value as Readonly<Record<string, unknown>>)
+    : null;
 }
 
 function textContent(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
-  return content.map((block) => {
-    const value = record(block);
-    return value?.type === "text" && typeof value.text === "string" ? value.text : "";
-  }).join("");
+  return content
+    .map((block) => {
+      const value = record(block);
+      return value?.type === "text" && typeof value.text === "string" ? value.text : "";
+    })
+    .join("");
 }
 
 function hasTextContent(content: unknown): boolean {
   if (typeof content === "string") return true;
-  return Array.isArray(content) && content.some((block) => {
-    const value = record(block);
-    return value?.type === "text" && typeof value.text === "string";
-  });
+  return (
+    Array.isArray(content) &&
+    content.some((block) => {
+      const value = record(block);
+      return value?.type === "text" && typeof value.text === "string";
+    })
+  );
 }
 
 function positiveLine(value: unknown): number | undefined {
@@ -57,9 +63,7 @@ function optionalText(value: unknown): string | undefined {
 }
 
 function runCall(name: string, value: Readonly<Record<string, unknown>>): ToolCall | undefined {
-  return name === "bash" && typeof value.command === "string"
-    ? { kind: "run", command: value.command }
-    : undefined;
+  return name === "bash" && typeof value.command === "string" ? { kind: "run", command: value.command } : undefined;
 }
 
 function readCall(name: string, value: Readonly<Record<string, unknown>>): ToolCall | undefined {
@@ -106,11 +110,12 @@ function refineEditCall(call: ToolCall, result: unknown): ToolCall {
 
 function toolCall(name: string, args: unknown): ToolCall {
   const value = record(args) ?? {};
-  return runCall(name, value)
-    ?? readCall(name, value)
-    ?? searchCall(name, value)
-    ?? fileChangeCall(name, value)
-    ?? { kind: "other", display: name };
+  return (
+    runCall(name, value) ??
+    readCall(name, value) ??
+    searchCall(name, value) ??
+    fileChangeCall(name, value) ?? { kind: "other", display: name }
+  );
 }
 
 export type PiEventState = {
@@ -119,12 +124,18 @@ export type PiEventState = {
   tools: Map<string, Readonly<{ name: string; call: ToolCall }>>;
 };
 
-function translateNote(event: Extract<AgentSessionEvent, { type: "auto_retry_start" | "compaction_end" }>): readonly AgentEvent[] {
-  if (event.type === "auto_retry_start") return [noteEvent(`Retrying request ${event.attempt}/${event.maxAttempts}: ${event.errorMessage}`)];
+function translateNote(
+  event: Extract<AgentSessionEvent, { type: "auto_retry_start" | "compaction_end" }>,
+): readonly AgentEvent[] {
+  if (event.type === "auto_retry_start")
+    return [noteEvent(`Retrying request ${event.attempt}/${event.maxAttempts}: ${event.errorMessage}`)];
   return event.errorMessage === undefined ? [] : [noteEvent(event.errorMessage)];
 }
 
-function translateToolStart(event: Extract<AgentSessionEvent, { type: "tool_execution_start" }>, state: PiEventState): readonly AgentEvent[] {
+function translateToolStart(
+  event: Extract<AgentSessionEvent, { type: "tool_execution_start" }>,
+  state: PiEventState,
+): readonly AgentEvent[] {
   const call = toolCall(event.toolName, event.args);
   state.tools.set(event.toolCallId, { name: event.toolName, call });
   return [{ type: "tool", phase: "started", id: event.toolCallId, name: event.toolName, call }];
@@ -138,14 +149,22 @@ function translateToolEnd(
   state.tools.delete(event.toolCallId);
   const name = started?.name ?? event.toolName;
   const call = started?.call ?? { kind: "other", display: name };
-  return [{
-    type: "tool", phase: "completed", id: event.toolCallId, name,
-    call: event.isError ? call : refineEditCall(call, event.result),
-    result: { status: event.isError ? "error" : "ok" },
-  }];
+  return [
+    {
+      type: "tool",
+      phase: "completed",
+      id: event.toolCallId,
+      name,
+      call: event.isError ? call : refineEditCall(call, event.result),
+      result: { status: event.isError ? "error" : "ok" },
+    },
+  ];
 }
 
-function translateMessage(event: Extract<AgentSessionEvent, { type: "message_end" }>, state: PiEventState): readonly AgentEvent[] {
+function translateMessage(
+  event: Extract<AgentSessionEvent, { type: "message_end" }>,
+  state: PiEventState,
+): readonly AgentEvent[] {
   const message = record(event.message);
   if (message?.role !== "assistant") return [];
   state.assistantSeen = true;
@@ -174,10 +193,14 @@ function translateMessage(event: Extract<AgentSessionEvent, { type: "message_end
 export function translatePiEvent(event: AgentSessionEvent, state: PiEventState): readonly AgentEvent[] {
   const disposition = PI_EVENT_DISPOSITIONS[event.type];
   if (disposition === "drop") return [];
-  if (disposition === "note") return translateNote(event as Extract<AgentSessionEvent, { type: "auto_retry_start" | "compaction_end" }>);
-  if (disposition === "tool-start") return translateToolStart(event as Extract<AgentSessionEvent, { type: "tool_execution_start" }>, state);
-  if (disposition === "tool-end") return translateToolEnd(event as Extract<AgentSessionEvent, { type: "tool_execution_end" }>, state);
-  if (disposition === "message") return translateMessage(event as Extract<AgentSessionEvent, { type: "message_end" }>, state);
+  if (disposition === "note")
+    return translateNote(event as Extract<AgentSessionEvent, { type: "auto_retry_start" | "compaction_end" }>);
+  if (disposition === "tool-start")
+    return translateToolStart(event as Extract<AgentSessionEvent, { type: "tool_execution_start" }>, state);
+  if (disposition === "tool-end")
+    return translateToolEnd(event as Extract<AgentSessionEvent, { type: "tool_execution_end" }>, state);
+  if (disposition === "message")
+    return translateMessage(event as Extract<AgentSessionEvent, { type: "message_end" }>, state);
   return [unknownEvent(event.type)];
 }
 
@@ -187,7 +210,8 @@ export function piTerminalFailure(messages: readonly unknown[]): string | null {
     if (message?.role !== "assistant") continue;
     if (message.stopReason !== "error") return null;
     return typeof message.errorMessage === "string" && message.errorMessage.trim().length > 0
-      ? message.errorMessage : "Pi provider ended with an error";
+      ? message.errorMessage
+      : "Pi provider ended with an error";
   }
   return null;
 }

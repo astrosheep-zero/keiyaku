@@ -38,11 +38,16 @@ function parseKey(value: unknown, index: number): DependencyKey {
   }
   try {
     switch (value[0]) {
-      case "document": return { kind: "document", value: documentKey(value[1]) };
-      case "segment": return { kind: "segment", value: documentSegmentKey(value[1]) };
-      case "snapshot": return { kind: "snapshot", value: snapshotId(value[1]) };
-      case "change": return { kind: "change", value: changeId(value[1]) };
-      default: throw new AuthorityCorruptionError(`unknown dependency key kind '${value[0]}'`);
+      case "document":
+        return { kind: "document", value: documentKey(value[1]) };
+      case "segment":
+        return { kind: "segment", value: documentSegmentKey(value[1]) };
+      case "snapshot":
+        return { kind: "snapshot", value: snapshotId(value[1]) };
+      case "change":
+        return { kind: "change", value: changeId(value[1]) };
+      default:
+        throw new AuthorityCorruptionError(`unknown dependency key kind '${value[0]}'`);
     }
   } catch (error) {
     throw error instanceof AuthorityCorruptionError
@@ -54,7 +59,8 @@ function parseKey(value: unknown, index: number): DependencyKey {
 function canonicalEncodedKeys(keys: readonly DependencyKey[]): readonly string[] {
   const encoded = keys.map(encodeKey).sort();
   for (let index = 1; index < encoded.length; index += 1) {
-    if (encoded[index] === encoded[index - 1]) throw new AuthorityCorruptionError("dependency key set cannot contain duplicates");
+    if (encoded[index] === encoded[index - 1])
+      throw new AuthorityCorruptionError("dependency key set cannot contain duplicates");
   }
   return encoded;
 }
@@ -96,17 +102,17 @@ function currentKeys(state: ContractState): ReadonlySet<string> {
   return new Set([
     encodeKey({ kind: "document", value: state.terms.document.key }),
     ...state.terms.segments.map((value) => encodeKey({ kind: "segment", value })),
-    ...(integration === undefined ? [] : [
-      encodeKey({ kind: "snapshot", value: integration.snapshot }),
-      encodeKey({ kind: "change", value: integration.changeId }),
-    ]),
+    ...(integration === undefined
+      ? []
+      : [
+          encodeKey({ kind: "snapshot", value: integration.snapshot }),
+          encodeKey({ kind: "change", value: integration.changeId }),
+        ]),
   ]);
 }
 
 /** Build one memoized currentness test for a folded contract snapshot. */
-export function currentSubjectPredicate(
-  state: ContractState,
-): (subject: DependencyKeySet) => boolean {
+export function currentSubjectPredicate(state: ContractState): (subject: DependencyKeySet) => boolean {
   const available = currentKeys(state);
   const current = new Map<DependencyKeySet, boolean>();
   return (subject) => {

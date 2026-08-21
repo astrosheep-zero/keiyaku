@@ -15,12 +15,7 @@ import {
   type TargetPlacementRefusal,
 } from "../git/target-placement.js";
 import { admitDecidedOffer, mintAttempts, type AcceptedAdmission } from "./attempt.js";
-import {
-  prepareProtocolAttempt,
-  runProtocol,
-  type ProtocolResult,
-  type RunProtocolInput,
-} from "./run.js";
+import { prepareProtocolAttempt, runProtocol, type ProtocolResult, type RunProtocolInput } from "./run.js";
 
 export type PlacementExecutionFailure = Readonly<{
   kind: "placement-failed";
@@ -169,7 +164,8 @@ export async function admitPlacement<ExtraRefusal = never>(
     contracts: [input.contractId],
     attempts,
     decide: decidePlacement,
-    observe: (observedRepository, observedChannel, contracts) => observeGitForAdmissionAt(observedRepository, observedChannel, contracts),
+    observe: (observedRepository, observedChannel, contracts) =>
+      observeGitForAdmissionAt(observedRepository, observedChannel, contracts),
   };
   if (target === undefined) return await runProtocol(protocol);
   return await runUnderTargetPlacementFence(
@@ -178,10 +174,11 @@ export async function admitPlacement<ExtraRefusal = never>(
     async () => {
       const result = await runFencedPlacement(repository, input, protocol, hereWorkspacePath);
       if (onDeliveryMissing === undefined || !isDeliveryMissing(result)) return result;
-      return await onDeliveryMissing() ?? result;
+      return (await onDeliveryMissing()) ?? result;
     },
-    (result, error) => result.kind === "accepted"
-      ? { ...result, physical: reconcileEffectFailure(error, result.physical) }
-      : placementFailure(error),
+    (result, error) =>
+      result.kind === "accepted"
+        ? { ...result, physical: reconcileEffectFailure(error, result.physical) }
+        : placementFailure(error),
   );
 }

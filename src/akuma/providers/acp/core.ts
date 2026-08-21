@@ -19,7 +19,8 @@ import {
 
 export type { AcpToolInterpreter, AcpToolUpdate };
 
-export type AcpStartInput = Parameters<ProviderAdapter["start"]>[0]
+export type AcpStartInput =
+  | Parameters<ProviderAdapter["start"]>[0]
   | Parameters<NonNullable<ProviderAdapter["resume"]>>[0];
 
 export type AcpSessionMeta = Readonly<Record<string, unknown>>;
@@ -49,19 +50,29 @@ function diagnostic(acp: AcpModule, error: unknown): string {
   if (!(error instanceof Error)) return String(error);
   if (!(error instanceof acp.RequestError) || error.data === undefined) return error.message;
   let data: string;
-  try { data = typeof error.data === "string" ? error.data : JSON.stringify(error.data); }
-  catch { data = String(error.data); }
+  try {
+    data = typeof error.data === "string" ? error.data : JSON.stringify(error.data);
+  } catch {
+    data = String(error.data);
+  }
   return data.length === 0 ? `${error.message} [${error.code}]` : `${error.message} [${error.code}]: ${data}`;
 }
 
-function createAcpClient(acp: AcpModule, onUpdate: (notification: AcpSdk.SessionNotification) => void): AcpSdk.ClientApp {
-  return acp.client({ name: "keiyaku" })
+function createAcpClient(
+  acp: AcpModule,
+  onUpdate: (notification: AcpSdk.SessionNotification) => void,
+): AcpSdk.ClientApp {
+  return acp
+    .client({ name: "keiyaku" })
     .onNotification(acp.methods.client.session.update, ({ params }) => onUpdate(params));
 }
 
 function promptResult(response: AcpSdk.PromptResponse): TurnResult {
-  if (response.stopReason === "end_turn" || response.stopReason === "max_tokens"
-    || response.stopReason === "max_turn_requests") {
+  if (
+    response.stopReason === "end_turn" ||
+    response.stopReason === "max_tokens" ||
+    response.stopReason === "max_turn_requests"
+  ) {
     return { kind: "answered", answer: "" };
   }
   return { kind: "failed", diagnostic: `ACP prompt ended ${response.stopReason}` };
@@ -85,11 +96,13 @@ async function establishSession(
     throw new Error("ACP agent does not advertise session/load");
   }
   if (input.session.kind === "fresh") {
-    return (await agent.request(acp.methods.agent.session.new, {
-      cwd: input.cwd,
-      mcpServers: [],
-      ...requestMeta(dependencies.freshSessionMeta),
-    })).sessionId;
+    return (
+      await agent.request(acp.methods.agent.session.new, {
+        cwd: input.cwd,
+        mcpServers: [],
+        ...requestMeta(dependencies.freshSessionMeta),
+      })
+    ).sessionId;
   }
   const sessionId = input.session.coordinate.sessionId;
   if (sessionId === undefined) throw new Error("ACP resume coordinate has no session id");
@@ -107,7 +120,9 @@ function createAcpTurn(acp: AcpModule, connection: AcpSdk.ClientConnection, inte
   let state = EMPTY_ACP_EVENT_STATE;
   let terminal = false;
   let resolveCompletion!: (result: TurnResult) => void;
-  const completion = new Promise<TurnResult>((resolve) => { resolveCompletion = resolve; });
+  const completion = new Promise<TurnResult>((resolve) => {
+    resolveCompletion = resolve;
+  });
   const update = (next: AcpSdk.SessionUpdate): void => {
     if (terminal) return;
     const mapped = mapAcpUpdate(next, state, interpret);
@@ -121,14 +136,22 @@ function createAcpTurn(acp: AcpModule, connection: AcpSdk.ClientConnection, inte
     const failCleanup = (error: unknown): void => {
       completionResult = { kind: "failed", diagnostic: `ACP cleanup failed: ${diagnostic(acp, error)}` };
     };
-    try { await cleanup(); } catch (error) { failCleanup(error); }
-    try { connection.close(); } catch (error) { failCleanup(error); }
+    try {
+      await cleanup();
+    } catch (error) {
+      failCleanup(error);
+    }
+    try {
+      connection.close();
+    } catch (error) {
+      failCleanup(error);
+    }
     const flushed = flushAcpEvents(state);
     for (const event of flushed.events) events.emit(event);
     events.end();
-    resolveCompletion(completionResult.kind === "answered"
-      ? { ...completionResult, answer: flushed.state.answer }
-      : completionResult);
+    resolveCompletion(
+      completionResult.kind === "answered" ? { ...completionResult, answer: flushed.state.answer } : completionResult,
+    );
   };
   return {
     events,
@@ -147,25 +170,39 @@ function beginAcpPrompt(
   input: AcpStartInput,
 ): Session {
   const { acp, agent } = context;
-  void agent.request<AcpSdk.PromptResponse, AcpSdk.PromptRequest>(acp.methods.agent.session.prompt, {
-    sessionId,
-    prompt: [{ type: "text", text: input.body }, ...input.launchTells.map(({ text }) => ({ type: "text" as const, text }))],
-  }).then(
-    (response) => turn.finish(promptResult(response), () => child.endInputAndDrain()),
-    (error: unknown) => turn.finish({ kind: "failed", diagnostic: diagnostic(acp, error) }, () => child.endInputAndDrain()),
+  void agent
+    .request<AcpSdk.PromptResponse, AcpSdk.PromptRequest>(acp.methods.agent.session.prompt, {
+      sessionId,
+      prompt: [
+        { type: "text", text: input.body },
+        ...input.launchTells.map(({ text }) => ({ type: "text" as const, text })),
+      ],
+    })
+    .then(
+      (response) => turn.finish(promptResult(response), () => child.endInputAndDrain()),
+      (error: unknown) =>
+        turn.finish({ kind: "failed", diagnostic: diagnostic(acp, error) }, () => child.endInputAndDrain()),
+    );
+  void child.exited.then((exit) =>
+    turn.finish(
+      {
+        kind: "failed",
+        diagnostic: exit.stderr || `ACP process exited${exit.code === null ? "" : ` with code ${exit.code}`}`,
+      },
+      () => child.endInputAndDrain(),
+    ),
   );
-  void child.exited.then((exit) => turn.finish({
-    kind: "failed",
-    diagnostic: exit.stderr || `ACP process exited${exit.code === null ? "" : ` with code ${exit.code}`}`,
-  }, () => child.endInputAndDrain()));
   return {
     admission: { fence: sessionId },
     events: turn.events,
     completion: turn.completion,
     abort: async () => {
       let result: TurnResult = { kind: "failed", diagnostic: "ACP turn cancelled" };
-      try { await agent.notify(acp.methods.agent.session.cancel, { sessionId }); }
-      catch (error) { result = { kind: "failed", diagnostic: diagnostic(acp, error) }; }
+      try {
+        await agent.notify(acp.methods.agent.session.cancel, { sessionId });
+      } catch (error) {
+        result = { kind: "failed", diagnostic: diagnostic(acp, error) };
+      }
       if (!turn.open()) await child.close(true);
       else await turn.finish(result, () => child.close(true));
     },
@@ -197,10 +234,12 @@ export async function startAcpSession(
   let turn!: ReturnType<typeof createAcpTurn>;
   const connection = createAcpClient(acp, (notification) => {
     if (notification.sessionId === sessionId) turn.update(notification.update);
-  }).connect(acp.ndJsonStream(
-    Writable.toWeb(child.input) as WritableStream<Uint8Array>,
-    Readable.toWeb(child.output) as ReadableStream<Uint8Array>,
-  ));
+  }).connect(
+    acp.ndJsonStream(
+      Writable.toWeb(child.input) as WritableStream<Uint8Array>,
+      Readable.toWeb(child.output) as ReadableStream<Uint8Array>,
+    ),
+  );
   turn = createAcpTurn(acp, connection, dependencies.interpretTool);
   try {
     sessionId = await abortable(establishSession(acp, connection.agent, input, dependencies), signal);
@@ -209,8 +248,9 @@ export async function startAcpSession(
     return { session, agent: connection.agent, sessionId, open: turn.open };
   } catch (error) {
     connection.close(error);
-    try { await child.close(true); }
-    catch (cleanup) {
+    try {
+      await child.close(true);
+    } catch (cleanup) {
       throw new Error(`${diagnostic(acp, error)}; ACP cleanup failed: ${diagnostic(acp, cleanup)}`, { cause: error });
     }
     turn.events.end();

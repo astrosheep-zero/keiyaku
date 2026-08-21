@@ -7,7 +7,11 @@ function refusal(message: string): never {
   throw new TypeError(message);
 }
 
-function requiredProse(document: DocumentNode, sections: ReadonlyMap<string, SectionNode>, name: "objective" | "brief"): string {
+function requiredProse(
+  document: DocumentNode,
+  sections: ReadonlyMap<string, SectionNode>,
+  name: "objective" | "brief",
+): string {
   const section = sections.get(name);
   if (section === undefined) refusal(`arc document is missing ## ${name[0]!.toUpperCase()}${name.slice(1)}`);
   const value = sectionContent(document, section);

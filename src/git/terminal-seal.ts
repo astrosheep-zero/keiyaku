@@ -16,7 +16,8 @@ export type TerminalSealExpectations = Readonly<{
   trees: readonly GitObjectId[];
   treeBySnapshot: ReadonlyMap<SnapshotId, GitObjectId>;
 }>;
-export type TerminalSealObject = Readonly<{ kind: "present"; type: string; bytes: Buffer }>
+export type TerminalSealObject =
+  | Readonly<{ kind: "present"; type: string; bytes: Buffer }>
   | Readonly<{ kind: "missing" }>;
 type CommitMetadata = Readonly<{ tree: GitObjectId; parents: readonly SnapshotId[] }>;
 type WorkspaceTree = Awaited<ReturnType<typeof captureWorkspaceTree>>;
@@ -31,13 +32,17 @@ export type TerminalWorkspaceObservation = Readonly<{
 }>;
 
 export function terminalSealSnapshots(state: ContractState): readonly SnapshotId[] {
-  return [...new Set([
-    state.coordinates.start,
-    ...(state.delivery === null ? [] : [
-      state.delivery.data.tenderSnapshot,
-      ...(state.currentIntegration === null ? [] : [state.currentIntegration.snapshot]),
+  return [
+    ...new Set([
+      state.coordinates.start,
+      ...(state.delivery === null
+        ? []
+        : [
+            state.delivery.data.tenderSnapshot,
+            ...(state.currentIntegration === null ? [] : [state.currentIntegration.snapshot]),
+          ]),
     ]),
-  ])];
+  ];
 }
 
 function commitMetadata(snapshot: SnapshotId, result: TerminalSealObject | undefined): CommitMetadata {
@@ -65,10 +70,9 @@ export function terminalSealExpectations(
   objects: ReadonlyMap<GitOid, TerminalSealObject>,
 ): TerminalSealExpectations {
   const snapshots = terminalSealSnapshots(state);
-  const metadata = new Map(snapshots.map((snapshot) => [
-    snapshot,
-    commitMetadata(snapshot, objects.get(gitObjectIdForSnapshot(snapshot))),
-  ]));
+  const metadata = new Map(
+    snapshots.map((snapshot) => [snapshot, commitMetadata(snapshot, objects.get(gitObjectIdForSnapshot(snapshot)))]),
+  );
   const treeBySnapshot = new Map([...metadata].map(([snapshot, commit]) => [snapshot, commit.tree]));
   if (state.delivery === null) {
     return { heads: [state.coordinates.start], trees: [...treeBySnapshot.values()], treeBySnapshot };
@@ -78,12 +82,14 @@ export function terminalSealExpectations(
   if (tenderMetadata === undefined) throw new Error(`terminal seal metadata was not resolved: ${tender}`);
   const [tenderParent] = tenderMetadata.parents;
   return {
-    heads: [...new Set([
-      state.coordinates.start,
-      ...(tenderParent === undefined ? [] : [tenderParent]),
-      tender,
-      state.currentIntegration?.snapshot ?? state.delivery.data.integration.snapshot,
-    ])],
+    heads: [
+      ...new Set([
+        state.coordinates.start,
+        ...(tenderParent === undefined ? [] : [tenderParent]),
+        tender,
+        state.currentIntegration?.snapshot ?? state.delivery.data.integration.snapshot,
+      ]),
+    ],
     trees: [...treeBySnapshot.values()],
     treeBySnapshot,
   };

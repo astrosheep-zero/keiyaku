@@ -103,18 +103,17 @@ export type TellDeliveryInput = Readonly<{
   turnSequence: number;
   fence: string;
   deliveredAt: string;
-}> & (
-  | Readonly<{ route: "launch" }>
-  | Readonly<{ route: "live"; receipt: "unavailable" | "required" }>
-);
+}> &
+  (Readonly<{ route: "launch" }> | Readonly<{ route: "live"; receipt: "unavailable" | "required" }>);
 
 export type TellReceiptInput = Readonly<{
   kind: string;
   receivedAt: string;
-}> & (
-  | Readonly<{ evidence: "exact"; tellId: string }>
-  | Readonly<{ evidence: "fence"; turnSequence: number; fence: string }>
-);
+}> &
+  (
+    | Readonly<{ evidence: "exact"; tellId: string }>
+    | Readonly<{ evidence: "fence"; turnSequence: number; fence: string }>
+  );
 
 export type TaskRequestInput = Readonly<{
   id: string;
@@ -123,45 +122,52 @@ export type TaskRequestInput = Readonly<{
   request: TaskMutationRequest;
 }>;
 
-export type RequestInput = Readonly<{
-  id: string;
-  action: "akuma.call";
-  archetype: string;
-  body: string;
-  cwd?: string;
-  world: string;
-  recipe: RequestRecipe;
-}> | Readonly<{
-  id: string;
-  action: "akuma.wait";
-  targets: readonly AkuId[];
-  completion: "any" | "all";
-  timeoutMs?: number;
-}> | Readonly<{
-  id: string;
-  action: "akuma.tell";
-  target: AkuId;
-  body: string;
-}> | Readonly<{
-  id: string;
-  action: "akuma.kill";
-  targets: readonly AkuId[];
-}> | Readonly<{
-  id: string;
-  action: "contract.deliver";
-  repoRoot: string;
-  contractId: string;
-  message?: string;
-  includeDirty: boolean;
-  materializeConflict: boolean;
-}> | Readonly<{
-  id: string;
-  action: "contract.review";
-  repoRoot: string;
-  contractId: string;
-  verdict: "satisfied" | "unsatisfied";
-  summary?: string;
-}> | TaskRequestInput;
+export type RequestInput =
+  | Readonly<{
+      id: string;
+      action: "akuma.call";
+      archetype: string;
+      body: string;
+      cwd?: string;
+      world: string;
+      recipe: RequestRecipe;
+    }>
+  | Readonly<{
+      id: string;
+      action: "akuma.wait";
+      targets: readonly AkuId[];
+      completion: "any" | "all";
+      timeoutMs?: number;
+    }>
+  | Readonly<{
+      id: string;
+      action: "akuma.tell";
+      target: AkuId;
+      body: string;
+    }>
+  | Readonly<{
+      id: string;
+      action: "akuma.kill";
+      targets: readonly AkuId[];
+    }>
+  | Readonly<{
+      id: string;
+      action: "contract.deliver";
+      repoRoot: string;
+      contractId: string;
+      message?: string;
+      includeDirty: boolean;
+      materializeConflict: boolean;
+    }>
+  | Readonly<{
+      id: string;
+      action: "contract.review";
+      repoRoot: string;
+      contractId: string;
+      verdict: "satisfied" | "unsatisfied";
+      summary?: string;
+    }>
+  | TaskRequestInput;
 
 export type UpstreamRequestService =
   | Readonly<{ action: "akuma.wait" }>
@@ -186,19 +192,21 @@ export type UpstreamRequestService =
       action: TaskMutationRequest["action"];
     }>;
 
-type AdmittedRequest = RequestInput & Readonly<{
-  requester: AkuId;
-  admittedAt: string;
-}>;
+type AdmittedRequest = RequestInput &
+  Readonly<{
+    requester: AkuId;
+    admittedAt: string;
+  }>;
 
 export type RequestFact =
   | (AdmittedRequest & Readonly<{ state: "admitted" }>)
   | (Extract<AdmittedRequest, { action: "akuma.call" }> & Readonly<{ state: "reserved"; child: AkuId }>)
   | (Extract<AdmittedRequest, { action: "akuma.call" }> & Readonly<{ state: "served"; child: AkuId }>)
-  | (Exclude<AdmittedRequest, { action: "akuma.call" }> & Readonly<{
-      state: "served";
-      service: UpstreamRequestService;
-    }>)
+  | (Exclude<AdmittedRequest, { action: "akuma.call" }> &
+      Readonly<{
+        state: "served";
+        service: UpstreamRequestService;
+      }>)
   | (AdmittedRequest & Readonly<{ state: "refused"; diagnostic: string }>)
   | (AdmittedRequest & Readonly<{ state: "voided"; evidence: string }>);
 
@@ -222,11 +230,13 @@ export type HeartSnapshot = Readonly<{
   lastActivityAt: string | null;
 }>;
 
-export function life(input: Readonly<{
-  leash: LeashProbe;
-  body: BodyFact | null;
-  kill: KillFact | null;
-}>): AkumaLife {
+export function life(
+  input: Readonly<{
+    leash: LeashProbe;
+    body: BodyFact | null;
+    kill: KillFact | null;
+  }>,
+): AkumaLife {
   if (input.body?.hung !== undefined) return "hung";
   if (input.leash === "held") return "running";
   if (input.body === null || input.body.end === undefined) return "untidy";
@@ -244,7 +254,7 @@ export function lifeAt(
   if (current === "hung") return body?.hung?.at ?? null;
   if (current === "killed") return kill?.at ?? null;
   if (current === "asleep") return body?.endedAt ?? createdAt;
-  return current === "stranded" ? body?.endedAt ?? null : null;
+  return current === "stranded" ? (body?.endedAt ?? null) : null;
 }
 
 export type SoulRow = Readonly<{

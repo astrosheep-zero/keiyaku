@@ -34,7 +34,9 @@
   "scripts": {
     "build": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('build', { recursive: true, force: true })\" && tsc -p tsconfig.json && node scripts/copy-integrations.js && node --input-type=module -e \"import { chmodSync } from 'node:fs'; chmodSync('build/src/cli/index.js', 0o755)\"",
     "review:model-impact": "node --import tsx scripts/model-change-impact.ts",
-    "test": "npm run build && npm run test:architecture && npm run test:maintainability && npm run test:reachability && node --import tsx scripts/run-tests.mjs",
+    "format": "prettier --write --print-width 120 \"src/**/*.ts\" \"scripts/**/*.ts\"",
+    "format:check": "prettier --check --print-width 120 \"src/**/*.ts\" \"scripts/**/*.ts\"",
+    "test": "npm run format:check && npm run build && npm run test:architecture && npm run test:maintainability && npm run test:reachability && node --import tsx scripts/run-tests.mjs",
     "test:architecture": "node --import tsx scripts/check-architecture.ts",
     "test:e2e": "npm run build && node scripts/run-tests.mjs tests/packaged-cli.e2e.ts",
     "test:maintainability": "node scripts/check-maintainability.js",
@@ -48,6 +50,7 @@
     "@typescript-eslint/parser": "^8.66.0",
     "eslint": "^9.39.5",
     "knip": "^6.31.0",
+    "prettier": "3.6.2",
     "tsx": "^4.20.0",
     "typescript": "^5.9.0"
   },

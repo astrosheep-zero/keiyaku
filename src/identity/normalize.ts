@@ -23,11 +23,13 @@ export function normalizeIdentityStem(input: Readonly<{ source: string }>): stri
   return result;
 }
 
-export function fitIdentityStem(input: Readonly<{
-  stem: string;
-  maxBytes: number;
-  suffix?: string;
-}>): string {
+export function fitIdentityStem(
+  input: Readonly<{
+    stem: string;
+    maxBytes: number;
+    suffix?: string;
+  }>,
+): string {
   if (!Number.isSafeInteger(input.maxBytes) || input.maxBytes < 1) {
     throw new Error("identity stem byte budget must be a positive safe integer");
   }

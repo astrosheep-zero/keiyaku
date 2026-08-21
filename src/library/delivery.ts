@@ -21,7 +21,19 @@ class DeliveryHandle {
   constructor(
     identity: Pick<DeliveryValue, "tenderSnapshot" | "integration" | "method" | "policy">,
     private readonly readDiff: () => Promise<string | null>,
-    outcomes: Partial<Pick<DeliveryValue, "completion" | "verification" | "verificationReuse" | "verificationSummary" | "placement" | "cleanup" | "leak" | "continuation">> = {},
+    outcomes: Partial<
+      Pick<
+        DeliveryValue,
+        | "completion"
+        | "verification"
+        | "verificationReuse"
+        | "verificationSummary"
+        | "placement"
+        | "cleanup"
+        | "leak"
+        | "continuation"
+      >
+    > = {},
   ) {
     this.tenderSnapshot = identity.tenderSnapshot;
     this.integration = identity.integration;

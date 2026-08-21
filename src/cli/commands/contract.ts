@@ -14,57 +14,71 @@ export type ContractCommandSpec = Readonly<{
 type Output = Readonly<{ output: "text" | "json" }>;
 type Actor = Readonly<{ actor?: string }>;
 
-export type ParsedBind = Output & Actor & Readonly<{
-  command: "bind";
-  task?: string;
-  target?: string;
-  workspace?: "here";
-  after?: readonly string[];
-  gates?: readonly string[];
-}>;
-export type ParsedAmend = Output & Actor & Readonly<{
-  command: "amend";
-  contract?: string;
-  after?: readonly string[];
-  clearAfter?: true;
-  gates?: readonly string[];
-  stdin?: true;
-}>;
-export type ParsedDeliver = Output & Actor & Readonly<{
-  command: "deliver";
-  contract?: string;
-  message?: string;
-  includeDirty: boolean;
-  materializeConflict: boolean;
-}>;
-export type ParsedReview = Output & Actor & Readonly<{
-  command: "review";
-  contract?: string;
-  verdict: "satisfied" | "unsatisfied";
-  summary?: string;
-  summaryFromStdin?: true;
-}>;
-export type ParsedArc = Output & Actor & Readonly<{
-  command: "arc";
-  contract?: string;
-}>;
-export type ParsedAbandon = Output & Actor & Readonly<{
-  command: "abandon";
-  contract?: string;
-  note?: string;
-}>;
-export type ParsedStatus = Output & (
-  | Readonly<{ command: "status"; contract?: string; akuma?: never }>
-  | Readonly<{ command: "status"; contract: string; akuma: true }>
-);
+export type ParsedBind = Output &
+  Actor &
+  Readonly<{
+    command: "bind";
+    task?: string;
+    target?: string;
+    workspace?: "here";
+    after?: readonly string[];
+    gates?: readonly string[];
+  }>;
+export type ParsedAmend = Output &
+  Actor &
+  Readonly<{
+    command: "amend";
+    contract?: string;
+    after?: readonly string[];
+    clearAfter?: true;
+    gates?: readonly string[];
+    stdin?: true;
+  }>;
+export type ParsedDeliver = Output &
+  Actor &
+  Readonly<{
+    command: "deliver";
+    contract?: string;
+    message?: string;
+    includeDirty: boolean;
+    materializeConflict: boolean;
+  }>;
+export type ParsedReview = Output &
+  Actor &
+  Readonly<{
+    command: "review";
+    contract?: string;
+    verdict: "satisfied" | "unsatisfied";
+    summary?: string;
+    summaryFromStdin?: true;
+  }>;
+export type ParsedArc = Output &
+  Actor &
+  Readonly<{
+    command: "arc";
+    contract?: string;
+  }>;
+export type ParsedAbandon = Output &
+  Actor &
+  Readonly<{
+    command: "abandon";
+    contract?: string;
+    note?: string;
+  }>;
+export type ParsedStatus = Output &
+  (
+    | Readonly<{ command: "status"; contract?: string; akuma?: never }>
+    | Readonly<{ command: "status"; contract: string; akuma: true }>
+  );
 export type ParsedLs = Output & Readonly<{ command: "ls"; query: CatalogQuery }>;
-export type ParsedAudit = Output & Readonly<{
-  command: "audit";
-  contract?: string;
-  includeDirty: boolean;
-  showDiff: boolean;
-  actor?: string;
-}>;
+export type ParsedAudit = Output &
+  Readonly<{
+    command: "audit";
+    contract?: string;
+    includeDirty: boolean;
+    showDiff: boolean;
+    actor?: string;
+  }>;
 export type ParsedReconcile = Output & Readonly<{ command: "reconcile"; contract?: string; retryHooks: boolean }>;
 export type ParsedNuke = Output & Readonly<{ command: "nuke"; confirm?: string }>;
 export type ParsedSettings = Output & Readonly<{ command: "settings" }>;
@@ -72,9 +86,29 @@ export type ParsedRegion = Output & Readonly<{ command: "region"; contract?: str
 export type ParsedShow = Output & Readonly<{ command: "show"; contract?: string }>;
 
 export const CONTRACT_COMMAND_SPECS = {
-  bind: { positional: "none", stdin: "required", flags: { actor: "value", task: "value", target: "value", here: "boolean", after: "repeat-value", gates: "raw-value", json: "boolean" }, usage: "bind [--task <task/...>] [--target <ref>] [--here] [--after <kei/...> ...] [--gates <name,...>] [--actor <actor>] -", purpose: "Create one Contract from stdin Markdown." },
+  bind: {
+    positional: "none",
+    stdin: "required",
+    flags: {
+      actor: "value",
+      task: "value",
+      target: "value",
+      here: "boolean",
+      after: "repeat-value",
+      gates: "raw-value",
+      json: "boolean",
+    },
+    usage:
+      "bind [--task <task/...>] [--target <ref>] [--here] [--after <kei/...> ...] [--gates <name,...>] [--actor <actor>] -",
+    purpose: "Create one Contract from stdin Markdown.",
+  },
   amend: {
-    positional: "optional", stdin: "optional", flags: { actor: "value", after: "repeat-value", "clear-after": "boolean", gates: "raw-value", json: "boolean" }, usage: "amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name,...>] [--actor <actor>] [-]", purpose: "Amend one Contract's document operations or structured terms.",
+    positional: "optional",
+    stdin: "optional",
+    flags: { actor: "value", after: "repeat-value", "clear-after": "boolean", gates: "raw-value", json: "boolean" },
+    usage:
+      "amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name,...>] [--actor <actor>] [-]",
+    purpose: "Amend one Contract's document operations or structured terms.",
     help: [
       "  ## Replace: Context|Objective|Design|Region|Criteria|Verification|<extension>",
       "  ## Append: Context|Objective|Design|Criteria|<extension>",
@@ -85,7 +119,18 @@ export const CONTRACT_COMMAND_SPECS = {
     ].join("\n"),
   },
   deliver: {
-    positional: "optional", stdin: "none", flags: { actor: "value", message: "value", "include-dirty": "boolean", "materialize-conflict": "boolean", json: "boolean" }, usage: "deliver [<contract>|@<contract>] [--message <text>] [--include-dirty] [--materialize-conflict] [--actor <actor>]", purpose: "Deliver one Contract candidate from the appointed worktree.",
+    positional: "optional",
+    stdin: "none",
+    flags: {
+      actor: "value",
+      message: "value",
+      "include-dirty": "boolean",
+      "materialize-conflict": "boolean",
+      json: "boolean",
+    },
+    usage:
+      "deliver [<contract>|@<contract>] [--message <text>] [--include-dirty] [--materialize-conflict] [--actor <actor>]",
+    purpose: "Deliver one Contract candidate from the appointed worktree.",
     help: [
       "  --include-dirty         Capture the complete non-ignored worktree tree as the",
       "                          candidate; stages nothing, commits nothing. Refused",
@@ -95,17 +140,84 @@ export const CONTRACT_COMMAND_SPECS = {
       "                          delivery: resolve, stage, deliver again.",
     ].join("\n"),
   },
-  review: { positional: "optional", stdin: "optional", flags: { actor: "value", satisfied: "boolean", unsatisfied: "boolean", summary: "value", json: "boolean" }, usage: "review [<contract>|@<contract>] (--satisfied | --unsatisfied) (--summary <text> | -) [--actor <actor>]", purpose: "Record one review verdict." },
-  arc: { positional: "optional", stdin: "required", flags: { actor: "value", json: "boolean" }, usage: "arc [<contract>|@<contract>] [--actor <actor>] -", purpose: "Record stdin arc Markdown for one Contract." },
-  abandon: { positional: "optional", stdin: "none", flags: { actor: "value", note: "value", json: "boolean" }, usage: "abandon [<contract>|@<contract>] [--note <text>] [--actor <actor>]", purpose: "Abandon one Contract with an optional note." },
-  status: { positional: "optional", stdin: "none", flags: { json: "boolean" }, usage: "status [<contract>|@name|<aku/...>]", purpose: "Read the world status board or one Contract projection." },
-  show: { positional: "optional", stdin: "none", flags: { json: "boolean" }, usage: "show [<contract>|@<contract>]", purpose: "Read one Contract guidance projection." },
-  ls: { positional: "optional", stdin: "none", flags: { json: "boolean" }, usage: "ls task[/]\n       keiyaku ls kei[/]\n       keiyaku ls aku[/]\n       keiyaku ls aku/<akuma>[/]\n       keiyaku ls \"aku/*/*\"", purpose: "List one identity directory." },
-  audit: { positional: "optional", stdin: "none", flags: { "include-dirty": "boolean", diff: "boolean", actor: "value", json: "boolean" }, usage: "audit [<contract>|@<contract>] [--include-dirty] [--diff] [--actor <actor>]", purpose: "Ask what candidate preparation, Verification, and target placement would do." },
-  reconcile: { positional: "optional", stdin: "none", flags: { "retry-hooks": "boolean", json: "boolean" }, usage: "reconcile [<contract>|@<contract>] [--retry-hooks]", purpose: "Reconcile one Contract or the invocation world." },
-  nuke: { positional: "none", stdin: "none", flags: { confirm: "value", json: "boolean" }, usage: "nuke [--confirm <WorldRoot>] [--json]", purpose: "Remove Keiyaku-owned data from one confirmed World." },
-  settings: { positional: "none", stdin: "none", flags: { json: "boolean" }, usage: "settings", purpose: "Read user and project Settings resources." },
-  region: { positional: "optional", stdin: "none", flags: { overlap: "boolean", path: "value", json: "boolean" }, usage: "region [<contract>] [--overlap]\n       region --path <repo-relative-path>", purpose: "Read active declared Contract Regions." },
+  review: {
+    positional: "optional",
+    stdin: "optional",
+    flags: { actor: "value", satisfied: "boolean", unsatisfied: "boolean", summary: "value", json: "boolean" },
+    usage: "review [<contract>|@<contract>] (--satisfied | --unsatisfied) (--summary <text> | -) [--actor <actor>]",
+    purpose: "Record one review verdict.",
+  },
+  arc: {
+    positional: "optional",
+    stdin: "required",
+    flags: { actor: "value", json: "boolean" },
+    usage: "arc [<contract>|@<contract>] [--actor <actor>] -",
+    purpose: "Record stdin arc Markdown for one Contract.",
+  },
+  abandon: {
+    positional: "optional",
+    stdin: "none",
+    flags: { actor: "value", note: "value", json: "boolean" },
+    usage: "abandon [<contract>|@<contract>] [--note <text>] [--actor <actor>]",
+    purpose: "Abandon one Contract with an optional note.",
+  },
+  status: {
+    positional: "optional",
+    stdin: "none",
+    flags: { json: "boolean" },
+    usage: "status [<contract>|@name|<aku/...>]",
+    purpose: "Read the world status board or one Contract projection.",
+  },
+  show: {
+    positional: "optional",
+    stdin: "none",
+    flags: { json: "boolean" },
+    usage: "show [<contract>|@<contract>]",
+    purpose: "Read one Contract guidance projection.",
+  },
+  ls: {
+    positional: "optional",
+    stdin: "none",
+    flags: { json: "boolean" },
+    usage:
+      'ls task[/]\n       keiyaku ls kei[/]\n       keiyaku ls aku[/]\n       keiyaku ls aku/<akuma>[/]\n       keiyaku ls "aku/*/*"',
+    purpose: "List one identity directory.",
+  },
+  audit: {
+    positional: "optional",
+    stdin: "none",
+    flags: { "include-dirty": "boolean", diff: "boolean", actor: "value", json: "boolean" },
+    usage: "audit [<contract>|@<contract>] [--include-dirty] [--diff] [--actor <actor>]",
+    purpose: "Ask what candidate preparation, Verification, and target placement would do.",
+  },
+  reconcile: {
+    positional: "optional",
+    stdin: "none",
+    flags: { "retry-hooks": "boolean", json: "boolean" },
+    usage: "reconcile [<contract>|@<contract>] [--retry-hooks]",
+    purpose: "Reconcile one Contract or the invocation world.",
+  },
+  nuke: {
+    positional: "none",
+    stdin: "none",
+    flags: { confirm: "value", json: "boolean" },
+    usage: "nuke [--confirm <WorldRoot>] [--json]",
+    purpose: "Remove Keiyaku-owned data from one confirmed World.",
+  },
+  settings: {
+    positional: "none",
+    stdin: "none",
+    flags: { json: "boolean" },
+    usage: "settings",
+    purpose: "Read user and project Settings resources.",
+  },
+  region: {
+    positional: "optional",
+    stdin: "none",
+    flags: { overlap: "boolean", path: "value", json: "boolean" },
+    usage: "region [<contract>] [--overlap]\n       region --path <repo-relative-path>",
+    purpose: "Read active declared Contract Regions.",
+  },
 } as const satisfies Readonly<Record<string, ContractCommandSpec>>;
 
 export type ContractCommand = keyof typeof CONTRACT_COMMAND_SPECS;

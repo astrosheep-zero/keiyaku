@@ -23,10 +23,7 @@ export function prerequisitesReach(
   return false;
 }
 
-export function samePrerequisites(
-  left: readonly ContractId[],
-  right: readonly ContractId[],
-): boolean {
+export function samePrerequisites(left: readonly ContractId[], right: readonly ContractId[]): boolean {
   if (left === right) return true;
   if (left.length !== right.length) return false;
   return left.every((id, index) => id === right[index]);

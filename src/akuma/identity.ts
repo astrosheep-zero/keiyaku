@@ -54,11 +54,13 @@ export function akumaRunRoot(worldRoot: string): string {
   return join(worldRoot, ".keiyaku", "akuma", "run");
 }
 
-export function akumaPaths(input: Readonly<{
-  runRoot: string;
-  archetype: string;
-  suffix: string;
-}>): AkumaPaths {
+export function akumaPaths(
+  input: Readonly<{
+    runRoot: string;
+    archetype: string;
+    suffix: string;
+  }>,
+): AkumaPaths {
   const directory = join(input.runRoot, `${archetypeName(input.archetype)}-${suffixSegment(input.suffix)}`);
   return {
     directory,
@@ -86,11 +88,13 @@ export async function ensureAkumaRunRoot(worldRoot: string): Promise<string> {
   return runRoot;
 }
 
-export async function allocateAkumaDirectory(input: Readonly<{
-  worldRoot: string;
-  archetype: string;
-  draw?: () => string;
-}>): Promise<AllocatedAkuma> {
+export async function allocateAkumaDirectory(
+  input: Readonly<{
+    worldRoot: string;
+    archetype: string;
+    draw?: () => string;
+  }>,
+): Promise<AllocatedAkuma> {
   const archetype = archetypeName(input.archetype);
   const runRoot = await ensureAkumaRunRoot(input.worldRoot);
   for (;;) {

@@ -1,6 +1,6 @@
 import type { ArchitecturePolicy } from "./engine.js";
 
-const any = (target: string, symbols?: readonly string[]) => symbols ? { target, symbols } : { target };
+const any = (target: string, symbols?: readonly string[]) => (symbols ? { target, symbols } : { target });
 const types = (target: string, symbols?: readonly string[]) => ({
   target,
   ...(symbols === undefined ? {} : { symbols }),
@@ -9,11 +9,10 @@ const types = (target: string, symbols?: readonly string[]) => ({
 const factErrors = any("core/facts/errors.ts");
 const factTypes = any("core/facts/types.ts");
 const gitRepository = types("git/process.ts", ["GitRepository"]);
-const ownersFor = (symbols: readonly string[], ...sources: readonly string[]) => sources.map((source) => ({ source, symbols }));
-const forbiddenFor = (
-  source: string,
-  guards: readonly Readonly<{ pattern: RegExp; detail: string }>[],
-) => guards.map(({ pattern, detail }) => ({ source, pattern, detail }));
+const ownersFor = (symbols: readonly string[], ...sources: readonly string[]) =>
+  sources.map((source) => ({ source, symbols }));
+const forbiddenFor = (source: string, guards: readonly Readonly<{ pattern: RegExp; detail: string }>[]) =>
+  guards.map(({ pattern, detail }) => ({ source, pattern, detail }));
 export const KEIYAKU_ARCHITECTURE_POLICY = {
   zones: [
     {
@@ -42,33 +41,213 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { source: "akuma/identity.ts", allow: [any("identity/coordinates.ts"), any("identity/normalize.ts")] },
     { source: "akuma/provider-recipe.ts", allow: [] },
     { source: "akuma/allowed.ts", allow: [any("task/mutation.ts", ["TASK_MUTATION_ACTIONS"])] },
-    { source: "akuma/heart/facts.ts", allow: [types("akuma/identity.ts"), types("akuma/coordinate.ts"), types("akuma/provider-recipe.ts"), types("akuma/allowed.ts"), types("task/mutation.ts")] },
+    {
+      source: "akuma/heart/facts.ts",
+      allow: [
+        types("akuma/identity.ts"),
+        types("akuma/coordinate.ts"),
+        types("akuma/provider-recipe.ts"),
+        types("akuma/allowed.ts"),
+        types("task/mutation.ts"),
+      ],
+    },
     { source: "akuma/heart/schema.ts", allow: [] },
     { source: "akuma/coordinate.ts", allow: [] },
-    { source: "akuma/heart/rows.ts", allow: [types("akuma/heart/facts.ts"), types("akuma/provider-recipe.ts"), any("akuma/coordinate.ts")] },
-    { source: "akuma/heart/request-rows.ts", allow: [types("akuma/heart/facts.ts"), types("akuma/identity.ts"), any("task/mutation.ts", ["isTaskMutationAction"])] },
+    {
+      source: "akuma/heart/rows.ts",
+      allow: [types("akuma/heart/facts.ts"), types("akuma/provider-recipe.ts"), any("akuma/coordinate.ts")],
+    },
+    {
+      source: "akuma/heart/request-rows.ts",
+      allow: [
+        types("akuma/heart/facts.ts"),
+        types("akuma/identity.ts"),
+        any("task/mutation.ts", ["isTaskMutationAction"]),
+      ],
+    },
     { source: "akuma/heart/tells.ts", allow: [types("akuma/heart/facts.ts")] },
-    { source: "akuma/heart/timeline.ts", allow: [types("akuma/heart/facts.ts"), any("akuma/heart/rows.ts", ["decodeActivityRow", "decodeCallRow", "decodeTurnRow", "ActivityFact", "ActivityRow", "CallRow", "TurnRow"]), any("akuma/heart/tells.ts", ["decodeTellAtSequence", "pendingTellProtectionSql", "pendingTellSequencesSql"])] },
-    { source: "akuma/heart/soul.ts", allow: [any("akuma/allowed.ts"), any("akuma/identity.ts", ["parseAkuId", "AkuId"]), any("akuma/provider-recipe.ts"), types("akuma/heart/facts.ts")] },
-    { source: "akuma/heart/storage.ts", allow: [types("akuma/identity.ts"), types("akuma/heart/facts.ts"), any("akuma/heart/schema.ts"), any("akuma/heart/rows.ts"), any("akuma/heart/soul.ts"), any("akuma/heart/tells.ts", ["insertTellFact"]), any("akuma/heart/timeline.ts", ["pruneActivityFacts"])] },
-    { source: "akuma/heart/request-authority.ts", allow: [any("akuma/allowed.ts"), types("akuma/identity.ts"), types("akuma/heart/facts.ts"), any("akuma/heart/request-rows.ts"), any("akuma/heart/soul.ts", ["soulFact"]), any("akuma/heart/storage.ts")] },
-    { source: "akuma/heart/index.ts", allow: [types("akuma/identity.ts"), types("akuma/coordinate.ts"), any("akuma/heart/facts.ts"), any("akuma/heart/request-authority.ts"), any("akuma/heart/rows.ts"), any("akuma/heart/soul.ts", ["soulFact"]), any("akuma/heart/tells.ts"), any("akuma/heart/timeline.ts"), any("akuma/heart/storage.ts")] },
-    { source: "akuma/provider.ts", allow: [types("akuma/heart/index.ts"), any("akuma/coordinate.ts"), types("akuma/provider-recipe.ts")] },
+    {
+      source: "akuma/heart/timeline.ts",
+      allow: [
+        types("akuma/heart/facts.ts"),
+        any("akuma/heart/rows.ts", [
+          "decodeActivityRow",
+          "decodeCallRow",
+          "decodeTurnRow",
+          "ActivityFact",
+          "ActivityRow",
+          "CallRow",
+          "TurnRow",
+        ]),
+        any("akuma/heart/tells.ts", ["decodeTellAtSequence", "pendingTellProtectionSql", "pendingTellSequencesSql"]),
+      ],
+    },
+    {
+      source: "akuma/heart/soul.ts",
+      allow: [
+        any("akuma/allowed.ts"),
+        any("akuma/identity.ts", ["parseAkuId", "AkuId"]),
+        any("akuma/provider-recipe.ts"),
+        types("akuma/heart/facts.ts"),
+      ],
+    },
+    {
+      source: "akuma/heart/storage.ts",
+      allow: [
+        types("akuma/identity.ts"),
+        types("akuma/heart/facts.ts"),
+        any("akuma/heart/schema.ts"),
+        any("akuma/heart/rows.ts"),
+        any("akuma/heart/soul.ts"),
+        any("akuma/heart/tells.ts", ["insertTellFact"]),
+        any("akuma/heart/timeline.ts", ["pruneActivityFacts"]),
+      ],
+    },
+    {
+      source: "akuma/heart/request-authority.ts",
+      allow: [
+        any("akuma/allowed.ts"),
+        types("akuma/identity.ts"),
+        types("akuma/heart/facts.ts"),
+        any("akuma/heart/request-rows.ts"),
+        any("akuma/heart/soul.ts", ["soulFact"]),
+        any("akuma/heart/storage.ts"),
+      ],
+    },
+    {
+      source: "akuma/heart/index.ts",
+      allow: [
+        types("akuma/identity.ts"),
+        types("akuma/coordinate.ts"),
+        any("akuma/heart/facts.ts"),
+        any("akuma/heart/request-authority.ts"),
+        any("akuma/heart/rows.ts"),
+        any("akuma/heart/soul.ts", ["soulFact"]),
+        any("akuma/heart/tells.ts"),
+        any("akuma/heart/timeline.ts"),
+        any("akuma/heart/storage.ts"),
+      ],
+    },
+    {
+      source: "akuma/provider.ts",
+      allow: [types("akuma/heart/index.ts"), any("akuma/coordinate.ts"), types("akuma/provider-recipe.ts")],
+    },
     { source: "akuma/projection.ts", allow: [types("akuma/heart/index.ts"), any("akuma/provider.ts")] },
-    { source: "akuma/providers/index.ts", allow: [types("akuma/provider.ts"), any("akuma/provider-recipe.ts"), any("akuma/providers/acp/config.ts"), any("akuma/providers/acp/index.ts"), any("akuma/providers/claude/index.ts"), any("akuma/providers/codex-app-server/index.ts"), any("akuma/providers/grok-build/index.ts"), any("akuma/providers/opencode-sdk/index.ts"), any("akuma/providers/pi/index.ts")] },
-    { source: "akuma/providers/claude/index.ts", allow: [any("akuma/abort.ts"), any("akuma/provider.ts"), any("akuma/provider-recipe.ts", ["ProviderOptions", "providerLaunchEnv"]), any("akuma/providers/claude/events.ts"), any("akuma/providers/claude/input.ts")] },
-    { source: "akuma/providers/pi/index.ts", allow: [any("akuma/abort.ts"), any("akuma/providers/pi/events.ts"), any("akuma/provider.ts"), types("akuma/provider-recipe.ts"), types("akuma/coordinate.ts")] },
-    { source: "akuma/providers/pi/events.ts", allow: [any("akuma/provider.ts"), any("akuma/providers/unified-patch.ts")] },
-    { source: "akuma/providers/codex-app-server/index.ts", allow: [any("akuma/providers/codex-app-server/events.ts"), any("akuma/provider.ts"), any("akuma/provider-recipe.ts", ["ProviderExecution", "ProviderOptions", "providerLaunchEnv"]), any("runtime/proc/line-rpc.ts")] },
-    { source: "akuma/providers/acp/core.ts", allow: [any("akuma/abort.ts"), any("akuma/providers/acp/events.ts"), any("akuma/provider.ts"), any("akuma/provider-recipe.ts", ["providerLaunchEnv"]), any("runtime/proc/stdio.ts")] },
-    { source: "akuma/providers/acp/config.ts", allow: [types("akuma/provider-recipe.ts", ["SystemPromptMode"]) ] },
-    { source: "akuma/providers/acp/index.ts", allow: [types("akuma/provider.ts"), types("akuma/provider-recipe.ts"), any("akuma/providers/acp/config.ts"), any("akuma/providers/acp/core.ts")] },
-    { source: "akuma/providers/grok-build/index.ts", allow: [types("akuma/provider.ts"), types("akuma/provider-recipe.ts"), any("akuma/providers/acp/core.ts")] },
-    { source: "akuma/providers/codex-app-server/events.ts", allow: [any("akuma/provider.ts"), any("akuma/providers/unified-patch.ts"), types("runtime/proc/line-rpc.ts")] },
-    { source: "akuma/providers/opencode-sdk/index.ts", allow: [any("akuma/abort.ts"), any("akuma/providers/opencode-sdk/events.ts"), any("akuma/providers/opencode-sdk/session.ts"), any("akuma/provider.ts"), types("akuma/heart/index.ts"), types("akuma/provider-recipe.ts")] },
-    { source: "akuma/providers/opencode-sdk/session.ts", allow: [any("akuma/abort.ts"), types("akuma/heart/index.ts"), any("akuma/provider-recipe.ts", ["ProviderExecution", "providerLaunchEnv"]), any("runtime/proc/run.ts")] },
-    { source: "akuma/providers/**", allow: [types("akuma/heart/index.ts"), any("akuma/provider.ts"), types("akuma/provider-recipe.ts"), any("runtime/proc/line-rpc.ts")] },
-    { source: "akuma/archetype.ts", allow: [any("akuma/allowed.ts"), any("akuma/identity.ts"), types("akuma/provider.ts", ["ProviderAdapter"]), any("akuma/provider-recipe.ts"), any("akuma/providers/index.ts", ["resolveProviderExecution"]), types("settings.ts")] },
+    {
+      source: "akuma/providers/index.ts",
+      allow: [
+        types("akuma/provider.ts"),
+        any("akuma/provider-recipe.ts"),
+        any("akuma/providers/acp/config.ts"),
+        any("akuma/providers/acp/index.ts"),
+        any("akuma/providers/claude/index.ts"),
+        any("akuma/providers/codex-app-server/index.ts"),
+        any("akuma/providers/grok-build/index.ts"),
+        any("akuma/providers/opencode-sdk/index.ts"),
+        any("akuma/providers/pi/index.ts"),
+      ],
+    },
+    {
+      source: "akuma/providers/claude/index.ts",
+      allow: [
+        any("akuma/abort.ts"),
+        any("akuma/provider.ts"),
+        any("akuma/provider-recipe.ts", ["ProviderOptions", "providerLaunchEnv"]),
+        any("akuma/providers/claude/events.ts"),
+        any("akuma/providers/claude/input.ts"),
+      ],
+    },
+    {
+      source: "akuma/providers/pi/index.ts",
+      allow: [
+        any("akuma/abort.ts"),
+        any("akuma/providers/pi/events.ts"),
+        any("akuma/provider.ts"),
+        types("akuma/provider-recipe.ts"),
+        types("akuma/coordinate.ts"),
+      ],
+    },
+    {
+      source: "akuma/providers/pi/events.ts",
+      allow: [any("akuma/provider.ts"), any("akuma/providers/unified-patch.ts")],
+    },
+    {
+      source: "akuma/providers/codex-app-server/index.ts",
+      allow: [
+        any("akuma/providers/codex-app-server/events.ts"),
+        any("akuma/provider.ts"),
+        any("akuma/provider-recipe.ts", ["ProviderExecution", "ProviderOptions", "providerLaunchEnv"]),
+        any("runtime/proc/line-rpc.ts"),
+      ],
+    },
+    {
+      source: "akuma/providers/acp/core.ts",
+      allow: [
+        any("akuma/abort.ts"),
+        any("akuma/providers/acp/events.ts"),
+        any("akuma/provider.ts"),
+        any("akuma/provider-recipe.ts", ["providerLaunchEnv"]),
+        any("runtime/proc/stdio.ts"),
+      ],
+    },
+    { source: "akuma/providers/acp/config.ts", allow: [types("akuma/provider-recipe.ts", ["SystemPromptMode"])] },
+    {
+      source: "akuma/providers/acp/index.ts",
+      allow: [
+        types("akuma/provider.ts"),
+        types("akuma/provider-recipe.ts"),
+        any("akuma/providers/acp/config.ts"),
+        any("akuma/providers/acp/core.ts"),
+      ],
+    },
+    {
+      source: "akuma/providers/grok-build/index.ts",
+      allow: [types("akuma/provider.ts"), types("akuma/provider-recipe.ts"), any("akuma/providers/acp/core.ts")],
+    },
+    {
+      source: "akuma/providers/codex-app-server/events.ts",
+      allow: [any("akuma/provider.ts"), any("akuma/providers/unified-patch.ts"), types("runtime/proc/line-rpc.ts")],
+    },
+    {
+      source: "akuma/providers/opencode-sdk/index.ts",
+      allow: [
+        any("akuma/abort.ts"),
+        any("akuma/providers/opencode-sdk/events.ts"),
+        any("akuma/providers/opencode-sdk/session.ts"),
+        any("akuma/provider.ts"),
+        types("akuma/heart/index.ts"),
+        types("akuma/provider-recipe.ts"),
+      ],
+    },
+    {
+      source: "akuma/providers/opencode-sdk/session.ts",
+      allow: [
+        any("akuma/abort.ts"),
+        types("akuma/heart/index.ts"),
+        any("akuma/provider-recipe.ts", ["ProviderExecution", "providerLaunchEnv"]),
+        any("runtime/proc/run.ts"),
+      ],
+    },
+    {
+      source: "akuma/providers/**",
+      allow: [
+        types("akuma/heart/index.ts"),
+        any("akuma/provider.ts"),
+        types("akuma/provider-recipe.ts"),
+        any("runtime/proc/line-rpc.ts"),
+      ],
+    },
+    {
+      source: "akuma/archetype.ts",
+      allow: [
+        any("akuma/allowed.ts"),
+        any("akuma/identity.ts"),
+        types("akuma/provider.ts", ["ProviderAdapter"]),
+        any("akuma/provider-recipe.ts"),
+        any("akuma/providers/index.ts", ["resolveProviderExecution"]),
+        types("settings.ts"),
+      ],
+    },
     {
       source: "akuma/publication.ts",
       allow: [any("akuma/abort.ts"), any("akuma/heart/index.ts"), any("akuma/identity.ts"), any("runtime/proc/run.ts")],
@@ -80,7 +259,12 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("akuma/identity.ts", ["archetypeName", "parseAkuId", "AkuId"]),
         any("akuma/provider-recipe.ts", ["decodeProviderOptions", "decodeReadonlyRestraint", "ReadonlyRestraint"]),
         any("akuma/providers/index.ts", ["decodeProviderExecution"]),
-        any("task/mutation.ts", ["TaskMutationAction", "TaskMutationRequest", "decodeTaskMutationRequest", "isTaskMutationAction"]),
+        any("task/mutation.ts", [
+          "TaskMutationAction",
+          "TaskMutationRequest",
+          "decodeTaskMutationRequest",
+          "isTaskMutationAction",
+        ]),
       ],
     },
     {
@@ -130,12 +314,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
           "Soul",
           "UpstreamRequestService",
         ]),
-        any("akuma/identity.ts", [
-          "pathsForAkuId",
-          "worldRootForAkumaPaths",
-          "AkuId",
-          "AkumaPaths",
-        ]),
+        any("akuma/identity.ts", ["pathsForAkuId", "worldRootForAkumaPaths", "AkuId", "AkumaPaths"]),
         any("akuma/publication.ts", ["BIRTH_TIMEOUT_MS", "publishAkuma"]),
         any("akuma/request-wire.ts", [
           "atomicJson",
@@ -161,7 +340,12 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("akuma/body-turn.ts", ["BodySupervisor", "CONTROL_RESPONSE_MS", "driveTurn", "DrivenTurn", "turnRecipe"]),
         types("akuma/provider.ts", ["ProviderAdapter"]),
         any("akuma/providers/index.ts"),
-        any("akuma/request-serve.ts", ["clearBodyRequestTransport", "settleBodyRequests", "UpstreamExecutionPort", "RequestChildLaunch"]),
+        any("akuma/request-serve.ts", [
+          "clearBodyRequestTransport",
+          "settleBodyRequests",
+          "UpstreamExecutionPort",
+          "RequestChildLaunch",
+        ]),
         any("runtime/proc/run.ts"),
       ],
     },
@@ -210,24 +394,27 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "akuma/nuke.ts",
       allow: [
         any("akuma/body.ts", ["CONTROL_RESPONSE_MS"]),
-        any("akuma/heart/index.ts", [
-          "HeldAkumaLeash",
-          "readHeart",
-          "readKill",
-          "requestStop",
-        ]),
-        any("akuma/identity.ts", [
-          "akuIdFromDirectoryName",
-          "akumaPaths",
-          "akumaRunRoot",
-          "AkuId",
-          "AkumaPaths",
-        ]),
+        any("akuma/heart/index.ts", ["HeldAkumaLeash", "readHeart", "readKill", "requestStop"]),
+        any("akuma/identity.ts", ["akuIdFromDirectoryName", "akumaPaths", "akumaRunRoot", "AkuId", "AkumaPaths"]),
         any("alias/index.ts", ["nukeAliases"]),
         types("world.ts", ["WorldRoot"]),
       ],
     },
-    { source: "akuma/index.ts", allow: [any("akuma/allowed.ts"), any("akuma/akuma.ts"), any("akuma/archetype.ts"), any("akuma/requests.ts"), any("akuma/heart/index.ts", ["readSoul"]), types("akuma/heart/index.ts"), any("akuma/identity.ts", ["pathsForAkuId", "AkuId"]), types("akuma/provider.ts"), types("akuma/provider-recipe.ts"), types("world.ts")] },
+    {
+      source: "akuma/index.ts",
+      allow: [
+        any("akuma/allowed.ts"),
+        any("akuma/akuma.ts"),
+        any("akuma/archetype.ts"),
+        any("akuma/requests.ts"),
+        any("akuma/heart/index.ts", ["readSoul"]),
+        types("akuma/heart/index.ts"),
+        any("akuma/identity.ts", ["pathsForAkuId", "AkuId"]),
+        types("akuma/provider.ts"),
+        types("akuma/provider-recipe.ts"),
+        types("world.ts"),
+      ],
+    },
     {
       source: "dispatch/index.ts",
       allow: [
@@ -253,7 +440,10 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     { source: "core/facts/types.ts", allow: [any("identity/coordinates.ts")] },
     { source: "core/facts/errors.ts", allow: [] },
-    { source: "core/facts/codec.ts", allow: [factErrors, factTypes, any("core/subject.ts", ["parseDependencyKeySet"])] },
+    {
+      source: "core/facts/codec.ts",
+      allow: [factErrors, factTypes, any("core/subject.ts", ["parseDependencyKeySet"])],
+    },
     {
       source: "core/facts/fold.ts",
       allow: [
@@ -265,7 +455,10 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     { source: "core/facts/gate.ts", allow: [any("core/subject.ts"), types("core/facts/types.ts")] },
     { source: "core/subject.ts", allow: [factErrors, factTypes] },
-    { source: "core/facts/eligibility.ts", allow: [any("core/facts/observation.ts"), types("core/facts/offer.ts"), types("core/facts/types.ts")] },
+    {
+      source: "core/facts/eligibility.ts",
+      allow: [any("core/facts/observation.ts"), types("core/facts/offer.ts"), types("core/facts/types.ts")],
+    },
     { source: "core/facts/offer.ts", allow: [types("core/facts/types.ts")] },
     { source: "core/facts/observation.ts", allow: [types("core/facts/types.ts")] },
     {
@@ -277,19 +470,43 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [
         types("core/decide.ts"),
         types("core/facts/offer.ts"),
-        any("core/facts/eligibility.ts", ["placeEligibleBounds", "prerequisiteStatus", "prerequisitesReach", "samePrerequisites"]),
+        any("core/facts/eligibility.ts", [
+          "placeEligibleBounds",
+          "prerequisiteStatus",
+          "prerequisitesReach",
+          "samePrerequisites",
+        ]),
         any("core/facts/gate.ts"),
-        any("core/facts/observation.ts", ["activeContract", "contractState", "documentIsCurrent", "prerequisiteStatus"]),
+        any("core/facts/observation.ts", [
+          "activeContract",
+          "contractState",
+          "documentIsCurrent",
+          "prerequisiteStatus",
+        ]),
         types("core/facts/types.ts"),
       ],
     },
     { source: "git/identity.ts", allow: [factTypes] },
     { source: "git/tree.ts", allow: [any("git/identity.ts")] },
     { source: "git/process.ts", allow: [any("runtime/proc/run.ts", ["consumeProcessStdout"])] },
-    { source: "git/repository.ts", allow: [any("git/identity.ts"), any("git/tree.ts"), factErrors, any("git/process.ts", ["GitPlumbingError", "runGit", "runGitWithEnvironment", "GitRepository"])] },
+    {
+      source: "git/repository.ts",
+      allow: [
+        any("git/identity.ts"),
+        any("git/tree.ts"),
+        factErrors,
+        any("git/process.ts", ["GitPlumbingError", "runGit", "runGitWithEnvironment", "GitRepository"]),
+      ],
+    },
     {
       source: "git/read-observation.ts",
-      allow: [factErrors, any("git/identity.ts"), any("git/process.ts", ["GitPlumbingError", "GitRepository"]), any("git/repository.ts"), any("git/tree.ts", ["parseTreeObject", "TreeEntry", "validPath"])],
+      allow: [
+        factErrors,
+        any("git/identity.ts"),
+        any("git/process.ts", ["GitPlumbingError", "GitRepository"]),
+        any("git/repository.ts"),
+        any("git/tree.ts", ["parseTreeObject", "TreeEntry", "validPath"]),
+      ],
     },
     {
       source: "git/admission.ts",
@@ -309,8 +526,13 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [
         any("git/identity.ts"),
         any("git/read-observation.ts", [
-          "GitBlobResult", "GitDecodeChannel", "GitReadObservation", "GitTreeSelection",
-          "readGitTreeSelection", "withGitReadObservation", "withGitTargetedReadObservation",
+          "GitBlobResult",
+          "GitDecodeChannel",
+          "GitReadObservation",
+          "GitTreeSelection",
+          "readGitTreeSelection",
+          "withGitReadObservation",
+          "withGitTargetedReadObservation",
         ]),
         any("git/repository.ts"),
         any("git/process.ts", ["GitPlumbingError", "runGit", "GitRepository"]),
@@ -327,7 +549,12 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("git/identity.ts"),
         any("git/repository.ts"),
         any("git/process.ts", ["GitPlumbingError", "runGit", "runGitWithEnvironment", "GitRepository"]),
-        any("git/workspace.ts", ["captureWorkspaceTree", "unmergedWorkspacePaths", "workspaceMergeHead", "worktreePath"]),
+        any("git/workspace.ts", [
+          "captureWorkspaceTree",
+          "unmergedWorkspacePaths",
+          "workspaceMergeHead",
+          "worktreePath",
+        ]),
         types("core/decide.ts"),
         types("core/facts/types.ts"),
       ],
@@ -347,7 +574,13 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     {
       source: "git/workspace.ts",
-      allow: [types("core/facts/types.ts"), any("git/identity.ts"), any("git/process.ts", ["GitPlumbingError", "runGit", "runGitWithEnvironment", "GitRepository"]), any("git/repository.ts"), types("world.ts")],
+      allow: [
+        types("core/facts/types.ts"),
+        any("git/identity.ts"),
+        any("git/process.ts", ["GitPlumbingError", "runGit", "runGitWithEnvironment", "GitRepository"]),
+        any("git/repository.ts"),
+        types("world.ts"),
+      ],
     },
     {
       source: "git/nuke.ts",
@@ -437,7 +670,13 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     {
       source: "git/scratch.ts",
-      allow: [any("coordination/sqlite-transaction-lock.ts"), any("git/identity.ts"), any("git/process.ts", ["runGit", "GitRepository"]), any("git/repository.ts"), types("core/facts/types.ts")],
+      allow: [
+        any("coordination/sqlite-transaction-lock.ts"),
+        any("git/identity.ts"),
+        any("git/process.ts", ["runGit", "GitRepository"]),
+        any("git/repository.ts"),
+        types("core/facts/types.ts"),
+      ],
     },
     {
       source: "protocol/attempt.ts",
@@ -567,23 +806,13 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "protocol/amend.ts",
       allow: [
-        any("git/observe.ts", [
-          "extendContractsForAdmissionAt",
-          "observeContractsForAdmissionAt",
-        ]),
+        any("git/observe.ts", ["extendContractsForAdmissionAt", "observeContractsForAdmissionAt"]),
         types("git/observe.ts", ["GitDecisionObservation"]),
         types("git/read-observation.ts", ["GitDecodeChannel"]),
         any("core/facts/observation.ts", ["contractState"]),
         types("core/facts/types.ts", ["AmendData", "ContractId", "ContractTerms"]),
-        any("core/verbs/amend.ts", [
-          "AmendInput",
-          "AmendRefusal",
-          "decideAmend",
-        ]),
-        types("verification/declaration.ts", [
-          "VerificationDeclarationPreparation",
-          "VerificationDeclarationRefusal",
-        ]),
+        any("core/verbs/amend.ts", ["AmendInput", "AmendRefusal", "decideAmend"]),
+        types("verification/declaration.ts", ["VerificationDeclarationPreparation", "VerificationDeclarationRefusal"]),
         any("protocol/attempt.ts", ["admitDecidedOffer", "mintAttempts"]),
         any("protocol/outcome.ts", ["admitted"]),
         types("protocol/operations.ts", ["MutationOperationInput", "IntentOutcome"]),
@@ -652,21 +881,13 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
           "JournalEntry",
           "SnapshotId",
         ]),
-        any("core/verbs/deliver.ts", [
-          "DeliverInput",
-          "DeliverRefusal",
-          "decideDeliver",
-        ]),
+        any("core/verbs/deliver.ts", ["DeliverInput", "DeliverRefusal", "decideDeliver"]),
         types("verification/declaration.ts", ["VerificationDeclarationRefusal"]),
         types("protocol/intent.ts", ["CurrentVerifiedAttestation"]),
         any("protocol/completion.ts"),
         any("protocol/attempt.ts", ["admitDecidedOffer", "mintAttempts"]),
         any("protocol/outcome.ts", ["admitted"]),
-        any("workspace-place.ts", [
-          "ManagedWorktreeAppointment",
-          "appointmentFor",
-          "readPlaceRegister",
-        ]),
+        any("workspace-place.ts", ["ManagedWorktreeAppointment", "appointmentFor", "readPlaceRegister"]),
         types("protocol/operations.ts", [
           "AttemptDecision",
           "DeliverConflictRefusal",
@@ -696,17 +917,8 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         types("core/decide.ts", ["AttemptContext"]),
         any("core/facts/observation.ts", ["contractState"]),
         any("core/facts/types.ts", ["gate"]),
-        types("core/facts/types.ts", [
-          "AttestationData",
-          "ContractId",
-          "ContractState",
-          "DeliverData",
-        ]),
-        any("core/verbs/attestation.ts", [
-          "AttestationInput",
-          "AttestationRefusal",
-          "decideAttestation",
-        ]),
+        types("core/facts/types.ts", ["AttestationData", "ContractId", "ContractState", "DeliverData"]),
+        any("core/verbs/attestation.ts", ["AttestationInput", "AttestationRefusal", "decideAttestation"]),
         any("protocol/attempt.ts", ["admitDecidedOffer", "mintAttempts"]),
         any("protocol/outcome.ts", ["admitted"]),
         any("protocol/completion.ts"),
@@ -724,19 +936,12 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "protocol/audit.ts",
       allow: [
-        any("git/integration.ts", [
-          "DeliveryDiffScope",
-          "readDeliveryDiff",
-          "readDeliveryScope",
-        ]),
+        any("git/integration.ts", ["DeliveryDiffScope", "readDeliveryDiff", "readDeliveryScope"]),
         any("git/observe.ts", ["observeContractsForAdmissionAt"]),
         any("git/target-placement.ts", ["AuditTargetAnswer", "adjudicateAuditTarget"]),
         any("core/facts/observation.ts", ["activeContract", "documentIsCurrent"]),
         types("core/facts/types.ts", ["ChangeId", "ContractState", "DeliverData", "SnapshotId"]),
-        any("workspace-place.ts", [
-          "ManagedWorktreeAppointment",
-          "readManagedWorktreeAppointment",
-        ]),
+        any("workspace-place.ts", ["ManagedWorktreeAppointment", "readManagedWorktreeAppointment"]),
         any("protocol/intent.ts", ["verifyDelivery"]),
         any("protocol/outcome.ts", ["accepted", "admitted"]),
         types("protocol/operations.ts", [
@@ -777,12 +982,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "protocol/reconcile.ts",
       allow: [
-        any("git/reconcile.ts", [
-          "ReconcileResult",
-          "reconcile",
-          "reconcileBatch",
-          "reconcileObservationFailure",
-        ]),
+        any("git/reconcile.ts", ["ReconcileResult", "reconcile", "reconcileBatch", "reconcileObservationFailure"]),
         any("git/observe.ts", ["observeContractWorld"]),
         any("git/read-observation.ts", ["withGitReadObservation"]),
         types("git/read-observation.ts", ["GitDecodeChannel"]),
@@ -792,9 +992,41 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         types("protocol/operations.ts", ["MutationOperationInput", "RepositoryScope"]),
       ],
     },
-    { source: "protocol/read/observation.ts", allow: [any("git/hooks.ts", ["observeWorktreeHookMarker"]), types("git/process.ts", ["GitRepository"]), any("git/repository.ts", ["registeredWorktrees", "worktreeGitDirectory"]), any("git/target-placement.ts", ["observeTargetCheckoutShape"]), types("protocol/read/status.ts", ["ContractRow"])] },
-    { source: "protocol/read/status.ts", allow: [any("git/observe.ts"), any("git/read-observation.ts", ["GitDecodeChannel", "GitReadObservation", "withGitReadObservation"]), gitRepository, any("git/workspace.ts", ["worktreePath", "observeTargetLag", "observeWorkspace"]), any("workspace-place.ts", ["PlaceRegister", "appointmentFor", "readPlaceRegister"]), types("git/workspace.ts", ["ContractTargetLag", "ContractWorkspaceObservation"]), any("body/decode.ts", ["decodeContractDocument"]), any("core/facts/gate.ts", ["GateCurrent", "gateReports"]), any("core/facts/observation.ts", ["prerequisiteStatus"]), any("core/facts/types.ts", ["ContractId", "ContractState", "SnapshotId"]), types("core/facts/types.ts"), types("protocol/read/status.ts", ["ContractRow"]) ] },
-    { source: "protocol/read/documents.ts", allow: [any("git/observe.ts", ["observeActiveContractWorld"]), types("git/read-observation.ts", ["GitReadObservation"]), types("core/facts/types.ts", ["ContractId"])] },
+    {
+      source: "protocol/read/observation.ts",
+      allow: [
+        any("git/hooks.ts", ["observeWorktreeHookMarker"]),
+        types("git/process.ts", ["GitRepository"]),
+        any("git/repository.ts", ["registeredWorktrees", "worktreeGitDirectory"]),
+        any("git/target-placement.ts", ["observeTargetCheckoutShape"]),
+        types("protocol/read/status.ts", ["ContractRow"]),
+      ],
+    },
+    {
+      source: "protocol/read/status.ts",
+      allow: [
+        any("git/observe.ts"),
+        any("git/read-observation.ts", ["GitDecodeChannel", "GitReadObservation", "withGitReadObservation"]),
+        gitRepository,
+        any("git/workspace.ts", ["worktreePath", "observeTargetLag", "observeWorkspace"]),
+        any("workspace-place.ts", ["PlaceRegister", "appointmentFor", "readPlaceRegister"]),
+        types("git/workspace.ts", ["ContractTargetLag", "ContractWorkspaceObservation"]),
+        any("body/decode.ts", ["decodeContractDocument"]),
+        any("core/facts/gate.ts", ["GateCurrent", "gateReports"]),
+        any("core/facts/observation.ts", ["prerequisiteStatus"]),
+        any("core/facts/types.ts", ["ContractId", "ContractState", "SnapshotId"]),
+        types("core/facts/types.ts"),
+        types("protocol/read/status.ts", ["ContractRow"]),
+      ],
+    },
+    {
+      source: "protocol/read/documents.ts",
+      allow: [
+        any("git/observe.ts", ["observeActiveContractWorld"]),
+        types("git/read-observation.ts", ["GitReadObservation"]),
+        types("core/facts/types.ts", ["ContractId"]),
+      ],
+    },
     { source: "runtime/proc/line-rpc.ts", allow: [any("runtime/proc/stdio.ts")] },
     { source: "runtime/proc/stdio.ts", allow: [any("runtime/proc/run.ts"), any("runtime/proc/launch.ts")] },
     { source: "runtime/proc/run.ts", allow: [any("runtime/proc/launch.ts")] },
@@ -837,8 +1069,14 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "library/contract.ts",
       allow: [
-        any("akuma/requests.ts", ["UpstreamRequestOutcome", "injectedBodyRequests", "requestBodyDeliver", "requestBodyReview"]),
-        any("body/amend.ts"), any("markdown/diff.ts"),
+        any("akuma/requests.ts", [
+          "UpstreamRequestOutcome",
+          "injectedBodyRequests",
+          "requestBodyDeliver",
+          "requestBodyReview",
+        ]),
+        any("body/amend.ts"),
+        any("markdown/diff.ts"),
         any("body/arc.ts"),
         any("body/decode.ts"),
         any("contract-worktree.ts"),
@@ -872,11 +1110,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("protocol/amend.ts", ["amendOperation"]),
         any("protocol/arc.ts", ["arcOperation"]),
         types("protocol/audit.ts", ["AuditReport"]),
-        any("protocol/deliver.ts", [
-          "deliverOperation",
-          "IntegrationConflictMaterialized",
-          "VerificationReuse",
-        ]),
+        any("protocol/deliver.ts", ["deliverOperation", "IntegrationConflictMaterialized", "VerificationReuse"]),
         types("protocol/reconcile.ts", ["ReconcileReport"]),
         any("protocol/review.ts", ["reviewOperation", "ReviewValue"]),
         any("dispatch/index.ts", ["Dispatch", "readDispatchesAt"]),
@@ -960,11 +1194,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "library/reconcile.ts",
       allow: [
-        any("contract-worktree.ts", [
-          "projectContractWorktree",
-          "ContractFileEffect",
-          "ContractFileLag",
-        ]),
+        any("contract-worktree.ts", ["projectContractWorktree", "ContractFileEffect", "ContractFileLag"]),
         any("workspace-place.ts", [
           "appointManagedWorktrees",
           "placeRegisterPath",
@@ -974,7 +1204,12 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         types("core/facts/types.ts"),
         any("core/facts/errors.ts", ["AuthorityCorruptionError"]),
         types("git/read-observation.ts", ["GitDecodeChannel"]),
-        any("protocol/reconcile.ts", ["reconcileAllOperation", "reconcileOperation", "worldContractStates", "ReconcileReport"]),
+        any("protocol/reconcile.ts", [
+          "reconcileAllOperation",
+          "reconcileOperation",
+          "worldContractStates",
+          "ReconcileReport",
+        ]),
         any("git/reconcile.ts", ["reconcileObservationFailure"]),
         any("protocol/operations.ts", ["stateOperation", "RepositoryScope"]),
         any("settlement/settle.ts", ["settle", "settleAll", "SettlementReport"]),
@@ -997,11 +1232,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("git/read-observation.ts", ["withGitDecodeChannel"]),
         any("library/configuration.ts"),
         any("library/input.ts"),
-        any("library/reconcile.ts", [
-          "completeRepoReconcile",
-          "RepoContractReconcileReport",
-          "RepoReconcileReport",
-        ]),
+        any("library/reconcile.ts", ["completeRepoReconcile", "RepoContractReconcileReport", "RepoReconcileReport"]),
       ],
     },
     {
@@ -1024,7 +1255,8 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("library/nuke.ts"),
         types("library/refusal.ts", ["NukeConfirmationRefusal", "NukeConfirmationRequiredRefusal"]),
         types("library/region.ts"),
-        types("settlement/settle.ts"), types("world.ts"),
+        types("settlement/settle.ts"),
+        types("world.ts"),
       ],
     },
     {
@@ -1120,11 +1352,21 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("verification/declaration.ts", ["prepareVerificationDeclaration"]),
       ],
     },
-    { source: "library/configuration.ts", allow: [any("core/facts/types.ts", ["gateWord"]), any("settings.ts", ["Settings", "SettingsError"]), types("git/hooks.ts")] },
+    {
+      source: "library/configuration.ts",
+      allow: [
+        any("core/facts/types.ts", ["gateWord"]),
+        any("settings.ts", ["Settings", "SettingsError"]),
+        types("git/hooks.ts"),
+      ],
+    },
     {
       source: "library/region.ts",
       allow: [
-        any("body/decode.ts"), any("body/region.ts"), types("core/facts/types.ts"), types("protocol/read/documents.ts", ["ContractDocumentProjection"]),
+        any("body/decode.ts"),
+        any("body/region.ts"),
+        types("core/facts/types.ts"),
+        types("protocol/read/documents.ts", ["ContractDocumentProjection"]),
         any("git/read-observation.ts", ["GitDecodeChannel", "withGitDecodeChannel"]),
         any("protocol/operations.ts", ["RepositoryScope", "documentsOperationAt"]),
       ],
@@ -1134,19 +1376,84 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [any("library/keiyaku.ts"), any("settings.ts"), any("world.ts")],
     },
     { source: "markdown/**", allow: [any("markdown/lex.ts"), any("markdown/types.ts"), any("markdown/diff.ts")] },
-    { source: "task/identity.ts", allow: [any("identity/coordinates.ts"), any("identity/normalize.ts")] }, { source: "task/context.ts", allow: [any("coordination/durable-file.ts"), any("identity/normalize.ts")] },
+    { source: "task/identity.ts", allow: [any("identity/coordinates.ts"), any("identity/normalize.ts")] },
+    { source: "task/context.ts", allow: [any("coordination/durable-file.ts"), any("identity/normalize.ts")] },
     { source: "task/document.ts", allow: [any("task/identity.ts")] },
     { source: "task/board.ts", allow: [types("task/document.ts"), any("task/identity.ts")] },
-    { source: "task/store.ts", allow: [types("world.ts"), any("coordination/sqlite-transaction-lock.ts"), any("task/board.ts"), any("task/document.ts"), any("task/identity.ts")] },
+    {
+      source: "task/store.ts",
+      allow: [
+        types("world.ts"),
+        any("coordination/sqlite-transaction-lock.ts"),
+        any("task/board.ts"),
+        any("task/document.ts"),
+        any("task/identity.ts"),
+      ],
+    },
     { source: "task/query.ts", allow: [any("task/board.ts"), types("task/document.ts"), any("task/identity.ts")] },
-    { source: "task/operations.ts", allow: [types("world.ts"), any("markdown/diff.ts"), any("task/context.ts"), any("task/board.ts"), any("task/document.ts"), any("task/identity.ts"), any("task/query.ts"), any("task/store.ts")] },
-    { source: "task/compose.ts", allow: [types("world.ts"), any("markdown/diff.ts"), any("task/context.ts"), any("task/board.ts"), any("task/document.ts"), any("task/identity.ts"), any("task/operations.ts"), any("task/store.ts")] },
-    { source: "task/input.ts", allow: [any("task/document.ts"), any("task/identity.ts"), types("task/operations.ts"), any("task/query.ts")] },
-    { source: "task/mutation.ts", allow: [types("world.ts"), types("task/compose.ts"), any("task/input.ts"), any("task/index.ts"), types("task/identity.ts"), types("task/operations.ts")] },
-    { source: "task/index.ts", allow: [types("world.ts"), any("task/board.ts"), any("task/compose.ts"), any("task/document.ts"), any("task/identity.ts"), any("task/input.ts"), any("task/operations.ts"), any("task/query.ts"), any("task/store.ts")] },
+    {
+      source: "task/operations.ts",
+      allow: [
+        types("world.ts"),
+        any("markdown/diff.ts"),
+        any("task/context.ts"),
+        any("task/board.ts"),
+        any("task/document.ts"),
+        any("task/identity.ts"),
+        any("task/query.ts"),
+        any("task/store.ts"),
+      ],
+    },
+    {
+      source: "task/compose.ts",
+      allow: [
+        types("world.ts"),
+        any("markdown/diff.ts"),
+        any("task/context.ts"),
+        any("task/board.ts"),
+        any("task/document.ts"),
+        any("task/identity.ts"),
+        any("task/operations.ts"),
+        any("task/store.ts"),
+      ],
+    },
+    {
+      source: "task/input.ts",
+      allow: [any("task/document.ts"), any("task/identity.ts"), types("task/operations.ts"), any("task/query.ts")],
+    },
+    {
+      source: "task/mutation.ts",
+      allow: [
+        types("world.ts"),
+        types("task/compose.ts"),
+        any("task/input.ts"),
+        any("task/index.ts"),
+        types("task/identity.ts"),
+        types("task/operations.ts"),
+      ],
+    },
+    {
+      source: "task/index.ts",
+      allow: [
+        types("world.ts"),
+        any("task/board.ts"),
+        any("task/compose.ts"),
+        any("task/document.ts"),
+        any("task/identity.ts"),
+        any("task/input.ts"),
+        any("task/operations.ts"),
+        any("task/query.ts"),
+        any("task/store.ts"),
+      ],
+    },
     {
       source: "settlement/fence.ts",
-      allow: [any("coordination/sqlite-transaction-lock.ts"), any("git/repository.ts"), gitRepository, types("task/identity.ts")],
+      allow: [
+        any("coordination/sqlite-transaction-lock.ts"),
+        any("git/repository.ts"),
+        gitRepository,
+        types("task/identity.ts"),
+      ],
     },
     {
       source: "settlement/holder.ts",
@@ -1162,7 +1469,23 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("task/identity.ts"),
       ],
     },
-    { source: "settlement/settle.ts", allow: [any("world.ts"), any("git/observe.ts"), any("git/read-observation.ts"), types("git/reconcile.ts"), gitRepository, factTypes, any("settlement/fence.ts"), any("settlement/holder.ts"), any("task/context.ts"), any("task/operations.ts"), types("task/identity.ts"), types("task/store.ts")] },
+    {
+      source: "settlement/settle.ts",
+      allow: [
+        any("world.ts"),
+        any("git/observe.ts"),
+        any("git/read-observation.ts"),
+        types("git/reconcile.ts"),
+        gitRepository,
+        factTypes,
+        any("settlement/fence.ts"),
+        any("settlement/holder.ts"),
+        any("task/context.ts"),
+        any("task/operations.ts"),
+        types("task/identity.ts"),
+        types("task/store.ts"),
+      ],
+    },
     {
       source: "kanshi/read.ts",
       allow: [
@@ -1171,7 +1494,13 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("alias/index.ts", ["AliasBinding", "readAliases"]),
         any("dispatch/index.ts", ["Dispatch", "readDispatchesAt"]),
         any("git/read-observation.ts", ["GitReadObservation", "withGitDecodeChannel", "withGitReadObservation"]),
-        any("kanshi/**"), any("library/region.ts", ["readRegionDeclarations", "regionIntersections", "regionPathMatches", "validateRegionPath"]),
+        any("kanshi/**"),
+        any("library/region.ts", [
+          "readRegionDeclarations",
+          "regionIntersections",
+          "regionPathMatches",
+          "validateRegionPath",
+        ]),
         any("core/facts/types.ts", ["contractId"]),
         any("contract-worktree.ts", ["resolveHereContractWorkspace"]),
         types("library/contract.ts"),
@@ -1185,15 +1514,34 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("task/operations.ts", ["observeTaskBoard"]),
       ],
     },
-    { source: "kanshi/report.ts", allow: [types("world.ts"), types("akuma/index.ts"), types("identity/selector.ts"), types("library/contract.ts"), types("protocol/read/observation.ts", ["CurrentPhysicalIssue"]), types("task/index.ts")] },
+    {
+      source: "kanshi/report.ts",
+      allow: [
+        types("world.ts"),
+        types("akuma/index.ts"),
+        types("identity/selector.ts"),
+        types("library/contract.ts"),
+        types("protocol/read/observation.ts", ["CurrentPhysicalIssue"]),
+        types("task/index.ts"),
+      ],
+    },
     { source: "kanshi/fleet.ts", allow: [types("kanshi/report.ts", ["AkumaKanshiRow"])] },
-    { source: "kanshi/select.ts", allow: [types("kanshi/report.ts"), any("library/region.ts", ["regionIntersections", "regionPathMatches"])] },
+    {
+      source: "kanshi/select.ts",
+      allow: [types("kanshi/report.ts"), any("library/region.ts", ["regionIntersections", "regionPathMatches"])],
+    },
     { source: "kanshi/**", allow: [any("index.ts"), any("kanshi/**"), any("task/index.ts")] },
     {
       source: "body/amend.ts",
       allow: [
-        any("body/region.ts"), any("body/render.ts"), any("body/shape.ts"), types("body/types.ts"),
-        any("body/verification.ts"), any("markdown/parse.ts"), any("markdown/query.ts"), types("markdown/types.ts"),
+        any("body/region.ts"),
+        any("body/render.ts"),
+        any("body/shape.ts"),
+        types("body/types.ts"),
+        any("body/verification.ts"),
+        any("markdown/parse.ts"),
+        any("markdown/query.ts"),
+        types("markdown/types.ts"),
         types("verification/declaration.ts"),
       ],
     },
@@ -1216,11 +1564,23 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     {
       source: "cli/commands/akuma.ts",
-      allow: [any("akuma/allowed.ts"), any("akuma/identity.ts", ["archetypeName", "parseAkuId", "AkuId"]), any("cli/usage.ts"), any("duration.ts"), any("identity/selector.ts")],
+      allow: [
+        any("akuma/allowed.ts"),
+        any("akuma/identity.ts", ["archetypeName", "parseAkuId", "AkuId"]),
+        any("cli/usage.ts"),
+        any("duration.ts"),
+        any("identity/selector.ts"),
+      ],
     },
     {
       source: "cli/commands/akuma-invoke.ts",
-      allow: [any("akuma/index.ts"), any("index.ts"), types("cli/commands/akuma.ts"), types("settings.ts"), types("world.ts")],
+      allow: [
+        any("akuma/index.ts"),
+        any("index.ts"),
+        types("cli/commands/akuma.ts"),
+        types("settings.ts"),
+        types("world.ts"),
+      ],
     },
     {
       source: "cli/commands/install.ts",
@@ -1246,7 +1606,16 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     {
       source: "cli/commands/task-invoke.ts",
-      allow: [types("cli/commands/task.ts"), any("cli/usage.ts", ["CliUsageError"]), any("task/index.ts"), any("task/operations.ts", ["observeTaskDetails"]), any("task/context.ts", ["resolveTaskNamespaceContext", "writeTaskNamespaceContext"]), any("task/mutation.ts"), types("world.ts"), any("akuma/requests.ts", ["injectedBodyRequests", "requestBodyTask"])],
+      allow: [
+        types("cli/commands/task.ts"),
+        any("cli/usage.ts", ["CliUsageError"]),
+        any("task/index.ts"),
+        any("task/operations.ts", ["observeTaskDetails"]),
+        any("task/context.ts", ["resolveTaskNamespaceContext", "writeTaskNamespaceContext"]),
+        any("task/mutation.ts"),
+        types("world.ts"),
+        any("akuma/requests.ts", ["injectedBodyRequests", "requestBodyTask"]),
+      ],
     },
     {
       source: "cli/draft.ts",
@@ -1272,7 +1641,14 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         ]),
       ],
     },
-    { source: "cli/render/catalog.ts", allow: [types("index.ts"), any("cli/render/contract-observation.ts"), any("cli/render/terminal.ts", ["safeText"])] },
+    {
+      source: "cli/render/catalog.ts",
+      allow: [
+        types("index.ts"),
+        any("cli/render/contract-observation.ts"),
+        any("cli/render/terminal.ts", ["safeText"]),
+      ],
+    },
     { source: "cli/render/contract-observation.ts", allow: [types("index.ts")] },
     {
       source: "cli/main.ts",
@@ -1461,9 +1837,20 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       module: "node:fs",
       owners: [
-        ...ownersFor(["readFileSync", "readdirSync"], "scripts/check-architecture.ts", "scripts/model-change-impact.ts"),
-        ...ownersFor(["closeSync", "fsyncSync", "openSync", "renameSync", "writeFileSync"], "task/store.ts", "coordination/durable-file.ts"),
-        { source: "cli/draft.ts", symbols: ["lstatSync", "mkdirSync", "readFileSync", "readdirSync", "unlinkSync", "utimesSync"] },
+        ...ownersFor(
+          ["readFileSync", "readdirSync"],
+          "scripts/check-architecture.ts",
+          "scripts/model-change-impact.ts",
+        ),
+        ...ownersFor(
+          ["closeSync", "fsyncSync", "openSync", "renameSync", "writeFileSync"],
+          "task/store.ts",
+          "coordination/durable-file.ts",
+        ),
+        {
+          source: "cli/draft.ts",
+          symbols: ["lstatSync", "mkdirSync", "readFileSync", "readdirSync", "unlinkSync", "utimesSync"],
+        },
         { source: "akuma/heart/storage.ts", symbols: ["watch"] },
       ],
     },
@@ -1505,16 +1892,53 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       module: "node:crypto",
       owners: [
-        ...ownersFor(["randomBytes"], "coordination/durable-file.ts", "git/scratch.ts", "library/bind.ts", "protocol/attempt.ts", "task/context.ts", "task/store.ts", "akuma/identity.ts"),
-        ...ownersFor(["createHash"], "cli/draft.ts", "git/identity.ts", "git/tree.ts", "settlement/fence.ts", "settlement/holder.ts", "body/keys.ts", "dispatch/index.ts", "workspace-place.ts"),
+        ...ownersFor(
+          ["randomBytes"],
+          "coordination/durable-file.ts",
+          "git/scratch.ts",
+          "library/bind.ts",
+          "protocol/attempt.ts",
+          "task/context.ts",
+          "task/store.ts",
+          "akuma/identity.ts",
+        ),
+        ...ownersFor(
+          ["createHash"],
+          "cli/draft.ts",
+          "git/identity.ts",
+          "git/tree.ts",
+          "settlement/fence.ts",
+          "settlement/holder.ts",
+          "body/keys.ts",
+          "dispatch/index.ts",
+          "workspace-place.ts",
+        ),
         { source: "coordination/sqlite-transaction-lock.ts", symbols: ["randomInt"] },
-        ...ownersFor(["randomUUID"], "akuma/akuma.ts", "akuma/providers/claude/index.ts", "akuma/providers/opencode-sdk/index.ts", "akuma/requests.ts", "akuma/request-wire.ts"),
+        ...ownersFor(
+          ["randomUUID"],
+          "akuma/akuma.ts",
+          "akuma/providers/claude/index.ts",
+          "akuma/providers/opencode-sdk/index.ts",
+          "akuma/requests.ts",
+          "akuma/request-wire.ts",
+        ),
       ],
     },
-    { module: "node:sqlite", owners: [
-      ...ownersFor(["DatabaseSync"], "coordination/sqlite-transaction-lock.ts", "akuma/heart/storage.ts"),
-      ...ownersFor(["DatabaseSync"], "akuma/heart/soul.ts", "akuma/heart/schema.ts", "akuma/heart/rows.ts", "akuma/heart/request-rows.ts", "akuma/heart/timeline.ts", "akuma/heart/tells.ts").map((owner) => ({ ...owner, mode: "type-only" as const })),
-    ] },
+    {
+      module: "node:sqlite",
+      owners: [
+        ...ownersFor(["DatabaseSync"], "coordination/sqlite-transaction-lock.ts", "akuma/heart/storage.ts"),
+        ...ownersFor(
+          ["DatabaseSync"],
+          "akuma/heart/soul.ts",
+          "akuma/heart/schema.ts",
+          "akuma/heart/rows.ts",
+          "akuma/heart/request-rows.ts",
+          "akuma/heart/timeline.ts",
+          "akuma/heart/tells.ts",
+        ).map((owner) => ({ ...owner, mode: "type-only" as const })),
+      ],
+    },
     { module: "crypto", owners: [] },
   ],
   forbiddenSourcePatterns: [
@@ -1524,9 +1948,18 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       detail: "provider resolution imports only the selected adapter at the execution edge",
     },
     ...forbiddenFor("git/read-observation.ts", [
-      { pattern: /(?:contracts\/|settlement\/task-holders|dispatch\/|decodeJournal|decodeHolder)/u, detail: "Git read observation is product-blind; product paths and codecs remain with their owners" },
-      { pattern: /(?:\bclass\b|#[A-Za-z_$])/u, detail: "Git decode ownership uses one structural callback capability, not nominal or private-field machinery" },
-      { pattern: /withGitDecodeChannel\s*\(/u, detail: "read observations consume their caller's channel and never create a compatibility channel" },
+      {
+        pattern: /(?:contracts\/|settlement\/task-holders|dispatch\/|decodeJournal|decodeHolder)/u,
+        detail: "Git read observation is product-blind; product paths and codecs remain with their owners",
+      },
+      {
+        pattern: /(?:\bclass\b|#[A-Za-z_$])/u,
+        detail: "Git decode ownership uses one structural callback capability, not nominal or private-field machinery",
+      },
+      {
+        pattern: /withGitDecodeChannel\s*\(/u,
+        detail: "read observations consume their caller's channel and never create a compatibility channel",
+      },
     ]),
     {
       source: "git/repository.ts",
@@ -1539,8 +1972,14 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       detail: "Kanshi composes owner projections and must not inspect or consume Git observation mechanics",
     },
     ...forbiddenFor("akuma/heart/index.ts", [
-      { pattern: /\b(?:SELECT|INSERT|UPDATE|DELETE)\b/iu, detail: "Heart SQL belongs to schema mechanics or named fact statements, never the transaction judge" },
-      { pattern: /\.prepare\s*\(/u, detail: "Heart index owns adjudication and must execute SQL through schema.ts or rows.ts" },
+      {
+        pattern: /\b(?:SELECT|INSERT|UPDATE|DELETE)\b/iu,
+        detail: "Heart SQL belongs to schema mechanics or named fact statements, never the transaction judge",
+      },
+      {
+        pattern: /\.prepare\s*\(/u,
+        detail: "Heart index owns adjudication and must execute SQL through schema.ts or rows.ts",
+      },
     ]),
   ],
   forbiddenModules: ["better-sqlite3", "sqlite3"],
@@ -1551,14 +1990,120 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { capability: "math-random", owners: [] },
     { capability: "module-mutable-state", owners: [] },
     { capability: "date-now", owners: ["protocol/attempt.ts", "cli/draft.ts"] },
-    { capability: "new-date-current", owners: ["akuma/akuma.ts", "akuma/nuke.ts", "akuma/body.ts", "akuma/publication.ts", "dispatch/index.ts", "kanshi/read.ts", "protocol/bind.ts", "protocol/operations.ts", "protocol/read/status.ts", "task/compose.ts", "task/operations.ts"] },
-    { capability: "process-argv", owners: ["akuma-body.ts", "akuma/body.ts", "cli/main.ts", "cli/index.ts", "git/hooks.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
-    { capability: "process-cwd", owners: ["akuma/akuma.ts", "git/repository.ts", "cli/main.ts", "cli/runtime.ts", "kanshi/read.ts", "library/repo.ts", "task/index.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
-    { capability: "process-environment", owners: ["akuma-body.ts", "akuma/body.ts", "akuma/providers/acp/core.ts", "akuma/providers/claude/index.ts", "akuma/providers/codex-app-server/index.ts", "akuma/providers/opencode-sdk/session.ts", "akuma/requests.ts", "cli/invoke.ts", "cli/main.ts", "cli/runtime.ts", "git/process.ts", "protocol/audit.ts", "protocol/completion.ts", "protocol/deliver.ts", "runtime/proc/**"] },
-    { capability: "process-output", owners: ["akuma-body.ts", "cli/main.ts", "cli/runtime.ts", "cli/index.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
+    {
+      capability: "new-date-current",
+      owners: [
+        "akuma/akuma.ts",
+        "akuma/nuke.ts",
+        "akuma/body.ts",
+        "akuma/publication.ts",
+        "dispatch/index.ts",
+        "kanshi/read.ts",
+        "protocol/bind.ts",
+        "protocol/operations.ts",
+        "protocol/read/status.ts",
+        "task/compose.ts",
+        "task/operations.ts",
+      ],
+    },
+    {
+      capability: "process-argv",
+      owners: [
+        "akuma-body.ts",
+        "akuma/body.ts",
+        "cli/main.ts",
+        "cli/index.ts",
+        "git/hooks.ts",
+        "scripts/check-architecture.ts",
+        "scripts/model-change-impact.ts",
+      ],
+    },
+    {
+      capability: "process-cwd",
+      owners: [
+        "akuma/akuma.ts",
+        "git/repository.ts",
+        "cli/main.ts",
+        "cli/runtime.ts",
+        "kanshi/read.ts",
+        "library/repo.ts",
+        "task/index.ts",
+        "scripts/check-architecture.ts",
+        "scripts/model-change-impact.ts",
+      ],
+    },
+    {
+      capability: "process-environment",
+      owners: [
+        "akuma-body.ts",
+        "akuma/body.ts",
+        "akuma/providers/acp/core.ts",
+        "akuma/providers/claude/index.ts",
+        "akuma/providers/codex-app-server/index.ts",
+        "akuma/providers/opencode-sdk/session.ts",
+        "akuma/requests.ts",
+        "cli/invoke.ts",
+        "cli/main.ts",
+        "cli/runtime.ts",
+        "git/process.ts",
+        "protocol/audit.ts",
+        "protocol/completion.ts",
+        "protocol/deliver.ts",
+        "runtime/proc/**",
+      ],
+    },
+    {
+      capability: "process-output",
+      owners: [
+        "akuma-body.ts",
+        "cli/main.ts",
+        "cli/runtime.ts",
+        "cli/index.ts",
+        "scripts/check-architecture.ts",
+        "scripts/model-change-impact.ts",
+      ],
+    },
     { capability: "process-pid", owners: ["runtime/proc/**"] },
     { capability: "require", owners: [] },
-    { capability: "type-error-construction", owners: ["world.ts", "akuma-body.ts", "akuma/allowed.ts", "akuma/akuma.ts", "akuma/body.ts", "akuma/body-turn.ts", "akuma/identity.ts", "akuma/archetype.ts", "akuma/provider.ts", "akuma/provider-recipe.ts", "akuma/providers/index.ts", "akuma/providers/acp/config.ts", "akuma/providers/acp/index.ts", "akuma/providers/grok-build/index.ts", "akuma/providers/pi/index.ts", "alias/index.ts", "body/**", "cli/actor.ts", "contract-worktree.ts", "workspace-place.ts", "git/hooks.ts", "kanshi/**", "library/configuration.ts", "library/contract.ts", "library/input.ts", "library/repo.ts", "library/akuma-creation.ts", "library/address.ts", "library/fleet.ts", "library/catalog.ts", "identity/coordinates.ts", "identity/selector.ts", "settings.ts", "task/**"] },
+    {
+      capability: "type-error-construction",
+      owners: [
+        "world.ts",
+        "akuma-body.ts",
+        "akuma/allowed.ts",
+        "akuma/akuma.ts",
+        "akuma/body.ts",
+        "akuma/body-turn.ts",
+        "akuma/identity.ts",
+        "akuma/archetype.ts",
+        "akuma/provider.ts",
+        "akuma/provider-recipe.ts",
+        "akuma/providers/index.ts",
+        "akuma/providers/acp/config.ts",
+        "akuma/providers/acp/index.ts",
+        "akuma/providers/grok-build/index.ts",
+        "akuma/providers/pi/index.ts",
+        "alias/index.ts",
+        "body/**",
+        "cli/actor.ts",
+        "contract-worktree.ts",
+        "workspace-place.ts",
+        "git/hooks.ts",
+        "kanshi/**",
+        "library/configuration.ts",
+        "library/contract.ts",
+        "library/input.ts",
+        "library/repo.ts",
+        "library/akuma-creation.ts",
+        "library/address.ts",
+        "library/fleet.ts",
+        "library/catalog.ts",
+        "identity/coordinates.ts",
+        "identity/selector.ts",
+        "settings.ts",
+        "task/**",
+      ],
+    },
   ],
   forbiddenFileNames: [
     "approval-preparation.ts",

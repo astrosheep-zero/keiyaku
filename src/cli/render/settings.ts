@@ -1,16 +1,16 @@
 import type { Settings, SettingsScopeState } from "../../settings.js";
 
 function namespaceNames(value: Settings): readonly string[] {
-  return [...new Set([value.scopes.user, value.scopes.project].flatMap(
-    (scope) => scope.kind === "read" ? scope.namespaces : [],
-  ))].sort();
+  return [
+    ...new Set(
+      [value.scopes.user, value.scopes.project].flatMap((scope) => (scope.kind === "read" ? scope.namespaces : [])),
+    ),
+  ].sort();
 }
 
 function scope(name: string, value: SettingsScopeState): string {
   const path = value.path === undefined ? "" : ` ${value.path}`;
-  return value.kind === "failed"
-    ? `${name} failed${path} ${value.diagnostic}`
-    : `${name} ${value.kind}${path}`;
+  return value.kind === "failed" ? `${name} failed${path} ${value.diagnostic}` : `${name} ${value.kind}${path}`;
 }
 
 export function settingsJsonValue(value: Settings): unknown {
@@ -29,7 +29,9 @@ export function renderSettingsText(value: Settings): string {
       for (const failure of view.failures) lines.push(`failure ${failure.scope} ${failure.diagnostic}`);
     }
     for (const entry of view.entries) {
-      lines.push(`entry ${entry.name} ${entry.source}${entry.shadows ? " shadows user" : ""} ${JSON.stringify(entry.value)}`);
+      lines.push(
+        `entry ${entry.name} ${entry.source}${entry.shadows ? " shadows user" : ""} ${JSON.stringify(entry.value)}`,
+      );
     }
   }
   return lines.join("\n");

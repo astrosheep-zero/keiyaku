@@ -11,11 +11,7 @@ import { reconcileObservationFailure } from "../git/reconcile.js";
 import { stateOperation, type RepositoryScope } from "../protocol/operations.js";
 import { settle, settleAll, type SettlementReport } from "../settlement/settle.js";
 import type { WorktreeHooks } from "./configuration.js";
-import {
-  projectContractWorktree,
-  type ContractFileEffect,
-  type ContractFileLag,
-} from "../contract-worktree.js";
+import { projectContractWorktree, type ContractFileEffect, type ContractFileLag } from "../contract-worktree.js";
 import {
   appointManagedWorktrees,
   placeRegisterPath,
@@ -73,15 +69,10 @@ function isManagedTerminal(state: ContractState | null): boolean {
 }
 
 function appointableManagedContracts(states: readonly ContractState[]): readonly ContractId[] {
-  return states
-    .filter((state) => isManagedWorktree(state) && state.terminal === null)
-    .map((state) => state.id);
+  return states.filter((state) => isManagedWorktree(state) && state.terminal === null).map((state) => state.id);
 }
 
-async function appointPlaces(
-  scope: RepositoryScope,
-  states: readonly ContractState[],
-): Promise<PlaceRegister> {
+async function appointPlaces(scope: RepositoryScope, states: readonly ContractState[]): Promise<PlaceRegister> {
   return await appointManagedWorktrees(scope, appointableManagedContracts(states));
 }
 
@@ -90,10 +81,7 @@ function releaseEligible(
   cleanup: ReconcileReport | undefined,
   appointed: boolean,
 ): boolean {
-  return cleanup !== undefined
-    && cleanup.lag.length === 0
-    && isManagedTerminal(state)
-    && appointed;
+  return cleanup !== undefined && cleanup.lag.length === 0 && isManagedTerminal(state) && appointed;
 }
 
 async function releaseAppointments(
@@ -141,9 +129,12 @@ async function appointForContract(
   }
 }
 
-export async function completeReconcile(input: ReconcileOptions & Readonly<{
-  contractId: ContractId;
-}>): Promise<ReconcileCompletion> {
+export async function completeReconcile(
+  input: ReconcileOptions &
+    Readonly<{
+      contractId: ContractId;
+    }>,
+): Promise<ReconcileCompletion> {
   const observed = await observeState(input.scope, input.channel, input.contractId);
   if ("failed" in observed) {
     return { effects: observed.failed.effects, lag: observed.failed.lag, settlement: emptySettlement() };
@@ -165,15 +156,18 @@ export async function completeReconcile(input: ReconcileOptions & Readonly<{
     state: retained.state,
     effects: retained.report.effects,
   });
-  const cleanup = isManagedTerminal(retained.state)
-    ? await reconcileOperation({ ...input, ...appointed })
-    : null;
+  const cleanup = isManagedTerminal(retained.state) ? await reconcileOperation({ ...input, ...appointed }) : null;
   const release = releaseEligible(retained.state, cleanup?.report, appointment.place !== undefined)
     ? await releaseAppointments(input.scope, [input.contractId])
     : undefined;
   return {
     effects: [...retained.report.effects, ...projection.effects, ...(cleanup?.report.effects ?? [])],
-    lag: [...retained.report.lag, ...projection.lag, ...(cleanup?.report.lag ?? []), ...(release === undefined ? [] : [release])],
+    lag: [
+      ...retained.report.lag,
+      ...projection.lag,
+      ...(cleanup?.report.lag ?? []),
+      ...(release === undefined ? [] : [release]),
+    ],
     settlement,
   };
 }
@@ -186,9 +180,11 @@ function attachReleaseLag(
   const affected = new Set(released);
   return {
     kind: "completed",
-    contracts: contracts.map((contract) => affected.has(contract.contractId)
-      ? { ...contract, report: { ...contract.report, lag: [...contract.report.lag, lag] } }
-      : contract),
+    contracts: contracts.map((contract) =>
+      affected.has(contract.contractId)
+        ? { ...contract, report: { ...contract.report, lag: [...contract.report.lag, lag] } }
+        : contract,
+    ),
   };
 }
 
@@ -239,9 +235,8 @@ export async function completeRepoReconcile(input: ReconcileOptions): Promise<Re
   const cleanup = retained.contracts.some((contract) => isManagedTerminal(contract.state))
     ? await reconcileAllOperation({ ...input, states, places })
     : null;
-  const later = cleanup === null
-    ? null
-    : new Map(cleanup.contracts.map((contract) => [contract.contractId, contract.report]));
+  const later =
+    cleanup === null ? null : new Map(cleanup.contracts.map((contract) => [contract.contractId, contract.report]));
   const released: ContractId[] = [];
   const contracts: RepoReconcileContracts[number][] = [];
   for (const [index, contract] of retained.contracts.entries()) {

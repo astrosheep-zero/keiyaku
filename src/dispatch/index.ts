@@ -72,8 +72,11 @@ function decode(path: string, bytes: Uint8Array): Dispatch {
   if (keys.length !== 3 || keys.some((key) => !["akuId", "contractId", "dispatchedAt"].includes(key))) {
     corruption(`Dispatch has invalid fields: ${path}`);
   }
-  if (typeof record.akuId !== "string" || typeof record.contractId !== "string"
-    || typeof record.dispatchedAt !== "string") {
+  if (
+    typeof record.akuId !== "string" ||
+    typeof record.contractId !== "string" ||
+    typeof record.dispatchedAt !== "string"
+  ) {
     corruption(`Dispatch has invalid values: ${path}`);
   }
   let akuId: AkuId;
@@ -115,8 +118,9 @@ export async function readDispatch(repository: GitRepository, value: AkuId): Pro
 }
 
 export async function readDispatchesAt(observation: GitReadObservation): Promise<readonly Dispatch[]> {
-  const entries = [...observation.snapshot.paths]
-    .filter(([path, entry]) => path.startsWith(DISPATCH_PREFIX) && entry.type === "blob");
+  const entries = [...observation.snapshot.paths].filter(
+    ([path, entry]) => path.startsWith(DISPATCH_PREFIX) && entry.type === "blob",
+  );
   const blobs = await observation.readBlobs(entries.map(([, entry]) => entry.oid));
   const dispatches: Dispatch[] = [];
   const seen = new Set<AkuId>();
@@ -136,7 +140,9 @@ export async function readDispatchesAt(observation: GitReadObservation): Promise
 }
 
 export async function readDispatches(repository: GitRepository): Promise<readonly Dispatch[]> {
-  return await withGitDecodeChannel(repository, (channel) => withGitReadObservation(repository, channel, readDispatchesAt));
+  return await withGitDecodeChannel(repository, (channel) =>
+    withGitReadObservation(repository, channel, readDispatchesAt),
+  );
 }
 
 async function observedPublication(
@@ -155,11 +161,13 @@ function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export async function publishDispatch(input: Readonly<{
-  repository: GitRepository;
-  akuId: AkuId;
-  contractId: ContractId;
-}>): Promise<DispatchPublication> {
+export async function publishDispatch(
+  input: Readonly<{
+    repository: GitRepository;
+    akuId: AkuId;
+    contractId: ContractId;
+  }>,
+): Promise<DispatchPublication> {
   const akuId = parseAkuId(input.akuId).id;
   const owner = contractId(input.contractId);
   const intended: Dispatch = { akuId, contractId: owner, dispatchedAt: new Date().toISOString() };
@@ -191,11 +199,13 @@ export async function publishDispatch(input: Readonly<{
         message: `dispatch ${akuId}`,
         at: intended.dispatchedAt,
       });
-      const publication = await updateRefsAtomically(input.repository, [{
-        ref: GIT_REF,
-        newOid: commit,
-        expectedOid: snapshot.commit,
-      }]);
+      const publication = await updateRefsAtomically(input.repository, [
+        {
+          ref: GIT_REF,
+          newOid: commit,
+          expectedOid: snapshot.commit,
+        },
+      ]);
       if (publication.kind === "published") return { kind: "dispatched", dispatch: intended };
 
       const observed = await observedPublication(input.repository, akuId, owner);

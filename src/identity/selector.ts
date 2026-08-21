@@ -18,9 +18,14 @@ export function parseAkumaGlob(value: string): AkumaGlob {
   const segments = value.split("/");
   const archetype = segments[1] ?? "";
   const archetypeProbe = archetype.replaceAll("*", "x");
-  if (segments.length !== 3 || segments[0] !== "aku" || !value.includes("*")
-    || archetype.length === 0 || normalizeIdentityStem({ source: archetypeProbe }) !== archetypeProbe
-    || !AKUMA_GLOB_SUFFIX.test(segments[2] ?? "")) {
+  if (
+    segments.length !== 3 ||
+    segments[0] !== "aku" ||
+    !value.includes("*") ||
+    archetype.length === 0 ||
+    normalizeIdentityStem({ source: archetypeProbe }) !== archetypeProbe ||
+    !AKUMA_GLOB_SUFFIX.test(segments[2] ?? "")
+  ) {
     throw new TypeError("Akuma glob must be aku/<akuma-pattern>/<hex-pattern> and contain *");
   }
   return value as AkumaGlob;

@@ -7,26 +7,42 @@ import type { HookFailure } from "../git/hooks.js";
 import { projectSettings } from "../settings.js";
 import type { DecideInput, OfferDecision } from "../core/decide.js";
 import { dependencyKeySet } from "../core/subject.js";
-import type { ActorId, ContractId, ContractState, DependencyKeySet, EntryUlid, SnapshotId } from "../core/facts/types.js";
+import type {
+  ActorId,
+  ContractId,
+  ContractState,
+  DependencyKeySet,
+  EntryUlid,
+  SnapshotId,
+} from "../core/facts/types.js";
 import { latestCurrentAttestations } from "../core/facts/gate.js";
 import { decideAttestation, type AttestationInput, type AttestationRefusal } from "../core/verbs/attestation.js";
-import { executeVerification, type VerificationNonterminalOutcome, type VerificationTerminalOutcome } from "../verification/execution.js";
+import {
+  executeVerification,
+  type VerificationNonterminalOutcome,
+  type VerificationTerminalOutcome,
+} from "../verification/execution.js";
 import { VERIFIED, type VerificationDefinition } from "../verification/declaration.js";
 import { runProtocol, type CompanionDecorator, type ProtocolResult } from "./run.js";
 import { mintAttempts } from "./attempt.js";
 
 type IntentAdmissionOptions<Input, Refusal, Seed> = Readonly<{
   observedContracts?: readonly ContractId[];
-  observe?: (repository: GitRepository, channel: GitDecodeChannel, contracts: readonly ContractId[]) => Promise<GitDecisionObservation>;
+  observe?: (
+    repository: GitRepository,
+    channel: GitDecodeChannel,
+    contracts: readonly ContractId[],
+  ) => Promise<GitDecisionObservation>;
   decorateOffer?: CompanionDecorator;
   observationSelection?: GitTreeSelection;
   prepareInput?: (
     observation: GitDecisionObservation,
     input: Seed,
-  ) => Readonly<{ kind: "prepared"; input: Input; assertions?: readonly GitRefAssertion[] }>
+  ) =>
+    | Readonly<{ kind: "prepared"; input: Input; assertions?: readonly GitRefAssertion[] }>
     | Readonly<{ kind: "refused"; refusal: Refusal }>
     | Promise<
-        Readonly<{ kind: "prepared"; input: Input; assertions?: readonly GitRefAssertion[] }>
+        | Readonly<{ kind: "prepared"; input: Input; assertions?: readonly GitRefAssertion[] }>
         | Readonly<{ kind: "refused"; refusal: Refusal }>
       >;
 }>;
@@ -58,7 +74,6 @@ export function admitIntent<
   });
 }
 
-
 type VerifyDeliveryInput = Readonly<{
   channel: GitDecodeChannel;
   repository: GitRepository;
@@ -72,19 +87,23 @@ type VerifyDeliveryInput = Readonly<{
   verification?: VerificationDefinition;
 }>;
 
-export type VerificationRuntimeStop = Readonly<{
-  failure: "unknown-exit" | "cancelled";
-}> | Readonly<{
-  failure: "candidate-unavailable" | "spawn-error";
-  diagnostic: string;
-}> | Readonly<{
-  failure: "environment-failure";
-  diagnostic: string;
-}> | Readonly<{
-  failure: "environment-failure";
-  command: number;
-  detail: HookFailure;
-}>;
+export type VerificationRuntimeStop =
+  | Readonly<{
+      failure: "unknown-exit" | "cancelled";
+    }>
+  | Readonly<{
+      failure: "candidate-unavailable" | "spawn-error";
+      diagnostic: string;
+    }>
+  | Readonly<{
+      failure: "environment-failure";
+      diagnostic: string;
+    }>
+  | Readonly<{
+      failure: "environment-failure";
+      command: number;
+      detail: HookFailure;
+    }>;
 
 export type VerificationCleanupFailure = Readonly<{
   phase: "destroy";
@@ -139,16 +158,14 @@ export function currentVerifiedAttestation(state: ContractState): CurrentVerifie
   return current === undefined
     ? undefined
     : {
-      entry: current.entry,
-      verdict: current.data.verdict,
-      ...(current.data.summary === undefined ? {} : { summary: current.data.summary }),
-    };
+        entry: current.entry,
+        verdict: current.data.verdict,
+        ...(current.data.summary === undefined ? {} : { summary: current.data.summary }),
+      };
 }
 
 /** Run Verification against an explicit or admitted integration snapshot. */
-export async function verifyDelivery(
-  input: VerifyDeliveryInput,
-): Promise<VerificationResult | null> {
+export async function verifyDelivery(input: VerifyDeliveryInput): Promise<VerificationResult | null> {
   const snapshot = input.snapshot ?? input.state.currentIntegration?.snapshot;
   if (snapshot === undefined || input.verification === undefined) return null;
   const subject = dependencyKeySet([
@@ -176,13 +193,14 @@ export async function verifyDelivery(
   } else if (execution.outcome.kind === "candidate-unavailable") {
     step = { failure: "candidate-unavailable", diagnostic: execution.outcome.diagnostic };
   } else if (execution.outcome.kind === "environment-failure") {
-    step = "diagnostic" in execution.outcome
-      ? { failure: "environment-failure", diagnostic: execution.outcome.diagnostic }
-      : { failure: "environment-failure", command: execution.outcome.command, detail: execution.outcome.detail };
+    step =
+      "diagnostic" in execution.outcome
+        ? { failure: "environment-failure", diagnostic: execution.outcome.diagnostic }
+        : { failure: "environment-failure", command: execution.outcome.command, detail: execution.outcome.detail };
   } else if (
-    execution.outcome.kind === "unknown-exit"
-    || execution.outcome.kind === "cancelled"
-    || execution.outcome.kind === "spawn-error"
+    execution.outcome.kind === "unknown-exit" ||
+    execution.outcome.kind === "cancelled" ||
+    execution.outcome.kind === "spawn-error"
   ) {
     step = runtimeStop(execution.outcome);
   } else {
@@ -192,13 +210,13 @@ export async function verifyDelivery(
     step,
     ...(execution.outcome.kind === "terminal"
       ? {
-        counts: {
-          passed: execution.outcome.passed,
-          total: execution.outcome.total,
-          verdict: execution.outcome.verdict,
-          ...(execution.outcome.summary === undefined ? {} : { summary: execution.outcome.summary }),
-        },
-      }
+          counts: {
+            passed: execution.outcome.passed,
+            total: execution.outcome.total,
+            verdict: execution.outcome.verdict,
+            ...(execution.outcome.summary === undefined ? {} : { summary: execution.outcome.summary }),
+          },
+        }
       : {}),
     ...(execution.cleanup === undefined ? {} : { cleanup: execution.cleanup }),
     ...(execution.leak === undefined ? {} : { leak: execution.leak }),

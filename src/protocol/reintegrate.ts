@@ -1,10 +1,6 @@
 import { contractState } from "../core/facts/observation.js";
 import type { ActorId, ContractId, ReintegratedData } from "../core/facts/types.js";
-import {
-  decideReintegrate,
-  type ReintegrateInput,
-  type ReintegrateRefusal,
-} from "../core/verbs/reintegrate.js";
+import { decideReintegrate, type ReintegrateInput, type ReintegrateRefusal } from "../core/verbs/reintegrate.js";
 import {
   materializeReintegrationSnapshot,
   persistedTender,
@@ -36,7 +32,9 @@ type ReintegrationInput = Readonly<{
   actor?: ActorId;
 }>;
 
-async function runReintegration(input: ReintegrationInput): Promise<Exclude<ReintegrationResult, PlacementExecutionFailure>> {
+async function runReintegration(
+  input: ReintegrationInput,
+): Promise<Exclude<ReintegrationResult, PlacementExecutionFailure>> {
   const attempts = mintAttempts({ entryCount: 1 });
   for (let index = 0; index < attempts.length; index += 1) {
     const attempt = attempts[index]!;
@@ -106,9 +104,5 @@ async function runReintegration(input: ReintegrationInput): Promise<Exclude<Rein
 }
 
 export async function reintegrateOperation(input: ReintegrationInput): Promise<ReintegrationResult> {
-  return await runUnderTargetPlacementFence(
-    input.repository,
-    input.target,
-    async () => await runReintegration(input),
-  );
+  return await runUnderTargetPlacementFence(input.repository, input.target, async () => await runReintegration(input));
 }

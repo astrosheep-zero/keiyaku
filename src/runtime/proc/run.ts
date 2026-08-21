@@ -3,10 +3,7 @@ import { open, type FileHandle } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import crossSpawn from "cross-spawn";
-import {
-  spawnOptionsFor,
-  type DetachedProcessInput,
-} from "./launch.js";
+import { spawnOptionsFor, type DetachedProcessInput } from "./launch.js";
 
 export { handoffProcess, type DetachedProcessInput } from "./launch.js";
 
@@ -31,9 +28,10 @@ type ProcessSpawnOptions = Readonly<{
 
 type ProcessSpawner = (command: string, args: readonly string[], options: ProcessSpawnOptions) => ChildProcess;
 
-export type ProcessInput = ProcessLaunch & Readonly<{
-  readonly timeoutMs?: number;
-}>;
+export type ProcessInput = ProcessLaunch &
+  Readonly<{
+    readonly timeoutMs?: number;
+  }>;
 
 type ProcessTerminal = Readonly<{
   readonly kind: "terminal";
@@ -60,7 +58,12 @@ type ProcessCancelled = Readonly<{
   readonly kind: "cancelled";
 }>;
 
-export type ProcessOutcome = ProcessTerminal | ProcessTimeout | ProcessSpawnError | ProcessUnknownExit | ProcessCancelled;
+export type ProcessOutcome =
+  | ProcessTerminal
+  | ProcessTimeout
+  | ProcessSpawnError
+  | ProcessUnknownExit
+  | ProcessCancelled;
 
 type ProcessStreamError = Readonly<{
   readonly kind: "stream-error";
@@ -111,9 +114,8 @@ function tailCapture(limit: number) {
     result(): Readonly<{ text: string; truncated: boolean }> {
       const size = Math.min(total, limit);
       const start = total > limit ? cursor : 0;
-      const value = start === 0
-        ? bytes.subarray(0, size)
-        : Buffer.concat([bytes.subarray(start), bytes.subarray(0, start)]);
+      const value =
+        start === 0 ? bytes.subarray(0, size) : Buffer.concat([bytes.subarray(start), bytes.subarray(0, start)]);
       return { text: value.toString("utf8"), truncated: total > limit };
     },
   };
@@ -142,8 +144,14 @@ export async function terminateOwnedProcess(child: ChildProcess, force = false):
   if (pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
   let exited = false;
   const exit = new Promise<void>((resolve) => {
-    child.once("exit", () => { exited = true; resolve(); });
-    child.once("close", () => { exited = true; resolve(); });
+    child.once("exit", () => {
+      exited = true;
+      resolve();
+    });
+    child.once("close", () => {
+      exited = true;
+      resolve();
+    });
   });
   if (process.platform === "win32") {
     await terminateWindowsTree(pid);
@@ -151,7 +159,11 @@ export async function terminateOwnedProcess(child: ChildProcess, force = false):
     return;
   }
   if (force) {
-    try { process.kill(-pid, "SIGKILL"); } catch (error) { ignoreMissingProcess(error); }
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch (error) {
+      ignoreMissingProcess(error);
+    }
     await exit;
     return;
   }
@@ -207,7 +219,11 @@ export async function spawnDetachedProcess(input: DetachedProcessInput): Promise
   let launched = false;
   try {
     const from = (await log.stat()).size;
-    const child = spawn(input.argv[0]!, input.argv.slice(1), spawnOptionsFor("retained", input, ["ignore", log.fd, log.fd]));
+    const child = spawn(
+      input.argv[0]!,
+      input.argv.slice(1),
+      spawnOptionsFor("retained", input, ["ignore", log.fd, log.fd]),
+    );
     await new Promise<void>((resolve, reject) => {
       child.once("spawn", resolve);
       child.once("error", reject);
@@ -231,7 +247,9 @@ export async function spawnDetachedProcess(input: DetachedProcessInput): Promise
             failure ??= error;
           }
           if (failure !== undefined) {
-            throw new Error(`pre-admission ${status}: run-log evidence unavailable: ${failure instanceof Error ? failure.message : String(failure)}`);
+            throw new Error(
+              `pre-admission ${status}: run-log evidence unavailable: ${failure instanceof Error ? failure.message : String(failure)}`,
+            );
           }
           resolve(result!);
         })().catch(reject);
@@ -240,7 +258,9 @@ export async function spawnDetachedProcess(input: DetachedProcessInput): Promise
     void exited.catch(() => undefined);
     let state: "active" | "terminating" | "inert" = "active";
     let termination: Promise<void> | undefined;
-    const invalidate = (): void => { state = "inert"; };
+    const invalidate = (): void => {
+      state = "inert";
+    };
     child.once("exit", invalidate);
     child.once("close", invalidate);
     launched = true;

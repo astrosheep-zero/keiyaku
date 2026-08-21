@@ -3,11 +3,7 @@ import { rename, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { decodeAllowedActions } from "./allowed.js";
 import { archetypeName, parseAkuId, type AkuId } from "./identity.js";
-import {
-  decodeProviderOptions,
-  decodeReadonlyRestraint,
-  type ReadonlyRestraint,
-} from "./provider-recipe.js";
+import { decodeProviderOptions, decodeReadonlyRestraint, type ReadonlyRestraint } from "./provider-recipe.js";
 import { decodeProviderExecution } from "./providers/index.js";
 import {
   decodeTaskMutationRequest,
@@ -76,9 +72,16 @@ export type TaskRequestClaim = Readonly<{
   world: string;
   request: TaskMutationRequest;
 }>;
-export type RequestClaim = CallRequestClaim | WaitRequestClaim | TellRequestClaim | KillRequestClaim
-  | DeliverRequestClaim | ReviewRequestClaim | TaskRequestClaim;
-export type StructuralRequestClaim = Omit<CallRequestClaim, "recipe"> & Readonly<{ recipe: unknown }>
+export type RequestClaim =
+  | CallRequestClaim
+  | WaitRequestClaim
+  | TellRequestClaim
+  | KillRequestClaim
+  | DeliverRequestClaim
+  | ReviewRequestClaim
+  | TaskRequestClaim;
+export type StructuralRequestClaim =
+  | (Omit<CallRequestClaim, "recipe"> & Readonly<{ recipe: unknown }>)
   | Exclude<RequestClaim, CallRequestClaim>;
 
 export type UpstreamRequestFailure =
@@ -113,13 +116,14 @@ export type RequestReceipt =
   | (ReceiptBase<"contract.deliver", "served"> & Readonly<{ reference: ForwardedDeliveryReference }>)
   | (ReceiptBase<"contract.review", "served"> & Readonly<{ reference: ForwardedReviewReference }>)
   | (ReceiptBase<TaskMutationAction, "served"> & Readonly<{ reference: ForwardedTaskReference }>)
-  | (ReceiptBase<Exclude<RequestClaim["action"], "akuma.call">, "served"> & Readonly<{ outcome: UpstreamRequestOutcome }>)
+  | (ReceiptBase<Exclude<RequestClaim["action"], "akuma.call">, "served"> &
+      Readonly<{ outcome: UpstreamRequestOutcome }>)
   | (ReceiptBase<RequestClaim["action"], "refused"> & Readonly<{ diagnostic: string }>)
   | (ReceiptBase<RequestClaim["action"], "voided"> & Readonly<{ evidence: string }>);
 
 function object(value: unknown): Readonly<Record<string, unknown>> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Readonly<Record<string, unknown>>
+    ? (value as Readonly<Record<string, unknown>>)
     : null;
 }
 
@@ -148,11 +152,7 @@ function canonicalTargets(value: unknown): readonly AkuId[] | null {
   const ids: AkuId[] = [];
   for (const item of value) {
     const id = canonicalAkuId(item);
-    if (
-      id === null
-      || (ids.length > 0
-        && Buffer.compare(Buffer.from(ids.at(-1)!), Buffer.from(id)) >= 0)
-    ) return null;
+    if (id === null || (ids.length > 0 && Buffer.compare(Buffer.from(ids.at(-1)!), Buffer.from(id)) >= 0)) return null;
     ids.push(id);
   }
   return ids;
@@ -169,11 +169,11 @@ export function decodeRecipe(value: unknown): RequestRecipe | null {
     ...(recipe.readonly === undefined ? [] : ["readonly"]),
   ];
   if (
-    !exactKeys(recipe, expected)
-    || (recipe.description !== undefined
-      && (typeof recipe.description !== "string"
-        || recipe.description.trim().length === 0))
-  ) return null;
+    !exactKeys(recipe, expected) ||
+    (recipe.description !== undefined &&
+      (typeof recipe.description !== "string" || recipe.description.trim().length === 0))
+  )
+    return null;
   try {
     const options = decodeProviderOptions(recipe.options);
     const readonly = recipe.readonly === undefined ? undefined : decodeReadonlyRestraint(recipe.readonly);
@@ -195,19 +195,14 @@ function contractId(value: unknown): string | null {
 }
 
 function decodeCall(id: string, payload: Readonly<Record<string, unknown>>): StructuralRequestClaim | null {
-  const expected = [
-    "archetype",
-    "body",
-    "recipe",
-    "world",
-    ...(payload.cwd === undefined ? [] : ["cwd"]),
-  ];
+  const expected = ["archetype", "body", "recipe", "world", ...(payload.cwd === undefined ? [] : ["cwd"])];
   if (
-    !exactKeys(payload, expected)
-    || typeof payload.body !== "string"
-    || !absolute(payload.world)
-    || (payload.cwd !== undefined && !absolute(payload.cwd))
-  ) return null;
+    !exactKeys(payload, expected) ||
+    typeof payload.body !== "string" ||
+    !absolute(payload.world) ||
+    (payload.cwd !== undefined && !absolute(payload.cwd))
+  )
+    return null;
   try {
     archetypeName(payload.archetype as string);
   } catch {
@@ -226,45 +221,33 @@ function decodeCall(id: string, payload: Readonly<Record<string, unknown>>): Str
 
 function decodeWait(id: string, payload: Readonly<Record<string, unknown>>): WaitRequestClaim | null {
   const targets = canonicalTargets(payload.targets);
-  const expected = [
-    "completion",
-    "targets",
-    ...(payload.timeoutMs === undefined ? [] : ["timeoutMs"]),
-  ];
+  const expected = ["completion", "targets", ...(payload.timeoutMs === undefined ? [] : ["timeoutMs"])];
   if (
-    !exactKeys(payload, expected)
-    || targets === null
-    || (payload.completion !== "any" && payload.completion !== "all")
-    || (payload.timeoutMs !== undefined
-      && (!Number.isSafeInteger(payload.timeoutMs)
-        || (payload.timeoutMs as number) < 0))
-  ) return null;
+    !exactKeys(payload, expected) ||
+    targets === null ||
+    (payload.completion !== "any" && payload.completion !== "all") ||
+    (payload.timeoutMs !== undefined && (!Number.isSafeInteger(payload.timeoutMs) || (payload.timeoutMs as number) < 0))
+  )
+    return null;
   return {
     id,
     action: "akuma.wait",
     targets,
     completion: payload.completion,
-    ...(payload.timeoutMs === undefined
-      ? {}
-      : { timeoutMs: payload.timeoutMs as number }),
+    ...(payload.timeoutMs === undefined ? {} : { timeoutMs: payload.timeoutMs as number }),
   };
 }
 
 function decodeTell(id: string, payload: Readonly<Record<string, unknown>>): TellRequestClaim | null {
   const target = canonicalAkuId(payload.target);
-  return exactKeys(payload, ["body", "target"])
-    && target !== null
-    && typeof payload.body === "string"
+  return exactKeys(payload, ["body", "target"]) && target !== null && typeof payload.body === "string"
     ? { id, action: "akuma.tell", target, body: payload.body }
     : null;
 }
 
 function decodeKill(id: string, payload: Readonly<Record<string, unknown>>): KillRequestClaim | null {
   const targets = canonicalTargets(payload.targets);
-  return exactKeys(payload, ["targets"])
-    && targets !== null
-    ? { id, action: "akuma.kill", targets }
-    : null;
+  return exactKeys(payload, ["targets"]) && targets !== null ? { id, action: "akuma.kill", targets } : null;
 }
 
 function decodeDeliver(id: string, payload: Readonly<Record<string, unknown>>): DeliverRequestClaim | null {
@@ -276,14 +259,12 @@ function decodeDeliver(id: string, payload: Readonly<Record<string, unknown>>): 
     ...(payload.message === undefined ? [] : ["message"]),
   ]);
   const selected = contractId(payload.contractId);
-  return valid
-    && selected !== null
-    && absolute(payload.repoRoot)
-    && typeof payload.includeDirty === "boolean"
-    && typeof payload.materializeConflict === "boolean"
-    && (payload.message === undefined
-      || (typeof payload.message === "string"
-        && payload.message.trim().length > 0))
+  return valid &&
+    selected !== null &&
+    absolute(payload.repoRoot) &&
+    typeof payload.includeDirty === "boolean" &&
+    typeof payload.materializeConflict === "boolean" &&
+    (payload.message === undefined || (typeof payload.message === "string" && payload.message.trim().length > 0))
     ? {
         id,
         action: "contract.deliver",
@@ -291,9 +272,7 @@ function decodeDeliver(id: string, payload: Readonly<Record<string, unknown>>): 
         contractId: selected,
         includeDirty: payload.includeDirty,
         materializeConflict: payload.materializeConflict,
-        ...(payload.message === undefined
-          ? {}
-          : { message: payload.message as string }),
+        ...(payload.message === undefined ? {} : { message: payload.message as string }),
       }
     : null;
 }
@@ -306,32 +285,25 @@ function decodeReview(id: string, payload: Readonly<Record<string, unknown>>): R
     ...(payload.summary === undefined ? [] : ["summary"]),
   ]);
   const selected = contractId(payload.contractId);
-  return valid
-    && selected !== null
-    && absolute(payload.repoRoot)
-    && (payload.verdict === "satisfied" || payload.verdict === "unsatisfied")
-    && (payload.summary === undefined
-      || (typeof payload.summary === "string"
-        && payload.summary.trim().length > 0))
+  return valid &&
+    selected !== null &&
+    absolute(payload.repoRoot) &&
+    (payload.verdict === "satisfied" || payload.verdict === "unsatisfied") &&
+    (payload.summary === undefined || (typeof payload.summary === "string" && payload.summary.trim().length > 0))
     ? {
         id,
         action: "contract.review",
         repoRoot: payload.repoRoot,
         contractId: selected,
         verdict: payload.verdict,
-        ...(payload.summary === undefined
-          ? {}
-          : { summary: payload.summary as string }),
+        ...(payload.summary === undefined ? {} : { summary: payload.summary as string }),
       }
     : null;
 }
 
 function decodeTask(id: string, action: string, payload: Readonly<Record<string, unknown>>): TaskRequestClaim | null {
-  if (
-    !isTaskMutationAction(action)
-    || !exactKeys(payload, ["request", "world"])
-    || !absolute(payload.world)
-  ) return null;
+  if (!isTaskMutationAction(action) || !exactKeys(payload, ["request", "world"]) || !absolute(payload.world))
+    return null;
   try {
     return {
       id,
@@ -345,10 +317,7 @@ function decodeTask(id: string, action: string, payload: Readonly<Record<string,
 }
 
 const CLAIM_DECODERS: Readonly<
-  Record<
-    string,
-    (id: string, payload: Readonly<Record<string, unknown>>) => StructuralRequestClaim | null
-  >
+  Record<string, (id: string, payload: Readonly<Record<string, unknown>>) => StructuralRequestClaim | null>
 > = {
   "akuma.call": decodeCall,
   "akuma.wait": decodeWait,
@@ -367,12 +336,13 @@ export function decodeClaim(bytes: string, fileId: string): StructuralRequestCla
   }
   const value = object(decoded);
   if (
-    value === null
-    || !exactKeys(value, ["action", "id", "payload"])
-    || value.id !== fileId
-    || typeof value.id !== "string"
-    || !UUID.test(value.id)
-  ) return null;
+    value === null ||
+    !exactKeys(value, ["action", "id", "payload"]) ||
+    value.id !== fileId ||
+    typeof value.id !== "string" ||
+    !UUID.test(value.id)
+  )
+    return null;
   const payload = object(value.payload);
   if (payload === null || typeof value.action !== "string") return null;
   const decoder = CLAIM_DECODERS[value.action];
@@ -385,64 +355,73 @@ function outcome(value: unknown): UpstreamRequestOutcome | null {
     return { kind: input.kind, result: input.result };
   }
   const failure = object(input?.failure);
-  if (
-    input?.kind !== "failed"
-    || !exactKeys(input, ["failure", "kind"])
-    || failure === null
-  ) return null;
+  if (input?.kind !== "failed" || !exactKeys(input, ["failure", "kind"]) || failure === null) return null;
   if (failure.kind === "akuma-not-born" && exactKeys(failure, ["id", "kind"])) {
     const id = canonicalAkuId(failure.id);
-    return id === null
-      ? null
-      : { kind: input.kind, failure: { kind: failure.kind, id } };
+    return id === null ? null : { kind: input.kind, failure: { kind: failure.kind, id } };
   }
-  return failure.kind === "failed" && exactKeys(failure, ["diagnostic", "kind"]) && typeof failure.diagnostic === "string"
-    ? { kind: input.kind, failure: { kind: failure.kind, diagnostic: failure.diagnostic } } : null;
+  return failure.kind === "failed" &&
+    exactKeys(failure, ["diagnostic", "kind"]) &&
+    typeof failure.diagnostic === "string"
+    ? { kind: input.kind, failure: { kind: failure.kind, diagnostic: failure.diagnostic } }
+    : null;
 }
 
-function envelope(value: Readonly<Record<string, unknown>>, id: string, action: RequestClaim["action"]): RequestReceipt | null {
+function envelope(
+  value: Readonly<Record<string, unknown>>,
+  id: string,
+  action: RequestClaim["action"],
+): RequestReceipt | null {
   if (
-    value.state === "refused"
-    && exactKeys(value, ["action", "diagnostic", "id", "state"])
-    && typeof value.diagnostic === "string"
+    value.state === "refused" &&
+    exactKeys(value, ["action", "diagnostic", "id", "state"]) &&
+    typeof value.diagnostic === "string"
   ) {
     return { id, action, state: value.state, diagnostic: value.diagnostic };
   }
   if (
-    value.state === "voided"
-    && exactKeys(value, ["action", "evidence", "id", "state"])
-    && typeof value.evidence === "string"
+    value.state === "voided" &&
+    exactKeys(value, ["action", "evidence", "id", "state"]) &&
+    typeof value.evidence === "string"
   ) {
     return { id, action, state: value.state, evidence: value.evidence };
   }
-  if (
-    action !== "akuma.call"
-    && value.state === "served"
-    && exactKeys(value, ["action", "id", "outcome", "state"])
-  ) {
+  if (action !== "akuma.call" && value.state === "served" && exactKeys(value, ["action", "id", "outcome", "state"])) {
     const decoded = outcome(value.outcome);
-    return decoded === null
-      ? null
-      : { id, action, state: value.state, outcome: decoded };
+    return decoded === null ? null : { id, action, state: value.state, outcome: decoded };
   }
   return null;
 }
 
-function reference(value: unknown, action: "contract.deliver" | "contract.review"): ForwardedDeliveryReference | ForwardedReviewReference | null {
+function reference(
+  value: unknown,
+  action: "contract.deliver" | "contract.review",
+): ForwardedDeliveryReference | ForwardedReviewReference | null {
   const input = object(value);
   const field = action === "contract.deliver" ? "deliveryFactId" : "reviewFactId";
   if (
-    input === null
-    || !exactKeys(input, ["contractId", field, "kind", "repoRoot"])
-    || input.kind !== "accepted-reference"
-    || !absolute(input.repoRoot)
-    || contractId(input.contractId) === null
-    || typeof input[field] !== "string"
-    || input[field].trim().length === 0
-  ) return null;
+    input === null ||
+    !exactKeys(input, ["contractId", field, "kind", "repoRoot"]) ||
+    input.kind !== "accepted-reference" ||
+    !absolute(input.repoRoot) ||
+    contractId(input.contractId) === null ||
+    typeof input[field] !== "string" ||
+    input[field].trim().length === 0
+  )
+    return null;
   return action === "contract.deliver"
-    ? { kind: input.kind, repoRoot: input.repoRoot, contractId: input.contractId as string, deliveryFactId: input.deliveryFactId as string }
-    : { kind: input.kind, repoRoot: input.repoRoot, contractId: input.contractId as string, reviewFactId: input.reviewFactId as string };
+    ? {
+        kind: input.kind,
+        repoRoot: input.repoRoot,
+        contractId: input.contractId as string,
+        deliveryFactId: input.deliveryFactId as string,
+      }
+    : {
+        kind: input.kind,
+        repoRoot: input.repoRoot,
+        contractId: input.contractId as string,
+        reviewFactId: input.reviewFactId as string,
+      };
 }
 
 function decodeCallReceipt(value: Readonly<Record<string, unknown>>, id: string): RequestReceipt | null {
@@ -472,11 +451,12 @@ function decodeTaskReceipt(
   if (value.state !== "served" || !exactKeys(value, ["action", "id", "reference", "state"])) return null;
   const selected = object(value.reference);
   if (
-    selected === null
-    || !exactKeys(selected, ["action", "kind"])
-    || selected.kind !== "served-reference"
-    || selected.action !== action
-  ) return null;
+    selected === null ||
+    !exactKeys(selected, ["action", "kind"]) ||
+    selected.kind !== "served-reference" ||
+    selected.action !== action
+  )
+    return null;
   return { id, action, state: value.state, reference: { kind: selected.kind, action } };
 }
 

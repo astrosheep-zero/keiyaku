@@ -12,15 +12,24 @@ export class VerificationDocumentError extends Error {
   }
 }
 
-export function decodeVerificationDeclarations(document: DocumentNode, section: SectionNode): readonly VerificationDeclaration[] {
+export function decodeVerificationDeclarations(
+  document: DocumentNode,
+  section: SectionNode,
+): readonly VerificationDeclaration[] {
   const blocks = directChildren(section, "code_block");
-  if (blocks.length === 0) throw new VerificationDocumentError("Verification must contain one or more fenced executor declarations");
-  const other = section.children.filter((node) => node.type !== "code_block" && rawSlice(document, node.span).trim().length > 0);
-  if (other.length > 0) throw new VerificationDocumentError("Verification may contain only fenced executor declarations");
+  if (blocks.length === 0)
+    throw new VerificationDocumentError("Verification must contain one or more fenced executor declarations");
+  const other = section.children.filter(
+    (node) => node.type !== "code_block" && rawSlice(document, node.span).trim().length > 0,
+  );
+  if (other.length > 0)
+    throw new VerificationDocumentError("Verification may contain only fenced executor declarations");
   return blocks.map((block) => {
     const info = /^(bash|zsh|pwsh)(?: timeout=([^ ]+))?$/.exec(block.info);
     if (!block.closed || info === null) {
-      throw new VerificationDocumentError("Verification fences must be closed and use bash, zsh, or pwsh with optional timeout=<duration>");
+      throw new VerificationDocumentError(
+        "Verification fences must be closed and use bash, zsh, or pwsh with optional timeout=<duration>",
+      );
     }
     const script = block.lines.slice(1, -1).join("\n");
     if (script.trim().length === 0) throw new VerificationDocumentError("Verification scripts must be nonblank");

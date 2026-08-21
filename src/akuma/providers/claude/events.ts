@@ -1,10 +1,5 @@
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import {
-  AgentEventChannel,
-  noteEvent,
-  unknownEvent,
-  type ToolCall,
-} from "../../provider.js";
+import { AgentEventChannel, noteEvent, unknownEvent, type ToolCall } from "../../provider.js";
 
 type ClaudeMessageType = SDKMessage["type"];
 type ClaudeSystemSubtype = Extract<SDKMessage, { type: "system" }>["subtype"];
@@ -59,7 +54,7 @@ export const CLAUDE_SYSTEM_DISPOSITIONS = {
 
 function object(value: unknown): Readonly<Record<string, unknown>> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Readonly<Record<string, unknown>>
+    ? (value as Readonly<Record<string, unknown>>)
     : undefined;
 }
 
@@ -112,15 +107,21 @@ const CLAUDE_SYSTEM_NOTES = {
   },
   hook_started: (message) => `Hook ${nonblank(message.hook_name) ?? "unknown"} started`,
   informational: (message) => nonblank(message.content) ?? "Informational notice",
-  mirror_error: (message) => `Transcript mirror warning: ${nonblank(message.error) ?? nonblank(message.message) ?? "unknown error"}`,
+  mirror_error: (message) =>
+    `Transcript mirror warning: ${nonblank(message.error) ?? nonblank(message.message) ?? "unknown error"}`,
   model_refusal_fallback: () => "Model refusal; using fallback",
   model_refusal_no_fallback: () => "Model refusal; no fallback available",
   notification: (message) => nonblank(message.message) ?? nonblank(message.content) ?? "Notification",
-  permission_denied: (message) => `Permission refused${nonblank(message.message) === undefined ? "" : `: ${nonblank(message.message)}`}`,
-  plugin_install: (message) => `Plugin install ${nonblank(message.status) ?? "updated"}${nonblank(message.name) === undefined ? "" : `: ${nonblank(message.name)}`}`,
-  status: (message) => `Status: ${nonblank(message.status) ?? "idle"}${nonblank(message.error) === undefined ? "" : ` (${nonblank(message.error)})`}`,
-  task_notification: (message) => `Task ${nonblank(message.task_id) ?? "unknown"} ${nonblank(message.status) ?? "updated"}`,
-  task_progress: (message) => nonblank(message.description) ?? `Task ${nonblank(message.task_id) ?? "unknown"} progressed`,
+  permission_denied: (message) =>
+    `Permission refused${nonblank(message.message) === undefined ? "" : `: ${nonblank(message.message)}`}`,
+  plugin_install: (message) =>
+    `Plugin install ${nonblank(message.status) ?? "updated"}${nonblank(message.name) === undefined ? "" : `: ${nonblank(message.name)}`}`,
+  status: (message) =>
+    `Status: ${nonblank(message.status) ?? "idle"}${nonblank(message.error) === undefined ? "" : ` (${nonblank(message.error)})`}`,
+  task_notification: (message) =>
+    `Task ${nonblank(message.task_id) ?? "unknown"} ${nonblank(message.status) ?? "updated"}`,
+  task_progress: (message) =>
+    nonblank(message.description) ?? `Task ${nonblank(message.task_id) ?? "unknown"} progressed`,
   task_started: (message) => nonblank(message.description) ?? `Task ${nonblank(message.task_id) ?? "unknown"} started`,
   task_updated: (message) => `Task ${nonblank(message.task_id) ?? "unknown"} updated`,
   worker_shutting_down: (message) => `Worker stopping: ${nonblank(message.reason) ?? "unknown reason"}`,
@@ -177,11 +178,7 @@ function nonnegativeInt(value: unknown): number | undefined {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
 }
 
-function fileChange(
-  op: "add" | "update",
-  path: string,
-  gitDiff: unknown,
-): Extract<ToolCall, { kind: "fileChange" }> {
+function fileChange(op: "add" | "update", path: string, gitDiff: unknown): Extract<ToolCall, { kind: "fileChange" }> {
   const diff = object(gitDiff);
   const added = nonnegativeInt(diff?.additions);
   const removed = nonnegativeInt(diff?.deletions);
@@ -212,9 +209,7 @@ function editResult(result: unknown): ToolCall | undefined {
 
 function notebookResult(result: unknown): ToolCall | undefined {
   const path = nonblank(object(result)?.notebook_path);
-  return path === undefined
-    ? undefined
-    : { kind: "fileChange", changes: [{ op: "update", path }] };
+  return path === undefined ? undefined : { kind: "fileChange", changes: [{ op: "update", path }] };
 }
 
 function structuredFileChange(name: string, result: unknown): ToolCall | undefined {
@@ -228,10 +223,11 @@ function toolCall(name: string, input: unknown): ToolCall {
   const run = runCall(name, value);
   if (run !== undefined) return run;
   const path = startedPath(name, value);
-  return readCall(name, path, value)
-    ?? searchCall(name, value)
-    ?? fileChangeCall(name, path)
-    ?? { kind: "other", display: name };
+  return (
+    readCall(name, path, value) ??
+    searchCall(name, value) ??
+    fileChangeCall(name, path) ?? { kind: "other", display: name }
+  );
 }
 
 function assistantEvents(
@@ -246,7 +242,8 @@ function assistantEvents(
   }
   const text = message.message.content
     .filter((block): block is Extract<typeof block, { type: "text" }> => block.type === "text")
-    .map((block) => block.text).join("");
+    .map((block) => block.text)
+    .join("");
   if (text.length > 0) events.emit({ type: "assistant", text });
   for (const block of message.message.content) {
     const value = object(block);
@@ -277,9 +274,7 @@ function toolResultEvents(
     if (observed === undefined) continue;
     state.tools.delete(id);
     const failed = value.is_error === true;
-    const structured = failed
-      ? undefined
-      : structuredFileChange(observed.name, message.tool_use_result);
+    const structured = failed ? undefined : structuredFileChange(observed.name, message.tool_use_result);
     events.emit({
       type: "tool",
       phase: "completed",
@@ -304,11 +299,7 @@ function emitSystemMessage(value: Readonly<Record<string, unknown>>, events: Age
   events.emit(noteEvent(note?.(value ?? {}) ?? subtype));
 }
 
-export function emitClaudeMessage(
-  message: SDKMessage,
-  events: AgentEventChannel,
-  state: ClaudeObservationState,
-): void {
+export function emitClaudeMessage(message: SDKMessage, events: AgentEventChannel, state: ClaudeObservationState): void {
   const value = object(message) ?? {};
   const kind = nonblank(value.type) ?? "unknown";
   if (!Object.hasOwn(CLAUDE_MESSAGE_DISPOSITIONS, kind)) return events.emit(unknownEvent(kind));

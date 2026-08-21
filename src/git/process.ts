@@ -15,13 +15,20 @@ export type GitRepository = Readonly<{
 }>;
 
 export class GitPlumbingError extends Error {
-  readonly stdout: Buffer; readonly stderr: Buffer;
-  readonly status: number | null; readonly pid: number | null;
+  readonly stdout: Buffer;
+  readonly stderr: Buffer;
+  readonly status: number | null;
+  readonly pid: number | null;
 
-  constructor(input: Readonly<{
-    stdout?: string | Uint8Array; stderr: string | Uint8Array;
-    status: number | null; message: string; pid?: number | null;
-  }>) {
+  constructor(
+    input: Readonly<{
+      stdout?: string | Uint8Array;
+      stderr: string | Uint8Array;
+      status: number | null;
+      message: string;
+      pid?: number | null;
+    }>,
+  ) {
     super(input.message);
     this.name = "GitPlumbingError";
     this.stdout = Buffer.from(input.stdout ?? "");
@@ -43,7 +50,7 @@ function commandError(command: readonly string[], error: unknown): GitPlumbingEr
   };
   const stderr = candidate.stderr === undefined ? Buffer.alloc(0) : Buffer.from(candidate.stderr);
   const stdout = candidate.stdout === undefined ? Buffer.alloc(0) : Buffer.from(candidate.stdout);
-  const detail = stderr.length === 0 ? candidate.message ?? "git command failed" : stderr.toString("utf8");
+  const detail = stderr.length === 0 ? (candidate.message ?? "git command failed") : stderr.toString("utf8");
   return new GitPlumbingError({
     stdout,
     stderr,
@@ -76,7 +83,9 @@ async function executeGit(
     stderr.push(retained);
     stderrBytes += retained.length;
   });
-  child.stdin.on("error", (error: Error) => { inputError = error; });
+  child.stdin.on("error", (error: Error) => {
+    inputError = error;
+  });
   child.stdin.end(input);
   const terminal = await new Promise<Readonly<{ code: number | null; error?: Error }>>((resolveTerminal) => {
     child.once("error", (error) => resolveTerminal({ code: null, error }));
@@ -106,19 +115,23 @@ export async function consumeGitStdout(
   args: readonly string[],
   consume: (chunk: Buffer) => void,
 ): Promise<void> {
-  const result = await consumeProcessStdout({
-    argv: [repository.gitPath, ...args],
-    cwd: repository.effectiveCwd,
-  }, consume);
+  const result = await consumeProcessStdout(
+    {
+      argv: [repository.gitPath, ...args],
+      cwd: repository.effectiveCwd,
+    },
+    consume,
+  );
   const { outcome } = result;
   if (outcome.kind === "terminal" && outcome.code === 0) return;
   const status = outcome.kind === "terminal" ? outcome.code : null;
   const stderr = outcome.kind === "terminal" ? outcome.stderr : "";
-  const message = outcome.kind === "terminal"
-    ? `git exited with status ${outcome.code}`
-    : outcome.kind === "spawn-error" || outcome.kind === "stream-error"
-      ? outcome.diagnostic
-      : `git process ended with ${outcome.kind}`;
+  const message =
+    outcome.kind === "terminal"
+      ? `git exited with status ${outcome.code}`
+      : outcome.kind === "spawn-error" || outcome.kind === "stream-error"
+        ? outcome.diagnostic
+        : `git process ended with ${outcome.kind}`;
   throw commandError(args, {
     message,
     stderr,

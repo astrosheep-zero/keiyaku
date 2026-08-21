@@ -56,7 +56,11 @@ function decodeCommand(value: unknown, coordinate: string): HookCommand {
     throw new Error(`${coordinate}.argv must be a nonempty string array`);
   }
   if (value.argv[0]!.trim().length === 0) throw new Error(`${coordinate}.argv[0] must be nonblank`);
-  if (!Number.isSafeInteger(value.timeoutMs) || (value.timeoutMs as number) < 1 || (value.timeoutMs as number) > 2_147_483_647) {
+  if (
+    !Number.isSafeInteger(value.timeoutMs) ||
+    (value.timeoutMs as number) < 1 ||
+    (value.timeoutMs as number) > 2_147_483_647
+  ) {
     throw new Error(`${coordinate}.timeoutMs is invalid`);
   }
   return { argv: value.argv, timeoutMs: value.timeoutMs as number };
@@ -72,10 +76,21 @@ function decodeFailure(value: unknown, coordinate: string): HookFailure {
   switch (value.kind) {
     case "exit":
       exactKeys(value, ["kind", "code", "stdout", "stderr", "truncated"], coordinate);
-      if (!Number.isInteger(value.code) || typeof value.stdout !== "string" || typeof value.stderr !== "string" || typeof value.truncated !== "boolean") {
+      if (
+        !Number.isInteger(value.code) ||
+        typeof value.stdout !== "string" ||
+        typeof value.stderr !== "string" ||
+        typeof value.truncated !== "boolean"
+      ) {
         throw new Error(`${coordinate} is invalid`);
       }
-      return { kind: "exit", code: value.code as number, stdout: value.stdout, stderr: value.stderr, truncated: value.truncated };
+      return {
+        kind: "exit",
+        code: value.code as number,
+        stdout: value.stdout,
+        stderr: value.stderr,
+        truncated: value.truncated,
+      };
     case "timeout":
     case "unknown-exit":
       exactKeys(value, ["kind"], coordinate);
@@ -107,7 +122,11 @@ function decodeProgress(value: unknown, commands: number, coordinate: string): H
     if (!Number.isInteger(value.command) || (value.command as number) < 0 || (value.command as number) >= commands) {
       throw new Error(`${coordinate}.command is invalid`);
     }
-    return { status: "failed", command: value.command as number, failure: decodeFailure(value.failure, `${coordinate}.failure`) };
+    return {
+      status: "failed",
+      command: value.command as number,
+      failure: decodeFailure(value.failure, `${coordinate}.failure`),
+    };
   }
   throw new Error(`${coordinate}.status is invalid`);
 }
@@ -146,11 +165,12 @@ async function readMarker(administrationDirectory: string): Promise<HookMarker |
 
 function hookFailureDiagnostic(phase: HookPhase, progress: Extract<HookProgress, { status: "failed" }>): string {
   const failure = progress.failure;
-  const detail = failure.kind === "exit"
-    ? `exit=${failure.code}`
-    : failure.kind === "spawn-error"
-      ? failure.diagnostic
-      : failure.kind;
+  const detail =
+    failure.kind === "exit"
+      ? `exit=${failure.code}`
+      : failure.kind === "spawn-error"
+        ? failure.diagnostic
+        : failure.kind;
   return `worktree-hook-failed ${phase} command=${progress.command} ${detail}`;
 }
 
@@ -159,11 +179,15 @@ export type WorktreeHookMarkerObservation =
   | Readonly<{ kind: "failed"; diagnostic: string }>;
 
 /** Read the durable hook marker without executing commands or taking locks. */
-export async function observeWorktreeHookMarker(administrationDirectory: string): Promise<WorktreeHookMarkerObservation> {
+export async function observeWorktreeHookMarker(
+  administrationDirectory: string,
+): Promise<WorktreeHookMarkerObservation> {
   const marker = await readMarker(administrationDirectory);
   if (marker === null) return { kind: "absent" };
-  if (marker.create.status === "failed") return { kind: "failed", diagnostic: hookFailureDiagnostic("create", marker.create) };
-  if (marker.destroy.status === "failed") return { kind: "failed", diagnostic: hookFailureDiagnostic("destroy", marker.destroy) };
+  if (marker.create.status === "failed")
+    return { kind: "failed", diagnostic: hookFailureDiagnostic("create", marker.create) };
+  if (marker.destroy.status === "failed")
+    return { kind: "failed", diagnostic: hookFailureDiagnostic("destroy", marker.destroy) };
   if (marker.create.status === "pending" || marker.destroy.status === "pending") return { kind: "pending" };
   return { kind: "ok" };
 }
@@ -185,22 +209,27 @@ function freshMarker(commands: WorktreeHooks, createPending: boolean): HookMarke
 
 function failedOutcome(outcome: Exclude<ProcessOutcome, { kind: "cancelled" }>): HookFailure | null {
   if (outcome.kind === "terminal") {
-    return outcome.code === 0 ? null : {
-      kind: "exit",
-      code: outcome.code,
-      stdout: outcome.stdout,
-      stderr: outcome.stderr,
-      truncated: outcome.truncated,
-    };
+    return outcome.code === 0
+      ? null
+      : {
+          kind: "exit",
+          code: outcome.code,
+          stdout: outcome.stdout,
+          stderr: outcome.stderr,
+          truncated: outcome.truncated,
+        };
   }
   return outcome;
 }
 
-export type HookCommandRun = Readonly<{ kind: "ok" }> | Readonly<{ kind: "cancelled" }> | Readonly<{
-  kind: "failed";
-  command: number;
-  failure: HookFailure;
-}>;
+export type HookCommandRun =
+  | Readonly<{ kind: "ok" }>
+  | Readonly<{ kind: "cancelled" }>
+  | Readonly<{
+      kind: "failed";
+      command: number;
+      failure: HookFailure;
+    }>;
 
 /** Execute an ordered command list without lifecycle state. Scratch owns this policy. */
 export async function runHookCommands(
@@ -240,7 +269,8 @@ function hookExecutionLockPath(administrationDirectory: string): string {
 async function regularFile(path: string): Promise<boolean> {
   try {
     const value = await lstat(path);
-    if (!value.isFile() || value.isSymbolicLink()) throw new Error(`worktree hook custody is not a regular file: ${path}`);
+    if (!value.isFile() || value.isSymbolicLink())
+      throw new Error(`worktree hook custody is not a regular file: ${path}`);
     return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
@@ -303,9 +333,18 @@ async function executePendingCommand(input: HookRunnerInput): Promise<void> {
     if (result.kind === "cancelled") throw new Error("managed hook runner cancelled without a signal");
     const failure = result.kind === "failed" ? result.failure : null;
     const next = input.command + 1;
-    await writeMarker(input.administrationDirectory, withProgress(marker, input.phase, failure === null
-      ? next === marker.commands[input.phase].length ? { status: "ok" } : { status: "pending", next }
-      : { status: "failed", command: input.command, failure }));
+    await writeMarker(
+      input.administrationDirectory,
+      withProgress(
+        marker,
+        input.phase,
+        failure === null
+          ? next === marker.commands[input.phase].length
+            ? { status: "ok" }
+            : { status: "pending", next }
+          : { status: "failed", command: input.command, failure },
+      ),
+    );
   } finally {
     held.close();
   }
@@ -314,7 +353,9 @@ async function executePendingCommand(input: HookRunnerInput): Promise<void> {
 function runnerFailure(outcome: ProcessOutcome): Error {
   if (outcome.kind === "terminal") {
     const detail = outcome.stderr.trim() || outcome.stdout.trim();
-    return new Error(detail.length === 0 ? `Hook runner exited ${outcome.code}` : `Hook runner exited ${outcome.code}: ${detail}`);
+    return new Error(
+      detail.length === 0 ? `Hook runner exited ${outcome.code}` : `Hook runner exited ${outcome.code}: ${detail}`,
+    );
   }
   if (outcome.kind === "spawn-error") return new Error(`Hook runner failed to spawn: ${outcome.diagnostic}`);
   return new Error(`Hook runner ended with ${outcome.kind}`);
@@ -349,10 +390,19 @@ async function runPhase(
     if (progress.status === "ok") return null;
     if (progress.status === "failed") {
       if (!retryFailure) {
-        return { kind: "worktree-hook-failed", phase, path: worktree, command: progress.command, failure: progress.failure };
+        return {
+          kind: "worktree-hook-failed",
+          phase,
+          path: worktree,
+          command: progress.command,
+          failure: progress.failure,
+        };
       }
       retryFailure = false;
-      await writeMarker(administrationDirectory, withProgress(marker, phase, { status: "pending", next: progress.command }));
+      await writeMarker(
+        administrationDirectory,
+        withProgress(marker, phase, { status: "pending", next: progress.command }),
+      );
       continue;
     }
     if (progress.next === marker.commands[phase].length) {
@@ -363,15 +413,29 @@ async function runPhase(
   }
 }
 
-export function runCreateHooks(worktree: string, administrationDirectory: string, hooks: WorktreeHooks, retryHooks: boolean): Promise<WorktreeHookLag | null> {
+export function runCreateHooks(
+  worktree: string,
+  administrationDirectory: string,
+  hooks: WorktreeHooks,
+  retryHooks: boolean,
+): Promise<WorktreeHookLag | null> {
   return runPhase(worktree, administrationDirectory, hooks, "create", retryHooks);
 }
 
-export function runDestroyHooks(worktree: string, administrationDirectory: string, hooks: WorktreeHooks, retryHooks: boolean): Promise<WorktreeHookLag | null> {
+export function runDestroyHooks(
+  worktree: string,
+  administrationDirectory: string,
+  hooks: WorktreeHooks,
+  retryHooks: boolean,
+): Promise<WorktreeHookLag | null> {
   return runPhase(worktree, administrationDirectory, hooks, "destroy", retryHooks);
 }
 
-if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1] && process.argv[2] === "--run-hook") {
+if (
+  process.argv[1] !== undefined &&
+  fileURLToPath(import.meta.url) === process.argv[1] &&
+  process.argv[2] === "--run-hook"
+) {
   const encoded = process.argv[3];
   if (encoded === undefined) throw new Error("Hook runner input is missing");
   await executePendingCommand(decodeRunnerInput(encoded));

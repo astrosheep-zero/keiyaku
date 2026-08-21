@@ -19,7 +19,11 @@ export function parseDuration(value: string): DurationParseResult {
 }
 
 export function formatDuration(milliseconds: number): string {
-  for (const [unit, multiplier] of [["h", 3_600_000], ["m", 60_000], ["s", 1_000]] as const) {
+  for (const [unit, multiplier] of [
+    ["h", 3_600_000],
+    ["m", 60_000],
+    ["s", 1_000],
+  ] as const) {
     if (milliseconds >= multiplier && milliseconds % multiplier === 0) return `${milliseconds / multiplier}${unit}`;
   }
   return `${milliseconds}ms`;

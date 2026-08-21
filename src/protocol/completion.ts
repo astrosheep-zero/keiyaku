@@ -3,7 +3,12 @@ import type { WorktreeLeak } from "../git/scratch.js";
 import type { GitRepository } from "../git/process.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import type { VerificationDeclarationPreparation } from "../verification/declaration.js";
-import { currentVerifiedAttestation, verifyDelivery, type CurrentVerifiedAttestation, type VerificationCleanupFailure } from "./intent.js";
+import {
+  currentVerifiedAttestation,
+  verifyDelivery,
+  type CurrentVerifiedAttestation,
+  type VerificationCleanupFailure,
+} from "./intent.js";
 import { admitPlacement } from "./placement.js";
 import { reintegrateOperation, type ReintegrationResult } from "./reintegrate.js";
 import type { AcceptedProtocolStep } from "./outcome.js";
@@ -66,11 +71,13 @@ async function verificationFor(
   input: CompletionInput,
   admission: AcceptedProtocolStep,
   snapshot: SnapshotId,
-): Promise<Readonly<{
-  admission: AcceptedProtocolStep;
-  evidence: Omit<CompletionEvidence, "placement">;
-  completionVerification?: CompletionVerification;
-}>> {
+): Promise<
+  Readonly<{
+    admission: AcceptedProtocolStep;
+    evidence: Omit<CompletionEvidence, "placement">;
+    completionVerification?: CompletionVerification;
+  }>
+> {
   const current = currentVerifiedAttestation(admission.state);
   if (current !== undefined) {
     return {
@@ -113,12 +120,12 @@ async function verificationFor(
     ...(unpacked.counts === undefined
       ? {}
       : {
-        completionVerification: {
-          mode: "ran" as const,
-          verdict: unpacked.counts.verdict,
-          ...(unpacked.counts.summary === undefined ? {} : { summary: unpacked.counts.summary }),
-        },
-      }),
+          completionVerification: {
+            mode: "ran" as const,
+            verdict: unpacked.counts.verdict,
+            ...(unpacked.counts.summary === undefined ? {} : { summary: unpacked.counts.summary }),
+          },
+        }),
   };
 }
 
@@ -158,9 +165,10 @@ function acceptedCompletion(
   const integration = admission.state.currentIntegration?.snapshot;
   if (integration === undefined) throw new Error("accepted placement is missing its final integration");
   const current = completionVerification ?? currentVerifiedAttestation(admission.state);
-  const verification = current === undefined
-    ? undefined
-    : { mode: completionVerification?.mode ?? "reused", verdict: current.verdict } as const;
+  const verification =
+    current === undefined
+      ? undefined
+      : ({ mode: completionVerification?.mode ?? "reused", verdict: current.verdict } as const);
   const summary = current?.summary;
   return {
     completion: {

@@ -15,7 +15,8 @@ function selectorError(message: string): never {
 
 function activeManagedCandidates(rows: readonly ContractRow[]): readonly SelectorCandidate[] {
   return rows.flatMap((contract) => {
-    if (contract.disposition !== "active" || contract.workspace !== "worktree" || contract.worktreePath === null) return [];
+    if (contract.disposition !== "active" || contract.workspace !== "worktree" || contract.worktreePath === null)
+      return [];
     return [{ id: contract.id, worktreePath: contract.worktreePath }];
   });
 }
@@ -34,16 +35,16 @@ export function contractFromInput(repo: Repo, value: string): SelectedContract {
 function resolveShortContract(rows: readonly ContractRow[], selector: string): ContractId {
   if (selector.startsWith("@kei/")) selectorError(`redundant short contract selector: ${selector}`);
   const short = selector.slice(1);
-  const candidates = activeManagedCandidates(rows)
-    .filter((candidate) => candidate.id.slice("kei/".length) === short);
+  const candidates = activeManagedCandidates(rows).filter((candidate) => candidate.id.slice("kei/".length) === short);
   if (candidates.length === 0) selectorError(`unknown contract selector: ${selector}`);
   if (candidates.length !== 1) selectorError(`ambiguous contract selector: ${selector}`);
   return candidates[0]!.id;
 }
 
 function resolveOmittedContract(board: ContractBoard, scope: string): ContractId {
-  const candidates = activeManagedCandidates(board.rows)
-    .filter((candidate) => resolve(scope) === resolve(candidate.worktreePath));
+  const candidates = activeManagedCandidates(board.rows).filter(
+    (candidate) => resolve(scope) === resolve(candidate.worktreePath),
+  );
   if (candidates.length === 0) {
     selectorError("an explicit full or @ contract selector is required outside a managed worktree");
   }
@@ -51,7 +52,11 @@ function resolveOmittedContract(board: ContractBoard, scope: string): ContractId
   return candidates[0]!.id;
 }
 
-export function resolveContextualContract(board: ContractBoard, selector: string | undefined, scope: string): ContractId {
+export function resolveContextualContract(
+  board: ContractBoard,
+  selector: string | undefined,
+  scope: string,
+): ContractId {
   if (selector === undefined) return resolveOmittedContract(board, scope);
   if (selector.startsWith("@")) return resolveShortContract(board.rows, selector);
   return selectorError(`contract selector must be kei/<contract-segment> or @<contract-segment>: ${selector}`);

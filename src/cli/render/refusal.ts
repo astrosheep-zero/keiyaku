@@ -15,12 +15,7 @@ function wrap(lines: string[], text: string, indent: string, columns: number): v
   lines.push(...renderOpaqueBlock(text, indent, columns));
 }
 
-function collectionLines(
-  name: string,
-  members: readonly string[],
-  indent: string,
-  columns: number,
-): readonly string[] {
+function collectionLines(name: string, members: readonly string[], indent: string, columns: number): readonly string[] {
   if (members.length === 0) return renderOpaqueBlock(`${name} 0`, indent, columns);
   return [
     ...renderOpaqueBlock(name, indent, columns),
@@ -39,7 +34,8 @@ function refusalIdentity(refusal: RenderableRefusal, addressed?: string): string
 
 function refusalHead(kind: string, identity: string | undefined, details: readonly string[]): string {
   return [kind, identity === undefined ? undefined : `contractId=${identity}`, ...details]
-    .filter((part): part is string => part !== undefined).join(" ");
+    .filter((part): part is string => part !== undefined)
+    .join(" ");
 }
 
 function renderDirtyRefusal(
@@ -55,7 +51,12 @@ function renderDirtyRefusal(
   }
   wrap(lines, gitShortStat(refusal.shortStat), indent, columns);
   if (refusal.option !== undefined) {
-    wrap(lines, `option ${refusal.option.flag} ${refusal.option.available ? "available" : "unavailable"}`, indent, columns);
+    wrap(
+      lines,
+      `option ${refusal.option.flag} ${refusal.option.available ? "available" : "unavailable"}`,
+      indent,
+      columns,
+    );
   }
   return lines;
 }
@@ -69,7 +70,11 @@ export function renderRefusalFacts(
   const identity = refusalIdentity(refusal, addressed);
   if (refusal.kind === "nuke-confirmation-mismatch") {
     return [
-      ...renderOpaqueBlock(`nuke confirmation mismatch world=${refusal.world} confirmation=${refusal.confirmation}`, indent, columns),
+      ...renderOpaqueBlock(
+        `nuke confirmation mismatch world=${refusal.world} confirmation=${refusal.confirmation}`,
+        indent,
+        columns,
+      ),
       ...renderOpaqueBlock(`keiyaku nuke --confirm ${refusal.world}`, indent, columns),
     ];
   }
@@ -88,9 +93,14 @@ export function renderRefusalFacts(
   }
   if (refusal.kind === "integration-failed") {
     const lines = [
-      ...renderOpaqueBlock(refusalHead(refusal.kind, identity, [`reason=${refusal.reason}`, `targetHead=${refusal.targetHead}`]), indent, columns),
+      ...renderOpaqueBlock(
+        refusalHead(refusal.kind, identity, [`reason=${refusal.reason}`, `targetHead=${refusal.targetHead}`]),
+        indent,
+        columns,
+      ),
     ];
-    if (refusal.conflictPaths !== undefined) lines.push(...collectionLines("conflictPaths", refusal.conflictPaths, indent, columns));
+    if (refusal.conflictPaths !== undefined)
+      lines.push(...collectionLines("conflictPaths", refusal.conflictPaths, indent, columns));
     if ("recovery" in refusal && refusal.recovery !== undefined) {
       wrap(lines, `recovery materialize conflicts · ${refusal.recovery.materialize}`, indent, columns);
       wrap(lines, `recovery continue after resolve and commit · ${refusal.recovery.continue}`, indent, columns);
@@ -99,31 +109,49 @@ export function renderRefusalFacts(
   }
   if (refusal.kind === "merge-state-present") {
     return renderOpaqueBlock(
-      refusalHead(refusal.kind, identity, [
-        `workspace=${refusal.workspace.kind}`,
-        `path=${refusal.workspace.path}`,
-      ]),
+      refusalHead(refusal.kind, identity, [`workspace=${refusal.workspace.kind}`, `path=${refusal.workspace.path}`]),
       indent,
       columns,
     );
   }
   if (refusal.kind === "integration-unsupported") {
-    return renderOpaqueBlock(refusalHead(refusal.kind, identity, [`requiredGit=${refusal.requiredGit}`]), indent, columns);
+    return renderOpaqueBlock(
+      refusalHead(refusal.kind, identity, [`requiredGit=${refusal.requiredGit}`]),
+      indent,
+      columns,
+    );
   }
   if (refusal.kind === "checkout-not-followable") {
-    const lines = [...renderOpaqueBlock(refusalHead(refusal.kind, identity, [`target=${refusal.target}`, `path=${refusal.path}`, `reason=${refusal.reason}`]), indent, columns)];
+    const lines = [
+      ...renderOpaqueBlock(
+        refusalHead(refusal.kind, identity, [
+          `target=${refusal.target}`,
+          `path=${refusal.path}`,
+          `reason=${refusal.reason}`,
+        ]),
+        indent,
+        columns,
+      ),
+    ];
     lines.push(...collectionLines("paths", refusal.paths, indent, columns));
     return lines;
   }
   if (refusal.kind === "workspace-not-on-target") {
-    return renderOpaqueBlock(refusalHead(refusal.kind, identity, [`target=${refusal.target}`, `branch=${refusal.branch}`]), indent, columns);
+    return renderOpaqueBlock(
+      refusalHead(refusal.kind, identity, [`target=${refusal.target}`, `branch=${refusal.branch}`]),
+      indent,
+      columns,
+    );
   }
   if (refusal.kind === "here-target-mismatch") {
     return renderOpaqueBlock(`here-target-mismatch target=${refusal.target} branch=${refusal.branch}`, indent, columns);
   }
   if (refusal.kind === "here-worktree-appointed") {
     return renderOpaqueBlock(
-      refusalHead(refusal.kind, undefined, [refusal.contract === undefined ? "" : `contract=${refusal.contract}`, `path=${refusal.path}`]),
+      refusalHead(refusal.kind, undefined, [
+        refusal.contract === undefined ? "" : `contract=${refusal.contract}`,
+        `path=${refusal.path}`,
+      ]),
       indent,
       columns,
     );
@@ -134,18 +162,14 @@ export function renderRefusalFacts(
 export function renderRefusal(result: RefusedResult, context?: TextRenderContext): string {
   const columns = context?.columns ?? 80;
   const base = `! ${result.verb} refused`;
-  const lines = result.contract === undefined
-    ? [base]
-    : displayColumns(`${base} — ${result.contract}`) <= columns
-      ? [`${base} — ${result.contract}`]
-      : [`${base} —`, `  ${safeText(result.contract)}`];
+  const lines =
+    result.contract === undefined
+      ? [base]
+      : displayColumns(`${base} — ${result.contract}`) <= columns
+        ? [`${base} — ${result.contract}`]
+        : [`${base} —`, `  ${safeText(result.contract)}`];
   if (isRecord(result.refusal) && typeof result.refusal.kind === "string") {
-    lines.push(...renderRefusalFacts(
-      result.refusal as RenderableRefusal,
-      "   ",
-      columns,
-      result.contract,
-    ));
+    lines.push(...renderRefusalFacts(result.refusal as RenderableRefusal, "   ", columns, result.contract));
   }
   const output = lines.join("\n");
   return result.draft === undefined ? output : `${output}\n${renderBindDraftReceipt(result.draft)}`;
@@ -158,11 +182,7 @@ export function renderConflictMaterialized(
   const columns = context?.columns ?? 80;
   const indent = "   ";
   return [
-    ...renderOpaqueBlock(
-      `integration-conflict-materialized targetHead=${result.targetHead}`,
-      "",
-      columns,
-    ),
+    ...renderOpaqueBlock(`integration-conflict-materialized targetHead=${result.targetHead}`, "", columns),
     ...collectionLines("conflictPaths", result.conflictPaths, indent, columns),
     ...renderOpaqueBlock(`workspace ${result.workspace.kind} ${result.workspace.path}`, indent, columns),
   ].join("\n");

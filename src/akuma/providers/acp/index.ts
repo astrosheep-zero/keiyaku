@@ -19,22 +19,24 @@ function optionAdmission(options: ProviderOptions, config: AcpExecutionConfig): 
     if (config.systemPromptArg === undefined) {
       return { kind: "refused", diagnostic: "ACP provider has no systemPrompt argument mapping" };
     }
-    if (
-      options.systemPromptMode !== undefined
-      && options.systemPromptMode !== (config.systemPromptMode ?? "replace")
-    ) {
-      return { kind: "refused", diagnostic: "ACP provider systemPromptMode does not match the configured argument mode" };
+    if (options.systemPromptMode !== undefined && options.systemPromptMode !== (config.systemPromptMode ?? "replace")) {
+      return {
+        kind: "refused",
+        diagnostic: "ACP provider systemPromptMode does not match the configured argument mode",
+      };
     }
   }
   return {
     kind: "admitted",
     options,
-    ...(options.readonly === undefined ? {} : {
-      readonly: {
-        enforcement: "none" as const,
-        diagnostic: "ACP cannot remove task-surface mutation capabilities",
-      },
-    }),
+    ...(options.readonly === undefined
+      ? {}
+      : {
+          readonly: {
+            enforcement: "none" as const,
+            diagnostic: "ACP cannot remove task-surface mutation capabilities",
+          },
+        }),
   };
 }
 
@@ -54,10 +56,7 @@ function argv(
   return values as [string, ...string[]];
 }
 
-export function createAcpProvider(
-  execution: ProviderExecution,
-  dependencies: AcpDependencies = {},
-): ProviderAdapter {
+export function createAcpProvider(execution: ProviderExecution, dependencies: AcpDependencies = {}): ProviderAdapter {
   if (execution.executable === undefined) throw new TypeError("ACP provider execution requires executable");
   const config = decodeAcpConfig(execution.config);
   const drive = async (input: AcpStartInput) => {

@@ -26,18 +26,29 @@ import { outcomeLines, receiptPayload } from "./receipt.js";
 import { displayColumns, renderTextBlock, safeText, type TextRenderContext } from "./terminal.js";
 
 type TaskReadOutcome = TaskList | BlockedTaskList | TaskQueryResult | TaskDecompositionTree | TaskNamespaceResult;
-type TaskFailure = Extract<TaskMutationResult, { kind: "refused" | "retry" }> | Extract<TaskCompositionResult, { kind: "refused" }>;
+type TaskFailure =
+  | Extract<TaskMutationResult, { kind: "refused" | "retry" }>
+  | Extract<TaskCompositionResult, { kind: "refused" }>;
 type TaskWord = TaskRow["disposition"] | TaskView["state"] | TaskRef["state"];
-type TaskEntity = Readonly<{ id: string; priority: number | null; word?: TaskWord; facts?: string; title: string | null }>;
+type TaskEntity = Readonly<{
+  id: string;
+  priority: number | null;
+  word?: TaskWord;
+  facts?: string;
+  title: string | null;
+}>;
 type RefusalProjection = Readonly<{ line: string; diagnostic?: string }>;
 type ComposeStop = Extract<TaskCompositionResult, { kind: "incomplete" }>["stopped"];
 
 const DEFAULT_CONTEXT: TextRenderContext = { columns: 80, color: false };
 
 function isWorldObservation(result: TaskInvocationResult): result is TaskWorldObservation {
-  return typeof result === "object" && result !== null
-    && "kind" in result
-    && (result.kind === "present" || result.kind === "absent" || result.kind === "failed");
+  return (
+    typeof result === "object" &&
+    result !== null &&
+    "kind" in result &&
+    (result.kind === "present" || result.kind === "absent" || result.kind === "failed")
+  );
 }
 
 function markFor(word: string): string {
@@ -55,7 +66,9 @@ function priorityText(priority: number | null): string {
 }
 
 function scanUnit(id: string, priority: number | null, word: TaskWord | undefined): string {
-  return word === undefined ? `${markFor("ready")} ${id} · ${priorityText(priority)}` : `${markFor(word)} ${id} · ${priorityText(priority)} ${word}`;
+  return word === undefined
+    ? `${markFor("ready")} ${id} · ${priorityText(priority)}`
+    : `${markFor(word)} ${id} · ${priorityText(priority)} ${word}`;
 }
 
 function entityLines(entity: TaskEntity, columns: number, indent = ""): readonly string[] {
@@ -67,8 +80,13 @@ function entityLines(entity: TaskEntity, columns: number, indent = ""): readonly
   return [`${scan} —`, ...renderTextBlock(title, `${indent}  `, columns)];
 }
 
-function stateEntity(task: TaskView | TaskRef & { priority?: number | null }): TaskEntity {
-  return { id: task.id, priority: "priority" in task && task.priority !== undefined ? task.priority : null, word: task.state, title: task.title };
+function stateEntity(task: TaskView | (TaskRef & { priority?: number | null })): TaskEntity {
+  return {
+    id: task.id,
+    priority: "priority" in task && task.priority !== undefined ? task.priority : null,
+    word: task.state,
+    title: task.title,
+  };
 }
 
 function projectRefusal(refusal: TaskRefusal): RefusalProjection {
@@ -135,7 +153,11 @@ function listEntity(item: TaskRow, omitDisposition: boolean): TaskEntity {
   };
 }
 
-function renderListRow(item: TaskRow | BlockedTaskRow | TaskQueryRow, columns: number, omitDisposition: boolean): readonly string[] {
+function renderListRow(
+  item: TaskRow | BlockedTaskRow | TaskQueryRow,
+  columns: number,
+  omitDisposition: boolean,
+): readonly string[] {
   const lines = [...entityLines(listEntity(item, omitDisposition), columns)];
   if ("blockers" in item) {
     for (const blocker of item.blockers) lines.push(`  needs ${blocker.id} · ${blocker.state}`);
@@ -143,7 +165,9 @@ function renderListRow(item: TaskRow | BlockedTaskRow | TaskQueryRow, columns: n
   return lines;
 }
 
-function shellQuote(value: string): string { return `'${value.replaceAll("'", "'\\''")}'`; }
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
 
 function recoveryCommand(command: ParsedTaskCommand, total: number): string {
   const parts = ["keiyaku", "task", command.action];
@@ -155,19 +179,32 @@ function recoveryCommand(command: ParsedTaskCommand, total: number): string {
   if ((command.action === "ready" || command.action === "blocked") && typeof command.flags.parent === "string") {
     parts.push("--parent", command.flags.parent);
   }
-  if (command.action === "query" && typeof command.flags.where === "string") parts.push("--where", shellQuote(command.flags.where));
+  if (command.action === "query" && typeof command.flags.where === "string")
+    parts.push("--where", shellQuote(command.flags.where));
   if (command.action === "query" && typeof command.flags.sort === "string") parts.push("--sort", command.flags.sort);
   parts.push("--limit", String(total));
   return parts.join(" ");
 }
 
-function renderRows(command: ParsedTaskCommand, result: TaskList | BlockedTaskList | TaskQueryResult, columns: number): string {
+function renderRows(
+  command: ParsedTaskCommand,
+  result: TaskList | BlockedTaskList | TaskQueryResult,
+  columns: number,
+): string {
   if (result.kind !== "accepted") return renderFailure(command.action, result, columns);
   const view = command.action === "ls" ? "tasks" : command.action;
   const footer = result.value.truncated
-    ? ["", `  + ${result.value.total - result.value.returned} more not shown`, `    ${recoveryCommand(command, result.value.total)}`]
+    ? [
+        "",
+        `  + ${result.value.total - result.value.returned} more not shown`,
+        `    ${recoveryCommand(command, result.value.total)}`,
+      ]
     : [];
-  return [pageHeading(view, result.value), ...result.value.rows.flatMap((item) => renderListRow(item, columns, command.action === "ready")), ...footer].join("\n");
+  return [
+    pageHeading(view, result.value),
+    ...result.value.rows.flatMap((item) => renderListRow(item, columns, command.action === "ready")),
+    ...footer,
+  ].join("\n");
 }
 
 function renderShowDetail(result: TaskDetail, columns: number): string {
@@ -218,18 +255,23 @@ function renderDoctor(report: TaskDoctorReport): string {
 }
 
 function renderAcceptedMutation(verb: string, task: TaskView, columns: number, documentDiff?: string): string {
-  const lines = [
-    ...outcomeLines("✓", verb, "accepted", task.id, columns),
-    ...entityLines(stateEntity(task), columns),
-  ];
+  const lines = [...outcomeLines("✓", verb, "accepted", task.id, columns), ...entityLines(stateEntity(task), columns)];
   if (documentDiff !== undefined) receiptPayload(lines, "diff", documentDiff);
   return lines.join("\n");
 }
 
-function renderMutation(command: ParsedTaskCommand, result: TaskMutationResult | TaskUpdateResult, columns: number): string {
+function renderMutation(
+  command: ParsedTaskCommand,
+  result: TaskMutationResult | TaskUpdateResult,
+  columns: number,
+): string {
   if (result.kind !== "accepted") return renderFailure(command.action, result, columns);
   if (command.action !== "update") {
-    return renderAcceptedMutation(command.action, (result as Extract<TaskMutationResult, { kind: "accepted" }>).value, columns);
+    return renderAcceptedMutation(
+      command.action,
+      (result as Extract<TaskMutationResult, { kind: "accepted" }>).value,
+      columns,
+    );
   }
   const value = (result as Extract<TaskUpdateResult, { kind: "accepted" }>).value;
   return renderAcceptedMutation(command.action, value.task, columns, value.documentDiff);
@@ -248,7 +290,10 @@ function renderBatch(verb: string, batch: TaskBatchResult): string {
   return batch.items.map((item) => renderBatchItem(verb, item)).join("\n");
 }
 
-function composeDiffs(lines: string[], changes: Extract<TaskCompositionResult, { kind: "accepted" }>["documentChanges"]): void {
+function composeDiffs(
+  lines: string[],
+  changes: Extract<TaskCompositionResult, { kind: "accepted" }>["documentChanges"],
+): void {
   for (const change of changes) receiptPayload(lines, `diff ${change.taskId}`, change.documentDiff);
 }
 
@@ -291,12 +336,19 @@ function renderTaskValue(
   columns: number,
 ): string {
   if (command.action === "show") return renderShow(result as TaskShowResult, columns);
-  if (command.action === "ls" || command.action === "ready" || command.action === "blocked" || command.action === "query") {
+  if (
+    command.action === "ls" ||
+    command.action === "ready" ||
+    command.action === "blocked" ||
+    command.action === "query"
+  ) {
     return renderRows(command, result as TaskList | BlockedTaskList | TaskQueryResult, columns);
   }
   if (command.action === "tree") {
     const tree = result as TaskDecompositionTree;
-    return tree.kind === "accepted" ? treeLines(tree.value, columns).join("\n") : renderFailure(command.action, tree, columns);
+    return tree.kind === "accepted"
+      ? treeLines(tree.value, columns).join("\n")
+      : renderFailure(command.action, tree, columns);
   }
   if (command.action === "doctor") return renderDoctor(result as TaskDoctorReport);
   if (command.action === "namespace") {
@@ -324,7 +376,8 @@ export function taskExitCode(result: TaskInvocationResult): number {
     if (result.kind === "failed") return 3;
     result = result.value;
   }
-  if (typeof result === "object" && result !== null && "issues" in result) return (result as TaskDoctorReport).issues.length === 0 ? 0 : 1;
+  if (typeof result === "object" && result !== null && "issues" in result)
+    return (result as TaskDoctorReport).issues.length === 0 ? 0 : 1;
   if (typeof result === "object" && result !== null && "items" in result) {
     const kinds = (result as TaskBatchResult).items.map((item) => item.outcome.kind);
     return kinds.includes("retry") ? 2 : kinds.includes("refused") ? 1 : 0;

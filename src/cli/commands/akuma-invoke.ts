@@ -20,10 +20,40 @@ export type AkumaInvocationResult =
   | Readonly<{ kind: "akuma"; action: "status"; status: AkumaObservation; alias?: string }>
   | Readonly<{ kind: "akuma"; action: "wait"; result: AkumaWaitResult; alias?: string }>
   | Readonly<{ kind: "akuma"; action: "tell"; mode: "ordinary"; result: AkumaTellResult; body: string; alias?: string }>
-  | Readonly<{ kind: "akuma"; action: "tell"; mode: "interrupt"; result: Awaited<ReturnType<typeof Keiyaku.interrupt>>; body: string; alias?: string }>
-  | Readonly<{ kind: "akuma"; action: "history"; akuma: AkuId; mode: "page"; history: ActivityHistory; historyResult: AkumaHistoryResult; alias?: string }>
-  | Readonly<{ kind: "akuma"; action: "history"; akuma: AkuId; mode: "last"; answer: string; historyResult: AkumaHistoryResult; alias?: string }>
-  | Readonly<{ kind: "akuma"; action: "history"; akuma: AkuId; mode: "no-answer"; historyResult: AkumaHistoryResult; alias?: string }>
+  | Readonly<{
+      kind: "akuma";
+      action: "tell";
+      mode: "interrupt";
+      result: Awaited<ReturnType<typeof Keiyaku.interrupt>>;
+      body: string;
+      alias?: string;
+    }>
+  | Readonly<{
+      kind: "akuma";
+      action: "history";
+      akuma: AkuId;
+      mode: "page";
+      history: ActivityHistory;
+      historyResult: AkumaHistoryResult;
+      alias?: string;
+    }>
+  | Readonly<{
+      kind: "akuma";
+      action: "history";
+      akuma: AkuId;
+      mode: "last";
+      answer: string;
+      historyResult: AkumaHistoryResult;
+      alias?: string;
+    }>
+  | Readonly<{
+      kind: "akuma";
+      action: "history";
+      akuma: AkuId;
+      mode: "no-answer";
+      historyResult: AkumaHistoryResult;
+      alias?: string;
+    }>
   | Readonly<{ kind: "akuma"; action: "fork"; receipt: ForkResult }>
   | Readonly<{ kind: "akuma"; action: "kill"; result: AkumaKillResult; alias?: string }>;
 
@@ -77,7 +107,14 @@ async function invokeTell(
       ...(input.repo === undefined ? {} : { repo: input.repo }),
     });
     const alias = inputAlias(command.akuma);
-    return { kind: "akuma", action: "tell", mode: "interrupt", result, body, ...(alias === undefined ? {} : { alias }) };
+    return {
+      kind: "akuma",
+      action: "tell",
+      mode: "interrupt",
+      result,
+      body,
+      ...(alias === undefined ? {} : { alias }),
+    };
   }
   const result = await Keiyaku.tell({
     path: input.path,
@@ -149,10 +186,7 @@ async function invokeKill(
   };
 }
 
-export async function invokeAkuma(
-  command: InvokedAkumaCommand,
-  input: InvokeInput,
-): Promise<AkumaInvocationResult> {
+export async function invokeAkuma(command: InvokedAkumaCommand, input: InvokeInput): Promise<AkumaInvocationResult> {
   switch (command.command) {
     case "call": {
       const body = await promptBody(command, input);
@@ -172,11 +206,16 @@ export async function invokeAkuma(
       });
       return { kind: "akuma", action: "call", result, world: input.path };
     }
-    case "wait": return await invokeWait(command, input);
-    case "tell": return await invokeTell(command, input);
-    case "history": return await invokeHistory(command, input);
-    case "fork": return await invokeFork(command, input);
-    case "kill": return await invokeKill(command, input);
+    case "wait":
+      return await invokeWait(command, input);
+    case "tell":
+      return await invokeTell(command, input);
+    case "history":
+      return await invokeHistory(command, input);
+    case "fork":
+      return await invokeFork(command, input);
+    case "kill":
+      return await invokeKill(command, input);
   }
 }
 

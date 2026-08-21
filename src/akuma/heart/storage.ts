@@ -4,14 +4,7 @@ import { lstat } from "node:fs/promises";
 import { basename, dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { AkumaPaths } from "../identity.js";
-import type {
-  BodyFact,
-  LeashProbe,
-  SessionFact,
-  Soul,
-  StopFact,
-  TellFact,
-} from "./facts.js";
+import type { BodyFact, LeashProbe, SessionFact, Soul, StopFact, TellFact } from "./facts.js";
 import { HEART_SCHEMA, LEASH_SCHEMA, assertHeartSchemaVersion, assertLeashSchemaVersion } from "./schema.js";
 import {
   deletePauseControl,
@@ -49,13 +42,16 @@ export async function watchHeart(paths: AkumaPaths, signal: AbortSignal): Promis
       wake?.();
     }
   });
-  watcher.on("error", (error) => { failure = error; wake?.(); });
+  watcher.on("error", (error) => {
+    failure = error;
+    wake?.();
+  });
   const abort = (): void => {
     wake?.();
     watcher.close();
   };
   signal.addEventListener("abort", abort, { once: true });
-  return (async function*(): AsyncGenerator<void> {
+  return (async function* (): AsyncGenerator<void> {
     try {
       for (;;) {
         if (changes.length > 0) {
@@ -65,7 +61,9 @@ export async function watchHeart(paths: AkumaPaths, signal: AbortSignal): Promis
         }
         if (failure !== undefined) throw failure;
         if (signal.aborted) return;
-        await new Promise<void>((resolve) => { wake = resolve; });
+        await new Promise<void>((resolve) => {
+          wake = resolve;
+        });
         wake = undefined;
       }
     } catch (error) {
@@ -79,7 +77,10 @@ export async function watchHeart(paths: AkumaPaths, signal: AbortSignal): Promis
 }
 
 export class HeartAbsentError extends Error {
-  constructor(readonly path: string, options?: ErrorOptions) {
+  constructor(
+    readonly path: string,
+    options?: ErrorOptions,
+  ) {
     super(`Akuma Heart database is absent: ${path}`, options);
     this.name = "HeartAbsentError";
   }
@@ -92,17 +93,20 @@ export function isHeartAbsent(error: unknown): error is HeartAbsentError {
 function isBusy(error: unknown): boolean {
   const value = error as { code?: unknown; errcode?: unknown; message?: unknown };
   const message = String(value?.message ?? "").toLowerCase();
-  return value?.code === "ERR_SQLITE_BUSY" || value?.code === "ERR_SQLITE_LOCKED"
-    || value?.errcode === 5 || message.includes("database is locked") || message.includes("database is busy");
+  return (
+    value?.code === "ERR_SQLITE_BUSY" ||
+    value?.code === "ERR_SQLITE_LOCKED" ||
+    value?.errcode === 5 ||
+    message.includes("database is locked") ||
+    message.includes("database is busy")
+  );
 }
 
 async function openExistingDatabase(path: string, timeout?: number): Promise<DatabaseSync> {
   const uri = pathToFileURL(path);
   uri.searchParams.set("mode", "rw");
   try {
-    return timeout === undefined
-      ? new DatabaseSync(uri.href)
-      : new DatabaseSync(uri.href, { timeout });
+    return timeout === undefined ? new DatabaseSync(uri.href) : new DatabaseSync(uri.href, { timeout });
   } catch (error) {
     if ((error as { errcode?: unknown }).errcode === SQLITE_CANTOPEN) {
       try {
@@ -131,7 +135,11 @@ async function openHeart(path: string, verify = true): Promise<DatabaseSync> {
 
 export async function withHeart<T>(paths: AkumaPaths, body: (database: DatabaseSync) => T): Promise<T> {
   const database = await openHeart(paths.heart);
-  try { return body(database); } finally { database.close(); }
+  try {
+    return body(database);
+  } finally {
+    database.close();
+  }
 }
 
 export function transaction<T>(database: DatabaseSync, body: () => T): T {
@@ -141,7 +149,11 @@ export function transaction<T>(database: DatabaseSync, body: () => T): T {
     database.exec("COMMIT");
     return result;
   } catch (error) {
-    try { database.exec("ROLLBACK"); } catch { /* preserve the adjudication failure */ }
+    try {
+      database.exec("ROLLBACK");
+    } catch {
+      /* preserve the adjudication failure */
+    }
     throw error;
   }
 }
@@ -153,7 +165,11 @@ export function readTransaction<T>(database: DatabaseSync, body: () => T): T {
     database.exec("COMMIT");
     return result;
   } catch (error) {
-    try { database.exec("ROLLBACK"); } catch { /* preserve the original failure */ }
+    try {
+      database.exec("ROLLBACK");
+    } catch {
+      /* preserve the original failure */
+    }
     throw error;
   }
 }
@@ -163,12 +179,16 @@ export async function initializeHeart(paths: AkumaPaths): Promise<void> {
   try {
     heart.exec(HEART_SCHEMA);
     assertHeartSchemaVersion(heart);
-  } finally { heart.close(); }
+  } finally {
+    heart.close();
+  }
   const leash = new DatabaseSync(paths.leash);
   try {
     leash.exec(LEASH_SCHEMA);
     assertLeashSchemaVersion(leash);
-  } finally { leash.close(); }
+  } finally {
+    leash.close();
+  }
 }
 
 export class HeldAkumaLeash {
@@ -190,19 +210,25 @@ export class HeldAkumaLeash {
     }
   }
 
-  async birth(paths: AkumaPaths, soul: Soul, session?: Omit<SessionFact, "sequence">): Promise<"born" | "already-born" | "sealed"> {
+  async birth(
+    paths: AkumaPaths,
+    soul: Soul,
+    session?: Omit<SessionFact, "sequence">,
+  ): Promise<"born" | "already-born" | "sealed"> {
     if (sealExists(this.database)) return "sealed";
-    return await withHeart(paths, (heart) => transaction(heart, () => {
-      if (soulFact(heart) !== null) return "already-born";
-      insertSoulFact(heart, soul);
-      if (session !== undefined) insertSessionFact(heart, session);
-      return "born";
-    }));
+    return await withHeart(paths, (heart) =>
+      transaction(heart, () => {
+        if (soulFact(heart) !== null) return "already-born";
+        insertSoulFact(heart, soul);
+        if (session !== undefined) insertSessionFact(heart, session);
+        return "born";
+      }),
+    );
   }
 
   async sealIfUnborn(paths: AkumaPaths, input: Readonly<{ evidence: string; at: string }>): Promise<"born" | "sealed"> {
     if (sealExists(this.database)) return "sealed";
-    if (await withHeart(paths, (heart) => soulFact(heart)) !== null) return "born";
+    if ((await withHeart(paths, (heart) => soulFact(heart))) !== null) return "born";
     insertSealFact(this.database, input);
     this.database.exec("COMMIT");
     this.closed = true;
@@ -214,8 +240,12 @@ export class HeldAkumaLeash {
     return sealFact(this.database);
   }
 
-  async clearPause(paths: AkumaPaths): Promise<void> { await withHeart(paths, deletePauseControl); }
-  async clearStop(paths: AkumaPaths): Promise<void> { await withHeart(paths, deleteStopControl); }
+  async clearPause(paths: AkumaPaths): Promise<void> {
+    await withHeart(paths, deletePauseControl);
+  }
+  async clearStop(paths: AkumaPaths): Promise<void> {
+    await withHeart(paths, deleteStopControl);
+  }
 
   async recordBody(paths: AkumaPaths, input: Readonly<{ leashTakenAt: string }>): Promise<BodyFact> {
     if (this.closed || this.bodySequence !== undefined) throw new Error("Akuma leash cannot start another Body");
@@ -234,42 +264,59 @@ export class HeldAkumaLeash {
     await withHeart(paths, (heart) => markBodyHung(heart, input));
   }
 
-  async settleStop(paths: AkumaPaths, expectedBodySequence?: number): Promise<Readonly<{ target: StopFact; result: "recorded" | "already-killed" }> | null> {
-    return await withHeart(paths, (heart) => transaction(heart, () => {
-      const target = stopFact(heart);
-      if (target === null) {
-        if (expectedBodySequence === undefined) return null;
-        const existing = killFactForBody(heart, expectedBodySequence);
-        return existing === null ? null : { target: { bodySequence: expectedBodySequence, requestedAt: existing.at }, result: "already-killed" };
-      }
-      if (expectedBodySequence !== undefined && target.bodySequence !== expectedBodySequence) {
-        throw new Error("Akuma stop target changed while kill was in progress");
-      }
-      const latest = latestBodyFact(heart);
-      if (latest?.sequence !== target.bodySequence) throw new Error("Akuma stop target is not the latest Body");
-      if (latest.end !== "put-down") return null;
-      const result = latestKillFact(heart)?.bodySequence === target.bodySequence
-        ? "already-killed" as const
-        : (insertKillFact(heart, target.bodySequence, target.requestedAt), "recorded" as const);
-      deleteStopControl(heart);
-      return { target, result };
-    }));
+  async settleStop(
+    paths: AkumaPaths,
+    expectedBodySequence?: number,
+  ): Promise<Readonly<{ target: StopFact; result: "recorded" | "already-killed" }> | null> {
+    return await withHeart(paths, (heart) =>
+      transaction(heart, () => {
+        const target = stopFact(heart);
+        if (target === null) {
+          if (expectedBodySequence === undefined) return null;
+          const existing = killFactForBody(heart, expectedBodySequence);
+          return existing === null
+            ? null
+            : { target: { bodySequence: expectedBodySequence, requestedAt: existing.at }, result: "already-killed" };
+        }
+        if (expectedBodySequence !== undefined && target.bodySequence !== expectedBodySequence) {
+          throw new Error("Akuma stop target changed while kill was in progress");
+        }
+        const latest = latestBodyFact(heart);
+        if (latest?.sequence !== target.bodySequence) throw new Error("Akuma stop target is not the latest Body");
+        if (latest.end !== "put-down") return null;
+        const result =
+          latestKillFact(heart)?.bodySequence === target.bodySequence
+            ? ("already-killed" as const)
+            : (insertKillFact(heart, target.bodySequence, target.requestedAt), "recorded" as const);
+        deleteStopControl(heart);
+        return { target, result };
+      }),
+    );
   }
 
-  async recordInterruptTell(paths: AkumaPaths, tell: Omit<TellFact, "sequence" | "state" | "deliveries">): Promise<Readonly<{ kind: "not-born" } | { kind: "recorded"; tell: TellFact }>> {
-    return await withHeart(paths, (heart) => transaction(heart, () => {
-      deletePauseControl(heart);
-      if (soulFact(heart) === null) return { kind: "not-born" };
-      const sequence = insertTellFact(heart, tell);
-      pruneActivityFacts(heart, ACTIVITY_LIMIT);
-      return { kind: "recorded", tell: { sequence, ...tell, state: "pending", deliveries: [] } };
-    }));
+  async recordInterruptTell(
+    paths: AkumaPaths,
+    tell: Omit<TellFact, "sequence" | "state" | "deliveries">,
+  ): Promise<Readonly<{ kind: "not-born" } | { kind: "recorded"; tell: TellFact }>> {
+    return await withHeart(paths, (heart) =>
+      transaction(heart, () => {
+        deletePauseControl(heart);
+        if (soulFact(heart) === null) return { kind: "not-born" };
+        const sequence = insertTellFact(heart, tell);
+        pruneActivityFacts(heart, ACTIVITY_LIMIT);
+        return { kind: "recorded", tell: { sequence, ...tell, state: "pending", deliveries: [] } };
+      }),
+    );
   }
 
   release(): void {
     if (this.closed) return;
     this.closed = true;
-    try { this.database.exec("ROLLBACK"); } finally { this.database.close(); }
+    try {
+      this.database.exec("ROLLBACK");
+    } finally {
+      this.database.close();
+    }
   }
 }
 
@@ -285,5 +332,7 @@ export async function readSealFromLeash(paths: AkumaPaths): Promise<ReturnType<t
   try {
     assertLeashSchemaVersion(leash);
     return sealFact(leash);
-  } finally { leash.close(); }
+  } finally {
+    leash.close();
+  }
 }

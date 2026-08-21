@@ -63,7 +63,8 @@ const RUNTIME_DROPPED_EVENT_KINDS = new Set([
 
 function object(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown> : undefined;
+    ? (value as Record<string, unknown>)
+    : undefined;
 }
 function text(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
@@ -109,27 +110,33 @@ function writeCall(
   metadata: Record<string, unknown> | undefined,
 ): ToolCall | undefined {
   const path = text(metadata?.filepath) ?? text(input?.filePath);
-  const op = metadata?.exists === false ? "add" as const
-    : metadata?.exists === true ? "update" as const : undefined;
+  const op =
+    metadata?.exists === false ? ("add" as const) : metadata?.exists === true ? ("update" as const) : undefined;
   return path === undefined || op === undefined ? undefined : fileChange([change(op, path, undefined)]);
 }
 function applyPatchFile(value: unknown): FileChangeCall["changes"][number] | undefined {
   const file = object(value);
   if (file === undefined) return undefined;
   const type = file.type;
-  const op = type === "add" ? "add" as const
-    : type === "delete" ? "delete" as const
-    : type === "update" || type === "modify" || type === "move"
-      ? "update" as const : undefined;
+  const op =
+    type === "add"
+      ? ("add" as const)
+      : type === "delete"
+        ? ("delete" as const)
+        : type === "update" || type === "modify" || type === "move"
+          ? ("update" as const)
+          : undefined;
   const path = type === "move" ? text(file.movePath) : text(file.filePath);
   return op === undefined || path === undefined ? undefined : change(op, path, diffstat(file));
 }
 function applyPatchCall(metadata: Record<string, unknown> | undefined): ToolCall | undefined {
   if (!Array.isArray(metadata?.files)) return undefined;
-  return fileChange(metadata.files.flatMap((value) => {
-    const next = applyPatchFile(value);
-    return next === undefined ? [] : [next];
-  }));
+  return fileChange(
+    metadata.files.flatMap((value) => {
+      const next = applyPatchFile(value);
+      return next === undefined ? [] : [next];
+    }),
+  );
 }
 function strongerCall(previous: ToolCall | undefined, next: ToolCall | undefined): ToolCall | undefined {
   if (next === undefined) return previous;
@@ -138,9 +145,7 @@ function strongerCall(previous: ToolCall | undefined, next: ToolCall | undefined
 }
 
 function runCall(name: string, value: Record<string, unknown> | undefined): ToolCall | undefined {
-  return name === "bash" || name === "shell"
-    ? { kind: "run", command: text(value?.command) ?? name }
-    : undefined;
+  return name === "bash" || name === "shell" ? { kind: "run", command: text(value?.command) ?? name } : undefined;
 }
 
 function readCall(name: string, value: Record<string, unknown> | undefined): ToolCall | undefined {
@@ -163,7 +168,7 @@ function searchCall(name: string, value: Record<string, unknown> | undefined): T
   if (query === undefined) return undefined;
   const path = text(value?.path) ?? text(value?.filePath);
   const glob = text(value?.glob);
-  const scope = name === "glob" ? "files" as const : "content" as const;
+  const scope = name === "glob" ? ("files" as const) : ("content" as const);
   return {
     kind: "search",
     query,
@@ -193,7 +198,8 @@ function mapTextPart(part: Part, events: Emitter, state: State, thought: boolean
   const time = object(part.time);
   const content = text(part.text);
   const seen = thought ? state.reasoningParts : state.assistantParts;
-  if (!belongs(part, state) || id === undefined || content === undefined || time?.end === undefined || seen.has(id)) return;
+  if (!belongs(part, state) || id === undefined || content === undefined || time?.end === undefined || seen.has(id))
+    return;
   seen.add(id);
   if (thought) events.emit({ type: "thought", text: content });
   else events.emit({ type: "assistant", text: content });
@@ -202,9 +208,16 @@ function resultFor(state: Part, failed: boolean): ToolResult {
   const exit = object(state.metadata)?.exit;
   const exitCode = typeof exit === "number" && Number.isInteger(exit) ? exit : undefined;
   if (failed) {
-    return { status: "error", message: text(state.error) ?? "OpenCode tool failed", ...(exitCode === undefined ? {} : { exitCode }) };
+    return {
+      status: "error",
+      message: text(state.error) ?? "OpenCode tool failed",
+      ...(exitCode === undefined ? {} : { exitCode }),
+    };
   }
-  return { status: exitCode !== undefined && exitCode !== 0 ? "error" : "ok", ...(exitCode === undefined ? {} : { exitCode }) };
+  return {
+    status: exitCode !== undefined && exitCode !== 0 ? "error" : "ok",
+    ...(exitCode === undefined ? {} : { exitCode }),
+  };
 }
 function mapToolPart(part: Part, events: Emitter, state: State): void {
   if (!belongs(part, state)) return;
@@ -213,8 +226,11 @@ function mapToolPart(part: Part, events: Emitter, state: State): void {
   const toolState = object(part.state);
   if (id === undefined || name === undefined || toolState === undefined) return;
   const next = callFor(name, toolState.input, toolState.metadata);
-  if ((toolState.status === "pending" || toolState.status === "running")
-    && !state.tools.has(id) && !state.completedTools.has(id)) {
+  if (
+    (toolState.status === "pending" || toolState.status === "running") &&
+    !state.tools.has(id) &&
+    !state.completedTools.has(id)
+  ) {
     if (next === undefined) return;
     const observed = { name, call: next };
     state.tools.set(id, observed);
@@ -253,16 +269,20 @@ function mapSessionError(properties: Part, events: Emitter, state: State): void 
 }
 function mapTodo(properties: Part, events: Emitter, state: State): void {
   if (properties.sessionID !== state.sessionId || !Array.isArray(properties.todos)) return;
-  const summary = properties.todos.flatMap((value) => {
-    const todo = object(value);
-    const content = text(todo?.content);
-    return content === undefined ? [] : [`${text(todo?.status) ?? "todo"}: ${content}`];
-  }).join("; ");
+  const summary = properties.todos
+    .flatMap((value) => {
+      const todo = object(value);
+      const content = text(todo?.content);
+      return content === undefined ? [] : [`${text(todo?.status) ?? "todo"}: ${content}`];
+    })
+    .join("; ");
   if (summary.length > 0) events.emit(noteEvent(summary));
 }
 function ignoredEvent(type: unknown): boolean {
-  return typeof type === "string"
-    && (OPENCODE_EVENT_DISPOSITIONS[type as NativeEventKind] === "dropped" || RUNTIME_DROPPED_EVENT_KINDS.has(type));
+  return (
+    typeof type === "string" &&
+    (OPENCODE_EVENT_DISPOSITIONS[type as NativeEventKind] === "dropped" || RUNTIME_DROPPED_EVENT_KINDS.has(type))
+  );
 }
 
 export function mapEvent(value: unknown, events: Emitter, state: State): void {
@@ -276,7 +296,12 @@ export function mapEvent(value: unknown, events: Emitter, state: State): void {
   }
   if (event.type === "message.updated") {
     const info = object(properties.info);
-    if (info !== undefined && info.sessionID === state.sessionId && info.role === "assistant" && info.error !== undefined) {
+    if (
+      info !== undefined &&
+      info.sessionID === state.sessionId &&
+      info.role === "assistant" &&
+      info.error !== undefined
+    ) {
       state.failure = diagnostic(info.error);
     }
     return;

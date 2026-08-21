@@ -14,14 +14,16 @@ export type UnmetPrerequisite = Readonly<{
   state: "missing" | "active" | "abandoned";
 }>;
 
-export type PlacementRefusal = Readonly<{
-  kind: "contract-missing" | "delivery-missing" | "terminal" | "gates-unsatisfied";
-  contractId: ContractId;
-}> | Readonly<{
-  kind: "prerequisites-unsatisfied";
-  contractId: ContractId;
-  unmet: readonly UnmetPrerequisite[];
-}>;
+export type PlacementRefusal =
+  | Readonly<{
+      kind: "contract-missing" | "delivery-missing" | "terminal" | "gates-unsatisfied";
+      contractId: ContractId;
+    }>
+  | Readonly<{
+      kind: "prerequisites-unsatisfied";
+      contractId: ContractId;
+      unmet: readonly UnmetPrerequisite[];
+    }>;
 
 function unmetPrerequisites(
   prerequisites: readonly ContractId[],
@@ -41,9 +43,11 @@ function unmetPrerequisites(
   return unmet;
 }
 
-export function decidePlacement(
-  { input, attempt, observation }: DecideInput<PlacementInput>,
-): OfferDecision<PlacementRefusal> {
+export function decidePlacement({
+  input,
+  attempt,
+  observation,
+}: DecideInput<PlacementInput>): OfferDecision<PlacementRefusal> {
   const id = input.contractId;
   const current = activeContract(observation, id);
   if ("kind" in current) return { kind: "refused", refusal: current };
@@ -73,13 +77,15 @@ export function decidePlacement(
     kind: "offer",
     offer: {
       facts: [{ contractId: id, expectedHead: current.head, entries: [claimed] }],
-      ...(current.coordinates.target === undefined ? {} : {
-        target: {
-          target: current.coordinates.target,
-          expectedOid: integration.predecessor,
-          newOid: integration.snapshot,
-        },
-      }),
+      ...(current.coordinates.target === undefined
+        ? {}
+        : {
+            target: {
+              target: current.coordinates.target,
+              expectedOid: integration.predecessor,
+              newOid: integration.snapshot,
+            },
+          }),
     },
   } as const;
 }

@@ -7,19 +7,29 @@ export type TaskCoordinate = Readonly<{ namespace: readonly string[]; localId: s
 const STEM_CODE_POINTS = 32;
 
 export function isTaskSegment(value: string): boolean {
-  return value.length > 0 && value !== "." && value !== ".." && !value.includes("/")
-    && normalizeIdentityStem({ source: value }) === value;
+  return (
+    value.length > 0 &&
+    value !== "." &&
+    value !== ".." &&
+    !value.includes("/") &&
+    normalizeIdentityStem({ source: value }) === value
+  );
 }
 
 export function parseTaskId(value: string): TaskCoordinate {
   let segments: readonly string[];
-  try { segments = identitySegments({ family: "task", value }); } catch { throw new TypeError("task ID must be task/<local-id> or task/<namespace...>/<local-id>"); }
+  try {
+    segments = identitySegments({ family: "task", value });
+  } catch {
+    throw new TypeError("task ID must be task/<local-id> or task/<namespace...>/<local-id>");
+  }
   if (!segments.every(isTaskSegment)) throw new TypeError("task ID contains a noncanonical segment");
   return { namespace: segments.slice(0, -1), localId: segments.at(-1)! };
 }
 
 export function formatTaskId(coordinate: TaskCoordinate): TaskId {
-  if (![...coordinate.namespace, coordinate.localId].every(isTaskSegment)) throw new TypeError("task coordinate contains a noncanonical segment");
+  if (![...coordinate.namespace, coordinate.localId].every(isTaskSegment))
+    throw new TypeError("task coordinate contains a noncanonical segment");
   return identityCoordinate({ family: "task", segments: [...coordinate.namespace, coordinate.localId] }) as TaskId;
 }
 

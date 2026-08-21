@@ -4,7 +4,7 @@ import type { ProcessInput, ProcessOutcome } from "../../runtime/proc/run.js";
 import { CliUsageError, usageLine } from "../usage.js";
 
 export const HARNESS_NAMES = ["codex", "claude", "opencode", "pi"] as const;
-export type HarnessName = typeof HARNESS_NAMES[number];
+export type HarnessName = (typeof HARNESS_NAMES)[number];
 
 export type ParsedInstallCommand = Readonly<{
   command: "install";
@@ -50,8 +50,10 @@ export function parseInstallCommand(argv: readonly string[]): ParsedInstallComma
   }
   if (positionals.length > 1) throw new CliUsageError("install accepts at most one harness", usageLine(INSTALL_USAGE));
   const harness = positionals[0];
-  if (all && harness !== undefined) throw new CliUsageError("install accepts either a harness or --all", usageLine(INSTALL_USAGE));
-  if (!all && !isHarness(harness)) throw new CliUsageError("install requires a supported harness or --all", usageLine(INSTALL_USAGE));
+  if (all && harness !== undefined)
+    throw new CliUsageError("install accepts either a harness or --all", usageLine(INSTALL_USAGE));
+  if (!all && !isHarness(harness))
+    throw new CliUsageError("install requires a supported harness or --all", usageLine(INSTALL_USAGE));
   return {
     command: "install",
     harnesses: all ? HARNESS_NAMES : [harness as HarnessName],
@@ -69,17 +71,21 @@ const PLUGIN_ROOT = resolve(ASSET_ROOT, "plugins/keiyaku");
 
 function recipes(harness: HarnessName): readonly (readonly string[])[] {
   switch (harness) {
-    case "codex": return [
-      ["codex", "plugin", "marketplace", "add", ASSET_ROOT, "--json"],
-      ["codex", "plugin", "add", "keiyaku", "--marketplace", "keiyaku", "--json"],
-    ];
-    case "claude": return [
-      ["claude", "plugin", "marketplace", "add", ASSET_ROOT],
-      ["claude", "plugin", "install", "keiyaku@keiyaku", "--scope", "user"],
-      ["claude", "plugin", "update", "keiyaku@keiyaku", "--scope", "user"],
-    ];
-    case "opencode": return [["opencode", "plugin", PLUGIN_ROOT, "--global", "--force"]];
-    case "pi": return [["pi", "install", PLUGIN_ROOT]];
+    case "codex":
+      return [
+        ["codex", "plugin", "marketplace", "add", ASSET_ROOT, "--json"],
+        ["codex", "plugin", "add", "keiyaku", "--marketplace", "keiyaku", "--json"],
+      ];
+    case "claude":
+      return [
+        ["claude", "plugin", "marketplace", "add", ASSET_ROOT],
+        ["claude", "plugin", "install", "keiyaku@keiyaku", "--scope", "user"],
+        ["claude", "plugin", "update", "keiyaku@keiyaku", "--scope", "user"],
+      ];
+    case "opencode":
+      return [["opencode", "plugin", PLUGIN_ROOT, "--global", "--force"]];
+    case "pi":
+      return [["pi", "install", PLUGIN_ROOT]];
   }
 }
 
@@ -113,15 +119,21 @@ export async function installHarnesses(
         break;
       }
     }
-    results.push({ harness, status: failure === undefined ? "installed" : "failed", ...(failure === undefined ? {} : { diagnostic: failure }) });
+    results.push({
+      harness,
+      status: failure === undefined ? "installed" : "failed",
+      ...(failure === undefined ? {} : { diagnostic: failure }),
+    });
   }
   return { kind: "install", results };
 }
 
 export function renderInstallText(result: InstallInvocationResult): string {
-  return result.results.map((item) => item.status === "installed"
-    ? `${item.harness} installed`
-    : `${item.harness} failed: ${item.diagnostic}`).join("\n");
+  return result.results
+    .map((item) =>
+      item.status === "installed" ? `${item.harness} installed` : `${item.harness} failed: ${item.diagnostic}`,
+    )
+    .join("\n");
 }
 
 export function installExitCode(result: InstallInvocationResult): number {

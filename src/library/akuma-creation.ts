@@ -11,12 +11,7 @@ import {
 import type { AkuId } from "../akuma/identity.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { ContractId } from "../core/facts/types.js";
-import {
-  publishDispatch,
-  readDispatch,
-  type Dispatch,
-  type DispatchFailure,
-} from "../dispatch/index.js";
+import { publishDispatch, readDispatch, type Dispatch, type DispatchFailure } from "../dispatch/index.js";
 import { parseAkumaAlias, type AkumaAlias } from "../identity/selector.js";
 import { readManagedWorktreeAppointment } from "../workspace-place.js";
 import type { Settings } from "../settings.js";
@@ -105,7 +100,11 @@ function text(value: unknown, label: string): string {
 
 function settingsOption(value: unknown): Settings | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "object" || value === null || typeof (value as { namespace?: unknown }).namespace !== "function") {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    typeof (value as { namespace?: unknown }).namespace !== "function"
+  ) {
     throw new TypeError("settings must be a Settings");
   }
   return value as Settings;
@@ -172,11 +171,13 @@ async function observeCall(
   }
 }
 
-async function dispatchStage(input: Readonly<{
-  repository: Parameters<typeof publishDispatch>[0]["repository"];
-  akuId: AkuId;
-  contractId: Parameters<typeof publishDispatch>[0]["contractId"];
-}>): Promise<DispatchStage> {
+async function dispatchStage(
+  input: Readonly<{
+    repository: Parameters<typeof publishDispatch>[0]["repository"];
+    akuId: AkuId;
+    contractId: Parameters<typeof publishDispatch>[0]["contractId"];
+  }>,
+): Promise<DispatchStage> {
   try {
     const published = await publishDispatch(input);
     return published.kind === "dispatched"
@@ -187,11 +188,13 @@ async function dispatchStage(input: Readonly<{
   }
 }
 
-async function forkDispatchStage(input: Readonly<{
-  repository: Parameters<typeof readDispatch>[0];
-  parent: AkuId;
-  child: AkuId;
-}>): Promise<DispatchStage> {
+async function forkDispatchStage(
+  input: Readonly<{
+    repository: Parameters<typeof readDispatch>[0];
+    parent: AkuId;
+    child: AkuId;
+  }>,
+): Promise<DispatchStage> {
   try {
     const parent = await readDispatch(input.repository, input.parent);
     return parent === null
@@ -234,11 +237,13 @@ async function currentManagedContract(contract: Keiyaku, contractId: ContractId)
   return state;
 }
 
-async function resolveCallExecution(input: Readonly<{
-  path: WorldRoot;
-  cwd?: string;
-  contract?: Keiyaku;
-}>): Promise<CallExecution | undefined> {
+async function resolveCallExecution(
+  input: Readonly<{
+    path: WorldRoot;
+    cwd?: string;
+    contract?: Keiyaku;
+  }>,
+): Promise<CallExecution | undefined> {
   if (input.cwd !== undefined) {
     return {
       cwd: await canonicalizeExistingDirectory(input.cwd, `cwd is not an existing directory: ${input.cwd}`),
@@ -270,7 +275,20 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
   const values = requireInput(input, "Keiyaku.call input");
   onlyKeys(
     values,
-    ["path", "archetype", "body", "cwd", "readonly", "mode", "timeoutMs", "home", "settings", "contract", "alias", "allowed"],
+    [
+      "path",
+      "archetype",
+      "body",
+      "cwd",
+      "readonly",
+      "mode",
+      "timeoutMs",
+      "home",
+      "settings",
+      "contract",
+      "alias",
+      "allowed",
+    ],
     "Keiyaku.call input",
   );
   const path = nonblank(values.path, "path") as WorldRoot;
@@ -282,9 +300,8 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
   const timeoutMs = callTimeout(values.timeoutMs, mode);
   const home = homeOption(values.home);
   const settings = settingsOption(values.settings);
-  const alias: AkumaAlias | undefined = values.alias === undefined
-    ? undefined
-    : parseAkumaAlias(nonblank(values.alias, "alias"));
+  const alias: AkumaAlias | undefined =
+    values.alias === undefined ? undefined : parseAkumaAlias(nonblank(values.alias, "alias"));
   const seat = values.contract === undefined ? undefined : seatForKeiyaku(values.contract);
   const execution = await resolveCallExecution({
     path,
@@ -300,15 +317,15 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
     ...(values.allowed === undefined ? {} : { allowed: values.allowed as readonly AllowedAction[] }),
     ...(execution === undefined ? {} : { cwd: execution.cwd }),
   };
-  const handle = execution === undefined
-    ? await world.call(call)
-    : await callAkumaWithContext(world, call, { cwdCanonical: true });
+  const handle =
+    execution === undefined ? await world.call(call) : await callAkumaWithContext(world, call, { cwdCanonical: true });
   const completedExecution = execution ?? akumaCallExecution(handle);
   if (completedExecution === undefined) throw new Error("Akuma call is missing its birth execution");
   const readonly = (await handle.status()).readonly;
-  const dispatch: DispatchStage = seat === undefined
-    ? { kind: "none" }
-    : await dispatchStage({ repository: seat.scope, akuId: handle.id, contractId: seat.id });
+  const dispatch: DispatchStage =
+    seat === undefined
+      ? { kind: "none" }
+      : await dispatchStage({ repository: seat.scope, akuId: handle.id, contractId: seat.id });
   let aliasStage: AliasStage = { kind: "none" };
   if (alias !== undefined) {
     if (dispatch.kind === "failed") aliasStage = { kind: "skipped", reason: "dispatch-failed" };
@@ -338,16 +355,19 @@ export async function forkKeiyaku(input: ForkInput): Promise<ForkResult> {
   onlyKeys(values, ["path", "akuma", "at", "repo"], "Keiyaku.fork input");
   const path = nonblank(values.path, "path") as WorldRoot;
   const at = nonblank(values.at, "at");
-  const akuma = (await addressAkuma({
-    path,
-    akuma: nonblank(values.akuma, "akuma"),
-  })).id;
+  const akuma = (
+    await addressAkuma({
+      path,
+      akuma: nonblank(values.akuma, "akuma"),
+    })
+  ).id;
   const repository = values.repo === undefined ? undefined : scopeForRepo(values.repo);
 
   const receipt = await Akuma.of(path).of({ id: akuma }).fork({ at });
   if (receipt.kind !== "forked") return { ...receipt, parent: akuma };
-  const dispatch = repository === undefined
-    ? { kind: "none" as const }
-    : await forkDispatchStage({ repository, parent: akuma, child: receipt.child });
+  const dispatch =
+    repository === undefined
+      ? { kind: "none" as const }
+      : await forkDispatchStage({ repository, parent: akuma, child: receipt.child });
   return { kind: "forked", parent: akuma, child: receipt.child, dispatch };
 }

@@ -2,22 +2,13 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { gitObjectId } from "./identity.js";
 import { parseTreeObject, validPath, type TreeEntry } from "./tree.js";
-import {
-  GIT_FORMAT_BYTES,
-  GIT_FORMAT_PATH,
-  GIT_REF,
-  readRef,
-  type GitOid,
-  type GitSnapshot,
-} from "./repository.js";
+import { GIT_FORMAT_BYTES, GIT_FORMAT_PATH, GIT_REF, readRef, type GitOid, type GitSnapshot } from "./repository.js";
 import { GitPlumbingError, type GitRepository } from "./process.js";
 
 const gitReadObservationBrand: unique symbol = Symbol("GitReadObservation");
 const gitDecodeChannelBrand: unique symbol = Symbol("GitDecodeChannel");
 
-export type GitBlobResult =
-  | Readonly<{ kind: "present"; bytes: Buffer }>
-  | Readonly<{ kind: "missing" }>;
+export type GitBlobResult = Readonly<{ kind: "present"; bytes: Buffer }> | Readonly<{ kind: "missing" }>;
 
 export type GitReadObservation = Readonly<{
   readonly [gitReadObservationBrand]: true;
@@ -92,19 +83,24 @@ function batchObjectReader(repository: GitRepository): BatchObjectReader {
   let spawnError: Error | null = null;
   let failure: GitPlumbingError | null = null;
   child.stderr.on("data", (chunk: Buffer) => stderr.push(Buffer.from(chunk)));
-  child.on("error", (error) => { spawnError = error; });
-  child.stdin.on("error", (error) => { spawnError ??= error; });
-
-  const plumbingError = (message: string, status: number | null): GitPlumbingError => new GitPlumbingError({
-    stderr: Buffer.concat(stderr),
-    status,
-    message: `git cat-file --batch: ${message}`,
-    pid: child.pid ?? null,
+  child.on("error", (error) => {
+    spawnError = error;
   });
+  child.stdin.on("error", (error) => {
+    spawnError ??= error;
+  });
+
+  const plumbingError = (message: string, status: number | null): GitPlumbingError =>
+    new GitPlumbingError({
+      stderr: Buffer.concat(stderr),
+      status,
+      message: `git cat-file --batch: ${message}`,
+      pid: child.pid ?? null,
+    });
   const write = async (value: string): Promise<void> => {
     if (spawnError !== null) throw spawnError;
     await new Promise<void>((resolve, reject) => {
-      child.stdin.write(value, (error) => error === null || error === undefined ? resolve() : reject(error));
+      child.stdin.write(value, (error) => (error === null || error === undefined ? resolve() : reject(error)));
     });
   };
   const read = async (oid: GitOid): Promise<GitObjectResult> => {
@@ -135,7 +131,10 @@ function batchObjectReader(repository: GitRepository): BatchObjectReader {
     const cached = cache.get(oid);
     if (cached !== undefined) return cached;
     const requested = tail.then(async () => await read(oid));
-    tail = requested.then(() => undefined, () => undefined);
+    tail = requested.then(
+      () => undefined,
+      () => undefined,
+    );
     cache.set(oid, requested);
     return requested;
   };
@@ -163,17 +162,20 @@ function commitTree(result: GitObjectResult, commit: GitOid): GitOid {
   const newline = result.bytes.indexOf(0x0a);
   if (newline < 0) throw new AuthorityCorruptionError(`Git state commit has no headers: ${commit}`);
   const firstLine = result.bytes.subarray(0, newline).toString("ascii");
-  if (!firstLine.startsWith("tree ")) throw new AuthorityCorruptionError(`Git state commit has no root tree: ${commit}`);
+  if (!firstLine.startsWith("tree "))
+    throw new AuthorityCorruptionError(`Git state commit has no root tree: ${commit}`);
   return gitObjectId(firstLine.slice("tree ".length), "Git state tree");
 }
 
 async function completeTree(
   channel: GitDecodeChannel,
   root: GitOid,
-): Promise<Readonly<{
-  paths: ReadonlyMap<string, TreeEntry>;
-  directories: ReadonlyMap<string, ReadonlyMap<string, TreeEntry>>;
-}>> {
+): Promise<
+  Readonly<{
+    paths: ReadonlyMap<string, TreeEntry>;
+    directories: ReadonlyMap<string, ReadonlyMap<string, TreeEntry>>;
+  }>
+> {
   const paths = new Map<string, TreeEntry>();
   const directories = new Map<string, ReadonlyMap<string, TreeEntry>>();
   let level = [{ path: "", oid: root }];
@@ -233,10 +235,12 @@ export async function readGitTreeSelection(
   channel: GitDecodeChannel,
   root: GitOid,
   selection: GitTreeSelection,
-): Promise<Readonly<{
-  paths: ReadonlyMap<string, TreeEntry>;
-  directories: ReadonlyMap<string, ReadonlyMap<string, TreeEntry>>;
-}>> {
+): Promise<
+  Readonly<{
+    paths: ReadonlyMap<string, TreeEntry>;
+    directories: ReadonlyMap<string, ReadonlyMap<string, TreeEntry>>;
+  }>
+> {
   const paths = new Map<string, TreeEntry>();
   const directories = new Map<string, ReadonlyMap<string, TreeEntry>>();
   const readDirectory = async (path: string, oid: GitOid): Promise<ReadonlyMap<string, TreeEntry>> => {
@@ -249,30 +253,34 @@ export async function readGitTreeSelection(
   };
   const enumerate = async (path: string, oid: GitOid): Promise<void> => {
     const entries = await readDirectory(path, oid);
-    await Promise.all([...entries].map(async ([name, entry]) => {
-      const childPath = path.length === 0 ? name : `${path}/${name}`;
-      if (entry.type === "tree") await enumerate(childPath, entry.oid);
-      else paths.set(childPath, entry);
-    }));
+    await Promise.all(
+      [...entries].map(async ([name, entry]) => {
+        const childPath = path.length === 0 ? name : `${path}/${name}`;
+        if (entry.type === "tree") await enumerate(childPath, entry.oid);
+        else paths.set(childPath, entry);
+      }),
+    );
   };
   const visit = async (path: string, oid: GitOid, node: TreeSelectionNode): Promise<void> => {
     const entries = await readDirectory(path, oid);
-    await Promise.all([...node.children].map(async ([name, child]) => {
-      const entry = entries.get(name);
-      if (entry === undefined) return;
-      const childPath = path.length === 0 ? name : `${path}/${name}`;
-      if (entry.type !== "tree") {
-        paths.set(childPath, entry);
-        return;
-      }
-      if (child.exact || child.subtree) paths.set(childPath, entry);
-      if (child.exact && child.children.size === 0 && !child.subtree) {
-        paths.set(childPath, entry);
-        return;
-      }
-      if (child.subtree) await enumerate(childPath, entry.oid);
-      else if (child.children.size > 0) await visit(childPath, entry.oid, child);
-    }));
+    await Promise.all(
+      [...node.children].map(async ([name, child]) => {
+        const entry = entries.get(name);
+        if (entry === undefined) return;
+        const childPath = path.length === 0 ? name : `${path}/${name}`;
+        if (entry.type !== "tree") {
+          paths.set(childPath, entry);
+          return;
+        }
+        if (child.exact || child.subtree) paths.set(childPath, entry);
+        if (child.exact && child.children.size === 0 && !child.subtree) {
+          paths.set(childPath, entry);
+          return;
+        }
+        if (child.subtree) await enumerate(childPath, entry.oid);
+        else if (child.children.size > 0) await visit(childPath, entry.oid, child);
+      }),
+    );
   };
   await visit("", root, selectionTree(selection));
   return { paths, directories };
@@ -294,7 +302,7 @@ export async function withGitDecodeChannel<Value>(
 ): Promise<Value> {
   const transport: { reader: BatchObjectReader | null } = { reader: null };
   let active = true;
-  const objectReader = (): BatchObjectReader => transport.reader ??= batchObjectReader(repository);
+  const objectReader = (): BatchObjectReader => (transport.reader ??= batchObjectReader(repository));
   const channel = {
     [gitDecodeChannelBrand]: true,
     readObjects: (oids: readonly GitOid[]) => {
@@ -368,9 +376,8 @@ async function observeEpoch<Value>(
       const commitObject = (await channel.readObjects([commit])).get(commit);
       if (commitObject === undefined) throw new Error(`missing state commit result: ${commit}`);
       const tree = await commitTree(commitObject, commit);
-      const observed = selection === null
-        ? await completeTree(channel, tree)
-        : await readGitTreeSelection(channel, tree, selection);
+      const observed =
+        selection === null ? await completeTree(channel, tree) : await readGitTreeSelection(channel, tree, selection);
       snapshot = { commit, tree, paths: observed.paths };
       treeDirectories = observed.directories;
     }

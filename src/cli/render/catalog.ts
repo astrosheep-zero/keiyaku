@@ -49,9 +49,7 @@ function renderContractCatalog(catalog: Extract<Catalog, { kind: "contracts" }>)
       `  ${safeText(row.title ?? "title unavailable")}`,
       `  ${row.phase}`,
       ...row.after.map((edge) => `  ${afterWording(edge)}`),
-      ...(row.dependents.length === 0
-        ? []
-        : [`  dependents ${row.dependents.map(dependentWording).join(" · ")}`]),
+      ...(row.dependents.length === 0 ? [] : [`  dependents ${row.dependents.map(dependentWording).join(" · ")}`]),
       ...(row.gates.reports.length === 0
         ? []
         : [`  ${row.gates.reports.map((report) => `${gateGlyph(report)} ${report.gate}`).join("  ")}`]),
@@ -66,17 +64,23 @@ function renderContractCatalog(catalog: Extract<Catalog, { kind: "contracts" }>)
 
 export function renderCatalogText(catalog: Catalog): string {
   if (catalog.kind === "tasks") {
-    return catalog.rows.map((row) => `${safeText(row.id)} - P${row.priority} - ${row.disposition} - ${safeText(row.title)}`).join("\n");
+    return catalog.rows
+      .map((row) => `${safeText(row.id)} - P${row.priority} - ${row.disposition} - ${safeText(row.title)}`)
+      .join("\n");
   }
   if (catalog.kind === "contracts") return renderContractCatalog(catalog);
   if (catalog.kind === "archetypes") {
-    return catalog.rows.flatMap((row) => [
-      `${safeText(row.name)}${row.model === undefined ? "" : ` - ${safeText(row.model)}`}`,
-      ...(row.description === undefined ? [] : [`  ${safeText(row.description)}`]),
-    ]).join("\n");
+    return catalog.rows
+      .flatMap((row) => [
+        `${safeText(row.name)}${row.model === undefined ? "" : ` - ${safeText(row.model)}`}`,
+        ...(row.description === undefined ? [] : [`  ${safeText(row.description)}`]),
+      ])
+      .join("\n");
   }
-  return catalog.rows.map((row) => {
-    if (!("lifeAt" in row)) return `${safeText(row.id)} - ${row.life}`;
-    return `${safeText(row.id)} - ${row.life} - runtime ${row.lifeAt ?? "-"} - last activity ${row.lastActivityAt ?? "-"}`;
-  }).join("\n");
+  return catalog.rows
+    .map((row) => {
+      if (!("lifeAt" in row)) return `${safeText(row.id)} - ${row.life}`;
+      return `${safeText(row.id)} - ${row.life} - runtime ${row.lifeAt ?? "-"} - last activity ${row.lastActivityAt ?? "-"}`;
+    })
+    .join("\n");
 }

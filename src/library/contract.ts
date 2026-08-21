@@ -32,7 +32,8 @@ import {
 import { type Gate, type WorktreeHooks, worktreeHooksOption } from "./configuration.js";
 import {
   contractId,
-  type ChangeId, type FactKind,
+  type ChangeId,
+  type FactKind,
   type ContractId,
   type ContractState,
   type JournalEntry,
@@ -57,17 +58,17 @@ import type {
   ContractGateReport,
   ContractObservation,
   ContractPhase,
-  ContractRow, AfterEndpointObservation, ContractAfterEdge, ContractDependent, ContractWorkspaceObservation,
+  ContractRow,
+  AfterEndpointObservation,
+  ContractAfterEdge,
+  ContractDependent,
+  ContractWorkspaceObservation,
 } from "../protocol/read/status.js";
 import { abandonOperation } from "../protocol/abandon.js";
 import { amendOperation } from "../protocol/amend.js";
 import { arcOperation } from "../protocol/arc.js";
 import type { AuditReport } from "../protocol/audit.js";
-import {
-  deliverOperation,
-  type IntegrationConflictMaterialized,
-  type VerificationReuse,
-} from "../protocol/deliver.js";
+import { deliverOperation, type IntegrationConflictMaterialized, type VerificationReuse } from "../protocol/deliver.js";
 import type { ReconcileReport as ProtocolReconcileReport } from "../protocol/reconcile.js";
 import { reviewOperation, type ReviewValue } from "../protocol/review.js";
 import { readDispatchesAt, type Dispatch } from "../dispatch/index.js";
@@ -92,12 +93,7 @@ import {
 import { auditContract, type AuditInput } from "./audit.js";
 import { Delivery, deliveryHandle, type DeliveryValue } from "./delivery.js";
 import { continueAcceptedCompletion, type ContinuationReport } from "./continuation.js";
-import {
-  completionInput,
-  completeHolderMutation,
-  completeMutation,
-  type MutationResult,
-} from "./mutation.js";
+import { completionInput, completeHolderMutation, completeMutation, type MutationResult } from "./mutation.js";
 import { completeReconcile } from "./reconcile.js";
 import { admitBindWithAppointment } from "./bind.js";
 import {
@@ -111,7 +107,13 @@ import {
 export { KeiyakuRefused, type ContractAppointmentRefusal } from "./refusal.js";
 export { KeiyakuRetry, type KeiyakuRefusal, type KeiyakuRetryReason };
 export { gatesFrom, requireBranchesToBeUpToDateFrom, SettingsError } from "./configuration.js";
-export type { Gate, GatesFromInput, HookCommand, RequireBranchesToBeUpToDateFromInput, WorktreeHooks } from "./configuration.js";
+export type {
+  Gate,
+  GatesFromInput,
+  HookCommand,
+  RequireBranchesToBeUpToDateFromInput,
+  WorktreeHooks,
+} from "./configuration.js";
 
 export type {
   AuditInput,
@@ -171,47 +173,62 @@ export type { SettlementAction, SettlementLag, SettlementReport } from "../settl
 
 type ActorOptions = Readonly<{ actor?: ActorId; hooks?: WorktreeHooks }>;
 
-export type BindInput = ActorOptions & Readonly<{
-  repo: Repo;
-  markdown: string;
-  task?: TaskId;
-  target?: string;
-  workspace?: "worktree" | "here";
-  after?: readonly ContractId[];
-  gates?: readonly Gate[];
-}>;
+export type BindInput = ActorOptions &
+  Readonly<{
+    repo: Repo;
+    markdown: string;
+    task?: TaskId;
+    target?: string;
+    workspace?: "worktree" | "here";
+    after?: readonly ContractId[];
+    gates?: readonly Gate[];
+  }>;
 
-export type AmendInput = ActorOptions & Readonly<{
-  markdown?: string;
-  after?: readonly ContractId[];
-  gates?: readonly Gate[];
-}>;
+export type AmendInput = ActorOptions &
+  Readonly<{
+    markdown?: string;
+    after?: readonly ContractId[];
+    gates?: readonly Gate[];
+  }>;
 
-export type ArcInput = ActorOptions & Readonly<{
-  markdown: string;
-}>;
+export type ArcInput = ActorOptions &
+  Readonly<{
+    markdown: string;
+  }>;
 
 export type ContractListInput = Readonly<{ repo: Repo }>;
 export type ContractObservationInput = Readonly<{ repo: Repo; id: ContractId }>;
 export type KeiyakuOfInput = Readonly<{ repo: Repo; id: ContractId }>;
 export type ReviewInput = ActorOptions & Readonly<{ verdict: AttestationVerdict; summary?: string }>;
 export type AbandonInput = ActorOptions & Readonly<{ note?: string }>;
-export type DeliverInput = ActorOptions & Readonly<{
-  message?: string; requireBranchesToBeUpToDate?: boolean;
-  includeDirty?: boolean; materializeConflict?: boolean; signal?: AbortSignal;
-}>;
+export type DeliverInput = ActorOptions &
+  Readonly<{
+    message?: string;
+    requireBranchesToBeUpToDate?: boolean;
+    includeDirty?: boolean;
+    materializeConflict?: boolean;
+    signal?: AbortSignal;
+  }>;
 
 type DeliveryExecutionInput = Readonly<{
-  scope: RepositoryScope; contractId: ContractId;
-  actor?: ReturnType<typeof actorOption>["actor"]; message?: string;
-  requireBranchesToBeUpToDate: boolean; includeDirty: boolean; materializeConflict: boolean;
-  signal?: AbortSignal; hooks: WorktreeHooks;
+  scope: RepositoryScope;
+  contractId: ContractId;
+  actor?: ReturnType<typeof actorOption>["actor"];
+  message?: string;
+  requireBranchesToBeUpToDate: boolean;
+  includeDirty: boolean;
+  materializeConflict: boolean;
+  signal?: AbortSignal;
+  hooks: WorktreeHooks;
 }>;
 
 type ReviewExecutionInput = Readonly<{
-  scope: RepositoryScope; contractId: ContractId;
+  scope: RepositoryScope;
+  contractId: ContractId;
   actor?: ReturnType<typeof actorOption>["actor"];
-  verdict: AttestationVerdict; summary?: string; hooks: WorktreeHooks;
+  verdict: AttestationVerdict;
+  summary?: string;
+  hooks: WorktreeHooks;
 }>;
 
 type ForwardedMutationReceipt<Value> =
@@ -267,12 +284,14 @@ async function executeLocalDelivery(
 async function executeLocalReview(input: ReviewExecutionInput): Promise<MutationResult<Review>> {
   return withGitDecodeChannel(input.scope, async (channel) => {
     const operation = operationContext(input.scope, channel, input.contractId);
-    const accepted = requireAccepted(await reviewOperation({
-      ...operation,
-      verdict: input.verdict,
-      ...(input.summary === undefined ? {} : { summary: input.summary }),
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
-    }));
+    const accepted = requireAccepted(
+      await reviewOperation({
+        ...operation,
+        verdict: input.verdict,
+        ...(input.summary === undefined ? {} : { summary: input.summary }),
+        ...(input.actor === undefined ? {} : { actor: input.actor }),
+      }),
+    );
     const continued = await continueAcceptedCompletion({
       ...operation,
       accepted,
@@ -287,14 +306,18 @@ async function executeLocalReview(input: ReviewExecutionInput): Promise<Mutation
 
 function forwardedReceipt<Receipt>(outcome: UpstreamRequestOutcome, action: string): Receipt {
   if (outcome.kind === "failed") {
-    throw new Error(outcome.failure.kind === "failed"
-      ? outcome.failure.diagnostic
-      : `Unexpected Akuma target failure for ${action}: ${outcome.failure.id}`);
+    throw new Error(
+      outcome.failure.kind === "failed"
+        ? outcome.failure.diagnostic
+        : `Unexpected Akuma target failure for ${action}: ${outcome.failure.id}`,
+    );
   }
   return outcome.result as Receipt;
 }
 
-function requireForwarded(receipt: ForwardedDeliveryReceipt): MutationResult<DeliveryValue> | IntegrationConflictMaterialized;
+function requireForwarded(
+  receipt: ForwardedDeliveryReceipt,
+): MutationResult<DeliveryValue> | IntegrationConflictMaterialized;
 function requireForwarded(receipt: ForwardedReviewReceipt): MutationResult<Review>;
 function requireForwarded(
   receipt: ForwardedDeliveryReceipt | ForwardedReviewReceipt,
@@ -304,11 +327,19 @@ function requireForwarded(
   return receipt.kind === "accepted" ? receipt.result : receipt;
 }
 
-export async function executeForwardedDeliver(input: Readonly<{
-  repo: Repo; contractId: string; requester: string; message?: string;
-  includeDirty: boolean; materializeConflict: boolean;
-  requireBranchesToBeUpToDate: boolean; hooks: WorktreeHooks; signal?: AbortSignal;
-}>): Promise<Readonly<{ result: ForwardedDeliveryReceipt; deliveryFactId?: string }>> {
+export async function executeForwardedDeliver(
+  input: Readonly<{
+    repo: Repo;
+    contractId: string;
+    requester: string;
+    message?: string;
+    includeDirty: boolean;
+    materializeConflict: boolean;
+    requireBranchesToBeUpToDate: boolean;
+    hooks: WorktreeHooks;
+    signal?: AbortSignal;
+  }>,
+): Promise<Readonly<{ result: ForwardedDeliveryReceipt; deliveryFactId?: string }>> {
   const id = contractId(input.contractId);
   const actor = actorOption(input.requester).actor;
   const message = optionalNonblank(input.message, "deliver message");
@@ -333,10 +364,16 @@ export async function executeForwardedDeliver(input: Readonly<{
   }
 }
 
-export async function executeForwardedReview(input: Readonly<{
-  repo: Repo; contractId: string; requester: string; verdict: AttestationVerdict;
-  summary?: string; hooks: WorktreeHooks;
-}>): Promise<Readonly<{ result: ForwardedReviewReceipt; reviewFactId?: string }>> {
+export async function executeForwardedReview(
+  input: Readonly<{
+    repo: Repo;
+    contractId: string;
+    requester: string;
+    verdict: AttestationVerdict;
+    summary?: string;
+    hooks: WorktreeHooks;
+  }>,
+): Promise<Readonly<{ result: ForwardedReviewReceipt; reviewFactId?: string }>> {
   const id = contractId(input.contractId);
   const actor = actorOption(input.requester).actor;
   if (input.verdict !== "satisfied" && input.verdict !== "unsatisfied") {
@@ -369,18 +406,18 @@ export class KeiyakuHandle {
   }
 
   async state(): Promise<ContractState> {
-    return withGitDecodeChannel(this.scope, (channel) => stateOperation({
-      scope: this.scope,
-      channel,
-      contractId: this.id,
-    }));
+    return withGitDecodeChannel(this.scope, (channel) =>
+      stateOperation({
+        scope: this.scope,
+        channel,
+        contractId: this.id,
+      }),
+    );
   }
 
   async history(): Promise<ContractHistory> {
-    return withGitDecodeChannel(this.scope, (channel) => withGitReadObservation(
-      this.scope,
-      channel,
-      async (observation) => {
+    return withGitDecodeChannel(this.scope, (channel) =>
+      withGitReadObservation(this.scope, channel, async (observation) => {
         const [journals, dispatches] = await Promise.all([
           observeContractsForAdmissionInObservationAt(observation, [this.id]),
           readDispatchesAt(observation),
@@ -390,9 +427,8 @@ export class KeiyakuHandle {
         if (record.state === null) throw new KeiyakuRefused({ kind: "contract-missing", contractId: this.id });
         const commit = observation.snapshot.commit;
         if (commit === null) throw new Error("contract history requires a keiyaku-state snapshot");
-        const recordedAt = (event: ContractHistoryEvent): string => (
-          event.source === "journal" ? event.fact.at : event.dispatch.dispatchedAt
-        );
+        const recordedAt = (event: ContractHistoryEvent): string =>
+          event.source === "journal" ? event.fact.at : event.dispatch.dispatchedAt;
         const events = [
           ...record.entries.map((fact) => ({ source: "journal" as const, fact })),
           ...dispatches
@@ -406,8 +442,8 @@ export class KeiyakuHandle {
           return 0;
         });
         return { id: this.id, state: mintSnapshotId(commit), events };
-      },
-    ));
+      }),
+    );
   }
 
   async guidance(): Promise<string> {
@@ -419,14 +455,14 @@ export class KeiyakuHandle {
   }
 
   async delivery(): Promise<Delivery | null> {
-    const delivery = await withGitDecodeChannel(this.scope, (channel) => deliveryOperation({
-      scope: this.scope,
-      channel,
-      contractId: this.id,
-    }));
-    return delivery === null
-      ? null
-      : this.deliveryHandle(delivery);
+    const delivery = await withGitDecodeChannel(this.scope, (channel) =>
+      deliveryOperation({
+        scope: this.scope,
+        channel,
+        contractId: this.id,
+      }),
+    );
+    return delivery === null ? null : this.deliveryHandle(delivery);
   }
 
   async amend(input: AmendInput): Promise<AmendResult> {
@@ -435,44 +471,44 @@ export class KeiyakuHandle {
     const markdown = values.markdown === undefined ? undefined : requireMarkdown(values.markdown);
     const actor = actorOption(values.actor);
     const gates = values.gates === undefined ? undefined : normalizedGates(values.gates);
-    const prerequisites = values.after === undefined
-      ? undefined
-      : normalizedList(values.after, "after", contractId);
+    const prerequisites = values.after === undefined ? undefined : normalizedList(values.after, "after", contractId);
     if (markdown === undefined && gates === undefined && prerequisites === undefined) {
       throw new TypeError("amend requires markdown, after, or gates");
     }
     const amendment = await withGitDecodeChannel(this.scope, async (channel) => {
       let changedSections: ReadonlySet<string> | undefined;
-      const accepted = requireAccepted(await amendOperation({
-        scope: this.scope,
-        channel,
-        contractId: this.id,
-        ...actor,
-        deriveAmendment: (source) => {
-          const amendment = markdown === undefined
-            ? undefined
-            : applyAmendDocument(
-              markdown,
-              decodeContractDocument(source.document.bytes),
-            );
-          changedSections = amendment?.changedSections;
-          const document = amendment === undefined
-            ? decodeContractDocument(source.document.bytes)
-            : decodeContractDocument(amendment.document);
-          const terms = markdown === undefined
-            ? {
-                document: source.document,
-                segments: source.segments,
-                gates: gates ?? source.gates,
-                after: prerequisites ?? source.after,
-              }
-            : contractTerms(document, gates ?? source.gates, prerequisites ?? source.after);
-          return {
-            terms,
-            verification: documentDerivation(document, terms.gates, this.id).verification,
-          };
-        },
-      }));
+      const accepted = requireAccepted(
+        await amendOperation({
+          scope: this.scope,
+          channel,
+          contractId: this.id,
+          ...actor,
+          deriveAmendment: (source) => {
+            const amendment =
+              markdown === undefined
+                ? undefined
+                : applyAmendDocument(markdown, decodeContractDocument(source.document.bytes));
+            changedSections = amendment?.changedSections;
+            const document =
+              amendment === undefined
+                ? decodeContractDocument(source.document.bytes)
+                : decodeContractDocument(amendment.document);
+            const terms =
+              markdown === undefined
+                ? {
+                    document: source.document,
+                    segments: source.segments,
+                    gates: gates ?? source.gates,
+                    after: prerequisites ?? source.after,
+                  }
+                : contractTerms(document, gates ?? source.gates, prerequisites ?? source.after);
+            return {
+              terms,
+              verification: documentDerivation(document, terms.gates, this.id).verification,
+            };
+          },
+        }),
+      );
       const completed = await completeMutation({
         ...completionInput(this.scope, channel, this.id, () => undefined, hooks),
         accepted,
@@ -506,35 +542,40 @@ export class KeiyakuHandle {
     const values = input === undefined ? undefined : requireInput(input, "deliver input");
     const hooks = worktreeHooksOption(values?.hooks);
     const message = optionalNonblank(values?.message, "deliver message");
-    const requireBranchesToBeUpToDate = optionalBoolean(
-      values?.requireBranchesToBeUpToDate, "requireBranchesToBeUpToDate",
-    ) ?? false;
+    const requireBranchesToBeUpToDate =
+      optionalBoolean(values?.requireBranchesToBeUpToDate, "requireBranchesToBeUpToDate") ?? false;
     const includeDirty = optionalBoolean(values?.includeDirty, "includeDirty") ?? false;
     const materializeConflict = optionalBoolean(values?.materializeConflict, "materializeConflict") ?? false;
     const actor = actorOption(values?.actor);
     const signal = optionalSignal(values?.signal);
     const requests = injectedBodyRequests();
-    const result = requests === null
-      ? await executeLocalDelivery({
-        scope: this.scope,
-        contractId: this.id,
-        ...actor,
-        ...(message === undefined ? {} : { message }),
-        requireBranchesToBeUpToDate,
-        includeDirty,
-        materializeConflict,
-        ...(signal === undefined ? {} : { signal }),
-        hooks,
-      })
-      : requireForwarded(forwardedReceipt<ForwardedDeliveryReceipt>(await requestBodyDeliver({
-          directory: requests,
-          repoRoot: this.scope.primaryWorktree,
-          contractId: this.id,
-          ...(message === undefined ? {} : { message }),
-          includeDirty,
-          materializeConflict,
-          ...(signal === undefined ? {} : { signal }),
-        }), "deliver"));
+    const result =
+      requests === null
+        ? await executeLocalDelivery({
+            scope: this.scope,
+            contractId: this.id,
+            ...actor,
+            ...(message === undefined ? {} : { message }),
+            requireBranchesToBeUpToDate,
+            includeDirty,
+            materializeConflict,
+            ...(signal === undefined ? {} : { signal }),
+            hooks,
+          })
+        : requireForwarded(
+            forwardedReceipt<ForwardedDeliveryReceipt>(
+              await requestBodyDeliver({
+                directory: requests,
+                repoRoot: this.scope.primaryWorktree,
+                contractId: this.id,
+                ...(message === undefined ? {} : { message }),
+                includeDirty,
+                materializeConflict,
+                ...(signal === undefined ? {} : { signal }),
+              }),
+              "deliver",
+            ),
+          );
     return "facts" in result ? { ...result, value: this.deliveryHandle(result.value) } : result;
   }
 
@@ -549,13 +590,18 @@ export class KeiyakuHandle {
     const actor = actorOption(values.actor);
     const requests = injectedBodyRequests();
     if (requests !== null) {
-      return requireForwarded(forwardedReceipt<ForwardedReviewReceipt>(await requestBodyReview({
-        directory: requests,
-        repoRoot: this.scope.primaryWorktree,
-        contractId: this.id,
-        verdict,
-        ...(summary === undefined ? {} : { summary }),
-      }), "review"));
+      return requireForwarded(
+        forwardedReceipt<ForwardedReviewReceipt>(
+          await requestBodyReview({
+            directory: requests,
+            repoRoot: this.scope.primaryWorktree,
+            contractId: this.id,
+            verdict,
+            ...(summary === undefined ? {} : { summary }),
+          }),
+          "review",
+        ),
+      );
     }
     return await executeLocalReview({
       scope: this.scope,
@@ -572,18 +618,20 @@ export class KeiyakuHandle {
     const hooks = worktreeHooksOption(values?.hooks);
     const note = optionalNonblank(values?.note, "abandon note");
     return withGitDecodeChannel(this.scope, async (channel) => {
-      const admission = await releaseTaskHolderWithFence(this.scope, channel, this.id, () => abandonOperation({
-        scope: this.scope,
-        channel,
-        contractId: this.id,
-        ...actorOption(values?.actor),
-        ...(note === undefined ? {} : { note }),
-        observationSelection: taskHolderObservationSelection(),
-        decorateOffer: async ({ observation, contractId: owner }) => {
-          const companion = await releaseTaskHolder(channel, observation, owner);
-          return companion === null ? [] : [companion];
-        },
-      }));
+      const admission = await releaseTaskHolderWithFence(this.scope, channel, this.id, () =>
+        abandonOperation({
+          scope: this.scope,
+          channel,
+          contractId: this.id,
+          ...actorOption(values?.actor),
+          ...(note === undefined ? {} : { note }),
+          observationSelection: taskHolderObservationSelection(),
+          decorateOffer: async ({ observation, contractId: owner }) => {
+            const companion = await releaseTaskHolder(channel, observation, owner);
+            return companion === null ? [] : [companion];
+          },
+        }),
+      );
       return completeHolderMutation({
         completion: completionInput(this.scope, channel, this.id, () => undefined, hooks),
         admission,
@@ -597,13 +645,15 @@ export class KeiyakuHandle {
     const hooks = worktreeHooksOption(values.hooks);
     const chapter = decodeArcDocument(requireMarkdown(values.markdown));
     return withGitDecodeChannel(this.scope, async (channel) => {
-      const accepted = requireAccepted(await arcOperation({
-        scope: this.scope,
-        channel,
-        contractId: this.id,
-        ...actorOption(values.actor),
-        chapter,
-      }));
+      const accepted = requireAccepted(
+        await arcOperation({
+          scope: this.scope,
+          channel,
+          contractId: this.id,
+          ...actorOption(values.actor),
+          chapter,
+        }),
+      );
       return completeMutation({
         ...completionInput(this.scope, channel, this.id, () => undefined, hooks),
         accepted,
@@ -621,22 +671,25 @@ export class KeiyakuHandle {
 
   async reconcile(input?: ReconcileInput): Promise<ReconcileReport> {
     const options = reconcileInput(input);
-    return withGitDecodeChannel(this.scope, (channel) => completeReconcile({
-      scope: this.scope, channel, contractId: this.id, ...options,
-    }));
+    return withGitDecodeChannel(this.scope, (channel) =>
+      completeReconcile({
+        scope: this.scope,
+        channel,
+        contractId: this.id,
+        ...options,
+      }),
+    );
   }
 
   private deliveryHandle(delivery: DeliveryValue): Delivery {
-    return deliveryHandle(
-      delivery,
-      () => deliveryDiffOperation({
+    return deliveryHandle(delivery, () =>
+      deliveryDiffOperation({
         scope: this.scope,
         integrationPredecessor: delivery.integration.predecessor,
         integrationSnapshot: delivery.integration.snapshot,
       }),
     );
   }
-
 }
 
 const KEIYAKU_SEATS = new WeakMap<object, Readonly<{ id: ContractId; scope: RepositoryScope }>>();
@@ -660,18 +713,22 @@ export function keiyakuOf(input: KeiyakuOfInput): Keiyaku {
 
 export async function listKeiyaku(input: ContractListInput): Promise<ContractBoard> {
   const values = requireInput(input, "Keiyaku.list input");
-  for (const key of Object.keys(values)) if (key !== "repo") throw new TypeError(`Keiyaku.list input has unknown field: ${key}`);
+  for (const key of Object.keys(values))
+    if (key !== "repo") throw new TypeError(`Keiyaku.list input has unknown field: ${key}`);
   const scope = scopeForRepo(values.repo);
-  return withGitDecodeChannel(scope, (channel) => contractsOperation({
-    scope,
-    channel,
-    hereWorkspace: async (id) => await resolveHereContractWorkspace(scope, id),
-  }));
+  return withGitDecodeChannel(scope, (channel) =>
+    contractsOperation({
+      scope,
+      channel,
+      hereWorkspace: async (id) => await resolveHereContractWorkspace(scope, id),
+    }),
+  );
 }
 
 export async function observeKeiyaku(input: ContractObservationInput): Promise<ContractObservation> {
   const values = requireInput(input, "Keiyaku.observe input");
-  for (const key of Object.keys(values)) if (key !== "repo" && key !== "id") throw new TypeError(`Keiyaku.observe input has unknown field: ${key}`);
+  for (const key of Object.keys(values))
+    if (key !== "repo" && key !== "id") throw new TypeError(`Keiyaku.observe input has unknown field: ${key}`);
   const scope = scopeForRepo(values.repo);
   if (typeof values.id !== "string") throw new TypeError("contract ID must be a string");
   let id: ContractId;
@@ -680,12 +737,14 @@ export async function observeKeiyaku(input: ContractObservationInput): Promise<C
   } catch (error) {
     throw new TypeError(error instanceof Error ? error.message : "contract ID is invalid");
   }
-  return withGitDecodeChannel(scope, (channel) => contractObservationOperation({
-    scope,
-    channel,
-    contractId: id,
-    hereWorkspace: async (contract) => await resolveHereContractWorkspace(scope, contract),
-  }));
+  return withGitDecodeChannel(scope, (channel) =>
+    contractObservationOperation({
+      scope,
+      channel,
+      contractId: id,
+      hereWorkspace: async (contract) => await resolveHereContractWorkspace(scope, contract),
+    }),
+  );
 }
 
 export async function bindKeiyaku(input: BindInput): Promise<BindResult> {
@@ -706,28 +765,31 @@ export async function bindKeiyaku(input: BindInput): Promise<BindResult> {
     normalizedList(values.after, "after", contractId),
   );
   return withGitDecodeChannel(scope, async (channel) => {
-    const admitCandidate = () => admitBindWithAppointment({
-      scope,
-      channel,
-      title: document.title,
-      terms,
-      verification: documentDerivation(document, terms.gates).verification,
-      workspace,
-      ...(target === undefined ? {} : { target }),
-      ...(task === undefined ? {} : { task }),
-      ...actor,
-    });
+    const admitCandidate = () =>
+      admitBindWithAppointment({
+        scope,
+        channel,
+        title: document.title,
+        terms,
+        verification: documentDerivation(document, terms.gates).verification,
+        workspace,
+        ...(target === undefined ? {} : { target }),
+        ...(task === undefined ? {} : { task }),
+        ...actor,
+      });
     const admission = task === undefined ? null : await claimTaskHolderWithFence(scope, task, admitCandidate);
     const accepted = requireAccepted(admission === null ? await admitCandidate() : admission.result);
     const id = accepted.value.contractId;
-    const toHandle = ({ contractId: contract }: { contractId: ContractId }): Keiyaku => new KeiyakuHandle(contract, scope);
-    const result = admission === null
-      ? await completeMutation({ ...completionInput(scope, channel, id, toHandle, hooks), accepted })
-      : await completeHolderMutation({
-          completion: completionInput(scope, channel, id, toHandle, hooks),
-          admission,
-          requireAccepted,
-        });
+    const toHandle = ({ contractId: contract }: { contractId: ContractId }): Keiyaku =>
+      new KeiyakuHandle(contract, scope);
+    const result =
+      admission === null
+        ? await completeMutation({ ...completionInput(scope, channel, id, toHandle, hooks), accepted })
+        : await completeHolderMutation({
+            completion: completionInput(scope, channel, id, toHandle, hooks),
+            admission,
+            requireAccepted,
+          });
     return {
       facts: result.facts,
       head: result.head,
@@ -735,7 +797,7 @@ export async function bindKeiyaku(input: BindInput): Promise<BindResult> {
       effects: result.effects,
       lags: result.lags,
       settlement: result.settlement,
-      ...await observeRegion(scope, channel, id, document.region),
+      ...(await observeRegion(scope, channel, id, document.region)),
     };
   });
 }

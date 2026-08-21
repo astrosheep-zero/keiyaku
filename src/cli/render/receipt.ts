@@ -1,8 +1,4 @@
-import type {
-  PlacementStop,
-  VerificationReuse,
-  VerificationStop,
-} from "../../index.js";
+import type { PlacementStop, VerificationReuse, VerificationStop } from "../../index.js";
 import type { AcceptedDeliverResult, Lag } from "../result.js";
 import { displayColumns, renderOpaqueBlock, safeText } from "./terminal.js";
 
@@ -54,12 +50,7 @@ export function outcomeLines(
   return [`${base} —`, `  ${safeText(contract)}`];
 }
 
-export function titleLines(
-  mark: string,
-  title: string,
-  contract: string,
-  columns = 80,
-): string[] {
+export function titleLines(mark: string, title: string, contract: string, columns = 80): string[] {
   const base = `${mark} ${title}`;
   const inline = `${base} — ${contract}`;
   if (displayColumns(inline) <= columns) return [inline];
@@ -88,11 +79,13 @@ function prerequisiteRows(stop: VerificationStop | PlacementStop, columns: numbe
   if (!("refusal" in stop) || stop.refusal?.kind !== "prerequisites-unsatisfied") return [];
   const lines: string[] = [];
   for (const prerequisite of stop.refusal.unmet) {
-    receiptRow(lines, " ", "prerequisite", [
-      { text: prerequisite.contractId, opaque: true },
-      { text: "·" },
-      { text: prerequisite.state },
-    ], columns);
+    receiptRow(
+      lines,
+      " ",
+      "prerequisite",
+      [{ text: prerequisite.contractId, opaque: true }, { text: "·" }, { text: prerequisite.state }],
+      columns,
+    );
   }
   return lines;
 }
@@ -133,10 +126,7 @@ export function stopLines(
   return lines;
 }
 
-export function stopSummary(
-  stop: VerificationStop | PlacementStop,
-  addressed: string,
-): readonly ReceiptSegment[] {
+export function stopSummary(stop: VerificationStop | PlacementStop, addressed: string): readonly ReceiptSegment[] {
   const detail: ReceiptSegment[] = [];
   if ("refusal" in stop && stop.refusal !== undefined) {
     detail.push({ text: stop.refusal.kind });
@@ -161,24 +151,24 @@ export function cleanupLines(
   columns: number,
 ): readonly string[] {
   const lines: string[] = [];
-  receiptRow(lines, "!", "cleanup", [
-    { text: cleanup.phase },
-    { text: `command=${cleanup.command}` },
-    { text: hookFailureSummary(cleanup.detail), opaque: true },
-  ], columns);
+  receiptRow(
+    lines,
+    "!",
+    "cleanup",
+    [
+      { text: cleanup.phase },
+      { text: `command=${cleanup.command}` },
+      { text: hookFailureSummary(cleanup.detail), opaque: true },
+    ],
+    columns,
+  );
   appendHookPayload(lines, cleanup.detail);
   return lines;
 }
 
-export function leakLines(
-  leak: NonNullable<AcceptedDeliverResult["leak"]>,
-  columns: number,
-): readonly string[] {
+export function leakLines(leak: NonNullable<AcceptedDeliverResult["leak"]>, columns: number): readonly string[] {
   const lines: string[] = [];
-  receiptRow(lines, "!", "leak", [
-    { text: "worktree" },
-    { text: leak.path, opaque: true },
-  ], columns);
+  receiptRow(lines, "!", "leak", [{ text: "worktree" }, { text: leak.path, opaque: true }], columns);
   receiptPayload(lines, "diagnostic", leak.diagnostic);
   return lines;
 }

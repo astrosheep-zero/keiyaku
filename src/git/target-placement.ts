@@ -1,21 +1,15 @@
 import { lstat } from "node:fs/promises";
 import { resolve } from "node:path";
-import { acquireSqliteTransactionLock, type HeldSqliteTransactionLock } from "../coordination/sqlite-transaction-lock.js";
+import {
+  acquireSqliteTransactionLock,
+  type HeldSqliteTransactionLock,
+} from "../coordination/sqlite-transaction-lock.js";
 import type { ContractId, ContractState, SnapshotId } from "../core/facts/types.js";
 import type { RefOperation } from "../core/facts/offer.js";
 import { gitObjectId, gitObjectIdForSnapshot, gitRefLocator, mintSnapshotId, type GitObjectId } from "./identity.js";
 import { currentBranch } from "./observe.js";
-import {
-  commonGitDirectory,
-  readRef,
-  registeredWorktrees,
-} from "./repository.js";
-import {
-  consumeGitStdout,
-  GitPlumbingError,
-  runGit,
-  type GitRepository,
-} from "./process.js";
+import { commonGitDirectory, readRef, registeredWorktrees } from "./repository.js";
+import { consumeGitStdout, GitPlumbingError, runGit, type GitRepository } from "./process.js";
 import { captureWorkspaceTree } from "./workspace.js";
 
 export type WorkspaceNotOnTargetRefusal = Readonly<{
@@ -94,9 +88,7 @@ function literalPath(path: string): string {
 
 async function commitTree(repository: GitRepository, snapshot: SnapshotId): Promise<GitObjectId> {
   return gitObjectId(
-    (await runGit(repository, ["show", "-s", "--format=%T", gitObjectIdForSnapshot(snapshot)]))
-      .toString("utf8")
-      .trim(),
+    (await runGit(repository, ["show", "-s", "--format=%T", gitObjectIdForSnapshot(snapshot)])).toString("utf8").trim(),
     "commit tree",
   );
 }
@@ -161,11 +153,20 @@ async function dryRunRefusal(
   const dirty = await gitPaths(repository, path, ["diff-files", "--name-only", "-z", "--", ...pathspecs]);
   if (dirty.length > 0) return checkoutRefusal(contractId, target, path, "conflict", dirty);
 
-  const unmerged = await gitPaths(repository, path, ["diff", "--name-only", "--diff-filter=U", "-z", "--", ...pathspecs]);
+  const unmerged = await gitPaths(repository, path, [
+    "diff",
+    "--name-only",
+    "--diff-filter=U",
+    "-z",
+    "--",
+    ...pathspecs,
+  ]);
   if (unmerged.length > 0) return checkoutRefusal(contractId, target, path, "conflict", unmerged);
 
-  return await untrackedRefusalWithinScopes(input, scopes, false)
-    ?? checkoutRefusal(contractId, target, path, "conflict", []);
+  return (
+    (await untrackedRefusalWithinScopes(input, scopes, false)) ??
+    checkoutRefusal(contractId, target, path, "conflict", [])
+  );
 }
 
 type PhysicalScope = Readonly<{
@@ -198,7 +199,10 @@ async function candidateEntryIsBlob(
   candidatePath: string,
 ): Promise<boolean> {
   const output = await runGit(repository, ["-C", path, "ls-tree", "-z", candidate, "--", literalPath(candidatePath)]);
-  const records = output.toString("utf8").split("\0").filter((record) => record.length > 0);
+  const records = output
+    .toString("utf8")
+    .split("\0")
+    .filter((record) => record.length > 0);
   if (records.length !== 1) throw new Error(`candidate path has no unique Git entry: ${candidatePath}`);
   const separator = records[0]!.indexOf("\t");
   if (separator < 0) throw new Error(`candidate path has a malformed Git entry: ${candidatePath}`);
@@ -254,13 +258,7 @@ async function untrackedRefusalWithinScopes(
   for (const scope of scopes) {
     if (scope.kind !== "directory") continue;
     let found = false;
-    await consumeGitStdout(repository, [
-      "-C",
-      path,
-      ...args,
-      "--",
-      literalPath(scope.path),
-    ], (chunk) => {
+    await consumeGitStdout(repository, ["-C", path, ...args, "--", literalPath(scope.path)], (chunk) => {
       if (chunk.length > 0) found = true;
     });
     if (found) return checkoutRefusal(contractId, target, path, "untracked", [scope.path]);
@@ -274,7 +272,10 @@ async function indexMatchesTreeOnPaths(
   tree: GitObjectId,
   paths: readonly string[],
 ): Promise<boolean> {
-  return (await gitPaths(repository, path, ["diff-index", "--cached", "--name-only", "-z", tree, "--", ...paths])).length === 0;
+  return (
+    (await gitPaths(repository, path, ["diff-index", "--cached", "--name-only", "-z", tree, "--", ...paths])).length ===
+    0
+  );
 }
 
 async function workspaceMatchesTreeOnPaths(
@@ -284,7 +285,9 @@ async function workspaceMatchesTreeOnPaths(
   workspaceTree: GitObjectId,
   paths: readonly string[],
 ): Promise<boolean> {
-  return (await gitPaths(repository, path, ["diff", "--name-only", "-z", tree, workspaceTree, "--", ...paths])).length === 0;
+  return (
+    (await gitPaths(repository, path, ["diff", "--name-only", "-z", tree, workspaceTree, "--", ...paths])).length === 0
+  );
 }
 
 async function ordinaryPrecheck(
@@ -347,7 +350,7 @@ export async function observeTargetPlacement(
   const worktrees = (await registeredWorktrees(repository))
     .filter((worktree) => worktree.branch === target.target)
     .sort((left, right) => left.path.localeCompare(right.path));
-  const hereSource = input.coordinates.workspace === "here" ? input.hereWorkspacePath ?? null : null;
+  const hereSource = input.coordinates.workspace === "here" ? (input.hereWorkspacePath ?? null) : null;
   if (hereSource !== null) {
     const branch = await currentBranch(repository, hereSource);
     if (branch !== target.target) {
@@ -372,8 +375,10 @@ export async function observeTargetPlacement(
     }
     arms.push({ kind, path: worktree.path });
   }
-  if (input.coordinates.workspace === "here" && hereSource === null) throw new Error("targeted here workspace is unappointed");
-  if (hereSource !== null && !arms.some((arm) => arm.kind === "here")) throw new Error("targeted here workspace is not a registered checkout of its target");
+  if (input.coordinates.workspace === "here" && hereSource === null)
+    throw new Error("targeted here workspace is unappointed");
+  if (hereSource !== null && !arms.some((arm) => arm.kind === "here"))
+    throw new Error("targeted here workspace is not a registered checkout of its target");
   return { kind: "ready", arms };
 }
 
@@ -455,8 +460,18 @@ function recoveryLag(path: string, target: string, detail: string): TargetChecko
   return { kind: "target-checkout-retained", path, target, diagnostic: detail };
 }
 
-type CheckoutInput = Readonly<{ repository: GitRepository; path: string; predecessor: SnapshotId; candidate: SnapshotId; predecessorTree: GitObjectId; candidateTree: GitObjectId }>;
-type CheckoutClassification = Readonly<{ kind: "complete" }> | Readonly<{ kind: "retained" }> | Readonly<{ kind: "recoverable"; action: "candidate-index" | "index-merge" | "worktree-merge" }>;
+type CheckoutInput = Readonly<{
+  repository: GitRepository;
+  path: string;
+  predecessor: SnapshotId;
+  candidate: SnapshotId;
+  predecessorTree: GitObjectId;
+  candidateTree: GitObjectId;
+}>;
+type CheckoutClassification =
+  | Readonly<{ kind: "complete" }>
+  | Readonly<{ kind: "retained" }>
+  | Readonly<{ kind: "recoverable"; action: "candidate-index" | "index-merge" | "worktree-merge" }>;
 
 async function classifyCheckout(input: CheckoutInput): Promise<CheckoutClassification> {
   const { repository, path, predecessorTree, candidateTree } = input;
@@ -464,12 +479,19 @@ async function classifyCheckout(input: CheckoutInput): Promise<CheckoutClassific
   if (changedPaths.length === 0) return { kind: "complete" };
   const workspaceTree = (await captureWorkspaceTree(repository, path)).tree;
   const candidateIndex = await indexMatchesTreeOnPaths(repository, path, candidateTree, changedPaths);
-  const candidateWorkspace = await workspaceMatchesTreeOnPaths(repository, path, candidateTree, workspaceTree, changedPaths);
+  const candidateWorkspace = await workspaceMatchesTreeOnPaths(
+    repository,
+    path,
+    candidateTree,
+    workspaceTree,
+    changedPaths,
+  );
   if (candidateIndex && candidateWorkspace) return { kind: "complete" };
   if (workspaceTree === candidateTree) return { kind: "recoverable", action: "candidate-index" };
   const predecessorIndex = await indexMatchesTreeOnPaths(repository, path, predecessorTree, changedPaths);
   if (predecessorIndex && candidateWorkspace) return { kind: "recoverable", action: "index-merge" };
-  return !predecessorIndex || !(await workspaceMatchesTreeOnPaths(repository, path, predecessorTree, workspaceTree, changedPaths))
+  return !predecessorIndex ||
+    !(await workspaceMatchesTreeOnPaths(repository, path, predecessorTree, workspaceTree, changedPaths))
     ? { kind: "retained" }
     : { kind: "recoverable", action: "worktree-merge" };
 }
@@ -479,7 +501,10 @@ export async function observeTargetCheckoutShape(
   repository: GitRepository,
   input: Readonly<{ path: string; predecessor: SnapshotId; candidate: SnapshotId }>,
 ): Promise<"complete" | "recoverable" | "retained"> {
-  const [predecessorTree, candidateTree] = await Promise.all([commitTree(repository, input.predecessor), commitTree(repository, input.candidate)]);
+  const [predecessorTree, candidateTree] = await Promise.all([
+    commitTree(repository, input.predecessor),
+    commitTree(repository, input.candidate),
+  ]);
   return (await classifyCheckout({ repository, ...input, predecessorTree, candidateTree })).kind;
 }
 
@@ -493,10 +518,26 @@ async function recoverCheckout(input: CheckoutInput): Promise<"complete" | "reco
     return "recovered";
   }
   if (classified.action === "index-merge") {
-    await runGit(repository, ["-C", path, "read-tree", "-i", "-m", gitObjectIdForSnapshot(predecessor), gitObjectIdForSnapshot(candidate)]);
+    await runGit(repository, [
+      "-C",
+      path,
+      "read-tree",
+      "-i",
+      "-m",
+      gitObjectIdForSnapshot(predecessor),
+      gitObjectIdForSnapshot(candidate),
+    ]);
     return "recovered";
   }
-  await runGit(repository, ["-C", path, "read-tree", "-m", "-u", gitObjectIdForSnapshot(predecessor), gitObjectIdForSnapshot(candidate)]);
+  await runGit(repository, [
+    "-C",
+    path,
+    "read-tree",
+    "-m",
+    "-u",
+    gitObjectIdForSnapshot(predecessor),
+    gitObjectIdForSnapshot(candidate),
+  ]);
   return "recovered";
 }
 
@@ -508,7 +549,8 @@ export async function recoverTargetPlacement(
   const delivery = state.delivery;
   if (state.terminal?.kind !== "claimed" || target === undefined || delivery === null) return { effects: [], lag: [] };
   const integration = state.currentIntegration;
-  if (integration === null || await readRef(repository, target) !== integration.snapshot) return { effects: [], lag: [] };
+  if (integration === null || (await readRef(repository, target)) !== integration.snapshot)
+    return { effects: [], lag: [] };
 
   const candidateTree = await commitTree(repository, integration.snapshot);
   const predecessorTree = await commitTree(repository, integration.predecessor);

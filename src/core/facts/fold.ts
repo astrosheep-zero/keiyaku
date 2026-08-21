@@ -59,11 +59,7 @@ function foldArc(state: ContractState, entry: ArcEntry): ContractState {
   return { ...state, currentArc: entry };
 }
 
-function foldEntry(
-  state: ContractState,
-  entry: JournalEntry,
-  attestations: AttestationEntry[],
-): ContractState {
+function foldEntry(state: ContractState, entry: JournalEntry, attestations: AttestationEntry[]): ContractState {
   if (entry.contract !== state.id) foldError(`entry belongs to ${entry.contract}, not ${state.id}`);
   requireActive(state, entry);
 

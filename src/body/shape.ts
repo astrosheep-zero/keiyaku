@@ -7,13 +7,7 @@ export const CONTRACT_SECTIONS = {
   verification: { title: "Verification", required: false },
 } as const;
 
-export const RESERVED_SECTIONS: ReadonlySet<string> = new Set([
-  "gates",
-  "pipeline",
-  "after",
-  "arc",
-  "fulfillment",
-]);
+export const RESERVED_SECTIONS: ReadonlySet<string> = new Set(["gates", "pipeline", "after", "arc", "fulfillment"]);
 
 export type ContractSectionName = keyof typeof CONTRACT_SECTIONS;
 

@@ -41,10 +41,8 @@ export type ToolEvent = Readonly<{
   name: string;
   call: ToolCall;
   truncated?: true;
-}> & (
-  | Readonly<{ phase: "started"; result?: never }>
-  | Readonly<{ phase: "completed"; result: ToolResult }>
-);
+}> &
+  (Readonly<{ phase: "started"; result?: never }> | Readonly<{ phase: "completed"; result: ToolResult }>);
 
 export type AgentEvent =
   | Readonly<{ type: "session"; coordinate: ResumeCoordinate }>
@@ -65,7 +63,7 @@ const AGENT_EVENT_TYPES = {
 
 function object(value: unknown): Readonly<Record<string, unknown>> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Readonly<Record<string, unknown>>
+    ? (value as Readonly<Record<string, unknown>>)
     : null;
 }
 
@@ -93,7 +91,7 @@ function decodeOptionalText(value: unknown): string | null | undefined {
 
 function decodeSearchScope(value: unknown): SearchScope | null | undefined {
   if (value === undefined) return undefined;
-  return typeof value === "string" && Object.hasOwn(SEARCH_SCOPES, value) ? value as SearchScope : null;
+  return typeof value === "string" && Object.hasOwn(SEARCH_SCOPES, value) ? (value as SearchScope) : null;
 }
 
 function decodeRunCall(call: Readonly<Record<string, unknown>>): ToolCall | null {
@@ -129,12 +127,10 @@ function decodeSearchCall(call: Readonly<Record<string, unknown>>): ToolCall | n
 }
 
 function decodeNonnegativeCount(value: unknown): number | null {
-  return Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : null;
+  return Number.isSafeInteger(value) && (value as number) >= 0 ? (value as number) : null;
 }
 
-function decodeDiffstat(
-  value: unknown,
-): Readonly<{ added: number; removed: number }> | null | undefined {
+function decodeDiffstat(value: unknown): Readonly<{ added: number; removed: number }> | null | undefined {
   if (value === undefined) return undefined;
   const diffstat = object(value);
   if (diffstat === null) return null;
@@ -143,13 +139,14 @@ function decodeDiffstat(
   return added === null || removed === null ? null : { added, removed };
 }
 
-function decodeFileChangeMember(
-  value: unknown,
-): Extract<ToolCall, { kind: "fileChange" }>["changes"][number] | null {
+function decodeFileChangeMember(value: unknown): Extract<ToolCall, { kind: "fileChange" }>["changes"][number] | null {
   const change = object(value);
-  if (change === null || (change.op !== "add" && change.op !== "update"
-    && change.op !== "delete" && change.op !== "unspecified")
-    || typeof change.path !== "string") return null;
+  if (
+    change === null ||
+    (change.op !== "add" && change.op !== "update" && change.op !== "delete" && change.op !== "unspecified") ||
+    typeof change.path !== "string"
+  )
+    return null;
   const diffstat = decodeDiffstat(change.diffstat);
   if (diffstat === null) return null;
   return {
@@ -173,12 +170,18 @@ function decodeToolCall(value: unknown): ToolCall | null {
   const call = object(value);
   if (call === null) return null;
   switch (call.kind) {
-    case "run": return decodeRunCall(call);
-    case "read": return decodeReadCall(call);
-    case "search": return decodeSearchCall(call);
-    case "fileChange": return decodeFileChangeCall(call);
-    case "other": return decodeOtherCall(call);
-    default: return null;
+    case "run":
+      return decodeRunCall(call);
+    case "read":
+      return decodeReadCall(call);
+    case "search":
+      return decodeSearchCall(call);
+    case "fileChange":
+      return decodeFileChangeCall(call);
+    case "other":
+      return decodeOtherCall(call);
+    default:
+      return null;
   }
 }
 
@@ -199,13 +202,26 @@ function decodeToolEvent(event: Readonly<Record<string, unknown>>): ToolEvent | 
   if (typeof event.id !== "string" || typeof event.name !== "string") return null;
   const call = decodeToolCall(event.call);
   if (call !== null && event.phase === "started" && event.result === undefined) {
-    return { type: "tool", phase: "started", id: event.id, name: event.name, call,
-      ...(event.truncated === true ? { truncated: true } : {}) };
+    return {
+      type: "tool",
+      phase: "started",
+      id: event.id,
+      name: event.name,
+      call,
+      ...(event.truncated === true ? { truncated: true } : {}),
+    };
   }
   const result = decodeToolResult(event.result);
   if (call !== null && event.phase === "completed" && result !== null) {
-    return { type: "tool", phase: "completed", id: event.id, name: event.name, call, result,
-      ...(event.truncated === true ? { truncated: true } : {}) };
+    return {
+      type: "tool",
+      phase: "completed",
+      id: event.id,
+      name: event.name,
+      call,
+      result,
+      ...(event.truncated === true ? { truncated: true } : {}),
+    };
   }
   return null;
 }
@@ -215,15 +231,20 @@ function decodeTypedEvent(type: AgentEvent["type"], event: Readonly<Record<strin
   const truncated = event.truncated === true ? { truncated: true as const } : {};
   switch (type) {
     case "assistant":
-    case "thought": return typeof event.text === "string" ? { type, text: event.text, ...truncated } : null;
-    case "note": return typeof event.text === "string" ? { type, text: event.text, ...truncated } : null;
-    case "unknown": return typeof event.kind === "string" ? { type, kind: event.kind, ...truncated } : null;
+    case "thought":
+      return typeof event.text === "string" ? { type, text: event.text, ...truncated } : null;
+    case "note":
+      return typeof event.text === "string" ? { type, text: event.text, ...truncated } : null;
+    case "unknown":
+      return typeof event.kind === "string" ? { type, kind: event.kind, ...truncated } : null;
     case "session": {
       const coordinate = decodeResumeCoordinate(event.coordinate);
       return coordinate === null ? null : { type, coordinate };
     }
-    case "tool": return decodeToolEvent(event);
-    default: return type satisfies never;
+    case "tool":
+      return decodeToolEvent(event);
+    default:
+      return type satisfies never;
   }
 }
 
@@ -237,37 +258,50 @@ export function decodeAgentEvent(value: unknown): AgentEvent {
 
 function boundedToolCall(call: ToolCall): Readonly<{ value: ToolCall; truncated: boolean }> {
   switch (call.kind) {
-    case "run": return { value: { kind: call.kind, command: boundedEventText(call.command) }, truncated: call.command.length > AGENT_EVENT_TEXT_LIMIT };
-    case "read": return {
-      value: {
-        kind: call.kind,
-        path: boundedEventText(call.path),
-        ...(call.offset === undefined ? {} : { offset: call.offset }),
-        ...(call.limit === undefined ? {} : { limit: call.limit }),
-      },
-      truncated: call.path.length > AGENT_EVENT_TEXT_LIMIT,
-    };
-    case "search": return {
-      value: {
-        kind: call.kind,
-        query: boundedEventText(call.query),
-        ...(call.scope === undefined ? {} : { scope: call.scope }),
-        ...(call.path === undefined ? {} : { path: boundedEventText(call.path) }),
-        ...(call.glob === undefined ? {} : { glob: boundedEventText(call.glob) }),
-      },
-      truncated: call.query.length > AGENT_EVENT_TEXT_LIMIT
-        || (call.path !== undefined && call.path.length > AGENT_EVENT_TEXT_LIMIT)
-        || (call.glob !== undefined && call.glob.length > AGENT_EVENT_TEXT_LIMIT),
-    };
-    case "fileChange": return {
-      value: {
-        kind: call.kind,
-        changes: call.changes.map((change) => ({ ...change, path: boundedEventText(change.path) })),
-      },
-      truncated: call.changes.some((change) => change.path.length > AGENT_EVENT_TEXT_LIMIT),
-    };
-    case "other": return { value: { kind: call.kind, display: boundedEventText(call.display) }, truncated: call.display.length > AGENT_EVENT_TEXT_LIMIT };
-    default: return call satisfies never;
+    case "run":
+      return {
+        value: { kind: call.kind, command: boundedEventText(call.command) },
+        truncated: call.command.length > AGENT_EVENT_TEXT_LIMIT,
+      };
+    case "read":
+      return {
+        value: {
+          kind: call.kind,
+          path: boundedEventText(call.path),
+          ...(call.offset === undefined ? {} : { offset: call.offset }),
+          ...(call.limit === undefined ? {} : { limit: call.limit }),
+        },
+        truncated: call.path.length > AGENT_EVENT_TEXT_LIMIT,
+      };
+    case "search":
+      return {
+        value: {
+          kind: call.kind,
+          query: boundedEventText(call.query),
+          ...(call.scope === undefined ? {} : { scope: call.scope }),
+          ...(call.path === undefined ? {} : { path: boundedEventText(call.path) }),
+          ...(call.glob === undefined ? {} : { glob: boundedEventText(call.glob) }),
+        },
+        truncated:
+          call.query.length > AGENT_EVENT_TEXT_LIMIT ||
+          (call.path !== undefined && call.path.length > AGENT_EVENT_TEXT_LIMIT) ||
+          (call.glob !== undefined && call.glob.length > AGENT_EVENT_TEXT_LIMIT),
+      };
+    case "fileChange":
+      return {
+        value: {
+          kind: call.kind,
+          changes: call.changes.map((change) => ({ ...change, path: boundedEventText(change.path) })),
+        },
+        truncated: call.changes.some((change) => change.path.length > AGENT_EVENT_TEXT_LIMIT),
+      };
+    case "other":
+      return {
+        value: { kind: call.kind, display: boundedEventText(call.display) },
+        truncated: call.display.length > AGENT_EVENT_TEXT_LIMIT,
+      };
+    default:
+      return call satisfies never;
   }
 }
 
@@ -288,32 +322,54 @@ export function encodeAgentEvent(event: AgentEvent): unknown {
     ...(changed || ("truncated" in event && event.truncated === true) ? { truncated: true } : {}),
   });
   switch (event.type) {
-    case "session": return { type: event.type, coordinate: encodeResumeCoordinate(event.coordinate) };
-    case "assistant": return marked({ type: event.type, text: boundedEventText(event.text) }, event.text.length > AGENT_EVENT_TEXT_LIMIT);
-    case "thought": return marked({ type: event.type, text: boundedThoughtText(event.text) }, event.text.length > AGENT_THOUGHT_TEXT_LIMIT);
-    case "note": return marked({ type: event.type, text: boundedEventText(event.text) }, event.text.length > AGENT_EVENT_TEXT_LIMIT);
-    case "unknown": return marked({ type: event.type, kind: boundedEventText(event.kind) }, event.kind.length > AGENT_EVENT_TEXT_LIMIT);
+    case "session":
+      return { type: event.type, coordinate: encodeResumeCoordinate(event.coordinate) };
+    case "assistant":
+      return marked(
+        { type: event.type, text: boundedEventText(event.text) },
+        event.text.length > AGENT_EVENT_TEXT_LIMIT,
+      );
+    case "thought":
+      return marked(
+        { type: event.type, text: boundedThoughtText(event.text) },
+        event.text.length > AGENT_THOUGHT_TEXT_LIMIT,
+      );
+    case "note":
+      return marked(
+        { type: event.type, text: boundedEventText(event.text) },
+        event.text.length > AGENT_EVENT_TEXT_LIMIT,
+      );
+    case "unknown":
+      return marked(
+        { type: event.type, kind: boundedEventText(event.kind) },
+        event.kind.length > AGENT_EVENT_TEXT_LIMIT,
+      );
     case "tool": {
       const call = boundedToolCall(event.call);
       const name = boundedEventText(event.name);
       const result = event.phase === "completed" ? boundedToolResult(event.result) : undefined;
-      return marked(event.phase === "started" ? {
-          type: event.type,
-          id: event.id,
-          phase: event.phase,
-          name,
-          call: call.value,
-        }
-      : {
-          type: event.type,
-          id: event.id,
-          phase: event.phase,
-          name,
-          call: call.value,
-          result: result!.value,
-        }, name !== event.name || call.truncated || result?.truncated === true);
+      return marked(
+        event.phase === "started"
+          ? {
+              type: event.type,
+              id: event.id,
+              phase: event.phase,
+              name,
+              call: call.value,
+            }
+          : {
+              type: event.type,
+              id: event.id,
+              phase: event.phase,
+              name,
+              call: call.value,
+              result: result!.value,
+            },
+        name !== event.name || call.truncated || result?.truncated === true,
+      );
     }
-    default: return event satisfies never;
+    default:
+      return event satisfies never;
   }
 }
 
@@ -372,9 +428,7 @@ export type ProviderFence = string;
 export type TellReceipt =
   | Readonly<{ evidence: "exact"; tellId: string; kind: string }>
   | Readonly<{ evidence: "fence"; fence: ProviderFence; kind: string }>;
-export type TellSubmission =
-  | Readonly<{ kind: "accepted"; fence: ProviderFence }>
-  | Readonly<{ kind: "turn-ended" }>;
+export type TellSubmission = Readonly<{ kind: "accepted"; fence: ProviderFence }> | Readonly<{ kind: "turn-ended" }>;
 
 export type Session = Readonly<{
   admission: Readonly<{ fence: ProviderFence }>;
@@ -403,13 +457,18 @@ export type ProviderOptionAdmission =
 
 export type ProviderAdapter = Readonly<{
   admitOptions(options: ProviderOptions): ProviderOptionAdmission;
-  fork?(input: Readonly<{
-    session: ResumeCoordinate;
-    at: string;
-    cwd: string;
-  }>): Promise<Readonly<{ session: ResumeCoordinate }>>;
+  fork?(
+    input: Readonly<{
+      session: ResumeCoordinate;
+      at: string;
+      cwd: string;
+    }>,
+  ): Promise<Readonly<{ session: ResumeCoordinate }>>;
   start(input: DriveInput & Readonly<{ session: Readonly<{ kind: "fresh" }> }>): Promise<Session>;
-  resume?(input: DriveInput & Readonly<{
-    session: Readonly<{ kind: "resume"; coordinate: ResumeCoordinate }>;
-  }>): Promise<Session>;
+  resume?(
+    input: DriveInput &
+      Readonly<{
+        session: Readonly<{ kind: "resume"; coordinate: ResumeCoordinate }>;
+      }>,
+  ): Promise<Session>;
 }>;

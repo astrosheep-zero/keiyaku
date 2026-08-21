@@ -105,7 +105,8 @@ function patternMatchesPath(pattern: readonly RegionSegment[], path: readonly st
       continue;
     }
     if (segment === undefined || path[pathIndex] === undefined) continue;
-    if (segmentMatchesPath(segment.characters, Array.from(path[pathIndex]!))) queue.push([patternIndex + 1, pathIndex + 1]);
+    if (segmentMatchesPath(segment.characters, Array.from(path[pathIndex]!)))
+      queue.push([patternIndex + 1, pathIndex + 1]);
   }
   return false;
 }

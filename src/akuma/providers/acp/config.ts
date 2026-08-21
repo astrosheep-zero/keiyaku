@@ -26,15 +26,20 @@ export function decodeAcpConfig(value: unknown): AcpExecutionConfig {
     throw new TypeError("ACP provider config must be an object");
   }
   const config = value as Readonly<Record<string, unknown>>;
-  const unknown = Object.keys(config)
-    .find((key) => !["argvBefore", "argvAfter", "effortArg", "modelArg", "systemPromptArg", "systemPromptMode"].includes(key));
+  const unknown = Object.keys(config).find(
+    (key) => !["argvBefore", "argvAfter", "effortArg", "modelArg", "systemPromptArg", "systemPromptMode"].includes(key),
+  );
   if (unknown !== undefined) throw new TypeError(`ACP provider config has unknown field ${unknown}`);
-  if (!Array.isArray(config.argvBefore)
-    || config.argvBefore.some((arg) => typeof arg !== "string" || arg.trim().length === 0)) {
+  if (
+    !Array.isArray(config.argvBefore) ||
+    config.argvBefore.some((arg) => typeof arg !== "string" || arg.trim().length === 0)
+  ) {
     throw new TypeError("ACP provider config argvBefore must be an array of nonblank strings");
   }
-  if (!Array.isArray(config.argvAfter)
-    || config.argvAfter.some((arg) => typeof arg !== "string" || arg.trim().length === 0)) {
+  if (
+    !Array.isArray(config.argvAfter) ||
+    config.argvAfter.some((arg) => typeof arg !== "string" || arg.trim().length === 0)
+  ) {
     throw new TypeError("ACP provider config argvAfter must be an array of nonblank strings");
   }
   const modelArg = argumentName(config, "modelArg");

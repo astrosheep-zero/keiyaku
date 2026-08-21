@@ -12,14 +12,14 @@ export type NukeInput = Readonly<{
 
 export type NukeResult =
   | Readonly<{
-    kind: "success";
-    world: WorldRoot;
-  }>
+      kind: "success";
+      world: WorldRoot;
+    }>
   | Readonly<{
-    kind: "failed";
-    world: WorldRoot;
-    diagnostic: string;
-  }>;
+      kind: "failed";
+      world: WorldRoot;
+      diagnostic: string;
+    }>;
 
 function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -58,11 +58,7 @@ export async function nukeKeiyaku(input: NukeInput): Promise<NukeResult> {
         }
       }
     };
-    await Promise.all([
-      attempt(deleteAkuma()),
-      attempt(nukeGit(value.world)),
-      attempt(nukeTask(value.world)),
-    ]);
+    await Promise.all([attempt(deleteAkuma()), attempt(nukeGit(value.world)), attempt(nukeTask(value.world))]);
     if (failed) throw firstDiagnostic;
     return { kind: "success", world: value.world };
   } catch (error) {

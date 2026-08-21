@@ -32,11 +32,13 @@ export type SettlementReport = Readonly<{
   lags: readonly SettlementLag[];
 }>;
 
-export function deferredTaskHolderSettlement(input: Readonly<{
-  contractId: ContractId;
-  taskId: TaskId;
-  diagnostic: string;
-}>): SettlementReport {
+export function deferredTaskHolderSettlement(
+  input: Readonly<{
+    contractId: ContractId;
+    taskId: TaskId;
+    diagnostic: string;
+  }>,
+): SettlementReport {
   return { actions: [], lags: [{ kind: "settlement-failed", surface: "task-holder", ...input }] };
 }
 
@@ -61,7 +63,9 @@ function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function taskFailure(result: Exclude<Awaited<ReturnType<typeof settleTask>>, { kind: "changed" | "unchanged" }>): string {
+function taskFailure(
+  result: Exclude<Awaited<ReturnType<typeof settleTask>>, { kind: "changed" | "unchanged" }>,
+): string {
   return result.kind === "retry"
     ? `Task settlement requires retry: ${result.reason}`
     : `Task settlement refused: ${JSON.stringify(result.refusal)}`;
@@ -80,9 +84,19 @@ async function settleTasks(input: SettleTasksInput): Promise<void> {
   const { repository, channel, world, candidate, actions, lags } = input;
   let observation: GitDecisionObservation;
   try {
-    observation = await observeContractsForAdmissionAt(repository, channel, [candidate.id], taskHolderObservationSelection());
+    observation = await observeContractsForAdmissionAt(
+      repository,
+      channel,
+      [candidate.id],
+      taskHolderObservationSelection(),
+    );
   } catch (error) {
-    lags.push({ kind: "settlement-failed", surface: "task-holder", contractId: candidate.id, diagnostic: diagnostic(error) });
+    lags.push({
+      kind: "settlement-failed",
+      surface: "task-holder",
+      contractId: candidate.id,
+      diagnostic: diagnostic(error),
+    });
     return;
   }
   const state = observation.journals.get(candidate.id)?.state ?? null;
@@ -91,7 +105,12 @@ async function settleTasks(input: SettleTasksInput): Promise<void> {
   try {
     holder = (await readTaskHolderProjectionFromDecision(channel, observation)).get(candidate.id) ?? null;
   } catch (error) {
-    lags.push({ kind: "settlement-failed", surface: "task-holder", contractId: candidate.id, diagnostic: diagnostic(error) });
+    lags.push({
+      kind: "settlement-failed",
+      surface: "task-holder",
+      contractId: candidate.id,
+      diagnostic: diagnostic(error),
+    });
     return;
   }
   if (holder === null || holder.disposition !== "held") return;
@@ -101,12 +120,24 @@ async function settleTasks(input: SettleTasksInput): Promise<void> {
   try {
     result = await settleTask(world, taskId);
   } catch (error) {
-    lags.push({ kind: "settlement-failed", surface: "task", contractId: candidate.id, taskId, diagnostic: diagnostic(error) });
+    lags.push({
+      kind: "settlement-failed",
+      surface: "task",
+      contractId: candidate.id,
+      taskId,
+      diagnostic: diagnostic(error),
+    });
     return;
   }
   if (result.kind === "changed") actions.push({ kind: "task", taskId, action: "done" });
   else if (result.kind !== "unchanged") {
-    lags.push({ kind: "settlement-failed", surface: "task", contractId: candidate.id, taskId, diagnostic: taskFailure(result) });
+    lags.push({
+      kind: "settlement-failed",
+      surface: "task",
+      contractId: candidate.id,
+      taskId,
+      diagnostic: taskFailure(result),
+    });
     return;
   }
 
@@ -122,14 +153,27 @@ async function settleTasks(input: SettleTasksInput): Promise<void> {
       });
     }
   } catch (error) {
-    lags.push({ kind: "settlement-failed", surface: "task-holder", contractId: candidate.id, taskId, diagnostic: diagnostic(error) });
+    lags.push({
+      kind: "settlement-failed",
+      surface: "task-holder",
+      contractId: candidate.id,
+      taskId,
+      diagnostic: diagnostic(error),
+    });
   }
 }
 
-async function settleNamespace(state: ContractState, effects: readonly Effect[], actions: SettlementAction[], lags: SettlementLag[]): Promise<void> {
+async function settleNamespace(
+  state: ContractState,
+  effects: readonly Effect[],
+  actions: SettlementAction[],
+  lags: SettlementLag[],
+): Promise<void> {
   if (state.terminal !== null || state.coordinates.workspace !== "worktree") return;
-  const worktrees = effects.filter((effect): effect is Extract<Effect, { kind: "worktree" }> =>
-    effect.kind === "worktree" && effect.action !== "removed");
+  const worktrees = effects.filter(
+    (effect): effect is Extract<Effect, { kind: "worktree" }> =>
+      effect.kind === "worktree" && effect.action !== "removed",
+  );
   for (const effect of worktrees) {
     try {
       actions.push({
@@ -151,7 +195,8 @@ async function settleNamespace(state: ContractState, effects: readonly Effect[],
 
 async function settleObserved(input: SettlementInput): Promise<SettlementReport> {
   if (input.state === null) return { actions: [], lags: [] };
-  const actions: SettlementAction[] = [], lags: SettlementLag[] = [];
+  const actions: SettlementAction[] = [],
+    lags: SettlementLag[] = [];
   if (input.state.terminal?.kind === "claimed") {
     try {
       await settleTasks({
@@ -163,7 +208,12 @@ async function settleObserved(input: SettlementInput): Promise<SettlementReport>
         lags,
       });
     } catch (error) {
-      lags.push({ kind: "settlement-failed", surface: "task", contractId: input.state.id, diagnostic: diagnostic(error) });
+      lags.push({
+        kind: "settlement-failed",
+        surface: "task",
+        contractId: input.state.id,
+        diagnostic: diagnostic(error),
+      });
     }
   }
   await settleNamespace(input.state, input.effects, actions, lags);
@@ -181,5 +231,7 @@ export async function settle(input: SettlementInput): Promise<SettlementReport> 
 
 export async function settleAll(input: SettlementBatchInput): Promise<readonly SettlementReport[]> {
   const repository = onPrimaryWorktree(input.repository);
-  return await Promise.all(input.contracts.map((contract) => settleObserved({ repository, channel: input.channel, ...contract })));
+  return await Promise.all(
+    input.contracts.map((contract) => settleObserved({ repository, channel: input.channel, ...contract })),
+  );
 }

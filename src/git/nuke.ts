@@ -1,11 +1,7 @@
 import { access } from "node:fs/promises";
 import { nukeHereAppointments } from "../contract-worktree.js";
 import type { ContractId } from "../core/facts/types.js";
-import {
-  nukeEmptyPlaceAuthority,
-  readPlaceRegister,
-  releaseManagedWorktrees,
-} from "../workspace-place.js";
+import { nukeEmptyPlaceAuthority, readPlaceRegister, releaseManagedWorktrees } from "../workspace-place.js";
 import type { WorldRoot } from "../world.js";
 import { nukeWorktreeHookResidue } from "./hooks.js";
 import { runGit, type GitRepository } from "./process.js";
@@ -14,11 +10,13 @@ import { worktreePath } from "./workspace.js";
 
 type ManagedEntry = Readonly<{ contract: ContractId; path: string }>;
 
-async function managedCustody(repository: GitRepository): Promise<Readonly<{
-  entries: readonly ManagedEntry[];
-  refs: readonly string[];
-  state: boolean;
-}>> {
+async function managedCustody(repository: GitRepository): Promise<
+  Readonly<{
+    entries: readonly ManagedEntry[];
+    refs: readonly string[];
+    state: boolean;
+  }>
+> {
   const register = await readPlaceRegister(repository);
   const topology = new Map((await registeredWorktrees(repository)).map((entry) => [entry.path, entry]));
   const entries: ManagedEntry[] = [];
@@ -26,17 +24,32 @@ async function managedCustody(repository: GitRepository): Promise<Readonly<{
     const path = worktreePath(repository, appointment.place);
     const registered = topology.get(path);
     if (registered === undefined) {
-      try { await access(path); } catch { entries.push({ contract: appointment.contract, path }); continue; }
+      try {
+        await access(path);
+      } catch {
+        entries.push({ contract: appointment.contract, path });
+        continue;
+      }
       throw new Error(`managed Place path has foreign custody: ${path}`);
     }
     if (registered.branch !== null) throw new Error(`managed Place path has a branch: ${path}`);
     entries.push({ contract: appointment.contract, path });
   }
-  const refs = (await runGit(repository, [
-    "for-each-ref", "--format=%(refname)", "refs/heads/keiyaku-delivery", "refs/heads/keiyaku-candidate",
-  ])).toString("utf8").split("\n").filter((ref) => ref.length > 0);
-  const state = await runGit(repository, ["show-ref", "--verify", "--quiet", "refs/heads/keiyaku-state"])
-    .then(() => true, () => false);
+  const refs = (
+    await runGit(repository, [
+      "for-each-ref",
+      "--format=%(refname)",
+      "refs/heads/keiyaku-delivery",
+      "refs/heads/keiyaku-candidate",
+    ])
+  )
+    .toString("utf8")
+    .split("\n")
+    .filter((ref) => ref.length > 0);
+  const state = await runGit(repository, ["show-ref", "--verify", "--quiet", "refs/heads/keiyaku-state"]).then(
+    () => true,
+    () => false,
+  );
   return { entries, refs, state };
 }
 
@@ -44,7 +57,11 @@ async function removeManagedWorktree(repository: GitRepository, entry: ManagedEn
   const topology = await registeredWorktrees(repository);
   const registered = topology.find((candidate) => candidate.path === entry.path);
   if (registered === undefined) {
-    try { await access(entry.path); } catch { return; }
+    try {
+      await access(entry.path);
+    } catch {
+      return;
+    }
     throw new Error(`managed Place path has foreign custody: ${entry.path}`);
   }
   if (registered.branch !== null) throw new Error(`managed Place path has a branch: ${entry.path}`);
@@ -53,7 +70,11 @@ async function removeManagedWorktree(repository: GitRepository, entry: ManagedEn
   if ((await registeredWorktrees(repository)).some((candidate) => candidate.path === entry.path)) {
     throw new Error(`managed Place worktree remains registered: ${entry.path}`);
   }
-  try { await access(entry.path); } catch { return; }
+  try {
+    await access(entry.path);
+  } catch {
+    return;
+  }
   throw new Error(`managed Place worktree remains present: ${entry.path}`);
 }
 
@@ -66,8 +87,9 @@ async function removeOwnedRefs(repository: GitRepository, refs: readonly string[
 
 export async function nukeGit(world: WorldRoot): Promise<void> {
   let repository: GitRepository;
-  try { repository = await repositoryAt(world); }
-  catch (error) {
+  try {
+    repository = await repositoryAt(world);
+  } catch (error) {
     if (error instanceof NoGitWorldError) return;
     throw error;
   }
@@ -80,7 +102,9 @@ export async function nukeGit(world: WorldRoot): Promise<void> {
   await nukeEmptyPlaceAuthority(repository);
   await removeOwnedRefs(repository, custody.refs);
   if (custody.state) {
-    const oid = (await runGit(repository, ["rev-parse", "--verify", "refs/heads/keiyaku-state"])).toString("utf8").trim();
+    const oid = (await runGit(repository, ["rev-parse", "--verify", "refs/heads/keiyaku-state"]))
+      .toString("utf8")
+      .trim();
     await runGit(repository, ["update-ref", "--no-deref", "-d", "refs/heads/keiyaku-state", oid]);
   }
 }

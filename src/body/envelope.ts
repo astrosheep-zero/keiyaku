@@ -11,8 +11,9 @@ function nonblankRaw(document: DocumentNode, node: MarkdownBlockNode): boolean {
 }
 
 function topLevelSections(document: DocumentNode): readonly SectionNode[] {
-  return indexedHeadings(indexDocument(document), { level: 2 })
-    .filter((node): node is SectionNode => node.type === "section");
+  return indexedHeadings(indexDocument(document), { level: 2 }).filter(
+    (node): node is SectionNode => node.type === "section",
+  );
 }
 
 export function decodeDocumentEnvelope(
@@ -26,8 +27,9 @@ export function decodeDocumentEnvelope(
 }> {
   const document = parseToAST(source);
   if (document.frontmatter !== undefined) refusal(`${kind} document may not contain frontmatter`);
-  const titles = indexedHeadings(indexDocument(document), { level: 1 })
-    .filter((node): node is SectionNode => node.type === "section");
+  const titles = indexedHeadings(indexDocument(document), { level: 1 }).filter(
+    (node): node is SectionNode => node.type === "section",
+  );
   if (titles.length !== 1) refusal(`${kind} document requires exactly one H1 title`);
   const title = titles[0]!;
   if (title.children.some((node) => nonblankRaw(document, node))) {

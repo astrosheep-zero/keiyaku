@@ -16,7 +16,12 @@ import {
   type AkumaAction,
   type ParsedAkumaCommand,
 } from "./commands/akuma.js";
-import { INSTALL_USAGE, parseInstallCommand, renderInstallHelp, type ParsedInstallCommand } from "./commands/install.js";
+import {
+  INSTALL_USAGE,
+  parseInstallCommand,
+  renderInstallHelp,
+  type ParsedInstallCommand,
+} from "./commands/install.js";
 import {
   CONTRACT_COMMAND_SPECS,
   type ContractCommand as Command,
@@ -80,11 +85,16 @@ export function renderCommandUsage(command: ParsedCommand): string {
 
 export function renderHelp(coordinate: CliHelpCoordinate): string {
   switch (coordinate.kind) {
-    case "root": return renderRootHelp();
-    case "contract": return renderContractHelp(coordinate.command);
-    case "task": return renderTaskHelp(coordinate.action);
-    case "install": return renderInstallHelp();
-    case "akuma": return renderAkumaHelp(coordinate.action);
+    case "root":
+      return renderRootHelp();
+    case "contract":
+      return renderContractHelp(coordinate.command);
+    case "task":
+      return renderTaskHelp(coordinate.action);
+    case "install":
+      return renderInstallHelp();
+    case "akuma":
+      return renderAkumaHelp(coordinate.action);
   }
 }
 
@@ -171,7 +181,10 @@ export function assertExplicitRepoUse(command: ParsedCommand, repo: string | und
   if (repo !== undefined && !commandRepoPolicy(command).acceptsExplicit) refuseUnusedRepo(command);
 }
 
-function optionalFlag(flags: Readonly<Record<string, string | true | readonly string[]>>, name: string): string | undefined {
+function optionalFlag(
+  flags: Readonly<Record<string, string | true | readonly string[]>>,
+  name: string,
+): string | undefined {
   const value = flags[name];
   return typeof value === "string" ? value : undefined;
 }
@@ -261,7 +274,7 @@ function scanArgv(argv: readonly string[]): ParsedParts {
     refuse(command, `${command} requires stdin`);
   }
 
-  const output = state.flags.json === true ? "json" as const : "text" as const;
+  const output = state.flags.json === true ? ("json" as const) : ("text" as const);
   const actor = optionalFlag(state.flags, "actor");
   return { command, ...state, output, ...(actor === undefined ? {} : { actor }) };
 }
@@ -269,7 +282,8 @@ function scanArgv(argv: readonly string[]): ParsedParts {
 function parseBind(parts: ParsedParts): ParsedBind {
   const task = optionalFlag(parts.flags, "task");
   const target = optionalFlag(parts.flags, "target");
-  const after = parts.flags.after === undefined ? [] : Array.isArray(parts.flags.after) ? parts.flags.after : [parts.flags.after];
+  const after =
+    parts.flags.after === undefined ? [] : Array.isArray(parts.flags.after) ? parts.flags.after : [parts.flags.after];
   const gates = parseGateBundleNames(parts, "bind");
   return {
     command: "bind",
@@ -285,8 +299,10 @@ function parseBind(parts: ParsedParts): ParsedBind {
 
 function parseAmend(parts: ParsedParts): ParsedAmend {
   const contract = parts.positionals[0];
-  const after = parts.flags.after === undefined ? [] : Array.isArray(parts.flags.after) ? parts.flags.after : [parts.flags.after];
-  if (parts.flags["clear-after"] === true && after.length > 0) refuse("amend", "--clear-after and --after are mutually exclusive");
+  const after =
+    parts.flags.after === undefined ? [] : Array.isArray(parts.flags.after) ? parts.flags.after : [parts.flags.after];
+  if (parts.flags["clear-after"] === true && after.length > 0)
+    refuse("amend", "--clear-after and --after are mutually exclusive");
   const gates = parseGateBundleNames(parts, "amend");
   if (!parts.stdin && parts.flags.after === undefined && parts.flags["clear-after"] !== true && gates === undefined) {
     refuse("amend", "amend requires stdin or --after, --clear-after, or --gates");
@@ -395,7 +411,8 @@ function parseRegion(parts: ParsedParts): ParsedRegion {
   const contract = parts.positionals[0];
   const path = optionalFlag(parts.flags, "path");
   const overlap = parts.flags.overlap === true;
-  if (path !== undefined && (contract !== undefined || overlap)) refuse("region", "--path cannot combine with a contract or --overlap");
+  if (path !== undefined && (contract !== undefined || overlap))
+    refuse("region", "--path cannot combine with a contract or --overlap");
   return {
     command: "region",
     ...(contract === undefined ? {} : { contract }),
@@ -419,7 +436,9 @@ function parseLs(parts: ParsedParts): ParsedLs {
   }
 }
 
-function invocationOptions(argv: readonly string[]): Readonly<{ cwd?: string; repo?: string; commandArgv: readonly string[] }> {
+function invocationOptions(
+  argv: readonly string[],
+): Readonly<{ cwd?: string; repo?: string; commandArgv: readonly string[] }> {
   let cwd: string | undefined;
   let repo: string | undefined;
   let stdinSeen = false;
@@ -472,15 +491,24 @@ function helpCoordinate(argv: readonly string[]): CliHelpCoordinate | null {
 
 function parseCommand(parts: ParsedParts): ParsedCommand {
   switch (parts.command) {
-    case "bind": return parseBind(parts);
-    case "amend": return parseAmend(parts);
-    case "deliver": return parseDeliver(parts);
-    case "review": return parseReview(parts);
-    case "arc": return parseArc(parts);
-    case "abandon": return parseAbandon(parts);
-    case "status": return parseStatus(parts);
-    case "show": return parseShow(parts);
-    case "ls": return parseLs(parts);
+    case "bind":
+      return parseBind(parts);
+    case "amend":
+      return parseAmend(parts);
+    case "deliver":
+      return parseDeliver(parts);
+    case "review":
+      return parseReview(parts);
+    case "arc":
+      return parseArc(parts);
+    case "abandon":
+      return parseAbandon(parts);
+    case "status":
+      return parseStatus(parts);
+    case "show":
+      return parseShow(parts);
+    case "ls":
+      return parseLs(parts);
     case "audit": {
       const contract = parts.positionals[0];
       return {
@@ -505,8 +533,10 @@ function parseCommand(parts: ParsedParts): ParsedCommand {
       const confirm = optionalFlag(parts.flags, "confirm");
       return { command: "nuke", ...(confirm === undefined ? {} : { confirm }), output: parts.output };
     }
-    case "settings": return { command: "settings", output: parts.output };
-    case "region": return parseRegion(parts);
+    case "settings":
+      return { command: "settings", output: parts.output };
+    case "region":
+      return parseRegion(parts);
   }
 }
 
@@ -514,20 +544,17 @@ export function parseArgv(argv: readonly string[]): ParsedInvocation {
   const invocation = invocationOptions(argv);
   const help = helpCoordinate(invocation.commandArgv);
   if (help !== null) return { help };
-  if (invocation.commandArgv[0] === "ls"
-    && (invocation.commandArgv.length === 1
-      || (invocation.commandArgv.length === 2 && invocation.commandArgv[1] === "--json"))) {
+  if (
+    invocation.commandArgv[0] === "ls" &&
+    (invocation.commandArgv.length === 1 ||
+      (invocation.commandArgv.length === 2 && invocation.commandArgv[1] === "--json"))
+  ) {
     return { help: { kind: "contract", command: "ls" } };
   }
-  const task = invocation.commandArgv[0] === "task"
-    ? parseTaskCommand(invocation.commandArgv.slice(1))
-    : undefined;
-  const install = invocation.commandArgv[0] === "install"
-    ? parseInstallCommand(invocation.commandArgv.slice(1))
-    : undefined;
-  const akuma = isAkumaAction(invocation.commandArgv[0])
-    ? parseAkumaCommand(invocation.commandArgv)
-    : undefined;
+  const task = invocation.commandArgv[0] === "task" ? parseTaskCommand(invocation.commandArgv.slice(1)) : undefined;
+  const install =
+    invocation.commandArgv[0] === "install" ? parseInstallCommand(invocation.commandArgv.slice(1)) : undefined;
+  const akuma = isAkumaAction(invocation.commandArgv[0]) ? parseAkumaCommand(invocation.commandArgv) : undefined;
   const parsed: ParsedExecution = {
     ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
     ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),

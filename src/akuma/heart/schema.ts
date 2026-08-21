@@ -3,15 +3,12 @@ import type { DatabaseSync } from "node:sqlite";
 const HEART_SCHEMA_VERSION = 20;
 const LEASH_SCHEMA_VERSION = 4;
 
-function assertSchemaVersion(
-  database: DatabaseSync,
-  table: "akuma_schema" | "leash_schema",
-  expected: number,
-): void {
-  const row = database.prepare(`SELECT version FROM ${table} WHERE singleton = 1`).get() as { version: number } | undefined;
-  if (row?.version !== expected) throw new Error(
-    `Akuma ${table === "akuma_schema" ? "heart" : "leash"} schema version must be ${expected}`,
-  );
+function assertSchemaVersion(database: DatabaseSync, table: "akuma_schema" | "leash_schema", expected: number): void {
+  const row = database.prepare(`SELECT version FROM ${table} WHERE singleton = 1`).get() as
+    | { version: number }
+    | undefined;
+  if (row?.version !== expected)
+    throw new Error(`Akuma ${table === "akuma_schema" ? "heart" : "leash"} schema version must be ${expected}`);
 }
 
 export function assertHeartSchemaVersion(database: DatabaseSync): void {

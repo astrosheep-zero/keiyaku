@@ -2,19 +2,8 @@ import { lstat, readdir, rm } from "node:fs/promises";
 import { nukeAliases } from "../alias/index.js";
 import type { WorldRoot } from "../world.js";
 import { CONTROL_RESPONSE_MS } from "./body.js";
-import {
-  HeldAkumaLeash,
-  readHeart,
-  readKill,
-  requestStop,
-} from "./heart/index.js";
-import {
-  akuIdFromDirectoryName,
-  akumaPaths,
-  akumaRunRoot,
-  type AkuId,
-  type AkumaPaths,
-} from "./identity.js";
+import { HeldAkumaLeash, readHeart, readKill, requestStop } from "./heart/index.js";
+import { akuIdFromDirectoryName, akumaPaths, akumaRunRoot, type AkuId, type AkumaPaths } from "./identity.js";
 
 const POLL_MS = 100;
 
@@ -49,17 +38,17 @@ async function stopRunningAkuma(entry: NukeAkumaEntry): Promise<HeldAkumaLeash> 
   if (leash === null) throw new Error(`Akuma ${entry.id} could not be stopped: unavailable`);
   try {
     if (request.kind === "already-killed" || request.kind === "already-stopped") return leash;
-    if (await readKill(entry.paths, request.body.sequence) !== null) return leash;
+    if ((await readKill(entry.paths, request.body.sequence)) !== null) return leash;
     const current = await readHeart(entry.paths);
     if (current.latestBody?.sequence !== request.body.sequence) {
-      if (await readKill(entry.paths, request.body.sequence) !== null) return leash;
+      if ((await readKill(entry.paths, request.body.sequence)) !== null) return leash;
       throw new Error(`Akuma ${entry.id} could not be stopped: unavailable`);
     }
     if (current.latestBody.end !== "put-down") {
       await leash.clearStop(entry.paths);
       throw new Error(`Akuma ${entry.id} could not be stopped: untidy`);
     }
-    if (await leash.settleStop(entry.paths, request.body.sequence) === null) {
+    if ((await leash.settleStop(entry.paths, request.body.sequence)) === null) {
       throw new Error(`Akuma ${entry.id} could not be stopped: unavailable`);
     }
     return leash;
@@ -79,8 +68,7 @@ async function removeRegularFile(path: string): Promise<void> {
 }
 
 async function removeAkumaEntry(entry: NukeAkumaEntry): Promise<void> {
-  for (const path of [entry.paths.heart, entry.paths.log,
-    `${entry.paths.heart}-wal`, `${entry.paths.heart}-shm`]) {
+  for (const path of [entry.paths.heart, entry.paths.log, `${entry.paths.heart}-wal`, `${entry.paths.heart}-shm`]) {
     await removeRegularFile(path);
   }
 }
@@ -120,9 +108,10 @@ export async function stopAkuma(world: WorldRoot): Promise<() => Promise<void>> 
   try {
     for (const entry of entries) {
       const snapshot = await readHeart(entry.paths);
-      const leash = snapshot.soul !== null && snapshot.latestBody?.end === undefined
-        ? await stopRunningAkuma(entry)
-        : await takeLeashUntil(entry.paths, performance.now() + CONTROL_RESPONSE_MS);
+      const leash =
+        snapshot.soul !== null && snapshot.latestBody?.end === undefined
+          ? await stopRunningAkuma(entry)
+          : await takeLeashUntil(entry.paths, performance.now() + CONTROL_RESPONSE_MS);
       if (leash === null) throw new Error(`Akuma ${entry.id} could not be verified stopped`);
       try {
         const after = await readHeart(entry.paths);

@@ -37,7 +37,8 @@ function reverseDependents(
       index.set(prerequisite, dependents);
     }
   }
-  for (const dependents of index.values()) dependents.sort((left, right) => left.state.id.localeCompare(right.state.id));
+  for (const dependents of index.values())
+    dependents.sort((left, right) => left.state.id.localeCompare(right.state.id));
   return index;
 }
 
@@ -54,16 +55,18 @@ function appendAccepted<Value>(
   };
 }
 
-export async function continueDeliveredDependents<Value extends object>(input: Readonly<{
-  scope: RepositoryScope;
-  channel: GitDecodeChannel;
-  contractId: ContractId;
-  accepted: AcceptedIntent<Value>;
-  deriveDocument: (state: ContractState) => DocumentDerivation;
-  resolveHereWorkspace?: HereWorkspaceResolver;
-  actor?: import("../core/facts/types.js").ActorId;
-  signal?: AbortSignal;
-}>): Promise<AcceptedIntent<Value & Readonly<{ continuation?: ContinuationReport }>>> {
+export async function continueDeliveredDependents<Value extends object>(
+  input: Readonly<{
+    scope: RepositoryScope;
+    channel: GitDecodeChannel;
+    contractId: ContractId;
+    accepted: AcceptedIntent<Value>;
+    deriveDocument: (state: ContractState) => DocumentDerivation;
+    resolveHereWorkspace?: HereWorkspaceResolver;
+    actor?: import("../core/facts/types.js").ActorId;
+    signal?: AbortSignal;
+  }>,
+): Promise<AcceptedIntent<Value & Readonly<{ continuation?: ContinuationReport }>>> {
   const world = await withGitReadObservation(
     input.scope,
     input.channel,
@@ -82,10 +85,13 @@ export async function continueDeliveredDependents<Value extends object>(input: R
     for (const candidate of dependents.get(parent) ?? []) {
       const contractId = candidate.state.id;
       if (
-        attempted.has(contractId)
-        || !candidate.state.terms.after.every((dependency) =>
-          newlyClaimed.has(dependency) || world.eligibility.get(dependency)?.terminal?.kind === "claimed")
-      ) continue;
+        attempted.has(contractId) ||
+        !candidate.state.terms.after.every(
+          (dependency) =>
+            newlyClaimed.has(dependency) || world.eligibility.get(dependency)?.terminal?.kind === "claimed",
+        )
+      )
+        continue;
       attempted.add(contractId);
       const child = await continueDeliveryOperation({
         scope: input.scope,
@@ -123,16 +129,18 @@ export async function continueDeliveredDependents<Value extends object>(input: R
   };
 }
 
-export async function continueAcceptedCompletion<Value extends Readonly<{ completion?: unknown }>>(input: Readonly<{
-  scope: RepositoryScope;
-  channel: GitDecodeChannel;
-  contractId: ContractId;
-  accepted: AcceptedIntent<Value>;
-  deriveDocument: (state: ContractState) => DocumentDerivation;
-  resolveHereWorkspace?: HereWorkspaceResolver;
-  actor?: import("../core/facts/types.js").ActorId;
-  signal?: AbortSignal;
-}>): Promise<AcceptedIntent<Value & Readonly<{ continuation?: ContinuationReport }>>> {
+export async function continueAcceptedCompletion<Value extends Readonly<{ completion?: unknown }>>(
+  input: Readonly<{
+    scope: RepositoryScope;
+    channel: GitDecodeChannel;
+    contractId: ContractId;
+    accepted: AcceptedIntent<Value>;
+    deriveDocument: (state: ContractState) => DocumentDerivation;
+    resolveHereWorkspace?: HereWorkspaceResolver;
+    actor?: import("../core/facts/types.js").ActorId;
+    signal?: AbortSignal;
+  }>,
+): Promise<AcceptedIntent<Value & Readonly<{ continuation?: ContinuationReport }>>> {
   if (input.accepted.value.completion === undefined) return input.accepted;
   return await continueDeliveredDependents(input);
 }

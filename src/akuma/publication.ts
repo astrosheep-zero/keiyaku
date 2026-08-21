@@ -1,16 +1,5 @@
-import {
-  HeldAkumaLeash,
-  initializeHeart,
-  readHeart,
-  readSeal,
-  readSoul,
-  type Soul,
-} from "./heart/index.js";
-import {
-  allocateAkumaDirectory,
-  type AllocatedAkuma,
-  type AkumaPaths,
-} from "./identity.js";
+import { HeldAkumaLeash, initializeHeart, readHeart, readSeal, readSoul, type Soul } from "./heart/index.js";
+import { allocateAkumaDirectory, type AllocatedAkuma, type AkumaPaths } from "./identity.js";
 import { abortableDelay } from "./abort.js";
 
 const POLL_MS = 100;
@@ -29,12 +18,14 @@ async function settleTimedOutBirth(paths: AkumaPaths): Promise<Soul | null> {
       evidence: "call-timeout",
       at: new Date().toISOString(),
     });
-  } finally { leash.release(); }
+  } finally {
+    leash.release();
+  }
   if (result === "sealed") {
     const seal = await readSeal(paths);
-    throw new Error(seal?.evidence === "call-timeout" || seal === null
-      ? "Akuma body failed before birth"
-      : seal.evidence);
+    throw new Error(
+      seal?.evidence === "call-timeout" || seal === null ? "Akuma body failed before birth" : seal.evidence,
+    );
   }
   const soul = await readSoul(paths);
   if (soul === null) throw new Error("Akuma birth settled without a soul");
@@ -44,8 +35,11 @@ async function settleTimedOutBirth(paths: AkumaPaths): Promise<Soul | null> {
 async function observedBirthFailure(paths: AkumaPaths): Promise<string | null> {
   const leash = await HeldAkumaLeash.try(paths);
   if (leash === null) return null;
-  try { return leash.readSeal()?.evidence ?? null; }
-  finally { leash.release(); }
+  try {
+    return leash.readSeal()?.evidence ?? null;
+  } finally {
+    leash.release();
+  }
 }
 
 async function awaitBirth(paths: AkumaPaths, signal?: AbortSignal): Promise<Soul> {
@@ -80,7 +74,9 @@ async function awaitAsleepBirth(paths: AkumaPaths): Promise<void> {
     if ((await readHeart(paths)).latestBody?.end !== "exited") {
       throw new Error("Forked Akuma birth body did not exit cleanly");
     }
-  } finally { leash.release(); }
+  } finally {
+    leash.release();
+  }
 }
 
 async function sealLocalFailure(allocated: AllocatedAkuma, error: unknown): Promise<void> {
@@ -92,18 +88,24 @@ async function sealLocalFailure(allocated: AllocatedAkuma, error: unknown): Prom
         evidence: diagnostic(error),
         at: new Date().toISOString(),
       });
-    } finally { leash.release(); }
-  } catch { /* the original local publication failure remains authoritative */ }
+    } finally {
+      leash.release();
+    }
+  } catch {
+    /* the original local publication failure remains authoritative */
+  }
 }
 
-export async function publishAkuma(input: Readonly<{
-  worldPath: string;
-  archetype: string;
-  awaitAsleep?: boolean;
-  reserve?(allocated: AllocatedAkuma): Promise<void>;
-  launch(allocated: AllocatedAkuma): Promise<void>;
-  signal?: AbortSignal;
-}>): Promise<AllocatedAkuma> {
+export async function publishAkuma(
+  input: Readonly<{
+    worldPath: string;
+    archetype: string;
+    awaitAsleep?: boolean;
+    reserve?(allocated: AllocatedAkuma): Promise<void>;
+    launch(allocated: AllocatedAkuma): Promise<void>;
+    signal?: AbortSignal;
+  }>,
+): Promise<AllocatedAkuma> {
   input.signal?.throwIfAborted();
   const allocated = await allocateAkumaDirectory({ worldRoot: input.worldPath, archetype: input.archetype });
   try {

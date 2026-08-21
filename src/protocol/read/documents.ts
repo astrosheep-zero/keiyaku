@@ -8,9 +8,7 @@ export type ContractDocumentProjection = Readonly<{
 }>;
 
 /** Read every live contract document from one immutable Git snapshot. */
-export async function readDocuments(
-  observation: GitReadObservation,
-): Promise<readonly ContractDocumentProjection[]> {
+export async function readDocuments(observation: GitReadObservation): Promise<readonly ContractDocumentProjection[]> {
   const observed = await observeActiveContractWorld(observation);
   const documents: ContractDocumentProjection[] = [];
   for (const [contract, observation] of observed.contracts) {

@@ -11,7 +11,11 @@ export type AbandonInput = Readonly<{
 
 export type AbandonRefusal = Readonly<{ kind: "contract-missing" | "terminal"; contractId: ContractId }>;
 
-export function decideAbandon({ input, attempt, observation }: DecideInput<AbandonInput>): OfferDecision<AbandonRefusal> {
+export function decideAbandon({
+  input,
+  attempt,
+  observation,
+}: DecideInput<AbandonInput>): OfferDecision<AbandonRefusal> {
   const id = input.contractId;
   const current = activeContract(observation, id);
   if ("kind" in current) return { kind: "refused", refusal: current };

@@ -5,10 +5,7 @@ export type ContractsObservation = ReadonlyMap<ContractId, ContractState | null>
 export type PrerequisiteStatus = "unknown" | "pending" | "claimed";
 
 /** Read one requested identity; a missing key violates the observation contract. */
-export function contractState(
-  observation: ContractsObservation,
-  contract: ContractId,
-): ContractState | null {
+export function contractState(observation: ContractsObservation, contract: ContractId): ContractState | null {
   const state = observation.get(contract);
   if (state === undefined) {
     throw new Error(`missing contract decision observation: ${contract}`);
@@ -49,9 +46,6 @@ export function activeContract(
   return state;
 }
 
-export function documentIsCurrent(
-  state: ContractState,
-  document: DocumentKey,
-): boolean {
+export function documentIsCurrent(state: ContractState, document: DocumentKey): boolean {
   return state.terms.document.key === document;
 }

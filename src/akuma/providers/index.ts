@@ -36,17 +36,22 @@ async function adapterFor(execution: ProviderExecution): Promise<ProviderAdapter
       ? claudeProvider
       : createClaudeProvider(execution);
   }
-  if (execution.kind === "codex-app-server") return (await import("./codex-app-server/index.js")).createCodexAppServerProvider(execution);
-  if (execution.kind === "grok-build") return (await import("./grok-build/index.js")).createGrokBuildProvider(execution);
-  if (execution.kind === "opencode-sdk") return (await import("./opencode-sdk/index.js")).createOpencodeProvider(execution);
+  if (execution.kind === "codex-app-server")
+    return (await import("./codex-app-server/index.js")).createCodexAppServerProvider(execution);
+  if (execution.kind === "grok-build")
+    return (await import("./grok-build/index.js")).createGrokBuildProvider(execution);
+  if (execution.kind === "opencode-sdk")
+    return (await import("./opencode-sdk/index.js")).createOpencodeProvider(execution);
   if (execution.kind === "pi") return (await import("./pi/index.js")).createPiProvider(execution);
   throw new TypeError(`unknown Akuma provider kind ${(execution as ProviderExecution).kind}`);
 }
 
-export async function resolveProviderExecution(input: unknown): Promise<Readonly<{
-  execution: ProviderExecution;
-  adapter: ProviderAdapter;
-}>> {
+export async function resolveProviderExecution(input: unknown): Promise<
+  Readonly<{
+    execution: ProviderExecution;
+    adapter: ProviderAdapter;
+  }>
+> {
   const execution = decodeProviderExecution(input);
   return Object.freeze({ execution, adapter: await adapterFor(execution) });
 }

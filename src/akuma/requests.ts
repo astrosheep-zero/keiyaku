@@ -29,7 +29,10 @@ const POLL_MS = 100;
 
 export class AkumaBodyRequestError extends Error {
   readonly kind = "akuma-body-request";
-  constructor(readonly outcome: "refused" | "voided", readonly diagnostic: string) {
+  constructor(
+    readonly outcome: "refused" | "voided",
+    readonly diagnostic: string,
+  ) {
     super(`Akuma body request ${outcome}: ${diagnostic}`);
     this.name = "AkumaBodyRequestError";
   }
@@ -42,11 +45,13 @@ export function injectedBodyRequests(): string | null {
   return directory;
 }
 
-async function requestBody(input: Readonly<{
-  directory: string;
-  claim: RequestClaim;
-  signal?: AbortSignal;
-}>): Promise<RequestReceipt> {
+async function requestBody(
+  input: Readonly<{
+    directory: string;
+    claim: RequestClaim;
+    signal?: AbortSignal;
+  }>,
+): Promise<RequestReceipt> {
   input.signal?.throwIfAborted();
   await atomicJson(requestPath(input.directory, input.claim.id), {
     id: input.claim.id,
@@ -64,7 +69,12 @@ async function requestBody(input: Readonly<{
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
-    if (!await access(input.directory).then(() => true, () => false)) {
+    if (
+      !(await access(input.directory).then(
+        () => true,
+        () => false,
+      ))
+    ) {
       throw new AkumaBodyRequestError("voided", "parent request channel closed before a receipt");
     }
     await abortableDelay(POLL_MS, input.signal);
@@ -94,12 +104,14 @@ async function requestUpstream(
   return receipt.outcome;
 }
 
-export async function requestBodyTask(input: Readonly<{
-  directory: string;
-  world: string;
-  request: TaskMutationRequest;
-  id?: string;
-}>): Promise<unknown> {
+export async function requestBodyTask(
+  input: Readonly<{
+    directory: string;
+    world: string;
+    request: TaskMutationRequest;
+    id?: string;
+  }>,
+): Promise<unknown> {
   const id = input.id ?? randomUUID();
   const receipt = await requestBody({
     directory: input.directory,
@@ -110,9 +122,11 @@ export async function requestBodyTask(input: Readonly<{
   }
   if ("reference" in receipt) return receipt.reference;
   if (receipt.outcome.kind === "returned") return receipt.outcome.result;
-  throw new Error(receipt.outcome.failure.kind === "failed"
-    ? receipt.outcome.failure.diagnostic
-    : "Akuma body request parent is not born");
+  throw new Error(
+    receipt.outcome.failure.kind === "failed"
+      ? receipt.outcome.failure.diagnostic
+      : "Akuma body request parent is not born",
+  );
 }
 
 export async function requestBodyWait(
@@ -136,19 +150,15 @@ export async function requestBodyKill(
   return await requestUpstream(directory, { ...claim, id, action: "akuma.kill" });
 }
 
-type ContractRequestInput<T extends DeliverRequestClaim | ReviewRequestClaim> = Omit<T, "action" | "id">
-  & Readonly<{ directory: string; signal?: AbortSignal }>;
+type ContractRequestInput<T extends DeliverRequestClaim | ReviewRequestClaim> = Omit<T, "action" | "id"> &
+  Readonly<{ directory: string; signal?: AbortSignal }>;
 type ContractClaim<T extends "contract.deliver" | "contract.review"> = Extract<RequestClaim, { action: T }>;
 
 async function requestContract<T extends "contract.deliver" | "contract.review">(
-  input: ContractRequestInput<ContractClaim<T>>
-    & Readonly<{ id?: string }>,
+  input: ContractRequestInput<ContractClaim<T>> & Readonly<{ id?: string }>,
   action: T,
 ): Promise<
-  UpstreamRequestOutcome
-  | (T extends "contract.deliver"
-    ? ForwardedDeliveryReference
-    : ForwardedReviewReference)
+  UpstreamRequestOutcome | (T extends "contract.deliver" ? ForwardedDeliveryReference : ForwardedReviewReference)
 > {
   const { directory, id = randomUUID(), signal, ...claim } = input;
   const receipt = await requestBody({
@@ -160,7 +170,7 @@ async function requestContract<T extends "contract.deliver" | "contract.review">
     throw new Error(`Akuma body request ${id} returned the wrong action`);
   }
   return "reference" in receipt
-    ? receipt.reference as T extends "contract.deliver" ? ForwardedDeliveryReference : ForwardedReviewReference
+    ? (receipt.reference as T extends "contract.deliver" ? ForwardedDeliveryReference : ForwardedReviewReference)
     : receipt.outcome;
 }
 

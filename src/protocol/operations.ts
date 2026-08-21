@@ -59,10 +59,11 @@ export type DeliverConflictRefusal = Readonly<{
   }>;
 }>;
 
-export type DeliveryPreparationRefusal = Readonly<{
-  kind: "target-missing" | "worktree-missing";
-  contractId: ContractId;
-}>
+export type DeliveryPreparationRefusal =
+  | Readonly<{
+      kind: "target-missing" | "worktree-missing";
+      contractId: ContractId;
+    }>
   | DirtyWorkspaceRefusal
   | UnmergedPathsRefusal
   | IntegrationPreparationRefusal
@@ -91,10 +92,11 @@ type OperationInput = Readonly<{
   actor?: import("../core/facts/types.js").ActorId;
 }>;
 export type HereWorkspaceResolver = (contractId: ContractId) => Promise<string | undefined>;
-export type MutationOperationInput = OperationInput & Readonly<{
-  channel: GitDecodeChannel;
-  resolveHereWorkspace?: HereWorkspaceResolver;
-}>;
+export type MutationOperationInput = OperationInput &
+  Readonly<{
+    channel: GitDecodeChannel;
+    resolveHereWorkspace?: HereWorkspaceResolver;
+  }>;
 
 export type DocumentDerivation = Readonly<{
   document: DocumentKey;
@@ -113,20 +115,20 @@ export type PlacementStop =
       | Readonly<{ kind: "target-missing"; contractId: ContractId }>
     >
   | Readonly<{
-    failure: "target-moved";
-    contractId: ContractId;
-    target: string;
-    expected: SnapshotId;
-    observed: SnapshotId | null;
-  }>
+      failure: "target-moved";
+      contractId: ContractId;
+      target: string;
+      expected: SnapshotId;
+      observed: SnapshotId | null;
+    }>
   | Readonly<{
-    failure: "target-moved";
-    contractId: ContractId;
-    target: string;
-    integratedAt: SnapshotId;
-    observed: SnapshotId | null;
-    attempts: number;
-  }>
+      failure: "target-moved";
+      contractId: ContractId;
+      target: string;
+      integratedAt: SnapshotId;
+      observed: SnapshotId | null;
+      attempts: number;
+    }>
   | Readonly<{ failure: "target-placement-failed"; diagnostic: string }>;
 
 export type AttemptDecision<Value, Refusal = IntentRefusal> =
@@ -136,7 +138,9 @@ export type AttemptDecision<Value, Refusal = IntentRefusal> =
   | Readonly<{ kind: "collision" }>
   | Extract<DecidedOfferResult, { kind: "publication-failed" }>;
 
-export function timestamp(): string { return new Date().toISOString(); }
+export function timestamp(): string {
+  return new Date().toISOString();
+}
 
 export function mergeAdmissions(current: AcceptedProtocolStep, next: AcceptedProtocolStep): AcceptedProtocolStep {
   const effects = [...(current.physical?.effects ?? []), ...(next.physical?.effects ?? [])];
@@ -186,7 +190,9 @@ export function placementStop(
 
 export type RepositoryScope = GitRepository;
 
-export async function scopeOperation(input: Readonly<{ coordinate: string; gitPath?: string }>): Promise<RepositoryScope> {
+export async function scopeOperation(
+  input: Readonly<{ coordinate: string; gitPath?: string }>,
+): Promise<RepositoryScope> {
   return await repositoryAt(input.coordinate, input.gitPath);
 }
 
@@ -201,15 +207,19 @@ export async function contractsOperation(
     hereWorkspace?: import("./read/status.js").HereWorkspaceObservationResolver;
   }>,
 ): Promise<ContractBoard> {
-  return withGitReadObservation(input.scope, input.channel, (observation) => readContractBoard(observation, undefined, input.hereWorkspace));
+  return withGitReadObservation(input.scope, input.channel, (observation) =>
+    readContractBoard(observation, undefined, input.hereWorkspace),
+  );
 }
 
-export async function contractObservationOperation(input: Readonly<{
-  scope: RepositoryScope;
-  channel: GitDecodeChannel;
-  contractId: ContractId;
-  hereWorkspace?: import("./read/status.js").HereWorkspaceObservationResolver;
-}>): Promise<ContractObservation> {
+export async function contractObservationOperation(
+  input: Readonly<{
+    scope: RepositoryScope;
+    channel: GitDecodeChannel;
+    contractId: ContractId;
+    hereWorkspace?: import("./read/status.js").HereWorkspaceObservationResolver;
+  }>,
+): Promise<ContractObservation> {
   return await readContractObservationAt(input.scope, input.channel, input.contractId, input.hereWorkspace);
 }
 
@@ -234,10 +244,12 @@ export async function deliveryOperation(input: MutationOperationInput): Promise<
     : { ...state.delivery.data, integration: state.currentIntegration };
 }
 
-export async function deliveryDiffOperation(input: Readonly<{
-  scope: RepositoryScope;
-  integrationPredecessor: SnapshotId;
-  integrationSnapshot: SnapshotId;
-}>): Promise<string | null> {
+export async function deliveryDiffOperation(
+  input: Readonly<{
+    scope: RepositoryScope;
+    integrationPredecessor: SnapshotId;
+    integrationSnapshot: SnapshotId;
+  }>,
+): Promise<string | null> {
   return await readDeliveryDiff(input.scope, input.integrationPredecessor, input.integrationSnapshot);
 }

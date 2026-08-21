@@ -41,14 +41,18 @@ async function attempt(input: BindAttemptInput, id: ContractId) {
     workspace: input.workspace,
     contractId: id,
     ...(input.target === undefined ? {} : { target: input.target }),
-    ...(input.task === undefined ? {} : {
-      decorateOffer: ({ contractId: owner }) => [claimTaskHolder(input.task!, owner)],
-    }),
+    ...(input.task === undefined
+      ? {}
+      : {
+          decorateOffer: ({ contractId: owner }) => [claimTaskHolder(input.task!, owner)],
+        }),
     ...(input.actor === undefined ? {} : { actor: input.actor }),
   });
 }
 
-async function attemptCandidates(input: BindAttemptInput): Promise<IntentOutcome<Readonly<{ contractId: ContractId }>, KeiyakuRefusal>> {
+async function attemptCandidates(
+  input: BindAttemptInput,
+): Promise<IntentOutcome<Readonly<{ contractId: ContractId }>, KeiyakuRefusal>> {
   let result!: IntentOutcome<Readonly<{ contractId: ContractId }>, KeiyakuRefusal>;
   for (let collision = 0; collision <= 3; collision += 1) {
     const id = candidateId(input.title, collision);
@@ -56,11 +60,14 @@ async function attemptCandidates(input: BindAttemptInput): Promise<IntentOutcome
     if (input.workspace === "here") {
       const reservation = await reserveContractWorktree(input.scope, id);
       if (reservation.kind !== "reserved") {
-        return { kind: "refused", refusal: {
-          kind: "here-worktree-appointed",
-          path: reservation.path,
-          ...(reservation.kind === "appointed" ? { contract: reservation.contract } : {}),
-        } };
+        return {
+          kind: "refused",
+          refusal: {
+            kind: "here-worktree-appointed",
+            path: reservation.path,
+            ...(reservation.kind === "appointed" ? { contract: reservation.contract } : {}),
+          },
+        };
       }
       reserved = true;
     }

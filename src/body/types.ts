@@ -22,8 +22,9 @@ export type ContractBody = Readonly<{
   readonly extensions: readonly ContractExtension[];
 }>;
 
-export type DecodedContractDocument = ContractBody & Readonly<{
-  readonly document: Readonly<{ readonly bytes: string; readonly key: DocumentKey }>;
-  readonly segments: readonly DocumentSegmentKey[];
-  readonly verificationSegment: DocumentSegmentKey | null;
-}>;
+export type DecodedContractDocument = ContractBody &
+  Readonly<{
+    readonly document: Readonly<{ readonly bytes: string; readonly key: DocumentKey }>;
+    readonly segments: readonly DocumentSegmentKey[];
+    readonly verificationSegment: DocumentSegmentKey | null;
+  }>;

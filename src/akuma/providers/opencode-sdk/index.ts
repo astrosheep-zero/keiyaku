@@ -17,7 +17,8 @@ export type OpencodeProviderTestOptions = Readonly<{ loader?: OpencodeSdkLoader 
 
 function object(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown> : undefined;
+    ? (value as Record<string, unknown>)
+    : undefined;
 }
 function text(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
@@ -42,10 +43,17 @@ function admit(options: ProviderOptions): void {
 }
 function eventValue(value: unknown): unknown {
   if (typeof value !== "string") return value;
-  try { return JSON.parse(value) as unknown; } catch { return { type: value }; }
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return { type: value };
+  }
 }
 
-function promptBody(input: Input, messageID: string): Readonly<{
+function promptBody(
+  input: Input,
+  messageID: string,
+): Readonly<{
   messageID: string;
   model?: { providerID: string; modelID: string };
   variant?: string;
@@ -84,13 +92,15 @@ function newest(rows: readonly MessageRow[]): MessageRow | undefined {
     return at >= latestAt ? row : latest;
   }, undefined);
 }
-async function readTurnResult(input: Readonly<{
-  session: Awaited<ReturnType<typeof loadOpencode>>["client"]["session"];
-  sessionId: string;
-  cwd: string;
-  messageID: string;
-  state: ReturnType<typeof createEventState>;
-}>): Promise<TurnResult | undefined> {
+async function readTurnResult(
+  input: Readonly<{
+    session: Awaited<ReturnType<typeof loadOpencode>>["client"]["session"];
+    sessionId: string;
+    cwd: string;
+    messageID: string;
+    state: ReturnType<typeof createEventState>;
+  }>,
+): Promise<TurnResult | undefined> {
   try {
     const response = await input.session.messages({
       path: { id: input.sessionId },
@@ -104,7 +114,8 @@ async function readTurnResult(input: Readonly<{
     const assistant = newest(rows.filter((row) => row.info.role === "assistant" && row.info.parentID === userId));
     const historyId = text(assistant?.info.id);
     if (input.state.failure !== undefined) return { kind: "failed", diagnostic: input.state.failure };
-    if (assistant === undefined) return { kind: "failed", diagnostic: "OpenCode completed without a native assistant answer" };
+    if (assistant === undefined)
+      return { kind: "failed", diagnostic: "OpenCode completed without a native assistant answer" };
     if (assistant.info.error !== undefined) return { kind: "failed", diagnostic: diagnostic(assistant.info.error) };
     const answer = assistant.parts
       .map((part) => object(part))
@@ -145,21 +156,22 @@ function nativeProgress(type: unknown, properties: Record<string, unknown>, busy
 function startsTurn(value: unknown, sessionId: string, messageID: string): boolean {
   const event = object(value);
   const info = object(object(event?.properties)?.info);
-  return event?.type === "message.updated"
-    && info?.sessionID === sessionId
-    && info.role === "user"
-    && info.id === messageID;
+  return (
+    event?.type === "message.updated" && info?.sessionID === sessionId && info.role === "user" && info.id === messageID
+  );
 }
-async function observeTurn(input: Readonly<{
-  iterator: AsyncIterator<unknown>;
-  session: Awaited<ReturnType<typeof loadOpencode>>["client"]["session"];
-  sessionId: string;
-  cwd: string;
-  messageID: string;
-  events: AgentEventChannel;
-  state: ReturnType<typeof createEventState>;
-  submissionState: { started: boolean };
-}>): Promise<TurnResult> {
+async function observeTurn(
+  input: Readonly<{
+    iterator: AsyncIterator<unknown>;
+    session: Awaited<ReturnType<typeof loadOpencode>>["client"]["session"];
+    sessionId: string;
+    cwd: string;
+    messageID: string;
+    events: AgentEventChannel;
+    state: ReturnType<typeof createEventState>;
+    submissionState: { started: boolean };
+  }>,
+): Promise<TurnResult> {
   let active = false;
   let busy = false;
   try {
@@ -228,21 +240,24 @@ async function forceDisposeOpencode(
 async function drive(execution: ProviderExecution, input: Input, loader?: OpencodeSdkLoader): Promise<Session> {
   admit(input.options);
   const signal = input.signal ?? new AbortController().signal;
-  const resumeSessionId = input.session.kind === "resume"
-    ? opencodeSessionId(input.session.coordinate)
-    : undefined;
+  const resumeSessionId = input.session.kind === "resume" ? opencodeSessionId(input.session.coordinate) : undefined;
   const abortController = new AbortController();
   const abortSetup = () => abortController.abort(signal.reason);
   signal.addEventListener("abort", abortSetup, { once: true });
   signal.throwIfAborted();
   const runtime = await abortable(
-    loadOpencode({
-      ...execution,
-      env: {
-        ...execution.env,
-        ...(input.requests === undefined ? {} : { [AKUMA_REQUESTS_ENV]: input.requests.dir }),
+    loadOpencode(
+      {
+        ...execution,
+        env: {
+          ...execution.env,
+          ...(input.requests === undefined ? {} : { [AKUMA_REQUESTS_ENV]: input.requests.dir }),
+        },
       },
-    }, input.cwd, abortController.signal, loader),
+      input.cwd,
+      abortController.signal,
+      loader,
+    ),
     abortController.signal,
     async (late) => await late.close(),
   );
@@ -254,10 +269,12 @@ async function drive(execution: ProviderExecution, input: Input, loader?: Openco
   };
   try {
     const session = runtime.client.session;
-    const sessionResponse = await abortable(input.session.kind === "fresh"
-      ? session.create({ query: { directory: input.cwd }, throwOnError: true })
-      : session.get({ path: { id: resumeSessionId! }, query: { directory: input.cwd }, throwOnError: true }),
-    abortController.signal);
+    const sessionResponse = await abortable(
+      input.session.kind === "fresh"
+        ? session.create({ query: { directory: input.cwd }, throwOnError: true })
+        : session.get({ path: { id: resumeSessionId! }, query: { directory: input.cwd }, throwOnError: true }),
+      abortController.signal,
+    );
     const info = object(object(sessionResponse)?.data) ?? object(sessionResponse);
     const sessionId = text(info?.id) ?? resumeSessionId;
     if (sessionId === undefined) throw new Error("OpenCode did not return a session id");
@@ -270,20 +287,32 @@ async function drive(execution: ProviderExecution, input: Input, loader?: Openco
     const streamResult = await abortable(
       runtime.client.event.subscribe({ query: { directory: input.cwd } }),
       abortController.signal,
-      async (late) => { await late.stream[Symbol.asyncIterator]().return?.(undefined); },
+      async (late) => {
+        await late.stream[Symbol.asyncIterator]().return?.(undefined);
+      },
     );
     iterator = streamResult.stream[Symbol.asyncIterator]();
     const { completion, finish } = terminalSettlement(events, closeOnce);
     const observation = observeTurn({
-      iterator, session, sessionId, cwd: input.cwd, messageID, events, state, submissionState,
+      iterator,
+      session,
+      sessionId,
+      cwd: input.cwd,
+      messageID,
+      events,
+      state,
+      submissionState,
     });
     submissionState.started = true;
-    await abortable(session.promptAsync({
-      path: { id: sessionId },
-      query: { directory: input.cwd },
-      body: promptBody(input, messageID),
-      throwOnError: true,
-    }), abortController.signal);
+    await abortable(
+      session.promptAsync({
+        path: { id: sessionId },
+        query: { directory: input.cwd },
+        body: promptBody(input, messageID),
+        throwOnError: true,
+      }),
+      abortController.signal,
+    );
     void observation.then(finish);
     signal.removeEventListener("abort", abortSetup);
     return {
@@ -292,7 +321,9 @@ async function drive(execution: ProviderExecution, input: Input, loader?: Openco
       completion,
       abort: async () => {
         abortController.abort();
-        void session.abort({ path: { id: sessionId }, query: { directory: input.cwd }, throwOnError: true }).catch(() => undefined);
+        void session
+          .abort({ path: { id: sessionId }, query: { directory: input.cwd }, throwOnError: true })
+          .catch(() => undefined);
         await finish({ kind: "failed", diagnostic: "OpenCode session interrupted" });
       },
       forceDispose: () => forceDisposeOpencode(abortController, closeOnce, finish),
@@ -305,21 +336,29 @@ async function drive(execution: ProviderExecution, input: Input, loader?: Openco
   }
 }
 
-export function createOpencodeProvider(input: ProviderExecution | OpencodeProviderTestOptions = { name: OPENCODE_SDK_PROVIDER, kind: "opencode-sdk" }): ProviderAdapter {
+export function createOpencodeProvider(
+  input: ProviderExecution | OpencodeProviderTestOptions = { name: OPENCODE_SDK_PROVIDER, kind: "opencode-sdk" },
+): ProviderAdapter {
   const execution: ProviderExecution = "kind" in input ? input : { name: OPENCODE_SDK_PROVIDER, kind: "opencode-sdk" };
   const loader = "loader" in input ? input.loader : undefined;
   return {
     admitOptions(options: ProviderOptions) {
-      try { admit(options); } catch (error) { return { kind: "refused", diagnostic: diagnostic(error) }; }
+      try {
+        admit(options);
+      } catch (error) {
+        return { kind: "refused", diagnostic: diagnostic(error) };
+      }
       return {
         kind: "admitted",
         options: Object.freeze({ ...options }),
-        ...(options.readonly === undefined ? {} : {
-          readonly: {
-            enforcement: "none" as const,
-            diagnostic: "OpenCode V1 cannot remove task-surface mutation capabilities",
-          },
-        }),
+        ...(options.readonly === undefined
+          ? {}
+          : {
+              readonly: {
+                enforcement: "none" as const,
+                diagnostic: "OpenCode V1 cannot remove task-surface mutation capabilities",
+              },
+            }),
       };
     },
     start: (input) => drive(execution, input, loader),

@@ -12,16 +12,26 @@ export function abortable<T>(
     };
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
-    void operation.then(async (value) => {
-      signal.removeEventListener("abort", abort);
-      if (!aborted) { resolve(value); return; }
-      try { await disposeLate?.(value); }
-      catch (error) { reject(error); return; }
-      reject(signal.reason);
-    }, (error: unknown) => {
-      signal.removeEventListener("abort", abort);
-      reject(aborted ? signal.reason : error);
-    });
+    void operation.then(
+      async (value) => {
+        signal.removeEventListener("abort", abort);
+        if (!aborted) {
+          resolve(value);
+          return;
+        }
+        try {
+          await disposeLate?.(value);
+        } catch (error) {
+          reject(error);
+          return;
+        }
+        reject(signal.reason);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", abort);
+        reject(aborted ? signal.reason : error);
+      },
+    );
   });
 }
 
