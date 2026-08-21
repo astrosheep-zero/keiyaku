@@ -129,7 +129,7 @@ type TerminalWorktreeCleanup = Readonly<{
 type TerminalCustody = Readonly<{
   repository: GitRepository;
   state: ContractState;
-  expected: TerminalSealExpectations;
+  resolveSeal: () => Promise<TerminalSealExpectations>;
   ref: string;
   pin: string;
   acc: ReconcileAccumulation;
@@ -504,24 +504,35 @@ function sealedTree(expected: TerminalSealExpectations, snapshot: SnapshotId): G
 }
 
 async function releaseTerminalCustody(
-  { repository, state, expected, ref, pin, acc: { effects } }: TerminalCustody,
+  { repository, state, resolveSeal, ref, pin, acc: { effects } }: TerminalCustody,
 ): Promise<void> {
+  const [deliveryRef, candidatePin] = await Promise.all([readRef(repository, ref), readRef(repository, pin)]);
+  if (deliveryRef === null && candidatePin === null) return;
   if (state.delivery === null) {
     const custodian = await snapshotCustodian(repository, state.coordinates.start);
-    if (custodian !== null) effects.push(await removeRefWithCustody(repository, ref, custodian.ref, custodian.oid));
-    effects.push(await removeRef(repository, pin));
+    if (deliveryRef !== null && custodian !== null) effects.push(await removeRefWithCustody(repository, ref, custodian.ref, custodian.oid));
+    if (candidatePin !== null) effects.push(await removeRef(repository, pin));
     return;
   }
   const tender = state.delivery.data.tenderSnapshot;
   const integration = state.currentIntegration?.snapshot ?? state.delivery.data.integration.snapshot;
   const target = await targetCustodyForClaimedIntegration(repository, state, integration);
-  if (sealedTree(expected, tender) === sealedTree(expected, integration) && target !== null) {
-    effects.push(await removeRefWithCustody(repository, ref, target.ref, target.oid));
-    effects.push(await removeRefWithCustody(repository, pin, target.ref, target.oid));
-  } else if (tender === integration) {
-    effects.push(await removeRefWithCustody(repository, pin, ref, tender));
-  } else if (target !== null) {
-    effects.push(await removeRefWithCustody(repository, pin, target.ref, target.oid));
+  if (deliveryRef !== null && target !== null) {
+    if (tender === integration) {
+      effects.push(await removeRefWithCustody(repository, ref, target.ref, target.oid));
+    } else {
+      const expected = await resolveSeal();
+      if (sealedTree(expected, tender) === sealedTree(expected, integration)) {
+        effects.push(await removeRefWithCustody(repository, ref, target.ref, target.oid));
+      }
+    }
+  }
+  if (candidatePin !== null) {
+    if (target !== null) {
+      effects.push(await removeRefWithCustody(repository, pin, target.ref, target.oid));
+    } else if (tender === integration && deliveryRef !== null) {
+      effects.push(await removeRefWithCustody(repository, pin, ref, tender));
+    }
   }
 }
 
@@ -535,7 +546,18 @@ async function reconcileTerminalManagedWorktree(
   const ref = deliveryRefFor(state.id);
   const pin = candidatePinRefFor(state.id);
   const path = place === undefined ? undefined : worktreePath(repository, place);
-  if (path === undefined) return complete(acc.effects, acc.lag);
+  if (path === undefined) {
+    if (retainTerminalWorktree === true) return complete(acc.effects, acc.lag);
+    await releaseTerminalCustody({
+      repository: primary,
+      state,
+      resolveSeal: async () => await terminalSealExpectations(channel, state),
+      ref,
+      pin,
+      acc,
+    });
+    return complete(acc.effects, acc.lag);
+  }
   const expected = await terminalSealExpectations(channel, state);
   acc.effects.push(await updateRef(primary, ref, state.delivery?.data.tenderSnapshot ?? state.coordinates.start));
   if (state.delivery !== null) {
@@ -553,7 +575,14 @@ async function reconcileTerminalManagedWorktree(
     acc,
   });
   if (retained !== null) return retained;
-  await releaseTerminalCustody({ repository: primary, state, expected, ref, pin, acc });
+  await releaseTerminalCustody({
+    repository: primary,
+    state,
+    resolveSeal: async () => expected,
+    ref,
+    pin,
+    acc,
+  });
   return complete(acc.effects, acc.lag);
 }
 

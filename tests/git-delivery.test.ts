@@ -13,6 +13,7 @@ import { materializeJudgedConflict, readDeliveryDiff, workspaceMergeStatePresent
 import { materializeScratchCandidate } from "../src/git/scratch.js";
 import { followManagedWorktree, reconcile } from "../src/git/reconcile.js";
 import { worktreePath } from "../src/git/workspace.js";
+import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import { reserveContractWorktree, resolveHereContractWorkspace } from "../src/contract-worktree.js";
 import {
   AuthorityCorruptionError,
@@ -118,7 +119,7 @@ function commitSignature(repository: TestGitRepository, commit: string): readonl
   ]).trim().split("\0");
 }
 
-async function targetedContract() {
+async function targetedContract(gates: readonly string[] = []) {
   const repository = makeGitRepository();
   repository.run(["config", "user.name", "Test User"]);
   repository.run(["config", "user.email", "test@example.com"]);
@@ -131,6 +132,7 @@ async function targetedContract() {
     markdown: contractBody(),
     workspace: "worktree",
     target: "refs/heads/main",
+    ...(gates.length === 0 ? {} : { gates }),
   });
   const state = await bound.keiyaku.state();
   return {
@@ -1283,6 +1285,145 @@ test("targetless terminal cleanup retains tender custody for Delivery.diff", asy
   const recovered = await bound.keiyaku.delivery();
   assert.ok(recovered);
   assert.match(await recovered.diff() ?? "", /candidate\.txt/);
+});
+
+test("repository reconcile does not recreate released terminal custody without a Place", async () => {
+  const { contract, repository, worktree } = await targetedContract(["reviewed"]);
+  writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
+  repository.run(["-C", worktree, "add", "candidate.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
+  await contract.deliver();
+  await contract.review({ verdict: "satisfied" });
+  const state = await contract.state();
+  const id = state.id;
+  assert.equal(state.terminal?.kind, "claimed");
+  const git = await repositoryAt(repository.path);
+  assert.deepEqual(await readManagedWorktreeAppointment(git, id), { kind: "unappointed" });
+  assert.equal(await readRef(git, deliveryRefFor(id)), null);
+  assert.equal(await readRef(git, candidatePinRefFor(id)), null);
+
+  writeFileSync(join(repository.path, "target-only.txt"), "target advance\n");
+  repository.run(["add", "target-only.txt"]);
+  repository.run(["commit", "--quiet", "-m", "target advance"]);
+  const targetBefore = repository.run(["rev-parse", "refs/heads/main"]).trim();
+  const fresh = await Repo.at({ path: repository.path });
+  const report = await fresh.reconcile();
+
+  assert.equal(report.kind, "completed");
+  if (report.kind !== "completed") throw new Error("expected completed repository reconcile");
+  assert.equal(report.contracts.find((item) => item.contractId === id)?.report.lag.length, 0);
+  assert.equal((await Keiyaku.of({ repo: fresh, id }).state()).terminal?.kind, "claimed");
+  assert.equal(await readRef(git, deliveryRefFor(id)), null);
+  assert.equal(await readRef(git, candidatePinRefFor(id)), null);
+  assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), targetBefore);
+});
+
+test("repository reconcile releases a lone candidate pin after its tender is pruned", async () => {
+  const { contract, repository, worktree } = await targetedContract(["reviewed"]);
+  writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
+  repository.run(["-C", worktree, "add", "candidate.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
+  await contract.deliver();
+  const delivered = await contract.state();
+  const tender = delivered.delivery?.data.tenderSnapshot;
+  const integration = delivered.currentIntegration?.snapshot;
+  assert.ok(tender);
+  assert.ok(integration);
+  assert.notEqual(tender, integration);
+  await contract.review({ verdict: "satisfied" });
+
+  const id = (await contract.state()).id;
+  const git = await repositoryAt(repository.path);
+  assert.deepEqual(await readManagedWorktreeAppointment(git, id), { kind: "unappointed" });
+  assert.equal(await readRef(git, deliveryRefFor(id)), null);
+  assert.equal(await readRef(git, candidatePinRefFor(id)), null);
+  repository.run(["update-ref", candidatePinRefFor(id), integration]);
+  assert.equal(await readRef(git, deliveryRefFor(id)), null);
+
+  repository.run(["reflog", "expire", "--expire=now", "--all"]);
+  repository.run(["gc", "--prune=now"]);
+  assert.throws(() => repository.run(["cat-file", "-e", `${tender}^{commit}`]));
+
+  const targetBefore = repository.run(["rev-parse", "refs/heads/main"]).trim();
+  const fresh = await Repo.at({ path: repository.path });
+  const report = await fresh.reconcile();
+
+  assert.equal(report.kind, "completed");
+  if (report.kind !== "completed") throw new Error("expected completed repository reconcile");
+  assert.equal(report.contracts.find((item) => item.contractId === id)?.report.lag.length, 0);
+  assert.equal((await Keiyaku.of({ repo: fresh, id }).state()).terminal?.kind, "claimed");
+  assert.equal(await readRef(git, candidatePinRefFor(id)), null);
+  assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), targetBefore);
+});
+
+test("one repository reconcile sweeps unappointed claimed custody through exact target bytes", async () => {
+  const first = await targetedContract(["reviewed"]);
+  writeFileSync(join(first.worktree, "first.txt"), "first candidate\n");
+  first.repository.run(["-C", first.worktree, "add", "first.txt"]);
+  first.repository.run(["-C", first.worktree, "commit", "--quiet", "-m", "first candidate"]);
+  await first.contract.deliver();
+  await first.contract.review({ verdict: "satisfied" });
+  const firstState = await first.contract.state();
+  assert.equal(firstState.terminal?.kind, "claimed");
+  const firstId = firstState.id;
+  const firstTender = firstState.delivery?.data.tenderSnapshot;
+  const firstIntegration = firstState.currentIntegration?.snapshot;
+  assert.ok(firstTender);
+  assert.ok(firstIntegration);
+  const git = await repositoryAt(first.repository.path);
+  assert.deepEqual(await readManagedWorktreeAppointment(git, firstId), { kind: "unappointed" });
+  first.repository.run(["update-ref", deliveryRefFor(firstId), firstTender]);
+  first.repository.run(["update-ref", candidatePinRefFor(firstId), firstIntegration]);
+  first.repository.run(["update-ref", "refs/heads/secondary", "refs/heads/main"]);
+
+  const secondBound = await Keiyaku.bind({
+    repo: await Repo.at({ path: first.repository.path }),
+    markdown: contractBody(),
+    workspace: "worktree",
+    target: "refs/heads/secondary",
+    gates: ["reviewed"],
+  });
+  const second = secondBound.keiyaku;
+  const secondId = (await second.state()).id;
+  const secondWorktree = await appointedWorktreePath(git, secondId);
+  writeFileSync(join(secondWorktree, "second.txt"), "second candidate\n");
+  first.repository.run(["-C", secondWorktree, "add", "second.txt"]);
+  first.repository.run(["-C", secondWorktree, "commit", "--quiet", "-m", "second candidate"]);
+  await second.deliver();
+  const deliveredSecond = await second.state();
+  const secondTender = deliveredSecond.delivery?.data.tenderSnapshot;
+  assert.ok(secondTender);
+  writeFileSync(join(first.repository.path, "target-only.txt"), "target advance\n");
+  first.repository.run(["checkout", "--quiet", "secondary"]);
+  first.repository.run(["add", "target-only.txt"]);
+  first.repository.run(["commit", "--quiet", "-m", "target advance"]);
+  first.repository.run(["checkout", "--quiet", "main"]);
+  await second.review({ verdict: "satisfied" });
+  const secondState = await second.state();
+  assert.equal(secondState.terminal?.kind, "claimed");
+  const secondIntegration = secondState.currentIntegration?.snapshot;
+  assert.ok(secondIntegration);
+  assert.deepEqual(await readManagedWorktreeAppointment(git, secondId), { kind: "unappointed" });
+  first.repository.run(["update-ref", deliveryRefFor(secondId), secondTender]);
+  first.repository.run(["update-ref", candidatePinRefFor(secondId), secondIntegration]);
+
+  const targetBefore = first.repository.run(["rev-parse", "refs/heads/main"]).trim();
+  const secondaryBefore = first.repository.run(["rev-parse", "refs/heads/secondary"]).trim();
+  const fresh = await Repo.at({ path: first.repository.path });
+  const report = await fresh.reconcile();
+
+  assert.equal(report.kind, "completed");
+  if (report.kind !== "completed") throw new Error("expected completed repository reconcile");
+  assert.deepEqual(new Set(report.contracts.map((contract) => contract.contractId)), new Set([firstId, secondId]));
+  assert.equal(report.contracts.every((contract) => contract.report.lag.length === 0), true);
+  assert.equal((await Keiyaku.of({ repo: fresh, id: firstId }).state()).terminal?.kind, "claimed");
+  assert.equal((await Keiyaku.of({ repo: fresh, id: secondId }).state()).terminal?.kind, "claimed");
+  assert.equal(await readRef(git, deliveryRefFor(firstId)), null);
+  assert.equal(await readRef(git, candidatePinRefFor(firstId)), null);
+  assert.equal(await readRef(git, deliveryRefFor(secondId)), secondTender);
+  assert.equal(await readRef(git, candidatePinRefFor(secondId)), null);
+  assert.equal(first.repository.run(["rev-parse", "refs/heads/main"]).trim(), targetBefore);
+  assert.equal(first.repository.run(["rev-parse", "refs/heads/secondary"]).trim(), secondaryBefore);
 });
 
 test("abandon salvages untracked managed-worktree bytes without retaining the worktree", async () => {
