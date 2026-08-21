@@ -88,6 +88,10 @@ async function directArchetypeSettings(root: string) {
     join(home, "akuma", "restricted.md"),
     "---\nprovider: local\nallowed:\n  - task.add\n---\nWork.\n",
   );
+  writeFileSync(
+    join(home, "akuma", "empty.md"),
+    "---\nprovider: local\nallowed: []\n---\nWork.\n",
+  );
   writeFileSync(join(home, "settings.json"), JSON.stringify({
     providers: { local: { kind: "codex-app-server", executable } },
   }));
@@ -345,7 +349,7 @@ test("direct Akuma birth reports process cwd and the embedding World fallback", 
   }
 });
 
-test("direct birth freezes Archetype defaults and exact per-call allowed replacement", async () => {
+test("direct birth unions Archetype defaults with additive allowed values", async () => {
   const { raw } = await repositoryFixture();
   const world = await World.at(raw.path);
   const configured = await directArchetypeSettings(world);
@@ -359,16 +363,20 @@ test("direct birth freezes Archetype defaults and exact per-call allowed replace
     const restricted = await akuma.call({ archetype: "restricted", body: "default" });
     assert.deepEqual((await readSoul(pathsForAkuId(world, restricted.id)))?.allowed, ["task.add"]);
 
-    const replaced = await akuma.call({
+    const added = await akuma.call({
       archetype: "restricted",
-      body: "replace",
+      body: "add",
       allowed: ["akuma.call"],
     });
-    assert.deepEqual((await readSoul(pathsForAkuId(world, replaced.id)))?.allowed, ["akuma.call"]);
+    assert.deepEqual((await readSoul(pathsForAkuId(world, added.id)))?.allowed, ["akuma.call", "task.add"]);
 
-    const empty = await akuma.call({ archetype: "worker", body: "empty", allowed: [] });
-    assert.deepEqual((await readSoul(pathsForAkuId(world, empty.id)))?.allowed, []);
-    assert.equal((await empty.wait(undefined, { timeoutMs: 2_000 })).life, "asleep");
+    const fullWithAddition = await akuma.call({ archetype: "worker", body: "full with addition", allowed: ["contract.deliver"] });
+    assert.deepEqual((await readSoul(pathsForAkuId(world, fullWithAddition.id)))?.allowed, ALLOWED_ACTIONS);
+
+    const emptyBase = await akuma.call({ archetype: "empty", body: "empty base" });
+    assert.deepEqual((await readSoul(pathsForAkuId(world, emptyBase.id)))?.allowed, []);
+    const emptyWithAddition = await akuma.call({ archetype: "empty", body: "empty with addition", allowed: ["akuma.call"] });
+    assert.deepEqual((await readSoul(pathsForAkuId(world, emptyWithAddition.id)))?.allowed, ["akuma.call"]);
 
     writeFileSync(join(configured.home, "akuma", "reviewer.md"), "---\nprovider: local\nreadonly: true\n---\nReview.\n");
     const callReadonly = await akuma.call({ archetype: "worker", body: "call readonly", readonly: true });
@@ -402,6 +410,25 @@ test("direct birth freezes Archetype defaults and exact per-call allowed replace
   } finally {
     if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
     else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
+    rmSync(raw.path, { recursive: true, force: true });
+  }
+});
+
+test("call-time allowed additions reject unknown and duplicate values", async () => {
+  const { raw } = await repositoryFixture();
+  const world = await World.at(raw.path);
+  const configured = await directArchetypeSettings(world);
+  try {
+    const akuma = Akuma.of(world, configured);
+    await assert.rejects(
+      akuma.call({ archetype: "worker", body: "invalid", allowed: ["akuma.unknown"] as never }),
+      /Akuma call allowed contains an unknown action: akuma\.unknown/u,
+    );
+    await assert.rejects(
+      akuma.call({ archetype: "worker", body: "invalid", allowed: ["akuma.call", "akuma.call"] }),
+      /Akuma call allowed contains a duplicate action: akuma\.call/u,
+    );
+  } finally {
     rmSync(raw.path, { recursive: true, force: true });
   }
 });

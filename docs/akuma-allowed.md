@@ -35,13 +35,13 @@ remains observation and is never permission-keyed.
 Archetype Markdown may declare `allowed` as a flat list. Omission means the
 complete current vocabulary; a present list is the complete default, including
 the empty list. Unknown values, non-string entries, and duplicates invalidate
-the Archetype. Valid lists are stored in lexical order.
+the Archetype or call additions. Valid lists are stored in lexical order.
 
-One direct call may replace the Archetype default with another complete list.
-That replacement may contain actions absent from the Archetype because the
-Archetype is configuration, not an authority ceiling. A nested call instead
-clips its requested child list to the authenticated direct caller Soul. The
-direct-parent clip is complete: no birth reads or walks earlier ancestors.
+Call-time `allowed` values are additions to the Archetype base. One birth's
+requested set is the union of that base and the additions; an omitted call set
+therefore leaves the base unchanged. A nested call clips that union to the
+authenticated direct caller Soul. The direct-parent clip is complete: no birth
+reads or walks earlier ancestors.
 
 Every new Soul freezes its effective list. Reading a pre-feature Soul with no
 list means the complete current vocabulary. Wake and restart retain the Soul;

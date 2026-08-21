@@ -257,9 +257,8 @@ searched path.
 
 `--contract` accepts one complete `kei/...` and requests Dispatch after birth;
 `--alias` accepts `@name` and moves that world-local Alias only after Dispatch
-succeeds. Repeated `--allowed` values replace the Archetype list for that
-birth; `--allowed none` selects the empty list and cannot be combined with
-another value. The vocabulary is owned by
+succeeds. Repeated `--allowed` values add actions to the Archetype defaults;
+an empty repeated set carries no clearing meaning. The vocabulary is owned by
 [akuma-allowed.md](akuma-allowed.md). Explicit invocation cwd wins for a
 contracted call, otherwise its
 appointed managed worktree is used. A direct Contract-free call uses ambient

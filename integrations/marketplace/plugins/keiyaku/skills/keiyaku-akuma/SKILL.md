@@ -29,6 +29,9 @@ exclusive. Decide up front whether you will stay:
 Alias already points elsewhere, it moves to the born Akuma. The worker's
 execution cwd is exactly `-C <path>`, or your own cwd when `-C` is omitted.
 
+Repeated `--allowed` values add actions to the Archetype defaults. Restriction
+comes from the Archetype base and, for nested calls, the direct parent Soul.
+
 ## Archetypes
 
 An Archetype is a Markdown file at `~/.keiyaku/akuma/<name>.md`. Its

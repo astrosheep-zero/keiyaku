@@ -50,8 +50,9 @@ Keiyaku.fork(input: ForkInput): Promise<ForkResult>
 ```
 
 `path` is an already resolved WorldRoot; Library never climbs or normalizes it.
-`allowed`, when present, replaces the Archetype list for that birth; Akuma owns
-its vocabulary and effective-set judgment.
+`allowed`, when present, adds to the Archetype list for that birth; Akuma owns
+its vocabulary and effective-set judgment. An empty additions list carries no
+clearing meaning.
 `readonly`, when present, must be literal `true` and can only add the birth
 restriction. The effective value is the Archetype declaration OR this call;
 omission is RW unless the Archetype already restricts it. Library validates the

@@ -93,16 +93,7 @@ test("Akuma CLI parses root verbs without the removed namespace", () => {
       output: "text",
     },
   });
-  assert.deepEqual(parseArgv(["call", "claude", "--allowed", "none", "-"]), {
-    command: {
-      command: "call",
-      archetype: "claude",
-      allowed: [],
-      mode: "wait",
-      prompt: { kind: "stdin" },
-      output: "text",
-    },
-  });
+  assert.throws(() => parseArgv(["call", "claude", "--allowed", "none", "-"]), /unknown action: none/u);
   assert.deepEqual(parseArgv(["call", "claude", "--readonly", "-"]), {
     command: {
       command: "call",
@@ -114,10 +105,6 @@ test("Akuma CLI parses root verbs without the removed namespace", () => {
     },
   });
   assert.throws(() => parseArgv(["call", "claude", "--write", "-"]), /option --write is not valid/u);
-  assert.throws(
-    () => parseArgv(["call", "claude", "--allowed", "none", "--allowed", "akuma.call", "-"]),
-    /cannot be combined/u,
-  );
   assert.throws(
     () => parseArgv(["call", "claude", "--allowed", "task.add", "--allowed", "task.add", "-"]),
     /duplicate action/u,

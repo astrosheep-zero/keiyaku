@@ -64,7 +64,7 @@ const AKUMA_COMMAND_SPECS = {
       "--contract dispatches the born Akuma to that Contract.",
       "--alias assigns the world-local @name selector to the born Akuma.",
       "--readonly adds the one-way read-only birth restriction.",
-      "Repeated --allowed replaces the Archetype list; --allowed none selects an empty list.",
+      "Repeated --allowed adds actions to the Archetype defaults.",
       "With --contract, Dispatch succeeds first. If @name exists, the alias then moves.",
     ].join("\n"),
   },
@@ -335,10 +335,6 @@ function parseAllowedFlag(
   if (raw === undefined) return undefined;
   if (!Array.isArray(raw)) fail("--allowed requires a value");
   const selected = raw as readonly string[];
-  if (selected.includes("none")) {
-    if (selected.length !== 1) fail("--allowed none cannot be combined with another value");
-    return [];
-  }
   try { return decodeAllowedActions(selected, "--allowed"); }
   catch (error) { fail(error instanceof Error ? error.message : "invalid --allowed action"); }
 }

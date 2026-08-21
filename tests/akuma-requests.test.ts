@@ -110,7 +110,7 @@ test("aborted publication keeps an in-flight launch lexically owned", async () =
 });
 
 test("Heart clips nested allowed at each direct parent and cannot regain removed actions", async () => {
-  const value = await fixture(["akuma.call", "task.add"]);
+  const value = await fixture(["akuma.call"]);
   const previousRequests = process.env[AKUMA_REQUESTS_ENV];
   const previousHome = process.env.HOME;
   const home = join(value.root, "home");

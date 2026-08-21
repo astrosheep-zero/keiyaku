@@ -53,6 +53,7 @@ import { settings as readSettings, type Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
 import {
   decodeAllowedActions,
+  unionAllowedActions,
   type AllowedAction,
 } from "./allowed.js";
 
@@ -548,7 +549,7 @@ export class Akuma {
     });
     const allowed = input.allowed === undefined
       ? archetype.allowed
-      : decodeAllowedActions(input.allowed, "Akuma call allowed");
+      : unionAllowedActions(archetype.allowed, decodeAllowedActions(input.allowed, "Akuma call allowed"));
     const requests = injectedBodyRequests();
     const requestRecipe = Object.freeze({
       ...(archetype.description === undefined ? {} : { description: archetype.description }),

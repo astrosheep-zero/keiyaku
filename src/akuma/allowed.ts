@@ -33,6 +33,12 @@ export function effectiveAllowedActions(value: unknown): AllowedActions {
   return value === undefined ? ALLOWED_ACTIONS : decodeAllowedActions(value);
 }
 
+export function unionAllowedActions(base: AllowedActions, additions: AllowedActions): AllowedActions {
+  const merged = new Set(base);
+  for (const action of additions) merged.add(action);
+  return Object.freeze([...merged].sort());
+}
+
 export function clipAllowedActions(requested: AllowedActions, parent: AllowedActions): AllowedActions {
   const ceiling = new Set(parent);
   return Object.freeze(requested.filter((action) => ceiling.has(action)));
