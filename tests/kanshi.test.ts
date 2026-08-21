@@ -708,7 +708,7 @@ function attentionReport(): KanshiReport {
           contractRow({
             id: "kei/active-contract",
             title: "Active Contract",
-            phase: "pending-delivery",
+            phase: "tendered",
             phaseAt: "2026-08-11T23:57:00.000Z",
             worktreePath: dirtyPath,
             workspaceObservation: worktreeObservation(dirtyPath, "dirty", { staged: 1, unstaged: 3, untracked: 2, submodules: 0 }),
@@ -915,13 +915,13 @@ test("Kanshi text uses live sections, preserves important facts, and omits termi
   const contracts = sectionBody(text, "KEIYAKU");
   assert.match(contracts, /^! kei\/active-contract$/mu);
   assert.match(contracts, /Active Contract/u);
-  assert.match(contracts, /pending-delivery/u);
+  assert.match(contracts, /tendered/u);
   assert.match(contracts, /target main/u);
   assert.match(contracts, /7 commits behind main/u);
   assert.match(contracts, /target moved/u);
   assert.match(contracts, /worktree dirty · staged 1 · unstaged 3 · untracked 2/u);
   assert.match(contracts, /^ {2}DIR     \/repo\/\.git\/keiyaku\/wt\/active-contract$/mu);
-  assert.match(contracts, /pending-delivery · 3m/u);
+  assert.match(contracts, /tendered · 3m/u);
   assert.match(contracts, /GATES   \[✓\] reviewed   \[✗\] verified   \[~\] security   \[ \] manual/u);
   assert.match(contracts, /LINKED  task\/running/u);
   assert.match(contracts, /aku\/worker\/a0000001 \(@lead\)/u);
@@ -947,6 +947,11 @@ test("Kanshi text uses live sections, preserves important facts, and omits termi
   assert.match(contracts, /worktree unavailable/u);
   assert.match(contracts, /^ {2}DIR     \/repo\/\.git\/keiyaku\/wt\/unavailable-contract$/mu);
   assert.doesNotMatch((nextCold === -1 ? cold : cold.slice(0, nextCold)), /↳ /u);
+  const selected = renderKanshiText(selectKanshi({ report, contract: "kei/active-contract" }), { columns: 120, color: false }, "contract");
+  assert.match(selected, /tendered · 3m/u);
+  const active = report.contracts.value.rows.find((row) => row.id === "kei/active-contract");
+  assert.equal(active?.phase, "tendered");
+  assert.equal(JSON.parse(JSON.stringify(active)).phase, "tendered");
 
   const tasks = sectionBody(text, "TASK");
   assert.match(tasks, /^‖ task\/blocked$/mu);
@@ -1004,7 +1009,7 @@ test("Kanshi sections use a ten-row aperture with exact complete and partial foo
     ...report,
     contracts: {
       ...report.contracts,
-      value: { ...report.contracts.value, rows: [...coldContracts, contractRow({ id: "kei/hot-last", phase: "pending-delivery" })] },
+      value: { ...report.contracts.value, rows: [...coldContracts, contractRow({ id: "kei/hot-last", phase: "tendered" })] },
     },
     tasks: {
       ...report.tasks,

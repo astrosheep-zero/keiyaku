@@ -10,12 +10,13 @@ library edge by [document.md](document.md).
 The folded lifecycle is:
 
 ```text
-no journal -> waiting -> bound -> pending delivery -> claimed
+no journal -> waiting -> bound -> tendered -> claimed
                       \-> abandoned
 ```
 
 `claimed` and `abandoned` are terminal. The phase is a derived read model over
-facts, never another persisted authority.
+facts, never another persisted authority. A nonterminal Contract with a current
+delivery is `tendered`.
 
 A bind records immutable coordinates and the initial opaque contract terms. It
 does not admit `bound`; the contract waits for the first operation whose fact
@@ -101,7 +102,7 @@ the flag, the same preparation and judge run first; on conflict, a clean
 appointed workspace with no Git merge state receives `git merge --no-commit`
 of that judged `targetHead` and returns `integration-conflict-materialized`.
 That result is not an accepted mutation: it admits no deliver fact, mints no
-candidate, and leaves the Contract `pending-delivery`. Delivery first reads the
+candidate, and leaves the Contract `tendered`. Delivery first reads the
 appointed workspace's real index: any unmerged entry refuses as
 `unmerged-paths`, with its sorted unique complete paths, regardless of
 `includeDirty`. Once every path is resolved and staged, the existing dirty

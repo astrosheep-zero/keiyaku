@@ -94,7 +94,7 @@ did not land until the gates had current evidence.
 kanshi ─ 7 keiyaku · 18 akuma · 286 task ─ /Users/astrosheep/Developer/keiyaku-v4 main 9cfdca6017633e51827b9b2eba3c76a7fe08e05f
 
 keiyaku 7
-⧗ kei/add-acp-provider-and-grok-build-profile pending-delivery
+⧗ kei/add-acp-provider-and-grok-build-profile tendered
   worktree · integration c5cafef6 · -> refs/heads/main
   ! reviewed
 ⧗ kei/align-task-cli-truth-promises waiting

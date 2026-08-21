@@ -34,6 +34,7 @@ import {
   type ContractId,
   type JournalEntry,
 } from "../src/core/facts/types.js";
+import { renderCatalogText } from "../src/cli/render/catalog.js";
 import { fitIdentityStem, normalizeIdentityStem } from "../src/identity/normalize.js";
 
 
@@ -203,14 +204,14 @@ test("public Contract rows select the source entry for every phase", async () =>
   const ids = {
     waiting: await bind(repository, "Phase waiting", "here"),
     bound: await bind(repository, "Phase bound", "here"),
-    pending: await bind(repository, "Phase pending", "here"),
+    tendered: await bind(repository, "Phase tendered", "here"),
     claimed: await bind(repository, "Phase claimed", "here"),
     abandoned: await bind(repository, "Phase abandoned", "here"),
   };
   const times = {
     waiting: firstJournalAt(repository, ids.waiting),
     bound: "2026-08-12T00:01:00.000Z",
-    pending: "2026-08-12T00:02:00.000Z",
+    tendered: "2026-08-12T00:02:00.000Z",
     claimed: "2026-08-12T00:03:00.000Z",
     abandoned: "2026-08-12T00:04:00.000Z",
   };
@@ -234,11 +235,11 @@ test("public Contract rows select the source entry for every phase", async () =>
       policy: { requireBranchesToBeUpToDate: false },
     },
   });
-  const pendingDelivery = deliverEntry(ids.pending, times.pending, "01ARZ3NDEKTSV4RRFFQ69G5FBC");
+  const tenderedDelivery = deliverEntry(ids.tendered, times.tendered, "01ARZ3NDEKTSV4RRFFQ69G5FBC");
   const claimedDelivery = deliverEntry(ids.claimed, "2026-08-12T00:02:30.000Z", "01ARZ3NDEKTSV4RRFFQ69G5FBD");
   const additions = new Map<ContractId, readonly JournalEntry[]>([
     [ids.bound, [boundEntry(ids.bound, times.bound, "01ARZ3NDEKTSV4RRFFQ69G5FBB")]],
-    [ids.pending, [boundEntry(ids.pending, "2026-08-12T00:01:30.000Z", "01ARZ3NDEKTSV4RRFFQ69G5FBE"), pendingDelivery]],
+    [ids.tendered, [boundEntry(ids.tendered, "2026-08-12T00:01:30.000Z", "01ARZ3NDEKTSV4RRFFQ69G5FBE"), tenderedDelivery]],
     [ids.claimed, [
       boundEntry(ids.claimed, "2026-08-12T00:01:45.000Z", "01ARZ3NDEKTSV4RRFFQ69G5FBF"),
       claimedDelivery,
@@ -275,7 +276,7 @@ test("public Contract rows select the source entry for every phase", async () =>
   const expected = [
     [ids.waiting, "waiting", times.waiting],
     [ids.bound, "bound", times.bound],
-    [ids.pending, "pending-delivery", times.pending],
+    [ids.tendered, "tendered", times.tendered],
     [ids.claimed, "claimed", times.claimed],
     [ids.abandoned, "abandoned", times.abandoned],
   ] as const;
@@ -289,6 +290,20 @@ test("public Contract rows select the source entry for every phase", async () =>
     assert.equal(observed.row.phase, phase);
     assert.equal(observed.row.phaseAt, phaseAt);
   }
+  const board = await withGitDecodeChannel(scope, (channel) => contractsOperation({
+    scope, channel, hereWorkspace: hereWorkspace(scope),
+  }));
+  const tendered = board.rows.find((row) => row.id === ids.tendered);
+  assert.equal(tendered?.phase, "tendered");
+  assert.equal(JSON.parse(JSON.stringify(tendered)).phase, "tendered");
+  const catalog = renderCatalogText({
+    kind: "contracts",
+    root: board.root,
+    state: board.state,
+    observedAt: board.observedAt,
+    rows: board.rows,
+  });
+  assert.match(catalog, new RegExp(`${ids.tendered}\\n  Phase tendered\\n  tendered`, "u"));
 });
 
 test("Contract boards preserve endpoint kinds and lexical active reverse dependents", async () => {

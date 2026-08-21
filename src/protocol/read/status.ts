@@ -21,7 +21,7 @@ import type { GitDecodeChannel, GitReadObservation } from "../../git/read-observ
 import { gateReports, type GateCurrent } from "../../core/facts/gate.js";
 import type { ContractId, ContractState, DeliverData, JournalEntry, SnapshotId } from "../../core/facts/types.js";
 
-export type ContractPhase = "waiting" | "bound" | "pending-delivery" | "claimed" | "abandoned";
+export type ContractPhase = "waiting" | "bound" | "tendered" | "claimed" | "abandoned";
 export type ContractDisposition = "active" | "terminal";
 
 export type ContractGateCurrent = GateCurrent;
@@ -96,7 +96,7 @@ function titleFor(state: ContractState): string | null {
 function phaseFor(state: ContractState): ContractPhase {
   if (state.terminal?.kind === "claimed") return "claimed";
   if (state.terminal?.kind === "abandoned") return "abandoned";
-  if (state.delivery !== null) return "pending-delivery";
+  if (state.delivery !== null) return "tendered";
   if (state.bound !== null) return "bound";
   return "waiting";
 }

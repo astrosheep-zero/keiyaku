@@ -222,7 +222,7 @@ type ContractWorkspaceObservation =
   | Readonly<{ kind: "unappointed" }>
   | Readonly<{ kind: "failed"; diagnostic: string }>
 
-type ContractPhase = "waiting" | "bound" | "pending-delivery" | "claimed" | "abandoned"
+type ContractPhase = "waiting" | "bound" | "tendered" | "claimed" | "abandoned"
 type AfterEndpointObservation =
   | Readonly<{ kind: "claimed" }>
   | Readonly<{ kind: "active"; phase: ContractPhase }>
@@ -240,7 +240,7 @@ type ContractDependent = Readonly<{
 type ContractRow = Readonly<{
   id: ContractId
   title: string | null
-  phase: "waiting" | "bound" | "pending-delivery" | "claimed" | "abandoned"
+  phase: ContractPhase
   phaseAt: string
   lastJournalAt: string
   disposition: "active" | "terminal"

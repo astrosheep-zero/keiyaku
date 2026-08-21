@@ -17,7 +17,7 @@ contract document -> bind -> work -> audit -> deliver -> review gates
                                                                 \-> abandoned
 ```
 
-The lifecycle is `waiting -> bound -> pending-delivery -> claimed | abandoned`;
+The lifecycle is `waiting -> bound -> tendered -> claimed | abandoned`;
 the last two are terminal. Reserve `--after` for true logical ordering: one
 Contract's result must ultimately build on another's settled outcome, or their
 intended work has a large or irreconcilable interaction that should be
@@ -219,7 +219,7 @@ included. Read the receipt:
   delivery is done.
 - When a gate is not current, the receipt shows the recorded candidate and the
   placement stop. This is not a failed delivery. The Contract stays
-  `pending-delivery` while you complete the gates.
+  `tendered` while you complete the gates.
 - A lag row reports an accepted physical effect that has not finished. The
   delivery stands; `reconcile` completes the effect later. It never changes
   the verdict.
@@ -283,7 +283,7 @@ Placement follows the Git mental model you already have:
   The deliver or review you just ran still counts: the recorded candidate and
   any `✓ reviewed` verdict are kept, but nothing claims and nothing moves.
   The target ref, its checkout, and your bytes stay exactly where they were,
-  and the Contract stays `pending-delivery`.
+  and the Contract stays `tendered`.
 - A `--here` Contract behaves like a commit with gates: it lands on the current
   branch and cannot deliver to a foreign checked-out target.
 

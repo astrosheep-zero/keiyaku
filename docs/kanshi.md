@@ -258,7 +258,7 @@ coordinate, aggregate score, or alternate status mode.
 
 ! kei/example
   TITLE   Title
-  STATE   pending-delivery · 3m
+  STATE   tendered · 3m
   GIT     target main · 7 commits behind main · target moved · worktree dirty · staged 1 · unstaged 3 · untracked 2
   DIR     /absolute/managed/path
   GATES   [✓] build   [✗] tests
@@ -289,7 +289,7 @@ coordinate, aggregate score, or alternate status mode.
 
 The text aperture shows at most ten rows from each section. Contract and Task
 select hot live rows first, then cold-live rows in their existing source order: a
-Contract is hot when it is pending-delivery, has failed or
+Contract is hot when it is tendered, has failed or
 stale gate testimony, is behind its target, has a dirty or unavailable
 worktree, has an unavailable or held TaskHolder, has an attached Akuma, or has
 no readable title; a Task is hot when blocked or in progress. Fleet selects its

@@ -148,7 +148,7 @@ function showWorkspacePath(row: ContractKanshiRow, hot: boolean): boolean {
 
 function contractHot(row: ContractKanshiRow): boolean {
   if (row.title === null) return true;
-  if (row.phase === "pending-delivery") return true;
+  if (row.phase === "tendered") return true;
   if (row.holder.kind === "unavailable" || row.holder.kind === "held") return true;
   if (row.fleet.length > 0) return true;
   if (row.targetLag.kind === "counted" && row.targetLag.behind > 0) return true;
