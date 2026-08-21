@@ -470,7 +470,7 @@ test("Akuma snapshot changes aggregate paths and leave JSON repeated", () => {
   assert.match(incomplete, /^ {2}\+4 -0 {2}src\/b\.ts$/mu);
 });
 
-test("Akuma running life is the unfinished terminal line and tell omits it", () => {
+test("Akuma mutation snapshots omit observation context", () => {
   const observation = akumaObservation({
     id: "aku/worker/1234abcd",
     life: "running",
@@ -501,9 +501,28 @@ test("Akuma running life is the unfinished terminal line and tell omits it", () 
   assert.equal(waitLines.at(-2), "");
   const told = renderAkumaText(parseArgv(["tell", observation.status.id, "steer"]).command, tellInvocation(observation));
   assert.doesNotMatch(told, /STILL RUNNING/u);
-  assert.match(told, /^tasks 1$/mu);
-  assert.match(told, /^changes 0$/mu);
+  assert.doesNotMatch(told, /^tasks /mu);
+  assert.doesNotMatch(told, /^changes /mu);
   assert.notEqual(told.split("\n").at(-1), "");
+  const killed = renderAkumaText(parseArgv(["kill", observation.status.id]).command, {
+    kind: "akuma",
+    action: "kill",
+    result: {
+      results: [{
+        id: observation.status.id,
+        evidence: "killed",
+        observation: {
+          kind: "observed",
+          ...observation,
+          status: { ...observation.status, life: "killed" },
+        },
+      }],
+    },
+  });
+  assert.match(killed, /^kill killed$/mu);
+  assert.doesNotMatch(killed, /^tasks /mu);
+  assert.doesNotMatch(killed, /^changes /mu);
+  assert.equal(killed.split("\n").at(-1), "× killed");
   const asleep = renderStatus(akumaObservation({
     id: "aku/worker/1234abcd",
     life: "asleep",

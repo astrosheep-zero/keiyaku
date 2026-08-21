@@ -232,7 +232,9 @@ timeline after one blank line; the reported-change block follows Tasks. A
 plural answered wait member places the same two context blocks after one blank
 line following its exact answer. Status, wait, unfinished
 observed call, and kill then place life last: one blank line, then a top-level
-life line. Ordinary and interrupt tell output and history omit life. Running
+life line. Ordinary and interrupt tell output and history omit life. Tell,
+interrupt, and kill omit the created-Task and reported-change blocks beneath
+the timeline; status, wait, and call retain them. Running
 life is exactly `● STILL RUNNING`; an asleep Akuma renders as `✓ came back`,
 `× killed`, `? stranded`, `? hung`, and `? untidy`.
 

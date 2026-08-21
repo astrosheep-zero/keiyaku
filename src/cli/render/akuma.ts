@@ -280,15 +280,22 @@ function answeredBlock(
   return `${answeredHeading(observation.status.id, alias, columns)}\n${answer}${separator}${context}`;
 }
 
-function snapshotText(
-  view: Readonly<{
-    status: AkumaObservation["status"];
-    contract: DispatchAssociation;
-    createdTasks?: CreatedTaskObservation;
-  }>,
+type SnapshotView = Readonly<{
+  status: AkumaObservation["status"];
+  contract: DispatchAssociation;
+  createdTasks?: CreatedTaskObservation;
+}>;
+
+type SnapshotCoreOptions = Readonly<{
+  alias?: string;
+  facts?: readonly string[];
+}>;
+
+function snapshotCore(
+  view: SnapshotView,
   context: TextRenderContext,
-  options: Readonly<{ alias?: string; facts?: readonly string[]; showLife?: boolean }> = {},
-): string {
+  options: SnapshotCoreOptions,
+): Readonly<{ activity: readonly string[]; lines: readonly string[] }> {
   const snapshot = view.status.timeline;
   const activity = snapshot.kind === "idle" && snapshot.outcome !== undefined
     ? groupedRows([
@@ -301,30 +308,55 @@ function snapshotText(
     ...contractFacts(view.contract),
     ...(options.facts ?? []),
   ];
-  const taskContext = renderTaskContextLines(view.createdTasks, context.columns);
-  const changes = renderReportedChangeLines(snapshot);
   const pending = pendingWithoutLiveBody(view.status);
-  const footer = options.showLife === false ? [] : ["", lifeLabel(view.status.life)];
+  return {
+    activity,
+    lines: [
+      ...snapshotHeading(view.status.id, options.alias, view.contract, context.columns),
+      ...facts,
+      ...activity,
+      ...(pending === 0 ? [] : [`pending ${pending} tells · no live body`]),
+    ],
+  };
+}
+
+function snapshotText(
+  view: SnapshotView,
+  context: TextRenderContext,
+  options: SnapshotCoreOptions = {},
+): string {
+  const core = snapshotCore(view, context, options);
+  const taskContext = renderTaskContextLines(view.createdTasks, context.columns);
   return [
-    ...snapshotHeading(view.status.id, options.alias, view.contract, context.columns),
-    ...facts,
-    ...activity,
-    ...(pending === 0 ? [] : [`pending ${pending} tells · no live body`]),
-    ...(activity.length > 0 && taskContext.length > 0 ? [""] : []),
+    ...core.lines,
+    ...(core.activity.length > 0 && taskContext.length > 0 ? [""] : []),
     ...taskContext,
-    ...changes,
-    ...footer,
+    ...renderReportedChangeLines(view.status.timeline),
+    "",
+    lifeLabel(view.status.life),
   ].join("\n");
 }
 
-function observationStageText(
+function mutationSnapshotText(
+  view: SnapshotView,
+  context: TextRenderContext,
+  options: SnapshotCoreOptions & Readonly<{ showLife?: boolean }> = {},
+): string {
+  const core = snapshotCore(view, context, options);
+  return [
+    ...core.lines,
+    ...(options.showLife === false ? [] : ["", lifeLabel(view.status.life)]),
+  ].join("\n");
+}
+
+function mutationObservationStageText(
   id: string,
   observation: AkumaObservationStage,
   context: TextRenderContext,
-  options: Readonly<{ alias?: string; facts?: readonly string[]; showLife?: boolean }> = {},
+  options: SnapshotCoreOptions & Readonly<{ showLife?: boolean }> = {},
 ): string {
   if (observation.kind === "unobserved") return unobservedText(id, observation.diagnostic);
-  return snapshotText(observation, context, options);
+  return mutationSnapshotText(observation, context, options);
 }
 
 function waitText(
@@ -363,7 +395,7 @@ function tellText(result: Extract<AkumaInvocationResult, { action: "tell"; mode:
     : wake.kind === "pursuing"
       ? [`wake pursuing · body ${wake.bodySequence}`]
       : [`wake ${wake.kind}`];
-  return observationStageText(result.result.akuma, result.result.observation, context, {
+  return mutationObservationStageText(result.result.akuma, result.result.observation, context, {
     ...(result.alias === undefined ? {} : { alias: result.alias }),
     facts,
     showLife: false,
@@ -457,7 +489,7 @@ export function renderAkumaText(command: ParsedCommand, result: AkumaInvocationR
     case "tell":
       return result.mode === "ordinary"
         ? tellText(result, context)
-        : observationStageText(result.result.id, result.result.observation, context, {
+        : mutationObservationStageText(result.result.id, result.result.observation, context, {
           ...(result.alias === undefined ? {} : { alias: result.alias }),
           showLife: false,
         });
@@ -470,11 +502,14 @@ export function renderAkumaText(command: ParsedCommand, result: AkumaInvocationR
         ? { kind: "none" }
         : { kind: "associated", contractId });
     }
-    case "kill": return result.result.results.map((member) => observationStageText(
+    case "kill": return result.result.results.map((member) => mutationObservationStageText(
       member.id,
       member.observation,
       context,
-      { facts: [`kill ${member.evidence}`], ...(result.alias === undefined ? {} : { alias: result.alias }) },
+      {
+        facts: [`kill ${member.evidence}`],
+        ...(result.alias === undefined ? {} : { alias: result.alias }),
+      },
     )).join("\n\n");
   }
 }
