@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { ESLint } from "eslint";
 import {
   markdownCharacterCount,
   markdownCharacterFindings,
@@ -44,6 +45,33 @@ test("maintainability max-lines exemptions require useful effective-line caps", 
   assert.match(invalid[0] ?? "", /useful maxEffectiveLines cap above 500/);
   assert.match(invalid[1] ?? "", /useful maxEffectiveLines cap above 500/);
   assert.match(invalid[2] ?? "", /useful maxEffectiveLines cap above 500/);
+});
+
+test("maintainability function exemptions require named owners and useful caps", () => {
+  assert.deepEqual(validateExemptions([{
+    file: "scripts/check-maintainability.js",
+    reason: "The maintainability runner is one diagnostics owner.",
+    maxEffectiveLines: 501,
+    functions: [{ name: "run", reason: "The runner keeps one diagnostics lifecycle.", maxEffectiveLines: 81 }],
+  }]), []);
+  const invalid = validateExemptions([{
+    file: "scripts/check-architecture.ts",
+    reason: "The architecture checker is one diagnostics owner.",
+    maxEffectiveLines: 501,
+    functions: [{ name: "", reason: "", maxEffectiveLines: 80 }],
+  }]);
+  assert.match(invalid[0] ?? "", /function 1 needs a name/);
+});
+
+test("maintainability function exemptions apply only to the named function", async () => {
+  const body = Array.from({ length: 84 }, (_, index) => `  const value${index} = ${index};`).join("\n");
+  const source = `async function drivePi() {\n${body}\n}\nfunction unrelated() {\n${body}\n}\n`;
+  const eslint = new ESLint({ cwd: process.cwd() });
+  const [result] = await eslint.lintText(source, { filePath: join(process.cwd(), "src/akuma/providers/pi/index.ts") });
+  const findings = result.messages.filter(({ ruleId }) => ruleId === "maintainability/exact-function-lines");
+  assert.equal(findings.length, 1);
+  assert.match(findings[0]?.message ?? "", /unrelated/);
+  assert.match(findings[0]?.message ?? "", /Maximum allowed is 80/);
 });
 
 test("maintainability hard line limit promotes only above 500 effective lines", () => {

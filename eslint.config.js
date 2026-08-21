@@ -1,7 +1,57 @@
 import parser from "@typescript-eslint/parser";
+import { builtinRules } from "eslint/use-at-your-own-risk";
 import { FILE_LINE_EXEMPTIONS, FILE_LINES } from "./scripts/maintainability/config.js";
 
 const codeLineLimit = (severity, max) => [severity, { max, skipBlankLines: true, skipComments: true }];
+const maxLinesPerFunction = builtinRules.get("max-lines-per-function");
+
+function functionName(node) {
+  if (node.id?.type === "Identifier") return node.id.name;
+  const parent = node.parent;
+  if (parent?.type === "VariableDeclarator" && parent.id.type === "Identifier") return parent.id.name;
+  if ((parent?.type === "MethodDefinition" || parent?.type === "Property") && parent.key) {
+    return parent.key.type === "Identifier" ? parent.key.name : String(parent.key.value);
+  }
+  return null;
+}
+
+function contextWithOptions(context, options) {
+  const scoped = Object.create(context);
+  Object.defineProperty(scoped, "options", { value: [options] });
+  return scoped;
+}
+
+function exactFunctionLineRule(functions) {
+  return {
+    meta: maxLinesPerFunction.meta,
+    create(context) {
+      const defaultRule = maxLinesPerFunction.create(contextWithOptions(context, {
+        max: 80,
+        skipBlankLines: true,
+        skipComments: true,
+        IIFEs: true,
+      }));
+      const namedRules = new Map(functions.map((entry) => [
+        entry.name,
+        maxLinesPerFunction.create(contextWithOptions(context, {
+          max: entry.maxEffectiveLines,
+          skipBlankLines: true,
+          skipComments: true,
+          IIFEs: true,
+        })),
+      ]));
+      const visit = (visitorName, node) => {
+        const visitor = namedRules.get(functionName(node)) ?? defaultRule;
+        visitor[visitorName]?.(node);
+      };
+      return {
+        FunctionDeclaration: (node) => visit("FunctionDeclaration", node),
+        FunctionExpression: (node) => visit("FunctionExpression", node),
+        ArrowFunctionExpression: (node) => visit("ArrowFunctionExpression", node),
+      };
+    },
+  };
+}
 
 export default [
   {
@@ -27,7 +77,16 @@ export default [
   ...FILE_LINE_EXEMPTIONS.map((exemption) => ({
     files: [exemption.file],
     rules: {
-      "max-lines": codeLineLimit("warn", exemption.maxEffectiveLines),
+      ...(exemption.maxEffectiveLines === undefined ? {} : { "max-lines": codeLineLimit("warn", exemption.maxEffectiveLines) }),
+      ...(exemption.functions === undefined
+        ? {}
+        : {
+            "max-lines-per-function": "off",
+            "maintainability/exact-function-lines": "error",
+          }),
     },
+    ...(exemption.functions === undefined
+      ? {}
+      : { plugins: { maintainability: { rules: { "exact-function-lines": exactFunctionLineRule(exemption.functions) } } } }),
   })),
 ];

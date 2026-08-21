@@ -17,7 +17,7 @@ const MARKDOWN_EXCLUDED_DIRECTORIES = new Set([
 function exemptionError(exemption, index, seen, rootDirectory) {
   const label = `maintainability exemption ${index + 1}`;
   if (!exemption || typeof exemption !== "object") return `${label} must be an object`;
-  const { file, reason, maxEffectiveLines } = exemption;
+  const { file, reason, maxEffectiveLines, functions } = exemption;
   if (typeof file !== "string" || file.length === 0) return `${label} needs a file`;
   if (path.isAbsolute(file) || path.posix.normalize(file) !== file || /[*?[\]{}!]/.test(file)) {
     return `${label} must use one exact normalized relative file path`;
@@ -27,8 +27,27 @@ function exemptionError(exemption, index, seen, rootDirectory) {
   seen.add(file);
   if (!existsSync(path.join(rootDirectory, file))) return `${label} targets missing file ${file}`;
   if (typeof reason !== "string" || reason.trim().length === 0) return `${label} needs a reason`;
-  if (!Number.isSafeInteger(maxEffectiveLines) || maxEffectiveLines <= FILE_LINES.error) {
+  if (maxEffectiveLines !== undefined && (!Number.isSafeInteger(maxEffectiveLines) || maxEffectiveLines <= FILE_LINES.error)) {
     return `${label} needs a useful maxEffectiveLines cap above ${FILE_LINES.error}`;
+  }
+  if (maxEffectiveLines === undefined && functions === undefined) {
+    return `${label} needs a useful maxEffectiveLines cap above ${FILE_LINES.error}`;
+  }
+  if (functions !== undefined) {
+    if (!Array.isArray(functions) || functions.length === 0) return `${label} functions must be a non-empty array`;
+    for (const [functionIndex, functionExemption] of functions.entries()) {
+      const functionLabel = `${label} function ${functionIndex + 1}`;
+      if (!functionExemption || typeof functionExemption !== "object") return `${functionLabel} must be an object`;
+      if (typeof functionExemption.name !== "string" || functionExemption.name.trim().length === 0) {
+        return `${functionLabel} needs a name`;
+      }
+      if (typeof functionExemption.reason !== "string" || functionExemption.reason.trim().length === 0) {
+        return `${functionLabel} needs a reason`;
+      }
+      if (!Number.isSafeInteger(functionExemption.maxEffectiveLines) || functionExemption.maxEffectiveLines <= 80) {
+        return `${functionLabel} needs a useful maxEffectiveLines cap above 80`;
+      }
+    }
   }
   return null;
 }
@@ -105,7 +124,14 @@ async function run() {
   else {
     console.log("maintainability exemptions:");
     for (const exemption of FILE_LINE_EXEMPTIONS) {
-      console.log(`- ${exemption.file}: ${exemption.maxEffectiveLines} max-lines (${exemption.reason})`);
+      if (exemption.maxEffectiveLines !== undefined) {
+        console.log(`- ${exemption.file}: ${exemption.maxEffectiveLines} max-lines (${exemption.reason})`);
+      } else {
+        console.log(`- ${exemption.file}: function exemptions (${exemption.reason})`);
+      }
+      for (const functionExemption of exemption.functions ?? []) {
+        console.log(`  - ${functionExemption.name}: ${functionExemption.maxEffectiveLines} max-lines-per-function (${functionExemption.reason})`);
+      }
     }
   }
 
