@@ -70,7 +70,7 @@ The command vocabulary is:
 
 | Command | Public adaptation |
 | --- | --- |
-| `bind` | Calls `Keiyaku.bind` with the pinned Repo, Markdown, and structured options. |
+| `bind` | Calls `Keiyaku.bind` with the pinned Repo, Markdown/structured options, or the explicit sibling fork form. |
 | `amend` | Calls `keiyaku.amend` with the operation Markdown and structured options. |
 | `deliver` | Calls `keiyaku.deliver`. |
 | `review` | Calls `keiyaku.review`; in a declared request channel it forwards one hop through the direct parent. |
@@ -87,7 +87,10 @@ The command vocabulary is:
 | `call`, `fork` | Call the package-root Akuma facet so Dispatch and Alias integration is not reimplemented at the edge. |
 | `wait`, `tell`, `history`, `kill` | Call the corresponding package-root capability; Contract history uses its handle and `tell --interrupt` selects composed interrupt. |
 
-`bind` accepts no contract positional. Existing Contract commands accept a full
+`bind --fork-of kei/<complete-id>` reads no stdin and creates a sibling from the
+source's current folded terms and original start snapshot. It accepts only
+`--target`, `--here`, `--actor`, and `--json`; `-`, `--task`, `--gates`, and
+`--after` are syntax refusals. `bind` accepts no contract positional. Existing Contract commands accept a full
 `kei/<contract-segment>` or active `@<contract-segment>` reference. The short
 reference resolves over `ContractBoard` rows and is never stored.
 
@@ -123,7 +126,8 @@ Contract lifecycle.
 
 ## Inputs And Flags
 
-A final bare `-` reads stdin. For `bind`, it reads one contract document; for
+A final bare `-` reads stdin. For ordinary `bind`, it reads one contract document;
+the `--fork-of` form reads no stdin. For
 `amend`, one amendment-operation document when `-` is present; for `arc`, one
 arc document; and for `review`, the required summary. Review takes exactly one summary source:
 `--summary <text>` or final `-`. Neither or both is a usage refusal. No other
@@ -151,7 +155,7 @@ the bind result or exit status. The receipt is CLI-owned transient input custody
 not Contract or Library state; recovery submits it through the ordinary `bind -`
 entry point.
 
-`bind` maps `--target`, `--here`, repeated `--after`, `--gates`, and `--actor`
+Ordinary `bind` maps `--target`, `--here`, repeated `--after`, `--gates`, and `--actor`
 to `Keiyaku.bind`. An explicit `--target` remains literal input for the public
 target boundary. When it is omitted, the adapter supplies
 `repo.currentBranch()`; an attached branch therefore becomes the canonical
@@ -162,6 +166,9 @@ maps to `workspace: "here"`; on an attached branch the same default target
 makes it a commit-in-place contract. An explicit foreign target with `--here`
 is a typed bind refusal. The omitted form maps to the public managed-worktree
 default.
+Fork bind copies the source target when `--target` is omitted, copies its start
+exactly, and defaults to managed worktree even when the source used `--here`.
+It stores no source or comparison relation.
 `amend` maps optional Markdown, `--actor`, repeated `--after`,
 and `--gates` to `keiyaku.amend`. Its omitted `after` leaves the current value
 unchanged, while `--clear-after` maps to `after: []`; it is mutually exclusive

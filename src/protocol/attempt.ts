@@ -66,7 +66,11 @@ export type AcceptedAdmission = Readonly<{
 }>;
 
 export type AttemptTerminal = Readonly<{ kind: "collision" }> | PublicationFailed;
-export type DecidedOfferResult = AcceptedAdmission | AttemptTerminal | Readonly<{ kind: "redecide" }>;
+export type DecidedOfferResult<Refusal = never> =
+  | AcceptedAdmission
+  | AttemptTerminal
+  | Readonly<{ kind: "redecide" }>
+  | Readonly<{ kind: "refused"; refusal: Refusal }>;
 
 function offerEntries(offer: Offer): readonly JournalEntry[] {
   return offer.facts.flatMap((append) => append.entries);
@@ -140,7 +144,7 @@ async function publicationPremiseMoved(
 }
 
 /** Admit one decided offer without making another legal decision. */
-export async function admitDecidedOffer(
+export async function admitDecidedOffer<Refusal = never>(
   input: Readonly<{
     channel: GitDecodeChannel;
     repository: GitRepository;
@@ -149,12 +153,17 @@ export async function admitDecidedOffer(
     offer: Offer;
     primaryContract: ContractId;
     assertions?: readonly GitRefAssertion[];
+    validateAdmission?: (observation: GitDecisionObservation) => Refusal | undefined | Promise<Refusal | undefined>;
   }>,
-): Promise<DecidedOfferResult> {
+): Promise<DecidedOfferResult<Refusal>> {
   const { channel, repository, decisionObservation, attempt, offer, primaryContract } = input;
   const assertions = input.assertions ?? [];
   validateOffer(offer, attempt);
   const primary = primaryAppend(offer, primaryContract);
+  if (input.validateAdmission !== undefined) {
+    const refusal = await input.validateAdmission(decisionObservation);
+    if (refusal !== undefined) return { kind: "refused", refusal };
+  }
   const admission = await admit(repository, offer, decisionObservation.admission, assertions);
   if (admission.kind === "accepted") {
     return {

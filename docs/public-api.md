@@ -64,7 +64,7 @@ namespace states.
 surface is exactly:
 
 ```ts
-type BindInput = Readonly<{
+type MarkdownBindInput = Readonly<{
   repo: Repo
   markdown: string
   task?: TaskId
@@ -75,6 +75,17 @@ type BindInput = Readonly<{
   gates?: readonly Gate[]
   hooks?: WorktreeHooks
 }>
+
+type ForkBindInput = Readonly<{
+  repo: Repo
+  forkOf: ContractId
+  target?: string
+  workspace?: "worktree" | "here"
+  actor?: ActorId
+  hooks?: WorktreeHooks
+}>
+
+type BindInput = MarkdownBindInput | ForkBindInput
 
 type HookCommand = Readonly<{
   argv: readonly string[]
@@ -93,6 +104,15 @@ type ReconcileInput = Readonly<{
 
 Repo.at(input?: { path?: string; gitPath?: string }): Promise<Repo>
 repo.root: string
+
+`ForkBindInput` is a closed, disjoint bind form. It reads the named source's
+current folded terms and exact original start snapshot, changes only its H1 to
+`Fork · <source title>`, and admits an ordinary fresh Contract. It has no
+Markdown, Task, gate, or prerequisite input. Its only overrides are target and
+workspace placement; target otherwise copies the source target and workspace
+defaults to managed worktree. A source may be active or abandoned, but missing,
+corrupt, unfoldable, or unavailable-start sources refuse. The source relation is
+not persisted.
 repo.currentBranch(): Promise<string | null>
 repo.reconcile(input?: ReconcileInput): Promise<RepoReconcileReport>
 Keiyaku.of(input: { repo: Repo; id: ContractId }): Keiyaku

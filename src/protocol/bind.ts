@@ -13,7 +13,6 @@ import type {
 import { admitIntent } from "./intent.js";
 import { complete, type IntentOutcome } from "./outcome.js";
 import type { CompanionDecorator } from "./run.js";
-
 export type TargetInputRefusal =
   | Readonly<{ kind: "invalid-target" }>
   | Readonly<{ kind: "target-missing" }>
@@ -22,6 +21,7 @@ export type TargetInputRefusal =
       target: string;
       branch: string | null;
     }>;
+export type ForkSourceMovedRefusal = Readonly<{ kind: "fork-source-moved"; contractId: ContractId }>;
 
 type BindOperationInput = Readonly<{
   scope: GitRepository;
@@ -33,9 +33,11 @@ type BindOperationInput = Readonly<{
   actor?: ActorId;
   decorateOffer?: CompanionDecorator;
   contractId: ContractId;
+  coordinates?: Readonly<{ start: import("../core/facts/types.js").SnapshotId }>;
+  source?: Readonly<{ contractId: ContractId; head: import("../core/facts/types.js").ContractHead | null; start: import("../core/facts/types.js").SnapshotId; document: import("../core/facts/types.js").DocumentKey }>;
 }>;
 
-type BindRefusalUnion = BindRefusal | TargetInputRefusal | VerificationDeclarationRefusal;
+type BindRefusalUnion = BindRefusal | TargetInputRefusal | VerificationDeclarationRefusal | ForkSourceMovedRefusal;
 type BindSeed = Readonly<{ contractId: ContractId; actor?: ActorId; at: string }>;
 
 async function bindPreparation(
@@ -58,8 +60,9 @@ async function bindPreparation(
   if (input.workspace === "here" && target !== undefined && observed.branch !== target) {
     return { kind: "refused", refusal: { kind: "here-target-mismatch", target, branch: observed.branch } };
   }
-  const oid = gitObjectIdForSnapshot(observed.start);
-  const assertions: GitRefAssertion[] = [{ ref: target ?? "HEAD", oid }];
+  const start = input.coordinates?.start ?? observed.start;
+  const oid = gitObjectIdForSnapshot(input.coordinates === undefined ? start : observed.start);
+  const assertions: GitRefAssertion[] = input.coordinates === undefined ? [{ ref: target ?? "HEAD", oid }] : [];
   return {
     kind: "prepared",
     input: {
@@ -68,7 +71,7 @@ async function bindPreparation(
         kind: "prepared",
         data: {
           coordinates: {
-            start: observed.start,
+            start,
             ...(observed.target === undefined ? {} : { target: observed.target }),
             workspace: input.workspace,
           },
@@ -83,7 +86,7 @@ async function bindPreparation(
 export async function bindOperation(
   input: BindOperationInput,
 ): Promise<
-  IntentOutcome<Readonly<{ contractId: ContractId }>, BindRefusal | TargetInputRefusal | VerificationDeclarationRefusal>
+  IntentOutcome<Readonly<{ contractId: ContractId }>, BindRefusal | TargetInputRefusal | VerificationDeclarationRefusal | ForkSourceMovedRefusal>
 > {
   let target: string | undefined;
   if (input.target !== undefined) {
@@ -104,8 +107,22 @@ export async function bindOperation(
       } satisfies BindSeed,
       decideBind,
       {
-        observedContracts: [id, ...input.terms.after],
+        observedContracts: [id, ...input.terms.after, ...(input.source === undefined ? [] : [input.source.contractId])],
         prepareInput: async (_observation, original) => bindPreparation(input, target, original),
+        ...(input.source === undefined
+          ? {}
+          : {
+              validateAdmission: (observation: import("../git/observe.js").GitDecisionObservation) => {
+                const current = observation.decision.get(input.source!.contractId);
+                return current !== null
+                  && current !== undefined
+                  && current.head === input.source!.head
+                  && current.coordinates.start === input.source!.start
+                  && current.terms.document.key === input.source!.document
+                  ? undefined
+                  : { kind: "fork-source-moved", contractId: input.source!.contractId } as const;
+              },
+            }),
         ...(input.decorateOffer === undefined ? {} : { decorateOffer: input.decorateOffer }),
       },
     ),

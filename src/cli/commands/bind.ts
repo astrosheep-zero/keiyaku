@@ -13,22 +13,26 @@ import { contractFromInput } from "../selectors.js";
 type BindCommandInput = Readonly<{
   command: ParsedBind;
   repo: Repo;
-  markdown: string;
-  gates: readonly Gate[];
+  markdown?: string;
+  gates?: readonly Gate[];
   actor?: ActorId;
   hooks?: WorktreeHooks;
 }>;
 
-export async function bindFromCommand({
-  command,
-  repo,
-  markdown,
-  gates,
-  actor,
-  hooks,
-}: BindCommandInput): Promise<BindResult> {
+export async function bindFromCommand({ command, repo, markdown, gates, actor, hooks }: BindCommandInput): Promise<BindResult> {
+  if (command.forkOf !== undefined) {
+    return Keiyaku.bind({
+      repo,
+      forkOf: contractFromInput(repo, command.forkOf).id,
+      ...(command.target === undefined ? {} : { target: command.target }),
+      ...(command.workspace === undefined ? {} : { workspace: command.workspace }),
+      ...(actor === undefined ? {} : { actor }),
+      ...(hooks === undefined ? {} : { hooks }),
+    });
+  }
   const after: readonly ContractId[] | undefined = command.after?.map((id) => contractFromInput(repo, id).id);
-  const target = command.target ?? (await repo.currentBranch());
+  const target = command.target ?? await repo.currentBranch();
+  if (markdown === undefined || gates === undefined) throw new Error("Markdown bind command is missing stdin terms");
   return Keiyaku.bind({
     repo,
     markdown,

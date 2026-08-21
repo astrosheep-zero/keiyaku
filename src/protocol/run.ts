@@ -43,6 +43,7 @@ export type RunProtocolInput<
   extendAttempt?: (attempt: AttemptContext, observedContractCount: number) => AttemptContext;
   /** Add opaque companions from the exact immutable observation for this attempt. */
   decorateOffer?: CompanionDecorator;
+  validateAdmission?: (observation: GitDecisionObservation) => Refusal | undefined | Promise<Refusal | undefined>;
   observationSelection?: GitTreeSelection;
 }> &
   (
@@ -144,7 +145,7 @@ export async function runProtocol<
   for (let index = 0; index < attempts.length; index += 1) {
     const prepared = await prepareProtocolAttempt(input, attempts[index]!);
     if (prepared.kind === "refused") return prepared;
-    const result = await admitDecidedOffer({
+    const result = await admitDecidedOffer<Refusal>({
       channel: input.channel,
       repository: input.repository,
       decisionObservation: prepared.observation,
@@ -152,8 +153,9 @@ export async function runProtocol<
       offer: prepared.offer,
       primaryContract: input.input.contractId,
       assertions: prepared.assertions,
+      ...(input.validateAdmission === undefined ? {} : { validateAdmission: input.validateAdmission }),
     });
-    if (result.kind === "accepted" || result.kind === "publication-failed") return result;
+    if (result.kind === "accepted" || result.kind === "publication-failed" || result.kind === "refused") return result;
     if (result.kind === "collision" && index + 1 === attempts.length) return result;
   }
   return { kind: "exhausted" };

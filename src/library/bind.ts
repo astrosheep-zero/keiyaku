@@ -22,9 +22,12 @@ type BindAttemptInput = Readonly<{
   verification: VerificationDeclarationPreparation;
   workspace: "worktree" | "here";
   target?: string;
+  coordinates?: Readonly<{ start: import("../core/facts/types.js").SnapshotId }>;
+  source?: Parameters<typeof bindOperation>[0]["source"];
   task?: TaskId;
   actor?: ActorId;
 }>;
+
 
 function candidateId(title: string, collision: number): ContractId {
   const stem = fitIdentityStem({ stem: normalizeIdentityStem({ source: title }) || "contract", maxBytes: 48 });
@@ -39,6 +42,8 @@ async function attempt(input: BindAttemptInput, id: ContractId) {
     terms: input.terms,
     verification: input.verification,
     workspace: input.workspace,
+    ...(input.coordinates === undefined ? {} : { coordinates: input.coordinates }),
+    ...(input.source === undefined ? {} : { source: input.source }),
     contractId: id,
     ...(input.target === undefined ? {} : { target: input.target }),
     ...(input.task === undefined

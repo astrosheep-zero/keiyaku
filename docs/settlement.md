@@ -6,6 +6,10 @@ accepted Contract state into Task state. Contract journals and Task Markdown
 remain their products' lifecycle authorities; the holder is only the one
 cross-product association authority.
 
+Fork bind has no Task input and creates no TaskHolder, settlement relation,
+lineage, sibling registry, or comparison outcome. It reaches Settlement only
+as an ordinary new Contract after admission.
+
 No other module may import both Contract write-side facts and Task write
 operations. Core Contract decisions, Git admission, Task, and Akuma do not
 import settlement. The package-root Library composes holder changes into

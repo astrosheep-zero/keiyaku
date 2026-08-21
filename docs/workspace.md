@@ -103,6 +103,10 @@ foreign appointments untouched.
 
 ## Managed Place Appointment
 
+Fork bind defaults to a fresh managed worktree regardless of the source
+workspace. Explicit `here` uses ordinary here custody; source appointments and
+mutable workspace bytes are never shared.
+
 Place is the managed form of this same local appointment. It is not a Git
 identity, journal field, or a second product. A here Contract never enters
 the Place register.

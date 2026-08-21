@@ -55,6 +55,8 @@ async function readStdin(): Promise<string> {
 function selectedStdinDiagnostic(command: Exclude<ParsedCommand, { command: "install" }>): string | undefined {
   switch (command.command) {
     case "bind":
+      if (command.forkOf !== undefined) return undefined;
+      return `${command.command} requires a nonblank stdin document`;
     case "arc":
       return `${command.command} requires a nonblank stdin document`;
     case "amend":
@@ -168,14 +170,21 @@ async function bindDraftReceipt(establishWorld: () => Promise<WorldRoot>, markdo
   }
 }
 
-async function invokeBind({
-  parsed,
-  repo,
-  edge,
-  configuration,
-  hooks,
-  establishWorld,
-}: BindInvocation): Promise<InvocationResult> {
+async function invokeBind({ parsed, repo, edge, configuration, hooks, establishWorld }: BindInvocation): Promise<InvocationResult> {
+  if (parsed.forkOf !== undefined) {
+    const actor = actorFromEdge(parsed.actor, edge.environment);
+    const { bindFromCommand } = await import("./commands/bind.js");
+    const { acceptedBind, resultFromMutationCall } = await import("./accepted.js");
+    return resultFromMutationCall(
+      "bind",
+      () => bindFromCommand({ command: parsed, repo, ...(actor === undefined ? {} : { actor }), hooks }),
+      (accepted) => {
+        const bound = accepted.facts.find((fact) => fact.kind === "bind");
+        if (bound === undefined || bound.kind !== "bind") throw new Error("accepted bind is missing its bind fact");
+        return acceptedBind(accepted, bound.data.coordinates);
+      },
+    );
+  }
   const markdown = await edge.readStdin();
   const gates = await selectedGates(configuration, parsed.gates);
   const actor = actorFromEdge(parsed.actor, edge.environment);
@@ -378,7 +387,7 @@ async function invokeExisting(input: ExistingInvocation): Promise<InvocationResu
     case "audit":
       return invokeAudit(parsed, seat, await selectedGitPolicy(configuration));
     default:
-      return parsed satisfies never;
+      return parsed as never;
   }
 }
 

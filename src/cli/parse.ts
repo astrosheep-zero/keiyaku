@@ -280,6 +280,23 @@ function scanArgv(argv: readonly string[]): ParsedParts {
 }
 
 function parseBind(parts: ParsedParts): ParsedBind {
+  const forkOf = optionalFlag(parts.flags, "fork-of");
+  if (forkOf !== undefined) {
+    if (parts.stdin) refuse("bind", "fork bind reads no stdin");
+    for (const option of ["task", "after", "gates"]) {
+      if (parts.flags[option] !== undefined) refuse("bind", `--${option} is not valid with --fork-of`);
+    }
+    const target = optionalFlag(parts.flags, "target");
+    return {
+      command: "bind",
+      forkOf,
+      ...(target === undefined ? {} : { target }),
+      ...(parts.flags.here === true ? { workspace: "here" as const } : {}),
+      ...(parts.actor === undefined ? {} : { actor: parts.actor }),
+      output: parts.output,
+    };
+  }
+  if (!parts.stdin) refuse("bind", "bind requires stdin");
   const task = optionalFlag(parts.flags, "task");
   const target = optionalFlag(parts.flags, "target");
   const after =

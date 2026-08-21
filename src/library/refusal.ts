@@ -7,6 +7,10 @@ export type ContractAppointmentRefusal = Readonly<{
   path: string;
   contract?: ContractId;
 }>;
+export type ForkSourceRefusal = Readonly<{
+  kind: "fork-source-missing" | "fork-source-unavailable" | "fork-source-invalid" | "fork-source-moved";
+  contractId: ContractId;
+}>;
 
 export type NukeConfirmationRefusal = Readonly<{
   kind: "nuke-confirmation-mismatch";
@@ -18,11 +22,9 @@ export type NukeConfirmationRequiredRefusal = Readonly<{
   world: string;
 }>;
 
-export type KeiyakuRefusal =
-  | IntentRefusal
-  | ContractAppointmentRefusal
-  | NukeConfirmationRefusal
-  | NukeConfirmationRequiredRefusal;
+export type KeiyakuRefusal = IntentRefusal | ContractAppointmentRefusal
+  | ForkSourceRefusal
+  | NukeConfirmationRefusal | NukeConfirmationRequiredRefusal;
 export type KeiyakuRetryReason = IntentRetry;
 
 export class KeiyakuRefused extends Error {

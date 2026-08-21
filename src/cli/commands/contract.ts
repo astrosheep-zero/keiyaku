@@ -18,6 +18,7 @@ export type ParsedBind = Output &
   Actor &
   Readonly<{
     command: "bind";
+    forkOf?: string;
     task?: string;
     target?: string;
     workspace?: "here";
@@ -87,8 +88,7 @@ export type ParsedShow = Output & Readonly<{ command: "show"; contract?: string 
 
 export const CONTRACT_COMMAND_SPECS = {
   bind: {
-    positional: "none",
-    stdin: "required",
+    positional: "none", stdin: "optional",
     flags: {
       actor: "value",
       task: "value",
@@ -96,11 +96,12 @@ export const CONTRACT_COMMAND_SPECS = {
       here: "boolean",
       after: "repeat-value",
       gates: "raw-value",
+      "fork-of": "value",
       json: "boolean",
     },
     usage:
-      "bind [--task <task/...>] [--target <ref>] [--here] [--after <kei/...> ...] [--gates <name,...>] [--actor <actor>] -",
-    purpose: "Create one Contract from stdin Markdown.",
+      "bind [--task <task/...>] [--target <ref>] [--here] [--after <kei/...> ...] [--gates <name,...>] [--actor <actor>] - | bind --fork-of <kei/...> [--target <ref>] [--here] [--actor <actor>]",
+    purpose: "Create one Contract from stdin Markdown or a sibling fork.",
   },
   amend: {
     positional: "optional",

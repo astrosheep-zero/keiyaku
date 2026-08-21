@@ -26,6 +26,11 @@ handled by generic gate currentness rather than by another document projection.
 
 ## Markdown Dialect
 
+Fork bind replaces only the source document H1 with `Fork · <source title>` and
+preserves every remaining byte, including extensions and line endings. The
+ordinary decoder recomputes document and section keys; no fork-specific field or
+grammar exists.
+
 The Markdown layer accepts column-zero ATX H1, H2, and H3 headings, one
 repository-wide fence law, YAML frontmatter, blockquotes, nested lists, and
 opaque inline and fence bytes. Setext headings and inline AST interpretation

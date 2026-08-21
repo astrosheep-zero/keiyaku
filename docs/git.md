@@ -70,6 +70,11 @@ resolved target head; without a target it is the caller worktree's current
 point for a `here` workspace. A targeted here contract is legal only while
 the caller's symbolic `HEAD` is that target.
 
+Fork bind copies the source `coordinates.start` exactly after confirming its
+immutable commit remains observable. An omitted target copies the source target;
+an explicit target uses ordinary validation. The new Contract receives a fresh
+delivery ref, managed worktree, and candidate custody.
+
 Bind derives those coordinates anew inside every semantic attempt. The same
 atomic admission transaction asserts only the ref fact sealed into
 `coordinates.start`: an explicit target's OID, or dereferenced `HEAD` OID for a

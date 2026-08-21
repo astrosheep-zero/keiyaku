@@ -12,7 +12,7 @@ import type { DeliverRefusal } from "../core/verbs/deliver.js";
 import type { PlacementRefusal } from "../core/verbs/placement.js";
 import type { AttestationRefusal } from "../core/verbs/attestation.js";
 import type { ContractId, ContractState, DeliverData, DocumentKey, SnapshotId } from "../core/facts/types.js";
-import type { BindRefusal, TargetInputRefusal } from "./bind.js";
+import type { BindRefusal, ForkSourceMovedRefusal, TargetInputRefusal } from "./bind.js";
 import type { IntegrationPreparationRefusal } from "../git/integration.js";
 import type { TargetPlacementRefusal } from "../git/target-placement.js";
 import type { VerificationCleanupFailure, VerificationRuntimeStop, VerificationResult } from "./intent.js";
@@ -75,6 +75,7 @@ export type IntentRefusal =
   | AmendRefusal
   | ArcRefusal
   | BindRefusal
+  | ForkSourceMovedRefusal
   | DeliverRefusal
   | DeliveryPreparationRefusal
   | DeliverConflictRefusal

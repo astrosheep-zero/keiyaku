@@ -329,6 +329,10 @@ the exact mechanical record is last. The renderer uses only typed fields on the
 invocation result. It never rereads authority, parses prose, or infers state
 from a missing effect.
 
+A fork bind uses the ordinary bind receipt and JSON shape. Renderers name only
+the new complete ContractId and ordinary bind fields; they never expose or
+infer a source, lineage, or comparison relation.
+
 ```text
 ✓ bound — <complete kei/...>
 ✓ terms replaced — <complete kei/...>

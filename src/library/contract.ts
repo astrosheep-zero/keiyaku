@@ -39,6 +39,7 @@ import {
   type JournalEntry,
   type SnapshotId,
 } from "../core/facts/types.js";
+import { AuthorityCorruptionError } from "../core/facts/errors.js";
 export { AuthorityCorruptionError } from "../core/facts/errors.js";
 import {
   contractObservationOperation,
@@ -171,18 +172,27 @@ export type ReconcileReport = Readonly<{
 }>;
 export type { SettlementAction, SettlementLag, SettlementReport } from "../settlement/settle.js";
 
+export type MarkdownBindInput = Readonly<{
+  repo: Repo;
+  markdown: string;
+  task?: TaskId;
+  target?: string;
+  workspace?: "worktree" | "here";
+  actor?: ActorId;
+  after?: readonly ContractId[];
+  gates?: readonly Gate[];
+  hooks?: WorktreeHooks;
+}>;
+export type ForkBindInput = Readonly<{
+  repo: Repo;
+  forkOf: ContractId;
+  target?: string;
+  workspace?: "worktree" | "here";
+  actor?: ActorId;
+  hooks?: WorktreeHooks;
+}>;
+export type BindInput = MarkdownBindInput | ForkBindInput;
 type ActorOptions = Readonly<{ actor?: ActorId; hooks?: WorktreeHooks }>;
-
-export type BindInput = ActorOptions &
-  Readonly<{
-    repo: Repo;
-    markdown: string;
-    task?: TaskId;
-    target?: string;
-    workspace?: "worktree" | "here";
-    after?: readonly ContractId[];
-    gates?: readonly Gate[];
-  }>;
 
 export type AmendInput = ActorOptions &
   Readonly<{
@@ -750,6 +760,69 @@ export async function observeKeiyaku(input: ContractObservationInput): Promise<C
 export async function bindKeiyaku(input: BindInput): Promise<BindResult> {
   const values = requireInput(input, "Keiyaku.bind input");
   const hooks = worktreeHooksOption(values.hooks);
+  const forkOf = values.forkOf;
+  if (forkOf !== undefined) {
+    for (const key of Object.keys(values)) {
+      if (!["repo", "forkOf", "target", "workspace", "actor", "hooks"].includes(key)) {
+        throw new TypeError(`fork bind input has unknown field: ${key}`);
+      }
+    }
+    if (typeof forkOf !== "string") throw new TypeError("forkOf must be a ContractId");
+    let sourceId: ContractId;
+    try { sourceId = contractId(forkOf); } catch (error) { throw new TypeError(error instanceof Error ? error.message : "forkOf must be a ContractId"); }
+    const sourceScope = scopeForRepo(values.repo);
+    const sourceWorkspace = values.workspace === undefined ? "worktree" : values.workspace;
+    if (sourceWorkspace !== "worktree" && sourceWorkspace !== "here") throw new TypeError("workspace must be worktree or here");
+    const target = values.target;
+    if (target !== undefined && typeof target !== "string") throw new TypeError("target must be a string");
+    const actor = actorOption(values.actor);
+    return withGitDecodeChannel(sourceScope, async (channel) => {
+      let source: ContractState;
+      try { source = await stateOperation({ scope: sourceScope, channel, contractId: sourceId }); }
+      catch (error) {
+        if (error instanceof Error && error.message === `contract does not exist: ${sourceId}`) {
+          throw new KeiyakuRefused({ kind: "fork-source-missing", contractId: sourceId });
+        }
+        if (error instanceof AuthorityCorruptionError) throw new KeiyakuRefused({ kind: "fork-source-invalid", contractId: sourceId });
+        throw error;
+      }
+      const sourceObject = (await channel.readObjects([source.coordinates.start as never])).get(source.coordinates.start as never);
+      if (sourceObject?.kind !== "present" || sourceObject.type !== "commit") throw new KeiyakuRefused({ kind: "fork-source-unavailable", contractId: sourceId });
+      const currentSource = await stateOperation({ scope: sourceScope, channel, contractId: sourceId });
+      if (
+        currentSource.head !== source.head
+        || currentSource.coordinates.start !== source.coordinates.start
+        || currentSource.terms.document.key !== source.terms.document.key
+      ) {
+        throw new KeiyakuRefused({ kind: "fork-source-moved", contractId: sourceId });
+      }
+      let sourceDocument: ReturnType<typeof decodeContractDocument>;
+      try { sourceDocument = decodeContractDocument(source.terms.document.bytes); }
+      catch (error) { if (error instanceof TypeError) throw new KeiyakuRefused({ kind: "fork-source-invalid", contractId: sourceId }); throw error; }
+      const markdown = sourceDocument.document.bytes.replace(/^\s*#\s*[^\r\n]*(?:\r?\n|$)/u, `# Fork · ${sourceDocument.title}${sourceDocument.document.bytes.includes("\r\n") ? "\r\n" : "\n"}`);
+      const document = decodeContractDocument(markdown);
+      const terms = contractTerms(document, source.terms.gates, source.terms.after);
+      const admission = requireAccepted(await admitBindWithAppointment({
+        scope: sourceScope,
+        channel,
+        title: document.title,
+        terms,
+        verification: documentDerivation(document, terms.gates).verification,
+        workspace: sourceWorkspace,
+        ...(target === undefined ? (source.coordinates.target === undefined ? {} : { target: source.coordinates.target }) : { target }),
+        coordinates: { start: source.coordinates.start },
+        source: { contractId: sourceId, head: source.head, start: source.coordinates.start, document: source.terms.document.key },
+        ...actor,
+      }));
+      const id = admission.value.contractId;
+      const toHandle = ({ contractId: contract }: { contractId: ContractId }): Keiyaku => new KeiyakuHandle(contract, sourceScope);
+      const result = await completeMutation({ ...completionInput(sourceScope, channel, id, toHandle, hooks), accepted: admission });
+      return {
+        facts: result.facts, head: result.head, keiyaku: result.value, effects: result.effects,
+        lags: result.lags, settlement: result.settlement, ...await observeRegion(sourceScope, channel, id, document.region),
+      };
+    });
+  }
   const scope = scopeForRepo(values.repo);
   const markdown = requireMarkdown(values.markdown);
   const task = taskOption(values.task);

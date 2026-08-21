@@ -180,6 +180,14 @@ The first admitted arc has `seq = 1`; every later arc increments it exactly by
 one. The newest arc is `ContractState.currentArc`. Arc is legal before a
 terminal fact and otherwise receives a typed refusal.
 
+## Fork Bind
+
+Fork bind constructs a new ordinary Contract, not a lifecycle edge. It copies a
+source's current folded document, declared gates, and ordered `after`
+coordinates, retaining no delivery, testimony, terminal, TaskHolder, or source
+relation. Active and abandoned sources are admissible when folded state and
+recorded start are observable. Later source mutations cannot affect the fork.
+
 ## Gates And Attestations
 
 Named gate catalog entries in Settings are construction input only. Their

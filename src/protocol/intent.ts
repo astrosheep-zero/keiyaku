@@ -34,6 +34,7 @@ type IntentAdmissionOptions<Input, Refusal, Seed> = Readonly<{
     contracts: readonly ContractId[],
   ) => Promise<GitDecisionObservation>;
   decorateOffer?: CompanionDecorator;
+  validateAdmission?: (observation: GitDecisionObservation) => Refusal | undefined | Promise<Refusal | undefined>;
   observationSelection?: GitTreeSelection;
   prepareInput?: (
     observation: GitDecisionObservation,
@@ -69,6 +70,7 @@ export function admitIntent<
     decide,
     ...(options.observe === undefined ? {} : { observe: options.observe }),
     ...(options.decorateOffer === undefined ? {} : { decorateOffer: options.decorateOffer }),
+    ...(options.validateAdmission === undefined ? {} : { validateAdmission: options.validateAdmission }),
     ...(options.observationSelection === undefined ? {} : { observationSelection: options.observationSelection }),
     ...(options.prepareInput === undefined ? {} : { prepareInput: options.prepareInput }),
   });
