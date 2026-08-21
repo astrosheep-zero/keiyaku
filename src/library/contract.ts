@@ -20,7 +20,7 @@ import {
   requireInput,
   requireMarkdown,
 } from "./input.js";
-import { observeRegion, type RegionObservation, type RegionOverlap } from "./region.js";
+import { observeRegion, type AmendRegionObservation, type RegionObservation, type RegionOverlap } from "./region.js";
 import { type Gate, type WorktreeHooks, worktreeHooksOption } from "./configuration.js";
 import {
   type ActorId as FactActorId,
@@ -154,7 +154,7 @@ export type { MutationResult };
 export { Delivery };
 
 export type BindResult = Readonly<Omit<MutationResult<Keiyaku>, "value"> & { keiyaku: Keiyaku } & RegionObservation>;
-export type AmendResult = Readonly<MutationResult<void> & RegionObservation & { documentDiff: string }>;
+export type AmendResult = Readonly<MutationResult<void> & { documentDiff: string }> & AmendRegionObservation;
 export type ReconcileReport = Readonly<{
   effects: readonly TopologyEffect[];
   lag: readonly Lag[];
@@ -492,19 +492,24 @@ export class KeiyakuHandle {
     if (markdown === undefined && gates === undefined && prerequisites === undefined) {
       throw new TypeError("amend requires markdown, after, or gates");
     }
-    return withGitDecodeChannel(this.scope, async (channel) => {
+    const amendment = await withGitDecodeChannel(this.scope, async (channel) => {
+      let changedSections: ReadonlySet<string> | undefined;
       const accepted = requireAccepted(await amendOperation({
         scope: this.scope,
         channel,
         contractId: this.id,
         ...actor,
         deriveAmendment: (source) => {
-          const document = markdown === undefined
-            ? decodeContractDocument(source.document.bytes)
-            : decodeContractDocument(applyAmendDocument(
+          const amendment = markdown === undefined
+            ? undefined
+            : applyAmendDocument(
               markdown,
               decodeContractDocument(source.document.bytes),
-            ));
+            );
+          changedSections = amendment?.changedSections;
+          const document = amendment === undefined
+            ? decodeContractDocument(source.document.bytes)
+            : decodeContractDocument(amendment.document);
           const terms = markdown === undefined
             ? {
                 document: source.document,
@@ -519,21 +524,33 @@ export class KeiyakuHandle {
           };
         },
       }));
-      const document = decodeContractDocument(accepted.value.terms.document.bytes);
+      const completed = await completeMutation({
+        ...completionInput(this.scope, channel, this.id, () => undefined, hooks),
+        accepted,
+      });
       return {
-        ...await completeMutation({
-          ...completionInput(this.scope, channel, this.id, () => undefined, hooks),
-          accepted,
-        }),
+        completed,
+        document: decodeContractDocument(accepted.value.terms.document.bytes),
+        changedSections,
         documentDiff: documentDiff(
           "before",
           "after",
           accepted.value.source.document.bytes,
           accepted.value.terms.document.bytes,
         ),
-        ...await observeRegion(this.scope, channel, this.id, document.region),
       };
     });
+    const regionObservation = amendment.changedSections?.has("region")
+      ? await withGitDecodeChannel(
+        this.scope,
+        async (channel) => await observeRegion(this.scope, channel, this.id, amendment.document.region),
+      )
+      : {};
+    return {
+      ...amendment.completed,
+      documentDiff: amendment.documentDiff,
+      ...regionObservation,
+    };
   }
 
   async deliver(input?: DeliverInput): Promise<MutationResult<Delivery> | IntegrationConflictMaterialized> {

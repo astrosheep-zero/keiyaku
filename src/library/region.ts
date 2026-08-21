@@ -15,6 +15,11 @@ export type RegionObservation = Readonly<
   | { overlapFailure: string; overlaps?: never }
 >;
 
+export type AmendRegionObservation = RegionObservation | Readonly<{
+  overlaps?: never;
+  overlapFailure?: never;
+}>;
+
 export type RegionDeclarationRead = Readonly<{ contract: ContractId; patterns: readonly string[] }>;
 
 export function readRegionDeclarations(documents: readonly ContractDocumentProjection[]): readonly RegionDeclarationRead[] {

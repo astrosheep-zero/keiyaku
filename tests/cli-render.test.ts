@@ -101,6 +101,29 @@ test("world observation failure text is exact", () => {
   assert.equal(renderText(result), "reconcile: world observation failed · git failed");
 });
 
+test("amend text omits an absent Region observation", () => {
+  const contract = contractId("kei/no-amend-region-observation");
+  const result: InvocationResult = {
+    kind: "accepted",
+    verb: "amend",
+    contract,
+    head: contractHead("head"),
+    facts: [],
+    effects: [],
+    settlement: { actions: [], lags: [] },
+    diff: "",
+  };
+  assert.equal(renderText(result), [
+    "✓ terms replaced — kei/no-amend-region-observation",
+    "  terms diff",
+    "",
+    "",
+    "",
+    "  record",
+    "    head head",
+  ].join("\n"));
+});
+
 test("reconcile text renders followed worktrees and retained follow shape", () => {
   const contract = contractId("kei/followed");
   const tender = snapshotId("tender");

@@ -21,7 +21,7 @@ const body: ContractBodyValue = {
 
 function applyAmendOperations(source: string, current: ContractBodyValue) {
   const document = decodeContractDocument(renderContractBody(current));
-  return decodeContractDocument(applyAmendDocument(source, document));
+  return decodeContractDocument(applyAmendDocument(source, document).document);
 }
 
 test("amend H2 operations form one complete body replacement", () => {

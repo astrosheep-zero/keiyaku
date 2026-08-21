@@ -115,9 +115,15 @@ type BindResult = Readonly<
   RegionObservation
 >
 
+type AmendRegionObservation = Readonly<
+  | { overlaps?: never; overlapFailure?: never }
+  | { overlaps: readonly RegionOverlap[]; overlapFailure?: never }
+  | { overlapFailure: string; overlaps?: never }
+>
+
 type AmendResult = Readonly<
   MutationResult<void> &
-  RegionObservation &
+  AmendRegionObservation &
   { documentDiff: string }
 >
 
@@ -344,12 +350,26 @@ type Review = Readonly<{
 }>
 ```
 
-`RegionObservation` is structural notation for successful `bind` and `amend`
-results, not another package-root export. Exactly one property is present.
-`overlaps`, including `[]`, means the observation completed. `overlapFailure`
-means admission succeeded but the non-authoritative observation did not
-complete; it contains the verbatim diagnostic and does not change the mutation
-result. `RegionOverlap` is the only exported Region result type.
+`RegionObservation` is structural notation for a successful `bind` result, and
+for the Region-observing arms of a successful `amend` result; it is not another
+package-root export. A bind and a Region-targeting amend carry exactly one
+property. An amend that does not target Region carries neither property. Its
+three exclusive shapes are no Region properties, `overlaps`, or
+`overlapFailure`. `overlaps`, including `[]`, means the observation completed.
+`overlapFailure` means admission succeeded but the non-authoritative
+observation did not complete; it contains the verbatim diagnostic and does not
+change the mutation result. `RegionOverlap` is the only exported Region result
+type.
+
+A successful amend observes Region only when its accepted Markdown operation
+document has the normalized `region` changed section: the canonical `Replace:
+Region` operation from [document.md](document.md). The body amendment boundary
+returns that parser-derived changed-section set with its rendered document, and
+the library consults that set after admission and mandatory mutation work.
+Structured-only amendments and operation documents targeting another section
+perform no Region observation and return neither Region property. This neither
+rescans nor reparses Markdown nor compares Region declarations, so an explicit
+`Replace: Region` observes even when its replacement patterns are unchanged.
 
 The report compares declared write intent to expose likely interaction between
 active Contracts. Even though pattern intersection is exact, the report is a

@@ -280,7 +280,13 @@ function apply(source: string, current: ContractBody): Readonly<{ body: Contract
   return { body: completeBody(body), changed };
 }
 
-export function applyAmendDocument(source: string, current: DecodedContractDocument): string {
+export function applyAmendDocument(
+  source: string,
+  current: DecodedContractDocument,
+): Readonly<{ document: string; changedSections: ReadonlySet<string> }> {
   const result = apply(source, current);
-  return renderAmendedContractBody(current.document.bytes, result.body, result.changed);
+  return {
+    document: renderAmendedContractBody(current.document.bytes, result.body, result.changed),
+    changedSections: result.changed,
+  };
 }

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import test from "node:test";
 import { Keiyaku, Repo } from "../src/index.js";
 import { makeGitRepository, type TestGitRepository, withGitShim } from "./support/git.js";
@@ -78,6 +79,60 @@ test("bind and amend expose only live-peer Region witnesses from one document re
     patterns: [{ mine: "src/api/internal/**", theirs: "src/api/internal/**" }],
   }]);
   assert.equal("overlapFailure" in amended, false);
+});
+
+test("amend observes Region only when its operation targets Region", async () => {
+  const repository = repositoryWithHead();
+  const bound = await bind(repository, "Observed", ["src/**"]);
+  const id = (await bound.keiyaku.state()).id;
+
+  async function amendWithObservationMarker(mark: string, markdown?: string) {
+    const completionMarker = `${repository.path}/region-amend-${mark}-completed`;
+    const firstBatchMarker = `${repository.path}/region-amend-${mark}-first-batch`;
+    const observedMarker = `${repository.path}/region-amend-${mark}-observed`;
+    const result = await withGitShim(
+      [
+        "if [ \"$1 $2\" = \"cat-file --batch\" ]; then",
+        `  if [ ! -e "${firstBatchMarker}" ]; then`,
+        `    touch "${firstBatchMarker}"`,
+        "    \"$KEIYAKU_REAL_GIT\" \"$@\"",
+        "    status=$?",
+        `    touch "${completionMarker}"`,
+        "    exit \"$status\"",
+        "  fi",
+        `  if [ -e "${completionMarker}" ]; then`,
+        `    touch "${observedMarker}"`,
+        "  fi",
+        "fi",
+        "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
+      ].join("\n"),
+      {},
+      async (gitPath) => Keiyaku.of({ repo: await Repo.at({ path: repository.path, gitPath }), id }).amend(
+        markdown === undefined ? { gates: [] } : { markdown },
+      ),
+    );
+    return { result, firstBatchMarker, completionMarker, observedMarker };
+  }
+
+  const context = await amendWithObservationMarker("context", "## Replace: Context\nChanged context.\n");
+  assert.equal("overlaps" in context.result, false);
+  assert.equal("overlapFailure" in context.result, false);
+  assert.equal(existsSync(context.firstBatchMarker), true);
+  assert.equal(existsSync(context.completionMarker), true);
+  assert.equal(existsSync(context.observedMarker), false);
+
+  const structured = await amendWithObservationMarker("structured");
+  assert.equal("overlaps" in structured.result, false);
+  assert.equal("overlapFailure" in structured.result, false);
+  assert.equal(existsSync(structured.firstBatchMarker), true);
+  assert.equal(existsSync(structured.completionMarker), true);
+  assert.equal(existsSync(structured.observedMarker), false);
+
+  const region = await amendWithObservationMarker("region", "## Replace: Region\n~~~\nsrc/**\n~~~\n");
+  assert.equal("overlaps" in region.result || "overlapFailure" in region.result, true);
+  assert.equal(existsSync(region.firstBatchMarker), true);
+  assert.equal(existsSync(region.completionMarker), true);
+  assert.equal(existsSync(region.observedMarker), true);
 });
 
 test("post-admission observation failure preserves the admitted Contract without abandonment", async () => {

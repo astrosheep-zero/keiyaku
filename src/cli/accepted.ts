@@ -10,7 +10,7 @@ import {
   type MutationResult,
   type Review,
 } from "../index.js";
-import type { RegionObservation } from "../library/region.js";
+import type { AmendRegionObservation, RegionObservation } from "../library/region.js";
 import type {
   AcceptedAbandonResult,
   AcceptedAmendResult,
@@ -66,9 +66,15 @@ function acceptedEnvelope(
   };
 }
 
-function acceptedRegion(result: AmendResult | BindResult): RegionObservation {
+function acceptedRegion(result: BindResult): RegionObservation {
   if (result.overlapFailure !== undefined) return { overlapFailure: result.overlapFailure };
   return { overlaps: result.overlaps };
+}
+
+function acceptedAmendRegion(result: AmendResult): AmendRegionObservation {
+  if (result.overlapFailure !== undefined) return { overlapFailure: result.overlapFailure };
+  if (result.overlaps !== undefined) return { overlaps: result.overlaps };
+  return {};
 }
 
 export function acceptedBind(
@@ -89,7 +95,7 @@ export function acceptedAmend(result: AmendResult, coordinate: ContractId): Acce
     ...acceptedEnvelope(result, coordinate),
     verb: "amend",
     diff: result.documentDiff,
-    ...acceptedRegion(result),
+    ...acceptedAmendRegion(result),
   };
 }
 

@@ -273,7 +273,8 @@ non-null `head`, `facts`, `effects`, `settlement`, and optional nonempty `lag`.
 Verb fields remain flat: bind
 requires `target` and exactly one Region answer (`overlaps` or
 `overlapFailure`); amend requires `diff`, including the empty string, and
-that same Region answer; deliver and review may carry the same optional
+exactly one of three exclusive Region shapes: neither Region property,
+`overlaps`, or `overlapFailure`; deliver and review may carry the same optional
 `completion`, `verification`, `verificationReuse`, `verificationSummary`,
 `placement`, `continuation`, `cleanup`, and `leak` fields, while review additionally carries
 its `verdict` and optional `workspace`; arc and abandon carry no
@@ -421,8 +422,12 @@ counts are derived checks: every complete Contract ID and every exact
 own complete Contract ID. Overlap uses the neutral Region relation mark and
 never changes accepted into refused. An incomplete observation is one
 `~ overlap unavailable` block with the verbatim diagnostic. An empty completed
-observation renders no overlap block. JSON exposes the same `overlaps` or
-`overlapFailure` property.
+observation renders no overlap block. Bind always carries one Region answer.
+An accepted amend carries `overlaps` or `overlapFailure` only when its typed
+result carries that answer; when both properties are absent, text emits no
+overlap block and JSON preserves their absence. The renderer consumes those
+typed result shapes without parsing the amendment document or inferring whether
+Region changed.
 
 Document diff is labeled, then the exact public content, including an empty
 string. The CLI never computes another diff or makes availability a lifecycle

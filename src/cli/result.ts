@@ -16,7 +16,7 @@ import type {
 import type { KanshiReport } from "../kanshi/index.js";
 import type { RegionRead, Section } from "../kanshi/index.js";
 import type { Catalog } from "../index.js";
-import type { RegionObservation } from "../library/region.js";
+import type { AmendRegionObservation, RegionObservation } from "../library/region.js";
 import type { NukeResult } from "../index.js";
 
 export type BindDraftReceipt = Readonly<
@@ -93,7 +93,7 @@ export type AcceptedAmendResult = AcceptedEnvelope & Readonly<{
   verdict?: never;
   chapter?: never;
   note?: never;
-}> & RegionObservation;
+}> & AmendRegionObservation;
 
 export type AcceptedDeliverResult = AcceptedEnvelope & Readonly<{
   verb: "deliver";

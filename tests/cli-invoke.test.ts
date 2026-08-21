@@ -759,6 +759,26 @@ test("amend applies H2 operations into a complete Markdown replacement", async (
   );
 });
 
+test("CLI amend preserves absent Region observations for non-Region operations", async () => {
+  const repository = repositoryWithMain();
+  const bound = await invokeWithDocument(
+    repository.path,
+    ["bind", "--actor", "external-test", "-"],
+    contractDocument("No amend Region observation"),
+  );
+  const id = acceptedContract(bound);
+  const amended = await invokeWithDocument(
+    repository.path,
+    ["amend", id, "--actor", "external-test", "-"],
+    "## Replace: Context\nNo Region read.\n",
+  );
+  assert.equal(amended.kind, "accepted");
+  if (amended.kind !== "accepted") throw new Error("expected accepted amend");
+  assert.equal("overlaps" in amended, false);
+  assert.equal("overlapFailure" in amended, false);
+  assert.doesNotMatch(renderText(amended), /overlap/u);
+});
+
 test("amend accepts changed prerequisites after delivery and still rejects cycles", async () => {
   const repository = repositoryWithMain();
   const prerequisite = await invokeWithDocument(

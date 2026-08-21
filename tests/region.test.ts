@@ -108,7 +108,9 @@ test("contract rendering chooses a fence that preserves legal delimiter path byt
 test("contract decoding and amendment share Region validation", () => {
   const current = decodeContractDocument(contract("src/**"));
   assert.deepEqual(decodeContractDocument(contract("src/**", "txt")).region, ["src/**"]);
-  assert.deepEqual(decodeContractDocument(applyAmendDocument("## Replace: Region\n~~~txt\ntests/**\n~~~", current)).region, ["tests/**"]);
+  const amendment = applyAmendDocument("## Replace: Region\n~~~txt\ntests/**\n~~~", current);
+  assert.deepEqual(decodeContractDocument(amendment.document).region, ["tests/**"]);
+  assert.deepEqual([...amendment.changedSections], ["region"]);
   assert.throws(
     () => decodeContractDocument(contract("src/**file")),
     (error: unknown) => error instanceof TypeError && error.message.includes("Region pattern 'src/**file' may use ** only as a complete segment"),
