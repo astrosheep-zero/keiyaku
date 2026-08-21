@@ -4,6 +4,8 @@ import { contractHead, contractId, snapshotId } from "../src/core/facts/types.js
 import type { InvocationResult } from "../src/cli/result.js";
 import { renderCatalogText } from "../src/cli/render/catalog.js";
 import { renderText } from "../src/cli/render/text.js";
+import type { Catalog } from "../src/library/catalog.js";
+import type { ContractRow } from "../src/protocol/read/status.js";
 
 test("catalog text renders only the selected identity layer", () => {
   assert.equal(renderCatalogText({
@@ -20,6 +22,52 @@ test("catalog text renders only the selected identity layer", () => {
     rows: [{ id: "aku/worker/deadbeef" as never, life: "unborn" }],
     searched: ["/world/.keiyaku/akuma/run"],
   }), "aku/worker/deadbeef - unborn");
+});
+
+test("Contract catalog keeps domain IDs complete and makes every gate state legible", () => {
+  const state = snapshotId("a".repeat(40));
+  const row: ContractRow = {
+    id: contractId("kei/selected-contract"),
+    title: "Selected Contract",
+    phase: "waiting",
+    phaseAt: "2026-08-12T00:00:00.000Z",
+    lastJournalAt: "2026-08-12T00:00:00.000Z",
+    disposition: "active",
+    workspace: "here",
+    worktreePath: null,
+    workspaceObservation: { kind: "clean", location: { kind: "here" }, counts: { staged: 0, unstaged: 0, untracked: 0, submodules: 0 }, merge: null },
+    target: null,
+    targetLag: { kind: "none" },
+    delivery: null,
+    targetObservation: null,
+    gates: {
+      satisfied: false,
+      reports: [
+        { gate: "reviewed", current: { kind: "attested", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z" } },
+        { gate: "verified", current: { kind: "attested", verdict: "unsatisfied", at: "2026-08-12T00:00:00.000Z" } },
+        { gate: "security", current: { kind: "stale", priorVerdict: "satisfied" } },
+        { gate: "manual", current: { kind: "missing" } },
+      ],
+    },
+    after: [
+      { contractId: contractId("kei/claimed-prerequisite"), endpoint: { kind: "claimed" } },
+      { contractId: contractId("kei/active-prerequisite"), endpoint: { kind: "active", phase: "waiting" } },
+      { contractId: contractId("kei/abandoned-prerequisite"), endpoint: { kind: "abandoned" } },
+      { contractId: contractId("kei/missing-prerequisite"), endpoint: { kind: "missing" } },
+    ],
+    dependents: [{ contractId: contractId("kei/dependent-contract"), phase: "waiting" }],
+  };
+  const catalog: Catalog = { kind: "contracts", root: "/repo", state, observedAt: "2026-08-12T00:00:00.000Z", rows: [row] };
+  const text = renderCatalogText(catalog);
+
+  assert.match(text, /contract state aaaaaaa · observedAt 2026-08-12T00:00:00.000Z/u);
+  assert.doesNotMatch(text, new RegExp(state, "u"));
+  assert.match(text, /\[✓\] reviewed  \[✗\] verified  \[~\] security  \[ \] manual/u);
+  assert.match(text, /after kei\/claimed-prerequisite \(claimed\)/u);
+  assert.match(text, /blocked by kei\/active-prerequisite \(waiting\)/u);
+  assert.match(text, /blocked by kei\/abandoned-prerequisite \(abandoned\)/u);
+  assert.match(text, /blocked by kei\/missing-prerequisite \(missing\)/u);
+  assert.match(text, /dependents kei\/dependent-contract \(waiting\)/u);
 });
 
 test("observation text keeps the command and view data together", () => {

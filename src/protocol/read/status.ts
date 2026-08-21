@@ -35,6 +35,22 @@ export type HereWorkspaceObservationResolution =
   | Readonly<{ kind: "failed"; diagnostic: string }>;
 export type HereWorkspaceObservationResolver = (contractId: ContractId) => Promise<HereWorkspaceObservationResolution>;
 
+export type AfterEndpointObservation =
+  | Readonly<{ kind: "claimed" }>
+  | Readonly<{ kind: "active"; phase: ContractPhase }>
+  | Readonly<{ kind: "abandoned" }>
+  | Readonly<{ kind: "missing" }>;
+
+export type ContractAfterEdge = Readonly<{
+  contractId: ContractId;
+  endpoint: AfterEndpointObservation;
+}>;
+
+export type ContractDependent = Readonly<{
+  contractId: ContractId;
+  phase: ContractPhase;
+}>;
+
 export type ContractRow = Readonly<{
   id: ContractId;
   title: string | null;
@@ -53,11 +69,14 @@ export type ContractRow = Readonly<{
     reports: readonly ContractGateReport[];
     satisfied: boolean;
   }>;
+  after: readonly ContractAfterEdge[];
+  dependents: readonly ContractDependent[];
 }>;
 
 export type ContractBoard = Readonly<{
   root: string;
   state: SnapshotId | null;
+  observedAt: string;
   rows: readonly ContractRow[];
 }>;
 
@@ -162,11 +181,50 @@ type ContractRowInput = Readonly<{
   lastJournalAt: string;
   targetObservation: ContractRow["targetObservation"];
   register: PlaceRegister;
+  after: readonly ContractAfterEdge[];
+  dependents: readonly ContractDependent[];
   resolveHereWorkspace?: HereWorkspaceObservationResolver;
 }>;
 
+function afterEndpoint(state: ContractState | null | undefined): AfterEndpointObservation {
+  if (state === undefined || state === null) return { kind: "missing" };
+  if (state.terminal?.kind === "claimed") return { kind: "claimed" };
+  if (state.terminal?.kind === "abandoned") return { kind: "abandoned" };
+  return { kind: "active", phase: phaseFor(state) };
+}
+
+function afterEdges(
+  state: ContractState,
+  endpoints: ReadonlyMap<ContractId, ContractState | null>,
+): readonly ContractAfterEdge[] {
+  return state.terms.after.map((contractId) => ({
+    contractId,
+    endpoint: afterEndpoint(endpoints.get(contractId)),
+  }));
+}
+
+function reverseDependents(
+  id: ContractId,
+  rows: readonly Readonly<{ id: ContractId; phase: ContractPhase; disposition: ContractDisposition; after: readonly ContractAfterEdge[] }>[],
+): readonly ContractDependent[] {
+  return rows
+    .filter((row) => row.disposition === "active" && row.after.some((edge) => edge.contractId === id))
+    .map((row) => ({ contractId: row.id, phase: row.phase }))
+    .sort((left, right) => left.contractId.localeCompare(right.contractId));
+}
+
 async function rowFor(input: ContractRowInput): Promise<ContractRow> {
-  const { repository, state, bindAt, lastJournalAt, targetObservation, register, resolveHereWorkspace } = input;
+  const {
+    repository,
+    state,
+    bindAt,
+    lastJournalAt,
+    targetObservation,
+    register,
+    after,
+    dependents,
+    resolveHereWorkspace,
+  } = input;
   const workspace = state.coordinates.workspace;
   const gates = gateReports(state);
   const { appointed, workspaceObservation, targetLag } = workspace === "worktree"
@@ -192,42 +250,65 @@ async function rowFor(input: ContractRowInput): Promise<ContractRow> {
       reports: gates.reports.map((report) => ({ gate: report.gate, current: report.current })),
       satisfied: gates.satisfied,
     },
+    after,
+    dependents,
   };
+}
+
+async function afterEndpointMap(
+  observation: GitReadObservation,
+  known: ReadonlyMap<ContractId, ContractState | null>,
+  ids: readonly ContractId[],
+): Promise<ReadonlyMap<ContractId, ContractState | null>> {
+  const missing = ids.filter((id) => !known.has(id));
+  if (missing.length === 0) return known;
+  const extra = await observeContractsForAdmissionInObservationAt(observation, missing);
+  return new Map([...known, ...[...extra.journals].map(([id, record]) => [id, record.state] as const)]);
 }
 
 /** Build the Contract board from one immutable git observation. */
 export async function readContractBoard(
   observation: GitReadObservation,
-  selected?: ContractId,
+  include?: ContractId,
   resolveHereWorkspace?: HereWorkspaceObservationResolver,
 ): Promise<ContractBoard> {
-  if (selected !== undefined) {
-    const contract = await readContractObservation(observation, selected, resolveHereWorkspace);
-    return {
-      root: observation.repository.primaryWorktree,
-      state: observation.snapshot.commit as SnapshotId | null,
-      rows: contract.kind === "missing" ? [] : [contract.row],
-    };
-  }
+  const observedAt = new Date().toISOString();
   const observed = await observeActiveContractWorld(observation);
+  const contracts = new Map(observed.contracts);
+  let endpoints = new Map(observed.eligibility);
+  if (include !== undefined && !contracts.has(include)) {
+    const extra = await observeContractsForAdmissionInObservationAt(observation, [include]);
+    const record = extra.journals.get(include);
+    if (record === undefined) throw new Error(`missing requested Contract observation: ${include}`);
+    contracts.set(include, record);
+    endpoints.set(include, record.state);
+    if (record.state !== null) {
+      endpoints = new Map(await afterEndpointMap(observation, endpoints, record.state.terms.after));
+    }
+  }
   const register = await readPlaceRegister(observation.repository);
-  const rows: Promise<ContractRow>[] = [];
-  for (const value of observed.contracts.values()) {
-    if (value.state === null) continue;
+  const projected = await Promise.all([...contracts.values()].flatMap((value) => {
+    if (value.state === null) return [];
     const state = value.state;
-    const bindAt = value.entries[0]!.at;
-    const lastJournalAt = lastJournalAtFor(value.entries);
-    rows.push(observeDeliveryTargetAt(observation, state).then((target) => rowFor({
+    return [observeDeliveryTargetAt(observation, state).then((target) => rowFor({
       repository: observation.repository,
       state,
-      bindAt,
-      lastJournalAt,
+      bindAt: value.entries[0]!.at,
+      lastJournalAt: lastJournalAtFor(value.entries),
       targetObservation: target,
       register,
+      after: afterEdges(state, endpoints),
+      dependents: [],
       ...(resolveHereWorkspace === undefined ? {} : { resolveHereWorkspace }),
-    })));
-  }
-  return { root: observation.repository.primaryWorktree, state: observed.snapshot, rows: await Promise.all(rows) };
+    }))];
+  }));
+  const rows = projected.map((row) => ({ ...row, dependents: reverseDependents(row.id, projected) }));
+  return {
+    root: observation.repository.primaryWorktree,
+    state: observed.snapshot,
+    observedAt,
+    rows,
+  };
 }
 
 /** Observe one Contract and its target from one fresh ref epoch. */
@@ -240,20 +321,26 @@ export async function readContractObservation(
   const record = observed.journals.get(id);
   if (record === undefined) throw new Error(`missing requested Contract observation: ${id}`);
   const state = record.state;
-  return state === null
-    ? { kind: "missing", id }
-    : {
-        kind: "present",
-        row: await rowFor({
-          repository: observation.repository,
-          state,
-          bindAt: record.entries[0]!.at,
-          lastJournalAt: lastJournalAtFor(record.entries),
-          targetObservation: await observeDeliveryTargetAt(observation, state),
-          register: await readPlaceRegister(observation.repository),
-          ...(resolveHereWorkspace === undefined ? {} : { resolveHereWorkspace }),
-        }),
-      };
+  if (state === null) return { kind: "missing", id };
+  const endpoints = await afterEndpointMap(
+    observation,
+    new Map([[id, state]]),
+    state.terms.after,
+  );
+  return {
+    kind: "present",
+    row: await rowFor({
+      repository: observation.repository,
+      state,
+      bindAt: record.entries[0]!.at,
+      lastJournalAt: lastJournalAtFor(record.entries),
+      targetObservation: await observeDeliveryTargetAt(observation, state),
+      register: await readPlaceRegister(observation.repository),
+      after: afterEdges(state, endpoints),
+      dependents: [],
+      ...(resolveHereWorkspace === undefined ? {} : { resolveHereWorkspace }),
+    }),
+  };
 }
 
 /** Observe one Contract and its target from one fresh ref epoch. */

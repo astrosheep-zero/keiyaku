@@ -159,6 +159,28 @@ test("explicit materialization projects the judged conflict in the appointed wor
   assert.equal(mergeHead(repository, worktree), targetHead);
 });
 
+test("Contract reads observe materialized merge conflicts and staged resolutions", async () => {
+  const { repository, bound, targetHead, worktree } = await conflictedTargetReview();
+  const materialized = await bound.keiyaku.deliver({ materializeConflict: true });
+  assert.equal(materialized.kind, "integration-conflict-materialized");
+  const conflict = (await Keiyaku.list({ repo: await Repo.at({ path: repository.path }) })).rows
+    .find((row) => row.id === bound.keiyaku.id)?.workspaceObservation;
+  assert.deepEqual(conflict?.kind === "dirty" ? conflict.merge : undefined, {
+    head: targetHead,
+    unmergedPaths: ["a.txt", "z.txt"],
+  });
+
+  writeFileSync(join(worktree, "a.txt"), "resolved\n");
+  writeFileSync(join(worktree, "z.txt"), "resolved\n");
+  repository.run(["-C", worktree, "add", "a.txt", "z.txt"]);
+  const staged = (await Keiyaku.list({ repo: await Repo.at({ path: repository.path }) })).rows
+    .find((row) => row.id === bound.keiyaku.id)?.workspaceObservation;
+  assert.deepEqual(staged?.kind === "dirty" ? staged.merge : undefined, {
+    head: targetHead,
+    unmergedPaths: [],
+  });
+});
+
 test("resolved merge delivery requires dirty authority and preserves native parents", async () => {
   const { repository, bound, targetHead, worktree } = await conflictedTargetReview();
   const git = await repositoryAt(repository.path);

@@ -1,4 +1,5 @@
 import type { ContractBoard, ContractDisposition } from "../library/contract.js";
+import type { CurrentPhysicalIssue } from "../protocol/read/observation.js";
 import type { TaskId, TaskRef, TaskRow } from "../task/index.js";
 import type { AkumaList, AkumaListRow, UnbornAkumaListRow, ActivitySnapshot } from "../akuma/index.js";
 import type { AkumaAlias } from "../identity/selector.js";
@@ -22,10 +23,13 @@ export type ContractFleetAttachment = Readonly<{
   aliases: readonly AkumaAlias[];
 }>;
 
+export type { CurrentPhysicalIssue };
+
 export type ContractKanshiRow = ContractBoard["rows"][number] & Readonly<{
   holder: ContractHolderObservation;
   fleet: readonly ContractFleetAttachment[];
   namespaceTasks: Section<readonly TaskRow[]>;
+  issue?: CurrentPhysicalIssue;
 }>;
 
 export type ContractKanshiBoard = Omit<ContractBoard, "rows"> & Readonly<{

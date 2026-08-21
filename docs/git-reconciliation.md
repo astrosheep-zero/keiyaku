@@ -52,7 +52,11 @@ projects an older claim after a newer target movement, or retries an ordinary
 pre-publication refusal. A completed checkout produces no effect; a completed
 recovery reports `recovered`; an incompatible shape reports
 `target-checkout-retained` and leaves every byte untouched. A checkout already
-at the candidate needs no recovery effect.
+at the candidate needs no recovery effect. Selected Contract status may
+independently judge that same pure shape, and may read a durable hook marker,
+as `CurrentPhysicalIssue`. That projection performs no reconcile, acquires no
+lock, mutates no refs or worktrees, and executes no hooks. World status and
+the Contract catalog omit it.
 
 A pending tender keeps its tender and integration reachable through
 Keiyaku-owned refs in either workspace mode. Cleanup never moves the target ref.

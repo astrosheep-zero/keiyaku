@@ -7,6 +7,7 @@ import { appointManagedWorktrees } from "../src/workspace-place.js";
 import { appointedWorktreePath, type TestGitRepository, withGitShim } from "./support/git.js";
 import { repositoryWithMain } from "./support/library-verbs.js";
 import {
+  GIT_REF,
   readBlob,
   readGit,
   repositoryAt,
@@ -46,7 +47,7 @@ function hereWorkspace(scope: Awaited<ReturnType<typeof scopeOperation>>) {
   return async () => ({ kind: "appointed" as const, path: scope.effectiveCwd });
 }
 
-function terms(title: string) {
+function terms(title: string, after: readonly ContractId[] = []) {
   const document = decodeContractDocument([
     `# ${title}`,
     "",
@@ -69,7 +70,7 @@ function terms(title: string) {
     "The operation returns only plain data.",
     "",
   ].join("\n"));
-  return { document: document.document, segments: document.segments, gates: [], after: [] };
+  return { document: document.document, segments: document.segments, gates: [], after };
 }
 
 function protocolContractId(title: string): ContractId {
@@ -79,13 +80,18 @@ function protocolContractId(title: string): ContractId {
   }));
 }
 
-async function bind(repository: TestGitRepository, title: string, workspace: "worktree" | "here"): Promise<ContractId> {
+async function bind(
+  repository: TestGitRepository,
+  title: string,
+  workspace: "worktree" | "here",
+  after: readonly ContractId[] = [],
+): Promise<ContractId> {
   const scope = await scopeOperation({ coordinate: repository.path });
   const result = await withGitDecodeChannel(scope, (channel) => bindOperation({
     scope,
     channel,
     contractId: protocolContractId(title),
-    terms: terms(title),
+    terms: terms(title, after),
     verification: { kind: "prepared", data: null },
     workspace,
   }));
@@ -124,9 +130,12 @@ test("Contract reads return plain pinned data from one git snapshot", async () =
       "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     ].join("\n"),
     { KEIYAKU_STATUS_READ_LOG: log },
-    () => withGitDecodeChannel(scope, (channel) => contractsOperation({
-      scope, channel, hereWorkspace: hereWorkspace(scope),
-    })),
+    async (gitPath) => {
+      const shimScope = await scopeOperation({ coordinate: repository.path, gitPath });
+      return withGitDecodeChannel(shimScope, (channel) => contractsOperation({
+        scope: shimScope, channel, hereWorkspace: hereWorkspace(shimScope),
+      }));
+    },
   );
   const git = await repositoryAt(repository.path);
 
@@ -136,27 +145,32 @@ test("Contract reads return plain pinned data from one git snapshot", async () =
   assert.equal(git.effectiveCwd, resolve(repository.path));
   assert.equal(report.root, git.primaryWorktree);
   assert.equal(report.state, (await readGit(git)).commit);
+  assert.equal(new Date(report.observedAt).toISOString(), report.observedAt);
   const zeros = { staged: 0, unstaged: 0, untracked: 0, submodules: 0 };
   assert.deepEqual(report.rows.find((contract) => contract.id === first), {
     id: first,
     title: "First status row",
     phase: "waiting",
     phaseAt: firstJournalAt(repository, first),
+    lastJournalAt: firstJournalAt(repository, first),
     disposition: "active",
     workspace: "here",
     worktreePath: null,
-    workspaceObservation: { kind: "clean", location: { kind: "here" }, counts: zeros },
+    workspaceObservation: { kind: "clean", location: { kind: "here" }, counts: zeros, merge: null },
     target: null,
     targetLag: { kind: "none" },
     delivery: null,
     targetObservation: null,
     gates: { reports: [], satisfied: true },
+    after: [],
+    dependents: [],
   });
   assert.deepEqual(report.rows.find((contract) => contract.id === second), {
     id: second,
     title: "Second status row",
     phase: "waiting",
     phaseAt: firstJournalAt(repository, second),
+    lastJournalAt: firstJournalAt(repository, second),
     disposition: "active",
     workspace: "worktree",
     worktreePath: null,
@@ -166,6 +180,8 @@ test("Contract reads return plain pinned data from one git snapshot", async () =
     delivery: null,
     targetObservation: null,
     gates: { reports: [], satisfied: true },
+    after: [],
+    dependents: [],
   });
   const invocations = readFileSync(log, "utf8").trim().split("\n");
   assert.equal(invocations.filter((command) => command === "cat-file --batch").length, 1);
@@ -275,6 +291,97 @@ test("public Contract rows select the source entry for every phase", async () =>
   }
 });
 
+test("Contract boards preserve endpoint kinds and lexical active reverse dependents", async () => {
+  const repository = repositoryWithMain();
+  const active = await bind(repository, "Active prerequisite", "here");
+  const claimed = await bind(repository, "Claimed prerequisite", "here");
+  const abandoned = await bind(repository, "Abandoned prerequisite", "here");
+  const missing = protocolContractId("Missing prerequisite");
+  const dependent = await bind(repository, "Dependent", "here", [claimed, active, abandoned]);
+  const alpha = await bind(repository, "Alpha dependent", "here", [active]);
+  const zulu = await bind(repository, "Zulu dependent", "here", [active]);
+  const git = await repositoryAt(repository.path);
+  const before = await readGit(git);
+  if (before.commit === null) throw new Error("Keiyaku state was not published");
+  const snapshot = snapshotId(repository.run(["rev-parse", "HEAD"]).trim());
+  const claimDelivery: JournalEntry = {
+    v: 1,
+    kind: "deliver",
+    contract: claimed,
+    entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FBK"),
+    at: "2026-08-12T00:01:00.000Z",
+    data: {
+      tenderSnapshot: snapshot,
+      integration: { predecessor: snapshot, snapshot, changeId: changeId("change-claimed-prerequisite") },
+      method: "squash",
+      policy: { requireBranchesToBeUpToDate: false },
+    },
+  };
+  const terminalEntries = new Map<ContractId, readonly JournalEntry[]>([
+    [claimed, [
+      {
+        v: 1, kind: "bound", contract: claimed,
+        entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FBJ"), at: "2026-08-12T00:00:30.000Z", data: {},
+      },
+      claimDelivery,
+      {
+        v: 1, kind: "claimed", contract: claimed,
+        entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FBR"), at: "2026-08-12T00:02:00.000Z",
+        data: { delivery: claimDelivery.entry },
+      },
+    ]],
+    [abandoned, [{
+      v: 1, kind: "abandoned", contract: abandoned,
+      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FBM"), at: "2026-08-12T00:03:00.000Z", data: {},
+    }]],
+  ]);
+  const updates = new Map<string, { oid: string } | null>();
+  for (const [id, entries] of terminalEntries) {
+    const activePath = contractJournalPath(id, "active");
+    const current = before.paths.get(activePath);
+    if (current?.type !== "blob") throw new Error("missing active journal");
+    const oid = await writeBlob(git, Buffer.concat([await readBlob(git, current.oid), ...entries.map((entry) => Buffer.from(encodeEntry(entry)))]));
+    updates.set(activePath, null);
+    updates.set(contractJournalPath(id, "terminal"), { oid });
+  }
+  const dependentPath = contractJournalPath(dependent, "active");
+  const dependentJournal = before.paths.get(dependentPath);
+  if (dependentJournal?.type !== "blob") throw new Error("missing dependent journal");
+  const amendedDependent = await writeBlob(git, Buffer.concat([
+    await readBlob(git, dependentJournal.oid),
+    Buffer.from(encodeEntry({
+      v: 1,
+      kind: "amend",
+      contract: dependent,
+      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FBN"),
+      at: "2026-08-12T00:04:00.000Z",
+      data: terms("Dependent", [claimed, active, abandoned, missing]),
+    })),
+  ]));
+  updates.set(dependentPath, { oid: amendedDependent });
+  const tree = await updateGitTree(git, before.tree, updates);
+  const commit = await writeCommit({ repository: git, tree, parent: before.commit });
+  repository.run(["update-ref", GIT_REF, commit, before.commit]);
+
+  const scope = await scopeOperation({ coordinate: repository.path });
+  const board = await withGitDecodeChannel(scope, (channel) => contractsOperation({
+    scope, channel, hereWorkspace: hereWorkspace(scope),
+  }));
+  const row = board.rows.find((candidate) => candidate.id === dependent);
+  assert.deepEqual(row?.after, [
+    { contractId: claimed, endpoint: { kind: "claimed" } },
+    { contractId: active, endpoint: { kind: "active", phase: "waiting" } },
+    { contractId: abandoned, endpoint: { kind: "abandoned" } },
+    { contractId: missing, endpoint: { kind: "missing" } },
+  ]);
+  assert.deepEqual(board.rows.find((candidate) => candidate.id === active)?.dependents, [
+    { contractId: alpha, phase: "waiting" },
+    { contractId: dependent, phase: "waiting" },
+    { contractId: zulu, phase: "waiting" },
+  ]);
+  assert.equal(board.rows.some((candidate) => candidate.id === claimed || candidate.id === abandoned), false);
+});
+
 test("single Contract observation never combines state and target from different epochs", async () => {
   const repository = repositoryWithMain();
   repository.run(["branch", "target"]);
@@ -346,6 +453,7 @@ test("single Contract observation never combines state and target from different
       title: "Frozen observation",
       phase: "waiting",
       phaseAt: firstJournalAt(repository, id),
+      lastJournalAt: firstJournalAt(repository, id),
       disposition: "active",
       workspace: "here",
       worktreePath: null,
@@ -353,12 +461,15 @@ test("single Contract observation never combines state and target from different
         kind: "clean",
         location: { kind: "here" },
         counts: { staged: 0, unstaged: 0, untracked: 0, submodules: 0 },
+        merge: null,
       },
       target: "refs/heads/target",
       targetLag: { kind: "counted", behind: 0 },
       delivery: null,
       targetObservation: { head: targetBefore, drift: false },
       gates: { reports: [], satisfied: true },
+      after: [],
+      dependents: [],
     },
   });
 });

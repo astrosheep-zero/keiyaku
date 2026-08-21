@@ -8,12 +8,14 @@ import { Akuma } from "../akuma/index.js";
 import { readAliases, type AliasBinding } from "../alias/index.js";
 import { readDispatchesAt, type Dispatch } from "../dispatch/index.js";
 import { readTaskHolderProjectionAt, type TaskHolderProjection } from "../settlement/holder.js";
+import { observeCurrentPhysicalIssue } from "../protocol/read/observation.js";
 import { readContractBoard } from "../protocol/read/status.js";
 import { withGitDecodeChannel, withGitReadObservation, type GitReadObservation } from "../git/read-observation.js";
 import { readDocuments } from "../protocol/read/documents.js";
 import { readRegionDeclarations, validateRegionPath } from "../library/region.js";
 import { contractId } from "../core/facts/types.js";
 import { selectKanshi, selectRegion } from "./select.js";
+import { FLEET_SNAPSHOT_ROWS, visibleFleetRows } from "./fleet.js";
 import type { TaskRow } from "../task/index.js";
 import type {
   AkumaKanshiWorld,
@@ -127,17 +129,42 @@ async function readBranch(repo?: Repo): Promise<string | null> {
 
 async function readContracts(
   observation: GitReadObservation,
-  selected?: ContractBoard["rows"][number]["id"],
+  include?: ContractBoard["rows"][number]["id"],
 ): Promise<Section<ContractBoard>> {
   try {
     return {
       kind: "present",
       value: await readContractBoard(
         observation,
-        selected,
+        include,
         async (id) => await resolveHereContractWorkspace(observation.repository, id),
       ),
     };
+  } catch (error) {
+    return { kind: "failed", failure: { message: diagnostic(error) } };
+  }
+}
+
+async function attachSelectedIssue(
+  observation: GitReadObservation,
+  contracts: Section<ContractKanshiBoard>,
+  selected: ContractBoard["rows"][number]["id"],
+): Promise<Section<ContractKanshiBoard>> {
+  if (contracts.kind !== "present") return contracts;
+  try {
+    const rows = await Promise.all(contracts.value.rows.map(async (row) => {
+      if (row.id !== selected) return row;
+      const here = row.workspace === "here"
+        ? await resolveHereContractWorkspace(observation.repository, row.id)
+        : undefined;
+      const issue = await observeCurrentPhysicalIssue(
+        observation.repository,
+        row,
+        here?.kind === "appointed" ? here.path : undefined,
+      );
+      return issue === undefined ? row : { ...row, issue };
+    }));
+    return { kind: "present", value: { ...contracts.value, rows } };
   } catch (error) {
     return { kind: "failed", failure: { message: diagnostic(error) } };
   }
@@ -299,15 +326,8 @@ async function joinAkuma(
         }),
       };
     });
-    const running = rows
-      .filter((row) => row.life === "running")
-      .sort((left, right) => {
-        const l = "lastActivityAt" in left && left.lastActivityAt !== null ? Date.parse(left.lastActivityAt) : -Infinity;
-        const r = "lastActivityAt" in right && right.lastActivityAt !== null ? Date.parse(right.lastActivityAt) : -Infinity;
-        return r - l;
-      })
-      .slice(0, 3);
-    const snapshots = new Map(await Promise.all(running.map(async (row) => {
+    const snapshotRows = visibleFleetRows(rows).slice(0, FLEET_SNAPSHOT_ROWS);
+    const snapshots = new Map(await Promise.all(snapshotRows.map(async (row) => {
       try {
         return [row.id, (await Akuma.of(path).of({ id: row.id }).status()).timeline] as const;
       } catch {
@@ -384,7 +404,7 @@ export async function observeKanshi(input: KanshiInput): Promise<KanshiObservati
         : dispatches.kind === "failed"
           ? dispatches
           : await joinAkuma(world, observeContract, dispatches.value, aliases);
-      const report = {
+      const assembled = {
         root: world,
         observedAt,
         branch,
@@ -393,10 +413,13 @@ export async function observeKanshi(input: KanshiInput): Promise<KanshiObservati
         akuma,
         ...(region === undefined ? {} : { region }),
       } satisfies KanshiReport;
+      if (input.contract === undefined) return { report: assembled, aliases };
+      const selected = selectKanshi({ report: assembled, contract: input.contract });
       return {
-        report: input.contract === undefined
-          ? report
-          : selectKanshi({ report, contract: input.contract }),
+        report: {
+          ...selected,
+          contracts: await attachSelectedIssue(observation, selected.contracts, input.contract),
+        },
         aliases,
       };
     }));

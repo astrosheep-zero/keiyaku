@@ -205,6 +205,14 @@ No common ancestor produces `integration-failed` with reason
 That conflict names the exact judged `targetHead` and the ordered unique
 conflict paths.
 
+Read-only clean and dirty `ContractWorkspaceObservation` arms carry
+`merge: null` or `{ head, unmergedPaths }` from that same `MERGE_HEAD`
+primitive and ordered unmerged porcelain/index paths. Merge is orthogonal to
+dirty counts. Unavailable, unappointed, and failed arms fabricate no merge
+field. `MERGE_HEAD` with unmerged paths is current materialized workspace
+state; an ordinary unmaterialized deliver conflict exists only in its mutation
+receipt and does not appear on later ls, status, or history.
+
 When deliver asks to materialize a judged conflict, Git first detects existing
 merge state with `git rev-parse -q --verify MERGE_HEAD` in the appointed
 workspace. It then projects the already-made judge as

@@ -441,7 +441,12 @@ async function invokeStatus(
         if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
         return (await import("./commands/akuma-invoke.js")).invokeAkumaStatus(world, address.id, parsed.contract, repo);
       }
-      return { kind: "status" as const, report: selectKanshi({ report: observation.report, contract: address.id }), selection: "contract" as const };
+      if (repo === undefined) throw new CliUsageError("cannot select a contract while the Contract world is absent");
+      return {
+        kind: "status" as const,
+        report: await kanshi({ world, repo, contract: address.id }),
+        selection: "contract" as const,
+      };
     } catch (error) {
       if (error instanceof TypeError) throw new CliUsageError(error.message);
       throw error;
@@ -509,21 +514,24 @@ async function invokeContractHistory(repo: Repo | undefined, contract: string): 
   }
 }
 
-// eslint-disable-next-line complexity -- command dispatch keeps the CLI's existing boundary in one place.
-async function invokeParsed(
-  invocation: NonInstallExecution,
-  runtime: InvokeRuntime,
-): Promise<InvocationResult | TaskInvocationResult | AkumaInvocationResult | SettingsInvocationResult> {
-  const environment = runtime.environment ?? process.env;
-  const gitPath = gitPathFromEdge(environment);
+async function resolveInvocationCoordinates(invocation: NonInstallExecution, runtime: InvokeRuntime) {
+  const environment = runtime.environment ?? process.env, gitPath = gitPathFromEdge(environment);
   const { resolveCliCoordinates } = await import("./coordinates.js");
-  const coordinates = await resolveCliCoordinates({
+  return resolveCliCoordinates({
     ...(runtime.cwd === undefined ? {} : { processCwd: runtime.cwd }),
     ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
     ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),
     ...(gitPath === undefined ? {} : { gitPath }),
     command: invocation.command,
   });
+}
+
+// eslint-disable-next-line complexity -- command dispatch keeps the CLI's existing boundary in one place.
+async function invokeParsed(
+  invocation: NonInstallExecution,
+  runtime: InvokeRuntime,
+): Promise<InvocationResult | TaskInvocationResult | AkumaInvocationResult | SettingsInvocationResult> {
+  const coordinates = await resolveInvocationCoordinates(invocation, runtime);
   const { cwd, cwdSource, repo, world, candidateWorld, establishWorld, taskContext } = coordinates;
   const edge: InvocationEdge = {
     environment: runtime.environment ?? process.env,

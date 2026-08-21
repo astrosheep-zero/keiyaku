@@ -89,7 +89,8 @@ only when that appointed workspace is clean and has no existing Git merge
 state. A dirty workspace reuses `dirty-workspace` even when `includeDirty` is
 true. Existing merge state refuses `merge-state-present` with the appointed
 `{ kind, path }`. Neither refusal mutates bytes, refs, facts, pins, or
-lifecycle. Keiyaku adds no merge-abort command. No matching appointment uses the
+lifecycle. Read-only status observes that same merge as the clean/dirty
+`merge` field, independent of dirty counts. Keiyaku adds no merge-abort command. No matching appointment uses the
 existing unavailable or `worktree-missing` behavior. Multiple valid matching
 appointments are authority corruption. Pre-admission delivery, review, and
 audit, and nonterminal projection or reconciliation, throw

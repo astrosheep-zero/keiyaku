@@ -455,52 +455,48 @@ function recoveryLag(path: string, target: string, detail: string): TargetChecko
   return { kind: "target-checkout-retained", path, target, diagnostic: detail };
 }
 
-async function recoverCheckout(input: Readonly<{
-  repository: GitRepository;
-  path: string;
-  predecessor: SnapshotId;
-  candidate: SnapshotId;
-  predecessorTree: GitObjectId;
-  candidateTree: GitObjectId;
-}>): Promise<"complete" | "recovered" | "retained"> {
-  const { repository, path, predecessor, candidate, predecessorTree, candidateTree } = input;
+type CheckoutInput = Readonly<{ repository: GitRepository; path: string; predecessor: SnapshotId; candidate: SnapshotId; predecessorTree: GitObjectId; candidateTree: GitObjectId }>;
+type CheckoutClassification = Readonly<{ kind: "complete" }> | Readonly<{ kind: "retained" }> | Readonly<{ kind: "recoverable"; action: "candidate-index" | "index-merge" | "worktree-merge" }>;
+
+async function classifyCheckout(input: CheckoutInput): Promise<CheckoutClassification> {
+  const { repository, path, predecessorTree, candidateTree } = input;
   const changedPaths = await gitPaths(repository, path, ["diff", "--name-only", "-z", predecessorTree, candidateTree]);
-  if (changedPaths.length === 0) return "complete";
+  if (changedPaths.length === 0) return { kind: "complete" };
   const workspaceTree = (await captureWorkspaceTree(repository, path)).tree;
   const candidateIndex = await indexMatchesTreeOnPaths(repository, path, candidateTree, changedPaths);
   const candidateWorkspace = await workspaceMatchesTreeOnPaths(repository, path, candidateTree, workspaceTree, changedPaths);
-  if (candidateIndex && candidateWorkspace) return "complete";
+  if (candidateIndex && candidateWorkspace) return { kind: "complete" };
+  if (workspaceTree === candidateTree) return { kind: "recoverable", action: "candidate-index" };
+  const predecessorIndex = await indexMatchesTreeOnPaths(repository, path, predecessorTree, changedPaths);
+  if (predecessorIndex && candidateWorkspace) return { kind: "recoverable", action: "index-merge" };
+  return !predecessorIndex || !(await workspaceMatchesTreeOnPaths(repository, path, predecessorTree, workspaceTree, changedPaths))
+    ? { kind: "retained" }
+    : { kind: "recoverable", action: "worktree-merge" };
+}
 
-  if (workspaceTree === candidateTree) {
+/** Judge the target-checkout shape without mutating refs, worktrees, or indexes. */
+export async function observeTargetCheckoutShape(
+  repository: GitRepository,
+  input: Readonly<{ path: string; predecessor: SnapshotId; candidate: SnapshotId }>,
+): Promise<"complete" | "recoverable" | "retained"> {
+  const [predecessorTree, candidateTree] = await Promise.all([commitTree(repository, input.predecessor), commitTree(repository, input.candidate)]);
+  return (await classifyCheckout({ repository, ...input, predecessorTree, candidateTree })).kind;
+}
+
+async function recoverCheckout(input: CheckoutInput): Promise<"complete" | "recovered" | "retained"> {
+  const classified = await classifyCheckout(input);
+  if (classified.kind === "complete") return "complete";
+  if (classified.kind === "retained") return "retained";
+  const { repository, path, predecessor, candidate } = input;
+  if (classified.action === "candidate-index") {
     await runGit(repository, ["-C", path, "read-tree", gitObjectIdForSnapshot(candidate)]);
     return "recovered";
   }
-
-  const predecessorIndex = await indexMatchesTreeOnPaths(repository, path, predecessorTree, changedPaths);
-  if (predecessorIndex && candidateWorkspace) {
-    await runGit(repository, [
-      "-C",
-      path,
-      "read-tree",
-      "-i",
-      "-m",
-      gitObjectIdForSnapshot(predecessor),
-      gitObjectIdForSnapshot(candidate),
-    ]);
+  if (classified.action === "index-merge") {
+    await runGit(repository, ["-C", path, "read-tree", "-i", "-m", gitObjectIdForSnapshot(predecessor), gitObjectIdForSnapshot(candidate)]);
     return "recovered";
   }
-
-  const predecessorWorkspace = await workspaceMatchesTreeOnPaths(repository, path, predecessorTree, workspaceTree, changedPaths);
-  if (!predecessorIndex || !predecessorWorkspace) return "retained";
-  await runGit(repository, [
-    "-C",
-    path,
-    "read-tree",
-    "-m",
-    "-u",
-    gitObjectIdForSnapshot(predecessor),
-    gitObjectIdForSnapshot(candidate),
-  ]);
+  await runGit(repository, ["-C", path, "read-tree", "-m", "-u", gitObjectIdForSnapshot(predecessor), gitObjectIdForSnapshot(candidate)]);
   return "recovered";
 }
 

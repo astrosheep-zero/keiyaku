@@ -144,6 +144,30 @@ async function readMarker(administrationDirectory: string): Promise<HookMarker |
   }
 }
 
+function hookFailureDiagnostic(phase: HookPhase, progress: Extract<HookProgress, { status: "failed" }>): string {
+  const failure = progress.failure;
+  const detail = failure.kind === "exit"
+    ? `exit=${failure.code}`
+    : failure.kind === "spawn-error"
+      ? failure.diagnostic
+      : failure.kind;
+  return `worktree-hook-failed ${phase} command=${progress.command} ${detail}`;
+}
+
+export type WorktreeHookMarkerObservation =
+  | Readonly<{ kind: "absent" | "pending" | "ok" }>
+  | Readonly<{ kind: "failed"; diagnostic: string }>;
+
+/** Read the durable hook marker without executing commands or taking locks. */
+export async function observeWorktreeHookMarker(administrationDirectory: string): Promise<WorktreeHookMarkerObservation> {
+  const marker = await readMarker(administrationDirectory);
+  if (marker === null) return { kind: "absent" };
+  if (marker.create.status === "failed") return { kind: "failed", diagnostic: hookFailureDiagnostic("create", marker.create) };
+  if (marker.destroy.status === "failed") return { kind: "failed", diagnostic: hookFailureDiagnostic("destroy", marker.destroy) };
+  if (marker.create.status === "pending" || marker.destroy.status === "pending") return { kind: "pending" };
+  return { kind: "ok" };
+}
+
 async function writeMarker(administrationDirectory: string, marker: HookMarker): Promise<void> {
   const path = hookMarkerPath(administrationDirectory);
   await mkdir(dirname(path), { recursive: true });

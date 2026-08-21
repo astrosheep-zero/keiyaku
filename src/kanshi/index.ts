@@ -9,6 +9,7 @@ export type {
   ContractHolderObservation,
   ContractKanshiBoard,
   ContractKanshiRow,
+  CurrentPhysicalIssue,
   KanshiReport,
   Section,
   TaskKanshiRow,

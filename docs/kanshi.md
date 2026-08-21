@@ -6,8 +6,9 @@ selection. It is a reader, never authority: it writes, caches, repairs, and
 reconciles nothing.
 
 Its text projection is owned by [cli-output.md](cli-output.md). The renderer
-derives each section's visible live count only from the assembled `contracts`,
-`akuma`, and `tasks` sections. It performs no additional read. An absent or
+derives each section's visible count only from the assembled `contracts`,
+`akuma`, and `tasks` sections. Contract and Task count non-terminal `live`
+rows; Fleet counts readable Akuma identities. It performs no additional read. An absent or
 failed section is
 named as such and is never counted as zero; a present empty section is zero.
 The text projection adds no persisted counters or another report field.
@@ -56,9 +57,13 @@ assembled rows. Contract `lastJournalAt` is the final entry in the frozen
 journal observation. Born Akuma `lastActivityAt` is its Heart owner's bounded
 latest timeline-row observation and may be `null`. Kanshi does not persist or
 precompute an age. Text derives every displayed age against this report's one
-`observedAt`; JSON retains only the source timestamps. Fleet text defines `live`
-as exactly `running` rows, orders them only by descending `lastActivityAt`, and
-includes one activity snapshot line for the first three rows.
+`observedAt`; JSON retains only the source timestamps. Fleet text retains every
+readable Akuma row, including running, asleep, stranded, killed, hung, untidy,
+unborn, stillborn, and lost rows. It uses a ten-row hot-first aperture: the
+existing Akuma hot rule selects running, lost, stillborn, and missing or
+unavailable Dispatch endpoints before cold rows in source order. The same final
+visible ordering selects activity snapshots, which are bounded to its first
+three rows.
 
 When a Repo is present, Kanshi creates one call-scoped Git read observation and
 passes it to the complete Contract, TaskHolder, and
@@ -163,10 +168,28 @@ row and its subordinate holder, Fleet attachment, namespace, workspace, and
 gate facts without world-board sections, top-level Task or
 Fleet rows, or aggregate counts. The JSON projection keeps the assembled
 selected report; text does not repeat those joined relations as world sections.
-Kanshi owns that assembled observation: a complete Contract ID reads that one
-Contract and joins only its contextual relations. It never builds the complete
-Contract board and filters it afterward. Selectors that require world lookup may
+Kanshi owns that assembled observation. Selected Contract status constructs the
+complete Contract board from one Git observation, including reverse active
+dependents, then selects the addressed row and its joined relations. It does
+not assume reverse dependents exist in a single-journal read. Selectors that
+require world lookup may
 read the world to resolve the identity before requesting the same observation.
+
+`CurrentPhysicalIssue` is selected-only:
+
+```ts
+type CurrentPhysicalIssue =
+  | Readonly<{ kind: "hook-failure"; diagnostic: string }>
+  | Readonly<{ kind: "target-checkout-retained"; target: string }>
+```
+
+After selection, Kanshi may attach `issue` on that Contract row by reading a
+durable hook marker or independently judging the pure target-checkout shape. It
+must not call effectful reconcile, acquire that lock, mutate refs or worktrees,
+or execute hooks. World status and `keiyaku ls kei/` omit the property and do
+not run the projection. Observation failure is a section diagnostic, not an
+issue arm. `unsealed-bytes`, `worktree-retained`, `reconcile-failed`, and
+contract-file failures without a durable source remain receipt-only.
 
 For named status, the same call-scoped observation supplies the complete Alias
 register and report to Address. Address resolves active managed Contract short
@@ -224,9 +247,10 @@ touched paths, Git conflicts, ownership, gates, or serialization advice.
 
 Human and Flagship share one text projection. The renderer consumes the typed
 report only; it does not reread product authorities or infer associations. Bare
-world text has three sections in this exact order: KEIYAKU, FLEET, TASK. Each
-left-aligned header is `[ <SECTION> ]  <N> live`, where N is that section's
-non-terminal live count. There is no signature, invocation coordinate, state
+world text has three sections in this exact order: KEIYAKU, FLEET, TASK.
+KEIYAKU and TASK headers are `[ <SECTION> ]  <N> live`, where N is that
+section's non-terminal live count. Fleet is `[ FLEET ]  <N> akuma`, where N is
+every readable Fleet row. There is no signature, invocation coordinate, state
 coordinate, aggregate score, or alternate status mode.
 
 ```text
@@ -244,13 +268,13 @@ coordinate, aggregate score, or alternate status mode.
   (all 1 live keiyaku shown)
 
 
-[ FLEET ]  1 live
+[ FLEET ]  1 akuma
 
 ● aku/worker/abcd1234 (@lead)
   LIFE    running · 4m
   LINKED  -> kei/example
 
-  (all 1 live akuma shown)
+  (all 1 akuma shown)
 
 
 [ TASK ]  1 live
@@ -263,25 +287,29 @@ coordinate, aggregate score, or alternate status mode.
   (all 1 live task shown)
 ```
 
-The text aperture shows at most ten live rows from each section. It selects
-hot live rows first, then cold-live rows in their existing source order: a
+The text aperture shows at most ten rows from each section. Contract and Task
+select hot live rows first, then cold-live rows in their existing source order: a
 Contract is hot when it is pending-delivery, has failed or
 stale gate testimony, is behind its target, has a dirty or unavailable
 worktree, has an unavailable or held TaskHolder, has an attached Akuma, or has
-no readable title; a Task is hot when blocked or in progress; an Akuma is hot
-when running, lost, stillborn, or its Dispatch endpoint is
-missing or unavailable. No row is duplicated. Terminal Contract and Task rows
-are omitted and excluded from their live count; Fleet retains its existing life
-semantics, including killed rows. Complete coordinates remain present in output
-bytes even when the terminal wraps them.
+no readable title; a Task is hot when blocked or in progress. Fleet selects its
+existing hot rows first: running, lost, stillborn, or a missing or unavailable
+Dispatch endpoint, then all cold rows in source order. No row is duplicated.
+Terminal Contract and Task rows are omitted and excluded from their live count;
+Fleet retains every readable life state, including asleep, stranded, killed,
+hung, untidy, unborn, and stillborn rows. Complete coordinates remain present
+in output bytes even when the terminal wraps them.
 
 After its visible rows, a complete section writes exactly
-`  (all <N> live <unit> shown)`. A partial section writes exactly
-`  + <N> more live <unit> not shown` followed by
+`  (all <N> live <unit> shown)` for KEIYAKU and TASK, and
+`  (all <N> akuma shown)` for FLEET. A partial KEIYAKU or TASK section writes
+exactly `  + <N> more live <unit> not shown`; a partial FLEET writes exactly
+`  + <N> more akuma not shown`; each is followed by
 `    keiyaku ls <selector>/`; the resulting commands are `keiyaku ls kei/`,
 `keiyaku ls aku/`, and `keiyaku ls task/`. The
-omitted count is the live count beyond the ten-row aperture and never includes
-terminal Contract or Task rows. There is one blank line after each header and
+omitted count is the relevant section count beyond the ten-row aperture and
+never includes terminal Contract or Task rows. Fleet snapshots belong only to
+the first three final visible rows. There is one blank line after each header and
 before its footer, then two blank lines before the next header. `keiyaku ls`
 is the complete text inspection path; typed Kanshi and JSON remain complete.
 

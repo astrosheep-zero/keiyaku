@@ -14,6 +14,9 @@ import {
   type GitRepository,
 } from "./process.js";
 import type { DeliveryCommitMetadata, TenderCapture } from "./tender.js";
+import { workspaceMergeStatePresent } from "./workspace.js";
+
+export { workspaceMergeStatePresent };
 
 type IntegrationTender = Pick<TenderCapture, "head" | "tree">;
 
@@ -260,28 +263,6 @@ async function mergedTree(
     stderr: result.stderr,
     status: result.status,
     message: "git merge-tree --write-tree failed",
-  });
-}
-
-/** True when the appointed workspace already has Git MERGE_HEAD. */
-export async function workspaceMergeStatePresent(
-  repository: GitRepository,
-  workspace: string,
-): Promise<boolean> {
-  const result = await runAllowingNonzero(repository, [
-    "-C",
-    workspace,
-    "rev-parse",
-    "-q",
-    "--verify",
-    "MERGE_HEAD",
-  ]);
-  if (result.status === 0) return true;
-  if (result.status === 1) return false;
-  throw new GitPlumbingError({
-    stderr: result.stderr,
-    status: result.status,
-    message: "git rev-parse --verify MERGE_HEAD failed",
   });
 }
 

@@ -52,6 +52,7 @@ import type {
   ContractPhase,
   ContractRow,
 } from "../protocol/read/status.js";
+import type { AfterEndpointObservation, ContractAfterEdge, ContractDependent, ContractWorkspaceObservation } from "../protocol/read/status.js";
 import { abandonOperation } from "../protocol/abandon.js";
 import { amendOperation } from "../protocol/amend.js";
 import { arcOperation } from "../protocol/arc.js";
@@ -126,6 +127,7 @@ export type {
   FactKind,
   SnapshotId,
 };
+export type { AfterEndpointObservation, ContractAfterEdge, ContractDependent, ContractWorkspaceObservation };
 export type { TaskId };
 export type { RegionOverlap };
 

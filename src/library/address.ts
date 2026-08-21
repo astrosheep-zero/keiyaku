@@ -67,7 +67,7 @@ async function directId(path: WorldRoot, selector: string): Promise<AkuId> {
 }
 
 export type NamedAddress =
-  | Readonly<{ kind: "contract"; id: string }>
+  | Readonly<{ kind: "contract"; id: ReturnType<typeof contractId> }>
   | Readonly<{ kind: "akuma"; id: AkuId }>;
 
 export type NamedAddressInput = Readonly<{

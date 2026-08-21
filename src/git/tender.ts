@@ -12,7 +12,12 @@ import {
   runGitWithEnvironment,
   type GitRepository,
 } from "./process.js";
-import { captureWorkspaceTree, worktreePath } from "./workspace.js";
+import {
+  captureWorkspaceTree,
+  unmergedWorkspacePaths,
+  workspaceMergeHead,
+  worktreePath,
+} from "./workspace.js";
 
 export type TenderCaptureCoordinates = Readonly<{
   contractId: ContractId;
@@ -69,30 +74,6 @@ async function workspaceExists(repository: GitRepository, workspace: "worktree" 
 function workspaceFor(repository: GitRepository, input: TenderCaptureCoordinates): string | undefined {
   if (input.workspacePath !== undefined) return input.workspacePath;
   return input.place === undefined ? undefined : worktreePath(repository, input.place);
-}
-
-async function workspaceMergeHead(repository: GitRepository, workspace: string): Promise<SnapshotId | undefined> {
-  try {
-    return mintSnapshotId((await runGit(repository, ["-C", workspace, "rev-parse", "-q", "--verify", "MERGE_HEAD"]))
-      .toString("utf8")
-      .trim());
-  } catch (error) {
-    if (error instanceof GitPlumbingError && error.status === 1) return undefined;
-    throw error;
-  }
-}
-
-async function unmergedWorkspacePaths(repository: GitRepository, workspace: string): Promise<readonly string[]> {
-  const records = (await runGit(repository, ["-C", workspace, "ls-files", "--unmerged", "-z"]))
-    .toString("utf8")
-    .split("\0");
-  const paths = new Set<string>();
-  for (const record of records.slice(0, -1)) {
-    const separator = record.indexOf("\t");
-    if (separator < 0) throw new Error(`malformed unmerged index record: ${record}`);
-    paths.add(record.slice(separator + 1));
-  }
-  return [...paths].sort();
 }
 
 /** Capture the complete workspace tree through Git's private index mechanics. */

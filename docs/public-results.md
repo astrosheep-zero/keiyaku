@@ -510,14 +510,9 @@ the last typed Protocol refusal; the package root throws `KeiyakuRefused` with
 that same refusal. Identity exhaustion is not `KeiyakuRetry` and does not use
 the `exhausted` retry reason.
 
-Read-only Contract rows expose one `ContractWorkspaceObservation` union. Its
-generic `failed { diagnostic: string }` arm reports workspace-appointment
-authority corruption or an unreadable workspace fact without introducing a
-new refusal. A duplicate valid here appointment produces that arm for status,
-observe, and Kanshi; `ContractRow.worktreePath` remains null. The diagnostic
-is bounded text and may include matching worktree paths, but no structured
-path field is added to the public result. Mutating pre-admission paths and
-nonterminal reconciliation instead throw `AuthorityCorruptionError`.
+Read-only `ContractWorkspaceObservation` is owned by
+[public-api.md](public-api.md); this mutation-results chapter defines no
+second read-result shape.
 
 ```ts
 type AuditWorkspace = Readonly<{ kind: "worktree" | "here"; path: string }>

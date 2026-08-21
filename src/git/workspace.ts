@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { SnapshotId } from "../core/facts/types.js";
 import { gitObjectId, mintSnapshotId, type GitObjectId } from "./identity.js";
-import { runGit, runGitWithEnvironment, type GitRepository } from "./process.js";
+import { GitPlumbingError, runGit, runGitWithEnvironment, type GitRepository } from "./process.js";
 
 const WORKTREE_DIRECTORY = ["keiyaku", "wt"] as const;
 
@@ -48,7 +48,9 @@ function fields(record: string, count: number): readonly string[] {
   return result;
 }
 
-async function workspaceChanges(repository: GitRepository, workspace: string): Promise<WorkspaceChanges> {
+type WorkspaceStatus = WorkspaceChanges & Readonly<{ unmergedPaths: readonly string[] }>;
+
+async function workspaceStatus(repository: GitRepository, workspace: string): Promise<WorkspaceStatus> {
   const records = (await runGit(repository, [
     "-C", workspace,
     "status", "--porcelain=v2", "-z", "--untracked-files=all", "--ignore-submodules=none",
@@ -57,6 +59,7 @@ async function workspaceChanges(repository: GitRepository, workspace: string): P
   const unstaged = new Set<string>();
   const untracked = new Set<string>();
   const submodules = new Set<string>();
+  const unmerged = new Set<string>();
 
   for (let index = 0; index < records.length - 1; index += 1) {
     const record = records[index]!;
@@ -70,6 +73,7 @@ async function workspaceChanges(repository: GitRepository, workspace: string): P
       const xy = parts[1]!;
       const sub = parts[2]!;
       const path = parts.at(-1)!;
+      if (kind === "u") unmerged.add(path);
       if (xy[0] !== ".") staged.add(path);
       if (xy[1] !== ".") unstaged.add(path);
       if (sub.startsWith("S") && (sub[2] !== "." || sub[3] !== ".")) submodules.add(path);
@@ -90,7 +94,38 @@ async function workspaceChanges(repository: GitRepository, workspace: string): P
     unstaged: [...unstaged].sort(),
     untracked: [...untracked].sort(),
     submodules: [...submodules].sort(),
+    unmergedPaths: [...unmerged].sort(),
   };
+}
+
+async function workspaceChanges(repository: GitRepository, workspace: string): Promise<WorkspaceChanges> {
+  const { unmergedPaths: _unmergedPaths, ...changes } = await workspaceStatus(repository, workspace);
+  return changes;
+}
+
+/** Observe MERGE_HEAD in an appointed workspace, or undefined when absent. */
+export async function workspaceMergeHead(repository: GitRepository, workspace: string): Promise<SnapshotId | undefined> {
+  try {
+    return mintSnapshotId((await runGit(repository, ["-C", workspace, "rev-parse", "-q", "--verify", "MERGE_HEAD"]))
+      .toString("utf8")
+      .trim());
+  } catch (error) {
+    if (error instanceof GitPlumbingError && error.status === 1) return undefined;
+    throw error;
+  }
+}
+
+/** True when the appointed workspace already has Git MERGE_HEAD. */
+export async function workspaceMergeStatePresent(
+  repository: GitRepository,
+  workspace: string,
+): Promise<boolean> {
+  return (await workspaceMergeHead(repository, workspace)) !== undefined;
+}
+
+/** Sorted unique unmerged index paths from porcelain status. */
+export async function unmergedWorkspacePaths(repository: GitRepository, workspace: string): Promise<readonly string[]> {
+  return (await workspaceStatus(repository, workspace)).unmergedPaths;
 }
 
 export type WorkspaceChangeCounts = Readonly<{
@@ -104,8 +139,18 @@ export type ContractWorkspaceLocation =
   | Readonly<{ kind: "worktree"; path: string }>
   | Readonly<{ kind: "here" }>;
 
+export type ContractWorkspaceMerge = Readonly<{
+  head: SnapshotId;
+  unmergedPaths: readonly string[];
+}>;
+
 export type ContractWorkspaceObservation =
-  | Readonly<{ kind: "clean" | "dirty"; location: ContractWorkspaceLocation; counts: WorkspaceChangeCounts }>
+  | Readonly<{
+      kind: "clean" | "dirty";
+      location: ContractWorkspaceLocation;
+      counts: WorkspaceChangeCounts;
+      merge: ContractWorkspaceMerge | null;
+    }>
   | Readonly<{ kind: "unavailable"; location: ContractWorkspaceLocation }>
   | Readonly<{ kind: "unappointed" }>
   | Readonly<{ kind: "failed"; diagnostic: string }>;
@@ -130,9 +175,12 @@ export async function observeWorkspace(
   workspace: string,
 ): Promise<ContractWorkspaceObservation> {
   try {
-    const counts = countsOf(await workspaceChanges(repository, workspace));
+    const status = await workspaceStatus(repository, workspace);
+    const counts = countsOf(status);
     const dirty = counts.staged > 0 || counts.unstaged > 0 || counts.untracked > 0 || counts.submodules > 0;
-    return { kind: dirty ? "dirty" : "clean", location, counts };
+    const head = await workspaceMergeHead(repository, workspace);
+    const merge = head === undefined ? null : { head, unmergedPaths: status.unmergedPaths };
+    return { kind: dirty ? "dirty" : "clean", location, counts, merge };
   } catch {
     return { kind: "unavailable", location };
   }

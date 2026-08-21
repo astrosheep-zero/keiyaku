@@ -21,7 +21,7 @@ export type CatalogInput =
 
 export type Catalog =
   | Readonly<{ kind: "tasks"; root: WorldRoot; rows: readonly TaskRow[] }>
-  | Readonly<{ kind: "contracts"; root: string; state: string | null; rows: ContractBoard["rows"] }>
+  | Readonly<{ kind: "contracts"; root: string; state: string | null; observedAt: string; rows: ContractBoard["rows"] }>
   | Readonly<{ kind: "archetypes"; rows: readonly ArchetypeCatalogRow[] }>
   | Readonly<{
       kind: "akuma";
@@ -75,7 +75,7 @@ export async function listCatalog(input: CatalogInput): Promise<Catalog> {
   if (query.kind === "contracts") {
     if (!(values.repo instanceof Repo)) throw new TypeError("repo must be a Repo");
     const board = await listKeiyaku({ repo: values.repo });
-    return { kind: "contracts", root: board.root, state: board.state, rows: board.rows };
+    return { kind: "contracts", root: board.root, state: board.state, observedAt: board.observedAt, rows: board.rows };
   }
   if (query.kind === "archetypes") {
     const home = optionalHome(values.home);

@@ -24,6 +24,7 @@ import { contractJournalPath } from "../src/git/identity.js";
 import { lastJournalAtFor, phaseAtFor } from "../src/protocol/read/status.js";
 import { contractId, contractSegment } from "../src/core/facts/types.js";
 import { kanshi, selectKanshi, type KanshiReport } from "../src/kanshi/index.js";
+import { visibleFleetRows } from "../src/kanshi/fleet.js";
 import { contractNamespace } from "../src/settlement/settle.js";
 import { projectTaskBoardObservation } from "../src/task/board.js";
 import { serializeTaskDocument, type TaskDocument } from "../src/task/document.js";
@@ -101,7 +102,7 @@ async function observedGitInvocations(repository: ReturnType<typeof makeGitRepos
   await withGitShim(
     "printf '%s\\n' \"$*\" >> \"$KEIYAKU_KANSHI_GIT_LOG\"\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     { KEIYAKU_KANSHI_GIT_LOG: log },
-    async () => observe(repository.path, await Repo.at({ path: repository.path })),
+    async (gitPath) => observe(repository.path, await Repo.at({ path: repository.path, gitPath })),
   );
   return gitInvocations(log);
 }
@@ -145,7 +146,7 @@ test("one-target Kanshi observation has an eight-process Git topology with one h
   assert.equal(invocations.some((command) => /rev-list --count HEAD\.\.refs\//u.test(command)), false);
 });
 
-test("named status selects an active Contract from one pinned Kanshi observation", async () => {
+test("named status resolves its address from the initial observation before the selected read", async () => {
   const repository = makeGitRepository();
   repository.run(["config", "user.name", "Test User"]);
   repository.run(["config", "user.email", "test@example.com"]);
@@ -180,17 +181,55 @@ test("named status selects an active Contract from one pinned Kanshi observation
       KEIYAKU_BARRIER_MARKER: marker,
       KEIYAKU_TERMINAL_OID: terminal,
     },
-    async () => await invoke(parseArgv(["-C", repository.path, "status", `@${contract.id.slice("kei/".length)}`])),
+    async (gitPath) => await invoke(
+      parseArgv(["-C", repository.path, "status", `@${contract.id.slice("kei/".length)}`]),
+      { environment: { KEIYAKU_GIT_PATH: gitPath } },
+    ),
   );
 
   assert.equal(result.kind, "status");
   assert.equal(result.kind === "status" && result.selection, "contract");
   assert.equal(result.kind === "status" && result.report.contracts.kind === "present"
-    && result.report.contracts.value.rows.find((row) => row.id === contract.id)?.disposition, "active");
+    && result.report.contracts.value.rows.find((row) => row.id === contract.id)?.disposition, "terminal");
   assert.equal(repository.run(["rev-parse", GIT_REF]).trim(), terminal);
 });
 
-test("complete Contract status does not read an unrelated Contract journal", async () => {
+test("canonical and Contract-alias status both assemble selected-only current physical issues", async () => {
+  const repository = makeGitRepository();
+  repository.run(["config", "user.name", "Test User"]);
+  repository.run(["config", "user.email", "test@example.com"]);
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const bound = await Keiyaku.bind({
+    repo: await Repo.at({ path: repository.path }),
+    markdown: document("Selected issue parity"),
+    workspace: "worktree",
+    hooks: {
+      create: [{ argv: [process.execPath, "-e", "process.exit(9)"], timeoutMs: 5_000 }],
+      destroy: [],
+    },
+  });
+  const id = bound.keiyaku.id;
+  const world = await World.at(repository.path);
+  const unselected = await kanshi({ world, repo: await Repo.at({ path: repository.path }) });
+  assert.equal(unselected.contracts.kind, "present");
+  if (unselected.contracts.kind !== "present") return;
+  assert.equal("issue" in unselected.contracts.value.rows.find((row) => row.id === id)!, false);
+
+  const readIssue = async (selector: string) => {
+    const result = await invoke(parseArgv(["-C", repository.path, "status", selector]));
+    assert.equal(result.kind, "status");
+    if (result.kind !== "status" || result.report.contracts.kind !== "present") throw new Error("selected Contract status was unavailable");
+    assert.deepEqual(result.report.contracts.value.rows.map((row) => row.id), [id]);
+    return result.report.contracts.value.rows[0]?.issue;
+  };
+
+  const canonical = await readIssue(id);
+  const alias = await readIssue(`@${id.slice("kei/".length)}`);
+  assert.deepEqual(canonical, alias);
+  assert.equal(canonical?.kind, "hook-failure");
+});
+
+test("complete Contract status exposes a corrupt active dependency as a Contract section diagnostic", async () => {
   const repository = makeGitRepository();
   repository.run(["config", "user.name", "Test User"]);
   repository.run(["config", "user.email", "test@example.com"]);
@@ -217,9 +256,7 @@ test("complete Contract status does not read an unrelated Contract journal", asy
   assert.equal(result.kind, "status");
   if (result.kind !== "status") return;
   assert.equal(result.selection, "contract");
-  assert.equal(result.report.contracts.kind, "present");
-  if (result.report.contracts.kind !== "present") return;
-  assert.deepEqual(result.report.contracts.value.rows.map((row) => row.id), [selectedId]);
+  assert.equal(result.report.contracts.kind, "failed");
 });
 
 test("same-target lag counts each workspace HEAD against the one frozen target head", async () => {
@@ -241,7 +278,7 @@ test("same-target lag counts each workspace HEAD against the one frozen target h
   const report = await withGitShim(
     "printf '%s\\n' \"$*\" >> \"$KEIYAKU_KANSHI_GIT_LOG\"\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     { KEIYAKU_KANSHI_GIT_LOG: log },
-    async () => observe(repository.path, await Repo.at({ path: repository.path })),
+    async (gitPath) => observe(repository.path, await Repo.at({ path: repository.path, gitPath })),
   );
 
   assert.equal(report.contracts.kind, "present");
@@ -321,7 +358,7 @@ test("a dead shared Kanshi batch fails every Git-backed owner without restarting
       "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     ].join("\n"),
     { KEIYAKU_KANSHI_GIT_LOG: log },
-    async () => observe(repository.path, await Repo.at({ path: repository.path })),
+    async (gitPath) => observe(repository.path, await Repo.at({ path: repository.path, gitPath })),
   );
 
   assert.equal(report.contracts.kind, "failed");
@@ -605,13 +642,13 @@ function worktreeObservation(
 ) {
   return kind === "unavailable"
     ? { kind, location: { kind: "worktree" as const, path } }
-    : { kind, location: { kind: "worktree" as const, path }, counts };
+    : { kind, location: { kind: "worktree" as const, path }, counts, merge: null };
 }
 
 function hereObservation(kind: "clean" | "dirty" | "unavailable" = "clean", counts = zeros()) {
   return kind === "unavailable"
     ? { kind, location: { kind: "here" as const } }
-    : { kind, location: { kind: "here" as const }, counts };
+    : { kind, location: { kind: "here" as const }, counts, merge: null };
 }
 
 function contractRow(input: Partial<Extract<KanshiReport["contracts"], { kind: "present" }>["value"]["rows"][number]> & { id: string }) {
@@ -634,6 +671,8 @@ function contractRow(input: Partial<Extract<KanshiReport["contracts"], { kind: "
     fleet: [],
     namespaceTasks: { kind: "present" as const, value: [] },
     gates: { satisfied: true, reports: [] },
+    after: [],
+    dependents: [],
     ...input,
   };
 }
@@ -649,6 +688,7 @@ function attentionReport(): KanshiReport {
       value: {
         root: "/repo",
         state: "cccccccccccccccccccccccccccccccccccccccc",
+        observedAt: "2026-08-12T00:00:00.000Z",
         rows: [
           contractRow({
             id: "kei/terminal-contract",
@@ -782,7 +822,7 @@ test("Kanshi text keeps complete identities in the aperture grammar", async () =
   assert.equal(text.includes(akumaId), true);
   assert.match(text, /\[ KEIYAKU \]  1 live/u);
   assert.match(text, /\[ TASK \]  1 live/u);
-  assert.match(text, /\[ FLEET \]  1 live/u);
+  assert.match(text, /\[ FLEET \]  1 akuma/u);
   assert.ok(text.indexOf("[ KEIYAKU ]") < text.indexOf("[ FLEET ]"));
   assert.ok(text.indexOf("[ FLEET ]") < text.indexOf("[ TASK ]"));
   assert.doesNotMatch(text, /\bFLEET \d/u);
@@ -858,7 +898,7 @@ test("Kanshi text uses live sections, preserves important facts, and omits termi
   const text = renderKanshiText(report, { columns: 120, color: false });
 
   assert.equal(text.split("\n", 1)[0], "[ KEIYAKU ]  6 live");
-  assert.match(text, /\n\n\[ FLEET \]  7 live/u);
+  assert.match(text, /\n\n\[ FLEET \]  7 akuma/u);
   assert.match(text, /\n\n\[ TASK \]  4 live/u);
   assert.doesNotMatch(text, /attention|kanshi ───|──\[/u);
   assert.doesNotMatch(text, /^ {2}↳ /mu);
@@ -939,6 +979,8 @@ test("Kanshi text uses live sections, preserves important facts, and omits termi
   assert.doesNotMatch(fleet, /asleep · 1d · activity/u);
   assert.match(fleet, /killed · 30s/u);
   assert.match(fleet, /hung · —/u);
+  assert.match(fleet, /stillborn · —/u);
+  assert.match(fleet, /unborn · —/u);
   assert.deepEqual(report, before);
 });
 
@@ -952,7 +994,7 @@ test("Kanshi sections use a ten-row aperture with exact complete and partial foo
     akuma: { ...report.akuma, value: { ...report.akuma.value, rows: [] } },
   }, { columns: 120, color: false });
   assert.match(empty, /\[ KEIYAKU \]  0 live[\s\S]*\(all 0 live keiyaku shown\)/u);
-  assert.match(empty, /\[ FLEET \]  0 live[\s\S]*\(all 0 live akuma shown\)/u);
+  assert.match(empty, /\[ FLEET \]  0 akuma[\s\S]*\(all 0 akuma shown\)/u);
   assert.match(empty, /\[ TASK \]  0 live[\s\S]*\(all 0 live task shown\)/u);
 
   const coldContracts = Array.from({ length: 11 }, (_, index) => contractRow({ id: `kei/cold-${index}` }));
@@ -974,15 +1016,58 @@ test("Kanshi sections use a ten-row aperture with exact complete and partial foo
     },
   }, { columns: 120, color: false });
 
-  for (const [section, unit, selector] of [["KEIYAKU", "keiyaku", "kei"], ["FLEET", "akuma", "aku"], ["TASK", "task", "task"]] as const) {
+  for (const [section, unit, selector] of [["KEIYAKU", "keiyaku", "kei"], ["TASK", "task", "task"]] as const) {
     const body = sectionBody(partial, section);
     assert.match(body, new RegExp(`\\+ 2 more live ${unit} not shown`, "u"));
     assert.match(body, new RegExp(`keiyaku ls ${selector}/`, "u"));
   }
+  assert.match(sectionBody(partial, "FLEET"), /\+ 2 more akuma not shown[\s\S]*keiyaku ls aku\//u);
   assert.match(sectionBody(partial, "KEIYAKU"), /^● kei\/hot-last$/mu);
   assert.match(sectionBody(partial, "FLEET"), /^● aku\/worker\/hot-last \(@lead\)$/mu);
   assert.match(sectionBody(partial, "TASK"), /^● task\/hot-last$/mu);
   assert.doesNotMatch(partial, /cold-09|cold-10/u);
+});
+
+test("Fleet retains non-running rows and bounds snapshots to its final hot-first aperture", () => {
+  const report = attentionReport();
+  if (report.akuma.kind !== "present") throw new Error("fixture Fleet must be present");
+  const untidy = {
+    ...report.akuma.value.rows[6]!,
+    id: "aku/worker/a0000008",
+    life: "untidy" as const,
+  };
+  const rows = [...report.akuma.value.rows, untidy];
+  const visible = visibleFleetRows(rows);
+  assert.deepEqual(visible.map((row) => row.id), [
+    "aku/worker/a0000001",
+    "aku/worker/a0000004",
+    "aku/worker/a0000006",
+    "aku/worker/a0000007",
+    "aku/worker/a0000008",
+    "aku/worker/a0000002",
+    "aku/worker/a0000003",
+    "aku/worker/a0000005",
+  ]);
+  const snapshotRows = new Set(visible.slice(0, 3).map((row) => row.id));
+  const decorated = rows.map((row) => snapshotRows.has(row.id)
+    ? {
+      ...row,
+      snapshot: {
+        kind: "idle",
+        entries: [],
+        omitted: 0,
+        outcome: { outcome: { kind: "answered", answer: `snapshot ${row.id}` } },
+      } as never,
+    }
+    : row);
+  const text = renderKanshiText({
+    ...report,
+    akuma: { ...report.akuma, value: { ...report.akuma.value, rows: decorated } },
+  }, { columns: 120, color: false });
+  assert.match(text, /\[ FLEET \]  8 akuma/u);
+  for (const row of visible.slice(0, 3)) assert.match(text, new RegExp(`snapshot ${row.id}`, "u"));
+  for (const row of visible.slice(3)) assert.doesNotMatch(text, new RegExp(`snapshot ${row.id}`, "u"));
+  assert.match(text, /untidy/u);
 });
 
 test("unappointed managed Contracts render without a worktree path", () => {
@@ -1009,7 +1094,7 @@ test("exact Contract Kanshi text keeps terminal gates and testimony summaries", 
   const text = renderKanshiText(selected, { columns: 80, color: false }, "contract");
 
   assert.match(text, /^✓ kei\/terminal-contract$/mu);
-  assert.match(text, /gates: ✓ reviewed/u);
+  assert.match(text, /gates: \[✓\] reviewed/u);
   assert.match(text, /reviewed: terminal review summary/u);
   assert.doesNotMatch(text, /kei\/active-contract/u);
   assert.doesNotMatch(text, /^kanshi /u);
@@ -1107,8 +1192,8 @@ test("absent and failed Kanshi sections stay typed and distinct from empty prese
   assert.match(failed, /! broken board/u);
   assert.match(failed, /\[ TASK \]/u);
   assert.match(failed, /task absent/u);
-  assert.match(failed, /\[ FLEET \]  0 live/u);
-  assert.match(failed, /\(all 0 live akuma shown\)/u);
+  assert.match(failed, /\[ FLEET \]  0 akuma/u);
+  assert.match(failed, /\(all 0 akuma shown\)/u);
 });
 
 test("Kanshi selection is a projection that preserves source presence", async () => {
@@ -1170,7 +1255,7 @@ test("target lag counts the frozen targetObservation head after the live ref mov
       KEIYAKU_REPO: repository.path,
       KEIYAKU_FROZEN: frozen,
     },
-    async () => observe(repository.path, await Repo.at({ path: repository.path })),
+    async (gitPath) => observe(repository.path, await Repo.at({ path: repository.path, gitPath })),
   );
 
   assert.equal(report.contracts.kind, "present");

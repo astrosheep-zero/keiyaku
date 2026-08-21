@@ -174,9 +174,13 @@ persisted and is independent of delivery or audit paths.
 `Repo.at` throws outside a repository; `root` is the primary-worktree absolute
 path, so its worktrees share one journal while retaining the caller coordinate
 needed by `workspace: "here"`.
-`Keiyaku.list` enumerates the Contract world; `Keiyaku.observe` performs one
-targeted journal observation without enumerating it. Both project the same row
-shape. The return contract and behavior of `reconcile` are defined by
+`Keiyaku.list` enumerates the active Contract world from one Git observation
+and samples `observedAt` with that observation. `Keiyaku.observe` performs one
+targeted journal observation without enumerating the world. Both project the
+same row shape, including declared `after` edges. Reverse `dependents` require
+the complete active board, so a targeted observe leaves `dependents` empty.
+Selected status constructs that complete board, then selects; it is not a
+targeted observe. The return contract and behavior of `reconcile` are defined by
 [git-reconciliation.md](git-reconciliation.md).
 
 `Keiyaku` is a stateless branded handle born only through `Keiyaku.of` or a
@@ -208,15 +212,37 @@ type ContractTargetLag =
 type ContractWorkspaceLocation =
   | Readonly<{ kind: "worktree"; path: string }>
   | Readonly<{ kind: "here" }>
+type ContractWorkspaceMerge = Readonly<{
+  head: SnapshotId
+  unmergedPaths: readonly string[]
+}>
 type ContractWorkspaceObservation =
-  | Readonly<{ kind: "clean" | "dirty"; location: ContractWorkspaceLocation; counts: Readonly<{ staged: number; unstaged: number; untracked: number; submodules: number }> }>
+  | Readonly<{ kind: "clean" | "dirty"; location: ContractWorkspaceLocation; counts: Readonly<{ staged: number; unstaged: number; untracked: number; submodules: number }>; merge: ContractWorkspaceMerge | null }>
   | Readonly<{ kind: "unavailable"; location: ContractWorkspaceLocation }>
   | Readonly<{ kind: "unappointed" }>
+  | Readonly<{ kind: "failed"; diagnostic: string }>
+
+type ContractPhase = "waiting" | "bound" | "pending-delivery" | "claimed" | "abandoned"
+type AfterEndpointObservation =
+  | Readonly<{ kind: "claimed" }>
+  | Readonly<{ kind: "active"; phase: ContractPhase }>
+  | Readonly<{ kind: "abandoned" }>
+  | Readonly<{ kind: "missing" }>
+type ContractAfterEdge = Readonly<{
+  contractId: ContractId
+  endpoint: AfterEndpointObservation
+}>
+type ContractDependent = Readonly<{
+  contractId: ContractId
+  phase: ContractPhase
+}>
 
 type ContractRow = Readonly<{
   id: ContractId
   title: string | null
   phase: "waiting" | "bound" | "pending-delivery" | "claimed" | "abandoned"
+  phaseAt: string
+  lastJournalAt: string
   disposition: "active" | "terminal"
   workspace: "worktree" | "here"
   worktreePath: string | null
@@ -226,11 +252,14 @@ type ContractRow = Readonly<{
   delivery: DeliveryIdentity | null
   targetObservation: Readonly<{ head: SnapshotId | null; drift: boolean }> | null
   gates: Readonly<{ reports: readonly ContractGateReport[]; satisfied: boolean }>
+  after: readonly ContractAfterEdge[]
+  dependents: readonly ContractDependent[]
 }>
 
 type ContractBoard = Readonly<{
   root: string
   state: SnapshotId | null
+  observedAt: string
   rows: readonly ContractRow[]
 }>
 
@@ -240,14 +269,30 @@ type ContractObservation =
 ```
 
 `state` is the same-read `refs/heads/keiyaku-state` commit, or `null` when
-absent. Title is the current document H1. `targetLag` counts workspace `HEAD`
+absent. `observedAt` is sampled with that Git observation. Title is the current
+document H1. `targetLag` counts workspace `HEAD`
 against the same-epoch `targetObservation.head` and never rereads a live
 target ref. `workspaceObservation` is a Git read-time fact, not a journal
-field. An unappointed managed Contract uses the `unappointed` arm,
-keeps `worktreePath` null, and is not probed as a worktree. Phase,
+field. Clean and dirty arms carry `merge: null` or `{ head, unmergedPaths }`
+from `MERGE_HEAD` and ordered unmerged index paths; unavailable, unappointed,
+and failed arms fabricate no merge field. An unappointed managed Contract uses
+the `unappointed` arm,
+keeps `worktreePath` null, and is not probed as a worktree. `after` preserves
+declared edges in terms order. `dependents` reverse only active board rows and
+sort lexically by complete ContractId. Phase,
 disposition, candidate currency, every gate report, and `gates.satisfied` use
 the claimed-admission judgment. Downstream boards copy them and never
-re-evaluate them.
+re-evaluate them. JSON retains full Git object IDs. Text may abbreviate only
+Git object IDs — `state`, tender snapshot, integration predecessor/snapshot,
+target HEAD, and merge head — with unique prefixes, minimum 7 and lengthened as
+required. ChangeId, ContractId, EntryUlid, TaskId, and AkuId remain complete.
+The generic `failed { diagnostic: string }` arm reports workspace-appointment
+authority corruption or an unreadable workspace fact without a new refusal. A
+duplicate valid here appointment produces that arm for list, observe, and
+Kanshi; `worktreePath` remains null. Its diagnostic is bounded text and may
+include matching worktree paths, but has no structured path field. Mutating
+pre-admission paths and nonterminal reconciliation instead throw
+`AuthorityCorruptionError`.
 
 ## Contract Operations
 

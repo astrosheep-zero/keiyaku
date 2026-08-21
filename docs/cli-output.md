@@ -90,9 +90,21 @@ report's one `observedAt`. It floors nonnegative elapsed time to `Ns` below one
 minute, `Nm` below one hour, `Nh` below one day, and `Nd` thereafter; a later
 source is `future` and lawful absence is `—`. Contract phase is
 `<phase> · <age>` before target facts, and born Akuma life is `<life> · <age>`.
-Selected Contract gates retain `<mark> <gate> <age>` detail; world-board gate
-slots are age-less. JSON retains the source timestamps and never contains the
-derived age.
+Selected Contract gates retain `[✓]|[✗]|[~]|[ ] <gate> <age>` detail; world-board
+and catalog gates are age-less and use the same bracketed glyphs. JSON retains
+the source timestamps and never contains the derived age. JSON retains complete
+Git object IDs; text may use unique Git prefixes, minimum 7 and lengthened as
+required, only for `state`, tender snapshot, integration predecessor/snapshot,
+target HEAD, and merge head.
+
+`keiyaku ls kei/` is one flat continuous Contract stream: a compact gate legend,
+complete `kei/<id>` identities, declared gates, after/dependent topology, and
+workspace merge facts, with no sections, table alignment, or World joins.
+World status primarily renders `blocked by kei/<id> (<condition>)`. Selected
+status renders complete after edges in terms order, lexical active dependents,
+merge-head expansion with zero or all paths, and selected-only
+`lag (observed now):`. A claimed after endpoint is `after kei/<id> (claimed)`.
+Do not render unlocks or waited by.
 
 Bare Kanshi text begins with its first section and uses KEIYAKU, FLEET, TASK in
 that order. Each section has a `[ <SECTION> ]  <N> live` header, at most ten
