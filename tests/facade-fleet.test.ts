@@ -217,13 +217,13 @@ test("plural wait skips an earlier unreadable member without spending its shared
     const ordinary = waited.observations.flatMap(ordinaryEntries);
     assert.equal(ordinary.length, 30);
     assert.deepEqual(waited.observations.slice(0, 5).map((view) => ordinaryEntries(view).length), [6, 6, 6, 6, 6]);
-    assert.equal(waited.observations.every((view) => toldEntries(view).length === 1), true);
+    assert.equal(waited.observations.every((view) => toldEntries(view).length === 0), true);
     assert.equal(hasPinned(waited.observations[4]!), true);
     assert.equal(waited.observations[5]!.status.timeline.kind, "open");
     assert.equal(ordinaryEntries(waited.observations[5]!).length, 0);
     assert.equal(hasPinned(waited.observations[5]!), true);
     assert.deepEqual(waited.observations[5]!.status.timeline.entries.map((entry) =>
-      entry.kind === "gap" ? `gap:${entry.count}` : entry.row.kind), ["tell", "gap:2", "tool", "tell"]);
+      entry.kind === "gap" ? `gap:${entry.count}` : entry.row.kind), ["gap:2", "tool", "tell"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -270,7 +270,7 @@ test("plural wait carries unused allowance and keeps pins after exhaustion", asy
     assert.equal(waited.observations.flatMap(ordinaryEntries).length, 30);
     assert.equal(ordinaryEntries(waited.observations[0]!).length, 2);
     assert.deepEqual(waited.observations.slice(1, 5).map((view) => ordinaryEntries(view).length), [6, 6, 6, 6]);
-    assert.equal(waited.observations.every((view) => toldEntries(view).length === 1), true);
+    assert.equal(waited.observations.every((view) => toldEntries(view).length === 0), true);
     const later = waited.observations[5]!;
     assert.deepEqual(
       ordinaryEntries(later).map((entry) => entry.kind === "row" && (entry.row.kind === "said" || entry.row.kind === "note")
@@ -283,7 +283,7 @@ test("plural wait carries unused allowance and keeps pins after exhaustion", asy
     assert.equal(hasPinned(waited.observations[6]!), true);
     assert.equal(waited.observations[6]!.status.timeline.kind, "open");
     assert.deepEqual(waited.observations[6]!.status.timeline.entries.map((entry) =>
-      entry.kind === "gap" ? `gap:${entry.count}` : entry.row.kind), ["tell", "gap:7", "tool", "tell"]);
+      entry.kind === "gap" ? `gap:${entry.count}` : entry.row.kind), ["gap:7", "tool", "tell"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -412,7 +412,7 @@ test("single Contract observation never combines state and target from different
     terms: terms("Frozen observation"),
     verification: { kind: "prepared", data: null },
     workspace: "worktree",
-    target: "refs/heads/target",
+    targetSelection: { kind: "explicit", target: "refs/heads/target" },
   }));
   assert.equal(contract.kind, "accepted");
   if (contract.kind !== "accepted") throw new Error("bind did not succeed");

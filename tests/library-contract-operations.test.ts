@@ -280,7 +280,8 @@ test("native resolution continues through plain deliver against the then-current
 test("Delivery.diff freshly reads its pinned candidate diff", async () => {
   const repository = repositoryWithMain();
   const contract = await bind(repository);
-  commitCandidate(repository);
+  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), contract.id);
+  commitCandidate(repository, worktree);
   await contract.deliver();
 
   const log = resolve(repository.path, "delivery-diff.log");
@@ -305,7 +306,8 @@ test("one public handle reuses its resolved repository scope", async () => {
   const repository = repositoryWithMain();
   const initial = await bind(repository);
   const id = (await initial.state()).id;
-  commitCandidate(repository);
+  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), id);
+  commitCandidate(repository, worktree);
   const log = resolve(repository.path, ".git", "scope-discovery.log");
   writeFileSync(log, "");
 
@@ -407,7 +409,14 @@ test("repo reconcile keeps per-Contract reports after discovery", async () => {
   assert.equal(report.contracts[0]?.contractId, id);
   assert.equal(Array.isArray(report.contracts[0]?.report.effects), true);
   assert.equal(Array.isArray(report.contracts[0]?.report.lag), true);
-  assert.deepEqual(report.contracts[0]?.report.settlement, { actions: [], lags: [] });
+  assert.deepEqual(report.contracts[0]?.report.settlement, {
+    actions: [{
+      kind: "namespace-context",
+      path: await appointedWorktreePath(await repositoryAt(repository.path), id),
+      action: "kept",
+    }],
+    lags: [],
+  });
 });
 
 test("repo reconcile does not observe the Contract world again after discovery", async () => {
@@ -455,7 +464,8 @@ test("public review, abandon, and Arc preserve their ruled testimony", async () 
   ].join("\n") });
   assert.equal((await contract.state()).currentArc?.data.seq, 1);
 
-  commitCandidate(repository);
+  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), contract.id);
+  commitCandidate(repository, worktree);
   const delivered = await contract.deliver();
   const recovered = await contract.delivery();
   assert.equal(recovered?.integration.snapshot, delivered.value.integration.snapshot);
@@ -619,7 +629,8 @@ test("a dependent claimed during continuation reports already-terminal", async (
 test("review records before delivery and the same patch can be placed", async () => {
   const repository = repositoryWithMain();
   const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: document(), workspace: "worktree", gates: ["reviewed"] });
-  writeFileSync(`${repository.path}/candidate.txt`, "candidate\n");
+  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), result.keiyaku.id);
+  writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
 
   const reviewed = await result.keiyaku.review({ verdict: "satisfied" });
   assert.deepEqual(reviewed.facts.map((fact) => fact.kind), ["attestation"]);
@@ -893,10 +904,11 @@ test("a satisfied review cannot interleave a stale integration stop across the t
 test("a whitespace-only worktree change stales prior review testimony", async () => {
   const repository = repositoryWithMain();
   const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: document(), workspace: "worktree", gates: ["reviewed"] });
-  writeFileSync(`${repository.path}/candidate.txt`, "candidate\n");
+  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), result.keiyaku.id);
+  writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
   const reviewed = await result.keiyaku.review({ verdict: "satisfied" });
   const reviewedChangeId = changeIdFromSubject((await result.keiyaku.state()).attestations.at(-1)?.data.subject);
-  writeFileSync(`${repository.path}/candidate.txt`, "candidate \n");
+  writeFileSync(join(worktree, "candidate.txt"), "candidate \n");
 
   const delivered = await result.keiyaku.deliver({ includeDirty: true });
   assert.equal(reviewed.value.placement?.refusal.kind, "delivery-missing");
@@ -909,10 +921,11 @@ test("a whitespace-only worktree change stales prior review testimony", async ()
 test("a changed worktree patch leaves the reviewed placement pending", async () => {
   const repository = repositoryWithMain();
   const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: document(), workspace: "worktree", gates: ["reviewed"] });
-  writeFileSync(`${repository.path}/candidate.txt`, "first\n");
+  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), result.keiyaku.id);
+  writeFileSync(join(worktree, "candidate.txt"), "first\n");
   const reviewed = await result.keiyaku.review({ verdict: "satisfied" });
   assert.deepEqual(reviewed.value.workspace?.untracked, ["candidate.txt"]);
-  writeFileSync(`${repository.path}/candidate.txt`, "second\n");
+  writeFileSync(join(worktree, "candidate.txt"), "second\n");
 
   const delivered = await result.keiyaku.deliver({ includeDirty: true });
   assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["bound", "deliver"]);
@@ -934,7 +947,8 @@ test("terms-only amend copies Markdown bytes and identities without rendering", 
     workspace: "worktree",
     gates: ["reviewed", "held"],
   });
-  commitCandidate(repository);
+  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), bound.keiyaku.id);
+  commitCandidate(repository, worktree);
   await bound.keiyaku.deliver();
   await bound.keiyaku.review({ verdict: "satisfied" });
   const before = await bound.keiyaku.state();
@@ -956,7 +970,8 @@ test("terms-only amend copies Markdown bytes and identities without rendering", 
 test("a changed document leaves an otherwise unchanged reviewed patch pending", async () => {
   const repository = repositoryWithMain();
   const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: document(), workspace: "worktree", gates: ["reviewed"] });
-  writeFileSync(`${repository.path}/candidate.txt`, "candidate\n");
+  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), result.keiyaku.id);
+  writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
   const reviewed = await result.keiyaku.review({ verdict: "satisfied" });
 
   const amended = await result.keiyaku.amend({
@@ -972,7 +987,8 @@ test("a changed document leaves an otherwise unchanged reviewed patch pending", 
 test("review testimony is recorded when reviewed is not a placement gate", async () => {
   const repository = repositoryWithMain();
   const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: document(), workspace: "worktree", gates: [] });
-  writeFileSync(`${repository.path}/candidate.txt`, "candidate\n");
+  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), result.keiyaku.id);
+  writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
 
   const reviewed = await result.keiyaku.review({ verdict: "unsatisfied" });
   assert.deepEqual(reviewed.facts.map((fact) => fact.kind), ["attestation"]);
