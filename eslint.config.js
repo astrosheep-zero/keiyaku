@@ -1,19 +1,10 @@
 import parser from "@typescript-eslint/parser";
 import { builtinRules } from "eslint/use-at-your-own-risk";
 import { FILE_LINE_EXEMPTIONS, FILE_LINES } from "./scripts/maintainability/config.js";
+import { functionName, functionVisitor } from "./scripts/maintainability/functions.js";
 
 const codeLineLimit = (severity, max) => [severity, { max, skipBlankLines: true, skipComments: true }];
 const maxLinesPerFunction = builtinRules.get("max-lines-per-function");
-
-function functionName(node) {
-  if (node.id?.type === "Identifier") return node.id.name;
-  const parent = node.parent;
-  if (parent?.type === "VariableDeclarator" && parent.id.type === "Identifier") return parent.id.name;
-  if ((parent?.type === "MethodDefinition" || parent?.type === "Property") && parent.key) {
-    return parent.key.type === "Identifier" ? parent.key.name : String(parent.key.value);
-  }
-  return null;
-}
 
 function contextWithOptions(context, options) {
   const scoped = Object.create(context);
@@ -44,11 +35,7 @@ function exactFunctionLineRule(functions) {
         const visitor = namedRules.get(functionName(node)) ?? defaultRule;
         visitor[visitorName]?.(node);
       };
-      return {
-        FunctionDeclaration: (node) => visit("FunctionDeclaration", node),
-        FunctionExpression: (node) => visit("FunctionExpression", node),
-        ArrowFunctionExpression: (node) => visit("ArrowFunctionExpression", node),
-      };
+      return functionVisitor((node) => visit(node.type, node));
     },
   };
 }

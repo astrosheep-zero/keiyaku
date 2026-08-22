@@ -1,8 +1,10 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ESLint } from "eslint";
+import { ESLint, Linter } from "eslint";
+import parser from "@typescript-eslint/parser";
 import { FILE_LINE_EXEMPTIONS, FILE_LINES, MARKDOWN_CHARACTERS } from "./maintainability/config.js";
+import { effectiveFileLineCount, effectiveFunctionLineCount, functionName, functionVisitor } from "./maintainability/functions.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MARKDOWN_EXCLUDED_DIRECTORIES = new Set([
@@ -25,7 +27,9 @@ function exemptionError(exemption, index, seen, rootDirectory) {
   if (!file.startsWith("src/") && !file.startsWith("scripts/")) return `${label} must target src/ or scripts/`;
   if (seen.has(file)) return `${label} duplicates ${file}`;
   seen.add(file);
-  if (!existsSync(path.join(rootDirectory, file))) return `${label} targets missing file ${file}`;
+  const target = path.join(rootDirectory, file);
+  if (!existsSync(target)) return `${label} targets missing file ${file}`;
+  if (!statSync(target).isFile()) return `${label} targets non-file path ${file}`;
   if (typeof reason !== "string" || reason.trim().length === 0) return `${label} needs a reason`;
   if (maxEffectiveLines !== undefined && (!Number.isSafeInteger(maxEffectiveLines) || maxEffectiveLines <= FILE_LINES.error)) {
     return `${label} needs a useful maxEffectiveLines cap above ${FILE_LINES.error}`;
@@ -52,11 +56,69 @@ function exemptionError(exemption, index, seen, rootDirectory) {
   return null;
 }
 
+const staleMeasurementBaseConfig = Object.freeze({
+  files: ["**/*.js", "**/*.ts"],
+  languageOptions: {
+    parser,
+    parserOptions: { ecmaVersion: "latest", sourceType: "module" },
+  },
+  plugins: {
+    maintainability: { rules: {} },
+  },
+  rules: {},
+});
+
+function staleExemptionErrors(exemptions, rootDirectory) {
+  const linter = new Linter();
+  return exemptions.flatMap((exemption, index) => {
+    const source = readFileSync(path.join(rootDirectory, exemption.file), "utf8");
+    let fileLines = null;
+    const functionMeasurements = [];
+    const measurementRule = {
+      meta: { schema: [] },
+      create(context) {
+        return {
+          Program: () => { fileLines = effectiveFileLineCount(context.sourceCode); },
+          ...functionVisitor((node) => {
+            const name = functionName(node);
+            if (name !== null) functionMeasurements.push({ name, lines: effectiveFunctionLineCount(node, context.sourceCode) });
+          }),
+        };
+      },
+    };
+    const config = {
+      ...staleMeasurementBaseConfig,
+      plugins: { maintainability: { rules: { "measure-exemptions": measurementRule } } },
+      rules: { "maintainability/measure-exemptions": "warn" },
+    };
+    const messages = linter.verify(source, [config], { filename: exemption.file });
+    const parseError = messages.find(({ ruleId }) => ruleId === null);
+    if (parseError) return [`maintainability exemption ${index + 1} cannot measure ${exemption.file}: ${parseError.message}`];
+
+    const errors = [];
+    if (exemption.maxEffectiveLines !== undefined) {
+      if (fileLines <= FILE_LINES.warning) {
+        errors.push(`maintainability exemption ${index + 1} file ${exemption.file} is stale at ${fileLines} effective lines; it must exceed ${FILE_LINES.warning}`);
+      }
+    }
+    for (const functionExemption of exemption.functions ?? []) {
+      const measurement = functionMeasurements.find(({ name }) => name === functionExemption.name);
+      if (measurement === undefined) {
+        errors.push(`maintainability exemption ${index + 1} function ${functionExemption.name} was not found in ${exemption.file}`);
+      } else if (measurement.lines <= 80) {
+        errors.push(`maintainability exemption ${index + 1} function ${functionExemption.name} in ${exemption.file} is stale at ${measurement.lines} effective lines; it must exceed 80`);
+      }
+    }
+    return errors;
+  });
+}
+
 export function validateExemptions(exemptions, rootDirectory = root) {
   const seen = new Set();
-  return exemptions
+  const errors = exemptions
     .map((exemption, index) => exemptionError(exemption, index, seen, rootDirectory))
     .filter((error) => error !== null);
+  return errors.length > 0 ? errors : staleExemptionErrors(exemptions, rootDirectory);
 }
 
 function effectiveLineCount(message) {

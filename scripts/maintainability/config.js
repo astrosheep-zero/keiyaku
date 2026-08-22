@@ -23,7 +23,6 @@ export const FILE_LINE_EXEMPTIONS = Object.freeze([
   owner("src/git/target-placement.ts", "Target placement owns appointment and physical placement decisions across the existing delivery lifecycle.", 532),
   owner("src/kanshi/read.ts", "Kanshi read owns composite observation and its section associations as one public read lifecycle.", 501, [functionOwner("observeKanshi", "Composite observation establishes one read epoch before projecting every Kanshi section.", 83)]),
   owner("src/library/fleet.ts", "The package-root fleet handle owns Akuma fleet operations and their public result adaptation as one fleet boundary.", 501),
-  owner("src/protocol/deliver.ts", "Delivery preparation owns the admission-to-placement protocol boundary and its shared facts.", 501, [functionOwner("prepareDelivery", "Delivery preparation keeps the one admission and placement decision together.", 84)]),
   owner("src/task/operations.ts", "Task operations own the task verb vocabulary and result decisions across CLI, library, and settlement readers.", 501),
   owner("src/workspace-place.ts", "Workspace placement owns appointment, release, and terminal cleanup around one managed-place lifecycle.", 501),
   owner("src/akuma/providers/claude/index.ts", "The Claude adapter owns native query observation and drive custody for one provider lifecycle.", undefined, [
@@ -33,6 +32,5 @@ export const FILE_LINE_EXEMPTIONS = Object.freeze([
   owner("src/akuma/providers/codex-app-server/index.ts", "The Codex app-server adapter owns native session start and custody for one provider lifecycle.", undefined, [functionOwner("startCodex", "Codex startup owns initialization and session admission across one native process boundary.", 85)]),
   owner("src/akuma/providers/opencode-sdk/index.ts", "The OpenCode adapter owns native session drive, observation, and disposal for one provider lifecycle.", undefined, [functionOwner("drive", "OpenCode drive keeps SDK observation and disposal in the one native session owner.", 98)]),
   owner("src/akuma/providers/pi/index.ts", "The Pi adapter owns native session creation, event drive, and disposal for one provider lifecycle.", undefined, [functionOwner("drivePi", "Pi drive keeps session creation, event forwarding, and forced disposal under one adapter owner.", 98)]),
-  owner("src/cli/render/refusal.ts", "Refusal rendering owns the complete public refusal-fact projection and its shared identity and detail rules.", undefined, [functionOwner("renderRefusalFacts", "Refusal facts are rendered through one complete result-shape owner.", 98)]),
   owner("src/git/read-observation.ts", "Git read observation owns batch object decoding and the shared read channel consumed by every Git reader.", undefined, [functionOwner("batchObjectReader", "Batch decoding keeps one repository observation channel and its cursor lifecycle together.", 88)]),
 ]);

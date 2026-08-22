@@ -14,8 +14,8 @@ import {
 
 test("maintainability max-lines exemptions require exact live paths", () => {
   assert.deepEqual(validateExemptions([{
-    file: "scripts/check-maintainability.js",
-    reason: "The maintainability runner is one diagnostics owner.",
+    file: "src/akuma/provider.ts",
+    reason: "The provider adapter is one diagnostics owner.",
     maxEffectiveLines: 501,
   }]), []);
 
@@ -27,10 +27,24 @@ test("maintainability max-lines exemptions require exact live paths", () => {
   assert.match(invalid[1] ?? "", /targets missing file/);
 });
 
+test("maintainability exemptions reject existing directories", (context) => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-maintainability-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, "src", "directory"), { recursive: true });
+
+  const errors = validateExemptions([{
+    file: "src/directory",
+    reason: "Fixture exemption.",
+    maxEffectiveLines: 501,
+  }], root);
+
+  assert.match(errors[0] ?? "", /targets non-file path src\/directory/);
+});
+
 test("maintainability max-lines exemptions require useful effective-line caps", () => {
   const exemption = {
-    file: "scripts/check-maintainability.js",
-    reason: "The maintainability runner is one diagnostics owner.",
+    file: "src/akuma/providers/pi/index.ts",
+    reason: "The provider adapter is one diagnostics owner.",
   };
   const invalid = validateExemptions([
     exemption,
@@ -49,10 +63,9 @@ test("maintainability max-lines exemptions require useful effective-line caps", 
 
 test("maintainability function exemptions require named owners and useful caps", () => {
   assert.deepEqual(validateExemptions([{
-    file: "scripts/check-maintainability.js",
-    reason: "The maintainability runner is one diagnostics owner.",
-    maxEffectiveLines: 501,
-    functions: [{ name: "run", reason: "The runner keeps one diagnostics lifecycle.", maxEffectiveLines: 81 }],
+    file: "src/akuma/providers/pi/index.ts",
+    reason: "The provider adapter is one diagnostics owner.",
+    functions: [{ name: "drivePi", reason: "The provider keeps one session lifecycle.", maxEffectiveLines: 99 }],
   }]), []);
   const invalid = validateExemptions([{
     file: "scripts/check-architecture.ts",
@@ -61,6 +74,70 @@ test("maintainability function exemptions require named owners and useful caps",
     functions: [{ name: "", reason: "", maxEffectiveLines: 80 }],
   }]);
   assert.match(invalid[0] ?? "", /function 1 needs a name/);
+});
+
+test("maintainability file exemptions reject measured stale effective-line counts", (context) => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-maintainability-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, "src"));
+  writeFileSync(join(root, "src", "stale.ts"), "const value = 1;\n// ignored\n");
+
+  const errors = validateExemptions([{
+    file: "src/stale.ts",
+    reason: "Fixture exemption.",
+    maxEffectiveLines: 501,
+  }], root);
+
+  assert.match(errors[0] ?? "", /file src\/stale\.ts is stale at 1 effective lines/);
+});
+
+test("maintainability named-function exemptions reject measured stale effective-line counts", (context) => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-maintainability-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, "src"));
+  writeFileSync(join(root, "src", "stale.ts"), "function staleOwner() {\n  return 1;\n}\n");
+
+  const errors = validateExemptions([{
+    file: "src/stale.ts",
+    reason: "Fixture exemption.",
+    functions: [{ name: "staleOwner", reason: "Fixture function exemption.", maxEffectiveLines: 81 }],
+  }], root);
+
+  assert.match(errors[0] ?? "", /function staleOwner in src\/stale\.ts is stale at 3 effective lines/);
+});
+
+test("maintainability named arrow-function exemptions use AST names", (context) => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-maintainability-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, "src"));
+  writeFileSync(join(root, "src", "arrow.ts"), "const arrowOwner = () => {\n  return 1;\n};\n");
+
+  const errors = validateExemptions([{
+    file: "src/arrow.ts",
+    reason: "Fixture exemption.",
+    functions: [{ name: "arrowOwner", reason: "Fixture function exemption.", maxEffectiveLines: 81 }],
+  }], root);
+
+  assert.match(errors[0] ?? "", /function arrowOwner in src\/arrow\.ts is stale at 3 effective lines/);
+});
+
+test("maintainability exemptions remain valid above their stale boundaries", (context) => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-maintainability-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, "src"));
+  writeFileSync(join(root, "src", "retained.ts"), Array.from({ length: 401 }, (_, index) => `const value${index} = ${index};`).join("\n"));
+  writeFileSync(join(root, "src", "retained-function.ts"), `function retainedOwner() {\n${Array.from({ length: 79 }, (_, index) => `  const value${index} = ${index};`).join("\n")}\n}`);
+
+  assert.deepEqual(validateExemptions([{
+    file: "src/retained.ts",
+    reason: "Fixture exemption.",
+    maxEffectiveLines: 501,
+  }], root), []);
+  assert.deepEqual(validateExemptions([{
+    file: "src/retained-function.ts",
+    reason: "Fixture exemption.",
+    functions: [{ name: "retainedOwner", reason: "Fixture function exemption.", maxEffectiveLines: 81 }],
+  }], root), []);
 });
 
 test("maintainability function exemptions apply only to the named function", async () => {
