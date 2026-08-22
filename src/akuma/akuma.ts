@@ -3,7 +3,7 @@ import { readdir, realpath, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
   CONTROL_RESPONSE_MS,
-  recoverPendingTells,
+  handoffPendingTells,
   spawnAkumaBody,
   type TellResult,
   type TellWakeRuntime,
@@ -214,7 +214,7 @@ function diagnostic(error: unknown): string {
 
 export async function killAkumaWithRecovery(
   paths: AkumaPaths,
-  recover: (paths: AkumaPaths) => Promise<void> = recoverPendingTells,
+  recover: (paths: AkumaPaths) => Promise<void> = handoffPendingTells,
 ): Promise<KillEvidence> {
   try {
     const request = await requestStop(paths, new Date().toISOString());
@@ -243,7 +243,7 @@ export async function killAkumaWithRecovery(
       leash.release();
     }
   } finally {
-    await recover(paths).catch(() => undefined);
+    void recover(paths).catch(() => undefined);
   }
 }
 

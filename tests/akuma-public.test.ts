@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { Akuma, AkumaNotBornError, defaultWaitComplete } from "../src/akuma/akuma.js";
+import { Akuma, AkumaNotBornError, defaultWaitComplete, killAkumaWithRecovery } from "../src/akuma/akuma.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { ordinarySnapshotBudget, projectTurns, selectHistory, selectSnapshot, type ActivitySnapshot, type TurnLedger } from "../src/akuma/projection.js";
 import { AkumaArchetypeError, listArchetypeDefinitions, loadArchetype } from "../src/akuma/archetype.js";
@@ -1112,6 +1112,73 @@ test("tell after an already stopped Body wakes the same Akuma through its retain
     assert.equal((await handle.status()).life, "asleep");
     assert.equal((await handle.status()).timeline.kind === "idle"
       && (await handle.status()).timeline.outcome?.outcome.kind === "answered", true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("kill returns before its successor recovery settles", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-kill-recovery-fire-and-forget-"));
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1d1e0010" });
+    await initializeHeart(allocated.paths);
+    const holder = (await HeldAkumaLeash.try(allocated.paths))!;
+    await holder.birth(allocated.paths, {
+      id: allocated.id,
+      archetype: "claude",
+      provider: CLAUDE_EXECUTION,
+      options: {},
+      origin: { kind: "direct" },
+      cwd: root,
+      createdAt: "2026-08-10T00:00:00.000Z",
+    });
+    const body = await holder.recordBody(allocated.paths, { leashTakenAt: "2026-08-10T00:00:00.000Z" });
+    await breakBody(allocated.paths, { sequence: body.sequence, end: "put-down", at: "2026-08-10T00:00:01.000Z" });
+    await recordTell(allocated.paths, {
+      id: "kill-recovery-pending",
+      body: "continue",
+      recordedAt: "2026-08-10T00:00:02.000Z",
+    });
+    holder.release();
+
+    let recoveryReleased!: () => void;
+    let recoverySettled = false;
+    const recovery = new Promise<void>((resolve) => {
+      recoveryReleased = () => { recoverySettled = true; resolve(); };
+    });
+    assert.equal(await killAkumaWithRecovery(allocated.paths, async () => await recovery), "already-stopped");
+    assert.equal(recoverySettled, false);
+    recoveryReleased();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("failed kill recovery leaves its pending Tell unchanged", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-kill-recovery-failure-"));
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1d1e0011" });
+    await initializeHeart(allocated.paths);
+    const holder = (await HeldAkumaLeash.try(allocated.paths))!;
+    await holder.birth(allocated.paths, {
+      id: allocated.id,
+      archetype: "claude",
+      provider: CLAUDE_EXECUTION,
+      options: {},
+      origin: { kind: "direct" },
+      cwd: root,
+      createdAt: "2026-08-10T00:00:00.000Z",
+    });
+    const body = await holder.recordBody(allocated.paths, { leashTakenAt: "2026-08-10T00:00:00.000Z" });
+    await breakBody(allocated.paths, { sequence: body.sequence, end: "put-down", at: "2026-08-10T00:00:01.000Z" });
+    await recordTell(allocated.paths, {
+      id: "kill-recovery-failure",
+      body: "continue",
+      recordedAt: "2026-08-10T00:00:02.000Z",
+    });
+    holder.release();
+    assert.equal(await killAkumaWithRecovery(allocated.paths, async () => { throw new Error("spawn denied"); }), "already-stopped");
+    assert.deepEqual((await readHeart(allocated.paths)).pending.map((tell) => tell.id), ["kill-recovery-failure"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

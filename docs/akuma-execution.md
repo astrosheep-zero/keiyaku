@@ -37,8 +37,10 @@ provider events become Heart facts, and Body Requests become in-process calls.
 **Wake is level-triggered.** The wake predicate is `pending Tells exist && no
 live Body holds the leash`. Tell, interrupt, kill, and every existing
 Heart-custody entry re-evaluate it; after releasing its leash, a Body performs
-one final re-evaluation and wakes the pending debt when the predicate holds.
-No daemon heals it without a later interaction.
+one final re-evaluation and, when the predicate holds, initiates one detached
+successor and releases its handle. Successful launch ends that recovery without
+observing Heart delivery, child admission, or child exit; launch failure leaves
+the Tell pending. No daemon heals it without a later interaction.
 
 A waker establishes its cancellable Heart observer before unconditionally
 spawning one child. It never probes the leash or joins a leash observation to a

@@ -70,6 +70,7 @@ export type TellWakeRuntime = Readonly<{
 type BodyRuntime = Readonly<{
   now(): string;
   spawnChild?(launch: RequestChildLaunch): Promise<void>;
+  spawnBody?(launch: BodyLaunch): Promise<OwnedProcess>;
   upstream?: UpstreamExecutionPort;
 }>;
 
@@ -147,18 +148,17 @@ async function persistTurn(
 }
 
 function defaultRuntime(): BodyRuntime {
-  return {
-    now: () => new Date().toISOString(),
-    spawnChild: handoffAkumaBody,
-  };
+  return { now: () => new Date().toISOString(), spawnChild: handoffAkumaBody, spawnBody: spawnAkumaBody };
 }
 
-async function bodyProcessInput(launch: BodyLaunch) {
+export async function bodyProcessInput(launch: BodyLaunch, bodyModuleUrl = import.meta.url) {
   const encoded = Buffer.from(JSON.stringify(launch), "utf8").toString("base64url");
   const actorId = launch.seed?.id ?? (await readHeart(launch.paths)).soul?.id;
   if (actorId === undefined) throw new Error("Akuma wake has no born soul");
+  const source = bodyModuleUrl.endsWith(".ts");
+  const entry = fileURLToPath(new URL(source ? "../akuma-body.ts" : "../akuma-body.js", bodyModuleUrl));
   return {
-    argv: [process.execPath, ...process.execArgv, fileURLToPath(new URL("../akuma-body.js", import.meta.url)), encoded],
+    argv: source ? [process.execPath, "--import", "tsx", entry, encoded] : [process.execPath, entry, encoded],
     cwd: await launchCwd(launch),
     env: { ...process.env, KEIYAKU_ACTOR_ID: actorId },
     log: launch.paths.log,
@@ -257,6 +257,13 @@ async function runBodyTurns(input: BodyExecution): Promise<void> {
   }
 }
 
+export async function handoffPendingTells(paths: AkumaPaths, spawn: (launch: BodyLaunch) => Promise<OwnedProcess> = spawnAkumaBody): Promise<void> {
+  try {
+    if ((await readHeart(paths)).pending.length === 0) return;
+    (await spawn({ paths, refuseIfHeld: true })).release();
+  } catch { /* a later Heart interaction retries the unchanged pending Tell */ }
+}
+
 export async function driveAkumaBody(
   launch: BodyLaunch,
   adapter?: ProviderAdapter,
@@ -298,7 +305,7 @@ export async function driveAkumaBody(
     throw error;
   } finally {
     leash.release();
-    if (bodyStarted) await recoverPendingTells(launch.paths);
+    if (bodyStarted) await handoffPendingTells(launch.paths, runtime.spawnBody ?? spawnAkumaBody);
   }
 }
 

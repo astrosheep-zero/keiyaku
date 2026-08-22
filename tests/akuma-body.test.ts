@@ -5,7 +5,8 @@ import { join } from "node:path";
 import test from "node:test";
 import type { Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { CONTROL_RESPONSE_MS } from "../src/akuma/body.js";
-import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
+import { bodyProcessInput, driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
+import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import { HeldAkumaLeash, activitySlice, admitRequest, initializeHeart, pauseRequested, probeLeash, readHeart, readRequest, readSoul, recordSession, recordTell, requestPause, requestStop, reserveRequest, stopRequested, type AkuId } from "../src/akuma/heart/index.js";
 import type { ProviderOptions } from "../src/akuma/provider-recipe.js";
 import { allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
@@ -310,6 +311,8 @@ test("a Session without live tell hands off while narration remains open", async
         };
       },
     };
+    let automaticLaunches = 0;
+    let released = 0;
     const body = driveAkumaBody({
       paths: allocated.paths,
       seed: {
@@ -321,7 +324,19 @@ test("a Session without live tell hands off while narration remains open", async
         cwd: root,
       },
       initialBody: "work",
-    }, incumbent, { now: () => "2026-08-08T00:00:00.000Z" });
+    }, incumbent, {
+      now: () => "2026-08-08T00:00:00.000Z",
+      async spawnBody(launch) {
+        automaticLaunches += 1;
+        assert.deepEqual(launch, { paths: allocated.paths, refuseIfHeld: true });
+        return {
+          pid: 1,
+          exited: new Promise<never>(() => undefined),
+          async terminate() {},
+          release() { released += 1; },
+        } satisfies OwnedProcess;
+      },
+    });
     while ((await readHeart(allocated.paths)).latestBody === null) {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
@@ -340,6 +355,8 @@ test("a Session without live tell hands off while narration remains open", async
     assert.equal((await readHeart(allocated.paths)).latestBody?.end, "put-down");
     assert.deepEqual(await outcomes(allocated.paths), []);
     assert.deepEqual((await readHeart(allocated.paths)).pending.map((tell) => tell.id), ["tell-handoff"]);
+    assert.equal(automaticLaunches, 1);
+    assert.equal(released, 1);
 
     const launches: Array<readonly Readonly<{ id: string; text: string }>[]> = [];
     const successorStart = async (input: Parameters<ProviderAdapter["start"]>[0]) => {
@@ -364,6 +381,108 @@ test("a Session without live tell hands off while narration remains open", async
     assert.deepEqual(launches, [[{ id: "tell-handoff", text: "continue promptly" }]]);
     assert.deepEqual((await readHeart(allocated.paths)).pending, []);
     assert.equal((await outcomes(allocated.paths)).length, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("detached Body argv selects source or build runtime without coordinator execArgv", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-body-argv-"));
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1a2b3c44" });
+    await initializeHeart(allocated.paths);
+    const inherited = [...process.execArgv];
+    process.execArgv.splice(0, process.execArgv.length, "--keiyaku-test-parent-flag");
+    try {
+      const input = await bodyProcessInput({
+        paths: allocated.paths,
+        seed: {
+          id: allocated.id,
+          archetype: "claude",
+          provider: { name: "claude", kind: "claude-agent-sdk" },
+          options: {},
+          origin: { kind: "direct" },
+          cwd: root,
+        },
+      });
+      assert.deepEqual(input.argv.slice(0, 3), [process.execPath, "--import", "tsx"]);
+      assert.match(input.argv[3]!, /src[\\/]akuma-body\.ts$/u);
+      assert.equal(input.argv.includes("--keiyaku-test-parent-flag"), false);
+      const built = await bodyProcessInput(
+        {
+          paths: allocated.paths,
+          seed: {
+            id: allocated.id,
+            archetype: "claude",
+            provider: { name: "claude", kind: "claude-agent-sdk" },
+            options: {},
+            origin: { kind: "direct" },
+            cwd: root,
+          },
+        },
+        new URL("../build/src/akuma/body.js", import.meta.url).href,
+      );
+      assert.equal(built.argv[0], process.execPath);
+      assert.match(built.argv[1]!, /build[\\/]src[\\/]akuma-body\.js$/u);
+      assert.equal(built.argv.length, 3);
+      assert.equal(built.argv.includes("--keiyaku-test-parent-flag"), false);
+    } finally {
+      process.execArgv.splice(0, process.execArgv.length, ...inherited);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a failed release recovery spawn leaves its Tell pending", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-release-spawn-failure-"));
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "acp", draw: () => "1a2b3c45" });
+    await initializeHeart(allocated.paths);
+    let spawnAttempts = 0;
+    const body = driveAkumaBody({
+      paths: allocated.paths,
+      seed: {
+        id: allocated.id,
+        archetype: "acp",
+        provider: { name: "acp", kind: "acp" },
+        options: {},
+        origin: { kind: "direct" },
+        cwd: root,
+      },
+      initialBody: "work",
+    }, {
+      admitOptions(options) { return { kind: "admitted", options }; },
+      async start() {
+        return {
+          admission: { fence: "release-spawn-failure" },
+          events: { async *[Symbol.asyncIterator]() { await new Promise<void>(() => undefined); } },
+          completion: new Promise<TurnResult>(() => undefined),
+          async abort() {},
+        };
+      },
+    }, {
+      now: () => "2026-08-08T00:00:00.000Z",
+      async spawnBody() {
+        spawnAttempts += 1;
+        throw new Error("spawn denied");
+      },
+    });
+    while ((await readHeart(allocated.paths)).latestBody === null) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    await recordTell(allocated.paths, {
+      id: "release-spawn-failure",
+      body: "continue",
+      recordedAt: "2026-08-08T00:00:01.000Z",
+    });
+    await Promise.race([
+      body,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Body did not release after spawn failure")), 1_000)),
+    ]);
+    assert.equal(spawnAttempts, 1);
+    assert.equal(await probeLeash(allocated.paths), "free");
+    assert.deepEqual((await readHeart(allocated.paths)).pending.map((tell) => tell.id), ["release-spawn-failure"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
