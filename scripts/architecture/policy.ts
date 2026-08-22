@@ -58,7 +58,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       owners: [
         { source: "world.ts", symbols: ["mkdir", "realpath", "stat"] },
         { source: "settings.ts", symbols: ["readFile"] },
-        ...ownersFor(["realpath"], "cli/coordinates.ts", "git/scratch.ts"),
+        ...ownersFor(["realpath", "access"], "cli/coordinates.ts", "git/scratch.ts"),
         { source: "akuma/archetype.ts", symbols: ["readFile", "readdir"] },
         { source: "akuma/akuma.ts", symbols: ["readdir", "realpath", "stat"] },
         { source: "akuma/nuke.ts", symbols: ["lstat", "readdir", "rm", "rmdir"] },
@@ -78,6 +78,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         { source: "git/hooks.ts", symbols: ["lstat", "mkdir", "readFile", "unlink"] },
         { source: "git/nuke.ts", symbols: ["access", "lstat", "realpath", "rm"] },
         { source: "git/reconcile.ts", symbols: ["access", "mkdir", "readdir", "rmdir", "unlink"] },
+        { source: "git/terminal-reconcile.ts", symbols: ["access"] },
         { source: "git/tender.ts", symbols: ["access"] },
         { source: "git/workspace.ts", symbols: ["access", "appendFile", "mkdtemp", "readFile", "rm"] },
         { source: "settlement/fence.ts", symbols: ["readdir", "rmdir", "unlink"] },

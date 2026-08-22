@@ -11,7 +11,6 @@ const owner = (file, reason, maxEffectiveLines, functions = []) => ({
 const functionOwner = (name, reason, maxEffectiveLines) => ({ name, reason, maxEffectiveLines });
 
 export const FILE_LINE_EXEMPTIONS = Object.freeze([
-  owner("src/git/reconcile.ts", "Git reconciliation is one serialized effect owner; the terminal physical-absence proof belongs with topology, hooks, and custody rather than a packed companion file.", 696),
   owner("src/akuma/body-turn.ts", "One concrete live Turn owner keeps provider custody, receipt and tell pumping, bounded control, and hung retirement coherent.", 600),
   owner("src/akuma/request-serve.ts", "Admission, reservation/spawn, owner dispatch, durable receipt projection, live pump, and predecessor recovery share one parent Heart lease, serial admission boundary, and cancellation fence.", 604),
   owner("src/akuma/akuma.ts", "The low-level Akuma owner keeps birth, handles, lifecycle controls, and fleet reads coherent; splitting those operations would obscure that boundary.", 633),

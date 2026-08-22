@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { realpath } from "node:fs/promises";
+import { access, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import {
@@ -19,7 +19,7 @@ export type MaterializedScratchCandidate = Readonly<{
   dispose: () => Promise<WorktreeLeak | null>;
 }>;
 
-export type CollectableScratchWorktree = Readonly<{
+type CollectableScratchWorktree = Readonly<{
   path: string;
   release(): void;
 }>;
@@ -27,6 +27,12 @@ export type CollectableScratchWorktree = Readonly<{
 export type WorktreeLeak = Readonly<{
   path: string;
   diagnostic: string;
+}>;
+
+type CollectableScratchRemoval = Readonly<{
+  path: string;
+  action: "removed" | "unchanged";
+  retained: boolean;
 }>;
 
 function scratchPath(): string {
@@ -39,9 +45,7 @@ function ownershipLockPath(path: string): string | null {
   return match === null ? null : join(SCRATCH_ROOT, `.${SCRATCH_PREFIX}${match[1]}.owner.sqlite`);
 }
 
-export async function collectableScratchWorktrees(
-  paths: Iterable<string>,
-): Promise<readonly CollectableScratchWorktree[]> {
+async function collectableScratchWorktrees(paths: Iterable<string>): Promise<readonly CollectableScratchWorktree[]> {
   const collectable: CollectableScratchWorktree[] = [];
   for (const path of paths) {
     const lockPath = ownershipLockPath(path);
@@ -50,6 +54,40 @@ export async function collectableScratchWorktrees(
     if (lock !== null) collectable.push({ path, release: () => lock.close() });
   }
   return collectable;
+}
+
+const pathExists = (path: string) =>
+  access(path).then(
+    () => true,
+    () => false,
+  );
+
+/** Remove only abandoned Verification scratch worktrees whose ownership locks are held. */
+export async function removeCollectableScratchWorktrees(
+  repository: GitRepository,
+  paths: Set<string>,
+): Promise<readonly CollectableScratchRemoval[]> {
+  const removals: CollectableScratchRemoval[] = [];
+  for (const scratch of await collectableScratchWorktrees(paths)) {
+    try {
+      if (!(await pathExists(scratch.path))) {
+        await runGit(repository, ["worktree", "remove", scratch.path]);
+        paths.delete(scratch.path);
+        removals.push({ path: scratch.path, action: "removed", retained: false });
+        continue;
+      }
+      try {
+        await runGit(repository, ["worktree", "remove", "--force", scratch.path]);
+        paths.delete(scratch.path);
+        removals.push({ path: scratch.path, action: "removed", retained: false });
+      } catch {
+        removals.push({ path: scratch.path, action: "unchanged", retained: true });
+      }
+    } finally {
+      scratch.release();
+    }
+  }
+  return removals;
 }
 
 /** Materialize a disposable candidate worktree and own only its removal. */
