@@ -2,7 +2,7 @@ import { documentDiff } from "../markdown/diff.js";
 import { applyAmendDocument } from "../body/amend.js";
 import { decodeArcDocument } from "../body/arc.js";
 import { decodeContractDocument } from "../body/decode.js";
-import { renderContractGuidance, type ContractFileEffect, type ContractFileLag } from "../contract-worktree.js";
+import { renderContractGuidance } from "../contract-worktree.js";
 import {
   actorOption,
   contractTerms,
@@ -14,23 +14,15 @@ import {
   optionalSignal,
   requireInput,
   requireMarkdown,
-  taskOption,
 } from "./input.js";
-import {
-  observeChangedRegion,
-  observeRegion,
-  type AmendRegionObservation,
-  type RegionObservation,
-  type RegionOverlap,
-} from "./region.js";
-import { type Gate, type WorktreeHooks, worktreeHooksOption } from "./configuration.js";
+import { observeChangedRegion, type RegionOverlap } from "./region.js";
+import { worktreeHooksOption } from "./configuration.js";
 import {
   contractId,
   type ChangeId,
   type FactKind,
   type ContractId,
   type ContractState,
-  type JournalEntry,
   type SnapshotId,
 } from "../core/facts/types.js";
 export { AuthorityCorruptionError } from "../core/facts/errors.js";
@@ -62,31 +54,53 @@ import { abandonOperation } from "../protocol/abandon.js";
 import { amendOperation } from "../protocol/amend.js";
 import { arcOperation } from "../protocol/arc.js";
 import type { AuditReport } from "../protocol/audit.js";
-import { deliverOperation, type IntegrationConflictMaterialized, type VerificationReuse } from "../protocol/deliver.js";
-import type { ReconcileReport as ProtocolReconcileReport } from "../protocol/reconcile.js";
-import { reviewOperation, type ReviewValue } from "../protocol/review.js";
-import { readDispatchesAt, type Dispatch } from "../dispatch/index.js";
+import type { IntegrationConflictMaterialized, VerificationReuse } from "../protocol/deliver.js";
+import { readDispatchesAt } from "../dispatch/index.js";
 import { mintSnapshotId } from "../git/identity.js";
 import { observeContractsForAdmissionInObservationAt } from "../git/observe.js";
-import { withGitDecodeChannel, withGitReadObservation, type GitDecodeChannel } from "../git/read-observation.js";
-import { type SettlementReport } from "../settlement/settle.js";
+import { withGitDecodeChannel, withGitReadObservation } from "../git/read-observation.js";
 import { releaseTaskHolder, releaseTaskHolderWithFence, taskHolderObservationSelection } from "../settlement/holder.js";
 import type { TaskId } from "../task/identity.js";
-import { Repo, reconcileInput, scopeForRepo, type ReconcileInput } from "./repo.js";
-import {
-  injectedBodyRequests,
-  requestBodyDeliver,
-  requestBodyReview,
-  type UpstreamRequestOutcome,
-} from "../akuma/requests.js";
+import { reconcileInput, scopeForRepo, type ReconcileInput } from "./repo.js";
+import { injectedBodyRequests, requestBodyDeliver, requestBodyReview } from "../akuma/requests.js";
 import { auditContract, type AuditInput } from "./audit.js";
 import { Delivery, deliveryHandle, type DeliveryValue } from "./delivery.js";
-import { continueAcceptedCompletion, type ContinuationReport } from "./continuation.js";
+import { type ContinuationReport } from "./continuation.js";
 import { completionInput, completeHolderMutation, completeMutation, type MutationResult } from "./mutation.js";
 import { completeReconcile } from "./reconcile.js";
-import { admitForkBindWithAppointment, prepareMarkdownBind } from "./bind.js";
+import { bindFromCli as bindFromCliImplementation, bindKeiyaku as bindKeiyakuImplementation } from "./contract-bind.js";
+import type {
+  AbandonInput,
+  AmendInput,
+  AmendResult,
+  ArcInput,
+  BindInput,
+  BindResult,
+  ContractListInput,
+  ContractObservationInput,
+  DeliverInput,
+  ForkBindInput,
+  KeiyakuOfInput,
+  MarkdownBindInput,
+  ReconcileReport,
+  ReviewInput,
+  ContractHistory,
+  ContractHistoryEvent,
+  Fact,
+  Lag,
+  TopologyEffect,
+} from "./contract-types.js";
 import {
-  forwardedMutationFailure,
+  executeLocalDelivery,
+  executeLocalReview,
+  forwardedReceipt,
+  requireForwarded,
+  type AttestationVerdict as OperationAttestationVerdict,
+  type ForwardedDeliveryReceipt,
+  type ForwardedReviewReceipt,
+  type Review as OperationReview,
+} from "./contract-operations.js";
+import {
   KeiyakuRefused,
   KeiyakuRetry,
   requireAccepted,
@@ -95,6 +109,7 @@ import {
 } from "./refusal.js";
 export { KeiyakuRefused } from "./refusal.js";
 export { KeiyakuRetry, type KeiyakuRefusal, type KeiyakuRetryReason };
+export { executeForwardedDeliver, executeForwardedReview } from "./contract-operations.js";
 export { gatesFrom, requireBranchesToBeUpToDateFrom, SettingsError } from "./configuration.js";
 export type {
   Gate,
@@ -105,6 +120,10 @@ export type {
 } from "./configuration.js";
 
 export type {
+  AbandonInput,
+  AmendInput,
+  AmendResult,
+  ArcInput,
   AuditInput,
   AuditReport,
   ChangeId,
@@ -115,284 +134,47 @@ export type {
   ContractGateReport,
   ContractAfterEdge,
   ContractId,
+  ContractHistory,
+  ContractHistoryEvent,
   ContractDependent,
   ContractObservation,
   ContractPhase,
   ContractRow,
   ContractState,
   ContractWorkspaceObservation,
+  BindInput,
+  BindResult,
+  ContractListInput,
+  ContractObservationInput,
+  DeliverInput,
+  ForkBindInput,
+  KeiyakuOfInput,
+  MarkdownBindInput,
+  ReconcileReport,
+  ReviewInput,
   DeliveryPreparationRefusal,
+  Fact,
   FactKind,
   IntegrationConflictMaterialized,
+  Lag,
   MutationResult,
   PlacementStop,
   RegionOverlap,
   SnapshotId,
   TaskId,
+  TopologyEffect,
   VerificationReuse,
   VerificationStop,
 };
 export type { AfterEndpointObservation };
 
-export type Fact = JournalEntry;
-export type ContractHistoryEvent =
-  | Readonly<{ source: "journal"; fact: Fact }>
-  | Readonly<{ source: "dispatch"; dispatch: Dispatch }>;
-export type ContractHistory = Readonly<{
-  id: ContractId;
-  state: SnapshotId;
-  events: readonly ContractHistoryEvent[];
-}>;
 export type ActorId = string;
-export type AttestationVerdict = "satisfied" | "unsatisfied";
-export type Review = ReviewValue & Readonly<{ continuation?: ContinuationReport }>;
+export type AttestationVerdict = OperationAttestationVerdict;
+export type Review = OperationReview;
 
-export type TopologyEffect = ProtocolReconcileReport["effects"][number] | ContractFileEffect;
-export type Lag = ProtocolReconcileReport["lag"][number] | ContractFileLag;
 export { Delivery };
 
-export type BindResult = Readonly<Omit<MutationResult<Keiyaku>, "value"> & { keiyaku: Keiyaku } & RegionObservation>;
-export type AmendResult = Readonly<MutationResult<void> & { documentDiff: string }> & AmendRegionObservation;
-export type ReconcileReport = Readonly<{
-  effects: readonly TopologyEffect[];
-  lag: readonly Lag[];
-  settlement: SettlementReport;
-}>;
 export type { SettlementAction, SettlementLag, SettlementReport } from "../settlement/settle.js";
-
-export type MarkdownBindInput = Readonly<{
-  repo: Repo;
-  markdown: string;
-  task?: TaskId;
-  target?: string;
-  workspace?: "worktree";
-  actor?: ActorId;
-  after?: readonly ContractId[];
-  gates?: readonly Gate[];
-  hooks?: WorktreeHooks;
-}>;
-export type ForkBindInput = Readonly<{
-  repo: Repo;
-  forkOf: ContractId;
-  target?: string;
-  workspace?: "worktree";
-  actor?: ActorId;
-  hooks?: WorktreeHooks;
-}>;
-export type BindInput = MarkdownBindInput | ForkBindInput;
-type ActorOptions = Readonly<{ actor?: ActorId; hooks?: WorktreeHooks }>;
-
-export type AmendInput = ActorOptions &
-  Readonly<{
-    markdown?: string;
-    after?: readonly ContractId[];
-    gates?: readonly Gate[];
-  }>;
-
-export type ArcInput = ActorOptions &
-  Readonly<{
-    markdown: string;
-  }>;
-
-export type ContractListInput = Readonly<{ repo: Repo }>;
-export type ContractObservationInput = Readonly<{ repo: Repo; id: ContractId }>;
-export type KeiyakuOfInput = Readonly<{ repo: Repo; id: ContractId }>;
-export type ReviewInput = ActorOptions & Readonly<{ verdict: AttestationVerdict; summary?: string }>;
-export type AbandonInput = ActorOptions & Readonly<{ note?: string }>;
-export type DeliverInput = ActorOptions &
-  Readonly<{
-    message?: string;
-    requireBranchesToBeUpToDate?: boolean;
-    includeDirty?: boolean;
-    materializeConflict?: boolean;
-    signal?: AbortSignal;
-  }>;
-
-type DeliveryExecutionInput = Readonly<{
-  scope: RepositoryScope;
-  contractId: ContractId;
-  actor?: ReturnType<typeof actorOption>["actor"];
-  message?: string;
-  requireBranchesToBeUpToDate: boolean;
-  includeDirty: boolean;
-  materializeConflict: boolean;
-  signal?: AbortSignal;
-  hooks: WorktreeHooks;
-}>;
-
-type ReviewExecutionInput = Readonly<{
-  scope: RepositoryScope;
-  contractId: ContractId;
-  actor?: ReturnType<typeof actorOption>["actor"];
-  verdict: AttestationVerdict;
-  summary?: string;
-  hooks: WorktreeHooks;
-}>;
-
-type ForwardedMutationReceipt<Value> =
-  | Readonly<{ kind: "accepted"; result: MutationResult<Value> }>
-  | Readonly<{ kind: "refused"; refusal: KeiyakuRefusal }>
-  | Readonly<{ kind: "retry"; reason: KeiyakuRetryReason }>;
-type ForwardedDeliveryReceipt = ForwardedMutationReceipt<DeliveryValue> | IntegrationConflictMaterialized;
-type ForwardedReviewReceipt = ForwardedMutationReceipt<Review>;
-
-function derivedDocument(state: ContractState) {
-  return documentDerivation(decodeContractDocument(state.terms.document.bytes), state.terms.gates, state.id);
-}
-
-function operationContext(scope: RepositoryScope, channel: GitDecodeChannel, contractId: ContractId) {
-  return {
-    scope,
-    channel,
-    contractId,
-    deriveDocument: derivedDocument,
-  };
-}
-
-async function executeLocalDelivery(
-  input: DeliveryExecutionInput,
-): Promise<MutationResult<DeliveryValue> | IntegrationConflictMaterialized> {
-  return withGitDecodeChannel(input.scope, async (channel) => {
-    const operation = operationContext(input.scope, channel, input.contractId);
-    const outcome = await deliverOperation({
-      ...operation,
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
-      ...(input.message === undefined ? {} : { message: input.message }),
-      requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
-      includeDirty: input.includeDirty,
-      materializeConflict: input.materializeConflict,
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-    });
-    if (outcome.kind === "integration-conflict-materialized") return outcome;
-    const accepted = requireAccepted(outcome);
-    const continued = await continueAcceptedCompletion({
-      ...operation,
-      accepted,
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-    });
-    return completeMutation({
-      ...completionInput(input.scope, channel, input.contractId, (delivery: DeliveryValue) => delivery, input.hooks),
-      accepted: continued,
-    });
-  });
-}
-
-async function executeLocalReview(input: ReviewExecutionInput): Promise<MutationResult<Review>> {
-  return withGitDecodeChannel(input.scope, async (channel) => {
-    const operation = operationContext(input.scope, channel, input.contractId);
-    const accepted = requireAccepted(
-      await reviewOperation({
-        ...operation,
-        verdict: input.verdict,
-        ...(input.summary === undefined ? {} : { summary: input.summary }),
-        ...(input.actor === undefined ? {} : { actor: input.actor }),
-      }),
-    );
-    const continued = await continueAcceptedCompletion({
-      ...operation,
-      accepted,
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
-    });
-    return completeMutation({
-      ...completionInput(input.scope, channel, input.contractId, (review: Review) => review, input.hooks),
-      accepted: continued,
-    });
-  });
-}
-
-function forwardedReceipt<Receipt>(outcome: UpstreamRequestOutcome, action: string): Receipt {
-  if (outcome.kind === "failed") {
-    throw new Error(
-      outcome.failure.kind === "failed"
-        ? outcome.failure.diagnostic
-        : `Unexpected Akuma target failure for ${action}: ${outcome.failure.id}`,
-    );
-  }
-  return outcome.result as Receipt;
-}
-
-function requireForwarded(
-  receipt: ForwardedDeliveryReceipt,
-): MutationResult<DeliveryValue> | IntegrationConflictMaterialized;
-function requireForwarded(receipt: ForwardedReviewReceipt): MutationResult<Review>;
-function requireForwarded(
-  receipt: ForwardedDeliveryReceipt | ForwardedReviewReceipt,
-): MutationResult<DeliveryValue> | MutationResult<Review> | IntegrationConflictMaterialized {
-  if (receipt.kind === "refused") throw new KeiyakuRefused(receipt.refusal);
-  if (receipt.kind === "retry") throw new KeiyakuRetry(receipt.reason);
-  return receipt.kind === "accepted" ? receipt.result : receipt;
-}
-
-export async function executeForwardedDeliver(
-  input: Readonly<{
-    repo: Repo;
-    contractId: string;
-    requester: string;
-    message?: string;
-    includeDirty: boolean;
-    materializeConflict: boolean;
-    requireBranchesToBeUpToDate: boolean;
-    hooks: WorktreeHooks;
-    signal?: AbortSignal;
-  }>,
-): Promise<Readonly<{ result: ForwardedDeliveryReceipt; deliveryFactId?: string }>> {
-  const id = contractId(input.contractId);
-  const actor = actorOption(input.requester).actor;
-  const message = optionalNonblank(input.message, "deliver message");
-  try {
-    const result = await executeLocalDelivery({
-      scope: scopeForRepo(input.repo),
-      contractId: id,
-      ...(actor === undefined ? {} : { actor }),
-      ...(message === undefined ? {} : { message }),
-      requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
-      includeDirty: input.includeDirty,
-      materializeConflict: input.materializeConflict,
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-      hooks: input.hooks,
-    });
-    if (!("facts" in result)) return { result };
-    const delivery = result.facts.find((fact) => fact.kind === "deliver");
-    if (delivery === undefined) throw new Error("accepted delivery is missing its journal fact");
-    return { result: { kind: "accepted", result }, deliveryFactId: delivery.entry };
-  } catch (error) {
-    return forwardedMutationFailure(error);
-  }
-}
-
-export async function executeForwardedReview(
-  input: Readonly<{
-    repo: Repo;
-    contractId: string;
-    requester: string;
-    verdict: AttestationVerdict;
-    summary?: string;
-    hooks: WorktreeHooks;
-  }>,
-): Promise<Readonly<{ result: ForwardedReviewReceipt; reviewFactId?: string }>> {
-  const id = contractId(input.contractId);
-  const actor = actorOption(input.requester).actor;
-  if (input.verdict !== "satisfied" && input.verdict !== "unsatisfied") {
-    throw new TypeError("verdict must be satisfied or unsatisfied");
-  }
-  const summary = optionalNonblank(input.summary, "review summary");
-  try {
-    const result = await executeLocalReview({
-      scope: scopeForRepo(input.repo),
-      contractId: id,
-      ...(actor === undefined ? {} : { actor }),
-      verdict: input.verdict,
-      ...(summary === undefined ? {} : { summary }),
-      hooks: input.hooks,
-    });
-    const review = result.facts.find((fact) => fact.kind === "attestation");
-    if (review === undefined) throw new Error("accepted review is missing its journal fact");
-    return { result: { kind: "accepted", result }, reviewFactId: review.entry };
-  } catch (error) {
-    return forwardedMutationFailure(error);
-  }
-}
 
 export class KeiyakuHandle {
   constructor(
@@ -731,100 +513,11 @@ export async function observeKeiyaku(input: ContractObservationInput): Promise<C
   return withGitDecodeChannel(scope, (channel) => contractObservationOperation({ scope, channel, contractId: id }));
 }
 
-function acceptedBindResult(result: MutationResult<Keiyaku>, region: RegionObservation): BindResult {
-  const { facts, head, effects, lags, settlement } = result;
-  return { facts, head, keiyaku: result.value, effects, lags, settlement, ...region };
-}
-
 export async function bindKeiyaku(input: BindInput): Promise<BindResult> {
-  const values = requireInput(input, "Keiyaku.bind input");
-  const hooks = worktreeHooksOption(values.hooks);
-  const forkOf = values.forkOf;
-  if (forkOf !== undefined) {
-    for (const key of Object.keys(values)) {
-      if (!["repo", "forkOf", "target", "workspace", "actor", "hooks"].includes(key)) {
-        throw new TypeError(`fork bind input has unknown field: ${key}`);
-      }
-    }
-    if (typeof forkOf !== "string") throw new TypeError("forkOf must be a ContractId");
-    let sourceId: ContractId;
-    try {
-      sourceId = contractId(forkOf);
-    } catch (error) {
-      throw new TypeError(error instanceof Error ? error.message : "forkOf must be a ContractId");
-    }
-    const sourceScope = scopeForRepo(values.repo);
-    if ((values.workspace ?? "worktree") !== "worktree") throw new TypeError("workspace must be worktree");
-    const target = values.target;
-    if (target !== undefined && typeof target !== "string") throw new TypeError("target must be a string");
-    const actor = actorOption(values.actor);
-    return withGitDecodeChannel(sourceScope, async (channel) => {
-      const fork = await admitForkBindWithAppointment({
-        scope: sourceScope,
-        channel,
-        sourceId,
-        ...(target === undefined ? {} : { target }),
-        ...actor,
-      });
-      const admission = requireAccepted(fork.admission);
-      const id = admission.value.contractId;
-      const toHandle = ({ contractId: contract }: { contractId: ContractId }): Keiyaku =>
-        new KeiyakuHandle(contract, sourceScope);
-      const result = await completeMutation({
-        ...completionInput(sourceScope, channel, id, toHandle, hooks),
-        accepted: admission,
-      });
-      return acceptedBindResult(result, await observeRegion(sourceScope, channel, id, fork.document.region));
-    });
-  }
-  return bindMarkdownFromValues(values, "targetless");
+  return bindKeiyakuImplementation(input, (id, scope) => new KeiyakuHandle(id, scope));
 }
 
 /** Internal CLI composition; not exported from the package root. */
 export async function bindFromCli(input: BindInput): Promise<BindResult> {
-  const values = requireInput(input, "Keiyaku.bind input");
-  return values.forkOf !== undefined ? bindKeiyaku(input) : bindMarkdownFromValues(values, "current-branch");
-}
-
-async function bindMarkdownFromValues(
-  values: Record<string, unknown>,
-  omittedTarget: "targetless" | "current-branch",
-): Promise<BindResult> {
-  const hooks = worktreeHooksOption(values.hooks);
-  const scope = scopeForRepo(values.repo);
-  const task = taskOption(values.task);
-  const document = decodeContractDocument(requireMarkdown(values.markdown));
-  if ((values.workspace ?? "worktree") !== "worktree") throw new TypeError("workspace must be worktree");
-  const target = values.target;
-  if (target !== undefined && typeof target !== "string") throw new TypeError("target must be a string");
-  const actor = actorOption(values.actor);
-  const gates = normalizedGates(values.gates);
-  const after = normalizedList(values.after, "after", contractId);
-  const targetSelection = target !== undefined ? { kind: "explicit" as const, target } : { kind: omittedTarget };
-  return withGitDecodeChannel(scope, async (channel) => {
-    const admission = await prepareMarkdownBind({
-      scope,
-      channel,
-      document,
-      gates,
-      after,
-      workspace: "worktree",
-      targetSelection,
-      ...(task === undefined ? {} : { task }),
-      ...actor,
-    });
-    const accepted = requireAccepted(admission.admission === null ? admission.result : admission.admission.result);
-    const id = accepted.value.contractId;
-    const toHandle = ({ contractId: contract }: { contractId: ContractId }): Keiyaku =>
-      new KeiyakuHandle(contract, scope);
-    const result =
-      admission.admission === null
-        ? await completeMutation({ ...completionInput(scope, channel, id, toHandle, hooks), accepted })
-        : await completeHolderMutation({
-            completion: completionInput(scope, channel, id, toHandle, hooks),
-            admission: admission.admission,
-            requireAccepted,
-          });
-    return acceptedBindResult(result, await observeRegion(scope, channel, id, document.region));
-  });
+  return bindFromCliImplementation(input, (id, scope) => new KeiyakuHandle(id, scope));
 }

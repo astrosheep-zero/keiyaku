@@ -292,6 +292,8 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         "kanshi/**",
         "library/configuration.ts",
         "library/contract.ts",
+        "library/contract-bind.ts",
+        "library/contract-operations.ts",
         "library/input.ts",
         "library/repo.ts",
         "library/akuma-creation.ts",
