@@ -4,12 +4,14 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   try {
     const parsed = parseArgv(argv);
     if ("help" in parsed) {
-      process.stdout.write(`${renderHelp(parsed.help)}\n`);
+      const help = renderHelp(parsed.help);
+      process.stdout.write(help.endsWith("\n") ? help : `${help}\n`);
       return 0;
     }
     return await (await import("./runtime.js")).runCliCommand(parsed);
   } catch (error) {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    const diagnostic = error instanceof Error ? error.message : String(error);
+    process.stderr.write(diagnostic.endsWith("\n") ? diagnostic : `${diagnostic}\n`);
     return error instanceof CliUsageError ? 1 : 3;
   }
 }

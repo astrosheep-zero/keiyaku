@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { main } from "../src/cli/main.js";
 import { CONTRACT_COMMAND_SPECS, type ContractCommand, type ContractCommandSpec } from "../src/cli/commands/contract.js";
@@ -169,6 +172,46 @@ test("amend help resolves at the parser edge for an absent world", () => {
     parseArgv(["-C", "/definitely/absent/keiyaku-world", "amend", "--json", "-", "--help"]),
     { help: { kind: "contract", command: "amend" } },
   );
+});
+
+async function captureMain(argv: readonly string[]): Promise<Readonly<{ exit: number; stdout: string; stderr: string }>> {
+  let stdout = "";
+  let stderr = "";
+  const writeStdout = process.stdout.write;
+  const writeStderr = process.stderr.write;
+  const forwardStdout = writeStdout.bind(process.stdout);
+  process.stdout.write = ((chunk: string | Uint8Array) => {
+    if (typeof chunk !== "string") return forwardStdout(chunk);
+    stdout += chunk;
+    return true;
+  }) as typeof process.stdout.write;
+  process.stderr.write = ((chunk: string | Uint8Array) => { stderr += String(chunk); return true; }) as typeof process.stderr.write;
+  try {
+    return { exit: await main(argv), stdout, stderr };
+  } finally {
+    process.stdout.write = writeStdout;
+    process.stderr.write = writeStderr;
+  }
+}
+
+test("ordinary CLI help, usage, and JSON end with one LF", async () => {
+  const help = await captureMain(["--help"]);
+  assert.equal(help.exit, 0);
+  assert.equal(renderRootHelp().endsWith("\n"), false);
+  assert.equal(help.stdout, `${renderRootHelp()}\n`);
+  assert.equal(help.stderr, "");
+
+  const usage = await captureMain([]);
+  assert.equal(usage.exit, 1);
+  assert.equal(usage.stdout, "");
+  assert.equal(usage.stderr.endsWith("\n"), true);
+  assert.equal(usage.stderr.endsWith("\n\n"), false);
+  assert.match(usage.stderr, /^unknown command: \nusage: keiyaku /u);
+
+  const json = await captureMain(["-C", mkdtempSync(join(tmpdir(), "keiyaku-cli-lf-")), "task", "ls", "--json"]);
+  assert.equal(json.exit, 1);
+  assert.equal(json.stdout, '{"kind":"absent"}\n');
+  assert.equal(json.stderr, "");
 });
 
 test("bare ls is help-only even when its cwd cannot be read", async () => {

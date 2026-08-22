@@ -806,6 +806,11 @@ test("packaged CLI call writes representative success and failure exits", async 
     assert.equal(answered.code, 0);
     assert.equal(answered.stdout, "finished");
     assert.equal(answered.stderr, "");
+    const answeredJson = await runPackagedCli(["-C", root, "call", "worker", "--json", "answer"], { cwd: root, env });
+    assert.equal(answeredJson.code, 0);
+    assert.equal(answeredJson.stdout.endsWith("\n"), true);
+    assert.equal(answeredJson.stdout.endsWith("\n\n"), false);
+    assert.equal(JSON.parse(answeredJson.stdout).observation.kind, "observed");
 
     const failed = await runPackagedCli(["-C", root, "call", "worker", "--wait", "2s", "-"], { cwd: root, env, stdin: "fail" });
     assert.equal(failed.code, 2);
@@ -876,6 +881,11 @@ test("packaged CLI wait and history --last write exact multiline and empty answe
     assert.equal(last.code, 0);
     assert.equal(last.stdout, "line one\nline two\n");
     assert.equal(last.stderr, "");
+    const lastJson = await runPackagedCli(["-C", root, "history", multiline.id, "--last", "--json"], { cwd: root, env: environment });
+    assert.equal(lastJson.code, 0);
+    assert.equal(lastJson.stdout.endsWith("\n"), true);
+    assert.equal(lastJson.stdout.endsWith("\n\n"), false);
+    assert.equal(JSON.parse(lastJson.stdout).answer, "line one\nline two\n");
     const empty = await answered("bbb22222", "");
     const emptyOut = await runPackagedCli(["-C", root, "wait", empty.id, "--timeout", "0ms"], { cwd: root, env: environment });
     assert.equal(emptyOut.code, 0);
@@ -884,6 +894,15 @@ test("packaged CLI wait and history --last write exact multiline and empty answe
     assert.equal(emptyLast.code, 0);
     assert.equal(emptyLast.stdout, "");
     assert.equal(emptyLast.stderr, "");
+    const bare = await answered("ccc33333", "no newline");
+    const bareWait = await runPackagedCli(["-C", root, "wait", bare.id, "--timeout", "0ms"], { cwd: root, env: environment });
+    assert.equal(bareWait.code, 0);
+    assert.equal(bareWait.stdout, "no newline");
+    assert.equal(bareWait.stderr, "");
+    const bareLast = await runPackagedCli(["-C", root, "history", bare.id, "--last"], { cwd: root, env: environment });
+    assert.equal(bareLast.code, 0);
+    assert.equal(bareLast.stdout, "no newline");
+    assert.equal(bareLast.stderr, "");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

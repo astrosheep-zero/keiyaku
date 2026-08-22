@@ -10,6 +10,7 @@ import { CliUsageError, parseArgv } from "../src/cli/parse.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { parseTaskQueryExpression } from "../src/cli/commands/task-query.js";
 import { renderTaskIncompleteDiagnostic, renderTaskText, taskExitCode } from "../src/cli/render/task.js";
+import { writeTask } from "../src/cli/runtime.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
 import type { TaskInvocationResult } from "../src/cli/commands/task-invoke.js";
 import { makeGitRepository } from "./support/git.js";
@@ -460,7 +461,10 @@ test("Task world reads retain failed observations", async () => {
     assert.doesNotMatch(renderTaskText(command, result), /\{/u);
     assert.equal(taskExitCode(result), 3);
     const text = await runMain(["-C", root, "task", action]);
+    const rendered = renderTaskText(command, result);
     assert.equal(text.exit, 3);
+    assert.equal(rendered.endsWith("\n"), true);
+    assert.equal(text.stdout, rendered);
     assert.match(text.stdout, /^task world failed\ndiagnostic\n\n/u);
     assert.equal(text.stderr, "");
     const json = await runMain(["-C", root, "task", action, "--json"]);
@@ -574,6 +578,32 @@ test("incomplete compose rendering keeps draft on stdout and diagnostics separat
     "",
   ].join("\n"));
   assert.equal(taskExitCode(result), 1);
+});
+
+test("incomplete compose keeps an unterminated draft byte-exact at the CLI boundary", async () => {
+  const command = parseArgv(["task", "compose", "-"]).command;
+  if (command.command !== "task") throw new Error("not a task command");
+  const result = {
+    kind: "incomplete" as const,
+    documentChanges: [],
+    stopped: { kind: "retry" as const, reason: "busy" as const },
+    draft: "ns=\n+ Remaining",
+  };
+  let stdout = "";
+  let stderr = "";
+  const writeStdout = process.stdout.write;
+  const writeStderr = process.stderr.write;
+  process.stdout.write = ((chunk: string | Uint8Array) => { stdout += String(chunk); return true; }) as typeof process.stdout.write;
+  process.stderr.write = ((chunk: string | Uint8Array) => { stderr += String(chunk); return true; }) as typeof process.stderr.write;
+  try {
+    assert.equal(await writeTask(command, result), 1);
+  } finally {
+    process.stdout.write = writeStdout;
+    process.stderr.write = writeStderr;
+  }
+  assert.equal(stdout, result.draft);
+  assert.equal(stdout.endsWith("\n"), false);
+  assert.equal(stderr, "! compose incomplete · 0 admitted\n? stopped busy\n");
 });
 
 test("Task list, blocked, show, mutation, and batch text use one scan grammar", async () => {

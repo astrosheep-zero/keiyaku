@@ -74,6 +74,20 @@ stderr line: `⧖ preparing keiyaku` for bind, `⧖ delivering`,
 not progress or durable state. Wait/Akuma observation add none; `--json`
 suppresses it.
 
+The final write boundary terminates each complete ordinary stdout or stderr
+message with exactly one trailing LF. It adds `\n` when the rendered bytes omit
+it and does not add another when they already end with one. Help, usage,
+catalogs, guidance, status, observation, receipts, diagnostics, JSON, and
+successful or refused text all take this terminator. JSON values, renderer
+return values, library results, persisted facts, provider bytes, and the
+guidance Markdown itself are unchanged; the terminator applies only at emit.
+
+Answered default `call`, answered ordinary single `wait`, and `history --last`
+write retained answer bytes unchanged, including empty answers and answers that
+do not end with `\n`. Those three paths receive no framing newline. JSON for
+the same reads remains ordinary and is LF-terminated. With no retained answer,
+`history --last` remains ordinary text.
+
 ## Shared Scanner Grammar
 
 Tell renders its wake receipt before the shared observation as exactly `wake
