@@ -1,8 +1,4 @@
-import {
-  normalizeTargetBranch,
-  observeBindCoordinates,
-  type BindTargetSelection,
-} from "../git/observe.js";
+import { normalizeTargetBranch, observeBindCoordinates, type BindTargetSelection } from "../git/observe.js";
 export type { BindTargetSelection };
 import { gitObjectIdForSnapshot } from "../git/identity.js";
 import type { GitRefAssertion } from "../git/repository.js";

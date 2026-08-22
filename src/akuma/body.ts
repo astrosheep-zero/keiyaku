@@ -319,11 +319,7 @@ export async function spawnAkumaBody(launch: BodyLaunch): Promise<OwnedProcess> 
 }
 
 export async function runAkumaBody(launch: BodyLaunch, upstream: UpstreamExecutionPort): Promise<"held" | void> {
-  return await driveAkumaBody(launch, undefined, {
-    now: () => new Date().toISOString(),
-    spawnChild: handoffAkumaBody,
-    upstream,
-  });
+  return await driveAkumaBody(launch, undefined, { ...defaultRuntime(), upstream });
 }
 
 const DIRECT_TELL_WAKE: TellWakeRuntime = {

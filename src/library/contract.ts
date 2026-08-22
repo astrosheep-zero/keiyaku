@@ -732,7 +732,8 @@ export async function observeKeiyaku(input: ContractObservationInput): Promise<C
 }
 
 function acceptedBindResult(result: MutationResult<Keiyaku>, region: RegionObservation): BindResult {
-  return { facts: result.facts, head: result.head, keiyaku: result.value, effects: result.effects, lags: result.lags, settlement: result.settlement, ...region };
+  const { facts, head, effects, lags, settlement } = result;
+  return { facts, head, keiyaku: result.value, effects, lags, settlement, ...region };
 }
 
 export async function bindKeiyaku(input: BindInput): Promise<BindResult> {
@@ -785,7 +786,10 @@ export async function bindFromCli(input: BindInput): Promise<BindResult> {
   return values.forkOf !== undefined ? bindKeiyaku(input) : bindMarkdownFromValues(values, "current-branch");
 }
 
-async function bindMarkdownFromValues(values: Record<string, unknown>, omittedTarget: "targetless" | "current-branch"): Promise<BindResult> {
+async function bindMarkdownFromValues(
+  values: Record<string, unknown>,
+  omittedTarget: "targetless" | "current-branch",
+): Promise<BindResult> {
   const hooks = worktreeHooksOption(values.hooks);
   const scope = scopeForRepo(values.repo);
   const task = taskOption(values.task);

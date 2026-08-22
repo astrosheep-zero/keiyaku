@@ -1,11 +1,7 @@
 import type { ArchitecturePolicy } from "./engine.js";
 
 const any = (target: string, symbols?: readonly string[]) => (symbols ? { target, symbols } : { target });
-const types = (target: string, symbols?: readonly string[]) => ({
-  target,
-  ...(symbols === undefined ? {} : { symbols }),
-  mode: "type-only" as const,
-});
+const types = (...args: Parameters<typeof any>) => ({ ...any(...args), mode: "type-only" as const });
 const factErrors = any("core/facts/errors.ts");
 const factTypes = any("core/facts/types.ts");
 const gitRepository = types("git/process.ts", ["GitRepository"]);
@@ -1690,7 +1686,12 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     {
       source: "cli/commands/bind.ts",
-      allow: [any("index.ts"), any("library/contract.ts", ["bindFromCli"]), types("cli/commands/contract.ts", ["ParsedBind"]), any("cli/selectors.ts")],
+      allow: [
+        any("index.ts"),
+        any("library/contract.ts", ["bindFromCli"]),
+        types("cli/commands/contract.ts", ["ParsedBind"]),
+        any("cli/selectors.ts"),
+      ],
     },
     { source: "cli/commands/contract.ts", allow: [types("library/catalog.ts", ["CatalogQuery"])] },
     {
