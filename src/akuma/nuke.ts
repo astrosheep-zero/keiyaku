@@ -73,7 +73,8 @@ async function removeEmptyDirectory(path: string): Promise<void> {
   try {
     await rmdir(path);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT" && (error as NodeJS.ErrnoException).code !== "ENOTEMPTY") throw error;
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT" && (error as NodeJS.ErrnoException).code !== "ENOTEMPTY")
+      throw error;
   }
 }
 
