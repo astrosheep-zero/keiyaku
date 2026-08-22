@@ -170,7 +170,14 @@ async function bindDraftReceipt(establishWorld: () => Promise<WorldRoot>, markdo
   }
 }
 
-async function invokeBind({ parsed, repo, edge, configuration, hooks, establishWorld }: BindInvocation): Promise<InvocationResult> {
+async function invokeBind({
+  parsed,
+  repo,
+  edge,
+  configuration,
+  hooks,
+  establishWorld,
+}: BindInvocation): Promise<InvocationResult> {
   if (parsed.forkOf !== undefined) {
     const actor = actorFromEdge(parsed.actor, edge.environment);
     const { bindFromCommand } = await import("./commands/bind.js");
@@ -559,7 +566,16 @@ async function invokeRegion(
   if (report.region?.kind !== "present" || report.region.value.kind !== "declarations") {
     return { kind: "region", region: report.region ?? { kind: "absent" } };
   }
-  return { kind: "region", region: { kind: "present", value: selectRegion({ declarations: report.region.value.declarations, selection: { kind: "contract", contract } }) } };
+  return {
+    kind: "region",
+    region: {
+      kind: "present",
+      value: selectRegion({
+        declarations: report.region.value.declarations,
+        selection: { kind: "contract", contract },
+      }),
+    },
+  };
 }
 
 async function invokeContractHistory(repo: Repo | undefined, contract: string): Promise<InvocationResult> {

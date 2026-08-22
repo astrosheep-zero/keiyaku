@@ -115,7 +115,8 @@ function grokSessionMeta(
 ): Pick<AcpDependencies, "freshSessionMeta" | "loadSessionMeta"> {
   const configured = config === undefined ? {} : { freshSessionMeta: config, loadSessionMeta: config };
   if (options.systemPrompt === undefined || options.systemPrompt.length === 0) return configured;
-  if (options.systemPromptMode === "append") return { ...configured, freshSessionMeta: { ...config, rules: options.systemPrompt } };
+  if (options.systemPromptMode === "append")
+    return { ...configured, freshSessionMeta: { ...config, rules: options.systemPrompt } };
   if (options.systemPromptMode === "replace") {
     const meta = { systemPromptOverride: options.systemPrompt };
     return { ...configured, freshSessionMeta: { ...config, ...meta }, loadSessionMeta: { ...config, ...meta } };

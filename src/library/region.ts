@@ -49,7 +49,8 @@ export function regionOverlaps(
 }
 
 export function validateRegionPatterns(patterns: unknown): readonly [string, ...string[]] {
-  if (!Array.isArray(patterns) || patterns.length === 0) throw new Error("Region query requires one or more path patterns");
+  if (!Array.isArray(patterns) || patterns.length === 0)
+    throw new Error("Region query requires one or more path patterns");
   return patterns.map((pattern) => {
     if (typeof pattern !== "string") throw new Error("Region path patterns must be strings");
     return assertRegionPattern(pattern);

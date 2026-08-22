@@ -136,9 +136,9 @@ export async function observeBindCoordinates(
       };
     } catch (error) {
       if (
-        error instanceof GitPlumbingError
-        && error.status === 128
-        && error.stderr.toString("utf8").includes("Needed a single revision")
+        error instanceof GitPlumbingError &&
+        error.status === 128 &&
+        error.stderr.toString("utf8").includes("Needed a single revision")
       ) {
         return { kind: "unborn-head", branch: await currentBranch(repository) };
       }

@@ -85,8 +85,11 @@ function regionSelection(value: unknown): KanshiRegionSelection {
   }
   if (selection.kind === "path") {
     exactKeys(selection, ["kind", "patterns"], "region selection");
-    try { return { kind: "path", patterns: validateRegionPatterns(selection.patterns) }; }
-    catch (error) { throw new TypeError(error instanceof Error ? error.message : String(error)); }
+    try {
+      return { kind: "path", patterns: validateRegionPatterns(selection.patterns) };
+    } catch (error) {
+      throw new TypeError(error instanceof Error ? error.message : String(error));
+    }
   }
   throw new TypeError(`kanshi region selection kind is invalid: ${selection.kind}`);
 }
@@ -403,42 +406,45 @@ export async function observeKanshi(input: KanshiInput): Promise<KanshiObservati
   }
   try {
     const repository = scopeForRepo(repo);
-    return await withGitDecodeChannel(repository, (channel) => withGitReadObservation(repository, channel, async (observation) => {
-      const [contractSection, holders, dispatches, regionSection, board] = await Promise.all([
-        readContracts(observation, contract),
-        readHolders(observation),
-        readDispatches(observation),
-        region === undefined ? Promise.resolve(undefined) : readRegion(observation, region),
-        readTaskWorld(world),
-      ]);
-      const contracts = decorateContracts(contractSection, holders, (id) => namespaceTaskSection(board, id));
-      const observeContract = contractEndpointObserver(contracts);
-      const aliases = world === null ? { kind: "absent" as const } : await readAliasBindings(world);
-      const tasks = world === null ? { kind: "absent" as const } : readTasks(world, board, holders, observeContract);
-      const akuma = world === null
-        ? { kind: "absent" as const }
-        : dispatches.kind === "failed"
-          ? dispatches
-          : await joinAkuma(world, observeContract, dispatches.value, aliases);
-      const assembled = {
-        root: world,
-        observedAt,
-        branch,
-        contracts: attachFleet(contracts, akuma),
-        tasks,
-        akuma,
-        ...(regionSection === undefined ? {} : { region: regionSection }),
-      } satisfies KanshiReport;
-      if (contract === undefined) return { report: assembled, aliases };
-      const selected = selectKanshi({ report: assembled, contract });
-      return {
-        report: {
-          ...selected,
-          contracts: await attachSelectedIssue(observation, selected.contracts, contract),
-        },
-        aliases,
-      };
-    }));
+    return await withGitDecodeChannel(repository, (channel) =>
+      withGitReadObservation(repository, channel, async (observation) => {
+        const [contractSection, holders, dispatches, regionSection, board] = await Promise.all([
+          readContracts(observation, contract),
+          readHolders(observation),
+          readDispatches(observation),
+          region === undefined ? Promise.resolve(undefined) : readRegion(observation, region),
+          readTaskWorld(world),
+        ]);
+        const contracts = decorateContracts(contractSection, holders, (id) => namespaceTaskSection(board, id));
+        const observeContract = contractEndpointObserver(contracts);
+        const aliases = world === null ? { kind: "absent" as const } : await readAliasBindings(world);
+        const tasks = world === null ? { kind: "absent" as const } : readTasks(world, board, holders, observeContract);
+        const akuma =
+          world === null
+            ? { kind: "absent" as const }
+            : dispatches.kind === "failed"
+              ? dispatches
+              : await joinAkuma(world, observeContract, dispatches.value, aliases);
+        const assembled = {
+          root: world,
+          observedAt,
+          branch,
+          contracts: attachFleet(contracts, akuma),
+          tasks,
+          akuma,
+          ...(regionSection === undefined ? {} : { region: regionSection }),
+        } satisfies KanshiReport;
+        if (contract === undefined) return { report: assembled, aliases };
+        const selected = selectKanshi({ report: assembled, contract });
+        return {
+          report: {
+            ...selected,
+            contracts: await attachSelectedIssue(observation, selected.contracts, contract),
+          },
+          aliases,
+        };
+      }),
+    );
   } catch (error) {
     const failure = { kind: "failed" as const, failure: { message: diagnostic(error) } };
     return {

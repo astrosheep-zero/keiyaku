@@ -2,11 +2,7 @@ import { documentDiff } from "../markdown/diff.js";
 import { applyAmendDocument } from "../body/amend.js";
 import { decodeArcDocument } from "../body/arc.js";
 import { decodeContractDocument } from "../body/decode.js";
-import {
-  renderContractGuidance,
-  type ContractFileEffect,
-  type ContractFileLag,
-} from "../contract-worktree.js";
+import { renderContractGuidance, type ContractFileEffect, type ContractFileLag } from "../contract-worktree.js";
 import {
   actorOption,
   contractTerms,
@@ -74,11 +70,7 @@ import { mintSnapshotId } from "../git/identity.js";
 import { observeContractsForAdmissionInObservationAt } from "../git/observe.js";
 import { withGitDecodeChannel, withGitReadObservation, type GitDecodeChannel } from "../git/read-observation.js";
 import { type SettlementReport } from "../settlement/settle.js";
-import {
-  releaseTaskHolder,
-  releaseTaskHolderWithFence,
-  taskHolderObservationSelection,
-} from "../settlement/holder.js";
+import { releaseTaskHolder, releaseTaskHolderWithFence, taskHolderObservationSelection } from "../settlement/holder.js";
 import type { TaskId } from "../task/identity.js";
 import { Repo, reconcileInput, scopeForRepo, type ReconcileInput } from "./repo.js";
 import {
@@ -721,9 +713,7 @@ export async function listKeiyaku(input: ContractListInput): Promise<ContractBoa
   for (const key of Object.keys(values))
     if (key !== "repo") throw new TypeError(`Keiyaku.list input has unknown field: ${key}`);
   const scope = scopeForRepo(values.repo);
-  return withGitDecodeChannel(scope, (channel) =>
-    contractsOperation({ scope, channel }),
-  );
+  return withGitDecodeChannel(scope, (channel) => contractsOperation({ scope, channel }));
 }
 
 export async function observeKeiyaku(input: ContractObservationInput): Promise<ContractObservation> {
@@ -738,9 +728,7 @@ export async function observeKeiyaku(input: ContractObservationInput): Promise<C
   } catch (error) {
     throw new TypeError(error instanceof Error ? error.message : "contract ID is invalid");
   }
-  return withGitDecodeChannel(scope, (channel) =>
-    contractObservationOperation({ scope, channel, contractId: id }),
-  );
+  return withGitDecodeChannel(scope, (channel) => contractObservationOperation({ scope, channel, contractId: id }));
 }
 
 export async function bindKeiyaku(input: BindInput): Promise<BindResult> {
@@ -755,21 +743,40 @@ export async function bindKeiyaku(input: BindInput): Promise<BindResult> {
     }
     if (typeof forkOf !== "string") throw new TypeError("forkOf must be a ContractId");
     let sourceId: ContractId;
-    try { sourceId = contractId(forkOf); } catch (error) { throw new TypeError(error instanceof Error ? error.message : "forkOf must be a ContractId"); }
+    try {
+      sourceId = contractId(forkOf);
+    } catch (error) {
+      throw new TypeError(error instanceof Error ? error.message : "forkOf must be a ContractId");
+    }
     const sourceScope = scopeForRepo(values.repo);
     if ((values.workspace ?? "worktree") !== "worktree") throw new TypeError("workspace must be worktree");
     const target = values.target;
     if (target !== undefined && typeof target !== "string") throw new TypeError("target must be a string");
     const actor = actorOption(values.actor);
     return withGitDecodeChannel(sourceScope, async (channel) => {
-      const fork = await admitForkBindWithAppointment({ scope: sourceScope, channel, sourceId, ...(target === undefined ? {} : { target }), ...actor });
+      const fork = await admitForkBindWithAppointment({
+        scope: sourceScope,
+        channel,
+        sourceId,
+        ...(target === undefined ? {} : { target }),
+        ...actor,
+      });
       const admission = requireAccepted(fork.admission);
       const id = admission.value.contractId;
-      const toHandle = ({ contractId: contract }: { contractId: ContractId }): Keiyaku => new KeiyakuHandle(contract, sourceScope);
-      const result = await completeMutation({ ...completionInput(sourceScope, channel, id, toHandle, hooks), accepted: admission });
+      const toHandle = ({ contractId: contract }: { contractId: ContractId }): Keiyaku =>
+        new KeiyakuHandle(contract, sourceScope);
+      const result = await completeMutation({
+        ...completionInput(sourceScope, channel, id, toHandle, hooks),
+        accepted: admission,
+      });
       return {
-        facts: result.facts, head: result.head, keiyaku: result.value, effects: result.effects,
-        lags: result.lags, settlement: result.settlement, ...await observeRegion(sourceScope, channel, id, fork.document.region),
+        facts: result.facts,
+        head: result.head,
+        keiyaku: result.value,
+        effects: result.effects,
+        lags: result.lags,
+        settlement: result.settlement,
+        ...(await observeRegion(sourceScope, channel, id, fork.document.region)),
       };
     });
   }
@@ -783,13 +790,29 @@ export async function bindKeiyaku(input: BindInput): Promise<BindResult> {
   const gates = normalizedGates(values.gates);
   const after = normalizedList(values.after, "after", contractId);
   return withGitDecodeChannel(scope, async (channel) => {
-    const admission = await prepareMarkdownBind({ scope, channel, document, gates, after, workspace: "worktree", ...(target === undefined ? {} : { target }), ...(task === undefined ? {} : { task }), ...actor });
+    const admission = await prepareMarkdownBind({
+      scope,
+      channel,
+      document,
+      gates,
+      after,
+      workspace: "worktree",
+      ...(target === undefined ? {} : { target }),
+      ...(task === undefined ? {} : { task }),
+      ...actor,
+    });
     const accepted = requireAccepted(admission.admission === null ? admission.result : admission.admission.result);
     const id = accepted.value.contractId;
-    const toHandle = ({ contractId: contract }: { contractId: ContractId }): Keiyaku => new KeiyakuHandle(contract, scope);
-    const result = admission.admission === null
-      ? await completeMutation({ ...completionInput(scope, channel, id, toHandle, hooks), accepted })
-      : await completeHolderMutation({ completion: completionInput(scope, channel, id, toHandle, hooks), admission: admission.admission, requireAccepted });
+    const toHandle = ({ contractId: contract }: { contractId: ContractId }): Keiyaku =>
+      new KeiyakuHandle(contract, scope);
+    const result =
+      admission.admission === null
+        ? await completeMutation({ ...completionInput(scope, channel, id, toHandle, hooks), accepted })
+        : await completeHolderMutation({
+            completion: completionInput(scope, channel, id, toHandle, hooks),
+            admission: admission.admission,
+            requireAccepted,
+          });
     return {
       facts: result.facts,
       head: result.head,

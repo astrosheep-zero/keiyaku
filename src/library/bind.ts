@@ -26,7 +26,6 @@ type BindAttemptInput = Readonly<{
   actor?: ActorId;
 }>;
 
-
 function candidateId(title: string, collision: number): ContractId {
   const stem = fitIdentityStem({ stem: normalizeIdentityStem({ source: title }) || "contract", maxBytes: 48 });
   const suffix = collision === 0 ? "" : `-${randomBytes(8).toString("hex")}`;
@@ -70,13 +69,15 @@ export async function admitBindWithAppointment(input: BindAttemptInput) {
   return await attemptCandidates(input);
 }
 
-export async function admitForkBindWithAppointment(input: Readonly<{
-  scope: RepositoryScope;
-  channel: GitDecodeChannel;
-  sourceId: ContractId;
-  target?: string;
-  actor?: ActorId;
-}>) {
+export async function admitForkBindWithAppointment(
+  input: Readonly<{
+    scope: RepositoryScope;
+    channel: GitDecodeChannel;
+    sourceId: ContractId;
+    target?: string;
+    actor?: ActorId;
+  }>,
+) {
   let source: Awaited<ReturnType<typeof stateOperation>>;
   try {
     source = await stateOperation({ scope: input.scope, channel: input.channel, contractId: input.sourceId });
@@ -89,15 +90,21 @@ export async function admitForkBindWithAppointment(input: Readonly<{
     }
     throw error;
   }
-  const sourceObject = (await input.channel.readObjects([source.coordinates.start as never])).get(source.coordinates.start as never);
+  const sourceObject = (await input.channel.readObjects([source.coordinates.start as never])).get(
+    source.coordinates.start as never,
+  );
   if (sourceObject?.kind !== "present" || sourceObject.type !== "commit") {
     throw new KeiyakuRefused({ kind: "fork-source-unavailable", contractId: input.sourceId });
   }
-  const currentSource = await stateOperation({ scope: input.scope, channel: input.channel, contractId: input.sourceId });
+  const currentSource = await stateOperation({
+    scope: input.scope,
+    channel: input.channel,
+    contractId: input.sourceId,
+  });
   if (
-    currentSource.head !== source.head
-    || currentSource.coordinates.start !== source.coordinates.start
-    || currentSource.terms.document.key !== source.terms.document.key
+    currentSource.head !== source.head ||
+    currentSource.coordinates.start !== source.coordinates.start ||
+    currentSource.terms.document.key !== source.terms.document.key
   ) {
     throw new KeiyakuRefused({ kind: "fork-source-moved", contractId: input.sourceId });
   }
@@ -124,7 +131,9 @@ export async function admitForkBindWithAppointment(input: Readonly<{
     verification: documentDerivation(document, terms.gates).verification,
     workspace: "worktree",
     ...(input.target === undefined
-      ? (source.coordinates.target === undefined ? {} : { target: source.coordinates.target })
+      ? source.coordinates.target === undefined
+        ? {}
+        : { target: source.coordinates.target }
       : { target: input.target }),
     coordinates: { start: source.coordinates.start },
     source: {
@@ -138,43 +147,49 @@ export async function admitForkBindWithAppointment(input: Readonly<{
   return { admission, document };
 }
 
-export async function admitMarkdownBind(input: Readonly<{
-  scope: RepositoryScope;
-  channel: GitDecodeChannel;
-  title: string;
-  terms: Parameters<typeof bindOperation>[0]["terms"];
-  verification: VerificationDeclarationPreparation;
-  workspace: "worktree";
-  target?: string;
-  task?: TaskId;
-  actor?: ActorId;
-}>) {
+export async function admitMarkdownBind(
+  input: Readonly<{
+    scope: RepositoryScope;
+    channel: GitDecodeChannel;
+    title: string;
+    terms: Parameters<typeof bindOperation>[0]["terms"];
+    verification: VerificationDeclarationPreparation;
+    workspace: "worktree";
+    target?: string;
+    task?: TaskId;
+    actor?: ActorId;
+  }>,
+) {
   return await admitBindWithAppointment(input);
 }
 
-export async function prepareMarkdownBind(input: Readonly<{
-  scope: RepositoryScope;
-  channel: GitDecodeChannel;
-  document: ReturnType<typeof decodeContractDocument>;
-  gates: readonly import("../core/facts/types.js").Gate[];
-  after: readonly ContractId[];
-  workspace: "worktree";
-  target?: string;
-  task?: TaskId;
-  actor?: ActorId;
-}>) {
+export async function prepareMarkdownBind(
+  input: Readonly<{
+    scope: RepositoryScope;
+    channel: GitDecodeChannel;
+    document: ReturnType<typeof decodeContractDocument>;
+    gates: readonly import("../core/facts/types.js").Gate[];
+    after: readonly ContractId[];
+    workspace: "worktree";
+    target?: string;
+    task?: TaskId;
+    actor?: ActorId;
+  }>,
+) {
   const terms = contractTerms(input.document, input.gates, input.after);
-  const admitCandidate = () => admitMarkdownBind({
-    scope: input.scope,
-    channel: input.channel,
-    title: input.document.title,
-    terms,
-    verification: documentDerivation(input.document, terms.gates).verification,
-    workspace: input.workspace,
-    ...(input.target === undefined ? {} : { target: input.target }),
-    ...(input.task === undefined ? {} : { task: input.task }),
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
-  });
-  const admission = input.task === undefined ? null : await claimTaskHolderWithFence(input.scope, input.task, admitCandidate);
+  const admitCandidate = () =>
+    admitMarkdownBind({
+      scope: input.scope,
+      channel: input.channel,
+      title: input.document.title,
+      terms,
+      verification: documentDerivation(input.document, terms.gates).verification,
+      workspace: input.workspace,
+      ...(input.target === undefined ? {} : { target: input.target }),
+      ...(input.task === undefined ? {} : { task: input.task }),
+      ...(input.actor === undefined ? {} : { actor: input.actor }),
+    });
+  const admission =
+    input.task === undefined ? null : await claimTaskHolderWithFence(input.scope, input.task, admitCandidate);
   return { admission, result: admission === null ? await admitCandidate() : admission.result };
 }

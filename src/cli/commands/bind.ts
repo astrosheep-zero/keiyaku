@@ -19,7 +19,14 @@ type BindCommandInput = Readonly<{
   hooks?: WorktreeHooks;
 }>;
 
-export async function bindFromCommand({ command, repo, markdown, gates, actor, hooks }: BindCommandInput): Promise<BindResult> {
+export async function bindFromCommand({
+  command,
+  repo,
+  markdown,
+  gates,
+  actor,
+  hooks,
+}: BindCommandInput): Promise<BindResult> {
   if (command.forkOf !== undefined) {
     return Keiyaku.bind({
       repo,

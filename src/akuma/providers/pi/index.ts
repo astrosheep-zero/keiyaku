@@ -187,7 +187,8 @@ async function drivePi(
       let result: TurnResult;
       if (aborting) result = { kind: "failed", diagnostic: "Pi session aborted" };
       else if (terminalFailure !== null) result = { kind: "failed", diagnostic: terminalFailure };
-      else if (!state.assistantSeen) result = { kind: "failed", diagnostic: "Pi completed without a native assistant answer" };
+      else if (!state.assistantSeen)
+        result = { kind: "failed", diagnostic: "Pi completed without a native assistant answer" };
       else {
         const historyId = native.sessionManager.getLeafId();
         result = {

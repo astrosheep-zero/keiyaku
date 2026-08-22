@@ -1,10 +1,5 @@
 import { decodeAgentEvent, type ToolCall, type ToolResult } from "./provider.js";
-import type {
-  TellDelivery,
-  TellFact,
-  TimelineFact,
-  TurnEndFact,
-} from "./heart/index.js";
+import type { TellDelivery, TellFact, TimelineFact, TurnEndFact } from "./heart/index.js";
 
 const DEFAULT_TAIL = 3;
 const DEFAULT_VOICE = 3;
@@ -21,9 +16,30 @@ export type TurnStartRow = Readonly<{
 }>;
 
 type CallRow = Readonly<{ kind: "call"; sequence: number; turnSequence: number; at: string; text: string }>;
-type SaidRow = Readonly<{ kind: "said"; sequence: number; turnSequence: number; at: string; text: string; truncated?: true }>;
-type ThoughtRow = Readonly<{ kind: "thought"; sequence: number; turnSequence: number; at: string; text: string; truncated?: true }>;
-type NoteRow = Readonly<{ kind: "note"; sequence: number; turnSequence: number; at: string; text: string; truncated?: true }>;
+type SaidRow = Readonly<{
+  kind: "said";
+  sequence: number;
+  turnSequence: number;
+  at: string;
+  text: string;
+  truncated?: true;
+}>;
+type ThoughtRow = Readonly<{
+  kind: "thought";
+  sequence: number;
+  turnSequence: number;
+  at: string;
+  text: string;
+  truncated?: true;
+}>;
+type NoteRow = Readonly<{
+  kind: "note";
+  sequence: number;
+  turnSequence: number;
+  at: string;
+  text: string;
+  truncated?: true;
+}>;
 type TurnNarrationRow = CallRow | SaidRow | ThoughtRow | NoteRow;
 
 export type TellRow = Readonly<{
@@ -123,18 +139,22 @@ const EMPTY_REPORTED: ReportedChangeSummary = { reportedChanges: [], reportedCha
 
 export type Snapshot =
   | Readonly<{ kind: "unborn"; entries: readonly []; omitted: 0 } & ReportedChangeSummary>
-  | Readonly<{
-      kind: "open";
-      turn: TurnStartRow;
-      entries: readonly ActivitySnapshotEntry<OpenSnapshotRow>[];
-      omitted: number;
-    } & ReportedChangeSummary>
-  | Readonly<{
-      kind: "idle";
-      outcome?: OutcomeRow;
-      entries: readonly ActivitySnapshotEntry<IdleSnapshotRow>[];
-      omitted: number;
-    } & ReportedChangeSummary>;
+  | Readonly<
+      {
+        kind: "open";
+        turn: TurnStartRow;
+        entries: readonly ActivitySnapshotEntry<OpenSnapshotRow>[];
+        omitted: number;
+      } & ReportedChangeSummary
+    >
+  | Readonly<
+      {
+        kind: "idle";
+        outcome?: OutcomeRow;
+        entries: readonly ActivitySnapshotEntry<IdleSnapshotRow>[];
+        omitted: number;
+      } & ReportedChangeSummary
+    >;
 
 export type ActivitySnapshot = Snapshot;
 
@@ -198,12 +218,24 @@ function narrationRow(
   event: ReturnType<typeof decodeAgentEvent>,
 ): TurnNarrationRow | null {
   if (event.type === "assistant") {
-    return { kind: "said", sequence: fact.sequence, turnSequence: fact.turnSequence, at: fact.at, text: event.text,
-      ...(event.truncated === true ? { truncated: true } : {}) };
+    return {
+      kind: "said",
+      sequence: fact.sequence,
+      turnSequence: fact.turnSequence,
+      at: fact.at,
+      text: event.text,
+      ...(event.truncated === true ? { truncated: true } : {}),
+    };
   }
   if (event.type === "thought" || event.type === "note") {
-    return { kind: event.type, sequence: fact.sequence, turnSequence: fact.turnSequence, at: fact.at, text: event.text,
-      ...(event.truncated === true ? { truncated: true } : {}) };
+    return {
+      kind: event.type,
+      sequence: fact.sequence,
+      turnSequence: fact.turnSequence,
+      at: fact.at,
+      text: event.text,
+      ...(event.truncated === true ? { truncated: true } : {}),
+    };
   }
   return null;
 }
@@ -233,7 +265,16 @@ function projectToolEvent(
   const index = running.get(key);
   const started = index === undefined ? undefined : rows[index];
   if (started?.kind !== "tool") {
-    rows.push({ kind: "tool", sequence: fact.sequence, turnSequence: fact.turnSequence, at: fact.at, name: event.name, call: event.call, state: event.result, ...(event.truncated === true ? { truncated: true } : {}) });
+    rows.push({
+      kind: "tool",
+      sequence: fact.sequence,
+      turnSequence: fact.turnSequence,
+      at: fact.at,
+      name: event.name,
+      call: event.call,
+      state: event.result,
+      ...(event.truncated === true ? { truncated: true } : {}),
+    });
     return;
   }
   const durationMs = duration(started.at, fact.at);
@@ -295,10 +336,13 @@ function finishTurn(turn: MutableTurn): ProjectedTurn {
 }
 
 /** Fold the retained fact timeline into Turn-owned rows without inventing provider facts. */
-export function projectTurns(facts: readonly TimelineFact[], retained: RetainedWindow = {
-  lowestRetained: facts[0]?.sequence ?? null,
-  highest: facts.at(-1)?.sequence ?? null,
-}): TurnLedger {
+export function projectTurns(
+  facts: readonly TimelineFact[],
+  retained: RetainedWindow = {
+    lowestRetained: facts[0]?.sequence ?? null,
+    highest: facts.at(-1)?.sequence ?? null,
+  },
+): TurnLedger {
   const state: ProjectionState = {
     turns: [],
     turnsBySequence: new Map(),
@@ -309,12 +353,24 @@ export function projectTurns(facts: readonly TimelineFact[], retained: RetainedW
   };
   for (const fact of facts) {
     if (fact.kind === "turn-start") {
-      const turn = { kind: "turn" as const, sequence: fact.sequence, turnSequence: fact.sequence, bodySequence: fact.bodySequence, at: fact.startedAt };
+      const turn = {
+        kind: "turn" as const,
+        sequence: fact.sequence,
+        turnSequence: fact.sequence,
+        bodySequence: fact.bodySequence,
+        at: fact.startedAt,
+      };
       const projected: MutableTurn = { phase: "open", turn, rows: [], running: new Map() };
       state.turns.push(projected);
       state.turnsBySequence.set(turn.turnSequence, projected);
     } else if (fact.kind === "turn-end") {
-      const outcome = { kind: "outcome" as const, sequence: fact.sequence, turnSequence: fact.turnSequence, at: fact.completedAt, outcome: fact.outcome };
+      const outcome = {
+        kind: "outcome" as const,
+        sequence: fact.sequence,
+        turnSequence: fact.turnSequence,
+        at: fact.completedAt,
+        outcome: fact.outcome,
+      };
       const turn = state.turnsBySequence.get(fact.turnSequence);
       if (turn === undefined) state.orphanOutcomes.push(outcome);
       else {
@@ -323,12 +379,26 @@ export function projectTurns(facts: readonly TimelineFact[], retained: RetainedW
         turn.outcome = outcome;
       }
     } else if (fact.kind === "call") {
-      const row = { kind: "call" as const, sequence: fact.sequence, turnSequence: fact.turnSequence, at: fact.at, text: fact.body };
+      const row = {
+        kind: "call" as const,
+        sequence: fact.sequence,
+        turnSequence: fact.turnSequence,
+        at: fact.at,
+        text: fact.body,
+      };
       const turn = state.turnsBySequence.get(fact.turnSequence);
       if (turn === undefined) state.orphanRows.push(row);
       else turn.rows.push(row);
     } else if (fact.kind === "tell") {
-      state.tells.push({ kind: "tell", sequence: fact.sequence, at: fact.recordedAt, tellId: fact.id, text: fact.body, state: fact.state, deliveries: fact.deliveries });
+      state.tells.push({
+        kind: "tell",
+        sequence: fact.sequence,
+        at: fact.recordedAt,
+        tellId: fact.id,
+        text: fact.body,
+        state: fact.state,
+        deliveries: fact.deliveries,
+      });
     } else {
       projectActivityEvent(state, fact);
     }
@@ -343,7 +413,13 @@ export function projectTurns(facts: readonly TimelineFact[], retained: RetainedW
   const frontier = turns.at(-1);
   const openTurn = frontier?.kind === "open" ? frontier : undefined;
   const latestOutcome = rows.findLast((row): row is OutcomeRow => row.kind === "outcome");
-  return { rows, turns, retained, ...(openTurn === undefined ? {} : { openTurn }), ...(latestOutcome === undefined ? {} : { latestOutcome }) };
+  return {
+    rows,
+    turns,
+    retained,
+    ...(openTurn === undefined ? {} : { openTurn }),
+    ...(latestOutcome === undefined ? {} : { latestOutcome }),
+  };
 }
 
 function assembleEntries<Row extends SnapshotRow>(
@@ -377,20 +453,22 @@ function assembleEntries<Row extends SnapshotRow>(
 const DEFAULT_ORDINARY = DEFAULT_TAIL + DEFAULT_VOICE;
 
 /** Split one nonnegative ordinary allowance into newest tail first, then pre-tail voice. */
-export function ordinarySnapshotBudget(ordinaryBudget: number = DEFAULT_ORDINARY): Readonly<{ tail: number; voice: number }> {
+export function ordinarySnapshotBudget(
+  ordinaryBudget: number = DEFAULT_ORDINARY,
+): Readonly<{ tail: number; voice: number }> {
   const tail = Math.min(DEFAULT_TAIL, Math.max(0, ordinaryBudget));
   return { tail, voice: Math.min(DEFAULT_VOICE, Math.max(0, ordinaryBudget) - tail) };
 }
 
-type SuccessfulFileChangeRow = CompletedToolRow & Readonly<{
-  call: Extract<ToolCall, { kind: "fileChange" }>;
-}>;
+type SuccessfulFileChangeRow = CompletedToolRow &
+  Readonly<{
+    call: Extract<ToolCall, { kind: "fileChange" }>;
+  }>;
 
 function isSuccessfulFileChange(row: OpenTurnRow | ClosedTurnRow): row is SuccessfulFileChangeRow {
-  return row.kind === "tool"
-    && typeof row.state === "object"
-    && row.state.status === "ok"
-    && row.call.kind === "fileChange";
+  return (
+    row.kind === "tool" && typeof row.state === "object" && row.state.status === "ok" && row.call.kind === "fileChange"
+  );
 }
 
 function flattenReportedChanges(rows: readonly (OpenTurnRow | ClosedTurnRow)[]): readonly ReportedFileChange[] {
@@ -456,8 +534,9 @@ export function selectSnapshot(
     const tail = tailCount === 0 ? [] : ordinary.slice(-tailCount);
     const tailSet = new Set(tail);
     const voiceCount = Math.max(0, budget.voice ?? DEFAULT_VOICE);
-    const voiceCandidates = ordinary
-      .filter((row) => !tailSet.has(row) && (row.kind === "said" || row.kind === "thought"));
+    const voiceCandidates = ordinary.filter(
+      (row) => !tailSet.has(row) && (row.kind === "said" || row.kind === "thought"),
+    );
     const voice = voiceCount === 0 ? [] : voiceCandidates.slice(-voiceCount);
     const selected = new Set<ActivityRow>([...pinSet, ...tail, ...voice]);
     const omitted = window.filter((row) => !selected.has(row)).length;
@@ -485,14 +564,19 @@ export function selectSnapshot(
 }
 
 export function selectHistory(ledger: TurnLedger, cursor: HistoryCursor): HistoryPage {
-  const eligible = ledger.rows.filter((row) => cursor.before !== undefined
-    ? row.sequence < cursor.before
-    : cursor.since !== undefined ? row.sequence > cursor.since : true);
+  const eligible = ledger.rows.filter((row) =>
+    cursor.before !== undefined
+      ? row.sequence < cursor.before
+      : cursor.since !== undefined
+        ? row.sequence > cursor.since
+        : true,
+  );
   const rows = cursor.since !== undefined ? eligible.slice(0, cursor.limit) : eligible.slice(-cursor.limit);
   const omitted = Math.max(0, eligible.length - rows.length);
-  const historyLost = cursor.since !== undefined
-    ? (ledger.rows[0] !== undefined && ledger.rows[0].sequence > cursor.since + 1)
-    : (ledger.retained.lowestRetained !== null && ledger.retained.lowestRetained > 1 && omitted === 0);
+  const historyLost =
+    cursor.since !== undefined
+      ? ledger.rows[0] !== undefined && ledger.rows[0].sequence > cursor.since + 1
+      : ledger.retained.lowestRetained !== null && ledger.retained.lowestRetained > 1 && omitted === 0;
   return {
     rows,
     omitted,

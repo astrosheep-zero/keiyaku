@@ -82,16 +82,18 @@ export type ParsedAudit = Output &
 export type ParsedReconcile = Output & Readonly<{ command: "reconcile"; contract?: string; retryHooks: boolean }>;
 export type ParsedNuke = Output & Readonly<{ command: "nuke"; confirm?: string }>;
 export type ParsedSettings = Output & Readonly<{ command: "settings" }>;
-export type ParsedRegion = Output & Readonly<{
-  command: "region";
-  contract?: string;
-  paths?: readonly [string, ...string[]];
-}>;
+export type ParsedRegion = Output &
+  Readonly<{
+    command: "region";
+    contract?: string;
+    paths?: readonly [string, ...string[]];
+  }>;
 export type ParsedShow = Output & Readonly<{ command: "show"; contract?: string }>;
 
 export const CONTRACT_COMMAND_SPECS = {
   bind: {
-    positional: "none", stdin: "optional",
+    positional: "none",
+    stdin: "optional",
     flags: {
       actor: "value",
       task: "value",

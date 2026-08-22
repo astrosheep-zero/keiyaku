@@ -60,7 +60,10 @@ export function selectRegion(
     return {
       kind: "contract",
       declaration,
-      overlaps: regionOverlaps(declaration.patterns, declarations.filter((value) => value.contract !== selection.contract)),
+      overlaps: regionOverlaps(
+        declaration.patterns,
+        declarations.filter((value) => value.contract !== selection.contract),
+      ),
     };
   }
   return {

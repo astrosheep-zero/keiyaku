@@ -19,9 +19,7 @@ export type SpawnLaunchPolicy = Readonly<{
   shell: false;
 }>;
 
-export type PlatformLaunchPolicy =
-  | Readonly<{ kind: "windows-launcher" }>
-  | SpawnLaunchPolicy;
+export type PlatformLaunchPolicy = Readonly<{ kind: "windows-launcher" }> | SpawnLaunchPolicy;
 
 export function platformLaunchPolicy(
   intent: LaunchIntent,
@@ -89,7 +87,11 @@ async function waitSpawned(child: ChildProcess): Promise<void> {
 export async function spawnLoggedProcess(input: DetachedProcessInput, intent: LaunchIntent): Promise<ChildProcess> {
   const log = await open(input.log, "a");
   try {
-    const child = spawn(input.argv[0]!, input.argv.slice(1), spawnOptionsFor(intent, input, ["ignore", log.fd, log.fd]));
+    const child = spawn(
+      input.argv[0]!,
+      input.argv.slice(1),
+      spawnOptionsFor(intent, input, ["ignore", log.fd, log.fd]),
+    );
     await waitSpawned(child);
     return child;
   } finally {
@@ -110,7 +112,9 @@ export async function handoffWindowsLaunch(
   });
   let stderr = "";
   child.stderr?.setEncoding("utf8");
-  child.stderr?.on("data", (chunk: string) => { stderr = `${stderr}${chunk}`.slice(-4_000); });
+  child.stderr?.on("data", (chunk: string) => {
+    stderr = `${stderr}${chunk}`.slice(-4_000);
+  });
   const closed = new Promise<number | null>((resolve) => {
     child.once("close", (exitCode) => resolve(exitCode));
   });

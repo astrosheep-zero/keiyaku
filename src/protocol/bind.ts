@@ -30,7 +30,12 @@ type BindOperationInput = Readonly<{
   decorateOffer?: CompanionDecorator;
   contractId: ContractId;
   coordinates?: Readonly<{ start: import("../core/facts/types.js").SnapshotId }>;
-  source?: Readonly<{ contractId: ContractId; head: import("../core/facts/types.js").ContractHead | null; start: import("../core/facts/types.js").SnapshotId; document: import("../core/facts/types.js").DocumentKey }>;
+  source?: Readonly<{
+    contractId: ContractId;
+    head: import("../core/facts/types.js").ContractHead | null;
+    start: import("../core/facts/types.js").SnapshotId;
+    document: import("../core/facts/types.js").DocumentKey;
+  }>;
 }>;
 
 type BindRefusalUnion = BindRefusal | TargetInputRefusal | VerificationDeclarationRefusal | ForkSourceMovedRefusal;
@@ -82,7 +87,10 @@ async function bindPreparation(
 export async function bindOperation(
   input: BindOperationInput,
 ): Promise<
-  IntentOutcome<Readonly<{ contractId: ContractId }>, BindRefusal | TargetInputRefusal | VerificationDeclarationRefusal | ForkSourceMovedRefusal>
+  IntentOutcome<
+    Readonly<{ contractId: ContractId }>,
+    BindRefusal | TargetInputRefusal | VerificationDeclarationRefusal | ForkSourceMovedRefusal
+  >
 > {
   let target: string | undefined;
   if (input.target !== undefined) {
@@ -110,13 +118,13 @@ export async function bindOperation(
           : {
               validateAdmission: (observation: import("../git/observe.js").GitDecisionObservation) => {
                 const current = observation.decision.get(input.source!.contractId);
-                return current !== null
-                  && current !== undefined
-                  && current.head === input.source!.head
-                  && current.coordinates.start === input.source!.start
-                  && current.terms.document.key === input.source!.document
+                return current !== null &&
+                  current !== undefined &&
+                  current.head === input.source!.head &&
+                  current.coordinates.start === input.source!.start &&
+                  current.terms.document.key === input.source!.document
                   ? undefined
-                  : { kind: "fork-source-moved", contractId: input.source!.contractId } as const;
+                  : ({ kind: "fork-source-moved", contractId: input.source!.contractId } as const);
               },
             }),
         ...(input.decorateOffer === undefined ? {} : { decorateOffer: input.decorateOffer }),

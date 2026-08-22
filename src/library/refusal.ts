@@ -17,7 +17,11 @@ export type NukeConfirmationRequiredRefusal = Readonly<{
   world: string;
 }>;
 
-export type KeiyakuRefusal = IntentRefusal | ForkSourceRefusal | NukeConfirmationRefusal | NukeConfirmationRequiredRefusal;
+export type KeiyakuRefusal =
+  | IntentRefusal
+  | ForkSourceRefusal
+  | NukeConfirmationRefusal
+  | NukeConfirmationRequiredRefusal;
 export type KeiyakuRetryReason = IntentRetry;
 
 export class KeiyakuRefused extends Error {

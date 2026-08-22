@@ -56,11 +56,7 @@ import { resolveProviderExecution } from "./providers/index.js";
 import { injectedBodyRequests, requestBodyCall } from "./requests.js";
 import { settings as readSettings, type Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
-import {
-  decodeAllowedActions,
-  unionAllowedActions,
-  type AllowedAction,
-} from "./allowed.js";
+import { decodeAllowedActions, unionAllowedActions, type AllowedAction } from "./allowed.js";
 
 const POLL_MS = 100;
 
@@ -101,9 +97,12 @@ export type AkumaStatus = Readonly<{
 
 /** The default completion judgment over one complete status snapshot. */
 export function defaultWaitComplete(status: AkumaStatus): boolean {
-  return status.life !== "running"
-    && !status.timeline.entries.some((entry) => entry.kind === "row"
-      && entry.row.kind === "tell" && entry.row.state === "pending");
+  return (
+    status.life !== "running" &&
+    !status.timeline.entries.some(
+      (entry) => entry.kind === "row" && entry.row.kind === "tell" && entry.row.state === "pending",
+    )
+  );
 }
 
 export type { ReadonlyRestraint } from "./provider-recipe.js";
@@ -221,18 +220,19 @@ export async function killAkumaWithRecovery(
     if (request.kind !== "requested") return request.kind;
     const target = request.body;
     const leash = await takeLeashUntil(paths, performance.now() + CONTROL_RESPONSE_MS);
-    if (await readKill(paths, target.sequence) !== null) {
+    if ((await readKill(paths, target.sequence)) !== null) {
       leash?.release();
       return "killed";
     }
     if (leash === null) {
-      if (await readKill(paths, target.sequence) !== null) return "killed";
+      if ((await readKill(paths, target.sequence)) !== null) return "killed";
       const body = (await readHeart(paths)).latestBody;
       return body?.sequence === target.sequence && body.hung !== undefined ? "hung" : "unavailable";
     }
     try {
       const settledBody = (await readHeart(paths)).latestBody;
-      if (settledBody?.sequence !== target.sequence) return await readKill(paths, target.sequence) === null ? "unavailable" : "killed";
+      if (settledBody?.sequence !== target.sequence)
+        return (await readKill(paths, target.sequence)) === null ? "unavailable" : "killed";
       if (settledBody.end !== "put-down") {
         await leash.clearStop(paths);
         return "untidy";
@@ -247,14 +247,11 @@ export async function killAkumaWithRecovery(
   }
 }
 
-async function fleetListRow(
-  paths: AkumaPaths,
-  expected: AkuId,
-): Promise<AkumaListRow | UnbornAkumaListRow> {
+async function fleetListRow(paths: AkumaPaths, expected: AkuId): Promise<AkumaListRow | UnbornAkumaListRow> {
   const snapshot = await readHeart(paths);
   if (snapshot.soul !== null) return await bornListRow(paths, expected, snapshot);
   try {
-    if (await probeLeash(paths) === "held") return { id: expected, life: "unborn" };
+    if ((await probeLeash(paths)) === "held") return { id: expected, life: "unborn" };
     const seal = await readSeal(paths);
     return seal === null ? { id: expected, life: "unborn" } : { id: expected, life: "stillborn", seal };
   } catch (error) {
@@ -296,16 +293,16 @@ async function bornStatus(
     ordinaryBudget?: number;
   }>,
 ): Promise<BudgetedStatusObservation> {
-  if (input.ordinaryBudget !== undefined
-    && (!Number.isSafeInteger(input.ordinaryBudget) || input.ordinaryBudget < 0)) {
+  if (input.ordinaryBudget !== undefined && (!Number.isSafeInteger(input.ordinaryBudget) || input.ordinaryBudget < 0)) {
     throw new TypeError("ordinary budget must be a nonnegative safe integer");
   }
   const snapshot = await readHeart(paths);
   if (snapshot.soul === null) throw new AkumaNotBornError(expected);
   const current = await bornListRow(paths, expected, snapshot);
-  const resumeUnsupported = current.life === "stranded"
-    && snapshot.latestSession?.provider === snapshot.soul.provider.name
-    && (await resolveProviderExecution(snapshot.soul.provider)).adapter.resume === undefined;
+  const resumeUnsupported =
+    current.life === "stranded" &&
+    snapshot.latestSession?.provider === snapshot.soul.provider.name &&
+    (await resolveProviderExecution(snapshot.soul.provider)).adapter.resume === undefined;
   const slice = await activitySlice(paths);
   const selected = selectSnapshot(projectTurns(slice.rows), {
     aperture: input.aperture,
@@ -365,7 +362,10 @@ export class AkumaHandle {
     if (input.before !== undefined && input.since !== undefined) {
       throw new TypeError("Akuma history before and since are mutually exclusive");
     }
-    for (const [name, value] of [["before", input.before], ["since", input.since]] as const) {
+    for (const [name, value] of [
+      ["before", input.before],
+      ["since", input.since],
+    ] as const) {
       if (value !== undefined && (!Number.isSafeInteger(value) || value <= 0)) {
         throw new TypeError(`Akuma history ${name} must be a positive safe integer`);
       }
@@ -375,22 +375,24 @@ export class AkumaHandle {
       throw new TypeError("Akuma history limit must be a positive safe integer no greater than 5000");
     }
     const slice = await activitySlice(this.paths);
-    return selectHistory(projectTurns(slice.rows, {
-      lowestRetained: slice.lowestRetained,
-      highest: slice.highest,
-    }), {
-      ...(input.before === undefined ? {} : { before: input.before }),
-      ...(input.since === undefined ? {} : { since: input.since }),
-      limit,
-    });
+    return selectHistory(
+      projectTurns(slice.rows, {
+        lowestRetained: slice.lowestRetained,
+        highest: slice.highest,
+      }),
+      {
+        ...(input.before === undefined ? {} : { before: input.before }),
+        ...(input.since === undefined ? {} : { since: input.since }),
+        limit,
+      },
+    );
   }
 
   async wait(
     predicate: (status: AkumaStatus) => boolean = defaultWaitComplete,
     options: Readonly<{ timeoutMs?: number }> = {},
   ): Promise<AkumaStatus> {
-    if (options.timeoutMs !== undefined
-      && (!Number.isFinite(options.timeoutMs) || options.timeoutMs < 0)) {
+    if (options.timeoutMs !== undefined && (!Number.isFinite(options.timeoutMs) || options.timeoutMs < 0)) {
       throw new TypeError("Akuma wait timeoutMs must be a nonnegative finite millisecond duration");
     }
     const deadline = options.timeoutMs === undefined ? undefined : performance.now() + options.timeoutMs;
@@ -420,18 +422,27 @@ export class AkumaHandle {
     }
     if (leash === null) {
       const body = (await readHeart(this.paths)).latestBody;
-      return { kind: "unavailable", evidence: body?.sequence === request.body.sequence && body.hung !== undefined
-        ? "hung"
-        : "unavailable" };
+      return {
+        kind: "unavailable",
+        evidence: body?.sequence === request.body.sequence && body.hung !== undefined ? "hung" : "unavailable",
+      };
     }
 
     const settledBody = (await readHeart(this.paths)).latestBody;
     if (settledBody?.sequence === request.body.sequence && settledBody.hung !== undefined) {
-      try { await leash.clearPause(this.paths); } finally { leash.release(); }
+      try {
+        await leash.clearPause(this.paths);
+      } finally {
+        leash.release();
+      }
       return { kind: "unavailable", evidence: "hung" };
     }
     if (settledBody?.sequence !== request.body.sequence || settledBody.end === undefined) {
-      try { await leash.clearPause(this.paths); } finally { leash.release(); }
+      try {
+        await leash.clearPause(this.paths);
+      } finally {
+        leash.release();
+      }
       return { kind: "unavailable", evidence: "untidy" };
     }
     if (request.body.end !== undefined || settledBody.end !== "put-down") putDown = "was-idle";
@@ -461,7 +472,8 @@ export class AkumaHandle {
     if (adapter.fork === undefined) return { kind: "provider-cannot-fork", provider: source.provider.name };
     const point = await readForkPoint(this.paths, input.at);
     if (point === null) return { kind: "unknown-history", at: input.at };
-    if (point.provider !== source.provider.name) throw new Error(`Akuma fork point ${input.at} has a mismatched provider`);
+    if (point.provider !== source.provider.name)
+      throw new Error(`Akuma fork point ${input.at} has a mismatched provider`);
 
     let childSession: ResumeCoordinate;
     try {
@@ -484,21 +496,23 @@ export class AkumaHandle {
         archetype: source.archetype,
         awaitAsleep: true,
         launch: async (allocated) => {
-          (await spawnAkumaBody({
-            paths: allocated.paths,
-            seed: {
-              id: allocated.id,
-              archetype: source.archetype,
-              ...(source.description === undefined ? {} : { description: source.description }),
-              provider: source.provider,
-              options: source.options,
-              ...(source.readonly === undefined ? {} : { readonly: source.readonly }),
-              allowed: source.allowed,
-              cwd: source.cwd,
-              origin: { kind: "fork", parent: this.id, at: input.at },
-            },
-            birthSession,
-          })).release();
+          (
+            await spawnAkumaBody({
+              paths: allocated.paths,
+              seed: {
+                id: allocated.id,
+                archetype: source.archetype,
+                ...(source.description === undefined ? {} : { description: source.description }),
+                provider: source.provider,
+                options: source.options,
+                ...(source.readonly === undefined ? {} : { readonly: source.readonly }),
+                allowed: source.allowed,
+                cwd: source.cwd,
+                origin: { kind: "fork", parent: this.id, at: input.at },
+              },
+              birthSession,
+            })
+          ).release();
         },
       });
       return { kind: "forked", child: child.id };
@@ -528,14 +542,15 @@ export function akumaCallExecution(handle: AkumaHandle): AkumaCallExecution | un
   return handle[CALL_EXECUTION];
 }
 
-export type LastAnswer =
-  | Readonly<{ kind: "answer"; answer: string }>
-  | Readonly<{ kind: "no-answer" }>;
+export type LastAnswer = Readonly<{ kind: "answer"; answer: string }> | Readonly<{ kind: "no-answer" }>;
 
 type AkumaConfiguration = Readonly<{ home?: string; settings?: Settings }>;
 
 export class Akuma {
-  private constructor(private readonly path: WorldRoot, private readonly configuration: AkumaConfiguration) {}
+  private constructor(
+    private readonly path: WorldRoot,
+    private readonly configuration: AkumaConfiguration,
+  ) {}
 
   static of(root: WorldRoot, input: AkumaConfiguration = {}): Akuma {
     if (typeof root !== "string") throw new TypeError("Akuma.of root must be a WorldRoot");
@@ -558,16 +573,17 @@ export class Akuma {
     const readonly = callReadonly(input.readonly);
     const name = archetypeName(input.archetype);
     const home = this.configuration.home === undefined ? {} : { home: this.configuration.home };
-    const settings = this.configuration.settings ?? await readSettings({ root: this.path, ...home });
+    const settings = this.configuration.settings ?? (await readSettings({ root: this.path, ...home }));
     const archetype = await loadArchetype({
       name,
       ...home,
       settings,
       ...readonly,
     });
-    const allowed = input.allowed === undefined
-      ? archetype.allowed
-      : unionAllowedActions(archetype.allowed, decodeAllowedActions(input.allowed, "Akuma call allowed"));
+    const allowed =
+      input.allowed === undefined
+        ? archetype.allowed
+        : unionAllowedActions(archetype.allowed, decodeAllowedActions(input.allowed, "Akuma call allowed"));
     const requests = injectedBodyRequests();
     const requestRecipe = Object.freeze({
       ...(archetype.description === undefined ? {} : { description: archetype.description }),
@@ -577,9 +593,12 @@ export class Akuma {
       allowed,
     });
     if (requests !== null) {
-      const cwd = input.cwd === undefined
-        ? undefined
-        : context?.cwdCanonical === true ? input.cwd : await canonicalBirthCwd(input.cwd);
+      const cwd =
+        input.cwd === undefined
+          ? undefined
+          : context?.cwdCanonical === true
+            ? input.cwd
+            : await canonicalBirthCwd(input.cwd);
       const child = await requestBodyCall({
         directory: requests,
         id: randomUUID(),
@@ -597,25 +616,26 @@ export class Akuma {
     }
     const initiatorCwd = context.initiatorCwd;
     const selectedCwd = input.cwd ?? initiatorCwd ?? this.path;
-    const cwd = input.cwd !== undefined && context?.cwdCanonical === true
-      ? input.cwd
-      : await canonicalBirthCwd(selectedCwd);
+    const cwd =
+      input.cwd !== undefined && context?.cwdCanonical === true ? input.cwd : await canonicalBirthCwd(selectedCwd);
     const recipe = requestRecipe;
     const published = await publishAkuma({
       worldPath: this.path,
       archetype: archetype.name,
       launch: async (allocated) => {
-        (await spawnAkumaBody({
-          paths: allocated.paths,
-          seed: {
-            id: allocated.id,
-            archetype: allocated.archetype,
-            ...recipe,
-            cwd,
-            origin: { kind: "direct" },
-          },
-          initialBody: input.body,
-        })).release();
+        (
+          await spawnAkumaBody({
+            paths: allocated.paths,
+            seed: {
+              id: allocated.id,
+              archetype: allocated.archetype,
+              ...recipe,
+              cwd,
+              origin: { kind: "direct" },
+            },
+            initialBody: input.body,
+          })
+        ).release();
       },
     });
     return new AkumaHandle(published.id, this.path, {

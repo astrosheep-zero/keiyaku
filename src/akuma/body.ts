@@ -257,11 +257,16 @@ async function runBodyTurns(input: BodyExecution): Promise<void> {
   }
 }
 
-export async function handoffPendingTells(paths: AkumaPaths, spawn: (launch: BodyLaunch) => Promise<OwnedProcess> = spawnAkumaBody): Promise<void> {
+export async function handoffPendingTells(
+  paths: AkumaPaths,
+  spawn: (launch: BodyLaunch) => Promise<OwnedProcess> = spawnAkumaBody,
+): Promise<void> {
   try {
     if ((await readHeart(paths)).pending.length === 0) return;
     (await spawn({ paths, refuseIfHeld: true })).release();
-  } catch { /* a later Heart interaction retries the unchanged pending Tell */ }
+  } catch {
+    /* a later Heart interaction retries the unchanged pending Tell */
+  }
 }
 
 export async function driveAkumaBody(

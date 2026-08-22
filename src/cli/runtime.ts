@@ -31,7 +31,13 @@ export async function writeTask(
     color: false,
   };
   if (command.output === "json") writeCliStream(process.stdout, JSON.stringify(result));
-  else if (command.action === "compose" && typeof result === "object" && result !== null && "kind" in result && result.kind === "incomplete") {
+  else if (
+    command.action === "compose" &&
+    typeof result === "object" &&
+    result !== null &&
+    "kind" in result &&
+    result.kind === "incomplete"
+  ) {
     const diagnostic = renderTaskIncompleteDiagnostic(result);
     if (diagnostic.length > 0) writeCliStream(process.stderr, diagnostic);
     process.stdout.write(result.draft);
@@ -51,11 +57,12 @@ async function writeAkuma(
   result: AkumaInvocationResult,
 ): Promise<number> {
   const { renderAkumaJson, akumaExitCode, akumaRawAnswer, renderAkumaText } = await import("./render/akuma.js");
-  const output = command.output === "json" ? renderAkumaJson(result) : renderAkumaText(command, result, displayContext());
-  const exact = command.output === "text" && (
-    akumaRawAnswer(result) !== undefined
-    || (command.command === "history" && command.last && result.action === "history" && result.mode === "last")
-  );
+  const output =
+    command.output === "json" ? renderAkumaJson(result) : renderAkumaText(command, result, displayContext());
+  const exact =
+    command.output === "text" &&
+    (akumaRawAnswer(result) !== undefined ||
+      (command.command === "history" && command.last && result.action === "history" && result.mode === "last"));
   if (exact) process.stdout.write(output);
   else writeCliStream(process.stdout, output);
   return akumaExitCode(result);
@@ -66,22 +73,31 @@ function isAkumaOutput(
   result: unknown,
 ): command is InvokedAkumaCommand | Extract<ParsedCommand, { command: "status" }> {
   if (isParsedAkumaCommand(command)) return true;
-  return command.command === "status"
-    && typeof result === "object"
-    && result !== null
-    && "kind" in result
-    && result.kind === "akuma";
+  return (
+    command.command === "status" &&
+    typeof result === "object" &&
+    result !== null &&
+    "kind" in result &&
+    result.kind === "akuma"
+  );
 }
 
 function invocationJson(result: InvocationResult): unknown {
   switch (result.kind) {
-    case "guidance": return { contract: result.contract, guidance: result.guidance };
-    case "catalog": return result.catalog;
-    case "nuke": return result.result;
-    case "region": return result.region;
-    case "contract-history": return result.history;
-    case "status": return result.report;
-    default: return result;
+    case "guidance":
+      return { contract: result.contract, guidance: result.guidance };
+    case "catalog":
+      return result.catalog;
+    case "nuke":
+      return result.result;
+    case "region":
+      return result.region;
+    case "contract-history":
+      return result.history;
+    case "status":
+      return result.report;
+    default:
+      return result;
   }
 }
 
@@ -105,7 +121,10 @@ async function writeResult(command: ParsedCommand, result: unknown): Promise<num
   if (command.command === "settings") {
     const { renderSettingsText, settingsJsonValue } = await import("./render/settings.js");
     const value = (result as { value: Settings }).value;
-    writeCliStream(process.stdout, command.output === "json" ? JSON.stringify(settingsJsonValue(value)) : renderSettingsText(value));
+    writeCliStream(
+      process.stdout,
+      command.output === "json" ? JSON.stringify(settingsJsonValue(value)) : renderSettingsText(value),
+    );
     return 0;
   }
   if (isAkumaOutput(command, result)) return await writeAkuma(command, result as AkumaInvocationResult);
@@ -117,8 +136,14 @@ async function writeResult(command: ParsedCommand, result: unknown): Promise<num
   return invocationExitCode(contractResult);
 }
 
-function writeWorldScopeRefusal(error: Readonly<{ refusal: { kind: string; world: string; ids: readonly string[] } }>, output: "text" | "json"): number {
-  const body = output === "json" ? JSON.stringify(error.refusal) : `${error.refusal.kind} ${error.refusal.world} ${error.refusal.ids.join(" ")}`;
+function writeWorldScopeRefusal(
+  error: Readonly<{ refusal: { kind: string; world: string; ids: readonly string[] } }>,
+  output: "text" | "json",
+): number {
+  const body =
+    output === "json"
+      ? JSON.stringify(error.refusal)
+      : `${error.refusal.kind} ${error.refusal.world} ${error.refusal.ids.join(" ")}`;
   writeCliStream(process.stderr, body);
   return 1;
 }
@@ -130,7 +155,13 @@ export async function runCliCommand(invocation: ParsedExecution): Promise<number
     const { invoke } = await import("./invoke.js");
     const result = await invoke(invocation, {
       cwd: process.cwd(),
-      ...(start === undefined ? {} : { onOperationStart: () => { writeCliStream(process.stderr, start); } }),
+      ...(start === undefined
+        ? {}
+        : {
+            onOperationStart: () => {
+              writeCliStream(process.stderr, start);
+            },
+          }),
     });
     return await writeResult(command, result);
   } catch (error) {
@@ -141,7 +172,10 @@ export async function runCliCommand(invocation: ParsedExecution): Promise<number
     if (command.command === "bind") {
       const { BindDraftError } = await import("./draft.js");
       if (error instanceof BindDraftError) {
-        writeCliStream(process.stderr, error.original instanceof Error ? error.original.message : String(error.original));
+        writeCliStream(
+          process.stderr,
+          error.original instanceof Error ? error.original.message : String(error.original),
+        );
         const { renderBindDraftReceipt } = await import("./render/refusal.js");
         writeCliStream(process.stderr, renderBindDraftReceipt(error.draft));
         return error.original instanceof CliUsageError ? 1 : 3;
