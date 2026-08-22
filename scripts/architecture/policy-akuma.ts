@@ -91,7 +91,11 @@ export const akumaZones = [
     source: "akuma/provider.ts",
     allow: [types("akuma/heart/index.ts"), any("akuma/coordinate.ts"), types("akuma/provider-recipe.ts")],
   },
-  { source: "akuma/projection.ts", allow: [types("akuma/heart/index.ts"), any("akuma/provider.ts")] },
+  {
+    source: "akuma/projection.ts",
+    allow: [types("akuma/heart/index.ts"), any("akuma/provider.ts"), any("akuma/projection-read.ts")],
+  },
+  { source: "akuma/projection-read.ts", allow: [types("akuma/projection.ts")] },
   {
     source: "akuma/providers/index.ts",
     allow: [

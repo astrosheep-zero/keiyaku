@@ -77,6 +77,25 @@ export const cliZones = [
         "safeText",
         "truncateMiddleDisplayText",
       ]),
+      any("cli/render/akuma-activity.ts"),
+    ],
+  },
+  {
+    source: "cli/render/akuma-activity.ts",
+    allow: [
+      any("akuma/index.ts", ["defaultWaitComplete"]),
+      types("akuma/index.ts"),
+      types("index.ts"),
+      types("cli/commands/akuma-invoke.ts"),
+      types("cli/parse.ts"),
+      any("cli/render/akuma-tool.ts"),
+      any("cli/render/terminal.ts", [
+        "TextRenderContext",
+        "displayColumns",
+        "renderBoundedTextBlock",
+        "safeText",
+        "truncateMiddleDisplayText",
+      ]),
     ],
   },
   {
@@ -234,6 +253,10 @@ export const cliZones = [
       any("cli/render/terminal.ts"),
     ],
   },
+  {
+    source: "cli/render/contract-history.ts",
+    allow: [types("index.ts"), any("cli/render/receipt.ts", ["receiptPayload"])],
+  },
   { source: "cli/render/board.ts", allow: [types("cli/result.ts")] },
   {
     source: "cli/render/contract.ts",
@@ -243,6 +266,7 @@ export const cliZones = [
       any("cli/render/audit.ts"),
       any("cli/render/receipt.ts"),
       any("cli/render/terminal.ts"),
+      any("cli/render/contract-history.ts"),
     ],
   },
   {
