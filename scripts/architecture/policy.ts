@@ -1866,7 +1866,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         ...ownersFor(["realpath"], "cli/coordinates.ts", "git/scratch.ts"),
         { source: "akuma/archetype.ts", symbols: ["readFile", "readdir"] },
         { source: "akuma/akuma.ts", symbols: ["readdir", "realpath", "stat"] },
-        { source: "akuma/nuke.ts", symbols: ["lstat", "readdir", "rm"] },
+        { source: "akuma/nuke.ts", symbols: ["lstat", "readdir", "rm", "rmdir"] },
         ...ownersFor(["lstat", "watch"], "akuma/heart/storage.ts"),
         ...ownersFor(["lstat"], "git/target-placement.ts"),
         { source: "akuma/identity.ts", symbols: ["mkdir", "writeFile"] },

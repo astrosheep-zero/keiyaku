@@ -43,7 +43,16 @@ synchronous.
 During a confirmed World data reset, the Akuma owner keeps each stopped
 Akuma's leash from its stop verification through deletion of that same
 coordinate, then releases it. A new Body therefore cannot reclaim the
-coordinate between those effects.
+coordinate between those effects. After that hold, the owner removes the
+coordinate's known Heart, journal sidecars, stdio log, leash database, and the
+known request-channel protocol files owned by
+[akuma-requests.md](akuma-requests.md). Unknown children remain, including
+unknown descendants inside the request channel. Empty recognized entries and
+the run root, including its `.gitignore` marker, are removed only when no
+non-Keiyaku bytes remain.
+Stop timeout, unverified end, held-custody failure, nonregular or symlink
+protection failure, or filesystem failure returns the existing owner failure
+and leaves remaining custody for retry.
 - **seal** — a control row that closes a coordinate forever: a sealed
   directory will never be born.
   Written only under the leash; a late body's birth claim checks the seal

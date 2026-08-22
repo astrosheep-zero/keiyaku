@@ -14,6 +14,7 @@ export type AkumaPaths = Readonly<{
   heart: string;
   leash: string;
   log: string;
+  requests: string;
 }>;
 
 export type AllocatedAkuma = Readonly<{
@@ -67,6 +68,7 @@ export function akumaPaths(
     heart: join(directory, "heart.db"),
     leash: join(directory, "leash.db"),
     log: join(directory, "stdio.log"),
+    requests: join(directory, "requests"),
   };
 }
 

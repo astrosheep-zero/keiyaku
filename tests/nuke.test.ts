@@ -5,8 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { Keiyaku, KeiyakuRefused, World } from "../src/index.js";
+import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
-import { initializeHeart, readHeart } from "../src/akuma/heart/index.js";
+import { HeldAkumaLeash, initializeHeart, readHeart, type Soul } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
 import { moveAlias } from "../src/alias/index.js";
@@ -141,6 +142,13 @@ test("confirmed nuke stops live writers and removes owned state while preserving
     const unknownRun = join(world, ".keiyaku", "akuma", "run", "foreign-12345678");
     const orphanRun = join(world, ".keiyaku", "akuma", "run", "foreign-87654321");
     const foreignByte = join(foreign, "foreign.txt");
+    const recognizedUnknown = join(running.allocated.paths.directory, "unknown.bin");
+    const recognizedDir = join(running.allocated.paths.directory, "unknown-dir");
+    const recognizedLink = join(running.allocated.paths.directory, "unknown-link");
+    writeFileSync(recognizedUnknown, "preserve recognized unknown\n");
+    mkdirSync(recognizedDir);
+    writeFileSync(join(recognizedDir, "inside.bin"), "inside\n");
+    symlinkSync(recognizedUnknown, recognizedLink);
     writeFileSync(settings, "{\"project\":true}\n");
     writeFileSync(unknown, "unknown\n");
     mkdirSync(unknownRun, { recursive: true });
@@ -152,8 +160,12 @@ test("confirmed nuke stops live writers and removes owned state while preserving
     assert.deepEqual(await Keiyaku.nuke({ world, confirm: world }), { kind: "success", world });
     await running.body;
     assert.equal(existsSync(running.allocated.paths.heart), false);
-    assert.equal(existsSync(running.allocated.paths.leash), true);
-    assert.equal(existsSync(join(running.allocated.paths.directory, "requests")), true);
+    assert.equal(existsSync(running.allocated.paths.leash), false);
+    assert.equal(existsSync(join(running.allocated.paths.directory, "requests")), false);
+    assert.equal(existsSync(recognizedUnknown), true);
+    assert.equal(readFileSync(recognizedUnknown, "utf8"), "preserve recognized unknown\n");
+    assert.equal(readFileSync(join(recognizedDir, "inside.bin"), "utf8"), "inside\n");
+    assert.equal(readFileSync(recognizedLink, "utf8"), "preserve recognized unknown\n");
     assert.equal(existsSync(join(world, ".keiyaku", "akuma", "alias.json")), false);
     assert.equal(existsSync(join(world, ".keiyaku", "locks", "akuma-alias.sqlite")), true);
     assert.equal(existsSync(join(world, ".keiyaku", "tasks", "remove-me.md")), false);
@@ -170,6 +182,120 @@ test("confirmed nuke stops live writers and removes owned state while preserving
   } finally {
     rmSync(fixture.raw.path, { recursive: true, force: true });
     rmSync(fixture.foreign, { recursive: true, force: true });
+  }
+});
+
+test("confirmed nuke removes known stopped-entry artifacts and empty run roots", async () => {
+  const world = await testWorld();
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "abcd1234" });
+    await initializeHeart(allocated.paths);
+    writeFileSync(allocated.paths.log, "stdio\n");
+    writeFileSync(`${allocated.paths.heart}-wal`, "wal\n");
+    writeFileSync(`${allocated.paths.heart}-shm`, "shm\n");
+    mkdirSync(join(allocated.paths.requests, "1"), { recursive: true });
+    writeFileSync(join(allocated.paths.requests, "1", "41111111-1111-4111-8111-111111111111.request.json"), "{}\n");
+    writeFileSync(join(allocated.paths.requests, "1", "41111111-1111-4111-8111-111111111111.receipt.json"), "{}\n");
+    assert.deepEqual(await Keiyaku.nuke({ world, confirm: world }), { kind: "success", world });
+    assert.equal(existsSync(allocated.paths.heart), false);
+    assert.equal(existsSync(allocated.paths.leash), false);
+    assert.equal(existsSync(allocated.paths.log), false);
+    assert.equal(existsSync(`${allocated.paths.heart}-wal`), false);
+    assert.equal(existsSync(`${allocated.paths.heart}-shm`), false);
+    assert.equal(existsSync(allocated.paths.requests), false);
+    assert.equal(existsSync(allocated.paths.directory), false);
+    assert.equal(existsSync(join(world, ".keiyaku", "akuma", "run")), false);
+    assert.deepEqual(await Keiyaku.nuke({ world, confirm: world }), { kind: "success", world });
+  } finally {
+    rmSync(world, { recursive: true, force: true });
+  }
+});
+
+test("confirmed nuke preserves unknown descendants inside the request channel", async () => {
+  const world = await testWorld();
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "feedface" });
+    await initializeHeart(allocated.paths);
+    const sequence = join(allocated.paths.requests, "1");
+    mkdirSync(sequence, { recursive: true });
+    writeFileSync(join(sequence, "41111111-1111-4111-8111-111111111111.request.json"), "{}\n");
+    writeFileSync(join(sequence, "41111111-1111-4111-8111-111111111111.receipt.json"), "{}\n");
+    const unknownFile = join(sequence, "unknown.bin");
+    const unknownDir = join(sequence, "unknown-dir");
+    const unknownLink = join(sequence, "unknown-link");
+    const requestLink = join(sequence, "42222222-2222-4222-8222-222222222222.request.json");
+    const invalidUuid = join(sequence, "11111111-1111-1111-1111-111111111111.request.json");
+    writeFileSync(unknownFile, "keep-request-unknown\n");
+    writeFileSync(invalidUuid, "keep-invalid-uuid\n");
+    mkdirSync(unknownDir);
+    writeFileSync(join(unknownDir, "nested.request.json"), "nested\n");
+    symlinkSync(unknownFile, unknownLink);
+    symlinkSync(unknownFile, requestLink);
+    writeFileSync(join(allocated.paths.requests, "not-a-sequence.request.json"), "sibling\n");
+    mkdirSync(join(allocated.paths.requests, "other-dir"));
+    writeFileSync(join(allocated.paths.requests, "other-dir", "inside.bin"), "inside\n");
+    assert.deepEqual(await Keiyaku.nuke({ world, confirm: world }), { kind: "success", world });
+    assert.equal(existsSync(join(sequence, "41111111-1111-4111-8111-111111111111.request.json")), false);
+    assert.equal(existsSync(join(sequence, "41111111-1111-4111-8111-111111111111.receipt.json")), false);
+    assert.equal(readFileSync(unknownFile, "utf8"), "keep-request-unknown\n");
+    assert.equal(readFileSync(invalidUuid, "utf8"), "keep-invalid-uuid\n");
+    assert.equal(readFileSync(join(unknownDir, "nested.request.json"), "utf8"), "nested\n");
+    assert.equal(readFileSync(unknownLink, "utf8"), "keep-request-unknown\n");
+    assert.equal(readFileSync(requestLink, "utf8"), "keep-request-unknown\n");
+    assert.equal(readFileSync(join(allocated.paths.requests, "not-a-sequence.request.json"), "utf8"), "sibling\n");
+    assert.equal(readFileSync(join(allocated.paths.requests, "other-dir", "inside.bin"), "utf8"), "inside\n");
+    assert.equal(existsSync(allocated.paths.heart), false);
+    assert.equal(existsSync(allocated.paths.leash), false);
+    assert.equal(existsSync(sequence), true);
+    assert.equal(existsSync(allocated.paths.requests), true);
+    for (const name of ["01", "00", "9007199254740992", "9007199254740993"]) {
+      const noncanonical = join(allocated.paths.requests, name);
+      mkdirSync(noncanonical);
+      writeFileSync(join(noncanonical, "43333333-3333-4333-8333-333333333333.request.json"), "keep-noncanonical\n");
+    }
+    assert.deepEqual(await Keiyaku.nuke({ world, confirm: world }), { kind: "success", world });
+    for (const name of ["01", "00", "9007199254740992", "9007199254740993"]) {
+      assert.equal(readFileSync(join(allocated.paths.requests, name, "43333333-3333-4333-8333-333333333333.request.json"), "utf8"), "keep-noncanonical\n");
+    }
+  } finally {
+    rmSync(world, { recursive: true, force: true });
+  }
+});
+
+test("confirmed nuke preserves recognized entries when stop cannot take custody", async () => {
+  const world = await testWorld();
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "deadbeef" });
+    await initializeHeart(allocated.paths);
+    const soul: Soul = {
+      id: allocated.id,
+      archetype: "claude",
+      provider: CLAUDE_EXECUTION,
+      options: {},
+      cwd: world,
+      origin: { kind: "direct" },
+      allowed: ALLOWED_ACTIONS,
+      createdAt: "2026-08-19T00:00:00.000Z",
+    };
+    const leash = (await HeldAkumaLeash.try(allocated.paths))!;
+    try {
+      await leash.birth(allocated.paths, soul);
+      await leash.recordBody(allocated.paths, { leashTakenAt: "2026-08-19T00:00:00.000Z" });
+      writeFileSync(allocated.paths.log, "stdio\n");
+      mkdirSync(allocated.paths.requests, { recursive: true });
+      writeFileSync(join(allocated.paths.requests, "pending.json"), "claim\n");
+      const result = await Keiyaku.nuke({ world, confirm: world });
+      assert.equal(result.kind, "failed");
+      assert.match(result.diagnostic, /could not be stopped: unavailable/u);
+      assert.equal(existsSync(allocated.paths.heart), true);
+      assert.equal(existsSync(allocated.paths.leash), true);
+      assert.equal(existsSync(allocated.paths.log), true);
+      assert.equal(readFileSync(join(allocated.paths.requests, "pending.json"), "utf8"), "claim\n");
+    } finally {
+      leash.release();
+    }
+  } finally {
+    rmSync(world, { recursive: true, force: true });
   }
 });
 

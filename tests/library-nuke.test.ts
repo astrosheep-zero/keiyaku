@@ -9,12 +9,13 @@ async function worldFixture(): Promise<string> {
   return await World.at(mkdtempSync(join(tmpdir(), "keiyaku-v4-library-nuke-")));
 }
 
-test("confirmed nuke removes an empty World marker", async () => {
+test("confirmed nuke retains the coordination lock marker", async () => {
   const world = await worldFixture();
   try {
     assert.equal(existsSync(join(world, ".keiyaku")), true);
     assert.deepEqual(await Keiyaku.nuke({ world, confirm: world }), { kind: "success", world });
-    assert.equal(existsSync(join(world, ".keiyaku")), false);
+    assert.equal(existsSync(join(world, ".keiyaku")), true);
+    assert.equal(existsSync(join(world, ".keiyaku", "locks", "task-allocation.sqlite")), true);
   } finally {
     rmSync(world, { recursive: true, force: true });
   }
