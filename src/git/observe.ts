@@ -75,6 +75,11 @@ export type BindCoordinatesObservation = Readonly<{
   branch: string | null;
 }>;
 
+export type UnbornHeadObservation = Readonly<{
+  kind: "unborn-head";
+  branch: string | null;
+}>;
+
 const TARGET_COORDINATES_FORMAT = "%(refname)%00%(objectname)%00";
 
 export async function normalizeTargetBranch(repository: GitRepository, input: string): Promise<string | null> {
@@ -122,15 +127,22 @@ function structuredFields(output: Buffer, fieldCount: number): readonly string[]
 export async function observeBindCoordinates(
   repository: GitRepository,
   requestedTarget?: string,
-): Promise<BindCoordinatesObservation | null> {
+): Promise<BindCoordinatesObservation | UnbornHeadObservation | null> {
   if (requestedTarget === undefined) {
     try {
       return {
         start: mintSnapshotId((await runGit(repository, ["rev-parse", "--verify", "HEAD"])).toString("utf8").trim()),
         branch: await currentBranch(repository),
       };
-    } catch {
-      malformedBindCoordinatesOutput();
+    } catch (error) {
+      if (
+        error instanceof GitPlumbingError
+        && error.status === 128
+        && error.stderr.toString("utf8").includes("Needed a single revision")
+      ) {
+        return { kind: "unborn-head", branch: await currentBranch(repository) };
+      }
+      throw error;
     }
   }
 

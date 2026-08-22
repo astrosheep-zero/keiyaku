@@ -146,6 +146,14 @@ test("observes a missing explicit bind target without inventing coordinates", as
   assert.equal(await observeBindCoordinates(await repositoryAt(repository.path), "refs/heads/missing"), null);
 });
 
+test("observes an unborn targetless HEAD as a typed pre-admission outcome", async () => {
+  const repository = makeGitRepository();
+  assert.deepEqual(await observeBindCoordinates(await repositoryAt(repository.path)), {
+    kind: "unborn-head",
+    branch: "refs/heads/main",
+  });
+});
+
 test("refuses targets that name Keiyaku-owned refs", async () => {
   const repository = repositoryWithHead();
   const ownedTargets = [

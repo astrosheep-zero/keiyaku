@@ -30,13 +30,12 @@ export async function bindFromCommand({ command, repo, markdown, gates, actor, h
     });
   }
   const after: readonly ContractId[] | undefined = command.after?.map((id) => contractFromInput(repo, id).id);
-  const target = command.target ?? await repo.currentBranch();
   if (markdown === undefined || gates === undefined) throw new Error("Markdown bind command is missing stdin terms");
   return Keiyaku.bind({
     repo,
     markdown,
     ...(command.task === undefined ? {} : { task: command.task as `task/${string}` }),
-    ...(target === null ? {} : { target }),
+    ...(command.target === undefined ? {} : { target: command.target }),
     ...(actor === undefined ? {} : { actor }),
     ...(hooks === undefined ? {} : { hooks }),
     ...(after === undefined ? {} : { after }),

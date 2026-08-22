@@ -258,6 +258,7 @@ type DocumentMovedRefusal = Readonly<{
 type TargetInputRefusal =
   | Readonly<{ kind: "invalid-target" }>
   | Readonly<{ kind: "target-missing" }>
+  | Readonly<{ kind: "unborn-head" }>
   | Readonly<{
       kind: "here-target-mismatch"
       target: string

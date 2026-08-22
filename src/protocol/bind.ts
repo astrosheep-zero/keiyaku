@@ -15,7 +15,8 @@ import { complete, type IntentOutcome } from "./outcome.js";
 import type { CompanionDecorator } from "./run.js";
 export type TargetInputRefusal =
   | Readonly<{ kind: "invalid-target" }>
-  | Readonly<{ kind: "target-missing" }>;
+  | Readonly<{ kind: "target-missing" }>
+  | Readonly<{ kind: "unborn-head" }>;
 export type ForkSourceMovedRefusal = Readonly<{ kind: "fork-source-moved"; contractId: ContractId }>;
 
 type BindOperationInput = Readonly<{
@@ -52,6 +53,9 @@ async function bindPreparation(
   }
   const observed = await observeBindCoordinates(input.scope, target);
   if (observed === null) return { kind: "refused", refusal: { kind: "target-missing" } };
+  if (!("start" in observed)) {
+    return { kind: "refused", refusal: { kind: "unborn-head" } };
+  }
   const start = input.coordinates?.start ?? observed.start;
   const oid = gitObjectIdForSnapshot(input.coordinates === undefined ? start : observed.start);
   const assertions: GitRefAssertion[] = input.coordinates === undefined ? [{ ref: target ?? "HEAD", oid }] : [];

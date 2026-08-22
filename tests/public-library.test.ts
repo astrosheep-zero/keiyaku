@@ -424,6 +424,17 @@ test("bind canonicalizes branch targets and refuses invalid names before birth",
   assert.equal(repository.run(["for-each-ref", "--format=%(refname)", "refs/heads/missing"]), "");
 });
 
+test("targetless bind refuses an unborn HEAD without publishing effects", async () => {
+  const repository = makeGitRepository();
+  const repo = await Repo.at({ path: repository.path });
+  await assert.rejects(
+    Keiyaku.bind({ repo, markdown: markdown("Unborn targetless"), workspace: "worktree" }),
+    (error: unknown) => error instanceof KeiyakuRefused && error.code === "unborn-head",
+  );
+  assert.equal(repository.run(["for-each-ref", "--format=%(refname)", "refs/heads/keiyaku-state"]), "");
+  assert.deepEqual((await Keiyaku.list({ repo })).rows, []);
+});
+
 test("public amend rejects a transitive prerequisite cycle without moving its head", async () => {
   const repo = await Repo.at({ path: repositoryWithInitialCommit().path });
   const prerequisite = await Keiyaku.bind({ repo, markdown: markdown("Prerequisite"), workspace: "worktree" });

@@ -223,6 +223,18 @@ test("an implicit Contract call refuses before creating its candidate World", as
   assert.equal(existsSync(marker), false);
 });
 
+test("targetless bind on an unborn HEAD renders its typed refusal and preserves the draft", async () => {
+  const repository = makeGitRepository();
+  const source = contractDocument("Unborn CLI bind");
+  const result = await invokeWithDocument(repository.path, ["bind", "-"], source);
+  assert.equal(result.kind, "refused");
+  if (result.kind !== "refused") return;
+  assert.deepEqual(result.refusal, { kind: "unborn-head" });
+  assert.match(renderText(result), /unborn-head/u);
+  assert.equal(result.draft?.path === undefined, false);
+  assert.equal(repository.run(["for-each-ref", "--format=%(refname)", "refs/heads/keiyaku-state"]), "");
+});
+
 function acceptedContract(result: Awaited<ReturnType<typeof invoke>>): ContractId {
   if (result.kind !== "accepted") throw new Error(`expected accepted result, got ${result.kind}`);
   return result.contract;
@@ -555,7 +567,7 @@ test("a linked-worktree Task invocation uses its local namespace and the primary
   if (board.kind === "accepted") assert.equal(board.value.rows.some((row) => row.id === added.value?.id), true);
 });
 
-test("bind defaults its target to the invocation worktree's current branch", async () => {
+test("targetless bind uses the invocation worktree's current HEAD without a target ref", async () => {
   const repository = repositoryWithMain();
   const start = repository.run(["rev-parse", "refs/heads/main"]).trim();
   const source = contractDocument("Markdown Bind", "## Rollout Notes\nfirst\n\n- second\n");
@@ -569,10 +581,9 @@ test("bind defaults its target to the invocation worktree's current branch", asy
   const state = (await observeContract(await repositoryAt(repository.path), acceptedContract(result))).state;
   assert.deepEqual(state?.coordinates, {
     start,
-    target: "refs/heads/main",
     workspace: "worktree",
   });
-  assert.equal(result.kind === "accepted" ? result.target : undefined, "refs/heads/main");
+  assert.equal(result.kind === "accepted" ? result.target : undefined, null);
   assert.equal(state?.terms?.document.bytes, source);
   const decoded = state?.terms === null || state?.terms === undefined
     ? null
@@ -960,7 +971,7 @@ test("managed delivery follows an eligible deterministic worktree", async () => 
   const target = repository.run(["rev-parse", "refs/heads/main"]).trim();
   const bound = await invokeWithDocument(
     repository.path,
-    ["bind", "--actor", "external-test", "-"],
+    ["bind", "--target", "main", "--actor", "external-test", "-"],
     contractDocument("Managed Worktree"),
   );
   const id = acceptedContract(bound);
@@ -1042,7 +1053,7 @@ test("managed abandonment cleans terminal resources from its own worktree cwd", 
   const repository = repositoryWithMain();
   const bound = await invokeWithDocument(
     repository.path,
-    ["bind", "--actor", "external-test", "-"],
+    ["bind", "--target", "main", "--actor", "external-test", "-"],
     contractDocument("Managed Abandonment"),
   );
   const id = acceptedContract(bound);

@@ -88,7 +88,9 @@ not change the caller's checkout to restore the earlier observation.
 An explicit target must exist at bind observation. Absence is returned to
 the library as `target-missing` before any journal or ref publication. Git
 never creates the target branch and never substitutes another ref or the
-caller's current `HEAD` for it.
+caller's current `HEAD` for it. A targetless bind requires a dereferenceable
+`HEAD`; a fresh repository with an unborn `HEAD` returns the typed
+`unborn-head` refusal without inventing a snapshot or publishing state.
 
 A target is an optional Git ref because a claimed placement may move it.
 `workspace: "worktree"` gives Git ownership of one deterministic delivery ref

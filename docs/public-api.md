@@ -171,6 +171,9 @@ current `HEAD`. The canonical full ref is the only target value persisted in
 contract coordinates; its Git meaning is defined in
 [git.md](git.md).
 
+An omitted target requires a real `HEAD` commit; an unborn `HEAD` returns the
+typed `unborn-head` refusal.
+
 `Repo.at` resolves and pins the Git world before returning; omitted `path` uses
 the caller cwd. Optional nonblank `gitPath` selects and pins the executable for
 every Git subprocess issued through that Repo; omission uses the literal
