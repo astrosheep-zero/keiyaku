@@ -190,7 +190,7 @@ type MergeStatePresentRefusal = Readonly<{
   kind: "merge-state-present"
   contractId: ContractId
   workspace: Readonly<{
-    kind: "here" | "worktree"
+    kind: "worktree"
     path: string
   }>
 }>
@@ -200,7 +200,7 @@ type IntegrationConflictMaterialized = Readonly<{
   targetHead: SnapshotId
   conflictPaths: readonly string[]
   workspace: Readonly<{
-    kind: "here" | "worktree"
+    kind: "worktree"
     path: string
   }>
 }>
@@ -214,13 +214,6 @@ type CheckoutNotFollowableRefusal = Readonly<{
   paths: readonly string[]
 }>
 
-type DeliveryWorkspaceRefusal = Readonly<{
-  kind: "workspace-not-on-target"
-  contractId: ContractId
-  target: string
-  branch: string | null
-}>
-
 type DeliveryPreparationRefusal =
   | Readonly<{ kind: "target-missing" | "worktree-missing"; contractId: ContractId }>
   | DirtyWorkspaceRefusal
@@ -228,7 +221,6 @@ type DeliveryPreparationRefusal =
   | IntegrationRefusal
   | MergeStatePresentRefusal
   | CheckoutNotFollowableRefusal
-  | DeliveryWorkspaceRefusal
 
 type DirtyWorkspaceRefusal = Readonly<{
   kind: "dirty-workspace"
@@ -259,11 +251,6 @@ type TargetInputRefusal =
   | Readonly<{ kind: "invalid-target" }>
   | Readonly<{ kind: "target-missing" }>
   | Readonly<{ kind: "unborn-head" }>
-  | Readonly<{
-      kind: "here-target-mismatch"
-      target: string
-      branch: string | null
-    }>
 
 type VerificationStop =
   | StepStop<AttestationRefusal>
@@ -281,7 +268,7 @@ type VerificationStop =
   | Readonly<{ failure: "spawn-error"; diagnostic: string }>
 
 type PlacementStop =
-  | StepStop<PlacementRefusal | IntegrationRefusal | CheckoutNotFollowableRefusal | DeliveryWorkspaceRefusal>
+  | StepStop<PlacementRefusal | IntegrationRefusal | CheckoutNotFollowableRefusal>
   | Readonly<{
       failure: "target-moved"
       contractId: ContractId
@@ -459,7 +446,7 @@ Read-only `ContractWorkspaceObservation` is owned by
 second read-result shape.
 
 ```ts
-type AuditWorkspace = Readonly<{ kind: "worktree" | "here"; path: string }>
+type AuditWorkspace = Readonly<{ kind: "worktree"; path: string }>
 type DiffScope = Readonly<{
   filesChanged: number
   insertions: number

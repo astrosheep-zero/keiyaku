@@ -66,9 +66,7 @@ product owners create neither Git readers nor cross-call caches.
 
 Git mints `ContractCoordinates.start` at bind. With a target it is the
 resolved target head; without a target it is the caller worktree's current
-`HEAD`. It is the initial managed-worktree commit and the original comparison
-point for a `here` workspace. A targeted here contract is legal only while
-the caller's symbolic `HEAD` is that target.
+`HEAD`. It is the initial managed-worktree commit.
 
 Bind derives those coordinates anew inside every semantic attempt from one
 target-selection intent: an explicit target, the current attached branch, or
@@ -84,12 +82,6 @@ updates, creates, deletes, or symbolically updates a ref. An OID movement,
 identity collision, or Git CAS retry therefore discards the attempt and
 re-observes coordinates; a fresh read alone is not the currentness judge.
 
-The symbolic branch and attachedness read for targeted `here` eligibility are
-not Contract facts. They can refuse that decision observation, but admission
-does not assert or persist them. Moving to another branch at the same OID
-between observation and admission is therefore legal and invisible; Git must
-not change the caller's checkout to restore the earlier observation.
-
 An explicit target must exist at bind observation. Absence is returned to
 the library as `target-missing` before any journal or ref publication. Git
 never creates the target branch and never substitutes another ref or the
@@ -100,12 +92,6 @@ caller's current `HEAD` for it. A targetless bind requires a dereferenceable
 A target is an optional Git ref because a claimed placement may move it.
 `workspace: "worktree"` gives Git ownership of one deterministic delivery ref
 and linked worktree; its branch remains independent from the target.
-`workspace: "here"` uses the pinned caller worktree in place and never takes
-ownership of that worktree or its branch. Here is a commit-in-place capability,
-not a foreign-target delivery mode: bind refuses a targeted here workspace
-whose symbolic `HEAD` differs from that target or is detached. Delivery refuses
-before tender when the workspace no longer names its recorded target. A
-targetless here contract remains legal.
 
 The Git ref, managed delivery namespace, and candidate-pin namespace have
 this one Git owner. The library boundary rejects a target that names any
@@ -128,14 +114,13 @@ Terminal cleanup proves the appointed path is physically absent before Place
 release. A retained physical path remains explicit lag; absence is the proof of
 cleanup, not appointment metadata.
 
-Git owns workspace cleanliness and target lag at the appointed path, or at
-the pinned caller worktree for `here`, counting workspace `HEAD` against
-the same-epoch frozen `targetObservation.head` and never a live target ref.
+Git owns workspace cleanliness and target lag at the appointed path, counting
+workspace `HEAD` against the same-epoch frozen `targetObservation.head` and
+never a live target ref.
 A named target with a missing frozen head is unknown. Clean means empty
 staged, unstaged, untracked, and submodule sets; otherwise dirty;
 unavailable when unobservable. An unappointed managed Contract has no
-worktree to probe. Here never fabricates a managed path. These facts are
-not persisted.
+worktree to probe. These facts are not persisted.
 
 ## Tender, Integration, And Diff Ownership
 
@@ -232,15 +217,6 @@ only predecessor-to-candidate writes, never follows symlinks or enumerates
 unrelated siblings, and lets Git judge whether a displaced scope contains
 ignored untracked bytes. Any such byte refuses as `untracked`; observation
 failure is nonpublishing `target-placement-failed`.
-
-When a targeted here workspace is itself the target checkout, placement
-follows Git commit semantics. Its captured dirty bytes are the verified
-candidate, so merge preconditions do not apply. After publication Git sets
-that checkout's index to the candidate tree and does not write its worktree.
-Captured staged, unstaged, and untracked bytes therefore become the clean
-candidate. Bytes edited after capture remain ordinary unstaged changes.
-Staging intent created after capture may be reclassified as unstaged, but its
-worktree bytes are never discarded.
 
 The target fence has no post-admission marker or ancestor search. Recovery is
 allowed only while the target names the claimed candidate. Candidate index and

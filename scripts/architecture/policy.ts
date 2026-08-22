@@ -581,7 +581,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "git/nuke.ts",
       allow: [
-        any("contract-worktree.ts", ["nukeContractWorktreeLock", "nukeHereAppointments"]),
+        any("contract-worktree.ts", ["nukeContractWorktreeLock"]),
         types("core/facts/types.ts", ["ContractId"]),
         any("git/hooks.ts", ["nukeWorktreeHookResidue"]),
         any("git/process.ts", ["runGit", "GitRepository"]),
@@ -1168,12 +1168,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("git/observe.ts", ["observeActiveContractWorld"]),
         any("git/read-observation.ts", ["GitDecodeChannel", "withGitReadObservation"]),
         any("protocol/deliver.ts", ["continueDeliveryOperation"]),
-        any("protocol/operations.ts", [
-          "DocumentDerivation",
-          "HereWorkspaceResolver",
-          "PlacementStop",
-          "RepositoryScope",
-        ]),
+        any("protocol/operations.ts", ["DocumentDerivation", "PlacementStop", "RepositoryScope"]),
         types("library/mutation.ts", ["AcceptedIntent"]),
       ],
     },
@@ -1497,7 +1492,6 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("kanshi/**"),
         any("library/region.ts", ["readRegionDeclarations", "validateRegionPatterns"]),
         any("core/facts/types.ts", ["contractId"]),
-        any("contract-worktree.ts", ["resolveHereContractWorkspace"]),
         types("library/contract.ts"),
         any("library/repo.ts", ["Repo", "scopeForRepo"]),
         any("protocol/read/status.ts", ["readContractBoard"]),
