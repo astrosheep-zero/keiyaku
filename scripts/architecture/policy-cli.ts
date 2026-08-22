@@ -4,7 +4,7 @@ export const cliZones = [
     source: "cli/commands/akuma.ts",
     allow: [
       any("akuma/allowed.ts"),
-      any("akuma/identity.ts", ["archetypeName", "parseAkuId", "AkuId"]),
+      any("akuma/identity.ts", ["parseAkuId", "AkuId"]),
       any("cli/usage.ts"),
       any("duration.ts"),
       any("identity/selector.ts"),
@@ -134,7 +134,36 @@ export const cliZones = [
       any("cli/selectors.ts"),
     ],
   },
-  { source: "cli/commands/contract.ts", allow: [types("library/catalog.ts", ["CatalogQuery"])] },
+  {
+    source: "cli/commands/contract.ts",
+    allow: [
+      any("akuma/identity.ts", ["archetypeName"]),
+      types("library/catalog.ts", ["CatalogQuery"]),
+      any("cli/usage.ts", ["CliUsageError", "usageLine"]),
+    ],
+  },
+  {
+    source: "cli/commands/contract-invoke.ts",
+    allow: [
+      types("index.ts"),
+      types("cli/parse.ts"),
+      types("cli/result.ts"),
+      types("cli/selectors.ts"),
+      types("library/configuration.ts"),
+      types("library/repo.ts"),
+      types("settings.ts"),
+      types("world.ts"),
+      any("cli/accepted.ts"),
+      any("cli/actor.ts"),
+      any("cli/commands/amend.ts"),
+      any("cli/commands/bind.ts"),
+      any("cli/draft.ts"),
+      any("cli/selectors.ts"),
+      any("cli/usage.ts"),
+      any("library/configuration.ts"),
+      any("library/keiyaku.ts"),
+    ],
+  },
   {
     source: "cli/invoke.ts",
     allow: [

@@ -1,5 +1,5 @@
 import { CliUsageError, isBlankInput, usageLine } from "../usage.js";
-import { archetypeName, parseAkuId } from "../../akuma/identity.js";
+import { parseAkuId } from "../../akuma/identity.js";
 import { parseDuration as decodeDuration } from "../../duration.js";
 import { parseAkumaAlias, parseAkumaGlob, type AkumaAlias } from "../../identity/selector.js";
 import { decodeAllowedActions, type AllowedActions } from "../../akuma/allowed.js";
@@ -129,16 +129,6 @@ export function renderAkumaHelp(action: AkumaAction): string {
 
 export function renderAkumaUsage(action: AkumaAction): string {
   return usageLine(AKUMA_COMMAND_SPECS[action].usage);
-}
-
-export function parseAkumaCatalogPath(
-  value: string,
-): Readonly<{ kind: "archetypes" } | { kind: "akuma"; archetype?: string }> | null {
-  if (value === "aku" || value === "aku/") return { kind: "archetypes" };
-  if (value === "aku/*/*") return { kind: "akuma" };
-  const match = /^aku\/([^/]+)\/?$/u.exec(value);
-  if (match === null) return null;
-  return { kind: "akuma", archetype: archetypeName(match[1]!) };
 }
 
 type Scanned = Readonly<{ flags: Readonly<Record<string, FlagValue>>; positionals: readonly string[]; stdin: boolean }>;
