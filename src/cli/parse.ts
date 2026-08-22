@@ -208,9 +208,8 @@ function refuse(command: Command, message: string): never {
   throw new CliUsageError(message, contractUsage(command));
 }
 
-function scanStdin(command: Command, state: ScanState, index: number, length: number): void {
+function scanStdin(command: Command, state: ScanState): void {
   if (state.stdin) refuse(command, "stdin marker '-' may appear only once");
-  if (index !== length - 1) refuse(command, "stdin marker '-' must be the final argument");
   if (CONTRACT_COMMAND_SPECS[command].stdin === "none") refuse(command, `${command} reads no stdin`);
   state.stdin = true;
 }
@@ -253,7 +252,7 @@ function scanArgv(argv: readonly string[]): ParsedParts {
   for (let index = 1; index < argv.length; index += 1) {
     const token = argv[index]!;
     if (token === "-") {
-      scanStdin(command, state, index, argv.length);
+      scanStdin(command, state);
       continue;
     }
     if (token.startsWith("--")) {
@@ -422,16 +421,13 @@ function invocationOptions(
 ): Readonly<{ cwd?: string; repo?: string; commandArgv: readonly string[] }> {
   let cwd: string | undefined;
   let repo: string | undefined;
-  let stdinSeen = false;
   const commandArgv: string[] = [];
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index]!;
     if (token !== "-C" && token !== "--cwd" && token !== "--repo") {
       commandArgv.push(token);
-      if (token === "-") stdinSeen = true;
       continue;
     }
-    if (stdinSeen) throw new CliUsageError("stdin marker '-' must be the final argument", renderRootHelp());
     if (token === "--repo" && repo !== undefined) {
       throw new CliUsageError("--repo may appear only once", renderRootHelp());
     }

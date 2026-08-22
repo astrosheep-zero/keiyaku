@@ -102,12 +102,8 @@ test("task parser owns subcommand arity, repeat flags, and selected stdin", () =
     cwd: "/tmp/project",
     command: { command: "task", action: "add", output: "json", positionals: ["Ship task"], flags: { namespace: "contract/inside", state: "in_progress", needs: ["task/a", "task/b"], json: true } },
   });
-  assert.deepEqual(parseArgv(["task", "update", "task/a", "--append", "-"]), {
-    command: { command: "task", action: "update", output: "text", positionals: ["task/a"], flags: { append: "" }, stdin: "append" },
-  });
-  assert.deepEqual(parseArgv(["task", "update", "task/a", "--note", "-"]), {
-    command: { command: "task", action: "update", output: "text", positionals: ["task/a"], flags: { note: "" }, stdin: "note" },
-  });
+  assert.throws(() => parseArgv(["task", "update", "task/a", "--append", "-"]), /--append requires a value/u);
+  assert.throws(() => parseArgv(["task", "update", "task/a", "--note", "-"]), /--note requires a value/u);
   assert.deepEqual(parseArgv(["task", "add", "Ship task", "--actor", "flagship"]).command, {
     command: "task", action: "add", output: "text", positionals: ["Ship task"], flags: { actor: "flagship" },
   });
@@ -194,8 +190,8 @@ test("task invocation works outside Git and consumes stdin only when selected", 
   assert.equal((shown as { task: { state: string } }).task.state, "on_hold");
   assert.equal((shown as { task: { note: string } }).task.note, "initial");
 
-  const noteUpdate = await invoke(parseArgv(["-C", root, "task", "update", "task/native-cli", "--note", "-"]), { readStdin: () => { reads += 1; return "replacement"; } }) as TaskInvocationResult;
-  assert.equal((noteUpdate as { kind: string }).kind, "accepted"); assert.equal(reads, 2);
+  const noteUpdate = await invoke(parseArgv(["-C", root, "task", "update", "task/native-cli", "--note", "replacement"]), { readStdin: () => { reads += 1; return "unused"; } }) as TaskInvocationResult;
+  assert.equal((noteUpdate as { kind: string }).kind, "accepted"); assert.equal(reads, 1);
   const noteShown = await invoke(parseArgv(["-C", root, "task", "show", "task/native-cli"])) as TaskInvocationResult;
   assert.equal((noteShown as { task: { note: string } }).task.note, "replacement");
   const showCommand = parseArgv(["task", "show", "task/native-cli"]).command;

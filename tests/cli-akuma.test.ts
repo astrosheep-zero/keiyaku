@@ -131,7 +131,10 @@ test("Akuma CLI parses root verbs without the removed namespace", () => {
     },
   });
   assert.throws(() => parseArgv(["-C", "/one", "call", "claude", "--cwd", "/two", "-"]), /may appear only once/u);
-  assert.throws(() => parseArgv(["call", "claude", "-", "--cwd", "/world"]), /stdin marker '-' must be the final argument/u);
+  assert.deepEqual(parseArgv(["call", "claude", "-", "--cwd", "/world"]), {
+    cwd: "/world",
+    command: { command: "call", archetype: "claude", mode: "wait", prompt: { kind: "stdin" }, output: "text" },
+  });
   assert.throws(() => parseArgv(["call", "claude", "--wait", "5m", "--detach", "-"]), /mutually exclusive/u);
   assert.throws(() => parseArgv(["call", "claude", "--alias", "review", "-"]), /Akuma alias must match/u);
   assert.deepEqual(parseArgv(["tell", "aku/claude/1234abcd", "--json", "-"]), {
@@ -225,6 +228,29 @@ test("Akuma CLI parses root verbs without the removed namespace", () => {
   assert.throws(() => parseArgv(["interrupt", "aku\/claude\/1234abcd", "-"]), /unknown command/u);
   assert.throws(() => parseArgv(["tell", "aku\/claude\/1234abcd", "--interrupt"]), /requires a prompt argument or stdin/u);
   assert.throws(() => parseArgv(["kill", "aku\/claude\/1234abcd", "-"]), /stdin marker .* not valid/);
+  assert.deepEqual(parseArgv(["call", "worker", "-", "--allowed", "contract.deliver", "--detach"]), {
+    command: {
+      command: "call",
+      archetype: "worker",
+      allowed: ["contract.deliver"],
+      mode: "detach",
+      prompt: { kind: "stdin" },
+      output: "text",
+    },
+  });
+  assert.deepEqual(parseArgv(["tell", "-", "@alias", "--interrupt"]), {
+    command: {
+      command: "tell",
+      akuma: "@alias",
+      interrupt: true,
+      prompt: { kind: "stdin" },
+      output: "text",
+    },
+  });
+  assert.throws(() => parseArgv(["call", "worker", "-", "-"]), /stdin marker '-' may appear only once/u);
+  assert.throws(() => parseArgv(["wait", "aku\/claude\/1234abcd", "-"]), /stdin marker .* not valid/);
+  assert.throws(() => parseArgv(["history", "aku\/claude\/1234abcd", "-"]), /stdin marker .* not valid/);
+  assert.throws(() => parseArgv(["fork", "aku\/claude\/1234abcd", "-", "--at", "history-1"]), /stdin marker .* not valid/);
   assert.throws(() => parseArgv(["fork", "aku\/claude\/1234abcd"]), /requires --at/);
   assert.throws(() => parseArgv(["fork", "aku\/claude\/1234abcd", "--at", ""]), /--at requires a nonblank value/);
   const blankSources: ReadonlyArray<readonly [argv: readonly string[], pattern: RegExp]> = [

@@ -306,8 +306,8 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
     [["call", " ", "-"], /call requires a nonblank value/],
     [["tell", "aku/claude/1234abcd", " \u00a0"], /tell requires a nonblank value/],
     [["fork", "aku/claude/1234abcd", "--at", "  "], /--at requires a nonblank value/],
-    [["task", "add"], /task add requires either TITLE or final '-' input/],
-    [["task", "add", "Title", "-"], /task add requires either TITLE or final '-' input/],
+    [["task", "add"], /task add requires either TITLE or '-' input/],
+    [["task", "add", "Title", "-"], /task add requires either TITLE or '-' input/],
     [["task", "add", "  "], /task add requires a nonblank value/],
     [["task", "add", "Title", "--body", ""], /--body requires a nonblank value/],
     [["task", "add", "Title", "--note", "\t"], /--note requires a nonblank value/],
@@ -363,4 +363,40 @@ test("region accepts repeated --path patterns and omits deleted overlap grammar"
   assert.match(renderRootHelp(), /region \[<contract>\]/);
   assert.doesNotMatch(renderRootHelp(), /--overlap/);
   assert.doesNotMatch(renderContractHelp("region"), /--overlap/);
+});
+
+test("stdin marker is position independent for Contract commands and global coordinates", () => {
+  assert.deepEqual(parseArgv(["bind", "-", "--task", "task/example", "--json"]), {
+    command: { command: "bind", task: "task/example", output: "json" },
+  });
+  assert.deepEqual(parseArgv(["amend", "-", "kei/example", "--json"]), {
+    command: { command: "amend", contract: "kei/example", stdin: true, output: "json" },
+  });
+  assert.deepEqual(parseArgv(["arc", "-", "--actor", "operator", "kei/example"]), {
+    command: { command: "arc", contract: "kei/example", actor: "operator", output: "text" },
+  });
+  assert.deepEqual(parseArgv(["review", "-", "--satisfied", "kei/example"]), {
+    command: {
+      command: "review",
+      contract: "kei/example",
+      verdict: "satisfied",
+      summaryFromStdin: true,
+      output: "text",
+    },
+  });
+  assert.deepEqual(parseArgv(["bind", "-", "-C", "/repo/caller", "--repo", "../delivery"]), {
+    cwd: "/repo/caller",
+    repo: "../delivery",
+    command: { command: "bind", output: "text" },
+  });
+  assert.deepEqual(parseArgv(["--repo", "../delivery", "bind", "-", "-C", "/repo/caller"]), {
+    cwd: "/repo/caller",
+    repo: "../delivery",
+    command: { command: "bind", output: "text" },
+  });
+  assert.throws(() => parseArgv(["bind", "-", "--json", "-"]), /stdin marker '-' may appear only once/u);
+  assert.throws(() => parseArgv(["status", "-", "--json"]), /status reads no stdin/u);
+  assert.throws(() => parseArgv(["arc", "kei/example"]), /arc requires stdin/u);
+  assert.throws(() => parseArgv(["bind", "-", "-C", "/one", "--cwd", "/two"]), /-C\/--cwd may appear only once/u);
+  assert.throws(() => parseArgv(["bind", "-", "--repo"]), /--repo requires a path/u);
 });

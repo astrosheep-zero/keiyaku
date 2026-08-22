@@ -141,8 +141,8 @@ task add [--namespace <ns>] [--actor <actor>] -`,
       relates: "repeat",
       "drop-relates": "repeat",
     },
-    usage: `task update <TaskId> [--title <text>] [--body <text>|- | --append <text>|-]
-  [--note <text>|-]
+    usage: `task update <TaskId> [--title <text>] [--body <text>|- | --append <text>]
+  [--note <text>]
   [--priority 0..3] [--needs <TaskId>]... [--drop-needs <TaskId>]...
   [--parent <TaskId> | --no-parent]
   [--supersedes <TaskId>]... [--drop-supersedes <TaskId>]...
@@ -253,9 +253,8 @@ function scanTaskOption(
     kind = input.spec.flags[name];
   if (kind === undefined) fail(`option ${token} is not valid for task ${input.action}`);
   const next = kind === "boolean" ? undefined : input.argv[input.index + 1];
-  if (next === "-" && input.action === "update" && (name === "body" || name === "append" || name === "note")) {
-    if (input.index + 1 !== input.argv.length - 1 || input.stdin !== undefined)
-      fail("stdin update marker '-' must be final");
+  if (next === "-" && input.action === "update" && name === "body") {
+    if (input.stdin !== undefined) fail("stdin marker '-' may appear only once");
     input.flags[name] = "";
     return { index: input.index + 1, stdin: name };
   }
@@ -276,8 +275,8 @@ function scanTaskArgv(action: TaskAction, argv: readonly string[], fail: (messag
   for (let index = 1; index < argv.length; index += 1) {
     const token = argv[index]!;
     if (token === "-") {
-      if (index !== argv.length - 1 || stdin !== undefined || spec.stdin === undefined)
-        fail("stdin marker '-' is not valid here");
+      if (spec.stdin === undefined) fail("stdin marker '-' is not valid here");
+      if (stdin !== undefined) fail("stdin marker '-' may appear only once");
       stdin = spec.stdin;
       continue;
     }
@@ -341,14 +340,14 @@ function validateTaskScan(action: TaskAction, scanned: ScannedTask, fail: (messa
   if (positionals.length < spec.arity[0] || positionals.length > spec.arity[1])
     fail(`task ${action} has invalid positional arguments`);
   if (action === "add" && (stdin === "document") === (positionals.length === 1))
-    fail("task add requires either TITLE or final '-' input");
+    fail("task add requires either TITLE or '-' input");
   if (
     action === "add" &&
     stdin === "document" &&
     Object.keys(flags).some((name) => name !== "json" && name !== "namespace" && name !== "actor")
   )
     fail("task add document input owns its creation fields");
-  if (action === "compose" && stdin !== "compose") fail("task compose requires final '-' input");
+  if (action === "compose" && stdin !== "compose") fail("task compose requires '-' input");
   validateTaskReadFlags(action, flags, fail);
   if (action === "update") validateUpdate(scanned, fail);
 }

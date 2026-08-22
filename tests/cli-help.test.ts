@@ -55,6 +55,8 @@ test("each grammar owner renders its own namespace and leaf help", () => {
   ].join("\n"));
   assert.match(renderTaskHelp(), /task update <TaskId>/u);
   assert.match(renderTaskHelp("tree"), /usage: keiyaku task tree <TaskId>/u);
+  assert.match(renderTaskHelp("update"), /--body <text>\|- \| --append <text>/u);
+  assert.doesNotMatch(renderTaskHelp("update"), /--append <text>\|-|--note <text>\|-/u);
   assert.doesNotMatch(renderTaskHelp(), /--full/u);
   assert.doesNotMatch(renderTaskHelp(), /--contract|--no-contract/u);
   assert.match(renderTaskHelp("compose"), /usage: keiyaku task compose \[--actor <actor>\] -/u);
@@ -72,10 +74,15 @@ test("each grammar owner renders its own namespace and leaf help", () => {
     "",
     "usage: keiyaku tell <aku/...|@alias> [--interrupt] (<prompt> | -)",
     "",
-    "Give <prompt> as one argument, or use final - to read stdin.",
+    "Give <prompt> as one argument, or use - to read stdin.",
     "--interrupt ends the current Body before recording the prompt and waking its successor.",
   ].join("\n"));
   assert.match(renderAkumaHelp("history"), /\[--limit <count>\] \[--last\]/u);
+  assert.doesNotMatch(renderAkumaHelp("call"), /final -/u);
+  assert.doesNotMatch(renderAkumaHelp("tell"), /final -/u);
+  assert.doesNotMatch(renderRootHelp(), /final -/u);
+  assert.doesNotMatch(renderTaskHelp("add"), /final -/u);
+  assert.doesNotMatch(renderTaskHelp("compose"), /final -/u);
 });
 
 test("amend leaf help enumerates the operation grammar", () => {

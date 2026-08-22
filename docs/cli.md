@@ -48,7 +48,7 @@ before coordinate resolution, including help and `install`, do not consume the
 variable. No library or Git module reads `KEIYAKU_GIT_PATH`.
 
 The parser owns argv syntax, including arity, duplicates, unknown flags, mutual
-exclusion, and final-stdin selection. It performs no product observation or
+exclusion, and stdin selection. It performs no product observation or
 judgment. Help completes at this dependency-light edge. After a non-help parse,
 the invocation adapter loads only the selected command family's execution and
 rendering graph, then calls the corresponding public operation without a second
@@ -122,14 +122,15 @@ Contract lifecycle.
 
 ## Inputs And Flags
 
-A final bare `-` reads stdin. For ordinary `bind`, it reads one contract document;
-the `--fork-of` form reads no stdin. For
-`amend`, one amendment-operation document when `-` is present; for `arc`, one
-arc document; and for `review`, the required summary. Review takes exactly one summary source:
-`--summary <text>` or final `-`. Neither or both is a usage refusal. No other
-Contract command reads stdin. Akuma and Task stdin entry points are specified
-by their command grammars below. The grammar of all document inputs is owned
-by [document.md](document.md).
+Standalone `-` is the stdin marker: once, at any argument position.
+Scanning continues, and `-C`/`--cwd`/`--repo` may follow.
+For ordinary `bind`, it reads one contract document; the `--fork-of` form reads
+no stdin. For `amend`, one amendment-operation document when `-` is present; for
+`arc`, one arc document; and for `review`, the required summary. Review takes
+exactly one summary source: `--summary <text>` or `-`. Neither or both is a
+usage refusal. No other Contract command reads stdin. Akuma and Task stdin
+entry points follow their command grammars. Document input grammar is owned by
+[document.md](document.md).
 
 Argv decides whether stdin is required or allowed before bytes are acquired.
 Acquisition failure exits `3`; syntax and edge validation remain usage
@@ -166,10 +167,10 @@ It stores no source or comparison relation.
 `amend` maps optional Markdown, `--actor`, repeated `--after`,
 and `--gates` to `keiyaku.amend`. Its omitted `after` leaves the current value
 unchanged, while `--clear-after` maps to `after: []`; it is mutually exclusive
-with `--after`. Final `-` selects one nonblank H2 operation document. Its
+with `--after`. `-` selects one nonblank H2 operation document. Its
 absence requires at least one of `--after`, `--clear-after`, or `--gates` and
 does not acquire stdin; otherwise parsing is usage before observation. `bind`
-and `arc` still require their final `-` document input. Amend leaf help
+and `arc` still require `-`. Amend leaf help
 enumerates the operation headings and keeps the target forms distinct for
 criteria and extensions. Body semantics remain owned by the document chapter.
 
@@ -228,7 +229,7 @@ uses native harness installers; `--all` runs the supported harnesses in fixed
 order and continues after failures. Text and JSON expose one typed result per
 harness; any failure exits `1`.
 
-`call` and `tell` accept exactly one nonblank positional or final-stdin prompt
+`call` and `tell` accept exactly one nonblank positional or stdin prompt
 and pass its bytes unchanged. The CLI maps `KEIYAKU_HOME` once for the
 explicit Akuma home; provider selection remains a library concern. Missing-name
 text names the input and points to `keiyaku ls aku/`.

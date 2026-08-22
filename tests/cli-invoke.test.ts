@@ -1266,8 +1266,6 @@ test("blank acquired stdin is usage before World, Repo, or package invocation", 
     [["task", "add", "-"], "\t", /task add requires a nonblank stdin document/],
     [["task", "compose", "-"], "", /task compose requires a nonblank stdin document/],
     [["task", "update", "task/example", "--body", "-"], "   ", /task update --body requires a nonblank value/],
-    [["task", "update", "task/example", "--append", "-"], "\n", /task update --append requires a nonblank value/],
-    [["task", "update", "task/example", "--note", "-"], " ", /task update --note requires a nonblank value/],
   ];
   for (const [argv, stdin, pattern] of cases) {
     await assert.rejects(

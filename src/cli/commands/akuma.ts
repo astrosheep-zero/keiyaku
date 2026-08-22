@@ -60,7 +60,7 @@ const AKUMA_COMMAND_SPECS = {
       "call <akuma-name> [--contract <kei/...>] [--alias @name] [--readonly] [--allowed <product.action>]... [--wait <duration> | -d | --detach] (<prompt> | -)",
     purpose: "Birth an Akuma from <akuma-name> with one prompt.",
     details: [
-      "Give <prompt> as one argument, or use final - to read stdin.",
+      "Give <prompt> as one argument, or use - to read stdin.",
       "Default: --wait 5m. An explicit --wait replaces that duration; -d and --detach return after birth.",
       "--contract dispatches the born Akuma to that Contract.",
       "--alias assigns the world-local @name selector to the born Akuma.",
@@ -83,7 +83,7 @@ const AKUMA_COMMAND_SPECS = {
     usage: "tell <aku/...|@alias> [--interrupt] (<prompt> | -)",
     purpose: "Send one prompt to an existing Akuma and wake it.",
     details: [
-      "Give <prompt> as one argument, or use final - to read stdin.",
+      "Give <prompt> as one argument, or use - to read stdin.",
       "--interrupt ends the current Body before recording the prompt and waking its successor.",
     ].join("\n"),
   },
@@ -192,7 +192,8 @@ function scanAkuma(action: AkumaAction, argv: readonly string[], fail: (message:
   for (let index = 1; index < argv.length; index += 1) {
     const token = argv[index]!;
     if (token === "-") {
-      if (stdin || index !== argv.length - 1 || !spec.stdin) fail(`stdin marker '-' is not valid for ${action}`);
+      if (!spec.stdin) fail(`stdin marker '-' is not valid for ${action}`);
+      if (stdin) fail("stdin marker '-' may appear only once");
       stdin = true;
     } else if (token === "-d") {
       if (action !== "call") fail(`option ${token} is not valid for ${action}`);

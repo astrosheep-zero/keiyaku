@@ -50,8 +50,8 @@ task query [--where <expression>] [--world]
   [--sort priority|created|updated|id] [--limit <n>] [--json]
 task tree <TaskId> [--json]
 task doctor [--json]
-task update <TaskId> [--title <text>] [--body <text>|- | --append <text>|-]
-  [--note <text>|-]
+task update <TaskId> [--title <text>] [--body <text>|- | --append <text>]
+  [--note <text>]
   [--priority 0..3] [--needs <TaskId>]... [--drop-needs <TaskId>]...
   [--parent <TaskId> | --no-parent]
   [--supersedes <TaskId>]... [--drop-supersedes <TaskId>]...
@@ -66,10 +66,10 @@ task namespace [<namespace>] [--json]
 task compose [--actor <actor>] [--json] -
 ```
 
-Literal `-` selects creation-document input for add, body or note input only
-after `--body`, `--append`, or `--note` for update, and composition input for
-compose. Unselected piped stdin is not consumed. Add requires exactly one
-source: a nonblank TITLE or final `-`. Add document input rejects
+Literal `-` selects creation-document input for add, body input only after
+`--body` for update, and composition input for compose. Unselected piped stdin
+is not consumed. Add requires exactly one
+source: a nonblank TITLE or `-`. Add document input rejects
 creation-owned identity, may declare its initial state, and cannot be combined
 with structured creation flags other than `--namespace` and `--actor`. Update requires at
 least one explicit patch and remains legal when it changes only non-body
@@ -89,7 +89,7 @@ each addressed Task in that Task's independent atomic lifecycle mutation. Batch
 lifecycle commands preserve input order, continue after per-Task refusals, and
 do not consume stdin for notes.
 
-`--actor` is legal only on `task add` (structured and final `-` forms) and
+`--actor` is legal only on `task add` (structured and `-` forms) and
 `task compose`. The invocation edge resolves actor once before reading or
 applying the selected creation input: explicit nonblank `--actor`, then
 nonblank `KEIYAKU_ACTOR_ID`, then unsigned. A blank explicit value is usage; a
