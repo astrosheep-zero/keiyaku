@@ -113,7 +113,7 @@ test("supplemental Contract help is owned by command specs", () => {
   assert.doesNotMatch(renderRootHelp(), /stdin operations/u);
   for (const command of Object.keys(CONTRACT_COMMAND_SPECS) as ContractCommand[]) {
     const spec: ContractCommandSpec = CONTRACT_COMMAND_SPECS[command];
-    const expected = `${spec.purpose}\n\n${usageLine(spec.usage)}${spec.help === undefined ? "" : `\n\n${spec.help}`}`;
+    const expected = `${spec.purpose}\n\n${usageLine(spec.usage)}${spec.details === undefined ? "" : `\n\n${spec.details}`}`;
     assert.equal(renderContractHelp(command), expected);
   }
 });

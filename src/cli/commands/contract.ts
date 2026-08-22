@@ -8,7 +8,7 @@ export type ContractCommandSpec = Readonly<{
   flags: Readonly<Record<string, ContractFlagKind>>;
   usage: string;
   purpose: string;
-  help?: string;
+  details?: string;
 }>;
 
 type Output = Readonly<{ output: "text" | "json" }>;
@@ -112,7 +112,7 @@ export const CONTRACT_COMMAND_SPECS = {
     usage:
       "amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name,...>] [--actor <actor>] [-]",
     purpose: "Amend one Contract's document operations or structured terms.",
-    help: [
+    details: [
       "  ## Replace: Context|Objective|Design|Region|Criteria|Verification|<extension>",
       "  ## Append: Context|Objective|Design|Criteria|<extension>",
       "  ## Add: Criteria|<new-extension-title>",
@@ -134,7 +134,7 @@ export const CONTRACT_COMMAND_SPECS = {
     usage:
       "deliver [<contract>|@<contract>] [--message <text>] [--include-dirty] [--materialize-conflict] [--actor <actor>]",
     purpose: "Deliver one Contract candidate from the appointed worktree.",
-    help: [
+    details: [
       "  --include-dirty         Capture the complete non-ignored worktree tree as the",
       "                          candidate; stages nothing, commits nothing. Refused",
       "                          while unmerged paths exist.",

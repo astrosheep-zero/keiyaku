@@ -46,8 +46,9 @@ usage, and purpose values. Only Task remains a namespace.
 
 `--help` is a reserved parser token. After optional `-C`, its presence requests
 help for the longest legal command-word prefix even when later tokens are
-invalid. Root, namespace, and leaf help render their owning rows; leaf help may
-add supplemental guidance or one minimal example. There is no `help` command,
+invalid. Root and namespace help render each spec's usage and purpose. Leaf help
+renders the same spec's purpose, usage, and optional opaque details text owned by
+that spec. There is no `help` command,
 `-h`, per-row flag, or JSON help.
 
 Help writes stdout, exits `0`, reads no stdin or product state, and works

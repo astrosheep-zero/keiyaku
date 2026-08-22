@@ -43,6 +43,7 @@ type TaskCommandSpec = Readonly<{
   stdin?: "document" | "compose";
   usage: string;
   purpose: string;
+  details?: string;
 }>;
 
 const COMMON = { json: "boolean" } as const;
@@ -102,6 +103,13 @@ task add [--namespace <ns>] [--actor <actor>] -`,
     usage: `task query [--where <expression>] [--world]
   [--sort priority|created|updated|id] [--limit <n>]`,
     purpose: "Query Task facts with a typed boolean expression.",
+    details: [
+      "fields: state priority title id parent under needs blocks ready blocked created updated",
+      "operators: = != < > <= >= ~ and or not ( )",
+      "examples:",
+      "  keiyaku task query --where 'priority <= 1 and ready' --world",
+      "  keiyaku task query --where 'updated < 2026-08-06T00:00:00.000Z' --world",
+    ].join("\n"),
   },
   tree: {
     arity: [1, 1],
@@ -184,18 +192,7 @@ export function isTaskAction(value: string | undefined): value is TaskAction {
 export function renderTaskHelp(action?: TaskAction): string {
   if (action !== undefined) {
     const spec = TASK_COMMAND_SPECS[action];
-    const queryGuide =
-      action === "query"
-        ? [
-            "",
-            "fields: state priority title id parent under needs blocks ready blocked created updated",
-            "operators: = != < > <= >= ~ and or not ( )",
-            "examples:",
-            "  keiyaku task query --where 'priority <= 1 and ready' --world",
-            "  keiyaku task query --where 'updated < 2026-08-06T00:00:00.000Z' --world",
-          ].join("\n")
-        : "";
-    return `${spec.purpose}\n\n${usageLine(spec.usage)}${queryGuide}`;
+    return `${spec.purpose}\n\n${usageLine(spec.usage)}${spec.details === undefined ? "" : `\n\n${spec.details}`}`;
   }
   return [
     "usage: keiyaku task <command> ...",

@@ -69,7 +69,7 @@ export function renderRootHelp(): string {
 export function renderContractHelp(command: Command): string {
   const spec: CommandSpec = CONTRACT_COMMAND_SPECS[command];
   const help = `${spec.purpose}\n\n${usageLine(spec.usage)}`;
-  return spec.help === undefined ? help : `${help}\n\n${spec.help}`;
+  return spec.details === undefined ? help : `${help}\n\n${spec.details}`;
 }
 
 function contractUsage(command: Command): string {
