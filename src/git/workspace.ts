@@ -6,7 +6,7 @@ import { gitObjectId, mintSnapshotId, type GitObjectId } from "./identity.js";
 import { GitPlumbingError, runGit, runGitWithEnvironment, type GitRepository } from "./process.js";
 import { worktreeGitDirectory } from "./repository.js";
 
-const WORKTREE_DIRECTORY = ["keiyaku", "wt"] as const;
+const WORKTREE_DIRECTORY = [".keiyaku", "wt"] as const;
 
 export type WorkspaceChanges = Readonly<{
   staged: readonly string[];
@@ -24,7 +24,7 @@ export type WorkspaceTree = Readonly<{
 }>;
 
 export function worktreePath(repository: GitRepository, place: string): string {
-  return resolve(repository.commonDirectory, ...WORKTREE_DIRECTORY, place);
+  return resolve(repository.primaryWorktree, ...WORKTREE_DIRECTORY, place);
 }
 
 export type ManagedWorktreeFollow =

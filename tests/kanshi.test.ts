@@ -617,7 +617,7 @@ function worktreeObservation(
 
 function contractRow(input: Partial<Extract<KanshiReport["contracts"], { kind: "present" }>["value"]["rows"][number]> & { id: string }) {
   const workspace = input.workspace ?? "worktree";
-  const path = input.worktreePath ?? `/repo/.git/keiyaku/wt/${input.id.slice("kei/".length)}`;
+  const path = input.worktreePath ?? `/repo/.keiyaku/wt/${input.id.slice("kei/".length)}`;
   return {
     title: input.title ?? input.id.slice("kei/".length),
     phase: "waiting" as const,
@@ -642,7 +642,7 @@ function contractRow(input: Partial<Extract<KanshiReport["contracts"], { kind: "
 }
 
 function attentionReport(): KanshiReport {
-  const dirtyPath = "/repo/.git/keiyaku/wt/active-contract";
+  const dirtyPath = "/repo/.keiyaku/wt/active-contract";
   return {
     root: "/repo",
     observedAt: "2026-08-12T00:00:00.000Z",
@@ -660,8 +660,8 @@ function attentionReport(): KanshiReport {
             phase: "claimed",
             phaseAt: "2026-08-10T00:00:00.000Z",
             disposition: "terminal",
-            worktreePath: "/repo/.git/keiyaku/wt/terminal-contract",
-            workspaceObservation: worktreeObservation("/repo/.git/keiyaku/wt/terminal-contract"),
+            worktreePath: "/repo/.keiyaku/wt/terminal-contract",
+            workspaceObservation: worktreeObservation("/repo/.keiyaku/wt/terminal-contract"),
             gates: {
               satisfied: true,
               reports: [
@@ -714,8 +714,8 @@ function attentionReport(): KanshiReport {
           contractRow({
             id: "kei/unavailable-contract",
             title: "Unavailable Contract",
-            worktreePath: "/repo/.git/keiyaku/wt/unavailable-contract",
-            workspaceObservation: worktreeObservation("/repo/.git/keiyaku/wt/unavailable-contract", "unavailable"),
+            worktreePath: "/repo/.keiyaku/wt/unavailable-contract",
+            workspaceObservation: worktreeObservation("/repo/.keiyaku/wt/unavailable-contract", "unavailable"),
           }),
         ],
       },
@@ -877,7 +877,7 @@ test("Kanshi text uses live sections, preserves important facts, and omits termi
   assert.match(contracts, /7 commits behind main/u);
   assert.match(contracts, /target moved/u);
   assert.match(contracts, /worktree dirty · staged 1 · unstaged 3 · untracked 2/u);
-  assert.match(contracts, /^ {2}DIR     \/repo\/\.git\/keiyaku\/wt\/active-contract$/mu);
+  assert.match(contracts, /^ {2}DIR     \/repo\/\.keiyaku\/wt\/active-contract$/mu);
   assert.match(contracts, /tendered · 3m/u);
   assert.match(contracts, /GATES   \[✓\] reviewed   \[✗\] verified   \[~\] security   \[ \] manual/u);
   assert.match(contracts, /LINKED  task\/running/u);
@@ -899,7 +899,7 @@ test("Kanshi text uses live sections, preserves important facts, and omits termi
   assert.doesNotMatch(contracts, /target unknown/u);
   assert.match(contracts, /no target/u);
   assert.match(contracts, /worktree unavailable/u);
-  assert.match(contracts, /^ {2}DIR     \/repo\/\.git\/keiyaku\/wt\/unavailable-contract$/mu);
+  assert.match(contracts, /^ {2}DIR     \/repo\/\.keiyaku\/wt\/unavailable-contract$/mu);
   assert.doesNotMatch((nextCold === -1 ? cold : cold.slice(0, nextCold)), /↳ /u);
   const selected = renderKanshiText(selectKanshi({ report, contract: "kei/active-contract" }), { columns: 120, color: false }, "contract");
   assert.match(selected, /tendered · 3m/u);
@@ -1069,7 +1069,7 @@ test("Kanshi wraps titles without dropping coordinates or gates", () => {
   assert.ok(paths.every((line) => !line.includes("…") && !line.includes("...")));
   assert.ok(text.split("\n").some((line) => line.startsWith("  TITLE ") && displayColumns(line) <= 20));
   assert.equal(text.includes("kei/active-contract"), true);
-  assert.equal(text.includes("/repo/.git/keiyaku/wt/active-contract"), true);
+  assert.equal(text.includes("/repo/.keiyaku/wt/active-contract"), true);
   assert.match(text, /verified/u);
   assert.match(text, /7 commits behind main/u);
   assert.match(text, /target moved/u);

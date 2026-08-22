@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
-import { lstat, readlink, symlink } from "node:fs/promises";
-import { dirname, join, relative, resolve } from "node:path";
+import { lstat, readlink, realpath, symlink } from "node:fs/promises";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -17,20 +17,41 @@ async function installDependencies(cwd) {
   if (code !== 0) throw new Error(`npm ci exited with code ${code}`);
 }
 
-const cwd = process.cwd();
-const { stdout } = await execFileAsync(
-  "git",
-  ["rev-parse", "--path-format=absolute", "--git-common-dir"],
-  { cwd },
-);
-const commonDirectory = stdout.trim();
-const managedWorktrees = join(commonDirectory, "keiyaku", "wt");
+function firstWorktreeFromPorcelain(output) {
+  const worktree = output.split("\0")[0];
+  if (worktree === undefined || !worktree.startsWith("worktree ")) {
+    throw new Error("Git worktree porcelain output is missing a worktree path");
+  }
+  const path = worktree.slice("worktree ".length);
+  if (path.length === 0) throw new Error("Git worktree porcelain output has an empty worktree path");
+  return resolve(path);
+}
+
+async function insideWorkTree(path) {
+  try {
+    const { stdout } = await execFileAsync("git", ["rev-parse", "--is-inside-work-tree"], { cwd: path });
+    return stdout.trim() === "true";
+  } catch {
+    return false;
+  }
+}
+
+function primaryFromManagedCwd(cwd) {
+  const parent = dirname(cwd);
+  return basename(parent) === "wt" && basename(dirname(parent)) === ".keiyaku" ? dirname(dirname(parent)) : undefined;
+}
+
+const cwd = await realpath(process.cwd());
+const { stdout } = await execFileAsync("git", ["worktree", "list", "--porcelain", "-z"], { cwd });
+const main = firstWorktreeFromPorcelain(stdout);
+const primaryWorktree = await realpath((await insideWorkTree(main)) ? main : (primaryFromManagedCwd(cwd) ?? cwd));
+const managedWorktrees = join(primaryWorktree, ".keiyaku", "wt");
 const isManagedWorktree = dirname(cwd) === managedWorktrees;
 
 if (!isManagedWorktree) {
   await installDependencies(cwd);
 } else {
-  const sharedDependencies = join(dirname(commonDirectory), "node_modules");
+  const sharedDependencies = join(primaryWorktree, "node_modules");
   const sharedStat = await lstat(sharedDependencies);
   if (!sharedStat.isDirectory()) throw new Error(`${sharedDependencies} is not a dependency directory`);
 

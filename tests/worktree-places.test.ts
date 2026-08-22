@@ -352,9 +352,10 @@ test("current path projection is the appointed Place", async () => {
   assert.equal(current.kind, "appointed");
   if (current.kind !== "appointed") throw new Error("expected appointed path");
   assert.equal(current.path, worktreePath(git, appointed.place));
+  assert.equal(current.path, join(git.primaryWorktree, ".keiyaku", "wt", appointed.place));
 });
 
-test("linked worktrees share the appointed Place under the common directory", async () => {
+test("linked worktrees share the appointed Place path under the primary worktree", async () => {
   const repository = repositoryWithCommit();
   const linked = mkdtempSync(join(tmpdir(), "keiyaku-place-linked-"));
   repository.run(["worktree", "add", "--quiet", "--detach", linked]);
@@ -372,7 +373,7 @@ test("linked worktrees share the appointed Place under the common directory", as
 
 test("contextual selection matches the appointed Place path", () => {
   const id = "kei/active-contract" as ContractId;
-  const path = "/repo/.git/keiyaku/wt/atlantis";
+  const path = "/repo/.keiyaku/wt/atlantis";
   const board = {
     root: "/repo",
     state: null,

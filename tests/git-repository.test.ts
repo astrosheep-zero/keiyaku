@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, realpathSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
   commonGitDirectory,
@@ -38,8 +40,36 @@ test("repositoryAt pins one absolute common directory for primary and linked wor
   assert.equal(commonGitDirectory(secondary), expected);
   assert.equal(
     worktreePath(secondary, "atlantis"),
-    join(expected, "keiyaku", "wt", "atlantis"),
+    join(primary.primaryWorktree, ".keiyaku", "wt", "atlantis"),
   );
+  assert.equal(worktreePath(secondary, "atlantis"), worktreePath(primary, "atlantis"));
+});
+
+test("dependency provisioning links a managed worktree to the registered primary with a separate git dir", () => {
+  const primary = mkdtempSync(join(tmpdir(), "keiyaku-separate-primary-"));
+  const gitDir = mkdtempSync(join(tmpdir(), "keiyaku-separate-gitdir-"));
+  execFileSync("git", ["init", "--quiet", "--initial-branch=main", `--separate-git-dir=${gitDir}`, primary]);
+  execFileSync("git", ["-C", primary, "config", "user.name", "Keiyaku Test"]);
+  execFileSync("git", ["-C", primary, "config", "user.email", "keiyaku@example.invalid"]);
+  execFileSync("git", ["-C", primary, "commit", "--quiet", "--allow-empty", "-m", "initial"]);
+  const common = execFileSync(
+    "git",
+    ["-C", primary, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+    { encoding: "utf8" },
+  ).trim();
+  assert.notEqual(resolve(dirname(common)), resolve(primary));
+  mkdirSync(join(primary, "node_modules"));
+  const managed = join(primary, ".keiyaku", "wt", "atlantis");
+  execFileSync("git", ["-C", primary, "worktree", "add", "--quiet", "--detach", managed]);
+  execFileSync(
+    process.execPath,
+    [fileURLToPath(new URL("../scripts/provision-worktree-dependencies.js", import.meta.url))],
+    { cwd: managed, encoding: "utf8" },
+  );
+  const linked = join(managed, "node_modules");
+  assert.equal(lstatSync(linked).isSymbolicLink(), true);
+  assert.equal(realpathSync(linked), realpathSync(join(primary, "node_modules")));
+  assert.notEqual(resolve(managed, readlinkSync(linked)), resolve(dirname(common), "node_modules"));
 });
 
 test("contract path derivation reuses the common directory pinned by repositoryAt", async () => {

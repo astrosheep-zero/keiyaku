@@ -19,10 +19,10 @@ function board(): ContractBoard {
         phaseAt: "2026-08-12T00:00:00.000Z",
         disposition: "active",
         workspace: "worktree",
-        worktreePath: "/repo/.git/keiyaku/wt/active-contract",
+        worktreePath: "/repo/.keiyaku/wt/active-contract",
         workspaceObservation: {
           kind: "clean",
-          location: { kind: "worktree", path: "/repo/.git/keiyaku/wt/active-contract" },
+          location: { kind: "worktree", path: "/repo/.keiyaku/wt/active-contract" },
           counts: { staged: 0, unstaged: 0, untracked: 0, submodules: 0 },
         },
         target: "refs/heads/main",
@@ -38,7 +38,7 @@ function board(): ContractBoard {
 test("selectors resolve active worktrees from public status rows", () => {
   const report = board();
   assert.equal(resolveContextualContract(report, "@active-contract", "/repo"), active);
-  assert.equal(resolveContextualContract(report, undefined, "/repo/.git/keiyaku/wt/active-contract"), active);
+  assert.equal(resolveContextualContract(report, undefined, "/repo/.keiyaku/wt/active-contract"), active);
 });
 
 test("short selectors match normalized contract segments without a second grammar", () => {
@@ -53,7 +53,7 @@ test("short selectors match normalized contract segments without a second gramma
 
 test("omitted selectors require an exact public scope", () => {
   assert.throws(
-    () => resolveContextualContract(board(), undefined, "/repo/.git/keiyaku/wt/active-contract/subdirectory"),
+    () => resolveContextualContract(board(), undefined, "/repo/.keiyaku/wt/active-contract/subdirectory"),
     CliUsageError,
   );
   assert.throws(
@@ -71,7 +71,7 @@ test("selectors use disposition rather than reinterpreting terminal phases", () 
     } satisfies ContractBoard;
     assert.throws(() => resolveContextualContract(report, "@active-contract", "/repo"), CliUsageError);
     assert.throws(
-      () => resolveContextualContract(report, undefined, "/repo/.git/keiyaku/wt/active-contract"),
+      () => resolveContextualContract(report, undefined, "/repo/.keiyaku/wt/active-contract"),
       CliUsageError,
     );
   }

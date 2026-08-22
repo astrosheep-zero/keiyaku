@@ -470,7 +470,10 @@ test("post-admission reconcile failure remains accepted with a physical lag", as
   if (result.kind !== "accepted") throw new Error("post-admission result was not accepted");
   assert.deepEqual(result.facts.map((fact) => fact.kind), ["bind"]);
   assert.notEqual(result.head, null);
-  assert.deepEqual(result.effects.map((effect) => [effect.kind, effect.action]), [["ref", "created"]]);
+  assert.deepEqual(result.effects.map((effect) => [effect.kind, effect.action]), [
+    ["ref", "created"],
+    ["contract-file", "created"],
+  ]);
   assert.equal(result.lag?.[0]?.kind, "reconcile-failed");
   if (result.lag?.[0]?.kind === "reconcile-failed") {
     assert.equal(result.lag[0].stage, "effect");
@@ -986,7 +989,7 @@ test("managed delivery follows an eligible deterministic worktree", async () => 
   );
   assert.equal(await appointedWorktreePath(managedRepository, id), path);
   assert.notEqual(path, resolve(path, ".keiyaku-v4", "worktrees", "managed-worktree"));
-  assert.match(path, /[\\/]keiyaku[\\/]wt[\\/]/u);
+  assert.match(path, /[\\/]\.keiyaku[\\/]wt[\\/]/u);
   repository.run(["-C", path, "commit", "--allow-empty", "--quiet", "-m", "managed candidate"]);
   const candidate = repository.run(["-C", path, "rev-parse", "HEAD"]).trim();
 

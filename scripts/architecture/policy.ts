@@ -1873,7 +1873,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         { source: "git/nuke.ts", symbols: ["access"] },
         { source: "git/reconcile.ts", symbols: ["access", "mkdir", "readdir", "rmdir", "unlink"] },
         { source: "git/tender.ts", symbols: ["access"] },
-        { source: "git/workspace.ts", symbols: ["access", "mkdtemp", "rm"] },
+        { source: "git/workspace.ts", symbols: ["access", "appendFile", "mkdtemp", "readFile", "rm"] },
         { source: "settlement/fence.ts", symbols: ["readdir", "rmdir", "unlink"] },
         { source: "runtime/proc/launch.ts", symbols: ["open"] },
         { source: "runtime/proc/run.ts", symbols: ["FileHandle", "open"] },

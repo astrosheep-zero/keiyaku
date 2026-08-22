@@ -105,10 +105,11 @@ second legality authority.
 Git does not derive a managed worktree path from ContractId. Workspace
 appointment owns Place allocation; Git consumes an explicit appointed Place
 and realizes the worktree only at
-`<git-common-dir>/keiyaku/wt/<place>`. Primary and linked worktrees
-therefore share that appointed path. The path is not stored in the Contract
-journal. Git never derives, scans, or adopts another managed-worktree
-coordinate from Contract identity.
+`<primary-worktree>/.keiyaku/wt/<place>`. Primary and linked worktrees
+share that appointed path. Git does not write repository `info/exclude` for
+`.keiyaku/`. The path is not stored in the Contract journal. Git never
+derives, scans, or adopts another managed-worktree coordinate from Contract
+identity.
 
 Terminal cleanup proves the appointed path is physically absent before Place
 release. A retained physical path remains explicit lag; absence is the proof of

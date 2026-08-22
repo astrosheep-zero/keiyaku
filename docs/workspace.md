@@ -113,7 +113,7 @@ this order: fold the admitted Contract; under the register lock, decode once
 and reuse the Contract's appointment or durably appoint by its hash-derived
 forward scan; if that
 appointment failed operationally, return typed lag and perform no Git
-effect. Realize Git at `<git-common-dir>/keiyaku/wt/<place>`; project
+effect. Realize Git at `<primary-worktree>/.keiyaku/wt/<place>`; project
 workspace guidance at that realized worktree. Once an appointment is durable
 it survives every later failure, and retry uses the same Place. Existing
 appointments are never reselected from Git or filesystem topology.
@@ -163,8 +163,9 @@ that appointment, cleanup, release, or register-lag policy. The workspace
 owner creates or repairs these derived files atomically:
 
 ```text
-.keiyaku/.gitignore
-.keiyaku/KEIYAKU.md
+<primary-worktree>/.keiyaku/.gitignore
+<appointed-worktree>/.keiyaku/.gitignore
+<appointed-worktree>/.keiyaku/KEIYAKU.md
 ```
 
 Appointment reads, metadata checks, file reads, advisory chmod, and cleanup are
@@ -172,11 +173,17 @@ awaited. Reservation and repair fulfill only after their durable-file commit
 has completed. There is no synchronous appointment API or deferred cleanup
 queue.
 
-The nested ignore file contains exactly `.gitignore` and `KEIYAKU.md`. This
-keeps both files out of ordinary Git status and delivery capture without
-centralizing unrelated ignore policy. A tracked generated path is a failure.
-After every successful guidance create or replacement, Keiyaku attempts
-`0444`; inability to change the mode is advisory and does not create lag.
+The primary ignore is local to that checkout. It is not
+`$GIT_DIR/info/exclude` and not a project-root `.gitignore` rule. It uses the
+owned-data wildcard `*` so primary-only management bytes stay out of ordinary
+Git status and dirty capture, and it re-includes `settings.json` and `tasks/`
+so project Settings and Task authority remain capturable. Each managed
+worktree's ignore file contains exactly `.gitignore` and `KEIYAKU.md`. This
+keeps both guidance files out of ordinary Git status and delivery capture
+without hiding other nested `.keiyaku/` bytes. A tracked generated path is a
+failure. After every successful guidance create or replacement, Keiyaku
+attempts `0444`; inability to change the mode is advisory and does not create
+lag.
 
 A write or cleanup failure returns a `contract-file-failed` lag naming the
 worktree, path, and diagnostic while preserving admitted facts and completed

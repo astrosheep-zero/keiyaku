@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import test from "node:test";
 import { prepareDelivery } from "../src/protocol/deliver.js";
 import { prepareReview } from "../src/protocol/review.js";
@@ -423,6 +423,46 @@ test("permissive integration reports unsupported Git while strict policy needs n
 test("Git materialization uses the appointed Place basename", async () => {
   const repository = makeGitRepository();
   assert.equal(basename(worktreePath(await repositoryAt(repository.path), "atlantis")), "atlantis");
+});
+
+test("Git realizes managed worktrees under the primary .keiyaku/wt root", async () => {
+  const { repository, worktree } = await boundContract();
+  const git = await repositoryAt(repository.path);
+  assert.equal(dirname(worktree), join(git.primaryWorktree, ".keiyaku", "wt"));
+  const excludePath = join(git.commonDirectory, "info", "exclude");
+  const exclude = existsSync(excludePath) ? readFileSync(excludePath, "utf8") : "";
+  assert.equal(
+    exclude.split(/\r?\n/u).some((line) => {
+      const trimmed = line.trim();
+      return trimmed === "/.keiyaku/" || trimmed === ".keiyaku/";
+    }),
+    false,
+  );
+  assert.equal(
+    readFileSync(join(git.primaryWorktree, ".keiyaku", ".gitignore"), "utf8"),
+    "*\n!settings.json\n!tasks/\n!tasks/**\n",
+  );
+  assert.equal(repository.run(["status", "--porcelain", "--untracked-files=all"]).includes(".keiyaku"), false);
+});
+
+test("primary management bytes stay ignored while nested managed-worktree bytes remain capturable", async () => {
+  const { repository, worktree } = await boundContract();
+  const git = await repositoryAt(repository.path);
+  writeFileSync(join(git.primaryWorktree, ".keiyaku", "owned.dat"), "primary-only\n");
+  mkdirSync(join(worktree, ".keiyaku"), { recursive: true });
+  writeFileSync(join(worktree, ".keiyaku", "settings.json"), "{}\n");
+  assert.equal(repository.run(["status", "--porcelain", "--untracked-files=all"]).includes(".keiyaku"), false);
+  assert.equal(
+    repository.run(["check-ignore", "--", ".keiyaku/owned.dat", ".keiyaku/wt"]).trim(),
+    ".keiyaku/owned.dat\n.keiyaku/wt",
+  );
+  const nestedStatus = repository.run(["-C", worktree, "status", "--porcelain", "--untracked-files=all"]);
+  assert.equal(nestedStatus.includes(".keiyaku/settings.json"), true);
+  repository.run(["-C", worktree, "add", "--", ".keiyaku/settings.json"]);
+  assert.equal(
+    repository.run(["-C", worktree, "diff", "--cached", "--name-only"]).trim(),
+    ".keiyaku/settings.json",
+  );
 });
 
 test("dirty delivery materializes a candidate without changing the caller index", async () => {
@@ -1022,7 +1062,10 @@ test("managed bind preserves its admitted Contract when worktree reconciliation 
   );
   assert.deepEqual(result.facts.map((fact) => fact.kind), ["bind"]);
   assert.notEqual(result.head, null);
-  assert.deepEqual(result.effects.map((effect) => [effect.kind, effect.action]), [["ref", "created"]]);
+  assert.deepEqual(result.effects.map((effect) => [effect.kind, effect.action]), [
+    ["ref", "created"],
+    ["contract-file", "created"],
+  ]);
   assert.equal(result.lags[0]?.kind, "reconcile-failed");
   if (result.lags[0]?.kind === "reconcile-failed") {
     assert.equal(result.lags[0].stage, "effect");
@@ -1038,11 +1081,11 @@ test("managed bind preserves its admitted Contract when worktree reconciliation 
 });
 
 test("distinct no-op candidates share the empty patch ChangeId", async () => {
-  const { repository, id } = await boundContract();
+  const { repository, id, worktree } = await boundContract();
 
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "first no-op"]);
+  repository.run(["-C", worktree, "commit", "--allow-empty", "--quiet", "-m", "first no-op"]);
   const first = await preparedDelivery(repository, id);
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "second no-op"]);
+  repository.run(["-C", worktree, "commit", "--allow-empty", "--quiet", "-m", "second no-op"]);
   const second = await preparedDelivery(repository, id);
 
   assert.notEqual(first.integration.snapshot, second.integration.snapshot);
@@ -1532,13 +1575,13 @@ test("a clean no-delivery abandonment releases the managed worktree from its sta
 });
 
 test("nonempty candidates retain Git start-to-tender ChangeId", async () => {
-  const { repository, id } = await boundContract();
-  writeFileSync(join(repository.path, "candidate.txt"), "candidate\n");
-  repository.run(["add", "candidate.txt"]);
-  repository.run(["commit", "--quiet", "-m", "candidate"]);
+  const { repository, id, worktree } = await boundContract();
+  writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
+  repository.run(["-C", worktree, "add", "candidate.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
 
   const delivery = await preparedDelivery(repository, id);
-  assert.equal(delivery.integration.snapshot, repository.run(["rev-parse", "HEAD"]).trim());
+  assert.equal(delivery.integration.snapshot, repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim());
   const patch = repository.run([
     "-c", "core.quotePath=false",
     "-c", "core.abbrev=40",

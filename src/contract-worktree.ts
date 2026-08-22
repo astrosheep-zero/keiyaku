@@ -9,6 +9,7 @@ import { worktreePath } from "./git/workspace.js";
 import { appointmentFor, placeRegisterPath, type PlaceRegister } from "./workspace-place.js";
 
 const IGNORE_BYTES = ".gitignore\nKEIYAKU.md\n";
+const PRIMARY_IGNORE_BYTES = "*\n!settings.json\n!tasks/\n!tasks/**\n";
 const APPOINTMENT_DESCRIPTION = "This is a read-only projection. Do not edit manually.";
 export type ContractAppointment =
   | Readonly<{ kind: "absent"; path: string }>
@@ -189,13 +190,37 @@ async function materialize(
   worktree: string,
   guidance: string,
 ): Promise<ContractWorktreeResult> {
+  const effects: ContractFileEffect[] = [];
+  const failed = (target: string, path: string, error: unknown): ContractWorktreeResult => ({
+    effects,
+    lag: [
+      {
+        kind: "contract-file-failed",
+        worktree: target,
+        path,
+        diagnostic: error instanceof Error ? error.message : String(error),
+      },
+    ],
+  });
+  try {
+    effects.push(
+      await repair(
+        { ...repository, effectiveCwd: repository.primaryWorktree },
+        repository.primaryWorktree,
+        ".keiyaku/.gitignore",
+        PRIMARY_IGNORE_BYTES,
+      ),
+    );
+  } catch (error) {
+    return failed(repository.primaryWorktree, join(repository.primaryWorktree, ".keiyaku", ".gitignore"), error);
+  }
   const stat = await lstat(worktree).catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") return undefined;
     throw error;
   });
   if (stat === undefined || !stat.isDirectory()) {
     return {
-      effects: [],
+      effects,
       lag: [
         {
           kind: "contract-file-failed",
@@ -207,7 +232,6 @@ async function materialize(
     };
   }
   const scoped = { ...repository, effectiveCwd: worktree };
-  const effects: ContractFileEffect[] = [];
   for (const [relativePath, bytes] of [
     [".keiyaku/.gitignore", IGNORE_BYTES],
     [".keiyaku/KEIYAKU.md", guidance],
@@ -215,17 +239,7 @@ async function materialize(
     try {
       effects.push(await repair(scoped, worktree, relativePath, bytes));
     } catch (error) {
-      return {
-        effects,
-        lag: [
-          {
-            kind: "contract-file-failed",
-            worktree,
-            path: join(worktree, relativePath),
-            diagnostic: error instanceof Error ? error.message : String(error),
-          },
-        ],
-      };
+      return failed(worktree, join(worktree, relativePath), error);
     }
   }
   return { effects, lag: [] };
