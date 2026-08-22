@@ -16,7 +16,11 @@ import type { ResumeCoordinate } from "../../provider.js";
 
 export { CLAUDE_MESSAGE_DISPOSITIONS, CLAUDE_SYSTEM_DISPOSITIONS } from "./events.js";
 
-type ClaudeExecution = Readonly<{ executable?: string; env?: Readonly<Record<string, string>> }>;
+type ClaudeExecution = Readonly<{
+  executable?: string;
+  config?: Readonly<Record<string, unknown>>;
+  env?: Readonly<Record<string, string>>;
+}>;
 type ClaudeDriveInput = Parameters<ProviderAdapter["start"]>[0] | Parameters<NonNullable<ProviderAdapter["resume"]>>[0];
 type ReceiptWaiter = Readonly<{ resolve(value: IteratorResult<TellReceipt>): void }>;
 type AcceptedTell = { id: string; afterCheckpoint: number; visible: boolean };
@@ -372,6 +376,9 @@ export function createClaudeProvider(
       ? loadOrExecution
       : async () => (await import("@anthropic-ai/claude-agent-sdk")) as ClaudeSdk;
   const selectedExecution = typeof loadOrExecution === "function" ? execution : loadOrExecution;
+  if (selectedExecution.config !== undefined) {
+    throw new TypeError("provider execution config is unsupported by claude-agent-sdk");
+  }
   return {
     admitOptions: admitClaudeOptions,
     fork: (input) => forkClaude(load, selectedExecution, input),

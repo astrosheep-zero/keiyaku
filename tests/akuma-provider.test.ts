@@ -37,7 +37,7 @@ import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js
 import { translatePiEvent } from "../src/akuma/providers/pi/events.js";
 import { createAcpProvider } from "../src/akuma/providers/acp/index.js";
 import { createGrokBuildProvider, interpretGrokTool } from "../src/akuma/providers/grok-build/index.js";
-import { decodeProviderExecution } from "../src/akuma/providers/index.js";
+import { decodeProviderExecution, resolveProviderExecution } from "../src/akuma/providers/index.js";
 import { EMPTY_ACP_EVENT_STATE, mapAcpUpdate } from "../src/akuma/providers/acp/events.js";
 import { projectTurns } from "../src/akuma/projection.js";
 import type { StdioProcess } from "../src/runtime/proc/stdio.js";
@@ -1694,29 +1694,83 @@ test("readonly restraint codec validates known members and ignores additions", (
   assert.throws(() => decodeReadonlyRestraint({ enforcement: "magic" }), /native or none with a diagnostic/u);
 });
 
-test("provider recipe decoding validates kind config before constructing an adapter", () => {
-  assert.throws(() => decodeProviderExecution({
+test("provider recipe preserves opaque config until adapter construction", async () => {
+  assert.deepEqual(decodeProviderExecution({
+    name: "claude",
+    kind: "claude-agent-sdk",
+    config: { unexpected: true },
+  }), {
+    name: "claude",
+    kind: "claude-agent-sdk",
+    config: { unexpected: true },
+  });
+  assert.throws(() => createClaudeProvider({
     name: "claude",
     kind: "claude-agent-sdk",
     config: { unexpected: true },
   }), /config is unsupported by claude-agent-sdk/u);
-  assert.throws(() => decodeProviderExecution({
+  await assert.rejects(resolveProviderExecution({
+    name: "claude",
+    kind: "claude-agent-sdk",
+    config: { unexpected: true },
+  }), /config is unsupported by claude-agent-sdk/u);
+  assert.deepEqual(decodeProviderExecution({
+    name: "opencode-sdk",
+    kind: "opencode-sdk",
+    config: { unexpected: true },
+  }), {
+    name: "opencode-sdk",
+    kind: "opencode-sdk",
+    config: { unexpected: true },
+  });
+  assert.throws(() => createOpencodeProvider({
     name: "opencode-sdk",
     kind: "opencode-sdk",
     config: { unexpected: true },
   }), /config is unsupported by opencode-sdk/u);
-  assert.throws(() => decodeProviderExecution({
+  assert.deepEqual(decodeProviderExecution({
+    name: "pi",
+    kind: "pi",
+    config: { tools: ["bash"] },
+  }), {
+    name: "pi",
+    kind: "pi",
+    config: { tools: ["bash"] },
+  });
+  assert.throws(() => createPiProvider({
     name: "pi",
     kind: "pi",
     config: { tools: ["bash"] },
   }), /does not support executable or config/u);
-  assert.throws(() => decodeProviderExecution({
+  assert.deepEqual(decodeProviderExecution({
+    name: "grok-build",
+    kind: "grok-build",
+    executable: "grok",
+    config: { extension: true },
+  }), {
+    name: "grok-build",
+    kind: "grok-build",
+    executable: "grok",
+    config: { extension: true },
+  });
+  assert.throws(() => createGrokBuildProvider({
     name: "grok-build",
     kind: "grok-build",
     executable: "grok",
     config: { extension: true },
   }), /does not support execution config/u);
-  assert.throws(() => decodeProviderExecution({
+  assert.deepEqual(decodeProviderExecution({
+    name: "acp",
+    kind: "acp",
+    executable: "agent",
+    config: { argvBefore: ["x"], argvAfter: [], unexpected: true },
+  }), {
+    name: "acp",
+    kind: "acp",
+    executable: "agent",
+    config: { argvBefore: ["x"], argvAfter: [], unexpected: true },
+  });
+  assert.throws(() => createAcpProvider({
     name: "acp",
     kind: "acp",
     executable: "agent",

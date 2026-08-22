@@ -1,29 +1,13 @@
 import type { ProviderAdapter } from "../provider.js";
 import { decodeProviderRecipe, type ProviderExecution } from "../provider-recipe.js";
-import { decodeAcpConfig } from "./acp/config.js";
 
 export function decodeProviderExecution(input: unknown): ProviderExecution {
   const decoded = decodeProviderRecipe(input);
-  if ((decoded.kind === "claude-agent-sdk" || decoded.kind === "opencode-sdk") && decoded.config !== undefined) {
-    throw new TypeError(`provider execution config is unsupported by ${decoded.kind}`);
-  }
-  if (decoded.kind === "pi") {
-    if (decoded.executable !== undefined || decoded.config !== undefined) {
-      throw new TypeError("Pi provider does not support executable or config");
-    }
-    if (decoded.env !== undefined && Object.keys(decoded.env).length > 0) {
-      throw new TypeError("env injection not supported for provider pi");
-    }
-  }
-  if (decoded.kind === "grok-build" && decoded.config !== undefined) {
-    throw new TypeError("Grok Build does not support execution config");
-  }
-  const config = decoded.kind === "acp" ? decodeAcpConfig(decoded.config) : decoded.config;
   return Object.freeze({
     name: decoded.name,
     kind: decoded.kind,
     ...(decoded.executable === undefined ? {} : { executable: decoded.executable }),
-    ...(config === undefined ? {} : { config }),
+    ...(decoded.config === undefined ? {} : { config: decoded.config }),
     ...(decoded.env === undefined ? {} : { env: decoded.env }),
   });
 }
@@ -32,7 +16,7 @@ async function adapterFor(execution: ProviderExecution): Promise<ProviderAdapter
   if (execution.kind === "acp") return (await import("./acp/index.js")).createAcpProvider(execution);
   if (execution.kind === "claude-agent-sdk") {
     const { claudeProvider, createClaudeProvider } = await import("./claude/index.js");
-    return execution.executable === undefined && execution.env === undefined
+    return execution.executable === undefined && execution.config === undefined && execution.env === undefined
       ? claudeProvider
       : createClaudeProvider(execution);
   }

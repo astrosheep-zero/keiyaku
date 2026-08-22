@@ -340,6 +340,9 @@ export function createOpencodeProvider(
   input: ProviderExecution | OpencodeProviderTestOptions = { name: OPENCODE_SDK_PROVIDER, kind: "opencode-sdk" },
 ): ProviderAdapter {
   const execution: ProviderExecution = "kind" in input ? input : { name: OPENCODE_SDK_PROVIDER, kind: "opencode-sdk" };
+  if (execution.config !== undefined) {
+    throw new TypeError("provider execution config is unsupported by opencode-sdk");
+  }
   const loader = "loader" in input ? input.loader : undefined;
   return {
     admitOptions(options: ProviderOptions) {
