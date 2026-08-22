@@ -11,8 +11,6 @@ const owner = (file, reason, maxEffectiveLines, functions = []) => ({
 const functionOwner = (name, reason, maxEffectiveLines) => ({ name, reason, maxEffectiveLines });
 
 export const FILE_LINE_EXEMPTIONS = Object.freeze([
-  owner("scripts/architecture/policy.ts", "The centralized declarative architecture map remains one policy authority; line compression had made active declarations unreadable.", 2134),
-  owner("scripts/architecture/engine.ts", "The centralized TypeScript architecture analyzer keeps parsing and all enforced dependency and capability rules in one implementation owner.", 621),
   owner("src/git/reconcile.ts", "Git reconciliation is one serialized effect owner; the terminal physical-absence proof belongs with topology, hooks, and custody rather than a packed companion file.", 696),
   owner("src/akuma/body-turn.ts", "One concrete live Turn owner keeps provider custody, receipt and tell pumping, bounded control, and hung retirement coherent.", 600),
   owner("src/akuma/request-serve.ts", "Admission, reservation/spawn, owner dispatch, durable receipt projection, live pump, and predecessor recovery share one parent Heart lease, serial admission boundary, and cancellation fence.", 604),
