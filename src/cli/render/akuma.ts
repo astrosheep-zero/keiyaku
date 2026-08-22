@@ -427,7 +427,7 @@ function tellText(
           `! wake failed · ${safeText(wake.diagnostic)}${wake.child === undefined ? "" : ` · log ${wake.child.log.path} ${wake.child.log.from}..${wake.child.log.to}`}`,
         ]
       : wake.kind === "pursuing"
-        ? [`wake pursuing · body ${wake.bodySequence}`]
+        ? []
         : [`wake ${wake.kind}`];
   return mutationObservationStageText(result.result.akuma, result.result.observation, context, {
     ...(result.alias === undefined ? {} : { alias: result.alias }),

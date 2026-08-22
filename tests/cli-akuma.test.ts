@@ -501,6 +501,8 @@ test("Akuma mutation snapshots omit observation context", () => {
   assert.ok(waitLines.indexOf("changes 0") < waitLines.length - 1);
   assert.equal(waitLines.at(-2), "");
   const told = renderAkumaText(parseArgv(["tell", observation.status.id, "steer"]).command, tellInvocation(observation));
+  assert.doesNotMatch(told, /^wake pursuing/u);
+  assert.match(told, /working/u);
   assert.doesNotMatch(told, /STILL RUNNING/u);
   assert.doesNotMatch(told, /^tasks /mu);
   assert.doesNotMatch(told, /^changes /mu);
