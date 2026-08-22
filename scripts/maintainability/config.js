@@ -11,10 +11,8 @@ const owner = (file, reason, maxEffectiveLines, functions = []) => ({
 const functionOwner = (name, reason, maxEffectiveLines) => ({ name, reason, maxEffectiveLines });
 
 export const FILE_LINE_EXEMPTIONS = Object.freeze([
-  owner("src/akuma/body-turn.ts", "One concrete live Turn owner keeps provider custody, receipt and tell pumping, bounded control, and hung retirement coherent.", 600),
-  owner("src/akuma/request-serve.ts", "Admission, reservation/spawn, owner dispatch, durable receipt projection, live pump, and predecessor recovery share one parent Heart lease, serial admission boundary, and cancellation fence.", 604),
-  owner("src/akuma/akuma.ts", "The low-level Akuma owner keeps birth, handles, lifecycle controls, and fleet reads coherent; splitting those operations would obscure that boundary.", 633),
   owner("src/akuma/projection.ts", "The Akuma projection owns the one pure translation from retained Heart facts to public turn values; splitting it would duplicate projection ordering knowledge.", 538, [functionOwner("projectTurns", "Turn projection and its ordering and filtering rules are one read-time projection owner.", 86)]),
+  owner("src/akuma/request-execution.ts", "Admitted upstream request execution keeps provider custody and typed settlement inputs under one execution owner.", undefined, [functionOwner("executeRequest", "Request action dispatch preserves one admitted execution boundary.", 100)]),
   owner("src/akuma/provider.ts", "The provider-neutral vocabulary and adapter contract are one change-axis owner shared by every built-in provider.", 501),
   owner("src/akuma/request-wire.ts", "Request wire encoding and decoding preserve one byte boundary between requester and serving sides; splitting it would duplicate the wire authority.", 501),
   owner("src/cli/commands/task-invoke.ts", "Task invocation owns command admission through execution handoff as one task-command lifecycle boundary.", 501),

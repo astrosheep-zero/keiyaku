@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { abortableDelay } from "./abort.js";
-import { BodySupervisor, driveTurn, turnRecipe, type DrivenTurn } from "./body-turn.js";
+import { BodySupervisor } from "./body-supervisor.js";
+import { driveTurn, turnRecipe, type DrivenTurn } from "./turn-drive.js";
 import {
   HeldAkumaLeash,
   breakBody,
@@ -33,7 +34,7 @@ import {
 
 const LEASH_RETRY_MS = 100;
 export const LEASH_HELD_EXIT = 75;
-export { CONTROL_RESPONSE_MS } from "./body-turn.js";
+export { CONTROL_RESPONSE_MS } from "./body-supervisor.js";
 
 export type BodyLaunch = Readonly<{
   paths: AkumaPaths;

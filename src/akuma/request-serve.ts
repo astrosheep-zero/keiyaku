@@ -32,6 +32,7 @@ import {
   type UpstreamRequestOutcome,
 } from "./request-wire.js";
 import { isTaskMutationAction, type TaskMutationRequest } from "../task/mutation.js";
+import { executeRequest } from "./request-execution.js";
 
 const POLL_MS = 100;
 
@@ -101,13 +102,13 @@ type PumpInput = Readonly<{
   upstream?: UpstreamExecutionPort;
   signal: AbortSignal;
 }>;
-type ServeInput = Omit<PumpInput, "bodySequence"> &
+export type ServeInput = Omit<PumpInput, "bodySequence"> &
   Readonly<{
     directory: string;
     claim: StructuralRequestClaim;
     admissionOpen(): boolean;
   }>;
-type UpstreamFact = Exclude<
+export type UpstreamFact = Exclude<
   Extract<RequestFact, { state: "admitted" }>,
   Extract<RequestFact, { action: "akuma.call" }>
 >;
@@ -277,116 +278,6 @@ function failure(error: unknown): UpstreamRequestFailure {
   return { kind: "failed", diagnostic: diagnostic(error) };
 }
 
-async function execute(
-  input: ServeInput,
-  request: UpstreamFact,
-): Promise<Readonly<{ result: unknown; service?: UpstreamRequestService }>> {
-  if (input.upstream === undefined) throw new Error("upstream execution port is unavailable");
-  if (request.action === "akuma.wait") {
-    const result = await input.upstream.wait({
-      targets: request.targets,
-      completion: request.completion,
-      ...(request.timeoutMs === undefined ? {} : { timeoutMs: request.timeoutMs }),
-      signal: input.signal,
-    });
-    return { result, service: { action: request.action } };
-  }
-  if (request.action === "akuma.tell") {
-    const result = await input.upstream.tell({
-      target: request.target,
-      body: request.body,
-      tellId: request.id,
-      recordedAt: request.admittedAt,
-      signal: input.signal,
-    });
-    return {
-      result,
-      service: { action: request.action, target: request.target, tellId: request.id },
-    };
-  }
-  if (request.action === "akuma.kill") {
-    const served = await input.upstream.kill({
-      targets: request.targets,
-      signal: input.signal,
-    });
-    return {
-      result: served.result,
-      service: { action: request.action, results: served.service },
-    };
-  }
-  if (request.action === "contract.deliver") {
-    return await executeDeliver(input, request);
-  }
-  if (request.action === "contract.review") {
-    return await executeReview(input, request);
-  }
-  const task = request as TaskRequestClaim & Readonly<{ requester: AkuId }>;
-  const result = await input.upstream.task({
-    world: task.world,
-    request: task.request,
-    requester: task.requester,
-    signal: input.signal,
-  });
-  return { result, service: { action: task.action } };
-}
-
-async function executeDeliver(
-  input: ServeInput,
-  request: Extract<UpstreamFact, { action: "contract.deliver" }>,
-): Promise<Readonly<{ result: unknown; service?: UpstreamRequestService }>> {
-  if (input.upstream === undefined) throw new Error("upstream execution port is unavailable");
-  const served = await input.upstream.deliver({
-    repoRoot: request.repoRoot,
-    contractId: request.contractId,
-    ...(request.message === undefined ? {} : { message: request.message }),
-    includeDirty: request.includeDirty,
-    materializeConflict: request.materializeConflict,
-    requester: request.requester,
-    signal: input.signal,
-  });
-  return {
-    result: served.result,
-    ...(served.deliveryFactId === undefined
-      ? {}
-      : {
-          service: {
-            action: request.action,
-            repoRoot: request.repoRoot,
-            contractId: request.contractId,
-            deliveryFactId: served.deliveryFactId,
-          },
-        }),
-  };
-}
-
-async function executeReview(
-  input: ServeInput,
-  request: Extract<UpstreamFact, { action: "contract.review" }>,
-): Promise<Readonly<{ result: unknown; service?: UpstreamRequestService }>> {
-  if (input.upstream === undefined) throw new Error("upstream execution port is unavailable");
-  const served = await input.upstream.review({
-    repoRoot: request.repoRoot,
-    contractId: request.contractId,
-    verdict: request.verdict,
-    ...(request.summary === undefined ? {} : { summary: request.summary }),
-    requester: request.requester,
-    signal: input.signal,
-  });
-  return {
-    result: served.result,
-    ...(served.reviewFactId === undefined
-      ? {}
-      : {
-          service: {
-            action: request.action,
-            repoRoot: request.repoRoot,
-            contractId: request.contractId,
-            reviewFactId: served.reviewFactId,
-          },
-        }),
-  };
-}
-
 function pendingService(request: UpstreamFact): UpstreamRequestService | undefined {
   if (request.action === "akuma.wait") return { action: request.action };
   if (request.action === "akuma.tell") {
@@ -433,7 +324,7 @@ async function serveUpstream(
   let outcome: UpstreamRequestOutcome;
   let service = pendingService(request);
   try {
-    const served = await execute(input, request);
+    const served = await executeRequest(input, request);
     outcome = { kind: "returned", result: served.result };
     if (served.service !== undefined) service = served.service;
   } catch (error) {

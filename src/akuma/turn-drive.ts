@@ -8,8 +8,6 @@ import {
   recordSession,
   recordTellDeliveries,
   recordTellReceipt,
-  type HeartSnapshot,
-  type HeldAkumaLeash,
   type ResumeCoordinate,
   type Soul,
   type TellFact,
@@ -17,100 +15,7 @@ import {
 import type { AkumaPaths } from "./identity.js";
 import { encodeAgentEvent, type AgentEvent, type ProviderAdapter, type Session, type TurnResult } from "./provider.js";
 import { BodyRequestPump, type RequestChildLaunch, type UpstreamExecutionPort } from "./request-serve.js";
-
-const BODY_CONTROL_OBSERVATION_MS = 100;
-export const CONTROL_RESPONSE_MS = 1_000;
-
-export class BodySupervisor {
-  readonly signal: AbortSignal;
-  private readonly controller = new AbortController();
-  private readonly finished = new AbortController();
-  private readonly observer: Promise<void>;
-  private waiter: ((snapshot: HeartSnapshot) => void) | undefined;
-  private observation: HeartSnapshot;
-  private stopping?: "control" | "heart-gone";
-
-  private constructor(
-    private readonly paths: AkumaPaths,
-    private readonly bodySequence: number,
-    private readonly leash: HeldAkumaLeash,
-    observation: HeartSnapshot,
-  ) {
-    this.signal = this.controller.signal;
-    this.observation = observation;
-    this.observer = this.observe();
-  }
-
-  static async open(paths: AkumaPaths, bodySequence: number, leash: HeldAkumaLeash): Promise<BodySupervisor> {
-    return new BodySupervisor(paths, bodySequence, leash, await readHeart(paths));
-  }
-
-  get reason(): "control" | "heart-gone" | undefined {
-    return this.stopping;
-  }
-  current(): HeartSnapshot {
-    return this.observation;
-  }
-
-  async recordHung(diagnostic: string, at: string): Promise<void> {
-    await this.leash.recordBodyHung(this.paths, { sequence: this.bodySequence, diagnostic, at });
-  }
-
-  async refresh(): Promise<HeartSnapshot> {
-    this.publish(await readHeart(this.paths));
-    return this.observation;
-  }
-
-  next(after: HeartSnapshot): Promise<HeartSnapshot> {
-    if (this.observation !== after) return Promise.resolve(this.observation);
-    return new Promise((resolve) => {
-      this.waiter = resolve;
-    });
-  }
-
-  cancel(reason: "control" | "heart-gone"): void {
-    if (this.stopping !== undefined) return;
-    this.stopping = reason;
-    this.controller.abort(
-      new Error(reason === "control" ? "Akuma Body interrupted by durable control" : "Akuma Heart disappeared"),
-    );
-    this.waiter?.(this.observation);
-    this.waiter = undefined;
-  }
-
-  async close(): Promise<void> {
-    this.finished.abort();
-    await this.observer;
-    this.waiter = undefined;
-  }
-
-  private publish(snapshot: HeartSnapshot): void {
-    this.observation = snapshot;
-    this.waiter?.(snapshot);
-    this.waiter = undefined;
-  }
-
-  private async observe(): Promise<void> {
-    for (;;) {
-      const snapshot = this.observation;
-      if (!(await heartExists(this.paths))) return this.cancel("heart-gone");
-      if (snapshot.stop?.bodySequence === this.bodySequence || snapshot.pause?.bodySequence === this.bodySequence) {
-        return this.cancel("control");
-      }
-      try {
-        await abortableDelay(BODY_CONTROL_OBSERVATION_MS, this.finished.signal);
-      } catch {
-        return;
-      }
-      try {
-        await this.refresh();
-      } catch (error) {
-        if (await heartExists(this.paths)) throw error;
-        return this.cancel("heart-gone");
-      }
-    }
-  }
-}
+import { BodySupervisor, CONTROL_RESPONSE_MS } from "./body-supervisor.js";
 
 type EffectSerializer = {
   <T>(effect: () => Promise<T> | T): Promise<T>;
@@ -142,13 +47,7 @@ function serializeEffects(): EffectSerializer {
 export async function turnRecipe(
   paths: AkumaPaths,
   soul: Soul,
-): Promise<
-  Readonly<{
-    cwd: string;
-    options: Soul["options"];
-    session?: ResumeCoordinate;
-  }>
-> {
+): Promise<Readonly<{ cwd: string; options: Soul["options"]; session?: ResumeCoordinate }>> {
   const latest = (await readHeart(paths)).latestSession;
   const admitted = latest?.provider === soul.provider.name ? latest : undefined;
   const session = admitted?.coordinate;
@@ -225,11 +124,7 @@ async function failedTurnSetup(
     if (input.supervisor.reason === "heart-gone") throw error;
     return { kind: "stopped" };
   }
-  return {
-    kind: "failed",
-    turnSequence,
-    diagnostic: error instanceof Error ? error.message : String(error),
-  };
+  return { kind: "failed", turnSequence, diagnostic: error instanceof Error ? error.message : String(error) };
 }
 
 async function writeProviderEvent(input: DriveTurnInput, active: ActiveTurn, event: AgentEvent): Promise<void> {
@@ -244,11 +139,7 @@ async function writeProviderEvent(input: DriveTurnInput, active: ActiveTurn, eve
       admittedAt: at,
     });
   }
-  await appendActivity(input.paths, {
-    turnSequence: active.turnSequence,
-    event: encodeAgentEvent(event),
-    at,
-  });
+  await appendActivity(input.paths, { turnSequence: active.turnSequence, event: encodeAgentEvent(event), at });
 }
 
 async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
@@ -301,7 +192,7 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
       }
       return { kind: "stopped" };
     }
-    if (input.launchTells.length > 0) {
+    if (input.launchTells.length > 0)
       await recordTellDeliveries(
         input.paths,
         input.launchTells.map((tell) => ({
@@ -312,7 +203,6 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
           deliveredAt: input.now(),
         })),
       );
-    }
     void selected.completion.then(() => requests.stopAdmission());
     return {
       turnSequence: turn.sequence,
@@ -429,7 +319,6 @@ async function stopActiveDrive(input: DriveTurnInput, active: ActiveTurn): Promi
     active.releaseDriveSignal();
   }
 }
-
 function hasUnattemptedTell(
   liveTells: boolean,
   tellPump: Promise<"live" | "turn-ended"> | null,
@@ -438,7 +327,6 @@ function hasUnattemptedTell(
 ): boolean {
   return liveTells && tellPump === null && pending.some((tell) => !attempted.has(tell.id));
 }
-
 async function settleCompletion(
   result: TurnResult,
   session: ResumeCoordinate | undefined,
