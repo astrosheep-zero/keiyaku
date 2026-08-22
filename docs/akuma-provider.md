@@ -1,12 +1,15 @@
 # Akuma Provider Boundary
 
 This chapter owns the provider-neutral protocol and native adapter obligations.
-The shared recipe codec owns the provider-neutral execution envelope. The
-provider map applies the selected kind's config grammar before any adapter is
-constructed; Heart and callers do not repeat or bypass that judgment. Recipe
-inspection remains adapter- and SDK-free; selected adapter construction is
-asynchronous, and that adapter loads its native SDK only when it starts or
-resumes a native session.
+The shared recipe codec owns the provider-neutral execution envelope. Its
+`config` member is an opaque provider escape hatch: the codec only requires an
+object and preserves it unchanged (apart from its immutable snapshot). The
+selected adapter is the sole owner of any config interpretation. It may pass
+the object to its native boundary, decode a provider-owned shape, or refuse it
+when that provider does not support config. The provider map never parses,
+filters, or rejects a config on an adapter's behalf. Recipe inspection remains
+adapter- and SDK-free; selected adapter construction is asynchronous, and that
+adapter loads its native SDK only when it starts or resumes a native session.
 
 ## Turn Correlation
 
@@ -184,8 +187,10 @@ realization. Native restraint has no diagnostic; `none`
 names the enforcement gap, and missing enforcement remains admitted. Sessions
 persist execution name and exact options, from which tell, resume, recovery,
 and fork reconstruct adapters. Fork inherits execution and restraint.
-Generic provider execution, option, and restraint decoders validate known
-members and ignore additional members.
+Generic provider execution, option, and restraint decoders validate the
+provider-neutral envelope and ignore additional envelope members. `config` is
+not a provider-neutral grammar: it remains opaque until the selected adapter
+owns its fate.
 
 When `systemPrompt` is present, `systemPromptMode` selects append or replace.
 Each adapter maps the effective mode to its native prompt input; unsupported
