@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { closeSync, fsyncSync, openSync, renameSync, writeFileSync } from "node:fs";
-import { lstat, mkdir, readFile, readdir, unlink } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, rmdir, unlink } from "node:fs/promises";
 import { dirname, relative, resolve, sep } from "node:path";
 import {
   acquireSqliteTransactionLock,
@@ -54,6 +54,43 @@ function coordinateFromPath(tasksDirectory: string, path: string) {
   if (local.startsWith("..") || resolve(tasksDirectory, local) !== path || !local.endsWith(".md"))
     throw new Error(`invalid Task authority path: ${path}`);
   return parseTaskId(`task/${local.slice(0, -3).split(sep).join("/")}`);
+}
+
+function ownedTaskId(tasksDirectory: string, path: string): TaskId | null {
+  try {
+    return formatTaskId(coordinateFromPath(tasksDirectory, path));
+  } catch {
+    return null;
+  }
+}
+
+async function ownedAuthorityCandidates(directory: string): Promise<readonly Readonly<{ id: TaskId; path: string }>[]> {
+  const candidates: Readonly<{ id: TaskId; path: string }>[] = [];
+  for (const path of await authorityFiles(directory)) {
+    const id = ownedTaskId(directory, path);
+    if (id !== null) candidates.push({ id, path });
+  }
+  return candidates;
+}
+
+async function removeEmptyTaskDirectories(directory: string, removeSelf: boolean): Promise<void> {
+  let entries;
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  for (const entry of entries) {
+    if (entry.isDirectory()) await removeEmptyTaskDirectories(resolve(directory, entry.name), true);
+  }
+  if (!removeSelf) return;
+  try {
+    await rmdir(directory);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT" && code !== "ENOTEMPTY") throw error;
+  }
 }
 
 export async function readBoard(world: WorldRoot): Promise<BoardSnapshot> {
@@ -122,13 +159,28 @@ function lockPath(world: WorldRoot, id: TaskId): string {
   return resolve(world, ".keiyaku", "locks", "task", ...coordinate.namespace, `${coordinate.localId}.sqlite`);
 }
 
-export async function nukeTaskAuthority(world: WorldRoot): Promise<void | "busy"> {
-  const ids = [...(await readBoard(world)).board.tasks.keys()].sort((left, right) =>
-    Buffer.compare(Buffer.from(left), Buffer.from(right)),
-  );
-  if (ids.length === 0) return;
-  const result = await withTaskLocks({ world, allocation: true, ids }, async () => {
-    for (const id of ids) await unlink(authorityPath(world, id));
+export async function nukeTaskAuthority(
+  world: WorldRoot,
+  options?: Readonly<{ timeoutMs?: number }>,
+): Promise<void | "busy"> {
+  const directory = tasksDirectory(world);
+  const lockOptions = options?.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs };
+  const result = await withTaskLocks({ world, allocation: true, ids: [], ...lockOptions }, async () => {
+    const candidates = await ownedAuthorityCandidates(directory);
+    const ids = [...new Set(candidates.map((candidate) => candidate.id))].sort((left, right) =>
+      Buffer.compare(Buffer.from(left), Buffer.from(right)),
+    );
+    return await withTaskLocks({ world, allocation: false, ids, ...lockOptions }, async () => {
+      for (const candidate of candidates) {
+        try {
+          const stat = await lstat(candidate.path);
+          if (stat.isFile() && !stat.isSymbolicLink()) await unlink(candidate.path);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+      }
+      await removeEmptyTaskDirectories(directory, false);
+    });
   });
   if (result === "busy") return "busy";
 }

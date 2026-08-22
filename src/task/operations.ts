@@ -36,8 +36,8 @@ import {
 } from "./query.js";
 
 export type TaskView = Readonly<TaskDocument & { namespace: readonly string[] }>;
-export async function nukeTask(world: WorldRoot): Promise<void> {
-  if ((await nukeTaskAuthority(world)) === "busy") throw new Error("Task reset lock contention");
+export async function nukeTask(world: WorldRoot, options?: Readonly<{ timeoutMs?: number }>): Promise<void> {
+  if ((await nukeTaskAuthority(world, options)) === "busy") throw new Error("Task reset lock contention");
 }
 
 export type TaskRefusal =

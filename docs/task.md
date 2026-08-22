@@ -83,6 +83,23 @@ equal the path-derived coordinate. Unknown keys and malformed documents are
 authority corruption. Manual editing is authoritative; a manual move that
 breaks the witness is corruption.
 
+Confirmed `keiyaku nuke` enumerates owned Task authority from the
+`.keiyaku/tasks/**` path topology and regular-file shape. A regular non-symlink
+`.md` file whose relative path is a valid Task coordinate is eligible for
+deletion even when its Markdown is corrupt; the reset never decodes content to
+decide custody. Invalid-coordinate paths, symlinks, nonregular entries, and
+bytes outside the Task authority root remain and are not decoded as Task
+documents. The reset acquires the allocation lock first and enumerates owned
+paths only while that lock is held, so a Task created while the reset waits is
+still in the deletion set. It then acquires the per-Task locks for the complete
+valid path-derived ID set in canonical byte order, re-observes those paths, and
+deletes only still-present regular non-symlink owned files. A concurrent lock
+timeout is the existing busy failure; a malformed document is not. Empty
+directories inside the tasks root are removed after owned files are gone,
+including when the owned set is empty, and only when no unknown, nonregular, or
+symlink entry remains. The `.keiyaku/tasks` root and sibling authority stay.
+Ordinary reads and mutations still reject corrupt persisted authority.
+
 Public Task reads and writes are asynchronous and observe complete files. Each
 mutation replaces one complete authority file atomically; there is no second
 sync API or parallel writer.
@@ -342,9 +359,10 @@ type TaskCompositionResult =
 One Task file replacement is one commit point. Task never stages, commits, or
 changes Git refs; predecessor-byte comparison is the write adjudicator.
 
-Cooperating writers serialize allocation and addressed mutations with the
-Task-owned lock resources. Lock acquisition is awaited before the serial writer
-section; coordination contains no Task facts or durable owner state.
+Cooperating writers serialize allocation, addressed mutations, and confirmed
+nuke cleanup with the Task-owned lock resources. Lock acquisition is awaited
+before the serial writer section; coordination contains no Task facts or
+durable owner state.
 
 Locks serialize cooperating writers; predecessor-byte comparison remains the
 sole write adjudicator against manual editors. Byte movement returns

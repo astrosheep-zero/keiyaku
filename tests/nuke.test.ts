@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -18,7 +19,7 @@ import { repositoryAt } from "../src/git/repository.js";
 import { worktreePath } from "../src/git/workspace.js";
 import { appointManagedWorktrees, readPlaceRegister } from "../src/workspace-place.js";
 import { contractId } from "../src/core/facts/types.js";
-import { Tasks } from "../src/task/index.js";
+import { TaskAuthorityCorruptionError, Tasks } from "../src/task/index.js";
 import { makeGitRepository } from "./support/git.js";
 
 const CLAUDE_EXECUTION = { name: "claude", kind: "claude-agent-sdk" } as const;
@@ -73,6 +74,43 @@ async function runningAkuma(world: Awaited<ReturnType<typeof testWorld>>) {
   while ((await readHeart(allocated.paths)).latestBody === null) await new Promise((resolve) => setTimeout(resolve, 5));
   return { allocated, body };
 }
+
+test("confirmed nuke removes owned Task authority by path shape without decoding Markdown", async () => {
+  const world = await testWorld();
+  try {
+    const tasks = Tasks.of(world);
+    assert.equal((await tasks.add({ title: "Valid owned" })).kind, "accepted");
+    const root = join(world, ".keiyaku", "tasks");
+    mkdirSync(join(root, "nested"), { recursive: true });
+    writeFileSync(join(root, "broken.md"), "not Task authority\n");
+    writeFileSync(join(root, "nested", "also-broken.md"), "still corrupt\n");
+    await assert.rejects(tasks.list({ scope: "world", selection: "all" }), TaskAuthorityCorruptionError);
+    writeFileSync(join(root, "Not-Valid.md"), "invalid coordinate\n");
+    writeFileSync(join(root, "keep.txt"), "unknown\n");
+    const linked = join(root, "link.md");
+    symlinkSync(join(root, "keep.txt"), linked);
+    const fifo = join(root, "pipe.md");
+    if (process.platform !== "win32") execFileSync("mkfifo", [fifo]);
+    const outside = join(world, ".keiyaku", "unknown.bin");
+    writeFileSync(outside, "outside\n");
+    assert.deepEqual(await Keiyaku.nuke({ world, confirm: world }), { kind: "success", world });
+    assert.equal(existsSync(join(root, "valid-owned.md")), false);
+    assert.equal(existsSync(join(root, "broken.md")), false);
+    assert.equal(existsSync(join(root, "nested", "also-broken.md")), false);
+    assert.equal(existsSync(join(root, "nested")), false);
+    assert.equal(existsSync(root), true);
+    assert.equal(readFileSync(join(root, "Not-Valid.md"), "utf8"), "invalid coordinate\n");
+    assert.equal(readFileSync(join(root, "keep.txt"), "utf8"), "unknown\n");
+    assert.equal(lstatSync(linked).isSymbolicLink(), true);
+    if (process.platform !== "win32") assert.equal(statSync(fifo).isFIFO(), true);
+    assert.equal(readFileSync(outside, "utf8"), "outside\n");
+    assert.deepEqual(await Keiyaku.nuke({ world, confirm: world }), { kind: "success", world });
+    assert.equal(readFileSync(join(root, "keep.txt"), "utf8"), "unknown\n");
+    assert.equal(lstatSync(linked).isSymbolicLink(), true);
+  } finally {
+    rmSync(world, { recursive: true, force: true });
+  }
+});
 
 test("bare and mismatched nuke confirmations refuse before deletion", async () => {
   const world = await testWorld();
@@ -186,14 +224,13 @@ test("Git nuke retains an attached appointed worktree while clearing independent
 test("owner failure becomes one diagnostic and leaves failed custody for retry", async () => {
   const world = await testWorld();
   try {
-    const broken = join(world, ".keiyaku", "tasks", "broken.md");
-    mkdirSync(join(world, ".keiyaku", "tasks"), { recursive: true });
-    writeFileSync(broken, "not Task authority\n");
+    const tasks = join(world, ".keiyaku", "tasks");
+    writeFileSync(tasks, "not a directory\n");
     const result = await Keiyaku.nuke({ world, confirm: world });
     assert.equal(result.kind, "failed");
     assert.equal(result.world, world);
-    assert.match(result.diagnostic, /task document/u);
-    assert.equal(existsSync(broken), true);
+    assert.match(result.diagnostic, /ENOTDIR/u);
+    assert.equal(readFileSync(tasks, "utf8"), "not a directory\n");
   } finally { rmSync(world, { recursive: true, force: true }); }
 });
 
@@ -201,14 +238,13 @@ test("owner deletion attempts remain independent after the stop prerequisite", a
   const fixture = await gitNukeFixture();
   try {
     const { raw, world, managedPath } = fixture;
-    const broken = join(world, ".keiyaku", "tasks", "broken.md");
-    mkdirSync(join(world, ".keiyaku", "tasks"), { recursive: true });
-    writeFileSync(broken, "not Task authority\n");
+    const tasks = join(world, ".keiyaku", "tasks");
+    writeFileSync(tasks, "not a directory\n");
     const result = await Keiyaku.nuke({ world, confirm: world });
     assert.equal(result.kind, "failed");
     assert.equal(existsSync(managedPath), false);
     assert.throws(() => raw.run(["show-ref", "--verify", "--quiet", "refs/heads/keiyaku-state"]));
-    assert.equal(existsSync(broken), true);
+    assert.equal(readFileSync(tasks, "utf8"), "not a directory\n");
   } finally {
     rmSync(fixture.raw.path, { recursive: true, force: true });
     rmSync(fixture.foreign, { recursive: true, force: true });
