@@ -1,3 +1,5 @@
+import { rmdir } from "node:fs/promises";
+import { resolve } from "node:path";
 import { stopAkuma } from "../akuma/nuke.js";
 import { nukeGit } from "../git/nuke.js";
 import { nukeTask } from "../task/operations.js";
@@ -23,6 +25,15 @@ export type NukeResult =
 
 function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+async function removeEmptyWorldMarker(world: WorldRoot): Promise<void> {
+  try {
+    await rmdir(resolve(world, ".keiyaku"));
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT" && code !== "ENOTEMPTY") throw error;
+  }
 }
 
 function nukeInput(input: NukeInput): NukeInput {
@@ -60,6 +71,7 @@ export async function nukeKeiyaku(input: NukeInput): Promise<NukeResult> {
     };
     await Promise.all([attempt(deleteAkuma()), attempt(nukeGit(value.world)), attempt(nukeTask(value.world))]);
     if (failed) throw firstDiagnostic;
+    await removeEmptyWorldMarker(value.world);
     return { kind: "success", world: value.world };
   } catch (error) {
     return { kind: "failed", world: value.world, diagnostic: diagnostic(error) };

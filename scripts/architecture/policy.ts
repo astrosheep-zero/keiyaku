@@ -1857,6 +1857,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         { source: "akuma/request-wire.ts", symbols: ["rename", "rm", "writeFile"] },
         { source: "alias/index.ts", symbols: ["lstat", "mkdir", "readFile", "unlink"] },
         { source: "library/akuma-creation.ts", symbols: ["realpath", "stat"] },
+        { source: "library/nuke.ts", symbols: ["rmdir"] },
         { source: "contract-worktree.ts", symbols: ["chmod", "lstat", "readFile", "unlink"] },
         { source: "workspace-place.ts", symbols: ["lstat", "mkdir", "readFile", "unlink"] },
         { source: "coordination/durable-file.ts", symbols: ["lstat", "mkdir", "readFile", "unlink"] },
