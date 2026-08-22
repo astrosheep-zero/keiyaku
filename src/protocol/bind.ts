@@ -1,4 +1,9 @@
-import { normalizeTargetBranch, observeBindCoordinates } from "../git/observe.js";
+import {
+  normalizeTargetBranch,
+  observeBindCoordinates,
+  type BindTargetSelection,
+} from "../git/observe.js";
+export type { BindTargetSelection };
 import { gitObjectIdForSnapshot } from "../git/identity.js";
 import type { GitRefAssertion } from "../git/repository.js";
 import type { GitRepository } from "../git/process.js";
@@ -24,7 +29,7 @@ type BindOperationInput = Readonly<{
   channel: GitDecodeChannel;
   terms: BindData["terms"];
   verification: VerificationDeclarationPreparation;
-  target?: string;
+  targetSelection?: BindTargetSelection;
   workspace: "worktree";
   actor?: ActorId;
   decorateOffer?: CompanionDecorator;
@@ -43,7 +48,7 @@ type BindSeed = Readonly<{ contractId: ContractId; actor?: ActorId; at: string }
 
 async function bindPreparation(
   input: BindOperationInput,
-  target: string | undefined,
+  selection: BindTargetSelection,
   seed: BindSeed,
 ): Promise<
   | Readonly<{
@@ -56,14 +61,15 @@ async function bindPreparation(
   if (input.verification.kind === "refused") {
     return { kind: "prepared", input: { ...seed, preparation: input.verification } };
   }
-  const observed = await observeBindCoordinates(input.scope, target);
+  const observed = await observeBindCoordinates(input.scope, selection);
   if (observed === null) return { kind: "refused", refusal: { kind: "target-missing" } };
   if (!("start" in observed)) {
     return { kind: "refused", refusal: { kind: "unborn-head" } };
   }
   const start = input.coordinates?.start ?? observed.start;
   const oid = gitObjectIdForSnapshot(input.coordinates === undefined ? start : observed.start);
-  const assertions: GitRefAssertion[] = input.coordinates === undefined ? [{ ref: target ?? "HEAD", oid }] : [];
+  const assertions: GitRefAssertion[] =
+    input.coordinates === undefined ? [{ ref: observed.target ?? "HEAD", oid }] : [];
   return {
     kind: "prepared",
     input: {
@@ -92,11 +98,11 @@ export async function bindOperation(
     BindRefusal | TargetInputRefusal | VerificationDeclarationRefusal | ForkSourceMovedRefusal
   >
 > {
-  let target: string | undefined;
-  if (input.target !== undefined) {
-    const normalized = await normalizeTargetBranch(input.scope, input.target);
+  let selection: BindTargetSelection = input.targetSelection ?? { kind: "targetless" };
+  if (selection.kind === "explicit") {
+    const normalized = await normalizeTargetBranch(input.scope, selection.target);
     if (normalized === null) return { kind: "refused", refusal: { kind: "invalid-target" } };
-    target = normalized;
+    selection = { kind: "explicit", target: normalized };
   }
   const at = new Date().toISOString();
   const id = input.contractId;
@@ -112,7 +118,7 @@ export async function bindOperation(
       decideBind,
       {
         observedContracts: [id, ...input.terms.after, ...(input.source === undefined ? [] : [input.source.contractId])],
-        prepareInput: async (_observation, original) => bindPreparation(input, target, original),
+        prepareInput: async (_observation, original) => bindPreparation(input, selection, original),
         ...(input.source === undefined
           ? {}
           : {

@@ -7,6 +7,7 @@ import {
   type Repo,
   type WorktreeHooks,
 } from "../../index.js";
+import { bindFromCli } from "../../library/contract.js";
 import type { ParsedBind } from "./contract.js";
 import { contractFromInput } from "../selectors.js";
 
@@ -38,7 +39,7 @@ export async function bindFromCommand({
   }
   const after: readonly ContractId[] | undefined = command.after?.map((id) => contractFromInput(repo, id).id);
   if (markdown === undefined || gates === undefined) throw new Error("Markdown bind command is missing stdin terms");
-  return Keiyaku.bind({
+  return bindFromCli({
     repo,
     markdown,
     ...(command.task === undefined ? {} : { task: command.task as `task/${string}` }),

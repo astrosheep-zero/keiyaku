@@ -731,6 +731,10 @@ export async function observeKeiyaku(input: ContractObservationInput): Promise<C
   return withGitDecodeChannel(scope, (channel) => contractObservationOperation({ scope, channel, contractId: id }));
 }
 
+function acceptedBindResult(result: MutationResult<Keiyaku>, region: RegionObservation): BindResult {
+  return { facts: result.facts, head: result.head, keiyaku: result.value, effects: result.effects, lags: result.lags, settlement: result.settlement, ...region };
+}
+
 export async function bindKeiyaku(input: BindInput): Promise<BindResult> {
   const values = requireInput(input, "Keiyaku.bind input");
   const hooks = worktreeHooksOption(values.hooks);
@@ -769,17 +773,20 @@ export async function bindKeiyaku(input: BindInput): Promise<BindResult> {
         ...completionInput(sourceScope, channel, id, toHandle, hooks),
         accepted: admission,
       });
-      return {
-        facts: result.facts,
-        head: result.head,
-        keiyaku: result.value,
-        effects: result.effects,
-        lags: result.lags,
-        settlement: result.settlement,
-        ...(await observeRegion(sourceScope, channel, id, fork.document.region)),
-      };
+      return acceptedBindResult(result, await observeRegion(sourceScope, channel, id, fork.document.region));
     });
   }
+  return bindMarkdownFromValues(values, "targetless");
+}
+
+/** Internal CLI composition; not exported from the package root. */
+export async function bindFromCli(input: BindInput): Promise<BindResult> {
+  const values = requireInput(input, "Keiyaku.bind input");
+  return values.forkOf !== undefined ? bindKeiyaku(input) : bindMarkdownFromValues(values, "current-branch");
+}
+
+async function bindMarkdownFromValues(values: Record<string, unknown>, omittedTarget: "targetless" | "current-branch"): Promise<BindResult> {
+  const hooks = worktreeHooksOption(values.hooks);
   const scope = scopeForRepo(values.repo);
   const task = taskOption(values.task);
   const document = decodeContractDocument(requireMarkdown(values.markdown));
@@ -789,6 +796,7 @@ export async function bindKeiyaku(input: BindInput): Promise<BindResult> {
   const actor = actorOption(values.actor);
   const gates = normalizedGates(values.gates);
   const after = normalizedList(values.after, "after", contractId);
+  const targetSelection = target !== undefined ? { kind: "explicit" as const, target } : { kind: omittedTarget };
   return withGitDecodeChannel(scope, async (channel) => {
     const admission = await prepareMarkdownBind({
       scope,
@@ -797,7 +805,7 @@ export async function bindKeiyaku(input: BindInput): Promise<BindResult> {
       gates,
       after,
       workspace: "worktree",
-      ...(target === undefined ? {} : { target }),
+      targetSelection,
       ...(task === undefined ? {} : { task }),
       ...actor,
     });
@@ -813,14 +821,6 @@ export async function bindKeiyaku(input: BindInput): Promise<BindResult> {
             admission: admission.admission,
             requireAccepted,
           });
-    return {
-      facts: result.facts,
-      head: result.head,
-      keiyaku: result.value,
-      effects: result.effects,
-      lags: result.lags,
-      settlement: result.settlement,
-      ...(await observeRegion(scope, channel, id, document.region)),
-    };
+    return acceptedBindResult(result, await observeRegion(scope, channel, id, document.region));
   });
 }

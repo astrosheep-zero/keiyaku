@@ -80,6 +80,11 @@ export type UnbornHeadObservation = Readonly<{
   branch: string | null;
 }>;
 
+export type BindTargetSelection =
+  | Readonly<{ kind: "explicit"; target: string }>
+  | Readonly<{ kind: "current-branch" }>
+  | Readonly<{ kind: "targetless" }>;
+
 const TARGET_COORDINATES_FORMAT = "%(refname)%00%(objectname)%00";
 
 export async function normalizeTargetBranch(repository: GitRepository, input: string): Promise<string | null> {
@@ -123,47 +128,59 @@ function structuredFields(output: Buffer, fieldCount: number): readonly string[]
   return fields.slice(0, -1);
 }
 
+async function observeHeadCoordinates(
+  repository: GitRepository,
+): Promise<BindCoordinatesObservation | UnbornHeadObservation> {
+  try {
+    return {
+      start: mintSnapshotId((await runGit(repository, ["rev-parse", "--verify", "HEAD"])).toString("utf8").trim()),
+      branch: await currentBranch(repository),
+    };
+  } catch (error) {
+    if (
+      error instanceof GitPlumbingError &&
+      error.status === 128 &&
+      error.stderr.toString("utf8").includes("Needed a single revision")
+    ) {
+      return { kind: "unborn-head", branch: await currentBranch(repository) };
+    }
+    throw error;
+  }
+}
+
 /** Observe bind's tender start and optional reward target without creating persistent state. */
 export async function observeBindCoordinates(
   repository: GitRepository,
-  requestedTarget?: string,
+  selection: BindTargetSelection = { kind: "targetless" },
 ): Promise<BindCoordinatesObservation | UnbornHeadObservation | null> {
-  if (requestedTarget === undefined) {
+  if (selection.kind === "explicit") {
+    const requestedTarget = selection.target;
+    if (isKeiyakuOwnedRef(requestedTarget)) {
+      throw new Error(`bind target names a Keiyaku-owned ref: ${requestedTarget}`);
+    }
+
+    const output = await runGit(repository, [
+      "for-each-ref",
+      `--format=${TARGET_COORDINATES_FORMAT}`,
+      "--",
+      requestedTarget,
+    ]);
+    if (output.length === 0) return null;
+    const [target, start] = structuredFields(output, 2);
+    if (target !== requestedTarget || start === undefined) malformedBindCoordinatesOutput();
     try {
-      return {
-        start: mintSnapshotId((await runGit(repository, ["rev-parse", "--verify", "HEAD"])).toString("utf8").trim()),
-        branch: await currentBranch(repository),
-      };
-    } catch (error) {
-      if (
-        error instanceof GitPlumbingError &&
-        error.status === 128 &&
-        error.stderr.toString("utf8").includes("Needed a single revision")
-      ) {
-        return { kind: "unborn-head", branch: await currentBranch(repository) };
-      }
-      throw error;
+      return { target, start: mintSnapshotId(start), branch: await currentBranch(repository) };
+    } catch {
+      malformedBindCoordinatesOutput();
     }
   }
 
-  if (isKeiyakuOwnedRef(requestedTarget)) {
-    throw new Error(`bind target names a Keiyaku-owned ref: ${requestedTarget}`);
+  const observed = await observeHeadCoordinates(repository);
+  if ("kind" in observed) return observed;
+  if (selection.kind === "current-branch" && observed.branch !== null) {
+    return { start: observed.start, target: observed.branch, branch: observed.branch };
   }
-
-  const output = await runGit(repository, [
-    "for-each-ref",
-    `--format=${TARGET_COORDINATES_FORMAT}`,
-    "--",
-    requestedTarget,
-  ]);
-  if (output.length === 0) return null;
-  const [target, start] = structuredFields(output, 2);
-  if (target !== requestedTarget || start === undefined) malformedBindCoordinatesOutput();
-  try {
-    return { target, start: mintSnapshotId(start), branch: await currentBranch(repository) };
-  } catch {
-    malformedBindCoordinatesOutput();
-  }
+  return observed;
 }
 
 type DecodedJournal = Readonly<{

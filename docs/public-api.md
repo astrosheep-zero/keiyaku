@@ -171,6 +171,7 @@ current `HEAD`. The canonical full ref is the only target value persisted in
 contract coordinates; its Git meaning is defined in
 [git.md](git.md).
 
+Omitting `target` is targetless, not the current branch.
 An omitted target requires a real `HEAD` commit; an unborn `HEAD` returns the
 typed `unborn-head` refusal.
 

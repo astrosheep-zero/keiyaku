@@ -424,6 +424,16 @@ test("bind canonicalizes branch targets and refuses invalid names before birth",
   assert.equal(repository.run(["for-each-ref", "--format=%(refname)", "refs/heads/missing"]), "");
 });
 
+test("omitted public bind remains targetless on an attached HEAD", async () => {
+  const repository = repositoryWithInitialCommit();
+  const repo = await Repo.at({ path: repository.path });
+  const start = repository.run(["rev-parse", "HEAD"]).trim();
+  const bound = await Keiyaku.bind({ repo, markdown: markdown("Public targetless"), workspace: "worktree" });
+  const state = await bound.keiyaku.state();
+  assert.equal(state.coordinates.target, undefined);
+  assert.equal(state.coordinates.start, start);
+});
+
 test("targetless bind refuses an unborn HEAD without publishing effects", async () => {
   const repository = makeGitRepository();
   const repo = await Repo.at({ path: repository.path });

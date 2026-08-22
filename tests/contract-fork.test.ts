@@ -33,6 +33,27 @@ test("fork bind copies current terms and the exact source start into fresh custo
   assert.deepEqual((await fork.keiyaku.state()).terms.gates, ["reviewed"]);
 });
 
+test("fork bind copies the source target and does not substitute the caller branch", async () => {
+  const repository = repositoryWithMain();
+  const repo = await Repo.at({ path: repository.path });
+  repository.run(["branch", "release"]);
+  const source = await Keiyaku.bind({
+    repo,
+    markdown: document().replace("# Library verbs", "# Targeted source"),
+    workspace: "worktree",
+    target: "release",
+    gates: [],
+  });
+  const sourceState = await source.keiyaku.state();
+  assert.equal(sourceState.coordinates.target, "refs/heads/release");
+
+  repository.run(["checkout", "-B", "caller"]);
+  const fork = await Keiyaku.bind({ repo, forkOf: source.keiyaku.id });
+  const forkState = await fork.keiyaku.state();
+  assert.equal(forkState.coordinates.target, "refs/heads/release");
+  assert.equal(forkState.coordinates.start, sourceState.coordinates.start);
+});
+
 test("fork bind refuses missing sources and incompatible term inputs", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });

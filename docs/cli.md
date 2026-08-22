@@ -152,13 +152,14 @@ not Contract or Library state; recovery submits it through the ordinary `bind -`
 entry point.
 
 Ordinary `bind` maps `--target`, repeated `--after`, `--gates`, and `--actor`
-to `Keiyaku.bind`. An explicit `--target` remains literal input for the public
-target boundary. When it is omitted, the adapter supplies
-`repo.currentBranch()`; an attached branch therefore becomes the canonical
-target, while detached HEAD remains explicitly targetless. The parser itself
-does not inspect Git. An accepted bind result exposes the persisted canonical
-target, or `null`, so this default is never hidden. The omitted form maps to
-the public managed-worktree default.
+into bind. An explicit `--target` remains literal input for the public
+target boundary. Omitting `--target` selects current-branch intent, resolved
+in the same bind coordinate observation used for admission. An attached
+existing branch becomes the canonical target; detached committed HEAD remains
+targetless; unborn HEAD returns `unborn-head`, never `target-missing`. The
+parser does not inspect Git or pre-read a branch name as an explicit target.
+An accepted bind result exposes the persisted canonical target, or `null`, so
+this default is never hidden.
 Fork bind copies the source target when `--target` is omitted and copies its
 start exactly. It always uses a fresh managed worktree.
 It stores no source or comparison relation.

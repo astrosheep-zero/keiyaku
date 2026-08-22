@@ -4,7 +4,7 @@ import { contractIdFromSegment, type ActorId, type ContractId } from "../core/fa
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import { fitIdentityStem, normalizeIdentityStem } from "../identity/normalize.js";
-import { bindOperation } from "../protocol/bind.js";
+import { bindOperation, type BindTargetSelection } from "../protocol/bind.js";
 import { stateOperation, type IntentOutcome, type RepositoryScope } from "../protocol/operations.js";
 import { claimTaskHolder, claimTaskHolderWithFence } from "../settlement/holder.js";
 import type { TaskId } from "../task/identity.js";
@@ -19,7 +19,7 @@ type BindAttemptInput = Readonly<{
   terms: Parameters<typeof bindOperation>[0]["terms"];
   verification: VerificationDeclarationPreparation;
   workspace: "worktree";
-  target?: string;
+  targetSelection?: BindTargetSelection;
   coordinates?: Readonly<{ start: import("../core/facts/types.js").SnapshotId }>;
   source?: Parameters<typeof bindOperation>[0]["source"];
   task?: TaskId;
@@ -42,7 +42,7 @@ async function attempt(input: BindAttemptInput, id: ContractId) {
     ...(input.coordinates === undefined ? {} : { coordinates: input.coordinates }),
     ...(input.source === undefined ? {} : { source: input.source }),
     contractId: id,
-    ...(input.target === undefined ? {} : { target: input.target }),
+    ...(input.targetSelection === undefined ? {} : { targetSelection: input.targetSelection }),
     ...(input.task === undefined
       ? {}
       : {
@@ -130,11 +130,12 @@ export async function admitForkBindWithAppointment(
     terms,
     verification: documentDerivation(document, terms.gates).verification,
     workspace: "worktree",
-    ...(input.target === undefined
-      ? source.coordinates.target === undefined
-        ? {}
-        : { target: source.coordinates.target }
-      : { target: input.target }),
+    targetSelection:
+      input.target === undefined
+        ? source.coordinates.target === undefined
+          ? { kind: "targetless" }
+          : { kind: "explicit", target: source.coordinates.target }
+        : { kind: "explicit", target: input.target },
     coordinates: { start: source.coordinates.start },
     source: {
       contractId: input.sourceId,
@@ -155,7 +156,7 @@ export async function admitMarkdownBind(
     terms: Parameters<typeof bindOperation>[0]["terms"];
     verification: VerificationDeclarationPreparation;
     workspace: "worktree";
-    target?: string;
+    targetSelection?: BindTargetSelection;
     task?: TaskId;
     actor?: ActorId;
   }>,
@@ -171,7 +172,7 @@ export async function prepareMarkdownBind(
     gates: readonly import("../core/facts/types.js").Gate[];
     after: readonly ContractId[];
     workspace: "worktree";
-    target?: string;
+    targetSelection?: BindTargetSelection;
     task?: TaskId;
     actor?: ActorId;
   }>,
@@ -185,7 +186,7 @@ export async function prepareMarkdownBind(
       terms,
       verification: documentDerivation(input.document, terms.gates).verification,
       workspace: input.workspace,
-      ...(input.target === undefined ? {} : { target: input.target }),
+      ...(input.targetSelection === undefined ? {} : { targetSelection: input.targetSelection }),
       ...(input.task === undefined ? {} : { task: input.task }),
       ...(input.actor === undefined ? {} : { actor: input.actor }),
     });

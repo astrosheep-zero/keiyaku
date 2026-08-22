@@ -567,7 +567,7 @@ test("a linked-worktree Task invocation uses its local namespace and the primary
   if (board.kind === "accepted") assert.equal(board.value.rows.some((row) => row.id === added.value?.id), true);
 });
 
-test("targetless bind uses the invocation worktree's current HEAD without a target ref", async () => {
+test("ordinary omitted-target bind uses the invocation worktree's current attached branch", async () => {
   const repository = repositoryWithMain();
   const start = repository.run(["rev-parse", "refs/heads/main"]).trim();
   const source = contractDocument("Markdown Bind", "## Rollout Notes\nfirst\n\n- second\n");
@@ -581,9 +581,10 @@ test("targetless bind uses the invocation worktree's current HEAD without a targ
   const state = (await observeContract(await repositoryAt(repository.path), acceptedContract(result))).state;
   assert.deepEqual(state?.coordinates, {
     start,
+    target: "refs/heads/main",
     workspace: "worktree",
   });
-  assert.equal(result.kind === "accepted" ? result.target : undefined, null);
+  assert.equal(result.kind === "accepted" ? result.target : undefined, "refs/heads/main");
   assert.equal(state?.terms?.document.bytes, source);
   const decoded = state?.terms === null || state?.terms === undefined
     ? null

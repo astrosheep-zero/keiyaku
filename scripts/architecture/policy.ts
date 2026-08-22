@@ -1062,7 +1062,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         types("git/read-observation.ts", ["GitDecodeChannel"]),
         any("identity/normalize.ts", ["fitIdentityStem", "normalizeIdentityStem"]),
         any("protocol/operations.ts", ["IntentOutcome", "RepositoryScope", "stateOperation"]),
-        any("protocol/bind.ts", ["bindOperation"]),
+        any("protocol/bind.ts", ["BindTargetSelection", "bindOperation"]),
         any("settlement/holder.ts", ["claimTaskHolder", "claimTaskHolderWithFence"]),
         types("task/identity.ts", ["TaskId"]),
         types("verification/declaration.ts", ["VerificationDeclarationPreparation"]),
@@ -1690,7 +1690,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     {
       source: "cli/commands/bind.ts",
-      allow: [any("index.ts"), types("cli/commands/contract.ts", ["ParsedBind"]), any("cli/selectors.ts")],
+      allow: [any("index.ts"), any("library/contract.ts", ["bindFromCli"]), types("cli/commands/contract.ts", ["ParsedBind"]), any("cli/selectors.ts")],
     },
     { source: "cli/commands/contract.ts", allow: [types("library/catalog.ts", ["CatalogQuery"])] },
     {

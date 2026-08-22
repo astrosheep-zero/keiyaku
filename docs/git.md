@@ -70,14 +70,19 @@ resolved target head; without a target it is the caller worktree's current
 point for a `here` workspace. A targeted here contract is legal only while
 the caller's symbolic `HEAD` is that target.
 
-Bind derives those coordinates anew inside every semantic attempt. The same
-atomic admission transaction asserts only the ref fact sealed into
-`coordinates.start`: an explicit target's OID, or dereferenced `HEAD` OID for a
-targetless bind. Every assertion is a non-mutating `verify`; apart from the
-state-ref CAS append, admission never updates, creates, deletes, or symbolically
-updates a ref. An OID movement, identity collision, or Git CAS retry therefore
-discards the attempt and re-observes coordinates; a fresh read alone is not the
-currentness judge.
+Bind derives those coordinates anew inside every semantic attempt from one
+target-selection intent: an explicit target, the current attached branch, or
+targetless. Current-branch intent is resolved in that same observation. An
+attached existing branch becomes the canonical `refs/heads/...` target and
+start snapshot. A detached committed `HEAD` is targetless and starts at that
+`HEAD`. An unborn `HEAD` returns `unborn-head` and is never classified as
+`target-missing`. The same atomic admission transaction asserts only the ref
+fact sealed into `coordinates.start`: the selected target ref's OID, or
+dereferenced `HEAD` OID when there is no target. Every assertion is a
+non-mutating `verify`; apart from the state-ref CAS append, admission never
+updates, creates, deletes, or symbolically updates a ref. An OID movement,
+identity collision, or Git CAS retry therefore discards the attempt and
+re-observes coordinates; a fresh read alone is not the currentness judge.
 
 The symbolic branch and attachedness read for targeted `here` eligibility are
 not Contract facts. They can refuse that decision observation, but admission

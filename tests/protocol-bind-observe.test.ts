@@ -125,7 +125,7 @@ test("observes an explicit target by its exact full ref", async () => {
   const target = "refs/heads/release";
   const start = repository.run(["rev-parse", target]).trim();
 
-  assert.deepEqual(await observeBindCoordinates(await repositoryAt(repository.path), target), {
+  assert.deepEqual(await observeBindCoordinates(await repositoryAt(repository.path), { kind: "explicit", target }), {
     target,
     start,
     branch: "refs/heads/main",
@@ -143,7 +143,10 @@ test("observes a targetless detached bind snapshot", async () => {
 test("observes a missing explicit bind target without inventing coordinates", async () => {
   const repository = repositoryWithHead();
 
-  assert.equal(await observeBindCoordinates(await repositoryAt(repository.path), "refs/heads/missing"), null);
+  assert.equal(
+    await observeBindCoordinates(await repositoryAt(repository.path), { kind: "explicit", target: "refs/heads/missing" }),
+    null,
+  );
 });
 
 test("observes an unborn targetless HEAD as a typed pre-admission outcome", async () => {
@@ -152,6 +155,39 @@ test("observes an unborn targetless HEAD as a typed pre-admission outcome", asyn
     kind: "unborn-head",
     branch: "refs/heads/main",
   });
+});
+
+test("observes current-branch intent from the attached HEAD without a second resolver", async () => {
+  const repository = repositoryWithHead();
+  const start = repository.run(["rev-parse", "HEAD"]).trim();
+
+  assert.deepEqual(
+    await observeBindCoordinates(await repositoryAt(repository.path), { kind: "current-branch" }),
+    { start, target: "refs/heads/main", branch: "refs/heads/main" },
+  );
+
+  repository.run(["checkout", "--quiet", "--detach"]);
+  assert.deepEqual(
+    await observeBindCoordinates(await repositoryAt(repository.path), { kind: "current-branch" }),
+    { start, branch: null },
+  );
+});
+
+test("current-branch intent on an unborn HEAD remains unborn-head", async () => {
+  const repository = makeGitRepository();
+  assert.deepEqual(await observeBindCoordinates(await repositoryAt(repository.path), { kind: "current-branch" }), {
+    kind: "unborn-head",
+    branch: "refs/heads/main",
+  });
+  assert.deepEqual(
+    await bindOperation({
+      scope: await repositoryAt(repository.path),
+      terms: terms([]),
+      targetSelection: { kind: "current-branch" },
+      workspace: "worktree",
+    }),
+    { kind: "refused", refusal: { kind: "unborn-head" } },
+  );
 });
 
 test("refuses targets that name Keiyaku-owned refs", async () => {
@@ -166,7 +202,7 @@ test("refuses targets that name Keiyaku-owned refs", async () => {
 
   for (const target of ownedTargets) {
     await assert.rejects(
-      observeBindCoordinates(await repositoryAt(repository.path), target),
+      observeBindCoordinates(await repositoryAt(repository.path), { kind: "explicit", target }),
       (error: unknown) => error instanceof Error
         && !(error instanceof TypeError)
         && error.message === `bind target names a Keiyaku-owned ref: ${target}`,
@@ -187,7 +223,10 @@ test("refuses malformed structured bind observations", async () => {
     {},
     async (gitPath) => {
       await assert.rejects(
-        observeBindCoordinates(await repositoryAt(repository.path, gitPath), "refs/heads/main"),
+        observeBindCoordinates(await repositoryAt(repository.path, gitPath), {
+          kind: "explicit",
+          target: "refs/heads/main",
+        }),
         /malformed structured Git output while observing bind coordinates/,
       );
     },
@@ -537,7 +576,7 @@ test("bind reobserves and atomically asserts target coordinates after Git moveme
     scope: await repositoryAt(repository.path, gitPath),
     title: "Moving target",
     terms: terms([]),
-    target: "refs/heads/release",
+    targetSelection: { kind: "explicit", target: "refs/heads/release" },
     workspace: "worktree",
   }));
 
@@ -589,7 +628,7 @@ test("bind never restores a targeted checkout that moved to a same-OID branch", 
     scope: await repositoryAt(repository.path, gitPath),
     title: "Same OID checkout movement",
     terms: terms([]),
-    target: "refs/heads/main",
+    targetSelection: { kind: "explicit", target: "refs/heads/main" },
     workspace: "worktree",
   }));
 
@@ -597,6 +636,38 @@ test("bind never restores a targeted checkout that moved to a same-OID branch", 
   if (bound.kind !== "accepted") throw new Error("same-OID moved bind was not accepted");
   assert.equal(repository.run(["symbolic-ref", "HEAD"]).trim(), "refs/heads/feature");
   assert.equal((await observeContract(git, bound.value.contractId)).state?.coordinates.start, start);
+});
+
+test("current-branch bind reobserves and asserts the attached branch after Git movement", async () => {
+  const repository = repositoryWithHead();
+  const git = await repositoryAt(repository.path);
+  const predecessor = repository.run(["rev-parse", "refs/heads/main"]).trim();
+  const tree = repository.run(["rev-parse", `${predecessor}^{tree}`]).trim();
+  const moved = repository.run(["commit-tree", tree, "-p", predecessor, "-m", "move current branch"]).trim();
+  const marker = join(repository.path, "bind-current-branch-observation.marker");
+  const bound = await withGitShim([
+    'if [ "$1 $2" = "update-ref --stdin" ] && [ ! -e "$KEIYAKU_BIND_MARKER" ]; then',
+    '  : > "$KEIYAKU_BIND_MARKER"',
+    '  "$KEIYAKU_REAL_GIT" update-ref refs/heads/main "$KEIYAKU_MOVED_TARGET" "$KEIYAKU_OLD_TARGET" || exit $?',
+    "fi",
+    'exec "$KEIYAKU_REAL_GIT" "$@"',
+  ].join("\n"), {
+    KEIYAKU_BIND_MARKER: marker,
+    KEIYAKU_MOVED_TARGET: moved,
+    KEIYAKU_OLD_TARGET: predecessor,
+  }, async (gitPath) => bindOperation({
+    scope: await repositoryAt(repository.path, gitPath),
+    title: "Moving current branch",
+    terms: terms([]),
+    targetSelection: { kind: "current-branch" },
+    workspace: "worktree",
+  }));
+
+  assert.equal(bound.kind, "accepted");
+  if (bound.kind !== "accepted") throw new Error("moved current-branch bind was not accepted");
+  const state = (await observeContract(git, bound.value.contractId)).state;
+  assert.equal(state?.coordinates.target, "refs/heads/main");
+  assert.equal(state?.coordinates.start, moved);
 });
 
 test("targetless bind reobserves a different HEAD OID after atomic verification fails", async () => {
