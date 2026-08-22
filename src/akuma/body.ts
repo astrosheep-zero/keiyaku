@@ -427,7 +427,3 @@ export async function wakeRecordedTell(
     wake: (await wakePendingTells(paths, tellId, runtime))!,
   };
 }
-
-export async function recoverPendingTells(paths: AkumaPaths): Promise<void> {
-  await wakePendingTells(paths, undefined, DIRECT_TELL_WAKE);
-}

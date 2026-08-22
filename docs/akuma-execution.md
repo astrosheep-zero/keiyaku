@@ -42,6 +42,10 @@ successor and releases its handle. Successful launch ends that recovery without
 observing Heart delivery, child admission, or child exit; launch failure leaves
 the Tell pending. No daemon heals it without a later interaction.
 
+Kill recovery uses the same detached handoff after its leash evidence is
+settled; kill returns its lifecycle evidence without waiting for successor
+admission, Heart delivery, or child exit.
+
 A waker establishes its cancellable Heart observer before unconditionally
 spawning one child. It never probes the leash or joins a leash observation to a
 Body row. Fresh Heart delivery evidence returns `told`; a later Body fact
