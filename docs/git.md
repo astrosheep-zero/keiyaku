@@ -98,13 +98,35 @@ this one Git owner. The library boundary rejects a target that names any
 of them before coordinates are recorded; target input and canonicalization are
 defined only in [public-api.md](public-api.md).
 
-Confirmed Git nuke removes `refs/heads/keiyaku-state` first with an expected
-OID compare-and-swap. A state OID race fails before topology deletion and a
-later confirmation retries. During migration, nuke enumerates both legacy
-`refs/heads/keiyaku-delivery/*` and `refs/heads/keiyaku-candidate/*` leaves and
-the current `refs/keiyaku/delivery/*` and `refs/keiyaku/candidate/*` leaves;
-each leaf deletion uses its freshly observed OID. Ordinary and unknown refs
-remain untouched.
+The Git owner performs confirmed reset state-first. It snapshots
+`refs/heads/keiyaku-state` and deletes that ref with an expected-OID
+compare-and-swap before deleting regenerable delivery, candidate, worktree, or
+Place topology. If the state OID moved between observation and deletion, the
+owner attempt fails before topology cleanup so a later confirmed reset can
+retry. If the state ref is absent, reset continues against the observed owned
+topology. State-first is the only reset ordering law; reset adds no World-wide
+lock, ledger, backup, trash, undo, or repository GC.
+
+During namespace migration, reset enumerates leaves under the distinct legacy
+roots `refs/heads/keiyaku-delivery` and `refs/heads/keiyaku-candidate` and the
+distinct migration roots `refs/keiyaku/delivery` and `refs/keiyaku/candidate`.
+Each leaf deletion uses that leaf's freshly observed OID as the expected value.
+Ordinary, unknown, and foreign refs remain untouched.
+
+Reset retains a registered appointed worktree whose HEAD is attached, and it
+removes only a detached managed worktree after hook-residue cleanup and proof
+that the path is unregistered and physically absent. An appointment with no
+registered worktree is removable residue only when its Git administration
+pointer resolves under this repository's pinned common Git directory; otherwise
+the path is foreign or unknown and is retained. That proof never scans or
+adopts arbitrary worktrees. Each appointment is released only after its managed
+path is absent. Place authority is removed only after the appointment register
+is empty. SQLite lock files remain.
+
+A failed owner attempt is retryable and may leave independently completed
+effects. Success reports only the effects observed by this Git owner. It does
+not promise a serialized transaction against writers that do not honor
+Keiyaku locks.
 
 Managed delivery and candidate-pin leaves are deterministic private topology
 derived from the complete ContractId. They are never public identity or a

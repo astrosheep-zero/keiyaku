@@ -24,6 +24,12 @@ process, reads the frozen command and durably records its resulting progress
 before releasing that lock. Thus caller death may release the Contract lock but
 cannot let a later reconcile overlap the still-running Hook command.
 
+Confirmed Git reset is not reconciliation. It does not compute
+desired-minus-actual effects, replay hooks as lifecycle recovery, or reverse
+admission. Managed-worktree hook markers are Keiyaku-owned residue of the
+worktrees reset removes; SQLite lock files remain. A failed reset attempt stays
+retryable and may keep independently completed effects.
+
 Ordinary admission does not take the per-Contract effect lock. Targeted
 placement takes the separate canonical target fence described above. A public
 mutation that admits a newer fact performs its mandatory reconciliation through

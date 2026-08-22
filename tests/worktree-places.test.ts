@@ -11,6 +11,7 @@ import {
   decodePlaceRegister,
   emptyPlaceRegister,
   nextPlace,
+  nukeEmptyPlaceAuthority,
   place,
   placeRegisterPath,
   readManagedWorktreeAppointment,
@@ -341,6 +342,27 @@ test("a 10000-appointment observation decodes the register once", async () => {
   }
   const failed = await readManagedWorktreeAppointment(git, EXAMPLE);
   assert.equal(failed.kind, "failed");
+});
+
+test("empty Place authority nuke removes the register and retains the lock", async () => {
+  const git = await repositoryAt(repositoryWithCommit().path);
+  await appointManagedWorktrees(git, [EXAMPLE]);
+  await releaseManagedWorktrees(git, [EXAMPLE]);
+  const lock = join(git.commonDirectory, "keiyaku", "locks", "places.sqlite");
+  assert.equal(existsSync(placeRegisterPath(git)), true);
+  assert.equal(existsSync(lock), true);
+  await nukeEmptyPlaceAuthority(git);
+  assert.equal(existsSync(placeRegisterPath(git)), false);
+  assert.equal(existsSync(lock), true);
+});
+
+test("Place authority nuke retains a nonempty register and its lock", async () => {
+  const git = await repositoryAt(repositoryWithCommit().path);
+  await appointManagedWorktrees(git, [EXAMPLE]);
+  const lock = join(git.commonDirectory, "keiyaku", "locks", "places.sqlite");
+  await assert.rejects(() => nukeEmptyPlaceAuthority(git), /Place authority still has managed worktree appointments/u);
+  assert.equal(existsSync(placeRegisterPath(git)), true);
+  assert.equal(existsSync(lock), true);
 });
 
 test("current path projection is the appointed Place", async () => {

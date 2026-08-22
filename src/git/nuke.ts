@@ -21,18 +21,14 @@ import { worktreePath } from "./workspace.js";
 
 type ManagedEntry = Readonly<{ contract: ContractId; path: string }>;
 
-async function managedCustody(repository: GitRepository): Promise<
-  Readonly<{
-    entries: readonly ManagedEntry[];
-  }>
-> {
+async function managedCustody(repository: GitRepository): Promise<Readonly<{ entries: readonly ManagedEntry[] }>> {
   const register = await readPlaceRegister(repository);
-  const entries: ManagedEntry[] = [];
-  for (const appointment of register.appointments) {
-    const path = worktreePath(repository, appointment.place);
-    entries.push({ contract: appointment.contract, path });
-  }
-  return { entries };
+  return {
+    entries: register.appointments.map((appointment) => ({
+      contract: appointment.contract,
+      path: worktreePath(repository, appointment.place),
+    })),
+  };
 }
 
 function underCommonDirectory(commonDirectory: string, administrationDirectory: string): boolean {
@@ -67,7 +63,7 @@ async function unregisteredResidueBelongsToRepository(repository: GitRepository,
   }
 }
 
-async function removeUnregisteredResidue(repository: GitRepository, entry: ManagedEntry): Promise<void> {
+async function removeUnregisteredResidue(repository: GitRepository, entry: ManagedEntry): Promise<boolean> {
   let present = true;
   try {
     await access(entry.path);
@@ -75,7 +71,7 @@ async function removeUnregisteredResidue(repository: GitRepository, entry: Manag
     if ((error as NodeJS.ErrnoException).code === "ENOENT") present = false;
     else throw error;
   }
-  if (!present) return;
+  if (!present) return true;
   if (!(await unregisteredResidueBelongsToRepository(repository, entry.path))) {
     throw new Error(`managed Place path has foreign custody: ${entry.path}`);
   }
@@ -85,19 +81,15 @@ async function removeUnregisteredResidue(repository: GitRepository, entry: Manag
   try {
     await access(entry.path);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
     throw error;
   }
   throw new Error(`managed Place worktree remains present: ${entry.path}`);
 }
 
 async function removeManagedWorktree(repository: GitRepository, entry: ManagedEntry): Promise<boolean> {
-  const topology = await registeredWorktrees(repository);
-  const registered = topology.find((candidate) => candidate.path === entry.path);
-  if (registered === undefined) {
-    await removeUnregisteredResidue(repository, entry);
-    return true;
-  }
+  const registered = (await registeredWorktrees(repository)).find((candidate) => candidate.path === entry.path);
+  if (registered === undefined) return await removeUnregisteredResidue(repository, entry);
   if (registered.branch !== null) return false;
   await nukeWorktreeHookResidue(await worktreeGitDirectory(repository, entry.path));
   await runGit(repository, ["worktree", "remove", "--force", entry.path]);
@@ -106,14 +98,18 @@ async function removeManagedWorktree(repository: GitRepository, entry: ManagedEn
   }
   try {
     await access(entry.path);
-  } catch {
-    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
+    throw error;
   }
   throw new Error(`managed Place worktree remains present: ${entry.path}`);
 }
 
-async function removeOwnedRefs(repository: GitRepository): Promise<unknown | undefined> {
-  let firstFailure: unknown;
+async function deleteRefAt(repository: GitRepository, ref: string, expectedOid: string): Promise<void> {
+  await runGit(repository, ["update-ref", "--no-deref", "-d", ref, expectedOid]);
+}
+
+async function removeOwnedRefs(repository: GitRepository): Promise<void> {
   const roots = [
     DELIVERY_REF_NAMESPACE,
     CANDIDATE_PIN_REF_NAMESPACE,
@@ -126,44 +122,27 @@ async function removeOwnedRefs(repository: GitRepository): Promise<unknown | und
       .split("\n")
       .filter((ref) => ref.length > root.length && ref.startsWith(`${root}/`));
     for (const ref of refs) {
-      try {
-        const oid = await readRef(repository, ref);
-        if (oid !== null) await runGit(repository, ["update-ref", "--no-deref", "-d", ref, oid]);
-      } catch (error) {
-        firstFailure ??= error;
-      }
+      const oid = await readRef(repository, ref);
+      if (oid !== null) await deleteRefAt(repository, ref, oid);
     }
   }
-  return firstFailure;
 }
 
-export async function nukeGit(world: WorldRoot): Promise<void> {
+export async function nukeGit(world: WorldRoot, gitPath = "git"): Promise<void> {
   let repository: GitRepository;
   try {
-    repository = await repositoryAt(world);
+    repository = await repositoryAt(world, gitPath);
   } catch (error) {
     if (error instanceof NoGitWorldError) return;
     throw error;
   }
-  // The state ref is the journal root. Remove it before reading or deleting any
-  // topology that a concurrent writer could regenerate from that root.
   const state = await readRef(repository, GIT_REF);
-  if (state !== null) await runGit(repository, ["update-ref", "--no-deref", "-d", GIT_REF, state]);
+  if (state !== null) await deleteRefAt(repository, GIT_REF, state);
 
   const custody = await managedCustody(repository);
-  let firstFailure: unknown;
   for (const entry of custody.entries) {
-    try {
-      if (await removeManagedWorktree(repository, entry)) await releaseManagedWorktrees(repository, [entry.contract]);
-    } catch (error) {
-      firstFailure ??= error;
-    }
+    if (await removeManagedWorktree(repository, entry)) await releaseManagedWorktrees(repository, [entry.contract]);
   }
-  firstFailure ??= await removeOwnedRefs(repository);
-  try {
-    await nukeEmptyPlaceAuthority(repository);
-  } catch (error) {
-    firstFailure ??= error;
-  }
-  if (firstFailure !== undefined) throw firstFailure;
+  await nukeEmptyPlaceAuthority(repository);
+  await removeOwnedRefs(repository);
 }

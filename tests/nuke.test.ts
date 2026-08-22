@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -16,17 +15,34 @@ import { parseArgv } from "../src/cli/parse.js";
 import { renderRefusal } from "../src/cli/render/refusal.js";
 import { nukeExitCode } from "../src/cli/render/nuke.js";
 import { nukeGit } from "../src/git/nuke.js";
-import { repositoryAt } from "../src/git/repository.js";
+import { commonGitDirectory, repositoryAt } from "../src/git/repository.js";
 import { worktreePath } from "../src/git/workspace.js";
-import { appointManagedWorktrees, readPlaceRegister } from "../src/workspace-place.js";
+import { appointManagedWorktrees, placeRegisterPath, readPlaceRegister } from "../src/workspace-place.js";
 import { contractId } from "../src/core/facts/types.js";
-import { TaskAuthorityCorruptionError, Tasks } from "../src/task/index.js";
-import { makeGitRepository } from "./support/git.js";
+import { Tasks } from "../src/task/index.js";
+import { makeGitRepository, withGitShim } from "./support/git.js";
 
 const CLAUDE_EXECUTION = { name: "claude", kind: "claude-agent-sdk" } as const;
 
 async function testWorld() {
   return await World.at(mkdtempSync(join(tmpdir(), "keiyaku-v4-nuke-")));
+}
+
+function refPresent(raw: ReturnType<typeof makeGitRepository>, ref: string): boolean {
+  try {
+    raw.run(["show-ref", "--verify", "--quiet", ref]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function placeLockPath(repository: Awaited<ReturnType<typeof repositoryAt>>): string {
+  return join(commonGitDirectory(repository), "keiyaku", "locks", "places.sqlite");
+}
+
+function gitNukeShim(extra = ""): string {
+  return ['printf "%s\\n" "$*" >> "$KEIYAKU_CALLS"', extra, 'exec "$KEIYAKU_REAL_GIT" "$@"'].join("\n");
 }
 
 async function gitNukeFixture() {
@@ -75,43 +91,6 @@ async function runningAkuma(world: Awaited<ReturnType<typeof testWorld>>) {
   while ((await readHeart(allocated.paths)).latestBody === null) await new Promise((resolve) => setTimeout(resolve, 5));
   return { allocated, body };
 }
-
-test("confirmed nuke removes owned Task authority by path shape without decoding Markdown", async () => {
-  const world = await testWorld();
-  try {
-    const tasks = Tasks.of(world);
-    assert.equal((await tasks.add({ title: "Valid owned" })).kind, "accepted");
-    const root = join(world, ".keiyaku", "tasks");
-    mkdirSync(join(root, "nested"), { recursive: true });
-    writeFileSync(join(root, "broken.md"), "not Task authority\n");
-    writeFileSync(join(root, "nested", "also-broken.md"), "still corrupt\n");
-    await assert.rejects(tasks.list({ scope: "world", selection: "all" }), TaskAuthorityCorruptionError);
-    writeFileSync(join(root, "Not-Valid.md"), "invalid coordinate\n");
-    writeFileSync(join(root, "keep.txt"), "unknown\n");
-    const linked = join(root, "link.md");
-    symlinkSync(join(root, "keep.txt"), linked);
-    const fifo = join(root, "pipe.md");
-    if (process.platform !== "win32") execFileSync("mkfifo", [fifo]);
-    const outside = join(world, ".keiyaku", "unknown.bin");
-    writeFileSync(outside, "outside\n");
-    assert.deepEqual(await Keiyaku.nuke({ world, confirm: world }), { kind: "success", world });
-    assert.equal(existsSync(join(root, "valid-owned.md")), false);
-    assert.equal(existsSync(join(root, "broken.md")), false);
-    assert.equal(existsSync(join(root, "nested", "also-broken.md")), false);
-    assert.equal(existsSync(join(root, "nested")), false);
-    assert.equal(existsSync(root), true);
-    assert.equal(readFileSync(join(root, "Not-Valid.md"), "utf8"), "invalid coordinate\n");
-    assert.equal(readFileSync(join(root, "keep.txt"), "utf8"), "unknown\n");
-    assert.equal(lstatSync(linked).isSymbolicLink(), true);
-    if (process.platform !== "win32") assert.equal(statSync(fifo).isFIFO(), true);
-    assert.equal(readFileSync(outside, "utf8"), "outside\n");
-    assert.deepEqual(await Keiyaku.nuke({ world, confirm: world }), { kind: "success", world });
-    assert.equal(readFileSync(join(root, "keep.txt"), "utf8"), "unknown\n");
-    assert.equal(lstatSync(linked).isSymbolicLink(), true);
-  } finally {
-    rmSync(world, { recursive: true, force: true });
-  }
-});
 
 test("bare and mismatched nuke confirmations refuse before deletion", async () => {
   const world = await testWorld();
@@ -172,6 +151,7 @@ test("confirmed nuke stops live writers and removes owned state while preserving
     assert.equal(existsSync(managedPath), false);
     assert.throws(() => raw.run(["show-ref", "--verify", "--quiet", "refs/heads/keiyaku-state"]));
     assert.equal(raw.run(["show-ref", "--verify", "--quiet", "refs/heads/business-branch"]), "");
+    assert.equal(existsSync(placeLockPath(await repositoryAt(world))), true);
     assert.equal(readFileSync(settings, "utf8"), "{\"project\":true}\n");
     assert.equal(readFileSync(namespace, "utf8"), "retained\n");
     assert.equal(readFileSync(unknown, "utf8"), "unknown\n");
@@ -308,8 +288,9 @@ test("Git nuke removes legacy and migration leaves but preserves ordinary refs",
     "refs/heads/keiyaku-candidate/legacy",
     "refs/keiyaku/delivery/current",
     "refs/keiyaku/candidate/current",
+    "refs/heads/keiyaku-delivery-extra",
+    "refs/heads/business-branch",
   ]) raw.run(["update-ref", ref, "HEAD"]);
-  raw.run(["update-ref", "refs/heads/business-branch", "HEAD"]);
   raw.run(["update-ref", "refs/heads/keiyaku-state", "HEAD"]);
   try {
     await nukeGit(world);
@@ -318,9 +299,129 @@ test("Git nuke removes legacy and migration leaves but preserves ordinary refs",
       "refs/heads/keiyaku-candidate/legacy",
       "refs/keiyaku/delivery/current",
       "refs/keiyaku/candidate/current",
-    ]) assert.throws(() => raw.run(["show-ref", "--verify", "--quiet", ref]));
-    assert.equal(raw.run(["show-ref", "--verify", "--quiet", "refs/heads/business-branch"]), "");
-    assert.throws(() => raw.run(["show-ref", "--verify", "--quiet", "refs/heads/keiyaku-state"]));
+      "refs/heads/keiyaku-state",
+    ]) assert.equal(refPresent(raw, ref), false);
+    assert.equal(refPresent(raw, "refs/heads/business-branch"), true);
+    assert.equal(refPresent(raw, "refs/heads/keiyaku-delivery-extra"), true);
+  } finally {
+    rmSync(raw.path, { recursive: true, force: true });
+  }
+});
+
+test("Git nuke continues owned topology cleanup when the state ref is absent", async () => {
+  const raw = makeGitRepository();
+  raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const world = await World.at(raw.path);
+  raw.run(["update-ref", "refs/heads/keiyaku-delivery/legacy", "HEAD"]);
+  raw.run(["update-ref", "refs/keiyaku/candidate/current", "HEAD"]);
+  try {
+    assert.equal(refPresent(raw, "refs/heads/keiyaku-state"), false);
+    await nukeGit(world);
+    assert.equal(refPresent(raw, "refs/heads/keiyaku-delivery/legacy"), false);
+    assert.equal(refPresent(raw, "refs/keiyaku/candidate/current"), false);
+  } finally {
+    rmSync(raw.path, { recursive: true, force: true });
+  }
+});
+
+test("Git nuke deletes keiyaku-state with expected-OID CAS before topology deletion", async () => {
+  const fixture = await gitNukeFixture();
+  const calls = join(mkdtempSync(join(tmpdir(), "keiyaku-v4-nuke-calls-")), "calls");
+  try {
+    await withGitShim(gitNukeShim(), { KEIYAKU_CALLS: calls }, (gitPath) => nukeGit(fixture.world, gitPath));
+    const commands = readFileSync(calls, "utf8").trim().split("\n");
+    const stateDelete = commands.findIndex((command) =>
+      command.startsWith("update-ref --no-deref -d refs/heads/keiyaku-state "),
+    );
+    const worktreeRemove = commands.findIndex((command) => command.startsWith("worktree remove --force "));
+    const leafDelete = commands.findIndex((command) =>
+      /^update-ref --no-deref -d refs\/(heads\/keiyaku-(delivery|candidate)|keiyaku\/(delivery|candidate))\//u.test(command),
+    );
+    assert.notEqual(stateDelete, -1);
+    assert.notEqual(worktreeRemove, -1);
+    assert.notEqual(leafDelete, -1);
+    assert.equal(stateDelete < worktreeRemove, true);
+    assert.equal(stateDelete < leafDelete, true);
+    assert.equal(existsSync(fixture.managedPath), false);
+    assert.equal(refPresent(fixture.raw, "refs/heads/keiyaku-state"), false);
+  } finally {
+    rmSync(fixture.raw.path, { recursive: true, force: true });
+    rmSync(fixture.foreign, { recursive: true, force: true });
+  }
+});
+
+test("Git nuke refuses a changed state OID before deleting regenerable topology", async () => {
+  const fixture = await gitNukeFixture();
+  const calls = join(mkdtempSync(join(tmpdir(), "keiyaku-v4-nuke-state-race-")), "calls");
+  const raced = join(calls, "..", "raced");
+  fixture.raw.run(["commit", "--allow-empty", "--quiet", "-m", "moved-state"]);
+  const moved = fixture.raw.run(["rev-parse", "HEAD"]).trim();
+  try {
+    await assert.rejects(
+      () => withGitShim(
+        gitNukeShim([
+          'if [ "$1" = "update-ref" ] && [ "$2" = "--no-deref" ] && [ "$3" = "-d" ] && [ "$4" = "refs/heads/keiyaku-state" ] && [ ! -f "$KEIYAKU_RACE_DONE" ]; then',
+          ': > "$KEIYAKU_RACE_DONE"',
+          '"$KEIYAKU_REAL_GIT" update-ref refs/heads/keiyaku-state "$KEIYAKU_RACE_STATE"',
+          "fi",
+        ].join("\n")),
+        { KEIYAKU_CALLS: calls, KEIYAKU_RACE_DONE: raced, KEIYAKU_RACE_STATE: moved },
+        (gitPath) => nukeGit(fixture.world, gitPath),
+      ),
+    );
+    assert.equal(existsSync(fixture.managedPath), true);
+    assert.equal(refPresent(fixture.raw, "refs/heads/keiyaku-state"), true);
+    assert.equal(refPresent(fixture.raw, "refs/heads/keiyaku-delivery/nuke-managed"), true);
+    assert.equal(refPresent(fixture.raw, "refs/heads/keiyaku-candidate/nuke-managed"), true);
+    assert.equal(readFileSync(calls, "utf8").includes("worktree remove --force "), false);
+    await nukeGit(fixture.world);
+    assert.equal(existsSync(fixture.managedPath), false);
+    assert.equal(refPresent(fixture.raw, "refs/heads/keiyaku-state"), false);
+  } finally {
+    rmSync(fixture.raw.path, { recursive: true, force: true });
+    rmSync(fixture.foreign, { recursive: true, force: true });
+  }
+});
+
+test("Git nuke retains a leaf whose expected OID changed and retries later", async () => {
+  const raw = makeGitRepository();
+  raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const world = await World.at(raw.path);
+  const racedRef = "refs/heads/keiyaku-delivery/legacy";
+  for (const ref of [
+    racedRef,
+    "refs/heads/keiyaku-candidate/legacy",
+    "refs/keiyaku/delivery/current",
+    "refs/keiyaku/candidate/current",
+    "refs/heads/business-branch",
+    "refs/heads/keiyaku-state",
+  ]) raw.run(["update-ref", ref, "HEAD"]);
+  raw.run(["commit", "--allow-empty", "--quiet", "-m", "moved-leaf"]);
+  const moved = raw.run(["rev-parse", "HEAD"]).trim();
+  const calls = join(mkdtempSync(join(tmpdir(), "keiyaku-v4-nuke-leaf-race-")), "calls");
+  const raced = join(calls, "..", "raced");
+  try {
+    await assert.rejects(
+      () => withGitShim(
+        gitNukeShim([
+          'if [ "$1" = "update-ref" ] && [ "$2" = "--no-deref" ] && [ "$3" = "-d" ] && [ "$4" = "$KEIYAKU_RACE_REF" ] && [ ! -f "$KEIYAKU_RACE_DONE" ]; then',
+          ': > "$KEIYAKU_RACE_DONE"',
+          '"$KEIYAKU_REAL_GIT" update-ref "$KEIYAKU_RACE_REF" "$KEIYAKU_RACE_OID"',
+          "fi",
+        ].join("\n")),
+        { KEIYAKU_CALLS: calls, KEIYAKU_RACE_DONE: raced, KEIYAKU_RACE_REF: racedRef, KEIYAKU_RACE_OID: moved },
+        (gitPath) => nukeGit(world, gitPath),
+      ),
+    );
+    assert.equal(refPresent(raw, "refs/heads/keiyaku-state"), false);
+    assert.equal(refPresent(raw, racedRef), true);
+    assert.equal(refPresent(raw, "refs/heads/business-branch"), true);
+    await nukeGit(world);
+    assert.equal(refPresent(raw, racedRef), false);
+    assert.equal(refPresent(raw, "refs/heads/keiyaku-candidate/legacy"), false);
+    assert.equal(refPresent(raw, "refs/keiyaku/delivery/current"), false);
+    assert.equal(refPresent(raw, "refs/keiyaku/candidate/current"), false);
+    assert.equal(refPresent(raw, "refs/heads/business-branch"), true);
   } finally {
     rmSync(raw.path, { recursive: true, force: true });
   }
@@ -340,9 +441,79 @@ test("Git nuke retains an attached appointed worktree while clearing independent
     await assert.rejects(() => nukeGit(world), /Place authority still has managed worktree appointments/u);
     assert.equal(existsSync(path), true);
     assert.equal(raw.run(["-C", path, "symbolic-ref", "--quiet", "--short", "HEAD"]), "nuke-attached-branch\n");
-    assert.throws(() => raw.run(["show-ref", "--verify", "--quiet", "refs/heads/keiyaku-state"]));
+    assert.equal(refPresent(raw, "refs/heads/keiyaku-state"), false);
+    assert.equal(existsSync(placeRegisterPath(repository)), true);
+    assert.equal(existsSync(placeLockPath(repository)), true);
   } finally {
     raw.run(["worktree", "remove", "--force", path]);
+    rmSync(raw.path, { recursive: true, force: true });
+  }
+});
+
+test("Git nuke removes a registered detached managed worktree after verification", async () => {
+  const fixture = await gitNukeFixture();
+  try {
+    const repository = await repositoryAt(fixture.world);
+    await nukeGit(fixture.world);
+    assert.equal(existsSync(fixture.managedPath), false);
+    assert.equal(existsSync(placeRegisterPath(repository)), false);
+    assert.equal(existsSync(placeLockPath(repository)), true);
+    assert.equal(refPresent(fixture.raw, "refs/heads/keiyaku-state"), false);
+    assert.equal(refPresent(fixture.raw, "refs/heads/keiyaku-delivery/nuke-managed"), false);
+  } finally {
+    rmSync(fixture.raw.path, { recursive: true, force: true });
+    rmSync(fixture.foreign, { recursive: true, force: true });
+  }
+});
+
+test("Git nuke retains an unregistered appointed path whose admin is foreign", async () => {
+  const raw = makeGitRepository();
+  raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const world = await World.at(raw.path);
+  const repository = await repositoryAt(world);
+  const contract = contractId("kei/nuke-foreign-admin");
+  const register = await appointManagedWorktrees(repository, [contract]);
+  const path = worktreePath(repository, register.byContract.get(contract)!.place);
+  const foreign = makeGitRepository();
+  foreign.run(["commit", "--allow-empty", "--quiet", "-m", "foreign"]);
+  foreign.run(["worktree", "add", "--quiet", "--detach", path, "HEAD"]);
+  writeFileSync(join(path, "keep.txt"), "foreign\n");
+  raw.run(["update-ref", "refs/heads/keiyaku-state", "HEAD"]);
+  try {
+    await assert.rejects(() => nukeGit(world), /managed Place path has foreign custody/u);
+    assert.equal(existsSync(path), true);
+    assert.equal(readFileSync(join(path, "keep.txt"), "utf8"), "foreign\n");
+    assert.equal(existsSync(placeRegisterPath(repository)), true);
+    assert.equal(refPresent(raw, "refs/heads/keiyaku-state"), false);
+  } finally {
+    foreign.run(["worktree", "remove", "--force", path]);
+    rmSync(foreign.path, { recursive: true, force: true });
+    rmSync(raw.path, { recursive: true, force: true });
+  }
+});
+
+test("Git nuke removes proven unregistered appointed residue", async () => {
+  const raw = makeGitRepository();
+  raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const world = await World.at(raw.path);
+  const repository = await repositoryAt(world);
+  const contract = contractId("kei/nuke-residue");
+  const register = await appointManagedWorktrees(repository, [contract]);
+  const path = worktreePath(repository, register.byContract.get(contract)!.place);
+  const admin = join(commonGitDirectory(repository), "worktrees", "nuke-residue");
+  mkdirSync(path, { recursive: true });
+  mkdirSync(admin, { recursive: true });
+  writeFileSync(join(path, ".git"), `gitdir: ${admin}\n`);
+  writeFileSync(join(path, "owned.txt"), "residue\n");
+  writeFileSync(join(admin, "commondir"), "../..\n");
+  writeFileSync(join(admin, "HEAD"), "ref: refs/heads/main\n");
+  raw.run(["update-ref", "refs/heads/keiyaku-state", "HEAD"]);
+  try {
+    await nukeGit(world);
+    assert.equal(existsSync(path), false);
+    assert.equal(existsSync(placeRegisterPath(repository)), false);
+    assert.equal(existsSync(placeLockPath(repository)), true);
+  } finally {
     rmSync(raw.path, { recursive: true, force: true });
   }
 });
@@ -350,13 +521,14 @@ test("Git nuke retains an attached appointed worktree while clearing independent
 test("owner failure becomes one diagnostic and leaves failed custody for retry", async () => {
   const world = await testWorld();
   try {
-    const tasks = join(world, ".keiyaku", "tasks");
-    writeFileSync(tasks, "not a directory\n");
+    const broken = join(world, ".keiyaku", "tasks", "broken.md");
+    mkdirSync(join(world, ".keiyaku", "tasks"), { recursive: true });
+    writeFileSync(broken, "not Task authority\n");
     const result = await Keiyaku.nuke({ world, confirm: world });
     assert.equal(result.kind, "failed");
     assert.equal(result.world, world);
-    assert.match(result.diagnostic, /ENOTDIR/u);
-    assert.equal(readFileSync(tasks, "utf8"), "not a directory\n");
+    assert.match(result.diagnostic, /task document/u);
+    assert.equal(existsSync(broken), true);
   } finally { rmSync(world, { recursive: true, force: true }); }
 });
 
@@ -364,13 +536,14 @@ test("owner deletion attempts remain independent after the stop prerequisite", a
   const fixture = await gitNukeFixture();
   try {
     const { raw, world, managedPath } = fixture;
-    const tasks = join(world, ".keiyaku", "tasks");
-    writeFileSync(tasks, "not a directory\n");
+    const broken = join(world, ".keiyaku", "tasks", "broken.md");
+    mkdirSync(join(world, ".keiyaku", "tasks"), { recursive: true });
+    writeFileSync(broken, "not Task authority\n");
     const result = await Keiyaku.nuke({ world, confirm: world });
     assert.equal(result.kind, "failed");
     assert.equal(existsSync(managedPath), false);
     assert.throws(() => raw.run(["show-ref", "--verify", "--quiet", "refs/heads/keiyaku-state"]));
-    assert.equal(readFileSync(tasks, "utf8"), "not a directory\n");
+    assert.equal(existsSync(broken), true);
   } finally {
     rmSync(fixture.raw.path, { recursive: true, force: true });
     rmSync(fixture.foreign, { recursive: true, force: true });

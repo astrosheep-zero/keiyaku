@@ -6,7 +6,13 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
+  CANDIDATE_PIN_REF_NAMESPACE,
   commonGitDirectory,
+  DELIVERY_REF_NAMESPACE,
+  GIT_REF,
+  isKeiyakuOwnedRef,
+  MIGRATION_CANDIDATE_PIN_REF_NAMESPACE,
+  MIGRATION_DELIVERY_REF_NAMESPACE,
   readBlob,
   repositoryAt,
   writeBlob,
@@ -27,6 +33,26 @@ function repositoryWithCommit() {
   repository.run(["commit", "--quiet", "--allow-empty", "-m", "initial"]);
   return repository;
 }
+
+test("Keiyaku-owned refs keep delivery and candidate namespaces distinct across generations", () => {
+  assert.equal(isKeiyakuOwnedRef(GIT_REF), true);
+  for (const root of [
+    DELIVERY_REF_NAMESPACE,
+    CANDIDATE_PIN_REF_NAMESPACE,
+    MIGRATION_DELIVERY_REF_NAMESPACE,
+    MIGRATION_CANDIDATE_PIN_REF_NAMESPACE,
+  ]) {
+    assert.equal(isKeiyakuOwnedRef(root), true);
+    assert.equal(isKeiyakuOwnedRef(`${root}/leaf`), true);
+  }
+  assert.equal(isKeiyakuOwnedRef("refs/heads/main"), false);
+  assert.equal(isKeiyakuOwnedRef("refs/heads/keiyaku-delivery-extra"), false);
+  assert.equal(isKeiyakuOwnedRef("refs/keiyaku/other"), false);
+  assert.equal(DELIVERY_REF_NAMESPACE.startsWith(CANDIDATE_PIN_REF_NAMESPACE), false);
+  assert.equal(CANDIDATE_PIN_REF_NAMESPACE.startsWith(DELIVERY_REF_NAMESPACE), false);
+  assert.equal(MIGRATION_DELIVERY_REF_NAMESPACE.startsWith(MIGRATION_CANDIDATE_PIN_REF_NAMESPACE), false);
+  assert.equal(MIGRATION_CANDIDATE_PIN_REF_NAMESPACE.startsWith(MIGRATION_DELIVERY_REF_NAMESPACE), false);
+});
 
 test("repositoryAt pins one absolute common directory for primary and linked worktrees", async () => {
   const repository = repositoryWithCommit();
