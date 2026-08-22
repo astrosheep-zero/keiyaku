@@ -82,8 +82,8 @@ export async function bind(repository: TestGitRepository, verification?: string)
   return result.keiyaku;
 }
 
-export function commitCandidate(repository: TestGitRepository): void {
-  writeFileSync(`${repository.path}/candidate.txt`, "candidate\n");
-  repository.run(["add", "candidate.txt"]);
-  repository.run(["commit", "--quiet", "-m", "candidate"]);
+export function commitCandidate(repository: TestGitRepository, worktreePath = repository.path): void {
+  writeFileSync(`${worktreePath}/candidate.txt`, "candidate\n");
+  repository.run(["-C", worktreePath, "add", "candidate.txt"]);
+  repository.run(["-C", worktreePath, "commit", "--quiet", "-m", "candidate"]);
 }

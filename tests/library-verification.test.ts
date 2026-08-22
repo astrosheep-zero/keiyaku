@@ -4,19 +4,26 @@ import { join } from "node:path";
 import test from "node:test";
 import { Keiyaku, Repo } from "../src/index.js";
 import { acceptedDeliver } from "../src/cli/accepted.js";
-import { withGitShim } from "./support/git.js";
+import type { ContractId } from "../src/core/facts/types.js";
+import { repositoryAt } from "../src/git/repository.js";
+import { appointedWorktreePath, withGitShim } from "./support/git.js";
 import { bind, commitCandidate, document, repositoryWithMain } from "./support/library-verbs.js";
+
+async function candidateWorktree(repository: ReturnType<typeof repositoryWithMain>, contract: { readonly id: ContractId }): Promise<string> {
+  return appointedWorktreePath(await repositoryAt(repository.path), contract.id);
+}
 
 test("changed worktree after audit prevents Verification reuse", async () => {
   const repository = repositoryWithMain();
   const contract = await bind(repository, "exit 0");
-  commitCandidate(repository);
+  const worktree = await candidateWorktree(repository, contract);
+  commitCandidate(repository, worktree);
   const audited = await contract.audit();
   assert.equal(audited.value.candidate.kind, "ready");
 
-  writeFileSync(join(repository.path, "candidate.txt"), "changed\n");
-  repository.run(["add", "candidate.txt"]);
-  repository.run(["commit", "--quiet", "-m", "changed"]);
+  writeFileSync(join(worktree, "candidate.txt"), "changed\n");
+  repository.run(["-C", worktree, "add", "candidate.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "changed"]);
 
   const delivered = await contract.deliver();
   assert.equal(delivered.value.verificationReuse, undefined);
@@ -29,7 +36,7 @@ test("changed worktree after audit prevents Verification reuse", async () => {
 test("public deliver keeps its Verification admission in accepted facts", async () => {
   const repository = repositoryWithMain();
   const contract = await bind(repository, "exit 0");
-  commitCandidate(repository);
+  commitCandidate(repository, await candidateWorktree(repository, contract));
 
   const delivered = await contract.deliver();
   assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["bound", "deliver", "attestation", "claimed"]);
@@ -51,7 +58,7 @@ test("completion omits Verification when no declaration applies", async () => {
     workspace: "worktree",
     gates: [],
   });
-  commitCandidate(repository);
+  commitCandidate(repository, await candidateWorktree(repository, bound.keiyaku));
 
   const delivered = await bound.keiyaku.deliver();
 
@@ -67,7 +74,7 @@ test("status and audit expose only current Verification testimony", async () => 
     workspace: "worktree",
     gates: ["reviewed", "verified"],
   });
-  commitCandidate(repository);
+  commitCandidate(repository, await candidateWorktree(repository, bound.keiyaku));
 
   const delivered = await bound.keiyaku.deliver();
   const state = await bound.keiyaku.state();
@@ -121,7 +128,7 @@ test("amend preserves untouched Verification bytes and currentness", async () =>
     gates: ["reviewed", "verified"],
   });
   const verificationSegment = (await bound.keiyaku.state()).terms.segments.at(-1);
-  commitCandidate(repository);
+  commitCandidate(repository, await candidateWorktree(repository, bound.keiyaku));
   const delivered = await bound.keiyaku.deliver();
 
   const amended = await bound.keiyaku.amend({ markdown: "## Replace: Objective\nA narrower objective.\n" });
@@ -144,7 +151,7 @@ test("a declaration timeout admits unsatisfied testimony and leaves placement to
     workspace: "worktree",
     gates: [],
   });
-  commitCandidate(openRepository);
+  commitCandidate(openRepository, await candidateWorktree(openRepository, open.keiyaku));
   const openDelivery = await open.keiyaku.deliver();
   assert.deepEqual(openDelivery.facts.map((fact) => fact.kind), ["bound", "deliver", "attestation", "claimed"]);
   assert.equal(openDelivery.facts.find((fact) => fact.kind === "attestation")?.data.verdict, "unsatisfied");
@@ -163,7 +170,7 @@ test("a declaration timeout admits unsatisfied testimony and leaves placement to
     workspace: "worktree",
     gates: ["verified"],
   });
-  commitCandidate(gatedRepository);
+  commitCandidate(gatedRepository, await candidateWorktree(gatedRepository, gated.keiyaku));
   const gatedDelivery = await gated.keiyaku.deliver();
   assert.deepEqual(gatedDelivery.facts.map((fact) => fact.kind), ["bound", "deliver", "attestation"]);
   assert.equal(gatedDelivery.facts.find((fact) => fact.kind === "attestation")?.data.verdict, "unsatisfied");
@@ -185,12 +192,12 @@ function worktreeSettings(create: readonly string[], destroy: readonly string[] 
   });
 }
 
-function writeCandidateSettings(repository: ReturnType<typeof repositoryWithMain>, settings: string): void {
-  mkdirSync(join(repository.path, ".keiyaku"), { recursive: true });
-  writeFileSync(join(repository.path, ".keiyaku", "settings.json"), settings);
-  writeFileSync(join(repository.path, "package-lock.json"), "{}\n");
-  repository.run(["add", ".keiyaku/settings.json", "package-lock.json"]);
-  repository.run(["commit", "--quiet", "-m", "candidate settings"]);
+function writeCandidateSettings(repository: ReturnType<typeof repositoryWithMain>, worktreePath: string, settings: string): void {
+  mkdirSync(join(worktreePath, ".keiyaku"), { recursive: true });
+  writeFileSync(join(worktreePath, ".keiyaku", "settings.json"), settings);
+  writeFileSync(join(worktreePath, "package-lock.json"), "{}\n");
+  repository.run(["-C", worktreePath, "add", ".keiyaku/settings.json", "package-lock.json"]);
+  repository.run(["-C", worktreePath, "commit", "--quiet", "-m", "candidate settings"]);
 }
 
 async function waitForFile(path: string): Promise<void> {
@@ -206,8 +213,9 @@ test("Verification provisions only the candidate Settings environment and destro
   writeFileSync(join(repository.path, ".gitignore"), "node_modules/\n");
   repository.run(["add", ".gitignore"]);
   repository.run(["commit", "--quiet", "-m", "ignore caller dependencies"]);
-  const destroyed = join(repository.path, "destroyed");
   const contract = await bind(repository, "test -f node_modules/candidate-ready && test ! -e node_modules/caller-only");
+  const worktree = await candidateWorktree(repository, contract);
+  const destroyed = join(worktree, "destroyed");
   const create = [process.execPath, "-e", [
     "const fs = require('node:fs');",
     "if (!fs.existsSync('package-lock.json')) process.exit(1);",
@@ -215,7 +223,7 @@ test("Verification provisions only the candidate Settings environment and destro
     "fs.writeFileSync('node_modules/candidate-ready', 'ready');",
   ].join(" ")];
   const destroy = [process.execPath, "-e", `require('node:fs').writeFileSync(${JSON.stringify(destroyed)}, 'destroyed')`];
-  writeCandidateSettings(repository, worktreeSettings(create, destroy));
+  writeCandidateSettings(repository, worktree, worktreeSettings(create, destroy));
   mkdirSync(join(repository.path, "node_modules"), { recursive: true });
   writeFileSync(join(repository.path, "node_modules", "caller-only"), "caller\n");
 
@@ -228,11 +236,12 @@ test("Verification provisions only the candidate Settings environment and destro
 
 test("candidate create failure stops Verification with no attestation and still runs destroy", async () => {
   const repository = repositoryWithMain();
-  const destroyed = join(repository.path, "destroyed-after-create-failure");
   const contract = await bind(repository, `require('node:fs').writeFileSync(${JSON.stringify(join(repository.path, "verification-ran"))}, 'ran')`);
+  const worktree = await candidateWorktree(repository, contract);
+  const destroyed = join(worktree, "destroyed-after-create-failure");
   const create = [process.execPath, "-e", "process.exit(17)"];
   const destroy = [process.execPath, "-e", `require('node:fs').writeFileSync(${JSON.stringify(destroyed)}, 'destroyed')`];
-  writeCandidateSettings(repository, worktreeSettings(create, destroy));
+  writeCandidateSettings(repository, worktree, worktreeSettings(create, destroy));
 
   const delivered = await contract.deliver();
 
@@ -245,7 +254,7 @@ test("candidate create failure stops Verification with no attestation and still 
 test("candidate Settings failure is honest and has no command sentinel", async () => {
   const repository = repositoryWithMain();
   const contract = await bind(repository, "exit 0");
-  writeCandidateSettings(repository, "{ not-json\n");
+  writeCandidateSettings(repository, await candidateWorktree(repository, contract), "{ not-json\n");
 
   const delivered = await contract.deliver();
 
@@ -264,10 +273,12 @@ test("candidate Settings failure is honest and has no command sentinel", async (
 
 test("caller cancellation admits no attestation and still destroys scratch", async () => {
   const repository = repositoryWithMain();
-  const started = join(repository.path, "verification-started");
-  const destroyed = join(repository.path, "destroyed-after-cancel");
-  const contract = await bind(repository, `${process.execPath} -e ${JSON.stringify(`require("node:fs").writeFileSync(${JSON.stringify(started)}, "started")`)}; sleep 30`);
-  writeCandidateSettings(repository, worktreeSettings([], [
+  const contract = await bind(repository, `${process.execPath} -e ${JSON.stringify("require('node:fs').writeFileSync('verification-started', 'started')")}; sleep 30`);
+  const worktree = await candidateWorktree(repository, contract);
+  const started = join(worktree, "verification-started");
+  const destroyed = join(worktree, "destroyed-after-cancel");
+  await contract.amend({ markdown: `## Replace: Verification\n~~~bash\n${process.execPath} -e ${JSON.stringify(`require("node:fs").writeFileSync(${JSON.stringify(started)}, "started")`)}; sleep 30\n~~~\n` });
+  writeCandidateSettings(repository, worktree, worktreeSettings([], [
     process.execPath,
     "-e",
     `require('node:fs').writeFileSync(${JSON.stringify(destroyed)}, 'destroyed')`,
@@ -287,7 +298,7 @@ test("caller cancellation admits no attestation and still destroys scratch", asy
 test("destroy failure is cleanup evidence, not a leak after successful removal", async () => {
   const repository = repositoryWithMain();
   const contract = await bind(repository, "exit 0");
-  writeCandidateSettings(repository, worktreeSettings([], [process.execPath, "-e", "process.exit(19)"]));
+  writeCandidateSettings(repository, await candidateWorktree(repository, contract), worktreeSettings([], [process.execPath, "-e", "process.exit(19)"]));
 
   const delivered = await contract.deliver();
 
@@ -303,7 +314,7 @@ test("destroy failure is cleanup evidence, not a leak after successful removal",
 test("public deliver preserves admission when Verification cleanup leaks a worktree", async () => {
   const repository = repositoryWithMain();
   const contract = await bind(repository, "exit 0");
-  commitCandidate(repository);
+  commitCandidate(repository, await candidateWorktree(repository, contract));
   const delivered = await withGitShim(
     [
       "if [ \"$1\" = \"worktree\" ] && [ \"$2\" = \"remove\" ]; then",
