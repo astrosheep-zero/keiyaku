@@ -26,6 +26,11 @@ but it ends the Session event stream before exposing `completion`; Body drains
 that one narration boundary before reading the result. Completion and events
 are not competing terminal judges, and later narration cannot create another
 outcome.
+The turn owner is the sole completion settlement point: a rejected
+`Session.completion` is observed there and folded into the existing typed
+provider failure result, even when the event iterator remains open; request
+admission stops as soon as that rejection is observed. Adapters do not add
+duplicate completion continuations or a second failure surface.
 
 ## Provider boundary
 

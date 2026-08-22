@@ -235,7 +235,8 @@ export async function executeWaitAkuma(input: WaitExecutionInput): Promise<Akuma
     const round = await observeWaitRound(input.path, input.ids, input.signal);
     const settled = round.statuses.map(defaultWaitComplete);
     const completed =
-      round.statuses.length > 0 && (input.completion === "any" ? settled.some(Boolean) : settled.every(Boolean));
+      round.statuses.length > 0 &&
+      (input.completion === "any" ? settled.some(Boolean) : round.unobserved.length === 0 && settled.every(Boolean));
     if (completed || (deadline !== undefined && performance.now() >= deadline)) {
       return {
         completion: input.completion,

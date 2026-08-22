@@ -325,6 +325,47 @@ const provider: ProviderAdapter = {
   },
 };
 
+test("turn owner folds a rejected completion while the event stream remains open", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-completion-rejection-")));
+  let rejectCompletion!: (error: Error) => void;
+  const completion = new Promise<never>((_, reject) => { rejectCompletion = reject; });
+  const rejecting: ProviderAdapter = {
+    admitOptions(options) { return { kind: "admitted", options }; },
+    async start() {
+      queueMicrotask(() => rejectCompletion(new Error("completion rejected")));
+      return {
+        admission: { fence: "completion-rejection" },
+        events: { async *[Symbol.asyncIterator]() { await new Promise<void>(() => {}); } },
+        completion,
+        async abort() {},
+        async forceDispose() {},
+      };
+    },
+  };
+  try {
+    const world = await World.at(root);
+    const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "deadbeef" });
+    await initializeHeart(allocated.paths);
+    await driveAkumaBody({
+      paths: allocated.paths,
+      seed: {
+        id: allocated.id,
+        archetype: "claude",
+        provider: CLAUDE_EXECUTION,
+        options: {},
+        cwd: world,
+        origin: { kind: "direct" },
+        allowed: ALLOWED_ACTIONS,
+      },
+      initialBody: "work",
+    }, rejecting, { now: () => "2026-08-24T00:00:00.000Z" });
+    const rows = (await activitySlice(allocated.paths)).rows;
+    const outcome = rows.find((row) => row.kind === "turn-end");
+    assert.ok(outcome, JSON.stringify(rows));
+    assert.deepEqual(outcome.outcome, { kind: "failed", diagnostic: "completion rejected" });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 async function answeredSource(root: string, suffix: string, readonly?: Soul["readonly"]) {
   const world = await World.at(root);
   const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => suffix });

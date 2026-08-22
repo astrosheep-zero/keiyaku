@@ -94,19 +94,17 @@ export class Akuma {
       worldPath: this.path,
       archetype: archetype.name,
       launch: async (allocated) =>
-        (
-          await spawnAkumaBody({
-            paths: allocated.paths,
-            seed: {
-              id: allocated.id,
-              archetype: allocated.archetype,
-              ...requestRecipe,
-              cwd,
-              origin: { kind: "direct" },
-            },
-            initialBody: input.body,
-          })
-        ).release(),
+        await spawnAkumaBody({
+          paths: allocated.paths,
+          seed: {
+            id: allocated.id,
+            archetype: allocated.archetype,
+            ...requestRecipe,
+            cwd,
+            origin: { kind: "direct" },
+          },
+          initialBody: input.body,
+        }),
     });
     return new AkumaHandle(published.id, this.path, {
       cwd,

@@ -132,6 +132,13 @@ The remaining window between create and claim is owned by `call()` while it
 lives: on timeout it takes the leash itself if it can, seals with
 `call-timeout` evidence, and reports the timeout. Process output never decides
 whether the Body failed or what evidence the Seal contains.
+The publication owner retains the launched process, including a request-origin
+launch handed through Body, until it observes Soul or Seal. A known child exit
+before Soul is an immediately observed birth failure,
+diagnosed only from the parent-held exit code or signal; the parent may
+best-effort write that evidence as the Seal. The 30-second birth timeout
+applies only while the child remains alive without a birth fact, and release
+after observation relinquishes custody without terminating the child.
 If the caller crashes inside the window, the directory is unborn until someone
 pays the leash to seal it. Nothing sweeps blind; nothing adjudicates by age.
 

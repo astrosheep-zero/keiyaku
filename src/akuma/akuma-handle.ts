@@ -250,23 +250,21 @@ export class AkumaHandle {
         archetype: source.archetype,
         awaitAsleep: true,
         launch: async (allocated) => {
-          (
-            await spawnAkumaBody({
-              paths: allocated.paths,
-              seed: {
-                id: allocated.id,
-                archetype: source.archetype,
-                ...(source.description === undefined ? {} : { description: source.description }),
-                provider: source.provider,
-                options: source.options,
-                ...(source.readonly === undefined ? {} : { readonly: source.readonly }),
-                allowed: source.allowed,
-                cwd: source.cwd,
-                origin: { kind: "fork", parent: this.id, at: input.at },
-              },
-              birthSession,
-            })
-          ).release();
+          return await spawnAkumaBody({
+            paths: allocated.paths,
+            seed: {
+              id: allocated.id,
+              archetype: source.archetype,
+              ...(source.description === undefined ? {} : { description: source.description }),
+              provider: source.provider,
+              options: source.options,
+              ...(source.readonly === undefined ? {} : { readonly: source.readonly }),
+              allowed: source.allowed,
+              cwd: source.cwd,
+              origin: { kind: "fork", parent: this.id, at: input.at },
+            },
+            birthSession,
+          });
         },
       });
       return { kind: "forked", child: child.id };

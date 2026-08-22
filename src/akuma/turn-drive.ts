@@ -16,6 +16,7 @@ import type { AkumaPaths } from "./identity.js";
 import { encodeAgentEvent, type AgentEvent, type ProviderAdapter, type Session, type TurnResult } from "./provider.js";
 import { BodyRequestPump, type RequestChildLaunch, type UpstreamExecutionPort } from "./request-serve.js";
 import { BodySupervisor, CONTROL_RESPONSE_MS } from "./body-supervisor.js";
+import type { OwnedProcess } from "../runtime/proc/run.js";
 
 type EffectSerializer = {
   <T>(effect: () => Promise<T> | T): Promise<T>;
@@ -71,7 +72,7 @@ export type DriveTurnInput = Readonly<{
   call?: string;
   launchTells: readonly TellFact[];
   supervisor: BodySupervisor;
-  runtimeSpawn(launch: RequestChildLaunch): Promise<void>;
+  runtimeSpawn(launch: RequestChildLaunch): Promise<OwnedProcess | void>;
   upstream?: UpstreamExecutionPort;
   now(): string;
 }>;
@@ -203,7 +204,10 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
           deliveredAt: input.now(),
         })),
       );
-    void selected.completion.then(() => requests.stopAdmission());
+    void selected.completion.then(
+      () => requests.stopAdmission(),
+      () => undefined,
+    );
     return {
       turnSequence: turn.sequence,
       drive: selected,
@@ -280,6 +284,13 @@ function observeReceiptFailure(receiptPump: Promise<void>): Promise<never> {
   );
 }
 
+function observeCompletionFailure(drive: Session): Promise<Readonly<{ kind: "completion-failed"; error: unknown }>> {
+  return drive.completion.then(
+    () => new Promise<never>(() => {}),
+    (error: unknown) => ({ kind: "completion-failed" as const, error }),
+  );
+}
+
 async function submitPendingLiveTells(
   writers: TurnWriters,
   pending: readonly TellFact[],
@@ -350,6 +361,7 @@ async function consumeTurnDrive(input: DriveTurnInput, active: ActiveTurn): Prom
   const mayWrite = (): boolean => writesOpen && !input.supervisor.signal.aborted;
   const writers: TurnWriters = { input, turnSequence, drive, writeWitness, mayWrite };
   const receiptFailure = observeReceiptFailure(pumpReceipts(writers));
+  const completionFailure = observeCompletionFailure(drive);
   const iterator = drive.events[Symbol.asyncIterator]();
   let pending = iterator.next();
   let liveTells = true;
@@ -377,7 +389,12 @@ async function consumeTurnDrive(input: DriveTurnInput, active: ActiveTurn): Prom
         ...(tellObservation === null ? [] : [tellObservation]),
         receiptFailure,
         requests.failure,
+        completionFailure,
       ]);
+      if (next.kind === "completion-failed") {
+        requests.stopAdmission();
+        throw next.error;
+      }
       if (next.kind === "heart") {
         heart = next.observation;
         continue;

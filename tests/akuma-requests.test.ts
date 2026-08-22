@@ -26,6 +26,7 @@ import {
 import { BodyRequestPump, settleBodyRequests } from "../src/akuma/request-serve.js";
 import { decodeClaim } from "../src/akuma/request-wire.js";
 import { World } from "../src/world.js";
+import type { OwnedProcess } from "../src/runtime/proc/run.js";
 
 async function akumaAt(root: string) { return Akuma.of(await World.at(root)); }
 
@@ -225,6 +226,130 @@ test("publication preserves a Body failure that occurs before birth", async () =
       },
     }), /Akuma wake has no born soul/u);
     assert.equal(childPaths === undefined ? null : (await readSeal(childPaths))?.evidence, "Akuma wake has no born soul");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("publication observes an exited request child before Soul and releases without terminating", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-publication-exit-")));
+  let released = false;
+  let terminated = false;
+  const child: OwnedProcess = {
+    pid: 4242,
+    exited: Promise.resolve({ code: 7, signal: null, log: { path: "/tmp/request-child.log", from: 0, to: 0 } }),
+    terminate: async () => { terminated = true; },
+    release: () => { released = true; },
+  };
+  const started = performance.now();
+  try {
+    await assert.rejects(
+      publishAkuma({ worldPath: root, archetype: "worker", launch: async () => child }),
+      /pre-admission exit 7/u,
+    );
+    assert.ok(performance.now() - started < 1_000);
+    assert.equal(released, true);
+    assert.equal(terminated, false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("publication keeps the parent Seal as evidence but diagnoses a child exit from its status", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-publication-exit-seal-")));
+  let childPaths: Awaited<ReturnType<typeof allocateAkumaDirectory>>["paths"] | undefined;
+  const exit = { code: 7, signal: null, log: { path: "/tmp/request-child.log", from: 0, to: 0 } } as const;
+  const child: OwnedProcess = {
+    pid: 4244,
+    exited: {
+      then(
+        onFulfilled: (value: typeof exit) => unknown,
+        onRejected?: (error: unknown) => unknown,
+      ) {
+        return (async () => {
+          try {
+            const paths = childPaths!;
+            const leash = (await HeldAkumaLeash.try(paths))!;
+            await leash.sealIfUnborn(paths, { evidence: "body failure", at: new Date().toISOString() });
+            leash.release();
+            return onFulfilled(exit);
+          } catch (error) {
+            if (onRejected === undefined) throw error;
+            return onRejected(error);
+          }
+        })();
+      },
+    } as unknown as OwnedProcess["exited"],
+    terminate: async () => {},
+    release: () => {},
+  };
+  try {
+    await assert.rejects(
+      publishAkuma({
+        worldPath: root,
+        archetype: "worker",
+        async launch(allocated) {
+          childPaths = allocated.paths;
+          return child;
+        },
+      }),
+      (error: unknown) => error instanceof Error
+        && error.message === "pre-admission exit 7",
+    );
+    assert.equal((await readSeal(childPaths!))?.evidence, "body failure");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("publication prefers an already-settled parent exit over a pre-written non-exit Seal", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-publication-exit-prewritten-seal-")));
+  let childPaths: Awaited<ReturnType<typeof allocateAkumaDirectory>>["paths"] | undefined;
+  let resolveExit!: (exit: { code: number; signal: null; log: { path: string; from: number; to: number } }) => void;
+  const exit = { code: 7, signal: null, log: { path: "/tmp/request-child.log", from: 0, to: 0 } } as const;
+  const child: OwnedProcess = {
+    pid: 4245,
+    exited: new Promise((resolve) => { resolveExit = resolve; }),
+    terminate: async () => {},
+    release: () => {},
+  };
+  try {
+    await assert.rejects(
+      publishAkuma({
+        worldPath: root,
+        archetype: "worker",
+        async launch(allocated) {
+          childPaths = allocated.paths;
+          const leash = (await HeldAkumaLeash.try(allocated.paths))!;
+          await leash.sealIfUnborn(allocated.paths, { evidence: "body failure", at: new Date().toISOString() });
+          leash.release();
+          resolveExit(exit);
+          return child;
+        },
+      }),
+      (error: unknown) => error instanceof Error && error.message === "pre-admission exit 7",
+    );
+    assert.equal((await readSeal(childPaths!))?.evidence, "body failure");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("publication keeps a live child on the existing birth wait and release never terminates it", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-publication-live-")));
+  const controller = new AbortController();
+  let released = false;
+  let terminated = false;
+  const child: OwnedProcess = {
+    pid: 4243,
+    exited: new Promise(() => {}),
+    terminate: async () => { terminated = true; },
+    release: () => { released = true; },
+  };
+  const publication = publishAkuma({
+    worldPath: root,
+    archetype: "worker",
+    signal: controller.signal,
+    launch: async () => child,
+  });
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    controller.abort(new Error("cancel live birth"));
+    await assert.rejects(publication, /cancel live birth/u);
+    assert.equal(released, true);
+    assert.equal(terminated, false);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

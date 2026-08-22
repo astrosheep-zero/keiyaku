@@ -750,6 +750,8 @@ test("Contract plural wait omits unreadable Heart observations for all and any",
       timeoutMs: 0,
     });
     assert.deepEqual(waited.observations.map((observation) => observation.status.id), [readable.id]);
+    assert.equal(waited.unobserved.length, 1);
+    if (completion === "all") assert.equal(waited.completion, "all");
   }
 });
 

@@ -33,6 +33,7 @@ import {
 } from "./request-wire.js";
 import { isTaskMutationAction, type TaskMutationRequest } from "../task/mutation.js";
 import { executeRequest } from "./request-execution.js";
+import type { OwnedProcess } from "../runtime/proc/run.js";
 
 const POLL_MS = 100;
 
@@ -98,7 +99,7 @@ type PumpInput = Readonly<{
   parent: Soul;
   bodySequence: number;
   now(): string;
-  spawn(launch: RequestChildLaunch): Promise<void>;
+  spawn(launch: RequestChildLaunch): Promise<OwnedProcess | void>;
   upstream?: UpstreamExecutionPort;
   signal: AbortSignal;
 }>;
@@ -236,7 +237,7 @@ async function serveCall(
       },
       launch: async (allocated) => {
         if (!input.admissionOpen()) throw new Error("body closed request admission");
-        await input.spawn({
+        return await input.spawn({
           paths: allocated.paths,
           seed: {
             id: allocated.id,
