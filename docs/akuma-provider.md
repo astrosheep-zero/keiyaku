@@ -4,12 +4,17 @@ This chapter owns the provider-neutral protocol and native adapter obligations.
 The shared recipe codec owns the provider-neutral execution envelope. Its
 `config` member is an opaque provider escape hatch: the codec only requires an
 object and preserves it unchanged (apart from its immutable snapshot). The
-selected adapter is the sole owner of any config interpretation. It may pass
-the object to its native boundary, decode a provider-owned shape, or refuse it
-when that provider does not support config. The provider map never parses,
-filters, or rejects a config on an adapter's behalf. Recipe inspection remains
-adapter- and SDK-free; selected adapter construction is asynchronous, and that
-adapter loads its native SDK only when it starts or resumes a native session.
+selected adapter is the sole owner of its fate. Codex, Claude, and OpenCode
+route opaque objects to their native options/config boundaries, with
+Keiyaku-owned fields applied afterward. Pi's native boundary is the closed
+`CreateAgentSessionOptions` interface, which has no generic config field; Pi
+therefore refuses an opaque config only immediately before native session
+creation, where that concrete shape cannot be consumed. ACP and Grok own their
+launch/argv dialects and decode or map their config as adapter-owned metadata.
+The provider map never parses, filters, or rejects a config on an adapter's behalf.
+Recipe inspection remains adapter- and SDK-free; selected adapter construction
+is asynchronous, and that adapter loads its native SDK only when it starts or
+resumes a native session.
 
 ## Turn Correlation
 

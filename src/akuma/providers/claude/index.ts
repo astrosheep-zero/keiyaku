@@ -92,6 +92,7 @@ function claudeQueryOptions(
 ): Options {
   const mode = permissionMode(input.options.readonly);
   return {
+    ...(execution.config ?? {}),
     cwd: input.cwd,
     abortController,
     ...(input.requests === undefined ? {} : { additionalDirectories: [input.requests.dir] }),
@@ -376,9 +377,6 @@ export function createClaudeProvider(
       ? loadOrExecution
       : async () => (await import("@anthropic-ai/claude-agent-sdk")) as ClaudeSdk;
   const selectedExecution = typeof loadOrExecution === "function" ? execution : loadOrExecution;
-  if (selectedExecution.config !== undefined) {
-    throw new TypeError("provider execution config is unsupported by claude-agent-sdk");
-  }
   return {
     admitOptions: admitClaudeOptions,
     fork: (input) => forkClaude(load, selectedExecution, input),

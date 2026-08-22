@@ -104,8 +104,18 @@ type PiDriveInput = Parameters<ProviderAdapter["start"]>[0] | Parameters<NonNull
 
 type PiCreatedSession = Awaited<ReturnType<PiSdk["createAgentSession"]>>;
 
-async function createPiSession(sdk: PiSdk, input: PiDriveInput, signal: AbortSignal): Promise<PiCreatedSession> {
-  const setup = piCreateOptions(sdk, input).then(async (options) => await sdk.createAgentSession(options));
+async function createPiSession(
+  sdk: PiSdk,
+  execution: ProviderExecution,
+  input: PiDriveInput,
+  signal: AbortSignal,
+): Promise<PiCreatedSession> {
+  const setup = piCreateOptions(sdk, input).then(async (options) => {
+    if (execution.config !== undefined) {
+      throw new TypeError("Pi provider config cannot be consumed by native CreateAgentSessionOptions");
+    }
+    return await sdk.createAgentSession(options);
+  });
   return await abortable(setup, signal, (created) => created.session.dispose());
 }
 
@@ -120,8 +130,13 @@ function forceDisposePi(
   return Promise.resolve();
 }
 
-async function drivePi(sdk: PiSdk, input: PiDriveInput, signal: AbortSignal): Promise<Session> {
-  const created = await createPiSession(sdk, input, signal);
+async function drivePi(
+  sdk: PiSdk,
+  execution: ProviderExecution,
+  input: PiDriveInput,
+  signal: AbortSignal,
+): Promise<Session> {
+  const created = await createPiSession(sdk, execution, input, signal);
   const native = created.session;
   if (signal.aborted) {
     native.dispose();
@@ -248,16 +263,14 @@ export function createPiProvider(
   execution: ProviderExecution = { name: "pi", kind: "pi" },
   load: () => Promise<PiSdk> = loadPiSdk,
 ): ProviderAdapter {
-  if (execution.executable !== undefined || execution.config !== undefined) {
-    throw new TypeError("Pi provider does not support executable or config");
-  }
+  if (execution.executable !== undefined) throw new TypeError("Pi provider does not support executable");
   if (execution.env !== undefined && Object.keys(execution.env).length > 0) {
     throw new TypeError("env injection not supported for provider pi");
   }
   const drive = async (input: PiDriveInput): Promise<Session> => {
     const signal = input.signal ?? new AbortController().signal;
     signal.throwIfAborted();
-    return drivePi(await abortable(load(), signal), input, signal);
+    return drivePi(await abortable(load(), signal), execution, input, signal);
   };
   return {
     admitOptions: admitPiOptions,

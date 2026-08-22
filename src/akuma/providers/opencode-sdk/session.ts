@@ -81,7 +81,11 @@ export async function loadOpencode(
   const owned = await spawnDetachedProcess({
     argv: [execution.executable ?? "opencode", "serve", "--hostname", "127.0.0.1", "--port", String(port)],
     cwd,
-    env: { ...process.env, ...execution.env },
+    env: {
+      ...process.env,
+      ...(execution.config === undefined ? {} : { OPENCODE_CONFIG_CONTENT: JSON.stringify(execution.config) }),
+      ...execution.env,
+    },
     log: `${cwd}/.opencode.log`,
   });
   const { createOpencodeClient } = await import("@opencode-ai/sdk");

@@ -109,14 +109,18 @@ function optionAdmission(options: ProviderOptions): ProviderOptionAdmission {
   };
 }
 
-function grokSessionMeta(options: ProviderOptions): Pick<AcpDependencies, "freshSessionMeta" | "loadSessionMeta"> {
-  if (options.systemPrompt === undefined || options.systemPrompt.length === 0) return {};
-  if (options.systemPromptMode === "append") return { freshSessionMeta: { rules: options.systemPrompt } };
+function grokSessionMeta(
+  config: ProviderExecution["config"],
+  options: ProviderOptions,
+): Pick<AcpDependencies, "freshSessionMeta" | "loadSessionMeta"> {
+  const configured = config === undefined ? {} : { freshSessionMeta: config, loadSessionMeta: config };
+  if (options.systemPrompt === undefined || options.systemPrompt.length === 0) return configured;
+  if (options.systemPromptMode === "append") return { ...configured, freshSessionMeta: { ...config, rules: options.systemPrompt } };
   if (options.systemPromptMode === "replace") {
     const meta = { systemPromptOverride: options.systemPrompt };
-    return { freshSessionMeta: meta, loadSessionMeta: meta };
+    return { ...configured, freshSessionMeta: { ...config, ...meta }, loadSessionMeta: { ...config, ...meta } };
   }
-  return {};
+  return configured;
 }
 
 function argv(execution: ProviderExecution, options: ProviderOptions): readonly [string, ...string[]] {
@@ -152,7 +156,6 @@ export function createGrokBuildProvider(
   dependencies: AcpDependencies = {},
 ): ProviderAdapter {
   if (execution.executable === undefined) throw new TypeError("Grok Build provider execution requires executable");
-  if (execution.config !== undefined) throw new TypeError("Grok Build provider does not support execution config");
   const drive = async (input: AcpStartInput) => {
     const launch = {
       argv: argv(execution, input.options),
@@ -162,7 +165,7 @@ export function createGrokBuildProvider(
       await startAcpSession(launch, input, {
         ...dependencies,
         interpretTool: interpretGrokTool,
-        ...grokSessionMeta(input.options),
+        ...grokSessionMeta(execution.config, input.options),
       }),
     );
   };

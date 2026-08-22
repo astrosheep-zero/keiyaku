@@ -1674,10 +1674,24 @@ test("Pi readonly admits native enforcement and removes every task-surface mutat
     options: { readonly: true },
     readonly: { enforcement: "native" },
   });
-  assert.throws(
-    () => createPiProvider({ name: "pi", kind: "pi", config: { tools: ["bash"] } }),
-    /does not support executable or config/u,
-  );
+});
+
+test("Pi defers opaque config refusal to its native session boundary", async () => {
+  const fake = fakePiSdk();
+  const provider = createPiProvider({
+    name: "pi",
+    kind: "pi",
+    config: { cwd: "/wrong", tools: ["bash"], thinkingLevel: "low" },
+  }, async () => fake.sdk);
+  assert.equal(provider.admitOptions({ readonly: true }).kind, "admitted");
+  await assert.rejects(provider.start({
+    body: "inspect",
+    launchTells: [],
+    cwd: "/keiyaku-owned",
+    options: { readonly: true, effort: "high" },
+    session: { kind: "fresh" },
+  }), /Pi provider config cannot be consumed by native CreateAgentSessionOptions/u);
+  assert.equal(fake.seen.options, undefined);
 });
 
 test("readonly restraint codec validates known members and ignores additions", () => {
@@ -1704,16 +1718,17 @@ test("provider recipe preserves opaque config until adapter construction", async
     kind: "claude-agent-sdk",
     config: { unexpected: true },
   });
-  assert.throws(() => createClaudeProvider({
+  assert.doesNotThrow(() => createClaudeProvider({
     name: "claude",
     kind: "claude-agent-sdk",
     config: { unexpected: true },
-  }), /config is unsupported by claude-agent-sdk/u);
-  await assert.rejects(resolveProviderExecution({
+  }));
+  const claudeResolved = await resolveProviderExecution({
     name: "claude",
     kind: "claude-agent-sdk",
     config: { unexpected: true },
-  }), /config is unsupported by claude-agent-sdk/u);
+  });
+  assert.equal(claudeResolved.execution.config?.unexpected, true);
   assert.deepEqual(decodeProviderExecution({
     name: "opencode-sdk",
     kind: "opencode-sdk",
@@ -1723,11 +1738,11 @@ test("provider recipe preserves opaque config until adapter construction", async
     kind: "opencode-sdk",
     config: { unexpected: true },
   });
-  assert.throws(() => createOpencodeProvider({
+  assert.doesNotThrow(() => createOpencodeProvider({
     name: "opencode-sdk",
     kind: "opencode-sdk",
     config: { unexpected: true },
-  }), /config is unsupported by opencode-sdk/u);
+  }));
   assert.deepEqual(decodeProviderExecution({
     name: "pi",
     kind: "pi",
@@ -1737,11 +1752,11 @@ test("provider recipe preserves opaque config until adapter construction", async
     kind: "pi",
     config: { tools: ["bash"] },
   });
-  assert.throws(() => createPiProvider({
+  assert.doesNotThrow(() => createPiProvider({
     name: "pi",
     kind: "pi",
     config: { tools: ["bash"] },
-  }), /does not support executable or config/u);
+  }));
   assert.deepEqual(decodeProviderExecution({
     name: "grok-build",
     kind: "grok-build",
@@ -1753,12 +1768,12 @@ test("provider recipe preserves opaque config until adapter construction", async
     executable: "grok",
     config: { extension: true },
   });
-  assert.throws(() => createGrokBuildProvider({
+  assert.doesNotThrow(() => createGrokBuildProvider({
     name: "grok-build",
     kind: "grok-build",
     executable: "grok",
     config: { extension: true },
-  }), /does not support execution config/u);
+  }));
   assert.deepEqual(decodeProviderExecution({
     name: "acp",
     kind: "acp",
