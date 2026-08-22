@@ -184,24 +184,19 @@ async function drivePi(
   void (async () => {
     try {
       await native.prompt([input.body, ...input.launchTells.map((tell) => tell.text)].join("\n\n"));
-      if (aborting) {
-        settle({ kind: "failed", diagnostic: "Pi session aborted" });
-        return;
+      let result: TurnResult;
+      if (aborting) result = { kind: "failed", diagnostic: "Pi session aborted" };
+      else if (terminalFailure !== null) result = { kind: "failed", diagnostic: terminalFailure };
+      else if (!state.assistantSeen) result = { kind: "failed", diagnostic: "Pi completed without a native assistant answer" };
+      else {
+        const historyId = native.sessionManager.getLeafId();
+        result = {
+          kind: "answered",
+          answer: state.answer,
+          ...(historyId === null ? {} : { historyId }),
+        };
       }
-      if (terminalFailure !== null) {
-        settle({ kind: "failed", diagnostic: terminalFailure });
-        return;
-      }
-      if (!state.assistantSeen) {
-        settle({ kind: "failed", diagnostic: "Pi completed without a native assistant answer" });
-        return;
-      }
-      const historyId = native.sessionManager.getLeafId();
-      settle({
-        kind: "answered",
-        answer: state.answer,
-        ...(historyId === null ? {} : { historyId }),
-      });
+      settle(result);
     } catch (error) {
       settle(
         aborting
