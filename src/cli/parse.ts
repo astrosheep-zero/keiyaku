@@ -378,48 +378,16 @@ function parseReview(parts: ParsedParts): ParsedReview {
   };
 }
 
-function parseArc(parts: ParsedParts): ParsedArc {
-  const contract = parts.positionals[0];
-  return {
-    command: "arc",
-    ...(contract === undefined ? {} : { contract }),
-    ...(parts.actor === undefined ? {} : { actor: parts.actor }),
-    output: parts.output,
-  };
-}
-
-function parseAbandon(parts: ParsedParts): ParsedAbandon {
-  const contract = parts.positionals[0];
-  const note = optionalFlag(parts.flags, "note");
-  return {
-    command: "abandon",
-    ...(contract === undefined ? {} : { contract }),
-    ...(note === undefined ? {} : { note }),
-    ...(parts.actor === undefined ? {} : { actor: parts.actor }),
-    output: parts.output,
-  };
-}
-
 function parseStatus(parts: ParsedParts): ParsedStatus {
   const contract = parts.positionals[0];
   if (contract?.startsWith("aku/") === true) {
-    return {
-      command: "status",
-      contract,
-      akuma: true,
-      output: parts.output,
-    };
+    return { command: "status", contract, akuma: true, output: parts.output };
   }
   return {
     command: "status",
     ...(contract === undefined ? {} : { contract }),
     output: parts.output,
   };
-}
-
-function parseShow(parts: ParsedParts): ParsedShow {
-  const contract = parts.positionals[0];
-  return { command: "show", ...(contract === undefined ? {} : { contract }), output: parts.output };
 }
 
 function parseRegion(parts: ParsedParts): ParsedRegion {
@@ -512,14 +480,32 @@ function parseCommand(parts: ParsedParts): ParsedCommand {
       return parseDeliver(parts);
     case "review":
       return parseReview(parts);
-    case "arc":
-      return parseArc(parts);
-    case "abandon":
-      return parseAbandon(parts);
+    case "arc": {
+      const contract = parts.positionals[0];
+      return {
+        command: "arc",
+        ...(contract === undefined ? {} : { contract }),
+        ...(parts.actor === undefined ? {} : { actor: parts.actor }),
+        output: parts.output,
+      };
+    }
+    case "abandon": {
+      const contract = parts.positionals[0];
+      const note = optionalFlag(parts.flags, "note");
+      return {
+        command: "abandon",
+        ...(contract === undefined ? {} : { contract }),
+        ...(note === undefined ? {} : { note }),
+        ...(parts.actor === undefined ? {} : { actor: parts.actor }),
+        output: parts.output,
+      };
+    }
     case "status":
       return parseStatus(parts);
-    case "show":
-      return parseShow(parts);
+    case "show": {
+      const contract = parts.positionals[0];
+      return { command: "show", ...(contract === undefined ? {} : { contract }), output: parts.output };
+    }
     case "ls":
       return parseLs(parts);
     case "audit": {
@@ -568,10 +554,9 @@ export function parseArgv(argv: readonly string[]): ParsedInvocation {
   const install =
     invocation.commandArgv[0] === "install" ? parseInstallCommand(invocation.commandArgv.slice(1)) : undefined;
   const akuma = isAkumaAction(invocation.commandArgv[0]) ? parseAkumaCommand(invocation.commandArgv) : undefined;
-  const parsed: ParsedExecution = {
+  return {
     ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
     ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),
     command: task ?? akuma ?? install ?? parseCommand(scanArgv(invocation.commandArgv)),
   };
-  return parsed;
 }
