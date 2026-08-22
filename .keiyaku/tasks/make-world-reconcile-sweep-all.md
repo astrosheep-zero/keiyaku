@@ -1,7 +1,7 @@
 ---
 id: task/make-world-reconcile-sweep-all
 title: Make world reconcile sweep all releasable custody
-state: in_progress
+state: done
 priority: 1
 needs: []
 parent: task/reconcile-custody-and-cleanup
@@ -9,7 +9,7 @@ supersedes: []
 relates: []
 note: ""
 createdAt: 2026-08-22T15:36:03.581Z
-updatedAt: 2026-08-22T17:41:28.110Z
+updatedAt: 2026-08-22T19:25:11.642Z
 ---
 Determine why global reconcile removes only a small fraction of delivery/candidate refs. Inventory the discovery boundary, terminal-state eligibility, sealed-byte and external-custodian proofs, missing-journal/orphan refs, retained worktrees, candidate pins, and settlement coupling. Define complete reporting and safe cleanup/retry semantics so every releasable ref is eventually handled without deleting protected or undiscoverable custody.
 Faye ruling act/282:
