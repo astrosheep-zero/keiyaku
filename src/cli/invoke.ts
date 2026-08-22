@@ -1,6 +1,7 @@
 import { resolveActor } from "./actor.js";
 import { isParsedAkumaCommand, type InvokedAkumaCommand } from "./commands/akuma.js";
 import type { AkumaInvocationResult } from "./commands/akuma-invoke.js";
+import { invokeContractMutation } from "./commands/contract-invoke.js";
 import type { InstallInvocationResult } from "./commands/install.js";
 import type { TaskInvocationResult } from "./commands/task-invoke.js";
 import {
@@ -13,9 +14,8 @@ import {
 import { isBlankInput } from "./usage.js";
 import type { InvocationResult, RegionResult } from "./result.js";
 import type { SelectedContract } from "./selectors.js";
-import type { ActorId, ContractId, Keiyaku as KeiyakuContract } from "../index.js";
+import type { ActorId, ContractId } from "../index.js";
 import type { KanshiRegionSelection } from "../kanshi/index.js";
-import type { WorktreeHooks } from "../library/configuration.js";
 import type { Repo } from "../library/repo.js";
 import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
@@ -30,12 +30,6 @@ type InvokeRuntime = Readonly<{
   onOperationStart?: () => void;
 }>;
 
-type ExistingCommand = Exclude<
-  ParsedCommand,
-  | InvokedAkumaCommand
-  | { command: "history" }
-  | { command: "bind" | "nuke" | "status" | "show" | "ls" | "reconcile" | "settings" | "region" | "task" | "install" }
->;
 type NonInstallExecution = Readonly<{
   cwd?: string;
   repo?: string;
@@ -114,19 +108,6 @@ function consumeSettings<T>(run: () => T, ErrorType: new (message: string) => Er
   }
 }
 
-async function selectedGates(value: Settings, names?: readonly string[]) {
-  const { gatesFrom, SettingsError } = await import("../library/configuration.js");
-  return consumeSettings(
-    () => gatesFrom({ settings: value, ...(names === undefined ? {} : { names }) }),
-    SettingsError,
-  );
-}
-
-async function selectedGitPolicy(value: Settings): Promise<boolean> {
-  const { requireBranchesToBeUpToDateFrom, SettingsError } = await import("../library/configuration.js");
-  return consumeSettings(() => requireBranchesToBeUpToDateFrom({ settings: value }), SettingsError);
-}
-
 function actorFromEdge(actor: string | undefined, environment: NodeJS.ProcessEnv): ActorId | undefined {
   let resolved: ActorId | undefined;
   try {
@@ -150,252 +131,6 @@ async function selectContract(repo: Repo, selector: string | undefined, scope: s
   const { Keiyaku } = await import("../library/keiyaku.js");
   const id = resolveContextualContract(await Keiyaku.list({ repo }), selector, scope);
   return contractFromInput(repo, id);
-}
-
-type BindInvocation = Readonly<{
-  parsed: Extract<ParsedCommand, { command: "bind" }>;
-  repo: Repo;
-  edge: InvocationEdge;
-  configuration: Settings;
-  hooks: WorktreeHooks;
-  establishWorld: () => Promise<WorldRoot>;
-}>;
-
-async function bindDraftReceipt(establishWorld: () => Promise<WorldRoot>, markdown: string) {
-  const { preserveBindDraft } = await import("./draft.js");
-  try {
-    return preserveBindDraft(await establishWorld(), markdown);
-  } catch (error) {
-    return { warning: `bind draft could not be preserved: ${error instanceof Error ? error.message : String(error)}` };
-  }
-}
-
-async function invokeBind({
-  parsed,
-  repo,
-  edge,
-  configuration,
-  hooks,
-  establishWorld,
-}: BindInvocation): Promise<InvocationResult> {
-  if (parsed.forkOf !== undefined) {
-    const actor = actorFromEdge(parsed.actor, edge.environment);
-    const { bindFromCommand } = await import("./commands/bind.js");
-    const { acceptedBind, resultFromMutationCall } = await import("./accepted.js");
-    return resultFromMutationCall(
-      "bind",
-      () => bindFromCommand({ command: parsed, repo, ...(actor === undefined ? {} : { actor }), hooks }),
-      (accepted) => {
-        const bound = accepted.facts.find((fact) => fact.kind === "bind");
-        if (bound === undefined || bound.kind !== "bind") throw new Error("accepted bind is missing its bind fact");
-        return acceptedBind(accepted, bound.data.coordinates);
-      },
-    );
-  }
-  const markdown = await edge.readStdin();
-  const gates = await selectedGates(configuration, parsed.gates);
-  const actor = actorFromEdge(parsed.actor, edge.environment);
-  const { bindFromCommand } = await import("./commands/bind.js");
-  const { acceptedBind, resultFromMutationCall } = await import("./accepted.js");
-  try {
-    const result = await resultFromMutationCall(
-      "bind",
-      () =>
-        bindFromCommand({
-          command: parsed,
-          repo,
-          markdown,
-          gates,
-          ...(actor === undefined ? {} : { actor }),
-          hooks,
-        }),
-      (accepted) => {
-        const bound = accepted.facts.find((fact) => fact.kind === "bind");
-        if (bound === undefined || bound.kind !== "bind") throw new Error("accepted bind is missing its bind fact");
-        return acceptedBind(accepted, bound.data.coordinates);
-      },
-    );
-    if (result.kind !== "refused") return result;
-    return { ...result, draft: await bindDraftReceipt(establishWorld, markdown) };
-  } catch (error) {
-    if (!(error instanceof TypeError)) throw error;
-    const { BindDraftError } = await import("./draft.js");
-    throw new BindDraftError(error, await bindDraftReceipt(establishWorld, markdown));
-  }
-}
-
-type ExistingSeat = Readonly<{
-  contract: KeiyakuContract;
-  id: ContractId;
-  actor?: ActorId;
-  hooks: WorktreeHooks;
-}>;
-
-function deliverRefusal(refusal: unknown): unknown {
-  if (typeof refusal !== "object" || refusal === null || !("kind" in refusal) || refusal.kind !== "dirty-workspace") {
-    return refusal;
-  }
-  const submodules = "submodules" in refusal && Array.isArray(refusal.submodules) ? refusal.submodules : [];
-  return { ...refusal, option: { flag: "--include-dirty", available: submodules.length === 0 } };
-}
-
-async function invokeDeliver(
-  parsed: Extract<ExistingCommand, { command: "deliver" }>,
-  seat: ExistingSeat,
-  requireBranchesToBeUpToDate: boolean,
-): Promise<InvocationResult> {
-  const { acceptedDeliver } = await import("./accepted.js");
-  try {
-    const delivered = await seat.contract.deliver({
-      ...(seat.actor === undefined ? {} : { actor: seat.actor }),
-      ...(parsed.message === undefined ? {} : { message: parsed.message }),
-      requireBranchesToBeUpToDate,
-      includeDirty: parsed.includeDirty,
-      materializeConflict: parsed.materializeConflict,
-      hooks: seat.hooks,
-    });
-    if (!("facts" in delivered)) return delivered;
-    return acceptedDeliver(delivered, seat.id);
-  } catch (error) {
-    const { KeiyakuRefused, KeiyakuRetry } = await import("../library/keiyaku.js");
-    if (error instanceof KeiyakuRefused) {
-      return { kind: "refused", verb: "deliver", contract: seat.id, refusal: deliverRefusal(error.refusal) };
-    }
-    if (error instanceof KeiyakuRetry) {
-      return { kind: "retry", verb: "deliver", contract: seat.id, detail: error.reason };
-    }
-    throw error;
-  }
-}
-
-async function invokeReview(
-  parsed: Extract<ExistingCommand, { command: "review" }>,
-  seat: ExistingSeat,
-  readStdin: () => Promise<string>,
-): Promise<InvocationResult> {
-  const summary = parsed.summaryFromStdin === true ? await readStdin() : parsed.summary;
-  const { acceptedReview, resultFromMutationCall } = await import("./accepted.js");
-  return resultFromMutationCall(
-    "review",
-    () =>
-      seat.contract.review({
-        verdict: parsed.verdict,
-        ...(seat.actor === undefined ? {} : { actor: seat.actor }),
-        ...(summary === undefined ? {} : { summary }),
-        hooks: seat.hooks,
-      }),
-    (result) => acceptedReview(result, seat.id),
-    { coordinate: seat.id },
-  );
-}
-
-async function invokeAudit(
-  parsed: Extract<ExistingCommand, { command: "audit" }>,
-  seat: ExistingSeat,
-  requireBranchesToBeUpToDate: boolean,
-): Promise<InvocationResult> {
-  const { acceptedAudit, resultFromMutationCall } = await import("./accepted.js");
-  return resultFromMutationCall(
-    "audit",
-    () =>
-      seat.contract.audit({
-        ...(seat.actor === undefined ? {} : { actor: seat.actor }),
-        includeDirty: parsed.includeDirty,
-        showDiff: parsed.showDiff,
-        requireBranchesToBeUpToDate,
-        hooks: seat.hooks,
-      }),
-    (result) => acceptedAudit(result, seat.id),
-    { coordinate: seat.id },
-  );
-}
-
-type ExistingInvocation = Readonly<{
-  parsed: ExistingCommand;
-  repo: Repo;
-  edge: InvocationEdge;
-  scope: string;
-  configuration: Settings;
-  hooks: WorktreeHooks;
-}>;
-
-async function existingSeat({
-  parsed,
-  repo,
-  edge,
-  scope,
-  hooks,
-}: Omit<ExistingInvocation, "configuration">): Promise<ExistingSeat> {
-  const { id, contract } = await selectContract(repo, parsed.contract, scope);
-  const actor = actorFromEdge(parsed.actor, edge.environment);
-  return { contract, id, ...(actor === undefined ? {} : { actor }), hooks };
-}
-
-async function invokeExisting(input: ExistingInvocation): Promise<InvocationResult> {
-  const { parsed, repo, edge, configuration, hooks } = input;
-  const seat = await existingSeat(input);
-  const { id, contract, actor } = seat;
-
-  switch (parsed.command) {
-    case "amend": {
-      const markdown = parsed.stdin === true ? await edge.readStdin() : undefined;
-      const gates = parsed.gates === undefined ? undefined : await selectedGates(configuration, parsed.gates);
-      const { amendFromCommand } = await import("./commands/amend.js");
-      const { acceptedAmend, resultFromMutationCall } = await import("./accepted.js");
-      return resultFromMutationCall(
-        "amend",
-        () =>
-          amendFromCommand({
-            command: parsed,
-            repo,
-            contract,
-            ...(markdown === undefined ? {} : { markdown }),
-            gates,
-            ...(actor === undefined ? {} : { actor }),
-            hooks,
-          }),
-        (result) => acceptedAmend(result, id),
-        { coordinate: id },
-      );
-    }
-    case "deliver":
-      return invokeDeliver(parsed, seat, await selectedGitPolicy(configuration));
-    case "review":
-      return invokeReview(parsed, seat, edge.readStdin);
-    case "arc": {
-      const markdown = await edge.readStdin();
-      const { acceptedArc, resultFromMutationCall } = await import("./accepted.js");
-      return resultFromMutationCall(
-        "arc",
-        () =>
-          contract.arc({
-            markdown,
-            ...(actor === undefined ? {} : { actor }),
-            hooks,
-          }),
-        (result) => acceptedArc(result, id),
-        { coordinate: id },
-      );
-    }
-    case "abandon": {
-      const { acceptedAbandon, resultFromMutationCall } = await import("./accepted.js");
-      return resultFromMutationCall(
-        "abandon",
-        () =>
-          contract.abandon({
-            ...(actor === undefined ? {} : { actor }),
-            ...(parsed.note === undefined ? {} : { note: parsed.note }),
-            hooks,
-          }),
-        (result) => acceptedAbandon(result, id),
-        { coordinate: id },
-      );
-    }
-    case "audit":
-      return invokeAudit(parsed, seat, await selectedGitPolicy(configuration));
-    default:
-      return parsed as never;
-  }
 }
 
 type AkumaEdgeInput = Readonly<{
@@ -594,6 +329,25 @@ async function invokeContractHistory(repo: Repo | undefined, contract: string): 
   }
 }
 
+async function invokeForwardedContractMutation(
+  parsed: Extract<ParsedCommand, { command: "deliver" | "review" }>,
+  repo: Repo,
+  edge: InvocationEdge,
+  scope: string,
+  establishWorld: () => Promise<WorldRoot>,
+): Promise<InvocationResult> {
+  const { EMPTY_WORKTREE_HOOKS } = await import("../library/configuration.js");
+  return invokeContractMutation({
+    parsed,
+    repo,
+    edge,
+    scope,
+    hooks: EMPTY_WORKTREE_HOOKS,
+    establishWorld,
+    forwarded: true,
+  });
+}
+
 async function resolveInvocationCoordinates(invocation: NonInstallExecution, runtime: InvokeRuntime) {
   const environment = runtime.environment ?? process.env,
     gitPath = gitPathFromEdge(environment);
@@ -657,11 +411,7 @@ async function invokeParsed(
     (parsed.command === "deliver" || parsed.command === "review") &&
     (await import("../akuma/requests.js")).injectedBodyRequests() !== null
   ) {
-    const { EMPTY_WORKTREE_HOOKS } = await import("../library/configuration.js");
-    const seat = await existingSeat({ parsed, repo, edge, scope, hooks: EMPTY_WORKTREE_HOOKS });
-    return parsed.command === "deliver"
-      ? await invokeDeliver(parsed, seat, false)
-      : await invokeReview(parsed, seat, edge.readStdin);
+    return invokeForwardedContractMutation(parsed, repo, edge, scope, establishWorld);
   }
   const configuration = await settingsAt(world ?? undefined, home);
   const { worktreeHooksFrom, SettingsError } = await import("../library/configuration.js");
@@ -671,27 +421,22 @@ async function invokeParsed(
     const selected = await selectContract(repo, parsed.contract, scope);
     return { kind: "guidance", contract: selected.id, guidance: await selected.contract.guidance() };
   }
-  switch (parsed.command) {
-    case "reconcile": {
-      if (parsed.contract === undefined) {
-        return {
-          kind: "observation",
-          command: "reconcile",
-          report: await repo.reconcile({ hooks, retryHooks: parsed.retryHooks }),
-        };
-      }
-      const { contract } = await selectContract(repo, parsed.contract, scope);
+  if (parsed.command === "reconcile") {
+    if (parsed.contract === undefined) {
       return {
         kind: "observation",
         command: "reconcile",
-        ...(await contract.reconcile({ hooks, retryHooks: parsed.retryHooks })),
+        report: await repo.reconcile({ hooks, retryHooks: parsed.retryHooks }),
       };
     }
-    case "bind":
-      return invokeBind({ parsed, repo, edge, configuration, hooks, establishWorld });
-    default:
-      return invokeExisting({ parsed, repo, edge, scope, configuration, hooks });
+    const { contract } = await selectContract(repo, parsed.contract, scope);
+    return {
+      kind: "observation",
+      command: "reconcile",
+      ...(await contract.reconcile({ hooks, retryHooks: parsed.retryHooks })),
+    };
   }
+  return invokeContractMutation({ parsed, repo, edge, scope, configuration, hooks, establishWorld });
 }
 
 function withResolvedTaskActor(command: ParsedCommand, runtime: InvokeRuntime): InvokeRuntime {
