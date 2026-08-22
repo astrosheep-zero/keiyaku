@@ -83,11 +83,9 @@ equal the path-derived coordinate. Unknown keys and malformed documents are
 authority corruption. Manual editing is authoritative; a manual move that
 breaks the witness is corruption.
 
-Public Task reads and writes are asynchronous and observe complete files. One
-compare-and-replace commit may synchronously fsync a unique temporary file,
-rename it, and fsync the parent where supported; Windows uses file fsync plus
-atomic rename. All surrounding observation and cleanup remains asynchronous,
-with no second sync API or parallel writer.
+Public Task reads and writes are asynchronous and observe complete files. Each
+mutation replaces one complete authority file atomically; there is no second
+sync API or parallel writer.
 
 `priority` is `0 | 1 | 2 | 3` and defaults to `2`. Relation arrays are ordered,
 duplicate-free full TaskIds. `note` is a string and defaults to empty.
@@ -111,12 +109,9 @@ Markdown edits remain authoritative, Task does not promise complete
 change-since-observation, history, or event-log reads; a partial journal
 would be dishonest.
 
-Task may be reached through one direct-parent Akuma Body Request, but that is
-an integration edge, not Task authority. The Task owner decodes the same public
-mutation inputs and runs the same forced-local operation for the caller-selected
-World. The authenticated requester supplies creation actor on that edge; Task
-does not inspect Akuma, Heart, Contract, or transport state, and retains no
-request lifecycle fact.
+Task may be reached through one direct-parent Akuma Body Request, but that
+integration edge is not Task authority. The Task owner runs the same operation
+for the caller-selected World and retains no request lifecycle fact.
 
 ## Lifecycle And Graph
 
@@ -154,12 +149,9 @@ descendant observation and scoped selection, but never cascades lifecycle or
 propagates needs. `supersedes` is navigation, and `relates` is nonblocking;
 neither changes readiness or lifecycle.
 
-Each complete board observation constructs one Task-owned ephemeral relation
-projection. Task detail, blocker and status views, recursive tree, and query
-consume that same projection; none reconstructs reverse relations by rescanning
-the board. Outgoing declarations remain canonical Task-document authority. The
-projection is derived read state only: it is neither persisted nor cached across
-board observations.
+Reverse relations are one Task-owned projection of a complete board observation.
+They are derived read state, never persisted or cached across observations, and
+outgoing declarations remain canonical document authority.
 
 ## Native TypeScript Surface
 
@@ -266,13 +258,9 @@ next item and never interrupts an atomic replacement.
 
 ## Views
 
-`show <TaskId>...` is world-scoped and returns exact fields, body, direct needs
-with released status, unresolved blockers, derived blocks/children/
-supersededBy/related, parent, and outgoing supersedes
-bytes when present. Multiple complete TaskIds are observed and rendered in input
-order (one blank line between text entries; a JSON array). If any ID is invalid
-or missing, the invocation returns one usage or typed missing refusal and no
-partial result.
+`show` observes complete addressed Tasks and their direct and derived
+relationships. CLI argument grammar and text/JSON presentation belong to
+[cli-task.md](cli-task.md).
 `tree <TaskId>` follows parent decomposition from one observed board.
 Starting at the addressed root, it recursively selects Tasks whose `parent`
 equals the current TaskId, in canonical TaskId byte order. A node seen again
@@ -282,17 +270,12 @@ do not invent child nodes. `needs` stays the ordering/blocking projection in
 `show` and readiness; it is not the decomposition tree. `doctor` diagnoses the
 complete world independently of current namespace.
 
-`list` defaults to active tasks in the current namespace. Closed and all are
-explicit selections; `scope: "world"` escapes the current namespace. `ready`
-and `blocked` have the same scope rule and accept an optional parent TaskId;
-parent-scoped results contain only recursive descendants of that Task. Rows
-sort by priority then TaskId bytes and contain TaskId, priority, disposition,
-and title. Every list result is bounded by its optional `limit` and carries an
-honest `total` for the complete matching set; no result requires title/body
-prose inference. Blocked rows add unresolved blocker references only. File
-mtime is never read. Text pages that are truncated state the exact remaining
-count and print one complete repeat command with `--limit` equal to `total`;
-JSON remains the typed page shape without a footer.
+`list` defaults to active Tasks in the current namespace; closed, all, and
+world scope are explicit. `ready` and `blocked` share that scope and may select
+recursive descendants of one existing parent. Results are priority-then-TaskId
+ordered, bounded with complete totals, and never infer data from prose or mtime.
+Blocked rows add unresolved blocker references. Presentation belongs to
+[cli-task.md](cli-task.md).
 
 `query` is the general read surface over one Task board snapshot. Its public
 input is a typed expression tree, never a shell string. Task owns the exported
@@ -311,16 +294,11 @@ claim, assignment, scheduler, Contract, Akuma, Git, or prose-inferred field.
 `under` and the named-view `parent` selector require an existing parent and
 select recursive descendants only; a missing parent is a typed Task refusal.
 An omitted query expression selects active Tasks, excluding `done` and `drop`.
-The Task operations owner can project the complete world rows and these blocker
-references from one board snapshot for a composite reader. That same internal
-composite observation also exposes enough data to select ordinary `TaskRow`
-values by exact namespace or current `createdBy`. Public contextual rows
-contain only the existing `TaskRow` fields; they do not expose `createdBy`,
-timestamps, note, body, or Task persistence. Both selections include every
-Task state and preserve priority-then-TaskId byte order. They are complete,
-not paged: there is no row cap, latest-only rule, continuation, omitted
-counter, cache, reverse index, or persisted projection. This observation
-does not expose Task persistence or read TaskHolder or Contract authority.
+The Task operations owner can project complete world rows and blocker references
+from one board snapshot for composite readers. Public contextual rows retain
+only the existing `TaskRow` fields, preserve priority-then-TaskId order, and are
+complete rather than paged; they do not expose Task persistence or Contract
+authority.
 
 ## Compose
 
@@ -358,23 +336,11 @@ type TaskCompositionResult =
 ## Admission And Coordination
 
 One Task file replacement is one commit point. Task never stages, commits, or
-changes Git refs. It writes a temporary regular file, flushes it, rechecks the
-observed predecessor bytes, atomically renames it, and syncs the directory when
-that platform supports directory fsync.
+changes Git refs; predecessor-byte comparison is the write adjudicator.
 
-Cooperating writers use `.keiyaku/locks/task/<namespace...>/<local-id>.sqlite`.
-ID allocation first takes `.keiyaku/locks/task-allocation.sqlite`; compose then
-takes its addressed task locks in TaskId byte order. Relation changes have no
-world-wide adjudication and take only the addressed task lock. The shared
-SQLite transaction primitive waits at most three seconds and propagates
-cancellation. Databases contain no Task fact, owner row, PID, lease, heartbeat,
-or stale-break policy and may be recreated when idle. Only coordination imports
-`node:sqlite`.
-
-Lock acquisition is awaited before a Task mutation enters its serial writer
-section. The bounded `DatabaseSync` transaction used by the coordination owner
-is the sole synchronous SQLite exception; it contains only one lock decision
-and custody handoff. Task file observation and cleanup remain asynchronous.
+Cooperating writers serialize allocation and addressed mutations with the
+Task-owned lock resources. Lock acquisition is awaited before the serial writer
+section; coordination contains no Task facts or durable owner state.
 
 Locks serialize cooperating writers; predecessor-byte comparison remains the
 sole write adjudicator against manual editors. Byte movement returns

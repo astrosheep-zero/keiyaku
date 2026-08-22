@@ -66,12 +66,9 @@ product owners create neither Git readers nor cross-call caches.
 
 Git mints `ContractCoordinates.start` at bind. With a target it is the
 resolved target head; without a target it is the caller worktree's current
-`HEAD`. It is the initial managed-worktree commit.
-
-Fork bind copies the source `coordinates.start` exactly after confirming its
-immutable commit remains observable. An omitted target copies the source target;
-an explicit target uses ordinary validation. The new Contract receives a fresh
-delivery ref, managed worktree, and candidate custody.
+`HEAD`. It is the initial managed-worktree commit and the original comparison
+point for a `here` workspace. A targeted here contract is legal only while
+the caller's symbolic `HEAD` is that target.
 
 Bind derives those coordinates anew inside every semantic attempt. The same
 atomic admission transaction asserts only the ref fact sealed into
@@ -82,6 +79,12 @@ updates a ref. An OID movement, identity collision, or Git CAS retry therefore
 discards the attempt and re-observes coordinates; a fresh read alone is not the
 currentness judge.
 
+The symbolic branch and attachedness read for targeted `here` eligibility are
+not Contract facts. They can refuse that decision observation, but admission
+does not assert or persist them. Moving to another branch at the same OID
+between observation and admission is therefore legal and invisible; Git must
+not change the caller's checkout to restore the earlier observation.
+
 An explicit target must exist at bind observation. Absence is returned to
 the library as `target-missing` before any journal or ref publication. Git
 never creates the target branch and never substitutes another ref or the
@@ -90,21 +93,21 @@ caller's current `HEAD` for it.
 A target is an optional Git ref because a claimed placement may move it.
 `workspace: "worktree"` gives Git ownership of one deterministic delivery ref
 and linked worktree; its branch remains independent from the target.
-Managed Contracts use only the appointed delivery worktree; caller-local
-workspaces are not Contract coordinates.
+`workspace: "here"` uses the pinned caller worktree in place and never takes
+ownership of that worktree or its branch. Here is a commit-in-place capability,
+not a foreign-target delivery mode: bind refuses a targeted here workspace
+whose symbolic `HEAD` differs from that target or is detached. Delivery refuses
+before tender when the workspace no longer names its recorded target. A
+targetless here contract remains legal.
 
 The Git ref, managed delivery namespace, and candidate-pin namespace have
 this one Git owner. The library boundary rejects a target that names any
 of them before coordinates are recorded; target input and canonicalization are
 defined only in [public-api.md](public-api.md).
 
-Git derives each managed delivery-ref leaf and candidate-pin leaf from the
-complete ContractId using one private physical-name projection. It replaces
-the validated coordinate's structural `/` separator with `-`; for example,
-`kei/example` materializes as `kei-example`. The family prefix comes from
-the identity itself and is neither added nor reconstructed by Git. This
-stable projection does not reuse title normalization. These names are
-deterministic topology, not public identity or a second legality authority.
+Managed delivery and candidate-pin leaves are deterministic private topology
+derived from the complete ContractId. They are never public identity or a
+second legality authority.
 
 Git does not derive a managed worktree path from ContractId. Workspace
 appointment owns Place allocation; Git consumes an explicit appointed Place
@@ -114,21 +117,18 @@ therefore share that appointed path. The path is not stored in the Contract
 journal. Git never derives, scans, or adopts another managed-worktree
 coordinate from Contract identity.
 
-Git's terminal worktree cleanup proves the appointed path is physically
-absent before the workspace owner may release the Place. An
-unregistered-but-existing appointed path is typed `worktree-retained` lag
-and is not a successful cleanup. A path that is neither registered nor
-present may report `unchanged` and still prove absence. An ordinary
-unappointed terminal is not a missing-Place failure: appointment absence
-is the proof that physical cleanup already completed.
+Terminal cleanup proves the appointed path is physically absent before Place
+release. A retained physical path remains explicit lag; absence is the proof of
+cleanup, not appointment metadata.
 
-Git owns workspace cleanliness and target lag at the appointed path, counting
-workspace `HEAD` against the same-epoch frozen `targetObservation.head` and
-never a live target ref.
+Git owns workspace cleanliness and target lag at the appointed path, or at
+the pinned caller worktree for `here`, counting workspace `HEAD` against
+the same-epoch frozen `targetObservation.head` and never a live target ref.
 A named target with a missing frozen head is unknown. Clean means empty
 staged, unstaged, untracked, and submodule sets; otherwise dirty;
 unavailable when unobservable. An unappointed managed Contract has no
-worktree to probe. These facts are not persisted.
+worktree to probe. Here never fabricates a managed path. These facts are
+not persisted.
 
 ## Tender, Integration, And Diff Ownership
 
@@ -140,49 +140,25 @@ governed by the reconciliation rules below.
 
 ## Delivery Preparation And Placement
 
-Delivery preparation consumes only the state coordinates and current document
-projection from that attempt, pure `requireBranchesToBeUpToDate` and
-`includeDirty` values, and optional caller message and actor testimony. It does
-not observe, fold, or judge contract lifecycle state, decode a document,
-request a callback, import Settings, or import a protocol body. For a target contract, Git observes
-the current target head and constructs one squash integration against it. For a
-targetless contract, the supplied `start` coordinate is the integration
-predecessor, the tender is also the integration snapshot, and there is no target
-ref operation.
+Delivery preparation consumes the attempt's coordinates, delivery policy,
+dirty authorization, and optional caller testimony. It does not judge Contract
+lifecycle or decode documents. A targeted tender integrates against one frozen
+target head; a targetless tender has no target-ref operation.
 
-It returns mechanical data or failure to the one lifecycle decision;
-it is not a lifecycle judge. The tender is the selected managed-worktree
-content. Dirty content refuses delivery and Verification unless
-`includeDirty` is true. Review needs no such authorization and discloses the
-ordinary dirty paths and totals it observed. Dirty submodule internals always
-refuse because the superproject tree cannot seal them.
+Git returns mechanical data or typed failure to the lifecycle decision. Dirty
+content refuses delivery and Verification unless `includeDirty` is true;
+review observes ordinary dirty paths without that authorization. Dirty
+submodule internals always refuse because the superproject tree cannot seal
+them.
 
-When `includeDirty` is true, Git captures all non-ignored staged, unstaged, and
-untracked final bytes through one private index and materializes a deterministic
-tender commit/tree without changing the real `HEAD`, index, branch, or files.
-It is complete-workspace authorization, not a staged-only mode or path selector.
-Its commit message is the default `<contract-id>: <title>` subject or the
-caller-supplied subject, one blank line, the complete current Contract Markdown
-with one trailing newline, then one blank line and the final
-`Keiyaku-Contract: <contract-id>` trailer. A supplied message replaces only the
-subject. Tender and integration materialized by one preparation share the
-captured workspace `HEAD` committer timestamp and one author/committer pair.
+`includeDirty` captures the complete non-ignored final tree in a private index
+without changing the real checkout. The tender message contains the Contract
+Markdown and deterministic actor/timestamp testimony; caller message replaces
+only its subject.
 
-After an accepted dirty managed delivery, reconciliation may project that same
-recorded tender snapshot into its existing managed worktree. It moves only an
-eligible detached `HEAD` and its real index through Git's mixed-reset semantics;
-it never checks out or writes worktree files. The tender snapshot remains the
-only durable candidate identity. Bytes written after capture remain ordinary
-tracked or untracked changes above the tender, while the captured bytes become
-the clean delivered baseline. An already-followed worktree is not reset again,
-so subsequent index and worktree changes remain untouched. The exact eligible
-and retained shapes are owned by [git-reconciliation.md](git-reconciliation.md).
-Reusing that timestamp keeps an unchanged prospective audit identity stable for
-a later delivery. Actor testimony wins and
-uses `keiyaku@localhost`; otherwise a complete repository-effective
-`user.name`/`user.email` pair wins, with `Keiyaku <keiyaku@localhost>` as the
-fallback when either value is absent. Private state commits retain their own
-identity and message law.
+After accepted dirty delivery, reconciliation may project the recorded tender
+into an eligible managed worktree without writing later edits. Tender and
+ChangeId remain the candidate identities; target movement never changes them.
 
 `SnapshotId` is commit identity. ChangeId is one byte-sensitive identity for the
 immutable Contract start to captured tender tree, including binary, mode, path,
@@ -191,51 +167,27 @@ and review share it without creating a durable review snapshot. It changes only
 with reviewed content, not target movement; later integration failure is a
 placement stop and never changes the admitted review subject.
 
-`requireBranchesToBeUpToDate` is a delivery-attempt policy. When true, a
-targeted tender that does not descend from the observed target head returns
-`integration-failed` with reason `not-based-on-target`; it admits no delivery
-fact. When false, Git computes the common ancestor of the tender `HEAD` and
-observed target head, then performs a three-way squash integration with that
-ancestor as base, observed target head as ours, and tender tree as theirs. A
-rebase therefore changes the integration base through ordinary Git history;
-immutable Contract `start` remains birth topology and is not a mutable delivery
-base. Git uses `merge-tree --write-tree -z --name-only`, then creates one
-deterministic commit whose parent is the observed target head and whose message
-is the tender message. The judge never checks out or edits an agent worktree.
-No common ancestor produces `integration-failed` with reason
-`unrelated-histories`; structured conflict paths produce reason `conflict`.
-That conflict names the exact judged `targetHead` and the ordered unique
-conflict paths.
+`requireBranchesToBeUpToDate` is the target freshness policy. When disabled,
+Git performs one three-way squash integration against the frozen target head.
+Unrelated histories and structured conflicts are typed failures naming the
+judged target and conflict paths; the judge never edits an agent worktree.
 
-Read-only clean and dirty `ContractWorkspaceObservation` arms carry
-`merge: null` or `{ head, unmergedPaths }` from that same `MERGE_HEAD`
-primitive and ordered unmerged porcelain/index paths. Merge is orthogonal to
-dirty counts. Unavailable, unappointed, and failed arms fabricate no merge
-field. `MERGE_HEAD` with unmerged paths is current materialized workspace
-state; an ordinary unmaterialized deliver conflict exists only in its mutation
-receipt and does not appear on later ls, status, or history.
+Workspace observations expose merge state separately from dirty counts. A
+materialized merge is current workspace state; an unmaterialized deliver
+conflict exists only in its mutation result and is not fabricated into later
+reads.
 
-When deliver asks to materialize a judged conflict, Git first detects existing
-merge state with `git rev-parse -q --verify MERGE_HEAD` in the appointed
-workspace. It then projects the already-made judge as
-`git merge --no-commit <targetHead>` in that same workspace. This is not a
-second conflict adjudicator and does not choose ours/theirs, write a merge
-commit, or move a ref. Git owns only that detection and projection.
+When deliver asks to materialize a judged conflict, Git projects that judged
+target into the appointed workspace without choosing ours/theirs, committing,
+or moving a ref. This is recovery projection, not a second conflict judge.
 
-Before tender sealing, delivery reads the real index with Git. Any unmerged
-entries refuse as `unmerged-paths` with sorted unique complete paths; this is
-unconditional and admits no delivery fact, Verification, candidate, or target
-change. A resolved `MERGE_HEAD` makes the workspace dirty for delivery
-authorization even when its tree equals `HEAD`. With `includeDirty`, the
-existing private-index capture seals its final bytes in a deterministic tender
-whose parents are the appointed `HEAD`, then the captured `MERGE_HEAD`. This
-is custody of Git's already materialized state, not another conflict judge.
+Unmerged index entries refuse as `unmerged-paths` before delivery admission. A
+resolved merge remains dirty for authorization; `includeDirty` captures the
+already materialized final bytes as the tender without judging the conflict
+again.
 
-Squash integration requires Git 2.38 or a compatible structured
-`merge-tree --write-tree` capability. Git probes that capability without
-parsing version prose. Absence returns `integration-unsupported` with
-`requiredGit: "2.38"`. Targetless delivery and the strict up-to-date path do
-not require this capability.
+Integration requires Git's structured merge-tree capability; unsupported Git is
+a typed integration failure. Targetless delivery does not need it.
 
 Targeted claimed placement is one serialized Git operation per canonical
 target ref. Its fence begins before checkout preconditions are observed and
@@ -273,6 +225,15 @@ only predecessor-to-candidate writes, never follows symlinks or enumerates
 unrelated siblings, and lets Git judge whether a displaced scope contains
 ignored untracked bytes. Any such byte refuses as `untracked`; observation
 failure is nonpublishing `target-placement-failed`.
+
+When a targeted here workspace is itself the target checkout, placement
+follows Git commit semantics. Its captured dirty bytes are the verified
+candidate, so merge preconditions do not apply. After publication Git sets
+that checkout's index to the candidate tree and does not write its worktree.
+Captured staged, unstaged, and untracked bytes therefore become the clean
+candidate. Bytes edited after capture remain ordinary unstaged changes.
+Staging intent created after capture may be reclassified as unstaged, but its
+worktree bytes are never discarded.
 
 The target fence has no post-admission marker or ancestor search. Recovery is
 allowed only while the target names the claimed candidate. Candidate index and

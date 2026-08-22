@@ -21,57 +21,12 @@ outcome.
 
 ## Provider boundary
 
-```ts
-type ProviderAdapter = {
-  admitOptions(options: ProviderOptions): ProviderOptionAdmission;
-  start(input: FreshDrive): Promise<Session>;
-  resume?(input: ResumeDrive): Promise<Session>;
-  fork?(input: {
-    session: ResumeCoordinate;
-    at: string;
-    cwd: string;
-  }): Promise<{ session: ResumeCoordinate }>;
-};
-
-type ReadonlyRestraint = Readonly<
-  | { enforcement: "native"; diagnostic?: never }
-  | { enforcement: "none"; diagnostic: string }
->;
-
-type ProviderOptionAdmission =
-  | { kind: "admitted"; options: ProviderOptions; readonly?: ReadonlyRestraint }
-  | { kind: "refused"; diagnostic: string };
-type DriveInput = {
-  body: string;
-  launchTells: readonly { id: TellId; text: string }[];
-  cwd: string;
-  options: ProviderOptions;
-  requests?: { dir: string };
-};
-
-type FreshDrive = DriveInput & { session: { kind: "fresh" } };
-type ResumeDrive = DriveInput & {
-  session: { kind: "resume"; coordinate: ResumeCoordinate };
-};
-
-type Session = {
-  admission: SessionAdmission;
-  events: AsyncIterable<AgentEvent>;
-  receipts?: AsyncIterable<TellReceipt>;
-  completion: Promise<TurnResult>;
-  abort: () => Promise<void>;
-  forceDispose: () => Promise<void>;
-  tell?: (tell: { id: TellId; text: string }) => Promise<TellSubmission>;
-};
-
-type TellSubmission =
-  | { kind: "accepted"; fence: ProviderFence }
-  | { kind: "turn-ended" };
-type SessionAdmission = { fence: ProviderFence };
-type TellReceipt =
-  | { evidence: "exact"; tellId: TellId; kind: ReceiptKind }
-  | { evidence: "fence"; fence: ProviderFence; kind: ReceiptKind };
-```
+The adapter contract has one option-admission result and one Session boundary.
+An admitted drive carries the body, launch tells, cwd, options, and optional
+request directory. A Session exposes typed events, completion, graceful abort,
+forced disposal, and optional resume, fork, live-tell, and receipt operations.
+Admission and tell results carry only an opaque provider fence or `turn-ended`;
+the provider never returns product identities through this boundary.
 
 `ProviderFence` is an adapter-authored opaque submission coordinate unique to
 one delivery group within one Turn. Its durable correlation key is the
@@ -145,51 +100,15 @@ Launch admission is terminal evidence for its immutable `launchTells` batch.
 Body copies that one distinction into the live delivery fact; no capability
 table or provider-name branch exists in Heart.
 
-Provider observation is the closed public vocabulary:
+Provider observation is a closed vocabulary: session coordinates, assistant and
+thought narration, notes, typed tool start/completion pairs, and an `unknown`
+arm. Tools preserve native names and available paths, search selectors,
+file-change operations, diffstat, and result status; absent native facts stay
+absent. The boundary owns the codec and Heart stores its encoded bytes opaquely.
 
-```ts
-type AgentEvent =
-  | { type: "session"; coordinate: ResumeCoordinate }
-  | { type: "assistant"; text: string }
-  | { type: "thought"; text: string }
-  | {
-      type: "tool";
-      id: string;
-      phase: "started" | "completed";
-      name: string;
-      call: ToolCall;
-      result?: ToolResult;
-    }
-  | { type: "note"; text: string }
-  | { type: "unknown"; kind: string };
-
-type ToolCall =
-  | { kind: "run"; command: string }
-  | { kind: "read"; path: string; offset?: number; limit?: number }
-  | { kind: "search"; query: string; scope?: "content" | "files" | "web"; path?: string; glob?: string }
-  | {
-      kind: "fileChange";
-      changes: readonly {
-        op: "add" | "update" | "delete" | "unspecified";
-        path: string;
-        diffstat?: { added: number; removed: number };
-      }[];
-    }
-  | { kind: "other"; display: string };
-
-type ToolResult = {
-  status: "ok" | "error";
-  message?: string;
-  exitCode?: number;
-};
-```
-
-The provider boundary owns this vocabulary and its strict encode/decode pair. The body
-encodes normalized events before handing opaque JSON to Heart; public activity
-readers decode through the same owner before history or snapshot folding. Exhaustive
-event-type switches make a union change fail typecheck until the codec changes
-with it. Heart remains the opaque persistence owner and does not import provider
-semantics.
+The body encodes normalized events before handing opaque JSON to Heart; public
+activity readers decode through the same owner before history or snapshot
+folding. Heart never imports provider semantics.
 
 Each native adapter separates process/session control from pure native-event
 translation. The Body consumes the typed translation result and does not
@@ -238,73 +157,18 @@ or refusal narration to `note`. Deltas, input echoes, result bodies, raw
 thinking, and usage telemetry are dropped. Closed native unions are exhaustive;
 open method sets end in the unknown fallback.
 
-Codex translates admitted notifications in native order. The first
-`turn/completed` freezes the terminal result while already admitted narration
-drains; a bounded one-second fallback ends an uncooperative producer without
-rewriting that result. Terminal observation closes steer admission and rejects
-unacknowledged steers. Only native `item/completed` produces a completed tool;
-terminality never repairs an unmatched start.
+Adapters preserve each provider's terminal and tell evidence without making
+transport acknowledgements into product completion. Codex and Claude expose
+different native tell checkpoints; OpenCode and Pi carry pending tells into the
+next launch. A terminal result closes the Turn once, unmatched tool starts stay
+unsettled, and no adapter fabricates completion or consumes a tell without its
+native evidence.
 
-The public projector inserts an unmatched start as `active` in its owning open
-Turn. On that Turn's end it converts each remaining active row to `unsettled`
-while constructing the typed closed Turn. This revokes current-running
-qualification but does not fabricate a tool completion or terminate a process.
-History flattens an open Turn's tool as `active` and a closed unmatched tool as
-`unsettled`. Snapshot and history lifecycle are derived from the typed start,
-completion, and Turn facts, never from renderer inference.
-
-Claude's terminal answer is exactly `result.result`. Codex emits every completed
-`agentMessage` as assistant activity, while its terminal answer is exactly the
-last completed `agentMessage` text. A failed Codex turn preserves
-the native explanation from an `error` notification or `turn.error`, using a
-generic status diagnostic only when no native detail exists.
-
-Codex exposes live tell through native `turn/steer`. The adapter submits one
-text input with the TellId as `clientUserMessageId` to the admitted thread and
-active turn, accepts only a response naming that same turn, and then returns an
-opaque fence scoped to that native acknowledgement. Codex supplies no receipt
-stream: successful `turn/steer` acceptance is its strongest terminal evidence.
-Terminal turn observation returns `turn-ended` for new steers immediately, but the adapter keeps
-only acknowledgements received before that terminal observation as native
-acceptance evidence. An already-submitted steer still awaiting acknowledgement
-is rejected when terminal observation closes request admission; terminal
-settlement never waits indefinitely for it, and a later response cannot invent
-acceptance across the closed boundary.
-
-Claude uses one long-lived streaming-input Query. SDK demand for the next item
-proves submission and yields only a submission fence. A later successful
-`result` is the consumption checkpoint and yields exact `consumed` receipts for
-previously acknowledged tells, after `tell()` resolves. Earlier results prove
-nothing; accepted tells without a later checkpoint remain replayable. Terminal
-Query returns `turn-ended`, and pre-acknowledgement failure rejects.
-
-OpenCode V1 treats `promptAsync` as launch admission. Only the matching native
-user message opens the Turn's terminal epoch; same-session idle or error closes
-it, and a same-session error after submission may close a launch before that
-identity appears. The final assistant message supplies answer and fork coordinate but cannot
-create another completion decision. Events are isolated by session id. V1
-claims no live tell; pending tells enter the next prompt. Archetype `effort`
-maps to native `variant`.
-
-Pi's `steer()` acknowledgement likewise proves queueing only. Pi omits live
-tell and receives pending text in the next launch input.
-
-File-change adapters preserve every available native operation, path, and
-per-change diffstat. Missing optional facts make the public row shorter; an
-adapter never invents a diffstat. Diffstat may be derived from a provider-native
-unified patch, never from workspace observation or prose. Claude, Pi, and
-OpenCode capture only known native names and those fields.
-`unspecified` applies only when the provider reports a file edit and path but
-no add, update, or delete subtype. It records that native absence; it is never
-an inference failure or compatibility value.
-A similarly named unknown tool stays `other`; a missing read path or search
-query omits the fact. Codex web search keeps only query and drops fuzzy search.
-Claude derives add/update from write/edit and omits missing diffstat. Pi edit
-keeps update and may add patch-derived counts; Pi write stays `other` until a
-native result establishes add or update. A multi-file public summary aggregates
-only when every change has a diffstat. No
-terminal file ledger, event bus, usage or cost arm, raw-provider passthrough,
-or native output body belongs in this boundary.
+File-change adapters preserve native operation, path, and available diffstat;
+missing facts remain absent. Diffstat may come only from provider-native patch
+evidence, never from workspace observation or prose. Unknown tools remain
+`other`, and this boundary has no file ledger, usage arm, raw-provider
+passthrough, or native output body.
 
 An answered `TurnResult.historyId`, when present, is the provider-owned fork
 point, not a generic result identifier. Completion does not require one and no
@@ -323,42 +187,11 @@ and fork reconstruct adapters. Fork inherits execution and restraint.
 Generic provider execution, option, and restraint decoders validate known
 members and ignore additional members.
 
-When `systemPrompt` is present, `systemPromptMode` selects whether that body
-appends to or replaces the provider's native system prompt. New Archetype
-admission always carries the effective mode. Historical Soul, Session, and
-RequestRecipe options may still contain `systemPrompt` without a mode; each
-adapter below interprets that absence with its pre-change behavior so resume
-and fork do not change. No adapter rewrites persisted options.
-
-- Claude: append uses the `claude_code` preset with `append`; replace supplies
-  the body as the complete custom `systemPrompt`. Historical mode absence
-  remains append.
-- Codex app-server: append sends `developerInstructions`; replace sends
-  `baseInstructions`. Fresh `thread/start` and resumed `thread/resume`
-  parameters use the same mapping. Fork inherits its source thread and does
-  not resend prompt fields. Historical mode absence remains append.
-- OpenCode V1: append uses the existing per-user `system` input, which native
-  OpenCode appends after its agent/provider prompt. Replace is a typed
-  refusal because V1 exposes no replacement input. Historical mode absence
-  remains the existing append behavior.
-- Pi: append uses `appendSystemPromptOverride` to append the body after the
-  loader's existing appended prompt blocks; replace uses
-  `systemPromptOverride`. Historical mode absence remains the existing
-  replace behavior.
-- Grok Build: append is admitted and sends `_meta.rules` only on fresh
-  `session/new`; resume/load sends no `rules` because Grok folds rules only at
-  creation and retains the session prompt. Replace sends
-  `_meta.systemPromptOverride` on fresh `session/new` and resumed
-  `session/load`. Historical mode absence with a body remains refused because
-  Grok previously admitted no such Akuma. Those `_meta` keys are Grok dialect
-  fields owned only by this kind.
-- Generic ACP: execution config may declare `systemPromptMode: append | replace`
-  paired with `systemPromptArg`. A configured `systemPromptArg` without the
-  new field retains its historical replace declaration. A prompt is admitted
-  only when its effective option mode matches the configured argument mode; a
-  missing mapping or mismatch is a typed refusal. Config mode without an
-  argument is malformed. Historical options without a mode continue through
-  the historical argument mapping.
+When `systemPrompt` is present, `systemPromptMode` selects append or replace.
+Each adapter maps the effective mode to its native prompt input; unsupported
+replacement is a typed refusal. Historical options without a mode retain their
+old interpretation, and persisted options are never rewritten. Generic ACP
+owns only configured portable mappings; dialect literals stay in their kind.
 `executable` constrains process start; literal `env` overlays only ambient
 launch environment and is neither durable nor interpolated. Claude execution
 with `env` refuses fork because native `forkSession` cannot accept it.

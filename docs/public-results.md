@@ -190,7 +190,7 @@ type MergeStatePresentRefusal = Readonly<{
   kind: "merge-state-present"
   contractId: ContractId
   workspace: Readonly<{
-    kind: "worktree"
+    kind: "here" | "worktree"
     path: string
   }>
 }>
@@ -200,7 +200,7 @@ type IntegrationConflictMaterialized = Readonly<{
   targetHead: SnapshotId
   conflictPaths: readonly string[]
   workspace: Readonly<{
-    kind: "worktree"
+    kind: "here" | "worktree"
     path: string
   }>
 }>
@@ -214,6 +214,13 @@ type CheckoutNotFollowableRefusal = Readonly<{
   paths: readonly string[]
 }>
 
+type DeliveryWorkspaceRefusal = Readonly<{
+  kind: "workspace-not-on-target"
+  contractId: ContractId
+  target: string
+  branch: string | null
+}>
+
 type DeliveryPreparationRefusal =
   | Readonly<{ kind: "target-missing" | "worktree-missing"; contractId: ContractId }>
   | DirtyWorkspaceRefusal
@@ -221,6 +228,7 @@ type DeliveryPreparationRefusal =
   | IntegrationRefusal
   | MergeStatePresentRefusal
   | CheckoutNotFollowableRefusal
+  | DeliveryWorkspaceRefusal
 
 type DirtyWorkspaceRefusal = Readonly<{
   kind: "dirty-workspace"
@@ -250,6 +258,11 @@ type DocumentMovedRefusal = Readonly<{
 type TargetInputRefusal =
   | Readonly<{ kind: "invalid-target" }>
   | Readonly<{ kind: "target-missing" }>
+  | Readonly<{
+      kind: "here-target-mismatch"
+      target: string
+      branch: string | null
+    }>
 
 type VerificationStop =
   | StepStop<AttestationRefusal>
@@ -267,7 +280,7 @@ type VerificationStop =
   | Readonly<{ failure: "spawn-error"; diagnostic: string }>
 
 type PlacementStop =
-  | StepStop<PlacementRefusal | IntegrationRefusal | CheckoutNotFollowableRefusal>
+  | StepStop<PlacementRefusal | IntegrationRefusal | CheckoutNotFollowableRefusal | DeliveryWorkspaceRefusal>
   | Readonly<{
       failure: "target-moved"
       contractId: ContractId
@@ -366,58 +379,19 @@ or amend. Small overlaps may proceed under Git's optimistic model and be
 resolved manually or by a delegated worker; logical dependency or unsafe
 large interaction is represented explicitly with `after`.
 
-The Region report remains a library-edge observation. It is not passed to
-protocol, core, or Git, and it never crosses those layers as Region
-vocabulary. After admission, the library makes one internal protocol document
-read. That read observes Git once, folds every contract, filters
-terminal contracts, and returns only `{ contract, documentBytes }`; it neither
-decodes a document nor names Region. The library removes self, decodes the
-opaque peer bytes through the same body methodology, and computes overlap at
-the edge. It never imports Git directly, loops over per-contract `state()`
-reads, reuses an admission receipt as a world snapshot, or caches or persists a
-second Region value.
-
 Kanshi's optional read-time Region section is separate from this mutation-time
 snapshot. It exposes the three-arm `RegionRead` union selected by
 `KanshiInput.region`, including the same `RegionOverlap` shape exported here;
 it carries declarations only and never actual touched paths or Git conflicts.
 
-`amend` exposes `terms-moved` when any source `ContractTerms` value used to
-derive its complete replacement no longer matches the attempt observation.
-`deliver` and audit's read-only methodology selection expose
-`DocumentMovedRefusal` for their key-stamped document derivation. Review receives no decoded-document
-derivation and does not expose `document-moved`; its testimony remains keyed to
-the subject actually reviewed. `KeiyakuRefusal` therefore includes
-`terms-moved` for amend and `DocumentMovedRefusal` for deliver and audit.
-It also includes `DirtyWorkspaceRefusal` when delivery lacks explicit
-dirty authorization, when dirty submodule internals cannot be sealed or
-observed, or when conflict materialization finds a dirty appointed workspace,
-including when `includeDirty` is also supplied. Existing Git merge state
-during materialization is `MergeStatePresentRefusal`. Ordinary dirty review is
-accepted and returns a `workspace`
-disclosure instead of a refusal. One path may appear in both staged and
-unstaged arrays when the index and worktree each differ. `shortStat` describes
-the complete final tree relative to `HEAD`; binary entries count as changed
-files with zero textual insertions/deletions. These refusals end the
-invocation; they do not trigger a reread, auto-retry, or adoption of a new
-document revision.
+`terms-moved` identifies an amend whose source terms changed. Deliver and audit
+use `DocumentMovedRefusal` for a moved stamped document; review has no such
+refusal. Delivery also exposes the typed dirty, unmerged, merge-state, target,
+and workspace refusals defined above. Ordinary dirty review is accepted with a
+workspace disclosure, and these refusals never reread or adopt a new revision.
 
-`UnmergedPathsRefusal` is the delivery and audit refusal for a real index with
-unmerged entries. Its `paths` are Git-reported sorted unique complete paths;
-it applies with or without `includeDirty`, before candidate or Verification
-work. A resolved `MERGE_HEAD` remains ordinary dirty authorization: with
-`includeDirty`, its tender snapshot has workspace `HEAD` then `MERGE_HEAD` as
-its ordered parents.
-
-`TargetInputRefusal` is the `KeiyakuRefusal` member for `Keiyaku.bind` target
-validation and existence. It has no contract coordinate because a rejected
-target establishes no contract identity.
-
-Every accepted `AmendResult` includes its nonoptional `documentDiff`. The
-library computes it exactly once with the JavaScript `diff` package from the
-exact whole-document before and after bytes. It is presentation data only: it
-is not document-body law, a journal fact, a receipt, cache state, or a gate
-input, and it does not cross below the library boundary.
+Every accepted `AmendResult` includes its nonoptional `documentDiff`, which is
+presentation data only and does not enter journal, gate, or core state.
 
 `deliver` may return `IntegrationConflictMaterialized` instead of a
 `MutationResult`. That value is the public conflict-handoff result: it has no
@@ -435,9 +409,6 @@ Verification declaration applied. An unsatisfied terminal Verification may
 also carry its existing bounded `verificationSummary`, including when a gate
 stop leaves placement incomplete. Package-root results expose no `Receipt`,
 `prior`, or folded `snapshot`.
-Protocol may retain prior and snapshot values while composing one invocation,
-but they are process-local implementation data with no public or persistent
-reader.
 
 An accepted deliver or review carries `continuation` only when its successful
 placement selects at least one retained dependent. `claimed` and `stopped`
@@ -461,12 +432,10 @@ worktree-content ChangeId, while integration coordinates remain placement
 topology. The obligations are independent and both channels may be present on
 one Delivery. A channel is absent exactly when its obligation was not applicable
 or admitted its fact; callers distinguish those cases through `facts`. These
-values remain process-local and non-authoritative;
-the journal is the sole lifecycle authority. `environment-failure` identifies
-candidate provisioning, never a Verification verdict; `candidate-unavailable`
-identifies materialization failure; `unknown-exit`, `spawn-error`, and admission
-stops remain execution/admission stops. A declaration-owned timeout instead
-admits an unsatisfied attestation and therefore has no stop arm.
+values remain process-local and non-authoritative; the journal is the sole
+lifecycle authority. Environment, candidate, execution, and admission failures
+remain typed stops. A declaration-owned timeout admits an unsatisfied
+attestation rather than a stop.
 
 `prerequisites-unsatisfied` carries a nonempty `unmet` collection exactly as
 projected by the placement decision. Its rows retain declared prerequisite
@@ -475,50 +444,21 @@ category; claimed prerequisites do not appear. Protocol, Library, JSON, and
 text consume that same public value without another authority read or lifecycle
 derivation.
 
-`KeiyakuRefused` stores the complete structured `KeiyakuRefusal`; its `code`
-getter derives from `refusal.kind`. `KeiyakuRetry` does the same for
-`KeiyakuRetryReason`. The getters are not second stored discriminants. Callers
-can switch exhaustively on `code` and inspect the structured value when the
-refusal carries a contract coordinate or the retry carries a diagnostic.
-Programmer value-shape errors and authority corruption retain their distinct
-exception types.
+`KeiyakuRefused` and `KeiyakuRetry` retain the complete structured value and
+derive their machine code from its discriminant. They are reserved for
+invocations that admitted no fact; post-admission physical and settlement
+failures remain typed lags on the successful result.
 
-`KeiyakuRefused` and `KeiyakuRetry` remain reserved for invocations that
-admitted no fact. Recoverable post-admission physical and settlement failures
-are visible in the successful result's typed lags. The facade never abandons
-an admitted Contract as error recovery.
-
-Placement's `target-placement-failed` stop includes a bounded diagnostic for a
-failed Git custody observation or target-fence command. It is a pre-publication
-mechanical failure, so the target ref, checkout, and claimed fact remain
-untouched; it is not an ignored-collision refusal and it is never interpreted
-from Git stderr prose by the lifecycle layer.
-
-Retry details are process-local and non-authoritative. Exhaustion and canonical
-entry collisions carry no admission, contract, journal, or byte payload. A
-known failed atomic transaction carries only `publication-failed` and its
-verbatim diagnostic. It does not claim which asserted ref moved; a later
-invocation prepares from a fresh observation.
-
-Result identity has one source. A successful bind names the born Contract only
-through `keiyaku` and its facts; later mutation results address the handle the
-caller already owns. A refusal carries a contract identity only when its
-structured refusal concerns an existing contract. A retry never carries
-contract identity: it asserts that no new identity was established, and
-retrying bind mints a new identity. Adapters keep their addressed input instead
-of mining another coordinate from an error.
-
-Library owns bind identity allocation. Four `contract-exists` admissions return
-the last typed Protocol refusal; the package root throws `KeiyakuRefused` with
-that same refusal. Identity exhaustion is not `KeiyakuRetry` and does not use
-the `exhausted` retry reason.
+Placement failures remain pre-publication typed stops, and retry details remain
+non-authoritative. A retry never carries a newly established Contract identity;
+bind identity allocation stays at the library boundary.
 
 Read-only `ContractWorkspaceObservation` is owned by
 [public-api.md](public-api.md); this mutation-results chapter defines no
 second read-result shape.
 
 ```ts
-type AuditWorkspace = Readonly<{ kind: "worktree"; path: string }>
+type AuditWorkspace = Readonly<{ kind: "worktree" | "here"; path: string }>
 type DiffScope = Readonly<{
   filesChanged: number
   insertions: number

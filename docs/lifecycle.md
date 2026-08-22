@@ -7,16 +7,9 @@ library edge by [document.md](document.md).
 
 ## Lifecycle
 
-The folded lifecycle is:
-
-```text
-no journal -> waiting -> bound -> tendered -> claimed
-                      \-> abandoned
-```
-
-`claimed` and `abandoned` are terminal. The phase is a derived read model over
-facts, never another persisted authority. A nonterminal Contract with a current
-delivery is `tendered`.
+The folded lifecycle is `no journal -> waiting -> bound -> pending delivery ->
+claimed | abandoned`. The terminal phase is a derived read model, never another
+persisted authority.
 
 A bind records immutable coordinates and the initial opaque contract terms. It
 does not admit `bound`; the contract waits for the first operation whose fact
@@ -65,65 +58,20 @@ last integration snapshot, freshly observed target (or `null` when the ref
 disappeared), and numeric attempt count.
 Audit never invokes placement.
 
-For a targeted offer, Git's checked-out-target preconditions are part of that
-same placement attempt. `checkout-not-followable` is a typed mechanical
-refusal from the target fence, not a lifecycle judgment or post-admission lag.
-It admits no `claimed` fact and moves no target ref. A completed targeted
-placement returns its checkout effects with the accepted step. Once the atomic
-ref transaction is accepted it cannot be reinterpreted as a refusal: a follow
-failure is returned as the recoverable physical lag defined by
-[git-reconciliation.md](git-reconciliation.md), and process death can leave
-that same recovery shape.
+Git owns target followability. Its mechanical stops cannot publish, become
+claimed, or change eligibility; failed follow is recoverable lag under
+[git-reconciliation.md](git-reconciliation.md), never reversed admission.
 
-Git owns checkout followability and ignored-byte custody. Its mechanical
-`target-placement-failed` stop cannot publish, become claimed, or change
-lifecycle eligibility.
+`deliver` records the Git-owned candidate and frozen-policy identity; a later
+tender replaces it. Current `verified` testimony for that delivery and
+Verification segment is reused, whether satisfied or unsatisfied; otherwise
+Verification runs. Placement consumes generic current gate evidence.
 
-`deliver` tenders the selected worktree content and records the Git-owned
-snapshot, integration, ChangeId, squash, and frozen-policy identity. A later
-tender replaces the current delivery. After admission, current `verified`
-testimony for that exact delivery and Verification segment is reused, whether
-satisfied or unsatisfied; otherwise Verification runs. Placement consumes only
-generic current gate evidence. Git owns preparation details.
-
-`deliver` accepts one boolean `materializeConflict`; omission is false. The
-flag is consulted only after the one Git integration judge returns
-`reason: "conflict"`. A non-conflicting placement ignores it, and the ordinary
-accepted delivery is equivalent to omission. Plain conflict is observation-only:
-it returns typed `integration-failed` with the judged `targetHead`, ordered
-`conflictPaths`, and
-
-```ts
-recovery: { materialize: "deliver --materialize-conflict", continue: "deliver" }
-```
-
-and changes no workspace bytes, journal, pins, refs, or lifecycle phase. With
-the flag, the same preparation and judge run first; on conflict, a clean
-appointed workspace with no Git merge state receives `git merge --no-commit`
-of that judged `targetHead` and returns `integration-conflict-materialized`.
-That result is not an accepted mutation: it admits no deliver fact, mints no
-candidate, and leaves the Contract `tendered`. Delivery first reads the
-appointed workspace's real index: any unmerged entry refuses as
-`unmerged-paths`, with its sorted unique complete paths, regardless of
-`includeDirty`. Once every path is resolved and staged, the existing dirty
-authorization applies even when the resolved tree equals `HEAD`: plain
-delivery returns `dirty-workspace`, while `includeDirty` captures the tree and
-materializes a tender whose ordered parents are workspace `HEAD` then
-`MERGE_HEAD`. Continuation after a native resolve-and-commit remains plain
-`deliver`.
-
-An authenticated Akuma `contract.deliver` is the same Contract operation at a
-different process boundary: the claim preserves the caller-selected Repo as
-its normalized primary-worktree coordinate, and the direct parent reconstructs
-that Repo, supplies the requester as actor, reads Settings scoped to it for
-policy and hooks, and calls the same local executor. The request claim also
-carries only the complete ContractId, optional message, `includeDirty`, and
-`materializeConflict`; it creates no second delivery authority. Its Heart
-reference is the Repo coordinate, ContractId, and accepted delivery fact id.
-Materialization stores no accepted delivery reference. The live exchange
-retains the normal accepted, refusal, retry, materialized, and trailing
-projections; later pumps retain only that accepted reference and never infer
-or replay a delivery.
+`deliver` may request conflict materialization. A plain conflict is the typed
+`integration-failed` refusal and changes no authority; materialization projects
+the judged conflict into the appointed workspace, admits no delivery fact, and
+leaves the Contract pending. Unmerged entries refuse as `unmerged-paths`.
+Akuma delivery forwarding creates no second delivery authority.
 
 `review` is a contract operation and may record testimony before any `deliver`.
 Git captures its subject as the document key projected by the decision
@@ -145,16 +93,8 @@ a second delivery fact. An unsatisfied review records the same subject and
 judgment but never requests placement. Optional `summary` is opaque testimony
 and does not participate in a gate.
 
-An authenticated Akuma `contract.review` is the same independent Contract
-operation at a different process boundary. Its claim preserves the selected
-Repo's normalized primary-worktree coordinate, complete ContractId, verdict,
-and optional summary; the direct parent reconstructs that Repo, supplies the
-requester as actor, reads only that Repo's Settings for worktree hooks, and
-calls the same forced-local review executor. Heart retains only the Repo
-coordinate, ContractId, and owner-minted attestation fact id. The live exchange
-retains the complete normal review mutation result. Later pumps project that
-accepted reference only; they never inspect or replay review state. Permission
-is separately keyed as `contract.review` and grants no delivery authority.
+Akuma review forwarding is independently permission-keyed and grants no
+delivery authority.
 
 `abandon` admits one `abandoned` terminal fact with `{ note? }`. Optional
 `note` remains opaque testimony rather than a gate input. The decision neither
@@ -179,14 +119,6 @@ is absent and readers use the effective contract terms.
 The first admitted arc has `seq = 1`; every later arc increments it exactly by
 one. The newest arc is `ContractState.currentArc`. Arc is legal before a
 terminal fact and otherwise receives a typed refusal.
-
-## Fork Bind
-
-Fork bind constructs a new ordinary Contract, not a lifecycle edge. It copies a
-source's current folded document, declared gates, and ordered `after`
-coordinates, retaining no delivery, testimony, terminal, TaskHolder, or source
-relation. Active and abandoned sources are admissible when folded state and
-recorded start are observable. Later source mutations cannot affect the fork.
 
 ## Gates And Attestations
 

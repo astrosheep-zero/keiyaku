@@ -353,57 +353,17 @@ keiyaku.reconcile(input?: ReconcileInput): Promise<ReconcileReport>
 delivery.diff(): Promise<string | null>
 ```
 
-`deliver` uses a clean-workspace default. `includeDirty: true` explicitly
-authorizes the complete non-ignored staged, unstaged, and untracked final tree;
-it does not select only staged paths and never includes dirty submodule
-internals. Omission and `false` are identical. Git performs the capture without
-changing the caller's real `HEAD`, index, branch, or files. `materializeConflict`
-is a separate boolean whose omission is false. It is consulted only after the
-one integration judge returns `reason: "conflict"`; a non-conflicting placement
-is equivalent to omission. On conflict, omission returns the typed
-`integration-failed` refusal with recovery values. `true` materializes that
-already-judged conflict in the appointed workspace and returns
-`IntegrationConflictMaterialized` rather than a mutation result. Materialization
-does not honor `includeDirty`. Audit receives the
-same clean-worktree default and the same `includeDirty` authorization. It does
-not accept a custom commit message or `materializeConflict`. `showDiff: true` asks the accepted audit
-result to carry the prospective predecessor-to-candidate `diff` and `scope.paths`;
-omission leaves those bytes off the report. An explicitly requested empty
-string remains visible.
+`deliver` and `audit` default to a clean workspace; `includeDirty` authorizes
+the complete non-ignored final tree, not a staged-path selection. Omission is
+the same as `false`. `materializeConflict` is false by default and can return
+`IntegrationConflictMaterialized`; its conflict and recovery rules belong to
+[lifecycle.md](lifecycle.md). Audit has no message or materialization input;
+`showDiff` includes the requested candidate diff and scope, including `""`.
+Akuma forwarding and Verification retain their owning protocol boundaries.
 
-When an Akuma request channel is present, `deliver` forwards the pinned
-Repo's normalized primary-worktree coordinate, its complete ContractId,
-optional message, `includeDirty`, and `materializeConflict` to the direct parent. The parent
-reconstructs that Repo instead of substituting its own World, supplies the
-requester actor, and reads Settings scoped to the selected Repo for Git policy
-and hooks; caller-provided actor, policy, and hooks do not cross the boundary.
-The parent invokes the same local executor as ordinary delivery, and the live
-exchange returns the ordinary mutation, refusal, retry, or materialized result.
-Heart persists only the Repo
-coordinate, ContractId, and accepted delivery fact id; materialization stores
-no accepted delivery reference. A later pump projects
-that typed reference for the same request id without reconstructing live
-trailing channels. No second delivery result or automatic multi-hop route
-exists.
-
-When a delivery or audit runs Verification, the library materializes the
-integration snapshot into a private scratch worktree and derives its worktree
-commands from that snapshot's tracked project Settings. Caller Settings and
-`node_modules` are not public inputs to this operation. An environment that
-cannot become ready returns the typed Verification stop from
-[public-results.md](public-results.md) and admits no attestation; declaration
-timeouts are instead unsatisfied attestation facts. Caller cancellation is a
-nonterminal stop and admits no attestation.
-
-`state()` and `guidance()` observe and fold afresh for each call. `guidance()`
-returns the canonical derived bytes owned by [workspace.md](workspace.md).
-`history()` reads the selected journal and matching Dispatch facts from one
-`keiyaku-state` observation. It needs no WorldRoot or Akuma Settings; static
-`Keiyaku.history` remains the Akuma operation. Missing Contract is the existing
-refusal, and corruption in either authority fails the read. Events preserve
-their exact facts and use the deterministic, non-causal recorded-time ordering
-owned by [model.md](model.md). There is no cursor, parallel source collection,
-or persisted merge.
+`state()` and `guidance()` observe and fold afresh. `history()` returns typed
+journal and Dispatch events from one observation; its ordering and failures are
+owned by [model.md](model.md).
 
 ```ts
 type ContractHistoryEvent =
@@ -421,60 +381,18 @@ Worktree paths are projected
 by `status()` for selectors and board views; a contract handle has no duplicate
 path getter.
 
-`amend` takes an optional H2 operation document. At least one of `markdown`,
-`after`, or `gates` must be present; otherwise the Library throws `TypeError`
-before observation or admission. `actor` and `hooks` do not count as a change.
-When `markdown` is present, the H2 grammar, validation, ordered application,
-rendering, retries, and document-diff behavior remain as owned by
-[document.md](document.md). When it is absent, the current `document` and
-`segments` are copied unchanged and only supplied `after` or `gates` replace
-their current values; omitted structured terms retain their current values,
-explicit empty arrays remain valid replacements, and `documentDiff` is `""`.
-`arc` takes an arc document. Their input grammars are owned by
-[document.md](document.md). `deliver`, `review`,
-`abandon`, and `audit` apply the lifecycle rules in
-[lifecycle.md](lifecycle.md). `reconcile` requests the Git operation
-defined in [git-reconciliation.md](git-reconciliation.md). `ReconcileReport`
-is that chapter's exact `ReconcileResult`, including its flat cleanup lag.
-`Repo.reconcile` returns that chapter's `RepoReconcileReport` union: a
-completed world, including an empty Contract list, or
-`world-observation-failed` before any ContractId exists. This chapter does
-not define a second result shape.
+`amend` requires `markdown`, `after`, or `gates`; its grammar and document diff
+belong to [document.md](document.md). Omitted terms remain unchanged and empty
+arrays replace theirs. Lifecycle operations use [lifecycle.md](lifecycle.md),
+and reconciliation uses [git-reconciliation.md](git-reconciliation.md).
 
-Every accepted mutation makes one mandatory reconciliation attempt with the
-supplied `hooks`, if any. Omitting them means empty commands only when Git must
-freeze a marker for a worktree that has no marker; it never replaces commands
-already frozen in that marker. `retryHooks` exists only on explicit reconcile,
-is a boolean programmer input, and retries a stored failed phase with its
-frozen commands. No mutation input carries `retryHooks`, so an ordinary later
-mutation cannot silently retry a failed external command.
+`review` does not require a Delivery and records its `reviewed` testimony before
+trailing placement. Dirty-workspace disclosure is not testimony or delivery
+authorization. Its Akuma permission is independent of `contract.deliver`.
 
-`review` is a contract operation. It does not require a Delivery handle or an
-existing delivery fact. Its subject is the current worktree-content ChangeId
-and the document key projected by its lifecycle observation. Review admits that
-attestation before any trailing placement. It receives no decoded-document
-derivation. It records the owned `reviewed` testimony even when that token is
-absent from `terms.gates`. If the observed worktree includes ordinary dirty
-workspace bytes, `Review` exposes a `workspace` disclosure with staged,
-unstaged, untracked, and `shortStat` fields; that disclosure is not testimony
-and does not authorize delivery.
-
-When `AKUMA_REQUESTS` identifies a declared provider drive, `review` preserves
-the selected Repo's normalized primary-worktree coordinate, existing verdict
-and summary inputs, and existing mutation result through one direct-parent
-request. The requester is the actor; caller actor, Settings, hooks, callbacks,
-and unresolved selectors do not cross the channel. The parent reconstructs the
-selected Repo and uses its scoped Settings for worktree hooks before entering
-the same forced-local review executor used by ordinary `KeiyakuHandle.review()`.
-`contract.review` is independently permission-keyed from `contract.deliver`.
-
-`delivery()` freshly observes the journal and returns the most recent tender.
-It returns `null` only when the contract has never tendered. A returned
-Delivery exposes the tender snapshot and the complete integration identity;
-`deliver()` and `delivery()` are its two birth paths. A Delivery has no review
-operation. `message` overrides only a mechanically materialized commit message;
-it replaces the subject, while the current Contract Markdown and final Contract
-trailer remain present. Omitting it uses the Git template in [git.md](git.md).
+`delivery()` freshly returns the most recent tender or `null`. A Delivery exposes
+its tender and integration identities, has no review operation, and uses the
+Git-owned message template when `message` is omitted.
 
 ## Delivery Diff
 

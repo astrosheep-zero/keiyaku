@@ -98,47 +98,10 @@ exits 0 for `told`, `pursuing`, and `held`, and 2 for `failed`; JSON remains the
 typed result. When pending Tell rows exist without a live Body, shared Akuma
 text adds `pending <N> tells · no live body`.
 
-Text surfaces share a small scanner grammar, not a shared layout. Renderer words
-are lowercase; `·` separates facts on a summary line; evidence is indented by
-two spaces; a glyph is paired with its word; and a complete coordinate remains
-copyable and is never truncated. Confirmed absence has no placeholder row, while
-an observed empty collection is represented by its honest zero. Numeric counts
-and ages align to the right when a surface uses columns. These rules are
-presentation laws only: they do not add facts to JSON, journal authority, or
-read models.
+Text uses lowercase words, `·` fact separators, indented evidence, complete
+coordinates, and honest empty results; these presentation rules add no facts.
 
-Kanshi alone derives compact age text from each row's source timestamp and the
-report's one `observedAt`. It floors nonnegative elapsed time to `Ns` below one
-minute, `Nm` below one hour, `Nh` below one day, and `Nd` thereafter; a later
-source is `future` and lawful absence is `—`. Contract phase is
-`<phase> · <age>` before target facts, and born Akuma life is `<life> · <age>`.
-Selected Contract gates retain `[✓]|[✗]|[~]|[ ] <gate> <age>` detail; world-board
-and catalog gates are age-less and use the same bracketed glyphs. JSON retains
-the source timestamps and never contains the derived age. JSON retains complete
-Git object IDs; text may use unique Git prefixes, minimum 7 and lengthened as
-required, only for `state`, tender snapshot, integration predecessor/snapshot,
-target HEAD, and merge head.
-
-`keiyaku ls kei/` is one flat continuous Contract stream: a compact gate legend,
-complete `kei/<id>` identities, declared gates, after/dependent topology, and
-workspace merge facts, with no sections, table alignment, or World joins.
-World status primarily renders `blocked by kei/<id> (<condition>)`. Selected
-status renders complete after edges in terms order, lexical active dependents,
-merge-head expansion with zero or all paths, and selected-only
-`lag (observed now):`. A claimed after endpoint is `after kei/<id> (claimed)`.
-Do not render unlocks or waited by.
-
-Bare Kanshi text begins with its first section and uses KEIYAKU, FLEET, TASK in
-that order. Each section has a `[ <SECTION> ]  <N> live` header, at most ten
-hot-first live rows, and an exact complete or partial footer owned by
-[kanshi.md](kanshi.md). It has no aggregate signature, cwd, state coordinate,
-or status presentation flag. `--json` retains the complete typed report; the
-`keiyaku ls kei/`, `keiyaku ls aku/`, and `keiyaku ls task/` catalogs are the
-complete text inspection paths. FLEET remains only a section name, never a
-count unit. Other commands start with their operation identity and do not
-receive a banner.
-
-Every invocation renders exactly one final plain result object on stdout:
+Final plain results are:
 
 | Kind | Product content | Exit |
 | --- | --- | --- |
@@ -170,8 +133,6 @@ character ruler, and its exact answer, followed by its `tasks` and
 `$ keiyaku -C <world> wait <@alias|AkuId> --timeout 5m`, using the successful
 Alias or complete AkuId and canonical World; failure adds no command or life.
 `said` and `thought` occupy at most two terminal lines with visible clipping.
-Text never changes the public JSON value.
-
 Akuma life words are rendered from the public union. Running text is exactly
 `● STILL RUNNING`; other words keep their public spellings. `hung` means the
 latest Body durably recorded provider custody that did not retire; a public
@@ -180,77 +141,16 @@ free but the latest Body has no explicit end. Both use the conservative `?`
 mark. Mutation renderers preserve `hung`, `untidy`, and `unavailable` evidence
 and return failure status without inventing an external termination attempt.
 
-Snapshot omission is positional: every typed snapshot gap renders as
-`      ⋮ N omitted` at its actual break between visible rows, with the vertical
-ellipsis in the glyph column, and the gap counts sum to the typed `omitted`
-total. History retains its own cursor and loss metadata and does not
-reinterpret snapshot gaps. Text is clipped by terminal display width without
-splitting grapheme clusters. A `run` command remains one row and preserves
-recognizable head and tail when clipped; the completed outcome is omitted
-before the command subject is lost. A cue and ellipsis alone are not a
-subject. Every timeline rendered line fits the requested display width. Mutation
-receipt opaque tokens may physically exceed it when indivisibility requires.
-Display-only transport unwrapping does not change persisted command
-bytes or timeline layout. The five-column gutter prints `HH:MM` on the first
-visible event and when its displayed minute changes; otherwise it stays blank.
-One space follows the gutter, then the semantic glyph, one space, then a fixed
-verb field sufficient for `say`, `think`, `note`, `tell`, and tool labels; body
-text begins at one stable column. Say, think, tell, and answered-outcome bodies
-are wrapped in `U+201C`/`U+201D`; tool, note, call, and error bodies are not.
-A wrapped body line places a vertical bar in the glyph column and aligns its
-body with the first line's body. Event glyphs
-remain: ordinary voice, note, and told rows use `│`, completed success uses
-`✓`, completed failure uses `!`, active tool uses `⧖`, pending tell uses `⧗`,
-unsettled tool uses `?`, and continuation uses `│`. There is no aggregate
-omission token on the first row, standalone minute divider, second rule
-between relation and activity, or changed snapshot selection. One `fileChange`
-with one `unspecified` change renders as `edit` with its path.
+Snapshot gaps remain positional (`⋮ N omitted`) and history keeps its own loss
+metadata. Timeline text fits the requested width without splitting graphemes;
+opaque receipt coordinates remain complete even when they overflow. Gutter,
+glyph, wrapping, and life vocabulary are presentation rules; JSON and persisted
+bytes are unchanged.
 
-```text
-aku/expert-akuma/5659b10d (@expert)
-────────────
-└─ kei/make-non-git-runtime-observation-honestly-async
-      ⋮ 171 omitted
-14:36 │ say    “I’m editing the architecture allowlist to mirror the completed-”
-      │        “migration: synchronous filesystem authority remains only in the two documented…”
-      ⋮ 17 omitted
-14:46 │ think  “The migrated Heart and Body slices now pass except one real-”
-      │        “async race exposed by the new boundary…”
-14:47 ✓ run    $ npm run test:focused — ok
-      ! run    $ npm test — failed
-      ⋮ 11 omitted
-14:49 ✓ run    $ npm test — ok
-      ⧗ tell   “Please also inspect the termination path.”
-14:50 ⧖ run    $ npm run test:focused
-tasks 2
-  ● task/repair-maintainability-limit · Repair maintainability parameter limit · in_progress · P0
-  ‖ task/restore-nuke-fixture · Restore Nuke fixture API · blocked · P1
-changes 15
-  +3 -2    /tmp/keiyaku-integration.uAA0a9/repo/tests/nuke.test.ts
-  +15 -10  /Users/astrosheep/Developer/keiyaku-v4/.git/keiyaku/wt/valhalla/src/cli/invoke.ts
-  +10 -10  /tmp/keiyaku-integration.uAA0a9/repo/src/cli/invoke.ts
-  ⋮ 10 earlier changes
-
-● STILL RUNNING
-```
-
-The identity and optional alias occupy the first line. The next line is a
-fixed twelve-character `U+2500` ruler; it marks the boundary
-between identity and the rest of the snapshot. When a Contract is associated,
-its complete `kei/...` coordinate follows on the separate hanging relation line
-beginning with `U+2514` and `U+2500`; an unassociated Akuma omits that line.
-Identity rows never contain current life.
-Activity follows the identity and optional relation directly, keeping typed
-gaps in persisted order. Created Task context, when supplied, follows the
-timeline after one blank line; the reported-change block follows Tasks. A
-plural answered wait member places the same two context blocks after one blank
-line following its exact answer. Status, wait, unfinished
-observed call, and kill then place life last: one blank line, then a top-level
-life line. Ordinary and interrupt tell output and history omit life. Tell,
-interrupt, and kill omit the created-Task and reported-change blocks beneath
-the timeline; status, wait, and call retain them. Running
-life is exactly `● STILL RUNNING`; an asleep Akuma renders as `✓ came back`,
-`× killed`, `? stranded`, `? hung`, and `? untidy`.
+Identity and relation precede activity. Created Task context and reported
+changes follow the timeline; life is last where observed. Exact-answer reads
+remain raw. Running life is `● STILL RUNNING`; other public life words remain
+unchanged.
 
 A present created Task observation renders:
 
@@ -259,15 +159,11 @@ tasks <N>
   <mark> <complete TaskId> · <title> · <disposition> · P<n>
 ```
 
-Each Task is one logical row indented two spaces: existing disposition mark,
-complete TaskId, title, disposition, and priority. Titles may wrap with a
-four-space continuation. Complete TaskIds never truncate. The renderer invents
-no Contract relation, `unbound` word, or blocker line. Zero matches render
-`tasks 0`; failure renders `! tasks failed <diagnostic>`. Absent Task context
-adds no block.
+Each Task row retains its complete identity, title, disposition, and priority;
+zero and failed observations render their typed empty or failure forms.
 
-Reported changes keep the typed operation count `shown + omitted` and group
-visible operations by exact path in first-visible order:
+Reported changes keep the typed operation count and group visible operations by
+exact path in first-visible order:
 
 ```text
 changes <N>
@@ -275,77 +171,29 @@ changes <N>
   ⋮ N earlier changes
 ```
 
-Statistics form a fixed left column. Complete grouped diffstats sum to `+N -N`;
-any missing diffstat in the group renders `+? -?`. Paths are never truncated
-and may exceed the terminal width. The omitted line stays indented two spaces
-and keeps the typed `reportedChangesOmitted` value. JSON and the public
-snapshot retain every repeated operation; aggregation is text-only. Empty
-summaries print `changes 0`. Neither block consumes the timeline budget. Raw
-answered wait/call, history, and compact FLEET remain unchanged. Renderers
-perform no Task, Heart, or Dispatch lookup. JSON values, timeline semantics,
-and history model remain unchanged.
+Paths remain complete, missing stats use `+? -?`, and JSON retains every
+repeated operation. Empty summaries print `changes 0`; these blocks do not
+consume the timeline budget.
 
-Post-admission physical or settlement failures remain inside the accepted
-object as typed lags. Text and JSON expose them without changing the Contract
-fact, command kind, or exit status. The adapter never hides the existing
-Contract or automatically abandons it.
+Post-admission physical or settlement failures remain typed lags and do not
+change the Contract fact, command kind, or exit status.
 
-Accepted Contract mutation results are one flat closed union discriminated by
-`bind`, `amend`, `deliver`, `review`, `arc`, `abandon`, and `audit`; reconcile
-remains an observation. The common envelope carries `kind`, `verb`, `contract`,
-non-null `head`, `facts`, `effects`, `settlement`, and optional nonempty `lag`.
-Verb fields remain flat: bind
-requires `target` and exactly one Region answer (`overlaps` or
-`overlapFailure`); amend requires `diff`, including the empty string, and
-exactly one of three exclusive Region shapes: neither Region property,
-`overlaps`, or `overlapFailure`; deliver and review may carry the same optional
-`completion`, `verification`, `verificationReuse`, `verificationSummary`,
-`placement`, `continuation`, `cleanup`, and `leak` fields, while review additionally carries
-its `verdict` and optional `workspace`; arc and abandon carry no
-verb-specific field; audit requires `report` and alone may carry its
-top-level `cleanup` and `leak`. An arm cannot carry another arm's fields.
-JSON remains that same flat value; there is no payload envelope, second
-schema, or compatibility arm.
+Accepted Contract mutation results remain one flat typed value per verb, with
+their public fields and lag facts preserved. Reconcile remains an observation;
+there is no payload envelope, second schema, or compatibility arm.
 
 The renderer is a pure exhaustive projection over `InvocationResult`; it
 invents no fields, rereads no authority, and does not change exit semantics.
 JSON serializes that same public value.
 
-Accepted deliver and review results may carry the typed final `completion`:
-`{ integration: SnapshotId, verification?: { mode: "ran" | "reused", verdict:
-"satisfied" | "unsatisfied" } }`. It exists only for an accepted placement;
-the nested Verification is absent when no declaration applied. The renderer
-projects this value directly and never reconstructs a target from facts or
-folded state.
+Deliver and review project typed `completion` directly: its integration and
+optional Verification verdict determine the target line. Movement is one
+neutral deviation; unsatisfied Verification and dependent continuation stops
+remain visible with their typed summaries. No target or state is reconstructed.
 
-When accepted facts contain `reintegrated`, delivery and review text show one
-neutral `~ target moved · re-integrated x<N>` deviation, where N is the count
-of those facts. The final target line is projected only from `completion` and
-includes `· verified (ran|reused)` only for a satisfied nested Verification;
-no-declaration completion has no `verified` word, while an unsatisfied nested
-Verification adds `! verification unsatisfied (ran|reused)` and its existing
-bounded summary when present. Every `reintegrated` journal row retains
-`predecessor -> snapshot`. A repeated movement stop shows its integrated
-snapshot, observed target, and numeric attempts; the renderer does not infer
-these values from history.
-
-When `continuation` is present, deliver and review text project one concise row
-for every reported dependent without rereading Contract state. Claimed members
-render `✓ continuation complete <ContractId>`. Stopped members render
-`! continuation blocked <ContractId> · <typed stop summary>`. The complete
-structured stop remains in the same JSON value. Absence renders no continuation
-heading or zero row.
-
-An accepted mutation receipt answers the caller's verb-specific question, not
-whether Protocol admitted an entry. Its first line names the world change made
-by that verb and the Contract identity. Decision-relevant consequences follow;
-the exact mechanical record is last. The renderer uses only typed fields on the
-invocation result. It never rereads authority, parses prose, or infers state
-from a missing effect.
-
-A fork bind uses the ordinary bind receipt and JSON shape. Renderers name only
-the new complete ContractId and ordinary bind fields; they never expose or
-infer a source, lineage, or comparison relation.
+An accepted receipt answers its verb-specific question: identity and
+decision-relevant consequences precede the mechanical record. Rendering uses
+typed invocation fields only and never rereads authority.
 
 ```text
 ✓ bound — <complete kei/...>
@@ -414,20 +262,9 @@ Abandon reports its optional note and only the explicit workspace and recovery
 snapshot effects that occurred. Audit reports candidate, Verification, and
 target observations without describing the candidate as accepted or approved.
 
-The primary UI does not use `accepted`, `admitted`, `recorded` as an admission
-synonym, `placement`, `claim`, `stopped`, `mutation`, or an internal result-arm
-name. Journal kinds retain their exact names only inside the record. The clear
-domain words `verification`, `target`, `workspace`, `testimony`, `terms`, and
-`candidate` remain available. Refused and retry glyphs and exit semantics do not
-change.
-
-The record contains every admitted fact identity, head, Git effect, settlement
-action and lag. Fact data needed by the first screen is projected into a named
-verb field: bind workspace, deliver and review attestation verdict, arc sequence
-and title, and abandon note. Shared facts remain identity-only; the adapter does
-not expose a generic JournalEntry-data dump. Changed effects precede unchanged
-confirmations. Audit text shows admitted testimony but does not fall through to
-unrelated reconciliation effects or settlement actions.
+The primary UI uses caller-facing domain words; internal journal and result-arm
+names remain confined to the record. Records show typed decision-relevant facts
+in order, without rereading reconciliation or settlement.
 
 An abandonment recovery effect renders
 `✓ recovery-snapshot created <SnapshotId> ephemeral`. The word `ephemeral` is
@@ -513,20 +350,10 @@ internals still refuse before review admission. The same shortstat wording is
 used in dirty-workspace refused text. Neither surface uses `files=`,
 `insertions=`, `deletions=`, or invented porcelain XY codes.
 
-The glyph column is the only lightweight grouping: `!` is an unresolved
-obligation, `~` is a neutral deviation, and record rows keep their existing
-low-weight, changed, and unchanged marks. There are no section headings or
-decorative blank-line groups.
-
-Each stop is independent: Verification never suppresses the placement attempt,
-and one accepted invocation may render both a `! verification` row and a
-`! claim` row. An environment
-failure keeps its command index and typed command failure in the obligation row.
-A declaration timeout is an unsatisfied attestation fact, not a stop. A failed
-scratch destroy command renders as an unresolved cleanup obligation without
-claiming that the worktree remains. A leak row reports a disposable Verification
-worktree that could not be removed after admission; it does not change the
-accepted exit status and is not a repair command.
+Glyphs distinguish obligations (`!`), neutral deviations (`~`), and ordinary
+record rows. Verification, cleanup, and environment stops remain independent
+typed evidence and do not change an accepted exit status unless their public
+result says so.
 Region reads render as follows:
 
 ```text
