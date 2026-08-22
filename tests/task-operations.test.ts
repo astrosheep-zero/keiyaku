@@ -134,9 +134,27 @@ test("lifecycle, readiness, blocked projection, update diff, and batch results c
     assert.match(updated.value.documentDiff, /Dependent renamed/u);
     assert.match(updated.value.documentDiff, /task\/dependent\.md/u);
     assert.equal(updated.value.documentDiff.includes(tasks.root), false);
+    assert.equal(updated.value.task.body, "body");
   }
   const batch = await tasks.batch({ verb: "done", ids: [dependent, "task/missing"] });
   assert.deepEqual(batch.items.map((item) => item.outcome.kind), ["accepted", "refused"]);
+});
+
+test("appendBody supplies one missing LF boundary without duplicating caller delimiters", async () => {
+  const { tasks } = await world();
+  const plain = acceptedId(await tasks.add({ title: "Plain body", body: "first" }));
+  const appended = await tasks.task({ id: plain }).update({ appendBody: "second" });
+  assert.equal(appended.kind, "accepted");
+  if (appended.kind === "accepted") assert.equal(appended.value.task.body, "first\nsecond");
+
+  const leading = await tasks.task({ id: plain }).update({ appendBody: "\nthird" });
+  assert.equal(leading.kind, "accepted");
+  if (leading.kind === "accepted") assert.equal(leading.value.task.body, "first\nsecond\nthird");
+
+  const terminated = acceptedId(await tasks.add({ title: "Terminated body", body: "first\n" }));
+  const afterTerminated = await tasks.task({ id: terminated }).update({ appendBody: "second" });
+  assert.equal(afterTerminated.kind, "accepted");
+  if (afterTerminated.kind === "accepted") assert.equal(afterTerminated.value.task.body, "first\nsecond");
 });
 
 test("bounded Task query filters before limit and parent views recurse", async () => {

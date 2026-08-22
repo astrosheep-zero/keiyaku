@@ -1,7 +1,7 @@
 ---
 id: task/replace-readiness-polling-with-an-event-channel
 title: Replace readiness polling with an event channel
-state: open
+state: done
 priority: 1
 needs: []
 parent: task/stabilize-runtime-process-test-synchronization
@@ -10,7 +10,7 @@ relates: []
 note: ""
 createdBy: aku/worker-2/3ad6a87d
 createdAt: 2026-08-20T12:13:16.261Z
-updatedAt: 2026-08-20T13:07:46.088Z
+updatedAt: 2026-08-22T07:19:08.350Z
 ---
 Make fake descendants announce readiness through a caller-owned event channel and preserve real child processes.
 

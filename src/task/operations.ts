@@ -212,6 +212,12 @@ function listChange(
 function relatedOwner(board: TaskBoard, id: TaskId, target: TaskId): TaskId | null {
   return board.tasks.get(target)?.relates.includes(id) ? target : null;
 }
+function appendTaskBody(current: string, addition: string): string {
+  if (current.length === 0 || addition.length === 0 || current.endsWith("\n") || addition.startsWith("\n")) {
+    return current + addition;
+  }
+  return `${current}\n${addition}`;
+}
 function updateDocument(board: TaskBoard, current: TaskDocument, input: UpdateTaskInput): TaskDocument | TaskRefusal {
   for (const related of input.dropRelates ?? [])
     if (!current.relates.includes(related)) {
@@ -221,7 +227,8 @@ function updateDocument(board: TaskBoard, current: TaskDocument, input: UpdateTa
   return {
     ...current,
     ...(input.title === undefined ? {} : { title: input.title }),
-    body: input.body ?? (input.appendBody === undefined ? current.body : current.body + input.appendBody),
+    body:
+      input.body ?? (input.appendBody === undefined ? current.body : appendTaskBody(current.body, input.appendBody)),
     ...(input.note === undefined ? {} : { note: input.note }),
     ...(input.priority === undefined ? {} : { priority: input.priority }),
     needs: listChange(current.needs, input.needs, input.addNeeds, input.dropNeeds),

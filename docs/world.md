@@ -120,3 +120,8 @@ The reset law maps to one owner per concern:
 The package composition stops active writers, then attempts the owner-local
 deletion entry points independently. It has no fixed cross-owner order,
 storage path, ref, glob, inventory, count, or residue-specific knowledge.
+
+The Git owner performs its reset state-first: it removes the state authority
+with an expected-OID compare-and-swap before deleting regenerable topology.
+This ordering is local to Git and does not create a World-wide reset lock or
+transaction; an owner failure remains retryable under the same confirmation.

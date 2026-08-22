@@ -1,15 +1,15 @@
 ---
 id: task/审计项目架构边界-重复与-owner-错位
 title: 审计项目架构边界、重复与 owner 错位
-state: open
+state: done
 priority: 1
 needs: []
 parent: null
 supersedes: []
 relates: []
-note: ""
+note: All 18 child investigations are terminal; the parent audit has no remaining unowned delivery slice. Keep its findings as historical evidence.
 createdAt: 2026-08-17T03:25:45.037Z
-updatedAt: 2026-08-18T03:55:24.954Z
+updatedAt: 2026-08-22T08:30:16.113Z
 ---
 本任务是当前代码的模块级事实账本与交付拆分，不是架构权威。六个互不重叠的 Akuma lane 负责 Contract/Protocol、Akuma runtime、Task/Kanshi/CLI、Git/storage、Core/Body/Verification/Settlement 和当前测试的调用证据；以下成立性、边界、删除项和依赖由主 agent 对照 owner law 裁决。
 

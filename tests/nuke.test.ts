@@ -13,6 +13,7 @@ import { invoke } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
 import { renderRefusal } from "../src/cli/render/refusal.js";
 import { nukeExitCode } from "../src/cli/render/nuke.js";
+import { nukeGit } from "../src/git/nuke.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { worktreePath } from "../src/git/workspace.js";
 import { appointManagedWorktrees, readPlaceRegister } from "../src/workspace-place.js";
@@ -131,6 +132,54 @@ test("confirmed nuke stops live writers and removes owned state while preserving
   } finally {
     rmSync(fixture.raw.path, { recursive: true, force: true });
     rmSync(fixture.foreign, { recursive: true, force: true });
+  }
+});
+
+test("Git nuke removes legacy and migration leaves but preserves ordinary refs", async () => {
+  const raw = makeGitRepository();
+  raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const world = await World.at(raw.path);
+  for (const ref of [
+    "refs/heads/keiyaku-delivery/legacy",
+    "refs/heads/keiyaku-candidate/legacy",
+    "refs/keiyaku/delivery/current",
+    "refs/keiyaku/candidate/current",
+  ]) raw.run(["update-ref", ref, "HEAD"]);
+  raw.run(["update-ref", "refs/heads/business-branch", "HEAD"]);
+  raw.run(["update-ref", "refs/heads/keiyaku-state", "HEAD"]);
+  try {
+    await nukeGit(world);
+    for (const ref of [
+      "refs/heads/keiyaku-delivery/legacy",
+      "refs/heads/keiyaku-candidate/legacy",
+      "refs/keiyaku/delivery/current",
+      "refs/keiyaku/candidate/current",
+    ]) assert.throws(() => raw.run(["show-ref", "--verify", "--quiet", ref]));
+    assert.equal(raw.run(["show-ref", "--verify", "--quiet", "refs/heads/business-branch"]), "");
+    assert.throws(() => raw.run(["show-ref", "--verify", "--quiet", "refs/heads/keiyaku-state"]));
+  } finally {
+    rmSync(raw.path, { recursive: true, force: true });
+  }
+});
+
+test("Git nuke retains an attached appointed worktree while clearing independent refs", async () => {
+  const raw = makeGitRepository();
+  raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const world = await World.at(raw.path);
+  const repository = await repositoryAt(world);
+  const contract = contractId("kei/nuke-attached");
+  const register = await appointManagedWorktrees(repository, [contract]);
+  const path = worktreePath(repository, register.byContract.get(contract)!.place);
+  raw.run(["worktree", "add", "--quiet", "-b", "nuke-attached-branch", path, "HEAD"]);
+  raw.run(["update-ref", "refs/heads/keiyaku-state", "HEAD"]);
+  try {
+    await assert.rejects(() => nukeGit(world), /Place authority still has managed worktree appointments/u);
+    assert.equal(existsSync(path), true);
+    assert.equal(raw.run(["-C", path, "symbolic-ref", "--quiet", "--short", "HEAD"]), "nuke-attached-branch\n");
+    assert.throws(() => raw.run(["show-ref", "--verify", "--quiet", "refs/heads/keiyaku-state"]));
+  } finally {
+    raw.run(["worktree", "remove", "--force", path]);
+    rmSync(raw.path, { recursive: true, force: true });
   }
 });
 

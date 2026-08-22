@@ -1,17 +1,17 @@
 ---
 id: task/system-prompt-contract/narrow-append-replace-candidate-scope-and-verifi
 title: Narrow append-replace candidate scope and verification
-state: open
+state: done
 priority: 1
 needs: []
 parent: null
 supersedes: []
 relates:
   - task/restore-full-test-green-after-architecture-polic
-note: ""
+note: The append/replace implementation is already claimed on main as kei/let-archetype-bodies-append-or-replace-native-sy; this coordination task is superseded by the accepted delivery.
 createdBy: aku/worker-2/975214cf
 createdAt: 2026-08-20T12:03:06.020Z
-updatedAt: 2026-08-20T13:48:36.659Z
+updatedAt: 2026-08-22T07:28:04.884Z
 ---
 Scope isolation complete via temporary HEAD index: tracked checkout bytes restored to db43c62d; explicit out-of-scope materialization paths removed; temporary index reports zero staged/unstaged/unmerged changes and git diff --check passes. HEAD^..HEAD is exactly 15 Contract files. Focused Akuma tests pass on rerun; source typecheck, build, architecture, reachability, and diff check pass. npm test reaches maintainability and exits 1 with five errors only in scripts/architecture/policy.ts, src/cli/invoke.ts, src/cli/parse.ts, src/cli/runtime.ts, and src/protocol/deliver.ts, all outside the 15-file candidate; classify as current-main baseline. Delivery attempt against protected linked index was refused dirty-workspace because the installed CLI reads the stale 207-path real index; retry is pending coordinator-linked-index authority. Final plain delivery receipt: keiyaku deliver kei/let-archetype-bodies-append-or-replace-native-sy exited 1 with dirty-workspace, listing stale 207 staged and 207 unstaged paths; no candidate, placement, or review fact recorded. The installed CLI ignores the temporary GIT_INDEX_FILE and observes the managed linked index. Exact required recovery is coordinator-authorized restoration of /Users/astrosheep/Developer/keiyaku-v4/.git/worktrees/hades/index from HEAD; worker cannot create /Users/astrosheep/Developer/keiyaku-v4/.git/worktrees/hades/index.lock (Operation not permitted).Verified delivery scope is exactly the Contract Region's 15 path patterns: docs/akuma.md, docs/akuma-provider.md, src/akuma/archetype.ts, src/akuma/provider-recipe.ts, src/akuma/providers/acp/**, src/akuma/providers/claude/**, src/akuma/providers/codex-app-server/**, src/akuma/providers/grok-build/**, src/akuma/providers/opencode-sdk/**, src/akuma/providers/pi/**, tests/library-akuma-creation.test.ts, tests/settings.test.ts, tests/akuma-heart.test.ts, tests/akuma-body.test.ts, tests/akuma-requests.test.ts, tests/akuma-provider.test.ts. Candidate implementation is verified commit db43c62d. Temporary clean index at /private/tmp/hades-index-delivery.zxV38K reports no staged/unstaged/unmerged paths and git diff --check passes. Declared focused Akuma tests, typecheck, build, architecture, reachability pass; npm test exits 1 only at existing maintainability errors outside the 15-path candidate. Real linked index repair remains required before deliver.
 Declared checks rerun from db43c62d checkout: focused Akuma suite passed; test:typecheck passed; build passed; test:architecture passed (201 files); test:reachability passed. npm test exited 1 at test:maintainability with 1 error (scripts/architecture/policy.ts max-lines 1385 > 1350) and 651 warnings, outside the Contract Region. Delivery executed exactly: GIT_INDEX_FILE=/private/tmp/hades-index-delivery.zxV38K keiyaku deliver kei/let-archetype-bodies-append-or-replace-native-sy --include-dirty. Receipt reached integration and refused with integration-failed conflict against targetHead 7d645753e88c9833ac97a06fded595a, conflict paths src/cli/render/kanshi.ts and tests/nuke.test.ts. No materialize-conflict recovery was attempted because those paths are outside this Contract Region. Task remains open pending coordinator resolution of target conflict and accepted delivery.

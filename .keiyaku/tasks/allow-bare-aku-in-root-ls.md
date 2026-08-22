@@ -1,7 +1,7 @@
 ---
 id: task/allow-bare-aku-in-root-ls
 title: Allow bare aku in root ls
-state: open
+state: done
 priority: 1
 needs: []
 parent: null
@@ -9,7 +9,7 @@ supersedes: []
 relates: []
 note: ""
 createdAt: 2026-08-15T01:31:31.903Z
-updatedAt: 2026-08-15T01:31:31.903Z
+updatedAt: 2026-08-22T07:25:00.530Z
 ---
 The root ls identity selector should accept `aku` directly. Users must not be forced to write the storage-shaped trailing slash form `aku/` merely to list the Archetype catalog.
 

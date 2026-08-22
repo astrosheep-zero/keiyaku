@@ -98,6 +98,14 @@ this one Git owner. The library boundary rejects a target that names any
 of them before coordinates are recorded; target input and canonicalization are
 defined only in [public-api.md](public-api.md).
 
+Confirmed Git nuke removes `refs/heads/keiyaku-state` first with an expected
+OID compare-and-swap. A state OID race fails before topology deletion and a
+later confirmation retries. During migration, nuke enumerates both legacy
+`refs/heads/keiyaku-delivery/*` and `refs/heads/keiyaku-candidate/*` leaves and
+the current `refs/keiyaku/delivery/*` and `refs/keiyaku/candidate/*` leaves;
+each leaf deletion uses its freshly observed OID. Ordinary and unknown refs
+remain untouched.
+
 Managed delivery and candidate-pin leaves are deterministic private topology
 derived from the complete ContractId. They are never public identity or a
 second legality authority.

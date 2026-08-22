@@ -15,6 +15,8 @@ export type { TreeChange } from "./tree.js";
 export const GIT_REF = "refs/heads/keiyaku-state";
 export const DELIVERY_REF_NAMESPACE = "refs/heads/keiyaku-delivery";
 export const CANDIDATE_PIN_REF_NAMESPACE = "refs/heads/keiyaku-candidate";
+export const MIGRATION_DELIVERY_REF_NAMESPACE = "refs/keiyaku/delivery";
+export const MIGRATION_CANDIDATE_PIN_REF_NAMESPACE = "refs/keiyaku/candidate";
 export const GIT_FORMAT_PATH = "meta/format.json";
 const CURRENT_FORMAT_VERSION = 4;
 export const GIT_FORMAT_BYTES = `{"version":${CURRENT_FORMAT_VERSION}}\n`;
@@ -24,7 +26,11 @@ export function isKeiyakuOwnedRef(ref: string): boolean {
     ref === DELIVERY_REF_NAMESPACE ||
     ref.startsWith(`${DELIVERY_REF_NAMESPACE}/`) ||
     ref === CANDIDATE_PIN_REF_NAMESPACE ||
-    ref.startsWith(`${CANDIDATE_PIN_REF_NAMESPACE}/`)
+    ref.startsWith(`${CANDIDATE_PIN_REF_NAMESPACE}/`) ||
+    ref === MIGRATION_DELIVERY_REF_NAMESPACE ||
+    ref.startsWith(`${MIGRATION_DELIVERY_REF_NAMESPACE}/`) ||
+    ref === MIGRATION_CANDIDATE_PIN_REF_NAMESPACE ||
+    ref.startsWith(`${MIGRATION_CANDIDATE_PIN_REF_NAMESPACE}/`)
   );
 }
 

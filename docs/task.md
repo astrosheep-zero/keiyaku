@@ -230,7 +230,11 @@ start, stop, hold, resume, done, drop, batch, and settlement preserve existing
 lifecycle methods. `done` and `drop` may replace the note in the same atomic
 lifecycle mutation. `update` is a field-preserving patch: title, mutually
 exclusive body or append-body, priority, relation replace/add/drop, nullable
-parent, and note replacement. `TaskView` and full Task detail expose optional
+parent, and note replacement. `appendBody` preserves its supplied bytes and
+inserts exactly one LF at the boundary when the existing nonempty body does not
+end in LF and the addition does not already begin with LF. An empty body
+receives the addition unchanged; an existing trailing LF is never duplicated.
+`TaskView` and full Task detail expose optional
 `createdBy`; compact list and query rows do not.
 
 Shape errors throw `TypeError` before world observation. Malformed persisted
