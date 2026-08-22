@@ -518,21 +518,20 @@ test("Git nuke removes proven unregistered appointed residue", async () => {
   }
 });
 
-test("owner failure becomes one diagnostic and leaves failed custody for retry", async () => {
+test("nuke deletes malformed Task authority by owned path", async () => {
   const world = await testWorld();
   try {
     const broken = join(world, ".keiyaku", "tasks", "broken.md");
     mkdirSync(join(world, ".keiyaku", "tasks"), { recursive: true });
     writeFileSync(broken, "not Task authority\n");
     const result = await Keiyaku.nuke({ world, confirm: world });
-    assert.equal(result.kind, "failed");
+    assert.equal(result.kind, "success");
     assert.equal(result.world, world);
-    assert.match(result.diagnostic, /task document/u);
-    assert.equal(existsSync(broken), true);
+    assert.equal(existsSync(broken), false);
   } finally { rmSync(world, { recursive: true, force: true }); }
 });
 
-test("owner deletion attempts remain independent after the stop prerequisite", async () => {
+test("nuke deletes malformed Task authority after the stop prerequisite", async () => {
   const fixture = await gitNukeFixture();
   try {
     const { raw, world, managedPath } = fixture;
@@ -540,10 +539,10 @@ test("owner deletion attempts remain independent after the stop prerequisite", a
     mkdirSync(join(world, ".keiyaku", "tasks"), { recursive: true });
     writeFileSync(broken, "not Task authority\n");
     const result = await Keiyaku.nuke({ world, confirm: world });
-    assert.equal(result.kind, "failed");
+    assert.equal(result.kind, "success");
     assert.equal(existsSync(managedPath), false);
     assert.throws(() => raw.run(["show-ref", "--verify", "--quiet", "refs/heads/keiyaku-state"]));
-    assert.equal(existsSync(broken), true);
+    assert.equal(existsSync(broken), false);
   } finally {
     rmSync(fixture.raw.path, { recursive: true, force: true });
     rmSync(fixture.foreign, { recursive: true, force: true });

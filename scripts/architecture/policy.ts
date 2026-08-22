@@ -1889,7 +1889,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         { source: "runtime/proc/launch.ts", symbols: ["open"] },
         { source: "runtime/proc/run.ts", symbols: ["FileHandle", "open"] },
         { source: "task/context.ts", symbols: ["lstat", "mkdir", "readFile"] },
-        { source: "task/store.ts", symbols: ["lstat", "mkdir", "readFile", "readdir", "unlink"] },
+        { source: "task/store.ts", symbols: ["lstat", "mkdir", "readFile", "readdir", "rmdir", "unlink"] },
       ],
     },
     { module: "fs/promises", owners: [] },
