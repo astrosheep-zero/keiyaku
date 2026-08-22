@@ -302,15 +302,23 @@ retain the worktree. Claimed cleanup likewise retains every unsealed `HEAD` or
 tree rather than manufacturing recovery evidence.
 
 Every Keiyaku-owned ref deletion is one atomic transaction that verifies its
-surviving custodian ref. A candidate pin is released only when that ref preserves
-the exact integration commit. A delivery ref may be released when the surviving
-claimed integration preserves the exact tender tree; otherwise the tender ref
-remains. Equal trees therefore suffice only for tender-byte custody, never as a
+surviving custodian ref. For claimed targeted custody, reconciliation freezes
+the current target tip and treats that target as an integration custodian only
+when the recorded integration commit is an ancestor of that frozen tip. The
+deletion transaction then verifies that the target still names the frozen tip.
+A candidate pin is released only when a surviving custodian preserves the
+exact integration commit, including a target whose frozen history still
+contains it. A delivery ref may be released when the surviving claimed
+integration preserves the exact tender tree; otherwise the tender ref remains.
+Equal trees therefore suffice only for tender-byte custody, never as a
 substitute for integration commit identity. A retained worktree retains its
 reachability topology. Git pruning may make only identities whose custody has
 lawfully ended unavailable. Identity facts remain durable Contract state. The
 public `Delivery.diff()` contract and its git-unavailable result are defined in
 [public-api.md](public-api.md).
 
-No cleanup operation rewrites a target ref. A targetless claimed contract and a
-targeted contract whose target later moves share the same byte-custody rule.
+No cleanup operation rewrites a target ref. A target that advances while the
+integration remains reachable stays a custodian. A rewrite or deletion that
+removes the integration from target history retains the owned ref for a later
+reconcile to re-observe. A targetless claimed contract still requires another
+surviving custodian of the same byte identity. Nonredundant custody remains.

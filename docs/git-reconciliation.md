@@ -114,10 +114,16 @@ precedes ref cleanup. That result must prove the appointed path is physically
 absent before Place release; leftover bytes at an unregistered appointed path
 are retention, not completed cleanup. Each Keiyaku-owned ref deletion
 atomically verifies its surviving custodian ref. Integration custody requires
-the exact integration commit; tender custody requires the exact tender tree and
-may therefore pass to the claimed integration when their trees match.
-Nonredundant custody remains. Retention never reverses or changes an accepted
-outcome.
+the exact integration commit. A frozen target tip may serve as that custodian
+only when Git ancestry proves the integration is reachable from the tip; the
+deletion transaction verifies the target still names that frozen tip. A later
+advance that keeps the integration reachable is therefore usable custody on
+retry, while a rewrite or missing target is not. Tender custody requires the
+exact tender tree and may therefore pass to the claimed integration when their
+trees match. Nonredundant custody remains. Retention never reverses or changes
+an accepted outcome. Retained owned refs are reported as `ref` effects with
+`action: "unchanged"` that preserve the current OID, so retryable retention is
+observable without claiming deletion.
 
 ### Managed Worktree Hooks
 

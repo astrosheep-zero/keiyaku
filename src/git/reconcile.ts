@@ -181,6 +181,11 @@ async function removeRefWithCustody(
   );
   return { kind: "ref", name: ref, action: "removed", before, after: null };
 }
+
+function retainedRefEffect(ref: string, snapshot: GitOid): Effect {
+  return { kind: "ref", name: ref, action: "unchanged", before: snapshot, after: snapshot };
+}
+
 async function acquireWorktreeTopology(repository: GitRepository): Promise<WorktreeTopology> {
   return { paths: new Set(await registeredWorktreePaths(repository)) };
 }
@@ -291,19 +296,23 @@ async function refRows(repository: GitRepository): Promise<readonly Readonly<{ r
       return { ref, oid };
     });
 }
+async function commitIsAncestor(repository: GitRepository, ancestor: SnapshotId, descendant: string): Promise<boolean> {
+  try {
+    await runGit(repository, ["merge-base", "--is-ancestor", gitObjectIdForSnapshot(ancestor), descendant]);
+    return true;
+  } catch (error) {
+    if (error instanceof GitPlumbingError && error.status === 1) return false;
+    throw error;
+  }
+}
+
 async function snapshotCustodian(
   repository: GitRepository,
   snapshot: SnapshotId,
 ): Promise<Readonly<{ ref: string; oid: SnapshotId }> | null> {
   for (const row of await refRows(repository)) {
     if (isKeiyakuOwnedRef(row.ref)) continue;
-    try {
-      await runGit(repository, ["merge-base", "--is-ancestor", gitObjectIdForSnapshot(snapshot), row.oid]);
-      return { ref: row.ref, oid: mintSnapshotId(row.oid) };
-    } catch (error) {
-      if (error instanceof GitPlumbingError && error.status === 1) continue;
-      throw error;
-    }
+    if (await commitIsAncestor(repository, snapshot, row.oid)) return { ref: row.ref, oid: mintSnapshotId(row.oid) };
   }
   return null;
 }
@@ -439,11 +448,11 @@ async function targetCustodyForClaimedIntegration(
   state: ContractState,
   integration: SnapshotId,
 ): Promise<Readonly<{ ref: string; oid: SnapshotId }> | null> {
-  return state.terminal?.kind === "claimed" &&
-    state.coordinates.target !== undefined &&
-    (await readRef(repository, state.coordinates.target)) === integration
-    ? { ref: state.coordinates.target, oid: integration }
-    : null;
+  if (state.terminal?.kind !== "claimed" || state.coordinates.target === undefined) return null;
+  const target = await readRef(repository, state.coordinates.target);
+  if (target === null) return null;
+  const oid = mintSnapshotId(target);
+  return (await commitIsAncestor(repository, integration, oid)) ? { ref: state.coordinates.target, oid } : null;
 }
 
 function sealedTree(expected: TerminalSealExpectations, snapshot: SnapshotId): GitOid {
@@ -464,8 +473,13 @@ async function releaseTerminalCustody({
   if (deliveryRef === null && candidatePin === null) return;
   if (state.delivery === null) {
     const custodian = await snapshotCustodian(repository, state.coordinates.start);
-    if (deliveryRef !== null && custodian !== null)
-      effects.push(await removeRefWithCustody(repository, ref, custodian.ref, custodian.oid));
+    if (deliveryRef !== null) {
+      effects.push(
+        custodian === null
+          ? retainedRefEffect(ref, deliveryRef)
+          : await removeRefWithCustody(repository, ref, custodian.ref, custodian.oid),
+      );
+    }
     if (candidatePin !== null) effects.push(await removeRef(repository, pin));
     return;
   }
@@ -479,14 +493,20 @@ async function releaseTerminalCustody({
       const expected = await resolveSeal();
       if (sealedTree(expected, tender) === sealedTree(expected, integration)) {
         effects.push(await removeRefWithCustody(repository, ref, target.ref, target.oid));
+      } else {
+        effects.push(retainedRefEffect(ref, deliveryRef));
       }
     }
+  } else if (deliveryRef !== null) {
+    effects.push(retainedRefEffect(ref, deliveryRef));
   }
   if (candidatePin !== null) {
     if (target !== null) {
       effects.push(await removeRefWithCustody(repository, pin, target.ref, target.oid));
     } else if (tender === integration && deliveryRef !== null) {
       effects.push(await removeRefWithCustody(repository, pin, ref, tender));
+    } else {
+      effects.push(retainedRefEffect(pin, candidatePin));
     }
   }
 }

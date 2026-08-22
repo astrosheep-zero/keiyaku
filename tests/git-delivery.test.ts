@@ -1394,6 +1394,43 @@ test("one repository reconcile sweeps unappointed claimed custody through exact 
   assert.equal(first.repository.run(["rev-parse", "refs/heads/secondary"]).trim(), secondaryBefore);
 });
 
+test("claimed target history keeps integration custody after a normal target advance", async () => {
+  const { contract, repository, worktree } = await targetedContract(["reviewed"]);
+  writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
+  repository.run(["-C", worktree, "add", "candidate.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
+  await contract.deliver();
+  await contract.review({ verdict: "satisfied" });
+  const state = await contract.state();
+  assert.equal(state.terminal?.kind, "claimed");
+  const tender = state.delivery?.data.tenderSnapshot;
+  const integration = state.currentIntegration?.snapshot ?? state.delivery?.data.integration.snapshot;
+  assert.ok(tender);
+  assert.ok(integration);
+  repository.run(["update-ref", deliveryRefFor(state.id), tender]);
+  repository.run(["update-ref", candidatePinRefFor(state.id), integration]);
+  writeFileSync(join(repository.path, "after-claim.txt"), "after claim\n");
+  repository.run(["add", "after-claim.txt"]);
+  repository.run(["commit", "--quiet", "-m", "after claim"]);
+  const targetBefore = repository.run(["rev-parse", "refs/heads/main"]).trim();
+
+  const report = await contract.reconcile();
+  const git = await repositoryAt(repository.path);
+
+  assert.equal(await readRef(git, candidatePinRefFor(state.id)), null);
+  assert.equal(await readRef(git, deliveryRefFor(state.id)), null);
+  assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), targetBefore);
+  assert.equal(report.lag.length, 0);
+  assert.equal(
+    report.effects.some((effect) => effect.kind === "ref" && effect.name === candidatePinRefFor(state.id) && effect.action === "removed"),
+    true,
+  );
+  assert.equal(
+    report.effects.some((effect) => effect.kind === "ref" && effect.name === deliveryRefFor(state.id) && effect.action === "removed"),
+    true,
+  );
+});
+
 test("abandon salvages untracked managed-worktree bytes without retaining the worktree", async () => {
   const repository = makeGitRepository();
   repository.run(["config", "user.name", "Test User"]);
