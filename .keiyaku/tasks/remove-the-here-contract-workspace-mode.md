@@ -1,7 +1,7 @@
 ---
 id: task/remove-the-here-contract-workspace-mode
 title: Remove the here Contract workspace mode
-state: open
+state: done
 priority: 0
 needs:
   - task/unify-invocation-coordinates-and-forwarded-opera
@@ -10,6 +10,6 @@ supersedes: []
 relates: []
 note: ""
 createdAt: 2026-08-19T08:00:34.834Z
-updatedAt: 2026-08-19T08:00:34.834Z
+updatedAt: 2026-08-21T23:23:55.564Z
 ---
 After the coordinate Contract lands, hard-delete workspace here from public inputs, persisted terms, workspace appointments, protocol branches, CLI, docs, and tests without a compatibility path.

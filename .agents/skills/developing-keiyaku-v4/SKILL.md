@@ -26,6 +26,21 @@ legacy repository at `/Users/astrosheep/Developer/keiyaku`.
 - Keep the current-version-only cut: port evidence selectively, never because
   a v3 abstraction already exists.
 
+### Owner chapter scope
+
+An owner chapter is a law book, not a specification dump. It records the
+surface's high-level product intent, durable invariants, caller-visible
+semantics, and the ownership boundaries needed to keep one authority. It does
+not recite source code, private helper names, implementation control flow,
+exhaustive provider dialect details, internal field inventories, test cases, or
+replaceable configuration. Public grammar and persisted/public shapes remain
+only to the degree callers or stored authority depend on them; explain their
+meaning and constraints rather than mirroring their TypeScript declarations.
+When a chapter grows, delete implementation narration and duplicated law
+before considering any maintainability exemption. A per-file exemption is
+appropriate only when the remaining text is genuinely irreplaceable law for
+that owner, not when a spec or code summary was left in place.
+
 ## Repository and task commands
 
 Always select the v4 repository explicitly:
@@ -216,6 +231,21 @@ owning root document in the same accepted change when it is durable architecture
 6. Review the combined diff for second authorities, dead compatibility code,
    duplicated lifecycle gates, and accidental v3 import.
 7. Commit only the coherent accepted slice; leave unrelated dirty files alone.
+
+### Test priority
+
+Test the product's normal end-to-end path first: the lifecycle a caller is
+expected to use, including the handoff between admission, physical effects,
+terminal settlement, and the next read or reconcile. A green collection of
+edge cases does not compensate for a missing happy path. For every lifecycle
+effect, verify the ordinary sequence and the first retry or restart boundary
+that a real caller reaches.
+
+Add a refusal, race, restart, or unknown-input test only when the changed
+behavior introduces that concrete risk. Do not manufacture a test matrix,
+duplicate setup, or paranoid branch coverage to make numbers look complete.
+Each test must expose a user-visible invariant or a real custody/lifecycle
+failure, and the smallest useful regression must be preferred.
 
 Use `apply_patch` for manual edits. Never use destructive Git commands to clean
 up a worktree you do not own.

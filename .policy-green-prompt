@@ -1,0 +1,9 @@
+Task: task/restore-full-test-green-after-architecture-polic
+
+The current main checkout has one concrete failure: `npm test` exits 1 in maintainability because scripts/architecture/policy.ts is 1387 effective lines while its existing bounded exemption is maxEffectiveLines 1350. `npm run test:typecheck` and `npm run build` pass. The exact failure is at policy.ts line 1353.
+
+Implement the smallest real fix. Read SOUL.md, docs/README.md, docs/settings.md, docs/architecture-related owner docs named by README, the Task above, scripts/architecture/policy.ts, scripts/architecture/engine.ts, scripts/check-maintainability.js, scripts/maintainability/config.js, and the current architecture tests before editing.
+
+Scope: scripts/architecture/policy.ts and only directly necessary architecture/maintainability tests or config. Preserve policy.ts as the single executable topology authority. Preserve exact symbol-scoped enforcement for akuma/requests.ts, akuma/request-serve.ts, akuma/body.ts, akuma-body.ts, and all existing owner boundaries. Do not raise the 1350 cap, disable max-lines, collapse readable multiline code, split policy into another authority, broaden any allowance to a whole module, or change product source/docs. Prefer deleting stale/redundant policy representation or a small policy-local declarative compression that does not alter decisions. Prove before/after architecture behavior is unchanged, especially that an unlisted import from the changed request/serve/body edges still fails.
+
+Run `npm test`, `npm run test:typecheck`, `npm run build`, `git diff --check`, and the architecture/maintainability checks. Do not touch unrelated dirty `.keiyaku/tasks` files. Commit only the scoped fix if the worktree permits; otherwise leave the diff and report the permission blocker. Return exact line-count result and test exits.
