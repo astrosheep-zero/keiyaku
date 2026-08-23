@@ -1,4 +1,3 @@
-/* eslint-disable max-lines */
 import type { AkumaKanshiRow, ContractKanshiRow, KanshiReport, Section, TaskKanshiRow } from "../../kanshi/index.js";
 import { visibleFleetRows } from "../../kanshi/fleet.js";
 import {
@@ -137,28 +136,6 @@ function mergeFacts(
 
 function worldAfterFacts(row: ContractKanshiRow): readonly string[] {
   return row.after.map(afterWording);
-}
-
-function contractHot(row: ContractKanshiRow): boolean {
-  if (row.title === null) return true;
-  if (row.phase === "tendered") return true;
-  if (row.holder.kind === "unavailable" || row.holder.kind === "held") return true;
-  if (row.fleet.length > 0) return true;
-  if (row.targetLag.kind === "counted" && row.targetLag.behind > 0) return true;
-  if (row.workspaceObservation.kind !== "clean" && row.workspaceObservation.kind !== "unappointed") {
-    return true;
-  }
-  if (row.after.some((edge) => edge.endpoint.kind !== "claimed")) return true;
-  return row.gates.reports.some(
-    (report) =>
-      report.current.kind === "stale" ||
-      report.current.kind === "missing" ||
-      (report.current.kind === "attested" && report.current.verdict === "unsatisfied"),
-  );
-}
-
-function taskHot(row: TaskKanshiRow): boolean {
-  return row.disposition === "blocked" || row.disposition === "in_progress";
 }
 
 function activitySnapshotLine(row: AkumaKanshiRow): string | undefined {
@@ -398,14 +375,25 @@ function renderWorldContractRow(
     ...linkedFacts(row, report, "world"),
   ];
   const lines = [
-    identityLine(contractMark(row), row.id, `· ${row.phase} · ${formatAge(row.phaseAt, report.observedAt)} · ${title}`),
+    identityLine(
+      contractMark(row),
+      row.id,
+      `· ${row.phase} · ${formatAge(row.lastJournalAt, report.observedAt)} · ${title}`,
+    ),
   ];
   lines.push(...plumbFacts(facts, context.columns));
   return lines;
 }
 
-function selectRows<T>(rows: readonly T[], isHot: (row: T) => boolean): readonly T[] {
-  return [...rows.filter(isHot), ...rows.filter((row) => !isHot(row))].slice(0, MAX_VISIBLE_ROWS);
+function selectRecentRows<T>(rows: readonly T[], timestamp: (row: T) => string): readonly T[] {
+  return [...rows]
+    .sort((left, right) => {
+      const leftAt = timestamp(left);
+      const rightAt = timestamp(right);
+      if (leftAt === rightAt) return 0;
+      return leftAt > rightAt ? -1 : 1;
+    })
+    .slice(0, MAX_VISIBLE_ROWS);
 }
 
 function sectionFooter({
@@ -450,7 +438,7 @@ function renderContracts(report: KanshiReport, context: TextRenderContext): read
   if (section.kind === "absent") return sectionAbsent("KEIYAKU", context.columns);
   if (section.kind === "failed") return failure("KEIYAKU", section, context);
   const live = section.value.rows.filter((row) => !isTerminalContract(row));
-  const rows = selectRows(live, contractHot);
+  const rows = selectRecentRows(live, (row) => row.lastJournalAt);
   const abbreviations = gitAbbreviations(report);
   const candidates = live.filter((row) => row.delivery !== null).length;
   const rendered = sectionBlock({
@@ -479,7 +467,7 @@ function renderTasks(report: KanshiReport, context: TextRenderContext): readonly
   if (section.kind === "absent") return sectionAbsent("TASK", context.columns);
   if (section.kind === "failed") return failure("TASK", section, context);
   const live = section.value.rows.filter((row) => !isTerminalTask(row));
-  const rows = selectRows(live, taskHot);
+  const rows = selectRecentRows(live, (row) => row.updatedAt);
   const rowLines: readonly (readonly string[])[] = rows.map((row) => {
     const relation = row.contract === undefined ? ["unbound"] : [endpointFact(row.contract.id, row.contract.observed)];
     const lines = [

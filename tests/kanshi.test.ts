@@ -7,7 +7,8 @@ import { invoke } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
-import { HeldAkumaLeash, initializeHeart } from "../src/akuma/heart/index.js";
+import { AkumaHandle } from "../src/akuma/index.js";
+import { breakBody, HeldAkumaLeash, initializeHeart } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { Keiyaku, Repo } from "../src/index.js";
 import {
@@ -47,7 +48,7 @@ function document(title = "Kanshi contract"): string {
   ].join("\n");
 }
 
-async function bornAkuma(root: string, suffix: string) {
+async function bornAkuma(root: string, suffix: string, createdAt = "2026-08-09T00:00:00.000Z", settle = false) {
   const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "watcher", draw: () => suffix });
   await initializeHeart(allocated.paths);
   const leash = (await HeldAkumaLeash.try(allocated.paths))!;
@@ -58,8 +59,12 @@ async function bornAkuma(root: string, suffix: string) {
     options: {},
     cwd: root,
     origin: { kind: "direct" },
-    createdAt: "2026-08-09T00:00:00.000Z",
+    createdAt,
   });
+  if (settle) {
+    const body = await leash.recordBody(allocated.paths, { leashTakenAt: createdAt });
+    await breakBody(allocated.paths, { sequence: body.sequence, end: "put-down", at: createdAt });
+  }
   leash.release();
   return allocated.id;
 }
@@ -695,11 +700,13 @@ function attentionReport(): KanshiReport {
             title: "Cold Contract",
             phase: "bound",
             phaseAt: "2026-08-11T22:00:00.000Z",
+            lastJournalAt: "2026-08-11T22:00:00.000Z",
           }),
           contractRow({
             id: "kei/target-unknown",
             title: "Target Unknown",
             phaseAt: "2026-08-12T00:00:01.000Z",
+            lastJournalAt: "2026-08-12T00:00:01.000Z",
             target: "refs/heads/release",
             targetLag: { kind: "unknown" },
             targetObservation: { head: null, drift: true },
@@ -828,7 +835,7 @@ test("Kanshi Contract journal recency moves after a terms amendment", async () =
   assert.equal(row?.phaseAt, initial?.phaseAt);
 });
 
-test("Kanshi ages keep every unit boundary, future, and absent evidence distinct", () => {
+test("bare Contract ages keep every unit boundary, future, and absent evidence distinct", () => {
   const report = attentionReport();
   if (report.contracts.kind !== "present") throw new Error("fixture contracts must be present");
   const sources = [
@@ -840,7 +847,11 @@ test("Kanshi ages keep every unit boundary, future, and absent evidence distinct
     ["1d", "2026-08-11T00:00:00.000Z"],
     ["future", "2026-08-12T00:00:01.000Z"],
   ] as const;
-  const timedRows = sources.map(([label, phaseAt]) => contractRow({ id: `kei/age-${label}`, phaseAt }));
+  const timedRows = sources.map(([label, lastJournalAt]) => contractRow({
+    id: `kei/age-${label}`,
+    phaseAt: "2026-08-10T00:00:00.000Z",
+    lastJournalAt,
+  }));
   const text = renderKanshiText({
     ...report,
     contracts: { ...report.contracts, value: { ...report.contracts.value, rows: timedRows } },
@@ -870,14 +881,14 @@ test("Kanshi text uses live sections, preserves important facts, and omits termi
   for (const row of report.akuma.value.rows) assert.equal(text.includes(row.id), true);
 
   const contracts = sectionBody(text, "KEIYAKU");
-  assert.match(contracts, /^! kei\/active-contract · tendered · 3m · Active Contract$/mu);
+  assert.match(contracts, /^! kei\/active-contract · tendered · 30s · Active Contract$/mu);
   assert.match(contracts, /Active Contract/u);
   assert.match(contracts, /tendered/u);
   assert.match(contracts, /│ no candidate · target main/u);
   assert.match(contracts, /target main/u);
   assert.match(contracts, /7 commits behind main/u);
   assert.match(contracts, /target moved/u);
-  assert.match(contracts, /tendered · 3m/u);
+  assert.match(contracts, /tendered · 30s/u);
   assert.match(contracts, /\[✓\] reviewed/u);
   assert.match(contracts, /\[✗\] verified/u);
   assert.match(contracts, /\[~\] security \(stale\)/u);
@@ -1103,22 +1114,45 @@ test("Kanshi sections use a ten-row aperture with exact complete and partial foo
   assert.match(empty, /\[ FLEET \]  0 akuma[\s\S]*\(all 0 akuma shown\)/u);
   assert.match(empty, /\[ TASK \]  0 live[\s\S]*\(all 0 live task shown\)/u);
 
-  const coldContracts = Array.from({ length: 11 }, (_, index) => contractRow({ id: `kei/cold-${index}` }));
-  const coldTasks = Array.from({ length: 11 }, (_, index) => ({ ...report.tasks.value.rows[3]!, id: `task/cold-${index}` }));
-  const coldAkuma = Array.from({ length: 11 }, (_, index) => ({ ...report.akuma.value.rows[1]!, id: `aku/worker/cold${String(index).padStart(4, "0")}` }));
+  const oldAt = "2026-08-11T23:00:00.000Z";
+  const newAt = "2026-08-11T23:59:00.000Z";
+  const hotContracts = Array.from({ length: 11 }, (_, index) => contractRow({
+    id: `kei/hot-${index}`,
+    phase: "tendered",
+    lastJournalAt: oldAt,
+  }));
+  const hotTasks = Array.from({ length: 11 }, (_, index) => ({
+    ...report.tasks.value.rows[1]!,
+    id: `task/hot-${index}`,
+    updatedAt: oldAt,
+  }));
+  const hotAkuma = Array.from({ length: 11 }, (_, index) => ({
+    ...report.akuma.value.rows[0]!,
+    id: `aku/worker/hot${String(index).padStart(4, "0")}`,
+    lifeAt: oldAt,
+    lastActivityAt: oldAt,
+  }));
   const partial = renderKanshiText({
     ...report,
     contracts: {
       ...report.contracts,
-      value: { ...report.contracts.value, rows: [...coldContracts, contractRow({ id: "kei/hot-last", phase: "tendered" })] },
+      value: { ...report.contracts.value, rows: [...hotContracts, contractRow({ id: "kei/new-cold", lastJournalAt: newAt })] },
     },
     tasks: {
       ...report.tasks,
-      value: { ...report.tasks.value, rows: [...coldTasks, { ...report.tasks.value.rows[1]!, id: "task/hot-last" }] },
+      value: { ...report.tasks.value, rows: [...hotTasks, { ...report.tasks.value.rows[3]!, id: "task/new-cold", updatedAt: newAt }] },
     },
     akuma: {
       ...report.akuma,
-      value: { ...report.akuma.value, rows: [...coldAkuma, { ...report.akuma.value.rows[0]!, id: "aku/worker/hot-last" }] },
+      value: {
+        ...report.akuma.value,
+        rows: [...hotAkuma, {
+          ...report.akuma.value.rows[2]!,
+          id: "aku/worker/new-cold",
+          lifeAt: newAt,
+          lastActivityAt: oldAt,
+        }],
+      },
     },
   }, { columns: 120, color: false });
 
@@ -1128,31 +1162,32 @@ test("Kanshi sections use a ten-row aperture with exact complete and partial foo
     assert.match(body, new RegExp(`keiyaku ls ${selector}/`, "u"));
   }
   assert.match(sectionBody(partial, "FLEET"), /\+ 2 more akuma not shown[\s\S]*keiyaku ls aku\//u);
-  assert.match(sectionBody(partial, "KEIYAKU"), /^● kei\/hot-last · tendered/mu);
-  assert.match(sectionBody(partial, "FLEET"), /^● aku\/worker\/hot-last \(@lead\) · running/mu);
-  assert.match(sectionBody(partial, "TASK"), /^● task\/hot-last · in_progress/mu);
-  assert.doesNotMatch(partial, /cold-09|cold-10/u);
+  assert.match(sectionBody(partial, "KEIYAKU"), /^○ kei\/new-cold · waiting · 1m/mu);
+  assert.match(sectionBody(partial, "FLEET"), /^× aku\/worker\/new-cold · killed · 1m/mu);
+  assert.match(sectionBody(partial, "TASK"), /^○ task\/new-cold · ready/mu);
+  assert.doesNotMatch(partial, /hot-09|hot-10/u);
 });
 
-test("Fleet retains non-running rows and bounds snapshots to its final hot-first aperture", () => {
+test("Fleet ranks max owner timestamps and aligns snapshots with its recent-first display", () => {
   const report = attentionReport();
   if (report.akuma.kind !== "present") throw new Error("fixture Fleet must be present");
-  const untidy = {
-    ...report.akuma.value.rows[6]!,
-    id: "aku/worker/a0000008",
-    life: "untidy" as const,
-  };
-  const rows = [...report.akuma.value.rows, untidy];
+  const source = report.akuma.value.rows[0]!;
+  const rows = [
+    { ...source, id: "aku/worker/no-coordinate-first", life: "asleep" as const, lifeAt: null, lastActivityAt: null },
+    { ...source, id: "aku/worker/tie-second", life: "asleep" as const, lifeAt: null, lastActivityAt: "2026-08-11T23:57:00.000Z" },
+    { ...source, id: "aku/worker/life-next", life: "killed" as const, lifeAt: "2026-08-11T23:58:00.000Z", lastActivityAt: "2026-08-11T21:00:00.000Z" },
+    { ...source, id: "aku/worker/no-coordinate-second", life: "asleep" as const, lifeAt: null, lastActivityAt: null },
+    { ...source, id: "aku/worker/activity-newest", life: "asleep" as const, lifeAt: "2026-08-11T22:00:00.000Z", lastActivityAt: "2026-08-11T23:59:00.000Z" },
+    { ...source, id: "aku/worker/tie-first", life: "asleep" as const, lifeAt: "2026-08-11T23:57:00.000Z", lastActivityAt: null },
+  ];
   const visible = visibleFleetRows(rows);
   assert.deepEqual(visible.map((row) => row.id), [
-    "aku/worker/a0000001",
-    "aku/worker/a0000004",
-    "aku/worker/a0000006",
-    "aku/worker/a0000007",
-    "aku/worker/a0000008",
-    "aku/worker/a0000002",
-    "aku/worker/a0000003",
-    "aku/worker/a0000005",
+    "aku/worker/activity-newest",
+    "aku/worker/life-next",
+    "aku/worker/tie-second",
+    "aku/worker/tie-first",
+    "aku/worker/no-coordinate-first",
+    "aku/worker/no-coordinate-second",
   ]);
   const snapshotRows = new Set(visible.slice(0, 3).map((row) => row.id));
   const decorated = rows.map((row) => snapshotRows.has(row.id)
@@ -1170,12 +1205,45 @@ test("Fleet retains non-running rows and bounds snapshots to its final hot-first
     ...report,
     akuma: { ...report.akuma, value: { ...report.akuma.value, rows: decorated } },
   }, { columns: 120, color: false });
-  assert.match(text, /\[ FLEET \]  8 akuma/u);
+  assert.match(text, /\[ FLEET \]  6 akuma/u);
   assert.doesNotMatch(text, /SNAPSHOT/u);
   assert.ok(text.split("\n").filter((line) => line.includes("activity \"")).every((line) => displayColumns(line) <= 120));
   for (const row of visible.slice(0, 3)) assert.match(text, new RegExp(`snapshot ${row.id.slice(0, 12)}`, "u"));
   for (const row of visible.slice(3)) assert.doesNotMatch(text, new RegExp(`snapshot ${row.id}`, "u"));
-  assert.match(text, /untidy/u);
+  const fleet = sectionBody(text, "FLEET");
+  for (const [index, row] of visible.entries()) {
+    const before = visible[index - 1];
+    if (before !== undefined) assert.ok(fleet.indexOf(before.id) < fleet.indexOf(row.id));
+  }
+  assert.match(text, /no-coordinate-second/u);
+});
+
+test("Kanshi reads ActivitySnapshots for the first three final Fleet display rows", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-kanshi-fleet-snapshots-"));
+  const ids = [
+    await bornAkuma(root, "a0000001", "2026-08-09T00:00:00.000Z", true),
+    await bornAkuma(root, "a0000002", "2026-08-09T00:03:00.000Z", true),
+    await bornAkuma(root, "a0000003", "2026-08-09T00:01:00.000Z", true),
+    await bornAkuma(root, "a0000004", "2026-08-09T00:02:00.000Z", true),
+  ];
+  const originalStatus = AkumaHandle.prototype.status;
+  const statusReads: string[] = [];
+  AkumaHandle.prototype.status = async function () {
+    statusReads.push(this.id);
+    return await originalStatus.call(this);
+  };
+  try {
+    const report = await observe(root);
+    assert.equal(report.akuma.kind, "present");
+    if (report.akuma.kind !== "present") return;
+    const fleet = sectionBody(renderKanshiText(report, { columns: 120, color: false }), "FLEET");
+    const displayed = [...ids].sort((left, right) => fleet.indexOf(left) - fleet.indexOf(right));
+    assert.deepEqual(displayed, [ids[1], ids[3], ids[2], ids[0]]);
+    assert.equal(statusReads.length, 3);
+    assert.deepEqual([...statusReads].sort(), [...displayed.slice(0, 3)].sort());
+  } finally {
+    AkumaHandle.prototype.status = originalStatus;
+  }
 });
 
 test("Fleet keeps a complete long Akuma identity beside narrow activity text", () => {

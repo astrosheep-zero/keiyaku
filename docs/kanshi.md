@@ -59,11 +59,13 @@ latest timeline-row observation and may be `null`. Kanshi does not persist or
 precompute an age. Text derives every displayed age against this report's one
 `observedAt`; JSON retains only the source timestamps. Fleet text retains every
 readable Akuma row, including running, asleep, stranded, killed, hung, untidy,
-unborn, stillborn, and lost rows. It uses a ten-row hot-first aperture: the
-existing Akuma hot rule selects running, lost, stillborn, and missing or
-unavailable Dispatch endpoints before cold rows in source order. The same final
-visible ordering selects activity snapshots, which are bounded to its first
-three rows.
+unborn, stillborn, and lost rows. Every bare section uses its owner's native
+update coordinate for a stable descending recent-first ten-row aperture:
+Contract uses `lastJournalAt`, Task uses `updatedAt`, and Fleet uses the later
+non-null value of `lifeAt` and `lastActivityAt`. Equal coordinates preserve
+source order; a Fleet row with neither coordinate is older than one with either
+coordinate. The same final Fleet ordering selects activity snapshots, which are
+bounded to its first three rows.
 
 When a Repo is present, Kanshi creates one call-scoped Git read observation and
 passes it to the complete Contract, TaskHolder, and
@@ -288,18 +290,15 @@ coordinate, aggregate score, or alternate status mode.
 ● task/example · in_progress · P0 · Title · -> kei/example
 ```
 
-The text aperture shows at most ten rows from each section. Contract and Task
-select hot live rows first, then cold-live rows in their existing source order: a
-Contract is hot when it is tendered, has failed or
-stale gate testimony, is behind its target, has a dirty or unavailable
-worktree, has an unavailable or held TaskHolder, has an attached Akuma, or has
-no readable title; a Task is hot when blocked or in progress. Fleet selects its
-existing hot rows first: running, lost, stillborn, or a missing or unavailable
-Dispatch endpoint, then all cold rows in source order. No row is duplicated.
-Terminal Contract and Task rows are omitted and excluded from their live count;
-Fleet retains every readable life state, including asleep, stranded, killed,
-hung, untidy, unborn, and stillborn rows. Complete coordinates remain present
-in output bytes even when the terminal wraps them.
+The text aperture shows at most ten rows from each section, selected by the
+stable recent-first owner-coordinate rule. No row is duplicated. Terminal
+Contract and Task rows are omitted and excluded from their live count; Fleet
+retains every readable life state, including asleep, stranded, killed, hung,
+untidy, unborn, and stillborn rows. Complete coordinates remain present in
+output bytes even when the terminal wraps them. Bare Contract rows render age
+from `lastJournalAt`; selected Contract status continues to render phase age
+from `phaseAt`. Fleet renders both life and activity ages, and Task retains its
+existing update coordinate and display.
 
 After its visible rows, a complete section writes exactly
 `  (all <N> live <unit> shown)` for KEIYAKU and TASK, and
