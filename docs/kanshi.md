@@ -348,10 +348,23 @@ Visible hot Contract rows retain every such fact; cold rows retain their
 complete identity, title, phase, and target facts. World-board gates are
 age-less slots: `[✓]` satisfied, `[✗]` unsatisfied, `[ ]` never reported, and
 `[~]` stale. Selected Contract text retains detailed gate ages and summaries.
-World attachments render as a `LINKED` list with the first identity on the
-label line and later identities on aligned following lines. Selected Contract
-text renders `namespaceTasks` after holder and Fleet attachment rows, as one
-summary then every matching row:
+World and selected Contract attachments render as a `LINKED` list. Every entry
+contains its contextual glyph, complete identity, and basic current status:
+
+```text
+  LINKED  ⧗ task/fix-auth · on_hold
+          ● aku/worker-2 (@lead) · running
+```
+
+The list preserves every attached entry, including the current TaskHolder.
+When a present endpoint cannot be found it ends in `missing`; an absent or
+failed endpoint section ends in `unavailable`. An unavailable TaskHolder with
+no readable identity renders `! task · unavailable`. These statuses remain
+visible rather than looking like live attachments. Task titles, priorities,
+blockers, bodies, and other Task detail do not appear below a Contract-linked
+line. Akuma snapshots, activity, archetype, and description do not appear
+there either. Selected Contract text then renders `namespaceTasks` after the
+linked rows, as one summary then every matching row:
 
 ```text
   │ namespace tasks <N>
@@ -384,8 +397,8 @@ Hot world-board Contract rows use this aligned field order:
   GIT     <target facts> · <worktree state>
   DIR     /absolute/managed/path
   GATES   [✓] build   [✗] tests
-  LINKED  task/<complete-id>
-          aku/<complete-id> (@alias)
+  LINKED  <task-glyph> task/<complete-id> · <disposition>
+          <akuma-glyph> aku/<complete-id> (@alias) · <life>
 ```
 
 `GIT` carries the worktree state. `DIR` appears for a hot managed Contract
@@ -394,4 +407,5 @@ unavailable location; unappointed and failed observations never invent one.
 Cold live rows keep the complete identity, title, phase, and target facts in
 one compact row, without repeating clean worktree state or a path. IDs and
 paths are never shortened; they may overflow the terminal. `LINKED` is an
-entity attachment list, not a worktree relation.
+entity attachment list, not a worktree relation. Fleet remains the only Akuma
+activity surface and retains its single bounded activity line.

@@ -880,8 +880,9 @@ test("Kanshi text uses live sections, preserves important facts, and omits termi
   assert.match(contracts, /^ {2}DIR     \/repo\/\.keiyaku\/wt\/active-contract$/mu);
   assert.match(contracts, /tendered · 3m/u);
   assert.match(contracts, /GATES   \[✓\] reviewed   \[✗\] verified   \[~\] security   \[ \] manual/u);
-  assert.match(contracts, /LINKED  task\/running/u);
-  assert.match(contracts, /aku\/worker\/a0000001 \(@lead\)/u);
+  assert.match(contracts, /LINKED  ● task\/running · in_progress/u);
+  assert.match(contracts, /● aku\/worker\/a0000001 \(@lead\) · running/u);
+  assert.doesNotMatch(contracts, /Investigate failed Linux verification|P0|activity/u);
   assert.doesNotMatch(contracts, /world summary should stay hidden/u);
   const cold = contracts.split("kei/cold-contract")[1]!;
   const nextCold = cold.search(/^[!●○✓?×] /mu);
@@ -942,6 +943,53 @@ test("Kanshi text uses live sections, preserves important facts, and omits termi
   assert.match(fleet, /stillborn · —/u);
   assert.match(fleet, /unborn · —/u);
   assert.deepEqual(report, before);
+});
+
+test("Contract LINKED entries stay compact and preserve endpoint disposition", () => {
+  const report = attentionReport();
+  if (report.contracts.kind !== "present" || report.tasks.kind !== "present" || report.akuma.kind !== "present") {
+    throw new Error("fixture sections must be present");
+  }
+  const row = report.contracts.value.rows.find((candidate) => candidate.id === "kei/active-contract");
+  if (row === undefined) throw new Error("fixture Contract must be present");
+  const linkedRow = {
+    ...row,
+    fleet: [
+      ...row.fleet,
+      { id: "aku/worker/missing", aliases: ["@missing"] },
+    ],
+  };
+  const compact = renderKanshiText({
+    ...report,
+    contracts: { ...report.contracts, value: { ...report.contracts.value, rows: [linkedRow] } },
+  }, { columns: 120, color: false });
+  const selected = renderKanshiText({
+    ...report,
+    contracts: { ...report.contracts, value: { ...report.contracts.value, rows: [linkedRow] } },
+  }, { columns: 120, color: false }, "contract");
+  for (const text of [compact, selected]) {
+    assert.match(text, /● task\/running · in_progress/u);
+    assert.match(text, /● aku\/worker\/a0000001 \(@lead\) · running/u);
+    assert.match(text, /! aku\/worker\/missing \(@missing\) · missing/u);
+    const linked = text.split("\n").filter((line) => /task\/running|aku\/worker\/a0000001|aku\/worker\/missing/u.test(line)).join("\n");
+    assert.doesNotMatch(linked, /Investigate failed Linux verification|P0|activity/u);
+  }
+  const missingTask = renderKanshiText({
+    ...report,
+    contracts: { ...report.contracts, value: { ...report.contracts.value, rows: [linkedRow] } },
+    tasks: { ...report.tasks, value: { ...report.tasks.value, rows: report.tasks.value.rows.filter((task) => task.id !== "task/running") } },
+  }, { columns: 120, color: false }, "contract");
+  assert.match(missingTask, /! task\/running · missing/u);
+
+  const unavailable = renderKanshiText({
+    ...report,
+    contracts: { ...report.contracts, value: { ...report.contracts.value, rows: [{ ...linkedRow, holder: { kind: "unavailable" } }] } },
+    tasks: { kind: "failed", failure: { message: "task board unavailable" } },
+    akuma: { kind: "failed", failure: { message: "fleet unavailable" } },
+  }, { columns: 120, color: false }, "contract");
+  assert.match(unavailable, /! task · unavailable/u);
+  assert.match(unavailable, /! aku\/worker\/a0000001 \(@lead\) · unavailable/u);
+  assert.match(unavailable, /! aku\/worker\/missing \(@missing\) · unavailable/u);
 });
 
 test("Kanshi sections use a ten-row aperture with exact complete and partial footers", () => {
@@ -1348,7 +1396,7 @@ test("Contract namespace Tasks come from one Task board observation", async () =
   const worldText = renderKanshiText(report, { columns: 120, color: false });
   const selectedText = renderKanshiText(selected, { columns: 120, color: false }, "contract");
   assert.doesNotMatch(sectionBody(worldText, "KEIYAKU"), /namespace tasks /u);
-  assert.match(selectedText, new RegExp(String.raw`task ${taskId}`, "u"));
+  assert.match(selectedText, new RegExp(String.raw`● ${taskId} · in_progress`, "u"));
   assert.match(selectedText, /namespace tasks 2/u);
   assert.match(selectedText, new RegExp(String.raw`⧗ task/${segment}/zeta · P0 on_hold — Namespace zeta`, "u"));
   assert.match(selectedText, new RegExp(String.raw`✓ task/${segment}/alpha · P3 done — Namespace alpha`, "u"));

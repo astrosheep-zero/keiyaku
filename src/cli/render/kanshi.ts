@@ -330,6 +330,31 @@ function endpointFact(id: string, observed: string | undefined): string {
   return `-> ${id}`;
 }
 
+function linkedTask(report: KanshiReport, taskId: string): string {
+  if (report.tasks.kind !== "present") return `! ${taskId} · unavailable`;
+  const task = report.tasks.value.rows.find((candidate) => candidate.id === taskId);
+  return task === undefined ? `! ${taskId} · missing` : `${taskMark(task)} ${task.id} · ${task.disposition}`;
+}
+
+function linkedAkuma(
+  report: KanshiReport,
+  id: string,
+  aliases: readonly string[],
+): string {
+  const alias = aliases.length === 0 ? "" : ` (${aliases.join(" ")})`;
+  if (report.akuma.kind !== "present") return `! ${id}${alias} · unavailable`;
+  const akuma = report.akuma.value.rows.find((candidate) => candidate.id === id);
+  return akuma === undefined ? `! ${id}${alias} · missing` : `${akumaMark(akuma.life)} ${id}${alias} · ${akuma.life}`;
+}
+
+function linkedFacts(row: ContractKanshiRow, report: KanshiReport): readonly string[] {
+  const linked: string[] = [];
+  if (row.holder.kind === "held") linked.push(linkedTask(report, row.holder.taskId));
+  if (row.holder.kind === "unavailable") linked.push("! task · unavailable");
+  for (const attached of row.fleet) linked.push(linkedAkuma(report, attached.id, attached.aliases));
+  return linked;
+}
+
 function renderNamespaceTasks(row: ContractKanshiRow, context: TextRenderContext): readonly string[] {
   if (row.namespaceTasks.kind === "absent") return plumbFacts(["namespace tasks absent"], context.columns);
   if (row.namespaceTasks.kind === "failed") {
@@ -390,12 +415,7 @@ function renderContractRow(
   }
   lines.push(...renderGates(row.gates.reports, report.observedAt, context.columns, selection === "contract"));
   lines.push(...selectedExtras(row, selection, abbreviations, context.columns));
-  if (row.holder.kind === "held") lines.push(...plumbFacts([`task ${row.holder.taskId}`], context.columns));
-  if (row.holder.kind === "unavailable") lines.push(...plumbFacts(["holder unavailable"], context.columns));
-  for (const attached of row.fleet) {
-    const aliases = attached.aliases.length === 0 ? "" : ` (${attached.aliases.join(" ")})`;
-    lines.push(...plumbFacts([`akuma ${attached.id}${aliases}`], context.columns));
-  }
+  lines.push(...plumbFacts(linkedFacts(row, report), context.columns));
   if (selection === "contract") {
     if (row.issue !== undefined) {
       const detail =
@@ -478,13 +498,7 @@ function renderWorldContractRow(
   }
   lines.push(...renderWorldGates(row.gates.reports));
   for (const fact of after) lines.push(`  ${safeText(fact)}`);
-  const linked: string[] = [];
-  if (row.holder.kind === "held") linked.push(row.holder.taskId);
-  if (row.holder.kind === "unavailable") linked.push("holder unavailable");
-  for (const attached of row.fleet) {
-    const aliases = attached.aliases.length === 0 ? "" : ` (${attached.aliases.join(" ")})`;
-    linked.push(`${attached.id}${aliases}`);
-  }
+  const linked = linkedFacts(row, report);
   if (linked.length > 0) {
     lines.push(fieldLine("LINKED", linked[0]!));
     for (const item of linked.slice(1)) lines.push(`  ${" ".repeat(FIELD_WIDTH)}${safeText(item)}`);
