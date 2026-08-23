@@ -926,6 +926,7 @@ test("Kanshi text uses live sections, preserves important facts, and omits termi
   assert.match(fleet, /^● aku\/worker\/a0000001 \(@lead\)$/mu);
   assert.match(fleet, /running · 4m/u);
   assert.match(fleet, /activity 5m/u);
+  assert.doesNotMatch(fleet, /ACTIVITYactivity/u);
   const stranded = fleet.split("aku/worker/a0000006")[1]!;
   const nextStranded = stranded.search(/^[!●○✓?×] /mu);
   const strandedBlock = nextStranded === -1 ? stranded : stranded.slice(0, nextStranded);

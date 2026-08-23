@@ -619,7 +619,9 @@ function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly
     const lines = [identityLine(akumaMark(row.life), row.id, akumaLabel(row))];
     lines.push(fieldLine("LIFE", key.join(" · ")));
     if (snapshot !== undefined)
-      lines.push(fieldLine("ACTIVITY", boundedActivity(snapshot, context.columns, fieldPrefix("ACTIVITY"))));
+      lines.push(
+        fieldLine("ACTIVITY", ` ${boundedActivity(snapshot, context.columns, `${fieldPrefix("ACTIVITY")} `)}`),
+      );
     lines.push(fieldLine("LINKED", relation.join(" · ")));
     return lines;
   });
