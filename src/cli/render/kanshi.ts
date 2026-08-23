@@ -4,10 +4,10 @@ import { visibleFleetRows } from "../../kanshi/fleet.js";
 import {
   abbreviateGitIds,
   afterWording,
+  candidateFact,
   dependentWording,
   displayGitId,
-  gateGlyph,
-  gateLegend,
+  gateFact,
   gitIdsInRow,
   mergeSummary,
 } from "./contract-observation.js";
@@ -334,7 +334,7 @@ function renderSelectedContractRow(
   lines.push(...semanticBlock("after", worldAfterFacts(row), context));
   lines.push(...semanticBlock("dependents", row.dependents.map(dependentWording), context));
   const gateFacts = row.gates.reports.flatMap((gate) => [
-    `${gateGlyph(gate)} ${gate.gate} ${formatAge(gate.current.kind === "attested" ? gate.current.at : null, report.observedAt)}`,
+    `${gateFact(gate)} ${formatAge(gate.current.kind === "attested" ? gate.current.at : null, report.observedAt)}`,
     ...(gate.current.kind === "attested" && gate.current.summary !== undefined
       ? [`${gate.gate}: ${gate.current.summary}`]
       : []),
@@ -365,10 +365,9 @@ function renderSelectedContractRow(
 }
 
 function candidateFacts(row: ContractKanshiRow, abbreviations: ReadonlyMap<string, string>): readonly string[] {
-  if (row.delivery === null) return [];
+  if (row.delivery === null) return [candidateFact(row.delivery)];
   const delivery = row.delivery;
   return [
-    "candidate",
     `tender ${displayGitId(delivery.tenderSnapshot, abbreviations)}`,
     `integration ${displayGitId(delivery.integration.predecessor, abbreviations)} -> ${displayGitId(delivery.integration.snapshot, abbreviations)}`,
     `method ${delivery.method}`,
@@ -391,11 +390,11 @@ function renderWorldContractRow(
 ): readonly string[] {
   const title = row.title ?? "title unavailable";
   const facts = [
-    `${row.delivery === null ? "○" : "●"}`,
+    candidateFact(row.delivery),
     ...targetFacts(row),
     ...worldAfterFacts(row),
     ...(row.dependents.length === 0 ? [] : [`dependents ${row.dependents.map(dependentWording).join(" · ")}`]),
-    ...row.gates.reports.map((report) => `${gateGlyph(report)} ${report.gate}`),
+    ...row.gates.reports.map(gateFact),
     ...linkedFacts(row, report, "world"),
   ];
   const lines = [
@@ -462,7 +461,7 @@ function renderContracts(report: KanshiReport, context: TextRenderContext): read
     total: live.length,
   });
   const header = `[ KEIYAKU ]  contract state ${section.value.state === null ? "-" : displayGitId(section.value.state, abbreviations)} · observedAt ${report.observedAt} · ${live.length} live · candidate ${candidates}`;
-  return [header, "", "  ○ no candidate · ● candidate", `  ${gateLegend()}`, ...rendered.slice(1)];
+  return [header, "", ...rendered.slice(1)];
 }
 
 function renderSelectedContract(report: KanshiReport, context: TextRenderContext): readonly string[] {

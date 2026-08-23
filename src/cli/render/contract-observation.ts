@@ -14,8 +14,12 @@ export function gateGlyph(report: ContractGateReport): string {
   return report.current.verdict === "satisfied" ? "[✓]" : "[✗]";
 }
 
-export function gateLegend(): string {
-  return "[✓] satisfied  [✗] unsatisfied  [~] stale  [ ] missing";
+export function gateFact(report: ContractGateReport): string {
+  return `${gateGlyph(report)} ${report.gate}${report.current.kind === "stale" ? " (stale)" : ""}`;
+}
+
+export function candidateFact(delivery: ContractRow["delivery"]): string {
+  return delivery === null ? "no candidate" : "candidate";
 }
 
 export function afterWording(edge: ContractAfterEdge): string {

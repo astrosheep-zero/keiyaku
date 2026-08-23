@@ -2,10 +2,10 @@ import type { Catalog, ContractRow } from "../../index.js";
 import {
   abbreviateGitIds,
   afterWording,
+  candidateFact,
   dependentWording,
   displayGitId,
-  gateGlyph,
-  gateLegend,
+  gateFact,
   gitIdsInRow,
 } from "./contract-observation.js";
 import { safeText } from "./terminal.js";
@@ -59,19 +59,14 @@ function renderContractCatalog(catalog: Extract<Catalog, { kind: "contracts" }>)
     catalog.state === null
       ? `observedAt ${catalog.observedAt}`
       : `contract state ${displayGitId(catalog.state, abbreviations)} · observedAt ${catalog.observedAt}`,
-    "○ no candidate · ● candidate",
-    gateLegend(),
   ];
   const blocks = rows.map((row) => {
     const lines = [
       `${catalogMark(row)} ${safeText(row.id)} · ${row.phase} · ${formatAge(row.phaseAt, catalog.observedAt)} · ${safeText(row.title ?? "title unavailable")}`,
-      `  ${row.delivery === null ? "○" : "●"}`,
-      `  ${targetLine(row)}`,
+      `  ${candidateFact(row.delivery)} · ${targetLine(row)}`,
       ...row.after.map((edge) => `  ${afterWording(edge)}`),
       ...(row.dependents.length === 0 ? [] : [`  dependents ${row.dependents.map(dependentWording).join(" · ")}`]),
-      ...(row.gates.reports.length === 0
-        ? []
-        : [`  ${row.gates.reports.map((report) => `${gateGlyph(report)} ${report.gate}`).join("  ")}`]),
+      ...(row.gates.reports.length === 0 ? [] : [`  ${row.gates.reports.map(gateFact).join("  ")}`]),
     ];
     return lines.join("\n");
   });

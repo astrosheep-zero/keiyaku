@@ -268,16 +268,17 @@ Human and Flagship share one text projection. The renderer consumes the typed
 report only; it does not reread product authorities or infer associations. Bare
 world text has three sections in this exact order: KEIYAKU, FLEET, TASK.
 The KEIYAKU header includes the unique Git-prefix Contract state, observedAt,
-live count, and candidate count, followed by `○ no candidate · ● candidate`
-and `[✓] satisfied  [✗] unsatisfied  [~] stale  [ ] missing` legends. Fleet
-and TASK retain their existing counts. There is no signature, invocation
+live count, and candidate count. Candidate existence starts the candidate/target
+fact line as `candidate` or `no candidate`; the row has no candidate glyph.
+Gate glyphs stay immediately before gate names, and stale gates append `(stale)`.
+Fleet and TASK retain their existing counts. There is no signature, invocation
 coordinate, aggregate score, or alternate status mode.
 
 ```text
 [ KEIYAKU ]  1 live
 
 ! kei/example · tendered · 3m · Title
-  │ ○ · target main · 7 commits behind main · [✗] tests
+  │ no candidate · target main · 7 commits behind main · [✗] tests
   │ ● task/example · in_progress · ● aku/worker/abcd1234 (@lead) · running
 
 [ FLEET ]  1 akuma
@@ -319,7 +320,7 @@ header. `keiyaku ls`
 is the complete text inspection path; typed Kanshi and JSON remain complete.
 
 `keiyaku ls kei/` is a pure active-Contract catalog. Its header includes active
-count, Contract state, observedAt, and the same candidate and gate legends.
+count, Contract state, observedAt, and candidate count.
 Each natural-flow block retains complete identity, age, title, after/dependent
 edges, gate testimony, and target blocker facts. It does not join Task, Alias,
 Dispatch, Akuma, holder, or namespace data and does not expose candidate
@@ -369,7 +370,8 @@ unknown, stale, or lost. There is no invented `=` mark.
 
 World-board Contract rows are natural-flow decision summaries with complete
 identity, age, title, after/dependent edges, gate testimony, and target facts.
-They do not expose workspace or merge internals. Attached Task and Akuma rows
+They start the candidate/target fact line with `candidate` or `no candidate`;
+stale gate facts append `(stale)`. They do not expose workspace or merge internals. Attached Task and Akuma rows
 retain complete identity, aliases, and basic current status only. Fleet remains
 the sole Akuma activity surface. Selected status uses lowercase semantic blocks
 for `after`, `dependents`, `gates`, `candidate/integration`, `target`,

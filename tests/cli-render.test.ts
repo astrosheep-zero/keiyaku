@@ -62,15 +62,12 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
 
   assert.match(text, /1 active · 0 candidates/u);
   assert.match(text, /contract state aaaaaaa · observedAt 2026-08-12T00:00:00.000Z/u);
-  assert.match(text, /^○ no candidate · ● candidate$/mu);
-  assert.equal([...text.matchAll(/^○ no candidate · ● candidate$/gmu)].length, 1);
   assert.match(text, /! kei\/selected-contract · waiting · 0s · Selected Contract/u);
-  assert.match(text, /^  ○$/mu);
-  assert.doesNotMatch(text, /^  ○ no candidate$/mu);
-  assert.match(text, /  no target/u);
+  assert.match(text, /^  no candidate · no target$/mu);
+  assert.doesNotMatch(text, /○ no candidate · ● candidate|satisfied  \[✗\] unsatisfied/u);
   assert.doesNotMatch(text, /worktree clean|tender |integration |merge /u);
   assert.doesNotMatch(text, new RegExp(state, "u"));
-  assert.match(text, /\[✓\] reviewed  \[✗\] verified  \[~\] security  \[ \] manual/u);
+  assert.match(text, /\[✓\] reviewed  \[✗\] verified  \[~\] security \(stale\)  \[ \] manual/u);
   assert.match(text, /after kei\/claimed-prerequisite \(claimed\)/u);
   assert.match(text, /blocked by kei\/active-prerequisite \(waiting\)/u);
   assert.match(text, /blocked by kei\/abandoned-prerequisite \(abandoned\)/u);
@@ -92,10 +89,8 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
     }],
   });
   assert.match(delivered, /1 active · 1 candidate(?!s)/u);
-  assert.match(delivered, /^○ no candidate · ● candidate$/mu);
-  assert.equal([...delivered.matchAll(/^○ no candidate · ● candidate$/gmu)].length, 1);
-  assert.match(delivered, /^  ●$/mu);
-  assert.doesNotMatch(delivered, /^  ● candidate$/mu);
+  assert.match(delivered, /^  candidate · no target$/mu);
+  assert.doesNotMatch(delivered, /○ no candidate · ● candidate|satisfied  \[✗\] unsatisfied/u);
   assert.doesNotMatch(delivered, /tender |integration /u);
 });
 

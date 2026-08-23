@@ -870,18 +870,17 @@ test("Kanshi text uses live sections, preserves important facts, and omits termi
   for (const row of report.akuma.value.rows) assert.equal(text.includes(row.id), true);
 
   const contracts = sectionBody(text, "KEIYAKU");
-  assert.match(text, /^  ○ no candidate · ● candidate$/mu);
-  assert.equal([...text.matchAll(/^  ○ no candidate · ● candidate$/gmu)].length, 1);
   assert.match(contracts, /^! kei\/active-contract · tendered · 3m · Active Contract$/mu);
   assert.match(contracts, /Active Contract/u);
   assert.match(contracts, /tendered/u);
-  assert.match(contracts, /│ ○ · target main/u);
-  assert.doesNotMatch(contracts, /│ ○ no candidate/u);
+  assert.match(contracts, /│ no candidate · target main/u);
   assert.match(contracts, /target main/u);
   assert.match(contracts, /7 commits behind main/u);
   assert.match(contracts, /target moved/u);
   assert.match(contracts, /tendered · 3m/u);
-  assert.match(contracts, /\[✓\] reviewed · \[✗\] verified · \[~\] security/u);
+  assert.match(contracts, /\[✓\] reviewed/u);
+  assert.match(contracts, /\[✗\] verified/u);
+  assert.match(contracts, /\[~\] security \(stale\)/u);
   assert.match(contracts, /● aku\/worker\/a0000001 \(@lead\) · running/u);
   assert.doesNotMatch(contracts, /Investigate failed Linux verification|P0|activity/u);
   assert.doesNotMatch(contracts, /world summary should stay hidden/u);
@@ -903,7 +902,7 @@ test("Kanshi text uses live sections, preserves important facts, and omits termi
   assert.doesNotMatch(contracts, /worktree |merge |\/repo\/\.keiyaku\/wt\//u);
   const selected = renderKanshiText(selectKanshi({ report, contract: "kei/active-contract" }), { columns: 120, color: false }, "contract");
   assert.match(selected, /tendered · 3m/u);
-  assert.match(selected, /  candidate\/integration\n    none/u);
+  assert.match(selected, /  candidate\/integration\n    no candidate/u);
   const active = report.contracts.value.rows.find((row) => row.id === "kei/active-contract");
   assert.equal(active?.phase, "tendered");
   assert.equal(JSON.parse(JSON.stringify(active)).phase, "tendered");
@@ -945,7 +944,7 @@ test("Kanshi text uses live sections, preserves important facts, and omits termi
   assert.deepEqual(report, before);
 });
 
-test("world Contract rows keep the candidate glyph without repeating candidate words", () => {
+test("world Contract rows make candidate facts self-describing", () => {
   const report = attentionReport();
   if (report.contracts.kind !== "present") throw new Error("fixture contracts must be present");
   const row = report.contracts.value.rows.find((candidate) => candidate.id === "kei/active-contract");
@@ -969,13 +968,12 @@ test("world Contract rows keep the candidate glyph without repeating candidate w
   };
   const text = renderKanshiText(deliveredReport, { columns: 120, color: false });
   assert.match(text.split("\n", 1)[0]!, /candidate 1$/u);
-  assert.match(text, /^  ○ no candidate · ● candidate$/mu);
-  assert.equal([...text.matchAll(/^  ○ no candidate · ● candidate$/gmu)].length, 1);
+  assert.doesNotMatch(text, /○ no candidate · ● candidate|satisfied  \[✗\] unsatisfied/u);
   const body = sectionBody(text, "KEIYAKU");
-  assert.match(body, /│ ● · target main/u);
-  assert.doesNotMatch(body, /│ ● candidate/u);
+  assert.match(body, /│ candidate · target main/u);
   const selected = renderKanshiText(deliveredReport, { columns: 120, color: false }, "contract");
-  assert.match(selected, /  candidate\/integration\n    candidate\n    tender /u);
+  assert.match(selected, /  candidate\/integration\n    tender /u);
+  assert.doesNotMatch(selected, /candidate\/integration\n    candidate\n/u);
 });
 
 test("Contract LINKED entries stay compact and preserve endpoint disposition", () => {

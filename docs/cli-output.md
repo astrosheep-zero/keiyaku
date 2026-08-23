@@ -73,11 +73,12 @@ Kanshi text is a pure projection of its typed report. Bare world status keeps
 the `[ KEIYAKU ]`, `[ FLEET ]`, `[ TASK ]` order; these are its only uppercase
 section headers. Contract rows are natural-flow decision summaries with complete
 identity, age, title, blockers, edges, gate states, target facts, and attached
-Task/Akuma identities with aliases and basic current status only. Fleet remains
+Task/Akuma identities with aliases and basic current status only. Candidate
+existence starts the candidate/target fact line as `candidate` or `no candidate`;
+gate glyphs stay beside gate names, and stale gates append `(stale)`. Fleet remains
 the bounded Akuma activity surface. `keiyaku ls kei/` is the pure active
-Contract catalog: it keeps the same candidate and gate legends and relevant
-Contract facts without Task or Akuma joins, candidate coordinates, or workspace
-and merge internals. Named Contract status renders only the selected Contract,
+Contract catalog: it keeps the relevant Contract facts without Task or Akuma joins,
+candidate coordinates, or workspace and merge internals. Named Contract status renders only the selected Contract,
 using lowercase semantic blocks for `after`, `dependents`, `gates`,
 `candidate/integration`, `target`, `workspace/merge`, `attachments`, and
 `namespace tasks`. Git object IDs use the existing unique-prefix primitive;
