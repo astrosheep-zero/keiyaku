@@ -267,9 +267,10 @@ conflicts, ownership, gates, or serialization advice.
 Human and Flagship share one text projection. The renderer consumes the typed
 report only; it does not reread product authorities or infer associations. Bare
 world text has three sections in this exact order: KEIYAKU, FLEET, TASK.
-KEIYAKU and TASK headers are `[ <SECTION> ]  <N> live`, where N is that
-section's non-terminal live count. Fleet is `[ FLEET ]  <N> akuma`, where N is
-every readable Fleet row. There is no signature, invocation coordinate, state
+The KEIYAKU header includes the unique Git-prefix Contract state, observedAt,
+live count, and candidate count, followed by `○ no candidate · ● candidate`
+and `[✓] satisfied  [✗] unsatisfied  [~] stale  [ ] missing` legends. Fleet
+and TASK retain their existing counts. There is no signature, invocation
 coordinate, aggregate score, or alternate status mode.
 
 ```text
@@ -327,12 +328,19 @@ exactly `  + <N> more live <unit> not shown`; a partial FLEET writes exactly
 `    keiyaku ls <selector>/`; the resulting commands are `keiyaku ls kei/`,
 `keiyaku ls aku/`, and `keiyaku ls task/`. The
 omitted count is the relevant section count beyond the ten-row aperture and
-never includes terminal Contract or Task rows. Fleet snapshots belong only to
-the first three final visible rows. There is one blank line after each header and
-before its footer, then two blank lines before the next header. `keiyaku ls`
+never includes terminal Contract or Task rows. Fleet keeps its ten-row aperture
+and snapshot read boundary, but text projects only one physical
+`activity "<bounded text>"` line for a visible latest semantic activity or idle
+outcome. The value is safe-text-normalized and clipped with the terminal
+display-width primitive; it is not the durable ActivitySnapshot. Rows without
+a latest activity or outcome omit the activity field. There is one blank line
+after each header and before its footer, then two blank lines before the next
+header. `keiyaku ls`
 is the complete text inspection path; typed Kanshi and JSON remain complete.
 
-Contract rows retain complete `kei/...` identity, read-time title, phase, target,
+`keiyaku ls kei/` is a flat active-Contract stream. Its header includes active
+count, Contract state, observedAt, and the same candidate and gate legends.
+Rows retain complete `kei/...` identity, read-time title, phase, target,
 numeric behind when known, `commits behind <target> unknown` beside a known
 target name when lag is unknown, explicit no-target when none, independent
 target movement, gate testimony, and exact attached Task/Akuma coordinates.

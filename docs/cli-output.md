@@ -69,6 +69,22 @@ CLI does not prompt.
 Plain text is the primary CLI projection. `--json` is a secondary projection
 of the same typed value; it never excuses missing or degraded text facts.
 
+Kanshi text is a pure projection of its typed report. World status keeps the
+`[ KEIYAKU ]`, `[ FLEET ]`, `[ TASK ]` order and exposes Contract state,
+observedAt, live and candidate counts, plus candidate and gate legends. The
+Contract catalog is a flat active stream with the same metadata and complete
+identities. Named Contract status renders only the selected Contract facts,
+including every named gate, delivery candidate and integration coordinates,
+target observation, workspace/merge facts, attachments, and namespace Tasks.
+Git object IDs use the existing unique-prefix primitive; Contract, Change,
+Task, and Akuma identities remain complete.
+
+Fleet activity text is bounded presentation only: a visible latest semantic
+activity or idle outcome renders as one safe-text-normalized physical line,
+`activity "<bounded text>"`, clipped to the requested display width. The
+durable ActivitySnapshot, its retention, and JSON values are unchanged. A row
+without a latest activity or idle outcome omits the activity text.
+
 After stdin acquisition, external-command or substantial Git work writes one
 stderr line: `⧖ preparing keiyaku` for bind, `⧖ delivering`,
 `⧖ auditing`, `⧖ reconciling`, or `⧖ installing skills`. It is a start fact,

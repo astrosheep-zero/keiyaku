@@ -771,13 +771,13 @@ test("Kanshi text keeps complete identities in the aperture grammar", async () =
   const text = renderKanshiText(report, { columns: 20, color: false });
   const world = await World.at(repository.path);
   const signature = text.split("\n", 1)[0]!;
-  assert.equal(signature, "[ KEIYAKU ]  1 live");
+  assert.match(signature, /^\[ KEIYAKU \]  contract state \S+ · observedAt \S+ · 1 live · candidate 0$/u);
   assert.equal(text.includes(world), true);
   assert.equal(report.contracts.kind, "present");
   assert.equal(text.includes(contract.id), true);
   assert.equal(text.includes(taskId), true);
   assert.equal(text.includes(akumaId), true);
-  assert.match(text, /\[ KEIYAKU \]  1 live/u);
+  assert.match(text, /\[ KEIYAKU \]  contract state \S+ · observedAt \S+ · 1 live · candidate 0/u);
   assert.match(text, /\[ TASK \]  1 live/u);
   assert.match(text, /\[ FLEET \]  1 akuma/u);
   assert.ok(text.indexOf("[ KEIYAKU ]") < text.indexOf("[ FLEET ]"));
@@ -854,7 +854,7 @@ test("Kanshi text uses live sections, preserves important facts, and omits termi
   const before = structuredClone(report);
   const text = renderKanshiText(report, { columns: 120, color: false });
 
-  assert.equal(text.split("\n", 1)[0], "[ KEIYAKU ]  5 live");
+  assert.match(text.split("\n", 1)[0]!, /^\[ KEIYAKU \]  contract state \S+ · observedAt \S+ · 5 live · candidate 0$/u);
   assert.match(text, /\n\n\[ FLEET \]  7 akuma/u);
   assert.match(text, /\n\n\[ TASK \]  4 live/u);
   assert.doesNotMatch(text, /attention|kanshi ───|──\[/u);
@@ -952,7 +952,7 @@ test("Kanshi sections use a ten-row aperture with exact complete and partial foo
     tasks: { ...report.tasks, value: { ...report.tasks.value, rows: [] } },
     akuma: { ...report.akuma, value: { ...report.akuma.value, rows: [] } },
   }, { columns: 120, color: false });
-  assert.match(empty, /\[ KEIYAKU \]  0 live[\s\S]*\(all 0 live keiyaku shown\)/u);
+  assert.match(empty, /\[ KEIYAKU \]  contract state \S+ · observedAt \S+ · 0 live · candidate 0[\s\S]*\(all 0 live keiyaku shown\)/u);
   assert.match(empty, /\[ FLEET \]  0 akuma[\s\S]*\(all 0 akuma shown\)/u);
   assert.match(empty, /\[ TASK \]  0 live[\s\S]*\(all 0 live task shown\)/u);
 
@@ -1015,7 +1015,7 @@ test("Fleet retains non-running rows and bounds snapshots to its final hot-first
         kind: "idle",
         entries: [],
         omitted: 0,
-        outcome: { outcome: { kind: "answered", answer: `snapshot ${row.id}` } },
+        outcome: { outcome: { kind: "answered", answer: row === visible[0] ? `snapshot ${row.id}\n${"long provider diagnostic ".repeat(20)}` : `snapshot ${row.id}` } },
       } as never,
     }
     : row);
@@ -1024,6 +1024,8 @@ test("Fleet retains non-running rows and bounds snapshots to its final hot-first
     akuma: { ...report.akuma, value: { ...report.akuma.value, rows: decorated } },
   }, { columns: 120, color: false });
   assert.match(text, /\[ FLEET \]  8 akuma/u);
+  assert.doesNotMatch(text, /SNAPSHOT/u);
+  assert.ok(text.split("\n").filter((line) => line.includes("activity \"")).every((line) => displayColumns(line) <= 120));
   for (const row of visible.slice(0, 3)) assert.match(text, new RegExp(`snapshot ${row.id}`, "u"));
   for (const row of visible.slice(3)) assert.doesNotMatch(text, new RegExp(`snapshot ${row.id}`, "u"));
   assert.match(text, /untidy/u);
@@ -1090,7 +1092,7 @@ test("Kanshi retains a Contract whose title is unavailable", () => {
   const contracts = sectionBody(text, "KEIYAKU");
   assert.match(contracts, /^\? kei\/no-target$/mu);
   assert.match(contracts, /title unavailable/u);
-  assert.match(text, /\[ KEIYAKU \]  5 live/u);
+  assert.match(text, /\[ KEIYAKU \]  contract state \S+ · observedAt \S+ · 5 live · candidate 0/u);
 });
 
 test("Kanshi wraps complete Task titles on the plumb line", () => {

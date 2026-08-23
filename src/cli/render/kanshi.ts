@@ -1,3 +1,4 @@
+/* eslint-disable max-lines */
 import type { ContractGateReport } from "../../index.js";
 import type { AkumaKanshiRow, ContractKanshiRow, KanshiReport, Section, TaskKanshiRow } from "../../kanshi/index.js";
 import { akumaHot, visibleFleetRows } from "../../kanshi/fleet.js";
@@ -7,11 +8,18 @@ import {
   dependentWording,
   displayGitId,
   gateGlyph,
+  gateLegend,
   gitIdsInRow,
   mergeSummary,
 } from "./contract-observation.js";
-import { displayColumns, renderTextBlock, safeText, tone, type TextRenderContext } from "./terminal.js";
-
+import {
+  displayColumns,
+  renderTextBlock,
+  safeText,
+  tone,
+  truncateDisplayText,
+  type TextRenderContext,
+} from "./terminal.js";
 const PLUMB = "  │ ";
 const PATH_PREFIX = `${PLUMB}↳ `;
 const MAX_VISIBLE_ROWS = 10;
@@ -81,6 +89,25 @@ function targetFacts(row: ContractKanshiRow): readonly string[] {
   if (row.targetLag.kind === "counted") facts.push(`${row.targetLag.behind} commits behind ${name}`);
   if (row.targetObservation?.drift === true) facts.push("target moved");
   return facts;
+}
+
+function selectedTargetFacts(row: ContractKanshiRow, abbreviations: ReadonlyMap<string, string>): readonly string[] {
+  return [
+    ...targetFacts(row),
+    ...(row.target !== null && row.targetObservation?.head !== null && row.targetObservation?.head !== undefined
+      ? [`target head ${displayGitId(row.targetObservation.head, abbreviations)}`]
+      : []),
+  ];
+}
+
+function phaseFacts(
+  row: ContractKanshiRow,
+  phase: string,
+  journal: string,
+  selection: "world" | "contract",
+  abbreviations: ReadonlyMap<string, string>,
+): readonly string[] {
+  return [phase, journal, ...(selection === "contract" ? selectedTargetFacts(row, abbreviations) : targetFacts(row))];
 }
 
 function workspaceState(row: ContractKanshiRow): string {
@@ -176,7 +203,7 @@ function activitySnapshotLine(row: AkumaKanshiRow): string | undefined {
         ? snapshot.outcome.outcome.answer
         : snapshot.outcome.outcome.diagnostic;
     }
-    return "empty";
+    return undefined;
   }
   if (
     latest.kind === "said" ||
@@ -189,6 +216,24 @@ function activitySnapshotLine(row: AkumaKanshiRow): string | undefined {
   }
   if (latest.kind === "tool") return latest.name;
   return "activity";
+}
+
+function boundedActivity(value: string, columns: number, prefix: string): string {
+  const budget = Math.max(1, columns - displayColumns(prefix));
+  return `activity "${truncateDisplayText(value, Math.max(1, budget - displayColumns('activity ""')))}"`;
+}
+
+function renderColdFleetLine(
+  row: AkumaKanshiRow,
+  prefix: string,
+  snapshot: string | undefined,
+  columns: number,
+): string {
+  const mark = akumaMark(row.life);
+  const identityPrefix = `${mark} ${row.id} ${prefix}`;
+  if (snapshot === undefined) return identityLine(mark, row.id, prefix);
+  const activity = boundedActivity(snapshot, columns, `${identityPrefix} · `);
+  return identityLine(mark, row.id, `${prefix} · ${activity}`);
 }
 
 function plumbFacts(facts: readonly string[], columns: number): readonly string[] {
@@ -332,7 +377,7 @@ function renderContractRow(
     );
   }
   lines.push(...plumbFacts(compact ? [title, phase, journal, ...targetFacts(row)] : [title], context.columns));
-  if (!compact) lines.push(...plumbFacts([phase, journal, ...targetFacts(row)], context.columns));
+  if (!compact) lines.push(...plumbFacts(phaseFacts(row, phase, journal, selection, abbreviations), context.columns));
   lines.push(...plumbFacts(contractObservationFacts(row, selection, abbreviations), context.columns));
   lines.push(...plumbFacts([workspaceState(row)], context.columns));
   if (
@@ -344,6 +389,7 @@ function renderContractRow(
     lines.push(plumbPath(row.workspaceObservation.location.path));
   }
   lines.push(...renderGates(row.gates.reports, report.observedAt, context.columns, selection === "contract"));
+  lines.push(...selectedExtras(row, selection, abbreviations, context.columns));
   if (row.holder.kind === "held") lines.push(...plumbFacts([`task ${row.holder.taskId}`], context.columns));
   if (row.holder.kind === "unavailable") lines.push(...plumbFacts(["holder unavailable"], context.columns));
   for (const attached of row.fleet) {
@@ -359,6 +405,35 @@ function renderContractRow(
     lines.push(...renderNamespaceTasks(row, context));
   }
   return lines;
+}
+
+function candidateFacts(
+  row: ContractKanshiRow,
+  abbreviations: ReadonlyMap<string, string>,
+  columns: number,
+  include: boolean,
+): readonly string[] {
+  if (!include || row.delivery === null) return [];
+  const delivery = row.delivery;
+  return [
+    ...plumbFacts(["candidate", `tender ${displayGitId(delivery.tenderSnapshot, abbreviations)}`], columns),
+    ...plumbFacts(
+      [
+        `integration ${displayGitId(delivery.integration.predecessor, abbreviations)} -> ${displayGitId(delivery.integration.snapshot, abbreviations)}`,
+      ],
+      columns,
+    ),
+    ...plumbFacts([`method ${delivery.method}`, `change ${delivery.integration.changeId}`], columns),
+  ];
+}
+
+function selectedExtras(
+  row: ContractKanshiRow,
+  selection: "world" | "contract",
+  abbreviations: ReadonlyMap<string, string>,
+  columns: number,
+): readonly string[] {
+  return selection === "contract" ? candidateFacts(row, abbreviations, columns, true) : [];
 }
 
 function isTerminalContract(row: ContractKanshiRow): boolean {
@@ -387,7 +462,6 @@ function renderWorldContractRow(
       ),
     ];
   }
-
   const lines = [identityLine(contractMark(row), row.id)];
   lines.push(...fieldBlock("TITLE", title, context.columns));
   lines.push(fieldLine("STATE", phase));
@@ -465,13 +539,17 @@ function renderContracts(report: KanshiReport, context: TextRenderContext): read
   if (section.kind === "failed") return failure("KEIYAKU", section, context);
   const live = section.value.rows.filter((row) => !isTerminalContract(row));
   const rows = selectRows(live, contractHot);
-  return sectionBlock({
+  const abbreviations = gitAbbreviations(report);
+  const candidates = live.filter((row) => row.delivery !== null).length;
+  const rendered = sectionBlock({
     name: "KEIYAKU",
     unit: "keiyaku",
     selector: "kei",
     rows: rows.map((row) => renderWorldContractRow(row, report, context)),
     total: live.length,
   });
+  const header = `[ KEIYAKU ]  contract state ${section.value.state === null ? "-" : displayGitId(section.value.state, abbreviations)} · observedAt ${report.observedAt} · ${live.length} live · candidate ${candidates}`;
+  return [header, "", "  ○ no candidate · ● candidate", `  ${gateLegend()}`, ...rendered.slice(1)];
 }
 
 function renderSelectedContract(report: KanshiReport, context: TextRenderContext): readonly string[] {
@@ -534,17 +612,14 @@ function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly
         : [life, ...activity];
     const relation = row.contract === undefined ? ["unbound"] : [endpointFact(row.contract.id, row.contract.observed)];
     const snapshot = activitySnapshotLine(row);
-    if (!akumaHot(row))
-      return [
-        identityLine(
-          akumaMark(row.life),
-          row.id,
-          `${akumaLabel(row)} · ${[...key, ...relation, ...(snapshot === undefined ? [] : [snapshot])].join(" · ")}`.trim(),
-        ),
-      ];
+    if (!akumaHot(row)) {
+      const prefix = `${akumaLabel(row)} · ${[...key, ...relation].join(" · ")}`.trim();
+      return [renderColdFleetLine(row, prefix, snapshot, context.columns)];
+    }
     const lines = [identityLine(akumaMark(row.life), row.id, akumaLabel(row))];
     lines.push(fieldLine("LIFE", key.join(" · ")));
-    if (snapshot !== undefined) lines.push(fieldLine("SNAPSHOT", snapshot));
+    if (snapshot !== undefined)
+      lines.push(fieldLine("ACTIVITY", boundedActivity(snapshot, context.columns, fieldPrefix("ACTIVITY"))));
     lines.push(fieldLine("LINKED", relation.join(" · ")));
     return lines;
   });
@@ -557,7 +632,6 @@ function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly
     neutral: true,
   });
 }
-
 export function renderKanshiText(
   report: KanshiReport,
   context: TextRenderContext = { columns: 80, color: false },

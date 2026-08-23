@@ -26,30 +26,50 @@ function workspaceLine(row: ContractRow): string {
   return counts.length === 0 ? "worktree dirty" : `worktree dirty · ${counts.join(" · ")}`;
 }
 
+function targetLine(row: ContractRow): string {
+  if (row.target === null) return "no target";
+  const target = row.target.startsWith("refs/heads/") ? row.target.slice("refs/heads/".length) : row.target;
+  const lag =
+    row.targetLag.kind === "counted"
+      ? `${row.targetLag.behind} commits behind ${target}`
+      : row.targetLag.kind === "unknown"
+        ? `commits behind ${target} unknown`
+        : undefined;
+  return [
+    `target ${target}`,
+    ...(lag === undefined ? [] : [lag]),
+    ...(row.targetObservation?.drift === true ? ["target moved"] : []),
+  ].join(" · ");
+}
+
 function renderContractCatalog(catalog: Extract<Catalog, { kind: "contracts" }>): string {
   const abbreviations = abbreviateGitIds([
     ...(catalog.state === null ? [] : [catalog.state]),
     ...catalog.rows.flatMap(gitIdsInRow),
   ]);
-  const candidates = catalog.rows.filter((row) => row.disposition === "active" && row.delivery !== null).length;
+  const rows = catalog.rows.filter((row) => row.disposition === "active");
+  const candidates = rows.filter((row) => row.delivery !== null).length;
   const header = [
-    gateLegend(),
-    `${catalog.rows.length} contracts · ${candidates} candidate${candidates === 1 ? "" : "s"}`,
+    `${rows.length} active · ${candidates} candidate${candidates === 1 ? "" : "s"}`,
     catalog.state === null
       ? `observedAt ${catalog.observedAt}`
       : `contract state ${displayGitId(catalog.state, abbreviations)} · observedAt ${catalog.observedAt}`,
+    "○ no candidate · ● candidate",
+    gateLegend(),
   ];
-  const blocks = catalog.rows.map((row) => {
+  const blocks = rows.map((row) => {
     const lines = [
       safeText(row.id),
       `  ${safeText(row.title ?? "title unavailable")}`,
       `  ${row.phase}`,
+      `  ${targetLine(row)}`,
       ...row.after.map((edge) => `  ${afterWording(edge)}`),
       ...(row.dependents.length === 0 ? [] : [`  dependents ${row.dependents.map(dependentWording).join(" · ")}`]),
       ...(row.gates.reports.length === 0
         ? []
         : [`  ${row.gates.reports.map((report) => `${gateGlyph(report)} ${report.gate}`).join("  ")}`]),
       `  ${workspaceLine(row)}`,
+      `  ${row.delivery === null ? "○ no candidate" : "● candidate"}`,
     ];
     const merge = mergeSummary(row.workspaceObservation);
     if (merge !== undefined) lines.push(`  ${merge}`);
@@ -57,7 +77,6 @@ function renderContractCatalog(catalog: Extract<Catalog, { kind: "contracts" }>)
   });
   return [...header, ...(blocks.length === 0 ? [] : ["", ...blocks])].join("\n");
 }
-
 export function renderCatalogText(catalog: Catalog): string {
   if (catalog.kind === "tasks") {
     return catalog.rows
