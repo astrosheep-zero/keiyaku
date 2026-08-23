@@ -256,11 +256,51 @@ function linkedAkuma(report: KanshiReport, id: string, aliases: readonly string[
   return akuma === undefined ? `! ${id}${alias} · missing` : `${akumaMark(akuma.life)} ${id}${alias} · ${akuma.life}`;
 }
 
-function linkedFacts(row: ContractKanshiRow, report: KanshiReport): readonly string[] {
+type AkumaAttachmentRow = Extract<KanshiReport["akuma"], { kind: "present" }>["value"]["rows"][number];
+
+function isTerminalAkuma(life: string): boolean {
+  return life === "killed" || life === "stillborn";
+}
+
+function attachmentTimestamp(akuma: AkumaAttachmentRow): string | null {
+  if ("lifeAt" in akuma && akuma.lifeAt !== null) return akuma.lifeAt;
+  if ("lastActivityAt" in akuma && akuma.lastActivityAt !== null) return akuma.lastActivityAt;
+  return null;
+}
+
+function worldAttachments(row: ContractKanshiRow, report: KanshiReport): readonly ContractKanshiRow["fleet"][number][] {
+  if (report.akuma.kind !== "present") return row.fleet;
+  const byId = new Map<string, AkumaAttachmentRow>(report.akuma.value.rows.map((akuma) => [akuma.id, akuma]));
+  const nonTerminal = new Set<ContractKanshiRow["fleet"][number]["id"]>();
+  const unknown = new Set<ContractKanshiRow["fleet"][number]["id"]>();
+  let latestTerminal: { id: ContractKanshiRow["fleet"][number]["id"]; at: string | null } | undefined;
+  row.fleet.forEach((attached) => {
+    const akuma = byId.get(attached.id);
+    if (akuma === undefined) {
+      unknown.add(attached.id);
+      return;
+    }
+    if (!isTerminalAkuma(akuma.life)) {
+      nonTerminal.add(attached.id);
+      return;
+    }
+    const at = attachmentTimestamp(akuma);
+    if (latestTerminal === undefined || (at !== null && (latestTerminal.at === null || at > latestTerminal.at))) {
+      latestTerminal = { id: attached.id, at };
+    }
+  });
+  const retained = new Set(unknown);
+  for (const id of nonTerminal) retained.add(id);
+  if (nonTerminal.size === 0 && latestTerminal !== undefined) retained.add(latestTerminal.id);
+  return row.fleet.filter((attached) => retained.has(attached.id));
+}
+
+function linkedFacts(row: ContractKanshiRow, report: KanshiReport, mode: "world" | "selected"): readonly string[] {
   const linked: string[] = [];
   if (row.holder.kind === "held") linked.push(linkedTask(report, row.holder.taskId));
   if (row.holder.kind === "unavailable") linked.push("! task · unavailable");
-  for (const attached of row.fleet) linked.push(linkedAkuma(report, attached.id, attached.aliases));
+  const attachments = mode === "world" ? worldAttachments(row, report) : row.fleet;
+  for (const attached of attachments) linked.push(linkedAkuma(report, attached.id, attached.aliases));
   return linked;
 }
 
@@ -313,7 +353,7 @@ function renderSelectedContractRow(
   lines.push(
     ...semanticBlock("workspace/merge", [...workspaceFacts, ...mergeFacts(row, true, abbreviations)], context),
   );
-  const attachments = [...linkedFacts(row, report)];
+  const attachments = [...linkedFacts(row, report, "selected")];
   if (row.issue !== undefined) {
     const detail =
       row.issue.kind === "hook-failure" ? row.issue.diagnostic : `target-checkout-retained ${row.issue.target}`;
@@ -356,7 +396,7 @@ function renderWorldContractRow(
     ...worldAfterFacts(row),
     ...(row.dependents.length === 0 ? [] : [`dependents ${row.dependents.map(dependentWording).join(" · ")}`]),
     ...row.gates.reports.map((report) => `${gateGlyph(report)} ${report.gate}`),
-    ...linkedFacts(row, report),
+    ...linkedFacts(row, report, "world"),
   ];
   const lines = [
     identityLine(contractMark(row), row.id, `· ${row.phase} · ${formatAge(row.phaseAt, report.observedAt)} · ${title}`),

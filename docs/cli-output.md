@@ -83,6 +83,10 @@ using lowercase semantic blocks for `after`, `dependents`, `gates`,
 `namespace tasks`. Git object IDs use the existing unique-prefix primitive;
 Contract, Change, Task, and Akuma identities remain complete.
 
+World and catalog Contract attachments show all non-terminal Akuma, or only the
+most recent terminal attachment when none are non-terminal. Selected Contract
+status shows every attached Akuma, including terminal retry history.
+
 Fleet activity text is bounded presentation only: a visible latest semantic
 activity or idle outcome renders as one safe-text-normalized physical line,
 `activity "<bounded text>"`, clipped to the requested display width. The

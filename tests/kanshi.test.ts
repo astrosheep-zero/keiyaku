@@ -987,6 +987,73 @@ test("Contract LINKED entries stay compact and preserve endpoint disposition", (
   assert.match(unavailable, /! aku\/worker\/missing \(@missing\) · unavailable/u);
 });
 
+test("world Contract attachments keep non-terminal Akuma and omit terminal retry history", () => {
+  const report = attentionReport();
+  if (report.contracts.kind !== "present" || report.akuma.kind !== "present") throw new Error("fixture sections must be present");
+  const row = report.contracts.value.rows.find((candidate) => candidate.id === "kei/active-contract");
+  if (row === undefined) throw new Error("fixture Contract must be present");
+  const linkedRow = {
+    ...row,
+    fleet: [
+      { id: "aku/worker/a0000001", aliases: ["@lead"] },
+      { id: "aku/worker/a0000002", aliases: [] },
+      { id: "aku/worker/a0000003", aliases: [] },
+    ],
+  };
+  const text = renderKanshiText({
+    ...report,
+    contracts: { ...report.contracts, value: { ...report.contracts.value, rows: [linkedRow] } },
+  }, { columns: 120, color: false });
+  const body = sectionBody(text, "KEIYAKU");
+  assert.match(body, /aku\/worker\/a0000001 \(@lead\) · running/u);
+  assert.match(body, /aku\/worker\/a0000002 · asleep/u);
+  assert.doesNotMatch(body, /aku\/worker\/a0000003 · killed/u);
+});
+
+test("world Contract attachments keep one latest terminal Akuma when no executor is live", () => {
+  const report = attentionReport();
+  if (report.contracts.kind !== "present" || report.akuma.kind !== "present") throw new Error("fixture sections must be present");
+  const row = report.contracts.value.rows.find((candidate) => candidate.id === "kei/active-contract");
+  if (row === undefined) throw new Error("fixture Contract must be present");
+  const older = { ...report.akuma.value.rows[2]!, id: "aku/worker/a0000008", lifeAt: "2026-08-11T23:00:00.000Z" };
+  const text = renderKanshiText({
+    ...report,
+    contracts: {
+      ...report.contracts,
+      value: { ...report.contracts.value, rows: [{ ...row, fleet: [{ id: older.id, aliases: [] }, { id: "aku/worker/a0000003", aliases: [] }] }] },
+    },
+    akuma: { ...report.akuma, value: { ...report.akuma.value, rows: [...report.akuma.value.rows, older] } },
+  }, { columns: 120, color: false });
+  const body = sectionBody(text, "KEIYAKU");
+  assert.match(body, /aku\/worker\/a0000003 · killed/u);
+  assert.doesNotMatch(body, /aku\/worker\/a0000008 · killed/u);
+});
+
+test("selected Contract attachments retain terminal retry history", () => {
+  const report = attentionReport();
+  if (report.contracts.kind !== "present" || report.akuma.kind !== "present") throw new Error("fixture sections must be present");
+  const row = report.contracts.value.rows.find((candidate) => candidate.id === "kei/active-contract");
+  if (row === undefined) throw new Error("fixture Contract must be present");
+  const older = { ...report.akuma.value.rows[2]!, id: "aku/worker/a0000008", lifeAt: "2026-08-11T23:00:00.000Z" };
+  const selected = renderKanshiText({
+    ...report,
+    contracts: { ...report.contracts, value: { ...report.contracts.value, rows: [{ ...row, fleet: [{ id: older.id, aliases: [] }, { id: "aku/worker/a0000003", aliases: [] }] }] } },
+    akuma: { ...report.akuma, value: { ...report.akuma.value, rows: [...report.akuma.value.rows, older] } },
+  }, { columns: 120, color: false }, "contract");
+  assert.match(selected, /aku\/worker\/a0000008 · killed/u);
+  assert.match(selected, /aku\/worker\/a0000003 · killed/u);
+});
+
+test("attachment projection leaves Task holder and report facts unchanged", () => {
+  const report = attentionReport();
+  const before = structuredClone(report);
+  const text = renderKanshiText(report, { columns: 120, color: false });
+  assert.match(sectionBody(text, "KEIYAKU"), /● task\/running · in_progress/u);
+  assert.deepEqual(report, before);
+  assert.match(JSON.stringify(report), /"lifeAt":"2026-08-11T23:59:30.000Z"/u);
+  assert.equal(JSON.stringify(report).includes('"fleet":[{"id":"aku/worker/a0000001"'), true);
+});
+
 test("Kanshi sections use a ten-row aperture with exact complete and partial footers", () => {
   const report = attentionReport();
   if (report.contracts.kind !== "present" || report.tasks.kind !== "present" || report.akuma.kind !== "present") throw new Error("fixture sections must be present");
