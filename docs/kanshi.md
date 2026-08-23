@@ -277,7 +277,7 @@ coordinate, aggregate score, or alternate status mode.
 [ KEIYAKU ]  1 live
 
 ! kei/example · tendered · 3m · Title
-  │ ○ no candidate · target main · 7 commits behind main · [✗] tests
+  │ ○ · target main · 7 commits behind main · [✗] tests
   │ ● task/example · in_progress · ● aku/worker/abcd1234 (@lead) · running
 
 [ FLEET ]  1 akuma

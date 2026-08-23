@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { contractHead, contractId, snapshotId } from "../src/core/facts/types.js";
+import { changeId, contractHead, contractId, snapshotId } from "../src/core/facts/types.js";
 import type { InvocationResult } from "../src/cli/result.js";
 import { renderCatalogText } from "../src/cli/render/catalog.js";
 import { renderText } from "../src/cli/render/text.js";
@@ -60,9 +60,13 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
   const catalog: Catalog = { kind: "contracts", root: "/repo", state, observedAt: "2026-08-12T00:00:00.000Z", rows: [row] };
   const text = renderCatalogText(catalog);
 
+  assert.match(text, /1 active · 0 candidates/u);
   assert.match(text, /contract state aaaaaaa · observedAt 2026-08-12T00:00:00.000Z/u);
-  assert.match(text, /○ no candidate · ● candidate/u);
+  assert.match(text, /^○ no candidate · ● candidate$/mu);
+  assert.equal([...text.matchAll(/^○ no candidate · ● candidate$/gmu)].length, 1);
   assert.match(text, /! kei\/selected-contract · waiting · 0s · Selected Contract/u);
+  assert.match(text, /^  ○$/mu);
+  assert.doesNotMatch(text, /^  ○ no candidate$/mu);
   assert.match(text, /  no target/u);
   assert.doesNotMatch(text, /worktree clean|tender |integration |merge /u);
   assert.doesNotMatch(text, new RegExp(state, "u"));
@@ -72,6 +76,27 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
   assert.match(text, /blocked by kei\/abandoned-prerequisite \(abandoned\)/u);
   assert.match(text, /blocked by kei\/missing-prerequisite \(missing\)/u);
   assert.match(text, /dependents kei\/dependent-contract \(waiting\)/u);
+
+  const snap = snapshotId("b".repeat(40));
+  const delivered = renderCatalogText({
+    ...catalog,
+    rows: [{
+      ...row,
+      phase: "tendered",
+      delivery: {
+        tenderSnapshot: snap,
+        integration: { predecessor: snap, snapshot: snap, changeId: changeId("chg-selected-contract") },
+        method: "squash",
+        policy: { requireBranchesToBeUpToDate: false },
+      },
+    }],
+  });
+  assert.match(delivered, /1 active · 1 candidate(?!s)/u);
+  assert.match(delivered, /^○ no candidate · ● candidate$/mu);
+  assert.equal([...delivered.matchAll(/^○ no candidate · ● candidate$/gmu)].length, 1);
+  assert.match(delivered, /^  ●$/mu);
+  assert.doesNotMatch(delivered, /^  ● candidate$/mu);
+  assert.doesNotMatch(delivered, /tender |integration /u);
 });
 
 test("observation text keeps the command and view data together", () => {

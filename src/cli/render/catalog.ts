@@ -65,7 +65,7 @@ function renderContractCatalog(catalog: Extract<Catalog, { kind: "contracts" }>)
   const blocks = rows.map((row) => {
     const lines = [
       `${catalogMark(row)} ${safeText(row.id)} · ${row.phase} · ${formatAge(row.phaseAt, catalog.observedAt)} · ${safeText(row.title ?? "title unavailable")}`,
-      `  ${row.delivery === null ? "○ no candidate" : "● candidate"}`,
+      `  ${row.delivery === null ? "○" : "●"}`,
       `  ${targetLine(row)}`,
       ...row.after.map((edge) => `  ${afterWording(edge)}`),
       ...(row.dependents.length === 0 ? [] : [`  dependents ${row.dependents.map(dependentWording).join(" · ")}`]),

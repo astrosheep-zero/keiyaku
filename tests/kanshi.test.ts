@@ -870,9 +870,13 @@ test("Kanshi text uses live sections, preserves important facts, and omits termi
   for (const row of report.akuma.value.rows) assert.equal(text.includes(row.id), true);
 
   const contracts = sectionBody(text, "KEIYAKU");
+  assert.match(text, /^  ○ no candidate · ● candidate$/mu);
+  assert.equal([...text.matchAll(/^  ○ no candidate · ● candidate$/gmu)].length, 1);
   assert.match(contracts, /^! kei\/active-contract · tendered · 3m · Active Contract$/mu);
   assert.match(contracts, /Active Contract/u);
   assert.match(contracts, /tendered/u);
+  assert.match(contracts, /│ ○ · target main/u);
+  assert.doesNotMatch(contracts, /│ ○ no candidate/u);
   assert.match(contracts, /target main/u);
   assert.match(contracts, /7 commits behind main/u);
   assert.match(contracts, /target moved/u);
@@ -899,6 +903,7 @@ test("Kanshi text uses live sections, preserves important facts, and omits termi
   assert.doesNotMatch(contracts, /worktree |merge |\/repo\/\.keiyaku\/wt\//u);
   const selected = renderKanshiText(selectKanshi({ report, contract: "kei/active-contract" }), { columns: 120, color: false }, "contract");
   assert.match(selected, /tendered · 3m/u);
+  assert.match(selected, /  candidate\/integration\n    none/u);
   const active = report.contracts.value.rows.find((row) => row.id === "kei/active-contract");
   assert.equal(active?.phase, "tendered");
   assert.equal(JSON.parse(JSON.stringify(active)).phase, "tendered");
@@ -938,6 +943,39 @@ test("Kanshi text uses live sections, preserves important facts, and omits termi
   assert.match(fleet, /stillborn · —/u);
   assert.match(fleet, /unborn · —/u);
   assert.deepEqual(report, before);
+});
+
+test("world Contract rows keep the candidate glyph without repeating candidate words", () => {
+  const report = attentionReport();
+  if (report.contracts.kind !== "present") throw new Error("fixture contracts must be present");
+  const row = report.contracts.value.rows.find((candidate) => candidate.id === "kei/active-contract");
+  if (row === undefined) throw new Error("fixture Contract must be present");
+  const delivered = {
+    ...row,
+    delivery: {
+      tenderSnapshot: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      integration: {
+        predecessor: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        snapshot: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        changeId: "chg-active-contract",
+      },
+      method: "squash" as const,
+      policy: { requireBranchesToBeUpToDate: false },
+    },
+  };
+  const deliveredReport = {
+    ...report,
+    contracts: { ...report.contracts, value: { ...report.contracts.value, rows: [delivered] } },
+  };
+  const text = renderKanshiText(deliveredReport, { columns: 120, color: false });
+  assert.match(text.split("\n", 1)[0]!, /candidate 1$/u);
+  assert.match(text, /^  ○ no candidate · ● candidate$/mu);
+  assert.equal([...text.matchAll(/^  ○ no candidate · ● candidate$/gmu)].length, 1);
+  const body = sectionBody(text, "KEIYAKU");
+  assert.match(body, /│ ● · target main/u);
+  assert.doesNotMatch(body, /│ ● candidate/u);
+  const selected = renderKanshiText(deliveredReport, { columns: 120, color: false }, "contract");
+  assert.match(selected, /  candidate\/integration\n    candidate\n    tender /u);
 });
 
 test("Contract LINKED entries stay compact and preserve endpoint disposition", () => {

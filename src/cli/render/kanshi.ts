@@ -391,7 +391,7 @@ function renderWorldContractRow(
 ): readonly string[] {
   const title = row.title ?? "title unavailable";
   const facts = [
-    `${row.delivery === null ? "○ no candidate" : "● candidate"}`,
+    `${row.delivery === null ? "○" : "●"}`,
     ...targetFacts(row),
     ...worldAfterFacts(row),
     ...(row.dependents.length === 0 ? [] : [`dependents ${row.dependents.map(dependentWording).join(" · ")}`]),
