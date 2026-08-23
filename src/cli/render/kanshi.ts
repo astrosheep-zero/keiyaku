@@ -1,7 +1,6 @@
 /* eslint-disable max-lines */
-import type { ContractGateReport } from "../../index.js";
 import type { AkumaKanshiRow, ContractKanshiRow, KanshiReport, Section, TaskKanshiRow } from "../../kanshi/index.js";
-import { akumaHot, visibleFleetRows } from "../../kanshi/fleet.js";
+import { visibleFleetRows } from "../../kanshi/fleet.js";
 import {
   abbreviateGitIds,
   afterWording,
@@ -21,9 +20,7 @@ import {
   type TextRenderContext,
 } from "./terminal.js";
 const PLUMB = "  │ ";
-const PATH_PREFIX = `${PLUMB}↳ `;
 const MAX_VISIBLE_ROWS = 10;
-const FIELD_WIDTH = 8;
 
 function contractMark(row: ContractKanshiRow): string {
   if (row.phase === "claimed") return "✓";
@@ -100,16 +97,6 @@ function selectedTargetFacts(row: ContractKanshiRow, abbreviations: ReadonlyMap<
   ];
 }
 
-function phaseFacts(
-  row: ContractKanshiRow,
-  phase: string,
-  journal: string,
-  selection: "world" | "contract",
-  abbreviations: ReadonlyMap<string, string>,
-): readonly string[] {
-  return [phase, journal, ...(selection === "contract" ? selectedTargetFacts(row, abbreviations) : targetFacts(row))];
-}
-
 function workspaceState(row: ContractKanshiRow): string {
   const observation = row.workspaceObservation;
   if (observation.kind === "failed") return `worktree unavailable · ${observation.diagnostic}`;
@@ -150,24 +137,6 @@ function mergeFacts(
 
 function worldAfterFacts(row: ContractKanshiRow): readonly string[] {
   return row.after.map(afterWording);
-}
-
-function contractObservationFacts(
-  row: ContractKanshiRow,
-  selection: "world" | "contract",
-  abbreviations: ReadonlyMap<string, string>,
-): readonly string[] {
-  const facts = [...(selection === "contract" ? worldAfterFacts(row) : [])];
-  if (selection === "contract" && row.dependents.length > 0)
-    facts.push(`dependents ${row.dependents.map(dependentWording).join(" · ")}`);
-  return [...facts, ...mergeFacts(row, selection === "contract", abbreviations)];
-}
-
-function showWorkspacePath(row: ContractKanshiRow, hot: boolean): boolean {
-  if (row.workspace !== "worktree") return false;
-  if (row.workspaceObservation.kind === "unappointed") return false;
-  if (row.workspaceObservation.kind !== "clean" && row.workspaceObservation.kind !== "failed") return true;
-  return hot;
 }
 
 function contractHot(row: ContractKanshiRow): boolean {
@@ -228,12 +197,12 @@ function renderColdFleetLine(
   prefix: string,
   snapshot: string | undefined,
   columns: number,
-): string {
+): readonly string[] {
   const mark = akumaMark(row.life);
-  const identityPrefix = `${mark} ${row.id} ${prefix}`;
-  if (snapshot === undefined) return identityLine(mark, row.id, prefix);
-  const activity = boundedActivity(snapshot, columns, `${identityPrefix} · `);
-  return identityLine(mark, row.id, `${prefix} · ${activity}`);
+  const identity = identityLine(mark, row.id, prefix);
+  if (snapshot === undefined) return [identity];
+  const activity = boundedActivity(snapshot, columns, PLUMB);
+  return [identity, ...plumbFacts([activity], columns)];
 }
 
 function plumbFacts(facts: readonly string[], columns: number): readonly string[] {
@@ -252,64 +221,8 @@ function plumbFacts(facts: readonly string[], columns: number): readonly string[
   return lines;
 }
 
-function plumbBlock(value: string, columns: number): readonly string[] {
-  return renderTextBlock(value, PLUMB, columns);
-}
-
-function plumbPath(path: string): string {
-  return `${PATH_PREFIX}${safeText(path)}`;
-}
-
 function identityLine(mark: string, identity: string, extra = ""): string {
   return extra.length === 0 ? `${mark} ${safeText(identity)}` : `${mark} ${safeText(identity)} ${safeText(extra)}`;
-}
-
-function renderGates(
-  reports: readonly ContractGateReport[],
-  observedAt: string,
-  columns: number,
-  includeSummaries: boolean,
-): readonly string[] {
-  if (reports.length === 0) return [];
-  const lines = [
-    ...plumbFacts(
-      [
-        `gates: ${reports
-          .map(
-            (report) =>
-              `${gateGlyph(report)} ${report.gate} ${formatAge(report.current.kind === "attested" ? report.current.at : null, observedAt)}`,
-          )
-          .join(" · ")}`,
-      ],
-      columns,
-    ),
-  ];
-  if (!includeSummaries) return lines;
-  for (const report of reports) {
-    if (report.current.kind !== "attested" || report.current.summary === undefined) continue;
-    lines.push(...plumbBlock(`${report.gate}: ${report.current.summary}`, columns));
-  }
-  return lines;
-}
-
-function fieldPrefix(label: string): string {
-  return `  ${label.padEnd(FIELD_WIDTH, " ")}`;
-}
-
-function fieldLine(label: string, value: string): string {
-  return `${fieldPrefix(label)}${safeText(value)}`;
-}
-
-function fieldBlock(label: string, value: string, columns: number): readonly string[] {
-  const continuation = " ".repeat(fieldPrefix(label).length);
-  return renderTextBlock(value, continuation, columns).map((line, index) =>
-    index === 0 ? `${fieldPrefix(label)}${line.slice(continuation.length)}` : line,
-  );
-}
-
-function renderWorldGates(reports: readonly ContractGateReport[]): readonly string[] {
-  if (reports.length === 0) return [];
-  return [fieldLine("GATES", reports.map((report) => `${gateGlyph(report)} ${report.gate}`).join("   "))];
 }
 
 function failure(
@@ -336,11 +249,7 @@ function linkedTask(report: KanshiReport, taskId: string): string {
   return task === undefined ? `! ${taskId} · missing` : `${taskMark(task)} ${task.id} · ${task.disposition}`;
 }
 
-function linkedAkuma(
-  report: KanshiReport,
-  id: string,
-  aliases: readonly string[],
-): string {
+function linkedAkuma(report: KanshiReport, id: string, aliases: readonly string[]): string {
   const alias = aliases.length === 0 ? "" : ` (${aliases.join(" ")})`;
   if (report.akuma.kind !== "present") return `! ${id}${alias} · unavailable`;
   const akuma = report.akuma.value.rows.find((candidate) => candidate.id === id);
@@ -355,105 +264,76 @@ function linkedFacts(row: ContractKanshiRow, report: KanshiReport): readonly str
   return linked;
 }
 
-function renderNamespaceTasks(row: ContractKanshiRow, context: TextRenderContext): readonly string[] {
-  if (row.namespaceTasks.kind === "absent") return plumbFacts(["namespace tasks absent"], context.columns);
-  if (row.namespaceTasks.kind === "failed") {
-    return plumbFacts([`namespace tasks failed ${row.namespaceTasks.failure.message}`], context.columns);
-  }
-  const lines = [...plumbFacts([`namespace tasks ${row.namespaceTasks.value.length}`], context.columns)];
-  for (const task of row.namespaceTasks.value) {
-    const scan = `${taskMark(task)} ${task.id} · P${task.priority} ${task.disposition}`;
-    const title = safeText(task.title);
-    const inline = `${scan} — ${title}`;
-    if (displayColumns(inline) <= context.columns - displayColumns(PLUMB)) {
-      lines.push(...plumbFacts([inline], context.columns));
-    } else {
-      lines.push(...plumbFacts([`${scan} —`], context.columns));
-      lines.push(...plumbBlock(title, context.columns));
-    }
-  }
+function semanticBlock(name: string, facts: readonly string[], context: TextRenderContext): readonly string[] {
+  const lines = [`  ${name}`];
+  const values = facts.length === 0 ? ["none"] : facts;
+  for (const fact of values) lines.push(...renderTextBlock(safeText(fact), "    ", context.columns));
   return lines;
 }
 
-function renderContractRow(
+function namespaceTaskFacts(row: ContractKanshiRow): readonly string[] {
+  if (row.namespaceTasks.kind === "absent") return ["absent"];
+  if (row.namespaceTasks.kind === "failed") {
+    return [`failed ${row.namespaceTasks.failure.message}`];
+  }
+  return row.namespaceTasks.value.map(
+    (task) => `${taskMark(task)} ${task.id} · P${task.priority} ${task.disposition} — ${task.title}`,
+  );
+}
+
+function renderSelectedContractRow(
   row: ContractKanshiRow,
   report: KanshiReport,
   context: TextRenderContext,
-  selection: "world" | "contract",
   abbreviations: ReadonlyMap<string, string>,
 ): readonly string[] {
-  const hot = contractHot(row);
-  const compact = !hot && selection !== "contract";
   const title = row.title ?? "title unavailable";
-  const phase = `${row.phase} · ${formatAge(row.phaseAt, report.observedAt)}`;
-  const journal = `journal ${formatAge(row.lastJournalAt, report.observedAt)}`;
-  const lines = [identityLine(contractMark(row), row.id)];
-  if (selection === "contract") {
-    const state = report.contracts.kind === "present" ? report.contracts.value.state : null;
-    lines.push(
-      ...plumbFacts(
-        [
-          state === null
-            ? `observedAt ${report.observedAt}`
-            : `contract state ${displayGitId(state, abbreviations)} · observedAt ${report.observedAt}`,
-        ],
-        context.columns,
-      ),
-    );
-  }
-  lines.push(...plumbFacts(compact ? [title, phase, journal, ...targetFacts(row)] : [title], context.columns));
-  if (!compact) lines.push(...plumbFacts(phaseFacts(row, phase, journal, selection, abbreviations), context.columns));
-  lines.push(...plumbFacts(contractObservationFacts(row, selection, abbreviations), context.columns));
-  lines.push(...plumbFacts([workspaceState(row)], context.columns));
+  const lines = [
+    identityLine(contractMark(row), row.id, `· ${row.phase} · ${formatAge(row.phaseAt, report.observedAt)} · ${title}`),
+  ];
+  lines.push(...semanticBlock("after", worldAfterFacts(row), context));
+  lines.push(...semanticBlock("dependents", row.dependents.map(dependentWording), context));
+  const gateFacts = row.gates.reports.flatMap((gate) => [
+    `${gateGlyph(gate)} ${gate.gate} ${formatAge(gate.current.kind === "attested" ? gate.current.at : null, report.observedAt)}`,
+    ...(gate.current.kind === "attested" && gate.current.summary !== undefined
+      ? [`${gate.gate}: ${gate.current.summary}`]
+      : []),
+  ]);
+  lines.push(...semanticBlock("gates", gateFacts, context));
+  lines.push(...semanticBlock("candidate/integration", candidateFacts(row, abbreviations), context));
+  lines.push(...semanticBlock("target", selectedTargetFacts(row, abbreviations), context));
+  const workspaceFacts = [workspaceState(row)];
   if (
-    showWorkspacePath(row, hot || selection === "contract") &&
     row.workspaceObservation.kind !== "unappointed" &&
     row.workspaceObservation.kind !== "failed" &&
     row.workspaceObservation.location.kind === "worktree"
   ) {
-    lines.push(plumbPath(row.workspaceObservation.location.path));
+    workspaceFacts.push(`path ${row.workspaceObservation.location.path}`);
   }
-  lines.push(...renderGates(row.gates.reports, report.observedAt, context.columns, selection === "contract"));
-  lines.push(...selectedExtras(row, selection, abbreviations, context.columns));
-  lines.push(...plumbFacts(linkedFacts(row, report), context.columns));
-  if (selection === "contract") {
-    if (row.issue !== undefined) {
-      const detail =
-        row.issue.kind === "hook-failure" ? row.issue.diagnostic : `target-checkout-retained ${row.issue.target}`;
-      lines.push(...plumbFacts([`lag (observed now): ${detail}`], context.columns));
-    }
-    lines.push(...renderNamespaceTasks(row, context));
+  lines.push(
+    ...semanticBlock("workspace/merge", [...workspaceFacts, ...mergeFacts(row, true, abbreviations)], context),
+  );
+  const attachments = [...linkedFacts(row, report)];
+  if (row.issue !== undefined) {
+    const detail =
+      row.issue.kind === "hook-failure" ? row.issue.diagnostic : `target-checkout-retained ${row.issue.target}`;
+    attachments.push(`lag (observed now): ${detail}`);
   }
+  lines.push(...semanticBlock("attachments", attachments, context));
+  lines.push(...semanticBlock("namespace tasks", namespaceTaskFacts(row), context));
   return lines;
 }
 
-function candidateFacts(
-  row: ContractKanshiRow,
-  abbreviations: ReadonlyMap<string, string>,
-  columns: number,
-  include: boolean,
-): readonly string[] {
-  if (!include || row.delivery === null) return [];
+function candidateFacts(row: ContractKanshiRow, abbreviations: ReadonlyMap<string, string>): readonly string[] {
+  if (row.delivery === null) return [];
   const delivery = row.delivery;
   return [
-    ...plumbFacts(["candidate", `tender ${displayGitId(delivery.tenderSnapshot, abbreviations)}`], columns),
-    ...plumbFacts(
-      [
-        `integration ${displayGitId(delivery.integration.predecessor, abbreviations)} -> ${displayGitId(delivery.integration.snapshot, abbreviations)}`,
-      ],
-      columns,
-    ),
-    ...plumbFacts([`method ${delivery.method}`, `change ${delivery.integration.changeId}`], columns),
+    "candidate",
+    `tender ${displayGitId(delivery.tenderSnapshot, abbreviations)}`,
+    `integration ${displayGitId(delivery.integration.predecessor, abbreviations)} -> ${displayGitId(delivery.integration.snapshot, abbreviations)}`,
+    `method ${delivery.method}`,
+    `change ${delivery.integration.changeId}`,
   ];
-}
-
-function selectedExtras(
-  row: ContractKanshiRow,
-  selection: "world" | "contract",
-  abbreviations: ReadonlyMap<string, string>,
-  columns: number,
-): readonly string[] {
-  return selection === "contract" ? candidateFacts(row, abbreviations, columns, true) : [];
 }
 
 function isTerminalContract(row: ContractKanshiRow): boolean {
@@ -469,40 +349,19 @@ function renderWorldContractRow(
   report: KanshiReport,
   context: TextRenderContext,
 ): readonly string[] {
-  const hot = contractHot(row);
   const title = row.title ?? "title unavailable";
-  const phase = `${row.phase} · ${formatAge(row.phaseAt, report.observedAt)}`;
-  const after = worldAfterFacts(row);
-  if (!hot) {
-    return [
-      identityLine(
-        contractMark(row),
-        row.id,
-        `· "${title}" · ${phase} · ${[...targetFacts(row), ...after].join(" · ")}`,
-      ),
-    ];
-  }
-  const lines = [identityLine(contractMark(row), row.id)];
-  lines.push(...fieldBlock("TITLE", title, context.columns));
-  lines.push(fieldLine("STATE", phase));
-  lines.push(
-    fieldLine("GIT", [...targetFacts(row), workspaceState(row), ...mergeFacts(row, false, new Map())].join(" · ")),
-  );
-  if (
-    showWorkspacePath(row, hot) &&
-    row.workspaceObservation.kind !== "unappointed" &&
-    row.workspaceObservation.kind !== "failed" &&
-    row.workspaceObservation.location.kind === "worktree"
-  ) {
-    lines.push(fieldLine("DIR", row.workspaceObservation.location.path));
-  }
-  lines.push(...renderWorldGates(row.gates.reports));
-  for (const fact of after) lines.push(`  ${safeText(fact)}`);
-  const linked = linkedFacts(row, report);
-  if (linked.length > 0) {
-    lines.push(fieldLine("LINKED", linked[0]!));
-    for (const item of linked.slice(1)) lines.push(`  ${" ".repeat(FIELD_WIDTH)}${safeText(item)}`);
-  }
+  const facts = [
+    `${row.delivery === null ? "○ no candidate" : "● candidate"}`,
+    ...targetFacts(row),
+    ...worldAfterFacts(row),
+    ...(row.dependents.length === 0 ? [] : [`dependents ${row.dependents.map(dependentWording).join(" · ")}`]),
+    ...row.gates.reports.map((report) => `${gateGlyph(report)} ${report.gate}`),
+    ...linkedFacts(row, report),
+  ];
+  const lines = [
+    identityLine(contractMark(row), row.id, `· ${row.phase} · ${formatAge(row.phaseAt, report.observedAt)} · ${title}`),
+  ];
+  lines.push(...plumbFacts(facts, context.columns));
   return lines;
 }
 
@@ -573,7 +432,7 @@ function renderSelectedContract(report: KanshiReport, context: TextRenderContext
   const row = section.value.rows[0];
   return row === undefined
     ? [`${PLUMB}keiyaku absent`]
-    : renderContractRow(row, report, context, "contract", gitAbbreviations(report));
+    : renderSelectedContractRow(row, report, context, gitAbbreviations(report));
 }
 
 function renderTasks(report: KanshiReport, context: TextRenderContext): readonly string[] {
@@ -582,22 +441,21 @@ function renderTasks(report: KanshiReport, context: TextRenderContext): readonly
   if (section.kind === "failed") return failure("TASK", section, context);
   const live = section.value.rows.filter((row) => !isTerminalTask(row));
   const rows = selectRows(live, taskHot);
-  const rowLines: readonly string[][] = rows.map((row) => {
-    const compact = !taskHot(row);
+  const rowLines: readonly (readonly string[])[] = rows.map((row) => {
     const relation = row.contract === undefined ? ["unbound"] : [endpointFact(row.contract.id, row.contract.observed)];
-    if (compact)
-      return [
-        identityLine(
-          taskMark(row),
-          row.id,
-          `· "${row.title}" · ${row.disposition} · P${row.priority} · ${relation.join(" · ")}`,
-        ),
-      ];
-    const lines = [identityLine(taskMark(row), row.id)];
-    lines.push(...fieldBlock("TITLE", row.title, context.columns));
-    lines.push(fieldLine("STATE", `${row.disposition} · P${row.priority}`));
-    for (const blocker of row.blockers ?? []) lines.push(fieldLine("BLOCKED", blocker.id));
-    lines.push(fieldLine("LINKED", relation.join(" · ")));
+    const lines = [
+      identityLine(
+        taskMark(row),
+        row.id,
+        `· ${row.disposition} · P${row.priority} · ${row.title} · ${relation.join(" · ")}`,
+      ),
+    ];
+    lines.push(
+      ...plumbFacts(
+        (row.blockers ?? []).map((blocker) => `blocked ${blocker.id}`),
+        context.columns,
+      ),
+    );
     return lines;
   });
   return sectionBlock({ name: "TASK", unit: "task", selector: "task", rows: rowLines, total: live.length });
@@ -613,7 +471,7 @@ function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly
   if (section.kind === "absent") return sectionAbsent("FLEET", context.columns);
   if (section.kind === "failed") return failure("FLEET", section, context);
   const rows = visibleFleetRows(section.value.rows);
-  const rowLines: readonly string[][] = rows.map((row) => {
+  const rowLines: readonly (readonly string[])[] = rows.map((row) => {
     const lifeAt = "lifeAt" in row ? row.lifeAt : null;
     const life = `${row.life} · ${formatAge(lifeAt, report.observedAt)}`;
     const activity =
@@ -626,18 +484,8 @@ function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly
         : [life, ...activity];
     const relation = row.contract === undefined ? ["unbound"] : [endpointFact(row.contract.id, row.contract.observed)];
     const snapshot = activitySnapshotLine(row);
-    if (!akumaHot(row)) {
-      const prefix = `${akumaLabel(row)} · ${[...key, ...relation].join(" · ")}`.trim();
-      return [renderColdFleetLine(row, prefix, snapshot, context.columns)];
-    }
-    const lines = [identityLine(akumaMark(row.life), row.id, akumaLabel(row))];
-    lines.push(fieldLine("LIFE", key.join(" · ")));
-    if (snapshot !== undefined)
-      lines.push(
-        fieldLine("ACTIVITY", ` ${boundedActivity(snapshot, context.columns, `${fieldPrefix("ACTIVITY")} `)}`),
-      );
-    lines.push(fieldLine("LINKED", relation.join(" · ")));
-    return lines;
+    const prefix = `${akumaLabel(row)} · ${[...key, ...relation].join(" · ")}`.trim();
+    return renderColdFleetLine(row, prefix, snapshot, context.columns);
   });
   return sectionBlock({
     name: "FLEET",

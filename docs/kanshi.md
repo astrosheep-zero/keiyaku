@@ -276,35 +276,15 @@ coordinate, aggregate score, or alternate status mode.
 ```text
 [ KEIYAKU ]  1 live
 
-! kei/example
-  TITLE   Title
-  STATE   tendered · 3m
-  GIT     target main · 7 commits behind main · target moved · worktree dirty · staged 1 · unstaged 3 · untracked 2
-  DIR     /absolute/managed/path
-  GATES   [✓] build   [✗] tests
-  LINKED  task/example
-          aku/worker/abcd1234 (@lead)
-
-  (all 1 live keiyaku shown)
-
+! kei/example · tendered · 3m · Title
+  │ ○ no candidate · target main · 7 commits behind main · [✗] tests
+  │ ● task/example · in_progress · ● aku/worker/abcd1234 (@lead) · running
 
 [ FLEET ]  1 akuma
-
-● aku/worker/abcd1234 (@lead)
-  LIFE    running · 4m
-  LINKED  -> kei/example
-
-  (all 1 akuma shown)
-
+● aku/worker/abcd1234 (@lead) · running · 4m · -> kei/example
 
 [ TASK ]  1 live
-
-● task/example
-  TITLE   Title
-  STATE   in_progress · P0
-  LINKED  -> kei/example
-
-  (all 1 live task shown)
+● task/example · in_progress · P0 · Title · -> kei/example
 ```
 
 The text aperture shows at most ten rows from each section. Contract and Task
@@ -338,22 +318,20 @@ after each header and before its footer, then two blank lines before the next
 header. `keiyaku ls`
 is the complete text inspection path; typed Kanshi and JSON remain complete.
 
-`keiyaku ls kei/` is a flat active-Contract stream. Its header includes active
+`keiyaku ls kei/` is a pure active-Contract catalog. Its header includes active
 count, Contract state, observedAt, and the same candidate and gate legends.
-Rows retain complete `kei/...` identity, read-time title, phase, target,
-numeric behind when known, `commits behind <target> unknown` beside a known
-target name when lag is unknown, explicit no-target when none, independent
-target movement, gate testimony, and exact attached Task/Akuma coordinates.
-Visible hot Contract rows retain every such fact; cold rows retain their
-complete identity, title, phase, and target facts. World-board gates are
-age-less slots: `[✓]` satisfied, `[✗]` unsatisfied, `[ ]` never reported, and
-`[~]` stale. Selected Contract text retains detailed gate ages and summaries.
-World and selected Contract attachments render as a `LINKED` list. Every entry
+Each natural-flow block retains complete identity, age, title, after/dependent
+edges, gate testimony, and target blocker facts. It does not join Task, Alias,
+Dispatch, Akuma, holder, or namespace data and does not expose candidate
+coordinates, workspace detail, or merge internals. Selected Contract text
+retains detailed gate ages and summaries.
+World status and selected Contract attachments render as a natural-flow list. Every entry
 contains its contextual glyph, complete identity, and basic current status:
 
 ```text
-  LINKED  ⧗ task/fix-auth · on_hold
-          ● aku/worker-2 (@lead) · running
+  attachments
+    ⧗ task/fix-auth · on_hold
+    ● aku/worker-2 (@lead) · running
 ```
 
 The list preserves every attached entry, including the current TaskHolder.
@@ -363,16 +341,16 @@ no readable identity renders `! task · unavailable`. These statuses remain
 visible rather than looking like live attachments. Task titles, priorities,
 blockers, bodies, and other Task detail do not appear below a Contract-linked
 line. Akuma snapshots, activity, archetype, and description do not appear
-there either. Selected Contract text then renders `namespaceTasks` after the
-linked rows, as one summary then every matching row:
+there either. Selected Contract text then renders `namespace tasks` after the
+attachment block, as every matching row:
 
 ```text
-  │ namespace tasks <N>
-  │ <mark> <complete TaskId> · P<n> <disposition> — <title>
+  namespace tasks
+    <mark> <complete TaskId> · P<n> <disposition> — <title>
 ```
 
-Zero matches render `namespace tasks 0`. Absent and failed observations render
-`namespace tasks absent` or `namespace tasks failed <diagnostic>`. Bare world
+Zero matches render `none`. Absent and failed observations render `absent` or
+`failed <diagnostic>` beneath the `namespace tasks` block. Bare world
 Kanshi omits those nested rows because TASK already renders every Task.
 Task and Akuma rows retain complete identities, state or key facts, and exact `-> kei/...`
 associations where present. A missing endpoint is `-> kei/... (missing)`; an
@@ -389,23 +367,11 @@ vocabulary: `●` live, `○` waiting or idle, `✓` claimed or satisfied, `×`
 abandoned, killed, or dropped, `!` unsatisfied or stillborn, and `?`
 unknown, stale, or lost. There is no invented `=` mark.
 
-Hot world-board Contract rows use this aligned field order:
-
-```text
-  TITLE   <title>
-  STATE   <phase> · <age>
-  GIT     <target facts> · <worktree state>
-  DIR     /absolute/managed/path
-  GATES   [✓] build   [✗] tests
-  LINKED  <task-glyph> task/<complete-id> · <disposition>
-          <akuma-glyph> aku/<complete-id> (@alias) · <life>
-```
-
-`GIT` carries the worktree state. `DIR` appears for a hot managed Contract
-when its observation supplies a managed worktree location, including an
-unavailable location; unappointed and failed observations never invent one.
-Cold live rows keep the complete identity, title, phase, and target facts in
-one compact row, without repeating clean worktree state or a path. IDs and
-paths are never shortened; they may overflow the terminal. `LINKED` is an
-entity attachment list, not a worktree relation. Fleet remains the only Akuma
-activity surface and retains its single bounded activity line.
+World-board Contract rows are natural-flow decision summaries with complete
+identity, age, title, after/dependent edges, gate testimony, and target facts.
+They do not expose workspace or merge internals. Attached Task and Akuma rows
+retain complete identity, aliases, and basic current status only. Fleet remains
+the sole Akuma activity surface. Selected status uses lowercase semantic blocks
+for `after`, `dependents`, `gates`, `candidate/integration`, `target`,
+`workspace/merge`, `attachments`, and `namespace tasks`; it exposes the complete
+selected evidence without fixed field labels.

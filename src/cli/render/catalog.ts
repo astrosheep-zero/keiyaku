@@ -7,24 +7,8 @@ import {
   gateGlyph,
   gateLegend,
   gitIdsInRow,
-  mergeSummary,
 } from "./contract-observation.js";
 import { safeText } from "./terminal.js";
-
-function workspaceLine(row: ContractRow): string {
-  const observation = row.workspaceObservation;
-  if (observation.kind === "failed") return `worktree unavailable · ${observation.diagnostic}`;
-  if (observation.kind === "unappointed") return "worktree unappointed";
-  if (observation.kind === "unavailable") return "worktree unavailable";
-  if (observation.kind === "clean") return "worktree clean";
-  const counts = [
-    ...(observation.counts.staged > 0 ? [`staged ${observation.counts.staged}`] : []),
-    ...(observation.counts.unstaged > 0 ? [`unstaged ${observation.counts.unstaged}`] : []),
-    ...(observation.counts.untracked > 0 ? [`untracked ${observation.counts.untracked}`] : []),
-    ...(observation.counts.submodules > 0 ? [`submodules ${observation.counts.submodules}`] : []),
-  ];
-  return counts.length === 0 ? "worktree dirty" : `worktree dirty · ${counts.join(" · ")}`;
-}
 
 function targetLine(row: ContractRow): string {
   if (row.target === null) return "no target";
@@ -40,6 +24,27 @@ function targetLine(row: ContractRow): string {
     ...(lag === undefined ? [] : [lag]),
     ...(row.targetObservation?.drift === true ? ["target moved"] : []),
   ].join(" · ");
+}
+
+function catalogMark(row: ContractRow): string {
+  if (row.phase === "claimed") return "✓";
+  if (row.phase === "abandoned") return "×";
+  if (row.title === null) return "?";
+  if (row.gates.reports.some((gate) => gate.current.kind === "attested" && gate.current.verdict === "unsatisfied"))
+    return "!";
+  if (row.targetLag.kind === "unknown") return "?";
+  if (row.phase === "waiting") return "○";
+  return "●";
+}
+
+function formatAge(source: string, observedAt: string): string {
+  const seconds = Math.floor((Date.parse(observedAt) - Date.parse(source)) / 1_000);
+  if (seconds < 0) return "future";
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
 }
 
 function renderContractCatalog(catalog: Extract<Catalog, { kind: "contracts" }>): string {
@@ -59,20 +64,15 @@ function renderContractCatalog(catalog: Extract<Catalog, { kind: "contracts" }>)
   ];
   const blocks = rows.map((row) => {
     const lines = [
-      safeText(row.id),
-      `  ${safeText(row.title ?? "title unavailable")}`,
-      `  ${row.phase}`,
+      `${catalogMark(row)} ${safeText(row.id)} · ${row.phase} · ${formatAge(row.phaseAt, catalog.observedAt)} · ${safeText(row.title ?? "title unavailable")}`,
+      `  ${row.delivery === null ? "○ no candidate" : "● candidate"}`,
       `  ${targetLine(row)}`,
       ...row.after.map((edge) => `  ${afterWording(edge)}`),
       ...(row.dependents.length === 0 ? [] : [`  dependents ${row.dependents.map(dependentWording).join(" · ")}`]),
       ...(row.gates.reports.length === 0
         ? []
         : [`  ${row.gates.reports.map((report) => `${gateGlyph(report)} ${report.gate}`).join("  ")}`]),
-      `  ${workspaceLine(row)}`,
-      `  ${row.delivery === null ? "○ no candidate" : "● candidate"}`,
     ];
-    const merge = mergeSummary(row.workspaceObservation);
-    if (merge !== undefined) lines.push(`  ${merge}`);
     return lines.join("\n");
   });
   return [...header, ...(blocks.length === 0 ? [] : ["", ...blocks])].join("\n");
