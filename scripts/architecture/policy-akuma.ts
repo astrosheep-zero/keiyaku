@@ -293,6 +293,7 @@ export const akumaZones = [
       ]),
       any("task/mutation.ts", ["TaskMutationRequest", "isTaskMutationAction"]),
       any("akuma/request-execution.ts", ["executeRequest"]),
+      types("runtime/proc/run.ts", ["OwnedProcess"]),
     ],
   },
   {
@@ -354,6 +355,7 @@ export const akumaZones = [
       any("akuma/provider.ts", ["AgentEvent", "encodeAgentEvent", "ProviderAdapter", "Session", "TurnResult"]),
       any("akuma/request-serve.ts", ["BodyRequestPump", "RequestChildLaunch", "UpstreamExecutionPort"]),
       any("akuma/body-supervisor.ts", ["BodySupervisor", "CONTROL_RESPONSE_MS"]),
+      types("runtime/proc/run.ts", ["OwnedProcess"]),
     ],
   },
   {

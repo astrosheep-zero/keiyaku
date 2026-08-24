@@ -159,7 +159,9 @@ export async function bodyProcessInput(launch: BodyLaunch, bodyModuleUrl = impor
   const source = bodyModuleUrl.endsWith(".ts");
   const entry = fileURLToPath(new URL(source ? "../akuma-body.ts" : "../akuma-body.js", bodyModuleUrl));
   return {
-    argv: source ? [process.execPath, "--import", "tsx", entry, encoded] : [process.execPath, entry, encoded],
+    argv: source
+      ? [process.execPath, "--import", import.meta.resolve("tsx"), entry, encoded]
+      : [process.execPath, entry, encoded],
     cwd: await launchCwd(launch),
     env: { ...process.env, KEIYAKU_ACTOR_ID: actorId },
     log: launch.paths.log,

@@ -217,6 +217,12 @@ async function retainDetachedExitEvidence(
 export async function spawnDetachedProcess(input: DetachedProcessInput): Promise<OwnedProcess> {
   const log = await open(input.log, "a");
   let launched = false;
+  let logClosed = false;
+  const closeLog = async (): Promise<void> => {
+    if (logClosed) return;
+    logClosed = true;
+    await log.close();
+  };
   try {
     const from = (await log.stat()).size;
     const child = spawn(
@@ -224,12 +230,13 @@ export async function spawnDetachedProcess(input: DetachedProcessInput): Promise
       input.argv.slice(1),
       spawnOptionsFor("retained", input, ["ignore", log.fd, log.fd]),
     );
-    await new Promise<void>((resolve, reject) => {
-      child.once("spawn", resolve);
-      child.once("error", reject);
-    });
-    if (child.pid === undefined) throw new Error("detached process spawned without a pid");
-    const pid = child.pid;
+    let state: "active" | "terminating" | "inert" = "active";
+    let termination: Promise<void> | undefined;
+    const invalidate = (): void => {
+      state = "inert";
+    };
+    child.once("exit", invalidate);
+    child.once("close", invalidate);
     const exited = new Promise<DetachedProcessExit>((resolve, reject) => {
       child.once("close", (code, signal) => {
         void (async () => {
@@ -242,7 +249,7 @@ export async function spawnDetachedProcess(input: DetachedProcessInput): Promise
             failure = error;
           }
           try {
-            await log.close();
+            await closeLog();
           } catch (error) {
             failure ??= error;
           }
@@ -256,13 +263,12 @@ export async function spawnDetachedProcess(input: DetachedProcessInput): Promise
       });
     });
     void exited.catch(() => undefined);
-    let state: "active" | "terminating" | "inert" = "active";
-    let termination: Promise<void> | undefined;
-    const invalidate = (): void => {
-      state = "inert";
-    };
-    child.once("exit", invalidate);
-    child.once("close", invalidate);
+    await new Promise<void>((resolve, reject) => {
+      child.once("spawn", resolve);
+      child.once("error", reject);
+    });
+    if (child.pid === undefined) throw new Error("detached process spawned without a pid");
+    const pid = child.pid;
     launched = true;
     return {
       pid,
@@ -281,7 +287,7 @@ export async function spawnDetachedProcess(input: DetachedProcessInput): Promise
       },
     };
   } finally {
-    if (!launched) await log.close();
+    if (!launched) await closeLog();
   }
 }
 

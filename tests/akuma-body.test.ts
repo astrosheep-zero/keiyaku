@@ -405,7 +405,9 @@ test("detached Body argv selects source or build runtime without coordinator exe
           cwd: root,
         },
       });
-      assert.deepEqual(input.argv.slice(0, 3), [process.execPath, "--import", "tsx"]);
+      assert.equal(input.argv[0], process.execPath);
+      assert.equal(input.argv[1], "--import");
+      assert.equal(input.argv[2], import.meta.resolve("tsx"));
       assert.match(input.argv[3]!, /src[\\/]akuma-body\.ts$/u);
       assert.equal(input.argv.includes("--keiyaku-test-parent-flag"), false);
       const built = await bodyProcessInput(
