@@ -63,7 +63,7 @@ test("launch intent maps to one private platform policy", () => {
   assert.deepEqual(platformLaunchPolicy("handoff", "win32"), { kind: "windows-launcher" });
   assert.deepEqual(platformLaunchPolicy("retained", "win32"), {
     kind: "spawn",
-    detached: false,
+    detached: true,
     windowsHide: true,
     shell: false,
   });
@@ -82,7 +82,7 @@ test("launch intent maps to one private platform policy", () => {
   assert.deepEqual(spawnOptionsFor("retained", { cwd: "/tmp", env: process.env }, ["ignore", "pipe", "pipe"], "win32"), {
     cwd: "/tmp",
     env: process.env,
-    detached: false,
+    detached: true,
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
     shell: false,

@@ -28,7 +28,7 @@ export function platformLaunchPolicy(
   if (platform === "win32" && intent === "handoff") return { kind: "windows-launcher" };
   return {
     kind: "spawn",
-    detached: platform !== "win32",
+    detached: true,
     windowsHide: true,
     shell: false,
   };
