@@ -25,14 +25,7 @@ export function spawnStdioProcess(
   const child = spawn(
     input.argv[0],
     input.argv.slice(1),
-    spawnOptionsFor(
-      "retained",
-      {
-        cwd: input.cwd,
-        env: input.env ?? process.env,
-      },
-      ["pipe", "pipe", "pipe"],
-    ),
+    spawnOptionsFor({ cwd: input.cwd, env: input.env ?? process.env }, ["pipe", "pipe", "pipe"]),
   );
   let stderr = "";
   let inputEnded = false;

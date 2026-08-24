@@ -1,13 +1,16 @@
-import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { open, type FileHandle } from "node:fs/promises";
-import { setTimeout as delay } from "node:timers/promises";
-import { promisify } from "node:util";
+import { spawn, type ChildProcess } from "node:child_process";
+import { open } from "node:fs/promises";
 import crossSpawn from "cross-spawn";
 import { spawnOptionsFor, type DetachedProcessInput } from "./launch.js";
+import { detachedExitStatus, retainDetachedExitEvidence } from "./process-exit.js";
+import { createProcessLifecycle } from "./lifecycle.js";
+import { terminateOwnedProcess } from "./termination.js";
+import type { DetachedProcessExit, OwnedProcess } from "./types.js";
+import { spawnWindowsRetainedProcess } from "./windows-run.js";
 
-export { handoffProcess, type DetachedProcessInput } from "./launch.js";
+export type { DetachedProcessInput } from "./launch.js";
+export type { DetachedProcessExit, OwnedProcess, RunLogReference } from "./types.js";
 
-const TERMINATION_GRACE_MS = 250;
 const STREAM_TAIL_BYTES = 16 * 1024;
 
 type ProcessLaunch = Readonly<{
@@ -75,24 +78,6 @@ export type ProcessConsumption = Readonly<{
   readonly pid: number | null;
 }>;
 
-export type RunLogReference = Readonly<{
-  path: string;
-  from: number;
-  to: number;
-}>;
-
-export type DetachedProcessExit = Readonly<{
-  code: number | null;
-  signal: NodeJS.Signals | null;
-  log: RunLogReference;
-}>;
-export type OwnedProcess = Readonly<{
-  pid: number;
-  exited: Promise<DetachedProcessExit>;
-  terminate(force?: boolean): Promise<void>;
-  release(): void;
-}>;
-
 function tailCapture(limit: number) {
   const bytes = Buffer.allocUnsafe(limit);
   let total = 0;
@@ -121,100 +106,10 @@ function tailCapture(limit: number) {
   };
 }
 
-function ignoreMissingProcess(error: unknown): void {
-  if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
-}
-
-function detachedExitStatus(code: number | null, signal: NodeJS.Signals | null): string {
-  return code === null ? `signal ${signal ?? "unknown"}` : `exit ${code}`;
-}
-
-const WINDOWS_TERMINATION_TIMEOUT_MS = 1_000;
-const execFileAsync = promisify(execFile);
-
-async function terminateWindowsTree(pid: number): Promise<void> {
-  await execFileAsync("taskkill", ["/PID", String(pid), "/T", "/F"], {
-    timeout: WINDOWS_TERMINATION_TIMEOUT_MS,
-    windowsHide: true,
-  });
-}
-
-export async function terminateOwnedProcess(child: ChildProcess, force = false): Promise<void> {
-  const pid = child.pid;
-  if (pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
-  let exited = false;
-  const exit = new Promise<void>((resolve) => {
-    child.once("exit", () => {
-      exited = true;
-      resolve();
-    });
-    child.once("close", () => {
-      exited = true;
-      resolve();
-    });
-  });
-  if (process.platform === "win32") {
-    await terminateWindowsTree(pid);
-    await exit;
-    return;
-  }
-  if (force) {
-    try {
-      process.kill(-pid, "SIGKILL");
-    } catch (error) {
-      ignoreMissingProcess(error);
-    }
-    await exit;
-    return;
-  }
-  try {
-    process.kill(-pid, "SIGTERM");
-  } catch (error) {
-    ignoreMissingProcess(error);
-    await exit;
-    return;
-  }
-  await Promise.race([exit, delay(TERMINATION_GRACE_MS)]);
-  if (exited || child.exitCode !== null || child.signalCode !== null) return;
-  try {
-    process.kill(-pid, "SIGKILL");
-  } catch (error) {
-    ignoreMissingProcess(error);
-  }
-  await exit;
-}
-
-async function retainDetachedExitEvidence(
-  log: FileHandle,
-  path: string,
-  from: number,
-  code: number | null,
-  signal: NodeJS.Signals | null,
-): Promise<DetachedProcessExit> {
-  const status = detachedExitStatus(code, signal);
-  const marker = Buffer.from(`[child ${status}]\n`);
-  let written = 0;
-  while (written < marker.byteLength) {
-    const write = await log.write(marker, written, marker.byteLength - written);
-    if (write.bytesWritten === 0) throw new Error("run log exit marker write made no progress");
-    written += write.bytesWritten;
-  }
-  const evidence = await log.stat();
-  if (evidence.size < from) throw new Error("run log shrank before exit evidence was retained");
-  const referenced = await open(path, "r");
-  try {
-    const current = await referenced.stat();
-    if (current.dev !== evidence.dev || current.ino !== evidence.ino) {
-      throw new Error("run log path changed before exit evidence was retained");
-    }
-    if (current.size < evidence.size) throw new Error("run log path size changed before exit evidence was retained");
-  } finally {
-    await referenced.close();
-  }
-  return { code, signal, log: { path, from, to: evidence.size } };
-}
+export { terminateOwnedProcess } from "./termination.js";
 
 export async function spawnDetachedProcess(input: DetachedProcessInput): Promise<OwnedProcess> {
+  if (process.platform === "win32") return spawnWindowsRetainedProcess(input);
   const log = await open(input.log, "a");
   let launched = false;
   let logClosed = false;
@@ -225,15 +120,13 @@ export async function spawnDetachedProcess(input: DetachedProcessInput): Promise
   };
   try {
     const from = (await log.stat()).size;
-    const child = spawn(
-      input.argv[0]!,
-      input.argv.slice(1),
-      spawnOptionsFor("retained", input, ["ignore", log.fd, log.fd]),
+    const child = spawn(input.argv[0]!, input.argv.slice(1), spawnOptionsFor(input, ["ignore", log.fd, log.fd]));
+    const lifecycle = createProcessLifecycle(
+      (force) => terminateOwnedProcess(child, force),
+      () => child.unref(),
     );
-    let state: "active" | "terminating" | "inert" = "active";
-    let termination: Promise<void> | undefined;
     const invalidate = (): void => {
-      state = "inert";
+      lifecycle.markInert();
     };
     child.once("exit", invalidate);
     child.once("close", invalidate);
@@ -273,18 +166,8 @@ export async function spawnDetachedProcess(input: DetachedProcessInput): Promise
     return {
       pid,
       exited,
-      terminate(force = false) {
-        if (state === "inert") return Promise.resolve();
-        if (termination !== undefined) return termination;
-        state = "terminating";
-        termination = terminateOwnedProcess(child, force).finally(invalidate);
-        return termination;
-      },
-      release: () => {
-        if (state === "inert") return;
-        state = "inert";
-        child.unref();
-      },
+      terminate: lifecycle.terminate,
+      release: lifecycle.release,
     };
   } finally {
     if (!launched) await closeLog();
@@ -313,11 +196,7 @@ async function executeProcess(
   spawnProcess: ProcessSpawner = spawn,
 ): Promise<ProcessConsumption> {
   if (input.signal?.aborted === true) return { outcome: { kind: "cancelled" }, pid: null };
-  const child = spawnProcess(
-    input.argv[0]!,
-    input.argv.slice(1),
-    spawnOptionsFor("retained", input, ["ignore", "pipe", "pipe"]),
-  );
+  const child = spawnProcess(input.argv[0]!, input.argv.slice(1), spawnOptionsFor(input, ["ignore", "pipe", "pipe"]));
   const stdout = tailCapture(STREAM_TAIL_BYTES);
   const stderr = tailCapture(STREAM_TAIL_BYTES);
 

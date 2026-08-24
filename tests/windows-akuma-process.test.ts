@@ -4,12 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
-import {
-  handoffProcess,
-  handoffWindowsLaunch,
-  platformLaunchPolicy,
-  spawnOptionsFor,
-} from "../src/runtime/proc/launch.js";
+import { spawnOptionsFor, spawnWindowsLauncher } from "../src/runtime/proc/launch.js";
 import { consumeProcessStdout, runProcess, spawnDetachedProcess } from "../src/runtime/proc/run.js";
 import { spawnStdioProcess } from "../src/runtime/proc/stdio.js";
 
@@ -19,19 +14,22 @@ const packagedLauncher = resolve("build/src/runtime/proc/windows-launch.exe");
 function peSubsystem(path: string): number {
   const bytes = readFileSync(path);
   assert.equal(bytes.toString("ascii", 0, 2), "MZ");
-  const offset = bytes.readUInt32LE(0x3C);
+  const offset = bytes.readUInt32LE(0x3c);
   assert.equal(bytes.toString("ascii", offset, offset + 4), "PE\0\0");
   const optional = offset + 24;
   const magic = bytes.readUInt16LE(optional);
-  assert.ok(magic === 0x10B || magic === 0x20B);
+  assert.ok(magic === 0x10b || magic === 0x20b);
   return bytes.readUInt16LE(optional + 68);
 }
 
 async function waitForExit(pid: number): Promise<void> {
   const deadline = performance.now() + 2_000;
   while (true) {
-    try { process.kill(pid, 0); }
-    catch { return; }
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return;
+    }
     if (performance.now() >= deadline) throw new Error(`process ${pid} survived`);
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
@@ -52,34 +50,15 @@ test("the Windows release launcher is a GUI-subsystem x64 PE", async (t) => {
     return;
   }
   assert.equal(existsSync(packagedLauncher), true);
-  const built = await import(pathToFileURL(resolve("build/src/runtime/proc/launch.js")).href) as {
+  const built = (await import(pathToFileURL(resolve("build/src/runtime/proc/launch.js")).href)) as {
     windowsLauncherPath(): string;
   };
   assert.equal(built.windowsLauncherPath(), packagedLauncher);
   assert.equal(peSubsystem(packagedLauncher), IMAGE_SUBSYSTEM_WINDOWS_GUI);
 });
 
-test("launch intent maps to one private platform policy", () => {
-  assert.deepEqual(platformLaunchPolicy("handoff", "win32"), { kind: "windows-launcher" });
-  assert.deepEqual(platformLaunchPolicy("retained", "win32"), {
-    kind: "spawn",
-    detached: true,
-    windowsHide: true,
-    shell: false,
-  });
-  assert.deepEqual(platformLaunchPolicy("handoff", "darwin"), {
-    kind: "spawn",
-    detached: true,
-    windowsHide: true,
-    shell: false,
-  });
-  assert.deepEqual(platformLaunchPolicy("retained", "linux"), {
-    kind: "spawn",
-    detached: true,
-    windowsHide: true,
-    shell: false,
-  });
-  assert.deepEqual(spawnOptionsFor("retained", { cwd: "/tmp", env: process.env }, ["ignore", "pipe", "pipe"], "win32"), {
+test("launch policy keeps detached, hidden, no-shell process semantics", () => {
+  assert.deepEqual(spawnOptionsFor({ cwd: "/tmp", env: process.env }, ["ignore", "pipe", "pipe"]), {
     cwd: "/tmp",
     env: process.env,
     detached: true,
@@ -87,18 +66,26 @@ test("launch intent maps to one private platform policy", () => {
     windowsHide: true,
     shell: false,
   });
-  assert.throws(() => spawnOptionsFor("handoff", { cwd: "/tmp" }, ["ignore", "ignore", "ignore"], "win32"), /GUI launcher/);
 });
 
 test("a missing Windows launcher fails with the typed spawn error", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-missing-launch-"));
   try {
     await assert.rejects(
-      () => handoffWindowsLaunch({
-        argv: [process.execPath, "-e", ""],
-        cwd: root,
-        log: join(root, "stdio.log"),
-      }, join(root, "missing-windows-launch.exe")),
+      () =>
+        new Promise<void>((resolve, reject) => {
+          const child = spawnWindowsLauncher(
+            {
+              argv: [process.execPath, "-e", ""],
+              cwd: root,
+              log: join(root, "stdio.log"),
+            },
+            join(root, "missing-windows-launch.exe"),
+          );
+          child.once("error", reject);
+          child.once("spawn", () => reject(new Error("missing launcher unexpectedly spawned")));
+          child.once("close", () => resolve());
+        }),
       (error: unknown) => {
         assert.ok(error instanceof Error);
         assert.match(error.message, /ENOENT/);
@@ -111,30 +98,7 @@ test("a missing Windows launcher fails with the typed spawn error", async () => 
   }
 });
 
-test("native EINVAL diagnostics retain a typed error.code", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-einval-launch-"));
-  const diagnostic = join(root, "einval.js");
-  writeFileSync(diagnostic, "process.stderr.write('spawn launcher EINVAL\\n'); process.exit(1);\n");
-  try {
-    await assert.rejects(
-      () => handoffWindowsLaunch({
-        argv: ["child.exe"],
-        cwd: root,
-        log: diagnostic,
-      }, process.execPath),
-      (error: unknown) => {
-        assert.ok(error instanceof Error);
-        assert.match(error.message, /EINVAL/);
-        assert.equal((error as NodeJS.ErrnoException).code, "EINVAL");
-        return true;
-      },
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("Windows handoff accepts a one-element target argv", async (t) => {
+test("Windows retained launch accepts a one-element target argv", async (t) => {
   if (process.platform !== "win32") {
     t.skip("the native launcher argv cut is Windows-only");
     return;
@@ -143,7 +107,8 @@ test("Windows handoff accepts a one-element target argv", async (t) => {
   const log = join(root, "stdio.log");
   const child = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "hostname.exe");
   try {
-    await handoffProcess({ argv: [child], cwd: root, log });
+    const owned = await spawnDetachedProcess({ argv: [child], cwd: root, log });
+    await owned.exited;
     const deadline = performance.now() + 2_000;
     let text = "";
     while (performance.now() < deadline) {
@@ -157,79 +122,83 @@ test("Windows handoff accepts a one-element target argv", async (t) => {
   }
 });
 
-test("Body handoff returns no pid and leaves the child alive", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-handoff-"));
+test("retained launch returns the target pid and release leaves it alive", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-retained-"));
   const pidFile = join(root, "pid");
   const log = join(root, "stdio.log");
   let pid: number | undefined;
   try {
-    const result = await handoffProcess({
-      argv: [process.execPath, "-e", `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000)`],
+    const owned = await spawnDetachedProcess({
+      argv: [
+        process.execPath,
+        "-e",
+        `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000)`,
+      ],
       cwd: root,
       log,
     });
-    assert.equal(result, undefined);
+    assert.ok(Number.isSafeInteger(owned.pid) && owned.pid > 0);
+    owned.release();
     pid = Number.parseInt(await waitForFile(pidFile), 10);
-    assert.ok(Number.isSafeInteger(pid) && pid > 0);
+    assert.equal(pid, owned.pid);
     process.kill(pid, 0);
   } finally {
     if (pid !== undefined) {
-      try { process.kill(pid, "SIGKILL"); } catch { /* already reaped */ }
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        /* already reaped */
+      }
       await waitForExit(pid);
     }
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("Windows handoff returns while its target remains long-lived", async (t) => {
+test("Windows retained launch returns while its target remains long-lived", async (t) => {
   if (process.platform !== "win32") {
     t.skip("the launcher stderr inheritance regression is Windows-only");
     return;
   }
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-handoff-return-"));
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-retained-return-"));
   const pidFile = join(root, "pid");
   let pid: number | undefined;
   try {
     const started = performance.now();
-    await handoffWindowsLaunch({
-      argv: [process.execPath, "-e", `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 10_000)`],
+    const owned = await spawnDetachedProcess({
+      argv: [
+        process.execPath,
+        "-e",
+        `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 10_000)`,
+      ],
       cwd: root,
       log: join(root, "stdio.log"),
     });
     assert.ok(performance.now() - started < 1_000);
     pid = Number.parseInt(await waitForFile(pidFile), 10);
+    assert.equal(pid, owned.pid);
+    owned.release();
   } finally {
     if (pid !== undefined) {
-      try { process.kill(pid, "SIGKILL"); } catch { /* already reaped */ }
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        /* already reaped */
+      }
       await waitForExit(pid);
     }
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("handoff and retained paths preserve no-shell argv and log bytes", async () => {
+test("retained launch preserves no-shell argv and log bytes", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-launch-bytes-"));
   const cwd = join(root, "目录-ä");
   mkdirSync(cwd);
   const payload = ["", "a && b ✨", "has space", 'quote"inside', "trailing\\", "目录-ä"];
-  const script = 'process.stdout.write(JSON.stringify({ argv: process.argv.slice(1), cwd: process.cwd(), env: process.env.KEIYAKU_UNICODE }))';
+  const script =
+    "process.stdout.write(JSON.stringify({ argv: process.argv.slice(1), cwd: process.cwd(), env: process.env.KEIYAKU_UNICODE }))";
   try {
-    const handoffLog = join(cwd, "handoff.log");
-    await handoffProcess({
-      argv: [process.execPath, "-e", script, ...payload],
-      cwd,
-      env: { ...process.env, KEIYAKU_UNICODE: "café-✨" },
-      log: handoffLog,
-    });
-    const deadline = performance.now() + 2_000;
-    let handoffText = "";
-    while (performance.now() < deadline) {
-      if (existsSync(handoffLog)) handoffText = readFileSync(handoffLog, "utf8");
-      if (handoffText.includes('"argv"')) break;
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-    assert.deepEqual(JSON.parse(handoffText), { argv: payload, cwd: realpathSync(cwd), env: "café-✨" });
-
     const retainedLog = join(cwd, "retained.log");
     const owned = await spawnDetachedProcess({
       argv: [process.execPath, "-e", script, ...payload],
@@ -237,7 +206,7 @@ test("handoff and retained paths preserve no-shell argv and log bytes", async ()
       env: { ...process.env, KEIYAKU_UNICODE: "café-✨" },
       log: retainedLog,
     });
-    await waitForExit(owned.pid);
+    await owned.exited;
     const childBytes = JSON.stringify({ argv: payload, cwd: realpathSync(cwd), env: "café-✨" });
     assert.equal(readFileSync(retainedLog, "utf8"), `${childBytes}[child exit 0]\n`);
   } finally {
@@ -264,30 +233,21 @@ function assertHiddenConsole(reported: { handle: string; tty: boolean }): void {
   assert.ok(reported.handle === "0" || reported.handle === "0x0", reported.handle);
 }
 
-test("Windows hosts hide consoles for Body handoff and retained children", async (t) => {
+test("Windows hosts hide consoles for retained children", async (t) => {
   if (process.platform !== "win32") {
     t.skip("visible-console observation requires a Windows host");
     return;
   }
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-windows-console-"));
-  let pid: number | undefined;
   try {
-    const result = await handoffProcess({
-      argv: [process.execPath, "-e", consoleProbe(join(root, "handoff-console"), true)],
-      cwd: root,
-      log: join(root, "handoff.log"),
-    });
-    assert.equal(result, undefined);
-    const handoff = JSON.parse(await waitForFile(join(root, "handoff-console"))) as { pid: number; handle: string; tty: boolean };
-    pid = handoff.pid;
-    assertHiddenConsole(handoff);
-
     const owned = await spawnDetachedProcess({
       argv: [process.execPath, "-e", consoleProbe(join(root, "logged-console"), true)],
       cwd: root,
       log: join(root, "logged.log"),
     });
-    assertHiddenConsole(JSON.parse(await waitForFile(join(root, "logged-console"))) as { handle: string; tty: boolean });
+    assertHiddenConsole(
+      JSON.parse(await waitForFile(join(root, "logged-console"))) as { handle: string; tty: boolean },
+    );
     await owned.terminate(true);
     await waitForExit(owned.pid);
 
@@ -296,14 +256,21 @@ test("Windows hosts hide consoles for Body handoff and retained children", async
       cwd: root,
       timeoutMs: 5_000,
     });
-    assertHiddenConsole(JSON.parse(await waitForFile(join(root, "buffered-console"))) as { handle: string; tty: boolean });
+    assertHiddenConsole(
+      JSON.parse(await waitForFile(join(root, "buffered-console"))) as { handle: string; tty: boolean },
+    );
 
-    await consumeProcessStdout({
-      argv: [process.execPath, "-e", consoleProbe(join(root, "stream-console"), false)],
-      cwd: root,
-      timeoutMs: 5_000,
-    }, () => {});
-    assertHiddenConsole(JSON.parse(await waitForFile(join(root, "stream-console"))) as { handle: string; tty: boolean });
+    await consumeProcessStdout(
+      {
+        argv: [process.execPath, "-e", consoleProbe(join(root, "stream-console"), false)],
+        cwd: root,
+        timeoutMs: 5_000,
+      },
+      () => {},
+    );
+    assertHiddenConsole(
+      JSON.parse(await waitForFile(join(root, "stream-console"))) as { handle: string; tty: boolean },
+    );
 
     const stdio = spawnStdioProcess({
       argv: [process.execPath, "-e", consoleProbe(join(root, "stdio-console"), true)],
@@ -312,10 +279,6 @@ test("Windows hosts hide consoles for Body handoff and retained children", async
     assertHiddenConsole(JSON.parse(await waitForFile(join(root, "stdio-console"))) as { handle: string; tty: boolean });
     await stdio.close(true);
   } finally {
-    if (pid !== undefined) {
-      try { process.kill(pid, "SIGKILL"); } catch { /* already reaped */ }
-      await waitForExit(pid);
-    }
     rmSync(root, { recursive: true, force: true });
   }
 });

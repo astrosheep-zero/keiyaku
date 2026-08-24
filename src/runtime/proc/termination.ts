@@ -1,0 +1,70 @@
+import { execFile, type ChildProcess } from "node:child_process";
+import { setTimeout as delay } from "node:timers/promises";
+import { promisify } from "node:util";
+
+const TERMINATION_GRACE_MS = 250;
+const WINDOWS_TERMINATION_TIMEOUT_MS = 1_000;
+const execFileAsync = promisify(execFile);
+
+function ignoreMissingProcess(error: unknown): void {
+  if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+}
+
+export async function terminateWindowsTree(pid: number): Promise<void> {
+  try {
+    await execFileAsync("taskkill", ["/PID", String(pid), "/T", "/F"], {
+      timeout: WINDOWS_TERMINATION_TIMEOUT_MS,
+      windowsHide: true,
+    });
+  } catch (error) {
+    const diagnostic = error as NodeJS.ErrnoException & { stderr?: string };
+    const text = `${diagnostic.stderr ?? ""} ${diagnostic.message ?? ""}`;
+    if (diagnostic.code === "ESRCH" || /not found|no running instance|does not exist/iu.test(text)) return;
+    throw error;
+  }
+}
+
+export async function terminateOwnedProcess(child: ChildProcess, force = false): Promise<void> {
+  const pid = child.pid;
+  if (pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
+  let exited = false;
+  const exit = new Promise<void>((resolve) => {
+    child.once("exit", () => {
+      exited = true;
+      resolve();
+    });
+    child.once("close", () => {
+      exited = true;
+      resolve();
+    });
+  });
+  if (process.platform === "win32") {
+    await terminateWindowsTree(pid);
+    await exit;
+    return;
+  }
+  if (force) {
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch (error) {
+      ignoreMissingProcess(error);
+    }
+    await exit;
+    return;
+  }
+  try {
+    process.kill(-pid, "SIGTERM");
+  } catch (error) {
+    ignoreMissingProcess(error);
+    await exit;
+    return;
+  }
+  await Promise.race([exit, delay(TERMINATION_GRACE_MS)]);
+  if (exited || child.exitCode !== null || child.signalCode !== null) return;
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch (error) {
+    ignoreMissingProcess(error);
+  }
+  await exit;
+}

@@ -27,7 +27,6 @@ import {
   type RequestChildLaunch,
 } from "./request-serve.js";
 import {
-  handoffProcess,
   spawnDetachedProcess,
   type DetachedProcessExit,
   type OwnedProcess,
@@ -73,7 +72,7 @@ export type TellWakeRuntime = Readonly<{
 
 type BodyRuntime = Readonly<{
   now(): string;
-  spawnChild?(launch: RequestChildLaunch): Promise<void>;
+  spawnChild?(launch: RequestChildLaunch): Promise<OwnedProcess>;
   spawnBody?(launch: BodyLaunch): Promise<OwnedProcess>;
   express?(route: ResultRoute, options: Readonly<{ as: string; body: string }>): Promise<unknown>;
   upstream?: UpstreamExecutionPort;
@@ -186,7 +185,7 @@ async function expressInitialOutcome(
 function defaultRuntime(): BodyRuntime {
   return {
     now: () => new Date().toISOString(),
-    spawnChild: handoffAkumaBody,
+    spawnChild: spawnAkumaBody,
     spawnBody: spawnAkumaBody,
   };
 }
@@ -205,10 +204,6 @@ export async function bodyProcessInput(launch: BodyLaunch, bodyModuleUrl = impor
     env: { ...process.env, KEIYAKU_ACTOR_ID: actorId },
     log: launch.paths.log,
   };
-}
-
-async function handoffAkumaBody(launch: BodyLaunch): Promise<void> {
-  await handoffProcess(await bodyProcessInput(launch));
 }
 
 type BodyExecution = Readonly<{
@@ -271,7 +266,7 @@ async function runBodyTurns(input: BodyExecution): Promise<void> {
       adapter,
       bodySequence,
       supervisor,
-      runtimeSpawn: runtime.spawnChild ?? handoffAkumaBody,
+      runtimeSpawn: runtime.spawnChild ?? spawnAkumaBody,
       body: initial ?? "",
       ...(initial === undefined ? {} : { call: initial }),
       launchTells,

@@ -1,4 +1,5 @@
 #define WIN32_LEAN_AND_MEAN
+#define _WIN32_WINNT 0x0600
 #include <windows.h>
 
 /* cl /O2 /MT /DUNICODE /D_UNICODE /Fewindows-launch.exe windows-launch.c /link /SUBSYSTEM:WINDOWS /MACHINE:X64 */
@@ -13,6 +14,10 @@ static HANDLE error_handle(void) {
   return GetStdHandle(STD_ERROR_HANDLE);
 }
 
+static HANDLE output_handle(void) {
+  return GetStdHandle(STD_OUTPUT_HANDLE);
+}
+
 static SIZE_T narrow_length(const char *value) {
   SIZE_T length = 0;
   while (value[length] != '\0') length += 1;
@@ -21,6 +26,13 @@ static SIZE_T narrow_length(const char *value) {
 
 static void write_error(const char *value) {
   HANDLE handle = error_handle();
+  if (handle == NULL || handle == INVALID_HANDLE_VALUE) return;
+  DWORD written = 0;
+  WriteFile(handle, value, (DWORD)narrow_length(value), &written, NULL);
+}
+
+static void write_output(const char *value) {
+  HANDLE handle = output_handle();
   if (handle == NULL || handle == INVALID_HANDLE_VALUE) return;
   DWORD written = 0;
   WriteFile(handle, value, (DWORD)narrow_length(value), &written, NULL);
@@ -153,26 +165,127 @@ static HANDLE open_nul(void) {
   return handle;
 }
 
+static LPPROC_THREAD_ATTRIBUTE_LIST create_handle_list(HANDLE *handles, SIZE_T count) {
+  SIZE_T size = 0;
+  InitializeProcThreadAttributeList(NULL, 1, 0, &size);
+  if (size == 0) fail_message("spawn launcher EINVAL");
+  LPPROC_THREAD_ATTRIBUTE_LIST list =
+    (LPPROC_THREAD_ATTRIBUTE_LIST)heap_alloc(size);
+  if (!InitializeProcThreadAttributeList(list, 1, 0, &size)) {
+    HeapFree(GetProcessHeap(), 0, list);
+    fail_message("spawn launcher EINVAL");
+  }
+  if (!UpdateProcThreadAttribute(
+        list,
+        0,
+        PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+        handles,
+        count * sizeof(HANDLE),
+        NULL,
+        NULL
+      )) {
+    DeleteProcThreadAttributeList(list);
+    HeapFree(GetProcessHeap(), 0, list);
+    fail_message("spawn launcher EINVAL");
+  }
+  return list;
+}
+
+struct RetainedControl {
+  HANDLE release_event;
+};
+
+static int read_command(char *command, SIZE_T capacity) {
+  HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
+  SIZE_T length = 0;
+  if (input == NULL || input == INVALID_HANDLE_VALUE || capacity < 2) return 0;
+  for (;;) {
+    char value;
+    DWORD read = 0;
+    if (!ReadFile(input, &value, 1, &read, NULL) || read == 0) return 0;
+    if (value == '\n') {
+      command[length] = '\0';
+      return 1;
+    }
+    if (value != '\r' && length + 1 < capacity) command[length++] = value;
+  }
+}
+
+static DWORD WINAPI retained_control(void *argument) {
+  struct RetainedControl *control = (struct RetainedControl *)argument;
+  char command[32];
+  if (!read_command(command, sizeof(command))) {
+    SetEvent(control->release_event);
+    return 0;
+  }
+  if (lstrcmpA(command, "release") == 0) {
+    SetEvent(control->release_event);
+    return 0;
+  }
+  SetEvent(control->release_event);
+  return 0;
+}
+
+static void write_started(DWORD pid) {
+  char line[64];
+  SIZE_T length = 0;
+  const char *prefix = "started ";
+  while (prefix[length] != '\0') { line[length] = prefix[length]; length += 1; }
+  char digits[16];
+  SIZE_T count = 0;
+  do { digits[count++] = (char)('0' + (pid % 10)); pid /= 10; } while (pid != 0);
+  while (count > 0) line[length++] = digits[--count];
+  line[length++] = '\n';
+  line[length] = '\0';
+  write_output(line);
+}
+
+static void write_exited(DWORD code) {
+  char line[64];
+  SIZE_T length = 0;
+  const char *prefix = "exited ";
+  while (prefix[length] != '\0') { line[length] = prefix[length]; length += 1; }
+  char digits[16];
+  SIZE_T count = 0;
+  do { digits[count++] = (char)('0' + (code % 10)); code /= 10; } while (code != 0);
+  while (count > 0) line[length++] = digits[--count];
+  line[length++] = '\n';
+  line[length] = '\0';
+  write_output(line);
+}
+
 static int launch(const wchar_t *log_path, int argc, wchar_t **argv) {
   if (argc < 1 || argv[0][0] == L'\0') fail_message("spawn launcher EINVAL");
 
   HANDLE log = open_log(log_path);
   HANDLE nul = open_nul();
   struct CommandLine command = build_command_line(argc, argv);
-  STARTUPINFOW startup = { 0 };
+  STARTUPINFOEXW startup = { 0 };
   PROCESS_INFORMATION process = { 0 };
-  startup.cb = sizeof(startup);
-  startup.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
-  startup.wShowWindow = SW_HIDE;
-  startup.hStdInput = nul;
-  startup.hStdOutput = log;
-  startup.hStdError = log;
+  startup.StartupInfo.cb = sizeof(startup);
+  startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+  startup.StartupInfo.wShowWindow = SW_HIDE;
+  startup.StartupInfo.hStdInput = nul;
+  startup.StartupInfo.hStdOutput = log;
+  startup.StartupInfo.hStdError = log;
 
-  // Clear HANDLE_FLAG_INHERIT on the launcher's diagnostic stderr pipe
-  // while leaving intended log/NUL handles inheritable.
-  HANDLE stderrHandle = GetStdHandle(STD_ERROR_HANDLE);
-  if (stderrHandle != INVALID_HANDLE_VALUE) {
-    SetHandleInformation(stderrHandle, HANDLE_FLAG_INHERIT, 0);
+  // The target receives only its explicit log/NUL handles. The launcher's
+  // protocol and diagnostic pipes stay private to the retained owner.
+  HANDLE inheritedHandles[] = { nul, log };
+  startup.lpAttributeList = create_handle_list(
+    inheritedHandles,
+    sizeof(inheritedHandles) / sizeof(inheritedHandles[0])
+  );
+  HANDLE launcherHandles[] = {
+    GetStdHandle(STD_INPUT_HANDLE),
+    GetStdHandle(STD_OUTPUT_HANDLE),
+    GetStdHandle(STD_ERROR_HANDLE),
+  };
+  for (SIZE_T index = 0; index < sizeof(launcherHandles) / sizeof(launcherHandles[0]); index += 1) {
+    HANDLE handle = launcherHandles[index];
+    if (handle != NULL && handle != INVALID_HANDLE_VALUE) {
+      SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0);
+    }
   }
 
   BOOL created = CreateProcessW(
@@ -181,28 +294,67 @@ static int launch(const wchar_t *log_path, int argc, wchar_t **argv) {
     NULL,
     NULL,
     TRUE,
-    CREATE_NO_WINDOW,
+    CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
     NULL,
     NULL,
-    &startup,
+    &startup.StartupInfo,
     &process
   );
   if (!created) {
     DWORD error = GetLastError();
+    DeleteProcThreadAttributeList(startup.lpAttributeList);
+    HeapFree(GetProcessHeap(), 0, startup.lpAttributeList);
     CloseHandle(log);
     CloseHandle(nul);
+    HeapFree(GetProcessHeap(), 0, command.value);
     fail_spawn(argv[0], spawn_code(error));
   }
 
+  write_started(process.dwProcessId);
+  DeleteProcThreadAttributeList(startup.lpAttributeList);
+  HeapFree(GetProcessHeap(), 0, startup.lpAttributeList);
   CloseHandle(process.hThread);
-  CloseHandle(process.hProcess);
   CloseHandle(log);
   CloseHandle(nul);
   HeapFree(GetProcessHeap(), 0, command.value);
+
+  HANDLE release_event = CreateEventW(NULL, TRUE, FALSE, NULL);
+  if (release_event == NULL) {
+    TerminateProcess(process.hProcess, 1);
+    CloseHandle(process.hProcess);
+    fail_message("spawn launcher EINVAL");
+  }
+  struct RetainedControl control = { release_event };
+  HANDLE control_thread = CreateThread(NULL, 0, retained_control, &control, 0, NULL);
+  if (control_thread == NULL) {
+    TerminateProcess(process.hProcess, 1);
+    CloseHandle(release_event);
+    CloseHandle(process.hProcess);
+    fail_message("spawn launcher EINVAL");
+  }
+  HANDLE waits[2] = { process.hProcess, release_event };
+  DWORD winner = WaitForMultipleObjects(2, waits, FALSE, INFINITE);
+  if (winner == WAIT_OBJECT_0 + 1) {
+    WaitForSingleObject(control_thread, INFINITE);
+    CloseHandle(control_thread);
+    CloseHandle(release_event);
+    CloseHandle(process.hProcess);
+    return 0;
+  }
+  WaitForSingleObject(process.hProcess, INFINITE);
+  DWORD code = 1;
+  GetExitCodeProcess(process.hProcess, &code);
+  write_exited(code);
+  CancelSynchronousIo(control_thread);
+  WaitForSingleObject(control_thread, INFINITE);
+  CloseHandle(control_thread);
+  CloseHandle(release_event);
+  CloseHandle(process.hProcess);
   return 0;
 }
 
 int wmain(int argc, wchar_t **argv) {
-  if (argc < 3) fail_message("spawn launcher EINVAL");
-  return launch(argv[1], argc - 2, argv + 2);
+  if (argc < 4) fail_message("spawn launcher EINVAL");
+  if (lstrcmpW(argv[1], L"--retain") != 0) fail_message("spawn launcher EINVAL");
+  return launch(argv[2], argc - 3, argv + 3);
 }

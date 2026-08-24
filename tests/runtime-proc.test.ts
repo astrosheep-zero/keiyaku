@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
+import { createProcessLifecycle } from "../src/runtime/proc/lifecycle.js";
 import { LineRpcProcess } from "../src/runtime/proc/line-rpc.js";
 import { spawnStdioProcess } from "../src/runtime/proc/stdio.js";
 import {
@@ -22,6 +23,27 @@ function input(argv: readonly string[], overrides: Partial<ProcessInput> = {}): 
   };
 }
 
+test("owned-process lifecycle serializes release behind termination", async () => {
+  let finish!: () => void;
+  let terminations = 0;
+  let releases = 0;
+  const lifecycle = createProcessLifecycle(
+    async () => {
+      terminations += 1;
+      await new Promise<void>((resolve) => { finish = resolve; });
+    },
+    () => { releases += 1; },
+  );
+  const termination = lifecycle.terminate();
+  lifecycle.release();
+  assert.equal(releases, 0);
+  finish();
+  await termination;
+  await lifecycle.terminate();
+  assert.equal(terminations, 1);
+  lifecycle.release();
+  assert.equal(releases, 0);
+});
 function waitForOutputLine(expected: string, message: string): Readonly<{
   wait: Promise<void>;
   observe(chunk: Uint8Array): void;

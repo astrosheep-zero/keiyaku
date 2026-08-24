@@ -1,8 +1,32 @@
 import { any, factErrors, factTypes, gitRepository, types } from "./policy-helpers.js";
 export const runtimeLibraryZones = [
+  { source: "runtime/proc/lifecycle.ts", allow: [] },
+  { source: "runtime/proc/process-exit.ts", allow: [types("runtime/proc/types.ts")] },
+  { source: "runtime/proc/termination.ts", allow: [] },
+  { source: "runtime/proc/types.ts", allow: [] },
+  {
+    source: "runtime/proc/windows-run.ts",
+    allow: [
+      any("runtime/proc/launch.ts"),
+      any("runtime/proc/process-exit.ts"),
+      any("runtime/proc/termination.ts"),
+      any("runtime/proc/lifecycle.ts"),
+      types("runtime/proc/types.ts"),
+    ],
+  },
   { source: "runtime/proc/line-rpc.ts", allow: [any("runtime/proc/stdio.ts")] },
   { source: "runtime/proc/stdio.ts", allow: [any("runtime/proc/run.ts"), any("runtime/proc/launch.ts")] },
-  { source: "runtime/proc/run.ts", allow: [any("runtime/proc/launch.ts")] },
+  {
+    source: "runtime/proc/run.ts",
+    allow: [
+      any("runtime/proc/launch.ts"),
+      any("runtime/proc/process-exit.ts"),
+      any("runtime/proc/termination.ts"),
+      any("runtime/proc/lifecycle.ts"),
+      types("runtime/proc/types.ts"),
+      any("runtime/proc/windows-run.ts"),
+    ],
+  },
   { source: "runtime/proc/launch.ts", allow: [] },
   {
     source: "verification/declaration.ts",
