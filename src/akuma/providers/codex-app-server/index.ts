@@ -160,12 +160,8 @@ async function abortTurn(server: LineRpcProcess, state: CodexTurnState, settle: 
   await server.close(true);
 }
 
-async function startCodex(execution: ProviderExecution, input: StartInput): Promise<Session> {
-  const signal = input.signal ?? new AbortController().signal;
-  if (input.session.kind === "resume" && !("sessionId" in input.session.coordinate))
-    throw new Error("Codex app-server resume requires sessionId");
-  const events = new AgentEventChannel();
-  const server = new LineRpcProcess({
+function codexServer(execution: ProviderExecution, input: StartInput): LineRpcProcess {
+  return new LineRpcProcess({
     argv: [execution.executable ?? "codex", "app-server", "--listen", "stdio://"],
     cwd: input.cwd,
     ...(execution.env === undefined && input.requests === undefined
@@ -178,6 +174,14 @@ async function startCodex(execution: ProviderExecution, input: StartInput): Prom
           },
         }),
   });
+}
+
+async function startCodex(execution: ProviderExecution, input: StartInput): Promise<Session> {
+  const signal = input.signal ?? new AbortController().signal;
+  if (input.session.kind === "resume" && !("sessionId" in input.session.coordinate))
+    throw new Error("Codex app-server resume requires sessionId");
+  const events = new AgentEventChannel();
+  const server = codexServer(execution, input);
   const state: CodexTurnState = { settled: false, tools: new Map() };
   let settle!: (result: TurnResult) => void;
   const completion = new Promise<TurnResult>((resolve) => {

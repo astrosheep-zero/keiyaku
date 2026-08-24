@@ -67,12 +67,30 @@ type BatchObjectReader = Readonly<{
   close(): Promise<void>;
 }>;
 
-function batchObjectReader(repository: GitRepository): BatchObjectReader {
-  const child: ChildProcessWithoutNullStreams = spawn(repository.gitPath, ["cat-file", "--batch"], {
+function batchChild(repository: GitRepository): ChildProcessWithoutNullStreams {
+  return spawn(repository.gitPath, ["cat-file", "--batch"], {
     cwd: repository.effectiveCwd,
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   });
+}
+
+function batchError(
+  child: ChildProcessWithoutNullStreams,
+  stderr: readonly Buffer[],
+  message: string,
+  status: number | null,
+): GitPlumbingError {
+  return new GitPlumbingError({
+    stderr: Buffer.concat(stderr),
+    status,
+    message: `git cat-file --batch: ${message}`,
+    pid: child.pid ?? null,
+  });
+}
+
+function batchObjectReader(repository: GitRepository): BatchObjectReader {
+  const child = batchChild(repository);
   const cursor = streamCursor(child.stdout);
   const cache = new Map<GitOid, Promise<GitObjectResult>>();
   const stderr: Buffer[] = [];
@@ -90,13 +108,6 @@ function batchObjectReader(repository: GitRepository): BatchObjectReader {
     spawnError ??= error;
   });
 
-  const plumbingError = (message: string, status: number | null): GitPlumbingError =>
-    new GitPlumbingError({
-      stderr: Buffer.concat(stderr),
-      status,
-      message: `git cat-file --batch: ${message}`,
-      pid: child.pid ?? null,
-    });
   const write = async (value: string): Promise<void> => {
     if (spawnError !== null) throw spawnError;
     await new Promise<void>((resolve, reject) => {
@@ -123,7 +134,7 @@ function batchObjectReader(repository: GitRepository): BatchObjectReader {
       if (failure !== null) throw failure;
       child.kill();
       await closed;
-      failure = plumbingError(error instanceof Error ? error.message : String(error), child.exitCode);
+      failure = batchError(child, stderr, error instanceof Error ? error.message : String(error), child.exitCode);
       throw failure;
     }
   };
@@ -150,7 +161,7 @@ function batchObjectReader(repository: GitRepository): BatchObjectReader {
     if (!child.stdin.destroyed) child.stdin.end();
     const outcome = await closed;
     if (spawnError !== null || outcome.code !== 0) {
-      throw plumbingError("git cat-file --batch did not close cleanly", outcome.code);
+      throw batchError(child, stderr, "git cat-file --batch did not close cleanly", outcome.code);
     }
   };
   return { objects, close };

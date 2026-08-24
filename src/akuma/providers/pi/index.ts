@@ -103,6 +103,14 @@ async function piCreateOptions(sdk: PiSdk, input: PiDriveInput): Promise<CreateA
 type PiDriveInput = Parameters<ProviderAdapter["start"]>[0] | Parameters<NonNullable<ProviderAdapter["resume"]>>[0];
 
 type PiCreatedSession = Awaited<ReturnType<PiSdk["createAgentSession"]>>;
+type PiNativeSession = PiCreatedSession["session"];
+type PiDriveState = {
+  terminalFailure: string | null;
+  disposed: boolean;
+  abortRequest?: Promise<void>;
+  aborting: boolean;
+  settled: boolean;
+};
 
 async function createPiSession(
   sdk: PiSdk,
@@ -130,6 +138,38 @@ function forceDisposePi(
   return Promise.resolve();
 }
 
+async function runPiPrompt(
+  native: PiNativeSession,
+  input: PiDriveInput,
+  events: PiEventState,
+  state: PiDriveState,
+  settle: (result: TurnResult) => void,
+): Promise<void> {
+  try {
+    await native.prompt([input.body, ...input.launchTells.map((tell) => tell.text)].join("\n\n"));
+    let result: TurnResult;
+    if (state.aborting) result = { kind: "failed", diagnostic: "Pi session aborted" };
+    else if (state.terminalFailure !== null) result = { kind: "failed", diagnostic: state.terminalFailure };
+    else if (!events.assistantSeen)
+      result = { kind: "failed", diagnostic: "Pi completed without a native assistant answer" };
+    else {
+      const historyId = native.sessionManager.getLeafId();
+      result = {
+        kind: "answered",
+        answer: events.answer,
+        ...(historyId === null ? {} : { historyId }),
+      };
+    }
+    settle(result);
+  } catch (error) {
+    settle(
+      state.aborting
+        ? { kind: "failed", diagnostic: "Pi session aborted" }
+        : { kind: "failed", diagnostic: diagnostic(error) },
+    );
+  }
+}
+
 async function drivePi(
   sdk: PiSdk,
   execution: ProviderExecution,
@@ -147,15 +187,16 @@ async function drivePi(
     throw new Error("Pi session admitted without sessionFile");
   }
   const events = new AgentEventChannel();
-  const state: PiEventState = { answer: "", assistantSeen: false, tools: new Map() };
-  let terminalFailure: string | null = null;
-  let disposed = false;
-  let abortRequest: Promise<void> | undefined;
-  let aborting = false;
-  let settled = false;
+  const eventState: PiEventState = { answer: "", assistantSeen: false, tools: new Map() };
+  const state: PiDriveState = {
+    terminalFailure: null,
+    disposed: false,
+    aborting: false,
+    settled: false,
+  };
   const dispose = (): void => {
-    if (disposed) return;
-    disposed = true;
+    if (state.disposed) return;
+    state.disposed = true;
     try {
       unsubscribe();
     } finally {
@@ -167,8 +208,8 @@ async function drivePi(
     }
   };
   const unsubscribe = native.subscribe((event) => {
-    if (event.type === "agent_end" && !event.willRetry) terminalFailure = piTerminalFailure(event.messages);
-    for (const translated of translatePiEvent(event, state)) events.emit(translated);
+    if (event.type === "agent_end" && !event.willRetry) state.terminalFailure = piTerminalFailure(event.messages);
+    for (const translated of translatePiEvent(event, eventState)) events.emit(translated);
   });
   events.emit({ type: "session", coordinate: { sessionFile: native.sessionFile, sessionId: native.sessionId } });
   let settleCompletion!: (result: TurnResult) => void;
@@ -176,44 +217,20 @@ async function drivePi(
     settleCompletion = resolve;
   });
   const settle = (result: TurnResult): void => {
-    if (settled) return;
-    settled = true;
+    if (state.settled) return;
+    state.settled = true;
     dispose();
     settleCompletion(result);
   };
-  void (async () => {
-    try {
-      await native.prompt([input.body, ...input.launchTells.map((tell) => tell.text)].join("\n\n"));
-      let result: TurnResult;
-      if (aborting) result = { kind: "failed", diagnostic: "Pi session aborted" };
-      else if (terminalFailure !== null) result = { kind: "failed", diagnostic: terminalFailure };
-      else if (!state.assistantSeen)
-        result = { kind: "failed", diagnostic: "Pi completed without a native assistant answer" };
-      else {
-        const historyId = native.sessionManager.getLeafId();
-        result = {
-          kind: "answered",
-          answer: state.answer,
-          ...(historyId === null ? {} : { historyId }),
-        };
-      }
-      settle(result);
-    } catch (error) {
-      settle(
-        aborting
-          ? { kind: "failed", diagnostic: "Pi session aborted" }
-          : { kind: "failed", diagnostic: diagnostic(error) },
-      );
-    }
-  })();
+  void runPiPrompt(native, input, eventState, state, settle);
   return {
     admission: { fence: native.sessionId },
     events,
     completion,
     abort: () => {
-      abortRequest ??= (async () => {
-        if (settled) return;
-        aborting = true;
+      state.abortRequest ??= (async () => {
+        if (state.settled) return;
+        state.aborting = true;
         try {
           await native.abort();
         } catch {
@@ -221,11 +238,11 @@ async function drivePi(
         }
         settle({ kind: "failed", diagnostic: "Pi session aborted" });
       })();
-      return abortRequest;
+      return state.abortRequest;
     },
     forceDispose: () =>
       forceDisposePi(dispose, settle, () => {
-        aborting = true;
+        state.aborting = true;
       }),
   };
 }

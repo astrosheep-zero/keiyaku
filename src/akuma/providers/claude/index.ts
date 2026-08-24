@@ -160,6 +160,13 @@ type ObserveInput = Readonly<{
   state: Readonly<{ get openSubmissions(): number }>;
 }>;
 
+type ClaudeObservationProgress = { checkpoint: number; ended: boolean };
+type ClaudeReceiptControls = Readonly<{
+  flushReceipts(): void;
+  settleReceipts(): void;
+  closeWhenIdle(): void;
+}>;
+
 function successfulResult(message: Extract<SDKMessage, { type: "result" }>, historyId?: string): TurnResult {
   return {
     kind: "answered",
@@ -173,8 +180,110 @@ function finishClaudeInput(input: ClaudeInput, terminal: TurnResult | null): voi
   else input.close();
 }
 
+async function consumeClaudeQuery(
+  context: ObserveInput &
+    Readonly<{
+      observation: ClaudeObservationState;
+      progress: ClaudeObservationProgress;
+      admit: () => void;
+      rejectAdmission: (error: Error) => void;
+      settle: (result: TurnResult) => void;
+      controls: ClaudeReceiptControls;
+    }>,
+): Promise<void> {
+  const { query, input, events, observation, progress, admit, rejectAdmission, settle, controls } = context;
+  let admitted = false;
+  let terminal: TurnResult | null = null;
+  let historyId: string | undefined;
+  try {
+    for await (const message of query) {
+      if (!admitted && "session_id" in message && typeof message.session_id === "string") {
+        admitted = true;
+        events.emit({ type: "session", coordinate: { sessionId: message.session_id } });
+        admit();
+      }
+      emitClaudeMessage(message, events, observation);
+      if (
+        message.type === "assistant" &&
+        message.parent_tool_use_id === null &&
+        typeof message.uuid === "string" &&
+        message.uuid.length > 0
+      )
+        historyId = message.uuid;
+      if (message.type !== "result") continue;
+      if (message.subtype === "success") {
+        terminal = successfulResult(message, historyId);
+        progress.checkpoint += 1;
+        controls.flushReceipts();
+        queueMicrotask(controls.closeWhenIdle);
+      } else {
+        terminal = { kind: "failed", diagnostic: message.errors.join("; ") || message.subtype };
+        input.close();
+      }
+    }
+    progress.ended = true;
+    const result = terminal ?? { kind: "failed" as const, diagnostic: "Claude query ended without a result" };
+    if (!admitted)
+      rejectAdmission(
+        new Error(result.kind === "failed" ? result.diagnostic : "Claude query ended before session admission"),
+      );
+    settle(result);
+  } catch (error) {
+    progress.ended = true;
+    input.fail(error);
+    const failure = error instanceof Error ? error : new Error(String(error));
+    if (!admitted) rejectAdmission(failure);
+    settle({ kind: "failed", diagnostic: failure.message });
+  } finally {
+    finishClaudeInput(input, terminal);
+    events.end();
+    controls.settleReceipts();
+  }
+}
+
+type ClaudeDriveState = { submission: number; openSubmissions: number };
+
+function claudeTell(
+  input: ClaudeInput,
+  observed: Observation,
+  accepted: AcceptedTell[],
+  state: ClaudeDriveState,
+  run: string,
+): NonNullable<Session["tell"]> {
+  return (tell) => {
+    if (observed.ended || input.closed) return Promise.resolve({ kind: "turn-ended" });
+    state.openSubmissions += 1;
+    const ordinal = ++state.submission;
+    return new Promise((resolve, reject) => {
+      const pending: AcceptedTell = { id: tell.id, afterCheckpoint: 0, visible: false };
+      void input
+        .push(claudeUserMessage(tell.text), () => {
+          pending.afterCheckpoint = observed.checkpoint;
+          accepted.push(pending);
+        })
+        .then(
+          () => {
+            state.openSubmissions -= 1;
+            resolve({ kind: "accepted", fence: `claude:${run}:${ordinal}` });
+            queueMicrotask(() => {
+              pending.visible = true;
+              observed.flushReceipts();
+              observed.settleReceipts();
+            });
+          },
+          (error) => {
+            state.openSubmissions -= 1;
+            if (isClaudeTurnEnded(error)) resolve({ kind: "turn-ended" });
+            else reject(error);
+            observed.settleReceipts();
+          },
+        );
+    });
+  };
+}
+
 function observeClaudeQuery(context: ObserveInput): Observation {
-  const { query, input, events, receipts, accepted, state } = context;
+  const { input, receipts, accepted, state } = context;
   const observation: ClaudeObservationState = { tools: new Map() };
   let admit!: () => void;
   let rejectAdmission!: (error: Error) => void;
@@ -186,16 +295,15 @@ function observeClaudeQuery(context: ObserveInput): Observation {
   const completion = new Promise<TurnResult>((resolve) => {
     settle = resolve;
   });
-  let checkpoint = 0,
-    ended = false;
+  const progress: ClaudeObservationProgress = { checkpoint: 0, ended: false };
 
   const settleReceipts = (): void => {
-    if (ended && state.openSubmissions === 0 && accepted.every((tell) => tell.visible)) receipts.end();
+    if (progress.ended && state.openSubmissions === 0 && accepted.every((tell) => tell.visible)) receipts.end();
   };
   const flushReceipts = (): void => {
     for (let index = 0; index < accepted.length; ) {
       const tell = accepted[index]!;
-      if (!tell.visible || tell.afterCheckpoint >= checkpoint) {
+      if (!tell.visible || tell.afterCheckpoint >= progress.checkpoint) {
         index += 1;
         continue;
       }
@@ -209,64 +317,24 @@ function observeClaudeQuery(context: ObserveInput): Observation {
     if (state.openSubmissions === 0 && accepted.length === 0 && input.pending === 0) input.close();
   };
 
-  void (async () => {
-    let admitted = false;
-    let terminal: TurnResult | null = null;
-    let historyId: string | undefined;
-    try {
-      for await (const message of query) {
-        if (!admitted && "session_id" in message && typeof message.session_id === "string") {
-          admitted = true;
-          events.emit({ type: "session", coordinate: { sessionId: message.session_id } });
-          admit();
-        }
-        emitClaudeMessage(message, events, observation);
-        if (
-          message.type === "assistant" &&
-          message.parent_tool_use_id === null &&
-          typeof message.uuid === "string" &&
-          message.uuid.length > 0
-        )
-          historyId = message.uuid;
-        if (message.type !== "result") continue;
-        if (message.subtype === "success") {
-          terminal = successfulResult(message, historyId);
-          checkpoint += 1;
-          flushReceipts();
-          queueMicrotask(closeWhenIdle);
-        } else {
-          terminal = { kind: "failed", diagnostic: message.errors.join("; ") || message.subtype };
-          input.close();
-        }
-      }
-      ended = true;
-      const result = terminal ?? { kind: "failed" as const, diagnostic: "Claude query ended without a result" };
-      if (!admitted)
-        rejectAdmission(
-          new Error(result.kind === "failed" ? result.diagnostic : "Claude query ended before session admission"),
-        );
-      settle(result);
-    } catch (error) {
-      ended = true;
-      input.fail(error);
-      const failure = error instanceof Error ? error : new Error(String(error));
-      if (!admitted) rejectAdmission(failure);
-      settle({ kind: "failed", diagnostic: failure.message });
-    } finally {
-      finishClaudeInput(input, terminal);
-      events.end();
-      settleReceipts();
-    }
-  })();
+  void consumeClaudeQuery({
+    ...context,
+    observation,
+    progress,
+    admit,
+    rejectAdmission,
+    settle,
+    controls: { flushReceipts, settleReceipts, closeWhenIdle },
+  });
 
   return {
     admission,
     completion,
     get ended() {
-      return ended;
+      return progress.ended;
     },
     get checkpoint() {
-      return checkpoint;
+      return progress.checkpoint;
     },
     flushReceipts,
     settleReceipts,
@@ -289,8 +357,7 @@ async function driveClaude(
   const abortController = new AbortController();
   const run = randomUUID();
   const accepted: AcceptedTell[] = [];
-  let submission = 0;
-  let openSubmissions = 0;
+  const driveState: ClaudeDriveState = { submission: 0, openSubmissions: 0 };
   const launchAcknowledged = input.push(claudeUserMessage(launchText(drive)));
   const query = sdk.query({
     prompt: input.iterable,
@@ -311,7 +378,7 @@ async function driveClaude(
     accepted,
     state: {
       get openSubmissions() {
-        return openSubmissions;
+        return driveState.openSubmissions;
       },
     },
   });
@@ -326,36 +393,7 @@ async function driveClaude(
     events,
     receipts,
     completion: observed.completion,
-    tell(tell) {
-      if (observed.ended || input.closed) return Promise.resolve({ kind: "turn-ended" });
-      openSubmissions += 1;
-      const ordinal = ++submission;
-      return new Promise((resolve, reject) => {
-        const pending: AcceptedTell = { id: tell.id, afterCheckpoint: 0, visible: false };
-        void input
-          .push(claudeUserMessage(tell.text), () => {
-            pending.afterCheckpoint = observed.checkpoint;
-            accepted.push(pending);
-          })
-          .then(
-            () => {
-              openSubmissions -= 1;
-              resolve({ kind: "accepted", fence: `claude:${run}:${ordinal}` });
-              queueMicrotask(() => {
-                pending.visible = true;
-                observed.flushReceipts();
-                observed.settleReceipts();
-              });
-            },
-            (error) => {
-              openSubmissions -= 1;
-              if (isClaudeTurnEnded(error)) resolve({ kind: "turn-ended" });
-              else reject(error);
-              observed.settleReceipts();
-            },
-          );
-      });
-    },
+    tell: claudeTell(input, observed, accepted, driveState, run),
     async abort(): Promise<void> {
       shutDown(new Error("Claude query aborted"));
       await observed.completion;

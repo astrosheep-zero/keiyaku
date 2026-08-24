@@ -379,35 +379,47 @@ async function readDispatches(
   }
 }
 
-export async function observeKanshi(input: KanshiInput): Promise<KanshiObservation> {
-  const observedAt = new Date().toISOString();
-  const { world, repo, region, contract } = coordinate(input);
-  const branch = await readBranch(repo);
-  if (repo === undefined) {
-    const contracts = { kind: "absent" as const };
-    const holders = { kind: "absent" as const };
-    const observeContract = contractEndpointObserver(contracts);
-    const board = await readTaskWorld(world);
-    const tasks = world === null ? { kind: "absent" as const } : readTasks(world, board, holders, observeContract);
-    const aliases = world === null ? { kind: "absent" as const } : await readAliasBindings(world);
-    const akuma = world === null ? { kind: "absent" as const } : await joinAkuma(world, observeContract, [], aliases);
-    return {
-      report: {
-        root: world,
-        observedAt,
-        branch,
-        contracts,
-        tasks,
-        akuma,
-        ...(region === undefined ? {} : { region: { kind: "absent" as const } }),
-      },
-      aliases,
-    };
-  }
+async function observeWithoutRepo(
+  world: WorldRoot | null,
+  region: KanshiRegionSelection | undefined,
+  observedAt: string,
+  branch: string | null,
+): Promise<KanshiObservation> {
+  const contracts = { kind: "absent" as const };
+  const holders = { kind: "absent" as const };
+  const observeContract = contractEndpointObserver(contracts);
+  const board = await readTaskWorld(world);
+  const tasks = world === null ? { kind: "absent" as const } : readTasks(world, board, holders, observeContract);
+  const aliases = world === null ? { kind: "absent" as const } : await readAliasBindings(world);
+  const akuma = world === null ? { kind: "absent" as const } : await joinAkuma(world, observeContract, [], aliases);
+  return {
+    report: {
+      root: world,
+      observedAt,
+      branch,
+      contracts,
+      tasks,
+      akuma,
+      ...(region === undefined ? {} : { region: { kind: "absent" as const } }),
+    },
+    aliases,
+  };
+}
+
+type RepoObservationInput = Readonly<{
+  world: WorldRoot | null;
+  repo: ReturnType<typeof scopeForRepo>;
+  region: KanshiRegionSelection | undefined;
+  contract: ContractBoard["rows"][number]["id"] | undefined;
+  observedAt: string;
+  branch: string | null;
+}>;
+
+async function observeRepo(input: RepoObservationInput): Promise<KanshiObservation> {
+  const { world, repo, region, contract, observedAt, branch } = input;
   try {
-    const repository = scopeForRepo(repo);
-    return await withGitDecodeChannel(repository, (channel) =>
-      withGitReadObservation(repository, channel, async (observation) => {
+    return await withGitDecodeChannel(repo, (channel) =>
+      withGitReadObservation(repo, channel, async (observation) => {
         const [contractSection, holders, dispatches, regionSection, board] = await Promise.all([
           readContracts(observation, contract),
           readHolders(observation),
@@ -460,6 +472,14 @@ export async function observeKanshi(input: KanshiInput): Promise<KanshiObservati
       aliases: world === null ? { kind: "absent" } : failure,
     };
   }
+}
+
+export async function observeKanshi(input: KanshiInput): Promise<KanshiObservation> {
+  const observedAt = new Date().toISOString();
+  const { world, repo, region, contract } = coordinate(input);
+  const branch = await readBranch(repo);
+  if (repo === undefined) return observeWithoutRepo(world, region, observedAt, branch);
+  return observeRepo({ world, repo: scopeForRepo(repo), region, contract, observedAt, branch });
 }
 
 export async function kanshi(input: KanshiInput): Promise<KanshiReport> {

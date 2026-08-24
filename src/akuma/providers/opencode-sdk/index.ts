@@ -237,15 +237,15 @@ async function forceDisposeOpencode(
   await finish({ kind: "failed", diagnostic: "OpenCode session force-disposed" });
 }
 
-async function drive(execution: ProviderExecution, input: Input, loader?: OpencodeSdkLoader): Promise<Session> {
-  admit(input.options);
-  const signal = input.signal ?? new AbortController().signal;
-  const resumeSessionId = input.session.kind === "resume" ? opencodeSessionId(input.session.coordinate) : undefined;
-  const abortController = new AbortController();
-  const abortSetup = () => abortController.abort(signal.reason);
-  signal.addEventListener("abort", abortSetup, { once: true });
-  signal.throwIfAborted();
-  const runtime = await abortable(
+type OpencodeRuntime = Awaited<ReturnType<typeof loadOpencode>>;
+
+async function loadDriveRuntime(
+  execution: ProviderExecution,
+  input: Input,
+  signal: AbortSignal,
+  loader?: OpencodeSdkLoader,
+): Promise<OpencodeRuntime> {
+  return await abortable(
     loadOpencode(
       {
         ...execution,
@@ -255,12 +255,42 @@ async function drive(execution: ProviderExecution, input: Input, loader?: Openco
         },
       },
       input.cwd,
-      abortController.signal,
+      signal,
       loader,
     ),
-    abortController.signal,
+    signal,
     async (late) => await late.close(),
   );
+}
+
+async function openDriveSession(
+  runtime: OpencodeRuntime,
+  input: Input,
+  resumeSessionId: string | undefined,
+  signal: AbortSignal,
+): Promise<Readonly<{ session: OpencodeRuntime["client"]["session"]; sessionId: string }>> {
+  const session = runtime.client.session;
+  const response = await abortable(
+    input.session.kind === "fresh"
+      ? session.create({ query: { directory: input.cwd }, throwOnError: true })
+      : session.get({ path: { id: resumeSessionId! }, query: { directory: input.cwd }, throwOnError: true }),
+    signal,
+  );
+  const info = object(object(response)?.data) ?? object(response);
+  const sessionId = text(info?.id) ?? resumeSessionId;
+  if (sessionId === undefined) throw new Error("OpenCode did not return a session id");
+  return { session, sessionId };
+}
+
+async function drive(execution: ProviderExecution, input: Input, loader?: OpencodeSdkLoader): Promise<Session> {
+  admit(input.options);
+  const signal = input.signal ?? new AbortController().signal;
+  const resumeSessionId = input.session.kind === "resume" ? opencodeSessionId(input.session.coordinate) : undefined;
+  const abortController = new AbortController();
+  const abortSetup = () => abortController.abort(signal.reason);
+  signal.addEventListener("abort", abortSetup, { once: true });
+  signal.throwIfAborted();
+  const runtime = await loadDriveRuntime(execution, input, abortController.signal, loader);
   let closing: Promise<void> | undefined;
   let iterator: AsyncIterator<unknown> | undefined;
   const closeOnce = (): Promise<void> => {
@@ -268,16 +298,7 @@ async function drive(execution: ProviderExecution, input: Input, loader?: Openco
     return closing;
   };
   try {
-    const session = runtime.client.session;
-    const sessionResponse = await abortable(
-      input.session.kind === "fresh"
-        ? session.create({ query: { directory: input.cwd }, throwOnError: true })
-        : session.get({ path: { id: resumeSessionId! }, query: { directory: input.cwd }, throwOnError: true }),
-      abortController.signal,
-    );
-    const info = object(object(sessionResponse)?.data) ?? object(sessionResponse);
-    const sessionId = text(info?.id) ?? resumeSessionId;
-    if (sessionId === undefined) throw new Error("OpenCode did not return a session id");
+    const { session, sessionId } = await openDriveSession(runtime, input, resumeSessionId, abortController.signal);
 
     const events = new AgentEventChannel();
     const state = createEventState(sessionId);
