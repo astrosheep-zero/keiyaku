@@ -1,3 +1,4 @@
+import type { SquareRoute } from "@astrosheep/square";
 import { type AkuId, type ActivityHistory } from "../../akuma/index.js";
 import {
   Keiyaku,
@@ -64,6 +65,7 @@ type InvokeInput = Readonly<{
   settings?: Settings;
   contract?: KeiyakuContract;
   repo?: Repo;
+  resultRoute?: SquareRoute;
   readStdin(): Promise<string>;
 }>;
 
@@ -203,6 +205,7 @@ export async function invokeAkuma(command: InvokedAkumaCommand, input: InvokeInp
         ...(input.contract === undefined ? {} : { contract: input.contract }),
         ...(command.alias === undefined ? {} : { alias: command.alias }),
         ...(command.allowed === undefined ? {} : { allowed: command.allowed }),
+        ...(input.resultRoute === undefined ? {} : { resultRoute: input.resultRoute }),
       });
       return { kind: "akuma", action: "call", result, world: input.path };
     }

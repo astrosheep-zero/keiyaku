@@ -21,7 +21,7 @@ function detachedCall(result: Pick<CallResult, "dispatch" | "alias">): Parameter
       kind: "called",
       akuma,
       execution: { cwd: world, source: "process" },
-      observation: { kind: "detached" },
+      observation: { kind: "detached", resultRoute: "not-captured" },
       ...result,
     },
   };

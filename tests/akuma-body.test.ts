@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -1614,4 +1614,218 @@ test("heart loss wakes a Body stalled on provider observation", async () => {
   assert.equal(aborted, true);
   assert.equal(existsSync(allocated.paths.heart), false);
   rmSync(root, { recursive: true, force: true });
+});
+
+test("Body expresses the committed initial call outcome once and never later tells or open loss", async () => {
+  const route = Object.freeze({ v: 1, squarePath: "/square", name: "Alice" });
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-result-route-"));
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "a11ce001" });
+    await initializeHeart(allocated.paths);
+    const expressions: Array<Readonly<{ as: string; body: string; outcome: unknown }>> = [];
+    await driveAkumaBody({
+      paths: allocated.paths,
+      seed: {
+        id: allocated.id,
+        archetype: "claude",
+        provider: { name: "claude", kind: "claude-agent-sdk" },
+        options: {},
+        origin: { kind: "direct" },
+        cwd: root,
+      },
+      initialBody: "build it",
+      resultRoute: route,
+    }, adapter({
+      starts: [],
+      events: [{ type: "session", coordinate: { sessionId: "native-1" } }],
+      result: { kind: "answered", answer: "done", historyId: "history-1" },
+    }), {
+      now: () => "2026-08-08T00:00:00.000Z",
+      async express(_route, options) {
+        expressions.push({ ...options, outcome: (await outcomes(allocated.paths))[0] });
+      },
+    });
+    assert.deepEqual(expressions, [{
+      as: "keiyaku",
+      body: JSON.stringify({ akuma: allocated.id, outcome: "answered" }),
+      outcome: {
+        kind: "answered",
+        answer: "done",
+        historyId: "history-1",
+        session: { sessionId: "native-1" },
+      },
+    }]);
+
+    await recordTell(allocated.paths, {
+      id: "tell-later",
+      body: "adjust it",
+      recordedAt: "2026-08-08T00:00:01.000Z",
+    });
+    await driveAkumaBody({
+      paths: allocated.paths,
+      resultRoute: route,
+    }, adapter({
+      starts: [],
+      events: [],
+      result: { kind: "answered", answer: "adjusted", historyId: "history-2" },
+    }), {
+      now: () => "2026-08-08T00:00:02.000Z",
+      async express() {
+        throw new Error("later Tell Turns must not express");
+      },
+    });
+    assert.equal(expressions.length, 1);
+    assert.deepEqual((await outcomes(allocated.paths))[1], {
+      kind: "answered",
+      answer: "adjusted",
+      historyId: "history-2",
+      session: { sessionId: "native-1" },
+    });
+
+    const failed = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "fa11ed02" });
+    await initializeHeart(failed.paths);
+    const failedExpressions: unknown[] = [];
+    await driveAkumaBody({
+      paths: failed.paths,
+      seed: {
+        id: failed.id,
+        archetype: "claude",
+        provider: { name: "claude", kind: "claude-agent-sdk" },
+        options: {},
+        origin: { kind: "direct" },
+        cwd: root,
+      },
+      initialBody: "fail it",
+      resultRoute: route,
+    }, adapter({
+      starts: [],
+      events: [],
+      result: { kind: "failed", diagnostic: "provider failed" },
+    }), {
+      now: () => "2026-08-08T00:00:03.000Z",
+      async express(_route, options) {
+        failedExpressions.push({ ...options, outcome: (await outcomes(failed.paths))[0] });
+      },
+    });
+    assert.deepEqual(failedExpressions, [{
+      as: "keiyaku",
+      body: JSON.stringify({ akuma: failed.id, outcome: "failed" }),
+      outcome: { kind: "failed", diagnostic: "provider failed" },
+    }]);
+    assert.equal((await readHeart(failed.paths)).latestBody?.end, "broke-off");
+
+    const hung = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "c0ffee07" });
+    await initializeHeart(hung.paths);
+    const hungExpressions: unknown[] = [];
+    const hungBody = driveAkumaBody({
+      paths: hung.paths,
+      seed: {
+        id: hung.id,
+        archetype: "claude",
+        provider: { name: "claude", kind: "claude-agent-sdk" },
+        options: {},
+        origin: { kind: "direct" },
+        cwd: root,
+      },
+      initialBody: "work",
+      resultRoute: route,
+    }, {
+      admitOptions(options) { return { kind: "admitted", options }; },
+      async start() {
+        return {
+          admission: { fence: "hung-route-turn" },
+          events: { async *[Symbol.asyncIterator]() { await new Promise<void>(() => {}); } },
+          completion: new Promise<TurnResult>(() => {}),
+          async abort() { throw new Error("graceful disposal failed"); },
+          async forceDispose() { throw new Error("forced disposal failed"); },
+        };
+      },
+    }, {
+      now: () => "2026-08-08T00:00:04.000Z",
+      async express() {
+        hungExpressions.push("expressed");
+      },
+    });
+    while ((await readHeart(hung.paths)).latestBody === null) await new Promise((resolve) => setTimeout(resolve, 5));
+    await requestPause(hung.paths, "2026-08-08T00:00:05.000Z");
+    await hungBody;
+    assert.deepEqual(hungExpressions, []);
+    assert.equal((await outcomes(hung.paths)).length, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("result-route express failure leaves the committed Heart outcome unchanged", async () => {
+  const route = Object.freeze({ v: 1, squarePath: "/square", name: "Alice" });
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-result-route-fail-"));
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "de1f0001" });
+    await initializeHeart(allocated.paths);
+    let attempts = 0;
+    await driveAkumaBody({
+      paths: allocated.paths,
+      seed: {
+        id: allocated.id,
+        archetype: "claude",
+        provider: { name: "claude", kind: "claude-agent-sdk" },
+        options: {},
+        origin: { kind: "direct" },
+        cwd: root,
+      },
+      initialBody: "build it",
+      resultRoute: route,
+    }, adapter({
+      starts: [],
+      events: [{ type: "session", coordinate: { sessionId: "native-1" } }],
+      result: { kind: "answered", answer: "done", historyId: "history-1" },
+    }), {
+      now: () => "2026-08-08T00:00:00.000Z",
+      async express() {
+        attempts += 1;
+        throw new Error("square unavailable");
+      },
+    });
+    assert.equal(attempts, 1);
+    assert.deepEqual((await outcomes(allocated.paths))[0], {
+      kind: "answered",
+      answer: "done",
+      historyId: "history-1",
+      session: { sessionId: "native-1" },
+    });
+    assert.match(readFileSync(allocated.paths.log, "utf8"), /result-route express failed: square unavailable/u);
+    assert.equal((await readHeart(allocated.paths)).latestBody?.end, "exited");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("BodyLaunch serializes an opaque resultRoute through process input", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-result-route-argv-"));
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "5e11a11e" });
+    await initializeHeart(allocated.paths);
+    const resultRoute = Object.freeze({ v: 1, squarePath: "/square", name: "Alice" });
+    const input = await bodyProcessInput({
+      paths: allocated.paths,
+      seed: {
+        id: allocated.id,
+        archetype: "claude",
+        provider: { name: "claude", kind: "claude-agent-sdk" },
+        options: {},
+        origin: { kind: "direct" },
+        cwd: root,
+      },
+      initialBody: "build it",
+      resultRoute,
+    });
+    const encoded = input.argv.at(-1)!;
+    assert.deepEqual(JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")).resultRoute, {
+      v: 1,
+      squarePath: "/square",
+      name: "Alice",
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

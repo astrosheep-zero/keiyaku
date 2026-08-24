@@ -225,7 +225,16 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
       ...configured.placement,
       mode: "detach",
     });
-    assert.deepEqual(detached.observation, { kind: "detached" });
+    assert.deepEqual(detached.observation, { kind: "detached", resultRoute: "not-captured" });
+    const routed = await Keiyaku.call({
+      path: world,
+      archetype: "worker",
+      body: "routed",
+      ...configured.placement,
+      mode: "detach",
+      resultRoute: Object.freeze({ v: 1 }),
+    });
+    assert.deepEqual(routed.observation, { kind: "detached", resultRoute: "captured" });
     await assert.rejects(
       Keiyaku.call({
         path: world,
@@ -615,7 +624,7 @@ test("Keiyaku.call carries the CallResult restraint on detached and failed obser
       enforcement: "none",
       diagnostic: "Grok Build cannot remove task-surface mutation capabilities",
     });
-    assert.deepEqual(detached.observation, { kind: "detached" });
+    assert.deepEqual(detached.observation, { kind: "detached", resultRoute: "not-captured" });
 
     AkumaHandle.prototype.wait = async function () {
       throw new Error("heart unavailable");

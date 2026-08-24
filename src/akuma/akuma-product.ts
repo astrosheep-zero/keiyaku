@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readdir, realpath, stat } from "node:fs/promises";
 import { resolve } from "node:path";
+import type { SquareRoute } from "@astrosheep/square";
 import { AkumaHandle } from "./akuma-handle.js";
 import type { AkumaCallContext, AkumaCallInput, AkumaConfiguration, AkumaList, AkumaListInput } from "./akuma.js";
 import { CALL_WITH_CONTEXT } from "./akuma-product-symbols.js";
@@ -13,6 +14,8 @@ import { injectedBodyRequests, requestBodyCall } from "./requests.js";
 import { decodeAllowedActions, unionAllowedActions } from "./allowed.js";
 import { settings as readSettings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
+
+type AkumaCallLaunchInput = AkumaCallInput & Readonly<{ resultRoute?: SquareRoute }>;
 
 function callReadonly(value: unknown): Readonly<{ readonly?: true }> {
   if (value === undefined) return {};
@@ -46,10 +49,10 @@ export class Akuma {
   async listArchetypes(): Promise<readonly string[]> {
     return readArchetypes(this.configuration.home === undefined ? {} : { home: this.configuration.home });
   }
-  async call(input: AkumaCallInput): Promise<AkumaHandle> {
+  async call(input: AkumaCallLaunchInput): Promise<AkumaHandle> {
     return await this[CALL_WITH_CONTEXT](input, { initiatorCwd: process.cwd() });
   }
-  async [CALL_WITH_CONTEXT](input: AkumaCallInput, context: AkumaCallContext): Promise<AkumaHandle> {
+  async [CALL_WITH_CONTEXT](input: AkumaCallLaunchInput, context: AkumaCallContext): Promise<AkumaHandle> {
     const readonly = callReadonly(input.readonly);
     const name = archetypeName(input.archetype);
     const home = this.configuration.home === undefined ? {} : { home: this.configuration.home };
@@ -104,6 +107,7 @@ export class Akuma {
             origin: { kind: "direct" },
           },
           initialBody: input.body,
+          ...(input.resultRoute === undefined ? {} : { resultRoute: input.resultRoute }),
         }),
     });
     return new AkumaHandle(published.id, this.path, {
@@ -147,7 +151,7 @@ export class Akuma {
 }
 export async function callAkumaWithContext(
   akuma: Akuma,
-  input: AkumaCallInput,
+  input: AkumaCallLaunchInput,
   context: AkumaCallContext,
 ): Promise<AkumaHandle> {
   return await akuma[CALL_WITH_CONTEXT](input, context);

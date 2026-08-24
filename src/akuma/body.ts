@@ -1,4 +1,6 @@
+import { appendFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import type { SquareRoute } from "@astrosheep/square";
 import { abortableDelay } from "./abort.js";
 import { BodySupervisor } from "./body-supervisor.js";
 import { driveTurn, turnRecipe, type DrivenTurn } from "./turn-drive.js";
@@ -42,6 +44,7 @@ export type BodyLaunch = Readonly<{
   birthSession?: Omit<SessionFact, "sequence">;
   initialBody?: string;
   refuseIfHeld?: boolean;
+  resultRoute?: SquareRoute;
 }>;
 
 export type TellWake =
@@ -72,6 +75,7 @@ type BodyRuntime = Readonly<{
   now(): string;
   spawnChild?(launch: RequestChildLaunch): Promise<void>;
   spawnBody?(launch: BodyLaunch): Promise<OwnedProcess>;
+  express?(route: SquareRoute, options: Readonly<{ as: string; body: string }>): Promise<unknown>;
   upstream?: UpstreamExecutionPort;
 }>;
 
@@ -148,8 +152,39 @@ async function persistTurn(
   return result.kind === "answered" && result.session === undefined ? "failed" : result.kind;
 }
 
+function boundedDiagnostic(error: unknown): string {
+  const text = diagnostic(error);
+  return text.length <= 500 ? text : `${text.slice(0, 500)}...`;
+}
+
+async function expressInitialOutcome(
+  launch: BodyLaunch,
+  soul: Soul,
+  outcome: "answered" | "failed",
+  runtime: BodyRuntime,
+): Promise<void> {
+  if (launch.resultRoute === undefined) return;
+  try {
+    const express = runtime.express ?? (await import("@astrosheep/square")).express;
+    await express(launch.resultRoute, {
+      as: "keiyaku",
+      body: JSON.stringify({ akuma: soul.id, outcome }),
+    });
+  } catch (error) {
+    try {
+      await appendFile(launch.paths.log, `result-route express failed: ${boundedDiagnostic(error)}\n`);
+    } catch {
+      /* express loss never changes Heart truth */
+    }
+  }
+}
+
 function defaultRuntime(): BodyRuntime {
-  return { now: () => new Date().toISOString(), spawnChild: handoffAkumaBody, spawnBody: spawnAkumaBody };
+  return {
+    now: () => new Date().toISOString(),
+    spawnChild: handoffAkumaBody,
+    spawnBody: spawnAkumaBody,
+  };
 }
 
 export async function bodyProcessInput(launch: BodyLaunch, bodyModuleUrl = import.meta.url) {
@@ -248,10 +283,13 @@ async function runBodyTurns(input: BodyExecution): Promise<void> {
       await breakBody(launch.paths, { sequence: bodySequence, end: "put-down", at: runtime.now() });
       return;
     }
-    if (
-      result.kind === "resume-unsupported" ||
-      (await persistTurn(launch.paths, result.turnSequence, result, runtime.now())) === "failed"
-    ) {
+    if (result.kind === "resume-unsupported") {
+      await breakBody(launch.paths, { sequence: bodySequence, end: "broke-off", at: runtime.now() });
+      return;
+    }
+    const outcome = await persistTurn(launch.paths, result.turnSequence, result, runtime.now());
+    if (initial !== undefined) await expressInitialOutcome(launch, soul, outcome, runtime);
+    if (outcome === "failed") {
       await breakBody(launch.paths, { sequence: bodySequence, end: "broke-off", at: runtime.now() });
       return;
     }

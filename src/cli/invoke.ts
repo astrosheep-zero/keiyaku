@@ -1,3 +1,4 @@
+import { captureRoute } from "@astrosheep/square";
 import { resolveActor } from "./actor.js";
 import { isParsedAkumaCommand, type InvokedAkumaCommand } from "./commands/akuma.js";
 import type { AkumaInvocationResult } from "./commands/akuma-invoke.js";
@@ -138,6 +139,7 @@ type AkumaEdgeInput = Readonly<{
   candidate: WorldRoot | null;
   establish: () => Promise<WorldRoot>;
   statedCwd?: string;
+  invocationCwd: string;
   repo?: Repo;
   home?: string;
   edge: InvocationEdge;
@@ -157,12 +159,15 @@ async function invokeAkumaFromEdge(parsed: InvokedAkumaCommand, input: AkumaEdge
       parsed.command === "call" && parsed.contract !== undefined
         ? (await import("./selectors.js")).contractFromInput(repo as Repo, parsed.contract).contract
         : undefined;
+    const resultRoute =
+      parsed.command === "call" ? captureRoute({ cwd: input.invocationCwd, env: edge.environment }) : null;
     return await invokeAkuma(parsed, {
       path,
       ...(statedCwd === undefined ? {} : { statedCwd }),
       ...(home === undefined ? {} : { home }),
       ...(configuration === undefined ? {} : { settings: configuration }),
       ...(contract === undefined ? (repo === undefined ? {} : { repo }) : { contract }),
+      ...(resultRoute === null ? {} : { resultRoute }),
       readStdin: edge.readStdin,
     });
   } catch (error) {
@@ -396,6 +401,7 @@ async function invokeParsed(
       located: world,
       candidate: candidateWorld,
       establish: coordinates.establishWorld,
+      invocationCwd: cwd,
       ...(cwdSource === "input" ? { statedCwd: cwd } : {}),
       ...(repo === undefined ? {} : { repo }),
       ...(home === undefined ? {} : { home }),

@@ -39,6 +39,7 @@ type CallInput = Readonly<{
   contract?: Keiyaku
   alias?: AkumaAlias
   allowed?: readonly AllowedAction[]
+  resultRoute?: SquareRoute
 }>
 
 type ForkInput = Readonly<{
@@ -52,6 +53,12 @@ Keiyaku.call(input: CallInput): Promise<CallResult>
 Keiyaku.fork(input: ForkInput): Promise<ForkResult>
 ```
 
+`resultRoute` is the optional, flat Square-owned opaque `SquareRoute`. Library
+callers that provide it pass the value through unchanged. Library does not
+capture a route, inspect route fields, derive `sessionId`, `provider`, or
+`cwd`, or create a callback registry. Capture belongs to the caller edge.
+The initial call Turn outcome is committed before Body invokes Square's
+route-aware `express`. Notification loss never changes Heart truth.
 `path` is an already resolved WorldRoot; Library never climbs or normalizes it.
 `allowed`, when present, adds to the Archetype list for that birth; Akuma owns
 its vocabulary and effective-set judgment. An empty additions list carries no
@@ -73,7 +80,9 @@ trying a lower-precedence source; appointment failures identify `reconcile`
 as the repair entry. `mode` defaults to `"wait"`; wait mode observes the born handle
 until it stops running or `timeoutMs`, which defaults to 300,000 milliseconds.
 Detach mode returns after the post-birth integration stages and rejects a
-supplied `timeoutMs` as contradictory caller input. `archetype` remains the TypeScript input name for
+supplied `timeoutMs` as contradictory caller input. Its observation always
+discloses whether a result route was present as `resultRoute: "captured" |
+"not-captured"`; no other observation arm carries that field. `archetype` remains the TypeScript input name for
 the Akuma-owned concept even though the CLI presents its positional as
 `<akuma>`. `contract`, when present, must be a genuine package-root Keiyaku
 handle and supplies both the complete ContractId and its already pinned Git
@@ -116,7 +125,7 @@ type AliasStage =
   | Readonly<{ kind: "failed"; failure: IntegrationFailure }>
 
 type CallObservation =
-  | Readonly<{ kind: "detached" }>
+  | Readonly<{ kind: "detached"; resultRoute: "captured" | "not-captured" }>
   | Readonly<{ kind: "observed"; status: AkumaStatus }>
   | Readonly<{ kind: "failed"; failure: IntegrationFailure }>
 

@@ -66,6 +66,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         ...ownersFor(["lstat", "watch"], "akuma/heart/storage.ts"),
         ...ownersFor(["lstat"], "git/target-placement.ts"),
         { source: "akuma/identity.ts", symbols: ["mkdir", "writeFile"] },
+        { source: "akuma/body.ts", symbols: ["appendFile"] },
         { source: "akuma/requests.ts", symbols: ["access", "readFile"] },
         { source: "akuma/request-serve.ts", symbols: ["access", "mkdir", "readFile", "readdir", "rm"] },
         { source: "akuma/request-wire.ts", symbols: ["rename", "rm", "writeFile"] },

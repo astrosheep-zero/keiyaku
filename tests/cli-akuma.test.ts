@@ -996,6 +996,90 @@ test("linked and primary worktrees observe one Akuma World while Soul retains it
   assert.equal(existsSync(join(linked, ".keiyaku", "akuma", "run")), false);
 });
 
+test("CLI call captures a unique Square route and proceeds when capture is missing", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-cli-result-route-")));
+  const home = join(root, ".home");
+  mkdirSync(join(home, "akuma"), { recursive: true });
+  writeFileSync(join(home, "akuma", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
+  const parent = await allocateAkumaDirectory({ worldRoot: root, archetype: "parent", draw: () => "1234abcd" });
+  await initializeHeart(parent.paths);
+  const soul: Soul = {
+    id: parent.id,
+    archetype: "parent",
+    provider: { name: "codex-app-server", kind: "codex-app-server" },
+    options: {},
+    cwd: root,
+    origin: { kind: "direct" },
+    createdAt: "2026-08-24T00:00:00.000Z",
+  };
+  const leash = (await HeldAkumaLeash.try(parent.paths))!;
+  await leash.birth(parent.paths, soul);
+  const pump = await BodyRequestPump.open({
+    paths: parent.paths,
+    parent: soul,
+    bodySequence: 1,
+    now: () => "2026-08-24T00:00:01.000Z",
+    signal: new AbortController().signal,
+    async spawn(launch) {
+      const child = (await HeldAkumaLeash.try(launch.paths))!;
+      await child.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-24T00:00:02.000Z" });
+      child.release();
+    },
+  });
+  const previousRequests = process.env[AKUMA_REQUESTS_ENV];
+  const previousRegistry = process.env.SQUARE_REGISTRY;
+  const registry = join(root, "sessions.ndjsonl");
+  const squareDir = join(root, ".square");
+  const squarePath = join(squareDir, "PUBLIC.square");
+  mkdirSync(squareDir, { recursive: true });
+  writeFileSync(squarePath, "");
+  writeFileSync(
+    registry,
+    `${JSON.stringify({
+      v: 1,
+      ts: new Date().toISOString(),
+      op: "join",
+      channel: "claude-code",
+      session_id: "alice-session",
+      name: "Alice",
+      square_path: realpathSync(squarePath),
+      owner_id: "alice-owner",
+    })}\n`,
+  );
+  process.env[AKUMA_REQUESTS_ENV] = pump.directory;
+  process.env.SQUARE_REGISTRY = registry;
+  const baseEnv = { ...process.env, KEIYAKU_HOME: home, SQUARE_REGISTRY: registry };
+  delete baseEnv.CLAUDE_CODE_SESSION_ID;
+  delete baseEnv.CODEX_THREAD_ID;
+  delete baseEnv.OPENCODE_SESSION_ID;
+  delete baseEnv.SQUARE_PI_SESSION_ID;
+  delete baseEnv.PASEO_AGENT_ID;
+  try {
+    const captured = await invoke(parseArgv(["-C", root, "call", "worker", "-d", "prompt"]), {
+      environment: { ...baseEnv, CLAUDE_CODE_SESSION_ID: "alice-session" },
+    });
+    assert.equal(captured.kind, "akuma");
+    if (captured.kind !== "akuma" || captured.action !== "call") return;
+    assert.deepEqual(captured.result.observation, { kind: "detached", resultRoute: "captured" });
+
+    const missing = await invoke(parseArgv(["-C", root, "call", "worker", "-d", "still"]), {
+      environment: baseEnv,
+    });
+    assert.equal(missing.kind, "akuma");
+    if (missing.kind !== "akuma" || missing.action !== "call") return;
+    assert.deepEqual(missing.result.observation, { kind: "detached", resultRoute: "not-captured" });
+    assert.equal(missing.result.akuma.startsWith("aku/"), true);
+  } finally {
+    await pump.close();
+    leash.release();
+    if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
+    else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
+    if (previousRegistry === undefined) delete process.env.SQUARE_REGISTRY;
+    else process.env.SQUARE_REGISTRY = previousRegistry;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("raw-answer selection preserves exact bytes and unfinished snapshots", () => {
   const id = "aku/worker/1234abcd" as const;
   const observation = (answer: string, life: "asleep" | "running" = "asleep"): AkumaObservation => akumaObservation({

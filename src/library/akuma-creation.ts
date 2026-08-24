@@ -1,4 +1,5 @@
 import { realpath, stat } from "node:fs/promises";
+import type { SquareRoute } from "@astrosheep/square";
 import { moveAlias, type AliasBinding } from "../alias/index.js";
 import {
   Akuma,
@@ -53,10 +54,11 @@ export type CallInput = Readonly<{
   contract?: Keiyaku;
   alias?: AkumaAlias;
   allowed?: readonly AllowedAction[];
+  resultRoute?: SquareRoute;
 }>;
 
 export type CallObservation =
-  | Readonly<{ kind: "detached" }>
+  | Readonly<{ kind: "detached"; resultRoute: "captured" | "not-captured" }>
   | Readonly<{ kind: "observed"; status: AkumaStatus }>
   | Readonly<{ kind: "failed"; failure: IntegrationFailure }>;
 
@@ -162,8 +164,11 @@ async function observeCall(
   handle: Awaited<ReturnType<Akuma["call"]>>,
   mode: "wait" | "detach",
   timeoutMs: number,
+  resultRoute: SquareRoute | undefined,
 ): Promise<CallObservation> {
-  if (mode === "detach") return { kind: "detached" };
+  if (mode === "detach") {
+    return { kind: "detached", resultRoute: resultRoute === undefined ? "not-captured" : "captured" };
+  }
   try {
     return { kind: "observed", status: await handle.wait(undefined, { timeoutMs }) };
   } catch (error) {
@@ -285,6 +290,7 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
       "contract",
       "alias",
       "allowed",
+      "resultRoute",
     ],
     "Keiyaku.call input",
   );
@@ -300,6 +306,7 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
   const alias: AkumaAlias | undefined =
     values.alias === undefined ? undefined : parseAkumaAlias(nonblank(values.alias, "alias"));
   const seat = values.contract === undefined ? undefined : seatForKeiyaku(values.contract);
+  const resultRoute = values.resultRoute as SquareRoute | undefined;
   const execution = await resolveCallExecution({
     path,
     ...(cwd === undefined ? {} : { cwd }),
@@ -313,6 +320,7 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
     ...(readonlyRequested === undefined ? {} : { readonly: readonlyRequested }),
     ...(values.allowed === undefined ? {} : { allowed: values.allowed as readonly AllowedAction[] }),
     ...(execution === undefined ? {} : { cwd: execution.cwd }),
+    ...(resultRoute === undefined ? {} : { resultRoute }),
   };
   const handle =
     execution === undefined ? await world.call(call) : await callAkumaWithContext(world, call, { cwdCanonical: true });
@@ -335,7 +343,7 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
       }
     }
   }
-  const observation = await observeCall(handle, mode, timeoutMs);
+  const observation = await observeCall(handle, mode, timeoutMs, resultRoute);
   return {
     kind: "called",
     akuma: handle.id,
