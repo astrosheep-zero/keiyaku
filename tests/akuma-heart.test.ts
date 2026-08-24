@@ -47,6 +47,7 @@ import { insertActivityFact, insertKillFact, insertSessionFact, insertStopContro
 import { decodeSoul, decodeSoulRow, encodeSoul, encodeSoulRow } from "../src/akuma/heart/soul.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { insertTellFact } from "../src/akuma/heart/tells.js";
+import { turnRecipe } from "../src/akuma/turn-drive.js";
 
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-heart-"));
@@ -153,6 +154,27 @@ test("session admission survives before turn completion", async () => {
     assert.equal((await readHeart(value.allocated.paths)).latestSession?.sequence, fact.sequence);
     assert.deepEqual((await readHeart(value.allocated.paths)).latestSession?.coordinate, { sessionId: "native-session" });
     assert.deepEqual((await readHeart(value.allocated.paths)).latestSession?.options, value.soul.options);
+  } finally { value.close(); }
+});
+
+test("provider session cwd does not replace the Soul execution cwd", async () => {
+  const value = await fixture();
+  try {
+    const body = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await body.birth(value.allocated.paths, value.soul);
+    await recordSession(value.allocated.paths, {
+      provider: value.soul.provider.name,
+      options: value.soul.options,
+      coordinate: { sessionId: "provider-cwd" },
+      cwd: "/provider/selected",
+      admittedAt: "2026-08-08T00:00:01.000Z",
+    });
+    body.release();
+    assert.deepEqual(await turnRecipe(value.allocated.paths, value.soul), {
+      cwd: value.soul.cwd,
+      options: value.soul.options,
+      session: { sessionId: "provider-cwd" },
+    });
   } finally { value.close(); }
 });
 

@@ -53,7 +53,7 @@ export async function turnRecipe(
   const admitted = latest?.provider === soul.provider.name ? latest : undefined;
   const session = admitted?.coordinate;
   return {
-    cwd: admitted?.cwd ?? soul.cwd,
+    cwd: soul.cwd,
     options: admitted?.options ?? soul.options,
     ...(session === undefined ? {} : { session }),
   };
