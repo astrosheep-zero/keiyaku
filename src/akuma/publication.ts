@@ -67,9 +67,7 @@ async function sealObservedExit(paths: AkumaPaths, exit: DetachedProcessExit): P
 async function observeSettledExit(
   owned: OwnedProcess | undefined,
 ): Promise<
-  | { kind: "pending" }
-  | { kind: "exited"; exit: DetachedProcessExit }
-  | { kind: "exit-error"; error: unknown }
+  { kind: "pending" } | { kind: "exited"; exit: DetachedProcessExit } | { kind: "exit-error"; error: unknown }
 > {
   if (owned === undefined) return { kind: "pending" };
   const pending = Symbol("pending");
