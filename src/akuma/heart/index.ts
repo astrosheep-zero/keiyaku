@@ -51,7 +51,14 @@ import {
   pruneActivityFacts,
   type ActivityFactSlice,
 } from "./timeline.js";
-import { isHeartAbsent, readSealFromLeash, readTransaction, transaction, withHeart } from "./storage.js";
+import {
+  isHeartAbsent,
+  readSealFromLeash,
+  readTransaction,
+  transaction,
+  withHeart,
+  withReadOnlyHeart,
+} from "./storage.js";
 import { soulFact } from "./soul.js";
 export {
   HeartAbsentError,
@@ -313,7 +320,7 @@ export async function finishBodyIfIdle(
 
 export async function readHeart(paths: AkumaPaths): Promise<HeartSnapshot> {
   try {
-    return await withHeart(paths, (heart) =>
+    return await withReadOnlyHeart(paths, (heart) =>
       readTransaction(heart, () => ({
         soul: soulFact(heart),
         latestBody: latestBodyFact(heart),

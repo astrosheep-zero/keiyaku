@@ -6,9 +6,13 @@ export function abortable<T>(
   signal.throwIfAborted();
   return new Promise((resolve, reject) => {
     let aborted = false;
+    let settled = false;
     const abort = (): void => {
       aborted = true;
-      if (disposeLate === undefined) reject(signal.reason);
+      if (!settled) {
+        settled = true;
+        reject(signal.reason);
+      }
     };
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
@@ -16,19 +20,16 @@ export function abortable<T>(
       async (value) => {
         signal.removeEventListener("abort", abort);
         if (!aborted) {
+          settled = true;
           resolve(value);
           return;
         }
-        try {
-          await disposeLate?.(value);
-        } catch (error) {
-          reject(error);
-          return;
-        }
-        reject(signal.reason);
+        void Promise.resolve(disposeLate?.(value)).catch(() => undefined);
       },
       (error: unknown) => {
         signal.removeEventListener("abort", abort);
+        if (settled) return;
+        settled = true;
         reject(aborted ? signal.reason : error);
       },
     );

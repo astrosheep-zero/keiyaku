@@ -36,7 +36,7 @@ const SQLITE_CANTOPEN = 14;
 
 export async function watchHeart(paths: AkumaPaths, signal: AbortSignal): Promise<AsyncGenerator<void>> {
   const heart = basename(paths.heart);
-  const changes: void[] = [];
+  let changed = false;
   let failure: unknown;
   let wake: (() => void) | undefined;
   // fs.watch opens the directory synchronously. Its throw is therefore the
@@ -44,7 +44,7 @@ export async function watchHeart(paths: AkumaPaths, signal: AbortSignal): Promis
   const watcher = watchDirectory(dirname(paths.heart), { signal }, (_event, filename) => {
     const name = filename?.toString();
     if (name === undefined || name === heart || name === `${heart}-wal`) {
-      changes.push(undefined);
+      changed = true;
       wake?.();
     }
   });
@@ -60,8 +60,8 @@ export async function watchHeart(paths: AkumaPaths, signal: AbortSignal): Promis
   return (async function* (): AsyncGenerator<void> {
     try {
       for (;;) {
-        if (changes.length > 0) {
-          changes.shift();
+        if (changed) {
+          changed = false;
           yield;
           continue;
         }
@@ -108,9 +108,9 @@ function isBusy(error: unknown): boolean {
   );
 }
 
-async function openExistingDatabase(path: string, timeout?: number): Promise<DatabaseSync> {
+async function openExistingDatabase(path: string, timeout?: number, mode: "rw" | "ro" = "rw"): Promise<DatabaseSync> {
   const uri = pathToFileURL(path);
-  uri.searchParams.set("mode", "rw");
+  uri.searchParams.set("mode", mode);
   try {
     return timeout === undefined ? new DatabaseSync(uri.href) : new DatabaseSync(uri.href, { timeout });
   } catch (error) {
@@ -139,6 +139,18 @@ async function openHeart(path: string, verify = true): Promise<DatabaseSync> {
   }
 }
 
+async function openHeartReadOnly(path: string, verify = true): Promise<DatabaseSync> {
+  const database = await openExistingDatabase(path, undefined, "ro");
+  try {
+    database.exec("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000");
+    if (verify) assertHeartSchemaVersion(database);
+    return database;
+  } catch (error) {
+    database.close();
+    throw error;
+  }
+}
+
 export async function classifyHeartSchema(paths: AkumaPaths): Promise<"current" | "unsupported"> {
   let database: DatabaseSync;
   try {
@@ -156,6 +168,15 @@ export async function classifyHeartSchema(paths: AkumaPaths): Promise<"current" 
 
 export async function withHeart<T>(paths: AkumaPaths, body: (database: DatabaseSync) => T): Promise<T> {
   const database = await openHeart(paths.heart);
+  try {
+    return body(database);
+  } finally {
+    database.close();
+  }
+}
+
+export async function withReadOnlyHeart<T>(paths: AkumaPaths, body: (database: DatabaseSync) => T): Promise<T> {
+  const database = await openHeartReadOnly(paths.heart);
   try {
     return body(database);
   } finally {

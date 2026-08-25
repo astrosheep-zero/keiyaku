@@ -261,8 +261,11 @@ test("Tell observes Body admission between observer registration and spawn", asy
       recordedAt: value.soul.createdAt,
       runtime: {
         async observeHeart() {
-          body = leash.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
-          return (async function*() { await body; yield; })();
+          return (async function*() {
+            body = leash.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
+            await body;
+            yield;
+          })();
         },
         async spawn(): Promise<OwnedProcess> {
           spawned += 1;
@@ -484,6 +487,25 @@ test("watchHeart abort settles a pending read and closes promptly", async () => 
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Heart watcher did not stop")), 250)),
     ]), { value: undefined, done: true });
     assert.deepEqual(await watcher.return(undefined), { value: undefined, done: true });
+  } finally { value.close(); }
+});
+
+test("read-only Heart observations do not prompt their own watcher", async () => {
+  const value = await fixture();
+  try {
+    const controller = new AbortController();
+    const watcher = await watchHeart(value.allocated.paths, controller.signal);
+    const prompt = watcher.next();
+    for (let index = 0; index < 20; index += 1) await readHeart(value.allocated.paths);
+    assert.deepEqual(
+      await Promise.race([
+        prompt,
+        new Promise((resolve) => setTimeout(() => resolve("quiet"), 100)),
+      ]),
+      "quiet",
+    );
+    controller.abort();
+    await watcher.return(undefined);
   } finally { value.close(); }
 });
 

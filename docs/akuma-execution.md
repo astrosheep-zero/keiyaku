@@ -67,9 +67,13 @@ honest receipts while their children converge through the one leash.
 
 Observer establishment failure returns `failed` before spawn and leaves the
 Tell pending. Aborting an established observer wakes a pending generator read,
-closes its filesystem watcher, and lets cleanup finish; there is no polling
-fallback. A pre-admission child failure records its actual waitpid code or
-signal plus a bounded `{ path, from, to }` reference into the shared run log.
+closes its underlying observer, and lets cleanup finish; there is no polling
+fallback. The observer is a replaceable cross-process prompt over Heart's
+durable storage: it carries no fact, may merge or repeat prompts, and must
+deliver at least one prompt after an external Heart settlement. Subscription
+precedes the initial Heart read, so a write between those steps cannot be
+missed. A pre-admission child failure records its actual waitpid code or signal
+plus a bounded `{ path, from, to }` reference into the shared run log.
 The interval may contain interleaved output, includes the child's exit marker,
 and is not captured stderr or a child-attributed file tail.
 
@@ -82,8 +86,10 @@ Heart change observation belongs to the direct caller that executes wake under
 its host permission. A forwarded provider Tell writes only its granted Body
 Request transport; its direct parent executes the Tell and observes Heart. The
 observer is established before spawn. An observation failure retains the Tell,
-spawns no child, and returns failed; a filesystem event only prompts a fresh
-Heart read, whose successor Body fact is the sole custody evidence.
+spawns no child, and returns failed; a prompt only prompts a fresh Heart read,
+whose successor Body fact is the sole custody evidence. Observation must not
+disturb the Heart files it observes: Heart reads use read-only SQLite custody,
+and write-only WAL setup remains on Heart creation and write paths.
 
 **Succession.** A new Body never reconstructs custody of its predecessor. A
 held leash means wait. A free leash with an explicitly ended predecessor is

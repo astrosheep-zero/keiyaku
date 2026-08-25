@@ -435,8 +435,13 @@ async function awaitWake(
     if (winner.kind === "exited") {
       return winner.exit.code === LEASH_HELD_EXIT ? { kind: "held" } : failedChild(winner.exit);
     }
-    await child.terminate();
-    await child.exited;
+    try {
+      await child.terminate();
+    } catch (error) {
+      /* Termination rejection leaves physical custody unresolved; release it deliberately. */
+      child.release();
+      return { kind: "failed", diagnostic: diagnostic(error) };
+    }
     return winner.kind === "observer-failed"
       ? { kind: "failed", diagnostic: diagnostic(winner.error) }
       : { kind: "failed", diagnostic: "Heart observer closed" };
@@ -451,10 +456,10 @@ async function wakePendingTells(
   const watching = new AbortController();
   let changed: AsyncGenerator<void> | undefined;
   try {
+    changed = await runtime.observeHeart(paths, watching.signal);
     const beforeHeart = await readHeart(paths);
     if (tellId === undefined && beforeHeart.pending.length === 0) return null;
     const before = beforeHeart.latestBody?.sequence ?? 0;
-    changed = await runtime.observeHeart(paths, watching.signal);
     return await awaitWake(paths, tellId, before, await runtime.spawn(paths), changed);
   } catch (error) {
     return { kind: "failed", diagnostic: diagnostic(error) };

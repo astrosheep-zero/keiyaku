@@ -103,6 +103,8 @@ async function awaitBirth(paths: AkumaPaths, owned: OwnedProcess | undefined, si
     if (performance.now() >= deadline) {
       const settled = await settleTimedOutBirth(paths);
       if (settled !== null) return settled;
+      if (owned !== undefined) await owned.terminate(true);
+      throw new Error("Akuma birth timed out before Soul admission");
     }
     if (owned === undefined) {
       await abortableDelay(Math.min(POLL_MS, Math.max(0, deadline - performance.now())), signal);

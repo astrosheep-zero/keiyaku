@@ -2885,6 +2885,70 @@ test("Claude adapter admits the native session before returning its answer", asy
   }]);
 });
 
+test("Claude closes the terminal gate before a delayed Query iterator tail", async () => {
+  const late = deferred<void>();
+  const iteratorEnded = deferred<void>();
+  const provider = createClaudeProvider(async () => ({
+    query({ prompt }) {
+      void (async () => {
+        for await (const _message of prompt as AsyncIterable<SDKUserMessage>) { /* pull the streaming input */ }
+      })();
+      return (async function* () {
+        try {
+          yield { type: "system", subtype: "init", session_id: "session-terminal-gate" } as unknown as SDKMessage;
+          yield {
+            type: "assistant",
+            uuid: "assistant-before-terminal",
+            session_id: "session-terminal-gate",
+            parent_tool_use_id: null,
+            message: { content: [{ type: "text", text: "before" }] },
+          } as unknown as SDKMessage;
+          yield {
+            type: "result",
+            subtype: "success",
+            session_id: "session-terminal-gate",
+            result: "done",
+          } as unknown as SDKMessage;
+          await late.promise;
+          yield {
+            type: "assistant",
+            uuid: "assistant-after-terminal",
+            session_id: "session-terminal-gate",
+            parent_tool_use_id: null,
+            message: { content: [{ type: "tool_use", id: "late-tool", name: "Bash", input: { command: "late" } }] },
+          } as unknown as SDKMessage;
+          yield {
+            type: "user",
+            session_id: "session-terminal-gate",
+            parent_tool_use_id: null,
+            message: { content: [{ type: "tool_result", tool_use_id: "late-tool", content: "late result" }] },
+          } as unknown as SDKMessage;
+        } finally {
+          iteratorEnded.resolve();
+        }
+      })() as unknown as Query;
+    },
+  }));
+  const drive = await provider.start({
+    body: "initial", launchTells: [], cwd: "/work", options: {}, session: { kind: "fresh" },
+  });
+
+  const completion = await Promise.race([
+    drive.completion,
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Claude completion waited for Query tail")), 500)),
+  ]);
+  assert.deepEqual(completion, { kind: "answered", answer: "done", historyId: "assistant-before-terminal" });
+  const events = [];
+  for await (const event of drive.events) events.push(event);
+  assert.deepEqual(events, [
+    { type: "session", coordinate: { sessionId: "session-terminal-gate" } },
+    { type: "assistant", text: "before" },
+  ]);
+
+  late.resolve();
+  await iteratorEnded.promise;
+});
+
 test("Claude adapter restores only the native session coordinate it was given", async () => {
   let resume: unknown;
   const provider = createClaudeProvider(async () => ({
@@ -3188,7 +3252,7 @@ test("Claude live tell waits for a post-yield source pull and shares one Query",
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "done 1", historyId: "assistant-live-1" });
 });
 
-test("Claude receipt waits for both acknowledgement and a later successful checkpoint", async () => {
+test("Claude terminality closes a pending tell receipt at the first result", async () => {
   const harness = controlledClaude();
   const provider = createClaudeProvider(async () => harness.sdk);
   const drive = await provider.start({
@@ -3198,20 +3262,10 @@ test("Claude receipt waits for both acknowledgement and a later successful check
   const yielded = await harness.receiveInput();
   assert.equal(yielded.done, false);
   harness.output(...claudeResult(1));
-  let received = false;
-  const receipt = drive.receipts![Symbol.asyncIterator]().next().then((value) => { received = true; return value; });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(received, false);
-  harness.acknowledgeInput();
-  await tell;
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(received, false);
-  harness.output(...claudeResult(2));
-  assert.deepEqual(await receipt, {
-    done: false,
-    value: { evidence: "exact", tellId: "tell-live-2", kind: "consumed" },
-  });
-  assert.deepEqual(await drive.completion, { kind: "answered", answer: "done 2", historyId: "assistant-live-2" });
+  assert.deepEqual(await tell, { kind: "turn-ended" });
+  assert.deepEqual(await drive.receipts![Symbol.asyncIterator]().next(), { done: true, value: undefined });
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "done 1", historyId: "assistant-live-1" });
+  harness.end();
 });
 
 test("Claude terminality and failure before source acknowledgement preserve honest tell outcomes", async () => {
@@ -3263,6 +3317,36 @@ test("Claude abort rejects an unacknowledged tell and settles the Query", async 
   await drive.abort();
   await assert.rejects(submission, /aborted/u);
   assert.equal((await drive.completion).kind, "failed");
+});
+
+test("Claude setup cancellation rejects before a late native admission", async () => {
+  const admission = deferred<void>();
+  let closeRequested = false;
+  const provider = createClaudeProvider(async () => ({
+    query({ prompt }) {
+      const input = (prompt as AsyncIterable<SDKUserMessage>)[Symbol.asyncIterator]();
+      void input.next().then(() => input.next()).catch(() => undefined);
+      const query = (async function* () {
+        await admission.promise;
+        yield { type: "system", subtype: "init", session_id: "late-session" } as unknown as SDKMessage;
+      })() as unknown as Query;
+      query.close = () => { closeRequested = true; };
+      return query;
+    },
+  }));
+  const controller = new AbortController();
+  const starting = provider.start({
+    body: "initial", launchTells: [], cwd: "/work", options: {}, session: { kind: "fresh" },
+    signal: controller.signal,
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.abort(new Error("cancelled during admission"));
+  await assert.rejects(starting, /cancelled during admission/u);
+  assert.equal(closeRequested, true);
+
+  admission.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
 });
 
 test("Claude abort waits for native Query cleanup", async () => {

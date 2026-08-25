@@ -26,12 +26,12 @@ Each drive gets an ephemeral transport directory owned by the akuma:
 ```
 
 The adapter injects its absolute path; a native sandbox also grants the
-directory as writable. A caller atomically writes `{ id, action, payload }`
-to `<request-id>.request.json` and polls `<request-id>.receipt.json` without a
-deadline.
-The body writes the receipt projection. The request id is a caller-minted UUID.
-The directory is best-effort removed after the drive drains, so bytes never
-cross drives.
+directory as writable. A caller atomically writes `{ id, action, payload }` to
+a fresh transport claim file and polls its matching receipt without a deadline.
+The transport filename is an opaque per-attempt nonce; the caller-minted request
+id inside the claim is the Heart idempotence key and is never the transport
+rendezvous key. The body writes the receipt projection. The directory is
+best-effort removed after the drive drains, so bytes never cross drives.
 
 Transport creation, claim and receipt reads, temporary-file publication,
 directory scans, and cleanup are awaited filesystem operations. The request
@@ -45,7 +45,9 @@ Transport bytes are not facts. Before Heart admission they are claims. A live
 receipt may carry a one-time operation result that Heart does not retain;
 durable terminal facts and accepted Contract fact references remain reproducible.
 Missing, malformed, or discarded transport bytes therefore do not create or
-erase authority. The parent Heart's request facts are the only durable request
+erase authority. A claim that reuses a request id with different payload is
+refused at the transport boundary and cannot replace the existing Heart fact.
+The parent Heart's request facts are the only durable request
 authority and have one writer: the Body holding its leash. Admission uses the
 request id for idempotence, so at-least-once claim observation produces at most
 one fact. There is no second store.

@@ -134,7 +134,9 @@ fails before writing Soul seals the directory under the leash with its exact
 diagnostic; the caller observes that seal and reports the same spawn failure.
 The remaining window between create and claim is owned by `call()` while it
 lives: on timeout it takes the leash itself if it can, seals with
-`call-timeout` evidence, and reports the timeout. Process output never decides
+`call-timeout` evidence, and reports the timeout. If the child still holds the
+leash at the deadline, the caller terminates its own launched child before
+reporting timeout; it never waits forever for leash custody. Process output never decides
 whether the Body failed or what evidence the Seal contains.
 The publication owner retains the launched process, including a request-origin
 launch handed through Body, until it observes Soul or Seal. A known child exit

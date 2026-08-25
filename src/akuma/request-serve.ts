@@ -106,6 +106,15 @@ function isTask(value: Readonly<{ action: string }>): value is TaskRequestClaim 
   return isTaskMutationAction(value.action);
 }
 
+function refusalRecipe(value: unknown): unknown {
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    const recipe = value as Readonly<Record<string, unknown>>;
+    if (Array.isArray(recipe.allowed)) return recipe;
+    return { ...recipe, allowed: [] };
+  }
+  return { allowed: [] };
+}
+
 function acceptedReceipt(
   fact: Extract<RequestFact, { state: "served" }>,
   service: Extract<
@@ -184,6 +193,23 @@ async function projectReceipt(
   }
 }
 
+async function refuseInvalidCall(
+  input: ServeInput & Readonly<{ claim: Extract<StructuralRequestClaim, { action: "akuma.call" }> }>,
+): Promise<void> {
+  let fact = await admitRequest(input.paths, {
+    ...input.claim,
+    recipe: refusalRecipe(input.claim.recipe),
+    admittedAt: input.now(),
+  } as never);
+  const existing = receiptFor(fact);
+  if (existing !== null) {
+    await projectReceipt(input.directory, input.transportId, fact);
+    return;
+  }
+  fact = await refuseRequest(input.paths, input.claim.id, "invalid akuma.call recipe");
+  await projectReceipt(input.directory, input.transportId, fact);
+}
+
 async function serveCall(
   input: ServeInput &
     Readonly<{
@@ -193,7 +219,10 @@ async function serveCall(
   input.signal.throwIfAborted();
   if (!input.admissionOpen()) return;
   const recipe = decodeRecipe(input.claim.recipe);
-  if (recipe === null) return;
+  if (recipe === null) {
+    await refuseInvalidCall(input);
+    return;
+  }
   let fact = await admitRequest(input.paths, { ...input.claim, recipe, admittedAt: input.now() } as never);
   const existing = receiptFor(fact);
   if (existing !== null) {

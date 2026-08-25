@@ -53,12 +53,13 @@ async function requestBody(
   }>,
 ): Promise<RequestReceipt> {
   input.signal?.throwIfAborted();
-  await atomicJson(requestPath(input.directory, input.claim.id), {
+  const transportId = randomUUID();
+  await atomicJson(requestPath(input.directory, transportId), {
     id: input.claim.id,
     action: input.claim.action,
     payload: requestPayload(input.claim),
   });
-  const path = receiptPath(input.directory, input.claim.id);
+  const path = receiptPath(input.directory, transportId);
   for (;;) {
     try {
       const receipt = decodeReceipt(await readFile(path, "utf8"), input.claim.id, input.claim.action);

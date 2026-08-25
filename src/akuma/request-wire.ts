@@ -338,7 +338,7 @@ export function decodeClaim(bytes: string, fileId: string): StructuralRequestCla
   if (
     value === null ||
     !exactKeys(value, ["action", "id", "payload"]) ||
-    value.id !== fileId ||
+    !UUID.test(fileId) ||
     typeof value.id !== "string" ||
     !UUID.test(value.id)
   )
