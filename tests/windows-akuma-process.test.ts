@@ -388,8 +388,10 @@ test("Windows hosts hide consoles for retained children", async (t) => {
     return;
   }
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-windows-console-"));
+  let owned: Awaited<ReturnType<typeof spawnDetachedProcess>> | undefined;
+  let stdio: ReturnType<typeof spawnStdioProcess> | undefined;
   try {
-    const owned = await spawnDetachedProcess({
+    owned = await spawnDetachedProcess({
       argv: [process.execPath, "-e", consoleProbe(join(root, "logged-console"), true)],
       cwd: root,
       log: join(root, "logged.log"),
@@ -421,13 +423,23 @@ test("Windows hosts hide consoles for retained children", async (t) => {
       JSON.parse(await waitForFile(join(root, "stream-console"))) as { handle: string; tty: boolean },
     );
 
-    const stdio = spawnStdioProcess({
+    stdio = spawnStdioProcess({
       argv: [process.execPath, "-e", consoleProbe(join(root, "stdio-console"), true)],
       cwd: root,
     });
     assertHiddenConsole(JSON.parse(await waitForFile(join(root, "stdio-console"))) as { handle: string; tty: boolean });
     await stdio.close(true);
   } finally {
+    try {
+      await stdio?.close(true);
+    } catch {
+      /* preserve the observation failure */
+    }
+    try {
+      await owned?.terminate(true);
+    } catch {
+      /* preserve the observation failure */
+    }
     rmSync(root, { recursive: true, force: true });
   }
 });
