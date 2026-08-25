@@ -511,7 +511,11 @@ test("a direct spawner retains a short exit marker write before its exit receipt
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("a direct spawner rejects exit evidence when its run-log path disappears", async () => {
+test("a direct spawner rejects exit evidence when its run-log path disappears", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("Windows inherited log handles cannot be unlinked while the child is alive");
+    return;
+  }
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-owned-process-missing-log-"));
   try {
     const log = join(root, "stdio.log");
