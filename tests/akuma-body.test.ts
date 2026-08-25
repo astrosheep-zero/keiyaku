@@ -2034,17 +2034,52 @@ test("Body delivers answered and failed initial outcomes as bare Square activiti
       const history = await square.history();
       const says = history.filter((activity) => activity.kind === "say");
       assert.deepEqual(
-        says.map((activity) => JSON.parse(activity.body!)),
-        [
-          { outcome: "answered", answer: "done" },
-          { outcome: "failed", diagnostic: "provider failed" },
-        ],
-      );
-      assert.equal(
-        says.every((activity) => !("akuma" in JSON.parse(activity.body!))),
-        true,
+        says.map((activity) => activity.body),
+        ["done", "provider failed"],
       );
       assert.equal(says.length, 2);
+    } finally {
+      await square.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Body caps long Square outcomes and points to the latest Akuma history", async () => {
+  const { Square } = await import("@astrosheep/square");
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-square-outcome-cap-"));
+  try {
+    const squarePath = join(root, ".square", "PUBLIC.square");
+    await (await Square.build({ path: squarePath, markdown: "# public" })).close();
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "cafe1000" });
+    await initializeHeart(allocated.paths);
+    const answer = "x".repeat(1_001);
+    await driveAkumaBody(
+      {
+        paths: allocated.paths,
+        seed: {
+          id: allocated.id,
+          archetype: "claude",
+          provider: { name: "claude", kind: "claude-agent-sdk" },
+          options: {},
+          origin: { kind: "direct" },
+          cwd: root,
+        },
+        initialBody: "answer",
+      },
+      adapter({
+        starts: [],
+        events: [{ type: "session", coordinate: { sessionId: "s1" } }],
+        result: { kind: "answered", answer, historyId: "h1" },
+      }),
+      { now: () => "2026-08-08T00:00:00.000Z" },
+    );
+    const square = await Square.at({ path: squarePath });
+    try {
+      const says = (await square.history()).filter((activity) => activity.kind === "say");
+      assert.equal(says.length, 1);
+      assert.equal(says[0]?.body, `${"x".repeat(1_000)}\n\nkeiyaku history ${allocated.id} --last`);
     } finally {
       await square.close();
     }

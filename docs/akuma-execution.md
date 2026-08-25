@@ -23,10 +23,12 @@ loss may leave the Turn open and do not synthesize a provider result.
 After the initial Turn outcome is committed, Body derives the WorldRoot from
 its launch paths, opens `<WorldRoot>/.square/PUBLIC.square`, and implicitly
 joins as its own AkuId. Unless that identity is already done, it emits exactly
-one bare JSON activity: `{ outcome: "answered", answer }` or
-`{ outcome: "failed", diagnostic }`. It never calls `done`; the Aku remains
-joined. Missing Square and delivery failures are best-effort, logged, and do
-not change Heart truth or Body terminal state.
+one bare activity containing the answer or failure diagnostic. The activity
+contains at most the first 1,000 characters; a longer outcome appends
+`keiyaku history <AkuId> --last` so the caller can read the complete latest
+outcome. Heart retains the complete answer and diagnostic. It never calls
+`done`; the Aku remains joined. Missing Square and delivery failures are
+best-effort, logged, and do not change Heart truth or Body terminal state.
 
 Body construction never hides Heart or filesystem observation. Its supervisor
 and request pump are opened asynchronously, and every control tick, Heart

@@ -153,6 +153,14 @@ type CommittedOutcome =
   | Readonly<{ outcome: "answered"; answer: string }>
   | Readonly<{ outcome: "failed"; diagnostic: string }>;
 
+const OUTCOME_PREVIEW_LIMIT = 1_000;
+
+function outcomePreview(identity: string, outcome: CommittedOutcome): string {
+  const text = outcome.outcome === "answered" ? outcome.answer : outcome.diagnostic;
+  if (text.length <= OUTCOME_PREVIEW_LIMIT) return text;
+  return `${text.slice(0, OUTCOME_PREVIEW_LIMIT)}\n\nkeiyaku history ${identity} --last`;
+}
+
 function boundedDiagnostic(error: unknown): string {
   const text = diagnostic(error);
   return text.length <= 500 ? text : `${text.slice(0, 500)}...`;
@@ -167,7 +175,7 @@ async function expressInitialOutcome(launch: BodyLaunch, outcome: CommittedOutco
     try {
       const joined = await square.implicitJoin(identity);
       if (joined.state === "done" || joined.participant === undefined) return;
-      await joined.participant.express(JSON.stringify(outcome));
+      await joined.participant.express(outcomePreview(identity, outcome));
     } finally {
       await square.close();
     }
