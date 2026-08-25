@@ -1233,7 +1233,11 @@ test("CLI call launches with or without a recognized Square listener", async () 
       assert.equal(existsSync(join(root, ".keiyaku", "akuma", "run")), true);
       const status = await Keiyaku.status({ path: root, akuma: id });
       if (status.status.life === "running") {
-        await Keiyaku.kill({ path: root, akuma: [id] });
+        try {
+          await Keiyaku.kill({ path: root, akuma: [id] });
+        } catch (error) {
+          if (!(error instanceof Error) || error.message !== "Akuma has no Body to kill") throw error;
+        }
         await Keiyaku.wait({ path: root, akuma: [id] });
       }
     }
