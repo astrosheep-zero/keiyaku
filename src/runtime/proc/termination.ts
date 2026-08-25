@@ -26,8 +26,18 @@ export async function terminateWindowsTree(pid: number): Promise<void> {
 }
 
 export async function settleWindowsTermination(exit: Promise<void>): Promise<void> {
-  await exit;
+  const settled = await Promise.race([
+    exit.then(() => true),
+    delay(WINDOWS_TERMINATION_TIMEOUT_MS, false, { ref: false }).then(() => false),
+  ]);
+  if (!settled) throw new Error("Windows process did not exit after taskkill");
   await delay(WINDOWS_TERMINATION_SETTLE_MS);
+}
+
+function closeWindowsStreams(child: ChildProcess): void {
+  child.stdin?.destroy();
+  child.stdout?.destroy();
+  child.stderr?.destroy();
 }
 
 export async function terminateOwnedProcess(child: ChildProcess, force = false): Promise<void> {
@@ -45,8 +55,12 @@ export async function terminateOwnedProcess(child: ChildProcess, force = false):
     });
   });
   if (process.platform === "win32") {
-    await terminateWindowsTree(pid);
-    await settleWindowsTermination(exit);
+    try {
+      await terminateWindowsTree(pid);
+      await settleWindowsTermination(exit);
+    } finally {
+      closeWindowsStreams(child);
+    }
     return;
   }
   if (force) {
