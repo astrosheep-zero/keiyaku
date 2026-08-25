@@ -300,7 +300,7 @@ test("a released Akuma Body completes through Pi and an OpenAI chat completion e
     restoreEnvironment("PI_TELEMETRY", environment.telemetry);
     restoreEnvironment("OPENAI_API_KEY", environment.openaiApiKey);
     await fixture.close();
-    rmSync(root, { recursive: true, force: true });
+    await removeTempDirectory(root);
   }
 });
 
