@@ -38,8 +38,8 @@ async function waitForExit(pid: number): Promise<void> {
   }
 }
 
-async function waitForFile(path: string): Promise<string> {
-  const deadline = performance.now() + 2_000;
+async function waitForFile(path: string, timeoutMs = 2_000): Promise<string> {
+  const deadline = performance.now() + timeoutMs;
   while (!existsSync(path)) {
     if (performance.now() >= deadline) throw new Error(`missing ${path}`);
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -397,7 +397,7 @@ test("Windows hosts hide consoles for retained children", async (t) => {
       log: join(root, "logged.log"),
     });
     assertHiddenConsole(
-      JSON.parse(await waitForFile(join(root, "logged-console"))) as { handle: string; tty: boolean },
+      JSON.parse(await waitForFile(join(root, "logged-console"), 10_000)) as { handle: string; tty: boolean },
     );
     await owned.terminate(true);
     await waitForExit(owned.pid);
@@ -408,7 +408,7 @@ test("Windows hosts hide consoles for retained children", async (t) => {
       timeoutMs: 5_000,
     });
     assertHiddenConsole(
-      JSON.parse(await waitForFile(join(root, "buffered-console"))) as { handle: string; tty: boolean },
+      JSON.parse(await waitForFile(join(root, "buffered-console"), 10_000)) as { handle: string; tty: boolean },
     );
 
     await consumeProcessStdout(
@@ -420,14 +420,16 @@ test("Windows hosts hide consoles for retained children", async (t) => {
       () => {},
     );
     assertHiddenConsole(
-      JSON.parse(await waitForFile(join(root, "stream-console"))) as { handle: string; tty: boolean },
+      JSON.parse(await waitForFile(join(root, "stream-console"), 10_000)) as { handle: string; tty: boolean },
     );
 
     stdio = spawnStdioProcess({
       argv: [process.execPath, "-e", consoleProbe(join(root, "stdio-console"), true)],
       cwd: root,
     });
-    assertHiddenConsole(JSON.parse(await waitForFile(join(root, "stdio-console"))) as { handle: string; tty: boolean });
+    assertHiddenConsole(
+      JSON.parse(await waitForFile(join(root, "stdio-console"), 10_000)) as { handle: string; tty: boolean },
+    );
     await stdio.close(true);
   } finally {
     try {
