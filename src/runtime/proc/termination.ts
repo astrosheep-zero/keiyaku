@@ -3,6 +3,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 
 const TERMINATION_GRACE_MS = 250;
+const WINDOWS_TERMINATION_SETTLE_MS = 250;
 const WINDOWS_TERMINATION_TIMEOUT_MS = 1_000;
 const execFileAsync = promisify(execFile);
 
@@ -24,6 +25,11 @@ export async function terminateWindowsTree(pid: number): Promise<void> {
   }
 }
 
+export async function settleWindowsTermination(exit: Promise<void>): Promise<void> {
+  await exit;
+  await delay(WINDOWS_TERMINATION_SETTLE_MS);
+}
+
 export async function terminateOwnedProcess(child: ChildProcess, force = false): Promise<void> {
   const pid = child.pid;
   if (pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
@@ -40,8 +46,7 @@ export async function terminateOwnedProcess(child: ChildProcess, force = false):
   });
   if (process.platform === "win32") {
     await terminateWindowsTree(pid);
-    await exit;
-    await delay(TERMINATION_GRACE_MS);
+    await settleWindowsTermination(exit);
     return;
   }
   if (force) {

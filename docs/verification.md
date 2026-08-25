@@ -178,7 +178,13 @@ global Verification timeout, Settings key, CLI flag, library option, or
 environment variable. Execution starts detached on every platform. For timeout,
 POSIX execution starts a new session and process group, sends that group a
 graceful signal, waits a bounded grace interval, then force-kills the group. Windows uses
-`taskkill /PID <pid> /T /F`. The portable process-tree guarantee covers the
+`taskkill /PID <pid> /T /F` as its sole termination authority. Windows termination is
+not complete when `taskkill` returns: the runtime waits for the directly owned child
+handle to report exit and then applies one bounded settling window for inherited
+handles and related process artifacts to be released. The window is not silently
+extended; an EPERM or residual process/handle after it expires is a real failure.
+Retained `release` relinquishes the runtime's custody while leaving the target alive;
+it does not invoke termination. The portable process-tree guarantee covers the
 tree rooted at the directly spawned child while that caller still owns its
 handle. A subprocess that escapes the tree, or remains after SIGKILL,
 harness loss, or a Node crash, lies outside that guarantee.

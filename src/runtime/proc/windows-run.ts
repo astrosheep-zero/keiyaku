@@ -3,7 +3,7 @@ import { createInterface, type Interface } from "node:readline";
 import { launchFailure, spawnWindowsLauncher, type DetachedProcessInput } from "./launch.js";
 import { detachedExitStatus, retainDetachedExitEvidence } from "./process-exit.js";
 import { createProcessLifecycle, type ProcessLifecycle } from "./lifecycle.js";
-import { terminateWindowsTree } from "./termination.js";
+import { settleWindowsTermination, terminateWindowsTree } from "./termination.js";
 import type { DetachedProcessExit, OwnedProcess } from "./types.js";
 
 type WindowsContext = {
@@ -168,7 +168,7 @@ function ownedWindowsProcess(context: WindowsContext, pid: number): OwnedProcess
   const lifecycle = createProcessLifecycle(
     async () => {
       await terminateWindowsTree(pid);
-      await context.exited;
+      await settleWindowsTermination(context.exited.then(() => undefined));
     },
     () => {
       context.released = true;
