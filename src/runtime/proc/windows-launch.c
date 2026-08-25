@@ -42,6 +42,12 @@ static void write_output(const char *value) {
   WriteFile(handle, value, (DWORD)narrow_length(value), &written, NULL);
 }
 
+static void flush_output(void) {
+  HANDLE handle = output_handle();
+  if (handle == NULL || handle == INVALID_HANDLE_VALUE) return;
+  FlushFileBuffers(handle);
+}
+
 static void fail_message(const char *message) {
   write_error(message);
   write_error("\n");
@@ -199,15 +205,6 @@ struct RetainedControl {
   HANDLE release_event;
 };
 
-static void stop_control_thread(HANDLE thread) {
-  CancelSynchronousIo(thread);
-  DWORD state = WaitForSingleObject(thread, 1000);
-  if (state == WAIT_TIMEOUT) {
-    TerminateThread(thread, 1);
-    WaitForSingleObject(thread, 1000);
-  }
-}
-
 static int read_command(char *command, SIZE_T capacity) {
   HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
   SIZE_T length = 0;
@@ -348,21 +345,14 @@ static int launch(const wchar_t *log_path, int argc, wchar_t **argv) {
   HANDLE waits[2] = { process.hProcess, release_event };
   DWORD winner = WaitForMultipleObjects(2, waits, FALSE, INFINITE);
   if (winner == WAIT_OBJECT_0 + 1) {
-    stop_control_thread(control_thread);
-    CloseHandle(control_thread);
-    CloseHandle(release_event);
-    CloseHandle(process.hProcess);
-    return 0;
+    ExitProcess(0);
   }
   WaitForSingleObject(process.hProcess, INFINITE);
   DWORD code = 1;
   GetExitCodeProcess(process.hProcess, &code);
   write_exited(code);
-  stop_control_thread(control_thread);
-  CloseHandle(control_thread);
-  CloseHandle(release_event);
-  CloseHandle(process.hProcess);
-  return 0;
+  flush_output();
+  ExitProcess(0);
 }
 
 int wmain(int argc, wchar_t **argv) {
