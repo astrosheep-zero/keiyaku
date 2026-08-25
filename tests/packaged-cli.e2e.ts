@@ -40,7 +40,11 @@ function npmCommand(args: readonly string[], cwd: string): string {
 }
 
 function installedCommand(args: readonly string[], cwd: string): string {
-  return npmCommand(["exec", "--offline", "--", "keiyaku", ...args], cwd);
+  return command(
+    process.execPath,
+    [join(cwd, "node_modules", "@astrosheep", "keiyaku", "build", "src", "cli", "index.js"), ...args],
+    cwd,
+  );
 }
 
 test("published package installs one keiyaku CLI and runs against a real repository", () => {
@@ -80,12 +84,10 @@ test("published package installs one keiyaku CLI and runs against a real reposit
     "--ignore-scripts",
     "--no-audit",
     "--no-fund",
-    "--offline",
+    "--prefer-offline",
     "--legacy-peer-deps",
     "--no-bin-links",
     "--package-lock=false",
-    "--cache",
-    cache,
     packageArchive,
   ], installed);
 

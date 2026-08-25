@@ -16,6 +16,7 @@ type WindowsContext = {
   stderr: string;
   started: boolean;
   targetPid: number | undefined;
+  released: boolean;
   finished: boolean;
   lifecycle?: ProcessLifecycle;
   startedPromise: Promise<number>;
@@ -58,6 +59,7 @@ function createWindowsContext(
     stderr: "",
     started: false,
     targetPid: undefined,
+    released: false,
     finished: false,
     startedPromise,
     startedResolve,
@@ -73,6 +75,7 @@ function createWindowsContext(
 }
 
 function failWindows(context: WindowsContext, error: unknown): void {
+  if (context.released) return;
   context.lifecycle?.markInert();
   if (!context.started) context.startedReject(error);
   if (!context.finished) {
@@ -152,6 +155,7 @@ function handleWindowsLine(context: WindowsContext, line: string): void {
 function installWindowsProtocol(context: WindowsContext): void {
   context.child.once("error", (error) => failWindows(context, error));
   context.child.once("close", () => {
+    if (context.released) return;
     if (!context.started) {
       failWindows(context, launchFailure(context.input.argv[0] ?? "windows-launch.exe", context.stderr.trim()));
     } else if (!context.finished) {
@@ -168,6 +172,7 @@ function ownedWindowsProcess(context: WindowsContext, pid: number): OwnedProcess
       await context.exited;
     },
     () => {
+      context.released = true;
       context.reader.close();
       context.child.stdin?.write("release\n");
       context.child.stdin?.end();

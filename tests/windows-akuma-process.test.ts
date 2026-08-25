@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
+import { Akuma } from "../src/akuma/akuma.js";
 import { spawnOptionsFor, spawnWindowsLauncher } from "../src/runtime/proc/launch.js";
 import { consumeProcessStdout, runProcess, spawnDetachedProcess } from "../src/runtime/proc/run.js";
 import { spawnStdioProcess } from "../src/runtime/proc/stdio.js";
+import { World } from "../src/world.js";
 
 const IMAGE_SUBSYSTEM_WINDOWS_GUI = 2;
 const packagedLauncher = resolve("build/src/runtime/proc/windows-launch.exe");
@@ -42,6 +45,59 @@ async function waitForFile(path: string): Promise<string> {
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   return readFileSync(path, "utf8");
+}
+
+function restoreEnvironment(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
+
+async function startChatCompletionFixture() {
+  let requests = 0;
+  const server = createServer((request, response) => {
+    if (request.method !== "POST" || request.url !== "/v1/chat/completions") {
+      response.writeHead(404).end();
+      return;
+    }
+    requests += 1;
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    response.write(
+      `data: ${JSON.stringify({
+        id: "fixture-completion",
+        object: "chat.completion.chunk",
+        created: 0,
+        model: "fixture-chat",
+        choices: [{ index: 0, delta: { role: "assistant", content: "fixture answer" }, finish_reason: null }],
+      })}\n\n`,
+    );
+    response.write(
+      `data: ${JSON.stringify({
+        id: "fixture-completion",
+        object: "chat.completion.chunk",
+        created: 0,
+        model: "fixture-chat",
+        choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+        usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
+      })}\n\n`,
+    );
+    response.end("data: [DONE]\n\n");
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  if (address === null || typeof address === "string") throw new Error("chat completion fixture did not bind TCP");
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}/v1`,
+    get requests() {
+      return requests;
+    },
+    close: async () =>
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error === undefined ? resolve() : reject(error)));
+      }),
+  };
 }
 
 test("the Windows release launcher is a GUI-subsystem x64 PE", async (t) => {
@@ -142,6 +198,8 @@ test("retained launch returns the target pid and release leaves it alive", async
     pid = Number.parseInt(await waitForFile(pidFile), 10);
     assert.equal(pid, owned.pid);
     process.kill(pid, 0);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    process.kill(pid, 0);
   } finally {
     if (pid !== undefined) {
       try {
@@ -151,6 +209,83 @@ test("retained launch returns the target pid and release leaves it alive", async
       }
       await waitForExit(pid);
     }
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a released Akuma Body completes through Pi and an OpenAI chat completion endpoint", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-windows-akuma-e2e-"));
+  const home = join(root, "keiyaku-home");
+  const piHome = join(root, "pi-home");
+  const fixture = await startChatCompletionFixture();
+  const environment = {
+    agentDir: process.env.PI_CODING_AGENT_DIR,
+    offline: process.env.PI_OFFLINE,
+    skipVersionCheck: process.env.PI_SKIP_VERSION_CHECK,
+    telemetry: process.env.PI_TELEMETRY,
+    openaiApiKey: process.env.OPENAI_API_KEY,
+  };
+  try {
+    mkdirSync(join(home, "akuma"), { recursive: true });
+    mkdirSync(piHome);
+    writeFileSync(
+      join(home, "akuma", "fixture.md"),
+      "---\nprovider: pi\nmodel: fixture/fixture-chat\nreadonly: true\n---\n",
+    );
+    writeFileSync(
+      join(piHome, "models.json"),
+      `${JSON.stringify(
+        {
+          providers: {
+            fixture: {
+              baseUrl: fixture.baseUrl,
+              api: "openai-completions",
+              apiKey: "fixture",
+              compat: { supportsDeveloperRole: false, supportsReasoningEffort: false },
+              models: [
+                {
+                  id: "fixture-chat",
+                  reasoning: false,
+                  input: ["text"],
+                  contextWindow: 4_096,
+                  maxTokens: 128,
+                  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+                },
+              ],
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    process.env.PI_CODING_AGENT_DIR = piHome;
+    process.env.PI_OFFLINE = "1";
+    process.env.PI_SKIP_VERSION_CHECK = "1";
+    process.env.PI_TELEMETRY = "0";
+    process.env.OPENAI_API_KEY = "fixture";
+
+    const world = Akuma.of(await World.at(root), { home });
+    const handle = await world.call({ archetype: "fixture", body: "Return the fixture answer." });
+    const status = await handle.wait(undefined, { timeoutMs: 15_000 });
+    assert.equal(fixture.requests, 1);
+    assert.equal(status.life, "asleep");
+    assert.equal(status.timeline.kind === "idle" && status.timeline.outcome?.outcome.kind === "answered", true);
+    const outcome = (await handle.history()).rows.find((row) => row.kind === "outcome")?.outcome;
+    assert.equal(outcome?.kind, "answered");
+    if (outcome?.kind === "answered") {
+      assert.equal(outcome.answer, "fixture answer");
+      assert.equal(outcome.session.sessionFile.startsWith(piHome), true);
+      assert.ok(outcome.session.sessionId.length > 0);
+      assert.ok(outcome.historyId?.length > 0);
+    }
+  } finally {
+    restoreEnvironment("PI_CODING_AGENT_DIR", environment.agentDir);
+    restoreEnvironment("PI_OFFLINE", environment.offline);
+    restoreEnvironment("PI_SKIP_VERSION_CHECK", environment.skipVersionCheck);
+    restoreEnvironment("PI_TELEMETRY", environment.telemetry);
+    restoreEnvironment("OPENAI_API_KEY", environment.openaiApiKey);
+    await fixture.close();
     rmSync(root, { recursive: true, force: true });
   }
 });
