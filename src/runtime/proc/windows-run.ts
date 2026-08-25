@@ -122,6 +122,7 @@ function recordWindowsExit(context: WindowsContext, code: number): void {
         `pre-admission ${status}: run-log evidence unavailable: ${failure instanceof Error ? failure.message : String(failure)}`,
       );
     }
+    await settleWindowsTermination(Promise.resolve());
     context.exitResolve(result!);
   })().catch(context.exitReject);
 }
