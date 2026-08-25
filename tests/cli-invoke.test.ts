@@ -5,14 +5,14 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { GIT_REF, readRef, repositoryAt } from "../src/git/repository.js";
+import { GIT_REF, readRef } from "../src/git/repository.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { HeartAbsentError } from "../src/akuma/heart/index.js";
 import { Delivery, Keiyaku, KeiyakuRefused, KeiyakuRetry, NoGitWorldError, Repo, type ContractId } from "../src/index.js";
 import { reconcile } from "../src/git/reconcile.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
-import { appointedWorktreePath, makeGitRepository, observeContract, withGitShim } from "./support/git.js";
+import { appointedWorktreePath, cachedRepositoryAt, makeGitRepository, observeContract, withGitShim } from "./support/git.js";
 import { repositoryWithMain as makeRepositoryWithMain } from "./support/library-verbs.js";
 const repositoryWithMain = () => makeRepositoryWithMain({ files: {
   ".keiyaku/settings.json": JSON.stringify({ gates: {
@@ -371,7 +371,7 @@ test("explicit Repo selects Contract storage without replacing the invocation Wo
 
   assert.deepEqual((await Keiyaku.list({ repo: invocationRepo })).rows, []);
   assert.deepEqual((await Keiyaku.list({ repo: contractRepo })).rows.map((row) => row.id), [id]);
-  assert.deepEqual((await observeContract(await repositoryAt(contractRepository.path), id)).state?.terms.gates, ["reviewed"]);
+  assert.deepEqual((await observeContract(await cachedRepositoryAt(contractRepository.path), id)).state?.terms.gates, ["reviewed"]);
 });
 
 test("composite status refuses an explicit Repo that could create a mixed-World report", async () => {
@@ -536,7 +536,7 @@ test("journal-writing commands preserve optional actor testimony", async () => {
   });
 
   const unsigned = await command(["bind", "-"], {});
-  const unsignedEntries = (await observeContract(await repositoryAt(repository.path), acceptedContract(unsigned))).entries;
+  const unsignedEntries = (await observeContract(await cachedRepositoryAt(repository.path), acceptedContract(unsigned))).entries;
   assert.equal(unsignedEntries.length, 1);
   assert.equal(unsignedEntries.every((entry) => !("actor" in entry)), true);
 
@@ -544,22 +544,22 @@ test("journal-writing commands preserve optional actor testimony", async () => {
   const fromEnvironment = await command(["bind", "-"], {
     KEIYAKU_ACTOR_ID: environmentActor,
   });
-  assert.equal((await observeContract(await repositoryAt(repository.path), acceptedContract(fromEnvironment))).entries[0]?.actor, environmentActor);
+  assert.equal((await observeContract(await cachedRepositoryAt(repository.path), acceptedContract(fromEnvironment))).entries[0]?.actor, environmentActor);
 
   const explicitActor = " external \u{1f9d1}\u{1f3fd}\u200d\u{1f4bb} ";
   const explicit = await command(["bind", "--actor", explicitActor, "-"], {
     KEIYAKU_ACTOR_ID: "different projection",
   });
-  const persisted = (await observeContract(await repositoryAt(repository.path), acceptedContract(explicit))).entries[0]?.actor;
+  const persisted = (await observeContract(await cachedRepositoryAt(repository.path), acceptedContract(explicit))).entries[0]?.actor;
   assert.equal(persisted, explicitActor);
   assert.deepEqual(Buffer.from(persisted ?? "", "utf8"), Buffer.from(explicitActor, "utf8"));
 
-  const beforeBlank = await readRef(await repositoryAt(repository.path), GIT_REF);
+  const beforeBlank = await readRef(await cachedRepositoryAt(repository.path), GIT_REF);
   await assert.rejects(
     async () => command(["bind", "--actor", " \t", "-"], { KEIYAKU_ACTOR_ID: "aku/environment" }),
     (error: unknown) => error instanceof CliUsageError && /--actor requires a nonblank value/.test(error.message),
   );
-  assert.equal(await readRef(await repositoryAt(repository.path), GIT_REF), beforeBlank);
+  assert.equal(await readRef(await cachedRepositoryAt(repository.path), GIT_REF), beforeBlank);
 });
 
 test("task creation resolves actor before applying the selected input", async () => {
@@ -621,7 +621,7 @@ test("ordinary omitted-target bind uses the invocation worktree's current attach
     source,
   );
 
-  const state = (await observeContract(await repositoryAt(repository.path), acceptedContract(result))).state;
+  const state = (await observeContract(await cachedRepositoryAt(repository.path), acceptedContract(result))).state;
   assert.deepEqual(state?.coordinates, {
     start,
     target: "refs/heads/main",
@@ -708,7 +708,7 @@ test("bind observes an explicit target rather than the checked-out branch", asyn
   );
 
   assert.deepEqual(
-    (await observeContract(await repositoryAt(repository.path), acceptedContract(result))).state?.coordinates,
+    (await observeContract(await cachedRepositoryAt(repository.path), acceptedContract(result))).state?.coordinates,
     { start, target: "refs/heads/release", workspace: "worktree" },
   );
   assert.equal(result.kind === "accepted" ? result.target : undefined, "refs/heads/release");
@@ -723,7 +723,7 @@ test("targetless bind accepts detached HEAD without a reward operation", async (
     ["bind", "--actor", "external-test", "-"],
     contractDocument("Detached"),
   );
-  const coordinates = (await observeContract(await repositoryAt(repository.path), acceptedContract(result))).state?.coordinates;
+  const coordinates = (await observeContract(await cachedRepositoryAt(repository.path), acceptedContract(result))).state?.coordinates;
   assert.equal(coordinates?.target, undefined);
   assert.equal(result.kind === "accepted" ? result.target : undefined, null);
 });
@@ -762,7 +762,7 @@ test("amend structured terms do not acquire stdin", async () => {
   assert.equal(after.kind === "accepted" && after.diff, "");
   assert.equal(cleared.kind === "accepted" && cleared.diff, "");
   assert.equal(gated.kind === "accepted" && gated.diff, "");
-  const terms = (await observeContract(await repositoryAt(repository.path), id)).state?.terms;
+  const terms = (await observeContract(await cachedRepositoryAt(repository.path), id)).state?.terms;
   assert.deepEqual(terms?.after, []);
   assert.deepEqual(terms?.gates, ["reviewed"]);
 });
@@ -789,7 +789,7 @@ test("amend applies H2 operations into a complete Markdown replacement", async (
     ].join("\n"),
   );
   assert.equal(amended.kind, "accepted");
-  const terms = (await observeContract(await repositoryAt(repository.path), id)).state?.terms;
+  const terms = (await observeContract(await cachedRepositoryAt(repository.path), id)).state?.terms;
   const body = terms === null || terms === undefined ? null : decodeContractDocument(terms.document.bytes);
   assert.equal(body?.title, "Original");
   assert.equal(body?.context, "\nReplacement context.\n\n");
@@ -859,7 +859,7 @@ test("amend accepts changed prerequisites after delivery and still rejects cycle
   );
   assert.equal(amended.kind, "accepted");
   assert.deepEqual((await contract.state()).terms.after, [prerequisiteId]);
-  const beforeCycle = await readRef(await repositoryAt(repository.path), GIT_REF);
+  const beforeCycle = await readRef(await cachedRepositoryAt(repository.path), GIT_REF);
 
   const selfDependent = await invokeWithDocument(
     repository.path,
@@ -872,7 +872,7 @@ test("amend accepts changed prerequisites after delivery and still rejects cycle
     contract: id,
     refusal: { kind: "cyclic-prerequisite", contractId: id },
   });
-  assert.equal(await readRef(await repositoryAt(repository.path), GIT_REF), beforeCycle);
+  assert.equal(await readRef(await cachedRepositoryAt(repository.path), GIT_REF), beforeCycle);
 });
 
 test("concurrent amend diff uses the accepted predecessor after a competing amend", async () => {
@@ -933,7 +933,7 @@ test("bind freezes the selected gate snapshot", async () => {
   );
 
   assert.deepEqual(
-    (await observeContract(await repositoryAt(repository.path), acceptedContract(result))).state?.terms?.gates,
+    (await observeContract(await cachedRepositoryAt(repository.path), acceptedContract(result))).state?.terms?.gates,
     ["verified", "reviewed"],
   );
 });
@@ -973,7 +973,7 @@ test("amend freezes expanded plural gate bundles as concrete replacement terms",
   );
   assert.equal(amended.kind, "accepted");
   assert.deepEqual(
-    (await observeContract(await repositoryAt(repository.path), id)).state?.terms.gates,
+    (await observeContract(await cachedRepositoryAt(repository.path), id)).state?.terms.gates,
     ["verified", "reviewed"],
   );
 });
@@ -989,7 +989,7 @@ test("bind defaults to reviewed unless a present default bundle overrides it", a
     { KEIYAKU_HOME: home },
   );
   assert.deepEqual(
-    (await observeContract(await repositoryAt(missing.path), acceptedContract(implicit))).state?.terms.gates,
+    (await observeContract(await cachedRepositoryAt(missing.path), acceptedContract(implicit))).state?.terms.gates,
     ["reviewed"],
   );
   rmSync(home, { recursive: true, force: true });
@@ -1004,7 +1004,7 @@ test("bind defaults to reviewed unless a present default bundle overrides it", a
     contractDocument("Explicit Empty Default"),
   );
   assert.deepEqual(
-    (await observeContract(await repositoryAt(empty.path), acceptedContract(overridden))).state?.terms.gates,
+    (await observeContract(await cachedRepositoryAt(empty.path), acceptedContract(overridden))).state?.terms.gates,
     [],
   );
 });
@@ -1019,10 +1019,10 @@ test("managed delivery follows an eligible deterministic worktree", async () => 
     contractDocument("Managed Worktree"),
   );
   const id = acceptedContract(bound);
-  const path = await appointedWorktreePath(await repositoryAt(repository.path), id);
-  const managedRepository = await repositoryAt(path);
+  const path = await appointedWorktreePath(await cachedRepositoryAt(repository.path), id);
+  const managedRepository = await cachedRepositoryAt(path);
   assert.equal(managedRepository.effectiveCwd, path);
-  assert.equal(managedRepository.primaryWorktree, (await repositoryAt(repository.path)).primaryWorktree);
+  assert.equal(managedRepository.primaryWorktree, (await cachedRepositoryAt(repository.path)).primaryWorktree);
   const fromManaged = (argv: readonly string[], source = "") => invoke(
     parseArgv(["-C", path, ...argv]),
     { environment: {}, readStdin: () => source },
@@ -1035,10 +1035,10 @@ test("managed delivery follows an eligible deterministic worktree", async () => 
 
   const deliver = await fromManaged(["deliver", "--actor", "external-test"]);
   assert.equal(deliver.kind, "accepted");
-  const state = (await observeContract(await repositoryAt(repository.path), id)).state;
+  const state = (await observeContract(await cachedRepositoryAt(repository.path), id)).state;
   assert.equal(state?.delivery?.data.tenderSnapshot, candidate);
-  assert.equal(await readRef(await repositoryAt(repository.path), candidatePinRefFor(id)), state?.delivery?.data.integration.snapshot);
-  assert.equal(await readRef(await repositoryAt(repository.path), deliveryRefFor(id)), candidate);
+  assert.equal(await readRef(await cachedRepositoryAt(repository.path), candidatePinRefFor(id)), state?.delivery?.data.integration.snapshot);
+  assert.equal(await readRef(await cachedRepositoryAt(repository.path), deliveryRefFor(id)), candidate);
   const audit = await fromManaged(["audit"]);
   assert.equal(audit.kind, "accepted");
   if (audit.kind !== "accepted") throw new Error("audit was not accepted");
@@ -1047,7 +1047,7 @@ test("managed delivery follows an eligible deterministic worktree", async () => 
   assert.equal(audit.report?.target.kind, "placeable");
 
   repository.run(["-C", path, "reset", "--hard", target]);
-  const reconcileRepository = await repositoryAt(repository.path);
+  const reconcileRepository = await cachedRepositoryAt(repository.path);
   const appointment = await readManagedWorktreeAppointment(reconcileRepository, id);
   const reconciled = await withGitDecodeChannel(reconcileRepository, (channel) => reconcile({
     repository: reconcileRepository,
@@ -1063,8 +1063,8 @@ test("managed delivery follows an eligible deterministic worktree", async () => 
   const satisfiedReview = await fromManaged(["review", id, "--satisfied", "--summary", "accepted", "--actor", "external-test"]);
   assert.equal(satisfiedReview.kind, "accepted");
   assert.equal("lag" in satisfiedReview, false);
-  assert.equal(await readRef(await repositoryAt(repository.path), deliveryRefFor(id)), null);
-  assert.equal(await readRef(await repositoryAt(repository.path), candidatePinRefFor(id)), null);
+  assert.equal(await readRef(await cachedRepositoryAt(repository.path), deliveryRefFor(id)), null);
+  assert.equal(await readRef(await cachedRepositoryAt(repository.path), candidatePinRefFor(id)), null);
   assert.equal(existsSync(path), false);
 });
 
@@ -1076,7 +1076,7 @@ test("an accepted arc preserves un-tendered managed worktree content", async () 
     contractDocument("Un-tendered Work"),
   );
   const id = acceptedContract(bound);
-  const path = await appointedWorktreePath(await repositoryAt(repository.path), id);
+  const path = await appointedWorktreePath(await cachedRepositoryAt(repository.path), id);
   writeFileSync(resolve(path, "agent-owned.txt"), "keep this work\n");
   repository.run(["-C", path, "add", "agent-owned.txt"]);
   repository.run(["-C", path, "commit", "--quiet", "-m", "un-tendered work"]);
@@ -1102,7 +1102,7 @@ test("managed abandonment cleans terminal resources from its own worktree cwd", 
   );
   const id = acceptedContract(bound);
 
-  const path = await appointedWorktreePath(await repositoryAt(repository.path), id);
+  const path = await appointedWorktreePath(await cachedRepositoryAt(repository.path), id);
   const fromManaged = (argv: readonly string[], source = "") => invoke(
     parseArgv(["-C", path, ...argv]),
     { environment: {}, readStdin: () => source },
@@ -1110,20 +1110,20 @@ test("managed abandonment cleans terminal resources from its own worktree cwd", 
   repository.run(["-C", path, "commit", "--allow-empty", "--quiet", "-m", "managed candidate"]);
   const delivered = await fromManaged(["deliver", "--actor", "external-test"]);
   assert.equal(delivered.kind, "accepted");
-  assert.equal(await readRef(await repositoryAt(repository.path), deliveryRefFor(id)) !== null, true);
-  assert.equal(await readRef(await repositoryAt(repository.path), candidatePinRefFor(id)) !== null, true);
+  assert.equal(await readRef(await cachedRepositoryAt(repository.path), deliveryRefFor(id)) !== null, true);
+  assert.equal(await readRef(await cachedRepositoryAt(repository.path), candidatePinRefFor(id)) !== null, true);
 
   const abandoned = await fromManaged([
     "abandon", id, "--note", "scope changed", "--actor", "external-test",
   ]);
   assert.equal(abandoned.kind, "accepted");
   assert.equal("lag" in abandoned, false);
-  assert.equal((await observeContract(await repositoryAt(repository.path), id)).state?.terminal?.kind, "abandoned");
-  assert.equal((await observeContract(await repositoryAt(repository.path), id)).state?.terminal?.data.note, "scope changed");
-  assert.equal(await readRef(await repositoryAt(repository.path), deliveryRefFor(id)) !== null, true);
+  assert.equal((await observeContract(await cachedRepositoryAt(repository.path), id)).state?.terminal?.kind, "abandoned");
+  assert.equal((await observeContract(await cachedRepositoryAt(repository.path), id)).state?.terminal?.data.note, "scope changed");
+  assert.equal(await readRef(await cachedRepositoryAt(repository.path), deliveryRefFor(id)) !== null, true);
   assert.equal(
-    await readRef(await repositoryAt(repository.path), candidatePinRefFor(id)),
-    (await observeContract(await repositoryAt(repository.path), id)).state?.delivery?.data.integration.snapshot,
+    await readRef(await cachedRepositoryAt(repository.path), candidatePinRefFor(id)),
+    (await observeContract(await cachedRepositoryAt(repository.path), id)).state?.delivery?.data.integration.snapshot,
   );
   assert.equal(existsSync(path), false);
 });
@@ -1136,14 +1136,14 @@ test("a terminal worktree removal failure remains accepted cleanup lag", async (
     contractDocument("Retained Cleanup"),
   );
   const id = acceptedContract(bound);
-  const path = await appointedWorktreePath(await repositoryAt(repository.path), id);
+  const path = await appointedWorktreePath(await cachedRepositoryAt(repository.path), id);
   repository.run(["-C", path, "commit", "--allow-empty", "--quiet", "-m", "retained candidate"]);
   const candidate = repository.run(["-C", path, "rev-parse", "HEAD"]).trim();
   const delivered = await invoke(parseArgv(["-C", path, "deliver", id, "--actor", "external-test"]), {
     environment: {},
   });
   assert.equal(delivered.kind, "accepted");
-  const state = (await observeContract(await repositoryAt(repository.path), id)).state;
+  const state = (await observeContract(await cachedRepositoryAt(repository.path), id)).state;
 
   const abandoned = await withGitShim(
     [
@@ -1163,8 +1163,8 @@ test("a terminal worktree removal failure remains accepted cleanup lag", async (
   if (abandoned.kind !== "accepted") return;
   assert.deepEqual(abandoned.lag, [{ kind: "worktree-retained", path }]);
   assert.equal(existsSync(path), true);
-  assert.equal(await readRef(await repositoryAt(repository.path), deliveryRefFor(id)), state?.delivery?.data.tenderSnapshot);
-  assert.equal(await readRef(await repositoryAt(repository.path), candidatePinRefFor(id)), state?.delivery?.data.integration.snapshot);
+  assert.equal(await readRef(await cachedRepositoryAt(repository.path), deliveryRefFor(id)), state?.delivery?.data.tenderSnapshot);
+  assert.equal(await readRef(await cachedRepositoryAt(repository.path), candidatePinRefFor(id)), state?.delivery?.data.integration.snapshot);
 });
 
 test("reconcile world command adapts the public repository report", async () => {
@@ -1364,7 +1364,7 @@ test("valid acquired stdin bytes pass through unchanged", async () => {
   const source = `  \n${contractDocument("Keep Bytes")}\n`;
   const bound = await invokeWithDocument(repository.path, ["bind", "-"], source);
   const id = acceptedContract(bound);
-  assert.equal((await observeContract(await repositoryAt(repository.path), id)).state?.terms?.document.bytes, source);
+  assert.equal((await observeContract(await cachedRepositoryAt(repository.path), id)).state?.terms?.document.bytes, source);
 });
 
 async function conflictedDeliverCommand() {
@@ -1378,7 +1378,7 @@ async function conflictedDeliverCommand() {
     contractDocument("Conflicted delivery"),
   );
   const id = acceptedContract(bound);
-  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), id);
+  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), id);
   writeFileSync(join(repository.path, "shared.txt"), "target\n");
   repository.run(["add", "shared.txt"]);
   repository.run(["commit", "--quiet", "-m", "target change"]);
@@ -1438,7 +1438,7 @@ test("deliver --materialize-conflict returns the exact public materialization ob
   assert.equal(json.targetHead, targetHead);
   assert.deepEqual(json.conflictPaths, ["shared.txt"]);
   assert.deepEqual(json.workspace, { kind: "worktree", path: worktree });
-  const state = (await observeContract(await repositoryAt(repository.path), id)).state;
+  const state = (await observeContract(await cachedRepositoryAt(repository.path), id)).state;
   assert.equal(state?.delivery, null);
   assert.equal(state?.terminal, null);
 });

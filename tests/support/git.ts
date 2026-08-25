@@ -1,12 +1,28 @@
 import { execFileSync } from "node:child_process";
 import { appendFileSync, chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { readManagedWorktreeAppointment } from "../../src/workspace-place.js";
 import type { ContractId } from "../../src/core/facts/types.js";
 import { observeContractAt } from "../../src/git/observe.js";
 import { withGitDecodeChannel } from "../../src/git/read-observation.js";
 import type { GitRepository } from "../../src/git/process.js";
+import { repositoryAt as productionRepositoryAt } from "../../src/git/repository.js";
+
+const repositoryCapabilities = new Map<string, Promise<GitRepository>>();
+
+export function cachedRepositoryAt(cwd: string, gitPath = "git"): Promise<GitRepository> {
+  const key = `${resolve(cwd)}\0${gitPath}`;
+  const existing = repositoryCapabilities.get(key);
+  if (existing !== undefined) return existing;
+
+  const capability = productionRepositoryAt(cwd, gitPath);
+  repositoryCapabilities.set(key, capability);
+  void capability.catch(() => {
+    if (repositoryCapabilities.get(key) === capability) repositoryCapabilities.delete(key);
+  });
+  return capability;
+}
 
 export interface TestGitRepository {
   readonly path: string;
