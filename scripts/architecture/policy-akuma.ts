@@ -442,7 +442,7 @@ export const akumaZones = [
     source: "akuma/nuke.ts",
     allow: [
       any("akuma/body.ts", ["CONTROL_RESPONSE_MS"]),
-      any("akuma/heart/index.ts", ["HeldAkumaLeash", "readHeart", "readKill", "requestStop"]),
+      any("akuma/heart/index.ts", ["HeldAkumaLeash", "classifyHeartSchema", "readHeart", "readKill", "requestStop"]),
       any("akuma/identity.ts", ["akuIdFromDirectoryName", "akumaPaths", "akumaRunRoot", "AkuId", "AkumaPaths"]),
       any("alias/index.ts", ["nukeAliases"]),
       types("world.ts", ["WorldRoot"]),

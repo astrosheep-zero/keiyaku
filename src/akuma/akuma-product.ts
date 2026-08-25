@@ -1,9 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { readdir, realpath, stat } from "node:fs/promises";
 import { resolve } from "node:path";
-import type { SquareRoute } from "@astrosheep/square";
 import { AkumaHandle } from "./akuma-handle.js";
-import type { AkumaCallContext, AkumaCallInput, AkumaConfiguration, AkumaList, AkumaListInput } from "./akuma.js";
+import type {
+  AkumaCallContext,
+  AkumaCallInput,
+  AkumaConfiguration,
+  AkumaList,
+  AkumaListInput,
+  ResultRoute,
+} from "./akuma.js";
 import { CALL_WITH_CONTEXT } from "./akuma-product-symbols.js";
 import { fleetListRow, readAkumaBirthCwd } from "./akuma-observe.js";
 import { akuIdFromDirectoryName, akumaPaths, akumaRunRoot, archetypeName, parseAkuId } from "./identity.js";
@@ -15,7 +21,7 @@ import { decodeAllowedActions, unionAllowedActions } from "./allowed.js";
 import { settings as readSettings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
 
-type AkumaCallLaunchInput = AkumaCallInput & Readonly<{ resultRoute?: SquareRoute }>;
+type AkumaCallLaunchInput = AkumaCallInput & Readonly<{ resultRoute?: ResultRoute }>;
 
 function callReadonly(value: unknown): Readonly<{ readonly?: true }> {
   if (value === undefined) return {};

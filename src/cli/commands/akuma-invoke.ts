@@ -1,5 +1,5 @@
-import type { SquareRoute } from "@astrosheep/square";
 import { type AkuId, type ActivityHistory } from "../../akuma/index.js";
+import type { ResultRoute } from "../../akuma/akuma.js";
 import {
   Keiyaku,
   type AkumaKillResult,
@@ -65,7 +65,7 @@ type InvokeInput = Readonly<{
   settings?: Settings;
   contract?: KeiyakuContract;
   repo?: Repo;
-  resultRoute?: SquareRoute;
+  resultRoute?: ResultRoute;
   readStdin(): Promise<string>;
 }>;
 

@@ -1,6 +1,5 @@
 import { appendFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import type { SquareRoute } from "@astrosheep/square";
 import { abortableDelay } from "./abort.js";
 import { BodySupervisor } from "./body-supervisor.js";
 import { driveTurn, turnRecipe, type DrivenTurn } from "./turn-drive.js";
@@ -19,6 +18,7 @@ import {
 } from "./heart/index.js";
 import type { AkumaPaths } from "./identity.js";
 import type { ProviderAdapter } from "./provider.js";
+import type { ResultRoute } from "./akuma.js";
 import { resolveProviderExecution } from "./providers/index.js";
 import {
   clearBodyRequestTransport,
@@ -44,7 +44,7 @@ export type BodyLaunch = Readonly<{
   birthSession?: Omit<SessionFact, "sequence">;
   initialBody?: string;
   refuseIfHeld?: boolean;
-  resultRoute?: SquareRoute;
+  resultRoute?: ResultRoute;
 }>;
 
 export type TellWake =
@@ -75,7 +75,7 @@ type BodyRuntime = Readonly<{
   now(): string;
   spawnChild?(launch: RequestChildLaunch): Promise<void>;
   spawnBody?(launch: BodyLaunch): Promise<OwnedProcess>;
-  express?(route: SquareRoute, options: Readonly<{ as: string; body: string }>): Promise<unknown>;
+  express?(route: ResultRoute, options: Readonly<{ as: string; body: string }>): Promise<unknown>;
   upstream?: UpstreamExecutionPort;
 }>;
 
@@ -133,24 +133,28 @@ async function persistTurn(
   turnSequence: number,
   result: DrivenTurn,
   completedAt: string,
-): Promise<"answered" | "failed"> {
-  await endTurn(paths, {
-    turnSequence,
-    outcome:
-      result.kind === "answered" && result.session !== undefined
-        ? {
-            kind: "answered",
-            session: result.session,
-            answer: result.answer,
-            ...(result.historyId === undefined ? {} : { historyId: result.historyId }),
-          }
-        : result.kind === "answered"
-          ? { kind: "failed", diagnostic: "Provider answered without a resumable session" }
-          : { kind: "failed", diagnostic: result.diagnostic },
-    completedAt,
-  });
-  return result.kind === "answered" && result.session === undefined ? "failed" : result.kind;
+): Promise<CommittedOutcome> {
+  if (result.kind === "answered" && result.session !== undefined) {
+    await endTurn(paths, {
+      turnSequence,
+      outcome: {
+        kind: "answered",
+        session: result.session,
+        answer: result.answer,
+        ...(result.historyId === undefined ? {} : { historyId: result.historyId }),
+      },
+      completedAt,
+    });
+    return { outcome: "answered", answer: result.answer };
+  }
+  const diagnostic = result.kind === "answered" ? "Provider answered without a resumable session" : result.diagnostic;
+  await endTurn(paths, { turnSequence, outcome: { kind: "failed", diagnostic }, completedAt });
+  return { outcome: "failed", diagnostic };
 }
+
+type CommittedOutcome =
+  | Readonly<{ outcome: "answered"; answer: string }>
+  | Readonly<{ outcome: "failed"; diagnostic: string }>;
 
 function boundedDiagnostic(error: unknown): string {
   const text = diagnostic(error);
@@ -160,7 +164,7 @@ function boundedDiagnostic(error: unknown): string {
 async function expressInitialOutcome(
   launch: BodyLaunch,
   soul: Soul,
-  outcome: "answered" | "failed",
+  outcome: CommittedOutcome,
   runtime: BodyRuntime,
 ): Promise<void> {
   if (launch.resultRoute === undefined) return;
@@ -168,7 +172,7 @@ async function expressInitialOutcome(
     const express = runtime.express ?? (await import("@astrosheep/square")).express;
     await express(launch.resultRoute, {
       as: "keiyaku",
-      body: JSON.stringify({ akuma: soul.id, outcome }),
+      body: JSON.stringify({ akuma: soul.id, ...outcome }),
     });
   } catch (error) {
     try {
@@ -289,7 +293,7 @@ async function runBodyTurns(input: BodyExecution): Promise<void> {
     }
     const outcome = await persistTurn(launch.paths, result.turnSequence, result, runtime.now());
     if (initial !== undefined) await expressInitialOutcome(launch, soul, outcome, runtime);
-    if (outcome === "failed") {
+    if (outcome.outcome === "failed") {
       await breakBody(launch.paths, { sequence: bodySequence, end: "broke-off", at: runtime.now() });
       return;
     }

@@ -247,11 +247,14 @@ Call waits five minutes by default. `--wait` replaces that duration, while
 Before Akuma birth, the edge captures an optional Square `resultRoute` from
 the invocation cwd and environment, not the Akuma execution cwd. A missing or
 ambiguous capture yields no route and does not refuse the call. The captured
-route is opaque and Square-owned. Detach discloses `resultRoute: "captured" |
+route is opaque to Keiyaku's public facade and owned by its integration edge.
+Detach discloses `resultRoute: "captured" |
 "not-captured"`. Body commits the initial call Turn outcome before
 route-aware Square `express`; express failure never changes Heart truth.
-Answered
-terminal observations write exact answer bytes. Successful detach
+Answered terminal observations write exact answer bytes, and a captured result
+route receives those bytes in the `answer` field of its JSON result body;
+failed terminal observations carry their `diagnostic` field instead.
+Successful detach
 prints the canonical-world wait command using the successful Alias or complete
 AkuId; failure adds no command and fabricates no life.
 

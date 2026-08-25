@@ -104,6 +104,8 @@ export type AkumaCallInput = Readonly<{
   readonly?: true;
   allowed?: readonly AllowedAction[];
 }>;
+/** Opaque, serializable caller result address carried across the Body process. */
+export type ResultRoute = Readonly<unknown>;
 export type AkumaCallContext = Readonly<{ initiatorCwd?: string; cwdCanonical?: true }>;
 
 export type { TellResult, TellWake } from "./body.js";

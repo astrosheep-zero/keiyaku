@@ -3,7 +3,7 @@ import { pathsForAkuId, type AkuId } from "./identity.js";
 import type { WorldRoot } from "../world.js";
 
 export { Akuma, AkumaHandle, AkumaNotBornError, defaultWaitComplete } from "./akuma.js";
-export type { AkumaCallInput } from "./akuma.js";
+export type { AkumaCallInput, ResultRoute } from "./akuma.js";
 export { ALLOWED_ACTIONS } from "./allowed.js";
 export type { AllowedAction, AllowedActions } from "./allowed.js";
 export type { WorldRoot } from "../world.js";

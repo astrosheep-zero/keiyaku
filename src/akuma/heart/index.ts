@@ -53,7 +53,15 @@ import {
 } from "./timeline.js";
 import { isHeartAbsent, readSealFromLeash, readTransaction, transaction, withHeart } from "./storage.js";
 import { soulFact } from "./soul.js";
-export { HeartAbsentError, HeldAkumaLeash, initializeHeart, isHeartAbsent, probeLeash, watchHeart } from "./storage.js";
+export {
+  HeartAbsentError,
+  HeldAkumaLeash,
+  classifyHeartSchema,
+  initializeHeart,
+  isHeartAbsent,
+  probeLeash,
+  watchHeart,
+} from "./storage.js";
 export {
   admitRequest,
   readNonterminalRequests,

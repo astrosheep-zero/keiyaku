@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { Keiyaku, KeiyakuRefused, World } from "../src/index.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
@@ -188,6 +189,59 @@ test("confirmed nuke removes known stopped-entry artifacts and empty run roots",
     assert.deepEqual(await Keiyaku.nuke({ world, confirm: world }), { kind: "success", world });
   } finally {
     rmSync(world, { recursive: true, force: true });
+  }
+});
+
+test("confirmed nuke cleans a legacy Heart schema and continues independent owners", async () => {
+  const fixture = await gitNukeFixture();
+  try {
+    const { raw, world, managedPath, foreign } = fixture;
+    const tasks = Tasks.of(world);
+    assert.equal((await tasks.add({ title: "Remove me" })).kind, "accepted");
+    const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "14000000" });
+    const heart = new DatabaseSync(allocated.paths.heart);
+    heart.exec("CREATE TABLE akuma_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO akuma_schema VALUES (1, 14)");
+    heart.close();
+    const leash = new DatabaseSync(allocated.paths.leash);
+    leash.exec("CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)");
+    leash.close();
+    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 20/u);
+    await assert.rejects(HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
+    writeFileSync(allocated.paths.log, "stdio\n");
+    writeFileSync(`${allocated.paths.heart}-wal`, "wal\n");
+    mkdirSync(join(allocated.paths.requests, "1"), { recursive: true });
+    writeFileSync(join(allocated.paths.requests, "1", "41111111-1111-4111-8111-111111111111.request.json"), "{}\n");
+    const recognizedUnknown = join(allocated.paths.directory, "unknown.bin");
+    writeFileSync(recognizedUnknown, "preserve recognized unknown\n");
+    const settings = join(world, ".keiyaku", "settings.json");
+    const namespace = join(world, ".keiyaku", "namespace", "current");
+    const unknown = join(world, ".keiyaku", "unknown.bin");
+    mkdirSync(join(world, ".keiyaku", "namespace"), { recursive: true });
+    writeFileSync(namespace, "retained\n");
+    writeFileSync(settings, "{\"project\":true}\n");
+    writeFileSync(unknown, "unknown\n");
+    const foreignByte = join(foreign, "foreign.txt");
+    writeFileSync(foreignByte, "retain\n");
+
+    assert.deepEqual(await Keiyaku.nuke({ world, confirm: world }), { kind: "success", world });
+    assert.equal(existsSync(allocated.paths.heart), false);
+    assert.equal(existsSync(allocated.paths.leash), false);
+    assert.equal(existsSync(allocated.paths.log), false);
+    assert.equal(existsSync(`${allocated.paths.heart}-wal`), false);
+    assert.equal(existsSync(join(allocated.paths.requests, "1", "41111111-1111-4111-8111-111111111111.request.json")), false);
+    assert.equal(readFileSync(recognizedUnknown, "utf8"), "preserve recognized unknown\n");
+    assert.equal(existsSync(join(world, ".keiyaku", "tasks", "remove-me.md")), false);
+    assert.equal(existsSync(managedPath), false);
+    assert.throws(() => raw.run(["show-ref", "--verify", "--quiet", "refs/heads/keiyaku-state"]));
+    assert.equal(raw.run(["show-ref", "--verify", "--quiet", "refs/heads/business-branch"]), "");
+    assert.equal(readFileSync(settings, "utf8"), "{\"project\":true}\n");
+    assert.equal(readFileSync(namespace, "utf8"), "retained\n");
+    assert.equal(readFileSync(unknown, "utf8"), "unknown\n");
+    assert.equal(readFileSync(foreignByte, "utf8"), "retain\n");
+    assert.deepEqual(await Keiyaku.nuke({ world, confirm: world }), { kind: "success", world });
+  } finally {
+    rmSync(fixture.raw.path, { recursive: true, force: true });
+    rmSync(fixture.foreign, { recursive: true, force: true });
   }
 });
 

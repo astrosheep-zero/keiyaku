@@ -28,6 +28,11 @@ jobs:
           node-version: 24.x
           cache: npm
 
+      - name: Set up Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.14.1
+
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --prefer-offline
 
@@ -66,13 +71,13 @@ jobs:
           node-version: 24.x
           cache: npm
 
+      - name: Set up Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.14.1
+
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --prefer-offline
-
-      - name: Configure x64 MSVC toolchain
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
 
       - name: Build
         run: npm run build
@@ -120,13 +125,13 @@ jobs:
           node-version: 24.x
           cache: npm
 
+      - name: Set up Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.14.1
+
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --prefer-offline
-
-      - name: Configure x64 MSVC toolchain
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
 
       - name: Run packaged CLI end-to-end test
         run: npm run test:e2e
@@ -148,6 +153,11 @@ jobs:
         with:
           node-version: 24.x
           cache: npm
+
+      - name: Set up Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.14.1
 
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --prefer-offline

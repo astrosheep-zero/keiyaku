@@ -1,5 +1,4 @@
 import { realpath, stat } from "node:fs/promises";
-import type { SquareRoute } from "@astrosheep/square";
 import { moveAlias, type AliasBinding } from "../alias/index.js";
 import {
   Akuma,
@@ -8,6 +7,7 @@ import {
   type AkumaStatus,
   type ForkReceipt,
   type ReadonlyRestraint,
+  type ResultRoute,
 } from "../akuma/akuma.js";
 import type { AkuId } from "../akuma/identity.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
@@ -54,7 +54,7 @@ export type CallInput = Readonly<{
   contract?: Keiyaku;
   alias?: AkumaAlias;
   allowed?: readonly AllowedAction[];
-  resultRoute?: SquareRoute;
+  resultRoute?: ResultRoute;
 }>;
 
 export type CallObservation =
@@ -164,7 +164,7 @@ async function observeCall(
   handle: Awaited<ReturnType<Akuma["call"]>>,
   mode: "wait" | "detach",
   timeoutMs: number,
-  resultRoute: SquareRoute | undefined,
+  resultRoute: ResultRoute | undefined,
 ): Promise<CallObservation> {
   if (mode === "detach") {
     return { kind: "detached", resultRoute: resultRoute === undefined ? "not-captured" : "captured" };
@@ -306,7 +306,7 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
   const alias: AkumaAlias | undefined =
     values.alias === undefined ? undefined : parseAkumaAlias(nonblank(values.alias, "alias"));
   const seat = values.contract === undefined ? undefined : seatForKeiyaku(values.contract);
-  const resultRoute = values.resultRoute as SquareRoute | undefined;
+  const resultRoute = values.resultRoute as ResultRoute | undefined;
   const execution = await resolveCallExecution({
     path,
     ...(cwd === undefined ? {} : { cwd }),

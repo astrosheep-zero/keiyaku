@@ -19,6 +19,17 @@ export function assertLeashSchemaVersion(database: DatabaseSync): void {
   assertSchemaVersion(database, "leash_schema", LEASH_SCHEMA_VERSION);
 }
 
+export function heartSchemaIsCurrent(database: DatabaseSync): boolean {
+  try {
+    const row = database.prepare(`SELECT version FROM akuma_schema WHERE singleton = 1`).get() as
+      | { version: number }
+      | undefined;
+    return row?.version === HEART_SCHEMA_VERSION;
+  } catch {
+    return false;
+  }
+}
+
 export const HEART_SCHEMA = `
   CREATE TABLE IF NOT EXISTS akuma_schema (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),

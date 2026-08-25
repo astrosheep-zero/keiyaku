@@ -5,7 +5,13 @@ import { basename, dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { AkumaPaths } from "../identity.js";
 import type { BodyFact, LeashProbe, SessionFact, Soul, StopFact, TellFact } from "./facts.js";
-import { HEART_SCHEMA, LEASH_SCHEMA, assertHeartSchemaVersion, assertLeashSchemaVersion } from "./schema.js";
+import {
+  HEART_SCHEMA,
+  LEASH_SCHEMA,
+  assertHeartSchemaVersion,
+  assertLeashSchemaVersion,
+  heartSchemaIsCurrent,
+} from "./schema.js";
 import {
   deletePauseControl,
   deleteStopControl,
@@ -130,6 +136,21 @@ async function openHeart(path: string, verify = true): Promise<DatabaseSync> {
   } catch (error) {
     database.close();
     throw error;
+  }
+}
+
+export async function classifyHeartSchema(paths: AkumaPaths): Promise<"current" | "unsupported"> {
+  let database: DatabaseSync;
+  try {
+    database = await openExistingDatabase(paths.heart);
+  } catch (error) {
+    if (isHeartAbsent(error)) return "unsupported";
+    throw error;
+  }
+  try {
+    return heartSchemaIsCurrent(database) ? "current" : "unsupported";
+  } finally {
+    database.close();
   }
 }
 

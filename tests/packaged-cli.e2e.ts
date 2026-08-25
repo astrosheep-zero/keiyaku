@@ -53,10 +53,8 @@ test("published package installs one keiyaku CLI and runs against a real reposit
   const archives = readdirSync(packed).filter((name) => name.endsWith(".tgz"));
   assert.equal(archives.length, 1, `expected one package archive, got ${archives.join(", ")}`);
   const packageArchive = join(packed, archives[0]!);
-  if (process.platform === "win32") {
-    const listing = command("tar", ["-tzf", packageArchive], root);
-    assert.ok(listing.split(/\r?\n/u).includes("package/build/src/runtime/proc/windows-launch.exe"));
-  }
+	const listing = command("tar", ["-tzf", packageArchive], root);
+	assert.ok(listing.split(/\r?\n/u).includes("package/build/src/runtime/proc/windows-launch.exe"));
   const claudePackage = join(root, "node_modules", "@anthropic-ai", "claude-agent-sdk");
   npmCommand(["pack", "--ignore-scripts", "--pack-destination", packed, "--cache", cache], claudePackage);
   const claudeArchives = readdirSync(packed).filter((name) => name.startsWith("anthropic-ai-claude-agent-sdk-") && name.endsWith(".tgz"));

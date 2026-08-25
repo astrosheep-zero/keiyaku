@@ -104,11 +104,12 @@ user Settings, namespace configuration, global Archetypes, and unknown
 worktree and appointment are Keiyaku-owned custody; this does not authorize
 repository cleanup or deletion of arbitrary worktrees. A marker or directory
 is removed only after owner cleanup leaves it empty. Recognized Akuma entries
-are Keiyaku-owned custody: nuke removes their known management artifacts and
-known request-channel protocol files, preserves unknown child bytes including
-unknown descendants inside a request channel, and preserves coordination lock
-files outside the entry. A recognized entry and the Akuma run root are removed
-only when no non-Keiyaku bytes remain.
+are Keiyaku-owned custody even when their Heart schema is not current: nuke
+removes their known management artifacts and known request-channel protocol
+files, preserves unknown child bytes including unknown descendants inside a
+request channel, and preserves coordination lock files outside the entry. A
+recognized entry and the Akuma run root are removed only when no non-Keiyaku
+bytes remain.
 
 The reset law maps to one owner per concern:
 

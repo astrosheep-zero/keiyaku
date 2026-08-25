@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { nukeAliases } from "../alias/index.js";
 import type { WorldRoot } from "../world.js";
 import { CONTROL_RESPONSE_MS } from "./body.js";
-import { HeldAkumaLeash, readHeart, readKill, requestStop } from "./heart/index.js";
+import { HeldAkumaLeash, classifyHeartSchema, readHeart, readKill, requestStop } from "./heart/index.js";
 import { akuIdFromDirectoryName, akumaPaths, akumaRunRoot, type AkuId, type AkumaPaths } from "./identity.js";
 
 const POLL_MS = 100;
@@ -188,8 +188,10 @@ async function nukeAkumaEntries(world: WorldRoot): Promise<readonly NukeAkumaEnt
 export async function stopAkuma(world: WorldRoot): Promise<() => Promise<void>> {
   const entries = await nukeAkumaEntries(world);
   const held: HeldAkumaLeash[] = [];
+  let prepared = false;
   try {
     for (const entry of entries) {
+      if ((await classifyHeartSchema(entry.paths)) === "unsupported") continue;
       const snapshot = await readHeart(entry.paths);
       const leash =
         snapshot.soul !== null && snapshot.latestBody?.end === undefined
@@ -208,6 +210,7 @@ export async function stopAkuma(world: WorldRoot): Promise<() => Promise<void>> 
         throw error;
       }
     }
+    prepared = true;
     return async () => {
       try {
         await nukeAliases(world);
@@ -218,7 +221,7 @@ export async function stopAkuma(world: WorldRoot): Promise<() => Promise<void>> 
       }
     };
   } finally {
-    if (held.length !== entries.length) {
+    if (!prepared) {
       for (const leash of held.reverse()) leash.release();
     }
   }

@@ -39,7 +39,7 @@ type CallInput = Readonly<{
   contract?: Keiyaku
   alias?: AkumaAlias
   allowed?: readonly AllowedAction[]
-  resultRoute?: SquareRoute
+  resultRoute?: ResultRoute
 }>
 
 type ForkInput = Readonly<{
@@ -53,10 +53,13 @@ Keiyaku.call(input: CallInput): Promise<CallResult>
 Keiyaku.fork(input: ForkInput): Promise<ForkResult>
 ```
 
-`resultRoute` is the optional, flat Square-owned opaque `SquareRoute`. Library
-callers that provide it pass the value through unchanged. Library does not
+`resultRoute` is the optional, flat Keiyaku-owned opaque `ResultRoute`. It is a
+serializable caller address carried unchanged across the Body process. Library
+callers that provide it pass the value through unchanged; Library does not
 capture a route, inspect route fields, derive `sessionId`, `provider`, or
-`cwd`, or create a callback registry. Capture belongs to the caller edge.
+`cwd`, or create a callback registry. The CLI integration captures the current
+Square route at the caller edge; Keiyaku's public facade does not import or
+expose Square's route type.
 The initial call Turn outcome is committed before Body invokes Square's
 route-aware `express`. Notification loss never changes Heart truth.
 `path` is an already resolved WorldRoot; Library never climbs or normalizes it.

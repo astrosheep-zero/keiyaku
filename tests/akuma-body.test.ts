@@ -1647,7 +1647,7 @@ test("Body expresses the committed initial call outcome once and never later tel
     });
     assert.deepEqual(expressions, [{
       as: "keiyaku",
-      body: JSON.stringify({ akuma: allocated.id, outcome: "answered" }),
+      body: JSON.stringify({ akuma: allocated.id, outcome: "answered", answer: "done" }),
       outcome: {
         kind: "answered",
         answer: "done",
@@ -1709,7 +1709,7 @@ test("Body expresses the committed initial call outcome once and never later tel
     });
     assert.deepEqual(failedExpressions, [{
       as: "keiyaku",
-      body: JSON.stringify({ akuma: failed.id, outcome: "failed" }),
+      body: JSON.stringify({ akuma: failed.id, outcome: "failed", diagnostic: "provider failed" }),
       outcome: { kind: "failed", diagnostic: "provider failed" },
     }]);
     assert.equal((await readHeart(failed.paths)).latestBody?.end, "broke-off");

@@ -159,7 +159,10 @@ permanent same-identity successor gate.
 Successful completion remains
 separate from the optional exact provider fork point; session and complete
 answer remain required for an answered Turn. Older hearts
-fail the schema gate; no migration or compatibility decoder exists. Absence is
+fail the schema gate; no migration or compatibility decoder exists. Confirmed
+World reset classifies that version without reading Heart facts. An unsupported
+recognized Heart remains Keiyaku-owned custody for the reset owned by
+[akuma.md](akuma.md) and [world.md](world.md). Absence is
 stored as SQL `NULL` and omitted from public values.
 
 Heart custody owns its fact vocabulary, schema gates, row codecs, connections,

@@ -50,6 +50,10 @@ known request-channel protocol files owned by
 unknown descendants inside the request channel. Empty recognized entries and
 the run root, including its `.gitignore` marker, are removed only when no
 non-Keiyaku bytes remain.
+A recognized entry whose Heart schema is not current is not opened through the
+current Heart reader and is not stop-interpreted. Reset still removes that
+coordinate's known management artifacts. This is not schema migration,
+compatibility reading, or a live runtime change.
 Stop timeout, unverified end, held-custody failure, nonregular or symlink
 protection failure, or filesystem failure returns the existing owner failure
 and leaves remaining custody for retry.
