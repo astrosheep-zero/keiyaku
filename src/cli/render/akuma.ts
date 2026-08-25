@@ -171,6 +171,10 @@ function tellExitCode(result: Extract<AkumaInvocationResult, { action: "tell" }>
 function forkExitCode(result: Extract<AkumaInvocationResult, { action: "fork" }>): number {
   return result.receipt.kind === "forked" ? 0 : result.receipt.kind === "upstream-forked" ? 2 : 1;
 }
+function historyExitCode(result: Extract<AkumaInvocationResult, { action: "history" }>): number {
+  if (result.mode !== "exact") return 0;
+  return result.historyResult.kind === "exact" ? 0 : 1;
+}
 
 export function akumaExitCode(result: AkumaInvocationResult): number {
   switch (result.action) {
@@ -182,6 +186,8 @@ export function akumaExitCode(result: AkumaInvocationResult): number {
       return tellExitCode(result);
     case "fork":
       return forkExitCode(result);
+    case "history":
+      return historyExitCode(result);
     default:
       return 0;
   }

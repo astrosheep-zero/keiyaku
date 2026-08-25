@@ -9,6 +9,13 @@ export type AkuId = string & { readonly [AKU_ID]: true };
 
 const HEX8 = /^[0-9a-f]{8}$/u;
 
+export function parsePublicHistoryId(value: string): number | null {
+  const match = /^turn\/([1-9][0-9]*)$/u.exec(value);
+  if (match === null) return null;
+  const sequence = Number(match[1]);
+  return Number.isSafeInteger(sequence) ? sequence : null;
+}
+
 export type AkumaPaths = Readonly<{
   directory: string;
   heart: string;

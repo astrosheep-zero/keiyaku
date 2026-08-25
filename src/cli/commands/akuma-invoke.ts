@@ -56,6 +56,14 @@ export type AkumaInvocationResult =
       historyResult: AkumaHistoryResult;
       alias?: string;
     }>
+  | Readonly<{
+      kind: "akuma";
+      action: "history";
+      akuma: AkuId;
+      mode: "exact";
+      historyResult: AkumaHistoryResult;
+      alias?: string;
+    }>
   | Readonly<{ kind: "akuma"; action: "fork"; receipt: ForkResult }>
   | Readonly<{ kind: "akuma"; action: "kill"; result: AkumaKillResult; alias?: string }>;
 
@@ -141,6 +149,7 @@ async function invokeHistory(
     ...(command.before === undefined ? {} : { before: command.before }),
     ...(command.since === undefined ? {} : { since: command.since }),
     ...(command.limit === undefined ? {} : { limit: command.limit }),
+    ...(command.id === undefined ? {} : { id: command.id }),
     last: command.last,
   });
   return {
@@ -149,11 +158,13 @@ async function invokeHistory(
     akuma: result.id,
     historyResult: result,
     ...(inputAlias(command.akuma) === undefined ? {} : { alias: command.akuma }),
-    ...(result.kind === "history"
-      ? { mode: "page" as const, history: result.history }
-      : result.kind === "last"
-        ? { mode: "last" as const, answer: result.answer }
-        : { mode: "no-answer" as const }),
+    ...(command.id !== undefined
+      ? { mode: "exact" as const }
+      : result.kind === "history"
+        ? { mode: "page" as const, history: result.history }
+        : result.kind === "last"
+          ? { mode: "last" as const, answer: result.answer }
+          : { mode: "no-answer" as const }),
   };
 }
 

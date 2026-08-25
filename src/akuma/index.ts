@@ -22,6 +22,7 @@ export type {
   AkumaListRow,
   AkumaStatus,
   ActivityHistory,
+  ExactHistory,
   ActivityRow,
   ActivitySnapshot,
   ActivitySnapshotEntry,

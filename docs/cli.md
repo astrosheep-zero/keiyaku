@@ -300,7 +300,11 @@ no answered turn, text writes `no answer retained` and JSON exposes the typed
 `{ "kind": "no-answer", "id": "...", "contract": ... }` arm. An answered empty string remains
 an answer and writes zero bytes in text mode. Both last-answer arms exit zero
 because each is a successful read result.
-`fork` requires one nonblank `--at` history id and has no stdin body.
+`history <aku/...|@alias> --id <historyId>` reads one exact retained answered
+or failed outcome and writes its complete answer or diagnostic. `--id` is
+mutually exclusive with `--last`, `--before`, `--since`, and `--limit`; blank
+or unknown IDs are typed results with nonzero exit. `fork` requires one
+nonblank `--at` history id and has no stdin body; failed IDs are non-forkable.
 Fork passes the selected Contract Repo, otherwise the invocation Repo when
 available. The facade alone reads and propagates parent Dispatch; CLI never
 reads Dispatch or Alias files.

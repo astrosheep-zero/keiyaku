@@ -4,7 +4,7 @@ export const cliZones = [
     source: "cli/commands/akuma.ts",
     allow: [
       any("akuma/allowed.ts"),
-      any("akuma/identity.ts", ["parseAkuId", "AkuId"]),
+      any("akuma/identity.ts", ["parseAkuId", "AkuId", "parsePublicHistoryId"]),
       any("cli/usage.ts"),
       any("duration.ts"),
       any("identity/selector.ts"),

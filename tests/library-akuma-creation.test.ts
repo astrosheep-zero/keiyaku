@@ -573,8 +573,11 @@ test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async ()
   const mutable = claudeProvider as MutableProvider;
   const originalFork = mutable.fork;
   try {
-    mutable.fork = async () => ({ session: { sessionId: "child-session" } });
-    const result = await Keiyaku.fork({ path: world, akuma: source.id, at: "history-1", repo });
+    mutable.fork = async (input) => {
+      assert.equal(input.at, "history-1");
+      return { session: { sessionId: "child-session" } };
+    };
+    const result = await Keiyaku.fork({ path: world, akuma: source.id, at: "turn/1", repo });
     assert.equal(result.kind, "forked", JSON.stringify(result));
     if (result.kind !== "forked") return;
     assert.equal(result.dispatch.kind, "dispatched");
@@ -594,7 +597,7 @@ test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async ()
       at: "2026-08-11T01:00:01.000Z",
     });
     assert.equal((await updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind, "published");
-    const partial = await Keiyaku.fork({ path: world, akuma: source.id, at: "history-1", repo });
+    const partial = await Keiyaku.fork({ path: world, akuma: source.id, at: "turn/1", repo });
     assert.equal(partial.kind, "forked", JSON.stringify(partial));
     if (partial.kind !== "forked") return;
     assert.equal(partial.dispatch.kind, "failed");

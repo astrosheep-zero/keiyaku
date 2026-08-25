@@ -903,7 +903,7 @@ test("normal body completion refuses while a tell remains pending", async () => 
       },
       { kind: "failed", diagnostic: "later failure" },
     ]);
-    assert.deepEqual(await readForkPoint(value.allocated.paths, "turn-1"), {
+    assert.deepEqual(await readForkPoint(value.allocated.paths, `turn/${firstTurn.sequence}`), {
       historyId: "turn-1",
       session: { sessionId: "native-session" },
       provider: "claude",

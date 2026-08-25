@@ -227,8 +227,9 @@ snapshot pinning or category budgets.
 
 The shared timeline is the sole retained Turn projection. Its `turn-start` and
 `turn-end` rows provide answer, failure, and boundary order. The fork-point
-reader is the only targeted `turns` read: it exact-matches one answered Turn
-carrying `historyId` and returns that fact's
+reader is the only targeted `turns` read: it strictly parses one public
+`turn/<turnSequence>` id, exact-matches that answered Turn, and returns its
+private provider `historyId` with that fact's
 inseparable session and native point. It also resolves that session
 coordinate's admitted provider, cwd, and options recipe for the native call and
 child birth; a retained answered turn without that recipe is authority

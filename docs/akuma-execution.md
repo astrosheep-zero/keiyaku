@@ -320,11 +320,12 @@ forwarding request never becomes a second verb implementation or lifecycle judge
 
 ## Fork
 
-`fork({ at: historyId })` requires one exact retained answered-turn match.
-The selected fact supplies its inseparable `{ session, historyId }` pair; fork
+`fork({ at: historyId })` strictly parses the public `turn/<turnSequence>` id
+and requires one exact retained answered-turn match. The selected fact supplies
+its inseparable private `{ session, historyId }` pair; fork
 never substitutes the latest session, chooses a nearby turn, or resumes the
-parent session. A failed turn has no history id and therefore cannot be
-distinguished from any other absent coordinate at this boundary.
+parent session. Failed, malformed, or answered-without-native-coordinate ids
+are all the same typed `unknown-history` result at this boundary.
 
 The public result is a closed sum:
 

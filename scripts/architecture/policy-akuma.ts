@@ -77,6 +77,7 @@ export const akumaZones = [
     source: "akuma/heart/index.ts",
     allow: [
       types("akuma/identity.ts"),
+      any("akuma/identity.ts", ["parsePublicHistoryId"]),
       types("akuma/coordinate.ts"),
       any("akuma/heart/facts.ts"),
       any("akuma/heart/request-authority.ts"),

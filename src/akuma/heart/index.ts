@@ -1,4 +1,5 @@
 import type { AkumaPaths } from "../identity.js";
+import { parsePublicHistoryId } from "../identity.js";
 import type {
   BodyEnd,
   BodyFact,
@@ -354,9 +355,11 @@ export async function readLastAnsweredTurn(paths: AkumaPaths): Promise<TurnFact 
 }
 
 export async function readForkPoint(paths: AkumaPaths, historyId: string): Promise<ForkPoint | null> {
+  const turnSequence = parsePublicHistoryId(historyId);
+  if (turnSequence === null) return null;
   try {
     return await withHeart(paths, (heart) => {
-      const turn = answeredTurnFact(heart, historyId);
+      const turn = answeredTurnFact(heart, turnSequence);
       const outcome = turn?.end?.outcome;
       if (outcome?.kind !== "answered" || outcome.historyId === undefined) return null;
       const recipe = sessionFactForCoordinate(heart, outcome.session);

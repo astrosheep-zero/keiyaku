@@ -289,9 +289,10 @@ test("a released Akuma Body completes through Pi and an OpenAI chat completion e
     assert.equal(outcome?.kind, "answered");
     if (outcome?.kind === "answered") {
       assert.equal(outcome.answer, "fixture answer");
-      assert.equal(outcome.session.sessionFile.startsWith(piHome), true);
-      assert.ok(outcome.session.sessionId.length > 0);
-      assert.ok(outcome.historyId?.length > 0);
+      assert.match(outcome.historyId, /^turn\/[1-9][0-9]*$/u);
+      const exact = await handle.history({ id: outcome.historyId });
+      assert.equal(exact.kind, "exact");
+      if (exact.kind === "exact") assert.deepEqual(exact.outcome.outcome, outcome);
     }
   } finally {
     restoreEnvironment("PI_CODING_AGENT_DIR", environment.agentDir);

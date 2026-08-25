@@ -1,7 +1,13 @@
 import { decodeAgentEvent, type ToolCall, type ToolResult } from "./provider.js";
 import type { TellDelivery, TellFact, TimelineFact, TurnEndFact } from "./heart/index.js";
 
-export type TurnOutcome = TurnEndFact["outcome"];
+export type TurnOutcome =
+  | Readonly<{
+      kind: "answered";
+      historyId: string;
+      answer: string;
+    }>
+  | Readonly<{ kind: "failed"; historyId: string; diagnostic: string }>;
 
 export type TurnStartRow = Readonly<{
   kind: "turn";
@@ -55,6 +61,13 @@ export type OutcomeRow = Readonly<{
   at: string;
   outcome: TurnOutcome;
 }>;
+
+function publicOutcome(turnSequence: number, outcome: TurnEndFact["outcome"]): TurnOutcome {
+  const historyId = `turn/${turnSequence}`;
+  return outcome.kind === "answered"
+    ? { kind: "answered", historyId, answer: outcome.answer }
+    : { kind: "failed", historyId, diagnostic: outcome.diagnostic };
+}
 
 export type ActiveToolRow = Readonly<{
   kind: "tool";
@@ -162,7 +175,16 @@ export type ActivityHistory = Readonly<{
   highest: number | null;
 }>;
 
+export type ExactHistory =
+  | Readonly<{ kind: "exact"; outcome: OutcomeRow }>
+  | Readonly<{ kind: "unknown-history"; id: string }>;
+
 export type HistoryPage = ActivityHistory;
+
+export function selectExactHistory(rows: readonly ActivityRow[], id: string): ExactHistory {
+  const outcome = rows.find((row): row is OutcomeRow => row.kind === "outcome" && row.outcome.historyId === id);
+  return outcome === undefined ? { kind: "unknown-history", id } : { kind: "exact", outcome };
+}
 
 export type HistoryCursor = Readonly<{ before?: number; since?: number; limit: number }>;
 
@@ -383,7 +405,7 @@ export function projectTurns(
         sequence: fact.sequence,
         turnSequence: fact.turnSequence,
         at: fact.completedAt,
-        outcome: fact.outcome,
+        outcome: publicOutcome(fact.turnSequence, fact.outcome),
       };
       const turn = state.turnsBySequence.get(fact.turnSequence);
       if (turn === undefined) state.orphanOutcomes.push(outcome);

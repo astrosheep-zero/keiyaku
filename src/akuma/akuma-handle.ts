@@ -15,8 +15,14 @@ import {
   type ResumeCoordinate,
   type SessionFact,
 } from "./heart/index.js";
-import { pathsForAkuId, type AkuId, type AkumaPaths } from "./identity.js";
-import { projectTurns, selectHistory, type ActivityHistory } from "./projection.js";
+import { parsePublicHistoryId, pathsForAkuId, type AkuId, type AkumaPaths } from "./identity.js";
+import {
+  projectTurns,
+  selectHistory,
+  selectExactHistory,
+  type ActivityHistory,
+  type ExactHistory,
+} from "./projection.js";
 import { resolveProviderExecution } from "./providers/index.js";
 import { publishAkuma } from "./publication.js";
 import { spawnAkumaBody } from "./body.js";
@@ -108,11 +114,30 @@ export class AkumaHandle {
     return pathsForAkuId(this.worldPath, this.id);
   }
 
+  private async exactHistory(
+    input: Readonly<{ id?: string; before?: number; since?: number; limit?: number }>,
+  ): Promise<ExactHistory> {
+    if (typeof input.id !== "string" || input.id.trim() === "")
+      throw new TypeError("Akuma history id must be a nonblank string");
+    if (input.before !== undefined || input.since !== undefined || input.limit !== undefined)
+      throw new TypeError("Akuma history id cannot be combined with before, since, or limit");
+    if (parsePublicHistoryId(input.id) === null)
+      throw new TypeError("Akuma history id must match turn/<positive safe integer>");
+    const slice = await activitySlice(this.paths);
+    return selectExactHistory(
+      projectTurns(slice.rows, { lowestRetained: slice.lowestRetained, highest: slice.highest }).rows,
+      input.id,
+    );
+  }
+
   async status(): Promise<AkumaStatus> {
     return (await bornStatus(this.paths, this.id, { aperture: "monitoring" })).status;
   }
 
-  async history(input: Readonly<{ before?: number; since?: number; limit?: number }> = {}): Promise<ActivityHistory> {
+  async history(
+    input: Readonly<{ id?: string; before?: number; since?: number; limit?: number }> = {},
+  ): Promise<ActivityHistory | ExactHistory> {
+    if (input.id !== undefined) return this.exactHistory(input);
     if (input.before !== undefined && input.since !== undefined) {
       throw new TypeError("Akuma history before and since are mutually exclusive");
     }

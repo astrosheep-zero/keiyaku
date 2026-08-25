@@ -3,6 +3,7 @@ import {
   AkumaNotBornError,
   defaultWaitComplete,
   type ActivityHistory,
+  type OutcomeRow,
   type AkumaStatus,
   type InterruptReceipt,
   type KillEvidence,
@@ -24,6 +25,7 @@ import type { WorldRoot } from "../world.js";
 import { addressAkuma, addressAkumaSet, type AkumaAddressInput, type AkumaSetAddressInput } from "./address.js";
 import { requireInput } from "./input.js";
 import { scopeForRepo, type Repo } from "./repo.js";
+import { parsePublicHistoryId } from "../akuma/identity.js";
 
 export type CreatedTaskObservation =
   | Readonly<{ kind: "present"; rows: readonly TaskRow[] }>
@@ -80,6 +82,7 @@ export type AkumaInterruptResult = Readonly<{
 }>;
 export type AkumaHistoryInput = AkumaAddressInput &
   Readonly<{
+    id?: string;
     before?: number;
     since?: number;
     limit?: number;
@@ -87,6 +90,13 @@ export type AkumaHistoryInput = AkumaAddressInput &
   }>;
 export type AkumaHistoryResult =
   | Readonly<{ kind: "history"; id: AkumaStatus["id"]; history: ActivityHistory; contract: DispatchAssociation }>
+  | Readonly<{ kind: "exact"; id: AkumaStatus["id"]; outcome: OutcomeRow; contract: DispatchAssociation }>
+  | Readonly<{
+      kind: "unknown-history";
+      id: AkumaStatus["id"];
+      historyId: string;
+      contract: DispatchAssociation;
+    }>
   | Readonly<{ kind: "last"; id: AkumaStatus["id"]; answer: string; contract: DispatchAssociation }>
   | Readonly<{ kind: "no-answer"; id: AkumaStatus["id"]; contract: DispatchAssociation }>;
 
@@ -474,14 +484,26 @@ export async function interruptAkuma(input: AkumaInterruptInput): Promise<AkumaI
   return { id: addressed.id, receipt, observation };
 }
 
-export async function historyAkuma(input: AkumaHistoryInput): Promise<AkumaHistoryResult> {
-  const values = requireInput(input, "Keiyaku.history input");
+function validateHistoryInput(values: Record<string, unknown>): void {
   for (const key of Object.keys(values)) {
-    if (!["path", "akuma", "before", "since", "limit", "last", "repo"].includes(key)) {
+    if (!["path", "akuma", "id", "before", "since", "limit", "last", "repo"].includes(key))
       throw new TypeError(`Keiyaku.history input has unknown field: ${key}`);
-    }
   }
   if (values.last !== undefined && typeof values.last !== "boolean") throw new TypeError("last must be a boolean");
+  if (values.id !== undefined && (typeof values.id !== "string" || values.id.trim() === ""))
+    throw new TypeError("id must be a nonblank string");
+  if (values.id !== undefined && parsePublicHistoryId(values.id as string) === null)
+    throw new TypeError("id must match turn/<positive safe integer>");
+  if (
+    values.id !== undefined &&
+    (values.last === true || values.before !== undefined || values.since !== undefined || values.limit !== undefined)
+  )
+    throw new TypeError("id cannot be combined with last, before, since, or limit");
+}
+
+export async function historyAkuma(input: AkumaHistoryInput): Promise<AkumaHistoryResult> {
+  const values = requireInput(input, "Keiyaku.history input");
+  validateHistoryInput(values);
   const addressed = await addressAkuma(directAddress(values));
   const handle = source(addressed.path).of({ id: addressed.id });
   const contract = await dispatchAssociation(values.repo as Repo | undefined, addressed.id);
@@ -492,9 +514,15 @@ export async function historyAkuma(input: AkumaHistoryInput): Promise<AkumaHisto
       : { kind: "no-answer", id: addressed.id, contract };
   }
   const history = await handle.history({
+    ...(values.id === undefined ? {} : { id: values.id as string }),
     ...(values.before === undefined ? {} : { before: values.before as number }),
     ...(values.since === undefined ? {} : { since: values.since as number }),
     ...(values.limit === undefined ? {} : { limit: values.limit as number }),
   });
-  return { kind: "history", id: addressed.id, history, contract };
+  if (values.id !== undefined) {
+    if ("kind" in history && history.kind === "exact")
+      return { kind: "exact", id: addressed.id, outcome: history.outcome, contract };
+    return { kind: "unknown-history", id: addressed.id, historyId: values.id as string, contract };
+  }
+  return { kind: "history", id: addressed.id, history: history as ActivityHistory, contract };
 }

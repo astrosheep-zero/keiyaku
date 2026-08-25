@@ -48,10 +48,10 @@ await world.list();                        // compact fleet rows; no history sca
 a.id                                       // aku/<archetype>/<hex8>
 await a.status()                           // current state + bounded activity
 await a.wait(predicate?, { timeoutMs? })   // same status carrier on either outcome
-await a.history({ before?, since?, limit? }) // persistent execution-history page
+await a.history({ id?, before?, since?, limit? }) // exact retained outcome or execution-history page
 await a.tell(body)                         // typed mutation result
 await a.interrupt(body)                    // bounded pause, leash proof, then tell
-await a.fork({ at: historyId })            // exact retained native fork point
+await a.fork({ at: historyId })            // exact retained answered point
 await a.kill()                             // typed settlement evidence
 ```
 
@@ -170,6 +170,14 @@ sequences. `before` and `since` are exclusive and mutually exclusive.
 `before=N` selects semantic rows with sequence less than `N`; `since=N`
 selects rows with sequence greater than `N`. `limit` counts folded semantic
 rows and remains 1..5,000. Status and wait never carry a full history page.
+Every completed answered or failed Turn has one stable, nonblank Heart-owned
+`historyId` in the form `turn/<turnSequence>`, present on history outcome rows
+and status/wait outcomes. Provider-native coordinates remain private.
+`history({ id })` selects exactly one retained outcome with its complete answer
+or diagnostic; blank IDs are invalid
+input, unknown IDs are typed unknown-history results, and `id` cannot be
+combined with cursor or limit options. `fork({ at })` accepts this same ID and
+only answered outcomes are forkable.
 The explicit last-answer read selects the latest retained answered Turn by
 durable order and preserves its complete bytes, including an empty answer.
 

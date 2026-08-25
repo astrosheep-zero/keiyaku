@@ -20,7 +20,7 @@ import { invoke } from "../src/cli/invoke.js";
 import { invokeAkuma } from "../src/cli/commands/akuma-invoke.js";
 import { recognizeAndListen } from "../src/cli/square-edge.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
-import { akumaExitCode, akumaJsonValue, akumaRawAnswer, renderAkumaText } from "../src/cli/render/akuma.js";
+import { akumaExitCode, akumaJsonValue, akumaRawAnswer, renderAkumaJson, renderAkumaText } from "../src/cli/render/akuma.js";
 import type { TextRenderContext } from "../src/cli/render/terminal.js";
 import type { AkuId } from "../src/akuma/identity.js";
 import { makeGitRepository } from "./support/git.js";
@@ -176,6 +176,9 @@ test("Akuma CLI parses root verbs without the removed namespace", () => {
       output: "json",
     },
   });
+  assert.deepEqual(parseArgv(["history", "aku/claude/1234abcd", "--id", "turn/7", "--json"]), {
+    command: { command: "history", akuma: "aku/claude/1234abcd", id: "turn/7", last: false, output: "json" },
+  });
   assert.deepEqual(parseArgv(["history", "kei/example", "--json"]), {
     command: { command: "history", contract: "kei/example", output: "json" },
   });
@@ -196,6 +199,10 @@ test("Akuma CLI parses root verbs without the removed namespace", () => {
     assert.throws(() => parseArgv(["history", "aku/claude/1234abcd", "--limit", limit]), /--limit/u);
   }
   assert.throws(() => parseArgv(["history", "aku/claude/1234abcd", "--last", "--limit", "1"]), /cannot be combined/u);
+  assert.throws(() => parseArgv(["history", "aku/claude/1234abcd", "--id", "turn/1", "--last"]), /cannot be combined/u);
+  for (const id of ["history-1", "turn/0", "turn/9007199254740992"]) {
+    assert.throws(() => parseArgv(["history", "aku/claude/1234abcd", "--id", id]), /turn\/<positive safe integer>/u);
+  }
   assert.deepEqual(parseArgv(["status", "aku/claude/1234abcd"]), {
     command: { command: "status", contract: "aku/claude/1234abcd", akuma: true, output: "text" },
   });
@@ -758,6 +765,62 @@ test("Akuma output preserves a complete associated Contract identity", () => {
   });
 });
 
+test("Akuma history --id reads an exact failed outcome without a failure exit", () => {
+  const command = parseArgv(["history", "aku/worker/00000001", "--id", "turn/7"]).command;
+  const failed = {
+    kind: "akuma" as const,
+    action: "history" as const,
+    akuma: "aku/worker/00000001" as const,
+    mode: "exact" as const,
+    historyResult: {
+      kind: "exact" as const,
+      id: "aku/worker/00000001" as const,
+      outcome: {
+        kind: "outcome" as const,
+        sequence: 7,
+        turnSequence: 7,
+        at: "2026-08-16T00:00:00.000Z",
+        outcome: { kind: "failed" as const, diagnostic: "complete diagnostic", historyId: "turn/7" },
+      },
+      contract: { kind: "none" as const },
+    },
+  };
+  assert.equal(renderAkumaText(command, failed), "complete diagnostic");
+  assert.equal(renderAkumaJson(failed), JSON.stringify(failed.historyResult));
+  assert.equal(akumaExitCode(failed), 0);
+
+  const answered = {
+    ...failed,
+    historyResult: {
+      kind: "exact" as const,
+      id: failed.akuma,
+      outcome: {
+        kind: "outcome" as const,
+        sequence: 7,
+        turnSequence: 7,
+        at: "2026-08-16T00:00:00.000Z",
+        outcome: { kind: "answered" as const, answer: "complete answer", historyId: "turn/7" },
+      },
+      contract: { kind: "none" as const },
+    },
+  };
+  assert.equal(akumaRawAnswer(answered), "complete answer");
+
+  const last = {
+    ...failed,
+    mode: "last" as const,
+    historyResult: {
+      kind: "last" as const,
+      id: failed.akuma,
+      answer: "retained answer",
+      contract: { kind: "none" as const },
+    },
+    answer: "retained answer",
+  };
+  assert.equal(renderAkumaText(parseArgv(["history", failed.akuma, "--last"]).command, last), "retained answer");
+  assert.equal(akumaExitCode(last), 0);
+});
+
 test("Akuma status keeps a complete Contract ID at narrow width", () => {
   const contractId = "kei/provider-core-review" as const;
   const status = akumaObservation(
@@ -905,8 +968,47 @@ test("Akuma status, wait, and history share public observations without embeddin
     if (!("kind" in historyResult) || historyResult.kind !== "akuma" || historyResult.action !== "history") return;
     assert.deepEqual(
       historyResult.history.rows.filter((row) => row.kind === "outcome").map((row) => row.outcome),
-      [{ kind: "answered", answer: "cli answer", historyId: "cli-history", session: { sessionId: "cli-session" } }],
+      [{ kind: "answered", answer: "cli answer", historyId: "turn/1" }],
     );
+    const exact = await invoke(parseArgv(["-C", root, "history", allocated.id, "--id", "turn/1"]), {
+      environment,
+      readStdin: () => { throw new Error("history must not read stdin"); },
+    });
+    if (!("kind" in exact) || exact.kind !== "akuma" || exact.action !== "history") return;
+    assert.equal(exact.mode, "exact");
+    assert.equal(renderAkumaText(parseArgv(["history", allocated.id, "--id", "turn/1"]).command, exact), "cli answer");
+    assert.deepEqual(
+      JSON.parse(renderAkumaJson(exact)),
+      {
+        kind: "exact",
+        id: allocated.id,
+        outcome: {
+          kind: "outcome",
+          sequence: 5,
+          turnSequence: 1,
+          at: "2026-08-08T00:00:00.000Z",
+          outcome: { kind: "answered", answer: "cli answer", historyId: "turn/1" },
+        },
+        contract: { kind: "none" },
+      },
+    );
+    assert.equal(akumaExitCode(exact), 0);
+
+    const unknown = await invoke(parseArgv(["-C", root, "history", allocated.id, "--id", "turn/404"]), {
+      environment,
+      readStdin: () => { throw new Error("history must not read stdin"); },
+    });
+    if (!("kind" in unknown) || unknown.kind !== "akuma" || unknown.action !== "history") return;
+    assert.equal(unknown.mode, "exact");
+    assert.equal(
+      renderAkumaText(parseArgv(["history", allocated.id, "--id", "turn/404"]).command, unknown),
+      "turn/404 has no matching retained outcome",
+    );
+    assert.deepEqual(
+      JSON.parse(renderAkumaJson(unknown)),
+      { kind: "unknown-history", id: allocated.id, historyId: "turn/404", contract: { kind: "none" } },
+    );
+    assert.equal(akumaExitCode(unknown), 1);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1063,7 +1165,18 @@ test("packaged CLI wait and history --last write exact multiline and empty answe
       };
     },
   });
-  const answered = async (draw: string, answer: string) => {
+  const failing = (diagnostic: string): ProviderAdapter => ({
+    ...answering("unused"),
+    async start() {
+      return {
+        admission: { fence: "wait-failure" },
+        events: { async *[Symbol.asyncIterator]() {} },
+        completion: Promise.resolve({ kind: "failed" as const, diagnostic }),
+        async abort() {},
+      };
+    },
+  });
+  const answered = async (draw: string, answer: string, provider = answering(answer)) => {
     const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => draw });
     await initializeHeart(allocated.paths);
     const leash = (await HeldAkumaLeash.try(allocated.paths))!;
@@ -1091,10 +1204,25 @@ test("packaged CLI wait and history --last write exact multiline and empty answe
         },
         initialBody: "work",
       },
-      answering(answer),
+      provider,
       { now: () => "2026-08-16T00:00:00.000Z" },
     );
     return allocated;
+  };
+  const historyId = async (id: string): Promise<string> => {
+    const result = await runPackagedCli(["-C", root, "history", id, "--json"], {
+      cwd: root,
+      env: environment,
+    });
+    assert.equal(result.code, 0);
+    const rows = (
+      JSON.parse(result.stdout) as {
+        history: { rows: readonly { kind: string; outcome?: { historyId?: string } }[] };
+      }
+    ).history.rows;
+    const value = rows.find((row) => row.kind === "outcome")?.outcome?.historyId;
+    assert.match(value, /^turn\/[1-9][0-9]*$/u);
+    return value!;
   };
   try {
     const multiline = await answered("aaa11111", "line one\nline two\n");
@@ -1143,6 +1271,25 @@ test("packaged CLI wait and history --last write exact multiline and empty answe
     assert.equal(bareLast.code, 0);
     assert.equal(bareLast.stdout, "no newline");
     assert.equal(bareLast.stderr, "");
+
+    const bareHistoryId = await historyId(bare.id);
+    const bareExact = await runPackagedCli(["-C", root, "history", bare.id, "--id", bareHistoryId!], {
+      cwd: root,
+      env: environment,
+    });
+    assert.equal(bareExact.code, 0);
+    assert.equal(bareExact.stdout, "no newline");
+    assert.equal(bareExact.stderr, "");
+
+    const failedOutcome = await answered("ddd44444", "unused", failing("diagnostic without newline"));
+    const failedHistoryId = await historyId(failedOutcome.id);
+    const failedExact = await runPackagedCli(["-C", root, "history", failedOutcome.id, "--id", failedHistoryId!], {
+      cwd: root,
+      env: environment,
+    });
+    assert.equal(failedExact.code, 0);
+    assert.equal(failedExact.stdout, "diagnostic without newline");
+    assert.equal(failedExact.stderr, "");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

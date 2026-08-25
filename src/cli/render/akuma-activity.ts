@@ -410,6 +410,11 @@ export function akumaRawAnswer(result: AkumaInvocationResult): string | undefine
   }
   if (result.action === "wait" && result.result.observations.length === 1)
     return statusAnswer(result.result.observations[0]!);
+  if (result.action === "history" && result.mode === "exact" && result.historyResult.kind === "exact") {
+    return result.historyResult.outcome.outcome.kind === "answered"
+      ? result.historyResult.outcome.outcome.answer
+      : result.historyResult.outcome.outcome.diagnostic;
+  }
   return undefined;
 }
 
@@ -437,6 +442,12 @@ export function historyText(
   result: Extract<AkumaInvocationResult, { action: "history" }>,
   context: TextRenderContext,
 ): string {
+  if (result.mode === "exact") {
+    const exact = result.historyResult;
+    if (exact.kind !== "exact")
+      return `${exact.kind === "unknown-history" ? exact.historyId : "unknown"} has no matching retained outcome`;
+    return exact.outcome.outcome.kind === "answered" ? exact.outcome.outcome.answer : exact.outcome.outcome.diagnostic;
+  }
   if (command.last) return result.mode === "last" ? result.answer : "no answer retained";
   if (result.mode !== "page") throw new Error("history result lacks page");
   return [

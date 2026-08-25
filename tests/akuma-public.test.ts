@@ -30,6 +30,7 @@ import { akumaRunRoot, allocateAkumaDirectory, pathsForAkuId } from "../src/akum
 import type { ProviderAdapter } from "../src/akuma/provider.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import { settings } from "../src/settings.js";
+import { Keiyaku } from "../src/index.js";
 import { World } from "../src/world.js";
 
 const CLAUDE_EXECUTION = { name: "claude", kind: "claude-agent-sdk" } as const;
@@ -73,6 +74,22 @@ async function bornHistoryHandle(root: string, suffix: string) {
 function toolRow(rows: readonly { kind: string; sequence: number; state?: unknown }[]) {
   return rows.filter((row) => row.kind === "tool");
 }
+
+test("malformed public history IDs refuse before Heart reads", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-history-id-"));
+  const born = await bornHistoryHandle(root, "c0000005");
+  born.holder.release();
+  unlinkSync(born.allocated.paths.heart);
+  try {
+    await assert.rejects(() => born.handle.history({ id: "history-1" }), /turn\/<positive safe integer>/u);
+    await assert.rejects(
+      () => Keiyaku.history({ path: root, akuma: born.allocated.id, id: "turn/9007199254740992" }),
+      /turn\/<positive safe integer>/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("history completion keeps the start sequence and never remints", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-history-remint-"));
@@ -863,9 +880,10 @@ test("an answered Turn without a fork point remains visible and keeps its answer
     assert.deepEqual((await handle.lastAnswer()), { kind: "answer", answer: "complete without fork" });
     assert.deepEqual((await handle.history()).rows.find((row) => row.kind === "outcome")?.outcome, {
       kind: "answered",
-      session: { sessionId: "no-point-session" },
+      historyId: "turn/1",
       answer: "complete without fork",
     });
+    assert.equal((await handle.history({ id: "turn/1" })).kind, "exact");
     assert.deepEqual(await handle.fork({ at: "missing-point" }), { kind: "unknown-history", at: "missing-point" });
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -885,7 +903,7 @@ test("fork publishes a sleeping child with lineage and its native birth session"
       return { session: { sessionId: "fork-child-session" } };
     };
 
-    const receipt = await world.of({ id: source.id }).fork({ at: "public-history" });
+    const receipt = await world.of({ id: source.id }).fork({ at: "turn/1" });
     assert.equal(receipt.kind, "forked", JSON.stringify(receipt));
     if (receipt.kind !== "forked") return;
     assert.deepEqual(nativeInput, {
@@ -898,7 +916,7 @@ test("fork publishes a sleeping child with lineage and its native birth session"
     assert.equal((await child.status()).life, "asleep");
     const childPaths = pathsForAkuId(root, receipt.child);
     const snapshot = await readHeart(childPaths);
-    assert.deepEqual(snapshot.soul?.origin, { kind: "fork", parent: source.id, at: "public-history" });
+    assert.deepEqual(snapshot.soul?.origin, { kind: "fork", parent: source.id, at: "turn/1" });
     assert.equal(snapshot.soul?.description, "Fork source");
     assert.deepEqual(snapshot.latestSession, {
       sequence: 1,
@@ -923,7 +941,7 @@ test("fork preserves the exact admitted readonly restraint byte-for-byte", async
     const source = await answeredSource(root, "f0a10007", { enforcement: "native" });
     mutable.fork = async () => ({ session: { sessionId: "fork-restraint-child" } });
     const world = (await akumaAt(root));
-    const receipt = await world.of({ id: source.id }).fork({ at: "public-history" });
+    const receipt = await world.of({ id: source.id }).fork({ at: "turn/1" });
     assert.equal(receipt.kind, "forked", JSON.stringify(receipt));
     if (receipt.kind !== "forked") return;
     const child = world.of({ id: receipt.child });
@@ -953,7 +971,7 @@ test("fork preserves categorical, exact-history, native, local, and not-born fai
     };
     assert.deepEqual(await handle.fork({ at: "missing" }), { kind: "unknown-history", at: "missing" });
     assert.equal(nativeCalls, 0);
-    assert.deepEqual(await handle.fork({ at: "public-history" }), { kind: "fork-failed", diagnostic: "native refused" });
+    assert.deepEqual(await handle.fork({ at: "turn/1" }), { kind: "fork-failed", diagnostic: "native refused" });
 
     mutable.fork = async () => {
       const runRoot = akumaRunRoot(root);
@@ -961,7 +979,7 @@ test("fork preserves categorical, exact-history, native, local, and not-born fai
       writeFileSync(runRoot, "blocked");
       return { session: { sessionId: "orphan-upstream-session" } };
     };
-    const partial = await handle.fork({ at: "public-history" });
+    const partial = await handle.fork({ at: "turn/1" });
     assert.equal(partial.kind, "upstream-forked");
     if (partial.kind === "upstream-forked") {
       assert.deepEqual(partial.childSession, { sessionId: "orphan-upstream-session" });
@@ -1059,13 +1077,16 @@ test("public Akuma handles separate compact list rows from full status and wait"
     assert.equal("pending" in status, false);
     assert.equal(status.timeline.kind, "idle");
     assert.equal(status.timeline.kind === "idle" && status.timeline.outcome?.outcome.kind === "answered", true);
+    assert.equal(status.timeline.kind === "idle" && status.timeline.outcome?.outcome.historyId, "turn/1");
     assert.equal("history" in status, false);
     assert.deepEqual((await handle.history()).rows.find((row) => row.kind === "outcome")?.outcome, {
       kind: "answered",
       answer: "public answer",
-      historyId: "public-history",
-      session: { sessionId: "public-session" },
+      historyId: "turn/1",
     });
+    const exact = await handle.history({ id: "turn/1" });
+    assert.equal(exact.kind, "exact");
+    if (exact.kind === "exact") assert.deepEqual(exact.outcome.outcome, { kind: "answered", answer: "public answer", historyId: "turn/1" });
     assert.equal(status.timeline.entries.length, 0);
     assert.deepEqual(await handle.wait((candidate) => candidate.timeline.kind === "idle"
       && candidate.timeline.outcome?.outcome.kind === "answered"), status);
@@ -1729,6 +1750,11 @@ test("a failed turn is durable public evidence and never masquerades as provider
     assert.deepEqual((await timeline(allocated.paths)).filter((fact) => fact.kind === "turn-end").map((turn) => turn.outcome), [
       { kind: "failed", diagnostic: "native failed" },
     ]);
+    const publicOutcome = (await handle.history()).rows.find((row) => row.kind === "outcome")?.outcome;
+    assert.deepEqual(publicOutcome, { kind: "failed", historyId: "turn/1", diagnostic: "native failed" });
+    const exact = await handle.history({ id: "turn/1" });
+    assert.equal(exact.kind, "exact");
+    if (exact.kind === "exact") assert.deepEqual(exact.outcome.outcome, publicOutcome);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -27,7 +27,10 @@ type NukeConfirmationRefusal = Readonly<{
 
 ```
 
-This chapter owns the package-root nuke result and refusal shapes. Reset
+This chapter owns the package-root nuke result and refusal shapes. Akuma exact
+history uses one Heart-owned nonblank `historyId` for every completed answered
+or failed outcome; unknown selectors are typed results and malformed input is
+rejected before reading Heart. Reset
 semantics and preservation law live in [world.md](world.md).
 
 Kanshi Contract rows expose `lastJournalAt`, the timestamp of the final entry

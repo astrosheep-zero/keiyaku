@@ -3,6 +3,7 @@ import { parseAkuId } from "../../akuma/identity.js";
 import { parseDuration as decodeDuration } from "../../duration.js";
 import { parseAkumaAlias, parseAkumaGlob, type AkumaAlias } from "../../identity/selector.js";
 import { decodeAllowedActions, type AllowedActions } from "../../akuma/allowed.js";
+import { parsePublicHistoryId } from "../../akuma/identity.js";
 
 type Output = Readonly<{ output: "text" | "json" }>;
 type Addressed = Readonly<{ akuma: string }>;
@@ -25,7 +26,8 @@ export type ParsedAkumaCommand = Output &
     | Readonly<{ command: "kill"; akuma: readonly string[] }>
     | Readonly<{ command: "wait"; akuma: readonly string[]; completion?: "any" | "all"; timeoutMs?: number }>
     | (Readonly<{ command: "tell"; interrupt: boolean }> & Addressed & Prompted)
-    | (Readonly<{ command: "history"; last: boolean; before?: number; since?: number; limit?: number }> & Addressed)
+    | (Readonly<{ command: "history"; last: boolean; id?: string; before?: number; since?: number; limit?: number }> &
+        Addressed)
     | Readonly<{ command: "history"; contract: string }>
     | (Readonly<{ command: "fork"; at: string }> & Addressed)
   );
@@ -90,8 +92,9 @@ const AKUMA_COMMAND_SPECS = {
   history: {
     arity: 1,
     stdin: false,
-    flags: { before: "value", since: "value", limit: "value", last: "boolean", json: "boolean" },
-    usage: "history <aku/...|@alias|kei/...> [--before <index> | --since <index>] [--limit <count>] [--last]",
+    flags: { id: "value", before: "value", since: "value", limit: "value", last: "boolean", json: "boolean" },
+    usage:
+      "history <aku/...|@alias|kei/...> [--id <historyId> | --before <index> | --since <index>] [--limit <count>] [--last]",
     purpose: "Read Akuma execution history or one complete Contract journal and Dispatch timeline.",
   },
   fork: {
@@ -256,21 +259,35 @@ function parseHistory(
   fail: (message: string) => never,
 ): Extract<ParsedAkumaCommand, { command: "history" }> {
   if (selector.startsWith("kei/")) {
-    if (flags.before !== undefined || flags.since !== undefined || flags.limit !== undefined || flags.last === true) {
-      fail("history kei/... does not accept --before, --since, --limit, or --last");
+    if ([flags.id, flags.before, flags.since, flags.limit, flags.last].some((value) => value !== undefined)) {
+      fail("history kei/... does not accept --id, --before, --since, --limit, or --last");
     }
     return { command: "history", contract: selector, output };
   }
+  return parseAkumaHistory(selector, flags, output, fail);
+}
+
+function parseAkumaHistory(
+  selector: string,
+  flags: Readonly<Record<string, FlagValue>>,
+  output: "text" | "json",
+  fail: (message: string) => never,
+): Extract<ParsedAkumaCommand, { command: "history"; akuma: string }> {
+  const bounded = flags.before !== undefined || flags.since !== undefined || flags.limit !== undefined;
   if (flags.before !== undefined && flags.since !== undefined)
     fail("history --before and --since are mutually exclusive");
-  if (flags.last === true && (flags.before !== undefined || flags.since !== undefined || flags.limit !== undefined)) {
-    fail("history --last cannot be combined with --before, --since, or --limit");
-  }
+  if (flags.id !== undefined && (flags.last === true || bounded))
+    fail("history --id cannot be combined with --last, --before, --since, or --limit");
+  if (flags.last === true && bounded) fail("history --last cannot be combined with --before, --since, or --limit");
   const limit = flags.limit === undefined ? undefined : positiveIndex(flags.limit, "--limit", fail);
   if (limit !== undefined && limit > 5_000) fail("--limit must be no greater than 5000");
+  const id =
+    flags.id === undefined ? undefined : stringFlag(flags.id, "history --id requires a nonblank historyId", fail);
+  if (id !== undefined && parsePublicHistoryId(id) === null) fail("history --id requires turn/<positive safe integer>");
   return {
     command: "history",
     akuma: validateDirect(selector, fail),
+    ...(id === undefined ? {} : { id }),
     last: flags.last === true,
     ...(flags.before === undefined ? {} : { before: positiveIndex(flags.before, "--before", fail) }),
     ...(flags.since === undefined ? {} : { since: positiveIndex(flags.since, "--since", fail) }),

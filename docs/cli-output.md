@@ -122,7 +122,10 @@ Answered default `call`, answered ordinary single `wait`, and `history --last`
 write retained answer bytes unchanged, including empty answers and answers that
 do not end with `\n`. Those three paths receive no framing newline. JSON for
 the same reads remains ordinary and is LF-terminated. With no retained answer,
-`history --last` remains ordinary text.
+`history --last` remains ordinary text. Exact Akuma history selected by
+`--id` writes only the complete retained answer or diagnostic; JSON exposes the
+selected outcome and its single Heart-owned `historyId`, never provider-native
+coordinates.
 
 ## Shared Scanner Grammar
 

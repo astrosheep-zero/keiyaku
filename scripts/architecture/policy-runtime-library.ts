@@ -383,6 +383,7 @@ export const runtimeLibraryZones = [
     source: "library/fleet.ts",
     allow: [
       any("akuma/index.ts"),
+      any("akuma/identity.ts", ["parsePublicHistoryId"]),
       any("akuma/akuma.ts", ["readBudgetedStatus", "tellAkumaWithId"]),
       any("akuma/requests.ts", [
         "injectedBodyRequests",
