@@ -12,6 +12,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import test from "node:test";
 
 const root = resolve(import.meta.dirname, "..");
@@ -134,7 +135,7 @@ test("published package installs one keiyaku CLI and runs against a real reposit
     "--input-type=module",
     "--eval",
     source.join("\n"),
-    providerRegistry,
+    pathToFileURL(providerRegistry).href,
   ], installed);
   assert.deepEqual(JSON.parse(inspect([
     "const { decodeProviderExecution } = await import(process.argv.at(-1));",
