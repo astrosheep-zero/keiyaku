@@ -7,15 +7,37 @@ import { CALL_WITH_CONTEXT } from "./akuma-product-symbols.js";
 import { fleetListRow, readAkumaBirthCwd } from "./akuma-observe.js";
 import { akuIdFromDirectoryName, akumaPaths, akumaRunRoot, archetypeName, parseAkuId } from "./identity.js";
 import { loadArchetype, listArchetypes as readArchetypes } from "./archetype.js";
-import { publishAkuma } from "./publication.js";
+import { birthAkuma, launchAkuma } from "./publication.js";
 import { spawnAkumaBody } from "./body.js";
-import type { ResultRoute } from "./result-route.js";
 import { injectedBodyRequests, requestBodyCall } from "./requests.js";
 import { decodeAllowedActions, unionAllowedActions } from "./allowed.js";
 import { settings as readSettings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
+import type { BodyLaunch } from "./body.js";
+import type { AllocatedAkuma } from "./identity.js";
 
-type AkumaCallLaunchInput = AkumaCallInput & Readonly<{ resultRoute?: ResultRoute }>;
+type AkumaCallRecipe = Omit<NonNullable<BodyLaunch["seed"]>, "id" | "archetype" | "cwd" | "origin">;
+type BornExecution = Readonly<{ cwd: string; source: "input" | "caller" | "process" | "world" }>;
+
+export type BornAkumaCall = Readonly<{
+  kind: "born";
+  allocated: AllocatedAkuma;
+  seed: AkumaCallRecipe &
+    Readonly<{ id: AllocatedAkuma["id"]; archetype: string; cwd: string; origin: { kind: "direct" } }>;
+  initialBody: string;
+  execution: BornExecution;
+}>;
+
+export type RequestedAkumaCall = Readonly<{
+  kind: "requested";
+  id: AllocatedAkuma["id"];
+  cwd: string;
+  execution: BornExecution;
+}>;
+
+export type AkumaBornCall = BornAkumaCall | RequestedAkumaCall;
+
+type AkumaCallLaunchInput = AkumaCallInput;
 
 function callReadonly(value: unknown): Readonly<{ readonly?: true }> {
   if (value === undefined) return {};
@@ -52,7 +74,7 @@ export class Akuma {
   async call(input: AkumaCallLaunchInput): Promise<AkumaHandle> {
     return await this[CALL_WITH_CONTEXT](input, { initiatorCwd: process.cwd() });
   }
-  async [CALL_WITH_CONTEXT](input: AkumaCallLaunchInput, context: AkumaCallContext): Promise<AkumaHandle> {
+  async beginCall(input: AkumaCallLaunchInput, context: AkumaCallContext): Promise<AkumaBornCall> {
     const readonly = callReadonly(input.readonly);
     const name = archetypeName(input.archetype);
     const home = this.configuration.home === undefined ? {} : { home: this.configuration.home };
@@ -87,33 +109,51 @@ export class Akuma {
         recipe: requestRecipe,
       });
       const bornCwd = await readAkumaBirthCwd(this.path, child);
-      return new AkumaHandle(child, this.path, { cwd: bornCwd, source: cwd === undefined ? "caller" : "input" });
+      return {
+        kind: "requested",
+        id: child,
+        cwd: bornCwd,
+        execution: { cwd: bornCwd, source: cwd === undefined ? "caller" : "input" },
+      };
     }
     const initiatorCwd = context.initiatorCwd;
     const selectedCwd = input.cwd ?? initiatorCwd ?? this.path;
     const cwd =
       input.cwd !== undefined && context?.cwdCanonical === true ? input.cwd : await canonicalBirthCwd(selectedCwd);
-    const published = await publishAkuma({
-      worldPath: this.path,
-      archetype: archetype.name,
+    const allocated = await birthAkuma({ worldPath: this.path, archetype: archetype.name });
+    return {
+      kind: "born",
+      allocated,
+      seed: {
+        id: allocated.id,
+        archetype: allocated.archetype,
+        ...requestRecipe,
+        cwd,
+        origin: { kind: "direct" },
+      },
+      initialBody: input.body,
+      execution: {
+        cwd,
+        source: input.cwd !== undefined ? "input" : initiatorCwd === undefined ? "world" : "process",
+      },
+    };
+  }
+  async finishCall(born: AkumaBornCall): Promise<AkumaHandle> {
+    if (born.kind === "requested") {
+      return new AkumaHandle(born.id, this.path, { cwd: born.cwd, source: born.execution.source });
+    }
+    const published = await launchAkuma({
+      allocated: born.allocated,
       launch: async (allocated) =>
-        await spawnAkumaBody({
-          paths: allocated.paths,
-          seed: {
-            id: allocated.id,
-            archetype: allocated.archetype,
-            ...requestRecipe,
-            cwd,
-            origin: { kind: "direct" },
-          },
-          initialBody: input.body,
-          ...(input.resultRoute === undefined ? {} : { resultRoute: input.resultRoute }),
-        }),
+        await spawnAkumaBody({ paths: allocated.paths, seed: born.seed, initialBody: born.initialBody }),
     });
     return new AkumaHandle(published.id, this.path, {
-      cwd,
-      source: input.cwd !== undefined ? "input" : initiatorCwd === undefined ? "world" : "process",
+      cwd: born.execution.cwd,
+      source: born.execution.source,
     });
+  }
+  async [CALL_WITH_CONTEXT](input: AkumaCallLaunchInput, context: AkumaCallContext): Promise<AkumaHandle> {
+    return await this.finishCall(await this.beginCall(input, context));
   }
   async list(input: AkumaListInput = {}): Promise<AkumaList> {
     if (typeof input !== "object" || input === null || Array.isArray(input))
@@ -155,4 +195,16 @@ export async function callAkumaWithContext(
   context: AkumaCallContext,
 ): Promise<AkumaHandle> {
   return await akuma[CALL_WITH_CONTEXT](input, context);
+}
+
+export async function beginAkumaCall(
+  akuma: Akuma,
+  input: AkumaCallLaunchInput,
+  context: AkumaCallContext,
+): Promise<AkumaBornCall> {
+  return await akuma.beginCall(input, context);
+}
+
+export async function finishAkumaCall(akuma: Akuma, born: AkumaBornCall): Promise<AkumaHandle> {
+  return await akuma.finishCall(born);
 }

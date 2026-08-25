@@ -1,4 +1,4 @@
-import { type AkuId, type ActivityHistory, type ResultRoute } from "../../akuma/index.js";
+import { type AkuId, type ActivityHistory } from "../../akuma/index.js";
 import {
   Keiyaku,
   type AkumaKillResult,
@@ -14,6 +14,8 @@ import {
 import type { Settings } from "../../settings.js";
 import type { WorldRoot } from "../../world.js";
 import type { AkumaPromptSource, InvokedAkumaCommand } from "./akuma.js";
+import { beginCall, finishCall } from "../../library/akuma-creation.js";
+import { recognizeAndListen } from "../square-edge.js";
 
 export type AkumaInvocationResult =
   | Readonly<{ kind: "akuma"; action: "call"; result: CallResult; world: WorldRoot }>
@@ -64,7 +66,7 @@ type InvokeInput = Readonly<{
   settings?: Settings;
   contract?: KeiyakuContract;
   repo?: Repo;
-  resultRoute?: ResultRoute;
+  environment: NodeJS.ProcessEnv;
   readStdin(): Promise<string>;
 }>;
 
@@ -191,7 +193,7 @@ export async function invokeAkuma(command: InvokedAkumaCommand, input: InvokeInp
   switch (command.command) {
     case "call": {
       const body = await promptBody(command, input);
-      const result = await Keiyaku.call({
+      const born = await beginCall({
         path: input.path,
         archetype: command.archetype,
         body,
@@ -204,8 +206,24 @@ export async function invokeAkuma(command: InvokedAkumaCommand, input: InvokeInp
         ...(input.contract === undefined ? {} : { contract: input.contract }),
         ...(command.alias === undefined ? {} : { alias: command.alias }),
         ...(command.allowed === undefined ? {} : { allowed: command.allowed }),
-        ...(input.resultRoute === undefined ? {} : { resultRoute: input.resultRoute }),
       });
+      const listener =
+        born.born.kind === "born"
+          ? await recognizeAndListen(input.path, input.environment, born.born.allocated)
+          : undefined;
+      let result: CallResult;
+      try {
+        result = await finishCall(born);
+      } catch (error) {
+        if (listener?.committed === true) {
+          try {
+            await listener.rollback();
+          } catch {
+            /* preserve launch failure */
+          }
+        }
+        throw error;
+      }
       return { kind: "akuma", action: "call", result, world: input.path };
     }
     case "wait":

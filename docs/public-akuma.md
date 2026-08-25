@@ -39,7 +39,6 @@ type CallInput = Readonly<{
   contract?: Keiyaku
   alias?: AkumaAlias
   allowed?: readonly AllowedAction[]
-  resultRoute?: ResultRoute
 }>
 
 type ForkInput = Readonly<{
@@ -53,15 +52,9 @@ Keiyaku.call(input: CallInput): Promise<CallResult>
 Keiyaku.fork(input: ForkInput): Promise<ForkResult>
 ```
 
-`resultRoute` is the optional, flat Keiyaku-owned opaque `ResultRoute`. It is a
-serializable caller address carried unchanged across the Body process. Library
-callers that provide it pass the value through unchanged; Library does not
-capture a route, inspect route fields, derive `sessionId`, `provider`, or
-`cwd`, or create a callback registry. The CLI integration captures the current
-Square route at the caller edge; Keiyaku's public facade does not import or
-expose Square's route type.
-The initial call Turn outcome is committed before Body invokes Square's
-route-aware `express`. Notification loss never changes Heart truth.
+The public call input and detached observation carry no route, caller identity,
+Square location, or Square-shaped field. Outcome delivery is owned by the
+execution and CLI edge chapters.
 `path` is an already resolved WorldRoot; Library never climbs or normalizes it.
 `allowed`, when present, adds to the Archetype list for that birth; Akuma owns
 its vocabulary and effective-set judgment. An empty additions list carries no
@@ -82,10 +75,9 @@ selected path or unavailable Contract workspace refuses before birth without
 trying a lower-precedence source; appointment failures identify `reconcile`
 as the repair entry. `mode` defaults to `"wait"`; wait mode observes the born handle
 until it stops running or `timeoutMs`, which defaults to 300,000 milliseconds.
-Detach mode returns after the post-birth integration stages and rejects a
-supplied `timeoutMs` as contradictory caller input. Its observation always
-discloses whether a result route was present as `resultRoute: "captured" |
-"not-captured"`; no other observation arm carries that field. `archetype` remains the TypeScript input name for
+Detach mode returns after birth and pre-launch integration and rejects a
+supplied `timeoutMs` as contradictory caller input. Its observation is exactly
+`{ kind: "detached" }`. `archetype` remains the TypeScript input name for
 the Akuma-owned concept even though the CLI presents its positional as
 `<akuma>`. `contract`, when present, must be a genuine package-root Keiyaku
 handle and supplies both the complete ContractId and its already pinned Git
@@ -112,38 +104,38 @@ type DispatchStage =
   | Readonly<{ kind: "none" }>
   | Readonly<{ kind: "dispatched"; dispatch: Dispatch }>
   | Readonly<{
-      kind: "failed"
-      failure: DispatchFailure | IntegrationFailure
-    }>
+      kind: "failed";
+      failure: DispatchFailure | IntegrationFailure;
+    }>;
 
 type IntegrationFailure = Readonly<{
-  kind: "authority-corruption" | "infrastructure"
-  diagnostic: string
-}>
+  kind: "authority-corruption" | "infrastructure";
+  diagnostic: string;
+}>;
 
 type AliasStage =
   | Readonly<{ kind: "none" }>
   | Readonly<{ kind: "aliased"; alias: AliasBinding; previous: AkuId | null }>
   | Readonly<{ kind: "skipped"; reason: "dispatch-failed" }>
-  | Readonly<{ kind: "failed"; failure: IntegrationFailure }>
+  | Readonly<{ kind: "failed"; failure: IntegrationFailure }>;
 
 type CallObservation =
-  | Readonly<{ kind: "detached"; resultRoute: "captured" | "not-captured" }>
+  | Readonly<{ kind: "detached" }>
   | Readonly<{ kind: "observed"; status: AkumaStatus }>
-  | Readonly<{ kind: "failed"; failure: IntegrationFailure }>
+  | Readonly<{ kind: "failed"; failure: IntegrationFailure }>;
 
 type CallResult = Readonly<{
-  kind: "called"
-  akuma: AkuId
-  readonly?: ReadonlyRestraint
+  kind: "called";
+  akuma: AkuId;
+  readonly?: ReadonlyRestraint;
   execution: Readonly<{
-    cwd: string
-    source: "input" | "contract-worktree" | "caller" | "process" | "world"
-  }>
-  dispatch: DispatchStage
-  alias: AliasStage
-  observation: CallObservation
-}>
+    cwd: string;
+    source: "input" | "contract-worktree" | "caller" | "process" | "world";
+  }>;
+  dispatch: DispatchStage;
+  alias: AliasStage;
+  observation: CallObservation;
+}>;
 
 type ForkResult =
   | Readonly<{ kind: "forked"; parent: AkuId; child: AkuId; dispatch: DispatchStage }>
@@ -151,16 +143,16 @@ type ForkResult =
   | Readonly<{ kind: "unknown-history"; parent: AkuId; at: string }>
   | Readonly<{ kind: "fork-failed"; parent: AkuId; diagnostic: string }>
   | Readonly<{
-      kind: "upstream-forked"
-      parent: AkuId
-      childSession: ResumeCoordinate
-      diagnostic: string
-    }>
+      kind: "upstream-forked";
+      parent: AkuId;
+      childSession: ResumeCoordinate;
+      diagnostic: string;
+    }>;
 ```
 
 The top-level Akuma result reports the irreversible Akuma fact first. Once an
 Akuma was born or forked, a later Dispatch, Alias, or call observation failure stays inside its
-closed stage and never becomes a naked rejection or rollback. A Dispatch
+completed integration and never becomes a naked rejection or rollback. A Dispatch
 failure prevents a requested Alias move and produces `skipped`; an Alias
 failure preserves the completed Dispatch. Observation still runs after either
 integration stage because those stages do not stop the born Akuma. A call

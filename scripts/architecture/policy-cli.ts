@@ -14,6 +14,8 @@ export const cliZones = [
     source: "cli/commands/akuma-invoke.ts",
     allow: [
       any("akuma/index.ts"),
+      any("library/akuma-creation.ts", ["beginCall", "finishCall"]),
+      any("cli/square-edge.ts", ["recognizeAndListen"]),
       any("index.ts"),
       types("cli/commands/akuma.ts"),
       types("settings.ts"),
@@ -198,6 +200,8 @@ export const cliZones = [
       any("cli/accepted.ts"),
       any("cli/actor.ts"),
       any("cli/commands/**"),
+      any("cli/square-edge.ts"),
+      any("akuma/publication.ts"),
       any("cli/coordinates.ts"),
       any("cli/draft.ts"),
       any("cli/parse.ts"),
@@ -210,6 +214,10 @@ export const cliZones = [
       any("library/keiyaku.ts"),
       any("settings.ts"),
     ],
+  },
+  {
+    source: "cli/square-edge.ts",
+    allow: [any("@astrosheep/square"), any("akuma/identity.ts"), any("akuma/publication.ts"), types("world.ts")],
   },
   {
     source: "scripts/architecture/**",

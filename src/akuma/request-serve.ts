@@ -231,12 +231,9 @@ async function serveCall(
       worldPath: world,
       archetype: request.archetype,
       signal: input.signal,
-      reserve: async (allocated) => {
-        if (!input.admissionOpen()) throw new Error("body closed request admission");
-        fact = await reserveRequest(input.paths, request.id, allocated.id);
-      },
       launch: async (allocated) => {
         if (!input.admissionOpen()) throw new Error("body closed request admission");
+        fact = await reserveRequest(input.paths, request.id, allocated.id);
         return await input.spawn({
           paths: allocated.paths,
           seed: {

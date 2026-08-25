@@ -6,6 +6,14 @@ import type { DetachedProcessExit, OwnedProcess } from "../runtime/proc/run.js";
 const POLL_MS = 100;
 export const BIRTH_TIMEOUT_MS = 30_000;
 
+export type BirthInput = Readonly<{ worldPath: string; archetype: string; signal?: AbortSignal }>;
+export type LaunchInput = Readonly<{
+  allocated: AllocatedAkuma;
+  awaitAsleep?: boolean;
+  launch(allocated: AllocatedAkuma): Promise<OwnedProcess | void>;
+  signal?: AbortSignal;
+}>;
+
 function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -156,24 +164,25 @@ async function sealLocalFailure(allocated: AllocatedAkuma, error: unknown): Prom
   }
 }
 
-export async function publishAkuma(
-  input: Readonly<{
-    worldPath: string;
-    archetype: string;
-    awaitAsleep?: boolean;
-    reserve?(allocated: AllocatedAkuma): Promise<void>;
-    launch(allocated: AllocatedAkuma): Promise<OwnedProcess | void>;
-    signal?: AbortSignal;
-  }>,
-): Promise<AllocatedAkuma> {
+export async function birthAkuma(input: BirthInput): Promise<AllocatedAkuma> {
   input.signal?.throwIfAborted();
   const allocated = await allocateAkumaDirectory({ worldRoot: input.worldPath, archetype: input.archetype });
   try {
     await initializeHeart(allocated.paths);
     input.signal?.throwIfAborted();
-    await input.reserve?.(allocated);
+    return allocated;
+  } catch (error) {
+    await sealLocalFailure(allocated, error);
+    throw error;
+  }
+}
+
+export async function launchAkuma(input: LaunchInput): Promise<AllocatedAkuma> {
+  const { allocated } = input;
+  let owned: OwnedProcess | void;
+  try {
     input.signal?.throwIfAborted();
-    const owned = await input.launch(allocated);
+    owned = await input.launch(allocated);
     try {
       input.signal?.throwIfAborted();
       const soul = await awaitBirth(allocated.paths, owned ?? undefined, input.signal);
@@ -187,4 +196,9 @@ export async function publishAkuma(
     await sealLocalFailure(allocated, error);
     throw error;
   }
+}
+
+export async function publishAkuma(input: BirthInput & Omit<LaunchInput, "allocated">): Promise<AllocatedAkuma> {
+  const allocated = await birthAkuma(input);
+  return await launchAkuma({ ...input, allocated });
 }

@@ -65,23 +65,23 @@ per-owner confirmation. `--repo` has no consumer for this command.
 
 The command vocabulary is:
 
-| Command | Public adaptation |
-| --- | --- |
-| `bind` | Calls `Keiyaku.bind` with the pinned Repo, Markdown/structured options, or the explicit sibling fork form. |
-| `amend` | Calls `keiyaku.amend` with the operation Markdown and structured options. |
-| `deliver` | Calls `keiyaku.deliver`. |
-| `review` | Calls `keiyaku.review`; in a declared request channel it forwards one hop through the direct parent. |
-| `abandon` | Calls `keiyaku.abandon`. |
-| `arc` | Calls `keiyaku.arc` with arc Markdown. |
-| `status` | Calls Kanshi or one exact Akuma status according to its selector. |
-| `show` | Calls `keiyaku.guidance()` for one selected Contract. |
-| `ls` | Lists exactly one selected Task, Contract, Akuma configuration, or Akuma identity directory. |
-| `audit` | Calls `keiyaku.audit`. |
-| `reconcile` | Calls the selected public reconciliation method. |
-| `settings` | Constructs and observes the shared read-only Settings resource. |
-| `install` | Installs the bundled Keiyaku skills through one or more native harness installers. |
-| `task ...` | Calls the separate `./task` public surface described below. |
-| `call`, `fork` | Call the package-root Akuma facet so Dispatch and Alias integration is not reimplemented at the edge. |
+| Command                           | Public adaptation                                                                                                                   |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `bind`                            | Calls `Keiyaku.bind` with the pinned Repo, Markdown/structured options, or the explicit sibling fork form.                          |
+| `amend`                           | Calls `keiyaku.amend` with the operation Markdown and structured options.                                                           |
+| `deliver`                         | Calls `keiyaku.deliver`.                                                                                                            |
+| `review`                          | Calls `keiyaku.review`; in a declared request channel it forwards one hop through the direct parent.                                |
+| `abandon`                         | Calls `keiyaku.abandon`.                                                                                                            |
+| `arc`                             | Calls `keiyaku.arc` with arc Markdown.                                                                                              |
+| `status`                          | Calls Kanshi or one exact Akuma status according to its selector.                                                                   |
+| `show`                            | Calls `keiyaku.guidance()` for one selected Contract.                                                                               |
+| `ls`                              | Lists exactly one selected Task, Contract, Akuma configuration, or Akuma identity directory.                                        |
+| `audit`                           | Calls `keiyaku.audit`.                                                                                                              |
+| `reconcile`                       | Calls the selected public reconciliation method.                                                                                    |
+| `settings`                        | Constructs and observes the shared read-only Settings resource.                                                                     |
+| `install`                         | Installs the bundled Keiyaku skills through one or more native harness installers.                                                  |
+| `task ...`                        | Calls the separate `./task` public surface described below.                                                                         |
+| `call`, `fork`                    | Call the package-root Akuma facet so Dispatch and Alias integration is not reimplemented at the edge.                               |
 | `wait`, `tell`, `history`, `kill` | Call the corresponding package-root capability; Contract history uses its handle and `tell --interrupt` selects composed interrupt. |
 
 `bind --fork-of kei/<complete-id>` reads no stdin and creates a sibling from the
@@ -244,16 +244,14 @@ appointed managed worktree is used. A direct Contract-free call uses ambient
 process cwd; a nested omitted call inherits its hosting caller Soul cwd.
 Call waits five minutes by default. `--wait` replaces that duration, while
 `-d`/`--detach` returns after birth and composition and excludes `--wait`.
-Before Akuma birth, the edge captures an optional Square `resultRoute` from
-the invocation cwd and environment, not the Akuma execution cwd. A missing or
-ambiguous capture yields no route and does not refuse the call. The captured
-route is opaque to Keiyaku's public facade and owned by its integration edge.
-Detach discloses `resultRoute: "captured" |
-"not-captured"`. Body commits the initial call Turn outcome before
-route-aware Square `express`; express failure never changes Heart truth.
-Answered terminal observations write exact answer bytes, and a captured result
-route receives those bytes in the `answer` field of its JSON result body;
-failed terminal observations carry their `diagnostic` field instead.
+Before Body spawn, the edge resolves `<WorldRoot>/.square/PUBLIC.square`,
+recognizes the current caller, and establishes a listener for the allocated Aku.
+Missing Square or absent, ambiguous, stale, or foreign recognition is a no-op
+and still launches. An idempotent listen creates no rollback obligation. If
+launch fails after a newly committed listener activity, the edge reopens and
+re-recognizes the caller, then best-effort ignores that Aku; cleanup never
+masks the launch failure. Detach returns `{ kind: "detached" }`. Outcome
+payload and Body delivery belong to [akuma-execution.md](akuma-execution.md).
 Successful detach
 prints the canonical-world wait command using the successful Alias or complete
 AkuId; failure adds no command and fabricates no life.

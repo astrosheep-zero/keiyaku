@@ -20,20 +20,13 @@ Normal completion writes exactly one Turn end with the complete answer or typed
 failure. Start failure writes a failed end. Stop, interrupt, kill, and process
 loss may leave the Turn open and do not synthesize a provider result.
 
-When a serializable `resultRoute` is present, Body invokes the Square
-route-aware `express` after that Turn end is written, and only for that
-initial call Turn. The sender identity is the existing Keiyaku product name
-`keiyaku`. The body is JSON containing the Akuma id and the committed result:
-`{ akuma, outcome: "answered", answer }` for an answered Turn, or
-`{ akuma, outcome: "failed", diagnostic }` for a failed Turn. `answer` is the
-complete provider answer bytes retained by Heart; `diagnostic` is the exact
-failed outcome diagnostic. Keiyaku does not decode `SquareRoute` or write
-Square mention grammar. Express is at most one attempt. Open Turns, process
-loss, stop, interrupt, kill, later Tell Turns, and a missing route express
-nothing. An express failure is reported through the Body log, does not change
-Heart truth, does not reject the already committed call, and is not retried or
-replayed. Heart remains readable through wait and history when notification is
-absent.
+After the initial Turn outcome is committed, Body derives the WorldRoot from
+its launch paths, opens `<WorldRoot>/.square/PUBLIC.square`, and implicitly
+joins as its own AkuId. Unless that identity is already done, it emits exactly
+one bare JSON activity: `{ outcome: "answered", answer }` or
+`{ outcome: "failed", diagnostic }`. It never calls `done`; the Aku remains
+joined. Missing Square and delivery failures are best-effort, logged, and do
+not change Heart truth or Body terminal state.
 
 Body construction never hides Heart or filesystem observation. Its supervisor
 and request pump are opened asynchronously, and every control tick, Heart

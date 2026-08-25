@@ -347,6 +347,8 @@ export const runtimeLibraryZones = [
       any("alias/index.ts"),
       types("akuma/allowed.ts"),
       any("akuma/akuma.ts"),
+      any("akuma/identity.ts"),
+      any("akuma/akuma-product.ts", ["beginAkumaCall", "finishAkumaCall", "AkumaBornCall"]),
       any("akuma/identity.ts", ["parseAkuId", "AkuId"]),
       factErrors,
       types("core/facts/types.ts", ["ContractId"]),

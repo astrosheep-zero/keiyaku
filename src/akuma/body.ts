@@ -1,4 +1,5 @@
 import { appendFile } from "node:fs/promises";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { abortableDelay } from "./abort.js";
 import { BodySupervisor } from "./body-supervisor.js";
@@ -16,9 +17,8 @@ import {
   type SessionFact,
   type Soul,
 } from "./heart/index.js";
-import type { AkumaPaths } from "./identity.js";
+import { worldRootForAkumaPaths, type AkumaPaths } from "./identity.js";
 import type { ProviderAdapter } from "./provider.js";
-import type { ResultRoute } from "./result-route.js";
 import { resolveProviderExecution } from "./providers/index.js";
 import {
   clearBodyRequestTransport,
@@ -43,7 +43,6 @@ export type BodyLaunch = Readonly<{
   birthSession?: Omit<SessionFact, "sequence">;
   initialBody?: string;
   refuseIfHeld?: boolean;
-  resultRoute?: ResultRoute;
 }>;
 
 export type TellWake =
@@ -74,7 +73,6 @@ type BodyRuntime = Readonly<{
   now(): string;
   spawnChild?(launch: RequestChildLaunch): Promise<OwnedProcess>;
   spawnBody?(launch: BodyLaunch): Promise<OwnedProcess>;
-  express?(route: ResultRoute, options: Readonly<{ as: string; body: string }>): Promise<unknown>;
   upstream?: UpstreamExecutionPort;
 }>;
 
@@ -160,22 +158,22 @@ function boundedDiagnostic(error: unknown): string {
   return text.length <= 500 ? text : `${text.slice(0, 500)}...`;
 }
 
-async function expressInitialOutcome(
-  launch: BodyLaunch,
-  soul: Soul,
-  outcome: CommittedOutcome,
-  runtime: BodyRuntime,
-): Promise<void> {
-  if (launch.resultRoute === undefined) return;
+async function expressInitialOutcome(launch: BodyLaunch, outcome: CommittedOutcome): Promise<void> {
   try {
-    const express = runtime.express ?? (await import("@astrosheep/square")).express;
-    await express(launch.resultRoute, {
-      as: "keiyaku",
-      body: JSON.stringify({ akuma: soul.id, ...outcome }),
-    });
+    const { Square } = await import("@astrosheep/square");
+    const identity = launch.seed?.id ?? (await readHeart(launch.paths)).soul?.id;
+    if (identity === undefined) return;
+    const square = await Square.at({ path: join(worldRootForAkumaPaths(launch.paths), ".square", "PUBLIC.square") });
+    try {
+      const joined = await square.implicitJoin(identity);
+      if (joined.state === "done" || joined.participant === undefined) return;
+      await joined.participant.express(JSON.stringify(outcome));
+    } finally {
+      await square.close();
+    }
   } catch (error) {
     try {
-      await appendFile(launch.paths.log, `result-route express failed: ${boundedDiagnostic(error)}\n`);
+      await appendFile(launch.paths.log, `square outcome express failed: ${boundedDiagnostic(error)}\n`);
     } catch {
       /* express loss never changes Heart truth */
     }
@@ -287,7 +285,7 @@ async function runBodyTurns(input: BodyExecution): Promise<void> {
       return;
     }
     const outcome = await persistTurn(launch.paths, result.turnSequence, result, runtime.now());
-    if (initial !== undefined) await expressInitialOutcome(launch, soul, outcome, runtime);
+    if (initial !== undefined) await expressInitialOutcome(launch, outcome);
     if (outcome.outcome === "failed") {
       await breakBody(launch.paths, { sequence: bodySequence, end: "broke-off", at: runtime.now() });
       return;

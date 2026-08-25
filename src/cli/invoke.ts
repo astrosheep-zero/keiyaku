@@ -1,4 +1,3 @@
-import { captureRoute } from "@astrosheep/square";
 import { resolveActor } from "./actor.js";
 import { isParsedAkumaCommand, type InvokedAkumaCommand } from "./commands/akuma.js";
 import type { AkumaInvocationResult } from "./commands/akuma-invoke.js";
@@ -159,15 +158,13 @@ async function invokeAkumaFromEdge(parsed: InvokedAkumaCommand, input: AkumaEdge
       parsed.command === "call" && parsed.contract !== undefined
         ? (await import("./selectors.js")).contractFromInput(repo as Repo, parsed.contract).contract
         : undefined;
-    const resultRoute =
-      parsed.command === "call" ? captureRoute({ cwd: input.invocationCwd, env: edge.environment }) : null;
     return await invokeAkuma(parsed, {
       path,
       ...(statedCwd === undefined ? {} : { statedCwd }),
       ...(home === undefined ? {} : { home }),
       ...(configuration === undefined ? {} : { settings: configuration }),
       ...(contract === undefined ? (repo === undefined ? {} : { repo }) : { contract }),
-      ...(resultRoute === null ? {} : { resultRoute }),
+      environment: edge.environment,
       readStdin: edge.readStdin,
     });
   } catch (error) {

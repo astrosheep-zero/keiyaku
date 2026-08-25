@@ -1,14 +1,7 @@
 import { realpath, stat } from "node:fs/promises";
 import { moveAlias, type AliasBinding } from "../alias/index.js";
-import {
-  Akuma,
-  akumaCallExecution,
-  callAkumaWithContext,
-  type AkumaStatus,
-  type ForkReceipt,
-  type ReadonlyRestraint,
-  type ResultRoute,
-} from "../akuma/akuma.js";
+import { Akuma, type AkumaStatus, type ForkReceipt, type ReadonlyRestraint } from "../akuma/akuma.js";
+import { beginAkumaCall, finishAkumaCall, type AkumaBornCall } from "../akuma/akuma-product.js";
 import type { AkuId } from "../akuma/identity.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { ContractId } from "../core/facts/types.js";
@@ -54,11 +47,10 @@ export type CallInput = Readonly<{
   contract?: Keiyaku;
   alias?: AkumaAlias;
   allowed?: readonly AllowedAction[];
-  resultRoute?: ResultRoute;
 }>;
 
 export type CallObservation =
-  | Readonly<{ kind: "detached"; resultRoute: "captured" | "not-captured" }>
+  | Readonly<{ kind: "detached" }>
   | Readonly<{ kind: "observed"; status: AkumaStatus }>
   | Readonly<{ kind: "failed"; failure: IntegrationFailure }>;
 
@@ -76,6 +68,16 @@ export type CallResult = Readonly<{
 }>;
 
 type CallExecution = CallResult["execution"];
+
+export type BornCall = Readonly<{
+  path: WorldRoot;
+  born: AkumaBornCall;
+  execution: CallExecution;
+  mode: "wait" | "detach";
+  timeoutMs: number;
+  dispatch: DispatchStage;
+  alias: AliasStage;
+}>;
 
 export type ForkInput = Readonly<{
   path: WorldRoot;
@@ -164,10 +166,9 @@ async function observeCall(
   handle: Awaited<ReturnType<Akuma["call"]>>,
   mode: "wait" | "detach",
   timeoutMs: number,
-  resultRoute: ResultRoute | undefined,
 ): Promise<CallObservation> {
   if (mode === "detach") {
-    return { kind: "detached", resultRoute: resultRoute === undefined ? "not-captured" : "captured" };
+    return { kind: "detached" };
   }
   try {
     return { kind: "observed", status: await handle.wait(undefined, { timeoutMs }) };
@@ -273,7 +274,7 @@ async function resolveCallExecution(
   return undefined;
 }
 
-export async function callKeiyaku(input: CallInput): Promise<CallResult> {
+export async function beginCall(input: CallInput): Promise<BornCall> {
   const values = requireInput(input, "Keiyaku.call input");
   onlyKeys(
     values,
@@ -290,7 +291,6 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
       "contract",
       "alias",
       "allowed",
-      "resultRoute",
     ],
     "Keiyaku.call input",
   );
@@ -306,13 +306,11 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
   const alias: AkumaAlias | undefined =
     values.alias === undefined ? undefined : parseAkumaAlias(nonblank(values.alias, "alias"));
   const seat = values.contract === undefined ? undefined : seatForKeiyaku(values.contract);
-  const resultRoute = values.resultRoute as ResultRoute | undefined;
   const execution = await resolveCallExecution({
     path,
     ...(cwd === undefined ? {} : { cwd }),
     ...(seat === undefined ? {} : { contract: values.contract as Keiyaku }),
   });
-
   const world = akumaWorld(path, home, settings);
   const call = {
     archetype,
@@ -320,39 +318,59 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
     ...(readonlyRequested === undefined ? {} : { readonly: readonlyRequested }),
     ...(values.allowed === undefined ? {} : { allowed: values.allowed as readonly AllowedAction[] }),
     ...(execution === undefined ? {} : { cwd: execution.cwd }),
-    ...(resultRoute === undefined ? {} : { resultRoute }),
   };
-  const handle =
-    execution === undefined ? await world.call(call) : await callAkumaWithContext(world, call, { cwdCanonical: true });
-  const completedExecution = execution ?? akumaCallExecution(handle);
-  if (completedExecution === undefined) throw new Error("Akuma call is missing its birth execution");
-  const readonly = (await handle.status()).readonly;
+  const born = await beginAkumaCall(
+    world,
+    call as Parameters<Akuma["call"]>[0],
+    execution === undefined ? {} : { cwdCanonical: true },
+  );
+  const akuma = born.kind === "requested" ? born.id : born.allocated.id;
+  const completedExecution = execution ?? born.execution;
   const dispatch: DispatchStage =
     seat === undefined
       ? { kind: "none" }
-      : await dispatchStage({ repository: seat.scope, akuId: handle.id, contractId: seat.id });
+      : await dispatchStage({ repository: seat.scope, akuId: akuma, contractId: seat.id });
   let aliasStage: AliasStage = { kind: "none" };
   if (alias !== undefined) {
     if (dispatch.kind === "failed") aliasStage = { kind: "skipped", reason: "dispatch-failed" };
     else {
       try {
-        const moved = await moveAlias({ world: path, alias, akuId: handle.id });
+        const moved = await moveAlias({ world: path, alias, akuId: akuma });
         aliasStage = { kind: "aliased", alias: moved.alias, previous: moved.previous };
       } catch (error) {
         aliasStage = { kind: "failed", failure: integrationFailure(error) };
       }
     }
   }
-  const observation = await observeCall(handle, mode, timeoutMs, resultRoute);
+  return {
+    path,
+    born,
+    execution: completedExecution,
+    mode,
+    timeoutMs,
+    dispatch,
+    alias: aliasStage,
+  };
+}
+
+export async function finishCall(born: BornCall): Promise<CallResult> {
+  const world = akumaWorld(born.path);
+  const handle = await finishAkumaCall(world, born.born);
+  const readonly = (await handle.status()).readonly;
+  const observation = await observeCall(handle, born.mode, born.timeoutMs);
   return {
     kind: "called",
     akuma: handle.id,
     ...(readonly === undefined ? {} : { readonly }),
-    execution: completedExecution,
-    dispatch,
-    alias: aliasStage,
+    execution: born.execution,
+    dispatch: born.dispatch,
+    alias: born.alias,
     observation,
   };
+}
+
+export async function callKeiyaku(input: CallInput): Promise<CallResult> {
+  return await finishCall(await beginCall(input));
 }
 
 export async function forkKeiyaku(input: ForkInput): Promise<ForkResult> {

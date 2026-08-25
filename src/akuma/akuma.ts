@@ -104,10 +104,12 @@ export type AkumaCallInput = Readonly<{
   readonly?: true;
   allowed?: readonly AllowedAction[];
 }>;
-export type AkumaCallContext = Readonly<{ initiatorCwd?: string; cwdCanonical?: true }>;
+export type AkumaCallContext = Readonly<{
+  initiatorCwd?: string;
+  cwdCanonical?: true;
+}>;
 
 export type { TellResult, TellWake } from "./body.js";
-export type { ResultRoute } from "./result-route.js";
 
 export type InterruptReceipt =
   | Readonly<{
