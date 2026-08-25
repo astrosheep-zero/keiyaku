@@ -107,6 +107,20 @@ async function waitForProcessExit(pid: number): Promise<void> {
   }
 }
 
+async function removeTempDirectory(path: string): Promise<void> {
+  const deadline = performance.now() + 2_000;
+  while (true) {
+    try {
+      rmSync(path, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (process.platform !== "win32" || (error as NodeJS.ErrnoException).code !== "EPERM") throw error;
+      if (performance.now() >= deadline) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+}
+
 test("runProcess returns terminal diagnostics from both streams", async () => {
   const outcome = await runProcess(input([
     process.execPath,
@@ -575,7 +589,7 @@ test("an owned process capability is inert after release and repeated terminate"
     } else {
       await owned?.terminate(true);
     }
-    rmSync(root, { recursive: true, force: true });
+    await removeTempDirectory(root);
   }
 });
 
@@ -600,6 +614,6 @@ test("release lets the parent reach beforeExit while the detached child continue
         await waitForProcessExit(childPid);
       }
     }
-    rmSync(root, { recursive: true, force: true });
+    await removeTempDirectory(root);
   }
 });
