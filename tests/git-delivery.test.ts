@@ -107,8 +107,6 @@ function commitSignature(repository: TestGitRepository, commit: string): readonl
 
 async function targetedContract(gates: readonly string[] = []) {
   const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Test User"]);
-  repository.run(["config", "user.email", "test@example.com"]);
   writeFileSync(join(repository.path, "shared.txt"), "base\n");
   repository.run(["add", "shared.txt"]);
   repository.run(["commit", "--quiet", "-m", "initial"]);
@@ -130,8 +128,6 @@ async function targetedContract(gates: readonly string[] = []) {
 
 async function directoryReplacementContract(ignore = "artifact/*.tmp\n") {
   const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Test User"]);
-  repository.run(["config", "user.email", "test@example.com"]);
   mkdirSync(join(repository.path, "artifact"));
   writeFileSync(join(repository.path, ".gitignore"), ignore);
   writeFileSync(join(repository.path, "artifact", "tracked.txt"), "tracked\n");
@@ -942,8 +938,6 @@ test("reconcile recreates a registered managed worktree whose directory disappea
 
 test("managed follow advances only the detached HEAD and real index", async () => {
   const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Test User"]);
-  repository.run(["config", "user.email", "test@example.com"]);
   writeFileSync(join(repository.path, "tracked.txt"), "base\n");
   repository.run(["add", "tracked.txt"]);
   repository.run(["commit", "--quiet", "-m", "initial"]);
@@ -979,8 +973,6 @@ test("managed follow advances only the detached HEAD and real index", async () =
 
 test("dirty managed delivery follows its accepted tender as the clean baseline", async () => {
   const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Test User"]);
-  repository.run(["config", "user.email", "test@example.com"]);
   writeFileSync(join(repository.path, "tracked.txt"), "base\n");
   repository.run(["add", "tracked.txt"]);
   repository.run(["commit", "--quiet", "-m", "initial"]);
@@ -1005,8 +997,6 @@ test("dirty managed delivery follows its accepted tender as the clean baseline",
 
 test("managed follow retains attached, moved, operating, and unsupported shapes", async () => {
   const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Test User"]);
-  repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const start = repository.run(["rev-parse", "HEAD"]).trim();
   const tender = repository.run(["commit-tree", `${start}^{tree}`, "-p", start], "tender\n").trim();
@@ -1226,8 +1216,6 @@ test("delivery diff leaves probe diagnostics as Git errors", async () => {
 
 test("targetless terminal cleanup retains tender custody for Delivery.diff", async () => {
   const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Test User"]);
-  repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const predecessor = repository.run(["rev-parse", "HEAD"]).trim();
   const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree", gates: ["reviewed"] });
@@ -1430,8 +1418,6 @@ test("claimed target history keeps integration custody after a normal target adv
 
 test("abandon salvages untracked managed-worktree bytes without retaining the worktree", async () => {
   const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Test User"]);
-  repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree", gates: ["reviewed"] });
   await bound.keiyaku.reconcile();
@@ -1457,8 +1443,6 @@ test("abandon salvages untracked managed-worktree bytes without retaining the wo
 
 test("abandon salvages a later managed-worktree commit without retaining the worktree", async () => {
   const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Test User"]);
-  repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree", gates: ["reviewed"] });
   await bound.keiyaku.reconcile();
@@ -1481,15 +1465,11 @@ test("abandon salvages a later managed-worktree commit without retaining the wor
 
 test("abandon retains dirty submodule internals that a recovery snapshot cannot capture", async () => {
   const child = makeGitRepository();
-  child.run(["config", "user.name", "Test User"]);
-  child.run(["config", "user.email", "test@example.com"]);
   writeFileSync(join(child.path, "child.txt"), "child\n");
   child.run(["add", "child.txt"]);
   child.run(["commit", "--quiet", "-m", "child"]);
 
   const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Test User"]);
-  repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const bound = await Keiyaku.bind({
     repo: await Repo.at({ path: repository.path }),
@@ -1518,8 +1498,6 @@ test("abandon retains dirty submodule internals that a recovery snapshot cannot 
 
 test("terminal reconcile removes a delivered managed worktree reset to its sealed start", async () => {
   const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Test User"]);
-  repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const start = repository.run(["rev-parse", "HEAD"]).trim();
   const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree", gates: ["reviewed"] });
@@ -1543,8 +1521,6 @@ test("terminal reconcile removes a delivered managed worktree reset to its seale
 
 test("terminal reconcile removes dirty deliver bytes after following the sealed tender", async () => {
   const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Test User"]);
-  repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree", gates: ["reviewed"] });
   await bound.keiyaku.reconcile();
@@ -1565,8 +1541,6 @@ test("terminal reconcile removes dirty deliver bytes after following the sealed 
 
 test("abandon salvages an unsealed tender parent without retaining the worktree", async () => {
   const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Test User"]);
-  repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const start = repository.run(["rev-parse", "HEAD"]).trim();
   const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree", gates: ["reviewed"] });
@@ -1592,8 +1566,6 @@ test("abandon salvages an unsealed tender parent without retaining the worktree"
 
 test("a clean no-delivery abandonment releases the managed worktree from its start", async () => {
   const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Test User"]);
-  repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree" });
   const start = repository.run(["rev-parse", "HEAD"]).trim();
@@ -1648,8 +1620,6 @@ test("nonempty candidates retain Git start-to-tender ChangeId", async () => {
 
 test("verification materializes the protocol-selected candidate snapshot", async () => {
   const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Test User"]);
-  repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "candidate"]);
   const candidate = mintSnapshotId(repository.run(["rev-parse", "HEAD"]).trim());
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "later head"]);
