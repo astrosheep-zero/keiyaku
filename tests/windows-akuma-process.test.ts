@@ -183,8 +183,9 @@ test("retained launch returns the target pid and release leaves it alive", async
   const pidFile = join(root, "pid");
   const log = join(root, "stdio.log");
   let pid: number | undefined;
+  let owned: Awaited<ReturnType<typeof spawnDetachedProcess>> | undefined;
   try {
-    const owned = await spawnDetachedProcess({
+    owned = await spawnDetachedProcess({
       argv: [
         process.execPath,
         "-e",
@@ -209,6 +210,7 @@ test("retained launch returns the target pid and release leaves it alive", async
       }
       await waitForExit(pid);
     }
+    await owned?.exited;
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -298,9 +300,10 @@ test("Windows retained launch returns while its target remains long-lived", asyn
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-retained-return-"));
   const pidFile = join(root, "pid");
   let pid: number | undefined;
+  let owned: Awaited<ReturnType<typeof spawnDetachedProcess>> | undefined;
   try {
     const started = performance.now();
-    const owned = await spawnDetachedProcess({
+    owned = await spawnDetachedProcess({
       argv: [
         process.execPath,
         "-e",
@@ -322,6 +325,7 @@ test("Windows retained launch returns while its target remains long-lived", asyn
       }
       await waitForExit(pid);
     }
+    await owned?.exited;
     rmSync(root, { recursive: true, force: true });
   }
 });
