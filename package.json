@@ -41,6 +41,8 @@
     "test": "npm run format:check && npm run build && npm run test:architecture && npm run test:maintainability && npm run test:reachability && node --import tsx scripts/run-tests.mjs",
     "test:architecture": "node --import tsx scripts/check-architecture.ts",
     "test:e2e": "npm run build && node scripts/run-tests.mjs tests/packaged-cli.e2e.ts",
+    "test:local": "node scripts/run-tests.mjs --suite local",
+    "test:integration": "node scripts/run-tests.mjs --suite integration",
     "test:maintainability": "node scripts/check-maintainability.js",
     "test:focused": "node scripts/run-tests.mjs",
     "test:focused:serial": "node scripts/run-tests.mjs --test-concurrency=1",
