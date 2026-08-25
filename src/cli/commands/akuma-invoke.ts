@@ -1,5 +1,4 @@
-import { type AkuId, type ActivityHistory } from "../../akuma/index.js";
-import type { ResultRoute } from "../../akuma/akuma.js";
+import { type AkuId, type ActivityHistory, type ResultRoute } from "../../akuma/index.js";
 import {
   Keiyaku,
   type AkumaKillResult,

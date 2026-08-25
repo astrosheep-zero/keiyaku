@@ -18,7 +18,7 @@ import {
 } from "./heart/index.js";
 import type { AkumaPaths } from "./identity.js";
 import type { ProviderAdapter } from "./provider.js";
-import type { ResultRoute } from "./akuma.js";
+import type { ResultRoute } from "./result-route.js";
 import { resolveProviderExecution } from "./providers/index.js";
 import {
   clearBodyRequestTransport,
