@@ -43,6 +43,7 @@
     "test:e2e": "npm run build && node scripts/run-tests.mjs tests/packaged-cli.e2e.ts",
     "test:maintainability": "node scripts/check-maintainability.js",
     "test:focused": "node scripts/run-tests.mjs",
+    "test:focused:serial": "node scripts/run-tests.mjs --test-concurrency=1",
     "test:reachability": "knip --include files,dependencies,unlisted,unresolved,duplicates",
     "test:typecheck": "tsc -p tsconfig.json --noEmit"
   },

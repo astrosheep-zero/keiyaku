@@ -15,9 +15,6 @@ export interface RepositoryWithMainOptions {
 
 export function repositoryWithMain(options: RepositoryWithMainOptions = {}): TestGitRepository {
   const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Test User"]);
-  repository.run(["config", "user.email", "test@example.com"]);
-  repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
   const files = options.files ?? {};
   for (const [relativePath, contents] of Object.entries(files)) {
     const path = join(repository.path, relativePath);
