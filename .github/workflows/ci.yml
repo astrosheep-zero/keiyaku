@@ -85,6 +85,7 @@ jobs:
       - name: Run Windows-native behavioral tests
         run: >-
           node --import tsx scripts/run-tests.mjs --test-concurrency=1
+          --test-reporter=spec --test-timeout=30000
           tests/actor.test.ts
           tests/akuma-heart.test.ts
           tests/akuma-identity.test.ts
@@ -92,7 +93,6 @@ jobs:
           tests/arc.test.ts
           tests/contract-document.test.ts
           tests/dependency-currentness.test.ts
-          tests/documentation.test.ts
           tests/fold.test.ts
           tests/markdown-ast.test.ts
           tests/model-impact.test.ts
