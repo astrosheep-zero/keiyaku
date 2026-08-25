@@ -1153,6 +1153,8 @@ test("tell after an already stopped Body wakes the same Akuma through its retain
     assert.equal((await handle.status()).life, "asleep");
     assert.equal((await handle.status()).timeline.kind === "idle"
       && (await handle.status()).timeline.outcome?.outcome.kind === "answered", true);
+    await handle.kill();
+    await handle.wait((status) => status.life !== "running");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1190,6 +1192,7 @@ test("kill returns before its successor recovery settles", async () => {
     assert.equal(await killAkumaWithRecovery(allocated.paths, async () => await recovery), "already-stopped");
     assert.equal(recoverySettled, false);
     recoveryReleased();
+    await recovery;
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1248,13 +1251,18 @@ test("interrupt records a tell only after taking an idle leash", async () => {
     });
     rmSync(seat, { recursive: true, force: true });
 
-    const receipt = await (await akumaAt(root)).of({ id: allocated.id }).interrupt("next");
+    const handle = (await akumaAt(root)).of({ id: allocated.id });
+    const receipt = await handle.interrupt("next");
     assert.equal(receipt.kind, "interrupted");
     if (receipt.kind !== "interrupted" || "kind" in receipt.tell) return;
     assert.equal(receipt.putDown, "was-idle");
     assert.equal(typeof receipt.tell.wake, "object");
     assert.equal(await pauseRequested(allocated.paths), false);
     assert.deepEqual((await readHeart(allocated.paths)).pending.map((tell) => tell.id), [receipt.tell.admission.tellId]);
+    if (receipt.tell.wake.kind === "pursuing") {
+      await handle.kill();
+      await handle.wait();
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1306,7 +1314,8 @@ test("interrupt waits for a running body to self-abort before recording the tell
     while ((await readHeart(allocated.paths)).latestBody === null) await new Promise((resolve) => setTimeout(resolve, 5));
     rmSync(seat, { recursive: true, force: true });
 
-    const receipt = await (await akumaAt(root)).of({ id: allocated.id }).interrupt("replace it");
+    const handle = (await akumaAt(root)).of({ id: allocated.id });
+    const receipt = await handle.interrupt("replace it");
     await body;
     assert.equal(receipt.kind, "interrupted");
     if (receipt.kind !== "interrupted") return;
@@ -1314,6 +1323,10 @@ test("interrupt waits for a running body to self-abort before recording the tell
     assert.equal(aborted, true);
     assert.equal((await readHeart(allocated.paths)).latestBody?.end, "put-down");
     assert.equal(await pauseRequested(allocated.paths), false);
+    if (receipt.tell.wake.kind === "pursuing") {
+      await handle.kill();
+      await handle.wait();
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

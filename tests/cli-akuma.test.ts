@@ -15,7 +15,7 @@ import type { ProviderAdapter } from "../src/akuma/provider.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { BodyRequestPump } from "../src/akuma/request-serve.js";
 import { executeKillAkuma, executeTellAkuma, executeWaitAkuma } from "../src/library/fleet.js";
-import type { AkumaObservation } from "../src/index.js";
+import { Keiyaku, type AkumaObservation } from "../src/index.js";
 import { invoke } from "../src/cli/invoke.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
 import { akumaExitCode, akumaJsonValue, akumaRawAnswer, renderAkumaText } from "../src/cli/render/akuma.js";
@@ -1227,9 +1227,16 @@ test("CLI call launches with or without a recognized Square listener", async () 
       readStdin: async () => "prompt",
     });
     assert.equal(result.kind, "akuma");
-    if (result.kind === "akuma" && result.action === "call")
+    if (result.kind === "akuma" && result.action === "call") {
       assert.deepEqual(result.result.observation, { kind: "detached" });
-    assert.equal(existsSync(join(root, ".keiyaku", "akuma", "run")), true);
+      const id = result.result.akuma;
+      assert.equal(existsSync(join(root, ".keiyaku", "akuma", "run")), true);
+      const status = await Keiyaku.status({ path: root, akuma: id });
+      if (status.status.life === "running") {
+        await Keiyaku.kill({ path: root, akuma: [id] });
+        await Keiyaku.wait({ path: root, akuma: [id] });
+      }
+    }
   } finally {
     if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
     else process.env[AKUMA_REQUESTS_ENV] = previousRequests;

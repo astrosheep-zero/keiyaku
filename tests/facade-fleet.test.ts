@@ -9,7 +9,7 @@ import { driveAkumaBody } from "../src/akuma/body.js";
 import { HeldAkumaLeash, appendActivity, beginTurn, endTurn, initializeHeart, readHeart, recordSession, recordTell } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
-import { AkumaNotBornError } from "../src/akuma/akuma.js";
+import { Akuma, AkumaNotBornError } from "../src/akuma/akuma.js";
 import { AkumaWorldScopeError, Keiyaku, Repo } from "../src/index.js";
 import { invoke } from "../src/cli/invoke.js";
 import { main } from "../src/cli/main.js";
@@ -291,6 +291,7 @@ test("plural wait carries unused allowance and keeps pins after exhaustion", asy
 
 test("status and wait do not fabricate a settled Tell; tell and kill receipts do not", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-tell-pin-"));
+  let held: HeldAkumaLeash | undefined;
   try {
     const source = await answered(root, "worker", "00000001");
     const hasTold = (entries: Awaited<ReturnType<typeof Keiyaku.status>>["status"]["timeline"]["entries"]) =>
@@ -304,6 +305,7 @@ test("status and wait do not fabricate a settled Tell; tell and kill receipts do
     if (killed.results[0]!.observation.kind === "observed") {
       assert.equal(hasTold(killed.results[0]!.observation.status.timeline.entries), false);
     }
+    held = (await HeldAkumaLeash.try(source.paths))!;
     const told = await Keiyaku.tell({ path: root, akuma: source.id, body: "continue" });
     assert.equal(told.observation.kind, "observed");
     if (told.observation.kind === "observed") {
@@ -313,14 +315,17 @@ test("status and wait do not fabricate a settled Tell; tell and kill receipts do
       assert.equal(hasTold(told.observation.status.timeline.entries), false);
     }
   } finally {
+    held?.release();
     rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("facade tell preserves mutation authority beside a separate observation", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-tell-"));
+  let held: HeldAkumaLeash | undefined;
   try {
     const source = await answered(root, "worker", "00000001");
+    held = (await HeldAkumaLeash.try(source.paths))!;
     const result = await Keiyaku.tell({ path: root, akuma: source.id, body: "continue" });
     assert.equal(result.akuma, source.id);
     assert.equal(result.tell.admission.fact, "recorded");
@@ -331,6 +336,7 @@ test("facade tell preserves mutation authority beside a separate observation", a
     assert.equal("receipt" in result, false);
     assert.equal("status" in result, false);
   } finally {
+    held?.release();
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -912,6 +918,7 @@ test("creator testimony appears on every Fleet observation carrier", async () =>
   const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-created-tasks-"));
   try {
     const worker = await answered(root, "worker", "00000001");
+    const workerHandle = Akuma.of(await World.at(root)).of({ id: worker.id });
     const reviewer = await answered(root, "reviewer", "00000002");
     const world = await World.at(root);
     writeCreatorTask(world, creatorTask({
@@ -945,6 +952,7 @@ test("creator testimony appears on every Fleet observation carrier", async () =>
     assert.deepEqual(interrupted.observation.createdTasks, { kind: "present", rows: workerRows });
     const killed = await Keiyaku.kill({ path: root, akuma: [worker.id] });
     assert.deepEqual(killed.results[0]!.observation.createdTasks, { kind: "present", rows: workerRows });
+    await workerHandle.wait();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -989,6 +997,7 @@ test("Task board failure keeps Fleet status and aggregate members", async () => 
   const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-created-failed-"));
   try {
     const worker = await answered(root, "worker", "00000001");
+    const workerHandle = Akuma.of(await World.at(root)).of({ id: worker.id });
     const reviewer = await answered(root, "reviewer", "00000002");
     mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });
     writeFileSync(join(root, ".keiyaku", "tasks", "bad.md"), "not a task document\n");
@@ -1017,6 +1026,8 @@ test("Task board failure keeps Fleet status and aggregate members", async () => 
     assert.equal(killed.results[0]!.id, reviewer.id);
     assert.equal(killed.results[0]!.evidence, "already-stopped");
     assert.deepEqual(killed.results[0]!.observation.createdTasks, status.createdTasks);
+    await Keiyaku.kill({ path: root, akuma: [worker.id] });
+    await workerHandle.wait();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
