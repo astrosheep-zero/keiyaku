@@ -1,28 +1,20 @@
-import { access, mkdir, readFile, readdir, rm } from "node:fs/promises";
-import { join } from "node:path";
-import { abortableDelay } from "./abort.js";
 import {
-  HeldAkumaLeash,
   admitRequest,
-  readNonterminalRequests,
   readRequest,
-  readSoul,
   refuseRequest,
   reserveRequest,
-  serveRequest,
+  serveRequest as serveChildRequest,
   serveUpstreamRequest,
   voidRequest,
   type KillEvidence,
   type RequestFact,
-  type Soul,
   type UpstreamRequestService,
 } from "./heart/index.js";
-import { pathsForAkuId, worldRootForAkumaPaths, type AkuId, type AkumaPaths } from "./identity.js";
-import { BIRTH_TIMEOUT_MS, publishAkuma } from "./publication.js";
+import { worldRootForAkumaPaths, type AkuId } from "./identity.js";
+import { publishAkuma } from "./publication.js";
 import {
   atomicJson,
   canonicalAkuId,
-  decodeClaim,
   decodeRecipe,
   receiptPath,
   type RequestReceipt,
@@ -33,15 +25,14 @@ import {
 } from "./request-wire.js";
 import { isTaskMutationAction, type TaskMutationRequest } from "../task/mutation.js";
 import { executeRequest } from "./request-execution.js";
-import type { OwnedProcess } from "../runtime/proc/run.js";
+import {
+  BodyRequestPump as LifecycleBodyRequestPump,
+  type RequestChildLaunch as LifecycleRequestChildLaunch,
+  type PumpInput as LifecyclePumpInput,
+} from "./request-lifecycle.js";
+export { clearBodyRequestTransport, settleBodyRequests } from "./request-lifecycle.js";
 
-const POLL_MS = 100;
-
-export type RequestChildLaunch = Readonly<{
-  paths: AkumaPaths;
-  seed: Omit<Soul, "createdAt">;
-  initialBody: string;
-}>;
+export type RequestChildLaunch = LifecycleRequestChildLaunch;
 
 type UpstreamCall = Readonly<{ signal: AbortSignal }>;
 type RequesterCall = UpstreamCall & Readonly<{ requester: AkuId }>;
@@ -94,18 +85,11 @@ export type UpstreamExecutionPort = Readonly<{
   ): Promise<unknown>;
 }>;
 
-type PumpInput = Readonly<{
-  paths: AkumaPaths;
-  parent: Soul;
-  bodySequence: number;
-  now(): string;
-  spawn(launch: RequestChildLaunch): Promise<OwnedProcess | void>;
-  upstream?: UpstreamExecutionPort;
-  signal: AbortSignal;
-}>;
+type PumpInput = Omit<LifecyclePumpInput, "upstream"> & Readonly<{ upstream?: UpstreamExecutionPort }>;
 export type ServeInput = Omit<PumpInput, "bodySequence"> &
   Readonly<{
     directory: string;
+    transportId: string;
     claim: StructuralRequestClaim;
     admissionOpen(): boolean;
   }>;
@@ -180,7 +164,12 @@ function receiptFor(fact: RequestFact): RequestReceipt | null {
   return null;
 }
 
-async function projectReceipt(directory: string, fact: RequestFact, outcome?: UpstreamRequestOutcome): Promise<void> {
+async function projectReceipt(
+  directory: string,
+  transportId: string,
+  fact: RequestFact,
+  outcome?: UpstreamRequestOutcome,
+): Promise<void> {
   const receipt =
     outcome === undefined
       ? receiptFor(fact)
@@ -189,7 +178,7 @@ async function projectReceipt(directory: string, fact: RequestFact, outcome?: Up
         : { id: fact.id, action: fact.action, state: "served" as const, outcome };
   if (receipt === null) return;
   try {
-    await atomicJson(receiptPath(directory, fact.id), receipt);
+    await atomicJson(receiptPath(directory, transportId), receipt);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
@@ -208,12 +197,12 @@ async function serveCall(
   let fact = await admitRequest(input.paths, { ...input.claim, recipe, admittedAt: input.now() } as never);
   const existing = receiptFor(fact);
   if (existing !== null) {
-    await projectReceipt(input.directory, fact);
+    await projectReceipt(input.directory, input.transportId, fact);
     return;
   }
   if (!input.admissionOpen()) {
     fact = await voidRequest(input.paths, input.claim.id, "body closed request admission");
-    await projectReceipt(input.directory, fact);
+    await projectReceipt(input.directory, input.transportId, fact);
     return;
   }
   if (fact.action !== "akuma.call" || fact.state !== "admitted") {
@@ -223,7 +212,7 @@ async function serveCall(
   const world = worldRootForAkumaPaths(input.paths);
   if (request.world !== world) {
     fact = await refuseRequest(input.paths, request.id, `request world ${request.world} does not match ${world}`);
-    await projectReceipt(input.directory, fact);
+    await projectReceipt(input.directory, input.transportId, fact);
     return;
   }
   try {
@@ -255,7 +244,7 @@ async function serveCall(
         });
       },
     });
-    fact = await serveRequest(input.paths, request.id, published.id);
+    fact = await serveChildRequest(input.paths, request.id, published.id);
   } catch (error) {
     const current = await readRequest(input.paths, request.id);
     if (current === null) throw error;
@@ -264,7 +253,7 @@ async function serveCall(
         ? await voidRequest(input.paths, request.id, diagnostic(error))
         : current;
   }
-  await projectReceipt(input.directory, fact);
+  await projectReceipt(input.directory, input.transportId, fact);
 }
 
 function failure(error: unknown): UpstreamRequestFailure {
@@ -297,11 +286,11 @@ async function serveUpstream(
   } as never);
   const existing = receiptFor(fact);
   if (existing !== null) {
-    await projectReceipt(input.directory, fact);
+    await projectReceipt(input.directory, input.transportId, fact);
     return;
   }
   if (fact.state === "served") {
-    await projectReceipt(input.directory, fact, {
+    await projectReceipt(input.directory, input.transportId, fact, {
       kind: "failed",
       failure: {
         kind: "failed",
@@ -312,7 +301,7 @@ async function serveUpstream(
   }
   if (!input.admissionOpen()) {
     fact = await voidRequest(input.paths, input.claim.id, "body closed request admission");
-    await projectReceipt(input.directory, fact);
+    await projectReceipt(input.directory, input.transportId, fact);
     return;
   }
   if (fact.state !== "admitted" || fact.action === "akuma.call") {
@@ -328,194 +317,27 @@ async function serveUpstream(
   } catch (error) {
     outcome = { kind: "failed", failure: failure(error) };
     fact = await voidRequest(input.paths, request.id, "body failed before serving the request");
-    await projectReceipt(input.directory, fact);
+    await projectReceipt(input.directory, input.transportId, fact);
     return;
   }
   fact =
     service === undefined
       ? await voidRequest(input.paths, request.id, "body completed without a durable Contract fact reference")
       : await serveUpstreamRequest(input.paths, request.id, service);
-  await projectReceipt(input.directory, fact, outcome);
+  await projectReceipt(input.directory, input.transportId, fact, outcome);
 }
 
-async function serve(input: ServeInput): Promise<void> {
+export async function serveRequest(input: ServeInput): Promise<void> {
   return input.claim.action === "akuma.call"
     ? await serveCall({ ...input, claim: input.claim })
     : await serveUpstream({ ...input, claim: input.claim });
 }
 
-async function requestFiles(directory: string): Promise<readonly string[]> {
-  try {
-    return (await readdir(directory)).filter((name) => name.endsWith(".request.json")).sort();
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw error;
-  }
-}
-
-export class BodyRequestPump {
-  readonly directory: string;
-  readonly failure: Promise<never>;
-  private readonly closeSignal = new AbortController();
-  private readonly executionSignal = new AbortController();
-  private readonly handled = new Set<string>();
-  private readonly running: Promise<void>;
-  private readonly cancelBody: () => void;
-  private admissionClosed = false;
-
-  private constructor(private readonly input: PumpInput) {
-    this.directory = join(input.paths.directory, "requests", String(input.bodySequence));
-    this.cancelBody = () => {
-      this.stopAdmission();
-      if (!this.executionSignal.signal.aborted) {
-        this.executionSignal.abort(input.signal.reason);
-      }
-    };
-    input.signal.addEventListener("abort", this.cancelBody, { once: true });
-    if (input.signal.aborted) this.cancelBody();
-    this.running = this.run();
-    this.failure = this.running.then(
-      () => new Promise<never>(() => {}),
-      (error: unknown) => Promise.reject(error),
-    );
-  }
-
+export class BodyRequestPump extends LifecycleBodyRequestPump {
   static async open(input: PumpInput): Promise<BodyRequestPump> {
-    await mkdir(join(input.paths.directory, "requests", String(input.bodySequence)), { recursive: true });
-    return new BodyRequestPump(input);
+    return (await LifecycleBodyRequestPump.openWithService(
+      input as LifecyclePumpInput,
+      async (claim) => await serveRequest(claim as ServeInput),
+    )) as BodyRequestPump;
   }
-
-  private async run(): Promise<void> {
-    while (!this.closeSignal.signal.aborted) {
-      for (const name of await requestFiles(this.directory)) {
-        if (this.closeSignal.signal.aborted) return;
-        const id = name.slice(0, -".request.json".length);
-        if (this.handled.has(id)) continue;
-        const path = join(this.directory, name);
-        const claim = decodeClaim(await readFile(path, "utf8"), id);
-        if (claim === null) {
-          await rm(path, { force: true });
-          this.handled.add(id);
-          continue;
-        }
-        if (!this.admissionClosed) {
-          await serve({
-            directory: this.directory,
-            claim,
-            ...this.input,
-            signal: this.executionSignal.signal,
-            admissionOpen: () => !this.admissionClosed,
-          });
-        }
-        this.handled.add(id);
-      }
-      try {
-        await abortableDelay(POLL_MS, this.closeSignal.signal);
-      } catch (error) {
-        if (this.closeSignal.signal.aborted) return;
-        throw error;
-      }
-    }
-  }
-
-  async close(): Promise<void> {
-    this.stopAdmission();
-    try {
-      await this.running;
-    } finally {
-      this.input.signal.removeEventListener("abort", this.cancelBody);
-      await rm(this.directory, { recursive: true, force: true });
-    }
-  }
-
-  stopAdmission(): void {
-    this.admissionClosed = true;
-    if (!this.closeSignal.signal.aborted) {
-      this.closeSignal.abort(new Error("Body request pump closed"));
-    }
-  }
-}
-
-export async function clearBodyRequestTransport(paths: AkumaPaths): Promise<void> {
-  await rm(join(paths.directory, "requests"), { recursive: true, force: true });
-}
-
-function matchingRequestOrigin(soul: Soul, parent: AkuId, id: string): boolean {
-  return soul.origin.kind === "request" && soul.origin.parent === parent && soul.origin.requestId === id;
-}
-
-async function settleReservedSoul(
-  paths: AkumaPaths,
-  parent: Soul,
-  request: Extract<RequestFact, { state: "reserved" }>,
-  soul: Soul,
-): Promise<void> {
-  await (matchingRequestOrigin(soul, parent.id, request.id)
-    ? serveRequest(paths, request.id, request.child)
-    : voidRequest(paths, request.id, "reserved child origin does not match the request"));
-}
-
-async function settleReserved(
-  paths: AkumaPaths,
-  parent: Soul,
-  request: Extract<RequestFact, { state: "reserved" }>,
-  now: () => string,
-  signal?: AbortSignal,
-): Promise<boolean> {
-  const childPaths = pathsForAkuId(request.world, request.child);
-  const deadline = performance.now() + BIRTH_TIMEOUT_MS;
-  for (;;) {
-    signal?.throwIfAborted();
-    if (
-      !(await access(childPaths.directory).then(
-        () => true,
-        () => false,
-      ))
-    ) {
-      await voidRequest(paths, request.id, "reserved child directory is absent");
-      return true;
-    }
-    const soul = await readSoul(childPaths);
-    if (soul !== null) {
-      await settleReservedSoul(paths, parent, request, soul);
-      return true;
-    }
-    const leash = await HeldAkumaLeash.try(childPaths);
-    if (leash !== null) {
-      try {
-        const settled = await readSoul(childPaths);
-        if (settled !== null) {
-          await settleReservedSoul(paths, parent, request, settled);
-        } else {
-          await leash.sealIfUnborn(childPaths, {
-            evidence: "request settlement",
-            at: now(),
-          });
-          await voidRequest(paths, request.id, "reserved child was sealed unborn");
-        }
-      } finally {
-        leash.release();
-      }
-      return true;
-    }
-    if (performance.now() >= deadline) return false;
-    await abortableDelay(Math.min(POLL_MS, Math.max(0, deadline - performance.now())), signal);
-  }
-}
-
-export async function settleBodyRequests(
-  paths: AkumaPaths,
-  parent: Soul,
-  now: () => string,
-  signal?: AbortSignal,
-): Promise<"settled" | "pending"> {
-  let pending = false;
-  for (const request of await readNonterminalRequests(paths)) {
-    signal?.throwIfAborted();
-    if (request.state === "admitted") {
-      await voidRequest(paths, request.id, "body died before serving the request");
-    } else if (request.state === "reserved" && !(await settleReserved(paths, parent, request, now, signal)))
-      pending = true;
-  }
-  return pending ? "pending" : "settled";
 }
