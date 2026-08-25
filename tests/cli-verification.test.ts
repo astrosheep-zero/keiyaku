@@ -13,7 +13,6 @@ async function repositoryWithCandidate() {
   const raw = makeGitRepository();
   raw.run(["config", "user.name", "Test User"]);
   raw.run(["config", "user.email", "test@example.com"]);
-  raw.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
   raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const target = raw.run(["rev-parse", "HEAD"]).trim();
   raw.run(["checkout", "--quiet", "-b", "feature"]);

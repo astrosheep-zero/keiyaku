@@ -17,7 +17,6 @@ test("empty Git read observation memoizes refs without starting object transport
   const repository = makeGitRepository();
   repository.run(["config", "user.name", "Test User"]);
   repository.run(["config", "user.email", "test@example.com"]);
-  repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const log = join(repository.path, "git-read-observation.log");
   writeFileSync(log, "");

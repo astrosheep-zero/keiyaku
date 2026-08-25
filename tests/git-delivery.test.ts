@@ -109,7 +109,6 @@ async function targetedContract(gates: readonly string[] = []) {
   const repository = makeGitRepository();
   repository.run(["config", "user.name", "Test User"]);
   repository.run(["config", "user.email", "test@example.com"]);
-  repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
   writeFileSync(join(repository.path, "shared.txt"), "base\n");
   repository.run(["add", "shared.txt"]);
   repository.run(["commit", "--quiet", "-m", "initial"]);
@@ -133,7 +132,6 @@ async function directoryReplacementContract(ignore = "artifact/*.tmp\n") {
   const repository = makeGitRepository();
   repository.run(["config", "user.name", "Test User"]);
   repository.run(["config", "user.email", "test@example.com"]);
-  repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
   mkdirSync(join(repository.path, "artifact"));
   writeFileSync(join(repository.path, ".gitignore"), ignore);
   writeFileSync(join(repository.path, "artifact", "tracked.txt"), "tracked\n");
@@ -1230,7 +1228,6 @@ test("targetless terminal cleanup retains tender custody for Delivery.diff", asy
   const repository = makeGitRepository();
   repository.run(["config", "user.name", "Test User"]);
   repository.run(["config", "user.email", "test@example.com"]);
-  repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const predecessor = repository.run(["rev-parse", "HEAD"]).trim();
   const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree", gates: ["reviewed"] });

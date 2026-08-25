@@ -64,7 +64,6 @@ async function repositoryFixture() {
   const raw = makeGitRepository();
   raw.run(["config", "user.name", "Test User"]);
   raw.run(["config", "user.email", "test@example.com"]);
-  raw.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
   raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   return { raw, repo: await Repo.at({ path: raw.path }), git: await repositoryAt(raw.path) };
 }

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readManagedWorktreeAppointment } from "../../src/workspace-place.js";
@@ -44,9 +44,10 @@ export function withGitShim<T>(
 export function makeGitRepository(): TestGitRepository {
   const path = mkdtempSync(join(tmpdir(), "keiyaku-v4-"));
   execFileSync("git", ["init", "--quiet", "--initial-branch=main", path]);
-  execFileSync("git", ["-C", path, "config", "user.name", "Keiyaku Test"]);
-  execFileSync("git", ["-C", path, "config", "user.email", "keiyaku-test@example.invalid"]);
-  execFileSync("git", ["-C", path, "config", "core.autocrlf", "false"]);
+  appendFileSync(
+    join(path, ".git", "config"),
+    "\n[user]\n\tname = Keiyaku Test\n\temail = keiyaku-test@example.invalid\n[core]\n\tautocrlf = false\n",
+  );
   const run = (args: readonly string[], input?: string | Uint8Array): string =>
     execFileSync("git", ["-C", path, ...args], { input, encoding: "utf8" }).toString();
   return { path, run };

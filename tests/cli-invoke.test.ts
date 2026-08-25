@@ -204,7 +204,6 @@ test("an implicit Contract call refuses before creating its candidate World", as
   const repository = makeGitRepository();
   repository.run(["config", "user.name", "Test User"]);
   repository.run(["config", "user.email", "test@example.com"]);
-  repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
   repository.run(["commit", "--quiet", "--allow-empty", "-m", "initial"]);
   const marker = resolve(repository.path, ".keiyaku");
   assert.equal(existsSync(marker), false);
@@ -1326,7 +1325,6 @@ test("history kei/... reads Contract history through Repo without an Akuma World
   const foreign = makeGitRepository();
   foreign.run(["config", "user.name", "Test User"]);
   foreign.run(["config", "user.email", "test@example.com"]);
-  foreign.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
   foreign.run(["commit", "--allow-empty", "--quiet", "-m", "foreign"]);
   const result = await invoke(parseArgv(["--repo", repository.path, "history", id]), {
     cwd: foreign.path,

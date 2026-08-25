@@ -35,7 +35,6 @@ function repository() {
   const value = makeGitRepository();
   value.run(["config", "user.name", "Test User"]);
   value.run(["config", "user.email", "test@example.com"]);
-  value.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
   value.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   writeFileSync(join(value.path, ".git", "info", "exclude"), ".keiyaku/locks/\n");
   return value;

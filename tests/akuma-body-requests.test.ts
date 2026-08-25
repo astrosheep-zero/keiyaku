@@ -782,7 +782,6 @@ test("CLI forwarded deliver preserves its selected Repo and uses parent Settings
   for (const repository of [parentRepository, contractRepository]) {
     repository.run(["config", "user.name", "Test User"]);
     repository.run(["config", "user.email", "test@example.com"]);
-    repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
     repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   }
   const root = await World.at(parentRepository.path);
