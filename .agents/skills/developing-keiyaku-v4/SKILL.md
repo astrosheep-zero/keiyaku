@@ -127,9 +127,9 @@ scan can run together. Give each lane one bounded responsibility and one
 observable handoff; serialize only the part that truly depends on another
 lane's result.
 
-To finish a Contract that declares the `reviewed` gate:
+When a Contract's declared gates include `reviewed`:
 
-1. Send an independent reviewer the exact Contract worktree and wait for its
+1. Send a reviewer the exact Contract worktree and wait for its
    completed report or review receipt. If it should record the verdict itself,
    dispatch it with `--allowed contract.review` and state both verdicts in the brief.
 2. If it reports blocking findings, fix the worktree and review the changed
