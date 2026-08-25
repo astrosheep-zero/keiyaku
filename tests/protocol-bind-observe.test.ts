@@ -12,7 +12,7 @@ import {
   DELIVERY_REF_NAMESPACE,
   readBlob,
   readGit,
-  repositoryAt,
+  repositoryAt as productionRepositoryAt,
   updateGitTree,
   updateRefsAtomically,
   writeBlob,
@@ -47,7 +47,9 @@ import { admitIntent } from "../src/protocol/intent.js";
 import { admitPlacement } from "../src/protocol/placement.js";
 import { runProtocol } from "../src/protocol/run.js";
 import { appointManagedWorktrees, readManagedWorktreeAppointment } from "../src/workspace-place.js";
-import { makeGitRepository, observeContract, withGitShim } from "./support/git.js";
+import { cachedRepositoryAt, makeGitRepository, observeContract, withGitShim } from "./support/git.js";
+
+const repositoryAt = cachedRepositoryAt;
 
 const NO_VERIFICATION = { kind: "prepared", data: null } as const;
 const DELIVERY_DOCUMENT = "# Contract\n";
@@ -223,7 +225,7 @@ test("refuses malformed structured bind observations", async () => {
     {},
     async (gitPath) => {
       await assert.rejects(
-        observeBindCoordinates(await repositoryAt(repository.path, gitPath), {
+        observeBindCoordinates(await productionRepositoryAt(repository.path, gitPath), {
           kind: "explicit",
           target: "refs/heads/main",
         }),
@@ -290,7 +292,7 @@ test("batches full Contract observation through one call-scoped object process",
     "if [ \"$1\" = \"cat-file\" ]; then printf '%s\\n' \"$*\" >> \"$KEIYAKU_READ_LOG\"; fi\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     { KEIYAKU_READ_LOG: log },
     async (gitPath) => {
-      const git = await repositoryAt(repository.path, gitPath);
+      const git = await productionRepositoryAt(repository.path, gitPath);
       return withGitDecodeChannel(git, (channel) => withGitReadObservation(git, channel, observeContractWorld));
     },
   );
@@ -334,7 +336,7 @@ test("known publication failure is returned without a post-result ref read", asy
     KEIYAKU_PUBLICATION_FAILED: failed,
     KEIYAKU_POST_FAILURE_READ: postRead,
   }, async (gitPath) => {
-    const scoped = await repositoryAt(repository.path, gitPath);
+    const scoped = await productionRepositoryAt(repository.path, gitPath);
     return withGitDecodeChannel(scoped, async (channel) => {
       const observation = await observeContractsForAdmissionAt(scoped, channel, [id]);
       const attempt = { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV")] };
@@ -494,7 +496,7 @@ async function amendObjectIo(
     "printf '%s\\n' \"$*\" >> \"$KEIYAKU_READ_LOG\"\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     { KEIYAKU_READ_LOG: log },
     async (gitPath) => amendOperation({
-      scope: await repositoryAt(repository.effectiveCwd, gitPath),
+      scope: await productionRepositoryAt(repository.effectiveCwd, gitPath),
       contractId: id,
       source: state.terms,
       terms: state.terms,
@@ -518,7 +520,7 @@ async function amendBatchRequests(
     "fi",
     'exec "$KEIYAKU_REAL_GIT" "$@"',
   ].join("\n"), { KEIYAKU_BATCH_OID_LOG: log }, async (gitPath) => amendOperation({
-    scope: await repositoryAt(repository.effectiveCwd, gitPath),
+    scope: await productionRepositoryAt(repository.effectiveCwd, gitPath),
     contractId: id,
     source: state.terms,
     terms: state.terms,
@@ -573,7 +575,7 @@ test("bind reobserves and atomically asserts target coordinates after Git moveme
     KEIYAKU_MOVED_TARGET: moved,
     KEIYAKU_OLD_TARGET: predecessor,
   }, async (gitPath) => bindOperation({
-    scope: await repositoryAt(repository.path, gitPath),
+    scope: await productionRepositoryAt(repository.path, gitPath),
     title: "Moving target",
     terms: terms([]),
     targetSelection: { kind: "explicit", target: "refs/heads/release" },
@@ -625,7 +627,7 @@ test("bind never restores a targeted checkout that moved to a same-OID branch", 
     "fi",
     'exec "$KEIYAKU_REAL_GIT" "$@"',
   ].join("\n"), {}, async (gitPath) => bindOperation({
-    scope: await repositoryAt(repository.path, gitPath),
+    scope: await productionRepositoryAt(repository.path, gitPath),
     title: "Same OID checkout movement",
     terms: terms([]),
     targetSelection: { kind: "explicit", target: "refs/heads/main" },
@@ -656,7 +658,7 @@ test("current-branch bind reobserves and asserts the attached branch after Git m
     KEIYAKU_MOVED_TARGET: moved,
     KEIYAKU_OLD_TARGET: predecessor,
   }, async (gitPath) => bindOperation({
-    scope: await repositoryAt(repository.path, gitPath),
+    scope: await productionRepositoryAt(repository.path, gitPath),
     title: "Moving current branch",
     terms: terms([]),
     targetSelection: { kind: "current-branch" },
@@ -686,7 +688,7 @@ test("targetless bind reobserves a different HEAD OID after atomic verification 
     "fi",
     'exec "$KEIYAKU_REAL_GIT" "$@"',
   ].join("\n"), { KEIYAKU_BIND_MARKER: marker }, async (gitPath) => bindOperation({
-    scope: await repositoryAt(repository.path, gitPath),
+    scope: await productionRepositoryAt(repository.path, gitPath),
     title: "Different OID checkout movement",
     terms: terms([]),
     workspace: "worktree",
@@ -1242,7 +1244,7 @@ test("placement redecides after a world advance without binding a dependent", as
     shim,
     { KEIYAKU_RACE_MARKER: marker, KEIYAKU_RACE_JOURNAL: dependentJournal },
     async (gitPath) => {
-      const scoped = await repositoryAt(repository.path, gitPath);
+      const scoped = await productionRepositoryAt(repository.path, gitPath);
       return withGitDecodeChannel(scoped, (channel) => admitPlacement({
         channel,
         repository: scoped,

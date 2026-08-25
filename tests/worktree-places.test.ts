@@ -21,7 +21,6 @@ import {
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import { contractId } from "../src/core/facts/types.js";
 import { worktreePath } from "../src/git/workspace.js";
-import { repositoryAt } from "../src/git/repository.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { resolveContextualContract } from "../src/cli/selectors.js";
 import { invoke } from "../src/cli/invoke.js";
@@ -31,7 +30,9 @@ import { readContractObservationAt } from "../src/protocol/read/status.js";
 import { Keiyaku, Repo, type ContractBoard, type ContractId } from "../src/index.js";
 import { Tasks } from "../src/task/index.js";
 import { World } from "../src/world.js";
-import { makeGitRepository } from "./support/git.js";
+import { cachedRepositoryAt, makeGitRepository } from "./support/git.js";
+
+const repositoryAt = cachedRepositoryAt;
 import * as workspace from "../src/git/workspace.js";
 
 const EXAMPLE = contractId("kei/example");
