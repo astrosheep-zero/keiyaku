@@ -4,6 +4,15 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      windows_test_files:
+        description: "Space-separated Windows native test files (empty runs the native suite)"
+        required: false
+        default: ""
+      windows_test_name:
+        description: "Optional Node test name pattern for the Windows native suite"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -83,29 +92,50 @@ jobs:
         run: npm run build
 
       - name: Run Windows-native behavioral tests
-        run: >-
-          node --import tsx scripts/run-tests.mjs --test-concurrency=1
-          --test-reporter=spec --test-timeout=30000
-          tests/actor.test.ts
-          tests/akuma-heart.test.ts
-          tests/akuma-identity.test.ts
-          tests/amend-body.test.ts
-          tests/arc.test.ts
-          tests/contract-document.test.ts
-          tests/dependency-currentness.test.ts
-          tests/fold.test.ts
-          tests/markdown-ast.test.ts
-          tests/model-impact.test.ts
-          tests/namespace-context.test.ts
-          tests/normalized-identity.test.ts
-          tests/observation.test.ts
-          tests/runtime-proc.test.ts
-          tests/windows-akuma-process.test.ts
-          tests/settings.test.ts
-          tests/sqlite-transaction-lock.test.ts
-          tests/task-document.test.ts
-          tests/task-operations.test.ts
-          tests/world.test.ts
+        env:
+          WINDOWS_TEST_FILES: ${{ inputs.windows_test_files }}
+          WINDOWS_TEST_NAME: ${{ inputs.windows_test_name }}
+        shell: pwsh
+        run: |
+          $nodeArgs = @(
+            "--import", "tsx",
+            "scripts/run-tests.mjs",
+            "--test-concurrency=1",
+            "--test-reporter=spec",
+            "--test-timeout=30000"
+          )
+          if ($env:WINDOWS_TEST_NAME.Trim()) {
+            $nodeArgs += "--test-name-pattern"
+            $nodeArgs += $env:WINDOWS_TEST_NAME
+          }
+          if ($env:WINDOWS_TEST_FILES.Trim()) {
+            $nodeArgs += @($env:WINDOWS_TEST_FILES -split "\s+" | Where-Object { $_ })
+          } else {
+            $nodeArgs += @(
+              "tests/actor.test.ts",
+              "tests/akuma-heart.test.ts",
+              "tests/akuma-identity.test.ts",
+              "tests/amend-body.test.ts",
+              "tests/arc.test.ts",
+              "tests/contract-document.test.ts",
+              "tests/dependency-currentness.test.ts",
+              "tests/fold.test.ts",
+              "tests/markdown-ast.test.ts",
+              "tests/model-impact.test.ts",
+              "tests/namespace-context.test.ts",
+              "tests/normalized-identity.test.ts",
+              "tests/observation.test.ts",
+              "tests/runtime-proc.test.ts",
+              "tests/windows-akuma-process.test.ts",
+              "tests/settings.test.ts",
+              "tests/sqlite-transaction-lock.test.ts",
+              "tests/task-document.test.ts",
+              "tests/task-operations.test.ts",
+              "tests/world.test.ts"
+            )
+          }
+          & node @nodeArgs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Check patch whitespace
         run: git diff --check
