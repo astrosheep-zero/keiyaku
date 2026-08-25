@@ -630,12 +630,19 @@ test("kill evaluates stranded pending Tell recovery exactly once", async () => {
     });
     leash.release();
     let recoveries = 0;
+    let recoveryFinished!: () => void;
+    const recoveryDone = new Promise<void>((resolve) => { recoveryFinished = resolve; });
     assert.equal(await killAkumaWithRecovery(value.allocated.paths, async (paths) => {
-      recoveries += 1;
-      assert.deepEqual((await readHeart(paths)).pending.map((tell) => tell.id), ["tell-recover-on-kill"]);
-      assert.equal(await probeLeash(paths), "free");
+      try {
+        recoveries += 1;
+        assert.deepEqual((await readHeart(paths)).pending.map((tell) => tell.id), ["tell-recover-on-kill"]);
+        assert.equal(await probeLeash(paths), "free");
+      } finally {
+        recoveryFinished();
+      }
     }), "already-stopped");
     assert.equal(recoveries, 1);
+    await recoveryDone;
   } finally { value.close(); }
 });
 
