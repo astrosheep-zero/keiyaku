@@ -47,6 +47,20 @@ async function waitForFile(path: string): Promise<string> {
   return readFileSync(path, "utf8");
 }
 
+async function removeTempDirectory(path: string): Promise<void> {
+  const deadline = performance.now() + 2_000;
+  while (true) {
+    try {
+      rmSync(path, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (process.platform !== "win32" || (error as NodeJS.ErrnoException).code !== "EPERM") throw error;
+      if (performance.now() >= deadline) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+}
+
 function restoreEnvironment(name: string, value: string | undefined): void {
   if (value === undefined) delete process.env[name];
   else process.env[name] = value;
@@ -183,9 +197,8 @@ test("retained launch returns the target pid and release leaves it alive", async
   const pidFile = join(root, "pid");
   const log = join(root, "stdio.log");
   let pid: number | undefined;
-  let owned: Awaited<ReturnType<typeof spawnDetachedProcess>> | undefined;
   try {
-    owned = await spawnDetachedProcess({
+    const owned = await spawnDetachedProcess({
       argv: [
         process.execPath,
         "-e",
@@ -210,8 +223,7 @@ test("retained launch returns the target pid and release leaves it alive", async
       }
       await waitForExit(pid);
     }
-    await owned?.exited;
-    rmSync(root, { recursive: true, force: true });
+    await removeTempDirectory(root);
   }
 });
 
@@ -300,10 +312,9 @@ test("Windows retained launch returns while its target remains long-lived", asyn
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-retained-return-"));
   const pidFile = join(root, "pid");
   let pid: number | undefined;
-  let owned: Awaited<ReturnType<typeof spawnDetachedProcess>> | undefined;
   try {
     const started = performance.now();
-    owned = await spawnDetachedProcess({
+    const owned = await spawnDetachedProcess({
       argv: [
         process.execPath,
         "-e",
@@ -325,8 +336,7 @@ test("Windows retained launch returns while its target remains long-lived", asyn
       }
       await waitForExit(pid);
     }
-    await owned?.exited;
-    rmSync(root, { recursive: true, force: true });
+    await removeTempDirectory(root);
   }
 });
 
