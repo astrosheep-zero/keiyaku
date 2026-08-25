@@ -14,11 +14,15 @@ export async function retainDetachedExitEvidence(
 ): Promise<DetachedProcessExit> {
   const status = detachedExitStatus(code, signal);
   const marker = Buffer.from(`[child ${status}]\n`);
+  const before = await log.stat();
+  if (before.size < from) throw new Error("run log shrank before exit evidence was retained");
   let written = 0;
+  let position = before.size;
   while (written < marker.byteLength) {
-    const write = await log.write(marker, written, marker.byteLength - written);
+    const write = await log.write(marker, written, marker.byteLength - written, position);
     if (write.bytesWritten === 0) throw new Error("run log exit marker write made no progress");
     written += write.bytesWritten;
+    position += write.bytesWritten;
   }
   const evidence = await log.stat();
   if (evidence.size < from) throw new Error("run log shrank before exit evidence was retained");

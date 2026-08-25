@@ -112,12 +112,6 @@ export async function spawnDetachedProcess(input: DetachedProcessInput): Promise
   if (process.platform === "win32") return spawnWindowsRetainedProcess(input);
   const log = await open(input.log, "a");
   let launched = false;
-  let logClosed = false;
-  const closeLog = async (): Promise<void> => {
-    if (logClosed) return;
-    logClosed = true;
-    await log.close();
-  };
   try {
     const from = (await log.stat()).size;
     const child = spawn(input.argv[0]!, input.argv.slice(1), spawnOptionsFor(input, ["ignore", log.fd, log.fd]));
@@ -136,13 +130,15 @@ export async function spawnDetachedProcess(input: DetachedProcessInput): Promise
           const status = detachedExitStatus(code, signal);
           let failure: unknown;
           let result: DetachedProcessExit | undefined;
+          let exitLog: Awaited<ReturnType<typeof open>> | undefined;
           try {
-            result = await retainDetachedExitEvidence(log, input.log, from, code, signal);
+            exitLog = await open(input.log, "r+");
+            result = await retainDetachedExitEvidence(exitLog, input.log, from, code, signal);
           } catch (error) {
             failure = error;
           }
           try {
-            await closeLog();
+            await exitLog?.close();
           } catch (error) {
             failure ??= error;
           }
@@ -162,6 +158,7 @@ export async function spawnDetachedProcess(input: DetachedProcessInput): Promise
     });
     if (child.pid === undefined) throw new Error("detached process spawned without a pid");
     const pid = child.pid;
+    await log.close();
     launched = true;
     return {
       pid,
@@ -170,7 +167,7 @@ export async function spawnDetachedProcess(input: DetachedProcessInput): Promise
       release: lifecycle.release,
     };
   } finally {
-    if (!launched) await closeLog();
+    if (!launched) await log.close();
   }
 }
 

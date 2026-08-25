@@ -8,7 +8,6 @@ import type { DetachedProcessExit, OwnedProcess } from "./types.js";
 
 type WindowsContext = {
   input: DetachedProcessInput;
-  log: FileHandle;
   from: number;
   closeLog(): Promise<void>;
   child: ReturnType<typeof spawnWindowsLauncher>;
@@ -29,7 +28,6 @@ type WindowsContext = {
 
 function createWindowsContext(
   input: DetachedProcessInput,
-  log: FileHandle,
   from: number,
   closeLog: () => Promise<void>,
 ): WindowsContext {
@@ -51,7 +49,6 @@ function createWindowsContext(
   child.stderr?.setEncoding("utf8");
   const context: WindowsContext = {
     input,
-    log,
     from,
     closeLog,
     child,
@@ -104,13 +101,15 @@ function recordWindowsExit(context: WindowsContext, code: number): void {
   void (async () => {
     let failure: unknown;
     let result: DetachedProcessExit | undefined;
+    let exitLog: FileHandle | undefined;
     try {
-      result = await retainDetachedExitEvidence(context.log, context.input.log, context.from, code, null);
+      exitLog = await open(context.input.log, "r+");
+      result = await retainDetachedExitEvidence(exitLog, context.input.log, context.from, code, null);
     } catch (error) {
       failure = error;
     }
     try {
-      await context.closeLog();
+      await exitLog?.close();
     } catch (error) {
       failure ??= error;
     }
@@ -198,10 +197,11 @@ export async function spawnWindowsRetainedProcess(input: DetachedProcessInput): 
     logClosed = true;
     await log.close();
   };
-  const context = createWindowsContext(input, log, (await log.stat()).size, closeLog);
+  const context = createWindowsContext(input, (await log.stat()).size, closeLog);
   installWindowsProtocol(context);
   try {
     const pid = await context.startedPromise;
+    await closeLog();
     return ownedWindowsProcess(context, pid);
   } catch (error) {
     context.reader.close();

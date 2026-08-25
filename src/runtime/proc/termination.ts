@@ -41,6 +41,7 @@ export async function terminateOwnedProcess(child: ChildProcess, force = false):
   if (process.platform === "win32") {
     await terminateWindowsTree(pid);
     await exit;
+    await delay(TERMINATION_GRACE_MS);
     return;
   }
   if (force) {

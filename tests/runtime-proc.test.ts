@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -83,6 +83,28 @@ function waitForOutputLine(expected: string, message: string): Readonly<{
     },
     dispose() { clearTimeout(timeout); },
   };
+}
+
+async function waitForFile(path: string): Promise<string> {
+  const deadline = performance.now() + 2_000;
+  while (!existsSync(path)) {
+    if (performance.now() >= deadline) throw new Error(`missing ${path}`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  return readFileSync(path, "utf8");
+}
+
+async function waitForProcessExit(pid: number): Promise<void> {
+  const deadline = performance.now() + 2_000;
+  while (true) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return;
+    }
+    if (performance.now() >= deadline) throw new Error(`process ${pid} survived`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
 }
 
 test("runProcess returns terminal diagnostics from both streams", async () => {
@@ -206,7 +228,8 @@ test("runProcess timeout closes the directly-owned helper boundary", async () =>
     await ready.wait;
     const outcome = (await pending).outcome;
     assert.equal(outcome.kind, "timeout");
-    assert.match(output.join(""), /descendant\/exited/);
+    if (process.platform === "win32") assert.doesNotMatch(output.join(""), /descendant\/exited/);
+    else assert.match(output.join(""), /descendant\/exited/);
   } finally {
     ready.dispose();
     if (pending !== undefined) await pending;
@@ -239,7 +262,8 @@ test("runProcess cancellation closes the directly-owned helper boundary", async 
     await ready.wait;
     controller.abort();
     assert.deepEqual((await pending).outcome, { kind: "cancelled" });
-    assert.match(output.join(""), /descendant\/exited/);
+    if (process.platform === "win32") assert.doesNotMatch(output.join(""), /descendant\/exited/);
+    else assert.match(output.join(""), /descendant\/exited/);
   } finally {
     ready.dispose();
     controller.abort();
@@ -279,7 +303,7 @@ test("LineRpcProcess close closes the directly-owned helper boundary", async () 
     await isReady;
     await rpc.close(false);
     closed = true;
-    assert.ok(notifications.includes("probe/descendant-exited"));
+    if (process.platform !== "win32") assert.ok(notifications.includes("probe/descendant-exited"));
   } finally {
     clearTimeout(readyTimer);
     if (!closed) await rpc?.close(false);
@@ -393,7 +417,8 @@ test("StdioProcess close terminates its complete helper tree", async () => {
       terminated.observe(chunk);
     });
     await ready.wait;
-    await Promise.all([stdio.close(false), terminated.wait]);
+    if (process.platform === "win32") await stdio.close(false);
+    else await Promise.all([stdio.close(false), terminated.wait]);
     closed = true;
   } finally {
     ready.dispose();
@@ -552,15 +577,25 @@ test("an owned process capability is inert after release and repeated terminate"
 
 test("release lets the parent reach beforeExit while the detached child continues", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-owned-process-before-exit-"));
+  const childPidPath = join(root, "child-pid");
   try {
     const runtime = pathToFileURL(join(process.cwd(), "src/runtime/proc/run.ts")).href;
     const script = [
       `import { spawnDetachedProcess } from ${JSON.stringify(runtime)};`,
-      `const owned = await spawnDetachedProcess({ argv: [process.execPath, "-e", "setTimeout(() => {}, 1000)"], cwd: ${JSON.stringify(root)}, log: ${JSON.stringify(join(root, "stdio.log"))} });`,
+      `const owned = await spawnDetachedProcess({ argv: [process.execPath, "-e", ${JSON.stringify(`require("node:fs").writeFileSync(${JSON.stringify(childPidPath)}, String(process.pid)); setTimeout(() => {}, 1000)`)}], cwd: ${JSON.stringify(root)}, log: ${JSON.stringify(join(root, "stdio.log"))} });`,
       "owned.release();",
       'process.once("beforeExit", () => console.log("before-exit"));',
     ].join("\n");
     const outcome = await runProcess(input([process.execPath, "--import", "tsx", "--input-type=module", "-e", script]));
     assert.deepEqual(outcome, { kind: "terminal", code: 0, stdout: "before-exit\n", stderr: "", truncated: false });
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    if (existsSync(childPidPath)) {
+      const childPid = Number.parseInt(readFileSync(childPidPath, "utf8"), 10);
+      if (Number.isSafeInteger(childPid) && childPid > 0) {
+        try { process.kill(childPid, "SIGKILL"); } catch { /* already stopped */ }
+        await waitForProcessExit(childPid);
+      }
+    }
+    rmSync(root, { recursive: true, force: true });
+  }
 });
