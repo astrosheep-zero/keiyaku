@@ -107,6 +107,20 @@ async function waitForProcessExit(pid: number): Promise<void> {
   }
 }
 
+async function removeTempDirectory(path: string): Promise<void> {
+  const deadline = performance.now() + 2_000;
+  while (true) {
+    try {
+      rmSync(path, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (process.platform !== "win32" || (error as NodeJS.ErrnoException).code !== "EPERM") throw error;
+      if (performance.now() >= deadline) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+}
+
 test("runProcess returns terminal diagnostics from both streams", async () => {
   const outcome = await runProcess(input([
     process.execPath,
@@ -233,7 +247,7 @@ test("runProcess timeout closes the directly-owned helper boundary", async () =>
   } finally {
     ready.dispose();
     if (pending !== undefined) await pending;
-    rmSync(root, { recursive: true, force: true });
+    await removeTempDirectory(root);
   }
 });
 
@@ -508,7 +522,7 @@ test("a direct spawner rejects exit evidence when its run-log path disappears", 
     });
     rmSync(log);
     await assert.rejects(owned.exited, /pre-admission exit 7: run-log evidence unavailable/u);
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally { await removeTempDirectory(root); }
 });
 
 test("an owned process capability is inert after termination and repeated terminate", async () => {
@@ -537,7 +551,7 @@ test("an owned process capability is inert after termination and repeated termin
     assert.equal(signals, 0);
   } finally {
     if (!terminated) await owned?.terminate(true);
-    rmSync(root, { recursive: true, force: true });
+    await removeTempDirectory(root);
   }
 });
 
@@ -571,7 +585,7 @@ test("an owned process capability is inert after release and repeated terminate"
     } else {
       await owned?.terminate(true);
     }
-    rmSync(root, { recursive: true, force: true });
+    await removeTempDirectory(root);
   }
 });
 
@@ -596,6 +610,6 @@ test("release lets the parent reach beforeExit while the detached child continue
         await waitForProcessExit(childPid);
       }
     }
-    rmSync(root, { recursive: true, force: true });
+    await removeTempDirectory(root);
   }
 });
