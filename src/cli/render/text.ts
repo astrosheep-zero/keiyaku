@@ -7,10 +7,12 @@ import type { TextRenderContext } from "./terminal.js";
 import { renderCatalogText } from "./catalog.js";
 import { renderNukeText } from "./nuke.js";
 import { renderRegionText } from "./region.js";
+import { renderStatusSetText } from "./status-set.js";
 
 export function renderText(result: InvocationResult, context?: TextRenderContext): string {
   if (result.kind === "guidance") return result.guidance;
   if (result.kind === "status") return renderKanshiText(result.report, context, result.selection);
+  if (result.kind === "status-set") return renderStatusSetText(result, context);
   if (result.kind === "catalog") return renderCatalogText(result.catalog);
   if (result.kind === "contract-history") return renderContractHistory(result.history);
   if (result.kind === "region") return renderRegionText(result.region);

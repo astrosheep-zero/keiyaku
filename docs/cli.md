@@ -73,7 +73,7 @@ The command vocabulary is:
 | `review`                          | Calls `keiyaku.review`; in a declared request channel it forwards one hop through the direct parent.                                |
 | `abandon`                         | Calls `keiyaku.abandon`.                                                                                                            |
 | `arc`                             | Calls `keiyaku.arc` with arc Markdown.                                                                                              |
-| `status`                          | Calls Kanshi or one exact Akuma status according to its selector.                                                                   |
+| `status`                          | Calls Kanshi or one or more exact Contract/Akuma status projections according to its selectors.                                     |
 | `show`                            | Calls `keiyaku.guidance()` for one selected Contract.                                                                               |
 | `ls`                              | Lists exactly one selected Task, Contract, Akuma configuration, or Akuma identity directory.                                        |
 | `audit`                           | Calls `keiyaku.audit`.                                                                                                              |
@@ -256,7 +256,11 @@ Successful detach
 prints the canonical-world wait command using the successful Alias or complete
 AkuId; failure adds no command and fabricates no life.
 
-`tell`, `fork`, and exact `status` accept one AkuId or Alias. `history` accepts
+`tell`, `fork`, and exact `status` accept one AkuId or Alias. `status` also accepts
+multiple `kei/...`, `aku/...`, or Alias selectors and returns one status entry per
+input selector in input order. All entries come from the same Kanshi observation
+when Contract or Alias resolution is needed; direct Akuma selectors use the
+Akuma status authority without constructing a Contract report. `history` accepts
 one complete ContractId; `wait` and `kill` additionally accept the documented
 set selectors. Bare `status` uses Kanshi; named status resolves one selector
 from that observation and refuses cross-kind ambiguity.

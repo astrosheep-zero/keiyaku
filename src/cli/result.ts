@@ -14,6 +14,7 @@ import type {
   VerificationStop,
 } from "../index.js";
 import type { KanshiReport } from "../kanshi/index.js";
+import type { AkumaObservation } from "../index.js";
 import type { RegionRead, Section } from "../kanshi/index.js";
 import type { Catalog } from "../index.js";
 import type { AmendRegionObservation, RegionObservation } from "../library/region.js";
@@ -255,6 +256,14 @@ export type StatusResult = Readonly<{
   selection: "world" | "contract";
 }>;
 
+export type StatusSetResult = Readonly<{
+  kind: "status-set";
+  entries: readonly (
+    | Readonly<{ selector: string; kind: "contract"; report: KanshiReport }>
+    | Readonly<{ selector: string; kind: "akuma"; status: AkumaObservation; alias?: string }>
+  )[];
+}>;
+
 export type RegionResult = Readonly<{ kind: "region"; region: Section<RegionRead> }>;
 
 export type CatalogResult = Readonly<{ kind: "catalog"; catalog: Catalog }>;
@@ -269,6 +278,7 @@ export type InvocationResult =
   | ObservationResult
   | GuidanceResult
   | StatusResult
+  | StatusSetResult
   | RegionResult
   | CatalogResult
   | ContractHistoryResult

@@ -427,6 +427,47 @@ test("an explicit status selector projects one Kanshi report without changing se
   assert.deepEqual(result.report.tasks.value.rows.map((row) => row.contract?.id), [id]);
 });
 
+test("status accepts multiple Contract selectors and preserves each selected report", async () => {
+  const repository = repositoryWithMain();
+  const first = acceptedContract(
+    await invokeWithDocument(repository.path, ["bind", "-"], contractDocument("First status")),
+  );
+  const second = acceptedContract(
+    await invokeWithDocument(repository.path, ["bind", "-"], contractDocument("Second status")),
+  );
+
+  const result = await invokeWithDocument(repository.path, ["status", first, second, "--json"], "");
+
+  assert.equal(result.kind, "status-set");
+  if (result.kind !== "status-set") return;
+  assert.doesNotThrow(() => renderText(result));
+  assert.match(renderText(result), new RegExp(first.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+  assert.deepEqual(result.entries.map((entry) => entry.selector), [first, second]);
+  assert.deepEqual(
+    result.entries.map((entry) => (entry.kind === "contract" ? entry.report.contracts.kind : entry.kind)),
+    ["present", "present"],
+  );
+  assert.deepEqual(
+    result.entries.map((entry) =>
+      entry.kind === "contract" && entry.report.contracts.kind === "present"
+        ? entry.report.contracts.value.rows.map((row) => row.id)
+        : [],
+    ),
+    [[first], [second]],
+  );
+});
+
+test("status preserves duplicate selectors as ordered projections", async () => {
+  const repository = repositoryWithMain();
+  const id = acceptedContract(
+    await invokeWithDocument(repository.path, ["bind", "-"], contractDocument("Repeated status")),
+  );
+  const result = await invokeWithDocument(repository.path, ["status", id, id, "--json"], "");
+  assert.equal(result.kind, "status-set");
+  if (result.kind !== "status-set") return;
+  assert.deepEqual(result.entries.map((entry) => entry.selector), [id, id]);
+});
+
 test("addressed retry renders the selected contract coordinate", async () => {
   const repository = repositoryWithMain();
   const bound = await invokeWithDocument(

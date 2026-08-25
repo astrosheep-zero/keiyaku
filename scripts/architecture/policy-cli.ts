@@ -216,6 +216,19 @@ export const cliZones = [
     ],
   },
   {
+    source: "cli/commands/status-set.ts",
+    allow: [
+      types("cli/result.ts"),
+      any("cli/parse.ts"),
+      any("cli/selectors.ts"),
+      any("cli/commands/akuma-invoke.ts"),
+      any("kanshi/index.ts"),
+      any("library/address.ts"),
+      types("library/repo.ts"),
+      types("world.ts"),
+    ],
+  },
+  {
     source: "cli/square-edge.ts",
     allow: [any("@astrosheep/square"), any("akuma/identity.ts"), any("akuma/publication.ts"), types("world.ts")],
   },
@@ -321,6 +334,16 @@ export const cliZones = [
       any("cli/render/catalog.ts"),
       any("cli/render/nuke.ts"),
       any("cli/render/region.ts"),
+      any("cli/render/status-set.ts"),
+    ],
+  },
+  {
+    source: "cli/render/status-set.ts",
+    allow: [
+      types("cli/result.ts"),
+      any("cli/render/akuma.ts"),
+      any("cli/render/kanshi.ts"),
+      types("cli/render/terminal.ts"),
     ],
   },
   {

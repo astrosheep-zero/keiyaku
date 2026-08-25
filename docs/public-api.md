@@ -5,7 +5,7 @@ Keiyaku.bind({ repo: await Repo.at(), markdown, target: "main" });
 ```
 
 Keiyaku is published as the public ESM-only npm package
-`@astrosheep/keiyaku@4.0.0`. The package root is its sole public Contract
+`@astrosheep/keiyaku@4.5.0`. The package root is its sole public Contract
 import surface, with `@astrosheep/keiyaku/task`,
 `@astrosheep/keiyaku/kanshi`, and `@astrosheep/keiyaku/akuma` as its named
 product exports. There is no old package-name compatibility export. The public

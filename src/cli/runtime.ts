@@ -96,6 +96,8 @@ function invocationJson(result: InvocationResult): unknown {
       return result.history;
     case "status":
       return result.report;
+    case "status-set":
+      return result.entries;
     default:
       return result;
   }

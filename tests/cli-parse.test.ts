@@ -158,6 +158,9 @@ test("status parses one folded board and preserves its optional contract filter"
   assert.deepEqual(parseArgv(["status", "kei/example", "--json"]), {
     command: { command: "status", contract: "kei/example", output: "json" },
   });
+  assert.deepEqual(parseArgv(["status", "kei/one", "kei/two", "aku/claude/1234abcd"]), {
+    command: { command: "status", selectors: ["kei/one", "kei/two", "aku/claude/1234abcd"], output: "text" },
+  });
   assert.throws(() => parseArgv(["status", "--fast"]), /not valid for status/);
 });
 

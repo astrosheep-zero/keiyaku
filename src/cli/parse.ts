@@ -247,7 +247,7 @@ function scanArgv(argv: readonly string[]): ParsedContractParts {
   if (spec.positional === "none" && state.positionals.length > 0) {
     refuse(command, `${command} accepts no contract`);
   }
-  if (spec.positional === "optional" && state.positionals.length > 1) {
+  if (spec.positional === "optional" && state.positionals.length > 1 && command !== "status") {
     refuse(command, `${command} accepts at most one contract`);
   }
   if (spec.stdin === "required" && !state.stdin) {

@@ -79,7 +79,7 @@ export type ParsedAbandon = Output &
   }>;
 export type ParsedStatus = Output &
   (
-    | Readonly<{ command: "status"; contract?: string; akuma?: never }>
+    | Readonly<{ command: "status"; contract?: string; selectors?: readonly string[]; akuma?: never }>
     | Readonly<{ command: "status"; contract: string; akuma: true }>
   );
 export type ParsedLs = Output & Readonly<{ command: "ls"; query: CatalogQuery }>;
@@ -182,8 +182,8 @@ export const CONTRACT_COMMAND_SPECS = {
     positional: "optional",
     stdin: "none",
     flags: { json: "boolean" },
-    usage: "status [<contract>|@name|<aku/...>]",
-    purpose: "Read the world status board or one Contract projection.",
+    usage: "status [<contract>|@name|<aku/...>]...",
+    purpose: "Read the world status board or one or more Contract and Akuma projections.",
   },
   show: {
     positional: "optional",
@@ -376,6 +376,9 @@ function parseReview(parts: ParsedContractParts): ParsedReview {
 }
 
 function parseStatus(parts: ParsedContractParts): ParsedStatus {
+  if (parts.positionals.length > 1) {
+    return { command: "status", selectors: parts.positionals, output: parts.output };
+  }
   const contract = parts.positionals[0];
   if (contract?.startsWith("aku/") === true) {
     return { command: "status", contract, akuma: true, output: parts.output };

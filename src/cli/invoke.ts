@@ -220,6 +220,11 @@ async function invokeStatus(
   world: WorldRoot | null,
   repo: Repo | undefined,
 ) {
+  const selectors = "selectors" in parsed ? parsed.selectors : undefined;
+  if (selectors !== undefined) {
+    const { invokeStatusSet } = await import("./commands/status-set.js");
+    return await invokeStatusSet(selectors, world, repo);
+  }
   if (parsed.akuma === true) {
     if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
     return (await import("./commands/akuma-invoke.js")).invokeAkumaStatus(world, parsed.contract, undefined, repo);
