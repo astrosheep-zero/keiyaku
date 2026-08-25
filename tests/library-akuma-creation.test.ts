@@ -346,12 +346,15 @@ test("direct birth unions Archetype defaults with additive allowed values", asyn
   const configured = await directArchetypeSettings(world);
   const previousRequests = process.env[AKUMA_REQUESTS_ENV];
   delete process.env[AKUMA_REQUESTS_ENV];
+  const handles: AkumaHandle[] = [];
   try {
     const akuma = Akuma.of(world, configured);
     const omitted = await akuma.call({ archetype: "worker", body: "all" });
+    handles.push(omitted);
     assert.deepEqual((await readSoul(pathsForAkuId(world, omitted.id)))?.allowed, ALLOWED_ACTIONS);
 
     const restricted = await akuma.call({ archetype: "restricted", body: "default" });
+    handles.push(restricted);
     assert.deepEqual((await readSoul(pathsForAkuId(world, restricted.id)))?.allowed, ["task.add"]);
 
     const added = await akuma.call({
@@ -359,19 +362,25 @@ test("direct birth unions Archetype defaults with additive allowed values", asyn
       body: "add",
       allowed: ["akuma.call"],
     });
+    handles.push(added);
     assert.deepEqual((await readSoul(pathsForAkuId(world, added.id)))?.allowed, ["akuma.call", "task.add"]);
 
     const fullWithAddition = await akuma.call({ archetype: "worker", body: "full with addition", allowed: ["contract.deliver"] });
+    handles.push(fullWithAddition);
     assert.deepEqual((await readSoul(pathsForAkuId(world, fullWithAddition.id)))?.allowed, ALLOWED_ACTIONS);
 
     const emptyBase = await akuma.call({ archetype: "empty", body: "empty base" });
+    handles.push(emptyBase);
     assert.deepEqual((await readSoul(pathsForAkuId(world, emptyBase.id)))?.allowed, []);
     const emptyWithAddition = await akuma.call({ archetype: "empty", body: "empty with addition", allowed: ["akuma.call"] });
+    handles.push(emptyWithAddition);
     assert.deepEqual((await readSoul(pathsForAkuId(world, emptyWithAddition.id)))?.allowed, ["akuma.call"]);
 
     writeFileSync(join(configured.home, "akuma", "reviewer.md"), "---\nprovider: local\nreadonly: true\n---\nReview.\n");
     const callReadonly = await akuma.call({ archetype: "worker", body: "call readonly", readonly: true });
+    handles.push(callReadonly);
     const markdownReadonly = await akuma.call({ archetype: "reviewer", body: "Markdown readonly" });
+    handles.push(markdownReadonly);
     assert.deepEqual((await readSoul(pathsForAkuId(world, callReadonly.id)))?.options, {
       readonly: true, systemPrompt: "Work.\n", systemPromptMode: "append",
     });
@@ -401,6 +410,7 @@ test("direct birth unions Archetype defaults with additive allowed values", asyn
   } finally {
     if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
     else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
+    for (const handle of handles) await handle.wait();
     rmSync(raw.path, { recursive: true, force: true });
   }
 });
