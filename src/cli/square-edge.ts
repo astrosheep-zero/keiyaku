@@ -1,4 +1,9 @@
-import { bindCurrentParticipant, Square, squareAssignedParticipantName, unbindCurrentParticipant } from "@astrosheep/square";
+import {
+  bindCurrentParticipant,
+  Square,
+  squareAssignedParticipantName,
+  unbindCurrentParticipant,
+} from "@astrosheep/square";
 import type { AllocatedAkuma } from "../akuma/identity.js";
 import { keiyakuSquarePath, type WorldRoot } from "../world.js";
 
