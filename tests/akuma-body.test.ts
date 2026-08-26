@@ -2056,7 +2056,7 @@ test("heart loss wakes a Body stalled on provider observation", async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-test("Body delivers answered and failed initial outcomes as bare Square activities", async () => {
+test("Body delivers compact initial completion activities to the Keiyaku Square", async () => {
   const { Square } = await import("@astrosheep/square");
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-square-outcome-"));
   try {
@@ -2076,6 +2076,7 @@ test("Body delivers answered and failed initial outcomes as bare Square activiti
           cwd: root,
         },
         initialBody: "answer",
+        completion: { participantName: "Alice", contractId: "kei/example" },
       },
       adapter({
         starts: [],
@@ -2108,6 +2109,7 @@ test("Body delivers answered and failed initial outcomes as bare Square activiti
           cwd: root,
         },
         initialBody: "fail",
+        completion: { participantName: "Alice" },
       },
       adapter({ starts: [], events: [], result: { kind: "failed", diagnostic: "provider failed" } }),
       { now: () => "2026-08-08T00:00:01.000Z" },
@@ -2118,7 +2120,7 @@ test("Body delivers answered and failed initial outcomes as bare Square activiti
       const says = history.filter((activity) => activity.kind === "say");
       assert.deepEqual(
         says.map((activity) => activity.body),
-        ["done", "provider failed"],
+        [`${answered.id} (@Alice) kei/example\n✓ came back`, `${failed.id} (@Alice)\n✓ came back`],
       );
       assert.equal(says.length, 2);
     } finally {
@@ -2129,7 +2131,7 @@ test("Body delivers answered and failed initial outcomes as bare Square activiti
   }
 });
 
-test("Body caps long Square outcomes and points to the latest Akuma history", async () => {
+test("Body never publishes the full initial outcome to Square", async () => {
   const { Square } = await import("@astrosheep/square");
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-square-outcome-cap-"));
   try {
@@ -2150,6 +2152,7 @@ test("Body caps long Square outcomes and points to the latest Akuma history", as
           cwd: root,
         },
         initialBody: "answer",
+        completion: { participantName: "Bob" },
       },
       adapter({
         starts: [],
@@ -2162,7 +2165,7 @@ test("Body caps long Square outcomes and points to the latest Akuma history", as
     try {
       const says = (await square.history()).filter((activity) => activity.kind === "say");
       assert.equal(says.length, 1);
-      assert.equal(says[0]?.body, `${"x".repeat(1_000)}\n\nkeiyaku history ${allocated.id} --last`);
+      assert.equal(says[0]?.body, `${allocated.id} (@Bob)\n✓ came back`);
     } finally {
       await square.close();
     }

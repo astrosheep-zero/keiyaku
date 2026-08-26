@@ -353,9 +353,13 @@ export async function beginCall(input: CallInput): Promise<BornCall> {
   };
 }
 
-export async function finishCall(born: BornCall): Promise<CallResult> {
+export async function finishCall(born: BornCall, participantName?: string): Promise<CallResult> {
   const world = akumaWorld(born.path);
-  const handle = await finishAkumaCall(world, born.born);
+  const contractId = born.dispatch.kind === "dispatched" ? born.dispatch.dispatch.contractId : undefined;
+  const handle = await finishAkumaCall(world, born.born, {
+    ...(participantName === undefined ? {} : { participantName }),
+    ...(contractId === undefined ? {} : { contractId }),
+  });
   const readonly = (await handle.status()).readonly;
   const observation = await observeCall(handle, born.mode, born.timeoutMs);
   return {

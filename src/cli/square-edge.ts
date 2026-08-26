@@ -29,7 +29,7 @@ export async function recognizeAndListen(
   worldRoot: WorldRoot,
   environment: NodeJS.ProcessEnv,
   allocated: AllocatedAkuma,
-): Promise<{ committed: boolean; rollback(): Promise<void> } | void> {
+): Promise<{ committed: boolean; participantName: string; rollback(): Promise<void> } | void> {
   const name = squareAssignedParticipantName(environment);
   if (name === undefined) return;
   const path = keiyakuSquarePath(worldRoot);
@@ -60,6 +60,7 @@ export async function recognizeAndListen(
     listening = change.activity !== null;
     return {
       committed: true,
+      participantName: name,
       rollback,
     };
   } catch (error) {

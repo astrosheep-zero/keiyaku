@@ -43,6 +43,7 @@ export type BodyLaunch = Readonly<{
   birthSession?: Omit<SessionFact, "sequence">;
   initialBody?: string;
   refuseIfHeld?: boolean;
+  completion?: Readonly<{ participantName?: string; contractId?: string }>;
 }>;
 
 export type TellWake =
@@ -153,12 +154,13 @@ type CommittedOutcome =
   | Readonly<{ outcome: "answered"; answer: string }>
   | Readonly<{ outcome: "failed"; diagnostic: string }>;
 
-const OUTCOME_PREVIEW_LIMIT = 1_000;
-
-function outcomePreview(identity: string, outcome: CommittedOutcome): string {
-  const text = outcome.outcome === "answered" ? outcome.answer : outcome.diagnostic;
-  if (text.length <= OUTCOME_PREVIEW_LIMIT) return text;
-  return `${text.slice(0, OUTCOME_PREVIEW_LIMIT)}\n\nkeiyaku history ${identity} --last`;
+function completionMessage(identity: string, completion: BodyLaunch["completion"]): string {
+  const participant = completion?.participantName;
+  const contract = completion?.contractId;
+  const header = [identity, participant === undefined ? undefined : `(@${participant})`, contract]
+    .filter((value): value is string => value !== undefined)
+    .join(" ");
+  return `${header}\n✓ came back`;
 }
 
 function boundedDiagnostic(error: unknown): string {
@@ -166,7 +168,7 @@ function boundedDiagnostic(error: unknown): string {
   return text.length <= 500 ? text : `${text.slice(0, 500)}...`;
 }
 
-async function expressInitialOutcome(launch: BodyLaunch, outcome: CommittedOutcome): Promise<void> {
+async function expressInitialOutcome(launch: BodyLaunch): Promise<void> {
   try {
     const { Square } = await import("@astrosheep/square");
     const identity = launch.seed?.id ?? (await readHeart(launch.paths)).soul?.id;
@@ -175,7 +177,7 @@ async function expressInitialOutcome(launch: BodyLaunch, outcome: CommittedOutco
     try {
       const joined = await square.implicitJoin(identity);
       if (joined.state === "done" || joined.participant === undefined) return;
-      await joined.participant.express(outcomePreview(identity, outcome));
+      await joined.participant.express(completionMessage(identity, launch.completion));
     } finally {
       await square.close();
     }
@@ -293,7 +295,7 @@ async function runBodyTurns(input: BodyExecution): Promise<void> {
       return;
     }
     const outcome = await persistTurn(launch.paths, result.turnSequence, result, runtime.now());
-    if (initial !== undefined) await expressInitialOutcome(launch, outcome);
+    if (initial !== undefined) await expressInitialOutcome(launch);
     if (outcome.outcome === "failed") {
       await breakBody(launch.paths, { sequence: bodySequence, end: "broke-off", at: runtime.now() });
       return;

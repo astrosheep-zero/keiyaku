@@ -138,14 +138,22 @@ export class Akuma {
       },
     };
   }
-  async finishCall(born: AkumaBornCall): Promise<AkumaHandle> {
+  async finishCall(
+    born: AkumaBornCall,
+    completion: Readonly<{ participantName?: string; contractId?: string }> = {},
+  ): Promise<AkumaHandle> {
     if (born.kind === "requested") {
       return new AkumaHandle(born.id, this.path, { cwd: born.cwd, source: born.execution.source });
     }
     const published = await launchAkuma({
       allocated: born.allocated,
       launch: async (allocated) =>
-        await spawnAkumaBody({ paths: allocated.paths, seed: born.seed, initialBody: born.initialBody }),
+        await spawnAkumaBody({
+          paths: allocated.paths,
+          seed: born.seed,
+          initialBody: born.initialBody,
+          ...(Object.keys(completion).length === 0 ? {} : { completion }),
+        }),
     });
     return new AkumaHandle(published.id, this.path, {
       cwd: born.execution.cwd,
@@ -205,6 +213,10 @@ export async function beginAkumaCall(
   return await akuma.beginCall(input, context);
 }
 
-export async function finishAkumaCall(akuma: Akuma, born: AkumaBornCall): Promise<AkumaHandle> {
-  return await akuma.finishCall(born);
+export async function finishAkumaCall(
+  akuma: Akuma,
+  born: AkumaBornCall,
+  completion: Readonly<{ participantName?: string; contractId?: string }> = {},
+): Promise<AkumaHandle> {
+  return await akuma.finishCall(born, completion);
 }

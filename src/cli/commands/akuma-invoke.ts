@@ -225,7 +225,7 @@ export async function invokeAkuma(command: InvokedAkumaCommand, input: InvokeInp
           : undefined;
       let result: CallResult;
       try {
-        result = await (input.finishCall ?? finishCall)(born);
+        result = await (input.finishCall ?? finishCall)(born, listener?.participantName);
       } catch (error) {
         if (listener?.committed === true) {
           try {
