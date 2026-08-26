@@ -426,6 +426,46 @@ test("Tell lets a successor Body win when its child exit races Heart observation
   } finally { value.close(); }
 });
 
+test("Tell gives a selected child exit one final Heart adjudication", async () => {
+  const value = await fixture();
+  let winnerSequence: number | undefined;
+  try {
+    const born = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await born.birth(value.allocated.paths, value.soul);
+    born.release();
+    const result = await tellAkumaWithId({
+      worldPath: value.root,
+      id: value.allocated.id,
+      body: "continue",
+      tellId: "tell-final-heart-after-exit",
+      recordedAt: value.soul.createdAt,
+      runtime: {
+        async observeHeart(_paths, signal) {
+          return (async function*() {
+            await new Promise<void>((resolve) => signal.addEventListener("abort", resolve, { once: true }));
+          })();
+        },
+        async spawn(): Promise<OwnedProcess> {
+          const exit = Promise.resolve({ code: 7, signal: null, log: { path: value.allocated.paths.log, from: 0, to: 0 } });
+          void exit.then(async () => {
+            const winner = (await HeldAkumaLeash.try(value.allocated.paths))!;
+            const body = await winner.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
+            winnerSequence = body.sequence;
+            winner.release();
+          });
+          return {
+            pid: 1,
+            exited: exit,
+            async terminate() {},
+            release() {},
+          };
+        },
+      },
+    });
+    assert.deepEqual(result.wake, { kind: "pursuing", bodySequence: winnerSequence });
+  } finally { value.close(); }
+});
+
 test("a filesystem nudge cannot hide pre-admission child exit", async () => {
   const value = await fixture();
   try {

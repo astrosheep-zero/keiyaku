@@ -684,6 +684,64 @@ test("a rejected wake termination releases custody without claiming the child ex
   }
 });
 
+test("Tell wake prioritizes a settled child exit over immediately-ready observer prompts", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-wake-settled-exit-"));
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "acp", draw: () => "1a2b3c47" });
+    await initializeHeart(allocated.paths);
+    const leash = (await HeldAkumaLeash.try(allocated.paths))!;
+    await leash.birth(allocated.paths, {
+      id: allocated.id,
+      archetype: "acp",
+      provider: { name: "acp", kind: "acp" },
+      options: {},
+      origin: { kind: "direct" },
+      cwd: root,
+      createdAt: "2026-08-08T00:00:00.000Z",
+    });
+    leash.release();
+    await recordTell(allocated.paths, {
+      id: "wake-settled-exit",
+      body: "continue",
+      recordedAt: "2026-08-08T00:00:00.000Z",
+    });
+
+    let prompts = 0;
+    const result = await wakeRecordedTell(allocated.paths, "wake-settled-exit", {
+      async observeHeart(_paths, signal) {
+        return (async function* () {
+          for (let index = 0; index < 500; index += 1) {
+            prompts += 1;
+            yield;
+          }
+          await new Promise<void>((resolve) => signal.addEventListener("abort", resolve, { once: true }));
+        })();
+      },
+      async spawn(): Promise<OwnedProcess> {
+        return {
+          pid: 1,
+          exited: Promise.resolve({
+            code: 7,
+            signal: null,
+            log: { path: join(root, "run.log"), from: 0, to: 0 },
+          }),
+          async terminate() {},
+          release() {},
+        };
+      },
+    });
+
+    assert.deepEqual(result.wake, {
+      kind: "failed",
+      diagnostic: "pre-admission exit 7",
+      child: { code: 7, signal: null, log: { path: join(root, "run.log"), from: 0, to: 0 } },
+    });
+    assert.equal(prompts, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("closed narration settles before a later Tell on a Session without live tell", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-tell-completion-"));
   try {

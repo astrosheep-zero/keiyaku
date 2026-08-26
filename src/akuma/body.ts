@@ -419,11 +419,11 @@ async function awaitWake(
       return settled;
     }
     const winner = await Promise.race([
+      child.exited.then((exit) => ({ kind: "exited" as const, exit })),
       nextChange.then(
         ({ done }) => ({ kind: done ? ("closed" as const) : ("changed" as const) }),
         (error) => ({ kind: "observer-failed" as const, error }),
       ),
-      child.exited.then((exit) => ({ kind: "exited" as const, exit })),
     ]);
     if (winner.kind === "changed") {
       nextChange = changed.next();

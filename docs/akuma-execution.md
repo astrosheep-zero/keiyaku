@@ -73,8 +73,11 @@ fallback. The observer is a replaceable cross-process prompt over Heart's
 durable storage: it carries no fact, may merge or repeat prompts, and must
 deliver at least one prompt after an external Heart settlement. Subscription
 precedes the initial Heart read, so a write between those steps cannot be
-missed. A pre-admission child failure records its actual waitpid code or signal
-plus a bounded `{ path, from, to }` reference into the shared run log.
+missed. When a current observer prompt and the child exit are both already
+ready at a wake race, the child exit is selected first. A prompt remains only
+a hint for one fresh Heart adjudication; it never decides wake itself. A
+pre-admission child failure records its actual waitpid code or signal plus a
+bounded `{ path, from, to }` reference into the shared run log.
 The interval may contain interleaved output, includes the child's exit marker,
 and is not captured stderr or a child-attributed file tail.
 
