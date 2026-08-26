@@ -139,7 +139,14 @@ leash at the deadline, the caller terminates its own launched child before
 reporting timeout; it never waits forever for leash custody. Process output never decides
 whether the Body failed or what evidence the Seal contains.
 The publication owner retains the launched process, including a request-origin
-launch handed through Body, until it observes Soul or Seal. A known child exit
+launch handed through Body, until it observes Soul or Seal. Caller cancellation
+is a request to close an unborn launch, never a third publication outcome or
+authority to report failure: publication first reads Soul, then, only when it
+is absent, terminates and confirms exit of its retained child before taking the
+leash without the cancelled signal. The leash's birth-or-seal judgment decides
+whether Soul won or Seal closes the coordinate. Publication releases that child
+only after observing the resulting Soul or Seal; until termination and exit are
+confirmed it remains pending with custody. A known child exit
 before Soul is an immediately observed birth failure,
 diagnosed only from the parent-held exit code or signal; the parent may
 best-effort write that evidence as the Seal. The 30-second birth timeout

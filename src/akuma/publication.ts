@@ -137,6 +137,65 @@ async function takeLeashUntil(paths: AkumaPaths, deadline: number): Promise<Held
   }
 }
 
+async function takeLeash(paths: AkumaPaths): Promise<HeldAkumaLeash> {
+  for (;;) {
+    const leash = await HeldAkumaLeash.try(paths);
+    if (leash !== null) return leash;
+    await abortableDelay(POLL_MS);
+  }
+}
+
+async function allocatedSoul(allocated: AllocatedAkuma): Promise<Soul> {
+  const soul = await readSoul(allocated.paths);
+  if (soul === null) throw new Error("Akuma birth settled without a soul");
+  if (soul.id !== allocated.id) throw new Error("Akuma birth returned a different identity");
+  return soul;
+}
+
+async function awaitConfirmation(result: Promise<unknown>): Promise<void> {
+  try {
+    await result;
+  } catch {
+    await new Promise<never>(() => {});
+  }
+}
+
+async function settleCancelledLaunch(
+  allocated: AllocatedAkuma,
+  owned: OwnedProcess,
+  cancellation: unknown,
+): Promise<"born" | "sealed"> {
+  if ((await readSoul(allocated.paths)) !== null) {
+    await allocatedSoul(allocated);
+    return "born";
+  }
+
+  await awaitConfirmation(owned.terminate());
+  await awaitConfirmation(owned.exited);
+
+  if ((await readSoul(allocated.paths)) !== null) {
+    await allocatedSoul(allocated);
+    return "born";
+  }
+
+  const leash = await takeLeash(allocated.paths);
+  let outcome: "born" | "sealed";
+  try {
+    outcome = await leash.sealIfUnborn(allocated.paths, {
+      evidence: diagnostic(cancellation),
+      at: new Date().toISOString(),
+    });
+  } finally {
+    leash.release();
+  }
+  if (outcome === "born") {
+    await allocatedSoul(allocated);
+    return "born";
+  }
+  if ((await readSeal(allocated.paths)) === null) throw new Error("Akuma birth settled without a seal");
+  return "sealed";
+}
+
 async function awaitAsleepBirth(paths: AkumaPaths): Promise<void> {
   const leash = await takeLeashUntil(paths, performance.now() + BIRTH_TIMEOUT_MS);
   if (leash === null) throw new Error("Forked Akuma did not finish its birth body");
@@ -181,21 +240,29 @@ export async function birthAkuma(input: BirthInput): Promise<AllocatedAkuma> {
 
 export async function launchAkuma(input: LaunchInput): Promise<AllocatedAkuma> {
   const { allocated } = input;
-  let owned: OwnedProcess | void;
+  let owned: OwnedProcess | void = undefined;
   try {
     input.signal?.throwIfAborted();
     owned = await input.launch(allocated);
-    try {
-      input.signal?.throwIfAborted();
-      const soul = await awaitBirth(allocated.paths, owned ?? undefined, input.signal);
-      if (soul.id !== allocated.id) throw new Error("Akuma birth returned a different identity");
-      if (input.awaitAsleep === true) await awaitAsleepBirth(allocated.paths);
-      return allocated;
-    } finally {
-      owned?.release();
-    }
+    input.signal?.throwIfAborted();
+    const soul = await awaitBirth(allocated.paths, owned ?? undefined, input.signal);
+    if (soul.id !== allocated.id) throw new Error("Akuma birth returned a different identity");
+    if (input.awaitAsleep === true) await awaitAsleepBirth(allocated.paths);
+    owned?.release();
+    return allocated;
   } catch (error) {
+    if (owned !== undefined && input.signal?.aborted && error === input.signal.reason) {
+      const outcome = await settleCancelledLaunch(allocated, owned, error);
+      if (outcome === "born") {
+        if (input.awaitAsleep === true) await awaitAsleepBirth(allocated.paths);
+        owned.release();
+        return allocated;
+      }
+      owned.release();
+      throw error;
+    }
     await sealLocalFailure(allocated, error);
+    owned?.release();
     throw error;
   }
 }
