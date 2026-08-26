@@ -100,7 +100,7 @@ function overlay(lines: readonly string[], theme: Theme, done: () => void) {
       if (data === "\u001b" || data === "q" || data === "Q" || data === "\r") done();
     },
     render(width: number): string[] {
-      const inner = Math.max(20, Math.min(100, width - 4));
+      const inner = Math.max(1, Math.min(100, width - 2));
       const border = theme.fg("border", "+");
       const rule = theme.fg("border", "-".repeat(inner));
       return [
@@ -124,23 +124,31 @@ export default function keiyakuExtension(pi: ExtensionAPI): void {
   const refresh = async (ctx: Pick<ExtensionContext, "hasUI" | "ui">): Promise<void> => {
     if (!ctx.hasUI) return;
     refreshInFlight ??= (async () => {
-      const result = await run(pi, ["status", "--json"]);
-      const report = parseReport(result);
-      if (report === undefined) {
-        const diagnostic = result.stderr.trim() || "status unavailable";
-        ctx.ui.setWidget("keiyaku", [`Keiyaku · ${lineForWidth(diagnostic, 100)}`]);
-      } else ctx.ui.setWidget("keiyaku", [summary(report)]);
+      try {
+        const result = await run(pi, ["status", "--json"]);
+        const report = parseReport(result);
+        if (report === undefined) {
+          const diagnostic = result.stderr.trim() || "status unavailable";
+          ctx.ui.setWidget("keiyaku", [`Keiyaku · ${lineForWidth(diagnostic, 100)}`]);
+        } else ctx.ui.setWidget("keiyaku", [summary(report)]);
+      } catch {
+        ctx.ui.setWidget("keiyaku", ["Keiyaku · status unavailable"]);
+      }
     })().finally(() => {
       refreshInFlight = undefined;
     });
     await refreshInFlight;
   };
 
-  pi.on("session_start", async (_event, ctx) => {
-    await refresh(ctx);
+  const scheduleRefresh = (ctx: Pick<ExtensionContext, "hasUI" | "ui">): void => {
+    void refresh(ctx).catch(() => undefined);
+  };
+
+  pi.on("session_start", (_event, ctx) => {
+    scheduleRefresh(ctx);
   });
-  pi.on("turn_end", async (_event, ctx) => {
-    await refresh(ctx);
+  pi.on("agent_end", (_event, ctx) => {
+    scheduleRefresh(ctx);
   });
   pi.registerCommand("keiyaku", {
     description: "Open the Kanshi world status",

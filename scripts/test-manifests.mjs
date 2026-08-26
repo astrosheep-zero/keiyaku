@@ -19,6 +19,7 @@ export const LOCAL_TEST_FILES = [
   "tests/namespace-context.test.ts",
   "tests/normalized-identity.test.ts",
   "tests/observation.test.ts",
+  "tests/pi-extension.test.ts",
   "tests/region.test.ts",
   "tests/settings.test.ts",
   "tests/task-document.test.ts",

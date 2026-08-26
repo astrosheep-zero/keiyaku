@@ -76,6 +76,8 @@ adds no facts or verbs, owns no lifecycle decision, and never presents a
 second authority. The widget and overlay use the same observation boundaries
 and keep section failure, absence, identity, and activity text as returned by
 Kanshi. A refresh is a new read, not persisted extension state.
+Resident refresh is best-effort background work: it never delays Pi session
+startup or an agent turn, and refresh failure never escapes into Pi lifecycle.
 
 Kanshi text is a pure projection of its typed report. Bare world status keeps
 the `[ KEIYAKU ]`, `[ FLEET ]`, `[ TASK ]` order; these are its only uppercase

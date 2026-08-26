@@ -1,12 +1,15 @@
 {
   "name": "keiyaku-harness",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "main": "./opencode.js",
   "keywords": [
     "pi-package"
   ],
   "pi": {
+    "extensions": [
+      "../../../pi/keiyaku.ts"
+    ],
     "skills": [
       "./skills"
     ]
