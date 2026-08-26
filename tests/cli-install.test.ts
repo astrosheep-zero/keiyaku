@@ -73,6 +73,7 @@ test("--all records failure and continues in fixed harness order", async () => {
   ]);
   assert.deepEqual(calls.map((argv) => argv[0]), ["codex", "codex", "claude", "opencode", "pi"]);
   assert.deepEqual(calls[3], ["opencode", "plugin", join(installAssetsRoot(), "plugins", "keiyaku"), "--global", "--force"]);
+  assert.deepEqual(calls[4], ["pi", "install", "npm:@astrosheep/keiyaku"]);
   assert.equal(installExitCode(result), 1);
   assert.match(renderInstallText(result), /claude failed: claude exited 7: not configured/);
 });

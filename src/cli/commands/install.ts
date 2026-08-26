@@ -68,6 +68,7 @@ export function renderInstallHelp(): string {
 const INSTALL_TIMEOUT_MS = 5 * 60 * 1000;
 const ASSET_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../../integrations/marketplace");
 const PLUGIN_ROOT = resolve(ASSET_ROOT, "plugins/keiyaku");
+const PI_PACKAGE_SOURCE = "npm:@astrosheep/keiyaku";
 
 function recipes(harness: HarnessName): readonly (readonly string[])[] {
   switch (harness) {
@@ -85,7 +86,7 @@ function recipes(harness: HarnessName): readonly (readonly string[])[] {
     case "opencode":
       return [["opencode", "plugin", PLUGIN_ROOT, "--global", "--force"]];
     case "pi":
-      return [["pi", "install", PLUGIN_ROOT]];
+      return [["pi", "install", PI_PACKAGE_SOURCE]];
   }
 }
 

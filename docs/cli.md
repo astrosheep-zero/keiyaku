@@ -233,8 +233,10 @@ only.
 
 `install` is the one edge command that does not read a repository or Git. It
 uses native harness installers; `--all` runs the supported harnesses in fixed
-order and continues after failures. Text and JSON expose one typed result per
-harness; any failure exits `1`.
+order and continues after failures. Pi installs the published
+`npm:@astrosheep/keiyaku` package, so its extension and skills are managed by
+Pi rather than by a path into the invoking CLI installation. Text and JSON
+expose one typed result per harness; any failure exits `1`.
 
 `call` and `tell` accept exactly one nonblank positional or stdin prompt
 and pass its bytes unchanged. The CLI maps `KEIYAKU_HOME` once for the
