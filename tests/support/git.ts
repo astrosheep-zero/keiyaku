@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { appendFileSync, chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, cpSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { Repo } from "../../src/index.js";
 import { readManagedWorktreeAppointment } from "../../src/workspace-place.js";
 import type { ContractId } from "../../src/core/facts/types.js";
 import { observeContractAt } from "../../src/git/observe.js";
@@ -10,6 +11,21 @@ import type { GitRepository } from "../../src/git/process.js";
 import { repositoryAt as productionRepositoryAt } from "../../src/git/repository.js";
 
 const repositoryCapabilities = new Map<string, Promise<GitRepository>>();
+const repositoryTemplateHasTrackedEntries = new WeakMap<TestGitRepository, boolean>();
+const repos = new Map<string, Promise<Repo>>();
+
+export function cachedRepoAt(path: string, gitPath = "git"): Promise<Repo> {
+  const key = `${resolve(path)}\0${gitPath}`;
+  const existing = repos.get(key);
+  if (existing !== undefined) return existing;
+
+  const repo = Repo.at({ path, gitPath });
+  repos.set(key, repo);
+  void repo.catch(() => {
+    if (repos.get(key) === repo) repos.delete(key);
+  });
+  return repo;
+}
 
 export function cachedRepositoryAt(cwd: string, gitPath = "git"): Promise<GitRepository> {
   const key = `${resolve(cwd)}\0${gitPath}`;
@@ -57,13 +73,37 @@ export function withGitShim<T>(
   }
 }
 
-export function makeGitRepository(): TestGitRepository {
+function initializedGitRepository(): TestGitRepository {
   const path = mkdtempSync(join(tmpdir(), "keiyaku-v4-"));
   execFileSync("git", ["init", "--quiet", "--initial-branch=main", path]);
   appendFileSync(
     join(path, ".git", "config"),
     "\n[user]\n\tname = Keiyaku Test\n\temail = keiyaku-test@example.invalid\n[core]\n\tautocrlf = false\n",
   );
+  const run = (args: readonly string[], input?: string | Uint8Array): string =>
+    execFileSync("git", ["-C", path, ...args], { input, encoding: "utf8" }).toString();
+  return { path, run };
+}
+
+let emptyRepositoryTemplate: TestGitRepository | undefined;
+
+export function makeGitRepository(): TestGitRepository {
+  const template = emptyRepositoryTemplate ??= initializedGitRepository();
+  return snapshotGitRepository(template);
+}
+
+export function snapshotGitRepository(source: TestGitRepository): TestGitRepository {
+  const directory = mkdtempSync(join(tmpdir(), "keiyaku-v4-snapshot-"));
+  const path = join(directory, "repository");
+  cpSync(source.path, path, { recursive: true, dereference: false, preserveTimestamps: true, verbatimSymlinks: true });
+  let hasTrackedEntries = repositoryTemplateHasTrackedEntries.get(source);
+  if (hasTrackedEntries === undefined) {
+    hasTrackedEntries = source.run(["ls-files", "--cached", "-z"]) !== "";
+    repositoryTemplateHasTrackedEntries.set(source, hasTrackedEntries);
+  }
+  if (hasTrackedEntries) {
+    execFileSync("git", ["-C", path, "update-index", "--refresh", "-q"]);
+  }
   const run = (args: readonly string[], input?: string | Uint8Array): string =>
     execFileSync("git", ["-C", path, ...args], { input, encoding: "utf8" }).toString();
   return { path, run };

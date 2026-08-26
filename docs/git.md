@@ -256,13 +256,10 @@ ignored untracked bytes. Any such byte refuses as `untracked`; observation
 failure is nonpublishing `target-placement-failed`.
 
 The target fence has no post-admission marker or ancestor search. Recovery is
-allowed only while the target names the claimed candidate. Candidate index and
-worktree on every changed path prove completion. Candidate worktree with
-predecessor index completes by index-only merge; predecessor index and
-worktree complete by the full two-tree update; a full candidate worktree with a
-noncandidate changed-path index completes by candidate index alignment. Other
-shapes or failed updates report target-checkout lag without further mutation,
-and later placement cannot pass while that checkout is behind.
+allowed only while the target names the claimed candidate. Unchanged staged,
+unstaged, and untracked paths are preserved. Interrupted claimed checkout
+recovery is owned by [git-reconciliation.md](git-reconciliation.md); later
+placement cannot pass while that checkout is behind.
 
 Git admission builds raw Git objects and uses one
 `update-ref --stdin --no-deref` transaction. It recognizes canonical admitted

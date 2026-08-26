@@ -74,17 +74,28 @@ No target ref moves, attached branch follows, extra commits, refs, markers, or
 persisted follow state exist.
 Target-checkout reconciliation exists only to finish the current claimed
 placement's interrupted follow. It takes the same canonical target fence as
-placement, rereads the claimed delivery and target ref, and applies only the
-shape-proven recovery described above. It never adopts an ancestor as a base,
-projects an older claim after a newer target movement, or retries an ordinary
-pre-publication refusal. A completed checkout produces no effect; a completed
-recovery reports `recovered`; an incompatible shape reports
-`target-checkout-retained` and leaves every byte untouched. A checkout already
-at the candidate needs no recovery effect. Selected Contract status may
-independently judge that same pure shape, and may read a durable hook marker,
-as `CurrentPhysicalIssue`. That projection performs no reconcile, acquires no
-lock, mutates no refs or worktrees, and executes no hooks. World status and
-the Contract catalog omit it.
+placement, rereads the claimed delivery and target ref, and applies only
+shape-proven recovery of that claimed predecessor-to-candidate movement. It
+never adopts an ancestor as a base, projects an older claim after a newer
+target movement, or retries an ordinary pre-publication refusal.
+
+Recovery may replay only the current claimed predecessor-to-candidate movement
+when the relevant checkout state can carry it. That replay may change only the
+semantic entries affected by the claimed movement. Unrelated semantic index
+and worktree state, including staging admitted concurrently after recovery
+observation, is preserved. Relevant concurrent or incompatible state that
+cannot carry the movement is retained without overwrite and reports existing
+target-checkout lag. A recovery reports `recovered` only after Git completes
+its native carry-forward.
+
+A completed checkout produces no effect; a completed recovery reports
+`recovered`; an incompatible shape reports `target-checkout-retained` and
+leaves every byte untouched. A checkout already at the candidate needs no
+recovery effect. Selected Contract status may independently judge that same
+pure shape, and may read a durable hook marker, as `CurrentPhysicalIssue`.
+That projection performs no reconcile, acquires no lock, mutates no refs or
+worktrees, and executes no hooks. World status and the Contract catalog omit
+it.
 
 A pending tender keeps its tender and integration reachable through
 Keiyaku-owned refs for the managed worktree. Cleanup never moves the target ref.

@@ -433,7 +433,7 @@ type CheckoutInput = Readonly<{
 type CheckoutClassification =
   | Readonly<{ kind: "complete" }>
   | Readonly<{ kind: "retained" }>
-  | Readonly<{ kind: "recoverable"; action: "candidate-index" | "index-merge" | "worktree-merge" }>;
+  | Readonly<{ kind: "recoverable"; action: "index-merge" | "worktree-merge" }>;
 
 async function classifyCheckout(input: CheckoutInput): Promise<CheckoutClassification> {
   const { repository, path, predecessorTree, candidateTree } = input;
@@ -449,7 +449,6 @@ async function classifyCheckout(input: CheckoutInput): Promise<CheckoutClassific
     changedPaths,
   );
   if (candidateIndex && candidateWorkspace) return { kind: "complete" };
-  if (workspaceTree === candidateTree) return { kind: "recoverable", action: "candidate-index" };
   const predecessorIndex = await indexMatchesTreeOnPaths(repository, path, predecessorTree, changedPaths);
   if (predecessorIndex && candidateWorkspace) return { kind: "recoverable", action: "index-merge" };
   return !predecessorIndex ||
@@ -475,10 +474,6 @@ async function recoverCheckout(input: CheckoutInput): Promise<"complete" | "reco
   if (classified.kind === "complete") return "complete";
   if (classified.kind === "retained") return "retained";
   const { repository, path, predecessor, candidate } = input;
-  if (classified.action === "candidate-index") {
-    await runGit(repository, ["-C", path, "read-tree", gitObjectIdForSnapshot(candidate)]);
-    return "recovered";
-  }
   if (classified.action === "index-merge") {
     await runGit(repository, [
       "-C",
