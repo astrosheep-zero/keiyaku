@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync, unlinkSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, unlinkSync } from "node:fs";
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,6 +28,7 @@ import {
   requestBodyWait,
 } from "../src/akuma/requests.js";
 import { BodyRequestPump, settleBodyRequests, type UpstreamExecutionPort } from "../src/akuma/request-serve.js";
+import { BodyRequestPump as LifecycleBodyRequestPump } from "../src/akuma/request-lifecycle.js";
 import { executeTellAkuma, executeWaitAkuma, waitAkuma } from "../src/library/fleet.js";
 import { hookMarkerPath } from "../src/git/hooks.js";
 import { repositoryAt, worktreeGitDirectory } from "../src/git/repository.js";
@@ -97,6 +98,99 @@ function noDeliver(): Pick<UpstreamExecutionPort, "deliver"> {
     },
   };
 }
+
+test("a Heart authority failure keeps its error identity, closes the channel, and recovers admission", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-request-authority-failure-")));
+  const parent = await born(root, "parent", "11111111");
+  const id = randomUUID();
+  const authorityFailure = new Error("simulated Heart authority failure");
+  let serving!: () => void;
+  const served = new Promise<void>((resolve) => {
+    serving = resolve;
+  });
+  const pump = await LifecycleBodyRequestPump.openWithService(
+    {
+      paths: parent.paths,
+      parent: parent.soul,
+      bodySequence: 1,
+      now: () => "2026-08-18T00:00:01.000Z",
+      spawn: async () => {
+        throw new Error("call is outside this test");
+      },
+      signal: new AbortController().signal,
+    },
+    async (input) => {
+      await admitRequest(input.paths, { ...input.claim, admittedAt: input.now() } as never);
+      serving();
+      throw authorityFailure;
+    },
+  );
+  let closed = false;
+  try {
+    const request = requestBodyWait({
+      directory: pump.directory,
+      id,
+      targets: ["aku/worker/22222222" as AkuId],
+      completion: "all",
+    });
+    const failed = assert.rejects(pump.failure, (error: unknown) => error === authorityFailure);
+    await served;
+    await failed;
+    assert.deepEqual((await readdir(pump.directory)).filter((name) => name.endsWith(".receipt.json")), []);
+    await assert.rejects(pump.close(), (error: unknown) => error === authorityFailure);
+    closed = true;
+    await assert.rejects(
+      request,
+      (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "voided",
+    );
+    assert.equal(existsSync(pump.directory), false);
+    assert.equal((await readRequest(parent.paths, id))?.state, "admitted");
+    assert.equal(await settleBodyRequests(parent.paths, parent.soul, () => "2026-08-18T00:00:02.000Z"), "settled");
+    assert.equal((await readRequest(parent.paths, id))?.state, "voided");
+  } finally {
+    if (!closed) await pump.close().catch(() => undefined);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a same-id different-payload conflict is refused without changing the admitted request", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-request-input-conflict-")));
+  const parent = await born(root, "parent", "11111111");
+  const id = randomUUID();
+  let calls = 0;
+  const pump = await openPump(parent, {
+    wait: async () => {
+      calls += 1;
+      return { observed: true };
+    },
+    tell: async () => {
+      throw new Error("unexpected tell");
+    },
+    kill: async () => {
+      throw new Error("unexpected kill");
+    },
+    ...noDeliver(),
+  });
+  try {
+    const first = {
+      directory: pump.directory,
+      id,
+      targets: ["aku/worker/22222222" as AkuId],
+      completion: "all" as const,
+    };
+    assert.deepEqual(await requestBodyWait(first), { kind: "returned", result: { observed: true } });
+    const fact = await readRequest(parent.paths, id);
+    await assert.rejects(
+      requestBodyWait({ ...first, targets: ["aku/worker/33333333" as AkuId] }),
+      (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "refused",
+    );
+    assert.deepEqual(await readRequest(parent.paths, id), fact);
+    assert.equal(calls, 1);
+  } finally {
+    await pump.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("call allocation crossing the admission fence settles voided without spawning", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-call-admission-fence-")));
@@ -976,6 +1070,43 @@ test("deliver returns without a durable reference and settles Heart voided", asy
   }
 });
 
+test("an executor throw settles its admitted request voided", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-executor-voided-")));
+  const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
+  const id = randomUUID();
+  const pump = await openPump(parent, {
+    wait: async () => {
+      throw new Error("unexpected wait");
+    },
+    tell: async () => {
+      throw new Error("unexpected tell");
+    },
+    kill: async () => {
+      throw new Error("unexpected kill");
+    },
+    deliver: async () => {
+      throw new Error("executor unavailable");
+    },
+  });
+  try {
+    await assert.rejects(
+      requestBodyDeliver({
+        directory: pump.directory,
+        id,
+        repoRoot: root,
+        contractId: "kei/executor-voided",
+        includeDirty: false,
+        materializeConflict: false,
+      }),
+      (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "voided",
+    );
+    assert.equal((await readRequest(parent.paths, id))?.state, "voided");
+  } finally {
+    await pump.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("forwarded materialization is a live result and stores no Heart delivery reference", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-deliver-materialized-")));
   const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
@@ -1088,7 +1219,7 @@ test("completion fences admission but drains a returned delivery reference", asy
   }
 });
 
-test("a terminal duplicate is reprojected when its replay fences admission", async () => {
+test("an identical retry converges on its existing terminal request when replay fences admission", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-terminal-replay-")));
   const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
   const id = randomUUID();

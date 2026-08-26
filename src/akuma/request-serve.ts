@@ -1,5 +1,6 @@
 import {
   admitRequest,
+  isRequestInputConflict,
   readRequest,
   refuseRequest,
   reserveRequest,
@@ -362,11 +363,25 @@ export async function serveRequest(input: ServeInput): Promise<void> {
     : await serveUpstream({ ...input, claim: input.claim });
 }
 
+async function serveTransportClaim(input: ServeInput): Promise<void> {
+  try {
+    await serveRequest(input);
+  } catch (error) {
+    if (!isRequestInputConflict(error)) throw error;
+    await atomicJson(receiptPath(input.directory, input.transportId), {
+      id: input.claim.id,
+      action: input.claim.action,
+      state: "refused",
+      diagnostic: error.message,
+    });
+  }
+}
+
 export class BodyRequestPump extends LifecycleBodyRequestPump {
   static async open(input: PumpInput): Promise<BodyRequestPump> {
     return (await LifecycleBodyRequestPump.openWithService(
       input as LifecyclePumpInput,
-      async (claim) => await serveRequest(claim as ServeInput),
+      async (claim) => await serveTransportClaim(claim as ServeInput),
     )) as BodyRequestPump;
   }
 }

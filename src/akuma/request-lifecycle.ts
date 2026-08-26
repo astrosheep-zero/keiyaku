@@ -12,7 +12,7 @@ import {
 } from "./heart/index.js";
 import { pathsForAkuId, type AkuId, type AkumaPaths } from "./identity.js";
 import { BIRTH_TIMEOUT_MS } from "./publication.js";
-import { atomicJson, decodeClaim, receiptPath, type StructuralRequestClaim } from "./request-wire.js";
+import { decodeClaim, type StructuralRequestClaim } from "./request-wire.js";
 import type { OwnedProcess } from "../runtime/proc/run.js";
 export type RequestChildLaunch = Readonly<{
   paths: AkumaPaths;
@@ -90,18 +90,14 @@ export class BodyRequestPump {
           continue;
         }
         if (!this.admissionClosed) {
-          try {
-            await this.serveClaim({
-              directory: this.directory,
-              transportId,
-              claim,
-              ...this.input,
-              signal: this.executionSignal.signal,
-              admissionOpen: () => !this.admissionClosed,
-            });
-          } catch (error) {
-            await projectTransportFailure(this.directory, transportId, claim, error);
-          }
+          await this.serveClaim({
+            directory: this.directory,
+            transportId,
+            claim,
+            ...this.input,
+            signal: this.executionSignal.signal,
+            admissionOpen: () => !this.admissionClosed,
+          });
         }
         this.handled.add(transportId);
       }
@@ -141,20 +137,6 @@ async function requestFiles(directory: string): Promise<readonly string[]> {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw error;
   }
-}
-
-async function projectTransportFailure(
-  directory: string,
-  transportId: string,
-  claim: StructuralRequestClaim,
-  error: unknown,
-): Promise<void> {
-  await atomicJson(receiptPath(directory, transportId), {
-    id: claim.id,
-    action: claim.action,
-    state: "refused",
-    diagnostic: error instanceof Error ? error.message : String(error),
-  });
 }
 
 function matchingRequestOrigin(soul: Soul, parent: AkuId, id: string): boolean {

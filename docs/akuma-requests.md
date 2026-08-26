@@ -206,15 +206,24 @@ the Body `broke-off`; only physical Heart loss can leave a request nonterminal
 for the existing recovery sweep.
 
 The directory is the live pump's custody promise: while it exists, one serving
-pump can read claims and project receipts. A pump scan, read, serve, or receipt
-projection failure reaches the Body turn supervisor, which follows its existing
-close path and removes the directory; admitted or reserved Heart facts remain
-for the next Body's recovery sweep. A malformed claim is deleted as transport
-bytes, without a receipt or Heart mutation. A request filename is not a caller
+pump can read claims and project receipts. The explicit same-id/different-
+payload Heart admission conflict is the only serve failure the transport
+projects as a `refused` receipt. A pump scan, read, serve, or receipt-projection
+failure otherwise writes no receipt and rejects `pump.failure` with its
+originating error before the claim is handled. The Body turn supervisor stops
+admission, awaits that pump, and recursively removes the sequence directory;
+admitted or reserved Heart facts remain for the next Body's recovery sweep.
+That removal terminates every remaining pre-admission claim as transport
+disappearance, never as a verdict. A live caller observes the existing typed
+`voided` channel-closed outcome with no receipt, then retries through a
+successor Body using the same logical id and identical payload. Heart admission
+is idempotent for that pair, so the retry converges on its existing fact instead
+of minting another request. A malformed claim is deleted as transport bytes,
+without a receipt or Heart mutation. A request filename is not a caller
 liveness receipt: a pump may already have consumed a valid duplicate claim
-while Heart settlement and receipt projection remain in flight. A caller polls
-for its receipt until the directory disappears, which is the existing typed
-`voided` channel-closed outcome.
+while Heart settlement and receipt projection remain in flight. Post-admission
+executor throw or cancellation with Heart authority intact remains the serving
+owner's `voided` settlement.
 Requests do not enter the idle predicate.
 
 One hop holds at every depth: each provider talks only to its own unsandboxed

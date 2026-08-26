@@ -263,6 +263,7 @@ export const akumaZones = [
     allow: [
       any("akuma/heart/index.ts", [
         "admitRequest",
+        "isRequestInputConflict",
         "readRequest",
         "refuseRequest",
         "reserveRequest",

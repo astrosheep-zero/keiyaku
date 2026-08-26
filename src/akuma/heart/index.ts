@@ -72,6 +72,7 @@ export {
 } from "./storage.js";
 export {
   admitRequest,
+  isRequestInputConflict,
   readNonterminalRequests,
   readRequest,
   refuseRequest,
