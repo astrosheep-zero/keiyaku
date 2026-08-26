@@ -21,7 +21,7 @@ failure. Start failure writes a failed end. Stop, interrupt, kill, and process
 loss may leave the Turn open and do not synthesize a provider result.
 
 After the initial Turn outcome is committed, Body derives the WorldRoot from
-its launch paths, opens `<WorldRoot>/.square/PUBLIC.square`, and implicitly
+its launch paths, opens `<WorldRoot>/.square/KEIYAKU.square`, and implicitly
 joins as its own AkuId. Unless that identity is already done, it emits exactly
 one bare activity containing the answer or failure diagnostic. The activity
 contains at most the first 1,000 characters; a longer outcome appends

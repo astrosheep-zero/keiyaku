@@ -245,10 +245,10 @@ process cwd; a nested omitted call inherits its hosting caller Soul cwd.
 Call waits five minutes by default. `--wait` replaces that duration, while
 `-d`/`--detach` returns after birth and composition and excludes `--wait`.
 Before Body spawn, the edge resolves the caller's path-independent
-`assignedSquareName` through Square, lazily opens `<WorldRoot>/.square/KEIYAKU.square`,
+`squareAssignedParticipantName` through Square, lazily opens `<WorldRoot>/.square/KEIYAKU.square`,
 explicitly joins and binds that name, and establishes a listener for the allocated
-Aku. Square automatic sessions keep their existing `PUBLIC.square` path, and the
-Body's initial outcome remains projected to PUBLIC. Missing or ambiguous caller
+Aku. The call edge and Body use the same `<WorldRoot>/.square/KEIYAKU.square`
+target for call activity and the initial outcome. Missing or ambiguous caller
 assignment is a no-op at this edge and still launches. Idempotent join, binding,
 and listen create no rollback obligation; launch failure rolls back only facts
 created by this call. Detach returns `{ kind: "detached" }`. Outcome payload and

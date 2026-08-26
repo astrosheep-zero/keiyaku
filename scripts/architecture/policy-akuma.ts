@@ -328,6 +328,7 @@ export const akumaZones = [
         "RequestChildLaunch",
       ]),
       any("runtime/proc/run.ts"),
+      any("world.ts"),
     ],
   },
   {

@@ -1259,7 +1259,7 @@ test("CLI Square edge uses assigned identity and the dedicated KEIYAKU square", 
   const previousRoutes = process.env.SQUARE_ROUTES;
   process.env.SQUARE_REGISTRY = registry;
   process.env.SQUARE_ROUTES = routes;
-  const environment = { ...process.env, CODEX_THREAD_ID: "caller", SQUARE_ROUTES: routes };
+  const environment = { ...process.env, CODEX_THREAD_ID: "caller", SQUARE_PARTICIPANT_NAME: "Alice", SQUARE_ROUTES: routes };
   try {
     writeFileSync(
       registry,
@@ -1302,7 +1302,7 @@ test("CLI Square edge rollback removes only facts committed by that call", async
   const previousRoutes = process.env.SQUARE_ROUTES;
   process.env.SQUARE_REGISTRY = registry;
   process.env.SQUARE_ROUTES = routes;
-  const environment = { ...process.env, CODEX_THREAD_ID: "caller", SQUARE_ROUTES: routes };
+  const environment = { ...process.env, CODEX_THREAD_ID: "caller", SQUARE_PARTICIPANT_NAME: "Alice", SQUARE_ROUTES: routes };
   const squarePath = join(root, ".square", "KEIYAKU.square");
   try {
     writeFileSync(
@@ -1369,7 +1369,7 @@ test("CLI call finish failure rolls back newly committed dedicated Square facts"
   process.env.SQUARE_REGISTRY = registry;
   process.env.SQUARE_ROUTES = routes;
   delete process.env[AKUMA_REQUESTS_ENV];
-  const environment = { ...process.env, KEIYAKU_HOME: home, CODEX_THREAD_ID: "caller", SQUARE_ROUTES: routes };
+  const environment = { ...process.env, KEIYAKU_HOME: home, CODEX_THREAD_ID: "caller", SQUARE_PARTICIPANT_NAME: "Alice", SQUARE_ROUTES: routes };
   try {
     writeFileSync(
       registry,

@@ -1,5 +1,4 @@
 import { appendFile } from "node:fs/promises";
-import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { abortableDelay } from "./abort.js";
 import { BodySupervisor } from "./body-supervisor.js";
@@ -18,6 +17,7 @@ import {
   type Soul,
 } from "./heart/index.js";
 import { worldRootForAkumaPaths, type AkumaPaths } from "./identity.js";
+import { keiyakuSquarePath } from "../world.js";
 import type { ProviderAdapter } from "./provider.js";
 import { resolveProviderExecution } from "./providers/index.js";
 import {
@@ -171,7 +171,7 @@ async function expressInitialOutcome(launch: BodyLaunch, outcome: CommittedOutco
     const { Square } = await import("@astrosheep/square");
     const identity = launch.seed?.id ?? (await readHeart(launch.paths)).soul?.id;
     if (identity === undefined) return;
-    const square = await Square.at({ path: join(worldRootForAkumaPaths(launch.paths), ".square", "PUBLIC.square") });
+    const square = await Square.at({ path: keiyakuSquarePath(worldRootForAkumaPaths(launch.paths)) });
     try {
       const joined = await square.implicitJoin(identity);
       if (joined.state === "done" || joined.participant === undefined) return;

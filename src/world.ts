@@ -14,6 +14,13 @@ export type WorldResolution = Readonly<{
   candidate: WorldRoot | null;
   establish: () => Promise<WorldRoot>;
 }>;
+
+export const KEIYAKU_SQUARE_FILE = "KEIYAKU.square";
+
+export function keiyakuSquarePath(worldRoot: string): string {
+  return join(worldRoot, ".square", KEIYAKU_SQUARE_FILE);
+}
+
 export class WorldError extends Error {
   readonly kind: "invalid-world" | "home-world" | "root-world";
 

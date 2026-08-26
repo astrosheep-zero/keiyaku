@@ -69,6 +69,14 @@ CLI does not prompt.
 Plain text is the primary CLI projection. `--json` is a secondary projection
 of the same typed value; it never excuses missing or degraded text facts.
 
+The first-party Pi extension is a second window over the Kanshi report. Its
+resident widget is only a compact count summary; `/keiyaku` opens the existing
+world-status text projection in an overlay. It reads through the CLI surface,
+adds no facts or verbs, owns no lifecycle decision, and never presents a
+second authority. The widget and overlay use the same observation boundaries
+and keep section failure, absence, identity, and activity text as returned by
+Kanshi. A refresh is a new read, not persisted extension state.
+
 Kanshi text is a pure projection of its typed report. Bare world status keeps
 the `[ KEIYAKU ]`, `[ FLEET ]`, `[ TASK ]` order; these are its only uppercase
 section headers. Contract rows are natural-flow decision summaries with complete
@@ -78,7 +86,9 @@ existence starts the candidate/target fact line as `candidate` or `no candidate`
 gate glyphs stay beside gate names, and stale gates append `(stale)`. Fleet remains
 the bounded Akuma activity surface. `keiyaku ls kei/` is the pure active
 Contract catalog: it keeps the relevant Contract facts without Task or Akuma joins,
-candidate coordinates, or workspace and merge internals. Named Contract status renders only the selected Contract,
+candidate coordinates, or workspace and merge internals. Named Contract status renders only the selected Contract. A multi-selector
+status renders one selected Contract or Akuma projection per input selector in
+input order; JSON exposes those entries as an ordered array.
 using lowercase semantic blocks for `after`, `dependents`, `gates`,
 `candidate/integration`, `target`, `workspace/merge`, `attachments`, and
 `namespace tasks`. Git object IDs use the existing unique-prefix primitive;

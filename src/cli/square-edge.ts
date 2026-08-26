@@ -1,7 +1,6 @@
-import { assignedSquareName, bindCurrentParticipant, Square, unbindCurrentParticipant } from "@astrosheep/square";
-import { join } from "node:path";
+import { bindCurrentParticipant, Square, squareAssignedParticipantName, unbindCurrentParticipant } from "@astrosheep/square";
 import type { AllocatedAkuma } from "../akuma/identity.js";
-import type { WorldRoot } from "../world.js";
+import { keiyakuSquarePath, type WorldRoot } from "../world.js";
 
 async function openKeiyakuSquare(path: string): Promise<Square> {
   try {
@@ -26,9 +25,9 @@ export async function recognizeAndListen(
   environment: NodeJS.ProcessEnv,
   allocated: AllocatedAkuma,
 ): Promise<{ committed: boolean; rollback(): Promise<void> } | void> {
-  const name = assignedSquareName(environment);
+  const name = squareAssignedParticipantName(environment);
   if (name === undefined) return;
-  const path = join(worldRoot, ".square", "KEIYAKU.square");
+  const path = keiyakuSquarePath(worldRoot);
   const square = await openKeiyakuSquare(path);
   let joined = false;
   let bound = false;

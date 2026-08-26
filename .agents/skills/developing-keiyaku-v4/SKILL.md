@@ -121,6 +121,8 @@ Use the roles deliberately:
   when the question benefits from parallel evidence. Its use does not need a
   separate usage report unless the result changes a decision.
 
+Reuse the same Akuma for revisions within the same Contract and role; dispatch a new one only when the role or delivery boundary changes, independent review is required, or its context is contaminated.
+
 Prefer parallel Akuma lanes whenever the work can be split without overlapping
 write surfaces: for example, implementation, independent review, and a broad
 scan can run together. Give each lane one bounded responsibility and one

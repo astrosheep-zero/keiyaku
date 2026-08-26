@@ -31,6 +31,7 @@ import type { AgentEvent, ProviderAdapter, TurnResult } from "../src/akuma/provi
 import { createClaudeProvider } from "../src/akuma/providers/claude/index.js";
 import { requestBodyCall } from "../src/akuma/requests.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
+import { keiyakuSquarePath } from "../src/world.js";
 
 async function outcomes(paths: Parameters<typeof activitySlice>[0]) {
   return (await activitySlice(paths)).rows.filter((fact) => fact.kind === "turn-end").map((fact) => fact.outcome);
@@ -2059,7 +2060,7 @@ test("Body delivers answered and failed initial outcomes as bare Square activiti
   const { Square } = await import("@astrosheep/square");
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-square-outcome-"));
   try {
-    const squarePath = join(root, ".square", "PUBLIC.square");
+    const squarePath = keiyakuSquarePath(root);
     await (await Square.build({ path: squarePath, markdown: "# public" })).close();
     const answered = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "a11ce001" });
     await initializeHeart(answered.paths);
@@ -2132,7 +2133,7 @@ test("Body caps long Square outcomes and points to the latest Akuma history", as
   const { Square } = await import("@astrosheep/square");
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-square-outcome-cap-"));
   try {
-    const squarePath = join(root, ".square", "PUBLIC.square");
+    const squarePath = keiyakuSquarePath(root);
     await (await Square.build({ path: squarePath, markdown: "# public" })).close();
     const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "cafe1000" });
     await initializeHeart(allocated.paths);

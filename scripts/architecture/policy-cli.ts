@@ -230,7 +230,7 @@ export const cliZones = [
   },
   {
     source: "cli/square-edge.ts",
-    allow: [any("@astrosheep/square"), any("akuma/identity.ts"), any("akuma/publication.ts"), types("world.ts")],
+    allow: [any("@astrosheep/square"), any("akuma/identity.ts"), any("akuma/publication.ts"), any("world.ts")],
   },
   {
     source: "scripts/architecture/**",
