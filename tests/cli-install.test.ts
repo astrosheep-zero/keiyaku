@@ -108,19 +108,23 @@ test("bundled instructions keep facade and standalone Akuma call surfaces distin
   assert.doesNotMatch(akumaSkill, /\bpersona\b|--persona|Contract|Dispatch|kei\/|--contract|--repo/iu);
 });
 
-test("all harness manifests identify the same bundle version", () => {
+test("harness manifests share one release version and keep cachebusters host-local", () => {
   const plugin = join(installAssetsRoot(), "plugins", "keiyaku");
-  const manifests = [
-    join(plugin, ".codex-plugin", "plugin.json"),
-    join(plugin, ".claude-plugin", "plugin.json"),
-    join(plugin, "package.json"),
-  ];
-  const versions = manifests.map((path) => {
+  const versionAt = (path: string): string => {
     const version = (JSON.parse(readFileSync(path, "utf8")) as { version?: unknown }).version;
     assert.equal(typeof version, "string", `${path} must declare a version`);
     return version;
-  });
-  assert.equal(new Set(versions).size, 1, `harness manifest versions differ: ${versions.join(", ")}`);
+  };
+  const codexVersion = versionAt(join(plugin, ".codex-plugin", "plugin.json"));
+  const claudeVersion = versionAt(join(plugin, ".claude-plugin", "plugin.json"));
+  const harnessVersion = versionAt(join(plugin, "package.json"));
+  const [codexRelease, codexMetadata, ...extraMetadata] = codexVersion.split("+");
+
+  assert.equal(claudeVersion, harnessVersion);
+  assert.equal(codexRelease, harnessVersion);
+  assert.match(codexMetadata ?? "", /^codex\.[0-9A-Za-z.-]+$/u);
+  assert.deepEqual(extraMetadata, []);
+  assert.equal(claudeVersion.includes("+"), false);
 });
 
 test("OpenCode and Pi expose the Keiyaku hard-cut identity", () => {

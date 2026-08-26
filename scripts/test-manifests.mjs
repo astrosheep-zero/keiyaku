@@ -58,6 +58,7 @@ export const INTEGRATION_TEST_FILES = [
   "tests/library-nuke.test.ts",
   "tests/library-verification.test.ts",
   "tests/nuke.test.ts",
+  "tests/path-coordinates.test.ts",
   "tests/protocol-bind-observe.test.ts",
   "tests/public-library.test.ts",
   "tests/region-observation.test.ts",
