@@ -1,6 +1,6 @@
 {
   "name": "@astrosheep/keiyaku",
-  "version": "4.5.3",
+  "version": "4.5.4",
   "files": [
     "build"
   ],
@@ -76,7 +76,17 @@
     "doc": "docs",
     "test": "tests"
   },
-  "keywords": [],
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./build/integrations/pi/keiyaku.ts"
+    ],
+    "skills": [
+      "./build/integrations/marketplace/plugins/keiyaku/skills"
+    ]
+  },
   "author": "",
   "license": "ISC",
   "publishConfig": {

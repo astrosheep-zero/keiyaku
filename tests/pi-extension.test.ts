@@ -1,7 +1,20 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import keiyakuExtension from "../integrations/pi/keiyaku.js";
+
+test("npm root package declares its Pi resources", () => {
+  const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
+    keywords?: unknown;
+    pi?: { extensions?: unknown; skills?: unknown };
+  };
+  assert.equal(Array.isArray(packageJson.keywords) && packageJson.keywords.includes("pi-package"), true);
+  assert.deepEqual(packageJson.pi, {
+    extensions: ["./build/integrations/pi/keiyaku.ts"],
+    skills: ["./build/integrations/marketplace/plugins/keiyaku/skills"],
+  });
+});
 
 type Handler = (event: unknown, context: ExtensionContext) => unknown;
 
