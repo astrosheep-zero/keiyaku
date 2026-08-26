@@ -1,3 +1,5 @@
+import { realpath } from "node:fs/promises";
+import { resolve } from "node:path";
 import { currentBranchOperation, scopeOperation, type RepositoryScope } from "../protocol/operations.js";
 import { NoGitWorldError } from "../git/repository.js";
 import { optionalNonblank, requireInput } from "./input.js";
@@ -15,7 +17,7 @@ const REPO_SCOPES = new WeakMap<object, RepositoryScope>();
 
 async function resolvePinnedScope(path?: string, gitPath?: string): Promise<RepositoryScope> {
   return await scopeOperation({
-    coordinate: path === undefined ? process.cwd() : path,
+    coordinate: await realpath(resolve(path === undefined ? process.cwd() : path)),
     ...(gitPath === undefined ? {} : { gitPath }),
   });
 }

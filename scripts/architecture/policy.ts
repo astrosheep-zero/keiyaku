@@ -59,6 +59,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         { source: "world.ts", symbols: ["mkdir", "realpath", "stat"] },
         { source: "settings.ts", symbols: ["readFile"] },
         ...ownersFor(["realpath", "access"], "cli/coordinates.ts", "git/scratch.ts"),
+        ...ownersFor(["realpath"], "library/repo.ts"),
         { source: "akuma/archetype.ts", symbols: ["readFile", "readdir"] },
         { source: "akuma/akuma.ts", symbols: ["realpath", "stat"] },
         { source: "akuma/akuma-product.ts", symbols: ["readdir", "realpath", "stat"] },

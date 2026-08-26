@@ -175,8 +175,10 @@ Omitting `target` is targetless, not the current branch.
 An omitted target requires a real `HEAD` commit; an unborn `HEAD` returns the
 typed `unborn-head` refusal.
 
-`Repo.at` resolves and pins the Git world before returning; omitted `path` uses
-the caller cwd. Optional nonblank `gitPath` selects and pins the executable for
+`Repo.at` resolves its path against the caller cwd and canonicalizes the
+existing filesystem coordinate to an absolute native path before pinning the
+Git world; omitted `path` uses the caller cwd. Repo, World, and Git internal
+filesystem coordinates retain that native form. Optional nonblank `gitPath` selects and pins the executable for
 every Git subprocess issued through that Repo; omission uses the literal
 executable `git`. The string is an executable coordinate, not a repository path,
 and is passed to process creation unchanged. `currentBranch()` returns the invocation worktree's canonical

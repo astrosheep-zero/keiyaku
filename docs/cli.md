@@ -22,6 +22,13 @@ process cwd is initiator context. The canonical value remains the base for
 relative argv paths and Repo and World discovery; the cwd itself is never
 product identity.
 
+CLI filesystem inputs resolve once at this edge to an existing, canonical
+absolute native path. The CLI passes that native coordinate directly to Repo,
+World, and Git; it does not interpret another platform's path spelling. In
+particular, Git Bash/MSYS converts ordinary `/c/...` shell arguments before
+Node starts. Raw MSYS path syntax that bypasses that conversion is outside the
+CLI grammar.
+
 `--repo <path>` is the explicit Contract Git coordinate. It resolves against
 the invocation cwd and may name any path inside the intended repository. It
 does not replace the invocation Repo used for World resolution or change Task,

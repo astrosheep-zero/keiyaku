@@ -132,7 +132,8 @@ jobs:
               "tests/sqlite-transaction-lock.test.ts",
               "tests/task-document.test.ts",
               "tests/task-operations.test.ts",
-              "tests/world.test.ts"
+              "tests/world.test.ts",
+              "tests/path-coordinates.test.ts"
             )
           }
           & node @nodeArgs
@@ -140,6 +141,71 @@ jobs:
 
       - name: Check patch whitespace
         run: git diff --check
+
+  windows-msys:
+    name: windows-2022 / Git Bash coordinate smoke
+    runs-on: windows-2022
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24.x
+          cache: npm
+
+      - name: Set up Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.14.1
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --prefer-offline
+
+      - name: Build
+        run: npm run build
+
+      - name: Run Git Bash coordinate smoke
+        shell: pwsh
+        run: |
+          $bash = Join-Path $env:ProgramFiles "Git\bin\bash.exe"
+          if (!(Test-Path $bash)) { throw "Git Bash is unavailable: $bash" }
+          $script = @'
+          set -euo pipefail
+          repository="$PWD/.keiyaku-msys-coordinate-$RANDOM"
+          trap 'rm -rf "$repository"' EXIT
+          git init --quiet --initial-branch=main "$repository"
+          git -C "$repository" config user.name "Keiyaku CI"
+          git -C "$repository" config user.email "keiyaku-ci@example.invalid"
+          git -C "$repository" commit --quiet --allow-empty -m initial
+          cat <<'KEIYAKU' | node "$PWD/build/src/cli/index.js" -C "$repository" --repo "$repository" bind -
+          # Git Bash coordinates
+
+          ## Context
+          Git Bash converts ordinary path arguments before Node starts.
+
+          ## Objective
+          Exercise one managed worktree lifecycle.
+
+          ## Design
+          Keep native coordinates inside the process.
+
+          ## Region
+          ~~~
+          src/**
+          ~~~
+
+          ## Criteria
+          ### Coordinate accepted
+          The contract binds from Git Bash.
+          KEIYAKU
+          test -d "$repository/.keiyaku/wt"
+          '@
+          & $bash --noprofile --norc -lc $script
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   windows-e2e:
     name: windows-2022 / packaged CLI e2e
@@ -197,6 +263,9 @@ jobs:
 
       - name: Run packaged CLI end-to-end test
         run: npm run test:e2e
+
+      - name: Run filesystem coordinate tests
+        run: npm run test:focused -- tests/path-coordinates.test.ts
 
       - name: Typecheck
         run: npm run test:typecheck

@@ -22,6 +22,12 @@ ordinary, streamed-output, and environment-augmented Git subprocesses all use
 that exact coordinate. Git modules do not read environment configuration or
 reinterpret the coordinate as a repository path.
 
+Filesystem coordinates arrive from the CLI, Repo, or World boundary as
+canonical absolute native paths and pass directly to Git argv and child cwd.
+Git does not convert Windows or MSYS path dialects. Git tree object paths are
+a separate slash-delimited Git grammar; filesystem normalization never applies
+to them.
+
 Targeted observation and admission are bounded by the touched journal and
 selected ancestor depth, never by the complete world; a full-world observation
 is the only complete-tree read. The private Git map has no independently
