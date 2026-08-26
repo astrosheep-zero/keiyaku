@@ -1,49 +1,70 @@
-import { Square } from "@astrosheep/square";
+import { assignedSquareName, bindCurrentParticipant, Square, unbindCurrentParticipant } from "@astrosheep/square";
 import { join } from "node:path";
 import type { AllocatedAkuma } from "../akuma/identity.js";
 import type { WorldRoot } from "../world.js";
+
+async function openKeiyakuSquare(path: string): Promise<Square> {
+  try {
+    return await Square.at({ path });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT" && (error as { code?: unknown }).code !== "unavailable")
+      throw error;
+    try {
+      return await Square.build({ path, markdown: "" });
+    } catch (buildError) {
+      try {
+        return await Square.at({ path });
+      } catch {
+        throw buildError;
+      }
+    }
+  }
+}
 
 export async function recognizeAndListen(
   worldRoot: WorldRoot,
   environment: NodeJS.ProcessEnv,
   allocated: AllocatedAkuma,
 ): Promise<{ committed: boolean; rollback(): Promise<void> } | void> {
-  const path = join(worldRoot, ".square", "PUBLIC.square");
-  let square: Square;
+  const name = assignedSquareName(environment);
+  if (name === undefined) return;
+  const path = join(worldRoot, ".square", "KEIYAKU.square");
+  const square = await openKeiyakuSquare(path);
+  let joined = false;
+  let bound = false;
+  let listening = false;
+  const rollback = async (): Promise<void> => {
+    if (listening || joined) {
+      const rollbackSquare = await Square.at({ path });
+      try {
+        const rollbackParticipant = await rollbackSquare.join(name);
+        if (listening) await rollbackParticipant.ignore(allocated.id);
+        if (joined) await rollbackParticipant.done();
+      } finally {
+        await rollbackSquare.close();
+      }
+    }
+    if (bound) unbindCurrentParticipant(path, name, environment);
+  };
   try {
-    square = await Square.at({ path });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT" || (error as { code?: unknown }).code === "unavailable")
-      return;
-    throw error;
-  }
-  try {
-    const recognize = (square as unknown as { recognize?: (env: NodeJS.ProcessEnv) => Promise<unknown> }).recognize;
-    if (recognize === undefined) return;
-    const participant = await recognize.call(square, environment);
-    if (participant === null) return;
-    const listener = participant as {
-      listen(target: string): Promise<{ activity: unknown | null }>;
-      ignore(target: string): Promise<unknown>;
-    };
+    const joinedResult = await square.joinWithActivity(name);
+    joined = joinedResult.activity !== null;
+    const participant = joinedResult.participant;
+    bound = bindCurrentParticipant(path, name, environment).created;
+    const listener = participant;
     const change = await listener.listen(allocated.id);
-    if (change.activity === null) return;
+    listening = change.activity !== null;
     return {
       committed: true,
-      rollback: async () => {
-        const rollbackSquare = await Square.at({ path });
-        try {
-          const current = (rollbackSquare as unknown as { recognize?: (env: NodeJS.ProcessEnv) => Promise<unknown> })
-            .recognize;
-          if (current === undefined) return;
-          const rollbackParticipant = await current.call(rollbackSquare, environment);
-          if (rollbackParticipant === null) return;
-          await (rollbackParticipant as { ignore(target: string): Promise<unknown> }).ignore(allocated.id);
-        } finally {
-          await rollbackSquare.close();
-        }
-      },
+      rollback,
     };
+  } catch (error) {
+    try {
+      await rollback();
+    } catch {
+      /* preserve the original Square edge failure */
+    }
+    throw error;
   } finally {
     await square.close();
   }

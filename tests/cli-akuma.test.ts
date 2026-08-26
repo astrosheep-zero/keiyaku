@@ -17,11 +17,14 @@ import { BodyRequestPump } from "../src/akuma/request-serve.js";
 import { executeKillAkuma, executeTellAkuma, executeWaitAkuma } from "../src/library/fleet.js";
 import { Keiyaku, type AkumaObservation } from "../src/index.js";
 import { invoke } from "../src/cli/invoke.js";
+import { invokeAkuma } from "../src/cli/commands/akuma-invoke.js";
+import { recognizeAndListen } from "../src/cli/square-edge.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
 import { akumaExitCode, akumaJsonValue, akumaRawAnswer, renderAkumaText } from "../src/cli/render/akuma.js";
 import type { TextRenderContext } from "../src/cli/render/terminal.js";
 import type { AkuId } from "../src/akuma/identity.js";
 import { makeGitRepository } from "./support/git.js";
+import { bindCurrentParticipant, Square, unbindCurrentParticipant } from "@astrosheep/square";
 
 const PACKAGED_CLI = fileURLToPath(new URL("../build/src/cli/index.js", import.meta.url));
 const emptyCreatedTasks = { kind: "present" as const, rows: [] };
@@ -1242,6 +1245,169 @@ test("CLI call launches with or without a recognized Square listener", async () 
       }
     }
   } finally {
+    if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
+    else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI Square edge uses assigned identity and the dedicated KEIYAKU square", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-cli-dedicated-square-")));
+  const registry = join(root, "sessions.ndjsonl");
+  const routes = join(root, "routes.ndjsonl");
+  const previousRegistry = process.env.SQUARE_REGISTRY;
+  const previousRoutes = process.env.SQUARE_ROUTES;
+  process.env.SQUARE_REGISTRY = registry;
+  process.env.SQUARE_ROUTES = routes;
+  const environment = { ...process.env, CODEX_THREAD_ID: "caller", SQUARE_ROUTES: routes };
+  try {
+    writeFileSync(
+      registry,
+      `${JSON.stringify({
+        v: 1,
+        ts: new Date().toISOString(),
+        op: "join",
+        channel: "codex",
+        session_id: "caller",
+        name: "Alice",
+        square_path: join(root, ".square", "PUBLIC.square"),
+        owner_id: "caller-owner",
+      })}\n`,
+    );
+    const result = await recognizeAndListen(root, environment, { id: "aku/test" } as never);
+    assert.equal(result?.committed, true);
+    const squarePath = join(root, ".square", "KEIYAKU.square");
+    assert.equal(existsSync(squarePath), true);
+    const square = await Square.at({ path: squarePath });
+    try {
+      const participant = await square.join("Alice");
+      assert.deepEqual(await participant.listening(), ["aku/test"]);
+    } finally {
+      await square.close();
+    }
+  } finally {
+    if (previousRegistry === undefined) delete process.env.SQUARE_REGISTRY;
+    else process.env.SQUARE_REGISTRY = previousRegistry;
+    if (previousRoutes === undefined) delete process.env.SQUARE_ROUTES;
+    else process.env.SQUARE_ROUTES = previousRoutes;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI Square edge rollback removes only facts committed by that call", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-cli-square-rollback-")));
+  const registry = join(root, "sessions.ndjsonl");
+  const routes = join(root, "routes.ndjsonl");
+  const previousRegistry = process.env.SQUARE_REGISTRY;
+  const previousRoutes = process.env.SQUARE_ROUTES;
+  process.env.SQUARE_REGISTRY = registry;
+  process.env.SQUARE_ROUTES = routes;
+  const environment = { ...process.env, CODEX_THREAD_ID: "caller", SQUARE_ROUTES: routes };
+  const squarePath = join(root, ".square", "KEIYAKU.square");
+  try {
+    writeFileSync(
+      registry,
+      `${JSON.stringify({
+        v: 1,
+        ts: new Date().toISOString(),
+        op: "join",
+        channel: "codex",
+        session_id: "caller",
+        name: "Alice",
+        square_path: join(root, ".square", "PUBLIC.square"),
+        owner_id: "caller-owner",
+      })}\n`,
+    );
+    const created = await recognizeAndListen(root, environment, { id: "aku/new" } as never);
+    await created?.rollback();
+    let square = await Square.at({ path: squarePath });
+    try {
+      assert.equal((await square.participants()).find((item) => item.name === "Alice")?.state, "done");
+    } finally {
+      await square.close();
+    }
+    assert.equal(unbindCurrentParticipant(squarePath, "Alice", environment), false);
+
+    square = await Square.at({ path: squarePath });
+    try {
+      const participant = await square.join("Alice");
+      await participant.listen("aku/existing");
+    } finally {
+      await square.close();
+    }
+    bindCurrentParticipant(squarePath, "Alice", environment);
+    const existing = await recognizeAndListen(root, environment, { id: "aku/existing" } as never);
+    await existing?.rollback();
+    square = await Square.at({ path: squarePath });
+    try {
+      const participant = await square.join("Alice");
+      assert.deepEqual(await participant.listening(), ["aku/existing"]);
+      assert.equal((await square.participants()).find((item) => item.name === "Alice")?.state, "joined");
+    } finally {
+      await square.close();
+    }
+    assert.equal(unbindCurrentParticipant(squarePath, "Alice", environment), true);
+  } finally {
+    if (previousRegistry === undefined) delete process.env.SQUARE_REGISTRY;
+    else process.env.SQUARE_REGISTRY = previousRegistry;
+    if (previousRoutes === undefined) delete process.env.SQUARE_ROUTES;
+    else process.env.SQUARE_ROUTES = previousRoutes;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI call finish failure rolls back newly committed dedicated Square facts", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-cli-square-launch-failure-")));
+  const home = join(root, ".home");
+  const registry = join(root, "sessions.ndjsonl");
+  const routes = join(root, "routes.ndjsonl");
+  mkdirSync(join(home, "akuma"), { recursive: true });
+  writeFileSync(join(home, "akuma", "worker.md"), "---\nprovider: claude\n---\nWorker.\n");
+  const previousRegistry = process.env.SQUARE_REGISTRY;
+  const previousRoutes = process.env.SQUARE_ROUTES;
+  const previousRequests = process.env[AKUMA_REQUESTS_ENV];
+  process.env.SQUARE_REGISTRY = registry;
+  process.env.SQUARE_ROUTES = routes;
+  delete process.env[AKUMA_REQUESTS_ENV];
+  const environment = { ...process.env, KEIYAKU_HOME: home, CODEX_THREAD_ID: "caller", SQUARE_ROUTES: routes };
+  try {
+    writeFileSync(
+      registry,
+      `${JSON.stringify({
+        v: 1,
+        ts: new Date().toISOString(),
+        op: "join",
+        channel: "codex",
+        session_id: "caller",
+        name: "Alice",
+        square_path: join(root, ".square", "PUBLIC.square"),
+        owner_id: "caller-owner",
+      })}\n`,
+    );
+    const command = parseArgv(["-C", root, "call", "worker", "prompt"]).command;
+    await assert.rejects(
+      invokeAkuma(command, {
+        path: root,
+        home,
+        environment,
+        readStdin: async () => "prompt",
+        finishCall: async () => {
+          throw new Error("injected finish failure");
+        },
+      }),
+      /injected finish failure/u,
+    );
+    const square = await Square.at({ path: join(root, ".square", "KEIYAKU.square") });
+    try {
+      assert.equal((await square.participants()).find((item) => item.name === "Alice")?.state, "done");
+    } finally {
+      await square.close();
+    }
+  } finally {
+    if (previousRegistry === undefined) delete process.env.SQUARE_REGISTRY;
+    else process.env.SQUARE_REGISTRY = previousRegistry;
+    if (previousRoutes === undefined) delete process.env.SQUARE_ROUTES;
+    else process.env.SQUARE_ROUTES = previousRoutes;
     if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
     else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
     rmSync(root, { recursive: true, force: true });

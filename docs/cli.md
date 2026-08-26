@@ -244,14 +244,15 @@ appointed managed worktree is used. A direct Contract-free call uses ambient
 process cwd; a nested omitted call inherits its hosting caller Soul cwd.
 Call waits five minutes by default. `--wait` replaces that duration, while
 `-d`/`--detach` returns after birth and composition and excludes `--wait`.
-Before Body spawn, the edge resolves `<WorldRoot>/.square/PUBLIC.square`,
-recognizes the current caller, and establishes a listener for the allocated Aku.
-Missing Square or absent, ambiguous, stale, or foreign recognition is a no-op
-and still launches. An idempotent listen creates no rollback obligation. If
-launch fails after a newly committed listener activity, the edge reopens and
-re-recognizes the caller, then best-effort ignores that Aku; cleanup never
-masks the launch failure. Detach returns `{ kind: "detached" }`. Outcome
-payload and Body delivery belong to [akuma-execution.md](akuma-execution.md).
+Before Body spawn, the edge resolves the caller's path-independent
+`assignedSquareName` through Square, lazily opens `<WorldRoot>/.square/KEIYAKU.square`,
+explicitly joins and binds that name, and establishes a listener for the allocated
+Aku. Square automatic sessions keep their existing `PUBLIC.square` path, and the
+Body's initial outcome remains projected to PUBLIC. Missing or ambiguous caller
+assignment is a no-op at this edge and still launches. Idempotent join, binding,
+and listen create no rollback obligation; launch failure rolls back only facts
+created by this call. Detach returns `{ kind: "detached" }`. Outcome payload and
+Body delivery belong to [akuma-execution.md](akuma-execution.md).
 Successful detach
 prints the canonical-world wait command using the successful Alias or complete
 AkuId; failure adds no command and fabricates no life.

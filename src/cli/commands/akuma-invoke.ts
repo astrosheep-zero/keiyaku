@@ -68,6 +68,7 @@ type InvokeInput = Readonly<{
   repo?: Repo;
   environment: NodeJS.ProcessEnv;
   readStdin(): Promise<string>;
+  finishCall?: typeof finishCall;
 }>;
 
 function inputAlias(selector: string): string | undefined {
@@ -213,7 +214,7 @@ export async function invokeAkuma(command: InvokedAkumaCommand, input: InvokeInp
           : undefined;
       let result: CallResult;
       try {
-        result = await finishCall(born);
+        result = await (input.finishCall ?? finishCall)(born);
       } catch (error) {
         if (listener?.committed === true) {
           try {
