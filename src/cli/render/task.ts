@@ -2,6 +2,7 @@ import type {
   BlockedTaskList,
   BlockedTaskRow,
   TaskBatchResult,
+  TaskCompositionDiagnostic,
   TaskCompositionResult,
   TaskDecompositionTree,
   TaskDetail,
@@ -37,7 +38,11 @@ type TaskEntity = Readonly<{
   facts?: string;
   title: string | null;
 }>;
-type RefusalProjection = Readonly<{ line: string; diagnostic?: string }>;
+type RefusalProjection = Readonly<{
+  line: string;
+  diagnostic?: string;
+  compositionDiagnostics?: readonly TaskCompositionDiagnostic[];
+}>;
 type ComposeStop = Extract<TaskCompositionResult, { kind: "incomplete" }>["stopped"];
 
 const DEFAULT_CONTEXT: TextRenderContext = { columns: 80, color: false };
@@ -98,6 +103,9 @@ function projectRefusal(refusal: TaskRefusal): RefusalProjection {
   if (refusal.kind === "relation-owned-by-other") {
     return { line: `relation-owned-by-other ${refusal.taskId} ${refusal.related} ${refusal.declaringTask}` };
   }
+  if (refusal.kind === "invalid-composition") {
+    return { line: refusal.kind, compositionDiagnostics: refusal.diagnostics };
+  }
   return { line: refusal.kind, diagnostic: refusal.diagnostic };
 }
 
@@ -113,6 +121,9 @@ function renderFailure(verb: string, result: TaskFailure, columns: number): stri
   const facts = projectRefusal(result.refusal);
   lines.push(facts.line);
   appendDiagnostic(lines, facts.diagnostic);
+  for (const item of facts.compositionDiagnostics ?? []) {
+    lines.push(`line ${item.line} · ${safeText(item.reason)} · ${safeText(item.token)}`);
+  }
   return lines.join("\n");
 }
 
@@ -305,10 +316,29 @@ function stoppedLines(stopped: ComposeStop): string[] {
   return lines;
 }
 
+function aliasLines(aliases: readonly Readonly<{ alias: string; taskId: string }>[]): readonly string[] {
+  return aliases.map((binding) => `alias ^${binding.alias} ${binding.taskId}`);
+}
+
+function renderPlan(result: Extract<TaskCompositionResult, { kind: "planned" }>): string {
+  const lines = [
+    `compose plan · ${result.admissionOrder.length} documents`,
+    ...aliasLines(result.aliases),
+    ...result.admissionOrder.map((id, index) => `admit ${index + 1} ${id}`),
+  ];
+  for (const body of result.bodies) {
+    lines.push(`body ${body.taskId} · ${body.bytes} bytes`);
+    lines.push(`  first ${safeText(body.firstLine)}`);
+    lines.push(`  last ${safeText(body.lastLine)}`);
+  }
+  return lines.join("\n");
+}
+
 function renderCompose(result: TaskCompositionResult, columns: number): string {
   if (result.kind === "incomplete") return "";
+  if (result.kind === "planned") return renderPlan(result);
   if (result.kind !== "accepted") return renderFailure("compose", result, columns);
-  const lines = [`✓ compose accepted · ${result.documentChanges.length} changed`];
+  const lines = [`✓ compose accepted · ${result.documentChanges.length} changed`, ...aliasLines(result.aliases)];
   composeDiffs(lines, result.documentChanges);
   return lines.join("\n");
 }

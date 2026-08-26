@@ -5,12 +5,11 @@ import test from "node:test";
 import { Keiyaku, Repo } from "../src/index.js";
 import { acceptedDeliver } from "../src/cli/accepted.js";
 import type { ContractId } from "../src/core/facts/types.js";
-import { repositoryAt } from "../src/git/repository.js";
-import { appointedWorktreePath, withGitShim } from "./support/git.js";
+import { appointedWorktreePath, cachedRepoAt, cachedRepositoryAt, withGitShim } from "./support/git.js";
 import { bind, commitCandidate, document, repositoryWithMain } from "./support/library-verbs.js";
 
 async function candidateWorktree(repository: ReturnType<typeof repositoryWithMain>, contract: { readonly id: ContractId }): Promise<string> {
-  return appointedWorktreePath(await repositoryAt(repository.path), contract.id);
+  return appointedWorktreePath(await cachedRepositoryAt(repository.path), contract.id);
 }
 
 test("changed worktree after audit prevents Verification reuse", async () => {
@@ -53,7 +52,7 @@ test("public deliver keeps its Verification admission in accepted facts", async 
 
 test("completion omits Verification when no declaration applies", async () => {
   const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
+  const bound = await Keiyaku.bind({ repo: await cachedRepoAt(repository.path),
     markdown: document(),
     workspace: "worktree",
     gates: [],
@@ -68,7 +67,7 @@ test("completion omits Verification when no declaration applies", async () => {
 
 test("status and audit expose only current Verification testimony", async () => {
   const repository = repositoryWithMain();
-  const repo = await Repo.at({ path: repository.path });
+  const repo = await cachedRepoAt(repository.path);
   const bound = await Keiyaku.bind({ repo,
     markdown: document('printf "checked"; printf "warning" >&2'),
     workspace: "worktree",
@@ -122,7 +121,7 @@ test("status and audit expose only current Verification testimony", async () => 
 
 test("amend preserves untouched Verification bytes and currentness", async () => {
   const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
+  const bound = await Keiyaku.bind({ repo: await cachedRepoAt(repository.path),
     markdown: document("exit 0"),
     workspace: "worktree",
     gates: ["reviewed", "verified"],
@@ -146,7 +145,7 @@ test("amend preserves untouched Verification bytes and currentness", async () =>
 
 test("a declaration timeout admits unsatisfied testimony and leaves placement to gates", async () => {
   const openRepository = repositoryWithMain();
-  const open = await Keiyaku.bind({ repo: await Repo.at({ path: openRepository.path }),
+  const open = await Keiyaku.bind({ repo: await cachedRepoAt(openRepository.path),
     markdown: document("sleep 1").replace("~~~bash\n", "~~~bash timeout=25ms\n"),
     workspace: "worktree",
     gates: [],
@@ -165,7 +164,7 @@ test("a declaration timeout admits unsatisfied testimony and leaves placement to
   assert.equal((await open.keiyaku.state()).terminal?.kind, "claimed");
 
   const gatedRepository = repositoryWithMain();
-  const gated = await Keiyaku.bind({ repo: await Repo.at({ path: gatedRepository.path }),
+  const gated = await Keiyaku.bind({ repo: await cachedRepoAt(gatedRepository.path),
     markdown: document("sleep 1").replace("~~~bash\n", "~~~bash timeout=25ms\n"),
     workspace: "worktree",
     gates: ["verified"],

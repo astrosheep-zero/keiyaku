@@ -40,13 +40,14 @@ export async function nukeTask(world: WorldRoot, options?: Readonly<{ timeoutMs?
   if ((await nukeTaskAuthority(world, options)) === "busy") throw new Error("Task reset lock contention");
 }
 
+export type TaskCompositionDiagnostic = Readonly<{ line: number; reason: string; token: string }>;
 export type TaskRefusal =
   | Readonly<{ kind: "task-missing"; taskId: TaskId }>
   | Readonly<{ kind: "invalid-lifecycle-transition"; taskId: TaskId; state: TaskState; verb: TaskLifecycleVerb }>
   | Readonly<{ kind: "invalid-graph"; diagnostic: string }>
   | Readonly<{ kind: "invalid-namespace-context"; path: string }>
   | Readonly<{ kind: "relation-owned-by-other"; taskId: TaskId; related: TaskId; declaringTask: TaskId }>
-  | Readonly<{ kind: "invalid-composition"; diagnostic: string }>;
+  | Readonly<{ kind: "invalid-composition"; diagnostics: readonly TaskCompositionDiagnostic[] }>;
 export type TaskRetry = "busy" | "concurrent-modification";
 export type TaskOutcome<A> =
   | Readonly<{ kind: "accepted"; value: A }>

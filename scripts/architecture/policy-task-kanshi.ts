@@ -30,14 +30,27 @@ export const taskKanshiZones = [
     ],
   },
   {
+    source: "task/compose-parser.ts",
+    allow: [any("task/identity.ts"), types("task/operations.ts")],
+  },
+  {
+    source: "task/compose-language.ts",
+    allow: [
+      any("task/compose-parser.ts"),
+      any("task/board.ts"),
+      any("task/document.ts"),
+      any("task/identity.ts"),
+      any("task/operations.ts"),
+    ],
+  },
+  {
     source: "task/compose.ts",
     allow: [
       types("world.ts"),
       any("markdown/diff.ts"),
-      any("task/context.ts"),
-      any("task/board.ts"),
+      any("task/compose-language.ts"),
       any("task/document.ts"),
-      any("task/identity.ts"),
+      types("task/identity.ts"),
       any("task/operations.ts"),
       any("task/store.ts"),
     ],

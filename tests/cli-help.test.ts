@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { main } from "../src/cli/main.js";
-import { CONTRACT_COMMAND_SPECS, type ContractCommand, type ContractCommandSpec } from "../src/cli/commands/contract.js";
+import {
+  CONTRACT_COMMAND_SPECS,
+  type ContractCommand,
+  type ContractCommandSpec,
+} from "../src/cli/commands/contract.js";
 import { CliUsageError, parseArgv, renderContractHelp, renderRootHelp } from "../src/cli/parse.js";
 import { renderAkumaHelp, type AkumaAction } from "../src/cli/commands/akuma.js";
 import { renderInstallHelp } from "../src/cli/commands/install.js";
@@ -39,44 +43,49 @@ test("each grammar owner renders its own namespace and leaf help", () => {
   assert.match(renderContractHelp("bind"), /usage: keiyaku bind \[--task <task\/\.\.\.>\]/u);
   assert.match(renderContractHelp("deliver"), /--message <text>\] \[--include-dirty\] \[--materialize-conflict\]/u);
   assert.match(renderContractHelp("review"), /usage: keiyaku review .*--satisfied \| --unsatisfied/u);
-  assert.equal(renderContractHelp("show"), [
-    "Read one Contract guidance projection.",
-    "",
-    "usage: keiyaku show [<contract>|@<contract>]",
-  ].join("\n"));
-  assert.equal(renderContractHelp("ls"), [
-    "List one identity directory.",
-    "",
-    "usage: keiyaku ls task[/]",
-    "       keiyaku ls kei[/]",
-    "       keiyaku ls aku[/]",
-    "       keiyaku ls aku/<akuma>[/]",
-    "       keiyaku ls \"aku/*/*\"",
-  ].join("\n"));
+  assert.equal(
+    renderContractHelp("show"),
+    ["Read one Contract guidance projection.", "", "usage: keiyaku show [<contract>|@<contract>]"].join("\n"),
+  );
+  assert.equal(
+    renderContractHelp("ls"),
+    [
+      "List one identity directory.",
+      "",
+      "usage: keiyaku ls task[/]",
+      "       keiyaku ls kei[/]",
+      "       keiyaku ls aku[/]",
+      "       keiyaku ls aku/<akuma>[/]",
+      '       keiyaku ls "aku/*/*"',
+    ].join("\n"),
+  );
   assert.match(renderTaskHelp(), /task update <TaskId>/u);
   assert.match(renderTaskHelp("tree"), /usage: keiyaku task tree <TaskId>/u);
   assert.match(renderTaskHelp("update"), /--body <text>\|- \| --append <text>/u);
   assert.doesNotMatch(renderTaskHelp("update"), /--append <text>\|-|--note <text>\|-/u);
   assert.doesNotMatch(renderTaskHelp(), /--full/u);
   assert.doesNotMatch(renderTaskHelp(), /--contract|--no-contract/u);
-  assert.match(renderTaskHelp("compose"), /usage: keiyaku task compose \[--actor <actor>\] -/u);
+  assert.match(renderTaskHelp("compose"), /usage: keiyaku task compose \[--actor <actor>\] \[--plan\] -/u);
   assert.match(renderTaskHelp("add"), /--actor <actor>/u);
   assert.doesNotMatch(renderTaskHelp("update"), /--actor/u);
   assert.doesNotMatch(renderTaskHelp("start"), /--actor/u);
   assert.doesNotMatch(renderTaskHelp("done"), /--actor/u);
   assert.doesNotMatch(renderTaskHelp(), /KEIYAKU_PROJECTION_ID/u);
-  assert.match(renderTaskHelp("compose"), /documents independently; partial admission has no cross-file atomicity or rollback/u);
+  assert.match(renderTaskHelp("compose"), /references: @task\/\.\.\. is pre-existing/u);
   assert.match(renderTaskHelp("ready"), /open Tasks whose every need is terminal/u);
   assert.doesNotMatch(renderRootHelp(), /^  interrupt /mu);
   assert.match(renderRootHelp(), /tell <aku\/\.\.\.|@alias> \[--interrupt\]/u);
-  assert.equal(renderAkumaHelp("tell"), [
-    "Send one prompt to an existing Akuma and wake it.",
-    "",
-    "usage: keiyaku tell <aku/...|@alias> [--interrupt] (<prompt> | -)",
-    "",
-    "Give <prompt> as one argument, or use - to read stdin.",
-    "--interrupt ends the current Body before recording the prompt and waking its successor.",
-  ].join("\n"));
+  assert.equal(
+    renderAkumaHelp("tell"),
+    [
+      "Send one prompt to an existing Akuma and wake it.",
+      "",
+      "usage: keiyaku tell <aku/...|@alias> [--interrupt] (<prompt> | -)",
+      "",
+      "Give <prompt> as one argument, or use - to read stdin.",
+      "--interrupt ends the current Body before recording the prompt and waking its successor.",
+    ].join("\n"),
+  );
   assert.match(renderAkumaHelp("history"), /\[--limit <count>\] \[--last\]/u);
   assert.doesNotMatch(renderAkumaHelp("call"), /final -/u);
   assert.doesNotMatch(renderAkumaHelp("tell"), /final -/u);
@@ -86,33 +95,39 @@ test("each grammar owner renders its own namespace and leaf help", () => {
 });
 
 test("amend leaf help enumerates the operation grammar", () => {
-  assert.equal(renderContractHelp("amend"), [
-    "Amend one Contract's document operations or structured terms.",
-    "",
-    "usage: keiyaku amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name,...>] [--actor <actor>] [-]",
-    "",
-    "  ## Replace: Context|Objective|Design|Region|Criteria|Verification|<extension>",
-    "  ## Append: Context|Objective|Design|Criteria|<extension>",
-    "  ## Add: Criteria|<new-extension-title>",
-    "  ## Update: <existing-extension-title>",
-    "  ## Remove: Criterion <existing-title>",
-    "  ## Remove: <existing-extension-title>",
-  ].join("\n"));
+  assert.equal(
+    renderContractHelp("amend"),
+    [
+      "Amend one Contract's document operations or structured terms.",
+      "",
+      "usage: keiyaku amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name,...>] [--actor <actor>] [-]",
+      "",
+      "  ## Replace: Context|Objective|Design|Region|Criteria|Verification|<extension>",
+      "  ## Append: Context|Objective|Design|Criteria|<extension>",
+      "  ## Add: Criteria|<new-extension-title>",
+      "  ## Update: <existing-extension-title>",
+      "  ## Remove: Criterion <existing-title>",
+      "  ## Remove: <existing-extension-title>",
+    ].join("\n"),
+  );
 });
 
 test("deliver leaf help explains candidate capture and conflict continuation", () => {
-  assert.equal(renderContractHelp("deliver"), [
-    "Deliver one Contract candidate from the appointed worktree.",
-    "",
-    "usage: keiyaku deliver [<contract>|@<contract>] [--message <text>] [--include-dirty] [--materialize-conflict] [--actor <actor>]",
-    "",
-    "  --include-dirty         Capture the complete non-ignored worktree tree as the",
-    "                          candidate; stages nothing, commits nothing. Refused",
-    "                          while unmerged paths exist.",
-    "  --materialize-conflict  After a conflict result, project the judged targetHead",
-    "                          into the worktree as an uncommitted merge. Not a",
-    "                          delivery: resolve, stage, deliver again.",
-  ].join("\n"));
+  assert.equal(
+    renderContractHelp("deliver"),
+    [
+      "Deliver one Contract candidate from the appointed worktree.",
+      "",
+      "usage: keiyaku deliver [<contract>|@<contract>] [--message <text>] [--include-dirty] [--materialize-conflict] [--actor <actor>]",
+      "",
+      "  --include-dirty         Capture the complete non-ignored worktree tree as the",
+      "                          candidate; stages nothing, commits nothing. Refused",
+      "                          while unmerged paths exist.",
+      "  --materialize-conflict  After a conflict result, project the judged targetHead",
+      "                          into the worktree as an uncommitted merge. Not a",
+      "                          delivery: resolve, stage, deliver again.",
+    ].join("\n"),
+  );
   assert.doesNotMatch(renderRootHelp(), /Capture the complete non-ignored worktree tree/u);
 });
 
@@ -139,19 +154,21 @@ test("help contains no Markdown file pointers", () => {
 test("amend syntax refusal keeps the stored usage block", () => {
   assert.throws(
     () => parseArgv(["amend"]),
-    (error: unknown) => error instanceof CliUsageError
-      && error.message.includes("amend requires stdin or --after, --clear-after, or --gates")
-      && error.message.includes("usage: keiyaku amend [<contract>|@<contract>]")
-      && !error.message.includes("minimal stdin"),
+    (error: unknown) =>
+      error instanceof CliUsageError &&
+      error.message.includes("amend requires stdin or --after, --clear-after, or --gates") &&
+      error.message.includes("usage: keiyaku amend [<contract>|@<contract>]") &&
+      !error.message.includes("minimal stdin"),
   );
 });
 
 test("syntax refusal retains the deepest reached grammar", () => {
   assert.throws(
     () => parseArgv(["task", "unknown"]),
-    (error: unknown) => error instanceof CliUsageError
-      && error.message.includes("usage: keiyaku task <command>")
-      && error.message.includes("task show <TaskId>"),
+    (error: unknown) =>
+      error instanceof CliUsageError &&
+      error.message.includes("usage: keiyaku task <command>") &&
+      error.message.includes("task show <TaskId>"),
   );
 });
 
@@ -160,8 +177,14 @@ test("help is stdout zero and does not enter an absent world", async () => {
   let stderr = "";
   const writeStdout = process.stdout.write;
   const writeStderr = process.stderr.write;
-  process.stdout.write = ((chunk: string | Uint8Array) => { stdout += String(chunk); return true; }) as typeof process.stdout.write;
-  process.stderr.write = ((chunk: string | Uint8Array) => { stderr += String(chunk); return true; }) as typeof process.stderr.write;
+  process.stdout.write = ((chunk: string | Uint8Array) => {
+    stdout += String(chunk);
+    return true;
+  }) as typeof process.stdout.write;
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    stderr += String(chunk);
+    return true;
+  }) as typeof process.stderr.write;
   try {
     const exit = await main(["-C", "/definitely/absent/keiyaku-world", "task", "unknown", "--json", "-", "--help"]);
     assert.equal(exit, 0);
@@ -175,13 +198,14 @@ test("help is stdout zero and does not enter an absent world", async () => {
 });
 
 test("amend help resolves at the parser edge for an absent world", () => {
-  assert.deepEqual(
-    parseArgv(["-C", "/definitely/absent/keiyaku-world", "amend", "--json", "-", "--help"]),
-    { help: { kind: "contract", command: "amend" } },
-  );
+  assert.deepEqual(parseArgv(["-C", "/definitely/absent/keiyaku-world", "amend", "--json", "-", "--help"]), {
+    help: { kind: "contract", command: "amend" },
+  });
 });
 
-async function captureMain(argv: readonly string[]): Promise<Readonly<{ exit: number; stdout: string; stderr: string }>> {
+async function captureMain(
+  argv: readonly string[],
+): Promise<Readonly<{ exit: number; stdout: string; stderr: string }>> {
   let stdout = "";
   let stderr = "";
   const writeStdout = process.stdout.write;
@@ -192,7 +216,10 @@ async function captureMain(argv: readonly string[]): Promise<Readonly<{ exit: nu
     stdout += chunk;
     return true;
   }) as typeof process.stdout.write;
-  process.stderr.write = ((chunk: string | Uint8Array) => { stderr += String(chunk); return true; }) as typeof process.stderr.write;
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    stderr += String(chunk);
+    return true;
+  }) as typeof process.stderr.write;
   try {
     return { exit: await main(argv), stdout, stderr };
   } finally {
@@ -226,8 +253,14 @@ test("bare ls is help-only even when its cwd cannot be read", async () => {
   let stderr = "";
   const writeStdout = process.stdout.write;
   const writeStderr = process.stderr.write;
-  process.stdout.write = ((chunk: string | Uint8Array) => { stdout += String(chunk); return true; }) as typeof process.stdout.write;
-  process.stderr.write = ((chunk: string | Uint8Array) => { stderr += String(chunk); return true; }) as typeof process.stderr.write;
+  process.stdout.write = ((chunk: string | Uint8Array) => {
+    stdout += String(chunk);
+    return true;
+  }) as typeof process.stdout.write;
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    stderr += String(chunk);
+    return true;
+  }) as typeof process.stderr.write;
   try {
     assert.equal(await main(["-C", "/definitely/absent/keiyaku-world", "ls"]), 0);
   } finally {

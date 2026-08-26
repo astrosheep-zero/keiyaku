@@ -7,8 +7,7 @@ import { decodeContractDocument } from "../src/body/decode.js";
 import { encodeEntry } from "../src/core/facts/codec.js";
 import { entryUlid, type JournalEntry } from "../src/core/facts/types.js";
 import { contractJournalPath } from "../src/git/identity.js";
-import { repositoryAt } from "../src/git/repository.js";
-import { appointedWorktreePath, withGitShim } from "./support/git.js";
+import { appointedWorktreePath, cachedRepoAt, cachedRepositoryAt, withGitShim } from "./support/git.js";
 import { bind, commitCandidate, document, refused, repositoryWithMain } from "./support/library-verbs.js";
 
 test("public amend returns the recovered journal head after unknown recovery", async () => {
@@ -204,7 +203,7 @@ test("accepted head excludes an append made after admission", async () => {
 
 test("claim does not mutate eligible dependents", async () => {
   const repository = repositoryWithMain();
-  const sourceResult = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
+  const sourceResult = await Keiyaku.bind({ repo: await cachedRepoAt(repository.path),
     markdown: document(),
     workspace: "worktree",
     gates: ["reviewed"],
@@ -215,7 +214,7 @@ test("claim does not mutate eligible dependents", async () => {
 
   const dependents: Keiyaku[] = [];
   for (let index = 0; index < 4; index += 1) {
-    const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
+    const bound = await Keiyaku.bind({ repo: await cachedRepoAt(repository.path),
       markdown: document(),
       workspace: "worktree",
       after: [(await source.state()).id],
@@ -235,13 +234,13 @@ test("claim does not mutate eligible dependents", async () => {
 test("delivery re-integrates its persisted tender when the target premise moves", async () => {
   const repository = repositoryWithMain();
   repository.run(["branch", "release"]);
-  const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
+  const result = await Keiyaku.bind({ repo: await cachedRepoAt(repository.path),
     markdown: document(),
     target: "refs/heads/release",
     workspace: "worktree",
     gates: [],
   });
-  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), result.keiyaku.id);
+  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), result.keiyaku.id);
   writeFileSync(resolve(worktree, "candidate.txt"), "captured\n");
   repository.run(["-C", worktree, "add", "candidate.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
@@ -298,7 +297,7 @@ test("reintegrated delivery does not aggregate Verification from the superseded 
   const repository = repositoryWithMain();
   repository.run(["branch", "release"]);
   const marker = `${repository.path}/first-verification.marker`;
-  const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
+  const result = await Keiyaku.bind({ repo: await cachedRepoAt(repository.path),
     markdown: document([
       `if [ -f ${JSON.stringify(marker)} ]; then`,
       "  kill -TERM $$",
@@ -311,7 +310,7 @@ test("reintegrated delivery does not aggregate Verification from the superseded 
     workspace: "worktree",
     gates: [],
   });
-  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), result.keiyaku.id);
+  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), result.keiyaku.id);
   writeFileSync(resolve(worktree, "candidate.txt"), "candidate\n");
   repository.run(["-C", worktree, "add", "candidate.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
@@ -352,13 +351,13 @@ test("reintegrated delivery does not aggregate Verification from the superseded 
 test("review re-integrates its accepted delivery when the target premise moves", async () => {
   const repository = repositoryWithMain();
   repository.run(["branch", "release"]);
-  const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
+  const result = await Keiyaku.bind({ repo: await cachedRepoAt(repository.path),
     markdown: document(),
     target: "refs/heads/release",
     workspace: "worktree",
     gates: ["reviewed"],
   });
-  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), result.keiyaku.id);
+  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), result.keiyaku.id);
   writeFileSync(resolve(worktree, "candidate.txt"), "candidate\n");
   repository.run(["-C", worktree, "add", "candidate.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);

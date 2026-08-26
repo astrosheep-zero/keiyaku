@@ -144,9 +144,6 @@ export async function worktreeRoot(repository: GitRepository): Promise<string> {
   return await absoluteGitPath(repository, ["--show-toplevel"], "worktree root");
 }
 
-function assertOid(oid: string, label: string): void {
-  gitObjectId(oid, label);
-}
 function assertRef(ref: string): void {
   if (!ref.startsWith("refs/") || /[\s\0]/.test(ref) || ref.endsWith("/") || ref.includes("..")) {
     throw new Error(`invalid Git ref: ${ref}`);
@@ -159,19 +156,38 @@ export async function readRef(repository: GitRepository, ref: string): Promise<G
   assertAssertionRef(ref);
   try {
     const oid = (await runGit(repository, ["rev-parse", "--verify", "--quiet", ref])).toString("utf8").trim();
-    if (oid.length === 0) return null;
-    assertOid(oid, `ref ${ref}`);
-    return oid;
+    return oid.length === 0 ? null : gitObjectId(oid, `ref ${ref}`);
   } catch (error) {
     if (error instanceof GitPlumbingError && error.status === 1) return null;
     throw error;
   }
 }
 
+/** Read an explicit set of asserted refs from one fresh Git observation. */
+export async function readRefs(repository: GitRepository, refs: readonly string[]) {
+  const refsToRead = [...new Set(refs)];
+  for (const ref of refsToRead) assertAssertionRef(ref);
+  if (refsToRead.length === 0) return new Map();
+  const output = (
+    await runGit(repository, ["cat-file", "--batch-check=%(objectname)"], `${refsToRead.join("\n")}\n`)
+  ).toString("utf8");
+  const records = output.split("\n");
+  if (records.pop() !== "" || records.length !== refsToRead.length)
+    throw new Error("Git ref batch output is malformed");
+  return new Map(
+    refsToRead.map((ref, index) => {
+      const oid = records[index]!;
+      if (oid === `${ref} missing`) return [ref, null];
+      gitObjectId(oid, `ref ${ref}`);
+      return [ref, oid];
+    }),
+  );
+}
+
 async function readTreeForCommit(repository: GitRepository, commit: GitOid): Promise<GitOid> {
-  assertOid(commit, "Git commit");
+  gitObjectId(commit, "Git commit");
   const tree = (await runGit(repository, ["show", "-s", "--format=%T", commit])).toString("utf8").trim();
-  assertOid(tree, "Git tree");
+  gitObjectId(tree, "Git tree");
   return tree;
 }
 
@@ -187,14 +203,14 @@ function parseTreeEntries(output: Buffer): Map<string, TreeEntry> {
     if (mode === undefined || type === undefined || oid === undefined || path.length === 0) {
       throw new GitPlumbingError({ stderr: record, status: null, message: `malformed ls-tree record: ${record}` });
     }
-    assertOid(oid, `tree entry ${path}`);
+    gitObjectId(oid, `tree entry ${path}`);
     entries.set(path, { mode, type, oid });
   }
   return entries;
 }
 
 export async function readTreeEntries(repository: GitRepository, tree: GitOid): Promise<Map<string, TreeEntry>> {
-  assertOid(tree, "tree");
+  gitObjectId(tree, "tree");
   const output = await runGit(repository, ["ls-tree", "-r", "-z", "--full-tree", tree]);
   return parseTreeEntries(output);
 }
@@ -226,12 +242,12 @@ export async function readGitPaths(repository: GitRepository, requestedPaths: re
 
 export async function writeBlob(repository: GitRepository, bytes: string | Uint8Array): Promise<GitOid> {
   const oid = (await runGit(repository, ["hash-object", "-w", "--stdin"], bytes)).toString("utf8").trim();
-  assertOid(oid, "written blob");
+  gitObjectId(oid, "written blob");
   return oid;
 }
 
 export async function readBlob(repository: GitRepository, oid: GitOid): Promise<Buffer> {
-  assertOid(oid, "blob");
+  gitObjectId(oid, "blob");
   return await runGit(repository, ["cat-file", "blob", oid]);
 }
 
@@ -250,7 +266,7 @@ async function readObjects(
   oids: readonly GitOid[],
 ): Promise<ReadonlyMap<GitOid, GitObject>> {
   const unique = [...new Set(oids)];
-  for (const oid of unique) assertOid(oid, "Git object");
+  for (const oid of unique) gitObjectId(oid, "Git object");
   if (unique.length === 0) return new Map();
 
   const output = await runGit(repository, ["cat-file", "--batch"], `${unique.join("\n")}\n`);
@@ -351,7 +367,7 @@ async function writePreparedTrees(repository: GitRepository, prepared: readonly 
   for (let index = 0; index < prepared.length; index += 1) {
     const expected = prepared[index]!.oid;
     const actual = written[index]!;
-    assertOid(actual, "written tree");
+    gitObjectId(actual, "written tree");
     if (actual !== expected) {
       throw new GitPlumbingError({ stderr: output, status: null, message: `mktree wrote unexpected tree: ${actual}` });
     }
@@ -404,8 +420,8 @@ async function writeCommitObject(
   }>,
 ): Promise<GitOid> {
   const { repository, tree, parents, message, actor, email, at } = input;
-  assertOid(tree, "commit tree");
-  for (const parent of parents) assertOid(parent, "commit parent");
+  gitObjectId(tree, "commit tree");
+  for (const parent of parents) gitObjectId(parent, "commit parent");
   const args = ["commit-tree", tree];
   for (const parent of parents) args.push("-p", parent);
   const commit = (
@@ -419,7 +435,7 @@ async function writeCommitObject(
   )
     .toString("utf8")
     .trim();
-  assertOid(commit, "written Git commit");
+  gitObjectId(commit, "written Git commit");
   return commit;
 }
 
@@ -446,7 +462,7 @@ export async function writeCommit(
 
 function refAssertionLine(assertion: GitRefAssertion): string {
   assertAssertionRef(assertion.ref);
-  assertOid(assertion.oid, `expected oid for ${assertion.ref}`);
+  gitObjectId(assertion.oid, `expected oid for ${assertion.ref}`);
   return `${assertion.ref === "HEAD" ? "" : "option no-deref\n"}verify ${assertion.ref} ${assertion.oid}`;
 }
 
@@ -457,8 +473,8 @@ function refUpdateLine(
   assertRef(update.ref);
   if (index > 0 && update.ref === GIT_REF) throw new Error(`duplicate ref update: ${update.ref}`);
   if (index > 0 && update.expectedOid === null) throw new Error("target ref updates require non-null OIDs");
-  assertOid(update.newOid, `new oid for ${update.ref}`);
-  if (update.expectedOid !== null) assertOid(update.expectedOid, `expected oid for ${update.ref}`);
+  gitObjectId(update.newOid, `new oid for ${update.ref}`);
+  if (update.expectedOid !== null) gitObjectId(update.expectedOid, `expected oid for ${update.ref}`);
   return `option no-deref\nupdate ${update.ref} ${update.newOid} ${update.expectedOid ?? "0".repeat(update.newOid.length)}`;
 }
 

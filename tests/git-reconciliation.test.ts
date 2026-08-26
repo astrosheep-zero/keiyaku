@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { Keiyaku, Repo, type ContractId, type TopologyEffect } from "../src/index.js";
+import { snapshotId } from "../src/core/facts/types.js";
 import { readRef, repositoryAt } from "../src/git/repository.js";
-import { appointedWorktreePath, withGitShim } from "./support/git.js";
+import { appointedWorktreePath, snapshotGitRepository, type TestGitRepository, withGitShim } from "./support/git.js";
 import { document, repositoryWithMain } from "./support/library-verbs.js";
 
 function deliveryRefFor(contract: ContractId): string {
@@ -25,7 +26,17 @@ function unchangedRef(effects: readonly TopologyEffect[], name: string, oid: str
   );
 }
 
-async function claimedTargeted() {
+type GeneratedWorktreeFile = Readonly<{ path: string; bytes: Buffer; mode: number }>;
+type TenderedReviewGatedTargetTemplate = Readonly<{
+  repository: TestGitRepository;
+  id: ContractId;
+  workspaceHead: ReturnType<typeof snapshotId>;
+  generatedFiles: readonly GeneratedWorktreeFile[];
+}>;
+
+let tenderedReviewGatedTargetTemplate: Promise<TenderedReviewGatedTargetTemplate> | undefined;
+
+async function buildTenderedReviewGatedTargetTemplate(): Promise<TenderedReviewGatedTargetTemplate> {
   const repository = repositoryWithMain({ files: { "shared.txt": "base\n" } });
   const bound = await Keiyaku.bind({
     repo: await Repo.at({ path: repository.path }),
@@ -40,6 +51,41 @@ async function claimedTargeted() {
   repository.run(["-C", worktree, "add", "candidate.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
   await contract.deliver();
+  const workspaceHead = snapshotId(repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim());
+  const generatedFiles = [
+    ".keiyaku/.gitignore",
+    ".keiyaku/KEIYAKU.md",
+    ".keiyaku/namespace/.gitignore",
+    ".keiyaku/namespace/current",
+  ].map((path) => ({
+    path,
+    bytes: readFileSync(join(worktree, path)),
+    mode: statSync(join(worktree, path)).mode & 0o777,
+  }));
+  repository.run(["worktree", "remove", "--force", worktree]);
+  return { repository, id: contract.id, workspaceHead, generatedFiles };
+}
+
+async function tenderedReviewGatedTargetFixture() {
+  const templatePromise = tenderedReviewGatedTargetTemplate ??= buildTenderedReviewGatedTargetTemplate();
+  let template: TenderedReviewGatedTargetTemplate;
+  try {
+    template = await templatePromise;
+  } catch (error) {
+    if (tenderedReviewGatedTargetTemplate === templatePromise) tenderedReviewGatedTargetTemplate = undefined;
+    throw error;
+  }
+  const repository = snapshotGitRepository(template.repository);
+  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), template.id);
+  repository.run(["worktree", "add", "--detach", worktree, template.workspaceHead]);
+  for (const generated of template.generatedFiles) {
+    const path = join(worktree, generated.path);
+    mkdirSync(join(worktree, ".keiyaku", ...generated.path.split("/").slice(1, -1)), { recursive: true });
+    writeFileSync(path, generated.bytes);
+    chmodSync(path, generated.mode);
+  }
+  const repo = await Repo.at({ path: repository.path });
+  const contract = Keiyaku.of({ repo, id: template.id });
   return { contract, repository, worktree };
 }
 
@@ -49,7 +95,7 @@ async function restoreOwnedRefs(repository: ReturnType<typeof repositoryWithMain
 }
 
 test("rewritten target history retains owned refs with unchanged effects", async () => {
-  const { contract, repository } = await claimedTargeted();
+  const { contract, repository } = await tenderedReviewGatedTargetFixture();
   writeFileSync(join(repository.path, "target-only.txt"), "target only\n");
   repository.run(["add", "target-only.txt"]);
   repository.run(["commit", "--quiet", "-m", "target only"]);
@@ -78,7 +124,7 @@ test("rewritten target history retains owned refs with unchanged effects", async
 });
 
 test("unequal tender and integration trees retain the delivery ref through a containing target", async () => {
-  const { contract, repository } = await claimedTargeted();
+  const { contract, repository } = await tenderedReviewGatedTargetFixture();
   writeFileSync(join(repository.path, "target-only.txt"), "target only\n");
   repository.run(["add", "target-only.txt"]);
   repository.run(["commit", "--quiet", "-m", "target only"]);
@@ -111,7 +157,7 @@ test("unequal tender and integration trees retain the delivery ref through a con
 });
 
 test("abandoned tender custody remains when it is the sole proof", async () => {
-  const { contract, repository } = await claimedTargeted();
+  const { contract, repository } = await tenderedReviewGatedTargetFixture();
   const delivered = await contract.state();
   const tender = delivered.delivery?.data.tenderSnapshot;
   const integration = delivered.currentIntegration?.snapshot ?? delivered.delivery?.data.integration.snapshot;
@@ -143,7 +189,7 @@ test("abandoned tender custody remains when it is the sole proof", async () => {
 });
 
 test("expected-target CAS retains owned refs under a stale frozen tip", async () => {
-  const { contract, repository } = await claimedTargeted();
+  const { contract, repository } = await tenderedReviewGatedTargetFixture();
   await contract.review({ verdict: "satisfied" });
   const state = await contract.state();
   assert.equal(state.terminal?.kind, "claimed");

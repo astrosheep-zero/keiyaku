@@ -8,100 +8,154 @@ import { World } from "../src/world.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 
 async function tasks() {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-compose-")); mkdirSync(join(root, ".keiyaku"));
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-compose-"));
+  mkdirSync(join(root, ".keiyaku"));
   return Tasks.of(await World.at(root));
 }
 
-test("compose allocates nested tasks, resolves parents, and returns native diffs", async () => {
+test("compose preserves fenced body bytes, aliases new nodes, and plans dependencies", async () => {
   const product = await tasks();
-  const result = await product.compose({ markdown: "ns=feature/inside\n+ Parent pri=1\nParent body\n  + Child needs=@task/feature/inside/parent\n\\+ literal body\n" });
+  const result = await product.compose({
+    markdown: [
+      "ns=feature/inside",
+      "+ Child",
+      "as = child",
+      "parent = ^parent",
+      "+ Parent",
+      "as = parent",
+      "pri = 1",
+      "body <<BODY",
+      "Parent body",
+      "    four-space code",
+      "+ this is body",
+      "BODY",
+      "",
+    ].join("\n"),
+  });
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") return;
-  assert.deepEqual(result.documentChanges.map((change) => change.taskId), ["task/feature/inside/child", "task/feature/inside/parent"]);
-  assert.ok(result.documentChanges.every((change) => change.kind === "created" && change.documentDiff.length > 0));
-  assert.ok(result.documentChanges.every((change) => change.documentDiff.includes(`${change.taskId}.md`) && !change.documentDiff.includes(product.root)));
+  assert.deepEqual(result.admissionOrder, ["task/feature/inside/parent", "task/feature/inside/child"]);
+  assert.deepEqual(result.aliases, [
+    { alias: "child", taskId: "task/feature/inside/child" },
+    { alias: "parent", taskId: "task/feature/inside/parent" },
+  ]);
+  assert.deepEqual(
+    result.documentChanges.map((change) => change.taskId),
+    result.admissionOrder,
+  );
+  const parent = await product.task({ id: "task/feature/inside/parent" }).read();
   const child = await product.task({ id: "task/feature/inside/child" }).read();
   assert.equal(child?.task.parent, "task/feature/inside/parent");
-  assert.equal(child?.task.body, "+ literal body");
-  assert.equal(child?.task.note, "");
-  assert.equal(child?.task.createdAt, child?.task.updatedAt);
+  assert.equal(parent?.task.body, "Parent body\n    four-space code\n+ this is body");
 });
 
-test("compose updates existing tasks and accepts an empty change set", async () => {
-  const product = await tasks(), added = await product.add({ title: "Existing" });
-  assert.equal(added.kind, "accepted");
-  const before = await product.task({ id: "task/existing" }).read();
-  const result = await product.compose({ markdown: "@task/existing pri=0\nNew body\n" });
+test("compose keeps @ references in the pre-existing board and exposes collision allocation", async () => {
+  const product = await tasks();
+  assert.equal((await product.add({ title: "Foo" })).kind, "accepted");
+  const result = await product.compose({
+    markdown: ["+ Foo", "as = fresh", "needs = @task/foo", "", "+ Uses fresh", "needs = ^fresh", ""].join("\n"),
+  });
   assert.equal(result.kind, "accepted");
-  if (result.kind === "accepted") assert.equal(result.documentChanges.length, 1);
-  const changed = await product.task({ id: "task/existing" }).read();
-  assert.equal(changed?.task.createdAt, before?.task.createdAt);
-  assert.ok((changed?.task.updatedAt ?? "") > (before?.task.updatedAt ?? ""));
-  const noChange = await product.compose({ markdown: "@task/existing pri=0\nNew body\n" });
-  assert.deepEqual(noChange, { kind: "accepted", documentChanges: [] });
-  assert.equal((await product.task({ id: "task/existing" }).read())?.task.updatedAt, changed?.task.updatedAt);
+  if (result.kind !== "accepted") return;
+  assert.deepEqual(result.aliases, [{ alias: "fresh", taskId: "task/foo-2" }]);
+  assert.equal((await product.task({ id: "task/uses-fresh" }).read())?.task.needs[0], "task/foo-2");
+  assert.equal((await product.task({ id: "task/foo-2" }).read())?.task.needs[0], "task/foo");
 });
 
-test("compose applies one captured timestamp to changed documents", async () => {
+test("compose supports relation removal and existing body replacement", async () => {
   const product = await tasks();
-  assert.equal((await product.add({ title: "First" })).kind, "accepted");
-  assert.equal((await product.add({ title: "Second" })).kind, "accepted");
-  const systemDate = Date;
-  let next = Date.parse("2050-01-01T00:00:00.000Z");
-  class AdvancingDate extends systemDate {
-    constructor(value?: string | number) {
-      super(value === undefined ? next++ : value);
-    }
-  }
-  globalThis.Date = AdvancingDate as unknown as DateConstructor;
-  try {
-    const result = await product.compose({ markdown: "@task/first pri=1\n@task/second pri=1\n" });
-    assert.equal(result.kind, "accepted");
-  } finally {
-    globalThis.Date = systemDate;
-  }
-
-  const first = await product.task({ id: "task/first" }).read();
-  const second = await product.task({ id: "task/second" }).read();
-  assert.equal(first?.task.updatedAt, "2050-01-01T00:00:00.000Z");
-  assert.equal(second?.task.updatedAt, "2050-01-01T00:00:00.000Z");
+  assert.equal((await product.add({ title: "Target" })).kind, "accepted");
+  assert.equal((await product.add({ title: "Existing", needs: ["task/target"] })).kind, "accepted");
+  const result = await product.compose({
+    markdown: ["@task/existing", "needs -= @task/target", "body <<BODY", "new exact body", "BODY", ""].join("\n"),
+  });
+  assert.equal(result.kind, "accepted");
+  const detail = await product.task({ id: "task/existing" }).read();
+  assert.deepEqual(detail?.task.needs, []);
+  assert.equal(detail?.task.body, "new exact body");
 });
 
-test("compose planning refusals write nothing", async () => {
+test("compose reports all planning errors and rejects cycles before writing", async () => {
   const product = await tasks();
-  const result = await product.compose({ markdown: "+ Broken needs=@task/missing\n" });
+  const result = await product.compose({
+    markdown: [
+      "+ Broken",
+      "as = duplicate",
+      "needs = @task/missing",
+      "+ Another",
+      "as = duplicate",
+      "pri = high",
+      "",
+    ].join("\n"),
+  });
   assert.equal(result.kind, "refused");
-  const all = await product.list({ scope: "world", selection: "all" });
-  assert.deepEqual(all, { kind: "accepted", value: { rows: [], total: 0, returned: 0, truncated: false } });
-  const duplicate = await product.compose({ markdown: "+ Duplicate relates=@task/a,@task/a\n" });
-  assert.equal(duplicate.kind, "refused");
-  const existing = await product.add({ title: "Existing" });
-  assert.equal(existing.kind, "accepted");
-  const repeated = await product.compose({ markdown: "@task/existing pri=1\n@task/existing pri=2\n" });
-  assert.equal(repeated.kind, "refused");
-});
+  if (result.kind !== "refused") return;
+  assert.ok(result.refusal.diagnostics.length >= 3);
+  assert.equal((await product.list({ scope: "world", selection: "all" })).kind, "accepted");
 
-test("compose admits cycles and doctor owns their diagnosis", async () => {
-  const product = await tasks();
   assert.equal((await product.add({ title: "First" })).kind, "accepted");
   assert.equal((await product.add({ title: "Second" })).kind, "accepted");
-  const result = await product.compose({ markdown: "@task/first needs=@task/second\n@task/second needs=@task/first\n" });
-  assert.equal(result.kind, "accepted");
-  assert.deepEqual((await product.doctor()).issues, [{ kind: "cycle", relation: "needs", tasks: ["task/first", "task/second"] }]);
+  const cycle = await product.compose({
+    markdown: ["@task/first", "needs = @task/second", "@task/second", "needs = @task/first", ""].join("\n"),
+  });
+  assert.equal(cycle.kind, "refused");
+  assert.equal((await product.task({ id: "task/first" }).read())?.task.needs.length, 0);
 });
 
-test("compose busy returns canonical remaining DSL that can be replayed directly", async () => {
+test("compose plan returns stable admission and body previews without writing", async () => {
   const product = await tasks();
-  const held = await acquireSqliteTransactionLock({ path: join(product.root, ".keiyaku", "locks", "task-allocation.sqlite"), mode: "immediate", timeoutMs: 100 });
+  const result = await product.compose({
+    plan: true,
+    markdown: [
+      "+ Child",
+      "as = child",
+      "needs = ^parent",
+      "+ Parent",
+      "as = parent",
+      "body <<BODY",
+      "body bytes",
+      "BODY",
+      "",
+    ].join("\n"),
+  });
+  assert.equal(result.kind, "planned");
+  if (result.kind !== "planned") return;
+  assert.deepEqual(result.admissionOrder, ["task/parent", "task/child"]);
+  assert.equal(result.bodies[0]?.bytes, 10);
+  assert.equal((await product.list({ scope: "world", selection: "all" })).value?.total, 0);
+});
+
+test("busy compose returns a reusable fenced recovery document", async () => {
+  const product = await tasks();
+  const held = await acquireSqliteTransactionLock({
+    path: join(product.root, ".keiyaku", "locks", "task-allocation.sqlite"),
+    mode: "immediate",
+    timeoutMs: 100,
+  });
   let result;
-  try { result = await product.compose({ markdown: "+ Remaining\n\\+ literal\n\\@task/not-a-node\n\\\\leading slash\n" }); }
-  finally { held.close(); }
+  try {
+    result = await product.compose({
+      markdown: "+ Remaining\nas = remaining\nbody <<BODY\n+ literal\n    indented\nBODY\n",
+    });
+  } finally {
+    held.close();
+  }
   assert.equal(result.kind, "incomplete");
   if (result.kind !== "incomplete") return;
   assert.deepEqual(result.stopped, { kind: "retry", reason: "busy" });
-  assert.match(result.draft, /^ns=\n\+ Remaining /u);
+  assert.match(result.draft, /^ns=\n\n\+ Remaining\nas = remaining\n/u);
   const replayed = await product.compose({ markdown: result.draft });
   assert.equal(replayed.kind, "accepted");
   const detail = await product.task({ id: "task/remaining" }).read();
-  assert.equal(detail?.task.body, "+ literal\n@task/not-a-node\n\\leading slash");
+  assert.equal(detail?.task.body, "+ literal\n    indented");
+});
+
+test("compose accepts empty documents without creating authority", async () => {
+  const product = await tasks();
+  assert.deepEqual(await product.compose({ markdown: "\n" }), {
+    kind: "accepted",
+    aliases: [],
+    admissionOrder: [],
+    documentChanges: [],
+  });
 });

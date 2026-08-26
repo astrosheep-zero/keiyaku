@@ -63,11 +63,12 @@ task resume <TaskId> [--json]
 task done <TaskId>... [--note <text>] [--json]
 task drop <TaskId>... [--note <text>] [--json]
 task namespace [<namespace>] [--json]
-task compose [--actor <actor>] [--json] -
+task compose [--actor <actor>] [--plan] [--json] -
 ```
 
 Literal `-` selects creation-document input for add, body input only after
-`--body` for update, and composition input for compose. Unselected piped stdin
+`--body` for update, and composition input for compose. `--plan` reads and
+validates the composition without writing authority. Unselected piped stdin
 is not consumed. Add requires exactly one
 source: a nonblank TITLE or `-`. Add document input rejects
 creation-owned identity, may declare its initial state, and cannot be combined
@@ -90,7 +91,7 @@ lifecycle commands preserve input order, continue after per-Task refusals, and
 do not consume stdin for notes.
 
 `--actor` is legal only on `task add` (structured and `-` forms) and
-`task compose`. The invocation edge resolves actor once before reading or
+`task compose`. `--plan` is legal only on `task compose`. The invocation edge resolves actor once before reading or
 applying the selected creation input: explicit nonblank `--actor`, then
 nonblank `KEIYAKU_ACTOR_ID`, then unsigned. A blank explicit value is usage; a
 blank environment value is absent. Update, lifecycle, and settlement commands
@@ -156,14 +157,32 @@ containing issues exits `1`. An unhealthy report begins `<N> issue` or
 relation and TaskId scalars; never render explanatory prose or JSON.
 
 Accepted update and compose render native whole-document diffs; the CLI never
-computes them. An incomplete compose writes only its reusable draft to stdout,
-writes its stopped reason and admitted diffs to stderr, and exits `1`. JSON
+computes them. A plan renders resolved aliases, stable admission order, and
+body byte previews. An incomplete compose writes only its reusable draft to
+stdout, writes its stopped reason and admitted diffs to stderr, and exits `1`. JSON
 writes the unchanged result object to stdout. Task refusal exits `1`, retry
 exits `2`, and corruption or infrastructure failure exits `3`.
 
-Compose admits Task documents independently. Each admitted document is its own
-commit point, so partial admission is possible; compose has no cross-file
-atomicity or rollback.
+Compose input grammar is owned here. Outside body fences, indentation has no
+meaning. A `+ Title` creates a Task and an `@task/<id>` line modifies only a
+pre-existing Task. Properties belong to the nearest node and use one line each:
+`as = <alias>`, `pri = 0|1|2|3`, `parent = <ref>|`, and relation properties
+`needs`, `supersedes`, and `relates` with `=`, `+=`, or `-=`. `^alias` refers
+to a new node in this document; `@task/...` refers to the pre-composition board.
+A relation list is comma-separated and may contain spaces after commas.
+
+`body =` clears the body. `body <<TOKEN` replaces it with exact bytes through
+the first line equal to TOKEN. TOKEN must match `[A-Z][A-Z0-9_]*` and be 3 to 32
+characters. Body content has no escape rules and may contain indentation, `+ `,
+`@task/`, or fence-like prose. A token appearing in body is the explicit
+boundary chosen by the caller; the parser stops at its first exact line.
+
+Planning diagnostics are typed and aggregate. Text renders one `line <n> ·
+<reason> · <token>` row per diagnostic; JSON retains `{ line, reason, token }`.
+The plan and accepted result expose aliases and admission order. Admission is
+stable topological order for new `needs`/`parent` dependencies, with document
+order as the tie-break. Recovery drafts use this same grammar and contain only
+remaining intent.
 
 The status board renders one public `KanshiReport`. Default and selected status
 have the same report shape. An explicit Contract selector projects the already
@@ -252,10 +271,11 @@ and `? <verb> <TaskId> · <typed retry reason>` for retry. Never serialize a
 refusal or retry as JSON in text. Batch exit precedence remains retry `2`,
 otherwise refusal `1`, otherwise `0`.
 
-Accepted compose renders `✓ compose accepted · <N> changed`, then each
-`diff <TaskId>` exact whole-document diff in document-change order. Refused
-compose renders `! compose refused`, the typed refusal kind, and an exact
-diagnostic payload when present. Incomplete compose keeps stdout as only the
+Accepted compose renders `✓ compose accepted · <N> changed`, alias mappings,
+then each `diff <TaskId>` exact whole-document diff in admission order. A plan
+renders the alias mappings, `admit <n> <TaskId>` rows, and body byte previews.
+Refused compose renders `! compose refused`, the typed refusal kind, and one
+line diagnostic per planning error. Incomplete compose keeps stdout as only the
 exact reusable draft bytes. Stderr begins
 `! compose incomplete · <N> admitted`, renders
 `! stopped <typed refusal kind ...>` or `? stopped <typed retry reason ...>`,

@@ -78,8 +78,8 @@ test("--all records failure and continues in fixed harness order", async () => {
   assert.match(renderInstallText(result), /claude failed: claude exited 7: not configured/);
 });
 
-test("the bundled plugin contains all five skills", () => {
-  for (const name of ["keiyaku", "keiyaku-task", "keiyaku-bind", "keiyaku-workflow", "keiyaku-akuma"]) {
+test("the bundled plugin contains all six skills", () => {
+  for (const name of ["keiyaku", "keiyaku-task", "keiyaku-bind", "keiyaku-workflow", "keiyaku-akuma", "keiyaku-babysit"]) {
     const path = join(installAssetsRoot(), "plugins", "keiyaku", "skills", name, "SKILL.md");
     const markdown = readFileSync(path, "utf8");
     assert.match(markdown, new RegExp(`^name: ${name}$`, "m"));

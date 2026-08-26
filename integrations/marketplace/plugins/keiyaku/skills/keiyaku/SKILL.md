@@ -14,6 +14,7 @@ read `<command> --help` before using flags.
 - A Contract is delivery authority; see `keiyaku-bind` to author and bind one,
   then `keiyaku-workflow` for the remaining lifecycle.
 - An Akuma is a callable worker; see `keiyaku-akuma`.
+- A long-running multi-lane goal needs coordination; see `keiyaku-babysit`.
 
 Settings owns named gate bundles. Omitting `--gates` selects `gates.default`,
 or freezes `["reviewed"]` when that entry is absent. `--gates <name,...>`

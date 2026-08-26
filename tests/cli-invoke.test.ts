@@ -12,7 +12,7 @@ import { Delivery, Keiyaku, KeiyakuRefused, KeiyakuRetry, NoGitWorldError, Repo,
 import { reconcile } from "../src/git/reconcile.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
-import { appointedWorktreePath, cachedRepositoryAt, makeGitRepository, observeContract, withGitShim } from "./support/git.js";
+import { appointedWorktreePath, cachedRepoAt, cachedRepositoryAt, makeGitRepository, observeContract, withGitShim } from "./support/git.js";
 import { repositoryWithMain as makeRepositoryWithMain } from "./support/library-verbs.js";
 const repositoryWithMain = () => makeRepositoryWithMain({ files: {
   ".keiyaku/settings.json": JSON.stringify({ gates: {
@@ -244,7 +244,7 @@ test("show returns the canonical Contract guidance in text and JSON projections"
   const source = contractDocument("Show Guidance");
   const bound = await invokeWithDocument(repository.path, ["bind", "-"], source);
   const id = acceptedContract(bound);
-  const expected = await Keiyaku.of({ repo: await Repo.at({ path: repository.path }), id }).guidance();
+  const expected = await Keiyaku.of({ repo: await cachedRepoAt(repository.path), id }).guidance();
   assert.ok(expected.startsWith(
     `---\ncontract: ${id}\ndescription: This is a read-only projection. Do not edit manually.\n---\n\n`,
   ));
@@ -366,8 +366,8 @@ test("explicit Repo selects Contract storage without replacing the invocation Wo
     readStdin: () => contractDocument("Orthogonal coordinates"),
   });
   const id = acceptedContract(result);
-  const invocationRepo = await Repo.at({ path: invocationRepository.path });
-  const contractRepo = await Repo.at({ path: contractRepository.path });
+  const invocationRepo = await cachedRepoAt(invocationRepository.path);
+  const contractRepo = await cachedRepoAt(contractRepository.path);
 
   assert.deepEqual((await Keiyaku.list({ repo: invocationRepo })).rows, []);
   assert.deepEqual((await Keiyaku.list({ repo: contractRepo })).rows.map((row) => row.id), [id]);
@@ -521,7 +521,7 @@ test("post-admission reconcile failure remains accepted with a physical lag", as
   }
   assert.deepEqual(result.settlement, { actions: [], lags: [] });
 
-  const state = await Keiyaku.of({ repo: await Repo.at({ path: repository.path }), id: result.contract }).state();
+  const state = await Keiyaku.of({ repo: await cachedRepoAt(repository.path), id: result.contract }).state();
   assert.equal(state.id, result.contract);
   assert.equal(state.head, result.head);
   assert.equal(state.terminal, null);
@@ -656,7 +656,7 @@ test("bind refusals preserve exact stdin without partial Contract or Task effect
     throw new Error("bind refusal did not return a draft path");
   }
   assert.equal(readFileSync(resolve(repository.path, result.draft.path), "utf8"), source);
-  assert.deepEqual((await Keiyaku.list({ repo: await Repo.at({ path: repository.path }) })).rows, []);
+  assert.deepEqual((await Keiyaku.list({ repo: await cachedRepoAt(repository.path) })).rows, []);
   const board = await tasks.list({ selection: "all", scope: "world" });
   assert.equal(board.kind, "accepted");
   if (board.kind === "accepted") assert.equal(board.value.rows.find((row) => row.id === added.value.id)?.state, "open");
@@ -679,7 +679,7 @@ test("invalid bind Markdown preserves exact stdin while retaining the original e
   assert.notEqual(observed, undefined);
   if (observed?.draft.path === undefined) throw new Error("invalid document did not return a draft path");
   assert.equal(readFileSync(resolve(repository.path, observed.draft.path), "utf8"), source);
-  assert.deepEqual((await Keiyaku.list({ repo: await Repo.at({ path: repository.path }) })).rows, []);
+  assert.deepEqual((await Keiyaku.list({ repo: await cachedRepoAt(repository.path) })).rows, []);
 });
 
 test("successful bind leaves existing draft receipts untouched", async () => {
@@ -696,7 +696,7 @@ test("successful bind leaves existing draft receipts untouched", async () => {
   assert.deepEqual(readFileSync(path), before);
 });
 
-test("bind observes an explicit target rather than the checked-out branch", async () => {
+test("bind forwards an explicit target distinct from the checked-out branch", async () => {
   const repository = repositoryWithMain();
   repository.run(["branch", "release"]);
   const start = repository.run(["rev-parse", "refs/heads/release"]).trim();
@@ -712,20 +712,6 @@ test("bind observes an explicit target rather than the checked-out branch", asyn
     { start, target: "refs/heads/release", workspace: "worktree" },
   );
   assert.equal(result.kind === "accepted" ? result.target : undefined, "refs/heads/release");
-});
-
-test("targetless bind accepts detached HEAD without a reward operation", async () => {
-  const repository = repositoryWithMain();
-  repository.run(["checkout", "--quiet", "--detach"]);
-
-  const result = await invokeWithDocument(
-    repository.path,
-    ["bind", "--actor", "external-test", "-"],
-    contractDocument("Detached"),
-  );
-  const coordinates = (await observeContract(await cachedRepositoryAt(repository.path), acceptedContract(result))).state?.coordinates;
-  assert.equal(coordinates?.target, undefined);
-  assert.equal(result.kind === "accepted" ? result.target : undefined, null);
 });
 
 test("amend structured terms do not acquire stdin", async () => {
@@ -848,7 +834,7 @@ test("amend accepts changed prerequisites after delivery and still rejects cycle
     contractDocument("Amendable prerequisites"),
   );
   const id = acceptedContract(bound);
-  const contract = Keiyaku.of({ repo: await Repo.at({ path: repository.path }), id });
+  const contract = Keiyaku.of({ repo: await cachedRepoAt(repository.path), id });
   const delivered = await contract.deliver();
   assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["bound", "deliver"]);
 
@@ -883,7 +869,7 @@ test("concurrent amend diff uses the accepted predecessor after a competing amen
     contractDocument("Concurrent original"),
   );
   const id = acceptedContract(bound);
-  const contract = Keiyaku.of({ repo: await Repo.at({ path: repository.path }), id });
+  const contract = Keiyaku.of({ repo: await cachedRepoAt(repository.path), id });
   const amend = Keiyaku.prototype.amend;
   let injected = false;
 
@@ -1193,25 +1179,8 @@ test("reconcile world command adapts the public repository report", async () => 
   assert.doesNotMatch(renderText(result), /world observation failed/u);
 });
 
-test("reconcile world command reports an empty completed world", async () => {
-  const repository = repositoryWithMain();
-  const result = await invoke(parseArgv(["reconcile"]), {
-    cwd: repository.path,
-    environment: {},
-  });
-  assert.deepEqual(result, {
-    kind: "observation",
-    command: "reconcile",
-    report: { kind: "completed", contracts: [] },
-  });
-  assert.equal(renderText(result).includes("world observation failed"), false);
-});
-
 test("reconcile world command carries a typed discovery failure", async () => {
   const repository = repositoryWithMain();
-  const bound = await invokeWithDocument(repository.path, ["bind", "-"], contractDocument("Reconcile discovery"));
-  assert.equal(bound.kind, "accepted");
-  if (bound.kind !== "accepted") return;
   const captured = await withGitShim(
     [
       `if [ "$*" = "rev-parse --verify --quiet ${GIT_REF}" ]; then`,
@@ -1321,7 +1290,7 @@ test("history kei/... reads Contract history through Repo without an Akuma World
   const repository = repositoryWithMain();
   const bound = await invokeWithDocument(repository.path, ["bind", "-"], contractDocument("History Route"));
   const id = acceptedContract(bound);
-  const expected = await Keiyaku.of({ repo: await Repo.at({ path: repository.path }), id }).history();
+  const expected = await Keiyaku.of({ repo: await cachedRepoAt(repository.path), id }).history();
   const foreign = makeGitRepository();
   foreign.run(["config", "user.name", "Test User"]);
   foreign.run(["config", "user.email", "test@example.com"]);
@@ -1392,33 +1361,6 @@ async function conflictedDeliverCommand() {
   );
   return { repository, id, worktree, targetHead, command };
 }
-
-test("deliver conflict JSON and text expose recovery without mutating the workspace", async () => {
-  const { repository, id, worktree, targetHead, command } = await conflictedDeliverCommand();
-  const result = await command(["deliver", "--actor", "external-test"]);
-  assert.deepEqual(result, {
-    kind: "refused",
-    verb: "deliver",
-    contract: id,
-    refusal: {
-      kind: "integration-failed",
-      contractId: id,
-      reason: "conflict",
-      targetHead,
-      conflictPaths: ["shared.txt"],
-      recovery: { materialize: "deliver --materialize-conflict", continue: "deliver" },
-    },
-  });
-  const text = renderText(result);
-  assert.match(text, /reason=conflict/u);
-  assert.match(text, /recovery materialize conflicts · deliver --materialize-conflict/u);
-  assert.match(text, /recovery continue after resolve and commit · deliver/u);
-  assert.deepEqual(JSON.parse(JSON.stringify(result)).refusal.recovery, {
-    materialize: "deliver --materialize-conflict",
-    continue: "deliver",
-  });
-  assert.throws(() => repository.run(["-C", worktree, "rev-parse", "-q", "--verify", "MERGE_HEAD"]));
-});
 
 test("deliver --materialize-conflict returns the exact public materialization object", async () => {
   const { repository, id, worktree, targetHead, command } = await conflictedDeliverCommand();

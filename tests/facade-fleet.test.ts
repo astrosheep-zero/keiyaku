@@ -946,13 +946,19 @@ test("creator testimony appears on every Fleet observation carrier", async () =>
     assert.deepEqual(status.createdTasks, { kind: "present", rows: workerRows });
     const waited = await Keiyaku.wait({ path: root, akuma: [worker.id], timeoutMs: 0 });
     assert.deepEqual(waited.observations[0]!.createdTasks, { kind: "present", rows: workerRows });
-    const told = await Keiyaku.tell({ path: root, akuma: worker.id, body: "continue" });
-    assert.deepEqual(told.observation.createdTasks, { kind: "present", rows: workerRows });
-    const interrupted = await Keiyaku.interrupt({ path: root, akuma: worker.id, body: "stop" });
-    assert.deepEqual(interrupted.observation.createdTasks, { kind: "present", rows: workerRows });
-    const killed = await Keiyaku.kill({ path: root, akuma: [worker.id] });
-    assert.deepEqual(killed.results[0]!.observation.createdTasks, { kind: "present", rows: workerRows });
-    await workerHandle.wait();
+    const leash = await HeldAkumaLeash.try(worker.paths);
+    assert.notEqual(leash, null);
+    try {
+      const told = await Keiyaku.tell({ path: root, akuma: worker.id, body: "continue" });
+      assert.deepEqual(told.observation.createdTasks, { kind: "present", rows: workerRows });
+      const interrupted = await Keiyaku.interrupt({ path: root, akuma: worker.id, body: "stop" });
+      assert.deepEqual(interrupted.observation.createdTasks, { kind: "present", rows: workerRows });
+      const killed = await Keiyaku.kill({ path: root, akuma: [worker.id] });
+      assert.deepEqual(killed.results[0]!.observation.createdTasks, { kind: "present", rows: workerRows });
+    } finally {
+      leash!.release();
+    }
+    await workerHandle.wait(undefined, { timeoutMs: 2_000 });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1017,17 +1023,23 @@ test("Task board failure keeps Fleet status and aggregate members", async () => 
       waited.observations.map((observation) => observation.createdTasks),
       [status.createdTasks, status.createdTasks],
     );
-    const told = await Keiyaku.tell({ path: root, akuma: worker.id, body: "continue" });
-    assert.equal(told.akuma, worker.id);
-    assert.equal(told.tell.admission.fact, "recorded");
-    assert.equal(typeof told.tell.admission.tellId, "string");
-    assert.deepEqual(told.observation.createdTasks, status.createdTasks);
-    const killed = await Keiyaku.kill({ path: root, akuma: [reviewer.id] });
-    assert.equal(killed.results[0]!.id, reviewer.id);
-    assert.equal(killed.results[0]!.evidence, "already-stopped");
-    assert.deepEqual(killed.results[0]!.observation.createdTasks, status.createdTasks);
-    await Keiyaku.kill({ path: root, akuma: [worker.id] });
-    await workerHandle.wait();
+    const leash = await HeldAkumaLeash.try(worker.paths);
+    assert.notEqual(leash, null);
+    try {
+      const told = await Keiyaku.tell({ path: root, akuma: worker.id, body: "continue" });
+      assert.equal(told.akuma, worker.id);
+      assert.equal(told.tell.admission.fact, "recorded");
+      assert.equal(typeof told.tell.admission.tellId, "string");
+      assert.deepEqual(told.observation.createdTasks, status.createdTasks);
+      const killed = await Keiyaku.kill({ path: root, akuma: [reviewer.id] });
+      assert.equal(killed.results[0]!.id, reviewer.id);
+      assert.equal(killed.results[0]!.evidence, "already-stopped");
+      assert.deepEqual(killed.results[0]!.observation.createdTasks, status.createdTasks);
+      await Keiyaku.kill({ path: root, akuma: [worker.id] });
+    } finally {
+      leash!.release();
+    }
+    await workerHandle.wait(undefined, { timeoutMs: 2_000 });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

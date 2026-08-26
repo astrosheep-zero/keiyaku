@@ -158,27 +158,32 @@ test("architecture policy separates Heart schema, fact statements, and SQLite co
   assert.deepEqual(typedSoul, []);
 
   const runtimeRows = check({
-    "akuma/heart/rows.ts": 'import { DatabaseSync } from "node:sqlite"; export const database = new DatabaseSync(":memory:");',
+    "akuma/heart/rows.ts":
+      'import { DatabaseSync } from "node:sqlite"; export const database = new DatabaseSync(":memory:");',
   });
   assert.ok(rules(runtimeRows).includes("architecture/capability-import"));
 
   const runtimeSchema = check({
-    "akuma/heart/schema.ts": 'import { DatabaseSync } from "node:sqlite"; export const database = new DatabaseSync(":memory:");',
+    "akuma/heart/schema.ts":
+      'import { DatabaseSync } from "node:sqlite"; export const database = new DatabaseSync(":memory:");',
   });
   assert.ok(rules(runtimeSchema).includes("architecture/capability-import"));
 
   const runtimeTimeline = check({
-    "akuma/heart/timeline.ts": 'import { DatabaseSync } from "node:sqlite"; export const database = new DatabaseSync(":memory:");',
+    "akuma/heart/timeline.ts":
+      'import { DatabaseSync } from "node:sqlite"; export const database = new DatabaseSync(":memory:");',
   });
   assert.ok(rules(runtimeTimeline).includes("architecture/capability-import"));
 
   const runtimeSoul = check({
-    "akuma/heart/soul.ts": 'import { DatabaseSync } from "node:sqlite"; export const database = new DatabaseSync(":memory:");',
+    "akuma/heart/soul.ts":
+      'import { DatabaseSync } from "node:sqlite"; export const database = new DatabaseSync(":memory:");',
   });
   assert.ok(rules(runtimeSoul).includes("architecture/capability-import"));
 
   const statementInJudge = check({
-    "akuma/heart/index.ts": 'export function judge(database: { prepare(sql: string): void }): void { database.prepare("SELECT 1"); }',
+    "akuma/heart/index.ts":
+      'export function judge(database: { prepare(sql: string): void }): void { database.prepare("SELECT 1"); }',
   });
   assert.equal(rules(statementInJudge).filter((rule) => rule === "architecture/forbidden-source-pattern").length, 2);
 });
@@ -186,8 +191,10 @@ test("architecture policy separates Heart schema, fact statements, and SQLite co
 test("architecture policy gives provider recipe grammar one inward dependency direction", () => {
   const accepted = check({
     "akuma/provider-recipe.ts": "export type ProviderOptions = {};",
-    "akuma/heart/facts.ts": 'import type { ProviderOptions } from "../provider-recipe.js"; export type SoulOptions = ProviderOptions;',
-    "akuma/provider.ts": 'import type { ProviderOptions } from "./provider-recipe.js"; export type DriveOptions = ProviderOptions;',
+    "akuma/heart/facts.ts":
+      'import type { ProviderOptions } from "../provider-recipe.js"; export type SoulOptions = ProviderOptions;',
+    "akuma/provider.ts":
+      'import type { ProviderOptions } from "./provider-recipe.js"; export type DriveOptions = ProviderOptions;',
   });
   assert.deepEqual(accepted, []);
 
@@ -201,13 +208,15 @@ test("architecture policy gives provider recipe grammar one inward dependency di
 test("architecture policy distinguishes provider SDK value edges from type-only config edges", () => {
   const accepted = check({
     "akuma/provider-recipe.ts": "export type SystemPromptMode = 'append' | 'replace';",
-    "akuma/providers/acp/config.ts": 'import type { SystemPromptMode } from "../../provider-recipe.js"; export type Config = { mode?: SystemPromptMode };',
+    "akuma/providers/acp/config.ts":
+      'import type { SystemPromptMode } from "../../provider-recipe.js"; export type Config = { mode?: SystemPromptMode };',
   });
   assert.deepEqual(accepted, []);
 
   const rejected = check({
     "akuma/provider-recipe.ts": "export const SystemPromptMode = 'append';",
-    "akuma/providers/acp/config.ts": 'import { SystemPromptMode } from "../../provider-recipe.js"; export const mode = SystemPromptMode;',
+    "akuma/providers/acp/config.ts":
+      'import { SystemPromptMode } from "../../provider-recipe.js"; export const mode = SystemPromptMode;',
   });
   assert.ok(rules(rejected).includes("architecture/dependency-direction"));
 });
@@ -215,7 +224,8 @@ test("architecture policy distinguishes provider SDK value edges from type-only 
 test("architecture policy checks the real CLI parse graph for provider SDK reachability", () => {
   const accepted = check({
     "cli/parse.ts": "export const parse = (): void => {};",
-    "akuma/providers/acp/core.ts": 'import type * as Sdk from "@agentclientprotocol/sdk"; export type Core = Sdk.ClientContext;',
+    "akuma/providers/acp/core.ts":
+      'import type * as Sdk from "@agentclientprotocol/sdk"; export type Core = Sdk.ClientContext;',
   });
   assert.deepEqual(accepted, []);
 
@@ -227,10 +237,9 @@ test("architecture policy checks the real CLI parse graph for provider SDK reach
 });
 
 test("architecture policy rejects the removed Akuma activity codec edge", () => {
-  const provider = [
-    "export function encodeAgentEvent(): void {}",
-    "export function decodeAgentEvent(): void {}",
-  ].join("\n");
+  const provider = ["export function encodeAgentEvent(): void {}", "export function decodeAgentEvent(): void {}"].join(
+    "\n",
+  );
   const diagnostics = check({
     "akuma/provider.ts": provider,
     "akuma/akuma.ts": 'import { decodeAgentEvent } from "./provider.js"; export const decode = decodeAgentEvent;',
@@ -249,7 +258,8 @@ test("architecture policy excludes type-only edges from module-loading cycles", 
 test("architecture policy keeps pure facts independent of Git", () => {
   const diagnostics = check({
     "git/process.ts": "export type GitRepository = {};",
-    "core/facts/fold.ts": 'import type { GitRepository } from "../../git/process.js"; export function fold(repository: GitRepository): void {}',
+    "core/facts/fold.ts":
+      'import type { GitRepository } from "../../git/process.js"; export function fold(repository: GitRepository): void {}',
   });
   assert.deepEqual(rules(diagnostics), ["architecture/dependency-direction"]);
 });
@@ -271,9 +281,11 @@ test("architecture policy permits protocol to join pact with Git", () => {
   const diagnostics = check({
     "core/decide.ts": "export type AttemptContext = {};",
     "git/process.ts": "export type GitRepository = {};",
-    "git/observe.ts": 'import type { GitRepository } from "./process.js"; export function observeContractsForAdmissionAt(repository: GitRepository): void { void repository; }',
+    "git/observe.ts":
+      'import type { GitRepository } from "./process.js"; export function observeContractsForAdmissionAt(repository: GitRepository): void { void repository; }',
     "protocol/attempt.ts": "export function admitDecidedOffer(): void {}",
-    "protocol/run.ts": 'import { observeContractsForAdmissionAt } from "../git/observe.js"; import type { GitRepository } from "../git/process.js"; import type { AttemptContext } from "../core/decide.js"; import { admitDecidedOffer } from "./attempt.js"; export function run(repository: GitRepository, attempt: AttemptContext): void { observeContractsForAdmissionAt(repository); void attempt; admitDecidedOffer(); }',
+    "protocol/run.ts":
+      'import { observeContractsForAdmissionAt } from "../git/observe.js"; import type { GitRepository } from "../git/process.js"; import type { AttemptContext } from "../core/decide.js"; import { admitDecidedOffer } from "./attempt.js"; export function run(repository: GitRepository, attempt: AttemptContext): void { observeContractsForAdmissionAt(repository); void attempt; admitDecidedOffer(); }',
   });
   assert.deepEqual(diagnostics, []);
 });
@@ -281,8 +293,10 @@ test("architecture policy permits protocol to join pact with Git", () => {
 test("architecture policy rejects former unread admission and fold readers", () => {
   const diagnostics = check({
     "core/facts/fold.ts": "export function foldJournal(): void {}",
-    "git/admission.ts": 'import { foldJournal } from "../core/facts/fold.js"; export function admit(): void { foldJournal(); }',
-    "protocol/run.ts": 'import { foldJournal } from "../core/facts/fold.js"; export function run(): void { foldJournal(); }',
+    "git/admission.ts":
+      'import { foldJournal } from "../core/facts/fold.js"; export function admit(): void { foldJournal(); }',
+    "protocol/run.ts":
+      'import { foldJournal } from "../core/facts/fold.js"; export function run(): void { foldJournal(); }',
   });
   assert.equal(rules(diagnostics).filter((rule) => rule === "architecture/dependency-direction").length, 2);
 });
@@ -290,7 +304,8 @@ test("architecture policy rejects former unread admission and fold readers", () 
 test("architecture policy keeps receipt folding out of operation orchestration", () => {
   const diagnostics = check({
     "core/facts/fold.ts": "export function foldJournal(): void {}",
-    "protocol/operations.ts": 'import { foldJournal } from "../core/facts/fold.js"; export function complete(): void { foldJournal(); }',
+    "protocol/operations.ts":
+      'import { foldJournal } from "../core/facts/fold.js"; export function complete(): void { foldJournal(); }',
   });
   assert.deepEqual(rules(diagnostics), ["architecture/dependency-direction"]);
 });
@@ -309,19 +324,22 @@ test("architecture policy lets Verification protocol own generic currentness loo
 
   const rejectedLookup = check({
     "core/facts/gate.ts": "export function latestCurrentAttestations(): void {}",
-    "protocol/operations.ts": 'import { latestCurrentAttestations } from "../core/facts/gate.js"; export function complete(): void { latestCurrentAttestations(); }',
+    "protocol/operations.ts":
+      'import { latestCurrentAttestations } from "../core/facts/gate.js"; export function complete(): void { latestCurrentAttestations(); }',
   });
   assert.deepEqual(rules(rejectedLookup), ["architecture/dependency-direction"]);
 
   const rejectedVerified = check({
     "verification/declaration.ts": "export const VERIFIED = 'verified';",
-    "protocol/operations.ts": 'import { VERIFIED } from "../verification/declaration.js"; export function complete(): void { void VERIFIED; }',
+    "protocol/operations.ts":
+      'import { VERIFIED } from "../verification/declaration.js"; export function complete(): void { void VERIFIED; }',
   });
   assert.deepEqual(rules(rejectedVerified), ["architecture/dependency-direction"]);
 
   const rejectedOtherGate = check({
     "core/facts/gate.ts": "export function gateReports(): void {}",
-    "protocol/intent.ts": 'import { gateReports } from "../core/facts/gate.js"; export function verify(): void { gateReports(); }',
+    "protocol/intent.ts":
+      'import { gateReports } from "../core/facts/gate.js"; export function verify(): void { gateReports(); }',
   });
   assert.deepEqual(rules(rejectedOtherGate), ["architecture/dependency-direction"]);
 });
@@ -343,33 +361,39 @@ test("architecture policy gives public audit invocation one library owner", () =
       "export type AuditInput = {};",
       "export function auditContract(): void { requireInput(); worktreeHooksOption(); documentDerivation(); requireAccepted(); auditOperation(); completeMutation(); }",
     ].join("\n"),
-    "library/contract.ts": 'import { auditContract, type AuditInput } from "./audit.js"; export type Input = AuditInput; export function audit(): void { auditContract(); }',
+    "library/contract.ts":
+      'import { auditContract, type AuditInput } from "./audit.js"; export type Input = AuditInput; export function audit(): void { auditContract(); }',
   });
   assert.deepEqual(accepted, []);
 
   const rejectedFacade = check({
     "protocol/audit.ts": "export function auditOperation(): void {}",
-    "library/contract.ts": 'import { auditOperation } from "../protocol/audit.js"; export function audit(): void { auditOperation(); }',
+    "library/contract.ts":
+      'import { auditOperation } from "../protocol/audit.js"; export function audit(): void { auditOperation(); }',
   });
   assert.deepEqual(rules(rejectedFacade), ["architecture/dependency-direction"]);
 
   const rejectedGate = check({
     "core/facts/gate.ts": "export function latestCurrentAttestations(): void {}",
-    "library/audit.ts": 'import { latestCurrentAttestations } from "../core/facts/gate.js"; export function audit(): void { latestCurrentAttestations(); }',
+    "library/audit.ts":
+      'import { latestCurrentAttestations } from "../core/facts/gate.js"; export function audit(): void { latestCurrentAttestations(); }',
   });
   assert.deepEqual(rules(rejectedGate), ["architecture/dependency-direction"]);
 
   const rejectedObserver = check({
     "git/target-placement.ts": "export function observeTargetPlacement(): void {}",
-    "library/audit.ts": 'import { observeTargetPlacement } from "../git/target-placement.js"; export function audit(): void { observeTargetPlacement(); }',
+    "library/audit.ts":
+      'import { observeTargetPlacement } from "../git/target-placement.js"; export function audit(): void { observeTargetPlacement(); }',
   });
   assert.deepEqual(rules(rejectedObserver), ["architecture/dependency-direction"]);
 });
 
 test("architecture policy lets audit operations call the Git target adjudicator", () => {
   const accepted = check({
-    "git/target-placement.ts": "export function observeTargetPlacement(): void {} export function adjudicateAuditTarget(): void {} export type TargetPlacementRefusal = {};",
-    "protocol/placement.ts": 'import { observeTargetPlacement } from "../git/target-placement.js"; export function observe(): void { observeTargetPlacement(); }',
+    "git/target-placement.ts":
+      "export function observeTargetPlacement(): void {} export function adjudicateAuditTarget(): void {} export type TargetPlacementRefusal = {};",
+    "protocol/placement.ts":
+      'import { observeTargetPlacement } from "../git/target-placement.js"; export function observe(): void { observeTargetPlacement(); }',
     "protocol/audit.ts": [
       'import { adjudicateAuditTarget } from "../git/target-placement.js";',
       "export function audit(): void { adjudicateAuditTarget(); }",
@@ -379,16 +403,18 @@ test("architecture policy lets audit operations call the Git target adjudicator"
 
   const rejected = check({
     "git/target-placement.ts": "export function observeTargetPlacement(): void {}",
-    "library/audit.ts": 'import { observeTargetPlacement } from "../git/target-placement.js"; export function audit(): void { observeTargetPlacement(); }',
+    "library/audit.ts":
+      'import { observeTargetPlacement } from "../git/target-placement.js"; export function audit(): void { observeTargetPlacement(); }',
   });
   assert.deepEqual(rules(rejected), ["architecture/dependency-direction"]);
 });
 
 test("architecture policy permits the aggregate status read path", () => {
   const diagnostics = check({
-    "core/facts/types.ts": "export type ContractId = string; export type ContractState = {}; export type SnapshotId = string;",
+    "core/facts/types.ts":
+      "export type ContractId = string; export type ContractState = {}; export type SnapshotId = string;",
     "core/facts/gate.ts": "export function gateReports(): void {} export function gatesSatisfied(): void {}",
-    "git/workspace.ts": "export function worktreePath(): string { return \"\"; }",
+    "git/workspace.ts": 'export function worktreePath(): string { return ""; }',
     "protocol/read/status.ts": [
       'import { worktreePath } from "../../git/workspace.js";',
       'import { gateReports } from "../../core/facts/gate.js";',
@@ -406,22 +432,25 @@ test("architecture policy permits the aggregate status read path", () => {
 
   const rejected = check({
     "core/facts/gate.ts": "export function gatesSatisfied(): void {}",
-    "protocol/read/status.ts": 'import { gatesSatisfied } from "../../core/facts/gate.js"; export function readStatus(): void { gatesSatisfied(); }',
+    "protocol/read/status.ts":
+      'import { gatesSatisfied } from "../../core/facts/gate.js"; export function readStatus(): void { gatesSatisfied(); }',
   });
   assert.deepEqual(rules(rejected), ["architecture/dependency-direction"]);
 });
 
 test("architecture policy limits publication retry observation to asserted refs", () => {
   const accepted = check({
-    "git/repository.ts": "export const GIT_REF = ''; export async function readRef(): Promise<void> {}",
+    "git/repository.ts": "export const GIT_REF = ''; export async function readRefs(): Promise<void> {}",
     "git/process.ts": "export type GitRepository = {};",
-    "protocol/attempt.ts": 'import { GIT_REF, readRef } from "../git/repository.js"; import type { GitRepository } from "../git/process.js"; export async function classify(repository: GitRepository): Promise<void> { void GIT_REF; await readRef(); void repository; }',
+    "protocol/attempt.ts":
+      'import { GIT_REF, readRefs } from "../git/repository.js"; import type { GitRepository } from "../git/process.js"; export async function classify(repository: GitRepository): Promise<void> { void GIT_REF; await readRefs(); void repository; }',
   });
   assert.deepEqual(accepted, []);
 
   const rejected = check({
     "git/repository.ts": "export function runGit(): void {}",
-    "protocol/attempt.ts": 'import { runGit } from "../git/repository.js"; export function classify(): void { runGit(); }',
+    "protocol/attempt.ts":
+      'import { runGit } from "../git/repository.js"; export function classify(): void { runGit(); }',
   });
   assert.deepEqual(rules(rejected), ["architecture/dependency-direction"]);
 });
@@ -429,7 +458,8 @@ test("architecture policy limits publication retry observation to asserted refs"
 test("architecture policy keeps Markdown generic and contract grammar at the CLI edge", () => {
   const accepted = check({
     "core/facts/types.ts": "export type DocumentKey = string;",
-    "body/types.ts": 'import type { DocumentKey } from "../core/facts/types.js"; export type ContractBody = { key: DocumentKey };',
+    "body/types.ts":
+      'import type { DocumentKey } from "../core/facts/types.js"; export type ContractBody = { key: DocumentKey };',
     "markdown/types.ts": "export type Document = {};",
     "markdown/parse.ts": 'import type { Document } from "./types.js"; export function parse(): Document { return {}; }',
     "body/decode.ts": [
@@ -443,7 +473,8 @@ test("architecture policy keeps Markdown generic and contract grammar at the CLI
   const rejected = check({
     "core/facts/types.ts": "export type ContractBody = {};",
     "cli/parse.ts": "export type Parsed = {};",
-    "markdown/parse.ts": 'import type { ContractBody } from "../core/facts/types.js"; export type Leaked = ContractBody;',
+    "markdown/parse.ts":
+      'import type { ContractBody } from "../core/facts/types.js"; export type Leaked = ContractBody;',
     "body/decode.ts": 'import type { Parsed } from "../cli/parse.js"; export type Leaked = Parsed;',
   });
   assert.equal(rules(rejected).filter((rule) => rule === "architecture/dependency-direction").length, 2);
@@ -507,7 +538,10 @@ test("architecture policy rejects capability use outside declared owners", () =>
     "kanshi/read.ts": "export function observedAt(): string { return new Date().toISOString(); }",
     "akuma/providers/acp/core.ts": "export const environment = globalThis.process.env;",
   });
-  assert.deepEqual(rules(accepted).filter((r) => r === "architecture/capability-use"), []);
+  assert.deepEqual(
+    rules(accepted).filter((r) => r === "architecture/capability-use"),
+    [],
+  );
 
   const facadeTypeError = check({
     "library/keiyaku.ts": "export function reject(): never { throw new TypeError('bad input'); }",
@@ -543,13 +577,15 @@ test("architecture policy enforces symbol-scoped allowances", () => {
 test("architecture policy scopes type-only allowances to approved symbols", () => {
   const accepted = check({
     "git/process.ts": "export type GitRepository = {}; export type Other = {};",
-    "workspace-place.ts": 'import type { GitRepository } from "./git/process.js"; export function place(repository: GitRepository): void { void repository; }',
+    "workspace-place.ts":
+      'import type { GitRepository } from "./git/process.js"; export function place(repository: GitRepository): void { void repository; }',
   });
   assert.deepEqual(accepted, []);
 
   const rejected = check({
     "git/process.ts": "export type GitRepository = {}; export type Other = {};",
-    "workspace-place.ts": 'import type { Other } from "./git/process.js"; export function place(value: Other): void { void value; }',
+    "workspace-place.ts":
+      'import type { Other } from "./git/process.js"; export function place(value: Other): void { void value; }',
   });
   assert.ok(rules(rejected).includes("architecture/dependency-direction"));
 });
@@ -557,7 +593,8 @@ test("architecture policy scopes type-only allowances to approved symbols", () =
 test("architecture policy uses specific zone before catch-all for Contract front door", () => {
   const diagnostics = check({
     "protocol/review.ts": "export function reviewOperation(): void {}",
-    "library/contract.ts": 'import { reviewOperation } from "../protocol/review.js"; export function facade(): void { reviewOperation(); }',
+    "library/contract.ts":
+      'import { reviewOperation } from "../protocol/review.js"; export function facade(): void { reviewOperation(); }',
   });
   assert.deepEqual(diagnostics, []);
 });
@@ -587,7 +624,8 @@ test("architecture policy keeps shared Git observation product-blind and Kanshi 
   assert.ok(rules(nominalChannel).includes("architecture/forbidden-source-pattern"));
 
   const compatibilityChannel = check({
-    "git/read-observation.ts": "export const read = () => withGitDecodeChannel(repo, (channel) => observeEpoch(repo, channel));",
+    "git/read-observation.ts":
+      "export const read = () => withGitDecodeChannel(repo, (channel) => observeEpoch(repo, channel));",
   });
   assert.ok(rules(compatibilityChannel).includes("architecture/forbidden-source-pattern"));
 
@@ -605,18 +643,33 @@ test("architecture policy matches recursive wildcards between exact path segment
       { source: "**", allow: [] },
     ],
   };
-  const accepted = checkArchitecture([
-    { path: "feature/adapter.ts", source: 'import type { Value } from "../shared/types.js"; export type Result = Value;' },
-    { path: "feature/nested/adapter.ts", source: 'import type { Value } from "../../shared/nested/types.js"; export type Result = Value;' },
-    { path: "shared/types.ts", source: "export type Value = string;" },
-    { path: "shared/nested/types.ts", source: "export type Value = string;" },
-  ], policy);
+  const accepted = checkArchitecture(
+    [
+      {
+        path: "feature/adapter.ts",
+        source: 'import type { Value } from "../shared/types.js"; export type Result = Value;',
+      },
+      {
+        path: "feature/nested/adapter.ts",
+        source: 'import type { Value } from "../../shared/nested/types.js"; export type Result = Value;',
+      },
+      { path: "shared/types.ts", source: "export type Value = string;" },
+      { path: "shared/nested/types.ts", source: "export type Value = string;" },
+    ],
+    policy,
+  );
   assert.deepEqual(accepted.diagnostics, []);
 
-  const rejected = checkArchitecture([
-    { path: "featurex/nested/adapter.ts", source: 'import type { Value } from "../../shared/nested/types.js"; export type Result = Value;' },
-    { path: "feature/nested/other.ts", source: "export type Value = string;" },
-    { path: "shared/nested/types.ts", source: "export type Value = string;" },
-  ], policy);
+  const rejected = checkArchitecture(
+    [
+      {
+        path: "featurex/nested/adapter.ts",
+        source: 'import type { Value } from "../../shared/nested/types.js"; export type Result = Value;',
+      },
+      { path: "feature/nested/other.ts", source: "export type Value = string;" },
+      { path: "shared/nested/types.ts", source: "export type Value = string;" },
+    ],
+    policy,
+  );
   assert.deepEqual(rules(rejected.diagnostics), ["architecture/dependency-direction"]);
 });

@@ -70,30 +70,26 @@ Relations are explicit facts: `needs` orders work, `parent` groups it,
 ## Batch Create Or Modify
 
 Use `task compose -` to create and modify multiple Tasks in one planning
-document:
+document. Its input grammar is documented by the Task CLI owner:
 
 ```bash
 keiyaku task compose - <<'EOF'
 ns=feature
-+ Parent pri=0
+
++ Parent
+as = parent
+pri = 0
+body <<BODY
 Parent body.
-  + Child needs=@task/existing
-@task/existing pri=1 relates+=@task/other
-Replacement body.
+BODY
+
++ Child
+parent = ^parent
+needs = @task/existing
 EOF
 ```
 
-- Optional first line `ns=<segment/...>` selects the allocation namespace;
-  `ns=` selects root.
-- `+ <title>` creates a Task. `@task/<id>` modifies an existing Task.
-- Two spaces of indentation assign the preceding shallower Task as `parent`.
-- Inline assignments are `pri=`, `parent=`, `needs=`, `supersedes=`, and
-  `relates=`. Relation values are comma-separated `@task/...` references.
-- `=` replaces or clears a field. `+=` appends only to `needs`, `supersedes`,
-  or `relates`.
-- Prose after a node replaces its body; bare `body=` clears it. Prefix body
-  lines beginning with `+ `, `@task/`, or `\` with one `\`.
-
-Compose does not change Task lifecycle state. Each changed Task is admitted
-independently; an incomplete result returns a canonical draft for the remaining
-batch.
+Use `--plan` to inspect aliases, admission order, and body byte previews without
+writing. Compose does not change Task lifecycle state. Each changed Task is
+admitted independently; an incomplete result returns a reusable draft for the
+remaining batch.

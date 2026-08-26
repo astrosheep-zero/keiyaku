@@ -12,7 +12,12 @@ import {
   type TaskRow,
   type TaskTreeNode,
 } from "./board.js";
-import { composeTasks, type TaskCompositionResult } from "./compose.js";
+import {
+  composeTasks,
+  type TaskCompositionAlias,
+  type TaskCompositionBodyPreview,
+  type TaskCompositionResult,
+} from "./compose.js";
 import { TaskAuthorityCorruptionError, type TaskPriority, type TaskState } from "./document.js";
 import type { TaskId } from "./identity.js";
 import {
@@ -29,6 +34,7 @@ import {
   type AddTaskDocumentInput,
   type AddTaskInput,
   type TaskBatchResult,
+  type TaskCompositionDiagnostic,
   type TaskMutationResult,
   type TaskOutcome,
   type TaskRefusal,
@@ -76,6 +82,9 @@ export type {
   AddTaskInput,
   BlockedTaskRow,
   TaskBatchResult,
+  TaskCompositionDiagnostic,
+  TaskCompositionAlias,
+  TaskCompositionBodyPreview,
   TaskCompositionResult,
   TaskDoctorIssue,
   TaskId,
@@ -292,14 +301,30 @@ class TasksHandle {
     return batchTasks(this.world, verb, taskIds(v.ids, "ids") ?? [], signal(v.signal), note);
   }
   compose(
-    input: Readonly<{ markdown: string; namespace?: readonly string[]; actor?: string; signal?: AbortSignal }>,
+    input: Readonly<{
+      markdown: string;
+      namespace?: readonly string[];
+      actor?: string;
+      signal?: AbortSignal;
+      plan?: boolean;
+    }>,
   ): Promise<TaskCompositionResult> {
     const v = record(input, "compose input");
-    closed(v, ["markdown", "namespace", "actor", "signal"], "compose input");
+    closed(v, ["markdown", "namespace", "actor", "signal", "plan"], "compose input");
     const markdown = text(v.markdown, "markdown");
     if (markdown === undefined) throw new TypeError("markdown is required");
+    if (v.plan !== undefined && typeof v.plan !== "boolean") throw new TypeError("plan must be a boolean");
     const selected = namespace(v.namespace);
-    return composeTasks(this.world, markdown, signal(v.signal), actor(v.actor), selected);
+    const selectedSignal = signal(v.signal);
+    const selectedActor = actor(v.actor);
+    return composeTasks({
+      world: this.world,
+      markdown,
+      ...(selectedSignal === undefined ? {} : { signal: selectedSignal }),
+      ...(selectedActor === undefined ? {} : { actor: selectedActor }),
+      ...(selected === undefined ? {} : { defaultNamespace: selected }),
+      planOnly: v.plan === true,
+    });
   }
 }
 export type Tasks = TasksHandle;

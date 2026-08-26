@@ -3,7 +3,7 @@ import { encodeEntry } from "../core/facts/codec.js";
 import { admit, type PublicationFailed } from "../git/admission.js";
 import { observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
-import { GIT_REF, readRef, type GitRefAssertion } from "../git/repository.js";
+import { GIT_REF, readRefs, type GitRefAssertion } from "../git/repository.js";
 import type { GitRepository } from "../git/process.js";
 import type { AttemptContext } from "../core/decide.js";
 import { foldJournal } from "../core/facts/fold.js";
@@ -138,9 +138,14 @@ async function publicationPremiseMoved(
   offer: Offer,
   assertions: readonly GitRefAssertion[],
 ): Promise<boolean> {
-  if ((await readRef(repository, GIT_REF)) !== observation.admission.snapshot.commit) return true;
-  for (const assertion of assertions) if ((await readRef(repository, assertion.ref)) !== assertion.oid) return true;
-  return offer.target !== undefined && (await readRef(repository, offer.target.target)) !== offer.target.expectedOid;
+  const refs = await readRefs(repository, [
+    GIT_REF,
+    ...assertions.map((assertion) => assertion.ref),
+    ...(offer.target === undefined ? [] : [offer.target.target]),
+  ]);
+  if (refs.get(GIT_REF) !== observation.admission.snapshot.commit) return true;
+  for (const assertion of assertions) if (refs.get(assertion.ref) !== assertion.oid) return true;
+  return offer.target !== undefined && refs.get(offer.target.target) !== offer.target.expectedOid;
 }
 
 /** Admit one decided offer without making another legal decision. */

@@ -6,7 +6,7 @@ export const protocolZones = [
       any("git/admission.ts"),
       any("git/observe.ts"),
       types("git/read-observation.ts", ["GitDecodeChannel"]),
-      any("git/repository.ts", ["GIT_REF", "GitRefAssertion", "readRef"]),
+      any("git/repository.ts", ["GIT_REF", "GitRefAssertion", "readRefs"]),
       gitRepository,
       types("core/decide.ts"),
       any("core/facts/codec.ts"),

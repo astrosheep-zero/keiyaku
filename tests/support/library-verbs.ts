@@ -7,15 +7,24 @@ import {
   Repo,
   type KeiyakuRefusal,
 } from "../../src/index.js";
-import { makeGitRepository, type TestGitRepository } from "./git.js";
+import { makeGitRepository, snapshotGitRepository, type TestGitRepository } from "./git.js";
 
 export interface RepositoryWithMainOptions {
   readonly files?: Readonly<Record<string, string>>;
 }
 
-export function repositoryWithMain(options: RepositoryWithMainOptions = {}): TestGitRepository {
+const templates = new Map<string, TestGitRepository>();
+
+function fixtureKey(files: Readonly<Record<string, string>>): string {
+  return JSON.stringify(Object.entries(files).sort(([left], [right]) => left.localeCompare(right)));
+}
+
+function templateFor(files: Readonly<Record<string, string>>): TestGitRepository {
+  const key = fixtureKey(files);
+  const existing = templates.get(key);
+  if (existing !== undefined) return existing;
+
   const repository = makeGitRepository();
-  const files = options.files ?? {};
   for (const [relativePath, contents] of Object.entries(files)) {
     const path = join(repository.path, relativePath);
     mkdirSync(dirname(path), { recursive: true });
@@ -27,7 +36,12 @@ export function repositoryWithMain(options: RepositoryWithMainOptions = {}): Tes
     repository.run(["add", "--", ...Object.keys(files)]);
     repository.run(["commit", "--quiet", "-m", "initial"]);
   }
+  templates.set(key, repository);
   return repository;
+}
+
+export function repositoryWithMain(options: RepositoryWithMainOptions = {}): TestGitRepository {
+  return snapshotGitRepository(templateFor(options.files ?? {}));
 }
 
 export function refused(expected: KeiyakuRefusal): (error: unknown) => boolean {

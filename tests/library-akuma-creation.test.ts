@@ -9,6 +9,7 @@ import {
   AkumaHandle,
   akumaCallExecution,
   callAkumaWithContext,
+  type AkumaCallInput,
 } from "../src/akuma/akuma.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { HeldAkumaLeash, initializeHeart, readSoul, type Soul } from "../src/akuma/heart/index.js";
@@ -112,6 +113,16 @@ async function directArchetypeSettings(root: string) {
   ].join("\n"));
   chmodSync(executable, 0o755);
   return { home, value: await settings({ root, home }) };
+}
+
+async function directBirthSoul(akuma: Akuma, input: AkumaCallInput): Promise<Soul> {
+  const born = await akuma.beginCall(input, { initiatorCwd: process.cwd() });
+  assert.equal(born.kind, "born");
+  if (born.kind !== "born") throw new Error("direct call unexpectedly entered the Body Request path");
+  await driveAkumaBody({ paths: born.allocated.paths, seed: born.seed });
+  const soul = await readSoul(born.allocated.paths);
+  assert.notEqual(soul, null);
+  return soul!;
 }
 
 async function requestPump(root: string) {
@@ -340,55 +351,61 @@ test("direct Akuma birth reports process cwd and the embedding World fallback", 
   }
 });
 
-test("direct birth unions Archetype defaults with additive allowed values", async () => {
+test("direct birth recipes freeze Archetype defaults and additive allowed values in every Soul", async () => {
   const { raw } = await repositoryFixture();
   const world = await World.at(raw.path);
   const configured = await directArchetypeSettings(world);
   const previousRequests = process.env[AKUMA_REQUESTS_ENV];
   delete process.env[AKUMA_REQUESTS_ENV];
-  const handles: AkumaHandle[] = [];
   try {
     const akuma = Akuma.of(world, configured);
-    const omitted = await akuma.call({ archetype: "worker", body: "all" });
-    handles.push(omitted);
-    assert.deepEqual((await readSoul(pathsForAkuId(world, omitted.id)))?.allowed, ALLOWED_ACTIONS);
+    const omitted = await directBirthSoul(akuma, { archetype: "worker", body: "all" });
+    assert.deepEqual(omitted.allowed, ALLOWED_ACTIONS);
 
-    const restricted = await akuma.call({ archetype: "restricted", body: "default" });
-    handles.push(restricted);
-    assert.deepEqual((await readSoul(pathsForAkuId(world, restricted.id)))?.allowed, ["task.add"]);
+    const restricted = await directBirthSoul(akuma, { archetype: "restricted", body: "default" });
+    assert.deepEqual(restricted.allowed, ["task.add"]);
 
-    const added = await akuma.call({
+    const added = await directBirthSoul(akuma, {
       archetype: "restricted",
       body: "add",
       allowed: ["akuma.call"],
     });
-    handles.push(added);
-    assert.deepEqual((await readSoul(pathsForAkuId(world, added.id)))?.allowed, ["akuma.call", "task.add"]);
+    assert.deepEqual(added.allowed, ["akuma.call", "task.add"]);
 
-    const fullWithAddition = await akuma.call({ archetype: "worker", body: "full with addition", allowed: ["contract.deliver"] });
-    handles.push(fullWithAddition);
-    assert.deepEqual((await readSoul(pathsForAkuId(world, fullWithAddition.id)))?.allowed, ALLOWED_ACTIONS);
+    const fullWithAddition = await directBirthSoul(akuma, {
+      archetype: "worker",
+      body: "full with addition",
+      allowed: ["contract.deliver"],
+    });
+    assert.deepEqual(fullWithAddition.allowed, ALLOWED_ACTIONS);
 
-    const emptyBase = await akuma.call({ archetype: "empty", body: "empty base" });
-    handles.push(emptyBase);
-    assert.deepEqual((await readSoul(pathsForAkuId(world, emptyBase.id)))?.allowed, []);
-    const emptyWithAddition = await akuma.call({ archetype: "empty", body: "empty with addition", allowed: ["akuma.call"] });
-    handles.push(emptyWithAddition);
-    assert.deepEqual((await readSoul(pathsForAkuId(world, emptyWithAddition.id)))?.allowed, ["akuma.call"]);
+    const emptyBase = await directBirthSoul(akuma, { archetype: "empty", body: "empty base" });
+    assert.deepEqual(emptyBase.allowed, []);
+    const emptyWithAddition = await directBirthSoul(akuma, {
+      archetype: "empty",
+      body: "empty with addition",
+      allowed: ["akuma.call"],
+    });
+    assert.deepEqual(emptyWithAddition.allowed, ["akuma.call"]);
 
     writeFileSync(join(configured.home, "akuma", "reviewer.md"), "---\nprovider: local\nreadonly: true\n---\nReview.\n");
-    const callReadonly = await akuma.call({ archetype: "worker", body: "call readonly", readonly: true });
-    handles.push(callReadonly);
-    const markdownReadonly = await akuma.call({ archetype: "reviewer", body: "Markdown readonly" });
-    handles.push(markdownReadonly);
-    assert.deepEqual((await readSoul(pathsForAkuId(world, callReadonly.id)))?.options, {
+    const callReadonly = await directBirthSoul(akuma, {
+      archetype: "worker",
+      body: "call readonly",
+      readonly: true,
+    });
+    const markdownReadonly = await directBirthSoul(akuma, {
+      archetype: "reviewer",
+      body: "Markdown readonly",
+    });
+    assert.deepEqual(callReadonly.options, {
       readonly: true, systemPrompt: "Work.\n", systemPromptMode: "append",
     });
-    assert.deepEqual((await readSoul(pathsForAkuId(world, callReadonly.id)))?.readonly, { enforcement: "native" });
-    assert.deepEqual((await readSoul(pathsForAkuId(world, markdownReadonly.id)))?.options, {
+    assert.deepEqual(callReadonly.readonly, { enforcement: "native" });
+    assert.deepEqual(markdownReadonly.options, {
       readonly: true, systemPrompt: "Review.\n", systemPromptMode: "append",
     });
-    assert.deepEqual((await readSoul(pathsForAkuId(world, markdownReadonly.id)))?.readonly, { enforcement: "native" });
+    assert.deepEqual(markdownReadonly.readonly, { enforcement: "native" });
 
     for (const readonly of [false, "true"] as const) {
       await assert.rejects(
@@ -410,7 +427,6 @@ test("direct birth unions Archetype defaults with additive allowed values", asyn
   } finally {
     if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
     else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
-    for (const handle of handles) await handle.wait();
     rmSync(raw.path, { recursive: true, force: true });
   }
 });

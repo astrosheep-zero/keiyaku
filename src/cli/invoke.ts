@@ -391,6 +391,7 @@ async function invokeParsed(
     ).invokeTaskFromEdge({
       parsed,
       world,
+      candidate: candidateWorld,
       context: taskContext,
       establish: coordinates.establishWorld,
       readStdin: edge.readStdin,

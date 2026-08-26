@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import test from "node:test";
@@ -22,7 +22,15 @@ import {
   type TopologyEffect,
 } from "../src/index.js";
 import { deliveryDiffOperation, scopeOperation } from "../src/protocol/operations.js";
-import { appointedWorktreePath, cachedRepositoryAt, makeGitRepository, observeContract, type TestGitRepository, withGitShim } from "./support/git.js";
+import {
+  appointedWorktreePath,
+  cachedRepositoryAt,
+  makeGitRepository,
+  observeContract,
+  snapshotGitRepository,
+  type TestGitRepository,
+  withGitShim,
+} from "./support/git.js";
 
 function contractBody(): string {
   return [
@@ -52,15 +60,126 @@ function preparationCoordinates(state: NonNullable<Awaited<ReturnType<typeof obs
   return { contractId: state.id, coordinates: state.coordinates };
 }
 
-async function boundContract(): Promise<Readonly<{ repository: TestGitRepository; id: ContractId; worktree: string }>> {
-  const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Test User"]);
-  repository.run(["config", "user.email", "test@example.com"]);
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree" });
-  const id = (await bound.keiyaku.state()).id;
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), id);
-  return { repository, id, worktree };
+const fixtureTemplates = new Map<string, TestGitRepository>();
+
+function deliveryFixture(files: Readonly<Record<string, string>> = {}, message = "initial"): TestGitRepository {
+  const key = JSON.stringify({ files: Object.entries(files).sort(([left], [right]) => left.localeCompare(right)), message });
+  let template = fixtureTemplates.get(key);
+  if (template === undefined) {
+    template = makeGitRepository();
+    for (const [path, contents] of Object.entries(files)) {
+      const target = join(template.path, path);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, contents);
+    }
+    if (Object.keys(files).length === 0) {
+      template.run(["commit", "--allow-empty", "--quiet", "-m", message]);
+    } else {
+      template.run(["add", "--", ...Object.keys(files)]);
+      template.run(["commit", "--quiet", "-m", message]);
+    }
+    fixtureTemplates.set(key, template);
+  }
+  return snapshotGitRepository(template);
+}
+
+test("delivery fixtures snapshot independent initial repositories", () => {
+  const first = deliveryFixture({ "fixture.txt": "template\n" });
+  const second = deliveryFixture({ "fixture.txt": "template\n" });
+  assert.notEqual(first.path, second.path);
+  assert.equal(existsSync(join(second.path, ".git", "objects", "info", "alternates")), false);
+  assert.equal(second.run(["remote"]).trim(), "");
+
+  writeFileSync(join(first.path, "fixture.txt"), "changed\n");
+  first.run(["add", "fixture.txt"]);
+  first.run(["commit", "--quiet", "-m", "changed fixture"]);
+  first.run(["config", "test.fixture", "changed"]);
+
+  const third = deliveryFixture({ "fixture.txt": "template\n" });
+  for (const repository of [second, third]) {
+    assert.equal(readFileSync(join(repository.path, "fixture.txt"), "utf8"), "template\n");
+    assert.equal(repository.run(["log", "-1", "--format=%s"]).trim(), "initial");
+    assert.equal(repository.run(["remote"]).trim(), "");
+    assert.equal(existsSync(join(repository.path, ".git", "objects", "info", "alternates")), false);
+    assert.throws(() => repository.run(["config", "--get", "test.fixture"]));
+  }
+});
+
+type GeneratedWorktreeFile = Readonly<{ path: string; bytes: Buffer; mode: number }>;
+type PostBindTemplate = Readonly<{
+  repository: TestGitRepository;
+  id: ContractId;
+  start: ReturnType<typeof mintSnapshotId>;
+  preparation: ReturnType<typeof preparationCoordinates>;
+  generatedFiles: readonly GeneratedWorktreeFile[];
+}>;
+
+const postBindTemplates = new Map<string, Promise<PostBindTemplate>>();
+
+function postBindTemplateKey(target: "targetless" | "targeted", gates: readonly string[]): string {
+  return JSON.stringify({ target, gates });
+}
+
+async function buildPostBindTemplate(target: "targetless" | "targeted", gates: readonly string[]): Promise<PostBindTemplate> {
+  const repository = target === "targetless" ? deliveryFixture() : deliveryFixture({ "shared.txt": "base\n" });
+  if (target === "targetless") {
+    repository.run(["config", "user.name", "Test User"]);
+    repository.run(["config", "user.email", "test@example.com"]);
+  }
+  const bound = await Keiyaku.bind({
+    repo: await Repo.at({ path: repository.path }),
+    markdown: contractBody(),
+    workspace: "worktree",
+    ...(target === "targeted" ? { target: "refs/heads/main", ...(gates.length === 0 ? {} : { gates }) } : {}),
+  });
+  const state = await bound.keiyaku.state();
+  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
+  const generatedFiles = [".keiyaku/.gitignore", ".keiyaku/KEIYAKU.md"].map((path) => ({
+    path,
+    bytes: readFileSync(join(worktree, path)),
+    mode: statSync(join(worktree, path)).mode & 0o777,
+  }));
+  repository.run(["worktree", "remove", "--force", worktree]);
+  return {
+    repository,
+    id: state.id,
+    start: state.coordinates.start,
+    preparation: preparationCoordinates(state),
+    generatedFiles,
+  };
+}
+
+function postBindTemplate(target: "targetless" | "targeted", gates: readonly string[] = []): Promise<PostBindTemplate> {
+  const key = postBindTemplateKey(target, gates);
+  const existing = postBindTemplates.get(key);
+  if (existing !== undefined) return existing;
+  const template = buildPostBindTemplate(target, gates);
+  postBindTemplates.set(key, template);
+  void template.catch(() => {
+    if (postBindTemplates.get(key) === template) postBindTemplates.delete(key);
+  });
+  return template;
+}
+
+async function postBindFixture(target: "targetless" | "targeted", gates: readonly string[] = []) {
+  const template = await postBindTemplate(target, gates);
+  const repository = snapshotGitRepository(template.repository);
+  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), template.id);
+  repository.run(["worktree", "add", "--detach", worktree, template.start]);
+  for (const generated of template.generatedFiles) {
+    const path = join(worktree, generated.path);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, generated.bytes);
+    chmodSync(path, generated.mode);
+  }
+  const repo = await Repo.at({ path: repository.path });
+  const contract = Keiyaku.of({ repo, id: template.id });
+  return { contract, repository, id: template.id, preparation: template.preparation, worktree };
+}
+
+async function boundContract() {
+  const { contract, repository, id, worktree } = await postBindFixture("targetless");
+  return { contract, repository, id, worktree };
 }
 
 async function preparedDelivery(repository: TestGitRepository, id: ContractId) {
@@ -106,33 +225,14 @@ function commitSignature(repository: TestGitRepository, commit: string): readonl
 }
 
 async function targetedContract(gates: readonly string[] = []) {
-  const repository = makeGitRepository();
-  writeFileSync(join(repository.path, "shared.txt"), "base\n");
-  repository.run(["add", "shared.txt"]);
-  repository.run(["commit", "--quiet", "-m", "initial"]);
-  const bound = await Keiyaku.bind({
-    repo: await Repo.at({ path: repository.path }),
-    markdown: contractBody(),
-    workspace: "worktree",
-    target: "refs/heads/main",
-    ...(gates.length === 0 ? {} : { gates }),
-  });
-  const state = await bound.keiyaku.state();
-  return {
-    contract: bound.keiyaku,
-    repository,
-    state,
-    worktree: await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id),
-  };
+  return await postBindFixture("targeted", gates);
 }
 
 async function directoryReplacementContract(ignore = "artifact/*.tmp\n") {
-  const repository = makeGitRepository();
-  mkdirSync(join(repository.path, "artifact"));
-  writeFileSync(join(repository.path, ".gitignore"), ignore);
-  writeFileSync(join(repository.path, "artifact", "tracked.txt"), "tracked\n");
-  repository.run(["add", ".gitignore", "artifact/tracked.txt"]);
-  repository.run(["commit", "--quiet", "-m", "tracked directory"]);
+  const repository = deliveryFixture({
+    ".gitignore": ignore,
+    "artifact/tracked.txt": "tracked\n",
+  }, "tracked directory");
   const bound = await Keiyaku.bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: contractBody(),
@@ -149,7 +249,7 @@ async function directoryReplacementContract(ignore = "artifact/*.tmp\n") {
 }
 
 test("permissive targeted delivery integrates tender bytes over the observed target head", async () => {
-  const { repository, state, worktree } = await targetedContract();
+  const { repository, preparation, worktree } = await targetedContract();
   writeFileSync(join(repository.path, "target.txt"), "target advance\n");
   repository.run(["add", "target.txt"]);
   repository.run(["commit", "--quiet", "-m", "advance target"]);
@@ -159,8 +259,8 @@ test("permissive targeted delivery integrates tender bytes over the observed tar
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "tender"]);
   const tenderHead = repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim();
   const git = await cachedRepositoryAt(repository.path);
-  const review = await prepareReview(git, preparationCoordinates(state));
-  const delivery = await prepareDelivery(git, preparationCoordinates(state), {
+  const review = await prepareReview(git, preparation);
+  const delivery = await prepareDelivery(git, preparation, {
     title: "Integrated delivery",
     document: contractBody(),
     requireBranchesToBeUpToDate: false,
@@ -177,10 +277,10 @@ test("permissive targeted delivery integrates tender bytes over the observed tar
 });
 
 test("strict targeted delivery refuses a tender not based on the target head", async () => {
-  const { repository, state } = await targetedContract();
+  const { repository, preparation } = await targetedContract();
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "advance target"]);
   const targetHead = repository.run(["rev-parse", "HEAD"]).trim();
-  assert.deepEqual(await prepareDelivery(await cachedRepositoryAt(repository.path), preparationCoordinates(state), {
+  assert.deepEqual(await prepareDelivery(await cachedRepositoryAt(repository.path), preparation, {
     title: "Strict delivery",
     document: contractBody(),
     requireBranchesToBeUpToDate: true,
@@ -188,7 +288,7 @@ test("strict targeted delivery refuses a tender not based on the target head", a
     kind: "refused",
     refusal: {
       kind: "integration-failed",
-      contractId: state.id,
+      contractId: preparation.contractId,
       reason: "not-based-on-target",
       targetHead,
     },
@@ -196,7 +296,7 @@ test("strict targeted delivery refuses a tender not based on the target head", a
 });
 
 test("targeted integration conflict returns structured paths", async () => {
-  const { repository, state, worktree } = await targetedContract();
+  const { repository, preparation, worktree } = await targetedContract();
   writeFileSync(join(repository.path, "shared.txt"), "target\n");
   repository.run(["add", "shared.txt"]);
   repository.run(["commit", "--quiet", "-m", "target change"]);
@@ -204,7 +304,7 @@ test("targeted integration conflict returns structured paths", async () => {
   writeFileSync(join(worktree, "shared.txt"), "tender\n");
   repository.run(["-C", worktree, "add", "shared.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "tender change"]);
-  assert.deepEqual(await prepareDelivery(await cachedRepositoryAt(repository.path), preparationCoordinates(state), {
+  assert.deepEqual(await prepareDelivery(await cachedRepositoryAt(repository.path), preparation, {
     title: "Conflicted delivery",
     document: contractBody(),
     requireBranchesToBeUpToDate: false,
@@ -212,7 +312,7 @@ test("targeted integration conflict returns structured paths", async () => {
     kind: "refused",
     refusal: {
       kind: "integration-failed",
-      contractId: state.id,
+      contractId: preparation.contractId,
       reason: "conflict",
       targetHead,
       conflictPaths: ["shared.txt"],
@@ -237,7 +337,7 @@ test("Git merge-state detection and judged conflict projection stay with the one
 });
 
 test("delivery refuses unresolved index paths and captures a resolved merge as a native graph", async () => {
-  const { repository, state, worktree } = await targetedContract();
+  const { repository, preparation, worktree } = await targetedContract();
   writeFileSync(join(repository.path, "a.txt"), "target\n");
   writeFileSync(join(repository.path, "z.txt"), "target\n");
   repository.run(["add", "a.txt", "z.txt"]);
@@ -254,13 +354,13 @@ test("delivery refuses unresolved index paths and captures a resolved merge as a
   const statusBefore = repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]);
 
   for (const includeDirty of [false, true]) {
-    assert.deepEqual(await prepareDelivery(git, preparationCoordinates(state), {
+    assert.deepEqual(await prepareDelivery(git, preparation, {
       title: "Resolved merge",
       document: contractBody(),
       includeDirty,
     }), {
       kind: "refused",
-      refusal: { kind: "unmerged-paths", contractId: state.id, paths: ["a.txt", "z.txt"] },
+      refusal: { kind: "unmerged-paths", contractId: preparation.contractId, paths: ["a.txt", "z.txt"] },
     });
     assert.equal(repository.run(["-C", worktree, "diff", "--cached", "--binary"]), indexBefore);
     assert.equal(repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]), statusBefore);
@@ -269,7 +369,7 @@ test("delivery refuses unresolved index paths and captures a resolved merge as a
   writeFileSync(join(worktree, "a.txt"), "resolved\n");
   writeFileSync(join(worktree, "z.txt"), "resolved\n");
   repository.run(["-C", worktree, "add", "a.txt", "z.txt"]);
-  const plain = await prepareDelivery(git, preparationCoordinates(state), {
+  const plain = await prepareDelivery(git, preparation, {
     title: "Resolved merge",
     document: contractBody(),
   });
@@ -279,7 +379,7 @@ test("delivery refuses unresolved index paths and captures a resolved merge as a
     if (plain.refusal.kind === "dirty-workspace") assert.deepEqual(plain.refusal.staged, ["a.txt", "z.txt"]);
   }
 
-  const prepared = await prepareDelivery(git, preparationCoordinates(state), {
+  const prepared = await prepareDelivery(git, preparation, {
     title: "Resolved merge",
     document: contractBody(),
     includeDirty: true,
@@ -296,7 +396,7 @@ test("delivery refuses unresolved index paths and captures a resolved merge as a
 });
 
 test("resolved merge state remains dirty authorization when its tree equals HEAD", async () => {
-  const { repository, state, worktree } = await targetedContract();
+  const { repository, preparation, worktree } = await targetedContract();
   writeFileSync(join(repository.path, "shared.txt"), "target\n");
   repository.run(["add", "shared.txt"]);
   repository.run(["commit", "--quiet", "-m", "target change"]);
@@ -310,13 +410,13 @@ test("resolved merge state remains dirty authorization when its tree equals HEAD
   writeFileSync(join(worktree, "shared.txt"), "tender\n");
   repository.run(["-C", worktree, "add", "shared.txt"]);
 
-  const plain = await prepareDelivery(git, preparationCoordinates(state), {
+  const plain = await prepareDelivery(git, preparation, {
     title: "Equal resolved merge",
     document: contractBody(),
   });
   assert.equal(plain.kind, "refused");
   if (plain.kind === "refused") assert.equal(plain.refusal.kind, "dirty-workspace");
-  const prepared = await prepareDelivery(git, preparationCoordinates(state), {
+  const prepared = await prepareDelivery(git, preparation, {
     title: "Equal resolved merge",
     document: contractBody(),
     includeDirty: true,
@@ -331,7 +431,7 @@ test("resolved merge state remains dirty authorization when its tree equals HEAD
 });
 
 test("rebasing a managed tender onto the current target resolves its integration base", async () => {
-  const { repository, state, worktree } = await targetedContract();
+  const { repository, preparation, worktree } = await targetedContract();
   writeFileSync(join(repository.path, "shared.txt"), "target\n");
   repository.run(["add", "shared.txt"]);
   repository.run(["commit", "--quiet", "-m", "target change"]);
@@ -340,7 +440,7 @@ test("rebasing a managed tender onto the current target resolves its integration
   writeFileSync(join(worktree, "shared.txt"), "tender\n");
   repository.run(["-C", worktree, "add", "shared.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "tender change"]);
-  const before = await prepareDelivery(await cachedRepositoryAt(repository.path), preparationCoordinates(state), {
+  const before = await prepareDelivery(await cachedRepositoryAt(repository.path), preparation, {
     title: "Conflicted delivery",
     document: contractBody(),
     requireBranchesToBeUpToDate: false,
@@ -348,12 +448,12 @@ test("rebasing a managed tender onto the current target resolves its integration
   assert.equal(before.kind, "refused");
 
   assert.throws(() => repository.run([
-    "-C", worktree, "rebase", "--onto", targetHead, state.coordinates.start,
+    "-C", worktree, "rebase", "--onto", targetHead, preparation.coordinates.start,
   ]));
   writeFileSync(join(worktree, "shared.txt"), "tender\n");
   repository.run(["-C", worktree, "add", "shared.txt"]);
   repository.run(["-C", worktree, "-c", "core.editor=true", "rebase", "--continue"]);
-  const after = await prepareDelivery(await cachedRepositoryAt(repository.path), preparationCoordinates(state), {
+  const after = await prepareDelivery(await cachedRepositoryAt(repository.path), preparation, {
     title: "Rebased delivery",
     document: contractBody(),
     requireBranchesToBeUpToDate: false,
@@ -365,14 +465,14 @@ test("rebasing a managed tender onto the current target resolves its integration
 });
 
 test("targeted integration refuses unrelated histories without invoking merge-tree", async () => {
-  const { repository, state, worktree } = await targetedContract();
+  const { repository, preparation, worktree } = await targetedContract();
   repository.run(["-C", worktree, "checkout", "--orphan", "unrelated"]);
   repository.run(["-C", worktree, "rm", "--quiet", "-rf", "."]);
   writeFileSync(join(worktree, "unrelated.txt"), "unrelated\n");
   repository.run(["-C", worktree, "add", "unrelated.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "unrelated"]);
   const targetHead = repository.run(["rev-parse", "refs/heads/main"]).trim();
-  const prepared = await prepareDelivery(await cachedRepositoryAt(repository.path), preparationCoordinates(state), {
+  const prepared = await prepareDelivery(await cachedRepositoryAt(repository.path), preparation, {
     title: "Unrelated delivery",
     document: contractBody(),
     requireBranchesToBeUpToDate: false,
@@ -381,7 +481,7 @@ test("targeted integration refuses unrelated histories without invoking merge-tr
     kind: "refused",
     refusal: {
       kind: "integration-failed",
-      contractId: state.id,
+      contractId: preparation.contractId,
       reason: "unrelated-histories",
       targetHead,
     },
@@ -389,7 +489,7 @@ test("targeted integration refuses unrelated histories without invoking merge-tr
 });
 
 test("permissive integration reports unsupported Git while strict policy needs no merge-tree", async () => {
-  const { repository, state } = await targetedContract();
+  const { repository, preparation } = await targetedContract();
   const shim = [
     'if [ "$1" = "merge-tree" ]; then',
     '  printf "unsupported merge-tree\n" >&2',
@@ -399,16 +499,16 @@ test("permissive integration reports unsupported Git while strict policy needs n
   ].join("\n");
   const permissive = await withGitShim(shim, {}, async (gitPath) => await prepareDelivery(
     await cachedRepositoryAt(repository.path, gitPath),
-    preparationCoordinates(state),
+    preparation,
     { title: "Permissive", document: contractBody(), requireBranchesToBeUpToDate: false },
   ));
   assert.deepEqual(permissive, {
     kind: "refused",
-    refusal: { kind: "integration-unsupported", contractId: state.id, requiredGit: "2.38" },
+    refusal: { kind: "integration-unsupported", contractId: preparation.contractId, requiredGit: "2.38" },
   });
   const strict = await withGitShim(shim, {}, async (gitPath) => await prepareDelivery(
     await cachedRepositoryAt(repository.path, gitPath),
-    preparationCoordinates(state),
+    preparation,
     { title: "Strict", document: contractBody(), requireBranchesToBeUpToDate: true },
   ));
   assert.equal(strict.kind, "prepared");
@@ -491,11 +591,11 @@ test("dirty delivery materializes a candidate without changing the caller index"
 });
 
 test("one preparation freezes Contract content, actor identity, and dates across tender and integration", async () => {
-  const { repository, state, worktree } = await targetedContract();
+  const { repository, preparation, worktree } = await targetedContract();
   writeFileSync(join(worktree, "candidate.txt"), "dirty candidate\n");
   const document = `${contractBody()}\n\n`;
   const expectedAt = repository.run(["-C", worktree, "show", "-s", "--format=%cI", "HEAD"]).trim();
-  const prepared = await prepareDelivery(await cachedRepositoryAt(repository.path), preparationCoordinates(state), {
+  const prepared = await prepareDelivery(await cachedRepositoryAt(repository.path), preparation, {
     title: "Ignored default subject",
     document,
     actor: actorId("Release Bot"),
@@ -506,7 +606,7 @@ test("one preparation freezes Contract content, actor identity, and dates across
   if (prepared.kind !== "prepared") return;
 
   const commits = [prepared.data.tenderSnapshot, prepared.data.integration.snapshot];
-  const expectedMessage = `Chosen subject\n\n${contractBody()}\n\nKeiyaku-Contract: ${state.id}\n`;
+  const expectedMessage = `Chosen subject\n\n${contractBody()}\n\nKeiyaku-Contract: ${preparation.contractId}\n`;
   for (const commit of commits) {
     assert.equal(commitMessage(repository, commit), expectedMessage);
     const [author, authorEmail, committer, committerEmail, authoredAt, committedAt] = commitSignature(
@@ -624,7 +724,7 @@ test("dirty delivery refuses classified paths unless the complete workspace is a
 });
 
 test("target placement observation reports checkout collisions without moving the target", async () => {
-  const { contract, repository, worktree, state } = await targetedContract();
+  const { contract, repository, preparation, worktree } = await targetedContract();
   const collision = "literal[1].tmp";
   writeFileSync(join(repository.path, ".gitignore"), "literal*.tmp\n");
   repository.run(["add", ".gitignore"]);
@@ -634,7 +734,7 @@ test("target placement observation reports checkout collisions without moving th
   repository.run(["-C", worktree, "add", collision]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "literal candidate"]);
   const git = await cachedRepositoryAt(repository.path);
-  const prepared = await prepareDelivery(git, preparationCoordinates(state), {
+  const prepared = await prepareDelivery(git, preparation, {
     title: "Delivery patch identity",
     document: contractBody(),
   });
@@ -644,12 +744,12 @@ test("target placement observation reports checkout collisions without moving th
   const indexBefore = repository.run(["diff", "--cached", "--binary"]);
   const worktreeBefore = repository.run(["status", "--porcelain=v1", "--untracked-files=all"]);
 
-  const targetName = state.coordinates.target;
+  const targetName = preparation.coordinates.target;
   assert.notEqual(targetName, undefined);
   if (targetName === undefined) return;
   const observed = await observeTargetPlacement(git, {
-    contractId: state.id,
-    coordinates: { ...state.coordinates, target: targetName },
+    contractId: preparation.contractId,
+    coordinates: { ...preparation.coordinates, target: targetName },
     predecessor: mintSnapshotId(target),
     candidate: prepared.data.integration.snapshot,
   });
@@ -670,12 +770,12 @@ test("target placement observation reports checkout collisions without moving th
 });
 
 test("target placement observation reports a ready targeted candidate without following it", async () => {
-  const { repository, worktree, state } = await targetedContract();
+  const { repository, preparation, worktree } = await targetedContract();
   writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
   repository.run(["-C", worktree, "add", "candidate.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "disjoint candidate"]);
   const git = await cachedRepositoryAt(repository.path);
-  const prepared = await prepareDelivery(git, preparationCoordinates(state), {
+  const prepared = await prepareDelivery(git, preparation, {
     title: "Delivery patch identity",
     document: contractBody(),
   });
@@ -683,12 +783,12 @@ test("target placement observation reports a ready targeted candidate without fo
   if (prepared.kind !== "prepared") throw new Error("delivery preparation was refused");
   const target = repository.run(["rev-parse", "refs/heads/main"]).trim();
 
-  const targetName = state.coordinates.target;
+  const targetName = preparation.coordinates.target;
   assert.notEqual(targetName, undefined);
   if (targetName === undefined) return;
   const observed = await observeTargetPlacement(git, {
-    contractId: state.id,
-    coordinates: { ...state.coordinates, target: targetName },
+    contractId: preparation.contractId,
+    coordinates: { ...preparation.coordinates, target: targetName },
     predecessor: mintSnapshotId(target),
     candidate: prepared.data.integration.snapshot,
   });
@@ -701,18 +801,18 @@ test("target placement observation reports a ready targeted candidate without fo
 });
 
 test("audit target adjudicator reports initial movement without observing followability", async () => {
-  const { repository, worktree, state } = await targetedContract();
+  const { repository, preparation, worktree } = await targetedContract();
   writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
   repository.run(["-C", worktree, "add", "candidate.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "disjoint candidate"]);
   const git = await cachedRepositoryAt(repository.path);
-  const prepared = await prepareDelivery(git, preparationCoordinates(state), {
+  const prepared = await prepareDelivery(git, preparation, {
     title: "Delivery patch identity",
     document: contractBody(),
   });
   assert.equal(prepared.kind, "prepared");
   if (prepared.kind !== "prepared") throw new Error("delivery preparation was refused");
-  const targetName = state.coordinates.target;
+  const targetName = preparation.coordinates.target;
   assert.notEqual(targetName, undefined);
   if (targetName === undefined) return;
   const expected = prepared.data.integration.predecessor;
@@ -729,8 +829,8 @@ test("audit target adjudicator reports initial movement without observing follow
     ].join("\n"),
     {},
     async (gitPath) => adjudicateAuditTarget({ ...git, gitPath }, {
-      contractId: state.id,
-      coordinates: { ...state.coordinates, target: targetName },
+      contractId: preparation.contractId,
+      coordinates: { ...preparation.coordinates, target: targetName },
       predecessor: expected,
       candidate: prepared.data.integration.snapshot,
     }),
@@ -745,18 +845,18 @@ test("audit target adjudicator reports initial movement without observing follow
 });
 
 test("audit target adjudicator reobserves movement after followability", async () => {
-  const { repository, worktree, state } = await targetedContract();
+  const { repository, preparation, worktree } = await targetedContract();
   writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
   repository.run(["-C", worktree, "add", "candidate.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "disjoint candidate"]);
   const git = await cachedRepositoryAt(repository.path);
-  const prepared = await prepareDelivery(git, preparationCoordinates(state), {
+  const prepared = await prepareDelivery(git, preparation, {
     title: "Delivery patch identity",
     document: contractBody(),
   });
   assert.equal(prepared.kind, "prepared");
   if (prepared.kind !== "prepared") throw new Error("delivery preparation was refused");
-  const targetName = state.coordinates.target;
+  const targetName = preparation.coordinates.target;
   assert.notEqual(targetName, undefined);
   if (targetName === undefined) return;
   const expected = prepared.data.integration.predecessor;
@@ -770,8 +870,8 @@ test("audit target adjudicator reobserves movement after followability", async (
     ].join("\n"),
     { KEIYAKU_TEST_REPO: repository.path },
     async (gitPath) => adjudicateAuditTarget({ ...git, gitPath }, {
-      contractId: state.id,
-      coordinates: { ...state.coordinates, target: targetName },
+      contractId: preparation.contractId,
+      coordinates: { ...preparation.coordinates, target: targetName },
       predecessor: expected,
       candidate: prepared.data.integration.snapshot,
     }),

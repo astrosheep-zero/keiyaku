@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
-const skills = ["keiyaku", "keiyaku-task", "keiyaku-bind", "keiyaku-workflow", "keiyaku-akuma"]
+const skills = ["keiyaku", "keiyaku-task", "keiyaku-bind", "keiyaku-workflow", "keiyaku-akuma", "keiyaku-babysit"]
   .map((name) => fileURLToPath(new URL(`./skills/${name}/SKILL.md`, import.meta.url)));
 
 export default {

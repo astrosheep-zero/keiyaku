@@ -3,10 +3,9 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { Keiyaku, Repo, type ContractId } from "../src/index.js";
-import { repositoryAt } from "../src/git/repository.js";
 import { adjudicateAuditTarget } from "../src/git/target-placement.js";
 import { releaseManagedWorktrees } from "../src/workspace-place.js";
-import { appointedWorktreePath, withGitShim } from "./support/git.js";
+import { appointedWorktreePath, cachedRepoAt, cachedRepositoryAt, withGitShim } from "./support/git.js";
 import { bind, commitCandidate, document, refused, repositoryWithMain } from "./support/library-verbs.js";
 
 test("pre-delivery audit candidate matches a later unchanged deliver", async () => {
@@ -65,7 +64,7 @@ test("unchanged deliver reuses unsatisfied pre-delivery audit Verification", asy
   assert.deepEqual(delivered.value.placement, {
     refusal: { kind: "gates-unsatisfied", contractId: (await contract.state()).id },
   });
-  const observed = await Keiyaku.observe({ repo: await Repo.at({ path: repository.path }), id: (await contract.state()).id });
+  const observed = await Keiyaku.observe({ repo: await cachedRepoAt(repository.path), id: (await contract.state()).id });
   assert.equal(observed.kind, "present");
   if (observed.kind !== "present") return;
   assert.equal(observed.row.gates.satisfied, false);
@@ -81,7 +80,7 @@ test("unchanged deliver reuses unsatisfied pre-delivery audit Verification", asy
 test("audit showDiff belongs to this attempt and dirty failure is blocked evidence", async () => {
   const repository = repositoryWithMain();
   const contract = await bind(repository, "exit 0");
-  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), contract.id);
+  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), contract.id);
   writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
 
   const blocked = await contract.audit();
@@ -113,14 +112,14 @@ test("ready targeted audit reports checkout collisions without placing", async (
   repository.run(["add", "shared.txt"]);
   repository.run(["commit", "--quiet", "-m", "base"]);
   const bound = await Keiyaku.bind({
-    repo: await Repo.at({ path: repository.path }),
+    repo: await cachedRepoAt(repository.path),
     markdown: document("exit 0"),
     workspace: "worktree",
     target: "refs/heads/main",
     gates: ["verified"],
   });
   const state = await bound.keiyaku.state();
-  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), state.id);
+  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
   const collision = "literal[1].tmp";
   writeFileSync(join(repository.path, ".gitignore"), "literal*.tmp\n");
   repository.run(["add", ".gitignore"]);
@@ -155,14 +154,14 @@ test("later target checkout mutation is reobserved at placement", async () => {
   repository.run(["add", "shared.txt"]);
   repository.run(["commit", "--quiet", "-m", "base"]);
   const bound = await Keiyaku.bind({
-    repo: await Repo.at({ path: repository.path }),
+    repo: await cachedRepoAt(repository.path),
     markdown: document("exit 0"),
     workspace: "worktree",
     target: "refs/heads/main",
     gates: ["verified"],
   });
   const state = await bound.keiyaku.state();
-  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), state.id);
+  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
   writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
   repository.run(["-C", worktree, "add", "candidate.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "disjoint candidate"]);
@@ -189,7 +188,7 @@ test("later target checkout mutation is reobserved at placement", async () => {
 
 test("operational target observation failure is target.failed", async () => {
   const repository = repositoryWithMain();
-  const git = await repositoryAt(repository.path);
+  const git = await cachedRepositoryAt(repository.path);
   const predecessor = repository.run(["rev-parse", "HEAD"]).trim();
   const answer = await withGitShim(
     [
@@ -215,7 +214,7 @@ test("operational target observation failure is target.failed", async () => {
 test("moved target wins over placeability", async () => {
   const repository = repositoryWithMain();
   const bound = await Keiyaku.bind({
-    repo: await Repo.at({ path: repository.path }),
+    repo: await cachedRepoAt(repository.path),
     markdown: document([
       'NEW=$(git commit-tree "$(git rev-parse HEAD^{tree})" -p refs/heads/main -m move-target)',
       'git update-ref refs/heads/main "$NEW"',
@@ -245,7 +244,7 @@ test("moved target wins over placeability", async () => {
 test("stopped Verification forces target not-observed", async () => {
   const repository = repositoryWithMain();
   const bound = await Keiyaku.bind({
-    repo: await Repo.at({ path: repository.path }),
+    repo: await cachedRepoAt(repository.path),
     markdown: document("kill -TERM $$"),
     workspace: "worktree",
     target: "refs/heads/main",
@@ -299,7 +298,7 @@ test("public audit exposes admitted verified attestations through facts", async 
 
 test("audit keeps its leading observation when the delivery candidate is unavailable", async () => {
   const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
+  const bound = await Keiyaku.bind({ repo: await cachedRepoAt(repository.path),
     markdown: document("exit 0"),
     workspace: "worktree",
     gates: ["reviewed"],
@@ -349,13 +348,13 @@ test("public audit refuses a terminal contract before reading its released works
 test("audit blocks an active unappointed workspace without inventing a path", async () => {
   const repository = repositoryWithMain();
   const bound = await Keiyaku.bind({
-    repo: await Repo.at({ path: repository.path }),
+    repo: await cachedRepoAt(repository.path),
     markdown: document(),
     workspace: "worktree",
     gates: ["reviewed"],
   });
   const state = await bound.keiyaku.state();
-  await releaseManagedWorktrees(await repositoryAt(repository.path), [state.id]);
+  await releaseManagedWorktrees(await cachedRepositoryAt(repository.path), [state.id]);
 
   const audited = await bound.keiyaku.audit();
   assert.deepEqual(audited.value.candidate, {
@@ -369,7 +368,7 @@ test("audit blocks an active unappointed workspace without inventing a path", as
 
 test("public audit rejects a missing contract with a typed refusal", async () => {
   const repository = repositoryWithMain();
-  const contract = Keiyaku.of({ repo: await Repo.at({ path: repository.path }), id: "kei/missing" as ContractId });
+  const contract = Keiyaku.of({ repo: await cachedRepoAt(repository.path), id: "kei/missing" as ContractId });
 
   await assert.rejects(
     contract.audit(),

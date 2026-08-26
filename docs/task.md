@@ -193,7 +193,7 @@ tasks.blocked(input?: { scope?: "namespace" | "world"; namespace?: readonly stri
 tasks.query(input?: { where?: TaskQueryExpression; scope?: "namespace" | "world"; namespace?: readonly string[]; sort?: "priority" | "created" | "updated" | "id"; limit?: number }): Promise<TaskQueryResult>
 tasks.doctor(): Promise<TaskDoctorReport>
 tasks.batch(input: { verb: "done" | "drop" | "hold"; ids: readonly string[]; note?: string; signal?: AbortSignal }): Promise<TaskBatchResult>
-tasks.compose(input: { markdown: string; namespace?: readonly string[]; actor?: string; signal?: AbortSignal }): Promise<TaskCompositionResult>
+tasks.compose(input: { markdown: string; namespace?: readonly string[]; actor?: string; signal?: AbortSignal; plan?: boolean }): Promise<TaskCompositionResult>
 
 task.read(): Promise<TaskDetail | null>
 task.tree(): Promise<TaskDecompositionTree>
@@ -323,35 +323,37 @@ authority.
 
 ## Compose
 
-Compose accepts a tree-shaped document. An optional first `ns=<segment/...>`
-or `ns=` pins allocation namespace; otherwise current context is captured once.
-`+ Title` allocates a task, `@task/id` modifies one, and two-space indentation
-assigns parent. Exact assignment prefixes are `parent`, `needs`, `supersedes`,
-`relates`, `pri`, and bare `body=`. `=` replaces or clears and `+=` appends;
-scalar parent and priority reject `+=`. Prose replaces body. Body lines that
-begin with `\`, `+ `, or `@task/` use one leading backslash, which parsing strips
-and failure-draft serialization restores.
+Compose is the Task product's batch planning and admission operation. It accepts
+one caller-supplied composition document and captures its effective namespace
+once. Planning allocates every new Task identity before admission, resolves
+references against the pre-existing board plus document-local new-node
+identities, and validates the complete post-image before any authority file is
+replaced. A document may address one Task at most once.
 
-Planning first allocates every `+` node in document order, then resolves every
-full TaskId reference against the board and all allocations. One document may
-address a TaskId at most once. Planning validates missing targets and self edges
-introduced by planned documents but performs no cycle diagnosis. An empty
-change set is accepted.
+Planning rejects malformed input, unresolved references, invalid relation
+patches, self edges, and cycles introduced by the planned `needs` or `parent`
+edges. Existing graph disease remains the responsibility of `doctor`. A valid
+plan has a deterministic admission order: dependencies required by a new
+`needs` or `parent` edge precede their dependents, and otherwise document order
+is the tie-break. The optional plan result exposes the resolved aliases,
+admission order, and body byte previews without writing authority.
 
-Documents admit in TaskId byte order. Each successful atomic rename is an
-independent Task commit point; compose has no cross-file atomicity or rollback.
-The first failure stops. A syntax or planning refusal has no draft. Once
-admission began, the result retains admitted diffs and returns canonical DSL
-for only the remaining intent. That draft always includes resolved `ns=` and
-is directly reusable as compose input.
+Each admitted file replacement is an independent Task commit point. Compose has
+no cross-file atomicity or rollback; the first admission failure stops and
+retains already admitted changes. The incomplete result carries the stopped
+reason, admitted changes, resolved composition facts, and a reusable draft for
+only the remaining intent. Replaying that draft against the resulting board
+completes the original intent and preserves body bytes. Compose does not alter
+Task lifecycle state, title, note, or Contract/Akuma authority.
+
+The public result is:
 
 ```ts
 type TaskCompositionResult =
-  | { kind: "accepted"; documentChanges: readonly TaskDocumentChange[] }
+  | { kind: "planned"; aliases: readonly TaskCompositionAlias[]; admissionOrder: readonly TaskId[]; bodies: readonly TaskCompositionBodyPreview[] }
+  | { kind: "accepted"; aliases: readonly TaskCompositionAlias[]; admissionOrder: readonly TaskId[]; documentChanges: readonly TaskDocumentChange[] }
   | { kind: "refused"; refusal: TaskRefusal }
-  | { kind: "incomplete"; documentChanges: readonly TaskDocumentChange[];
-      stopped: TaskRefusal | { kind: "retry"; reason: "busy" | "concurrent-modification" };
-      draft: string }
+  | { kind: "incomplete"; aliases: readonly TaskCompositionAlias[]; admissionOrder: readonly TaskId[]; documentChanges: readonly TaskDocumentChange[]; stopped: TaskRefusal | { kind: "retry"; reason: "busy" | "concurrent-modification" }; draft: string }
 ```
 
 ## Admission And Coordination

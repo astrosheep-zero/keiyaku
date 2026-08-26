@@ -48,6 +48,7 @@ export type TaskWorldObservation =
 type TaskProduct = ReturnType<typeof Tasks.of>;
 type TaskInput = Readonly<{
   world: WorldRoot | null;
+  candidate: WorldRoot | null;
   context: Readonly<{ directory: string; boundary: string }>;
   establish(): Promise<WorldRoot>;
   readStdin(): Promise<string>;
@@ -58,6 +59,7 @@ export async function invokeTaskFromEdge(
   input: Readonly<{
     parsed: ParsedTaskCommand;
     world: WorldRoot | null;
+    candidate: WorldRoot | null;
     context: Readonly<{ directory: string; boundary: string }>;
     establish: () => Promise<WorldRoot>;
     readStdin: () => Promise<string>;
@@ -67,6 +69,7 @@ export async function invokeTaskFromEdge(
   try {
     return await invokeTask(input.parsed, {
       world: input.world,
+      candidate: input.candidate,
       context: input.context,
       establish: input.establish,
       readStdin: input.readStdin,
@@ -409,6 +412,7 @@ function missingWorld(command: ParsedTaskCommand): TaskInvocationResult {
     refusal: { kind: "task-missing", taskId: id as TaskId },
   });
   if (isWorldObservation(command)) return { kind: "absent" };
+  if (command.action === "compose" && command.flags.plan === true) return { kind: "absent" };
   if (command.action === "namespace") return { kind: "accepted", value: [] };
   if (command.action === "hold" || command.action === "done" || command.action === "drop") {
     return { items: command.positionals.map((id) => ({ id: id as TaskId, outcome: missing(id) })) };
@@ -454,6 +458,7 @@ async function invokeLocalMutation(
         markdown: await input.readStdin(),
         namespace: current ?? [],
         ...(input.actor === undefined ? {} : { actor: input.actor }),
+        ...(command.flags.plan === true ? { plan: true } : {}),
       });
     default:
       throw new Error(`task action has no invocation: ${command.action}`);
@@ -463,7 +468,7 @@ async function invokeLocalMutation(
 function establishesWorld(command: ParsedTaskCommand): boolean {
   return (
     command.action === "add" ||
-    command.action === "compose" ||
+    (command.action === "compose" && command.flags.plan !== true) ||
     (command.action === "namespace" && command.positionals.length > 0)
   );
 }
@@ -473,12 +478,15 @@ function forwardsMutation(command: ParsedTaskCommand): boolean {
     command.action !== "show" &&
     command.action !== "tree" &&
     command.action !== "namespace" &&
+    !(command.action === "compose" && command.flags.plan === true) &&
     !isWorldObservation(command)
   );
 }
 
 export async function invokeTask(command: ParsedTaskCommand, input: TaskInput): Promise<TaskInvocationResult> {
-  const world = input.world ?? (establishesWorld(command) ? await input.establish() : null);
+  const planOnly = command.action === "compose" && command.flags.plan === true;
+  const world =
+    input.world ?? (planOnly ? input.candidate : establishesWorld(command) ? await input.establish() : null);
   if (world === null) return missingWorld(command);
   const tasks = Tasks.of(world);
   const contextSensitive =
