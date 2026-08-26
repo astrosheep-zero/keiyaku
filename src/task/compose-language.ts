@@ -4,6 +4,17 @@ import { allocateLocalId, deriveLocalStem, formatTaskId, parseTaskId, sameNamesp
 import { parseTaskComposition, type Assignment, type ParsedComposition, type ParsedNode } from "./compose-parser.js";
 import { advanceTaskTimestamp, type TaskCompositionDiagnostic } from "./operations.js";
 
+export function taskCompositionNamespaceHeader(markdown: string): Readonly<{
+  specified: boolean;
+  namespace?: readonly string[];
+}> {
+  const parsed = parseTaskComposition(markdown);
+  return {
+    specified: parsed.namespaceSpecified,
+    ...(parsed.namespace === undefined ? {} : { namespace: parsed.namespace }),
+  };
+}
+
 export type TaskCompositionAlias = Readonly<{ alias: string; taskId: TaskId }>;
 export type TaskCompositionBodyPreview = Readonly<{
   taskId: TaskId;

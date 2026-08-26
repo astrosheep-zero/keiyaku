@@ -17,7 +17,7 @@ surface. Read every owner named for the surface being changed.
 | [git.md](git.md) | Git world, worktrees, refs, delivery preparation and placement, pins, and byte custody. |
 | [git-reconciliation.md](git-reconciliation.md) | Replayable Git effects, worktree hooks, reconciliation reports, and lag. |
 | [workspace.md](workspace.md) | Contract worktree appointment, guidance projection, ignored files, and terminal cleanup. |
-| [settlement.md](settlement.md) | Post-admission cross-product settlement, Task associations, namespace projection, and replay. |
+| [settlement.md](settlement.md) | Post-admission cross-product settlement, Task associations, context installation, and replay. |
 | [dispatch.md](dispatch.md) | Immutable Akuma-to-Contract dispatch facts, Git persistence, publication, and reads. |
 | [alias.md](alias.md) | World-local movable Akuma aliases, file authority, locking, and durable replacement. |
 | [cli.md](cli.md) | Root invocation, command grammar, inputs, Akuma text, and edge boundaries. |

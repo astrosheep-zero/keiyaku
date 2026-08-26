@@ -10,7 +10,7 @@ import type {
   TaskDoctorReport,
   TaskList,
   TaskMutationResult,
-  TaskNamespaceResult,
+  TaskContextResult,
   TaskPage,
   TaskQueryResult,
   TaskQueryRow,
@@ -26,9 +26,10 @@ import type { ParsedTaskCommand } from "../commands/task.js";
 import { outcomeLines, receiptPayload } from "./receipt.js";
 import { displayColumns, renderTextBlock, safeText, type TextRenderContext } from "./terminal.js";
 
-type TaskReadOutcome = TaskList | BlockedTaskList | TaskQueryResult | TaskDecompositionTree | TaskNamespaceResult;
+type TaskReadOutcome = TaskList | BlockedTaskList | TaskQueryResult | TaskDecompositionTree | TaskContextResult;
 type TaskFailure =
   | Extract<TaskMutationResult, { kind: "refused" | "retry" }>
+  | Extract<TaskContextResult, { kind: "refused" | "retry" }>
   | Extract<TaskCompositionResult, { kind: "refused" }>;
 type TaskWord = TaskRow["disposition"] | TaskView["state"] | TaskRef["state"];
 type TaskEntity = Readonly<{
@@ -381,10 +382,11 @@ function renderTaskValue(
       : renderFailure(command.action, tree, columns);
   }
   if (command.action === "doctor") return renderDoctor(result as TaskDoctorReport);
-  if (command.action === "namespace") {
-    const namespace = result as TaskNamespaceResult;
-    if (namespace.kind !== "accepted") return renderFailure(command.action, namespace, columns);
-    return `namespace ${namespace.value.length === 0 ? "root" : namespace.value.join("/")}`;
+  if (command.action === "context") {
+    const context = result as TaskContextResult;
+    if (context.kind !== "accepted") return renderFailure(command.action, context, columns);
+    const value = context.value.namespace.length === 0 ? "root" : context.value.namespace.join("/");
+    return `context ${value} · ${context.value.source}`;
   }
   if (command.action === "compose") return renderCompose(result as TaskCompositionResult, columns);
   if (command.action === "hold" || command.action === "done" || command.action === "drop") {

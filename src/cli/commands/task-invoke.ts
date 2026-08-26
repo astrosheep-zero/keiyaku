@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- Task edge keeps native reads, forwarding, and local dispatch together. */
 import {
   Tasks,
   type BlockedTaskList,
@@ -9,12 +10,13 @@ import {
   type TaskId,
   type TaskList,
   type TaskMutationResult,
-  type TaskNamespaceResult,
+  type TaskContextResult,
   type TaskPriority,
   type TaskQueryResult,
   type TaskQuerySort,
   type TaskState,
   type TaskUpdateResult,
+  taskCompositionNamespaceHeader,
 } from "../../task/index.js";
 import { observeTaskDetails } from "../../task/operations.js";
 import type { ParsedTaskCommand } from "./task.js";
@@ -36,7 +38,7 @@ export type TaskInvocationResult =
   | TaskQueryResult
   | TaskDecompositionTree
   | TaskDoctorReport
-  | TaskNamespaceResult
+  | TaskContextResult
   | TaskWorldObservation;
 
 type TaskWorldRead = TaskList | BlockedTaskList | TaskQueryResult | TaskDoctorReport;
@@ -49,7 +51,7 @@ type TaskProduct = ReturnType<typeof Tasks.of>;
 type TaskInput = Readonly<{
   world: WorldRoot | null;
   candidate: WorldRoot | null;
-  context: Readonly<{ directory: string; boundary: string }>;
+  context: Readonly<{ directory: string; boundary: string; writeRoot?: string; managed?: boolean }>;
   establish(): Promise<WorldRoot>;
   readStdin(): Promise<string>;
   actor?: string;
@@ -291,10 +293,11 @@ async function mutationRequest(
   command: ParsedTaskCommand,
   input: TaskInput,
   current: readonly string[],
+  composeMarkdown?: string,
 ): Promise<TaskMutationRequest> {
   if (command.action === "add") return await addMutationRequest(command, input, current);
   if (command.action === "compose")
-    return { action: "task.compose", markdown: await input.readStdin(), namespace: current };
+    return { action: "task.compose", markdown: composeMarkdown ?? (await input.readStdin()), namespace: current };
   if (command.action === "update") return await updateMutationRequest(command, input);
   return lifecycleMutationRequest(command);
 }
@@ -413,7 +416,7 @@ function missingWorld(command: ParsedTaskCommand): TaskInvocationResult {
   });
   if (isWorldObservation(command)) return { kind: "absent" };
   if (command.action === "compose" && command.flags.plan === true) return { kind: "absent" };
-  if (command.action === "namespace") return { kind: "accepted", value: [] };
+  if (command.action === "context") return { kind: "accepted", value: { namespace: [], source: "default-root" } };
   if (command.action === "hold" || command.action === "done" || command.action === "drop") {
     return { items: command.positionals.map((id) => ({ id: id as TaskId, outcome: missing(id) })) };
   }
@@ -421,15 +424,20 @@ function missingWorld(command: ParsedTaskCommand): TaskInvocationResult {
 }
 
 async function invokeLocalMutation(
-  tasks: TaskProduct,
-  command: ParsedTaskCommand,
-  input: TaskInput,
-  current?: readonly string[],
+  input: Readonly<{
+    tasks: TaskProduct;
+    command: ParsedTaskCommand;
+    edge: TaskInput;
+    current?: readonly string[];
+    composeMarkdown?: string;
+    composeNamespace?: readonly string[];
+  }>,
 ): Promise<TaskInvocationResult> {
+  const { tasks, command, edge, current, composeMarkdown, composeNamespace } = input;
   if (isWorldObservation(command)) return observeWorldRead(tasks, command, current);
   if (command.action === "show" || command.action === "tree") return invokeRead(tasks, command, current);
-  if (command.action === "add") return await invokeAdd(tasks, command, input, current ?? []);
-  if (command.action === "update") return await invokeUpdate(tasks, command, input.readStdin);
+  if (command.action === "add") return await invokeAdd(tasks, command, edge, current ?? []);
+  if (command.action === "update") return await invokeUpdate(tasks, command, edge.readStdin);
   const id = command.positionals[0]!;
   switch (command.action) {
     case "start":
@@ -448,16 +456,21 @@ async function invokeLocalMutation(
       const note = value(command, "note");
       return tasks.batch({ verb: "drop", ids: command.positionals, ...(note === undefined ? {} : { note }) });
     }
-    case "namespace": {
+    case "context": {
       const selected = namespace(command.positionals[0]);
-      if (selected !== undefined) await writeTaskNamespaceContext(input.context.directory, selected);
-      return { kind: "accepted", value: selected ?? current ?? [] };
+      if (selected !== undefined) {
+        await writeTaskNamespaceContext(edge.context.writeRoot ?? edge.context.directory, selected);
+        const resolved = await resolveTaskNamespaceContext(edge.context);
+        if (typeof resolved === "object" && "kind" in resolved) return { kind: "refused", refusal: resolved };
+        return { kind: "accepted", value: resolved };
+      }
+      return { kind: "accepted", value: { namespace: current ?? [], source: "default-root" } };
     }
     case "compose":
       return tasks.compose({
-        markdown: await input.readStdin(),
-        namespace: current ?? [],
-        ...(input.actor === undefined ? {} : { actor: input.actor }),
+        markdown: composeMarkdown ?? (await edge.readStdin()),
+        namespace: composeNamespace ?? current ?? [],
+        ...(edge.actor === undefined ? {} : { actor: edge.actor }),
         ...(command.flags.plan === true ? { plan: true } : {}),
       });
     default:
@@ -469,7 +482,7 @@ function establishesWorld(command: ParsedTaskCommand): boolean {
   return (
     command.action === "add" ||
     (command.action === "compose" && command.flags.plan !== true) ||
-    (command.action === "namespace" && command.positionals.length > 0)
+    (command.action === "context" && command.positionals.length > 0)
   );
 }
 
@@ -477,22 +490,31 @@ function forwardsMutation(command: ParsedTaskCommand): boolean {
   return (
     command.action !== "show" &&
     command.action !== "tree" &&
-    command.action !== "namespace" &&
+    command.action !== "context" &&
     !(command.action === "compose" && command.flags.plan === true) &&
     !isWorldObservation(command)
   );
 }
 
+// eslint-disable-next-line complexity -- this is the single CLI edge ordering world, context, forwarding, and local execution.
 export async function invokeTask(command: ParsedTaskCommand, input: TaskInput): Promise<TaskInvocationResult> {
   const planOnly = command.action === "compose" && command.flags.plan === true;
+  const composeMarkdown = command.action === "compose" ? await input.readStdin() : undefined;
+  const composition = composeMarkdown === undefined ? undefined : taskCompositionNamespaceHeader(composeMarkdown);
+  const explicitNamespace =
+    command.action === "add"
+      ? namespace(value(command, "namespace"))
+      : command.action === "compose" && composition?.specified
+        ? composition.namespace
+        : undefined;
   const world =
     input.world ?? (planOnly ? input.candidate : establishesWorld(command) ? await input.establish() : null);
   if (world === null) return missingWorld(command);
   const tasks = Tasks.of(world);
   const contextSensitive =
-    command.action === "namespace" ||
-    command.action === "add" ||
-    command.action === "compose" ||
+    command.action === "context" ||
+    (command.action === "add" && explicitNamespace === undefined) ||
+    (command.action === "compose" && composition?.specified !== true) ||
     ((command.action === "ls" ||
       command.action === "ready" ||
       command.action === "blocked" ||
@@ -502,12 +524,24 @@ export async function invokeTask(command: ParsedTaskCommand, input: TaskInput): 
   if (contextSensitive) {
     const resolved = await resolveTaskNamespaceContext(input.context);
     if (typeof resolved === "object" && "kind" in resolved) return { kind: "refused", refusal: resolved };
-    current = resolved;
+    current = resolved.namespace;
+    if (command.action === "context" && command.positionals.length === 0) {
+      return { kind: "accepted", value: resolved };
+    }
   }
   const requests = injectedBodyRequests();
   if (requests !== null && forwardsMutation(command)) {
-    const request = validatedMutationRequest(await mutationRequest(command, input, current ?? []));
+    const request = validatedMutationRequest(
+      await mutationRequest(command, input, explicitNamespace ?? current ?? [], composeMarkdown),
+    );
     return (await requestBodyTask({ directory: requests, world, request })) as TaskInvocationResult;
   }
-  return await invokeLocalMutation(tasks, command, input, current);
+  return await invokeLocalMutation({
+    tasks,
+    command,
+    edge: input,
+    ...(current === undefined ? {} : { current }),
+    ...(composeMarkdown === undefined ? {} : { composeMarkdown }),
+    ...(explicitNamespace === undefined ? {} : { composeNamespace: explicitNamespace }),
+  });
 }

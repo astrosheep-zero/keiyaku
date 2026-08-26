@@ -72,16 +72,20 @@ Settlement has exactly these rules:
 2. A terminal Contract with no current matching holder does nothing. This is
    how superseded holders remain inert under settlement replay.
 3. An active managed Contract worktree reported as present by Git has its Task
-   namespace context installed or repaired through the Task-owned primitive at
-   that worktree root. Settlement does not construct a World at that path. The default namespace is the
-   ContractId's human contract segment. A valid local override is kept.
+   context installed or repaired through the Task-owned primitive at that
+   worktree root. Settlement does not construct a World at that path. The
+   default context value is the ContractId's human contract segment as a
+   TaskId namespace. A valid local override is kept.
 
-Settlement owns the canonical Contract namespace
-`[contractSegment(contractId)]`. Worktree repair and Kanshi consume that exact
-one-segment projection. A Task matches only when its complete namespace equals
-it; root, sibling, nested, world-current, and managed override namespaces do
-not change the observation. A match creates no holder, endpoint, lifecycle
-effect, or association; TaskHolder remains their sole authority.
+Settlement owns the canonical Contract-derived TaskId namespace
+`[contractSegment(contractId)]`. That coordinate is a source/value of context
+or a TaskId namespace, never a third namespace kind. Worktree repair installs
+it as directory context; Kanshi consumes the same one-segment TaskId namespace
+for exact matching and never consults directory context. A Task matches only
+when its complete TaskId namespace equals it; root, sibling, nested,
+world-current, and managed override context values do not change the
+observation. A match creates no holder, endpoint, lifecycle effect, or
+association; TaskHolder remains their sole authority.
 
 Settlement observes TaskHolder authority only when a candidate is `claimed`,
 because only a `claimed` candidate can reach the Task rule. A call with no

@@ -13,6 +13,12 @@ export type NamespaceContextRead =
 export type NamespaceContextInput = Readonly<{
   directory: string;
   boundary: string;
+  managed?: boolean;
+}>;
+export type NamespaceContextSource = "default-root" | "contract-installed" | "local-override";
+export type ResolvedNamespaceContext = Readonly<{
+  namespace: readonly string[];
+  source: NamespaceContextSource;
 }>;
 
 function directory(root: string): string {
@@ -59,6 +65,14 @@ async function readAt(root: string): Promise<NamespaceContextRead> {
   return validNamespaceSegments(segments) ? segments : { kind: "malformed", path: currentPath(root) };
 }
 
+async function readAtWithPath(
+  root: string,
+): Promise<NamespaceContextRead | Readonly<{ value: readonly string[]; path: string }>> {
+  const selected = await readAt(root);
+  if (selected === "absent" || (typeof selected === "object" && "kind" in selected)) return selected;
+  return { value: selected, path: currentPath(root) };
+}
+
 export async function readNamespaceContext(coordinates: NamespaceContextInput): Promise<NamespaceContextRead> {
   let current = coordinates.directory;
   for (;;) {
@@ -95,13 +109,25 @@ export async function repairNamespaceContext(root: string, segments: readonly st
 
 export async function resolveTaskNamespaceContext(
   input: NamespaceContextInput,
-): Promise<readonly string[] | Readonly<{ kind: "invalid-namespace-context"; path: string }>> {
-  const selected = await readNamespaceContext(input);
-  return selected === "absent"
-    ? []
-    : typeof selected === "object" && "kind" in selected
-      ? { kind: "invalid-namespace-context", path: selected.path }
-      : selected;
+): Promise<ResolvedNamespaceContext | Readonly<{ kind: "invalid-namespace-context"; path: string }>> {
+  let current = input.directory;
+  for (;;) {
+    const selected = await readAtWithPath(current);
+    if (selected !== "absent") {
+      if (typeof selected === "object" && "kind" in selected)
+        return { kind: "invalid-namespace-context", path: selected.path };
+      return {
+        namespace: "value" in selected ? selected.value : selected,
+        source: current === input.boundary && input.managed === true ? "contract-installed" : "local-override",
+      };
+    }
+    if (current === input.boundary) return { namespace: [], source: "default-root" };
+    const resolvedParent = dirname(resolve(current));
+    if (resolvedParent === current || !resolvedParent.startsWith(`${input.boundary}/`)) {
+      return { namespace: [], source: "default-root" };
+    }
+    current = resolvedParent;
+  }
 }
 
 export async function writeTaskNamespaceContext(directory: string, value: readonly string[]): Promise<void> {

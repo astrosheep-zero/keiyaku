@@ -225,13 +225,13 @@ test("task parser owns subcommand arity, repeat flags, and selected stdin", () =
     [["task", "drop", "task/a", "--note", "\t"], /--note requires a nonblank value/],
     [["task", "show", " "], /task show requires a nonblank value/],
     [["task", "update", "task/a", "--needs", "  "], /--needs requires a nonblank value/],
-    [["task", "namespace", "   "], /task namespace requires a nonblank value/],
-    [["task", "namespace", ""], /task namespace requires a nonblank value/],
+    [["task", "context", "   "], /task context requires a nonblank value/],
+    [["task", "context", ""], /task context requires a nonblank value/],
     [["task", "add", "Title", "--namespace", "   "], /--namespace requires a nonblank value/],
     [["task", "add", "Title", "--namespace", ""], /--namespace requires a nonblank value/],
   ];
-  assert.deepEqual(parseArgv(["task", "namespace", "/"]), {
-    command: { command: "task", action: "namespace", output: "text", positionals: ["/"], flags: {} },
+  assert.deepEqual(parseArgv(["task", "context", "/"]), {
+    command: { command: "task", action: "context", output: "text", positionals: ["/"], flags: {} },
   });
   assert.deepEqual(parseArgv(["task", "add", "Title", "--namespace", "/"]), {
     command: { command: "task", action: "add", output: "text", positionals: ["Title"], flags: { namespace: "/" } },
@@ -368,9 +368,9 @@ test("task invocation works outside Git and consumes stdin only when selected", 
   assert.equal((paddedShown as { task: { body: string } }).task.body, padded);
 });
 
-test("literal slash namespace selects root; empty and whitespace-only namespace are usage", async () => {
+test("literal slash context selects root; empty and whitespace-only context are usage", async () => {
   const root = world();
-  await invoke(parseArgv(["-C", root, "task", "namespace", "contract/inside"]));
+  await invoke(parseArgv(["-C", root, "task", "context", "contract/inside"]));
   const added = (await invoke(
     parseArgv(["-C", root, "task", "add", "Rooted", "--namespace", "/"]),
   )) as TaskInvocationResult;
@@ -378,23 +378,24 @@ test("literal slash namespace selects root; empty and whitespace-only namespace 
   const shown = (await invoke(parseArgv(["-C", root, "task", "show", "task/rooted"]))) as TaskInvocationResult;
   assert.equal((shown as { task: { title: string; id: string } }).task.title, "Rooted");
   assert.equal((shown as { task: { title: string; id: string } }).task.id, "task/rooted");
-  const current = await invoke(parseArgv(["-C", root, "task", "namespace"]));
-  assert.deepEqual(current, { kind: "accepted", value: ["contract", "inside"] });
-  const reset = await invoke(parseArgv(["-C", root, "task", "namespace", "/"]));
-  assert.deepEqual(reset, { kind: "accepted", value: [] });
-  const namespaceCommand = parseArgv(["task", "namespace"]).command;
-  if (namespaceCommand.command !== "task") throw new Error("not a task command");
-  assert.equal(renderTaskText(namespaceCommand, current), "namespace contract/inside");
-  assert.equal(renderTaskText(namespaceCommand, reset), "namespace root");
+  const current = await invoke(parseArgv(["-C", root, "task", "context"]));
+  assert.deepEqual(current, {
+    kind: "accepted",
+    value: { namespace: ["contract", "inside"], source: "local-override" },
+  });
+  const reset = await invoke(parseArgv(["-C", root, "task", "context", "/"]));
+  assert.deepEqual(reset, { kind: "accepted", value: { namespace: [], source: "local-override" } });
+  const contextCommand = parseArgv(["task", "context"]).command;
+  if (contextCommand.command !== "task") throw new Error("not a task command");
+  assert.equal(renderTaskText(contextCommand, current), "context contract/inside · local-override");
+  assert.equal(renderTaskText(contextCommand, reset), "context root · local-override");
   await assert.rejects(
-    async () => invoke(parseArgv(["-C", root, "task", "namespace", ""])),
-    (error: unknown) =>
-      error instanceof CliUsageError && /task namespace requires a nonblank value/.test(error.message),
+    async () => invoke(parseArgv(["-C", root, "task", "context", ""])),
+    (error: unknown) => error instanceof CliUsageError && /task context requires a nonblank value/.test(error.message),
   );
   await assert.rejects(
-    async () => invoke(parseArgv(["-C", root, "task", "namespace", "   "])),
-    (error: unknown) =>
-      error instanceof CliUsageError && /task namespace requires a nonblank value/.test(error.message),
+    async () => invoke(parseArgv(["-C", root, "task", "context", "   "])),
+    (error: unknown) => error instanceof CliUsageError && /task context requires a nonblank value/.test(error.message),
   );
   await assert.rejects(
     async () => invoke(parseArgv(["-C", root, "task", "add", "Nope", "--namespace", ""])),
@@ -423,9 +424,9 @@ test("Task, Settings, and Kanshi share the primary WorldRoot across Git worktree
   )) as TaskInvocationResult;
   assert.equal((shown as { task: { title: string } }).task.title, "Shared worktree task");
   assert.equal(existsSync(join(linked, ".keiyaku", "tasks")), false);
-  await invoke(parseArgv(["-C", linked, "task", "namespace", "contract/shared"]));
-  const namespace = await invoke(parseArgv(["-C", repository.path, "task", "namespace"]));
-  assert.deepEqual(namespace, { kind: "accepted", value: [] });
+  await invoke(parseArgv(["-C", linked, "task", "context", "contract/shared"]));
+  const namespace = await invoke(parseArgv(["-C", repository.path, "task", "context"]));
+  assert.deepEqual(namespace, { kind: "accepted", value: { namespace: [], source: "default-root" } });
 
   const settings = await invoke(parseArgv(["-C", linked, "settings"]));
   if (settings.kind !== "settings") throw new Error("expected settings result");
@@ -799,7 +800,7 @@ test("incomplete compose rendering keeps draft on stdout and diagnostics separat
     kind: "incomplete" as const,
     documentChanges: [{ taskId: "task/a" as const, kind: "created" as const, documentDiff: "diff bytes" }],
     stopped: { kind: "retry" as const, reason: "busy" as const },
-    draft: "ns=\n+ Remaining body=\n",
+    draft: "ns=/\n+ Remaining body=\n",
   };
   assert.equal(renderTaskText(command, result), "");
   assert.equal(
@@ -816,7 +817,7 @@ test("incomplete compose keeps an unterminated draft byte-exact at the CLI bound
     kind: "incomplete" as const,
     documentChanges: [],
     stopped: { kind: "retry" as const, reason: "busy" as const },
-    draft: "ns=\n+ Remaining",
+    draft: "ns=/\n+ Remaining",
   };
   let stdout = "";
   let stderr = "";
@@ -1057,7 +1058,7 @@ test("built CLI Task text stays one scan grammar at 80 and 36 columns", async ()
   const composeCommand = parseArgv(["task", "compose", "-"]).command;
   if (composeCommand.command !== "task") throw new Error("not a task command");
   assert.equal((incomplete as { kind: string }).kind, "incomplete");
-  assert.match((incomplete as { draft: string }).draft, /^ns=\n\n\+ Remaining\n/u);
+  assert.match((incomplete as { draft: string }).draft, /^ns=\/\n\n\+ Remaining\n/u);
   assert.equal(renderTaskText(composeCommand, incomplete), "");
   assert.match(
     renderTaskIncompleteDiagnostic(incomplete as never),

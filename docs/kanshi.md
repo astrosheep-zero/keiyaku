@@ -118,9 +118,9 @@ type ContractHolderObservation =
 is not absence. This decoration does not add Task knowledge to `ContractRow`
 or change `ContractBoard`. Each public `ContractKanshiRow` also carries
 `namespaceTasks: Section<readonly TaskRow[]>`. Settlement owns the canonical
-one-segment namespace; Kanshi consumes that projection and does not re-encode
-it. A Task matches only when its complete TaskId namespace equals that
-namespace. When a World is present, one Task board read supplies both the
+one-segment TaskId namespace; Kanshi consumes that projection and does not
+re-encode it. A Task matches only when its complete TaskId namespace equals
+that coordinate. Contract matching never consults directory context. When a World is present, one Task board read supplies both the
 top-level Task section and every Contract row's namespace selection. A
 successful read with no matches is `present` with an empty array. Without a
 World it is `absent`. Task authority corruption or infrastructure failure is

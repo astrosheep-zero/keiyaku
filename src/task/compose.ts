@@ -13,6 +13,7 @@ import type { TaskCompositionDiagnostic, TaskRefusal, TaskRetry } from "./operat
 import { authorityPath, readBoard, replaceAuthority, withTaskLocks } from "./store.js";
 
 export type { TaskCompositionAlias, TaskCompositionBodyPreview } from "./compose-language.js";
+export { taskCompositionNamespaceHeader } from "./compose-language.js";
 
 export type TaskDocumentChange = Readonly<{
   taskId: TaskId;
@@ -93,7 +94,7 @@ function recoveryDraft(namespace: readonly string[], remaining: readonly Planned
   for (const task of remaining) {
     if (task.kind === "new" && task.alias !== undefined) aliases.set(task.after.id, task.alias);
   }
-  const lines = [`ns=${namespace.join("/")}`];
+  const lines = [`ns=${namespace.length === 0 ? "/" : namespace.join("/")}`];
   for (const task of remaining) lines.push("", ...taskDraft(task, aliases));
   return `${lines.join("\n")}\n`;
 }

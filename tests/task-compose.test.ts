@@ -143,7 +143,7 @@ test("busy compose returns a reusable fenced recovery document", async () => {
   assert.equal(result.kind, "incomplete");
   if (result.kind !== "incomplete") return;
   assert.deepEqual(result.stopped, { kind: "retry", reason: "busy" });
-  assert.match(result.draft, /^ns=\n\n\+ Remaining\nas = remaining\n/u);
+  assert.match(result.draft, /^ns=\/\n\n\+ Remaining\nas = remaining\n/u);
   const replayed = await product.compose({ markdown: result.draft });
   assert.equal(replayed.kind, "accepted");
   const detail = await product.task({ id: "task/remaining" }).read();

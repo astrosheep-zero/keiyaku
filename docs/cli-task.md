@@ -62,7 +62,7 @@ task hold <TaskId>... [--json]
 task resume <TaskId> [--json]
 task done <TaskId>... [--note <text>] [--json]
 task drop <TaskId>... [--note <text>] [--json]
-task namespace [<namespace>] [--json]
+task context [<namespace>] [--json]
 task compose [--actor <actor>] [--plan] [--json] -
 ```
 
@@ -97,17 +97,43 @@ nonblank `KEIYAKU_ACTOR_ID`, then unsigned. A blank explicit value is usage; a
 blank environment value is absent. Update, lifecycle, and settlement commands
 do not accept `--actor`. Task code never reads `process.env`.
 
-Omitted namespace keeps the current or default namespace. A nonblank
-namespace path selects that namespace. Literal `/` as `task namespace` or add
-`--namespace` selects the root namespace. Empty and Unicode-whitespace-only
-namespace values are usage.
+Namespace selectors share one grammar. Omitted selector means effective
+context, and root only when context is absent. Literal `/` means explicit
+root. A nonblank slash-separated value selects that namespace. `task add
+--namespace`, compose `ns=`, and `task context` use these same meanings.
+Empty and Unicode-whitespace-only command values are usage. Empty compose
+`ns=` is invalid input and names `ns=/` in its diagnostic; recovery drafts
+always emit `ns=/` for root. Compose keeps `ns=` as its document-level
+selector and does not gain a `--namespace` flag.
 
-`ls`, `ready`, `blocked`, and `query` use current namespace unless `--world` is present.
+`task context [<namespace>] [--json]` replaced `task namespace`. With no
+argument it observes the effective context. With an argument it writes the
+marker at the invocation directory in Git or at WorldRoot outside Git, then
+observes the resulting effective context. Text identifies the value and
+source. JSON returns an accepted value with `namespace` and `source`, where
+source is `default-root` when no marker is found, `contract-installed` when
+the selected worktree-root marker is the active managed Contract default, and
+`local-override` for a selected local marker that is not that Contract
+default. Source is a read-time classification; it is not persisted
+provenance.
+
+Explicit namespace selection is authoritative over context observation.
+`task add` with `--namespace` must not read or reject on a malformed current
+marker. Compose acquires and parses its complete stdin document first; an
+explicit `ns=` header uses that parsed namespace without reading current
+context. Without an `ns=` header, compose resolves current context and
+reports `invalid-namespace-context` on a malformed marker. The Task-owned
+composition header parser owns recognition and validation. Ordinary
+omitted-selector operations retain the malformed-marker refusal.
+
+`ls`, `ready`, `blocked`, and `query` use current context unless `--world` is
+present. `--world` means every namespace in the current Task world anchored
+at WorldRoot.
 Their observations are bounded and carry the complete matching `total`; ready
 and blocked may additionally select recursive descendants of a complete parent
 TaskId. `ready` selects only open Tasks whose every `needs` target is terminal.
 `show`, `tree`, update, and lifecycle use complete IDs and never infer
-from namespace. `tree` is parent decomposition traversal.
+from context. `tree` is parent decomposition traversal.
 
 ```text
 task query [--where <expression>] [--world]
@@ -281,8 +307,9 @@ exact reusable draft bytes. Stderr begins
 `! stopped <typed refusal kind ...>` or `? stopped <typed retry reason ...>`,
 then each admitted `diff <TaskId>` exact payload in order. Exit remains `1`.
 
-Namespace text renders `namespace root` for `[]` and
-`namespace <segments joined by />` otherwise. Project every current
+Context text renders `context root` for `[]` and
+`context <segments joined by />` otherwise, then ` · ` and the source
+classification. JSON retains `{ namespace, source }`. Project every current
 `TaskRefusal` and `TaskRetry` member to its lowercase kind and exact public
 scalar coordinates. Renderer output contains no braces, JSON quotes, or
 implementation-arm prefixes. Do not change public values, JSON, or exit

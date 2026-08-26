@@ -22,7 +22,7 @@ export type TaskAction =
   | "resume"
   | "done"
   | "drop"
-  | "namespace"
+  | "context"
   | "compose";
 type TaskFlagValue = string | true | readonly string[];
 type TaskStdin = "document" | "body" | "append" | "note" | "compose";
@@ -84,18 +84,21 @@ task add [--namespace <ns>] [--actor <actor>] -`,
     flags: { ...COMMON, closed: "boolean", all: "boolean", world: "boolean", limit: "value" },
     usage: "task ls [--closed | --all] [--world] [--limit <n>]",
     purpose: "List Tasks in the selected scope.",
+    details: "--world lists every namespace in the current Task world.",
   },
   ready: {
     arity: [0, 0],
     flags: { ...COMMON, world: "boolean", parent: "value", limit: "value" },
     usage: "task ready [--world] [--parent <TaskId>] [--limit <n>]",
     purpose: "List open Tasks whose every need is terminal.",
+    details: "--world lists every namespace in the current Task world.",
   },
   blocked: {
     arity: [0, 0],
     flags: { ...COMMON, world: "boolean", parent: "value", limit: "value" },
     usage: "task blocked [--world] [--parent <TaskId>] [--limit <n>]",
     purpose: "List Tasks blocked by dependencies.",
+    details: "--world lists every namespace in the current Task world.",
   },
   query: {
     arity: [0, 0],
@@ -106,6 +109,7 @@ task add [--namespace <ns>] [--actor <actor>] -`,
     details: [
       "fields: state priority title id parent under needs blocks ready blocked created updated",
       "operators: = != < > <= >= ~ and or not ( )",
+      "--world lists every namespace in the current Task world.",
       "examples:",
       "  keiyaku task query --where 'priority <= 1 and ready' --world",
       "  keiyaku task query --where 'updated < 2026-08-06T00:00:00.000Z' --world",
@@ -170,11 +174,11 @@ task add [--namespace <ns>] [--actor <actor>] -`,
     usage: "task drop <TaskId>... [--note <text>]",
     purpose: "Drop one or more Tasks.",
   },
-  namespace: {
+  context: {
     arity: [0, 1],
     flags: COMMON,
-    usage: "task namespace [<namespace>]",
-    purpose: "Read or replace the current Task namespace.",
+    usage: "task context [<namespace>]",
+    purpose: "Read or replace the directory Task context.",
   },
   compose: {
     arity: [0, 0],

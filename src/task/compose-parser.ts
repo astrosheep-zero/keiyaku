@@ -26,6 +26,7 @@ export type ParsedNode = Readonly<{
 }>;
 export type ParsedComposition = Readonly<{
   namespace?: readonly string[];
+  namespaceSpecified: boolean;
   nodes: readonly ParsedNode[];
   diagnostics: readonly TaskCompositionDiagnostic[];
 }>;
@@ -62,7 +63,8 @@ function withoutFenceSeparator(value: string): string {
 }
 
 function parseNamespace(value: string): readonly string[] {
-  if (value === "") return [];
+  if (value === "/") return [];
+  if (value === "") throw new Error("empty compose namespace; use ns=/ for root");
   return parseTaskId(`task/${value}/placeholder`).namespace;
 }
 
@@ -214,5 +216,5 @@ export function parseTaskComposition(source: string): ParsedComposition {
       replaceNode(nodes, current);
     }
   }
-  return { ...(namespace === undefined ? {} : { namespace }), nodes, diagnostics };
+  return { ...(namespace === undefined ? {} : { namespace }), namespaceSpecified: sawNamespace, nodes, diagnostics };
 }

@@ -14,6 +14,7 @@ import {
 } from "./board.js";
 import {
   composeTasks,
+  taskCompositionNamespaceHeader,
   type TaskCompositionAlias,
   type TaskCompositionBodyPreview,
   type TaskCompositionResult,
@@ -74,7 +75,12 @@ export type TaskDetail = Omit<TaskDetailFacts, "task"> & Readonly<{ task: TaskVi
 export type TaskList = TaskOutcome<TaskPage<TaskRow>>;
 export type BlockedTaskList = TaskOutcome<TaskPage<BlockedTaskRow>>;
 export type TaskQueryResult = TaskOutcome<TaskPage<TaskQueryRow>>;
-export type TaskNamespaceResult = TaskOutcome<readonly string[]>;
+export type TaskContextSource = "default-root" | "contract-installed" | "local-override";
+export type ResolvedNamespaceContext = Readonly<{
+  namespace: readonly string[];
+  source: TaskContextSource;
+}>;
+export type TaskContextResult = TaskOutcome<ResolvedNamespaceContext>;
 export type TaskDoctorReport = Readonly<{ issues: readonly TaskDoctorIssue[] }>;
 export type TaskDecompositionTree = TaskOutcome<TaskTreeNode>;
 export type {
@@ -108,6 +114,7 @@ export type {
   TaskRelationPredicateField,
 };
 export { TaskAuthorityCorruptionError, TASK_RELATION_PREDICATE_FIELDS };
+export { taskCompositionNamespaceHeader };
 
 class TaskHandle {
   constructor(

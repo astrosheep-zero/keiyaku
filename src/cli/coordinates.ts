@@ -1,4 +1,4 @@
-import { realpath } from "node:fs/promises";
+import { lstat, realpath } from "node:fs/promises";
 import { resolve } from "node:path";
 import { NoGitWorldError, Repo } from "../library/repo.js";
 import { World, WorldError, type WorldRoot } from "../world.js";
@@ -14,7 +14,7 @@ export type CliCoordinates = Readonly<{
   repo?: Repo;
   world: WorldRoot | null;
   candidateWorld: WorldRoot | null;
-  taskContext: Readonly<{ directory: string; boundary: string }>;
+  taskContext: Readonly<{ directory: string; boundary: string; writeRoot: string; managed: boolean }>;
   establishWorld: () => Promise<WorldRoot>;
 }>;
 
@@ -42,6 +42,16 @@ async function discoverRepoAt(coordinate: string, gitPath?: string): Promise<Rep
     };
   } catch (error) {
     if (error instanceof NoGitWorldError) return { kind: "absent", error };
+    throw error;
+  }
+}
+
+async function managedContractWorktree(root: string): Promise<boolean> {
+  try {
+    const stat = await lstat(resolve(root, ".keiyaku", "KEIYAKU.md"));
+    return stat.isFile() && !stat.isSymbolicLink();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
     throw error;
   }
 }
@@ -90,7 +100,12 @@ export async function resolveCliCoordinates(input: CliCoordinateInput): Promise<
     ...(repo === undefined ? {} : { repo }),
     world: world.root,
     candidateWorld: world.candidate,
-    taskContext: { directory: cwd, boundary },
+    taskContext: {
+      directory: cwd,
+      boundary,
+      writeRoot: worldRepo === undefined ? boundary : cwd,
+      managed: await managedContractWorktree(boundary),
+    },
     establishWorld: world.establish,
   };
 }

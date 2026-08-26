@@ -29,7 +29,13 @@ suffix beginning at `-2` after the fitted base stem. Existing TaskIds and
 references are never rewritten.
 Callers never provide an arbitrary ID, and title updates never move authority.
 
-The world-local current namespace is context, not Task or contract
+Namespace is the immutable identity coordinate carried by a TaskId and
+encoded by its authority path. Context is the directory-local default
+pointer to a namespace. There is no third Contract namespace concept;
+Settlement may install a ContractId-derived context value, and Kanshi
+matches Tasks by TaskId namespace, never by directory context.
+
+The world-local current namespace is context, not Task or Contract
 authority. Its sole byte representation is:
 
 ```text
@@ -43,10 +49,15 @@ a nearest malformed marker refuses context-consuming CLI/composition operations
 as `invalid-namespace-context` at that marker path and never falls through.
 `add`, `addDocument`, and `compose` receive their already-resolved namespace as
 an explicit input; `list`, `ready`, and `blocked` receive it when selecting a
-namespace scope. Explicit full-TaskId operations (`show`, `tree`, `update`,
-and lifecycle) carry no context. `doctor` is always world-scoped. The caller
-edge writes `task namespace X` at the invocation directory for Git and at
-WorldRoot for non-Git.
+namespace scope. An explicit add `--namespace` or compose `ns=` header is
+authoritative and does not read or refuse on a malformed current marker.
+Omitted selectors resolve current context. Explicit full-TaskId operations
+(`show`, `tree`, `update`, and lifecycle) carry no context. `doctor` is always
+world-scoped. `--world` on `list`, `ready`, `blocked`, and `query` selects
+every namespace in the current Task world. The caller edge writes
+`task context X` at the invocation directory for Git and at WorldRoot for
+non-Git. Context source is a read-time classification from existing
+workspace and Contract facts; it is not persisted provenance.
 
 The byte law and read/write primitive belong to Task. Installation in a
 managed Contract worktree is driven only by [settlement](settlement.md), which
@@ -265,7 +276,8 @@ type TaskOutcome<A> =
   | { kind: "retry"; reason: "busy" | "concurrent-modification" }
 ```
 
-`TaskNamespaceResult` is `TaskOutcome<readonly string[]>` and preserves a
+`TaskContextResult` is `TaskOutcome<{ namespace: readonly string[]; source:
+"default-root" | "contract-installed" | "local-override" }>` and preserves a
 malformed marker as `invalid-namespace-context`, not a programmer `TypeError`.
 `TaskDoctorReport` contains ordered `issues`; each issue is a missing target,
 self relation, or strongly connected cycle component. An empty issue array is
@@ -325,7 +337,12 @@ authority.
 
 Compose is the Task product's batch planning and admission operation. It accepts
 one caller-supplied composition document and captures its effective namespace
-once. Planning allocates every new Task identity before admission, resolves
+once. The optional first-line `ns=` header is the document-level selector:
+omission uses the already-resolved current context, `ns=/` selects root, and a
+nonblank slash-separated value selects that namespace. Empty `ns=` is invalid
+and the diagnostic names `ns=/`. Recovery drafts always emit `ns=/` for root.
+Compose has no `--namespace` flag. Planning allocates every new Task identity
+before admission, resolves
 references against the pre-existing board plus document-local new-node
 identities, and validates the complete post-image before any authority file is
 replaced. A document may address one Task at most once.
