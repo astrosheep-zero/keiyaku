@@ -57,43 +57,38 @@ Kill recovery uses the same detached handoff after its leash evidence is
 settled; kill returns its lifecycle evidence without waiting for successor
 admission, Heart delivery, or child exit.
 
-A waker establishes its cancellable Heart observer before unconditionally
-spawning one child. It never probes the leash or joins a leash observation to a
-Body row. Fresh Heart delivery evidence returns `told`; a later Body fact
-returns `pursuing` with that fact's sequence; only the child's atomic leash
+A waker first reads Heart; a generic handoff with no pending Tell returns without
+spawning. Otherwise it freezes the latest Body sequence, unconditionally spawns
+one refuse-if-held child, and races that child's exit against a finite-rate
+schedule of Heart re-reads. It never probes the leash or joins a leash
+observation to a Body row.
+The schedule is replaceable implementation detail: it carries no fact, cannot
+be triggered or reset by Heart read side effects, and keeps child exit able to
+settle every race. Fresh Heart delivery evidence returns `told`; a later Body
+fact returns `pursuing` with that fact's sequence; only the child's atomic leash
 refusal returns `held`; and any other child exit before either Heart witness
 returns `failed`. A held result names no holder, promises no delivery, and
 writes no losing Body fact. Concurrent callers can therefore receive different
 honest receipts while their children converge through the one leash.
 
-Observer establishment failure returns `failed` before spawn and leaves the
-Tell pending. Aborting an established observer wakes a pending generator read,
-closes its underlying observer, and lets cleanup finish; there is no polling
-fallback. The observer is a replaceable cross-process prompt over Heart's
-durable storage: it carries no fact, may merge or repeat prompts, and must
-deliver at least one prompt after an external Heart settlement. Subscription
-precedes the initial Heart read, so a write between those steps cannot be
-missed. When a current observer prompt and the child exit are both already
-ready at a wake race, the child exit is selected first. A prompt remains only
-a hint for one fresh Heart adjudication; it never decides wake itself. A
-pre-admission child failure records its actual waitpid code or signal plus a
-bounded `{ path, from, to }` reference into the shared run log.
-The interval may contain interleaved output, includes the child's exit marker,
-and is not captured stderr or a child-attributed file tail.
+When a timer tick wins, the waker performs one Heart read and continues. When
+the child exits, the waker performs one final Heart adjudication; a concurrent
+durable witness therefore outranks the exit classification. A pre-admission
+child failure records its actual waitpid code or signal plus a bounded
+`{ path, from, to }` reference into the shared run log. The interval may
+contain interleaved output, includes the child's exit marker, and is not
+captured stderr or a child-attributed file tail.
 
 The pursuit is only as alive as its pursuers: a reboot or pre-admission child
 exit leaves the recorded Tell honestly pending. The next ordinary Heart
 interaction re-evaluates and pursues that debt. No daemon wakes anyone
 spontaneously, and no bootstrap-failure fact is recorded.
 
-Heart change observation belongs to the direct caller that executes wake under
-its host permission. A forwarded provider Tell writes only its granted Body
-Request transport; its direct parent executes the Tell and observes Heart. The
-observer is established before spawn. An observation failure retains the Tell,
-spawns no child, and returns failed; a prompt only prompts a fresh Heart read,
-whose successor Body fact is the sole custody evidence. Observation must not
-disturb the Heart files it observes: Heart reads use read-only SQLite custody,
-and write-only WAL setup remains on Heart creation and write paths.
+A forwarded provider Tell writes only its granted Body Request transport; its
+direct parent executes the Tell and reads Heart. A Heart read failure retains
+the Tell, spawns no child, and returns `failed`; the successor Body fact is the
+sole custody evidence. Heart reads use read-only SQLite custody, and write-only
+WAL setup remains on Heart creation and write paths.
 
 **Succession.** A new Body never reconstructs custody of its predecessor. A
 held leash means wait. A free leash with an explicitly ended predecessor is
@@ -109,7 +104,7 @@ ended; the body follows.
 
 The Body has one lifetime control observer, one Body-owned `AbortSignal`, and
 one obedience decision. Setup, request recovery, and the active drive do not
-create their own watchers or register duties. Each phase uses lexical cleanup
+create their own observation duties or register extra loops. Each phase uses lexical cleanup
 with the shared signal. One observation round reads one Heart snapshot and
 publishes that same snapshot to stop, pause, and pending-Tell consumers.
 

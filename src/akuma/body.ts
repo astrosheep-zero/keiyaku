@@ -12,7 +12,6 @@ import {
   isHeartAbsent,
   readHeart,
   readNonterminalRequests,
-  watchHeart,
   type SessionFact,
   type Soul,
 } from "./heart/index.js";
@@ -34,6 +33,7 @@ import {
 } from "../runtime/proc/run.js";
 
 const LEASH_RETRY_MS = 100;
+const WAKE_REREAD_MS = 100;
 export const LEASH_HELD_EXIT = 75;
 export { CONTROL_RESPONSE_MS } from "./body-supervisor.js";
 
@@ -66,8 +66,8 @@ export type TellResult = Readonly<{
 }>;
 
 export type TellWakeRuntime = Readonly<{
-  observeHeart(paths: AkumaPaths, signal: AbortSignal): Promise<AsyncGenerator<void>>;
   spawn(paths: AkumaPaths): Promise<OwnedProcess>;
+  schedule?(milliseconds: number, signal: AbortSignal): Promise<void>;
 }>;
 
 type BodyRuntime = Readonly<{
@@ -371,8 +371,8 @@ export async function runAkumaBody(launch: BodyLaunch, upstream: UpstreamExecuti
 }
 
 const DIRECT_TELL_WAKE: TellWakeRuntime = {
-  observeHeart: watchHeart,
   spawn: async (paths) => await spawnAkumaBody({ paths, refuseIfHeld: true }),
+  schedule: abortableDelay,
 };
 
 function diagnostic(error: unknown): string {
@@ -409,44 +409,36 @@ async function awaitWake(
   tellId: string | undefined,
   after: number,
   child: OwnedProcess,
-  changed: AsyncGenerator<void>,
+  schedule: (milliseconds: number, signal: AbortSignal) => Promise<void>,
 ): Promise<TellWake> {
-  let nextChange = changed.next();
   for (;;) {
     const settled = await settledWake(paths, tellId, after);
     if (settled !== null) {
       child.release();
       return settled;
     }
-    const winner = await Promise.race([
-      child.exited.then((exit) => ({ kind: "exited" as const, exit })),
-      nextChange.then(
-        ({ done }) => ({ kind: done ? ("closed" as const) : ("changed" as const) }),
-        (error) => ({ kind: "observer-failed" as const, error }),
-      ),
-    ]);
-    if (winner.kind === "changed") {
-      nextChange = changed.next();
-      continue;
+    const timerController = new AbortController();
+    const timer = schedule(WAKE_REREAD_MS, timerController.signal).then(() => ({ kind: "timer" as const }));
+    let winner: Awaited<typeof timer> | { kind: "exited"; exit: DetachedProcessExit };
+    try {
+      winner = await Promise.race([
+        child.exited.then((exit) => ({ kind: "exited" as const, exit })),
+        timer,
+      ]);
+    } catch (error) {
+      timerController.abort();
+      await timer.catch(() => undefined);
+      throw error;
     }
+    if (winner.kind === "timer") continue;
+    timerController.abort();
+    await timer.catch(() => undefined);
     const final = await settledWake(paths, tellId, after);
     if (final !== null) {
       child.release();
       return final;
     }
-    if (winner.kind === "exited") {
-      return winner.exit.code === LEASH_HELD_EXIT ? { kind: "held" } : failedChild(winner.exit);
-    }
-    try {
-      await child.terminate();
-    } catch (error) {
-      /* Termination rejection leaves physical custody unresolved; release it deliberately. */
-      child.release();
-      return { kind: "failed", diagnostic: diagnostic(error) };
-    }
-    return winner.kind === "observer-failed"
-      ? { kind: "failed", diagnostic: diagnostic(winner.error) }
-      : { kind: "failed", diagnostic: "Heart observer closed" };
+    return winner.exit.code === LEASH_HELD_EXIT ? { kind: "held" } : failedChild(winner.exit);
   }
 }
 
@@ -455,19 +447,19 @@ async function wakePendingTells(
   tellId: string | undefined,
   runtime: TellWakeRuntime,
 ): Promise<TellWake | null> {
-  const watching = new AbortController();
-  let changed: AsyncGenerator<void> | undefined;
   try {
-    changed = await runtime.observeHeart(paths, watching.signal);
     const beforeHeart = await readHeart(paths);
     if (tellId === undefined && beforeHeart.pending.length === 0) return null;
     const before = beforeHeart.latestBody?.sequence ?? 0;
-    return await awaitWake(paths, tellId, before, await runtime.spawn(paths), changed);
+    return await awaitWake(
+      paths,
+      tellId,
+      before,
+      await runtime.spawn(paths),
+      runtime.schedule ?? abortableDelay,
+    );
   } catch (error) {
     return { kind: "failed", diagnostic: diagnostic(error) };
-  } finally {
-    watching.abort();
-    await changed?.return(undefined);
   }
 }
 

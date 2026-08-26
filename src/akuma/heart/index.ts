@@ -68,7 +68,6 @@ export {
   initializeHeart,
   isHeartAbsent,
   probeLeash,
-  watchHeart,
 } from "./storage.js";
 export {
   admitRequest,

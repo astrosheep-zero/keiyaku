@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import { CONTROL_RESPONSE_MS, LEASH_HELD_EXIT, wakeRecordedTell } from "../src/akuma/body.js";
+import { CONTROL_RESPONSE_MS, LEASH_HELD_EXIT, handoffPendingTells, wakeRecordedTell } from "../src/akuma/body.js";
 import { bodyProcessInput, driveAkumaBody, type BodyLaunch, type TellWakeRuntime } from "../src/akuma/body.js";
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import {
@@ -32,6 +32,22 @@ import { createClaudeProvider } from "../src/akuma/providers/claude/index.js";
 import { requestBodyCall } from "../src/akuma/requests.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { keiyakuSquarePath } from "../src/world.js";
+
+test("generic handoff with no pending Tell does not spawn", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-empty-handoff-"));
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "acp", draw: () => "1a2b3c48" });
+    await initializeHeart(allocated.paths);
+    let spawned = 0;
+    await handoffPendingTells(allocated.paths, async () => {
+      spawned += 1;
+      throw new Error("must not spawn");
+    });
+    assert.equal(spawned, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 async function outcomes(paths: Parameters<typeof activitySlice>[0]) {
   return (await activitySlice(paths)).rows.filter((fact) => fact.kind === "turn-end").map((fact) => fact.outcome);
@@ -602,89 +618,7 @@ test("a failed release recovery spawn leaves its Tell pending", async () => {
   }
 });
 
-test("a rejected wake termination releases custody without claiming the child exited", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-wake-terminate-reject-"));
-  try {
-    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "acp", draw: () => "1a2b3c46" });
-    await initializeHeart(allocated.paths);
-    const leash = (await HeldAkumaLeash.try(allocated.paths))!;
-    await leash.birth(allocated.paths, {
-      id: allocated.id,
-      archetype: "acp",
-      provider: { name: "acp", kind: "acp" },
-      options: {},
-      origin: { kind: "direct" },
-      cwd: root,
-      createdAt: "2026-08-08T00:00:00.000Z",
-    });
-    leash.release();
-    await recordTell(allocated.paths, {
-      id: "wake-terminate-reject",
-      body: "continue",
-      recordedAt: "2026-08-08T00:00:00.000Z",
-    });
-
-    async function* closedObserver(): AsyncGenerator<void> {}
-    let released = false;
-    let spawns = 0;
-    const firstChild: OwnedProcess = {
-      pid: 1,
-      exited: new Promise(() => undefined),
-      async terminate() {
-        throw new Error("termination settlement unavailable");
-      },
-      release() {
-        released = true;
-      },
-    };
-    const secondObserver = async function* (signal: AbortSignal) {
-      yield;
-      await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
-    };
-    const runtime: TellWakeRuntime = {
-      observeHeart: async (_paths, signal) => {
-        if (spawns === 0) return closedObserver();
-        return secondObserver(signal);
-      },
-      async spawn() {
-        spawns += 1;
-        if (spawns === 1) return firstChild;
-        assert.equal(released, true);
-        return {
-          pid: 2,
-          exited: Promise.resolve({
-            code: LEASH_HELD_EXIT,
-            signal: null,
-            log: { path: join(root, "run.log"), from: 0, to: 0 },
-          }),
-          async terminate() {
-            throw new Error("held child must not terminate");
-          },
-          release() {},
-        } satisfies OwnedProcess;
-      },
-    };
-
-    const first = await wakeRecordedTell(allocated.paths, "wake-terminate-reject", runtime);
-    assert.deepEqual(first.wake, { kind: "failed", diagnostic: "termination settlement unavailable" });
-    assert.equal(released, true);
-    assert.deepEqual(
-      (await readHeart(allocated.paths)).pending.map((tell) => tell.id),
-      ["wake-terminate-reject"],
-    );
-
-    const second = await wakeRecordedTell(allocated.paths, "wake-terminate-reject", runtime);
-    assert.deepEqual(second.wake, { kind: "held" });
-    assert.deepEqual(
-      (await readHeart(allocated.paths)).pending.map((tell) => tell.id),
-      ["wake-terminate-reject"],
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("Tell wake prioritizes a settled child exit over immediately-ready observer prompts", async () => {
+test("Tell wake Heart reads do not create scheduler waits and child exit cancels one", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-wake-settled-exit-"));
   try {
     const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "acp", draw: () => "1a2b3c47" });
@@ -706,37 +640,46 @@ test("Tell wake prioritizes a settled child exit over immediately-ready observer
       recordedAt: "2026-08-08T00:00:00.000Z",
     });
 
-    let prompts = 0;
-    const result = await wakeRecordedTell(allocated.paths, "wake-settled-exit", {
-      async observeHeart(_paths, signal) {
-        return (async function* () {
-          for (let index = 0; index < 500; index += 1) {
-            prompts += 1;
-            yield;
-          }
-          await new Promise<void>((resolve) => signal.addEventListener("abort", resolve, { once: true }));
-        })();
+    let scheduleCalls = 0;
+    let schedulerAborted = false;
+    let scheduled!: () => void;
+    const scheduleStarted = new Promise<void>((resolve) => {
+      scheduled = resolve;
+    });
+    let settleChild!: (exit: { code: number; signal: null; log: { path: string; from: number; to: number } }) => void;
+    const childExited = new Promise<{ code: number; signal: null; log: { path: string; from: number; to: number } }>((resolve) => {
+      settleChild = resolve;
+    });
+    const resultPromise = wakeRecordedTell(allocated.paths, "wake-settled-exit", {
+      async schedule(_milliseconds, signal) {
+        scheduleCalls += 1;
+        scheduled();
+        await new Promise<void>((resolve, reject) => {
+          signal.addEventListener("abort", () => {
+            schedulerAborted = true;
+            reject(new Error("scheduler cancelled"));
+          }, { once: true });
+          signal.throwIfAborted();
+        });
       },
       async spawn(): Promise<OwnedProcess> {
         return {
           pid: 1,
-          exited: Promise.resolve({
-            code: 7,
-            signal: null,
-            log: { path: join(root, "run.log"), from: 0, to: 0 },
-          }),
+          exited: childExited,
           async terminate() {},
           release() {},
         };
       },
     });
+    await scheduleStarted;
+    for (let index = 0; index < 100; index += 1) await readHeart(allocated.paths);
+    assert.equal(scheduleCalls, 1);
+    settleChild({ code: LEASH_HELD_EXIT, signal: null, log: { path: join(root, "run.log"), from: 0, to: 0 } });
+    const result = await resultPromise;
 
-    assert.deepEqual(result.wake, {
-      kind: "failed",
-      diagnostic: "pre-admission exit 7",
-      child: { code: 7, signal: null, log: { path: join(root, "run.log"), from: 0, to: 0 } },
-    });
-    assert.equal(prompts, 1);
+    assert.deepEqual(result.wake, { kind: "held" });
+    assert.equal(scheduleCalls, 1);
+    assert.equal(schedulerAborted, true);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

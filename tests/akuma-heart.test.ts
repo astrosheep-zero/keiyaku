@@ -37,7 +37,6 @@ import {
   reserveRequest,
   serveRequest,
   stopRequested,
-  watchHeart,
   refuseRequest,
   voidRequest,
   type Soul,
@@ -246,7 +245,7 @@ test("tell admission shares activity order and delivery witnesses fold without m
   } finally { value.close(); }
 });
 
-test("Tell observes Body admission between observer registration and spawn", async () => {
+test("Tell observes Body admission after spawning its child", async () => {
   const value = await fixture();
   let spawned = 0;
   let body: Promise<Awaited<ReturnType<HeldAkumaLeash["recordBody"]>>> | undefined;
@@ -260,15 +259,10 @@ test("Tell observes Body admission between observer registration and spawn", asy
       tellId: "tell-registered-body",
       recordedAt: value.soul.createdAt,
       runtime: {
-        async observeHeart() {
-          return (async function*() {
-            body = leash.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
-            await body;
-            yield;
-          })();
-        },
         async spawn(): Promise<OwnedProcess> {
           spawned += 1;
+          body = leash.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
+          await body;
           return {
             pid: 1,
             exited: Promise.resolve({ code: LEASH_HELD_EXIT, signal: null, log: { path: value.allocated.paths.log, from: 0, to: 0 } }),
@@ -284,7 +278,7 @@ test("Tell observes Body admission between observer registration and spawn", asy
   } finally { value.close(); }
 });
 
-test("Tell fails before spawn when asynchronous Heart observation is denied", async () => {
+test("Tell reports spawn failure and leaves the Tell pending", async () => {
   const value = await fixture();
   let spawned = 0;
   try {
@@ -298,15 +292,14 @@ test("Tell fails before spawn when asynchronous Heart observation is denied", as
       tellId: "tell-observation-denied",
       recordedAt: value.soul.createdAt,
       runtime: {
-        async observeHeart() { throw new Error("EACCES: Heart observation denied"); },
         async spawn(): Promise<OwnedProcess> {
           spawned += 1;
-          throw new Error("must not spawn");
+          throw new Error("spawn denied");
         },
       },
     });
-    assert.deepEqual(result.wake, { kind: "failed", diagnostic: "EACCES: Heart observation denied" });
-    assert.equal(spawned, 0);
+    assert.deepEqual(result.wake, { kind: "failed", diagnostic: "spawn denied" });
+    assert.equal(spawned, 1);
     assert.deepEqual((await readHeart(value.allocated.paths)).pending.map((tell) => tell.id), ["tell-observation-denied"]);
   } finally { value.close(); }
 });
@@ -324,11 +317,6 @@ test("Tell reports held only from its spawned child's private leash refusal", as
       tellId: "tell-held",
       recordedAt: value.soul.createdAt,
       runtime: {
-        async observeHeart(_paths, signal) {
-          return (async function*() {
-            await new Promise<void>((resolve) => signal.addEventListener("abort", resolve, { once: true }));
-          })();
-        },
         async spawn(): Promise<OwnedProcess> {
           spawned += 1;
           return {
@@ -361,7 +349,6 @@ test("Tell lets a durably told successor win against a losing child exit", async
       tellId: "tell-won-before-exit",
       recordedAt: value.soul.createdAt,
       runtime: {
-        async observeHeart() { return (async function*() { yield; })(); },
         async spawn(): Promise<OwnedProcess> {
           const winner = (await HeldAkumaLeash.try(value.allocated.paths))!;
           const body = await winner.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
@@ -402,12 +389,6 @@ test("Tell lets a successor Body win when its child exit races Heart observation
       tellId: "tell-successor-race",
       recordedAt: value.soul.createdAt,
       runtime: {
-        async observeHeart(_paths, signal) {
-          return (async function*() {
-            yield;
-            await new Promise<void>((resolve) => signal.addEventListener("abort", resolve, { once: true }));
-          })();
-        },
         async spawn(): Promise<OwnedProcess> {
           const winner = (await HeldAkumaLeash.try(value.allocated.paths))!;
           const body = await winner.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
@@ -440,11 +421,6 @@ test("Tell gives a selected child exit one final Heart adjudication", async () =
       tellId: "tell-final-heart-after-exit",
       recordedAt: value.soul.createdAt,
       runtime: {
-        async observeHeart(_paths, signal) {
-          return (async function*() {
-            await new Promise<void>((resolve) => signal.addEventListener("abort", resolve, { once: true }));
-          })();
-        },
         async spawn(): Promise<OwnedProcess> {
           const exit = Promise.resolve({ code: 7, signal: null, log: { path: value.allocated.paths.log, from: 0, to: 0 } });
           void exit.then(async () => {
@@ -466,7 +442,7 @@ test("Tell gives a selected child exit one final Heart adjudication", async () =
   } finally { value.close(); }
 });
 
-test("a filesystem nudge cannot hide pre-admission child exit", async () => {
+test("a Heart re-read cannot hide pre-admission child exit", async () => {
   const value = await fixture();
   try {
     const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
@@ -479,12 +455,6 @@ test("a filesystem nudge cannot hide pre-admission child exit", async () => {
       tellId: "tell-pre-admission-exit",
       recordedAt: value.soul.createdAt,
       runtime: {
-        async observeHeart(_paths, signal) {
-          return (async function*() {
-            yield;
-            await new Promise<void>((resolve) => signal.addEventListener("abort", resolve, { once: true }));
-          })();
-        },
         async spawn(): Promise<OwnedProcess> {
           return {
             pid: 1,
@@ -512,40 +482,6 @@ test("tell admission refuses an unborn heart without writing its timeline", asyn
     }), { kind: "not-born" });
     assert.deepEqual((await activitySlice(value.allocated.paths)).rows, []);
     assert.deepEqual((await readHeart(value.allocated.paths)).pending, []);
-  } finally { value.close(); }
-});
-
-test("watchHeart abort settles a pending read and closes promptly", async () => {
-  const value = await fixture();
-  try {
-    const controller = new AbortController();
-    const watcher = await watchHeart(value.allocated.paths, controller.signal);
-    const pending = watcher.next();
-    controller.abort();
-    assert.deepEqual(await Promise.race([
-      pending,
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Heart watcher did not stop")), 250)),
-    ]), { value: undefined, done: true });
-    assert.deepEqual(await watcher.return(undefined), { value: undefined, done: true });
-  } finally { value.close(); }
-});
-
-test("read-only Heart observations do not prompt their own watcher", async () => {
-  const value = await fixture();
-  try {
-    const controller = new AbortController();
-    const watcher = await watchHeart(value.allocated.paths, controller.signal);
-    const prompt = watcher.next();
-    for (let index = 0; index < 20; index += 1) await readHeart(value.allocated.paths);
-    assert.deepEqual(
-      await Promise.race([
-        prompt,
-        new Promise((resolve) => setTimeout(() => resolve("quiet"), 100)),
-      ]),
-      "quiet",
-    );
-    controller.abort();
-    await watcher.return(undefined);
   } finally { value.close(); }
 });
 
