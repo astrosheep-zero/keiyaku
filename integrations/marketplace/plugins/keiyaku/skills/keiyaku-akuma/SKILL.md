@@ -84,6 +84,7 @@ choose `--interrupt` when the current attempt itself is the problem.
 
 ```bash
 keiyaku history <aku/...|@alias> --last
+keiyaku history <aku/...|@alias> --id <historyId>
 keiyaku history <aku/...|@alias> [--before <N> | --since <N>] [--limit <N>]
 ```
 
@@ -91,9 +92,17 @@ keiyaku history <aku/...|@alias> [--before <N> | --since <N>] [--limit <N>]
 and says so plainly when no answer exists yet. Snapshot rows elsewhere may
 clip long text; the terminal answer from `call`/`wait` and the bytes from
 `--last` are never clipped — when you need the full result, take it from one
-of those. Cursor reads page the activity timeline; `--before` and `--since`
-are exclusive sequence cursors. `--limit` defaults to 50 and accepts at most
-5000 semantic rows.
+of those. Every completed answered or failed outcome carries one Heart-owned
+public `historyId` shaped as `turn/<positive-safe-integer>` in `status`, `wait`,
+and history output. Use `--id` with that same value to read exactly one retained
+outcome: text writes the complete answer or diagnostic bytes without clipping
+or framing. Provider-native history coordinates remain private. A malformed or
+unknown ID is a typed nonzero refusal. `--id` is mutually exclusive with
+`--last`, `--before`, `--since`, and `--limit`.
+
+Cursor reads page the activity timeline; `--before` and `--since` are exclusive
+sequence cursors. `--limit` defaults to 50 and accepts at most 5000 semantic
+rows.
 
 ## Stop
 
@@ -116,5 +125,7 @@ keiyaku fork <aku/...|@alias> --at <historyId> [--alias @name]
 `fork` starts a child from one exact retained answered-turn coordinate and
 leaves the source untouched. It is a provider capability, not a guarantee:
 when the provider cannot fork from that turn, the command refuses rather than
-fabricating a fresh start. Take the `historyId` from `history` output; it must
-name an answered turn.
+fabricating a fresh start. Pass the same public `historyId` exposed by status,
+wait, or history; Heart privately resolves the provider coordinate. The ID must
+name an answered outcome with a provider fork point. Failed outcomes are not
+forkable.
