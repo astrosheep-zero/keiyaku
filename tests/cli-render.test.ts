@@ -290,6 +290,50 @@ test("reconcile text renders followed worktrees and retained follow shape", () =
   });
 });
 
+test("accepted receipts omit unchanged refs and Contract files without changing JSON", () => {
+  const contract = contractId("kei/unchanged-mechanics");
+  const head = contractHead("head");
+  const unchangedRef = {
+    kind: "ref" as const,
+    name: "refs/heads/main",
+    action: "unchanged" as const,
+    before: head,
+    after: head,
+  };
+  const unchangedFile = {
+    kind: "contract-file" as const,
+    path: "/repo/.keiyaku/KEIYAKU.md",
+    action: "unchanged" as const,
+  };
+  const result: InvocationResult = {
+    kind: "accepted",
+    verb: "deliver",
+    contract,
+    head,
+    facts: [{ contract, entry: "claim", kind: "claimed" }],
+    effects: [
+      unchangedRef,
+      unchangedFile,
+      { kind: "worktree", path: "/repo/.keiyaku/wt/contract", action: "unchanged" },
+      { kind: "ref", name: "refs/heads/main", action: "updated", before: head, after: contractHead("next") },
+      { kind: "recovery-snapshot", action: "created", snapshot: snapshotId("recovery"), retention: "ephemeral" },
+    ],
+    lag: [{ kind: "unsealed-bytes", path: "/repo/.keiyaku/wt/contract", paths: [] }],
+    settlement: { actions: [], lags: [] },
+    completion: { integration: snapshotId("integration") },
+  };
+
+  const text = renderText(result);
+  assert.doesNotMatch(text, /ref unchanged/u);
+  assert.doesNotMatch(text, /contract-file unchanged/u);
+  assert.match(text, /worktree unchanged \/repo\/\.keiyaku\/wt\/contract/u);
+  assert.match(text, /ref updated refs\/heads\/main/u);
+  assert.match(text, /recovery-snapshot created recovery ephemeral/u);
+  assert.match(text, /unsealed-bytes \/repo\/\.keiyaku\/wt\/contract/u);
+  assert.ok(text.indexOf("ref updated") < text.indexOf("worktree unchanged"));
+  assert.deepEqual(JSON.parse(JSON.stringify(result)).effects, result.effects);
+});
+
 test("completion stops render the public unmet prerequisites in order", () => {
   const contract = contractId("kei/waiting-on-prerequisites");
   const unmet = [

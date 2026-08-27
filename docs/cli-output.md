@@ -347,7 +347,11 @@ target observations without describing the candidate as accepted or approved.
 
 The primary UI uses caller-facing domain words; internal journal and result-arm
 names remain confined to the record. Records show typed decision-relevant facts
-in order, without rereading reconciliation or settlement.
+in order, without rereading reconciliation or settlement. Mechanically unchanged
+`ref` and `contract-file` effects are omitted from default accepted text so they
+cannot compete with the outcome; changed effects remain visible. JSON retains
+every effect exactly, and an unchanged effect remains available whenever it is
+carried by a typed lag, leak, stop, or recovery fact.
 
 An abandonment recovery effect renders
 `✓ recovery-snapshot created <SnapshotId> ephemeral`. The word `ephemeral` is

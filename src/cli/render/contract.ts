@@ -45,6 +45,10 @@ function changedEffect(effect: Effect): boolean {
   return effect.action !== "unchanged";
 }
 
+function showEffect(effect: Effect): boolean {
+  return changedEffect(effect) || (effect.kind !== "ref" && effect.kind !== "contract-file");
+}
+
 function effectRows(effect: Effect, columns: number): readonly string[] {
   const mark = changedEffect(effect) ? "✓" : "·";
   const lines: string[] = [];
@@ -247,7 +251,7 @@ function acceptedRecord(
     pushBlock(record, reuseLines(result.verificationReuse, columns));
   }
   const changed = result.effects.filter(changedEffect);
-  const unchanged = result.effects.filter((effect) => !changedEffect(effect));
+  const unchanged = result.effects.filter((effect) => !changedEffect(effect) && showEffect(effect));
   for (const effect of [...changed, ...unchanged]) pushBlock(record, effectRows(effect, columns));
   for (const action of result.settlement.actions) {
     receiptRow(
