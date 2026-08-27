@@ -13,7 +13,7 @@ import {
   updateGitTree,
   updateRefsAtomically,
   writeBlob,
-  writeCommit,
+  writeStateCommit,
   type GitSnapshot,
   type TreeChange,
 } from "../git/repository.js";
@@ -192,7 +192,7 @@ export async function publishDispatch(
       }
       changes.set(path, { oid: await writeBlob(input.repository, bytesFor(intended)) });
       const tree = await updateGitTree(input.repository, snapshot.tree, changes);
-      const commit = await writeCommit({
+      const commit = await writeStateCommit({
         repository: input.repository,
         tree,
         parent: snapshot.commit,

@@ -17,6 +17,8 @@ import {
   readRefs,
   repositoryAt,
   writeBlob,
+  writeCommit,
+  writeStateCommit,
 } from "../src/git/repository.js";
 import { GitPlumbingError, consumeGitStdout, runGit, runGitWithEnvironment, withGitAbortSignal } from "../src/git/process.js";
 import { worktreePath } from "../src/git/workspace.js";
@@ -56,6 +58,20 @@ test("Keiyaku-owned refs keep delivery and candidate namespaces distinct across 
   assert.equal(CANDIDATE_PIN_REF_NAMESPACE.startsWith(DELIVERY_REF_NAMESPACE), false);
   assert.equal(MIGRATION_DELIVERY_REF_NAMESPACE.startsWith(MIGRATION_CANDIDATE_PIN_REF_NAMESPACE), false);
   assert.equal(MIGRATION_CANDIDATE_PIN_REF_NAMESPACE.startsWith(MIGRATION_DELIVERY_REF_NAMESPACE), false);
+});
+
+test("state commit construction warns while ordinary commit messages stay unchanged", async () => {
+  const raw = repositoryWithCommit();
+  const repository = await repositoryAt(raw.path);
+  const parent = raw.run(["rev-parse", "HEAD"]).trim();
+  const tree = raw.run(["rev-parse", "HEAD^{tree}"]).trim();
+
+  const state = await writeStateCommit({ repository, tree, parent, message: "dispatch detail" });
+  assert.equal(raw.run(["show", "-s", "--format=%s", state]).trim(), "keiyaku authority - do not delete or rewrite");
+  assert.match(raw.run(["show", "-s", "--format=%B", state]), /\n\ndispatch detail\n/u);
+
+  const ordinary = await writeCommit({ repository, tree, parent, message: "ordinary detail" });
+  assert.equal(raw.run(["show", "-s", "--format=%s", ordinary]).trim(), "ordinary detail");
 });
 
 test("repositoryAt pins one absolute common directory for primary and linked worktrees", async () => {

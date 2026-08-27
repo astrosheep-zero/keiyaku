@@ -112,6 +112,15 @@ this one Git owner. The library boundary rejects a target that names any
 of them before coordinates are recorded; target input and canonicalization are
 defined only in [public-api.md](public-api.md).
 
+The canonical state ref, delivery refs, and candidate pins intentionally live
+under `refs/heads` so ordinary remote branch refspecs synchronize their
+authority and custody. Their visibility in branch-oriented tools is deliberate.
+Every commit installed as the `refs/heads/keiyaku-state` tip has the exact
+subject `keiyaku authority - do not delete or rewrite`; a state writer's
+operation detail, when present, follows after a blank line. Delivery,
+candidate, and ephemeral recovery commits keep their own subjects and
+identities. This warning does not add deletion detection or recovery behavior.
+
 The Git owner performs confirmed reset state-first. It snapshots
 `refs/heads/keiyaku-state` and deletes that ref with an expected-OID
 compare-and-swap before deleting regenerable delivery, candidate, worktree, or

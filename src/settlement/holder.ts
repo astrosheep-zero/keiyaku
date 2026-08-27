@@ -3,7 +3,7 @@ import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { TreeUpdate } from "../core/facts/offer.js";
 import { contractId, type ContractId } from "../core/facts/types.js";
 import type { GitDecisionObservation } from "../git/observe.js";
-import { GIT_REF, updateGitTree, updateRefsAtomically, writeBlob, writeCommit } from "../git/repository.js";
+import { GIT_REF, updateGitTree, updateRefsAtomically, writeBlob, writeStateCommit } from "../git/repository.js";
 import type { GitRepository } from "../git/process.js";
 import {
   withGitTargetedReadObservation,
@@ -188,7 +188,7 @@ export async function publishTaskHolderRelease(
     observation.admission.snapshot.tree,
     new Map([[release.path, { oid: await writeBlob(repository, release.bytes) }]]),
   );
-  const commit = await writeCommit({
+  const commit = await writeStateCommit({
     repository,
     tree,
     parent: observation.admission.snapshot.commit,

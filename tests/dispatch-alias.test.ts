@@ -36,6 +36,8 @@ test("Dispatch publishes one immutable association and preserves its first times
   const first = await publishDispatch({ repository, akuId: akuma, contractId: owner });
   assert.equal(first.kind, "dispatched");
   if (first.kind !== "dispatched") return;
+  assert.equal(raw.run(["log", "-1", "--format=%s", "refs/heads/keiyaku-state"]).trim(), "keiyaku authority - do not delete or rewrite");
+  assert.match(raw.run(["log", "-1", "--format=%B", "refs/heads/keiyaku-state"]), /\n\ndispatch aku\/worker\/1234abcd\n/u);
   assert.deepEqual(await readDispatch(repository, akuma), first.dispatch);
   assert.deepEqual(await readDispatches(repository), [first.dispatch]);
 

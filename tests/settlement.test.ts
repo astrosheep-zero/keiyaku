@@ -121,6 +121,7 @@ test("a Task document untracked in Git still completes through delivery", async 
   const delivered = await bound.keiyaku.deliver({ includeDirty: true });
 
   assert.equal((await bound.keiyaku.state()).terminal?.kind, "claimed");
+  assert.equal(world.run(["log", "-1", "--format=%s", "refs/heads/keiyaku-state"]).trim(), "keiyaku authority - do not delete or rewrite");
   assert.equal(await taskState(world.path, taskId), "done");
   assert.deepEqual(delivered.settlement.actions, [{ kind: "task", taskId, action: "done" }]);
   assert.deepEqual(delivered.settlement.lags, []);

@@ -11,7 +11,7 @@ import {
   updateGitTreeFromFrozenDirectories,
   updateRefsAtomically,
   writeBlob,
-  writeCommit,
+  writeStateCommit,
 } from "./repository.js";
 import type { GitRepository } from "./process.js";
 import { type ContractHead, type ContractId } from "../core/facts/types.js";
@@ -147,7 +147,7 @@ async function publishOffer(
     changes,
   );
   const gitCommit = mintSnapshotId(
-    await writeCommit({
+    await writeStateCommit({
       repository,
       tree: gitTree,
       parent: snapshot.commit,

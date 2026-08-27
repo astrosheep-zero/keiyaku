@@ -20,6 +20,7 @@ export const MIGRATION_CANDIDATE_PIN_REF_NAMESPACE = "refs/keiyaku/candidate";
 export const GIT_FORMAT_PATH = "meta/format.json";
 const CURRENT_FORMAT_VERSION = 4;
 export const GIT_FORMAT_BYTES = `{"version":${CURRENT_FORMAT_VERSION}}\n`;
+export const STATE_COMMIT_SUBJECT = "keiyaku authority - do not delete or rewrite";
 export function isKeiyakuOwnedRef(ref: string): boolean {
   return (
     ref === GIT_REF ||
@@ -439,16 +440,16 @@ async function writeCommitObject(
   return commit;
 }
 
-export async function writeCommit(
-  input: Readonly<{
-    repository: GitRepository;
-    tree: GitOid;
-    parent: GitOid | null;
-    message?: string;
-    actor?: string;
-    at?: string;
-  }>,
-): Promise<GitOid> {
+type WriteCommitInput = Readonly<{
+  repository: GitRepository;
+  tree: GitOid;
+  parent: GitOid | null;
+  message?: string;
+  actor?: string;
+  at?: string;
+}>;
+
+export async function writeCommit(input: WriteCommitInput): Promise<GitOid> {
   return await writeCommitObject({
     repository: input.repository,
     tree: input.tree,
@@ -458,6 +459,14 @@ export async function writeCommit(
     email: "keiyaku@localhost",
     ...(input.at === undefined ? {} : { at: input.at }),
   });
+}
+
+/** Write a commit that will become the canonical keiyaku-state tip. */
+export async function writeStateCommit(input: WriteCommitInput): Promise<GitOid> {
+  const detail = input.message;
+  const message =
+    detail === undefined || detail.length === 0 ? STATE_COMMIT_SUBJECT : `${STATE_COMMIT_SUBJECT}\n\n${detail}`;
+  return await writeCommit({ ...input, message });
 }
 
 function refAssertionLine(assertion: GitRefAssertion): string {
