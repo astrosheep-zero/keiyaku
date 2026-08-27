@@ -14,7 +14,6 @@ import {
 } from "./board.js";
 import {
   composeTasks,
-  taskCompositionNamespaceHeader,
   type TaskCompositionAlias,
   type TaskCompositionBodyPreview,
   type TaskCompositionResult,
@@ -114,7 +113,6 @@ export type {
   TaskRelationPredicateField,
 };
 export { TaskAuthorityCorruptionError, TASK_RELATION_PREDICATE_FIELDS };
-export { taskCompositionNamespaceHeader };
 
 class TaskHandle {
   constructor(

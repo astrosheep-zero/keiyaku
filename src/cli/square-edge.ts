@@ -48,13 +48,13 @@ export async function recognizeAndListen(
         await rollbackSquare.close();
       }
     }
-    if (bound) unbindCurrentParticipant(path, name, environment);
+    if (bound) await unbindCurrentParticipant(path, name, environment);
   };
   try {
     const joinedResult = await square.joinWithActivity(name);
     joined = joinedResult.activity !== null;
     const participant = joinedResult.participant;
-    bound = bindCurrentParticipant(path, name, environment).created;
+    bound = (await bindCurrentParticipant(path, name, environment)).created;
     const listener = participant;
     const change = await listener.listen(allocated.id);
     listening = change.activity !== null;

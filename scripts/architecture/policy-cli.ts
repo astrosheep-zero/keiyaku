@@ -50,6 +50,7 @@ export const cliZones = [
       types("cli/commands/task.ts"),
       any("cli/usage.ts", ["CliUsageError"]),
       any("task/index.ts"),
+      any("task/compose-language.ts", ["taskCompositionNamespaceHeader"]),
       any("task/operations.ts", ["observeTaskDetails"]),
       any("task/context.ts", ["resolveTaskNamespaceContext", "writeTaskNamespaceContext"]),
       any("task/mutation.ts"),

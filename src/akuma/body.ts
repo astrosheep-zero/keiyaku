@@ -421,10 +421,7 @@ async function awaitWake(
     const timer = schedule(WAKE_REREAD_MS, timerController.signal).then(() => ({ kind: "timer" as const }));
     let winner: Awaited<typeof timer> | { kind: "exited"; exit: DetachedProcessExit };
     try {
-      winner = await Promise.race([
-        child.exited.then((exit) => ({ kind: "exited" as const, exit })),
-        timer,
-      ]);
+      winner = await Promise.race([child.exited.then((exit) => ({ kind: "exited" as const, exit })), timer]);
     } catch (error) {
       timerController.abort();
       await timer.catch(() => undefined);
@@ -451,13 +448,7 @@ async function wakePendingTells(
     const beforeHeart = await readHeart(paths);
     if (tellId === undefined && beforeHeart.pending.length === 0) return null;
     const before = beforeHeart.latestBody?.sequence ?? 0;
-    return await awaitWake(
-      paths,
-      tellId,
-      before,
-      await runtime.spawn(paths),
-      runtime.schedule ?? abortableDelay,
-    );
+    return await awaitWake(paths, tellId, before, await runtime.spawn(paths), runtime.schedule ?? abortableDelay);
   } catch (error) {
     return { kind: "failed", diagnostic: diagnostic(error) };
   }

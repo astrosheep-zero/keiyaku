@@ -1473,7 +1473,7 @@ test("CLI Square edge rollback removes only facts committed by that call", async
     } finally {
       await square.close();
     }
-    assert.equal(unbindCurrentParticipant(squarePath, "Alice", environment), false);
+    assert.equal(await unbindCurrentParticipant(squarePath, "Alice", environment), false);
 
     square = await Square.at({ path: squarePath });
     try {
@@ -1482,7 +1482,7 @@ test("CLI Square edge rollback removes only facts committed by that call", async
     } finally {
       await square.close();
     }
-    bindCurrentParticipant(squarePath, "Alice", environment);
+    await bindCurrentParticipant(squarePath, "Alice", environment);
     const existing = await recognizeAndListen(root, environment, { id: "aku/existing" } as never);
     await existing?.rollback();
     square = await Square.at({ path: squarePath });
@@ -1493,7 +1493,7 @@ test("CLI Square edge rollback removes only facts committed by that call", async
     } finally {
       await square.close();
     }
-    assert.equal(unbindCurrentParticipant(squarePath, "Alice", environment), true);
+    assert.equal(await unbindCurrentParticipant(squarePath, "Alice", environment), true);
   } finally {
     if (previousRegistry === undefined) delete process.env.SQUARE_REGISTRY;
     else process.env.SQUARE_REGISTRY = previousRegistry;

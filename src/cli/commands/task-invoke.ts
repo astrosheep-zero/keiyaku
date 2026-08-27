@@ -16,8 +16,8 @@ import {
   type TaskQuerySort,
   type TaskState,
   type TaskUpdateResult,
-  taskCompositionNamespaceHeader,
 } from "../../task/index.js";
+import { taskCompositionNamespaceHeader } from "../../task/compose-language.js";
 import { observeTaskDetails } from "../../task/operations.js";
 import type { ParsedTaskCommand } from "./task.js";
 import type { WorldRoot } from "../../world.js";
