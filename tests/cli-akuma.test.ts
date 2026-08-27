@@ -333,7 +333,18 @@ function waitInvocation(observation: AkumaObservation) {
   };
 }
 
-function tellInvocation(observation: AkumaObservation) {
+function tellInvocation(
+  observation: AkumaObservation,
+  wake:
+    | { kind: "told" }
+    | { kind: "pursuing"; bodySequence: number }
+    | { kind: "held" }
+    | {
+        kind: "failed";
+        diagnostic: string;
+        child?: { code: number | null; signal: string | null; log: { path: string; from: number; to: number } };
+      } = { kind: "pursuing", bodySequence: 1 },
+) {
   return {
     kind: "akuma" as const,
     action: "tell" as const,
@@ -343,7 +354,7 @@ function tellInvocation(observation: AkumaObservation) {
       akuma: observation.status.id,
       tell: {
         admission: { tellId: "tell-1", fact: "recorded" as const },
-        wake: { kind: "pursuing" as const, bodySequence: 1 },
+        wake,
       },
       observation: { kind: "observed" as const, ...observation },
     },
@@ -750,6 +761,78 @@ test("Akuma mutation snapshots omit observation context", () => {
   assert.doesNotMatch(callText, /^tasks /mu);
   assert.match(callText, /^changes 0$/mu);
   assert.equal(callText.split("\n").at(-1), "● STILL RUNNING");
+});
+
+test("Tell delivery state lives on its timeline row", () => {
+  const base = akumaObservation({
+    id: "aku/worker/1234abcd",
+    life: "asleep",
+    timeline: {
+      kind: "idle",
+      entries: [
+        {
+          kind: "row",
+          row: {
+            kind: "tell",
+            sequence: 4,
+            at: "2026-08-10T16:42:00.000Z",
+            tellId: "tell-1",
+            text: "steer",
+            state: "told",
+            deliveries: [],
+          },
+        },
+      ],
+      omitted: 0,
+      ...emptyReported,
+    },
+  });
+  const command = parseArgv(["tell", base.status.id, "steer"]).command;
+  const told = renderAkumaText(command, tellInvocation(base, { kind: "told" }));
+  assert.match(told, /✓ told\s+“steer”/u);
+  assert.doesNotMatch(told, /wake told/u);
+
+  const pending = akumaObservation({
+    ...base.status,
+    timeline: {
+      kind: "idle",
+      entries: [
+        {
+          kind: "row",
+          row: {
+            kind: "tell",
+            sequence: 4,
+            at: "2026-08-10T16:42:00.000Z",
+            tellId: "tell-1",
+            text: "steer",
+            state: "pending",
+            deliveries: [],
+          },
+        },
+      ],
+      omitted: 0,
+      ...emptyReported,
+    },
+  });
+  const held = renderAkumaText(command, tellInvocation(pending, { kind: "held" }));
+  assert.match(held, /⧗ tell\s+“steer”/u);
+  assert.doesNotMatch(held, /wake|pending .* tells/u);
+
+  const pursuing = renderAkumaText(command, tellInvocation(pending, { kind: "pursuing", bodySequence: 1 }));
+  assert.doesNotMatch(pursuing, /wake|pending .* tells/u);
+
+  const failed = renderAkumaText(
+    command,
+    tellInvocation(pending, {
+      kind: "failed",
+      diagnostic: "child exited",
+      child: { code: 1, signal: null, log: { path: "/tmp/run.log", from: 3, to: 9 } },
+    }),
+  );
+  assert.equal((failed.match(/tell delivery failed/g) ?? []).length, 1);
+  assert.match(failed, /! tell delivery failed · child exited · log \/tmp\/run\.log 3\.\.9/u);
+  assert.match(failed, /⧗ tell\s+“steer”/u);
+  assert.doesNotMatch(failed, /wake failed/u);
 });
 
 test("Akuma output preserves a complete associated Contract identity", () => {

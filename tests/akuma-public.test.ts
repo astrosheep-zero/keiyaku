@@ -1331,6 +1331,21 @@ test("monitoring snapshots pin the latest settled Tell outside the ordinary budg
   assert.deepEqual(told(receipt.snapshot), []);
   assert.equal(receipt.ordinaryCount, 3);
 
+  const tellReceipt = selectSnapshot(ledger, {
+    aperture: "receipt",
+    budget: { tail: 3, voice: 0 },
+    admittedTellId: "latest",
+  });
+  assert.deepEqual(sequences(tellReceipt.snapshot), [5, "gap:1", 7, 8, 9]);
+  assert.deepEqual(told(tellReceipt.snapshot), ["latest"]);
+  assert.equal(tellReceipt.ordinaryCount, 3);
+  assert.equal(
+    tellReceipt.snapshot.entries.some(
+      (entry) => entry.kind === "row" && entry.row.kind === "tell" && entry.row.tellId === "pending",
+    ),
+    false,
+  );
+
   const closed = projectTurns([
     ...facts,
     {
@@ -1352,6 +1367,79 @@ test("monitoring snapshots pin the latest settled Tell outside the ordinary budg
   assert.deepEqual(sequences(idleReceipt.snapshot), [10]);
   assert.deepEqual(told(idleReceipt.snapshot), []);
   assert.equal(idleReceipt.ordinaryCount, 0);
+});
+
+test("tell receipt pins only its admitted Tell when another Tell is pending", () => {
+  const ledger = projectTurns([
+    { kind: "turn-start" as const, sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
+    {
+      kind: "tell" as const,
+      sequence: 2,
+      id: "tell-a",
+      body: "older pending",
+      recordedAt: "2026-08-10T00:00:02.000Z",
+      state: "pending" as const,
+      deliveries: [],
+    },
+    {
+      kind: "activity" as const,
+      sequence: 3,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:03.000Z",
+      event: { type: "note" as const, text: "ordinary one" },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 4,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:04.000Z",
+      event: { type: "note" as const, text: "ordinary two" },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 5,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:05.000Z",
+      event: { type: "note" as const, text: "ordinary three" },
+    },
+    {
+      kind: "tell" as const,
+      sequence: 6,
+      id: "tell-b",
+      body: "current admitted",
+      recordedAt: "2026-08-10T00:00:06.000Z",
+      state: "told" as const,
+      deliveries: [],
+    },
+    {
+      kind: "activity" as const,
+      sequence: 7,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:07.000Z",
+      event: { type: "note" as const, text: "ordinary four" },
+    },
+  ]);
+  const selected = selectSnapshot(ledger, {
+    aperture: "receipt",
+    budget: { tail: 3, voice: 0 },
+    admittedTellId: "tell-b",
+  });
+  assert.equal(selected.snapshot.kind, "open");
+  if (selected.snapshot.kind !== "open") return;
+  const rows = selected.snapshot.entries.flatMap((entry) => (entry.kind === "row" ? [entry.row] : []));
+  assert.deepEqual(
+    rows.map((row) => row.sequence),
+    [4, 5, 6, 7],
+  );
+  assert.equal(
+    rows.some((row) => row.kind === "tell" && row.tellId === "tell-a"),
+    false,
+  );
+  assert.equal(
+    rows.some((row) => row.kind === "tell" && row.tellId === "tell-b"),
+    true,
+  );
+  assert.equal(selected.ordinaryCount, 3);
 });
 
 test("outcome folding preserves a truncated final voice equal to the answer", () => {

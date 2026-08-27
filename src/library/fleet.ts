@@ -142,9 +142,17 @@ async function observeAkuma(status: AkumaStatus, path: WorldRoot, repo?: Repo): 
   return (await observeAkumaSet([status], path, repo))[0]!;
 }
 
-async function observeAkumaStage(path: WorldRoot, id: AkumaStatus["id"], repo?: Repo): Promise<AkumaObservationStage> {
+async function observeAkumaStage(
+  path: WorldRoot,
+  id: AkumaStatus["id"],
+  repo?: Repo,
+  admittedTellId?: string,
+): Promise<AkumaObservationStage> {
   try {
-    const observed = await readBudgetedStatus(path, id, { aperture: "receipt" });
+    const observed = await readBudgetedStatus(path, id, {
+      aperture: "receipt",
+      ...(admittedTellId === undefined ? {} : { admittedTellId }),
+    });
     return { kind: "observed", ...(await observeAkuma(observed.status, path, repo)) };
   } catch (error) {
     if (error instanceof AkumaNotBornError) throw error;
@@ -288,7 +296,7 @@ export async function executeTellAkuma(input: TellExecutionInput): Promise<Akuma
   return {
     akuma: input.id,
     tell,
-    observation: await observeAkumaStage(input.path, input.id, input.repo),
+    observation: await observeAkumaStage(input.path, input.id, input.repo, tell.admission.tellId),
   };
 }
 

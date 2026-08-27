@@ -19,7 +19,9 @@ budget, even when it sits outside the current open Turn or idle ordinary
 window, and it appears once at its persisted sequence. Pin selection happens
 before tail and voice fill, so the Tell never consumes an ordinary slot.
 Mutation receipt snapshots (`tell` and `kill`) keep the ordinary last-activity
-policy and do not pin a settled Tell.
+policy. A `tell` receipt additionally pins only the Tell admitted by that
+invocation at its persisted timeline sequence, outside the ordinary budget;
+`kill` receipts do not pin settled Tells.
 Every snapshot arm, including unborn, also carries `reportedChanges` and
 `reportedChangesOmitted` from that same frontier Turn. Eligible source rows
 are completed `fileChange` tools with successful result status; each native
@@ -128,7 +130,7 @@ is Body-scoped and does not imply entry into a Turn. Pending tell rows therefore
 remain visible outside the open-Turn selection because they can still change the
 caller's action. Monitoring snapshots pin the latest settled Tell the same way;
 other settled tell rows remain visible through history like other settled
-activity. Receipt snapshots do not pin a settled Tell. Text and
+activity. Text and
 JSON expose the same two-state row and no provider fence, five-stage
 lifecycle, or stage timeline. Tell
 rows are the sole detailed public tell projection; `AkumaStatus` carries no

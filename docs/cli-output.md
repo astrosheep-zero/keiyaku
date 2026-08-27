@@ -131,13 +131,13 @@ coordinates.
 
 ## Shared Scanner Grammar
 
-Tell renders its wake receipt before the shared observation as `wake told`, `wake
-held`, or `! wake failed · <diagnostic>`; a pursuing wake omits its wake row and
-renders only the shared observation. A failed receipt with child evidence
-appends its factual shared run-log path and byte range without calling those
-bytes stderr. Ordinary Tell exits 0 for `told`, `pursuing`, and `held`, and 2
-for `failed`; JSON remains the typed result. When pending Tell rows exist
-without a live Body, shared Akuma text adds `pending <N> tells · no live body`.
+Tell delivery state is rendered once on its timeline row: a told row is `✓ told`
+with its body, while a pending row is `⧗ tell`. Held and pursuing receipts add
+no wake fact. A failed receipt emits exactly one loud `! tell delivery failed ·
+<diagnostic>` fact; child evidence appends its factual shared run-log path and
+byte range without calling those bytes stderr. Ordinary Tell exits 0 for
+`told`, `pursuing`, and `held`, and 2 for `failed`; JSON remains the typed
+result. There is no separate pending-tells summary.
 
 Text uses lowercase words, `·` fact separators, indented evidence, complete
 coordinates, and honest empty results; these presentation rules add no facts.

@@ -106,14 +106,27 @@ function isActiveTool(row: ActivityRow): boolean {
 
 export function selectSnapshot(
   ledger: TurnLedger,
-  input: Readonly<{ aperture: "monitoring" | "receipt"; budget?: Readonly<{ tail: number; voice?: number }> }>,
+  input: Readonly<{
+    aperture: "monitoring" | "receipt";
+    budget?: Readonly<{ tail: number; voice?: number }>;
+    admittedTellId?: string;
+  }>,
 ): Readonly<{ snapshot: ActivitySnapshot; ordinaryCount: number }> {
   const budget = input.budget ?? { tail: DEFAULT_TAIL, voice: DEFAULT_VOICE };
   if (ledger.turns.length === 0 && !ledger.rows.some((row) => row.kind === "tell"))
     return { snapshot: { kind: "unborn", entries: [], omitted: 0, ...EMPTY_REPORTED }, ordinaryCount: 0 };
   const pending = ledger.rows.filter(isPendingTell);
   const latestTold = input.aperture === "monitoring" ? ledger.rows.findLast(isToldTell) : undefined;
-  const pins: readonly ActivityRow[] = latestTold === undefined ? pending : [...pending, latestTold];
+  const admittedTell =
+    input.aperture === "receipt" && input.admittedTellId !== undefined
+      ? ledger.rows.find((row) => row.kind === "tell" && row.tellId === input.admittedTellId)
+      : undefined;
+  const pins: readonly ActivityRow[] =
+    input.aperture === "receipt" && input.admittedTellId !== undefined
+      ? admittedTell === undefined
+        ? []
+        : [admittedTell]
+      : [...pending, ...(latestTold === undefined ? [] : [latestTold])];
   const reported = frontierReportedChanges(ledger);
   if (ledger.openTurn !== undefined) {
     const window = ledger.openTurn.rows;

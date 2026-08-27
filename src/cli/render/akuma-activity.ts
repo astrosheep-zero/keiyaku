@@ -69,15 +69,6 @@ function lifeLabel(life: AkumaObservation["status"]["life"]): string {
   return `? ${life}`;
 }
 
-function pendingWithoutLiveBody(status: AkumaObservation["status"]): number {
-  if (status.life === "running") return 0;
-  return status.timeline.entries.reduce(
-    (count, entry) =>
-      count + (entry.kind === "row" && entry.row.kind === "tell" && entry.row.state === "pending" ? 1 : 0),
-    0,
-  );
-}
-
 function clock(at: string): string {
   const date = new Date(at);
   return Number.isFinite(date.getTime())
@@ -90,7 +81,7 @@ function label(row: ActivityRow | SnapshotRow): string {
   if (row.kind === "thought") return "think";
   if (row.kind === "note") return "note";
   if (row.kind === "call") return "call";
-  if (row.kind === "tell") return "tell";
+  if (row.kind === "tell") return row.state === "told" ? "told" : "tell";
   if (row.kind === "outcome") return row.outcome.kind === "answered" ? "say" : "error";
   if (row.kind === "turn") return "call";
   return toolRepr(row).label;
@@ -98,6 +89,7 @@ function label(row: ActivityRow | SnapshotRow): string {
 
 function mark(row: ActivityRow | SnapshotRow): "│" | "✓" | "!" | "⧖" | "⧗" | "?" {
   if (row.kind === "outcome") return row.outcome.kind === "answered" ? "✓" : "!";
+  if (row.kind === "tell" && row.state === "told") return "✓";
   if (row.kind === "tell" && row.state === "pending") return "⧗";
   if (row.kind === "tool") {
     if (row.state === "active") return "⧖";
@@ -342,15 +334,9 @@ function snapshotCore(
     ...contractFacts(view.contract),
     ...(options.facts ?? []),
   ];
-  const pending = pendingWithoutLiveBody(view.status);
   return {
     activity,
-    lines: [
-      ...snapshotHeading(view.status.id, options.alias, view.contract),
-      ...facts,
-      ...activity,
-      ...(pending === 0 ? [] : [`pending ${pending} tells · no live body`]),
-    ],
+    lines: [...snapshotHeading(view.status.id, options.alias, view.contract), ...facts, ...activity],
   };
 }
 
@@ -464,11 +450,9 @@ export function tellText(
   const facts =
     wake.kind === "failed"
       ? [
-          `! wake failed · ${safeText(wake.diagnostic)}${wake.child === undefined ? "" : ` · log ${wake.child.log.path} ${wake.child.log.from}..${wake.child.log.to}`}`,
+          `! tell delivery failed · ${safeText(wake.diagnostic)}${wake.child === undefined ? "" : ` · log ${wake.child.log.path} ${wake.child.log.from}..${wake.child.log.to}`}`,
         ]
-      : wake.kind === "pursuing"
-        ? []
-        : [`wake ${wake.kind}`];
+      : [];
   return mutationObservationStageText(result.result.akuma, result.result.observation, context, {
     ...(result.alias === undefined ? {} : { alias: result.alias }),
     facts,

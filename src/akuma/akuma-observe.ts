@@ -57,7 +57,7 @@ export type BudgetedStatusObservation = Readonly<{ status: AkumaStatus; ordinary
 export async function bornStatus(
   paths: AkumaPaths,
   expected: AkuId,
-  input: Readonly<{ aperture: "monitoring" | "receipt"; ordinaryBudget?: number }>,
+  input: Readonly<{ aperture: "monitoring" | "receipt"; ordinaryBudget?: number; admittedTellId?: string }>,
 ): Promise<BudgetedStatusObservation> {
   if (input.ordinaryBudget !== undefined && (!Number.isSafeInteger(input.ordinaryBudget) || input.ordinaryBudget < 0))
     throw new TypeError("ordinary budget must be a nonnegative safe integer");
@@ -72,6 +72,7 @@ export async function bornStatus(
   const selected = selectSnapshot(projectTurns(slice.rows), {
     aperture: input.aperture,
     budget: ordinarySnapshotBudget(input.ordinaryBudget),
+    ...(input.admittedTellId === undefined ? {} : { admittedTellId: input.admittedTellId }),
   });
   return {
     status: {
@@ -88,7 +89,7 @@ export async function bornStatus(
 export async function readBudgetedStatus(
   worldPath: WorldRoot,
   id: AkuId,
-  input: Readonly<{ aperture: "monitoring" | "receipt"; ordinaryBudget?: number }>,
+  input: Readonly<{ aperture: "monitoring" | "receipt"; ordinaryBudget?: number; admittedTellId?: string }>,
 ): Promise<BudgetedStatusObservation> {
   return await bornStatus(pathsForAkuId(worldPath, id), id, input);
 }
