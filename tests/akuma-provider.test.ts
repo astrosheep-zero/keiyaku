@@ -4882,6 +4882,33 @@ test("Codex observation dispositions pin every currently known method and item",
   });
 });
 
+test("Codex hook started notes preserve the first usable native hook name spelling", () => {
+  const cases = [
+    { params: { name: "provision-dependencies" }, text: "Hook provision-dependencies started" },
+    { params: { hookName: "run-checks" }, text: "Hook run-checks started" },
+    { params: { hook_name: "publish" }, text: "Hook publish started" },
+    {
+      params: { name: "primary", hookName: "secondary", hook_name: "tertiary" },
+      text: "Hook primary started",
+    },
+    {
+      params: { name: "  ", hookName: "", hook_name: "usable-after-blanks" },
+      text: "Hook usable-after-blanks started",
+    },
+    {
+      params: { name: 42, hookName: false, hook_name: "" },
+      text: "Hook unknown started",
+    },
+  ] as const;
+
+  for (const { params, text } of cases) {
+    const events = new CollectingChannel();
+    const state = { settled: false, tools: new Map() };
+    assert.equal(codexNotificationResult({ method: "hook/started", params }, state, events), undefined);
+    assert.deepEqual(events.collected, [{ type: "note", text }]);
+  }
+});
+
 test("Codex app-server maps admitted options, native session, answer, and exact turn history", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-provider-"));
   try {

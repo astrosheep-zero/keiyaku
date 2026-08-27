@@ -301,7 +301,7 @@ function notificationAction(method: string, params: Readonly<Record<string, unkn
     case "guardianWarning":
       return `Guardian warning: ${message ?? "action warned"}`;
     case "hook/started":
-      return `Hook ${codexText(params.name) ?? codexText(params.hookName) ?? "unknown"} started`;
+      return `Hook ${codexText(params.name) ?? codexText(params.hookName) ?? codexText(params.hook_name) ?? "unknown"} started`;
     case "item/autoApprovalReview/completed":
       return "Action approval review completed";
     case "item/autoApprovalReview/started":

@@ -171,7 +171,10 @@ started event carries no result; a completed event requires one. Result
 `message` is a bounded diagnostic, never stdout, stderr, or a native result body.
 `thought` is one completed reasoning summary or block bounded at 4,000
 characters, never raw thinking text or a delta stream. `note` is one bounded
-line for non-tool plan, todo, retry, warning, or refusal narration. Every other
+line for non-tool plan, todo, retry, warning, or refusal narration. Codex
+`hook/started` notes preserve the first nonblank native hook name supplied by
+`name`, `hookName`, or `hook_name`, and use `Hook unknown started` only when
+none is usable. Every other
 persisted activity text field, including tool names, calls, diagnostics, and
 unknown native names, is bounded at 16,384 characters. The provider codec is
 the sole persistence-bound judge; session coordinates and tool pairing ids are
