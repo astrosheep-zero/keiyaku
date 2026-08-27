@@ -30,10 +30,11 @@ const POLL_MS = 100;
 export class AkumaBodyRequestError extends Error {
   readonly kind = "akuma-body-request";
   constructor(
+    readonly action: RequestClaim["action"],
     readonly outcome: "refused" | "voided",
     readonly diagnostic: string,
   ) {
-    super(`Akuma body request ${outcome}: ${diagnostic}`);
+    super(`${action} ${outcome === "voided" ? "failed" : "refused"}: ${diagnostic}`);
     this.name = "AkumaBodyRequestError";
   }
 }
@@ -64,8 +65,8 @@ async function requestBody(
     try {
       const receipt = decodeReceipt(await readFile(path, "utf8"), input.claim.id, input.claim.action);
       if (receipt === null) throw new Error(`Akuma body request ${input.claim.id} has an invalid receipt`);
-      if (receipt.state === "refused") throw new AkumaBodyRequestError("refused", receipt.diagnostic);
-      if (receipt.state === "voided") throw new AkumaBodyRequestError("voided", receipt.evidence);
+      if (receipt.state === "refused") throw new AkumaBodyRequestError(receipt.action, "refused", receipt.diagnostic);
+      if (receipt.state === "voided") throw new AkumaBodyRequestError(receipt.action, "voided", receipt.evidence);
       return receipt;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -76,7 +77,7 @@ async function requestBody(
         () => false,
       ))
     ) {
-      throw new AkumaBodyRequestError("voided", "parent request channel closed before a receipt");
+      throw new AkumaBodyRequestError(input.claim.action, "voided", "parent request channel closed before a receipt");
     }
     await abortableDelay(POLL_MS, input.signal);
   }

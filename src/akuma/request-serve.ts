@@ -346,7 +346,7 @@ async function serveUpstream(
     if (served.service !== undefined) service = served.service;
   } catch (error) {
     outcome = { kind: "failed", failure: failure(error) };
-    fact = await voidRequest(input.paths, request.id, "body failed before serving the request");
+    fact = await voidRequest(input.paths, request.id, diagnostic(error));
     await projectReceipt(input.directory, input.transportId, fact);
     return;
   }

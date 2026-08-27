@@ -558,7 +558,10 @@ test("contract review and delivery retain separate request permissions", async (
         materializeConflict: false,
       }),
       (error: unknown) =>
-        error instanceof AkumaBodyRequestError && error.diagnostic === "not-allowed: contract.deliver",
+        error instanceof AkumaBodyRequestError &&
+        error.outcome === "refused" &&
+        error.diagnostic === "not-allowed: contract.deliver" &&
+        error.message === "contract.deliver refused: not-allowed: contract.deliver",
     );
   } finally {
     await reviewPump.close();
@@ -1076,6 +1079,7 @@ test("an executor throw settles its admitted request voided", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-executor-voided-")));
   const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
   const id = randomUUID();
+  let calls = 0;
   const pump = await openPump(parent, {
     wait: async () => {
       throw new Error("unexpected wait");
@@ -1087,6 +1091,7 @@ test("an executor throw settles its admitted request voided", async () => {
       throw new Error("unexpected kill");
     },
     deliver: async () => {
+      calls += 1;
       throw new Error("executor unavailable");
     },
   });
@@ -1100,9 +1105,29 @@ test("an executor throw settles its admitted request voided", async () => {
         includeDirty: false,
         materializeConflict: false,
       }),
-      (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "voided",
+      (error: unknown) =>
+        error instanceof AkumaBodyRequestError &&
+        error.outcome === "voided" &&
+        error.diagnostic === "executor unavailable" &&
+        error.message === "contract.deliver failed: executor unavailable",
     );
     assert.equal((await readRequest(parent.paths, id))?.state, "voided");
+    await assert.rejects(
+      requestBodyDeliver({
+        directory: pump.directory,
+        id,
+        repoRoot: root,
+        contractId: "kei/executor-voided",
+        includeDirty: false,
+        materializeConflict: false,
+      }),
+      (error: unknown) =>
+        error instanceof AkumaBodyRequestError &&
+        error.outcome === "voided" &&
+        error.diagnostic === "executor unavailable" &&
+        error.message === "contract.deliver failed: executor unavailable",
+    );
+    assert.equal(calls, 1);
   } finally {
     await pump.close();
     rmSync(root, { recursive: true, force: true });

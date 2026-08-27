@@ -131,9 +131,10 @@ result is the same typed value as local execution. Heart stores only the Repo
 coordinate, ContractId, and owner-minted delivery fact id, and never stores a
 materialization result. A later pump
 projects that durable accepted reference for the same request id without
-replaying delivery. A normal return without that owner-minted reference, or an
-executor throw or cancellation, settles Heart `voided`; the durable fact is the
-only settlement authority. Forwarding never carries actor, Settings, hooks,
+replaying delivery. A normal return without that owner-minted reference settles
+Heart `voided`; an executor throw or cancellation settles it `voided` with the
+underlying diagnostic evidence. The durable fact is the only settlement
+authority. Forwarding never carries actor, Settings, hooks,
 policy, callbacks, or an unresolved selector, and it never routes beyond the
 direct parent.
 
