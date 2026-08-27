@@ -2,6 +2,7 @@
   "worktree": {
     "create": [
       {
+        "name": "provision-dependencies",
         "argv": [
           "node",
           "scripts/provision-worktree-dependencies.js"
