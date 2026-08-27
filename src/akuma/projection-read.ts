@@ -121,12 +121,11 @@ export function selectSnapshot(
     input.aperture === "receipt" && input.admittedTellId !== undefined
       ? ledger.rows.find((row) => row.kind === "tell" && row.tellId === input.admittedTellId)
       : undefined;
-  const pins: readonly ActivityRow[] =
-    input.aperture === "receipt" && input.admittedTellId !== undefined
-      ? admittedTell === undefined
-        ? []
-        : [admittedTell]
-      : [...pending, ...(latestTold === undefined ? [] : [latestTold])];
+  const pins: readonly ActivityRow[] = [
+    ...pending,
+    ...(latestTold === undefined ? [] : [latestTold]),
+    ...(admittedTell === undefined ? [] : [admittedTell]),
+  ];
   const reported = frontierReportedChanges(ledger);
   if (ledger.openTurn !== undefined) {
     const window = ledger.openTurn.rows;

@@ -1336,14 +1336,14 @@ test("monitoring snapshots pin the latest settled Tell outside the ordinary budg
     budget: { tail: 3, voice: 0 },
     admittedTellId: "latest",
   });
-  assert.deepEqual(sequences(tellReceipt.snapshot), [5, "gap:1", 7, 8, 9]);
+  assert.deepEqual(sequences(tellReceipt.snapshot), [5, "gap:1", 7, 8, 9, 10]);
   assert.deepEqual(told(tellReceipt.snapshot), ["latest"]);
   assert.equal(tellReceipt.ordinaryCount, 3);
   assert.equal(
     tellReceipt.snapshot.entries.some(
       (entry) => entry.kind === "row" && entry.row.kind === "tell" && entry.row.tellId === "pending",
     ),
-    false,
+    true,
   );
 
   const closed = projectTurns([
@@ -1369,7 +1369,7 @@ test("monitoring snapshots pin the latest settled Tell outside the ordinary budg
   assert.equal(idleReceipt.ordinaryCount, 0);
 });
 
-test("tell receipt pins only its admitted Tell when another Tell is pending", () => {
+test("tell receipt retains pending Tells alongside its admitted Tell", () => {
   const ledger = projectTurns([
     { kind: "turn-start" as const, sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
     {
@@ -1431,10 +1431,7 @@ test("tell receipt pins only its admitted Tell when another Tell is pending", ()
     rows.map((row) => row.sequence),
     [4, 5, 6, 7],
   );
-  assert.equal(
-    rows.some((row) => row.kind === "tell" && row.tellId === "tell-a"),
-    false,
-  );
+  assert.equal(rows.some((row) => row.kind === "tell" && row.tellId === "tell-a"), true);
   assert.equal(
     rows.some((row) => row.kind === "tell" && row.tellId === "tell-b"),
     true,

@@ -20,9 +20,9 @@ window, and it appears once at its persisted sequence. Pin selection happens
 before tail and voice fill, so the Tell never consumes an ordinary slot.
 Mutation receipt snapshots keep the ordinary last-activity policy. A `tell`
 receipt additionally pins the Tell admitted by that invocation at its
-persisted timeline sequence, outside the ordinary tail and voice budgets, so
-the receipt always carries its own Tell row. A `kill` receipt does not pin a
-settled Tell.
+persisted timeline sequence, outside the ordinary tail and voice budgets, while
+retaining the ordinary actionable pending-Tell pins. A `kill` receipt does not
+pin a settled Tell.
 Every snapshot arm, including unborn, also carries `reportedChanges` and
 `reportedChangesOmitted` from that same frontier Turn. Eligible source rows
 are completed `fileChange` tools with successful result status; each native
@@ -86,9 +86,9 @@ heart admission.
 timeline snapshot. It is not a fleet row and does not extend or embed the fleet
 projection. `status`, `wait`, `call`, `tell`, `interrupt`, and `kill` use the
 same readonly snapshot union. Monitoring observations (`status`, `wait`,
-`call`) pins the latest settled Tell. A `tell` mutation receipt pins only the
-Tell admitted by that invocation; other mutation receipts, including `kill`,
-do not pin a settled Tell.
+`call`) pins the latest settled Tell. A `tell` mutation receipt retains the
+ordinary snapshot pins and adds only the Tell admitted by that invocation;
+other mutation receipts, including `kill`, do not pin a settled Tell.
 An open snapshot may contain an `active` tool; an idle or unborn snapshot
 cannot represent one. A closed
 Turn's unmatched tool start remains `unsettled` in history and is not a claim
