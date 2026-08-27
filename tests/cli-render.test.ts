@@ -13,18 +13,58 @@ test("catalog text renders only the selected identity layer", () => {
       kind: "archetypes",
       rows: [{ name: "reviewer", model: "codex-5", description: "Read the complete change without truncation." }],
     }),
-    ["reviewer - codex-5", "  Read the complete change without truncation."].join("\n"),
+    ["archetypes 1", "", "reviewer - codex-5", "  Read the complete change without truncation."].join("\n"),
   );
   assert.equal(
     renderCatalogText({
       kind: "akuma",
       root: "/world",
       archetype: "worker",
+      observedAt: "2026-08-12T00:00:00.000Z",
       rows: [{ id: "aku/worker/deadbeef" as never, life: "unborn" }],
       searched: ["/world/.keiyaku/akuma/run"],
     }),
-    "aku/worker/deadbeef - unborn",
+    ["akuma instances 1 of 1 known", "  scope worker", "", "○ aku/worker/deadbeef · unborn"].join("\n"),
   );
+});
+
+test("scoped Akuma catalog recovery preserves its instance population", () => {
+  const text = renderCatalogText({
+    kind: "akuma",
+    root: "/world",
+    archetype: "worker",
+    observedAt: "2026-08-12T00:00:00.000Z",
+    rows: Array.from({ length: 11 }, (_, index) => ({
+      id: `aku/worker/${String(index).padStart(8, "0")}` as never,
+      life: "unborn" as const,
+    })),
+    searched: [],
+  });
+  assert.match(text, /akuma instances 10 of 11 known/u);
+  assert.match(text, /keiyaku ls aku\/worker\//u);
+  assert.doesNotMatch(text, /aku\/\*\/\*/u);
+});
+
+test("Akuma catalog renders future ages as now", () => {
+  const text = renderCatalogText({
+    kind: "akuma",
+    root: "/world",
+    archetype: "worker",
+    observedAt: "2026-08-12T00:00:00.000Z",
+    rows: [
+      {
+        id: "aku/worker/future" as never,
+        archetype: "worker",
+        life: "unborn",
+        lifeAt: "2026-08-12T00:00:01.000Z",
+        lastActivityAt: null,
+        pending: [],
+      },
+    ],
+    searched: [],
+  });
+  assert.match(text, /○ aku\/worker\/future · unborn · now/u);
+  assert.doesNotMatch(text, /0s/u);
 });
 
 test("Contract catalog keeps domain IDs complete and makes every gate state legible", () => {
@@ -149,7 +189,10 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
       },
     ],
   });
-  assert.match(disappeared, /^  candidate · target main · commits behind main unknown · target moved · bbbbbbb -> null$/mu);
+  assert.match(
+    disappeared,
+    /^  candidate · target main · commits behind main unknown · target moved · bbbbbbb -> null$/mu,
+  );
 });
 
 test("observation text keeps the command and view data together", () => {

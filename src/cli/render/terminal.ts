@@ -201,3 +201,80 @@ export function tone(value: string, kind: "dim" | "alert", color: boolean): stri
   if (!color) return value;
   return kind === "dim" ? `\u001b[2m${value}\u001b[0m` : `\u001b[31m${value}\u001b[0m`;
 }
+
+const KANSHI_NARROW_COLUMNS = 72;
+
+export function boundedActivity(value: string, columns: number, prefix: string): string {
+  const budget = Math.max(1, columns - displayColumns(prefix));
+  return `activity "${truncateDisplayText(value, Math.max(1, budget - displayColumns('activity ""')))}` + `"`;
+}
+
+export function plumbFacts(facts: readonly string[], columns: number): readonly string[] {
+  const clean = facts.map(safeText).filter((fact) => fact.length > 0);
+  if (clean.length === 0) return [];
+  const lines: string[] = [];
+  let current = "  │ ";
+  for (const fact of clean) {
+    const candidate = current === "  │ " ? `  │ ${fact}` : `${current} · ${fact}`;
+    if (current !== "  │ " && displayColumns(candidate) > columns) {
+      lines.push(current);
+      current = `  │ ${fact}`;
+    } else current = candidate;
+  }
+  lines.push(current);
+  return lines;
+}
+
+export function identityLine(mark: string, identity: string, extra = ""): string {
+  return extra.length === 0 ? `${mark} ${safeText(identity)}` : `${mark} ${safeText(identity)} ${safeText(extra)}`;
+}
+
+export function entityLines(
+  entity: Readonly<{
+    mark: string;
+    identity: string;
+    state: string;
+    title: string;
+    facts: readonly string[];
+    context: TextRenderContext;
+  }>,
+): readonly string[] {
+  const { mark, identity, state, title, facts, context } = entity;
+  if (context.columns > KANSHI_NARROW_COLUMNS) {
+    return [identityLine(mark, identity, `· ${state} · ${title}`), ...plumbFacts(facts, context.columns)];
+  }
+  return [
+    `${mark} ${safeText(state)}`,
+    `  ${safeText(identity)}`,
+    ...(title.length === 0 ? [] : renderTextBlock(safeText(title), "  ", context.columns)),
+    ...plumbFacts(facts, context.columns),
+  ];
+}
+
+export function renderSectionBlock({
+  name,
+  unit,
+  selector,
+  continuation,
+  rows,
+  total,
+  neutral = false,
+}: Readonly<{
+  name: string;
+  unit: string;
+  selector: string;
+  continuation?: string;
+  rows: readonly (readonly string[])[];
+  total: number;
+  neutral?: boolean;
+}>): readonly string[] {
+  const lines = [`[ ${name} ]  ${total}${neutral ? ` ${unit}` : " live"}`, "", ...rows.flat()];
+  if (lines.at(-1) !== "") lines.push("");
+  lines.push(
+    rows.length === total
+      ? `  (all ${total}${neutral ? "" : " live"} ${unit} shown)`
+      : `  + ${total - rows.length} more${neutral ? "" : " live"} ${unit} not shown`,
+  );
+  if (rows.length !== total) lines.push(`    ${continuation ?? `keiyaku ls ${selector}/`}`);
+  return lines;
+}

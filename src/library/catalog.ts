@@ -27,6 +27,7 @@ export type Catalog =
       kind: "akuma";
       root: WorldRoot;
       archetype: string | null;
+      observedAt: string;
       rows: AkumaList["rows"];
       searched: readonly string[];
     }>;
@@ -111,6 +112,7 @@ export async function listCatalog(input: CatalogInput): Promise<Catalog> {
     kind: "akuma",
     root: path,
     archetype: query.archetype ?? null,
+    observedAt: listed.observedAt,
     rows: listed.rows,
     searched: listed.searched,
   };

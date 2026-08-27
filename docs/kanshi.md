@@ -309,9 +309,13 @@ After its visible rows, a complete section writes exactly
 exactly `  + <N> more live <unit> not shown`; a partial AKUMA writes exactly
 `  + <N> more akuma not shown`; each is followed by
 `    keiyaku ls <selector>/`; the resulting commands are `keiyaku ls kei/`,
-`keiyaku ls aku/`, and `keiyaku ls task/`. The
+`keiyaku ls aku/`, and `keiyaku ls task/`. FLEET's instance continuation is
+`keiyaku ls "aku/*/*"` when unscoped and `keiyaku ls aku/<archetype>/` when
+scoped; it never points at the archetype directory. The
 omitted count is the relevant section count beyond the ten-row aperture and
-never includes terminal Contract or Task rows. Fleet keeps its ten-row aperture
+never includes terminal Contract or Task rows. TASK continuation is always
+`keiyaku task ls --world`.
+Fleet keeps its ten-row aperture
 and snapshot read boundary, but text projects only one physical
 `activity "<bounded text>"` line for a visible latest semantic activity or idle
 outcome. The value is safe-text-normalized and clipped with the terminal

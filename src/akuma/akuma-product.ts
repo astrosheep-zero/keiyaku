@@ -169,6 +169,7 @@ export class Akuma {
     const unknown = Object.keys(input).find((key) => key !== "archetype");
     if (unknown !== undefined) throw new TypeError(`Akuma list input has unknown field: ${unknown}`);
     const selected = input.archetype === undefined ? undefined : archetypeName(input.archetype);
+    const observedAt = new Date().toISOString();
     const runRoot = akumaRunRoot(this.path);
     let names: string[];
     try {
@@ -177,7 +178,7 @@ export class Akuma {
         .map((entry) => entry.name)
         .sort();
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { rows: [], searched: [runRoot] };
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { observedAt, rows: [], searched: [runRoot] };
       throw error;
     }
     const rows: AkumaList["rows"][number][] = [];
@@ -194,7 +195,7 @@ export class Akuma {
         rows.push(await fleetListRow(paths, physical.id));
       } catch {}
     }
-    return { rows, searched: [runRoot] };
+    return { observedAt, rows, searched: [runRoot] };
   }
 }
 export async function callAkumaWithContext(

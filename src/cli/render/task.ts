@@ -60,8 +60,9 @@ function isWorldObservation(result: TaskInvocationResult): result is TaskWorldOb
 function markFor(word: string): string {
   if (word === "in_progress") return "●";
   if (word === "ready" || word === "open") return "○";
-  if (word === "blocked" || word === "missing") return "!";
-  if (word === "on_hold") return "·";
+  if (word === "blocked") return "‖";
+  if (word === "missing") return "!";
+  if (word === "on_hold") return "⧗";
   if (word === "done") return "✓";
   if (word === "drop") return "×";
   return "?";
@@ -151,7 +152,7 @@ function compactFacts(item: TaskRow): string {
   return [
     `updated ${updatedAge(item.updatedAt)}`,
     ...(item.bodyPresent ? [] : ["no body"]),
-    ...(item.children === undefined ? [] : [`children ${item.children.live}/${item.children.total} live`]),
+    ...(item.children === undefined ? [] : [`children ${item.children.live} live · ${item.children.total} total`]),
   ].join(" · ");
 }
 
@@ -184,6 +185,7 @@ function shellQuote(value: string): string {
 function recoveryCommand(command: ParsedTaskCommand, total: number): string {
   const parts = ["keiyaku", "task", command.action];
   if (command.action === "ls") {
+    if (command.positionals.length > 0) parts.push(command.positionals[0]!);
     if (command.flags.closed === true) parts.push("--closed");
     if (command.flags.all === true) parts.push("--all");
   }
@@ -212,8 +214,18 @@ function renderRows(
         `    ${recoveryCommand(command, result.value.total)}`,
       ]
     : [];
+  const scope =
+    command.action === "ls"
+      ? command.flags.world === true
+        ? "world"
+        : command.positionals.length > 0
+          ? `namespace ${command.positionals[0]!.replace(/^task\//u, "").replace(/\/$/u, "") || "root"}`
+          : "current namespace"
+      : undefined;
+  const heading =
+    scope === undefined ? pageHeading(view, result.value) : `${pageHeading(view, result.value)} · ${scope}`;
   return [
-    pageHeading(view, result.value),
+    heading,
     ...result.value.rows.flatMap((item) => renderListRow(item, columns, command.action === "ready")),
     ...footer,
   ].join("\n");

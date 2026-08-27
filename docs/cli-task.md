@@ -257,8 +257,9 @@ The indivisible scan unit is `<mark> <complete TaskId> · P<n> <word>`. List
 and query copy `TaskDisposition`; show, mutation, and tree copy persisted
 `TaskState`; a missing referenced Task uses `missing`; unknown priority uses
 `P?` only when the public value lacks priority. Pair marks and words as
-`● in_progress`, `○ ready` or `○ open`, `! blocked` or `! missing`, `· on_hold`,
-`✓ done`, `× drop`, and `?` for retry or unknown evidence. Do not add a new
+`● in_progress`, `○ ready` or `○ open`, `‖ blocked` or `! missing`, `⧗ on_hold`,
+`✓ done`, `× drop`, and `?` for retry or unknown evidence. These marks are
+shared with world status; do not add a new
 glyph. If the title does not fit after the scan unit, keep the em dash at the
 end of the first line and wrap prose on two-space continuation lines at
 display-word boundaries. Never truncate or split TaskId, path, or another
@@ -270,10 +271,12 @@ and singular lowercase labels: `needs`, `blocks`, `child`, `parent`,
 and other labeled payloads use one lowercase label line, one blank line,
 byte-exact payload, and one trailing blank line.
 
-`ls` begins `tasks <returned>`; `ready`, `blocked`, and `query` begin with
+`ls` begins `tasks <returned> · <scope>`, where bare `task ls` names the
+current namespace scope, an explicit selector names its namespace, and
+`--world` names world scope. `ready`, `blocked`, and `query` begin with
 their lowercase view word. A truncated page renders
-`<view> <returned> of <total> · limit <returned>`. A present empty result
-renders `<view> 0`. Preserve public page order. Rows render only mark,
+`<view> <returned> of <total> · limit <returned> · <scope>` for `ls`; a present
+empty result renders `tasks 0 · <scope>`. Preserve public page order. Rows render only mark,
 complete TaskId, priority, disposition, and title. Query-only timestamps,
 parent, needs, and blocks stay in JSON. Blocked rows alone add one
 `needs <TaskId> · <state>` evidence row per unresolved blocker.
@@ -316,7 +319,7 @@ exact reusable draft bytes. Stderr begins
 then each admitted `diff <TaskId>` exact payload in order. Exit remains `1`.
 
 Context text renders `context root` for `[]` and
-`context <segments joined by />` otherwise, then ` · ` and the source
+`context <segments joined by />` otherwise, then `·` and the source
 classification. JSON retains `{ namespace, source }`. Project every current
 `TaskRefusal` and `TaskRetry` member to its lowercase kind and exact public
 scalar coordinates. Renderer output contains no braces, JSON quotes, or

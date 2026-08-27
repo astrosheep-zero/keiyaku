@@ -305,7 +305,12 @@ export const cliZones = [
       any("kanshi/fleet.ts"),
       any("cli/render/contract-observation.ts"),
       any("cli/render/terminal.ts"),
+      any("cli/render/kanshi-akuma.ts"),
     ],
+  },
+  {
+    source: "cli/render/kanshi-akuma.ts",
+    allow: [types("kanshi/index.ts"), any("kanshi/fleet.ts"), any("cli/render/terminal.ts")],
   },
   { source: "cli/render/nuke.ts", allow: [types("index.ts")] },
   {

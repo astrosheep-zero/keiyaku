@@ -338,7 +338,7 @@ test("task invocation works outside Git and consumes stdin only when selected", 
   if (showCommand.command !== "task") throw new Error("not a task command");
   assert.match(renderTaskText(showCommand, noteShown), /created .* · updated .*/u);
   assert.match(renderTaskText(showCommand, noteShown), /note\n\nreplacement\n/u);
-  assert.match(renderTaskText(showCommand, noteShown), /· task\/native-cli · P2 on_hold — Native CLI/u);
+  assert.match(renderTaskText(showCommand, noteShown), /⧗ task\/native-cli · P2 on_hold — Native CLI/u);
 
   const document = "---\ntitle: From document\nstate: done\n---\ncreated closed\n";
   const documentAdd = (await invoke(parseArgv(["-C", root, "task", "add", "-"]), {
@@ -603,10 +603,10 @@ test("task compose and views flow through native results", async () => {
   const listed = (await invoke(parseArgv(["-C", root, "task", "ls"]))) as TaskInvocationResult;
   const command = parseArgv(["task", "ls"]).command;
   if (command.command !== "task") throw new Error("not a task command");
-  assert.match(renderTaskText(command, listed), /^tasks 2$/mu);
+  assert.match(renderTaskText(command, listed), /^tasks 2 · current namespace$/mu);
   assert.match(
     renderTaskText(command, listed),
-    /^○ task\/parent · P2 ready · updated .* · no body · children 1\/1 live — Parent$/mu,
+    /^○ task\/parent · P2 ready · updated .* · no body · children 1 live · 1 total —$/mu,
   );
   assert.equal(taskExitCode(listed), 0);
 });
@@ -710,7 +710,7 @@ test("Task world reads distinguish absent authority from a present empty world",
     assert.deepEqual(value, action === "doctor" ? { issues: [] } : emptyPage);
     assert.equal(
       renderTaskText(command, observed),
-      action === "doctor" ? "healthy" : `${action === "ls" ? "tasks" : action} 0`,
+      action === "doctor" ? "healthy" : action === "ls" ? "tasks 0 · current namespace" : `${action} 0`,
     );
     assert.equal(taskExitCode(observed), 0);
   }
@@ -907,8 +907,8 @@ test("Task list, blocked, show, mutation, and batch text use one scan grammar", 
   if (lsCommand.command !== "task") throw new Error("not a task command");
   const listed = (await invoke(parseArgv(["-C", root, "task", "ls", "--limit", "1"]))) as TaskInvocationResult;
   const listedText = renderTaskText(lsCommand, listed);
-  assert.match(listedText, /^tasks 1 of 3 · limit 1$/mu);
-  assert.match(listedText, /^! task\/blocked · P2 blocked · updated .* — Blocked$/mu);
+  assert.match(listedText, /^tasks 1 of 3 · limit 1 · current namespace$/mu);
+  assert.match(listedText, /^‖ task\/blocked · P2 blocked · updated .* — Blocked$/mu);
   assert.doesNotMatch(listedText, /needs |created |parent /u);
 
   const blockedCommand = parseArgv(["task", "blocked"]).command;
@@ -916,7 +916,7 @@ test("Task list, blocked, show, mutation, and batch text use one scan grammar", 
   const blocked = (await invoke(parseArgv(["-C", root, "task", "blocked"]))) as TaskInvocationResult;
   const blockedText = renderTaskText(blockedCommand, blocked);
   assert.match(blockedText, /^blocked 1$/mu);
-  assert.match(blockedText, /^! task\/blocked · P2 blocked · updated .* — Blocked$/mu);
+  assert.match(blockedText, /^‖ task\/blocked · P2 blocked · updated .* — Blocked$/mu);
   assert.match(blockedText, /^  needs task\/need · open$/mu);
 
   await invoke(parseArgv(["-C", root, "task", "add", "Open need"]));
@@ -1087,7 +1087,7 @@ test("built CLI Task text stays one scan grammar at 80 and 36 columns", async ()
   assert.notEqual(narrow.code, 3, narrow.stderr);
   assert.doesNotMatch(narrow.stdout, /\{"kind"|TaskId - P/u);
   assertCopyable(narrow.stdout, [longId, blockerId]);
-  assert.equal(narrow.stdout.includes(`! ${longId} · P2 blocked · updated`), true);
+  assert.equal(narrow.stdout.includes(`‖ ${longId} · P2 blocked · updated`), true);
   assertFitsOrOverflowsLawfully(narrow.stdout, 36);
 
   const empty = world();
@@ -1102,7 +1102,7 @@ test("built CLI Task text stays one scan grammar at 80 and 36 columns", async ()
     kind: "present",
     value: { kind: "accepted", value: { rows: [], total: 0, returned: 0, truncated: false } },
   });
-  assert.equal(renderTaskText(lsCommand, presentEmpty), "tasks 0");
+  assert.equal(renderTaskText(lsCommand, presentEmpty), "tasks 0 · current namespace");
   assert.equal(taskExitCode(presentEmpty), 0);
 
   const absentCommand = parseArgv(["task", "ls"]).command;

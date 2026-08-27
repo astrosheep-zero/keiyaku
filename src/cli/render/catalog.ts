@@ -25,6 +25,68 @@ function targetLine(row: ContractRow, abbreviations: ReadonlyMap<string, string>
   );
 }
 
+const CATALOG_VISIBLE_AKUMA = 10;
+
+function akumaMark(life: string): string {
+  if (life === "running") return "●";
+  if (life === "asleep" || life === "unborn") return "○";
+  if (life === "killed") return "×";
+  if (life === "stillborn") return "!";
+  return "?";
+}
+
+function akumaUpdatedAt(row: Extract<Catalog, { kind: "akuma" }>["rows"][number]): string | null {
+  const lifeAt = "lifeAt" in row ? row.lifeAt : null;
+  const activityAt = "lastActivityAt" in row ? row.lastActivityAt : null;
+  if (lifeAt === null) return activityAt;
+  if (activityAt === null) return lifeAt;
+  return lifeAt > activityAt ? lifeAt : activityAt;
+}
+
+function relativeAge(source: string | null, observedAt: string): string | null {
+  if (source === null) return null;
+  const seconds = Math.floor((Date.parse(observedAt) - Date.parse(source)) / 1_000);
+  if (seconds < 0) return "now";
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
+function renderAkumaCatalog(catalog: Extract<Catalog, { kind: "akuma" }>): string {
+  const ordered = [...catalog.rows].sort((left, right) => {
+    const leftAt = akumaUpdatedAt(left);
+    const rightAt = akumaUpdatedAt(right);
+    if (leftAt === rightAt) return 0;
+    if (leftAt === null) return 1;
+    if (rightAt === null) return -1;
+    return leftAt > rightAt ? -1 : 1;
+  });
+  const rows = ordered.slice(0, CATALOG_VISIBLE_AKUMA);
+  const lines = [
+    `akuma instances ${rows.length} of ${ordered.length} known`,
+    ...(catalog.archetype === null ? [] : [`  scope ${safeText(catalog.archetype)}`]),
+    "",
+  ];
+  for (const row of rows) {
+    const lifeAt = "lifeAt" in row ? row.lifeAt : null;
+    const activityAt = "lastActivityAt" in row ? row.lastActivityAt : null;
+    const ages = [relativeAge(lifeAt, catalog.observedAt), relativeAge(activityAt, catalog.observedAt)].filter(
+      (age): age is string => age !== null,
+    );
+    lines.push(
+      `${akumaMark(row.life)} ${safeText(row.id)} · ${row.life}${ages.length === 0 ? "" : ` · ${ages.join(" · ")}`}`,
+    );
+  }
+  if (rows.length < ordered.length) {
+    const selector = catalog.archetype === null ? '"aku/*/*"' : `aku/${catalog.archetype}/`;
+    lines.push("", `  + ${ordered.length - rows.length} more akuma not shown`, `    keiyaku ls ${selector}`);
+  }
+  return lines.join("\n");
+}
+
 function catalogMark(row: ContractRow): string {
   if (row.phase === "claimed") return "✓";
   if (row.phase === "abandoned") return "×";
@@ -79,17 +141,14 @@ export function renderCatalogText(catalog: Catalog): string {
   }
   if (catalog.kind === "contracts") return renderContractCatalog(catalog);
   if (catalog.kind === "archetypes") {
-    return catalog.rows
-      .flatMap((row) => [
+    return [
+      `archetypes ${catalog.rows.length}`,
+      "",
+      ...catalog.rows.flatMap((row) => [
         `${safeText(row.name)}${row.model === undefined ? "" : ` - ${safeText(row.model)}`}`,
         ...(row.description === undefined ? [] : [`  ${safeText(row.description)}`]),
-      ])
-      .join("\n");
+      ]),
+    ].join("\n");
   }
-  return catalog.rows
-    .map((row) => {
-      if (!("lifeAt" in row)) return `${safeText(row.id)} - ${row.life}`;
-      return `${safeText(row.id)} - ${row.life} - runtime ${row.lifeAt ?? "-"} - last activity ${row.lastActivityAt ?? "-"}`;
-    })
-    .join("\n");
+  return renderAkumaCatalog(catalog);
 }

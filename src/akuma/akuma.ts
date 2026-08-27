@@ -82,6 +82,7 @@ export type UnbornAkumaListRow = Readonly<{
 }>;
 
 export type AkumaList = Readonly<{
+  observedAt: string;
   rows: readonly (AkumaListRow | UnbornAkumaListRow)[];
   searched: readonly string[];
 }>;

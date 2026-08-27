@@ -901,6 +901,7 @@ function attentionReport(): KanshiReport {
     akuma: {
       kind: "present",
       value: {
+        observedAt: "2026-08-12T00:00:00.000Z",
         searched: ["/repo/.keiyaku/akuma/run"],
         rows: [
           {
@@ -1478,9 +1479,9 @@ test("Kanshi sections use a ten-row aperture with exact complete and partial foo
   ] as const) {
     const body = sectionBody(partial, section);
     assert.match(body, new RegExp(`\\+ 2 more live ${unit} not shown`, "u"));
-    assert.match(body, new RegExp(`keiyaku ls ${selector}/`, "u"));
+    assert.match(body, selector === "task" ? /keiyaku task ls --world/u : new RegExp(`keiyaku ls ${selector}/`, "u"));
   }
-  assert.match(sectionBody(partial, "FLEET"), /\+ 2 more akuma not shown[\s\S]*keiyaku ls aku\//u);
+  assert.match(sectionBody(partial, "FLEET"), /\+ 2 more akuma not shown[\s\S]*keiyaku ls "aku\/\*\/\*"/u);
   assert.match(sectionBody(partial, "KEIYAKU"), /^○ kei\/new-cold · waiting · 1m/mu);
   assert.match(sectionBody(partial, "FLEET"), /^× aku\/worker\/new-cold · killed · 1m/mu);
   assert.match(sectionBody(partial, "TASK"), /^○ task\/new-cold · ready/mu);
@@ -1806,7 +1807,7 @@ test("absent and failed Kanshi sections stay typed and distinct from empty prese
       branch: null,
       contracts: { kind: "failed", failure: { message: "broken board" } },
       tasks: { kind: "absent" },
-      akuma: { kind: "present", value: { searched: [], rows: [] } },
+      akuma: { kind: "present", value: { observedAt: "2026-08-12T00:00:00.000Z", searched: [], rows: [] } },
     },
     { columns: 80, color: false },
   );

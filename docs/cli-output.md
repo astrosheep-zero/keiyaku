@@ -97,6 +97,14 @@ using lowercase semantic blocks for `after`, `dependents`, `gates`,
 `namespace tasks`. Git object IDs use the existing unique-prefix primitive;
 Contract, Change, Task, and Akuma identities remain complete.
 
+The archetype catalog is headed `archetypes <N>` so it cannot be mistaken for
+the Akuma instance population. The instance selector renders a bounded text
+view headed `akuma instances <returned> of <total> known`; relative ages are
+derived against the list's producer-sampled `observedAt` fact. A partial
+unscoped view exposes the exact `keiyaku ls "aku/*/*"` recovery command, while
+a scoped view preserves its `aku/<archetype>/` selector. JSON remains the
+complete catalog with exact timestamps and full rows.
+
 World and catalog Contract attachments show all non-terminal Akuma, or only the
 most recent terminal attachment when none are non-terminal. Selected Contract
 status shows every attached Akuma, including terminal retry history.
