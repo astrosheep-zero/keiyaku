@@ -122,6 +122,29 @@ export function safeText(value: string): string {
   return value.replaceAll(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (character) => (/\s/u.test(character) ? " " : "�"));
 }
 
+type CheckoutNotFollowable = Readonly<{
+  reason: "staged" | "conflict" | "untracked";
+  path: string;
+  target: string;
+  paths: readonly string[];
+}>;
+
+export function checkoutNotFollowableLines(refusal: CheckoutNotFollowable): readonly string[] {
+  const lines = [
+    "! checkout-not-followable",
+    `  checkout: ${safeText(refusal.path)}`,
+    `  target: ${safeText(refusal.target)}`,
+    `  reason: ${refusal.reason}`,
+  ];
+  if (refusal.paths.length === 0) {
+    lines.push("  paths: (none)");
+  } else {
+    lines.push("  paths:");
+    lines.push(...refusal.paths.map((path) => `    - ${JSON.stringify(path)}`));
+  }
+  return lines;
+}
+
 export function renderTextBlock(value: string, indent: string, columns: number): readonly string[] {
   const words = safeText(value)
     .trim()

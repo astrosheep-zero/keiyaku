@@ -292,6 +292,22 @@ The renderer prints each typed `unmet` member exactly once. It does not read
 the board, inspect a Contract, or derive a lifecycle category; JSON serializes
 that same public collection unchanged.
 
+A `checkout-not-followable` completion stop keeps its ordinary completion row,
+then renders exactly this typed-refusal block:
+
+```text
+! checkout-not-followable
+  checkout: <opaque-checkout-path>
+  target: <opaque-target-ref>
+  reason: <staged|conflict|untracked>
+  paths:
+    - "<escaped exact path>"
+```
+
+Paths stay in their typed order, each quoted and escaped; an empty collection
+renders exactly `  paths: (none)` with no list items. This renderer performs no
+Git or filesystem read and JSON preserves the original refusal unchanged.
+
 Bind reports its typed workspace coordinate and optional target; a missing
 target renders `no target`. Amend places the exact `terms diff` immediately
 after its first line because the diff is its product answer, not mechanical

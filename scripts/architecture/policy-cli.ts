@@ -310,7 +310,12 @@ export const cliZones = [
   { source: "cli/render/nuke.ts", allow: [types("index.ts")] },
   {
     source: "cli/render/receipt.ts",
-    allow: [types("index.ts"), types("cli/result.ts"), any("cli/render/terminal.ts")],
+    allow: [
+      types("index.ts"),
+      types("cli/result.ts"),
+      any("cli/render/refusal.ts", ["renderRefusalFacts"]),
+      any("cli/render/terminal.ts"),
+    ],
   },
   {
     source: "cli/render/refusal.ts",

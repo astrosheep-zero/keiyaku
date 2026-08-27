@@ -1,6 +1,13 @@
 import type { BindDraftReceipt, RefusedResult } from "../result.js";
 import type { IntegrationConflictMaterialized, KeiyakuRefusal } from "../../index.js";
-import { displayColumns, gitShortStat, renderOpaqueBlock, safeText, type TextRenderContext } from "./terminal.js";
+import {
+  checkoutNotFollowableLines,
+  displayColumns,
+  gitShortStat,
+  renderOpaqueBlock,
+  safeText,
+  type TextRenderContext,
+} from "./terminal.js";
 
 type DirtyWithOption = Extract<KeiyakuRefusal, { kind: "dirty-workspace" }> & {
   option?: Readonly<{ flag: string; available: boolean }>;
@@ -122,19 +129,7 @@ export function renderRefusalFacts(
     );
   }
   if (refusal.kind === "checkout-not-followable") {
-    const lines = [
-      ...renderOpaqueBlock(
-        refusalHead(refusal.kind, identity, [
-          `target=${refusal.target}`,
-          `path=${refusal.path}`,
-          `reason=${refusal.reason}`,
-        ]),
-        indent,
-        columns,
-      ),
-    ];
-    lines.push(...collectionLines("paths", refusal.paths, indent, columns));
-    return lines;
+    return checkoutNotFollowableLines(refusal);
   }
   return renderOpaqueBlock(refusalHead(refusal.kind, identity, []), indent, columns);
 }

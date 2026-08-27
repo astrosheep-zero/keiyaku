@@ -1,5 +1,6 @@
 import type { PlacementStop, VerificationReuse, VerificationStop } from "../../index.js";
 import type { AcceptedDeliverResult, Lag } from "../result.js";
+import { renderRefusalFacts } from "./refusal.js";
 import { displayColumns, renderOpaqueBlock, safeText } from "./terminal.js";
 
 export type ReceiptSegment = Readonly<{ text: string; opaque?: boolean }>;
@@ -117,6 +118,9 @@ export function stopLines(
   const state = label === "verification" ? "failed" : "blocked";
   receiptRow(lines, "!", label, [{ text: state }, { text: "·" }, ...detail], columns);
   lines.push(...prerequisiteRows(stop, columns));
+  if ("refusal" in stop && stop.refusal?.kind === "checkout-not-followable") {
+    lines.push(...renderRefusalFacts(stop.refusal, "", columns, addressed));
+  }
   if ("failure" in stop && stop.failure === "environment-failure" && "command" in stop) {
     appendHookPayload(lines, stop.detail);
   }

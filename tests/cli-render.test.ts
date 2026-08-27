@@ -297,6 +297,105 @@ test("completion stops render the public unmet prerequisites in order", () => {
   );
 });
 
+test("completion stops project every checkout-followability refusal fact", () => {
+  const contract = contractId("kei/checkout-followability");
+  const envelope = {
+    kind: "accepted" as const,
+    contract,
+    head: contractHead("head"),
+    facts: [],
+    effects: [],
+    settlement: { actions: [], lags: [] },
+  };
+  const cases = [
+    {
+      reason: "staged" as const,
+      paths: ["staged.ts", 'quote"path.ts'],
+      text: [
+        "! checkout-not-followable",
+        "  checkout: /repo/checkout",
+        "  target: refs/heads/main",
+        "  reason: staged",
+        "  paths:",
+        '    - "staged.ts"',
+        '    - "quote\\"path.ts"',
+      ],
+    },
+    {
+      reason: "conflict" as const,
+      paths: ["conflict.ts"],
+      text: [
+        "! checkout-not-followable",
+        "  checkout: /repo/checkout",
+        "  target: refs/heads/main",
+        "  reason: conflict",
+        "  paths:",
+        '    - "conflict.ts"',
+      ],
+    },
+    {
+      reason: "untracked" as const,
+      paths: [],
+      text: [
+        "! checkout-not-followable",
+        "  checkout: /repo/checkout",
+        "  target: refs/heads/main",
+        "  reason: untracked",
+        "  paths: (none)",
+      ],
+    },
+  ];
+
+  for (const { reason, paths, text } of cases) {
+    const rendered = renderText({
+      ...envelope,
+      verb: "deliver",
+      placement: {
+        refusal: {
+          kind: "checkout-not-followable",
+          contractId: contract,
+          target: "refs/heads/main",
+          path: "/repo/checkout",
+          reason,
+          paths,
+        },
+      },
+    });
+    const renderedLines = rendered.split("\n");
+    const start = renderedLines.indexOf("! checkout-not-followable");
+    assert.notEqual(start, -1);
+    assert.deepEqual(renderedLines.slice(start, start + text.length), text);
+  }
+});
+
+test("direct checkout refusal uses the same exact fact block", () => {
+  const contract = contractId("kei/direct-checkout-followability");
+  assert.equal(
+    renderText({
+      kind: "refused",
+      verb: "deliver",
+      contract,
+      refusal: {
+        kind: "checkout-not-followable",
+        contractId: contract,
+        target: "refs/heads/main",
+        path: "/repo/checkout",
+        reason: "conflict",
+        paths: ["a/b.txt"],
+      },
+    }),
+    [
+      `! deliver refused — ${contract}`,
+      "! checkout-not-followable",
+      "  checkout: /repo/checkout",
+      "  target: refs/heads/main",
+      "  reason: conflict",
+      "  paths:",
+      '    - "a/b.txt"',
+    ].join("\n"),
+  );
+});
+
 test("deliver projects a ran Verification completion", () => {
   const contract = contractId("kei/completion");
   const integration = snapshotId("integration-1");
