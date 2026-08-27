@@ -101,10 +101,10 @@ entry is a product settings error. Each entry is an ordered array of commands:
 {
   "worktree": {
     "create": [
-      { "argv": ["npm", "ci", "--ignore-scripts"], "timeoutMs": 300000 }
+      { "name": "install", "argv": ["npm", "ci", "--ignore-scripts"], "timeoutMs": 300000 }
     ],
     "destroy": [
-      { "argv": ["./scripts/teardown.sh"], "timeoutMs": 60000 }
+      { "name": "teardown", "argv": ["./scripts/teardown.sh"], "timeoutMs": 60000 }
     ]
   }
 }
@@ -116,7 +116,7 @@ through 2,147,483,647. Commands execute directly without a shell; interpolation
 and environment loading are not part of Settings. The returned arrays and
 commands are deeply frozen. A Keiyaku-created worktree uses only commands
 decoded from the project Settings bytes in the snapshot it checks out. Managed
-worktrees freeze those commands in their durable marker. Disposable Verification
+worktrees use those commands for each invocation. Disposable Verification
 scratch uses a project-only reader against its materialized integration tree:
 it does not read user Settings, caller-current Settings, caller lockfiles, or
 caller `node_modules`, and it retains no marker or progress state. Execution

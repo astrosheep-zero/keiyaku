@@ -185,7 +185,8 @@ criteria and extensions. Body semantics remain owned by the document chapter.
 
 Every Contract mutation and `reconcile` passes one CLI-observed `WorktreeHooks`
 value to the public operation; the CLI never runs hooks or reads markers.
-`--retry-hooks` retries only a frozen failed phase. Verification instead reads
+`--retry-hooks` retries the complete current hook phase; hook authors own
+idempotence. Verification instead reads
 tracked Settings from the integration snapshot. The CLI has no global
 Verification timeout or cancellation flag.
 

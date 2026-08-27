@@ -1,29 +1,15 @@
-import { observeWorktreeHookMarker } from "../../git/hooks.js";
 import type { GitRepository } from "../../git/process.js";
-import { registeredWorktrees, worktreeGitDirectory } from "../../git/repository.js";
+import { registeredWorktrees } from "../../git/repository.js";
 import { observeTargetCheckoutShape } from "../../git/target-placement.js";
 import type { ContractRow } from "./status.js";
 
-export type CurrentPhysicalIssue =
-  | Readonly<{ kind: "hook-failure"; diagnostic: string }>
-  | Readonly<{ kind: "target-checkout-retained"; target: string }>;
+export type CurrentPhysicalIssue = Readonly<{ kind: "target-checkout-retained"; target: string }>;
 
-function appointedWorkspacePath(row: ContractRow): string | null {
-  const observation = row.workspaceObservation;
-  if (observation.kind !== "clean" && observation.kind !== "dirty") return null;
-  return observation.location.kind === "worktree" ? observation.location.path : null;
-}
-
-/** Selected-only pure projection of durable hook failure or retained target checkout. */
+/** Selected-only pure projection of retained target checkout state. */
 export async function observeCurrentPhysicalIssue(
   repository: GitRepository,
   row: ContractRow,
 ): Promise<CurrentPhysicalIssue | undefined> {
-  const workspacePath = appointedWorkspacePath(row);
-  if (workspacePath !== null) {
-    const marker = await observeWorktreeHookMarker(await worktreeGitDirectory(repository, workspacePath));
-    if (marker.kind === "failed") return { kind: "hook-failure", diagnostic: marker.diagnostic };
-  }
   const target = row.target;
   const delivery = row.delivery;
   if (row.phase !== "claimed" || target === null || delivery === null) return undefined;

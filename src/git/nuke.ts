@@ -3,7 +3,6 @@ import { isAbsolute, relative, sep } from "node:path";
 import type { ContractId } from "../core/facts/types.js";
 import { nukeEmptyPlaceAuthority, readPlaceRegister, releaseManagedWorktrees } from "../workspace-place.js";
 import type { WorldRoot } from "../world.js";
-import { nukeWorktreeHookResidue } from "./hooks.js";
 import { runGit, type GitRepository } from "./process.js";
 import {
   CANDIDATE_PIN_REF_NAMESPACE,
@@ -75,8 +74,6 @@ async function removeUnregisteredResidue(repository: GitRepository, entry: Manag
   if (!(await unregisteredResidueBelongsToRepository(repository, entry.path))) {
     throw new Error(`managed Place path has foreign custody: ${entry.path}`);
   }
-  const administrationDirectory = await worktreeGitDirectory(repository, entry.path);
-  await nukeWorktreeHookResidue(administrationDirectory);
   await rm(entry.path, { recursive: true, force: true });
   try {
     await access(entry.path);
@@ -91,7 +88,6 @@ async function removeManagedWorktree(repository: GitRepository, entry: ManagedEn
   const registered = (await registeredWorktrees(repository)).find((candidate) => candidate.path === entry.path);
   if (registered === undefined) return await removeUnregisteredResidue(repository, entry);
   if (registered.branch !== null) return false;
-  await nukeWorktreeHookResidue(await worktreeGitDirectory(repository, entry.path));
   await runGit(repository, ["worktree", "remove", "--force", entry.path]);
   if ((await registeredWorktrees(repository)).some((candidate) => candidate.path === entry.path)) {
     throw new Error(`managed Place worktree remains registered: ${entry.path}`);

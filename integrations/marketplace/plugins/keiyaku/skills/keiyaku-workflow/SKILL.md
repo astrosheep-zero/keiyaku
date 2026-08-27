@@ -28,6 +28,14 @@ gate allows it.
 Use `keiyaku-bind` to decide readiness, author one bounded Contract, choose
 bind inputs, and read the receipt. Continue here from that receipt.
 
+Managed worktree hooks are transient named command arrays. Each command has a
+nonblank `name`, `argv`, and `timeoutMs`; create and destroy arrays execute
+serially in the current caller. There is no durable marker, frozen command
+snapshot, detached runner, or per-command retry index. `--retry-hooks` reruns
+the complete current phase, so hook authors own idempotence. A successful bind
+receipt prints create hook names in order under `hooks create` and never prints
+their argv or timeout.
+
 ## Work In The Contract Worktree
 
 Change and test code in the worktree the bind receipt names. `deliver` accepts

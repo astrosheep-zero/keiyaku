@@ -130,7 +130,7 @@ function lagRows(lag: Lag, columns: number): readonly string[] {
       "lag",
       [
         {
-          text: `worktree-hook-failed ${lag.phase} ${lag.path} command=${lag.command} ${hookFailureSummary(lag.failure)}`,
+          text: `worktree-hook-failed ${lag.phase} ${lag.path} command=${lag.command} name=${lag.name} ${hookFailureSummary(lag.failure)}`,
           opaque: true,
         },
       ],
@@ -376,6 +376,16 @@ function renderAcceptedBind(result: AcceptedBindResult, columns: number): string
   receiptRow(lines, " ", "workspace", [{ text: "managed worktree" }], columns);
   if (result.target === null) receiptRow(lines, " ", "no target", [], columns);
   else receiptRow(lines, " ", "target", [{ text: result.target, opaque: true }], columns);
+  const creates = result.hookRuns?.filter((run) => run.phase === "create") ?? [];
+  if (creates.length > 0) {
+    receiptRow(
+      lines,
+      " ",
+      "hooks create",
+      creates.map((run) => ({ text: run.name, opaque: true })),
+      columns,
+    );
+  }
   lines.push(...acceptedDeviations(result, columns), ...recordBlock(result, columns));
   return lines.join("\n");
 }

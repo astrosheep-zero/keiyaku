@@ -12,22 +12,19 @@ admission, and is the only repair primitive for accepted-but-lagged effects.
 Each Contract reconciliation is one serialized Git effect decision. Git takes
 one per-Contract coordination lock in the common Git directory, then observes
 that Contract's current journal and worktree topology while holding the lock,
-applies every ref, worktree, marker, and hook effect, and releases the lock.
+applies every ref, worktree, and hook effect, and releases the lock.
 Callers supply the Contract identity, never a previously folded state. The lock
 contains no domain fact and is never removed with a managed worktree. Different
 Contracts do not share this lock. Lock acquisition waits for the current effect
 decision to finish rather than imposing a timeout shorter than a configured
-hook command; process death releases the SQLite transaction. A Hook command has
-one additional marker-local execution lock held by its detached Git runner for
-the command's complete process lifetime. The runner, not the calling reconcile
-process, reads the frozen command and durably records its resulting progress
-before releasing that lock. Thus caller death may release the Contract lock but
-cannot let a later reconcile overlap the still-running Hook command.
+hook command; process death releases the SQLite transaction. Hook commands run
+serially in the current caller and leave no marker, frozen snapshot, detached
+runner, or marker-local lock. Hook authors own idempotence; whole-phase retry
+reruns the complete current command list.
 
 Confirmed Git reset is not reconciliation. It does not compute
 desired-minus-actual effects, replay hooks as lifecycle recovery, or reverse
-admission. Managed-worktree hook markers are Keiyaku-owned residue of the
-worktrees reset removes; SQLite lock files remain. A failed reset attempt stays
+admission. Managed-worktree hooks leave no marker residue; SQLite lock files remain. A failed reset attempt stays
 retryable and may keep independently completed effects.
 
 Ordinary admission does not take the per-Contract effect lock. Targeted
@@ -107,7 +104,7 @@ A completed checkout produces no effect; a completed recovery reports
 `recovered`; an incompatible shape reports `target-checkout-retained` and
 leaves every byte untouched. A checkout already at the candidate needs no
 recovery effect. Selected Contract status may independently judge that same
-pure shape, and may read a durable hook marker, as `CurrentPhysicalIssue`.
+pure shape as `CurrentPhysicalIssue`.
 That projection performs no reconcile, acquires no lock, mutates no refs or
 worktrees, and executes no hooks. World status and the Contract catalog omit
 it.
@@ -135,7 +132,7 @@ required reachability ref and reports `unsealed-bytes` with the least differing
 path set and, when applicable, the unsealed `HEAD`.
 
 An unsealed abandoned worktree instead writes one ref-free recovery commit over
-the first captured tree, runs the frozen destroy hooks, and captures again. If
+the first captured tree, runs the destroy hooks, and captures again. If
 the hook changes the tree or `HEAD`, a second recovery commit records that final
 capture with the first recovery as parent. Hook failure still retains the
 worktree and reports its lag; the already-created recovery remains an ephemeral
@@ -165,7 +162,7 @@ pure value from the library; it never reads Settings or interprets command
 meaning:
 
 ```ts
-type HookCommand = Readonly<{ argv: readonly string[]; timeoutMs: number }>;
+type HookCommand = Readonly<{ name: string; argv: readonly string[]; timeoutMs: number }>
 type WorktreeHooks = Readonly<{
   create: readonly HookCommand[];
   destroy: readonly HookCommand[];
@@ -175,61 +172,34 @@ type WorktreeHooks = Readonly<{
 Each command runs directly, without a shell, in the managed worktree and
 inherits the invocation environment. The shared process runtime bounds
 stdout/stderr tails, enforces `timeoutMs`, and terminates the command process
-tree on timeout. Commands must be serially replay-safe. The guarantee is
-at-least-once: runner death after a command produces its effect and before its
-progress is durably recorded can make a later runner execute that command
-again. Concurrent replay is not required.
+tree on timeout. Commands must be serially replay-safe. Callers may replay a
+complete phase after transient failure; hook authors own idempotence.
 
-Immediately after creating a worktree, Git atomically writes
-`keiyaku/hooks.json` beneath that linked worktree's Git administration
-directory. The marker is outside candidate content and disappears only when
-Git removes that managed worktree. The current hard-cut marker has version
-`1`, freezes the complete create/destroy command pair, and records each phase
-as `pending` with its next command index, `failed` with its command index and
-typed process failure, or `ok`. Every marker replacement uses a unique
-same-directory temporary file, fsyncs the file, renames it, and fsyncs the
-parent directory when the host platform supports directory fsync. Windows does
-not support fsync on an opened directory; on that platform the file fsync and
-atomic same-directory rename remain the commit boundary and the unsupported
-directory flush is omitted. Empty command arrays advance directly to `ok`.
-
-Marker reads and parent-directory preparation are awaited. The shared
-durable-file owner may retain synchronous descriptor write, file fsync, rename,
-and platform-appropriate directory fsync only inside that atomic replacement
-commit section; its Promise fulfills after the supported durability steps.
-Reconciliation does not expose a synchronous marker API or defer marker
-publication to a queue.
-
-An active worktree with no marker freezes the current supplied pair and runs
-create commands. A `pending` create phase resumes from its stored next index.
-An `ok` create phase never runs again. A `failed` phase reports its stored lag
-without running during ordinary reconciliation. Explicit
-`reconcile({ retryHooks: true })` resumes that failed phase from its stored
-command, still using the frozen pair; retry never recaptures current settings.
-For each pending index, the detached runner takes the execution lock, rereads
-the marker, and runs only when that exact index is still pending. A runner that
-queued behind an earlier caller therefore observes the earlier progress and
-does not repeat it. No running marker, pid lease, heartbeat, or age-based
-recovery state exists.
-
-The create order is worktree add, marker freeze, then create commands. A create
+Immediately after creating a worktree, Git runs the supplied create commands in
+order in the current caller. There is no marker, frozen command snapshot,
+detached runner, marker-local lock, or persisted progress. An unchanged active
+worktree skips create hooks; `retryHooks` reruns the complete current create
+list. A failed hook reports transient lag with its name and command index, and
+the next retry starts from the beginning. Destroy hooks run on each cleanup
+attempt reaching the hook stage and retry reruns the complete destroy list.
+The create order is worktree add, then create commands. A create
 failure retains the worktree and does not reverse or abandon the accepted
 Contract. The destroy order is initial capture and sealed-byte judgment,
-optional abandonment recovery, frozen destroy commands, repeated capture and
+optional abandonment recovery, destroy commands, repeated capture and
 optional recovery chaining, worktree removal, and atomic ref cleanup.
 A destroy failure retains the worktree and all reachability refs. Settings
-changes affect only a future worktree whose marker has not yet been frozen. Git
+changes affect the next invocation. Git
 does not expose a generic hook registry, lifecycle event bus, backend interface,
 or hook fact. Hook commands must not recursively invoke a mutation or
 reconciliation for the same Contract: the outer effect decision owns that
 Contract's lock until the command returns.
 
 Git owns Verification scratch physical lifecycle. Verification
-scratch is not a managed worktree effect and has none of this
-marker, retry, or resume state. Its disposable path is asynchronously
+scratch is not a managed worktree effect and has no retry or durable marker
+state. Its disposable path is asynchronously
 materialized and disposed by Verification in one awaited invocation. The shared ordered command
-primitive executes managed commands under this marker policy and scratch
-commands without it; there is no mode switch or second recovery loop.
+primitive executes managed and scratch commands with the same ordered
+semantics; there is no mode switch or second recovery loop.
 Reconciliation never resumes scratch provisioning or runs its repository
 commands. From fresh registered-worktree topology, it removes only scratch
 paths in Keiyaku's exact random namespace after nonblocking acquisition of that
@@ -241,9 +211,10 @@ collection, not command recovery, and reads no transient Verification result.
 
 ```ts
 type ReconcileResult = Readonly<{
-  effects: readonly Effect[];
-  lag: readonly ReconcileLag[];
-}>;
+  effects: readonly Effect[]
+  lag: readonly ReconcileLag[]
+  hookRuns?: readonly { phase: "create" | "destroy"; name: string }[]
+}>
 
 type ReconcileLag =
   | Readonly<{ kind: "worktree-retained"; path: string }>
@@ -260,11 +231,12 @@ type ReconcileLag =
       diagnostic: string;
     }>
   | Readonly<{
-      kind: "worktree-hook-failed";
-      phase: "create" | "destroy";
-      path: string;
-      command: number;
-      failure: HookFailure;
+      kind: "worktree-hook-failed"
+      phase: "create" | "destroy"
+      path: string
+      command: number
+      name: string
+      failure: HookFailure
     }>
   | Readonly<{
       kind: "reconcile-failed";

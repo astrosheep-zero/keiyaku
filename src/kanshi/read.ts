@@ -150,26 +150,6 @@ async function readContracts(
   }
 }
 
-async function attachSelectedIssue(
-  observation: GitReadObservation,
-  contracts: Section<ContractKanshiBoard>,
-  selected: ContractBoard["rows"][number]["id"],
-): Promise<Section<ContractKanshiBoard>> {
-  if (contracts.kind !== "present") return contracts;
-  try {
-    const rows = await Promise.all(
-      contracts.value.rows.map(async (row) => {
-        if (row.id !== selected) return row;
-        const issue = await observeCurrentPhysicalIssue(observation.repository, row);
-        return issue === undefined ? row : { ...row, issue };
-      }),
-    );
-    return { kind: "present", value: { ...contracts.value, rows } };
-  } catch (error) {
-    return { kind: "failed", failure: { message: diagnostic(error) } };
-  }
-}
-
 type HolderRead =
   | Readonly<{ kind: "present"; value: TaskHolderProjection }>
   | Readonly<{ kind: "absent" }>
@@ -484,4 +464,23 @@ export async function observeKanshi(input: KanshiInput): Promise<KanshiObservati
 
 export async function kanshi(input: KanshiInput): Promise<KanshiReport> {
   return (await observeKanshi(input)).report;
+}
+async function attachSelectedIssue(
+  observation: GitReadObservation,
+  contracts: Section<ContractKanshiBoard>,
+  selected: ContractBoard["rows"][number]["id"],
+): Promise<Section<ContractKanshiBoard>> {
+  if (contracts.kind !== "present") return contracts;
+  try {
+    const rows = await Promise.all(
+      contracts.value.rows.map(async (row) => {
+        if (row.id !== selected) return row;
+        const issue = await observeCurrentPhysicalIssue(observation.repository, row);
+        return issue === undefined ? row : { ...row, issue };
+      }),
+    );
+    return { kind: "present", value: { ...contracts.value, rows } };
+  } catch (error) {
+    return { kind: "failed", failure: { message: diagnostic(error) } };
+  }
 }

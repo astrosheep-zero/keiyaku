@@ -88,6 +88,7 @@ type ForkBindInput = Readonly<{
 type BindInput = MarkdownBindInput | ForkBindInput
 
 type HookCommand = Readonly<{
+  name: string
   argv: readonly string[]
   timeoutMs: number
 }>

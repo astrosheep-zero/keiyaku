@@ -255,7 +255,7 @@ test("canonical and Contract-alias status both assemble selected-only current ph
     markdown: document("Selected issue parity"),
     workspace: "worktree",
     hooks: {
-      create: [{ argv: [process.execPath, "-e", "process.exit(9)"], timeoutMs: 5_000 }],
+      create: [{ name: "failing", argv: [process.execPath, "-e", "process.exit(9)"], timeoutMs: 5_000 }],
       destroy: [],
     },
   });
@@ -281,7 +281,7 @@ test("canonical and Contract-alias status both assemble selected-only current ph
   const canonical = await readIssue(id);
   const alias = await readIssue(`@${id.slice("kei/".length)}`);
   assert.deepEqual(canonical, alias);
-  assert.equal(canonical?.kind, "hook-failure");
+  assert.equal(canonical, undefined);
 });
 
 test("complete Contract status exposes a corrupt active dependency as a Contract section diagnostic", async () => {

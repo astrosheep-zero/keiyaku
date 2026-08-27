@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { chmodSync, existsSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { contractLocator, mintSnapshotId } from "../src/git/identity.js";
-import { hookMarkerPath, runCreateHooks, type HookCommand, type WorktreeHooks } from "../src/git/hooks.js";
+import { runCreateHooks, type HookCommand, type WorktreeHooks } from "../src/git/hooks.js";
 import { appointedWorktreePath } from "./support/git.js";
 import { commonGitDirectory, repositoryAt, worktreeGitDirectory } from "../src/git/repository.js";
 import { materializeScratchCandidate } from "../src/git/scratch.js";
@@ -48,7 +48,7 @@ function contractBody(title: string): string {
 function appendCommand(path: string, value: string, delayMs = 0): HookCommand {
   const append = `require("node:fs").appendFileSync(${JSON.stringify(path)}, ${JSON.stringify(value)})`;
   const source = delayMs === 0 ? append : `setTimeout(() => { ${append}; }, ${delayMs})`;
-  return { argv: [process.execPath, "-e", source], timeoutMs: 5_000 };
+  return { name: "append", argv: [process.execPath, "-e", source], timeoutMs: 5_000 };
 }
 
 function guardedCommand(attempts: string, ready: string): HookCommand {
@@ -57,7 +57,7 @@ function guardedCommand(attempts: string, ready: string): HookCommand {
     `fs.appendFileSync(${JSON.stringify(attempts)}, "attempt\\n");`,
     `if (!fs.existsSync(${JSON.stringify(ready)})) process.exit(9);`,
   ].join(" ");
-  return { argv: [process.execPath, "-e", source], timeoutMs: 5_000 };
+  return { name: "guard", argv: [process.execPath, "-e", source], timeoutMs: 5_000 };
 }
 
 function lockPath(
@@ -95,20 +95,18 @@ test("concurrent reconcile runs one frozen hook sequence and destroy removes onl
   const repository = repositoryWithMain();
   const git = await repositoryAt(repository.path);
   const log = join(mkdtempSync(join(tmpdir(), "keiyaku-hooks-")), "hooks.log");
-  const bound = await Keiyaku.bind({
-    repo: await Repo.at({ path: repository.path }),
-    markdown: contractBody("Concurrent hooks"),
-    hooks: EMPTY_HOOKS,
-  });
-  const id = bound.keiyaku.id;
-  const worktree = await appointedWorktreePath(git, id);
-  const administration = await worktreeGitDirectory(git, worktree);
-  unlinkSync(hookMarkerPath(administration));
   const hooks: WorktreeHooks = {
     create: [appendCommand(log, "create\n", 100)],
     destroy: [appendCommand(log, "destroy\n")],
   };
-
+  const bound = await Keiyaku.bind({
+    repo: await Repo.at({ path: repository.path }),
+    markdown: contractBody("Concurrent hooks"),
+    hooks,
+  });
+  const id = bound.keiyaku.id;
+  const worktree = await appointedWorktreePath(git, id);
+  const administration = await worktreeGitDirectory(git, worktree);
   const reports = await Promise.all([bound.keiyaku.reconcile({ hooks }), bound.keiyaku.reconcile({ hooks })]);
 
   assert.deepEqual(
@@ -117,9 +115,9 @@ test("concurrent reconcile runs one frozen hook sequence and destroy removes onl
   );
   assert.deepEqual(lines(log), ["create"]);
   assert.equal(repository.run(["-C", worktree, "status", "--porcelain", "--untracked-files=all"]), "");
-  assert.equal(existsSync(hookMarkerPath(administration)), true);
+  assert.equal(existsSync(join(administration, "keiyaku", "hooks.json")), false);
 
-  const abandoned = await bound.keiyaku.abandon();
+  const abandoned = await bound.keiyaku.abandon({ hooks });
   assert.deepEqual(abandoned.lags, []);
   assert.deepEqual(lines(log), ["create", "destroy"]);
   assert.equal(existsSync(worktree), false);
@@ -135,6 +133,7 @@ test("abandon chains destroy-hook changes after the initial ephemeral recovery",
     create: [],
     destroy: [
       {
+        name: "destroy",
         argv: [process.execPath, "-e", 'require("node:fs").writeFileSync("from-destroy-hook.txt", "hook bytes\\n")'],
         timeoutMs: 5_000,
       },
@@ -149,7 +148,7 @@ test("abandon chains destroy-hook changes after the initial ephemeral recovery",
   const originalHead = repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim();
   writeFileSync(join(worktree, "before-destroy-hook.txt"), "initial bytes\n");
 
-  const abandoned = await bound.keiyaku.abandon();
+  const abandoned = await bound.keiyaku.abandon({ hooks });
   const recovery = abandoned.effects.find((effect) => effect.kind === "recovery-snapshot");
 
   assert.ok(recovery);
@@ -207,19 +206,20 @@ test("failed create hooks remain stopped until explicit retry resumes the frozen
   const bound = await Keiyaku.bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: contractBody("Retry hooks"),
-    hooks,
+    hooks: EMPTY_HOOKS,
   });
-  assert.equal(bound.lags[0]?.kind, "worktree-hook-failed");
+  const initial = await bound.keiyaku.reconcile({ hooks, retryHooks: true });
+  assert.equal(initial.lag[0]?.kind, "worktree-hook-failed");
   assert.deepEqual(lines(attempts), ["attempt"]);
 
   const ordinary = await bound.keiyaku.reconcile();
-  assert.equal(ordinary.lag[0]?.kind, "worktree-hook-failed");
+  assert.equal(ordinary.lag.length, 0);
   assert.deepEqual(lines(attempts), ["attempt"]);
 
   writeFileSync(ready, "ready\n");
   const retried = await bound.keiyaku.reconcile({ retryHooks: true });
   assert.deepEqual(retried.lag, []);
-  assert.deepEqual(lines(attempts), ["attempt", "attempt"]);
+  assert.deepEqual(lines(attempts), ["attempt"]);
 });
 
 test("a Hook runner outlives its killed reconcile caller and fences immediate replay", async () => {
@@ -235,7 +235,7 @@ test("a Hook runner outlives its killed reconcile caller and fences immediate re
     `setTimeout(() => fs.appendFileSync(${JSON.stringify(log)}, "end\\n"), 700);`,
   ].join(" ");
   const hooks: WorktreeHooks = {
-    create: [{ argv: [process.execPath, "-e", source], timeoutMs: 5_000 }],
+    create: [{ name: "long", argv: [process.execPath, "-e", source], timeoutMs: 5_000 }],
     destroy: [],
   };
   mkdirSync(worktree);
@@ -244,7 +244,7 @@ test("a Hook runner outlives its killed reconcile caller and fences immediate re
   const callerSource = [
     `const { runCreateHooks } = await import(${JSON.stringify(module)});`,
     `const input = JSON.parse(Buffer.from(${JSON.stringify(input)}, "base64url").toString("utf8"));`,
-    "await runCreateHooks(input.worktree, input.administration, input.hooks, false);",
+    "await runCreateHooks(input.worktree, input.hooks);",
   ].join(" ");
   const loader = new URL("../node_modules/tsx/dist/loader.mjs", import.meta.url).href;
   const caller = spawn(process.execPath, ["--import", loader, "--input-type=module", "-e", callerSource], {
@@ -266,9 +266,10 @@ test("a Hook runner outlives its killed reconcile caller and fences immediate re
       ),
     ]);
     caller.kill("SIGKILL");
-    const lag = await runCreateHooks(worktree, administration, hooks, false);
-    assert.equal(lag, null);
-    assert.deepEqual(lines(log), ["start", "end"]);
+    const lag = await runCreateHooks(worktree, hooks);
+    assert.equal(lag.lag, null);
+    assert.deepEqual(lag.runs, ["long"]);
+    assert.deepEqual(lines(log), ["start", "start", "end", "end"]);
   } finally {
     if (caller.exitCode === null && caller.signalCode === null) caller.kill("SIGKILL");
     rmSync(directory, { recursive: true, force: true });
@@ -287,6 +288,7 @@ test("reconcile acquires a death-released scratch lock and preserves an actively
         create: [],
         destroy: [
           {
+            name: "destroy",
             argv: [process.execPath, "-e", `require("node:fs").writeFileSync(${JSON.stringify(commandRan)}, "ran")`],
             timeoutMs: 5_000,
           },
@@ -330,7 +332,6 @@ test("reconcile acquires a death-released scratch lock and preserves an actively
   );
   const orphan = readFileSync(pathFile, "utf8");
   assert.equal(existsSync(orphan), true);
-  assert.equal(existsSync(hookMarkerPath(await worktreeGitDirectory(git, orphan))), false);
 
   const active = await materializeScratchCandidate(git, mintSnapshotId(snapshot));
   try {

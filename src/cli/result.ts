@@ -52,6 +52,7 @@ export type AcceptedEnvelope = Readonly<{
   facts: readonly AcceptedFact[];
   effects: MutationEnvelope["effects"];
   settlement: MutationEnvelope["settlement"];
+  hookRuns?: MutationResult<unknown>["hookRuns"];
   lag?: readonly [Lag, ...Lag[]];
 }>;
 

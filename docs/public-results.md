@@ -60,6 +60,16 @@ whose facts were admitted; `settlement` combines those reconciliation-owned
 settlements. There is no nested `receipt`,
 duplicate fact field, or result stored on a `Keiyaku` handle.
 
+The optional invocation-only `hookRuns` field is present only when at least one
+managed hook command succeeds during this invocation. It records successful
+hook names in execution order as `{ phase, name }`; a failed phase includes
+only names completed before the transient `WorktreeHookLag`, whose typed value
+also identifies the failed hook `name`. Whole-phase retries produce a fresh
+projection and never reuse persisted hook progress. JSON and text bind receipts
+consume this same value; bind text prints create hook names in order under
+`hooks create` and never prints argv or timeout. Empty hook execution omits the
+field.
+
 ```ts
 type KeiyakuRetryReason =
   | Readonly<{ kind: "exhausted" }>
@@ -75,6 +85,7 @@ type MutationResult<A> = Readonly<{
   value: A
   effects: readonly TopologyEffect[]
   lags: readonly Lag[]
+  hookRuns?: readonly { phase: "create" | "destroy"; name: string }[]
   settlement: SettlementReport
   hookRuns?: readonly WorktreeHookRun[]
   cleanup?: VerificationCleanupFailure

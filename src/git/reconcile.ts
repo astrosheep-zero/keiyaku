@@ -10,7 +10,6 @@ import {
   commonGitDirectory,
   DELIVERY_REF_NAMESPACE,
   registeredWorktreePaths,
-  worktreeGitDirectory,
   type GitOid,
 } from "./repository.js";
 import { runGit, type GitRepository } from "./process.js";
@@ -84,7 +83,11 @@ export type ReconcileLag =
   | TargetCheckoutLag
   | WorktreeHookLag
   | ReconcileFailure;
-export type ReconcileResult = Readonly<{ effects: readonly Effect[]; lag: readonly ReconcileLag[] }>;
+export type ReconcileResult = Readonly<{
+  effects: readonly Effect[];
+  lag: readonly ReconcileLag[];
+  hookRuns?: readonly { phase: "create" | "destroy"; name: string }[];
+}>;
 type ReconcileBatchItem = Readonly<{
   contract: ContractId;
   state: ContractState | null;
@@ -95,7 +98,11 @@ export type GitReconcileObservation = Readonly<{
   result: ReconcileResult;
 }>;
 export type WorktreeTopology = Readonly<{ paths: Set<string> }>;
-export type ReconcileAccumulation = Readonly<{ effects: Effect[]; lag: ReconcileLag[] }>;
+export type ReconcileAccumulation = Readonly<{
+  effects: Effect[];
+  lag: ReconcileLag[];
+  hookRuns: { phase: "create" | "destroy"; name: string }[];
+}>;
 
 function deliveryRefFor(contract: ContractId): string {
   return `${DELIVERY_REF_NAMESPACE}/${contractPhysicalName(contract)}`;
@@ -119,8 +126,12 @@ function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function complete(effects: readonly Effect[] = [], lag: readonly ReconcileLag[] = []): ReconcileResult {
-  return { effects, lag };
+function complete(
+  effects: readonly Effect[] = [],
+  lag: readonly ReconcileLag[] = [],
+  hookRuns: readonly { phase: "create" | "destroy"; name: string }[] = [],
+): ReconcileResult {
+  return hookRuns.length === 0 ? { effects, lag } : { effects, lag, hookRuns };
 }
 function failed(
   stage: ReconcileFailure["stage"],
@@ -209,7 +220,7 @@ async function reconcileActiveManagedWorktree(
   { repository, hooks, retryHooks, place }: ReconcileEffectsInput,
   state: ContractState,
   topology: WorktreeTopology,
-  { effects, lag }: ReconcileAccumulation,
+  { effects, lag, hookRuns }: ReconcileAccumulation,
 ): Promise<ReconcileResult> {
   if (place === undefined) return complete(effects, [...lag, missingPlaceLag(repository)]);
   const path = worktreePath(repository, place);
@@ -235,8 +246,11 @@ async function reconcileActiveManagedWorktree(
   } else {
     effects.push(projection);
   }
-  const hookLag = await runCreateHooks(path, await worktreeGitDirectory(repository, path), hooks, retryHooks);
-  if (hookLag !== null) lag.push(hookLag);
+  if (projection.action === "created" || retryHooks) {
+    const hookRun = await runCreateHooks(path, hooks);
+    hookRuns.push(...hookRun.runs.map((name) => ({ phase: "create" as const, name })));
+    if (hookRun.lag !== null) lag.push(hookRun.lag);
+  }
   effects.push(
     await (state.delivery
       ? await updateRef(
@@ -246,7 +260,7 @@ async function reconcileActiveManagedWorktree(
         )
       : await removeRef(repository, candidatePinRefFor(state.id))),
   );
-  return complete(effects, lag);
+  return complete(effects, lag, hookRuns);
 }
 
 async function reconcileWithTopology(
@@ -257,6 +271,7 @@ async function reconcileWithTopology(
   const { repository } = input;
   const effects: Effect[] = [];
   const lag: ReconcileLag[] = [];
+  const hookRuns: { phase: "create" | "destroy"; name: string }[] = [];
   try {
     await removeCollectableScratch(repository, topology, effects, lag);
     if (!state) return complete(effects, lag);
@@ -268,11 +283,12 @@ async function reconcileWithTopology(
         input,
         state,
         topology,
-        { effects, lag },
+        { effects, lag, hookRuns },
         { ref: deliveryRefFor(state.id), pin: candidatePinRefFor(state.id) },
       );
     }
-    return await reconcileActiveManagedWorktree(input, state, topology, { effects, lag });
+    const result = await reconcileActiveManagedWorktree(input, state, topology, { effects, lag, hookRuns });
+    return hookRuns.length === 0 ? result : { ...result, hookRuns };
   } catch (error) {
     return failed("effect", error, effects, lag);
   }

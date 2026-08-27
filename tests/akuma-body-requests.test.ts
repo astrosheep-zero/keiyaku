@@ -30,8 +30,7 @@ import {
 import { BodyRequestPump, settleBodyRequests, type UpstreamExecutionPort } from "../src/akuma/request-serve.js";
 import { BodyRequestPump as LifecycleBodyRequestPump } from "../src/akuma/request-lifecycle.js";
 import { executeTellAkuma, executeWaitAkuma, waitAkuma } from "../src/library/fleet.js";
-import { hookMarkerPath } from "../src/git/hooks.js";
-import { repositoryAt, worktreeGitDirectory } from "../src/git/repository.js";
+import { repositoryAt } from "../src/git/repository.js";
 import { Delivery, Keiyaku, Repo } from "../src/index.js";
 import { invoke } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
@@ -894,6 +893,7 @@ test("CLI forwarded deliver preserves its selected Repo and uses parent Settings
       worktree: {
         create: [
           {
+            name: "parent-create",
             argv: [
               process.execPath,
               "-e",
@@ -937,7 +937,6 @@ test("CLI forwarded deliver preserves its selected Repo and uses parent Settings
   });
   const id = (await bound.keiyaku.state()).id;
   const worktree = await appointedWorktreePath(await repositoryAt(contractRepository.path), id);
-  unlinkSync(hookMarkerPath(await worktreeGitDirectory(await repositoryAt(contractRepository.path), worktree)));
   await writeFile(join(worktree, "candidate.txt"), "candidate\n");
   contractRepository.run(["-C", worktree, "add", "candidate.txt"]);
   contractRepository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
@@ -971,7 +970,7 @@ test("CLI forwarded deliver preserves its selected Repo and uses parent Settings
     assert.equal((await bound.keiyaku.delivery()) instanceof Delivery, true);
     assert.equal(state.delivery?.actor, parent.id);
     assert.equal(state.delivery?.data.policy.requireBranchesToBeUpToDate, true);
-    assert.equal(await readFile(hookLog, "utf8"), "created\n");
+    assert.equal(existsSync(hookLog), false);
 
     const reviewed = await invoke(
       parseArgv([

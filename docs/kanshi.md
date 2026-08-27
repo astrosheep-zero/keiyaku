@@ -181,12 +181,11 @@ read the world to resolve the identity before requesting the same observation.
 
 ```ts
 type CurrentPhysicalIssue =
-  | Readonly<{ kind: "hook-failure"; diagnostic: string }>
   | Readonly<{ kind: "target-checkout-retained"; target: string }>
 ```
 
-After selection, Kanshi may attach `issue` on that Contract row by reading a
-durable hook marker or independently judging the pure target-checkout shape. It
+After selection, Kanshi may attach `issue` on that Contract row by independently
+judging the pure target-checkout shape. It
 must not call effectful reconcile, acquire that lock, mutate refs or worktrees,
 or execute hooks. World status and `keiyaku ls kei/` omit the property and do
 not run the projection. Observation failure is a section diagnostic, not an

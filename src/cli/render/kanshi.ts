@@ -331,11 +331,7 @@ function renderSelectedContractRow(
     ...semanticBlock("workspace/merge", [...workspaceFacts, ...mergeFacts(row, true, abbreviations)], context),
   );
   const attachments = [...linkedFacts(row, report, "selected")];
-  if (row.issue !== undefined) {
-    const detail =
-      row.issue.kind === "hook-failure" ? row.issue.diagnostic : `target-checkout-retained ${row.issue.target}`;
-    attachments.push(`lag (observed now): ${detail}`);
-  }
+  if (row.issue !== undefined) attachments.push(`lag (observed now): target-checkout-retained ${row.issue.target}`);
   lines.push(...semanticBlock("attachments", attachments, context));
   lines.push(...semanticBlock("namespace tasks", namespaceTaskFacts(row), context));
   return lines;

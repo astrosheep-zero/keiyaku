@@ -68,6 +68,16 @@ type BatchObjectReader = Readonly<{
   close(): Promise<void>;
 }>;
 
+async function batchObjects(
+  oids: readonly GitOid[],
+  object: (oid: GitOid) => Promise<GitObjectResult>,
+): Promise<ReadonlyMap<GitOid, GitObjectResult>> {
+  const unique = [...new Set(oids)];
+  for (const oid of unique) gitObjectId(oid, "Git object");
+  const entries = await Promise.all(unique.map(async (oid) => [oid, await object(oid)] as const));
+  return new Map(entries);
+}
+
 function batchChild(repository: GitRepository) {
   return spawnCancellableProcess({
     argv: [repository.gitPath, "cat-file", "--batch"],
@@ -177,12 +187,7 @@ function batchObjectReader(repository: GitRepository): BatchObjectReader {
     cache.set(oid, requested);
     return requested;
   };
-  const objects = async (oids: readonly GitOid[]): Promise<ReadonlyMap<GitOid, GitObjectResult>> => {
-    const unique = [...new Set(oids)];
-    for (const oid of unique) gitObjectId(oid, "Git object");
-    const entries = await Promise.all(unique.map(async (oid) => [oid, await object(oid)] as const));
-    return new Map(entries);
-  };
+  const objects = (oids: readonly GitOid[]) => batchObjects(oids, object);
   const close = async (): Promise<void> => {
     await tail.catch(() => undefined);
     if (failure !== null) {

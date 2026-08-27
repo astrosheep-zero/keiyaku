@@ -77,8 +77,11 @@ export function gatesFrom(input: GatesFromInput): readonly Gate[] {
 function command(value: unknown, coordinate: string, ErrorType: typeof TypeError | typeof SettingsError): HookCommand {
   if (!record(value)) throw new ErrorType(`${coordinate} must be an object`);
   for (const key of Object.keys(value)) {
-    if (key !== "argv" && key !== "timeoutMs") throw new ErrorType(`${coordinate} has unknown field: ${key}`);
+    if (key !== "name" && key !== "argv" && key !== "timeoutMs")
+      throw new ErrorType(`${coordinate} has unknown field: ${key}`);
   }
+  if (typeof value.name !== "string" || value.name.trim().length === 0)
+    throw new ErrorType(`${coordinate}.name must be nonblank`);
   if (!Array.isArray(value.argv) || value.argv.length === 0 || !value.argv.every((item) => typeof item === "string")) {
     throw new ErrorType(`${coordinate}.argv must be a nonempty string array`);
   }
@@ -90,7 +93,11 @@ function command(value: unknown, coordinate: string, ErrorType: typeof TypeError
   ) {
     throw new ErrorType(`${coordinate}.timeoutMs must be an integer from 1 through 2147483647`);
   }
-  return Object.freeze({ argv: Object.freeze([...value.argv]), timeoutMs: value.timeoutMs as number });
+  return Object.freeze({
+    name: value.name.trim(),
+    argv: Object.freeze([...value.argv]),
+    timeoutMs: value.timeoutMs as number,
+  });
 }
 
 function commands(

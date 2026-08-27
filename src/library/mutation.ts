@@ -26,6 +26,7 @@ export type MutationResult<Value> = Readonly<
     value: Value;
     effects: ReconcileCompletion["effects"];
     lags: ReconcileCompletion["lag"];
+    hookRuns?: readonly { phase: "create" | "destroy"; name: string }[];
     settlement: SettlementReport;
   } & AcceptedObligations
 >;
@@ -62,12 +63,14 @@ export async function completeMutation<Value, PublicValue>(
     ...(accepted.cleanup === undefined ? {} : { cleanup: accepted.cleanup }),
     ...(accepted.leak === undefined ? {} : { leak: accepted.leak }),
   };
+  const hookRuns = [...(accepted.physical?.hookRuns ?? []), ...reports.flatMap((report) => report.hookRuns ?? [])];
   return {
     facts: accepted.facts,
     head: accepted.head,
     value: value(accepted.value),
     effects: [...(accepted.physical?.effects ?? []), ...reports.flatMap((report) => report.effects)],
     lags: [...(accepted.physical?.lag ?? []), ...reports.flatMap((report) => report.lag)],
+    ...(hookRuns.length === 0 ? {} : { hookRuns }),
     settlement: {
       actions: reports.flatMap((report) => report.settlement.actions),
       lags: reports.flatMap((report) => report.settlement.lags),

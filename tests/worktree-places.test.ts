@@ -474,6 +474,7 @@ test("terminal cleanup releases the Place only after hooks and removal succeed",
   const attempts = join(directory, "attempts.log");
   const ready = join(directory, "ready");
   const destroy = {
+    name: "destroy",
     argv: [
       process.execPath,
       "-e",

@@ -23,6 +23,7 @@ export type ReconcileCompletion = Readonly<{
   effects: readonly (ReconcileReport["effects"][number] | ContractFileEffect)[];
   lag: readonly (ReconcileReport["lag"][number] | ContractFileLag)[];
   settlement: SettlementReport;
+  hookRuns?: readonly { phase: "create" | "destroy"; name: string }[];
 }>;
 
 export type RepoContractReconcileReport = ReconcileCompletion;
@@ -156,6 +157,7 @@ export async function completeReconcile(
   const release = releaseEligible(retained.state, cleanup?.report, appointment.place !== undefined)
     ? await releaseAppointments(input.scope, [input.contractId])
     : undefined;
+  const hookRuns = [...(retained.report.hookRuns ?? []), ...(cleanup?.report.hookRuns ?? [])];
   return {
     effects: [...retained.report.effects, ...projection.effects, ...(cleanup?.report.effects ?? [])],
     lag: [
@@ -165,6 +167,7 @@ export async function completeReconcile(
       ...(release === undefined ? [] : [release]),
     ],
     settlement,
+    ...(hookRuns.length === 0 ? {} : { hookRuns }),
   };
 }
 

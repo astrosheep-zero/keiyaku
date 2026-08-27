@@ -119,7 +119,7 @@ test("package root exposes only the ruled library values and declarations", () =
     'const selectedGates: readonly Gate[] = gatesFrom({ settings: settingsValue, names: ["strict", "review-only"] });',
     "// @ts-expect-error gatesFrom removed the singular name selector",
     'gatesFrom({ settings: settingsValue, name: "strict" });',
-    'const hook: HookCommand = { argv: ["npm", "ci"], timeoutMs: 300000 };',
+    'const hook: HookCommand = { name: "install", argv: ["npm", "ci"], timeoutMs: 300000 };',
     "const selectedHooks: WorktreeHooks = worktreeHooksFrom({ settings: settingsValue });",
     "const requireUpToDate: boolean = requireBranchesToBeUpToDateFrom({ settings: settingsValue });",
     "const settingsEntry = null as unknown as SettingsEntry;",

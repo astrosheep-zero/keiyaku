@@ -1,5 +1,5 @@
 import { access } from "node:fs/promises";
-import { isKeiyakuOwnedRef, readRef, writeCommit, worktreeGitDirectory, type GitOid } from "./repository.js";
+import { isKeiyakuOwnedRef, readRef, writeCommit, type GitOid } from "./repository.js";
 import { gitObjectIdForSnapshot, mintSnapshotId } from "./identity.js";
 import type { ContractState, SnapshotId } from "../core/facts/types.js";
 import type { GitDecodeChannel } from "./read-observation.js";
@@ -38,7 +38,6 @@ type TerminalWorktreeCleanup = Readonly<{
   state: ContractState;
   expected: TerminalSealExpectations;
   hooks: WorktreeHooks;
-  retryHooks: boolean;
   acc: ReconcileAccumulation;
 }>;
 type TerminalCustody = Readonly<{
@@ -165,18 +164,22 @@ function fromPrimaryWorktree(repository: GitRepository): GitRepository {
   return { ...repository, effectiveCwd: repository.primaryWorktree };
 }
 
-function complete(effects: readonly Effect[] = [], lag: readonly ReconcileLag[] = []): ReconcileResult {
-  return { effects, lag };
+function complete(
+  effects: readonly Effect[] = [],
+  lag: readonly ReconcileLag[] = [],
+  hookRuns: readonly { phase: "create" | "destroy"; name: string }[] = [],
+): ReconcileResult {
+  return hookRuns.length === 0 ? { effects, lag } : { effects, lag, hookRuns };
 }
 
 function retainTerminalWorktree(
   path: string,
   retainedLag: ReconcileLag,
-  { effects, lag }: ReconcileAccumulation,
+  { effects, lag, hookRuns }: ReconcileAccumulation,
 ): ReconcileResult {
   effects.push({ kind: "worktree", path, action: "unchanged" });
   lag.push(retainedLag);
-  return complete(effects, lag);
+  return complete(effects, lag, hookRuns);
 }
 
 async function terminalSealExpectations(
@@ -195,7 +198,6 @@ async function removeSealedTerminalWorktree({
   state,
   expected,
   hooks,
-  retryHooks,
   acc,
 }: TerminalWorktreeCleanup): Promise<ReconcileResult | null> {
   if (topology.paths.has(path) && (await pathExists(path))) {
@@ -236,8 +238,9 @@ async function removeSealedTerminalWorktree({
       }
       recovery = await recordRecovery(beforeWorkspace);
     }
-    const hookLag = await runDestroyHooks(path, await worktreeGitDirectory(repository, path), hooks, retryHooks);
-    if (hookLag !== null) return retainTerminalWorktree(path, hookLag, acc);
+    const hookRun = await runDestroyHooks(path, hooks);
+    acc.hookRuns.push(...hookRun.runs.map((name) => ({ phase: "destroy" as const, name })));
+    if (hookRun.lag !== null) return retainTerminalWorktree(path, hookRun.lag, acc);
     const after = await observeTerminalWorkspace(repository, path, expected);
     const afterWorkspace = after.workspace;
     const afterHooks = after.unsealed;
@@ -335,7 +338,7 @@ async function releaseTerminalCustody({
 }
 
 export async function reconcileTerminalManagedWorktree(
-  { repository, channel, hooks, retryHooks, retainTerminalWorktree, place }: TerminalReconcileInput,
+  { repository, channel, hooks, retainTerminalWorktree, place }: TerminalReconcileInput,
   state: ContractState,
   topology: WorktreeTopology,
   acc: ReconcileAccumulation,
@@ -345,9 +348,9 @@ export async function reconcileTerminalManagedWorktree(
   const path = place === undefined ? undefined : worktreePath(repository, place);
   const resolveSeal = async () => await terminalSealExpectations(channel, state);
   if (path === undefined) {
-    if (retainTerminalWorktree === true) return complete(acc.effects, acc.lag);
+    if (retainTerminalWorktree === true) return complete(acc.effects, acc.lag, acc.hookRuns);
     await releaseTerminalCustody({ repository: primary, state, resolveSeal, ref, pin, acc });
-    return complete(acc.effects, acc.lag);
+    return complete(acc.effects, acc.lag, acc.hookRuns);
   }
   const expected = await resolveSeal();
   acc.effects.push(await updateRef(primary, ref, state.delivery?.data.tenderSnapshot ?? state.coordinates.start));
@@ -364,10 +367,9 @@ export async function reconcileTerminalManagedWorktree(
     state,
     expected,
     hooks,
-    retryHooks,
     acc,
   });
   if (retained !== null) return retained;
   await releaseTerminalCustody({ repository: primary, state, resolveSeal: async () => expected, ref, pin, acc });
-  return complete(acc.effects, acc.lag);
+  return complete(acc.effects, acc.lag, acc.hookRuns);
 }
