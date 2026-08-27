@@ -732,6 +732,7 @@ test("Akuma mutation snapshots omit observation context", () => {
   assert.doesNotMatch(killed, /^tasks /mu);
   assert.doesNotMatch(killed, /^changes /mu);
   assert.equal(killed.split("\n").at(-1), "✓ killed");
+
   for (const evidence of ["already-killed", "already-stopped", "hung", "untidy", "unavailable"] as const) {
     const receipt = renderAkumaText(parseArgv(["kill", observation.status.id]).command, {
       kind: "akuma",
@@ -749,6 +750,7 @@ test("Akuma mutation snapshots omit observation context", () => {
     assert.equal(receipt.split("\n").filter((line) => line === expected).length, 1);
     assert.doesNotMatch(receipt, new RegExp(`^kill ${evidence}$`, "mu"));
   }
+
   const emptyKill = renderAkumaText(parseArgv(["kill", observation.status.id]).command, {
     kind: "akuma",
     action: "kill",

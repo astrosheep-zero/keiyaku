@@ -195,6 +195,13 @@ opaque receipt coordinates remain complete even when they overflow. Gutter,
 glyph, wrapping, and life vocabulary are presentation rules; JSON and persisted
 bytes are unchanged.
 
+Kill text keeps only the identity header, the newest retained non-turn activity
+row by persisted sequence (when present), and one final result line: `✓ killed`,
+`✓ already killed`, `✓ already stopped`, or `! not killed · <evidence>`. It omits
+timeline gaps, older rows, pending-Tell summaries, tasks, reported changes, and
+the separate `kill <evidence>` fact. Typed kill JSON, observation selection,
+Tell rendering, persisted facts, and exit status are unchanged.
+
 Identity and relation precede activity. Created Task context and reported
 changes follow the timeline; life is last where observed. Exact-answer reads
 remain raw. Running life is `● STILL RUNNING`; other public life words remain
