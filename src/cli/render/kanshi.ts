@@ -9,6 +9,7 @@ import {
   gateFact,
   gitIdsInRow,
   mergeSummary,
+  targetMovementFacts,
 } from "./contract-observation.js";
 import {
   displayColumns,
@@ -77,19 +78,18 @@ function branchName(target: string | null): string | null {
   return target.startsWith("refs/heads/") ? target.slice("refs/heads/".length) : target;
 }
 
-function targetFacts(row: ContractKanshiRow): readonly string[] {
+function targetFacts(row: ContractKanshiRow, abbreviations: ReadonlyMap<string, string>): readonly string[] {
   const name = branchName(row.target);
   if (name === null) return ["no target"];
   const facts = [`target ${name}`];
   if (row.targetLag.kind === "unknown") facts.push(`commits behind ${name} unknown`);
   if (row.targetLag.kind === "counted") facts.push(`${row.targetLag.behind} commits behind ${name}`);
-  if (row.targetObservation?.drift === true) facts.push("target moved");
-  return facts;
+  return [...facts, ...targetMovementFacts(row, abbreviations)];
 }
 
 function selectedTargetFacts(row: ContractKanshiRow, abbreviations: ReadonlyMap<string, string>): readonly string[] {
   return [
-    ...targetFacts(row),
+    ...targetFacts(row, abbreviations),
     ...(row.target !== null && row.targetObservation?.head !== null && row.targetObservation?.head !== undefined
       ? [`target head ${displayGitId(row.targetObservation.head, abbreviations)}`]
       : []),
@@ -368,7 +368,7 @@ function renderWorldContractRow(
   const title = row.title ?? "title unavailable";
   const facts = [
     candidateFact(row.delivery),
-    ...targetFacts(row),
+    ...targetFacts(row, gitAbbreviations(report)),
     ...worldAfterFacts(row),
     ...(row.dependents.length === 0 ? [] : [`dependents ${row.dependents.map(dependentWording).join(" · ")}`]),
     ...row.gates.reports.map(gateFact),

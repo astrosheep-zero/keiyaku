@@ -23,7 +23,7 @@ import {
 } from "../src/git/repository.js";
 import { contractJournalPath } from "../src/git/identity.js";
 import { lastJournalAtFor, phaseAtFor } from "../src/protocol/read/status.js";
-import { contractId, contractSegment } from "../src/core/facts/types.js";
+import { changeId, contractId, contractSegment, snapshotId } from "../src/core/facts/types.js";
 import { kanshi, selectKanshi, type KanshiReport } from "../src/kanshi/index.js";
 import { visibleFleetRows } from "../src/kanshi/fleet.js";
 import { contractNamespace } from "../src/settlement/settle.js";
@@ -1689,6 +1689,45 @@ test("Kanshi wraps titles without dropping coordinates or gates", () => {
   assert.match(text, /target moved/u);
   assert.equal(text.includes("\u001b"), false);
   assert.deepEqual(report, before);
+});
+
+test("Kanshi target movement names expected and observed heads, including a disappeared target", () => {
+  const report = attentionReport();
+  if (report.contracts.kind !== "present") throw new Error("fixture contracts must be present");
+  const expected = snapshotId("b".repeat(40));
+  const observed = snapshotId("d".repeat(40));
+  const rows = report.contracts.value.rows.map((row) =>
+    row.id === "kei/active-contract"
+      ? {
+          ...row,
+          delivery: {
+            tenderSnapshot: expected,
+            integration: { predecessor: expected, snapshot: expected, changeId: changeId("chg-kanshi-moved") },
+            method: "squash" as const,
+            policy: { requireBranchesToBeUpToDate: false },
+          },
+          targetObservation: { head: observed, drift: true },
+        }
+      : row,
+  );
+  const movedReport = { ...report, contracts: { ...report.contracts, value: { ...report.contracts.value, rows } } };
+  const world = renderKanshiText(movedReport, { columns: 120, color: false });
+  assert.match(world, /target moved · bbbbbbb -> ddddddd/u);
+  const selected = renderKanshiText(
+    { ...movedReport, contracts: { ...movedReport.contracts, value: { ...movedReport.contracts.value, rows: [rows[1]!] } } },
+    { columns: 120, color: false },
+    "contract",
+  );
+  assert.match(selected, /target moved\n    bbbbbbb -> ddddddd/u);
+
+  const disappearedRows = rows.map((row) =>
+    row.id === "kei/active-contract" ? { ...row, targetObservation: { head: null, drift: true } } : row,
+  );
+  const disappeared = renderKanshiText(
+    { ...movedReport, contracts: { ...movedReport.contracts, value: { ...movedReport.contracts.value, rows: disappearedRows } } },
+    { columns: 120, color: false },
+  );
+  assert.match(disappeared, /target moved · bbbbbbb -> null/u);
 });
 
 test("Kanshi retains a Contract whose title is unavailable", () => {

@@ -108,6 +108,48 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
   assert.match(delivered, /^  candidate · no target$/mu);
   assert.doesNotMatch(delivered, /○ no candidate · ● candidate|satisfied  \[✗\] unsatisfied/u);
   assert.doesNotMatch(delivered, /tender |integration /u);
+
+  const expected = snapshotId("b".repeat(40));
+  const observed = snapshotId("c".repeat(40));
+  const moved = renderCatalogText({
+    ...catalog,
+    rows: [
+      {
+        ...row,
+        target: "refs/heads/main",
+        targetLag: { kind: "counted", behind: 0 },
+        targetObservation: { head: observed, drift: true },
+        phase: "tendered",
+        delivery: {
+          tenderSnapshot: expected,
+          integration: { predecessor: expected, snapshot: expected, changeId: changeId("chg-target-moved") },
+          method: "squash",
+          policy: { requireBranchesToBeUpToDate: false },
+        },
+      },
+    ],
+  });
+  assert.match(moved, /^  candidate · target main · 0 commits behind main · target moved · bbbbbbb -> ccccccc$/mu);
+
+  const disappeared = renderCatalogText({
+    ...catalog,
+    rows: [
+      {
+        ...row,
+        target: "refs/heads/main",
+        targetLag: { kind: "unknown" },
+        targetObservation: { head: null, drift: true },
+        phase: "tendered",
+        delivery: {
+          tenderSnapshot: expected,
+          integration: { predecessor: expected, snapshot: expected, changeId: changeId("chg-target-null") },
+          method: "squash",
+          policy: { requireBranchesToBeUpToDate: false },
+        },
+      },
+    ],
+  });
+  assert.match(disappeared, /^  candidate · target main · commits behind main unknown · target moved · bbbbbbb -> null$/mu);
 });
 
 test("observation text keeps the command and view data together", () => {

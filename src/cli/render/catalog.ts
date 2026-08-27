@@ -7,10 +7,11 @@ import {
   displayGitId,
   gateFact,
   gitIdsInRow,
+  targetMovementFacts,
 } from "./contract-observation.js";
 import { safeText } from "./terminal.js";
 
-function targetLine(row: ContractRow): string {
+function targetLine(row: ContractRow, abbreviations: ReadonlyMap<string, string>): string {
   if (row.target === null) return "no target";
   const target = row.target.startsWith("refs/heads/") ? row.target.slice("refs/heads/".length) : row.target;
   const lag =
@@ -19,11 +20,9 @@ function targetLine(row: ContractRow): string {
       : row.targetLag.kind === "unknown"
         ? `commits behind ${target} unknown`
         : undefined;
-  return [
-    `target ${target}`,
-    ...(lag === undefined ? [] : [lag]),
-    ...(row.targetObservation?.drift === true ? ["target moved"] : []),
-  ].join(" · ");
+  return [`target ${target}`, ...(lag === undefined ? [] : [lag]), ...targetMovementFacts(row, abbreviations)].join(
+    " · ",
+  );
 }
 
 function catalogMark(row: ContractRow): string {
@@ -63,7 +62,7 @@ function renderContractCatalog(catalog: Extract<Catalog, { kind: "contracts" }>)
   const blocks = rows.map((row) => {
     const lines = [
       `${catalogMark(row)} ${safeText(row.id)} · ${row.phase} · ${formatAge(row.phaseAt, catalog.observedAt)} · ${safeText(row.title ?? "title unavailable")}`,
-      `  ${candidateFact(row.delivery)} · ${targetLine(row)}`,
+      `  ${candidateFact(row.delivery)} · ${targetLine(row, abbreviations)}`,
       ...row.after.map((edge) => `  ${afterWording(edge)}`),
       ...(row.dependents.length === 0 ? [] : [`  dependents ${row.dependents.map(dependentWording).join(" · ")}`]),
       ...(row.gates.reports.length === 0 ? [] : [`  ${row.gates.reports.map(gateFact).join("  ")}`]),

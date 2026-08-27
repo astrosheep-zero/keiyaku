@@ -66,3 +66,15 @@ export function gitIdsInRow(row: ContractRow): readonly string[] {
 export function displayGitId(value: string, abbreviations: ReadonlyMap<string, string>): string {
   return abbreviations.get(value) ?? value;
 }
+
+/** Render the pinned delivery target and the same-epoch observed target head. */
+export function targetMovementFacts(row: ContractRow, abbreviations: ReadonlyMap<string, string>): readonly string[] {
+  if (row.target === null || row.targetObservation?.drift !== true) return [];
+  if (row.delivery === null) return ["target moved"];
+  return [
+    "target moved",
+    `${displayGitId(row.delivery.integration.snapshot, abbreviations)} -> ${
+      row.targetObservation.head === null ? "null" : displayGitId(row.targetObservation.head, abbreviations)
+    }`,
+  ];
+}
