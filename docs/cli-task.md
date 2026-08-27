@@ -56,7 +56,7 @@ task update <TaskId> [--title <text>] [--body <text>|- | --append <text>]
   [--parent <TaskId> | --no-parent]
   [--supersedes <TaskId>]... [--drop-supersedes <TaskId>]...
   [--relates <TaskId>]... [--drop-relates <TaskId>]... [--json]
-task start <TaskId> [--json]
+task start <TaskId>... [--json]
 task stop <TaskId> [--json]
 task hold <TaskId>... [--json]
 task resume <TaskId> [--json]
@@ -87,8 +87,8 @@ World or Task package invocation. Valid acquired bytes pass through unchanged.
 Add `--note` sets the initial note. Update `--note` replaces the note and
 returns the native document diff. Done and drop `--note` replace the note for
 each addressed Task in that Task's independent atomic lifecycle mutation. Batch
-lifecycle commands preserve input order, continue after per-Task refusals, and
-do not consume stdin for notes.
+start, hold, done, and drop preserve input order, continue after per-Task
+refusals, and do not consume stdin for notes.
 
 `--actor` is legal only on `task add` (structured and `-` forms) and
 `task compose`. `--plan` is legal only on `task compose`. The invocation edge resolves actor once before reading or
@@ -192,10 +192,14 @@ exits `2`, and corruption or infrastructure failure exits `3`.
 Compose input grammar is owned here. Outside body fences, indentation has no
 meaning. A `+ Title` creates a Task and an `@task/<id>` line modifies only a
 pre-existing Task. Properties belong to the nearest node and use one line each:
-`as = <alias>`, `pri = 0|1|2|3`, `parent = <ref>|`, and relation properties
+`as = <alias>`, `state = open|in_progress|on_hold|done|drop`,
+`pri = 0|1|2|3`, `parent = <ref>|`, and relation properties
 `needs`, `supersedes`, and `relates` with `=`, `+=`, or `-=`. `^alias` refers
 to a new node in this document; `@task/...` refers to the pre-composition board.
-A relation list is comma-separated and may contain spaces after commas.
+A relation list is comma-separated and may contain spaces after commas. An
+alias is a nonempty single-line token containing neither Unicode whitespace nor
+a comma. `state` is valid only on a new node, accepts only `=`, and defaults to
+`open`; existing Task state remains writable through lifecycle commands.
 
 `body =` clears the body. `body <<TOKEN` replaces it with exact bytes through
 the first line equal to TOKEN. TOKEN must match `[A-Z][A-Z0-9_]*` and be 3 to 32
@@ -289,8 +293,8 @@ Single add, update, start, stop, resume, hold, done, and drop outcomes use
 `✓ <verb> accepted — <TaskId>`, `! <verb> refused`, or
 `? <verb> retry — <TaskId when the public result supplies it>`. Accepted
 single mutation follows with the resulting Task entity line. Accepted update
-then renders its exact whole-document diff payload. Batch hold, done, and drop
-preserve input order and render exactly one row per item:
+then renders its exact whole-document diff payload. Batch start, hold, done, and
+drop preserve input order and render exactly one row per item:
 `✓ <verb> <TaskId>` for accepted,
 `! <verb> <TaskId> · <typed refusal kind and exact scalar facts>` for refused,
 and `? <verb> <TaskId> · <typed retry reason>` for retry. Never serialize a

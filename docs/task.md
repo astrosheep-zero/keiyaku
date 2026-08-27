@@ -144,7 +144,8 @@ for the caller-selected World and retains no request lifecycle fact.
 ## Lifecycle And Graph
 
 Persisted states are `open`, `in_progress`, `on_hold`, `done`, and `drop`.
-Only these transitions are legal:
+Creation may write any persisted state as a birth fact. After birth, only these
+transitions are legal:
 
 ```text
 start   open                         -> in_progress
@@ -203,7 +204,7 @@ tasks.ready(input?: { scope?: "namespace" | "world"; namespace?: readonly string
 tasks.blocked(input?: { scope?: "namespace" | "world"; namespace?: readonly string[]; parent?: string; limit?: number }): Promise<BlockedTaskList>
 tasks.query(input?: { where?: TaskQueryExpression; scope?: "namespace" | "world"; namespace?: readonly string[]; sort?: "priority" | "created" | "updated" | "id"; limit?: number }): Promise<TaskQueryResult>
 tasks.doctor(): Promise<TaskDoctorReport>
-tasks.batch(input: { verb: "done" | "drop" | "hold"; ids: readonly string[]; note?: string; signal?: AbortSignal }): Promise<TaskBatchResult>
+tasks.batch(input: { verb: "start" | "done" | "drop" | "hold"; ids: readonly string[]; note?: string; signal?: AbortSignal }): Promise<TaskBatchResult>
 tasks.compose(input: { markdown: string; namespace?: readonly string[]; actor?: string; signal?: AbortSignal; plan?: boolean }): Promise<TaskCompositionResult>
 
 task.read(): Promise<TaskDetail | null>
@@ -250,8 +251,10 @@ optional initial state, optional actor, and signal. `addDocument` accepts
 creation-document Markdown plus an optional namespace, actor, and signal. The
 creation document cannot set identity, timestamps, or `createdBy` but may set
 note and any persisted state; omitted note is empty and omitted state defaults
-to `open`. `Tasks.compose` accepts the same optional actor and applies it only
-to newly allocated nodes. `add`, `addDocument`, and `compose` validate actor as
+to `open`. A new `Tasks.compose` node may likewise select any persisted initial
+state and defaults to `open`; compose cannot set state on a pre-existing node.
+`Tasks.compose` accepts the same optional actor and applies it only to newly
+allocated nodes. `add`, `addDocument`, and `compose` validate actor as
 optional nonblank bytes and persist it as `createdBy` when present. `update`,
 start, stop, hold, resume, done, drop, batch, and settlement preserve existing
 `createdBy` and do not accept actor. After creation, product state changes use
@@ -355,13 +358,20 @@ plan has a deterministic admission order: dependencies required by a new
 is the tie-break. The optional plan result exposes the resolved aliases,
 admission order, and body byte previews without writing authority.
 
+Each new node may declare `state = open|in_progress|on_hold|done|drop` as its
+birth state; omission means `open`. This property accepts only `=` and is
+invalid on a pre-existing node, whose state remains writable only through
+Task lifecycle methods. Composition aliases are nonempty single-line tokens
+containing no Unicode whitespace or comma; all other characters are accepted.
+
 Each admitted file replacement is an independent Task commit point. Compose has
 no cross-file atomicity or rollback; the first admission failure stops and
 retains already admitted changes. The incomplete result carries the stopped
 reason, admitted changes, resolved composition facts, and a reusable draft for
 only the remaining intent. Replaying that draft against the resulting board
-completes the original intent and preserves body bytes. Compose does not alter
-Task lifecycle state, title, note, or Contract/Akuma authority.
+completes the original intent and preserves body bytes. Compose does not change
+the lifecycle state, title, or note of pre-existing Tasks, and does not alter
+Contract/Akuma authority.
 
 The public result is:
 

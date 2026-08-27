@@ -74,6 +74,7 @@ function taskDraft(task: PlannedTask, remainingAliases: ReadonlyMap<TaskId, stri
   const document = task.after;
   const lines = [task.kind === "new" ? `+ ${document.title}` : `@${document.id}`];
   if (task.kind === "new" && task.alias !== undefined) lines.push(`as = ${task.alias}`);
+  if (task.kind === "new") lines.push(`state = ${document.state}`);
   lines.push(
     `pri = ${document.priority}`,
     `needs = ${document.needs.map((id) => reference(id, remainingAliases)).join(", ")}`,

@@ -389,7 +389,14 @@ function renderTaskValue(
     return `context ${value} · ${context.value.source}`;
   }
   if (command.action === "compose") return renderCompose(result as TaskCompositionResult, columns);
-  if (command.action === "hold" || command.action === "done" || command.action === "drop") {
+  if (
+    command.action === "start" ||
+    command.action === "hold" ||
+    command.action === "done" ||
+    command.action === "drop"
+  ) {
+    if (!(typeof result === "object" && result !== null && "items" in result))
+      return renderMutation(command, result as TaskMutationResult | TaskUpdateResult, columns);
     return renderBatch(command.action, result as TaskBatchResult);
   }
   return renderMutation(command, result as TaskMutationResult | TaskUpdateResult, columns);

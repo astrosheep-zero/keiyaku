@@ -3,7 +3,7 @@ import type { TaskCompositionDiagnostic } from "./operations.js";
 
 export type RelationField = "needs" | "supersedes" | "relates";
 export type Assignment = Readonly<{
-  field: "as" | "parent" | "pri" | RelationField;
+  field: "as" | "state" | "parent" | "pri" | RelationField;
   operator: "=" | "+=" | "-=";
   value: string;
   line: number;
@@ -69,7 +69,7 @@ function parseNamespace(value: string): readonly string[] {
 }
 
 function parseAssignment(text: string, line: number): Assignment | null {
-  const matched = /^(as|parent|pri|needs|supersedes|relates)\s*(=|\+=|-=)\s*(.*)$/u.exec(text);
+  const matched = /^(as|state|parent|pri|needs|supersedes|relates)\s*(=|\+=|-=)\s*(.*)$/u.exec(text);
   if (matched === null) return null;
   return {
     field: matched[1] as Assignment["field"],

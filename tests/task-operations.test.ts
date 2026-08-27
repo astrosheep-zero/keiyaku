@@ -107,6 +107,25 @@ test("done and drop replace note while preserving creation time", async () => {
   assert.throws(() => tasks.batch({ verb: "hold", ids: [two], note: "invalid" }), /valid only for done or drop/u);
 });
 
+test("batch start preserves order and continues after per-task refusals", async () => {
+  const { tasks } = await world();
+  const first = acceptedId(await tasks.add({ title: "Batch start first" }));
+  const alreadyDone = acceptedId(await tasks.add({ title: "Batch start done", state: "done" }));
+  const third = acceptedId(await tasks.add({ title: "Batch start third" }));
+  const result = await tasks.batch({ verb: "start", ids: [first, "task/missing", alreadyDone, third] });
+  assert.deepEqual(
+    result.items.map((item) => item.id),
+    [first, "task/missing", alreadyDone, third],
+  );
+  assert.deepEqual(
+    result.items.map((item) => item.outcome.kind),
+    ["accepted", "refused", "refused", "accepted"],
+  );
+  assert.equal((await tasks.task({ id: first }).read())?.task.state, "in_progress");
+  assert.equal((await tasks.task({ id: third }).read())?.task.state, "in_progress");
+  assert.throws(() => tasks.batch({ verb: "start", ids: [] }), /at least one TaskId/u);
+});
+
 test("Tasks creates root authority without Contract coupling", async () => {
   const { tasks } = await world();
   const rootId = acceptedId(await tasks.add({ title: "Root task" }));
@@ -743,4 +762,9 @@ test("forced-local Task mutation execution preserves owner validation and authen
     () => decodeTaskMutationRequest("task.add", { input: { title: "Invalid", actor: "forged" } }),
     /unknown field/u,
   );
+  assert.deepEqual(decodeTaskMutationRequest("task.start", { ids: ["task/one", "task/two"] }), {
+    action: "task.start",
+    ids: ["task/one", "task/two"],
+  });
+  assert.throws(() => decodeTaskMutationRequest("task.start", { ids: [] }), /at least one TaskId/u);
 });

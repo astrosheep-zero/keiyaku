@@ -42,7 +42,9 @@ export type TaskMutationRequest =
     }>
   | Readonly<{ action: "task.compose"; markdown: string; namespace: readonly string[] }>
   | Readonly<{ action: "task.update"; id: TaskId; input: Omit<UpdateTaskInput, "signal"> }>
-  | Readonly<{ action: "task.start" | "task.stop" | "task.resume"; id: TaskId }>
+  | Readonly<{ action: "task.start"; id: TaskId }>
+  | Readonly<{ action: "task.start"; ids: readonly TaskId[] }>
+  | Readonly<{ action: "task.stop" | "task.resume"; id: TaskId }>
   | Readonly<{ action: "task.hold"; ids: readonly TaskId[] }>
   | Readonly<{ action: "task.done" | "task.drop"; ids: readonly TaskId[]; note?: string }>;
 
@@ -56,6 +58,17 @@ function mutationObject(value: unknown, keys: readonly string[], label: string):
   const decoded = record(value, label);
   closed(decoded, keys, label);
   return decoded;
+}
+
+function decodeTaskStartRequest(value: unknown): Extract<TaskMutationRequest, { action: "task.start" }> {
+  const action = "task.start";
+  const request = mutationObject(value, ["id", "ids"], `${action} request`);
+  if (request.id !== undefined && request.ids !== undefined)
+    throw new TypeError(`${action} request has both id and ids`);
+  if (request.id !== undefined) return { action, id: taskId(request.id) };
+  const ids = taskIds(request.ids, "ids");
+  if (ids === undefined || ids.length === 0) throw new TypeError(`${action} request requires at least one TaskId`);
+  return { action, ids };
 }
 
 export function decodeTaskMutationRequest(action: TaskMutationAction, value: unknown): TaskMutationRequest {
@@ -114,6 +127,7 @@ export function decodeTaskMutationRequest(action: TaskMutationAction, value: unk
       return { action, id: taskId(request.id), input: updateInput(raw) };
     }
     case "task.start":
+      return decodeTaskStartRequest(value);
     case "task.stop":
     case "task.resume": {
       const request = mutationObject(value, ["id"], `${action} request`);
@@ -159,6 +173,7 @@ export async function executeTaskMutation(
     case "task.update":
       return await tasks.task({ id: request.id }).update({ ...request.input, ...withSignal });
     case "task.start":
+      if ("ids" in request) return await tasks.batch({ verb: "start", ids: request.ids, ...withSignal });
       return await tasks.task({ id: request.id }).start(withSignal);
     case "task.stop":
       return await tasks.task({ id: request.id }).stop(withSignal);

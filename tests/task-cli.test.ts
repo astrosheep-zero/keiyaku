@@ -127,6 +127,16 @@ function assertFitsOrOverflowsLawfully(text: string, columns: number): void {
 }
 
 test("task parser owns subcommand arity, repeat flags, and selected stdin", () => {
+  const multiStart = parseArgv(["task", "start", "task/one", "task/two"]);
+  assert.deepEqual(multiStart.command, {
+    command: "task",
+    action: "start",
+    output: "text",
+    positionals: ["task/one", "task/two"],
+    flags: {},
+  });
+  assert.throws(() => parseArgv(["tasks", "start", "task/one"]), /usage: keiyaku/u);
+  assert.throws(() => parseArgv(["task", "star", "task/one"]), /usage: keiyaku/u);
   assert.deepEqual(
     parseArgv([
       "-C",
@@ -970,6 +980,27 @@ test("singleton hold, done, and drop keep the batch item grammar", async () => {
   assert.equal(renderTaskText(doneCommand, retryDone), "? done task/done-me · concurrent-modification");
   assert.equal(renderTaskText(dropCommand, retryDrop), "? drop task/drop-me · busy");
   assert.equal(taskExitCode(retryHold), 2);
+});
+
+test("task start accepts multiple IDs while preserving singleton output", async () => {
+  const root = world();
+  await invoke(parseArgv(["-C", root, "task", "add", "First start"]));
+  await invoke(parseArgv(["-C", root, "task", "add", "Second start"]));
+  const singleCommand = parseArgv(["task", "start", "task/first-start"]).command;
+  if (singleCommand.command !== "task") throw new Error("not a task command");
+  const single = (await invoke(parseArgv(["-C", root, "task", "start", "task/first-start"]))) as TaskInvocationResult;
+  assert.match(renderTaskText(singleCommand, single), /^✓ start accepted — task\/first-start$/mu);
+
+  const multiCommand = parseArgv(["task", "start", "task/second-start", "task/missing"]).command;
+  if (multiCommand.command !== "task") throw new Error("not a task command");
+  const multi = (await invoke(
+    parseArgv(["-C", root, "task", "start", "task/second-start", "task/missing"]),
+  )) as TaskInvocationResult;
+  assert.equal(
+    renderTaskText(multiCommand, multi),
+    ["✓ start task/second-start", "! start task/missing · task-missing task/missing"].join("\n"),
+  );
+  assert.equal(taskExitCode(multi), 1);
 });
 
 test("built CLI Task text stays one scan grammar at 80 and 36 columns", async () => {

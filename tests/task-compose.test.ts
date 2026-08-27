@@ -49,6 +49,48 @@ test("compose preserves fenced body bytes, aliases new nodes, and plans dependen
   assert.equal(parent?.task.body, "Parent body\n    four-space code\n+ this is body");
 });
 
+test("compose admits initial state on new nodes and accepts the widest unambiguous aliases", async () => {
+  const product = await tasks();
+  const result = await product.compose({
+    markdown: [
+      "+ In progress",
+      "as = alias.with/slash_@mark",
+      "state = in_progress",
+      "+ On hold",
+      "as = hold.alias",
+      "state = on_hold",
+      "parent = ^alias.with/slash_@mark",
+      "+ Done",
+      "state = done",
+      "+ Dropped",
+      "state = drop",
+      "",
+    ].join("\n"),
+  });
+  assert.equal(result.kind, "accepted");
+  assert.equal((await product.task({ id: "task/in-progress" }).read())?.task.state, "in_progress");
+  assert.equal((await product.task({ id: "task/on-hold" }).read())?.task.state, "on_hold");
+  assert.equal((await product.task({ id: "task/on-hold" }).read())?.task.parent, "task/in-progress");
+  assert.equal((await product.task({ id: "task/done" }).read())?.task.state, "done");
+  assert.equal((await product.task({ id: "task/dropped" }).read())?.task.state, "drop");
+
+  const invalidAlias = await product.compose({ markdown: "+ Invalid\nas = has space\n" });
+  assert.equal(invalidAlias.kind, "refused");
+  if (invalidAlias.kind === "refused") assert.match(invalidAlias.refusal.diagnostics[0]?.reason ?? "", /alias/u);
+});
+
+test("compose rejects state on existing nodes and non-assignment state operators", async () => {
+  const product = await tasks();
+  assert.equal((await product.add({ title: "Existing" })).kind, "accepted");
+  const result = await product.compose({
+    markdown: ["@task/existing", "state = done", "+ New", "state += done", ""].join("\n"),
+  });
+  assert.equal(result.kind, "refused");
+  if (result.kind !== "refused") return;
+  assert.equal(result.refusal.diagnostics.length, 2);
+  assert.equal((await product.task({ id: "task/existing" }).read())?.task.state, "open");
+});
+
 test("compose keeps @ references in the pre-existing board and exposes collision allocation", async () => {
   const product = await tasks();
   assert.equal((await product.add({ title: "Foo" })).kind, "accepted");
@@ -148,6 +190,27 @@ test("busy compose returns a reusable fenced recovery document", async () => {
   assert.equal(replayed.kind, "accepted");
   const detail = await product.task({ id: "task/remaining" }).read();
   assert.equal(detail?.task.body, "+ literal\n    indented");
+});
+
+test("compose recovery drafts preserve a non-open initial state", async () => {
+  const product = await tasks();
+  const held = await acquireSqliteTransactionLock({
+    path: join(product.root, ".keiyaku", "locks", "task-allocation.sqlite"),
+    mode: "immediate",
+    timeoutMs: 100,
+  });
+  let result;
+  try {
+    result = await product.compose({ markdown: "+ Held\nas = held\nstate = on_hold\n" });
+  } finally {
+    held.close();
+  }
+  assert.equal(result.kind, "incomplete");
+  if (result.kind !== "incomplete") return;
+  assert.match(result.draft, /state = on_hold/u);
+  const replayed = await product.compose({ markdown: result.draft });
+  assert.equal(replayed.kind, "accepted");
+  assert.equal((await product.task({ id: "task/held" }).read())?.task.state, "on_hold");
 });
 
 test("compose accepts empty documents without creating authority", async () => {

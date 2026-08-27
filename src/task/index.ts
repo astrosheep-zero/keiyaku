@@ -294,16 +294,24 @@ class TasksHandle {
     return { issues: diagnoseBoard((await readBoard(this.world)).board) };
   }
   batch(
-    input: Readonly<{ verb: "done" | "drop" | "hold"; ids: readonly string[]; note?: string; signal?: AbortSignal }>,
+    input: Readonly<{
+      verb: "start" | "done" | "drop" | "hold";
+      ids: readonly string[];
+      note?: string;
+      signal?: AbortSignal;
+    }>,
   ): Promise<TaskBatchResult> {
     const v = record(input, "batch input");
     closed(v, ["verb", "ids", "note", "signal"], "batch input");
     const verb = v.verb;
-    if (verb !== "done" && verb !== "drop" && verb !== "hold") throw new TypeError("batch verb is invalid");
+    if (verb !== "start" && verb !== "done" && verb !== "drop" && verb !== "hold")
+      throw new TypeError("batch verb is invalid");
+    const ids = taskIds(v.ids, "ids");
+    if (ids === undefined || ids.length === 0) throw new TypeError("ids requires at least one TaskId");
     const note = text(v.note, "note");
     if (note !== undefined && verb !== "done" && verb !== "drop")
       throw new TypeError("batch note is valid only for done or drop");
-    return batchTasks(this.world, verb, taskIds(v.ids, "ids") ?? [], signal(v.signal), note);
+    return batchTasks(this.world, verb, ids, signal(v.signal), note);
   }
   compose(
     input: Readonly<{

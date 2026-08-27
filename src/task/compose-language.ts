@@ -1,5 +1,5 @@
 import type { TaskBoard } from "./board.js";
-import { serializeTaskDocument, type TaskDocument, type TaskPriority } from "./document.js";
+import { serializeTaskDocument, type TaskDocument, type TaskPriority, type TaskState } from "./document.js";
 import { allocateLocalId, deriveLocalStem, formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
 import { parseTaskComposition, type Assignment, type ParsedComposition, type ParsedNode } from "./compose-parser.js";
 import { advanceTaskTimestamp, type TaskCompositionDiagnostic } from "./operations.js";
@@ -119,8 +119,10 @@ function collectAliases(
       diagnostics.push(diagnostic(declaration.line, "only a new task may declare an alias", declaration.token));
       continue;
     }
-    if (declaration.operator !== "=" || !/^[a-z0-9-]+$/u.test(declaration.value)) {
-      diagnostics.push(diagnostic(declaration.line, "alias must use as = [a-z0-9-]+", declaration.token));
+    if (declaration.operator !== "=" || !/^[^\s,]+$/u.test(declaration.value)) {
+      diagnostics.push(
+        diagnostic(declaration.line, "alias must be a nonempty token without whitespace or comma", declaration.token),
+      );
       continue;
     }
     if (aliases.has(declaration.value)) {
@@ -131,6 +133,45 @@ function collectAliases(
     if (allocated !== undefined) aliases.set(declaration.value, allocated.id);
   }
   return aliases;
+}
+
+function isTaskState(value: string): value is TaskState {
+  return value === "open" || value === "in_progress" || value === "on_hold" || value === "done" || value === "drop";
+}
+
+function applyStateAssignment(
+  node: ParsedNode,
+  current: TaskDocument,
+  assignment: Assignment,
+  scalar: Set<string>,
+  diagnostics: TaskCompositionDiagnostic[],
+): TaskDocument {
+  if (node.kind !== "new") {
+    diagnostics.push(diagnostic(assignment.line, "only a new task may declare an initial state", assignment.token));
+    return current;
+  }
+  if (scalar.has(assignment.field)) {
+    diagnostics.push(diagnostic(assignment.line, "state is assigned more than once", assignment.token));
+    return current;
+  }
+  scalar.add(assignment.field);
+  if (assignment.operator !== "=" || !isTaskState(assignment.value)) {
+    diagnostics.push(diagnostic(assignment.line, "state must use = with a valid persisted state", assignment.token));
+    return current;
+  }
+  return { ...current, state: assignment.value };
+}
+
+function markScalarAssignment(
+  assignment: Assignment,
+  scalar: Set<string>,
+  diagnostics: TaskCompositionDiagnostic[],
+): void {
+  if (assignment.field !== "pri" && assignment.field !== "parent") return;
+  if (scalar.has(assignment.field)) {
+    diagnostics.push(diagnostic(assignment.line, `${assignment.field} is assigned more than once`, assignment.token));
+  }
+  scalar.add(assignment.field);
 }
 
 function resolveReference(
@@ -207,14 +248,11 @@ function applyAssignments(
   const scalar = new Set<string>();
   for (const assignment of node.assignments) {
     if (assignment.field === "as") continue;
-    if (assignment.field === "pri" || assignment.field === "parent") {
-      if (scalar.has(assignment.field)) {
-        diagnostics.push(
-          diagnostic(assignment.line, `${assignment.field} is assigned more than once`, assignment.token),
-        );
-      }
-      scalar.add(assignment.field);
+    if (assignment.field === "state") {
+      next = applyStateAssignment(node, next, assignment, scalar, diagnostics);
+      continue;
     }
+    markScalarAssignment(assignment, scalar, diagnostics);
     if (assignment.field === "pri") {
       if (assignment.operator !== "=" || !/^[0-3]$/u.test(assignment.value)) {
         diagnostics.push(diagnostic(assignment.line, "pri must use = with a value from 0 through 3", assignment.token));

@@ -42,7 +42,7 @@ keiyaku task ls --closed
 keiyaku task ls --all --world
 keiyaku task ready
 keiyaku task blocked
-keiyaku task tree <task-id> [--full]
+keiyaku task tree <task-id>
 keiyaku task doctor
 ```
 
@@ -53,19 +53,22 @@ commands require a complete TaskId and never infer namespace.
 ## Mutations
 
 ```bash
-keiyaku task start <task-id>
+keiyaku task start <task-id>...
 keiyaku task stop <task-id>
 keiyaku task hold <task-id>
 keiyaku task resume <task-id>
 keiyaku task done <task-id>...
 keiyaku task drop <task-id>... [--note <text>]
 keiyaku task update <task-id> --title <text>
-keiyaku task namespace [<namespace>]
+keiyaku task context [<namespace>]
 ```
 
 Use `--json` on any command when a script must inspect the typed result.
 Relations are explicit facts: `needs` orders work, `parent` groups it,
 `supersedes` navigates replacement, and `relates` does not affect readiness.
+`task start` accepts one or more complete TaskIds. A single ID keeps the
+single-mutation result; multiple IDs use the ordered batch result, continue
+after per-Task refusals, and preserve retry-over-refusal exit precedence.
 
 ## Batch Create Or Modify
 
@@ -78,6 +81,7 @@ ns=feature
 
 + Parent
 as = parent
+state = in_progress
 pri = 0
 body <<BODY
 Parent body.
@@ -90,6 +94,10 @@ EOF
 ```
 
 Use `--plan` to inspect aliases, admission order, and body byte previews without
-writing. Compose does not change Task lifecycle state. Each changed Task is
-admitted independently; an incomplete result returns a reusable draft for the
-remaining batch.
+writing. New `+ Title` nodes may declare `state = open|in_progress|on_hold|done|drop`
+as their initial state; omitted state is `open`. Existing `@task/...` nodes cannot
+declare state. Aliases are nonempty single-line tokens containing neither
+Unicode whitespace nor comma; references use `^alias`. Compose does not change
+the lifecycle state of pre-existing Tasks. Each changed Task is admitted
+independently; an incomplete result returns a reusable draft for the remaining
+batch and preserves each new node's declared state.
