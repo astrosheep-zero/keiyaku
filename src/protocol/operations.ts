@@ -116,6 +116,7 @@ export type PlacementStop =
       target: string;
       expected: SnapshotId;
       observed: SnapshotId | null;
+      observedTreeEqualsCandidate: boolean;
     }>
   | Readonly<{
       failure: "target-moved";
@@ -124,6 +125,7 @@ export type PlacementStop =
       integratedAt: SnapshotId;
       observed: SnapshotId | null;
       attempts: number;
+      observedTreeEqualsCandidate: boolean;
     }>
   | Readonly<{ failure: "target-placement-failed"; diagnostic: string }>;
 
@@ -178,8 +180,8 @@ export function placementStop(
   if (result.kind === "accepted") return undefined;
   if (result.kind === "placement-failed") return { failure: "target-placement-failed", diagnostic: result.diagnostic };
   if (result.kind === "target-moved") {
-    const { contractId, target, expected, observed } = result;
-    return { failure: "target-moved", contractId, target, expected, observed };
+    const { contractId, target, expected, observed, observedTreeEqualsCandidate } = result;
+    return { failure: "target-moved", contractId, target, expected, observed, observedTreeEqualsCandidate };
   }
   return result.kind === "refused" ? { refusal: result.refusal } : { retry: result };
 }

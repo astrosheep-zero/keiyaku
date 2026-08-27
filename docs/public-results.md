@@ -285,6 +285,7 @@ type PlacementStop =
       integratedAt: SnapshotId
       observed: SnapshotId | null
       attempts: number
+      observedTreeEqualsCandidate: boolean
     }>
   | Readonly<{ failure: "target-placement-failed"; diagnostic: string }>
 
@@ -422,9 +423,15 @@ admission stops share `VerificationStop`; placement admission stops use
 `PlacementStop`. In particular, a satisfied review can admit its attestation
 and then return a `delivery-missing` placement stop before any delivery exists.
 Once a delivery exists, review and delivery share the same reintegration
-completion loop. Target movement is represented by admitted `reintegrated`
-facts followed by a retry, or by an accepted typed repeated-movement stop after
-three complete cycles. Review and delivery share the delivery fact's one
+completion loop. A `target-moved` stop carries expected and observed target
+identities plus `observedTreeEqualsCandidate`, which is true only when the
+observed target commit tree exactly equals the offered candidate tree. A true
+value is an immediate stop: no `reintegrated` fact, retry, publication, target
+rewrite, or claim is emitted. External movement remains `target-moved`, never
+`claimed` or `already-applied`; a missing target is false. When false, target
+movement is represented by admitted `reintegrated` facts followed by a retry,
+or by an accepted typed repeated-movement stop after three complete cycles.
+Review and delivery share the delivery fact's one
 worktree-content ChangeId, while integration coordinates remain placement
 topology. The obligations are independent and both channels may be present on
 one Delivery. A channel is absent exactly when its obligation was not applicable

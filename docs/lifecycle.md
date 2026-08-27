@@ -50,12 +50,18 @@ Admitting testimony does not itself invoke placement; `deliver` and a satisfied
 also continues already-delivered direct dependents whose current prerequisites
 are now claimed. Both paths use the same placement adjudicator under the target
 fence. If the target moved after the accepted
-candidate was prepared, the protocol reuses the persisted tender and frozen
-policy, admits `reintegrated`, runs or reuses the exact Verification, and
-retries placement. It performs at most three complete integrate-verify-place
-cycles. Repeated movement is an accepted trailing `target-moved` stop with the
-last integration snapshot, freshly observed target (or `null` when the ref
-disappeared), and numeric attempt count.
+candidate was prepared, the protocol compares the observed target commit tree
+with the offered candidate tree under that same fence and exposes the boolean
+`observedTreeEqualsCandidate` on the `target-moved` stop. When true, completion
+stops immediately: it does not reintegrate, append a fact, rewrite the target,
+publish, or consume a retry cycle. External movement remains `target-moved`,
+never `claimed` or an equivalent terminal. When false, the protocol reuses the
+persisted tender and frozen policy, admits `reintegrated`, runs or reuses the
+exact Verification, and retries placement. It performs at most three complete
+integrate-verify-place cycles. A repeated movement stop carries the last
+integration snapshot, freshly observed target (or `null` when the ref
+disappeared), numeric attempt count, and the same equality boolean. A missing
+target is always false.
 Audit never invokes placement.
 
 Git owns target followability. Its mechanical stops cannot publish, become

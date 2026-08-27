@@ -12,6 +12,7 @@ import {
   followTargetPlacement,
   prepareTargetPlacement,
   observeTargetHead,
+  observedTreeEqualsCandidate,
   type TargetPlacementRefusal,
 } from "../git/target-placement.js";
 import { admitDecidedOffer, mintAttempts, type AcceptedAdmission } from "./attempt.js";
@@ -28,6 +29,7 @@ export type TargetMovedStop = Readonly<{
   target: string;
   expected: SnapshotId;
   observed: SnapshotId | null;
+  observedTreeEqualsCandidate: boolean;
 }>;
 
 export type PlacementProtocolResult<ExtraRefusal = never> =
@@ -73,12 +75,14 @@ async function runFencedPlacement(
     if (prepared.offer.target === undefined) throw new Error("targeted placement offer is missing its target movement");
     const observed = await observeTargetHead(repository, prepared.offer.target.target);
     if (observed !== prepared.offer.target.expectedOid) {
+      const treeEquals = await observedTreeEqualsCandidate(repository, observed, prepared.offer.target.newOid);
       return {
         kind: "target-moved",
         contractId: input.contractId,
         target: prepared.offer.target.target,
         expected: prepared.offer.target.expectedOid,
         observed,
+        observedTreeEqualsCandidate: treeEquals,
       };
     }
     const physical = await prepareTargetPlacement(repository, state, prepared.offer.target);

@@ -212,6 +212,9 @@ export async function completeCandidate(input: CompletionInput): Promise<Complet
   if (placement.kind !== "target-moved" || input.target === undefined) {
     return { admission, evidence: mergeEvidence(evidence, { placement: requiredPlacementStop(placement) }) };
   }
+  if (placement.observedTreeEqualsCandidate) {
+    return { admission, evidence: mergeEvidence(evidence, { placement: requiredPlacementStop(placement) }) };
+  }
 
   let integratedAt: SnapshotId | undefined;
   for (let attempts = 1; attempts <= MAX_REINTEGRATION_CYCLES; attempts += 1) {
@@ -240,6 +243,9 @@ export async function completeCandidate(input: CompletionInput): Promise<Complet
     if (placement.kind !== "target-moved") {
       return { admission, evidence: mergeEvidence(evidence, { placement: requiredPlacementStop(placement) }) };
     }
+    if (placement.observedTreeEqualsCandidate) {
+      return { admission, evidence: mergeEvidence(evidence, { placement: requiredPlacementStop(placement) }) };
+    }
     if (attempts === MAX_REINTEGRATION_CYCLES) {
       return {
         admission,
@@ -251,6 +257,7 @@ export async function completeCandidate(input: CompletionInput): Promise<Complet
             integratedAt: integratedAt!,
             observed: placement.observed,
             attempts,
+            observedTreeEqualsCandidate: placement.observedTreeEqualsCandidate,
           },
         }),
       };

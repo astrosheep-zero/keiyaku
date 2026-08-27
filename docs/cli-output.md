@@ -236,7 +236,10 @@ JSON serializes that same public value.
 Deliver and review project typed `completion` directly: its integration and
 optional Verification verdict determine the target line. Movement is one
 neutral deviation; unsatisfied Verification and dependent continuation stops
-remain visible with their typed summaries. No target or state is reconstructed.
+remain visible with their typed summaries. A `target-moved` stop also exposes
+`content=identical` when `observedTreeEqualsCandidate` is true; this is a fact,
+not a claim, acceptance label, or command directive. No target or state is
+reconstructed.
 
 An accepted receipt answers its verb-specific question: identity and
 decision-relevant consequences precede the mechanical record. Rendering uses

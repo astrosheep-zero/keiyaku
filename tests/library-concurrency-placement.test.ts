@@ -317,6 +317,63 @@ test("delivery re-integrates its persisted tender when the target premise moves"
   assert.match((await current?.diff()) ?? "", /candidate\.txt/u);
 });
 
+test("equivalent external target movement stops without reintegration or claim", async () => {
+  const repository = repositoryWithMain();
+  repository.run(["branch", "release"]);
+  const result = await Keiyaku.bind({
+    repo: await cachedRepoAt(repository.path),
+    markdown: document(),
+    target: "refs/heads/release",
+    workspace: "worktree",
+    gates: [],
+  });
+  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), result.keiyaku.id);
+  writeFileSync(resolve(worktree, "candidate.txt"), "captured\n");
+  repository.run(["-C", worktree, "add", "candidate.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
+  const raced = `${repository.path}/equivalent-target-raced.marker`;
+  const delivered = await withGitShim(
+    [
+      'if [ "$1" = "update-ref" ]; then',
+      "  input_file=$(mktemp)",
+      '  cat >"$input_file"',
+      '  if grep -q "update refs/heads/release" "$input_file" && [ ! -e "$KEIYAKU_TARGET_RACED" ]; then',
+      '    expected=$(awk \'$1 == "update" && $2 == "refs/heads/release" { print $4 }\' "$input_file")',
+      '    candidate=$(awk \'$1 == "update" && $2 == "refs/heads/release" { print $3 }\' "$input_file")',
+      '    tree=$("$KEIYAKU_REAL_GIT" rev-parse "$candidate^{tree}")',
+      '    external=$("$KEIYAKU_REAL_GIT" commit-tree "$tree" -p "$expected" -m "external equivalent")',
+      '    "$KEIYAKU_REAL_GIT" update-ref refs/heads/release "$external" "$expected"',
+      '    touch "$KEIYAKU_TARGET_RACED"',
+      "  fi",
+      '  "$KEIYAKU_REAL_GIT" "$@" <"$input_file"',
+      "  status=$?",
+      '  rm -f "$input_file"',
+      '  exit "$status"',
+      "fi",
+      'exec "$KEIYAKU_REAL_GIT" "$@"',
+    ].join("\n"),
+    { KEIYAKU_TARGET_RACED: raced },
+    async (gitPath) =>
+      (
+        await Keiyaku.of({
+          repo: await Repo.at({ path: repository.path, gitPath }),
+          id: result.keiyaku.id,
+        })
+      ).deliver(),
+  );
+
+  assert.deepEqual(
+    delivered.facts.map((fact) => fact.kind),
+    ["bound", "deliver"],
+  );
+  assert.equal(delivered.value.completion, undefined);
+  assert.equal(delivered.value.placement?.failure, "target-moved");
+  assert.equal(delivered.value.placement?.observedTreeEqualsCandidate, true);
+  assert.notEqual(delivered.value.placement?.observed, null);
+  assert.equal(repository.run(["rev-parse", "refs/heads/release"]).trim(), delivered.value.placement?.observed);
+  assert.equal((await result.keiyaku.state()).terminal, null);
+});
+
 test("reintegrated delivery does not aggregate Verification from the superseded integration", async () => {
   const repository = repositoryWithMain();
   repository.run(["branch", "release"]);
@@ -397,7 +454,9 @@ test("review re-integrates its accepted delivery when the target premise moves",
   repository.run(["-C", worktree, "add", "candidate.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
   const delivered = await result.keiyaku.deliver();
-  commitCandidate(repository);
+  writeFileSync(resolve(repository.path, "different-target.txt"), "different target\n");
+  repository.run(["add", "different-target.txt"]);
+  repository.run(["commit", "--quiet", "-m", "move target differently"]);
 
   const failed = `${repository.path}/publication-failed.marker`;
   const shim = [

@@ -82,6 +82,15 @@ async function commitTree(repository: GitRepository, snapshot: SnapshotId): Prom
   );
 }
 
+export async function observedTreeEqualsCandidate(
+  repository: GitRepository,
+  observed: SnapshotId | null,
+  candidate: SnapshotId,
+) {
+  if (observed === null) return false;
+  return (await commitTree(repository, observed)) === (await commitTree(repository, candidate));
+}
+
 function checkoutRefusal(
   contractId: ContractId,
   target: RefOperation,

@@ -96,11 +96,13 @@ function targetMovedDetail(stop: Extract<PlacementStop, { failure: "target-moved
       { text: stop.target, opaque: true },
       { text: `${stop.integratedAt} -> ${stop.observed}`, opaque: true },
       { text: `attempts=${stop.attempts}` },
+      ...(stop.observedTreeEqualsCandidate ? [{ text: "content=identical" }] : []),
     ];
   }
   return [
     { text: stop.target, opaque: true },
     { text: `${stop.expected} -> ${stop.observed}`, opaque: true },
+    ...(stop.observedTreeEqualsCandidate ? [{ text: "content=identical" }] : []),
   ];
 }
 
