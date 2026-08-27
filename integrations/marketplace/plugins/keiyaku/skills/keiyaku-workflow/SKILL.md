@@ -6,16 +6,8 @@ description: Use when authoring, binding, auditing, delivering, reviewing, amend
 # Keiyaku Workflow
 
 A Contract turns one bounded delivery into acceptable terms: bind it, work in
-the appointed worktree, audit the Contract, deliver, then review. When every
-declared gate is current, the result lands on the target ref.
-
-## How The Delivery Moves
-
-```text
-contract document -> bind -> work -> audit -> deliver -> review gates
-                                                    -> placement -> claimed
-                                                                \-> abandoned
-```
+the appointed worktree, audit the Contract, deliver, then satisfy its review
+gates. Placement claims it when every prerequisite and gate is current.
 
 The lifecycle is `waiting -> bound -> tendered -> claimed | abandoned`;
 the last two are terminal. Reserve `--after` for true logical ordering: one
@@ -42,6 +34,32 @@ Change and test code in the worktree the bind receipt names. `deliver` accepts
 a clean worktree by default. You may commit first, or explicitly include all
 non-ignored staged, unstaged, and untracked final bytes with
 `deliver --include-dirty`.
+
+### Managed Worktree Hooks
+
+Configure repository hooks in `<repo>/.keiyaku/settings.json` under the
+`worktree` namespace. User defaults live in `~/.keiyaku/settings.json` and may
+provide the same entries:
+
+```json
+{
+  "worktree": {
+    "create": [{ "argv": ["npm", "ci"], "timeoutMs": 300000 }],
+    "destroy": [{ "argv": ["./scripts/teardown.sh"], "timeoutMs": 60000 }]
+  }
+}
+```
+
+`create` runs when the managed worktree is created; `destroy` runs during
+terminal cleanup. `bind` does not print successful hook argv. A failed hook is
+reported as `worktree-hook-failed`; retry it explicitly:
+
+```bash
+keiyaku reconcile <contract> --retry-hooks
+```
+
+The selected commands freeze per worktree and may replay after runner failure,
+so keep them replay-safe.
 
 ## Regain The Picture
 
@@ -96,10 +114,10 @@ files before acting. Do not substitute a generic repository tour for the files
 that actually govern the assignment.
 
 Contract association, available forwarded actions, and the brief are
-independent inputs. When a Reviewer should record its own verdict, include
-`--allowed contract.review` and say in the brief to record `--satisfied` on
-pass or `--unsatisfied` on failure. When a Deliverer should tender its completed
-candidate, include `--allowed contract.deliver` and say so in the brief.
+independent inputs. Give a Reviewer `--allowed contract.review` only when it
+must record its own verdict, and state `--satisfied` or `--unsatisfied` in the
+brief. Give a Deliverer `--allowed contract.deliver` when it must tender its
+candidate.
 
 A `Deliverer` implements and verifies the terms in `Worktree`. Commission a
 `Reviewer` after delivery. The reviewer inspects the complete current Contract
@@ -107,8 +125,7 @@ worktree snapshot, not a worker report or named candidate commit, and does not
 modify it. Missing or contradictory seat, worktree, or reading list means stop
 and ask.
 
-Observe commissioned workers through their Contract association instead of
-collecting Aku ids by hand:
+Observe commissioned workers through their Contract association:
 
 ```bash
 keiyaku wait kei/<contract> --all --timeout 5m
@@ -178,14 +195,10 @@ Audit is an evidence window for a prospective delivery:
 keiyaku audit <contract> --diff
 ```
 
-It aggregates facts from the same candidate preparation used by `deliver`:
-the prospective candidate and integration identities, the requested diff, the
-declared Verification commands and their observed results, and the target
-placement observation. A terminal run may record subject-bound `verified`
-testimony for those observed commands; it does not deliver, request placement,
-satisfy a review gate, or decide whether the candidate should land. The
-coordinator judges the returned facts; a worker's completion report is not a
-substitute for them.
+Audit is prospective evidence for candidate preparation, Verification, and
+target placement. A terminal run may record subject-bound `verified` testimony,
+but audit never delivers, requests placement, or satisfies a gate; judge its
+facts rather than a worker's completion report.
 
 ## Deliver
 
@@ -200,29 +213,15 @@ Deliver when the worktree content is the candidate you intend to land:
 keiyaku deliver <contract> --include-dirty
 ```
 
-This example includes all non-ignored staged, unstaged, and untracked bytes in
-the candidate. Use `--include-dirty` only when the complete current workspace
-is the intended delivery; otherwise commit the intended bytes and run
-`keiyaku deliver <contract>`.
+Use `--include-dirty` only when the complete current workspace is the intended
+candidate; otherwise commit the intended bytes first. Read the receipt for the
+candidate, gate/placement stop, and any physical-effect lag. A not-complete
+delivery is still a recorded `tendered` candidate.
 
-`deliver` freshly tenders the candidate, records it, and requests placement.
-When a current audit attestation names the identical integration
-snapshot and Verification segment, deliver reuses it; otherwise it runs the
-declarations. Worktree, target, policy, document, Verification, or
-snapshot-producing option changes prevent reuse. If the workspace is dirty, the refusal
-lists staged, unstaged, and untracked paths, a short statistic, and the
-`--include-dirty` option. Use that option only when the complete current
-workspace is the intended delivery; dirty submodule internals cannot be
-included. Read the receipt:
-
-- When every gate is current, the receipt shows placement and `claimed`; the
-  delivery is done.
-- When a gate is not current, the receipt shows the recorded candidate and the
-  placement stop. This is not a failed delivery. The Contract stays
-  `tendered` while you complete the gates.
-- A lag row reports an accepted physical effect that has not finished. The
-  delivery stands; `reconcile` completes the effect later. It never changes
-  the verdict.
+`deliver` freshly tenders the candidate and requests placement. A current audit
+attestation is reused only when its integration snapshot and Verification
+segment still match; changes to the worktree, target, policy, document,
+Verification, or snapshot-producing options make it stale.
 
 ## Review Gates
 
@@ -237,8 +236,11 @@ Have an independent reviewer inspect the delivered Contract worktree snapshot.
 If it should record the verdict itself, dispatch it with `--allowed
 contract.review` and state both verdicts in the brief. Otherwise its answer is
 review input for the coordinator to record.
-The `review` command records the verdict. `--satisfied` requests placement; if
-the other gates are current, the receipt shows `claimed`.
+The `review` command records the verdict and `--satisfied` requests placement.
+
+`review --satisfied` is authoritative gate testimony and may claim the Contract
+when delivery, prerequisites, and all gates are current. Record it only for the
+bytes intended to land now.
 
 Fixing findings changes the patch and makes earlier evidence stale (`?` in
 `status`). Audit the rework, deliver it, then review again. Record
@@ -251,10 +253,8 @@ When active Contracts write a shared surface, landing order is a coordinator
 judgment, not Contract state. Keep the decision in the workflow skill; do not
 persist a train or add a second placement authority.
 
-- `audit` and a reviewer's report are preliminary. `review --satisfied` is
-  authoritative gate testimony: it requests placement and claims when
-  delivery, prerequisites, and all gates are current. Record it only when the
-  reviewed bytes are intended to land now.
+- `audit` and a reviewer's report are preliminary; the satisfied review is the
+  gate-visible judgment for placement.
 - Before recording a satisfied review, or delivering a Contract with no
   declared gates, ask whether the exact patch will survive until placement. A
   pure rebase whose `ChangeId` is unchanged keeps the existing review current;
@@ -273,19 +273,15 @@ persist a train or add a second placement authority.
 
 ## Target Placement
 
-Placement follows the Git mental model you already have:
+Managed target checkouts follow Git merge semantics: unrelated staged,
+unstaged, and untracked paths are preserved. Staged changes refuse only when
+Git cannot carry the predecessor-to-candidate merge; overlapping worktree
+changes and colliding untracked files also refuse.
 
-- Delivering from a managed worktree to a checked-out target behaves like a
-  merge. Non-overlapping staged, unstaged, and untracked files in that checkout
-  are preserved. A staged path refuses only when Git cannot carry it through
-  the predecessor-to-candidate merge; overlapping worktree changes and
-  colliding untracked files also refuse. The receipt lists the exact paths.
-  The deliver or review you just ran still counts: the recorded candidate and
-  any `✓ reviewed` verdict are kept, but nothing claims and nothing moves.
-  The target ref, its checkout, and your bytes stay exactly where they were,
-  and the Contract stays `tendered`.
-After a refusal, handle the listed paths, then `deliver` again or record a
-satisfied review; either command requests placement again.
+Placement refusal is nonpublishing: the receipt names the reason and paths,
+while the target, checkout bytes, candidate, and current review evidence remain
+unchanged. Handle the listed paths, then run `deliver` again or record a
+satisfied review to request placement again.
 
 ## Recover Or End
 
@@ -295,12 +291,11 @@ keiyaku abandon <contract> --note "<why>"     # terminal; target untouched
 ```
 
 `reconcile` completes physical effects of already accepted placements; it does
-not retry an ordinary placement refusal. `abandon` ends the Contract and never
-touches the target.
+not retry an ordinary placement refusal. Use `--retry-hooks` only for a frozen
+failed hook phase. A lagging effect does not change the accepted verdict.
+`abandon` ends the Contract and never touches the target.
 
 ## Routine Output
 
-Use default text output for normal operation and `--json` only when a script
-needs the public result. Use the complete `kei/...` ID, or `@...` inside a
-managed worktree. When a flag or stdin form is unclear, read that command's
-`--help` instead of guessing.
+Use the complete `kei/...` ID, or `@...` inside a managed worktree. Read a
+command's `--help` when its flags or stdin form are unclear.
