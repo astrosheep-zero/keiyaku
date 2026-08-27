@@ -139,3 +139,13 @@ npm install -g @astrosheep/keiyaku
 ```
 
 Node ≥ 22.19. Product law lives in [`docs/`](docs/README.md).
+
+## Source builds
+
+Building from source also builds the Windows launcher with Zig 0.14.1. Install
+that system tool separately and make `zig` available on `PATH`, or set
+`KEIYAKU_ZIG` to the selected executable. `npm ci` alone is not sufficient for
+the Windows launcher: use `npm ci --ignore-scripts --prefer-offline` followed by
+`npm run build` (or `npm test`). On non-Windows hosts, a missing or unusable
+Zig skips only the Windows launcher so the rest of `npm run build` and `npm test`
+can continue; Windows builds fail with an actionable diagnostic.

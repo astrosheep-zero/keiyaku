@@ -12,6 +12,16 @@ core fact or core gate vocabulary.
 
 ## Execution
 
+### Source-build launcher prerequisite
+
+The source build invokes Zig 0.14.1 to compile the Windows launcher. Zig is a
+system prerequisite, not an npm dependency: after `npm ci --ignore-scripts --prefer-offline`,
+run `npm run build` (or `npm test`) with
+`zig` on `PATH`, or set `KEIYAKU_ZIG` to the executable to use. On Windows, a
+missing or unusable selected executable fails the build with its cause. On
+non-Windows hosts, the same condition emits one deterministic skip fact for
+the launcher and lets the remaining TypeScript/package build continue.
+
 Verification is awaited within the invoking operation. `deliver` and `audit` receive the invocation's
 selected key-stamped `verification` derivation and execute exactly its ordered
 declarations. The presence of

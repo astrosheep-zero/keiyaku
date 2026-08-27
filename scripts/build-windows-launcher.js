@@ -11,13 +11,54 @@ const output = resolve(outputDirectory, "windows-launch.exe");
 const zigCacheRoot = resolve(tmpdir(), "keiyaku-zig-cache");
 const zigGlobalCacheDirectory = process.env.ZIG_GLOBAL_CACHE_DIR ?? resolve(zigCacheRoot, "global");
 const zigLocalCacheDirectory = process.env.ZIG_LOCAL_CACHE_DIR ?? resolve(zigCacheRoot, "local");
+const zigExecutable = process.env.KEIYAKU_ZIG ?? "zig";
+const requiredZigVersion = "0.14.1";
+
+function boundedCause(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  const stderr =
+    typeof error === "object" && error !== null && "stderr" in error && error.stderr !== undefined
+      ? String(error.stderr)
+      : "";
+  const detail = stderr !== "" && !message.includes(stderr) ? `${message}: ${stderr}` : message;
+  return detail.replace(/\s+/gu, " ").trim().slice(0, 512);
+}
+
+function zigPreflight() {
+  try {
+    const reportedVersion = execFileSync(zigExecutable, ["version"], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+      .toString()
+      .trim();
+    if (reportedVersion !== requiredZigVersion) {
+      throw new Error(`reported version ${reportedVersion || "(empty)"}; expected ${requiredZigVersion}`);
+    }
+  } catch (error) {
+    return boundedCause(error);
+  }
+  return undefined;
+}
+
+const preflightFailure = zigPreflight();
+if (preflightFailure !== undefined) {
+  const diagnostic =
+    `Zig ${requiredZigVersion} is required for the Windows launcher; ` +
+    `install it on PATH or set KEIYAKU_ZIG to an executable. ` +
+    `Cause: ${preflightFailure}`;
+  if (process.platform === "win32") throw new Error(diagnostic);
+  console.warn(`${diagnostic} Skipping Windows launcher on non-Windows host.`);
+  process.exit(0);
+}
 
 if (process.env.ZIG_GLOBAL_CACHE_DIR === undefined) mkdirSync(zigGlobalCacheDirectory, { recursive: true });
 if (process.env.ZIG_LOCAL_CACHE_DIR === undefined) mkdirSync(zigLocalCacheDirectory, { recursive: true });
 
 mkdirSync(outputDirectory, { recursive: true });
 execFileSync(
-  process.env.KEIYAKU_ZIG ?? "zig",
+  zigExecutable,
   [
     "cc",
     "-target",
