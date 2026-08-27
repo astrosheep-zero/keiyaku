@@ -95,7 +95,7 @@ function lagRows(lag: Lag, columns: number): readonly string[] {
       "lag",
       [
         {
-          text: `${lag.kind} reason=${lag.reason} tender=${lag.tender} head=${lag.head} path=${lag.path}`,
+          text: `${lag.kind} reason=${lag.reason} tender=${lag.tender} head=${lag.head}${lag.paths === undefined || lag.paths.length === 0 ? "" : ` paths=${lag.paths.join(",")}`} path=${lag.path}`,
           opaque: true,
         },
       ],

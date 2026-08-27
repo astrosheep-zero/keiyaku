@@ -36,6 +36,16 @@ export type ManagedWorktreeFollow =
       reason: "head-moved" | "head-attached" | "operation-in-progress" | "unsupported-parent-shape";
     }>;
 
+export type DependentWorktreeFollow =
+  | Readonly<{ kind: "followed"; before: SnapshotId; after: SnapshotId }>
+  | Readonly<{ kind: "unchanged" }>
+  | Readonly<{
+      kind: "retained";
+      head: SnapshotId;
+      reason: "head-moved" | "head-attached" | "operation-in-progress";
+      paths: readonly string[];
+    }>;
+
 async function workspaceRevision(
   repository: GitRepository,
   workspace: string,
@@ -108,6 +118,51 @@ export async function followManagedWorktree(
   if (!admitted) return { kind: "retained", head, reason: "operation-in-progress" };
   await runGit(repository, ["-C", workspace, "reset", "--mixed", gitObjectId(tender)]);
   return { kind: "followed", before: head, after: tender };
+}
+
+/** Follow a dependency baseline only through a clean, detached fast-forward. */
+export async function followDependentManagedWorktree(
+  repository: GitRepository,
+  workspace: string,
+  target: SnapshotId,
+): Promise<DependentWorktreeFollow> {
+  const head = await workspaceRevision(repository, workspace, "HEAD");
+  if (head === null) throw new Error("managed worktree HEAD is missing");
+  const status = await workspaceStatus(repository, workspace);
+  const gitDirectory = await worktreeGitDirectory(repository, workspace);
+  const operation = await workspaceOperationState(repository, workspace, gitDirectory);
+  const mergeHead = await workspaceRevision(repository, workspace, "MERGE_HEAD");
+  const paths = [
+    ...new Set([
+      ...status.staged,
+      ...status.unstaged,
+      ...status.untracked,
+      ...status.submodules,
+      ...status.unmergedPaths,
+    ]),
+  ].sort();
+  const attached = await runGit(repository, ["-C", workspace, "symbolic-ref", "--quiet", "HEAD"]).then(
+    () => true,
+    (error: unknown) => {
+      if (error instanceof GitPlumbingError && error.status === 1) return false;
+      throw error;
+    },
+  );
+  if (attached) return { kind: "retained", head, reason: "head-attached", paths };
+  if (mergeHead !== null || operation.other || operation.unmerged || paths.length > 0) {
+    return { kind: "retained", head, reason: "operation-in-progress", paths };
+  }
+  if (head === target) return { kind: "unchanged" };
+  let ancestor = false;
+  try {
+    await runGit(repository, ["merge-base", "--is-ancestor", gitObjectId(head), gitObjectId(target)]);
+    ancestor = true;
+  } catch (error) {
+    if (!(error instanceof GitPlumbingError) || error.status !== 1) throw error;
+  }
+  if (!ancestor) return { kind: "retained", head, reason: "head-moved", paths };
+  await runGit(repository, ["-C", workspace, "checkout", "--quiet", "--detach", gitObjectId(target)]);
+  return { kind: "followed", before: head, after: target };
 }
 
 export async function withPrivateGitIndex<Value>(

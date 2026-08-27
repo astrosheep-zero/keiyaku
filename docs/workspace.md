@@ -153,6 +153,14 @@ guidance frontmatter never persist Place. Managed worktrees contain no
 second appointment marker; `.keiyaku/KEIYAKU.md` is guidance inside a
 managed worktree.
 
+After a predecessor placement claims its snapshot, dependency continuation may
+physically advance an appointed dependent worktree. This is a Git-owned,
+read-before-write fast-forward: detached ancestor `HEAD` and a completely
+clean workspace are required, while attached, non-ancestor, staged, unstaged,
+untracked, merge, and conflict states are retained without changing bytes.
+The effect and typed lag are returned to the caller; no appointment, journal,
+candidate, review, or target-ref fact is created.
+
 ## Materialization And Cleanup
 
 Post-admission Place lifecycle composition has one private concrete Library

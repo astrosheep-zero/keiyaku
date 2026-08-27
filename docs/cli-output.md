@@ -395,6 +395,12 @@ Glyphs distinguish obligations (`!`), neutral deviations (`~`), and ordinary
 record rows. Verification, cleanup, and environment stops remain independent
 typed evidence and do not change an accepted exit status unless their public
 result says so.
+
+Dependency baseline follow uses the existing reconciliation rows. A successful
+clean fast-forward renders the `worktree followed` effect; a refusal renders
+`worktree-follow-retained` with its target, head, reason, exact worktree path,
+and any dirty paths. These rows report mechanical state only and contain no
+workflow instruction.
 Region reads render as follows:
 
 ```text

@@ -148,7 +148,7 @@ export const gitZones = [
       any("git/target-placement.ts"),
       any("git/terminal-seal.ts"),
       any("git/terminal-reconcile.ts"),
-      any("git/workspace.ts", ["followManagedWorktree", "worktreePath"]),
+      any("git/workspace.ts", ["followManagedWorktree", "followDependentManagedWorktree", "worktreePath"]),
       any("git/scratch.ts", ["removeCollectableScratchWorktrees"]),
     ],
   },

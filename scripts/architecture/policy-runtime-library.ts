@@ -242,10 +242,14 @@ export const runtimeLibraryZones = [
     allow: [
       types("core/facts/types.ts", ["ActorId", "ContractId", "ContractState", "JournalEntry"]),
       any("git/observe.ts", ["observeActiveContractWorld"]),
+      any("git/reconcile.ts", ["reconcileDependentWorktree"]),
+      types("git/reconcile.ts", ["ReconcileResult"]),
       any("git/read-observation.ts", ["GitDecodeChannel", "withGitReadObservation"]),
+      any("git/workspace.ts", ["worktreePath"]),
       any("protocol/deliver.ts", ["continueDeliveryOperation"]),
       any("protocol/operations.ts", ["DocumentDerivation", "PlacementStop", "RepositoryScope"]),
       types("library/mutation.ts", ["AcceptedIntent"]),
+      any("workspace-place.ts", ["appointmentFor", "readPlaceRegister"]),
     ],
   },
   {

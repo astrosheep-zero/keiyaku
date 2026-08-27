@@ -22,7 +22,7 @@ import { readRef } from "../src/git/repository.js";
 import { materializeJudgedConflict, readDeliveryDiff, workspaceMergeStatePresent } from "../src/git/integration.js";
 import { materializeScratchCandidate } from "../src/git/scratch.js";
 import { reconcile } from "../src/git/reconcile.js";
-import { followManagedWorktree, worktreePath } from "../src/git/workspace.js";
+import { followDependentManagedWorktree, followManagedWorktree, worktreePath } from "../src/git/workspace.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import { AuthorityCorruptionError, Keiyaku, Repo, type ContractId, type TopologyEffect } from "../src/index.js";
 import { deliveryDiffOperation, scopeOperation } from "../src/protocol/operations.js";
@@ -1137,6 +1137,117 @@ test("managed follow advances only the detached HEAD and real index", async () =
   assert.deepEqual(await followManagedWorktree(git, repository.path, mintSnapshotId(tender)), { kind: "unchanged" });
   assert.equal(repository.run(["diff", "--cached", "--binary"]), stagedAfter);
   assert.equal(readFileSync(join(repository.path, "tracked.txt"), "utf8"), "later\n");
+});
+
+test("dependent managed follow only advances a clean ancestor", async () => {
+  const repository = makeGitRepository();
+  writeFileSync(join(repository.path, "tracked.txt"), "base\n");
+  repository.run(["add", "tracked.txt"]);
+  repository.run(["commit", "--quiet", "-m", "initial"]);
+  const start = repository.run(["rev-parse", "HEAD"]).trim();
+  repository.run(["checkout", "--detach", "--quiet", start]);
+  writeFileSync(join(repository.path, "tracked.txt"), "target\n");
+  repository.run(["add", "tracked.txt"]);
+  repository.run(["commit", "--quiet", "-m", "predecessor"]);
+  const target = repository.run(["rev-parse", "HEAD"]).trim();
+  repository.run(["checkout", "--detach", "--quiet", start]);
+  const git = await cachedRepositoryAt(repository.path);
+
+  assert.deepEqual(await followDependentManagedWorktree(git, repository.path, mintSnapshotId(target)), {
+    kind: "followed",
+    before: mintSnapshotId(start),
+    after: mintSnapshotId(target),
+  });
+  assert.equal(repository.run(["rev-parse", "HEAD"]).trim(), target);
+  assert.equal(readFileSync(join(repository.path, "tracked.txt"), "utf8"), "target\n");
+  writeFileSync(join(repository.path, "at-target.txt"), "keep at target\n");
+  assert.deepEqual(await followDependentManagedWorktree(git, repository.path, mintSnapshotId(target)), {
+    kind: "retained",
+    head: mintSnapshotId(target),
+    reason: "operation-in-progress",
+    paths: ["at-target.txt"],
+  });
+  assert.equal(repository.run(["rev-parse", "HEAD"]).trim(), target);
+  assert.equal(readFileSync(join(repository.path, "at-target.txt"), "utf8"), "keep at target\n");
+  repository.run(["clean", "-fd", "--quiet"]);
+  repository.run(["reset", "--hard", "--quiet", start]);
+  writeFileSync(join(repository.path, "untracked.txt"), "keep\n");
+  assert.deepEqual(await followDependentManagedWorktree(git, repository.path, mintSnapshotId(target)), {
+    kind: "retained",
+    head: mintSnapshotId(start),
+    reason: "operation-in-progress",
+    paths: ["untracked.txt"],
+  });
+  assert.equal(repository.run(["rev-parse", "HEAD"]).trim(), start);
+  assert.equal(readFileSync(join(repository.path, "untracked.txt"), "utf8"), "keep\n");
+  repository.run(["clean", "-fd", "--quiet"]);
+  const later = repository.run(["commit-tree", `${target}^{tree}`, "-p", target], "later\n").trim();
+  repository.run(["reset", "--hard", "--quiet", later]);
+  assert.deepEqual(await followDependentManagedWorktree(git, repository.path, mintSnapshotId(target)), {
+    kind: "retained",
+    head: mintSnapshotId(later),
+    reason: "head-moved",
+    paths: [],
+  });
+  assert.equal(repository.run(["rev-parse", "HEAD"]).trim(), later);
+});
+
+test("dependent managed follow reports attached dirty paths without mutation", async () => {
+  const repository = makeGitRepository();
+  writeFileSync(join(repository.path, "tracked.txt"), "base\n");
+  repository.run(["add", "tracked.txt"]);
+  repository.run(["commit", "--quiet", "-m", "initial"]);
+  const start = repository.run(["rev-parse", "HEAD"]).trim();
+  repository.run(["checkout", "--detach", "--quiet", start]);
+  writeFileSync(join(repository.path, "tracked.txt"), "target\n");
+  repository.run(["add", "tracked.txt"]);
+  repository.run(["commit", "--quiet", "-m", "target"]);
+  const target = repository.run(["rev-parse", "HEAD"]).trim();
+  repository.run(["checkout", "--quiet", "main"]);
+  writeFileSync(join(repository.path, "tracked.txt"), "attached dirty\n");
+  writeFileSync(join(repository.path, "untracked.txt"), "untracked\n");
+  const before = readFileSync(join(repository.path, "tracked.txt"));
+  const git = await cachedRepositoryAt(repository.path);
+
+  assert.deepEqual(await followDependentManagedWorktree(git, repository.path, mintSnapshotId(target)), {
+    kind: "retained",
+    head: mintSnapshotId(start),
+    reason: "head-attached",
+    paths: ["tracked.txt", "untracked.txt"],
+  });
+  assert.equal(repository.run(["rev-parse", "HEAD"]).trim(), start);
+  assert.deepEqual(readFileSync(join(repository.path, "tracked.txt")), before);
+  assert.equal(readFileSync(join(repository.path, "untracked.txt"), "utf8"), "untracked\n");
+});
+
+test("dependent managed follow reports submodule-only dirt", async () => {
+  const child = makeGitRepository();
+  writeFileSync(join(child.path, "child.txt"), "child\n");
+  child.run(["add", "child.txt"]);
+  child.run(["commit", "--quiet", "-m", "child"]);
+
+  const repository = makeGitRepository();
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  repository.run(["-c", "protocol.file.allow=always", "submodule", "add", "--quiet", child.path, "module"]);
+  repository.run(["commit", "--quiet", "-am", "submodule"]);
+  const start = repository.run(["rev-parse", "HEAD"]).trim();
+  repository.run(["checkout", "--detach", "--quiet", start]);
+  writeFileSync(join(repository.path, "target.txt"), "target\n");
+  repository.run(["add", "target.txt"]);
+  repository.run(["commit", "--quiet", "-m", "target"]);
+  const target = repository.run(["rev-parse", "HEAD"]).trim();
+  repository.run(["checkout", "--detach", "--quiet", start]);
+  writeFileSync(join(repository.path, "module", "child.txt"), "dirty child\n");
+  const git = await cachedRepositoryAt(repository.path);
+
+  assert.deepEqual(await followDependentManagedWorktree(git, repository.path, mintSnapshotId(target)), {
+    kind: "retained",
+    head: mintSnapshotId(start),
+    reason: "operation-in-progress",
+    paths: ["module"],
+  });
+  assert.equal(repository.run(["rev-parse", "HEAD"]).trim(), start);
+  assert.equal(readFileSync(join(repository.path, "module", "child.txt"), "utf8"), "dirty child\n");
 });
 
 test("dirty managed delivery follows its accepted tender as the clean baseline", async () => {

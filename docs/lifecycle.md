@@ -223,6 +223,13 @@ becomes true because placement admitted `claimed`, that invocation attempts
 each selected retained dependent in canonical ContractId order. It reuses the
 dependent's persisted tender, frozen policy, Verification, reintegration, and
 placement paths; it never captures workspace bytes or appends another delivery.
+A managed dependent is first offered a bounded physical baseline follow to the
+predecessor's claimed integration snapshot. Git may advance only a detached
+dependent worktree whose `HEAD` is an ancestor of that snapshot and whose
+tracked, untracked, merge, and conflict state is clean. A refused follow keeps
+the dependent active and contributes typed reconciliation lag; it does not
+invoke delivery or review again. Existing candidate and review identities are
+only re-observed by the continuation's normal placement path.
 A child stop does not reverse the leading claim or prevent an independent
 sibling attempt. Each newly claimed child exposes its own direct dependents in
 the same finite invocation. Acyclic prerequisites and invocation-local

@@ -25,7 +25,7 @@ import {
   type TargetCheckoutLag,
 } from "./target-placement.js";
 import { runCreateHooks, type WorktreeHookLag, type WorktreeHooks } from "./hooks.js";
-import { followManagedWorktree, worktreePath } from "./workspace.js";
+import { followDependentManagedWorktree, followManagedWorktree, worktreePath } from "./workspace.js";
 import { removeCollectableScratchWorktrees } from "./scratch.js";
 import { reconcileTerminalManagedWorktree, removeRef, updateRef } from "./terminal-reconcile.js";
 import type { UnsealedBytes } from "./terminal-seal.js";
@@ -70,6 +70,7 @@ type WorktreeFollowRetained = Readonly<{
   tender: SnapshotId;
   head: SnapshotId;
   reason: "head-moved" | "head-attached" | "operation-in-progress" | "unsupported-parent-shape";
+  paths?: readonly string[];
 }>;
 export type ReconcileFailure = Readonly<{
   kind: "reconcile-failed";
@@ -322,6 +323,55 @@ export async function reconcile(input: ReconcileInput): Promise<GitReconcileObse
   if (exceptional !== undefined) throw exceptional;
   if (observation === undefined) throw new Error("reconcile produced no observation");
   return observation;
+}
+
+/** Reconcile one retained dependent worktree under its normal per-Contract lock. */
+export async function reconcileDependentWorktree(
+  repository: GitRepository,
+  contractId: ContractId,
+  path: string,
+  target: SnapshotId,
+): Promise<ReconcileResult> {
+  let held: HeldSqliteTransactionLock;
+  try {
+    held = await acquireSqliteTransactionLock({ path: reconcileLockPath(repository, contractId), mode: "immediate" });
+  } catch (error) {
+    return failed("effect", error);
+  }
+  let result: ReconcileResult;
+  try {
+    const follow = await followDependentManagedWorktree(repository, path, target);
+    if (follow.kind === "followed") {
+      result = {
+        effects: [{ kind: "worktree", path, action: "followed", before: follow.before, after: follow.after }],
+        lag: [],
+      };
+    } else if (follow.kind === "unchanged") {
+      result = { effects: [], lag: [] };
+    } else {
+      result = {
+        effects: [{ kind: "worktree", path, action: "unchanged" }],
+        lag: [
+          {
+            kind: "worktree-follow-retained",
+            path,
+            tender: target,
+            head: follow.head,
+            reason: follow.reason,
+            ...(follow.paths.length === 0 ? {} : { paths: follow.paths }),
+          },
+        ],
+      };
+    }
+  } catch (error) {
+    result = failed("effect", error, [{ kind: "worktree", path, action: "unchanged" }]);
+  }
+  try {
+    held.close();
+  } catch (error) {
+    result = failed("effect", error, result.effects, result.lag);
+  }
+  return result;
 }
 
 export function reconcileObservationFailure(error: unknown): ReconcileResult {

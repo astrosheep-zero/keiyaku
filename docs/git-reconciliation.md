@@ -72,6 +72,21 @@ failure remains `reconcile-failed`; it is not a retained follow shape. A
 follow reports `worktree` action `followed` with its before and after snapshot.
 No target ref moves, attached branch follows, extra commits, refs, markers, or
 persisted follow state exist.
+
+Dependency continuation has one additional, invocation-local managed-worktree
+follow. It targets the predecessor's claimed integration snapshot and is
+allowed only when the dependent's detached `HEAD` is an ancestor of that
+snapshot. A dry-run observes tracked staged/unstaged paths, untracked paths,
+submodule paths, `MERGE_HEAD`, operation metadata, and unmerged entries before
+any write. Any
+dirty, attached, non-ancestor, merge, or conflict shape is retained with a
+`worktree-follow-retained` lag naming the exact path, head, target (`tender`),
+reason, and dirty paths when present. A clean ancestor uses Git's native
+detached-checkout carry-forward, advancing the managed detached `HEAD` while
+updating its index and materializing the target worktree files, and reports the
+existing `worktree followed` effect. This physical repair appends no journal fact, moves no target ref, and
+never recaptures a candidate or reruns review; it is finite and idempotent
+under the dependent's existing reconcile lock.
 Target-checkout reconciliation exists only to finish the current claimed
 placement's interrupted follow. It takes the same canonical target fence as
 placement, rereads the claimed delivery and target ref, and applies only
@@ -150,11 +165,11 @@ pure value from the library; it never reads Settings or interprets command
 meaning:
 
 ```ts
-type HookCommand = Readonly<{ argv: readonly string[]; timeoutMs: number }>
+type HookCommand = Readonly<{ argv: readonly string[]; timeoutMs: number }>;
 type WorktreeHooks = Readonly<{
-  create: readonly HookCommand[]
-  destroy: readonly HookCommand[]
-}>
+  create: readonly HookCommand[];
+  destroy: readonly HookCommand[];
+}>;
 ```
 
 Each command runs directly, without a shell, in the managed worktree and
@@ -226,68 +241,68 @@ collection, not command recovery, and reads no transient Verification result.
 
 ```ts
 type ReconcileResult = Readonly<{
-  effects: readonly Effect[]
-  lag: readonly ReconcileLag[]
-}>
+  effects: readonly Effect[];
+  lag: readonly ReconcileLag[];
+}>;
 
 type ReconcileLag =
   | Readonly<{ kind: "worktree-retained"; path: string }>
   | Readonly<{
-      kind: "unsealed-bytes"
-      path: string
-      paths: readonly string[]
-      head?: SnapshotId
+      kind: "unsealed-bytes";
+      path: string;
+      paths: readonly string[];
+      head?: SnapshotId;
     }>
   | Readonly<{
-      kind: "target-checkout-retained"
-      path: string
-      target: string
-      diagnostic: string
+      kind: "target-checkout-retained";
+      path: string;
+      target: string;
+      diagnostic: string;
     }>
   | Readonly<{
-      kind: "worktree-hook-failed"
-      phase: "create" | "destroy"
-      path: string
-      command: number
-      failure: HookFailure
+      kind: "worktree-hook-failed";
+      phase: "create" | "destroy";
+      path: string;
+      command: number;
+      failure: HookFailure;
     }>
   | Readonly<{
-      kind: "reconcile-failed"
-      stage: "observation" | "effect"
-      diagnostic: string
-    }>
+      kind: "reconcile-failed";
+      stage: "observation" | "effect";
+      diagnostic: string;
+    }>;
 
 type HookFailure =
   | Readonly<{
-      kind: "exit"
-      code: number
-      stdout: string
-      stderr: string
-      truncated: boolean
+      kind: "exit";
+      code: number;
+      stdout: string;
+      stderr: string;
+      truncated: boolean;
     }>
   | Readonly<{ kind: "timeout" }>
   | Readonly<{ kind: "spawn-error"; diagnostic: string }>
-  | Readonly<{ kind: "unknown-exit" }>
+  | Readonly<{ kind: "unknown-exit" }>;
 
 type Effect =
   | Readonly<{
-      kind: "worktree"
-      path: string
-      action: "created" | "removed" | "unchanged"
+      kind: "worktree";
+      path: string;
+      action: "created" | "removed" | "unchanged";
     }>
   | Readonly<{
-      kind: "target-checkout"
-      path: string
-      target: string
-      action: "followed" | "recovered"
+      kind: "target-checkout";
+      path: string;
+      target: string;
+      action: "followed" | "recovered";
     }>
   | Readonly<{
-      kind: "ref"
-      name: string
-      before: GitObjectId | null
-      after: GitObjectId | null
-      action: "created" | "updated" | "removed" | "unchanged"
-    }>
+      kind: "ref";
+      name: string;
+      before: GitObjectId | null;
+      after: GitObjectId | null;
+      action: "created" | "updated" | "removed" | "unchanged";
+    }>;
 ```
 
 `keiyaku.reconcile()` returns the contract's `ReconcileResult` as its public
@@ -298,9 +313,9 @@ fails before any ContractId exists. The public report is exactly:
 
 ```ts
 type RepoReconcileItem = Readonly<{
-  contractId: ContractId
-  report: ReconcileReport
-}>
+  contractId: ContractId;
+  report: ReconcileReport;
+}>;
 
 type RepoReconcileReport =
   | Readonly<{
