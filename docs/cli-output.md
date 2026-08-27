@@ -27,13 +27,6 @@ history expansion.
 
 ## Help
 
-Root help includes:
-
-```text
-  nuke [--confirm <WorldRoot>]
-    Remove Keiyaku-owned data from one confirmed World.
-```
-
 The bare form uses the existing refusal envelope and exit status to print the
 exact literal confirmation invocation. JSON is the same typed refusal or
 execution value.
@@ -43,6 +36,13 @@ followed by the exact retry command using the resolved WorldRoot.
 Each command family owns its help rows. Root help composes those rows;
 validation, usage refusal, namespace help, and leaf help read the same syntax,
 usage, and purpose values. Only Task remains a namespace.
+
+Root help is a compact command index: each row uses the canonical `keiyaku`
+prefix and carries only the command name and purpose. Leaf help carries the
+complete usage, including accepted `--json`, followed by any spec-owned detail
+block. The fork usage documents both complete AkuIds and world-local `@alias`
+selectors. Contract history has no pagination controls; those flags remain
+Akuma-history-only refusals.
 
 `--help` is a reserved parser token. After optional `-C`, its presence requests
 help for the longest legal command-word prefix even when later tokens are
@@ -369,10 +369,11 @@ trimming, or normalization is added to the payload.
 
 A completed nonempty Region observation groups a repeated identical ordered
 witness set once beneath an explicit list of every participating Contract. The
-counts are derived checks: every complete Contract ID and every exact
-`mine ~ theirs` pair remains visible. Nonidentical sets remain beneath their
-own complete Contract ID. Overlap uses the neutral Region relation mark and
-never changes accepted into refused. An incomplete observation is one
+counts are derived checks and every non-tautological counterpart Contract ID
+remains visible; tautological `mine ~ mine` pairs are omitted from text.
+Nonidentical sets remain beneath their own complete Contract ID. Overlap uses
+the neutral Region relation
+mark and never changes accepted into refused. An incomplete observation is one
 `~ overlap unavailable` block with the verbatim diagnostic. An empty completed
 observation renders no overlap block. Bind always carries one Region answer.
 An accepted amend carries `overlaps` or `overlapFailure` only when its typed
@@ -470,3 +471,12 @@ present and failed sections exit `0`; the failure remains visible in the
 typed/text value rather than being mapped to the mutation retry status. JSON
 and text carry no actual touched paths, Git conflicts, ownership, or action
 advice.
+
+Text omits tautological `pattern ~ same-pattern` witnesses. The typed Region
+answer remains unchanged, including those exact pairs for JSON consumers.
+
+Settings text is a structured multiline projection. It starts with `settings`,
+indents the two scope facts, then lists each resolved namespace and entry. An
+entry value is emitted as indented pretty JSON on its own lines; its bytes are
+not collapsed into a fact line. `settings --json` remains the exact typed
+Settings projection.

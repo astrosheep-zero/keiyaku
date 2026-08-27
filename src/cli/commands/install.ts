@@ -25,7 +25,7 @@ export type InstallInvocationResult = Readonly<{
 
 export type InstallRunner = (input: ProcessInput) => Promise<ProcessOutcome>;
 
-export const INSTALL_USAGE = "install <codex|claude|opencode|pi>\n       install --all";
+export const INSTALL_USAGE = "install <codex|claude|opencode|pi> [--json]\ninstall --all [--json]";
 
 function isHarness(value: string | undefined): value is HarnessName {
   return value !== undefined && (HARNESS_NAMES as readonly string[]).includes(value);

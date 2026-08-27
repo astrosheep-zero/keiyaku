@@ -15,12 +15,7 @@ import {
   type AkumaAction,
   type ParsedAkumaCommand,
 } from "./commands/akuma.js";
-import {
-  INSTALL_USAGE,
-  parseInstallCommand,
-  renderInstallHelp,
-  type ParsedInstallCommand,
-} from "./commands/install.js";
+import { parseInstallCommand, renderInstallHelp, type ParsedInstallCommand } from "./commands/install.js";
 import {
   CONTRACT_COMMAND_SPECS,
   parseContractCommand,
@@ -44,6 +39,7 @@ import {
   type ParsedShow,
   type ParsedStatus,
 } from "./commands/contract.js";
+import { renderTextBlock } from "./render/terminal.js";
 import { CliUsageError, isBlankInput } from "./usage.js";
 export { CliUsageError } from "./usage.js";
 export { renderContractHelp } from "./commands/contract.js";
@@ -52,22 +48,35 @@ export type { Command };
 
 const ROOT_USAGE = "usage: keiyaku [-C <path>] [--repo <path>] <command> [<contract>|@<contract>] [--flag ...] [-]";
 
-export function renderRootHelp(): string {
-  return [
-    ROOT_USAGE,
-    "",
-    "global options:",
-    "  -C, --cwd <path>  Set the invocation working directory.",
-    "  --repo <path>     Select the Git repository coordinate.",
-    "",
-    "commands:",
-    ...Object.values(CONTRACT_COMMAND_SPECS).flatMap((spec) => [`  ${spec.usage}`, `    ${spec.purpose}`]),
-    `  ${INSTALL_USAGE}`,
-    "    Install the Keiyaku skills into an agent harness.",
-    "  task ...",
-    "    Task coordination; see `keiyaku task --help`.",
-    ...renderAkumaRootRows(),
-  ].join("\n");
+export function renderRootHelp(columns?: number): string {
+  return renderHelpText(
+    [
+      ROOT_USAGE,
+      "",
+      "global options:",
+      "  -C, --cwd <path>  Set the invocation working directory.",
+      "  --repo <path>     Select the Git repository coordinate.",
+      "",
+      "commands:",
+      ...Object.entries(CONTRACT_COMMAND_SPECS).map(([command, spec]) => `  keiyaku ${command}  ${spec.purpose}`),
+      "  keiyaku install  Install the Keiyaku skills into an agent harness.",
+      "  keiyaku task     Task coordination; see `keiyaku task --help`.",
+      ...renderAkumaRootRows(),
+    ].join("\n"),
+    columns,
+  );
+}
+
+function renderHelpText(help: string, columns: number | undefined): string {
+  if (columns === undefined || !Number.isFinite(columns) || columns <= 0) return help;
+  return help
+    .split("\n")
+    .flatMap((line) => {
+      if (line.trim().length === 0) return [line];
+      const indent = line.match(/^\s*/u)?.[0] ?? "";
+      return renderTextBlock(line.slice(indent.length), indent, columns);
+    })
+    .join("\n");
 }
 
 function contractUsage(command: Command): string {
@@ -81,19 +90,22 @@ export function renderCommandUsage(command: ParsedCommand): string {
   return contractUsage(command.command);
 }
 
-export function renderHelp(coordinate: CliHelpCoordinate): string {
-  switch (coordinate.kind) {
-    case "root":
-      return renderRootHelp();
-    case "contract":
-      return renderContractHelpForOwner(coordinate.command);
-    case "task":
-      return renderTaskHelp(coordinate.action);
-    case "install":
-      return renderInstallHelp();
-    case "akuma":
-      return renderAkumaHelp(coordinate.action);
-  }
+export function renderHelp(coordinate: CliHelpCoordinate, columns?: number): string {
+  const help = (() => {
+    switch (coordinate.kind) {
+      case "root":
+        return renderRootHelp();
+      case "contract":
+        return renderContractHelpForOwner(coordinate.command);
+      case "task":
+        return renderTaskHelp(coordinate.action);
+      case "install":
+        return renderInstallHelp();
+      case "akuma":
+        return renderAkumaHelp(coordinate.action);
+    }
+  })();
+  return renderHelpText(help, columns);
 }
 
 export type ParsedCommand =

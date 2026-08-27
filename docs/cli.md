@@ -320,8 +320,9 @@ because each is a successful read result.
 `history <aku/...|@alias> --id <historyId>` reads one exact retained answered
 or failed outcome and writes its complete answer or diagnostic. `--id` is
 mutually exclusive with `--last`, `--before`, `--since`, and `--limit`; blank
-or unknown IDs are typed results with nonzero exit. `fork` requires one
-nonblank `--at` history id and has no stdin body; failed IDs are non-forkable.
+or unknown IDs are typed results with nonzero exit. `fork` accepts one complete
+`aku/...` or world-local `@alias`, requires one nonblank `--at` history id, and
+has no stdin body; failed IDs are non-forkable.
 Fork passes the selected Contract Repo, otherwise the invocation Repo when
 available. The facade alone reads and propagates parent Dispatch; CLI never
 reads Dispatch or Alias files.

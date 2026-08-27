@@ -17,7 +17,8 @@ export function usageLine(usage: string): string {
     .split("\n")
     .map((line, index) => {
       if (index === 0) return `usage: keiyaku ${line}`;
-      return line.startsWith("task ") ? `       keiyaku ${line}` : `       ${line.trimStart()}`;
+      const continuation = line.trimStart();
+      return `       keiyaku ${continuation.startsWith("keiyaku ") ? continuation.slice("keiyaku ".length) : continuation}`;
     })
     .join("\n");
 }

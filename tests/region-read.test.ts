@@ -189,9 +189,19 @@ test("CLI Region renders grouped overlaps, empty facts, and refuses deleted dial
       },
     );
     const text = renderText(path);
-    assert.match(text, new RegExp(`overlap ${second.id} 2 pairs`));
+    assert.match(text, new RegExp(`overlap ${second.id} 1 pair`));
     assert.match(text, /^ {2}src\/\*\* ~ src\/cli\/\*\*$/m);
-    assert.match(text, /^ {2}tests\/\*\* ~ tests\/\*\*$/m);
+    assert.doesNotMatch(text, /tests\/\*\* ~ tests\/\*\*/u);
+    assert.match(text, new RegExp(`overlap ${first.id} exact match`, "u"));
+  }
+
+  const exactPath = await invoke(parseArgv(["region", "--path", "docs/guide/**"]), {
+    cwd: repository.path,
+    environment: {},
+  });
+  assert.equal(exactPath.kind, "region");
+  if (exactPath.kind === "region") {
+    assert.equal(renderText(exactPath), [`overlap ${first.id} exact match`].join("\n"));
   }
 
   const miss = await invoke(parseArgv(["region", "--path", "other/**"]), { cwd: repository.path, environment: {} });

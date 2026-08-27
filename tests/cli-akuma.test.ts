@@ -172,6 +172,9 @@ test("Akuma CLI parses root verbs without the removed namespace", () => {
   assert.deepEqual(parseArgv(["fork", "aku/claude/1234abcd", "--at", "history-1", "--json"]), {
     command: { command: "fork", akuma: "aku/claude/1234abcd", at: "history-1", output: "json" },
   });
+  assert.deepEqual(parseArgv(["fork", "@reviewer", "--at", "turn/7", "--json"]), {
+    command: { command: "fork", akuma: "@reviewer", at: "turn/7", output: "json" },
+  });
   assert.deepEqual(parseArgv(["history", "aku/claude/1234abcd", "--since", "7", "--limit", "25", "--json"]), {
     command: {
       command: "history",
@@ -188,6 +191,7 @@ test("Akuma CLI parses root verbs without the removed namespace", () => {
   assert.deepEqual(parseArgv(["history", "kei/example", "--json"]), {
     command: { command: "history", contract: "kei/example", output: "json" },
   });
+  assert.throws(() => parseArgv(["history", "kei/example", "--limit", "10"]), /does not accept/u);
   assert.deepEqual(parseArgv(["history", "@example"]), {
     command: { command: "history", akuma: "@example", last: false, output: "text" },
   });

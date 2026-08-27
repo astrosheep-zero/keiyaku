@@ -9,11 +9,12 @@ import {
   type ContractCommand,
   type ContractCommandSpec,
 } from "../src/cli/commands/contract.js";
-import { CliUsageError, parseArgv, renderContractHelp, renderRootHelp } from "../src/cli/parse.js";
+import { CliUsageError, parseArgv, renderContractHelp, renderHelp, renderRootHelp } from "../src/cli/parse.js";
 import { renderAkumaHelp, type AkumaAction } from "../src/cli/commands/akuma.js";
 import { renderInstallHelp } from "../src/cli/commands/install.js";
 import { renderTaskHelp, type TaskAction } from "../src/cli/commands/task.js";
 import { usageLine } from "../src/cli/usage.js";
+import { displayColumns } from "../src/cli/render/terminal.js";
 
 test("help resolves the longest legal command-word prefix before syntax scanning", () => {
   assert.deepEqual(parseArgv(["--help"]), { help: { kind: "root" } });
@@ -39,24 +40,24 @@ test("help resolves the longest legal command-word prefix before syntax scanning
 test("each grammar owner renders its own namespace and leaf help", () => {
   assert.match(renderRootHelp(), /-C, --cwd <path>  Set the invocation working directory\./u);
   assert.match(renderRootHelp(), /--repo <path>     Select the Git repository coordinate\./u);
-  assert.match(renderRootHelp(), /task \.\.\.\n    Task coordination; see `keiyaku task --help`\./u);
+  assert.match(renderRootHelp(), /keiyaku task\s+Task coordination; see `keiyaku task --help`\./u);
   assert.match(renderContractHelp("bind"), /usage: keiyaku bind \[--task <task\/\.\.\.>\]/u);
   assert.match(renderContractHelp("deliver"), /--message <text>\] \[--include-dirty\] \[--materialize-conflict\]/u);
   assert.match(renderContractHelp("review"), /usage: keiyaku review .*--satisfied \| --unsatisfied/u);
   assert.equal(
     renderContractHelp("show"),
-    ["Read one Contract guidance projection.", "", "usage: keiyaku show [<contract>|@<contract>]"].join("\n"),
+    ["Read one Contract guidance projection.", "", "usage: keiyaku show [<contract>|@<contract>] [--json]"].join("\n"),
   );
   assert.equal(
     renderContractHelp("ls"),
     [
       "List one identity directory.",
       "",
-      "usage: keiyaku ls task[/]",
-      "       keiyaku ls kei[/]",
-      "       keiyaku ls aku[/]",
-      "       keiyaku ls aku/<akuma>[/]",
-      '       keiyaku ls "aku/*/*"',
+      "usage: keiyaku ls task[/] [--json]",
+      "       keiyaku ls kei[/] [--json]",
+      "       keiyaku ls aku[/] [--json]",
+      "       keiyaku ls aku/<akuma>[/] [--json]",
+      '       keiyaku ls "aku/*/*" [--json]',
     ].join("\n"),
   );
   assert.match(renderTaskHelp(), /task update <TaskId>/u);
@@ -65,7 +66,7 @@ test("each grammar owner renders its own namespace and leaf help", () => {
   assert.doesNotMatch(renderTaskHelp("update"), /--append <text>\|-|--note <text>\|-/u);
   assert.doesNotMatch(renderTaskHelp(), /--full/u);
   assert.doesNotMatch(renderTaskHelp(), /--contract|--no-contract/u);
-  assert.match(renderTaskHelp("compose"), /usage: keiyaku task compose \[--actor <actor>\] \[--plan\] -/u);
+  assert.match(renderTaskHelp("compose"), /usage: keiyaku task compose \[--actor <actor>\] \[--plan\] \[--json\] -/u);
   assert.match(renderTaskHelp("add"), /--actor <actor>/u);
   assert.doesNotMatch(renderTaskHelp("update"), /--actor/u);
   assert.doesNotMatch(renderTaskHelp("start"), /--actor/u);
@@ -74,13 +75,13 @@ test("each grammar owner renders its own namespace and leaf help", () => {
   assert.match(renderTaskHelp("compose"), /references: @task\/\.\.\. is pre-existing/u);
   assert.match(renderTaskHelp("ready"), /open Tasks whose every need is terminal/u);
   assert.doesNotMatch(renderRootHelp(), /^  interrupt /mu);
-  assert.match(renderRootHelp(), /tell <aku\/\.\.\.|@alias> \[--interrupt\]/u);
+  assert.match(renderRootHelp(), /keiyaku tell\s+Send one prompt to an existing Akuma/u);
   assert.equal(
     renderAkumaHelp("tell"),
     [
       "Send one prompt to an existing Akuma and wake it.",
       "",
-      "usage: keiyaku tell <aku/...|@alias> [--interrupt] (<prompt> | -)",
+      "usage: keiyaku tell <aku/...|@alias> [--interrupt] [--json] (<prompt> | -)",
       "",
       "Give <prompt> as one argument, or use - to read stdin.",
       "--interrupt ends the current Body before recording the prompt and waking its successor.",
@@ -94,13 +95,26 @@ test("each grammar owner renders its own namespace and leaf help", () => {
   assert.doesNotMatch(renderTaskHelp("compose"), /final -/u);
 });
 
+test("help projections reflow at the requested terminal width without splitting tokens", () => {
+  const root = renderHelp({ kind: "root" }, 72);
+  const history = renderHelp({ kind: "akuma", action: "history" }, 72);
+  for (const help of [root, history]) {
+    assert.ok(help.split("\n").every((line) => displayColumns(line) <= 72), help);
+  }
+  assert.match(root, /keiyaku bind/u);
+  assert.match(history, /usage: keiyaku history/u);
+  assert.match(history, /--limit/u);
+  assert.match(history, /<count>/u);
+  assert.match(history, /--last/u);
+});
+
 test("amend leaf help enumerates the operation grammar", () => {
   assert.equal(
     renderContractHelp("amend"),
     [
       "Amend one Contract's document operations or structured terms.",
       "",
-      "usage: keiyaku amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name,...>] [--actor <actor>] [-]",
+      "usage: keiyaku amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name,...>] [--actor <actor>] [--json] [-]",
       "",
       "  ## Replace: Context|Objective|Design|Region|Criteria|Verification|<extension>",
       "  ## Append: Context|Objective|Design|Criteria|<extension>",
@@ -118,7 +132,7 @@ test("deliver leaf help explains candidate capture and conflict continuation", (
     [
       "Deliver one Contract candidate from the appointed worktree.",
       "",
-      "usage: keiyaku deliver [<contract>|@<contract>] [--message <text>] [--include-dirty] [--materialize-conflict] [--actor <actor>]",
+      "usage: keiyaku deliver [<contract>|@<contract>] [--message <text>] [--include-dirty] [--materialize-conflict] [--actor <actor>] [--json]",
       "",
       "  --include-dirty         Capture the complete non-ignored worktree tree as the",
       "                          candidate; stages nothing, commits nothing, including",

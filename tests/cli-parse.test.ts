@@ -26,7 +26,7 @@ test("nuke admits only a literal WorldRoot confirmation", () => {
   assert.throws(() => parseArgv(["nuke", "-"]), /nuke reads no stdin/u);
   assert.throws(() => parseArgv(["nuke", "--confirm", " "]), /requires a nonblank value/u);
   assert.throws(() => parseArgv(["nuke", "--confirm", "/one", "--confirm", "/two"]), /duplicate option/u);
-  assert.match(renderRootHelp(), /nuke \[--confirm <WorldRoot>\] \[--json\]/u);
+  assert.match(renderContractHelp("nuke"), /usage: keiyaku nuke \[--confirm <WorldRoot>\] \[--json\]/u);
   assert.match(renderContractHelp("nuke"), /Remove Keiyaku-owned data/u);
 });
 
@@ -369,7 +369,7 @@ test("region accepts repeated --path patterns and omits deleted overlap grammar"
     contract: "kei/example",
     output: "text",
   });
-  assert.match(renderRootHelp(), /region \[<contract>\]/);
+  assert.match(renderContractHelp("region"), /usage: keiyaku region \[<contract>\] \[--json\]/);
   assert.doesNotMatch(renderRootHelp(), /--overlap/);
   assert.doesNotMatch(renderContractHelp("region"), /--overlap/);
 });

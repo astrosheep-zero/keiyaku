@@ -4,7 +4,9 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   try {
     const parsed = parseArgv(argv);
     if ("help" in parsed) {
-      const help = renderHelp(parsed.help);
+      const columns =
+        process.stdout.isTTY === true && Number.isInteger(process.stdout.columns) ? process.stdout.columns : undefined;
+      const help = renderHelp(parsed.help, columns);
       process.stdout.write(help.endsWith("\n") ? help : `${help}\n`);
       return 0;
     }

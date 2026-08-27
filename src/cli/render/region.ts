@@ -2,10 +2,12 @@ import type { RegionOverlap, RegionRead, Section } from "../../kanshi/index.js";
 
 function overlapBlocks(overlaps: readonly RegionOverlap[]): readonly string[] {
   return overlaps.flatMap((overlap) => {
-    const count = overlap.patterns.length;
+    const patterns = overlap.patterns.filter((pattern) => pattern.mine !== pattern.theirs);
+    if (patterns.length === 0) return [`overlap ${overlap.contract} exact match`];
+    const count = patterns.length;
     return [
       `overlap ${overlap.contract} ${count} ${count === 1 ? "pair" : "pairs"}`,
-      ...overlap.patterns.map((pattern) => `  ${pattern.mine} ~ ${pattern.theirs}`),
+      ...patterns.map((pattern) => `  ${pattern.mine} ~ ${pattern.theirs}`),
     ];
   });
 }

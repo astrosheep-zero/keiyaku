@@ -125,7 +125,9 @@ async function writeResult(command: ParsedCommand, result: unknown): Promise<num
     const value = (result as { value: Settings }).value;
     writeCliStream(
       process.stdout,
-      command.output === "json" ? JSON.stringify(settingsJsonValue(value)) : renderSettingsText(value),
+      command.output === "json"
+        ? JSON.stringify(settingsJsonValue(value))
+        : renderSettingsText(value, displayContext().columns),
     );
     return 0;
   }

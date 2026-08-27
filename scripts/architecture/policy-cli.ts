@@ -122,6 +122,7 @@ export const cliZones = [
       any("cli/commands/contract.ts"),
       any("cli/commands/install.ts"),
       any("cli/commands/task.ts"),
+      any("cli/render/terminal.ts", ["renderTextBlock"]),
       any("cli/usage.ts"),
     ],
   },
@@ -327,7 +328,10 @@ export const cliZones = [
     allow: [types("index.ts"), types("cli/result.ts"), any("cli/render/terminal.ts")],
   },
   { source: "cli/render/region.ts", allow: [types("kanshi/index.ts")] },
-  { source: "cli/render/settings.ts", allow: [types("settings.ts")] },
+  {
+    source: "cli/render/settings.ts",
+    allow: [types("settings.ts"), any("cli/render/terminal.ts", ["displayColumns", "renderTextBlock"])],
+  },
   {
     source: "cli/render/task.ts",
     allow: [

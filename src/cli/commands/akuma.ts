@@ -59,7 +59,7 @@ const AKUMA_COMMAND_SPECS = {
       json: "boolean",
     },
     usage:
-      "call <akuma-name> [--contract <kei/...>] [--alias @name] [--readonly] [--allowed <product.action>]... [--wait <duration> | -d | --detach] (<prompt> | -)",
+      "call <akuma-name> [--contract <kei/...>] [--alias @name] [--readonly] [--allowed <product.action>]... [--wait <duration> | -d | --detach] [--json] (<prompt> | -)",
     purpose: "Birth an Akuma from <akuma-name> with one prompt.",
     details: [
       "Give <prompt> as one argument, or use - to read stdin.",
@@ -75,14 +75,14 @@ const AKUMA_COMMAND_SPECS = {
     arity: "one-or-more",
     stdin: false,
     flags: { any: "boolean", all: "boolean", timeout: "value", json: "boolean" },
-    usage: "wait <akuma-selector>... [--any | --all] [--timeout <duration>]",
+    usage: "wait <akuma-selector>... [--any | --all] [--timeout <duration>] [--json]",
     purpose: "Wait for one Akuma or an explicitly selected Akuma set.",
   },
   tell: {
     arity: 1,
     stdin: true,
     flags: { interrupt: "boolean", json: "boolean" },
-    usage: "tell <aku/...|@alias> [--interrupt] (<prompt> | -)",
+    usage: "tell <aku/...|@alias> [--interrupt] [--json] (<prompt> | -)",
     purpose: "Send one prompt to an existing Akuma and wake it.",
     details: [
       "Give <prompt> as one argument, or use - to read stdin.",
@@ -94,21 +94,21 @@ const AKUMA_COMMAND_SPECS = {
     stdin: false,
     flags: { id: "value", before: "value", since: "value", limit: "value", last: "boolean", json: "boolean" },
     usage:
-      "history <aku/...|@alias|kei/...> [--id <historyId> | --before <index> | --since <index>] [--limit <count>] [--last]",
+      "history <aku/...|@alias> [--id <historyId> | --before <index> | --since <index>] [--limit <count>] [--last] [--json]\nhistory <kei/...> [--json]",
     purpose: "Read Akuma execution history or one complete Contract journal and Dispatch timeline.",
   },
   fork: {
     arity: 1,
     stdin: false,
     flags: { at: "value", json: "boolean" },
-    usage: "fork <aku/...> --at <historyId>",
+    usage: "fork <aku/...|@alias> --at <historyId> [--json]",
     purpose: "Fork one Akuma at a retained answered history point.",
   },
   kill: {
     arity: "one-or-more",
     stdin: false,
     flags: { json: "boolean" },
-    usage: "kill <akuma-selector>...",
+    usage: "kill <akuma-selector>... [--json]",
     purpose: "Put down the current Body of an Akuma selector snapshot.",
   },
 } as const satisfies Readonly<Record<string, AkumaCommandSpec>>;
@@ -122,7 +122,7 @@ export function isParsedAkumaCommand(command: Readonly<{ command: string }>): co
 }
 
 export function renderAkumaRootRows(): readonly string[] {
-  return Object.values(AKUMA_COMMAND_SPECS).flatMap((spec) => [`  ${spec.usage}`, `    ${spec.purpose}`]);
+  return Object.entries(AKUMA_COMMAND_SPECS).map(([action, spec]) => `  keiyaku ${action}  ${spec.purpose}`);
 }
 
 export function renderAkumaHelp(action: AkumaAction): string {

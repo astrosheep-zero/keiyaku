@@ -10,6 +10,7 @@ import { decodeAcpConfig } from "../src/akuma/providers/acp/index.js";
 import { invoke, type SettingsInvocationResult } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
 import { renderSettingsText, settingsJsonValue } from "../src/cli/render/settings.js";
+import { displayColumns } from "../src/cli/render/terminal.js";
 import { settings } from "../src/settings.js";
 
 function fixture() {
@@ -476,10 +477,36 @@ test("settings CLI maps KEIYAKU_HOME only at the process edge", async () => {
     const result = await invoke(parsed, { cwd: value.project, environment: { KEIYAKU_HOME: value.home } });
     const observed = result as SettingsInvocationResult;
     assert.equal(observed.kind, "settings");
-    assert.match(renderSettingsText(observed.value), /^user read /u);
+    assert.match(renderSettingsText(observed.value), /^settings\n  user read(?:\n    )?/u);
+    assert.match(renderSettingsText(observed.value), /    entry default user\n      \{/u);
     assert.deepEqual((settingsJsonValue(observed.value) as { namespaces: readonly unknown[] }).namespaces, [
       observed.value.namespace("gates"),
     ]);
+  } finally {
+    value.close();
+  }
+});
+
+test("settings text preserves long paths and opaque provider values at the terminal width", async () => {
+  const value = fixture();
+  try {
+    const longHome = join(value.root, `${"settings-path-".repeat(8)}home`);
+    mkdirSync(longHome, { recursive: true });
+    const longPath = join(longHome, "settings.json");
+    writeFileSync(
+      longPath,
+      JSON.stringify({ providers: { local: { kind: "acp", env: { LONG_VALUE: "x".repeat(100) } } } }),
+    );
+    const observed = await settings({ root: value.project, home: longHome });
+    const text = renderSettingsText(observed, 72);
+    assert.match(text, new RegExp(longPath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+    assert.match(text, /"LONG_VALUE": "x{100}"/u);
+    assert.ok(
+      text
+        .split("\n")
+        .filter((line) => !line.includes("settings.json") && !line.includes('"LONG_VALUE"'))
+        .every((line) => displayColumns(line) <= 72),
+    );
   } finally {
     value.close();
   }
