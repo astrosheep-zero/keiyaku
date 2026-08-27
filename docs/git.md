@@ -218,10 +218,14 @@ When deliver asks to materialize a judged conflict, Git projects that judged
 target into the appointed workspace without choosing ours/theirs, committing,
 or moving a ref. This is recovery projection, not a second conflict judge.
 
-Unmerged index entries refuse as `unmerged-paths` before delivery admission. A
-resolved merge remains dirty for authorization; `includeDirty` captures the
-already materialized final bytes as the tender without judging the conflict
-again.
+Unmerged real-index entries refuse as `unmerged-paths` only when `includeDirty`
+is omitted. `includeDirty` does not refuse solely because the shared index still
+reports `UU`; it captures current non-ignored worktree bytes through the private
+index, leaves that shared index untouched, and keeps captured `MERGE_HEAD` as
+the second tender parent. Conflict markers are caller-authorized final bytes,
+not a second conflict judgment. Without `includeDirty`, any uncommitted
+workspace including unresolved or resolved merge state remains a dirty or
+unmerged refusal.
 
 Integration requires Git's structured merge-tree capability; unsupported Git is
 a typed integration failure. Targetless delivery does not need it.

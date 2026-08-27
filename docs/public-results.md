@@ -198,7 +198,7 @@ type IntegrationRefusal = Readonly<{
   conflictPaths: readonly string[]
   recovery: Readonly<{
     materialize: "deliver --materialize-conflict"
-    continue: "deliver"
+    continue: "deliver --include-dirty"
   }>
 }> | Readonly<{
   kind: "integration-unsupported"
@@ -396,7 +396,9 @@ it carries declarations only and never actual touched paths or Git conflicts.
 `terms-moved` identifies an amend whose source terms changed. Deliver and audit
 use `DocumentMovedRefusal` for a moved stamped document; review has no such
 refusal. Delivery also exposes the typed dirty, unmerged, merge-state, target,
-and workspace refusals defined above. Ordinary dirty review is accepted with a
+and workspace refusals defined above. `unmerged-paths` applies only when
+`includeDirty` is omitted; authorized dirty capture does not refuse solely for
+shared-index `UU` entries. Ordinary dirty review is accepted with a
 workspace disclosure, and these refusals never reread or adopt a new revision.
 
 Every accepted `AmendResult` includes its nonoptional `documentDiff`, which is

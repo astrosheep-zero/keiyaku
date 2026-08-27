@@ -12,6 +12,7 @@ export type TenderCaptureCoordinates = Readonly<{
   place?: string;
   workspacePath?: string;
   captureMergeState?: boolean;
+  /** Opt-in real-index UU refusal. Omit or false when authorized capture must read current worktree bytes. */
   rejectUnmerged?: boolean;
 }>;
 

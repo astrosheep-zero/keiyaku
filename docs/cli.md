@@ -225,9 +225,10 @@ refuse. `--materialize-conflict` is deliver-only and is consulted only after
 the one integration judge returns `reason: "conflict"`. On conflict, omission
 returns the typed failure with recovery values; the flag projects that judged
 conflict into the appointed workspace. It does not override the clean-workspace
-materialization precondition. After materialization, a native resolve-and-commit
-continues with plain `deliver`; a resolved and staged uncommitted merge continues
-with `deliver --include-dirty`. Their up-to-date policy comes only from Settings. `review` requires one
+materialization precondition. After materialization, resolve the conflicted
+files and continue with `deliver --include-dirty` while the merge stays
+uncommitted; a committed merge continues with plain `deliver`. No recovery step
+requires `git add`. Their up-to-date policy comes only from Settings. `review` requires one
 verdict and one summary source, has no dirty authorization, and discloses
 ordinary dirty bytes when accepted. `--diff` maps to audit `showDiff`; the value
 lives only at `report.candidate.diff`, including `""`. `--show-diff-body` is

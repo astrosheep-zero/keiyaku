@@ -658,7 +658,7 @@ test("deliver conflict text exposes target head, paths, and recovery", () => {
         reason: "conflict",
         targetHead,
         conflictPaths: ["a.txt", "z.txt"],
-        recovery: { materialize: "deliver --materialize-conflict", continue: "deliver" },
+        recovery: { materialize: "deliver --materialize-conflict", continue: "deliver --include-dirty" },
       },
     }),
     [
@@ -668,7 +668,7 @@ test("deliver conflict text exposes target head, paths, and recovery", () => {
       "   │ a.txt",
       "   │ z.txt",
       "   recovery materialize conflicts · deliver --materialize-conflict",
-      "   recovery continue after resolve and commit · deliver",
+      "   recovery continue after resolve and commit · deliver --include-dirty",
     ].join("\n"),
   );
 });

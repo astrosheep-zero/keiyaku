@@ -366,10 +366,12 @@ delivery.diff(): Promise<string | null>
 ```
 
 `deliver` and `audit` default to a clean workspace; `includeDirty` authorizes
-the complete non-ignored final tree, not a staged-path selection. Omission is
-the same as `false`. `materializeConflict` is false by default and can return
-`IntegrationConflictMaterialized`; its conflict and recovery rules belong to
-[lifecycle.md](lifecycle.md). Audit has no message or materialization input;
+the complete non-ignored final tree, not a staged-path selection, including when
+the real index still reports unmerged entries. Omission is the same as `false`
+and keeps the dirty-workspace or unmerged-paths refusal. `materializeConflict`
+is false by default and can return `IntegrationConflictMaterialized`; its
+conflict and recovery rules belong to [lifecycle.md](lifecycle.md). Audit has
+no message or materialization input;
 `showDiff` includes the requested candidate diff and scope, including `""`.
 Akuma forwarding and Verification retain their owning protocol boundaries.
 

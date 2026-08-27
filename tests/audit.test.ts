@@ -239,17 +239,32 @@ test("audit blocks an unresolved materialized merge with the delivery refusal", 
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "tender"]);
   const materialized = await bound.keiyaku.deliver({ materializeConflict: true });
   assert.equal(materialized.kind, "integration-conflict-materialized");
+  const indexBefore = repository.run(["-C", worktree, "diff", "--cached", "--binary"]);
+  const statusBefore = repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]);
+
+  const blocked = await bound.keiyaku.audit();
+  assert.deepEqual(blocked.facts, []);
+  assert.equal(blocked.value.candidate.kind, "blocked");
+  if (blocked.value.candidate.kind === "blocked") {
+    assert.equal(blocked.value.candidate.refusal.kind, "dirty-workspace");
+  }
+  assert.equal(blocked.value.verification.kind, "not-run");
+  assert.equal(blocked.value.target.kind, "not-observed");
+  assert.equal((await bound.keiyaku.state()).delivery, null);
 
   const audited = await bound.keiyaku.audit({ includeDirty: true });
   assert.deepEqual(audited.facts, []);
-  assert.deepEqual(audited.value, {
-    candidate: {
-      kind: "blocked",
-      refusal: { kind: "unmerged-paths", contractId: state.id, paths: ["shared.txt"] },
-    },
-    verification: { kind: "not-run" },
-    target: { kind: "not-observed" },
-  });
+  assert.equal(audited.value.candidate.kind, "ready");
+  if (audited.value.candidate.kind === "ready") {
+    const workspaceHead = repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim();
+    const mergeHead = repository.run(["-C", worktree, "rev-parse", "MERGE_HEAD"]).trim();
+    assert.deepEqual(
+      repository.run(["show", "-s", "--format=%P", audited.value.candidate.identity.tenderSnapshot]).trim().split(" "),
+      [workspaceHead, mergeHead],
+    );
+  }
+  assert.equal(repository.run(["-C", worktree, "diff", "--cached", "--binary"]), indexBefore);
+  assert.equal(repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]), statusBefore);
   assert.equal((await bound.keiyaku.state()).delivery, null);
 });
 

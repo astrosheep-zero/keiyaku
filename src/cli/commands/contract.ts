@@ -151,11 +151,11 @@ export const CONTRACT_COMMAND_SPECS = {
     purpose: "Deliver one Contract candidate from the appointed worktree.",
     details: [
       "  --include-dirty         Capture the complete non-ignored worktree tree as the",
-      "                          candidate; stages nothing, commits nothing. Refused",
-      "                          while unmerged paths exist.",
+      "                          candidate; stages nothing, commits nothing, including",
+      "                          an unmerged shared index.",
       "  --materialize-conflict  After a conflict result, project the judged targetHead",
       "                          into the worktree as an uncommitted merge. Not a",
-      "                          delivery: resolve, stage, deliver again.",
+      "                          delivery: resolve, then deliver with --include-dirty.",
     ].join("\n"),
   },
   review: {

@@ -55,7 +55,7 @@ export type DeliverConflictRefusal = Readonly<{
   conflictPaths: readonly string[];
   recovery: Readonly<{
     materialize: "deliver --materialize-conflict";
-    continue: "deliver";
+    continue: "deliver --include-dirty";
   }>;
 }>;
 

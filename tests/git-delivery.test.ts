@@ -367,25 +367,41 @@ test("delivery refuses unresolved index paths and captures a resolved merge as a
   const indexBefore = repository.run(["-C", worktree, "diff", "--cached", "--binary"]);
   const statusBefore = repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]);
 
-  for (const includeDirty of [false, true]) {
-    assert.deepEqual(
-      await prepareDelivery(git, preparation, {
-        title: "Resolved merge",
-        document: contractBody(),
-        includeDirty,
-      }),
-      {
-        kind: "refused",
-        refusal: { kind: "unmerged-paths", contractId: preparation.contractId, paths: ["a.txt", "z.txt"] },
-      },
-    );
-    assert.equal(repository.run(["-C", worktree, "diff", "--cached", "--binary"]), indexBefore);
-    assert.equal(repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]), statusBefore);
+  const omitted = await prepareDelivery(git, preparation, {
+    title: "Resolved merge",
+    document: contractBody(),
+  });
+  assert.equal(omitted.kind, "refused");
+  if (omitted.kind === "refused") {
+    assert.equal(omitted.refusal.kind, "dirty-workspace");
   }
+  assert.equal(repository.run(["-C", worktree, "diff", "--cached", "--binary"]), indexBefore);
+  assert.equal(repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]), statusBefore);
 
   writeFileSync(join(worktree, "a.txt"), "resolved\n");
   writeFileSync(join(worktree, "z.txt"), "resolved\n");
-  repository.run(["-C", worktree, "add", "a.txt", "z.txt"]);
+  const unresolvedIndex = repository.run(["-C", worktree, "diff", "--cached", "--binary"]);
+  const unresolvedStatus = repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]);
+  const preparedUnresolved = await prepareDelivery(git, preparation, {
+    title: "Resolved merge",
+    document: contractBody(),
+    includeDirty: true,
+  });
+  assert.equal(preparedUnresolved.kind, "prepared");
+  if (preparedUnresolved.kind !== "prepared") return;
+  assert.equal(repository.run(["-C", worktree, "diff", "--cached", "--binary"]), unresolvedIndex);
+  assert.equal(
+    repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]),
+    unresolvedStatus,
+  );
+  const unresolvedTender = preparedUnresolved.data.tenderSnapshot;
+  assert.deepEqual(repository.run(["show", "-s", "--format=%P", unresolvedTender]).trim().split(" "), [
+    tenderHead,
+    targetHead,
+  ]);
+  assert.equal(repository.run(["show", `${unresolvedTender}:a.txt`]), "resolved\n");
+  assert.equal(repository.run(["show", `${unresolvedTender}:z.txt`]), "resolved\n");
+
   const plain = await prepareDelivery(git, preparation, {
     title: "Resolved merge",
     document: contractBody(),
@@ -393,7 +409,19 @@ test("delivery refuses unresolved index paths and captures a resolved merge as a
   assert.equal(plain.kind, "refused");
   if (plain.kind === "refused") {
     assert.equal(plain.refusal.kind, "dirty-workspace");
-    if (plain.refusal.kind === "dirty-workspace") assert.deepEqual(plain.refusal.staged, ["a.txt", "z.txt"]);
+  }
+
+  repository.run(["-C", worktree, "add", "a.txt", "z.txt"]);
+  const dirtyOmitted = await prepareDelivery(git, preparation, {
+    title: "Resolved merge",
+    document: contractBody(),
+  });
+  assert.equal(dirtyOmitted.kind, "refused");
+  if (dirtyOmitted.kind === "refused") {
+    assert.equal(dirtyOmitted.refusal.kind, "dirty-workspace");
+    if (dirtyOmitted.refusal.kind === "dirty-workspace") {
+      assert.deepEqual(dirtyOmitted.refusal.staged, ["a.txt", "z.txt"]);
+    }
   }
 
   const prepared = await prepareDelivery(git, preparation, {

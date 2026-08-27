@@ -47,7 +47,7 @@ test("guidance preserves source bytes and appends one Fulfillment H2", () => {
   assert.match(guidance, /When an Arc is active, stay within that current chapter\./);
   assert.match(
     guidance,
-    /Deliver from this worktree\. A clean worktree delivers HEAD; uncommitted work\nneeds `deliver --include-dirty`, which captures the final non-ignored tree and\nstages or commits nothing\. If deliver reports a conflict, run\n`deliver --materialize-conflict`, resolve the conflicted files, stage them,\nand deliver again; while the merge stays uncommitted that continuation uses\n`--include-dirty`\. Unresolved paths always refuse\./,
+    /Deliver from this worktree\. A clean worktree delivers HEAD; uncommitted work\nneeds `deliver --include-dirty`, which captures the final non-ignored tree and\nstages or commits nothing\. If deliver reports a conflict, run\n`deliver --materialize-conflict`, resolve the conflicted files, and continue\nwith `deliver --include-dirty` while the merge stays uncommitted\./,
   );
   assert.match(guidance, /^### Reviewer$/m);
   assert.doesNotMatch(guidance, /^## Arc$/m);

@@ -76,7 +76,10 @@ Verification runs. Placement consumes generic current gate evidence.
 `deliver` may request conflict materialization. A plain conflict is the typed
 `integration-failed` refusal and changes no authority; materialization projects
 the judged conflict into the appointed workspace, admits no delivery fact, and
-leaves the Contract pending. Unmerged entries refuse as `unmerged-paths`.
+leaves the Contract pending. Continuation while that merge is uncommitted uses
+`includeDirty` to capture current worktree bytes; omitted `includeDirty` keeps
+the existing dirty-workspace or unmerged-paths refusal. Shared-index `UU` state
+alone is not a second conflict judge.
 Akuma delivery forwarding creates no second delivery authority.
 
 `review` is a contract operation and may record testimony before any `deliver`.

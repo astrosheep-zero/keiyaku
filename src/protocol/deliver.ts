@@ -51,7 +51,7 @@ export type IntegrationConflictMaterialized = Readonly<{
 
 const DELIVER_CONFLICT_RECOVERY = Object.freeze({
   materialize: "deliver --materialize-conflict",
-  continue: "deliver",
+  continue: "deliver --include-dirty",
 } as const);
 
 type DeliverOperationInput = MutationOperationInput &
@@ -104,7 +104,6 @@ export async function prepareDelivery(
     coordinates,
     ...(appointed === undefined ? {} : { place: appointed.place }),
     captureMergeState: true,
-    rejectUnmerged: true,
   });
   if (tender.kind === "refused") return tender;
   if (

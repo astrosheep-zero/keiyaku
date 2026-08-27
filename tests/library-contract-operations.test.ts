@@ -199,7 +199,7 @@ async function reviewGatedConflictCandidateFixture() {
 
 const DELIVER_CONFLICT_RECOVERY = {
   materialize: "deliver --materialize-conflict",
-  continue: "deliver",
+  continue: "deliver --include-dirty",
 } as const;
 
 function mergeHead(repository: ReturnType<typeof repositoryWithMain>, worktree: string): string | null {
@@ -305,18 +305,25 @@ test("resolved merge delivery requires dirty authority and preserves native pare
   assert.equal(materialized.kind, "integration-conflict-materialized");
   const journal = await readRef(git, GIT_REF);
 
-  for (const includeDirty of [false, true]) {
-    await assert.rejects(
-      () => contract.deliver({ includeDirty }),
-      refused({ kind: "unmerged-paths", contractId: contract.id, paths: ["a.txt", "z.txt"] }),
-    );
-    assert.equal(await readRef(git, GIT_REF), journal);
-    assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), targetHead);
-  }
+  const indexBefore = repository.run(["-C", worktree, "diff", "--cached", "--binary"]);
+  const statusBefore = repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]);
+  await assert.rejects(
+    () => contract.deliver(),
+    (error: unknown) => {
+      assert.ok(error instanceof KeiyakuRefused);
+      assert.equal(error.refusal.kind, "dirty-workspace");
+      return true;
+    },
+  );
+  assert.equal(await readRef(git, GIT_REF), journal);
+  assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), targetHead);
+  assert.equal(repository.run(["-C", worktree, "diff", "--cached", "--binary"]), indexBefore);
+  assert.equal(repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]), statusBefore);
 
   writeFileSync(join(worktree, "a.txt"), "resolved\n");
   writeFileSync(join(worktree, "z.txt"), "resolved\n");
-  repository.run(["-C", worktree, "add", "a.txt", "z.txt"]);
+  const unresolvedIndex = repository.run(["-C", worktree, "diff", "--cached", "--binary"]);
+  const unresolvedStatus = repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]);
   await assert.rejects(
     () => contract.deliver(),
     (error: unknown) => error instanceof KeiyakuRefused && error.refusal.kind === "dirty-workspace",
@@ -325,6 +332,13 @@ test("resolved merge delivery requires dirty authority and preserves native pare
   const delivered = await contract.deliver({ includeDirty: true });
   assert.equal("facts" in delivered, true);
   if (!("facts" in delivered)) return;
+  assert.notEqual(await readRef(git, GIT_REF), journal);
+  assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), targetHead);
+  assert.equal(repository.run(["-C", worktree, "diff", "--cached", "--binary"]), unresolvedIndex);
+  assert.equal(
+    repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]),
+    unresolvedStatus,
+  );
   assert.deepEqual(repository.run(["show", "-s", "--format=%P", delivered.value.tenderSnapshot]).trim().split(" "), [
     workspaceHead,
     targetHead,
