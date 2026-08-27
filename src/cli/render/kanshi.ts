@@ -1,4 +1,4 @@
-import type { AkumaKanshiRow, ContractKanshiRow, KanshiReport, Section, TaskKanshiRow } from "../../kanshi/index.js";
+import type { AkumaKanshiRow, ContractKanshiRow, KanshiReport, TaskKanshiRow } from "../../kanshi/index.js";
 import { visibleFleetRows } from "../../kanshi/fleet.js";
 import {
   abbreviateGitIds,
@@ -21,6 +21,7 @@ import {
 } from "./terminal.js";
 const PLUMB = "  │ ";
 const MAX_VISIBLE_ROWS = 10;
+const NARROW_COLUMNS = 72;
 
 function contractMark(row: ContractKanshiRow): string {
   if (row.phase === "claimed") return "✓";
@@ -64,7 +65,7 @@ function formatAge(source: string | null | undefined, observedAt: string): strin
   if (source === null || source === undefined) return "—";
   const sourceMs = Date.parse(source);
   const observedMs = Date.parse(observedAt);
-  if (sourceMs > observedMs) return "future";
+  if (sourceMs > observedMs) return "now";
   const seconds = Math.floor((observedMs - sourceMs) / 1_000);
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
@@ -169,19 +170,6 @@ function boundedActivity(value: string, columns: number, prefix: string): string
   return `activity "${truncateDisplayText(value, Math.max(1, budget - displayColumns('activity ""')))}"`;
 }
 
-function renderColdFleetLine(
-  row: AkumaKanshiRow,
-  prefix: string,
-  snapshot: string | undefined,
-  columns: number,
-): readonly string[] {
-  const mark = akumaMark(row.life);
-  const identity = identityLine(mark, row.id, prefix);
-  if (snapshot === undefined) return [identity];
-  const activity = boundedActivity(snapshot, columns, PLUMB);
-  return [identity, ...plumbFacts([activity], columns)];
-}
-
 function plumbFacts(facts: readonly string[], columns: number): readonly string[] {
   const clean = facts.map(safeText).filter((fact) => fact.length > 0);
   if (clean.length === 0) return [];
@@ -202,16 +190,23 @@ function identityLine(mark: string, identity: string, extra = ""): string {
   return extra.length === 0 ? `${mark} ${safeText(identity)}` : `${mark} ${safeText(identity)} ${safeText(extra)}`;
 }
 
-function failure(
-  name: string,
-  section: Extract<Section<unknown>, { kind: "failed" }>,
+function entityLines(
+  mark: string,
+  identity: string,
+  state: string,
+  title: string,
+  facts: readonly string[],
   context: TextRenderContext,
 ): readonly string[] {
-  return [`[ ${name} ]`, "", `${tone(`! ${safeText(section.failure.message)}`, "alert", context.color)}`];
-}
-
-function sectionAbsent(name: string, _columns: number): readonly string[] {
-  return [`[ ${name} ]`, "", `${PLUMB}${name.toLowerCase()} absent`];
+  if (context.columns > NARROW_COLUMNS) {
+    return [identityLine(mark, identity, `· ${state} · ${title}`), ...plumbFacts(facts, context.columns)];
+  }
+  return [
+    `${mark} ${safeText(state)}`,
+    `  ${safeText(identity)}`,
+    ...(title.length === 0 ? [] : renderTextBlock(safeText(title), "  ", context.columns)),
+    ...plumbFacts(facts, context.columns),
+  ];
 }
 
 function endpointFact(id: string, observed: string | undefined): string {
@@ -281,15 +276,31 @@ function linkedFacts(row: ContractKanshiRow, report: KanshiReport, mode: "world"
   return linked;
 }
 
+function linkedAkumaSummary(row: ContractKanshiRow, report: KanshiReport): string | undefined {
+  if (row.fleet.length === 0) return undefined;
+  if (report.akuma.kind !== "present") return "akuma unavailable";
+  const byId = new Map<string, AkumaAttachmentRow>(report.akuma.value.rows.map((akuma) => [akuma.id, akuma]));
+  const known = row.fleet
+    .map((attached) => byId.get(attached.id))
+    .filter((akuma): akuma is AkumaAttachmentRow => akuma !== undefined);
+  if (known.length === 0) return `akuma ${row.fleet.length} missing`;
+  const live = known.filter((akuma) => !isTerminalAkuma(akuma.life)).length;
+  const terminal = known.length - live;
+  const facts = [`akuma ${row.fleet.length}`];
+  if (live > 0) facts.push(`${live} live`);
+  if (terminal > 0) facts.push(`${terminal} terminal`);
+  return facts.join(" · ");
+}
+
 function semanticBlock(name: string, facts: readonly string[], context: TextRenderContext): readonly string[] {
+  if (facts.length === 0) return [];
   const lines = [`  ${name}`];
-  const values = facts.length === 0 ? ["none"] : facts;
-  for (const fact of values) lines.push(...renderTextBlock(safeText(fact), "    ", context.columns));
+  for (const fact of facts) lines.push(...renderTextBlock(safeText(fact), "    ", context.columns));
   return lines;
 }
 
 function namespaceTaskFacts(row: ContractKanshiRow): readonly string[] {
-  if (row.namespaceTasks.kind === "absent") return ["absent"];
+  if (row.namespaceTasks.kind === "absent") return [];
   if (row.namespaceTasks.kind === "failed") {
     return [`failed ${row.namespaceTasks.failure.message}`];
   }
@@ -306,7 +317,14 @@ function renderSelectedContractRow(
 ): readonly string[] {
   const title = row.title ?? "title unavailable";
   const lines = [
-    identityLine(contractMark(row), row.id, `· ${row.phase} · ${formatAge(row.phaseAt, report.observedAt)} · ${title}`),
+    ...entityLines(
+      contractMark(row),
+      row.id,
+      `${row.phase} · ${formatAge(row.phaseAt, report.observedAt)}`,
+      title,
+      [],
+      context,
+    ),
   ];
   lines.push(...semanticBlock("after", worldAfterFacts(row), context));
   lines.push(...semanticBlock("dependents", row.dependents.map(dependentWording), context));
@@ -362,23 +380,26 @@ function renderWorldContractRow(
   context: TextRenderContext,
 ): readonly string[] {
   const title = row.title ?? "title unavailable";
-  const facts = [
+  const contractFacts = [
     candidateFact(row.delivery),
     ...targetFacts(row, gitAbbreviations(report)),
     ...worldAfterFacts(row),
     ...(row.dependents.length === 0 ? [] : [`dependents ${row.dependents.map(dependentWording).join(" · ")}`]),
     ...row.gates.reports.map(gateFact),
-    ...linkedFacts(row, report, "world"),
   ];
-  const lines = [
-    identityLine(
-      contractMark(row),
-      row.id,
-      `· ${row.phase} · ${formatAge(row.lastJournalAt, report.observedAt)} · ${title}`,
-    ),
+  const linkedFacts = [
+    ...(row.holder.kind === "held" ? [linkedTask(report, row.holder.taskId)] : []),
+    ...(row.holder.kind === "unavailable" ? ["! task · unavailable"] : []),
+    ...(linkedAkumaSummary(row, report) === undefined ? [] : [linkedAkumaSummary(row, report)!]),
   ];
-  lines.push(...plumbFacts(facts, context.columns));
-  return lines;
+  return entityLines(
+    contractMark(row),
+    row.id,
+    `${row.phase} · ${formatAge(row.lastJournalAt, report.observedAt)}`,
+    title,
+    contractFacts,
+    context,
+  ).concat(plumbFacts(linkedFacts, context.columns));
 }
 
 function selectRecentRows<T>(rows: readonly T[], timestamp: (row: T) => string): readonly T[] {
@@ -425,27 +446,28 @@ function sectionBlock({
   neutral?: boolean;
 }>): readonly string[] {
   const lines = [`[ ${name} ]  ${total}${neutral ? ` ${unit}` : " live"}`, "", ...rows.flat()];
-  lines.push("", ...sectionFooter({ visible: rows.length, total, unit, selector, neutral }));
+  if (lines.at(-1) !== "") lines.push("");
+  lines.push(...sectionFooter({ visible: rows.length, total, unit, selector, neutral }));
   return lines;
 }
 
 function renderContracts(report: KanshiReport, context: TextRenderContext): readonly string[] {
   const section = report.contracts;
-  if (section.kind === "absent") return sectionAbsent("KEIYAKU", context.columns);
-  if (section.kind === "failed") return failure("KEIYAKU", section, context);
+  if (section.kind === "absent") return ["CONTRACTS // absent", "", `${PLUMB}contracts absent`];
+  if (section.kind === "failed")
+    return ["CONTRACTS // unavailable", "", tone(`! ${safeText(section.failure.message)}`, "alert", context.color)];
   const live = section.value.rows.filter((row) => !isTerminalContract(row));
   const rows = selectRecentRows(live, (row) => row.lastJournalAt);
-  const abbreviations = gitAbbreviations(report);
   const candidates = live.filter((row) => row.delivery !== null).length;
   const rendered = sectionBlock({
-    name: "KEIYAKU",
+    name: "CONTRACTS",
     unit: "keiyaku",
     selector: "kei",
     rows: rows.map((row) => renderWorldContractRow(row, report, context)),
     total: live.length,
   });
-  const header = `[ KEIYAKU ]  contract state ${section.value.state === null ? "-" : displayGitId(section.value.state, abbreviations)} · observedAt ${report.observedAt} · ${live.length} live · candidate ${candidates}`;
-  return [header, "", ...rendered.slice(1)];
+  const header = `CONTRACTS // ${live.length} live · ${candidates} candidates`;
+  return [header, ...rendered.slice(1)];
 }
 
 function renderSelectedContract(report: KanshiReport, context: TextRenderContext): readonly string[] {
@@ -460,28 +482,39 @@ function renderSelectedContract(report: KanshiReport, context: TextRenderContext
 
 function renderTasks(report: KanshiReport, context: TextRenderContext): readonly string[] {
   const section = report.tasks;
-  if (section.kind === "absent") return sectionAbsent("TASK", context.columns);
-  if (section.kind === "failed") return failure("TASK", section, context);
+  if (section.kind === "absent") return ["TASKS // absent", "", `${PLUMB}tasks absent`];
+  if (section.kind === "failed")
+    return ["TASKS // unavailable", "", tone(`! ${safeText(section.failure.message)}`, "alert", context.color)];
   const live = section.value.rows.filter((row) => !isTerminalTask(row));
   const rows = selectRecentRows(live, (row) => row.updatedAt);
   const rowLines: readonly (readonly string[])[] = rows.map((row) => {
     const relation = row.contract === undefined ? ["unbound"] : [endpointFact(row.contract.id, row.contract.observed)];
-    const lines = [
-      identityLine(
-        taskMark(row),
-        row.id,
-        `· ${row.disposition} · P${row.priority} · ${row.title} · ${relation.join(" · ")}`,
-      ),
-    ];
-    lines.push(
-      ...plumbFacts(
-        (row.blockers ?? []).map((blocker) => `blocked ${blocker.id}`),
-        context.columns,
-      ),
+    if (context.columns > NARROW_COLUMNS) {
+      return [
+        identityLine(
+          taskMark(row),
+          row.id,
+          `· ${row.disposition} · P${row.priority} · ${row.title} · ${relation.join(" · ")}`,
+        ),
+        ...plumbFacts(
+          (row.blockers ?? []).map((blocker) => `blocked ${blocker.id}`),
+          context.columns,
+        ),
+      ];
+    }
+    return entityLines(
+      taskMark(row),
+      row.id,
+      `${row.disposition} · P${row.priority}`,
+      row.title,
+      [...relation, ...(row.blockers ?? []).map((blocker) => `blocked ${blocker.id}`)],
+      context,
     );
-    return lines;
   });
-  return sectionBlock({ name: "TASK", unit: "task", selector: "task", rows: rowLines, total: live.length });
+  return [
+    `TASKS // ${live.length} live`,
+    ...sectionBlock({ name: "TASKS", unit: "task", selector: "task", rows: rowLines, total: live.length }).slice(1),
+  ];
 }
 
 function akumaLabel(row: AkumaKanshiRow): string {
@@ -491,8 +524,9 @@ function akumaLabel(row: AkumaKanshiRow): string {
 
 function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly string[] {
   const section = report.akuma;
-  if (section.kind === "absent") return sectionAbsent("FLEET", context.columns);
-  if (section.kind === "failed") return failure("FLEET", section, context);
+  if (section.kind === "absent") return ["AKUMA // absent", "", `${PLUMB}akuma absent`];
+  if (section.kind === "failed")
+    return ["AKUMA // unavailable", "", tone(`! ${safeText(section.failure.message)}`, "alert", context.color)];
   const rows = visibleFleetRows(section.value.rows);
   const rowLines: readonly (readonly string[])[] = rows.map((row) => {
     const lifeAt = "lifeAt" in row ? row.lifeAt : null;
@@ -507,17 +541,30 @@ function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly
         : [life, ...activity];
     const relation = row.contract === undefined ? ["unbound"] : [endpointFact(row.contract.id, row.contract.observed)];
     const snapshot = activitySnapshotLine(row);
-    const prefix = `${akumaLabel(row)} · ${[...key, ...relation].join(" · ")}`.trim();
-    return renderColdFleetLine(row, prefix, snapshot, context.columns);
+    const aliases = akumaLabel(row);
+    if (context.columns > NARROW_COLUMNS) {
+      const prefix = `${aliases} · ${[...key, ...relation].join(" · ")}`.trim();
+      const lines = [identityLine(akumaMark(row.life), row.id, prefix)];
+      return snapshot === undefined
+        ? lines
+        : [...lines, ...plumbFacts([boundedActivity(snapshot, context.columns, PLUMB)], context.columns)];
+    }
+    const identity = aliases.length === 0 ? row.id : `${row.id} ${aliases}`;
+    const facts = [...key.slice(1), ...relation];
+    const lines = entityLines(akumaMark(row.life), identity, key[0]!, "", facts, context);
+    if (snapshot === undefined) return lines;
+    return [...lines, ...plumbFacts([boundedActivity(snapshot, context.columns, PLUMB)], context.columns)];
   });
-  return sectionBlock({
-    name: "FLEET",
+  const header = `AKUMA // ${rows.length} recent · ${section.value.rows.length} known`;
+  const rendered = sectionBlock({
+    name: "AKUMA",
     unit: "akuma",
     selector: "aku",
     rows: rowLines,
     total: section.value.rows.length,
     neutral: true,
   });
+  return [header, ...rendered.slice(1)];
 }
 export function renderKanshiText(
   report: KanshiReport,
@@ -526,11 +573,11 @@ export function renderKanshiText(
 ): string {
   if (selection === "contract") return renderSelectedContract(report, context).join("\n");
   return [
+    `${tone("契", "alert", context.color)} KEIYAKU // WORLD`,
+    "",
     ...renderContracts(report, context),
     "",
-    "",
     ...renderAkuma(report, context),
-    "",
     "",
     ...renderTasks(report, context),
   ].join("\n");

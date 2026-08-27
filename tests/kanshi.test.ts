@@ -965,12 +965,14 @@ function attentionReport(): KanshiReport {
 }
 
 function sectionBody(text: string, name: string): string {
-  const open = `[ ${name} ]`;
+  const section = name === "KEIYAKU" ? "CONTRACTS" : name === "FLEET" ? "AKUMA" : name === "TASK" ? "TASKS" : name;
+  const open =
+    section === "CONTRACTS" || section === "AKUMA" || section === "TASKS" ? `${section} //` : `[ ${section} ]`;
   const start = text.indexOf(open);
   assert.notEqual(start, -1, `missing ${name} aperture`);
   const after = text.indexOf("\n", start);
   const rest = text.slice(after + 1);
-  const close = rest.search(/^\[ (?:KEIYAKU|FLEET|TASK) \]/mu);
+  const close = rest.search(/^(?:CONTRACTS|AKUMA|TASKS) \//mu);
   return close === -1 ? rest : rest.slice(0, close);
 }
 
@@ -980,17 +982,17 @@ test("Kanshi text keeps complete identities in the aperture grammar", async () =
   const text = renderKanshiText(report, { columns: 20, color: false });
   const world = await World.at(repository.path);
   const signature = text.split("\n", 1)[0]!;
-  assert.match(signature, /^\[ KEIYAKU \]  contract state \S+ · observedAt \S+ · 1 live · candidate 0$/u);
+  assert.equal(signature, "契 KEIYAKU // WORLD");
   assert.equal(text.includes(world), false);
   assert.equal(report.contracts.kind, "present");
   assert.equal(text.includes(contract.id), true);
   assert.equal(text.includes(taskId), true);
   assert.equal(text.includes(akumaId), true);
-  assert.match(text, /\[ KEIYAKU \]  contract state \S+ · observedAt \S+ · 1 live · candidate 0/u);
-  assert.match(text, /\[ TASK \]  1 live/u);
-  assert.match(text, /\[ FLEET \]  1 akuma/u);
-  assert.ok(text.indexOf("[ KEIYAKU ]") < text.indexOf("[ FLEET ]"));
-  assert.ok(text.indexOf("[ FLEET ]") < text.indexOf("[ TASK ]"));
+  assert.match(text, /CONTRACTS \/\/ 1 live · 0 candidates/u);
+  assert.match(text, /TASKS \/\/ 1 live/u);
+  assert.match(text, /AKUMA \/\/ 1 recent · 1 known/u);
+  assert.ok(text.indexOf("CONTRACTS //") < text.indexOf("AKUMA //"));
+  assert.ok(text.indexOf("AKUMA //") < text.indexOf("TASKS //"));
   assert.doesNotMatch(text, /\bFLEET \d/u);
   assert.doesNotMatch(signature, / fleet /u);
   const json = JSON.stringify(report);
@@ -1082,7 +1084,7 @@ test("bare Contract ages keep every unit boundary, future, and absent evidence d
     },
     { columns: 120, color: false },
   );
-  for (const [label] of sources) assert.match(text, new RegExp(`waiting · ${label}`, "u"));
+  for (const [label] of sources) assert.match(text, new RegExp(`waiting · ${label === "future" ? "now" : label}`, "u"));
   assert.match(text, /stillborn · —/u);
 });
 
@@ -1091,13 +1093,13 @@ test("Kanshi text uses live sections, preserves important facts, and omits termi
   const before = structuredClone(report);
   const text = renderKanshiText(report, { columns: 120, color: false });
 
-  assert.match(text.split("\n", 1)[0]!, /^\[ KEIYAKU \]  contract state \S+ · observedAt \S+ · 5 live · candidate 0$/u);
-  assert.match(text, /\n\n\[ FLEET \]  7 akuma/u);
-  assert.match(text, /\n\n\[ TASK \]  4 live/u);
+  assert.equal(text.split("\n", 1)[0], "契 KEIYAKU // WORLD");
+  assert.match(text, /\n\nAKUMA \/\/ 7 recent · 7 known/u);
+  assert.match(text, /\n\nTASKS \/\/ 4 live/u);
   assert.doesNotMatch(text, /attention|kanshi ───|──\[/u);
   assert.doesNotMatch(text, /^ {2}↳ /mu);
-  assert.ok(text.indexOf("[ KEIYAKU ]") < text.indexOf("[ FLEET ]"));
-  assert.ok(text.indexOf("[ FLEET ]") < text.indexOf("[ TASK ]"));
+  assert.ok(text.indexOf("CONTRACTS //") < text.indexOf("AKUMA //"));
+  assert.ok(text.indexOf("AKUMA //") < text.indexOf("TASKS //"));
 
   if (report.contracts.kind !== "present" || report.tasks.kind !== "present" || report.akuma.kind !== "present") {
     throw new Error("fixture sections must be present");
@@ -1124,7 +1126,7 @@ test("Kanshi text uses live sections, preserves important facts, and omits termi
   assert.match(contracts, /\[✓\] reviewed/u);
   assert.match(contracts, /\[✗\] verified/u);
   assert.match(contracts, /\[~\] security \(stale\)/u);
-  assert.match(contracts, /● aku\/worker\/a0000001 \(@lead\) · running/u);
+  assert.match(contracts, /akuma 1 · 1 live/u);
   assert.doesNotMatch(contracts, /Investigate failed Linux verification|P0|activity/u);
   assert.doesNotMatch(contracts, /world summary should stay hidden/u);
   const cold = contracts.split("kei/cold-contract")[1]!;
@@ -1214,7 +1216,7 @@ test("world Contract rows make candidate facts self-describing", () => {
     contracts: { ...report.contracts, value: { ...report.contracts.value, rows: [delivered] } },
   };
   const text = renderKanshiText(deliveredReport, { columns: 120, color: false });
-  assert.match(text.split("\n", 1)[0]!, /candidate 1$/u);
+  assert.match(text, /CONTRACTS \/\/ 1 live · 1 candidates/u);
   assert.doesNotMatch(text, /○ no candidate · ● candidate|satisfied  \[✗\] unsatisfied/u);
   const body = sectionBody(text, "KEIYAKU");
   assert.match(body, /│ candidate · target main/u);
@@ -1249,7 +1251,9 @@ test("Contract LINKED entries stay compact and preserve endpoint disposition", (
     { columns: 120, color: false },
     "contract",
   );
-  for (const text of [sectionBody(compact, "KEIYAKU"), selected]) {
+  assert.match(sectionBody(compact, "KEIYAKU"), /akuma 2 · 1 live/u);
+  assert.doesNotMatch(sectionBody(compact, "KEIYAKU"), /aku\/worker\//u);
+  for (const text of [selected]) {
     assert.match(text, /● task\/running · in_progress/u);
     assert.match(text, /● aku\/worker\/a0000001 \(@lead\) · running/u);
     assert.match(text, /! aku\/worker\/missing \(@missing\) · missing/u);
@@ -1313,9 +1317,8 @@ test("world Contract attachments keep non-terminal Akuma and omit terminal retry
     { columns: 120, color: false },
   );
   const body = sectionBody(text, "KEIYAKU");
-  assert.match(body, /aku\/worker\/a0000001 \(@lead\) · running/u);
-  assert.match(body, /aku\/worker\/a0000002 · asleep/u);
-  assert.doesNotMatch(body, /aku\/worker\/a0000003 · killed/u);
+  assert.match(body, /akuma 3 · 2 live · 1 terminal/u);
+  assert.doesNotMatch(body, /aku\/worker\//u);
 });
 
 test("world Contract attachments keep one latest terminal Akuma when no executor is live", () => {
@@ -1348,8 +1351,8 @@ test("world Contract attachments keep one latest terminal Akuma when no executor
     { columns: 120, color: false },
   );
   const body = sectionBody(text, "KEIYAKU");
-  assert.match(body, /aku\/worker\/a0000003 · killed/u);
-  assert.doesNotMatch(body, /aku\/worker\/a0000008 · killed/u);
+  assert.match(body, /akuma 2 · 2 terminal/u);
+  assert.doesNotMatch(body, /aku\/worker\//u);
 });
 
 test("selected Contract attachments retain terminal retry history", () => {
@@ -1409,12 +1412,9 @@ test("Kanshi sections use a ten-row aperture with exact complete and partial foo
     },
     { columns: 120, color: false },
   );
-  assert.match(
-    empty,
-    /\[ KEIYAKU \]  contract state \S+ · observedAt \S+ · 0 live · candidate 0[\s\S]*\(all 0 live keiyaku shown\)/u,
-  );
-  assert.match(empty, /\[ FLEET \]  0 akuma[\s\S]*\(all 0 akuma shown\)/u);
-  assert.match(empty, /\[ TASK \]  0 live[\s\S]*\(all 0 live task shown\)/u);
+  assert.match(empty, /CONTRACTS \/\/ 0 live · 0 candidates[\s\S]*all 0 live keiyaku shown/u);
+  assert.match(empty, /AKUMA \/\/ 0 recent · 0 known[\s\S]*\(all 0 akuma shown\)/u);
+  assert.match(empty, /TASKS \/\/ 0 live[\s\S]*\(all 0 live task shown\)/u);
 
   const oldAt = "2026-08-11T23:00:00.000Z";
   const newAt = "2026-08-11T23:59:00.000Z";
@@ -1564,7 +1564,7 @@ test("Fleet ranks max owner timestamps and aligns snapshots with its recent-firs
     },
     { columns: 120, color: false },
   );
-  assert.match(text, /\[ FLEET \]  6 akuma/u);
+  assert.match(text, /AKUMA \/\/ 6 recent · 6 known/u);
   assert.doesNotMatch(text, /SNAPSHOT/u);
   assert.ok(
     text
@@ -1714,7 +1714,10 @@ test("Kanshi target movement names expected and observed heads, including a disa
   const world = renderKanshiText(movedReport, { columns: 120, color: false });
   assert.match(world, /target moved · bbbbbbb -> ddddddd/u);
   const selected = renderKanshiText(
-    { ...movedReport, contracts: { ...movedReport.contracts, value: { ...movedReport.contracts.value, rows: [rows[1]!] } } },
+    {
+      ...movedReport,
+      contracts: { ...movedReport.contracts, value: { ...movedReport.contracts.value, rows: [rows[1]!] } },
+    },
     { columns: 120, color: false },
     "contract",
   );
@@ -1724,7 +1727,10 @@ test("Kanshi target movement names expected and observed heads, including a disa
     row.id === "kei/active-contract" ? { ...row, targetObservation: { head: null, drift: true } } : row,
   );
   const disappeared = renderKanshiText(
-    { ...movedReport, contracts: { ...movedReport.contracts, value: { ...movedReport.contracts.value, rows: disappearedRows } } },
+    {
+      ...movedReport,
+      contracts: { ...movedReport.contracts, value: { ...movedReport.contracts.value, rows: disappearedRows } },
+    },
     { columns: 120, color: false },
   );
   assert.match(disappeared, /target moved · bbbbbbb -> null/u);
@@ -1744,7 +1750,7 @@ test("Kanshi retains a Contract whose title is unavailable", () => {
   const contracts = sectionBody(text, "KEIYAKU");
   assert.match(contracts, /^\? kei\/no-target · waiting · 30s · title unavailable$/mu);
   assert.match(contracts, /title unavailable/u);
-  assert.match(text, /\[ KEIYAKU \]  contract state \S+ · observedAt \S+ · 5 live · candidate 0/u);
+  assert.match(text, /CONTRACTS \/\/ 5 live · 0 candidates/u);
 });
 
 test("Kanshi wraps complete Task titles on the plumb line", () => {
@@ -1804,12 +1810,39 @@ test("absent and failed Kanshi sections stay typed and distinct from empty prese
     },
     { columns: 80, color: false },
   );
-  assert.match(failed, /^\[ KEIYAKU \]/mu);
+  assert.match(failed, /^CONTRACTS \/\/ unavailable/mu);
   assert.match(failed, /! broken board/u);
-  assert.match(failed, /\[ TASK \]/u);
-  assert.match(failed, /task absent/u);
-  assert.match(failed, /\[ FLEET \]  0 akuma/u);
+  assert.match(failed, /TASKS \/\/ absent/u);
+  assert.match(failed, /tasks absent/u);
+  assert.match(failed, /AKUMA \/\/ 0 recent · 0 known/u);
   assert.match(failed, /\(all 0 akuma shown\)/u);
+
+  const absent = renderKanshiText(
+    {
+      root: "/repo",
+      observedAt: "2026-08-12T00:00:00.000Z",
+      branch: null,
+      contracts: { kind: "absent" },
+      tasks: { kind: "absent" },
+      akuma: { kind: "absent" },
+    },
+    { columns: 80, color: false },
+  );
+  assert.match(absent, /CONTRACTS \/\/ absent/u);
+  assert.match(absent, /AKUMA \/\/ absent/u);
+  assert.match(absent, /TASKS \/\/ absent/u);
+  assert.doesNotMatch(absent, /(?:CONTRACTS|AKUMA|TASKS) \/\/ 0/u);
+});
+
+test("selected Contract text uses deliberate entity rows at 72 columns", () => {
+  const report = attentionReport();
+  const selected = renderKanshiText(
+    selectKanshi({ report, contract: "kei/active-contract" }),
+    { columns: 72, color: false },
+    "contract",
+  );
+  assert.match(selected, /^! tendered · 3m\n  kei\/active-contract\n  Active Contract$/mu);
+  assert.doesNotMatch(selected, /^! kei\/active-contract · tendered/mu);
 });
 
 test("Kanshi selection is a projection that preserves source presence", async () => {

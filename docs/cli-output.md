@@ -79,11 +79,12 @@ Kanshi. A refresh is a new read, not persisted extension state.
 Resident refresh is best-effort background work: it never delays Pi session
 startup or an agent turn, and refresh failure never escapes into Pi lifecycle.
 
-Kanshi text is a pure projection of its typed report. Bare world status keeps
-the `[ KEIYAKU ]`, `[ FLEET ]`, `[ TASK ]` order; these are its only uppercase
-section headers. Contract rows are natural-flow decision summaries with complete
-identity, age, title, blockers, edges, gate states, target facts, and attached
-Task/Akuma identities with aliases and basic current status only. Candidate
+Kanshi text is a pure projection of its typed report. Bare world status opens
+with `契 KEIYAKU // WORLD`, then uses `CONTRACTS`, `AKUMA`, and `TASKS` headers
+with scoped objective counts. Contract rows are natural-flow decision summaries
+with complete identity, age, title, blockers, edges, gate states, and target
+facts; linked Akuma are represented by one compact summary, while complete
+identities remain in AKUMA and selected Contract detail. Candidate
 existence starts the candidate/target fact line as `candidate` or `no candidate`;
 gate glyphs stay beside gate names, and stale gates append `(stale)`. Fleet remains
 the bounded Akuma activity surface. `keiyaku ls kei/` is the pure active
@@ -151,13 +152,13 @@ coordinates, and honest empty results; these presentation rules add no facts.
 
 Final plain results are:
 
-| Kind | Product content | Exit |
-| --- | --- | --- |
-| `accepted` | closed Contract-mutation union discriminated by literal `bind` \| `amend` \| `deliver` \| `review` \| `arc` \| `abandon` \| `audit`; common envelope plus that verb's flat fields | 0 |
-| `refused` | typed refusal and observed grounds | 1 |
-| `retry` | exhausted, collision, or publication-failed detail; caller-addressed verbs use the caller's contract coordinate, while bind has no contract segment | 2 |
-| `observation` | view data, including observed effects when present | 0 |
-| `integration-conflict-materialized` | exact public `IntegrationConflictMaterialized` value: judged `targetHead`, ordered `conflictPaths`, and appointed `workspace` | 0 |
+| Kind                                | Product content                                                                                                                                                                   | Exit |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| `accepted`                          | closed Contract-mutation union discriminated by literal `bind` \| `amend` \| `deliver` \| `review` \| `arc` \| `abandon` \| `audit`; common envelope plus that verb's flat fields | 0    |
+| `refused`                           | typed refusal and observed grounds                                                                                                                                                | 1    |
+| `retry`                             | exhausted, collision, or publication-failed detail; caller-addressed verbs use the caller's contract coordinate, while bind has no contract segment                               | 2    |
+| `observation`                       | view data, including observed effects when present                                                                                                                                | 0    |
+| `integration-conflict-materialized` | exact public `IntegrationConflictMaterialized` value: judged `targetHead`, ordered `conflictPaths`, and appointed `workspace`                                                     | 0    |
 
 World `reconcile` remains this observation kind. JSON places the public
 `RepoReconcileReport` under `report` and never copies that report's

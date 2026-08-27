@@ -107,10 +107,7 @@ are never collapsed into `missing`.
 The same holder read is reverse-projected onto Kanshi-owned Contract rows as:
 
 ```ts
-type ContractHolderObservation =
-  | { kind: "held"; taskId: TaskId }
-  | { kind: "none" }
-  | { kind: "unavailable" };
+type ContractHolderObservation = { kind: "held"; taskId: TaskId } | { kind: "none" } | { kind: "unavailable" };
 ```
 
 `none` means the holder authority was read successfully and has no current
@@ -180,8 +177,7 @@ read the world to resolve the identity before requesting the same observation.
 `CurrentPhysicalIssue` is selected-only:
 
 ```ts
-type CurrentPhysicalIssue =
-  | Readonly<{ kind: "target-checkout-retained"; target: string }>
+type CurrentPhysicalIssue = Readonly<{ kind: "target-checkout-retained"; target: string }>;
 ```
 
 After selection, Kanshi may attach `issue` on that Contract row by independently
@@ -214,33 +210,33 @@ sections stay typed and remain distinct from an observed empty section.
 type KanshiRegionSelection =
   | Readonly<{ kind: "declarations" }>
   | Readonly<{ kind: "contract"; contract: ContractId }>
-  | Readonly<{ kind: "path"; patterns: readonly [string, ...string[]] }>
+  | Readonly<{ kind: "path"; patterns: readonly [string, ...string[]] }>;
 
 type RegionDeclaration = Readonly<{
-  contract: ContractId
-  patterns: readonly string[]
-}>
+  contract: ContractId;
+  patterns: readonly string[];
+}>;
 
 type RegionOverlap = Readonly<{
-  contract: ContractId
-  patterns: readonly Readonly<{ mine: string; theirs: string }>[]
-}>
+  contract: ContractId;
+  patterns: readonly Readonly<{ mine: string; theirs: string }>[];
+}>;
 
 type RegionRead =
   | Readonly<{
-      kind: "declarations"
-      declarations: readonly RegionDeclaration[]
+      kind: "declarations";
+      declarations: readonly RegionDeclaration[];
     }>
   | Readonly<{
-      kind: "contract"
-      declaration: RegionDeclaration
-      overlaps: readonly RegionOverlap[]
+      kind: "contract";
+      declaration: RegionDeclaration;
+      overlaps: readonly RegionOverlap[];
     }>
   | Readonly<{
-      kind: "path"
-      patterns: readonly string[]
-      overlaps: readonly RegionOverlap[]
-    }>
+      kind: "path";
+      patterns: readonly string[];
+      overlaps: readonly RegionOverlap[];
+    }>;
 ```
 
 Declarations preserve each active Contract's pattern order. Bare declarations
@@ -267,25 +263,33 @@ conflicts, ownership, gates, or serialization advice.
 
 Human and Flagship share one text projection. The renderer consumes the typed
 report only; it does not reread product authorities or infer associations. Bare
-world text has three sections in this exact order: KEIYAKU, FLEET, TASK.
-The KEIYAKU header includes the unique Git-prefix Contract state, observedAt,
-live count, and candidate count. Candidate existence starts the candidate/target
-fact line as `candidate` or `no candidate`; the row has no candidate glyph.
-Gate glyphs stay immediately before gate names, and stale gates append `(stale)`.
-Fleet and TASK retain their existing counts. There is no signature, invocation
-coordinate, aggregate score, or alternate status mode.
+world text has a `契 KEIYAKU // WORLD` masthead followed by three sections in
+this exact order: `CONTRACTS`, `AKUMA`, `TASKS`. Section headers carry scoped
+objective counts: `CONTRACTS // <N> live · <M> candidates`, `AKUMA // <V>
+recent · <T> known`, and `TASKS // <N> live`. Candidate existence starts the
+candidate/target fact line as `candidate` or `no candidate`; the row has no
+candidate glyph. Gate glyphs stay immediately before gate names, and stale gates
+append `(stale)`. Contract rows carry only a compact linked-Akuma summary;
+complete Akuma identities remain in AKUMA and selected Contract detail. There
+is no signature, invocation coordinate, aggregate score, or alternate status
+mode.
+
+When a section is absent, its named header is rendered as `CONTRACTS // absent`,
+`AKUMA // absent`, or `TASKS // absent`; absence never becomes a numeric zero.
 
 ```text
-[ KEIYAKU ]  1 live
+契 KEIYAKU // WORLD
+
+CONTRACTS // 1 live · 0 candidates
 
 ! kei/example · tendered · 3m · Title
   │ no candidate · target main · 7 commits behind main · [✗] tests
   │ ● task/example · in_progress · ● aku/worker/abcd1234 (@lead) · running
 
-[ FLEET ]  1 akuma
+AKUMA // 1 recent · 1 known
 ● aku/worker/abcd1234 (@lead) · running · 4m · -> kei/example
 
-[ TASK ]  1 live
+TASKS // 1 live
 ● task/example · in_progress · P0 · Title · -> kei/example
 ```
 
@@ -301,8 +305,8 @@ existing update coordinate and display.
 
 After its visible rows, a complete section writes exactly
 `  (all <N> live <unit> shown)` for KEIYAKU and TASK, and
-`  (all <N> akuma shown)` for FLEET. A partial KEIYAKU or TASK section writes
-exactly `  + <N> more live <unit> not shown`; a partial FLEET writes exactly
+`  (all <N> akuma shown)` for AKUMA. A partial CONTRACTS or TASKS section writes
+exactly `  + <N> more live <unit> not shown`; a partial AKUMA writes exactly
 `  + <N> more akuma not shown`; each is followed by
 `    keiyaku ls <selector>/`; the resulting commands are `keiyaku ls kei/`,
 `keiyaku ls aku/`, and `keiyaku ls task/`. The
@@ -313,8 +317,9 @@ and snapshot read boundary, but text projects only one physical
 outcome. The value is safe-text-normalized and clipped with the terminal
 display-width primitive; it is not the durable ActivitySnapshot. Rows without
 a latest activity or outcome omit the activity field. There is one blank line
-after each header and before its footer, then two blank lines before the next
-header. `keiyaku ls`
+after each header and before its footer, then one blank line before the next
+header. Future-dated text ages render `now`; JSON timestamps remain exact.
+`keiyaku ls`
 is the complete text inspection path; typed Kanshi and JSON remain complete.
 
 `keiyaku ls kei/` is a pure active-Contract catalog. Its header includes active
@@ -323,7 +328,9 @@ Each natural-flow block retains complete identity, age, title, after/dependent
 edges, gate testimony, and target blocker facts. It does not join Task, Alias,
 Dispatch, Akuma, holder, or namespace data and does not expose candidate
 coordinates, workspace detail, or merge internals. Selected Contract text
-retains detailed gate ages and summaries.
+retains detailed gate ages and summaries. At 72 columns and below, selected
+Contract entities separate state/age, complete identity, and title/facts onto
+deliberate lines; they do not rely on natural wrapping of the wide header.
 World status and selected Contract attachments render as a natural-flow list. Every entry
 contains its contextual glyph, complete identity, and basic current status:
 
