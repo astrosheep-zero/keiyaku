@@ -408,7 +408,7 @@ export const runtimeLibraryZones = [
       any("akuma/akuma.ts", ["Akuma", "AkumaList"]),
       any("akuma/archetype.ts", ["ArchetypeCatalogRow", "listArchetypeDefinitions"]),
       types("task/index.ts", ["TaskRow"]),
-      any("task/operations.ts", ["observeTaskCatalogRows"]),
+      any("task/catalog.ts", ["observeTaskCatalogRows"]),
       any("library/contract.ts", ["ContractBoard", "listKeiyaku"]),
       any("library/input.ts", ["requireInput"]),
       any("library/repo.ts", ["Repo"]),

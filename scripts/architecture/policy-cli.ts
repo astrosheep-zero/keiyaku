@@ -42,7 +42,11 @@ export const cliZones = [
   },
   {
     source: "cli/commands/task.ts",
-    allow: [any("cli/commands/task-query.ts"), any("cli/usage.ts")],
+    allow: [
+      any("cli/commands/task-query.ts"),
+      any("cli/usage.ts"),
+      any("task/catalog.ts", ["parseTaskNamespaceSelector"]),
+    ],
   },
   {
     source: "cli/commands/task-invoke.ts",
@@ -53,6 +57,7 @@ export const cliZones = [
       any("task/compose-language.ts", ["taskCompositionNamespaceHeader"]),
       any("task/operations.ts", ["observeTaskDetails"]),
       any("task/context.ts", ["resolveTaskNamespaceContext", "writeTaskNamespaceContext"]),
+      any("task/catalog.ts", ["parseTaskNamespaceSelector"]),
       any("task/mutation.ts"),
       types("world.ts"),
       any("akuma/requests.ts", ["injectedBodyRequests", "requestBodyTask"]),
@@ -161,6 +166,7 @@ export const cliZones = [
     allow: [
       any("akuma/identity.ts", ["archetypeName"]),
       types("library/catalog.ts", ["CatalogQuery"]),
+      any("task/catalog.ts", ["parseTaskNamespaceSelector"]),
       any("cli/usage.ts", ["CliUsageError", "usageLine"]),
     ],
   },

@@ -1,5 +1,6 @@
 import { archetypeName } from "../../akuma/identity.js";
 import type { CatalogQuery } from "../../library/catalog.js";
+import { parseTaskNamespaceSelector } from "../../task/catalog.js";
 import { CliUsageError, usageLine } from "../usage.js";
 
 export type ContractFlagKind = "boolean" | "value" | "raw-value" | "repeat-value";
@@ -401,7 +402,20 @@ function parseRegion(parts: ParsedContractParts): ParsedRegion {
 
 function parseLs(parts: ParsedContractParts): ParsedLs {
   const path = parts.positionals[0]!;
-  if (path === "task" || path === "task/") return { command: "ls", query: { kind: "tasks" }, output: parts.output };
+  if (path === "task" || path === "task/")
+    return { command: "ls", query: { kind: "tasks", namespace: [] }, output: parts.output };
+  if (path.startsWith("task/")) {
+    if (!path.endsWith("/")) refuse("ls", `invalid Task namespace selector: ${path}`);
+    const body = path.slice("task/".length, -1);
+    if (body.length === 0 || body.split("/").some((segment) => segment.length === 0))
+      refuse("ls", `invalid Task namespace selector: ${path}`);
+    try {
+      const namespace = parseTaskNamespaceSelector(path);
+      return { command: "ls", query: { kind: "tasks", namespace }, output: parts.output };
+    } catch (error) {
+      refuse("ls", error instanceof Error ? error.message : `invalid Task namespace selector: ${path}`);
+    }
+  }
   if (path === "kei" || path === "kei/") return { command: "ls", query: { kind: "contracts" }, output: parts.output };
   try {
     const query = parseAkumaCatalogPath(path);

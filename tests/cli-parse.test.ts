@@ -169,8 +169,14 @@ test("show parses one optional Contract selector and JSON output", () => {
 test("ls parses only canonical identity directories", () => {
   for (const path of ["task", "task/"]) {
     assert.deepEqual(parseArgv(["ls", path]), {
-      command: { command: "ls", query: { kind: "tasks" }, output: "text" },
+      command: { command: "ls", query: { kind: "tasks", namespace: [] }, output: "text" },
     });
+  }
+  assert.deepEqual(parseArgv(["ls", "task/feature/sub/", "--json"]), {
+    command: { command: "ls", query: { kind: "tasks", namespace: ["feature", "sub"] }, output: "json" },
+  });
+  for (const path of ["task/feature", "task//", "task/feature//"]) {
+    assert.throws(() => parseArgv(["ls", path]), /Task namespace selector/);
   }
   for (const path of ["kei", "kei/"]) {
     assert.deepEqual(parseArgv(["ls", path, "--json"]), {

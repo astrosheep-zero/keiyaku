@@ -1,5 +1,9 @@
 import { any, factErrors, factTypes, gitRepository, types } from "./policy-helpers.js";
 export const taskKanshiZones = [
+  {
+    source: "task/catalog.ts",
+    allow: [any("task/board.ts"), any("task/identity.ts"), any("task/store.ts"), types("world.ts")],
+  },
   { source: "markdown/**", allow: [any("markdown/lex.ts"), any("markdown/types.ts"), any("markdown/diff.ts")] },
   { source: "task/identity.ts", allow: [any("identity/coordinates.ts"), any("identity/normalize.ts")] },
   { source: "task/context.ts", allow: [any("coordination/durable-file.ts"), any("identity/normalize.ts")] },

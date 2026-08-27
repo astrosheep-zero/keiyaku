@@ -306,7 +306,8 @@ do not invent child nodes. `needs` stays the ordering/blocking projection in
 `show` and readiness; it is not the decomposition tree. `doctor` diagnoses the
 complete world independently of current namespace.
 
-`list` defaults to active Tasks in the current namespace; closed, all, and
+`list` defaults to active Tasks in the current namespace; an explicit namespace
+array selects exactly that namespace. Closed, all, and
 world scope are explicit. `ready` and `blocked` share that scope and may select
 recursive descendants of one existing parent. Results are priority-then-TaskId
 ordered, bounded with complete totals, and never infer data from prose or mtime.

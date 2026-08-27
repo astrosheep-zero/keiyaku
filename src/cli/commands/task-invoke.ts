@@ -20,6 +20,7 @@ import {
 import { taskCompositionNamespaceHeader } from "../../task/compose-language.js";
 import { observeTaskDetails } from "../../task/operations.js";
 import type { ParsedTaskCommand } from "./task.js";
+import { parseTaskNamespaceSelector } from "../../task/catalog.js";
 import type { WorldRoot } from "../../world.js";
 import { injectedBodyRequests, requestBodyTask } from "../../akuma/requests.js";
 import { decodeTaskMutationRequest, type TaskMutationRequest } from "../../task/mutation.js";
@@ -108,6 +109,12 @@ function ids(items: readonly string[] | undefined): readonly TaskId[] | undefine
 function limit(command: ParsedTaskCommand): number | undefined {
   const raw = value(command, "limit");
   return raw === undefined ? undefined : Number(raw);
+}
+
+function explicitListNamespace(command: ParsedTaskCommand): readonly string[] | undefined {
+  return command.action === "ls" && command.positionals.length === 1
+    ? parseTaskNamespaceSelector(command.positionals[0]!)
+    : undefined;
 }
 
 async function invokeAdd(
@@ -351,7 +358,9 @@ async function invokeRead(
     case "ls":
       return tasks.list({
         selection: command.flags.all === true ? "all" : command.flags.closed === true ? "closed" : "active",
-        ...readScope(command, current),
+        ...(explicitListNamespace(command) === undefined
+          ? readScope(command, current)
+          : { namespace: explicitListNamespace(command)! }),
         ...(limit(command) === undefined ? {} : { limit: limit(command)! }),
       });
     case "ready":
@@ -527,7 +536,7 @@ export async function invokeTask(command: ParsedTaskCommand, input: TaskInput): 
     command.action === "context" ||
     (command.action === "add" && explicitNamespace === undefined) ||
     (command.action === "compose" && composition?.specified !== true) ||
-    ((command.action === "ls" ||
+    (((command.action === "ls" && explicitListNamespace(command) === undefined) ||
       command.action === "ready" ||
       command.action === "blocked" ||
       command.action === "query") &&

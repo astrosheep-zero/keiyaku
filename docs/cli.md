@@ -121,7 +121,9 @@ the authoritative usage for every command.
 Bare `status` has no `--all`, limit, or alternate text mode. Its bounded text
 board and complete inspection paths are owned by [cli-output.md](cli-output.md)
 and [kanshi.md](kanshi.md); `--json` is the complete typed Kanshi projection.
-`keiyaku ls kei/` is the pure Contract catalog: active rows only, no World,
+`keiyaku ls task`, `keiyaku ls task/`, and trailing-slash
+`keiyaku ls task/<segment>/.../` select the complete Task catalog with exact
+namespace filtering. `keiyaku ls kei/` is the pure Contract catalog: active rows only, no World,
 Task, Alias, Dispatch, Akuma, holder, or namespace joins. Selected
 `keiyaku status kei/<id>` constructs the complete Contract board and then
 selects. World `keiyaku status` keeps its outer joins and does not reinterpret

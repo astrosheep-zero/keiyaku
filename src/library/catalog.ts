@@ -1,14 +1,14 @@
 import { Akuma, type AkumaList } from "../akuma/akuma.js";
 import { listArchetypeDefinitions, type ArchetypeCatalogRow } from "../akuma/archetype.js";
 import type { TaskRow } from "../task/index.js";
-import { observeTaskCatalogRows } from "../task/operations.js";
+import { observeTaskCatalogRows } from "../task/catalog.js";
 import { listKeiyaku, type ContractBoard } from "./contract.js";
 import { requireInput } from "./input.js";
 import { Repo } from "./repo.js";
 import type { WorldRoot } from "../world.js";
 
 export type CatalogQuery =
-  | Readonly<{ kind: "tasks" }>
+  | Readonly<{ kind: "tasks"; namespace?: readonly string[] }>
   | Readonly<{ kind: "contracts" }>
   | Readonly<{ kind: "archetypes" }>
   | Readonly<{ kind: "akuma"; archetype?: string }>;
@@ -44,6 +44,15 @@ function worldRoot(value: unknown): WorldRoot {
   return value as WorldRoot;
 }
 
+function taskQueryValue(query: Readonly<Record<string, unknown>>): CatalogQuery {
+  if (query.namespace !== undefined && !Array.isArray(query.namespace))
+    throw new TypeError("Keiyaku.ls Task namespace must be an array");
+  return {
+    kind: "tasks",
+    ...(query.namespace === undefined ? {} : { namespace: query.namespace as readonly string[] }),
+  };
+}
+
 function queryValue(value: unknown): CatalogQuery {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new TypeError("Keiyaku.ls query must be an object");
@@ -53,10 +62,15 @@ function queryValue(value: unknown): CatalogQuery {
     throw new TypeError("Keiyaku.ls query kind is invalid");
   }
   for (const key of Object.keys(query)) {
-    if (key !== "kind" && !(query.kind === "akuma" && key === "archetype")) {
+    if (
+      key !== "kind" &&
+      !(query.kind === "akuma" && key === "archetype") &&
+      !(query.kind === "tasks" && key === "namespace")
+    ) {
       throw new TypeError(`Keiyaku.ls query has unknown field: ${key}`);
     }
   }
+  if (query.kind === "tasks") return taskQueryValue(query);
   if (query.kind !== "akuma") return { kind: query.kind };
   if (query.archetype !== undefined && typeof query.archetype !== "string") {
     throw new TypeError("Keiyaku.ls Akuma name must be a string");
@@ -90,7 +104,7 @@ export async function listCatalog(input: CatalogInput): Promise<Catalog> {
   }
   const path = worldRoot(values.path);
   if (query.kind === "tasks") {
-    return { kind: "tasks", root: path, rows: await observeTaskCatalogRows(path) };
+    return { kind: "tasks", root: path, rows: await observeTaskCatalogRows(path, query.namespace) };
   }
   const listed = await Akuma.of(path).list(query.archetype === undefined ? undefined : { archetype: query.archetype });
   return {

@@ -496,6 +496,40 @@ test("Task catalog does not inherit the Task list default page limit", async () 
   }
 });
 
+test("Task catalog namespace queries distinguish omitted, root, and named scope", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-catalog-namespace-"));
+  try {
+    const tasks = Tasks.of(await World.at(root));
+    const rootTask = await tasks.add({ title: "Catalog root", namespace: [] });
+    const featureTask = await tasks.add({ title: "Catalog feature", namespace: ["feature"] });
+    const nestedTask = await tasks.add({ title: "Catalog nested", namespace: ["feature", "ui"] });
+    assert.equal(rootTask.kind, "accepted");
+    assert.equal(featureTask.kind, "accepted");
+    assert.equal(nestedTask.kind, "accepted");
+    const all = await Keiyaku.ls({ query: { kind: "tasks" }, path: root });
+    const rootOnly = await Keiyaku.ls({ query: { kind: "tasks", namespace: [] }, path: root });
+    const featureOnly = await Keiyaku.ls({ query: { kind: "tasks", namespace: ["feature"] }, path: root });
+    assert.deepEqual(
+      all.rows.map((row) => row.id),
+      ["task/catalog-root", "task/feature/catalog-feature", "task/feature/ui/catalog-nested"],
+    );
+    assert.deepEqual(
+      rootOnly.rows.map((row) => row.id),
+      ["task/catalog-root"],
+    );
+    assert.deepEqual(
+      featureOnly.rows.map((row) => row.id),
+      ["task/feature/catalog-feature"],
+    );
+    await assert.rejects(
+      () => Keiyaku.ls({ query: { kind: "tasks", namespace: ["bad/segment"] }, path: root }),
+      /canonical segments/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("CLI ls invokes each selected identity directory and emits selected JSON", async () => {
   const repository = makeGitRepository();
   const repo = await Repo.at({ path: repository.path });

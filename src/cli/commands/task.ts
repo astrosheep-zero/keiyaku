@@ -1,4 +1,5 @@
 import { CliUsageError, isBlankInput, usageLine } from "../usage.js";
+import { parseTaskNamespaceSelector } from "../../task/catalog.js";
 import {
   parseTaskQueryExpression,
   validateTaskLimit,
@@ -80,9 +81,9 @@ task add [--namespace <ns>] [--actor <actor>] -`,
     purpose: "Read one or more Tasks and their relationships.",
   },
   ls: {
-    arity: [0, 0],
+    arity: [0, 1],
     flags: { ...COMMON, closed: "boolean", all: "boolean", world: "boolean", limit: "value" },
-    usage: "task ls [--closed | --all] [--world] [--limit <n>]",
+    usage: "task ls [<namespace-selector>] [--closed | --all] [--world] [--limit <n>]",
     purpose: "List Tasks in the selected scope.",
     details: "--world lists every namespace in the current Task world.",
   },
@@ -336,6 +337,9 @@ function validateTaskReadFlags(
   fail: (message: string) => never,
 ): void {
   if (action === "ls" && flags.closed === true && flags.all === true) fail("--closed and --all are mutually exclusive");
+  if (action === "ls" && flags.world === true) {
+    // An explicit selector is checked below, after positional shape is known.
+  }
   if (typeof flags.limit === "string") {
     try {
       validateTaskLimit(flags.limit);
@@ -375,6 +379,19 @@ function validateTaskScan(action: TaskAction, scanned: ScannedTask, fail: (messa
   )
     fail("task add document input owns its creation fields");
   if (action === "compose" && stdin !== "compose") fail("task compose requires '-' input");
+  if (action === "ls" && positionals.length === 1) {
+    const selector = positionals[0]!;
+    if (selector !== "task/" && (!selector.startsWith("task/") || !selector.endsWith("/")))
+      fail(`invalid Task namespace selector: ${selector}`);
+    if (selector !== "task/") {
+      try {
+        parseTaskNamespaceSelector(selector);
+      } catch (error) {
+        fail(error instanceof Error ? error.message : String(error));
+      }
+    }
+    if (flags.world === true) fail("--world cannot be combined with an explicit Task namespace selector");
+  }
   validateTaskReadFlags(action, flags, fail);
   if (action === "update") validateUpdate(scanned, fail);
 }

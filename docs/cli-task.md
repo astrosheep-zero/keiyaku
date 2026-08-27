@@ -43,7 +43,7 @@ task add <TITLE> [--namespace <ns>] [--priority 0..3]
   [--body <text>] [--json]
 task add [--namespace <ns>] [--actor <actor>] [--json] -
 task show <TaskId> [--json]
-task ls [--closed | --all] [--world] [--limit <n>] [--json]
+task ls [<namespace-selector>] [--closed | --all] [--world] [--limit <n>] [--json]
 task ready [--world] [--parent <TaskId>] [--limit <n>] [--json]
 task blocked [--world] [--parent <TaskId>] [--limit <n>] [--json]
 task query [--where <expression>] [--world]
@@ -125,6 +125,10 @@ context. Without an `ns=` header, compose resolves current context and
 reports `invalid-namespace-context` on a malformed marker. The Task-owned
 composition header parser owns recognition and validation. Ordinary
 omitted-selector operations retain the malformed-marker refusal.
+
+`task ls` accepts one trailing-slash namespace selector (`task/` for root or
+`task/<segment>/.../` for a named namespace). Explicit selection bypasses
+context; `--world` is refused with an explicit selector.
 
 `ls`, `ready`, `blocked`, and `query` use current context unless `--world` is
 present. `--world` means every namespace in the current Task world anchored

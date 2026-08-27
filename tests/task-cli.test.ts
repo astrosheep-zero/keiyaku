@@ -13,6 +13,8 @@ import { renderTaskIncompleteDiagnostic, renderTaskText, taskExitCode } from "..
 import { writeTask } from "../src/cli/runtime.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
 import type { TaskInvocationResult } from "../src/cli/commands/task-invoke.js";
+import { Tasks } from "../src/task/index.js";
+import { World } from "../src/world.js";
 import { makeGitRepository } from "./support/git.js";
 
 function world(): string {
@@ -607,6 +609,48 @@ test("task compose and views flow through native results", async () => {
     /^○ task\/parent · P2 ready · updated .* · no body · children 1\/1 live — Parent$/mu,
   );
   assert.equal(taskExitCode(listed), 0);
+});
+
+test("task ls accepts exact namespace selectors and bypasses malformed context", async () => {
+  const root = world();
+  const tasks = Tasks.of(await World.at(root));
+  const rootTask = await tasks.add({ title: "Root task", namespace: [] });
+  const featureOne = await tasks.add({ title: "Feature one", namespace: ["feature"] });
+  const featureTwo = await tasks.add({ title: "Feature two", namespace: ["feature"] });
+  await tasks.add({ title: "Nested feature", namespace: ["feature", "ui"] });
+  assert.equal(rootTask.kind, "accepted");
+  assert.equal(featureOne.kind, "accepted");
+  assert.equal(featureTwo.kind, "accepted");
+  mkdirSync(join(root, ".keiyaku", "namespace"), { recursive: true });
+  writeFileSync(join(root, ".keiyaku", "namespace", "current"), "bad//context\n");
+
+  const selected = (await invoke(
+    parseArgv(["-C", root, "task", "ls", "task/feature/", "--all", "--json", "--limit", "1"]),
+  )) as {
+    kind: string;
+    value: { kind: string; value: { rows: readonly { id: string }[]; total: number; truncated: boolean } };
+  };
+  assert.equal(selected.kind, "present");
+  assert.deepEqual(
+    selected.value.value.rows.map((row) => row.id),
+    ["task/feature/feature-one"],
+  );
+  assert.equal(selected.value.value.total, 2);
+  assert.equal(selected.value.value.truncated, true);
+
+  const rootPage = (await invoke(parseArgv(["-C", root, "task", "ls", "task/", "--all", "--json"]))) as {
+    kind: string;
+    value: { value: { rows: readonly { id: string }[] } };
+  };
+  assert.deepEqual(
+    rootPage.value.value.rows.map((row) => row.id),
+    ["task/root-task"],
+  );
+  assert.throws(() => parseArgv(["task", "ls", "task/feature", "--all"]), /Task namespace selector/u);
+  assert.throws(() => parseArgv(["task", "ls", "task/Feature/", "--all"]), /Task namespace selector/u);
+  assert.throws(() => parseArgv(["task", "ls", "task/../", "--all"]), /Task namespace selector/u);
+  assert.throws(() => parseArgv(["task", "ls", "task/feature/", "--world"]), /--world/u);
+  assert.throws(() => parseArgv(["task", "ls", "task/feature/", "extra"]), /invalid positional/u);
 });
 
 test("task query keeps text and JSON membership on one typed page", async () => {

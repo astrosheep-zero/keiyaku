@@ -490,12 +490,6 @@ export async function queryTasks(
     }),
   };
 }
-/** Internal composite observation from one complete Task board read. */
 export async function observeTaskBoard(world: WorldRoot): Promise<TaskBoardObservation> {
   return projectTaskBoardObservation((await readBoard(world)).board);
-}
-/** Internal identity catalog from one complete Task board read. */
-export async function observeTaskCatalogRows(world: WorldRoot): Promise<readonly TaskRow[]> {
-  const board = (await readBoard(world)).board;
-  return projectRows(board, createTaskRelations(board), null, "all");
 }

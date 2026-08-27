@@ -207,6 +207,11 @@ targeted observe. The return contract and behavior of `reconcile` are defined by
 `Keiyaku` is a stateless branded handle born only through `Keiyaku.of` or a
 successful bind. There is no `Repo` convenience path or alternate constructor.
 
+`Keiyaku.ls({ query: { kind: "tasks", namespace? }, path })` observes the
+complete Task catalog. An omitted namespace returns every namespace; an empty
+array selects root and a nonempty array selects that exact namespace. Catalog
+rows retain their existing shape and are not page-limited.
+
 ```ts
 type ContractGateCurrent =
   | Readonly<{ kind: "attested"; verdict: "satisfied" | "unsatisfied"; summary?: string }>
