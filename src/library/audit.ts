@@ -2,7 +2,7 @@ import { decodeContractDocument } from "../body/decode.js";
 import type { ContractId } from "../core/facts/types.js";
 import { withGitDecodeChannel } from "../git/read-observation.js";
 import { auditOperation, type AuditReport } from "../protocol/audit.js";
-import type { RepositoryScope } from "../protocol/operations.js";
+import { withScopeAbortSignal, type RepositoryScope } from "../protocol/operations.js";
 import { worktreeHooksOption, type WorktreeHooks } from "./configuration.js";
 import { actorOption, documentDerivation, optionalBoolean, optionalSignal, requireInput } from "./input.js";
 import { completeMutation, type MutationResult } from "./mutation.js";
@@ -40,10 +40,11 @@ export async function auditContract(
   }>,
 ): Promise<MutationResult<AuditReport>> {
   const normalized = normalizeAuditInput(input.input);
-  return withGitDecodeChannel(input.scope, async (channel) => {
+  const scope = withScopeAbortSignal(input.scope, normalized.signal);
+  return withGitDecodeChannel(scope, async (channel) => {
     const accepted = requireAccepted(
       await auditOperation({
-        scope: input.scope,
+        scope,
         channel,
         contractId: input.contractId,
         deriveDocument: (state) =>
@@ -56,7 +57,7 @@ export async function auditContract(
       }),
     );
     return completeMutation({
-      scope: input.scope,
+      scope,
       channel,
       contractId: input.contractId,
       accepted,

@@ -1,5 +1,5 @@
 import { decodeContractDocument } from "../body/decode.js";
-import { type RepositoryScope } from "../protocol/operations.js";
+import { withScopeAbortSignal, type RepositoryScope } from "../protocol/operations.js";
 import { deliverOperation, type IntegrationConflictMaterialized } from "../protocol/deliver.js";
 import { reviewOperation, type ReviewValue } from "../protocol/review.js";
 import { continueAcceptedCompletion, type ContinuationReport } from "./continuation.js";
@@ -62,8 +62,9 @@ function operationContext(scope: RepositoryScope, channel: GitDecodeChannel, con
 export async function executeLocalDelivery(
   input: DeliveryExecutionInput,
 ): Promise<MutationResult<DeliveryValue> | IntegrationConflictMaterialized> {
-  return withGitDecodeChannel(input.scope, async (channel) => {
-    const operation = operationContext(input.scope, channel, input.contractId);
+  const scope = withScopeAbortSignal(input.scope, input.signal);
+  return withGitDecodeChannel(scope, async (channel) => {
+    const operation = operationContext(scope, channel, input.contractId);
     const outcome = await deliverOperation({
       ...operation,
       ...(input.actor === undefined ? {} : { actor: input.actor }),
@@ -82,7 +83,7 @@ export async function executeLocalDelivery(
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
     return completeMutation({
-      ...completionInput(input.scope, channel, input.contractId, (delivery: DeliveryValue) => delivery, input.hooks),
+      ...completionInput(scope, channel, input.contractId, (delivery: DeliveryValue) => delivery, input.hooks),
       accepted: continued,
     });
   });

@@ -164,14 +164,14 @@ export const runtimeLibraryZones = [
       any("library/region.ts", ["observeRegion", "RegionObservation"]),
       any("library/repo.ts", ["Repo", "scopeForRepo"]),
       any("library/configuration.ts", ["worktreeHooksOption", "WorktreeHooks"]),
-      types("protocol/operations.ts", ["RepositoryScope"]),
+      any("protocol/operations.ts", ["RepositoryScope", "withScopeAbortSignal"]),
     ],
   },
   {
     source: "library/contract-operations.ts",
     allow: [
       any("body/decode.ts", ["decodeContractDocument"]),
-      types("protocol/operations.ts", ["RepositoryScope"]),
+      any("protocol/operations.ts", ["RepositoryScope", "withScopeAbortSignal"]),
       any("protocol/deliver.ts", ["deliverOperation", "IntegrationConflictMaterialized"]),
       any("protocol/review.ts", ["reviewOperation", "ReviewValue"]),
       any("library/continuation.ts", ["continueAcceptedCompletion", "ContinuationReport"]),
@@ -216,7 +216,7 @@ export const runtimeLibraryZones = [
       types("core/facts/types.ts"),
       any("git/read-observation.ts", ["withGitDecodeChannel"]),
       any("protocol/audit.ts", ["auditOperation", "AuditReport"]),
-      types("protocol/operations.ts", ["RepositoryScope"]),
+      any("protocol/operations.ts", ["RepositoryScope", "withScopeAbortSignal"]),
       any("library/configuration.ts", ["worktreeHooksOption", "WorktreeHooks"]),
       any("library/input.ts", [
         "actorOption",

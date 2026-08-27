@@ -22,6 +22,14 @@ ordinary, streamed-output, and environment-augmented Git subprocesses all use
 that exact coordinate. Git modules do not read environment configuration or
 reinterpret the coordinate as a repository path.
 
+A cancellable Git capability carries its caller's `AbortSignal` through every
+ordinary, streamed-output, and environment-augmented subprocess it starts.
+Cancellation terminates the owned child process tree through the shared process
+runtime, waits for the direct child to close, then returns the existing typed
+operational failure naming the Git operation and cancellation. Git creates no
+separate timeout policy or lock-file recovery: an `index.lock` is neither
+removed nor treated as completion evidence.
+
 Filesystem coordinates arrive from the CLI, Repo, or World boundary as
 canonical absolute native paths and pass directly to Git argv and child cwd.
 Git does not convert Windows or MSYS path dialects. Git tree object paths are

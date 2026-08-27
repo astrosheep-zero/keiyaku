@@ -186,6 +186,10 @@ export function placementStop(
 
 export type RepositoryScope = GitRepository;
 
+export function withScopeAbortSignal(scope: RepositoryScope, signal: AbortSignal | undefined): RepositoryScope {
+  return signal === undefined ? scope : { ...scope, signal };
+}
+
 export async function scopeOperation(
   input: Readonly<{ coordinate: string; gitPath?: string }>,
 ): Promise<RepositoryScope> {

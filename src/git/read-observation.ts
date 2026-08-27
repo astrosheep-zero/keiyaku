@@ -1,5 +1,6 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
+import { spawnCancellableProcess } from "../runtime/proc/run.js";
 import { gitObjectId } from "./identity.js";
 import { parseTreeObject, validPath, type TreeEntry } from "./tree.js";
 import { GIT_FORMAT_BYTES, GIT_FORMAT_PATH, GIT_REF, readRef, type GitOid, type GitSnapshot } from "./repository.js";
@@ -67,11 +68,11 @@ type BatchObjectReader = Readonly<{
   close(): Promise<void>;
 }>;
 
-function batchChild(repository: GitRepository): ChildProcessWithoutNullStreams {
-  return spawn(repository.gitPath, ["cat-file", "--batch"], {
+function batchChild(repository: GitRepository) {
+  return spawnCancellableProcess({
+    argv: [repository.gitPath, "cat-file", "--batch"],
     cwd: repository.effectiveCwd,
-    stdio: ["pipe", "pipe", "pipe"],
-    windowsHide: true,
+    ...(repository.signal === undefined ? {} : { signal: repository.signal }),
   });
 }
 
@@ -89,8 +90,29 @@ function batchError(
   });
 }
 
+async function closeBatchProcess(
+  process: ReturnType<typeof spawnCancellableProcess>,
+  child: ChildProcessWithoutNullStreams,
+  closed: Promise<Readonly<{ code: number | null; signal: NodeJS.Signals | null }>>,
+  spawnError: Error | null,
+  stderr: readonly Buffer[],
+): Promise<void> {
+  if (!child.stdin.destroyed) child.stdin.end();
+  const outcome = await closed;
+  await process.waitTermination();
+  if (spawnError !== null || outcome.code !== 0) {
+    throw batchError(
+      child,
+      stderr,
+      process.cancelled() ? "git process cancelled" : "git cat-file --batch did not close cleanly",
+      outcome.code,
+    );
+  }
+}
+
 function batchObjectReader(repository: GitRepository): BatchObjectReader {
-  const child = batchChild(repository);
+  const process = batchChild(repository);
+  const child = process.child as ChildProcessWithoutNullStreams;
   const cursor = streamCursor(child.stdout);
   const cache = new Map<GitOid, Promise<GitObjectResult>>();
   const stderr: Buffer[] = [];
@@ -132,9 +154,15 @@ function batchObjectReader(repository: GitRepository): BatchObjectReader {
       return { kind: "present", type: header[1], bytes };
     } catch (error) {
       if (failure !== null) throw failure;
-      child.kill();
+      await process.terminate(true);
       await closed;
-      failure = batchError(child, stderr, error instanceof Error ? error.message : String(error), child.exitCode);
+      await process.waitTermination();
+      failure = batchError(
+        child,
+        stderr,
+        process.cancelled() ? "git process cancelled" : error instanceof Error ? error.message : String(error),
+        process.cancelled() ? null : child.exitCode,
+      );
       throw failure;
     }
   };
@@ -157,12 +185,11 @@ function batchObjectReader(repository: GitRepository): BatchObjectReader {
   };
   const close = async (): Promise<void> => {
     await tail.catch(() => undefined);
-    if (failure !== null) return;
-    if (!child.stdin.destroyed) child.stdin.end();
-    const outcome = await closed;
-    if (spawnError !== null || outcome.code !== 0) {
-      throw batchError(child, stderr, "git cat-file --batch did not close cleanly", outcome.code);
+    if (failure !== null) {
+      await process.waitTermination();
+      return;
     }
+    await closeBatchProcess(process, child, closed, spawnError, stderr);
   };
   return { objects, close };
 }

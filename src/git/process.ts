@@ -1,5 +1,4 @@
-import { spawn } from "node:child_process";
-import { consumeProcessStdout } from "../runtime/proc/run.js";
+import { consumeProcessStdout, spawnCancellableProcess } from "../runtime/proc/run.js";
 
 export type GitRepository = Readonly<{
   /** The executable selected when this repository capability is created. */
@@ -12,7 +11,14 @@ export type GitRepository = Readonly<{
   readonly primaryWorktree: string;
   /** The canonical common Git directory pinned when this capability is created. */
   readonly commonDirectory: string;
+  /** A caller-owned cancellation boundary for this capability view. */
+  readonly signal?: AbortSignal;
 }>;
+
+/** Give one caller's Git capability view its cancellation boundary. */
+export function withGitAbortSignal(repository: GitRepository, signal: AbortSignal | undefined): GitRepository {
+  return signal === undefined ? repository : { ...repository, signal };
+}
 
 export class GitPlumbingError extends Error {
   readonly stdout: Buffer;
@@ -66,35 +72,44 @@ async function executeGit(
   input: string | Uint8Array | undefined,
   environment?: NodeJS.ProcessEnv,
 ): Promise<Buffer> {
+  if (repository.signal?.aborted === true) {
+    throw commandError(args, { message: "git process cancelled", status: null });
+  }
   const stdout: Buffer[] = [];
   const stderr: Buffer[] = [];
   let stderrBytes = 0;
   let inputError: Error | undefined;
-  const child = spawn(repository.gitPath, [...args], {
+  const owned = spawnCancellableProcess({
+    argv: [repository.gitPath, ...args],
     cwd: repository.effectiveCwd,
     ...(environment === undefined ? {} : { env: { ...process.env, ...environment } }),
-    stdio: ["pipe", "pipe", "pipe"],
-    windowsHide: true,
+    ...(repository.signal === undefined ? {} : { signal: repository.signal }),
   });
-  child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
-  child.stderr.on("data", (chunk: Buffer) => {
+  const child = owned.child;
+  child.stdout!.on("data", (chunk: Buffer) => stdout.push(chunk));
+  child.stderr!.on("data", (chunk: Buffer) => {
     if (stderrBytes >= GIT_STDERR_BYTES) return;
     const retained = chunk.subarray(0, GIT_STDERR_BYTES - stderrBytes);
     stderr.push(retained);
     stderrBytes += retained.length;
   });
-  child.stdin.on("error", (error: Error) => {
+  child.stdin!.on("error", (error: Error) => {
     inputError = error;
   });
-  child.stdin.end(input);
+  child.stdin!.end(input);
   const terminal = await new Promise<Readonly<{ code: number | null; error?: Error }>>((resolveTerminal) => {
     child.once("error", (error) => resolveTerminal({ code: null, error }));
     child.once("close", (code) => resolveTerminal({ code }));
   });
+  await owned.waitTermination();
   const output = Buffer.concat(stdout);
-  if (terminal.code === 0 && inputError === undefined) return output;
+  if (!owned.cancelled() && terminal.code === 0 && inputError === undefined) return output;
   throw commandError(args, {
-    message: terminal.error?.message ?? inputError?.message ?? `git exited with status ${terminal.code ?? "unknown"}`,
+    message:
+      (owned.cancelled() ? "git process cancelled" : undefined) ??
+      terminal.error?.message ??
+      inputError?.message ??
+      `git exited with status ${terminal.code ?? "unknown"}`,
     stdout: output,
     stderr: Buffer.concat(stderr),
     status: terminal.code,
@@ -119,6 +134,7 @@ export async function consumeGitStdout(
     {
       argv: [repository.gitPath, ...args],
       cwd: repository.effectiveCwd,
+      ...(repository.signal === undefined ? {} : { signal: repository.signal }),
     },
     consume,
   );

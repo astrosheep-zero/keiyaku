@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
+import { withGitAbortSignal } from "../src/git/process.js";
 import { GIT_REF, repositoryAt } from "../src/git/repository.js";
 import { withGitDecodeChannel, withGitReadObservation, type GitReadObservation } from "../src/git/read-observation.js";
 import { gitExecutablePath, makeGitRepository, withGitShim } from "./support/git.js";
@@ -11,6 +12,14 @@ const MISSING_OID = "0000000000000000000000000000000000000000";
 function invocations(path: string): readonly string[] {
   const text = readFileSync(path, "utf8").trim();
   return text.length === 0 ? [] : text.split("\n");
+}
+
+async function waitForFile(path: string): Promise<void> {
+  for (let attempts = 0; attempts < 100; attempts += 1) {
+    if (existsSync(path)) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`timed out waiting for ${path}`);
 }
 
 test("empty Git read observation memoizes refs without starting object transport", async () => {
@@ -135,6 +144,37 @@ test("Git read observation returns a close-only batch failure", async () => {
         })(),
         /git cat-file --batch: git cat-file --batch did not close cleanly/u,
       ),
+  );
+});
+
+test("Git read observation reports cancellation instead of the interrupted batch read error", async () => {
+  const repository = makeGitRepository();
+  const marker = join(repository.path, "batch-cancellation-started");
+  const controller = new AbortController();
+
+  await withGitShim(
+    [
+      'if [ "$1 $2" = "cat-file --batch" ]; then',
+      '  printf started > "$KEIYAKU_BATCH_CANCEL_MARKER"',
+      "  while :; do sleep 10; done",
+      "fi",
+      'exec "$KEIYAKU_REAL_GIT" "$@"',
+    ].join("\n"),
+    { KEIYAKU_BATCH_CANCEL_MARKER: marker },
+    async (gitPath) => {
+      const git = withGitAbortSignal(await repositoryAt(repository.path, gitPath), controller.signal);
+      await assert.rejects(
+        withGitDecodeChannel(git, (channel) =>
+          withGitReadObservation(git, channel, async (observation) => {
+            const pending = observation.readBlobs([MISSING_OID]);
+            await waitForFile(marker);
+            controller.abort();
+            await pending;
+          }),
+        ),
+        /git cat-file --batch: git process cancelled/u,
+      );
+    },
   );
 });
 

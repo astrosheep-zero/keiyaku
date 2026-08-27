@@ -2,7 +2,10 @@ import { any, factErrors, factTypes, gitRepository, types } from "./policy-helpe
 export const gitZones = [
   { source: "git/identity.ts", allow: [factTypes] },
   { source: "git/tree.ts", allow: [any("git/identity.ts")] },
-  { source: "git/process.ts", allow: [any("runtime/proc/run.ts", ["consumeProcessStdout"])] },
+  {
+    source: "git/process.ts",
+    allow: [any("runtime/proc/run.ts", ["consumeProcessStdout", "spawnCancellableProcess"])],
+  },
   {
     source: "git/repository.ts",
     allow: [
@@ -18,6 +21,7 @@ export const gitZones = [
       factErrors,
       any("git/identity.ts"),
       any("git/process.ts", ["GitPlumbingError", "GitRepository"]),
+      any("runtime/proc/run.ts", ["spawnCancellableProcess"]),
       any("git/repository.ts"),
       any("git/tree.ts", ["parseTreeObject", "TreeEntry", "validPath"]),
     ],

@@ -31,6 +31,39 @@ type ProcessSpawnOptions = Readonly<{
 
 type ProcessSpawner = (command: string, args: readonly string[], options: ProcessSpawnOptions) => ChildProcess;
 
+export type CancellableProcess = Readonly<{
+  child: ChildProcess;
+  cancelled(): boolean;
+  terminate(force?: boolean): Promise<void>;
+  waitTermination(): Promise<void>;
+}>;
+
+export function spawnCancellableProcess(input: ProcessLaunch): CancellableProcess {
+  const child = spawn(input.argv[0]!, input.argv.slice(1), spawnOptionsFor(input, ["pipe", "pipe", "pipe"]));
+  let cancelled = false;
+  let termination: Promise<void> | undefined;
+  const terminate = (force = false): Promise<void> => {
+    termination ??= terminateOwnedProcess(child, force);
+    return termination;
+  };
+  const cancel = (): void => {
+    if (cancelled) return;
+    cancelled = true;
+    void terminate();
+  };
+  input.signal?.addEventListener("abort", cancel, { once: true });
+  if (input.signal?.aborted === true) cancel();
+  return {
+    child,
+    cancelled: () => cancelled,
+    terminate,
+    async waitTermination(): Promise<void> {
+      input.signal?.removeEventListener("abort", cancel);
+      await termination;
+    },
+  };
+}
+
 export type ProcessInput = ProcessLaunch &
   Readonly<{
     readonly timeoutMs?: number;

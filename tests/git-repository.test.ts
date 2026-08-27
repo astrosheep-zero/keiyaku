@@ -18,7 +18,7 @@ import {
   repositoryAt,
   writeBlob,
 } from "../src/git/repository.js";
-import { GitPlumbingError, consumeGitStdout, runGit, runGitWithEnvironment } from "../src/git/process.js";
+import { GitPlumbingError, consumeGitStdout, runGit, runGitWithEnvironment, withGitAbortSignal } from "../src/git/process.js";
 import { worktreePath } from "../src/git/workspace.js";
 import { gitExecutablePath, makeGitRepository, withGitShim } from "./support/git.js";
 
@@ -28,6 +28,14 @@ function repositoryWithCommit() {
   repository.run(["config", "user.email", "keiyaku@example.invalid"]);
   repository.run(["commit", "--quiet", "--allow-empty", "-m", "initial"]);
   return repository;
+}
+
+async function waitForFile(path: string): Promise<void> {
+  for (let attempts = 0; attempts < 100; attempts += 1) {
+    if (existsSync(path)) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`timed out waiting for ${path}`);
 }
 
 test("Keiyaku-owned refs keep delivery and candidate namespaces distinct across generations", () => {
@@ -212,6 +220,35 @@ test("async Git plumbing preserves nonzero exit evidence", async () => {
     runGit(git, ["rev-parse", "--verify", "refs/heads/missing"]),
     (error: unknown) =>
       error instanceof GitPlumbingError && error.status === 128 && error.stderr.length > 0 && error.pid !== null,
+  );
+});
+
+test("cancelling streamed Git execution uses its capability signal", async () => {
+  const repository = repositoryWithCommit();
+  const started = join(mkdtempSync(join(tmpdir(), "keiyaku-git-stream-cancellation-")), "started");
+
+  await withGitShim(
+    [
+      'if [ "$1" = "--version" ]; then',
+      '  sh -c \'echo ready; echo $$ > "$KEIYAKU_STARTED"; trap "exit 0" TERM; while :; do sleep 10; done\'',
+      "fi",
+      'exec "$KEIYAKU_REAL_GIT" "$@"',
+    ].join("\n"),
+    { KEIYAKU_STARTED: started },
+    async (gitPath) => {
+      const controller = new AbortController();
+      const pending = consumeGitStdout(
+        withGitAbortSignal(await repositoryAt(repository.path, gitPath), controller.signal),
+        ["--version"],
+        () => undefined,
+      );
+      await waitForFile(started);
+      controller.abort();
+      await assert.rejects(
+        pending,
+        (error: unknown) => error instanceof GitPlumbingError && /--version: git process ended with cancelled/u.test(error.message),
+      );
+    },
   );
 });
 
