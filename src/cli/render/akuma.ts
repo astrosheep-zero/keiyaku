@@ -6,6 +6,7 @@ import {
   akumaRawAnswer,
   associatedIdentity,
   historyText,
+  killObservationText,
   mutationObservationStageText,
   snapshotHeading,
   snapshotText,
@@ -131,12 +132,7 @@ export function renderAkumaText(
     }
     case "kill":
       return result.result.results
-        .map((member) =>
-          mutationObservationStageText(member.id, member.observation, context, {
-            facts: [`kill ${member.evidence}`],
-            ...(result.alias === undefined ? {} : { alias: result.alias }),
-          }),
-        )
+        .map((member) => killObservationText(member.id, member.evidence, member.observation, context, result.alias))
         .join("\n\n");
   }
 }

@@ -725,10 +725,54 @@ test("Akuma mutation snapshots omit observation context", () => {
       ],
     },
   });
-  assert.match(killed, /^kill killed$/mu);
+  assert.doesNotMatch(killed, /^kill /mu);
+  assert.match(killed, /working/u);
+  assert.doesNotMatch(killed, /tasks 1|changes 0/u);
+  assert.doesNotMatch(killed, /⋮ \d+ omitted/u);
   assert.doesNotMatch(killed, /^tasks /mu);
   assert.doesNotMatch(killed, /^changes /mu);
-  assert.equal(killed.split("\n").at(-1), "× killed");
+  assert.equal(killed.split("\n").at(-1), "✓ killed");
+
+  for (const evidence of ["already-killed", "already-stopped", "hung", "untidy", "unavailable"] as const) {
+    const receipt = renderAkumaText(parseArgv(["kill", observation.status.id]).command, {
+      kind: "akuma",
+      action: "kill",
+      result: {
+        results: [{ id: observation.status.id, evidence, observation: { kind: "observed", ...observation } }],
+      },
+    });
+    const expected =
+      evidence === "already-killed"
+        ? "✓ already killed"
+        : evidence === "already-stopped"
+          ? "✓ already stopped"
+          : `! not killed · ${evidence}`;
+    assert.equal(receipt.split("\n").filter((line) => line === expected).length, 1);
+    assert.doesNotMatch(receipt, new RegExp(`^kill ${evidence}$`, "mu"));
+  }
+
+  const emptyKill = renderAkumaText(parseArgv(["kill", observation.status.id]).command, {
+    kind: "akuma",
+    action: "kill",
+    result: {
+      results: [
+        {
+          id: observation.status.id,
+          evidence: "already-stopped",
+          observation: {
+            kind: "observed",
+            ...observation,
+            status: {
+              ...observation.status,
+              timeline: { kind: "idle", entries: [], omitted: 0, ...emptyReported },
+            },
+          },
+        },
+      ],
+    },
+  });
+  assert.match(emptyKill, new RegExp(`^${observation.status.id}\\n────────────`, "mu"));
+  assert.equal(emptyKill.split("\n").at(-1), "✓ already stopped");
   const asleep = renderStatus(
     akumaObservation({
       id: "aku/worker/1234abcd",

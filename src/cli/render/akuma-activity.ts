@@ -2,6 +2,7 @@ import type {
   ActivityRow,
   ActivitySnapshot,
   ActivitySnapshotEntry,
+  KillEvidence,
   ReportedFileChange,
   SnapshotRow,
 } from "../../akuma/index.js";
@@ -364,6 +365,35 @@ function mutationSnapshotText(
 ): string {
   const core = snapshotCore(view, context, options);
   return [...core.lines, ...(options.showLife === false ? [] : ["", lifeLabel(view.status.life)])].join("\n");
+}
+
+function killResultLabel(evidence: KillEvidence): string {
+  if (evidence === "killed") return "✓ killed";
+  if (evidence === "already-killed") return "✓ already killed";
+  if (evidence === "already-stopped") return "✓ already stopped";
+  return `! not killed · ${evidence}`;
+}
+
+function latestKillActivity(snapshot: ActivitySnapshot, context: TextRenderContext): readonly string[] {
+  const rows: ActivityRow[] = snapshot.entries.flatMap((entry) => (entry.kind === "row" ? [entry.row] : []));
+  const visible = rows.filter((row) => row.kind !== "turn");
+  const latest = visible.reduce<(typeof visible)[number] | undefined>(
+    (selected, row) => (selected === undefined || row.sequence > selected.sequence ? row : selected),
+    undefined,
+  );
+  return latest === undefined ? [] : groupedRows([latest], context);
+}
+
+export function killObservationText(
+  id: string,
+  evidence: KillEvidence,
+  observation: AkumaObservationStage,
+  context: TextRenderContext,
+  alias?: string,
+): string {
+  const heading = snapshotHeading(id, alias, observation.kind === "observed" ? observation.contract : undefined);
+  const activity = observation.kind === "observed" ? latestKillActivity(observation.status.timeline, context) : [];
+  return [...heading, ...activity, "", killResultLabel(evidence)].join("\n");
 }
 
 export function mutationObservationStageText(

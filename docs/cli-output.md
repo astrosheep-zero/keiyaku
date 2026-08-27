@@ -131,13 +131,19 @@ coordinates.
 
 ## Shared Scanner Grammar
 
-Tell delivery state is rendered once on its timeline row: a told row is `✓ told`
-with its body, while a pending row is `⧗ tell`. Held and pursuing receipts add
-no wake fact. A failed receipt emits exactly one loud `! tell delivery failed ·
-<diagnostic>` fact; child evidence appends its factual shared run-log path and
-byte range without calling those bytes stderr. Ordinary Tell exits 0 for
-`told`, `pursuing`, and `held`, and 2 for `failed`; JSON remains the typed
-result. There is no separate pending-tells summary.
+Tell delivery state is carried by its own timeline row. A settled `told` Tell
+uses `✓ told` and a pending Tell uses `⧗ tell`; the receipt does not add a
+duplicate `wake told` or `wake held` fact. A `pursuing` wake adds no wake fact.
+A failed wake keeps one loud `! tell delivery failed · <diagnostic>` fact and
+does not invent a second Tell row. Ordinary Tell exits 0 for `told`,
+`pursuing`, and `held`, and 2 for `failed`; JSON remains the typed result.
+
+Kill receipts keep the identity header and life result but render at most the
+single newest activity row from the observed timeline. They do not render an
+activity gap, pending-Tell summary, task or change blocks, or a separate
+`kill <evidence>` fact; the final result line is the sole kill evidence carrier:
+`✓ killed`, `✓ already killed`, `✓ already stopped`, `! not killed · hung`,
+`! not killed · untidy`, or `! not killed · unavailable`.
 
 Text uses lowercase words, `·` fact separators, indented evidence, complete
 coordinates, and honest empty results; these presentation rules add no facts.
