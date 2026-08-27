@@ -60,14 +60,27 @@ function guardedCommand(attempts: string, ready: string): HookCommand {
   return { argv: [process.execPath, "-e", source], timeoutMs: 5_000 };
 }
 
-function lockPath(repository: Awaited<ReturnType<typeof repositoryAt>>, id: Parameters<typeof contractLocator>[0]): string {
+function lockPath(
+  repository: Awaited<ReturnType<typeof repositoryAt>>,
+  id: Parameters<typeof contractLocator>[0],
+): string {
   const locator = contractLocator(id);
-  return join(commonGitDirectory(repository), "keiyaku", "locks", "reconcile", locator.slice(0, 2), `${locator.slice(2)}.sqlite`);
+  return join(
+    commonGitDirectory(repository),
+    "keiyaku",
+    "locks",
+    "reconcile",
+    locator.slice(0, 2),
+    `${locator.slice(2)}.sqlite`,
+  );
 }
 
 function lines(path: string): readonly string[] {
   if (!existsSync(path)) return [];
-  return readFileSync(path, "utf8").trim().split("\n").filter((line) => line.length > 0);
+  return readFileSync(path, "utf8")
+    .trim()
+    .split("\n")
+    .filter((line) => line.length > 0);
 }
 
 async function waitForFile(path: string): Promise<void> {
@@ -96,12 +109,12 @@ test("concurrent reconcile runs one frozen hook sequence and destroy removes onl
     destroy: [appendCommand(log, "destroy\n")],
   };
 
-  const reports = await Promise.all([
-    bound.keiyaku.reconcile({ hooks }),
-    bound.keiyaku.reconcile({ hooks }),
-  ]);
+  const reports = await Promise.all([bound.keiyaku.reconcile({ hooks }), bound.keiyaku.reconcile({ hooks })]);
 
-  assert.deepEqual(reports.map((report) => report.lag), [[], []]);
+  assert.deepEqual(
+    reports.map((report) => report.lag),
+    [[], []],
+  );
   assert.deepEqual(lines(log), ["create"]);
   assert.equal(repository.run(["-C", worktree, "status", "--porcelain", "--untracked-files=all"]), "");
   assert.equal(existsSync(hookMarkerPath(administration)), true);
@@ -120,10 +133,12 @@ test("abandon chains destroy-hook changes after the initial ephemeral recovery",
   const repository = repositoryWithMain();
   const hooks: WorktreeHooks = {
     create: [],
-    destroy: [{
-      argv: [process.execPath, "-e", 'require("node:fs").writeFileSync("from-destroy-hook.txt", "hook bytes\\n")'],
-      timeoutMs: 5_000,
-    }],
+    destroy: [
+      {
+        argv: [process.execPath, "-e", 'require("node:fs").writeFileSync("from-destroy-hook.txt", "hook bytes\\n")'],
+        timeoutMs: 5_000,
+      },
+    ],
   };
   const bound = await Keiyaku.bind({
     repo: await Repo.at({ path: repository.path }),
@@ -161,18 +176,23 @@ test("a reconcile queued on the effect lock reobserves terminal state before app
   const pending = bound.keiyaku.reconcile();
 
   const scope = await scopeOperation({ coordinate: repository.path });
-  const terminal = await withGitDecodeChannel(scope, (channel) => abandonOperation({
-    scope,
-    channel,
-    contractId: id,
-  }));
+  const terminal = await withGitDecodeChannel(scope, (channel) =>
+    abandonOperation({
+      scope,
+      channel,
+      contractId: id,
+    }),
+  );
   assert.equal(terminal.kind, "accepted");
   repository.run(["worktree", "remove", worktree]);
   held.close();
 
   const report = await pending;
   assert.equal(report.lag.length, 0);
-  assert.equal(report.effects.some((effect) => effect.kind === "worktree" && effect.action === "created"), false);
+  assert.equal(
+    report.effects.some((effect) => effect.kind === "worktree" && effect.action === "created"),
+    false,
+  );
   assert.equal(existsSync(worktree), false);
   assert.equal((await bound.keiyaku.state()).terminal?.kind, "abandoned");
 });
@@ -233,13 +253,17 @@ test("a Hook runner outlives its killed reconcile caller and fences immediate re
   });
   let callerStderr = "";
   caller.stderr.setEncoding("utf8");
-  caller.stderr.on("data", (chunk: string) => { callerStderr += chunk; });
+  caller.stderr.on("data", (chunk: string) => {
+    callerStderr += chunk;
+  });
   try {
     await Promise.race([
       waitForFile(started),
-      new Promise<never>((_resolve, reject) => caller.once("exit", (code, signal) => {
-        reject(new Error(`reconcile caller exited before Hook start (${code ?? signal}): ${callerStderr.trim()}`));
-      })),
+      new Promise<never>((_resolve, reject) =>
+        caller.once("exit", (code, signal) => {
+          reject(new Error(`reconcile caller exited before Hook start (${code ?? signal}): ${callerStderr.trim()}`));
+        }),
+      ),
     ]);
     caller.kill("SIGKILL");
     const lag = await runCreateHooks(worktree, administration, hooks, false);
@@ -256,15 +280,20 @@ test("reconcile acquires a death-released scratch lock and preserves an actively
   const git = await repositoryAt(repository.path);
   const commandRan = join(repository.path, "orphan-command-ran");
   mkdirSync(join(repository.path, ".keiyaku"), { recursive: true });
-  writeFileSync(join(repository.path, ".keiyaku", "settings.json"), JSON.stringify({
-    worktree: {
-      create: [],
-      destroy: [{
-        argv: [process.execPath, "-e", `require("node:fs").writeFileSync(${JSON.stringify(commandRan)}, "ran")`],
-        timeoutMs: 5_000,
-      }],
-    },
-  }));
+  writeFileSync(
+    join(repository.path, ".keiyaku", "settings.json"),
+    JSON.stringify({
+      worktree: {
+        create: [],
+        destroy: [
+          {
+            argv: [process.execPath, "-e", `require("node:fs").writeFileSync(${JSON.stringify(commandRan)}, "ran")`],
+            timeoutMs: 5_000,
+          },
+        ],
+      },
+    }),
+  );
   repository.run(["add", ".keiyaku/settings.json"]);
   repository.run(["commit", "--quiet", "-m", "scratch settings"]);
   const bound = await Keiyaku.bind({
@@ -290,11 +319,15 @@ test("reconcile acquires a death-released scratch lock and preserves an actively
   });
   let stderr = "";
   child.stderr.setEncoding("utf8");
-  child.stderr.on("data", (chunk: string) => { stderr += chunk; });
-  await new Promise<void>((resolve, reject) => child.once("close", (code, signal) => {
-    if (code === 0) resolve();
-    else reject(new Error(`scratch owner exited ${code ?? signal}: ${stderr.trim()}`));
-  }));
+  child.stderr.on("data", (chunk: string) => {
+    stderr += chunk;
+  });
+  await new Promise<void>((resolve, reject) =>
+    child.once("close", (code, signal) => {
+      if (code === 0) resolve();
+      else reject(new Error(`scratch owner exited ${code ?? signal}: ${stderr.trim()}`));
+    }),
+  );
   const orphan = readFileSync(pathFile, "utf8");
   assert.equal(existsSync(orphan), true);
   assert.equal(existsSync(hookMarkerPath(await worktreeGitDirectory(git, orphan))), false);
@@ -302,7 +335,12 @@ test("reconcile acquires a death-released scratch lock and preserves an actively
   const active = await materializeScratchCandidate(git, mintSnapshotId(snapshot));
   try {
     const report = await bound.keiyaku.reconcile();
-    assert.equal(report.effects.some((effect) => effect.kind === "worktree" && effect.path === orphan && effect.action === "removed"), true);
+    assert.equal(
+      report.effects.some(
+        (effect) => effect.kind === "worktree" && effect.path === orphan && effect.action === "removed",
+      ),
+      true,
+    );
     assert.equal(existsSync(orphan), false);
     assert.equal(existsSync(active.cwd), true);
     assert.equal(existsSync(commandRan), false);

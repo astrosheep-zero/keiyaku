@@ -50,8 +50,16 @@ export function gitExecutablePath(): string {
   return execFileSync(locator, ["git"], { encoding: "utf8" }).split(/\r?\n/u)[0]!.trim();
 }
 
-export function withGitShim<T>(body: string, variables: Readonly<Record<string, string>>, action: (gitPath: string) => Promise<T>): Promise<T>;
-export function withGitShim<T>(body: string, variables: Readonly<Record<string, string>>, action: (gitPath: string) => T): T;
+export function withGitShim<T>(
+  body: string,
+  variables: Readonly<Record<string, string>>,
+  action: (gitPath: string) => Promise<T>,
+): Promise<T>;
+export function withGitShim<T>(
+  body: string,
+  variables: Readonly<Record<string, string>>,
+  action: (gitPath: string) => T,
+): T;
 export function withGitShim<T>(
   body: string,
   variables: Readonly<Record<string, string>>,
@@ -64,7 +72,11 @@ export function withGitShim<T>(
   const assignments = Object.entries({ KEIYAKU_REAL_GIT: realGit, ...variables })
     .map(([key, value]) => `${key}=${shellQuote(value)}`)
     .join("\n");
-  writeFileSync(shimPath, `#!/bin/sh\n${assignments}\nexport ${Object.keys({ KEIYAKU_REAL_GIT: realGit, ...variables }).join(" ")}\n${body}\n`, { mode: 0o755 });
+  writeFileSync(
+    shimPath,
+    `#!/bin/sh\n${assignments}\nexport ${Object.keys({ KEIYAKU_REAL_GIT: realGit, ...variables }).join(" ")}\n${body}\n`,
+    { mode: 0o755 },
+  );
   chmodSync(shimPath, 0o755);
   try {
     return action(shimPath);
@@ -88,7 +100,7 @@ function initializedGitRepository(): TestGitRepository {
 let emptyRepositoryTemplate: TestGitRepository | undefined;
 
 export function makeGitRepository(): TestGitRepository {
-  const template = emptyRepositoryTemplate ??= initializedGitRepository();
+  const template = (emptyRepositoryTemplate ??= initializedGitRepository());
   return snapshotGitRepository(template);
 }
 

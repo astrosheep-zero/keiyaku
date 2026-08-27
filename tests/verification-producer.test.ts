@@ -20,7 +20,11 @@ function command(program: string): string {
   return `${JSON.stringify(process.execPath)} -e ${JSON.stringify(program)}`;
 }
 
-function input(root: string, declarations: readonly VerificationDeclaration[], overrides: Partial<ExecuteVerificationInput> = {}): ExecuteVerificationInput {
+function input(
+  root: string,
+  declarations: readonly VerificationDeclaration[],
+  overrides: Partial<ExecuteVerificationInput> = {},
+): ExecuteVerificationInput {
   const scratch: MaterializedScratchCandidate = { cwd: root, dispose: async () => null };
   return {
     repository: {} as ExecuteVerificationInput["repository"],
@@ -74,13 +78,21 @@ test("producer leaves an omitted declaration unbounded", async (t) => {
 test("a declaration timeout is terminally unsatisfied and later declarations still run", async () => {
   await inTemporaryDirectory(async (root) => {
     const secondStarted = join(root, "second-started");
-    const outcome = await executeVerification(input(root, [
-      declaration("sleep 1", "bash", 25),
-      declaration(command(`require("node:fs").writeFileSync(${JSON.stringify(secondStarted)}, "started")`)),
-    ]));
+    const outcome = await executeVerification(
+      input(root, [
+        declaration("sleep 1", "bash", 25),
+        declaration(command(`require("node:fs").writeFileSync(${JSON.stringify(secondStarted)}, "started")`)),
+      ]),
+    );
 
     assert.deepEqual(outcome, {
-      outcome: { kind: "terminal", verdict: "unsatisfied", passed: 1, total: 2, summary: "[1 bash timeout after 25ms]" },
+      outcome: {
+        kind: "terminal",
+        verdict: "unsatisfied",
+        passed: 1,
+        total: 2,
+        summary: "[1 bash timeout after 25ms]",
+      },
     });
     assert.equal(existsSync(secondStarted), true);
   });
@@ -91,10 +103,18 @@ test("caller cancellation is nonterminal and stops later declarations", async ()
     const started = join(root, "started");
     const later = join(root, "later");
     const controller = new AbortController();
-    const outcome = executeVerification(input(root, [
-      declaration(`${command(`require("node:fs").writeFileSync(${JSON.stringify(started)}, "started")`)}; sleep 30`),
-      declaration(command(`require("node:fs").writeFileSync(${JSON.stringify(later)}, "later")`)),
-    ], { signal: controller.signal }));
+    const outcome = executeVerification(
+      input(
+        root,
+        [
+          declaration(
+            `${command(`require("node:fs").writeFileSync(${JSON.stringify(started)}, "started")`)}; sleep 30`,
+          ),
+          declaration(command(`require("node:fs").writeFileSync(${JSON.stringify(later)}, "later")`)),
+        ],
+        { signal: controller.signal },
+      ),
+    );
     const deadline = performance.now() + 2_000;
     while (!existsSync(started)) {
       if (performance.now() >= deadline) throw new Error("Verification declaration did not start");
@@ -117,7 +137,9 @@ test("execution returns an unsatisfied verdict, unknown-exit, and spawn-error wi
     const unknownExit = await executeVerification(input(root, [declaration("kill -TERM $$")]));
     assert.deepEqual(unknownExit, { outcome: { kind: "unknown-exit" } });
 
-    const spawnError = await executeVerification(input(root, [declaration("true", "zsh")], { environment: { PATH: root } }));
+    const spawnError = await executeVerification(
+      input(root, [declaration("true", "zsh")], { environment: { PATH: root } }),
+    );
     assert.equal(spawnError.outcome.kind, "spawn-error");
     if (spawnError.outcome.kind !== "spawn-error") return;
     assert.match(spawnError.outcome.diagnostic, /spawn zsh ENOENT/);
@@ -126,10 +148,14 @@ test("execution returns an unsatisfied verdict, unknown-exit, and spawn-error wi
 
 test("producer preserves ordered terminal diagnostics within one 32 KiB summary", async () => {
   await inTemporaryDirectory(async (root) => {
-    const outcome = await executeVerification(input(root, [
-      declaration('printf "first-out"; printf "%*s" 12000 "" | tr " " a; printf "%*s" 12000 "" | tr " " b >&2; false'),
-      declaration('printf "%*s" 12000 "" | tr " " x; printf "%*s" 12000 "" | tr " " y >&2'),
-    ]));
+    const outcome = await executeVerification(
+      input(root, [
+        declaration(
+          'printf "first-out"; printf "%*s" 12000 "" | tr " " a; printf "%*s" 12000 "" | tr " " b >&2; false',
+        ),
+        declaration('printf "%*s" 12000 "" | tr " " x; printf "%*s" 12000 "" | tr " " y >&2'),
+      ]),
+    );
 
     assert.equal(outcome.outcome.kind, "terminal");
     if (outcome.outcome.kind !== "terminal") return;
@@ -149,35 +175,42 @@ test("producer invokes bash, zsh, and pwsh with their declared script argument",
     const capture = join(root, "argv");
     for (const executor of ["bash", "zsh", "pwsh"] as const) {
       const executable = join(root, executor);
-      writeFileSync(executable, [
-        "#!/bin/sh",
-        `printf '${executor}:' >> \"$CAPTURE_FILE\"`,
-        'for argument in "$@"; do',
-        '  printf "<%s>" "$argument" >> "$CAPTURE_FILE"',
-        "done",
-        'printf "\\n" >> "$CAPTURE_FILE"',
-      ].join("\n"));
+      writeFileSync(
+        executable,
+        [
+          "#!/bin/sh",
+          `printf '${executor}:' >> \"$CAPTURE_FILE\"`,
+          'for argument in "$@"; do',
+          '  printf "<%s>" "$argument" >> "$CAPTURE_FILE"',
+          "done",
+          'printf "\\n" >> "$CAPTURE_FILE"',
+        ].join("\n"),
+      );
       chmodSync(executable, 0o755);
     }
 
-    const outcome = await executeVerification(input(root, [
-      declaration("printf bash", "bash"),
-      declaration("printf zsh", "zsh"),
-      declaration("Write-Output pwsh", "pwsh"),
-    ], {
-      environment: {
-        ...process.env,
-        CAPTURE_FILE: capture,
-        PATH: `${root}:${process.env.PATH ?? ""}`,
-      },
-    }));
+    const outcome = await executeVerification(
+      input(
+        root,
+        [
+          declaration("printf bash", "bash"),
+          declaration("printf zsh", "zsh"),
+          declaration("Write-Output pwsh", "pwsh"),
+        ],
+        {
+          environment: {
+            ...process.env,
+            CAPTURE_FILE: capture,
+            PATH: `${root}:${process.env.PATH ?? ""}`,
+          },
+        },
+      ),
+    );
 
     assert.deepEqual(outcome, { outcome: { kind: "terminal", verdict: "satisfied", passed: 3, total: 3 } });
-    assert.equal(readFileSync(capture, "utf8"), [
-      "bash:<-c><printf bash>",
-      "zsh:<-c><printf zsh>",
-      "pwsh:<-Command><Write-Output pwsh>",
-      "",
-    ].join("\n"));
+    assert.equal(
+      readFileSync(capture, "utf8"),
+      ["bash:<-c><printf bash>", "zsh:<-c><printf zsh>", "pwsh:<-Command><Write-Output pwsh>", ""].join("\n"),
+    );
   });
 });

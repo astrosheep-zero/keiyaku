@@ -84,33 +84,33 @@ async function directArchetypeSettings(root: string) {
   symlinkSync(join(process.cwd(), "node_modules"), join(root, "node_modules"), "dir");
   mkdirSync(join(home, "akuma"), { recursive: true });
   writeFileSync(join(home, "akuma", "worker.md"), "---\nprovider: local\n---\nWork.\n");
+  writeFileSync(join(home, "akuma", "restricted.md"), "---\nprovider: local\nallowed:\n  - task.add\n---\nWork.\n");
+  writeFileSync(join(home, "akuma", "empty.md"), "---\nprovider: local\nallowed: []\n---\nWork.\n");
   writeFileSync(
-    join(home, "akuma", "restricted.md"),
-    "---\nprovider: local\nallowed:\n  - task.add\n---\nWork.\n",
+    join(home, "settings.json"),
+    JSON.stringify({
+      providers: { local: { kind: "codex-app-server", executable } },
+    }),
   );
   writeFileSync(
-    join(home, "akuma", "empty.md"),
-    "---\nprovider: local\nallowed: []\n---\nWork.\n",
+    executable,
+    [
+      "#!/usr/bin/env node",
+      "const readline = require('node:readline');",
+      "const send = (value) => process.stdout.write(JSON.stringify(value) + '\\n');",
+      "const reply = (message, result) => send({ id: message.id, result });",
+      "const lines = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });",
+      "lines.on('line', (line) => {",
+      "  const message = JSON.parse(line);",
+      "  if (message.method === 'initialize') return reply(message, {});",
+      "  if (message.method === 'initialized') return;",
+      "  if (message.method === 'thread/start') return reply(message, { thread: { id: 'thread-1' } });",
+      "  if (message.method !== 'turn/start') return;",
+      "  reply(message, { turn: { id: 'turn-1' } });",
+      "  send({ method: 'turn/completed', params: { turn: { id: 'turn-1', status: 'completed' } } });",
+      "});",
+    ].join("\n"),
   );
-  writeFileSync(join(home, "settings.json"), JSON.stringify({
-    providers: { local: { kind: "codex-app-server", executable } },
-  }));
-  writeFileSync(executable, [
-    "#!/usr/bin/env node",
-    "const readline = require('node:readline');",
-    "const send = (value) => process.stdout.write(JSON.stringify(value) + '\\n');",
-    "const reply = (message, result) => send({ id: message.id, result });",
-    "const lines = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });",
-    "lines.on('line', (line) => {",
-    "  const message = JSON.parse(line);",
-    "  if (message.method === 'initialize') return reply(message, {});",
-    "  if (message.method === 'initialized') return;",
-    "  if (message.method === 'thread/start') return reply(message, { thread: { id: 'thread-1' } });",
-    "  if (message.method !== 'turn/start') return;",
-    "  reply(message, { turn: { id: 'turn-1' } });",
-    "  send({ method: 'turn/completed', params: { turn: { id: 'turn-1', status: 'completed' } } });",
-    "});",
-  ].join("\n"));
   chmodSync(executable, 0o755);
   return { home, value: await settings({ root, home }) };
 }
@@ -179,22 +179,13 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
     const alias = parseAkumaAlias("@worker");
     const executionCwd = join(raw.path, "nested-worktree");
     mkdirSync(executionCwd);
-    const invoked = await invoke(parseArgv([
-      "-C",
-      executionCwd,
-      "call",
-      "worker",
-      "--repo",
-      "..",
-      "--contract",
-      owner,
-      "--alias",
-      alias,
-      "-",
-    ]), {
-      environment: { ...process.env, KEIYAKU_HOME: configured.home },
-      readStdin: () => "associated",
-    });
+    const invoked = await invoke(
+      parseArgv(["-C", executionCwd, "call", "worker", "--repo", "..", "--contract", owner, "--alias", alias, "-"]),
+      {
+        environment: { ...process.env, KEIYAKU_HOME: configured.home },
+        readStdin: () => "associated",
+      },
+    );
     assert.equal("kind" in invoked && invoked.kind, "akuma");
     if (!("kind" in invoked) || invoked.kind !== "akuma" || invoked.action !== "call") return;
     const associated = invoked.result;
@@ -208,10 +199,7 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
       previous: null,
     });
     assert.equal(associated.observation.kind, "observed");
-    assert.equal(
-      (await readSoul(pathsForAkuId(world, associated.akuma)))?.cwd,
-      realpathSync(executionCwd),
-    );
+    assert.equal((await readSoul(pathsForAkuId(world, associated.akuma)))?.cwd, realpathSync(executionCwd));
 
     writeFileSync(join(raw.path, ".keiyaku", "akuma", "alias.json"), "broken\n");
     const partial = await Keiyaku.call({
@@ -283,13 +271,7 @@ test("managed Contract calls use the appointed Place only when cwd is omitted", 
     assert.equal(appointment.kind, "appointed");
     if (appointment.kind !== "appointed") return;
 
-    const invoked = await invoke(parseArgv([
-      "call",
-      "worker",
-      "--contract",
-      managedId,
-      "-",
-    ]), {
+    const invoked = await invoke(parseArgv(["call", "worker", "--contract", managedId, "-"]), {
       cwd: raw.path,
       environment: { ...process.env, KEIYAKU_HOME: configured.home },
       readStdin: () => "implicit",
@@ -312,7 +294,6 @@ test("managed Contract calls use the appointed Place only when cwd is omitted", 
     assert.equal((await readSoul(pathsForAkuId(world, explicit.akuma)))?.cwd, world);
 
     await managed.keiyaku.abandon({ hooks: { create: [], destroy: [] } });
-
   } finally {
     await pump.close();
     leash.release();
@@ -336,11 +317,7 @@ test("direct Akuma birth reports process cwd and the embedding World fallback", 
       source: "process",
     });
 
-    const fallback = await callAkumaWithContext(
-      akuma,
-      { archetype: "worker", body: "world" },
-      {},
-    );
+    const fallback = await callAkumaWithContext(akuma, { archetype: "worker", body: "world" }, {});
     assert.deepEqual(akumaCallExecution(fallback), { cwd: world, source: "world" });
     assert.equal((await direct.wait(undefined, { timeoutMs: 2_000 })).life, "asleep");
     assert.equal((await fallback.wait(undefined, { timeoutMs: 2_000 })).life, "asleep");
@@ -388,7 +365,10 @@ test("direct birth recipes freeze Archetype defaults and additive allowed values
     });
     assert.deepEqual(emptyWithAddition.allowed, ["akuma.call"]);
 
-    writeFileSync(join(configured.home, "akuma", "reviewer.md"), "---\nprovider: local\nreadonly: true\n---\nReview.\n");
+    writeFileSync(
+      join(configured.home, "akuma", "reviewer.md"),
+      "---\nprovider: local\nreadonly: true\n---\nReview.\n",
+    );
     const callReadonly = await directBirthSoul(akuma, {
       archetype: "worker",
       body: "call readonly",
@@ -399,11 +379,15 @@ test("direct birth recipes freeze Archetype defaults and additive allowed values
       body: "Markdown readonly",
     });
     assert.deepEqual(callReadonly.options, {
-      readonly: true, systemPrompt: "Work.\n", systemPromptMode: "append",
+      readonly: true,
+      systemPrompt: "Work.\n",
+      systemPromptMode: "append",
     });
     assert.deepEqual(callReadonly.readonly, { enforcement: "native" });
     assert.deepEqual(markdownReadonly.options, {
-      readonly: true, systemPrompt: "Review.\n", systemPromptMode: "append",
+      readonly: true,
+      systemPrompt: "Review.\n",
+      systemPromptMode: "append",
     });
     assert.deepEqual(markdownReadonly.readonly, { enforcement: "native" });
 
@@ -466,10 +450,7 @@ test("Archetype allowed rejects unknown duplicate and non-string entries", async
         join(configured.home, "akuma", `${name}.md`),
         `---\nprovider: local\nallowed:\n${allowed}---\nWork.\n`,
       );
-      await assert.rejects(
-        Akuma.of(world, configured).call({ archetype: name, body: "invalid" }),
-        expected,
-      );
+      await assert.rejects(Akuma.of(world, configured).call({ archetype: name, body: "invalid" }), expected);
     }
     assert.deepEqual((await akuma.list()).rows, []);
   } finally {
@@ -547,41 +528,49 @@ test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async ()
   const owner = (await bound.keiyaku.state()).id;
   const source = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "face0001" });
   await initializeHeart(source.paths);
-  await driveAkumaBody({
-    paths: source.paths,
-    seed: {
-      id: source.id,
-      archetype: "claude",
-      provider: { name: "claude", kind: "claude-agent-sdk" },
-      options: {},
-      cwd: process.cwd(),
-      origin: { kind: "direct" },
-      allowed: ["akuma.call"],
+  await driveAkumaBody(
+    {
+      paths: source.paths,
+      seed: {
+        id: source.id,
+        archetype: "claude",
+        provider: { name: "claude", kind: "claude-agent-sdk" },
+        options: {},
+        cwd: process.cwd(),
+        origin: { kind: "direct" },
+        allowed: ["akuma.call"],
+      },
+      initialBody: "work",
     },
-    initialBody: "work",
-  }, {
-    admitOptions(options) { return { kind: "admitted", options }; },
-    async start() {
-      let finishEvents!: () => void;
-      const eventsFinished = new Promise<void>((resolve) => { finishEvents = resolve; });
-      return {
-        events: {
-          async *[Symbol.asyncIterator]() {
-            yield { type: "session" as const, coordinate: { sessionId: "parent-session" } };
-            finishEvents();
+    {
+      admitOptions(options) {
+        return { kind: "admitted", options };
+      },
+      async start() {
+        let finishEvents!: () => void;
+        const eventsFinished = new Promise<void>((resolve) => {
+          finishEvents = resolve;
+        });
+        return {
+          events: {
+            async *[Symbol.asyncIterator]() {
+              yield { type: "session" as const, coordinate: { sessionId: "parent-session" } };
+              finishEvents();
+            },
           },
-        },
-        completion: eventsFinished.then(() => ({
-          kind: "answered" as const,
-          answer: "done",
-          historyId: "history-1",
-        })),
-        async abort() {},
-      };
+          completion: eventsFinished.then(() => ({
+            kind: "answered" as const,
+            answer: "done",
+            historyId: "history-1",
+          })),
+          async abort() {},
+        };
+      },
     },
-  }, {
-    now: () => "2026-08-11T01:00:00.000Z",
-  });
+    {
+      now: () => "2026-08-11T01:00:00.000Z",
+    },
+  );
   await publishDispatch({ repository: git, akuId: source.id, contractId: owner });
   const alias = parseAkumaAlias("@parent");
   await moveAlias({ world, alias, akuId: source.id });
@@ -612,7 +601,10 @@ test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async ()
       message: "corrupt parent dispatch",
       at: "2026-08-11T01:00:01.000Z",
     });
-    assert.equal((await updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind, "published");
+    assert.equal(
+      (await updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind,
+      "published",
+    );
     const partial = await Keiyaku.fork({ path: world, akuma: source.id, at: "turn/1", repo });
     assert.equal(partial.kind, "forked", JSON.stringify(partial));
     if (partial.kind !== "forked") return;

@@ -16,29 +16,33 @@ if (process.env.ZIG_GLOBAL_CACHE_DIR === undefined) mkdirSync(zigGlobalCacheDire
 if (process.env.ZIG_LOCAL_CACHE_DIR === undefined) mkdirSync(zigLocalCacheDirectory, { recursive: true });
 
 mkdirSync(outputDirectory, { recursive: true });
-execFileSync(process.env.KEIYAKU_ZIG ?? "zig", [
-	"cc",
-	"-target",
-	"x86_64-windows-gnu",
-	"-O2",
-	"-g0",
-	"-static",
-	"-DWIN32_LEAN_AND_MEAN",
-	"-DUNICODE",
-	"-D_UNICODE",
-	"-municode",
-	"-Wl,/subsystem:windows",
-	source,
-	"-o",
-	output,
-], {
-	cwd: root,
-	env: {
-		...process.env,
-		ZIG_GLOBAL_CACHE_DIR: zigGlobalCacheDirectory,
-		ZIG_LOCAL_CACHE_DIR: zigLocalCacheDirectory,
-	},
-	stdio: "inherit",
-});
+execFileSync(
+  process.env.KEIYAKU_ZIG ?? "zig",
+  [
+    "cc",
+    "-target",
+    "x86_64-windows-gnu",
+    "-O2",
+    "-g0",
+    "-static",
+    "-DWIN32_LEAN_AND_MEAN",
+    "-DUNICODE",
+    "-D_UNICODE",
+    "-municode",
+    "-Wl,/subsystem:windows",
+    source,
+    "-o",
+    output,
+  ],
+  {
+    cwd: root,
+    env: {
+      ...process.env,
+      ZIG_GLOBAL_CACHE_DIR: zigGlobalCacheDirectory,
+      ZIG_LOCAL_CACHE_DIR: zigLocalCacheDirectory,
+    },
+    stdio: "inherit",
+  },
+);
 rmSync(output.replace(/\.exe$/u, ".pdb"), { force: true });
 if (!existsSync(output)) throw new Error(`Zig did not produce ${output}`);

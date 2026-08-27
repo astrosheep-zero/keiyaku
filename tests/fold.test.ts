@@ -45,15 +45,19 @@ function entry<K extends JournalEntry["kind"]>(
 test("foldJournal preserves a large interleaved attestation history and final state", () => {
   let index = 0;
   const entries: JournalEntry[] = [
-    entry("bind", {
-      coordinates: { start: snapshotId("initial"), workspace: "worktree" },
-      terms: {
-        document: { bytes: "# Fold history\n", key: documentKey("fold-history") },
-        segments: [],
-        gates: [],
-        after: [],
+    entry(
+      "bind",
+      {
+        coordinates: { start: snapshotId("initial"), workspace: "worktree" },
+        terms: {
+          document: { bytes: "# Fold history\n", key: documentKey("fold-history") },
+          segments: [],
+          gates: [],
+          after: [],
+        },
       },
-    }, index++),
+      index++,
+    ),
     entry("bound", {}, index++),
   ];
   const attestations: AttestationEntry[] = [];
@@ -61,32 +65,48 @@ test("foldJournal preserves a large interleaved attestation history and final st
   let lastDelivery: Extract<JournalEntry, { kind: "deliver" }> | undefined;
 
   for (let sequence = 1; sequence <= 256; sequence += 1) {
-    const beforeDelivery = entry("attestation", {
-      gate: gate("verified"),
-      subject: dependencyKeySet([]),
-      verdict: sequence % 2 === 0 ? "satisfied" : "unsatisfied",
-    }, index++);
-    const arc = entry("arc", {
-      seq: sequence,
-      title: `Arc ${sequence}`,
-      objective: `Objective ${sequence}`,
-      brief: `Brief ${sequence}`,
-    }, index++);
-    const delivery = entry("deliver", {
-      tenderSnapshot: snapshotId(`tender-${sequence}`),
-      integration: {
-        predecessor: snapshotId(`predecessor-${sequence}`),
-        snapshot: snapshotId(`candidate-${sequence}`),
-        changeId: changeId(`patch-${sequence}`),
+    const beforeDelivery = entry(
+      "attestation",
+      {
+        gate: gate("verified"),
+        subject: dependencyKeySet([]),
+        verdict: sequence % 2 === 0 ? "satisfied" : "unsatisfied",
       },
-      method: "squash",
-      policy: { requireBranchesToBeUpToDate: false },
-    }, index++);
-    const afterDelivery = entry("attestation", {
-      gate: gate("reviewed"),
-      subject: dependencyKeySet([]),
-      verdict: sequence % 2 === 0 ? "unsatisfied" : "satisfied",
-    }, index++);
+      index++,
+    );
+    const arc = entry(
+      "arc",
+      {
+        seq: sequence,
+        title: `Arc ${sequence}`,
+        objective: `Objective ${sequence}`,
+        brief: `Brief ${sequence}`,
+      },
+      index++,
+    );
+    const delivery = entry(
+      "deliver",
+      {
+        tenderSnapshot: snapshotId(`tender-${sequence}`),
+        integration: {
+          predecessor: snapshotId(`predecessor-${sequence}`),
+          snapshot: snapshotId(`candidate-${sequence}`),
+          changeId: changeId(`patch-${sequence}`),
+        },
+        method: "squash",
+        policy: { requireBranchesToBeUpToDate: false },
+      },
+      index++,
+    );
+    const afterDelivery = entry(
+      "attestation",
+      {
+        gate: gate("reviewed"),
+        subject: dependencyKeySet([]),
+        verdict: sequence % 2 === 0 ? "unsatisfied" : "satisfied",
+      },
+      index++,
+    );
     entries.push(beforeDelivery, arc, delivery, afterDelivery);
     attestations.push(beforeDelivery, afterDelivery);
     lastArc = arc;
@@ -107,15 +127,19 @@ test("foldJournal preserves a large interleaved attestation history and final st
 });
 
 test("foldJournal materializes its total state from the first bind", () => {
-  const bind = entry("bind", {
-    coordinates: { start: snapshotId("initial"), workspace: "worktree" },
-    terms: {
-      document: { bytes: "# Initial\n", key: documentKey("initial") },
-      segments: [],
-      gates: [],
-      after: [],
+  const bind = entry(
+    "bind",
+    {
+      coordinates: { start: snapshotId("initial"), workspace: "worktree" },
+      terms: {
+        document: { bytes: "# Initial\n", key: documentKey("initial") },
+        segments: [],
+        gates: [],
+        after: [],
+      },
     },
-  }, 0);
+    0,
+  );
 
   const state = foldJournal(id, [bind]);
 
@@ -124,30 +148,42 @@ test("foldJournal materializes its total state from the first bind", () => {
 });
 
 test("foldJournal keeps the delivery identity while advancing current integration", () => {
-  const bind = entry("bind", {
-    coordinates: { start: snapshotId("initial"), workspace: "worktree" },
-    terms: {
-      document: { bytes: "# Initial\n", key: documentKey("initial") },
-      segments: [],
-      gates: [],
-      after: [],
+  const bind = entry(
+    "bind",
+    {
+      coordinates: { start: snapshotId("initial"), workspace: "worktree" },
+      terms: {
+        document: { bytes: "# Initial\n", key: documentKey("initial") },
+        segments: [],
+        gates: [],
+        after: [],
+      },
     },
-  }, 0);
+    0,
+  );
   const bound = entry("bound", {}, 1);
-  const delivery = entry("deliver", {
-    tenderSnapshot: snapshotId("tender"),
-    integration: {
-      predecessor: snapshotId("predecessor"),
-      snapshot: snapshotId("candidate"),
-      changeId: changeId("patch"),
+  const delivery = entry(
+    "deliver",
+    {
+      tenderSnapshot: snapshotId("tender"),
+      integration: {
+        predecessor: snapshotId("predecessor"),
+        snapshot: snapshotId("candidate"),
+        changeId: changeId("patch"),
+      },
+      method: "squash",
+      policy: { requireBranchesToBeUpToDate: false },
     },
-    method: "squash",
-    policy: { requireBranchesToBeUpToDate: false },
-  }, 2);
-  const reintegrated = entry("reintegrated", {
-    predecessor: snapshotId("target-2"),
-    snapshot: snapshotId("candidate-2"),
-  }, 3);
+    2,
+  );
+  const reintegrated = entry(
+    "reintegrated",
+    {
+      predecessor: snapshotId("target-2"),
+      snapshot: snapshotId("candidate-2"),
+    },
+    3,
+  );
   const claimed = entry("claimed", { delivery: delivery.entry }, 4);
 
   const state = foldJournal(id, [bind, bound, delivery, reintegrated, claimed]);
@@ -162,49 +198,62 @@ test("foldJournal keeps the delivery identity while advancing current integratio
 });
 
 test("reintegrated codec rejects malformed data and fold rejects out-of-order entries", () => {
-  const valid = entry("reintegrated", {
-    predecessor: snapshotId("target"),
-    snapshot: snapshotId("candidate"),
-  }, 3);
+  const valid = entry(
+    "reintegrated",
+    {
+      predecessor: snapshotId("target"),
+      snapshot: snapshotId("candidate"),
+    },
+    3,
+  );
   const malformed = encodeEntry(valid).replace('"snapshot":"candidate"', '"snapshot":""');
   assert.throws(() => decodeJournal(malformed), /data\.reintegrated\.snapshot/);
 
-  const bind = entry("bind", {
-    coordinates: { start: snapshotId("initial"), workspace: "worktree" },
-    terms: {
-      document: { bytes: "# Initial\n", key: documentKey("initial") },
-      segments: [],
-      gates: [],
-      after: [],
+  const bind = entry(
+    "bind",
+    {
+      coordinates: { start: snapshotId("initial"), workspace: "worktree" },
+      terms: {
+        document: { bytes: "# Initial\n", key: documentKey("initial") },
+        segments: [],
+        gates: [],
+        after: [],
+      },
     },
-  }, 0);
-  assert.throws(
-    () => foldJournal(id, [bind, valid]),
-    /reintegrated requires a deliver/,
+    0,
   );
+  assert.throws(() => foldJournal(id, [bind, valid]), /reintegrated requires a deliver/);
 });
 
 test("foldJournal accepts an after replacement after bound and delivery", () => {
   const prerequisite = contractId("kei/replacement-prerequisite");
-  const bind = entry("bind", {
-    coordinates: { start: snapshotId("initial"), workspace: "worktree" },
-    terms: {
-      document: { bytes: "# Initial\n", key: documentKey("initial") },
-      segments: [],
-      gates: [],
-      after: [],
+  const bind = entry(
+    "bind",
+    {
+      coordinates: { start: snapshotId("initial"), workspace: "worktree" },
+      terms: {
+        document: { bytes: "# Initial\n", key: documentKey("initial") },
+        segments: [],
+        gates: [],
+        after: [],
+      },
     },
-  }, 0);
-  const delivery = entry("deliver", {
-    tenderSnapshot: snapshotId("tender"),
-    integration: {
-      predecessor: snapshotId("predecessor"),
-      snapshot: snapshotId("candidate"),
-      changeId: changeId("patch"),
+    0,
+  );
+  const delivery = entry(
+    "deliver",
+    {
+      tenderSnapshot: snapshotId("tender"),
+      integration: {
+        predecessor: snapshotId("predecessor"),
+        snapshot: snapshotId("candidate"),
+        changeId: changeId("patch"),
+      },
+      method: "squash",
+      policy: { requireBranchesToBeUpToDate: false },
     },
-    method: "squash",
-    policy: { requireBranchesToBeUpToDate: false },
-  }, 2);
+    2,
+  );
   const amend = entry("amend", { ...bind.data.terms, after: [prerequisite] }, 3);
 
   const state = foldJournal(id, [bind, entry("bound", {}, 1), delivery, amend]);

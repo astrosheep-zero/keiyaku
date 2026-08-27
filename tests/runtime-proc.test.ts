@@ -8,12 +8,7 @@ import test from "node:test";
 import { createProcessLifecycle } from "../src/runtime/proc/lifecycle.js";
 import { LineRpcProcess } from "../src/runtime/proc/line-rpc.js";
 import { spawnStdioProcess } from "../src/runtime/proc/stdio.js";
-import {
-  consumeProcessStdout,
-  runProcess,
-  spawnDetachedProcess,
-  type ProcessInput,
-} from "../src/runtime/proc/run.js";
+import { consumeProcessStdout, runProcess, spawnDetachedProcess, type ProcessInput } from "../src/runtime/proc/run.js";
 
 function input(argv: readonly string[], overrides: Partial<ProcessInput> = {}): ProcessInput {
   return {
@@ -30,9 +25,13 @@ test("owned-process lifecycle serializes release behind termination", async () =
   const lifecycle = createProcessLifecycle(
     async () => {
       terminations += 1;
-      await new Promise<void>((resolve) => { finish = resolve; });
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
     },
-    () => { releases += 1; },
+    () => {
+      releases += 1;
+    },
   );
   const termination = lifecycle.terminate();
   lifecycle.release();
@@ -44,7 +43,10 @@ test("owned-process lifecycle serializes release behind termination", async () =
   lifecycle.release();
   assert.equal(releases, 0);
 });
-function waitForOutputLine(expected: string, message: string): Readonly<{
+function waitForOutputLine(
+  expected: string,
+  message: string,
+): Readonly<{
   wait: Promise<void>;
   observe(chunk: Uint8Array): void;
   dispose(): void;
@@ -81,7 +83,9 @@ function waitForOutputLine(expected: string, message: string): Readonly<{
         if (line === expected) settle();
       }
     },
-    dispose() { clearTimeout(timeout); },
+    dispose() {
+      clearTimeout(timeout);
+    },
   };
 }
 
@@ -122,11 +126,9 @@ async function removeTempDirectory(path: string): Promise<void> {
 }
 
 test("runProcess returns terminal diagnostics from both streams", async () => {
-  const outcome = await runProcess(input([
-    process.execPath,
-    "-e",
-    'process.stdout.write("out"); process.stderr.write("err");',
-  ]));
+  const outcome = await runProcess(
+    input([process.execPath, "-e", 'process.stdout.write("out"); process.stderr.write("err");']),
+  );
 
   assert.deepEqual(outcome, {
     kind: "terminal",
@@ -138,16 +140,18 @@ test("runProcess returns terminal diagnostics from both streams", async () => {
 });
 
 test("runProcess retains only the final 16 KiB of each stream", async () => {
-  const outcome = await runProcess(input([
-    process.execPath,
-    "-e",
-    [
-      'process.stdout.write("a".repeat(20 * 1024));',
-      'process.stdout.write("stdout-tail");',
-      'process.stderr.write("b".repeat(20 * 1024));',
-      'process.stderr.write("stderr-tail");',
-    ].join(" "),
-  ]));
+  const outcome = await runProcess(
+    input([
+      process.execPath,
+      "-e",
+      [
+        'process.stdout.write("a".repeat(20 * 1024));',
+        'process.stdout.write("stdout-tail");',
+        'process.stderr.write("b".repeat(20 * 1024));',
+        'process.stderr.write("stderr-tail");',
+      ].join(" "),
+    ]),
+  );
 
   assert.equal(outcome.kind, "terminal");
   if (outcome.kind !== "terminal") return;
@@ -160,13 +164,12 @@ test("runProcess retains only the final 16 KiB of each stream", async () => {
 
 test("consumeProcessStdout drains output without retaining it", async () => {
   let consumed = 0;
-  const result = await consumeProcessStdout(input([
-    process.execPath,
-    "-e",
-    'process.stdout.write("x".repeat(2 * 1024 * 1024));',
-  ]), (chunk) => {
-    consumed += chunk.length;
-  });
+  const result = await consumeProcessStdout(
+    input([process.execPath, "-e", 'process.stdout.write("x".repeat(2 * 1024 * 1024));']),
+    (chunk) => {
+      consumed += chunk.length;
+    },
+  );
 
   assert.equal(consumed, 2 * 1024 * 1024);
   assert.ok(result.pid !== null && result.pid > 0);
@@ -180,13 +183,12 @@ test("consumeProcessStdout drains output without retaining it", async () => {
 });
 
 test("consumeProcessStdout terminates after a consumer failure", async () => {
-  const result = await consumeProcessStdout(input([
-    process.execPath,
-    "-e",
-    'process.stdout.write("output"); setInterval(() => {}, 1_000);',
-  ]), () => {
-    throw new Error("consumer refused output");
-  });
+  const result = await consumeProcessStdout(
+    input([process.execPath, "-e", 'process.stdout.write("output"); setInterval(() => {}, 1_000);']),
+    () => {
+      throw new Error("consumer refused output");
+    },
+  );
 
   assert.deepEqual(result.outcome, {
     kind: "stream-error",
@@ -195,15 +197,14 @@ test("consumeProcessStdout terminates after a consumer failure", async () => {
 });
 
 test("runProcess reports unknown exits", async () => {
-  const outcome = await runProcess(input([
-    process.execPath,
-    "-e",
-    'process.kill(process.pid, "SIGTERM");',
-  ]));
+  const outcome = await runProcess(input([process.execPath, "-e", 'process.kill(process.pid, "SIGTERM");']));
 
-  assert.deepEqual(outcome, process.platform === "win32"
-    ? { kind: "terminal", code: 1, stdout: "", stderr: "", truncated: false }
-    : { kind: "unknown-exit" });
+  assert.deepEqual(
+    outcome,
+    process.platform === "win32"
+      ? { kind: "terminal", code: 1, stdout: "", stderr: "", truncated: false }
+      : { kind: "unknown-exit" },
+  );
 });
 
 test("runProcess reports spawn errors", async () => {
@@ -231,14 +232,17 @@ test("runProcess timeout closes the directly-owned helper boundary", async () =>
   let pending: ReturnType<typeof consumeProcessStdout> | undefined;
   const output: string[] = [];
   try {
-    pending = consumeProcessStdout({
-      ...input([process.execPath, "-e", parent]),
-      cwd: root,
-      timeoutMs: 1_000,
-    }, (chunk) => {
-      output.push(chunk.toString("utf8"));
-      ready.observe(chunk);
-    });
+    pending = consumeProcessStdout(
+      {
+        ...input([process.execPath, "-e", parent]),
+        cwd: root,
+        timeoutMs: 1_000,
+      },
+      (chunk) => {
+        output.push(chunk.toString("utf8"));
+        ready.observe(chunk);
+      },
+    );
     await ready.wait;
     const outcome = (await pending).outcome;
     assert.equal(outcome.kind, "timeout");
@@ -269,10 +273,13 @@ test("runProcess cancellation closes the directly-owned helper boundary", async 
   let pending: ReturnType<typeof consumeProcessStdout> | undefined;
   const output: string[] = [];
   try {
-    pending = consumeProcessStdout({ argv: [process.execPath, "-e", parent], cwd: root, signal: controller.signal }, (chunk) => {
-      output.push(chunk.toString("utf8"));
-      ready.observe(chunk);
-    });
+    pending = consumeProcessStdout(
+      { argv: [process.execPath, "-e", parent], cwd: root, signal: controller.signal },
+      (chunk) => {
+        output.push(chunk.toString("utf8"));
+        ready.observe(chunk);
+      },
+    );
     await ready.wait;
     controller.abort();
     assert.deepEqual((await pending).outcome, { kind: "cancelled" });
@@ -306,7 +313,10 @@ test("LineRpcProcess close closes the directly-owned helper boundary", async () 
   const notifications: string[] = [];
   const isReady = new Promise<void>((resolve, reject) => {
     readyTimer = setTimeout(() => reject(new Error("line RPC helper did not signal readiness")), 2_000);
-    ready = () => { clearTimeout(readyTimer); resolve(); };
+    ready = () => {
+      clearTimeout(readyTimer);
+      resolve();
+    };
   });
   try {
     rpc = new LineRpcProcess({ argv: [process.execPath, "-e", parent], cwd: root });
@@ -328,7 +338,7 @@ test("LineRpcProcess close closes the directly-owned helper boundary", async () 
 test("LineRpcProcess endInputAndDrain admits delayed notifications before producer EOF", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-line-rpc-drain-"));
   const child = [
-    'process.stdin.resume();',
+    "process.stdin.resume();",
     'const send = (method) => process.stdout.write(JSON.stringify({ method }) + "\\n");',
     'process.stdin.on("end", () => setTimeout(() => { send("item/completed"); process.exit(0); }, 350));',
     'send("turn/completed");',
@@ -364,11 +374,7 @@ test("LineRpcProcess endInputAndDrain admits delayed notifications before produc
 
 test("LineRpcProcess endInputAndDrain force-closes an uncooperative producer", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-line-rpc-drain-timeout-"));
-  const child = [
-    "process.stdin.resume();",
-    "process.stdin.on('end',()=>{});",
-    "setInterval(()=>{},1000);",
-  ].join(" ");
+  const child = ["process.stdin.resume();", "process.stdin.on('end',()=>{});", "setInterval(()=>{},1000);"].join(" ");
   let rpc: LineRpcProcess | undefined;
   let closed = false;
   try {
@@ -387,7 +393,7 @@ test("StdioProcess endInputAndDrain retains output until producer EOF", async ()
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-stdio-drain-"));
   const child = [
     'process.stdout.write("terminal");',
-    'process.stdin.resume();',
+    "process.stdin.resume();",
     'process.stdin.on("end", () => setTimeout(() => { process.stdout.write(" tail"); process.exit(0); }, 50));',
   ].join(" ");
   let stdio: ReturnType<typeof spawnStdioProcess> | undefined;
@@ -442,7 +448,6 @@ test("StdioProcess close terminates its complete helper tree", async () => {
   }
 });
 
-
 test("a direct spawner terminates through its live owned-process handle", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-owned-process-"));
   let owned: Awaited<ReturnType<typeof spawnDetachedProcess>> | undefined;
@@ -477,7 +482,9 @@ test("a direct spawner retains its waitpid result and bounded shared-log referen
     assert.deepEqual(exit.log, { path: log, from: "prior stdout\n".length, to: readFileSync(log).length });
     assert.match(readFileSync(log, "utf8"), /prior stdout/u);
     assert.match(readFileSync(log, "utf8"), /\[child exit 7\]/u);
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("a direct spawner retains a short exit marker write before its exit receipt", async (t) => {
@@ -489,8 +496,14 @@ test("a direct spawner retains a short exit marker write before its exit receipt
     const prototype = Object.getPrototypeOf(handle) as WritableHandle;
     const originalWrite = prototype.write;
     let shortened = false;
-    t.mock.method(prototype, "write", async function(this: WritableHandle, ...args: unknown[]) {
-      if (!shortened && Buffer.isBuffer(args[0]) && typeof args[1] === "number" && typeof args[2] === "number" && args[2] > 1) {
+    t.mock.method(prototype, "write", async function (this: WritableHandle, ...args: unknown[]) {
+      if (
+        !shortened &&
+        Buffer.isBuffer(args[0]) &&
+        typeof args[1] === "number" &&
+        typeof args[2] === "number" &&
+        args[2] > 1
+      ) {
         shortened = true;
         return Reflect.apply(originalWrite, this, [args[0], args[1], 1, args[3]]);
       }
@@ -508,7 +521,9 @@ test("a direct spawner retains a short exit marker write before its exit receipt
     assert.equal(shortened, true);
     assert.match(content, /\[child exit 0\]\n$/u);
     assert.equal(exit.log.to, content.length);
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("a direct spawner rejects exit evidence when its run-log path disappears", async (t) => {
@@ -526,7 +541,9 @@ test("a direct spawner rejects exit evidence when its run-log path disappears", 
     });
     rmSync(log);
     await assert.rejects(owned.exited, /pre-admission exit 7: run-log evidence unavailable/u);
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("an owned process capability is inert after termination and repeated terminate", async () => {
@@ -551,7 +568,9 @@ test("an owned process capability is inert after termination and repeated termin
     try {
       await owned.terminate();
       await owned.terminate();
-    } finally { process.kill = originalKill; }
+    } finally {
+      process.kill = originalKill;
+    }
     assert.equal(signals, 0);
   } finally {
     if (!terminated) await owned?.terminate(true);
@@ -581,11 +600,17 @@ test("an owned process capability is inert after release and repeated terminate"
     try {
       await owned.terminate();
       await owned.terminate();
-    } finally { process.kill = originalKill; }
+    } finally {
+      process.kill = originalKill;
+    }
     assert.equal(signals, 0);
   } finally {
     if (owned !== undefined && released) {
-      try { process.kill(owned.pid, "SIGKILL"); } catch { /* already reaped */ }
+      try {
+        process.kill(owned.pid, "SIGKILL");
+      } catch {
+        /* already reaped */
+      }
     } else {
       await owned?.terminate(true);
     }
@@ -610,7 +635,11 @@ test("release lets the parent reach beforeExit while the detached child continue
     if (existsSync(childPidPath)) {
       const childPid = Number.parseInt(readFileSync(childPidPath, "utf8"), 10);
       if (Number.isSafeInteger(childPid) && childPid > 0) {
-        try { process.kill(childPid, "SIGKILL"); } catch { /* already stopped */ }
+        try {
+          process.kill(childPid, "SIGKILL");
+        } catch {
+          /* already stopped */
+        }
         await waitForProcessExit(childPid);
       }
     }

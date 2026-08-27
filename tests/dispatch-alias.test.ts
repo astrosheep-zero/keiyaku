@@ -116,7 +116,9 @@ test("Dispatch publication seats are exact to one Git common directory", async (
     const released = await blocked;
     assert.equal(released.kind, "dispatched");
   } finally {
-    try { firstRaw.run(["worktree", "remove", "--force", linked]); } catch {}
+    try {
+      firstRaw.run(["worktree", "remove", "--force", linked]);
+    } catch {}
     rmSync(linked, { recursive: true, force: true });
   }
 });
@@ -147,11 +149,16 @@ test("Dispatch keeps non-Dispatch CAS failure classifications", async () => {
   const repository = await repositoryAt(raw.path);
   const seed = parseAkuId("aku/worker/77777777").id;
   const owner = contractId("kei/dispatch-cas");
-  assert.equal((await publishDispatch({
-    repository,
-    akuId: seed,
-    contractId: owner,
-  })).kind, "dispatched");
+  assert.equal(
+    (
+      await publishDispatch({
+        repository,
+        akuId: seed,
+        contractId: owner,
+      })
+    ).kind,
+    "dispatched",
+  );
 
   const failed = await withGitShim(
     [
@@ -163,11 +170,12 @@ test("Dispatch keeps non-Dispatch CAS failure classifications", async () => {
       'exec "$KEIYAKU_REAL_GIT" "$@"',
     ].join("\n"),
     {},
-    async (gitPath) => publishDispatch({
-      repository: await repositoryAt(raw.path, gitPath),
-      akuId: parseAkuId("aku/worker/88888888").id,
-      contractId: owner,
-    }),
+    async (gitPath) =>
+      publishDispatch({
+        repository: await repositoryAt(raw.path, gitPath),
+        akuId: parseAkuId("aku/worker/88888888").id,
+        contractId: owner,
+      }),
   );
   assert.equal(failed.kind, "failed");
   if (failed.kind !== "failed") return;
@@ -186,11 +194,12 @@ test("Dispatch keeps non-Dispatch CAS failure classifications", async () => {
       'exec "$KEIYAKU_REAL_GIT" "$@"',
     ].join("\n"),
     {},
-    async (gitPath) => publishDispatch({
-      repository: await repositoryAt(raw.path, gitPath),
-      akuId: parseAkuId("aku/worker/99999999").id,
-      contractId: owner,
-    }),
+    async (gitPath) =>
+      publishDispatch({
+        repository: await repositoryAt(raw.path, gitPath),
+        akuId: parseAkuId("aku/worker/99999999").id,
+        contractId: owner,
+      }),
   );
   assert.deepEqual(raced, { kind: "failed", failure: { kind: "contention" } });
   assert.equal(await readDispatch(repository, parseAkuId("aku/worker/99999999").id), null);
@@ -211,8 +220,10 @@ test("Alias moves are serialized, canonical, and expose the previous target", as
       { alias: alpha, akuId: first },
       { alias: beta, akuId: second },
     ]);
-    assert.equal(readFileSync(join(world, ".keiyaku", "akuma", "alias.json"), "utf8"),
-      '{"version":1,"aliases":{"@alpha":"aku/worker/11111111","@beta":"aku/reviewer/22222222"}}\n');
+    assert.equal(
+      readFileSync(join(world, ".keiyaku", "akuma", "alias.json"), "utf8"),
+      '{"version":1,"aliases":{"@alpha":"aku/worker/11111111","@beta":"aku/reviewer/22222222"}}\n',
+    );
 
     assert.deepEqual(await moveAlias({ world, alias: alpha, akuId: second }), {
       alias: { alias: alpha, akuId: second },

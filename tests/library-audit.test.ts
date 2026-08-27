@@ -16,8 +16,14 @@ test("pre-delivery audit candidate matches a later unchanged deliver", async () 
   const audited = await contract.audit();
   assert.equal(audited.value.candidate.kind, "ready");
   if (audited.value.candidate.kind !== "ready") return;
-  assert.deepEqual(audited.facts.map((fact) => fact.kind), ["attestation"]);
-  assert.equal(audited.facts.some((fact) => fact.kind === "deliver" || fact.kind === "claimed" || fact.kind === "bound"), false);
+  assert.deepEqual(
+    audited.facts.map((fact) => fact.kind),
+    ["attestation"],
+  );
+  assert.equal(
+    audited.facts.some((fact) => fact.kind === "deliver" || fact.kind === "claimed" || fact.kind === "bound"),
+    false,
+  );
   assert.equal(audited.value.verification.kind, "satisfied");
   if (audited.value.verification.kind !== "satisfied") return;
   assert.equal(audited.value.verification.passed, 1);
@@ -36,7 +42,10 @@ test("pre-delivery audit candidate matches a later unchanged deliver", async () 
     integration: delivered.value.integration.snapshot,
     verification: { mode: "reused", verdict: "satisfied" },
   });
-  assert.equal(delivered.facts.some((fact) => fact.kind === "attestation"), false);
+  assert.equal(
+    delivered.facts.some((fact) => fact.kind === "attestation"),
+    false,
+  );
 });
 
 test("unchanged deliver reuses unsatisfied pre-delivery audit Verification", async () => {
@@ -47,7 +56,10 @@ test("unchanged deliver reuses unsatisfied pre-delivery audit Verification", asy
   const audited = await contract.audit();
   assert.equal(audited.value.candidate.kind, "ready");
   if (audited.value.candidate.kind !== "ready") return;
-  assert.deepEqual(audited.facts.map((fact) => fact.kind), ["attestation"]);
+  assert.deepEqual(
+    audited.facts.map((fact) => fact.kind),
+    ["attestation"],
+  );
   assert.equal(audited.facts[0]?.data.verdict, "unsatisfied");
   assert.equal(audited.value.verification.kind, "unsatisfied");
   if (audited.value.verification.kind !== "unsatisfied") return;
@@ -60,11 +72,17 @@ test("unchanged deliver reuses unsatisfied pre-delivery audit Verification", asy
   assert.deepEqual(delivered.value.integration, audited.value.candidate.identity.integration);
   assert.equal(delivered.value.verificationReuse?.verdict, "unsatisfied");
   assert.equal(delivered.value.verificationReuse?.entry, reused.entry);
-  assert.equal(delivered.facts.some((fact) => fact.kind === "attestation"), false);
+  assert.equal(
+    delivered.facts.some((fact) => fact.kind === "attestation"),
+    false,
+  );
   assert.deepEqual(delivered.value.placement, {
     refusal: { kind: "gates-unsatisfied", contractId: (await contract.state()).id },
   });
-  const observed = await Keiyaku.observe({ repo: await cachedRepoAt(repository.path), id: (await contract.state()).id });
+  const observed = await Keiyaku.observe({
+    repo: await cachedRepoAt(repository.path),
+    id: (await contract.state()).id,
+  });
   assert.equal(observed.kind, "present");
   if (observed.kind !== "present") return;
   assert.equal(observed.row.gates.satisfied, false);
@@ -73,7 +91,10 @@ test("unchanged deliver reuses unsatisfied pre-delivery audit Verification", asy
   if (current?.kind !== "attested") return;
   assert.equal(new Date(current.at).toISOString(), current.at);
   assert.deepEqual(observed.row.gates.reports, [
-    { gate: "verified", current: { kind: "attested", verdict: "unsatisfied", summary: "[1 bash exit 1]", at: current.at } },
+    {
+      gate: "verified",
+      current: { kind: "attested", verdict: "unsatisfied", summary: "[1 bash exit 1]", at: current.at },
+    },
   ]);
 });
 
@@ -140,7 +161,10 @@ test("ready targeted audit reports checkout collisions without placing", async (
   if (audited.value.target.refusal.kind !== "checkout-not-followable") return;
   assert.equal(audited.value.target.refusal.reason, "untracked");
   assert.deepEqual(audited.value.target.refusal.paths, [collision]);
-  assert.equal(audited.facts.some((fact) => fact.kind === "claimed" || fact.kind === "deliver"), false);
+  assert.equal(
+    audited.facts.some((fact) => fact.kind === "claimed" || fact.kind === "deliver"),
+    false,
+  );
   assert.equal((await bound.keiyaku.state()).delivery, null);
   assert.equal((await bound.keiyaku.state()).terminal, null);
   assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), target);
@@ -199,12 +223,16 @@ test("operational target observation failure is target.failed", async () => {
       'exec "$KEIYAKU_REAL_GIT" "$@"',
     ].join("\n"),
     {},
-    async (gitPath) => adjudicateAuditTarget({ ...git, gitPath }, {
-      contractId: "kei/target-observation",
-      coordinates: { workspace: "worktree", target: "refs/heads/main" },
-      predecessor,
-      candidate: predecessor,
-    }),
+    async (gitPath) =>
+      adjudicateAuditTarget(
+        { ...git, gitPath },
+        {
+          contractId: "kei/target-observation",
+          coordinates: { workspace: "worktree", target: "refs/heads/main" },
+          predecessor,
+          candidate: predecessor,
+        },
+      ),
   );
   assert.equal(answer.kind, "failed");
   if (answer.kind !== "failed") return;
@@ -215,11 +243,13 @@ test("moved target wins over placeability", async () => {
   const repository = repositoryWithMain();
   const bound = await Keiyaku.bind({
     repo: await cachedRepoAt(repository.path),
-    markdown: document([
-      'NEW=$(git commit-tree "$(git rev-parse HEAD^{tree})" -p refs/heads/main -m move-target)',
-      'git update-ref refs/heads/main "$NEW"',
-      "exit 0",
-    ].join("\n")),
+    markdown: document(
+      [
+        'NEW=$(git commit-tree "$(git rev-parse HEAD^{tree})" -p refs/heads/main -m move-target)',
+        'git update-ref refs/heads/main "$NEW"',
+        "exit 0",
+      ].join("\n"),
+    ),
     workspace: "worktree",
     target: "refs/heads/main",
     gates: ["verified"],
@@ -265,16 +295,20 @@ test("completeMutation preserves accepted cleanup and leak", async () => {
   const contract = await bind(repository, "exit 0");
   commitCandidate(repository);
   const cleanupFailure = [
-    "if [ \"$1\" = \"worktree\" ] && [ \"$2\" = \"remove\" ]; then",
+    'if [ "$1" = "worktree" ] && [ "$2" = "remove" ]; then',
     "  printf 'forced verification cleanup failure\\n' >&2",
     "  exit 17",
     "fi",
-    "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
+    'exec "$KEIYAKU_REAL_GIT" "$@"',
   ].join("\n");
-  const audited = await withGitShim(cleanupFailure, {}, async (gitPath) => (await Keiyaku.of({
-    repo: await Repo.at({ path: repository.path, gitPath }),
-    id: contract.id,
-  })).audit());
+  const audited = await withGitShim(cleanupFailure, {}, async (gitPath) =>
+    (
+      await Keiyaku.of({
+        repo: await Repo.at({ path: repository.path, gitPath }),
+        id: contract.id,
+      })
+    ).audit(),
+  );
   assert.equal(audited.value.candidate.kind, "ready");
   assert.match(audited.leak?.diagnostic ?? "", /forced verification cleanup failure/);
   assert.equal("leak" in audited.value, false);
@@ -289,7 +323,10 @@ test("public audit exposes admitted verified attestations through facts", async 
 
   await contract.deliver();
   const audited = await contract.audit();
-  assert.deepEqual(audited.facts.map((fact) => fact.kind), ["attestation"]);
+  assert.deepEqual(
+    audited.facts.map((fact) => fact.kind),
+    ["attestation"],
+  );
   assert.equal(audited.value.verification.kind, "unsatisfied");
   if (audited.value.verification.kind !== "unsatisfied") return;
   assert.equal(audited.value.verification.passed, 0);
@@ -298,7 +335,8 @@ test("public audit exposes admitted verified attestations through facts", async 
 
 test("audit keeps its leading observation when the delivery candidate is unavailable", async () => {
   const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({ repo: await cachedRepoAt(repository.path),
+  const bound = await Keiyaku.bind({
+    repo: await cachedRepoAt(repository.path),
     markdown: document("exit 0"),
     workspace: "worktree",
     gates: ["reviewed"],
@@ -316,10 +354,13 @@ test("audit keeps its leading observation when the delivery candidate is unavail
       'exec "$KEIYAKU_REAL_GIT" "$@"',
     ].join("\n"),
     {},
-    async (gitPath) => (await Keiyaku.of({
-      repo: await Repo.at({ path: repository.path, gitPath }),
-      id: bound.keiyaku.id,
-    })).audit(),
+    async (gitPath) =>
+      (
+        await Keiyaku.of({
+          repo: await Repo.at({ path: repository.path, gitPath }),
+          id: bound.keiyaku.id,
+        })
+      ).audit(),
   );
   assert.deepEqual(audited.facts, []);
   assert.equal(audited.value.candidate.kind, "ready");
@@ -339,10 +380,7 @@ test("public audit refuses a terminal contract before reading its released works
   commitCandidate(repository);
 
   await contract.deliver();
-  await assert.rejects(
-    () => contract.audit(),
-    refused({ kind: "terminal", contractId: (await contract.state()).id }),
-  );
+  await assert.rejects(() => contract.audit(), refused({ kind: "terminal", contractId: (await contract.state()).id }));
 });
 
 test("audit blocks an active unappointed workspace without inventing a path", async () => {

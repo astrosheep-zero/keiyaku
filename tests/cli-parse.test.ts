@@ -6,22 +6,13 @@ import { contractId, documentKey, entryUlid, snapshotId } from "../src/core/fact
 import { CliUsageError, parseArgv, renderContractHelp, renderRootHelp } from "../src/cli/parse.js";
 
 test("bind mints its contract identity and keeps JSON output separate from input", () => {
-  assert.deepEqual(
-    parseArgv([
-      "bind",
-      "--target",
-      "refs/heads/main",
-      "--json",
-      "-",
-    ]),
-    {
-      command: {
-        command: "bind",
-        target: "refs/heads/main",
-        output: "json",
-      },
+  assert.deepEqual(parseArgv(["bind", "--target", "refs/heads/main", "--json", "-"]), {
+    command: {
+      command: "bind",
+      target: "refs/heads/main",
+      output: "json",
     },
-  );
+  });
 });
 
 test("nuke admits only a literal WorldRoot confirmation", () => {
@@ -98,8 +89,9 @@ test("bind accepts one Task association at the Contract boundary", () => {
 test("unknown command syntax is refused with the exact command usage", () => {
   assert.throws(
     () => parseArgv(["bind", "--workspace-mode", "-"]),
-    (error: unknown) => error instanceof CliUsageError
-      && error.message.includes("usage: keiyaku bind [--task <task/...>] [--target <ref>]"),
+    (error: unknown) =>
+      error instanceof CliUsageError &&
+      error.message.includes("usage: keiyaku bind [--task <task/...>] [--target <ref>]"),
   );
   assert.throws(() => parseArgv(["unknown"]), /usage: keiyaku \[-C <path>\] \[--repo <path>\] <command>/);
 });
@@ -198,7 +190,16 @@ test("ls parses only canonical identity directories", () => {
   assert.deepEqual(parseArgv(["ls", "aku/*/*"]), {
     command: { command: "ls", query: { kind: "akuma" }, output: "text" },
   });
-  for (const path of ["keiy/", "@review", "kei/review", "task/namespace", "aku//", "aku/worker/1234abcd", "aku/*/", "aku/worker/extra/"]) {
+  for (const path of [
+    "keiy/",
+    "@review",
+    "kei/review",
+    "task/namespace",
+    "aku//",
+    "aku/worker/1234abcd",
+    "aku/*/",
+    "aku/worker/extra/",
+  ]) {
     assert.throws(() => parseArgv(["ls", path]), CliUsageError);
   }
 });
@@ -215,29 +216,24 @@ test("bind and amend retain complete after snapshots and gate bundle selectors",
       },
     },
   );
-  assert.deepEqual(
-    parseArgv(["amend", "kei/example", "--clear-after", "-"]),
-    { command: { command: "amend", contract: "kei/example", clearAfter: true, stdin: true, output: "text" } },
-  );
-  assert.deepEqual(
-    parseArgv(["amend", "kei/example", "--after", "kei/one"]),
-    { command: { command: "amend", contract: "kei/example", after: ["kei/one"], output: "text" } },
-  );
-  assert.deepEqual(
-    parseArgv(["amend", "kei/example", "--clear-after"]),
-    { command: { command: "amend", contract: "kei/example", clearAfter: true, output: "text" } },
-  );
-  assert.deepEqual(
-    parseArgv(["amend", "kei/example", "--gates", "default"]),
-    { command: { command: "amend", contract: "kei/example", gates: ["default"], output: "text" } },
-  );
+  assert.deepEqual(parseArgv(["amend", "kei/example", "--clear-after", "-"]), {
+    command: { command: "amend", contract: "kei/example", clearAfter: true, stdin: true, output: "text" },
+  });
+  assert.deepEqual(parseArgv(["amend", "kei/example", "--after", "kei/one"]), {
+    command: { command: "amend", contract: "kei/example", after: ["kei/one"], output: "text" },
+  });
+  assert.deepEqual(parseArgv(["amend", "kei/example", "--clear-after"]), {
+    command: { command: "amend", contract: "kei/example", clearAfter: true, output: "text" },
+  });
+  assert.deepEqual(parseArgv(["amend", "kei/example", "--gates", "default"]), {
+    command: { command: "amend", contract: "kei/example", gates: ["default"], output: "text" },
+  });
   for (const value of [",", "strict,", ",strict", "strict,,default"]) {
     assert.throws(() => parseArgv(["bind", "--gates", value, "-"]), /comma-separated names/u);
   }
-  assert.deepEqual(
-    parseArgv(["bind", "--gates", " ,--strict", "-"]),
-    { command: { command: "bind", gates: [" ", "--strict"], output: "text" } },
-  );
+  assert.deepEqual(parseArgv(["bind", "--gates", " ,--strict", "-"]), {
+    command: { command: "bind", gates: [" ", "--strict"], output: "text" },
+  });
   assert.throws(
     () => parseArgv(["amend", "kei/example"]),
     /amend requires stdin or --after, --clear-after, or --gates/,
@@ -250,10 +246,7 @@ test("bind and amend retain complete after snapshots and gate bundle selectors",
     () => parseArgv(["amend", "kei/example", "--after", "kei/one", "--clear-after", "-"]),
     /mutually exclusive/,
   );
-  assert.throws(
-    () => parseArgv(["bind", "--clear-after", "-"]),
-    /not valid for bind/,
-  );
+  assert.throws(() => parseArgv(["bind", "--clear-after", "-"]), /not valid for bind/);
 });
 
 test("abandon accepts a note but no caller-selected reason", () => {
@@ -270,10 +263,7 @@ test("abandon accepts a note but no caller-selected reason", () => {
 });
 
 test("flag specs preserve value and boolean option behavior", () => {
-  assert.throws(
-    () => parseArgv(["bind", "--gates", "strict", "--gates", "default", "-"]),
-    /duplicate option: --gates/,
-  );
+  assert.throws(() => parseArgv(["bind", "--gates", "strict", "--gates", "default", "-"]), /duplicate option: --gates/);
   assert.throws(
     () => parseArgv(["amend", "kei/example", "--clear-after", "--clear-after", "-"]),
     /duplicate option: --clear-after/,
@@ -282,7 +272,14 @@ test("flag specs preserve value and boolean option behavior", () => {
     command: { command: "audit", contract: "kei/example", includeDirty: false, showDiff: true, output: "text" },
   });
   assert.deepEqual(parseArgv(["audit", "kei/example", "--actor", "audit-user"]), {
-    command: { command: "audit", contract: "kei/example", includeDirty: false, showDiff: false, actor: "audit-user", output: "text" },
+    command: {
+      command: "audit",
+      contract: "kei/example",
+      includeDirty: false,
+      showDiff: false,
+      actor: "audit-user",
+      output: "text",
+    },
   });
   assert.deepEqual(parseArgv(["audit", "kei/example", "--include-dirty", "--diff"]), {
     command: { command: "audit", contract: "kei/example", includeDirty: true, showDiff: true, output: "text" },
@@ -332,7 +329,10 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
     [["region", "kei/one", "--path", "src/**"], /--path cannot combine with a contract/],
   ];
   for (const [argv, pattern] of cases) {
-    assert.throws(() => parseArgv(argv), (error: unknown) => error instanceof CliUsageError && pattern.test(error.message));
+    assert.throws(
+      () => parseArgv(argv),
+      (error: unknown) => error instanceof CliUsageError && pattern.test(error.message),
+    );
   }
   assert.deepEqual(parseArgv(["review", "--unsatisfied", "--summary", "  keep  "]).command, {
     command: "review",

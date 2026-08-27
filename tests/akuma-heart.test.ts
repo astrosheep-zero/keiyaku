@@ -92,7 +92,9 @@ test("existing Heart opens adjudicate absence without recreating heart.db", asyn
       HeartAbsentError,
     );
     assert.equal(existsSync(value.allocated.paths.heart), false);
-  } finally { value.close(); }
+  } finally {
+    value.close();
+  }
 });
 
 test("existing non-database Heart paths preserve the SQLite open failure", async () => {
@@ -100,27 +102,31 @@ test("existing non-database Heart paths preserve the SQLite open failure", async
   try {
     unlinkSync(value.allocated.paths.heart);
     mkdirSync(value.allocated.paths.heart);
-    await assert.rejects(
-      readHeart(value.allocated.paths),
-      (error: unknown) => {
-        assert.equal(error instanceof HeartAbsentError, false);
-        assert.equal(typeof (error as { errcode?: unknown }).errcode, "number");
-        return true;
-      },
-    );
+    await assert.rejects(readHeart(value.allocated.paths), (error: unknown) => {
+      assert.equal(error instanceof HeartAbsentError, false);
+      assert.equal(typeof (error as { errcode?: unknown }).errcode, "number");
+      return true;
+    });
     assert.equal(existsSync(value.allocated.paths.heart), true);
-  } finally { value.close(); }
+  } finally {
+    value.close();
+  }
 });
 
 test("birth and seal share the child's leash adjudicator", async () => {
   const value = await fixture();
   try {
     const sealer = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    assert.equal(await sealer.sealIfUnborn(value.allocated.paths, { evidence: "call-timeout", at: value.soul.createdAt }), "sealed");
+    assert.equal(
+      await sealer.sealIfUnborn(value.allocated.paths, { evidence: "call-timeout", at: value.soul.createdAt }),
+      "sealed",
+    );
     const lateBody = (await HeldAkumaLeash.try(value.allocated.paths))!;
     assert.equal(await lateBody.birth(value.allocated.paths, value.soul), "sealed");
     lateBody.release();
-  } finally { value.close(); }
+  } finally {
+    value.close();
+  }
 });
 
 test("a born soul cannot later be sealed", async () => {
@@ -132,9 +138,14 @@ test("a born soul cannot later be sealed", async () => {
     assert.equal(await probeLeash(value.allocated.paths), "held");
     body.release();
     const sealer = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    assert.equal(await sealer.sealIfUnborn(value.allocated.paths, { evidence: "late", at: value.soul.createdAt }), "born");
+    assert.equal(
+      await sealer.sealIfUnborn(value.allocated.paths, { evidence: "late", at: value.soul.createdAt }),
+      "born",
+    );
     sealer.release();
-  } finally { value.close(); }
+  } finally {
+    value.close();
+  }
 });
 
 test("session admission survives before turn completion", async () => {
@@ -151,9 +162,13 @@ test("session admission survives before turn completion", async () => {
     });
     body.release();
     assert.equal((await readHeart(value.allocated.paths)).latestSession?.sequence, fact.sequence);
-    assert.deepEqual((await readHeart(value.allocated.paths)).latestSession?.coordinate, { sessionId: "native-session" });
+    assert.deepEqual((await readHeart(value.allocated.paths)).latestSession?.coordinate, {
+      sessionId: "native-session",
+    });
     assert.deepEqual((await readHeart(value.allocated.paths)).latestSession?.options, value.soul.options);
-  } finally { value.close(); }
+  } finally {
+    value.close();
+  }
 });
 
 test("provider session cwd does not replace the Soul execution cwd", async () => {
@@ -174,7 +189,9 @@ test("provider session cwd does not replace the Soul execution cwd", async () =>
       options: value.soul.options,
       session: { sessionId: "provider-cwd" },
     });
-  } finally { value.close(); }
+  } finally {
+    value.close();
+  }
 });
 
 test("Pi sessionFile coordinates round trip through Heart custody", async () => {
@@ -194,7 +211,9 @@ test("Pi sessionFile coordinates round trip through Heart custody", async () => 
       sessionFile: "/sessions/pi.jsonl",
       sessionId: "pi-native",
     });
-  } finally { value.close(); }
+  } finally {
+    value.close();
+  }
 });
 
 test("tell admission shares activity order and delivery witnesses fold without mutable stages", async () => {
@@ -215,7 +234,9 @@ test("tell admission shares activity order and delivery witnesses fold without m
       at: "2026-08-08T00:00:00.000Z",
     });
     const admitted = await recordTell(value.allocated.paths, {
-      id: "tell-1", body: "first", recordedAt: "2026-08-08T00:00:01.000Z",
+      id: "tell-1",
+      body: "first",
+      recordedAt: "2026-08-08T00:00:01.000Z",
     });
     assert.equal(admitted.kind, "recorded");
     if (admitted.kind !== "recorded") return;
@@ -225,9 +246,10 @@ test("tell admission shares activity order and delivery witnesses fold without m
       at: "2026-08-08T00:00:02.000Z",
     });
     assert.deepEqual([firstActivity, admitted.tell.sequence, afterActivity], [2, 3, 4]);
-    assert.deepEqual((await activitySlice(value.allocated.paths)).rows.map((fact) => fact.kind), [
-      "turn-start", "activity", "tell", "activity",
-    ]);
+    assert.deepEqual(
+      (await activitySlice(value.allocated.paths)).rows.map((fact) => fact.kind),
+      ["turn-start", "activity", "tell", "activity"],
+    );
 
     const delivery = {
       tellId: admitted.tell.id,
@@ -242,7 +264,9 @@ test("tell admission shares activity order and delivery witnesses fold without m
     assert.equal(told !== undefined && "id" in told ? told.state : null, "told");
     assert.equal((await readHeart(value.allocated.paths)).pending.length, 0);
     body.release();
-  } finally { value.close(); }
+  } finally {
+    value.close();
+  }
 });
 
 test("Tell observes Body admission after spawning its child", async () => {
@@ -265,7 +289,11 @@ test("Tell observes Body admission after spawning its child", async () => {
           await body;
           return {
             pid: 1,
-            exited: Promise.resolve({ code: LEASH_HELD_EXIT, signal: null, log: { path: value.allocated.paths.log, from: 0, to: 0 } }),
+            exited: Promise.resolve({
+              code: LEASH_HELD_EXIT,
+              signal: null,
+              log: { path: value.allocated.paths.log, from: 0, to: 0 },
+            }),
             async terminate() {},
             release() {},
           };
@@ -275,7 +303,9 @@ test("Tell observes Body admission after spawning its child", async () => {
     assert.deepEqual(result.wake, { kind: "pursuing", bodySequence: (await body!).sequence });
     assert.equal(spawned, 1);
     leash.release();
-  } finally { value.close(); }
+  } finally {
+    value.close();
+  }
 });
 
 test("Tell reports spawn failure and leaves the Tell pending", async () => {
@@ -300,8 +330,13 @@ test("Tell reports spawn failure and leaves the Tell pending", async () => {
     });
     assert.deepEqual(result.wake, { kind: "failed", diagnostic: "spawn denied" });
     assert.equal(spawned, 1);
-    assert.deepEqual((await readHeart(value.allocated.paths)).pending.map((tell) => tell.id), ["tell-observation-denied"]);
-  } finally { value.close(); }
+    assert.deepEqual(
+      (await readHeart(value.allocated.paths)).pending.map((tell) => tell.id),
+      ["tell-observation-denied"],
+    );
+  } finally {
+    value.close();
+  }
 });
 
 test("Tell reports held only from its spawned child's private leash refusal", async () => {
@@ -321,7 +356,11 @@ test("Tell reports held only from its spawned child's private leash refusal", as
           spawned += 1;
           return {
             pid: 1,
-            exited: Promise.resolve({ code: LEASH_HELD_EXIT, signal: null, log: { path: value.allocated.paths.log, from: 0, to: 0 } }),
+            exited: Promise.resolve({
+              code: LEASH_HELD_EXIT,
+              signal: null,
+              log: { path: value.allocated.paths.log, from: 0, to: 0 },
+            }),
             async terminate() {},
             release() {},
           };
@@ -330,9 +369,14 @@ test("Tell reports held only from its spawned child's private leash refusal", as
     });
     assert.deepEqual(result.wake, { kind: "held" });
     assert.equal(spawned, 1);
-    assert.deepEqual((await readHeart(value.allocated.paths)).pending.map((tell) => tell.id), ["tell-held"]);
+    assert.deepEqual(
+      (await readHeart(value.allocated.paths)).pending.map((tell) => tell.id),
+      ["tell-held"],
+    );
     leash.release();
-  } finally { value.close(); }
+  } finally {
+    value.close();
+  }
 });
 
 test("Tell lets a durably told successor win against a losing child exit", async () => {
@@ -353,17 +397,33 @@ test("Tell lets a durably told successor win against a losing child exit", async
           const winner = (await HeldAkumaLeash.try(value.allocated.paths))!;
           const body = await winner.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
           winnerSequence = body.sequence;
-          const turn = await beginTurn(value.allocated.paths, { bodySequence: body.sequence, startedAt: value.soul.createdAt });
-          await recordTellDeliveries(value.allocated.paths, [{
-            tellId: "tell-won-before-exit", route: "launch", turnSequence: turn.sequence, fence: "winner", deliveredAt: value.soul.createdAt,
-          }]);
+          const turn = await beginTurn(value.allocated.paths, {
+            bodySequence: body.sequence,
+            startedAt: value.soul.createdAt,
+          });
+          await recordTellDeliveries(value.allocated.paths, [
+            {
+              tellId: "tell-won-before-exit",
+              route: "launch",
+              turnSequence: turn.sequence,
+              fence: "winner",
+              deliveredAt: value.soul.createdAt,
+            },
+          ]);
           await recordTellReceipt(value.allocated.paths, {
-            tellId: "tell-won-before-exit", evidence: "exact", kind: "consumed", receivedAt: value.soul.createdAt,
+            tellId: "tell-won-before-exit",
+            evidence: "exact",
+            kind: "consumed",
+            receivedAt: value.soul.createdAt,
           });
           winner.release();
           return {
             pid: 1,
-            exited: Promise.resolve({ code: 7, signal: null, log: { path: value.allocated.paths.log, from: 0, to: 0 } }),
+            exited: Promise.resolve({
+              code: 7,
+              signal: null,
+              log: { path: value.allocated.paths.log, from: 0, to: 0 },
+            }),
             async terminate() {},
             release() {},
           };
@@ -372,7 +432,9 @@ test("Tell lets a durably told successor win against a losing child exit", async
     });
     assert.deepEqual(result.wake, { kind: "told" });
     assert.equal((await readHeart(value.allocated.paths)).pending.length, 0);
-  } finally { value.close(); }
+  } finally {
+    value.close();
+  }
 });
 
 test("Tell lets a successor Body win when its child exit races Heart observation", async () => {
@@ -396,7 +458,11 @@ test("Tell lets a successor Body win when its child exit races Heart observation
           winner.release();
           return {
             pid: 1,
-            exited: Promise.resolve({ code: 7, signal: null, log: { path: value.allocated.paths.log, from: 0, to: 0 } }),
+            exited: Promise.resolve({
+              code: 7,
+              signal: null,
+              log: { path: value.allocated.paths.log, from: 0, to: 0 },
+            }),
             async terminate() {},
             release() {},
           };
@@ -404,7 +470,9 @@ test("Tell lets a successor Body win when its child exit races Heart observation
       },
     });
     assert.deepEqual(result.wake, { kind: "pursuing", bodySequence: winnerSequence });
-  } finally { value.close(); }
+  } finally {
+    value.close();
+  }
 });
 
 test("Tell gives a selected child exit one final Heart adjudication", async () => {
@@ -422,7 +490,11 @@ test("Tell gives a selected child exit one final Heart adjudication", async () =
       recordedAt: value.soul.createdAt,
       runtime: {
         async spawn(): Promise<OwnedProcess> {
-          const exit = Promise.resolve({ code: 7, signal: null, log: { path: value.allocated.paths.log, from: 0, to: 0 } });
+          const exit = Promise.resolve({
+            code: 7,
+            signal: null,
+            log: { path: value.allocated.paths.log, from: 0, to: 0 },
+          });
           void exit.then(async () => {
             const winner = (await HeldAkumaLeash.try(value.allocated.paths))!;
             const body = await winner.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
@@ -439,7 +511,9 @@ test("Tell gives a selected child exit one final Heart adjudication", async () =
       },
     });
     assert.deepEqual(result.wake, { kind: "pursuing", bodySequence: winnerSequence });
-  } finally { value.close(); }
+  } finally {
+    value.close();
+  }
 });
 
 test("a Heart re-read cannot hide pre-admission child exit", async () => {
@@ -458,7 +532,11 @@ test("a Heart re-read cannot hide pre-admission child exit", async () => {
         async spawn(): Promise<OwnedProcess> {
           return {
             pid: 1,
-            exited: Promise.resolve({ code: 7, signal: null, log: { path: value.allocated.paths.log, from: 12, to: 34 } }),
+            exited: Promise.resolve({
+              code: 7,
+              signal: null,
+              log: { path: value.allocated.paths.log, from: 12, to: 34 },
+            }),
             async terminate() {},
             release() {},
           };
@@ -470,19 +548,31 @@ test("a Heart re-read cannot hide pre-admission child exit", async () => {
       diagnostic: "pre-admission exit 7",
       child: { code: 7, signal: null, log: { path: value.allocated.paths.log, from: 12, to: 34 } },
     });
-    assert.deepEqual((await readHeart(value.allocated.paths)).pending.map((tell) => tell.id), ["tell-pre-admission-exit"]);
-  } finally { value.close(); }
+    assert.deepEqual(
+      (await readHeart(value.allocated.paths)).pending.map((tell) => tell.id),
+      ["tell-pre-admission-exit"],
+    );
+  } finally {
+    value.close();
+  }
 });
 
 test("tell admission refuses an unborn heart without writing its timeline", async () => {
   const value = await fixture();
   try {
-    assert.deepEqual(await recordTell(value.allocated.paths, {
-      id: "tell-unborn", body: "future input", recordedAt: "2026-08-08T00:00:01.000Z",
-    }), { kind: "not-born" });
+    assert.deepEqual(
+      await recordTell(value.allocated.paths, {
+        id: "tell-unborn",
+        body: "future input",
+        recordedAt: "2026-08-08T00:00:01.000Z",
+      }),
+      { kind: "not-born" },
+    );
     assert.deepEqual((await activitySlice(value.allocated.paths)).rows, []);
     assert.deepEqual((await readHeart(value.allocated.paths)).pending, []);
-  } finally { value.close(); }
+  } finally {
+    value.close();
+  }
 });
 
 test("live receipts are terminal only under their exact Heart correlation", async () => {
@@ -498,44 +588,79 @@ test("live receipts are terminal only under their exact Heart correlation", asyn
       startedAt: "2026-08-08T00:00:00.000Z",
     });
     const required = await recordTell(value.allocated.paths, {
-      id: "tell-required", body: "wait for receipt", recordedAt: "2026-08-08T00:00:01.000Z",
+      id: "tell-required",
+      body: "wait for receipt",
+      recordedAt: "2026-08-08T00:00:01.000Z",
     });
     const unavailable = await recordTell(value.allocated.paths, {
-      id: "tell-unavailable", body: "ack is terminal", recordedAt: "2026-08-08T00:00:02.000Z",
+      id: "tell-unavailable",
+      body: "ack is terminal",
+      recordedAt: "2026-08-08T00:00:02.000Z",
     });
     assert.equal(required.kind, "recorded");
     assert.equal(unavailable.kind, "recorded");
-    await recordTellDeliveries(value.allocated.paths, [{
-      tellId: "tell-required", route: "live", receipt: "required",
-      turnSequence: firstTurn.sequence,
-      fence: "shared-fence", deliveredAt: "2026-08-08T00:00:03.000Z",
-    }, {
-      tellId: "tell-unavailable", route: "live", receipt: "unavailable",
-      turnSequence: firstTurn.sequence,
-      fence: "ack-fence", deliveredAt: "2026-08-08T00:00:03.000Z",
-    }]);
-    assert.deepEqual((await readHeart(value.allocated.paths)).pending.map((tell) => tell.id), ["tell-required"]);
-    await assert.rejects(recordTellReceipt(value.allocated.paths, {
-      evidence: "fence", turnSequence: firstTurn.sequence + 1, fence: "shared-fence",
-      kind: "accepted", receivedAt: "2026-08-08T00:00:04.000Z",
-    }), /no delivery mapping/u);
-    assert.deepEqual((await readHeart(value.allocated.paths)).pending.map((tell) => tell.id), ["tell-required"]);
+    await recordTellDeliveries(value.allocated.paths, [
+      {
+        tellId: "tell-required",
+        route: "live",
+        receipt: "required",
+        turnSequence: firstTurn.sequence,
+        fence: "shared-fence",
+        deliveredAt: "2026-08-08T00:00:03.000Z",
+      },
+      {
+        tellId: "tell-unavailable",
+        route: "live",
+        receipt: "unavailable",
+        turnSequence: firstTurn.sequence,
+        fence: "ack-fence",
+        deliveredAt: "2026-08-08T00:00:03.000Z",
+      },
+    ]);
+    assert.deepEqual(
+      (await readHeart(value.allocated.paths)).pending.map((tell) => tell.id),
+      ["tell-required"],
+    );
+    await assert.rejects(
+      recordTellReceipt(value.allocated.paths, {
+        evidence: "fence",
+        turnSequence: firstTurn.sequence + 1,
+        fence: "shared-fence",
+        kind: "accepted",
+        receivedAt: "2026-08-08T00:00:04.000Z",
+      }),
+      /no delivery mapping/u,
+    );
+    assert.deepEqual(
+      (await readHeart(value.allocated.paths)).pending.map((tell) => tell.id),
+      ["tell-required"],
+    );
     await recordTellReceipt(value.allocated.paths, {
-      evidence: "fence", turnSequence: firstTurn.sequence, fence: "shared-fence",
-      kind: "accepted", receivedAt: "2026-08-08T00:00:05.000Z",
+      evidence: "fence",
+      turnSequence: firstTurn.sequence,
+      fence: "shared-fence",
+      kind: "accepted",
+      receivedAt: "2026-08-08T00:00:05.000Z",
     });
     assert.deepEqual((await readHeart(value.allocated.paths)).pending, []);
 
     const exact = await recordTell(value.allocated.paths, {
-      id: "tell-exact", body: "exact", recordedAt: "2026-08-08T00:00:06.000Z",
+      id: "tell-exact",
+      body: "exact",
+      recordedAt: "2026-08-08T00:00:06.000Z",
     });
     assert.equal(exact.kind, "recorded");
     await recordTellReceipt(value.allocated.paths, {
-      evidence: "exact", tellId: "tell-exact", kind: "consumed", receivedAt: "2026-08-08T00:00:07.000Z",
+      evidence: "exact",
+      tellId: "tell-exact",
+      kind: "consumed",
+      receivedAt: "2026-08-08T00:00:07.000Z",
     });
     assert.deepEqual((await readHeart(value.allocated.paths)).pending, []);
     body.release();
-  } finally { value.close(); }
+  } finally {
+    value.close();
+  }
 });
 
 test("kill witnesses one stopped Body without burning pending work", async () => {
@@ -547,7 +672,9 @@ test("kill witnesses one stopped Body without burning pending work", async () =>
       leashTakenAt: "2026-08-08T00:00:00.000Z",
     });
     const pending = await recordTell(value.allocated.paths, {
-      id: "tell-pending", body: "pending", recordedAt: "2026-08-08T00:00:01.000Z",
+      id: "tell-pending",
+      body: "pending",
+      recordedAt: "2026-08-08T00:00:01.000Z",
     });
     assert.equal(pending.kind, "recorded");
     const request = await admitRequest(value.allocated.paths, {
@@ -580,13 +707,19 @@ test("kill witnesses one stopped Body without burning pending work", async () =>
     assert.equal((await requestStop(value.allocated.paths, "later")).kind, "already-killed");
     let snapshot = await readHeart(value.allocated.paths);
     assert.equal(snapshot.latestKill?.bodySequence, firstBody.sequence);
-    assert.deepEqual(snapshot.pending.map((tell) => tell.id), ["tell-pending"]);
+    assert.deepEqual(
+      snapshot.pending.map((tell) => tell.id),
+      ["tell-pending"],
+    );
     assert.equal((await readRequest(value.allocated.paths, request.id))?.state, "admitted");
-    assert.equal(life({
-      leash: "free",
-      body: { ...firstBody, end: "put-down" },
-      kill: snapshot.latestKill,
-    }), "killed");
+    assert.equal(
+      life({
+        leash: "free",
+        body: { ...firstBody, end: "put-down" },
+        kill: snapshot.latestKill,
+      }),
+      "killed",
+    );
 
     leash.release();
     const successor = (await HeldAkumaLeash.try(value.allocated.paths))!;
@@ -598,22 +731,29 @@ test("kill witnesses one stopped Body without burning pending work", async () =>
       startedAt: "2026-08-08T00:00:04.000Z",
     });
     snapshot = await readHeart(value.allocated.paths);
-    assert.equal(life({
-      leash: "free",
-      body: { ...secondBody, end: "exited" },
-      kill: snapshot.latestKill,
-    }), "asleep");
-    await recordTellDeliveries(value.allocated.paths, [{
-      tellId: "tell-pending",
-      route: "launch",
-      turnSequence: secondTurn.sequence,
-      fence: "successor",
-      deliveredAt: "2026-08-08T00:00:05.000Z",
-    }]);
+    assert.equal(
+      life({
+        leash: "free",
+        body: { ...secondBody, end: "exited" },
+        kill: snapshot.latestKill,
+      }),
+      "asleep",
+    );
+    await recordTellDeliveries(value.allocated.paths, [
+      {
+        tellId: "tell-pending",
+        route: "launch",
+        turnSequence: secondTurn.sequence,
+        fence: "successor",
+        deliveredAt: "2026-08-08T00:00:05.000Z",
+      },
+    ]);
     assert.deepEqual((await readHeart(value.allocated.paths)).pending, []);
     assert.equal((await readRequest(value.allocated.paths, request.id))?.state, "admitted");
     successor.release();
-  } finally { value.close(); }
+  } finally {
+    value.close();
+  }
 });
 
 test("kill evaluates stranded pending Tell recovery exactly once", async () => {
@@ -624,24 +764,36 @@ test("kill evaluates stranded pending Tell recovery exactly once", async () => {
     const body = await leash.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
     await breakBody(value.allocated.paths, { sequence: body.sequence, end: "put-down", at: value.soul.createdAt });
     await recordTell(value.allocated.paths, {
-      id: "tell-recover-on-kill", body: "continue", recordedAt: value.soul.createdAt,
+      id: "tell-recover-on-kill",
+      body: "continue",
+      recordedAt: value.soul.createdAt,
     });
     leash.release();
     let recoveries = 0;
     let recoveryFinished!: () => void;
-    const recoveryDone = new Promise<void>((resolve) => { recoveryFinished = resolve; });
-    assert.equal(await killAkumaWithRecovery(value.allocated.paths, async (paths) => {
-      try {
-        recoveries += 1;
-        assert.deepEqual((await readHeart(paths)).pending.map((tell) => tell.id), ["tell-recover-on-kill"]);
-        assert.equal(await probeLeash(paths), "free");
-      } finally {
-        recoveryFinished();
-      }
-    }), "already-stopped");
+    const recoveryDone = new Promise<void>((resolve) => {
+      recoveryFinished = resolve;
+    });
+    assert.equal(
+      await killAkumaWithRecovery(value.allocated.paths, async (paths) => {
+        try {
+          recoveries += 1;
+          assert.deepEqual(
+            (await readHeart(paths)).pending.map((tell) => tell.id),
+            ["tell-recover-on-kill"],
+          );
+          assert.equal(await probeLeash(paths), "free");
+        } finally {
+          recoveryFinished();
+        }
+      }),
+      "already-stopped",
+    );
     assert.equal(recoveries, 1);
     await recoveryDone;
-  } finally { value.close(); }
+  } finally {
+    value.close();
+  }
 });
 
 test("retention uses a bounded settled buffer while pending tells remain pinned", async () => {
@@ -653,7 +805,9 @@ test("retention uses a bounded settled buffer while pending tells remain pinned"
       leashTakenAt: "2026-08-08T00:00:00.000Z",
     });
     const admitted = await recordTell(value.allocated.paths, {
-      id: "tell-pinned", body: "keep me", recordedAt: "2026-08-08T00:00:00.000Z",
+      id: "tell-pinned",
+      body: "keep me",
+      recordedAt: "2026-08-08T00:00:00.000Z",
     });
     assert.equal(admitted.kind, "recorded");
     const turn = await beginTurn(value.allocated.paths, {
@@ -663,29 +817,45 @@ test("retention uses a bounded settled buffer while pending tells remain pinned"
     const heart = new DatabaseSync(value.allocated.paths.heart);
     try {
       heart.exec("PRAGMA foreign_keys=ON; BEGIN IMMEDIATE");
-      heart.prepare(`WITH RECURSIVE rows(value) AS (
+      heart
+        .prepare(
+          `WITH RECURSIVE rows(value) AS (
         VALUES(1) UNION ALL SELECT value + 1 FROM rows WHERE value < 5501
-      ) INSERT INTO timeline(kind) SELECT 'activity' FROM rows`).run();
-      heart.prepare(`INSERT INTO activity(sequence, turn_sequence, event_json, at)
+      ) INSERT INTO timeline(kind) SELECT 'activity' FROM rows`,
+        )
+        .run();
+      heart
+        .prepare(
+          `INSERT INTO activity(sequence, turn_sequence, event_json, at)
         SELECT sequence, ?, '{"type":"note","text":"buffered"}', '2026-08-08T00:00:01.000Z'
-        FROM timeline WHERE kind = 'activity'`).run(turn.sequence);
+        FROM timeline WHERE kind = 'activity'`,
+        )
+        .run(turn.sequence);
       heart.exec("COMMIT");
     } catch (error) {
       heart.exec("ROLLBACK");
       throw error;
-    } finally { heart.close(); }
+    } finally {
+      heart.close();
+    }
 
     await appendActivity(value.allocated.paths, {
-    turnSequence: turn.sequence,
+      turnSequence: turn.sequence,
       event: { type: "note", text: "trigger compaction" },
       at: "2026-08-08T00:00:02.000Z",
     });
     let retained = await activitySlice(value.allocated.paths);
-    assert.equal(retained.rows.some((fact) => "id" in fact && fact.id === "tell-pinned"), true);
+    assert.equal(
+      retained.rows.some((fact) => "id" in fact && fact.id === "tell-pinned"),
+      true,
+    );
     assert.equal(retained.rows.filter((fact) => fact.kind === "activity").length, 5_000);
 
     await recordTellReceipt(value.allocated.paths, {
-      evidence: "exact", tellId: "tell-pinned", kind: "consumed", receivedAt: "2026-08-08T00:00:03.000Z",
+      evidence: "exact",
+      tellId: "tell-pinned",
+      kind: "consumed",
+      receivedAt: "2026-08-08T00:00:03.000Z",
     });
     for (let index = 0; index < 501; index += 1) {
       await appendActivity(value.allocated.paths, {
@@ -695,10 +865,15 @@ test("retention uses a bounded settled buffer while pending tells remain pinned"
       });
     }
     retained = await activitySlice(value.allocated.paths);
-    assert.equal(retained.rows.some((fact) => "id" in fact && fact.id === "tell-pinned"), false);
+    assert.equal(
+      retained.rows.some((fact) => "id" in fact && fact.id === "tell-pinned"),
+      false,
+    );
     assert.ok(retained.rows.length >= 5_000 && retained.rows.length <= 5_500);
     leash.release();
-  } finally { value.close(); }
+  } finally {
+    value.close();
+  }
 });
 
 test("Body Request facts have one idempotent monotonic authority", async () => {
@@ -721,8 +896,14 @@ test("Body Request facts have one idempotent monotonic authority", async () => {
       admittedAt: "2026-08-08T00:00:01.000Z",
     };
     assert.equal((await admitRequest(value.allocated.paths, input)).state, "admitted");
-    assert.equal((await admitRequest(value.allocated.paths, { ...input, admittedAt: "later" })).admittedAt, input.admittedAt);
-    assert.deepEqual((await readNonterminalRequests(value.allocated.paths)).map((request) => request.id), [input.id]);
+    assert.equal(
+      (await admitRequest(value.allocated.paths, { ...input, admittedAt: "later" })).admittedAt,
+      input.admittedAt,
+    );
+    assert.deepEqual(
+      (await readNonterminalRequests(value.allocated.paths)).map((request) => request.id),
+      [input.id],
+    );
 
     const child = await allocateAkumaDirectory({ worldRoot: value.root, archetype: "claude", draw: () => "deadbeef" });
     assert.equal((await reserveRequest(value.allocated.paths, input.id, child.id)).state, "reserved");
@@ -755,14 +936,20 @@ test("heart schema version 20 and leash schema version 4 hard-refuse old authori
   const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "30000000" });
   try {
     const heart = new DatabaseSync(allocated.paths.heart);
-    heart.exec("CREATE TABLE akuma_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO akuma_schema VALUES (1, 14)");
+    heart.exec(
+      "CREATE TABLE akuma_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO akuma_schema VALUES (1, 14)",
+    );
     heart.close();
     const leash = new DatabaseSync(allocated.paths.leash);
-    leash.exec("CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)");
+    leash.exec(
+      "CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)",
+    );
     leash.close();
     await assert.rejects(readHeart(allocated.paths), /heart schema version must be 20/u);
     await assert.rejects(HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("answered Turns persist without a provider fork point", async () => {
@@ -788,13 +975,21 @@ test("answered Turns persist without a provider fork point", async () => {
     });
     claim.release();
 
-    assert.deepEqual((await activitySlice(value.allocated.paths)).rows
-      .filter((fact) => fact.kind === "turn-end").map((fact) => fact.outcome), [{
-      kind: "answered",
-      session: { sessionId: "native-session" },
-      answer: "complete answer",
-    }]);
-  } finally { value.close(); }
+    assert.deepEqual(
+      (await activitySlice(value.allocated.paths)).rows
+        .filter((fact) => fact.kind === "turn-end")
+        .map((fact) => fact.outcome),
+      [
+        {
+          kind: "answered",
+          session: { sessionId: "native-session" },
+          answer: "complete answer",
+        },
+      ],
+    );
+  } finally {
+    value.close();
+  }
 });
 
 test("pause remains distinct from stop and can be cleared only under the leash", async () => {
@@ -828,7 +1023,9 @@ test("pause remains distinct from stop and can be cleared only under the leash",
       body: firstBody,
     });
     assert.equal(await pauseRequested(value.allocated.paths), true);
-  } finally { value.close(); }
+  } finally {
+    value.close();
+  }
 });
 
 test("normal body completion refuses while a tell remains pending", async () => {
@@ -847,9 +1044,14 @@ test("normal body completion refuses while a tell remains pending", async () => 
       admittedAt: "2026-08-08T00:00:00.000Z",
     });
     await recordTell(value.allocated.paths, {
-      id: "tell-1", body: "pending", recordedAt: "2026-08-08T00:00:01.000Z",
+      id: "tell-1",
+      body: "pending",
+      recordedAt: "2026-08-08T00:00:01.000Z",
     });
-    const firstTurn = await beginTurn(value.allocated.paths, { bodySequence: body.sequence, startedAt: "2026-08-08T00:00:01.000Z" });
+    const firstTurn = await beginTurn(value.allocated.paths, {
+      bodySequence: body.sequence,
+      startedAt: "2026-08-08T00:00:01.000Z",
+    });
     await endTurn(value.allocated.paths, {
       turnSequence: firstTurn.sequence,
       outcome: {
@@ -860,25 +1062,36 @@ test("normal body completion refuses while a tell remains pending", async () => 
       },
       completedAt: "2026-08-08T00:00:02.000Z",
     });
-    assert.deepEqual(await finishBodyIfIdle(value.allocated.paths, {
-      sequence: body.sequence, at: "2026-08-08T00:00:02.000Z",
-    }), { kind: "pending", tells: ["tell-1"] });
-    const secondTurn = await beginTurn(value.allocated.paths, { bodySequence: body.sequence, startedAt: "2026-08-08T00:00:02.000Z" });
+    assert.deepEqual(
+      await finishBodyIfIdle(value.allocated.paths, {
+        sequence: body.sequence,
+        at: "2026-08-08T00:00:02.000Z",
+      }),
+      { kind: "pending", tells: ["tell-1"] },
+    );
+    const secondTurn = await beginTurn(value.allocated.paths, {
+      bodySequence: body.sequence,
+      startedAt: "2026-08-08T00:00:02.000Z",
+    });
     await endTurn(value.allocated.paths, {
       turnSequence: secondTurn.sequence,
       outcome: { kind: "failed", diagnostic: "later failure" },
       completedAt: "2026-08-08T00:00:03.000Z",
     });
-    assert.deepEqual((await activitySlice(value.allocated.paths)).rows
-      .filter((fact) => fact.kind === "turn-end").map((turn) => turn.outcome), [
-      {
-        kind: "answered",
-        historyId: "turn-1",
-        session: { sessionId: "native-session" },
-        answer: "done",
-      },
-      { kind: "failed", diagnostic: "later failure" },
-    ]);
+    assert.deepEqual(
+      (await activitySlice(value.allocated.paths)).rows
+        .filter((fact) => fact.kind === "turn-end")
+        .map((turn) => turn.outcome),
+      [
+        {
+          kind: "answered",
+          historyId: "turn-1",
+          session: { sessionId: "native-session" },
+          answer: "done",
+        },
+        { kind: "failed", diagnostic: "later failure" },
+      ],
+    );
     assert.deepEqual(await readForkPoint(value.allocated.paths, `turn/${firstTurn.sequence}`), {
       historyId: "turn-1",
       session: { sessionId: "native-session" },
@@ -888,20 +1101,25 @@ test("normal body completion refuses while a tell remains pending", async () => 
     });
     assert.equal(await readForkPoint(value.allocated.paths, "missing-turn"), null);
     claim.release();
-  } finally { value.close(); }
+  } finally {
+    value.close();
+  }
 });
 
 test("fork birth admits the child session in the soul birth transaction", async () => {
   const value = await fixture();
   try {
     const body = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    assert.equal(await body.birth(value.allocated.paths, value.soul, {
-      provider: "claude",
-      coordinate: { sessionId: "fork-child" },
-      cwd: value.root,
-      options: value.soul.options,
-      admittedAt: "2026-08-08T00:00:00.000Z",
-    }), "born");
+    assert.equal(
+      await body.birth(value.allocated.paths, value.soul, {
+        provider: "claude",
+        coordinate: { sessionId: "fork-child" },
+        cwd: value.root,
+        options: value.soul.options,
+        admittedAt: "2026-08-08T00:00:00.000Z",
+      }),
+      "born",
+    );
     assert.deepEqual((await readHeart(value.allocated.paths)).latestSession, {
       sequence: 1,
       provider: "claude",
@@ -911,7 +1129,9 @@ test("fork birth admits the child session in the soul birth transaction", async 
       admittedAt: "2026-08-08T00:00:00.000Z",
     });
     body.release();
-  } finally { value.close(); }
+  } finally {
+    value.close();
+  }
 });
 
 test("Body idle settlement atomically obeys current control", async () => {
@@ -921,27 +1141,42 @@ test("Body idle settlement atomically obeys current control", async () => {
     await leash.birth(value.allocated.paths, value.soul);
     const body = await leash.recordBody(value.allocated.paths, { leashTakenAt: "2026-08-08T00:00:00.000Z" });
     await requestPause(value.allocated.paths, "2026-08-08T00:00:01.000Z");
-    assert.deepEqual(await finishBodyIfIdle(value.allocated.paths, {
-      sequence: body.sequence,
-      at: "2026-08-08T00:00:02.000Z",
-    }), { kind: "controlled" });
+    assert.deepEqual(
+      await finishBodyIfIdle(value.allocated.paths, {
+        sequence: body.sequence,
+        at: "2026-08-08T00:00:02.000Z",
+      }),
+      { kind: "controlled" },
+    );
     assert.equal((await readHeart(value.allocated.paths)).latestBody?.end, "put-down");
     leash.release();
-  } finally { value.close(); }
+  } finally {
+    value.close();
+  }
 });
 
 test("life is the sole leash and settlement interpretation", async () => {
   const body = { sequence: 1, leashTakenAt: "2026-08-08T00:00:00.000Z" };
   const kill = { sequence: 1, bodySequence: 1, evidence: "killed" as const, at: "life" };
-  const project = (input: Partial<Parameters<typeof life>[0]>) => life({
-    leash: "free", body, kill: null, ...input,
-  });
+  const project = (input: Partial<Parameters<typeof life>[0]>) =>
+    life({
+      leash: "free",
+      body,
+      kill: null,
+      ...input,
+    });
   assert.equal(project({ leash: "held", kill }), "running");
   assert.equal(project({ leash: "held" }), "running");
-  assert.equal(project({ leash: "held", body: {
-    ...body,
-    hung: { diagnostic: "provider custody remained live", at: "2026-08-08T00:00:02.000Z" },
-  } }), "hung");
+  assert.equal(
+    project({
+      leash: "held",
+      body: {
+        ...body,
+        hung: { diagnostic: "provider custody remained live", at: "2026-08-08T00:00:02.000Z" },
+      },
+    }),
+    "hung",
+  );
   assert.equal(project({}), "untidy");
   assert.equal(project({ body: { ...body, end: "exited" } }), "asleep");
   assert.equal(project({ body: { ...body, end: "broke-off" } }), "stranded");
@@ -968,20 +1203,34 @@ test("Body hung custody evidence round trips through Heart", async () => {
       end: "broke-off",
       at: "2026-08-08T00:00:02.000Z",
     });
-    assert.equal(life({ leash: "held", body: (await readHeart(value.allocated.paths)).latestBody, kill: null }), "hung");
+    assert.equal(
+      life({ leash: "held", body: (await readHeart(value.allocated.paths)).latestBody, kill: null }),
+      "hung",
+    );
     leash.release();
-    assert.equal(life({ leash: "free", body: (await readHeart(value.allocated.paths)).latestBody, kill: null }), "hung");
+    assert.equal(
+      life({ leash: "free", body: (await readHeart(value.allocated.paths)).latestBody, kill: null }),
+      "hung",
+    );
     const successor = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    await assert.rejects(successor.recordBody(value.allocated.paths, {
-      leashTakenAt: "2026-08-08T00:00:03.000Z",
-    }), /permanently gated by hung custody/u);
+    await assert.rejects(
+      successor.recordBody(value.allocated.paths, {
+        leashTakenAt: "2026-08-08T00:00:03.000Z",
+      }),
+      /permanently gated by hung custody/u,
+    );
     successor.release();
-    await assert.rejects(leash.recordBodyHung(value.allocated.paths, {
-      sequence: body.sequence,
-      diagnostic: "late fabricated custody",
-      at: "2026-08-08T00:00:02.000Z",
-    }), /not owned by this leash/u);
-  } finally { value.close(); }
+    await assert.rejects(
+      leash.recordBodyHung(value.allocated.paths, {
+        sequence: body.sequence,
+        diagnostic: "late fabricated custody",
+        at: "2026-08-08T00:00:02.000Z",
+      }),
+      /not owned by this leash/u,
+    );
+  } finally {
+    value.close();
+  }
 });
 
 function codecSoul(): Soul {
@@ -999,13 +1248,18 @@ function codecSoul(): Soul {
     options: { model: "claude-sonnet-4-5", effort: "high", readonly: true, network: "disabled", systemPrompt: "Work." },
     readonly: { enforcement: "native" },
     cwd: "/tmp/work",
-    origin: { kind: "request", parent: "aku/parent/1234abcd" as Soul["id"], requestId: "00000000-0000-4000-8000-000000000001" },
+    origin: {
+      kind: "request",
+      parent: "aku/parent/1234abcd" as Soul["id"],
+      requestId: "00000000-0000-4000-8000-000000000001",
+    },
     allowed: ["akuma.call", "task.add"],
     createdAt: "2026-08-15T00:00:00.000Z",
   };
 }
 
 test("soul codec hard-fails invalid known members", () => {
+  // prettier-ignore
   const corruptions: readonly Readonly<{ name: string; change: (soul: Soul) => unknown }>[] = [
     { name: "missing required field", change: (soul) => { const copy = { ...soul }; delete (copy as Record<string, unknown>).cwd; return copy; } },
     { name: "options readonly false", change: (soul) => ({ ...soul, options: { ...soul.options, readonly: false } }) },
@@ -1090,9 +1344,22 @@ test("soul codec decodes canonically, deep-freezes, and round-trips", () => {
     delete reordered[key];
     (reordered as Record<string, unknown>)[key] = value;
   }
-  assert.deepEqual(encodeSoulRow(codecSoul()), encodeSoulRow(reordered as unknown as Soul), "canonical serialization ignores input key order");
+  assert.deepEqual(
+    encodeSoulRow(codecSoul()),
+    encodeSoulRow(reordered as unknown as Soul),
+    "canonical serialization ignores input key order",
+  );
   assert.deepEqual(Object.keys(JSON.parse(encoded[0]!)), [
-    "id", "archetype", "description", "provider", "options", "readonly", "cwd", "origin", "allowed", "createdAt",
+    "id",
+    "archetype",
+    "description",
+    "provider",
+    "options",
+    "readonly",
+    "cwd",
+    "origin",
+    "allowed",
+    "createdAt",
   ]);
 
   const preFeature = JSON.parse(encoded[0]!) as Record<string, unknown>;
@@ -1100,8 +1367,16 @@ test("soul codec decodes canonically, deep-freezes, and round-trips", () => {
   assert.deepEqual(decodeSoul(preFeature).allowed, ALLOWED_ACTIONS);
   assert.deepEqual(JSON.parse(encodeSoul(decodeSoul(preFeature))).allowed, ALLOWED_ACTIONS);
 
-  assert.throws(() => encodeSoulRow({ ...codecSoul(), options: { readonly: true }, readonly: undefined }), undefined, "encode validates the consistency rule");
-  assert.equal(encodeSoulRow(codecSoul())[0] === encodeSoulRow(codecSoul())[0], true, "canonical encoding is deterministic");
+  assert.throws(
+    () => encodeSoulRow({ ...codecSoul(), options: { readonly: true }, readonly: undefined }),
+    undefined,
+    "encode validates the consistency rule",
+  );
+  assert.equal(
+    encodeSoulRow(codecSoul())[0] === encodeSoulRow(codecSoul())[0],
+    true,
+    "canonical encoding is deterministic",
+  );
 
   const historical = codecSoul();
   assert.equal(historical.options.systemPromptMode, undefined);
@@ -1117,7 +1392,7 @@ function afterSnapshotQuery(after: () => void): () => void {
   const proto = DatabaseSync.prototype;
   const originalPrepare = proto.prepare;
   let fired = false;
-  proto.prepare = function(this: DatabaseSync, ...args: Parameters<typeof originalPrepare>) {
+  proto.prepare = function (this: DatabaseSync, ...args: Parameters<typeof originalPrepare>) {
     const statement = originalPrepare.apply(this, args);
     const get = statement.get;
     const all = statement.all;
@@ -1126,19 +1401,21 @@ function afterSnapshotQuery(after: () => void): () => void {
       fired = true;
       after();
     };
-    statement.get = function(this: typeof statement, ...args: Parameters<typeof statement.get>) {
+    statement.get = function (this: typeof statement, ...args: Parameters<typeof statement.get>) {
       const result = get.apply(this, args);
       fire();
       return result;
     };
-    statement.all = function(this: typeof statement, ...args: Parameters<typeof statement.all>) {
+    statement.all = function (this: typeof statement, ...args: Parameters<typeof statement.all>) {
       const result = all.apply(this, args);
       fire();
       return result;
     };
     return statement;
   };
-  return () => { proto.prepare = originalPrepare; };
+  return () => {
+    proto.prepare = originalPrepare;
+  };
 }
 
 function writeHeart(path: string): DatabaseSync {
@@ -1202,7 +1479,9 @@ test("activitySlice returns one retained-bound and row epoch", async () => {
       writer.close();
     }
     body.release();
-  } finally { value.close(); }
+  } finally {
+    value.close();
+  }
 });
 
 test("Heart reads lastActivityAt from the final retained timeline row", async () => {
@@ -1229,7 +1508,9 @@ test("Heart reads lastActivityAt from the final retained timeline row", async ()
     });
     assert.equal((await readHeart(value.allocated.paths)).lastActivityAt, "2026-08-08T00:00:03.000Z");
     body.release();
-  } finally { value.close(); }
+  } finally {
+    value.close();
+  }
 });
 
 test("readHeart returns one related Heart-fact epoch", async () => {
@@ -1258,7 +1539,9 @@ test("readHeart returns one related Heart-fact epoch", async () => {
         admittedAt: "2026-08-08T00:00:01.000Z",
       });
       insertTellFact(writer, {
-        id: "tell-concurrent", body: "concurrent", recordedAt: "2026-08-08T00:00:02.000Z",
+        id: "tell-concurrent",
+        body: "concurrent",
+        recordedAt: "2026-08-08T00:00:02.000Z",
       });
       insertKillFact(writer, firstBody.sequence, "2026-08-08T00:00:03.000Z");
       insertStopControl(writer, firstBody.sequence, "2026-08-08T00:00:04.000Z");
@@ -1270,14 +1553,16 @@ test("readHeart returns one related Heart-fact epoch", async () => {
     });
     try {
       const snapshot = await readHeart(value.allocated.paths);
-      const pre = snapshot.latestSession === null
-        && snapshot.pending.length === 0
-        && snapshot.latestKill === null
-        && snapshot.stop === null;
-      const post = snapshot.latestSession?.coordinate.sessionId === "concurrent-session"
-        && snapshot.pending.map((tell) => tell.id).join() === "tell-concurrent"
-        && snapshot.latestKill?.bodySequence === firstBody.sequence
-        && snapshot.stop?.bodySequence === firstBody.sequence;
+      const pre =
+        snapshot.latestSession === null &&
+        snapshot.pending.length === 0 &&
+        snapshot.latestKill === null &&
+        snapshot.stop === null;
+      const post =
+        snapshot.latestSession?.coordinate.sessionId === "concurrent-session" &&
+        snapshot.pending.map((tell) => tell.id).join() === "tell-concurrent" &&
+        snapshot.latestKill?.bodySequence === firstBody.sequence &&
+        snapshot.stop?.bodySequence === firstBody.sequence;
       assert.equal(wrote, true);
       assert.equal(claimed, true);
       assert.equal(pre || post, true);
@@ -1287,5 +1572,7 @@ test("readHeart returns one related Heart-fact epoch", async () => {
       restore();
       writer.close();
     }
-  } finally { value.close(); }
+  } finally {
+    value.close();
+  }
 });

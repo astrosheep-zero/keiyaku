@@ -20,7 +20,13 @@ import { invoke } from "../src/cli/invoke.js";
 import { invokeAkuma } from "../src/cli/commands/akuma-invoke.js";
 import { recognizeAndListen } from "../src/cli/square-edge.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
-import { akumaExitCode, akumaJsonValue, akumaRawAnswer, renderAkumaJson, renderAkumaText } from "../src/cli/render/akuma.js";
+import {
+  akumaExitCode,
+  akumaJsonValue,
+  akumaRawAnswer,
+  renderAkumaJson,
+  renderAkumaText,
+} from "../src/cli/render/akuma.js";
 import type { TextRenderContext } from "../src/cli/render/terminal.js";
 import type { AkuId } from "../src/akuma/identity.js";
 import { makeGitRepository } from "./support/git.js";
@@ -972,31 +978,32 @@ test("Akuma status, wait, and history share public observations without embeddin
     );
     const exact = await invoke(parseArgv(["-C", root, "history", allocated.id, "--id", "turn/1"]), {
       environment,
-      readStdin: () => { throw new Error("history must not read stdin"); },
+      readStdin: () => {
+        throw new Error("history must not read stdin");
+      },
     });
     if (!("kind" in exact) || exact.kind !== "akuma" || exact.action !== "history") return;
     assert.equal(exact.mode, "exact");
     assert.equal(renderAkumaText(parseArgv(["history", allocated.id, "--id", "turn/1"]).command, exact), "cli answer");
-    assert.deepEqual(
-      JSON.parse(renderAkumaJson(exact)),
-      {
-        kind: "exact",
-        id: allocated.id,
-        outcome: {
-          kind: "outcome",
-          sequence: 5,
-          turnSequence: 1,
-          at: "2026-08-08T00:00:00.000Z",
-          outcome: { kind: "answered", answer: "cli answer", historyId: "turn/1" },
-        },
-        contract: { kind: "none" },
+    assert.deepEqual(JSON.parse(renderAkumaJson(exact)), {
+      kind: "exact",
+      id: allocated.id,
+      outcome: {
+        kind: "outcome",
+        sequence: 5,
+        turnSequence: 1,
+        at: "2026-08-08T00:00:00.000Z",
+        outcome: { kind: "answered", answer: "cli answer", historyId: "turn/1" },
       },
-    );
+      contract: { kind: "none" },
+    });
     assert.equal(akumaExitCode(exact), 0);
 
     const unknown = await invoke(parseArgv(["-C", root, "history", allocated.id, "--id", "turn/404"]), {
       environment,
-      readStdin: () => { throw new Error("history must not read stdin"); },
+      readStdin: () => {
+        throw new Error("history must not read stdin");
+      },
     });
     if (!("kind" in unknown) || unknown.kind !== "akuma" || unknown.action !== "history") return;
     assert.equal(unknown.mode, "exact");
@@ -1004,10 +1011,12 @@ test("Akuma status, wait, and history share public observations without embeddin
       renderAkumaText(parseArgv(["history", allocated.id, "--id", "turn/404"]).command, unknown),
       "turn/404 has no matching retained outcome",
     );
-    assert.deepEqual(
-      JSON.parse(renderAkumaJson(unknown)),
-      { kind: "unknown-history", id: allocated.id, historyId: "turn/404", contract: { kind: "none" } },
-    );
+    assert.deepEqual(JSON.parse(renderAkumaJson(unknown)), {
+      kind: "unknown-history",
+      id: allocated.id,
+      historyId: "turn/404",
+      contract: { kind: "none" },
+    });
     assert.equal(akumaExitCode(unknown), 1);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -1406,7 +1415,12 @@ test("CLI Square edge uses assigned identity and the dedicated KEIYAKU square", 
   const previousRoutes = process.env.SQUARE_ROUTES;
   process.env.SQUARE_REGISTRY = registry;
   process.env.SQUARE_ROUTES = routes;
-  const environment = { ...process.env, CODEX_THREAD_ID: "caller", SQUARE_PARTICIPANT_NAME: "Alice", SQUARE_ROUTES: routes };
+  const environment = {
+    ...process.env,
+    CODEX_THREAD_ID: "caller",
+    SQUARE_PARTICIPANT_NAME: "Alice",
+    SQUARE_ROUTES: routes,
+  };
   try {
     writeFileSync(
       registry,
@@ -1449,7 +1463,12 @@ test("CLI Square edge rollback removes only facts committed by that call", async
   const previousRoutes = process.env.SQUARE_ROUTES;
   process.env.SQUARE_REGISTRY = registry;
   process.env.SQUARE_ROUTES = routes;
-  const environment = { ...process.env, CODEX_THREAD_ID: "caller", SQUARE_PARTICIPANT_NAME: "Alice", SQUARE_ROUTES: routes };
+  const environment = {
+    ...process.env,
+    CODEX_THREAD_ID: "caller",
+    SQUARE_PARTICIPANT_NAME: "Alice",
+    SQUARE_ROUTES: routes,
+  };
   const squarePath = join(root, ".square", "KEIYAKU.square");
   try {
     writeFileSync(
@@ -1516,7 +1535,13 @@ test("CLI call finish failure rolls back newly committed dedicated Square facts"
   process.env.SQUARE_REGISTRY = registry;
   process.env.SQUARE_ROUTES = routes;
   delete process.env[AKUMA_REQUESTS_ENV];
-  const environment = { ...process.env, KEIYAKU_HOME: home, CODEX_THREAD_ID: "caller", SQUARE_PARTICIPANT_NAME: "Alice", SQUARE_ROUTES: routes };
+  const environment = {
+    ...process.env,
+    KEIYAKU_HOME: home,
+    CODEX_THREAD_ID: "caller",
+    SQUARE_PARTICIPANT_NAME: "Alice",
+    SQUARE_ROUTES: routes,
+  };
   try {
     writeFileSync(
       registry,

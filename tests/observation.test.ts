@@ -7,13 +7,7 @@ import { decideAttestation } from "../src/core/verbs/attestation.js";
 import { decideDeliver } from "../src/core/verbs/deliver.js";
 import { decidePlacement } from "../src/core/verbs/placement.js";
 import { foldJournal } from "../src/core/facts/fold.js";
-import {
-  changeId,
-  contractId,
-  documentKey,
-  entryUlid,
-  snapshotId,
-} from "../src/core/facts/types.js";
+import { changeId, contractId, documentKey, entryUlid, snapshotId } from "../src/core/facts/types.js";
 
 const id = contractId("kei/observation-test");
 const dependency = contractId("kei/observation-dependency");
@@ -28,17 +22,19 @@ function terms(after: readonly ReturnType<typeof contractId>[] = []) {
 }
 
 function waitingState(contract: ReturnType<typeof contractId>, after: readonly ReturnType<typeof contractId>[] = []) {
-  return foldJournal(contract, [{
-    v: 1,
-    kind: "bind",
-    contract,
-    entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
-    at: "2026-08-07T00:00:00Z",
-    data: {
-      coordinates: { start: snapshotId("start"), workspace: "worktree" },
-      terms: terms(after),
+  return foldJournal(contract, [
+    {
+      v: 1,
+      kind: "bind",
+      contract,
+      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+      at: "2026-08-07T00:00:00Z",
+      data: {
+        coordinates: { start: snapshotId("start"), workspace: "worktree" },
+        terms: terms(after),
+      },
     },
-  }]);
+  ]);
 }
 
 function deliveredState(contract: ReturnType<typeof contractId>, after: readonly ReturnType<typeof contractId>[] = []) {
@@ -82,54 +78,55 @@ function deliveredState(contract: ReturnType<typeof contractId>, after: readonly
   ]);
 }
 
-function terminalState(
-  contract: ReturnType<typeof contractId>,
-  terminal: "claimed" | "abandoned",
-) {
+function terminalState(contract: ReturnType<typeof contractId>, terminal: "claimed" | "abandoned") {
   const delivered = deliveredState(contract);
   return {
     ...delivered,
-    terminal: terminal === "claimed"
-      ? {
-        v: 1 as const,
-        kind: "claimed" as const,
-        contract,
-        entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAY"),
-        at: "2026-08-07T00:00:03Z",
-        data: { delivery: delivered.delivery!.entry },
-      }
-      : {
-        v: 1 as const,
-        kind: "abandoned" as const,
-        contract,
-        entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAY"),
-        at: "2026-08-07T00:00:03Z",
-        data: {},
-      },
+    terminal:
+      terminal === "claimed"
+        ? {
+            v: 1 as const,
+            kind: "claimed" as const,
+            contract,
+            entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAY"),
+            at: "2026-08-07T00:00:03Z",
+            data: { delivery: delivered.delivery!.entry },
+          }
+        : {
+            v: 1 as const,
+            kind: "abandoned" as const,
+            contract,
+            entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAY"),
+            at: "2026-08-07T00:00:03Z",
+            data: {},
+          },
   };
 }
 
 test("decision accessor rejects a missing key, while explicit null is domain absence", () => {
   assert.throws(
     () => contractState(new Map(), id),
-    (error: unknown) => error instanceof Error
-      && !(error instanceof TypeError)
-      && error.message.includes("missing contract decision observation"),
+    (error: unknown) =>
+      error instanceof Error &&
+      !(error instanceof TypeError) &&
+      error.message.includes("missing contract decision observation"),
   );
   assert.throws(
-    () => decideAmend({
-      input: {
-        contractId: id,
-        at: "2026-08-07T00:00:00Z",
-        source: terms(),
-        preparation: { kind: "prepared", data: terms() },
-      },
-      attempt: { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV")] },
-      observation: new Map([[dependency, null]]),
-    }),
-    (error: unknown) => error instanceof Error
-      && !(error instanceof TypeError)
-      && error.message.includes("missing contract decision observation"),
+    () =>
+      decideAmend({
+        input: {
+          contractId: id,
+          at: "2026-08-07T00:00:00Z",
+          source: terms(),
+          preparation: { kind: "prepared", data: terms() },
+        },
+        attempt: { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV")] },
+        observation: new Map([[dependency, null]]),
+      }),
+    (error: unknown) =>
+      error instanceof Error &&
+      !(error instanceof TypeError) &&
+      error.message.includes("missing contract decision observation"),
   );
 
   const observation = new Map<typeof id | typeof dependency, null>([
@@ -201,22 +198,23 @@ test("placement projects every non-claimed prerequisite from its one observation
 
 test("the decision map cannot carry a disagreeing state identity", () => {
   const other = contractId("kei/other-observation");
-  const state = foldJournal(other, [{
-    v: 1,
-    kind: "bind",
-    contract: other,
-    entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
-    at: "2026-08-07T00:00:00Z",
-    data: {
-      coordinates: { start: snapshotId("start"), workspace: "worktree" },
-      terms: terms(),
+  const state = foldJournal(other, [
+    {
+      v: 1,
+      kind: "bind",
+      contract: other,
+      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+      at: "2026-08-07T00:00:00Z",
+      data: {
+        coordinates: { start: snapshotId("start"), workspace: "worktree" },
+        terms: terms(),
+      },
     },
-  }]);
+  ]);
   assert.throws(
     () => contractState(new Map([[id, state]]), id),
-    (error: unknown) => error instanceof Error
-      && !(error instanceof TypeError)
-      && error.message.includes("disagrees with decision map"),
+    (error: unknown) =>
+      error instanceof Error && !(error instanceof TypeError) && error.message.includes("disagrees with decision map"),
   );
 });
 
@@ -226,20 +224,21 @@ test("amend refuses direct and transitive prerequisite cycles", () => {
   const c = contractId("kei/cycle-c");
   const current = waitingState(a, [c]);
   const attempt = { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAY")] };
-  const decide = (after: readonly ReturnType<typeof contractId>[]) => decideAmend({
-    input: {
-      contractId: a,
-      at: "2026-08-07T00:00:01Z",
-      source: current.terms,
-      preparation: { kind: "prepared" as const, data: terms(after) },
-    },
-    attempt,
-    observation: new Map([
-      [a, current],
-      [b, waitingState(b, [a])],
-      [c, waitingState(c)],
-    ]),
-  });
+  const decide = (after: readonly ReturnType<typeof contractId>[]) =>
+    decideAmend({
+      input: {
+        contractId: a,
+        at: "2026-08-07T00:00:01Z",
+        source: current.terms,
+        preparation: { kind: "prepared" as const, data: terms(after) },
+      },
+      attempt,
+      observation: new Map([
+        [a, current],
+        [b, waitingState(b, [a])],
+        [c, waitingState(c)],
+      ]),
+    });
 
   const refusal = { kind: "refused", refusal: { kind: "cyclic-prerequisite", contractId: a } };
   assert.deepEqual(decide([a]), refusal);
@@ -292,41 +291,53 @@ test("lifecycle and document refusals outrank a refused preparation", () => {
   const attempt = { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAY")] };
   const mechanical = { kind: "mechanical" };
 
-  assert.deepEqual(decideBind({
-    input: {
-      contractId: id,
-      at: "2026-08-07T00:00:02Z",
-      preparation: { kind: "refused", refusal: mechanical },
-    },
-    attempt,
-    observation: new Map([[id, active]]),
-  }), { kind: "refused", refusal: { kind: "contract-exists", contractId: id } });
-  assert.deepEqual(decideAmend({
-    input: {
-      contractId: id,
-      at: "2026-08-07T00:00:02Z",
-      source: { ...active.terms, document: { ...active.terms.document, key: documentKey("stale") } },
-      preparation: { kind: "refused", refusal: mechanical },
-    },
-    attempt,
-    observation: new Map([[id, active]]),
-  }), { kind: "refused", refusal: { kind: "terms-moved", contractId: id } });
-  assert.deepEqual(decideDeliver({
-    input: {
-      contractId: id,
-      at: "2026-08-07T00:00:02Z",
-      preparation: { kind: "refused", document: documentKey("stale"), refusal: mechanical },
-    },
-    attempt,
-    observation: new Map([[id, active]]),
-  }), { kind: "refused", refusal: { kind: "document-moved", contractId: id } });
-  assert.deepEqual(decideAttestation({
-    input: {
-      contractId: id,
-      at: "2026-08-07T00:00:02Z",
-      preparation: { kind: "refused", refusal: mechanical },
-    },
-    attempt,
-    observation: new Map([[id, terminal]]),
-  }), { kind: "refused", refusal: { kind: "terminal", contractId: id } });
+  assert.deepEqual(
+    decideBind({
+      input: {
+        contractId: id,
+        at: "2026-08-07T00:00:02Z",
+        preparation: { kind: "refused", refusal: mechanical },
+      },
+      attempt,
+      observation: new Map([[id, active]]),
+    }),
+    { kind: "refused", refusal: { kind: "contract-exists", contractId: id } },
+  );
+  assert.deepEqual(
+    decideAmend({
+      input: {
+        contractId: id,
+        at: "2026-08-07T00:00:02Z",
+        source: { ...active.terms, document: { ...active.terms.document, key: documentKey("stale") } },
+        preparation: { kind: "refused", refusal: mechanical },
+      },
+      attempt,
+      observation: new Map([[id, active]]),
+    }),
+    { kind: "refused", refusal: { kind: "terms-moved", contractId: id } },
+  );
+  assert.deepEqual(
+    decideDeliver({
+      input: {
+        contractId: id,
+        at: "2026-08-07T00:00:02Z",
+        preparation: { kind: "refused", document: documentKey("stale"), refusal: mechanical },
+      },
+      attempt,
+      observation: new Map([[id, active]]),
+    }),
+    { kind: "refused", refusal: { kind: "document-moved", contractId: id } },
+  );
+  assert.deepEqual(
+    decideAttestation({
+      input: {
+        contractId: id,
+        at: "2026-08-07T00:00:02Z",
+        preparation: { kind: "refused", refusal: mechanical },
+      },
+      attempt,
+      observation: new Map([[id, terminal]]),
+    }),
+    { kind: "refused", refusal: { kind: "terminal", contractId: id } },
+  );
 });

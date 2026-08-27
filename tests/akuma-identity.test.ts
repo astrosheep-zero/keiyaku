@@ -33,7 +33,11 @@ test("directory creation is the identity allocation adjudicator", async () => {
     const runRoot = await ensureAkumaRunRoot(root);
     mkdirSync(join(runRoot, "claude-00000000"));
     const draws = ["00000000", "11111111"];
-    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => draws.shift()! });
+    const allocated = await allocateAkumaDirectory({
+      worldRoot: root,
+      archetype: "claude",
+      draw: () => draws.shift()!,
+    });
     assert.equal(allocated.id, "aku/claude/11111111");
     assert.equal(existsSync(allocated.paths.directory), true);
     assert.equal(readFileSync(join(runRoot, ".gitignore"), "utf8"), "*\n");

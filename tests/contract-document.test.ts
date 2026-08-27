@@ -61,7 +61,10 @@ test("contract Markdown decodes core fields and retains unknown H2 bytes", () =>
   assert.equal(body.title, "Day One");
   assert.equal(body.context, "Current facts.\n\n");
   assert.deepEqual(body.region, ["src/cli/**", "tests/**"]);
-  assert.deepEqual(body.criteria.map((criterion) => criterion.title), ["Parses the document", "Retains extensions"]);
+  assert.deepEqual(
+    body.criteria.map((criterion) => criterion.title),
+    ["Parses the document", "Retains extensions"],
+  );
   assert.deepEqual(body.extensions, [{ title: "Rollout Notes", content: "first\n\n- second\n" }]);
   assert.deepEqual(body.verification, []);
 });
@@ -89,7 +92,8 @@ test("contract Markdown rejects frontmatter, duplicate sections, and missing str
   );
   assert.throws(
     () => decodeContractDocument(`---\nkind: contract\n---\n${document()}`),
-    (error: unknown) => error instanceof TypeError && error.message.includes("contract document may not contain frontmatter"),
+    (error: unknown) =>
+      error instanceof TypeError && error.message.includes("contract document may not contain frontmatter"),
   );
   assert.throws(
     () => decodeContractDocument(`${document()}\n## context\nduplicate\n`),
@@ -97,7 +101,8 @@ test("contract Markdown rejects frontmatter, duplicate sections, and missing str
   );
   assert.throws(
     () => decodeContractDocument("# Missing\n## Context\nonly one section\n"),
-    (error: unknown) => error instanceof TypeError && error.message.includes("contract document is missing ## Objective"),
+    (error: unknown) =>
+      error instanceof TypeError && error.message.includes("contract document is missing ## Objective"),
   );
 });
 
@@ -119,11 +124,16 @@ test("Verification uses direct fenced executors and reserved H2s are refused", (
       /integer duration with unit/,
     );
   }
-  assert.throws(() => decodeContractDocument(`${document()}\n## Verification\n~~~bash timeout=0s\ntrue\n~~~\n`), /must be positive/);
+  assert.throws(
+    () => decodeContractDocument(`${document()}\n## Verification\n~~~bash timeout=0s\ntrue\n~~~\n`),
+    /must be positive/,
+  );
   for (const name of ["Gates", "Pipeline", "After", "Arc", "Fulfillment"]) {
     assert.throws(
       () => decodeContractDocument(`${document()}\n## ${name}\n- declaration\n`),
-      (error: unknown) => error instanceof TypeError && error.message.includes(`${name.toLowerCase()} is not a contract Markdown section`),
+      (error: unknown) =>
+        error instanceof TypeError &&
+        error.message.includes(`${name.toLowerCase()} is not a contract Markdown section`),
     );
   }
 });
@@ -178,6 +188,9 @@ test("unknown H2 extensions keep exact CRLF bytes and stop at the next H2", () =
   assert.equal(body.context, "facts.\n\n");
   assert.equal(body.objective, "ship.\n\n");
   assert.deepEqual(body.extensions, [
-    { title: "Rollout Notes", content: "first line\r\n> ## Quoted\r\n> more\r\n- ## Listed\r\n~~~\r\n## Fenced\r\n~~~\r\nlast\r\n\n" },
+    {
+      title: "Rollout Notes",
+      content: "first line\r\n> ## Quoted\r\n> more\r\n- ## Listed\r\n~~~\r\n## Fenced\r\n~~~\r\nlast\r\n\n",
+    },
   ]);
 });

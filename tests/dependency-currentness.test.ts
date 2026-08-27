@@ -104,17 +104,19 @@ test("document and segment subjects are current before any delivery exists", () 
     ...current,
     terms: { ...current.terms, gates: [documentOnly] },
     delivery: null,
-    attestations: [{
-      ...current.attestations[0]!,
-      data: {
-        gate: documentOnly,
-        subject: dependencyKeySet([
-          { kind: "document", value: current.terms.document.key },
-          { kind: "segment", value: current.terms.segments[0]! },
-        ]),
-        verdict: "satisfied",
+    attestations: [
+      {
+        ...current.attestations[0]!,
+        data: {
+          gate: documentOnly,
+          subject: dependencyKeySet([
+            { kind: "document", value: current.terms.document.key },
+            { kind: "segment", value: current.terms.segments[0]! },
+          ]),
+          verdict: "satisfied",
+        },
       },
-    }],
+    ],
   };
 
   assert.equal(oneGateSatisfied(preDelivery, documentOnly), true);
@@ -143,15 +145,15 @@ test("gates use the latest testimony for the same current subject", () => {
 test("generic gates accept testimony for any current subject", () => {
   const current = state("candidate-a");
   const verified = gate("verified");
-  const unrelated = dependencyKeySet([
-    { kind: "document", value: current.terms.document.key },
-  ]);
+  const unrelated = dependencyKeySet([{ kind: "document", value: current.terms.document.key }]);
   const withUnrelatedLatest: ContractState = {
     ...current,
-    attestations: [{
-      ...current.attestations[1]!,
-      data: { gate: verified, subject: unrelated, verdict: "satisfied" },
-    }],
+    attestations: [
+      {
+        ...current.attestations[1]!,
+        data: { gate: verified, subject: unrelated, verdict: "satisfied" },
+      },
+    ],
   };
 
   assert.equal(oneGateSatisfied(withUnrelatedLatest, verified), true);

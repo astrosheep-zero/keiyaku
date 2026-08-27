@@ -5,14 +5,7 @@ import { ESLint } from "eslint";
 import { FILE_LINES, MARKDOWN_CHARACTERS } from "./maintainability/config.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const MARKDOWN_EXCLUDED_DIRECTORIES = new Set([
-  ".git",
-  ".keiyaku",
-  ".square",
-  "build",
-  "node_modules",
-  "reference",
-]);
+const MARKDOWN_EXCLUDED_DIRECTORIES = new Set([".git", ".keiyaku", ".square", "build", "node_modules", "reference"]);
 
 function effectiveLineCount(message) {
   if (message.ruleId !== "max-lines" || message.messageId !== "exceed") return null;
@@ -23,7 +16,8 @@ function effectiveLineCount(message) {
 export function promoteHardLineLimit(results) {
   return results.map((result) => {
     const messages = result.messages.map((message) =>
-      (effectiveLineCount(message) ?? 0) > FILE_LINES.error ? { ...message, severity: 2 } : message);
+      (effectiveLineCount(message) ?? 0) > FILE_LINES.error ? { ...message, severity: 2 } : message,
+    );
     return {
       ...result,
       messages,
@@ -45,8 +39,9 @@ export function markdownCharacterSeverity(characters) {
 
 function markdownFiles(directory, relative = "") {
   const files = [];
-  const entries = readdirSync(directory, { withFileTypes: true })
-    .sort((left, right) => left.name.localeCompare(right.name));
+  const entries = readdirSync(directory, { withFileTypes: true }).sort((left, right) =>
+    left.name.localeCompare(right.name),
+  );
   for (const entry of entries) {
     if (entry.isDirectory() && MARKDOWN_EXCLUDED_DIRECTORIES.has(entry.name)) continue;
     const absolute = path.join(directory, entry.name);

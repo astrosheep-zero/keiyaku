@@ -14,7 +14,10 @@ test("uses explicit nonblank actor bytes before the environment", () => {
   const actor = " external \u{1f9d1}\u{1f3fd}\u200d\u{1f4bb} ";
 
   assert.equal(resolveActor({ env: { [ENV]: "different projection" }, actor }), actor);
-  assert.deepEqual(Buffer.from(resolveActor({ env: { [ENV]: "different projection" }, actor })!, "utf8"), Buffer.from(actor, "utf8"));
+  assert.deepEqual(
+    Buffer.from(resolveActor({ env: { [ENV]: "different projection" }, actor })!, "utf8"),
+    Buffer.from(actor, "utf8"),
+  );
 });
 
 test("uses environment testimony when explicit actor is absent", () => {

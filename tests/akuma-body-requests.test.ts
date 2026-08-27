@@ -136,7 +136,10 @@ test("a Heart authority failure keeps its error identity, closes the channel, an
     const failed = assert.rejects(pump.failure, (error: unknown) => error === authorityFailure);
     await served;
     await failed;
-    assert.deepEqual((await readdir(pump.directory)).filter((name) => name.endsWith(".receipt.json")), []);
+    assert.deepEqual(
+      (await readdir(pump.directory)).filter((name) => name.endsWith(".receipt.json")),
+      [],
+    );
     await assert.rejects(pump.close(), (error: unknown) => error === authorityFailure);
     closed = true;
     await assert.rejects(

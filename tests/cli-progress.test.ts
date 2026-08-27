@@ -32,15 +32,16 @@ test("JSON operations never announce work", () => {
 
 test("an operation starts only after selected stdin is fully acquired", async () => {
   const events: string[] = [];
-  await assert.rejects(invoke(
-    parseArgv(["-C", "/definitely/absent/keiyaku-progress-test", "bind", "-"]),
-    {
+  await assert.rejects(
+    invoke(parseArgv(["-C", "/definitely/absent/keiyaku-progress-test", "bind", "-"]), {
       readStdin: async () => {
         events.push("stdin");
         return "contract document";
       },
-      onOperationStart: () => { events.push("start"); },
-    },
-  ));
+      onOperationStart: () => {
+        events.push("start");
+      },
+    }),
+  );
   assert.deepEqual(events, ["stdin", "start"]);
 });

@@ -38,7 +38,8 @@ function document(title: string, region: readonly string[]): string {
 }
 
 async function bind(repository: TestGitRepository, title: string, region: readonly string[]) {
-  const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
+  const result = await Keiyaku.bind({
+    repo: await Repo.at({ path: repository.path }),
     markdown: document(title, region),
     workspace: "worktree",
   });
@@ -52,32 +53,34 @@ test("bind and amend expose only live-peer Region witnesses from one document re
 
   const second = await bind(repository, "Second", ["src/api/**"]);
   const secondId = (await second.keiyaku.state()).id;
-  assert.deepEqual(second.overlaps, [{
-    contract: firstId,
-    patterns: [{ mine: "src/api/**", theirs: "src/**" }],
-  }]);
+  assert.deepEqual(second.overlaps, [
+    {
+      contract: firstId,
+      patterns: [{ mine: "src/api/**", theirs: "src/**" }],
+    },
+  ]);
   assert.equal("overlapFailure" in second, false);
 
   await first.keiyaku.abandon();
 
   const third = await bind(repository, "Third", ["src/api/internal/**"]);
   const thirdId = (await third.keiyaku.state()).id;
-  assert.deepEqual(third.overlaps, [{
-    contract: secondId,
-    patterns: [{ mine: "src/api/internal/**", theirs: "src/api/**" }],
-  }]);
+  assert.deepEqual(third.overlaps, [
+    {
+      contract: secondId,
+      patterns: [{ mine: "src/api/internal/**", theirs: "src/api/**" }],
+    },
+  ]);
 
-  const amended = await second.keiyaku.amend({ markdown: [
-    "## Replace: Region",
-    "~~~",
-    "src/api/internal/**",
-    "~~~",
-    "",
-  ].join("\n") });
-  assert.deepEqual(amended.overlaps, [{
-    contract: thirdId,
-    patterns: [{ mine: "src/api/internal/**", theirs: "src/api/internal/**" }],
-  }]);
+  const amended = await second.keiyaku.amend({
+    markdown: ["## Replace: Region", "~~~", "src/api/internal/**", "~~~", ""].join("\n"),
+  });
+  assert.deepEqual(amended.overlaps, [
+    {
+      contract: thirdId,
+      patterns: [{ mine: "src/api/internal/**", theirs: "src/api/internal/**" }],
+    },
+  ]);
   assert.equal("overlapFailure" in amended, false);
 });
 
@@ -92,24 +95,25 @@ test("amend observes Region only when its operation targets Region", async () =>
     const observedMarker = `${repository.path}/region-amend-${mark}-observed`;
     const result = await withGitShim(
       [
-        "if [ \"$1 $2\" = \"cat-file --batch\" ]; then",
+        'if [ "$1 $2" = "cat-file --batch" ]; then',
         `  if [ ! -e "${firstBatchMarker}" ]; then`,
         `    touch "${firstBatchMarker}"`,
-        "    \"$KEIYAKU_REAL_GIT\" \"$@\"",
+        '    "$KEIYAKU_REAL_GIT" "$@"',
         "    status=$?",
         `    touch "${completionMarker}"`,
-        "    exit \"$status\"",
+        '    exit "$status"',
         "  fi",
         `  if [ -e "${completionMarker}" ]; then`,
         `    touch "${observedMarker}"`,
         "  fi",
         "fi",
-        "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
+        'exec "$KEIYAKU_REAL_GIT" "$@"',
       ].join("\n"),
       {},
-      async (gitPath) => Keiyaku.of({ repo: await Repo.at({ path: repository.path, gitPath }), id }).amend(
-        markdown === undefined ? { gates: [] } : { markdown },
-      ),
+      async (gitPath) =>
+        Keiyaku.of({ repo: await Repo.at({ path: repository.path, gitPath }), id }).amend(
+          markdown === undefined ? { gates: [] } : { markdown },
+        ),
     );
     return { result, firstBatchMarker, completionMarker, observedMarker };
   }
@@ -141,25 +145,30 @@ test("post-admission observation failure preserves the admitted Contract without
   const marker = `${repository.path}/region-observation-admitted`;
   const batchPid = `${repository.path}/region-observation-batch.pid`;
   const result = await withGitShim(
-      [
-        "if [ \"$1 $2\" = \"cat-file --batch\" ]; then",
-        "  printf '%s\\n' \"$$\" > \"$KEIYAKU_REGION_BATCH_PID\"",
-        "fi",
-        "if [ \"$1\" = \"update-ref\" ] && [ ! -e \"$KEIYAKU_REGION_MARKER\" ]; then",
-        "  \"$KEIYAKU_REAL_GIT\" \"$@\" || exit $?",
-        "  kill -TERM \"$(cat \"$KEIYAKU_REGION_BATCH_PID\")\"",
-        "  touch \"$KEIYAKU_REGION_MARKER\"",
-        "  exit 0",
-        "fi",
-        "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
-      ].join("\n"),
-      { KEIYAKU_REGION_MARKER: marker, KEIYAKU_REGION_BATCH_PID: batchPid },
-      async (gitPath) => Keiyaku.bind({ repo: await Repo.at({ path: repository.path, gitPath }),
+    [
+      'if [ "$1 $2" = "cat-file --batch" ]; then',
+      '  printf \'%s\\n\' "$$" > "$KEIYAKU_REGION_BATCH_PID"',
+      "fi",
+      'if [ "$1" = "update-ref" ] && [ ! -e "$KEIYAKU_REGION_MARKER" ]; then',
+      '  "$KEIYAKU_REAL_GIT" "$@" || exit $?',
+      '  kill -TERM "$(cat "$KEIYAKU_REGION_BATCH_PID")"',
+      '  touch "$KEIYAKU_REGION_MARKER"',
+      "  exit 0",
+      "fi",
+      'exec "$KEIYAKU_REAL_GIT" "$@"',
+    ].join("\n"),
+    { KEIYAKU_REGION_MARKER: marker, KEIYAKU_REGION_BATCH_PID: batchPid },
+    async (gitPath) =>
+      Keiyaku.bind({
+        repo: await Repo.at({ path: repository.path, gitPath }),
         markdown: document("Observed failure", ["docs/**"]),
         workspace: "worktree",
       }),
   );
-  assert.deepEqual(result.facts.map((fact) => fact.kind), ["bind"]);
+  assert.deepEqual(
+    result.facts.map((fact) => fact.kind),
+    ["bind"],
+  );
   assert.notEqual(result.head, null);
   assert.equal(result.lags[0]?.kind, "reconcile-failed");
   if (result.lags[0]?.kind === "reconcile-failed") {

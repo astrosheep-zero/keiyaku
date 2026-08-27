@@ -56,10 +56,7 @@ test("omitted selectors require an exact public scope", () => {
     () => resolveContextualContract(board(), undefined, "/repo/.keiyaku/wt/active-contract/subdirectory"),
     CliUsageError,
   );
-  assert.throws(
-    () => resolveContextualContract(board(), undefined, "/repo"),
-    CliUsageError,
-  );
+  assert.throws(() => resolveContextualContract(board(), undefined, "/repo"), CliUsageError);
 });
 
 test("selectors use disposition rather than reinterpreting terminal phases", () => {

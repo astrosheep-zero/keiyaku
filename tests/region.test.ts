@@ -39,12 +39,7 @@ function contract(pattern: string, regionInfo = ""): string {
 }
 
 test("Region accepts only its closed positive path grammar", () => {
-  const accepted = [
-    ["**"],
-    ["src/*/file?.ts"],
-    ["dir/**/nested"],
-    ["literal.name"],
-  ] as const;
+  const accepted = [["**"], ["src/*/file?.ts"], ["dir/**/nested"], ["literal.name"]] as const;
   const refused = [
     ["/src"],
     ["src//file"],
@@ -78,14 +73,12 @@ test("Region accepts only one closed fence with no info string or exact txt", ()
     assert.ok(section?.type === "section");
     assert.throws(
       () => decodeRegion(document, section as SectionNode),
-      (error: unknown) => error instanceof RegionDocumentError && error.message.includes("no info string or the exact 'txt' info string"),
+      (error: unknown) =>
+        error instanceof RegionDocumentError && error.message.includes("no info string or the exact 'txt' info string"),
     );
   }
 
-  const invalidStructure = [
-    "## Region\n~~~\nsrc/**",
-    "## Region\n~~~\nsrc/**\n~~~\nextra",
-  ];
+  const invalidStructure = ["## Region\n~~~\nsrc/**", "## Region\n~~~\nsrc/**\n~~~\nextra"];
   for (const source of invalidStructure) {
     const document = parseToAST(source);
     const section = document.children[0];
@@ -113,11 +106,15 @@ test("contract decoding and amendment share Region validation", () => {
   assert.deepEqual([...amendment.changedSections], ["region"]);
   assert.throws(
     () => decodeContractDocument(contract("src/**file")),
-    (error: unknown) => error instanceof TypeError && error.message.includes("Region pattern 'src/**file' may use ** only as a complete segment"),
+    (error: unknown) =>
+      error instanceof TypeError &&
+      error.message.includes("Region pattern 'src/**file' may use ** only as a complete segment"),
   );
   assert.throws(
     () => applyAmendDocument("## Replace: Region\n~~~\nsrc/**file\n~~~", current),
-    (error: unknown) => error instanceof TypeError && error.message.includes("Region pattern 'src/**file' may use ** only as a complete segment"),
+    (error: unknown) =>
+      error instanceof TypeError &&
+      error.message.includes("Region pattern 'src/**file' may use ** only as a complete segment"),
   );
 });
 

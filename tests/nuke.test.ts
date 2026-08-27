@@ -75,19 +75,44 @@ async function runningAkuma(world: Awaited<ReturnType<typeof testWorld>>) {
   await initializeHeart(allocated.paths);
   let aborted = false;
   let settle!: (result: { kind: "failed"; diagnostic: string }) => void;
-  const completion = new Promise<{ kind: "failed"; diagnostic: string }>((resolve) => { settle = resolve; });
+  const completion = new Promise<{ kind: "failed"; diagnostic: string }>((resolve) => {
+    settle = resolve;
+  });
   const provider: ProviderAdapter = {
-    admitOptions(options) { return { kind: "admitted", options }; },
+    admitOptions(options) {
+      return { kind: "admitted", options };
+    },
     async start() {
       return {
         admission: { fence: "nuke-fixture-turn" },
-        events: { async *[Symbol.asyncIterator]() { while (!aborted) { yield { type: "note" as const, text: "working" }; await new Promise((resolve) => setTimeout(resolve, 10)); } } },
+        events: {
+          async *[Symbol.asyncIterator]() {
+            while (!aborted) {
+              yield { type: "note" as const, text: "working" };
+              await new Promise((resolve) => setTimeout(resolve, 10));
+            }
+          },
+        },
         completion,
-        async abort() { aborted = true; settle({ kind: "failed", diagnostic: "stopped" }); },
+        async abort() {
+          aborted = true;
+          settle({ kind: "failed", diagnostic: "stopped" });
+        },
       };
     },
   };
-  const launch: BodyLaunch = { paths: allocated.paths, seed: { id: allocated.id, archetype: "claude", provider: CLAUDE_EXECUTION, options: {}, origin: { kind: "direct" }, cwd: world }, initialBody: "keep working" };
+  const launch: BodyLaunch = {
+    paths: allocated.paths,
+    seed: {
+      id: allocated.id,
+      archetype: "claude",
+      provider: CLAUDE_EXECUTION,
+      options: {},
+      origin: { kind: "direct" },
+      cwd: world,
+    },
+    initialBody: "keep working",
+  };
   const body = driveAkumaBody(launch, provider, { now: () => "2026-08-19T00:00:00.000Z" });
   while ((await readHeart(allocated.paths)).latestBody === null) await new Promise((resolve) => setTimeout(resolve, 5));
   return { allocated, body };
@@ -98,12 +123,24 @@ test("bare and mismatched nuke confirmations refuse before deletion", async () =
   const sentinel = join(world, ".keiyaku", "sentinel");
   try {
     writeFileSync(sentinel, "preserve\n");
-    await assert.rejects(Keiyaku.nuke({ world }), (error: unknown) => error instanceof KeiyakuRefused
-      && error.refusal.kind === "nuke-confirmation-required" && error.refusal.world === world);
-    await assert.rejects(Keiyaku.nuke({ world, confirm: "wrong" }), (error: unknown) => error instanceof KeiyakuRefused
-      && error.refusal.kind === "nuke-confirmation-mismatch" && error.refusal.confirmation === "wrong");
+    await assert.rejects(
+      Keiyaku.nuke({ world }),
+      (error: unknown) =>
+        error instanceof KeiyakuRefused &&
+        error.refusal.kind === "nuke-confirmation-required" &&
+        error.refusal.world === world,
+    );
+    await assert.rejects(
+      Keiyaku.nuke({ world, confirm: "wrong" }),
+      (error: unknown) =>
+        error instanceof KeiyakuRefused &&
+        error.refusal.kind === "nuke-confirmation-mismatch" &&
+        error.refusal.confirmation === "wrong",
+    );
     assert.equal(readFileSync(sentinel, "utf8"), "preserve\n");
-  } finally { rmSync(world, { recursive: true, force: true }); }
+  } finally {
+    rmSync(world, { recursive: true, force: true });
+  }
 });
 
 test("confirmed nuke stops live writers and removes owned state while preserving boundaries", async () => {
@@ -129,7 +166,7 @@ test("confirmed nuke stops live writers and removes owned state while preserving
     mkdirSync(recognizedDir);
     writeFileSync(join(recognizedDir, "inside.bin"), "inside\n");
     symlinkSync(recognizedUnknown, recognizedLink);
-    writeFileSync(settings, "{\"project\":true}\n");
+    writeFileSync(settings, '{"project":true}\n');
     writeFileSync(unknown, "unknown\n");
     mkdirSync(unknownRun, { recursive: true });
     writeFileSync(join(unknownRun, "bytes.bin"), "foreign runtime\n");
@@ -153,7 +190,7 @@ test("confirmed nuke stops live writers and removes owned state while preserving
     assert.throws(() => raw.run(["show-ref", "--verify", "--quiet", "refs/heads/keiyaku-state"]));
     assert.equal(raw.run(["show-ref", "--verify", "--quiet", "refs/heads/business-branch"]), "");
     assert.equal(existsSync(placeLockPath(await repositoryAt(world))), true);
-    assert.equal(readFileSync(settings, "utf8"), "{\"project\":true}\n");
+    assert.equal(readFileSync(settings, "utf8"), '{"project":true}\n');
     assert.equal(readFileSync(namespace, "utf8"), "retained\n");
     assert.equal(readFileSync(unknown, "utf8"), "unknown\n");
     assert.equal(readFileSync(join(unknownRun, "bytes.bin"), "utf8"), "foreign runtime\n");
@@ -200,10 +237,14 @@ test("confirmed nuke cleans a legacy Heart schema and continues independent owne
     assert.equal((await tasks.add({ title: "Remove me" })).kind, "accepted");
     const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "14000000" });
     const heart = new DatabaseSync(allocated.paths.heart);
-    heart.exec("CREATE TABLE akuma_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO akuma_schema VALUES (1, 14)");
+    heart.exec(
+      "CREATE TABLE akuma_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO akuma_schema VALUES (1, 14)",
+    );
     heart.close();
     const leash = new DatabaseSync(allocated.paths.leash);
-    leash.exec("CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)");
+    leash.exec(
+      "CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)",
+    );
     leash.close();
     await assert.rejects(readHeart(allocated.paths), /heart schema version must be 20/u);
     await assert.rejects(HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
@@ -218,7 +259,7 @@ test("confirmed nuke cleans a legacy Heart schema and continues independent owne
     const unknown = join(world, ".keiyaku", "unknown.bin");
     mkdirSync(join(world, ".keiyaku", "namespace"), { recursive: true });
     writeFileSync(namespace, "retained\n");
-    writeFileSync(settings, "{\"project\":true}\n");
+    writeFileSync(settings, '{"project":true}\n');
     writeFileSync(unknown, "unknown\n");
     const foreignByte = join(foreign, "foreign.txt");
     writeFileSync(foreignByte, "retain\n");
@@ -228,13 +269,16 @@ test("confirmed nuke cleans a legacy Heart schema and continues independent owne
     assert.equal(existsSync(allocated.paths.leash), false);
     assert.equal(existsSync(allocated.paths.log), false);
     assert.equal(existsSync(`${allocated.paths.heart}-wal`), false);
-    assert.equal(existsSync(join(allocated.paths.requests, "1", "41111111-1111-4111-8111-111111111111.request.json")), false);
+    assert.equal(
+      existsSync(join(allocated.paths.requests, "1", "41111111-1111-4111-8111-111111111111.request.json")),
+      false,
+    );
     assert.equal(readFileSync(recognizedUnknown, "utf8"), "preserve recognized unknown\n");
     assert.equal(existsSync(join(world, ".keiyaku", "tasks", "remove-me.md")), false);
     assert.equal(existsSync(managedPath), false);
     assert.throws(() => raw.run(["show-ref", "--verify", "--quiet", "refs/heads/keiyaku-state"]));
     assert.equal(raw.run(["show-ref", "--verify", "--quiet", "refs/heads/business-branch"]), "");
-    assert.equal(readFileSync(settings, "utf8"), "{\"project\":true}\n");
+    assert.equal(readFileSync(settings, "utf8"), '{"project":true}\n');
     assert.equal(readFileSync(namespace, "utf8"), "retained\n");
     assert.equal(readFileSync(unknown, "utf8"), "unknown\n");
     assert.equal(readFileSync(foreignByte, "utf8"), "retain\n");
@@ -289,7 +333,10 @@ test("confirmed nuke preserves unknown descendants inside the request channel", 
     }
     assert.deepEqual(await Keiyaku.nuke({ world, confirm: world }), { kind: "success", world });
     for (const name of ["01", "00", "9007199254740992", "9007199254740993"]) {
-      assert.equal(readFileSync(join(allocated.paths.requests, name, "43333333-3333-4333-8333-333333333333.request.json"), "utf8"), "keep-noncanonical\n");
+      assert.equal(
+        readFileSync(join(allocated.paths.requests, name, "43333333-3333-4333-8333-333333333333.request.json"), "utf8"),
+        "keep-noncanonical\n",
+      );
     }
   } finally {
     rmSync(world, { recursive: true, force: true });
@@ -344,7 +391,8 @@ test("Git nuke removes legacy and migration leaves but preserves ordinary refs",
     "refs/keiyaku/candidate/current",
     "refs/heads/keiyaku-delivery-extra",
     "refs/heads/business-branch",
-  ]) raw.run(["update-ref", ref, "HEAD"]);
+  ])
+    raw.run(["update-ref", ref, "HEAD"]);
   raw.run(["update-ref", "refs/heads/keiyaku-state", "HEAD"]);
   try {
     await nukeGit(world);
@@ -354,7 +402,8 @@ test("Git nuke removes legacy and migration leaves but preserves ordinary refs",
       "refs/keiyaku/delivery/current",
       "refs/keiyaku/candidate/current",
       "refs/heads/keiyaku-state",
-    ]) assert.equal(refPresent(raw, ref), false);
+    ])
+      assert.equal(refPresent(raw, ref), false);
     assert.equal(refPresent(raw, "refs/heads/business-branch"), true);
     assert.equal(refPresent(raw, "refs/heads/keiyaku-delivery-extra"), true);
   } finally {
@@ -389,7 +438,9 @@ test("Git nuke deletes keiyaku-state with expected-OID CAS before topology delet
     );
     const worktreeRemove = commands.findIndex((command) => command.startsWith("worktree remove --force "));
     const leafDelete = commands.findIndex((command) =>
-      /^update-ref --no-deref -d refs\/(heads\/keiyaku-(delivery|candidate)|keiyaku\/(delivery|candidate))\//u.test(command),
+      /^update-ref --no-deref -d refs\/(heads\/keiyaku-(delivery|candidate)|keiyaku\/(delivery|candidate))\//u.test(
+        command,
+      ),
     );
     assert.notEqual(stateDelete, -1);
     assert.notEqual(worktreeRemove, -1);
@@ -411,14 +462,16 @@ test("Git nuke refuses a changed state OID before deleting regenerable topology"
   fixture.raw.run(["commit", "--allow-empty", "--quiet", "-m", "moved-state"]);
   const moved = fixture.raw.run(["rev-parse", "HEAD"]).trim();
   try {
-    await assert.rejects(
-      () => withGitShim(
-        gitNukeShim([
-          'if [ "$1" = "update-ref" ] && [ "$2" = "--no-deref" ] && [ "$3" = "-d" ] && [ "$4" = "refs/heads/keiyaku-state" ] && [ ! -f "$KEIYAKU_RACE_DONE" ]; then',
-          ': > "$KEIYAKU_RACE_DONE"',
-          '"$KEIYAKU_REAL_GIT" update-ref refs/heads/keiyaku-state "$KEIYAKU_RACE_STATE"',
-          "fi",
-        ].join("\n")),
+    await assert.rejects(() =>
+      withGitShim(
+        gitNukeShim(
+          [
+            'if [ "$1" = "update-ref" ] && [ "$2" = "--no-deref" ] && [ "$3" = "-d" ] && [ "$4" = "refs/heads/keiyaku-state" ] && [ ! -f "$KEIYAKU_RACE_DONE" ]; then',
+            ': > "$KEIYAKU_RACE_DONE"',
+            '"$KEIYAKU_REAL_GIT" update-ref refs/heads/keiyaku-state "$KEIYAKU_RACE_STATE"',
+            "fi",
+          ].join("\n"),
+        ),
         { KEIYAKU_CALLS: calls, KEIYAKU_RACE_DONE: raced, KEIYAKU_RACE_STATE: moved },
         (gitPath) => nukeGit(fixture.world, gitPath),
       ),
@@ -449,20 +502,23 @@ test("Git nuke retains a leaf whose expected OID changed and retries later", asy
     "refs/keiyaku/candidate/current",
     "refs/heads/business-branch",
     "refs/heads/keiyaku-state",
-  ]) raw.run(["update-ref", ref, "HEAD"]);
+  ])
+    raw.run(["update-ref", ref, "HEAD"]);
   raw.run(["commit", "--allow-empty", "--quiet", "-m", "moved-leaf"]);
   const moved = raw.run(["rev-parse", "HEAD"]).trim();
   const calls = join(mkdtempSync(join(tmpdir(), "keiyaku-v4-nuke-leaf-race-")), "calls");
   const raced = join(calls, "..", "raced");
   try {
-    await assert.rejects(
-      () => withGitShim(
-        gitNukeShim([
-          'if [ "$1" = "update-ref" ] && [ "$2" = "--no-deref" ] && [ "$3" = "-d" ] && [ "$4" = "$KEIYAKU_RACE_REF" ] && [ ! -f "$KEIYAKU_RACE_DONE" ]; then',
-          ': > "$KEIYAKU_RACE_DONE"',
-          '"$KEIYAKU_REAL_GIT" update-ref "$KEIYAKU_RACE_REF" "$KEIYAKU_RACE_OID"',
-          "fi",
-        ].join("\n")),
+    await assert.rejects(() =>
+      withGitShim(
+        gitNukeShim(
+          [
+            'if [ "$1" = "update-ref" ] && [ "$2" = "--no-deref" ] && [ "$3" = "-d" ] && [ "$4" = "$KEIYAKU_RACE_REF" ] && [ ! -f "$KEIYAKU_RACE_DONE" ]; then',
+            ': > "$KEIYAKU_RACE_DONE"',
+            '"$KEIYAKU_REAL_GIT" update-ref "$KEIYAKU_RACE_REF" "$KEIYAKU_RACE_OID"',
+            "fi",
+          ].join("\n"),
+        ),
         { KEIYAKU_CALLS: calls, KEIYAKU_RACE_DONE: raced, KEIYAKU_RACE_REF: racedRef, KEIYAKU_RACE_OID: moved },
         (gitPath) => nukeGit(world, gitPath),
       ),
@@ -582,7 +638,9 @@ test("nuke deletes malformed Task authority by owned path", async () => {
     assert.equal(result.kind, "success");
     assert.equal(result.world, world);
     assert.equal(existsSync(broken), false);
-  } finally { rmSync(world, { recursive: true, force: true }); }
+  } finally {
+    rmSync(world, { recursive: true, force: true });
+  }
 });
 
 test("nuke deletes malformed Task authority after the stop prerequisite", async () => {
@@ -611,9 +669,23 @@ test("CLI renders confirmation-required and confirmation-mismatch refusals", asy
     if ("help" in bare || "help" in mismatch) throw new Error("nuke invocation parsed as help");
     const required = await invoke(bare, { cwd: world });
     const rejected = await invoke(mismatch, { cwd: world });
-    assert.equal(renderRefusal(required as Extract<typeof required, { kind: "refused" }>, { columns: 1000, color: false }), ["! nuke refused", `   nuke confirmation required world=${world}`, `   keiyaku nuke --confirm ${world}`].join("\n"));
-    assert.equal(renderRefusal(rejected as Extract<typeof rejected, { kind: "refused" }>, { columns: 1000, color: false }), ["! nuke refused", `   nuke confirmation mismatch world=${world} confirmation=wrong`, `   keiyaku nuke --confirm ${world}`].join("\n"));
-  } finally { rmSync(world, { recursive: true, force: true }); }
+    assert.equal(
+      renderRefusal(required as Extract<typeof required, { kind: "refused" }>, { columns: 1000, color: false }),
+      ["! nuke refused", `   nuke confirmation required world=${world}`, `   keiyaku nuke --confirm ${world}`].join(
+        "\n",
+      ),
+    );
+    assert.equal(
+      renderRefusal(rejected as Extract<typeof rejected, { kind: "refused" }>, { columns: 1000, color: false }),
+      [
+        "! nuke refused",
+        `   nuke confirmation mismatch world=${world} confirmation=wrong`,
+        `   keiyaku nuke --confirm ${world}`,
+      ].join("\n"),
+    );
+  } finally {
+    rmSync(world, { recursive: true, force: true });
+  }
 });
 
 test("CLI nuke exit code reports owner failure", () => {

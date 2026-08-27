@@ -65,21 +65,40 @@ test("--all records failure and continues in fixed harness order", async () => {
     return input.argv[0] === "claude" ? terminal(7, "not configured") : terminal();
   };
   const result = await installHarnesses(["codex", "claude", "opencode", "pi"], {}, runner);
-  assert.deepEqual(result.results.map((item) => [item.harness, item.status]), [
-    ["codex", "installed"],
-    ["claude", "failed"],
-    ["opencode", "installed"],
-    ["pi", "installed"],
+  assert.deepEqual(
+    result.results.map((item) => [item.harness, item.status]),
+    [
+      ["codex", "installed"],
+      ["claude", "failed"],
+      ["opencode", "installed"],
+      ["pi", "installed"],
+    ],
+  );
+  assert.deepEqual(
+    calls.map((argv) => argv[0]),
+    ["codex", "codex", "claude", "opencode", "pi"],
+  );
+  assert.deepEqual(calls[3], [
+    "opencode",
+    "plugin",
+    join(installAssetsRoot(), "plugins", "keiyaku"),
+    "--global",
+    "--force",
   ]);
-  assert.deepEqual(calls.map((argv) => argv[0]), ["codex", "codex", "claude", "opencode", "pi"]);
-  assert.deepEqual(calls[3], ["opencode", "plugin", join(installAssetsRoot(), "plugins", "keiyaku"), "--global", "--force"]);
   assert.deepEqual(calls[4], ["pi", "install", "npm:@astrosheep/keiyaku"]);
   assert.equal(installExitCode(result), 1);
   assert.match(renderInstallText(result), /claude failed: claude exited 7: not configured/);
 });
 
 test("the bundled plugin contains all six skills", () => {
-  for (const name of ["keiyaku", "keiyaku-task", "keiyaku-bind", "keiyaku-workflow", "keiyaku-akuma", "keiyaku-babysit"]) {
+  for (const name of [
+    "keiyaku",
+    "keiyaku-task",
+    "keiyaku-bind",
+    "keiyaku-workflow",
+    "keiyaku-akuma",
+    "keiyaku-babysit",
+  ]) {
     const path = join(installAssetsRoot(), "plugins", "keiyaku", "skills", name, "SKILL.md");
     const markdown = readFileSync(path, "utf8");
     assert.match(markdown, new RegExp(`^name: ${name}$`, "m"));

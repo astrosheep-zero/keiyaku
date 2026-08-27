@@ -5,7 +5,9 @@ import { join } from "node:path";
 import test from "node:test";
 import { installNamespaceContext, readNamespaceContext, repairNamespaceContext } from "../src/task/context.js";
 
-function temporary(): string { return mkdtempSync(join(tmpdir(), "keiyaku-namespace-")); }
+function temporary(): string {
+  return mkdtempSync(join(tmpdir(), "keiyaku-namespace-"));
+}
 
 test("namespace context stores root and nested namespaces in canonical bytes", async () => {
   const root = temporary();
@@ -22,7 +24,8 @@ test("namespace context stores root and nested namespaces in canonical bytes", a
 test("repair preserves a valid override and repairs the ignored Git", async () => {
   const root = temporary();
   await installNamespaceContext(root, ["override"]);
-  const current = join(root, ".keiyaku", "namespace", "current"), inode = lstatSync(current).ino;
+  const current = join(root, ".keiyaku", "namespace", "current"),
+    inode = lstatSync(current).ino;
   writeFileSync(join(root, ".keiyaku", "namespace", ".gitignore"), "wrong\n");
   assert.equal(await repairNamespaceContext(root, ["default"]), "kept");
   assert.deepEqual(await readNamespaceContext({ directory: root, boundary: root }), ["override"]);
@@ -31,16 +34,24 @@ test("repair preserves a valid override and repairs the ignored Git", async () =
 });
 
 test("repair replaces malformed current bytes and readers reject symlinks", async () => {
-  const root = temporary(), directory = join(root, ".keiyaku", "namespace");
+  const root = temporary(),
+    directory = join(root, ".keiyaku", "namespace");
   mkdirSync(directory, { recursive: true });
   writeFileSync(join(directory, "current"), "Bad Namespace\n");
-  assert.deepEqual(await readNamespaceContext({ directory: root, boundary: root }), { kind: "malformed", path: join(root, ".keiyaku", "namespace", "current") });
+  assert.deepEqual(await readNamespaceContext({ directory: root, boundary: root }), {
+    kind: "malformed",
+    path: join(root, ".keiyaku", "namespace", "current"),
+  });
   assert.equal(await repairNamespaceContext(root, ["default"]), "installed");
   assert.deepEqual(await readNamespaceContext({ directory: root, boundary: root }), ["default"]);
 
-  const linked = temporary(), target = join(linked, "target");
+  const linked = temporary(),
+    target = join(linked, "target");
   mkdirSync(join(linked, ".keiyaku", "namespace"), { recursive: true });
   writeFileSync(target, "linked\n");
   symlinkSync(target, join(linked, ".keiyaku", "namespace", "current"));
-  assert.deepEqual(await readNamespaceContext({ directory: linked, boundary: linked }), { kind: "malformed", path: join(linked, ".keiyaku", "namespace", "current") });
+  assert.deepEqual(await readNamespaceContext({ directory: linked, boundary: linked }), {
+    kind: "malformed",
+    path: join(linked, ".keiyaku", "namespace", "current"),
+  });
 });

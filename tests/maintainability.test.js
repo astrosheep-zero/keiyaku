@@ -11,16 +11,21 @@ import {
 } from "../scripts/check-maintainability.js";
 
 test("maintainability hard line limit promotes only above 500 effective lines", () => {
-  const [result] = promoteHardLineLimit([{
-    messages: [
-      { ruleId: "max-lines", messageId: "exceed", message: "File has too many lines (500).", severity: 1 },
-      { ruleId: "max-lines", messageId: "exceed", message: "File has too many lines (501).", severity: 1 },
-    ],
-    errorCount: 0,
-    warningCount: 2,
-  }]);
+  const [result] = promoteHardLineLimit([
+    {
+      messages: [
+        { ruleId: "max-lines", messageId: "exceed", message: "File has too many lines (500).", severity: 1 },
+        { ruleId: "max-lines", messageId: "exceed", message: "File has too many lines (501).", severity: 1 },
+      ],
+      errorCount: 0,
+      warningCount: 2,
+    },
+  ]);
 
-  assert.deepEqual(result.messages.map(({ severity }) => severity), [1, 2]);
+  assert.deepEqual(
+    result.messages.map(({ severity }) => severity),
+    [1, 2],
+  );
   assert.equal(result.errorCount, 1);
   assert.equal(result.warningCount, 1);
 });

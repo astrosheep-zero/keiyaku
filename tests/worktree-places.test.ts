@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -79,11 +88,14 @@ function repositoryWithCommit() {
 }
 
 function registerOf(appointments: readonly { place: ReturnType<typeof place>; contract: ContractId }[]) {
-  return decodePlaceRegister("places.json", canonicalPlaceRegister({
-    appointments,
-    byPlace: new Map(),
-    byContract: new Map(),
-  }));
+  return decodePlaceRegister(
+    "places.json",
+    canonicalPlaceRegister({
+      appointments,
+      byPlace: new Map(),
+      byContract: new Map(),
+    }),
+  );
 }
 
 function expectedForwardAllocation(
@@ -99,7 +111,10 @@ function expectedForwardAllocation(
   }
 }
 
-function writeRegister(repository: Awaited<ReturnType<typeof repositoryAt>>, appointments: readonly { place: ReturnType<typeof place>; contract: ContractId }[]) {
+function writeRegister(
+  repository: Awaited<ReturnType<typeof repositoryAt>>,
+  appointments: readonly { place: ReturnType<typeof place>; contract: ContractId }[],
+) {
   const path = placeRegisterPath(repository);
   mkdirSync(join(repository.commonDirectory, "keiyaku"), { recursive: true });
   writeFileSync(path, canonicalPlaceRegister(registerOf(appointments)));
@@ -179,10 +194,13 @@ test("Place allocation wraps from a fixed stable start and resolves fixed same-b
 
 test("Place allocation repeats its stable start in the next generation", async () => {
   const repository = await repositoryAt(repositoryWithCommit().path);
-  writeRegister(repository, CONTRACT_PLACES.map((base, index) => ({
-    place: place(base),
-    contract: contractId(`kei/first-generation-${index}`),
-  })));
+  writeRegister(
+    repository,
+    CONTRACT_PLACES.map((base, index) => ({
+      place: place(base),
+      contract: contractId(`kei/first-generation-${index}`),
+    })),
+  );
   assert.equal(CONTRACT_PLACES[NEXT_GENERATION.startIndex], "sock");
   const next = await appointManagedWorktrees(repository, [NEXT_GENERATION.contract]);
   assert.equal(next.byContract.get(NEXT_GENERATION.contract)?.place, NEXT_GENERATION.expected);
@@ -212,12 +230,25 @@ test("missing Place file is empty and written empty remains canonical", async ()
 
 test("corrupt Place bytes are authority corruption", () => {
   const path = "places.json";
-  assert.throws(() => decodePlaceRegister(path, '{"version":1,"appointments":{"atlantis":"kei/example"}}'), AuthorityCorruptionError);
+  assert.throws(
+    () => decodePlaceRegister(path, '{"version":1,"appointments":{"atlantis":"kei/example"}}'),
+    AuthorityCorruptionError,
+  );
   assert.throws(() => decodePlaceRegister(path, '{"appointments":{},"version":1}\n'), AuthorityCorruptionError);
   assert.throws(() => decodePlaceRegister(path, '{"version":2,"appointments":{}}\n'), AuthorityCorruptionError);
-  assert.throws(() => decodePlaceRegister(path, '{"version":1,"appointments":{"Atlantis":"kei/example"}}\n'), AuthorityCorruptionError);
-  assert.throws(() => decodePlaceRegister(path, '{"version":1,"appointments":{"atlantis":"not-a-contract"}}\n'), AuthorityCorruptionError);
-  assert.throws(() => decodePlaceRegister(path, '{"version":1,"appointments":{"atlantis":"kei/example","hogwarts":"kei/example"}}\n'), AuthorityCorruptionError);
+  assert.throws(
+    () => decodePlaceRegister(path, '{"version":1,"appointments":{"Atlantis":"kei/example"}}\n'),
+    AuthorityCorruptionError,
+  );
+  assert.throws(
+    () => decodePlaceRegister(path, '{"version":1,"appointments":{"atlantis":"not-a-contract"}}\n'),
+    AuthorityCorruptionError,
+  );
+  assert.throws(
+    () =>
+      decodePlaceRegister(path, '{"version":1,"appointments":{"atlantis":"kei/example","hogwarts":"kei/example"}}\n'),
+    AuthorityCorruptionError,
+  );
 });
 
 test("concurrent appoint and release preserve every mapping", async () => {
@@ -225,20 +256,11 @@ test("concurrent appoint and release preserve every mapping", async () => {
   const first = Array.from({ length: 8 }, (_, index) => contractId(`kei/first-${index}`));
   const second = Array.from({ length: 8 }, (_, index) => contractId(`kei/second-${index}`));
   await appointManagedWorktrees(repository, first);
-  await Promise.all([
-    releaseManagedWorktrees(repository, first),
-    appointManagedWorktrees(repository, second),
-  ]);
+  await Promise.all([releaseManagedWorktrees(repository, first), appointManagedWorktrees(repository, second)]);
   const register = await readPlaceRegister(repository);
   assert.equal(register.appointments.length, second.length);
-  assert.deepEqual(
-    new Set(register.appointments.map((appointment) => appointment.contract)),
-    new Set(second),
-  );
-  assert.equal(
-    new Set(register.appointments.map((appointment) => appointment.place)).size,
-    second.length,
-  );
+  assert.deepEqual(new Set(register.appointments.map((appointment) => appointment.contract)), new Set(second));
+  assert.equal(new Set(register.appointments.map((appointment) => appointment.place)).size, second.length);
   assert.equal(
     readFileSync(join(repository.commonDirectory, "keiyaku", "places.json"), "utf8"),
     canonicalPlaceRegister(register),
@@ -273,7 +295,10 @@ test("retry reuses the durable Place and never inspects Git topology", async () 
   const retry = await appointManagedWorktrees(repository, [EXAMPLE]);
   assert.deepEqual(retry.byContract.get(EXAMPLE), first);
   const other = await appointManagedWorktrees(repository, [OTHER]);
-  assert.equal(other.byContract.get(OTHER)?.place, expectedForwardAllocation(OTHER_START_INDEX, new Set([first.place])));
+  assert.equal(
+    other.byContract.get(OTHER)?.place,
+    expectedForwardAllocation(OTHER_START_INDEX, new Set([first.place])),
+  );
 });
 
 test("the three-arm reader does not inspect the journal or filesystem", async () => {
@@ -307,9 +332,26 @@ function placeAt(index: number) {
 
 function contractBody(title: string): string {
   return [
-    `# ${title}`, "", "## Context", "Place worktree.", "", "## Objective", "Keep Place appointments.",
-    "", "## Design", "Use the appointed Place path.", "", "## Region", "```", "src/**", "```", "",
-    "## Criteria", "### Result", "The appointed Place is reused.", "",
+    `# ${title}`,
+    "",
+    "## Context",
+    "Place worktree.",
+    "",
+    "## Objective",
+    "Keep Place appointments.",
+    "",
+    "## Design",
+    "Use the appointed Place path.",
+    "",
+    "## Region",
+    "```",
+    "src/**",
+    "```",
+    "",
+    "## Criteria",
+    "### Result",
+    "The appointed Place is reused.",
+    "",
   ].join("\n");
 }
 
@@ -400,25 +442,27 @@ test("contextual selection matches the appointed Place path", () => {
   const board = {
     root: "/repo",
     state: null,
-    rows: [{
-      id,
-      title: "Active",
-      phase: "bound",
-      phaseAt: "2026-08-12T00:00:00.000Z",
-      disposition: "active",
-      workspace: "worktree",
-      worktreePath: path,
-      workspaceObservation: {
-        kind: "clean",
-        location: { kind: "worktree", path },
-        counts: { staged: 0, unstaged: 0, untracked: 0, submodules: 0 },
+    rows: [
+      {
+        id,
+        title: "Active",
+        phase: "bound",
+        phaseAt: "2026-08-12T00:00:00.000Z",
+        disposition: "active",
+        workspace: "worktree",
+        worktreePath: path,
+        workspaceObservation: {
+          kind: "clean",
+          location: { kind: "worktree", path },
+          counts: { staged: 0, unstaged: 0, untracked: 0, submodules: 0 },
+        },
+        target: null,
+        targetLag: { kind: "none" },
+        delivery: null,
+        targetObservation: null,
+        gates: { reports: [], satisfied: true },
       },
-      target: null,
-      targetLag: { kind: "none" },
-      delivery: null,
-      targetObservation: null,
-      gates: { reports: [], satisfied: true },
-    }],
+    ],
   } satisfies ContractBoard;
   assert.equal(resolveContextualContract(board, undefined, path), id);
   assert.equal(resolveContextualContract(board, "@active-contract", "/repo"), id);
@@ -430,11 +474,15 @@ test("terminal cleanup releases the Place only after hooks and removal succeed",
   const attempts = join(directory, "attempts.log");
   const ready = join(directory, "ready");
   const destroy = {
-    argv: [process.execPath, "-e", [
-      `const fs = require("node:fs");`,
-      `fs.appendFileSync(${JSON.stringify(attempts)}, "attempt\\n");`,
-      `if (!fs.existsSync(${JSON.stringify(ready)})) process.exit(9);`,
-    ].join(" ")],
+    argv: [
+      process.execPath,
+      "-e",
+      [
+        `const fs = require("node:fs");`,
+        `fs.appendFileSync(${JSON.stringify(attempts)}, "attempt\\n");`,
+        `if (!fs.existsSync(${JSON.stringify(ready)})) process.exit(9);`,
+      ].join(" "),
+    ],
     timeoutMs: 5_000,
   };
   const hooks = { create: [], destroy: [destroy] };
@@ -489,7 +537,10 @@ test("corrupt Place register fails mutation and isolates the Contract status sec
   assert.match(status.report.contracts.failure.message, /Place file has invalid fields/u);
   assert.equal(status.report.tasks.kind, "present");
   if (status.report.tasks.kind === "present") {
-    assert.equal(status.report.tasks.value.rows.some((row) => row.id === added.value.id), true);
+    assert.equal(
+      status.report.tasks.value.rows.some((row) => row.id === added.value.id),
+      true,
+    );
   }
   assert.notEqual(status.report.akuma.kind, "failed");
 });
@@ -569,10 +620,14 @@ test("a clean terminal stays unappointed across per-Contract and repo reconcile"
   const world = await (await Repo.at({ path: repository.path })).reconcile();
   assert.equal(world.kind, "completed");
   if (world.kind !== "completed") throw new Error("expected completed repo reconcile");
-  assert.equal(world.contracts.every((contract) => contract.report.lag.length === 0), true);
+  assert.equal(
+    world.contracts.every((contract) => contract.report.lag.length === 0),
+    true,
+  );
   assert.deepEqual(await readManagedWorktreeAppointment(git, bound.keiyaku.id), { kind: "unappointed" });
   const observed = await withGitDecodeChannel(git, (channel) =>
-    readContractObservationAt(git, channel, bound.keiyaku.id));
+    readContractObservationAt(git, channel, bound.keiyaku.id),
+  );
   assert.equal(observed.kind, "present");
   if (observed.kind !== "present") throw new Error("expected present observation");
   assert.equal(observed.row.worktreePath, null);

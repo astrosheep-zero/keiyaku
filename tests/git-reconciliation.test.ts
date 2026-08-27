@@ -17,12 +17,13 @@ function candidatePinRefFor(contract: ContractId): string {
 }
 
 function unchangedRef(effects: readonly TopologyEffect[], name: string, oid: string): boolean {
-  return effects.some((effect) =>
-    effect.kind === "ref"
-    && effect.name === name
-    && effect.action === "unchanged"
-    && effect.before === oid
-    && effect.after === oid
+  return effects.some(
+    (effect) =>
+      effect.kind === "ref" &&
+      effect.name === name &&
+      effect.action === "unchanged" &&
+      effect.before === oid &&
+      effect.after === oid,
   );
 }
 
@@ -67,7 +68,7 @@ async function buildTenderedReviewGatedTargetTemplate(): Promise<TenderedReviewG
 }
 
 async function tenderedReviewGatedTargetFixture() {
-  const templatePromise = tenderedReviewGatedTargetTemplate ??= buildTenderedReviewGatedTargetTemplate();
+  const templatePromise = (tenderedReviewGatedTargetTemplate ??= buildTenderedReviewGatedTargetTemplate());
   let template: TenderedReviewGatedTargetTemplate;
   try {
     template = await templatePromise;
@@ -89,7 +90,12 @@ async function tenderedReviewGatedTargetFixture() {
   return { contract, repository, worktree };
 }
 
-async function restoreOwnedRefs(repository: ReturnType<typeof repositoryWithMain>, id: ContractId, tender: string, integration: string) {
+async function restoreOwnedRefs(
+  repository: ReturnType<typeof repositoryWithMain>,
+  id: ContractId,
+  tender: string,
+  integration: string,
+) {
   repository.run(["update-ref", deliveryRefFor(id), tender]);
   repository.run(["update-ref", candidatePinRefFor(id), integration]);
 }
@@ -151,7 +157,9 @@ test("unequal tender and integration trees retain the delivery ref through a con
   assert.equal(report.lag.length, 0);
   assert.equal(unchangedRef(report.effects, deliveryRefFor(state.id), tender), true);
   assert.equal(
-    report.effects.some((effect) => effect.kind === "ref" && effect.name === candidatePinRefFor(state.id) && effect.action === "removed"),
+    report.effects.some(
+      (effect) => effect.kind === "ref" && effect.name === candidatePinRefFor(state.id) && effect.action === "removed",
+    ),
     true,
   );
 });
@@ -216,10 +224,12 @@ test("expected-target CAS retains owned refs under a stale frozen tip", async ()
     ].join("\n"),
     { KEIYAKU_MOVED_TARGET: marker, KEIYAKU_REPO: repository.path },
     async (gitPath) =>
-      (await Keiyaku.of({
-        repo: await Repo.at({ path: repository.path, gitPath }),
-        id: state.id,
-      })).reconcile(),
+      (
+        await Keiyaku.of({
+          repo: await Repo.at({ path: repository.path, gitPath }),
+          id: state.id,
+        })
+      ).reconcile(),
   );
   const git = await repositoryAt(repository.path);
   const moved = repository.run(["rev-parse", "refs/heads/main"]).trim();

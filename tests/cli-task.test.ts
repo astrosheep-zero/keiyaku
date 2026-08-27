@@ -34,8 +34,14 @@ test("task stdin markers stay exclusive and position independent", () => {
     },
   });
   assert.throws(() => parseArgv(["task", "update", "task/a", "--append", "-", "--json"]), /--append requires a value/u);
-  assert.throws(() => parseArgv(["task", "update", "task/a", "--note", "-", "--title", "Renamed"]), /--note requires a value/u);
-  assert.throws(() => parseArgv(["task", "update", "task/a", "--body", "-", "--note", "-"]), /--note requires a value/u);
+  assert.throws(
+    () => parseArgv(["task", "update", "task/a", "--note", "-", "--title", "Renamed"]),
+    /--note requires a value/u,
+  );
+  assert.throws(
+    () => parseArgv(["task", "update", "task/a", "--body", "-", "--note", "-"]),
+    /--note requires a value/u,
+  );
   assert.throws(() => parseArgv(["task", "add", "-", "-"]), /stdin marker '-' may appear only once/u);
   assert.throws(() => parseArgv(["task", "update", "task/a", "--title", "-"]), /--title requires a value/u);
   assert.throws(() => parseArgv(["task", "update", "task/a", "--parent", "-"]), /--parent requires a value/u);
@@ -43,6 +49,7 @@ test("task stdin markers stay exclusive and position independent", () => {
   assert.throws(() => parseArgv(["task", "compose"]), /task compose requires '-' input/u);
   assert.throws(
     () => parseArgv(["task", "add"]),
-    (error: unknown) => error instanceof CliUsageError && /task add requires either TITLE or '-' input/.test(error.message),
+    (error: unknown) =>
+      error instanceof CliUsageError && /task add requires either TITLE or '-' input/.test(error.message),
   );
 });

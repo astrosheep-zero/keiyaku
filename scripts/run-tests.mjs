@@ -31,11 +31,12 @@ for (let index = 0; index < supplied.length; index += 1) {
 }
 
 const suiteOption = options.findIndex((option) => option === "--suite" || option.startsWith("--suite="));
-const suite = suiteOption === -1
-  ? undefined
-  : options[suiteOption].startsWith("--suite=")
-    ? options[suiteOption].slice("--suite=".length)
-    : options[suiteOption + 1];
+const suite =
+  suiteOption === -1
+    ? undefined
+    : options[suiteOption].startsWith("--suite=")
+      ? options[suiteOption].slice("--suite=".length)
+      : options[suiteOption + 1];
 if (suiteOption !== -1 && !Object.hasOwn(TEST_MANIFESTS, suite)) {
   console.error(`Unknown test suite: ${suite ?? "(missing value)"}. Expected local or integration.`);
   process.exit(1);
@@ -54,22 +55,24 @@ if (missingTestFiles.length > 0) {
   console.error(`Test manifest contains missing file(s): ${missingTestFiles.join(", ")}`);
   process.exit(1);
 }
-const testOptions = suiteOption === -1
-  ? options
-  : options.filter((_, index) => index !== suiteOption &&
-      !(options[suiteOption] === "--suite" && index === suiteOption + 1));
-const reporterOptions = testOptions.some((option) => option === "--test-reporter" || option.startsWith("--test-reporter="))
+const testOptions =
+  suiteOption === -1
+    ? options
+    : options.filter(
+        (_, index) => index !== suiteOption && !(options[suiteOption] === "--suite" && index === suiteOption + 1),
+      );
+const reporterOptions = testOptions.some(
+  (option) => option === "--test-reporter" || option.startsWith("--test-reporter="),
+)
   ? []
   : ["--test-reporter=dot"];
 const environment = { ...process.env };
 delete environment.AKUMA_REQUESTS;
-const result = spawnSync(process.execPath, [
-  "--import", "tsx",
-  "--test",
-  ...reporterOptions,
-  ...testOptions,
-  ...testFiles,
-], { stdio: "inherit", env: environment });
+const result = spawnSync(
+  process.execPath,
+  ["--import", "tsx", "--test", ...reporterOptions, ...testOptions, ...testFiles],
+  { stdio: "inherit", env: environment },
+);
 
 if (result.error) throw result.error;
 process.exit(result.status ?? 1);

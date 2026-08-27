@@ -647,18 +647,24 @@ test("Tell wake Heart reads do not create scheduler waits and child exit cancels
       scheduled = resolve;
     });
     let settleChild!: (exit: { code: number; signal: null; log: { path: string; from: number; to: number } }) => void;
-    const childExited = new Promise<{ code: number; signal: null; log: { path: string; from: number; to: number } }>((resolve) => {
-      settleChild = resolve;
-    });
+    const childExited = new Promise<{ code: number; signal: null; log: { path: string; from: number; to: number } }>(
+      (resolve) => {
+        settleChild = resolve;
+      },
+    );
     const resultPromise = wakeRecordedTell(allocated.paths, "wake-settled-exit", {
       async schedule(_milliseconds, signal) {
         scheduleCalls += 1;
         scheduled();
         await new Promise<void>((resolve, reject) => {
-          signal.addEventListener("abort", () => {
-            schedulerAborted = true;
-            reject(new Error("scheduler cancelled"));
-          }, { once: true });
+          signal.addEventListener(
+            "abort",
+            () => {
+              schedulerAborted = true;
+              reject(new Error("scheduler cancelled"));
+            },
+            { once: true },
+          );
           signal.throwIfAborted();
         });
       },

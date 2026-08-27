@@ -5,13 +5,7 @@ import { renderContractBody } from "../src/body/render.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { decodeJournal, encodeEntry } from "../src/core/facts/codec.js";
 import { foldJournal } from "../src/core/facts/fold.js";
-import {
-  contractId,
-  entryUlid,
-  snapshotId,
-  type ContractId,
-  type JournalEntry,
-} from "../src/core/facts/types.js";
+import { contractId, entryUlid, snapshotId, type ContractId, type JournalEntry } from "../src/core/facts/types.js";
 import type { ContractBody } from "../src/body/types.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { decideArc } from "../src/core/verbs/arc.js";
@@ -50,7 +44,14 @@ function entry<K extends JournalEntry["kind"]>(
 
 function bind(suffix = "AA") {
   const document = decodeContractDocument(contractDocument(body.title));
-  return entry("bind", { coordinates: { start: initial, workspace: "worktree" }, terms: { document: document.document, segments: document.segments, gates: [], after: [] } }, suffix);
+  return entry(
+    "bind",
+    {
+      coordinates: { start: initial, workspace: "worktree" },
+      terms: { document: document.document, segments: document.segments, gates: [], after: [] },
+    },
+    suffix,
+  );
 }
 
 function arc(seq: number, suffix: string) {
@@ -102,7 +103,8 @@ test("Arc Markdown accepts only a title, Objective, and Brief", () => {
   assert.equal(decoded.brief.trim(), "Dispatch the next bounded implementation.");
   assert.throws(
     () => decodeArcDocument(`---\nkind: arc\n---\n${arcDocument()}`),
-    (error: unknown) => error instanceof TypeError && error.message.includes("arc document may not contain frontmatter"),
+    (error: unknown) =>
+      error instanceof TypeError && error.message.includes("arc document may not contain frontmatter"),
   );
   assert.throws(
     () => decodeArcDocument(`${arcDocument()}## Delivery\nnot allowed\n`),
@@ -150,10 +152,11 @@ test("Arc CLI admits explicit chapters without changing the status result shape"
     cwd: repository.path,
     environment: { KEIYAKU_HOME: `${repository.path}/empty-home` },
   };
-  const command = (argv: readonly string[], source = "") => invoke(parseArgv(argv), {
-    ...runtime,
-    readStdin: () => source,
-  });
+  const command = (argv: readonly string[], source = "") =>
+    invoke(parseArgv(argv), {
+      ...runtime,
+      readStdin: () => source,
+    });
 
   const bound = await command(["bind", "-"], contractDocument("Arc CLI"));
   assert.equal(bound.kind, "accepted");
@@ -164,7 +167,10 @@ test("Arc CLI admits explicit chapters without changing the status result shape"
 
   const admitted = await command(["arc", contract, "-"], arcDocument("CLI Chapter"));
   assert.equal(admitted.kind, "accepted");
-  assert.deepEqual(admitted.facts.map((fact) => fact.kind), ["arc"]);
+  assert.deepEqual(
+    admitted.facts.map((fact) => fact.kind),
+    ["arc"],
+  );
   const state = (await observeContract(await repositoryAt(repository.path), contract)).state;
   assert.equal(state?.currentArc?.data.seq, 1);
   assert.equal(state?.currentArc?.data.title, "CLI Chapter");
@@ -178,10 +184,16 @@ test("Arc CLI admits explicit chapters without changing the status result shape"
   const after = await command(["status", contract]);
   assert.equal(after.kind, "status");
   if (after.kind === "status" && after.report.contracts.kind === "present") {
-    assert.deepEqual(after.report.contracts.value.rows.map((row) => row.id), [contract]);
+    assert.deepEqual(
+      after.report.contracts.value.rows.map((row) => row.id),
+      [contract],
+    );
   }
   assert.match(JSON.stringify(after), new RegExp(contract));
   assert.doesNotMatch(renderContractBody(body), /\n## Arc\n/);
   assert.match(renderContractBody(body, secondState?.currentArc?.data), /## Arc\n\n### Sequence\n\n2/);
-  assert.match(renderContractBody(body, secondState?.currentArc?.data), /### Brief\n\nDispatch the next bounded implementation\./);
+  assert.match(
+    renderContractBody(body, secondState?.currentArc?.data),
+    /### Brief\n\nDispatch the next bounded implementation\./,
+  );
 });

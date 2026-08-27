@@ -22,15 +22,20 @@ test("empty Git read observation memoizes refs without starting object transport
   writeFileSync(log, "");
 
   await withGitShim(
-    "printf '%s\\n' \"$*\" >> \"$KEIYAKU_GIT_OBSERVATION_LOG\"\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"",
+    'printf \'%s\\n\' "$*" >> "$KEIYAKU_GIT_OBSERVATION_LOG"\nexec "$KEIYAKU_REAL_GIT" "$@"',
     { KEIYAKU_GIT_OBSERVATION_LOG: log },
     async (gitPath) => {
       const git = await repositoryAt(repository.path, gitPath);
-      return withGitDecodeChannel(git, (channel) => withGitReadObservation(git, channel, async (observation) => {
-      assert.equal(observation.snapshot.commit, null);
-      assert.equal(await observation.resolveRef("refs/heads/main"), await observation.resolveRef("refs/heads/main"));
-      assert.deepEqual(await observation.readBlobs([]), new Map());
-      }));
+      return withGitDecodeChannel(git, (channel) =>
+        withGitReadObservation(git, channel, async (observation) => {
+          assert.equal(observation.snapshot.commit, null);
+          assert.equal(
+            await observation.resolveRef("refs/heads/main"),
+            await observation.resolveRef("refs/heads/main"),
+          );
+          assert.deepEqual(await observation.readBlobs([]), new Map());
+        }),
+      );
     },
   );
 
@@ -48,10 +53,12 @@ test("Git read observation returns typed missing objects and closes its batch", 
   let retained: GitReadObservation | null = null;
 
   const git = await repositoryAt(repository.path);
-  const result = await withGitDecodeChannel(git, (channel) => withGitReadObservation(git, channel, async (observation) => {
-    retained = observation;
-    return (await observation.readBlobs([MISSING_OID])).get(MISSING_OID);
-  }));
+  const result = await withGitDecodeChannel(git, (channel) =>
+    withGitReadObservation(git, channel, async (observation) => {
+      retained = observation;
+      return (await observation.readBlobs([MISSING_OID])).get(MISSING_OID);
+    }),
+  );
 
   assert.deepEqual(result, { kind: "missing" });
   assert.notEqual(retained, null);
@@ -63,11 +70,11 @@ test("Git read observation uses the pinned executable for its batch", async () =
   const repository = makeGitRepository();
   const gitPath = gitExecutablePath();
   const git = await repositoryAt(repository.path, gitPath);
-  const result = await withGitDecodeChannel(git, (channel) => withGitReadObservation(
-    git,
-    channel,
-    async (observation) => (await observation.readBlobs([MISSING_OID])).get(MISSING_OID),
-  ));
+  const result = await withGitDecodeChannel(git, (channel) =>
+    withGitReadObservation(git, channel, async (observation) =>
+      (await observation.readBlobs([MISSING_OID])).get(MISSING_OID),
+    ),
+  );
   assert.deepEqual(result, { kind: "missing" });
 });
 
@@ -84,17 +91,20 @@ test("Git read observation preserves callback failure over a simultaneous close 
       'exec "$KEIYAKU_REAL_GIT" "$@"',
     ].join("\n"),
     {},
-    async (gitPath) => assert.rejects(
-      (async () => {
-        const git = await repositoryAt(repository.path, gitPath);
-        return withGitDecodeChannel(git, (channel) => withGitReadObservation(git, channel, async (observation) => {
-        retained = observation;
-        await observation.readBlobs([MISSING_OID]);
-        throw new Error("consumer failed");
-        }));
-      })(),
-      /consumer failed/u,
-    ),
+    async (gitPath) =>
+      assert.rejects(
+        (async () => {
+          const git = await repositoryAt(repository.path, gitPath);
+          return withGitDecodeChannel(git, (channel) =>
+            withGitReadObservation(git, channel, async (observation) => {
+              retained = observation;
+              await observation.readBlobs([MISSING_OID]);
+              throw new Error("consumer failed");
+            }),
+          );
+        })(),
+        /consumer failed/u,
+      ),
   );
 
   assert.notEqual(retained, null);
@@ -113,15 +123,18 @@ test("Git read observation returns a close-only batch failure", async () => {
       'exec "$KEIYAKU_REAL_GIT" "$@"',
     ].join("\n"),
     {},
-    async (gitPath) => assert.rejects(
-      (async () => {
-        const git = await repositoryAt(repository.path, gitPath);
-        return withGitDecodeChannel(git, (channel) => withGitReadObservation(git, channel, async (observation) => {
-        assert.deepEqual((await observation.readBlobs([MISSING_OID])).get(MISSING_OID), { kind: "missing" });
-        }));
-      })(),
-      /git cat-file --batch: git cat-file --batch did not close cleanly/u,
-    ),
+    async (gitPath) =>
+      assert.rejects(
+        (async () => {
+          const git = await repositoryAt(repository.path, gitPath);
+          return withGitDecodeChannel(git, (channel) =>
+            withGitReadObservation(git, channel, async (observation) => {
+              assert.deepEqual((await observation.readBlobs([MISSING_OID])).get(MISSING_OID), { kind: "missing" });
+            }),
+          );
+        })(),
+        /git cat-file --batch: git cat-file --batch did not close cleanly/u,
+      ),
   );
 });
 
@@ -132,17 +145,19 @@ test("a dead shared batch is not restarted for later object reads", async () => 
 
   await withGitShim(
     [
-      "printf '%s\\n' \"$*\" >> \"$KEIYAKU_GIT_OBSERVATION_LOG\"",
-      "if [ \"$1 $2\" = \"cat-file --batch\" ]; then exit 73; fi",
-      "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
+      'printf \'%s\\n\' "$*" >> "$KEIYAKU_GIT_OBSERVATION_LOG"',
+      'if [ "$1 $2" = "cat-file --batch" ]; then exit 73; fi',
+      'exec "$KEIYAKU_REAL_GIT" "$@"',
     ].join("\n"),
     { KEIYAKU_GIT_OBSERVATION_LOG: log },
     async (gitPath) => {
       const git = await repositoryAt(repository.path, gitPath);
-      await withGitDecodeChannel(git, (channel) => withGitReadObservation(git, channel, async (observation) => {
-        await assert.rejects(observation.readBlobs([MISSING_OID]), /git cat-file --batch/u);
-        await assert.rejects(observation.readBlobs([MISSING_OID]), /git cat-file --batch/u);
-      }));
+      await withGitDecodeChannel(git, (channel) =>
+        withGitReadObservation(git, channel, async (observation) => {
+          await assert.rejects(observation.readBlobs([MISSING_OID]), /git cat-file --batch/u);
+          await assert.rejects(observation.readBlobs([MISSING_OID]), /git cat-file --batch/u);
+        }),
+      );
     },
   );
 

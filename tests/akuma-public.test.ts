@@ -1,14 +1,19 @@
 import assert from "node:assert/strict";
-import {
-  existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, unlinkSync, writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { Akuma, AkumaNotBornError, defaultWaitComplete, killAkumaWithRecovery } from "../src/akuma/akuma.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
-import { ordinarySnapshotBudget, projectTurns, selectHistory, selectSnapshot, type ActivitySnapshot, type TurnLedger } from "../src/akuma/projection.js";
+import {
+  ordinarySnapshotBudget,
+  projectTurns,
+  selectHistory,
+  selectSnapshot,
+  type ActivitySnapshot,
+  type TurnLedger,
+} from "../src/akuma/projection.js";
 import { AkumaArchetypeError, listArchetypeDefinitions, loadArchetype } from "../src/akuma/archetype.js";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
 import {
@@ -35,10 +40,7 @@ import { World } from "../src/world.js";
 
 const CLAUDE_EXECUTION = { name: "claude", kind: "claude-agent-sdk" } as const;
 
-async function akumaAt(
-  root: string,
-  input?: { home?: string; settings?: Awaited<ReturnType<typeof settings>> },
-) {
+async function akumaAt(root: string, input?: { home?: string; settings?: Awaited<ReturnType<typeof settings>> }) {
   return Akuma.of(await World.at(root), input);
 }
 
@@ -48,7 +50,9 @@ async function timeline(paths: Parameters<typeof activitySlice>[0]) {
 
 async function bornHistoryHandle(root: string, suffix: string) {
   const allocated = await allocateAkumaDirectory({
-    worldRoot: root, archetype: "claude", draw: () => suffix,
+    worldRoot: root,
+    archetype: "claude",
+    draw: () => suffix,
   });
   await initializeHeart(allocated.paths);
   const holder = (await HeldAkumaLeash.try(allocated.paths))!;
@@ -98,7 +102,10 @@ test("history completion keeps the start sequence and never remints", async () =
     const start = await appendActivity(born.allocated.paths, {
       turnSequence: born.turn.sequence,
       event: {
-        type: "tool", phase: "started", id: "bash-1", name: "Bash",
+        type: "tool",
+        phase: "started",
+        id: "bash-1",
+        name: "Bash",
         call: { kind: "run", command: "npm test" },
       },
       at: "2026-08-10T00:00:02.000Z",
@@ -106,8 +113,12 @@ test("history completion keeps the start sequence and never remints", async () =
     const done = await appendActivity(born.allocated.paths, {
       turnSequence: born.turn.sequence,
       event: {
-        type: "tool", phase: "completed", id: "bash-1", name: "Bash",
-        call: { kind: "run", command: "npm test" }, result: { status: "ok" },
+        type: "tool",
+        phase: "completed",
+        id: "bash-1",
+        name: "Bash",
+        call: { kind: "run", command: "npm test" },
+        result: { status: "ok" },
       },
       at: "2026-08-10T00:00:03.000Z",
     });
@@ -118,14 +129,26 @@ test("history completion keeps the start sequence and never remints", async () =
     assert.equal(tools.length, 1);
     assert.equal(tools[0]?.sequence, 2);
     assert.equal(tools[0] !== undefined && "state" in tools[0] && tools[0].state !== "active", true);
-    assert.equal(page.rows.some((row) => row.kind === "tool" && row.sequence === 3), false);
+    assert.equal(
+      page.rows.some((row) => row.kind === "tool" && row.sequence === 3),
+      false,
+    );
 
     const sinceStart = await born.handle.history({ since: 2 });
-    assert.equal(sinceStart.rows.some((row) => row.kind === "tool"), false);
-    assert.equal(sinceStart.rows.some((row) => row.sequence === 3), false);
+    assert.equal(
+      sinceStart.rows.some((row) => row.kind === "tool"),
+      false,
+    );
+    assert.equal(
+      sinceStart.rows.some((row) => row.sequence === 3),
+      false,
+    );
 
     const beforeDone = await born.handle.history({ before: done });
-    assert.deepEqual(toolRow(beforeDone.rows).map((row) => row.sequence), [2]);
+    assert.deepEqual(
+      toolRow(beforeDone.rows).map((row) => row.sequence),
+      [2],
+    );
     assert.equal(beforeDone.rows.filter((row) => row.kind === "tool").length, 1);
   } finally {
     born.holder.release();
@@ -140,7 +163,10 @@ test("history limit counts folded semantic rows", async () => {
     await appendActivity(born.allocated.paths, {
       turnSequence: born.turn.sequence,
       event: {
-        type: "tool", phase: "started", id: "note-tool", name: "Bash",
+        type: "tool",
+        phase: "started",
+        id: "note-tool",
+        name: "Bash",
         call: { kind: "run", command: "echo" },
       },
       at: "2026-08-10T00:00:02.000Z",
@@ -148,8 +174,12 @@ test("history limit counts folded semantic rows", async () => {
     await appendActivity(born.allocated.paths, {
       turnSequence: born.turn.sequence,
       event: {
-        type: "tool", phase: "completed", id: "note-tool", name: "Bash",
-        call: { kind: "run", command: "echo" }, result: { status: "ok" },
+        type: "tool",
+        phase: "completed",
+        id: "note-tool",
+        name: "Bash",
+        call: { kind: "run", command: "echo" },
+        result: { status: "ok" },
       },
       at: "2026-08-10T00:00:03.000Z",
     });
@@ -167,7 +197,10 @@ test("history limit counts folded semantic rows", async () => {
     assert.ok(facts.length > 3);
     const page = await born.handle.history({ limit: 3 });
     assert.equal(page.rows.length, 3);
-    assert.deepEqual(page.rows.map((row) => row.kind), ["tool", "note", "note"]);
+    assert.deepEqual(
+      page.rows.map((row) => row.kind),
+      ["tool", "note", "note"],
+    );
     assert.equal(page.rows[0]?.sequence, 2);
     assert.equal(page.omitted > 0, true);
     assert.equal(page.lowestRetained, 1);
@@ -189,8 +222,14 @@ test("Heart activity reads do not take public history cursors", async () => {
     });
     const retained = await activitySlice(born.allocated.paths);
     const page = await born.handle.history({ before: 2, limit: 1 });
-    assert.deepEqual(retained.rows.map((row) => row.sequence), [1, 2]);
-    assert.deepEqual(page.rows.map((row) => row.sequence), [1]);
+    assert.deepEqual(
+      retained.rows.map((row) => row.sequence),
+      [1, 2],
+    );
+    assert.deepEqual(
+      page.rows.map((row) => row.sequence),
+      [1],
+    );
     assert.equal(page.lowestRetained, retained.lowestRetained);
     assert.equal(page.highest, retained.highest);
   } finally {
@@ -200,16 +239,27 @@ test("Heart activity reads do not take public history cursors", async () => {
 });
 
 test("forward history reports a pruned interval after its cursor", async () => {
-  const history = selectHistory(projectTurns([{
-      kind: "activity",
-      sequence: 9,
-      turnSequence: 1,
-      event: { type: "note", text: "retained" },
-      at: "2026-08-08T00:00:09.000Z",
-    }], { lowestRetained: 1, highest: 9 }), { since: 4, limit: 50 });
+  const history = selectHistory(
+    projectTurns(
+      [
+        {
+          kind: "activity",
+          sequence: 9,
+          turnSequence: 1,
+          event: { type: "note", text: "retained" },
+          at: "2026-08-08T00:00:09.000Z",
+        },
+      ],
+      { lowestRetained: 1, highest: 9 },
+    ),
+    { since: 4, limit: 50 },
+  );
 
   assert.equal(history.historyLost, true);
-  assert.deepEqual(history.rows.map((row) => row.sequence), [9]);
+  assert.deepEqual(
+    history.rows.map((row) => row.sequence),
+    [9],
+  );
 });
 
 test("Heart life timestamps select each reachable evidence source", () => {
@@ -250,24 +300,44 @@ test("public fleet rows wire every Heart life to its source timestamp", async ()
       return { allocated, holder };
     };
     const running = await born("f0000001", "2026-08-12T00:00:00.000Z");
-    const runningBody = await running.holder.recordBody(running.allocated.paths, { leashTakenAt: "2026-08-12T00:01:00.000Z" });
+    const runningBody = await running.holder.recordBody(running.allocated.paths, {
+      leashTakenAt: "2026-08-12T00:01:00.000Z",
+    });
     holders.push(running.holder);
     const hung = await born("f0000002", "2026-08-12T00:00:00.000Z");
     const hungBody = await hung.holder.recordBody(hung.allocated.paths, { leashTakenAt: "2026-08-12T00:02:00.000Z" });
-    await hung.holder.recordBodyHung(hung.allocated.paths, { sequence: hungBody.sequence, diagnostic: "stuck", at: "2026-08-12T00:03:00.000Z" });
+    await hung.holder.recordBodyHung(hung.allocated.paths, {
+      sequence: hungBody.sequence,
+      diagnostic: "stuck",
+      at: "2026-08-12T00:03:00.000Z",
+    });
     holders.push(hung.holder);
     const asleep = await born("f0000003", "2026-08-12T00:00:00.000Z");
-    const asleepBody = await asleep.holder.recordBody(asleep.allocated.paths, { leashTakenAt: "2026-08-12T00:04:00.000Z" });
+    const asleepBody = await asleep.holder.recordBody(asleep.allocated.paths, {
+      leashTakenAt: "2026-08-12T00:04:00.000Z",
+    });
     await finishBodyIfIdle(asleep.allocated.paths, { sequence: asleepBody.sequence, at: "2026-08-12T00:05:00.000Z" });
     asleep.holder.release();
     const stranded = await born("f0000004", "2026-08-12T00:00:00.000Z");
-    const strandedBody = await stranded.holder.recordBody(stranded.allocated.paths, { leashTakenAt: "2026-08-12T00:06:00.000Z" });
-    await breakBody(stranded.allocated.paths, { sequence: strandedBody.sequence, end: "broke-off", at: "2026-08-12T00:07:00.000Z" });
+    const strandedBody = await stranded.holder.recordBody(stranded.allocated.paths, {
+      leashTakenAt: "2026-08-12T00:06:00.000Z",
+    });
+    await breakBody(stranded.allocated.paths, {
+      sequence: strandedBody.sequence,
+      end: "broke-off",
+      at: "2026-08-12T00:07:00.000Z",
+    });
     stranded.holder.release();
     const killed = await born("f0000005", "2026-08-12T00:00:00.000Z");
-    const killedBody = await killed.holder.recordBody(killed.allocated.paths, { leashTakenAt: "2026-08-12T00:08:00.000Z" });
+    const killedBody = await killed.holder.recordBody(killed.allocated.paths, {
+      leashTakenAt: "2026-08-12T00:08:00.000Z",
+    });
     assert.equal((await requestStop(killed.allocated.paths, "2026-08-12T00:09:00.000Z")).kind, "requested");
-    await breakBody(killed.allocated.paths, { sequence: killedBody.sequence, end: "put-down", at: "2026-08-12T00:10:00.000Z" });
+    await breakBody(killed.allocated.paths, {
+      sequence: killedBody.sequence,
+      end: "put-down",
+      at: "2026-08-12T00:10:00.000Z",
+    });
     await killed.holder.settleStop(killed.allocated.paths);
     killed.holder.release();
     const untidy = await born("f0000006", "2026-08-12T00:00:00.000Z");
@@ -303,7 +373,9 @@ test("tell refuses an unborn address without leaving durable input", async () =>
     await initializeHeart(allocated.paths);
     await assert.rejects((await akumaAt(root)).of({ id: allocated.id }).tell("future input"), AkumaNotBornError);
     assert.deepEqual((await readHeart(allocated.paths)).pending, []);
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("interrupt refuses an unborn address without leaving durable input or control", async () => {
@@ -316,15 +388,23 @@ test("interrupt refuses an unborn address without leaving durable input or contr
       await assert.rejects((await akumaAt(root)).of({ id: allocated.id }).interrupt("future input"), AkumaNotBornError);
       assert.deepEqual((await readHeart(allocated.paths)).pending, []);
       assert.equal(await pauseRequested(allocated.paths), false);
-    } finally { holder.release(); }
-  } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      holder.release();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 const provider: ProviderAdapter = {
-  admitOptions(options) { return { kind: "admitted", options }; },
+  admitOptions(options) {
+    return { kind: "admitted", options };
+  },
   async start() {
     let finishEvents!: () => void;
-    const eventsFinished = new Promise<void>((resolve) => { finishEvents = resolve; });
+    const eventsFinished = new Promise<void>((resolve) => {
+      finishEvents = resolve;
+    });
     return {
       admission: { fence: "public-fixture-turn" },
       events: {
@@ -335,7 +415,9 @@ const provider: ProviderAdapter = {
         },
       },
       completion: eventsFinished.then(() => ({
-        kind: "answered" as const, answer: "public answer", historyId: "public-history",
+        kind: "answered" as const,
+        answer: "public answer",
+        historyId: "public-history",
       })),
       async abort() {},
     };
@@ -345,14 +427,22 @@ const provider: ProviderAdapter = {
 test("turn owner folds a rejected completion while the event stream remains open", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-completion-rejection-")));
   let rejectCompletion!: (error: Error) => void;
-  const completion = new Promise<never>((_, reject) => { rejectCompletion = reject; });
+  const completion = new Promise<never>((_, reject) => {
+    rejectCompletion = reject;
+  });
   const rejecting: ProviderAdapter = {
-    admitOptions(options) { return { kind: "admitted", options }; },
+    admitOptions(options) {
+      return { kind: "admitted", options };
+    },
     async start() {
       queueMicrotask(() => rejectCompletion(new Error("completion rejected")));
       return {
         admission: { fence: "completion-rejection" },
-        events: { async *[Symbol.asyncIterator]() { await new Promise<void>(() => {}); } },
+        events: {
+          async *[Symbol.asyncIterator]() {
+            await new Promise<void>(() => {});
+          },
+        },
         completion,
         async abort() {},
         async forceDispose() {},
@@ -363,46 +453,56 @@ test("turn owner folds a rejected completion while the event stream remains open
     const world = await World.at(root);
     const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "deadbeef" });
     await initializeHeart(allocated.paths);
-    await driveAkumaBody({
-      paths: allocated.paths,
-      seed: {
-        id: allocated.id,
-        archetype: "claude",
-        provider: CLAUDE_EXECUTION,
-        options: {},
-        cwd: world,
-        origin: { kind: "direct" },
-        allowed: ALLOWED_ACTIONS,
+    await driveAkumaBody(
+      {
+        paths: allocated.paths,
+        seed: {
+          id: allocated.id,
+          archetype: "claude",
+          provider: CLAUDE_EXECUTION,
+          options: {},
+          cwd: world,
+          origin: { kind: "direct" },
+          allowed: ALLOWED_ACTIONS,
+        },
+        initialBody: "work",
       },
-      initialBody: "work",
-    }, rejecting, { now: () => "2026-08-24T00:00:00.000Z" });
+      rejecting,
+      { now: () => "2026-08-24T00:00:00.000Z" },
+    );
     const rows = (await activitySlice(allocated.paths)).rows;
     const outcome = rows.find((row) => row.kind === "turn-end");
     assert.ok(outcome, JSON.stringify(rows));
     assert.deepEqual(outcome.outcome, { kind: "failed", diagnostic: "completion rejected" });
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 async function answeredSource(root: string, suffix: string, readonly?: Soul["readonly"]) {
   const world = await World.at(root);
   const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => suffix });
   await initializeHeart(allocated.paths);
-  await driveAkumaBody({
-    paths: allocated.paths,
-    seed: {
-      id: allocated.id,
-      archetype: "claude",
-      description: "Fork source",
-      provider: CLAUDE_EXECUTION,
-      options: { model: "fixture-model", ...(readonly === undefined ? {} : { readonly: true }) },
-      ...(readonly === undefined ? {} : { readonly }),
-      origin: { kind: "direct" },
-      cwd: world,
+  await driveAkumaBody(
+    {
+      paths: allocated.paths,
+      seed: {
+        id: allocated.id,
+        archetype: "claude",
+        description: "Fork source",
+        provider: CLAUDE_EXECUTION,
+        options: { model: "fixture-model", ...(readonly === undefined ? {} : { readonly: true }) },
+        ...(readonly === undefined ? {} : { readonly }),
+        origin: { kind: "direct" },
+        cwd: world,
+      },
+      initialBody: "work",
     },
-    initialBody: "work",
-  }, provider, {
-    now: () => "2026-08-08T00:00:00.000Z",
-  });
+    provider,
+    {
+      now: () => "2026-08-08T00:00:00.000Z",
+    },
+  );
   return allocated;
 }
 
@@ -420,10 +520,12 @@ test("public observation classifies a vanished Heart without recreating heart.db
     unlinkSync(allocated.paths.heart);
     const world = await akumaAt(root);
     await assert.rejects(world.of({ id: allocated.id }).status(), AkumaNotBornError);
-    assert.deepEqual((await world.list()).rows, [{
-      id: allocated.id,
-      life: "unborn",
-    }]);
+    assert.deepEqual((await world.list()).rows, [
+      {
+        id: allocated.id,
+        life: "unborn",
+      },
+    ]);
     assert.equal(existsSync(allocated.paths.heart), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -441,54 +543,144 @@ function snapshot(
 test("snapshot selects one current focus while history keeps honest tool lifecycle", () => {
   const facts = [
     { kind: "turn-start" as const, sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
-    { kind: "activity" as const, sequence: 2, turnSequence: 1, at: "2026-08-10T00:00:02.000Z", event: { type: "tool", phase: "started", id: "old", name: "Bash", call: { kind: "run", command: "old" } } },
-    { kind: "turn-end" as const, sequence: 3, turnSequence: 1, completedAt: "2026-08-10T00:00:03.000Z", outcome: { kind: "answered", answer: "old answer", session: { sessionId: "session" } } },
+    {
+      kind: "activity" as const,
+      sequence: 2,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:02.000Z",
+      event: { type: "tool", phase: "started", id: "old", name: "Bash", call: { kind: "run", command: "old" } },
+    },
+    {
+      kind: "turn-end" as const,
+      sequence: 3,
+      turnSequence: 1,
+      completedAt: "2026-08-10T00:00:03.000Z",
+      outcome: { kind: "answered", answer: "old answer", session: { sessionId: "session" } },
+    },
     { kind: "turn-start" as const, sequence: 4, bodySequence: 1, startedAt: "2026-08-10T00:00:04.000Z" },
     { kind: "call" as const, sequence: 5, turnSequence: 4, at: "2026-08-10T00:00:04.000Z", body: "current" },
-    { kind: "activity" as const, sequence: 6, turnSequence: 4, at: "2026-08-10T00:00:05.000Z", event: { type: "note", text: "checking" } },
-    { kind: "tell" as const, sequence: 7, id: "tell-1", body: "new direction", recordedAt: "2026-08-10T00:00:06.000Z", state: "pending" as const, deliveries: [] },
-    { kind: "activity" as const, sequence: 8, turnSequence: 4, at: "2026-08-10T00:00:07.000Z", event: { type: "tool", phase: "started", id: "current", name: "Search", call: { kind: "search", query: "TODO" } } },
+    {
+      kind: "activity" as const,
+      sequence: 6,
+      turnSequence: 4,
+      at: "2026-08-10T00:00:05.000Z",
+      event: { type: "note", text: "checking" },
+    },
+    {
+      kind: "tell" as const,
+      sequence: 7,
+      id: "tell-1",
+      body: "new direction",
+      recordedAt: "2026-08-10T00:00:06.000Z",
+      state: "pending" as const,
+      deliveries: [],
+    },
+    {
+      kind: "activity" as const,
+      sequence: 8,
+      turnSequence: 4,
+      at: "2026-08-10T00:00:07.000Z",
+      event: { type: "tool", phase: "started", id: "current", name: "Search", call: { kind: "search", query: "TODO" } },
+    },
   ];
   const ledger = projectTurns(facts);
   const selected = snapshot(ledger, { tail: 1 });
   assert.equal(selected.kind, "open");
   if (selected.kind !== "open") return;
-  assert.deepEqual(selected.entries.map((entry) => entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence), ["gap:1", 6, 7, 8]);
+  assert.deepEqual(
+    selected.entries.map((entry) => (entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence)),
+    ["gap:1", 6, 7, 8],
+  );
   assert.equal(selected.omitted, 1);
-  assert.equal(selected.entries.some((entry) => entry.kind === "row" && entry.row.kind === "tool" && entry.row.state === "active"), true);
-  assert.equal(selected.entries.some((entry) => entry.kind === "row" && entry.row.sequence === 2), false);
-  assert.equal(ledger.rows.some((row) => row.kind === "tool" && row.sequence === 2 && row.state === "unsettled"), true);
-  assert.equal(ledger.rows.some((row) => row.kind === "tool" && row.sequence === 8 && row.state === "active"), true);
+  assert.equal(
+    selected.entries.some((entry) => entry.kind === "row" && entry.row.kind === "tool" && entry.row.state === "active"),
+    true,
+  );
+  assert.equal(
+    selected.entries.some((entry) => entry.kind === "row" && entry.row.sequence === 2),
+    false,
+  );
+  assert.equal(
+    ledger.rows.some((row) => row.kind === "tool" && row.sequence === 2 && row.state === "unsettled"),
+    true,
+  );
+  assert.equal(
+    ledger.rows.some((row) => row.kind === "tool" && row.sequence === 8 && row.state === "active"),
+    true,
+  );
   assert.equal(ledger.turns[0]?.kind, "closed");
   assert.equal(ledger.turns[1]?.kind, "open");
-  assert.equal(ledger.openTurn?.rows.some((row) => row.kind === "tool" && row.state === "active"), true);
+  assert.equal(
+    ledger.openTurn?.rows.some((row) => row.kind === "tool" && row.state === "active"),
+    true,
+  );
 
-  const closed = projectTurns([...facts,
-    { kind: "activity" as const, sequence: 9, turnSequence: 4, at: "2026-08-10T00:00:08.000Z", event: { type: "assistant", text: "done" } },
-    { kind: "turn-end" as const, sequence: 10, turnSequence: 4, completedAt: "2026-08-10T00:00:09.000Z", outcome: { kind: "answered", answer: "done", session: { sessionId: "session" } } },
+  const closed = projectTurns([
+    ...facts,
+    {
+      kind: "activity" as const,
+      sequence: 9,
+      turnSequence: 4,
+      at: "2026-08-10T00:00:08.000Z",
+      event: { type: "assistant", text: "done" },
+    },
+    {
+      kind: "turn-end" as const,
+      sequence: 10,
+      turnSequence: 4,
+      completedAt: "2026-08-10T00:00:09.000Z",
+      outcome: { kind: "answered", answer: "done", session: { sessionId: "session" } },
+    },
   ]);
   const idle = snapshot(closed);
   assert.equal(idle.kind, "idle");
   if (idle.kind !== "idle") return;
   assert.equal(idle.outcome?.outcome.kind, "answered");
-  assert.deepEqual(idle.entries.map((entry) => entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence), [7]);
-  assert.equal(closed.rows.some((row) => row.kind === "said" && row.sequence === 9), false);
-  assert.equal(closed.rows.some((row) => row.kind === "tool" && row.sequence === 8 && row.state === "unsettled"), true);
+  assert.deepEqual(
+    idle.entries.map((entry) => (entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence)),
+    [7],
+  );
+  assert.equal(
+    closed.rows.some((row) => row.kind === "said" && row.sequence === 9),
+    false,
+  );
+  assert.equal(
+    closed.rows.some((row) => row.kind === "tool" && row.sequence === 8 && row.state === "unsettled"),
+    true,
+  );
   assert.equal(closed.turns[1]?.kind, "closed");
   if (closed.turns[1]?.kind === "closed") {
-    assert.equal(closed.turns[1].rows.some((row) => row.kind === "tool" && row.state === "unsettled"), true);
+    assert.equal(
+      closed.turns[1].rows.some((row) => row.kind === "tool" && row.state === "unsettled"),
+      true,
+    );
   }
 
   const mixedLedger = projectTurns([
     { kind: "turn-start", sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
-    { kind: "activity", sequence: 2, turnSequence: 1, at: "2026-08-10T00:00:02.000Z", event: { type: "tool", phase: "started", id: "abandoned", name: "Bash", call: { kind: "run", command: "old" } } },
+    {
+      kind: "activity",
+      sequence: 2,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:02.000Z",
+      event: { type: "tool", phase: "started", id: "abandoned", name: "Bash", call: { kind: "run", command: "old" } },
+    },
     { kind: "turn-start", sequence: 3, bodySequence: 2, startedAt: "2026-08-10T00:00:03.000Z" },
-    { kind: "turn-end", sequence: 4, turnSequence: 3, completedAt: "2026-08-10T00:00:04.000Z", outcome: { kind: "failed", diagnostic: "latest failed" } },
+    {
+      kind: "turn-end",
+      sequence: 4,
+      turnSequence: 3,
+      completedAt: "2026-08-10T00:00:04.000Z",
+      outcome: { kind: "failed", diagnostic: "latest failed" },
+    },
   ]);
   assert.equal(mixedLedger.turns[0]?.kind, "open");
   assert.equal(mixedLedger.turns[1]?.kind, "closed");
   assert.equal(mixedLedger.openTurn, undefined);
-  assert.equal(mixedLedger.rows.some((row) => row.kind === "tool" && row.sequence === 2 && row.state === "active"), true);
+  assert.equal(
+    mixedLedger.rows.some((row) => row.kind === "tool" && row.sequence === 2 && row.state === "active"),
+    true,
+  );
   assert.equal(snapshot(mixedLedger).kind, "idle");
 });
 
@@ -508,51 +700,177 @@ test("reported file changes follow the open or latest closed frontier", () => {
   const activeCall = { kind: "fileChange" as const, changes: [{ op: "delete" as const, path: "src/active.ts" }] };
   const facts = [
     { kind: "turn-start" as const, sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
-    { kind: "activity" as const, sequence: 2, turnSequence: 1, at: "2026-08-10T00:00:02.000Z", event: { type: "tool" as const, phase: "started" as const, id: "earlier", name: "Write", call: earlierCall } },
-    { kind: "activity" as const, sequence: 3, turnSequence: 1, at: "2026-08-10T00:00:03.000Z", event: { type: "tool" as const, phase: "completed" as const, id: "earlier", name: "Write", call: earlierCall, result: { status: "ok" as const } } },
-    { kind: "turn-end" as const, sequence: 4, turnSequence: 1, completedAt: "2026-08-10T00:00:04.000Z", outcome: { kind: "answered" as const, answer: "earlier", session: { sessionId: "earlier" } } },
+    {
+      kind: "activity" as const,
+      sequence: 2,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:02.000Z",
+      event: { type: "tool" as const, phase: "started" as const, id: "earlier", name: "Write", call: earlierCall },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 3,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:03.000Z",
+      event: {
+        type: "tool" as const,
+        phase: "completed" as const,
+        id: "earlier",
+        name: "Write",
+        call: earlierCall,
+        result: { status: "ok" as const },
+      },
+    },
+    {
+      kind: "turn-end" as const,
+      sequence: 4,
+      turnSequence: 1,
+      completedAt: "2026-08-10T00:00:04.000Z",
+      outcome: { kind: "answered" as const, answer: "earlier", session: { sessionId: "earlier" } },
+    },
     { kind: "turn-start" as const, sequence: 5, bodySequence: 1, startedAt: "2026-08-10T00:00:05.000Z" },
-    { kind: "activity" as const, sequence: 6, turnSequence: 5, at: "2026-08-10T00:00:06.000Z", event: { type: "tool" as const, phase: "started" as const, id: "frontier", name: "Write", call: frontierCall } },
-    { kind: "activity" as const, sequence: 7, turnSequence: 5, at: "2026-08-10T00:00:07.000Z", event: { type: "tool" as const, phase: "completed" as const, id: "frontier", name: "Write", call: frontierCall, result: { status: "ok" as const } } },
-    { kind: "activity" as const, sequence: 8, turnSequence: 5, at: "2026-08-10T00:00:08.000Z", event: { type: "tool" as const, phase: "started" as const, id: "failed", name: "Write", call: failedCall } },
-    { kind: "activity" as const, sequence: 9, turnSequence: 5, at: "2026-08-10T00:00:09.000Z", event: { type: "tool" as const, phase: "completed" as const, id: "failed", name: "Write", call: failedCall, result: { status: "error" as const } } },
-    { kind: "activity" as const, sequence: 10, turnSequence: 5, at: "2026-08-10T00:00:10.000Z", event: { type: "tool" as const, phase: "started" as const, id: "active", name: "Write", call: activeCall } },
-    { kind: "activity" as const, sequence: 11, turnSequence: 5, at: "2026-08-10T00:00:11.000Z", event: { type: "tool" as const, phase: "started" as const, id: "run", name: "Bash", call: { kind: "run" as const, command: "touch src/non-file.ts" } } },
-    { kind: "activity" as const, sequence: 12, turnSequence: 5, at: "2026-08-10T00:00:12.000Z", event: { type: "tool" as const, phase: "completed" as const, id: "run", name: "Bash", call: { kind: "run" as const, command: "touch src/non-file.ts" }, result: { status: "ok" as const } } },
+    {
+      kind: "activity" as const,
+      sequence: 6,
+      turnSequence: 5,
+      at: "2026-08-10T00:00:06.000Z",
+      event: { type: "tool" as const, phase: "started" as const, id: "frontier", name: "Write", call: frontierCall },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 7,
+      turnSequence: 5,
+      at: "2026-08-10T00:00:07.000Z",
+      event: {
+        type: "tool" as const,
+        phase: "completed" as const,
+        id: "frontier",
+        name: "Write",
+        call: frontierCall,
+        result: { status: "ok" as const },
+      },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 8,
+      turnSequence: 5,
+      at: "2026-08-10T00:00:08.000Z",
+      event: { type: "tool" as const, phase: "started" as const, id: "failed", name: "Write", call: failedCall },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 9,
+      turnSequence: 5,
+      at: "2026-08-10T00:00:09.000Z",
+      event: {
+        type: "tool" as const,
+        phase: "completed" as const,
+        id: "failed",
+        name: "Write",
+        call: failedCall,
+        result: { status: "error" as const },
+      },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 10,
+      turnSequence: 5,
+      at: "2026-08-10T00:00:10.000Z",
+      event: { type: "tool" as const, phase: "started" as const, id: "active", name: "Write", call: activeCall },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 11,
+      turnSequence: 5,
+      at: "2026-08-10T00:00:11.000Z",
+      event: {
+        type: "tool" as const,
+        phase: "started" as const,
+        id: "run",
+        name: "Bash",
+        call: { kind: "run" as const, command: "touch src/non-file.ts" },
+      },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 12,
+      turnSequence: 5,
+      at: "2026-08-10T00:00:12.000Z",
+      event: {
+        type: "tool" as const,
+        phase: "completed" as const,
+        id: "run",
+        name: "Bash",
+        call: { kind: "run" as const, command: "touch src/non-file.ts" },
+        result: { status: "ok" as const },
+      },
+    },
   ];
-  const reported = (view: ActivitySnapshot) => view.reportedChanges.map((change) => ({
-    sequence: change.sequence,
-    at: change.at,
-    op: change.op,
-    path: change.path,
-    ...(change.diffstat === undefined ? {} : { diffstat: change.diffstat }),
-  }));
+  const reported = (view: ActivitySnapshot) =>
+    view.reportedChanges.map((change) => ({
+      sequence: change.sequence,
+      at: change.at,
+      op: change.op,
+      path: change.path,
+      ...(change.diffstat === undefined ? {} : { diffstat: change.diffstat }),
+    }));
   const openLedger = projectTurns(facts);
-  const openFrontier = openLedger.openTurn?.rows.find((row) => row.kind === "tool" && row.call.kind === "fileChange" && row.sequence === 6);
+  const openFrontier = openLedger.openTurn?.rows.find(
+    (row) => row.kind === "tool" && row.call.kind === "fileChange" && row.sequence === 6,
+  );
   assert.ok(openFrontier !== undefined && openFrontier.kind === "tool" && openFrontier.call.kind === "fileChange");
   (openFrontier.call.changes[3] as unknown as { op: "unspecified" }).op = "unspecified";
 
   const open = snapshot(openLedger);
   assert.equal(open.kind, "open");
   assert.deepEqual(reported(open), [
-    { sequence: 6, at: "2026-08-10T00:00:06.000Z", op: "add", path: "src/created.ts", diffstat: { added: 4, removed: 0 } },
-    { sequence: 6, at: "2026-08-10T00:00:06.000Z", op: "update", path: "src/repeated.ts", diffstat: { added: 2, removed: 1 } },
-    { sequence: 6, at: "2026-08-10T00:00:06.000Z", op: "delete", path: "src/removed.ts", diffstat: { added: 0, removed: 3 } },
+    {
+      sequence: 6,
+      at: "2026-08-10T00:00:06.000Z",
+      op: "add",
+      path: "src/created.ts",
+      diffstat: { added: 4, removed: 0 },
+    },
+    {
+      sequence: 6,
+      at: "2026-08-10T00:00:06.000Z",
+      op: "update",
+      path: "src/repeated.ts",
+      diffstat: { added: 2, removed: 1 },
+    },
+    {
+      sequence: 6,
+      at: "2026-08-10T00:00:06.000Z",
+      op: "delete",
+      path: "src/removed.ts",
+      diffstat: { added: 0, removed: 3 },
+    },
     { sequence: 6, at: "2026-08-10T00:00:06.000Z", op: "unspecified", path: "src/unknown.ts" },
-    { sequence: 6, at: "2026-08-10T00:00:06.000Z", op: "update", path: "src/repeated.ts", diffstat: { added: 1, removed: 0 } },
+    {
+      sequence: 6,
+      at: "2026-08-10T00:00:06.000Z",
+      op: "update",
+      path: "src/repeated.ts",
+      diffstat: { added: 1, removed: 0 },
+    },
   ]);
   assert.equal(open.reportedChangesOmitted, 0);
 
-  const closedLedger = projectTurns([...facts, {
-    kind: "turn-end" as const,
-    sequence: 13,
-    turnSequence: 5,
-    completedAt: "2026-08-10T00:00:13.000Z",
-    outcome: { kind: "answered" as const, answer: "frontier", session: { sessionId: "frontier" } },
-  }]);
+  const closedLedger = projectTurns([
+    ...facts,
+    {
+      kind: "turn-end" as const,
+      sequence: 13,
+      turnSequence: 5,
+      completedAt: "2026-08-10T00:00:13.000Z",
+      outcome: { kind: "answered" as const, answer: "frontier", session: { sessionId: "frontier" } },
+    },
+  ]);
   const closedFrontier = closedLedger.turns.at(-1);
   assert.ok(closedFrontier?.kind === "closed");
-  const closedChange = closedFrontier.rows.find((row) => row.kind === "tool" && row.call.kind === "fileChange" && row.sequence === 6);
+  const closedChange = closedFrontier.rows.find(
+    (row) => row.kind === "tool" && row.call.kind === "fileChange" && row.sequence === 6,
+  );
   assert.ok(closedChange !== undefined && closedChange.kind === "tool" && closedChange.call.kind === "fileChange");
   (closedChange.call.changes[3] as unknown as { op: "unspecified" }).op = "unspecified";
 
@@ -582,20 +900,80 @@ test("reported file changes keep the newest five independently of ordinary omiss
   };
   const ledger = projectTurns([
     { kind: "turn-start" as const, sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
-    { kind: "activity" as const, sequence: 2, turnSequence: 1, at: "2026-08-10T00:00:02.000Z", event: { type: "tool" as const, phase: "started" as const, id: "first", name: "Write", call: firstCall } },
-    { kind: "activity" as const, sequence: 3, turnSequence: 1, at: "2026-08-10T00:00:03.000Z", event: { type: "tool" as const, phase: "completed" as const, id: "first", name: "Write", call: firstCall, result: { status: "ok" as const } } },
-    { kind: "activity" as const, sequence: 4, turnSequence: 1, at: "2026-08-10T00:00:04.000Z", event: { type: "note" as const, text: "ordinary one" } },
-    { kind: "activity" as const, sequence: 5, turnSequence: 1, at: "2026-08-10T00:00:05.000Z", event: { type: "tool" as const, phase: "started" as const, id: "second", name: "Write", call: secondCall } },
-    { kind: "activity" as const, sequence: 6, turnSequence: 1, at: "2026-08-10T00:00:06.000Z", event: { type: "tool" as const, phase: "completed" as const, id: "second", name: "Write", call: secondCall, result: { status: "ok" as const } } },
-    { kind: "activity" as const, sequence: 7, turnSequence: 1, at: "2026-08-10T00:00:07.000Z", event: { type: "note" as const, text: "ordinary two" } },
-    { kind: "activity" as const, sequence: 8, turnSequence: 1, at: "2026-08-10T00:00:08.000Z", event: { type: "note" as const, text: "ordinary three" } },
+    {
+      kind: "activity" as const,
+      sequence: 2,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:02.000Z",
+      event: { type: "tool" as const, phase: "started" as const, id: "first", name: "Write", call: firstCall },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 3,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:03.000Z",
+      event: {
+        type: "tool" as const,
+        phase: "completed" as const,
+        id: "first",
+        name: "Write",
+        call: firstCall,
+        result: { status: "ok" as const },
+      },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 4,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:04.000Z",
+      event: { type: "note" as const, text: "ordinary one" },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 5,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:05.000Z",
+      event: { type: "tool" as const, phase: "started" as const, id: "second", name: "Write", call: secondCall },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 6,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:06.000Z",
+      event: {
+        type: "tool" as const,
+        phase: "completed" as const,
+        id: "second",
+        name: "Write",
+        call: secondCall,
+        result: { status: "ok" as const },
+      },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 7,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:07.000Z",
+      event: { type: "note" as const, text: "ordinary two" },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 8,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:08.000Z",
+      event: { type: "note" as const, text: "ordinary three" },
+    },
   ]);
   const view = snapshot(ledger, { tail: 0, voice: 0 });
   assert.equal(view.kind, "open");
-  assert.deepEqual(view.reportedChanges.map((change) => change.path), [
-    "src/three.ts", "src/four.ts", "src/five.ts", "src/six.ts", "src/seven.ts",
-  ]);
-  assert.deepEqual(view.reportedChanges.map((change) => change.sequence), [2, 5, 5, 5, 5]);
+  assert.deepEqual(
+    view.reportedChanges.map((change) => change.path),
+    ["src/three.ts", "src/four.ts", "src/five.ts", "src/six.ts", "src/seven.ts"],
+  );
+  assert.deepEqual(
+    view.reportedChanges.map((change) => change.sequence),
+    [2, 5, 5, 5, 5],
+  );
   assert.equal(view.reportedChangesOmitted, 2);
   assert.equal(view.omitted, 5);
   assert.deepEqual(view.entries, [{ kind: "gap", count: 5 }]);
@@ -604,23 +982,91 @@ test("reported file changes keep the newest five independently of ordinary omiss
 test("open snapshot independently retains pre-tail voice and actionable pins", () => {
   const ledger = projectTurns([
     { kind: "turn-start" as const, sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
-    { kind: "activity" as const, sequence: 2, turnSequence: 1, at: "2026-08-10T00:00:02.000Z", event: { type: "assistant", text: "voice one" } },
-    { kind: "activity" as const, sequence: 3, turnSequence: 1, at: "2026-08-10T00:00:03.000Z", event: { type: "note", text: "hidden between voices" } },
-    { kind: "activity" as const, sequence: 4, turnSequence: 1, at: "2026-08-10T00:00:04.000Z", event: { type: "thought", text: "voice two" } },
-    { kind: "call" as const, sequence: 5, turnSequence: 1, at: "2026-08-10T00:00:05.000Z", body: "hidden between voices" },
-    { kind: "activity" as const, sequence: 6, turnSequence: 1, at: "2026-08-10T00:00:06.000Z", event: { type: "assistant", text: "voice three" } },
-    { kind: "activity" as const, sequence: 7, turnSequence: 1, at: "2026-08-10T00:00:07.000Z", event: { type: "note", text: "hidden before pin" } },
-    { kind: "activity" as const, sequence: 8, turnSequence: 1, at: "2026-08-10T00:00:08.000Z", event: { type: "tool", phase: "started", id: "pinned", name: "Search", call: { kind: "search", query: "pin" } } },
-    { kind: "tell" as const, sequence: 9, id: "tell-pinned", body: "pinned input", recordedAt: "2026-08-10T00:00:09.000Z", state: "pending" as const, deliveries: [] },
-    { kind: "activity" as const, sequence: 10, turnSequence: 1, at: "2026-08-10T00:00:10.000Z", event: { type: "note", text: "tail note" } },
-    { kind: "activity" as const, sequence: 11, turnSequence: 1, at: "2026-08-10T00:00:11.000Z", event: { type: "assistant", text: "tail voice" } },
-    { kind: "activity" as const, sequence: 12, turnSequence: 1, at: "2026-08-10T00:00:12.000Z", event: { type: "thought", text: "tail thought" } },
+    {
+      kind: "activity" as const,
+      sequence: 2,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:02.000Z",
+      event: { type: "assistant", text: "voice one" },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 3,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:03.000Z",
+      event: { type: "note", text: "hidden between voices" },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 4,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:04.000Z",
+      event: { type: "thought", text: "voice two" },
+    },
+    {
+      kind: "call" as const,
+      sequence: 5,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:05.000Z",
+      body: "hidden between voices",
+    },
+    {
+      kind: "activity" as const,
+      sequence: 6,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:06.000Z",
+      event: { type: "assistant", text: "voice three" },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 7,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:07.000Z",
+      event: { type: "note", text: "hidden before pin" },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 8,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:08.000Z",
+      event: { type: "tool", phase: "started", id: "pinned", name: "Search", call: { kind: "search", query: "pin" } },
+    },
+    {
+      kind: "tell" as const,
+      sequence: 9,
+      id: "tell-pinned",
+      body: "pinned input",
+      recordedAt: "2026-08-10T00:00:09.000Z",
+      state: "pending" as const,
+      deliveries: [],
+    },
+    {
+      kind: "activity" as const,
+      sequence: 10,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:10.000Z",
+      event: { type: "note", text: "tail note" },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 11,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:11.000Z",
+      event: { type: "assistant", text: "tail voice" },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 12,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:12.000Z",
+      event: { type: "thought", text: "tail thought" },
+    },
   ]);
 
   const view = snapshot(ledger, { tail: 3, voice: 3 });
   assert.equal(view.kind, "open");
   if (view.kind !== "open") return;
-  const positions = view.entries.map((entry) => entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence);
+  const positions = view.entries.map((entry) => (entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence));
   assert.deepEqual(positions, [2, "gap:1", 4, "gap:1", 6, "gap:1", 8, 9, 10, 11, 12]);
   assert.equal(view.entries.filter((entry) => entry.kind === "row").length, 8);
   assert.equal(view.omitted, 3);
@@ -628,7 +1074,10 @@ test("open snapshot independently retains pre-tail voice and actionable pins", (
   const pinnedOnly = snapshot(ledger, { tail: 0, voice: 0 });
   assert.equal(pinnedOnly.kind, "open");
   if (pinnedOnly.kind !== "open") return;
-  assert.deepEqual(pinnedOnly.entries.map((entry) => entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence), ["gap:6", 8, 9, "gap:3"]);
+  assert.deepEqual(
+    pinnedOnly.entries.map((entry) => (entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence)),
+    ["gap:6", 8, 9, "gap:3"],
+  );
   assert.equal(pinnedOnly.omitted, 9);
 });
 
@@ -641,62 +1090,233 @@ test("budgeted snapshot spends newest tail first under the public 3 + 3 proporti
 
   const ledger = projectTurns([
     { kind: "turn-start" as const, sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
-    { kind: "activity" as const, sequence: 2, turnSequence: 1, at: "2026-08-10T00:00:02.000Z", event: { type: "assistant", text: "old voice" } },
-    { kind: "activity" as const, sequence: 3, turnSequence: 1, at: "2026-08-10T00:00:03.000Z", event: { type: "assistant", text: "kept voice" } },
-    { kind: "activity" as const, sequence: 4, turnSequence: 1, at: "2026-08-10T00:00:04.000Z", event: { type: "note", text: "tail note" } },
-    { kind: "activity" as const, sequence: 5, turnSequence: 1, at: "2026-08-10T00:00:05.000Z", event: { type: "note", text: "newest note" } },
-    { kind: "activity" as const, sequence: 6, turnSequence: 1, at: "2026-08-10T00:00:06.000Z", event: { type: "tool", phase: "started", id: "pin", name: "Search", call: { kind: "search", query: "pin" } } },
-    { kind: "tell" as const, sequence: 7, id: "tell-pin", body: "pin", recordedAt: "2026-08-10T00:00:07.000Z", state: "pending" as const, deliveries: [] },
+    {
+      kind: "activity" as const,
+      sequence: 2,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:02.000Z",
+      event: { type: "assistant", text: "old voice" },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 3,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:03.000Z",
+      event: { type: "assistant", text: "kept voice" },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 4,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:04.000Z",
+      event: { type: "note", text: "tail note" },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 5,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:05.000Z",
+      event: { type: "note", text: "newest note" },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 6,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:06.000Z",
+      event: { type: "tool", phase: "started", id: "pin", name: "Search", call: { kind: "search", query: "pin" } },
+    },
+    {
+      kind: "tell" as const,
+      sequence: 7,
+      id: "tell-pin",
+      body: "pin",
+      recordedAt: "2026-08-10T00:00:07.000Z",
+      state: "pending" as const,
+      deliveries: [],
+    },
   ]);
   const selected = selectSnapshot(ledger, { aperture: "receipt", budget: ordinarySnapshotBudget(2) });
   assert.equal(selected.snapshot.kind, "open");
   if (selected.snapshot.kind !== "open") return;
-  assert.deepEqual(selected.snapshot.entries.map((entry) => entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence), ["gap:2", 4, 5, 6, 7]);
+  assert.deepEqual(
+    selected.snapshot.entries.map((entry) => (entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence)),
+    ["gap:2", 4, 5, 6, 7],
+  );
   assert.equal(selected.ordinaryCount, 2);
 });
 
 test("a newer running tool does not displace a complete 3 + 3 ordinary selection", () => {
   const ledger = projectTurns([
     { kind: "turn-start" as const, sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
-    { kind: "activity" as const, sequence: 2, turnSequence: 1, at: "2026-08-10T00:00:02.000Z", event: { type: "assistant", text: "hidden voice" } },
-    { kind: "activity" as const, sequence: 3, turnSequence: 1, at: "2026-08-10T00:00:03.000Z", event: { type: "note", text: "hidden note" } },
-    { kind: "activity" as const, sequence: 4, turnSequence: 1, at: "2026-08-10T00:00:04.000Z", event: { type: "assistant", text: "voice one" } },
-    { kind: "activity" as const, sequence: 5, turnSequence: 1, at: "2026-08-10T00:00:05.000Z", event: { type: "thought", text: "voice two" } },
-    { kind: "activity" as const, sequence: 6, turnSequence: 1, at: "2026-08-10T00:00:06.000Z", event: { type: "assistant", text: "voice three" } },
-    { kind: "activity" as const, sequence: 7, turnSequence: 1, at: "2026-08-10T00:00:07.000Z", event: { type: "note", text: "tail one" } },
-    { kind: "activity" as const, sequence: 8, turnSequence: 1, at: "2026-08-10T00:00:08.000Z", event: { type: "note", text: "tail two" } },
-    { kind: "activity" as const, sequence: 9, turnSequence: 1, at: "2026-08-10T00:00:09.000Z", event: { type: "note", text: "tail three" } },
-    { kind: "activity" as const, sequence: 10, turnSequence: 1, at: "2026-08-10T00:00:10.000Z", event: { type: "tool", phase: "started", id: "running", name: "Bash", call: { kind: "run", command: "npm test" } } },
-    { kind: "tell" as const, sequence: 11, id: "pending", body: "continue", recordedAt: "2026-08-10T00:00:11.000Z", state: "pending" as const, deliveries: [] },
+    {
+      kind: "activity" as const,
+      sequence: 2,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:02.000Z",
+      event: { type: "assistant", text: "hidden voice" },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 3,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:03.000Z",
+      event: { type: "note", text: "hidden note" },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 4,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:04.000Z",
+      event: { type: "assistant", text: "voice one" },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 5,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:05.000Z",
+      event: { type: "thought", text: "voice two" },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 6,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:06.000Z",
+      event: { type: "assistant", text: "voice three" },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 7,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:07.000Z",
+      event: { type: "note", text: "tail one" },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 8,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:08.000Z",
+      event: { type: "note", text: "tail two" },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 9,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:09.000Z",
+      event: { type: "note", text: "tail three" },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 10,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:10.000Z",
+      event: {
+        type: "tool",
+        phase: "started",
+        id: "running",
+        name: "Bash",
+        call: { kind: "run", command: "npm test" },
+      },
+    },
+    {
+      kind: "tell" as const,
+      sequence: 11,
+      id: "pending",
+      body: "continue",
+      recordedAt: "2026-08-10T00:00:11.000Z",
+      state: "pending" as const,
+      deliveries: [],
+    },
   ]);
   const selected = selectSnapshot(ledger, { aperture: "receipt", budget: { tail: 3, voice: 3 } });
   assert.equal(selected.snapshot.kind, "open");
   if (selected.snapshot.kind !== "open") return;
-  assert.deepEqual(selected.snapshot.entries.map((entry) => entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence), [
-    "gap:2", 4, 5, 6, 7, 8, 9, 10, 11,
-  ]);
+  assert.deepEqual(
+    selected.snapshot.entries.map((entry) => (entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence)),
+    ["gap:2", 4, 5, 6, 7, 8, 9, 10, 11],
+  );
   assert.equal(selected.ordinaryCount, 6);
-  assert.equal(selected.snapshot.entries.some((entry) => entry.kind === "row" && entry.row.kind === "tool" && entry.row.state === "active"), true);
+  assert.equal(
+    selected.snapshot.entries.some(
+      (entry) => entry.kind === "row" && entry.row.kind === "tool" && entry.row.state === "active",
+    ),
+    true,
+  );
 });
 
 test("monitoring snapshots pin the latest settled Tell outside the ordinary budget", () => {
   const facts = [
     { kind: "turn-start" as const, sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
-    { kind: "tell" as const, sequence: 2, id: "stale", body: "old steer", recordedAt: "2026-08-10T00:00:02.000Z", state: "told" as const, deliveries: [] },
-    { kind: "turn-end" as const, sequence: 3, turnSequence: 1, completedAt: "2026-08-10T00:00:03.000Z", outcome: { kind: "answered" as const, answer: "first", session: { sessionId: "session" } } },
+    {
+      kind: "tell" as const,
+      sequence: 2,
+      id: "stale",
+      body: "old steer",
+      recordedAt: "2026-08-10T00:00:02.000Z",
+      state: "told" as const,
+      deliveries: [],
+    },
+    {
+      kind: "turn-end" as const,
+      sequence: 3,
+      turnSequence: 1,
+      completedAt: "2026-08-10T00:00:03.000Z",
+      outcome: { kind: "answered" as const, answer: "first", session: { sessionId: "session" } },
+    },
     { kind: "turn-start" as const, sequence: 4, bodySequence: 1, startedAt: "2026-08-10T00:00:04.000Z" },
-    { kind: "tell" as const, sequence: 5, id: "latest", body: "new steer", recordedAt: "2026-08-10T00:00:05.000Z", state: "told" as const, deliveries: [] },
-    { kind: "activity" as const, sequence: 6, turnSequence: 4, at: "2026-08-10T00:00:06.000Z", event: { type: "note" as const, text: "hidden" } },
-    { kind: "activity" as const, sequence: 7, turnSequence: 4, at: "2026-08-10T00:00:07.000Z", event: { type: "note" as const, text: "tail one" } },
-    { kind: "activity" as const, sequence: 8, turnSequence: 4, at: "2026-08-10T00:00:08.000Z", event: { type: "note" as const, text: "tail two" } },
-    { kind: "activity" as const, sequence: 9, turnSequence: 4, at: "2026-08-10T00:00:09.000Z", event: { type: "note" as const, text: "tail three" } },
-    { kind: "tell" as const, sequence: 10, id: "pending", body: "continue", recordedAt: "2026-08-10T00:00:10.000Z", state: "pending" as const, deliveries: [] },
+    {
+      kind: "tell" as const,
+      sequence: 5,
+      id: "latest",
+      body: "new steer",
+      recordedAt: "2026-08-10T00:00:05.000Z",
+      state: "told" as const,
+      deliveries: [],
+    },
+    {
+      kind: "activity" as const,
+      sequence: 6,
+      turnSequence: 4,
+      at: "2026-08-10T00:00:06.000Z",
+      event: { type: "note" as const, text: "hidden" },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 7,
+      turnSequence: 4,
+      at: "2026-08-10T00:00:07.000Z",
+      event: { type: "note" as const, text: "tail one" },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 8,
+      turnSequence: 4,
+      at: "2026-08-10T00:00:08.000Z",
+      event: { type: "note" as const, text: "tail two" },
+    },
+    {
+      kind: "activity" as const,
+      sequence: 9,
+      turnSequence: 4,
+      at: "2026-08-10T00:00:09.000Z",
+      event: { type: "note" as const, text: "tail three" },
+    },
+    {
+      kind: "tell" as const,
+      sequence: 10,
+      id: "pending",
+      body: "continue",
+      recordedAt: "2026-08-10T00:00:10.000Z",
+      state: "pending" as const,
+      deliveries: [],
+    },
   ];
   const ledger = projectTurns(facts);
-  const sequences = (view: ActivitySnapshot) => view.entries.map((entry) =>
-    entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence);
-  const told = (view: ActivitySnapshot) => view.entries.flatMap((entry) =>
-    entry.kind === "row" && entry.row.kind === "tell" && entry.row.state === "told" ? [entry.row.tellId] : []);
+  const sequences = (view: ActivitySnapshot) =>
+    view.entries.map((entry) => (entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence));
+  const told = (view: ActivitySnapshot) =>
+    view.entries.flatMap((entry) =>
+      entry.kind === "row" && entry.row.kind === "tell" && entry.row.state === "told" ? [entry.row.tellId] : [],
+    );
 
   const monitoring = selectSnapshot(ledger, { aperture: "monitoring", budget: { tail: 3, voice: 0 } });
   assert.equal(monitoring.snapshot.kind, "open");
@@ -711,13 +1331,16 @@ test("monitoring snapshots pin the latest settled Tell outside the ordinary budg
   assert.deepEqual(told(receipt.snapshot), []);
   assert.equal(receipt.ordinaryCount, 3);
 
-  const closed = projectTurns([...facts, {
-    kind: "turn-end" as const,
-    sequence: 11,
-    turnSequence: 4,
-    completedAt: "2026-08-10T00:00:11.000Z",
-    outcome: { kind: "answered" as const, answer: "second", session: { sessionId: "session" } },
-  }]);
+  const closed = projectTurns([
+    ...facts,
+    {
+      kind: "turn-end" as const,
+      sequence: 11,
+      turnSequence: 4,
+      completedAt: "2026-08-10T00:00:11.000Z",
+      outcome: { kind: "answered" as const, answer: "second", session: { sessionId: "session" } },
+    },
+  ]);
   const idleMonitoring = selectSnapshot(closed, { aperture: "monitoring" });
   assert.equal(idleMonitoring.snapshot.kind, "idle");
   assert.deepEqual(sequences(idleMonitoring.snapshot), [5, 10]);
@@ -734,13 +1357,30 @@ test("monitoring snapshots pin the latest settled Tell outside the ordinary budg
 test("outcome folding preserves a truncated final voice equal to the answer", () => {
   const ledger = projectTurns([
     { kind: "turn-start", sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
-    { kind: "activity", sequence: 2, turnSequence: 1, at: "2026-08-10T00:00:02.000Z", event: { type: "assistant", text: "same answer", truncated: true } },
-    { kind: "turn-end", sequence: 3, turnSequence: 1, completedAt: "2026-08-10T00:00:03.000Z", outcome: { kind: "answered", answer: "same answer", session: { sessionId: "session" } } },
+    {
+      kind: "activity",
+      sequence: 2,
+      turnSequence: 1,
+      at: "2026-08-10T00:00:02.000Z",
+      event: { type: "assistant", text: "same answer", truncated: true },
+    },
+    {
+      kind: "turn-end",
+      sequence: 3,
+      turnSequence: 1,
+      completedAt: "2026-08-10T00:00:03.000Z",
+      outcome: { kind: "answered", answer: "same answer", session: { sessionId: "session" } },
+    },
   ]);
 
-  assert.equal(ledger.rows.some((row) => row.kind === "said"
-    && row.text === "same answer" && row.truncated === true), true);
-  assert.deepEqual(selectHistory(ledger, { limit: 50 }).rows.map((row) => row.kind), ["turn", "said", "outcome"]);
+  assert.equal(
+    ledger.rows.some((row) => row.kind === "said" && row.text === "same answer" && row.truncated === true),
+    true,
+  );
+  assert.deepEqual(
+    selectHistory(ledger, { limit: 50 }).rows.map((row) => row.kind),
+    ["turn", "said", "outcome"],
+  );
 });
 
 test("wait timeout returns the same running status carrier", async () => {
@@ -750,7 +1390,7 @@ test("wait timeout returns the same running status carrier", async () => {
     const leash = (await HeldAkumaLeash.try(source.paths))!;
     try {
       const handle = (await akumaAt(root)).of({ id: source.id });
-      const expected = (await handle.status());
+      const expected = await handle.status();
       assert.equal(expected.life, "running");
       assert.deepEqual(await handle.wait(undefined, { timeoutMs: 0 }), expected);
     } finally {
@@ -794,8 +1434,12 @@ test("ordinary wait returns the successor answer after a pending Tell is consume
     });
     const waiting = handle.wait();
     const successor: ProviderAdapter = {
-      admitOptions(options) { return { kind: "admitted", options }; },
-      async start() { throw new Error("successor must resume"); },
+      admitOptions(options) {
+        return { kind: "admitted", options };
+      },
+      async start() {
+        throw new Error("successor must resume");
+      },
       async resume(input) {
         assert.deepEqual(input.launchTells, [{ id: "successor-tell", text: "continue" }]);
         return {
@@ -812,8 +1456,12 @@ test("ordinary wait returns the successor answer after a pending Tell is consume
 
     const settled = await waiting;
     assert.equal(settled.life, "asleep");
-    assert.equal(settled.timeline.kind === "idle" && settled.timeline.outcome?.outcome.kind === "answered"
-      && settled.timeline.outcome.outcome.answer, "successor answer");
+    assert.equal(
+      settled.timeline.kind === "idle" &&
+        settled.timeline.outcome?.outcome.kind === "answered" &&
+        settled.timeline.outcome.outcome.answer,
+      "successor answer",
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -841,10 +1489,14 @@ test("an answered Turn without a fork point remains visible and keeps its answer
     const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "f0a10006" });
     await initializeHeart(allocated.paths);
     const noPointProvider: ProviderAdapter = {
-      admitOptions(options) { return { kind: "admitted", options }; },
+      admitOptions(options) {
+        return { kind: "admitted", options };
+      },
       async start() {
         let finishEvents!: () => void;
-        const eventsFinished = new Promise<void>((resolve) => { finishEvents = resolve; });
+        const eventsFinished = new Promise<void>((resolve) => {
+          finishEvents = resolve;
+        });
         return {
           admission: { fence: "no-point-turn" },
           events: {
@@ -854,30 +1506,35 @@ test("an answered Turn without a fork point remains visible and keeps its answer
             },
           },
           completion: eventsFinished.then(() => ({
-            kind: "answered" as const, answer: "complete without fork",
+            kind: "answered" as const,
+            answer: "complete without fork",
           })),
           async abort() {},
         };
       },
     };
-    await driveAkumaBody({
-      paths: allocated.paths,
-      seed: {
-        id: allocated.id,
-        archetype: "claude",
-        description: "No fork point",
-        provider: CLAUDE_EXECUTION,
-        options: { model: "fixture-model" },
-        origin: { kind: "direct" },
-        cwd: root,
+    await driveAkumaBody(
+      {
+        paths: allocated.paths,
+        seed: {
+          id: allocated.id,
+          archetype: "claude",
+          description: "No fork point",
+          provider: CLAUDE_EXECUTION,
+          options: { model: "fixture-model" },
+          origin: { kind: "direct" },
+          cwd: root,
+        },
+        initialBody: "work",
       },
-      initialBody: "work",
-    }, noPointProvider, {
-      now: () => "2026-08-08T00:00:00.000Z",
-    });
+      noPointProvider,
+      {
+        now: () => "2026-08-08T00:00:00.000Z",
+      },
+    );
 
     const handle = (await akumaAt(root)).of({ id: allocated.id });
-    assert.deepEqual((await handle.lastAnswer()), { kind: "answer", answer: "complete without fork" });
+    assert.deepEqual(await handle.lastAnswer(), { kind: "answer", answer: "complete without fork" });
     assert.deepEqual((await handle.history()).rows.find((row) => row.kind === "outcome")?.outcome, {
       kind: "answered",
       historyId: "turn/1",
@@ -885,7 +1542,9 @@ test("an answered Turn without a fork point remains visible and keeps its answer
     });
     assert.equal((await handle.history({ id: "turn/1" })).kind, "exact");
     assert.deepEqual(await handle.fork({ at: "missing-point" }), { kind: "unknown-history", at: "missing-point" });
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("fork publishes a sleeping child with lineage and its native birth session", async () => {
@@ -894,7 +1553,7 @@ test("fork publishes a sleeping child with lineage and its native birth session"
   const originalFork = mutable.fork;
   try {
     const source = await answeredSource(root, "f0a10001");
-    const world = (await akumaAt(root));
+    const world = await akumaAt(root);
     const worldRoot = await World.at(root);
     assert.equal(await world.of({ id: source.id }).kill(), "already-stopped");
     let nativeInput: Parameters<NonNullable<ProviderAdapter["fork"]>>[0] | undefined;
@@ -926,7 +1585,10 @@ test("fork publishes a sleeping child with lineage and its native birth session"
       options: { model: "fixture-model" },
       admittedAt: snapshot.latestSession?.admittedAt,
     });
-    assert.deepEqual((await timeline(childPaths)).filter((fact) => fact.kind === "turn-start"), []);
+    assert.deepEqual(
+      (await timeline(childPaths)).filter((fact) => fact.kind === "turn-start"),
+      [],
+    );
   } finally {
     mutable.fork = originalFork;
     rmSync(root, { recursive: true, force: true });
@@ -940,7 +1602,7 @@ test("fork preserves the exact admitted readonly restraint byte-for-byte", async
   try {
     const source = await answeredSource(root, "f0a10007", { enforcement: "native" });
     mutable.fork = async () => ({ session: { sessionId: "fork-restraint-child" } });
-    const world = (await akumaAt(root));
+    const world = await akumaAt(root);
     const receipt = await world.of({ id: source.id }).fork({ at: "turn/1" });
     assert.equal(receipt.kind, "forked", JSON.stringify(receipt));
     if (receipt.kind !== "forked") return;
@@ -988,12 +1650,18 @@ test("fork preserves categorical, exact-history, native, local, and not-born fai
 
     const unbornRoot = mkdtempSync(join(tmpdir(), "keiyaku-akuma-fork-unborn-"));
     try {
-      const unborn = await allocateAkumaDirectory({ worldRoot: unbornRoot, archetype: "claude", draw: () => "f0a10003" });
+      const unborn = await allocateAkumaDirectory({
+        worldRoot: unbornRoot,
+        archetype: "claude",
+        draw: () => "f0a10003",
+      });
       await assert.rejects(
         (await akumaAt(unbornRoot)).of({ id: unborn.id }).fork({ at: "anything" }),
         AkumaNotBornError,
       );
-    } finally { rmSync(unbornRoot, { recursive: true, force: true }); }
+    } finally {
+      rmSync(unbornRoot, { recursive: true, force: true });
+    }
   } finally {
     mutable.fork = originalFork;
     rmSync(root, { recursive: true, force: true });
@@ -1017,10 +1685,15 @@ test("status names a durable session that the adapter cannot resume", async () =
     await driveAkumaBody({ paths: source.paths }, claudeProvider, {
       now: () => "2026-08-08T00:00:02.000Z",
     });
-    const status = (await handle.status());
+    const status = await handle.status();
     assert.equal(status.life, "stranded");
     assert.equal(status.strandedReason, "resume-unsupported");
-    assert.equal(status.timeline.entries.some((entry) => entry.kind === "row" && entry.row.kind === "outcome" && entry.row.outcome.kind === "failed"), false);
+    assert.equal(
+      status.timeline.entries.some(
+        (entry) => entry.kind === "row" && entry.row.kind === "outcome" && entry.row.outcome.kind === "failed",
+      ),
+      false,
+    );
     const listed = (await (await akumaAt(root)).list()).rows[0]!;
     assert.equal("pending" in listed && listed.pending.includes("resume-unsupported-tell"), true);
     assert.equal((await timeline(source.paths)).filter((fact) => fact.kind === "turn-start").length, 1);
@@ -1034,7 +1707,7 @@ test("status names a durable session that the adapter cannot resume", async () =
 test("public Akuma handles separate compact list rows from full status and wait", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-public-"));
   try {
-    const world = (await akumaAt(root));
+    const world = await akumaAt(root);
     assert.deepEqual((await world.list()).rows, []);
     const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abcd" });
     await initializeHeart(allocated.paths);
@@ -1070,7 +1743,7 @@ test("public Akuma handles separate compact list rows from full status and wait"
     assert.equal(listed.archetype, "claude");
     assert.equal(listed.description, "Fixture akuma");
     assert.deepEqual(listed.pending, []);
-    const status = (await handle.status());
+    const status = await handle.status();
     assert.equal(status.life, "asleep");
     assert.equal("archetype" in status, false);
     assert.equal("description" in status, false);
@@ -1086,14 +1759,22 @@ test("public Akuma handles separate compact list rows from full status and wait"
     });
     const exact = await handle.history({ id: "turn/1" });
     assert.equal(exact.kind, "exact");
-    if (exact.kind === "exact") assert.deepEqual(exact.outcome.outcome, { kind: "answered", answer: "public answer", historyId: "turn/1" });
+    if (exact.kind === "exact")
+      assert.deepEqual(exact.outcome.outcome, { kind: "answered", answer: "public answer", historyId: "turn/1" });
     assert.equal(status.timeline.entries.length, 0);
-    assert.deepEqual(await handle.wait((candidate) => candidate.timeline.kind === "idle"
-      && candidate.timeline.outcome?.outcome.kind === "answered"), status);
+    assert.deepEqual(
+      await handle.wait(
+        (candidate) => candidate.timeline.kind === "idle" && candidate.timeline.outcome?.outcome.kind === "answered",
+      ),
+      status,
+    );
     assert.equal(await handle.kill(), "already-stopped");
     assert.equal((await handle.status()).life, "asleep");
-    assert.equal((await handle.status()).timeline.kind === "idle"
-      && (await handle.status()).timeline.outcome?.outcome.kind === "answered", true);
+    assert.equal(
+      (await handle.status()).timeline.kind === "idle" &&
+        (await handle.status()).timeline.outcome?.outcome.kind === "answered",
+      true,
+    );
     assert.equal(await handle.kill(), "already-stopped");
     assert.equal(await pauseRequested(allocated.paths), false);
     assert.deepEqual((await timeline(allocated.paths)).find((fact) => fact.kind === "turn-end")?.outcome, {
@@ -1114,20 +1795,24 @@ test("tell after an already stopped Body wakes the same Akuma through its retain
     mkdirSync(seat);
     const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1d1e0006" });
     await initializeHeart(allocated.paths);
-    await driveAkumaBody({
-      paths: allocated.paths,
-      seed: {
-        id: allocated.id,
-        archetype: "claude",
-        provider: CLAUDE_EXECUTION,
-        options: { model: "fixture-model" },
-        origin: { kind: "direct" },
-        cwd: seat,
+    await driveAkumaBody(
+      {
+        paths: allocated.paths,
+        seed: {
+          id: allocated.id,
+          archetype: "claude",
+          provider: CLAUDE_EXECUTION,
+          options: { model: "fixture-model" },
+          origin: { kind: "direct" },
+          cwd: seat,
+        },
+        initialBody: "first",
       },
-      initialBody: "first",
-    }, provider, {
-      now: () => "2026-08-08T00:00:00.000Z",
-    });
+      provider,
+      {
+        now: () => "2026-08-08T00:00:00.000Z",
+      },
+    );
 
     const handle = (await akumaAt(root)).of({ id: allocated.id });
     assert.equal(await handle.kill(), "already-stopped");
@@ -1136,12 +1821,19 @@ test("tell after an already stopped Body wakes the same Akuma through its retain
     rmSync(seat, { recursive: true, force: true });
     const told = await handle.tell("continue");
     assert.equal(typeof told.wake, "object");
-    assert.deepEqual((await readHeart(allocated.paths)).pending.map((tell) => tell.id), [told.admission.tellId]);
+    assert.deepEqual(
+      (await readHeart(allocated.paths)).pending.map((tell) => tell.id),
+      [told.admission.tellId],
+    );
 
     let resumed: Parameters<NonNullable<ProviderAdapter["resume"]>>[0] | undefined;
     const successor: ProviderAdapter = {
-      admitOptions(options) { return { kind: "admitted", options }; },
-      async start() { throw new Error("retained Akuma must resume"); },
+      admitOptions(options) {
+        return { kind: "admitted", options };
+      },
+      async start() {
+        throw new Error("retained Akuma must resume");
+      },
       async resume(input) {
         resumed = input;
         return {
@@ -1169,11 +1861,18 @@ test("tell after an already stopped Body wakes the same Akuma through its retain
     });
     assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, 2);
     assert.deepEqual((await readHeart(allocated.paths)).pending, []);
-    assert.equal((await handle.history()).rows.some((row) => row.kind === "tell"
-      && row.tellId === told.admission.tellId && row.state === "told"), true);
+    assert.equal(
+      (await handle.history()).rows.some(
+        (row) => row.kind === "tell" && row.tellId === told.admission.tellId && row.state === "told",
+      ),
+      true,
+    );
     assert.equal((await handle.status()).life, "asleep");
-    assert.equal((await handle.status()).timeline.kind === "idle"
-      && (await handle.status()).timeline.outcome?.outcome.kind === "answered", true);
+    assert.equal(
+      (await handle.status()).timeline.kind === "idle" &&
+        (await handle.status()).timeline.outcome?.outcome.kind === "answered",
+      true,
+    );
     await handle.kill();
     await handle.wait((status) => status.life !== "running");
   } finally {
@@ -1208,7 +1907,10 @@ test("kill returns before its successor recovery settles", async () => {
     let recoveryReleased!: () => void;
     let recoverySettled = false;
     const recovery = new Promise<void>((resolve) => {
-      recoveryReleased = () => { recoverySettled = true; resolve(); };
+      recoveryReleased = () => {
+        recoverySettled = true;
+        resolve();
+      };
     });
     assert.equal(await killAkumaWithRecovery(allocated.paths, async () => await recovery), "already-stopped");
     assert.equal(recoverySettled, false);
@@ -1242,8 +1944,16 @@ test("failed kill recovery leaves its pending Tell unchanged", async () => {
       recordedAt: "2026-08-10T00:00:02.000Z",
     });
     holder.release();
-    assert.equal(await killAkumaWithRecovery(allocated.paths, async () => { throw new Error("spawn denied"); }), "already-stopped");
-    assert.deepEqual((await readHeart(allocated.paths)).pending.map((tell) => tell.id), ["kill-recovery-failure"]);
+    assert.equal(
+      await killAkumaWithRecovery(allocated.paths, async () => {
+        throw new Error("spawn denied");
+      }),
+      "already-stopped",
+    );
+    assert.deepEqual(
+      (await readHeart(allocated.paths)).pending.map((tell) => tell.id),
+      ["kill-recovery-failure"],
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1256,20 +1966,24 @@ test("interrupt records a tell only after taking an idle leash", async () => {
     mkdirSync(seat);
     const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1d1e0001" });
     await initializeHeart(allocated.paths);
-    await driveAkumaBody({
-      paths: allocated.paths,
-      seed: {
-        id: allocated.id,
-        archetype: "claude",
-        provider: CLAUDE_EXECUTION,
-        options: {},
-        origin: { kind: "direct" },
-        cwd: seat,
+    await driveAkumaBody(
+      {
+        paths: allocated.paths,
+        seed: {
+          id: allocated.id,
+          archetype: "claude",
+          provider: CLAUDE_EXECUTION,
+          options: {},
+          origin: { kind: "direct" },
+          cwd: seat,
+        },
+        initialBody: "first",
       },
-      initialBody: "first",
-    }, provider, {
-      now: () => "2026-08-08T00:00:00.000Z",
-    });
+      provider,
+      {
+        now: () => "2026-08-08T00:00:00.000Z",
+      },
+    );
     rmSync(seat, { recursive: true, force: true });
 
     const handle = (await akumaAt(root)).of({ id: allocated.id });
@@ -1279,7 +1993,10 @@ test("interrupt records a tell only after taking an idle leash", async () => {
     assert.equal(receipt.putDown, "was-idle");
     assert.equal(typeof receipt.tell.wake, "object");
     assert.equal(await pauseRequested(allocated.paths), false);
-    assert.deepEqual((await readHeart(allocated.paths)).pending.map((tell) => tell.id), [receipt.tell.admission.tellId]);
+    assert.deepEqual(
+      (await readHeart(allocated.paths)).pending.map((tell) => tell.id),
+      [receipt.tell.admission.tellId],
+    );
     if (receipt.tell.wake.kind === "pursuing") {
       await handle.kill();
       await handle.wait();
@@ -1298,41 +2015,50 @@ test("interrupt waits for a running body to self-abort before recording the tell
     await initializeHeart(allocated.paths);
     let aborted = false;
     let settle!: (result: { kind: "failed"; diagnostic: string }) => void;
-    const completion = new Promise<{ kind: "failed"; diagnostic: string }>((resolve) => { settle = resolve; });
-    const body = driveAkumaBody({
-      paths: allocated.paths,
-      seed: {
-        id: allocated.id,
-        archetype: "claude",
-        provider: CLAUDE_EXECUTION,
-        options: {},
-        origin: { kind: "direct" },
-        cwd: seat,
-      },
-      initialBody: "work",
-    }, {
-      admitOptions(options) { return { kind: "admitted", options }; },
-      async start() {
-        return {
-          events: {
-            async *[Symbol.asyncIterator]() {
-              while (!aborted) {
-                yield { type: "action" as const, note: "Working" };
-                await new Promise((resolve) => setTimeout(resolve, 10));
-              }
-            },
-          },
-          completion,
-          async abort() {
-            aborted = true;
-            settle({ kind: "failed", diagnostic: "interrupted" });
-          },
-        };
-      },
-    }, {
-      now: () => "2026-08-08T00:00:00.000Z",
+    const completion = new Promise<{ kind: "failed"; diagnostic: string }>((resolve) => {
+      settle = resolve;
     });
-    while ((await readHeart(allocated.paths)).latestBody === null) await new Promise((resolve) => setTimeout(resolve, 5));
+    const body = driveAkumaBody(
+      {
+        paths: allocated.paths,
+        seed: {
+          id: allocated.id,
+          archetype: "claude",
+          provider: CLAUDE_EXECUTION,
+          options: {},
+          origin: { kind: "direct" },
+          cwd: seat,
+        },
+        initialBody: "work",
+      },
+      {
+        admitOptions(options) {
+          return { kind: "admitted", options };
+        },
+        async start() {
+          return {
+            events: {
+              async *[Symbol.asyncIterator]() {
+                while (!aborted) {
+                  yield { type: "action" as const, note: "Working" };
+                  await new Promise((resolve) => setTimeout(resolve, 10));
+                }
+              },
+            },
+            completion,
+            async abort() {
+              aborted = true;
+              settle({ kind: "failed", diagnostic: "interrupted" });
+            },
+          };
+        },
+      },
+      {
+        now: () => "2026-08-08T00:00:00.000Z",
+      },
+    );
+    while ((await readHeart(allocated.paths)).latestBody === null)
+      await new Promise((resolve) => setTimeout(resolve, 5));
     rmSync(seat, { recursive: true, force: true });
 
     const handle = (await akumaAt(root)).of({ id: allocated.id });
@@ -1438,21 +2164,24 @@ test("Archetype Markdown is strict call-time input with a durable option shape",
   try {
     mkdirSync(join(home, "akuma"));
     const settingsValue = await settings({ home });
-    writeFileSync(join(home, "akuma", "reviewer.md"), [
-      "---",
-      "provider: claude",
-      "model: claude-sonnet-4-5",
-      "effort: high",
-      "readonly: true",
-      "description: Careful reviewer",
-      "editor:",
-      "  theme: dark",
-      "tags: [review, careful]",
-      "revision: 3",
-      "---",
-      "Review the change from first principles.",
-      "",
-    ].join("\n"));
+    writeFileSync(
+      join(home, "akuma", "reviewer.md"),
+      [
+        "---",
+        "provider: claude",
+        "model: claude-sonnet-4-5",
+        "effort: high",
+        "readonly: true",
+        "description: Careful reviewer",
+        "editor:",
+        "  theme: dark",
+        "tags: [review, careful]",
+        "revision: 3",
+        "---",
+        "Review the change from first principles.",
+        "",
+      ].join("\n"),
+    );
     const loaded = await loadArchetype({ name: "reviewer", home, settings: settingsValue });
     const { adapter, ...definition } = loaded;
     assert.equal(typeof adapter.start, "function");
@@ -1474,22 +2203,21 @@ test("Archetype Markdown is strict call-time input with a durable option shape",
     writeFileSync(join(home, "akuma", "invalid.md"), "---\nprovider: claude\nreadonly: false\n---\n");
     await assert.rejects(
       loadArchetype({ name: "invalid", home, settings: settingsValue }),
-      (error: unknown) => error instanceof AkumaArchetypeError
-        && error.searched[0] === join(home, "akuma", "invalid.md")
-        && !error.message.includes("searched")
-        && !/archetype/iu.test(error.message),
+      (error: unknown) =>
+        error instanceof AkumaArchetypeError &&
+        error.searched[0] === join(home, "akuma", "invalid.md") &&
+        !error.message.includes("searched") &&
+        !/archetype/iu.test(error.message),
     );
     writeFileSync(join(home, "akuma", "stale-access.md"), "---\nprovider: claude\naccess: read\n---\n");
     await assert.rejects(
       loadArchetype({ name: "stale-access", home, settings: settingsValue }),
-      (error: unknown) => error instanceof AkumaArchetypeError
-        && error.reason.includes("access is not supported"),
+      (error: unknown) => error instanceof AkumaArchetypeError && error.reason.includes("access is not supported"),
     );
     writeFileSync(join(home, "akuma", "wordy-readonly.md"), "---\nprovider: claude\nreadonly: yes\n---\n");
     await assert.rejects(
       loadArchetype({ name: "wordy-readonly", home, settings: settingsValue }),
-      (error: unknown) => error instanceof AkumaArchetypeError
-        && error.reason.includes("readonly must be true"),
+      (error: unknown) => error instanceof AkumaArchetypeError && error.reason.includes("readonly must be true"),
     );
     writeFileSync(join(home, "akuma", "grok-review.md"), "---\nprovider: grok-build\nreadonly: true\n---\n");
     const grok = await loadArchetype({ name: "grok-review", home, settings: settingsValue });
@@ -1501,16 +2229,18 @@ test("Archetype Markdown is strict call-time input with a durable option shape",
     writeFileSync(join(home, "akuma", "unknown.md"), "---\nprovider: missing\n---\n");
     await assert.rejects(
       loadArchetype({ name: "unknown", home, settings: settingsValue }),
-      (error: unknown) => error instanceof AkumaArchetypeError
-        && error.reason === "uses unknown provider missing"
-        && error.searched[0] === join(home, "akuma", "unknown.md"),
+      (error: unknown) =>
+        error instanceof AkumaArchetypeError &&
+        error.reason === "uses unknown provider missing" &&
+        error.searched[0] === join(home, "akuma", "unknown.md"),
     );
     await assert.rejects(
       loadArchetype({ name: "missing", home, settings: settingsValue }),
-      (error: unknown) => error instanceof AkumaArchetypeError
-        && error.kind === "akuma-archetype"
-        && error.searched[0] === join(home, "akuma", "missing.md")
-        && error.message === "`missing` was not found\nuse `keiyaku ls aku/` to list available Akuma",
+      (error: unknown) =>
+        error instanceof AkumaArchetypeError &&
+        error.kind === "akuma-archetype" &&
+        error.searched[0] === join(home, "akuma", "missing.md") &&
+        error.message === "`missing` was not found\nuse `keiyaku ls aku/` to list available Akuma",
     );
   } finally {
     rmSync(home, { recursive: true, force: true });
@@ -1521,7 +2251,7 @@ test("Archetype catalog lists canonical files in byte order without admitting co
   const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-archetype-catalog-"));
   try {
     const settingsValue = await settings({ home });
-    const world = (await akumaAt(home, { home, settings: settingsValue }));
+    const world = await akumaAt(home, { home, settings: settingsValue });
     assert.deepEqual(await world.listArchetypes(), []);
 
     mkdirSync(join(home, "akuma"));
@@ -1546,27 +2276,33 @@ test("Archetype definition catalog decodes metadata without provider admission",
   try {
     mkdirSync(join(home, "akuma"));
     const settingsValue = await settings({ home });
-    writeFileSync(join(home, "akuma", "reviewer.md"), [
-      "---",
-      "provider: provider-that-does-not-exist",
-      "model: reviewer-model",
-      "description: A complete description that is not truncated by the owner.",
-      "---",
-      "prompt",
-      "",
-    ].join("\n"));
-    assert.deepEqual(await listArchetypeDefinitions({ home }), [{
-      name: "reviewer",
-      model: "reviewer-model",
-      description: "A complete description that is not truncated by the owner.",
-    }]);
+    writeFileSync(
+      join(home, "akuma", "reviewer.md"),
+      [
+        "---",
+        "provider: provider-that-does-not-exist",
+        "model: reviewer-model",
+        "description: A complete description that is not truncated by the owner.",
+        "---",
+        "prompt",
+        "",
+      ].join("\n"),
+    );
+    assert.deepEqual(await listArchetypeDefinitions({ home }), [
+      {
+        name: "reviewer",
+        model: "reviewer-model",
+        description: "A complete description that is not truncated by the owner.",
+      },
+    ]);
 
     writeFileSync(join(home, "akuma", "broken.md"), "not frontmatter\n");
     await assert.rejects(
       listArchetypeDefinitions({ home }),
-      (error: unknown) => error instanceof AkumaArchetypeError
-        && error.searched[0] === join(home, "akuma", "broken.md")
-        && /must begin with YAML frontmatter/u.test(error.reason),
+      (error: unknown) =>
+        error instanceof AkumaArchetypeError &&
+        error.searched[0] === join(home, "akuma", "broken.md") &&
+        /must begin with YAML frontmatter/u.test(error.reason),
     );
   } finally {
     rmSync(home, { recursive: true, force: true });
@@ -1583,9 +2319,10 @@ test("Archetype definition catalog reports the first invalid definition in byte 
     writeFileSync(join(home, "akuma", "bravo.md"), "not frontmatter\n");
     await assert.rejects(
       listArchetypeDefinitions({ home }),
-      (error: unknown) => error instanceof AkumaArchetypeError
-        && error.searched[0] === join(home, "akuma", "alpha.md")
-        && /must begin with YAML frontmatter/u.test(error.reason),
+      (error: unknown) =>
+        error instanceof AkumaArchetypeError &&
+        error.searched[0] === join(home, "akuma", "alpha.md") &&
+        /must begin with YAML frontmatter/u.test(error.reason),
     );
   } finally {
     rmSync(home, { recursive: true, force: true });
@@ -1599,9 +2336,12 @@ test("Akuma home is independent of injected Settings provenance", async () => {
   try {
     mkdirSync(join(homeA, "akuma"));
     mkdirSync(join(homeB, "akuma"));
-    writeFileSync(join(homeA, "settings.json"), JSON.stringify({
-      providers: { local: { kind: "claude-agent-sdk", executable: "from-a" } },
-    }));
+    writeFileSync(
+      join(homeA, "settings.json"),
+      JSON.stringify({
+        providers: { local: { kind: "claude-agent-sdk", executable: "from-a" } },
+      }),
+    );
     writeFileSync(join(homeA, "akuma", "decoy.md"), "---\nprovider: claude\n---\nFrom A.\n");
     writeFileSync(join(homeB, "akuma", "worker.md"), "---\nprovider: local\n---\nFrom B.\n");
     const settingsFromA = await settings({ home: homeA });
@@ -1625,44 +2365,59 @@ test("list keeps every ordinary birth window visible without creating files", as
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-list-birth-windows-"));
   try {
     const directoryOnly = await allocateAkumaDirectory({
-      worldRoot: root, archetype: "claude", draw: () => "b1000001",
+      worldRoot: root,
+      archetype: "claude",
+      draw: () => "b1000001",
     });
     const before = readdirSync(directoryOnly.paths.directory);
     const heartOnly = await allocateAkumaDirectory({
-      worldRoot: root, archetype: "claude", draw: () => "b1000002",
+      worldRoot: root,
+      archetype: "claude",
+      draw: () => "b1000002",
     });
     await initializeHeart(heartOnly.paths);
     unlinkSync(heartOnly.paths.leash);
     const both = await allocateAkumaDirectory({
-      worldRoot: root, archetype: "reviewer", draw: () => "b1000003",
+      worldRoot: root,
+      archetype: "reviewer",
+      draw: () => "b1000003",
     });
     await initializeHeart(both.paths);
     const sealed = await allocateAkumaDirectory({
-      worldRoot: root, archetype: "claude", draw: () => "b1000004",
+      worldRoot: root,
+      archetype: "claude",
+      draw: () => "b1000004",
     });
     await initializeHeart(sealed.paths);
     const holder = (await HeldAkumaLeash.try(sealed.paths))!;
-    assert.equal(await holder.sealIfUnborn(sealed.paths, {
-      evidence: "call-timeout",
-      at: "2026-08-08T00:00:00.000Z",
-    }), "sealed");
+    assert.equal(
+      await holder.sealIfUnborn(sealed.paths, {
+        evidence: "call-timeout",
+        at: "2026-08-08T00:00:00.000Z",
+      }),
+      "sealed",
+    );
     mkdirSync(join(akumaRunRoot(root), "not-an-identity"));
 
     const world = await akumaAt(root);
     assert.deepEqual((await world.list()).rows, [
       { id: directoryOnly.id, life: "unborn" },
       { id: heartOnly.id, life: "unborn" },
-      { id: sealed.id, life: "stillborn", seal: {
-        evidence: "call-timeout", at: "2026-08-08T00:00:00.000Z",
-      } },
+      {
+        id: sealed.id,
+        life: "stillborn",
+        seal: {
+          evidence: "call-timeout",
+          at: "2026-08-08T00:00:00.000Z",
+        },
+      },
       { id: both.id, life: "unborn" },
     ]);
-    assert.deepEqual((await world.list({ archetype: "claude" })).rows.map((row) => row.id), [
-      directoryOnly.id, heartOnly.id, sealed.id,
-    ]);
-    assert.deepEqual((await world.list({ archetype: "reviewer" })).rows, [
-      { id: both.id, life: "unborn" },
-    ]);
+    assert.deepEqual(
+      (await world.list({ archetype: "claude" })).rows.map((row) => row.id),
+      [directoryOnly.id, heartOnly.id, sealed.id],
+    );
+    assert.deepEqual((await world.list({ archetype: "reviewer" })).rows, [{ id: both.id, life: "unborn" }]);
     assert.deepEqual(readdirSync(directoryOnly.paths.directory), before);
     assert.equal(existsSync(directoryOnly.paths.heart), false);
     assert.equal(existsSync(directoryOnly.paths.leash), false);
@@ -1676,18 +2431,24 @@ test("list silently skips identities whose compact row cannot be read", async ()
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-list-schema-cut-"));
   try {
     const heartCut = await allocateAkumaDirectory({
-      worldRoot: root, archetype: "claude", draw: () => "c1000001",
+      worldRoot: root,
+      archetype: "claude",
+      draw: () => "c1000001",
     });
     const heart = new DatabaseSync(heartCut.paths.heart);
-    heart.exec([
-      "CREATE TABLE akuma_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL);",
-      "INSERT INTO akuma_schema VALUES (1, 13)",
-    ].join(""));
+    heart.exec(
+      [
+        "CREATE TABLE akuma_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL);",
+        "INSERT INTO akuma_schema VALUES (1, 13)",
+      ].join(""),
+    );
     heart.close();
     const noise = join(akumaRunRoot(root), "NOISE-notid");
     mkdirSync(noise);
     const visible = await allocateAkumaDirectory({
-      worldRoot: root, archetype: "claude", draw: () => "c1000003",
+      worldRoot: root,
+      archetype: "claude",
+      draw: () => "c1000003",
     });
 
     const world = await akumaAt(root);
@@ -1696,15 +2457,19 @@ test("list silently skips identities whose compact row cannot be read", async ()
 
     rmSync(heartCut.paths.directory, { recursive: true, force: true });
     const leashCut = await allocateAkumaDirectory({
-      worldRoot: root, archetype: "claude", draw: () => "c1000002",
+      worldRoot: root,
+      archetype: "claude",
+      draw: () => "c1000002",
     });
     await initializeHeart(leashCut.paths);
     unlinkSync(leashCut.paths.leash);
     const leash = new DatabaseSync(leashCut.paths.leash);
-    leash.exec([
-      "CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL);",
-      "INSERT INTO leash_schema VALUES (1, 2)",
-    ].join(""));
+    leash.exec(
+      [
+        "CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL);",
+        "INSERT INTO leash_schema VALUES (1, 2)",
+      ].join(""),
+    );
     leash.close();
     assert.deepEqual((await world.list()).rows, [{ id: visible.id, life: "unborn" }]);
   } finally {
@@ -1717,39 +2482,50 @@ test("a failed turn is durable public evidence and never masquerades as provider
   try {
     const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "fa11ed00" });
     await initializeHeart(allocated.paths);
-    await driveAkumaBody({
-      paths: allocated.paths,
-      seed: {
-        id: allocated.id,
-        archetype: "claude",
-        provider: CLAUDE_EXECUTION,
-        options: {},
-        origin: { kind: "direct" },
-        cwd: root,
+    await driveAkumaBody(
+      {
+        paths: allocated.paths,
+        seed: {
+          id: allocated.id,
+          archetype: "claude",
+          provider: CLAUDE_EXECUTION,
+          options: {},
+          origin: { kind: "direct" },
+          cwd: root,
+        },
+        initialBody: "fail",
       },
-      initialBody: "fail",
-    }, {
-      async start() {
-        return {
-          events: { async *[Symbol.asyncIterator]() {} },
-          completion: Promise.resolve({ kind: "failed", diagnostic: "native failed" }),
-          async abort() {},
-        };
+      {
+        async start() {
+          return {
+            events: { async *[Symbol.asyncIterator]() {} },
+            completion: Promise.resolve({ kind: "failed", diagnostic: "native failed" }),
+            async abort() {},
+          };
+        },
       },
-    }, {
-      now: () => "2026-08-08T00:00:00.000Z",
-    });
+      {
+        now: () => "2026-08-08T00:00:00.000Z",
+      },
+    );
     const handle = (await akumaAt(root)).of({ id: allocated.id });
-    assert.equal((await handle.status()).timeline.kind === "idle"
-      && (await handle.status()).timeline.outcome?.outcome.kind === "failed", true);
+    assert.equal(
+      (await handle.status()).timeline.kind === "idle" &&
+        (await handle.status()).timeline.outcome?.outcome.kind === "failed",
+      true,
+    );
     const settled = await handle.wait();
     assert.equal(settled.life, "stranded");
     assert.equal(settled.timeline.kind === "idle" && settled.timeline.outcome?.outcome.kind === "failed", true);
     assert.equal("pending" in settled, false);
-    assert.deepEqual((await handle.history()).rows.map((row) => row.kind), ["turn", "call", "outcome"]);
-    assert.deepEqual((await timeline(allocated.paths)).filter((fact) => fact.kind === "turn-end").map((turn) => turn.outcome), [
-      { kind: "failed", diagnostic: "native failed" },
-    ]);
+    assert.deepEqual(
+      (await handle.history()).rows.map((row) => row.kind),
+      ["turn", "call", "outcome"],
+    );
+    assert.deepEqual(
+      (await timeline(allocated.paths)).filter((fact) => fact.kind === "turn-end").map((turn) => turn.outcome),
+      [{ kind: "failed", diagnostic: "native failed" }],
+    );
     const publicOutcome = (await handle.history()).rows.find((row) => row.kind === "outcome")?.outcome;
     assert.deepEqual(publicOutcome, { kind: "failed", historyId: "turn/1", diagnostic: "native failed" });
     const exact = await handle.history({ id: "turn/1" });
@@ -1765,15 +2541,25 @@ test("activity is persistent narration and old raw events fail the public hard c
   try {
     const source = await answeredSource(root, "ac710001");
     const handle = (await akumaAt(root)).of({ id: source.id });
-    const before = (await handle.status());
+    const before = await handle.status();
     const heart = new DatabaseSync(source.paths.heart);
     try {
       heart.exec("PRAGMA foreign_keys=ON");
       heart.prepare("DELETE FROM timeline WHERE kind = 'activity'").run();
-    } finally { heart.close(); }
-    const after = (await handle.status());
-    assert.equal(after.timeline.entries.some((entry) => entry.kind === "row" && ["said", "thought", "note", "tool"].includes(entry.row.kind)), false);
-    assert.equal((await handle.history()).rows.some((row) => ["said", "thought", "note", "tool"].includes(row.kind)), false);
+    } finally {
+      heart.close();
+    }
+    const after = await handle.status();
+    assert.equal(
+      after.timeline.entries.some(
+        (entry) => entry.kind === "row" && ["said", "thought", "note", "tool"].includes(entry.row.kind),
+      ),
+      false,
+    );
+    assert.equal(
+      (await handle.history()).rows.some((row) => ["said", "thought", "note", "tool"].includes(row.kind)),
+      false,
+    );
 
     await appendActivity(source.paths, {
       turnSequence: 1,
@@ -1794,9 +2580,13 @@ test("kill gives the Body a grace window to abort its owned provider session", a
     await initializeHeart(allocated.paths);
     let aborted = false;
     let settle!: (result: { kind: "failed"; diagnostic: string }) => void;
-    const completion = new Promise<{ kind: "failed"; diagnostic: string }>((resolve) => { settle = resolve; });
+    const completion = new Promise<{ kind: "failed"; diagnostic: string }>((resolve) => {
+      settle = resolve;
+    });
     const running: ProviderAdapter = {
-      admitOptions(options) { return { kind: "admitted", options }; },
+      admitOptions(options) {
+        return { kind: "admitted", options };
+      },
       async start() {
         return {
           admission: { fence: "kill-fixture-turn" },
@@ -1831,7 +2621,8 @@ test("kill gives the Body a grace window to abort its owned provider session", a
     const body = driveAkumaBody(launch, running, {
       now: () => "2026-08-08T00:00:00.000Z",
     });
-    while ((await readHeart(allocated.paths)).latestBody === null) await new Promise((resolve) => setTimeout(resolve, 5));
+    while ((await readHeart(allocated.paths)).latestBody === null)
+      await new Promise((resolve) => setTimeout(resolve, 5));
 
     const handle = (await akumaAt(root)).of({ id: allocated.id });
     const waited = handle.wait();

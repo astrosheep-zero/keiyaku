@@ -158,7 +158,11 @@ test("cancelled publication returns born when Soul appears during termination be
         const leash = (await HeldAkumaLeash.try(allocated.paths))!;
         const child: OwnedProcess = {
           pid: 4246,
-          exited: Promise.resolve({ code: null, signal: "SIGTERM", log: { path: "/tmp/request-child.log", from: 0, to: 0 } }),
+          exited: Promise.resolve({
+            code: null,
+            signal: "SIGTERM",
+            log: { path: "/tmp/request-child.log", from: 0, to: 0 },
+          }),
           terminate: async () => {
             terminateCount += 1;
             await leash.birth(allocated.paths, {
@@ -220,7 +224,11 @@ test("cancelled publication terminates its child, observes Seal, and then reject
         const leash = (await HeldAkumaLeash.try(allocated.paths))!;
         const child: OwnedProcess = {
           pid: 4247,
-          exited: Promise.resolve({ code: null, signal: "SIGTERM", log: { path: "/tmp/request-child.log", from: 0, to: 0 } }),
+          exited: Promise.resolve({
+            code: null,
+            signal: "SIGTERM",
+            log: { path: "/tmp/request-child.log", from: 0, to: 0 },
+          }),
           terminate: async () => {
             terminateCount += 1;
             leash.release();
@@ -276,7 +284,8 @@ test("cancelled publication remains pending with child custody until termination
   });
   let confirmExit!: () => void;
   const exited = new Promise<Awaited<OwnedProcess["exited"]>>((resolve) => {
-    confirmExit = () => resolve({ code: null, signal: "SIGTERM", log: { path: "/tmp/request-child.log", from: 0, to: 0 } });
+    confirmExit = () =>
+      resolve({ code: null, signal: "SIGTERM", log: { path: "/tmp/request-child.log", from: 0, to: 0 } });
   });
   let releaseCount = 0;
   try {
@@ -567,7 +576,8 @@ test("cancelled publication closes a live child before releasing its custody", a
   let terminated = false;
   let confirmExit!: () => void;
   const exited = new Promise<Awaited<OwnedProcess["exited"]>>((resolve) => {
-    confirmExit = () => resolve({ code: null, signal: "SIGTERM", log: { path: "/tmp/request-child.log", from: 0, to: 0 } });
+    confirmExit = () =>
+      resolve({ code: null, signal: "SIGTERM", log: { path: "/tmp/request-child.log", from: 0, to: 0 } });
   });
   let childPaths: Awaited<ReturnType<typeof allocateAkumaDirectory>>["paths"] | undefined;
   const publication = publishAkuma({

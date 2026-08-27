@@ -5,7 +5,8 @@ import { parseToAST } from "../src/markdown/parse.js";
 import { directChildren, indexDocument, indexedHeadings, rawSlice, sectionContent } from "../src/markdown/query.js";
 
 test("token spans tile exact BOM and CRLF source", () => {
-  const source = "\uFEFF---\r\nkind: draft\r\neffortOptions:\r\n  - low\r\n  - high\r\n---\r\n# Title\r\n## Body\r\ntext\r\n";
+  const source =
+    "\uFEFF---\r\nkind: draft\r\neffortOptions:\r\n  - low\r\n  - high\r\n---\r\n# Title\r\n## Body\r\ntext\r\n";
   const document = parseToAST(source);
   const tokens = lexMarkdown(source);
   let cursor: number = document.bomLength;
@@ -34,7 +35,7 @@ test("fences keep heading-looking bytes opaque and H1 closes H2", () => {
   const index = indexDocument(document);
   assert.equal(indexedHeadings(index, { title: "not a section", level: 2 }).length, 0);
   assert.deepEqual(
-    indexedHeadings(index, { level: 1 }).map((node) => node.type === "section" ? node.title : node.text),
+    indexedHeadings(index, { level: 1 }).map((node) => (node.type === "section" ? node.title : node.text)),
     ["First", "Second"],
   );
   const design = indexedHeadings(index, { title: "design", level: 2 })[0];
@@ -53,7 +54,10 @@ test("nested lists and blockquotes remain structured while inline bytes stay opa
   assert.equal(list.items.length, 1);
   const nested = list.items[0]?.children.find((node) => node.type === "list");
   assert.equal(nested?.type, "list");
-  assert.match(list.items[0]?.children[0]?.type === "text" ? list.items[0].children[0].value : "", /\[link\]\(target\)/);
+  assert.match(
+    list.items[0]?.children[0]?.type === "text" ? list.items[0].children[0].value : "",
+    /\[link\]\(target\)/,
+  );
 
   const quoteDocument = parseToAST("## Notes\n> quoted [link](target)\n> second line\n");
   const notes = indexedHeadings(indexDocument(quoteDocument), { title: "notes", level: 2 })[0];
@@ -91,17 +95,7 @@ test("BOM, CRLF, and astral characters tile exact UTF-16 spans", () => {
 });
 
 test("info-bearing and shorter fence lines never close a fence; heading bytes stay opaque", () => {
-  const source = [
-    "# Doc",
-    "## Design",
-    "```",
-    "# Fake H1",
-    "## Fake H2",
-    "```ts",
-    "``",
-    "```",
-    "tail",
-  ].join("\n");
+  const source = ["# Doc", "## Design", "```", "# Fake H1", "## Fake H2", "```ts", "``", "```", "tail"].join("\n");
   const document = parseToAST(source);
   const index = indexDocument(document);
   assert.equal(indexedHeadings(index, { level: 1 }).length, 1);

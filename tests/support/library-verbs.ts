@@ -1,12 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import {
-  Keiyaku,
-  KeiyakuRefused,
-  Repo,
-  type KeiyakuRefusal,
-} from "../../src/index.js";
+import { Keiyaku, KeiyakuRefused, Repo, type KeiyakuRefusal } from "../../src/index.js";
 import { makeGitRepository, snapshotGitRepository, type TestGitRepository } from "./git.js";
 
 export interface RepositoryWithMainOptions {
@@ -73,19 +68,14 @@ export function document(verification?: string): string {
     "## Criteria",
     "### Public path",
     "The public path preserves fact payloads.",
-    ...(verification === undefined ? [] : [
-      "",
-      "## Verification",
-      "~~~bash",
-      verification,
-      "~~~",
-    ]),
+    ...(verification === undefined ? [] : ["", "## Verification", "~~~bash", verification, "~~~"]),
     "",
   ].join("\n");
 }
 
 export async function bind(repository: TestGitRepository, verification?: string) {
-  const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
+  const result = await Keiyaku.bind({
+    repo: await Repo.at({ path: repository.path }),
     markdown: document(verification),
     workspace: "worktree",
     gates: verification === undefined ? ["reviewed"] : ["verified"],

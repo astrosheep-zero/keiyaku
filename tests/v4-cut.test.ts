@@ -29,10 +29,7 @@ test("the journal codec accepts only the opaque current format", () => {
     },
   };
   assert.deepEqual(decodeJournal(encodeEntry(bind)), [bind]);
-  assert.throws(
-    () => decodeJournal(`${JSON.stringify({ ...bind, v: 0 })}\n`),
-    /entry\.v: expected version 1/,
-  );
+  assert.throws(() => decodeJournal(`${JSON.stringify({ ...bind, v: 0 })}\n`), /entry\.v: expected version 1/);
   assert.throws(
     () => decodeJournal(`${JSON.stringify({ ...bind, kind: "open", data: {} })}\n`),
     /unknown journal entry kind: open/,

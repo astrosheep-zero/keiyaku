@@ -51,14 +51,20 @@ function verificationBody(script: string | null = "exit 1"): string {
   ].join("\n");
 }
 
-
-async function failedStoredVerification(): Promise<Readonly<{
-  repository: TestGitRepository;
-  contract: Keiyaku;
-  state: Awaited<ReturnType<Keiyaku["state"]>>;
-}>> {
+async function failedStoredVerification(): Promise<
+  Readonly<{
+    repository: TestGitRepository;
+    contract: Keiyaku;
+    state: Awaited<ReturnType<Keiyaku["state"]>>;
+  }>
+> {
   const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: verificationBody(), workspace: "worktree", gates: ["verified"] });
+  const bound = await Keiyaku.bind({
+    repo: await Repo.at({ path: repository.path }),
+    markdown: verificationBody(),
+    workspace: "worktree",
+    gates: ["verified"],
+  });
   const worktree = await appointedWorktreePath(await repositoryAt(repository.path), bound.keiyaku.id);
   writeFileSync(`${worktree}/candidate.txt`, "candidate\n");
   repository.run(["-C", worktree, "add", "candidate.txt"]);
@@ -73,7 +79,8 @@ async function failedStoredVerification(): Promise<Readonly<{
 test("a verified placement gate without a Verification declaration is refused at bind", async () => {
   const repository = repositoryWithMain();
   await assert.rejects(
-    Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
+    Keiyaku.bind({
+      repo: await Repo.at({ path: repository.path }),
       markdown: verificationBody(null),
       workspace: "worktree",
       gates: ["verified"],
@@ -84,7 +91,11 @@ test("a verified placement gate without a Verification declaration is refused at
 
 test("an active amend cannot admit verified terms without a Verification declaration", async () => {
   const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: verificationBody(null), workspace: "worktree" });
+  const bound = await Keiyaku.bind({
+    repo: await Repo.at({ path: repository.path }),
+    markdown: verificationBody(null),
+    workspace: "worktree",
+  });
   const before = await bound.keiyaku.state();
 
   await assert.rejects(
@@ -102,7 +113,11 @@ test("an active amend cannot admit verified terms without a Verification declara
 
 test("terminal amend refusal outranks a missing Verification declaration", async () => {
   const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: verificationBody(null), workspace: "worktree" });
+  const bound = await Keiyaku.bind({
+    repo: await Repo.at({ path: repository.path }),
+    markdown: verificationBody(null),
+    workspace: "worktree",
+  });
   const id = (await bound.keiyaku.state()).id;
   await bound.keiyaku.abandon();
 
@@ -117,7 +132,11 @@ test("terminal amend refusal outranks a missing Verification declaration", async
 
 test("a stale document derivation is refused inside its E-decision", async () => {
   const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: verificationBody(null), workspace: "worktree" });
+  const bound = await Keiyaku.bind({
+    repo: await Repo.at({ path: repository.path }),
+    markdown: verificationBody(null),
+    workspace: "worktree",
+  });
   const state = await bound.keiyaku.state();
   const decoded = decodeContractDocument(state.terms.document.bytes);
   const derivation = {
@@ -134,27 +153,34 @@ test("a stale document derivation is refused inside its E-decision", async () =>
   const refusal = { kind: "document-moved", contractId: state.id };
 
   await withGitDecodeChannel(scope, async (channel) => {
-    assert.deepEqual(await deliverOperation({
-      scope,
-      channel,
-      contractId: state.id,
-      deriveDocument: () => derivation,
-      requireBranchesToBeUpToDate: false,
-      includeDirty: false,
-      materializeConflict: false,
-    }), { kind: "refused", refusal });
-    assert.deepEqual(await auditOperation({
-      scope,
-      channel,
-      contractId: state.id,
-      deriveDocument: () => derivation,
-    }), { kind: "refused", refusal });
+    assert.deepEqual(
+      await deliverOperation({
+        scope,
+        channel,
+        contractId: state.id,
+        deriveDocument: () => derivation,
+        requireBranchesToBeUpToDate: false,
+        includeDirty: false,
+        materializeConflict: false,
+      }),
+      { kind: "refused", refusal },
+    );
+    assert.deepEqual(
+      await auditOperation({
+        scope,
+        channel,
+        contractId: state.id,
+        deriveDocument: () => derivation,
+      }),
+      { kind: "refused", refusal },
+    );
   });
 });
 
 test("audit without Verification still returns an accepted ready candidate", async () => {
   const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
+  const bound = await Keiyaku.bind({
+    repo: await Repo.at({ path: repository.path }),
     markdown: verificationBody(null),
     workspace: "worktree",
   });
@@ -163,21 +189,23 @@ test("audit without Verification still returns an accepted ready candidate", asy
   const contractId = (await bound.keiyaku.state()).id;
   const observed = await withGitDecodeChannel(scope, (channel) => observeContractAt(scope, channel, contractId));
   const decoded = decodeContractDocument(observed.state!.terms.document.bytes);
-  const result = await withGitDecodeChannel(scope, (channel) => auditOperation({
-    scope,
-    channel,
-    contractId,
-    deriveDocument: () => ({
-      document: decoded.document.key,
-      bytes: decoded.document.bytes,
-      title: decoded.title,
-      verification: prepareVerificationDeclaration({
-        gates: observed.state!.terms.gates,
-        definition: verificationDefinition(decoded),
-        contractId,
+  const result = await withGitDecodeChannel(scope, (channel) =>
+    auditOperation({
+      scope,
+      channel,
+      contractId,
+      deriveDocument: () => ({
+        document: decoded.document.key,
+        bytes: decoded.document.bytes,
+        title: decoded.title,
+        verification: prepareVerificationDeclaration({
+          gates: observed.state!.terms.gates,
+          definition: verificationDefinition(decoded),
+          contractId,
+        }),
       }),
     }),
-  }));
+  );
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") return;
   assert.deepEqual(result.facts, []);
@@ -227,13 +255,9 @@ test("audit blocks an unresolved materialized merge with the delivery refusal", 
 
 test("audit accepts an attestation refusal as a stopped answer without facts", async () => {
   const { contract } = await failedStoredVerification();
-  const amended = await contract.amend({ markdown: [
-    "## Replace: Verification",
-    "~~~bash",
-    "sleep 0.2",
-    "~~~",
-    "",
-  ].join("\n") });
+  const amended = await contract.amend({
+    markdown: ["## Replace: Verification", "~~~bash", "sleep 0.2", "~~~", ""].join("\n"),
+  });
 
   const pending = contract.audit();
   const abandoned = new Promise<void>((resolve, reject) => {
@@ -260,13 +284,9 @@ test("audit accepts an attestation refusal as a stopped answer without facts", a
 
 test("audit admits Verification testimony for its captured old subject", async () => {
   const { contract } = await failedStoredVerification();
-  const delayed = await contract.amend({ markdown: [
-    "## Replace: Verification",
-    "~~~bash",
-    "sleep 0.2",
-    "~~~",
-    "",
-  ].join("\n") });
+  const delayed = await contract.amend({
+    markdown: ["## Replace: Verification", "~~~bash", "sleep 0.2", "~~~", ""].join("\n"),
+  });
   const state = await contract.state();
   const definition = verificationDefinition(decodeContractDocument(state.terms.document.bytes));
   if (state.delivery === null || definition === null) throw new Error("audit inputs are absent");
@@ -274,28 +294,30 @@ test("audit admits Verification testimony for its captured old subject", async (
   const pending = contract.audit();
   const amended = new Promise<void>((resolve, reject) => {
     setTimeout(() => {
-      void contract.amend({ markdown: [
-        "## Replace: Verification",
-        "~~~bash",
-        "exit 0",
-        "~~~",
-        "",
-      ].join("\n") }).then((result) => {
-        try {
-          resolve();
-        } catch (error) {
-          reject(error);
-        }
-      }, reject);
+      void contract
+        .amend({ markdown: ["## Replace: Verification", "~~~bash", "exit 0", "~~~", ""].join("\n") })
+        .then((result) => {
+          try {
+            resolve();
+          } catch (error) {
+            reject(error);
+          }
+        }, reject);
     }, 20);
   });
   const audited = await pending;
   await amended;
-  assert.deepEqual(audited.facts.map((fact) => fact.kind), ["attestation"]);
-  assert.equal((await contract.state()).attestations.at(-1)?.data.subject, dependencyKeySet([
-    { kind: "snapshot", value: state.delivery.data.integration.snapshot },
-    { kind: "segment", value: definition.segment },
-  ]));
+  assert.deepEqual(
+    audited.facts.map((fact) => fact.kind),
+    ["attestation"],
+  );
+  assert.equal(
+    (await contract.state()).attestations.at(-1)?.data.subject,
+    dependencyKeySet([
+      { kind: "snapshot", value: state.delivery.data.integration.snapshot },
+      { kind: "segment", value: definition.segment },
+    ]),
+  );
 });
 
 test("Verification reuse requires its exact producer subject", async () => {
@@ -313,14 +335,16 @@ test("Verification reuse requires its exact producer subject", async () => {
   let executions = 0;
 
   const git = await repositoryAt(repository.path);
-  const result = await withGitDecodeChannel(git, (channel) => verifyDelivery({
-    channel,
-    repository: git,
-    contractId: state.id,
-    at: "2026-08-06T00:00:03.000Z",
-    state: { ...state, attestations: [...state.attestations, unrelated] },
-    verification: definition,
-    environment: {},
-  }));
+  const result = await withGitDecodeChannel(git, (channel) =>
+    verifyDelivery({
+      channel,
+      repository: git,
+      contractId: state.id,
+      at: "2026-08-06T00:00:03.000Z",
+      state: { ...state, attestations: [...state.attestations, unrelated] },
+      verification: definition,
+      environment: {},
+    }),
+  );
   assert.equal(result?.step.kind, "accepted");
 });

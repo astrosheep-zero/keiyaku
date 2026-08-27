@@ -42,9 +42,26 @@ async function observe(path: string, repo?: Repo) {
 
 function document(title = "Kanshi contract"): string {
   return [
-    `# ${title}`, "", "## Context", "status", "", "## Objective", "render", "",
-    "## Design", "project public values", "", "## Region", "```", "src/**", "```", "",
-    "## Criteria", "### Visible", "The status row is visible.", "",
+    `# ${title}`,
+    "",
+    "## Context",
+    "status",
+    "",
+    "## Objective",
+    "render",
+    "",
+    "## Design",
+    "project public values",
+    "",
+    "## Region",
+    "```",
+    "src/**",
+    "```",
+    "",
+    "## Criteria",
+    "### Visible",
+    "The status row is visible.",
+    "",
   ].join("\n");
 }
 
@@ -90,7 +107,16 @@ async function populatedWorld() {
   assert.equal(renamed.kind, "accepted");
   await tasks.task({ id: added.value.id }).start();
   const akumaId = await bornAkuma(repository.path, "a0000001");
-  assert.equal((await publishDispatch({ repository: await repositoryAt(repository.path), akuId: akumaId, contractId: contract.id })).kind, "dispatched");
+  assert.equal(
+    (
+      await publishDispatch({
+        repository: await repositoryAt(repository.path),
+        akuId: akumaId,
+        contractId: contract.id,
+      })
+    ).kind,
+    "dispatched",
+  );
   await moveAlias({ world: repository.path, alias: "@watch", akuId: akumaId });
   return { repository, contract, keiyaku: bound.keiyaku, taskId: added.value.id, akumaId };
 }
@@ -104,7 +130,7 @@ async function observedGitInvocations(repository: ReturnType<typeof makeGitRepos
   const log = join(repository.path, "kanshi-git-invocations.log");
   writeFileSync(log, "");
   await withGitShim(
-    "printf '%s\\n' \"$*\" >> \"$KEIYAKU_KANSHI_GIT_LOG\"\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"",
+    'printf \'%s\\n\' "$*" >> "$KEIYAKU_KANSHI_GIT_LOG"\nexec "$KEIYAKU_REAL_GIT" "$@"',
     { KEIYAKU_KANSHI_GIT_LOG: log },
     async (gitPath) => observe(repository.path, await Repo.at({ path: repository.path, gitPath })),
   );
@@ -130,24 +156,41 @@ test("one-target Kanshi observation has an eight-process Git topology", async ()
   });
   const secondContract = await bound.keiyaku.state();
   const secondAkuma = await bornAkuma(repository.path, "a0000009");
-  assert.equal((await publishDispatch({
-    repository: await repositoryAt(repository.path),
-    akuId: secondAkuma,
-    contractId: secondContract.id,
-  })).kind, "dispatched");
+  assert.equal(
+    (
+      await publishDispatch({
+        repository: await repositoryAt(repository.path),
+        akuId: secondAkuma,
+        contractId: secondContract.id,
+      })
+    ).kind,
+    "dispatched",
+  );
   const invocations = await observedGitInvocations(repository);
 
   assert.equal(invocations.filter((command) => command === "worktree list --porcelain -z").length, 1);
-  assert.equal(invocations.filter((command) => command === "rev-parse --path-format=absolute --git-common-dir").length, 1);
+  assert.equal(
+    invocations.filter((command) => command === "rev-parse --path-format=absolute --git-common-dir").length,
+    1,
+  );
   assert.equal(invocations.filter((command) => command === "symbolic-ref --quiet HEAD").length, 1);
   assert.equal(invocations.filter((command) => command === `rev-parse --verify --quiet ${GIT_REF}`).length, 1);
-  assert.equal(invocations.some((command) => command.startsWith("ls-tree ")), false);
+  assert.equal(
+    invocations.some((command) => command.startsWith("ls-tree ")),
+    false,
+  );
   assert.equal(invocations.filter((command) => command === "cat-file --batch").length, 1);
   assert.equal(invocations.filter((command) => command === "rev-parse --verify --quiet refs/heads/main").length, 1);
-  assert.equal(invocations.some((command) => command.startsWith("cat-file blob ")), false);
+  assert.equal(
+    invocations.some((command) => command.startsWith("cat-file blob ")),
+    false,
+  );
   assert.equal(invocations.filter((command) => command.includes("status --porcelain=v2")).length, 2);
   assert.equal(invocations.filter((command) => /rev-list --count HEAD\.\.[0-9a-f]{40}$/u.test(command)).length, 2);
-  assert.equal(invocations.some((command) => /rev-list --count HEAD\.\.refs\//u.test(command)), false);
+  assert.equal(
+    invocations.some((command) => /rev-list --count HEAD\.\.refs\//u.test(command)),
+    false,
+  );
 });
 
 test("named status resolves its address from the initial observation before the selected read", async () => {
@@ -185,16 +228,20 @@ test("named status resolves its address from the initial observation before the 
       KEIYAKU_BARRIER_MARKER: marker,
       KEIYAKU_TERMINAL_OID: terminal,
     },
-    async (gitPath) => await invoke(
-      parseArgv(["-C", repository.path, "status", `@${contract.id.slice("kei/".length)}`]),
-      { environment: { KEIYAKU_GIT_PATH: gitPath } },
-    ),
+    async (gitPath) =>
+      await invoke(parseArgv(["-C", repository.path, "status", `@${contract.id.slice("kei/".length)}`]), {
+        environment: { KEIYAKU_GIT_PATH: gitPath },
+      }),
   );
 
   assert.equal(result.kind, "status");
   assert.equal(result.kind === "status" && result.selection, "contract");
-  assert.equal(result.kind === "status" && result.report.contracts.kind === "present"
-    && result.report.contracts.value.rows.find((row) => row.id === contract.id)?.disposition, "terminal");
+  assert.equal(
+    result.kind === "status" &&
+      result.report.contracts.kind === "present" &&
+      result.report.contracts.value.rows.find((row) => row.id === contract.id)?.disposition,
+    "terminal",
+  );
   assert.equal(repository.run(["rev-parse", GIT_REF]).trim(), terminal);
 });
 
@@ -222,8 +269,12 @@ test("canonical and Contract-alias status both assemble selected-only current ph
   const readIssue = async (selector: string) => {
     const result = await invoke(parseArgv(["-C", repository.path, "status", selector]));
     assert.equal(result.kind, "status");
-    if (result.kind !== "status" || result.report.contracts.kind !== "present") throw new Error("selected Contract status was unavailable");
-    assert.deepEqual(result.report.contracts.value.rows.map((row) => row.id), [id]);
+    if (result.kind !== "status" || result.report.contracts.kind !== "present")
+      throw new Error("selected Contract status was unavailable");
+    assert.deepEqual(
+      result.report.contracts.value.rows.map((row) => row.id),
+      [id],
+    );
     return result.report.contracts.value.rows[0]?.issue;
   };
 
@@ -245,15 +296,24 @@ test("complete Contract status exposes a corrupt active dependency as a Contract
   const unrelatedId = unrelated.keiyaku.id;
   const git = await repositoryAt(repository.path);
   const snapshot = await readGit(git);
-  const tree = await updateGitTree(git, snapshot.tree, new Map([
-    [contractJournalPath(unrelatedId), { oid: await writeBlob(git, "not a Contract journal\n") }],
-  ]));
+  const tree = await updateGitTree(
+    git,
+    snapshot.tree,
+    new Map([[contractJournalPath(unrelatedId), { oid: await writeBlob(git, "not a Contract journal\n") }]]),
+  );
   const commit = await writeCommit({ repository: git, tree, parent: snapshot.commit });
-  assert.equal((await updateRefsAtomically(git, [{
-    ref: GIT_REF,
-    newOid: commit,
-    expectedOid: snapshot.commit,
-  }])).kind, "published");
+  assert.equal(
+    (
+      await updateRefsAtomically(git, [
+        {
+          ref: GIT_REF,
+          newOid: commit,
+          expectedOid: snapshot.commit,
+        },
+      ])
+    ).kind,
+    "published",
+  );
 
   const result = await invoke(parseArgv(["-C", repository.path, "status", selectedId]));
 
@@ -280,7 +340,7 @@ test("same-target lag counts each workspace HEAD against the one frozen target h
   const log = join(repository.path, "kanshi-shared-target-lag.log");
   writeFileSync(log, "");
   const report = await withGitShim(
-    "printf '%s\\n' \"$*\" >> \"$KEIYAKU_KANSHI_GIT_LOG\"\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"",
+    'printf \'%s\\n\' "$*" >> "$KEIYAKU_KANSHI_GIT_LOG"\nexec "$KEIYAKU_REAL_GIT" "$@"',
     { KEIYAKU_KANSHI_GIT_LOG: log },
     async (gitPath) => observe(repository.path, await Repo.at({ path: repository.path, gitPath })),
   );
@@ -290,13 +350,22 @@ test("same-target lag counts each workspace HEAD against the one frozen target h
   const rows = [contract.id, second.id].map((id) => report.contracts.value.rows.find((row) => row.id === id));
   const head = rows[0]?.targetObservation?.head;
   assert.equal(typeof head, "string");
-  assert.equal(rows.every((row) => row?.target === "refs/heads/main" && row.targetObservation?.head === head), true);
+  assert.equal(
+    rows.every((row) => row?.target === "refs/heads/main" && row.targetObservation?.head === head),
+    true,
+  );
   const invocations = gitInvocations(log);
   const lagReads = invocations.filter((command) => /rev-list --count HEAD\.\.[0-9a-f]{40}$/u.test(command));
   assert.equal(lagReads.length, 2);
-  assert.equal(lagReads.every((command) => command.endsWith(`HEAD..${head}`)), true);
+  assert.equal(
+    lagReads.every((command) => command.endsWith(`HEAD..${head}`)),
+    true,
+  );
   assert.equal(invocations.filter((command) => command === "rev-parse --verify --quiet refs/heads/main").length, 1);
-  assert.equal(invocations.some((command) => /rev-list --count HEAD\.\.refs\//u.test(command)), false);
+  assert.equal(
+    invocations.some((command) => /rev-list --count HEAD\.\.refs\//u.test(command)),
+    false,
+  );
 });
 
 test("Kanshi Git topology adds one ref read per distinct Contract target", async () => {
@@ -311,13 +380,19 @@ test("Kanshi Git topology adds one ref read per distinct Contract target", async
 
   const invocations = await observedGitInvocations(repository);
 
-  assert.equal(invocations.filter((command) => command === "rev-parse --path-format=absolute --git-common-dir").length, 1);
+  assert.equal(
+    invocations.filter((command) => command === "rev-parse --path-format=absolute --git-common-dir").length,
+    1,
+  );
   assert.equal(invocations.filter((command) => command === "rev-parse --verify --quiet refs/heads/main").length, 1);
   assert.equal(invocations.filter((command) => command === "rev-parse --verify --quiet refs/heads/other").length, 1);
   assert.equal(invocations.filter((command) => command === "cat-file --batch").length, 1);
   assert.equal(invocations.filter((command) => command.includes("status --porcelain=v2")).length, 2);
   assert.equal(invocations.filter((command) => /rev-list --count HEAD\.\.[0-9a-f]{40}$/u.test(command)).length, 2);
-  assert.equal(invocations.some((command) => /rev-list --count HEAD\.\.refs\//u.test(command)), false);
+  assert.equal(
+    invocations.some((command) => /rev-list --count HEAD\.\.refs\//u.test(command)),
+    false,
+  );
 });
 
 test("a dead shared Kanshi batch fails every Git-backed owner without restarting", async () => {
@@ -327,9 +402,9 @@ test("a dead shared Kanshi batch fails every Git-backed owner without restarting
 
   const report = await withGitShim(
     [
-      "printf '%s\\n' \"$*\" >> \"$KEIYAKU_KANSHI_GIT_LOG\"",
-      "if [ \"$1 $2\" = \"cat-file --batch\" ]; then exit 74; fi",
-      "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
+      'printf \'%s\\n\' "$*" >> "$KEIYAKU_KANSHI_GIT_LOG"',
+      'if [ "$1 $2" = "cat-file --batch" ]; then exit 74; fi',
+      'exec "$KEIYAKU_REAL_GIT" "$@"',
     ].join("\n"),
     { KEIYAKU_KANSHI_GIT_LOG: log },
     async (gitPath) => observe(repository.path, await Repo.at({ path: repository.path, gitPath })),
@@ -366,8 +441,14 @@ test("a missing TaskHolder object fails only the TaskHolder-dependent section", 
   assert.equal(report.tasks.kind, "failed");
   assert.equal(report.akuma.kind, "present");
   if (report.contracts.kind === "present") {
-    assert.equal(report.contracts.value.rows.every((row) => row.holder.kind === "unavailable"), true);
-    assert.equal(report.contracts.value.rows.every((row) => row.namespaceTasks.kind === "present"), true);
+    assert.equal(
+      report.contracts.value.rows.every((row) => row.holder.kind === "unavailable"),
+      true,
+    );
+    assert.equal(
+      report.contracts.value.rows.every((row) => row.namespaceTasks.kind === "present"),
+      true,
+    );
   }
 });
 
@@ -389,11 +470,16 @@ test("a corrupt shared Git format fails every state-backed Kanshi section", asyn
   const { repository } = await populatedWorld();
   const git = await repositoryAt(repository.path);
   const snapshot = await readGit(git);
-  const tree = await updateGitTree(git, snapshot.tree, new Map([
-    [GIT_FORMAT_PATH, { oid: await writeBlob(git, "not the current format\n") }],
-  ]));
+  const tree = await updateGitTree(
+    git,
+    snapshot.tree,
+    new Map([[GIT_FORMAT_PATH, { oid: await writeBlob(git, "not the current format\n") }]]),
+  );
   const commit = await writeCommit({ repository: git, tree, parent: snapshot.commit });
-  assert.equal((await updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind, "published");
+  assert.equal(
+    (await updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind,
+    "published",
+  );
 
   const report = await observe(repository.path, await Repo.at({ path: repository.path }));
 
@@ -475,21 +561,33 @@ test("a malformed TaskHolder root fails only the Kanshi Task section", async () 
   const { repository } = await populatedWorld();
   const git = await repositoryAt(repository.path);
   const snapshot = await readGit(git);
-  const tree = await updateGitTree(git, snapshot.tree, new Map([
-    ["settlement/task-holders", { oid: await writeBlob(git, "not holder authority\n") }],
-  ]));
+  const tree = await updateGitTree(
+    git,
+    snapshot.tree,
+    new Map([["settlement/task-holders", { oid: await writeBlob(git, "not holder authority\n") }]]),
+  );
   const commit = await writeCommit({ repository: git, tree, parent: snapshot.commit });
-  assert.equal((await updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind, "published");
+  assert.equal(
+    (await updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind,
+    "published",
+  );
 
   const report = await observe(repository.path, await Repo.at({ path: repository.path }));
 
   assert.equal(report.contracts.kind, "present");
   assert.equal(report.tasks.kind, "failed");
   assert.equal(report.akuma.kind, "present");
-  if (report.tasks.kind === "failed") assert.match(report.tasks.failure.message, /TaskHolder authority root is not a tree/u);
+  if (report.tasks.kind === "failed")
+    assert.match(report.tasks.failure.message, /TaskHolder authority root is not a tree/u);
   if (report.contracts.kind === "present") {
-    assert.equal(report.contracts.value.rows.every((row) => row.holder.kind === "unavailable"), true);
-    assert.equal(report.contracts.value.rows.every((row) => row.namespaceTasks.kind === "present"), true);
+    assert.equal(
+      report.contracts.value.rows.every((row) => row.holder.kind === "unavailable"),
+      true,
+    );
+    assert.equal(
+      report.contracts.value.rows.every((row) => row.namespaceTasks.kind === "present"),
+      true,
+    );
   }
 });
 
@@ -497,11 +595,16 @@ test("a malformed Contract journal fails only the Kanshi Contract section", asyn
   const { repository, contract } = await populatedWorld();
   const git = await repositoryAt(repository.path);
   const snapshot = await readGit(git);
-  const tree = await updateGitTree(git, snapshot.tree, new Map([
-    [contractJournalPath(contract.id), { oid: await writeBlob(git, "not a Contract journal\n") }],
-  ]));
+  const tree = await updateGitTree(
+    git,
+    snapshot.tree,
+    new Map([[contractJournalPath(contract.id), { oid: await writeBlob(git, "not a Contract journal\n") }]]),
+  );
   const commit = await writeCommit({ repository: git, tree, parent: snapshot.commit });
-  assert.equal((await updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind, "published");
+  assert.equal(
+    (await updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind,
+    "published",
+  );
 
   const report = await observe(repository.path, await Repo.at({ path: repository.path }));
 
@@ -515,8 +618,11 @@ test("kanshi samples observedAt before section reads", async () => {
   const original = Date.prototype.toISOString;
   const currentBranch = Repo.prototype.currentBranch;
   let sampled = false;
-  Date.prototype.toISOString = function() { sampled = true; return original.call(this); };
-  Repo.prototype.currentBranch = async function() {
+  Date.prototype.toISOString = function () {
+    sampled = true;
+    return original.call(this);
+  };
+  Repo.prototype.currentBranch = async function () {
     assert.equal(sampled, true);
     return currentBranch.call(this);
   };
@@ -531,7 +637,9 @@ test("kanshi samples observedAt before section reads", async () => {
 test("a failed branch observation does not suppress readable Contract state", async () => {
   const { repository } = await populatedWorld();
   const currentBranch = Repo.prototype.currentBranch;
-  Repo.prototype.currentBranch = async function() { throw new Error("branch unavailable"); };
+  Repo.prototype.currentBranch = async function () {
+    throw new Error("branch unavailable");
+  };
   try {
     const report = await observe(repository.path, await Repo.at({ path: repository.path }));
     assert.equal(report.branch, null);
@@ -594,11 +702,16 @@ test("malformed Dispatch fails only the Kanshi Akuma section", async () => {
   const { repository } = await populatedWorld();
   const git = await repositoryAt(repository.path);
   const snapshot = await readGit(git);
-  const tree = await updateGitTree(git, snapshot.tree, new Map([
-    ["dispatch", { oid: await writeBlob(git, "not dispatch authority\n") }],
-  ]));
+  const tree = await updateGitTree(
+    git,
+    snapshot.tree,
+    new Map([["dispatch", { oid: await writeBlob(git, "not dispatch authority\n") }]]),
+  );
   const commit = await writeCommit({ repository: git, tree, parent: snapshot.commit });
-  assert.equal((await updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind, "published");
+  assert.equal(
+    (await updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind,
+    "published",
+  );
   const report = await observe(repository.path, await Repo.at({ path: repository.path }));
   assert.equal(report.contracts.kind, "present");
   assert.equal(report.tasks.kind, "present");
@@ -609,17 +722,15 @@ function zeros() {
   return { staged: 0, unstaged: 0, untracked: 0, submodules: 0 };
 }
 
-function worktreeObservation(
-  path: string,
-  kind: "clean" | "dirty" | "unavailable" = "clean",
-  counts = zeros(),
-) {
+function worktreeObservation(path: string, kind: "clean" | "dirty" | "unavailable" = "clean", counts = zeros()) {
   return kind === "unavailable"
     ? { kind, location: { kind: "worktree" as const, path } }
     : { kind, location: { kind: "worktree" as const, path }, counts, merge: null };
 }
 
-function contractRow(input: Partial<Extract<KanshiReport["contracts"], { kind: "present" }>["value"]["rows"][number]> & { id: string }) {
+function contractRow(
+  input: Partial<Extract<KanshiReport["contracts"], { kind: "present" }>["value"]["rows"][number]> & { id: string },
+) {
   const workspace = input.workspace ?? "worktree";
   const path = input.worktreePath ?? `/repo/.keiyaku/wt/${input.id.slice("kei/".length)}`;
   return {
@@ -669,7 +780,15 @@ function attentionReport(): KanshiReport {
             gates: {
               satisfied: true,
               reports: [
-                { gate: "reviewed", current: { kind: "attested", verdict: "satisfied", summary: "terminal review summary", at: "2026-08-10T00:00:00.000Z" } },
+                {
+                  gate: "reviewed",
+                  current: {
+                    kind: "attested",
+                    verdict: "satisfied",
+                    summary: "terminal review summary",
+                    at: "2026-08-10T00:00:00.000Z",
+                  },
+                },
               ],
             },
           }),
@@ -679,7 +798,12 @@ function attentionReport(): KanshiReport {
             phase: "tendered",
             phaseAt: "2026-08-11T23:57:00.000Z",
             worktreePath: dirtyPath,
-            workspaceObservation: worktreeObservation(dirtyPath, "dirty", { staged: 1, unstaged: 3, untracked: 2, submodules: 0 }),
+            workspaceObservation: worktreeObservation(dirtyPath, "dirty", {
+              staged: 1,
+              unstaged: 3,
+              untracked: 2,
+              submodules: 0,
+            }),
             targetLag: { kind: "counted", behind: 7 },
             targetObservation: { head: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", drift: true },
             holder: { kind: "held", taskId: "task/running" },
@@ -687,8 +811,24 @@ function attentionReport(): KanshiReport {
             gates: {
               satisfied: false,
               reports: [
-                { gate: "reviewed", current: { kind: "attested", verdict: "satisfied", summary: "world summary should stay hidden", at: "2026-08-11T23:58:00.000Z" } },
-                { gate: "verified", current: { kind: "attested", verdict: "unsatisfied", summary: "tests failed", at: "2026-08-11T22:00:00.000Z" } },
+                {
+                  gate: "reviewed",
+                  current: {
+                    kind: "attested",
+                    verdict: "satisfied",
+                    summary: "world summary should stay hidden",
+                    at: "2026-08-11T23:58:00.000Z",
+                  },
+                },
+                {
+                  gate: "verified",
+                  current: {
+                    kind: "attested",
+                    verdict: "unsatisfied",
+                    summary: "tests failed",
+                    at: "2026-08-11T22:00:00.000Z",
+                  },
+                },
                 { gate: "security", current: { kind: "stale", priorVerdict: "satisfied" } },
                 { gate: "manual", current: { kind: "missing" } },
               ],
@@ -731,11 +871,26 @@ function attentionReport(): KanshiReport {
       value: {
         root: "/repo",
         rows: [
-          { id: "task/blocked", title: "Blocked by release evidence", state: "open", priority: 0, disposition: "blocked", contract: { id: "kei/active-contract", observed: "active" }, blockers: [
-            { id: "task/release", title: "Release", state: "in_progress" },
-            { id: "task/missing", title: null, state: "missing" },
-          ] },
-          { id: "task/running", title: "Investigate failed Linux verification", state: "in_progress", priority: 0, disposition: "in_progress", contract: { id: "kei/active-contract", observed: "active" } },
+          {
+            id: "task/blocked",
+            title: "Blocked by release evidence",
+            state: "open",
+            priority: 0,
+            disposition: "blocked",
+            contract: { id: "kei/active-contract", observed: "active" },
+            blockers: [
+              { id: "task/release", title: "Release", state: "in_progress" },
+              { id: "task/missing", title: null, state: "missing" },
+            ],
+          },
+          {
+            id: "task/running",
+            title: "Investigate failed Linux verification",
+            state: "in_progress",
+            priority: 0,
+            disposition: "in_progress",
+            contract: { id: "kei/active-contract", observed: "active" },
+          },
           { id: "task/held", title: "Held", state: "on_hold", priority: 1, disposition: "on_hold" },
           { id: "task/ready", title: "Ready", state: "open", priority: 1, disposition: "ready" },
           { id: "task/done", title: "Done", state: "done", priority: 2, disposition: "done" },
@@ -748,13 +903,61 @@ function attentionReport(): KanshiReport {
       value: {
         searched: ["/repo/.keiyaku/akuma/run"],
         rows: [
-          { id: "aku/worker/a0000001", archetype: "worker", life: "running", lifeAt: "2026-08-11T23:56:00.000Z", lastActivityAt: "2026-08-11T23:55:00.000Z", pending: [], aliases: ["@lead"], contract: { id: "kei/active-contract", observed: "active" } },
-          { id: "aku/worker/a0000002", archetype: "worker", life: "asleep", lifeAt: "2026-08-11T00:00:00.000Z", lastActivityAt: null, pending: [], aliases: [] },
-          { id: "aku/worker/a0000003", archetype: "worker", life: "killed", lifeAt: "2026-08-11T23:59:30.000Z", lastActivityAt: "2026-08-11T23:59:00.000Z", pending: [], aliases: [] },
-          { id: "aku/worker/a0000004", life: "stillborn", seal: { at: "2026-08-10T00:00:00.000Z", evidence: "stillborn" }, aliases: [] },
+          {
+            id: "aku/worker/a0000001",
+            archetype: "worker",
+            life: "running",
+            lifeAt: "2026-08-11T23:56:00.000Z",
+            lastActivityAt: "2026-08-11T23:55:00.000Z",
+            pending: [],
+            aliases: ["@lead"],
+            contract: { id: "kei/active-contract", observed: "active" },
+          },
+          {
+            id: "aku/worker/a0000002",
+            archetype: "worker",
+            life: "asleep",
+            lifeAt: "2026-08-11T00:00:00.000Z",
+            lastActivityAt: null,
+            pending: [],
+            aliases: [],
+          },
+          {
+            id: "aku/worker/a0000003",
+            archetype: "worker",
+            life: "killed",
+            lifeAt: "2026-08-11T23:59:30.000Z",
+            lastActivityAt: "2026-08-11T23:59:00.000Z",
+            pending: [],
+            aliases: [],
+          },
+          {
+            id: "aku/worker/a0000004",
+            life: "stillborn",
+            seal: { at: "2026-08-10T00:00:00.000Z", evidence: "stillborn" },
+            aliases: [],
+          },
           { id: "aku/worker/a0000005", life: "unborn", aliases: [] },
-          { id: "aku/worker/a0000006", archetype: "worker", life: "stranded", lifeAt: "2026-08-11T22:00:00.000Z", lastActivityAt: "2026-08-11T22:30:00.000Z", strandedReason: "resume-unsupported", pending: ["pending"], aliases: [], contract: { id: "kei/missing-contract", observed: "missing" } },
-          { id: "aku/worker/a0000007", archetype: "worker", life: "hung", lifeAt: null, lastActivityAt: null, pending: [], aliases: [] },
+          {
+            id: "aku/worker/a0000006",
+            archetype: "worker",
+            life: "stranded",
+            lifeAt: "2026-08-11T22:00:00.000Z",
+            lastActivityAt: "2026-08-11T22:30:00.000Z",
+            strandedReason: "resume-unsupported",
+            pending: ["pending"],
+            aliases: [],
+            contract: { id: "kei/missing-contract", observed: "missing" },
+          },
+          {
+            id: "aku/worker/a0000007",
+            archetype: "worker",
+            life: "hung",
+            lifeAt: null,
+            lastActivityAt: null,
+            pending: [],
+            aliases: [],
+          },
         ],
       },
     },
@@ -805,9 +1008,28 @@ test("Contract phase timestamps select the owning journal entry", () => {
   const claimedAt = "2026-08-12T00:03:00.000Z";
   assert.equal(phaseAtFor({ terminal: null, delivery: null, bound: null }, bindAt), bindAt);
   assert.equal(phaseAtFor({ terminal: null, delivery: null, bound: { at: boundAt } as never }, bindAt), boundAt);
-  assert.equal(phaseAtFor({ terminal: null, delivery: { at: deliveryAt } as never, bound: { at: boundAt } as never }, bindAt), deliveryAt);
-  assert.equal(phaseAtFor({ terminal: { at: claimedAt } as never, delivery: { at: deliveryAt } as never, bound: { at: boundAt } as never }, bindAt), claimedAt);
-  assert.equal(phaseAtFor({ terminal: { at: "2026-08-12T00:04:00.000Z" } as never, delivery: { at: deliveryAt } as never, bound: { at: boundAt } as never }, bindAt), "2026-08-12T00:04:00.000Z");
+  assert.equal(
+    phaseAtFor({ terminal: null, delivery: { at: deliveryAt } as never, bound: { at: boundAt } as never }, bindAt),
+    deliveryAt,
+  );
+  assert.equal(
+    phaseAtFor(
+      { terminal: { at: claimedAt } as never, delivery: { at: deliveryAt } as never, bound: { at: boundAt } as never },
+      bindAt,
+    ),
+    claimedAt,
+  );
+  assert.equal(
+    phaseAtFor(
+      {
+        terminal: { at: "2026-08-12T00:04:00.000Z" } as never,
+        delivery: { at: deliveryAt } as never,
+        bound: { at: boundAt } as never,
+      },
+      bindAt,
+    ),
+    "2026-08-12T00:04:00.000Z",
+  );
 });
 
 test("Contract journal recency selects the final frozen journal entry", () => {
@@ -846,15 +1068,20 @@ test("bare Contract ages keep every unit boundary, future, and absent evidence d
     ["1d", "2026-08-11T00:00:00.000Z"],
     ["future", "2026-08-12T00:00:01.000Z"],
   ] as const;
-  const timedRows = sources.map(([label, lastJournalAt]) => contractRow({
-    id: `kei/age-${label}`,
-    phaseAt: "2026-08-10T00:00:00.000Z",
-    lastJournalAt,
-  }));
-  const text = renderKanshiText({
-    ...report,
-    contracts: { ...report.contracts, value: { ...report.contracts.value, rows: timedRows } },
-  }, { columns: 120, color: false });
+  const timedRows = sources.map(([label, lastJournalAt]) =>
+    contractRow({
+      id: `kei/age-${label}`,
+      phaseAt: "2026-08-10T00:00:00.000Z",
+      lastJournalAt,
+    }),
+  );
+  const text = renderKanshiText(
+    {
+      ...report,
+      contracts: { ...report.contracts, value: { ...report.contracts.value, rows: timedRows } },
+    },
+    { columns: 120, color: false },
+  );
   for (const [label] of sources) assert.match(text, new RegExp(`waiting · ${label}`, "u"));
   assert.match(text, /stillborn · —/u);
 });
@@ -875,8 +1102,14 @@ test("Kanshi text uses live sections, preserves important facts, and omits termi
   if (report.contracts.kind !== "present" || report.tasks.kind !== "present" || report.akuma.kind !== "present") {
     throw new Error("fixture sections must be present");
   }
-  for (const row of report.contracts.value.rows.filter((candidate) => candidate.phase !== "claimed" && candidate.phase !== "abandoned")) assert.equal(text.includes(row.id), true);
-  for (const row of report.tasks.value.rows.filter((candidate) => candidate.disposition !== "done" && candidate.disposition !== "drop")) assert.equal(text.includes(row.id), true);
+  for (const row of report.contracts.value.rows.filter(
+    (candidate) => candidate.phase !== "claimed" && candidate.phase !== "abandoned",
+  ))
+    assert.equal(text.includes(row.id), true);
+  for (const row of report.tasks.value.rows.filter(
+    (candidate) => candidate.disposition !== "done" && candidate.disposition !== "drop",
+  ))
+    assert.equal(text.includes(row.id), true);
   for (const row of report.akuma.value.rows) assert.equal(text.includes(row.id), true);
 
   const contracts = sectionBody(text, "KEIYAKU");
@@ -910,7 +1143,11 @@ test("Kanshi text uses live sections, preserves important facts, and omits termi
   assert.doesNotMatch(contracts, /target unknown/u);
   assert.match(contracts, /no target/u);
   assert.doesNotMatch(contracts, /worktree |merge |\/repo\/\.keiyaku\/wt\//u);
-  const selected = renderKanshiText(selectKanshi({ report, contract: "kei/active-contract" }), { columns: 120, color: false }, "contract");
+  const selected = renderKanshiText(
+    selectKanshi({ report, contract: "kei/active-contract" }),
+    { columns: 120, color: false },
+    "contract",
+  );
   assert.match(selected, /tendered · 3m/u);
   assert.match(selected, /  candidate\/integration\n    no candidate/u);
   const active = report.contracts.value.rows.find((row) => row.id === "kei/active-contract");
@@ -995,39 +1232,60 @@ test("Contract LINKED entries stay compact and preserve endpoint disposition", (
   if (row === undefined) throw new Error("fixture Contract must be present");
   const linkedRow = {
     ...row,
-    fleet: [
-      ...row.fleet,
-      { id: "aku/worker/missing", aliases: ["@missing"] },
-    ],
+    fleet: [...row.fleet, { id: "aku/worker/missing", aliases: ["@missing"] }],
   };
-  const compact = renderKanshiText({
-    ...report,
-    contracts: { ...report.contracts, value: { ...report.contracts.value, rows: [linkedRow] } },
-  }, { columns: 120, color: false });
-  const selected = renderKanshiText({
-    ...report,
-    contracts: { ...report.contracts, value: { ...report.contracts.value, rows: [linkedRow] } },
-  }, { columns: 120, color: false }, "contract");
+  const compact = renderKanshiText(
+    {
+      ...report,
+      contracts: { ...report.contracts, value: { ...report.contracts.value, rows: [linkedRow] } },
+    },
+    { columns: 120, color: false },
+  );
+  const selected = renderKanshiText(
+    {
+      ...report,
+      contracts: { ...report.contracts, value: { ...report.contracts.value, rows: [linkedRow] } },
+    },
+    { columns: 120, color: false },
+    "contract",
+  );
   for (const text of [sectionBody(compact, "KEIYAKU"), selected]) {
     assert.match(text, /● task\/running · in_progress/u);
     assert.match(text, /● aku\/worker\/a0000001 \(@lead\) · running/u);
     assert.match(text, /! aku\/worker\/missing \(@missing\) · missing/u);
-    const linked = text.split("\n").filter((line) => /task\/running|aku\/worker\/a0000001|aku\/worker\/missing/u.test(line)).join("\n");
+    const linked = text
+      .split("\n")
+      .filter((line) => /task\/running|aku\/worker\/a0000001|aku\/worker\/missing/u.test(line))
+      .join("\n");
     assert.doesNotMatch(linked, /Investigate failed Linux verification|P0|activity/u);
   }
-  const missingTask = renderKanshiText({
-    ...report,
-    contracts: { ...report.contracts, value: { ...report.contracts.value, rows: [linkedRow] } },
-    tasks: { ...report.tasks, value: { ...report.tasks.value, rows: report.tasks.value.rows.filter((task) => task.id !== "task/running") } },
-  }, { columns: 120, color: false }, "contract");
+  const missingTask = renderKanshiText(
+    {
+      ...report,
+      contracts: { ...report.contracts, value: { ...report.contracts.value, rows: [linkedRow] } },
+      tasks: {
+        ...report.tasks,
+        value: { ...report.tasks.value, rows: report.tasks.value.rows.filter((task) => task.id !== "task/running") },
+      },
+    },
+    { columns: 120, color: false },
+    "contract",
+  );
   assert.match(missingTask, /! task\/running · missing/u);
 
-  const unavailable = renderKanshiText({
-    ...report,
-    contracts: { ...report.contracts, value: { ...report.contracts.value, rows: [{ ...linkedRow, holder: { kind: "unavailable" } }] } },
-    tasks: { kind: "failed", failure: { message: "task board unavailable" } },
-    akuma: { kind: "failed", failure: { message: "fleet unavailable" } },
-  }, { columns: 120, color: false }, "contract");
+  const unavailable = renderKanshiText(
+    {
+      ...report,
+      contracts: {
+        ...report.contracts,
+        value: { ...report.contracts.value, rows: [{ ...linkedRow, holder: { kind: "unavailable" } }] },
+      },
+      tasks: { kind: "failed", failure: { message: "task board unavailable" } },
+      akuma: { kind: "failed", failure: { message: "fleet unavailable" } },
+    },
+    { columns: 120, color: false },
+    "contract",
+  );
   assert.match(unavailable, /! task · unavailable/u);
   assert.match(unavailable, /! aku\/worker\/a0000001 \(@lead\) · unavailable/u);
   assert.match(unavailable, /! aku\/worker\/missing \(@missing\) · unavailable/u);
@@ -1035,7 +1293,8 @@ test("Contract LINKED entries stay compact and preserve endpoint disposition", (
 
 test("world Contract attachments keep non-terminal Akuma and omit terminal retry history", () => {
   const report = attentionReport();
-  if (report.contracts.kind !== "present" || report.akuma.kind !== "present") throw new Error("fixture sections must be present");
+  if (report.contracts.kind !== "present" || report.akuma.kind !== "present")
+    throw new Error("fixture sections must be present");
   const row = report.contracts.value.rows.find((candidate) => candidate.id === "kei/active-contract");
   if (row === undefined) throw new Error("fixture Contract must be present");
   const linkedRow = {
@@ -1046,10 +1305,13 @@ test("world Contract attachments keep non-terminal Akuma and omit terminal retry
       { id: "aku/worker/a0000003", aliases: [] },
     ],
   };
-  const text = renderKanshiText({
-    ...report,
-    contracts: { ...report.contracts, value: { ...report.contracts.value, rows: [linkedRow] } },
-  }, { columns: 120, color: false });
+  const text = renderKanshiText(
+    {
+      ...report,
+      contracts: { ...report.contracts, value: { ...report.contracts.value, rows: [linkedRow] } },
+    },
+    { columns: 120, color: false },
+  );
   const body = sectionBody(text, "KEIYAKU");
   assert.match(body, /aku\/worker\/a0000001 \(@lead\) · running/u);
   assert.match(body, /aku\/worker\/a0000002 · asleep/u);
@@ -1058,18 +1320,33 @@ test("world Contract attachments keep non-terminal Akuma and omit terminal retry
 
 test("world Contract attachments keep one latest terminal Akuma when no executor is live", () => {
   const report = attentionReport();
-  if (report.contracts.kind !== "present" || report.akuma.kind !== "present") throw new Error("fixture sections must be present");
+  if (report.contracts.kind !== "present" || report.akuma.kind !== "present")
+    throw new Error("fixture sections must be present");
   const row = report.contracts.value.rows.find((candidate) => candidate.id === "kei/active-contract");
   if (row === undefined) throw new Error("fixture Contract must be present");
   const older = { ...report.akuma.value.rows[2]!, id: "aku/worker/a0000008", lifeAt: "2026-08-11T23:00:00.000Z" };
-  const text = renderKanshiText({
-    ...report,
-    contracts: {
-      ...report.contracts,
-      value: { ...report.contracts.value, rows: [{ ...row, fleet: [{ id: older.id, aliases: [] }, { id: "aku/worker/a0000003", aliases: [] }] }] },
+  const text = renderKanshiText(
+    {
+      ...report,
+      contracts: {
+        ...report.contracts,
+        value: {
+          ...report.contracts.value,
+          rows: [
+            {
+              ...row,
+              fleet: [
+                { id: older.id, aliases: [] },
+                { id: "aku/worker/a0000003", aliases: [] },
+              ],
+            },
+          ],
+        },
+      },
+      akuma: { ...report.akuma, value: { ...report.akuma.value, rows: [...report.akuma.value.rows, older] } },
     },
-    akuma: { ...report.akuma, value: { ...report.akuma.value, rows: [...report.akuma.value.rows, older] } },
-  }, { columns: 120, color: false });
+    { columns: 120, color: false },
+  );
   const body = sectionBody(text, "KEIYAKU");
   assert.match(body, /aku\/worker\/a0000003 · killed/u);
   assert.doesNotMatch(body, /aku\/worker\/a0000008 · killed/u);
@@ -1077,15 +1354,34 @@ test("world Contract attachments keep one latest terminal Akuma when no executor
 
 test("selected Contract attachments retain terminal retry history", () => {
   const report = attentionReport();
-  if (report.contracts.kind !== "present" || report.akuma.kind !== "present") throw new Error("fixture sections must be present");
+  if (report.contracts.kind !== "present" || report.akuma.kind !== "present")
+    throw new Error("fixture sections must be present");
   const row = report.contracts.value.rows.find((candidate) => candidate.id === "kei/active-contract");
   if (row === undefined) throw new Error("fixture Contract must be present");
   const older = { ...report.akuma.value.rows[2]!, id: "aku/worker/a0000008", lifeAt: "2026-08-11T23:00:00.000Z" };
-  const selected = renderKanshiText({
-    ...report,
-    contracts: { ...report.contracts, value: { ...report.contracts.value, rows: [{ ...row, fleet: [{ id: older.id, aliases: [] }, { id: "aku/worker/a0000003", aliases: [] }] }] } },
-    akuma: { ...report.akuma, value: { ...report.akuma.value, rows: [...report.akuma.value.rows, older] } },
-  }, { columns: 120, color: false }, "contract");
+  const selected = renderKanshiText(
+    {
+      ...report,
+      contracts: {
+        ...report.contracts,
+        value: {
+          ...report.contracts.value,
+          rows: [
+            {
+              ...row,
+              fleet: [
+                { id: older.id, aliases: [] },
+                { id: "aku/worker/a0000003", aliases: [] },
+              ],
+            },
+          ],
+        },
+      },
+      akuma: { ...report.akuma, value: { ...report.akuma.value, rows: [...report.akuma.value.rows, older] } },
+    },
+    { columns: 120, color: false },
+    "contract",
+  );
   assert.match(selected, /aku\/worker\/a0000008 · killed/u);
   assert.match(selected, /aku\/worker\/a0000003 · killed/u);
 });
@@ -1102,24 +1398,33 @@ test("attachment projection leaves Task holder and report facts unchanged", () =
 
 test("Kanshi sections use a ten-row aperture with exact complete and partial footers", () => {
   const report = attentionReport();
-  if (report.contracts.kind !== "present" || report.tasks.kind !== "present" || report.akuma.kind !== "present") throw new Error("fixture sections must be present");
-  const empty = renderKanshiText({
-    ...report,
-    contracts: { ...report.contracts, value: { ...report.contracts.value, rows: [] } },
-    tasks: { ...report.tasks, value: { ...report.tasks.value, rows: [] } },
-    akuma: { ...report.akuma, value: { ...report.akuma.value, rows: [] } },
-  }, { columns: 120, color: false });
-  assert.match(empty, /\[ KEIYAKU \]  contract state \S+ · observedAt \S+ · 0 live · candidate 0[\s\S]*\(all 0 live keiyaku shown\)/u);
+  if (report.contracts.kind !== "present" || report.tasks.kind !== "present" || report.akuma.kind !== "present")
+    throw new Error("fixture sections must be present");
+  const empty = renderKanshiText(
+    {
+      ...report,
+      contracts: { ...report.contracts, value: { ...report.contracts.value, rows: [] } },
+      tasks: { ...report.tasks, value: { ...report.tasks.value, rows: [] } },
+      akuma: { ...report.akuma, value: { ...report.akuma.value, rows: [] } },
+    },
+    { columns: 120, color: false },
+  );
+  assert.match(
+    empty,
+    /\[ KEIYAKU \]  contract state \S+ · observedAt \S+ · 0 live · candidate 0[\s\S]*\(all 0 live keiyaku shown\)/u,
+  );
   assert.match(empty, /\[ FLEET \]  0 akuma[\s\S]*\(all 0 akuma shown\)/u);
   assert.match(empty, /\[ TASK \]  0 live[\s\S]*\(all 0 live task shown\)/u);
 
   const oldAt = "2026-08-11T23:00:00.000Z";
   const newAt = "2026-08-11T23:59:00.000Z";
-  const hotContracts = Array.from({ length: 11 }, (_, index) => contractRow({
-    id: `kei/hot-${index}`,
-    phase: "tendered",
-    lastJournalAt: oldAt,
-  }));
+  const hotContracts = Array.from({ length: 11 }, (_, index) =>
+    contractRow({
+      id: `kei/hot-${index}`,
+      phase: "tendered",
+      lastJournalAt: oldAt,
+    }),
+  );
   const hotTasks = Array.from({ length: 11 }, (_, index) => ({
     ...report.tasks.value.rows[1]!,
     id: `task/hot-${index}`,
@@ -1131,31 +1436,46 @@ test("Kanshi sections use a ten-row aperture with exact complete and partial foo
     lifeAt: oldAt,
     lastActivityAt: oldAt,
   }));
-  const partial = renderKanshiText({
-    ...report,
-    contracts: {
-      ...report.contracts,
-      value: { ...report.contracts.value, rows: [...hotContracts, contractRow({ id: "kei/new-cold", lastJournalAt: newAt })] },
-    },
-    tasks: {
-      ...report.tasks,
-      value: { ...report.tasks.value, rows: [...hotTasks, { ...report.tasks.value.rows[3]!, id: "task/new-cold", updatedAt: newAt }] },
-    },
-    akuma: {
-      ...report.akuma,
-      value: {
-        ...report.akuma.value,
-        rows: [...hotAkuma, {
-          ...report.akuma.value.rows[2]!,
-          id: "aku/worker/new-cold",
-          lifeAt: newAt,
-          lastActivityAt: oldAt,
-        }],
+  const partial = renderKanshiText(
+    {
+      ...report,
+      contracts: {
+        ...report.contracts,
+        value: {
+          ...report.contracts.value,
+          rows: [...hotContracts, contractRow({ id: "kei/new-cold", lastJournalAt: newAt })],
+        },
+      },
+      tasks: {
+        ...report.tasks,
+        value: {
+          ...report.tasks.value,
+          rows: [...hotTasks, { ...report.tasks.value.rows[3]!, id: "task/new-cold", updatedAt: newAt }],
+        },
+      },
+      akuma: {
+        ...report.akuma,
+        value: {
+          ...report.akuma.value,
+          rows: [
+            ...hotAkuma,
+            {
+              ...report.akuma.value.rows[2]!,
+              id: "aku/worker/new-cold",
+              lifeAt: newAt,
+              lastActivityAt: oldAt,
+            },
+          ],
+        },
       },
     },
-  }, { columns: 120, color: false });
+    { columns: 120, color: false },
+  );
 
-  for (const [section, unit, selector] of [["KEIYAKU", "keiyaku", "kei"], ["TASK", "task", "task"]] as const) {
+  for (const [section, unit, selector] of [
+    ["KEIYAKU", "keiyaku", "kei"],
+    ["TASK", "task", "task"],
+  ] as const) {
     const body = sectionBody(partial, section);
     assert.match(body, new RegExp(`\\+ 2 more live ${unit} not shown`, "u"));
     assert.match(body, new RegExp(`keiyaku ls ${selector}/`, "u"));
@@ -1173,40 +1493,85 @@ test("Fleet ranks max owner timestamps and aligns snapshots with its recent-firs
   const source = report.akuma.value.rows[0]!;
   const rows = [
     { ...source, id: "aku/worker/no-coordinate-first", life: "asleep" as const, lifeAt: null, lastActivityAt: null },
-    { ...source, id: "aku/worker/tie-second", life: "asleep" as const, lifeAt: null, lastActivityAt: "2026-08-11T23:57:00.000Z" },
-    { ...source, id: "aku/worker/life-next", life: "killed" as const, lifeAt: "2026-08-11T23:58:00.000Z", lastActivityAt: "2026-08-11T21:00:00.000Z" },
+    {
+      ...source,
+      id: "aku/worker/tie-second",
+      life: "asleep" as const,
+      lifeAt: null,
+      lastActivityAt: "2026-08-11T23:57:00.000Z",
+    },
+    {
+      ...source,
+      id: "aku/worker/life-next",
+      life: "killed" as const,
+      lifeAt: "2026-08-11T23:58:00.000Z",
+      lastActivityAt: "2026-08-11T21:00:00.000Z",
+    },
     { ...source, id: "aku/worker/no-coordinate-second", life: "asleep" as const, lifeAt: null, lastActivityAt: null },
-    { ...source, id: "aku/worker/activity-newest", life: "asleep" as const, lifeAt: "2026-08-11T22:00:00.000Z", lastActivityAt: "2026-08-11T23:59:00.000Z" },
-    { ...source, id: "aku/worker/tie-first", life: "asleep" as const, lifeAt: "2026-08-11T23:57:00.000Z", lastActivityAt: null },
+    {
+      ...source,
+      id: "aku/worker/activity-newest",
+      life: "asleep" as const,
+      lifeAt: "2026-08-11T22:00:00.000Z",
+      lastActivityAt: "2026-08-11T23:59:00.000Z",
+    },
+    {
+      ...source,
+      id: "aku/worker/tie-first",
+      life: "asleep" as const,
+      lifeAt: "2026-08-11T23:57:00.000Z",
+      lastActivityAt: null,
+    },
   ];
   const visible = visibleFleetRows(rows);
-  assert.deepEqual(visible.map((row) => row.id), [
-    "aku/worker/activity-newest",
-    "aku/worker/life-next",
-    "aku/worker/tie-second",
-    "aku/worker/tie-first",
-    "aku/worker/no-coordinate-first",
-    "aku/worker/no-coordinate-second",
-  ]);
+  assert.deepEqual(
+    visible.map((row) => row.id),
+    [
+      "aku/worker/activity-newest",
+      "aku/worker/life-next",
+      "aku/worker/tie-second",
+      "aku/worker/tie-first",
+      "aku/worker/no-coordinate-first",
+      "aku/worker/no-coordinate-second",
+    ],
+  );
   const snapshotRows = new Set(visible.slice(0, 3).map((row) => row.id));
-  const decorated = rows.map((row) => snapshotRows.has(row.id)
-    ? {
-      ...row,
-      snapshot: {
-        kind: "idle",
-        entries: [],
-        omitted: 0,
-        outcome: { outcome: { kind: "answered", answer: row === visible[0] ? `snapshot ${row.id}\n${"long provider diagnostic ".repeat(20)}` : `snapshot ${row.id}` } },
-      } as never,
-    }
-    : row);
-  const text = renderKanshiText({
-    ...report,
-    akuma: { ...report.akuma, value: { ...report.akuma.value, rows: decorated } },
-  }, { columns: 120, color: false });
+  const decorated = rows.map((row) =>
+    snapshotRows.has(row.id)
+      ? {
+          ...row,
+          snapshot: {
+            kind: "idle",
+            entries: [],
+            omitted: 0,
+            outcome: {
+              outcome: {
+                kind: "answered",
+                answer:
+                  row === visible[0]
+                    ? `snapshot ${row.id}\n${"long provider diagnostic ".repeat(20)}`
+                    : `snapshot ${row.id}`,
+              },
+            },
+          } as never,
+        }
+      : row,
+  );
+  const text = renderKanshiText(
+    {
+      ...report,
+      akuma: { ...report.akuma, value: { ...report.akuma.value, rows: decorated } },
+    },
+    { columns: 120, color: false },
+  );
   assert.match(text, /\[ FLEET \]  6 akuma/u);
   assert.doesNotMatch(text, /SNAPSHOT/u);
-  assert.ok(text.split("\n").filter((line) => line.includes("activity \"")).every((line) => displayColumns(line) <= 120));
+  assert.ok(
+    text
+      .split("\n")
+      .filter((line) => line.includes('activity "'))
+      .every((line) => displayColumns(line) <= 120),
+  );
   for (const row of visible.slice(0, 3)) assert.match(text, new RegExp(`snapshot ${row.id.slice(0, 12)}`, "u"));
   for (const row of visible.slice(3)) assert.doesNotMatch(text, new RegExp(`snapshot ${row.id}`, "u"));
   const fleet = sectionBody(text, "FLEET");
@@ -1259,10 +1624,13 @@ test("Fleet keeps a complete long Akuma identity beside narrow activity text", (
       outcome: { outcome: { kind: "answered" as const, answer: "long semantic activity" } },
     },
   };
-  const text = renderKanshiText({
-    ...report,
-    akuma: { ...report.akuma, value: { ...report.akuma.value, rows: [row] } },
-  }, { columns: 24, color: false });
+  const text = renderKanshiText(
+    {
+      ...report,
+      akuma: { ...report.akuma, value: { ...report.akuma.value, rows: [row] } },
+    },
+    { columns: 24, color: false },
+  );
   assert.match(text, new RegExp(id, "u"));
   assert.match(text, /activity "long sem/u);
   const activity = text.split("\n").find((line) => line.includes('activity "'));
@@ -1273,17 +1641,22 @@ test("Fleet keeps a complete long Akuma identity beside narrow activity text", (
 test("unappointed managed Contracts render without a worktree path", () => {
   const report = attentionReport();
   if (report.contracts.kind !== "present") throw new Error("fixture contracts must be present");
-  const rows = report.contracts.value.rows.map((row) => row.id === "kei/cold-contract"
-    ? {
-      ...row,
-      worktreePath: null,
-      workspaceObservation: { kind: "unappointed" as const },
-    }
-    : row);
-  const text = renderKanshiText({
-    ...report,
-    contracts: { ...report.contracts, value: { ...report.contracts.value, rows } },
-  }, { columns: 120, color: false });
+  const rows = report.contracts.value.rows.map((row) =>
+    row.id === "kei/cold-contract"
+      ? {
+          ...row,
+          worktreePath: null,
+          workspaceObservation: { kind: "unappointed" as const },
+        }
+      : row,
+  );
+  const text = renderKanshiText(
+    {
+      ...report,
+      contracts: { ...report.contracts, value: { ...report.contracts.value, rows } },
+    },
+    { columns: 120, color: false },
+  );
   assert.match(text, /● kei\/cold-contract · bound · 2h · Cold Contract/u);
   assert.doesNotMatch(text, /DIR\s+.*cold-contract/u);
   assert.doesNotMatch(text, /kei\/cold-contract[\s\S]*↳ /u);
@@ -1321,13 +1694,14 @@ test("Kanshi wraps titles without dropping coordinates or gates", () => {
 test("Kanshi retains a Contract whose title is unavailable", () => {
   const report = attentionReport();
   if (report.contracts.kind !== "present") throw new Error("fixture contracts must be present");
-  const rows = report.contracts.value.rows.map((row) => row.id === "kei/no-target"
-    ? { ...row, title: null }
-    : row);
-  const text = renderKanshiText({
-    ...report,
-    contracts: { ...report.contracts, value: { ...report.contracts.value, rows } },
-  }, { columns: 80, color: false });
+  const rows = report.contracts.value.rows.map((row) => (row.id === "kei/no-target" ? { ...row, title: null } : row));
+  const text = renderKanshiText(
+    {
+      ...report,
+      contracts: { ...report.contracts, value: { ...report.contracts.value, rows } },
+    },
+    { columns: 80, color: false },
+  );
   const contracts = sectionBody(text, "KEIYAKU");
   assert.match(contracts, /^\? kei\/no-target · waiting · 30s · title unavailable$/mu);
   assert.match(contracts, /title unavailable/u);
@@ -1344,7 +1718,7 @@ test("Kanshi wraps complete Task titles on the plumb line", () => {
       ...report.tasks,
       value: {
         ...report.tasks.value,
-        rows: report.tasks.value.rows.map((row) => row.id === "task/running" ? { ...row, title } : row),
+        rows: report.tasks.value.rows.map((row) => (row.id === "task/running" ? { ...row, title } : row)),
       },
     },
   };
@@ -1369,9 +1743,9 @@ test("Kanshi has no Contract gate-block cap", () => {
       ...report.contracts,
       value: {
         ...report.contracts.value,
-        rows: report.contracts.value.rows.map((row) => row.id === "kei/active-contract"
-          ? { ...row, gates: { ...row.gates, reports: gates } }
-          : row),
+        rows: report.contracts.value.rows.map((row) =>
+          row.id === "kei/active-contract" ? { ...row, gates: { ...row.gates, reports: gates } } : row,
+        ),
       },
     },
   };
@@ -1380,14 +1754,17 @@ test("Kanshi has no Contract gate-block cap", () => {
 });
 
 test("absent and failed Kanshi sections stay typed and distinct from empty present sections", () => {
-  const failed = renderKanshiText({
-    root: "/repo",
-    observedAt: "2026-08-12T00:00:00.000Z",
-    branch: null,
-    contracts: { kind: "failed", failure: { message: "broken board" } },
-    tasks: { kind: "absent" },
-    akuma: { kind: "present", value: { searched: [], rows: [] } },
-  }, { columns: 80, color: false });
+  const failed = renderKanshiText(
+    {
+      root: "/repo",
+      observedAt: "2026-08-12T00:00:00.000Z",
+      branch: null,
+      contracts: { kind: "failed", failure: { message: "broken board" } },
+      tasks: { kind: "absent" },
+      akuma: { kind: "present", value: { searched: [], rows: [] } },
+    },
+    { columns: 80, color: false },
+  );
   assert.match(failed, /^\[ KEIYAKU \]/mu);
   assert.match(failed, /! broken board/u);
   assert.match(failed, /\[ TASK \]/u);
@@ -1403,21 +1780,34 @@ test("Kanshi selection is a projection that preserves source presence", async ()
   assert.equal(selected.contracts.kind, "present");
   assert.equal(selected.tasks.kind, "present");
   assert.equal(selected.akuma.kind, "present");
-  if (selected.contracts.kind !== "present" || selected.tasks.kind !== "present" || selected.akuma.kind !== "present") return;
-  assert.deepEqual(selected.contracts.value.rows.map((row) => row.id), [contract.id]);
-  assert.deepEqual(selected.tasks.value.rows.map((row) => row.id), [taskId]);
-  assert.deepEqual(selected.akuma.value.rows.map((row) => row.id), [report.akuma.value.rows[0]!.id]);
+  if (selected.contracts.kind !== "present" || selected.tasks.kind !== "present" || selected.akuma.kind !== "present")
+    return;
+  assert.deepEqual(
+    selected.contracts.value.rows.map((row) => row.id),
+    [contract.id],
+  );
+  assert.deepEqual(
+    selected.tasks.value.rows.map((row) => row.id),
+    [taskId],
+  );
+  assert.deepEqual(
+    selected.akuma.value.rows.map((row) => row.id),
+    [report.akuma.value.rows[0]!.id],
+  );
 });
 
 test("Kanshi text neutralizes control characters from source diagnostics", () => {
-  const text = renderKanshiText({
-    root: "/repo\u001b[31m\nforged",
-    observedAt: "2026-08-12T00:00:00.000Z",
-    branch: null,
-    contracts: { kind: "failed", failure: { message: "broken\u001b[2J\nforged\u2028again\u2029end" } },
-    tasks: { kind: "absent" },
-    akuma: { kind: "absent" },
-  }, { columns: 40, color: false });
+  const text = renderKanshiText(
+    {
+      root: "/repo\u001b[31m\nforged",
+      observedAt: "2026-08-12T00:00:00.000Z",
+      branch: null,
+      contracts: { kind: "failed", failure: { message: "broken\u001b[2J\nforged\u2028again\u2029end" } },
+      tasks: { kind: "absent" },
+      akuma: { kind: "absent" },
+    },
+    { columns: 40, color: false },
+  );
   assert.equal(text.includes("\u001b"), false);
   assert.equal(text.includes("\nforged"), false);
   assert.equal(text.includes("\u2028"), false);
@@ -1436,7 +1826,7 @@ test("target lag counts the frozen targetObservation head after the live ref mov
 
   const report = await withGitShim(
     [
-      "printf '%s\\n' \"$*\" >> \"$KEIYAKU_KANSHI_GIT_LOG\"",
+      'printf \'%s\\n\' "$*" >> "$KEIYAKU_KANSHI_GIT_LOG"',
       'if [ "$1" = "rev-parse" ] && [ "$2" = "--verify" ] && [ "$4" = "refs/heads/main" ]; then',
       '  if [ ! -e "$KEIYAKU_TARGET_FIRST" ]; then touch "$KEIYAKU_TARGET_FIRST"; exec "$KEIYAKU_REAL_GIT" "$@"; fi',
       "fi",
@@ -1465,8 +1855,14 @@ test("target lag counts the frozen targetObservation head after the live ref mov
   assert.deepEqual(row?.targetLag, { kind: "counted", behind: 0 });
   const invocations = gitInvocations(log);
   assert.equal(invocations.filter((command) => command === "rev-parse --verify --quiet refs/heads/main").length, 1);
-  assert.equal(invocations.some((command) => command.endsWith(`rev-list --count HEAD..${frozen}`)), true);
-  assert.equal(invocations.some((command) => /rev-list --count HEAD\.\.refs\//u.test(command)), false);
+  assert.equal(
+    invocations.some((command) => command.endsWith(`rev-list --count HEAD..${frozen}`)),
+    true,
+  );
+  assert.equal(
+    invocations.some((command) => /rev-list --count HEAD\.\.refs\//u.test(command)),
+    false,
+  );
   assert.notEqual(repository.run(["rev-parse", "refs/heads/main"]).trim(), frozen);
 });
 
@@ -1503,13 +1899,15 @@ test("default CLI status returns the Kanshi report instead of a generic observat
   }
 });
 
-function taskDocument(input: Readonly<{
-  id: TaskId;
-  title: string;
-  state?: TaskDocument["state"];
-  priority?: TaskDocument["priority"];
-  createdBy?: string;
-}>): TaskDocument {
+function taskDocument(
+  input: Readonly<{
+    id: TaskId;
+    title: string;
+    state?: TaskDocument["state"];
+    priority?: TaskDocument["priority"];
+    createdBy?: string;
+  }>,
+): TaskDocument {
   return {
     id: input.id,
     title: input.title,
@@ -1539,18 +1937,36 @@ test("Contract namespace Tasks come from one Task board observation", async () =
     writeFileSync(path, serializeTaskDocument(document));
   };
   writeTask(taskDocument({ id: "task/root-unbound", title: "Root unbound", priority: 0 }));
-  writeTask(taskDocument({
-    id: `task/${segment}/alpha`, title: "Namespace alpha", state: "done", priority: 3,
-  }));
-  writeTask(taskDocument({
-    id: `task/${segment}/zeta`, title: "Namespace zeta", state: "on_hold", priority: 0,
-  }));
-  writeTask(taskDocument({
-    id: `task/${segment}/child/nested`, title: "Nested descendant", priority: 0,
-  }));
-  writeTask(taskDocument({
-    id: `task/${contractSegment(sibling)}/sibling`, title: "Sibling namespace", priority: 0,
-  }));
+  writeTask(
+    taskDocument({
+      id: `task/${segment}/alpha`,
+      title: "Namespace alpha",
+      state: "done",
+      priority: 3,
+    }),
+  );
+  writeTask(
+    taskDocument({
+      id: `task/${segment}/zeta`,
+      title: "Namespace zeta",
+      state: "on_hold",
+      priority: 0,
+    }),
+  );
+  writeTask(
+    taskDocument({
+      id: `task/${segment}/child/nested`,
+      title: "Nested descendant",
+      priority: 0,
+    }),
+  );
+  writeTask(
+    taskDocument({
+      id: `task/${contractSegment(sibling)}/sibling`,
+      title: "Sibling namespace",
+      priority: 0,
+    }),
+  );
 
   const report = await observe(repository.path, await Repo.at({ path: repository.path }));
   const board = projectTaskBoardObservation((await readBoard(world)).board);
@@ -1562,22 +1978,46 @@ test("Contract namespace Tasks come from one Task board observation", async () =
   if (row?.namespaceTasks.kind !== "present") return;
   const expected = board.selectNamespace(contractNamespace(contract.id));
   assert.deepEqual(row.namespaceTasks.value, expected);
-  assert.deepEqual(expected.map((task) => task.id), [`task/${segment}/zeta`, `task/${segment}/alpha`]);
-  assert.deepEqual(expected.map((task) => task.state), ["on_hold", "done"]);
-  assert.equal(expected.some((task) => task.id === taskId), false);
-  assert.equal(expected.some((task) => task.id === "task/root-unbound"), false);
-  assert.equal(expected.some((task) => task.id === `task/${segment}/child/nested`), false);
-  assert.equal(expected.some((task) => task.id === `task/${contractSegment(sibling)}/sibling`), false);
-  assert.deepEqual(report.tasks.value.rows.map((task) => ({ id: task.id, disposition: task.disposition, blockers: task.blockers })), board.statusRows.map((task) => ({
-    id: task.id,
-    disposition: task.disposition,
-    blockers: task.blockers,
-  })));
+  assert.deepEqual(
+    expected.map((task) => task.id),
+    [`task/${segment}/zeta`, `task/${segment}/alpha`],
+  );
+  assert.deepEqual(
+    expected.map((task) => task.state),
+    ["on_hold", "done"],
+  );
+  assert.equal(
+    expected.some((task) => task.id === taskId),
+    false,
+  );
+  assert.equal(
+    expected.some((task) => task.id === "task/root-unbound"),
+    false,
+  );
+  assert.equal(
+    expected.some((task) => task.id === `task/${segment}/child/nested`),
+    false,
+  );
+  assert.equal(
+    expected.some((task) => task.id === `task/${contractSegment(sibling)}/sibling`),
+    false,
+  );
+  assert.deepEqual(
+    report.tasks.value.rows.map((task) => ({ id: task.id, disposition: task.disposition, blockers: task.blockers })),
+    board.statusRows.map((task) => ({
+      id: task.id,
+      disposition: task.disposition,
+      blockers: task.blockers,
+    })),
+  );
 
   const selected = selectKanshi({ report, contract: contract.id });
   assert.equal(selected.tasks.kind, "present");
   if (selected.tasks.kind === "present") {
-    assert.deepEqual(selected.tasks.value.rows.map((task) => task.id), [taskId]);
+    assert.deepEqual(
+      selected.tasks.value.rows.map((task) => task.id),
+      [taskId],
+    );
   }
   assert.equal(selected.contracts.kind, "present");
   if (selected.contracts.kind === "present") {
@@ -1604,8 +2044,15 @@ test("Task board failure fails namespace context without suppressing Contract or
   const row = report.contracts.value.rows.find((candidate) => candidate.id === contract.id);
   assert.equal(row?.namespaceTasks.kind, "failed");
   if (row?.namespaceTasks.kind === "failed") assert.match(row.namespaceTasks.failure.message, /front matter/u);
-  assert.equal(report.akuma.value.rows.some((candidate) => candidate.id === akumaId), true);
-  const selected = renderKanshiText(selectKanshi({ report, contract: contract.id }), { columns: 80, color: false }, "contract");
+  assert.equal(
+    report.akuma.value.rows.some((candidate) => candidate.id === akumaId),
+    true,
+  );
+  const selected = renderKanshiText(
+    selectKanshi({ report, contract: contract.id }),
+    { columns: 80, color: false },
+    "contract",
+  );
   assert.match(selected, /  namespace tasks\n    failed /u);
   assert.doesNotMatch(selected, /──\[ (?:KEIYAKU|TASK|FLEET) \]/u);
 });

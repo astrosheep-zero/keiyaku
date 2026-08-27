@@ -17,12 +17,7 @@ import test from "node:test";
 
 const root = resolve(import.meta.dirname, "..");
 
-function command(
-  executable: string,
-  args: readonly string[],
-  cwd: string,
-  shell = false,
-): string {
+function command(executable: string, args: readonly string[], cwd: string, shell = false): string {
   return execFileSync(executable, args, {
     cwd,
     encoding: "utf8",
@@ -32,12 +27,7 @@ function command(
 }
 
 function npmCommand(args: readonly string[], cwd: string): string {
-  return command(
-    process.platform === "win32" ? "npm.cmd" : "npm",
-    args,
-    cwd,
-    process.platform === "win32",
-  );
+  return command(process.platform === "win32" ? "npm.cmd" : "npm", args, cwd, process.platform === "win32");
 }
 
 function installedCommand(args: readonly string[], cwd: string): string {
@@ -58,44 +48,57 @@ test("published package installs one keiyaku CLI and runs against a real reposit
   const archives = readdirSync(packed).filter((name) => name.endsWith(".tgz"));
   assert.equal(archives.length, 1, `expected one package archive, got ${archives.join(", ")}`);
   const packageArchive = join(packed, archives[0]!);
-	const listing = command("tar", ["-tzf", packageArchive], root);
-	assert.ok(listing.split(/\r?\n/u).includes("package/build/src/runtime/proc/windows-launch.exe"));
+  const listing = command("tar", ["-tzf", packageArchive], root);
+  assert.ok(listing.split(/\r?\n/u).includes("package/build/src/runtime/proc/windows-launch.exe"));
   const claudePackage = join(root, "node_modules", "@anthropic-ai", "claude-agent-sdk");
   npmCommand(["pack", "--ignore-scripts", "--pack-destination", packed, "--cache", cache], claudePackage);
-  const claudeArchives = readdirSync(packed).filter((name) => name.startsWith("anthropic-ai-claude-agent-sdk-") && name.endsWith(".tgz"));
+  const claudeArchives = readdirSync(packed).filter(
+    (name) => name.startsWith("anthropic-ai-claude-agent-sdk-") && name.endsWith(".tgz"),
+  );
   assert.equal(claudeArchives.length, 1, `expected one Claude package archive, got ${claudeArchives.join(", ")}`);
 
   const packageManifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
     dependencies?: Readonly<Record<string, string>>;
     version: string;
   };
-  const dependencies = Object.fromEntries(Object.keys(packageManifest.dependencies ?? {}).map((name) => [
-    name,
-    name === "@anthropic-ai/claude-agent-sdk"
-      ? `file:${join(packed, claudeArchives[0]!)}`
-      : `file:${join(root, "node_modules", name)}`,
-  ]));
-  writeFileSync(join(installed, "package.json"), `${JSON.stringify({
-    name: "keiyaku-e2e-consumer",
-    private: true,
-    dependencies,
-  }, null, 2)}\n`);
-  npmCommand([
-    "install",
-    "--ignore-scripts",
-    "--no-audit",
-    "--no-fund",
-    "--prefer-offline",
-    "--legacy-peer-deps",
-    "--no-bin-links",
-    "--package-lock=false",
-    packageArchive,
-  ], installed);
+  const dependencies = Object.fromEntries(
+    Object.keys(packageManifest.dependencies ?? {}).map((name) => [
+      name,
+      name === "@anthropic-ai/claude-agent-sdk"
+        ? `file:${join(packed, claudeArchives[0]!)}`
+        : `file:${join(root, "node_modules", name)}`,
+    ]),
+  );
+  writeFileSync(
+    join(installed, "package.json"),
+    `${JSON.stringify(
+      {
+        name: "keiyaku-e2e-consumer",
+        private: true,
+        dependencies,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  npmCommand(
+    [
+      "install",
+      "--ignore-scripts",
+      "--no-audit",
+      "--no-fund",
+      "--prefer-offline",
+      "--legacy-peer-deps",
+      "--no-bin-links",
+      "--package-lock=false",
+      packageArchive,
+    ],
+    installed,
+  );
 
-  const installedPackage = JSON.parse(readFileSync(
-    join(installed, "node_modules", "@astrosheep", "keiyaku", "package.json"),
-    "utf8",
-  )) as { name: string; version: string; bin: Record<string, string> };
+  const installedPackage = JSON.parse(
+    readFileSync(join(installed, "node_modules", "@astrosheep", "keiyaku", "package.json"), "utf8"),
+  ) as { name: string; version: string; bin: Record<string, string> };
   assert.equal(installedPackage.name, "@astrosheep/keiyaku");
   assert.equal(installedPackage.version, packageManifest.version);
   assert.deepEqual(installedPackage.bin, { keiyaku: "build/src/cli/index.js" });
@@ -131,39 +134,58 @@ test("published package installs one keiyaku CLI and runs against a real reposit
     "providers",
     "index.js",
   );
-  const inspect = (source: readonly string[]): string => command("node", [
-    "--input-type=module",
-    "--eval",
-    source.join("\n"),
-    pathToFileURL(providerRegistry).href,
-  ], installed);
-  assert.deepEqual(JSON.parse(inspect([
-    "const { decodeProviderExecution } = await import(process.argv.at(-1));",
-    'process.stdout.write(JSON.stringify(decodeProviderExecution({ name: "claude", kind: "claude-agent-sdk" })));',
-  ])), { name: "claude", kind: "claude-agent-sdk" });
-  assert.deepEqual(JSON.parse(inspect([
-    "const { resolveProviderExecution } = await import(process.argv.at(-1));",
-    'const selected = await resolveProviderExecution({ name: "pi", kind: "pi" });',
-    "process.stdout.write(JSON.stringify({",
-    "  name: selected.execution.name,",
-    "  kind: selected.execution.kind,",
-    "  hasStart: typeof selected.adapter.start === 'function',",
-    "}));",
-  ])), { name: "pi", kind: "pi", hasStart: true });
-  assert.deepEqual(JSON.parse(inspect([
-    "const { resolveProviderExecution } = await import(process.argv.at(-1));",
-    'const selected = await resolveProviderExecution({ name: "claude", kind: "claude-agent-sdk" });',
-    "process.stdout.write(JSON.stringify({",
-    "  name: selected.execution.name,",
-    "  kind: selected.execution.kind,",
-    "  hasStart: typeof selected.adapter.start === 'function',",
-    "}));",
-  ])), { name: "claude", kind: "claude-agent-sdk", hasStart: true });
-  assert.throws(() => inspect([
-    "const { resolveProviderExecution } = await import(process.argv.at(-1));",
-    'const selected = await resolveProviderExecution({ name: "claude", kind: "claude-agent-sdk" });',
-    'await selected.adapter.start({ body: "start", launchTells: [], cwd: process.cwd(), options: {}, session: { kind: "fresh" } });',
-  ]), /Cannot find package/u);
+  const inspect = (source: readonly string[]): string =>
+    command(
+      "node",
+      ["--input-type=module", "--eval", source.join("\n"), pathToFileURL(providerRegistry).href],
+      installed,
+    );
+  assert.deepEqual(
+    JSON.parse(
+      inspect([
+        "const { decodeProviderExecution } = await import(process.argv.at(-1));",
+        'process.stdout.write(JSON.stringify(decodeProviderExecution({ name: "claude", kind: "claude-agent-sdk" })));',
+      ]),
+    ),
+    { name: "claude", kind: "claude-agent-sdk" },
+  );
+  assert.deepEqual(
+    JSON.parse(
+      inspect([
+        "const { resolveProviderExecution } = await import(process.argv.at(-1));",
+        'const selected = await resolveProviderExecution({ name: "pi", kind: "pi" });',
+        "process.stdout.write(JSON.stringify({",
+        "  name: selected.execution.name,",
+        "  kind: selected.execution.kind,",
+        "  hasStart: typeof selected.adapter.start === 'function',",
+        "}));",
+      ]),
+    ),
+    { name: "pi", kind: "pi", hasStart: true },
+  );
+  assert.deepEqual(
+    JSON.parse(
+      inspect([
+        "const { resolveProviderExecution } = await import(process.argv.at(-1));",
+        'const selected = await resolveProviderExecution({ name: "claude", kind: "claude-agent-sdk" });',
+        "process.stdout.write(JSON.stringify({",
+        "  name: selected.execution.name,",
+        "  kind: selected.execution.kind,",
+        "  hasStart: typeof selected.adapter.start === 'function',",
+        "}));",
+      ]),
+    ),
+    { name: "claude", kind: "claude-agent-sdk", hasStart: true },
+  );
+  assert.throws(
+    () =>
+      inspect([
+        "const { resolveProviderExecution } = await import(process.argv.at(-1));",
+        'const selected = await resolveProviderExecution({ name: "claude", kind: "claude-agent-sdk" });',
+        'await selected.adapter.start({ body: "start", launchTells: [], cwd: process.cwd(), options: {}, session: { kind: "fresh" } });',
+      ]),
+    /Cannot find package/u,
+  );
 });
 
 test("Windows packaging refuses a missing or corrupt launcher artifact", (t) => {
@@ -177,16 +199,10 @@ test("Windows packaging refuses a missing or corrupt launcher artifact", (t) => 
   copyFileSync(artifact, backup);
   try {
     writeFileSync(artifact, "corrupt");
-    assert.throws(
-      () => npmCommand(["pack", "--pack-destination", packed], root),
-      /not a PE image/u,
-    );
+    assert.throws(() => npmCommand(["pack", "--pack-destination", packed], root), /not a PE image/u);
     assert.equal(readdirSync(packed).filter((name) => name.endsWith(".tgz")).length, 0);
     unlinkSync(artifact);
-    assert.throws(
-      () => npmCommand(["pack", "--pack-destination", packed], root),
-      /artifact is missing/u,
-    );
+    assert.throws(() => npmCommand(["pack", "--pack-destination", packed], root), /artifact is missing/u);
     assert.equal(readdirSync(packed).filter((name) => name.endsWith(".tgz")).length, 0);
   } finally {
     copyFileSync(backup, artifact);

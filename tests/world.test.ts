@@ -10,7 +10,9 @@ import { parseArgv } from "../src/cli/parse.js";
 import { World, WorldError } from "../src/world.js";
 import { makeGitRepository } from "./support/git.js";
 
-function temporary(): string { return mkdtempSync(join(tmpdir(), "keiyaku-world-")); }
+function temporary(): string {
+  return mkdtempSync(join(tmpdir(), "keiyaku-world-"));
+}
 
 test("CLI coordinates retain explicit versus ambient cwd statedness", async () => {
   const root = temporary();
@@ -28,12 +30,15 @@ test("CLI coordinates retain explicit versus ambient cwd statedness", async () =
 });
 
 test("World.locate selects the nearest marker without creating one", async () => {
-  const outer = temporary(), nested = join(outer, "a"), leaf = join(nested, "b", "c");
+  const outer = temporary(),
+    nested = join(outer, "a"),
+    leaf = join(nested, "b", "c");
   mkdirSync(join(outer, ".keiyaku"));
   mkdirSync(join(nested, ".keiyaku"), { recursive: true });
   mkdirSync(leaf, { recursive: true });
   assert.equal(await World.locate(leaf), await realpath(nested));
-  const bare = join(temporary(), "leaf"); mkdirSync(bare);
+  const bare = join(temporary(), "leaf");
+  mkdirSync(bare);
   assert.equal(await World.locate(bare), null);
   const bareResolution = await World.resolve(bare);
   assert.equal(bareResolution.root, null);
@@ -42,7 +47,8 @@ test("World.locate selects the nearest marker without creating one", async () =>
 });
 
 test("World resolution reuses a non-Git ancestor marker while World.at remains exact", async () => {
-  const marked = temporary(), nested = join(marked, "a", "b");
+  const marked = temporary(),
+    nested = join(marked, "a", "b");
   mkdirSync(join(marked, ".keiyaku"));
   mkdirSync(nested, { recursive: true });
   const resolution = await World.resolve(nested);
@@ -50,7 +56,9 @@ test("World resolution reuses a non-Git ancestor marker while World.at remains e
   assert.equal(resolution.candidate, await realpath(marked));
   assert.equal(await resolution.establish(), await realpath(marked));
 
-  const root = temporary(), leaf = join(root, "a", "b"); mkdirSync(leaf, { recursive: true });
+  const root = temporary(),
+    leaf = join(root, "a", "b");
+  mkdirSync(leaf, { recursive: true });
   assert.equal(await World.at(leaf), await realpath(leaf));
   assert.equal(existsSync(join(leaf, ".keiyaku")), true);
   assert.equal(existsSync(join(root, ".keiyaku")), false);
@@ -69,9 +77,18 @@ test("one Git repository resolves one WorldRoot from primary, subdirectory, and 
 
   const primary = await repositoryAt(repository.path);
   const secondary = await repositoryAt(linked);
-  assert.equal(await World.locate({ cwd: repository.path, repositoryRoot: primary.primaryWorktree }), await realpath(repository.path));
-  assert.equal(await World.locate({ cwd: nested, repositoryRoot: primary.primaryWorktree }), await realpath(repository.path));
-  assert.equal(await World.locate({ cwd: linked, repositoryRoot: secondary.primaryWorktree }), await realpath(repository.path));
+  assert.equal(
+    await World.locate({ cwd: repository.path, repositoryRoot: primary.primaryWorktree }),
+    await realpath(repository.path),
+  );
+  assert.equal(
+    await World.locate({ cwd: nested, repositoryRoot: primary.primaryWorktree }),
+    await realpath(repository.path),
+  );
+  assert.equal(
+    await World.locate({ cwd: linked, repositoryRoot: secondary.primaryWorktree }),
+    await realpath(repository.path),
+  );
 });
 
 test("Git reads do not create a marker and Git creation establishes only the primary WorldRoot", async () => {
@@ -112,7 +129,8 @@ test("World excludes the filesystem root from locate and exact construction", as
 });
 
 test("World refuses a non-directory marker", async () => {
-  const root = temporary(); writeFileSync(join(root, ".keiyaku"), "not a directory");
+  const root = temporary();
+  writeFileSync(join(root, ".keiyaku"), "not a directory");
   await assert.rejects(World.locate(root), /world marker is not a directory/u);
   await assert.rejects(World.at(root), /world marker is not a directory/u);
 });
