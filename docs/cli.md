@@ -264,7 +264,9 @@ Aku. The call edge and Body use the same `<WorldRoot>/.square/KEIYAKU.square`
 target for call activity and the initial outcome. Missing or ambiguous caller
 assignment is a no-op at this edge and still launches. Idempotent join, binding,
 and listen create no rollback obligation; launch failure rolls back only facts
-created by this call. A legacy Square dependency that rejects the allocated Aku
+created by this call. Rollback attempts unbind, ignore, done, and close
+independently; a rollback failure is retained as bounded diagnostic evidence
+without replacing the original launch failure. A legacy Square dependency that rejects the allocated Aku
 target as an invalid name is treated as the same optional edge no-op, so Square
 grammar drift never refuses Akuma birth. Detach returns `{ kind: "detached" }`. Outcome payload and
 Body delivery belong to [akuma-execution.md](akuma-execution.md).

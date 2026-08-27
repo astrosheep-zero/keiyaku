@@ -17,6 +17,13 @@ import type { AkumaPromptSource, InvokedAkumaCommand } from "./akuma.js";
 import { beginCall, finishCall } from "../../library/akuma-creation.js";
 import { recognizeAndListen } from "../square-edge.js";
 
+function withRollbackDiagnostic(primary: unknown, rollback: unknown): Error {
+  const primaryText = primary instanceof Error ? primary.message : String(primary);
+  const rollbackText = rollback instanceof Error ? rollback.message : String(rollback);
+  const error = new Error(`${primaryText}; ${rollbackText}`, { cause: primary });
+  return error;
+}
+
 export type AkumaInvocationResult =
   | Readonly<{ kind: "akuma"; action: "call"; result: CallResult; world: WorldRoot }>
   | Readonly<{ kind: "akuma"; action: "status"; status: AkumaObservation; alias?: string }>
@@ -230,8 +237,8 @@ export async function invokeAkuma(command: InvokedAkumaCommand, input: InvokeInp
         if (listener?.committed === true) {
           try {
             await listener.rollback();
-          } catch {
-            /* preserve launch failure */
+          } catch (rollbackError) {
+            throw withRollbackDiagnostic(error, rollbackError);
           }
         }
         throw error;

@@ -113,7 +113,10 @@ revokes delegated Heart-write and spawn authority before retirement, bounds
 that request, and escalates rejection or timeout to mandatory adapter-owned
 `forceDispose()`. Forced disposal fulfills only after every adapter-owned OS
 child or native session is disposed, including late resources after
-cancellation. Streams, receipts, Tell promises, and iterators are not custody.
+cancellation. A late resource remains attached to an adapter-owned completion
+promise until disposal settles; disposal rejection is observable through the
+Body/Session diagnostic path and is never silently discarded. Streams, receipts,
+Tell promises, and iterators are not custody.
 
 `hung` has one source: both graceful cancellation and forced disposal failed
 to retire a named external provider child or native session within their

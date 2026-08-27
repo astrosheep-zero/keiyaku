@@ -228,7 +228,14 @@ async function retireProviderCustody(input: DriveTurnInput, turnSequence: number
   ): Promise<Readonly<{ kind: "retired" }> | Readonly<{ kind: "held"; error: unknown }>> =>
     await Promise.race([
       operation().then(
-        () => ({ kind: "retired" as const }),
+        async () => {
+          try {
+            await drive.lateDisposal?.();
+            return { kind: "retired" as const };
+          } catch (error: unknown) {
+            return { kind: "held" as const, error };
+          }
+        },
         (error: unknown) => ({ kind: "held" as const, error }),
       ),
       abortableDelay(CONTROL_RESPONSE_MS).then(() => ({
@@ -238,8 +245,21 @@ async function retireProviderCustody(input: DriveTurnInput, turnSequence: number
     ]);
   let outcome = await dispose(drive.abort);
   if (outcome.kind === "retired") return outcome;
+  const firstError = outcome.error;
   outcome = await dispose(drive.forceDispose);
-  if (outcome.kind === "retired") return outcome;
+  if (outcome.kind === "retired") {
+    outcome = { kind: "held", error: firstError };
+  } else if (outcome.error !== firstError) {
+    outcome = {
+      kind: "held",
+      error: new Error(
+        `${firstError instanceof Error ? firstError.message : String(firstError)}; ${
+          outcome.error instanceof Error ? outcome.error.message : String(outcome.error)
+        }`,
+        { cause: firstError },
+      ),
+    };
+  }
   if (await heartExists(input.paths)) {
     const diagnostic = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
     const at = input.now();

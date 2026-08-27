@@ -435,6 +435,7 @@ export type Session = Readonly<{
   events: AsyncIterable<AgentEvent>;
   receipts?: AsyncIterable<TellReceipt>;
   completion: Promise<TurnResult>;
+  lateDisposal?: () => Promise<void>;
   /** Requests graceful adapter-owned cancellation. */
   abort(): Promise<void>;
   /** Fulfills only after forced adapter-owned disposal is proved. */

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { abortable } from "../../abort.js";
+import { abortable, awaitLateDisposal } from "../../abort.js";
 import {
   AKUMA_REQUESTS_ENV,
   AgentEventChannel,
@@ -245,22 +245,34 @@ async function loadDriveRuntime(
   signal: AbortSignal,
   loader?: OpencodeSdkLoader,
 ): Promise<OpencodeRuntime> {
-  return await abortable(
-    loadOpencode(
-      {
-        ...execution,
-        env: {
-          ...execution.env,
-          ...(input.requests === undefined ? {} : { [AKUMA_REQUESTS_ENV]: input.requests.dir }),
+  try {
+    return await abortable(
+      loadOpencode(
+        {
+          ...execution,
+          env: {
+            ...execution.env,
+            ...(input.requests === undefined ? {} : { [AKUMA_REQUESTS_ENV]: input.requests.dir }),
+          },
         },
-      },
-      input.cwd,
+        input.cwd,
+        signal,
+        loader,
+      ),
       signal,
-      loader,
-    ),
-    signal,
-    async (late) => await late.close(),
-  );
+      async (late) => await late.close(),
+    );
+  } catch (error) {
+    try {
+      await awaitLateDisposal(signal);
+    } catch (lateError) {
+      throw new Error(
+        `${error instanceof Error ? error.message : String(error)}; provider late disposal failed: ${lateError instanceof Error ? lateError.message : String(lateError)}`,
+        { cause: error },
+      );
+    }
+    throw error;
+  }
 }
 
 async function openDriveSession(
@@ -340,6 +352,7 @@ async function drive(execution: ProviderExecution, input: Input, loader?: Openco
       admission: { fence: sessionId },
       events,
       completion,
+      lateDisposal: () => awaitLateDisposal(abortController.signal),
       abort: async () => {
         abortController.abort();
         void session

@@ -6,7 +6,7 @@ import type {
   SessionManager,
   CreateAgentSessionOptions,
 } from "@earendil-works/pi-coding-agent";
-import { abortable } from "../../abort.js";
+import { abortable, awaitLateDisposal } from "../../abort.js";
 import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
 import type { ResumeCoordinate } from "../../coordinate.js";
 import {
@@ -124,7 +124,19 @@ async function createPiSession(
     }
     return await sdk.createAgentSession(options);
   });
-  return await abortable(setup, signal, (created) => created.session.dispose());
+  try {
+    return await abortable(setup, signal, (created) => created.session.dispose());
+  } catch (error) {
+    try {
+      await awaitLateDisposal(signal);
+    } catch (lateError) {
+      throw new Error(
+        `${error instanceof Error ? error.message : String(error)}; provider late disposal failed: ${lateError instanceof Error ? lateError.message : String(lateError)}`,
+        { cause: error },
+      );
+    }
+    throw error;
+  }
 }
 
 function forceDisposePi(
