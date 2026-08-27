@@ -76,8 +76,14 @@ type MutationResult<A> = Readonly<{
   effects: readonly TopologyEffect[]
   lags: readonly Lag[]
   settlement: SettlementReport
+  hookRuns?: readonly WorktreeHookRun[]
   cleanup?: VerificationCleanupFailure
   leak?: WorktreeLeak
+}>
+
+type WorktreeHookRun = Readonly<{
+  phase: "create" | "destroy"
+  name: string
 }>
 
 type RecoverySnapshotEffect = Readonly<{
