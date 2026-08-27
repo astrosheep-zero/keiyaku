@@ -263,7 +263,7 @@ typed invocation fields only and never rereads authority.
   target -> <SnapshotId> [· verified (ran|reused)]
 ✓ continuation complete <complete kei/...>
 ! continuation blocked <complete kei/...> · <typed stop summary>
-! verification unsatisfied (ran|reused)
+! verification unsatisfied (ran|reused) · not required by Contract gates
 ! completion blocked · <typed reason and exact scalar facts>
 ~ workspace <N files changed, N insertions(+), N deletions(-)>
   staged <complete path>

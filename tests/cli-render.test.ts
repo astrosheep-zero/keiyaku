@@ -494,7 +494,7 @@ test("deliver projects no Verification and an unsatisfied non-gating Verificatio
     [
       "✓ delivered — kei/completion-states",
       "  target -> integration-2",
-      "! verification unsatisfied (ran)",
+      "! verification unsatisfied (ran) · not required by Contract gates",
       "  summary",
       "",
       "[1 bash exit 1]",
@@ -527,6 +527,40 @@ test("review projects reused Verification and distinguishes completion in its ti
     [
       "✓ review satisfied — complete — kei/review-completion",
       "  target -> integration-3 · verified (reused)",
+      "  record",
+      "    journal claim · claimed",
+      "    head head",
+    ].join("\n"),
+  );
+});
+
+test("review projects a reused unsatisfied Verification as non-gating completion", () => {
+  const contract = contractId("kei/review-completion-unsatisfied");
+  const integration = snapshotId("integration-4");
+  const envelope = {
+    kind: "accepted" as const,
+    contract,
+    head: contractHead("head"),
+    facts: [{ contract, entry: "claim", kind: "claimed" as const }],
+    effects: [],
+    settlement: { actions: [], lags: [] },
+  };
+  assert.equal(
+    renderText({
+      ...envelope,
+      verb: "review",
+      verdict: "satisfied",
+      completion: { integration, verification: { mode: "reused", verdict: "unsatisfied" } },
+      verificationSummary: "[reused bash exit 1]",
+    }),
+    [
+      "✓ review satisfied — complete — kei/review-completion-unsatisfied",
+      "  target -> integration-4",
+      "! verification unsatisfied (reused) · not required by Contract gates",
+      "  summary",
+      "",
+      "[reused bash exit 1]",
+      "",
       "  record",
       "    journal claim · claimed",
       "    head head",

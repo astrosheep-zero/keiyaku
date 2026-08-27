@@ -335,7 +335,13 @@ function completionLines(result: AcceptedDeliverResult | AcceptedReviewResult, c
     columns,
   );
   if (verification?.verdict === "unsatisfied") {
-    receiptRow(lines, "!", "verification", [{ text: "unsatisfied" }, { text: `(${verification.mode})` }], columns);
+    receiptRow(
+      lines,
+      "!",
+      "verification",
+      [{ text: "unsatisfied" }, { text: `(${verification.mode})` }, { text: "· not required by Contract gates" }],
+      columns,
+    );
     if (result.verificationSummary !== undefined) {
       receiptPayload(lines, "  summary", result.verificationSummary);
     }
