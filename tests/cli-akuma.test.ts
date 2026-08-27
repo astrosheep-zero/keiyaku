@@ -732,7 +732,6 @@ test("Akuma mutation snapshots omit observation context", () => {
   assert.doesNotMatch(killed, /^tasks /mu);
   assert.doesNotMatch(killed, /^changes /mu);
   assert.equal(killed.split("\n").at(-1), "✓ killed");
-
   for (const evidence of ["already-killed", "already-stopped", "hung", "untidy", "unavailable"] as const) {
     const receipt = renderAkumaText(parseArgv(["kill", observation.status.id]).command, {
       kind: "akuma",
@@ -750,7 +749,6 @@ test("Akuma mutation snapshots omit observation context", () => {
     assert.equal(receipt.split("\n").filter((line) => line === expected).length, 1);
     assert.doesNotMatch(receipt, new RegExp(`^kill ${evidence}$`, "mu"));
   }
-
   const emptyKill = renderAkumaText(parseArgv(["kill", observation.status.id]).command, {
     kind: "akuma",
     action: "kill",
@@ -1570,6 +1568,52 @@ test("CLI Square edge uses assigned identity and the dedicated KEIYAKU square", 
     try {
       const participant = await square.join("Alice");
       assert.deepEqual(await participant.listening(), ["aku/test"]);
+    } finally {
+      await square.close();
+    }
+  } finally {
+    if (previousRegistry === undefined) delete process.env.SQUARE_REGISTRY;
+    else process.env.SQUARE_REGISTRY = previousRegistry;
+    if (previousRoutes === undefined) delete process.env.SQUARE_ROUTES;
+    else process.env.SQUARE_ROUTES = previousRoutes;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI Square edge does not reject an emoji Akuma archetype", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-cli-square-emoji-akuma-")));
+  const registry = join(root, "sessions.ndjsonl");
+  const routes = join(root, "routes.ndjsonl");
+  const previousRegistry = process.env.SQUARE_REGISTRY;
+  const previousRoutes = process.env.SQUARE_ROUTES;
+  process.env.SQUARE_REGISTRY = registry;
+  process.env.SQUARE_ROUTES = routes;
+  const environment = {
+    ...process.env,
+    CODEX_THREAD_ID: "caller",
+    SQUARE_PARTICIPANT_NAME: "Alice",
+    SQUARE_ROUTES: routes,
+  };
+  try {
+    writeFileSync(
+      registry,
+      `${JSON.stringify({
+        v: 1,
+        ts: new Date().toISOString(),
+        op: "join",
+        channel: "codex",
+        session_id: "caller",
+        name: "Alice",
+        square_path: join(root, ".square", "PUBLIC.square"),
+        owner_id: "caller-owner",
+      })}\n`,
+    );
+    const result = await recognizeAndListen(root, environment, { id: "aku/🕷️/1234abcd" } as never);
+    assert.equal(result?.committed, true);
+    const square = await Square.at({ path: join(root, ".square", "KEIYAKU.square") });
+    try {
+      const participant = await square.join("Alice");
+      assert.deepEqual(await participant.listening(), ["aku/🕷️/1234abcd"]);
     } finally {
       await square.close();
     }

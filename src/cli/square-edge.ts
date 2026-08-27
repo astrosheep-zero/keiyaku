@@ -56,7 +56,17 @@ export async function recognizeAndListen(
     const participant = joinedResult.participant;
     bound = (await bindCurrentParticipant(path, name, environment)).created;
     const listener = participant;
-    const change = await listener.listen(allocated.id);
+    let change;
+    try {
+      change = await listener.listen(allocated.id);
+    } catch (error) {
+      // Keep birth independent from an older or drifting Square name grammar.
+      if ((error as { code?: unknown }).code === "invalid_name") {
+        await rollback();
+        return;
+      }
+      throw error;
+    }
     listening = change.activity !== null;
     return {
       committed: true,

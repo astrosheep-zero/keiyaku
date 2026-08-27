@@ -16,6 +16,31 @@ Recipe inspection remains adapter- and SDK-free; selected adapter construction
 is asynchronous, and that adapter loads its native SDK only when it starts or
 resumes a native session.
 
+## Structured answer capability
+
+Structured-answer schema is a Turn-start capability, not a live-tell mutation.
+Claude Agent SDK accepts `outputFormat` when a query starts, and Codex
+app-server accepts `outputSchema` on `turn/start`; neither exposes a schema
+setter on live steering. OpenCode's v2 prompt surface accepts
+`format.json_schema`, but its newer steer/queue input has no format field, and
+the current Keiyaku OpenCode adapter uses an entry point that does not send
+that option. A schema change therefore requires a successor Turn for all three.
+
+Pi's native session API has no assistant final-answer schema, but Pi is
+extensible: a Keiyaku Pi plugin may carry a schema-bearing prompt through its
+own extension boundary and perform native or post-answer validation. Pi's lack
+of a built-in SDK field is not a product-level impossibility.
+
+Grok Build has two distinct surfaces. The xAI HTTP SDK supports
+`response_format` with a JSON schema. The Grok Build ACP source also contains
+an optional per-prompt `outputSchema`, while `x.ai/interject` remains text-only
+and cannot replace an active Turn's schema. The installed Grok Build CLI and
+the current Keiyaku `grok-build` adapter have not established that ACP field as
+a stable local contract and do not currently send it. Until capability is
+verified at the selected executable, Grok structured answers remain
+Keiyaku-owned post-validation; any future schema-bearing prompt must be a new
+Turn, never an interjection.
+
 ## Turn Correlation
 
 Provider fences and tell receipts are correlated to the admitted Turn, not to
