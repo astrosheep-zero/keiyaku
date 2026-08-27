@@ -18,11 +18,10 @@ when one exists. That latest settled Tell is pinned outside the ordinary
 budget, even when it sits outside the current open Turn or idle ordinary
 window, and it appears once at its persisted sequence. Pin selection happens
 before tail and voice fill, so the Tell never consumes an ordinary slot.
-Mutation receipt snapshots keep the ordinary last-activity policy. A `tell`
-receipt additionally pins the Tell admitted by that invocation at its
-persisted timeline sequence, outside the ordinary tail and voice budgets, while
-retaining the ordinary actionable pending-Tell pins. A `kill` receipt does not
-pin a settled Tell.
+Mutation receipt snapshots (`tell` and `kill`) keep the ordinary last-activity
+policy. A `tell` receipt additionally pins only the Tell admitted by that
+invocation at its persisted timeline sequence, outside the ordinary budget;
+`kill` receipts do not pin settled Tells.
 Every snapshot arm, including unborn, also carries `reportedChanges` and
 `reportedChangesOmitted` from that same frontier Turn. Eligible source rows
 are completed `fileChange` tools with successful result status; each native
