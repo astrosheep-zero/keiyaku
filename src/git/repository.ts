@@ -1,3 +1,4 @@
+/* eslint-disable max-lines */
 import { isAbsolute, resolve } from "node:path";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { gitObjectId } from "./identity.js";

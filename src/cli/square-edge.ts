@@ -38,6 +38,7 @@ async function openKeiyakuSquare(path: string): Promise<Square> {
   }
 }
 
+// eslint-disable-next-line max-lines-per-function
 export async function recognizeAndListen(
   worldRoot: WorldRoot,
   environment: NodeJS.ProcessEnv,
