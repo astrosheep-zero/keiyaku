@@ -47,17 +47,16 @@ test("guidance preserves source bytes and appends one Fulfillment H2", () => {
   assert.equal(guidance.match(/^## Fulfillment$/gm)?.length, 1);
   assert.match(guidance, /^### Appointment$/m);
   assert.match(guidance, /^### Worktree$/m);
-  assert.match(
-    guidance,
-    /\.agents\/skills\/keiyaku-deliver\/SKILL\.md and `\.agents\/skills\/keiyaku-review\/SKILL\.md`/,
+  assert.doesNotMatch(
+    guidance.slice(guidance.indexOf("### Worktree"), guidance.indexOf("### Deliverer")),
+    /\.agents\/skills\/keiyaku-(deliver|review)\/SKILL\.md/,
   );
   assert.match(guidance, /^### Deliverer$/m);
   assert.match(guidance, /When an Arc is active, stay within that current chapter\./);
-  assert.match(
-    guidance,
-    /Deliver from this worktree\. A clean worktree delivers HEAD; uncommitted work\nneeds `deliver --include-dirty`, which captures the final non-ignored tree and\nstages or commits nothing\. If deliver reports a conflict, run\n`deliver --materialize-conflict`, resolve the conflicted files, and continue\nwith `deliver --include-dirty` while the merge stays uncommitted\./,
-  );
+  assert.match(guidance, /Implement and verify the Objective under the Design, Region, and Criteria in this Contract\./);
+  assert.match(guidance, /Read the Deliverer operating procedures at `\.agents\/skills\/keiyaku-deliver\/SKILL\.md`/);
   assert.match(guidance, /^### Reviewer$/m);
+  assert.match(guidance, /Read the Reviewer operating procedures at `\.agents\/skills\/keiyaku-review\/SKILL\.md`/);
   assert.doesNotMatch(guidance, /^## Arc$/m);
   assert.ok(guidance.endsWith("\n"));
 });
@@ -67,6 +66,8 @@ test("seat skills are static operating guidance without Contract facts", () => {
   assert.match(CONTRACT_DELIVERER_SKILL, /keiyaku deliver <contract> --include-dirty/);
   assert.match(CONTRACT_REVIEWER_SKILL, /^name: keiyaku-review$/m);
   assert.match(CONTRACT_REVIEWER_SKILL, /keiyaku review <contract> --satisfied/);
+  assert.match(CONTRACT_DELIVERER_SKILL, /materialize-conflict/);
+  assert.match(CONTRACT_REVIEWER_SKILL, /stale after it changes/);
   for (const skill of [CONTRACT_DELIVERER_SKILL, CONTRACT_REVIEWER_SKILL]) {
     assert.doesNotMatch(skill, /kei\/guidance|## Arc|Seat: Deliverer|Seat: Reviewer/);
   }
