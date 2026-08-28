@@ -13,7 +13,7 @@ is accepted; the identity underneath never changes.
 ## Start One
 
 ```bash
-keiyaku -C <cwd> call <akuma-name> [--alias @name] [--readonly] [--allowed <product.action>]... [--wait <duration> | -d | --detach] (<prompt> | -)
+keiyaku -C <cwd> call <akuma-name> [--alias @name] [--readonly] [--allowed <product.action>]... [--wait <duration> | -d | --detach] [--json] (<prompt> | -)
 ```
 
 Give the worker's initial prompt as one argument (quote it when it contains
