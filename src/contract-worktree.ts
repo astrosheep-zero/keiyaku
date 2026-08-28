@@ -3,7 +3,12 @@ import { join } from "node:path";
 import { acquireSqliteTransactionLock } from "./coordination/sqlite-transaction-lock.js";
 import { repairDerivedFile, type DerivedFileAction } from "./coordination/durable-file.js";
 import { contractId, type ContractId, type ContractState } from "./core/facts/types.js";
-import { renderContractAppointment, renderContractGuidance } from "./contract-guidance.js";
+import {
+  CONTRACT_DELIVERER_SKILL,
+  CONTRACT_REVIEWER_SKILL,
+  renderContractAppointment,
+  renderContractGuidance,
+} from "./contract-guidance.js";
 import { worktreeGitDirectory, worktreeRoot } from "./git/repository.js";
 import { GitPlumbingError, runGit, type GitRepository } from "./git/process.js";
 import { worktreePath } from "./git/workspace.js";
@@ -11,6 +16,11 @@ import { appointmentFor, placeRegisterPath, type PlaceRegister } from "./workspa
 
 const IGNORE_BYTES = ".gitignore\nKEIYAKU.md\n";
 const PRIMARY_IGNORE_BYTES = "*\n!settings.json\n!tasks/\n!tasks/**\n";
+const SEAT_IGNORE_BYTES = ".gitignore\nSKILL.md\n";
+const SEAT_SKILLS = [
+  ["keiyaku-deliver", CONTRACT_DELIVERER_SKILL],
+  ["keiyaku-review", CONTRACT_REVIEWER_SKILL],
+] as const;
 export type ContractAppointment =
   | Readonly<{ kind: "absent"; path: string }>
   | Readonly<{ kind: "appointed"; path: string; contract: ContractId }>
@@ -114,6 +124,33 @@ async function repair(
   return { kind: "contract-file", path, action };
 }
 
+async function isKeiyakuSeatLeaf(worktree: string, seat: string): Promise<boolean> {
+  const sentinel = join(worktree, ".agents", "skills", seat, ".gitignore");
+  const stat = await lstat(sentinel).catch((error: NodeJS.ErrnoException) =>
+    error.code === "ENOENT" ? undefined : Promise.reject(error),
+  );
+  return stat?.isFile() === true && !stat.isSymbolicLink() && (await readFile(sentinel, "utf8")) === SEAT_IGNORE_BYTES;
+}
+
+async function materializeSeatSkill(
+  repository: GitRepository,
+  worktree: string,
+  seat: string,
+  bytes: string,
+): Promise<readonly ContractFileEffect[]> {
+  const leaf = `.agents/skills/${seat}`;
+  const skill = `${leaf}/SKILL.md`;
+  const skillPath = join(worktree, skill);
+  const skillExists = await lstat(skillPath).catch((error: NodeJS.ErrnoException) =>
+    error.code === "ENOENT" ? false : Promise.reject(error),
+  );
+  if (!(await isKeiyakuSeatLeaf(worktree, seat)) && skillExists) return [];
+  return [
+    await repair(repository, worktree, `${leaf}/.gitignore`, SEAT_IGNORE_BYTES),
+    await repair(repository, worktree, skill, bytes),
+  ];
+}
+
 async function materialize(
   repository: GitRepository,
   worktree: string,
@@ -169,6 +206,13 @@ async function materialize(
       effects.push(await repair(scoped, worktree, relativePath, bytes));
     } catch (error) {
       return failed(worktree, join(worktree, relativePath), error);
+    }
+  }
+  for (const [seat, bytes] of SEAT_SKILLS) {
+    try {
+      effects.push(...(await materializeSeatSkill(scoped, worktree, seat, bytes)));
+    } catch (error) {
+      return failed(worktree, join(worktree, ".agents", "skills", seat), error);
     }
   }
   return { effects, lag: [] };

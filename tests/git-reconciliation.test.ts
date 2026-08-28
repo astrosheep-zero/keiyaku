@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { Keiyaku, Repo, type ContractId, type TopologyEffect } from "../src/index.js";
@@ -56,8 +56,10 @@ async function buildTenderedReviewGatedTargetTemplate(): Promise<TenderedReviewG
   const generatedFiles = [
     ".keiyaku/.gitignore",
     ".keiyaku/KEIYAKU.md",
-    ".keiyaku/namespace/.gitignore",
-    ".keiyaku/namespace/current",
+    ".agents/skills/keiyaku-deliver/.gitignore",
+    ".agents/skills/keiyaku-deliver/SKILL.md",
+    ".agents/skills/keiyaku-review/.gitignore",
+    ".agents/skills/keiyaku-review/SKILL.md",
   ].map((path) => ({
     path,
     bytes: readFileSync(join(worktree, path)),
@@ -81,7 +83,7 @@ async function tenderedReviewGatedTargetFixture() {
   repository.run(["worktree", "add", "--detach", worktree, template.workspaceHead]);
   for (const generated of template.generatedFiles) {
     const path = join(worktree, generated.path);
-    mkdirSync(join(worktree, ".keiyaku", ...generated.path.split("/").slice(1, -1)), { recursive: true });
+    mkdirSync(join(worktree, ...generated.path.split("/").slice(0, -1)), { recursive: true });
     writeFileSync(path, generated.bytes);
     chmodSync(path, generated.mode);
   }
@@ -89,6 +91,34 @@ async function tenderedReviewGatedTargetFixture() {
   const contract = Keiyaku.of({ repo, id: template.id });
   return { contract, repository, worktree };
 }
+
+test("reconciliation repairs sentinelled skills and preserves a tracked user override", async () => {
+  const repository = repositoryWithMain();
+  const bound = await Keiyaku.bind({
+    repo: await Repo.at({ path: repository.path }),
+    markdown: document(),
+    workspace: "worktree",
+  });
+  const contract = bound.keiyaku;
+  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), contract.id);
+  const deliverLeaf = join(worktree, ".agents", "skills", "keiyaku-deliver");
+  const deliverSkill = join(deliverLeaf, "SKILL.md");
+  const reviewSkill = join(worktree, ".agents", "skills", "keiyaku-review", "SKILL.md");
+  unlinkSync(join(deliverLeaf, ".gitignore"));
+  writeFileSync(deliverSkill, "# User deliverer skill\n");
+  repository.run(["-C", worktree, "add", ".agents/skills/keiyaku-deliver/SKILL.md"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "user seat skill"]);
+  writeFileSync(reviewSkill, "stale generated skill\n");
+
+  const report = await contract.reconcile();
+
+  assert.equal(report.lag.length, 0);
+  assert.equal(readFileSync(deliverSkill, "utf8"), "# User deliverer skill\n");
+  assert.equal(statSync(join(deliverLeaf, ".gitignore"), { throwIfNoEntry: false }), undefined);
+  assert.match(readFileSync(reviewSkill, "utf8"), /^---\nname: keiyaku-review$/m);
+  const status = repository.run(["-C", worktree, "status", "--porcelain", "--untracked-files=all"]);
+  assert.equal(status.includes("keiyaku-review"), false);
+});
 
 async function restoreOwnedRefs(
   repository: ReturnType<typeof repositoryWithMain>,

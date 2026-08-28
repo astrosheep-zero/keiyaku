@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { renderContractGuidance } from "../src/contract-guidance.js";
+import {
+  CONTRACT_DELIVERER_SKILL,
+  CONTRACT_REVIEWER_SKILL,
+  renderContractGuidance,
+} from "../src/contract-guidance.js";
 import {
   contractHead,
   contractId,
@@ -43,6 +47,10 @@ test("guidance preserves source bytes and appends one Fulfillment H2", () => {
   assert.equal(guidance.match(/^## Fulfillment$/gm)?.length, 1);
   assert.match(guidance, /^### Appointment$/m);
   assert.match(guidance, /^### Worktree$/m);
+  assert.match(
+    guidance,
+    /\.agents\/skills\/keiyaku-deliver\/SKILL\.md and `\.agents\/skills\/keiyaku-review\/SKILL\.md`/,
+  );
   assert.match(guidance, /^### Deliverer$/m);
   assert.match(guidance, /When an Arc is active, stay within that current chapter\./);
   assert.match(
@@ -52,6 +60,16 @@ test("guidance preserves source bytes and appends one Fulfillment H2", () => {
   assert.match(guidance, /^### Reviewer$/m);
   assert.doesNotMatch(guidance, /^## Arc$/m);
   assert.ok(guidance.endsWith("\n"));
+});
+
+test("seat skills are static operating guidance without Contract facts", () => {
+  assert.match(CONTRACT_DELIVERER_SKILL, /^name: keiyaku-deliver$/m);
+  assert.match(CONTRACT_DELIVERER_SKILL, /keiyaku deliver <contract> --include-dirty/);
+  assert.match(CONTRACT_REVIEWER_SKILL, /^name: keiyaku-review$/m);
+  assert.match(CONTRACT_REVIEWER_SKILL, /keiyaku review <contract> --satisfied/);
+  for (const skill of [CONTRACT_DELIVERER_SKILL, CONTRACT_REVIEWER_SKILL]) {
+    assert.doesNotMatch(skill, /kei\/guidance|## Arc|Seat: Deliverer|Seat: Reviewer/);
+  }
 });
 
 test("guidance inserts the current Arc before Fulfillment", () => {

@@ -461,10 +461,19 @@ test("Keiyaku owns contract construction over one pinned Repo capability", async
   );
   assert.ok(guidance.includes(markdown("Markdown input")));
   assert.equal(guidance.match(/^## Fulfillment$/gmu)?.length, 1);
+  assert.match(guidance, /keiyaku-deliver\/SKILL\.md.*keiyaku-review\/SKILL\.md/);
   const appointment = await readManagedWorktreeAppointment(await repositoryAt(repository.path), state.id);
   assert.equal(appointment.kind, "appointed");
   if (appointment.kind !== "appointed") throw new Error("expected appointed worktree");
   assert.equal(readFileSync(join(appointment.path, ".keiyaku", "KEIYAKU.md"), "utf8"), guidance);
+  assert.match(
+    readFileSync(join(appointment.path, ".agents", "skills", "keiyaku-deliver", "SKILL.md"), "utf8"),
+    /^---\nname: keiyaku-deliver$/m,
+  );
+  assert.match(
+    readFileSync(join(appointment.path, ".agents", "skills", "keiyaku-review", "SKILL.md"), "utf8"),
+    /^---\nname: keiyaku-review$/m,
+  );
 
   const sameTitle = await Keiyaku.bind({ repo, markdown: markdown("Markdown input"), workspace: "worktree" });
   assert.match((await sameTitle.keiyaku.state()).id, /^kei\/markdown-input-[0-9a-f]{16}$/);

@@ -144,7 +144,14 @@ async function buildPostBindTemplate(
   });
   const state = await bound.keiyaku.state();
   const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
-  const generatedFiles = [".keiyaku/.gitignore", ".keiyaku/KEIYAKU.md"].map((path) => ({
+  const generatedFiles = [
+    ".keiyaku/.gitignore",
+    ".keiyaku/KEIYAKU.md",
+    ".agents/skills/keiyaku-deliver/.gitignore",
+    ".agents/skills/keiyaku-deliver/SKILL.md",
+    ".agents/skills/keiyaku-review/.gitignore",
+    ".agents/skills/keiyaku-review/SKILL.md",
+  ].map((path) => ({
     path,
     bytes: readFileSync(join(worktree, path)),
     mode: statSync(join(worktree, path)).mode & 0o777,

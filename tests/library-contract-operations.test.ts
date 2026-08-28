@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { Keiyaku, KeiyakuRefused, Repo } from "../src/index.js";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
@@ -40,8 +40,10 @@ async function buildDefaultPostBindTemplate(): Promise<DefaultPostBindTemplate> 
   const generatedFiles = [
     ".keiyaku/.gitignore",
     ".keiyaku/KEIYAKU.md",
-    ".keiyaku/namespace/.gitignore",
-    ".keiyaku/namespace/current",
+    ".agents/skills/keiyaku-deliver/.gitignore",
+    ".agents/skills/keiyaku-deliver/SKILL.md",
+    ".agents/skills/keiyaku-review/.gitignore",
+    ".agents/skills/keiyaku-review/SKILL.md",
   ].map((path) => ({
     path,
     bytes: readFileSync(join(worktree, path)),
@@ -65,7 +67,7 @@ async function defaultBoundFixture() {
   repository.run(["worktree", "add", "--detach", worktree, template.start]);
   for (const generated of template.generatedFiles) {
     const path = join(worktree, generated.path);
-    mkdirSync(join(worktree, ".keiyaku", ...generated.path.split("/").slice(1, -1)), { recursive: true });
+    mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, generated.bytes);
     chmodSync(path, generated.mode);
   }
@@ -163,8 +165,10 @@ async function buildReviewGatedConflictCandidateTemplate(): Promise<ReviewGatedC
   const generatedFiles = [
     ".keiyaku/.gitignore",
     ".keiyaku/KEIYAKU.md",
-    ".keiyaku/namespace/.gitignore",
-    ".keiyaku/namespace/current",
+    ".agents/skills/keiyaku-deliver/.gitignore",
+    ".agents/skills/keiyaku-deliver/SKILL.md",
+    ".agents/skills/keiyaku-review/.gitignore",
+    ".agents/skills/keiyaku-review/SKILL.md",
   ].map((path) => ({
     path,
     bytes: readFileSync(join(worktree, path)),
@@ -188,7 +192,7 @@ async function reviewGatedConflictCandidateFixture() {
   repository.run(["worktree", "add", "--detach", worktree, template.candidateHead]);
   for (const generated of template.generatedFiles) {
     const path = join(worktree, generated.path);
-    mkdirSync(join(worktree, ".keiyaku", ...generated.path.split("/").slice(1, -1)), { recursive: true });
+    mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, generated.bytes);
     chmodSync(path, generated.mode);
   }

@@ -2,6 +2,40 @@ import type { ArcData, ContractId, ContractState } from "./core/facts/types.js";
 
 const APPOINTMENT_DESCRIPTION = "This is a read-only projection. Do not edit manually.";
 
+export const CONTRACT_DELIVERER_SKILL = [
+  "---",
+  "name: keiyaku-deliver",
+  "description: Operate as the Deliverer for an explicitly appointed Keiyaku Contract worktree.",
+  "---",
+  "",
+  "# Keiyaku Deliverer",
+  "",
+  "Work and test in the Contract worktree named by the bind receipt. The Contract and its owner documents decide the delivery; this skill is operating guidance only.",
+  "",
+  "## Deliver",
+  "",
+  "After the declared verification succeeds, deliver the candidate that is currently in this worktree. A clean worktree delivers HEAD; use `keiyaku deliver <contract> --include-dirty` only when every non-ignored current byte belongs in the candidate.",
+  "",
+  "Read the delivery receipt. A recorded candidate can wait for review or placement; do not infer lifecycle state from the worktree alone.",
+].join("\n").concat("\n");
+
+export const CONTRACT_REVIEWER_SKILL = [
+  "---",
+  "name: keiyaku-review",
+  "description: Operate as the Reviewer for an explicitly appointed Keiyaku Contract worktree.",
+  "---",
+  "",
+  "# Keiyaku Reviewer",
+  "",
+  "Review the complete current Contract worktree snapshot against its Contract and owner documents. The Contract and its owner documents decide the delivery; this skill is operating guidance only.",
+  "",
+  "## Review",
+  "",
+  "Do not modify the worktree. Compare every Contract criterion to the current candidate, report findings by root cause, and distinguish missing evidence from a passing observation.",
+  "",
+  "When authorized to record the verdict, use `keiyaku review <contract> --satisfied --summary <conclusion>` or `keiyaku review <contract> --unsatisfied --summary <finding>`. Review testimony applies to the current patch and may become stale after it changes.",
+].join("\n").concat("\n");
+
 export function renderContractAppointment(contract: ContractId): string {
   return `---\ncontract: ${contract}\ndescription: ${APPOINTMENT_DESCRIPTION}\n---\n`;
 }
@@ -41,6 +75,7 @@ const FULFILLMENT = [
   "This file is a derived view of the journal-authoritative Contract. Never edit it to change the Contract.",
   "Treat the directory containing `.keiyaku/KEIYAKU.md` as the Contract worktree root.",
   "Read the complete Contract before acting and keep work inside that worktree.",
+  "Seat operating skills are available at `.agents/skills/keiyaku-deliver/SKILL.md` and `.agents/skills/keiyaku-review/SKILL.md`.",
   "",
   "### Deliverer",
   "",

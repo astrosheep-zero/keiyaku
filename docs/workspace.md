@@ -26,6 +26,11 @@ Contract data, lifecycle evidence, or a second appointment coordinate.
 4. Exactly one `Fulfillment` H2 with ordered `Appointment`, `Worktree`,
    `Deliverer`, and `Reviewer` H3 sections.
 
+The canonical Worktree guidance names both static seat-skill paths:
+`.agents/skills/keiyaku-deliver/SKILL.md` and
+`.agents/skills/keiyaku-review/SKILL.md`. It does not select either seat or
+copy current Contract or Arc facts into them.
+
 `Appointment` requires every commission to name exactly one seat, Deliverer or
 Reviewer; the worker never infers an omitted seat. `Worktree` identifies this
 file as a derived view and requires work to remain in its Contract worktree.
@@ -174,6 +179,10 @@ owner creates or repairs these derived files atomically:
 <primary-worktree>/.keiyaku/.gitignore
 <appointed-worktree>/.keiyaku/.gitignore
 <appointed-worktree>/.keiyaku/KEIYAKU.md
+<appointed-worktree>/.agents/skills/keiyaku-deliver/.gitignore
+<appointed-worktree>/.agents/skills/keiyaku-deliver/SKILL.md
+<appointed-worktree>/.agents/skills/keiyaku-review/.gitignore
+<appointed-worktree>/.agents/skills/keiyaku-review/SKILL.md
 ```
 
 Appointment reads, metadata checks, file reads, advisory chmod, and cleanup are
@@ -192,6 +201,18 @@ without hiding other nested `.keiyaku/` bytes. A tracked generated path is a
 failure. After every successful guidance create or replacement, Keiyaku
 attempts `0444`; inability to change the mode is advisory and does not create
 lag.
+
+Every managed worktree also receives both static seat skills. Each seat leaf
+owns a `.gitignore` sentinel containing exactly `.gitignore` and `SKILL.md`,
+so it hides only that generated leaf from ordinary status and delivery capture;
+it does not alter project ignores, global excludes, Git common excludes, or a
+parent `.agents/skills/` directory. The sentinel marks a Keiyaku-owned leaf:
+its `SKILL.md` is created or repaired from the bundled operating guidance.
+When the sentinel is absent and that exact `SKILL.md` exists, the leaf is
+user-owned and projection neither overwrites the skill nor adds an ignore
+above it. Removing the sentinel relinquishes an owned leaf. The static skills
+contain workflow and tool guidance only; Contract and Arc facts remain only in
+the canonical `KEIYAKU.md` projection.
 
 A write or cleanup failure returns a `contract-file-failed` lag naming the
 worktree, path, and diagnostic while preserving admitted facts and completed
