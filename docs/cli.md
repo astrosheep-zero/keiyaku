@@ -260,15 +260,18 @@ Call waits five minutes by default. `--wait` replaces that duration, while
 Before Body spawn, the edge resolves the caller's path-independent
 `squareAssignedParticipantName` through Square, lazily opens `<WorldRoot>/.square/KEIYAKU.square`,
 explicitly joins and binds that name, and establishes a listener for the allocated
-Aku. The call edge and Body use the same `<WorldRoot>/.square/KEIYAKU.square`
+Aku. One invocation environment defines that complete Square-edge identity:
+recognition, Square opening and reopening, binding, and rollback use it without a
+separate ambient-environment read. The call edge and Body use the same `<WorldRoot>/.square/KEIYAKU.square`
 target for call activity and the initial outcome. Missing or ambiguous caller
-assignment is a no-op at this edge and still launches. Idempotent join, binding,
-and listen create no rollback obligation; launch failure rolls back only facts
-created by this call. Rollback attempts unbind, ignore, done, and close
-independently; a rollback failure is retained as bounded diagnostic evidence
-without replacing the original launch failure. A legacy Square dependency that rejects the allocated Aku
-target as an invalid name is treated as the same optional edge no-op, so Square
-grammar drift never refuses Akuma birth. Detach returns `{ kind: "detached" }`. Outcome payload and
+assignment is a no-op at this edge and still launches. Square opening, building,
+joining, binding, listening, closing, and cleanup are all best effort: a failure
+returns no listener and cannot alter Akuma birth, Body launch, call result, or a
+primary launch failure. Idempotent join, binding, and listen create no rollback
+obligation; launch failure rolls back only facts created by this call. The
+supported Square dependency accepts canonical emoji Aku identities; malformed,
+unavailable, or incompatible Square state remains the same optional-edge no-op.
+Detach returns `{ kind: "detached" }`. Outcome payload and
 Body delivery belong to [akuma-execution.md](akuma-execution.md).
 Successful detach
 prints the canonical-world wait command using the successful Alias or complete

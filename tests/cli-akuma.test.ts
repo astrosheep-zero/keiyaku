@@ -1606,6 +1606,108 @@ test("CLI Square edge uses assigned identity and the dedicated KEIYAKU square", 
   }
 });
 
+test("CLI Square edge keeps one supplied invocation environment through rollback", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-cli-square-invocation-environment-")));
+  const ambientRegistry = join(root, "ambient", "sessions.ndjsonl");
+  const invocationRegistry = join(root, "invocation", "sessions.ndjsonl");
+  const squarePath = join(root, ".square", "KEIYAKU.square");
+  try {
+    const script = `
+      import { createHostLedgerPort } from "@astrosheep/square";
+      import { dirname } from "node:path";
+      import { recognizeAndListen } from ${JSON.stringify(new URL("../src/cli/square-edge.ts", import.meta.url).href)};
+
+      const root = ${JSON.stringify(root)};
+      const squarePath = ${JSON.stringify(squarePath)};
+      const invocationRegistry = ${JSON.stringify(invocationRegistry)};
+      const ambientRegistry = ${JSON.stringify(ambientRegistry)};
+      const environment = {
+        ...process.env,
+        CODEX_THREAD_ID: "invocation-session",
+        SQUARE_PARTICIPANT_NAME: "Alice",
+        SQUARE_HOST_LEDGER_USER: dirname(invocationRegistry),
+        SQUARE_HOST_LEDGER_LOCAL: dirname(invocationRegistry),
+      };
+      const bindings = (rows) =>
+        rows.map(({ updatedAt: _updatedAt, v: _version, ...binding }) => binding);
+      const invocationLedger = createHostLedgerPort({
+        userPath: dirname(invocationRegistry),
+        localPath: dirname(invocationRegistry),
+      });
+      const ambientLedger = createHostLedgerPort({
+        userPath: dirname(ambientRegistry),
+        localPath: dirname(ambientRegistry),
+      });
+      delete environment.SQUARE_REGISTRY;
+      await ambientLedger.ensurePresence({
+        location: squarePath,
+        participant: "Alice",
+        session: "ambient-session",
+        channel: "codex",
+      });
+      const listener = await recognizeAndListen(root, environment, { id: "aku/test" });
+      const before = {
+        invocation: await invocationLedger.listPresence({ location: squarePath }),
+        ambient: await ambientLedger.listPresence({ location: squarePath }),
+      };
+      await listener?.rollback();
+      const after = {
+        invocation: await invocationLedger.listPresence({ location: squarePath }),
+        ambient: await ambientLedger.listPresence({ location: squarePath }),
+      };
+      process.stdout.write(JSON.stringify({
+        committed: listener?.committed,
+        before: {
+          invocation: bindings(before.invocation),
+          ambient: bindings(before.ambient),
+        },
+        after: {
+          invocation: bindings(after.invocation),
+          ambient: bindings(after.ambient),
+        },
+      }));
+    `;
+    const childEnvironment = {
+      ...process.env,
+      SQUARE_REGISTRY: ambientRegistry,
+      CODEX_THREAD_ID: "ambient-session",
+      SQUARE_PARTICIPANT_NAME: "Ambient",
+    };
+    delete childEnvironment.SQUARE_HOST_LEDGER_USER;
+    delete childEnvironment.SQUARE_HOST_LEDGER_LOCAL;
+    const outcome = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve, reject) => {
+      const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+        env: childEnvironment,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (chunk: Buffer | string) => {
+        stdout += String(chunk);
+      });
+      child.stderr.on("data", (chunk: Buffer | string) => {
+        stderr += String(chunk);
+      });
+      child.on("error", reject);
+      child.on("close", (code) => resolve({ code: code ?? 1, stdout, stderr }));
+    });
+    assert.equal(outcome.code, 0, outcome.stderr);
+    assert.deepEqual(JSON.parse(outcome.stdout), {
+      committed: true,
+      before: {
+        invocation: [{ location: squarePath, participant: "Alice", session: "invocation-session", channel: "codex" }],
+        ambient: [{ location: squarePath, participant: "Alice", session: "ambient-session", channel: "codex" }],
+      },
+      after: {
+        invocation: [],
+        ambient: [{ location: squarePath, participant: "Alice", session: "ambient-session", channel: "codex" }],
+      },
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("CLI Square edge does not reject an emoji Akuma archetype", async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-cli-square-emoji-akuma-")));
   const registry = join(root, "sessions.ndjsonl");
@@ -1620,6 +1722,7 @@ test("CLI Square edge does not reject an emoji Akuma archetype", async () => {
     SQUARE_PARTICIPANT_NAME: "Alice",
     SQUARE_ROUTES: routes,
   };
+  const squarePath = join(root, ".square", "KEIYAKU.square");
   try {
     writeFileSync(
       registry,
@@ -1634,9 +1737,15 @@ test("CLI Square edge does not reject an emoji Akuma archetype", async () => {
         owner_id: "caller-owner",
       })}\n`,
     );
+    const seeded = await Square.build({ path: squarePath, markdown: "", env: environment });
+    try {
+      await seeded.join("aku/🕷️/1234abcd");
+    } finally {
+      await seeded.close();
+    }
     const result = await recognizeAndListen(root, environment, { id: "aku/🕷️/1234abcd" } as never);
     assert.equal(result?.committed, true);
-    const square = await Square.at({ path: join(root, ".square", "KEIYAKU.square") });
+    const square = await Square.at({ path: squarePath, env: environment });
     try {
       const participant = await square.join("Alice");
       assert.deepEqual(await participant.listening(), ["aku/🕷️/1234abcd"]);
@@ -1648,6 +1757,47 @@ test("CLI Square edge does not reject an emoji Akuma archetype", async () => {
     else process.env.SQUARE_REGISTRY = previousRegistry;
     if (previousRoutes === undefined) delete process.env.SQUARE_ROUTES;
     else process.env.SQUARE_ROUTES = previousRoutes;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI call launches when the dedicated Square artifact is malformed", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-cli-malformed-square-")));
+  const home = join(root, ".home");
+  const registry = join(root, "sessions.ndjsonl");
+  mkdirSync(join(home, "akuma"), { recursive: true });
+  mkdirSync(join(root, ".square"), { recursive: true });
+  writeFileSync(join(home, "akuma", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
+  writeFileSync(join(root, ".square", "KEIYAKU.square"), "not a Square artifact\n");
+  const previousRequests = process.env[AKUMA_REQUESTS_ENV];
+  delete process.env[AKUMA_REQUESTS_ENV];
+  try {
+    const result = await invoke(parseArgv(["-C", root, "call", "worker", "-d", "prompt"]), {
+      environment: {
+        ...process.env,
+        KEIYAKU_HOME: home,
+        SQUARE_REGISTRY: registry,
+        CODEX_THREAD_ID: "caller",
+        SQUARE_PARTICIPANT_NAME: "Alice",
+      },
+      readStdin: async () => "prompt",
+    });
+    assert.equal(result.kind, "akuma");
+    if (result.kind === "akuma" && result.action === "call") {
+      assert.deepEqual(result.result.observation, { kind: "detached" });
+      const status = await Keiyaku.status({ path: root, akuma: result.result.akuma });
+      if (status.status.life === "running") {
+        try {
+          await Keiyaku.kill({ path: root, akuma: [result.result.akuma] });
+        } catch (error) {
+          if (!(error instanceof Error) || error.message !== "Akuma has no Body to kill") throw error;
+        }
+        await Keiyaku.wait({ path: root, akuma: [result.result.akuma] });
+      }
+    }
+  } finally {
+    if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
+    else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -1683,7 +1833,7 @@ test("CLI Square edge rollback removes only facts committed by that call", async
     );
     const created = await recognizeAndListen(root, environment, { id: "aku/new" } as never);
     await created?.rollback();
-    let square = await Square.at({ path: squarePath });
+    let square = await Square.at({ path: squarePath, env: environment });
     try {
       assert.equal((await square.participants()).find((item) => item.name === "Alice")?.state, "done");
     } finally {
@@ -1691,7 +1841,7 @@ test("CLI Square edge rollback removes only facts committed by that call", async
     }
     assert.equal(await unbindCurrentParticipant(squarePath, "Alice", environment), false);
 
-    square = await Square.at({ path: squarePath });
+    square = await Square.at({ path: squarePath, env: environment });
     try {
       const participant = await square.join("Alice");
       await participant.listen("aku/existing");
@@ -1701,7 +1851,7 @@ test("CLI Square edge rollback removes only facts committed by that call", async
     await bindCurrentParticipant(squarePath, "Alice", environment);
     const existing = await recognizeAndListen(root, environment, { id: "aku/existing" } as never);
     await existing?.rollback();
-    square = await Square.at({ path: squarePath });
+    square = await Square.at({ path: squarePath, env: environment });
     try {
       const participant = await square.join("Alice");
       assert.deepEqual(await participant.listening(), ["aku/existing"]);
