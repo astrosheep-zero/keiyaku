@@ -12,8 +12,7 @@ import { akumaCallRequestCommands } from "../src/akuma/call-request.js";
 import { HeldAkumaLeash, initializeHeart, readSoul, recordTell, type Soul } from "../src/akuma/heart/index.js";
 import { decodeSoul } from "../src/akuma/heart/soul.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
-import type { ProviderAdapter } from "../src/akuma/provider.js";
-import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
+import { AKUMA_REQUESTS_ENV, createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import { BodyRequestPump } from "../src/akuma/request-serve.js";
 import { executeKillAkuma, executeTellAkuma, executeWaitAkuma, fleetRequestCommands } from "../src/library/fleet.js";
 import { Keiyaku, type AkumaObservation } from "../src/index.js";
@@ -1005,27 +1004,34 @@ test("Akuma status, wait, and history share public observations without embeddin
       admitOptions(options) {
         return { kind: "admitted", options };
       },
-      async start() {
-        let finishEvents!: () => void;
-        const eventsFinished = new Promise<void>((resolve) => {
-          finishEvents = resolve;
-        });
-        return {
-          admission: { fence: "cli-fixture-turn" },
-          events: {
-            async *[Symbol.asyncIterator]() {
-              yield { type: "session" as const, coordinate: { sessionId: "cli-session" } };
-              yield { type: "assistant" as const, text: "cli activity" };
+      start() {
+        return createProviderAttempt(undefined, async () => {
+          let finishEvents!: () => void;
+          const eventsFinished = new Promise<void>((resolve) => {
+            finishEvents = resolve;
+          });
+          return {
+            admission: { fence: "cli-fixture-turn" },
+            events: {
+              async *[Symbol.asyncIterator]() {
+                yield { type: "session" as const, coordinate: { sessionId: "cli-session" } };
+                yield { type: "assistant" as const, text: "cli activity" };
+                finishEvents();
+              },
+            },
+            completion: eventsFinished.then(() => ({
+              kind: "answered" as const,
+              answer: "cli answer",
+              historyId: "cli-history",
+            })),
+            async abort() {
               finishEvents();
             },
-          },
-          completion: eventsFinished.then(() => ({
-            kind: "answered" as const,
-            answer: "cli answer",
-            historyId: "cli-history",
-          })),
-          async abort() {},
-        };
+            async forceDispose() {
+              finishEvents();
+            },
+          };
+        });
       },
     };
     await driveAkumaBody(
@@ -1179,37 +1185,45 @@ test("packaged CLI call writes representative success and failure exits", async 
     admitOptions(options) {
       return { kind: "admitted", options };
     },
-    async start() {
-      let finishEvents!: () => void;
-      const eventsFinished = new Promise<void>((resolve) => {
-        finishEvents = resolve;
-      });
-      return {
-        admission: { fence: "cli-call" },
-        events: {
-          async *[Symbol.asyncIterator]() {
-            yield { type: "session" as const, coordinate: { sessionId: "cli-session" } };
+    start() {
+      return createProviderAttempt(undefined, async () => {
+        let finishEvents!: () => void;
+        const eventsFinished = new Promise<void>((resolve) => {
+          finishEvents = resolve;
+        });
+        return {
+          admission: { fence: "cli-call" },
+          events: {
+            async *[Symbol.asyncIterator]() {
+              yield { type: "session" as const, coordinate: { sessionId: "cli-session" } };
+              finishEvents();
+            },
+          },
+          completion: eventsFinished.then(() => ({
+            kind: "answered" as const,
+            answer: "finished",
+            historyId: "cli-history",
+          })),
+          async abort() {
             finishEvents();
           },
-        },
-        completion: eventsFinished.then(() => ({
-          kind: "answered" as const,
-          answer: "finished",
-          historyId: "cli-history",
-        })),
-        async abort() {},
-      };
+          async forceDispose() {
+            finishEvents();
+          },
+        };
+      });
     },
   };
   const failing: ProviderAdapter = {
     ...answering,
-    async start() {
-      return {
+    start() {
+      return createProviderAttempt(undefined, async () => ({
         admission: { fence: "cli-fail" },
         events: { async *[Symbol.asyncIterator]() {} },
         completion: Promise.resolve({ kind: "failed" as const, diagnostic: "turn failed" }),
         async abort() {},
-      };
+        async forceDispose() {},
+      }));
     },
   };
   const held: HeldAkumaLeash[] = [];
@@ -1295,8 +1309,8 @@ test("packaged CLI wait and history --last write exact multiline and empty answe
     admitOptions(options) {
       return { kind: "admitted", options };
     },
-    async start() {
-      return {
+    start() {
+      return createProviderAttempt(undefined, async () => ({
         admission: { fence: "wait-answer" },
         events: {
           async *[Symbol.asyncIterator]() {
@@ -1305,18 +1319,20 @@ test("packaged CLI wait and history --last write exact multiline and empty answe
         },
         completion: Promise.resolve({ kind: "answered" as const, answer, historyId: "wait-history" }),
         async abort() {},
-      };
+        async forceDispose() {},
+      }));
     },
   });
   const failing = (diagnostic: string): ProviderAdapter => ({
     ...answering("unused"),
-    async start() {
-      return {
+    start() {
+      return createProviderAttempt(undefined, async () => ({
         admission: { fence: "wait-failure" },
         events: { async *[Symbol.asyncIterator]() {} },
         completion: Promise.resolve({ kind: "failed" as const, diagnostic }),
         async abort() {},
-      };
+        async forceDispose() {},
+      }));
     },
   });
   const answered = async (draw: string, answer: string, provider = answering(answer)) => {
@@ -1468,13 +1484,14 @@ test("linked and primary worktrees observe one Akuma World while Soul retains it
     admitOptions(options) {
       return { kind: "admitted", options };
     },
-    async start() {
-      return {
+    start() {
+      return createProviderAttempt(undefined, async () => ({
         admission: { fence: "shared-world" },
         events: { async *[Symbol.asyncIterator]() {} },
         completion: Promise.resolve({ kind: "answered", answer: "shared", historyId: "shared-world" }),
         async abort() {},
-      };
+        async forceDispose() {},
+      }));
     },
   };
   await driveAkumaBody(
