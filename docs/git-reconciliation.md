@@ -112,6 +112,12 @@ it.
 A pending tender keeps its tender and integration reachable through
 Keiyaku-owned refs for the managed worktree. Cleanup never moves the target ref.
 
+Before terminal cleanup, a caller may retain the appointed managed worktree for
+one post-admission Settlement pass. Git reports that still-present path as a
+`worktree unchanged` effect; this is topology observation, not a second
+appointment or worktree authority. Cleanup remains a later reconciliation
+decision.
+
 Terminal removal of a managed worktree resolves the immutable tree and parent
 metadata for its sealed commit identities once through the current Git decode
 channel. It then begins by capturing its complete non-ignored workspace tree

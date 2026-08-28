@@ -74,14 +74,20 @@ function taskFailure(
 type SettleTasksInput = Readonly<{
   repository: GitRepository;
   channel: GitDecodeChannel;
-  world: WorldRoot;
   candidate: ContractState;
   actions: SettlementAction[];
   lags: SettlementLag[];
 }>;
 
-async function settleTasks(input: SettleTasksInput): Promise<void> {
-  const { repository, channel, world, candidate, actions, lags } = input;
+type ApplicableHolder = Readonly<{
+  observation: GitDecisionObservation;
+  holder: TaskHolder;
+}>;
+
+async function observeApplicableHolder(
+  input: Pick<SettleTasksInput, "repository" | "channel" | "candidate" | "lags">,
+): Promise<ApplicableHolder | null> {
+  const { repository, channel, candidate, lags } = input;
   let observation: GitDecisionObservation;
   try {
     observation = await observeContractsForAdmissionAt(
@@ -97,13 +103,13 @@ async function settleTasks(input: SettleTasksInput): Promise<void> {
       contractId: candidate.id,
       diagnostic: diagnostic(error),
     });
-    return;
+    return null;
   }
   const state = observation.journals.get(candidate.id)?.state ?? null;
-  if (state === null || state.terminal?.kind !== "claimed") return;
-  let holder: TaskHolder | null;
+  if (state === null || state.terminal?.kind !== "claimed") return null;
   try {
-    holder = (await readTaskHolderProjectionFromDecision(channel, observation)).get(candidate.id) ?? null;
+    const holder = (await readTaskHolderProjectionFromDecision(channel, observation)).get(candidate.id) ?? null;
+    return holder?.disposition === "held" ? { observation, holder } : null;
   } catch (error) {
     lags.push({
       kind: "settlement-failed",
@@ -111,10 +117,29 @@ async function settleTasks(input: SettleTasksInput): Promise<void> {
       contractId: candidate.id,
       diagnostic: diagnostic(error),
     });
-    return;
+    return null;
   }
-  if (holder === null || holder.disposition !== "held") return;
+}
+
+async function settleTasks(input: SettleTasksInput): Promise<boolean> {
+  const { repository, channel, candidate, actions, lags } = input;
+  const applicable = await observeApplicableHolder({ repository, channel, candidate, lags });
+  if (applicable === null) return false;
+  const { observation, holder } = applicable;
   const taskId = holder.taskId;
+  let world: WorldRoot;
+  try {
+    world = await World.at(repository.primaryWorktree);
+  } catch (error) {
+    lags.push({
+      kind: "settlement-failed",
+      surface: "task",
+      contractId: candidate.id,
+      taskId,
+      diagnostic: diagnostic(error),
+    });
+    return true;
+  }
 
   let result: SettledTaskResult;
   try {
@@ -127,7 +152,7 @@ async function settleTasks(input: SettleTasksInput): Promise<void> {
       taskId,
       diagnostic: diagnostic(error),
     });
-    return;
+    return true;
   }
   if (result.kind === "changed") actions.push({ kind: "task", taskId, action: "done" });
   else if (result.kind !== "unchanged") {
@@ -138,7 +163,7 @@ async function settleTasks(input: SettleTasksInput): Promise<void> {
       taskId,
       diagnostic: taskFailure(result),
     });
-    return;
+    return true;
   }
 
   try {
@@ -161,6 +186,7 @@ async function settleTasks(input: SettleTasksInput): Promise<void> {
       diagnostic: diagnostic(error),
     });
   }
+  return true;
 }
 
 async function settleNamespace(
@@ -169,7 +195,7 @@ async function settleNamespace(
   actions: SettlementAction[],
   lags: SettlementLag[],
 ): Promise<void> {
-  if (state.terminal !== null || state.coordinates.workspace !== "worktree") return;
+  if (state.coordinates.workspace !== "worktree") return;
   const worktrees = effects.filter(
     (effect): effect is Extract<Effect, { kind: "worktree" }> =>
       effect.kind === "worktree" && effect.action !== "removed",
@@ -197,12 +223,12 @@ async function settleObserved(input: SettlementInput): Promise<SettlementReport>
   if (input.state === null) return { actions: [], lags: [] };
   const actions: SettlementAction[] = [],
     lags: SettlementLag[] = [];
+  let holderApplies = false;
   if (input.state.terminal?.kind === "claimed") {
     try {
-      await settleTasks({
+      holderApplies = await settleTasks({
         repository: input.repository,
         channel: input.channel,
-        world: await World.at(input.repository.primaryWorktree),
         candidate: input.state,
         actions,
         lags,
@@ -216,7 +242,7 @@ async function settleObserved(input: SettlementInput): Promise<SettlementReport>
       });
     }
   }
-  await settleNamespace(input.state, input.effects, actions, lags);
+  if (holderApplies) await settleNamespace(input.state, input.effects, actions, lags);
   return { actions, lags };
 }
 

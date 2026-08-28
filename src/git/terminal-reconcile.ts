@@ -54,13 +54,10 @@ async function removeTerminalWorktree(
   repository: GitRepository,
   topology: WorktreeTopology,
   path: string,
-): Promise<Readonly<{ effect: Effect; retained: boolean }>> {
+): Promise<Readonly<{ effect?: Effect; retained: boolean }>> {
   const registered = topology.paths.has(path);
   if (!registered) {
-    return {
-      effect: { kind: "worktree", path, action: "unchanged" },
-      retained: await pathExists(path),
-    };
+    return { retained: await pathExists(path) };
   }
   if (!(await pathExists(path))) {
     await runGit(repository, ["worktree", "remove", path]);
@@ -263,7 +260,7 @@ async function removeSealedTerminalWorktree({
   }
   const removal = await removeTerminalWorktree(repository, topology, path);
   if (removal.retained) return retainTerminalWorktree(path, { kind: "worktree-retained", path }, acc);
-  acc.effects.push(removal.effect);
+  if (removal.effect !== undefined) acc.effects.push(removal.effect);
   return null;
 }
 
@@ -359,7 +356,12 @@ export async function reconcileTerminalManagedWorktree(
       await updateRef(primary, pin, state.currentIntegration?.snapshot ?? state.delivery.data.integration.snapshot),
     );
   }
-  if (retainTerminalWorktree === true) return complete(acc.effects, acc.lag);
+  if (retainTerminalWorktree === true) {
+    if (topology.paths.has(path) && (await pathExists(path))) {
+      acc.effects.push({ kind: "worktree", path, action: "unchanged" });
+    }
+    return complete(acc.effects, acc.lag);
+  }
   const retained = await removeSealedTerminalWorktree({
     repository: primary,
     topology,

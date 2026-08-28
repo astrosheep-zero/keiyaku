@@ -69,10 +69,13 @@ Settlement has exactly these rules:
    `released`. An already `done` Task is unchanged and the holder is still
    released. A `drop` Task refuses the settlement transition and produces a
    lag; the holder stays `held` for a later replay.
-2. A terminal Contract with no current matching holder does nothing. This is
-   how superseded holders remain inert under settlement replay.
-3. An active managed Contract worktree reported as present by Git has its Task
-   context installed or repaired through the Task-owned primitive at that
+2. A terminal Contract with no current matching `held` holder does nothing:
+   Settlement does not enter, establish, read, or repair World, Task, or
+   namespace-context state. This is how missing, released, and superseded
+   holders remain inert under settlement replay.
+3. After proving a matching `held` holder from the frozen observation,
+   Settlement installs or repairs the Task context for each managed Contract
+   worktree reported as present by Git through the Task-owned primitive at that
    worktree root. Settlement does not construct a World at that path. The
    default context value is the ContractId's human contract segment as a
    TaskId namespace. A valid local override is kept.
@@ -88,9 +91,10 @@ observation. A match creates no holder, endpoint, lifecycle effect, or
 association; TaskHolder remains their sole authority.
 
 Settlement observes TaskHolder authority only when a candidate is `claimed`,
-because only a `claimed` candidate can reach the Task rule. A call with no
-applicable Task rule performs no TaskHolder observation; namespace settlement
-still runs from the supplied Contract state and Git effects.
+because only a `claimed` candidate can reach the Task rule. A call without a
+matching held holder is strictly zero effect; namespace settlement is a
+holder-bearing effect, never a consequence of supplied Contract state and Git
+effects alone.
 
 It has no Akuma rule. New rules require an owner-law change here; there is no
 event bus, registry, provider interface, or generic lifecycle-hook vocabulary.
