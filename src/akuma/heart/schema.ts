@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-const HEART_SCHEMA_VERSION = 20;
+const HEART_SCHEMA_VERSION = 21;
 const LEASH_SCHEMA_VERSION = 4;
 
 function assertSchemaVersion(database: DatabaseSync, table: "akuma_schema" | "leash_schema", expected: number): void {
@@ -129,14 +129,7 @@ export const HEART_SCHEMA = `
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
     id TEXT NOT NULL UNIQUE,
     requester TEXT NOT NULL,
-    action TEXT NOT NULL CHECK (
-      action IN (
-        'akuma.call', 'akuma.wait', 'akuma.tell', 'akuma.kill',
-        'contract.deliver', 'contract.review',
-        'task.add', 'task.addDocument', 'task.compose', 'task.update', 'task.start',
-        'task.stop', 'task.hold', 'task.resume', 'task.done', 'task.drop'
-      )
-    ),
+    action TEXT NOT NULL,
     payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
     admitted_at TEXT NOT NULL,
     state TEXT NOT NULL CHECK (state IN ('admitted', 'reserved', 'served', 'refused', 'voided')),
@@ -146,12 +139,11 @@ export const HEART_SCHEMA = `
     evidence TEXT,
     CHECK (
       (state = 'admitted' AND child IS NULL AND service_json IS NULL AND diagnostic IS NULL AND evidence IS NULL)
-      OR (state = 'reserved' AND action = 'akuma.call'
-        AND child IS NOT NULL AND service_json IS NULL
+      OR (state = 'reserved' AND child IS NOT NULL AND service_json IS NULL
         AND diagnostic IS NULL AND evidence IS NULL)
       OR (state = 'served'
-        AND ((action = 'akuma.call' AND child IS NOT NULL AND service_json IS NULL)
-          OR (action != 'akuma.call' AND child IS NULL AND service_json IS NOT NULL))
+        AND ((child IS NOT NULL AND service_json IS NULL)
+          OR (child IS NULL AND service_json IS NOT NULL))
         AND diagnostic IS NULL AND evidence IS NULL)
       OR (state = 'refused' AND child IS NULL AND service_json IS NULL AND diagnostic IS NOT NULL AND evidence IS NULL)
       OR (state = 'voided' AND child IS NULL AND service_json IS NULL AND diagnostic IS NULL AND evidence IS NOT NULL)

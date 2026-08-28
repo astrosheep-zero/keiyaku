@@ -1,17 +1,22 @@
 import { LEASH_HELD_EXIT, runAkumaBody, type BodyLaunch } from "./akuma/body.js";
+import { akumaCallRequestCommands } from "./akuma/call-request.js";
 import { worldRootForAkumaPaths } from "./akuma/identity.js";
-import type { UpstreamExecutionPort } from "./akuma/request-serve.js";
 import type { WorldRoot } from "./world.js";
 import { executeKillAkuma, executeTellAkuma, executeWaitAkuma } from "./library/fleet.js";
+import { fleetRequestCommands, type FleetRequestPort } from "./library/fleet.js";
 import { requireBranchesToBeUpToDateFrom, worktreeHooksFrom } from "./library/configuration.js";
 import { executeForwardedDeliver, executeForwardedReview } from "./library/contract.js";
+import { contractRequestCommands, type ContractRequestPort } from "./library/contract-operations.js";
 import { Repo } from "./library/repo.js";
 import { settings } from "./settings.js";
-import { executeTaskMutation } from "./task/mutation.js";
+import { executeTaskMutation, taskMutationRequestCommands, type TaskMutationRequestPort } from "./task/mutation.js";
 
 type BodyProcessConfiguration = Readonly<{ home?: string; gitPath?: string }>;
 
-export function upstreamFor(launch: BodyLaunch, processConfiguration: BodyProcessConfiguration): UpstreamExecutionPort {
+export function upstreamFor(
+  launch: BodyLaunch,
+  processConfiguration: BodyProcessConfiguration,
+): FleetRequestPort & ContractRequestPort & TaskMutationRequestPort {
   const path = worldRootForAkumaPaths(launch.paths) as WorldRoot;
   return {
     wait: async (input) =>
@@ -33,10 +38,7 @@ export function upstreamFor(launch: BodyLaunch, processConfiguration: BodyProces
       }),
     kill: async (input) => {
       const result = await executeKillAkuma({ path, ids: input.targets, signal: input.signal });
-      return {
-        result,
-        service: result.results.map(({ id, evidence }) => ({ id, evidence })),
-      };
+      return result;
     },
     deliver: async (input) => {
       const [repo, configuration] = await Promise.all([
@@ -103,4 +105,11 @@ const configuration = {
   ...(mappedHome === undefined || mappedHome.length === 0 ? {} : { home: mappedHome }),
   ...(mappedGitPath === undefined ? {} : { gitPath: mappedGitPath }),
 };
-if ((await runAkumaBody(launch, upstreamFor(launch, configuration))) === "held") process.exitCode = LEASH_HELD_EXIT;
+const upstream = upstreamFor(launch, configuration);
+const commands = {
+  ...akumaCallRequestCommands(),
+  ...fleetRequestCommands(),
+  ...contractRequestCommands(),
+  ...taskMutationRequestCommands(),
+};
+if ((await runAkumaBody(launch, upstream, commands)) === "held") process.exitCode = LEASH_HELD_EXIT;

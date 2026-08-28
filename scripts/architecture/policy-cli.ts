@@ -60,7 +60,7 @@ export const cliZones = [
       any("task/catalog.ts", ["parseTaskNamespaceSelector"]),
       any("task/mutation.ts"),
       types("world.ts"),
-      any("akuma/requests.ts", ["injectedBodyRequests", "requestBodyTask"]),
+      any("akuma/requests.ts", ["injectedBodyRequests"]),
     ],
   },
   {
@@ -254,6 +254,8 @@ export const cliZones = [
       any("scripts/architecture/policy-git.ts"),
       any("scripts/architecture/policy-protocol.ts"),
       any("scripts/architecture/policy-runtime-library.ts"),
+      any("scripts/architecture/policy-contract-handle.ts"),
+      any("scripts/architecture/policy-fleet-result.ts"),
       any("scripts/architecture/policy-task-kanshi.ts"),
     ],
   },

@@ -1,15 +1,12 @@
 import type { WorldRoot } from "../world.js";
-import type { TaskCompositionResult } from "./compose.js";
+import { isAbsolute, resolve } from "node:path";
+import { requestBodyCommand } from "../akuma/request-rendezvous.js";
+import { eraseRequestCommand, type ErasedRequestCommand, type RequestCommand } from "../akuma/request-wire.js";
 import { addInput, closed, namespace, record, taskId, taskIds, text, updateInput } from "./input.js";
-import type {
-  AddTaskDocumentInput,
-  AddTaskInput,
-  TaskBatchResult,
-  TaskMutationResult,
-  TaskUpdateResult,
-  UpdateTaskInput,
-} from "./operations.js";
+import type { AddTaskDocumentInput, AddTaskInput, UpdateTaskInput } from "./operations.js";
 import type { TaskId } from "./identity.js";
+import { isTaskMutationExecutionResult, type TaskMutationExecutionResult } from "./mutation-result.js";
+export type { TaskMutationExecutionResult } from "./mutation-result.js";
 
 export const TASK_MUTATION_ACTIONS = Object.freeze([
   "task.add",
@@ -48,16 +45,191 @@ export type TaskMutationRequest =
   | Readonly<{ action: "task.hold"; ids: readonly TaskId[] }>
   | Readonly<{ action: "task.done" | "task.drop"; ids: readonly TaskId[]; note?: string }>;
 
-export type TaskMutationExecutionResult =
-  | TaskMutationResult
-  | TaskUpdateResult
-  | TaskBatchResult
-  | TaskCompositionResult;
+export type ForwardedTaskReference = Readonly<{ kind: "served-reference"; action: TaskMutationAction }>;
+export type TaskMutationService = Readonly<{ action: TaskMutationAction }>;
+export type TaskMutationBodyRequest = Readonly<{
+  action: TaskMutationAction;
+  world: WorldRoot;
+  request: TaskMutationRequest;
+}>;
+export type TaskMutationRequestPort = Readonly<{
+  task(
+    input: Readonly<{ world: WorldRoot; request: TaskMutationRequest; requester: string; signal: AbortSignal }>,
+  ): Promise<TaskMutationExecutionResult>;
+}>;
+type TaskMutationExecutionContext = Readonly<{
+  requester: string;
+  signal: AbortSignal;
+  upstream: TaskMutationRequestPort;
+}>;
+
+function decodeTaskMutationExecutionContext(value: unknown): TaskMutationExecutionContext {
+  const context = resultRecord(value);
+  if (
+    context === null ||
+    typeof context.requester !== "string" ||
+    context.requester.trim() === "" ||
+    !isAbortSignal(context.signal) ||
+    !isTaskMutationRequestPort(context.upstream)
+  )
+    throw new Error("invalid Task execution context");
+  return { requester: context.requester, signal: context.signal, upstream: context.upstream };
+}
+
+function isAbortSignal(value: unknown): value is AbortSignal {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    typeof (value as { throwIfAborted?: unknown }).throwIfAborted === "function"
+  );
+}
+
+function isTaskMutationRequestPort(value: unknown): value is TaskMutationRequestPort {
+  const port = resultRecord(value);
+  return port !== null && typeof port.task === "function";
+}
+
+function resultRecord(value: unknown): Readonly<Record<string, unknown>> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : null;
+}
 
 function mutationObject(value: unknown, keys: readonly string[], label: string): Record<string, unknown> {
   const decoded = record(value, label);
   closed(decoded, keys, label);
   return decoded;
+}
+
+function canonicalWorld(value: unknown): WorldRoot | null {
+  return typeof value === "string" && isAbsolute(value) && resolve(value) === value ? (value as WorldRoot) : null;
+}
+
+function decodeTaskBodyRequest(action: TaskMutationAction, value: unknown): TaskMutationBodyRequest | null {
+  try {
+    const input = mutationObject(value, ["request", "world"], `${action} body request`);
+    const world = canonicalWorld(input.world);
+    if (world === null) return null;
+    return { action, world, request: decodeTaskMutationRequest(action, input.request) };
+  } catch {
+    return null;
+  }
+}
+
+function decodeTaskService(action: TaskMutationAction, value: unknown): TaskMutationService {
+  try {
+    const service = mutationObject(value, ["action"], `${action} service evidence`);
+    if (service.action !== action) throw new TypeError("action mismatch");
+    return { action };
+  } catch {
+    throw new Error(`malformed stored Task service evidence for ${action}`);
+  }
+}
+
+function decodeTaskReference(action: TaskMutationAction, value: unknown): ForwardedTaskReference {
+  try {
+    const reference = mutationObject(value, ["action", "kind"], `${action} service reference`);
+    if (reference.kind !== "served-reference" || reference.action !== action) throw new TypeError("action mismatch");
+    return { kind: "served-reference", action };
+  } catch {
+    throw new Error(`malformed Task service reference for ${action}`);
+  }
+}
+
+/** Task owns forwarded mutation payload, live result, and durable service evidence. */
+export function taskMutationRequestCommand(
+  action: TaskMutationAction,
+): RequestCommand<
+  TaskMutationBodyRequest,
+  TaskMutationExecutionResult,
+  TaskMutationService,
+  ForwardedTaskReference,
+  TaskMutationExecutionContext
+> {
+  return {
+    action,
+    encodeRequest: (input) => {
+      const { action: _action, ...request } = input.request;
+      return { world: input.world, request };
+    },
+    decodeRequest: (value) => decodeTaskBodyRequest(action, value),
+    encodeResult: (result) => result,
+    decodeResult: (result) => {
+      if (!isTaskMutationExecutionResult(result)) {
+        throw new Error(`transport integrity: Task ${action} returned an invalid live result`);
+      }
+      return result;
+    },
+    encodeService: (service) => service,
+    decodeService: (service) => decodeTaskService(action, service),
+    projectService: (service) => ({ kind: "served-reference", action: service.action }),
+    decodeReference: (reference) => decodeTaskReference(action, reference),
+    isPermitted: (allowed) => allowed.includes(action),
+    decodeExecutionContext: decodeTaskMutationExecutionContext,
+    execute: async (request, context) => {
+      return {
+        result: await context.upstream.task({
+          world: request.world,
+          request: request.request,
+          requester: context.requester,
+          signal: context.signal,
+        }),
+        service: { action: request.action },
+      };
+    },
+  };
+}
+
+export function taskMutationRequestCommands(): Readonly<Record<TaskMutationAction, ErasedRequestCommand>> {
+  return {
+    "task.add": eraseRequestCommand(taskMutationRequestCommand("task.add")),
+    "task.addDocument": eraseRequestCommand(taskMutationRequestCommand("task.addDocument")),
+    "task.compose": eraseRequestCommand(taskMutationRequestCommand("task.compose")),
+    "task.done": eraseRequestCommand(taskMutationRequestCommand("task.done")),
+    "task.drop": eraseRequestCommand(taskMutationRequestCommand("task.drop")),
+    "task.hold": eraseRequestCommand(taskMutationRequestCommand("task.hold")),
+    "task.resume": eraseRequestCommand(taskMutationRequestCommand("task.resume")),
+    "task.start": eraseRequestCommand(taskMutationRequestCommand("task.start")),
+    "task.stop": eraseRequestCommand(taskMutationRequestCommand("task.stop")),
+    "task.update": eraseRequestCommand(taskMutationRequestCommand("task.update")),
+  };
+}
+
+export function requestForwardedTask(
+  input: Readonly<{
+    directory: string;
+    id?: never;
+    world: WorldRoot;
+    request: TaskMutationRequest;
+    signal?: AbortSignal;
+  }>,
+): Promise<TaskMutationExecutionResult>;
+export function requestForwardedTask(
+  input: Readonly<{
+    directory: string;
+    id: string;
+    world: WorldRoot;
+    request: TaskMutationRequest;
+    signal?: AbortSignal;
+  }>,
+): Promise<TaskMutationExecutionResult | ForwardedTaskReference>;
+export async function requestForwardedTask(
+  input: Readonly<{
+    directory: string;
+    id?: string;
+    world: WorldRoot;
+    request: TaskMutationRequest;
+    signal?: AbortSignal;
+  }>,
+): Promise<TaskMutationExecutionResult | ForwardedTaskReference> {
+  const response = await requestBodyCommand({
+    directory: input.directory,
+    ...(input.id === undefined ? {} : { id: input.id }),
+    command: taskMutationRequestCommand(input.request.action),
+    value: { action: input.request.action, world: input.world, request: input.request },
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
+  return response.kind === "returned" ? response.result : response.reference;
 }
 
 function decodeTaskStartRequest(value: unknown): Extract<TaskMutationRequest, { action: "task.start" }> {

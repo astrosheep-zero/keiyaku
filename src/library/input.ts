@@ -35,6 +35,11 @@ export function requireInput(value: unknown, label: string): Record<string, unkn
   return value;
 }
 
+/** Shared public-input failure path for operation owners. */
+export function invalidInput(message: string): never {
+  throw new TypeError(message);
+}
+
 export function taskOption(value: unknown): TaskId | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "string") throw new TypeError("task must be a TaskId");

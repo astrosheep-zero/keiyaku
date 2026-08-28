@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- Fleet owns one coherent public operation surface. */
 import {
   Akuma,
   AkumaNotBornError,
@@ -7,49 +8,41 @@ import {
   type AkumaStatus,
   type InterruptReceipt,
   type KillEvidence,
-  type TellResult,
 } from "../akuma/index.js";
 import { readBudgetedStatus, tellAkumaWithId } from "../akuma/akuma.js";
-import {
-  injectedBodyRequests,
-  requestBodyKill,
-  requestBodyTell,
-  requestBodyWait,
-  type UpstreamRequestOutcome,
-} from "../akuma/requests.js";
-import type { ContractId } from "../core/facts/types.js";
+import { injectedBodyRequests, requestBodyCommand } from "../akuma/requests.js";
+import { eraseRequestCommand, type ErasedRequestCommand, type RequestCommand } from "../akuma/request-wire.js";
 import { readDispatch } from "../dispatch/index.js";
-import type { TaskRow } from "../task/index.js";
 import { observeTaskBoard } from "../task/operations.js";
 import type { WorldRoot } from "../world.js";
 import { addressAkuma, addressAkumaSet, type AkumaAddressInput, type AkumaSetAddressInput } from "./address.js";
 import { requireInput } from "./input.js";
+import {
+  isKillResult,
+  isTellResult,
+  isWaitResult,
+  type AkumaKillResult,
+  type AkumaObservation,
+  type AkumaObservationStage,
+  type AkumaTellResult,
+  type AkumaUnobserved,
+  type AkumaWaitResult,
+  type CreatedTaskObservation,
+  type DispatchAssociation,
+} from "./fleet-result.js";
+export { isKillResult, isTellResult, isWaitResult } from "./fleet-result.js";
+export type {
+  AkumaKillResult,
+  AkumaObservation,
+  AkumaObservationStage,
+  AkumaTellResult,
+  AkumaUnobserved,
+  AkumaWaitResult,
+  CreatedTaskObservation,
+  DispatchAssociation,
+} from "./fleet-result.js";
 import { scopeForRepo, type Repo } from "./repo.js";
-import { parsePublicHistoryId } from "../akuma/identity.js";
-
-export type CreatedTaskObservation =
-  | Readonly<{ kind: "present"; rows: readonly TaskRow[] }>
-  | Readonly<{ kind: "failed"; diagnostic: string }>;
-
-export type DispatchAssociation =
-  | Readonly<{ kind: "none" }>
-  | Readonly<{ kind: "associated"; contractId: ContractId }>
-  | Readonly<{ kind: "failed"; diagnostic: string }>;
-
-export type AkumaObservation = Readonly<{
-  status: AkumaStatus;
-  contract: DispatchAssociation;
-  createdTasks: CreatedTaskObservation;
-}>;
-
-export type AkumaObservationStage =
-  | (Readonly<{ kind: "observed" }> & AkumaObservation)
-  | Readonly<{ kind: "unobserved"; diagnostic: string }>;
-
-export type AkumaUnobserved = Readonly<{
-  id: AkumaStatus["id"];
-  diagnostic: string;
-}>;
+import { parseAkuId, parsePublicHistoryId } from "../akuma/identity.js";
 
 export type AkumaWaitInput = AkumaSetAddressInput &
   Readonly<{
@@ -57,22 +50,7 @@ export type AkumaWaitInput = AkumaSetAddressInput &
     timeoutMs?: number;
   }>;
 
-export type AkumaWaitResult = Readonly<{
-  completion: "any" | "all";
-  observations: readonly AkumaObservation[];
-  unobserved: readonly AkumaUnobserved[];
-}>;
-
-export type AkumaKillResult = Readonly<{
-  results: readonly Readonly<{ id: AkumaStatus["id"]; evidence: KillEvidence; observation: AkumaObservationStage }>[];
-}>;
-
 export type AkumaTellInput = AkumaAddressInput & Readonly<{ body: string }>;
-export type AkumaTellResult = Readonly<{
-  akuma: AkumaStatus["id"];
-  tell: TellResult;
-  observation: AkumaObservationStage;
-}>;
 export type { TellResult, TellWake } from "../akuma/index.js";
 export type AkumaInterruptInput = AkumaAddressInput & Readonly<{ body: string }>;
 export type AkumaInterruptResult = Readonly<{
@@ -323,10 +301,287 @@ export async function executeKillAkuma(input: KillExecutionInput): Promise<Akuma
   };
 }
 
-function upstreamResult<T>(outcome: UpstreamRequestOutcome): T {
-  if (outcome.kind === "returned") return outcome.result as T;
-  if (outcome.failure.kind === "akuma-not-born") throw new AkumaNotBornError(outcome.failure.id);
-  throw new Error(outcome.failure.diagnostic);
+function forwardedFleetCommandResult(
+  response: Awaited<ReturnType<typeof requestBodyCommand<FleetRequest, unknown, FleetService>>>,
+  action: "akuma.wait",
+): AkumaWaitResult;
+function forwardedFleetCommandResult(
+  response: Awaited<ReturnType<typeof requestBodyCommand<FleetRequest, unknown, FleetService>>>,
+  action: "akuma.tell",
+): AkumaTellResult;
+function forwardedFleetCommandResult(
+  response: Awaited<ReturnType<typeof requestBodyCommand<FleetRequest, unknown, FleetService>>>,
+  action: "akuma.kill",
+): AkumaKillResult;
+function forwardedFleetCommandResult(
+  response: Awaited<ReturnType<typeof requestBodyCommand<FleetRequest, unknown, FleetService>>>,
+  action: FleetRequest["action"],
+): AkumaWaitResult | AkumaTellResult | AkumaKillResult {
+  if (response.kind === "returned") {
+    if (action === "akuma.wait" && isWaitResult(response.result)) return response.result;
+    if (action === "akuma.tell" && isTellResult(response.result)) return response.result;
+    if (action === "akuma.kill" && isKillResult(response.result)) return response.result;
+    throw new Error(`transport integrity: Fleet ${action} returned an invalid live result`);
+  }
+  throw new Error("Akuma body request terminal Fleet reference cannot reproduce an expired live result");
+}
+
+type FleetRequest =
+  | Readonly<{
+      action: "akuma.wait";
+      targets: readonly AkumaStatus["id"][];
+      completion: "any" | "all";
+      timeoutMs?: number;
+    }>
+  | Readonly<{ action: "akuma.tell"; target: AkumaStatus["id"]; body: string }>
+  | Readonly<{ action: "akuma.kill"; targets: readonly AkumaStatus["id"][] }>;
+type FleetService =
+  | Readonly<{ action: "akuma.wait" }>
+  | Readonly<{ action: "akuma.tell"; target: AkumaStatus["id"]; tellId: string }>
+  | Readonly<{ action: "akuma.kill"; results: readonly Readonly<{ id: AkumaStatus["id"]; evidence: KillEvidence }>[] }>;
+
+export type FleetRequestPort = Readonly<{
+  wait(
+    input: Readonly<{
+      targets: readonly AkumaStatus["id"][];
+      completion: "any" | "all";
+      timeoutMs?: number;
+      signal: AbortSignal;
+    }>,
+  ): Promise<AkumaWaitResult>;
+  tell(
+    input: Readonly<{
+      target: AkumaStatus["id"];
+      body: string;
+      tellId: string;
+      recordedAt: string;
+      signal: AbortSignal;
+    }>,
+  ): Promise<AkumaTellResult>;
+  kill(
+    input: Readonly<{ targets: readonly AkumaStatus["id"][]; signal: AbortSignal }>,
+  ): Promise<
+    | AkumaKillResult
+    | Readonly<{ result: unknown; service: readonly Readonly<{ id: AkumaStatus["id"]; evidence: KillEvidence }>[] }>
+  >;
+}>;
+type FleetExecutionContext = Readonly<{
+  id: string;
+  admittedAt: string;
+  signal: AbortSignal;
+  upstream: FleetRequestPort;
+}>;
+
+function decodeFleetExecutionContext(value: unknown): FleetExecutionContext {
+  const context = fleetPayload(value);
+  if (
+    context === null ||
+    typeof context.id !== "string" ||
+    context.id.trim() === "" ||
+    typeof context.admittedAt !== "string" ||
+    !isAbortSignal(context.signal) ||
+    !isFleetRequestPort(context.upstream)
+  )
+    throw new Error("invalid Fleet execution context");
+  return {
+    id: context.id,
+    admittedAt: context.admittedAt,
+    signal: context.signal,
+    upstream: context.upstream,
+  };
+}
+
+function isAbortSignal(value: unknown): value is AbortSignal {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    typeof (value as { throwIfAborted?: unknown }).throwIfAborted === "function"
+  );
+}
+
+function isFleetRequestPort(value: unknown): value is FleetRequestPort {
+  const port = fleetPayload(value);
+  return (
+    port !== null &&
+    typeof port.wait === "function" &&
+    typeof port.tell === "function" &&
+    typeof port.kill === "function"
+  );
+}
+
+function fleetPayload(value: unknown): Readonly<Record<string, unknown>> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : null;
+}
+
+function exactFleetKeys(value: Readonly<Record<string, unknown>>, expected: readonly string[]): boolean {
+  const actual = Object.keys(value).sort();
+  const sorted = [...expected].sort();
+  return actual.length === sorted.length && actual.every((key, index) => key === sorted[index]);
+}
+
+function fleetIds(value: unknown): readonly AkumaStatus["id"][] | null {
+  if (!Array.isArray(value) || value.length === 0 || value.some((id) => typeof id !== "string")) return null;
+  const ids: AkumaStatus["id"][] = [];
+  for (const valueId of value) {
+    const id = canonicalFleetAkuId(valueId);
+    if (id === null || (ids.length > 0 && ids[ids.length - 1]! >= id)) return null;
+    ids.push(id);
+  }
+  return ids;
+}
+
+function canonicalFleetAkuId(value: unknown): AkumaStatus["id"] | null {
+  if (typeof value !== "string") return null;
+  try {
+    const id = parseAkuId(value).id;
+    return id === value ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+function decodeFleetRequest(action: string, value: unknown): FleetRequest | null {
+  const payload = fleetPayload(value);
+  if (payload === null) return null;
+  if (action === "akuma.wait") {
+    const targets = fleetIds(payload.targets);
+    if (
+      !exactFleetKeys(payload, ["completion", "targets", ...(payload.timeoutMs === undefined ? [] : ["timeoutMs"])]) ||
+      targets === null ||
+      (payload.completion !== "any" && payload.completion !== "all") ||
+      (payload.timeoutMs !== undefined &&
+        (!Number.isSafeInteger(payload.timeoutMs) || (payload.timeoutMs as number) < 0))
+    )
+      return null;
+    return {
+      action,
+      targets,
+      completion: payload.completion,
+      ...(payload.timeoutMs === undefined ? {} : { timeoutMs: payload.timeoutMs as number }),
+    };
+  }
+  if (action === "akuma.tell") {
+    const target = canonicalFleetAkuId(payload.target);
+    return exactFleetKeys(payload, ["body", "target"]) && target !== null && typeof payload.body === "string"
+      ? { action, target, body: payload.body }
+      : null;
+  }
+  const targets = fleetIds(payload.targets);
+  return action === "akuma.kill" && exactFleetKeys(payload, ["targets"]) && targets !== null
+    ? { action, targets }
+    : null;
+}
+
+function decodeFleetService(action: FleetRequest["action"], value: unknown): FleetService {
+  const service = fleetPayload(value);
+  if (service === null || service.action !== action) throw new Error("malformed stored Fleet service evidence");
+  if (service.action === "akuma.wait" && exactFleetKeys(service, ["action"])) return { action: service.action };
+  if (service.action === "akuma.tell") {
+    const target = canonicalFleetAkuId(service.target);
+    if (
+      exactFleetKeys(service, ["action", "target", "tellId"]) &&
+      target !== null &&
+      typeof service.tellId === "string" &&
+      service.tellId.trim() !== ""
+    )
+      return { action: service.action, target, tellId: service.tellId };
+  }
+  if (service.action === "akuma.kill" && Array.isArray(service.results)) {
+    const results: Array<Readonly<{ id: AkumaStatus["id"]; evidence: KillEvidence }>> = [];
+    for (const entry of service.results) {
+      const item = fleetPayload(entry);
+      const id = item === null ? null : canonicalFleetAkuId(item.id);
+      if (item === null || !exactFleetKeys(item, ["evidence", "id"]) || id === null || !isKillEvidence(item.evidence))
+        throw new Error("malformed stored Fleet service evidence");
+      results.push({ id, evidence: item.evidence });
+    }
+    return {
+      action: service.action,
+      results,
+    };
+  }
+  throw new Error("malformed stored Fleet service evidence");
+}
+
+function isKillEvidence(value: unknown): value is KillEvidence {
+  return (
+    value === "killed" ||
+    value === "already-killed" ||
+    value === "already-stopped" ||
+    value === "hung" ||
+    value === "untidy" ||
+    value === "unavailable"
+  );
+}
+
+/** Fleet owns its Body Request payload, live result, and durable service codecs. */
+export function fleetRequestCommand(
+  action: FleetRequest["action"],
+): RequestCommand<FleetRequest, unknown, FleetService, FleetService, FleetExecutionContext> {
+  return {
+    action,
+    encodeRequest: (request) => {
+      const { action: _action, ...payload } = request;
+      return payload;
+    },
+    decodeRequest: (payload) => decodeFleetRequest(action, payload),
+    encodeResult: (result) => result,
+    decodeResult: (result) => {
+      const valid =
+        action === "akuma.wait"
+          ? isWaitResult(result)
+          : action === "akuma.tell"
+            ? isTellResult(result)
+            : isKillResult(result);
+      if (!valid) throw new Error(`Akuma body request returned an invalid live result for ${action}`);
+      return result as AkumaWaitResult | AkumaTellResult | AkumaKillResult;
+    },
+    encodeService: (service) => service,
+    decodeService: (service) => decodeFleetService(action, service),
+    projectService: (service) => service,
+    decodeReference: (reference) => decodeFleetService(action, reference),
+    isPermitted: (allowed) => action === "akuma.wait" || allowed.includes(action),
+    decodeExecutionContext: decodeFleetExecutionContext,
+    execute: async (request, context) => {
+      if (request.action === "akuma.wait") {
+        return {
+          result: await context.upstream.wait({ ...request, signal: context.signal }),
+          service: { action: request.action },
+        };
+      }
+      if (request.action === "akuma.tell") {
+        return {
+          result: await context.upstream.tell({
+            target: request.target,
+            body: request.body,
+            tellId: context.id,
+            recordedAt: context.admittedAt,
+            signal: context.signal,
+          }),
+          service: { action: request.action, target: request.target, tellId: context.id },
+        };
+      }
+      const result = await context.upstream.kill({ targets: request.targets, signal: context.signal });
+      if ("result" in result)
+        return { result: result.result, service: { action: request.action, results: result.service } };
+      return {
+        result,
+        service: { action: request.action, results: result.results.map(({ id, evidence }) => ({ id, evidence })) },
+      };
+    },
+  };
+}
+
+export function fleetRequestCommands(): Readonly<
+  Record<"akuma.wait" | "akuma.tell" | "akuma.kill", ErasedRequestCommand>
+> {
+  return {
+    "akuma.wait": eraseRequestCommand(fleetRequestCommand("akuma.wait")),
+    "akuma.tell": eraseRequestCommand(fleetRequestCommand("akuma.tell")),
+    "akuma.kill": eraseRequestCommand(fleetRequestCommand("akuma.kill")),
+  };
 }
 
 function needsDispatchAttach(association: DispatchAssociation): boolean {
@@ -420,13 +675,20 @@ export async function waitAkuma(input: AkumaWaitInput): Promise<AkumaWaitResult>
   const timeoutMs = timeout(values.timeoutMs);
   const requests = injectedBodyRequests();
   if (requests !== null) {
-    const outcome = await requestBodyWait({
+    const response = await requestBodyCommand({
       directory: requests,
-      targets: addressed.ids,
-      completion: selected,
-      ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      command: fleetRequestCommand("akuma.wait"),
+      value: {
+        action: "akuma.wait",
+        targets: addressed.ids,
+        completion: selected,
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      },
     });
-    return await attachWaitContracts(values.repo as Repo | undefined, upstreamResult<AkumaWaitResult>(outcome));
+    return await attachWaitContracts(
+      values.repo as Repo | undefined,
+      forwardedFleetCommandResult(response, "akuma.wait"),
+    );
   }
   return await executeWaitAkuma({
     path: addressed.path,
@@ -441,8 +703,12 @@ export async function killAkuma(input: AkumaSetAddressInput): Promise<AkumaKillR
   const addressed = await addressAkumaSet(input);
   const requests = injectedBodyRequests();
   if (requests !== null) {
-    const outcome = await requestBodyKill({ directory: requests, targets: addressed.ids });
-    return await attachKillContracts(input.repo, upstreamResult<AkumaKillResult>(outcome));
+    const response = await requestBodyCommand({
+      directory: requests,
+      command: fleetRequestCommand("akuma.kill"),
+      value: { action: "akuma.kill", targets: addressed.ids },
+    });
+    return await attachKillContracts(input.repo, forwardedFleetCommandResult(response, "akuma.kill"));
   }
   return await executeKillAkuma({
     path: addressed.path,
@@ -462,12 +728,15 @@ export async function tellAkuma(input: AkumaTellInput): Promise<AkumaTellResult>
   const addressed = await addressAkuma(directAddress(values));
   const requests = injectedBodyRequests();
   if (requests !== null) {
-    const outcome = await requestBodyTell({
+    const response = await requestBodyCommand({
       directory: requests,
-      target: addressed.id,
-      body: values.body,
+      command: fleetRequestCommand("akuma.tell"),
+      value: { action: "akuma.tell", target: addressed.id, body: values.body },
     });
-    return await attachTellContract(values.repo as Repo | undefined, upstreamResult<AkumaTellResult>(outcome));
+    return await attachTellContract(
+      values.repo as Repo | undefined,
+      forwardedFleetCommandResult(response, "akuma.tell"),
+    );
   }
   return await executeTellAkuma({
     path: addressed.path,

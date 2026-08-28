@@ -1,206 +1,292 @@
-import { decodeContractDocument } from "../body/decode.js";
-import { withScopeAbortSignal, type RepositoryScope } from "../protocol/operations.js";
-import { deliverOperation, type IntegrationConflictMaterialized } from "../protocol/deliver.js";
-import { reviewOperation, type ReviewValue } from "../protocol/review.js";
-import { continueAcceptedCompletion, type ContinuationReport } from "./continuation.js";
-import { completionInput, completeMutation, type MutationResult } from "./mutation.js";
+import { contractId, type ContractId } from "../core/facts/types.js";
+import { requestBodyCommand } from "../akuma/request-rendezvous.js";
+import { eraseRequestCommand, type ErasedRequestCommand, type RequestCommand } from "../akuma/request-wire.js";
 import {
-  forwardedMutationFailure,
-  KeiyakuRefused,
-  KeiyakuRetry,
-  requireAccepted,
-  type KeiyakuRefusal,
-  type KeiyakuRetryReason,
-} from "./refusal.js";
-import { actorOption, documentDerivation, optionalNonblank } from "./input.js";
-import { type WorktreeHooks } from "./configuration.js";
-import { Repo, scopeForRepo } from "./repo.js";
-import { contractId, type ContractId, type ContractState } from "../core/facts/types.js";
-import { withGitDecodeChannel, type GitDecodeChannel } from "../git/read-observation.js";
-import type { UpstreamRequestOutcome } from "../akuma/requests.js";
-import type { DeliveryValue } from "./delivery.js";
+  isForwardedDeliveryReceipt,
+  isForwardedReviewReceipt,
+  type AttestationVerdict,
+  type ForwardedDeliveryReceipt,
+  type ForwardedReviewReceipt,
+} from "./contract-forwarding.js";
+import { isAbsolute, resolve } from "node:path";
 
-export type DeliveryExecutionInput = Readonly<{
-  scope: RepositoryScope;
-  contractId: ContractId;
-  actor?: ReturnType<typeof actorOption>["actor"];
-  message?: string;
-  requireBranchesToBeUpToDate: boolean;
-  includeDirty: boolean;
-  materializeConflict: boolean;
-  signal?: AbortSignal;
-  hooks: WorktreeHooks;
+type ReturnedContractRequest = Readonly<{ kind: "returned"; result: unknown; requestId: string; action: string }>;
+
+export type ContractRequest =
+  | Readonly<{
+      action: "contract.deliver";
+      repoRoot: string;
+      contractId: string;
+      message?: string;
+      includeDirty: boolean;
+      materializeConflict: boolean;
+    }>
+  | Readonly<{
+      action: "contract.review";
+      repoRoot: string;
+      contractId: string;
+      verdict: AttestationVerdict;
+      summary?: string;
+    }>;
+type DeliverRequest = Extract<ContractRequest, { action: "contract.deliver" }>;
+type ReviewRequest = Extract<ContractRequest, { action: "contract.review" }>;
+export type ContractService =
+  | Readonly<{ kind: "accepted-reference"; repoRoot: string; contractId: string; deliveryFactId: string }>
+  | Readonly<{ kind: "accepted-reference"; repoRoot: string; contractId: string; reviewFactId: string }>;
+export type ContractRequestPort = Readonly<{
+  deliver(
+    input: DeliverRequest & Readonly<{ requester: string; signal: AbortSignal }>,
+  ): Promise<Readonly<{ result: ForwardedDeliveryReceipt; deliveryFactId?: string }>>;
+  review(
+    input: ReviewRequest & Readonly<{ requester: string; signal: AbortSignal }>,
+  ): Promise<Readonly<{ result: ForwardedReviewReceipt; reviewFactId?: string }>>;
 }>;
+type ContractExecutionContext = Readonly<{ requester: string; signal: AbortSignal; upstream: ContractRequestPort }>;
 
-export type ReviewExecutionInput = Readonly<{
-  scope: RepositoryScope;
-  contractId: ContractId;
-  actor?: ReturnType<typeof actorOption>["actor"];
-  verdict: AttestationVerdict;
-  summary?: string;
-  hooks: WorktreeHooks;
-}>;
-
-export type AttestationVerdict = "satisfied" | "unsatisfied";
-export type Review = ReviewValue & Readonly<{ continuation?: ContinuationReport }>;
-
-export type ForwardedMutationReceipt<Value> =
-  | Readonly<{ kind: "accepted"; result: MutationResult<Value> }>
-  | Readonly<{ kind: "refused"; refusal: KeiyakuRefusal }>
-  | Readonly<{ kind: "retry"; reason: KeiyakuRetryReason }>;
-export type ForwardedDeliveryReceipt = ForwardedMutationReceipt<DeliveryValue> | IntegrationConflictMaterialized;
-export type ForwardedReviewReceipt = ForwardedMutationReceipt<Review>;
-
-function derivedDocument(state: ContractState) {
-  return documentDerivation(decodeContractDocument(state.terms.document.bytes), state.terms.gates, state.id);
+function decodeContractExecutionContext(value: unknown): ContractExecutionContext {
+  const context = contractPayload(value);
+  if (
+    context === null ||
+    typeof context.requester !== "string" ||
+    context.requester.trim() === "" ||
+    !isAbortSignal(context.signal) ||
+    !isContractRequestPort(context.upstream)
+  )
+    throw new Error("invalid Contract execution context");
+  return { requester: context.requester, signal: context.signal, upstream: context.upstream };
 }
 
-function operationContext(scope: RepositoryScope, channel: GitDecodeChannel, contractId: ContractId) {
-  return { scope, channel, contractId, deriveDocument: derivedDocument };
+function isAbortSignal(value: unknown): value is AbortSignal {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    typeof (value as { throwIfAborted?: unknown }).throwIfAborted === "function"
+  );
 }
 
-export async function executeLocalDelivery(
-  input: DeliveryExecutionInput,
-): Promise<MutationResult<DeliveryValue> | IntegrationConflictMaterialized> {
-  const scope = withScopeAbortSignal(input.scope, input.signal);
-  return withGitDecodeChannel(scope, async (channel) => {
-    const operation = operationContext(scope, channel, input.contractId);
-    const outcome = await deliverOperation({
-      ...operation,
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
-      ...(input.message === undefined ? {} : { message: input.message }),
-      requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
-      includeDirty: input.includeDirty,
-      materializeConflict: input.materializeConflict,
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-    });
-    if (outcome.kind === "integration-conflict-materialized") return outcome;
-    const accepted = requireAccepted(outcome);
-    const continued = await continueAcceptedCompletion({
-      ...operation,
-      accepted,
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-    });
-    return completeMutation({
-      ...completionInput(scope, channel, input.contractId, (delivery: DeliveryValue) => delivery, input.hooks),
-      accepted: continued,
-    });
-  });
+function isContractRequestPort(value: unknown): value is ContractRequestPort {
+  const port = contractPayload(value);
+  return port !== null && (typeof port.deliver === "function" || typeof port.review === "function");
 }
 
-export async function executeLocalReview(input: ReviewExecutionInput): Promise<MutationResult<Review>> {
-  return withGitDecodeChannel(input.scope, async (channel) => {
-    const operation = operationContext(input.scope, channel, input.contractId);
-    const accepted = requireAccepted(
-      await reviewOperation({
-        ...operation,
-        verdict: input.verdict,
-        ...(input.summary === undefined ? {} : { summary: input.summary }),
-        ...(input.actor === undefined ? {} : { actor: input.actor }),
-      }),
-    );
-    const continued = await continueAcceptedCompletion({
-      ...operation,
-      accepted,
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
-    });
-    return completeMutation({
-      ...completionInput(input.scope, channel, input.contractId, (review: Review) => review, input.hooks),
-      accepted: continued,
-    });
-  });
+function contractPayload(value: unknown): Readonly<Record<string, unknown>> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : null;
 }
 
-export function forwardedReceipt<Receipt>(outcome: UpstreamRequestOutcome, action: string): Receipt {
-  if (outcome.kind === "failed") {
-    throw new Error(
-      outcome.failure.kind === "failed"
-        ? outcome.failure.diagnostic
-        : `Unexpected Akuma target failure for ${action}: ${outcome.failure.id}`,
-    );
+function exactContractKeys(value: Readonly<Record<string, unknown>>, expected: readonly string[]): boolean {
+  const actual = Object.keys(value).sort();
+  const sorted = [...expected].sort();
+  return actual.length === sorted.length && actual.every((key, index) => key === sorted[index]);
+}
+
+function absolute(value: unknown): value is string {
+  return typeof value === "string" && isAbsolute(value) && resolve(value) === value;
+}
+
+function contractRequestBase(
+  input: Readonly<Record<string, unknown>>,
+): Readonly<{ repoRoot: string; contractId: ContractId }> | null {
+  if (!absolute(input.repoRoot) || typeof input.contractId !== "string") return null;
+  let id: ContractId;
+  try {
+    id = contractId(input.contractId);
+  } catch {
+    return null;
   }
-  return outcome.result as Receipt;
+  return { repoRoot: input.repoRoot, contractId: id };
 }
 
-export function requireForwarded(
-  receipt: ForwardedDeliveryReceipt,
-): MutationResult<DeliveryValue> | IntegrationConflictMaterialized;
-export function requireForwarded(receipt: ForwardedReviewReceipt): MutationResult<Review>;
-export function requireForwarded(
-  receipt: ForwardedDeliveryReceipt | ForwardedReviewReceipt,
-): MutationResult<DeliveryValue> | MutationResult<Review> | IntegrationConflictMaterialized {
-  if (receipt.kind === "refused") throw new KeiyakuRefused(receipt.refusal);
-  if (receipt.kind === "retry") throw new KeiyakuRetry(receipt.reason);
-  return receipt.kind === "accepted" ? receipt.result : receipt;
+function optionalPayloadText(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
-export async function executeForwardedDeliver(
+function decodeDeliverRequest(input: Readonly<Record<string, unknown>>): DeliverRequest | null {
+  const message = optionalPayloadText(input.message);
+  if (
+    message === null ||
+    !exactContractKeys(input, [
+      "contractId",
+      "includeDirty",
+      "materializeConflict",
+      "repoRoot",
+      ...(message === undefined ? [] : ["message"]),
+    ]) ||
+    typeof input.includeDirty !== "boolean" ||
+    typeof input.materializeConflict !== "boolean"
+  )
+    return null;
+  const base = contractRequestBase(input);
+  return base === null
+    ? null
+    : {
+        action: "contract.deliver",
+        ...base,
+        includeDirty: input.includeDirty,
+        materializeConflict: input.materializeConflict,
+        ...(message === undefined ? {} : { message }),
+      };
+}
+
+function decodeReviewRequest(input: Readonly<Record<string, unknown>>): ReviewRequest | null {
+  const summary = optionalPayloadText(input.summary);
+  if (
+    summary === null ||
+    !exactContractKeys(input, ["contractId", "repoRoot", "verdict", ...(summary === undefined ? [] : ["summary"])]) ||
+    (input.verdict !== "satisfied" && input.verdict !== "unsatisfied")
+  )
+    return null;
+  const base = contractRequestBase(input);
+  return base === null
+    ? null
+    : { action: "contract.review", ...base, verdict: input.verdict, ...(summary === undefined ? {} : { summary }) };
+}
+
+function decodeContractRequest(action: ContractRequest["action"], value: unknown): ContractRequest | null {
+  const input = contractPayload(value);
+  if (input === null) return null;
+  return action === "contract.deliver" ? decodeDeliverRequest(input) : decodeReviewRequest(input);
+}
+
+function decodeContractService(action: ContractRequest["action"], value: unknown): ContractService {
+  const service = contractPayload(value);
+  const field = action === "contract.deliver" ? "deliveryFactId" : "reviewFactId";
+  if (
+    service === null ||
+    !exactContractKeys(service, ["contractId", "kind", "repoRoot", field]) ||
+    service.kind !== "accepted-reference" ||
+    !absolute(service.repoRoot) ||
+    typeof service.contractId !== "string" ||
+    typeof service[field] !== "string" ||
+    service[field].trim().length === 0
+  )
+    throw new Error(`malformed stored Contract service evidence for ${action}`);
+  return action === "contract.deliver"
+    ? {
+        kind: service.kind,
+        repoRoot: service.repoRoot,
+        contractId: contractId(service.contractId),
+        deliveryFactId: service.deliveryFactId as string,
+      }
+    : {
+        kind: service.kind,
+        repoRoot: service.repoRoot,
+        contractId: contractId(service.contractId),
+        reviewFactId: service.reviewFactId as string,
+      };
+}
+
+export function contractRequestCommand(
+  action: ContractRequest["action"],
+): RequestCommand<ContractRequest, unknown, ContractService, ContractService, ContractExecutionContext> {
+  return {
+    action,
+    encodeRequest: (request) => {
+      const { action: _action, ...payload } = request;
+      return payload;
+    },
+    decodeRequest: (value) => decodeContractRequest(action, value),
+    encodeResult: (value) => value,
+    decodeResult: (value) => {
+      const valid = action === "contract.deliver" ? isForwardedDeliveryReceipt(value) : isForwardedReviewReceipt(value);
+      if (!valid) throw new Error(`transport integrity: Contract ${action} returned an invalid live result`);
+      return value;
+    },
+    encodeService: (service) => service,
+    decodeService: (service) => decodeContractService(action, service),
+    projectService: (service) => service,
+    decodeReference: (reference) => decodeContractService(action, reference),
+    isPermitted: (allowed) => allowed.includes(action),
+    decodeExecutionContext: decodeContractExecutionContext,
+    execute: async (request, context) => {
+      if (request.action === "contract.deliver") {
+        if (typeof context.upstream.deliver !== "function") throw new Error("invalid Contract execution context");
+        const served = await context.upstream.deliver({
+          ...request,
+          requester: context.requester,
+          signal: context.signal,
+        });
+        const factId = served.deliveryFactId;
+        if (factId === undefined)
+          throw new Error(`Contract ${request.action} completed without durable service evidence`);
+        return {
+          result: served.result,
+          service: {
+            kind: "accepted-reference" as const,
+            repoRoot: request.repoRoot,
+            contractId: request.contractId,
+            deliveryFactId: factId,
+          },
+        };
+      }
+      if (typeof context.upstream.review !== "function") throw new Error("invalid Contract execution context");
+      const served = await context.upstream.review({
+        ...request,
+        requester: context.requester,
+        signal: context.signal,
+      });
+      const factId = served.reviewFactId;
+      if (factId === undefined)
+        throw new Error(`Contract ${request.action} completed without durable service evidence`);
+      return {
+        result: served.result,
+        service: {
+          kind: "accepted-reference" as const,
+          repoRoot: request.repoRoot,
+          contractId: request.contractId,
+          reviewFactId: factId,
+        },
+      };
+    },
+  };
+}
+
+export function contractRequestCommands(): Readonly<
+  Record<"contract.deliver" | "contract.review", ErasedRequestCommand>
+> {
+  return {
+    "contract.deliver": eraseRequestCommand(contractRequestCommand("contract.deliver")),
+    "contract.review": eraseRequestCommand(contractRequestCommand("contract.review")),
+  };
+}
+
+export async function requestForwardedContract(
   input: Readonly<{
-    repo: Repo;
-    contractId: string;
-    requester: string;
-    message?: string;
-    includeDirty: boolean;
-    materializeConflict: boolean;
-    requireBranchesToBeUpToDate: boolean;
-    hooks: WorktreeHooks;
+    directory: string;
+    id?: string;
+    action: ContractRequest["action"];
+    request: ContractRequest;
     signal?: AbortSignal;
   }>,
-): Promise<Readonly<{ result: ForwardedDeliveryReceipt; deliveryFactId?: string }>> {
-  const id = contractId(input.contractId);
-  const actor = actorOption(input.requester).actor;
-  const message = optionalNonblank(input.message, "deliver message");
-  try {
-    const result = await executeLocalDelivery({
-      scope: scopeForRepo(input.repo),
-      contractId: id,
-      ...(actor === undefined ? {} : { actor }),
-      ...(message === undefined ? {} : { message }),
-      requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
-      includeDirty: input.includeDirty,
-      materializeConflict: input.materializeConflict,
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-      hooks: input.hooks,
-    });
-    if (!("facts" in result)) return { result };
-    const delivery = result.facts.find((fact) => fact.kind === "deliver");
-    if (delivery === undefined) throw new Error("accepted delivery is missing its journal fact");
-    return { result: { kind: "accepted", result }, deliveryFactId: delivery.entry };
-  } catch (error) {
-    return forwardedMutationFailure(error);
-  }
+): Promise<ReturnedContractRequest | ContractService> {
+  const command = contractRequestCommand(input.action);
+  const response = await requestBodyCommand({
+    directory: input.directory,
+    ...(input.id === undefined ? {} : { id: input.id }),
+    command,
+    value: input.request,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
+  return response.kind === "reference" ? response.reference : response;
 }
 
-export async function executeForwardedReview(
-  input: Readonly<{
-    repo: Repo;
-    contractId: string;
-    requester: string;
-    verdict: AttestationVerdict;
-    summary?: string;
-    hooks: WorktreeHooks;
-  }>,
-): Promise<Readonly<{ result: ForwardedReviewReceipt; reviewFactId?: string }>> {
-  const id = contractId(input.contractId);
-  const actor = actorOption(input.requester).actor;
-  if (input.verdict !== "satisfied" && input.verdict !== "unsatisfied") {
-    throw new TypeError("verdict must be satisfied or unsatisfied");
-  }
-  const summary = optionalNonblank(input.summary, "review summary");
-  try {
-    const result = await executeLocalReview({
-      scope: scopeForRepo(input.repo),
-      contractId: id,
-      ...(actor === undefined ? {} : { actor }),
-      verdict: input.verdict,
-      ...(summary === undefined ? {} : { summary }),
-      hooks: input.hooks,
-    });
-    const review = result.facts.find((fact) => fact.kind === "attestation");
-    if (review === undefined) throw new Error("accepted review is missing its journal fact");
-    return { result: { kind: "accepted", result }, reviewFactId: review.entry };
-  } catch (error) {
-    return forwardedMutationFailure(error);
-  }
-}
+export {
+  executeLocalDelivery,
+  executeLocalReview,
+  executeForwardedDeliver,
+  executeForwardedReview,
+  forwardedDeliveryReceipt,
+  forwardedReviewReceipt,
+  requireForwarded,
+} from "./contract-forwarding.js";
+export type {
+  AttestationVerdict,
+  DeliveryExecutionInput,
+  ForwardedDeliveryReceipt,
+  ForwardedMutationReceipt,
+  ForwardedReviewReceipt,
+  Review,
+  ReviewExecutionInput,
+} from "./contract-forwarding.js";

@@ -96,7 +96,6 @@ export type {
   RequestFact,
   RequestInput,
   RequestRecipe,
-  UpstreamRequestService,
   SealFact,
   SessionFact,
   Soul,

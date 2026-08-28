@@ -3,6 +3,8 @@ import { any, factErrors, factTypes, forbiddenFor, gitRepository, ownersFor, typ
 import { akumaZones } from "./policy-akuma.js";
 import { cliZones } from "./policy-cli.js";
 import { coreZones } from "./policy-core.js";
+import { contractHandleZones } from "./policy-contract-handle.js";
+import { fleetResultZones } from "./policy-fleet-result.js";
 import { foundationZones } from "./policy-foundation.js";
 import { gitZones } from "./policy-git.js";
 import { protocolZones } from "./policy-protocol.js";
@@ -16,6 +18,8 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     ...gitZones,
     ...protocolZones,
     ...runtimeLibraryZones,
+    ...fleetResultZones,
+    ...contractHandleZones,
     ...taskKanshiZones,
     ...cliZones,
   ],
@@ -68,6 +72,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         { source: "akuma/identity.ts", symbols: ["mkdir", "writeFile"] },
         { source: "akuma/body.ts", symbols: ["appendFile"] },
         { source: "akuma/requests.ts", symbols: ["access", "readFile"] },
+        { source: "akuma/request-rendezvous.ts", symbols: ["access", "readFile"] },
         { source: "akuma/request-lifecycle.ts", symbols: ["access", "mkdir", "readFile", "readdir", "rm"] },
         { source: "akuma/request-wire.ts", symbols: ["rename", "rm", "writeFile"] },
         { source: "alias/index.ts", symbols: ["lstat", "mkdir", "readFile", "unlink"] },
@@ -126,6 +131,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
           "akuma/providers/claude/index.ts",
           "akuma/providers/opencode-sdk/index.ts",
           "akuma/requests.ts",
+          "akuma/request-rendezvous.ts",
           "akuma/request-wire.ts",
         ),
       ],

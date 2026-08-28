@@ -4,6 +4,10 @@ This chapter owns one-hop Body Request transport, service, and recovery.
 Allowed-action vocabulary and admission are owned by
 [akuma-allowed.md](akuma-allowed.md).
 
+The closed request dispatch table is only an index from an action coordinate to
+codecs defined by that verb's owner. The index owns no request, result,
+service-evidence, or permission shape.
+
 ## Body Requests
 
 A provider process lives inside one parent body's drive. If that body dies,
@@ -55,8 +59,9 @@ one fact. There is no second store.
 For call, the claim decoder first validates the action envelope, then selects
 the stated cwd or the hosting parent Soul cwd. Only then does it decode the frozen provider and
 options with the existing owners for that final cwd. The complete validated
-payload enters Heart; transport never supplies a second allowed-action
-judgment. A malformed payload is a malformed claim and never becomes a durable
+payload enters Heart with the descriptor's permission decision; Heart
+authenticates the requester but does not interpret an allowed-action
+vocabulary. A malformed payload is a malformed claim and never becomes a durable
 request fact.
 
 The child directory and its leash remain the sole judge of child birth. The
@@ -74,8 +79,10 @@ The serving Body requires the request world to equal its own world. World
 mismatch settles `refused`; a malformed transport claim is not admitted. The
 Body never silently redirects a request.
 
-Service is serial in Heart admission order. Heart first applies the keyed
-action law; a refusal runs no operation owner. An admitted call then proceeds:
+Service is serial in Heart admission order. The selected owner descriptor
+applies the Soul-owned keyed-action law before generic admission; Heart records
+that decision after authenticating the requester, and a refusal runs no
+operation owner. An admitted call then proceeds:
 
 ```text
 parse -> select cwd -> validate recipe -> admit -> allocate directory -> reserve coordinate -> spawn child
@@ -112,7 +119,7 @@ coordinates never cross the channel. The parent Body calls the same forced-local
 Fleet executors used by ordinary Library and CLI entry points, so request service
 cannot recursively forward.
 
-Heart applies keyed permission before tell or kill runs; wait remains an unkeyed
+The Fleet descriptor applies keyed permission before tell or kill runs; wait remains an unkeyed
 observation. A served wait stores only a service marker, never its observation or
 timeout result. A served tell stores only its target and the request id used as
 TellId. A served kill stores only ordered target/evidence references; lifecycle
@@ -157,7 +164,7 @@ or replays Contract state.
 
 Each advertised `task.*` mutation carries its caller-selected normalized World,
 the exact public structured input or Markdown bytes, and every complete TaskId
-it addresses. The parent Heart judges that exact independent action key, then
+it addresses. The Task descriptor judges that exact independent action key against the authenticated Soul, then
 the detached Body reconstructs the selected World and enters Task's one
 forced-local mutation executor. Creation (`task.add`, `task.addDocument`, and
 `task.compose`) supplies the authenticated requester as Task actor; later Task

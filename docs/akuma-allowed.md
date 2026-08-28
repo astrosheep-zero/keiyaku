@@ -49,12 +49,14 @@ fork copies the source Soul's effective list exactly and accepts no override.
 
 ## Admission
 
-The hosting Heart is the sole judge for keyed actions. In the transaction that
-admits a request, it reads the authenticated caller Soul and either records the
-action coordinate or refuses `not-allowed: <action>` before the operation owner
-runs. The child performs no duplicate precheck. Request transport remains one
-hop, and Contract, Task, and Akuma owners remain the sole authorities for their
-operation outcomes.
+Dispatch lookup never admits an action. The selected operation descriptor applies
+this Soul-owned vocabulary to the authenticated caller's frozen list, including
+the unkeyed `akuma.wait` rule, before its owner executes. It supplies that one
+decision to Heart; Heart authenticates the requester and durably records the
+generic admission or `not-allowed: <action>` refusal without importing or
+interpreting this vocabulary. The child performs no duplicate precheck. Request
+transport remains one hop, and Contract, Task, and Akuma owners remain the sole
+authorities for their operation outcomes.
 
 Every `task.*` member is independently keyed. Permission for one Task mutation
 does not imply another Task action or any Contract action; Task requires no

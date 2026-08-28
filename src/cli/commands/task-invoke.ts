@@ -22,8 +22,8 @@ import { observeTaskDetails } from "../../task/operations.js";
 import type { ParsedTaskCommand } from "./task.js";
 import { parseTaskNamespaceSelector } from "../../task/catalog.js";
 import type { WorldRoot } from "../../world.js";
-import { injectedBodyRequests, requestBodyTask } from "../../akuma/requests.js";
-import { decodeTaskMutationRequest, type TaskMutationRequest } from "../../task/mutation.js";
+import { injectedBodyRequests } from "../../akuma/requests.js";
+import { decodeTaskMutationRequest, requestForwardedTask, type TaskMutationRequest } from "../../task/mutation.js";
 import { resolveTaskNamespaceContext, writeTaskNamespaceContext } from "../../task/context.js";
 import { CliUsageError } from "../usage.js";
 
@@ -555,7 +555,7 @@ export async function invokeTask(command: ParsedTaskCommand, input: TaskInput): 
     const request = validatedMutationRequest(
       await mutationRequest(command, input, explicitNamespace ?? current ?? [], composeMarkdown),
     );
-    return (await requestBodyTask({ directory: requests, world, request })) as TaskInvocationResult;
+    return await requestForwardedTask({ directory: requests, world, request });
   }
   return await invokeLocalMutation({
     tasks,

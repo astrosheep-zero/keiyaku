@@ -12,6 +12,7 @@ import {
   type AkumaCallInput,
 } from "../src/akuma/akuma.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
+import { akumaCallRequestCommands } from "../src/akuma/call-request.js";
 import { HeldAkumaLeash, initializeHeart, readSoul, type Soul } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
@@ -135,6 +136,7 @@ async function requestPump(root: string) {
     options: {},
     cwd: root,
     origin: { kind: "direct" },
+    allowed: ALLOWED_ACTIONS,
     createdAt: "2026-08-11T00:00:00.000Z",
   };
   const leash = (await HeldAkumaLeash.try(parent.paths))!;
@@ -145,6 +147,7 @@ async function requestPump(root: string) {
     bodySequence: 1,
     now: () => "2026-08-11T00:00:01.000Z",
     signal: new AbortController().signal,
+    commands: akumaCallRequestCommands(),
     async spawn(launch) {
       const child = (await HeldAkumaLeash.try(launch.paths))!;
       await child.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-11T00:00:02.000Z" });

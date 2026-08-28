@@ -10,22 +10,16 @@ import {
   type RequestFact,
   type Soul,
 } from "./heart/index.js";
-import { pathsForAkuId, type AkuId, type AkumaPaths } from "./identity.js";
+import { pathsForAkuId, worldRootForAkumaPaths, type AkuId, type AkumaPaths } from "./identity.js";
 import { BIRTH_TIMEOUT_MS } from "./publication.js";
-import { decodeClaim, type StructuralRequestClaim } from "./request-wire.js";
-import type { OwnedProcess } from "../runtime/proc/run.js";
-export type RequestChildLaunch = Readonly<{
-  paths: AkumaPaths;
-  seed: Omit<Soul, "createdAt">;
-  initialBody: string;
-}>;
+import { decodeEnvelope, type RequestEnvelope } from "./request-wire.js";
 
 export type PumpInput = Readonly<{
   paths: AkumaPaths;
   parent: Soul;
   bodySequence: number;
   now(): string;
-  spawn(launch: RequestChildLaunch): Promise<OwnedProcess | void>;
+  spawn(launch: unknown): Promise<unknown>;
   upstream?: unknown;
   signal: AbortSignal;
 }>;
@@ -35,7 +29,7 @@ type ServeClaim = (
     Readonly<{
       directory: string;
       transportId: string;
-      claim: StructuralRequestClaim;
+      claim: RequestEnvelope;
       signal: AbortSignal;
       admissionOpen(): boolean;
     }>,
@@ -83,7 +77,7 @@ export class BodyRequestPump {
         const transportId = name.slice(0, -".request.json".length);
         if (this.handled.has(transportId)) continue;
         const path = join(this.directory, name);
-        const claim = decodeClaim(await readFile(path, "utf8"), transportId);
+        const claim = decodeEnvelope(await readFile(path, "utf8"), transportId);
         if (claim === null) {
           await rm(path, { force: true });
           this.handled.add(transportId);
@@ -161,7 +155,7 @@ async function settleReserved(
   now: () => string,
   signal?: AbortSignal,
 ): Promise<boolean> {
-  const childPaths = pathsForAkuId(request.world, request.child);
+  const childPaths = pathsForAkuId(worldRootForAkumaPaths(paths), request.child);
   const deadline = performance.now() + BIRTH_TIMEOUT_MS;
   for (;;) {
     signal?.throwIfAborted();

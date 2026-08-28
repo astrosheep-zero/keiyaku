@@ -1,5 +1,5 @@
-import type { AkuId, AkumaPaths } from "../identity.js";
-import type { RequestFact, RequestInput, UpstreamRequestService } from "./facts.js";
+import { parseAkuId, type AkuId, type AkumaPaths } from "../identity.js";
+import type { RequestFact, RequestInput } from "./facts.js";
 import {
   insertRequestFact,
   nonterminalRequestFacts,
@@ -12,7 +12,6 @@ import {
 } from "./request-rows.js";
 import { transaction, withHeart } from "./storage.js";
 import { soulFact } from "./soul.js";
-import { clipAllowedActions } from "../allowed.js";
 import { requestPayloadJson } from "./request-rows.js";
 
 // This stays out of the public Heart index: only transport service projects it as a refusal.
@@ -29,38 +28,25 @@ export function isRequestInputConflict(error: unknown): error is Error {
 
 export async function admitRequest(
   paths: AkumaPaths,
-  input: RequestInput & Readonly<{ admittedAt: string }>,
+  input: RequestInput & Readonly<{ admittedAt: string; permitted: boolean }>,
 ): Promise<RequestFact> {
   return await withHeart(paths, (heart) =>
     transaction(heart, () => {
       const soul = soulFact(heart);
       if (soul === null) throw new Error("Akuma request admission requires a born Soul");
-      const action = input.action;
-      const parentAllowed = soul.allowed;
-      const permitted = action === "akuma.wait" || parentAllowed.includes(action);
-      const normalized: RequestInput =
-        input.action === "akuma.call"
-          ? {
-              ...input,
-              recipe: {
-                ...input.recipe,
-                allowed: permitted ? clipAllowedActions(input.recipe.allowed, parentAllowed) : input.recipe.allowed,
-              },
-            }
-          : input;
+      const { permitted, ...request } = input;
       insertRequestFact(heart, {
-        ...normalized,
+        ...request,
         requester: soul.id,
-        admittedAt: input.admittedAt,
-        ...(permitted ? {} : { refusal: `not-allowed: ${action}` }),
+        ...(permitted ? {} : { refusal: `not-allowed: ${input.action}` }),
       });
       const fact = requestFact(heart, input.id);
       if (fact === null) throw new Error(`Akuma request ${input.id} was not admitted`);
       if (
         fact.requester !== soul.id ||
-        fact.id !== normalized.id ||
-        fact.action !== normalized.action ||
-        requestPayloadJson(fact) !== requestPayloadJson(normalized)
+        fact.id !== input.id ||
+        fact.action !== input.action ||
+        requestPayloadJson(fact) !== requestPayloadJson(input)
       ) {
         throw new RequestInputConflictError(input.id);
       }
@@ -74,9 +60,12 @@ export async function reserveRequest(paths: AkumaPaths, id: string, child: AkuId
     transaction(heart, () => {
       const before = requestFact(heart, id);
       if (before === null) throw new Error(`unknown Akuma request ${id}`);
-      if (before.action !== "akuma.call") throw new Error(`Akuma request ${id} cannot reserve a child`);
       if (before.state === "admitted") updateRequestReserved(heart, id, child);
-      else if ((before.state !== "reserved" && before.state !== "served") || before.child !== child) {
+      else if (
+        (before.state !== "reserved" && before.state !== "served") ||
+        !("child" in before) ||
+        before.child !== child
+      ) {
         throw new Error(`Akuma request ${id} cannot reserve ${child}`);
       }
       return requestFact(heart, id)!;
@@ -84,14 +73,15 @@ export async function reserveRequest(paths: AkumaPaths, id: string, child: AkuId
   );
 }
 
-export async function serveRequest(paths: AkumaPaths, id: string, child: AkuId): Promise<RequestFact> {
+export async function serveRequest(paths: AkumaPaths, id: string, child: string): Promise<RequestFact> {
+  const parsed = parseAkuId(child);
+  if (parsed.id !== child) throw new Error(`Akuma request ${id} has a noncanonical child`);
   return await withHeart(paths, (heart) =>
     transaction(heart, () => {
       const before = requestFact(heart, id);
       if (before === null) throw new Error(`unknown Akuma request ${id}`);
-      if (before.action !== "akuma.call") throw new Error(`Akuma request ${id} cannot serve a child`);
-      if (before.state === "reserved" && before.child === child) updateRequestServed(heart, id, child);
-      else if (before.state !== "served" || before.child !== child) {
+      if (before.state === "reserved" && before.child === parsed.id) updateRequestServed(heart, id, parsed.id);
+      else if (before.state !== "served" || !("child" in before) || before.child !== parsed.id) {
         throw new Error(`Akuma request ${id} cannot serve ${child}`);
       }
       return requestFact(heart, id)!;
@@ -99,21 +89,14 @@ export async function serveRequest(paths: AkumaPaths, id: string, child: AkuId):
   );
 }
 
-export async function serveUpstreamRequest(
-  paths: AkumaPaths,
-  id: string,
-  service: UpstreamRequestService,
-): Promise<RequestFact> {
+export async function serveUpstreamRequest(paths: AkumaPaths, id: string, serviceJson: string): Promise<RequestFact> {
   return await withHeart(paths, (heart) =>
     transaction(heart, () => {
       const before = requestFact(heart, id);
       if (before === null) throw new Error(`unknown Akuma request ${id}`);
-      if (before.action === "akuma.call" || service.action !== before.action) {
-        throw new Error(`Akuma request ${id} has a mismatched service reference`);
-      }
-      if (before.state === "admitted") updateUpstreamRequestServed(heart, id, service);
-      else if (before.state !== "served") {
-        throw new Error(`Akuma request ${id} cannot be served as ${service.action}`);
+      if (before.state === "admitted") updateUpstreamRequestServed(heart, id, serviceJson);
+      else if (before.state !== "served" || !("serviceJson" in before) || before.serviceJson !== serviceJson) {
+        throw new Error(`Akuma request ${id} cannot be served with this service reference`);
       }
       return requestFact(heart, id)!;
     }),

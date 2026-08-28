@@ -19,9 +19,10 @@ import {
 import { allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
 import { publishAkuma } from "../src/akuma/publication.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
-import { AkumaBodyRequestError, requestBodyCall } from "../src/akuma/requests.js";
+import { akumaCallRequestCommands, requestForwardedAkumaCall as requestBodyCall } from "../src/akuma/call-request.js";
+import { AkumaBodyRequestError } from "../src/akuma/requests.js";
 import { BodyRequestPump, settleBodyRequests } from "../src/akuma/request-serve.js";
-import { decodeClaim } from "../src/akuma/request-wire.js";
+import { contractRequestCommand } from "../src/library/contract-operations.js";
 import { World } from "../src/world.js";
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
 
@@ -336,6 +337,7 @@ test("Heart clips nested allowed at each direct parent and cannot regain removed
     parent: value.soul,
     bodySequence: 1,
     now: () => "2026-08-09T00:00:01.000Z",
+    commands: akumaCallRequestCommands(),
     signal: new AbortController().signal,
     async spawn(launch) {
       const leash = (await HeldAkumaLeash.try(launch.paths))!;
@@ -361,6 +363,7 @@ test("Heart clips nested allowed at each direct parent and cannot regain removed
       parent: childSoul,
       bodySequence: 1,
       now: () => "2026-08-09T00:00:03.000Z",
+      commands: akumaCallRequestCommands(),
       signal: new AbortController().signal,
       async spawn(launch) {
         const leash = (await HeldAkumaLeash.try(launch.paths))!;
@@ -399,6 +402,7 @@ test("Heart refuses a disabled call before child publication", async () => {
     parent: value.soul,
     bodySequence: 1,
     now: () => "2026-08-09T00:00:01.000Z",
+    commands: akumaCallRequestCommands(),
     signal: new AbortController().signal,
     async spawn() {
       assert.fail("disabled request reached child publication");
@@ -632,6 +636,7 @@ test("a drive serves Body Requests through transport while Heart remains authori
     parent: value.soul,
     bodySequence: 1,
     now: () => "2026-08-09T00:00:01.000Z",
+    commands: akumaCallRequestCommands(),
     signal: new AbortController().signal,
     async spawn(launch) {
       const child = (await HeldAkumaLeash.try(launch.paths))!;
@@ -766,22 +771,18 @@ test("a new body settles old requests by observation without replay", async () =
     await admitRequest(value.parent.paths, {
       id: admittedId,
       action: "akuma.call",
-      archetype: "worker",
-      body: "never spawned",
-      world: value.root,
-      recipe: { provider: value.soul.provider, options: value.soul.options, allowed: value.soul.allowed },
+      payloadJson: JSON.stringify({ body: "never spawned" }),
       admittedAt: "2026-08-09T00:00:01.000Z",
+      permitted: true,
     });
 
     const bornId = "00000000-0000-4000-8000-000000000012";
     await admitRequest(value.parent.paths, {
       id: bornId,
       action: "akuma.call",
-      archetype: "worker",
-      body: "born",
-      world: value.root,
-      recipe: { provider: value.soul.provider, options: value.soul.options, allowed: value.soul.allowed },
+      payloadJson: JSON.stringify({ body: "born" }),
       admittedAt: "2026-08-09T00:00:02.000Z",
+      permitted: true,
     });
     const born = await allocateAkumaDirectory({ worldRoot: value.root, archetype: "worker", draw: () => "00000012" });
     await initializeHeart(born.paths);
@@ -799,11 +800,9 @@ test("a new body settles old requests by observation without replay", async () =
     await admitRequest(value.parent.paths, {
       id: unbornId,
       action: "akuma.call",
-      archetype: "worker",
-      body: "unborn",
-      world: value.root,
-      recipe: { provider: value.soul.provider, options: value.soul.options, allowed: value.soul.allowed },
+      payloadJson: JSON.stringify({ body: "unborn" }),
       admittedAt: "2026-08-09T00:00:03.000Z",
+      permitted: true,
     });
     const unborn = await allocateAkumaDirectory({ worldRoot: value.root, archetype: "worker", draw: () => "00000013" });
     await initializeHeart(unborn.paths);
@@ -813,11 +812,9 @@ test("a new body settles old requests by observation without replay", async () =
     await admitRequest(value.parent.paths, {
       id: mismatchId,
       action: "akuma.call",
-      archetype: "worker",
-      body: "mismatch",
-      world: value.root,
-      recipe: { provider: value.soul.provider, options: value.soul.options, allowed: value.soul.allowed },
+      payloadJson: JSON.stringify({ body: "mismatch" }),
       admittedAt: "2026-08-09T00:00:04.000Z",
+      permitted: true,
     });
     const mismatch = await allocateAkumaDirectory({
       worldRoot: value.root,
@@ -847,30 +844,21 @@ test("a new body settles old requests by observation without replay", async () =
   }
 });
 
-test("contract.deliver claims require the exact normalized payload keys", () => {
-  const id = "00000000-0000-4000-8000-000000000001";
+test("Contract owns the exact normalized deliver payload decoder", () => {
   const payload = {
     repoRoot: "/repo",
     contractId: "kei/example",
     includeDirty: false,
     materializeConflict: true,
   };
-  assert.deepEqual(decodeClaim(JSON.stringify({ id, action: "contract.deliver", payload }), id), {
-    id,
+  assert.deepEqual(contractRequestCommand("contract.deliver").decodeRequest(payload), {
     action: "contract.deliver",
     ...payload,
   });
   assert.equal(
-    decodeClaim(
-      JSON.stringify({
-        id,
-        action: "contract.deliver",
-        payload: { ...payload, extra: true },
-      }),
-      id,
-    ),
+    contractRequestCommand("contract.deliver").decodeRequest({ ...payload, extra: true }),
     null,
   );
   const { materializeConflict: _materializeConflict, ...without } = payload;
-  assert.equal(decodeClaim(JSON.stringify({ id, action: "contract.deliver", payload: without }), id), null);
+  assert.equal(contractRequestCommand("contract.deliver").decodeRequest(without), null);
 });

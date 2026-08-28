@@ -13,7 +13,8 @@ import type { WorldRoot } from "../world.js";
 import type { AllowedAction } from "../akuma/allowed.js";
 import { requireInput } from "./input.js";
 import { addressAkuma } from "./address.js";
-import { KeiyakuRefused, seatForKeiyaku, type Keiyaku } from "./contract.js";
+import { KeiyakuRefused, type Keiyaku } from "./contract.js";
+import { seatForKeiyaku } from "./contract-handle.js";
 import { scopeForRepo, type Repo } from "./repo.js";
 
 export type { AkumaStatus } from "../akuma/akuma.js";
@@ -255,6 +256,7 @@ async function resolveCallExecution(
   }
   if (input.contract !== undefined) {
     const seat = seatForKeiyaku(input.contract);
+    if (seat === null) throw new TypeError("contract must be a Keiyaku");
     const state = await currentManagedContract(input.contract, seat.id);
     const appointment = await readManagedWorktreeAppointment(seat.scope, state.id);
     if (appointment.kind === "unappointed") {
@@ -305,7 +307,9 @@ export async function beginCall(input: CallInput): Promise<BornCall> {
   const settings = settingsOption(values.settings);
   const alias: AkumaAlias | undefined =
     values.alias === undefined ? undefined : parseAkumaAlias(nonblank(values.alias, "alias"));
-  const seat = values.contract === undefined ? undefined : seatForKeiyaku(values.contract);
+  const selectedSeat = values.contract === undefined ? undefined : seatForKeiyaku(values.contract);
+  if (values.contract !== undefined && selectedSeat === null) throw new TypeError("contract must be a Keiyaku");
+  const seat = selectedSeat ?? undefined;
   const execution = await resolveCallExecution({
     path,
     ...(cwd === undefined ? {} : { cwd }),

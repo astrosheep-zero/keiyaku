@@ -8,13 +8,14 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { moveAlias } from "../src/alias/index.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
+import { akumaCallRequestCommands } from "../src/akuma/call-request.js";
 import { HeldAkumaLeash, initializeHeart, readSoul, recordTell, type Soul } from "../src/akuma/heart/index.js";
 import { decodeSoul } from "../src/akuma/heart/soul.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { BodyRequestPump } from "../src/akuma/request-serve.js";
-import { executeKillAkuma, executeTellAkuma, executeWaitAkuma } from "../src/library/fleet.js";
+import { executeKillAkuma, executeTellAkuma, executeWaitAkuma, fleetRequestCommands } from "../src/library/fleet.js";
 import { Keiyaku, type AkumaObservation } from "../src/index.js";
 import { invoke } from "../src/cli/invoke.js";
 import { invokeAkuma } from "../src/cli/commands/akuma-invoke.js";
@@ -1169,6 +1170,7 @@ test("packaged CLI call writes representative success and failure exits", async 
     options: {},
     cwd: root,
     origin: { kind: "direct" },
+    allowed: ["akuma.call"],
     createdAt: "2026-08-15T00:00:00.000Z",
   };
   const leash = (await HeldAkumaLeash.try(parent.paths))!;
@@ -1217,6 +1219,7 @@ test("packaged CLI call writes representative success and failure exits", async 
     bodySequence: 1,
     now: () => "2026-08-15T00:00:01.000Z",
     signal: new AbortController().signal,
+    commands: { ...akumaCallRequestCommands(), ...fleetRequestCommands() },
     upstream: {
       wait: async (input) =>
         await executeWaitAkuma({

@@ -70,8 +70,20 @@ export const taskKanshiZones = [
       types("task/compose.ts"),
       any("task/input.ts"),
       any("task/index.ts"),
-      types("task/identity.ts"),
+      any("task/identity.ts", ["parseTaskId", "TaskId"]),
       types("task/operations.ts"),
+      any("task/mutation-result.ts", ["TaskMutationExecutionResult", "isTaskMutationExecutionResult"]),
+      any("akuma/request-rendezvous.ts", ["requestBodyCommand"]),
+      any("akuma/request-wire.ts", ["eraseRequestCommand", "ErasedRequestCommand", "RequestCommand"]),
+    ],
+  },
+  {
+    source: "task/mutation-result.ts",
+    allow: [
+      any("task/input.ts", ["taskId"]),
+      any("task/identity.ts", ["parseTaskId", "TaskId"]),
+      types("task/compose.ts", ["TaskCompositionResult"]),
+      types("task/operations.ts", ["TaskBatchResult", "TaskMutationResult", "TaskUpdateResult"]),
     ],
   },
   {
@@ -94,7 +106,7 @@ export const taskKanshiZones = [
       any("coordination/sqlite-transaction-lock.ts"),
       any("git/repository.ts"),
       gitRepository,
-      types("task/identity.ts"),
+      any("task/identity.ts", ["parseTaskId", "TaskId"]),
     ],
   },
   {

@@ -1,7 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { AkuId } from "../identity.js";
-import type { RequestFact, RequestInput, UpstreamRequestService } from "./facts.js";
-import { isTaskMutationAction } from "../../task/mutation.js";
+import type { RequestFact, RequestInput } from "./facts.js";
 
 type RequestRow = Readonly<{
   sequence: number;
@@ -17,72 +16,38 @@ type RequestRow = Readonly<{
   evidence: string | null;
 }>;
 
-function json(value: unknown): string {
-  return JSON.stringify(value);
-}
-
-function parsed<T>(value: unknown): T {
+function assertJsonText(value: unknown): string {
   if (typeof value !== "string") throw new Error("Akuma authority contains non-text JSON");
-  return JSON.parse(value) as T;
+  JSON.parse(value);
+  return value;
 }
 
 export function requestPayloadJson(input: RequestInput): string {
-  const {
-    id: _id,
-    action: _action,
-    requester: _requester,
-    admittedAt: _admittedAt,
-    state: _state,
-    child: _child,
-    service: _service,
-    diagnostic: _diagnostic,
-    evidence: _evidence,
-    refusal: _refusal,
-    ...payload
-  } = input as RequestInput &
-    Readonly<{
-      requester?: AkuId;
-      admittedAt?: string;
-      state?: RequestFact["state"];
-      child?: AkuId;
-      service?: UpstreamRequestService;
-      diagnostic?: string;
-      evidence?: string;
-      refusal?: string;
-    }>;
-  return json(payload);
+  return assertJsonText(input.payloadJson);
 }
 
 function decodeRequestRow(row: RequestRow): RequestFact {
-  const knownAction =
-    ["akuma.call", "akuma.wait", "akuma.tell", "akuma.kill", "contract.deliver", "contract.review"].includes(
-      row.action,
-    ) || isTaskMutationAction(row.action);
-  if (!knownAction) throw new Error(`Akuma authority contains an unknown request action: ${row.action}`);
-  const payload = parsed<Omit<RequestInput, "action" | "id">>(row.payload_json);
   const input = {
     id: row.id,
     requester: row.requester as AkuId,
     action: row.action,
-    ...payload,
+    payloadJson: assertJsonText(row.payload_json),
     admittedAt: row.admitted_at,
-  } as RequestInput & Readonly<{ requester: AkuId; admittedAt: string }>;
+  };
   if (row.state === "reserved") {
-    if (input.action !== "akuma.call" || row.child === null) {
+    if (row.child === null || row.service_json !== null) {
       throw new Error("Akuma authority contains an invalid reserved request");
     }
     return { ...input, state: row.state, child: row.child as AkuId };
   }
   if (row.state === "served") {
-    if (input.action === "akuma.call") {
-      if (row.child === null) throw new Error("Akuma authority contains a served call without a child");
+    if (row.child !== null && row.service_json === null) {
       return { ...input, state: row.state, child: row.child as AkuId };
     }
-    if (row.service_json === null) {
-      throw new Error("Akuma authority contains a served request without a service reference");
+    if (row.child === null && row.service_json !== null) {
+      return { ...input, state: row.state, serviceJson: assertJsonText(row.service_json) };
     }
-    const service = parsed<UpstreamRequestService>(row.service_json);
-    return { ...input, state: row.state, service } as Extract<RequestFact, { state: "served" }>;
+    throw new Error("Akuma authority contains an invalid served request");
   }
   if (row.state === "refused") return { ...input, state: row.state, diagnostic: row.diagnostic! };
   if (row.state === "voided") return { ...input, state: row.state, evidence: row.evidence! };
@@ -148,9 +113,9 @@ export function updateUpstreamRequestServed(database: DatabaseSync, id: string, 
   database
     .prepare(
       `UPDATE requests SET state = 'served', service_json = ?
-    WHERE id = ? AND state = 'admitted' AND action != 'akuma.call'`,
+    WHERE id = ? AND state = 'admitted'`,
     )
-    .run(json(service), id);
+    .run(assertJsonText(service), id);
 }
 
 export function updateRequestRefused(database: DatabaseSync, id: string, diagnostic: string): void {

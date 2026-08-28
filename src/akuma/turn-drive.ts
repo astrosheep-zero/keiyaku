@@ -14,7 +14,9 @@ import {
 } from "./heart/index.js";
 import type { AkumaPaths } from "./identity.js";
 import { encodeAgentEvent, type AgentEvent, type ProviderAdapter, type Session, type TurnResult } from "./provider.js";
-import { BodyRequestPump, type RequestChildLaunch, type UpstreamExecutionPort } from "./request-serve.js";
+import type { AkumaCallRequestChildLaunch } from "./call-request.js";
+import { BodyRequestPump } from "./request-serve.js";
+import type { ErasedRequestCommand } from "./request-wire.js";
 import { BodySupervisor, CONTROL_RESPONSE_MS } from "./body-supervisor.js";
 import type { OwnedProcess } from "../runtime/proc/run.js";
 
@@ -72,8 +74,9 @@ export type DriveTurnInput = Readonly<{
   call?: string;
   launchTells: readonly TellFact[];
   supervisor: BodySupervisor;
-  runtimeSpawn(launch: RequestChildLaunch): Promise<OwnedProcess | void>;
-  upstream?: UpstreamExecutionPort;
+  runtimeSpawn(launch: AkumaCallRequestChildLaunch): Promise<OwnedProcess | void>;
+  upstream?: unknown;
+  commands: Readonly<Record<string, ErasedRequestCommand>>;
   now(): string;
 }>;
 
@@ -158,6 +161,7 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
     now: input.now,
     spawn: input.runtimeSpawn,
     ...(input.upstream === undefined ? {} : { upstream: input.upstream }),
+    commands: input.commands,
     signal: input.supervisor.signal,
   });
   const driveController = new AbortController();

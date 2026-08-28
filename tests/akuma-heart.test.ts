@@ -680,16 +680,9 @@ test("kill witnesses one stopped Body without burning pending work", async () =>
     const request = await admitRequest(value.allocated.paths, {
       id: "00000000-0000-4000-8000-000000000010",
       action: "akuma.call",
-      archetype: "claude",
-      body: "child work",
-      world: value.root,
-      recipe: {
-        description: value.soul.description,
-        provider: value.soul.provider,
-        options: value.soul.options,
-        allowed: value.soul.allowed,
-      },
+      payloadJson: JSON.stringify({ body: "child work" }),
       admittedAt: "2026-08-08T00:00:02.000Z",
+      permitted: true,
     });
     assert.deepEqual(await requestStop(value.allocated.paths, "2026-08-08T00:00:03.000Z"), {
       kind: "requested",
@@ -884,16 +877,9 @@ test("Body Request facts have one idempotent monotonic authority", async () => {
     const input = {
       id: "00000000-0000-4000-8000-000000000001",
       action: "akuma.call" as const,
-      archetype: "claude",
-      body: "build",
-      world: value.root,
-      recipe: {
-        description: value.soul.description,
-        provider: value.soul.provider,
-        options: value.soul.options,
-        allowed: value.soul.allowed,
-      },
+      payloadJson: JSON.stringify({ body: "build" }),
       admittedAt: "2026-08-08T00:00:01.000Z",
+      permitted: true,
     };
     assert.equal((await admitRequest(value.allocated.paths, input)).state, "admitted");
     assert.equal(
@@ -914,13 +900,13 @@ test("Body Request facts have one idempotent monotonic authority", async () => {
     const refused = await admitRequest(value.allocated.paths, {
       ...input,
       id: "00000000-0000-4000-8000-000000000002",
-      body: "refuse",
+      payloadJson: JSON.stringify({ body: "refuse" }),
     });
     assert.equal((await refuseRequest(value.allocated.paths, refused.id, "unknown Archetype")).state, "refused");
     const voided = await admitRequest(value.allocated.paths, {
       ...input,
       id: "00000000-0000-4000-8000-000000000003",
-      body: "void",
+      payloadJson: JSON.stringify({ body: "void" }),
     });
     assert.equal((await voidRequest(value.allocated.paths, voided.id, "caller gone")).state, "voided");
 
@@ -931,7 +917,7 @@ test("Body Request facts have one idempotent monotonic authority", async () => {
   }
 });
 
-test("heart schema version 20 and leash schema version 4 hard-refuse old authority", async () => {
+test("heart schema version 21 and leash schema version 4 hard-refuse old authority", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-schema-cut-"));
   const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "30000000" });
   try {
@@ -945,7 +931,7 @@ test("heart schema version 20 and leash schema version 4 hard-refuse old authori
       "CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)",
     );
     leash.close();
-    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 20/u);
+    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 21/u);
     await assert.rejects(HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
   } finally {
     rmSync(root, { recursive: true, force: true });

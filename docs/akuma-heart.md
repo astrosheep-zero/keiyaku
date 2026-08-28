@@ -153,8 +153,15 @@ database, not `heart.db`. Both schemas and their typed interpretation are
 owned inside the closed Heart custody core; no store or repository interface
 sits between callers and its index.
 
-Heart schema version is `20`; leash schema version remains `4`. Version 20
-permits hung evidence and `broke-off` on the same Body, and hard-cuts the
+Heart stores owner-canonical request and service JSON opaquely and validates
+only generic request lifecycle integrity. During request admission it
+authenticates the current Soul and records the caller-supplied permission
+decision, but does not interpret an action vocabulary, payload, service
+evidence, or child-owner meaning. Heart imports neither Task nor any verb
+owner; the Body-only closed request index supplies those descriptors. Heart
+schema version is `21`; leash
+schema version remains `4`. Version 21 permits hung evidence and `broke-off`
+on the same Body, and hard-cuts the
 permanent same-identity successor gate.
 Successful completion remains
 separate from the optional exact provider fork point; session and complete

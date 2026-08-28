@@ -2,7 +2,6 @@ import type { AkuId } from "../identity.js";
 import type { ResumeCoordinate } from "../coordinate.js";
 import type { ProviderExecution, ProviderOptions, ReadonlyRestraint } from "../provider-recipe.js";
 import type { AllowedActions } from "../allowed.js";
-import type { TaskMutationAction, TaskMutationRequest } from "../../task/mutation.js";
 export type { ResumeCoordinate } from "../coordinate.js";
 
 export type AkumaOrigin =
@@ -115,82 +114,11 @@ export type TellReceiptInput = Readonly<{
     | Readonly<{ evidence: "fence"; turnSequence: number; fence: string }>
   );
 
-export type TaskRequestInput = Readonly<{
+export type RequestInput = Readonly<{
   id: string;
-  action: TaskMutationAction;
-  world: string;
-  request: TaskMutationRequest;
+  action: string;
+  payloadJson: string;
 }>;
-
-export type RequestInput =
-  | Readonly<{
-      id: string;
-      action: "akuma.call";
-      archetype: string;
-      body: string;
-      cwd?: string;
-      world: string;
-      recipe: RequestRecipe;
-    }>
-  | Readonly<{
-      id: string;
-      action: "akuma.wait";
-      targets: readonly AkuId[];
-      completion: "any" | "all";
-      timeoutMs?: number;
-    }>
-  | Readonly<{
-      id: string;
-      action: "akuma.tell";
-      target: AkuId;
-      body: string;
-    }>
-  | Readonly<{
-      id: string;
-      action: "akuma.kill";
-      targets: readonly AkuId[];
-    }>
-  | Readonly<{
-      id: string;
-      action: "contract.deliver";
-      repoRoot: string;
-      contractId: string;
-      message?: string;
-      includeDirty: boolean;
-      materializeConflict: boolean;
-    }>
-  | Readonly<{
-      id: string;
-      action: "contract.review";
-      repoRoot: string;
-      contractId: string;
-      verdict: "satisfied" | "unsatisfied";
-      summary?: string;
-    }>
-  | TaskRequestInput;
-
-export type UpstreamRequestService =
-  | Readonly<{ action: "akuma.wait" }>
-  | Readonly<{ action: "akuma.tell"; target: AkuId; tellId: string }>
-  | Readonly<{
-      action: "akuma.kill";
-      results: readonly Readonly<{ id: AkuId; evidence: KillEvidence }>[];
-    }>
-  | Readonly<{
-      action: "contract.deliver";
-      repoRoot: string;
-      contractId: string;
-      deliveryFactId: string;
-    }>
-  | Readonly<{
-      action: "contract.review";
-      repoRoot: string;
-      contractId: string;
-      reviewFactId: string;
-    }>
-  | Readonly<{
-      action: TaskMutationRequest["action"];
-    }>;
 
 type AdmittedRequest = RequestInput &
   Readonly<{
@@ -200,13 +128,9 @@ type AdmittedRequest = RequestInput &
 
 export type RequestFact =
   | (AdmittedRequest & Readonly<{ state: "admitted" }>)
-  | (Extract<AdmittedRequest, { action: "akuma.call" }> & Readonly<{ state: "reserved"; child: AkuId }>)
-  | (Extract<AdmittedRequest, { action: "akuma.call" }> & Readonly<{ state: "served"; child: AkuId }>)
-  | (Exclude<AdmittedRequest, { action: "akuma.call" }> &
-      Readonly<{
-        state: "served";
-        service: UpstreamRequestService;
-      }>)
+  | (AdmittedRequest & Readonly<{ state: "reserved"; child: AkuId }>)
+  | (AdmittedRequest & Readonly<{ state: "served"; child: AkuId }>)
+  | (AdmittedRequest & Readonly<{ state: "served"; serviceJson: string }>)
   | (AdmittedRequest & Readonly<{ state: "refused"; diagnostic: string }>)
   | (AdmittedRequest & Readonly<{ state: "voided"; evidence: string }>);
 

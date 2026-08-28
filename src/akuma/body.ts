@@ -2,6 +2,7 @@ import { appendFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { abortableDelay } from "./abort.js";
 import { BodySupervisor } from "./body-supervisor.js";
+import type { AkumaCallRequestChildLaunch } from "./call-request.js";
 import { driveTurn, turnRecipe, type DrivenTurn } from "./turn-drive.js";
 import {
   HeldAkumaLeash,
@@ -19,12 +20,8 @@ import { worldRootForAkumaPaths, type AkumaPaths } from "./identity.js";
 import { keiyakuSquarePath } from "../world.js";
 import type { ProviderAdapter } from "./provider.js";
 import { resolveProviderExecution } from "./providers/index.js";
-import {
-  clearBodyRequestTransport,
-  settleBodyRequests,
-  type UpstreamExecutionPort,
-  type RequestChildLaunch,
-} from "./request-serve.js";
+import { clearBodyRequestTransport, settleBodyRequests } from "./request-serve.js";
+import type { ErasedRequestCommand } from "./request-wire.js";
 import {
   spawnDetachedProcess,
   type DetachedProcessExit,
@@ -72,9 +69,10 @@ export type TellWakeRuntime = Readonly<{
 
 type BodyRuntime = Readonly<{
   now(): string;
-  spawnChild?(launch: RequestChildLaunch): Promise<OwnedProcess>;
+  spawnChild?(launch: AkumaCallRequestChildLaunch): Promise<OwnedProcess>;
   spawnBody?(launch: BodyLaunch): Promise<OwnedProcess>;
-  upstream?: UpstreamExecutionPort;
+  upstream?: unknown;
+  commands: Readonly<Record<string, ErasedRequestCommand>>;
 }>;
 
 function missing(error: unknown): boolean {
@@ -194,6 +192,7 @@ function defaultRuntime(): BodyRuntime {
   return {
     now: () => new Date().toISOString(),
     spawnChild: spawnAkumaBody,
+    commands: {},
     spawnBody: spawnAkumaBody,
   };
 }
@@ -279,6 +278,7 @@ async function runBodyTurns(input: BodyExecution): Promise<void> {
       ...(initial === undefined ? {} : { call: initial }),
       launchTells,
       ...(runtime.upstream === undefined ? {} : { upstream: runtime.upstream }),
+      commands: runtime.commands,
       now: runtime.now,
     });
     if (result.kind === "hung") return;
@@ -366,8 +366,12 @@ export async function spawnAkumaBody(launch: BodyLaunch): Promise<OwnedProcess> 
   return await spawnDetachedProcess(await bodyProcessInput(launch));
 }
 
-export async function runAkumaBody(launch: BodyLaunch, upstream: UpstreamExecutionPort): Promise<"held" | void> {
-  return await driveAkumaBody(launch, undefined, { ...defaultRuntime(), upstream });
+export async function runAkumaBody(
+  launch: BodyLaunch,
+  upstream: unknown,
+  commands: Readonly<Record<string, ErasedRequestCommand>>,
+): Promise<"held" | void> {
+  return await driveAkumaBody(launch, undefined, { ...defaultRuntime(), upstream, commands });
 }
 
 const DIRECT_TELL_WAKE: TellWakeRuntime = {

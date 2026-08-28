@@ -29,7 +29,7 @@ import type { ProviderOptions } from "../src/akuma/provider-recipe.js";
 import { allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
 import type { AgentEvent, ProviderAdapter, TurnResult } from "../src/akuma/provider.js";
 import { createClaudeProvider } from "../src/akuma/providers/claude/index.js";
-import { requestBodyCall } from "../src/akuma/requests.js";
+import { akumaCallRequestCommands, requestForwardedAkumaCall as requestBodyCall } from "../src/akuma/call-request.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { keiyakuSquarePath } from "../src/world.js";
 
@@ -1226,15 +1226,9 @@ test("a drive drains Body Requests before recording its terminal turn", async ()
     await admitRequest(allocated.paths, {
       id: recoveredRequestId,
       action: "akuma.call",
-      archetype: "worker",
-      body: "crashed nested work",
-      world: root,
-      recipe: {
-        provider: { name: "claude", kind: "claude-agent-sdk" },
-        options: { systemPrompt: "Work.\n" },
-        allowed: ALLOWED_ACTIONS,
-      },
+      payloadJson: JSON.stringify({ malformed: "reserved recovery must ignore this payload" }),
       admittedAt: "2026-08-09T00:00:00.000Z",
+      permitted: true,
     });
     const staleTransport = join(allocated.paths.directory, "requests", "1", `${recoveredRequestId}.request.json`);
     mkdirSync(join(allocated.paths.directory, "requests", "1"), { recursive: true });
@@ -1292,6 +1286,7 @@ test("a drive drains Body Requests before recording its terminal turn", async ()
       provider,
       {
         now: () => "2026-08-09T00:00:00.000Z",
+        commands: akumaCallRequestCommands(),
         async spawnChild(launch) {
           const child = (await HeldAkumaLeash.try(launch.paths))!;
           await child.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-09T00:00:01.000Z" });
@@ -1608,11 +1603,9 @@ test("pause interrupts pre-drive request settlement within the control window", 
     await admitRequest(allocated.paths, {
       id: requestId,
       action: "akuma.call",
-      archetype: "worker",
-      body: "wait",
-      world: root,
-      recipe: { provider: soul.provider, options: {}, allowed: soul.allowed },
+      payloadJson: JSON.stringify({ malformed: "settlement remains payload blind" }),
       admittedAt: "2026-08-08T00:00:01.000Z",
+      permitted: true,
     });
     const child = await allocateAkumaDirectory({ worldRoot: root, archetype: "worker", draw: () => "c0ffed02" });
     await initializeHeart(child.paths);

@@ -17,9 +17,12 @@ its branded `WorldRoot` coordinate are defined by [world.md](world.md).
 ## Composition Boundary
 
 The Library validates caller values, presents public handles/results, and
-composes concrete owner capabilities. It owns no persisted authority, codec,
-lifecycle judgment, selector grammar, or physical Git, Task, or Akuma
-mechanism. The static `Keiyaku` facade assembles coherent Contract and Akuma
+composes concrete owner capabilities. The Library owns no persisted-authority
+or transport codec. Each operation owner validates the public values it exposes
+and runtime-decodes that same typed live value when it crosses a Body Request
+receipt; that decoder creates no authority or alternate transport shape. The
+Library owns no lifecycle judgment, selector grammar, or physical Git, Task, or
+Akuma mechanism. The static `Keiyaku` facade assembles coherent Contract and Akuma
 facets without a generic orchestrator, registry, second authority, or copied
 decision.
 

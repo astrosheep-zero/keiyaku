@@ -9,7 +9,8 @@ import { akuIdFromDirectoryName, akumaPaths, akumaRunRoot, archetypeName, parseA
 import { loadArchetype, listArchetypes as readArchetypes } from "./archetype.js";
 import { birthAkuma, launchAkuma } from "./publication.js";
 import { spawnAkumaBody } from "./body.js";
-import { injectedBodyRequests, requestBodyCall } from "./requests.js";
+import { requestForwardedAkumaCall } from "./call-request.js";
+import { injectedBodyRequests } from "./requests.js";
 import { decodeAllowedActions, unionAllowedActions } from "./allowed.js";
 import { settings as readSettings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
@@ -99,7 +100,7 @@ export class Akuma {
           : context?.cwdCanonical === true
             ? input.cwd
             : await canonicalBirthCwd(input.cwd);
-      const child = await requestBodyCall({
+      const child = await requestForwardedAkumaCall({
         directory: requests,
         id: randomUUID(),
         world: this.path,
