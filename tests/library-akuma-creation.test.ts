@@ -16,8 +16,7 @@ import { akumaCallRequestCommands } from "../src/akuma/call-request.js";
 import { HeldAkumaLeash, initializeHeart, readSoul, type Soul } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
-import type { ProviderAdapter } from "../src/akuma/provider.js";
-import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
+import { AKUMA_REQUESTS_ENV, createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import { BodyRequestPump } from "../src/akuma/request-serve.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { publishDispatch, readDispatch } from "../src/dispatch/index.js";
@@ -549,25 +548,33 @@ test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async ()
       admitOptions(options) {
         return { kind: "admitted", options };
       },
-      async start() {
-        let finishEvents!: () => void;
-        const eventsFinished = new Promise<void>((resolve) => {
-          finishEvents = resolve;
-        });
-        return {
-          events: {
-            async *[Symbol.asyncIterator]() {
-              yield { type: "session" as const, coordinate: { sessionId: "parent-session" } };
+      start() {
+        return createProviderAttempt(undefined, async () => {
+          let finishEvents!: () => void;
+          const eventsFinished = new Promise<void>((resolve) => {
+            finishEvents = resolve;
+          });
+          return {
+            admission: { fence: "parent-session" },
+            events: {
+              async *[Symbol.asyncIterator]() {
+                yield { type: "session" as const, coordinate: { sessionId: "parent-session" } };
+                finishEvents();
+              },
+            },
+            completion: eventsFinished.then(() => ({
+              kind: "answered" as const,
+              answer: "done",
+              historyId: "history-1",
+            })),
+            async abort() {
               finishEvents();
             },
-          },
-          completion: eventsFinished.then(() => ({
-            kind: "answered" as const,
-            answer: "done",
-            historyId: "history-1",
-          })),
-          async abort() {},
-        };
+            async forceDispose() {
+              finishEvents();
+            },
+          };
+        });
       },
     },
     {
@@ -581,9 +588,9 @@ test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async ()
   const mutable = claudeProvider as MutableProvider;
   const originalFork = mutable.fork;
   try {
-    mutable.fork = async (input) => {
+    mutable.fork = (input) => {
       assert.equal(input.at, "history-1");
-      return { session: { sessionId: "child-session" } };
+      return createProviderAttempt(undefined, async () => ({ session: { sessionId: "child-session" } }));
     };
     const result = await Keiyaku.fork({ path: world, akuma: source.id, at: "turn/1", repo });
     assert.equal(result.kind, "forked", JSON.stringify(result));
