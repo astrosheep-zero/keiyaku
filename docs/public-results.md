@@ -172,13 +172,31 @@ type UnmetPrerequisite = Readonly<{
   state: "missing" | "active" | "abandoned"
 }>
 
+type GateCurrent =
+  | Readonly<{
+      kind: "attested"
+      verdict: "satisfied" | "unsatisfied"
+      summary?: string
+      at: string
+    }>
+  | Readonly<{ kind: "stale"; priorVerdict: "satisfied" | "unsatisfied" }>
+  | Readonly<{ kind: "missing" }>
+
+type GateReport = Readonly<{
+  gate: Gate
+  current: GateCurrent
+}>
+
 type PlacementRefusal = Readonly<{
   kind:
     | "contract-missing"
     | "delivery-missing"
     | "terminal"
-    | "gates-unsatisfied"
   contractId: ContractId
+}> | Readonly<{
+  kind: "gates-unsatisfied"
+  contractId: ContractId
+  unmet: readonly GateReport[]
 }> | Readonly<{
   kind: "prerequisites-unsatisfied"
   contractId: ContractId
@@ -460,6 +478,13 @@ order, each complete ContractId, and one `missing`, `active`, or `abandoned`
 category; claimed prerequisites do not appear. Protocol, Library, JSON, and
 text consume that same public value without another authority read or lifecycle
 derivation.
+
+`gates-unsatisfied` likewise carries the sole placement decision's nonempty
+ordered `unmet` collection. Each existing `GateReport` retains its opaque gate
+token and current union: attested verdict with its optional summary and entry
+time, stale prior verdict, or missing. Current satisfied reports are omitted.
+Protocol, Library, JSON, and text consume those reports unchanged; no later
+layer recomputes gate currency or creates a parallel gate-detail value.
 
 `KeiyakuRefused` and `KeiyakuRetry` retain the complete structured value and
 derive their machine code from its discriminant. They are reserved for

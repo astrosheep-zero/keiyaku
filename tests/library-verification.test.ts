@@ -204,9 +204,17 @@ test("a declaration timeout admits unsatisfied testimony and leaves placement to
   );
   assert.equal(gatedDelivery.facts.find((fact) => fact.kind === "attestation")?.data.verdict, "unsatisfied");
   assert.equal(gatedDelivery.value.verification, undefined);
-  assert.deepEqual(gatedDelivery.value.placement, {
-    refusal: { kind: "gates-unsatisfied", contractId: (await gated.keiyaku.state()).id },
-  });
+  const gatedPlacement = gatedDelivery.value.placement;
+  assert.equal(gatedPlacement?.refusal.kind, "gates-unsatisfied");
+  if (gatedPlacement?.refusal.kind !== "gates-unsatisfied") return;
+  assert.deepEqual(
+    gatedPlacement.refusal.unmet.map(({ gate, current }) => ({
+      gate,
+      kind: current.kind,
+      verdict: current.kind === "attested" ? current.verdict : undefined,
+    })),
+    [{ gate: "verified", kind: "attested", verdict: "unsatisfied" }],
+  );
   assert.match(gatedDelivery.value.verificationSummary ?? "", /timeout after 25ms/);
   const accepted = acceptedDeliver(gatedDelivery, gated.keiyaku.id);
   assert.match(accepted.verificationSummary ?? "", /timeout after 25ms/);

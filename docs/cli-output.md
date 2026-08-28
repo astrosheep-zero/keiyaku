@@ -278,9 +278,9 @@ typed invocation fields only and never rereads authority.
 
   target -> <SnapshotId> [· verified (ran|reused)]
 ✓ continuation complete <complete kei/...>
-! continuation blocked <complete kei/...> · <typed stop summary>
 ! verification unsatisfied (ran|reused) · not required by Contract gates
-! completion blocked · <typed reason and exact scalar facts>
+! <direct Verification or placement cause and exact scalar facts>
+! <complete dependent ContractId> · <direct placement cause>
 ~ workspace <N files changed, N insertions(+), N deletions(-)>
   staged <complete path>
 ~ overlap <warning or witness>
@@ -297,11 +297,11 @@ terms diff
 ? <retry kind and exact diagnostic facts>
 ```
 
-A prerequisite completion stop is one completion row followed by the received
-public collection in its existing order:
+A direct prerequisite stop is followed by the received public collection in
+its existing order:
 
 ```text
-! completion blocked · prerequisites-unsatisfied
+! prerequisites unsatisfied
   prerequisite <complete kei/...> · <missing|active|abandoned>
 ```
 
@@ -309,8 +309,27 @@ The renderer prints each typed `unmet` member exactly once. It does not read
 the board, inspect a Contract, or derive a lifecycle category; JSON serializes
 that same public collection unchanged.
 
-A `checkout-not-followable` completion stop keeps its ordinary completion row,
-then renders exactly this typed-refusal block:
+A direct gate stop projects the exact reports supplied by placement, in their
+typed order:
+
+```text
+! gates unsatisfied
+  gate <gate> · unsatisfied · at=<timestamp>
+  summary <gate>
+
+<exact bounded summary bytes>
+
+  gate <gate> · stale · prior=<satisfied|unsatisfied>
+  gate <gate> · missing
+```
+
+Only the applicable gate rows render. An attested-unsatisfied row includes its
+typed entry timestamp once. The summary uses the ordinary opaque payload grammar
+once; gate tokens and payload bytes remain opaque. Text never reads a Contract,
+status, journal, Git, or gate evidence to derive these rows.
+
+A direct `checkout-not-followable` stop renders exactly this typed-refusal
+block:
 
 ```text
 ! checkout-not-followable
@@ -324,22 +343,26 @@ then renders exactly this typed-refusal block:
 Paths stay in their typed order, each quoted and escaped; an empty collection
 renders exactly `  paths: (none)` with no list items. This renderer performs no
 Git or filesystem read and JSON preserves the original refusal unchanged.
+A stopped continuation precedes that unchanged block with
+`! continuation <complete kei/...>` so its dependent identity remains visible;
+the context row is not a second cause.
 
 Bind reports its typed workspace coordinate and optional target; a missing
 target renders `no target`. Amend places the exact `terms diff` immediately
 after its first line because the diff is its product answer, not mechanical
 record. Deliver and review are complete exactly when their typed `completion`
-exists, which is the final placement answer. Otherwise each says `candidate
-kept`, reports any typed Verification stop, and names the typed completion stop
-without exposing the internal `placement` channel name. A claimed result with
-Verification satisfied renders `target -> <integration> · verified (ran|reused)`;
+exists, which is the final placement answer. Otherwise each projects its typed
+Verification or placement stop directly, then says `candidate kept`, without
+exposing the internal `placement` channel name or a generic blocked wrapper. A
+claimed result with Verification satisfied renders `target -> <integration> · verified (ran|reused)`;
 without an applicable declaration it renders `target -> <integration>`; an
 unsatisfied non-gating Verification renders the target followed by its typed
 unsatisfied row and bounded summary. Movement adds only the neutral deviation
 row. Review's first line includes its admitted review verdict and completion
-state without a second Contract-status row. Continuation rows use `complete`
-and `blocked` as consequence states; the journal's `claimed` word remains in the
-record only. Arc reports its typed sequence and
+state without a second Contract-status row. A stopped continuation projects the
+same direct placement cause after its complete dependent ContractId; an
+`already-terminal` continuation projects directly. The journal's `claimed` word
+remains in the record only. Arc reports its typed sequence and
 title as `chapter <N> · <title>`.
 Abandon reports its optional note and only the explicit workspace and recovery
 snapshot effects that occurred. Audit reports candidate, Verification, and

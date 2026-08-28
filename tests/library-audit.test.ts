@@ -76,9 +76,17 @@ test("unchanged deliver reuses unsatisfied pre-delivery audit Verification", asy
     delivered.facts.some((fact) => fact.kind === "attestation"),
     false,
   );
-  assert.deepEqual(delivered.value.placement, {
-    refusal: { kind: "gates-unsatisfied", contractId: (await contract.state()).id },
-  });
+  const placement = delivered.value.placement;
+  assert.equal(placement?.refusal.kind, "gates-unsatisfied");
+  if (placement?.refusal.kind !== "gates-unsatisfied") return;
+  assert.deepEqual(
+    placement.refusal.unmet.map(({ gate, current }) => ({
+      gate,
+      kind: current.kind,
+      verdict: current.kind === "attested" ? current.verdict : undefined,
+    })),
+    [{ gate: "verified", kind: "attested", verdict: "unsatisfied" }],
+  );
   const observed = await Keiyaku.observe({
     repo: await cachedRepoAt(repository.path),
     id: (await contract.state()).id,

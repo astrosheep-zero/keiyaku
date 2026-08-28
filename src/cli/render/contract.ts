@@ -23,7 +23,6 @@ import {
   receiptRow,
   reuseLines,
   stopLines,
-  stopSummary,
   titleLines,
 } from "./receipt.js";
 import { gitShortStat, renderOpaqueBlock, type TextRenderContext } from "./terminal.js";
@@ -369,14 +368,8 @@ function continuationLines(result: AcceptedDeliverResult | AcceptedReviewResult,
     receiptRow(lines, "✓", "continuation", [{ text: "complete" }, { text: contractId, opaque: true }], columns);
   }
   for (const { contractId, stop } of report.stopped) {
-    const detail = "kind" in stop ? [{ text: stop.kind }] : stopSummary(stop, contractId);
-    receiptRow(
-      lines,
-      "!",
-      "continuation",
-      [{ text: "blocked" }, { text: contractId, opaque: true }, { text: "·" }, ...detail],
-      columns,
-    );
+    if ("kind" in stop) receiptRow(lines, "!", contractId, [{ text: "· already terminal" }], columns);
+    else lines.push(...stopLines(stop, columns, contractId, contractId));
   }
   return lines;
 }
@@ -411,18 +404,15 @@ function renderAcceptedDeliver(result: AcceptedDeliverResult, columns: number): 
   const complete = result.completion !== undefined;
   const title = complete ? "delivered" : "deliver — not complete";
   const lines = titleLines("✓", title, result.contract, columns);
-  lines.push(
-    ...movementLines(result, columns),
-    ...completionLines(result, columns),
-    ...continuationLines(result, columns),
-  );
-  if (!complete) receiptRow(lines, " ", "candidate", [{ text: "kept" }], columns);
+  lines.push(...movementLines(result, columns), ...completionLines(result, columns));
   if (result.verification !== undefined) {
-    lines.push(...stopLines("verification", result.verification, columns, result.contract));
+    lines.push(...stopLines(result.verification, columns, result.contract));
   }
   if (!complete && result.placement !== undefined) {
-    lines.push(...stopLines("completion", result.placement, columns, result.contract));
+    lines.push(...stopLines(result.placement, columns, result.contract));
   }
+  if (!complete) receiptRow(lines, " ", "candidate", [{ text: "kept" }], columns);
+  lines.push(...continuationLines(result, columns));
   if (result.cleanup !== undefined) pushBlock(lines, cleanupLines(result.cleanup, columns));
   if (result.leak !== undefined) pushBlock(lines, leakLines(result.leak, columns));
   lines.push(...recordBlock(result, columns));
@@ -437,18 +427,15 @@ function renderAcceptedReview(result: AcceptedReviewResult, columns: number): st
     result.contract,
     columns,
   );
-  lines.push(
-    ...movementLines(result, columns),
-    ...completionLines(result, columns),
-    ...continuationLines(result, columns),
-  );
-  if (!complete) receiptRow(lines, " ", "candidate", [{ text: "kept" }], columns);
-  if (result.placement !== undefined) {
-    lines.push(...stopLines("completion", result.placement, columns, result.contract));
-  }
+  lines.push(...movementLines(result, columns), ...completionLines(result, columns));
   if (result.verification !== undefined) {
-    lines.push(...stopLines("verification", result.verification, columns, result.contract));
+    lines.push(...stopLines(result.verification, columns, result.contract));
   }
+  if (result.placement !== undefined) {
+    lines.push(...stopLines(result.placement, columns, result.contract));
+  }
+  if (!complete) receiptRow(lines, " ", "candidate", [{ text: "kept" }], columns);
+  lines.push(...continuationLines(result, columns));
   if (result.cleanup !== undefined) pushBlock(lines, cleanupLines(result.cleanup, columns));
   if (result.leak !== undefined) pushBlock(lines, leakLines(result.leak, columns));
   lines.push(...acceptedDeviations(result, columns), ...recordBlock(result, columns));

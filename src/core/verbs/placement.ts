@@ -1,4 +1,4 @@
-import { gatesSatisfied } from "../facts/gate.js";
+import { gateReports, type GateReport } from "../facts/gate.js";
 import { activeContract, contractState } from "../facts/observation.js";
 import type { ActorId, ContractId, ContractState, JournalEntry } from "../facts/types.js";
 import type { DecideInput, OfferDecision } from "../decide.js";
@@ -16,8 +16,13 @@ export type UnmetPrerequisite = Readonly<{
 
 export type PlacementRefusal =
   | Readonly<{
-      kind: "contract-missing" | "delivery-missing" | "terminal" | "gates-unsatisfied";
+      kind: "contract-missing" | "delivery-missing" | "terminal";
       contractId: ContractId;
+    }>
+  | Readonly<{
+      kind: "gates-unsatisfied";
+      contractId: ContractId;
+      unmet: readonly GateReport[];
     }>
   | Readonly<{
       kind: "prerequisites-unsatisfied";
@@ -60,8 +65,12 @@ export function decidePlacement({
   if (unmet.length > 0) {
     return { kind: "refused", refusal: { kind: "prerequisites-unsatisfied", contractId: id, unmet } };
   }
-  if (!gatesSatisfied(current)) {
-    return { kind: "refused", refusal: { kind: "gates-unsatisfied", contractId: id } };
+  const gates = gateReports(current);
+  if (!gates.satisfied) {
+    const unmetGates = gates.reports.filter(
+      (report) => report.current.kind !== "attested" || report.current.verdict !== "satisfied",
+    );
+    return { kind: "refused", refusal: { kind: "gates-unsatisfied", contractId: id, unmet: unmetGates } };
   }
 
   const claimed: JournalEntry = {

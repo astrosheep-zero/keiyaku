@@ -45,6 +45,12 @@ null observation, `abandoned` for an abandoned terminal, and `active` for every
 other non-claimed state. Claimed prerequisites are omitted, and this refusal
 always has a nonempty `unmet` collection. No later layer rereads Contract
 authority or adjudicates those categories.
+For `gates-unsatisfied`, that same sole adjudicator derives a nonempty ordered
+`unmet` collection from its one current gate-report projection. Every report
+whose current evidence is not an attested satisfied verdict remains in declared
+order with its existing attested-unsatisfied, stale, or missing union; current
+satisfied reports are omitted. No later layer rereads gate evidence, derives
+currency, or replaces these reports with another gate-detail value.
 Admitting testimony does not itself invoke placement; `deliver` and a satisfied
 `review` explicitly request it as a later protocol step. A successful placement
 also continues already-delivered direct dependents whose current prerequisites

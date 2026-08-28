@@ -700,12 +700,16 @@ test("a stopped continuation does not block an eligible sibling", async () => {
   const delivered = await prerequisite.keiyaku.deliver();
 
   assert.deepEqual(delivered.value.continuation?.claimed, [eligible.keiyaku.id]);
-  assert.deepEqual(delivered.value.continuation?.stopped, [
-    {
-      contractId: blocked.keiyaku.id,
-      stop: { refusal: { kind: "gates-unsatisfied", contractId: blocked.keiyaku.id } },
-    },
-  ]);
+  const stopped = delivered.value.continuation?.stopped;
+  assert.equal(stopped?.length, 1);
+  const blockedStop = stopped?.[0];
+  assert.equal(blockedStop?.contractId, blocked.keiyaku.id);
+  assert.equal(
+    "kind" in (blockedStop?.stop ?? {}) ? undefined : blockedStop?.stop.refusal.kind,
+    "gates-unsatisfied",
+  );
+  if (blockedStop === undefined || "kind" in blockedStop.stop || blockedStop.stop.refusal.kind !== "gates-unsatisfied") return;
+  assert.deepEqual(blockedStop.stop.refusal.unmet, [{ gate: "reviewed", current: { kind: "missing" } }]);
   assert.equal((await prerequisite.keiyaku.state()).terminal?.kind, "claimed");
   assert.equal((await eligible.keiyaku.state()).terminal?.kind, "claimed");
   assert.equal((await blocked.keiyaku.state()).terminal, null);

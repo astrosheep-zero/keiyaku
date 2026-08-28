@@ -334,7 +334,7 @@ test("accepted receipts omit unchanged refs and Contract files without changing 
   assert.deepEqual(JSON.parse(JSON.stringify(result)).effects, result.effects);
 });
 
-test("completion stops render the public unmet prerequisites in order", () => {
+test("direct placement stops render the public unmet prerequisites in order", () => {
   const contract = contractId("kei/waiting-on-prerequisites");
   const unmet = [
     { contractId: contractId("kei/active-prerequisite"), state: "active" as const },
@@ -358,11 +358,11 @@ test("completion stops render the public unmet prerequisites in order", () => {
     renderText(deliver),
     [
       "✓ deliver — not complete — kei/waiting-on-prerequisites",
-      "  candidate kept",
-      "! completion blocked · prerequisites-unsatisfied",
+      "! prerequisites unsatisfied",
       "  prerequisite kei/active-prerequisite · active",
       "  prerequisite kei/abandoned-prerequisite · abandoned",
       "  prerequisite kei/missing-prerequisite · missing",
+      "  candidate kept",
       "  record",
       "    head head",
     ].join("\n"),
@@ -373,11 +373,59 @@ test("completion stops render the public unmet prerequisites in order", () => {
     renderText(review),
     [
       "✓ review satisfied — not complete — kei/waiting-on-prerequisites",
-      "  candidate kept",
-      "! completion blocked · prerequisites-unsatisfied",
+      "! prerequisites unsatisfied",
       "  prerequisite kei/active-prerequisite · active",
       "  prerequisite kei/abandoned-prerequisite · abandoned",
       "  prerequisite kei/missing-prerequisite · missing",
+      "  candidate kept",
+      "  record",
+      "    head head",
+    ].join("\n"),
+  );
+});
+
+test("direct gate stops render the sole placement report without another read", () => {
+  const contract = contractId("kei/waiting-on-gates");
+  assert.equal(
+    renderText({
+      kind: "accepted",
+      verb: "deliver",
+      contract,
+      head: contractHead("head"),
+      facts: [],
+      effects: [],
+      settlement: { actions: [], lags: [] },
+      placement: {
+        refusal: {
+          kind: "gates-unsatisfied",
+          contractId: contract,
+          unmet: [
+            {
+              gate: "verified",
+              current: {
+                kind: "attested",
+                verdict: "unsatisfied",
+                summary: "[1 bash exit 1]",
+                at: "2026-08-01T00:00:00.000Z",
+              },
+            },
+            { gate: "reviewed", current: { kind: "stale", priorVerdict: "satisfied" } },
+            { gate: "manual", current: { kind: "missing" } },
+          ],
+        },
+      },
+    }),
+    [
+      "✓ deliver — not complete — kei/waiting-on-gates",
+      "! gates unsatisfied",
+      "  gate verified · unsatisfied · at=2026-08-01T00:00:00.000Z",
+      "  summary verified",
+      "",
+      "[1 bash exit 1]",
+      "",
+      "  gate reviewed · stale · prior=satisfied",
+      "  gate manual · missing",
+      "  candidate kept",
       "  record",
       "    head head",
     ].join("\n"),
@@ -483,6 +531,54 @@ test("direct checkout refusal uses the same exact fact block", () => {
   );
 });
 
+test("continuation checkout stop keeps its exact block after the dependent context", () => {
+  const contract = contractId("kei/prerequisite-checkout");
+  const dependent = contractId("kei/stopped-checkout-dependent");
+  assert.equal(
+    renderText({
+      kind: "accepted",
+      verb: "deliver",
+      contract,
+      head: contractHead("head"),
+      facts: [],
+      effects: [],
+      settlement: { actions: [], lags: [] },
+      completion: { integration: snapshotId("integration") },
+      continuation: {
+        claimed: [],
+        stopped: [
+          {
+            contractId: dependent,
+            stop: {
+              refusal: {
+                kind: "checkout-not-followable",
+                contractId: dependent,
+                target: "refs/heads/main",
+                path: "/repo/checkout",
+                reason: "untracked",
+                paths: ['quote"path.ts'],
+              },
+            },
+          },
+        ],
+      },
+    }),
+    [
+      "✓ delivered — kei/prerequisite-checkout",
+      "  target -> integration",
+      "! continuation kei/stopped-checkout-dependent",
+      "! checkout-not-followable",
+      "  checkout: /repo/checkout",
+      "  target: refs/heads/main",
+      "  reason: untracked",
+      "  paths:",
+      '    - "quote\\"path.ts"',
+      "  record",
+      "    head head",
+    ].join("\n"),
+  );
+});
+
 test("deliver projects a ran Verification completion", () => {
   const contract = contractId("kei/completion");
   const integration = snapshotId("integration-1");
@@ -529,7 +625,13 @@ test("deliver renders claimed and stopped continuations from the accepted result
         stopped: [
           {
             contractId: stopped,
-            stop: { refusal: { kind: "gates-unsatisfied", contractId: stopped } },
+            stop: {
+              refusal: {
+                kind: "gates-unsatisfied",
+                contractId: stopped,
+                unmet: [{ gate: "reviewed", current: { kind: "missing" } }],
+              },
+            },
           },
         ],
       },
@@ -538,7 +640,8 @@ test("deliver renders claimed and stopped continuations from the accepted result
       "✓ delivered — kei/prerequisite",
       "  target -> integration",
       "✓ continuation complete kei/claimed-dependent",
-      "! continuation blocked kei/stopped-dependent · gates-unsatisfied",
+      "! kei/stopped-dependent · gates unsatisfied",
+      "  gate reviewed · missing",
       "  record",
       "    head head",
     ].join("\n"),
@@ -720,9 +823,8 @@ test("movement projects its deviation and reintegration coordinates", () => {
     [
       "✓ deliver — not complete — kei/reintegrated",
       "~ target moved · re-integrated x2",
+      "! target moved refs/heads/main integration-2 -> null attempts=3",
       "  candidate kept",
-      "! completion blocked · target-moved refs/heads/main integration-2 -> null",
-      "  attempts=3",
       "  record",
       "    journal reintegration · reintegrated target-1 -> integration-2",
       "    journal reintegration-2 · reintegrated target-3 -> integration-4",

@@ -53,7 +53,7 @@ function verificationLines(
     return lines;
   }
   if (verification.kind === "stopped") {
-    return stopLines("verification", verification.stop, columns, addressed);
+    return stopLines(verification.stop, columns, addressed);
   }
   receiptRow(
     lines,
