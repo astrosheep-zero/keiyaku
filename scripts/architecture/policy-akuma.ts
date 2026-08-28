@@ -153,6 +153,7 @@ export const akumaZones = [
   {
     source: "akuma/providers/acp/index.ts",
     allow: [
+      any("akuma/provider.ts", ["createProviderAttempt"]),
       types("akuma/provider.ts"),
       types("akuma/provider-recipe.ts"),
       any("akuma/providers/acp/config.ts"),
@@ -161,7 +162,12 @@ export const akumaZones = [
   },
   {
     source: "akuma/providers/grok-build/index.ts",
-    allow: [types("akuma/provider.ts"), types("akuma/provider-recipe.ts"), any("akuma/providers/acp/core.ts")],
+    allow: [
+      any("akuma/provider.ts", ["createProviderAttempt"]),
+      types("akuma/provider.ts"),
+      types("akuma/provider-recipe.ts"),
+      any("akuma/providers/acp/core.ts"),
+    ],
   },
   {
     source: "akuma/providers/codex-app-server/events.ts",
@@ -335,7 +341,14 @@ export const akumaZones = [
         "TellFact",
       ]),
       types("akuma/identity.ts"),
-      any("akuma/provider.ts", ["AgentEvent", "encodeAgentEvent", "ProviderAdapter", "Session", "TurnResult"]),
+      any("akuma/provider.ts", [
+        "AgentEvent",
+        "encodeAgentEvent",
+        "ProviderAdapter",
+        "ProviderAttempt",
+        "Session",
+        "TurnResult",
+      ]),
       types("akuma/call-request.ts", ["AkumaCallRequestChildLaunch"]),
       any("akuma/request-serve.ts", ["BodyRequestPump"]),
       types("akuma/request-wire.ts", ["ErasedRequestCommand"]),

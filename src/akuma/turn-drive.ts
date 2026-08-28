@@ -1,4 +1,6 @@
 import { abortableDelay } from "./abort.js";
+
+/* eslint-disable max-lines-per-function -- Turn setup and consumption each preserve one ordered lifecycle transaction. */
 import {
   appendActivity,
   beginTurn,
@@ -13,7 +15,14 @@ import {
   type TellFact,
 } from "./heart/index.js";
 import type { AkumaPaths } from "./identity.js";
-import { encodeAgentEvent, type AgentEvent, type ProviderAdapter, type Session, type TurnResult } from "./provider.js";
+import {
+  encodeAgentEvent,
+  type AgentEvent,
+  type ProviderAdapter,
+  type ProviderAttempt,
+  type Session,
+  type TurnResult,
+} from "./provider.js";
 import type { AkumaCallRequestChildLaunch } from "./call-request.js";
 import { BodyRequestPump } from "./request-serve.js";
 import type { ErasedRequestCommand } from "./request-wire.js";
@@ -82,6 +91,7 @@ export type DriveTurnInput = Readonly<{
 
 type ActiveTurn = Readonly<{
   turnSequence: number;
+  attempt: ProviderAttempt<Session>;
   drive: Session;
   requests: BodyRequestPump;
   cwd: string;
@@ -181,15 +191,15 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
     signal: driveController.signal,
     requests: { dir: requests.directory },
   };
-  const setup =
+  const attempt =
     session === undefined
       ? input.adapter.start({ ...driveInput, session: { kind: "fresh" } })
       : input.adapter.resume!({ ...driveInput, session: { kind: "resume", coordinate: session } });
   try {
-    const selected = await Promise.race([setup, requests.failure]);
+    const selected = await Promise.race([attempt.result, requests.failure]);
     if (input.supervisor.signal.aborted) {
       try {
-        const retirement = await retireProviderCustody(input, turn.sequence, selected);
+        const retirement = await retireProviderCustody(input, turn.sequence, attempt);
         await requests.close();
         if (retirement.kind === "hung") return retirement;
       } finally {
@@ -214,6 +224,7 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
     );
     return {
       turnSequence: turn.sequence,
+      attempt,
       drive: selected,
       requests,
       cwd,
@@ -222,11 +233,24 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
       ...(session === undefined ? {} : { resume: session }),
     };
   } catch (error) {
+    const retirement = await retireProviderCustody(input, turn.sequence, attempt);
+    if (retirement.kind === "hung") {
+      try {
+        await requests.close();
+      } finally {
+        input.supervisor.signal.removeEventListener("abort", cancelDrive);
+      }
+      return retirement;
+    }
     return await failedTurnSetup(input, turn.sequence, requests, cancelDrive, error);
   }
 }
 
-async function retireProviderCustody(input: DriveTurnInput, turnSequence: number, drive: Session): Promise<Retirement> {
+async function retireProviderCustody(
+  input: DriveTurnInput,
+  turnSequence: number,
+  attempt: ProviderAttempt<Session>,
+): Promise<Retirement> {
   const dispose = async (
     operation: () => Promise<void>,
   ): Promise<Readonly<{ kind: "retired" }> | Readonly<{ kind: "held"; error: unknown }>> =>
@@ -234,7 +258,7 @@ async function retireProviderCustody(input: DriveTurnInput, turnSequence: number
       operation().then(
         async () => {
           try {
-            await drive.lateDisposal?.();
+            await attempt.closed;
             return { kind: "retired" as const };
           } catch (error: unknown) {
             return { kind: "held" as const, error };
@@ -247,23 +271,10 @@ async function retireProviderCustody(input: DriveTurnInput, turnSequence: number
         error: new Error(`provider custody remained live after ${CONTROL_RESPONSE_MS}ms`),
       })),
     ]);
-  let outcome = await dispose(drive.abort);
+  let outcome = await dispose(attempt.abort);
   if (outcome.kind === "retired") return outcome;
-  const firstError = outcome.error;
-  outcome = await dispose(drive.forceDispose);
-  if (outcome.kind === "retired") {
-    outcome = { kind: "held", error: firstError };
-  } else if (outcome.error !== firstError) {
-    outcome = {
-      kind: "held",
-      error: new Error(
-        `${firstError instanceof Error ? firstError.message : String(firstError)}; ${
-          outcome.error instanceof Error ? outcome.error.message : String(outcome.error)
-        }`,
-        { cause: firstError },
-      ),
-    };
-  }
+  outcome = await dispose(attempt.forceDispose);
+  if (outcome.kind === "retired") return outcome;
   if (await heartExists(input.paths)) {
     const diagnostic = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
     const at = input.now();
@@ -347,7 +358,7 @@ async function submitPendingLiveTells(
 
 async function stopActiveDrive(input: DriveTurnInput, active: ActiveTurn): Promise<Retirement> {
   try {
-    const retirement = await retireProviderCustody(input, active.turnSequence, active.drive);
+    const retirement = await retireProviderCustody(input, active.turnSequence, active.attempt);
     await active.requests.close();
     return retirement;
   } finally {
@@ -435,6 +446,7 @@ async function consumeTurnDrive(input: DriveTurnInput, active: ActiveTurn): Prom
       pending = iterator.next();
     }
     const result = await drive.completion;
+    await active.attempt.closed;
     if (tellPump !== null) await tellPump;
     await writeWitness.drain();
     writesOpen = false;
@@ -445,7 +457,7 @@ async function consumeTurnDrive(input: DriveTurnInput, active: ActiveTurn): Prom
       const retirement = await stopActiveDrive(input, active);
       return retirement.kind === "hung" ? retirement : { kind: "stopped" };
     }
-    const retirement = await retireProviderCustody(input, turnSequence, drive);
+    const retirement = await retireProviderCustody(input, turnSequence, active.attempt);
     try {
       await requests.close();
     } catch {

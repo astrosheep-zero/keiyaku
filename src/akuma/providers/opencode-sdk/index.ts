@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { abortable, awaitLateDisposal } from "../../abort.js";
 import {
   AKUMA_REQUESTS_ENV,
   AgentEventChannel,
+  createProviderAttempt,
+  type AttemptCustody,
   type ProviderAdapter,
   type Session,
   type TurnResult,
@@ -244,35 +245,45 @@ async function loadDriveRuntime(
   input: Input,
   signal: AbortSignal,
   loader?: OpencodeSdkLoader,
+  onRuntime?: (runtime: OpencodeRuntime) => void,
 ): Promise<OpencodeRuntime> {
-  try {
-    return await abortable(
-      loadOpencode(
-        {
-          ...execution,
-          env: {
-            ...execution.env,
-            ...(input.requests === undefined ? {} : { [AKUMA_REQUESTS_ENV]: input.requests.dir }),
-          },
-        },
-        input.cwd,
-        signal,
-        loader,
-      ),
-      signal,
-      async (late) => await late.close(),
-    );
-  } catch (error) {
-    try {
-      await awaitLateDisposal(signal);
-    } catch (lateError) {
-      throw new Error(
-        `${error instanceof Error ? error.message : String(error)}; provider late disposal failed: ${lateError instanceof Error ? lateError.message : String(lateError)}`,
-        { cause: error },
-      );
-    }
-    throw error;
+  const runtime = await loadOpencode(
+    {
+      ...execution,
+      env: {
+        ...execution.env,
+        ...(input.requests === undefined ? {} : { [AKUMA_REQUESTS_ENV]: input.requests.dir }),
+      },
+    },
+    input.cwd,
+    signal,
+    loader,
+    onRuntime,
+  );
+  if (signal.aborted) {
+    await runtime.close();
+    signal.throwIfAborted();
   }
+  return runtime;
+}
+
+function ownRuntime(custody: AttemptCustody | undefined, runtime: OpencodeRuntime): () => Promise<void> {
+  let closing: Promise<void> | undefined;
+  let settleRuntimeClosed!: () => void;
+  let rejectRuntimeClosed!: (reason?: unknown) => void;
+  const runtimeClosed = new Promise<void>((resolve, reject) => {
+    settleRuntimeClosed = resolve;
+    rejectRuntimeClosed = reject;
+  });
+  const close = (): Promise<void> => {
+    if (closing === undefined) {
+      closing = runtime.close();
+      void closing.then(settleRuntimeClosed, rejectRuntimeClosed);
+    }
+    return closing;
+  };
+  custody?.own({ closed: runtimeClosed, abort: close, forceDispose: close });
+  return close;
 }
 
 async function openDriveSession(
@@ -282,19 +293,22 @@ async function openDriveSession(
   signal: AbortSignal,
 ): Promise<Readonly<{ session: OpencodeRuntime["client"]["session"]; sessionId: string }>> {
   const session = runtime.client.session;
-  const response = await abortable(
-    input.session.kind === "fresh"
-      ? session.create({ query: { directory: input.cwd }, throwOnError: true })
-      : session.get({ path: { id: resumeSessionId! }, query: { directory: input.cwd }, throwOnError: true }),
-    signal,
-  );
+  const response = await (input.session.kind === "fresh"
+    ? session.create({ query: { directory: input.cwd }, throwOnError: true })
+    : session.get({ path: { id: resumeSessionId! }, query: { directory: input.cwd }, throwOnError: true }));
+  signal.throwIfAborted();
   const info = object(object(response)?.data) ?? object(response);
   const sessionId = text(info?.id) ?? resumeSessionId;
   if (sessionId === undefined) throw new Error("OpenCode did not return a session id");
   return { session, sessionId };
 }
 
-async function drive(execution: ProviderExecution, input: Input, loader?: OpencodeSdkLoader): Promise<Session> {
+async function drive(
+  execution: ProviderExecution,
+  input: Input,
+  loader?: OpencodeSdkLoader,
+  custody?: AttemptCustody,
+): Promise<Session> {
   admit(input.options);
   const signal = input.signal ?? new AbortController().signal;
   const resumeSessionId = input.session.kind === "resume" ? opencodeSessionId(input.session.coordinate) : undefined;
@@ -302,13 +316,11 @@ async function drive(execution: ProviderExecution, input: Input, loader?: Openco
   const abortSetup = () => abortController.abort(signal.reason);
   signal.addEventListener("abort", abortSetup, { once: true });
   signal.throwIfAborted();
-  const runtime = await loadDriveRuntime(execution, input, abortController.signal, loader);
-  let closing: Promise<void> | undefined;
+  let closeOnce!: () => Promise<void>;
+  const runtime = await loadDriveRuntime(execution, input, abortController.signal, loader, (ready) => {
+    closeOnce = ownRuntime(custody, ready);
+  });
   let iterator: AsyncIterator<unknown> | undefined;
-  const closeOnce = (): Promise<void> => {
-    closing ??= runtime.close();
-    return closing;
-  };
   try {
     const { session, sessionId } = await openDriveSession(runtime, input, resumeSessionId, abortController.signal);
 
@@ -317,13 +329,11 @@ async function drive(execution: ProviderExecution, input: Input, loader?: Openco
     const messageID = `msg_${randomUUID().replaceAll("-", "")}`;
     const submissionState = { started: false };
     events.emit({ type: "session", coordinate: coordinate(sessionId) });
-    const streamResult = await abortable(
-      runtime.client.event.subscribe({ query: { directory: input.cwd } }),
-      abortController.signal,
-      async (late) => {
-        await late.stream[Symbol.asyncIterator]().return?.(undefined);
-      },
-    );
+    const streamResult = await runtime.client.event.subscribe({ query: { directory: input.cwd } });
+    if (abortController.signal.aborted) {
+      await streamResult.stream[Symbol.asyncIterator]().return?.(undefined);
+      abortController.signal.throwIfAborted();
+    }
     iterator = streamResult.stream[Symbol.asyncIterator]();
     const { completion, finish } = terminalSettlement(events, closeOnce);
     const observation = observeTurn({
@@ -337,22 +347,19 @@ async function drive(execution: ProviderExecution, input: Input, loader?: Openco
       submissionState,
     });
     submissionState.started = true;
-    await abortable(
-      session.promptAsync({
-        path: { id: sessionId },
-        query: { directory: input.cwd },
-        body: promptBody(input, messageID),
-        throwOnError: true,
-      }),
-      abortController.signal,
-    );
+    await session.promptAsync({
+      path: { id: sessionId },
+      query: { directory: input.cwd },
+      body: promptBody(input, messageID),
+      throwOnError: true,
+    });
+    abortController.signal.throwIfAborted();
     void observation.then(finish);
     signal.removeEventListener("abort", abortSetup);
     return {
       admission: { fence: sessionId },
       events,
       completion,
-      lateDisposal: () => awaitLateDisposal(abortController.signal),
       abort: async () => {
         abortController.abort();
         void session
@@ -395,24 +402,50 @@ export function createOpencodeProvider(
             }),
       };
     },
-    start: (input) => drive(execution, input, loader),
-    resume: (input) => drive(execution, input, loader),
-    fork: async (input: { session: ResumeCoordinate; at: string; cwd: string }) => {
-      const sessionId = opencodeSessionId(input.session);
-      const runtime = await loadOpencode(execution, input.cwd, new AbortController().signal, loader);
-      try {
-        const result = await runtime.client.session.fork({
-          path: { id: sessionId },
-          query: { directory: input.cwd },
-          body: { messageID: input.at },
+    start: (input) =>
+      createProviderAttempt(
+        input.signal,
+        async (custody) => await drive(execution, { ...input, signal: custody.signal }, loader, custody),
+      ),
+    resume: (input) =>
+      createProviderAttempt(
+        input.signal,
+        async (custody) => await drive(execution, { ...input, signal: custody.signal }, loader, custody),
+      ),
+    fork: (input: { session: ResumeCoordinate; at: string; cwd: string }) =>
+      createProviderAttempt(new AbortController().signal, async (custody) => {
+        const sessionId = opencodeSessionId(input.session);
+        let close!: () => Promise<void>;
+        const runtime = await loadOpencode(execution, input.cwd, custody.signal, loader, (ready) => {
+          let closing: Promise<void> | undefined;
+          let settleRuntimeClosed!: () => void;
+          let rejectRuntimeClosed!: (reason?: unknown) => void;
+          const runtimeClosed = new Promise<void>((resolve, reject) => {
+            settleRuntimeClosed = resolve;
+            rejectRuntimeClosed = reject;
+          });
+          close = (): Promise<void> => {
+            if (closing === undefined) {
+              closing = ready.close();
+              void closing.then(settleRuntimeClosed, rejectRuntimeClosed);
+            }
+            return closing;
+          };
+          custody.own({ closed: runtimeClosed, abort: close, forceDispose: close });
         });
-        const info = object(object(result)?.data) ?? object(result);
-        const id = text(info?.id);
-        if (id === undefined || id === sessionId) throw new Error("OpenCode fork returned an invalid session id");
-        return { session: coordinate(id) };
-      } finally {
-        await runtime.close();
-      }
-    },
+        try {
+          const result = await runtime.client.session.fork({
+            path: { id: sessionId },
+            query: { directory: input.cwd },
+            body: { messageID: input.at },
+          });
+          const info = object(object(result)?.data) ?? object(result);
+          const id = text(info?.id);
+          if (id === undefined || id === sessionId) throw new Error("OpenCode fork returned an invalid session id");
+          return { session: coordinate(id) };
+        } finally {
+          await close();
+        }
+      }),
   };
 }

@@ -1,4 +1,5 @@
-import type { ProviderAdapter, ProviderOptionAdmission } from "../../provider.js";
+import { createProviderAttempt } from "../../provider.js";
+import type { AttemptCustody, ProviderAdapter, ProviderOptionAdmission } from "../../provider.js";
 import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
 import { decodeAcpConfig, type AcpExecutionConfig } from "./config.js";
 import { startAcpSession, type AcpDependencies, type AcpStartInput } from "./core.js";
@@ -59,16 +60,24 @@ function argv(
 export function createAcpProvider(execution: ProviderExecution, dependencies: AcpDependencies = {}): ProviderAdapter {
   if (execution.executable === undefined) throw new TypeError("ACP provider execution requires executable");
   const config = decodeAcpConfig(execution.config);
-  const drive = async (input: AcpStartInput) => {
+  const drive = async (input: AcpStartInput, custody: AttemptCustody) => {
     const launch = {
       argv: argv(execution, config, input.options),
       ...(execution.env === undefined ? {} : { env: execution.env }),
     };
-    return (await startAcpSession(launch, input, dependencies)).session;
+    return (await startAcpSession(launch, input, dependencies, custody)).session;
   };
   return {
     admitOptions: (options) => optionAdmission(options, config),
-    start: async (input) => await drive(input),
-    resume: async (input) => await drive(input),
+    start: (input) =>
+      createProviderAttempt(
+        input.signal,
+        async (custody) => await drive({ ...input, signal: custody.signal }, custody),
+      ),
+    resume: (input) =>
+      createProviderAttempt(
+        input.signal,
+        async (custody) => await drive({ ...input, signal: custody.signal }, custody),
+      ),
   };
 }

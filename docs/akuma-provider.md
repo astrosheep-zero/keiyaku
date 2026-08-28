@@ -59,12 +59,18 @@ duplicate completion continuations or a second failure surface.
 
 ## Provider boundary
 
-The adapter contract has one option-admission result and one Session boundary.
-An admitted drive carries the body, launch tells, cwd, options, and optional
-request directory. A Session exposes typed events, completion, graceful abort,
-forced disposal, and optional resume, fork, live-tell, and receipt operations.
-Admission and tell results carry only an opaque provider fence or `turn-ended`;
-the provider never returns product identities through this boundary.
+The adapter contract has one option-admission result, one synchronous attempt
+owner, and one Session boundary. Start, resume, and fork return their attempt
+before SDK loading, process or runtime creation, connection, subscription,
+native-session creation, or prompt admission begins. The attempt exposes its
+eventual result, graceful abort, forced disposal, and one mandatory `closed`
+proof. `closed` settles only after every resource created by that attempt has
+retired; cleanup failure rejects that proof. An admitted drive carries the body,
+launch tells, cwd, options, and optional request directory. A Session exposes
+typed events, completion, graceful abort, forced disposal, and optional live-
+tell and receipt operations, but never a second disposal proof. Admission and
+tell results carry only an opaque provider fence or `turn-ended`; the provider
+never returns product identities through this boundary.
 
 `ProviderFence` is an adapter-authored opaque submission coordinate unique to
 one delivery group within one Turn. Its durable correlation key is the
@@ -84,17 +90,20 @@ after Body custody is retired; an adapter without resume starts fresh only
 when no durable resume promise exists. There is no capability registry,
 declaration table, probe, independent `SteerControl`, or `ExecutionObserver`.
 
-Every adapter implements the same setup and Session custody contract. Setup
-accepts the Body signal and disposes any native session or OS child that arrives
-after cancellation. Session `abort()` requests graceful native cancellation; a
-late resource is never delivered. Streams, receipts, Tell promises, and
-iterators are not separate custody duties. Provider-specific cancellation is
-an implementation detail and does not create provider-specific lifecycle law.
-`forceDispose()` is mandatory and fulfills only after proof that the same
-adapter-owned child or native session has been forcibly disposed: an owned OS
-child is forcibly terminated and its exit awaited, and an in-process session
-awaits its native disposal completion. No PID, host, boot, registry, or other
-OS identity crosses the Provider Core boundary.
+Every adapter implements the same attempt and Session custody contract. The
+Body signal is cancellation notification only: it is never a custody key,
+resource registry, identity, or cleanup proof. The attempt owns every setup and
+live resource, including anything that arrives after cancellation. Its Session
+controls delegate to that same attempt. Streams, receipts, Tell promises, and
+iterators are subordinate to it, never separate custody duties. Provider-
+specific cancellation is implementation detail and does not create lifecycle
+law. Forced disposal fulfills only after proof that the same adapter-owned
+child or native session has been forcibly disposed: an owned OS child is
+forcibly terminated and its exit awaited, and an in-process session awaits its
+native disposal completion. No PID, host, boot, registry, or other OS identity
+crosses the Provider Core boundary. Fork attempt custody includes temporary
+SDK, process, and session-creation resources, but does not claim to revoke a
+durable remote child coordinate already created upstream.
 
 `Session` owns only one live native execution. A live `tell` returns `accepted`
 with a provider submission fence, or `turn-ended` when the adapter has already

@@ -6,12 +6,16 @@ import type {
   SessionManager,
   CreateAgentSessionOptions,
 } from "@earendil-works/pi-coding-agent";
-import { abortable, awaitLateDisposal } from "../../abort.js";
+
+/* eslint-disable max-lines-per-function -- Native Pi setup and disposal share one custody boundary. */
 import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
 import type { ResumeCoordinate } from "../../coordinate.js";
+import { abortable } from "../../abort.js";
 import {
   AKUMA_REQUESTS_ENV,
   AgentEventChannel,
+  createProviderAttempt,
+  type AttemptCustody,
   type ProviderAdapter,
   type Session,
   type TurnResult,
@@ -124,19 +128,12 @@ async function createPiSession(
     }
     return await sdk.createAgentSession(options);
   });
-  try {
-    return await abortable(setup, signal, (created) => created.session.dispose());
-  } catch (error) {
-    try {
-      await awaitLateDisposal(signal);
-    } catch (lateError) {
-      throw new Error(
-        `${error instanceof Error ? error.message : String(error)}; provider late disposal failed: ${lateError instanceof Error ? lateError.message : String(lateError)}`,
-        { cause: error },
-      );
-    }
-    throw error;
+  const created = await setup;
+  if (signal.aborted) {
+    await created.session.dispose();
+    signal.throwIfAborted();
   }
+  return created;
 }
 
 function forceDisposePi(
@@ -187,9 +184,28 @@ async function drivePi(
   execution: ProviderExecution,
   input: PiDriveInput,
   signal: AbortSignal,
+  custody?: AttemptCustody,
 ): Promise<Session> {
   const created = await createPiSession(sdk, execution, input, signal);
   const native = created.session;
+  let retired = false;
+  let settleRetired!: () => void;
+  const closed = new Promise<void>((resolve) => {
+    settleRetired = resolve;
+  });
+  custody?.own({
+    closed,
+    abort: async () => {
+      native.dispose();
+      retired = true;
+      settleRetired();
+    },
+    forceDispose: async () => {
+      native.dispose();
+      retired = true;
+      settleRetired();
+    },
+  });
   if (signal.aborted) {
     native.dispose();
     signal.throwIfAborted();
@@ -214,6 +230,10 @@ async function drivePi(
     } finally {
       try {
         native.dispose();
+        if (!retired) {
+          retired = true;
+          settleRetired();
+        }
       } finally {
         events.end();
       }
@@ -292,21 +312,24 @@ export function createPiProvider(
   if (execution.env !== undefined && Object.keys(execution.env).length > 0) {
     throw new TypeError("env injection not supported for provider pi");
   }
-  const drive = async (input: PiDriveInput): Promise<Session> => {
-    const signal = input.signal ?? new AbortController().signal;
-    signal.throwIfAborted();
-    return drivePi(await abortable(load(), signal), execution, input, signal);
+  const drive = async (input: PiDriveInput, custody: AttemptCustody): Promise<Session> => {
+    custody.signal.throwIfAborted();
+    const sdk = await abortable(load(), custody.signal);
+    custody.signal.throwIfAborted();
+    return await drivePi(sdk, execution, { ...input, signal: custody.signal }, custody.signal, custody);
   };
   return {
     admitOptions: admitPiOptions,
-    start: drive,
-    resume: async (input) => {
-      piSessionFile(input.session.coordinate);
-      return drive(input);
-    },
-    fork: async (input) => {
-      piSessionFile(input.session);
-      return forkPi(await load(), input);
-    },
+    start: (input) => createProviderAttempt(input.signal, async (custody) => await drive(input, custody)),
+    resume: (input) =>
+      createProviderAttempt(input.signal, async (custody) => {
+        piSessionFile(input.session.coordinate);
+        return await drive(input, custody);
+      }),
+    fork: (input) =>
+      createProviderAttempt(new AbortController().signal, async () => {
+        piSessionFile(input.session);
+        return await forkPi(await load(), input);
+      }),
   };
 }

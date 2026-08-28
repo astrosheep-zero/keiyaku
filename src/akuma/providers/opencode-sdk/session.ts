@@ -13,10 +13,12 @@ export type OpencodeSdkEvent = Pick<OpencodeClient["event"], "subscribe">;
 export type OpencodeSdkLoader = (
   cwd: string,
   execution: ProviderExecution,
+  signal: AbortSignal,
 ) => Promise<
   Readonly<{
     client: { session: OpencodeSdkSession; event: OpencodeSdkEvent };
     close?: () => Promise<void> | void;
+    ready?: Promise<void>;
   }>
 >;
 
@@ -67,15 +69,27 @@ export async function loadOpencode(
   cwd: string,
   signal: AbortSignal,
   loader?: OpencodeSdkLoader,
+  onRuntime?: (runtime: OpencodeRuntime) => void,
 ): Promise<OpencodeRuntime> {
   if (loader) {
-    const loaded = await loader(cwd, execution);
-    return {
+    const loaded = await abortable(loader(cwd, execution, signal), signal);
+    let closing: Promise<void> | undefined;
+    const runtime = {
       client: loaded.client,
       close: async () => {
-        await loaded.close?.();
+        closing ??= Promise.resolve(loaded.close?.()).then(() => undefined);
+        await closing;
       },
     };
+    onRuntime?.(runtime);
+    try {
+      if (loaded.ready !== undefined) await abortable(loaded.ready, signal);
+      signal.throwIfAborted();
+      return runtime;
+    } catch (error) {
+      await runtime.close();
+      throw error;
+    }
   }
   const port = await availablePort();
   const owned = await spawnDetachedProcess({
@@ -90,18 +104,22 @@ export async function loadOpencode(
   });
   const { createOpencodeClient } = await import("@opencode-ai/sdk");
   const client = createOpencodeClient({ baseUrl: `http://127.0.0.1:${port}`, directory: cwd });
+  let closing: Promise<void> | undefined;
+  const runtime = {
+    client,
+    close: async () => {
+      closing ??= owned.terminate();
+      await closing;
+    },
+  };
+  onRuntime?.(runtime);
   try {
     await waitReady(client, cwd, signal);
   } catch (error) {
-    await owned.terminate();
+    await runtime.close();
     throw error;
   }
-  return {
-    client,
-    close: async () => {
-      await owned.terminate();
-    },
-  };
+  return runtime;
 }
 
 export function coordinate(sessionId: string): ResumeCoordinate {

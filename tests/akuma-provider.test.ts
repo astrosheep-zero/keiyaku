@@ -11,10 +11,13 @@ import {
   AGENT_EVENT_TEXT_LIMIT,
   AKUMA_REQUESTS_ENV,
   AgentEventChannel,
+  createProviderAttempt,
   decodeAgentEvent,
   encodeAgentEvent,
   noteEvent,
   type AgentEvent,
+  type AttemptCustody,
+  type ProviderAttempt,
   type TurnResult,
 } from "../src/akuma/provider.js";
 import { decodeReadonlyRestraint, type ProviderExecution } from "../src/akuma/provider-recipe.js";
@@ -41,6 +44,191 @@ import { decodeProviderExecution, resolveProviderExecution } from "../src/akuma/
 import { EMPTY_ACP_EVENT_STATE, mapAcpUpdate } from "../src/akuma/providers/acp/events.js";
 import { projectTurns } from "../src/akuma/projection.js";
 import type { StdioProcess } from "../src/runtime/proc/stdio.js";
+
+function attemptResult<Result>(attempt: ProviderAttempt<Result>): Promise<Result> {
+  return attempt.result;
+}
+
+test("ProviderAttempt retires each owned resource once while allowing force escalation", async () => {
+  const setup = deferred<void>();
+  let custody!: AttemptCustody;
+  let aborts = 0;
+  let forces = 0;
+  const attempt = createProviderAttempt(undefined, async (received) => {
+    custody = received;
+    received.own({
+      closed: Promise.resolve(),
+      abort: async () => {
+        aborts += 1;
+      },
+      forceDispose: async () => {
+        forces += 1;
+      },
+    });
+    await setup.promise;
+    return "ready";
+  });
+
+  await Promise.resolve();
+  await Promise.all([attempt.abort(), attempt.abort()]);
+  assert.equal(aborts, 1);
+  await Promise.all([attempt.forceDispose(), attempt.forceDispose()]);
+  assert.equal(forces, 1);
+  setup.resolve();
+  await attempt.closed;
+  assert.equal(await attempt.result, "ready");
+  assert.ok(custody.signal.aborted);
+});
+
+test("ProviderAttempt shares forced retirement when abort has no graceful operation", async () => {
+  const setup = deferred<void>();
+  let forces = 0;
+  const attempt = createProviderAttempt(undefined, async (custody) => {
+    custody.own({
+      closed: Promise.resolve(),
+      forceDispose: async () => {
+        forces += 1;
+      },
+    });
+    await setup.promise;
+    return "ready";
+  });
+
+  await Promise.resolve();
+  await attempt.abort();
+  await attempt.forceDispose();
+  assert.equal(forces, 1);
+  setup.resolve();
+  await attempt.closed;
+});
+
+test("ProviderAttempt ignores repeated ownership of the same resource object", async () => {
+  const setup = deferred<void>();
+  let forces = 0;
+  const resource = {
+    closed: Promise.resolve(),
+    forceDispose: async () => {
+      forces += 1;
+    },
+  };
+  const attempt = createProviderAttempt(undefined, async (custody) => {
+    custody.own(resource);
+    custody.own(resource);
+    await setup.promise;
+    return "ready";
+  });
+
+  await Promise.resolve();
+  await attempt.forceDispose();
+  assert.equal(forces, 1);
+  setup.resolve();
+  await attempt.closed;
+});
+
+test("ProviderAttempt applies only the current retirement mode to late ownership", async () => {
+  const setup = deferred<void>();
+  let custody!: AttemptCustody;
+  let aborts = 0;
+  let forces = 0;
+  const attempt = createProviderAttempt(undefined, async (received) => {
+    custody = received;
+    await setup.promise;
+    return "ready";
+  });
+
+  await Promise.resolve();
+  await attempt.forceDispose();
+  custody.own({
+    closed: Promise.resolve(),
+    abort: async () => {
+      aborts += 1;
+    },
+    forceDispose: async () => {
+      forces += 1;
+    },
+  });
+  await Promise.resolve();
+  assert.equal(aborts, 0);
+  assert.equal(forces, 1);
+  setup.resolve();
+  await attempt.closed;
+});
+
+test("ProviderAttempt observes rejecting parent-cancellation retirement", async () => {
+  const parent = new AbortController();
+  const setup = deferred<void>();
+  const failure = new Error("physical cleanup failed");
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => unhandled.push(reason);
+  let forces = 0;
+  const attempt = createProviderAttempt(parent.signal, async (custody) => {
+    custody.own({
+      closed: Promise.resolve(),
+      forceDispose: async () => {
+        forces += 1;
+        throw failure;
+      },
+    });
+    setup.resolve();
+    await new Promise<void>((_resolve, reject) => {
+      custody.signal.addEventListener("abort", () => reject(custody.signal.reason), { once: true });
+    });
+    return "ready";
+  });
+
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    await setup.promise;
+    const result = assert.rejects(attempt.result, /parent cancelled/u);
+    const closed = assert.rejects(attempt.closed, /physical cleanup failed/u);
+    parent.abort(new Error("parent cancelled"));
+    await result;
+    await closed;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(forces, 1);
+    assert.deepEqual(unhandled, []);
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+  }
+});
+
+test("ProviderAttempt observes rejecting retirement of a late-owned resource", async () => {
+  const setup = deferred<void>();
+  const owned = deferred<void>();
+  const failure = new Error("late physical cleanup failed");
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => unhandled.push(reason);
+  let custody!: AttemptCustody;
+  let forces = 0;
+  const attempt = createProviderAttempt(undefined, async (received) => {
+    custody = received;
+    owned.resolve();
+    await setup.promise;
+    return "ready";
+  });
+
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    await owned.promise;
+    await attempt.forceDispose();
+    const closed = assert.rejects(attempt.closed, /late physical cleanup failed/u);
+    custody.own({
+      closed: Promise.resolve(),
+      forceDispose: async () => {
+        forces += 1;
+        throw failure;
+      },
+    });
+    setup.resolve();
+    assert.equal(await attempt.result, "ready");
+    await closed;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(forces, 1);
+    assert.deepEqual(unhandled, []);
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+  }
+});
 
 function fakeOpencode() {
   let closed = 0;
@@ -287,7 +475,7 @@ test("ACP uses stable initialization, fresh sessions, mapped profile arguments, 
       options: { model: "grok-4", effort: "high", systemPrompt: "Be precise." },
       session: { kind: "fresh" },
       requests: { dir: join(root, "requests") },
-    });
+    }).result;
     const events = [];
     for await (const event of drive.events) events.push(event);
     assert.deepEqual(await drive.completion, { kind: "answered", answer: "complete answer" });
@@ -350,7 +538,7 @@ test("ACP exposes no client-side coding capabilities", async () => {
       cwd: root,
       options: {},
       session: { kind: "fresh" },
-    });
+    }).result;
     assert.deepEqual(await drive.completion, { kind: "answered", answer: "complete answer" });
     const records = acpLog(fake.log);
     const refused = records.filter((record) => record.refusal !== undefined);
@@ -383,7 +571,7 @@ test("ACP preserves native request error code and data", async () => {
       cwd: root,
       options: {},
       session: { kind: "fresh" },
-    });
+    }).result;
     assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "Internal error [-32603]: native detail" });
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -402,7 +590,7 @@ test("ACP load retains the exact session ID without a fork or live tell capabili
       cwd: root,
       options: {},
       session: { kind: "resume", coordinate: { sessionId: "retained-session" } },
-    });
+    }).result;
     const events = [];
     for await (const event of drive.events) events.push(event);
     assert.deepEqual(events[0], { type: "session", coordinate: { sessionId: "retained-session" } });
@@ -425,7 +613,7 @@ test("ACP forced disposal closes its owned process tree after standard session/c
       cwd: root,
       options: {},
       session: { kind: "fresh" },
-    });
+    }).result;
     await drive.forceDispose();
     const events = [];
     for await (const event of drive.events) events.push(event);
@@ -501,6 +689,12 @@ function controlledAcpProcess(
     resolveCleanup = resolve;
     rejectCleanup = reject;
   });
+  let resolveExited!: (value: Readonly<{ code: number | null; signal: NodeJS.Signals | null; stderr: string }>) => void;
+  const exited = new Promise<Readonly<{ code: number | null; signal: NodeJS.Signals | null; stderr: string }>>(
+    (resolve) => {
+      resolveExited = resolve;
+    },
+  );
   const app = acp
     .agent({ name: "controlled-acp" })
     .onRequest(acp.methods.agent.initialize, async ({ params }) => {
@@ -552,16 +746,19 @@ function controlledAcpProcess(
     process: {
       input: inbound,
       output: outbound,
-      exited: new Promise(() => undefined),
+      exited,
       endInputAndDrain: async () => {
         startCleanup();
         await cleanup;
+        resolveExited({ code: 0, signal: null, stderr: "" });
       },
       close: async (force) => {
         if (force) {
           forcedCleanup += 1;
           resolveCleanup();
         }
+        await cleanup;
+        resolveExited({ code: null, signal: force ? "SIGKILL" : null, stderr: "" });
       },
     },
     initializeStarted,
@@ -641,7 +838,7 @@ test("Grok Build uses fixed launch arguments and admits queued interject on the 
     cwd: "/tmp",
     options: { model: "grok-4.6", effort: "high" },
     session: { kind: "fresh" },
-  });
+  }).result;
   assert.equal(drive.receipts, undefined);
   assert.ok(drive.tell);
   assert.deepEqual(await drive.tell({ id: "tell-123", text: "change direction" }), {
@@ -682,7 +879,7 @@ test("Grok Build rejects failed and unknown interject requests without admission
       cwd: "/tmp",
       options: {},
       session: { kind: "fresh" },
-    });
+    }).result;
     await assert.rejects(
       drive.tell!({ id: "tell-failed", text: "steer" }),
       interject === undefined ? /Method not found/u : /interject rejected/u,
@@ -703,7 +900,7 @@ test("Grok Build returns turn-ended when completion wins before interject acknow
     cwd: "/tmp",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   const submission = drive.tell!({ id: "tell-late", text: "too late" });
   await controlled.interjectStarted;
   controlled.resolvePrompt();
@@ -724,7 +921,7 @@ test("Grok Build abort uses standard ACP cancellation and closes owned process c
     cwd: "/tmp",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   await drive.abort();
   assert.equal(controlled.cancelled(), 1);
   assert.equal(controlled.forcedCleanup(), 1);
@@ -740,7 +937,7 @@ async function completeGrokDrive(
     spawnProcess: () => controlled.process,
   });
   const input = { body: "build", launchTells: [], cwd: "/tmp", options, session };
-  const drive = session.kind === "fresh" ? await provider.start(input) : await provider.resume!(input);
+  const drive = session.kind === "fresh" ? await provider.start(input).result : await provider.resume!(input).result;
   await controlled.cleanupStarted;
   controlled.resolveCleanup();
   await drive.completion;
@@ -806,7 +1003,7 @@ test("ACP completion waits for owned process cleanup", async () => {
     cwd: "/tmp",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   let completed = false;
   void drive.completion.then(() => {
     completed = true;
@@ -825,7 +1022,7 @@ test("ACP cleanup failure settles a typed failed Turn", async () => {
     cwd: "/tmp",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   await controlled.cleanupStarted;
   controlled.rejectCleanup(new Error("drain failed"));
   assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "ACP cleanup failed: drain failed" });
@@ -839,7 +1036,7 @@ test("ACP abort upgrades an in-flight graceful drain to forced cleanup", async (
     cwd: "/tmp",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   await controlled.cleanupStarted;
   await drive.abort();
   assert.equal(controlled.forcedCleanup(), 1);
@@ -857,9 +1054,11 @@ test("ACP setup abort closes a child stalled during initialization", async () =>
     session: { kind: "fresh" },
     signal: controller.signal,
   });
+  assert.equal("result" in setup && "closed" in setup, true);
   await controlled.initializeStarted;
   controller.abort(new Error("controlled setup cancellation"));
-  await assert.rejects(setup, /controlled setup cancellation/);
+  await assert.rejects(setup.result, /controlled setup cancellation/);
+  await setup.closed;
   assert.equal(controlled.forcedCleanup(), 1);
 });
 
@@ -871,7 +1070,7 @@ test("ACP ignores assistant updates after terminal prompt evidence", async () =>
     cwd: "/tmp",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   const events = (async () => {
     const observed = [];
     for await (const event of drive.events) observed.push(event);
@@ -1424,7 +1623,7 @@ test("OpenCode V1 adapter admits with promptAsync and completes from terminal ev
     options: {},
     session: { kind: "fresh" },
     requests: { dir: "/tmp/requests" },
-  });
+  }).result;
   assert.equal(drive.admission.fence, "session-fresh");
   const observed = [];
   for await (const event of drive.events) observed.push(event);
@@ -1481,7 +1680,7 @@ test("OpenCode V1 start waits for native prompt admission", async () => {
   let returned = false;
   const starting = provider
     .start({ body: "wait", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" } })
-    .then((drive) => {
+    .result.then((drive) => {
       returned = true;
       return drive;
     });
@@ -1490,6 +1689,61 @@ test("OpenCode V1 start waits for native prompt admission", async () => {
   admit();
   const drive = await starting;
   await drive.abort();
+});
+
+test("OpenCode start and resume reject closed when readiness cleanup fails", async () => {
+  for (const mode of ["start", "resume"] as const) {
+    const ready = deferred<void>();
+    let closed = 0;
+    const provider = createOpencodeProvider({
+      loader: async () => ({
+        client: { session: {} as never, event: {} as never },
+        close: async () => {
+          closed += 1;
+          throw new Error("OpenCode runtime close failed");
+        },
+        ready: ready.promise,
+      }),
+    });
+    const attempt =
+      mode === "start"
+        ? provider.start({ body: "wait", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" } })
+        : provider.resume!({
+            body: "wait",
+            launchTells: [],
+            cwd: "/tmp",
+            options: {},
+            session: { kind: "resume", coordinate: { sessionId: "session-resume" } },
+          });
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await assert.rejects(attempt.forceDispose(), /OpenCode runtime close failed/u);
+    await assert.rejects(attempt.result, /OpenCode runtime close failed/u);
+    await assert.rejects(attempt.closed, /OpenCode runtime close failed/u);
+    assert.equal(closed, 1);
+  }
+});
+
+test("OpenCode start and resume settle attempt custody after normal completion", async () => {
+  for (const mode of ["start", "resume"] as const) {
+    const fake = fakeOpencode();
+    const provider = createOpencodeProvider({ loader: fake.loader });
+    const attempt =
+      mode === "start"
+        ? provider.start({ body: "complete", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" } })
+        : provider.resume!({
+            body: "complete",
+            launchTells: [],
+            cwd: "/tmp",
+            options: {},
+            session: { kind: "resume", coordinate: { sessionId: "session-resume" } },
+          });
+
+    const drive = await attempt.result;
+    await drive.completion;
+    await attempt.closed;
+    assert.equal(fake.closed(), 1);
+  }
 });
 
 test("OpenCode V1 adapter resumes the supplied coordinate and forks the exact point", async () => {
@@ -1501,11 +1755,98 @@ test("OpenCode V1 adapter resumes the supplied coordinate and forks the exact po
     cwd: "/tmp",
     options: {},
     session: { kind: "resume", coordinate: { sessionId: "session-resume" } },
-  });
+  }).result;
   assert.equal((await drive.completion).kind, "answered");
-  assert.deepEqual(await provider.fork!({ session: { sessionId: "session-resume" }, at: "message-1", cwd: "/tmp" }), {
-    session: { sessionId: "session-child" },
+  assert.deepEqual(
+    await provider.fork!({ session: { sessionId: "session-resume" }, at: "message-1", cwd: "/tmp" }).result,
+    {
+      session: { sessionId: "session-child" },
+    },
+  );
+});
+
+test("OpenCode fork force-disposes a runtime held at readiness before publishing a result", async () => {
+  const ready = deferred<void>();
+  let closed = 0;
+  let forked = 0;
+  const provider = createOpencodeProvider({
+    loader: async () => ({
+      client: {
+        session: {
+          async fork() {
+            forked += 1;
+            return { data: { id: "session-child" } };
+          },
+        } as never,
+        event: {} as never,
+      },
+      close: async () => {
+        closed += 1;
+      },
+      ready: ready.promise,
+    }),
   });
+  const attempt = provider.fork!({ session: { sessionId: "session-source" }, at: "message-1", cwd: "/tmp" });
+
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  await attempt.forceDispose();
+  await assert.rejects(attempt.result, /provider attempt retired/u);
+  await attempt.closed;
+  assert.equal(closed, 1);
+  assert.equal(forked, 0);
+});
+
+test("OpenCode fork closes its owned runtime after normal completion", async () => {
+  let closed = 0;
+  const provider = createOpencodeProvider({
+    loader: async () => ({
+      client: {
+        session: {
+          async fork() {
+            return { data: { id: "session-child" } };
+          },
+        } as never,
+        event: {} as never,
+      },
+      close: async () => {
+        closed += 1;
+      },
+    }),
+  });
+  const attempt = provider.fork!({ session: { sessionId: "session-source" }, at: "message-1", cwd: "/tmp" });
+
+  assert.deepEqual(await attempt.result, { session: { sessionId: "session-child" } });
+  await attempt.closed;
+  assert.equal(closed, 1);
+});
+
+test("OpenCode fork rejects closed when its runtime close fails", async () => {
+  const ready = deferred<void>();
+  let closed = 0;
+  const provider = createOpencodeProvider({
+    loader: async () => ({
+      client: {
+        session: {
+          async fork() {
+            return { data: { id: "session-child" } };
+          },
+        } as never,
+        event: {} as never,
+      },
+      close: async () => {
+        closed += 1;
+        throw new Error("OpenCode runtime close failed");
+      },
+      ready: ready.promise,
+    }),
+  });
+  const attempt = provider.fork!({ session: { sessionId: "session-source" }, at: "message-1", cwd: "/tmp" });
+
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  await assert.rejects(attempt.forceDispose(), /OpenCode runtime close failed/u);
+  await assert.rejects(attempt.result, /OpenCode runtime close failed/u);
+  await assert.rejects(attempt.closed, /OpenCode runtime close failed/u);
+  assert.equal(closed, 1);
 });
 
 test("OpenCode V1 refuses a Pi coordinate before loading its native runtime", async () => {
@@ -1517,17 +1858,19 @@ test("OpenCode V1 refuses a Pi coordinate before loading its native runtime", as
     },
   });
   await assert.rejects(
-    provider.resume!({
-      body: "continue",
-      launchTells: [],
-      cwd: "/tmp",
-      options: {},
-      session: { kind: "resume", coordinate: { sessionFile: "/sessions/pi.jsonl" } },
-    }),
+    attemptResult(
+      provider.resume!({
+        body: "continue",
+        launchTells: [],
+        cwd: "/tmp",
+        options: {},
+        session: { kind: "resume", coordinate: { sessionFile: "/sessions/pi.jsonl" } },
+      }),
+    ),
     /OpenCode resume requires sessionId/u,
   );
   await assert.rejects(
-    provider.fork!({ session: { sessionFile: "/sessions/pi.jsonl" }, at: "message-1", cwd: "/tmp" }),
+    attemptResult(provider.fork!({ session: { sessionFile: "/sessions/pi.jsonl" }, at: "message-1", cwd: "/tmp" })),
     /OpenCode resume requires sessionId/u,
   );
   assert.equal(loaded, false);
@@ -1576,7 +1919,7 @@ test("OpenCode V1 abort cleanup does not await an uncooperative native abort", a
     cwd: "/tmp",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   await drive.abort();
   assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "OpenCode session interrupted" });
   assert.equal(closed, 1);
@@ -1617,7 +1960,7 @@ test("OpenCode abort releases native custody without waiting for its event itera
     cwd: "/tmp",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   await drive.abort();
   assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "OpenCode session interrupted" });
 });
@@ -1653,7 +1996,9 @@ test("OpenCode V1 rejects failed prompt admission and cleans up", async () => {
     }),
   });
   await assert.rejects(
-    provider.start({ body: "fail", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" } }),
+    attemptResult(
+      provider.start({ body: "fail", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" } }),
+    ),
     /prompt rejected/u,
   );
   assert.equal(closed, 1);
@@ -1677,7 +2022,7 @@ test("OpenCode V1 admits native prompt options and maps archetype effort to a mo
     cwd: "/tmp",
     options: { model: "provider/model", effort: "high", systemPrompt: "must enforce" },
     session: { kind: "resume", coordinate: { sessionId: "session-resume" } },
-  });
+  }).result;
   assert.equal((await drive.completion).kind, "answered");
   const prompt = fake.prompts[0] as { body: { messageID: string } };
   assert.match(prompt.body.messageID, /^msg_[0-9a-f]{32}$/u);
@@ -1782,7 +2127,7 @@ test("OpenCode V1 fails terminal observation without native assistant evidence",
     cwd: "/tmp",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   assert.deepEqual(await drive.completion, {
     kind: "failed",
     diagnostic: "OpenCode completed without a native assistant answer",
@@ -1858,7 +2203,7 @@ test("OpenCode V1 keeps an assistant answer without a usable message ID", async 
     cwd: "/tmp",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "complete" });
 });
 
@@ -1936,7 +2281,7 @@ test("OpenCode V1 ignores a prior terminal pair before this prompt is admitted",
   let returned = false;
   const starting = provider
     .start({ body: "current", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" } })
-    .then((drive) => {
+    .result.then((drive) => {
       returned = true;
       return drive;
     });
@@ -2008,7 +2353,7 @@ test("OpenCode V1 isolates other sessions and accepts the current Turn error", a
     cwd: "/tmp",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "native failed" });
 });
 
@@ -2057,7 +2402,7 @@ test("OpenCode V1 retains a setup error emitted before the user identity", async
     cwd: "/tmp",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   await begun;
   await Promise.resolve();
   admit();
@@ -2093,7 +2438,7 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
     options: {},
     session: { kind: "fresh" },
     requests: { dir: "/work/requests" },
-  });
+  }).result;
   assert.equal(drive.tell, undefined);
   const events = [];
   for await (const event of drive.events) events.push(event);
@@ -2136,7 +2481,7 @@ test("Pi keeps a completed answer when no exact fork point exists", async () => 
     cwd: "/work",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   for await (const _event of drive.events) {
     /* drain */
   }
@@ -2150,17 +2495,19 @@ test("Pi rejects wrong coordinates before loading its native SDK", async () => {
     throw new Error("must not load");
   });
   await assert.rejects(
-    provider.resume!({
-      body: "bad",
-      launchTells: [],
-      cwd: "/work",
-      options: {},
-      session: { kind: "resume", coordinate: { sessionId: "wrong" } },
-    }),
+    attemptResult(
+      provider.resume!({
+        body: "bad",
+        launchTells: [],
+        cwd: "/work",
+        options: {},
+        session: { kind: "resume", coordinate: { sessionId: "wrong" } },
+      }),
+    ),
     /requires sessionFile/u,
   );
   await assert.rejects(
-    provider.fork!({ session: { sessionId: "wrong" }, at: "entry", cwd: "/work" }),
+    attemptResult(provider.fork!({ session: { sessionId: "wrong" }, at: "entry", cwd: "/work" })),
     /requires sessionFile/u,
   );
   assert.equal(loaded, false);
@@ -2174,7 +2521,7 @@ test("Pi adapter disposes once on failure and repeated abort", async () => {
     cwd: "/work",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   for await (const _event of failedDrive.events) {
     /* drain */
   }
@@ -2188,7 +2535,7 @@ test("Pi adapter disposes once on failure and repeated abort", async () => {
     cwd: "/work",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   await Promise.all([abortedDrive.abort(), abortedDrive.abort()]);
   for await (const _event of abortedDrive.events) {
     /* drain */
@@ -2206,7 +2553,7 @@ test("Pi keeps abort pending when native cleanup refuses to settle", async () =>
     cwd: "/work",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   let settled = false;
   void drive.abort().then(() => {
     settled = true;
@@ -2233,7 +2580,7 @@ test("Pi and Claude setup loading observe the Body AbortSignal", async () => {
     });
     controller.abort(new Error("cancelled setup"));
     await Promise.race([
-      assert.rejects(starting, /cancelled setup/u),
+      assert.rejects(attemptResult(starting), /cancelled setup/u),
       new Promise((_, reject) => setTimeout(() => reject(new Error("setup ignored abort")), 500)),
     ]);
   }
@@ -2247,7 +2594,7 @@ test("Pi fails a prompt without assistant evidence", async () => {
     cwd: "/work",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   for await (const _event of drive.events) {
     /* drain */
   }
@@ -2270,7 +2617,7 @@ test("Pi preserves thinking-only and explicit empty assistant answers", async ()
     cwd: "/work",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   const events = [];
   for await (const event of drive.events) events.push(event);
   assert.deepEqual(events, [
@@ -2289,7 +2636,7 @@ test("Pi preserves thinking-only and explicit empty assistant answers", async ()
     cwd: "/work",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   const emptyEvents = [];
   for await (const event of emptyDrive.events) emptyEvents.push(event);
   assert.deepEqual(emptyEvents, [
@@ -2310,29 +2657,32 @@ test("Pi adapter resumes and forks only exact sessionFile coordinates", async ()
     cwd: "/work",
     options: {},
     session: { kind: "resume", coordinate: { sessionFile: "/sessions/source.jsonl" } },
-  });
+  }).result;
   for await (const _event of drive.events) {
     /* drain */
   }
   await drive.completion;
   assert.equal(fake.seen.opened, "/sessions/source.jsonl");
   assert.deepEqual(
-    await provider.fork!({ session: { sessionFile: "/sessions/source.jsonl" }, at: "entry-exact", cwd: "/work" }),
+    await provider.fork!({ session: { sessionFile: "/sessions/source.jsonl" }, at: "entry-exact", cwd: "/work" })
+      .result,
     { session: { sessionFile: "/sessions/child.jsonl" } },
   );
   assert.equal(fake.seen.branched, "entry-exact");
   await assert.rejects(
-    provider.resume!({
-      body: "bad",
-      launchTells: [],
-      cwd: "/work",
-      options: {},
-      session: { kind: "resume", coordinate: { sessionId: "wrong" } },
-    }),
+    attemptResult(
+      provider.resume!({
+        body: "bad",
+        launchTells: [],
+        cwd: "/work",
+        options: {},
+        session: { kind: "resume", coordinate: { sessionId: "wrong" } },
+      }),
+    ),
     /requires sessionFile/u,
   );
   await assert.rejects(
-    provider.fork!({ session: { sessionId: "wrong" }, at: "entry", cwd: "/work" }),
+    attemptResult(provider.fork!({ session: { sessionId: "wrong" }, at: "entry", cwd: "/work" })),
     /requires sessionFile/u,
   );
 });
@@ -2356,7 +2706,7 @@ test("Pi option admission maps native terms and refuses unsupported policy", asy
     cwd: "/work",
     options: { model: "openai/gpt", effort: "high", systemPrompt: "System" },
     session: { kind: "fresh" },
-  });
+  }).result;
   for await (const _event of drive.events) {
     /* drain */
   }
@@ -2380,7 +2730,7 @@ test("Pi appends or replaces the native resource-loader prompt from the admitted
     cwd: "/work",
     options: { systemPrompt: "System", systemPromptMode: "append" },
     session: { kind: "fresh" },
-  });
+  }).result;
   for await (const _event of appendDrive.events) {
     /* drain */
   }
@@ -2400,7 +2750,7 @@ test("Pi appends or replaces the native resource-loader prompt from the admitted
     cwd: "/work",
     options: { systemPrompt: "System", systemPromptMode: "replace" },
     session: { kind: "fresh" },
-  });
+  }).result;
   for await (const _event of replaceDrive.events) {
     /* drain */
   }
@@ -2421,7 +2771,7 @@ test("Pi readonly admits native enforcement and removes every task-surface mutat
     options: { readonly: true },
     session: { kind: "fresh" },
     requests: { dir: "/work/requests" },
-  });
+  }).result;
   for await (const _event of drive.events) {
     /* drain */
   }
@@ -2447,13 +2797,15 @@ test("Pi defers opaque config refusal to its native session boundary", async () 
   );
   assert.equal(provider.admitOptions({ readonly: true }).kind, "admitted");
   await assert.rejects(
-    provider.start({
-      body: "inspect",
-      launchTells: [],
-      cwd: "/keiyaku-owned",
-      options: { readonly: true, effort: "high" },
-      session: { kind: "fresh" },
-    }),
+    attemptResult(
+      provider.start({
+        body: "inspect",
+        launchTells: [],
+        cwd: "/keiyaku-owned",
+        options: { readonly: true, effort: "high" },
+        session: { kind: "fresh" },
+      }),
+    ),
     /Pi provider config cannot be consumed by native CreateAgentSessionOptions/u,
   );
   assert.equal(fake.seen.options, undefined);
@@ -4001,7 +4353,7 @@ test("Claude maps narration, drops native streams, and contains runtime skew", a
     cwd: "/work",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   assert.equal(typeof drive.tell, "function");
   const events = [];
   for await (const event of drive.events) events.push(event);
@@ -4065,7 +4417,7 @@ test("Claude adapter admits the native session before returning its answer", asy
     cwd: "/work",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   const events = [];
   for await (const event of drive.events) events.push(event);
 
@@ -4136,7 +4488,7 @@ test("Claude closes the terminal gate before a delayed Query iterator tail", asy
     cwd: "/work",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
 
   const completion = await Promise.race([
     drive.completion,
@@ -4180,7 +4532,7 @@ test("Claude adapter restores only the native session coordinate it was given", 
     cwd: "/work",
     options: {},
     session: { kind: "resume", coordinate: { sessionId: "session-1" } },
-  });
+  }).result;
   for await (const _event of drive.events) {
     /* drain */
   }
@@ -4195,17 +4547,19 @@ test("Claude refuses a Pi coordinate before loading its native SDK", async () =>
     throw new Error("must not load");
   });
   await assert.rejects(
-    provider.resume!({
-      body: "continue",
-      launchTells: [],
-      cwd: "/work",
-      options: {},
-      session: { kind: "resume", coordinate: { sessionFile: "/sessions/pi.jsonl" } },
-    }),
+    attemptResult(
+      provider.resume!({
+        body: "continue",
+        launchTells: [],
+        cwd: "/work",
+        options: {},
+        session: { kind: "resume", coordinate: { sessionFile: "/sessions/pi.jsonl" } },
+      }),
+    ),
     /Claude resume requires sessionId/u,
   );
   await assert.rejects(
-    provider.fork!({ session: { sessionFile: "/sessions/pi.jsonl" }, at: "message-1", cwd: "/work" }),
+    attemptResult(provider.fork!({ session: { sessionFile: "/sessions/pi.jsonl" }, at: "message-1", cwd: "/work" })),
     /Claude resume requires sessionId/u,
   );
   assert.equal(loaded, false);
@@ -4234,7 +4588,7 @@ test("Claude answers without substituting a result UUID for the assistant fork p
     cwd: "/work",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   for await (const _event of drive.events) {
     /* drain */
   }
@@ -4278,7 +4632,7 @@ test("Claude never substitutes a sidechain assistant UUID for the outer fork poi
     cwd: "/work",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   for await (const _event of drive.events) {
     /* drain */
   }
@@ -4330,7 +4684,7 @@ test("Claude adapter consumes the admitted Archetype options", async () => {
     cwd: "/work",
     options: admitted.options,
     session: { kind: "fresh" },
-  });
+  }).result;
   for await (const _event of drive.events) {
     /* drain */
   }
@@ -4382,7 +4736,7 @@ test("Claude replace supplies a custom system prompt while append keeps the pres
     cwd: "/work",
     options: { systemPrompt: "Review only.", systemPromptMode: "replace" },
     session: { kind: "fresh" },
-  });
+  }).result;
   for await (const _event of drive.events) {
     /* drain */
   }
@@ -4395,7 +4749,7 @@ test("Claude replace supplies a custom system prompt while append keeps the pres
     cwd: "/work",
     options: { systemPrompt: "Review only.", systemPromptMode: "append" },
     session: { kind: "fresh" },
-  });
+  }).result;
   for await (const _event of append.events) {
     /* drain */
   }
@@ -4442,7 +4796,7 @@ test("Claude execution overlays literal env and selects its executable", async (
     options: {},
     session: { kind: "fresh" },
     requests: { dir: "/work/requests" },
-  });
+  }).result;
   for await (const _event of drive.events) {
     /* drain */
   }
@@ -4491,7 +4845,7 @@ test("Claude start consumes its admitted snapshot without a second admission", a
     cwd: "/work",
     options: { network: "disabled" },
     session: { kind: "fresh" },
-  });
+  }).result;
   for await (const _event of drive.events) {
     /* drain */
   }
@@ -4518,7 +4872,7 @@ test("Claude live tell waits for a post-yield source pull and shares one Query",
     cwd: "/work",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   assert.equal(queries, 1);
   let resolved = false;
   const submission = drive.tell!({ id: "tell-live-1", text: "steer now" }).then((value) => {
@@ -4549,7 +4903,7 @@ test("Claude terminality closes a pending tell receipt at the first result", asy
     cwd: "/work",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   const tell = drive.tell!({ id: "tell-live-2", text: "after checkpoint" });
   const yielded = await harness.receiveInput();
   assert.equal(yielded.done, false);
@@ -4569,7 +4923,7 @@ test("Claude terminality and failure before source acknowledgement preserve hone
     cwd: "/work",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   terminal.output(...claudeResult(1));
   terminal.end();
   await terminalDrive.completion;
@@ -4583,7 +4937,7 @@ test("Claude terminality and failure before source acknowledgement preserve hone
     cwd: "/work",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   const submission = failingDrive.tell!({ id: "failed", text: "not accepted" });
   await failing.receiveInput();
   failing.fail(new Error("native input failed"));
@@ -4600,7 +4954,7 @@ test("Claude successful terminality wins over an in-flight tell acknowledgement"
     cwd: "/work",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   const submission = drive.tell!({ id: "ended-race", text: "too late" });
   const yielded = await harness.receiveInput();
   assert.equal(yielded.done, false);
@@ -4619,7 +4973,7 @@ test("Claude abort rejects an unacknowledged tell and settles the Query", async 
     cwd: "/work",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   const submission = drive.tell!({ id: "aborted", text: "pending" });
   await harness.receiveInput();
   await drive.abort();
@@ -4659,7 +5013,7 @@ test("Claude setup cancellation rejects before a late native admission", async (
 
   await new Promise((resolve) => setImmediate(resolve));
   controller.abort(new Error("cancelled during admission"));
-  await assert.rejects(starting, /cancelled during admission/u);
+  await assert.rejects(attemptResult(starting), /cancelled during admission/u);
   assert.equal(closeRequested, true);
 
   admission.resolve();
@@ -4692,7 +5046,7 @@ test("Claude abort waits for native Query cleanup", async () => {
     cwd: "/work",
     options: {},
     session: { kind: "fresh" },
-  });
+  }).result;
   let retired = false;
   const retirement = drive.abort().then(() => {
     retired = true;
@@ -4724,7 +5078,7 @@ test("Claude fork maps the exact native pair and returns a distinct child coordi
       session: { sessionId: "source-session" },
       at: "outer-assistant-uuid",
       cwd: "/work",
-    }),
+    }).result,
     { session: { sessionId: "child-session" } },
   );
   assert.deepEqual(calls, [
@@ -4742,7 +5096,7 @@ test("Claude fork rejects an unavailable primitive and dishonest child coordinat
     },
   }));
   await assert.rejects(
-    unavailable.fork!({ session: { sessionId: "source" }, at: "point", cwd: "/work" }),
+    attemptResult(unavailable.fork!({ session: { sessionId: "source" }, at: "point", cwd: "/work" })),
     /does not expose forkSession/,
   );
 
@@ -4756,7 +5110,7 @@ test("Claude fork rejects an unavailable primitive and dishonest child coordinat
       },
     }));
     await assert.rejects(
-      provider.fork!({ session: { sessionId: "source" }, at: "point", cwd: "/work" }),
+      attemptResult(provider.fork!({ session: { sessionId: "source" }, at: "point", cwd: "/work" })),
       child === "" ? /empty child session id/ : /reused the source session id/,
     );
   }
@@ -4779,7 +5133,7 @@ test("Claude fork refuses a frozen environment it cannot apply", async () => {
     { env: { CLAUDE_CONFIG_DIR: "/configured" } },
   );
   await assert.rejects(
-    provider.fork!({ session: { sessionId: "source" }, at: "point", cwd: "/work" }),
+    attemptResult(provider.fork!({ session: { sessionId: "source" }, at: "point", cwd: "/work" })),
     /cannot apply the frozen provider environment/u,
   );
   assert.equal(loaded, false);
@@ -4942,7 +5296,7 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
       options,
       requests: { dir: requestDirectory },
       session: { kind: "fresh" },
-    });
+    }).result;
     const events = [];
     for await (const event of drive.events) events.push(event);
     assert.deepEqual(await drive.completion, { kind: "answered", answer: "codex answer", historyId: "turn-1" });
@@ -4993,7 +5347,7 @@ test("Codex app-server maps append and replace onto the same fresh and resumed t
       cwd: root,
       options: { systemPrompt: "Work precisely.", systemPromptMode: "replace" },
       session: { kind: "fresh" },
-    });
+    }).result;
     for await (const _event of replaceDrive.events) {
       /* drain */
     }
@@ -5010,7 +5364,7 @@ test("Codex app-server maps append and replace onto the same fresh and resumed t
       cwd: root,
       options: { systemPrompt: "Work precisely.", systemPromptMode: "append" },
       session: { kind: "resume", coordinate: { sessionId: "thread-source" } },
-    });
+    }).result;
     for await (const _event of resumeDrive.events) {
       /* drain */
     }
@@ -5036,7 +5390,7 @@ test("Codex readonly admits native enforcement and requests the native read-only
       cwd: root,
       options: { readonly: true, network: "enabled" },
       session: { kind: "fresh" },
-    });
+    }).result;
     const events = [];
     for await (const event of drive.events) events.push(event);
     assert.deepEqual(await drive.completion, { kind: "answered", answer: "codex answer", historyId: "turn-1" });
@@ -5063,7 +5417,7 @@ test("Codex maps observations without leaking output or unknown payloads", async
       cwd: root,
       options: {},
       session: { kind: "fresh" },
-    });
+    }).result;
     const events = [];
     for await (const event of drive.events) events.push(event);
 
@@ -5112,7 +5466,7 @@ test("Codex drains admitted native completion narration before terminal closure"
       cwd: root,
       options: {},
       session: { kind: "fresh" },
-    });
+    }).result;
     let completionSettled = false;
     void drive.completion.then(() => {
       completionSettled = true;
@@ -5156,7 +5510,7 @@ test("Codex preserves an empty final agent message as the answered turn", async 
       cwd: root,
       options: {},
       session: { kind: "fresh" },
-    });
+    }).result;
     const events = [];
     for await (const event of drive.events) events.push(event);
     assert.deepEqual(events, [
@@ -5179,7 +5533,7 @@ test("Codex leaves an unmatched native tool start unmatched at terminal closure"
       cwd: root,
       options: {},
       session: { kind: "fresh" },
-    });
+    }).result;
     const events = [];
     for await (const event of drive.events) events.push(event);
 
@@ -5207,7 +5561,7 @@ test("Codex terminal drain has a bounded fallback for a hung producer", async ()
       cwd: root,
       options: {},
       session: { kind: "fresh" },
-    });
+    }).result;
     const started = performance.now();
     assert.deepEqual(await drive.completion, { kind: "answered", answer: "", historyId: "turn-1" });
     assert.ok(performance.now() - started < 2_000);
@@ -5228,7 +5582,7 @@ test("Codex settles when the native process exits without turn completion", asyn
       cwd: root,
       options: {},
       session: { kind: "fresh" },
-    });
+    }).result;
     for await (const _event of drive.events) {
       /* drain */
     }
@@ -5254,7 +5608,7 @@ test("Codex failed turns retain native notification and turn diagnostics", async
         cwd: root,
         options: {},
         session: { kind: "fresh" },
-      });
+      }).result;
       for await (const _event of drive.events) {
         /* drain */
       }
@@ -5276,7 +5630,7 @@ test("Codex app-server resumes and forks only the supplied native coordinates", 
       cwd: root,
       options: {},
       session: { kind: "resume", coordinate: { sessionId: "thread-source" } },
-    });
+    }).result;
     for await (const _event of drive.events) {
       /* drain */
     }
@@ -5286,7 +5640,7 @@ test("Codex app-server resumes and forks only the supplied native coordinates", 
         session: { sessionId: "thread-source" },
         at: "turn-exact",
         cwd: root,
-      }),
+      }).result,
       { session: { sessionId: "thread-child" } },
     );
     const requests = fake.requests();
@@ -5309,17 +5663,19 @@ test("Codex app-server refuses a Pi coordinate before starting a native process"
     const fake = fakeCodex(root);
     const provider = createCodexAppServerProvider(fake.executable);
     await assert.rejects(
-      provider.resume!({
-        body: "continue",
-        launchTells: [],
-        cwd: root,
-        options: {},
-        session: { kind: "resume", coordinate: { sessionFile: "/sessions/pi.jsonl" } },
-      }),
+      attemptResult(
+        provider.resume!({
+          body: "continue",
+          launchTells: [],
+          cwd: root,
+          options: {},
+          session: { kind: "resume", coordinate: { sessionFile: "/sessions/pi.jsonl" } },
+        }),
+      ),
       /Codex app-server resume requires sessionId/u,
     );
     await assert.rejects(
-      provider.fork!({ session: { sessionFile: "/sessions/pi.jsonl" }, at: "turn-1", cwd: root }),
+      attemptResult(provider.fork!({ session: { sessionFile: "/sessions/pi.jsonl" }, at: "turn-1", cwd: root })),
       /Codex app-server fork requires sessionId/u,
     );
     assert.deepEqual(fake.requests(), []);
@@ -5339,7 +5695,7 @@ test("Codex app-server abort interrupts and releases its owned child", async () 
       cwd: root,
       options: {},
       session: { kind: "fresh" },
-    });
+    }).result;
     await drive.abort();
     for await (const _event of drive.events) {
       /* drain */
@@ -5360,7 +5716,7 @@ test("Codex app-server live tell steers the admitted turn with exact correlation
       cwd: root,
       options: {},
       session: { kind: "fresh" },
-    });
+    }).result;
     assert.ok(drive.tell !== undefined);
     assert.deepEqual(await drive.tell!({ id: "tell-live-1", text: "check the race" }), {
       kind: "accepted",
@@ -5387,7 +5743,7 @@ test("Codex rejects a steer acknowledgement that remains pending at terminal obs
       cwd: root,
       options: {},
       session: { kind: "fresh" },
-    });
+    }).result;
     await assert.rejects(
       drive.tell!({ id: "tell-live-pending", text: "check the boundary" }),
       /line RPC process is closed/u,
@@ -5412,7 +5768,7 @@ test("Codex live tell rejects a mismatched native turn acknowledgement", async (
         cwd: root,
         options: {},
         session: { kind: "fresh" },
-      });
+      }).result;
       await assert.rejects(drive.tell!({ id: "tell-live-2", text: "check the turn" }), expected);
       await drive.abort();
     } finally {
@@ -5431,7 +5787,7 @@ test("Codex closes a pending rejected steer when completion arrives first", asyn
       cwd: root,
       options: {},
       session: { kind: "fresh" },
-    });
+    }).result;
     await assert.rejects(
       drive.tell!({ id: "tell-live-error", text: "check rejection" }),
       /line RPC process is closed/u,
@@ -5451,7 +5807,7 @@ test("Codex terminal closure fails a hung steer acknowledgement without waiting"
       cwd: root,
       options: {},
       session: { kind: "fresh" },
-    });
+    }).result;
     await assert.rejects(
       drive.tell!({ id: "tell-live-hung", text: "never acknowledged" }),
       /line RPC process is closed/u,

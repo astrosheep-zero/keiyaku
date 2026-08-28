@@ -4,6 +4,8 @@ import type { Options, Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/c
 import {
   AKUMA_REQUESTS_ENV,
   AgentEventChannel,
+  createProviderAttempt,
+  type AttemptCustody,
   type ProviderAdapter,
   type Session,
   type TellReceipt,
@@ -376,6 +378,7 @@ async function driveClaude(
   load: () => Promise<ClaudeSdk>,
   execution: ClaudeExecution,
   drive: ClaudeDriveInput,
+  custody: AttemptCustody,
 ): Promise<Session> {
   if (drive.session.kind === "resume") claudeSessionId(drive.session.coordinate);
   const signal = drive.signal ?? new AbortController().signal;
@@ -417,6 +420,17 @@ async function driveClaude(
       },
     },
   });
+  custody.own({
+    closed: observed.completion.then(() => undefined),
+    abort: async () => {
+      shutDown(new Error("Claude query aborted"));
+      await observed!.completion;
+    },
+    forceDispose: async () => {
+      shutDown(new Error("Claude query force-disposed"));
+      await observed!.completion;
+    },
+  });
   if (signal.aborted) abortSetup();
   try {
     await Promise.all([launchAcknowledged, observed.admission]);
@@ -454,9 +468,18 @@ export function createClaudeProvider(
   const selectedExecution = typeof loadOrExecution === "function" ? execution : loadOrExecution;
   return {
     admitOptions: admitClaudeOptions,
-    fork: (input) => forkClaude(load, selectedExecution, input),
-    start: (input) => driveClaude(load, selectedExecution, input),
-    resume: (input) => driveClaude(load, selectedExecution, input),
+    fork: (input) =>
+      createProviderAttempt(new AbortController().signal, async () => await forkClaude(load, selectedExecution, input)),
+    start: (input) =>
+      createProviderAttempt(
+        input.signal,
+        async (custody) => await driveClaude(load, selectedExecution, { ...input, signal: custody.signal }, custody),
+      ),
+    resume: (input) =>
+      createProviderAttempt(
+        input.signal,
+        async (custody) => await driveClaude(load, selectedExecution, { ...input, signal: custody.signal }, custody),
+      ),
   };
 }
 

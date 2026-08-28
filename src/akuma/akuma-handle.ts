@@ -256,7 +256,9 @@ export class AkumaHandle {
 
     let childSession: ResumeCoordinate;
     try {
-      childSession = (await adapter.fork({ session: point.session, at: point.historyId, cwd: point.cwd })).session;
+      const attempt = adapter.fork({ session: point.session, at: point.historyId, cwd: point.cwd });
+      childSession = (await attempt.result).session;
+      await attempt.closed;
     } catch (error) {
       return { kind: "fork-failed", diagnostic: diagnostic(error) };
     }

@@ -1,4 +1,5 @@
-import type { ProviderAdapter, ProviderOptionAdmission, Session, ToolCall } from "../../provider.js";
+import { createProviderAttempt } from "../../provider.js";
+import type { AttemptCustody, ProviderAdapter, ProviderOptionAdmission, Session, ToolCall } from "../../provider.js";
 import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
 import {
   startAcpSession,
@@ -157,22 +158,35 @@ export function createGrokBuildProvider(
   dependencies: AcpDependencies = {},
 ): ProviderAdapter {
   if (execution.executable === undefined) throw new TypeError("Grok Build provider execution requires executable");
-  const drive = async (input: AcpStartInput) => {
+  const drive = async (input: AcpStartInput, custody: AttemptCustody) => {
     const launch = {
       argv: argv(execution, input.options),
       ...(execution.env === undefined ? {} : { env: execution.env }),
     };
     return withInterject(
-      await startAcpSession(launch, input, {
-        ...dependencies,
-        interpretTool: interpretGrokTool,
-        ...grokSessionMeta(execution.config, input.options),
-      }),
+      await startAcpSession(
+        launch,
+        input,
+        {
+          ...dependencies,
+          interpretTool: interpretGrokTool,
+          ...grokSessionMeta(execution.config, input.options),
+        },
+        custody,
+      ),
     );
   };
   return {
     admitOptions: optionAdmission,
-    start: async (input) => await drive(input),
-    resume: async (input) => await drive(input),
+    start: (input) =>
+      createProviderAttempt(
+        input.signal,
+        async (custody) => await drive({ ...input, signal: custody.signal }, custody),
+      ),
+    resume: (input) =>
+      createProviderAttempt(
+        input.signal,
+        async (custody) => await drive({ ...input, signal: custody.signal }, custody),
+      ),
   };
 }

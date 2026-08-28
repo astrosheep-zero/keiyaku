@@ -5,6 +5,7 @@ import { abortable } from "../../abort.js";
 import {
   AKUMA_REQUESTS_ENV,
   AgentEventChannel,
+  type AttemptCustody,
   type ProviderAdapter,
   type Session,
   type TurnResult,
@@ -217,6 +218,7 @@ export async function startAcpSession(
   launch: AcpLaunch,
   input: AcpStartInput,
   dependencies: AcpDependencies = {},
+  custody?: AttemptCustody,
 ): Promise<AcpLiveSession> {
   const acp = await import("@agentclientprotocol/sdk");
   const signal = input.signal ?? new AbortController().signal;
@@ -229,6 +231,11 @@ export async function startAcpSession(
       ...launch.env,
       ...(input.requests === undefined ? {} : { [AKUMA_REQUESTS_ENV]: input.requests.dir }),
     },
+  });
+  custody?.own({
+    closed: child.exited.then(() => undefined),
+    abort: async () => await child.close(true),
+    forceDispose: async () => await child.close(true),
   });
   let sessionId: string | undefined;
   let turn!: ReturnType<typeof createAcpTurn>;
@@ -248,10 +255,12 @@ export async function startAcpSession(
     return { session, agent: connection.agent, sessionId, open: turn.open };
   } catch (error) {
     connection.close(error);
-    try {
-      await child.close(true);
-    } catch (cleanup) {
-      throw new Error(`${diagnostic(acp, error)}; ACP cleanup failed: ${diagnostic(acp, cleanup)}`, { cause: error });
+    if (custody === undefined) {
+      try {
+        await child.close(true);
+      } catch (cleanup) {
+        throw new Error(`${diagnostic(acp, error)}; ACP cleanup failed: ${diagnostic(acp, cleanup)}`, { cause: error });
+      }
     }
     turn.events.end();
     throw error;

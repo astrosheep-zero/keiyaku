@@ -2,14 +2,15 @@
 
 This chapter owns body execution and the tell, interrupt, kill, and fork lifecycle verbs.
 
-A Body first revokes delegated Heart-write and spawn authority, then races its
-Session `abort()` against the control response window. Abort rejection or
-timeout races mandatory adapter-owned `forceDispose()` against the same window.
-Forced success retires custody normally. Forced rejection or timeout appends
-the latest Body's `hung { diagnostic, at }`, records one diagnostic activity,
-ends that Body `broke-off`, and returns from the Body process. It never sleeps
-while holding the leash and never records ordinary `put-down` or handoff after
-that result.
+A Body first revokes delegated Heart-write and spawn authority, then races the
+current provider attempt's graceful abort and its mandatory `closed` proof
+against the control response window. Abort rejection or timeout races that
+same attempt's forced disposal and `closed` proof against the same window.
+Forced success retires custody normally even when graceful abort failed.
+Forced rejection, cleanup rejection, or timeout appends the latest Body's
+`hung { diagnostic, at }`, records one diagnostic activity, ends that Body
+`broke-off`, and returns from the Body process. It never sleeps while holding
+the leash and never records ordinary `put-down` or handoff after that result.
 
 ## Body And Turn
 
@@ -108,15 +109,18 @@ create their own observation duties or register extra loops. Each phase uses lex
 with the shared signal. One observation round reads one Heart snapshot and
 publishes that same snapshot to stop, pause, and pending-Tell consumers.
 
-A provider Session's `abort()` requests graceful native cancellation. The Body
-revokes delegated Heart-write and spawn authority before retirement, bounds
-that request, and escalates rejection or timeout to mandatory adapter-owned
-`forceDispose()`. Forced disposal fulfills only after every adapter-owned OS
-child or native session is disposed, including late resources after
-cancellation. A late resource remains attached to an adapter-owned completion
-promise until disposal settles; disposal rejection is observable through the
-Body/Session diagnostic path and is never silently discarded. Streams, receipts,
-Tell promises, and iterators are not custody.
+The driver stores the synchronous provider attempt before establishment begins.
+Every setup, request-pump, cancellation, admission, completion, and forced-
+retirement race retires through that one handle. The Body revokes delegated
+Heart-write and spawn authority before requesting graceful cancellation, bounds
+that request, and escalates rejection or timeout to forced disposal. It awaits
+the same mandatory `closed` proof before publishing a final Body judgment.
+Forced disposal fulfills only after every adapter-owned OS child or native
+session is disposed, including resources arriving after cancellation. Cleanup
+rejection remains observable on `closed` and reaches the existing Body failure
+judgment. A proof that does not settle within the existing forced-retirement
+window is `hung`; no new timeout, result kind, or lifecycle state exists for
+it. Streams, receipts, Tell promises, and iterators are not custody.
 
 `hung` has one source: both graceful cancellation and forced disposal failed
 to retire a named external provider child or native session within their

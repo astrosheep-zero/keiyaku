@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import type { Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { CONTROL_RESPONSE_MS, LEASH_HELD_EXIT, handoffPendingTells, wakeRecordedTell } from "../src/akuma/body.js";
-import { bodyProcessInput, driveAkumaBody, type BodyLaunch, type TellWakeRuntime } from "../src/akuma/body.js";
+import { bodyProcessInput, driveAkumaBody as runAkumaBody, type BodyLaunch, type TellWakeRuntime } from "../src/akuma/body.js";
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import {
   HeldAkumaLeash,
@@ -27,7 +27,14 @@ import {
 } from "../src/akuma/heart/index.js";
 import type { ProviderOptions } from "../src/akuma/provider-recipe.js";
 import { allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
-import type { AgentEvent, ProviderAdapter, TurnResult } from "../src/akuma/provider.js";
+import {
+  createProviderAttempt,
+  type AgentEvent,
+  type ProviderAdapter,
+  type ProviderAttempt,
+  type Session,
+  type TurnResult,
+} from "../src/akuma/provider.js";
 import { createClaudeProvider } from "../src/akuma/providers/claude/index.js";
 import { akumaCallRequestCommands, requestForwardedAkumaCall as requestBodyCall } from "../src/akuma/call-request.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
@@ -51,6 +58,60 @@ test("generic handoff with no pending Tell does not spawn", async () => {
 
 async function outcomes(paths: Parameters<typeof activitySlice>[0]) {
   return (await activitySlice(paths)).rows.filter((fact) => fact.kind === "turn-end").map((fact) => fact.outcome);
+}
+
+function sessionResource(session: Session) {
+  let settleClosed!: () => void;
+  const closed = new Promise<void>((resolve) => {
+    settleClosed = resolve;
+  });
+  void session.completion.then(settleClosed, settleClosed);
+  return {
+    closed,
+    abort: async () => {
+      await session.abort();
+      settleClosed();
+    },
+    forceDispose: async () => {
+      await session.forceDispose?.();
+      settleClosed();
+    },
+  };
+}
+
+function sessionAttempt(establish: () => Promise<Session>) {
+  return createProviderAttempt(undefined, async (custody) => {
+    const session = await establish();
+    custody.own(sessionResource(session));
+    return session;
+  });
+}
+
+function attemptForSession(value: Promise<Session> | ProviderAttempt<Session>): ProviderAttempt<Session> {
+  if ("result" in value) return value;
+  return createProviderAttempt(undefined, async (custody) => {
+    const session = await value;
+    custody.own(sessionResource(session));
+    return session;
+  });
+}
+
+function bodyAdapter(adapter: ProviderAdapter): ProviderAdapter {
+  return {
+    ...adapter,
+    start: (input) => attemptForSession(adapter.start(input) as Promise<Session> | ProviderAttempt<Session>),
+    ...(adapter.resume === undefined
+      ? {}
+      : {
+          resume: (input: Parameters<NonNullable<ProviderAdapter["resume"]>>[0]) =>
+            attemptForSession(adapter.resume!(input) as Promise<Session> | ProviderAttempt<Session>),
+        }),
+  };
+}
+
+async function driveAkumaBody(...input: Parameters<typeof runAkumaBody>): Promise<void> {
+  if (input[1] === undefined) await runAkumaBody(...input);
+  else await runAkumaBody(input[0], bodyAdapter(input[1]), input[2]);
 }
 
 function adapter(
@@ -98,8 +159,8 @@ function adapter(
     admitOptions(options) {
       return { kind: "admitted", options };
     },
-    start: drive,
-    resume: drive,
+    start: (input) => sessionAttempt(async () => await drive(input)),
+    resume: (input) => sessionAttempt(async () => await drive(input)),
   };
 }
 
@@ -314,8 +375,8 @@ test("a receipt-free live acknowledgement settles the tell in the current Body",
       admitOptions(options) {
         return { kind: "admitted", options };
       },
-      async start() {
-        return {
+      start() {
+        return sessionAttempt(async () => ({
           admission: { fence: "initial-turn" },
           events: {
             async *[Symbol.asyncIterator]() {
@@ -333,7 +394,8 @@ test("a receipt-free live acknowledgement settles the tell in the current Body",
             return { kind: "accepted" as const, fence: "turn-1:tell-live" };
           },
           async abort() {},
-        };
+          async forceDispose() {},
+        }));
       },
     };
     const body = driveAkumaBody(

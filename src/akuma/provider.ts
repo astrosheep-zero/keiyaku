@@ -1,5 +1,7 @@
 import { decodeResumeCoordinate, encodeResumeCoordinate, type ResumeCoordinate } from "./coordinate.js";
 import type { ProviderOptions, ReadonlyRestraint } from "./provider-recipe.js";
+
+/* eslint-disable max-lines, max-lines-per-function -- Provider custody is the single owner boundary for its public protocol. */
 export type { ResumeCoordinate } from "./coordinate.js";
 
 export const AKUMA_REQUESTS_ENV = "AKUMA_REQUESTS";
@@ -435,13 +437,147 @@ export type Session = Readonly<{
   events: AsyncIterable<AgentEvent>;
   receipts?: AsyncIterable<TellReceipt>;
   completion: Promise<TurnResult>;
-  lateDisposal?: () => Promise<void>;
   /** Requests graceful adapter-owned cancellation. */
   abort(): Promise<void>;
   /** Fulfills only after forced adapter-owned disposal is proved. */
   forceDispose(): Promise<void>;
   tell?(tell: Readonly<{ id: string; text: string }>): Promise<TellSubmission>;
 }>;
+
+/**
+ * Synchronous custody for one provider establishment or fork attempt.
+ * `closed` is the sole proof that every resource created by the attempt retired.
+ */
+export type ProviderAttempt<Result> = Readonly<{
+  result: Promise<Result>;
+  closed: Promise<void>;
+  abort(): Promise<void>;
+  forceDispose(): Promise<void>;
+}>;
+
+export type AttemptResource = Readonly<{
+  /** Resolves only when this physical resource has retired. */
+  closed: Promise<void>;
+  abort?(): Promise<void>;
+  forceDispose(): Promise<void>;
+}>;
+
+export type AttemptCustody = Readonly<{
+  signal: AbortSignal;
+  /** Register a resource in the attempt before awaiting further setup work. */
+  own(resource: AttemptResource): void;
+}>;
+
+/**
+ * Starts provider work after its caller has received custody.  The input signal
+ * remains a cancellation notification; this attempt owns its own controller
+ * and any resulting native resource controls.
+ */
+export function createProviderAttempt<Result>(
+  parentSignal: AbortSignal | undefined,
+  establish: (custody: AttemptCustody) => Promise<Result>,
+): ProviderAttempt<Result> {
+  const parent = parentSignal ?? new AbortController().signal;
+  const controller = new AbortController();
+  type OwnedResource = {
+    resource: AttemptResource;
+    abort?: Promise<void>;
+    forceDispose?: Promise<void>;
+  };
+  const resources: OwnedResource[] = [];
+  const ownedResources = new Map<AttemptResource, OwnedResource>();
+  const cleanupFailures: unknown[] = [];
+  const cleanupOperations: Promise<void>[] = [];
+  let setupComplete!: () => void;
+  const setupSettled = new Promise<void>((resolve) => {
+    setupComplete = resolve;
+  });
+  let retiring: "abort" | "forceDispose" | undefined;
+
+  const remember = (operation: Promise<void>, reportFailure: boolean): Promise<void> => {
+    const observed = operation.catch((error: unknown) => {
+      if (reportFailure) cleanupFailures.push(error);
+    });
+    cleanupOperations.push(observed);
+    return operation;
+  };
+  const observeBackgroundRetirement = (operation: Promise<void>): void => {
+    void operation.catch(() => undefined);
+  };
+  const startRetirement = (owned: OwnedResource, kind: "abort" | "forceDispose"): Promise<void> => {
+    if (kind === "abort" && owned.resource.abort === undefined) {
+      const force = startRetirement(owned, "forceDispose");
+      owned.abort = force;
+      return force;
+    }
+    const existing = owned[kind];
+    if (existing !== undefined) return existing;
+    const graceful = kind === "abort";
+    const dispose = graceful ? owned.resource.abort! : owned.resource.forceDispose;
+    const operation = remember(
+      Promise.resolve().then(() => dispose()),
+      !graceful,
+    );
+    owned[kind] = operation;
+    return operation;
+  };
+  const retire = (kind: "abort" | "forceDispose"): Promise<void> => {
+    if (kind === "forceDispose" || retiring === undefined) retiring = kind;
+    const pending = resources.map((resource) => startRetirement(resource, kind));
+    return Promise.all(pending).then(() => undefined);
+  };
+  const own = (resource: AttemptResource): void => {
+    if (ownedResources.has(resource)) return;
+    const owned = { resource };
+    resources.push(owned);
+    ownedResources.set(resource, owned);
+    void resource.closed.catch((error: unknown) => {
+      cleanupFailures.push(error);
+    });
+    if (retiring !== undefined) observeBackgroundRetirement(startRetirement(owned, retiring));
+  };
+  const cancelFromParent = (): void => {
+    if (!controller.signal.aborted) controller.abort(parent.reason);
+    void retire("abort").catch(() => {
+      observeBackgroundRetirement(retire("forceDispose"));
+    });
+  };
+  parent.addEventListener("abort", cancelFromParent, { once: true });
+  if (parent.aborted) cancelFromParent();
+
+  const result = Promise.resolve()
+    .then(() => establish({ signal: controller.signal, own }))
+    .catch((error: unknown) => {
+      if (!controller.signal.aborted) observeBackgroundRetirement(retire("forceDispose"));
+      throw error;
+    })
+    .finally(() => parent.removeEventListener("abort", cancelFromParent));
+
+  void result.then(
+    () => setupComplete(),
+    () => setupComplete(),
+  );
+  const closed = (async (): Promise<void> => {
+    await setupSettled;
+    for (;;) {
+      const operations = [...cleanupOperations];
+      const retired = resources.map((resource) => resource.resource.closed);
+      await Promise.allSettled([...operations, ...retired]);
+      if (operations.length === cleanupOperations.length) break;
+    }
+    if (cleanupFailures.length > 0) throw cleanupFailures[0];
+  })();
+  const control = async (operation: "abort" | "forceDispose"): Promise<void> => {
+    if (!controller.signal.aborted) controller.abort(new Error("provider attempt retired"));
+    await retire(operation);
+  };
+  return {
+    result,
+    closed,
+    abort: async () => await control("abort"),
+    forceDispose: async () => await control("forceDispose"),
+  };
+}
 
 export type DriveInput = Readonly<{
   body: string;
@@ -464,12 +600,12 @@ export type ProviderAdapter = Readonly<{
       at: string;
       cwd: string;
     }>,
-  ): Promise<Readonly<{ session: ResumeCoordinate }>>;
-  start(input: DriveInput & Readonly<{ session: Readonly<{ kind: "fresh" }> }>): Promise<Session>;
+  ): ProviderAttempt<Readonly<{ session: ResumeCoordinate }>>;
+  start(input: DriveInput & Readonly<{ session: Readonly<{ kind: "fresh" }> }>): ProviderAttempt<Session>;
   resume?(
     input: DriveInput &
       Readonly<{
         session: Readonly<{ kind: "resume"; coordinate: ResumeCoordinate }>;
       }>,
-  ): Promise<Session>;
+  ): ProviderAttempt<Session>;
 }>;

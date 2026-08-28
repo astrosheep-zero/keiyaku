@@ -159,6 +159,11 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       pattern: /^import .*\.\/.*\/index\.js";$/mu,
       detail: "provider resolution imports only the selected adapter at the execution edge",
     },
+    {
+      source: "akuma/**",
+      pattern: /(?:awaitLateDisposal|lateDisposal|WeakMap\s*<\s*AbortSignal)/u,
+      detail: "provider attempts, not AbortSignal-keyed state, own cleanup proof",
+    },
     ...forbiddenFor("git/read-observation.ts", [
       {
         pattern: /(?:contracts\/|settlement\/task-holders|dispatch\/|decodeJournal|decodeHolder)/u,

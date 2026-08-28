@@ -2,6 +2,8 @@ import { LineRpcProcess } from "../../../runtime/proc/line-rpc.js";
 import {
   AgentEventChannel,
   AKUMA_REQUESTS_ENV,
+  createProviderAttempt,
+  type AttemptCustody,
   type Session,
   type ProviderAdapter,
   type TurnResult,
@@ -133,12 +135,19 @@ async function admitTurn(
 async function forkCodex(
   execution: ProviderExecution,
   input: ForkInput,
+  custody: AttemptCustody,
 ): Promise<Readonly<{ session: { sessionId: string } }>> {
   if (!("sessionId" in input.session)) throw new Error("Codex app-server fork requires sessionId");
   const server = new LineRpcProcess({
     argv: [execution.executable ?? "codex", "app-server", "--listen", "stdio://"],
     cwd: input.cwd,
     ...(execution.env === undefined ? {} : { env: { ...process.env, ...execution.env } }),
+  });
+  const closed = new Promise<void>((resolve) => server.onExit(() => resolve()));
+  custody.own({
+    closed,
+    abort: async () => await server.close(true),
+    forceDispose: async () => await server.close(true),
   });
   try {
     await initialize(server);
@@ -176,12 +185,18 @@ function codexServer(execution: ProviderExecution, input: StartInput): LineRpcPr
   });
 }
 
-async function startCodex(execution: ProviderExecution, input: StartInput): Promise<Session> {
+async function startCodex(execution: ProviderExecution, input: StartInput, custody: AttemptCustody): Promise<Session> {
   const signal = input.signal ?? new AbortController().signal;
   if (input.session.kind === "resume" && !("sessionId" in input.session.coordinate))
     throw new Error("Codex app-server resume requires sessionId");
   const events = new AgentEventChannel();
   const server = codexServer(execution, input);
+  const closed = new Promise<void>((resolve) => server.onExit(() => resolve()));
+  custody.own({
+    closed,
+    abort: async () => await server.close(true),
+    forceDispose: async () => await server.close(true),
+  });
   const state: CodexTurnState = { settled: false, tools: new Map() };
   let settle!: (result: TurnResult) => void;
   const completion = new Promise<TurnResult>((resolve) => {
@@ -260,8 +275,20 @@ export function createCodexAppServerProvider(input: string | ProviderExecution =
         ...(options.readonly === undefined ? {} : { readonly: { enforcement: "native" as const } }),
       };
     },
-    fork: (input) => forkCodex(execution, input),
-    start: (input) => startCodex(execution, input),
-    resume: (input) => startCodex(execution, input),
+    fork: (input) =>
+      createProviderAttempt(
+        new AbortController().signal,
+        async (custody) => await forkCodex(execution, input, custody),
+      ),
+    start: (input) =>
+      createProviderAttempt(
+        input.signal,
+        async (custody) => await startCodex(execution, { ...input, signal: custody.signal }, custody),
+      ),
+    resume: (input) =>
+      createProviderAttempt(
+        input.signal,
+        async (custody) => await startCodex(execution, { ...input, signal: custody.signal }, custody),
+      ),
   };
 }
