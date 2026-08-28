@@ -211,6 +211,31 @@ test("history limit counts folded semantic rows", async () => {
   }
 });
 
+test("history defaults to the newest twelve semantic rows", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-history-default-"));
+  const born = await bornHistoryHandle(root, "c0000007");
+  try {
+    for (let index = 1; index <= 13; index += 1) {
+      await appendActivity(born.allocated.paths, {
+        turnSequence: born.turn.sequence,
+        event: { type: "note", text: `note ${index}` },
+        at: `2026-08-10T00:00:${String(index).padStart(2, "0")}.000Z`,
+      });
+    }
+
+    const page = await born.handle.history();
+    assert.equal(page.rows.length, 12);
+    assert.equal(page.hasEarlier, true);
+    assert.deepEqual(
+      page.rows.map((row) => row.sequence),
+      Array.from({ length: 12 }, (_, index) => index + 3),
+    );
+  } finally {
+    born.holder.release();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("Heart activity reads do not take public history cursors", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-history-owner-"));
   const born = await bornHistoryHandle(root, "c0000004");

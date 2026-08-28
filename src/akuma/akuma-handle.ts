@@ -149,7 +149,7 @@ export class AkumaHandle {
         throw new TypeError(`Akuma history ${name} must be a positive safe integer`);
       }
     }
-    const limit = input.limit ?? 50;
+    const limit = input.limit ?? 12;
     if (!Number.isSafeInteger(limit) || limit <= 0 || limit > 5_000) {
       throw new TypeError("Akuma history limit must be a positive safe integer no greater than 5000");
     }

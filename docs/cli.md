@@ -303,7 +303,7 @@ are refused except for zero itself, and the units convert to milliseconds
 before the public call. A converted value beyond the safe integer range is
 refused. Contract history requires a Repo, accepts no cursor, limit, or
 `--last`, and calls the selected Contract handle without constructing an Akuma
-World. Akuma history with no mode renders the newest page of at most 50 semantic
+World. Akuma history with no mode renders the newest page of at most 12 semantic
 rows. `--limit`
 selects a positive page size no greater than 5000 and otherwise keeps that
 default. `--before`

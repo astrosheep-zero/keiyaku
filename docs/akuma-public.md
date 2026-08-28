@@ -172,7 +172,8 @@ cursor or retained-boundary fields. Cursor coordinates are those semantic-row
 sequences. `before` and `since` are exclusive and mutually exclusive.
 `before=N` selects semantic rows with sequence less than `N`; `since=N`
 selects rows with sequence greater than `N`. `limit` counts folded semantic
-rows and remains 1..5,000. Status and wait never carry a full history page.
+rows and remains 1..5,000; an omitted limit selects the newest 12 rows. Status
+and wait never carry a full history page.
 Every completed answered or failed Turn has one stable, nonblank Heart-owned
 `historyId` in the form `turn/<turnSequence>`, present on history outcome rows
 and status/wait outcomes. Provider-native coordinates remain private.
