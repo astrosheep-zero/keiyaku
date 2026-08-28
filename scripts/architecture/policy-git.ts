@@ -196,7 +196,12 @@ export const gitZones = [
   {
     source: "contract-worktree.ts",
     allow: [
-      any("contract-guidance.ts", ["renderContractAppointment", "renderContractGuidance"]),
+      any("contract-guidance.ts", [
+        "CONTRACT_DELIVERER_SKILL",
+        "CONTRACT_REVIEWER_SKILL",
+        "renderContractAppointment",
+        "renderContractGuidance",
+      ]),
       any("coordination/durable-file.ts"),
       any("coordination/sqlite-transaction-lock.ts"),
       any("core/facts/errors.ts", ["AuthorityCorruptionError"]),

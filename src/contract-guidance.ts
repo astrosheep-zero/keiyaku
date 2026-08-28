@@ -17,7 +17,9 @@ export const CONTRACT_DELIVERER_SKILL = [
   "After the declared verification succeeds, deliver the candidate that is currently in this worktree. A clean worktree delivers HEAD; use `keiyaku deliver <contract> --include-dirty` only when every non-ignored current byte belongs in the candidate.",
   "",
   "Read the delivery receipt. A recorded candidate can wait for review or placement; do not infer lifecycle state from the worktree alone.",
-].join("\n").concat("\n");
+]
+  .join("\n")
+  .concat("\n");
 
 export const CONTRACT_REVIEWER_SKILL = [
   "---",
@@ -34,7 +36,9 @@ export const CONTRACT_REVIEWER_SKILL = [
   "Do not modify the worktree. Compare every Contract criterion to the current candidate, report findings by root cause, and distinguish missing evidence from a passing observation.",
   "",
   "When authorized to record the verdict, use `keiyaku review <contract> --satisfied --summary <conclusion>` or `keiyaku review <contract> --unsatisfied --summary <finding>`. Review testimony applies to the current patch and may become stale after it changes.",
-].join("\n").concat("\n");
+]
+  .join("\n")
+  .concat("\n");
 
 export function renderContractAppointment(contract: ContractId): string {
   return `---\ncontract: ${contract}\ndescription: ${APPOINTMENT_DESCRIPTION}\n---\n`;
