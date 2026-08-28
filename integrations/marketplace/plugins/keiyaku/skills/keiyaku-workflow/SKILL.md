@@ -240,7 +240,9 @@ keiyaku review <contract> --satisfied --summary "<conclusion>"
 keiyaku review <contract> --unsatisfied --summary "<finding>"
 ```
 
-Have an independent reviewer inspect the delivered Contract worktree snapshot.
+Have an independent reviewer — independent from the Deliverer and candidate
+implementation, not necessarily a newly created identity — inspect the
+delivered Contract worktree snapshot.
 If it should record the verdict itself, dispatch it with `--allowed
 contract.review` and state both verdicts in the brief. Otherwise its answer is
 review input for the coordinator to record.
@@ -268,7 +270,10 @@ persist a train or add a second placement authority.
   pure rebase whose `ChangeId` is unchanged keeps the existing review current;
   do not re-review content addressing kept alive. Conflict resolution that
   changes the `ChangeId` makes earlier testimony stale and requires a fresh
-  review against the resolved candidate.
+  review: re-inspect the resolved candidate and record new testimony. Fresh
+  review does not require a new reviewer identity. When the existing independent
+  reviewer is available, prefer reusing it, especially so the reviewer that
+  raised earlier findings can determine whether they are closed.
 - For Contracts known to overlap, resolve the current-target integration before
   the authoritative review. Preliminary feedback may happen earlier, but it
   is not a satisfied gate until its reviewed patch is the candidate intended
