@@ -554,13 +554,7 @@ test("repo reconcile keeps per-Contract reports after discovery", async () => {
   assert.equal(Array.isArray(report.contracts[0]?.report.effects), true);
   assert.equal(Array.isArray(report.contracts[0]?.report.lag), true);
   assert.deepEqual(report.contracts[0]?.report.settlement, {
-    actions: [
-      {
-        kind: "namespace-context",
-        path: await appointedWorktreePath(await cachedRepositoryAt(repository.path), id),
-        action: "kept",
-      },
-    ],
+    actions: [],
     lags: [],
   });
 });
