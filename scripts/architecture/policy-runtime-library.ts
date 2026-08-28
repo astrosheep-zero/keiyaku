@@ -76,7 +76,7 @@ export const runtimeLibraryZones = [
       any("markdown/diff.ts"),
       any("body/arc.ts"),
       any("body/decode.ts"),
-      any("contract-worktree.ts"),
+      any("contract-guidance.ts", ["renderContractGuidance"]),
       factErrors,
       factTypes,
       types("protocol/read/status.ts", [

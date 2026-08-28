@@ -186,6 +186,7 @@ export const gitZones = [
   {
     source: "contract-worktree.ts",
     allow: [
+      any("contract-guidance.ts", ["renderContractAppointment", "renderContractGuidance"]),
       any("coordination/durable-file.ts"),
       any("coordination/sqlite-transaction-lock.ts"),
       any("core/facts/errors.ts", ["AuthorityCorruptionError"]),
@@ -195,6 +196,10 @@ export const gitZones = [
       any("git/workspace.ts", ["worktreePath"]),
       any("workspace-place.ts", ["appointmentFor", "placeRegisterPath", "readPlaceRegister", "PlaceRegister"]),
     ],
+  },
+  {
+    source: "contract-guidance.ts",
+    allow: [types("core/facts/types.ts", ["ArcData", "ContractId", "ContractState"])],
   },
   {
     source: "git/terminal-seal.ts",

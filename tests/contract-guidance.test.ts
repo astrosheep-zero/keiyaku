@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { renderContractGuidance } from "../src/contract-worktree.js";
+import { renderContractGuidance } from "../src/contract-guidance.js";
 import {
   contractHead,
   contractId,

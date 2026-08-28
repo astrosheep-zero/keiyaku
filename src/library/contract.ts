@@ -2,7 +2,7 @@ import { documentDiff } from "../markdown/diff.js";
 import { applyAmendDocument } from "../body/amend.js";
 import { decodeArcDocument } from "../body/arc.js";
 import { decodeContractDocument } from "../body/decode.js";
-import { renderContractGuidance } from "../contract-worktree.js";
+import { renderContractGuidance } from "../contract-guidance.js";
 import {
   actorOption,
   contractTerms,
