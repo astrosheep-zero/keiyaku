@@ -13,6 +13,8 @@ export type GitRepository = Readonly<{
   readonly commonDirectory: string;
   /** A caller-owned cancellation boundary for this capability view. */
   readonly signal?: AbortSignal;
+  /** Test-only observation that this capability is waiting for the private-state seat. */
+  readonly onPrivateStateSeatContention?: () => void;
 }>;
 
 /** Give one caller's Git capability view its cancellation boundary. */

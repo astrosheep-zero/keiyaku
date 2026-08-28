@@ -4,6 +4,7 @@ import type { TreeUpdate } from "../core/facts/offer.js";
 import { contractId, type ContractId } from "../core/facts/types.js";
 import type { GitDecisionObservation } from "../git/observe.js";
 import { GIT_REF, updateGitTree, updateRefsAtomically, writeBlob, writeStateCommit } from "../git/repository.js";
+import { confirmPrivateStatePublication, type PrivateStatePublicationSeat } from "../git/private-state-seat.js";
 import type { GitRepository } from "../git/process.js";
 import {
   withGitTargetedReadObservation,
@@ -174,12 +175,23 @@ export type TaskHolderReleasePublication =
   | Readonly<{ kind: "not-held" }>
   | Readonly<{ kind: "non-published"; diagnostic: string }>;
 
+async function releasedHolderIsCurrent(
+  repository: GitRepository,
+  channel: GitDecodeChannel,
+  owner: ContractId,
+  expected: Uint8Array,
+): Promise<boolean> {
+  const current = (await observeTaskHolderProjection(repository, channel)).get(owner) ?? null;
+  return current?.disposition === "released" && Buffer.from(canonicalBytes(current)).equals(expected);
+}
+
 /** Publish the released holder against the same frozen observation that decided the release. */
 export async function publishTaskHolderRelease(
   repository: GitRepository,
   channel: GitDecodeChannel,
   observation: GitDecisionObservation,
   owner: ContractId,
+  seat: PrivateStatePublicationSeat,
 ): Promise<TaskHolderReleasePublication> {
   const release = await releaseTaskHolder(channel, observation, owner);
   if (release === null) return { kind: "not-held" };
@@ -201,7 +213,14 @@ export async function publishTaskHolderRelease(
       expectedOid: observation.admission.snapshot.commit,
     },
   ]);
-  if (publication.kind === "published") return { kind: "released" };
+  if (publication.kind === "published") {
+    confirmPrivateStatePublication(seat);
+    return { kind: "released" };
+  }
+  if (publication.kind === "unknown" && (await releasedHolderIsCurrent(repository, channel, owner, release.bytes))) {
+    confirmPrivateStatePublication(seat);
+    return { kind: "released" };
+  }
   return {
     kind: "non-published",
     diagnostic:

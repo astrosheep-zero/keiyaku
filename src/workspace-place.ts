@@ -187,6 +187,7 @@ export const CONTRACT_PLACES = Object.freeze([
 const PLACE_INDEX = new Map(CONTRACT_PLACES.map((base, index) => [base, index]));
 const PLACE_VERSION = 1;
 const GENERATION_SUFFIX = /^(?:[2-9]|[1-9][0-9]+)$/u;
+const placeAuthorityFence: unique symbol = Symbol("place-authority-fence");
 
 export type Place = string & { readonly [placeBrand]: "Place" };
 declare const placeBrand: unique symbol;
@@ -201,6 +202,7 @@ export type ManagedWorktreeAppointment =
   | Readonly<{ kind: "appointed"; place: Place; path: string }>
   | Readonly<{ kind: "unappointed" }>
   | Readonly<{ kind: "failed"; diagnostic: string }>;
+export type PlaceAuthorityFence = Readonly<{ readonly [placeAuthorityFence]: true }>;
 
 function placePaths(repository: GitRepository): Readonly<{ authority: string; lock: string }> {
   return {
@@ -325,27 +327,44 @@ export function appointmentFor(register: PlaceRegister, contract: ContractId): P
   return register.byContract.get(contract);
 }
 
-async function mutatePlaceRegister(
+export async function withPlaceAuthorityFence<T>(
+  repository: GitRepository,
+  action: (fence: PlaceAuthorityFence) => T | Promise<T>,
+): Promise<T> {
+  const location = placePaths(repository);
+  const held = await acquireSqliteTransactionLock({ path: location.lock, mode: "immediate" });
+  try {
+    return await action({ [placeAuthorityFence]: true });
+  } finally {
+    held.close();
+  }
+}
+
+async function mutatePlaceRegisterInFence(
   repository: GitRepository,
   mutate: (register: PlaceRegister) => PlaceRegister,
 ): Promise<PlaceRegister> {
   const location = placePaths(repository);
-  const held = await acquireSqliteTransactionLock({ path: location.lock, mode: "immediate" });
+  const current = await readPlaceRegister(repository);
+  const next = mutate(current);
+  const bytes = canonicalPlaceRegister(next);
   try {
-    const current = await readPlaceRegister(repository);
-    const next = mutate(current);
-    const bytes = canonicalPlaceRegister(next);
-    try {
-      if ((await readFile(location.authority, "utf8")) === bytes) return next;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
-    await mkdir(dirname(location.authority), { recursive: true });
-    await replaceFileDurably(location.authority, bytes);
-    return next;
-  } finally {
-    held.close();
+    if ((await readFile(location.authority, "utf8")) === bytes) return next;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
+  await mkdir(dirname(location.authority), { recursive: true });
+  await replaceFileDurably(location.authority, bytes);
+  return next;
+}
+
+async function mutatePlaceRegister(
+  repository: GitRepository,
+  mutate: (register: PlaceRegister) => PlaceRegister,
+  fence?: PlaceAuthorityFence,
+): Promise<PlaceRegister> {
+  if (fence !== undefined) return await mutatePlaceRegisterInFence(repository, mutate);
+  return await withPlaceAuthorityFence(repository, async () => await mutatePlaceRegisterInFence(repository, mutate));
 }
 
 function withAppointments(register: PlaceRegister, contracts: readonly ContractId[]): PlaceRegister {
@@ -388,13 +407,18 @@ export async function appointManagedWorktrees(
 export async function releaseManagedWorktrees(
   repository: GitRepository,
   contracts: readonly ContractId[],
+  fence?: PlaceAuthorityFence,
 ): Promise<void> {
   if (contracts.length === 0) return;
   const drop = new Set(contracts);
-  await mutatePlaceRegister(repository, (current) => {
-    const kept = current.appointments.filter((appointment) => !drop.has(appointment.contract));
-    return kept.length === current.appointments.length ? current : indexedRegister(kept);
-  });
+  await mutatePlaceRegister(
+    repository,
+    (current) => {
+      const kept = current.appointments.filter((appointment) => !drop.has(appointment.contract));
+      return kept.length === current.appointments.length ? current : indexedRegister(kept);
+    },
+    fence,
+  );
 }
 
 async function regularFile(path: string): Promise<boolean> {
@@ -407,19 +431,18 @@ async function regularFile(path: string): Promise<boolean> {
 }
 
 /** Remove only an already-empty Place authority. */
-export async function nukeEmptyPlaceAuthority(repository: GitRepository): Promise<void> {
+export async function nukeEmptyPlaceAuthority(repository: GitRepository, fence?: PlaceAuthorityFence): Promise<void> {
   const location = placePaths(repository);
   const [authorityPresent, lockPresent] = [await regularFile(location.authority), await regularFile(location.lock)];
   if (!authorityPresent && !lockPresent) return;
 
-  const held = await acquireSqliteTransactionLock({ path: location.lock, mode: "immediate" });
-  try {
+  const nuke = async () => {
     const current = await readPlaceRegister(repository);
     if (current.appointments.length !== 0) throw new Error("Place authority still has managed worktree appointments");
     if (await regularFile(location.authority)) await unlink(location.authority);
-  } finally {
-    held.close();
-  }
+  };
+  if (fence !== undefined) await nuke();
+  else await withPlaceAuthorityFence(repository, nuke);
 }
 
 export async function readManagedWorktreeAppointment(

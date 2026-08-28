@@ -16,6 +16,8 @@ import { parseArgv } from "../src/cli/parse.js";
 import { renderRefusal } from "../src/cli/render/refusal.js";
 import { nukeExitCode } from "../src/cli/render/nuke.js";
 import { nukeGit } from "../src/git/nuke.js";
+import { privateStatePublicationSeatPath } from "../src/git/private-state-seat.js";
+import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { commonGitDirectory, repositoryAt } from "../src/git/repository.js";
 import { worktreePath } from "../src/git/workspace.js";
 import { appointManagedWorktrees, placeRegisterPath, readPlaceRegister } from "../src/workspace-place.js";
@@ -484,6 +486,40 @@ test("Git nuke refuses a changed state OID before deleting regenerable topology"
     await nukeGit(fixture.world);
     assert.equal(existsSync(fixture.managedPath), false);
     assert.equal(refPresent(fixture.raw, "refs/heads/keiyaku-state"), false);
+  } finally {
+    rmSync(fixture.raw.path, { recursive: true, force: true });
+    rmSync(fixture.foreign, { recursive: true, force: true });
+  }
+});
+
+test("Git nuke exact-read-backs an unknown state deletion before topology cleanup", async () => {
+  const fixture = await gitNukeFixture();
+  const marker = join(mkdtempSync(join(tmpdir(), "keiyaku-v4-nuke-unknown-state-")), "done");
+  try {
+    const capability = await repositoryAt(fixture.world);
+    const held = await acquireSqliteTransactionLock({ path: privateStatePublicationSeatPath(capability), mode: "immediate" });
+    const arrival = Promise.withResolvers<void>();
+    const pending = withGitShim(
+      gitNukeShim(
+        [
+          'if [ "$1" = "update-ref" ] && [ "$2" = "--no-deref" ] && [ "$3" = "-d" ] && [ "$4" = "refs/heads/keiyaku-state" ] && [ ! -e "$KEIYAKU_UNKNOWN_DONE" ]; then',
+          '  : > "$KEIYAKU_UNKNOWN_DONE"',
+          '  "$KEIYAKU_REAL_GIT" "$@" || exit $?',
+          "  kill -TERM $$",
+          "fi",
+        ].join("\n"),
+      ),
+      { KEIYAKU_UNKNOWN_DONE: marker },
+      (gitPath) => nukeGit(fixture.world, gitPath, { onPrivateStateSeatContention: arrival.resolve }),
+    );
+    await arrival.promise;
+    assert.equal(refPresent(fixture.raw, "refs/heads/keiyaku-state"), true);
+    assert.equal(existsSync(fixture.managedPath), true);
+    held.close();
+    await pending;
+    assert.equal(refPresent(fixture.raw, "refs/heads/keiyaku-state"), false);
+    assert.equal(existsSync(fixture.managedPath), false);
+    assert.equal(refPresent(fixture.raw, "refs/heads/keiyaku-delivery/nuke-managed"), false);
   } finally {
     rmSync(fixture.raw.path, { recursive: true, force: true });
     rmSync(fixture.foreign, { recursive: true, force: true });

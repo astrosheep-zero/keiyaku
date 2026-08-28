@@ -126,6 +126,7 @@ export async function acquireSqliteTransactionLock(input: {
   mode: SqliteTransactionLockMode;
   timeoutMs?: number;
   signal?: AbortSignal;
+  onContended?: () => void;
 }): Promise<HeldSqliteTransactionLock> {
   if (
     input.path.length === 0 ||
@@ -135,12 +136,17 @@ export async function acquireSqliteTransactionLock(input: {
   }
   const started = performance.now();
   let cap = INITIAL_RETRY_MS;
+  let contended = false;
   for (;;) {
     input.signal?.throwIfAborted();
     try {
       return await openLock(input.path, input.mode);
     } catch (error) {
       if (!isBusy(error)) throw error;
+      if (!contended) {
+        contended = true;
+        input.onContended?.();
+      }
       const elapsed = performance.now() - started;
       if (input.timeoutMs !== undefined && elapsed >= input.timeoutMs) {
         throw new SqliteTransactionLockError(

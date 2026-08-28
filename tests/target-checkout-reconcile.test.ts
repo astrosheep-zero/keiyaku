@@ -9,6 +9,7 @@ import { gate, type ContractId } from "../src/core/facts/types.js";
 import { admitDecidedOffer, mintAttempts } from "../src/protocol/attempt.js";
 import { admitIntent } from "../src/protocol/intent.js";
 import { observeContractsForAdmissionAt } from "../src/git/observe.js";
+import { withPrivateStatePublicationSeat } from "../src/git/private-state-seat.js";
 
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import {
@@ -344,22 +345,25 @@ async function admitClaimWithoutFollow(
     );
     assert.equal(attested.kind, "accepted");
 
-    const observation = await observeContractsForAdmissionAt(git, channel, [contract.id]);
-    const attempt = mintAttempts({ entryCount: 2 })[0]!;
-    const decision = decidePlacement({
-      input: { contractId: contract.id, at: new Date().toISOString() },
-      attempt,
-      observation: observation.decision,
-    });
-    assert.equal(decision.kind, "offer");
-    if (decision.kind !== "offer") assert.fail("expected placement offer");
-    const admitted = await admitDecidedOffer({
-      channel,
-      repository: git,
-      decisionObservation: observation,
-      attempt,
-      offer: decision.offer,
-      primaryContract: contract.id,
+    const admitted = await withPrivateStatePublicationSeat(git, async (seat) => {
+      const observation = await observeContractsForAdmissionAt(git, channel, [contract.id]);
+      const attempt = mintAttempts({ entryCount: 2 })[0]!;
+      const decision = decidePlacement({
+        input: { contractId: contract.id, at: new Date().toISOString() },
+        attempt,
+        observation: observation.decision,
+      });
+      assert.equal(decision.kind, "offer");
+      if (decision.kind !== "offer") assert.fail("expected placement offer");
+      return await admitDecidedOffer({
+        channel,
+        repository: git,
+        seat,
+        decisionObservation: observation,
+        attempt,
+        offer: decision.offer,
+        primaryContract: contract.id,
+      });
     });
     assert.equal(admitted.kind, "accepted");
   });

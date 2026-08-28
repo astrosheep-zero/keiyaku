@@ -329,7 +329,9 @@ Protocol is the sole layer that joins pact decisions to Git observation and
 admission. Snapshot identity remains Git-private; pact never names a commit.
 Mechanical preparation and the completed decision remain one judge over one
 frozen observation, with lifecycle refusal taking precedence over mechanical
-failure. There is no lifecycle preflight, and retries never reuse preparation.
+failure. Each semantic attempt acquires Git's private-state publication seat
+before freezing that observation and holds it through admission; there is no
+lifecycle preflight, and retries never reuse preparation.
 
 One decision submits at most one Offer. Git alone constructs objects and
 atomically asserts the sealed OIDs; those assertions are the only admission
@@ -341,10 +343,12 @@ retry.
 
 After rejection, asserted coordinate movement discards the Offer and starts a
 fresh bounded semantic attempt. Three unsuccessful attempts return `exhausted`;
-no movement returns `publication-failed`. Unknown outcomes are classified only
-from durable canonical facts: exact entries prove acceptance, conflicting bytes
-are collision, and absence permits a fresh attempt. `document-moved` is returned
-without automatic retry. The journal is the sole recovery and handoff receipt.
+no movement returns `publication-failed`. The publication seat does not change
+that bound or make possession an acceptance judgment. Unknown outcomes are
+classified only from durable canonical facts: exact entries prove acceptance,
+conflicting bytes are collision, and absence permits a fresh attempt.
+`document-moved` is returned without automatic retry. The journal is the sole
+recovery and handoff receipt.
 
 Amend compares its complete source terms with the current terms and returns
 `terms-moved` when they differ. Deliver and audit use stamped document

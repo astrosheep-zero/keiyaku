@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import test from "node:test";
 import { moveAlias, readAliases, resolveAlias } from "../src/alias/index.js";
 import { parseAkuId } from "../src/akuma/identity.js";
@@ -9,22 +9,10 @@ import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transac
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import { contractId } from "../src/core/facts/types.js";
 import { publishDispatch, readDispatch, readDispatches } from "../src/dispatch/index.js";
-import { commonGitDirectory, repositoryAt } from "../src/git/repository.js";
-import type { GitRepository } from "../src/git/process.js";
+import { privateStatePublicationSeatPath } from "../src/git/private-state-seat.js";
+import { repositoryAt } from "../src/git/repository.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
-
-function dispatchLockPath(repository: GitRepository): string {
-  return resolve(commonGitDirectory(repository), "keiyaku", "locks", "dispatch.sqlite");
-}
-
-async function stillOpen<T>(work: Promise<T>, ms: number): Promise<void> {
-  const outcome = await Promise.race([
-    work.then((value) => ({ kind: "settled" as const, value })),
-    new Promise<{ kind: "open" }>((finish) => setTimeout(() => finish({ kind: "open" }), ms)),
-  ]);
-  assert.equal(outcome.kind, "open");
-}
 
 test("Dispatch publishes one immutable association and preserves its first timestamp", async () => {
   const raw = makeGitRepository();
@@ -63,13 +51,18 @@ test("concurrent distinct Dispatch publications wait for one repository seat", a
     parseAkuId("aku/worker/22222222").id,
     parseAkuId("aku/reviewer/33333333").id,
   ];
-  const held = await acquireSqliteTransactionLock({
-    path: dispatchLockPath(repository),
-    mode: "immediate",
-  });
-  const pending = ids.map((akuId) => publishDispatch({ repository, akuId, contractId: owner }));
+  const held = await acquireSqliteTransactionLock({ path: privateStatePublicationSeatPath(repository), mode: "immediate" });
+  const arrivals = ids.map(() => Promise.withResolvers<void>());
+  const pending = ids.map((akuId, index) =>
+    publishDispatch({
+      repository: { ...repository, onPrivateStateSeatContention: arrivals[index]!.resolve },
+      akuId,
+      contractId: owner,
+    }),
+  );
   try {
-    await stillOpen(Promise.all(pending), 250);
+    await Promise.all(arrivals.map(({ promise }) => promise));
+    assert.deepEqual(await readDispatches(repository), []);
   } finally {
     held.close();
   }
@@ -92,26 +85,28 @@ test("Dispatch publication seats are exact to one Git common directory", async (
     const worktree = await repositoryAt(linked);
     const other = await repositoryAt(makeGitRepository().path);
     const owner = contractId("kei/dispatch-scope");
-    assert.equal(dispatchLockPath(primary), dispatchLockPath(worktree));
-    assert.notEqual(dispatchLockPath(primary), dispatchLockPath(other));
+    assert.equal(privateStatePublicationSeatPath(primary), privateStatePublicationSeatPath(worktree));
+    assert.notEqual(privateStatePublicationSeatPath(primary), privateStatePublicationSeatPath(other));
 
     const held = await acquireSqliteTransactionLock({
-      path: dispatchLockPath(primary),
+      path: privateStatePublicationSeatPath(primary),
       mode: "immediate",
     });
+    const arrival = Promise.withResolvers<void>();
     const blocked = publishDispatch({
-      repository: worktree,
+      repository: { ...worktree, onPrivateStateSeatContention: arrival.resolve },
       akuId: parseAkuId("aku/worker/44444444").id,
       contractId: owner,
     });
     try {
+      await arrival.promise;
       const foreign = await publishDispatch({
         repository: other,
         akuId: parseAkuId("aku/worker/55555555").id,
         contractId: owner,
       });
       assert.equal(foreign.kind, "dispatched");
-      await stillOpen(blocked, 200);
+      assert.equal(await readDispatch(worktree, parseAkuId("aku/worker/44444444").id), null);
     } finally {
       held.close();
     }
@@ -203,7 +198,9 @@ test("Dispatch keeps non-Dispatch CAS failure classifications", async () => {
         contractId: owner,
       }),
   );
-  assert.deepEqual(raced, { kind: "failed", failure: { kind: "contention" } });
+  assert.equal(raced.kind, "failed");
+  if (raced.kind !== "failed") return;
+  assert.equal(raced.failure.kind, "publication-failed");
   assert.equal(await readDispatch(repository, parseAkuId("aku/worker/99999999").id), null);
 });
 

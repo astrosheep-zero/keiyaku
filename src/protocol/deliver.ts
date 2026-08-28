@@ -13,6 +13,7 @@ import {
 } from "../git/tender.js";
 import { worktreePath } from "../git/workspace.js";
 import { observeContractsForAdmissionAt } from "../git/observe.js";
+import { withPrivateStatePublicationSeat } from "../git/private-state-seat.js";
 import type { AttemptContext } from "../core/decide.js";
 import { contractState } from "../core/facts/observation.js";
 import type { ActorId, ContractId, ContractState, DeliverData, JournalEntry, SnapshotId } from "../core/facts/types.js";
@@ -152,6 +153,17 @@ async function deliverAttempt(
   input: DeliverOperationInput,
   attempt: AttemptContext,
 ): Promise<AttemptDecision<PreparedDelivery>> {
+  return await withPrivateStatePublicationSeat(
+    input.scope,
+    async (seat) => await deliverAttemptInPrivateStateSeat(input, attempt, seat),
+  );
+}
+
+async function deliverAttemptInPrivateStateSeat(
+  input: DeliverOperationInput,
+  attempt: AttemptContext,
+  seat: import("../git/private-state-seat.js").PrivateStatePublicationSeat,
+): Promise<AttemptDecision<PreparedDelivery>> {
   const decisionObservation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
   const state = contractState(decisionObservation.decision, input.contractId);
   const derivation = state === null ? undefined : input.deriveDocument(state);
@@ -207,6 +219,7 @@ async function deliverAttempt(
   const admission = await admitDecidedOffer({
     channel: input.channel,
     repository: input.scope,
+    seat,
     decisionObservation,
     attempt,
     offer: decision.offer,

@@ -4,6 +4,7 @@ import { contractState } from "../core/facts/observation.js";
 import type { ActorId, ContractId, SnapshotId } from "../core/facts/types.js";
 import { decidePlacement, type PlacementRefusal } from "../core/verbs/placement.js";
 import { observeGitForAdmissionAt } from "../git/observe.js";
+import { withPrivateStatePublicationSeat } from "../git/private-state-seat.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import { reconcileEffectFailure, type ReconcileResult } from "../git/reconcile.js";
 import { GitPlumbingError, type GitRepository } from "../git/process.js";
@@ -13,6 +14,7 @@ import {
   prepareTargetPlacement,
   observeTargetHead,
   observedTreeEqualsCandidate,
+  type PreparedTargetPlacement,
   type TargetPlacementRefusal,
 } from "../git/target-placement.js";
 import { admitDecidedOffer, mintAttempts, type AcceptedAdmission } from "./attempt.js";
@@ -67,41 +69,52 @@ async function runFencedPlacement(
   input: PlacementProtocolInput,
   protocol: RunProtocolInput<PlacementProtocolInput, PlacementRefusal | TargetPlacementRefusal>,
 ): Promise<PlacementProtocolResult> {
-  for (let index = 0; index < protocol.attempts.length; index += 1) {
-    const prepared = await prepareProtocolAttempt(protocol, protocol.attempts[index]!);
-    if (prepared.kind === "refused") return prepared;
-    const state = contractState(prepared.observation.decision, input.contractId);
-    if (state === null) throw new Error("placement offer has no contract state");
-    if (prepared.offer.target === undefined) throw new Error("targeted placement offer is missing its target movement");
-    const observed = await observeTargetHead(repository, prepared.offer.target.target);
-    if (observed !== prepared.offer.target.expectedOid) {
-      const treeEquals = await observedTreeEqualsCandidate(repository, observed, prepared.offer.target.newOid);
-      return {
-        kind: "target-moved",
-        contractId: input.contractId,
-        target: prepared.offer.target.target,
-        expected: prepared.offer.target.expectedOid,
-        observed,
-        observedTreeEqualsCandidate: treeEquals,
-      };
+  let preparedPhysical: PreparedTargetPlacement | undefined;
+  const result: PlacementProtocolResult = await withPrivateStatePublicationSeat(repository, async (seat) => {
+    for (let index = 0; index < protocol.attempts.length; index += 1) {
+      const prepared = await prepareProtocolAttempt(protocol, protocol.attempts[index]!);
+      if (prepared.kind === "refused") return prepared;
+      const state = contractState(prepared.observation.decision, input.contractId);
+      if (state === null) throw new Error("placement offer has no contract state");
+      if (prepared.offer.target === undefined)
+        throw new Error("targeted placement offer is missing its target movement");
+      const observed = await observeTargetHead(repository, prepared.offer.target.target);
+      if (observed !== prepared.offer.target.expectedOid) {
+        const treeEquals = await observedTreeEqualsCandidate(repository, observed, prepared.offer.target.newOid);
+        return {
+          kind: "target-moved",
+          contractId: input.contractId,
+          target: prepared.offer.target.target,
+          expected: prepared.offer.target.expectedOid,
+          observed,
+          observedTreeEqualsCandidate: treeEquals,
+        };
+      }
+      const physical = await prepareTargetPlacement(repository, state, prepared.offer.target);
+      if (physical.kind === "refused") return physical;
+      const result = await admitDecidedOffer({
+        channel: protocol.channel,
+        repository,
+        seat,
+        decisionObservation: prepared.observation,
+        attempt: prepared.attempt,
+        offer: prepared.offer,
+        primaryContract: input.contractId,
+      });
+      if (result.kind === "accepted") {
+        preparedPhysical = physical.placement;
+        return result;
+      }
+      if (result.kind === "publication-failed") return result;
+      if (result.kind === "collision" && index + 1 === protocol.attempts.length) return result;
     }
-    const physical = await prepareTargetPlacement(repository, state, prepared.offer.target);
-    if (physical.kind === "refused") return physical;
-    const result = await admitDecidedOffer({
-      channel: protocol.channel,
-      repository,
-      decisionObservation: prepared.observation,
-      attempt: prepared.attempt,
-      offer: prepared.offer,
-      primaryContract: input.contractId,
-    });
-    if (result.kind === "accepted") {
-      return { ...result, physical: await followTargetPlacement(repository, physical.placement) };
-    }
-    if (result.kind === "publication-failed") return result;
-    if (result.kind === "collision" && index + 1 === protocol.attempts.length) return result;
+    return { kind: "exhausted" };
+  });
+  if (result.kind !== "accepted") return result;
+  if (preparedPhysical === undefined) {
+    throw new Error("accepted placement has no prepared target checkout");
   }
-  return { kind: "exhausted" };
+  return { ...result, physical: await followTargetPlacement(repository, preparedPhysical) };
 }
 
 /** Hold the existing target-placement fence for one owner callback. */

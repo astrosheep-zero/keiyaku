@@ -476,7 +476,7 @@ export const akumaZones = [
     source: "dispatch/index.ts",
     allow: [
       any("akuma/identity.ts", ["parseAkuId", "AkuId"]),
-      any("coordination/sqlite-transaction-lock.ts"),
+      any("git/private-state-seat.ts"),
       factErrors,
       factTypes,
       any("git/read-observation.ts"),

@@ -121,14 +121,38 @@ operation detail, when present, follows after a blank line. Delivery,
 candidate, and ephemeral recovery commits keep their own subjects and
 identities. This warning does not add deletion detection or recovery behavior.
 
+Git serializes every cooperating writer of `refs/heads/keiyaku-state` with one
+abort-aware SQLite immediate-transaction seat at a fixed private path beneath
+the pinned common Git directory. The seat is shared by worktrees and processes
+of one repository, released by process death, and is not shared between
+repositories. A writer acquires it before observing the private root and holds
+it through its decision, object construction, authoritative unknown-outcome
+read-back, and final known publication result. Contract admission, post-
+admission TaskHolder release, Dispatch publication, and confirmed reset are
+the exhaustive current writers. Existing per-Task and target-placement fences
+remain outer; code holding this seat acquires no other Keiyaku publication,
+Task, target, allocation, or workspace fence.
+
+The seat schedules cooperating writers only. Root CAS and exact durable
+read-back remain the sole currentness and acceptance judges. A state-ref move
+while the seat is held is external movement and retains ordinary read-back and
+redecision behavior; a rejected CAS with no state-ref movement remains
+`publication-failed`. The seat adds no queue, fairness state, backoff, retry
+budget, daemon, per-Contract ref, or lock-derived acceptance. A seat-release
+failure never reverses a known or exact-read-back-proven publication.
+
 The Git owner performs confirmed reset state-first. It snapshots
 `refs/heads/keiyaku-state` and deletes that ref with an expected-OID
 compare-and-swap before deleting regenerable delivery, candidate, worktree, or
 Place topology. If the state OID moved between observation and deletion, the
 owner attempt fails before topology cleanup so a later confirmed reset can
 retry. If the state ref is absent, reset continues against the observed owned
-topology. State-first is the only reset ordering law; reset adds no World-wide
-lock, ledger, backup, trash, undo, or repository GC.
+topology. An unknown deletion outcome requires a fresh state-ref read-back:
+only observed absence permits cleanup. Reset holds its existing Place/appointment
+fence outside the private-state seat, then takes the seat before that snapshot
+and retains both through owned topology cleanup. State-first is the only reset
+ordering law; reset adds no World-wide lock, ledger, backup, trash, undo, or
+repository GC.
 
 During namespace migration, reset enumerates leaves under the distinct legacy
 roots `refs/heads/keiyaku-delivery` and `refs/heads/keiyaku-candidate` and the

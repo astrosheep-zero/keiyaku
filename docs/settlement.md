@@ -159,12 +159,15 @@ TaskHolder authority, current Task Markdown, and the current Git report on
 every invocation. It records no completion bit. Re-running Contract or world
 reconciliation repeats Git reconciliation and the same settlement rules. Task
 predecessor-byte comparison remains the Task write adjudicator; concurrent
-movement becomes a lag and is reconsidered later. Each claimed candidate is
-decided from one fresh frozen observation: that same snapshot yields the
-current Contract state, the current holder, and the release write's expected
-OID assertion, so the Task `done` write and the released holder come from one
-state epoch. A non-published release is reported as a `task-holder` lag and is
-retried on a later replay.
+movement becomes a lag and is reconsidered later. Settlement uses the current
+holder only to select its per-Task settlement fence. Once it holds that fence,
+it rereads the matching holder before deciding work, retains the fence through
+the Task-owned `done` operation, then acquires Git's private-state seat inside
+that fence. It freezes a fresh Contract and holder observation there for the
+release write's expected OID assertion. The seat stays held through release
+publication and exact unknown-outcome read-back; Task predecessor-byte
+comparison remains the only Task-write adjudicator. A non-published release is
+reported as a `task-holder` lag and is retried on a later replay.
 
 ## Hook Boundary
 

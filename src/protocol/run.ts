@@ -1,4 +1,5 @@
 import { extendAdmissionPathsAt, observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
+import { withPrivateStatePublicationSeat } from "../git/private-state-seat.js";
 import type { GitDecodeChannel, GitTreeSelection } from "../git/read-observation.js";
 import type { GitRepository } from "../git/process.js";
 import type { GitRefAssertion } from "../git/repository.js";
@@ -143,19 +144,22 @@ export async function runProtocol<
   const attempts = input.attempts;
 
   for (let index = 0; index < attempts.length; index += 1) {
-    const prepared = await prepareProtocolAttempt(input, attempts[index]!);
-    if (prepared.kind === "refused") return prepared;
-    const result = await admitDecidedOffer<Refusal>({
-      channel: input.channel,
-      repository: input.repository,
-      decisionObservation: prepared.observation,
-      attempt: prepared.attempt,
-      offer: prepared.offer,
-      primaryContract: input.input.contractId,
-      assertions: prepared.assertions,
-      ...(input.validateAdmission === undefined ? {} : { validateAdmission: input.validateAdmission }),
+    const result = await withPrivateStatePublicationSeat(input.repository, async (seat) => {
+      const prepared = await prepareProtocolAttempt(input, attempts[index]!);
+      if (prepared.kind === "refused") return prepared;
+      return await admitDecidedOffer<Refusal>({
+        channel: input.channel,
+        repository: input.repository,
+        seat,
+        decisionObservation: prepared.observation,
+        attempt: prepared.attempt,
+        offer: prepared.offer,
+        primaryContract: input.input.contractId,
+        assertions: prepared.assertions,
+        ...(input.validateAdmission === undefined ? {} : { validateAdmission: input.validateAdmission }),
+      });
     });
-    if (result.kind === "accepted" || result.kind === "publication-failed" || result.kind === "refused") return result;
+    if (result.kind === "refused" || result.kind === "accepted" || result.kind === "publication-failed") return result;
     if (result.kind === "collision" && index + 1 === attempts.length) return result;
   }
   return { kind: "exhausted" };

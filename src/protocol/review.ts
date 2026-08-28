@@ -7,6 +7,7 @@ import {
   type WorkspaceDirtyDelta,
 } from "../git/tender.js";
 import { observeContractsForAdmissionAt } from "../git/observe.js";
+import { withPrivateStatePublicationSeat } from "../git/private-state-seat.js";
 import { dependencyKeySet } from "../core/subject.js";
 import { contractState } from "../core/facts/observation.js";
 import type { AttestationData, ContractState, DeliverData } from "../core/facts/types.js";
@@ -124,6 +125,17 @@ async function reviewAttempt(
   input: ReviewOperationInput,
   attempt: AttemptContext,
 ): Promise<AttemptDecision<PreparedReview, ReviewRefusal>> {
+  return await withPrivateStatePublicationSeat(
+    input.scope,
+    async (seat) => await reviewAttemptInPrivateStateSeat(input, attempt, seat),
+  );
+}
+
+async function reviewAttemptInPrivateStateSeat(
+  input: ReviewOperationInput,
+  attempt: AttemptContext,
+  seat: import("../git/private-state-seat.js").PrivateStatePublicationSeat,
+): Promise<AttemptDecision<PreparedReview, ReviewRefusal>> {
   const decisionObservation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
   const state = contractState(decisionObservation.decision, input.contractId);
   let preparation: AttestationInput<ReviewRefusal>["preparation"];
@@ -168,6 +180,7 @@ async function reviewAttempt(
   const admission = await admitDecidedOffer({
     channel: input.channel,
     repository: input.scope,
+    seat,
     decisionObservation,
     attempt,
     offer: decision.offer,

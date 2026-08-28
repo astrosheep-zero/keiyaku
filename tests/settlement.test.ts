@@ -5,6 +5,8 @@ import { join } from "node:path";
 import test from "node:test";
 import { AuthorityCorruptionError, Keiyaku, Repo } from "../src/index.js";
 import { contractJournalPath } from "../src/git/identity.js";
+import { privateStatePublicationSeatPath } from "../src/git/private-state-seat.js";
+import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
 import {
   GIT_REF,
@@ -24,7 +26,7 @@ import { settle } from "../src/settlement/settle.js";
 import { readNamespaceContext } from "../src/task/context.js";
 import { Tasks } from "../src/task/index.js";
 import { World } from "../src/world.js";
-import { appointedWorktreePath, cachedRepoAt, cachedRepositoryAt, makeGitRepository } from "./support/git.js";
+import { appointedWorktreePath, cachedRepoAt, cachedRepositoryAt, makeGitRepository, withGitShim } from "./support/git.js";
 
 function repository() {
   const value = makeGitRepository();
@@ -307,6 +309,61 @@ test("a missing holder target remains an explicit Task settlement lag", async ()
     taskId: missing,
     diagnostic: `Task settlement refused: ${JSON.stringify({ kind: "task-missing", taskId: missing })}`,
   });
+});
+
+test("Settlement exact-read-backs an unknown TaskHolder release after external state advancement", async () => {
+  const world = repository(),
+    repo = await cachedRepoAt(world.path);
+  const taskId = await task(world.path, "Unknown holder release", "drop");
+  const bound = await Keiyaku.bind({
+    repo,
+    task: taskId,
+    markdown: document("Unknown holder release"),
+    workspace: "worktree",
+    gates: [],
+  });
+  writeFileSync(`${world.path}/unknown-holder.txt`, "candidate\n");
+  const delivered = await bound.keiyaku.deliver({ includeDirty: true });
+  assert.equal(delivered.settlement.lags[0]?.surface, "task");
+  replaceTaskState(world.path, taskId, "drop", "open");
+  const state = await bound.keiyaku.state();
+
+  const git = await cachedRepositoryAt(world.path);
+  const held = await acquireSqliteTransactionLock({ path: privateStatePublicationSeatPath(git), mode: "immediate" });
+  const arrival = Promise.withResolvers<void>();
+  const pending = withGitShim(
+    [
+      'if [ "$1" = "update-ref" ]; then',
+      '  "$KEIYAKU_REAL_GIT" "$@" || exit $?',
+      '  current=$("$KEIYAKU_REAL_GIT" rev-parse refs/heads/keiyaku-state)',
+      '  tree=$("$KEIYAKU_REAL_GIT" rev-parse "$current^{tree}")',
+      '  next=$("$KEIYAKU_REAL_GIT" commit-tree "$tree" -p "$current" -m external)',
+      '  "$KEIYAKU_REAL_GIT" update-ref refs/heads/keiyaku-state "$next" "$current" || exit $?',
+      "  kill -TERM $$",
+      "fi",
+      'exec "$KEIYAKU_REAL_GIT" "$@"',
+    ].join("\n"),
+    {},
+    async (gitPath) => {
+      const git = {
+        ...(await cachedRepositoryAt(world.path, gitPath)),
+        onPrivateStateSeatContention: arrival.resolve,
+      };
+      return await withGitDecodeChannel(git, async (channel) => settle({ repository: git, channel, state, effects: [] }));
+    },
+  );
+  await arrival.promise;
+  assert.equal(await taskState(world.path, taskId), "done");
+  assert.deepEqual(await holders(world), [{ version: 1, taskId, contractId: state.id, disposition: "held" }]);
+  held.close();
+  const report = await pending;
+
+  assert.deepEqual(report.actions, [{ kind: "task", taskId, action: "done" }]);
+  assert.deepEqual(report.lags, []);
+  assert.equal(await taskState(world.path, taskId), "done");
+  assert.deepEqual(await holders(world), [
+    { version: 1, taskId, contractId: state.id, disposition: "released" },
+  ]);
 });
 
 test("abandon rejects corrupt authority assigning one Contract multiple holders", async () => {

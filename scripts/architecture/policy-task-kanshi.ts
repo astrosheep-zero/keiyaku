@@ -104,6 +104,7 @@ export const taskKanshiZones = [
       types("core/facts/offer.ts"),
       factTypes,
       types("git/observe.ts", ["GitDecisionObservation"]),
+      any("git/private-state-seat.ts"),
       any("git/read-observation.ts"),
       any("git/repository.ts"),
       gitRepository,
@@ -116,6 +117,7 @@ export const taskKanshiZones = [
     allow: [
       any("world.ts"),
       any("git/observe.ts"),
+      any("git/private-state-seat.ts"),
       any("git/read-observation.ts"),
       types("git/reconcile.ts"),
       gitRepository,

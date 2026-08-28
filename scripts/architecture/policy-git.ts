@@ -1,6 +1,10 @@
 import { any, factErrors, factTypes, gitRepository, types } from "./policy-helpers.js";
 export const gitZones = [
   { source: "git/identity.ts", allow: [factTypes] },
+  {
+    source: "git/private-state-seat.ts",
+    allow: [any("coordination/sqlite-transaction-lock.ts"), gitRepository],
+  },
   { source: "git/tree.ts", allow: [any("git/identity.ts")] },
   {
     source: "git/process.ts",
@@ -101,7 +105,8 @@ export const gitZones = [
       any("contract-worktree.ts", ["nukeContractWorktreeLock"]),
       types("core/facts/types.ts", ["ContractId"]),
       any("git/hooks.ts", ["nukeWorktreeHookResidue"]),
-      any("git/process.ts", ["runGit", "GitRepository"]),
+      any("git/process.ts", ["GitPlumbingError", "runGit", "GitRepository"]),
+      any("git/private-state-seat.ts"),
       any("git/repository.ts", [
         "CANDIDATE_PIN_REF_NAMESPACE",
         "DELIVERY_REF_NAMESPACE",
@@ -115,7 +120,12 @@ export const gitZones = [
         "worktreeGitDirectory",
       ]),
       any("git/workspace.ts", ["worktreePath"]),
-      any("workspace-place.ts", ["nukeEmptyPlaceAuthority", "readPlaceRegister", "releaseManagedWorktrees"]),
+      any("workspace-place.ts", [
+        "nukeEmptyPlaceAuthority",
+        "readPlaceRegister",
+        "releaseManagedWorktrees",
+        "withPlaceAuthorityFence",
+      ]),
       types("world.ts", ["WorldRoot"]),
     ],
   },

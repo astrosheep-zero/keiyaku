@@ -20,7 +20,6 @@ export { akumaRawAnswer } from "./akuma-activity.js";
 function dispatchLines(stage: DispatchStage): readonly string[] {
   if (stage.kind === "none" || stage.kind === "dispatched") return [];
   if (stage.failure.kind === "conflict") return [`dispatch failed conflict ${stage.failure.current.contractId}`];
-  if (stage.failure.kind === "contention") return ["dispatch failed contention"];
   return [`dispatch failed ${stage.failure.kind} ${safeText(stage.failure.diagnostic)}`];
 }
 

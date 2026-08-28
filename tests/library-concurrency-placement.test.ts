@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
@@ -7,8 +8,92 @@ import { decodeContractDocument } from "../src/body/decode.js";
 import { encodeEntry } from "../src/core/facts/codec.js";
 import { entryUlid, type JournalEntry } from "../src/core/facts/types.js";
 import { contractJournalPath } from "../src/git/identity.js";
+import { privateStatePublicationSeatPath } from "../src/git/private-state-seat.js";
+import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
+import { reintegrateOperation } from "../src/protocol/reintegrate.js";
+import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { appointedWorktreePath, cachedRepoAt, cachedRepositoryAt, withGitShim } from "./support/git.js";
-import { bind, commitCandidate, document, refused, repositoryWithMain } from "./support/library-verbs.js";
+import { bind, commitCandidate, document, repositoryWithMain } from "./support/library-verbs.js";
+
+function crossProcessAmend(input: Readonly<{ repository: string; contractId: string; markdown: string }>) {
+  const source = [
+    "const { Keiyaku, Repo } = await import(process.env.KEIYAKU_MODULE);",
+    "const { repositoryAt } = await import(process.env.KEIYAKU_REPOSITORY_MODULE);",
+    "const { privateStatePublicationSeatPath } = await import(process.env.KEIYAKU_SEAT_MODULE);",
+    "const { tryAcquireSqliteTransactionLock } = await import(process.env.KEIYAKU_LOCK_MODULE);",
+    "const capability = await repositoryAt(process.env.KEIYAKU_REPOSITORY);",
+    "const probe = await tryAcquireSqliteTransactionLock({ path: privateStatePublicationSeatPath(capability), mode: 'immediate' });",
+    "if (probe !== null) { probe.close(); throw new Error('shared seat was not held'); }",
+    "process.stdout.write('ready\\n');",
+    "const contract = await Keiyaku.of({ repo: await Repo.at({ path: process.env.KEIYAKU_REPOSITORY }), id: process.env.KEIYAKU_CONTRACT });",
+    "try { await contract.amend({ markdown: process.env.KEIYAKU_MARKDOWN }); process.stdout.write('accepted\\n'); } catch (error) { process.stdout.write(`failed:${error.reason?.kind ?? error.refusal?.kind ?? error.name}\\n`); }",
+  ].join("\n");
+  const child = spawn(
+    process.execPath,
+    ["--import", new URL("../node_modules/tsx/dist/loader.mjs", import.meta.url).href, "--input-type=module", "-e", source],
+    {
+      env: {
+        ...process.env,
+        KEIYAKU_MODULE: new URL("../src/index.ts", import.meta.url).href,
+        KEIYAKU_REPOSITORY_MODULE: new URL("../src/git/repository.ts", import.meta.url).href,
+        KEIYAKU_SEAT_MODULE: new URL("../src/git/private-state-seat.ts", import.meta.url).href,
+        KEIYAKU_LOCK_MODULE: new URL("../src/coordination/sqlite-transaction-lock.ts", import.meta.url).href,
+        KEIYAKU_REPOSITORY: input.repository,
+        KEIYAKU_CONTRACT: input.contractId,
+        KEIYAKU_MARKDOWN: input.markdown,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  const ready = new Promise<void>((resolveReady, rejectReady) => {
+    child.once("error", rejectReady);
+    child.stdout.once("data", (bytes) =>
+      bytes.toString("utf8").includes("ready") ? resolveReady() : rejectReady(new Error("child did not become ready")),
+    );
+  });
+  const completed = new Promise<string>((resolveCompleted, rejectCompleted) => {
+    let diagnostic = "";
+    let output = "";
+    child.stdout.on("data", (bytes) => {
+      output += bytes.toString("utf8");
+    });
+    child.stderr.on("data", (bytes) => {
+      diagnostic += bytes.toString("utf8");
+    });
+    child.once("error", rejectCompleted);
+    child.once("exit", (code) =>
+      code === 0
+        ? resolveCompleted(output)
+        : rejectCompleted(new Error(`cross-process amend exited ${code}: ${diagnostic}`)),
+    );
+  });
+  return { ready, completed };
+}
+
+test("more independent cross-process mutations than the attempt bound serialize at the private root", async () => {
+  const repository = repositoryWithMain();
+  const contracts = [];
+  for (let index = 0; index < 4; index += 1) contracts.push(await bind(repository));
+  const capability = await cachedRepositoryAt(repository.path);
+  const held = await acquireSqliteTransactionLock({ path: privateStatePublicationSeatPath(capability), mode: "immediate" });
+  const workers = contracts.map((contract, index) =>
+    crossProcessAmend({
+      repository: repository.path,
+      contractId: contract.id,
+      markdown: `## Replace: Context\nwriter ${index}\n`,
+    }),
+  );
+  try {
+    await Promise.all(workers.map(({ ready }) => ready));
+  } finally {
+    held.close();
+  }
+  const outcomes = await Promise.all(workers.map(({ completed }) => completed));
+  assert.ok(outcomes.every((outcome) => outcome.includes("accepted")));
+  for (const [index, contract] of contracts.entries()) {
+    assert.equal(decodeContractDocument((await contract.state()).terms.document.bytes).context.trim(), `writer ${index}`);
+  }
+});
 
 test("public amend returns the recovered journal head after unknown recovery", async () => {
   const repository = repositoryWithMain();
@@ -72,47 +157,33 @@ test("public amend returns the recovered journal head after unknown recovery", a
   assert.equal(amended.head, live.head);
 });
 
-test("a concurrent amend redecides and returns terms-moved without replaying old input", async () => {
+test("same-Contract cross-process amends decide from the queued fresh state", async () => {
   const repository = repositoryWithMain();
   const contract = await bind(repository);
-  const initial = await contract.state();
-  const marker = `${repository.path}/amend-race.marker`;
-  const B = ["## Replace: Objective", "B's D0 amendment wins the admission race.", ""].join("\n");
-
-  const A = ["## Replace: Context", "A's D0 amendment must not be replayed against D1B.", ""].join("\n");
-  await assert.rejects(
-    withGitShim(
-      [
-        'if [ "$1" = "update-ref" ] && [ ! -e "$KEIYAKU_AMEND_RACE_MARKER" ]; then',
-        '  touch "$KEIYAKU_AMEND_RACE_MARKER"',
-        "  node --import \"$KEIYAKU_AMEND_RACE_LOADER\" --input-type=module -e 'const { Keiyaku, Repo } = await import(process.env.KEIYAKU_AMEND_RACE_MODULE); await Keiyaku.of({ repo: await Repo.at({ path: process.env.KEIYAKU_AMEND_RACE_REPO }), id: process.env.KEIYAKU_AMEND_RACE_ID }).amend({ markdown: process.env.KEIYAKU_AMEND_RACE_MARKDOWN });' || exit $?",
-        "fi",
-        'exec "$KEIYAKU_REAL_GIT" "$@"',
-      ].join("\n"),
-      {
-        KEIYAKU_AMEND_RACE_MARKER: marker,
-        KEIYAKU_AMEND_RACE_LOADER: new URL("../node_modules/tsx/dist/loader.mjs", import.meta.url).href,
-        KEIYAKU_AMEND_RACE_MODULE: new URL("../src/index.ts", import.meta.url).href,
-        KEIYAKU_AMEND_RACE_ID: initial.id,
-        KEIYAKU_AMEND_RACE_REPO: repository.path,
-        KEIYAKU_AMEND_RACE_MARKDOWN: B,
-      },
-      async (gitPath) =>
-        (
-          await Keiyaku.of({
-            repo: await Repo.at({ path: repository.path, gitPath }),
-            id: contract.id,
-          })
-        ).amend({ markdown: A }),
-    ),
-    refused({ kind: "terms-moved", contractId: initial.id }),
-  );
-  const current = await contract.state();
-  const initialBody = decodeContractDocument(initial.terms.document.bytes);
-  const currentBody = decodeContractDocument(current.terms.document.bytes);
-  assert.equal(currentBody.context.trim(), initialBody.context.trim());
-  assert.equal(currentBody.objective.trim(), "B's D0 amendment wins the admission race.");
-  assert.equal(current.terms.document.key === initial.terms.document.key, false);
+  const capability = await cachedRepositoryAt(repository.path);
+  const held = await acquireSqliteTransactionLock({ path: privateStatePublicationSeatPath(capability), mode: "immediate" });
+  const workers = [
+    crossProcessAmend({
+      repository: repository.path,
+      contractId: contract.id,
+      markdown: "## Replace: Context\nfirst source terms\n",
+    }),
+    crossProcessAmend({
+      repository: repository.path,
+      contractId: contract.id,
+      markdown: "## Replace: Objective\nsecond source terms\n",
+    }),
+  ];
+  try {
+    await Promise.all(workers.map(({ ready }) => ready));
+  } finally {
+    held.close();
+  }
+  const outcomes = await Promise.all(workers.map(({ completed }) => completed));
+  assert.equal(outcomes.filter((outcome) => outcome.includes("accepted")).length, 1);
+  assert.equal(outcomes.filter((outcome) => outcome.includes("failed:terms-moved")).length, 1);
+  const body = decodeContractDocument((await contract.state()).terms.document.bytes);
+  assert.ok(body.context.trim() === "first source terms" || body.objective.trim() === "second source terms");
 });
 
 test("a hard publication failure is returned without replaying the operation", async () => {
@@ -315,6 +386,59 @@ test("delivery re-integrates its persisted tender when the target premise moves"
   assert.equal(current?.integration.snapshot, reintegrated.data.snapshot);
   assert.equal(current?.integration.changeId, delivered.value.integration.changeId);
   assert.match((await current?.diff()) ?? "", /candidate\.txt/u);
+});
+
+test("reintegration observes and publishes only after the shared private-state seat", async () => {
+  const repository = repositoryWithMain();
+  repository.run(["branch", "release"]);
+  const bound = await Keiyaku.bind({
+    repo: await cachedRepoAt(repository.path),
+    markdown: document(),
+    target: "refs/heads/release",
+    workspace: "worktree",
+    gates: ["reviewed"],
+  });
+  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), bound.keiyaku.id);
+  writeFileSync(resolve(worktree, "candidate.txt"), "captured\n");
+  repository.run(["-C", worktree, "add", "candidate.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
+  await bound.keiyaku.deliver();
+  writeFileSync(resolve(repository.path, "target.txt"), "moved\n");
+  repository.run(["add", "target.txt"]);
+  repository.run(["commit", "--quiet", "-m", "move target"]);
+  repository.run(["update-ref", "refs/heads/release", repository.run(["rev-parse", "HEAD"]).trim()]);
+  const writers = [];
+  for (let index = 0; index < 3; index += 1) writers.push(await bind(repository));
+  const before = repository.run(["rev-parse", "refs/heads/keiyaku-state"]).trim();
+  const capability = await cachedRepositoryAt(repository.path);
+  const held = await acquireSqliteTransactionLock({
+    path: privateStatePublicationSeatPath(capability),
+    mode: "immediate",
+  });
+  const racingWriters = writers.map((contract, index) =>
+    crossProcessAmend({
+      repository: repository.path,
+      contractId: contract.id,
+      markdown: `## Replace: Context\nracing writer ${index}\n`,
+    }),
+  );
+  const reintegration = withGitDecodeChannel(capability, (channel) =>
+    reintegrateOperation({
+      channel,
+      repository: capability,
+      contractId: bound.keiyaku.id,
+      target: "refs/heads/release",
+    }),
+  );
+  try {
+    await Promise.all(racingWriters.map(({ ready }) => ready));
+    assert.equal(repository.run(["rev-parse", "refs/heads/keiyaku-state"]).trim(), before);
+  } finally {
+    held.close();
+  }
+  assert.equal((await reintegration).kind, "accepted");
+  const outcomes = await Promise.all(racingWriters.map(({ completed }) => completed));
+  assert.ok(outcomes.every((outcome) => outcome.includes("accepted")));
 });
 
 test("equivalent external target movement stops without reintegration or claim", async () => {

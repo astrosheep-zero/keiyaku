@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { encodeEntry } from "../core/facts/codec.js";
 import { admit, type PublicationFailed } from "../git/admission.js";
 import { observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
+import { confirmPrivateStatePublication, type PrivateStatePublicationSeat } from "../git/private-state-seat.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import { GIT_REF, readRefs, type GitRefAssertion } from "../git/repository.js";
 import type { GitRepository } from "../git/process.js";
@@ -153,6 +154,7 @@ export async function admitDecidedOffer<Refusal = never>(
   input: Readonly<{
     channel: GitDecodeChannel;
     repository: GitRepository;
+    seat: PrivateStatePublicationSeat;
     decisionObservation: GitDecisionObservation;
     attempt: AttemptContext;
     offer: Offer;
@@ -171,6 +173,7 @@ export async function admitDecidedOffer<Refusal = never>(
   }
   const admission = await admit(repository, offer, decisionObservation.admission, assertions);
   if (admission.kind === "accepted") {
+    confirmPrivateStatePublication(input.seat);
     return {
       kind: "accepted",
       facts: offerEntries(offer),
@@ -190,8 +193,19 @@ export async function admitDecidedOffer<Refusal = never>(
   );
   const classification = classifyUnknownAttempt({ contracts: recovered.journals }, offer);
   if (classification.kind === "accepted")
-    return recoveredAcceptance({ contracts: recovered.journals }, offer, primaryContract);
+    return confirmRecoveredAcceptance(input.seat, { contracts: recovered.journals }, offer, primaryContract);
   return classification.kind === "collision" ? { kind: "collision" } : { kind: "redecide" };
+}
+
+function confirmRecoveredAcceptance(
+  seat: PrivateStatePublicationSeat,
+  observation: Readonly<{ contracts: GitDecisionObservation["journals"] }>,
+  offer: Offer,
+  primaryContract: ContractId,
+): AcceptedAdmission {
+  const recovered = recoveredAcceptance(observation, offer, primaryContract);
+  confirmPrivateStatePublication(seat);
+  return recovered;
 }
 
 /** Classify an unknown atomic-publication outcome using only a captured Git observation. */

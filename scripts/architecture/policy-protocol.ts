@@ -5,6 +5,7 @@ export const protocolZones = [
     allow: [
       any("git/admission.ts"),
       any("git/observe.ts"),
+      any("git/private-state-seat.ts", ["PrivateStatePublicationSeat", "confirmPrivateStatePublication"]),
       types("git/read-observation.ts", ["GitDecodeChannel"]),
       any("git/repository.ts", ["GIT_REF", "GitRefAssertion", "readRefs"]),
       gitRepository,
@@ -20,6 +21,7 @@ export const protocolZones = [
     source: "protocol/run.ts",
     allow: [
       any("git/observe.ts"),
+      any("git/private-state-seat.ts"),
       types("git/read-observation.ts"),
       types("git/repository.ts", ["GitRefAssertion"]),
       gitRepository,
@@ -86,6 +88,7 @@ export const protocolZones = [
       types("core/facts/types.ts"),
       any("core/verbs/placement.ts"),
       any("git/observe.ts", ["observeGitForAdmissionAt"]),
+      any("git/private-state-seat.ts"),
       types("git/read-observation.ts", ["GitDecodeChannel"]),
       any("git/reconcile.ts", ["ReconcileResult", "reconcileEffectFailure"]),
       any("git/process.ts", ["GitPlumbingError", "GitRepository"]),
@@ -129,6 +132,7 @@ export const protocolZones = [
     source: "protocol/amend.ts",
     allow: [
       any("git/observe.ts", ["extendContractsForAdmissionAt", "observeContractsForAdmissionAt"]),
+      any("git/private-state-seat.ts"),
       types("git/observe.ts", ["GitDecisionObservation"]),
       types("git/read-observation.ts", ["GitDecodeChannel"]),
       any("core/facts/observation.ts", ["contractState"]),
@@ -165,6 +169,7 @@ export const protocolZones = [
       any("core/verbs/reintegrate.ts"),
       any("git/integration.ts"),
       any("git/observe.ts", ["observeContractsForAdmissionAt"]),
+      any("git/private-state-seat.ts"),
       gitRepository,
       types("git/read-observation.ts", ["GitDecodeChannel"]),
       types("git/repository.ts", ["GitRefAssertion"]),
@@ -177,6 +182,7 @@ export const protocolZones = [
   {
     source: "protocol/deliver.ts",
     allow: [
+      any("git/private-state-seat.ts"),
       any("git/integration.ts", [
         "materializeIntegrationSnapshot",
         "materializeJudgedConflict",
@@ -225,6 +231,7 @@ export const protocolZones = [
   {
     source: "protocol/review.ts",
     allow: [
+      any("git/private-state-seat.ts"),
       any("git/integration.ts", ["worktreeChangeId"]),
       any("git/tender.ts", [
         "TenderCapture",

@@ -1,9 +1,15 @@
 import { access, lstat, realpath, rm } from "node:fs/promises";
 import { isAbsolute, relative, sep } from "node:path";
 import type { ContractId } from "../core/facts/types.js";
-import { nukeEmptyPlaceAuthority, readPlaceRegister, releaseManagedWorktrees } from "../workspace-place.js";
+import {
+  nukeEmptyPlaceAuthority,
+  readPlaceRegister,
+  releaseManagedWorktrees,
+  withPlaceAuthorityFence,
+} from "../workspace-place.js";
 import type { WorldRoot } from "../world.js";
-import { runGit, type GitRepository } from "./process.js";
+import { GitPlumbingError, runGit, type GitRepository } from "./process.js";
+import { confirmPrivateStatePublication, withPrivateStatePublicationSeat } from "./private-state-seat.js";
 import {
   CANDIDATE_PIN_REF_NAMESPACE,
   DELIVERY_REF_NAMESPACE,
@@ -105,6 +111,26 @@ async function deleteRefAt(repository: GitRepository, ref: string, expectedOid: 
   await runGit(repository, ["update-ref", "--no-deref", "-d", ref, expectedOid]);
 }
 
+async function deleteObservedStateRef(
+  repository: GitRepository,
+  expectedOid: string,
+  seat: import("./private-state-seat.js").PrivateStatePublicationSeat,
+): Promise<void> {
+  try {
+    await deleteRefAt(repository, GIT_REF, expectedOid);
+    confirmPrivateStatePublication(seat);
+    return;
+  } catch (error) {
+    if (!(error instanceof GitPlumbingError) || error.pid === null || error.pid <= 0 || error.status !== null)
+      throw error;
+  }
+  if ((await readRef(repository, GIT_REF)) === null) {
+    confirmPrivateStatePublication(seat);
+    return;
+  }
+  throw new Error("state-ref deletion outcome is unknown");
+}
+
 async function removeOwnedRefs(repository: GitRepository): Promise<void> {
   const roots = [
     DELIVERY_REF_NAMESPACE,
@@ -124,21 +150,31 @@ async function removeOwnedRefs(repository: GitRepository): Promise<void> {
   }
 }
 
-export async function nukeGit(world: WorldRoot, gitPath = "git"): Promise<void> {
+export async function nukeGit(
+  world: WorldRoot,
+  gitPath = "git",
+  options?: Readonly<Pick<GitRepository, "onPrivateStateSeatContention">>,
+): Promise<void> {
   let repository: GitRepository;
   try {
-    repository = await repositoryAt(world, gitPath);
+    repository = { ...(await repositoryAt(world, gitPath)), ...options };
   } catch (error) {
     if (error instanceof NoGitWorldError) return;
     throw error;
   }
-  const state = await readRef(repository, GIT_REF);
-  if (state !== null) await deleteRefAt(repository, GIT_REF, state);
+  await withPlaceAuthorityFence(repository, async (placeFence) => {
+    const custody = await managedCustody(repository);
+    await withPrivateStatePublicationSeat(repository, async (seat) => {
+      const state = await readRef(repository, GIT_REF);
+      if (state !== null) await deleteObservedStateRef(repository, state, seat);
 
-  const custody = await managedCustody(repository);
-  for (const entry of custody.entries) {
-    if (await removeManagedWorktree(repository, entry)) await releaseManagedWorktrees(repository, [entry.contract]);
-  }
-  await nukeEmptyPlaceAuthority(repository);
-  await removeOwnedRefs(repository);
+      for (const entry of custody.entries) {
+        if (await removeManagedWorktree(repository, entry)) {
+          await releaseManagedWorktrees(repository, [entry.contract], placeFence);
+        }
+      }
+      await nukeEmptyPlaceAuthority(repository, placeFence);
+      await removeOwnedRefs(repository);
+    });
+  });
 }

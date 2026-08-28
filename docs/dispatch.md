@@ -57,16 +57,11 @@ timestamp, or Akuma-history expansion.
 
 ## Publication
 
-Dispatch publications in one repository share one publication seat at:
-
-```text
-<common Git directory>/keiyaku/locks/dispatch.sqlite
-```
-
-That seat covers the complete existing publication section. Worktrees of the
-same repository share it; distinct repositories do not. Git CAS remains the
-sole publication adjudicator. Non-Dispatch writers of `keiyaku-state` keep
-their existing outcomes.
+Dispatch uses Git's one private-state publication seat with every other writer
+of `keiyaku-state`. It acquires that seat before reading its path and holds it
+through tree and commit construction, CAS, and durable read-back. Worktrees of
+the same repository share it; distinct repositories do not. Git CAS and
+durable read-back remain the sole publication adjudicators.
 
 Publication observes the current private Git root, writes one blob and tree,
 and moves only `refs/heads/keiyaku-state` by CAS. It uses the existing Git
@@ -75,17 +70,15 @@ same-Contract fact is idempotent success and preserves the original
 `dispatchedAt`; a same-AkuId, different-Contract fact is a typed conflict and
 never changes authority.
 
-CAS movement is retried from fresh observation for at most three attempts. A
-Git result whose publication is unknown is always classified by authoritative
+A Git result whose publication is unknown is always classified by authoritative
 read-back. Read-back of the intended canonical fact is success; read-back of a
-different Contract is conflict; absence permits another attempt. Exhausted
-contention and a known publication failure are typed results, not invented
-facts or naked success. No layer parses Git diagnostic prose.
+different Contract is conflict; a known failure that leaves the same root is
+`publication-failed`. Dispatch has no product-specific lock, retry loop, or
+`contention` outcome. No layer parses Git diagnostic prose.
 
 ```ts
 type DispatchFailure =
   | Readonly<{ kind: "conflict"; current: Dispatch }>
-  | Readonly<{ kind: "contention" }>
   | Readonly<{ kind: "publication-failed"; diagnostic: string }>
 
 type DispatchPublication =
@@ -100,8 +93,8 @@ rolls back an already born Akuma.
 ## Boundary
 
 Dispatch imports only the Akuma identity parser, Contract identity parser,
-`AuthorityCorruptionError`, concrete Git primitives, and the existing SQLite
-transaction lock. Git treats its bytes as ordinary private-tree bytes and
-does not decode Dispatch. Neither Akuma nor core, protocol, Task, Alias, or
+`AuthorityCorruptionError`, and Git's private-state publication capability and
+concrete Git primitives. Git treats its bytes as ordinary private-tree bytes
+and does not decode Dispatch. Neither Akuma nor core, protocol, Task, Alias, or
 Settings imports Dispatch. There is no generic association registry, event
 bus, VCS backend, or provider interface.
