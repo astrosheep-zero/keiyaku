@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { appendFileSync, chmodSync, cpSync, mkdtempSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, cpSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Repo } from "../../src/index.js";
@@ -86,7 +86,7 @@ export function withGitShim<T>(
 }
 
 function initializedGitRepository(): TestGitRepository {
-  const path = mkdtempSync(join(tmpdir(), "keiyaku-v4-"));
+  const path = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-v4-")));
   execFileSync("git", ["init", "--quiet", "--initial-branch=main", path]);
   appendFileSync(
     join(path, ".git", "config"),
@@ -105,7 +105,7 @@ export function makeGitRepository(): TestGitRepository {
 }
 
 export function snapshotGitRepository(source: TestGitRepository): TestGitRepository {
-  const directory = mkdtempSync(join(tmpdir(), "keiyaku-v4-snapshot-"));
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-v4-snapshot-")));
   const path = join(directory, "repository");
   cpSync(source.path, path, { recursive: true, dereference: false, preserveTimestamps: true, verbatimSymlinks: true });
   let hasTrackedEntries = repositoryTemplateHasTrackedEntries.get(source);
@@ -122,7 +122,7 @@ export function snapshotGitRepository(source: TestGitRepository): TestGitReposit
 }
 
 export function cloneGitRepository(source: TestGitRepository): TestGitRepository {
-  const path = mkdtempSync(join(tmpdir(), "keiyaku-v4-clone-"));
+  const path = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-v4-clone-")));
   execFileSync("git", ["clone", "--quiet", source.path, path]);
   execFileSync("git", ["-C", path, "fetch", "--quiet", "origin", "refs/heads/keiyaku-state:refs/heads/keiyaku-state"]);
   const run = (args: readonly string[], input?: string | Uint8Array): string =>
@@ -131,7 +131,7 @@ export function cloneGitRepository(source: TestGitRepository): TestGitRepository
 }
 
 export function gitRepositoryPath(): string {
-  return mkdtempSync(join(tmpdir(), "keiyaku-v4-"));
+  return realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-v4-")));
 }
 
 export function observeContract(repository: GitRepository, id: ContractId) {

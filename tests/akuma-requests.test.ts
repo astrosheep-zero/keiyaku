@@ -339,6 +339,7 @@ test("Heart clips nested allowed at each direct parent and cannot regain removed
     parent: value.soul,
     bodySequence: 1,
     now: () => "2026-08-09T00:00:01.000Z",
+    upstream: { launchWorld: () => value.root },
     commands: akumaCallRequestCommands(),
     signal: new AbortController().signal,
     async spawn(launch) {
@@ -364,6 +365,7 @@ test("Heart clips nested allowed at each direct parent and cannot regain removed
       parent: childSoul,
       bodySequence: 1,
       now: () => "2026-08-09T00:00:03.000Z",
+      upstream: { launchWorld: () => value.root },
       commands: akumaCallRequestCommands(),
       signal: new AbortController().signal,
       async spawn(launch) {
@@ -402,6 +404,7 @@ test("Heart refuses a disabled call before child publication", async () => {
     parent: value.soul,
     bodySequence: 1,
     now: () => "2026-08-09T00:00:01.000Z",
+    upstream: { launchWorld: () => value.root },
     commands: akumaCallRequestCommands(),
     signal: new AbortController().signal,
     async spawn() {
@@ -636,6 +639,7 @@ test("a drive serves Body Requests through transport while Heart remains authori
     parent: value.soul,
     bodySequence: 1,
     now: () => "2026-08-09T00:00:01.000Z",
+    upstream: { launchWorld: () => value.root },
     commands: akumaCallRequestCommands(),
     signal: new AbortController().signal,
     async spawn(launch) {
@@ -711,11 +715,14 @@ test("a drive serves Body Requests through transport while Heart remains authori
     const malformedPath = join(pump.directory, `${malformedId}.request.json`);
     while (existsSync(malformedPath)) await new Promise((resolve) => setTimeout(resolve, 5));
     assert.equal(existsSync(join(pump.directory, `${malformedId}.receipt.json`)), false);
+    const other = join(value.root, "other");
+    mkdirSync(other);
+    const otherWorld = await World.prove(other);
     await assert.rejects(
       requestBodyCall({
         directory: pump.directory,
         id: "00000000-0000-4000-8000-000000000002",
-        world: join(value.root, "other"),
+        world: otherWorld,
         archetype: "worker",
         body: "wrong world",
         recipe: {

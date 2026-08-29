@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -213,7 +213,7 @@ function corruptHeart(root: string, suffix: string) {
 }
 
 test("facade snapshots aliases and globs with stable dedupe for wait and kill", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-fleet-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-facade-fleet-")));
   try {
     const worker = await answered(root, "worker", "00000002");
     const reviewer = await answered(root, "reviewer", "00000001");
@@ -246,7 +246,7 @@ test("facade snapshots aliases and globs with stable dedupe for wait and kill", 
 });
 
 test("facade requires an explicit completion mode for a plural wait", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-wait-mode-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-facade-wait-mode-")));
   try {
     const one = await answered(root, "worker", "00000001");
     const two = await answered(root, "worker", "00000002");
@@ -260,7 +260,7 @@ test("facade requires an explicit completion mode for a plural wait", async () =
 });
 
 test("plural wait skips an earlier unreadable member without spending its shared budget", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-wait-budget-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-facade-wait-budget-")));
   try {
     const unreadable = corruptHeart(root, "00000000");
     const sources = [];
@@ -315,7 +315,7 @@ test("plural wait skips an earlier unreadable member without spending its shared
 });
 
 test("plural wait carries unused allowance and keeps pins after exhaustion", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-wait-budget-flow-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-facade-wait-budget-flow-")));
   try {
     const sparse = await answered(root, "worker", "00000001");
     await openOrdinary(sparse.paths, "2026-08-11T00:01:00.000Z", { prefix: "sparse", notes: 2 });
@@ -385,7 +385,7 @@ test("plural wait carries unused allowance and keeps pins after exhaustion", asy
 });
 
 test("status and wait do not fabricate a settled Tell; tell and kill do not carry observations", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-tell-pin-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-facade-tell-pin-")));
   let held: HeldAkumaLeash | undefined;
   try {
     const source = await answered(root, "worker", "00000001");
@@ -407,7 +407,7 @@ test("status and wait do not fabricate a settled Tell; tell and kill do not carr
 });
 
 test("facade tell preserves its primary mutation authority", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-tell-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-facade-tell-")));
   let held: HeldAkumaLeash | undefined;
   try {
     const source = await answered(root, "worker", "00000001");
@@ -426,7 +426,7 @@ test("facade tell preserves its primary mutation authority", async () => {
 });
 
 test("facade ls reads exactly one selected identity directory", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-catalog-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-facade-catalog-")));
   const home = mkdtempSync(join(tmpdir(), "keiyaku-facade-catalog-home-"));
   try {
     const source = await answered(root, "worker", "00000001");
@@ -474,7 +474,7 @@ test("facade ls reads exactly one selected identity directory", async () => {
 });
 
 test("Task catalog does not inherit the Task list default page limit", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-catalog-page-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-facade-catalog-page-")));
   try {
     const first = await Tasks.of(await World.at(root)).add({ title: "Catalog 000" });
     assert.equal(first.kind, "accepted");
@@ -509,7 +509,7 @@ test("Task catalog does not inherit the Task list default page limit", async () 
 });
 
 test("Task catalog namespace queries distinguish omitted, root, and named scope", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-catalog-namespace-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-facade-catalog-namespace-")));
   try {
     const tasks = Tasks.of(await World.at(root));
     const rootTask = await tasks.add({ title: "Catalog root", namespace: [] });
@@ -702,7 +702,7 @@ test("named Address resolution refuses a Contract short-id shared with an Alias"
 });
 
 test("named Address refuses failed Kanshi Contract and Alias observations", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-named-kanshi-failed-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-named-kanshi-failed-")));
   try {
     const observation = await observeKanshi({ world: root as import("../src/index.js").WorldRoot });
     const failure = { kind: "failed" as const, failure: { message: "unavailable" } };
@@ -725,7 +725,7 @@ test("named Address refuses failed Kanshi Contract and Alias observations", asyn
 });
 
 test("named Address resolves a retained Alias outside Kanshi fleet rows", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-named-kanshi-alias-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-named-kanshi-alias-")));
   try {
     const id = akuId({ archetype: "worker", suffix: "deadbeef" });
     await moveAlias({ world: root, alias: "@outside", akuId: id });
@@ -748,7 +748,7 @@ test("named Address resolves a retained Alias outside Kanshi fleet rows", async 
 });
 
 test("history last bypasses activity and glob grammar follows normalized archetypes", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-last-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-facade-last-")));
   try {
     const source = await answered(root, "worker", "00000001");
     await appendActivity(source.paths, {
@@ -772,7 +772,7 @@ test("history last bypasses activity and glob grammar follows normalized archety
 });
 
 test("history last selects exactly one latest answered TurnFact by durable sequence", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-last-sequence-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-facade-last-sequence-")));
   try {
     const source = await allocateAkumaDirectory({ worldRoot: root, archetype: "worker", draw: () => "00000001" });
     await initializeHeart(source.paths);
@@ -911,7 +911,7 @@ test("cross-World Contract selector wait and kill refuse before operating", asyn
 });
 
 test("direct missing Aku remains AkumaNotBornError", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-direct-missing-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-direct-missing-")));
   try {
     const missing = akuId({ archetype: "worker", suffix: "deadbeef" });
     await assert.rejects(Keiyaku.status({ path: root, akuma: missing }), AkumaNotBornError);
@@ -922,7 +922,7 @@ test("direct missing Aku remains AkumaNotBornError", async () => {
 });
 
 test("plural wait preserves a missing direct AkuId error", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-plural-direct-missing-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-plural-direct-missing-")));
   try {
     const missing = akuId({ archetype: "worker", suffix: "00000001" });
     const readable = await answered(root, "worker", "00000002");
@@ -1023,7 +1023,7 @@ test("Contract plural wait omits unreadable Heart observations for all and any",
 });
 
 test("plural wait returns no observations when every status is unreadable", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-wait-unreadable-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-facade-wait-unreadable-")));
   try {
     const earlier = corruptHeart(root, "00000001");
     const later = corruptHeart(root, "00000002");
@@ -1158,7 +1158,7 @@ test("CLI wait and kill expose Contract selector world refusal as typed usage", 
 });
 
 test("exact set selection does not read unrelated Alias authority", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-exact-address-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-exact-address-")));
   try {
     mkdirSync(join(root, ".keiyaku", "akuma"), { recursive: true });
     writeFileSync(join(root, ".keiyaku", "akuma", "alias.json"), "broken\n");
@@ -1202,7 +1202,7 @@ function writeCreatorTask(world: string, document: TaskDocument): void {
 }
 
 test("creator testimony appears on Fleet observation carriers", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-created-tasks-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-facade-created-tasks-")));
   try {
     const worker = await answered(root, "worker", "00000001");
     const workerHandle = Akuma.of(await World.at(root)).of({ id: worker.id });
@@ -1287,7 +1287,7 @@ test("creator testimony appears on Fleet observation carriers", async () => {
 });
 
 test("multi-member wait and kill project every member from one Task board snapshot", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-created-set-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-facade-created-set-")));
   try {
     const worker = await answered(root, "worker", "00000001");
     const reviewer = await answered(root, "reviewer", "00000002");
@@ -1344,7 +1344,7 @@ test("multi-member wait and kill project every member from one Task board snapsh
 });
 
 test("Task board failure keeps Fleet status and aggregate members", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-created-failed-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-facade-created-failed-")));
   try {
     const worker = await answered(root, "worker", "00000001");
     const workerHandle = Akuma.of(await World.at(root)).of({ id: worker.id });

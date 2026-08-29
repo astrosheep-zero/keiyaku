@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -38,7 +38,7 @@ import {
 import { createClaudeProvider } from "../src/akuma/providers/claude/index.js";
 import { akumaCallRequestCommands, requestForwardedAkumaCall as requestBodyCall } from "../src/akuma/call-request.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
-import { keiyakuSquarePath } from "../src/world.js";
+import { keiyakuSquarePath, World } from "../src/world.js";
 
 test("generic handoff with no pending Tell does not spawn", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-empty-handoff-"));
@@ -1263,7 +1263,8 @@ test("request-pump failure closes transport during pending provider setup", asyn
 });
 
 test("a drive drains Body Requests before recording its terminal turn", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-body-requests-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-akuma-body-requests-")));
+  const world = await World.prove(root);
   const priorHome = process.env.HOME;
   const home = join(root, "home");
   mkdirSync(join(home, ".keiyaku", "akuma"), { recursive: true });
@@ -1348,6 +1349,7 @@ test("a drive drains Body Requests before recording its terminal turn", async ()
       provider,
       {
         now: () => "2026-08-09T00:00:00.000Z",
+        upstream: { launchWorld: () => world },
         commands: akumaCallRequestCommands(),
         async spawnChild(launch) {
           const child = (await HeldAkumaLeash.try(launch.paths))!;

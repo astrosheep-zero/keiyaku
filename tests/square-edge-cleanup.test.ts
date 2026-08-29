@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { bindCurrentParticipant, createHostLedgerPort, Square } from "@astrosheep/square";
@@ -50,7 +50,7 @@ async function committedSquare(root: string) {
 }
 
 test("Square rollback independently attempts ignore and done without failing", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-cleanup-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-square-cleanup-")));
   try {
     const { listener, restore } = await committedSquare(root);
     t.mock.method(
@@ -74,7 +74,7 @@ test("Square rollback independently attempts ignore and done without failing", a
 });
 
 test("Square rollback ignores close failure", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-close-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-square-close-")));
   try {
     const { listener, restore } = await committedSquare(root);
     t.mock.method(Square.prototype, "close", async () => {
@@ -88,7 +88,7 @@ test("Square rollback ignores close failure", async (t) => {
 });
 
 test("Square rollback ignores unbind failure after other cleanup", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-unbind-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-square-unbind-")));
   try {
     const { listener, environment, restore } = await committedSquare(root);
     assert.equal(environment.CODEX_THREAD_ID, "caller");
@@ -102,7 +102,7 @@ test("Square rollback ignores unbind failure after other cleanup", async () => {
 });
 
 test("Square rollback preserves normal cleanup", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-normal-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-square-normal-")));
   try {
     const { listener, restore } = await committedSquare(root);
     await listener.rollback();
@@ -113,7 +113,7 @@ test("Square rollback preserves normal cleanup", async () => {
 });
 
 test("launch failure keeps the primary error despite rollback failures", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-launch-failure-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-square-launch-failure-")));
   const home = join(root, ".home");
   const registry = join(root, "sessions.ndjsonl");
   const routes = join(root, "routes.ndjsonl");
@@ -191,7 +191,7 @@ test("launch failure keeps the primary error despite rollback failures", async (
 });
 
 test("launch failure preserves a binding that predates a Square rejoin", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-preexisting-binding-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-square-preexisting-binding-")));
   const home = join(root, ".home");
   const registry = join(root, "sessions.ndjsonl");
   const routes = join(root, "routes.ndjsonl");
@@ -246,7 +246,7 @@ test("launch failure preserves a binding that predates a Square rejoin", async (
 });
 
 test("launch failure removes only this session's binding when another session owns the same name", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-other-session-binding-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-square-other-session-binding-")));
   const home = join(root, ".home");
   const registry = join(root, "sessions.ndjsonl");
   const routes = join(root, "routes.ndjsonl");
@@ -303,7 +303,7 @@ test("launch failure removes only this session's binding when another session ow
 });
 
 test("launch failure retains a pre-existing PASEO binding while removing the new Codex binding", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-multiple-identities-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-square-multiple-identities-")));
   const home = join(root, ".home");
   const registry = join(root, "sessions.ndjsonl");
   const routes = join(root, "routes.ndjsonl");
@@ -368,7 +368,7 @@ test("launch failure retains a pre-existing PASEO binding while removing the new
 });
 
 test("failed binding without a native session removes the join presence", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-no-native-session-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-square-no-native-session-")));
   const registry = join(root, "sessions.ndjsonl");
   const routes = join(root, "routes.ndjsonl");
   const squarePath = join(root, ".square", "KEIYAKU.square");
