@@ -22,8 +22,7 @@ import { observeTaskDetails } from "../../task/operations.js";
 import type { ParsedTaskCommand } from "./task.js";
 import { parseTaskNamespaceSelector } from "../../task/catalog.js";
 import type { WorldRoot } from "../../world.js";
-import { injectedBodyRequests } from "../../akuma/requests.js";
-import { decodeTaskMutationRequest, requestForwardedTask, type TaskMutationRequest } from "../../task/mutation.js";
+import { localExecutionContext, type ExecutionContext } from "../../akuma/requests.js";
 import { resolveTaskNamespaceContext, writeTaskNamespaceContext } from "../../task/context.js";
 import { CliUsageError } from "../usage.js";
 
@@ -56,6 +55,7 @@ type TaskInput = Readonly<{
   establish(): Promise<WorldRoot>;
   readStdin(): Promise<string>;
   actor?: string;
+  execution: ExecutionContext;
 }>;
 
 export async function invokeTaskFromEdge(
@@ -67,6 +67,7 @@ export async function invokeTaskFromEdge(
     establish: () => Promise<WorldRoot>;
     readStdin: () => Promise<string>;
     actor: string | undefined;
+    execution?: ExecutionContext;
   }>,
 ): Promise<TaskInvocationResult> {
   try {
@@ -77,6 +78,7 @@ export async function invokeTaskFromEdge(
       establish: input.establish,
       readStdin: input.readStdin,
       ...(input.actor === undefined ? {} : { actor: input.actor }),
+      execution: input.execution ?? localExecutionContext(),
     });
   } catch (error) {
     if (error instanceof TypeError) throw new CliUsageError(error.message);
@@ -190,149 +192,6 @@ async function invokeUpdate(
     ...(addRelates === undefined ? {} : { addRelates }),
     ...(dropRelates === undefined ? {} : { dropRelates }),
   });
-}
-
-async function addMutationRequest(
-  command: ParsedTaskCommand,
-  input: TaskInput,
-  current: readonly string[],
-): Promise<TaskMutationRequest> {
-  const selectedNamespace = namespace(value(command, "namespace")) ?? current;
-  if (command.stdin === "document")
-    return {
-      action: "task.addDocument",
-      input: {
-        markdown: await input.readStdin(),
-        namespace: selectedNamespace,
-      },
-    };
-  const body = value(command, "body"),
-    note = value(command, "note");
-  const initialState = state(value(command, "state")),
-    selectedPriority = priority(value(command, "priority"));
-  const needs = ids(values(command, "needs")),
-    parent = value(command, "parent");
-  const supersedes = ids(values(command, "supersedes")),
-    relates = ids(values(command, "relates"));
-  return {
-    action: "task.add",
-    input: {
-      title: command.positionals[0]!,
-      namespace: selectedNamespace,
-      ...(body === undefined ? {} : { body }),
-      ...(note === undefined ? {} : { note }),
-      ...(initialState === undefined ? {} : { state: initialState }),
-      ...(selectedPriority === undefined ? {} : { priority: selectedPriority }),
-      ...(needs === undefined ? {} : { needs }),
-      ...(parent === undefined ? {} : { parent: parent as TaskId }),
-      ...(supersedes === undefined ? {} : { supersedes }),
-      ...(relates === undefined ? {} : { relates }),
-    },
-  };
-}
-
-async function updateMutationRequest(command: ParsedTaskCommand, input: TaskInput): Promise<TaskMutationRequest> {
-  const body = command.stdin === "body" ? await input.readStdin() : value(command, "body");
-  const appendBody = command.stdin === "append" ? await input.readStdin() : value(command, "append");
-  const note = command.stdin === "note" ? await input.readStdin() : value(command, "note");
-  const title = value(command, "title"),
-    selectedPriority = priority(value(command, "priority"));
-  const addNeeds = ids(values(command, "needs")),
-    dropNeeds = ids(values(command, "drop-needs"));
-  const parent = value(command, "parent"),
-    addSupersedes = ids(values(command, "supersedes"));
-  const dropSupersedes = ids(values(command, "drop-supersedes")),
-    addRelates = ids(values(command, "relates"));
-  const dropRelates = ids(values(command, "drop-relates"));
-  return {
-    action: "task.update",
-    id: command.positionals[0]! as TaskId,
-    input: {
-      ...(title === undefined ? {} : { title }),
-      ...(body === undefined ? {} : { body }),
-      ...(appendBody === undefined ? {} : { appendBody }),
-      ...(note === undefined ? {} : { note }),
-      ...(selectedPriority === undefined ? {} : { priority: selectedPriority }),
-      ...(addNeeds === undefined ? {} : { addNeeds }),
-      ...(dropNeeds === undefined ? {} : { dropNeeds }),
-      ...(command.flags["no-parent"] === true
-        ? { parent: null }
-        : parent === undefined
-          ? {}
-          : { parent: parent as TaskId }),
-      ...(addSupersedes === undefined ? {} : { addSupersedes }),
-      ...(dropSupersedes === undefined ? {} : { dropSupersedes }),
-      ...(addRelates === undefined ? {} : { addRelates }),
-      ...(dropRelates === undefined ? {} : { dropRelates }),
-    },
-  };
-}
-
-function lifecycleMutationRequest(command: ParsedTaskCommand): TaskMutationRequest {
-  const id = command.positionals[0]! as TaskId;
-  switch (command.action) {
-    case "start":
-      return command.positionals.length === 1
-        ? { action: "task.start", id }
-        : { action: "task.start", ids: command.positionals as readonly TaskId[] };
-    case "stop":
-      return { action: "task.stop", id };
-    case "resume":
-      return { action: "task.resume", id };
-    case "hold":
-      return { action: "task.hold", ids: command.positionals as readonly TaskId[] };
-    case "done":
-      return {
-        action: "task.done",
-        ids: command.positionals as readonly TaskId[],
-        ...(value(command, "note") === undefined ? {} : { note: value(command, "note")! }),
-      };
-    case "drop":
-      return {
-        action: "task.drop",
-        ids: command.positionals as readonly TaskId[],
-        ...(value(command, "note") === undefined ? {} : { note: value(command, "note")! }),
-      };
-    default:
-      throw new Error(`task action cannot forward: ${command.action}`);
-  }
-}
-
-async function mutationRequest(
-  command: ParsedTaskCommand,
-  input: TaskInput,
-  current: readonly string[],
-  composeMarkdown?: string,
-): Promise<TaskMutationRequest> {
-  if (command.action === "add") return await addMutationRequest(command, input, current);
-  if (command.action === "compose")
-    return { action: "task.compose", markdown: composeMarkdown ?? (await input.readStdin()), namespace: current };
-  if (command.action === "update") return await updateMutationRequest(command, input);
-  return lifecycleMutationRequest(command);
-}
-
-function validatedMutationRequest(request: TaskMutationRequest): TaskMutationRequest {
-  switch (request.action) {
-    case "task.add":
-    case "task.addDocument":
-      return decodeTaskMutationRequest(request.action, { input: request.input });
-    case "task.compose":
-      return decodeTaskMutationRequest(request.action, { markdown: request.markdown, namespace: request.namespace });
-    case "task.update":
-      return decodeTaskMutationRequest(request.action, { id: request.id, input: request.input });
-    case "task.start":
-    case "task.stop":
-    case "task.resume":
-      return decodeTaskMutationRequest(request.action, "ids" in request ? { ids: request.ids } : { id: request.id });
-    case "task.hold":
-      return decodeTaskMutationRequest(request.action, { ids: request.ids });
-    case "task.done":
-    case "task.drop":
-      return decodeTaskMutationRequest(request.action, {
-        ids: request.ids,
-        ...(request.note === undefined ? {} : { note: request.note }),
-      });
-  }
 }
 
 function readScope(
@@ -507,16 +366,6 @@ function establishesWorld(command: ParsedTaskCommand): boolean {
   );
 }
 
-function forwardsMutation(command: ParsedTaskCommand): boolean {
-  return (
-    command.action !== "show" &&
-    command.action !== "tree" &&
-    command.action !== "context" &&
-    !(command.action === "compose" && command.flags.plan === true) &&
-    !isWorldObservation(command)
-  );
-}
-
 // eslint-disable-next-line complexity -- this is the single CLI edge ordering world, context, forwarding, and local execution.
 export async function invokeTask(command: ParsedTaskCommand, input: TaskInput): Promise<TaskInvocationResult> {
   const planOnly = command.action === "compose" && command.flags.plan === true;
@@ -531,7 +380,7 @@ export async function invokeTask(command: ParsedTaskCommand, input: TaskInput): 
   const world =
     input.world ?? (planOnly ? input.candidate : establishesWorld(command) ? await input.establish() : null);
   if (world === null) return missingWorld(command);
-  const tasks = Tasks.of(world);
+  const tasks = Tasks.of(world, { execution: input.execution });
   const contextSensitive =
     command.action === "context" ||
     (command.action === "add" && explicitNamespace === undefined) ||
@@ -549,13 +398,6 @@ export async function invokeTask(command: ParsedTaskCommand, input: TaskInput): 
     if (command.action === "context" && command.positionals.length === 0) {
       return { kind: "accepted", value: resolved };
     }
-  }
-  const requests = injectedBodyRequests();
-  if (requests !== null && forwardsMutation(command)) {
-    const request = validatedMutationRequest(
-      await mutationRequest(command, input, explicitNamespace ?? current ?? [], composeMarkdown),
-    );
-    return await requestForwardedTask({ directory: requests, world, request });
   }
   return await invokeLocalMutation({
     tasks,

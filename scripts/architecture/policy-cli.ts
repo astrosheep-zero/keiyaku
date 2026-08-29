@@ -15,6 +15,8 @@ export const cliZones = [
     allow: [
       any("akuma/index.ts"),
       any("library/akuma-creation.ts", ["beginCall", "finishCall"]),
+      any("library/fleet.ts", ["killAkuma", "tellAkuma", "waitAkuma"]),
+      any("akuma/requests.ts"),
       any("cli/square-edge.ts", ["recognizeAndListen"]),
       any("index.ts"),
       types("cli/commands/akuma.ts"),
@@ -60,7 +62,7 @@ export const cliZones = [
       any("task/catalog.ts", ["parseTaskNamespaceSelector"]),
       any("task/mutation.ts"),
       types("world.ts"),
-      any("akuma/requests.ts", ["injectedBodyRequests"]),
+      any("akuma/requests.ts"),
     ],
   },
   {
@@ -191,6 +193,7 @@ export const cliZones = [
       any("cli/usage.ts"),
       any("library/configuration.ts"),
       any("library/keiyaku.ts"),
+      types("akuma/requests.ts"),
     ],
   },
   {
@@ -216,6 +219,7 @@ export const cliZones = [
       any("cli/selectors.ts"),
       any("cli/usage.ts"),
       any("akuma/requests.ts"),
+      any("akuma/provider.ts", ["AKUMA_REQUESTS_ENV"]),
       any("kanshi/index.ts"),
       any("library/address.ts"),
       any("library/configuration.ts"),
@@ -375,7 +379,14 @@ export const cliZones = [
   },
   {
     source: "cli/selectors.ts",
-    allow: [any("identity/coordinates.ts"), any("index.ts"), types("kanshi/index.ts"), any("cli/parse.ts")],
+    allow: [
+      any("identity/coordinates.ts"),
+      any("index.ts"),
+      any("library/contract.ts", ["keiyakuOf"]),
+      any("akuma/requests.ts"),
+      types("kanshi/index.ts"),
+      any("cli/parse.ts"),
+    ],
   },
   { source: "cli/usage.ts", allow: [] },
   {

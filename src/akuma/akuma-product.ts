@@ -10,7 +10,7 @@ import { loadArchetype, listArchetypes as readArchetypes } from "./archetype.js"
 import { birthAkuma, launchAkuma } from "./publication.js";
 import { spawnAkumaBody } from "./body.js";
 import { requestForwardedAkumaCall } from "./call-request.js";
-import { injectedBodyRequests } from "./requests.js";
+import { executionChannel } from "./requests.js";
 import { decodeAllowedActions, unionAllowedActions } from "./allowed.js";
 import { settings as readSettings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
@@ -85,7 +85,7 @@ export class Akuma {
       input.allowed === undefined
         ? archetype.allowed
         : unionAllowedActions(archetype.allowed, decodeAllowedActions(input.allowed, "Akuma call allowed"));
-    const requests = injectedBodyRequests();
+    const execution = executionChannel(this.configuration.execution);
     const requestRecipe = Object.freeze({
       ...(archetype.description === undefined ? {} : { description: archetype.description }),
       provider: archetype.provider,
@@ -93,7 +93,7 @@ export class Akuma {
       ...(archetype.readonly === undefined ? {} : { readonly: archetype.readonly }),
       allowed,
     });
-    if (requests !== null) {
+    if (execution.kind === "body-request") {
       const cwd =
         input.cwd === undefined
           ? undefined
@@ -101,7 +101,7 @@ export class Akuma {
             ? input.cwd
             : await canonicalBirthCwd(input.cwd);
       const child = await requestForwardedAkumaCall({
-        directory: requests,
+        directory: execution.directory,
         id: randomUUID(),
         world: this.path,
         archetype: name,

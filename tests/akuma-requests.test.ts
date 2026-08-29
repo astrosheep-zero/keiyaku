@@ -20,14 +20,16 @@ import { allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js"
 import { publishAkuma } from "../src/akuma/publication.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { akumaCallRequestCommands, requestForwardedAkumaCall as requestBodyCall } from "../src/akuma/call-request.js";
-import { AkumaBodyRequestError } from "../src/akuma/requests.js";
+import { AkumaBodyRequestError, bodyRequestExecutionContext } from "../src/akuma/requests.js";
 import { BodyRequestPump, settleBodyRequests } from "../src/akuma/request-serve.js";
 import { contractRequestCommand } from "../src/library/contract-operations.js";
 import { World } from "../src/world.js";
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
 
-async function akumaAt(root: string) {
-  return Akuma.of(await World.at(root));
+async function akumaAt(root: string, requestDirectory?: string) {
+  return Akuma.of(await World.at(root), {
+    ...(requestDirectory === undefined ? {} : { execution: bodyRequestExecutionContext(requestDirectory) }),
+  });
 }
 
 function requestTransportPath(directory: string, id: string): string | undefined {
@@ -346,9 +348,8 @@ test("Heart clips nested allowed at each direct parent and cannot regain removed
     },
   });
   try {
-    process.env[AKUMA_REQUESTS_ENV] = first.directory;
     const child = await (
-      await akumaAt(value.root)
+      await akumaAt(value.root, first.directory)
     ).call({
       archetype: "worker",
       body: "child",
@@ -372,9 +373,8 @@ test("Heart clips nested allowed at each direct parent and cannot regain removed
       },
     });
     try {
-      process.env[AKUMA_REQUESTS_ENV] = second.directory;
       const grandchild = await (
-        await akumaAt(value.root)
+        await akumaAt(value.root, second.directory)
       ).call({
         archetype: "worker",
         body: "grandchild",
@@ -645,10 +645,9 @@ test("a drive serves Body Requests through transport while Heart remains authori
     },
   });
   try {
-    process.env[AKUMA_REQUESTS_ENV] = pump.directory;
     const childId = (
       await (
-        await akumaAt(value.root)
+        await akumaAt(value.root, pump.directory)
       ).call({
         archetype: "worker",
         body: "build",
@@ -670,7 +669,7 @@ test("a drive serves Body Requests through transport while Heart remains authori
 
     const codexId = (
       await (
-        await akumaAt(value.root)
+        await akumaAt(value.root, pump.directory)
       ).call({
         archetype: "codex",
         body: "codex work",
@@ -683,7 +682,7 @@ test("a drive serves Body Requests through transport while Heart remains authori
     mkdirSync(explicit);
     const explicitId = (
       await (
-        await akumaAt(value.root)
+        await akumaAt(value.root, pump.directory)
       ).call({
         archetype: "worker",
         body: "explicit",

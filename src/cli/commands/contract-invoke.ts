@@ -8,6 +8,7 @@ import type { WorktreeHooks } from "../../library/configuration.js";
 import type { Repo } from "../../library/repo.js";
 import type { Settings } from "../../settings.js";
 import type { WorldRoot } from "../../world.js";
+import type { ExecutionContext } from "../../akuma/requests.js";
 
 type ContractMutation = Extract<
   ParsedCommand,
@@ -22,9 +23,9 @@ export type ContractMutationInput = Readonly<{
   edge: InvocationEdge;
   scope: string;
   configuration?: Settings;
-  hooks: WorktreeHooks;
+  hooks?: WorktreeHooks;
   establishWorld: () => Promise<WorldRoot>;
-  forwarded?: true;
+  execution: ExecutionContext;
 }>;
 
 function actorFromEdge(actor: string | undefined, environment: NodeJS.ProcessEnv): ActorId | undefined {
@@ -57,12 +58,17 @@ async function selectedGitPolicy(value: Settings): Promise<boolean> {
   return consumeSettings(() => requireBranchesToBeUpToDateFrom({ settings: value }), SettingsError);
 }
 
-async function selectContract(repo: Repo, selector: string | undefined, scope: string): Promise<SelectedContract> {
+async function selectContract(
+  repo: Repo,
+  selector: string | undefined,
+  scope: string,
+  execution: ExecutionContext,
+): Promise<SelectedContract> {
   const { contractFromInput, resolveContextualContract } = await import("../selectors.js");
-  if (selector !== undefined && !selector.startsWith("@")) return contractFromInput(repo, selector);
+  if (selector !== undefined && !selector.startsWith("@")) return contractFromInput(repo, selector, execution);
   const { Keiyaku } = await import("../../library/keiyaku.js");
   const id = resolveContextualContract(await Keiyaku.list({ repo }), selector, scope);
-  return contractFromInput(repo, id);
+  return contractFromInput(repo, id, execution);
 }
 
 async function bindDraftReceipt(establishWorld: () => Promise<WorldRoot>, markdown: string) {
@@ -83,7 +89,13 @@ async function invokeBind(input: ContractMutationInput): Promise<InvocationResul
   if (parsed.forkOf !== undefined) {
     return resultFromMutationCall(
       "bind",
-      () => bindFromCommand({ command: parsed, repo, ...(actor === undefined ? {} : { actor }), hooks }),
+      () =>
+        bindFromCommand({
+          command: parsed,
+          repo,
+          ...(actor === undefined ? {} : { actor }),
+          ...(hooks === undefined ? {} : { hooks }),
+        }),
       (accepted) => {
         const bound = accepted.facts.find((fact) => fact.kind === "bind");
         if (bound === undefined || bound.kind !== "bind") throw new Error("accepted bind is missing its bind fact");
@@ -104,7 +116,7 @@ async function invokeBind(input: ContractMutationInput): Promise<InvocationResul
           markdown,
           gates,
           ...(actor === undefined ? {} : { actor }),
-          hooks,
+          ...(hooks === undefined ? {} : { hooks }),
         }),
       (accepted) => {
         const bound = accepted.facts.find((fact) => fact.kind === "bind");
@@ -125,7 +137,7 @@ type ExistingSeat = Readonly<{
   contract: KeiyakuContract;
   id: ContractId;
   actor?: ActorId;
-  hooks: WorktreeHooks;
+  hooks?: WorktreeHooks;
 }>;
 
 function deliverRefusal(refusal: unknown): unknown {
@@ -137,10 +149,10 @@ function deliverRefusal(refusal: unknown): unknown {
 }
 
 async function existingSeat(input: ContractMutationInput, parsed: ExistingCommand): Promise<ExistingSeat> {
-  const { repo, edge, scope, hooks } = input;
-  const { id, contract } = await selectContract(repo, parsed.contract, scope);
+  const { repo, edge, scope, hooks, execution } = input;
+  const { id, contract } = await selectContract(repo, parsed.contract, scope, execution);
   const actor = actorFromEdge(parsed.actor, edge.environment);
-  return { contract, id, ...(actor === undefined ? {} : { actor }), hooks };
+  return { contract, id, ...(actor === undefined ? {} : { actor }), ...(hooks === undefined ? {} : { hooks }) };
 }
 
 async function invokeDeliver(
@@ -156,7 +168,7 @@ async function invokeDeliver(
       requireBranchesToBeUpToDate,
       includeDirty: parsed.includeDirty,
       materializeConflict: parsed.materializeConflict,
-      hooks: seat.hooks,
+      ...(seat.hooks === undefined ? {} : { hooks: seat.hooks }),
     });
     if (!("facts" in delivered)) return delivered;
     return acceptedDeliver(delivered, seat.id);
@@ -185,7 +197,7 @@ async function invokeReview(
         verdict: parsed.verdict,
         ...(seat.actor === undefined ? {} : { actor: seat.actor }),
         ...(summary === undefined ? {} : { summary }),
-        hooks: seat.hooks,
+        ...(seat.hooks === undefined ? {} : { hooks: seat.hooks }),
       }),
     (result) => acceptedReview(result, seat.id),
     { coordinate: seat.id },
@@ -193,7 +205,7 @@ async function invokeReview(
 }
 
 export async function invokeContractMutation(input: ContractMutationInput): Promise<InvocationResult> {
-  const { parsed, repo, edge, configuration, hooks, forwarded } = input;
+  const { parsed, repo, edge, configuration, hooks } = input;
   if (parsed.command === "bind") return invokeBind(input);
   const seat = await existingSeat(input, parsed);
   const { id, contract, actor } = seat;
@@ -214,14 +226,14 @@ export async function invokeContractMutation(input: ContractMutationInput): Prom
             ...(markdown === undefined ? {} : { markdown }),
             gates,
             ...(actor === undefined ? {} : { actor }),
-            hooks,
+            ...(hooks === undefined ? {} : { hooks }),
           }),
         (result) => acceptedAmend(result, id),
         { coordinate: id },
       );
     }
     case "deliver":
-      return invokeDeliver(parsed, seat, forwarded === true ? false : await selectedGitPolicy(configuration!));
+      return invokeDeliver(parsed, seat, configuration === undefined ? false : await selectedGitPolicy(configuration));
     case "review":
       return invokeReview(parsed, seat, edge.readStdin);
     case "arc": {
@@ -229,7 +241,12 @@ export async function invokeContractMutation(input: ContractMutationInput): Prom
       const { acceptedArc, resultFromMutationCall } = await import("../accepted.js");
       return resultFromMutationCall(
         "arc",
-        () => contract.arc({ markdown, ...(actor === undefined ? {} : { actor }), hooks }),
+        () =>
+          contract.arc({
+            markdown,
+            ...(actor === undefined ? {} : { actor }),
+            ...(hooks === undefined ? {} : { hooks }),
+          }),
         (result) => acceptedArc(result, id),
         { coordinate: id },
       );
@@ -242,15 +259,14 @@ export async function invokeContractMutation(input: ContractMutationInput): Prom
           contract.abandon({
             ...(actor === undefined ? {} : { actor }),
             ...(parsed.note === undefined ? {} : { note: parsed.note }),
-            hooks,
+            ...(hooks === undefined ? {} : { hooks }),
           }),
         (result) => acceptedAbandon(result, id),
         { coordinate: id },
       );
     }
     case "audit": {
-      if (configuration === undefined) throw new Error("audit invocation requires Settings");
-      const requireBranchesToBeUpToDate = await selectedGitPolicy(configuration);
+      const requireBranchesToBeUpToDate = configuration === undefined ? false : await selectedGitPolicy(configuration);
       const { acceptedAudit, resultFromMutationCall } = await import("../accepted.js");
       return resultFromMutationCall(
         "audit",
@@ -260,7 +276,7 @@ export async function invokeContractMutation(input: ContractMutationInput): Prom
             includeDirty: parsed.includeDirty,
             showDiff: parsed.showDiff,
             requireBranchesToBeUpToDate,
-            hooks,
+            ...(hooks === undefined ? {} : { hooks }),
           }),
         (result) => acceptedAudit(result, id),
         { coordinate: id },

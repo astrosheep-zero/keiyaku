@@ -1,21 +1,14 @@
-import {
-  KeiyakuHandle,
-  bindKeiyaku,
-  keiyakuOf,
-  listKeiyaku,
-  observeKeiyaku,
-  type Keiyaku as KeiyakuType,
-} from "./contract.js";
-import { callKeiyaku, forkKeiyaku } from "./akuma-creation.js";
-import { historyAkuma, interruptAkuma, killAkuma, statusAkuma, tellAkuma, waitAkuma } from "./fleet.js";
-import { listCatalog } from "./catalog.js";
-import { nukeKeiyaku } from "./nuke.js";
+import type { Keiyaku as KeiyakuType } from "./contract.js";
+import { composeLibrary } from "./composition.js";
+import { libraryExecutionInput, type LibraryExecution } from "../akuma/requests.js";
 
 export { AuthorityCorruptionError } from "../core/facts/errors.js";
 export { Delivery, KeiyakuRefused, KeiyakuRetry } from "./contract.js";
 export { NoGitWorldError, Repo } from "./repo.js";
 export { gatesFrom, requireBranchesToBeUpToDateFrom, SettingsError, worktreeHooksFrom } from "./configuration.js";
 export { AkumaWorldScopeError } from "./address.js";
+export { bodyRequestExecution } from "../akuma/requests.js";
+export type { LibraryExecution } from "../akuma/requests.js";
 
 export type {
   AbandonInput,
@@ -120,22 +113,13 @@ export type {
 } from "./fleet.js";
 
 export type Keiyaku = KeiyakuType;
+export type KeiyakuLibrary = ReturnType<typeof composeLibrary>;
+
+function routedLibrary(input: Readonly<{ execution: LibraryExecution }>): KeiyakuLibrary {
+  return composeLibrary(libraryExecutionInput(input));
+}
 
 export const Keiyaku = Object.freeze({
-  prototype: KeiyakuHandle.prototype,
-  [Symbol.hasInstance]: (value: unknown): boolean => value instanceof KeiyakuHandle,
-  bind: bindKeiyaku,
-  call: callKeiyaku,
-  fork: forkKeiyaku,
-  history: historyAkuma,
-  interrupt: interruptAkuma,
-  kill: killAkuma,
-  ls: listCatalog,
-  nuke: nukeKeiyaku,
-  list: listKeiyaku,
-  observe: observeKeiyaku,
-  of: keiyakuOf,
-  status: statusAkuma,
-  tell: tellAkuma,
-  wait: waitAkuma,
+  ...composeLibrary(),
+  withExecution: routedLibrary,
 });

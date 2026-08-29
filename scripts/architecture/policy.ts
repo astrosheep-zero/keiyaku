@@ -297,6 +297,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         "akuma/akuma-product.ts",
         "akuma/body.ts",
         "akuma/body-supervisor.ts",
+        "akuma/requests.ts",
         "akuma/identity.ts",
         "akuma/archetype.ts",
         "akuma/provider.ts",

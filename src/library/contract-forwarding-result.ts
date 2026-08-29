@@ -1,6 +1,7 @@
 import { encodeEntry } from "../core/facts/codec.js";
 import { changeId, contractHead, contractId, snapshotId, type JournalEntry } from "../core/facts/types.js";
 import type { IntegrationConflictMaterialized } from "../protocol/deliver.js";
+import type { AuditReport } from "../protocol/audit.js";
 import type { ReviewValue } from "../protocol/review.js";
 import type { ContinuationReport } from "./continuation.js";
 import type { DeliveryValue } from "./delivery.js";
@@ -18,6 +19,8 @@ export type ForwardedMutationReceipt<Value> =
 export type ForwardedDeliveryReceipt = ForwardedMutationReceipt<DeliveryValue> | IntegrationConflictMaterialized;
 
 export type ForwardedReviewReceipt = ForwardedMutationReceipt<Review>;
+
+export type ForwardedAuditReceipt = ForwardedMutationReceipt<AuditReport>;
 
 function record(value: unknown): Readonly<Record<string, unknown>> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -265,6 +268,72 @@ function reviewValue(value: unknown): boolean {
   ]);
 }
 
+function auditCandidate(value: unknown): boolean {
+  const candidate = record(value);
+  if (candidate === null) return false;
+  if (candidate.kind === "blocked")
+    return exactResultKeys(candidate, ["kind", "refusal"]) && record(candidate.refusal) !== null;
+  const workspace = record(candidate.workspace);
+  return (
+    candidate.kind === "ready" &&
+    exactResultKeys(
+      candidate,
+      ["diff", "identity", "kind", "scope", "workspace"].filter((key) => candidate[key] !== undefined),
+    ) &&
+    record(candidate.identity) !== null &&
+    record(candidate.scope) !== null &&
+    workspace?.kind === "worktree" &&
+    nonblank(workspace.path) &&
+    (candidate.diff === undefined || typeof candidate.diff === "string")
+  );
+}
+
+function auditVerification(value: unknown): boolean {
+  const verification = record(value);
+  if (verification === null) return false;
+  if (verification.kind === "not-run") return exactResultKeys(verification, ["kind"]);
+  if (verification.kind === "stopped")
+    return exactResultKeys(verification, ["kind", "stop"]) && record(verification.stop) !== null;
+  return (
+    (verification.kind === "satisfied" || verification.kind === "unsatisfied") &&
+    exactResultKeys(
+      verification,
+      ["kind", "passed", "summary", "total"].filter((key) => verification[key] !== undefined),
+    ) &&
+    typeof verification.passed === "number" &&
+    typeof verification.total === "number" &&
+    (verification.summary === undefined || typeof verification.summary === "string")
+  );
+}
+
+function auditDelivery(value: unknown): boolean {
+  if (value === undefined) return true;
+  const delivery = record(value);
+  return (
+    delivery !== null &&
+    exactResultKeys(delivery, ["changeId", "relation"]) &&
+    canonicalChange(delivery.changeId) &&
+    (delivery.relation === "identical" || delivery.relation === "differs")
+  );
+}
+
+export function isAuditReport(value: unknown): value is AuditReport {
+  const report = record(value);
+  const target = report === null ? null : record(report.target);
+  return (
+    report !== null &&
+    target !== null &&
+    exactResultKeys(
+      report,
+      ["candidate", "delivery", "target", "verification"].filter((key) => report[key] !== undefined),
+    ) &&
+    auditCandidate(report.candidate) &&
+    auditVerification(report.verification) &&
+    typeof target.kind === "string" &&
+    auditDelivery(report.delivery)
+  );
+}
+
 function acceptedResult(value: unknown, valueDecoder: (value: unknown) => boolean): boolean {
   const result = record(value);
   return (
@@ -317,6 +386,15 @@ export function isForwardedReviewReceipt(value: unknown): value is ForwardedRevi
   if (receipt === null || typeof receipt.kind !== "string") return false;
   if (receipt.kind === "accepted")
     return exactResultKeys(receipt, ["kind", "result"]) && acceptedResult(receipt.result, reviewValue);
+  if (receipt.kind === "refused") return isForwardedRefusal(receipt);
+  return receipt.kind === "retry" && isForwardedRetry(receipt);
+}
+
+export function isForwardedAuditReceipt(value: unknown): value is ForwardedAuditReceipt {
+  const receipt = record(value);
+  if (receipt === null || typeof receipt.kind !== "string") return false;
+  if (receipt.kind === "accepted")
+    return exactResultKeys(receipt, ["kind", "result"]) && acceptedResult(receipt.result, isAuditReport);
   if (receipt.kind === "refused") return isForwardedRefusal(receipt);
   return receipt.kind === "retry" && isForwardedRetry(receipt);
 }

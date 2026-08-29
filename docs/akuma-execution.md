@@ -323,6 +323,9 @@ Forwarded wait, tell, and kill enter these same local executors after the parent
 Heart's single permission decision. Tell uses the upstream request id as TellId;
 kill retains the lifecycle evidence above; wait remains observation only. The
 forwarding request never becomes a second verb implementation or lifecycle judge.
+Every parent-side Body Request service, including Contract and Task service,
+uses the explicitly local Library/Task composition; serving a request never
+observes or recaptures the child's transport channel.
 
 ## Fork
 

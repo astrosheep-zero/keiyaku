@@ -1,5 +1,6 @@
 import { any, factErrors, factTypes, gitRepository, types } from "./policy-helpers.js";
 export const taskKanshiZones = [
+  { source: "task/public.ts", allow: [any("task/index.ts")] },
   {
     source: "task/catalog.ts",
     allow: [any("task/board.ts"), any("task/identity.ts"), any("task/store.ts"), types("world.ts")],
@@ -67,11 +68,22 @@ export const taskKanshiZones = [
     source: "task/mutation.ts",
     allow: [
       types("world.ts"),
-      types("task/compose.ts"),
+      any("task/compose.ts", ["composeTasks", "TaskCompositionResult"]),
       any("task/input.ts"),
-      any("task/index.ts"),
       any("task/identity.ts", ["parseTaskId", "TaskId"]),
-      types("task/operations.ts"),
+      any("task/operations.ts", [
+        "addTask",
+        "addTaskDocument",
+        "batchTasks",
+        "lifecycleTask",
+        "updateTask",
+        "AddTaskDocumentInput",
+        "AddTaskInput",
+        "TaskBatchResult",
+        "TaskMutationResult",
+        "TaskUpdateResult",
+        "UpdateTaskInput",
+      ]),
       any("task/mutation-result.ts", ["TaskMutationExecutionResult", "isTaskMutationExecutionResult"]),
       any("akuma/request-rendezvous.ts", ["requestBodyCommand"]),
       any("akuma/request-wire.ts", ["eraseRequestCommand", "ErasedRequestCommand", "RequestCommand"]),
@@ -98,6 +110,8 @@ export const taskKanshiZones = [
       any("task/operations.ts"),
       any("task/query.ts"),
       any("task/store.ts"),
+      any("task/mutation.ts", ["TaskMutationRequest", "TaskMutationResultForRequest", "requestForwardedTask"]),
+      any("akuma/requests.ts"),
     ],
   },
   {

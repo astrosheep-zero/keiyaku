@@ -11,6 +11,7 @@ import { readManagedWorktreeAppointment } from "../workspace-place.js";
 import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
 import type { AllowedAction } from "../akuma/allowed.js";
+import { localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
 import { requireInput } from "./input.js";
 import { addressAkuma } from "./address.js";
 import { KeiyakuRefused, type Keiyaku } from "./contract.js";
@@ -120,10 +121,11 @@ function homeOption(value: unknown): string | undefined {
   return nonblank(value, "home");
 }
 
-function akumaWorld(path: WorldRoot, home?: string, settings?: Settings) {
+function akumaWorld(path: WorldRoot, home?: string, settings?: Settings, execution?: ExecutionContext) {
   return Akuma.of(path, {
     ...(home === undefined ? {} : { home }),
     ...(settings === undefined ? {} : { settings }),
+    ...(execution === undefined ? {} : { execution }),
   });
 }
 
@@ -276,7 +278,7 @@ async function resolveCallExecution(
   return undefined;
 }
 
-export async function beginCall(input: CallInput): Promise<BornCall> {
+export async function beginCall(input: CallInput, context: ExecutionContext): Promise<BornCall> {
   const values = requireInput(input, "Keiyaku.call input");
   onlyKeys(
     values,
@@ -315,7 +317,7 @@ export async function beginCall(input: CallInput): Promise<BornCall> {
     ...(cwd === undefined ? {} : { cwd }),
     ...(seat === undefined ? {} : { contract: values.contract as Keiyaku }),
   });
-  const world = akumaWorld(path, home, settings);
+  const world = akumaWorld(path, home, settings, context);
   const call = {
     archetype,
     body,
@@ -377,8 +379,11 @@ export async function finishCall(born: BornCall, participantName?: string): Prom
   };
 }
 
-export async function callKeiyaku(input: CallInput): Promise<CallResult> {
-  return await finishCall(await beginCall(input));
+export async function callKeiyaku(
+  input: CallInput,
+  execution: ExecutionContext = localExecutionContext(),
+): Promise<CallResult> {
+  return await finishCall(await beginCall(input, execution));
 }
 
 export async function forkKeiyaku(input: ForkInput): Promise<ForkResult> {

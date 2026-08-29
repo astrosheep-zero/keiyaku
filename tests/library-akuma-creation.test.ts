@@ -30,7 +30,7 @@ import {
   writeCommit,
 } from "../src/git/repository.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
-import { Keiyaku, Repo, World, settings } from "../src/index.js";
+import { bodyRequestExecution, Keiyaku, Repo, World, settings } from "../src/index.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import { invoke } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
@@ -161,10 +161,11 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
   const world = await World.at(raw.path);
   const configured = await archetypeSettings(world);
   const { pump, leash } = await requestPump(world);
+  const routedKeiyaku = Keiyaku.withExecution({ execution: bodyRequestExecution({ directory: pump.directory }) });
   const previousRequests = process.env[AKUMA_REQUESTS_ENV];
   process.env[AKUMA_REQUESTS_ENV] = pump.directory;
   try {
-    const independent = await Keiyaku.call({
+    const independent = await routedKeiyaku.call({
       path: world,
       archetype: "worker",
       body: "independent",
@@ -204,7 +205,7 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
     assert.equal((await readSoul(pathsForAkuId(world, associated.akuma)))?.cwd, realpathSync(executionCwd));
 
     writeFileSync(join(raw.path, ".keiyaku", "akuma", "alias.json"), "broken\n");
-    const partial = await Keiyaku.call({
+    const partial = await routedKeiyaku.call({
       path: world,
       archetype: "worker",
       body: "partial",
@@ -218,7 +219,7 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
     assert.equal(partial.observation.kind, "observed");
     assert.notEqual(await readDispatch(git, partial.akuma), null);
 
-    const detached = await Keiyaku.call({
+    const detached = await routedKeiyaku.call({
       path: world,
       archetype: "worker",
       body: "detached",
@@ -226,7 +227,7 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
       mode: "detach",
     });
     assert.deepEqual(detached.observation, { kind: "detached" });
-    const routed = await Keiyaku.call({
+    const routed = await routedKeiyaku.call({
       path: world,
       archetype: "worker",
       body: "routed",
@@ -235,7 +236,7 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
     });
     assert.deepEqual(routed.observation, { kind: "detached" });
     await assert.rejects(
-      Keiyaku.call({
+      routedKeiyaku.call({
         path: world,
         archetype: "worker",
         body: "invalid",
@@ -465,10 +466,11 @@ test("Keiyaku.call projects the same readonly restraint on CallResult and AkumaS
   const world = await World.at(raw.path);
   const configured = await archetypeSettings(world);
   const { pump, leash } = await requestPump(world);
+  const routedKeiyaku = Keiyaku.withExecution({ execution: bodyRequestExecution({ directory: pump.directory }) });
   const previousRequests = process.env[AKUMA_REQUESTS_ENV];
   process.env[AKUMA_REQUESTS_ENV] = pump.directory;
   try {
-    const result = await Keiyaku.call({
+    const result = await routedKeiyaku.call({
       path: world,
       archetype: "reviewer",
       body: "review",
@@ -494,6 +496,7 @@ test("Keiyaku.call observes for five minutes by default", async () => {
   const world = await World.at(raw.path);
   const configured = await archetypeSettings(world);
   const { pump, leash } = await requestPump(world);
+  const routedKeiyaku = Keiyaku.withExecution({ execution: bodyRequestExecution({ directory: pump.directory }) });
   const previousRequests = process.env[AKUMA_REQUESTS_ENV];
   const originalWait = AkumaHandle.prototype.wait;
   let receivedTimeout: number | undefined;
@@ -503,7 +506,7 @@ test("Keiyaku.call observes for five minutes by default", async () => {
     return await originalWait.call(this, predicate, { timeoutMs: 0 });
   };
   try {
-    const result = await Keiyaku.call({
+    const result = await routedKeiyaku.call({
       path: world,
       archetype: "worker",
       body: "observe",
@@ -638,11 +641,12 @@ test("Keiyaku.call carries the CallResult restraint on detached and failed obser
   const configured = await settings({ root: world, home });
   const placement = { home, settings: configured };
   const { pump, leash } = await requestPump(world);
+  const routedKeiyaku = Keiyaku.withExecution({ execution: bodyRequestExecution({ directory: pump.directory }) });
   const previousRequests = process.env[AKUMA_REQUESTS_ENV];
   const originalWait = AkumaHandle.prototype.wait;
   process.env[AKUMA_REQUESTS_ENV] = pump.directory;
   try {
-    const detached = await Keiyaku.call({
+    const detached = await routedKeiyaku.call({
       path: world,
       archetype: "grok-review",
       body: "",
@@ -658,7 +662,7 @@ test("Keiyaku.call carries the CallResult restraint on detached and failed obser
     AkumaHandle.prototype.wait = async function () {
       throw new Error("heart unavailable");
     };
-    const failed = await Keiyaku.call({
+    const failed = await routedKeiyaku.call({
       path: world,
       archetype: "reviewer",
       body: "fail",

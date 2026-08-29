@@ -12,8 +12,8 @@
       "import": "./build/src/index.js"
     },
     "./task": {
-      "types": "./build/src/task/index.d.ts",
-      "import": "./build/src/task/index.js"
+      "types": "./build/src/task/public.d.ts",
+      "import": "./build/src/task/public.js"
     },
     "./kanshi": {
       "types": "./build/src/kanshi/index.d.ts",

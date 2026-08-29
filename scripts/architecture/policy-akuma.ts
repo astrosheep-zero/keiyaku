@@ -249,10 +249,7 @@ export const akumaZones = [
   },
   {
     source: "akuma/requests.ts",
-    allow: [
-      any("akuma/provider.ts", ["AKUMA_REQUESTS_ENV"]),
-      any("akuma/request-rendezvous.ts", ["AkumaBodyRequestError", "requestBodyCommand"]),
-    ],
+    allow: [any("node:path"), any("akuma/request-rendezvous.ts", ["AkumaBodyRequestError", "requestBodyCommand"])],
   },
   {
     source: "akuma/request-serve.ts",

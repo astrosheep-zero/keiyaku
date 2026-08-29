@@ -60,7 +60,7 @@ function repositoryWithInitialCommit() {
 test("package root exposes only the ruled library values and declarations", () => {
   const directory = externalConsumer();
   const source = [
-    'import { AuthorityCorruptionError, AkumaWorldScopeError, Delivery, gatesFrom, Keiyaku, KeiyakuRefused, KeiyakuRetry, Repo, settings, SettingsError, worktreeHooksFrom, World, type AbandonInput, type ActorId, type AkumaHistoryResult, type AkumaObservation, type AkumaWorldScopeRefusal, type AmendInput, type AmendResult, type ArcInput, type AuditInput, type AuditReport, type AttestationVerdict, type BindInput, type BindResult, type ChangeId, type ContractAfterEdge, type ContractBoard, type ContractDependent, type ContractDisposition, type ContractGateCurrent, type ContractGateReport, type ContractHistory, type ContractHistoryEvent, type ContractId, type ContractObservation, type ContractObservationInput, type ContractListInput, type ContractPhase, type ContractRow, type ContractState, type ContractWorkspaceObservation, type CreatedTaskObservation, type DeliverInput, type DeliveryPreparationRefusal, type Fact, type FactKind, type Gate, type HookCommand, type KeiyakuRefusal, type KeiyakuRetryReason, type Lag, type MutationResult, type NukeConfirmationRefusal, type NukeConfirmationRequiredRefusal, type NukeInput, type NukeResult, type ReconcileReport, type RegionOverlap, type RepoAtInput, type RepoReconcileReport, type Review, type ReviewInput, type Settings, type SettingsEntry, type SettingsNamespaceView, type SettingsScopeState, type SettlementAction, type SettlementLag, type SettlementReport, type SnapshotId, type TaskId, type TopologyEffect, type VerificationReuse, type WorktreeHooks, type WorldResolution, type WorldResolutionInput, type WorldRoot } from "@astrosheep/keiyaku";',
+    'import { AuthorityCorruptionError, AkumaWorldScopeError, bodyRequestExecution, Delivery, gatesFrom, Keiyaku, KeiyakuRefused, KeiyakuRetry, Repo, settings, SettingsError, worktreeHooksFrom, World, type AbandonInput, type ActorId, type AkumaHistoryResult, type AkumaObservation, type AkumaWorldScopeRefusal, type AmendInput, type AmendResult, type ArcInput, type AuditInput, type AuditReport, type AttestationVerdict, type BindInput, type BindResult, type ChangeId, type ContractAfterEdge, type ContractBoard, type ContractDependent, type ContractDisposition, type ContractGateCurrent, type ContractGateReport, type ContractHistory, type ContractHistoryEvent, type ContractId, type ContractObservation, type ContractObservationInput, type ContractListInput, type ContractPhase, type ContractRow, type ContractState, type ContractWorkspaceObservation, type CreatedTaskObservation, type DeliverInput, type DeliveryPreparationRefusal, type Fact, type FactKind, type Gate, type HookCommand, type KeiyakuRefusal, type KeiyakuRetryReason, type Lag, type LibraryExecution, type MutationResult, type NukeConfirmationRefusal, type NukeConfirmationRequiredRefusal, type NukeInput, type NukeResult, type ReconcileReport, type RegionOverlap, type RepoAtInput, type RepoReconcileReport, type Review, type ReviewInput, type Settings, type SettingsEntry, type SettingsNamespaceView, type SettingsScopeState, type SettlementAction, type SettlementLag, type SettlementReport, type SnapshotId, type TaskId, type TopologyEffect, type VerificationReuse, type WorktreeHooks, type WorldResolution, type WorldResolutionInput, type WorldRoot } from "@astrosheep/keiyaku";',
     'import type { AkuId, AkumaAlias, AkumaStatus, AliasBinding, AliasStage, CallInput, CallResult, Dispatch, DispatchFailure, DispatchStage, ForkInput, ForkResult, IntegrationFailure } from "@astrosheep/keiyaku";',
     'const repo = await Repo.at({ path: "." });',
     'import { requireBranchesToBeUpToDateFrom } from "@astrosheep/keiyaku";',
@@ -70,6 +70,9 @@ test("package root exposes only the ruled library values and declarations", () =
     'const amendment: AmendInput = { markdown: "## Append: Context\\nMore\\n", after: [id] };',
     "const termsOnly: AmendInput = { after: [id] };",
     "const existing = Keiyaku.of({ repo, id });",
+    'const execution: LibraryExecution = bodyRequestExecution({ directory: "/tmp/keiyaku-requests" });',
+    "const routedKeiyaku = Keiyaku.withExecution({ execution });",
+    "const routedContract = routedKeiyaku.of({ repo, id });",
     'const akuma = "aku/worker/1234abcd" as AkuId;',
     'const alias = "@worker" as AkumaAlias;',
     "const world = null as unknown as WorldRoot;",
@@ -84,6 +87,7 @@ test("package root exposes only the ruled library values and declarations", () =
     "const worldCandidate: WorldRoot | null = (await worldResolution).candidate;",
     'const callInput: CallInput = { path: world, archetype: "worker", body: "work", mode: "wait", timeoutMs: 300000, contract: existing, alias };',
     "const callResult: Promise<CallResult> = Keiyaku.call(callInput);",
+    "const routedCall: Promise<CallResult> = routedKeiyaku.call(callInput);",
     "const callStatus = null as unknown as AkumaStatus;",
     'const forkInput: ForkInput = { path: world, akuma, at: "history-1", repo };',
     "const forkResult: Promise<ForkResult> = Keiyaku.fork(forkInput);",
@@ -235,7 +239,7 @@ test("package root exposes only the ruled library values and declarations", () =
     'type InternalReviewValue = import("@astrosheep/keiyaku").ReviewValue;',
     "// @ts-expect-error legacy DeliverValue alias is not a package-root export",
     'type InternalDeliverValue = import("@astrosheep/keiyaku").DeliverValue;',
-    'void new AuthorityCorruptionError("corrupt"); void new AkumaWorldScopeError({ kind: "akuma-not-in-world", ids: [akuma], world }); void (null as unknown as AkumaWorldScopeRefusal); void new SettingsError("invalid"); void existing; void delivery; void bound; void repo; void taskId; void akuma; void alias; void worldInput; void worldResolution; void callResult; void callStatus; void forkResult; void statusResult; void createdTasks; void historyResult; void contractHistory; void contractHistoryEvent; void aliasBinding; void aliasStage; void dispatch; void dispatchFailure; void dispatchStage; void integrationFailure; void report; void preparationRefusal; void verificationReuse; void kind; void amendment; void termsOnly; void invalidBind; void invalidAmend; void customGate; void settingsValue; void selectedGates; void hook; void selectedHooks; void settingsEntry; void settingsView; void settingsScope; void contractListInput; void contractObservationInput; void contractPhase; void tenderedPhase; void contractDisposition; void contractGateCurrent; void contractGateReport; void workspaceObservation; void failedWorkspaceObservation; void statusRow; void statusBoard; void statusObservation; void deliverInput; void fact; void gate; void reconcile; void atInput; void repoReconcile; void emptyWorld; void failedWorld; void completedWorld; void invalidFailedWorld; void invalidCompletedWorld; void failedAsCompleted; void reviewInput; void review; void regionOverlap; void snapshot; void refusal; void retry; void settlementAction; void settlementLag; void settlementReport; void nukeResult; void nukeKeiyakuRefusal; void nukeRequired; void bindResult; void amendResult; void amendWithoutRegion; void invalidAmendRegion; void invalidBindRegion;',
+    'void new AuthorityCorruptionError("corrupt"); void new AkumaWorldScopeError({ kind: "akuma-not-in-world", ids: [akuma], world }); void (null as unknown as AkumaWorldScopeRefusal); void new SettingsError("invalid"); void existing; void routedContract; void delivery; void bound; void repo; void taskId; void akuma; void alias; void worldInput; void worldResolution; void callResult; void routedCall; void callStatus; void forkResult; void statusResult; void createdTasks; void historyResult; void contractHistory; void contractHistoryEvent; void aliasBinding; void aliasStage; void dispatch; void dispatchFailure; void dispatchStage; void integrationFailure; void report; void preparationRefusal; void verificationReuse; void kind; void amendment; void termsOnly; void invalidBind; void invalidAmend; void customGate; void settingsValue; void selectedGates; void hook; void selectedHooks; void settingsEntry; void settingsView; void settingsScope; void contractListInput; void contractObservationInput; void contractPhase; void tenderedPhase; void contractDisposition; void contractGateCurrent; void contractGateReport; void workspaceObservation; void failedWorkspaceObservation; void statusRow; void statusBoard; void statusObservation; void deliverInput; void fact; void gate; void reconcile; void atInput; void repoReconcile; void emptyWorld; void failedWorld; void completedWorld; void invalidFailedWorld; void invalidCompletedWorld; void failedAsCompleted; void reviewInput; void review; void regionOverlap; void snapshot; void refusal; void retry; void settlementAction; void settlementLag; void settlementReport; void nukeResult; void nukeKeiyakuRefusal; void nukeRequired; void bindResult; void amendResult; void amendWithoutRegion; void invalidBindRegion;',
   ].join("\n");
   writeFileSync(join(directory, "consumer.ts"), source);
   execFileSync(
@@ -266,7 +270,7 @@ test("package root exposes only the ruled library values and declarations", () =
   );
   assert.equal(
     output.trim(),
-    "AkumaWorldScopeError,AuthorityCorruptionError,Delivery,Keiyaku,KeiyakuRefused,KeiyakuRetry,NoGitWorldError,Repo,SettingsError,World,WorldError,gatesFrom,settings,worktreeHooksFrom",
+    "AkumaWorldScopeError,AuthorityCorruptionError,Delivery,Keiyaku,KeiyakuRefused,KeiyakuRetry,NoGitWorldError,Repo,SettingsError,World,WorldError,bodyRequestExecution,gatesFrom,settings,worktreeHooksFrom",
   );
 });
 
@@ -331,10 +335,11 @@ test("package exports reject deep internal imports", () => {
 test("task package export exposes only the Tasks-first native surface", () => {
   const directory = externalConsumer();
   const source = [
-    'import { World } from "@astrosheep/keiyaku";',
+    'import { bodyRequestExecution, World } from "@astrosheep/keiyaku";',
     'import { Tasks, type Task, type TaskDecompositionTree, type TaskId, type TaskMutationResult, type TaskTreeNode } from "@astrosheep/keiyaku/task";',
     'const world = null as unknown as import("@astrosheep/keiyaku").WorldRoot;',
     "const tasks = Tasks.of(world);",
+    'const routedTasks = Tasks.of(world, { execution: bodyRequestExecution({ directory: "/tmp/keiyaku-requests" }) });',
     'const task: Task = tasks.task({ id: "task/example" });',
     "const id: TaskId = task.id;",
     'const result: Promise<TaskMutationResult> = tasks.add({ title: "Example", state: "in_progress", note: "initial" });',
@@ -350,7 +355,7 @@ test("task package export exposes only the Tasks-first native surface", () => {
     "void task.tree({ full: true });",
     "// @ts-expect-error DAG residue type is not exported",
     'type OldTree = import("@astrosheep/keiyaku/task").TaskDependencyTree;',
-    "void tasks; void task; void id; void result; void tree; void node;",
+    "void tasks; void routedTasks; void task; void id; void result; void tree; void node;",
   ].join("\n");
   writeFileSync(join(directory, "consumer-task.ts"), source);
   execFileSync(
@@ -416,6 +421,7 @@ test("Keiyaku owns contract construction over one pinned Repo capability", async
       "status",
       "tell",
       "wait",
+      "withExecution",
     ],
   );
   assert.deepEqual(

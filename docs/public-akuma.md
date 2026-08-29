@@ -18,6 +18,14 @@ awaited before the public Promise fulfills. Composition preserves the declared
 stage order; asynchronous observation does not introduce parallel writers,
 cached resolution, or a background integration queue.
 
+The package composition captures its execution channel at construction. The
+ordinary public facade is local; `Keiyaku.withExecution({ execution })` accepts
+the one explicit `bodyRequestExecution({ directory })` carrier and retains it
+through call, wait, tell, and kill. The provider CLI constructs and uses that
+same carrier once at its invocation edge. Neither operation input nor later
+operation selection exposes a routing field, and the parent's service
+composition is forced local.
+
 ## Akuma Creation Facet
 
 The Akuma creation facet is the package-root owner for operations that produce

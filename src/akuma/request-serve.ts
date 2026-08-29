@@ -119,9 +119,16 @@ function diagnostic(error: unknown): string {
 
 export async function serveRequest(input: ServeInput): Promise<void> {
   const command = input.commands[input.claim.action];
-  if (command !== undefined) {
-    if (await serveCommand(input, command)) return;
+  if (command === undefined) {
+    await atomicJson(receiptPath(input.directory, input.transportId), {
+      id: input.claim.id,
+      action: input.claim.action,
+      state: "refused",
+      diagnostic: `request action ${input.claim.action} is not registered`,
+    });
+    return;
   }
+  if (await serveCommand(input, command)) return;
 }
 
 async function serveTransportClaim(input: ServeInput): Promise<void> {

@@ -3,9 +3,20 @@ import { isAbsolute, resolve } from "node:path";
 import { requestBodyCommand } from "../akuma/request-rendezvous.js";
 import { eraseRequestCommand, type ErasedRequestCommand, type RequestCommand } from "../akuma/request-wire.js";
 import { addInput, closed, namespace, record, taskId, taskIds, text, updateInput } from "./input.js";
-import type { AddTaskDocumentInput, AddTaskInput, UpdateTaskInput } from "./operations.js";
+import {
+  addTask,
+  addTaskDocument,
+  batchTasks,
+  lifecycleTask,
+  updateTask,
+  type AddTaskDocumentInput,
+  type AddTaskInput,
+  type UpdateTaskInput,
+} from "./operations.js";
+import { composeTasks, type TaskCompositionResult } from "./compose.js";
 import type { TaskId } from "./identity.js";
 import { isTaskMutationExecutionResult, type TaskMutationExecutionResult } from "./mutation-result.js";
+import type { TaskBatchResult, TaskMutationResult, TaskUpdateResult } from "./operations.js";
 export type { TaskMutationExecutionResult } from "./mutation-result.js";
 
 export const TASK_MUTATION_ACTIONS = Object.freeze([
@@ -41,9 +52,25 @@ export type TaskMutationRequest =
   | Readonly<{ action: "task.update"; id: TaskId; input: Omit<UpdateTaskInput, "signal"> }>
   | Readonly<{ action: "task.start"; id: TaskId }>
   | Readonly<{ action: "task.start"; ids: readonly TaskId[] }>
-  | Readonly<{ action: "task.stop" | "task.resume"; id: TaskId }>
+  | Readonly<{ action: "task.stop"; id: TaskId }>
+  | Readonly<{ action: "task.resume"; id: TaskId }>
+  | Readonly<{ action: "task.hold"; id: TaskId }>
   | Readonly<{ action: "task.hold"; ids: readonly TaskId[] }>
-  | Readonly<{ action: "task.done" | "task.drop"; ids: readonly TaskId[]; note?: string }>;
+  | Readonly<{ action: "task.done"; id: TaskId; note?: string }>
+  | Readonly<{ action: "task.done"; ids: readonly TaskId[]; note?: string }>
+  | Readonly<{ action: "task.drop"; id: TaskId; note?: string }>
+  | Readonly<{ action: "task.drop"; ids: readonly TaskId[]; note?: string }>;
+
+export type TaskMutationResultForRequest<Request extends TaskMutationRequest> =
+  Request extends Readonly<{
+    action: "task.compose";
+  }>
+    ? TaskCompositionResult
+    : Request extends Readonly<{ action: "task.update" }>
+      ? TaskUpdateResult
+      : Request extends Readonly<{ ids: readonly TaskId[] }>
+        ? TaskBatchResult
+        : TaskMutationResult;
 
 export type ForwardedTaskReference = Readonly<{ kind: "served-reference"; action: TaskMutationAction }>;
 export type TaskMutationService = Readonly<{ action: TaskMutationAction }>;
@@ -195,33 +222,55 @@ export function taskMutationRequestCommands(): Readonly<Record<TaskMutationActio
   };
 }
 
-export function requestForwardedTask(
+function taskResultForRequest<Request extends TaskMutationRequest>(
+  request: Request,
+  value: unknown,
+): value is TaskMutationResultForRequest<Request> {
+  if (!isTaskMutationExecutionResult(value)) return false;
+  const result = resultRecord(value);
+  if (result === null) return false;
+  if (request.action === "task.compose") {
+    return (
+      result.kind === "planned" ||
+      result.kind === "incomplete" ||
+      (result.kind === "accepted" && Array.isArray(result.aliases))
+    );
+  }
+  if (request.action === "task.update") {
+    const accepted = result.kind === "accepted" ? resultRecord(result.value) : null;
+    return result.kind !== "accepted" || (accepted !== null && typeof accepted.documentDiff === "string");
+  }
+  if ("ids" in request) return Array.isArray(result.items);
+  return !Array.isArray(result.items);
+}
+
+export function requestForwardedTask<Request extends TaskMutationRequest>(
   input: Readonly<{
     directory: string;
     id?: never;
     world: WorldRoot;
-    request: TaskMutationRequest;
+    request: Request;
     signal?: AbortSignal;
   }>,
-): Promise<TaskMutationExecutionResult>;
-export function requestForwardedTask(
+): Promise<TaskMutationResultForRequest<Request>>;
+export function requestForwardedTask<Request extends TaskMutationRequest>(
   input: Readonly<{
     directory: string;
     id: string;
     world: WorldRoot;
-    request: TaskMutationRequest;
+    request: Request;
     signal?: AbortSignal;
   }>,
-): Promise<TaskMutationExecutionResult | ForwardedTaskReference>;
-export async function requestForwardedTask(
+): Promise<TaskMutationResultForRequest<Request> | ForwardedTaskReference>;
+export async function requestForwardedTask<Request extends TaskMutationRequest>(
   input: Readonly<{
     directory: string;
     id?: string;
     world: WorldRoot;
-    request: TaskMutationRequest;
+    request: Request;
     signal?: AbortSignal;
   }>,
-): Promise<TaskMutationExecutionResult | ForwardedTaskReference> {
+): Promise<TaskMutationResultForRequest<Request> | ForwardedTaskReference> {
   const response = await requestBodyCommand({
     directory: input.directory,
     ...(input.id === undefined ? {} : { id: input.id }),
@@ -229,18 +278,42 @@ export async function requestForwardedTask(
     value: { action: input.request.action, world: input.world, request: input.request },
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
-  return response.kind === "returned" ? response.result : response.reference;
+  if (response.kind === "reference") return response.reference;
+  if (!taskResultForRequest(input.request, response.result)) {
+    throw new Error(`transport integrity: Task ${input.request.action} returned an invalid result`);
+  }
+  return response.result;
 }
 
-function decodeTaskStartRequest(value: unknown): Extract<TaskMutationRequest, { action: "task.start" }> {
-  const action = "task.start";
+function decodeTaskSingleOrBatchRequest(action: "task.start" | "task.hold", value: unknown): TaskMutationRequest {
   const request = mutationObject(value, ["id", "ids"], `${action} request`);
   if (request.id !== undefined && request.ids !== undefined)
     throw new TypeError(`${action} request has both id and ids`);
-  if (request.id !== undefined) return { action, id: taskId(request.id) };
+  if (request.id !== undefined) {
+    const id = taskId(request.id);
+    return action === "task.start" ? { action: "task.start", id } : { action: "task.hold", id };
+  }
   const ids = taskIds(request.ids, "ids");
   if (ids === undefined || ids.length === 0) throw new TypeError(`${action} request requires at least one TaskId`);
-  return { action, ids };
+  return action === "task.start" ? { action: "task.start", ids } : { action: "task.hold", ids };
+}
+
+function decodeTaskTerminalRequest(action: "task.done" | "task.drop", value: unknown): TaskMutationRequest {
+  const request = mutationObject(value, ["id", "ids", "note"], `${action} request`);
+  if (request.id !== undefined && request.ids !== undefined)
+    throw new TypeError(`${action} request has both id and ids`);
+  const note = text(request.note, "note");
+  if (request.id !== undefined) {
+    const id = taskId(request.id);
+    return action === "task.done"
+      ? { action: "task.done", id, ...(note === undefined ? {} : { note }) }
+      : { action: "task.drop", id, ...(note === undefined ? {} : { note }) };
+  }
+  const ids = taskIds(request.ids, "ids");
+  if (ids === undefined || ids.length === 0) throw new TypeError(`${action} request requires at least one TaskId`);
+  return action === "task.done"
+    ? { action: "task.done", ids, ...(note === undefined ? {} : { note }) }
+    : { action: "task.drop", ids, ...(note === undefined ? {} : { note }) };
 }
 
 export function decodeTaskMutationRequest(action: TaskMutationAction, value: unknown): TaskMutationRequest {
@@ -299,21 +372,21 @@ export function decodeTaskMutationRequest(action: TaskMutationAction, value: unk
       return { action, id: taskId(request.id), input: updateInput(raw) };
     }
     case "task.start":
-      return decodeTaskStartRequest(value);
-    case "task.stop":
+      return decodeTaskSingleOrBatchRequest("task.start", value);
+    case "task.stop": {
+      const request = mutationObject(value, ["id"], `${action} request`);
+      return { action, id: taskId(request.id) };
+    }
     case "task.resume": {
       const request = mutationObject(value, ["id"], `${action} request`);
       return { action, id: taskId(request.id) };
     }
     case "task.hold": {
-      const request = mutationObject(value, ["ids"], "task.hold request");
-      return { action, ids: taskIds(request.ids, "ids") ?? [] };
+      return decodeTaskSingleOrBatchRequest("task.hold", value);
     }
     case "task.done":
     case "task.drop": {
-      const request = mutationObject(value, ["ids", "note"], `${action} request`);
-      const note = text(request.note, "note");
-      return { action, ids: taskIds(request.ids, "ids") ?? [], ...(note === undefined ? {} : { note }) };
+      return decodeTaskTerminalRequest(action, value);
     }
   }
 }
@@ -326,46 +399,39 @@ export async function executeTaskMutation(
     signal?: AbortSignal;
   }>,
 ): Promise<TaskMutationExecutionResult> {
-  const { Tasks } = await import("./index.js");
-  const tasks = Tasks.of(input.world);
   const { request, signal } = input;
   const withSignal = signal === undefined ? {} : { signal };
   switch (request.action) {
     case "task.add":
-      return await tasks.add({ ...request.input, actor: input.requester, ...withSignal });
+      return await addTask(input.world, { ...request.input, actor: input.requester, ...withSignal });
     case "task.addDocument":
-      return await tasks.addDocument({ ...request.input, actor: input.requester, ...withSignal });
+      return await addTaskDocument(input.world, { ...request.input, actor: input.requester, ...withSignal });
     case "task.compose":
-      return await tasks.compose({
+      return await composeTasks({
+        world: input.world,
         markdown: request.markdown,
-        namespace: request.namespace,
+        defaultNamespace: request.namespace,
         actor: input.requester,
+        planOnly: false,
         ...withSignal,
       });
     case "task.update":
-      return await tasks.task({ id: request.id }).update({ ...request.input, ...withSignal });
+      return await updateTask(input.world, request.id, { ...request.input, ...withSignal });
     case "task.start":
-      if ("ids" in request) return await tasks.batch({ verb: "start", ids: request.ids, ...withSignal });
-      return await tasks.task({ id: request.id }).start(withSignal);
+      if ("ids" in request) return await batchTasks(input.world, "start", request.ids, signal);
+      return await lifecycleTask(input.world, request.id, "start", signal);
     case "task.stop":
-      return await tasks.task({ id: request.id }).stop(withSignal);
+      return await lifecycleTask(input.world, request.id, "stop", signal);
     case "task.resume":
-      return await tasks.task({ id: request.id }).resume(withSignal);
+      return await lifecycleTask(input.world, request.id, "resume", signal);
     case "task.hold":
-      return await tasks.batch({ verb: "hold", ids: request.ids, ...withSignal });
+      if ("ids" in request) return await batchTasks(input.world, "hold", request.ids, signal);
+      return await lifecycleTask(input.world, request.id, "hold", signal);
     case "task.done":
-      return await tasks.batch({
-        verb: "done",
-        ids: request.ids,
-        ...withSignal,
-        ...(request.note === undefined ? {} : { note: request.note }),
-      });
+      if ("ids" in request) return await batchTasks(input.world, "done", request.ids, signal, request.note);
+      return await lifecycleTask(input.world, request.id, "done", signal, request.note);
     case "task.drop":
-      return await tasks.batch({
-        verb: "drop",
-        ids: request.ids,
-        ...withSignal,
-        ...(request.note === undefined ? {} : { note: request.note }),
-      });
+      if ("ids" in request) return await batchTasks(input.world, "drop", request.ids, signal, request.note);
+      return await lifecycleTask(input.world, request.id, "drop", signal, request.note);
   }
 }

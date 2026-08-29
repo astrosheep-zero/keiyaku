@@ -223,8 +223,8 @@ test("a declaration timeout admits unsatisfied testimony and leaves placement to
 function worktreeSettings(create: readonly string[], destroy: readonly string[] = []): string {
   return JSON.stringify({
     worktree: {
-      create: create.length === 0 ? [] : [{ argv: create, timeoutMs: 30_000 }],
-      destroy: destroy.length === 0 ? [] : [{ argv: destroy, timeoutMs: 30_000 }],
+      create: create.length === 0 ? [] : [{ name: "create", argv: create, timeoutMs: 30_000 }],
+      destroy: destroy.length === 0 ? [] : [{ name: "destroy", argv: destroy, timeoutMs: 30_000 }],
     },
   });
 }

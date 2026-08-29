@@ -12,6 +12,7 @@ an Akuma:
 akuma.call
 akuma.kill
 akuma.tell
+contract.audit
 contract.deliver
 contract.review
 task.add
@@ -61,3 +62,6 @@ authorities for their operation outcomes.
 Every `task.*` member is independently keyed. Permission for one Task mutation
 does not imply another Task action or any Contract action; Task requires no
 Contract association or permission.
+
+`contract.audit`, `contract.deliver`, and `contract.review` are independently
+keyed. Permission for one does not authorize either other Contract action.

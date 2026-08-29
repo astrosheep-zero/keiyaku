@@ -18,7 +18,7 @@ import {
 } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory, type AkuId } from "../src/akuma/identity.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
-import { AkumaBodyRequestError, requestBodyCommand } from "../src/akuma/requests.js";
+import { AkumaBodyRequestError, bodyRequestExecutionContext, requestBodyCommand } from "../src/akuma/requests.js";
 import {
   BodyRequestPump,
   receiptFor,
@@ -139,6 +139,28 @@ async function requestBodyReview(
   });
 }
 
+async function requestBodyAudit(
+  input: Readonly<{
+    directory: string;
+    id?: string;
+    repoRoot: string;
+    contractId: string;
+    includeDirty: boolean;
+    showDiff: boolean;
+    requireBranchesToBeUpToDate: boolean;
+    signal?: AbortSignal;
+  }>,
+) {
+  const { directory, id, signal, ...request } = input;
+  return await requestForwardedContract({
+    directory,
+    ...(id === undefined ? {} : { id }),
+    action: "contract.audit",
+    request: { action: "contract.audit", ...request },
+    ...(signal === undefined ? {} : { signal }),
+  });
+}
+
 async function requestBodyWait(input: Readonly<{ directory: string; id?: string; targets: readonly AkuId[]; completion: "any" | "all"; timeoutMs?: number }>) {
   const command = fleetRequestCommand("akuma.wait");
   return await requestBodyCommand({
@@ -248,7 +270,7 @@ test("Fleet decoder rejects noncanonical identities and incomplete terminal evid
   );
 });
 
-test("an unconfigured command index discards a malformed claim without a Heart fact or receipt", async () => {
+test("an unregistered action reaches a terminal refusal without external cancellation", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-unconfigured-command-")));
   const parent = await born(root, "parent", "25252525", []);
   const pump = await BodyRequestPump.open({
@@ -261,16 +283,20 @@ test("an unconfigured command index discards a malformed claim without a Heart f
     signal: new AbortController().signal,
   });
   try {
-    const transportId = randomUUID();
     const requestId = randomUUID();
-    await writeFile(
-      join(pump.directory, `${transportId}.request.json`),
-      JSON.stringify({ id: requestId, action: "akuma.wait", payload: { targets: [parent.id], completion: "all" } }),
+    await assert.rejects(
+      requestBodyCommand({
+        directory: pump.directory,
+        id: requestId,
+        command: fleetRequestCommand("akuma.wait"),
+        value: { action: "akuma.wait", targets: [parent.id], completion: "all" },
+      }),
+      (error: unknown) =>
+        error instanceof AkumaBodyRequestError &&
+        error.outcome === "refused" &&
+        error.diagnostic === "request action akuma.wait is not registered",
     );
-    await new Promise((resolve) => setTimeout(resolve, 250));
     assert.equal(await readRequest(parent.paths, requestId), null);
-    assert.equal(existsSync(join(pump.directory, `${transportId}.request.json`)), true);
-    assert.equal(existsSync(join(pump.directory, `${transportId}.receipt.json`)), false);
   } finally {
     await pump.close();
     rmSync(root, { recursive: true, force: true });
@@ -770,6 +796,89 @@ test("review claims execute once and Heart retains only the attestation fact ref
   }
 });
 
+test("audit claims use the default permission, retain owner report evidence, and never replay", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-audit-report-")));
+  const parent = await born(root, "parent", "11111111");
+  const contractId = "kei/forwarded-audit";
+  const report = {
+    candidate: { kind: "blocked" as const, refusal: { kind: "contract-missing" } },
+    verification: { kind: "not-run" as const },
+    target: { kind: "not-observed" as const },
+  };
+  let calls = 0;
+  const pump = await openPump(parent, {
+    audit: async (input) => {
+      calls += 1;
+      assert.equal(input.requester, parent.id);
+      assert.deepEqual(
+        {
+          contractId: input.contractId,
+          includeDirty: input.includeDirty,
+          showDiff: input.showDiff,
+          requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
+        },
+        { contractId, includeDirty: true, showDiff: true, requireBranchesToBeUpToDate: true },
+      );
+      return { result: { kind: "refused", refusal: { kind: "contract-missing" } }, auditReport: report };
+    },
+  });
+  try {
+    const id = randomUUID();
+    const outcomes = await Promise.all(
+      [1, 2].map(
+        async () =>
+          await requestBodyAudit({
+            directory: pump.directory,
+            id,
+            repoRoot: root,
+            contractId,
+            includeDirty: true,
+            showDiff: true,
+            requireBranchesToBeUpToDate: true,
+          }),
+      ),
+    );
+    assert.deepEqual(sortByKind(outcomes), [
+      { kind: "audit-report", repoRoot: root, contractId, report },
+      { kind: "returned", result: { kind: "refused", refusal: { kind: "contract-missing" } } },
+    ]);
+    assert.equal(calls, 1);
+    const fact = await readRequest(parent.paths, id);
+    assert.deepEqual(
+      fact?.state === "served" && "serviceJson" in fact ? JSON.parse(fact.serviceJson) : null,
+      { kind: "audit-report", repoRoot: root, contractId, report },
+    );
+
+    await pump.close();
+    const replayPump = await openPump(parent, {
+      audit: async () => {
+        calls += 1;
+        throw new Error("audit must not replay");
+      },
+    });
+    try {
+      assert.deepEqual(
+        await requestBodyAudit({
+          directory: replayPump.directory,
+          id,
+          repoRoot: root,
+          contractId,
+          includeDirty: true,
+          showDiff: true,
+          requireBranchesToBeUpToDate: true,
+        }),
+        { kind: "audit-report", repoRoot: root, contractId, report },
+      );
+      assert.equal(calls, 1);
+    } finally {
+      await replayPump.close();
+    }
+  } finally {
+    await pump.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("contract review and delivery retain separate request permissions", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-review-permission-")));
   const reviewParent = await born(root, "reviewer", "11111111", ["contract.review"]);
@@ -890,6 +999,14 @@ test("same-id task.add and all Task mutations preserve selected World and inputs
         requester: input.requester,
         request: input.request,
       });
+      if ("ids" in input.request) {
+        return {
+          items: input.request.ids.map((id) => ({
+            id,
+            outcome: { kind: "accepted", value: acceptedTaskView(id) },
+          })),
+        };
+      }
       if (input.request.action === "task.add" || input.request.action === "task.addDocument") {
         return {
           kind: "accepted",
@@ -1282,7 +1399,12 @@ test("CLI forwarded deliver preserves its selected Repo and uses parent Settings
       parseArgv(["--repo", contractRepository.path, "deliver", id, "--actor", "child-supplied-actor"]),
       {
         cwd: parentRepository.path,
-        environment: { KEIYAKU_HOME: childHome, KEIYAKU_GIT_PATH: gitPath, PATH: "" },
+        environment: {
+          KEIYAKU_HOME: childHome,
+          KEIYAKU_GIT_PATH: gitPath,
+          PATH: "",
+          [AKUMA_REQUESTS_ENV]: pump.directory,
+        },
       },
     );
     const state = await bound.keiyaku.state();
@@ -1306,7 +1428,12 @@ test("CLI forwarded deliver preserves its selected Repo and uses parent Settings
       ]),
       {
         cwd: parentRepository.path,
-        environment: { KEIYAKU_HOME: childHome, KEIYAKU_GIT_PATH: gitPath, PATH: "" },
+        environment: {
+          KEIYAKU_HOME: childHome,
+          KEIYAKU_GIT_PATH: gitPath,
+          PATH: "",
+          [AKUMA_REQUESTS_ENV]: pump.directory,
+        },
       },
     );
     assert.equal(reviewed.kind, "accepted");
@@ -2021,12 +2148,15 @@ test("Fleet resolves Alias glob and duplicate selectors before publishing a wait
   const previous = process.env[AKUMA_REQUESTS_ENV];
   try {
     process.env[AKUMA_REQUESTS_ENV] = pump.directory;
-    const result = await waitAkuma({
-      path: root,
-      akuma: ["@target", "aku/worker/*", target.id],
-      completion: "all",
-      timeoutMs: 0,
-    });
+    const result = await waitAkuma(
+      {
+        path: root,
+        akuma: ["@target", "aku/worker/*", target.id],
+        completion: "all",
+        timeoutMs: 0,
+      },
+      bodyRequestExecutionContext(pump.directory),
+    );
     assert.deepEqual(received, [target.id]);
     assert.deepEqual(
       result.observations.map((observation) => observation.status.id),

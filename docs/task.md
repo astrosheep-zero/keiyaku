@@ -17,6 +17,14 @@ marker cannot split Task authority. Outside Git, context lookup and writes
 remain at WorldRoot, and a nearer nested marker deliberately starts another
 Task world.
 
+The ordinary `Tasks.of(world)` construction is local. A caller that explicitly
+constructs `bodyRequestExecution({ directory })` may pass that same carrier to
+`Tasks.of(world, { execution })`; its mutable handles retain the direct-parent
+request channel. The Library and CLI use this one construction rather than a
+second Task forwarding path. Routing remains neither a Task operation input nor
+Task authority, Task code never reads provider environment to discover it, and
+parent request service always constructs the local Task executor.
+
 A `TaskId` is `task/<local-id>` at the root or
 `task/<namespace...>/<local-id>` in a nested namespace. Every segment uses the
 registered human-segment grammar. Creation derives the immutable local ID from
@@ -194,7 +202,7 @@ be read. `Tasks.of` is constructed only in the `present` arm. Absence is never
 converted to an accepted empty list or a healthy doctor report.
 
 ```ts
-Tasks.of(world: WorldRoot): Tasks
+Tasks.of(world: WorldRoot, input?: { execution?: LibraryExecution }): Tasks
 tasks.root: string
 tasks.task(input: { id: string }): Task
 tasks.add(input: AddTaskInput): Promise<TaskMutationResult>

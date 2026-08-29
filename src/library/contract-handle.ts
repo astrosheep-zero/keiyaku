@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { documentDiff } from "../markdown/diff.js";
 import { applyAmendDocument } from "../body/amend.js";
 import { decodeArcDocument } from "../body/arc.js";
@@ -62,14 +61,13 @@ import { observeContractsForAdmissionInObservationAt } from "../git/observe.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../git/read-observation.js";
 import { releaseTaskHolder, releaseTaskHolderWithFence, taskHolderObservationSelection } from "../settlement/holder.js";
 import type { TaskId } from "../task/identity.js";
-import { reconcileInput, scopeForRepo, type ReconcileInput } from "./repo.js";
-import { injectedBodyRequests } from "../akuma/requests.js";
+import { reconcileInput, type ReconcileInput } from "./repo.js";
+import { executionChannel, localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
 import { auditContract, type AuditInput } from "./audit.js";
 import { Delivery, deliveryHandle, type DeliveryValue } from "./delivery.js";
 import { type ContinuationReport } from "./continuation.js";
 import { completionInput, completeHolderMutation, completeMutation, type MutationResult } from "./mutation.js";
 import { completeReconcile } from "./reconcile.js";
-import { bindFromCli as bindFromCliImplementation, bindKeiyaku as bindKeiyakuImplementation } from "./contract-bind.js";
 import type {
   AbandonInput,
   AmendInput,
@@ -94,6 +92,7 @@ import type {
 import {
   executeLocalDelivery,
   executeLocalReview,
+  forwardedAuditReceipt,
   forwardedDeliveryReceipt,
   forwardedReviewReceipt,
   requestForwardedContract,
@@ -181,6 +180,7 @@ export class KeiyakuHandle {
   constructor(
     private readonly id: ContractId,
     private readonly scope: RepositoryScope,
+    private readonly execution: ExecutionContext = localExecutionContext(),
   ) {
     KEIYAKU_SEATS.set(this, { id, scope });
   }
@@ -328,9 +328,9 @@ export class KeiyakuHandle {
     const materializeConflict = optionalBoolean(values?.materializeConflict, "materializeConflict") ?? false;
     const actor = actorOption(values?.actor);
     const signal = optionalSignal(values?.signal);
-    const requests = injectedBodyRequests();
+    const channel = executionChannel(this.execution);
     const result =
-      requests === null
+      channel.kind === "local"
         ? await executeLocalDelivery({
             scope: this.scope,
             contractId: this.id,
@@ -345,7 +345,7 @@ export class KeiyakuHandle {
         : requireForwarded(
             forwardedDeliveryReceipt(
               await requestForwardedContract({
-                directory: requests,
+                directory: channel.directory,
                 action: "contract.deliver",
                 request: {
                   action: "contract.deliver",
@@ -371,12 +371,12 @@ export class KeiyakuHandle {
     }
     const summary = optionalNonblank(values.summary, "review summary");
     const actor = actorOption(values.actor);
-    const requests = injectedBodyRequests();
-    if (requests !== null) {
+    const channel = executionChannel(this.execution);
+    if (channel.kind === "body-request") {
       return requireForwarded(
         forwardedReviewReceipt(
           await requestForwardedContract({
-            directory: requests,
+            directory: channel.directory,
             action: "contract.review",
             request: {
               action: "contract.review",
@@ -448,6 +448,34 @@ export class KeiyakuHandle {
   }
 
   async audit(input?: AuditInput): Promise<MutationResult<AuditReport>> {
+    const channel = executionChannel(this.execution);
+    if (channel.kind === "body-request") {
+      const values = input === undefined ? undefined : requireInput(input, "audit input");
+      worktreeHooksOption(values?.hooks);
+      actorOption(values?.actor);
+      const includeDirty = optionalBoolean(values?.includeDirty, "includeDirty") ?? false;
+      const showDiff = optionalBoolean(values?.showDiff, "showDiff") ?? false;
+      const requireBranchesToBeUpToDate =
+        optionalBoolean(values?.requireBranchesToBeUpToDate, "requireBranchesToBeUpToDate") ?? false;
+      const signal = optionalSignal(values?.signal);
+      return requireForwarded(
+        forwardedAuditReceipt(
+          await requestForwardedContract({
+            directory: channel.directory,
+            action: "contract.audit",
+            request: {
+              action: "contract.audit",
+              repoRoot: this.scope.primaryWorktree,
+              contractId: this.id,
+              includeDirty,
+              showDiff,
+              requireBranchesToBeUpToDate,
+            },
+            ...(signal === undefined ? {} : { signal }),
+          }),
+        ),
+      );
+    }
     return auditContract({
       scope: this.scope,
       contractId: this.id,

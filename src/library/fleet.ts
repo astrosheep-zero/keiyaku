@@ -10,7 +10,12 @@ import {
   type KillEvidence,
 } from "../akuma/index.js";
 import { readBudgetedStatus, tellAkumaWithId } from "../akuma/akuma.js";
-import { injectedBodyRequests, requestBodyCommand } from "../akuma/requests.js";
+import {
+  executionChannel,
+  localExecutionContext,
+  requestBodyCommand,
+  type ExecutionContext,
+} from "../akuma/requests.js";
 import { eraseRequestCommand, type ErasedRequestCommand, type RequestCommand } from "../akuma/request-wire.js";
 import { readDispatch } from "../dispatch/index.js";
 import { observeTaskBoard } from "../task/operations.js";
@@ -656,7 +661,10 @@ export async function statusAkuma(input: AkumaAddressInput): Promise<AkumaObserv
   return await observeAkuma(await source(addressed.path).of({ id: addressed.id }).status(), addressed.path, input.repo);
 }
 
-export async function waitAkuma(input: AkumaWaitInput): Promise<AkumaWaitResult> {
+export async function waitAkuma(
+  input: AkumaWaitInput,
+  execution: ExecutionContext = localExecutionContext(),
+): Promise<AkumaWaitResult> {
   const values = requireInput(input, "Keiyaku.wait input");
   for (const key of Object.keys(values)) {
     if (!["path", "akuma", "repo", "completion", "timeoutMs"].includes(key)) {
@@ -673,10 +681,10 @@ export async function waitAkuma(input: AkumaWaitInput): Promise<AkumaWaitResult>
   }
   const selected = completion ?? "all";
   const timeoutMs = timeout(values.timeoutMs);
-  const requests = injectedBodyRequests();
-  if (requests !== null) {
+  const channel = executionChannel(execution);
+  if (channel.kind === "body-request") {
     const response = await requestBodyCommand({
-      directory: requests,
+      directory: channel.directory,
       command: fleetRequestCommand("akuma.wait"),
       value: {
         action: "akuma.wait",
@@ -699,12 +707,15 @@ export async function waitAkuma(input: AkumaWaitInput): Promise<AkumaWaitResult>
   });
 }
 
-export async function killAkuma(input: AkumaSetAddressInput): Promise<AkumaKillResult> {
+export async function killAkuma(
+  input: AkumaSetAddressInput,
+  execution: ExecutionContext = localExecutionContext(),
+): Promise<AkumaKillResult> {
   const addressed = await addressAkumaSet(input);
-  const requests = injectedBodyRequests();
-  if (requests !== null) {
+  const channel = executionChannel(execution);
+  if (channel.kind === "body-request") {
     const response = await requestBodyCommand({
-      directory: requests,
+      directory: channel.directory,
       command: fleetRequestCommand("akuma.kill"),
       value: { action: "akuma.kill", targets: addressed.ids },
     });
@@ -717,7 +728,10 @@ export async function killAkuma(input: AkumaSetAddressInput): Promise<AkumaKillR
   });
 }
 
-export async function tellAkuma(input: AkumaTellInput): Promise<AkumaTellResult> {
+export async function tellAkuma(
+  input: AkumaTellInput,
+  execution: ExecutionContext = localExecutionContext(),
+): Promise<AkumaTellResult> {
   const values = requireInput(input, "Keiyaku.tell input");
   for (const key of Object.keys(values)) {
     if (!["path", "akuma", "body", "repo"].includes(key)) {
@@ -726,10 +740,10 @@ export async function tellAkuma(input: AkumaTellInput): Promise<AkumaTellResult>
   }
   if (typeof values.body !== "string") throw new TypeError("body must be a string");
   const addressed = await addressAkuma(directAddress(values));
-  const requests = injectedBodyRequests();
-  if (requests !== null) {
+  const channel = executionChannel(execution);
+  if (channel.kind === "body-request") {
     const response = await requestBodyCommand({
-      directory: requests,
+      directory: channel.directory,
       command: fleetRequestCommand("akuma.tell"),
       value: { action: "akuma.tell", target: addressed.id, body: values.body },
     });

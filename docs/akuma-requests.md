@@ -16,10 +16,14 @@ Therefore a later body closes old requests by observation only: it never
 re-executes one, and never needs an exactly-once claim.
 
 The body creates a request transport for every provider drive, and the adapter
-injects `AKUMA_REQUESTS` into that drive's command environment. Nested call,
-wait, tell, kill, `contract.deliver`, `contract.review`, and mutable `task.*`
-operations reroute exactly when that variable exists. There is no second public
-verb or generic messaging surface.
+injects `AKUMA_REQUESTS` into that drive's command environment. The provider
+CLI captures that absolute path once as `bodyRequestExecution({ directory })`
+when it constructs its invocation composition; ordinary package construction
+captures local execution. The same explicit carrier composes routed public
+Library and Task facades. Nested call, wait, tell, kill, `contract.audit`,
+`contract.deliver`, `contract.review`, and mutable `task.*` operations use that
+captured channel. They never reread the variable or carry a route in public
+input. There is no second public verb or generic messaging surface.
 
 ### Transport, authority, and judge
 
@@ -126,6 +130,15 @@ TellId. A served kill stores only ordered target/evidence references; lifecycle
 facts remain in each target Heart. Verb results and operation failures travel only
 in the live receipt and never become permission refusals or a generic result store.
 
+`contract.audit` carries the selected Repo's normalized primary-worktree
+coordinate, a complete ContractId, `includeDirty`, `showDiff`, and the effective
+up-to-date policy flag. The direct parent reconstructs the Repo, supplies the
+authenticated requester and Settings-derived hooks/policy, and runs the same
+forced-local audit executor. Its live receipt is the complete ordinary
+`AuditReport`; its service evidence retains that owner-decoded report so a later
+terminal claim can project the same audit result without rerunning Git. Audit is
+independently permission-keyed from delivery and review.
+
 `contract.deliver` carries the selected Repo's normalized primary-worktree
 coordinate, a complete ContractId, optional message, `includeDirty`, and
 `materializeConflict`. The
@@ -184,7 +197,7 @@ nonterminal Task request without reading or changing Task authority.
 After predecessor settlement and before driving a turn, a body sweeps every
 nonterminal request. An admitted request without a reservation becomes
 `voided`: its old caller is gone and no body was spawned. This includes every
-admitted `contract.deliver` or `contract.review`; the sweep does not read
+admitted `contract.audit`, `contract.deliver`, or `contract.review`; the sweep does not read
 Contract state, infer an attempt from actor, time, or head, or replay either
 operation. For a reserved request:
 
@@ -227,7 +240,10 @@ disappearance, never as a verdict. A live caller observes the existing typed
 successor Body using the same logical id and identical payload. Heart admission
 is idempotent for that pair, so the retry converges on its existing fact instead
 of minting another request. A malformed claim is deleted as transport bytes,
-without a receipt or Heart mutation. A request filename is not a caller
+without a receipt or Heart mutation. An envelope-valid claim whose action is
+absent from the serving command index instead receives one terminal `refused`
+receipt naming that unregistered action. It never enters Heart admission or an
+operation owner: no owner codec exists to retain its payload. A request filename is not a caller
 liveness receipt: a pump may already have consumed a valid duplicate claim
 while Heart settlement and receipt projection remain in flight. Post-admission
 executor throw or cancellation with Heart authority intact remains the serving

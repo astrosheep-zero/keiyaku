@@ -5,13 +5,74 @@ import type { WorldRoot } from "./world.js";
 import { executeKillAkuma, executeTellAkuma, executeWaitAkuma } from "./library/fleet.js";
 import { fleetRequestCommands, type FleetRequestPort } from "./library/fleet.js";
 import { requireBranchesToBeUpToDateFrom, worktreeHooksFrom } from "./library/configuration.js";
-import { executeForwardedDeliver, executeForwardedReview } from "./library/contract.js";
-import { contractRequestCommands, type ContractRequestPort } from "./library/contract-operations.js";
+import {
+  contractRequestCommands,
+  executeForwardedAudit,
+  executeForwardedDeliver,
+  executeForwardedReview,
+  type ContractRequestPort,
+} from "./library/contract-operations.js";
 import { Repo } from "./library/repo.js";
 import { settings } from "./settings.js";
 import { executeTaskMutation, taskMutationRequestCommands, type TaskMutationRequestPort } from "./task/mutation.js";
 
 type BodyProcessConfiguration = Readonly<{ home?: string; gitPath?: string }>;
+
+async function contractDependencies(repoRoot: string, processConfiguration: BodyProcessConfiguration) {
+  return await Promise.all([
+    Repo.at({
+      path: repoRoot,
+      ...(processConfiguration.gitPath === undefined ? {} : { gitPath: processConfiguration.gitPath }),
+    }),
+    settings({
+      root: repoRoot as WorldRoot,
+      ...(processConfiguration.home === undefined ? {} : { home: processConfiguration.home }),
+    }),
+  ]);
+}
+
+function contractUpstream(processConfiguration: BodyProcessConfiguration): ContractRequestPort {
+  return {
+    audit: async (input) => {
+      const [repo, configuration] = await contractDependencies(input.repoRoot, processConfiguration);
+      return await executeForwardedAudit({
+        repo,
+        contractId: input.contractId,
+        requester: input.requester,
+        includeDirty: input.includeDirty,
+        showDiff: input.showDiff,
+        requireBranchesToBeUpToDate: requireBranchesToBeUpToDateFrom({ settings: configuration }),
+        hooks: worktreeHooksFrom({ settings: configuration }),
+        signal: input.signal,
+      });
+    },
+    deliver: async (input) => {
+      const [repo, configuration] = await contractDependencies(input.repoRoot, processConfiguration);
+      return await executeForwardedDeliver({
+        repo,
+        contractId: input.contractId,
+        requester: input.requester,
+        ...(input.message === undefined ? {} : { message: input.message }),
+        includeDirty: input.includeDirty,
+        materializeConflict: input.materializeConflict,
+        requireBranchesToBeUpToDate: requireBranchesToBeUpToDateFrom({ settings: configuration }),
+        hooks: worktreeHooksFrom({ settings: configuration }),
+        signal: input.signal,
+      });
+    },
+    review: async (input) => {
+      const [repo, configuration] = await contractDependencies(input.repoRoot, processConfiguration);
+      return await executeForwardedReview({
+        repo,
+        contractId: input.contractId,
+        requester: input.requester,
+        verdict: input.verdict,
+        ...(input.summary === undefined ? {} : { summary: input.summary }),
+        hooks: worktreeHooksFrom({ settings: configuration }),
+      });
+    },
+  };
+}
 
 export function upstreamFor(
   launch: BodyLaunch,
@@ -19,6 +80,7 @@ export function upstreamFor(
 ): FleetRequestPort & ContractRequestPort & TaskMutationRequestPort {
   const path = worldRootForAkumaPaths(launch.paths) as WorldRoot;
   return {
+    ...contractUpstream(processConfiguration),
     wait: async (input) =>
       await executeWaitAkuma({
         path,
@@ -39,49 +101,6 @@ export function upstreamFor(
     kill: async (input) => {
       const result = await executeKillAkuma({ path, ids: input.targets, signal: input.signal });
       return result;
-    },
-    deliver: async (input) => {
-      const [repo, configuration] = await Promise.all([
-        Repo.at({
-          path: input.repoRoot,
-          ...(processConfiguration.gitPath === undefined ? {} : { gitPath: processConfiguration.gitPath }),
-        }),
-        settings({
-          root: input.repoRoot as WorldRoot,
-          ...(processConfiguration.home === undefined ? {} : { home: processConfiguration.home }),
-        }),
-      ]);
-      return await executeForwardedDeliver({
-        repo,
-        contractId: input.contractId,
-        requester: input.requester,
-        ...(input.message === undefined ? {} : { message: input.message }),
-        includeDirty: input.includeDirty,
-        materializeConflict: input.materializeConflict,
-        requireBranchesToBeUpToDate: requireBranchesToBeUpToDateFrom({ settings: configuration }),
-        hooks: worktreeHooksFrom({ settings: configuration }),
-        signal: input.signal,
-      });
-    },
-    review: async (input) => {
-      const [repo, configuration] = await Promise.all([
-        Repo.at({
-          path: input.repoRoot,
-          ...(processConfiguration.gitPath === undefined ? {} : { gitPath: processConfiguration.gitPath }),
-        }),
-        settings({
-          root: input.repoRoot as WorldRoot,
-          ...(processConfiguration.home === undefined ? {} : { home: processConfiguration.home }),
-        }),
-      ]);
-      return await executeForwardedReview({
-        repo,
-        contractId: input.contractId,
-        requester: input.requester,
-        verdict: input.verdict,
-        ...(input.summary === undefined ? {} : { summary: input.summary }),
-        hooks: worktreeHooksFrom({ settings: configuration }),
-      });
     },
     task: async (input) =>
       await executeTaskMutation({

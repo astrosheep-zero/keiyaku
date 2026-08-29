@@ -24,6 +24,7 @@ import type { ActivitySnapshot } from "./projection.js";
 import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
 import type { AllowedAction } from "./allowed.js";
+import type { ExecutionContext } from "./requests.js";
 
 export const POLL_MS = 100;
 
@@ -220,7 +221,7 @@ export {
   type BudgetedStatusObservation,
 } from "./akuma-observe.js";
 
-export type AkumaConfiguration = Readonly<{ home?: string; settings?: Settings }>;
+export type AkumaConfiguration = Readonly<{ home?: string; settings?: Settings; execution?: ExecutionContext }>;
 
 export { AkumaHandle, akumaCallExecution, type LastAnswer } from "./akuma-handle.js";
 export { Akuma, callAkumaWithContext } from "./akuma-product.js";

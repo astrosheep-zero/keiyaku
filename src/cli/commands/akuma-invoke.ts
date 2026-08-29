@@ -15,6 +15,8 @@ import type { Settings } from "../../settings.js";
 import type { WorldRoot } from "../../world.js";
 import type { AkumaPromptSource, InvokedAkumaCommand } from "./akuma.js";
 import { beginCall, finishCall } from "../../library/akuma-creation.js";
+import { killAkuma, tellAkuma, waitAkuma } from "../../library/fleet.js";
+import { localExecutionContext, type ExecutionContext } from "../../akuma/requests.js";
 import { recognizeAndListen } from "../square-edge.js";
 
 function withRollbackDiagnostic(primary: unknown, rollback: unknown): Error {
@@ -84,6 +86,7 @@ type InvokeInput = Readonly<{
   environment: NodeJS.ProcessEnv;
   readStdin(): Promise<string>;
   finishCall?: typeof finishCall;
+  execution?: ExecutionContext;
 }>;
 
 function inputAlias(selector: string): string | undefined {
@@ -102,13 +105,16 @@ async function invokeWait(
   return {
     kind: "akuma",
     action: "wait",
-    result: await Keiyaku.wait({
-      path: input.path,
-      akuma: command.akuma,
-      ...(input.repo === undefined ? {} : { repo: input.repo }),
-      ...(command.completion === undefined ? {} : { completion: command.completion }),
-      ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
-    }),
+    result: await waitAkuma(
+      {
+        path: input.path,
+        akuma: command.akuma,
+        ...(input.repo === undefined ? {} : { repo: input.repo }),
+        ...(command.completion === undefined ? {} : { completion: command.completion }),
+        ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
+      },
+      input.execution ?? localExecutionContext(),
+    ),
     ...(alias === undefined ? {} : { alias }),
   };
 }
@@ -135,12 +141,15 @@ async function invokeTell(
       ...(alias === undefined ? {} : { alias }),
     };
   }
-  const result = await Keiyaku.tell({
-    path: input.path,
-    akuma: command.akuma,
-    body,
-    ...(input.repo === undefined ? {} : { repo: input.repo }),
-  });
+  const result = await tellAkuma(
+    {
+      path: input.path,
+      akuma: command.akuma,
+      body,
+      ...(input.repo === undefined ? {} : { repo: input.repo }),
+    },
+    input.execution ?? localExecutionContext(),
+  );
   const alias = inputAlias(command.akuma);
   return { kind: "akuma", action: "tell", mode: "ordinary", result, body, ...(alias === undefined ? {} : { alias }) };
 }
@@ -199,11 +208,14 @@ async function invokeKill(
   return {
     kind: "akuma",
     action: "kill",
-    result: await Keiyaku.kill({
-      path: input.path,
-      akuma: command.akuma,
-      ...(input.repo === undefined ? {} : { repo: input.repo }),
-    }),
+    result: await killAkuma(
+      {
+        path: input.path,
+        akuma: command.akuma,
+        ...(input.repo === undefined ? {} : { repo: input.repo }),
+      },
+      input.execution ?? localExecutionContext(),
+    ),
     ...(alias === undefined ? {} : { alias }),
   };
 }
@@ -212,20 +224,23 @@ export async function invokeAkuma(command: InvokedAkumaCommand, input: InvokeInp
   switch (command.command) {
     case "call": {
       const body = await promptBody(command, input);
-      const born = await beginCall({
-        path: input.path,
-        archetype: command.archetype,
-        body,
-        ...(input.home === undefined ? {} : { home: input.home }),
-        ...(input.settings === undefined ? {} : { settings: input.settings }),
-        ...(input.statedCwd === undefined ? {} : { cwd: input.statedCwd }),
-        mode: command.mode,
-        ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
-        ...(command.readonly === undefined ? {} : { readonly: command.readonly }),
-        ...(input.contract === undefined ? {} : { contract: input.contract }),
-        ...(command.alias === undefined ? {} : { alias: command.alias }),
-        ...(command.allowed === undefined ? {} : { allowed: command.allowed }),
-      });
+      const born = await beginCall(
+        {
+          path: input.path,
+          archetype: command.archetype,
+          body,
+          ...(input.home === undefined ? {} : { home: input.home }),
+          ...(input.settings === undefined ? {} : { settings: input.settings }),
+          ...(input.statedCwd === undefined ? {} : { cwd: input.statedCwd }),
+          mode: command.mode,
+          ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
+          ...(command.readonly === undefined ? {} : { readonly: command.readonly }),
+          ...(input.contract === undefined ? {} : { contract: input.contract }),
+          ...(command.alias === undefined ? {} : { alias: command.alias }),
+          ...(command.allowed === undefined ? {} : { allowed: command.allowed }),
+        },
+        input.execution ?? localExecutionContext(),
+      );
       const listener =
         born.born.kind === "born"
           ? await recognizeAndListen(input.path, input.environment, born.born.allocated)

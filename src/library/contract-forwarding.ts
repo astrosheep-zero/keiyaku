@@ -2,8 +2,10 @@ import { decodeContractDocument } from "../body/decode.js";
 import { contractId, type ContractId, type ContractState } from "../core/facts/types.js";
 import { withGitDecodeChannel, type GitDecodeChannel } from "../git/read-observation.js";
 import { deliverOperation, type IntegrationConflictMaterialized } from "../protocol/deliver.js";
-import { withScopeAbortSignal, type RepositoryScope } from "../protocol/operations.js";
+import type { RepositoryScope } from "../protocol/operations.js";
 import { reviewOperation } from "../protocol/review.js";
+import { auditContract, type AuditInput } from "./audit.js";
+import type { AuditReport } from "../protocol/audit.js";
 import { continueAcceptedCompletion } from "./continuation.js";
 import type { WorktreeHooks } from "./configuration.js";
 import type { DeliveryValue } from "./delivery.js";
@@ -12,13 +14,21 @@ import { completionInput, completeMutation, type MutationResult } from "./mutati
 import { forwardedMutationFailure, KeiyakuRefused, KeiyakuRetry, requireAccepted } from "./refusal.js";
 import {
   isForwardedDeliveryReceipt,
+  isForwardedAuditReceipt,
   isForwardedReviewReceipt,
+  type ForwardedAuditReceipt,
   type ForwardedDeliveryReceipt,
   type ForwardedReviewReceipt,
   type Review,
 } from "./contract-forwarding-result.js";
-export { isForwardedDeliveryReceipt, isForwardedReviewReceipt } from "./contract-forwarding-result.js";
+export {
+  isAuditReport,
+  isForwardedAuditReceipt,
+  isForwardedDeliveryReceipt,
+  isForwardedReviewReceipt,
+} from "./contract-forwarding-result.js";
 export type {
+  ForwardedAuditReceipt,
   ForwardedDeliveryReceipt,
   ForwardedMutationReceipt,
   ForwardedReviewReceipt,
@@ -73,7 +83,7 @@ function operationContext(scope: RepositoryScope, channel: GitDecodeChannel, con
 export async function executeLocalDelivery(
   input: DeliveryExecutionInput,
 ): Promise<MutationResult<DeliveryValue> | IntegrationConflictMaterialized> {
-  const scope = withScopeAbortSignal(input.scope, input.signal);
+  const scope = input.scope;
   return withGitDecodeChannel(scope, async (channel) => {
     const operation = operationContext(scope, channel, input.contractId);
     const outcome = await deliverOperation({
@@ -153,13 +163,25 @@ export function forwardedReviewReceipt(outcome: ForwardedOutcome): ForwardedRevi
   return outcome.result;
 }
 
+export function forwardedAuditReceipt(outcome: ForwardedOutcome): ForwardedAuditReceipt {
+  const failure = upstreamFailure(outcome, "contract.audit");
+  if (failure !== null) throw failure;
+  if (!isForwardedAuditReceipt(outcome.result)) throw transportIntegrityError(outcome, "contract.audit");
+  return outcome.result;
+}
+
 export function requireForwarded(
   receipt: ForwardedDeliveryReceipt,
 ): MutationResult<DeliveryValue> | IntegrationConflictMaterialized;
 export function requireForwarded(receipt: ForwardedReviewReceipt): MutationResult<Review>;
+export function requireForwarded(receipt: ForwardedAuditReceipt): MutationResult<AuditReport>;
 export function requireForwarded(
-  receipt: ForwardedDeliveryReceipt | ForwardedReviewReceipt,
-): MutationResult<DeliveryValue> | MutationResult<Review> | IntegrationConflictMaterialized {
+  receipt: ForwardedDeliveryReceipt | ForwardedReviewReceipt | ForwardedAuditReceipt,
+):
+  | MutationResult<DeliveryValue>
+  | MutationResult<Review>
+  | MutationResult<AuditReport>
+  | IntegrationConflictMaterialized {
   if (receipt.kind === "refused") throw new KeiyakuRefused(receipt.refusal);
   if (receipt.kind === "retry") throw new KeiyakuRetry(receipt.reason);
   return receipt.kind === "accepted" ? receipt.result : receipt;
@@ -230,6 +252,39 @@ export async function executeForwardedReview(
     const review = result.facts.find((fact) => fact.kind === "attestation");
     if (review === undefined) throw new Error("accepted review is missing its journal fact");
     return { result: { kind: "accepted", result }, reviewFactId: review.entry };
+  } catch (error) {
+    return forwardedMutationFailure(error);
+  }
+}
+
+export async function executeForwardedAudit(
+  input: Readonly<{
+    repo: Repo;
+    contractId: string;
+    requester: string;
+    includeDirty: boolean;
+    showDiff: boolean;
+    requireBranchesToBeUpToDate: boolean;
+    hooks: AuditInput["hooks"];
+    signal?: AbortSignal;
+  }>,
+): Promise<Readonly<{ result: ForwardedAuditReceipt; auditReport?: AuditReport }>> {
+  const id = contractId(input.contractId);
+  const actor = actorOption(input.requester).actor;
+  try {
+    const result = await auditContract({
+      scope: scopeForRepo(input.repo),
+      contractId: id,
+      input: {
+        ...(actor === undefined ? {} : { actor }),
+        includeDirty: input.includeDirty,
+        showDiff: input.showDiff,
+        requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
+        ...(input.hooks === undefined ? {} : { hooks: input.hooks }),
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+      },
+    });
+    return { result: { kind: "accepted", result }, auditReport: result.value };
   } catch (error) {
     return forwardedMutationFailure(error);
   }

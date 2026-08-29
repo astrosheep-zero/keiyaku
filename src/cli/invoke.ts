@@ -17,8 +17,17 @@ import type { SelectedContract } from "./selectors.js";
 import type { ActorId, ContractId } from "../index.js";
 import type { KanshiRegionSelection } from "../kanshi/index.js";
 import type { Repo } from "../library/repo.js";
+import type { WorktreeHooks } from "../library/configuration.js";
 import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
+import { AKUMA_REQUESTS_ENV } from "../akuma/provider.js";
+import {
+  bodyRequestExecution,
+  executionChannel,
+  localExecutionContext,
+  type ExecutionContext,
+  type LibraryExecution,
+} from "../akuma/requests.js";
 
 export type { AcceptedFact, InvocationResult, Lag } from "./result.js";
 
@@ -99,6 +108,27 @@ async function settingsAt(root: WorldRoot | undefined, home?: string): Promise<S
   return settings({ ...(root === undefined ? {} : { root }), ...(home === undefined ? {} : { home }) });
 }
 
+function executionForEnvironment(environment: NodeJS.ProcessEnv): LibraryExecution {
+  return environment[AKUMA_REQUESTS_ENV] === undefined
+    ? localExecutionContext()
+    : bodyRequestExecution({ directory: environment[AKUMA_REQUESTS_ENV] });
+}
+
+async function contractSettings(
+  command: ParsedCommand,
+  execution: ExecutionContext,
+  world: WorldRoot | null,
+  home?: string,
+): Promise<Readonly<{ configuration?: Settings; hooks?: WorktreeHooks }>> {
+  const forwarded =
+    executionChannel(execution).kind === "body-request" &&
+    (command.command === "audit" || command.command === "deliver" || command.command === "review");
+  if (forwarded) return {};
+  const configuration = await settingsAt(world ?? undefined, home);
+  const { worktreeHooksFrom, SettingsError } = await import("../library/configuration.js");
+  return { configuration, hooks: consumeSettings(() => worktreeHooksFrom({ settings: configuration }), SettingsError) };
+}
+
 function consumeSettings<T>(run: () => T, ErrorType: new (message: string) => Error): T {
   try {
     return run();
@@ -116,6 +146,17 @@ function actorFromEdge(actor: string | undefined, environment: NodeJS.ProcessEnv
     throw new CliUsageError(error instanceof Error ? error.message : String(error));
   }
   return resolved;
+}
+
+function taskActor(
+  command: Extract<ParsedCommand, { command: "task" }>,
+  runtime: InvokeRuntime,
+  environment: NodeJS.ProcessEnv,
+) {
+  return (
+    runtime.actor ??
+    actorFromEdge(typeof command.flags.actor === "string" ? command.flags.actor : undefined, environment)
+  );
 }
 
 function gitPathFromEdge(environment: NodeJS.ProcessEnv): string | undefined {
@@ -142,6 +183,7 @@ type AkumaEdgeInput = Readonly<{
   repo?: Repo;
   home?: string;
   edge: InvocationEdge;
+  execution: ExecutionContext;
 }>;
 
 async function invokeAkumaFromEdge(parsed: InvokedAkumaCommand, input: AkumaEdgeInput) {
@@ -156,7 +198,7 @@ async function invokeAkumaFromEdge(parsed: InvokedAkumaCommand, input: AkumaEdge
     const { invokeAkuma } = await import("./commands/akuma-invoke.js");
     const contract =
       parsed.command === "call" && parsed.contract !== undefined
-        ? (await import("./selectors.js")).contractFromInput(repo as Repo, parsed.contract).contract
+        ? (await import("./selectors.js")).contractFromInput(repo as Repo, parsed.contract, input.execution).contract
         : undefined;
     return await invokeAkuma(parsed, {
       path,
@@ -166,6 +208,7 @@ async function invokeAkumaFromEdge(parsed: InvokedAkumaCommand, input: AkumaEdge
       ...(contract === undefined ? (repo === undefined ? {} : { repo }) : { contract }),
       environment: edge.environment,
       readStdin: edge.readStdin,
+      execution: input.execution,
     });
   } catch (error) {
     const { AkumaWorldScopeError } = await import("../library/address.js");
@@ -336,25 +379,6 @@ async function invokeContractHistory(repo: Repo | undefined, contract: string): 
   }
 }
 
-async function invokeForwardedContractMutation(
-  parsed: Extract<ParsedCommand, { command: "deliver" | "review" }>,
-  repo: Repo,
-  edge: InvocationEdge,
-  scope: string,
-  establishWorld: () => Promise<WorldRoot>,
-): Promise<InvocationResult> {
-  const { EMPTY_WORKTREE_HOOKS } = await import("../library/configuration.js");
-  return invokeContractMutation({
-    parsed,
-    repo,
-    edge,
-    scope,
-    hooks: EMPTY_WORKTREE_HOOKS,
-    establishWorld,
-    forwarded: true,
-  });
-}
-
 async function resolveInvocationCoordinates(invocation: NonInstallExecution, runtime: InvokeRuntime) {
   const environment = runtime.environment ?? process.env,
     gitPath = gitPathFromEdge(environment);
@@ -374,6 +398,7 @@ async function invokeParsed(
   runtime: InvokeRuntime,
 ): Promise<InvocationResult | TaskInvocationResult | AkumaInvocationResult | SettingsInvocationResult> {
   const environment = runtime.environment ?? process.env;
+  const execution = executionForEnvironment(environment);
   const coordinates = await resolveInvocationCoordinates(invocation, runtime);
   const { cwd, cwdSource, repo, world, candidateWorld, establishWorld, taskContext } = coordinates;
   const edge: InvocationEdge = { environment, readStdin: runtime.readStdin ?? readStdin };
@@ -383,9 +408,7 @@ async function invokeParsed(
   if (parsed.command === "settings") return { kind: "settings", value: await settingsAt(world ?? undefined, home) };
   if (parsed.command === "nuke") return await (await import("./commands/nuke.js")).invokeNuke(parsed, world);
   if (parsed.command === "task") {
-    const actor =
-      runtime.actor ??
-      actorFromEdge(typeof parsed.flags.actor === "string" ? parsed.flags.actor : undefined, edge.environment);
+    const actor = taskActor(parsed, runtime, edge.environment);
     return await (
       await import("./commands/task-invoke.js")
     ).invokeTaskFromEdge({
@@ -396,6 +419,7 @@ async function invokeParsed(
       establish: coordinates.establishWorld,
       readStdin: edge.readStdin,
       actor,
+      execution,
     });
   }
   if (parsed.command === "history" && "contract" in parsed) return await invokeContractHistory(repo, parsed.contract);
@@ -409,6 +433,7 @@ async function invokeParsed(
       ...(repo === undefined ? {} : { repo }),
       ...(home === undefined ? {} : { home }),
       edge,
+      execution,
     });
   }
   if (parsed.command === "ls") return await invokeCatalog(parsed, world, repo, home);
@@ -416,15 +441,7 @@ async function invokeParsed(
   if (repo === undefined) throw new Error(`${parsed.command} requires a resolved Repo`);
   if (parsed.command === "region") return invokeRegion(parsed, world, repo);
   const scope = cwd;
-  if (
-    (parsed.command === "deliver" || parsed.command === "review") &&
-    (await import("../akuma/requests.js")).injectedBodyRequests() !== null
-  ) {
-    return invokeForwardedContractMutation(parsed, repo, edge, scope, establishWorld);
-  }
-  const configuration = await settingsAt(world ?? undefined, home);
-  const { worktreeHooksFrom, SettingsError } = await import("../library/configuration.js");
-  const hooks = consumeSettings(() => worktreeHooksFrom({ settings: configuration }), SettingsError);
+  const { configuration, hooks } = await contractSettings(parsed, execution, world, home);
 
   if (parsed.command === "show") {
     const selected = await selectContract(repo, parsed.contract, scope);
@@ -435,17 +452,26 @@ async function invokeParsed(
       return {
         kind: "observation",
         command: "reconcile",
-        report: await repo.reconcile({ hooks, retryHooks: parsed.retryHooks }),
+        report: await repo.reconcile({ ...(hooks === undefined ? {} : { hooks }), retryHooks: parsed.retryHooks }),
       };
     }
     const { contract } = await selectContract(repo, parsed.contract, scope);
     return {
       kind: "observation",
       command: "reconcile",
-      ...(await contract.reconcile({ hooks, retryHooks: parsed.retryHooks })),
+      ...(await contract.reconcile({ ...(hooks === undefined ? {} : { hooks }), retryHooks: parsed.retryHooks })),
     };
   }
-  return invokeContractMutation({ parsed, repo, edge, scope, configuration, hooks, establishWorld });
+  return invokeContractMutation({
+    parsed,
+    repo,
+    edge,
+    scope,
+    ...(configuration === undefined ? {} : { configuration }),
+    ...(hooks === undefined ? {} : { hooks }),
+    establishWorld,
+    execution,
+  });
 }
 
 function withResolvedTaskActor(command: ParsedCommand, runtime: InvokeRuntime): InvokeRuntime {

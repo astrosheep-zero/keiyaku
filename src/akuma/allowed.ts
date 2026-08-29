@@ -4,6 +4,7 @@ export const ALLOWED_ACTIONS = Object.freeze([
   "akuma.call",
   "akuma.kill",
   "akuma.tell",
+  "contract.audit",
   "contract.deliver",
   "contract.review",
   ...TASK_MUTATION_ACTIONS,

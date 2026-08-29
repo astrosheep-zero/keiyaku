@@ -1,23 +1,6 @@
-// @ts-nocheck
 // Contract's static facade deliberately depends only on construction and observation.
-import { applyAmendDocument } from "../body/amend.js";
-import { decodeArcDocument } from "../body/arc.js";
-import { decodeContractDocument } from "../body/decode.js";
-import { renderContractGuidance } from "../contract-guidance.js";
-import {
-  actorOption,
-  contractTerms,
-  documentDerivation,
-  normalizedGates,
-  normalizedList,
-  optionalBoolean,
-  optionalNonblank,
-  optionalSignal,
-  requireInput,
-  requireMarkdown,
-} from "./input.js";
-import { observeChangedRegion, type RegionOverlap } from "./region.js";
-import { worktreeHooksOption } from "./configuration.js";
+import { requireInput } from "./input.js";
+import type { RegionOverlap } from "./region.js";
 import {
   contractId,
   type ChangeId,
@@ -30,11 +13,7 @@ export { AuthorityCorruptionError } from "../core/facts/errors.js";
 import {
   contractObservationOperation,
   contractsOperation,
-  deliveryDiffOperation,
-  deliveryOperation,
-  stateOperation,
   type PlacementStop,
-  type RepositoryScope,
   type VerificationStop,
   type DeliveryPreparationRefusal,
 } from "../protocol/operations.js";
@@ -51,24 +30,16 @@ import type {
   ContractDependent,
   ContractWorkspaceObservation,
 } from "../protocol/read/status.js";
-import { abandonOperation } from "../protocol/abandon.js";
-import { amendOperation } from "../protocol/amend.js";
-import { arcOperation } from "../protocol/arc.js";
 import type { AuditReport } from "../protocol/audit.js";
 import type { IntegrationConflictMaterialized, VerificationReuse } from "../protocol/deliver.js";
-import { readDispatchesAt } from "../dispatch/index.js";
-import { mintSnapshotId } from "../git/identity.js";
-import { observeContractsForAdmissionInObservationAt } from "../git/observe.js";
-import { withGitDecodeChannel, withGitReadObservation } from "../git/read-observation.js";
-import { releaseTaskHolder, releaseTaskHolderWithFence, taskHolderObservationSelection } from "../settlement/holder.js";
+import { withGitDecodeChannel } from "../git/read-observation.js";
 import type { TaskId } from "../task/identity.js";
-import { reconcileInput, scopeForRepo, type ReconcileInput } from "./repo.js";
-import { injectedBodyRequests } from "../akuma/requests.js";
-import { auditContract, type AuditInput } from "./audit.js";
-import { Delivery, deliveryHandle, type DeliveryValue } from "./delivery.js";
+import { scopeForRepo } from "./repo.js";
+import { localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
+import type { AuditInput } from "./audit.js";
+import { Delivery } from "./delivery.js";
 import { type ContinuationReport } from "./continuation.js";
-import { completionInput, completeHolderMutation, completeMutation, type MutationResult } from "./mutation.js";
-import { completeReconcile } from "./reconcile.js";
+import type { MutationResult } from "./mutation.js";
 import { bindFromCli as bindFromCliImplementation, bindKeiyaku as bindKeiyakuImplementation } from "./contract-bind.js";
 export { KeiyakuHandle } from "./contract-handle.js";
 import { KeiyakuHandle } from "./contract-handle.js";
@@ -93,26 +64,13 @@ import type {
   Lag,
   TopologyEffect,
 } from "./contract-types.js";
-import {
-  executeLocalDelivery,
-  executeLocalReview,
-  forwardedDeliveryReceipt,
-  forwardedReviewReceipt,
-  requestForwardedContract,
-  requireForwarded,
-  type AttestationVerdict as OperationAttestationVerdict,
-  type Review as OperationReview,
+import type {
+  AttestationVerdict as OperationAttestationVerdict,
+  Review as OperationReview,
 } from "./contract-operations.js";
-import {
-  KeiyakuRefused,
-  KeiyakuRetry,
-  requireAccepted,
-  type KeiyakuRefusal,
-  type KeiyakuRetryReason,
-} from "./refusal.js";
+import { KeiyakuRetry, type KeiyakuRefusal, type KeiyakuRetryReason } from "./refusal.js";
 export { KeiyakuRefused } from "./refusal.js";
 export { KeiyakuRetry, type KeiyakuRefusal, type KeiyakuRetryReason };
-export { executeForwardedDeliver, executeForwardedReview } from "./contract-operations.js";
 export { gatesFrom, requireBranchesToBeUpToDateFrom, SettingsError } from "./configuration.js";
 export type {
   Gate,
@@ -181,11 +139,11 @@ export type { SettlementAction, SettlementLag, SettlementReport } from "../settl
 
 export type Keiyaku = KeiyakuHandle;
 
-export function keiyakuOf(input: KeiyakuOfInput): Keiyaku {
+export function keiyakuOf(input: KeiyakuOfInput, execution: ExecutionContext = localExecutionContext()): Keiyaku {
   const values = requireInput(input, "Keiyaku.of input");
   const scope = scopeForRepo(values.repo);
   if (typeof values.id !== "string") throw new TypeError("contract ID must be a string");
-  return new KeiyakuHandle(contractId(values.id), scope);
+  return new KeiyakuHandle(contractId(values.id), scope, execution);
 }
 
 export async function listKeiyaku(input: ContractListInput): Promise<ContractBoard> {
@@ -211,11 +169,17 @@ export async function observeKeiyaku(input: ContractObservationInput): Promise<C
   return withGitDecodeChannel(scope, (channel) => contractObservationOperation({ scope, channel, contractId: id }));
 }
 
-export async function bindKeiyaku(input: BindInput): Promise<BindResult> {
-  return bindKeiyakuImplementation(input, (id, scope) => new KeiyakuHandle(id, scope));
+export async function bindKeiyaku(
+  input: BindInput,
+  execution: ExecutionContext = localExecutionContext(),
+): Promise<BindResult> {
+  return bindKeiyakuImplementation(input, (id, scope) => new KeiyakuHandle(id, scope, execution));
 }
 
 /** Internal CLI composition; not exported from the package root. */
-export async function bindFromCli(input: BindInput): Promise<BindResult> {
-  return bindFromCliImplementation(input, (id, scope) => new KeiyakuHandle(id, scope));
+export async function bindFromCli(
+  input: BindInput,
+  execution: ExecutionContext = localExecutionContext(),
+): Promise<BindResult> {
+  return bindFromCliImplementation(input, (id, scope) => new KeiyakuHandle(id, scope, execution));
 }

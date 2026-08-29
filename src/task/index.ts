@@ -1,4 +1,12 @@
 import type { WorldRoot } from "../world.js";
+import {
+  executionChannel,
+  libraryExecution,
+  localExecutionContext,
+  type ExecutionContext,
+  type LibraryExecution,
+} from "../akuma/requests.js";
+import { requestForwardedTask, type TaskMutationRequest, type TaskMutationResultForRequest } from "./mutation.js";
 export type { WorldRoot } from "../world.js";
 import {
   buildTree,
@@ -112,12 +120,28 @@ export type {
   TaskQuerySort,
   TaskRelationPredicateField,
 };
+export type { LibraryExecution } from "../akuma/requests.js";
 export { TaskAuthorityCorruptionError, TASK_RELATION_PREDICATE_FIELDS };
+
+function forwardTask<Request extends TaskMutationRequest>(
+  directory: string,
+  world: WorldRoot,
+  request: Request,
+  signal?: AbortSignal,
+): Promise<TaskMutationResultForRequest<Request>> {
+  return requestForwardedTask({
+    directory,
+    world,
+    request,
+    ...(signal === undefined ? {} : { signal }),
+  });
+}
 
 class TaskHandle {
   constructor(
     readonly id: TaskId,
     private readonly world: WorldRoot,
+    private readonly execution: ExecutionContext,
   ) {}
   async read(): Promise<TaskDetail | null> {
     const board = (await readBoard(this.world)).board;
@@ -133,7 +157,13 @@ class TaskHandle {
       : { kind: "accepted", value: node };
   }
   update(input: UpdateTaskInput): Promise<TaskUpdateResult> {
-    return updateTask(this.world, this.id, updateInput(input));
+    const values = updateInput(input);
+    const { signal: abort, ...request } = values;
+    const channel = executionChannel(this.execution);
+    if (channel.kind === "body-request") {
+      return forwardTask(channel.directory, this.world, { action: "task.update", id: this.id, input: request }, abort);
+    }
+    return updateTask(this.world, this.id, values);
   }
   private lifecycle(
     verb: "start" | "stop" | "hold" | "resume" | "done" | "drop",
@@ -142,7 +172,35 @@ class TaskHandle {
     const value = record(input ?? {}, `${verb} input`);
     closed(value, verb === "drop" || verb === "done" ? ["note", "signal"] : ["signal"], `${verb} input`);
     const note = verb === "drop" || verb === "done" ? text(value.note, "note") : undefined;
-    return lifecycleTask(this.world, this.id, verb, signal(value.signal), note);
+    const abort = signal(value.signal);
+    const channel = executionChannel(this.execution);
+    if (channel.kind === "body-request") {
+      switch (verb) {
+        case "start":
+          return forwardTask(channel.directory, this.world, { action: "task.start", id: this.id }, abort);
+        case "stop":
+          return forwardTask(channel.directory, this.world, { action: "task.stop", id: this.id }, abort);
+        case "hold":
+          return forwardTask(channel.directory, this.world, { action: "task.hold", id: this.id }, abort);
+        case "resume":
+          return forwardTask(channel.directory, this.world, { action: "task.resume", id: this.id }, abort);
+        case "done":
+          return forwardTask(
+            channel.directory,
+            this.world,
+            { action: "task.done", id: this.id, ...(note === undefined ? {} : { note }) },
+            abort,
+          );
+        case "drop":
+          return forwardTask(
+            channel.directory,
+            this.world,
+            { action: "task.drop", id: this.id, ...(note === undefined ? {} : { note }) },
+            abort,
+          );
+      }
+    }
+    return lifecycleTask(this.world, this.id, verb, abort, note);
   }
   start(input?: { signal?: AbortSignal }): Promise<TaskMutationResult> {
     return this.lifecycle("start", input);
@@ -167,16 +225,30 @@ export type Task = TaskHandle;
 
 class TasksHandle {
   readonly root: WorldRoot;
-  constructor(private readonly world: WorldRoot) {
+  constructor(
+    private readonly world: WorldRoot,
+    private readonly execution: ExecutionContext,
+  ) {
     this.root = world;
   }
   task(input: Readonly<{ id: string }>): Task {
     const v = record(input, "task input");
     closed(v, ["id"], "task input");
-    return new TaskHandle(id(v.id), this.world);
+    return new TaskHandle(id(v.id), this.world, this.execution);
   }
   add(input: AddTaskInput): Promise<TaskMutationResult> {
-    return addTask(this.world, addInput(input));
+    const values = addInput(input);
+    const { actor: _actor, signal: abort, namespace: selected, ...request } = values;
+    const channel = executionChannel(this.execution);
+    if (channel.kind === "body-request") {
+      return forwardTask(
+        channel.directory,
+        this.world,
+        { action: "task.add", input: { ...request, namespace: selected ?? [] } },
+        abort,
+      );
+    }
+    return addTask(this.world, values);
   }
   addDocument(input: AddTaskDocumentInput): Promise<TaskMutationResult> {
     const v = record(input, "addDocument input");
@@ -186,12 +258,22 @@ class TasksHandle {
     const ns = namespace(v.namespace),
       createdBy = actor(v.actor),
       abort = signal(v.signal);
-    return addTaskDocument(this.world, {
+    const local = {
       markdown,
       ...(ns === undefined ? {} : { namespace: ns }),
       ...(createdBy === undefined ? {} : { actor: createdBy }),
       ...(abort === undefined ? {} : { signal: abort }),
-    });
+    };
+    const channel = executionChannel(this.execution);
+    if (channel.kind === "body-request") {
+      return forwardTask(
+        channel.directory,
+        this.world,
+        { action: "task.addDocument", input: { markdown, namespace: ns ?? [] } },
+        abort,
+      );
+    }
+    return addTaskDocument(this.world, local);
   }
   async list(
     input: Readonly<{
@@ -311,7 +393,31 @@ class TasksHandle {
     const note = text(v.note, "note");
     if (note !== undefined && verb !== "done" && verb !== "drop")
       throw new TypeError("batch note is valid only for done or drop");
-    return batchTasks(this.world, verb, ids, signal(v.signal), note);
+    const abort = signal(v.signal);
+    const channel = executionChannel(this.execution);
+    if (channel.kind === "body-request") {
+      switch (verb) {
+        case "start":
+          return forwardTask(channel.directory, this.world, { action: "task.start", ids }, abort);
+        case "hold":
+          return forwardTask(channel.directory, this.world, { action: "task.hold", ids }, abort);
+        case "done":
+          return forwardTask(
+            channel.directory,
+            this.world,
+            { action: "task.done", ids, ...(note === undefined ? {} : { note }) },
+            abort,
+          );
+        case "drop":
+          return forwardTask(
+            channel.directory,
+            this.world,
+            { action: "task.drop", ids, ...(note === undefined ? {} : { note }) },
+            abort,
+          );
+      }
+    }
+    return batchTasks(this.world, verb, ids, abort, note);
   }
   compose(
     input: Readonly<{
@@ -330,20 +436,43 @@ class TasksHandle {
     const selected = namespace(v.namespace);
     const selectedSignal = signal(v.signal);
     const selectedActor = actor(v.actor);
-    return composeTasks({
+    const local = {
       world: this.world,
       markdown,
       ...(selectedSignal === undefined ? {} : { signal: selectedSignal }),
       ...(selectedActor === undefined ? {} : { actor: selectedActor }),
       ...(selected === undefined ? {} : { defaultNamespace: selected }),
       planOnly: v.plan === true,
-    });
+    };
+    const channel = executionChannel(this.execution);
+    if (channel.kind === "body-request" && v.plan !== true) {
+      return forwardTask(
+        channel.directory,
+        this.world,
+        { action: "task.compose", markdown, namespace: selected ?? [] },
+        selectedSignal,
+      );
+    }
+    return composeTasks(local);
   }
 }
 export type Tasks = TasksHandle;
+export function tasksForExecution(world: WorldRoot, execution: ExecutionContext): Tasks {
+  if (typeof world !== "string") throw new TypeError("Tasks.of world must be a WorldRoot");
+  return new TasksHandle(world, execution);
+}
+
+type TasksOfInput = Readonly<{ execution?: LibraryExecution }>;
+
+function tasksOfExecution(input: TasksOfInput | undefined): ExecutionContext {
+  if (input === undefined) return localExecutionContext();
+  const values = record(input, "Tasks.of input");
+  closed(values, ["execution"], "Tasks.of input");
+  return values.execution === undefined ? localExecutionContext() : libraryExecution(values.execution);
+}
+
 export const Tasks = Object.freeze({
-  of(world: WorldRoot): Tasks {
-    if (typeof world !== "string") throw new TypeError("Tasks.of world must be a WorldRoot");
-    return new TasksHandle(world);
+  of(world: WorldRoot, input?: TasksOfInput): Tasks {
+    return tasksForExecution(world, tasksOfExecution(input));
   },
 });

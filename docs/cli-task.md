@@ -27,12 +27,13 @@ and or not ( )`, and executable examples including
 output selection only. Task Markdown, graph, lifecycle, diff, and compose
 decisions remain in the native Task surface.
 
-When the declared direct-parent Body Request channel is injected, each mutable
-Task command resolves its World and complete Task coordinates before forwarding
-the exact native mutation input one hop. It does not build a second Task command
-implementation or choose a replacement World. Read-only Task observations stay
-local. The live forwarded result uses the same Task JSON, text, and exit
-projection as an ordinary local result.
+The CLI captures its declared direct-parent Body Request channel once at the
+invocation root as the shared `bodyRequestExecution({ directory })` carrier.
+It constructs `Tasks.of(world, { execution })` once and uses that native Task
+surface for every command; the CLI does not build a second Task forwarding
+implementation, read environment again, or choose a replacement World.
+Read-only Task observations stay local. The live forwarded result uses the same
+Task JSON, text, and exit projection as an ordinary local result.
 
 ```text
 task add <TITLE> [--namespace <ns>] [--priority 0..3]

@@ -264,6 +264,11 @@ environment rather than mutating the Body process environment; readonly Pi
 still excludes bash. Provider-specific transport wiring does not change the one
 provider-neutral drive contract.
 
+This exposure is provider transport setup, not a Library routing decision. The
+provider child captures it once at its CLI composition root; the parent service
+uses an explicit local composition and never inherits a recursive forwarding
+choice.
+
 ## ACP
 
 `acp` is the standard protocol kind, not a product family. Its execution config

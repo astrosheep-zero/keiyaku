@@ -83,7 +83,7 @@ The command vocabulary is:
 | `status`                          | Calls Kanshi or one or more exact Contract/Akuma status projections according to its selectors.                                     |
 | `show`                            | Calls `keiyaku.guidance()` for one selected Contract.                                                                               |
 | `ls`                              | Lists exactly one selected Task, Contract, Akuma configuration, or Akuma identity directory.                                        |
-| `audit`                           | Calls `keiyaku.audit`.                                                                                                              |
+| `audit`                           | Calls `keiyaku.audit`; in a declared request channel it forwards one hop through the direct parent.                               |
 | `reconcile`                       | Calls the selected public reconciliation method.                                                                                    |
 | `settings`                        | Constructs and observes the shared read-only Settings resource.                                                                     |
 | `install`                         | Installs the bundled Keiyaku skills through one or more native harness installers.                                                  |
@@ -285,9 +285,12 @@ Akuma status authority without constructing a Contract report. `history` accepts
 one complete ContractId; `wait` and `kill` additionally accept the documented
 set selectors. Bare `status` uses Kanshi; named status resolves one selector
 from that observation and refuses cross-kind ambiguity.
-When `AKUMA_REQUESTS` identifies a provider drive, call, wait, tell,
-and kill use the same package-root operations but are served one hop by that
-provider's direct parent; CLI parsing and rendering do not change.
+At invocation construction, the CLI captures either local execution or the one
+absolute `AKUMA_REQUESTS` channel exposed to this provider drive as the shared
+typed Library execution carrier. Call, wait, tell, kill, Contract
+audit/deliver/review, and mutable Task commands use that same captured channel
+and are served one hop by the direct parent. CLI parsing, rendering, and public
+input grammar do not change.
 Bare `ls` renders the command's own help and exits successfully. It does not
 locate or create a World, construct a Repo or Settings value, or read Git,
 Task, Akuma configuration, or Akuma state. The accepted path grammar is closed

@@ -26,6 +26,17 @@ Akuma mechanism. The static `Keiyaku` facade assembles coherent Contract and Aku
 facets without a generic orchestrator, registry, second authority, or copied
 decision.
 
+One Library composition captures one immutable execution channel. Ordinary
+`Keiyaku` construction and `Tasks.of(world)` capture local execution.
+`bodyRequestExecution({ directory })` is the explicit, non-ambient public
+construction for one normalized direct-parent request channel. A caller passes
+that one value to `Keiyaku.withExecution({ execution })` for Contract, Fleet,
+and Akuma creation, and to `Tasks.of(world, { execution })` for Task handles.
+Those facades retain the same channel for every routed operation; operation
+inputs never carry a route, and no operation reads process environment to
+choose one. A Body parent constructs its service composition locally, so
+forwarding is exactly one hop and cannot recurse.
+
 Every package-root domain operation that accepts input takes exactly one
 readonly object. Public operations have no positional value parameters and no
 positional-value-plus-options overloads. A genuinely inputless operation keeps
@@ -120,6 +131,7 @@ not persisted.
 repo.currentBranch(): Promise<string | null>
 repo.reconcile(input?: ReconcileInput): Promise<RepoReconcileReport>
 Keiyaku.of(input: { repo: Repo; id: ContractId }): Keiyaku
+Keiyaku.withExecution(input: { execution: LibraryExecution }): KeiyakuLibrary
 Keiyaku.bind(input: BindInput): Promise<BindResult>
 Keiyaku.list(input: { repo: Repo }): Promise<ContractBoard>
 Keiyaku.observe(input: { repo: Repo; id: ContractId }): Promise<ContractObservation>
@@ -133,6 +145,18 @@ type NukeInput = Readonly<{
 }>
 
 ```
+
+```ts
+type LibraryExecution = ReturnType<typeof bodyRequestExecution>
+
+bodyRequestExecution(input: { directory: string }): LibraryExecution
+```
+
+`directory` is one absolute normalized Body Request transport path. It is not
+a general process-environment setting, and ordinary callers need not construct
+it. `KeiyakuLibrary` has the same static Contract, Fleet, Akuma creation, and
+catalog operations as `Keiyaku`, but they all retain the supplied execution
+channel. Its Contract handles keep that channel for their instance operations.
 
 The result union is owned by [public-results.md](public-results.md). The
 confirmation and reset semantics are owned by [world.md](world.md).

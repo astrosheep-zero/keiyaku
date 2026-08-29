@@ -1,6 +1,8 @@
 import { resolve } from "node:path";
 import { identitySegments } from "../identity/coordinates.js";
 import { Keiyaku, type ContractBoard, type ContractId, type ContractRow, type Repo } from "../index.js";
+import { keiyakuOf } from "../library/contract.js";
+import { localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
 import type { KanshiReport } from "../kanshi/index.js";
 import { CliUsageError } from "./parse.js";
 
@@ -23,10 +25,14 @@ function activeManagedCandidates(rows: readonly ContractRow[]): readonly Selecto
 
 export type SelectedContract = Readonly<{ id: ContractId; contract: Keiyaku }>;
 
-export function contractFromInput(repo: Repo, value: string): SelectedContract {
+export function contractFromInput(
+  repo: Repo,
+  value: string,
+  execution: ExecutionContext = localExecutionContext(),
+): SelectedContract {
   try {
     const id = value as ContractId;
-    return { id, contract: Keiyaku.of({ repo, id }) };
+    return { id, contract: keiyakuOf({ repo, id }, execution) };
   } catch (error) {
     selectorError(error instanceof Error ? error.message : String(error));
   }
