@@ -252,27 +252,6 @@ export function contractRequestCommands(): Readonly<
   };
 }
 
-export async function requestForwardedContract<Action extends ContractRequest["action"]>(
-  input: Readonly<{
-    directory: string;
-    id?: string;
-    action: Action;
-    request: ContractRequestFor<Action>;
-    signal?: AbortSignal;
-  }>,
-): Promise<ContractResultFor<Action> | ContractService> {
-  const command = contractRequestCommand(input.action);
-  const response = await requestBodyCommand({
-    directory: input.directory,
-    ...(input.id === undefined ? {} : { id: input.id }),
-    command,
-    value: input.request,
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
-  });
-  if (response.kind === "reference") return response.reference;
-  return response.result as ContractResultFor<Action>;
-}
-
 export async function requestForwardedContractLive<Action extends ContractRequest["action"]>(
   input: Readonly<{
     directory: string;

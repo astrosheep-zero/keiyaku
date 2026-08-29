@@ -28,11 +28,7 @@ import {
   fleetRequestCommands,
   waitAkuma,
 } from "../src/library/fleet.js";
-import {
-  contractRequestCommand,
-  contractRequestCommands,
-  requestForwardedContract,
-} from "../src/library/contract-operations.js";
+import { contractRequestCommand, contractRequestCommands } from "../src/library/contract-operations.js";
 import { KeiyakuRefused, KeiyakuRetry } from "../src/library/refusal.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { Delivery, Keiyaku, Repo } from "../src/index.js";
@@ -112,13 +108,14 @@ async function requestBodyDeliver(
   }>,
 ) {
   const { directory, id, signal, ...request } = input;
-  return await requestForwardedContract({
+  const response = await requestBodyCommand({
     directory,
     ...(id === undefined ? {} : { id }),
-    action: "contract.deliver",
-    request: { action: "contract.deliver", ...request },
+    command: contractRequestCommand("contract.deliver"),
+    value: { action: "contract.deliver", ...request },
     ...(signal === undefined ? {} : { signal }),
   });
+  return response.kind === "reference" ? response.reference : response.result;
 }
 
 async function requestBodyReview(
@@ -133,13 +130,14 @@ async function requestBodyReview(
   }>,
 ) {
   const { directory, id, signal, ...request } = input;
-  return await requestForwardedContract({
+  const response = await requestBodyCommand({
     directory,
     ...(id === undefined ? {} : { id }),
-    action: "contract.review",
-    request: { action: "contract.review", ...request },
+    command: contractRequestCommand("contract.review"),
+    value: { action: "contract.review", ...request },
     ...(signal === undefined ? {} : { signal }),
   });
+  return response.kind === "reference" ? response.reference : response.result;
 }
 
 async function requestBodyAudit(
@@ -155,13 +153,14 @@ async function requestBodyAudit(
   }>,
 ) {
   const { directory, id, signal, ...request } = input;
-  return await requestForwardedContract({
+  const response = await requestBodyCommand({
     directory,
     ...(id === undefined ? {} : { id }),
-    action: "contract.audit",
-    request: { action: "contract.audit", ...request },
+    command: contractRequestCommand("contract.audit"),
+    value: { action: "contract.audit", ...request },
     ...(signal === undefined ? {} : { signal }),
   });
+  return response.kind === "reference" ? response.reference : response.result;
 }
 
 async function requestBodyWait(
@@ -1032,7 +1031,10 @@ test("contract review and delivery retain separate request permissions", async (
     deliver: async () => {
       throw new Error("delivery must not execute");
     },
-    review: async () => ({ result: acceptedContract("permission", "review"), reviewFactId: "01ARZ3NDEKTSV4RRFFQ69G5FC0" }),
+    review: async () => ({
+      result: acceptedContract("permission", "review"),
+      reviewFactId: "01ARZ3NDEKTSV4RRFFQ69G5FC0",
+    }),
   });
   try {
     assert.deepEqual(
@@ -1554,7 +1556,10 @@ test("CLI forwarded deliver preserves its selected Repo and uses parent Settings
   } finally {
     process.argv.splice(0, process.argv.length, ...previousArgv);
   }
-  let pump = await openPump(parent, await compositionUpstreamFor({ paths: parent.paths }, { home: parentHome, gitPath }));
+  let pump = await openPump(
+    parent,
+    await compositionUpstreamFor({ paths: parent.paths }, { home: parentHome, gitPath }),
+  );
   const noncanonical = requestBodyDeliver({
     directory: pump.directory,
     id: randomUUID(),

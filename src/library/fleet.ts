@@ -39,7 +39,6 @@ import {
   parseAkumaObservation,
   parseCreatedTaskObservation,
 } from "./fleet-result.js";
-export { isKillResult, isTellResult, isWaitResult } from "./fleet-result.js";
 export type {
   AkumaKillResult,
   AkumaObservation,

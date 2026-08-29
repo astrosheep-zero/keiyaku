@@ -12,57 +12,6 @@ function canonicalSnapshot(value: string, context: z.RefinementCtx) {
 
 const nonblankStringSchema = z.string().refine((value) => value.trim() !== "");
 const snapshotIdSchema = z.string().transform(canonicalSnapshot);
-const effectSchema = z.union([
-  z
-    .object({
-      kind: z.literal("worktree"),
-      path: nonblankStringSchema,
-      action: z.enum(["created", "removed", "unchanged"]),
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal("worktree"),
-      path: nonblankStringSchema,
-      action: z.literal("followed"),
-      before: snapshotIdSchema,
-      after: snapshotIdSchema,
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal("recovery-snapshot"),
-      action: z.literal("created"),
-      snapshot: snapshotIdSchema,
-      retention: z.literal("ephemeral"),
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal("target-checkout"),
-      path: nonblankStringSchema,
-      target: nonblankStringSchema,
-      action: z.enum(["followed", "recovered"]),
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal("contract-file"),
-      path: nonblankStringSchema,
-      action: z.enum(["created", "updated", "unchanged", "removed"]),
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal("ref"),
-      name: nonblankStringSchema,
-      before: z.string().nullable(),
-      after: z.string().nullable(),
-      action: z.enum(["created", "updated", "removed", "unchanged"]),
-    })
-    .strict(),
-]);
-
 const hookFailureSchema = z.union([
   z
     .object({
@@ -134,11 +83,3 @@ export const reconciliationLagSchema = z.union([
     })
     .strict(),
 ]);
-
-export function isReconciliationEffect(value: unknown): boolean {
-  return effectSchema.safeParse(value).success;
-}
-
-export function reconciliationLag(value: unknown): boolean {
-  return reconciliationLagSchema.safeParse(value).success;
-}

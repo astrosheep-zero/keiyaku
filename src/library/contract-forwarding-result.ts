@@ -544,7 +544,7 @@ const mutationResultSchema = <Value>(value: z.ZodType<Value>) =>
 
 const deliveryMutationResultSchema = mutationResultSchema(deliveryValueSchema);
 const reviewMutationResultSchema = mutationResultSchema(reviewValueSchema);
-export const auditMutationResultSchema = mutationResultSchema(auditReportSchema);
+const auditMutationResultSchema = mutationResultSchema(auditReportSchema);
 
 export const deliveryResultSchema = z.union([
   deliveryMutationResultSchema,

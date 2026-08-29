@@ -144,11 +144,6 @@ function object(value: unknown): Readonly<Record<string, unknown>> | null {
     : null;
 }
 
-export function decodeAkumaCallRecipe(value: unknown): AkumaCallRecipe | null {
-  const parsed = akumaCallRecipeSchema.safeParse(value);
-  return parsed.success ? parsed.data : null;
-}
-
 export function decodeAkumaCallRequest(value: unknown): AkumaCallRequest | null {
   const parsed = akumaCallPayloadSchema.safeParse(value);
   return parsed.success ? { ...parsed.data, action: "akuma.call" } : null;

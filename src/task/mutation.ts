@@ -152,19 +152,7 @@ const taskRequestSchemas = {
   "task.update": updateRequestSchema,
 } as const;
 
-export const taskMutationRequestSchema = z.union([
-  taskRequestSchemas["task.add"],
-  taskRequestSchemas["task.addDocument"],
-  taskRequestSchemas["task.compose"],
-  taskRequestSchemas["task.done"],
-  taskRequestSchemas["task.drop"],
-  taskRequestSchemas["task.hold"],
-  taskRequestSchemas["task.resume"],
-  taskRequestSchemas["task.start"],
-  taskRequestSchemas["task.stop"],
-  taskRequestSchemas["task.update"],
-]);
-export type TaskMutationRequest = z.infer<typeof taskMutationRequestSchema>;
+export type TaskMutationRequest = z.infer<(typeof taskRequestSchemas)[TaskMutationAction]>;
 
 const worldPathSchema = z.string().min(1);
 const taskBodyRequestSchemas = {
@@ -179,10 +167,10 @@ const taskBodyRequestSchemas = {
   "task.stop": z.object({ world: worldPathSchema, request: taskRequestSchemas["task.stop"] }).strict(),
   "task.update": z.object({ world: worldPathSchema, request: taskRequestSchemas["task.update"] }).strict(),
 } as const;
-export const taskMutationBodyRequestSchema = z
-  .object({ world: worldPathSchema, request: taskMutationRequestSchema })
-  .strict();
-export type TaskMutationBodyRequest = z.infer<typeof taskMutationBodyRequestSchema>;
+export type TaskMutationBodyRequest = Readonly<{
+  world: z.infer<(typeof taskBodyRequestSchemas)[TaskMutationAction]>["world"];
+  request: TaskMutationRequest;
+}>;
 
 export const taskMutationServiceSchema = z.object({ action: z.enum(TASK_MUTATION_ACTIONS) }).strict();
 export type TaskMutationService = z.infer<typeof taskMutationServiceSchema>;
