@@ -121,7 +121,10 @@ Use the roles deliberately:
   when the question benefits from parallel evidence. Its use does not need a
   separate usage report unless the result changes a decision.
 
-Reuse the same Akuma for revisions within the same Contract and role; dispatch a new one only when the role or delivery boundary changes, independent review is required, or its context is contaminated.
+Follow the shipped workflow's reviewer-reuse boundary: reuse the same Akuma by
+default for revisions within one Contract and role, but start a replacement
+when its judgment frame or context is contaminated. A new Contract always gets
+a new `call --contract`; never repurpose another Contract's Akuma with `tell`.
 
 Prefer parallel Akuma lanes whenever the work can be split without overlapping
 write surfaces: for example, implementation, independent review, and a broad

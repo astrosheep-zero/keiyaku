@@ -23,6 +23,23 @@ immutable. You never push it through states by hand: `deliver` and satisfied
 reviews request placement, and placement claims when every prerequisite and
 gate allows it.
 
+## Choose The Lightest Sufficient Workflow
+
+Do not put every small change through the full Contract lifecycle.
+
+- Implement directly when the scope is small, understood, and easy to verify.
+- Bind a Contract without a review gate when the work is larger but mechanical,
+  and a bounded worktree or delivery record is useful. Add review when judgment,
+  risk, or independent acceptance makes it valuable.
+- If direct work grows beyond its original scope, stop and bind a Contract then.
+  Capture only the task-owned changes in a commit, cherry-pick that commit into
+  the appointed worktree, and continue there. Preserve unrelated caller changes.
+
+Choose by uncertainty, risk, and coordination cost, not file count. Public or
+persisted semantics, resource ownership, concurrency, security, and disputed
+architecture usually justify full terms and independent review. A narrow
+wording correction or exact mechanical synchronization usually does not.
+
 ## Bind
 
 Use `keiyaku-bind` to decide readiness, author one bounded Contract, choose
@@ -121,11 +138,19 @@ frontmatter names `Contract`, then reads the listed owner documents and source
 files before acting. Do not substitute a generic repository tour for the files
 that actually govern the assignment.
 
+The bind skill's authority order makes a commissioning brief zero-authority.
+Use it only to focus attention within the current Contract or Arc, point to
+evidence, and ask questions. It must not add or change acceptance terms, prescribe an
+unsettled implementation mechanism or expected review finding, or ask a
+reviewer to re-prove an earlier judgment. Removing the brief must not change
+the candidate's acceptance basis. Change terms through a journaled `amend`,
+not through `call` or `tell`.
+
 Contract association, available forwarded actions, and the brief are
 independent inputs. Give a Reviewer `--allowed contract.review` only when it
-must record its own verdict, and state `--satisfied` or `--unsatisfied` in the
-brief. Give a Deliverer `--allowed contract.deliver` when it must tender its
-candidate.
+must record its own verdict, and require it to choose `--satisfied` or
+`--unsatisfied` from its independent judgment. Give a Deliverer `--allowed
+contract.deliver` when it must tender its candidate.
 
 A `Deliverer` implements and verifies the terms in `Worktree`. Commission a
 `Reviewer` after delivery. The reviewer inspects the complete current Contract
@@ -240,13 +265,24 @@ keiyaku review <contract> --satisfied --summary "<conclusion>"
 keiyaku review <contract> --unsatisfied --summary "<finding>"
 ```
 
-Have an independent reviewer — independent from the Deliverer and candidate
-implementation, not necessarily a newly created identity — inspect the
-delivered Contract worktree snapshot.
+Have a reviewer independent from the Deliverer and candidate implementation
+inspect the delivered Contract worktree snapshot. Start a new Contract with a
+new `call --contract`; do not repurpose another Contract's reviewer with
+`tell`. Reuse that reviewer identity by default for later rounds of the same
+Contract. Start a replacement with a recorded reason when the reviewer's
+judgment frame is contaminated or the reviewer is involved in the term defect.
 If it should record the verdict itself, dispatch it with `--allowed
-contract.review` and state both verdicts in the brief. Otherwise its answer is
-review input for the coordinator to record.
+contract.review` and require it to choose the verdict from its independent
+judgment. Otherwise its answer is review input for the coordinator to record.
 The `review` command records the verdict and `--satisfied` requests placement.
+
+A repeat review re-judges the complete current snapshot from repository
+authority; checking whether an earlier finding closed is only one part of that
+judgment. If the same root cause produces a second unsatisfied review, stop
+commissioning stronger remediation for the candidate. Amend the Criterion from
+named authority or a constructible current failure, remove it, or escalate the
+unresolved premise. A conflicting, undefined, or ungrounded term is reported
+without a review receipt until `amend` makes the Contract adjudicable.
 
 `review --satisfied` is authoritative gate testimony and may claim the Contract
 when delivery, prerequisites, and all gates are current. Record it only for the
@@ -271,9 +307,9 @@ persist a train or add a second placement authority.
   do not re-review content addressing kept alive. Conflict resolution that
   changes the `ChangeId` makes earlier testimony stale and requires a fresh
   review: re-inspect the resolved candidate and record new testimony. Fresh
-  review does not require a new reviewer identity. When the existing independent
-  reviewer is available, prefer reusing it, especially so the reviewer that
-  raised earlier findings can determine whether they are closed.
+  review follows the reviewer-reuse rule above; prefer the existing independent
+  reviewer when its judgment frame remains sound, especially so earlier findings
+  can be checked within the complete fresh judgment.
 - For Contracts known to overlap, resolve the current-target integration before
   the authoritative review. Preliminary feedback may happen earlier, but it
   is not a satisfied gate until its reviewed patch is the candidate intended

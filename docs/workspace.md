@@ -36,11 +36,18 @@ Reviewer; the worker never infers an omitted seat. `Worktree` identifies this
 file as a derived view and requires work to remain in its Contract worktree.
 `Deliverer` implements and verifies the Contract terms without deciding the
 lifecycle and, when an Arc is active, stays within that current chapter. It
-stops on contradictions or unclosed terms. `Reviewer` reviews the complete
-current worktree snapshot without modifying it, compares each Criterion, and
-reports covered Criteria, findings, and missing evidence. Detailed commands,
-workflow, and cautions live in the pointed-to seat skills. Candidate commits
-are only for historical review.
+stops on contradictions, ungrounded terms, and open design choices. `Reviewer`
+reviews the complete current worktree snapshot without modifying it, first
+decides which Criteria are adjudicable, and reports covered Criteria, findings,
+term defects, and missing evidence. Detailed commands, verdict eligibility,
+workflow, and cautions live in the pointed-to seat skills. Candidate commits are
+only for historical review.
+
+The seat statements in `KEIYAKU.md` state the appointed seat's minimum
+responsibility and point to the corresponding operating procedure. Repository
+authority decides delivery semantics; the admitted Contract selects scope,
+terms, and evidence. A generated or user-owned skill may elaborate or replace
+procedure, but it neither amends those terms nor gains acceptance authority.
 
 The same canonical frontmatter projection feeds complete rendered guidance,
 so `Keiyaku.guidance()`, `keiyaku show`, managed worktree materialization,

@@ -112,7 +112,15 @@ test("workflow delegates bind authorship to the bind skill", () => {
   const workflow = readFileSync(join(skills, "keiyaku-workflow", "SKILL.md"), "utf8");
 
   assert.match(bind, /keiyaku -C <repo> bind/);
+  assert.match(bind, /## Authority Order/);
+  assert.match(bind, /brief \(zero authority\)/);
   assert.match(workflow, /Use `keiyaku-bind`/);
+  assert.match(workflow, /commissioning brief zero-authority/);
+  assert.match(workflow, /new `call --contract`/);
+  assert.match(workflow, /Reuse that reviewer identity by default/);
+  assert.match(workflow, /judgment frame is contaminated/);
+  assert.match(workflow, /second unsatisfied review/);
+  assert.match(workflow, /journaled `amend`/);
   assert.doesNotMatch(workflow, /### Decide The Threshold|### Write The Document/);
 });
 

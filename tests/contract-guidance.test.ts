@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  CONTRACT_DELIVERER_SKILL,
-  CONTRACT_REVIEWER_SKILL,
-  renderContractGuidance,
-} from "../src/contract-guidance.js";
+import { CONTRACT_DELIVERER_SKILL, CONTRACT_REVIEWER_SKILL, renderContractGuidance } from "../src/contract-guidance.js";
 import {
   contractHead,
   contractId,
@@ -53,9 +49,13 @@ test("guidance preserves source bytes and appends one Fulfillment H2", () => {
   );
   assert.match(guidance, /^### Deliverer$/m);
   assert.match(guidance, /When an Arc is active, stay within that current chapter\./);
-  assert.match(guidance, /Implement and verify the Objective under the Design, Region, and Criteria in this Contract\./);
+  assert.match(
+    guidance,
+    /Implement and verify the Objective under the Design, Region, and Criteria in this Contract\./,
+  );
   assert.match(guidance, /Read the Deliverer operating procedures at `\.agents\/skills\/keiyaku-deliver\/SKILL\.md`/);
   assert.match(guidance, /^### Reviewer$/m);
+  assert.match(guidance, /Compare each adjudicable Criterion individually/);
   assert.match(guidance, /Read the Reviewer operating procedures at `\.agents\/skills\/keiyaku-review\/SKILL\.md`/);
   assert.doesNotMatch(guidance, /^## Arc$/m);
   assert.ok(guidance.endsWith("\n"));
@@ -68,6 +68,16 @@ test("seat skills are static operating guidance without Contract facts", () => {
   assert.match(CONTRACT_REVIEWER_SKILL, /keiyaku review <contract> --satisfied/);
   assert.match(CONTRACT_DELIVERER_SKILL, /materialize-conflict/);
   assert.match(CONTRACT_REVIEWER_SKILL, /stale after it changes/);
+  assert.match(CONTRACT_REVIEWER_SKILL, /original intent behind the Objective/);
+  assert.match(CONTRACT_REVIEWER_SKILL, /Natural ripple outside the Region/);
+  assert.match(CONTRACT_DELIVERER_SKILL, /A dispatch brief may prioritize attention/);
+  assert.match(CONTRACT_DELIVERER_SKILL, /are yours unless the Contract explicitly pins them/);
+  assert.match(CONTRACT_DELIVERER_SKILL, /journaled amendment settles it/);
+  assert.match(CONTRACT_REVIEWER_SKILL, /every adjudicable Contract term/);
+  assert.match(CONTRACT_REVIEWER_SKILL, /hypothetical future source edit/);
+  assert.match(CONTRACT_REVIEWER_SKILL, /second unsatisfied review/);
+  assert.match(CONTRACT_REVIEWER_SKILL, /A term defect receives a report, not a review receipt/);
+  assert.doesNotMatch(CONTRACT_REVIEWER_SKILL, /The Contract and its owner documents decide the delivery/);
   for (const skill of [CONTRACT_DELIVERER_SKILL, CONTRACT_REVIEWER_SKILL]) {
     assert.doesNotMatch(skill, /kei\/guidance|## Arc|Seat: Deliverer|Seat: Reviewer/);
   }
