@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { type ChildProcess } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { join } from "node:path";
@@ -9,6 +11,7 @@ import { createProcessLifecycle } from "../src/runtime/proc/lifecycle.js";
 import { LineRpcProcess } from "../src/runtime/proc/line-rpc.js";
 import { spawnStdioProcess } from "../src/runtime/proc/stdio.js";
 import { consumeProcessStdout, runProcess, spawnDetachedProcess, type ProcessInput } from "../src/runtime/proc/run.js";
+import { terminateOwnedProcess } from "../src/runtime/proc/termination.js";
 
 function input(argv: readonly string[], overrides: Partial<ProcessInput> = {}): ProcessInput {
   return {
@@ -16,6 +19,43 @@ function input(argv: readonly string[], overrides: Partial<ProcessInput> = {}): 
     timeoutMs: 2_000,
     ...overrides,
   };
+}
+
+function ownedChild(pid: number): ChildProcess {
+  return Object.assign(new EventEmitter(), { pid, exitCode: null, signalCode: null }) as ChildProcess;
+}
+
+for (const force of [false, true]) {
+  test(`terminateOwnedProcess accepts EPERM after the owned child exits (${force ? "forced" : "graceful"})`, async (t) => {
+    if (process.platform === "win32") {
+      t.skip("POSIX group signals only");
+      return;
+    }
+    const child = ownedChild(10_000 + Number(force));
+    t.mock.method(process, "kill", ((pid: number, signal?: NodeJS.Signals | number) => {
+      assert.equal(pid, -child.pid);
+      assert.equal(signal, force ? "SIGKILL" : "SIGTERM");
+      child.emit("exit", 0, null);
+      throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+    }) as typeof process.kill);
+
+    await terminateOwnedProcess(child, force);
+  });
+
+  test(`terminateOwnedProcess rejects live-child EPERM (${force ? "forced" : "graceful"})`, async (t) => {
+    if (process.platform === "win32") {
+      t.skip("POSIX group signals only");
+      return;
+    }
+    const child = ownedChild(10_100 + Number(force));
+    t.mock.method(process, "kill", ((pid: number, signal?: NodeJS.Signals | number) => {
+      assert.equal(pid, -child.pid);
+      assert.equal(signal, force ? "SIGKILL" : "SIGTERM");
+      throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+    }) as typeof process.kill);
+
+    await assert.rejects(terminateOwnedProcess(child, force), /kill EPERM/u);
+  });
 }
 
 test("owned-process lifecycle serializes release behind termination", async () => {

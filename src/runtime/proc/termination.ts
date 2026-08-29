@@ -7,8 +7,22 @@ const WINDOWS_TERMINATION_SETTLE_MS = 250;
 const WINDOWS_TERMINATION_TIMEOUT_MS = 1_000;
 const execFileAsync = promisify(execFile);
 
-function ignoreMissingProcess(error: unknown): void {
-  if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+function isMissingProcess(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException).code === "ESRCH";
+}
+
+async function signalOwnedProcessGroup(pid: number, signal: NodeJS.Signals, exit: Promise<void>): Promise<void> {
+  try {
+    process.kill(-pid, signal);
+  } catch (error) {
+    if (isMissingProcess(error)) return;
+    if ((error as NodeJS.ErrnoException).code !== "EPERM") throw error;
+    const exited = await Promise.race([
+      exit.then(() => true),
+      delay(TERMINATION_GRACE_MS, false, { ref: false }).then(() => false),
+    ]);
+    if (!exited) throw error;
+  }
 }
 
 export async function terminateWindowsTree(pid: number): Promise<void> {
@@ -66,27 +80,14 @@ export async function terminateOwnedProcess(child: ChildProcess, force = false):
     return;
   }
   if (force) {
-    try {
-      process.kill(-pid, "SIGKILL");
-    } catch (error) {
-      ignoreMissingProcess(error);
-    }
+    await signalOwnedProcessGroup(pid, "SIGKILL", exit);
     await exit;
     return;
   }
-  try {
-    process.kill(-pid, "SIGTERM");
-  } catch (error) {
-    ignoreMissingProcess(error);
-    await exit;
-    return;
-  }
+  await signalOwnedProcessGroup(pid, "SIGTERM", exit);
+  if (exited || child.exitCode !== null || child.signalCode !== null) return;
   await Promise.race([exit, delay(TERMINATION_GRACE_MS)]);
   if (exited || child.exitCode !== null || child.signalCode !== null) return;
-  try {
-    process.kill(-pid, "SIGKILL");
-  } catch (error) {
-    ignoreMissingProcess(error);
-  }
+  await signalOwnedProcessGroup(pid, "SIGKILL", exit);
   await exit;
 }

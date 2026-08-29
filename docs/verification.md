@@ -193,6 +193,10 @@ not complete when `taskkill` returns: the runtime waits for the directly owned c
 handle to report exit and then applies one bounded settling window for inherited
 handles and related process artifacts to be released. The window is not silently
 extended; an EPERM or residual process/handle after it expires is a real failure.
+For POSIX group signals, ESRCH remains a completed termination. An EPERM is
+completed only when the directly owned child handle reports exit within a bounded
+settlement window; otherwise it remains the signal failure. This decision uses no
+persisted pid, reconstructed process identity, or probe of another process.
 Retained `release` relinquishes the runtime's custody while leaving the target alive;
 it does not invoke termination. The portable process-tree guarantee covers the
 tree rooted at the directly spawned child while that caller still owns its

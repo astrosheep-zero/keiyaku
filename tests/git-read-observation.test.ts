@@ -178,7 +178,14 @@ test("Git read observation reports cancellation instead of the interrupted batch
   );
 });
 
-test("a dead shared batch is not restarted for later object reads", async () => {
+test("a dead shared batch is not restarted for later object reads", async (t) => {
+  if (process.platform !== "win32") {
+    const originalKill = process.kill;
+    t.mock.method(process, "kill", ((pid: number, signal?: NodeJS.Signals | number) => {
+      if (pid < 0 && signal !== 0) throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+      return originalKill(pid, signal as NodeJS.Signals);
+    }) as typeof process.kill);
+  }
   const repository = makeGitRepository();
   const log = join(repository.path, "git-read-observation-death.log");
   writeFileSync(log, "");
@@ -194,8 +201,16 @@ test("a dead shared batch is not restarted for later object reads", async () => 
       const git = await repositoryAt(repository.path, gitPath);
       await withGitDecodeChannel(git, (channel) =>
         withGitReadObservation(git, channel, async (observation) => {
-          await assert.rejects(observation.readBlobs([MISSING_OID]), /git cat-file --batch/u);
-          await assert.rejects(observation.readBlobs([MISSING_OID]), /git cat-file --batch/u);
+          await assert.rejects(observation.readBlobs([MISSING_OID]), (error: Error) => {
+            assert.match(error.message, /git cat-file --batch/u);
+            assert.doesNotMatch(error.message, /EPERM/u);
+            return true;
+          });
+          await assert.rejects(observation.readBlobs([MISSING_OID]), (error: Error) => {
+            assert.match(error.message, /git cat-file --batch/u);
+            assert.doesNotMatch(error.message, /EPERM/u);
+            return true;
+          });
         }),
       );
     },
