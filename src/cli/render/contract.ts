@@ -8,7 +8,6 @@ import type {
   AcceptedEnvelope,
   AcceptedResult,
   AcceptedReviewResult,
-  Effect,
   Lag,
   RetryResult,
 } from "../result.js";
@@ -38,53 +37,6 @@ function retryLines(detail: KeiyakuRetryReason, indent: string, columns: number)
     return [...renderOpaqueBlock("publication-failed", indent, columns), ...["diagnostic", "", detail.diagnostic, ""]];
   }
   return renderOpaqueBlock(detail.kind, indent, columns);
-}
-
-function changedEffect(effect: Effect): boolean {
-  return effect.action !== "unchanged";
-}
-
-function showEffect(effect: Effect): boolean {
-  return changedEffect(effect) || (effect.kind !== "ref" && effect.kind !== "contract-file");
-}
-
-function effectRows(effect: Effect, columns: number): readonly string[] {
-  const mark = changedEffect(effect) ? "✓" : "·";
-  const lines: string[] = [];
-  if (effect.kind === "worktree") {
-    receiptRow(lines, mark, "worktree", [{ text: effect.action }, { text: effect.path, opaque: true }], columns);
-  } else if (effect.kind === "contract-file") {
-    receiptRow(lines, mark, "contract-file", [{ text: effect.action }, { text: effect.path, opaque: true }], columns);
-  } else if (effect.kind === "target-checkout") {
-    receiptRow(
-      lines,
-      mark,
-      "target-checkout",
-      [{ text: effect.action }, { text: effect.target, opaque: true }, { text: effect.path, opaque: true }],
-      columns,
-    );
-  } else if (effect.kind === "recovery-snapshot") {
-    receiptRow(
-      lines,
-      mark,
-      "recovery-snapshot",
-      [{ text: effect.action }, { text: effect.snapshot, opaque: true }, { text: effect.retention }],
-      columns,
-    );
-  } else {
-    receiptRow(
-      lines,
-      mark,
-      "ref",
-      [
-        { text: effect.action },
-        { text: effect.name, opaque: true },
-        { text: `${effect.before ?? "null"} -> ${effect.after ?? "null"}`, opaque: true },
-      ],
-      columns,
-    );
-  }
-  return lines;
 }
 
 function lagRows(lag: Lag, columns: number): readonly string[] {
@@ -156,7 +108,7 @@ function lagRows(lag: Lag, columns: number): readonly string[] {
   return lines;
 }
 
-function settlementLagRows(lag: AcceptedEnvelope["settlement"]["lags"][number], columns: number): readonly string[] {
+function settlementLagRows(lag: AcceptedEnvelope["settlementLags"][number], columns: number): readonly string[] {
   const lines: string[] = [];
   receiptRow(
     lines,
@@ -246,24 +198,10 @@ function acceptedRecord(
     );
   }
   receiptRow(record, " ", "head", [{ text: result.head, opaque: true }], columns);
+  if (result.recoverySnapshot !== undefined)
+    receiptRow(record, " ", "recovery snapshot", [{ text: result.recoverySnapshot, opaque: true }], columns);
   if (result.verb === "deliver") {
     pushBlock(record, reuseLines(result.verificationReuse, columns));
-  }
-  const changed = result.effects.filter(changedEffect);
-  const unchanged = result.effects.filter((effect) => !changedEffect(effect) && showEffect(effect));
-  for (const effect of [...changed, ...unchanged]) pushBlock(record, effectRows(effect, columns));
-  for (const action of result.settlement.actions) {
-    receiptRow(
-      record,
-      "·",
-      "settle",
-      [
-        { text: action.kind },
-        { text: action.action },
-        { text: action.kind === "task" ? action.taskId : action.path, opaque: true },
-      ],
-      columns,
-    );
   }
   return record;
 }
@@ -273,7 +211,7 @@ function acceptedLagRows(result: AcceptedEnvelope, columns: number): readonly st
   if (result.lag !== undefined) {
     for (const lag of result.lag) pushBlock(obligations, lagRows(lag, columns));
   }
-  for (const lag of result.settlement.lags) {
+  for (const lag of result.settlementLags) {
     pushBlock(obligations, settlementLagRows(lag, columns));
   }
   return obligations;
@@ -379,16 +317,6 @@ function renderAcceptedBind(result: AcceptedBindResult, columns: number): string
   receiptRow(lines, " ", "workspace", [{ text: "managed worktree" }], columns);
   if (result.target === null) receiptRow(lines, " ", "no target", [], columns);
   else receiptRow(lines, " ", "target", [{ text: result.target, opaque: true }], columns);
-  const creates = result.hookRuns?.filter((run) => run.phase === "create") ?? [];
-  if (creates.length > 0) {
-    receiptRow(
-      lines,
-      " ",
-      "hooks create",
-      creates.map((run) => ({ text: run.name, opaque: true })),
-      columns,
-    );
-  }
   lines.push(...acceptedDeviations(result, columns), ...recordBlock(result, columns));
   return lines.join("\n");
 }
@@ -458,19 +386,6 @@ function renderAcceptedArc(result: AcceptedArcResult, columns: number): string {
 function renderAcceptedAbandon(result: AcceptedAbandonResult, columns: number): string {
   const lines = titleLines("✓", "abandoned", result.contract, columns);
   if (result.note !== undefined) receiptRow(lines, " ", "note", [{ text: result.note }], columns);
-  for (const effect of result.effects) {
-    if (effect.kind === "worktree") {
-      receiptRow(lines, " ", "workspace", [{ text: effect.action }, { text: effect.path, opaque: true }], columns);
-    } else if (effect.kind === "recovery-snapshot") {
-      receiptRow(
-        lines,
-        " ",
-        "recovery snapshot",
-        [{ text: effect.snapshot, opaque: true }, { text: `· ${effect.retention}` }],
-        columns,
-      );
-    }
-  }
   lines.push(...recordBlock(result, columns));
   return lines.join("\n");
 }

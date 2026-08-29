@@ -53,11 +53,3 @@ export function requireAccepted<Value, Refusal extends KeiyakuRefusal>(
   if (result.kind === "retry") throw new KeiyakuRetry(result.reason);
   return result;
 }
-
-export function forwardedMutationFailure(error: unknown): Readonly<{
-  result: Readonly<{ kind: "refused"; refusal: KeiyakuRefusal } | { kind: "retry"; reason: KeiyakuRetryReason }>;
-}> {
-  if (error instanceof KeiyakuRefused) return { result: { kind: "refused", refusal: error.refusal } };
-  if (error instanceof KeiyakuRetry) return { result: { kind: "retry", reason: error.reason } };
-  throw error;
-}

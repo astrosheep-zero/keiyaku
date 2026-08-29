@@ -467,7 +467,7 @@ test("Keiyaku owns contract construction over one pinned Repo capability", async
   );
   assert.ok(guidance.includes(markdown("Markdown input")));
   assert.equal(guidance.match(/^## Fulfillment$/gmu)?.length, 1);
-  assert.match(guidance, /keiyaku-deliver\/SKILL\.md.*keiyaku-review\/SKILL\.md/);
+  assert.match(guidance, /keiyaku-deliver\/SKILL\.md[\s\S]*keiyaku-review\/SKILL\.md/);
   const appointment = await readManagedWorktreeAppointment(await repositoryAt(repository.path), state.id);
   assert.equal(appointment.kind, "appointed");
   if (appointment.kind !== "appointed") throw new Error("expected appointed worktree");

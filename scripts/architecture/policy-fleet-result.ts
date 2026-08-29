@@ -5,20 +5,9 @@ export const fleetResultZones = [
     source: "library/fleet-result.ts",
     allow: [
       types("akuma/index.ts", ["AkumaStatus", "KillEvidence", "TellResult"]),
-      types("core/facts/types.ts", ["ContractId"]),
-      types("task/index.ts", ["TaskRow"]),
-      any("library/fleet-status-result.ts", [
-        "canonicalFleetAkuId",
-        "exactFleetKeys",
-        "fleetCount",
-        "isFleetStatus",
-        "isFleetTaskRows",
-        "record",
-      ]),
+      any("akuma/akuma.ts", ["akumaIdSchema", "akumaStatusSchema"]),
+      any("core/facts/types.ts", ["contractId", "ContractId"]),
+      any("task/board.ts", ["taskRowsSchema"]),
     ],
-  },
-  {
-    source: "library/fleet-status-result.ts",
-    allow: [types("akuma/index.ts", ["AkumaStatus"]), any("akuma/identity.ts", ["parseAkuId"])],
   },
 ];

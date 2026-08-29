@@ -142,9 +142,11 @@ the first captured tree, runs the destroy hooks, and captures again. If
 the hook changes the tree or `HEAD`, a second recovery commit records that final
 capture with the first recovery as parent. Hook failure still retains the
 worktree and reports its lag; the already-created recovery remains an ephemeral
-effect. A successful final capture with no dirty submodule internals permits
-`git worktree remove --force`. The recovery tip appears only in that invocation's
-effects, creates no ref or journal fact, and may be pruned by Git. Removal
+reconciliation effect. A successful final capture with no dirty submodule internals permits
+`git worktree remove --force`. An accepted mutation projects the final recovery
+tip only as its `recoverySnapshot`, never by exposing the reconciliation effects
+collection; it creates no ref or journal fact, and may
+be pruned by Git. Removal
 precedes ref cleanup. That result must prove the appointed path is physically
 absent before Place release; leftover bytes at an unregistered appointed path
 are retention, not completed cleanup. Each Keiyaku-owned ref deletion

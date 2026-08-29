@@ -32,7 +32,7 @@ import {
   type Soul,
 } from "../src/akuma/heart/index.js";
 import { akumaRunRoot, allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
-import type { ProviderAdapter } from "../src/akuma/provider.js";
+import { createProviderAttempt, type ProviderAdapter, type Session } from "../src/akuma/provider.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import { settings } from "../src/settings.js";
 import { Keiyaku } from "../src/index.js";
@@ -421,31 +421,59 @@ test("interrupt refuses an unborn address without leaving durable input or contr
   }
 });
 
+type FixtureSession = Omit<Session, "forceDispose"> & Readonly<{ forceDispose?: Session["forceDispose"] }>;
+
+function fixtureAttempt(input: Readonly<{ signal: AbortSignal }>, establish: () => Promise<FixtureSession>) {
+  return createProviderAttempt(input.signal, async (custody) => {
+    const fixture = await establish();
+    const session: Session = { ...fixture, forceDispose: fixture.forceDispose ?? fixture.abort };
+    let settleClosed!: () => void;
+    const closed = new Promise<void>((resolve) => {
+      settleClosed = resolve;
+    });
+    void session.completion.then(settleClosed, settleClosed);
+    custody.own({
+      closed,
+      abort: async () => {
+        await session.abort();
+        settleClosed();
+      },
+      forceDispose: async () => {
+        await session.forceDispose();
+        settleClosed();
+      },
+    });
+    return session;
+  });
+}
+
 const provider: ProviderAdapter = {
   admitOptions(options) {
     return { kind: "admitted", options };
   },
-  async start() {
-    let finishEvents!: () => void;
-    const eventsFinished = new Promise<void>((resolve) => {
-      finishEvents = resolve;
-    });
-    return {
-      admission: { fence: "public-fixture-turn" },
-      events: {
-        async *[Symbol.asyncIterator]() {
-          yield { type: "session" as const, coordinate: { sessionId: "public-session" } };
-          yield { type: "assistant" as const, text: "working" };
-          finishEvents();
+  start(input) {
+    return fixtureAttempt(input, async () => {
+      let finishEvents!: () => void;
+      const eventsFinished = new Promise<void>((resolve) => {
+        finishEvents = resolve;
+      });
+      return {
+        admission: { fence: "public-fixture-turn" },
+        events: {
+          async *[Symbol.asyncIterator]() {
+            yield { type: "session" as const, coordinate: { sessionId: "public-session" } };
+            yield { type: "assistant" as const, text: "working" };
+            finishEvents();
+          },
         },
-      },
-      completion: eventsFinished.then(() => ({
-        kind: "answered" as const,
-        answer: "public answer",
-        historyId: "public-history",
-      })),
-      async abort() {},
-    };
+        completion: eventsFinished.then(() => ({
+          kind: "answered" as const,
+          answer: "public answer",
+          historyId: "public-history",
+        })),
+        async abort() {},
+      };
+    });
   },
 };
 
@@ -459,19 +487,20 @@ test("turn owner folds a rejected completion while the event stream remains open
     admitOptions(options) {
       return { kind: "admitted", options };
     },
-    async start() {
-      queueMicrotask(() => rejectCompletion(new Error("completion rejected")));
-      return {
-        admission: { fence: "completion-rejection" },
-        events: {
-          async *[Symbol.asyncIterator]() {
-            await new Promise<void>(() => {});
+    start(input) {
+      return fixtureAttempt(input, async () => {
+        queueMicrotask(() => rejectCompletion(new Error("completion rejected")));
+        return {
+          admission: { fence: "completion-rejection" },
+          events: {
+            async *[Symbol.asyncIterator]() {
+              await new Promise<void>(() => {});
+            },
           },
-        },
-        completion,
-        async abort() {},
-        async forceDispose() {},
-      };
+          completion,
+          async abort() {},
+        };
+      });
     },
   };
   try {
@@ -1553,14 +1582,14 @@ test("ordinary wait returns the successor answer after a pending Tell is consume
       async start() {
         throw new Error("successor must resume");
       },
-      async resume(input) {
+      resume(input) {
         assert.deepEqual(input.launchTells, [{ id: "successor-tell", text: "continue" }]);
-        return {
+        return fixtureAttempt(input, async () => ({
           admission: { fence: "successor-wait" },
           events: { async *[Symbol.asyncIterator]() {} },
           completion: Promise.resolve({ kind: "answered", answer: "successor answer", historyId: "successor-history" }),
           async abort() {},
-        };
+        }));
       },
     };
     await driveAkumaBody({ paths: source.paths }, successor, {
@@ -1605,7 +1634,8 @@ test("an answered Turn without a fork point remains visible and keeps its answer
       admitOptions(options) {
         return { kind: "admitted", options };
       },
-      async start() {
+      start(input) {
+        return fixtureAttempt(input, async () => {
         let finishEvents!: () => void;
         const eventsFinished = new Promise<void>((resolve) => {
           finishEvents = resolve;
@@ -1624,6 +1654,7 @@ test("an answered Turn without a fork point remains visible and keeps its answer
           })),
           async abort() {},
         };
+        });
       },
     };
     await driveAkumaBody(
@@ -1670,10 +1701,11 @@ test("fork publishes a sleeping child with lineage and its native birth session"
     const worldRoot = await World.at(root);
     assert.equal(await world.of({ id: source.id }).kill(), "already-stopped");
     let nativeInput: Parameters<NonNullable<ProviderAdapter["fork"]>>[0] | undefined;
-    mutable.fork = async (input) => {
-      nativeInput = input;
-      return { session: { sessionId: "fork-child-session" } };
-    };
+    mutable.fork = (input) =>
+      createProviderAttempt(undefined, async () => {
+        nativeInput = input;
+        return { session: { sessionId: "fork-child-session" } };
+      });
 
     const receipt = await world.of({ id: source.id }).fork({ at: "turn/1" });
     assert.equal(receipt.kind, "forked", JSON.stringify(receipt));
@@ -1714,7 +1746,7 @@ test("fork preserves the exact admitted readonly restraint byte-for-byte", async
   const originalFork = mutable.fork;
   try {
     const source = await answeredSource(root, "f0a10007", { enforcement: "native" });
-    mutable.fork = async () => ({ session: { sessionId: "fork-restraint-child" } });
+    mutable.fork = () => createProviderAttempt(undefined, async () => ({ session: { sessionId: "fork-restraint-child" } }));
     const world = await akumaAt(root);
     const receipt = await world.of({ id: source.id }).fork({ at: "turn/1" });
     assert.equal(receipt.kind, "forked", JSON.stringify(receipt));
@@ -1740,20 +1772,22 @@ test("fork preserves categorical, exact-history, native, local, and not-born fai
     assert.deepEqual(await handle.fork({ at: "missing" }), { kind: "provider-cannot-fork", provider: "claude" });
 
     let nativeCalls = 0;
-    mutable.fork = async () => {
-      nativeCalls += 1;
-      throw new Error("native refused");
-    };
+    mutable.fork = () =>
+      createProviderAttempt(undefined, async () => {
+        nativeCalls += 1;
+        throw new Error("native refused");
+      });
     assert.deepEqual(await handle.fork({ at: "missing" }), { kind: "unknown-history", at: "missing" });
     assert.equal(nativeCalls, 0);
     assert.deepEqual(await handle.fork({ at: "turn/1" }), { kind: "fork-failed", diagnostic: "native refused" });
 
-    mutable.fork = async () => {
-      const runRoot = akumaRunRoot(root);
-      rmSync(runRoot, { recursive: true, force: true });
-      writeFileSync(runRoot, "blocked");
-      return { session: { sessionId: "orphan-upstream-session" } };
-    };
+    mutable.fork = () =>
+      createProviderAttempt(undefined, async () => {
+        const runRoot = akumaRunRoot(root);
+        rmSync(runRoot, { recursive: true, force: true });
+        writeFileSync(runRoot, "blocked");
+        return { session: { sessionId: "orphan-upstream-session" } };
+      });
     const partial = await handle.fork({ at: "turn/1" });
     assert.equal(partial.kind, "upstream-forked");
     if (partial.kind === "upstream-forked") {
@@ -1947,14 +1981,14 @@ test("tell after an already stopped Body wakes the same Akuma through its retain
       async start() {
         throw new Error("retained Akuma must resume");
       },
-      async resume(input) {
+      resume(input) {
         resumed = input;
-        return {
+        return fixtureAttempt(input, async () => ({
           admission: { fence: "kill-resume-successor" },
           events: { async *[Symbol.asyncIterator]() {} },
           completion: Promise.resolve({ kind: "answered", answer: "continued", historyId: "continued-history" }),
           async abort() {},
-        };
+        }));
       },
     };
     await driveAkumaBody({ paths: allocated.paths }, successor, {
@@ -2148,8 +2182,8 @@ test("interrupt waits for a running body to self-abort before recording the tell
         admitOptions(options) {
           return { kind: "admitted", options };
         },
-        async start() {
-          return {
+        start(input) {
+          return fixtureAttempt(input, async () => ({
             events: {
               async *[Symbol.asyncIterator]() {
                 while (!aborted) {
@@ -2163,7 +2197,7 @@ test("interrupt waits for a running body to self-abort before recording the tell
               aborted = true;
               settle({ kind: "failed", diagnostic: "interrupted" });
             },
-          };
+          }));
         },
       },
       {
@@ -2609,12 +2643,12 @@ test("a failed turn is durable public evidence and never masquerades as provider
         initialBody: "fail",
       },
       {
-        async start() {
-          return {
+        start(input) {
+          return fixtureAttempt(input, async () => ({
             events: { async *[Symbol.asyncIterator]() {} },
             completion: Promise.resolve({ kind: "failed", diagnostic: "native failed" }),
             async abort() {},
-          };
+          }));
         },
       },
       {
@@ -2700,8 +2734,8 @@ test("kill gives the Body a grace window to abort its owned provider session", a
       admitOptions(options) {
         return { kind: "admitted", options };
       },
-      async start() {
-        return {
+      start(input) {
+        return fixtureAttempt(input, async () => ({
           admission: { fence: "kill-fixture-turn" },
           events: {
             async *[Symbol.asyncIterator]() {
@@ -2716,7 +2750,7 @@ test("kill gives the Body a grace window to abort its owned provider session", a
             aborted = true;
             settle({ kind: "failed", diagnostic: "stopped" });
           },
-        };
+        }));
       },
     };
     const launch: BodyLaunch = {

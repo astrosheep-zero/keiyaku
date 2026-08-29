@@ -17,6 +17,41 @@ export class AkumaBodyRequestError extends Error {
   }
 }
 
+function throwVoidedRequestFailure(
+  action: string,
+  evidence: string,
+  failure: unknown | undefined,
+  decodeFailure: ((failure: unknown) => Error | null) | undefined,
+): never {
+  const ownerFailure = decodeVoidedOwnerFailure(failure, decodeFailure);
+  if (ownerFailure !== null) throw ownerFailure;
+  throw new AkumaBodyRequestError(action, "voided", evidence);
+}
+
+function decodeVoidedOwnerFailure(
+  failure: unknown | undefined,
+  decodeFailure: ((failure: unknown) => Error | null) | undefined,
+): Error | null {
+  if (failure === undefined || decodeFailure === undefined) return null;
+  try {
+    return decodeFailure(failure);
+  } catch {
+    return null;
+  }
+}
+
+function withRequestMetadata<Response extends object>(
+  response: Response,
+  id: string,
+  action: string,
+): Response & Readonly<{ requestId: string; action: string }> {
+  Object.defineProperties(response, {
+    requestId: { value: id, enumerable: false },
+    action: { value: action, enumerable: false },
+  });
+  return response as Response & Readonly<{ requestId: string; action: string }>;
+}
+
 /** Generic rendezvous only: operation owners supply their own request and result codecs. */
 export async function requestBodyCommand<Input, Output, Service, Reference = Service>(
   input: Readonly<{
@@ -44,7 +79,9 @@ export async function requestBodyCommand<Input, Output, Service, Reference = Ser
       const receipt = decodeReceiptEnvelope(await readFile(path, "utf8"), id, input.command.action);
       if (receipt === null) throw new Error(`Akuma body request ${id} has an invalid receipt`);
       if (receipt.state === "refused") throw new AkumaBodyRequestError(receipt.action, "refused", receipt.diagnostic);
-      if (receipt.state === "voided") throw new AkumaBodyRequestError(receipt.action, "voided", receipt.evidence);
+      if (receipt.state === "voided") {
+        throwVoidedRequestFailure(receipt.action, receipt.evidence, receipt.failure, input.command.decodeFailure);
+      }
       if ("reference" in receipt) {
         let reference: Reference;
         try {
@@ -55,15 +92,14 @@ export async function requestBodyCommand<Input, Output, Service, Reference = Ser
             `transport integrity: request ${id} action ${input.command.action} returned an invalid durable reference: ${diagnostic}`,
           );
         }
-        const response = {
-          kind: "reference" as const,
-          reference,
-        };
-        Object.defineProperties(response, {
-          requestId: { value: id, enumerable: false },
-          action: { value: input.command.action, enumerable: false },
-        });
-        return response as Readonly<{ kind: "reference"; reference: Reference; requestId: string; action: string }>;
+        return withRequestMetadata(
+          {
+            kind: "reference" as const,
+            reference,
+          },
+          id,
+          input.command.action,
+        );
       }
       if (receipt.outcome.kind === "failed") {
         const failure = receipt.outcome.failure;
@@ -78,12 +114,7 @@ export async function requestBodyCommand<Input, Output, Service, Reference = Ser
           `transport integrity: request ${id} action ${input.command.action} returned an invalid live result: ${diagnostic}`,
         );
       }
-      const response = { kind: "returned" as const, result };
-      Object.defineProperties(response, {
-        requestId: { value: id, enumerable: false },
-        action: { value: input.command.action, enumerable: false },
-      });
-      return response as Readonly<{ kind: "returned"; result: Output; requestId: string; action: string }>;
+      return withRequestMetadata({ kind: "returned" as const, result }, id, input.command.action);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }

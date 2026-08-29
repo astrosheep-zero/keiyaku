@@ -360,7 +360,6 @@ function tellInvocation(
         admission: { tellId: "tell-1", fact: "recorded" as const },
         wake,
       },
-      observation: { kind: "observed" as const, ...observation },
     },
   };
 }
@@ -707,7 +706,8 @@ test("Akuma mutation snapshots omit observation context", () => {
     tellInvocation(observation),
   );
   assert.doesNotMatch(told, /^wake pursuing/u);
-  assert.match(told, /working/u);
+  assert.match(told, /✓ tell pursuing body=1/u);
+  assert.doesNotMatch(told, /working/u);
   assert.doesNotMatch(told, /STILL RUNNING/u);
   assert.doesNotMatch(told, /^tasks /mu);
   assert.doesNotMatch(told, /^changes /mu);
@@ -720,17 +720,12 @@ test("Akuma mutation snapshots omit observation context", () => {
         {
           id: observation.status.id,
           evidence: "killed",
-          observation: {
-            kind: "observed",
-            ...observation,
-            status: { ...observation.status, life: "killed" },
-          },
         },
       ],
     },
   });
   assert.doesNotMatch(killed, /^kill /mu);
-  assert.match(killed, /working/u);
+  assert.doesNotMatch(killed, /working/u);
   assert.doesNotMatch(killed, /tasks 1|changes 0/u);
   assert.doesNotMatch(killed, /⋮ \d+ omitted/u);
   assert.doesNotMatch(killed, /^tasks /mu);
@@ -742,7 +737,7 @@ test("Akuma mutation snapshots omit observation context", () => {
       kind: "akuma",
       action: "kill",
       result: {
-        results: [{ id: observation.status.id, evidence, observation: { kind: "observed", ...observation } }],
+        results: [{ id: observation.status.id, evidence }],
       },
     });
     const expected =
@@ -763,14 +758,6 @@ test("Akuma mutation snapshots omit observation context", () => {
         {
           id: observation.status.id,
           evidence: "already-stopped",
-          observation: {
-            kind: "observed",
-            ...observation,
-            status: {
-              ...observation.status,
-              timeline: { kind: "idle", entries: [], omitted: 0, ...emptyReported },
-            },
-          },
         },
       ],
     },
@@ -811,7 +798,7 @@ test("Akuma mutation snapshots omit observation context", () => {
   assert.equal(callText.split("\n").at(-1), "● STILL RUNNING");
 });
 
-test("Tell delivery state lives on its timeline row", () => {
+test("Tell output preserves only its direct admission and wake evidence", () => {
   const base = akumaObservation({
     id: "aku/worker/1234abcd",
     life: "asleep",
@@ -837,8 +824,8 @@ test("Tell delivery state lives on its timeline row", () => {
   });
   const command = parseArgv(["tell", base.status.id, "steer"]).command;
   const told = renderAkumaText(command, tellInvocation(base, { kind: "told" }));
-  assert.match(told, /✓ told\s+“steer”/u);
-  assert.doesNotMatch(told, /wake told/u);
+  assert.match(told, /✓ tell told/u);
+  assert.doesNotMatch(told, /“steer”|wake/u);
 
   const pending = akumaObservation({
     ...base.status,
@@ -863,11 +850,12 @@ test("Tell delivery state lives on its timeline row", () => {
     },
   });
   const held = renderAkumaText(command, tellInvocation(pending, { kind: "held" }));
-  assert.match(held, /⧗ tell\s+“steer”/u);
-  assert.doesNotMatch(held, /wake|pending .* tells/u);
+  assert.match(held, /✓ tell held/u);
+  assert.doesNotMatch(held, /wake|pending .* tells|“steer”/u);
 
   const pursuing = renderAkumaText(command, tellInvocation(pending, { kind: "pursuing", bodySequence: 1 }));
-  assert.doesNotMatch(pursuing, /wake|pending .* tells/u);
+  assert.match(pursuing, /✓ tell pursuing body=1/u);
+  assert.doesNotMatch(pursuing, /wake|pending .* tells|“steer”/u);
 
   const failed = renderAkumaText(
     command,
@@ -879,7 +867,7 @@ test("Tell delivery state lives on its timeline row", () => {
   );
   assert.equal((failed.match(/tell delivery failed/g) ?? []).length, 1);
   assert.match(failed, /! tell delivery failed · child exited · log \/tmp\/run\.log 3\.\.9/u);
-  assert.match(failed, /⧗ tell\s+“steer”/u);
+  assert.doesNotMatch(failed, /⧗ tell\s+“steer”/u);
   assert.doesNotMatch(failed, /wake failed/u);
 });
 

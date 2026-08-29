@@ -9,7 +9,7 @@ import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
 import { HeldAkumaLeash, initializeHeart, readHeart, type Soul } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
-import type { ProviderAdapter } from "../src/akuma/provider.js";
+import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import { moveAlias } from "../src/alias/index.js";
 import { invoke } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
@@ -84,8 +84,13 @@ async function runningAkuma(world: Awaited<ReturnType<typeof testWorld>>) {
     admitOptions(options) {
       return { kind: "admitted", options };
     },
-    async start() {
-      return {
+    start(input) {
+      return createProviderAttempt(input.signal, async (custody) => {
+        const stop = async () => {
+          aborted = true;
+          settle({ kind: "failed", diagnostic: "stopped" });
+        };
+        const session = {
         admission: { fence: "nuke-fixture-turn" },
         events: {
           async *[Symbol.asyncIterator]() {
@@ -96,11 +101,16 @@ async function runningAkuma(world: Awaited<ReturnType<typeof testWorld>>) {
           },
         },
         completion,
-        async abort() {
-          aborted = true;
-          settle({ kind: "failed", diagnostic: "stopped" });
-        },
-      };
+        abort: stop,
+        forceDispose: stop,
+        };
+        custody.own({
+          closed: completion.then(() => undefined),
+          abort: stop,
+          forceDispose: stop,
+        });
+        return session;
+      });
     },
   };
   const launch: BodyLaunch = {
@@ -248,7 +258,7 @@ test("confirmed nuke cleans a legacy Heart schema and continues independent owne
       "CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)",
     );
     leash.close();
-    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 20/u);
+    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 21/u);
     await assert.rejects(HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
     writeFileSync(allocated.paths.log, "stdio\n");
     writeFileSync(`${allocated.paths.heart}-wal`, "wal\n");

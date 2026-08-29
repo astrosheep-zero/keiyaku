@@ -364,7 +364,8 @@ identity in its message, and is deliberately left without a ref or durable
 fact. If destroy hooks change the captured `HEAD` or tree, cleanup writes a
 second recovery commit over the final tree with the first recovery as parent;
 the reported tip therefore keeps both captures reachable together while it
-survives. The result exposes only that final tip and labels it ephemeral. Git
+survives. An accepted mutation exposes only that final tip as
+`recoverySnapshot`, with no retention literal or effects collection. Git
 may prune the entire recovery chain at any time allowed by repository policy.
 Ignored bytes are outside the capture and are removed with the worktree. Dirty
 submodule internals cannot be represented by the superproject tree and still

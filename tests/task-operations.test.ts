@@ -4,13 +4,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { TaskAuthorityCorruptionError, Tasks, type TaskId, type TaskTreeNode } from "../src/task/index.js";
-import { decodeTaskMutationRequest, executeTaskMutation } from "../src/task/mutation.js";
+import { decodeTaskMutationRequest, executeTaskMutation, type TaskMutationBodyRequest } from "../src/task/mutation.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { parseTaskDocument, serializeTaskDocument } from "../src/task/document.js";
 import { parseTaskId } from "../src/task/identity.js";
 import { settleTask } from "../src/task/operations.js";
 import { DEFAULT_TASK_LOCK_TIMEOUT_MS, replaceAuthority, withTaskLocks } from "../src/task/store.js";
-import { World } from "../src/world.js";
+import { World, type WorldRoot } from "../src/world.js";
+
+type Assert<Condition extends true> = Condition;
+
+export type TaskBodyWorldRequiresCanonicalMint = Assert<
+  [TaskMutationBodyRequest["world"]] extends [WorldRoot] ? false : true
+>;
 
 async function world(): { root: string; tasks: ReturnType<typeof Tasks.of> } {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-tasks-"));
@@ -760,11 +766,11 @@ test("forced-local Task mutation execution preserves owner validation and authen
   );
   assert.throws(
     () => decodeTaskMutationRequest("task.add", { input: { title: "Invalid", actor: "forged" } }),
-    /unknown field/u,
+    /invalid task\.add request/u,
   );
   assert.deepEqual(decodeTaskMutationRequest("task.start", { ids: ["task/one", "task/two"] }), {
     action: "task.start",
     ids: ["task/one", "task/two"],
   });
-  assert.throws(() => decodeTaskMutationRequest("task.start", { ids: [] }), /at least one TaskId/u);
+  assert.throws(() => decodeTaskMutationRequest("task.start", { ids: [] }), /invalid task\.start request/u);
 });

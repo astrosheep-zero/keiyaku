@@ -70,7 +70,10 @@ export const cliZones = [
     allow: [any("coordination/durable-file.ts"), types("cli/result.ts"), types("world.ts")],
   },
   { source: "cli/render/akuma-tool-command.ts", allow: [] },
-  { source: "cli/render/akuma-tool.ts", allow: [types("akuma/index.ts"), any("cli/render/akuma-tool-command.ts")] },
+  {
+    source: "cli/render/akuma-tool.ts",
+    allow: [types("akuma/index.ts"), types("index.ts"), any("cli/render/akuma-tool-command.ts")],
+  },
   {
     source: "cli/render/akuma.ts",
     allow: [
@@ -80,6 +83,7 @@ export const cliZones = [
       types("cli/commands/akuma-invoke.ts"),
       types("cli/parse.ts"),
       any("cli/render/akuma-tool.ts"),
+      any("akuma/akuma.ts", ["parseAkumaStatus"]),
       any("cli/render/terminal.ts", [
         "TextRenderContext",
         "displayColumns",
@@ -99,6 +103,7 @@ export const cliZones = [
       types("cli/commands/akuma-invoke.ts"),
       types("cli/parse.ts"),
       any("cli/render/akuma-tool.ts"),
+      any("akuma/akuma.ts", ["parseAkumaStatus"]),
       any("cli/render/terminal.ts", [
         "TextRenderContext",
         "displayColumns",

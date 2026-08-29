@@ -364,22 +364,21 @@ same direct placement cause after its complete dependent ContractId; an
 `already-terminal` continuation projects directly. The journal's `claimed` word
 remains in the record only. Arc reports its typed sequence and
 title as `chapter <N> · <title>`.
-Abandon reports its optional note and only the explicit workspace and recovery
-snapshot effects that occurred. Audit reports candidate, Verification, and
+Abandon reports its optional note and the one recovery snapshot coordinate when
+cleanup created one. Audit reports candidate, Verification, and
 target observations without describing the candidate as accepted or approved.
 
 The primary UI uses caller-facing domain words; internal journal and result-arm
 names remain confined to the record. Records show typed decision-relevant facts
 in order, without rereading reconciliation or settlement. Mechanically unchanged
-`ref` and `contract-file` effects are omitted from default accepted text so they
-cannot compete with the outcome; changed effects remain visible. JSON retains
-every effect exactly, and an unchanged effect remains available whenever it is
-carried by a typed lag, leak, stop, or recovery fact.
+`ref` and `contract-file` effects belong to reconciliation observation reports,
+not accepted invocation answers. Accepted JSON retains its typed public result;
+an unchanged physical condition is visible only when carried by a typed lag,
+leak, stop, or recovery coordinate.
 
-An abandonment recovery effect renders
-`✓ recovery-snapshot created <SnapshotId> ephemeral`. The word `ephemeral` is
-literal: the snapshot has no ref or durable fact and may already be unavailable
-after repository garbage collection.
+An abandonment recovery coordinate renders `✓ recovery snapshot <SnapshotId>`.
+It has no ref or durable fact and may already be unavailable after repository
+garbage collection.
 
 An opaque Contract ID, entry, ref, path, hash, diagnostic, or diff coordinate
 is indivisible. The renderer never inserts bytes, whitespace, ellipses, or a

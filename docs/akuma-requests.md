@@ -60,6 +60,19 @@ authority and have one writer: the Body holding its leash. Admission uses the
 request id for idempotence, so at-least-once claim observation produces at most
 one fact. There is no second store.
 
+The selected operation owner strictly decodes its request, live result, service
+evidence, and projected reference at this edge. Heart stores only the
+owner-minted service JSON and never imports or interprets that schema. When a
+returned live result or projected reference is malformed, the caller reports the
+ordinary `transport integrity: request` error; it is not an operation refusal.
+
+An owner may additionally recognize one ephemeral encoded domain failure. The
+generic pump carries those opaque bytes only beside the voided receipt and its
+ordinary Heart evidence; Heart neither interprets nor retains them. The caller
+uses that same owner's strict decoder to rethrow the public typed error. An
+absent, malformed, unknown, or executor failure remains the ordinary generic
+voided error, never an owner result wrapper.
+
 For call, the claim decoder first validates the action envelope, then selects
 the stated cwd or the hosting parent Soul cwd. Only then does it decode the frozen provider and
 options with the existing owners for that final cwd. The complete validated
@@ -127,7 +140,8 @@ The Fleet descriptor applies keyed permission before tell or kill runs; wait rem
 observation. A served wait stores only a service marker, never its observation or
 timeout result. A served tell stores only its target and the request id used as
 TellId. A served kill stores only ordered target/evidence references; lifecycle
-facts remain in each target Heart. Verb results and operation failures travel only
+facts remain in each target Heart. Tell and kill receipts contain only those
+primary results, never a post-action observation. Verb results and operation failures travel only
 in the live receipt and never become permission refusals or a generic result store.
 
 `contract.audit` carries the selected Repo's normalized primary-worktree
@@ -168,8 +182,8 @@ verdict, and optional summary. The direct parent reconstructs that Repo,
 supplies the authenticated requester as actor, reads Settings scoped to it for
 worktree hooks, and calls the same forced-local Library review executor as
 ordinary review. The live receipt preserves the complete ordinary review result,
-including its attestation, workspace disclosure, placement stop, physical
-effects, lag, and claim projection. An accepted request stores only the Repo
+including its attestation, workspace disclosure, placement stop, reconciliation
+and settlement lags, recovery coordinate, and claim projection. An accepted request stores only the Repo
 coordinate, ContractId, and owner-minted review fact id in Heart. A normal
 return without that reference, or an executor throw or cancellation, settles
 Heart `voided`; a later pump projects only an accepted reference and never reads

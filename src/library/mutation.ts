@@ -1,4 +1,4 @@
-import type { ContractHead, ContractId, JournalEntry } from "../core/facts/types.js";
+import type { ContractHead, ContractId, JournalEntry, SnapshotId } from "../core/facts/types.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import type { ReconcileReport } from "../protocol/reconcile.js";
 import type { RepositoryScope } from "../protocol/operations.js";
@@ -24,10 +24,9 @@ export type MutationResult<Value> = Readonly<
     facts: readonly JournalEntry[];
     head: ContractHead;
     value: Value;
-    effects: ReconcileCompletion["effects"];
     lags: ReconcileCompletion["lag"];
-    hookRuns?: readonly { phase: "create" | "destroy"; name: string }[];
-    settlement: SettlementReport;
+    settlementLags: SettlementReport["lags"];
+    recoverySnapshot?: SnapshotId;
   } & AcceptedObligations
 >;
 
@@ -63,18 +62,15 @@ export async function completeMutation<Value, PublicValue>(
     ...(accepted.cleanup === undefined ? {} : { cleanup: accepted.cleanup }),
     ...(accepted.leak === undefined ? {} : { leak: accepted.leak }),
   };
-  const hookRuns = [...(accepted.physical?.hookRuns ?? []), ...reports.flatMap((report) => report.hookRuns ?? [])];
+  const effects = [...(accepted.physical?.effects ?? []), ...reports.flatMap((report) => report.effects)];
+  const recoverySnapshot = effects.findLast((effect) => effect.kind === "recovery-snapshot")?.snapshot;
   return {
     facts: accepted.facts,
     head: accepted.head,
     value: value(accepted.value),
-    effects: [...(accepted.physical?.effects ?? []), ...reports.flatMap((report) => report.effects)],
     lags: [...(accepted.physical?.lag ?? []), ...reports.flatMap((report) => report.lag)],
-    ...(hookRuns.length === 0 ? {} : { hookRuns }),
-    settlement: {
-      actions: reports.flatMap((report) => report.settlement.actions),
-      lags: reports.flatMap((report) => report.settlement.lags),
-    },
+    settlementLags: reports.flatMap((report) => report.settlement.lags),
+    ...(recoverySnapshot === undefined ? {} : { recoverySnapshot }),
     ...obligations,
   };
 }
@@ -96,9 +92,6 @@ export async function completeHolderMutation<Value, PublicValue, Refusal>(
   });
   return {
     ...completed,
-    settlement: {
-      actions: completed.settlement.actions,
-      lags: [...completed.settlement.lags, ...deferred.lags],
-    },
+    settlementLags: [...completed.settlementLags, ...deferred.lags],
   };
 }

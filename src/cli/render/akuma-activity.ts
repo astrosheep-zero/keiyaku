@@ -1,18 +1,11 @@
-import type {
-  ActivityRow,
-  ActivitySnapshot,
-  ActivitySnapshotEntry,
-  KillEvidence,
-  ReportedFileChange,
-  SnapshotRow,
-} from "../../akuma/index.js";
-import { defaultWaitComplete } from "../../akuma/index.js";
+import type { ActivityRow, KillEvidence, ReportedFileChange } from "../../akuma/index.js";
 import type {
   AkumaObservation,
   AkumaObservationStage,
   CreatedTaskObservation,
   DispatchAssociation,
 } from "../../index.js";
+import { parseAkumaStatus } from "../../akuma/akuma.js";
 import type { AkumaInvocationResult } from "../commands/akuma-invoke.js";
 import type { ParsedCommand } from "../parse.js";
 import { toolRepr } from "./akuma-tool.js";
@@ -28,6 +21,15 @@ export const DEFAULT_CONTEXT: TextRenderContext = { columns: 80, color: false };
 const SNAPSHOT_RULER = "────────────";
 const TIME_WIDTH = 5;
 const VERB_WIDTH = 6;
+
+type FleetTimeline = AkumaObservation["status"]["timeline"];
+type FleetTimelineEntry = FleetTimeline["entries"][number];
+type FleetSnapshotRow = Extract<FleetTimelineEntry, { kind: "row" }>["row"];
+type FleetReportedFileChange = FleetTimeline["reportedChanges"][number];
+type RenderRow = ActivityRow | FleetSnapshotRow;
+type RenderEntry = Readonly<{ kind: "gap"; count: number }> | Readonly<{ kind: "row"; row: RenderRow }>;
+type RenderedSnapshot = FleetTimeline;
+type RenderedFileChange = ReportedFileChange | FleetReportedFileChange;
 
 function identity(id: string, alias?: string): string {
   return `${id}${alias === undefined ? "" : ` (${alias})`}`;
@@ -77,7 +79,7 @@ function clock(at: string): string {
     : "unknown";
 }
 
-function label(row: ActivityRow | SnapshotRow): string {
+function label(row: RenderRow): string {
   if (row.kind === "said") return "say";
   if (row.kind === "thought") return "think";
   if (row.kind === "note") return "note";
@@ -85,10 +87,11 @@ function label(row: ActivityRow | SnapshotRow): string {
   if (row.kind === "tell") return row.state === "told" ? "told" : "tell";
   if (row.kind === "outcome") return row.outcome.kind === "answered" ? "say" : "error";
   if (row.kind === "turn") return "call";
+  if (row.kind !== "tool") return row.kind;
   return toolRepr(row).label;
 }
 
-function mark(row: ActivityRow | SnapshotRow): "│" | "✓" | "!" | "⧖" | "⧗" | "?" {
+function mark(row: RenderRow): "│" | "✓" | "!" | "⧖" | "⧗" | "?" {
   if (row.kind === "outcome") return row.outcome.kind === "answered" ? "✓" : "!";
   if (row.kind === "tell" && row.state === "told") return "✓";
   if (row.kind === "tell" && row.state === "pending") return "⧗";
@@ -100,9 +103,7 @@ function mark(row: ActivityRow | SnapshotRow): "│" | "✓" | "!" | "⧖" | "�
   return "│";
 }
 
-function rowText(
-  row: ActivityRow | SnapshotRow,
-): Readonly<{ text: string; lines: number; middle?: true; suffix?: string }> {
+function rowText(row: RenderRow): Readonly<{ text: string; lines: number; middle?: true; suffix?: string }> {
   if (
     row.kind === "said" ||
     row.kind === "thought" ||
@@ -120,6 +121,7 @@ function rowText(
       ? { text: row.outcome.answer, lines: 3 }
       : { text: row.outcome.diagnostic, lines: 2 };
   if (row.kind === "turn") return { text: "", lines: 1 };
+  if (row.kind !== "tool") return { text: "", lines: 1 };
   const repr = toolRepr(row);
   return {
     text: repr.text,
@@ -138,7 +140,7 @@ function continuationPrefix(): string {
   return eventPrefix("│", "");
 }
 
-function quotedBody(row: ActivityRow | SnapshotRow): boolean {
+function quotedBody(row: RenderRow): boolean {
   return (
     row.kind === "said" ||
     row.kind === "thought" ||
@@ -166,12 +168,7 @@ function renderMiddleEllipsis(first: string, text: string, suffix: string, colum
   return `${first}${truncateMiddleDisplayText(text, Math.max(0, showSuffix ? withSuffix : remaining))}${showSuffix ? suffix : ""}`;
 }
 
-function renderRow(
-  row: ActivityRow | SnapshotRow,
-  context: TextRenderContext,
-  history: boolean,
-  first: string,
-): readonly string[] {
+function renderRow(row: RenderRow, context: TextRenderContext, history: boolean, first: string): readonly string[] {
   const value = rowText(row);
   const quoted = quotedBody(row);
   const quoteWidth = quoted ? 2 : 0;
@@ -187,8 +184,6 @@ function renderRow(
   });
   return quoted ? quoteLines(lines, first) : lines;
 }
-
-type RenderEntry = ActivitySnapshotEntry | Readonly<{ kind: "row"; row: ActivityRow }>;
 
 function groupedEntries(
   entries: readonly RenderEntry[],
@@ -211,7 +206,7 @@ function groupedEntries(
   return lines;
 }
 
-function groupedRows(rows: readonly ActivityRow[], context: TextRenderContext, history = false): readonly string[] {
+function groupedRows(rows: readonly RenderRow[], context: TextRenderContext, history = false): readonly string[] {
   return groupedEntries(
     rows.filter((row) => row.kind !== "turn").map((row) => ({ kind: "row", row })),
     context,
@@ -229,7 +224,7 @@ function taskDispositionMark(disposition: CreatedTaskRow["disposition"]): string
   return disposition === "blocked" ? "‖" : "○";
 }
 
-function changeStat(group: readonly ReportedFileChange[]): string {
+function changeStat(group: readonly RenderedFileChange[]): string {
   let added = 0;
   let removed = 0;
   for (const change of group) {
@@ -241,9 +236,9 @@ function changeStat(group: readonly ReportedFileChange[]): string {
 }
 
 function groupedChangeRows(
-  changes: readonly ReportedFileChange[],
+  changes: readonly RenderedFileChange[],
 ): readonly Readonly<{ path: string; stat: string }>[] {
-  const groups: ReportedFileChange[][] = [];
+  const groups: RenderedFileChange[][] = [];
   const seen = new Map<string, number>();
   for (const change of changes) {
     const index = seen.get(change.path);
@@ -255,7 +250,7 @@ function groupedChangeRows(
   return groups.map((group) => ({ path: group[0]!.path, stat: changeStat(group) }));
 }
 
-function renderReportedChangeLines(snapshot: ActivitySnapshot): readonly string[] {
+function renderReportedChangeLines(snapshot: RenderedSnapshot): readonly string[] {
   const rows = groupedChangeRows(snapshot.reportedChanges);
   const width = rows.reduce((max, row) => Math.max(max, row.stat.length), 0);
   return [
@@ -374,10 +369,9 @@ function killResultLabel(evidence: KillEvidence): string {
   return `! not killed · ${evidence}`;
 }
 
-function latestKillActivity(snapshot: ActivitySnapshot, context: TextRenderContext): readonly string[] {
-  const rows: ActivityRow[] = snapshot.entries.flatMap((entry) => (entry.kind === "row" ? [entry.row] : []));
-  const visible = rows.filter((row) => row.kind !== "turn");
-  const latest = visible.reduce<(typeof visible)[number] | undefined>(
+function latestKillActivity(snapshot: RenderedSnapshot, context: TextRenderContext): readonly string[] {
+  const rows: FleetSnapshotRow[] = snapshot.entries.flatMap((entry) => (entry.kind === "row" ? [entry.row] : []));
+  const latest = rows.reduce<(typeof rows)[number] | undefined>(
     (selected, row) => (selected === undefined || row.sequence > selected.sequence ? row : selected),
     undefined,
   );
@@ -396,6 +390,10 @@ export function killObservationText(
   return [...heading, ...activity, "", killResultLabel(evidence)].join("\n");
 }
 
+export function killResultText(id: string, evidence: KillEvidence, alias?: string): string {
+  return [...snapshotHeading(id, alias, undefined), "", killResultLabel(evidence)].join("\n");
+}
+
 export function mutationObservationStageText(
   id: string,
   observation: AkumaObservationStage,
@@ -407,12 +405,21 @@ export function mutationObservationStageText(
 }
 
 export function statusAnswer(view: Readonly<{ status: AkumaObservation["status"] }>): string | undefined {
-  if (!defaultWaitComplete(view.status)) return undefined;
+  if (!waitComplete(view.status)) return undefined;
   if (view.status.life !== "asleep") return undefined;
   if (view.status.readonly?.enforcement === "none") return undefined;
   const timeline = view.status.timeline;
   if (timeline.kind !== "idle" || timeline.outcome?.outcome.kind !== "answered") return undefined;
   return timeline.outcome.outcome.answer;
+}
+
+function waitComplete(status: AkumaObservation["status"]): boolean {
+  return (
+    status.life !== "running" &&
+    !status.timeline.entries.some(
+      (entry) => entry.kind === "row" && entry.row.kind === "tell" && entry.row.state === "pending",
+    )
+  );
 }
 
 function answerCallFailed(result: Extract<AkumaInvocationResult, { action: "call" }>["result"]): boolean {
@@ -422,7 +429,7 @@ function answerCallFailed(result: Extract<AkumaInvocationResult, { action: "call
 export function akumaRawAnswer(result: AkumaInvocationResult): string | undefined {
   if (result.action === "call") {
     if (answerCallFailed(result.result) || result.result.observation.kind !== "observed") return undefined;
-    return statusAnswer({ status: result.result.observation.status });
+    return statusAnswer({ status: parseAkumaStatus(result.result.observation.status) });
   }
   if (result.action === "wait" && result.result.observations.length === 1)
     return statusAnswer(result.result.observations[0]!);
@@ -440,7 +447,7 @@ export function waitText(
 ): string {
   const alias = result.alias;
   const total = result.result.observations.length + result.result.unobserved.length;
-  const done = result.result.observations.filter((observation) => defaultWaitComplete(observation.status)).length;
+  const done = result.result.observations.filter((observation) => waitComplete(observation.status)).length;
   const blocks = [
     ...result.result.observations.map((observation) => {
       const answer = statusAnswer(observation);
@@ -472,20 +479,12 @@ export function historyText(
   ].join("\n");
 }
 
-export function tellText(
-  result: Extract<AkumaInvocationResult, { action: "tell"; mode: "ordinary" }>,
-  context: TextRenderContext,
-): string {
+export function tellText(result: Extract<AkumaInvocationResult, { action: "tell"; mode: "ordinary" }>): string {
   const wake = result.result.tell.wake;
-  const facts =
-    wake.kind === "failed"
-      ? [
-          `! tell delivery failed · ${safeText(wake.diagnostic)}${wake.child === undefined ? "" : ` · log ${wake.child.log.path} ${wake.child.log.from}..${wake.child.log.to}`}`,
-        ]
-      : [];
-  return mutationObservationStageText(result.result.akuma, result.result.observation, context, {
-    ...(result.alias === undefined ? {} : { alias: result.alias }),
-    facts,
-    showLife: false,
-  });
+  const target = identity(result.result.akuma, result.alias);
+  if (wake.kind === "failed") {
+    const child = "child" in wake ? wake.child : undefined;
+    return `${target}\n${SNAPSHOT_RULER}\n! tell delivery failed · ${safeText(wake.diagnostic)}${child === undefined ? "" : ` · log ${child.log.path} ${child.log.from}..${child.log.to}`}`;
+  }
+  return `${target}\n${SNAPSHOT_RULER}\n✓ tell ${wake.kind}${wake.kind === "pursuing" ? ` body=${wake.bodySequence}` : ""}`;
 }

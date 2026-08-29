@@ -2,6 +2,7 @@
 import {
   Akuma,
   AkumaNotBornError,
+  akumaIdSchema,
   defaultWaitComplete,
   type ActivityHistory,
   type OutcomeRow,
@@ -26,6 +27,7 @@ import {
   isKillResult,
   isTellResult,
   isWaitResult,
+  fleetResultSchemas,
   type AkumaKillResult,
   type AkumaObservation,
   type AkumaObservationStage,
@@ -34,6 +36,8 @@ import {
   type AkumaWaitResult,
   type CreatedTaskObservation,
   type DispatchAssociation,
+  parseAkumaObservation,
+  parseCreatedTaskObservation,
 } from "./fleet-result.js";
 export { isKillResult, isTellResult, isWaitResult } from "./fleet-result.js";
 export type {
@@ -47,7 +51,8 @@ export type {
   DispatchAssociation,
 } from "./fleet-result.js";
 import { scopeForRepo, type Repo } from "./repo.js";
-import { parseAkuId, parsePublicHistoryId } from "../akuma/identity.js";
+import { parsePublicHistoryId } from "../akuma/identity.js";
+import { z } from "zod";
 
 export type AkumaWaitInput = AkumaSetAddressInput &
   Readonly<{
@@ -118,7 +123,9 @@ async function createdTasksFor(
     const failed = { kind: "failed" as const, diagnostic: createdTaskDiagnostic(error) };
     return statuses.map(() => failed);
   }
-  return statuses.map((status) => ({ kind: "present", rows: board.selectCreatedBy(status.id) }));
+  return statuses.map((status) =>
+    parseCreatedTaskObservation({ kind: "present", rows: board.selectCreatedBy(status.id) }),
+  );
 }
 
 async function observeAkuma(status: AkumaStatus, path: WorldRoot, repo?: Repo): Promise<AkumaObservation> {
@@ -150,11 +157,13 @@ async function observeAkumaSet(
 ): Promise<readonly AkumaObservation[]> {
   const created = await createdTasksFor(path, statuses);
   return await Promise.all(
-    statuses.map(async (status, index) => ({
-      status,
-      contract: await dispatchAssociation(repo, status.id),
-      createdTasks: created[index]!,
-    })),
+    statuses.map(async (status, index) =>
+      parseAkumaObservation({
+        status,
+        contract: await dispatchAssociation(repo, status.id),
+        createdTasks: created[index]!,
+      }),
+    ),
   );
 }
 
@@ -239,11 +248,11 @@ export async function executeWaitAkuma(input: WaitExecutionInput): Promise<Akuma
       round.statuses.length > 0 &&
       (input.completion === "any" ? settled.some(Boolean) : round.unobserved.length === 0 && settled.every(Boolean));
     if (completed || (deadline !== undefined && performance.now() >= deadline)) {
-      return {
+      return fleetResultSchemas.wait.parse({
         completion: input.completion,
         observations: await observeAkumaSet(round.statuses, input.path, input.repo),
         unobserved: round.unobserved,
-      };
+      });
     }
     await delay(
       deadline === undefined ? POLL_MS : Math.min(POLL_MS, Math.max(0, deadline - performance.now())),
@@ -276,11 +285,10 @@ export async function executeTellAkuma(input: TellExecutionInput): Promise<Akuma
           ...(input.recordedAt === undefined ? {} : { recordedAt: input.recordedAt }),
         });
   input.signal?.throwIfAborted();
-  return {
+  return fleetResultSchemas.tell.parse({
     akuma: input.id,
     tell,
-    observation: await observeAkumaStage(input.path, input.id, input.repo, tell.admission.tellId),
-  };
+  });
 }
 
 type KillExecutionInput = Readonly<{
@@ -295,15 +303,9 @@ export async function executeKillAkuma(input: KillExecutionInput): Promise<Akuma
   const handles = input.ids.map((id) => source(input.path).of({ id }));
   const evidence = await Promise.all(handles.map(async (handle) => await handle.kill()));
   input.signal?.throwIfAborted();
-  return {
-    results: await Promise.all(
-      input.ids.map(async (id, index) => ({
-        id,
-        evidence: evidence[index]!,
-        observation: await observeAkumaStage(input.path, id, input.repo),
-      })),
-    ),
-  };
+  return fleetResultSchemas.kill.parse({
+    results: input.ids.map((id, index) => ({ id, evidence: evidence[index]! })),
+  });
 }
 
 function forwardedFleetCommandResult(
@@ -326,24 +328,58 @@ function forwardedFleetCommandResult(
     if (action === "akuma.wait" && isWaitResult(response.result)) return response.result;
     if (action === "akuma.tell" && isTellResult(response.result)) return response.result;
     if (action === "akuma.kill" && isKillResult(response.result)) return response.result;
-    throw new Error(`transport integrity: Fleet ${action} returned an invalid live result`);
+    throw new Error(`transport integrity: request Fleet ${action} returned an invalid live result`);
   }
   throw new Error("Akuma body request terminal Fleet reference cannot reproduce an expired live result");
 }
 
+const nonblankTextSchema = z.string().refine((value) => value.trim() !== "");
+const fleetTargetsSchema = z
+  .array(akumaIdSchema)
+  .min(1)
+  .superRefine((ids, context) => {
+    if (ids.some((id, index) => index > 0 && ids[index - 1]! >= id))
+      context.addIssue({ code: "custom", message: "expected a strictly ordered target set" });
+  });
+const waitRequestSchema = z
+  .object({
+    targets: fleetTargetsSchema,
+    completion: z.enum(["any", "all"]),
+    timeoutMs: z.number().int().nonnegative().optional(),
+  })
+  .strict()
+  .transform(({ timeoutMs, ...request }) => ({
+    action: "akuma.wait" as const,
+    ...request,
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+  }));
+const tellRequestSchema = z
+  .object({ target: akumaIdSchema, body: z.string() })
+  .strict()
+  .transform((request) => ({ action: "akuma.tell" as const, ...request }));
+const killRequestSchema = z
+  .object({ targets: fleetTargetsSchema })
+  .strict()
+  .transform((request) => ({ action: "akuma.kill" as const, ...request }));
+const waitServiceSchema = z.object({ action: z.literal("akuma.wait") }).strict();
+const tellServiceSchema = z
+  .object({ action: z.literal("akuma.tell"), target: akumaIdSchema, tellId: nonblankTextSchema })
+  .strict();
+const killServiceSchema = z
+  .object({
+    action: z.literal("akuma.kill"),
+    results: z.array(z.object({ id: akumaIdSchema, evidence: fleetResultSchemas.killEvidence }).strict()),
+  })
+  .strict();
 type FleetRequest =
-  | Readonly<{
-      action: "akuma.wait";
-      targets: readonly AkumaStatus["id"][];
-      completion: "any" | "all";
-      timeoutMs?: number;
-    }>
-  | Readonly<{ action: "akuma.tell"; target: AkumaStatus["id"]; body: string }>
-  | Readonly<{ action: "akuma.kill"; targets: readonly AkumaStatus["id"][] }>;
+  | (Omit<z.infer<typeof waitRequestSchema>, "targets"> & Readonly<{ targets: readonly AkumaStatus["id"][] }>)
+  | z.infer<typeof tellRequestSchema>
+  | (Omit<z.infer<typeof killRequestSchema>, "targets"> & Readonly<{ targets: readonly AkumaStatus["id"][] }>);
 type FleetService =
-  | Readonly<{ action: "akuma.wait" }>
-  | Readonly<{ action: "akuma.tell"; target: AkumaStatus["id"]; tellId: string }>
-  | Readonly<{ action: "akuma.kill"; results: readonly Readonly<{ id: AkumaStatus["id"]; evidence: KillEvidence }>[] }>;
+  | z.infer<typeof waitServiceSchema>
+  | z.infer<typeof tellServiceSchema>
+  | (Omit<z.infer<typeof killServiceSchema>, "results"> &
+      Readonly<{ results: readonly Readonly<{ id: AkumaStatus["id"]; evidence: KillEvidence }>[] }>);
 
 export type FleetRequestPort = Readonly<{
   wait(
@@ -420,105 +456,19 @@ function fleetPayload(value: unknown): Readonly<Record<string, unknown>> | null 
     : null;
 }
 
-function exactFleetKeys(value: Readonly<Record<string, unknown>>, expected: readonly string[]): boolean {
-  const actual = Object.keys(value).sort();
-  const sorted = [...expected].sort();
-  return actual.length === sorted.length && actual.every((key, index) => key === sorted[index]);
-}
-
-function fleetIds(value: unknown): readonly AkumaStatus["id"][] | null {
-  if (!Array.isArray(value) || value.length === 0 || value.some((id) => typeof id !== "string")) return null;
-  const ids: AkumaStatus["id"][] = [];
-  for (const valueId of value) {
-    const id = canonicalFleetAkuId(valueId);
-    if (id === null || (ids.length > 0 && ids[ids.length - 1]! >= id)) return null;
-    ids.push(id);
-  }
-  return ids;
-}
-
-function canonicalFleetAkuId(value: unknown): AkumaStatus["id"] | null {
-  if (typeof value !== "string") return null;
-  try {
-    const id = parseAkuId(value).id;
-    return id === value ? id : null;
-  } catch {
-    return null;
-  }
-}
-
-function decodeFleetRequest(action: string, value: unknown): FleetRequest | null {
-  const payload = fleetPayload(value);
-  if (payload === null) return null;
-  if (action === "akuma.wait") {
-    const targets = fleetIds(payload.targets);
-    if (
-      !exactFleetKeys(payload, ["completion", "targets", ...(payload.timeoutMs === undefined ? [] : ["timeoutMs"])]) ||
-      targets === null ||
-      (payload.completion !== "any" && payload.completion !== "all") ||
-      (payload.timeoutMs !== undefined &&
-        (!Number.isSafeInteger(payload.timeoutMs) || (payload.timeoutMs as number) < 0))
-    )
-      return null;
-    return {
-      action,
-      targets,
-      completion: payload.completion,
-      ...(payload.timeoutMs === undefined ? {} : { timeoutMs: payload.timeoutMs as number }),
-    };
-  }
-  if (action === "akuma.tell") {
-    const target = canonicalFleetAkuId(payload.target);
-    return exactFleetKeys(payload, ["body", "target"]) && target !== null && typeof payload.body === "string"
-      ? { action, target, body: payload.body }
-      : null;
-  }
-  const targets = fleetIds(payload.targets);
-  return action === "akuma.kill" && exactFleetKeys(payload, ["targets"]) && targets !== null
-    ? { action, targets }
-    : null;
+function decodeFleetRequest(action: FleetRequest["action"], value: unknown): FleetRequest | null {
+  const schema =
+    action === "akuma.wait" ? waitRequestSchema : action === "akuma.tell" ? tellRequestSchema : killRequestSchema;
+  const parsed = schema.safeParse(value);
+  return parsed.success ? parsed.data : null;
 }
 
 function decodeFleetService(action: FleetRequest["action"], value: unknown): FleetService {
-  const service = fleetPayload(value);
-  if (service === null || service.action !== action) throw new Error("malformed stored Fleet service evidence");
-  if (service.action === "akuma.wait" && exactFleetKeys(service, ["action"])) return { action: service.action };
-  if (service.action === "akuma.tell") {
-    const target = canonicalFleetAkuId(service.target);
-    if (
-      exactFleetKeys(service, ["action", "target", "tellId"]) &&
-      target !== null &&
-      typeof service.tellId === "string" &&
-      service.tellId.trim() !== ""
-    )
-      return { action: service.action, target, tellId: service.tellId };
-  }
-  if (service.action === "akuma.kill" && Array.isArray(service.results)) {
-    const results: Array<Readonly<{ id: AkumaStatus["id"]; evidence: KillEvidence }>> = [];
-    for (const entry of service.results) {
-      const item = fleetPayload(entry);
-      const id = item === null ? null : canonicalFleetAkuId(item.id);
-      if (item === null || !exactFleetKeys(item, ["evidence", "id"]) || id === null || !isKillEvidence(item.evidence))
-        throw new Error("malformed stored Fleet service evidence");
-      results.push({ id, evidence: item.evidence });
-    }
-    return {
-      action: service.action,
-      results,
-    };
-  }
-  throw new Error("malformed stored Fleet service evidence");
-}
-
-function isKillEvidence(value: unknown): value is KillEvidence {
-  return (
-    value === "killed" ||
-    value === "already-killed" ||
-    value === "already-stopped" ||
-    value === "hung" ||
-    value === "untidy" ||
-    value === "unavailable"
-  );
+  const schema =
+    action === "akuma.wait" ? waitServiceSchema : action === "akuma.tell" ? tellServiceSchema : killServiceSchema;
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) throw new Error("malformed stored Fleet service evidence");
+  return parsed.data;
 }
 
 /** Fleet owns its Body Request payload, live result, and durable service codecs. */
@@ -534,18 +484,19 @@ export function fleetRequestCommand(
     decodeRequest: (payload) => decodeFleetRequest(action, payload),
     encodeResult: (result) => result,
     decodeResult: (result) => {
-      const valid =
+      const schema =
         action === "akuma.wait"
-          ? isWaitResult(result)
+          ? fleetResultSchemas.wait
           : action === "akuma.tell"
-            ? isTellResult(result)
-            : isKillResult(result);
-      if (!valid) throw new Error(`Akuma body request returned an invalid live result for ${action}`);
-      return result as AkumaWaitResult | AkumaTellResult | AkumaKillResult;
+            ? fleetResultSchemas.tell
+            : fleetResultSchemas.kill;
+      const parsed = schema.safeParse(result);
+      if (!parsed.success) throw new Error(`Akuma body request returned an invalid live result for ${action}`);
+      return parsed.data;
     },
-    encodeService: (service) => service,
+    encodeService: (service) => decodeFleetService(action, service),
     decodeService: (service) => decodeFleetService(action, service),
-    projectService: (service) => service,
+    projectService: (service) => decodeFleetService(action, service),
     decodeReference: (reference) => decodeFleetService(action, reference),
     isPermitted: (allowed) => action === "akuma.wait" || allowed.includes(action),
     decodeExecutionContext: decodeFleetExecutionContext,
@@ -601,43 +552,14 @@ async function attachObservationContract(
   return { ...observation, contract: await dispatchAssociation(repo, observation.status.id) };
 }
 
-async function attachObservationStage(
-  repo: Repo | undefined,
-  observation: AkumaObservationStage,
-): Promise<AkumaObservationStage> {
-  if (repo === undefined || observation.kind !== "observed") return observation;
-  return { ...observation, ...(await attachObservationContract(repo, observation)) };
-}
-
 async function attachWaitContracts(repo: Repo | undefined, result: AkumaWaitResult): Promise<AkumaWaitResult> {
-  return repo === undefined
-    ? result
-    : {
-        ...result,
-        observations: await Promise.all(
-          result.observations.map((observation) => attachObservationContract(repo, observation)),
-        ),
-      };
-}
-
-async function attachTellContract(repo: Repo | undefined, result: AkumaTellResult): Promise<AkumaTellResult> {
-  return repo === undefined
-    ? result
-    : { ...result, observation: await attachObservationStage(repo, result.observation) };
-}
-
-async function attachKillContracts(repo: Repo | undefined, result: AkumaKillResult): Promise<AkumaKillResult> {
-  return repo === undefined
-    ? result
-    : {
-        ...result,
-        results: await Promise.all(
-          result.results.map(async (entry) => ({
-            ...entry,
-            observation: await attachObservationStage(repo, entry.observation),
-          })),
-        ),
-      };
+  if (repo === undefined) return result;
+  return fleetResultSchemas.wait.parse({
+    ...result,
+    observations: await Promise.all(
+      result.observations.map((observation) => attachObservationContract(repo, observation)),
+    ),
+  });
 }
 
 function directAddress(values: Record<string, unknown>): AkumaAddressInput {
@@ -719,7 +641,7 @@ export async function killAkuma(
       command: fleetRequestCommand("akuma.kill"),
       value: { action: "akuma.kill", targets: addressed.ids },
     });
-    return await attachKillContracts(input.repo, forwardedFleetCommandResult(response, "akuma.kill"));
+    return forwardedFleetCommandResult(response, "akuma.kill");
   }
   return await executeKillAkuma({
     path: addressed.path,
@@ -747,10 +669,7 @@ export async function tellAkuma(
       command: fleetRequestCommand("akuma.tell"),
       value: { action: "akuma.tell", target: addressed.id, body: values.body },
     });
-    return await attachTellContract(
-      values.repo as Repo | undefined,
-      forwardedFleetCommandResult(response, "akuma.tell"),
-    );
+    return forwardedFleetCommandResult(response, "akuma.tell");
   }
   return await executeTellAkuma({
     path: addressed.path,

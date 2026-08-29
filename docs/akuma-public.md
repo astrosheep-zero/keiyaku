@@ -100,6 +100,11 @@ coordinate; Body coordinates remain private to Body lifecycle facts.
 it never re-evaluates provider capability or turns that fact into a warning
 type.
 
+Akuma owns one strict Body-boundary schema for its caller-visible status and
+timeline projection. Its exported TypeScript projection type derives from that
+schema, and local and forwarded readers consume the same decoded value; Fleet
+does not restate an Akuma status or activity shape.
+
 `tell(body)` returns one typed mutation result: the allocated TellId, its
 recorded Heart admission, and durable wake custody evidence. It does not imply
 delivery, provider observation, or turn entry:

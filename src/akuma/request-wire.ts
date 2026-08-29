@@ -1,10 +1,43 @@
 import { randomUUID } from "node:crypto";
 import { rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { z } from "zod";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
-export type RequestEnvelope = Readonly<{ id: string; action: string; payload: unknown }>;
+const requestIdSchema = z.string().regex(UUID);
+const actionSchema = z.string().refine((value) => value.trim() !== "");
+
+const requestEnvelopeSchema = z.object({ id: requestIdSchema, action: actionSchema, payload: z.unknown() }).strict();
+
+const upstreamRequestFailureSchema = z.union([
+  z.object({ kind: z.literal("akuma-not-born"), id: z.string() }).strict(),
+  z.object({ kind: z.literal("failed"), diagnostic: z.string() }).strict(),
+]);
+
+const returnedEnvelopeSchema = z.union([
+  z.object({ kind: z.literal("returned"), result: z.unknown() }).strict(),
+  z.object({ kind: z.literal("failed"), failure: upstreamRequestFailureSchema }).strict(),
+]);
+
+const receiptEnvelopeSchema = z.union([
+  z
+    .object({ id: requestIdSchema, action: actionSchema, state: z.literal("served"), outcome: returnedEnvelopeSchema })
+    .strict(),
+  z.object({ id: requestIdSchema, action: actionSchema, state: z.literal("served"), reference: z.unknown() }).strict(),
+  z.object({ id: requestIdSchema, action: actionSchema, state: z.literal("refused"), diagnostic: z.string() }).strict(),
+  z
+    .object({
+      id: requestIdSchema,
+      action: actionSchema,
+      state: z.literal("voided"),
+      evidence: z.string(),
+      failure: z.unknown().optional(),
+    })
+    .strict(),
+]);
+
+export type RequestEnvelope = z.infer<typeof requestEnvelopeSchema>;
 /**
  * A Body Request operation is owned by the verb that defines its public
  * values.  Transport only carries the opaque values produced here.
@@ -15,6 +48,8 @@ export type RequestCommand<Input, Output, Service, Reference = Service, Context 
   decodeRequest(payload: unknown): Input | null;
   encodeResult(result: Output): unknown;
   decodeResult(result: unknown): Output;
+  encodeFailure?(error: unknown): unknown | null;
+  decodeFailure?(failure: unknown): Error | null;
   encodeService(service: Service): unknown;
   decodeService(service: unknown): Service;
   projectService(service: Service): Reference;
@@ -38,6 +73,7 @@ export type ErasedRequest = Readonly<{
   payloadJson: string;
   isPermitted(allowed: readonly string[]): boolean;
   execute(context: unknown): Promise<ErasedRequestExecution>;
+  encodeFailure(error: unknown): unknown | null;
   projectServiceJson(serviceJson: string): unknown;
   projectChild(child: string): unknown;
 }>;
@@ -67,6 +103,7 @@ export function eraseRequestCommand<Input, Output, Service, Reference, Context>(
                 serviceJson: JSON.stringify(command.encodeService(served.service)),
               };
         },
+        encodeFailure: (error) => command.encodeFailure?.(error) ?? null,
         projectServiceJson: (serviceJson) => command.projectService(command.decodeService(JSON.parse(serviceJson))),
         projectChild: (child) => {
           if (command.projectChild === undefined)
@@ -77,29 +114,9 @@ export function eraseRequestCommand<Input, Output, Service, Reference, Context>(
     },
   };
 }
-export type UpstreamRequestFailure =
-  | Readonly<{ kind: "akuma-not-born"; id: string }>
-  | Readonly<{ kind: "failed"; diagnostic: string }>;
-export type ReturnedEnvelope =
-  | Readonly<{ kind: "returned"; result: unknown }>
-  | Readonly<{ kind: "failed"; failure: UpstreamRequestFailure }>;
-export type ReceiptEnvelope =
-  | (Readonly<{ id: string; action: string; state: "served" }> & Readonly<{ outcome: ReturnedEnvelope }>)
-  | (Readonly<{ id: string; action: string; state: "served" }> & Readonly<{ reference: unknown }>)
-  | Readonly<{ id: string; action: string; state: "refused"; diagnostic: string }>
-  | Readonly<{ id: string; action: string; state: "voided"; evidence: string }>;
-
-function object(value: unknown): Readonly<Record<string, unknown>> | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
-}
-
-function exactKeys(value: Readonly<Record<string, unknown>>, expected: readonly string[]): boolean {
-  const actual = Object.keys(value).sort();
-  const sorted = [...expected].sort();
-  return actual.length === sorted.length && actual.every((key, index) => key === sorted[index]);
-}
+export type UpstreamRequestFailure = z.infer<typeof upstreamRequestFailureSchema>;
+export type ReturnedEnvelope = z.infer<typeof returnedEnvelopeSchema>;
+export type ReceiptEnvelope = z.infer<typeof receiptEnvelopeSchema>;
 
 export function decodeEnvelope(bytes: string, fileId: string): RequestEnvelope | null {
   let decoded: unknown;
@@ -108,38 +125,8 @@ export function decodeEnvelope(bytes: string, fileId: string): RequestEnvelope |
   } catch {
     return null;
   }
-  const value = object(decoded);
-  if (
-    value === null ||
-    !exactKeys(value, ["action", "id", "payload"]) ||
-    !UUID.test(fileId) ||
-    typeof value.id !== "string" ||
-    !UUID.test(value.id) ||
-    typeof value.action !== "string" ||
-    value.action.trim() === ""
-  )
-    return null;
-  return { id: value.id, action: value.action, payload: value.payload };
-}
-
-function decodeOutcome(value: unknown): ReturnedEnvelope | null {
-  const envelope = object(value);
-  if (envelope?.kind === "returned" && exactKeys(envelope, ["kind", "result"])) {
-    return { kind: "returned", result: envelope.result };
-  }
-  const failure = object(envelope?.failure);
-  if (envelope?.kind !== "failed" || !exactKeys(envelope, ["failure", "kind"]) || failure === null) return null;
-  if (failure.kind === "akuma-not-born" && exactKeys(failure, ["id", "kind"]) && typeof failure.id === "string") {
-    return { kind: "failed", failure: { kind: "akuma-not-born", id: failure.id } };
-  }
-  if (
-    failure.kind === "failed" &&
-    exactKeys(failure, ["diagnostic", "kind"]) &&
-    typeof failure.diagnostic === "string"
-  ) {
-    return { kind: "failed", failure: { kind: "failed", diagnostic: failure.diagnostic } };
-  }
-  return null;
+  const parsed = requestEnvelopeSchema.safeParse(decoded);
+  return UUID.test(fileId) && parsed.success ? parsed.data : null;
 }
 
 export function decodeReceiptEnvelope(bytes: string, id: string, action: string): ReceiptEnvelope | null {
@@ -149,30 +136,8 @@ export function decodeReceiptEnvelope(bytes: string, id: string, action: string)
   } catch {
     return null;
   }
-  const value = object(decoded);
-  if (value === null || value.id !== id || value.action !== action || typeof value.state !== "string") return null;
-  if (
-    value.state === "refused" &&
-    exactKeys(value, ["action", "diagnostic", "id", "state"]) &&
-    typeof value.diagnostic === "string"
-  ) {
-    return { id, action, state: "refused", diagnostic: value.diagnostic };
-  }
-  if (
-    value.state === "voided" &&
-    exactKeys(value, ["action", "evidence", "id", "state"]) &&
-    typeof value.evidence === "string"
-  ) {
-    return { id, action, state: "voided", evidence: value.evidence };
-  }
-  if (value.state === "served" && exactKeys(value, ["action", "id", "reference", "state"])) {
-    return { id, action, state: "served", reference: value.reference };
-  }
-  if (value.state === "served" && exactKeys(value, ["action", "id", "outcome", "state"])) {
-    const outcome = decodeOutcome(value.outcome);
-    return outcome === null ? null : { id, action, state: "served", outcome };
-  }
-  return null;
+  const parsed = receiptEnvelopeSchema.safeParse(decoded);
+  return parsed.success && parsed.data.id === id && parsed.data.action === action ? parsed.data : null;
 }
 
 export function requestPath(directory: string, id: string): string {

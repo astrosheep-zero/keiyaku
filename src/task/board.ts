@@ -1,18 +1,37 @@
 import type { TaskDocument, TaskPriority, TaskState } from "./document.js";
-import { parseTaskId, sameNamespace, type TaskId } from "./identity.js";
+import { formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
+import { z } from "zod";
 
 export type TaskRef = Readonly<{ id: TaskId; title: string | null; state: TaskState | "missing" }>;
-export type TaskDisposition = "ready" | "blocked" | "in_progress" | "on_hold" | "done" | "drop";
-export type TaskRow = Readonly<{
-  id: TaskId;
-  title: string;
-  state: TaskState;
-  priority: TaskPriority;
-  disposition: TaskDisposition;
-  updatedAt: string;
-  bodyPresent: boolean;
-  children?: Readonly<{ live: number; total: number }>;
-}>;
+const taskRowIdSchema = z.string().transform((value, context) => {
+  try {
+    const id = formatTaskId(parseTaskId(value));
+    if (id !== value) throw new Error("not canonical");
+    return id;
+  } catch {
+    context.addIssue({ code: "custom", message: "expected canonical TaskId" });
+    return z.NEVER;
+  }
+});
+const taskRowTimestampSchema = z.string().refine((value) => Number.isFinite(Date.parse(value)), "expected timestamp");
+export const taskRowSchema = z
+  .object({
+    id: taskRowIdSchema,
+    title: z.string().refine((value) => value.trim() !== ""),
+    state: z.enum(["open", "in_progress", "on_hold", "done", "drop"]),
+    priority: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]),
+    disposition: z.enum(["ready", "blocked", "in_progress", "on_hold", "done", "drop"]),
+    updatedAt: taskRowTimestampSchema,
+    bodyPresent: z.boolean(),
+    children: z
+      .object({ live: z.number().int().nonnegative(), total: z.number().int().nonnegative() })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export const taskRowsSchema = z.array(taskRowSchema).readonly();
+export type TaskDisposition = z.infer<typeof taskRowSchema>["disposition"];
+export type TaskRow = z.infer<typeof taskRowSchema>;
 export type BlockedTaskRow = TaskRow & Readonly<{ blockers: readonly TaskRef[] }>;
 export type TaskDetailFacts = Readonly<{
   task: TaskDocument;

@@ -1,12 +1,13 @@
 import type { DispatchStage } from "../../index.js";
 import type { AkumaInvocationResult } from "../commands/akuma-invoke.js";
 import type { ParsedCommand } from "../parse.js";
+import { parseAkumaStatus } from "../../akuma/akuma.js";
 import {
   DEFAULT_CONTEXT,
   akumaRawAnswer,
   associatedIdentity,
   historyText,
-  killObservationText,
+  killResultText,
   mutationObservationStageText,
   snapshotHeading,
   snapshotText,
@@ -79,7 +80,7 @@ function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, co
   }
   return snapshotText(
     {
-      status: result.result.observation.status,
+      status: parseAkumaStatus(result.result.observation.status),
       contract: contractId === undefined ? { kind: "none" } : { kind: "associated", contractId },
     },
     context,
@@ -107,7 +108,7 @@ export function renderAkumaText(
       return waitText(result, context);
     case "tell":
       return result.mode === "ordinary"
-        ? tellText(result, context)
+        ? tellText(result)
         : mutationObservationStageText(result.result.id, result.result.observation, context, {
             ...(result.alias === undefined ? {} : { alias: result.alias }),
             showLife: false,
@@ -131,7 +132,7 @@ export function renderAkumaText(
     }
     case "kill":
       return result.result.results
-        .map((member) => killObservationText(member.id, member.evidence, member.observation, context, result.alias))
+        .map((member) => killResultText(member.id, member.evidence, result.alias))
         .join("\n\n");
   }
 }

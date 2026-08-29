@@ -1,7 +1,9 @@
 import type { ActivityRow, SnapshotRow } from "../../akuma/index.js";
+import type { AkumaObservation } from "../../index.js";
 import { normalizeToolCommand } from "./akuma-tool-command.js";
 
-type ToolRow = Extract<ActivityRow | SnapshotRow, { kind: "tool" }>;
+type FleetTimelineRow = Extract<AkumaObservation["status"]["timeline"]["entries"][number], { kind: "row" }>["row"];
+type ToolRow = Extract<ActivityRow | SnapshotRow | FleetTimelineRow, { kind: "tool" }>;
 
 export type ToolRepr = Readonly<{
   label: string;

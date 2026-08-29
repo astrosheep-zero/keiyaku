@@ -54,6 +54,8 @@ export async function terminateOwnedProcess(child: ChildProcess, force = false):
       resolve();
     });
   });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  if (exited || child.exitCode !== null || child.signalCode !== null) return;
   if (process.platform === "win32") {
     try {
       await terminateWindowsTree(pid);

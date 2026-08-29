@@ -231,8 +231,7 @@ test("amend text omits an absent Region observation", () => {
     contract,
     head: contractHead("head"),
     facts: [],
-    effects: [],
-    settlement: { actions: [], lags: [] },
+    settlementLags: [],
     diff: "",
   };
   assert.equal(
@@ -249,7 +248,7 @@ test("amend text omits an absent Region observation", () => {
   );
 });
 
-test("reconcile text renders followed worktrees and retained follow shape", () => {
+test("accepted results preserve reconciliation lag without telemetry", () => {
   const contract = contractId("kei/followed");
   const tender = snapshotId("tender");
   const head = snapshotId("head");
@@ -258,9 +257,8 @@ test("reconcile text renders followed worktrees and retained follow shape", () =
     contract,
     head: contractHead("record"),
     facts: [],
-    effects: [{ kind: "worktree" as const, path: "/tmp/wt", action: "followed" as const, before: head, after: tender }],
     lag: [{ kind: "worktree-follow-retained" as const, path: "/tmp/wt", tender, head, reason: "head-moved" as const }],
-    settlement: { actions: [], lags: [] },
+    settlementLags: [],
   };
   assert.equal(
     renderText({ ...envelope, verb: "deliver" }),
@@ -269,18 +267,10 @@ test("reconcile text renders followed worktrees and retained follow shape", () =
       "  candidate kept",
       "  record",
       "    head record",
-      "  ✓ worktree followed /tmp/wt",
       "  ! lag",
       "    worktree-follow-retained reason=head-moved tender=tender head=head path=/tmp/wt",
     ].join("\n"),
   );
-  assert.deepEqual(envelope.effects[0], {
-    kind: "worktree",
-    path: "/tmp/wt",
-    action: "followed",
-    before: head,
-    after: tender,
-  });
   assert.deepEqual(envelope.lag[0], {
     kind: "worktree-follow-retained",
     path: "/tmp/wt",
@@ -290,48 +280,27 @@ test("reconcile text renders followed worktrees and retained follow shape", () =
   });
 });
 
-test("accepted receipts omit unchanged refs and Contract files without changing JSON", () => {
+test("accepted receipts omit execution telemetry and retain recovery snapshots", () => {
   const contract = contractId("kei/unchanged-mechanics");
   const head = contractHead("head");
-  const unchangedRef = {
-    kind: "ref" as const,
-    name: "refs/heads/main",
-    action: "unchanged" as const,
-    before: head,
-    after: head,
-  };
-  const unchangedFile = {
-    kind: "contract-file" as const,
-    path: "/repo/.keiyaku/KEIYAKU.md",
-    action: "unchanged" as const,
-  };
   const result: InvocationResult = {
     kind: "accepted",
     verb: "deliver",
     contract,
     head,
     facts: [{ contract, entry: "claim", kind: "claimed" }],
-    effects: [
-      unchangedRef,
-      unchangedFile,
-      { kind: "worktree", path: "/repo/.keiyaku/wt/contract", action: "unchanged" },
-      { kind: "ref", name: "refs/heads/main", action: "updated", before: head, after: contractHead("next") },
-      { kind: "recovery-snapshot", action: "created", snapshot: snapshotId("recovery"), retention: "ephemeral" },
-    ],
     lag: [{ kind: "unsealed-bytes", path: "/repo/.keiyaku/wt/contract", paths: [] }],
-    settlement: { actions: [], lags: [] },
+    settlementLags: [],
+    recoverySnapshot: snapshotId("recovery"),
     completion: { integration: snapshotId("integration") },
   };
 
   const text = renderText(result);
-  assert.doesNotMatch(text, /ref unchanged/u);
-  assert.doesNotMatch(text, /contract-file unchanged/u);
-  assert.match(text, /worktree unchanged \/repo\/\.keiyaku\/wt\/contract/u);
-  assert.match(text, /ref updated refs\/heads\/main/u);
-  assert.match(text, /recovery-snapshot created recovery ephemeral/u);
+  assert.doesNotMatch(text, /ref updated|contract-file|worktree unchanged/u);
+  assert.doesNotMatch(text, /ephemeral/u);
+  assert.match(text, /recovery snapshot recovery/u);
   assert.match(text, /unsealed-bytes \/repo\/\.keiyaku\/wt\/contract/u);
-  assert.ok(text.indexOf("ref updated") < text.indexOf("worktree unchanged"));
-  assert.deepEqual(JSON.parse(JSON.stringify(result)).effects, result.effects);
+  assert.equal(JSON.parse(JSON.stringify(result)).recoverySnapshot, result.recoverySnapshot);
 });
 
 test("direct placement stops render the public unmet prerequisites in order", () => {
@@ -349,8 +318,7 @@ test("direct placement stops render the public unmet prerequisites in order", ()
     contract,
     head: contractHead("head"),
     facts: [],
-    effects: [],
-    settlement: { actions: [], lags: [] },
+    settlementLags: [],
   };
 
   const deliver: InvocationResult = { ...envelope, verb: "deliver", placement };
@@ -393,8 +361,7 @@ test("direct gate stops render the sole placement report without another read", 
       contract,
       head: contractHead("head"),
       facts: [],
-      effects: [],
-      settlement: { actions: [], lags: [] },
+      settlementLags: [],
       placement: {
         refusal: {
           kind: "gates-unsatisfied",
@@ -439,8 +406,7 @@ test("completion stops project every checkout-followability refusal fact", () =>
     contract,
     head: contractHead("head"),
     facts: [],
-    effects: [],
-    settlement: { actions: [], lags: [] },
+    settlementLags: [],
   };
   const cases = [
     {
@@ -541,8 +507,7 @@ test("continuation checkout stop keeps its exact block after the dependent conte
       contract,
       head: contractHead("head"),
       facts: [],
-      effects: [],
-      settlement: { actions: [], lags: [] },
+      settlementLags: [],
       completion: { integration: snapshotId("integration") },
       continuation: {
         claimed: [],
@@ -587,8 +552,7 @@ test("deliver projects a ran Verification completion", () => {
     contract,
     head: contractHead("head"),
     facts: [{ contract, entry: "claim", kind: "claimed" as const }],
-    effects: [],
-    settlement: { actions: [], lags: [] },
+    settlementLags: [],
   };
   assert.equal(
     renderText({
@@ -617,8 +581,7 @@ test("deliver renders claimed and stopped continuations from the accepted result
       contract,
       head: contractHead("head"),
       facts: [],
-      effects: [],
-      settlement: { actions: [], lags: [] },
+      settlementLags: [],
       completion: { integration: snapshotId("integration") },
       continuation: {
         claimed: [claimed],
@@ -656,8 +619,7 @@ test("deliver projects no Verification and an unsatisfied non-gating Verificatio
     contract,
     head: contractHead("head"),
     facts: [{ contract, entry: "claim", kind: "claimed" as const }],
-    effects: [],
-    settlement: { actions: [], lags: [] },
+    settlementLags: [],
   };
   assert.equal(
     renderText({
@@ -704,8 +666,7 @@ test("review projects reused Verification and distinguishes completion in its ti
     contract,
     head: contractHead("head"),
     facts: [{ contract, entry: "claim", kind: "claimed" as const }],
-    effects: [],
-    settlement: { actions: [], lags: [] },
+    settlementLags: [],
   };
   assert.equal(
     renderText({
@@ -732,8 +693,7 @@ test("review projects a reused unsatisfied Verification as non-gating completion
     contract,
     head: contractHead("head"),
     facts: [{ contract, entry: "claim", kind: "claimed" as const }],
-    effects: [],
-    settlement: { actions: [], lags: [] },
+    settlementLags: [],
   };
   assert.equal(
     renderText({
@@ -768,8 +728,7 @@ test("movement projects its deviation and reintegration coordinates", () => {
     kind: "accepted" as const,
     contract,
     head: contractHead("head"),
-    effects: [],
-    settlement: { actions: [], lags: [] },
+    settlementLags: [],
   };
   const facts = [
     {

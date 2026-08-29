@@ -92,11 +92,7 @@ import type {
 import {
   executeLocalDelivery,
   executeLocalReview,
-  forwardedAuditReceipt,
-  forwardedDeliveryReceipt,
-  forwardedReviewReceipt,
-  requestForwardedContract,
-  requireForwarded,
+  requestForwardedContractLive,
   type AttestationVerdict as OperationAttestationVerdict,
   type Review as OperationReview,
 } from "./contract-operations.js";
@@ -342,23 +338,19 @@ export class KeiyakuHandle {
             ...(signal === undefined ? {} : { signal }),
             hooks,
           })
-        : requireForwarded(
-            forwardedDeliveryReceipt(
-              await requestForwardedContract({
-                directory: channel.directory,
-                action: "contract.deliver",
-                request: {
-                  action: "contract.deliver",
-                  repoRoot: this.scope.primaryWorktree,
-                  contractId: this.id,
-                  ...(message === undefined ? {} : { message }),
-                  includeDirty,
-                  materializeConflict,
-                },
-                ...(signal === undefined ? {} : { signal }),
-              }),
-            ),
-          );
+        : await requestForwardedContractLive({
+            directory: channel.directory,
+            action: "contract.deliver",
+            request: {
+              action: "contract.deliver",
+              repoRoot: this.scope.primaryWorktree,
+              contractId: this.id,
+              ...(message === undefined ? {} : { message }),
+              includeDirty,
+              materializeConflict,
+            },
+            ...(signal === undefined ? {} : { signal }),
+          });
     return "facts" in result ? { ...result, value: this.deliveryHandle(result.value) } : result;
   }
 
@@ -373,21 +365,17 @@ export class KeiyakuHandle {
     const actor = actorOption(values.actor);
     const channel = executionChannel(this.execution);
     if (channel.kind === "body-request") {
-      return requireForwarded(
-        forwardedReviewReceipt(
-          await requestForwardedContract({
-            directory: channel.directory,
-            action: "contract.review",
-            request: {
-              action: "contract.review",
-              repoRoot: this.scope.primaryWorktree,
-              contractId: this.id,
-              verdict,
-              ...(summary === undefined ? {} : { summary }),
-            },
-          }),
-        ),
-      );
+      return await requestForwardedContractLive({
+        directory: channel.directory,
+        action: "contract.review",
+        request: {
+          action: "contract.review",
+          repoRoot: this.scope.primaryWorktree,
+          contractId: this.id,
+          verdict,
+          ...(summary === undefined ? {} : { summary }),
+        },
+      });
     }
     return await executeLocalReview({
       scope: this.scope,
@@ -458,23 +446,19 @@ export class KeiyakuHandle {
       const requireBranchesToBeUpToDate =
         optionalBoolean(values?.requireBranchesToBeUpToDate, "requireBranchesToBeUpToDate") ?? false;
       const signal = optionalSignal(values?.signal);
-      return requireForwarded(
-        forwardedAuditReceipt(
-          await requestForwardedContract({
-            directory: channel.directory,
-            action: "contract.audit",
-            request: {
-              action: "contract.audit",
-              repoRoot: this.scope.primaryWorktree,
-              contractId: this.id,
-              includeDirty,
-              showDiff,
-              requireBranchesToBeUpToDate,
-            },
-            ...(signal === undefined ? {} : { signal }),
-          }),
-        ),
-      );
+      return await requestForwardedContractLive({
+        directory: channel.directory,
+        action: "contract.audit",
+        request: {
+          action: "contract.audit",
+          repoRoot: this.scope.primaryWorktree,
+          contractId: this.id,
+          includeDirty,
+          showDiff,
+          requireBranchesToBeUpToDate,
+        },
+        ...(signal === undefined ? {} : { signal }),
+      });
     }
     return auditContract({
       scope: this.scope,

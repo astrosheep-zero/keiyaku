@@ -19,20 +19,21 @@ import {
 import { allocateAkumaDirectory, type AkuId } from "../src/akuma/identity.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { AkumaBodyRequestError, bodyRequestExecutionContext, requestBodyCommand } from "../src/akuma/requests.js";
-import {
-  BodyRequestPump,
-  receiptFor,
-  settleBodyRequests,
-} from "../src/akuma/request-serve.js";
+import { BodyRequestPump, receiptFor, settleBodyRequests } from "../src/akuma/request-serve.js";
 import { BodyRequestPump as LifecycleBodyRequestPump } from "../src/akuma/request-lifecycle.js";
-import { executeTellAkuma, executeWaitAkuma, fleetRequestCommand, fleetRequestCommands, waitAkuma } from "../src/library/fleet.js";
+import {
+  executeTellAkuma,
+  executeWaitAkuma,
+  fleetRequestCommand,
+  fleetRequestCommands,
+  waitAkuma,
+} from "../src/library/fleet.js";
 import {
   contractRequestCommand,
   contractRequestCommands,
-  forwardedDeliveryReceipt,
-  forwardedReviewReceipt,
   requestForwardedContract,
 } from "../src/library/contract-operations.js";
+import { KeiyakuRefused, KeiyakuRetry } from "../src/library/refusal.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { Delivery, Keiyaku, Repo } from "../src/index.js";
 import { invoke } from "../src/cli/invoke.js";
@@ -66,10 +67,7 @@ async function born(root: WorldRoot, archetype: string, draw: string, allowed: S
   return { ...allocated, soul };
 }
 
-async function openPump(
-  parent: Awaited<ReturnType<typeof born>>,
-  upstream: unknown,
-): Promise<BodyRequestPump> {
+async function openPump(parent: Awaited<ReturnType<typeof born>>, upstream: unknown): Promise<BodyRequestPump> {
   return await BodyRequestPump.open({
     paths: parent.paths,
     parent: parent.soul,
@@ -79,7 +77,12 @@ async function openPump(
       throw new Error("call is outside this test");
     },
     upstream,
-    commands: { ...akumaCallRequestCommands(), ...fleetRequestCommands(), ...contractRequestCommands(), ...taskMutationRequestCommands() },
+    commands: {
+      ...akumaCallRequestCommands(),
+      ...fleetRequestCommands(),
+      ...contractRequestCommands(),
+      ...taskMutationRequestCommands(),
+    },
     signal: new AbortController().signal,
   });
 }
@@ -161,23 +164,44 @@ async function requestBodyAudit(
   });
 }
 
-async function requestBodyWait(input: Readonly<{ directory: string; id?: string; targets: readonly AkuId[]; completion: "any" | "all"; timeoutMs?: number }>) {
+async function requestBodyWait(
+  input: Readonly<{
+    directory: string;
+    id?: string;
+    targets: readonly AkuId[];
+    completion: "any" | "all";
+    timeoutMs?: number;
+  }>,
+) {
   const command = fleetRequestCommand("akuma.wait");
   return await requestBodyCommand({
     ...input,
     command: { ...command, decodeResult: (result) => result },
-    value: { action: "akuma.wait", targets: input.targets, completion: input.completion, ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }) },
+    value: {
+      action: "akuma.wait",
+      targets: input.targets,
+      completion: input.completion,
+      ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+    },
   });
 }
 
 async function requestBodyTell(input: Readonly<{ directory: string; id?: string; target: AkuId; body: string }>) {
   const command = fleetRequestCommand("akuma.tell");
-  return await requestBodyCommand({ ...input, command: { ...command, decodeResult: (result) => result }, value: { action: "akuma.tell", target: input.target, body: input.body } });
+  return await requestBodyCommand({
+    ...input,
+    command: { ...command, decodeResult: (result) => result },
+    value: { action: "akuma.tell", target: input.target, body: input.body },
+  });
 }
 
 async function requestBodyKill(input: Readonly<{ directory: string; id?: string; targets: readonly AkuId[] }>) {
   const command = fleetRequestCommand("akuma.kill");
-  return await requestBodyCommand({ ...input, command: { ...command, decodeResult: (result) => result }, value: { action: "akuma.kill", targets: input.targets } });
+  return await requestBodyCommand({
+    ...input,
+    command: { ...command, decodeResult: (result) => result },
+    value: { action: "akuma.kill", targets: input.targets },
+  });
 }
 
 async function readTransportClaim(directory: string, id: string): Promise<Readonly<{ payload: unknown }>> {
@@ -197,24 +221,20 @@ function sortByKind<T extends Readonly<{ kind: string }>>(values: readonly T[]):
 
 function acceptedContract(marker: string, action: "deliver" | "review") {
   return {
-    kind: "accepted" as const,
-    result: {
-      facts: [],
-      head: "head",
-      value:
-        action === "deliver"
-          ? {
-              tenderSnapshot: "tender",
-              integration: { predecessor: "predecessor", snapshot: "snapshot", changeId: "change" },
-              method: "squash",
-              policy: { requireBranchesToBeUpToDate: false },
-              verificationSummary: marker,
-            }
-          : { verificationSummary: marker },
-      effects: [],
-      lags: [],
-      settlement: { actions: [], lags: [] },
-    },
+    facts: [],
+    head: "head",
+    value:
+      action === "deliver"
+        ? {
+            tenderSnapshot: "tender",
+            integration: { predecessor: "predecessor", snapshot: "snapshot", changeId: "change" },
+            method: "squash",
+            policy: { requireBranchesToBeUpToDate: false },
+            verificationSummary: marker,
+          }
+        : { verificationSummary: marker },
+    lags: [],
+    settlementLags: [],
   };
 }
 
@@ -244,24 +264,47 @@ function noDeliver(): Readonly<{ deliver(): Promise<never> }> {
   };
 }
 
-test("operation owners reject corrupt live results before callers can trust a receipt", () => {
+test("Contract owns strict direct live-result decoding", () => {
   assert.throws(
-    () => forwardedDeliveryReceipt({ kind: "returned", result: { kind: "accepted", result: {} } }),
-    /transport integrity: request unknown action contract\.deliver/u,
+    () => contractRequestCommand("contract.deliver").decodeResult({ kind: "accepted", result: {} }),
+    /transport integrity: Contract contract\.deliver returned an invalid live result/u,
   );
   assert.throws(
-    () => forwardedReviewReceipt({ kind: "returned", result: { kind: "retry", reason: {} } }),
-    /transport integrity: request unknown action contract\.review/u,
+    () => contractRequestCommand("contract.review").decodeResult({ kind: "retry", reason: {} }),
+    /transport integrity: Contract contract\.review returned an invalid live result/u,
   );
 });
 
+test("Contract owns strict live domain-failure decoding", () => {
+  const command = contractRequestCommand("contract.deliver");
+  const refusal = new KeiyakuRefused({ kind: "contract-missing", contractId: "kei/missing" });
+  const encoded = command.encodeFailure?.(refusal);
+  const decoded = encoded === undefined ? null : command.decodeFailure?.(encoded);
+  assert.ok(decoded instanceof KeiyakuRefused);
+  assert.deepEqual(decoded.refusal, refusal.refusal);
+  assert.equal(command.encodeFailure?.(new Error("executor unavailable")), null);
+  assert.equal(command.decodeFailure?.({ kind: "refused", refusal: { kind: "contract-missing" } }), null);
+});
+
 test("Fleet decoder rejects noncanonical identities and incomplete terminal evidence", () => {
-  assert.equal(
-    fleetRequestCommand("akuma.tell").decodeRequest({ target: "not-an-aku", body: "hello" }),
-    null,
+  assert.equal(fleetRequestCommand("akuma.tell").decodeRequest({ target: "not-an-aku", body: "hello" }), null);
+  assert.throws(
+    () =>
+      fleetRequestCommand("akuma.tell").decodeService({
+        action: "akuma.tell",
+        target: "aku/worker/nothex",
+        tellId: "tell",
+      }),
+    /malformed stored Fleet service evidence/u,
   );
   assert.throws(
-    () => fleetRequestCommand("akuma.tell").decodeService({ action: "akuma.tell", target: "aku/worker/nothex", tellId: "tell" }),
+    () =>
+      fleetRequestCommand("akuma.tell").decodeService({
+        action: "akuma.tell",
+        target: "aku/worker/11111111",
+        tellId: "tell",
+        unexpected: true,
+      }),
     /malformed stored Fleet service evidence/u,
   );
   assert.throws(
@@ -309,6 +352,17 @@ test("Contract decoder rejects corrupt stored service evidence during terminal r
   try {
     assert.throws(
       () => contractRequestCommand("contract.deliver").decodeService({ malformed: true }),
+      /malformed stored Contract service evidence for contract\.deliver/u,
+    );
+    assert.throws(
+      () =>
+        contractRequestCommand("contract.deliver").decodeService({
+          action: "contract.deliver",
+          repoRoot: root,
+          contractId: "kei/forwarded-delivery",
+          deliveryFactId: "fact",
+          unexpected: true,
+        }),
       /malformed stored Contract service evidence for contract\.deliver/u,
     );
   } finally {
@@ -600,29 +654,18 @@ test("deliver claims execute once and Heart retains only the Contract fact refer
   });
   try {
     const id = randomUUID();
-    const outcomes = await Promise.all(
-      [1, 2].map(
-        async () =>
-          await requestBodyDeliver({
-            directory: pump.directory,
-            id,
-            repoRoot: root,
-            contractId,
-            message: "ship it",
-            includeDirty: true,
-            materializeConflict: false,
-          }),
-      ),
-    );
-    assert.deepEqual(sortByKind(outcomes), [
-      {
-        kind: "accepted-reference",
+    assert.deepEqual(
+      await requestBodyDeliver({
+        directory: pump.directory,
+        id,
         repoRoot: root,
         contractId,
-        deliveryFactId: "01ARZ3NDEKTSV4RRFFQ69G5FA3",
-      },
-      { kind: "returned", result: acceptedContract("delivery-result", "deliver") },
-    ]);
+        message: "ship it",
+        includeDirty: true,
+        materializeConflict: false,
+      }),
+      acceptedContract("delivery-result", "deliver"),
+    );
     assert.equal(calls, 1);
     const claim = await readTransportClaim(pump.directory, id);
     assert.deepEqual(claim.payload, {
@@ -718,28 +761,17 @@ test("review claims execute once and Heart retains only the attestation fact ref
   });
   try {
     const id = randomUUID();
-    const outcomes = await Promise.all(
-      [1, 2].map(
-        async () =>
-          await requestBodyReview({
-            directory: pump.directory,
-            id,
-            repoRoot: root,
-            contractId,
-            verdict: "satisfied",
-            summary: "ready",
-          }),
-      ),
-    );
-    assert.deepEqual(sortByKind(outcomes), [
-      {
-        kind: "accepted-reference",
+    assert.deepEqual(
+      await requestBodyReview({
+        directory: pump.directory,
+        id,
         repoRoot: root,
         contractId,
-        reviewFactId: "01ARZ3NDEKTSV4RRFFQ69G5FA4",
-      },
-      { kind: "returned", result: acceptedContract("review-result", "review") },
-    ]);
+        verdict: "satisfied",
+        summary: "ready",
+      }),
+      acceptedContract("review-result", "review"),
+    );
     assert.equal(calls, 1);
     const fact = await readRequest(parent.paths, id);
     assert.deepEqual(fact?.state === "served" && "serviceJson" in fact ? JSON.parse(fact.serviceJson) : null, {
@@ -801,7 +833,7 @@ test("audit claims use the default permission, retain owner report evidence, and
   const parent = await born(root, "parent", "11111111");
   const contractId = "kei/forwarded-audit";
   const report = {
-    candidate: { kind: "blocked" as const, refusal: { kind: "contract-missing" } },
+    candidate: { kind: "blocked" as const, refusal: { kind: "target-missing", contractId } },
     verification: { kind: "not-run" as const },
     target: { kind: "not-observed" as const },
   };
@@ -819,35 +851,31 @@ test("audit claims use the default permission, retain owner report evidence, and
         },
         { contractId, includeDirty: true, showDiff: true, requireBranchesToBeUpToDate: true },
       );
-      return { result: { kind: "refused", refusal: { kind: "contract-missing" } }, auditReport: report };
+      return { result: { facts: [], head: "head", value: report, lags: [], settlementLags: [] }, auditReport: report };
     },
   });
   try {
     const id = randomUUID();
-    const outcomes = await Promise.all(
-      [1, 2].map(
-        async () =>
-          await requestBodyAudit({
-            directory: pump.directory,
-            id,
-            repoRoot: root,
-            contractId,
-            includeDirty: true,
-            showDiff: true,
-            requireBranchesToBeUpToDate: true,
-          }),
-      ),
+    assert.deepEqual(
+      await requestBodyAudit({
+        directory: pump.directory,
+        id,
+        repoRoot: root,
+        contractId,
+        includeDirty: true,
+        showDiff: true,
+        requireBranchesToBeUpToDate: true,
+      }),
+      { facts: [], head: "head", value: report, lags: [], settlementLags: [] },
     );
-    assert.deepEqual(sortByKind(outcomes), [
-      { kind: "audit-report", repoRoot: root, contractId, report },
-      { kind: "returned", result: { kind: "refused", refusal: { kind: "contract-missing" } } },
-    ]);
     assert.equal(calls, 1);
     const fact = await readRequest(parent.paths, id);
-    assert.deepEqual(
-      fact?.state === "served" && "serviceJson" in fact ? JSON.parse(fact.serviceJson) : null,
-      { kind: "audit-report", repoRoot: root, contractId, report },
-    );
+    assert.deepEqual(fact?.state === "served" && "serviceJson" in fact ? JSON.parse(fact.serviceJson) : null, {
+      kind: "audit-report",
+      repoRoot: root,
+      contractId,
+      report,
+    });
 
     await pump.close();
     const replayPump = await openPump(parent, {
@@ -895,10 +923,7 @@ test("contract review and delivery retain separate request permissions", async (
     deliver: async () => {
       throw new Error("delivery must not execute");
     },
-    review: async () => ({
-      result: { kind: "refused", refusal: { kind: "contract-missing" } },
-      reviewFactId: "01ARZ3NDEKTSV4RRFFQ69G5FC0",
-    }),
+    review: async () => ({ result: acceptedContract("permission", "review"), reviewFactId: "01ARZ3NDEKTSV4RRFFQ69G5FC0" }),
   });
   try {
     assert.deepEqual(
@@ -909,7 +934,7 @@ test("contract review and delivery retain separate request permissions", async (
         contractId: "kei/missing",
         verdict: "unsatisfied",
       }),
-      { kind: "returned", result: { kind: "refused", refusal: { kind: "contract-missing" } } },
+      acceptedContract("permission", "review"),
     );
     await assert.rejects(
       requestBodyDeliver({
@@ -941,7 +966,7 @@ test("contract review and delivery retain separate request permissions", async (
     kill: async () => {
       throw new Error("unexpected kill");
     },
-    deliver: async () => ({ result: { kind: "refused", refusal: { kind: "contract-missing" } } }),
+    deliver: async () => ({ result: acceptedContract("permission", "deliver") }),
     review: async () => {
       throw new Error("review must not execute");
     },
@@ -1200,6 +1225,11 @@ test("Task owns malformed live-result and durable-reference decoders", async () 
     () => command.decodeResult({ kind: "accepted", value: { id: "task/target" } }),
     /transport integrity: Task task\.start returned an invalid live result/u,
   );
+  assert.equal(command.decodeRequest({ id: "task/target", unexpected: true }), null);
+  assert.throws(
+    () => command.decodeResult({ kind: "accepted", value: { ...acceptedTaskView("task/target"), unexpected: true } }),
+    /transport integrity: Task task\.start returned an invalid live result/u,
+  );
   assert.throws(
     () => command.decodeService({ action: "task.stop" }),
     /malformed stored Task service evidence for task\.start/u,
@@ -1243,6 +1273,32 @@ test("Task owns malformed live-result and durable-reference decoders", async () 
   }
 });
 
+test("Task raw Body execution mints its World before Task dispatch", async () => {
+  const command = taskMutationRequestCommand("task.add");
+  const request = command.decodeRequest({
+    world: "/definitely-not-a-keiyaku-world",
+    request: { input: { title: "unreachable", namespace: [] } },
+  });
+  assert.notEqual(request, null);
+  if (request === null) return;
+
+  let dispatched = false;
+  await assert.rejects(
+    command.execute(request, {
+      requester: "aku/worker/11111111",
+      signal: new AbortController().signal,
+      upstream: {
+        task: async () => {
+          dispatched = true;
+          throw new Error("Task port must not receive an unminted World");
+        },
+      },
+    }),
+    /world path is not an existing directory: \/definitely-not-a-keiyaku-world/u,
+  );
+  assert.equal(dispatched, false);
+});
+
 test("CLI forwards Task mutations through the parent and renders the native Task result", async () => {
   const parentRoot = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-task-cli-parent-")));
   const selectedWorld = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-task-cli-selected-")));
@@ -1262,7 +1318,7 @@ test("CLI forwards Task mutations through the parent and renders the native Task
     },
     task: async (input) =>
       await executeTaskMutation({
-        world: input.world as WorldRoot,
+        world: input.world,
         request: input.request,
         requester: input.requester,
         signal: input.signal,
@@ -1457,7 +1513,6 @@ test("deliver returns without a durable reference and settles Heart voided", asy
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-deliver-voided-")));
   const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
   const id = randomUUID();
-  const refusal = { kind: "refused" as const, refusal: { kind: "contract-missing" } };
   const pump = await openPump(parent, {
     wait: async () => {
       throw new Error("unexpected wait");
@@ -1468,7 +1523,9 @@ test("deliver returns without a durable reference and settles Heart voided", asy
     kill: async () => {
       throw new Error("unexpected kill");
     },
-    deliver: async () => ({ result: refusal }),
+    deliver: async () => {
+      throw new KeiyakuRefused({ kind: "contract-missing", contractId: "kei/not-accepted" });
+    },
   });
   try {
     await assert.rejects(
@@ -1481,9 +1538,8 @@ test("deliver returns without a durable reference and settles Heart voided", asy
         materializeConflict: false,
       }),
       (error: unknown) =>
-        error instanceof AkumaBodyRequestError &&
-        error.outcome === "voided" &&
-        error.diagnostic === "Contract contract.deliver completed without durable service evidence",
+        error instanceof KeiyakuRefused &&
+        assert.deepEqual(error.refusal, { kind: "contract-missing", contractId: "kei/not-accepted" }) === undefined,
     );
     assert.equal((await readRequest(parent.paths, id))?.state, "voided");
   } finally {
@@ -1518,6 +1574,72 @@ test("deliver returns without a durable reference and settles Heart voided", asy
     );
   } finally {
     await replay.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Contract forwarding preserves typed live failures for deliver, review, and audit", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-contract-live-failures-")));
+  const parent = await born(root, "parent", "11111111", ["contract.deliver", "contract.review", "contract.audit"]);
+  const pump = await openPump(parent, {
+    deliver: async () => {
+      throw new KeiyakuRefused({ kind: "contract-missing", contractId: "kei/missing-deliver" });
+    },
+    review: async () => {
+      throw new KeiyakuRetry({ kind: "collision" });
+    },
+    audit: async () => {
+      throw new KeiyakuRefused({ kind: "terminal", contractId: "kei/missing-audit" });
+    },
+  });
+  try {
+    const deliverId = randomUUID();
+    await assert.rejects(
+      requestBodyDeliver({
+        directory: pump.directory,
+        id: deliverId,
+        repoRoot: root,
+        contractId: "kei/missing-deliver",
+        includeDirty: false,
+        materializeConflict: false,
+      }),
+      (error: unknown) =>
+        error instanceof KeiyakuRefused &&
+        assert.deepEqual(error.refusal, { kind: "contract-missing", contractId: "kei/missing-deliver" }) === undefined,
+    );
+    const reviewId = randomUUID();
+    await assert.rejects(
+      requestBodyReview({
+        directory: pump.directory,
+        id: reviewId,
+        repoRoot: root,
+        contractId: "kei/missing-review",
+        verdict: "unsatisfied",
+      }),
+      (error: unknown) => error instanceof KeiyakuRetry && error.reason.kind === "collision",
+    );
+    const auditId = randomUUID();
+    await assert.rejects(
+      requestBodyAudit({
+        directory: pump.directory,
+        id: auditId,
+        repoRoot: root,
+        contractId: "kei/missing-audit",
+        includeDirty: false,
+        showDiff: false,
+        requireBranchesToBeUpToDate: false,
+      }),
+      (error: unknown) =>
+        error instanceof KeiyakuRefused &&
+        assert.deepEqual(error.refusal, { kind: "terminal", contractId: "kei/missing-audit" }) === undefined,
+    );
+    for (const id of [deliverId, reviewId, auditId]) {
+      const fact = await readRequest(parent.paths, id);
+      assert.equal(fact?.state, "voided");
+      assert.equal(fact !== null && fact !== undefined && "serviceJson" in fact, false);
+    }
+  } finally {
+    await pump.close();
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -1966,7 +2088,16 @@ test("upstream receipts keep action results out of Heart service facts", async (
       ),
     );
     assert.deepEqual(sortByKind(duplicateKills), [
-      { kind: "reference", reference: { action: "akuma.kill", results: [{ id: first, evidence: "already-stopped" }, { id: second, evidence: "already-stopped" }] } },
+      {
+        kind: "reference",
+        reference: {
+          action: "akuma.kill",
+          results: [
+            { id: first, evidence: "already-stopped" },
+            { id: second, evidence: "already-stopped" },
+          ],
+        },
+      },
       { kind: "returned", result: { marker: "kill-result" } },
     ]);
     assert.equal(killCalls, 1);
@@ -2211,10 +2342,13 @@ test("a forwarded Tell writes its transport and the direct parent enters the tel
       ),
     );
     assert.equal(outcomes.filter((value) => (value as { kind: string }).kind === "returned").length, 1);
-    assert.deepEqual(outcomes.find((value) => (value as { kind: string }).kind === "reference"), {
-      kind: "reference",
-      reference: { action: "akuma.tell", target: target.id, tellId: id },
-    });
+    assert.deepEqual(
+      outcomes.find((value) => (value as { kind: string }).kind === "reference"),
+      {
+        kind: "reference",
+        reference: { action: "akuma.tell", target: target.id, tellId: id },
+      },
+    );
     assert.equal(calls, 1);
     assert.deepEqual(
       (await readHeart(target.paths)).pending.map((tell) => ({ id: tell.id, body: tell.body })),

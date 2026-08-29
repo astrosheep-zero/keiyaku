@@ -24,7 +24,7 @@ import { materializeScratchCandidate } from "../src/git/scratch.js";
 import { reconcile } from "../src/git/reconcile.js";
 import { followDependentManagedWorktree, followManagedWorktree, worktreePath } from "../src/git/workspace.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
-import { AuthorityCorruptionError, Keiyaku, Repo, type ContractId, type TopologyEffect } from "../src/index.js";
+import { AuthorityCorruptionError, Keiyaku, Repo, type ContractId } from "../src/index.js";
 import { deliveryDiffOperation, scopeOperation } from "../src/protocol/operations.js";
 import {
   appointedWorktreePath,
@@ -219,10 +219,9 @@ function candidatePinRefFor(contract: ContractId): string {
   return `refs/heads/keiyaku-candidate/kei-${contract.slice("kei/".length)}`;
 }
 
-function recoverySnapshot(effects: readonly TopologyEffect[]): string {
-  const recovery = effects.find((effect) => effect.kind === "recovery-snapshot");
-  assert.ok(recovery);
-  return recovery.snapshot;
+function recoverySnapshot(result: Readonly<{ recoverySnapshot?: string }>): string {
+  if (result.recoverySnapshot === undefined) assert.fail("accepted mutation is missing recoverySnapshot");
+  return result.recoverySnapshot;
 }
 
 function commitMessage(repository: TestGitRepository, commit: string): string {
@@ -1311,16 +1310,6 @@ test("dirty managed delivery follows its accepted tender as the clean baseline",
   assert.equal(repository.run(["-C", path, "status", "--porcelain=v2", "--untracked-files=all"]), "");
   assert.equal(readFileSync(join(path, "tracked.txt"), "utf8"), "delivered\n");
   assert.equal(readFileSync(join(path, "delivered.txt"), "utf8"), "delivered\n");
-  assert.equal(
-    delivered.effects.some(
-      (effect) =>
-        effect.kind === "worktree" &&
-        effect.action === "followed" &&
-        effect.before === before &&
-        effect.after === tender,
-    ),
-    true,
-  );
 });
 
 test("managed follow retains attached, moved, operating, and unsupported shapes", async () => {
@@ -1395,19 +1384,12 @@ test("managed bind preserves its admitted Contract when worktree reconciliation 
     ["bind"],
   );
   assert.notEqual(result.head, null);
-  assert.deepEqual(
-    result.effects.map((effect) => [effect.kind, effect.action]),
-    [
-      ["ref", "created"],
-      ["contract-file", "created"],
-    ],
-  );
   assert.equal(result.lags[0]?.kind, "reconcile-failed");
   if (result.lags[0]?.kind === "reconcile-failed") {
     assert.equal(result.lags[0].stage, "effect");
     assert.match(result.lags[0].diagnostic, /forced managed worktree failure/);
   }
-  assert.deepEqual(result.settlement, { actions: [], lags: [] });
+  assert.deepEqual(result.settlementLags, []);
   const state = await result.keiyaku.state();
   assert.equal(state.id, result.facts[0]?.contract);
   assert.equal(state.head, result.head);
@@ -1596,10 +1578,6 @@ test("targetless terminal cleanup retains tender custody for Delivery.diff", asy
 
   const reviewed = await bound.keiyaku.review({ verdict: "satisfied" });
   assert.ok((await bound.keiyaku.state()).terminal);
-  assert.equal(
-    reviewed.effects.some((effect) => effect.kind === "worktree" && effect.action === "removed"),
-    true,
-  );
 
   repository.run(["reflog", "expire", "--expire=now", "--all"]);
   repository.run(["gc", "--prune=now"]);
@@ -1808,7 +1786,7 @@ test("abandon salvages untracked managed-worktree bytes without retaining the wo
   await bound.keiyaku.deliver();
   writeFileSync(join(path, "untracked-agent-work.txt"), "retain me\n");
   const abandoned = await bound.keiyaku.abandon();
-  const recovery = recoverySnapshot(abandoned.effects);
+  const recovery = recoverySnapshot(abandoned);
 
   assert.deepEqual(abandoned.lags, []);
   assert.equal(existsSync(path), false);
@@ -1839,7 +1817,7 @@ test("abandon salvages a later managed-worktree commit without retaining the wor
   repository.run(["-C", path, "commit", "--allow-empty", "--quiet", "-m", "later agent work"]);
   const later = repository.run(["-C", path, "rev-parse", "HEAD"]).trim();
   const abandoned = await bound.keiyaku.abandon();
-  const recovery = recoverySnapshot(abandoned.effects);
+  const recovery = recoverySnapshot(abandoned);
 
   assert.deepEqual(abandoned.lags, []);
   assert.equal(existsSync(path), false);
@@ -1870,10 +1848,7 @@ test("abandon retains dirty submodule internals that a recovery snapshot cannot 
 
   const abandoned = await bound.keiyaku.abandon();
 
-  assert.equal(
-    abandoned.effects.some((effect) => effect.kind === "recovery-snapshot"),
-    false,
-  );
+  assert.equal(abandoned.recoverySnapshot, undefined);
   const head = mintSnapshotId(repository.run(["-C", path, "rev-parse", "HEAD"]).trim());
   assert.deepEqual(abandoned.lags, [
     {
@@ -1909,10 +1884,6 @@ test("terminal reconcile removes a delivered managed worktree reset to its seale
   const abandoned = await bound.keiyaku.abandon();
 
   assert.deepEqual(abandoned.lags, []);
-  assert.equal(
-    abandoned.effects.some((effect) => effect.kind === "worktree" && effect.action === "removed"),
-    true,
-  );
   assert.equal(existsSync(path), false);
   assert.equal(repository.run(["cat-file", "-e", `${start}^{commit}`]), "");
   assert.equal(repository.run(["cat-file", "-e", `${candidate}^{commit}`]), "");
@@ -1939,10 +1910,6 @@ test("terminal reconcile removes dirty deliver bytes after following the sealed 
   const abandoned = await bound.keiyaku.abandon();
 
   assert.deepEqual(abandoned.lags, []);
-  assert.equal(
-    abandoned.effects.some((effect) => effect.kind === "worktree" && effect.action === "removed"),
-    true,
-  );
   assert.equal(existsSync(path), false);
 });
 
@@ -1970,7 +1937,7 @@ test("abandon salvages an unsealed tender parent without retaining the worktree"
   await bound.keiyaku.deliver();
   repository.run(["-C", path, "reset", "--soft", secondParent]);
   const abandoned = await bound.keiyaku.abandon();
-  const recovery = recoverySnapshot(abandoned.effects);
+  const recovery = recoverySnapshot(abandoned);
 
   assert.deepEqual(abandoned.lags, []);
   assert.equal(existsSync(path), false);
@@ -1992,10 +1959,6 @@ test("a clean no-delivery abandonment releases the managed worktree from its sta
   const abandoned = await bound.keiyaku.abandon();
 
   assert.deepEqual(abandoned.lags, []);
-  assert.equal(
-    abandoned.effects.some((effect) => effect.kind === "worktree" && effect.action === "removed"),
-    true,
-  );
   assert.equal(existsSync(path), false);
   assert.equal(
     await readRef(await cachedRepositoryAt(repository.path), deliveryRefFor((await bound.keiyaku.state()).id)),

@@ -147,7 +147,10 @@ would be dishonest.
 
 Task may be reached through one direct-parent Akuma Body Request, but that
 integration edge is not Task authority. The Task owner runs the same operation
-for the caller-selected World and retains no request lifecycle fact.
+for the caller-selected World and retains no request lifecycle fact. Its exact
+structured request, live mutation result, service evidence, and served reference
+are strict Task-owned transport values; Task authority Markdown and domain
+parsers remain outside that boundary.
 
 ## Lifecycle And Graph
 
@@ -253,6 +256,11 @@ is nonempty. Child counts come from the one relation projection: `total` counts
 all direct children and `live` excludes `done` and `drop`; the field is absent
 when there are no children. `TaskQueryRow` carries these fields in addition to
 its existing parent, needs, blocks, createdAt, and updatedAt facts.
+
+Task owns one strict Body-boundary schema for this caller-visible row
+projection. Its exported TypeScript row type derives from that schema, and
+local and forwarded readers consume the same decoded rows; a composite reader
+does not restate the row shape.
 
 `add` accepts structured title, namespace, body, note, priority, relations,
 optional initial state, optional actor, and signal. `addDocument` accepts

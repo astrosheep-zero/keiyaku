@@ -149,16 +149,15 @@ test("abandon chains destroy-hook changes after the initial ephemeral recovery",
   writeFileSync(join(worktree, "before-destroy-hook.txt"), "initial bytes\n");
 
   const abandoned = await bound.keiyaku.abandon({ hooks });
-  const recovery = abandoned.effects.find((effect) => effect.kind === "recovery-snapshot");
-
-  assert.ok(recovery);
+  assert.notEqual(abandoned.recoverySnapshot, undefined);
+  const recovery = abandoned.recoverySnapshot!;
   assert.equal(existsSync(worktree), false);
-  assert.equal(repository.run(["show", `${recovery.snapshot}:before-destroy-hook.txt`]), "initial bytes\n");
-  assert.equal(repository.run(["show", `${recovery.snapshot}:from-destroy-hook.txt`]), "hook bytes\n");
-  assert.equal(repository.run(["show", `${recovery.snapshot}^:before-destroy-hook.txt`]), "initial bytes\n");
-  const beforeHookPaths = repository.run(["ls-tree", "--name-only", `${recovery.snapshot}^`]);
+  assert.equal(repository.run(["show", `${recovery}:before-destroy-hook.txt`]), "initial bytes\n");
+  assert.equal(repository.run(["show", `${recovery}:from-destroy-hook.txt`]), "hook bytes\n");
+  assert.equal(repository.run(["show", `${recovery}^:before-destroy-hook.txt`]), "initial bytes\n");
+  const beforeHookPaths = repository.run(["ls-tree", "--name-only", `${recovery}^`]);
   assert.equal(beforeHookPaths.includes("from-destroy-hook.txt"), false);
-  assert.equal(repository.run(["rev-parse", `${recovery.snapshot}^^`]).trim(), originalHead);
+  assert.equal(repository.run(["rev-parse", `${recovery}^^`]).trim(), originalHead);
 });
 
 test("a reconcile queued on the effect lock reobserves terminal state before applying topology", async () => {

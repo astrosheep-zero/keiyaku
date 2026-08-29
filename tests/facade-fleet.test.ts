@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { moveAlias } from "../src/alias/index.js";
+import { akumaStatusSchema, type AkumaStatus } from "../src/akuma/akuma.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import {
   HeldAkumaLeash,
@@ -16,15 +17,16 @@ import {
   recordSession,
   recordTell,
 } from "../src/akuma/heart/index.js";
-import { allocateAkumaDirectory } from "../src/akuma/identity.js";
-import type { ProviderAdapter } from "../src/akuma/provider.js";
+import { allocateAkumaDirectory, akuId } from "../src/akuma/identity.js";
+import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import { Akuma, AkumaNotBornError } from "../src/akuma/akuma.js";
 import { AkumaWorldScopeError, Keiyaku, Repo } from "../src/index.js";
 import { invoke } from "../src/cli/invoke.js";
 import { main } from "../src/cli/main.js";
 import { parseArgv } from "../src/cli/parse.js";
-import { projectTaskBoardObservation } from "../src/task/board.js";
+import { projectTaskBoardObservation, taskRowsSchema, type TaskRow } from "../src/task/board.js";
 import { Tasks, type TaskId } from "../src/task/index.js";
+import { formatTaskId } from "../src/task/identity.js";
 import { serializeTaskDocument, type TaskDocument } from "../src/task/document.js";
 import { authorityPath, readBoard } from "../src/task/store.js";
 import { World } from "../src/world.js";
@@ -34,35 +36,66 @@ import { addressAkumaSet, resolveNamedAddress } from "../src/library/address.js"
 import { observeKanshi } from "../src/kanshi/read.js";
 import { publishDispatch } from "../src/dispatch/index.js";
 import { repositoryAt } from "../src/git/repository.js";
-import { akuId } from "../src/akuma/identity.js";
 import { contractId } from "../src/core/facts/types.js";
 
 const provider: ProviderAdapter = {
   admitOptions(options) {
     return { kind: "admitted", options };
   },
-  async start() {
-    let finishEvents!: () => void;
-    const eventsFinished = new Promise<void>((resolve) => {
-      finishEvents = resolve;
-    });
-    return {
-      admission: { fence: "fleet-fixture-turn" },
-      events: {
-        async *[Symbol.asyncIterator]() {
-          yield { type: "session" as const, coordinate: { sessionId: "fixture" } };
-          finishEvents();
-        },
-      },
-      completion: eventsFinished.then(() => ({
+  start(input) {
+    return createProviderAttempt(input.signal, async (custody) => {
+      let finishEvents!: () => void;
+      const eventsFinished = new Promise<void>((resolve) => {
+        finishEvents = resolve;
+      });
+      const completion = eventsFinished.then(() => ({
         kind: "answered" as const,
         answer: "done",
         historyId: "history",
-      })),
-      async abort() {},
-    };
+      }));
+      const session = {
+        admission: { fence: "fleet-fixture-turn" },
+        events: {
+          async *[Symbol.asyncIterator]() {
+            yield { type: "session" as const, coordinate: { sessionId: "fixture" } };
+            finishEvents();
+          },
+        },
+        completion,
+        async abort() {},
+        async forceDispose() {},
+      };
+      custody.own({
+        closed: completion.then(() => undefined),
+        abort: session.abort,
+        forceDispose: session.forceDispose,
+      });
+      return session;
+    });
   },
 };
+
+test("Akuma and Task owner schemas strictly decode Fleet projections", () => {
+  const status: AkumaStatus = {
+    id: akuId({ archetype: "worker", suffix: "00000001" }),
+    life: "running",
+    timeline: { kind: "unborn", entries: [], omitted: 0, reportedChanges: [], reportedChangesOmitted: 0 },
+  };
+  const row: TaskRow = {
+    id: formatTaskId({ namespace: [], localId: "fleet-row" }),
+    title: "Fleet row",
+    state: "open",
+    priority: 2,
+    disposition: "ready",
+    updatedAt: "2026-08-29T00:00:00.000Z",
+    bodyPresent: false,
+  };
+
+  assert.deepEqual(akumaStatusSchema.parse(status), status);
+  assert.deepEqual(taskRowsSchema.parse([row]), [row]);
+  assert.equal(akumaStatusSchema.safeParse({ ...status, undeclared: true }).success, false);
+  assert.equal(taskRowsSchema.safeParse([{ ...row, undeclared: true }]).success, false);
+});
 
 async function completeTurn(
   paths: Parameters<typeof beginTurn>[0],
@@ -351,7 +384,7 @@ test("plural wait carries unused allowance and keeps pins after exhaustion", asy
   }
 });
 
-test("status and wait do not fabricate a settled Tell; tell and kill receipts do not", async () => {
+test("status and wait do not fabricate a settled Tell; tell and kill do not carry observations", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-tell-pin-"));
   let held: HeldAkumaLeash | undefined;
   try {
@@ -363,32 +396,17 @@ test("status and wait do not fabricate a settled Tell; tell and kill receipts do
     const waited = await Keiyaku.wait({ path: root, akuma: [source.id], timeoutMs: 0 });
     assert.equal(hasTold(waited.observations[0]!.status.timeline.entries), false);
     const killed = await Keiyaku.kill({ path: root, akuma: [source.id] });
-    assert.equal(killed.results[0]!.observation.kind, "observed");
-    if (killed.results[0]!.observation.kind === "observed") {
-      assert.equal(hasTold(killed.results[0]!.observation.status.timeline.entries), false);
-    }
+    assert.equal("observation" in killed.results[0]!, false);
     held = (await HeldAkumaLeash.try(source.paths))!;
     const told = await Keiyaku.tell({ path: root, akuma: source.id, body: "continue" });
-    assert.equal(told.observation.kind, "observed");
-    if (told.observation.kind === "observed") {
-      assert.ok(
-        told.observation.status.timeline.entries.some(
-          (entry) =>
-            entry.kind === "row" &&
-            entry.row.kind === "tell" &&
-            entry.row.tellId === told.tell.admission.tellId &&
-            entry.row.state === "pending",
-        ),
-      );
-      assert.equal(hasTold(told.observation.status.timeline.entries), false);
-    }
+    assert.equal("observation" in told, false);
   } finally {
     held?.release();
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("facade tell preserves mutation authority beside a separate observation", async () => {
+test("facade tell preserves its primary mutation authority", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-tell-"));
   let held: HeldAkumaLeash | undefined;
   try {
@@ -398,13 +416,7 @@ test("facade tell preserves mutation authority beside a separate observation", a
     assert.equal(result.akuma, source.id);
     assert.equal(result.tell.admission.fact, "recorded");
     assert.equal(typeof result.tell.admission.tellId, "string");
-    assert.equal(result.observation.status.id, source.id);
-    assert.ok(
-      result.observation.status.timeline.entries.some(
-        (entry) =>
-          entry.kind === "row" && entry.row.kind === "tell" && entry.row.tellId === result.tell.admission.tellId,
-      ),
-    );
+    assert.equal("observation" in result, false);
     assert.equal("receipt" in result, false);
     assert.equal("status" in result, false);
   } finally {
@@ -1189,7 +1201,7 @@ function writeCreatorTask(world: string, document: TaskDocument): void {
   writeFileSync(path, serializeTaskDocument(document));
 }
 
-test("creator testimony appears on every Fleet observation carrier", async () => {
+test("creator testimony appears on Fleet observation carriers", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-created-tasks-"));
   try {
     const worker = await answered(root, "worker", "00000001");
@@ -1260,11 +1272,11 @@ test("creator testimony appears on every Fleet observation carrier", async () =>
     assert.notEqual(leash, null);
     try {
       const told = await Keiyaku.tell({ path: root, akuma: worker.id, body: "continue" });
-      assert.deepEqual(told.observation.createdTasks, { kind: "present", rows: workerRows });
+      assert.equal("observation" in told, false);
       const interrupted = await Keiyaku.interrupt({ path: root, akuma: worker.id, body: "stop" });
       assert.deepEqual(interrupted.observation.createdTasks, { kind: "present", rows: workerRows });
       const killed = await Keiyaku.kill({ path: root, akuma: [worker.id] });
-      assert.deepEqual(killed.results[0]!.observation.createdTasks, { kind: "present", rows: workerRows });
+      assert.equal("observation" in killed.results[0]!, false);
     } finally {
       leash!.release();
     }
@@ -1322,12 +1334,9 @@ test("multi-member wait and kill project every member from one Task board snapsh
       killed.results.map((member) => member.id),
       [reviewer.id, worker.id],
     );
-    assert.deepEqual(
-      killed.results.map((member) => member.observation.createdTasks),
-      [
-        { kind: "present", rows: expected.selectCreatedBy(reviewer.id) },
-        { kind: "present", rows: expected.selectCreatedBy(worker.id) },
-      ],
+    assert.equal(
+      killed.results.every((member) => !("observation" in member)),
+      true,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -1371,11 +1380,11 @@ test("Task board failure keeps Fleet status and aggregate members", async () => 
       assert.equal(told.akuma, worker.id);
       assert.equal(told.tell.admission.fact, "recorded");
       assert.equal(typeof told.tell.admission.tellId, "string");
-      assert.deepEqual(told.observation.createdTasks, status.createdTasks);
+      assert.equal("observation" in told, false);
       const killed = await Keiyaku.kill({ path: root, akuma: [reviewer.id] });
       assert.equal(killed.results[0]!.id, reviewer.id);
       assert.equal(killed.results[0]!.evidence, "already-stopped");
-      assert.deepEqual(killed.results[0]!.observation.createdTasks, status.createdTasks);
+      assert.equal("observation" in killed.results[0]!, false);
       await Keiyaku.kill({ path: root, akuma: [worker.id] });
     } finally {
       leash!.release();

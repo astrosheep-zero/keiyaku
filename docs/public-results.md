@@ -50,25 +50,22 @@ returning. Post-admission failure is reported as lag without hiding or
 rejecting the admitted Contract. CLI calls this same facade; it does not
 interpret protocol outcomes or repeat either follow-up stage.
 
-`MutationResult` is invocation-scoped observation, never Contract state or a
+`MutationResult` is an invocation-scoped answer, never Contract state or a
 durable receipt. `facts` and `head` come only from accepted protocol admission.
 When claim continuation admits facts for dependent Contracts, `facts` contains
 those consequence facts while `head` remains the addressed Contract's head.
-`effects` and `lags` first contain physical results produced inside targeted
-placement fences, then one mandatory Git reconciliation for every Contract
-whose facts were admitted; `settlement` combines those reconciliation-owned
-settlements. There is no nested `receipt`,
-duplicate fact field, or result stored on a `Keiyaku` handle.
+Mandatory reconciliation contributes only its `lags`, and Settlement contributes
+only `settlementLags`; empty `settlementLags` is the completion judgment. There
+is no successful-action collection, hook inventory, nested `receipt`, duplicate
+fact field, or result stored on a `Keiyaku` handle.
 
-The optional invocation-only `hookRuns` field is present only when at least one
-managed hook command succeeds during this invocation. It records successful
-hook names in execution order as `{ phase, name }`; a failed phase includes
-only names completed before the transient `WorktreeHookLag`, whose typed value
-also identifies the failed hook `name`. Whole-phase retries produce a fresh
-projection and never reuse persisted hook progress. JSON and text bind receipts
-consume this same value; bind text prints create hook names in order under
-`hooks create` and never prints argv or timeout. Empty hook execution omits the
-field.
+The identical result is returned after local or forwarded execution. Body
+transport serializes that public value directly; it contributes no narrower
+receipt value, result projection, or effects collection.
+
+When terminal cleanup creates recovery evidence, `recoverySnapshot` is exactly
+the final ref-free `SnapshotId` selected by reconciliation. It is invocation
+scoped, has no kind or retention tag, is absent from facts, and may be pruned.
 
 ```ts
 type KeiyakuRetryReason =
@@ -83,25 +80,11 @@ type MutationResult<A> = Readonly<{
   facts: readonly Fact[]
   head: ContractHead
   value: A
-  effects: readonly TopologyEffect[]
   lags: readonly Lag[]
-  hookRuns?: readonly { phase: "create" | "destroy"; name: string }[]
-  settlement: SettlementReport
-  hookRuns?: readonly WorktreeHookRun[]
+  settlementLags: readonly SettlementLag[]
+  recoverySnapshot?: SnapshotId
   cleanup?: VerificationCleanupFailure
   leak?: WorktreeLeak
-}>
-
-type WorktreeHookRun = Readonly<{
-  phase: "create" | "destroy"
-  name: string
-}>
-
-type RecoverySnapshotEffect = Readonly<{
-  kind: "recovery-snapshot"
-  action: "created"
-  snapshot: SnapshotId
-  retention: "ephemeral"
 }>
 
 class KeiyakuRefused extends Error {

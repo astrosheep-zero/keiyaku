@@ -1,22 +1,31 @@
-import type { WorldRoot } from "../world.js";
-import { isAbsolute, resolve } from "node:path";
+/* eslint-disable max-lines -- Task owns one coherent forwarded mutation boundary. */
+import { World, type WorldRoot } from "../world.js";
 import { requestBodyCommand } from "../akuma/request-rendezvous.js";
 import { eraseRequestCommand, type ErasedRequestCommand, type RequestCommand } from "../akuma/request-wire.js";
-import { addInput, closed, namespace, record, taskId, taskIds, text, updateInput } from "./input.js";
 import {
   addTask,
   addTaskDocument,
   batchTasks,
   lifecycleTask,
   updateTask,
-  type AddTaskDocumentInput,
   type AddTaskInput,
+  type TaskBatchResult,
+  type TaskMutationResult,
+  type TaskUpdateResult,
   type UpdateTaskInput,
 } from "./operations.js";
 import { composeTasks, type TaskCompositionResult } from "./compose.js";
-import type { TaskId } from "./identity.js";
-import { isTaskMutationExecutionResult, type TaskMutationExecutionResult } from "./mutation-result.js";
-import type { TaskBatchResult, TaskMutationResult, TaskUpdateResult } from "./operations.js";
+import { isTaskSegment } from "./identity.js";
+import {
+  taskBatchResultSchema,
+  taskCompositionResultSchema,
+  taskMutationIdSchema,
+  taskMutationResultSchema,
+  taskUpdateResultSchema,
+  isTaskMutationExecutionResult,
+  type TaskMutationExecutionResult,
+} from "./mutation-result.js";
+import { z } from "zod";
 export type { TaskMutationExecutionResult } from "./mutation-result.js";
 
 export const TASK_MUTATION_ACTIONS = Object.freeze([
@@ -39,46 +48,158 @@ export function isTaskMutationAction(value: unknown): value is TaskMutationActio
   return typeof value === "string" && TASK_MUTATION_ACTION_SET.has(value);
 }
 
-export type TaskMutationRequest =
-  | Readonly<{
-      action: "task.add";
-      input: Omit<AddTaskInput, "actor" | "signal" | "namespace"> & Readonly<{ namespace: readonly string[] }>;
-    }>
-  | Readonly<{
-      action: "task.addDocument";
-      input: Omit<AddTaskDocumentInput, "actor" | "signal" | "namespace"> & Readonly<{ namespace: readonly string[] }>;
-    }>
-  | Readonly<{ action: "task.compose"; markdown: string; namespace: readonly string[] }>
-  | Readonly<{ action: "task.update"; id: TaskId; input: Omit<UpdateTaskInput, "signal"> }>
-  | Readonly<{ action: "task.start"; id: TaskId }>
-  | Readonly<{ action: "task.start"; ids: readonly TaskId[] }>
-  | Readonly<{ action: "task.stop"; id: TaskId }>
-  | Readonly<{ action: "task.resume"; id: TaskId }>
-  | Readonly<{ action: "task.hold"; id: TaskId }>
-  | Readonly<{ action: "task.hold"; ids: readonly TaskId[] }>
-  | Readonly<{ action: "task.done"; id: TaskId; note?: string }>
-  | Readonly<{ action: "task.done"; ids: readonly TaskId[]; note?: string }>
-  | Readonly<{ action: "task.drop"; id: TaskId; note?: string }>
-  | Readonly<{ action: "task.drop"; ids: readonly TaskId[]; note?: string }>;
+const nonblankTextSchema = z.string().refine((value) => value.trim() !== "");
+const namespaceSchema = z.array(z.string().refine(isTaskSegment)).readonly();
+const taskIdsBaseSchema = z.array(taskMutationIdSchema).superRefine((ids, context) => {
+  if (new Set(ids).size !== ids.length) context.addIssue({ code: "custom", message: "TaskIds must be unique" });
+});
+const taskIdsSchema = taskIdsBaseSchema.readonly();
+const nonemptyTaskIdsSchema = taskIdsBaseSchema.min(1).readonly();
+const taskStateSchema = z.enum(["open", "in_progress", "on_hold", "done", "drop"]);
+const taskPrioritySchema = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]);
+const addInputSchema = z
+  .object({
+    title: nonblankTextSchema,
+    namespace: namespaceSchema,
+    body: z.string().optional(),
+    note: z.string().optional(),
+    state: taskStateSchema.optional(),
+    priority: taskPrioritySchema.optional(),
+    needs: taskIdsSchema.optional(),
+    parent: taskMutationIdSchema.nullable().optional(),
+    supersedes: taskIdsSchema.optional(),
+    relates: taskIdsSchema.optional(),
+  })
+  .strict();
+const updateInputSchema = z
+  .object({
+    title: nonblankTextSchema.optional(),
+    body: z.string().optional(),
+    appendBody: z.string().optional(),
+    note: z.string().optional(),
+    priority: taskPrioritySchema.optional(),
+    needs: taskIdsSchema.optional(),
+    addNeeds: taskIdsSchema.optional(),
+    dropNeeds: taskIdsSchema.optional(),
+    parent: taskMutationIdSchema.nullable().optional(),
+    supersedes: taskIdsSchema.optional(),
+    addSupersedes: taskIdsSchema.optional(),
+    dropSupersedes: taskIdsSchema.optional(),
+    relates: taskIdsSchema.optional(),
+    addRelates: taskIdsSchema.optional(),
+    dropRelates: taskIdsSchema.optional(),
+  })
+  .strict()
+  .superRefine((input, context) => {
+    if (input.body !== undefined && input.appendBody !== undefined)
+      context.addIssue({ code: "custom", message: "body and appendBody are mutually exclusive" });
+    if (Object.values(input).every((value) => value === undefined))
+      context.addIssue({ code: "custom", message: "update requires at least one field change" });
+  });
+const addRequestSchema = z
+  .object({ input: addInputSchema })
+  .strict()
+  .transform(({ input }) => ({ action: "task.add" as const, input }));
+const addDocumentRequestSchema = z
+  .object({ input: z.object({ markdown: z.string(), namespace: namespaceSchema }).strict() })
+  .strict()
+  .transform(({ input }) => ({ action: "task.addDocument" as const, input }));
+const composeRequestSchema = z
+  .object({ markdown: z.string(), namespace: namespaceSchema })
+  .strict()
+  .transform((request) => ({ action: "task.compose" as const, ...request }));
+const updateRequestSchema = z
+  .object({ id: taskMutationIdSchema, input: updateInputSchema })
+  .strict()
+  .transform((request) => ({ action: "task.update" as const, ...request }));
+const singleOrBatchRequestSchema = <Action extends "task.start" | "task.hold">(action: Action) =>
+  z.union([
+    z
+      .object({ id: taskMutationIdSchema })
+      .strict()
+      .transform(({ id }) => ({ action, id })),
+    z
+      .object({ ids: nonemptyTaskIdsSchema })
+      .strict()
+      .transform(({ ids }) => ({ action, ids })),
+  ]);
+const singleRequestSchema = <Action extends "task.stop" | "task.resume">(action: Action) =>
+  z
+    .object({ id: taskMutationIdSchema })
+    .strict()
+    .transform((request) => ({ action, ...request }));
+const terminalRequestSchema = <Action extends "task.done" | "task.drop">(action: Action) =>
+  z.union([
+    z
+      .object({ id: taskMutationIdSchema, note: z.string().optional() })
+      .strict()
+      .transform(({ id, note }) => ({ action, id, ...(note === undefined ? {} : { note }) })),
+    z
+      .object({ ids: nonemptyTaskIdsSchema, note: z.string().optional() })
+      .strict()
+      .transform(({ ids, note }) => ({ action, ids, ...(note === undefined ? {} : { note }) })),
+  ]);
+const taskRequestSchemas = {
+  "task.add": addRequestSchema,
+  "task.addDocument": addDocumentRequestSchema,
+  "task.compose": composeRequestSchema,
+  "task.done": terminalRequestSchema("task.done"),
+  "task.drop": terminalRequestSchema("task.drop"),
+  "task.hold": singleOrBatchRequestSchema("task.hold"),
+  "task.resume": singleRequestSchema("task.resume"),
+  "task.start": singleOrBatchRequestSchema("task.start"),
+  "task.stop": singleRequestSchema("task.stop"),
+  "task.update": updateRequestSchema,
+} as const;
+
+export const taskMutationRequestSchema = z.union([
+  taskRequestSchemas["task.add"],
+  taskRequestSchemas["task.addDocument"],
+  taskRequestSchemas["task.compose"],
+  taskRequestSchemas["task.done"],
+  taskRequestSchemas["task.drop"],
+  taskRequestSchemas["task.hold"],
+  taskRequestSchemas["task.resume"],
+  taskRequestSchemas["task.start"],
+  taskRequestSchemas["task.stop"],
+  taskRequestSchemas["task.update"],
+]);
+export type TaskMutationRequest = z.infer<typeof taskMutationRequestSchema>;
+
+const worldPathSchema = z.string().min(1);
+const taskBodyRequestSchemas = {
+  "task.add": z.object({ world: worldPathSchema, request: taskRequestSchemas["task.add"] }).strict(),
+  "task.addDocument": z.object({ world: worldPathSchema, request: taskRequestSchemas["task.addDocument"] }).strict(),
+  "task.compose": z.object({ world: worldPathSchema, request: taskRequestSchemas["task.compose"] }).strict(),
+  "task.done": z.object({ world: worldPathSchema, request: taskRequestSchemas["task.done"] }).strict(),
+  "task.drop": z.object({ world: worldPathSchema, request: taskRequestSchemas["task.drop"] }).strict(),
+  "task.hold": z.object({ world: worldPathSchema, request: taskRequestSchemas["task.hold"] }).strict(),
+  "task.resume": z.object({ world: worldPathSchema, request: taskRequestSchemas["task.resume"] }).strict(),
+  "task.start": z.object({ world: worldPathSchema, request: taskRequestSchemas["task.start"] }).strict(),
+  "task.stop": z.object({ world: worldPathSchema, request: taskRequestSchemas["task.stop"] }).strict(),
+  "task.update": z.object({ world: worldPathSchema, request: taskRequestSchemas["task.update"] }).strict(),
+} as const;
+export const taskMutationBodyRequestSchema = z
+  .object({ world: worldPathSchema, request: taskMutationRequestSchema })
+  .strict();
+export type TaskMutationBodyRequest = z.infer<typeof taskMutationBodyRequestSchema>;
+
+export const taskMutationServiceSchema = z.object({ action: z.enum(TASK_MUTATION_ACTIONS) }).strict();
+export type TaskMutationService = z.infer<typeof taskMutationServiceSchema>;
+
+export const forwardedTaskReferenceSchema = z
+  .object({ kind: z.literal("served-reference"), action: z.enum(TASK_MUTATION_ACTIONS) })
+  .strict();
+export type ForwardedTaskReference = z.infer<typeof forwardedTaskReferenceSchema>;
 
 export type TaskMutationResultForRequest<Request extends TaskMutationRequest> =
-  Request extends Readonly<{
-    action: "task.compose";
-  }>
+  Request extends Readonly<{ action: "task.compose" }>
     ? TaskCompositionResult
     : Request extends Readonly<{ action: "task.update" }>
       ? TaskUpdateResult
-      : Request extends Readonly<{ ids: readonly TaskId[] }>
+      : Request extends Readonly<{ ids: readonly string[] }>
         ? TaskBatchResult
         : TaskMutationResult;
-
-export type ForwardedTaskReference = Readonly<{ kind: "served-reference"; action: TaskMutationAction }>;
-export type TaskMutationService = Readonly<{ action: TaskMutationAction }>;
-export type TaskMutationBodyRequest = Readonly<{
-  action: TaskMutationAction;
-  world: WorldRoot;
-  request: TaskMutationRequest;
-}>;
 export type TaskMutationRequestPort = Readonly<{
   task(
     input: Readonly<{ world: WorldRoot; request: TaskMutationRequest; requester: string; signal: AbortSignal }>,
@@ -122,45 +243,23 @@ function resultRecord(value: unknown): Readonly<Record<string, unknown>> | null 
     : null;
 }
 
-function mutationObject(value: unknown, keys: readonly string[], label: string): Record<string, unknown> {
-  const decoded = record(value, label);
-  closed(decoded, keys, label);
-  return decoded;
-}
-
-function canonicalWorld(value: unknown): WorldRoot | null {
-  return typeof value === "string" && isAbsolute(value) && resolve(value) === value ? (value as WorldRoot) : null;
-}
-
 function decodeTaskBodyRequest(action: TaskMutationAction, value: unknown): TaskMutationBodyRequest | null {
-  try {
-    const input = mutationObject(value, ["request", "world"], `${action} body request`);
-    const world = canonicalWorld(input.world);
-    if (world === null) return null;
-    return { action, world, request: decodeTaskMutationRequest(action, input.request) };
-  } catch {
-    return null;
-  }
+  const parsed = taskBodyRequestSchemas[action].safeParse(value);
+  return parsed.success ? parsed.data : null;
 }
 
 function decodeTaskService(action: TaskMutationAction, value: unknown): TaskMutationService {
-  try {
-    const service = mutationObject(value, ["action"], `${action} service evidence`);
-    if (service.action !== action) throw new TypeError("action mismatch");
-    return { action };
-  } catch {
+  const parsed = taskMutationServiceSchema.safeParse(value);
+  if (!parsed.success || parsed.data.action !== action)
     throw new Error(`malformed stored Task service evidence for ${action}`);
-  }
+  return parsed.data;
 }
 
 function decodeTaskReference(action: TaskMutationAction, value: unknown): ForwardedTaskReference {
-  try {
-    const reference = mutationObject(value, ["action", "kind"], `${action} service reference`);
-    if (reference.kind !== "served-reference" || reference.action !== action) throw new TypeError("action mismatch");
-    return { kind: "served-reference", action };
-  } catch {
+  const parsed = forwardedTaskReferenceSchema.safeParse(value);
+  if (!parsed.success || parsed.data.action !== action)
     throw new Error(`malformed Task service reference for ${action}`);
-  }
+  return parsed.data;
 }
 
 /** Task owns forwarded mutation payload, live result, and durable service evidence. */
@@ -187,21 +286,22 @@ export function taskMutationRequestCommand(
       }
       return result;
     },
-    encodeService: (service) => service,
+    encodeService: (service) => decodeTaskService(action, service),
     decodeService: (service) => decodeTaskService(action, service),
-    projectService: (service) => ({ kind: "served-reference", action: service.action }),
+    projectService: (service) => decodeTaskReference(action, { kind: "served-reference", action: service.action }),
     decodeReference: (reference) => decodeTaskReference(action, reference),
     isPermitted: (allowed) => allowed.includes(action),
     decodeExecutionContext: decodeTaskMutationExecutionContext,
     execute: async (request, context) => {
+      const world = await World.at(request.world);
       return {
         result: await context.upstream.task({
-          world: request.world,
+          world,
           request: request.request,
           requester: context.requester,
           signal: context.signal,
         }),
-        service: { action: request.action },
+        service: { action: request.request.action },
       };
     },
   };
@@ -226,22 +326,15 @@ function taskResultForRequest<Request extends TaskMutationRequest>(
   request: Request,
   value: unknown,
 ): value is TaskMutationResultForRequest<Request> {
-  if (!isTaskMutationExecutionResult(value)) return false;
-  const result = resultRecord(value);
-  if (result === null) return false;
-  if (request.action === "task.compose") {
-    return (
-      result.kind === "planned" ||
-      result.kind === "incomplete" ||
-      (result.kind === "accepted" && Array.isArray(result.aliases))
-    );
-  }
-  if (request.action === "task.update") {
-    const accepted = result.kind === "accepted" ? resultRecord(result.value) : null;
-    return result.kind !== "accepted" || (accepted !== null && typeof accepted.documentDiff === "string");
-  }
-  if ("ids" in request) return Array.isArray(result.items);
-  return !Array.isArray(result.items);
+  const schema =
+    request.action === "task.compose"
+      ? taskCompositionResultSchema
+      : request.action === "task.update"
+        ? taskUpdateResultSchema
+        : "ids" in request
+          ? taskBatchResultSchema
+          : taskMutationResultSchema;
+  return schema.safeParse(value).success;
 }
 
 export function requestForwardedTask<Request extends TaskMutationRequest>(
@@ -275,120 +368,75 @@ export async function requestForwardedTask<Request extends TaskMutationRequest>(
     directory: input.directory,
     ...(input.id === undefined ? {} : { id: input.id }),
     command: taskMutationRequestCommand(input.request.action),
-    value: { action: input.request.action, world: input.world, request: input.request },
+    value: { world: input.world, request: input.request },
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
   if (response.kind === "reference") return response.reference;
   if (!taskResultForRequest(input.request, response.result)) {
-    throw new Error(`transport integrity: Task ${input.request.action} returned an invalid result`);
+    throw new Error(`transport integrity: request Task ${input.request.action} returned an invalid live result`);
   }
   return response.result;
 }
 
-function decodeTaskSingleOrBatchRequest(action: "task.start" | "task.hold", value: unknown): TaskMutationRequest {
-  const request = mutationObject(value, ["id", "ids"], `${action} request`);
-  if (request.id !== undefined && request.ids !== undefined)
-    throw new TypeError(`${action} request has both id and ids`);
-  if (request.id !== undefined) {
-    const id = taskId(request.id);
-    return action === "task.start" ? { action: "task.start", id } : { action: "task.hold", id };
-  }
-  const ids = taskIds(request.ids, "ids");
-  if (ids === undefined || ids.length === 0) throw new TypeError(`${action} request requires at least one TaskId`);
-  return action === "task.start" ? { action: "task.start", ids } : { action: "task.hold", ids };
-}
-
-function decodeTaskTerminalRequest(action: "task.done" | "task.drop", value: unknown): TaskMutationRequest {
-  const request = mutationObject(value, ["id", "ids", "note"], `${action} request`);
-  if (request.id !== undefined && request.ids !== undefined)
-    throw new TypeError(`${action} request has both id and ids`);
-  const note = text(request.note, "note");
-  if (request.id !== undefined) {
-    const id = taskId(request.id);
-    return action === "task.done"
-      ? { action: "task.done", id, ...(note === undefined ? {} : { note }) }
-      : { action: "task.drop", id, ...(note === undefined ? {} : { note }) };
-  }
-  const ids = taskIds(request.ids, "ids");
-  if (ids === undefined || ids.length === 0) throw new TypeError(`${action} request requires at least one TaskId`);
-  return action === "task.done"
-    ? { action: "task.done", ids, ...(note === undefined ? {} : { note }) }
-    : { action: "task.drop", ids, ...(note === undefined ? {} : { note }) };
-}
-
 export function decodeTaskMutationRequest(action: TaskMutationAction, value: unknown): TaskMutationRequest {
-  switch (action) {
-    case "task.add": {
-      const input = mutationObject(value, ["input"], "task.add request");
-      const raw = mutationObject(
-        input.input,
-        ["title", "namespace", "body", "note", "state", "priority", "needs", "parent", "supersedes", "relates"],
-        "task.add input",
-      );
-      const decoded = addInput(raw);
-      if (decoded.namespace === undefined) throw new TypeError("task.add request namespace is required");
-      return { action, input: { ...decoded, namespace: decoded.namespace } };
-    }
-    case "task.addDocument": {
-      const input = mutationObject(value, ["input"], "task.addDocument request");
-      const raw = mutationObject(input.input, ["markdown", "namespace"], "task.addDocument input");
-      const markdown = text(raw.markdown, "markdown");
-      if (markdown === undefined) throw new TypeError("markdown is required");
-      const selected = namespace(raw.namespace);
-      if (selected === undefined) throw new TypeError("task.addDocument request namespace is required");
-      return { action, input: { markdown, namespace: selected } };
-    }
-    case "task.compose": {
-      const input = mutationObject(value, ["markdown", "namespace"], "task.compose request");
-      const markdown = text(input.markdown, "markdown");
-      if (markdown === undefined) throw new TypeError("markdown is required");
-      const selected = namespace(input.namespace);
-      if (selected === undefined) throw new TypeError("task.compose request namespace is required");
-      return { action, markdown, namespace: selected };
-    }
-    case "task.update": {
-      const request = mutationObject(value, ["id", "input"], "task.update request");
-      const raw = mutationObject(
-        request.input,
-        [
-          "title",
-          "body",
-          "appendBody",
-          "note",
-          "priority",
-          "needs",
-          "addNeeds",
-          "dropNeeds",
-          "parent",
-          "supersedes",
-          "addSupersedes",
-          "dropSupersedes",
-          "relates",
-          "addRelates",
-          "dropRelates",
-        ],
-        "task.update input",
-      );
-      return { action, id: taskId(request.id), input: updateInput(raw) };
-    }
-    case "task.start":
-      return decodeTaskSingleOrBatchRequest("task.start", value);
-    case "task.stop": {
-      const request = mutationObject(value, ["id"], `${action} request`);
-      return { action, id: taskId(request.id) };
-    }
-    case "task.resume": {
-      const request = mutationObject(value, ["id"], `${action} request`);
-      return { action, id: taskId(request.id) };
-    }
-    case "task.hold": {
-      return decodeTaskSingleOrBatchRequest("task.hold", value);
-    }
-    case "task.done":
-    case "task.drop": {
-      return decodeTaskTerminalRequest(action, value);
-    }
-  }
+  const parsed = taskRequestSchemas[action].safeParse(value);
+  if (!parsed.success) throw new TypeError(`invalid ${action} request`);
+  return parsed.data;
+}
+
+function addTaskOptions(input: z.output<typeof addInputSchema>, actor: string, signal?: AbortSignal): AddTaskInput {
+  const { body, note, state, priority, needs, parent, supersedes, relates, ...required } = input;
+  return {
+    ...required,
+    actor,
+    ...(body === undefined ? {} : { body }),
+    ...(note === undefined ? {} : { note }),
+    ...(state === undefined ? {} : { state }),
+    ...(priority === undefined ? {} : { priority }),
+    ...(needs === undefined ? {} : { needs }),
+    ...(parent === undefined ? {} : { parent }),
+    ...(supersedes === undefined ? {} : { supersedes }),
+    ...(relates === undefined ? {} : { relates }),
+    ...(signal === undefined ? {} : { signal }),
+  };
+}
+
+function updateTaskOptions(input: z.output<typeof updateInputSchema>, signal?: AbortSignal): UpdateTaskInput {
+  const {
+    title,
+    body,
+    appendBody,
+    note,
+    priority,
+    needs,
+    addNeeds,
+    dropNeeds,
+    parent,
+    supersedes,
+    addSupersedes,
+    dropSupersedes,
+    relates,
+    addRelates,
+    dropRelates,
+  } = input;
+  return {
+    ...(title === undefined ? {} : { title }),
+    ...(body === undefined ? {} : { body }),
+    ...(appendBody === undefined ? {} : { appendBody }),
+    ...(note === undefined ? {} : { note }),
+    ...(priority === undefined ? {} : { priority }),
+    ...(needs === undefined ? {} : { needs }),
+    ...(addNeeds === undefined ? {} : { addNeeds }),
+    ...(dropNeeds === undefined ? {} : { dropNeeds }),
+    ...(parent === undefined ? {} : { parent }),
+    ...(supersedes === undefined ? {} : { supersedes }),
+    ...(addSupersedes === undefined ? {} : { addSupersedes }),
+    ...(dropSupersedes === undefined ? {} : { dropSupersedes }),
+    ...(relates === undefined ? {} : { relates }),
+    ...(addRelates === undefined ? {} : { addRelates }),
+    ...(dropRelates === undefined ? {} : { dropRelates }),
+    ...(signal === undefined ? {} : { signal }),
+  };
 }
 
 export async function executeTaskMutation(
@@ -403,7 +451,7 @@ export async function executeTaskMutation(
   const withSignal = signal === undefined ? {} : { signal };
   switch (request.action) {
     case "task.add":
-      return await addTask(input.world, { ...request.input, actor: input.requester, ...withSignal });
+      return await addTask(input.world, addTaskOptions(request.input, input.requester, signal));
     case "task.addDocument":
       return await addTaskDocument(input.world, { ...request.input, actor: input.requester, ...withSignal });
     case "task.compose":
@@ -416,7 +464,7 @@ export async function executeTaskMutation(
         ...withSignal,
       });
     case "task.update":
-      return await updateTask(input.world, request.id, { ...request.input, ...withSignal });
+      return await updateTask(input.world, request.id, updateTaskOptions(request.input, signal));
     case "task.start":
       if ("ids" in request) return await batchTasks(input.world, "start", request.ids, signal);
       return await lifecycleTask(input.world, request.id, "start", signal);

@@ -34,12 +34,19 @@ async function projectCommandReceipt(
   fact: RequestFact,
   command: ErasedRequest,
   outcome?: Readonly<{ kind: "returned"; result: unknown }>,
+  failure?: unknown,
 ): Promise<void> {
   const receipt =
     fact.state === "refused"
       ? { id: fact.id, action: fact.action, state: "refused" as const, diagnostic: fact.diagnostic }
       : fact.state === "voided"
-        ? { id: fact.id, action: fact.action, state: "voided" as const, evidence: fact.evidence }
+        ? {
+            id: fact.id,
+            action: fact.action,
+            state: "voided" as const,
+            evidence: fact.evidence,
+            ...(failure === undefined ? {} : { failure }),
+          }
         : outcome === undefined
           ? "serviceJson" in fact
             ? {
@@ -102,19 +109,29 @@ async function serveCommand(input: ServeInput, command: ErasedRequestCommand): P
         : await serveUpstreamRequest(input.paths, fact.id, served.serviceJson);
     await projectCommandReceipt(input, fact, request, { kind: "returned", result: served.result });
   } catch (error) {
+    const failure = encodedFailure(request, error);
     const current = await readRequest(input.paths, fact.id);
     if (current === null) throw error;
     fact =
       current.state === "admitted" || current.state === "reserved"
         ? await voidRequest(input.paths, fact.id, diagnostic(error))
         : current;
-    await projectCommandReceipt(input, fact, request);
+    await projectCommandReceipt(input, fact, request, undefined, failure);
   }
   return true;
 }
 
 function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function encodedFailure(request: ErasedRequest, error: unknown): unknown | undefined {
+  try {
+    const failure = request.encodeFailure(error);
+    return failure === null ? undefined : failure;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function serveRequest(input: ServeInput): Promise<void> {

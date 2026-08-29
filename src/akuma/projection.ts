@@ -1,66 +1,208 @@
-import { decodeAgentEvent, type ToolCall, type ToolResult } from "./provider.js";
-import type { TellDelivery, TellFact, TimelineFact, TurnEndFact } from "./heart/index.js";
+/* eslint-disable max-lines -- Akuma owns one coherent activity projection and strict boundary schema. */
+import { decodeAgentEvent } from "./provider.js";
+import type { TimelineFact, TurnEndFact } from "./heart/index.js";
+import { z } from "zod";
 
-export type TurnOutcome =
-  | Readonly<{
-      kind: "answered";
-      historyId: string;
-      answer: string;
-    }>
-  | Readonly<{ kind: "failed"; historyId: string; diagnostic: string }>;
+const nonblankTextSchema = z.string().refine((value) => value.trim() !== "");
+const countSchema = z.number().int().nonnegative();
+const timestampSchema = z.string().refine((value) => Number.isFinite(Date.parse(value)), "expected timestamp");
+const diffstatSchema = z.object({ added: countSchema, removed: countSchema }).strict();
+const fileChangeSchema = z
+  .object({
+    op: z.enum(["add", "update", "delete", "unspecified"]),
+    path: z.string(),
+    diffstat: diffstatSchema.optional(),
+  })
+  .strict();
+const toolCallSchema = z.union([
+  z.object({ kind: z.literal("run"), command: z.string() }).strict(),
+  z
+    .object({
+      kind: z.literal("read"),
+      path: z.string(),
+      offset: countSchema.optional(),
+      limit: countSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("search"),
+      query: z.string(),
+      scope: z.enum(["content", "files", "web"]).optional(),
+      path: z.string().optional(),
+      glob: z.string().optional(),
+    })
+    .strict(),
+  z.object({ kind: z.literal("fileChange"), changes: z.array(fileChangeSchema).readonly() }).strict(),
+  z.object({ kind: z.literal("other"), display: z.string() }).strict(),
+]);
+const toolResultSchema = z
+  .object({ status: z.enum(["ok", "error"]), message: z.string().optional(), exitCode: z.number().int().optional() })
+  .strict();
+const tellDeliverySchema = z
+  .object({
+    deliveredAt: timestampSchema,
+    route: z.enum(["launch", "live"]),
+    turnSequence: countSchema,
+    receipt: z.enum(["unavailable", "required"]).optional(),
+  })
+  .strict();
+const turnRowSchema = z
+  .object({
+    kind: z.literal("turn"),
+    sequence: countSchema,
+    turnSequence: countSchema,
+    bodySequence: countSchema,
+    at: timestampSchema,
+  })
+  .strict();
+const callRowSchema = z
+  .object({
+    kind: z.literal("call"),
+    sequence: countSchema,
+    turnSequence: countSchema,
+    at: timestampSchema,
+    text: z.string(),
+  })
+  .strict();
+const textRowSchema = (kind: "said" | "thought" | "note") =>
+  z
+    .object({
+      kind: z.literal(kind),
+      sequence: countSchema,
+      turnSequence: countSchema,
+      at: timestampSchema,
+      text: z.string(),
+      truncated: z.literal(true).optional(),
+    })
+    .strict();
+const tellRowSchema = z
+  .object({
+    kind: z.literal("tell"),
+    sequence: countSchema,
+    at: timestampSchema,
+    tellId: nonblankTextSchema,
+    text: z.string(),
+    state: z.enum(["pending", "told"]),
+    deliveries: z.array(tellDeliverySchema).readonly(),
+  })
+  .strict();
+const outcomeSchema = z.union([
+  z.object({ kind: z.literal("answered"), historyId: nonblankTextSchema, answer: z.string() }).strict(),
+  z.object({ kind: z.literal("failed"), historyId: nonblankTextSchema, diagnostic: z.string() }).strict(),
+]);
+const outcomeRowSchema = z
+  .object({
+    kind: z.literal("outcome"),
+    sequence: countSchema,
+    turnSequence: countSchema,
+    at: timestampSchema,
+    outcome: outcomeSchema,
+  })
+  .strict();
+const activeToolRowSchema = z
+  .object({
+    kind: z.literal("tool"),
+    sequence: countSchema,
+    turnSequence: countSchema,
+    at: timestampSchema,
+    name: nonblankTextSchema,
+    call: toolCallSchema,
+    state: z.literal("active"),
+    truncated: z.literal(true).optional(),
+  })
+  .strict();
+const completedToolRowSchema = z
+  .object({
+    kind: z.literal("tool"),
+    sequence: countSchema,
+    turnSequence: countSchema,
+    at: timestampSchema,
+    completedAt: timestampSchema.optional(),
+    durationMs: z.number().finite().nonnegative().optional(),
+    name: nonblankTextSchema,
+    call: toolCallSchema,
+    state: toolResultSchema,
+    truncated: z.literal(true).optional(),
+  })
+  .strict();
+const unsettledToolRowSchema = z
+  .object({
+    kind: z.literal("tool"),
+    sequence: countSchema,
+    turnSequence: countSchema,
+    at: timestampSchema,
+    name: nonblankTextSchema,
+    call: toolCallSchema,
+    state: z.literal("unsettled"),
+    truncated: z.literal(true).optional(),
+  })
+  .strict();
+const snapshotFactRowSchema = z.union([
+  callRowSchema,
+  textRowSchema("said"),
+  textRowSchema("thought"),
+  textRowSchema("note"),
+  tellRowSchema,
+]);
+const openSnapshotRowSchema = z.union([snapshotFactRowSchema, activeToolRowSchema, completedToolRowSchema]);
+const idleSnapshotRowSchema = z.union([snapshotFactRowSchema, completedToolRowSchema]);
+const snapshotEntrySchema = <Row extends z.ZodType>(row: Row) =>
+  z.union([
+    z.object({ kind: z.literal("gap"), count: countSchema }).strict(),
+    z.object({ kind: z.literal("row"), row }).strict(),
+  ]);
+const reportedFileChangeSchema = z
+  .object({
+    sequence: countSchema,
+    at: timestampSchema,
+    op: z.enum(["add", "update", "delete", "unspecified"]),
+    path: z.string(),
+    diffstat: diffstatSchema.optional(),
+  })
+  .strict();
+const reportedChangeFields = {
+  reportedChanges: z.array(reportedFileChangeSchema).readonly(),
+  reportedChangesOmitted: countSchema,
+};
+export const activitySnapshotSchema = z.union([
+  z
+    .object({
+      kind: z.literal("unborn"),
+      entries: z.tuple([]).readonly(),
+      omitted: z.literal(0),
+      ...reportedChangeFields,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("open"),
+      turn: turnRowSchema,
+      entries: z.array(snapshotEntrySchema(openSnapshotRowSchema)).readonly(),
+      omitted: countSchema,
+      ...reportedChangeFields,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("idle"),
+      outcome: outcomeRowSchema.optional(),
+      entries: z.array(snapshotEntrySchema(idleSnapshotRowSchema)).readonly(),
+      omitted: countSchema,
+      ...reportedChangeFields,
+    })
+    .strict(),
+]);
 
-export type TurnStartRow = Readonly<{
-  kind: "turn";
-  sequence: number;
-  turnSequence: number;
-  bodySequence: number;
-  at: string;
-}>;
-
-type CallRow = Readonly<{ kind: "call"; sequence: number; turnSequence: number; at: string; text: string }>;
-type SaidRow = Readonly<{
-  kind: "said";
-  sequence: number;
-  turnSequence: number;
-  at: string;
-  text: string;
-  truncated?: true;
-}>;
-type ThoughtRow = Readonly<{
-  kind: "thought";
-  sequence: number;
-  turnSequence: number;
-  at: string;
-  text: string;
-  truncated?: true;
-}>;
-type NoteRow = Readonly<{
-  kind: "note";
-  sequence: number;
-  turnSequence: number;
-  at: string;
-  text: string;
-  truncated?: true;
-}>;
+export type TurnOutcome = z.infer<typeof outcomeSchema>;
+export type TurnStartRow = z.infer<typeof turnRowSchema>;
+type CallRow = z.infer<typeof callRowSchema>;
+type SaidRow = z.infer<ReturnType<typeof textRowSchema>>;
+type ThoughtRow = z.infer<ReturnType<typeof textRowSchema>>;
+type NoteRow = z.infer<ReturnType<typeof textRowSchema>>;
 type TurnNarrationRow = CallRow | SaidRow | ThoughtRow | NoteRow;
-
-export type TellRow = Readonly<{
-  kind: "tell";
-  sequence: number;
-  at: string;
-  tellId: string;
-  text: string;
-  state: TellFact["state"];
-  deliveries: readonly TellDelivery[];
-}>;
-
-export type OutcomeRow = Readonly<{
-  kind: "outcome";
-  sequence: number;
-  turnSequence: number;
-  at: string;
-  outcome: TurnOutcome;
-}>;
+export type TellRow = z.infer<typeof tellRowSchema>;
+export type OutcomeRow = z.infer<typeof outcomeRowSchema>;
 
 function publicOutcome(turnSequence: number, outcome: TurnEndFact["outcome"]): TurnOutcome {
   const historyId = `turn/${turnSequence}`;
@@ -69,40 +211,9 @@ function publicOutcome(turnSequence: number, outcome: TurnEndFact["outcome"]): T
     : { kind: "failed", historyId, diagnostic: outcome.diagnostic };
 }
 
-export type ActiveToolRow = Readonly<{
-  kind: "tool";
-  sequence: number;
-  turnSequence: number;
-  at: string;
-  name: string;
-  call: ToolCall;
-  state: "active";
-  truncated?: true;
-}>;
-
-export type CompletedToolRow = Readonly<{
-  kind: "tool";
-  sequence: number;
-  turnSequence: number;
-  at: string;
-  completedAt?: string;
-  durationMs?: number;
-  name: string;
-  call: ToolCall;
-  state: ToolResult;
-  truncated?: true;
-}>;
-
-export type UnsettledToolRow = Readonly<{
-  kind: "tool";
-  sequence: number;
-  turnSequence: number;
-  at: string;
-  name: string;
-  call: ToolCall;
-  state: "unsettled";
-  truncated?: true;
-}>;
+export type ActiveToolRow = z.infer<typeof activeToolRowSchema>;
+export type CompletedToolRow = z.infer<typeof completedToolRowSchema>;
+export type UnsettledToolRow = z.infer<typeof unsettledToolRowSchema>;
 
 export type OpenTurnRow = TurnNarrationRow | ActiveToolRow | CompletedToolRow;
 export type ClosedTurnRow = TurnNarrationRow | UnsettledToolRow | CompletedToolRow;
@@ -123,47 +234,15 @@ export type ClosedTurn = Readonly<{
 export type ProjectedTurn = OpenTurn | ClosedTurn;
 export type ActivityRow = TurnStartRow | OpenTurnRow | ClosedTurnRow | TellRow | OutcomeRow;
 
-type SnapshotFactRow = TurnNarrationRow | TellRow;
-export type OpenSnapshotRow = SnapshotFactRow | ActiveToolRow | CompletedToolRow;
-export type IdleSnapshotRow = SnapshotFactRow | CompletedToolRow;
+export type OpenSnapshotRow = z.infer<typeof openSnapshotRowSchema>;
+export type IdleSnapshotRow = z.infer<typeof idleSnapshotRowSchema>;
 export type SnapshotRow = OpenSnapshotRow | IdleSnapshotRow;
-export type ActivitySnapshotEntry<Row extends SnapshotRow = SnapshotRow> =
-  | Readonly<{ kind: "row"; row: Row }>
-  | Readonly<{ kind: "gap"; count: number }>;
-
-export type ReportedFileChange = Readonly<{
-  sequence: number;
-  at: string;
-  op: "add" | "update" | "delete" | "unspecified";
-  path: string;
-  diffstat?: Readonly<{ added: number; removed: number }>;
-}>;
-
-type ReportedChangeSummary = Readonly<{
-  reportedChanges: readonly ReportedFileChange[];
-  reportedChangesOmitted: number;
-}>;
-
-export type Snapshot =
-  | Readonly<{ kind: "unborn"; entries: readonly []; omitted: 0 } & ReportedChangeSummary>
-  | Readonly<
-      {
-        kind: "open";
-        turn: TurnStartRow;
-        entries: readonly ActivitySnapshotEntry<OpenSnapshotRow>[];
-        omitted: number;
-      } & ReportedChangeSummary
-    >
-  | Readonly<
-      {
-        kind: "idle";
-        outcome?: OutcomeRow;
-        entries: readonly ActivitySnapshotEntry<IdleSnapshotRow>[];
-        omitted: number;
-      } & ReportedChangeSummary
-    >;
-
-export type ActivitySnapshot = Snapshot;
+export type ActivitySnapshotEntry<Row extends SnapshotRow = SnapshotRow> = z.infer<
+  ReturnType<typeof snapshotEntrySchema<z.ZodType<Row>>>
+>;
+export type ReportedFileChange = z.infer<typeof reportedFileChangeSchema>;
+export type Snapshot = z.infer<typeof activitySnapshotSchema>;
+export type ActivitySnapshot = z.infer<typeof activitySnapshotSchema>;
 
 export type ActivityHistory = Readonly<{
   rows: readonly ActivityRow[];

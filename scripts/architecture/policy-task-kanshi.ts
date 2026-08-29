@@ -67,10 +67,9 @@ export const taskKanshiZones = [
   {
     source: "task/mutation.ts",
     allow: [
-      types("world.ts"),
+      any("world.ts", ["World", "WorldRoot"]),
       any("task/compose.ts", ["composeTasks", "TaskCompositionResult"]),
-      any("task/input.ts"),
-      any("task/identity.ts", ["parseTaskId", "TaskId"]),
+      any("task/identity.ts", ["isTaskSegment", "TaskId"]),
       any("task/operations.ts", [
         "addTask",
         "addTaskDocument",
@@ -84,7 +83,16 @@ export const taskKanshiZones = [
         "TaskUpdateResult",
         "UpdateTaskInput",
       ]),
-      any("task/mutation-result.ts", ["TaskMutationExecutionResult", "isTaskMutationExecutionResult"]),
+      any("task/mutation-result.ts", [
+        "TaskMutationExecutionResult",
+        "isTaskMutationExecutionResult",
+        "taskBatchResultSchema",
+        "taskCompositionResultSchema",
+        "taskMutationExecutionResultSchema",
+        "taskMutationIdSchema",
+        "taskMutationResultSchema",
+        "taskUpdateResultSchema",
+      ]),
       any("akuma/request-rendezvous.ts", ["requestBodyCommand"]),
       any("akuma/request-wire.ts", ["eraseRequestCommand", "ErasedRequestCommand", "RequestCommand"]),
     ],
@@ -92,10 +100,15 @@ export const taskKanshiZones = [
   {
     source: "task/mutation-result.ts",
     allow: [
-      any("task/input.ts", ["taskId"]),
-      any("task/identity.ts", ["parseTaskId", "TaskId"]),
+      any("task/identity.ts", ["formatTaskId", "isTaskSegment", "parseTaskId"]),
       types("task/compose.ts", ["TaskCompositionResult"]),
-      types("task/operations.ts", ["TaskBatchResult", "TaskMutationResult", "TaskUpdateResult"]),
+      types("task/operations.ts", [
+        "TaskBatchResult",
+        "TaskMutationResult",
+        "TaskRefusal",
+        "TaskUpdateResult",
+        "TaskView",
+      ]),
     ],
   },
   {

@@ -1,400 +1,577 @@
-import { encodeEntry } from "../core/facts/codec.js";
-import { changeId, contractHead, contractId, snapshotId, type JournalEntry } from "../core/facts/types.js";
-import type { IntegrationConflictMaterialized } from "../protocol/deliver.js";
+/* eslint-disable max-lines -- Contract owns one coherent forwarded result boundary. */
+import { decodeJournalEntry } from "../core/facts/codec.js";
+import { changeId, contractHead, contractId, entryUlid, gate, snapshotId } from "../core/facts/types.js";
 import type { AuditReport } from "../protocol/audit.js";
+import type { IntegrationConflictMaterialized } from "../protocol/deliver.js";
 import type { ReviewValue } from "../protocol/review.js";
+import { formatTaskId, parseTaskId } from "../task/identity.js";
 import type { ContinuationReport } from "./continuation.js";
 import type { DeliveryValue } from "./delivery.js";
 import type { MutationResult } from "./mutation.js";
-import type { KeiyakuRefusal, KeiyakuRetryReason } from "./refusal.js";
-import { reconciliationEffect, reconciliationLag } from "./contract-forwarding-reconciliation-result.js";
+import { KeiyakuRefused, KeiyakuRetry, type KeiyakuRefusal, type KeiyakuRetryReason } from "./refusal.js";
+import { reconciliationLagSchema } from "./contract-forwarding-reconciliation-result.js";
+import { z } from "zod";
 
 export type Review = ReviewValue & Readonly<{ continuation?: ContinuationReport }>;
 
-export type ForwardedMutationReceipt<Value> =
-  | Readonly<{ kind: "accepted"; result: MutationResult<Value> }>
-  | Readonly<{ kind: "refused"; refusal: KeiyakuRefusal }>
-  | Readonly<{ kind: "retry"; reason: KeiyakuRetryReason }>;
-
-export type ForwardedDeliveryReceipt = ForwardedMutationReceipt<DeliveryValue> | IntegrationConflictMaterialized;
-
-export type ForwardedReviewReceipt = ForwardedMutationReceipt<Review>;
-
-export type ForwardedAuditReceipt = ForwardedMutationReceipt<AuditReport>;
-
-function record(value: unknown): Readonly<Record<string, unknown>> | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
-}
-
-function exactResultKeys(value: Readonly<Record<string, unknown>>, expected: readonly string[]): boolean {
-  const actual = Object.keys(value).sort();
-  const sorted = [...expected].sort();
-  return actual.length === sorted.length && actual.every((key, index) => key === sorted[index]);
-}
-
-function nonblank(value: unknown): value is string {
-  return typeof value === "string" && value.trim() !== "";
-}
-
-function canonicalHead(value: unknown): boolean {
-  if (!nonblank(value)) return false;
-  try {
-    contractHead(value);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function canonicalSnapshot(value: unknown): boolean {
-  if (!nonblank(value)) return false;
-  try {
-    snapshotId(value);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function canonicalChange(value: unknown): boolean {
-  if (!nonblank(value)) return false;
-  try {
-    changeId(value);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function canonicalContract(value: unknown): boolean {
-  if (!nonblank(value)) return false;
-  try {
-    contractId(value);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function journalFact(value: unknown): boolean {
-  try {
-    encodeEntry(value as JournalEntry);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function receiptResultKeys(result: Readonly<Record<string, unknown>>): readonly string[] {
-  return [
-    "effects",
-    "facts",
-    "head",
-    "lags",
-    "settlement",
-    "value",
-    ...(result.cleanup === undefined ? [] : ["cleanup"]),
-    ...(result.hookRuns === undefined ? [] : ["hookRuns"]),
-    ...(result.leak === undefined ? [] : ["leak"]),
-  ];
-}
-
-function hookRuns(value: unknown): boolean {
-  return (
-    Array.isArray(value) &&
-    value.every((run) => {
-      const item = record(run);
-      return (
-        item !== null &&
-        exactResultKeys(item, ["name", "phase"]) &&
-        nonblank(item.name) &&
-        (item.phase === "create" || item.phase === "destroy")
-      );
-    })
-  );
-}
-
-function settlement(value: unknown): boolean {
-  const report = record(value);
-  if (
-    report === null ||
-    !exactResultKeys(report, ["actions", "lags"]) ||
-    !Array.isArray(report.actions) ||
-    !Array.isArray(report.lags)
-  )
-    return false;
-  const actions = report.actions.every((action) => {
-    const item = record(action);
-    if (item === null || typeof item.kind !== "string") return false;
-    if (item.kind === "task")
-      return exactResultKeys(item, ["action", "kind", "taskId"]) && item.action === "done" && nonblank(item.taskId);
-    return (
-      item.kind === "namespace-context" &&
-      exactResultKeys(item, ["action", "kind", "path"]) &&
-      nonblank(item.path) &&
-      (item.action === "installed" || item.action === "kept")
-    );
-  });
-  return (
-    actions &&
-    report.lags.every((lag) => {
-      const item = record(lag);
-      return (
-        item !== null &&
-        item.kind === "settlement-failed" &&
-        nonblank(item.diagnostic) &&
-        canonicalContract(item.contractId) &&
-        ["task-holder", "task", "namespace-context"].includes(item.surface as string) &&
-        (item.taskId === undefined || nonblank(item.taskId)) &&
-        (item.path === undefined || nonblank(item.path))
-      );
-    })
-  );
-}
-
-function completionVerification(value: unknown): boolean {
-  const verification = record(value);
-  return (
-    verification !== null &&
-    exactResultKeys(verification, ["mode", "verdict"]) &&
-    ["ran", "reused"].includes(verification.mode as string) &&
-    ["satisfied", "unsatisfied"].includes(verification.verdict as string)
-  );
-}
-
-function completionRecord(value: unknown): boolean {
-  const completion = record(value);
-  if (completion === null || !canonicalSnapshot(completion.integration)) return false;
-  const expected = ["integration", ...(completion.verification === undefined ? [] : ["verification"])];
-  return (
-    exactResultKeys(completion, expected) &&
-    (completion.verification === undefined || completionVerification(completion.verification))
-  );
-}
-
-function workspaceEvidence(value: unknown): boolean {
-  const workspace = record(value);
-  return (
-    workspace !== null &&
-    exactResultKeys(workspace, ["shortStat", "staged", "unstaged", "untracked"]) &&
-    Array.isArray(workspace.staged) &&
-    Array.isArray(workspace.unstaged) &&
-    Array.isArray(workspace.untracked) &&
-    workspace.staged.every(nonblank) &&
-    workspace.unstaged.every(nonblank) &&
-    workspace.untracked.every(nonblank)
-  );
-}
-
-function genericEvidenceRecord(value: unknown): boolean {
-  return record(value) !== null;
-}
-
-const completionEvidenceVariants: Readonly<Record<string, (value: unknown) => boolean>> = {
-  completion: completionRecord,
-  verificationSummary: nonblank,
-  workspace: workspaceEvidence,
-  verification: genericEvidenceRecord,
-  verificationReuse: genericEvidenceRecord,
-  placement: genericEvidenceRecord,
-  cleanup: genericEvidenceRecord,
-  leak: genericEvidenceRecord,
-  continuation: genericEvidenceRecord,
-};
-
-function completionEvidence(value: unknown, allowed: readonly string[]): boolean {
-  const evidence = record(value);
-  if (evidence === null) return false;
-  if (
-    !exactResultKeys(
-      evidence,
-      allowed.filter((key) => evidence[key] !== undefined),
-    )
-  )
-    return false;
-  return allowed.every((field) => {
-    const decoder = completionEvidenceVariants[field];
-    return evidence[field] === undefined || decoder === undefined || decoder(evidence[field]);
+function canonical<Value>(
+  decode: (value: string) => Value,
+  message: string,
+): z.ZodPipe<z.ZodString, z.ZodTransform<Value, string>> {
+  return z.string().transform((value, context) => {
+    try {
+      return decode(value);
+    } catch {
+      context.addIssue({ code: "custom", message });
+      return z.NEVER;
+    }
   });
 }
 
-function deliveryValue(value: unknown): boolean {
-  const delivery = record(value);
-  if (delivery === null) return false;
-  const allowed = [
-    "cleanup",
-    "completion",
-    "continuation",
-    "integration",
-    "leak",
-    "method",
-    "placement",
-    "policy",
-    "tenderSnapshot",
-    "verification",
-    "verificationReuse",
-    "verificationSummary",
-  ];
-  const integration = record(delivery.integration);
-  const policy = record(delivery.policy);
-  return (
-    completionEvidence(delivery, allowed) &&
-    canonicalSnapshot(delivery.tenderSnapshot) &&
-    integration !== null &&
-    exactResultKeys(integration, ["changeId", "predecessor", "snapshot"]) &&
-    canonicalChange(integration.changeId) &&
-    canonicalSnapshot(integration.predecessor) &&
-    canonicalSnapshot(integration.snapshot) &&
-    delivery.method === "squash" &&
-    policy !== null &&
-    exactResultKeys(policy, ["requireBranchesToBeUpToDate"]) &&
-    typeof policy.requireBranchesToBeUpToDate === "boolean"
+const nonblankStringSchema = z.string().refine((value) => value.trim() !== "");
+const contractIdSchema = canonical(contractId, "expected ContractId");
+const contractHeadSchema = canonical(contractHead, "expected ContractHead");
+const snapshotIdSchema = canonical(snapshotId, "expected SnapshotId");
+const changeIdSchema = canonical(changeId, "expected ChangeId");
+const taskIdSchema = z.string().transform((value, context) => {
+  try {
+    const id = formatTaskId(parseTaskId(value));
+    if (id !== value) throw new Error("not canonical");
+    return id;
+  } catch {
+    context.addIssue({ code: "custom", message: "expected canonical TaskId" });
+    return z.NEVER;
+  }
+});
+const journalFactSchema = z.unknown().transform((value, context) => {
+  try {
+    return decodeJournalEntry(value);
+  } catch {
+    context.addIssue({ code: "custom", message: "expected journal entry" });
+    return z.NEVER;
+  }
+});
+
+const settlementLagSchema = z
+  .object({
+    kind: z.literal("settlement-failed"),
+    surface: z.enum(["task-holder", "task", "namespace-context"]),
+    contractId: contractIdSchema,
+    taskId: taskIdSchema.optional(),
+    path: nonblankStringSchema.optional(),
+    diagnostic: nonblankStringSchema,
+  })
+  .strict()
+  .transform(({ taskId, path, ...lag }) => ({
+    ...lag,
+    ...(taskId === undefined ? {} : { taskId }),
+    ...(path === undefined ? {} : { path }),
+  }));
+const completionSchema = z
+  .object({
+    integration: snapshotIdSchema,
+    verification: z
+      .object({ mode: z.enum(["ran", "reused"]), verdict: z.enum(["satisfied", "unsatisfied"]) })
+      .strict()
+      .optional(),
+  })
+  .strict()
+  .transform(({ verification, ...completion }) =>
+    verification === undefined ? completion : { ...completion, verification },
   );
-}
+const integrationSchema = z
+  .object({ predecessor: snapshotIdSchema, snapshot: snapshotIdSchema, changeId: changeIdSchema })
+  .strict();
+const policySchema = z.object({ requireBranchesToBeUpToDate: z.boolean() }).strict();
 
-function reviewValue(value: unknown): boolean {
-  return completionEvidence(value, [
-    "cleanup",
-    "completion",
-    "continuation",
-    "leak",
-    "placement",
-    "verification",
-    "verificationReuse",
-    "verificationSummary",
-    "workspace",
-  ]);
-}
-
-function auditCandidate(value: unknown): boolean {
-  const candidate = record(value);
-  if (candidate === null) return false;
-  if (candidate.kind === "blocked")
-    return exactResultKeys(candidate, ["kind", "refusal"]) && record(candidate.refusal) !== null;
-  const workspace = record(candidate.workspace);
-  return (
-    candidate.kind === "ready" &&
-    exactResultKeys(
-      candidate,
-      ["diff", "identity", "kind", "scope", "workspace"].filter((key) => candidate[key] !== undefined),
-    ) &&
-    record(candidate.identity) !== null &&
-    record(candidate.scope) !== null &&
-    workspace?.kind === "worktree" &&
-    nonblank(workspace.path) &&
-    (candidate.diff === undefined || typeof candidate.diff === "string")
+const gateSchema = canonical(gate, "expected Gate");
+const contractIdentityRefusalSchema = z
+  .object({
+    kind: z.enum([
+      "terminal",
+      "terms-moved",
+      "unknown-prerequisite",
+      "cyclic-prerequisite",
+      "document-moved",
+      "contract-exists",
+      "invalid-after",
+      "fork-source-moved",
+      "worktree-missing",
+      "target-missing",
+      "delivery-missing",
+    ]),
+    contractId: contractIdSchema,
+  })
+  .strict();
+const contractMissingRefusalSchema = z
+  .object({ kind: z.literal("contract-missing"), contractId: contractIdSchema })
+  .strict();
+const targetInputRefusalSchema = z.union([
+  z.object({ kind: z.literal("invalid-target") }).strict(),
+  z.object({ kind: z.literal("target-missing") }).strict(),
+  z.object({ kind: z.literal("unborn-head") }).strict(),
+]);
+const verificationDeclarationRefusalSchema = z
+  .object({ kind: z.literal("verification-declaration-invalid"), contractId: contractIdSchema.optional() })
+  .strict()
+  .transform(({ contractId, ...refusal }) => (contractId === undefined ? refusal : { ...refusal, contractId }));
+const workspaceSchema = z.object({ kind: z.literal("worktree"), path: nonblankStringSchema }).strict();
+const mergeStateRefusalSchema = z
+  .object({ kind: z.literal("merge-state-present"), contractId: contractIdSchema, workspace: workspaceSchema })
+  .strict();
+const unmergedPathsRefusalSchema = z
+  .object({ kind: z.literal("unmerged-paths"), contractId: contractIdSchema, paths: z.array(nonblankStringSchema) })
+  .strict();
+const dirtyWorkspaceRefusalSchema = z
+  .object({
+    kind: z.literal("dirty-workspace"),
+    contractId: contractIdSchema,
+    staged: z.array(nonblankStringSchema),
+    unstaged: z.array(nonblankStringSchema),
+    untracked: z.array(nonblankStringSchema),
+    submodules: z.array(nonblankStringSchema),
+    shortStat: z
+      .object({
+        filesChanged: z.number().int().nonnegative(),
+        insertions: z.number().int().nonnegative(),
+        deletions: z.number().int().nonnegative(),
+      })
+      .strict(),
+  })
+  .strict();
+const integrationFailureSchema = z
+  .object({
+    kind: z.literal("integration-failed"),
+    contractId: contractIdSchema,
+    reason: z.enum(["not-based-on-target", "unrelated-histories", "conflict"]),
+    targetHead: snapshotIdSchema,
+    conflictPaths: z.array(nonblankStringSchema).optional(),
+  })
+  .strict()
+  .transform(({ conflictPaths, ...failure }) =>
+    conflictPaths === undefined ? failure : { ...failure, conflictPaths },
   );
-}
+const integrationPreparationRefusalSchema = z.union([
+  integrationFailureSchema,
+  z
+    .object({
+      kind: z.literal("integration-unsupported"),
+      contractId: contractIdSchema,
+      requiredGit: z.literal("2.38"),
+    })
+    .strict(),
+]);
+const integrationRefusalSchema = z.union([
+  integrationPreparationRefusalSchema,
+  z
+    .object({
+      kind: z.literal("integration-failed"),
+      contractId: contractIdSchema,
+      reason: z.literal("conflict"),
+      targetHead: snapshotIdSchema,
+      conflictPaths: z.array(nonblankStringSchema),
+      recovery: z
+        .object({
+          materialize: z.literal("deliver --materialize-conflict"),
+          continue: z.literal("deliver --include-dirty"),
+        })
+        .strict(),
+    })
+    .strict(),
+]);
+const checkoutRefusalSchema = z
+  .object({
+    kind: z.literal("checkout-not-followable"),
+    contractId: contractIdSchema,
+    target: nonblankStringSchema,
+    path: nonblankStringSchema,
+    reason: z.enum(["staged", "conflict", "untracked"]),
+    paths: z.array(nonblankStringSchema),
+  })
+  .strict();
+const gateCurrentSchema = z.union([
+  z
+    .object({
+      kind: z.literal("attested"),
+      verdict: z.enum(["satisfied", "unsatisfied"]),
+      summary: z.string().optional(),
+      at: z.string(),
+    })
+    .strict()
+    .transform(({ summary, ...current }) => (summary === undefined ? current : { ...current, summary })),
+  z.object({ kind: z.literal("stale"), priorVerdict: z.enum(["satisfied", "unsatisfied"]) }).strict(),
+  z.object({ kind: z.literal("missing") }).strict(),
+]);
+const placementRefusalSchema = z.union([
+  z
+    .object({
+      kind: z.literal("gates-unsatisfied"),
+      contractId: contractIdSchema,
+      unmet: z.array(z.object({ gate: gateSchema, current: gateCurrentSchema }).strict()),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("prerequisites-unsatisfied"),
+      contractId: contractIdSchema,
+      unmet: z.array(
+        z.object({ contractId: contractIdSchema, state: z.enum(["missing", "active", "abandoned"]) }).strict(),
+      ),
+    })
+    .strict(),
+]);
+const nukeRefusalSchema = z.union([
+  z.object({ kind: z.literal("nuke-confirmation-required"), world: nonblankStringSchema }).strict(),
+  z
+    .object({ kind: z.literal("nuke-confirmation-mismatch"), world: nonblankStringSchema, confirmation: z.string() })
+    .strict(),
+]);
+const forkSourceRefusalSchema = z
+  .object({
+    kind: z.enum(["fork-source-missing", "fork-source-unavailable", "fork-source-invalid", "fork-source-moved"]),
+    contractId: contractIdSchema,
+  })
+  .strict();
+const refusalSchema = z.union([
+  contractMissingRefusalSchema,
+  contractIdentityRefusalSchema,
+  targetInputRefusalSchema,
+  verificationDeclarationRefusalSchema,
+  mergeStateRefusalSchema,
+  unmergedPathsRefusalSchema,
+  dirtyWorkspaceRefusalSchema,
+  integrationRefusalSchema,
+  checkoutRefusalSchema,
+  placementRefusalSchema,
+  nukeRefusalSchema,
+  forkSourceRefusalSchema,
+]) satisfies z.ZodType<KeiyakuRefusal>;
+const retrySchema = z.union([
+  z.object({ kind: z.literal("exhausted") }).strict(),
+  z.object({ kind: z.literal("collision") }).strict(),
+  z.object({ kind: z.literal("publication-failed"), diagnostic: z.string() }).strict(),
+]) satisfies z.ZodType<KeiyakuRetryReason>;
+const materializedConflictSchema = z
+  .object({
+    kind: z.literal("integration-conflict-materialized"),
+    targetHead: snapshotIdSchema,
+    conflictPaths: z.array(nonblankStringSchema),
+    workspace: z.object({ kind: z.literal("worktree"), path: nonblankStringSchema }).strict(),
+  })
+  .strict() satisfies z.ZodType<IntegrationConflictMaterialized>;
 
-function auditVerification(value: unknown): boolean {
-  const verification = record(value);
-  if (verification === null) return false;
-  if (verification.kind === "not-run") return exactResultKeys(verification, ["kind"]);
-  if (verification.kind === "stopped")
-    return exactResultKeys(verification, ["kind", "stop"]) && record(verification.stop) !== null;
-  return (
-    (verification.kind === "satisfied" || verification.kind === "unsatisfied") &&
-    exactResultKeys(
+const hookFailureSchema = z.union([
+  z
+    .object({
+      kind: z.literal("exit"),
+      code: z.number().int(),
+      stdout: z.string(),
+      stderr: z.string(),
+      truncated: z.boolean(),
+    })
+    .strict(),
+  z.object({ kind: z.literal("timeout") }).strict(),
+  z.object({ kind: z.literal("spawn-error"), diagnostic: z.string() }).strict(),
+  z.object({ kind: z.literal("unknown-exit") }).strict(),
+]);
+const attestationRefusalSchema = z
+  .object({ kind: z.enum(["contract-missing", "terminal"]), contractId: contractIdSchema })
+  .strict();
+const verificationStopSchema = z.union([
+  z.object({ refusal: z.union([attestationRefusalSchema, verificationDeclarationRefusalSchema]) }).strict(),
+  z.object({ retry: retrySchema }).strict(),
+  z.object({ failure: z.enum(["unknown-exit", "cancelled"]) }).strict(),
+  z.object({ failure: z.enum(["candidate-unavailable", "spawn-error"]), diagnostic: z.string() }).strict(),
+  z.object({ failure: z.literal("environment-failure"), diagnostic: z.string() }).strict(),
+  z
+    .object({ failure: z.literal("environment-failure"), command: z.number().int(), detail: hookFailureSchema })
+    .strict(),
+]) satisfies z.ZodType<NonNullable<DeliveryValue["verification"]>>;
+const verificationReuseSchema = z
+  .object({
+    entry: canonical(entryUlid, "expected EntryUlid"),
+    verdict: z.enum(["satisfied", "unsatisfied"]),
+    summary: z.string().optional(),
+  })
+  .strict()
+  .transform(({ summary, ...reuse }) => (summary === undefined ? reuse : { ...reuse, summary })) satisfies z.ZodType<
+  NonNullable<DeliveryValue["verificationReuse"]>
+>;
+const placementStepRefusalSchema = z.union([
+  z
+    .object({ kind: z.enum(["contract-missing", "delivery-missing", "terminal"]), contractId: contractIdSchema })
+    .strict(),
+  placementRefusalSchema,
+  checkoutRefusalSchema,
+  integrationFailureSchema,
+  z
+    .object({
+      kind: z.literal("integration-unsupported"),
+      contractId: contractIdSchema,
+      requiredGit: z.literal("2.38"),
+    })
+    .strict(),
+  z.object({ kind: z.literal("target-missing"), contractId: contractIdSchema }).strict(),
+]);
+const placementStopSchema = z.union([
+  z.object({ refusal: placementStepRefusalSchema }).strict(),
+  z.object({ retry: retrySchema }).strict(),
+  z
+    .object({
+      failure: z.literal("target-moved"),
+      contractId: contractIdSchema,
+      target: nonblankStringSchema,
+      expected: snapshotIdSchema,
+      observed: snapshotIdSchema.nullable(),
+      observedTreeEqualsCandidate: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
+      failure: z.literal("target-moved"),
+      contractId: contractIdSchema,
+      target: nonblankStringSchema,
+      integratedAt: snapshotIdSchema,
+      observed: snapshotIdSchema.nullable(),
+      attempts: z.number().int(),
+      observedTreeEqualsCandidate: z.boolean(),
+    })
+    .strict(),
+  z.object({ failure: z.literal("target-placement-failed"), diagnostic: z.string() }).strict(),
+]) satisfies z.ZodType<NonNullable<DeliveryValue["placement"]>>;
+const cleanupSchema = z
+  .object({ phase: z.literal("destroy"), command: z.number().int(), detail: hookFailureSchema })
+  .strict() satisfies z.ZodType<NonNullable<DeliveryValue["cleanup"]>>;
+const leakSchema = z.object({ path: z.string(), diagnostic: z.string() }).strict() satisfies z.ZodType<
+  NonNullable<DeliveryValue["leak"]>
+>;
+const continuationSchema = z
+  .object({
+    claimed: z.array(contractIdSchema),
+    stopped: z.array(
+      z
+        .object({
+          contractId: contractIdSchema,
+          stop: z.union([placementStopSchema, z.object({ kind: z.literal("already-terminal") }).strict()]),
+        })
+        .strict(),
+    ),
+  })
+  .strict() satisfies z.ZodType<NonNullable<DeliveryValue["continuation"]>>;
+const workspaceDeltaSchema = z
+  .object({
+    staged: z.array(z.string()),
+    unstaged: z.array(z.string()),
+    untracked: z.array(z.string()),
+    shortStat: z
+      .object({ filesChanged: z.number().int(), insertions: z.number().int(), deletions: z.number().int() })
+      .strict(),
+  })
+  .strict() satisfies z.ZodType<NonNullable<Review["workspace"]>>;
+const deliveryValueSchema = z
+  .object({
+    tenderSnapshot: snapshotIdSchema,
+    integration: integrationSchema,
+    method: z.literal("squash"),
+    policy: policySchema,
+    completion: completionSchema.optional(),
+    verification: verificationStopSchema.optional(),
+    verificationReuse: verificationReuseSchema.optional(),
+    verificationSummary: nonblankStringSchema.optional(),
+    placement: placementStopSchema.optional(),
+    cleanup: cleanupSchema.optional(),
+    leak: leakSchema.optional(),
+    continuation: continuationSchema.optional(),
+  })
+  .strict()
+  .transform(
+    ({
+      completion,
       verification,
-      ["kind", "passed", "summary", "total"].filter((key) => verification[key] !== undefined),
-    ) &&
-    typeof verification.passed === "number" &&
-    typeof verification.total === "number" &&
-    (verification.summary === undefined || typeof verification.summary === "string")
-  );
+      verificationReuse,
+      verificationSummary,
+      placement,
+      cleanup,
+      leak,
+      continuation,
+      ...value
+    }) => ({
+      ...value,
+      ...(completion === undefined ? {} : { completion }),
+      ...(verification === undefined ? {} : { verification }),
+      ...(verificationReuse === undefined ? {} : { verificationReuse }),
+      ...(verificationSummary === undefined ? {} : { verificationSummary }),
+      ...(placement === undefined ? {} : { placement }),
+      ...(cleanup === undefined ? {} : { cleanup }),
+      ...(leak === undefined ? {} : { leak }),
+      ...(continuation === undefined ? {} : { continuation }),
+    }),
+  ) satisfies z.ZodType<DeliveryValue>;
+const reviewValueSchema = z
+  .object({
+    completion: completionSchema.optional(),
+    verification: verificationStopSchema.optional(),
+    verificationReuse: verificationReuseSchema.optional(),
+    verificationSummary: nonblankStringSchema.optional(),
+    placement: placementStopSchema.optional(),
+    cleanup: cleanupSchema.optional(),
+    leak: leakSchema.optional(),
+    continuation: continuationSchema.optional(),
+    workspace: workspaceDeltaSchema.optional(),
+  })
+  .strict()
+  .transform(
+    ({
+      completion,
+      verification,
+      verificationReuse,
+      verificationSummary,
+      placement,
+      cleanup,
+      leak,
+      continuation,
+      workspace,
+    }) => ({
+      ...(completion === undefined ? {} : { completion }),
+      ...(verification === undefined ? {} : { verification }),
+      ...(verificationReuse === undefined ? {} : { verificationReuse }),
+      ...(verificationSummary === undefined ? {} : { verificationSummary }),
+      ...(placement === undefined ? {} : { placement }),
+      ...(cleanup === undefined ? {} : { cleanup }),
+      ...(leak === undefined ? {} : { leak }),
+      ...(continuation === undefined ? {} : { continuation }),
+      ...(workspace === undefined ? {} : { workspace }),
+    }),
+  ) satisfies z.ZodType<Review>;
+const deliveryPreparationRefusalSchema = z.union([
+  z.object({ kind: z.enum(["target-missing", "worktree-missing"]), contractId: contractIdSchema }).strict(),
+  dirtyWorkspaceRefusalSchema,
+  unmergedPathsRefusalSchema,
+  integrationPreparationRefusalSchema,
+  mergeStateRefusalSchema,
+  checkoutRefusalSchema,
+]);
+const auditReadyCandidateSchema = z
+  .object({
+    kind: z.literal("ready"),
+    workspace: z.object({ kind: z.literal("worktree"), path: nonblankStringSchema }).strict(),
+    identity: z
+      .object({
+        tenderSnapshot: snapshotIdSchema,
+        integration: integrationSchema,
+        method: z.literal("squash"),
+        policy: policySchema,
+      })
+      .strict(),
+    scope: z
+      .object({
+        filesChanged: z.number().int(),
+        insertions: z.number().int(),
+        deletions: z.number().int(),
+        paths: z.array(z.string()).optional(),
+      })
+      .strict()
+      .transform(({ paths, ...scope }) => (paths === undefined ? scope : { ...scope, paths })),
+    diff: z.string().optional(),
+  })
+  .strict()
+  .transform(({ diff, ...candidate }) => (diff === undefined ? candidate : { ...candidate, diff }));
+const auditCandidateSchema = z.union([
+  z.object({ kind: z.literal("blocked"), refusal: deliveryPreparationRefusalSchema }).strict(),
+  auditReadyCandidateSchema,
+]);
+const auditVerificationSchema = z.union([
+  z.object({ kind: z.literal("not-run") }).strict(),
+  z.object({ kind: z.literal("stopped"), stop: verificationStopSchema }).strict(),
+  z
+    .object({
+      kind: z.enum(["satisfied", "unsatisfied"]),
+      passed: z.number(),
+      total: z.number(),
+      summary: z.string().optional(),
+    })
+    .strict()
+    .transform(({ summary, ...verification }) => (summary === undefined ? verification : { ...verification, summary })),
+]);
+const auditTargetSchema = z.union([
+  z.object({ kind: z.literal("not-observed") }).strict(),
+  z.object({ kind: z.literal("placeable"), ref: z.string(), head: snapshotIdSchema }).strict(),
+  z
+    .object({
+      kind: z.literal("moved"),
+      ref: z.string(),
+      expected: snapshotIdSchema,
+      observed: snapshotIdSchema.nullable(),
+    })
+    .strict(),
+  z.object({ kind: z.literal("refused"), refusal: checkoutRefusalSchema }).strict(),
+  z.object({ kind: z.literal("failed"), diagnostic: z.string() }).strict(),
+]);
+export const auditReportSchema = z
+  .object({
+    candidate: auditCandidateSchema,
+    verification: auditVerificationSchema,
+    target: auditTargetSchema,
+    delivery: z
+      .object({ changeId: changeIdSchema, relation: z.enum(["identical", "differs"]) })
+      .strict()
+      .optional(),
+  })
+  .strict()
+  .transform(({ delivery, ...report }) =>
+    delivery === undefined ? report : { ...report, delivery },
+  ) satisfies z.ZodType<AuditReport>;
+
+const mutationResultSchema = <Value>(value: z.ZodType<Value>) =>
+  z
+    .object({
+      facts: z.array(journalFactSchema),
+      head: contractHeadSchema,
+      value,
+      lags: z.array(reconciliationLagSchema),
+      settlementLags: z.array(settlementLagSchema),
+      recoverySnapshot: snapshotIdSchema.optional(),
+      cleanup: cleanupSchema.optional(),
+      leak: leakSchema.optional(),
+    })
+    .strict()
+    .transform(({ recoverySnapshot, cleanup, leak, ...result }) => ({
+      ...result,
+      ...(recoverySnapshot === undefined ? {} : { recoverySnapshot }),
+      ...(cleanup === undefined ? {} : { cleanup }),
+      ...(leak === undefined ? {} : { leak }),
+    }));
+
+const deliveryMutationResultSchema = mutationResultSchema(deliveryValueSchema);
+const reviewMutationResultSchema = mutationResultSchema(reviewValueSchema);
+export const auditMutationResultSchema = mutationResultSchema(auditReportSchema);
+
+export const deliveryResultSchema = z.union([
+  deliveryMutationResultSchema,
+  materializedConflictSchema,
+]) satisfies z.ZodType<MutationResult<DeliveryValue> | IntegrationConflictMaterialized>;
+export const reviewResultSchema = reviewMutationResultSchema satisfies z.ZodType<MutationResult<Review>>;
+export const auditResultSchema = auditMutationResultSchema satisfies z.ZodType<MutationResult<AuditReport>>;
+
+const contractLiveFailureSchema = z.union([
+  z.object({ kind: z.literal("refused"), refusal: refusalSchema }).strict(),
+  z.object({ kind: z.literal("retry"), reason: retrySchema }).strict(),
+]);
+
+export function encodeContractLiveFailure(error: unknown): unknown | null {
+  if (error instanceof KeiyakuRefused) {
+    return contractLiveFailureSchema.parse({ kind: "refused", refusal: error.refusal });
+  }
+  if (error instanceof KeiyakuRetry) {
+    return contractLiveFailureSchema.parse({ kind: "retry", reason: error.reason });
+  }
+  return null;
 }
 
-function auditDelivery(value: unknown): boolean {
-  if (value === undefined) return true;
-  const delivery = record(value);
-  return (
-    delivery !== null &&
-    exactResultKeys(delivery, ["changeId", "relation"]) &&
-    canonicalChange(delivery.changeId) &&
-    (delivery.relation === "identical" || delivery.relation === "differs")
-  );
-}
-
-export function isAuditReport(value: unknown): value is AuditReport {
-  const report = record(value);
-  const target = report === null ? null : record(report.target);
-  return (
-    report !== null &&
-    target !== null &&
-    exactResultKeys(
-      report,
-      ["candidate", "delivery", "target", "verification"].filter((key) => report[key] !== undefined),
-    ) &&
-    auditCandidate(report.candidate) &&
-    auditVerification(report.verification) &&
-    typeof target.kind === "string" &&
-    auditDelivery(report.delivery)
-  );
-}
-
-function acceptedResult(value: unknown, valueDecoder: (value: unknown) => boolean): boolean {
-  const result = record(value);
-  return (
-    result !== null &&
-    exactResultKeys(result, receiptResultKeys(result)) &&
-    Array.isArray(result.facts) &&
-    result.facts.every(journalFact) &&
-    canonicalHead(result.head) &&
-    valueDecoder(result.value) &&
-    Array.isArray(result.effects) &&
-    result.effects.every(reconciliationEffect) &&
-    Array.isArray(result.lags) &&
-    result.lags.every(reconciliationLag) &&
-    settlement(result.settlement) &&
-    (result.cleanup === undefined || record(result.cleanup) !== null) &&
-    (result.hookRuns === undefined || hookRuns(result.hookRuns)) &&
-    (result.leak === undefined || record(result.leak) !== null)
-  );
-}
-
-function isForwardedRefusal(receipt: Readonly<Record<string, unknown>>): boolean {
-  const refusal = record(receipt.refusal);
-  return exactResultKeys(receipt, ["kind", "refusal"]) && refusal !== null && nonblank(refusal.kind);
-}
-
-function isForwardedRetry(receipt: Readonly<Record<string, unknown>>): boolean {
-  return exactResultKeys(receipt, ["kind", "reason"]) && typeof receipt.reason === "string";
-}
-
-export function isForwardedDeliveryReceipt(value: unknown): value is ForwardedDeliveryReceipt {
-  const receipt = record(value);
-  if (receipt === null || typeof receipt.kind !== "string") return false;
-  if (receipt.kind === "accepted")
-    return exactResultKeys(receipt, ["kind", "result"]) && acceptedResult(receipt.result, deliveryValue);
-  if (receipt.kind === "refused") return isForwardedRefusal(receipt);
-  if (receipt.kind === "retry") return isForwardedRetry(receipt);
-  return (
-    receipt.kind === "integration-conflict-materialized" &&
-    exactResultKeys(receipt, ["conflictPaths", "kind", "targetHead", "workspace"]) &&
-    canonicalSnapshot(receipt.targetHead) &&
-    Array.isArray(receipt.conflictPaths) &&
-    receipt.conflictPaths.every(nonblank) &&
-    record(receipt.workspace)?.kind === "worktree" &&
-    nonblank(record(receipt.workspace)?.path)
-  );
-}
-
-export function isForwardedReviewReceipt(value: unknown): value is ForwardedReviewReceipt {
-  const receipt = record(value);
-  if (receipt === null || typeof receipt.kind !== "string") return false;
-  if (receipt.kind === "accepted")
-    return exactResultKeys(receipt, ["kind", "result"]) && acceptedResult(receipt.result, reviewValue);
-  if (receipt.kind === "refused") return isForwardedRefusal(receipt);
-  return receipt.kind === "retry" && isForwardedRetry(receipt);
-}
-
-export function isForwardedAuditReceipt(value: unknown): value is ForwardedAuditReceipt {
-  const receipt = record(value);
-  if (receipt === null || typeof receipt.kind !== "string") return false;
-  if (receipt.kind === "accepted")
-    return exactResultKeys(receipt, ["kind", "result"]) && acceptedResult(receipt.result, isAuditReport);
-  if (receipt.kind === "refused") return isForwardedRefusal(receipt);
-  return receipt.kind === "retry" && isForwardedRetry(receipt);
+export function decodeContractLiveFailure(value: unknown): Error | null {
+  const parsed = contractLiveFailureSchema.safeParse(value);
+  if (!parsed.success) return null;
+  return parsed.data.kind === "refused"
+    ? new KeiyakuRefused(parsed.data.refusal)
+    : new KeiyakuRetry(parsed.data.reason);
 }

@@ -27,6 +27,23 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { module: "node:module", owners: [] },
     { module: "module", owners: [] },
     {
+      module: "zod",
+      owners: [
+        { source: "akuma/request-wire.ts", symbols: ["z"] },
+        { source: "akuma/call-request.ts", symbols: ["z"] },
+        { source: "akuma/akuma.ts", symbols: ["z"] },
+        { source: "akuma/projection.ts", symbols: ["z"] },
+        { source: "library/contract-operations.ts", symbols: ["z"] },
+        { source: "library/contract-forwarding-result.ts", symbols: ["z"] },
+        { source: "library/contract-forwarding-reconciliation-result.ts", symbols: ["z"] },
+        { source: "library/fleet.ts", symbols: ["z"] },
+        { source: "library/fleet-result.ts", symbols: ["z"] },
+        { source: "task/mutation.ts", symbols: ["z"] },
+        { source: "task/mutation-result.ts", symbols: ["z"] },
+        { source: "task/board.ts", symbols: ["z"] },
+      ],
+    },
+    {
       module: "node:child_process",
       owners: [
         { source: "git/process.ts", symbols: ["spawn"] },

@@ -279,6 +279,11 @@ function validateEntry(value: unknown): JournalEntry {
   return entry;
 }
 
+/** Validate one in-memory journal value with the persisted-fact authority. */
+export function decodeJournalEntry(value: unknown): JournalEntry {
+  return validateEntry(value);
+}
+
 function canonicalValue(value: unknown): string {
   if (value === null) return "null";
   if (typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);

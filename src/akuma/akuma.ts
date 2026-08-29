@@ -17,14 +17,14 @@ import {
   type AkumaLife,
   type KillEvidence,
   type ResumeCoordinate,
-  type Soul,
 } from "./heart/index.js";
-import { pathsForAkuId, type AkuId, type AkumaPaths } from "./identity.js";
-import type { ActivitySnapshot } from "./projection.js";
+import { parseAkuId, pathsForAkuId, type AkuId, type AkumaPaths } from "./identity.js";
+import { activitySnapshotSchema } from "./projection.js";
 import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
 import type { AllowedAction } from "./allowed.js";
 import type { ExecutionContext } from "./requests.js";
+import { z } from "zod";
 
 export const POLL_MS = 100;
 
@@ -55,13 +55,34 @@ export type AkumaListRow = Readonly<{
   pending: readonly string[];
 }>;
 
-export type AkumaStatus = Readonly<{
-  id: AkuId;
-  life: AkumaLife;
-  readonly?: Soul["readonly"];
-  timeline: ActivitySnapshot;
-  strandedReason?: "resume-unsupported";
-}>;
+export const akumaIdSchema = z.string().transform((value, context) => {
+  try {
+    const id = parseAkuId(value).id;
+    if (id !== value) throw new Error("not canonical");
+    return id;
+  } catch {
+    context.addIssue({ code: "custom", message: "expected canonical AkuId" });
+    return z.NEVER;
+  }
+});
+const readonlySchema = z.union([
+  z.object({ enforcement: z.literal("native") }).strict(),
+  z.object({ enforcement: z.literal("none"), diagnostic: z.string().refine((value) => value.trim() !== "") }).strict(),
+]);
+export const akumaStatusSchema = z
+  .object({
+    id: akumaIdSchema,
+    life: z.enum(["running", "asleep", "stranded", "hung", "untidy", "killed"]),
+    readonly: readonlySchema.optional(),
+    timeline: activitySnapshotSchema,
+    strandedReason: z.literal("resume-unsupported").optional(),
+  })
+  .strict();
+export type AkumaStatus = z.infer<typeof akumaStatusSchema>;
+
+export function parseAkumaStatus(value: unknown): AkumaStatus {
+  return akumaStatusSchema.parse(value);
+}
 
 /** The default completion judgment over one complete status snapshot. */
 export function defaultWaitComplete(status: AkumaStatus): boolean {

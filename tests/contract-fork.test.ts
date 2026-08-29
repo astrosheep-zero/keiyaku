@@ -3,6 +3,7 @@ import test from "node:test";
 import { Keiyaku, KeiyakuRefused, Repo } from "../src/index.js";
 import { invoke } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
+import { GIT_REF } from "../src/git/repository.js";
 import { document, repositoryWithMain } from "./support/library-verbs.js";
 import { withGitShim } from "./support/git.js";
 
@@ -120,22 +121,26 @@ test("fork admission rejects a source amend interleaved at the state transaction
     workspace: "worktree",
     gates: [],
   });
+  const oldState = repository.run(["rev-parse", GIT_REF]).trim();
+  await source.keiyaku.amend({ gates: ["reviewed"] });
+  const movedState = repository.run(["rev-parse", GIT_REF]).trim();
+  repository.run(["update-ref", GIT_REF, oldState, movedState]);
   const marker = `${repository.path}/fork-race.marker`;
   await assert.rejects(
     withGitShim(
       [
         'if [ "$1" = "update-ref" ] && [ ! -e "$KEIYAKU_FORK_RACE_MARKER" ]; then',
         '  touch "$KEIYAKU_FORK_RACE_MARKER"',
-        "  node --import \"$KEIYAKU_FORK_RACE_LOADER\" --input-type=module -e 'const { Keiyaku, Repo } = await import(process.env.KEIYAKU_FORK_RACE_MODULE); await Keiyaku.of({ repo: await Repo.at({ path: process.env.KEIYAKU_FORK_RACE_REPO }), id: process.env.KEIYAKU_FORK_RACE_ID }).amend({ gates: [] });'",
+        '  "$KEIYAKU_REAL_GIT" -C "$KEIYAKU_FORK_RACE_REPO" update-ref "$KEIYAKU_FORK_RACE_STATE_REF" "$KEIYAKU_FORK_RACE_MOVED" "$KEIYAKU_FORK_RACE_OLD"',
         "fi",
         'exec "$KEIYAKU_REAL_GIT" "$@"',
       ].join("\n"),
       {
         KEIYAKU_FORK_RACE_MARKER: marker,
-        KEIYAKU_FORK_RACE_LOADER: new URL("../node_modules/tsx/dist/loader.mjs", import.meta.url).href,
-        KEIYAKU_FORK_RACE_MODULE: new URL("../src/index.ts", import.meta.url).href,
         KEIYAKU_FORK_RACE_REPO: repository.path,
-        KEIYAKU_FORK_RACE_ID: source.keiyaku.id,
+        KEIYAKU_FORK_RACE_STATE_REF: GIT_REF,
+        KEIYAKU_FORK_RACE_OLD: oldState,
+        KEIYAKU_FORK_RACE_MOVED: movedState,
       },
       async (gitPath) =>
         Keiyaku.bind({ repo: await Repo.at({ path: repository.path, gitPath }), forkOf: source.keiyaku.id }),
@@ -145,5 +150,5 @@ test("fork admission rejects a source amend interleaved at the state transaction
       error.refusal.kind === "fork-source-moved" &&
       error.refusal.contractId === source.keiyaku.id,
   );
-  assert.equal((await source.keiyaku.state()).terms.gates.length, 0);
+  assert.deepEqual((await source.keiyaku.state()).terms.gates, ["reviewed"]);
 });

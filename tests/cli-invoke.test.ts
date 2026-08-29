@@ -564,19 +564,12 @@ test("post-admission reconcile failure remains accepted with a physical lag", as
     ["bind"],
   );
   assert.notEqual(result.head, null);
-  assert.deepEqual(
-    result.effects.map((effect) => [effect.kind, effect.action]),
-    [
-      ["ref", "created"],
-      ["contract-file", "created"],
-    ],
-  );
   assert.equal(result.lag?.[0]?.kind, "reconcile-failed");
   if (result.lag?.[0]?.kind === "reconcile-failed") {
     assert.equal(result.lag[0].stage, "effect");
     assert.match(result.lag[0].diagnostic, /forced CLI worktree failure/);
   }
-  assert.deepEqual(result.settlement, { actions: [], lags: [] });
+  assert.deepEqual(result.settlementLags, []);
 
   const state = await Keiyaku.of({ repo: await cachedRepoAt(repository.path), id: result.contract }).state();
   assert.equal(state.id, result.contract);

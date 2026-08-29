@@ -161,14 +161,6 @@ test("ordinary placement follows a checked-out target and preserves unrelated wo
   assert.equal(readFileSync(resolve(repository.path, "untracked.txt"), "utf8"), "untracked local\n");
   assert.equal(repository.run(["diff", "--cached", "--name-only"]), "");
   assert.equal(delivered.lags.length, 0);
-  assert.ok(
-    delivered.effects.some(
-      (effect) =>
-        effect.kind === "target-checkout" &&
-        effect.path === realpathSync(repository.path) &&
-        effect.action === "followed",
-    ),
-  );
 });
 
 test("claimed target observation is current at integration and drifts after rewind", async () => {
@@ -206,7 +198,6 @@ test("ordinary placement carries unrelated staged index bytes through the follow
   assert.equal(readFileSync(resolve(repository.path, "local.txt"), "utf8"), "staged local\n");
   assert.equal(repository.run(["diff", "--cached", "--", "local.txt"]), stagedPatch);
   assert.deepEqual(delivered.lags, []);
-  assert.ok(delivered.effects.some((effect) => effect.kind === "target-checkout" && effect.action === "followed"));
 });
 
 test("ordinary placement follows the target checkout in another worktree", async () => {
@@ -221,12 +212,6 @@ test("ordinary placement follows the target checkout in another worktree", async
 
   assert.equal(readFileSync(resolve(checkout, "delivered.txt"), "utf8"), "candidate\n");
   assert.equal(repository.run(["-C", checkout, "status", "--porcelain"]), "");
-  assert.ok(
-    delivered.effects.some(
-      (effect) =>
-        effect.kind === "target-checkout" && effect.path === realpathSync(checkout) && effect.action === "followed",
-    ),
-  );
 });
 
 test("conflicting target bytes refuse placement before claimed or target movement", async () => {
@@ -316,7 +301,6 @@ test("a staged candidate-changed path refuses placement with its exact path", as
   assert.equal(repository.run(["diff", "--cached", "--", "delivered.txt"]), stagedPatch);
   assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "staged conflict\n");
   assert.deepEqual(delivered.lags, []);
-  assert.ok(!delivered.effects.some((effect) => effect.kind === "target-checkout"));
 });
 
 async function admitClaimWithoutFollow(

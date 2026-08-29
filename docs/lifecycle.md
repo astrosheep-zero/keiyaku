@@ -368,8 +368,9 @@ The leading admission selects the outer result. `refused` and `retry` mean no
 journal fact landed; once the leading act completes the result remains
 `accepted`. Verification, placement, claim continuation, cleanup,
 reconciliation, and settlement are independent trailing duties whose facts or
-typed stops remain on their own channels. Continuation facts and physical
-effects join the invoking result while its `head` remains the addressed
-Contract's head. These duties never reverse acceptance, change exit status,
+typed stops remain on their own channels. Continuation facts join the invoking
+result while its `head` remains the addressed Contract's head; reconciliation
+contributes lags and, when cleanup creates unrecoverable evidence, the sole
+`recoverySnapshot` coordinate rather than an effects collection. These duties never reverse acceptance, change exit status,
 append abandonment, or hide the admitted Contract. Exact public shapes are owned by
 [public-results.md](public-results.md).

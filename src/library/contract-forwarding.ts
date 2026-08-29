@@ -11,29 +11,15 @@ import type { WorktreeHooks } from "./configuration.js";
 import type { DeliveryValue } from "./delivery.js";
 import { actorOption, documentDerivation, invalidInput, optionalNonblank } from "./input.js";
 import { completionInput, completeMutation, type MutationResult } from "./mutation.js";
-import { forwardedMutationFailure, KeiyakuRefused, KeiyakuRetry, requireAccepted } from "./refusal.js";
+import { requireAccepted } from "./refusal.js";
 import {
-  isForwardedDeliveryReceipt,
-  isForwardedAuditReceipt,
-  isForwardedReviewReceipt,
-  type ForwardedAuditReceipt,
-  type ForwardedDeliveryReceipt,
-  type ForwardedReviewReceipt,
+  auditReportSchema,
+  auditResultSchema,
+  deliveryResultSchema,
+  reviewResultSchema,
   type Review,
 } from "./contract-forwarding-result.js";
-export {
-  isAuditReport,
-  isForwardedAuditReceipt,
-  isForwardedDeliveryReceipt,
-  isForwardedReviewReceipt,
-} from "./contract-forwarding-result.js";
-export type {
-  ForwardedAuditReceipt,
-  ForwardedDeliveryReceipt,
-  ForwardedMutationReceipt,
-  ForwardedReviewReceipt,
-  Review,
-} from "./contract-forwarding-result.js";
+export type { Review } from "./contract-forwarding-result.js";
 import { Repo, scopeForRepo } from "./repo.js";
 
 export type DeliveryExecutionInput = Readonly<{
@@ -57,20 +43,6 @@ export type ReviewExecutionInput = Readonly<{
   summary?: string;
   hooks: WorktreeHooks;
 }>;
-
-type ForwardedOutcome = Readonly<{
-  kind: string;
-  result?: unknown;
-  failure?: unknown;
-  requestId?: string;
-  action?: string;
-}>;
-
-function returnedRecord(value: unknown): Readonly<Record<string, unknown>> | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
-}
 
 function derivedDocument(state: ContractState) {
   return documentDerivation(decodeContractDocument(state.terms.document.bytes), state.terms.gates, state.id);
@@ -133,60 +105,6 @@ export async function executeLocalReview(input: ReviewExecutionInput): Promise<M
   });
 }
 
-function transportIntegrityError(outcome: ForwardedOutcome, action: string): Error {
-  return new Error(
-    `transport integrity: request ${outcome.requestId ?? "unknown"} action ${outcome.action ?? action} returned an invalid live result`,
-  );
-}
-
-function upstreamFailure(outcome: ForwardedOutcome, action: string): Error | null {
-  if (outcome.kind !== "failed") return null;
-  const failure = returnedRecord(outcome.failure);
-  return new Error(
-    failure?.kind === "failed" && typeof failure.diagnostic === "string"
-      ? failure.diagnostic
-      : `Unexpected Akuma target failure for ${action}`,
-  );
-}
-
-export function forwardedDeliveryReceipt(outcome: ForwardedOutcome): ForwardedDeliveryReceipt {
-  const failure = upstreamFailure(outcome, "contract.deliver");
-  if (failure !== null) throw failure;
-  if (!isForwardedDeliveryReceipt(outcome.result)) throw transportIntegrityError(outcome, "contract.deliver");
-  return outcome.result;
-}
-
-export function forwardedReviewReceipt(outcome: ForwardedOutcome): ForwardedReviewReceipt {
-  const failure = upstreamFailure(outcome, "contract.review");
-  if (failure !== null) throw failure;
-  if (!isForwardedReviewReceipt(outcome.result)) throw transportIntegrityError(outcome, "contract.review");
-  return outcome.result;
-}
-
-export function forwardedAuditReceipt(outcome: ForwardedOutcome): ForwardedAuditReceipt {
-  const failure = upstreamFailure(outcome, "contract.audit");
-  if (failure !== null) throw failure;
-  if (!isForwardedAuditReceipt(outcome.result)) throw transportIntegrityError(outcome, "contract.audit");
-  return outcome.result;
-}
-
-export function requireForwarded(
-  receipt: ForwardedDeliveryReceipt,
-): MutationResult<DeliveryValue> | IntegrationConflictMaterialized;
-export function requireForwarded(receipt: ForwardedReviewReceipt): MutationResult<Review>;
-export function requireForwarded(receipt: ForwardedAuditReceipt): MutationResult<AuditReport>;
-export function requireForwarded(
-  receipt: ForwardedDeliveryReceipt | ForwardedReviewReceipt | ForwardedAuditReceipt,
-):
-  | MutationResult<DeliveryValue>
-  | MutationResult<Review>
-  | MutationResult<AuditReport>
-  | IntegrationConflictMaterialized {
-  if (receipt.kind === "refused") throw new KeiyakuRefused(receipt.refusal);
-  if (receipt.kind === "retry") throw new KeiyakuRetry(receipt.reason);
-  return receipt.kind === "accepted" ? receipt.result : receipt;
-}
-
 export async function executeForwardedDeliver(
   input: Readonly<{
     repo: Repo;
@@ -199,29 +117,27 @@ export async function executeForwardedDeliver(
     hooks: Parameters<typeof executeLocalDelivery>[0]["hooks"];
     signal?: AbortSignal;
   }>,
-): Promise<Readonly<{ result: ForwardedDeliveryReceipt; deliveryFactId?: string }>> {
+): Promise<
+  Readonly<{ result: MutationResult<DeliveryValue> | IntegrationConflictMaterialized; deliveryFactId?: string }>
+> {
   const id = contractId(input.contractId);
   const actor = actorOption(input.requester).actor;
   const message = optionalNonblank(input.message, "deliver message");
-  try {
-    const result = await executeLocalDelivery({
-      scope: scopeForRepo(input.repo),
-      contractId: id,
-      ...(actor === undefined ? {} : { actor }),
-      ...(message === undefined ? {} : { message }),
-      requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
-      includeDirty: input.includeDirty,
-      materializeConflict: input.materializeConflict,
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-      hooks: input.hooks,
-    });
-    if (!("facts" in result)) return { result };
-    const delivery = result.facts.find((fact) => fact.kind === "deliver");
-    if (delivery === undefined) throw new Error("accepted delivery is missing its journal fact");
-    return { result: { kind: "accepted", result }, deliveryFactId: delivery.entry };
-  } catch (error) {
-    return forwardedMutationFailure(error);
-  }
+  const result = await executeLocalDelivery({
+    scope: scopeForRepo(input.repo),
+    contractId: id,
+    ...(actor === undefined ? {} : { actor }),
+    ...(message === undefined ? {} : { message }),
+    requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
+    includeDirty: input.includeDirty,
+    materializeConflict: input.materializeConflict,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+    hooks: input.hooks,
+  });
+  if (!("facts" in result)) return { result: deliveryResultSchema.parse(result) };
+  const delivery = result.facts.find((fact) => fact.kind === "deliver");
+  if (delivery === undefined) throw new Error("accepted delivery is missing its journal fact");
+  return { result: deliveryResultSchema.parse(result), deliveryFactId: delivery.entry };
 }
 
 export async function executeForwardedReview(
@@ -233,28 +149,24 @@ export async function executeForwardedReview(
     summary?: string;
     hooks: Parameters<typeof executeLocalReview>[0]["hooks"];
   }>,
-): Promise<Readonly<{ result: ForwardedReviewReceipt; reviewFactId?: string }>> {
+): Promise<Readonly<{ result: MutationResult<Review>; reviewFactId?: string }>> {
   const id = contractId(input.contractId);
   const actor = actorOption(input.requester).actor;
   if (input.verdict !== "satisfied" && input.verdict !== "unsatisfied") {
     invalidInput("verdict must be satisfied or unsatisfied");
   }
   const summary = optionalNonblank(input.summary, "review summary");
-  try {
-    const result = await executeLocalReview({
-      scope: scopeForRepo(input.repo),
-      contractId: id,
-      ...(actor === undefined ? {} : { actor }),
-      verdict: input.verdict,
-      ...(summary === undefined ? {} : { summary }),
-      hooks: input.hooks,
-    });
-    const review = result.facts.find((fact) => fact.kind === "attestation");
-    if (review === undefined) throw new Error("accepted review is missing its journal fact");
-    return { result: { kind: "accepted", result }, reviewFactId: review.entry };
-  } catch (error) {
-    return forwardedMutationFailure(error);
-  }
+  const result = await executeLocalReview({
+    scope: scopeForRepo(input.repo),
+    contractId: id,
+    ...(actor === undefined ? {} : { actor }),
+    verdict: input.verdict,
+    ...(summary === undefined ? {} : { summary }),
+    hooks: input.hooks,
+  });
+  const review = result.facts.find((fact) => fact.kind === "attestation");
+  if (review === undefined) throw new Error("accepted review is missing its journal fact");
+  return { result: reviewResultSchema.parse(result), reviewFactId: review.entry };
 }
 
 export async function executeForwardedAudit(
@@ -268,24 +180,20 @@ export async function executeForwardedAudit(
     hooks: AuditInput["hooks"];
     signal?: AbortSignal;
   }>,
-): Promise<Readonly<{ result: ForwardedAuditReceipt; auditReport?: AuditReport }>> {
+): Promise<Readonly<{ result: MutationResult<AuditReport>; auditReport?: AuditReport }>> {
   const id = contractId(input.contractId);
   const actor = actorOption(input.requester).actor;
-  try {
-    const result = await auditContract({
-      scope: scopeForRepo(input.repo),
-      contractId: id,
-      input: {
-        ...(actor === undefined ? {} : { actor }),
-        includeDirty: input.includeDirty,
-        showDiff: input.showDiff,
-        requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
-        ...(input.hooks === undefined ? {} : { hooks: input.hooks }),
-        ...(input.signal === undefined ? {} : { signal: input.signal }),
-      },
-    });
-    return { result: { kind: "accepted", result }, auditReport: result.value };
-  } catch (error) {
-    return forwardedMutationFailure(error);
-  }
+  const result = await auditContract({
+    scope: scopeForRepo(input.repo),
+    contractId: id,
+    input: {
+      ...(actor === undefined ? {} : { actor }),
+      includeDirty: input.includeDirty,
+      showDiff: input.showDiff,
+      requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
+      ...(input.hooks === undefined ? {} : { hooks: input.hooks }),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    },
+  });
+  return { result: auditResultSchema.parse(result), auditReport: auditReportSchema.parse(result.value) };
 }

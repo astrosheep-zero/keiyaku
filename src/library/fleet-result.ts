@@ -1,205 +1,114 @@
-import type { AkumaStatus, KillEvidence, TellResult } from "../akuma/index.js";
-import type { ContractId } from "../core/facts/types.js";
-import type { TaskRow } from "../task/index.js";
-import {
-  canonicalFleetAkuId,
-  exactFleetKeys,
-  fleetCount,
-  isFleetStatus,
-  isFleetTaskRows,
-  record,
-} from "./fleet-status-result.js";
+import { akumaIdSchema, akumaStatusSchema } from "../akuma/akuma.js";
+import type { KillEvidence, TellResult } from "../akuma/index.js";
+import { contractId } from "../core/facts/types.js";
+import { taskRowsSchema } from "../task/board.js";
+import { z } from "zod";
 
-export type CreatedTaskObservation =
-  | Readonly<{ kind: "present"; rows: readonly TaskRow[] }>
-  | Readonly<{ kind: "failed"; diagnostic: string }>;
+const nonblankTextSchema = z.string().refine((value) => value.trim() !== "");
+const contractIdSchema = z.string().transform((value, context) => {
+  try {
+    return contractId(value);
+  } catch {
+    context.addIssue({ code: "custom", message: "expected ContractId" });
+    return z.NEVER;
+  }
+});
+const killEvidenceSchema = z.enum([
+  "killed",
+  "already-killed",
+  "already-stopped",
+  "hung",
+  "untidy",
+  "unavailable",
+]) satisfies z.ZodType<KillEvidence>;
+const dispatchAssociationSchema = z.union([
+  z.object({ kind: z.literal("none") }).strict(),
+  z.object({ kind: z.literal("associated"), contractId: contractIdSchema }).strict(),
+  z.object({ kind: z.literal("failed"), diagnostic: z.string() }).strict(),
+]);
+const createdTaskObservationSchema = z.union([
+  z.object({ kind: z.literal("present"), rows: taskRowsSchema }).strict(),
+  z.object({ kind: z.literal("failed"), diagnostic: z.string() }).strict(),
+]);
+const akumaObservationSchema = z
+  .object({
+    status: akumaStatusSchema,
+    contract: dispatchAssociationSchema,
+    createdTasks: createdTaskObservationSchema,
+  })
+  .strict();
+const runLogReferenceSchema = z
+  .object({ path: z.string(), from: z.number().int().nonnegative(), to: z.number().int().nonnegative() })
+  .strict();
+const failedTellWakeSchema = z
+  .object({
+    kind: z.literal("failed"),
+    diagnostic: z.string(),
+    child: z
+      .object({ code: z.number().int().nullable(), signal: z.string().nullable(), log: runLogReferenceSchema })
+      .strict()
+      .optional(),
+  })
+  .strict()
+  .transform(({ child, ...wake }) => (child === undefined ? wake : { ...wake, child }));
+const tellWakeSchema = z.union([
+  z.object({ kind: z.literal("told") }).strict(),
+  z.object({ kind: z.literal("held") }).strict(),
+  z.object({ kind: z.literal("pursuing"), bodySequence: z.number().int().nonnegative() }).strict(),
+  failedTellWakeSchema,
+]);
+const tellResultSchema = z
+  .object({
+    admission: z.object({ fact: z.literal("recorded"), tellId: nonblankTextSchema }).strict(),
+    wake: tellWakeSchema,
+  })
+  .strict() satisfies z.ZodType<TellResult>;
+const akumaUnobservedSchema = z.object({ id: akumaIdSchema, diagnostic: z.string() }).strict();
+const akumaKillResultItemSchema = z.object({ id: akumaIdSchema, evidence: killEvidenceSchema }).strict();
+const akumaWaitResultSchema = z
+  .object({
+    completion: z.enum(["any", "all"]),
+    observations: z.array(akumaObservationSchema),
+    unobserved: z.array(akumaUnobservedSchema),
+  })
+  .strict();
+const akumaKillResultSchema = z.object({ results: z.array(akumaKillResultItemSchema) }).strict();
+const akumaTellResultSchema = z.object({ akuma: akumaIdSchema, tell: tellResultSchema }).strict();
 
-export type DispatchAssociation =
-  | Readonly<{ kind: "none" }>
-  | Readonly<{ kind: "associated"; contractId: ContractId }>
-  | Readonly<{ kind: "failed"; diagnostic: string }>;
-
-export type AkumaObservation = Readonly<{
-  status: AkumaStatus;
-  contract: DispatchAssociation;
-  createdTasks: CreatedTaskObservation;
-}>;
-
+export type CreatedTaskObservation = z.infer<typeof createdTaskObservationSchema>;
+export type DispatchAssociation = z.infer<typeof dispatchAssociationSchema>;
+export type AkumaObservation = z.infer<typeof akumaObservationSchema>;
 export type AkumaObservationStage =
   | (Readonly<{ kind: "observed" }> & AkumaObservation)
   | Readonly<{ kind: "unobserved"; diagnostic: string }>;
+export type AkumaUnobserved = z.infer<typeof akumaUnobservedSchema>;
+export type AkumaWaitResult = z.infer<typeof akumaWaitResultSchema>;
+export type AkumaKillResult = z.infer<typeof akumaKillResultSchema>;
+export type AkumaTellResult = z.infer<typeof akumaTellResultSchema>;
 
-export type AkumaUnobserved = Readonly<{
-  id: AkumaStatus["id"];
-  diagnostic: string;
-}>;
-
-export type AkumaWaitResult = Readonly<{
-  completion: "any" | "all";
-  observations: readonly AkumaObservation[];
-  unobserved: readonly AkumaUnobserved[];
-}>;
-
-export type AkumaKillResult = Readonly<{
-  results: readonly Readonly<{
-    id: AkumaStatus["id"];
-    evidence: KillEvidence;
-    observation: AkumaObservationStage;
-  }>[];
-}>;
-
-export type AkumaTellResult = Readonly<{
-  akuma: AkumaStatus["id"];
-  tell: TellResult;
-  observation: AkumaObservationStage;
-}>;
-
-function isKillEvidence(value: unknown): value is KillEvidence {
-  return (
-    value === "killed" ||
-    value === "already-killed" ||
-    value === "already-stopped" ||
-    value === "hung" ||
-    value === "untidy" ||
-    value === "unavailable"
-  );
+export function parseCreatedTaskObservation(value: unknown): CreatedTaskObservation {
+  return createdTaskObservationSchema.parse(value);
 }
 
-function isDispatchAssociation(value: unknown): value is DispatchAssociation {
-  const association = record(value);
-  if (association === null || typeof association.kind !== "string") return false;
-  if (association.kind === "none") return exactFleetKeys(association, ["kind"]);
-  if (association.kind === "associated")
-    return (
-      exactFleetKeys(association, ["contractId", "kind"]) &&
-      typeof association.contractId === "string" &&
-      association.contractId.trim() !== ""
-    );
-  return (
-    association.kind === "failed" &&
-    exactFleetKeys(association, ["diagnostic", "kind"]) &&
-    typeof association.diagnostic === "string"
-  );
-}
-
-function isCreatedTaskObservation(value: unknown): value is CreatedTaskObservation {
-  const observation = record(value);
-  if (observation === null || typeof observation.kind !== "string") return false;
-  if (observation.kind === "present")
-    return exactFleetKeys(observation, ["kind", "rows"]) && isFleetTaskRows(observation.rows);
-  return (
-    observation.kind === "failed" &&
-    exactFleetKeys(observation, ["diagnostic", "kind"]) &&
-    typeof observation.diagnostic === "string"
-  );
-}
-
-function isAkumaObservation(value: unknown): value is AkumaObservation {
-  const observation = record(value);
-  return (
-    observation !== null &&
-    exactFleetKeys(observation, ["contract", "createdTasks", "status"]) &&
-    isFleetStatus(observation.status) &&
-    isDispatchAssociation(observation.contract) &&
-    isCreatedTaskObservation(observation.createdTasks)
-  );
-}
-
-function isObservationStage(value: unknown): value is AkumaObservationStage {
-  const observation = record(value);
-  if (observation === null || typeof observation.kind !== "string") return false;
-  if (observation.kind === "observed")
-    return (
-      exactFleetKeys(observation, ["contract", "createdTasks", "kind", "status"]) && isAkumaObservation(observation)
-    );
-  return (
-    observation.kind === "unobserved" &&
-    exactFleetKeys(observation, ["diagnostic", "kind"]) &&
-    typeof observation.diagnostic === "string"
-  );
+export function parseAkumaObservation(value: unknown): AkumaObservation {
+  return akumaObservationSchema.parse(value);
 }
 
 export function isWaitResult(value: unknown): value is AkumaWaitResult {
-  const result = record(value);
-  return (
-    result !== null &&
-    exactFleetKeys(result, ["completion", "observations", "unobserved"]) &&
-    (result.completion === "any" || result.completion === "all") &&
-    Array.isArray(result.observations) &&
-    result.observations.every(isAkumaObservation) &&
-    Array.isArray(result.unobserved) &&
-    result.unobserved.every((item) => {
-      const unobserved = record(item);
-      return (
-        unobserved !== null &&
-        exactFleetKeys(unobserved, ["diagnostic", "id"]) &&
-        canonicalFleetAkuId(unobserved.id) !== null &&
-        typeof unobserved.diagnostic === "string"
-      );
-    })
-  );
+  return akumaWaitResultSchema.safeParse(value).success;
 }
 
 export function isKillResult(value: unknown): value is AkumaKillResult {
-  const result = record(value);
-  return (
-    result !== null &&
-    exactFleetKeys(result, ["results"]) &&
-    Array.isArray(result.results) &&
-    result.results.every((item) => {
-      const entry = record(item);
-      return (
-        entry !== null &&
-        exactFleetKeys(entry, ["evidence", "id", "observation"]) &&
-        canonicalFleetAkuId(entry.id) !== null &&
-        isKillEvidence(entry.evidence) &&
-        isObservationStage(entry.observation)
-      );
-    })
-  );
+  return akumaKillResultSchema.safeParse(value).success;
 }
 
 export function isTellResult(value: unknown): value is AkumaTellResult {
-  const result = record(value);
-  return (
-    result !== null &&
-    exactFleetKeys(result, ["akuma", "observation", "tell"]) &&
-    canonicalFleetAkuId(result.akuma) !== null &&
-    isTellResultValue(result.tell) &&
-    isObservationStage(result.observation)
-  );
+  return akumaTellResultSchema.safeParse(value).success;
 }
 
-function isTellResultValue(value: unknown): boolean {
-  const tell = record(value);
-  const admission = record(tell?.admission);
-  return (
-    tell !== null &&
-    exactFleetKeys(tell, ["admission", "wake"]) &&
-    admission !== null &&
-    exactFleetKeys(admission, ["fact", "tellId"]) &&
-    admission.fact === "recorded" &&
-    typeof admission.tellId === "string" &&
-    admission.tellId.trim() !== "" &&
-    fleetTellWake(tell.wake)
-  );
-}
-
-function fleetTellWake(value: unknown): boolean {
-  const wake = record(value);
-  if (wake === null || typeof wake.kind !== "string") return false;
-  if (["told", "held"].includes(wake.kind)) return exactFleetKeys(wake, ["kind"]);
-  if (wake.kind === "pursuing") return exactFleetKeys(wake, ["bodySequence", "kind"]) && fleetCount(wake.bodySequence);
-  if (wake.kind !== "failed") return false;
-  const child = record(wake.child);
-  return (
-    exactFleetKeys(wake, ["diagnostic", "kind", ...(wake.child === undefined ? [] : ["child"])]) &&
-    typeof wake.diagnostic === "string" &&
-    (wake.child === undefined ||
-      (child !== null &&
-        exactFleetKeys(child, ["code", "log", "signal"]) &&
-        (child.code === null || (typeof child.code === "number" && Number.isSafeInteger(child.code))) &&
-        (child.signal === null || typeof child.signal === "string") &&
-        record(child.log) !== null))
-  );
-}
+export const fleetResultSchemas = {
+  wait: akumaWaitResultSchema,
+  tell: akumaTellResultSchema,
+  kill: akumaKillResultSchema,
+  killEvidence: killEvidenceSchema,
+};

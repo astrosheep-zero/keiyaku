@@ -551,7 +551,8 @@ test("appoint write failure causes no Git ref or worktree effect", async () => {
   const git = await repositoryAt(repository.path);
   const directory = join(git.commonDirectory, "keiyaku");
   mkdirSync(directory, { recursive: true });
-  chmodSync(directory, 0o555);
+  const target = placeRegisterPath(git);
+  mkdirSync(target);
   const worktrees = repository.run(["worktree", "list", "--porcelain"]);
   try {
     const bound = await Keiyaku.bind({
@@ -564,9 +565,10 @@ test("appoint write failure causes no Git ref or worktree effect", async () => {
     assert.equal(existsSync(worktreePath(git, "atlantis")), false);
     assert.equal(repository.run(["worktree", "list", "--porcelain"]), worktrees);
     assert.doesNotMatch(repository.run(["show-ref"]), /refs\/keiyaku\/delivery\//u);
+    rmSync(target, { recursive: true });
     assert.deepEqual(await readManagedWorktreeAppointment(git, bound.keiyaku.id), { kind: "unappointed" });
   } finally {
-    chmodSync(directory, 0o755);
+    rmSync(target, { recursive: true, force: true });
   }
 });
 

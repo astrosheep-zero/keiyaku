@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, rmSync, mkdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { bindCurrentParticipant, createHostLedgerPort, Square } from "@astrosheep/square";
@@ -8,8 +8,6 @@ import { recognizeAndListen } from "../src/cli/square-edge.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { invokeAkuma } from "../src/cli/commands/akuma-invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
-import { recognizeAndListen } from "../src/cli/square-edge.js";
-import { writeFileSync } from "node:fs";
 
 async function committedSquare(root: string) {
   const squarePath = join(root, ".square", "KEIYAKU.square");

@@ -206,12 +206,10 @@ test("abandoned tender custody remains when it is the sole proof", async () => {
   const git = await repositoryAt(repository.path);
 
   assert.equal(await readRef(git, deliveryRefFor(id)), tender);
-  assert.equal(unchangedRef(abandoned.effects, deliveryRefFor(id), tender), true);
   if (tender === integration) {
     assert.equal(await readRef(git, candidatePinRefFor(id)), null);
   } else {
     assert.equal(await readRef(git, candidatePinRefFor(id)), integration);
-    assert.equal(unchangedRef(abandoned.effects, candidatePinRefFor(id), integration), true);
   }
 
   const report = await contract.reconcile();

@@ -6,12 +6,15 @@ This chapter owns package-root Akuma creation, addressing, fleet, and cross-prod
 
 The package root exports the Akuma-owned `TellResult` and `TellWake` unchanged;
 Fleet embeds that same four-outcome wake receipt and adds no second wake schema.
+Fleet's wait, tell, and kill boundary values are owner-decoded strict JSON;
+their AkuId leaves remain minted by Akuma identity. This transport boundary
+does not change the public observation or wake meanings.
 
-All Akuma observations expose the same typed timeline snapshot. Mutation
-receipts and the fresh observation remain separate values, while status, wait,
-call, tell, interrupt, and kill use the same semantic rows. Snapshot selection
-pins the current frontier, latest outcome, open Turn, and pending tell; it does
-not add a derived lifecycle fact.
+All Akuma observations expose the same typed timeline snapshot. Status, wait,
+call, interrupt, and observation verbs use those rows. `tell` and `kill` return
+only their primary mutation evidence and do not append a post-action
+observation. Snapshot selection pins the current frontier, latest outcome, open
+Turn, and pending tell; it does not add a derived lifecycle fact.
 
 Every filesystem, Alias, Dispatch, and Heart observation in these facets is
 awaited before the public Promise fulfills. Composition preserves the declared
@@ -243,7 +246,6 @@ type AkumaObservationStage =
 type AkumaTellResult = {
   akuma: AkuId;
   tell: TellResult;
-  observation: AkumaObservationStage;
 };
 
 type AkumaInterruptResult = {
@@ -258,12 +260,12 @@ type AkumaKillResult = {
   results: readonly {
     id: AkuId;
     evidence: KillEvidence;
-    observation: AkumaObservationStage;
   }[];
 };
 ```
 
-The optional `repo` coordinate enables this read-only Dispatch composition.
+For result shapes that carry an observation, the optional `repo` coordinate
+enables this read-only Dispatch composition.
 `status` is always the unmodified Akuma observation; `contract` is a required
 Dispatch association union. `{ kind: "none" }` means no Repo was supplied or a
 supplied Repo had no Dispatch; `{ kind: "failed" }` preserves the Akuma status
@@ -276,13 +278,13 @@ under existing Task law. A successful Task read with no matches is
 `{ kind: "present", rows: [] }`. Task authority corruption or infrastructure
 failure becomes `{ kind: "failed", diagnostic }` and never suppresses an Akuma
 status, Dispatch association, mutation receipt, kill evidence, or another
-member. Each direct status or single-member mutation first obtains its existing
-fresh Akuma status, then performs one Task board observation. Multi-member wait
+member. Direct `status` obtains the existing fresh Akuma status before its Task
+board observation. `tell` and `kill` return their primary evidence without a
+trailing status or Task read. Multi-member wait
 performs no Task read during its polling loop; once the Akuma-owned default completion
 predicate or timeout selects the final statuses, it reads the Task board
 exactly once and projects every member from that same board snapshot.
-Multi-member kill likewise reads the Task board once for all post-action
-observations. There is no `AkumaStatusView` export, type alias, or wait
+There is no `AkumaStatusView` export, type alias, or wait
 `statuses` compatibility field. Fleet never intersects the association into
 `AkumaStatus`. Akuma core still knows no Contract, Dispatch, Task, or Repo,
 and renderers perform no lookup. `CallObservation` remains on its current raw
@@ -308,18 +310,10 @@ successful read uses the same `tail=3`, `voice=3` selector as ordinary status;
 an omitted read spends none of that budget. After that budget is spent, later
 members retain life, outcome, every running tool and pending tell while ordinary
 detail collapses into typed gaps. When only part of one member fits, its newest
-ordinary detail consumes the remainder. Kill returns one evidence and a
-post-action `AkumaObservationStage` per selected AkuId in stable order. `tell`,
-`interrupt`, and `kill` preserve their primary receipt/evidence even when the
-later status observation is `{ kind: "unobserved", diagnostic }`; successful
-stages flatten the observation (`result.observation.status`), rather than
-nested observation data.
-`Keiyaku.tell` composes the handle's
-typed mutation result with one subsequent whole-Akuma status observation. The
-two fields have separate authority: `tell` alone states what this invocation
-caused; `observation` gives the flagship current life, activity, outcomes, and
-the two-state tell projection. Facade code never derives delivery or receipt
-facts from that observation. Direct verbs accept only AkuId or Alias.
+ordinary detail consumes the remainder. Kill returns one evidence per selected
+AkuId in stable order. Tell returns its resolved AkuId and Tell receipt.
+`Keiyaku.interrupt` retains its separate post-action observation. Direct verbs
+accept only AkuId or Alias.
 Their result carries the resolved AkuId, so an adapter never resolves a movable
 Alias twice. History carries the same required Dispatch association beside its
 history-specific value rather than inside it. `history({ last: true })` is the distinct last-answer arm: it reads

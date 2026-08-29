@@ -43,16 +43,15 @@ export type AcceptedFact =
 
 export type Lag = ReconcileReport["lag"][number];
 
-type MutationEnvelope = Pick<MutationResult<unknown>, "head" | "effects" | "settlement">;
+type MutationEnvelope = Pick<MutationResult<unknown>, "head" | "settlementLags" | "recoverySnapshot">;
 
 export type AcceptedEnvelope = Readonly<{
   kind: "accepted";
   contract: ContractId;
   head: MutationEnvelope["head"];
   facts: readonly AcceptedFact[];
-  effects: MutationEnvelope["effects"];
-  settlement: MutationEnvelope["settlement"];
-  hookRuns?: MutationResult<unknown>["hookRuns"];
+  settlementLags: MutationEnvelope["settlementLags"];
+  recoverySnapshot?: MutationEnvelope["recoverySnapshot"];
   lag?: readonly [Lag, ...Lag[]];
 }>;
 

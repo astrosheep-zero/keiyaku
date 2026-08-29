@@ -20,7 +20,12 @@ The Library validates caller values, presents public handles/results, and
 composes concrete owner capabilities. The Library owns no persisted-authority
 or transport codec. Each operation owner validates the public values it exposes
 and runtime-decodes that same typed live value when it crosses a Body Request
-receipt; that decoder creates no authority or alternate transport shape. The
+receipt; local and forwarded invocation return that one public result shape,
+without a transport projection or a later authority reread. The
+owner keeps one strict JSON schema for each of its request, live result, service
+evidence, and projected-reference shapes. Those schemas reject unknown object
+fields and delegate canonical identity leaves to their existing identity owner;
+they do not define persisted-domain codecs or a transport DTO.
 Library owns no lifecycle judgment, selector grammar, or physical Git, Task, or
 Akuma mechanism. The static `Keiyaku` facade assembles coherent Contract and Akuma
 facets without a generic orchestrator, registry, second authority, or copied

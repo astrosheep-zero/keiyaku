@@ -1,30 +1,83 @@
 import { isAbsolute, resolve } from "node:path";
-import { clipAllowedActions, decodeAllowedActions, type AllowedActions } from "./allowed.js";
+import { clipAllowedActions, decodeAllowedActions } from "./allowed.js";
 import { refuseRequest, reserveRequest, type Soul } from "./heart/index.js";
 import { archetypeName, parseAkuId, worldRootForAkumaPaths, type AkuId, type AkumaPaths } from "./identity.js";
 import { publishAkuma } from "./publication.js";
-import { decodeProviderOptions, decodeReadonlyRestraint, type ReadonlyRestraint } from "./provider-recipe.js";
+import { decodeProviderOptions, decodeReadonlyRestraint } from "./provider-recipe.js";
 import { decodeProviderExecution } from "./providers/index.js";
 import { requestBodyCommand } from "./request-rendezvous.js";
 import { eraseRequestCommand, type ErasedRequestCommand, type RequestCommand } from "./request-wire.js";
 import type { OwnedProcess } from "../runtime/proc/run.js";
+import { z } from "zod";
 
-export type AkumaCallRecipe = Readonly<{
-  description?: string;
-  allowed: AllowedActions;
-  provider: ReturnType<typeof decodeProviderExecution>;
-  options: ReturnType<typeof decodeProviderOptions>;
-  readonly?: ReadonlyRestraint;
-}>;
+function schemaDecode<Value>(
+  decode: (value: unknown) => Value,
+  message: string,
+): z.ZodPipe<z.ZodUnknown, z.ZodTransform<Value, unknown>> {
+  return z.unknown().transform((value, context) => {
+    try {
+      return decode(value);
+    } catch {
+      context.addIssue({ code: "custom", message });
+      return z.NEVER;
+    }
+  });
+}
 
-export type AkumaCallRequest = Readonly<{
-  action: "akuma.call";
-  world: string;
-  archetype: string;
-  body: string;
-  cwd?: string;
-  recipe: AkumaCallRecipe;
-}>;
+const absolutePathSchema = z.string().refine((value) => isAbsolute(value) && resolve(value) === value);
+const akuIdSchema = z.string().transform((value, context) => {
+  try {
+    const id = parseAkuId(value).id;
+    if (id !== value) {
+      context.addIssue({ code: "custom", message: "expected canonical AkuId" });
+      return z.NEVER;
+    }
+    return id;
+  } catch {
+    context.addIssue({ code: "custom", message: "expected canonical AkuId" });
+    return z.NEVER;
+  }
+});
+const archetypeSchema = z.string().transform((value, context) => {
+  try {
+    return archetypeName(value);
+  } catch {
+    context.addIssue({ code: "custom", message: "expected archetype" });
+    return z.NEVER;
+  }
+});
+const allowedActionsSchema = schemaDecode(decodeAllowedActions, "expected allowed actions");
+const providerExecutionSchema = schemaDecode(decodeProviderExecution, "expected provider execution");
+const providerOptionsSchema = schemaDecode(decodeProviderOptions, "expected provider options");
+const readonlyRestraintSchema = schemaDecode(decodeReadonlyRestraint, "expected readonly restraint");
+
+const akumaCallRecipeSchema = z
+  .object({
+    description: z.string().trim().min(1).optional(),
+    allowed: allowedActionsSchema,
+    provider: providerExecutionSchema,
+    options: providerOptionsSchema,
+    readonly: readonlyRestraintSchema.optional(),
+  })
+  .strict()
+  .superRefine((recipe, context) => {
+    if ((recipe.options.readonly === true) !== (recipe.readonly !== undefined)) {
+      context.addIssue({ code: "custom", message: "readonly recipe fields disagree" });
+    }
+  });
+
+const akumaCallPayloadSchema = z
+  .object({
+    world: absolutePathSchema,
+    archetype: archetypeSchema,
+    body: z.string(),
+    cwd: absolutePathSchema.optional(),
+    recipe: akumaCallRecipeSchema,
+  })
+  .strict();
+
+export type AkumaCallRecipe = z.infer<typeof akumaCallRecipeSchema>;
+export type AkumaCallRequest = z.infer<typeof akumaCallPayloadSchema> & Readonly<{ action: "akuma.call" }>;
 
 export type AkumaCallRequestChildLaunch = Readonly<{
   paths: AkumaPaths;
@@ -46,7 +99,7 @@ function decodeCallExecutionContext(value: unknown): CallExecutionContext {
   const context = object(value);
   const paths = object(context?.paths);
   const parent = object(context?.parent);
-  const parentId = canonicalAkuId(parent?.id);
+  const parentId = akuIdSchema.safeParse(parent?.id);
   if (
     context === null ||
     typeof context.id !== "string" ||
@@ -58,7 +111,7 @@ function decodeCallExecutionContext(value: unknown): CallExecutionContext {
     paths === null ||
     !["directory", "heart", "leash", "log", "requests"].every((key) => typeof paths[key] === "string") ||
     parent === null ||
-    parentId === null ||
+    !parentId.success ||
     typeof parent.cwd !== "string" ||
     !Array.isArray(parent.allowed) ||
     typeof context.spawn !== "function" ||
@@ -82,86 +135,14 @@ function object(value: unknown): Readonly<Record<string, unknown>> | null {
     : null;
 }
 
-function exactKeys(value: Readonly<Record<string, unknown>>, expected: readonly string[]): boolean {
-  const actual = Object.keys(value).sort();
-  const sorted = [...expected].sort();
-  return actual.length === sorted.length && actual.every((key, index) => key === sorted[index]);
-}
-
-function absolute(value: unknown): value is string {
-  return typeof value === "string" && isAbsolute(value) && resolve(value) === value;
-}
-
-function canonicalAkuId(value: unknown): AkuId | null {
-  if (typeof value !== "string") return null;
-  try {
-    const id = parseAkuId(value).id;
-    return id === value ? id : null;
-  } catch {
-    return null;
-  }
-}
-
 export function decodeAkumaCallRecipe(value: unknown): AkumaCallRecipe | null {
-  const recipe = object(value);
-  if (recipe === null) return null;
-  const expected = [
-    "allowed",
-    "options",
-    "provider",
-    ...(recipe.description === undefined ? [] : ["description"]),
-    ...(recipe.readonly === undefined ? [] : ["readonly"]),
-  ];
-  if (
-    !exactKeys(recipe, expected) ||
-    (recipe.description !== undefined &&
-      (typeof recipe.description !== "string" || recipe.description.trim().length === 0))
-  )
-    return null;
-  try {
-    const options = decodeProviderOptions(recipe.options);
-    const readonly = recipe.readonly === undefined ? undefined : decodeReadonlyRestraint(recipe.readonly);
-    if ((options.readonly === true) !== (readonly !== undefined)) return null;
-    return Object.freeze({
-      ...(recipe.description === undefined ? {} : { description: recipe.description }),
-      allowed: decodeAllowedActions(recipe.allowed),
-      provider: decodeProviderExecution(recipe.provider),
-      options,
-      ...(readonly === undefined ? {} : { readonly }),
-    });
-  } catch {
-    return null;
-  }
+  const parsed = akumaCallRecipeSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
 }
 
 export function decodeAkumaCallRequest(value: unknown): AkumaCallRequest | null {
-  const request = object(value);
-  if (request === null) return null;
-  const expected = ["archetype", "body", "recipe", "world", ...(request.cwd === undefined ? [] : ["cwd"])];
-  if (
-    !exactKeys(request, expected) ||
-    typeof request.body !== "string" ||
-    !absolute(request.world) ||
-    (request.cwd !== undefined && !absolute(request.cwd))
-  )
-    return null;
-  let archetype: string;
-  try {
-    if (typeof request.archetype !== "string") return null;
-    archetype = archetypeName(request.archetype);
-  } catch {
-    return null;
-  }
-  const recipe = decodeAkumaCallRecipe(request.recipe);
-  if (recipe === null) return null;
-  return {
-    action: "akuma.call",
-    world: request.world,
-    archetype,
-    body: request.body,
-    recipe,
-    ...(request.cwd === undefined ? {} : { cwd: request.cwd }),
-  };
+  const parsed = akumaCallPayloadSchema.safeParse(value);
+  return parsed.success ? { ...parsed.data, action: "akuma.call" } : null;
 }
 
 function callPayload(request: AkumaCallRequest): unknown {
@@ -178,7 +159,13 @@ async function executeAkumaCall(
     await refuseRequest(context.paths, context.id, `request world ${request.world} does not match ${world}`);
     throw new Error(`request world ${request.world} does not match ${world}`);
   }
-  const recipe = { ...request.recipe, allowed: clipAllowedActions(request.recipe.allowed, context.parent.allowed) };
+  const recipe = {
+    ...(request.recipe.description === undefined ? {} : { description: request.recipe.description }),
+    allowed: clipAllowedActions(request.recipe.allowed, context.parent.allowed),
+    provider: request.recipe.provider,
+    options: request.recipe.options,
+    ...(request.recipe.readonly === undefined ? {} : { readonly: request.recipe.readonly }),
+  };
   const published = await publishAkuma({
     worldPath: world,
     archetype: request.archetype,
@@ -209,9 +196,9 @@ export function akumaCallRequestCommand(): RequestCommand<AkumaCallRequest, AkuI
     decodeRequest: decodeAkumaCallRequest,
     encodeResult: (result) => result,
     decodeResult: (result) => {
-      const child = canonicalAkuId(result);
-      if (child === null) throw new Error("Akuma call returned an invalid child");
-      return child;
+      const child = akuIdSchema.safeParse(result);
+      if (!child.success) throw new Error("Akuma call returned an invalid child");
+      return child.data;
     },
     encodeService: (service) => service,
     decodeService: (_service) => {
@@ -221,14 +208,14 @@ export function akumaCallRequestCommand(): RequestCommand<AkumaCallRequest, AkuI
       throw new Error("Akuma call has no service evidence");
     },
     projectChild: (child) => {
-      const id = canonicalAkuId(child);
-      if (id === null) throw new Error("Akuma call stored an invalid child reference");
-      return id;
+      const id = akuIdSchema.safeParse(child);
+      if (!id.success) throw new Error("Akuma call stored an invalid child reference");
+      return id.data;
     },
     decodeReference: (reference) => {
-      const child = canonicalAkuId(reference);
-      if (child === null) throw new Error("Akuma call stored an invalid child reference");
-      return child;
+      const child = akuIdSchema.safeParse(reference);
+      if (!child.success) throw new Error("Akuma call stored an invalid child reference");
+      return child.data;
     },
     isPermitted: (allowed) => allowed.includes("akuma.call"),
     decodeExecutionContext: decodeCallExecutionContext,

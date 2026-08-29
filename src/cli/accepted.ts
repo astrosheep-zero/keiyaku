@@ -27,7 +27,7 @@ import type {
 
 type MutationObservation = Pick<
   MutationResult<unknown>,
-  "facts" | "head" | "effects" | "lags" | "settlement" | "hookRuns"
+  "facts" | "head" | "lags" | "settlementLags" | "recoverySnapshot"
 >;
 
 type MutationCallOptions = Readonly<{
@@ -62,9 +62,8 @@ function acceptedEnvelope(result: MutationObservation, coordinate: ContractId | 
     contract,
     head: result.head,
     facts: acceptedFacts(result),
-    effects: result.effects,
-    settlement: result.settlement,
-    ...(result.hookRuns === undefined ? {} : { hookRuns: result.hookRuns }),
+    settlementLags: result.settlementLags,
+    ...(result.recoverySnapshot === undefined ? {} : { recoverySnapshot: result.recoverySnapshot }),
     ...(result.lags.length === 0 || firstLag === undefined ? {} : { lag: [firstLag, ...result.lags.slice(1)] }),
   };
 }

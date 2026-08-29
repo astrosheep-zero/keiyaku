@@ -1,62 +1,101 @@
-import { contractId, type ContractId } from "../core/facts/types.js";
+import { contractId } from "../core/facts/types.js";
 import { requestBodyCommand } from "../akuma/request-rendezvous.js";
 import { eraseRequestCommand, type ErasedRequestCommand, type RequestCommand } from "../akuma/request-wire.js";
 import {
-  isAuditReport,
-  isForwardedAuditReceipt,
-  isForwardedDeliveryReceipt,
-  isForwardedReviewReceipt,
-  type ForwardedAuditReceipt,
-  type AttestationVerdict,
-  type ForwardedDeliveryReceipt,
-  type ForwardedReviewReceipt,
-} from "./contract-forwarding.js";
+  auditReportSchema,
+  auditResultSchema,
+  decodeContractLiveFailure,
+  deliveryResultSchema,
+  encodeContractLiveFailure,
+  reviewResultSchema,
+} from "./contract-forwarding-result.js";
 import type { AuditReport } from "../protocol/audit.js";
+import type { IntegrationConflictMaterialized } from "../protocol/deliver.js";
+import type { DeliveryValue } from "./delivery.js";
+import type { MutationResult } from "./mutation.js";
+import type { Review } from "./contract-forwarding.js";
 import { isAbsolute, resolve } from "node:path";
+import { z } from "zod";
 
-type ReturnedContractRequest = Readonly<{ kind: "returned"; result: unknown; requestId: string; action: string }>;
+type DeliveryResult = MutationResult<DeliveryValue> | IntegrationConflictMaterialized;
+type ReviewResult = MutationResult<Review>;
+type AuditResult = MutationResult<AuditReport>;
+type ContractResult = DeliveryResult | ReviewResult | AuditResult;
+
+const absolutePathSchema = z.string().refine((value) => isAbsolute(value) && resolve(value) === value);
+const nonblankStringSchema = z.string().refine((value) => value.trim() !== "");
+const contractIdSchema = z.string().transform((value, context) => {
+  try {
+    return contractId(value);
+  } catch {
+    context.addIssue({ code: "custom", message: "expected ContractId" });
+    return z.NEVER;
+  }
+});
+const contractRequestBaseSchema = z.object({ repoRoot: absolutePathSchema, contractId: contractIdSchema }).strict();
+const auditRequestSchema = contractRequestBaseSchema
+  .extend({
+    includeDirty: z.boolean(),
+    showDiff: z.boolean(),
+    requireBranchesToBeUpToDate: z.boolean(),
+  })
+  .transform((request) => ({ action: "contract.audit" as const, ...request }));
+const deliverRequestSchema = contractRequestBaseSchema
+  .extend({ includeDirty: z.boolean(), materializeConflict: z.boolean(), message: nonblankStringSchema.optional() })
+  .transform((request) => ({ action: "contract.deliver" as const, ...request }));
+const reviewRequestSchema = contractRequestBaseSchema
+  .extend({ verdict: z.enum(["satisfied", "unsatisfied"]), summary: nonblankStringSchema.optional() })
+  .transform((request) => ({ action: "contract.review" as const, ...request }));
 
 export type ContractRequest =
-  | Readonly<{
-      action: "contract.audit";
-      repoRoot: string;
-      contractId: string;
-      includeDirty: boolean;
-      showDiff: boolean;
-      requireBranchesToBeUpToDate: boolean;
-    }>
-  | Readonly<{
-      action: "contract.deliver";
-      repoRoot: string;
-      contractId: string;
-      message?: string;
-      includeDirty: boolean;
-      materializeConflict: boolean;
-    }>
-  | Readonly<{
-      action: "contract.review";
-      repoRoot: string;
-      contractId: string;
-      verdict: AttestationVerdict;
-      summary?: string;
-    }>;
+  | z.infer<typeof auditRequestSchema>
+  | z.infer<typeof deliverRequestSchema>
+  | z.infer<typeof reviewRequestSchema>;
 type DeliverRequest = Extract<ContractRequest, { action: "contract.deliver" }>;
 type ReviewRequest = Extract<ContractRequest, { action: "contract.review" }>;
 type AuditRequest = Extract<ContractRequest, { action: "contract.audit" }>;
-export type ContractService =
-  | Readonly<{ kind: "audit-report"; repoRoot: string; contractId: string; report: AuditReport }>
-  | Readonly<{ kind: "accepted-reference"; repoRoot: string; contractId: string; deliveryFactId: string }>
-  | Readonly<{ kind: "accepted-reference"; repoRoot: string; contractId: string; reviewFactId: string }>;
+type ContractResultFor<Action extends ContractRequest["action"]> = Action extends "contract.deliver"
+  ? DeliveryResult
+  : Action extends "contract.review"
+    ? ReviewResult
+    : AuditResult;
+type ContractRequestFor<Action extends ContractRequest["action"]> = Extract<ContractRequest, { action: Action }>;
+const auditServiceSchema = z
+  .object({
+    kind: z.literal("audit-report"),
+    repoRoot: absolutePathSchema,
+    contractId: contractIdSchema,
+    report: auditReportSchema,
+  })
+  .strict();
+const deliveryReferenceSchema = z
+  .object({
+    kind: z.literal("accepted-reference"),
+    repoRoot: absolutePathSchema,
+    contractId: contractIdSchema,
+    deliveryFactId: nonblankStringSchema,
+  })
+  .strict();
+const reviewReferenceSchema = z
+  .object({
+    kind: z.literal("accepted-reference"),
+    repoRoot: absolutePathSchema,
+    contractId: contractIdSchema,
+    reviewFactId: nonblankStringSchema,
+  })
+  .strict();
+const contractServiceSchema = z.union([auditServiceSchema, deliveryReferenceSchema, reviewReferenceSchema]);
+export type ContractService = z.infer<typeof contractServiceSchema>;
 export type ContractRequestPort = Readonly<{
   audit(
     input: AuditRequest & Readonly<{ requester: string; signal: AbortSignal }>,
-  ): Promise<Readonly<{ result: ForwardedAuditReceipt; auditReport?: AuditReport }>>;
+  ): Promise<Readonly<{ result: AuditResult; auditReport?: AuditReport }>>;
   deliver(
     input: DeliverRequest & Readonly<{ requester: string; signal: AbortSignal }>,
-  ): Promise<Readonly<{ result: ForwardedDeliveryReceipt; deliveryFactId?: string }>>;
+  ): Promise<Readonly<{ result: DeliveryResult; deliveryFactId?: string }>>;
   review(
     input: ReviewRequest & Readonly<{ requester: string; signal: AbortSignal }>,
-  ): Promise<Readonly<{ result: ForwardedReviewReceipt; reviewFactId?: string }>>;
+  ): Promise<Readonly<{ result: ReviewResult; reviewFactId?: string }>>;
 }>;
 type ContractExecutionContext = Readonly<{ requester: string; signal: AbortSignal; upstream: ContractRequestPort }>;
 
@@ -95,151 +134,33 @@ function contractPayload(value: unknown): Readonly<Record<string, unknown>> | nu
     : null;
 }
 
-function exactContractKeys(value: Readonly<Record<string, unknown>>, expected: readonly string[]): boolean {
-  const actual = Object.keys(value).sort();
-  const sorted = [...expected].sort();
-  return actual.length === sorted.length && actual.every((key, index) => key === sorted[index]);
-}
-
-function absolute(value: unknown): value is string {
-  return typeof value === "string" && isAbsolute(value) && resolve(value) === value;
-}
-
-function contractRequestBase(
-  input: Readonly<Record<string, unknown>>,
-): Readonly<{ repoRoot: string; contractId: ContractId }> | null {
-  if (!absolute(input.repoRoot) || typeof input.contractId !== "string") return null;
-  let id: ContractId;
-  try {
-    id = contractId(input.contractId);
-  } catch {
-    return null;
-  }
-  return { repoRoot: input.repoRoot, contractId: id };
-}
-
-function optionalPayloadText(value: unknown): string | null | undefined {
-  if (value === undefined) return undefined;
-  return typeof value === "string" && value.trim().length > 0 ? value : null;
-}
-
-function decodeDeliverRequest(input: Readonly<Record<string, unknown>>): DeliverRequest | null {
-  const message = optionalPayloadText(input.message);
-  if (
-    message === null ||
-    !exactContractKeys(input, [
-      "contractId",
-      "includeDirty",
-      "materializeConflict",
-      "repoRoot",
-      ...(message === undefined ? [] : ["message"]),
-    ]) ||
-    typeof input.includeDirty !== "boolean" ||
-    typeof input.materializeConflict !== "boolean"
-  )
-    return null;
-  const base = contractRequestBase(input);
-  return base === null
-    ? null
-    : {
-        action: "contract.deliver",
-        ...base,
-        includeDirty: input.includeDirty,
-        materializeConflict: input.materializeConflict,
-        ...(message === undefined ? {} : { message }),
-      };
-}
-
-function decodeReviewRequest(input: Readonly<Record<string, unknown>>): ReviewRequest | null {
-  const summary = optionalPayloadText(input.summary);
-  if (
-    summary === null ||
-    !exactContractKeys(input, ["contractId", "repoRoot", "verdict", ...(summary === undefined ? [] : ["summary"])]) ||
-    (input.verdict !== "satisfied" && input.verdict !== "unsatisfied")
-  )
-    return null;
-  const base = contractRequestBase(input);
-  return base === null
-    ? null
-    : { action: "contract.review", ...base, verdict: input.verdict, ...(summary === undefined ? {} : { summary }) };
-}
-
-function decodeAuditRequest(input: Readonly<Record<string, unknown>>): AuditRequest | null {
-  if (
-    !exactContractKeys(input, ["contractId", "includeDirty", "repoRoot", "requireBranchesToBeUpToDate", "showDiff"]) ||
-    typeof input.includeDirty !== "boolean" ||
-    typeof input.showDiff !== "boolean" ||
-    typeof input.requireBranchesToBeUpToDate !== "boolean"
-  )
-    return null;
-  const base = contractRequestBase(input);
-  return base === null
-    ? null
-    : {
-        action: "contract.audit",
-        ...base,
-        includeDirty: input.includeDirty,
-        showDiff: input.showDiff,
-        requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
-      };
-}
-
 function decodeContractRequest(action: ContractRequest["action"], value: unknown): ContractRequest | null {
-  const input = contractPayload(value);
-  if (input === null) return null;
-  if (action === "contract.audit") return decodeAuditRequest(input);
-  return action === "contract.deliver" ? decodeDeliverRequest(input) : decodeReviewRequest(input);
+  const schema =
+    action === "contract.audit"
+      ? auditRequestSchema
+      : action === "contract.deliver"
+        ? deliverRequestSchema
+        : reviewRequestSchema;
+  const parsed = schema.safeParse(value);
+  return parsed.success ? parsed.data : null;
 }
 
 function decodeContractService(action: ContractRequest["action"], value: unknown): ContractService {
-  const service = contractPayload(value);
-  if (action === "contract.audit") {
-    if (
-      service === null ||
-      !exactContractKeys(service, ["contractId", "kind", "repoRoot", "report"]) ||
-      service.kind !== "audit-report" ||
-      !absolute(service.repoRoot) ||
-      typeof service.contractId !== "string" ||
-      !isAuditReport(service.report)
-    )
-      throw new Error(`malformed stored Contract service evidence for ${action}`);
-    return {
-      kind: service.kind,
-      repoRoot: service.repoRoot,
-      contractId: contractId(service.contractId),
-      report: service.report,
-    };
-  }
-  const field = action === "contract.deliver" ? "deliveryFactId" : "reviewFactId";
-  if (
-    service === null ||
-    !exactContractKeys(service, ["contractId", "kind", "repoRoot", field]) ||
-    service.kind !== "accepted-reference" ||
-    !absolute(service.repoRoot) ||
-    typeof service.contractId !== "string" ||
-    typeof service[field] !== "string" ||
-    service[field].trim().length === 0
-  )
-    throw new Error(`malformed stored Contract service evidence for ${action}`);
-  return action === "contract.deliver"
-    ? {
-        kind: service.kind,
-        repoRoot: service.repoRoot,
-        contractId: contractId(service.contractId),
-        deliveryFactId: service.deliveryFactId as string,
-      }
-    : {
-        kind: service.kind,
-        repoRoot: service.repoRoot,
-        contractId: contractId(service.contractId),
-        reviewFactId: service.reviewFactId as string,
-      };
+  const schema =
+    action === "contract.audit"
+      ? auditServiceSchema
+      : action === "contract.deliver"
+        ? deliveryReferenceSchema
+        : reviewReferenceSchema;
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) throw new Error(`malformed stored Contract service evidence for ${action}`);
+  return parsed.data;
 }
 
 async function executeContractRequest(
   request: ContractRequest,
   context: ContractExecutionContext,
-): Promise<Readonly<{ result: unknown; service: ContractService }>> {
+): Promise<Readonly<{ result: ContractResult; service: ContractService }>> {
   if (request.action === "contract.audit") {
     if (typeof context.upstream.audit !== "function") throw new Error("invalid Contract execution context");
     const served = await context.upstream.audit({ ...request, requester: context.requester, signal: context.signal });
@@ -251,7 +172,7 @@ async function executeContractRequest(
         kind: "audit-report",
         repoRoot: request.repoRoot,
         contractId: request.contractId,
-        report: served.auditReport,
+        report: auditReportSchema.parse(served.auditReport),
       },
     };
   }
@@ -285,20 +206,21 @@ async function executeContractRequest(
   };
 }
 
-function decodedContractResult(action: ContractRequest["action"], value: unknown): unknown {
-  const valid =
+function decodedContractResult(action: ContractRequest["action"], value: unknown): ContractResult {
+  const schema =
     action === "contract.audit"
-      ? isForwardedAuditReceipt(value)
+      ? auditResultSchema
       : action === "contract.deliver"
-        ? isForwardedDeliveryReceipt(value)
-        : isForwardedReviewReceipt(value);
-  if (!valid) throw new Error(`transport integrity: Contract ${action} returned an invalid live result`);
-  return value;
+        ? deliveryResultSchema
+        : reviewResultSchema;
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) throw new Error(`transport integrity: Contract ${action} returned an invalid live result`);
+  return parsed.data;
 }
 
 export function contractRequestCommand(
   action: ContractRequest["action"],
-): RequestCommand<ContractRequest, unknown, ContractService, ContractService, ContractExecutionContext> {
+): RequestCommand<ContractRequest, ContractResult, ContractService, ContractService, ContractExecutionContext> {
   return {
     action,
     encodeRequest: (request) => {
@@ -308,9 +230,11 @@ export function contractRequestCommand(
     decodeRequest: (value) => decodeContractRequest(action, value),
     encodeResult: (value) => value,
     decodeResult: (value) => decodedContractResult(action, value),
-    encodeService: (service) => service,
+    encodeFailure: encodeContractLiveFailure,
+    decodeFailure: decodeContractLiveFailure,
+    encodeService: (service) => decodeContractService(action, service),
     decodeService: (service) => decodeContractService(action, service),
-    projectService: (service) => service,
+    projectService: (service) => decodeContractService(action, service),
     decodeReference: (reference) => decodeContractService(action, reference),
     isPermitted: (allowed) => allowed.includes(action),
     decodeExecutionContext: decodeContractExecutionContext,
@@ -328,15 +252,15 @@ export function contractRequestCommands(): Readonly<
   };
 }
 
-export async function requestForwardedContract(
+export async function requestForwardedContract<Action extends ContractRequest["action"]>(
   input: Readonly<{
     directory: string;
     id?: string;
-    action: ContractRequest["action"];
-    request: ContractRequest;
+    action: Action;
+    request: ContractRequestFor<Action>;
     signal?: AbortSignal;
   }>,
-): Promise<ReturnedContractRequest | ContractService> {
+): Promise<ContractResultFor<Action> | ContractService> {
   const command = contractRequestCommand(input.action);
   const response = await requestBodyCommand({
     directory: input.directory,
@@ -345,7 +269,31 @@ export async function requestForwardedContract(
     value: input.request,
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
-  return response.kind === "reference" ? response.reference : response;
+  if (response.kind === "reference") return response.reference;
+  return response.result as ContractResultFor<Action>;
+}
+
+export async function requestForwardedContractLive<Action extends ContractRequest["action"]>(
+  input: Readonly<{
+    directory: string;
+    action: Action;
+    request: ContractRequestFor<Action>;
+    signal?: AbortSignal;
+  }>,
+): Promise<ContractResultFor<Action>> {
+  const command = contractRequestCommand(input.action);
+  const response = await requestBodyCommand({
+    directory: input.directory,
+    command,
+    value: input.request,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
+  if (response.kind === "reference") {
+    throw new Error(
+      `transport integrity: request ${response.requestId} action ${response.action} returned a durable reference without a live result`,
+    );
+  }
+  return response.result as ContractResultFor<Action>;
 }
 
 export {
@@ -354,18 +302,10 @@ export {
   executeForwardedAudit,
   executeForwardedDeliver,
   executeForwardedReview,
-  forwardedAuditReceipt,
-  forwardedDeliveryReceipt,
-  forwardedReviewReceipt,
-  requireForwarded,
 } from "./contract-forwarding.js";
 export type {
   AttestationVerdict,
   DeliveryExecutionInput,
-  ForwardedAuditReceipt,
-  ForwardedDeliveryReceipt,
-  ForwardedMutationReceipt,
-  ForwardedReviewReceipt,
   Review,
   ReviewExecutionInput,
 } from "./contract-forwarding.js";

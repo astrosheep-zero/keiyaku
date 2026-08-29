@@ -227,7 +227,7 @@ test("audit renders transient Verification cleanup leaks after accepted and obse
   const leak = observedAudit.leak;
   assert.match(leak?.diagnostic ?? "", /forced verification cleanup failure/);
   const observedText = renderText(observedAudit, { columns: 400, color: false });
-  assert.match(observedText, /unknown-exit/);
+  assert.match(observedText, /unknown exit/);
   assert.equal(observedText.includes(leak!.path), true);
   assert.equal(observedText.includes(leak!.diagnostic.trimEnd()), true);
 });
