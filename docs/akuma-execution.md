@@ -46,6 +46,14 @@ records its Body fact, and resumes the latest session or starts fresh at
 `soul.cwd`. While it owns the leash, Heart rows become provider actions,
 provider events become Heart facts, and Body Requests become in-process calls.
 
+Before Body constructs its upstream operation port, it read-only proves the
+World derived from its launch paths and carries that minted capability through
+the in-memory execution context. A routed call proves only its transported
+World before exact comparison and child allocation; it does not derive or
+re-prove the launch coordinate. Fleet carries only canonical targets and uses
+that already proved parent World. Neither path creates a marker or makes Heart
+or the wire a coordinate judge.
+
 **Wake is level-triggered.** The wake predicate is `pending Tells exist && no
 live Body holds the leash`. Tell, interrupt, kill, and every existing
 Heart-custody entry re-evaluate it; after releasing its leash, a Body performs

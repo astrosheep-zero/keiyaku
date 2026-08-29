@@ -23,6 +23,7 @@ type WorldResolution = {
 World.resolve(input: string | WorldResolutionInput): Promise<WorldResolution>
 World.locate(input: string | WorldResolutionInput): Promise<WorldRoot | null>
 World.at(path: string): Promise<WorldRoot>
+World.prove(path: string): Promise<WorldRoot>
 ```
 
 `World.resolve` resolves the invocation directory once and returns the current
@@ -55,6 +56,21 @@ and establishes exactly that existing directory. It never climbs. This is the
 library boundary for callers that already hold the coordinate rather than an
 invocation path. A missing directory or non-directory marker is a typed world
 error. Home and filesystem root remain forbidden.
+
+`World.prove(path)` is the read-only exact capability boundary for a raw
+explicit coordinate. It uses the same canonical directory observation as
+`resolve` with that coordinate selected as the repository root, and returns a
+WorldRoot only when the supplied bytes exactly equal the canonical physical
+directory coordinate. It neither consults or creates a marker nor climbs to or
+substitutes an ancestor World. Relative paths, aliases (including symlinks),
+missing paths, nondirectories, home, and the filesystem root reject. It never
+rewrites the caller value or changes the filesystem.
+
+Raw process, transport, and JavaScript-object coordinates cross this proof at
+their owning outer operation before any World-owned product effect. That
+operation carries the returned WorldRoot downward; consumers do not resolve or
+re-prove it. In particular, `Akuma.of` remains a synchronous consumer of an
+already minted WorldRoot.
 
 The CLI resolves the invocation Git repository once, passes its
 `primaryWorktree` as `repositoryRoot`, and retains one `WorldResolution` for

@@ -1,7 +1,7 @@
 import { isAbsolute, resolve } from "node:path";
 import { clipAllowedActions, decodeAllowedActions } from "./allowed.js";
 import { refuseRequest, reserveRequest, type Soul } from "./heart/index.js";
-import { archetypeName, parseAkuId, worldRootForAkumaPaths, type AkuId, type AkumaPaths } from "./identity.js";
+import { archetypeName, parseAkuId, type AkuId, type AkumaPaths } from "./identity.js";
 import { publishAkuma } from "./publication.js";
 import { decodeProviderOptions, decodeReadonlyRestraint } from "./provider-recipe.js";
 import { decodeProviderExecution } from "./providers/index.js";
@@ -9,6 +9,7 @@ import { requestBodyCommand } from "./request-rendezvous.js";
 import { eraseRequestCommand, type ErasedRequestCommand, type RequestCommand } from "./request-wire.js";
 import type { OwnedProcess } from "../runtime/proc/run.js";
 import { z } from "zod";
+import { World, type WorldRoot } from "../world.js";
 
 function schemaDecode<Value>(
   decode: (value: unknown) => Value,
@@ -89,11 +90,17 @@ type CallExecutionContext = Readonly<{
   id: string;
   requester: string;
   signal: AbortSignal;
+  world: WorldRoot;
   paths: AkumaPaths;
   parent: Soul;
   spawn(launch: AkumaCallRequestChildLaunch): Promise<OwnedProcess | void>;
   admissionOpen(): boolean;
 }>;
+
+function carriesLaunchWorld(value: unknown): value is Readonly<{ launchWorld(): WorldRoot }> {
+  const upstream = object(value);
+  return upstream !== null && typeof upstream.launchWorld === "function";
+}
 
 function decodeCallExecutionContext(value: unknown): CallExecutionContext {
   const context = object(value);
@@ -118,10 +125,12 @@ function decodeCallExecutionContext(value: unknown): CallExecutionContext {
     typeof context.admissionOpen !== "function"
   )
     throw new Error("invalid Akuma call execution context");
+  if (!carriesLaunchWorld(context.upstream)) throw new Error("Akuma call requires a minted launch World");
   return {
     id: context.id,
     requester: context.requester,
     signal: context.signal as AbortSignal,
+    world: context.upstream.launchWorld(),
     paths: context.paths as AkumaPaths,
     parent: context.parent as Soul,
     spawn: context.spawn as CallExecutionContext["spawn"],
@@ -154,10 +163,11 @@ async function executeAkumaCall(
   request: AkumaCallRequest,
   context: CallExecutionContext,
 ): Promise<Readonly<{ result: AkuId; child: string }>> {
-  const world = worldRootForAkumaPaths(context.paths);
-  if (request.world !== world) {
-    await refuseRequest(context.paths, context.id, `request world ${request.world} does not match ${world}`);
-    throw new Error(`request world ${request.world} does not match ${world}`);
+  const world = context.world;
+  const requestWorld = await World.prove(request.world);
+  if (requestWorld !== world) {
+    await refuseRequest(context.paths, context.id, `request world ${requestWorld} does not match ${world}`);
+    throw new Error(`request world ${requestWorld} does not match ${world}`);
   }
   const recipe = {
     ...(request.recipe.description === undefined ? {} : { description: request.recipe.description }),

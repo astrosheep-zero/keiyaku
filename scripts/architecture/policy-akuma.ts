@@ -227,6 +227,7 @@ export const akumaZones = [
       any("akuma/provider-recipe.ts", ["decodeProviderOptions", "decodeReadonlyRestraint", "ReadonlyRestraint"]),
       any("akuma/providers/index.ts", ["decodeProviderExecution"]),
       any("akuma/request-rendezvous.ts", ["requestBodyCommand"]),
+      any("world.ts", ["World", "WorldRoot"]),
       any("akuma/request-wire.ts", ["eraseRequestCommand", "ErasedRequestCommand", "RequestCommand"]),
       types("runtime/proc/run.ts", ["OwnedProcess"]),
     ],

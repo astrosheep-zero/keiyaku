@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { stopAkuma } from "../akuma/nuke.js";
 import { nukeGit } from "../git/nuke.js";
 import { nukeTask } from "../task/operations.js";
-import type { WorldRoot } from "../world.js";
+import { World, type WorldRoot } from "../world.js";
 import { KeiyakuRefused } from "./refusal.js";
 import { requireInput, requireMarkdown } from "./input.js";
 
@@ -36,15 +36,15 @@ async function removeEmptyWorldMarker(world: WorldRoot): Promise<void> {
   }
 }
 
-function nukeInput(input: NukeInput): NukeInput {
+async function nukeInput(input: NukeInput): Promise<NukeInput> {
   const value = requireInput(input, "nuke input");
-  const world = requireMarkdown(value.world, "world") as WorldRoot;
+  const world = await World.prove(requireMarkdown(value.world, "world"));
   const confirm = value.confirm === undefined ? undefined : requireMarkdown(value.confirm, "confirm");
   return { world, ...(confirm === undefined ? {} : { confirm }) };
 }
 
 export async function nukeKeiyaku(input: NukeInput): Promise<NukeResult> {
-  const value = nukeInput(input);
+  const value = await nukeInput(input);
   if (value.confirm === undefined) {
     throw new KeiyakuRefused({ kind: "nuke-confirmation-required", world: value.world });
   }

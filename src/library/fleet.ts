@@ -562,19 +562,19 @@ async function attachWaitContracts(repo: Repo | undefined, result: AkumaWaitResu
   });
 }
 
-function directAddress(values: Record<string, unknown>): AkumaAddressInput {
+function directAddress(values: Record<string, unknown>): Parameters<typeof addressAkuma>[0] {
   return {
-    path: values.path as WorldRoot,
-    akuma: values.akuma as string,
-    ...(values.repo === undefined ? {} : { repo: values.repo as Repo }),
+    path: values.path,
+    akuma: values.akuma,
+    ...(values.repo === undefined ? {} : { repo: values.repo }),
   };
 }
 
-function setAddress(values: Record<string, unknown>): AkumaSetAddressInput {
+function setAddress(values: Record<string, unknown>): Parameters<typeof addressAkumaSet>[0] {
   return {
-    path: values.path as WorldRoot,
-    akuma: values.akuma as readonly string[],
-    ...(values.repo === undefined ? {} : { repo: values.repo as NonNullable<AkumaSetAddressInput["repo"]> }),
+    path: values.path,
+    akuma: values.akuma,
+    ...(values.repo === undefined ? {} : { repo: values.repo }),
   };
 }
 

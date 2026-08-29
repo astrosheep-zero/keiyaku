@@ -67,6 +67,10 @@ The public call input and detached observation carry no route, caller identity,
 Square location, or Square-shaped field. Outcome delivery is owned by the
 execution and CLI edge chapters.
 `path` is an already resolved WorldRoot; Library never climbs or normalizes it.
+At a JavaScript package boundary it proves the raw value once through World
+before Alias, Dispatch, Settings, Akuma, or filesystem effects, then passes the
+minted value downward. `Akuma.of` remains synchronous and never resolves a
+path itself.
 `allowed`, when present, adds to the Archetype list for that birth; Akuma owns
 its vocabulary and effective-set judgment. An empty additions list carries no
 clearing meaning.

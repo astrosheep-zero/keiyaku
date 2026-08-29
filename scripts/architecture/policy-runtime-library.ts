@@ -280,7 +280,7 @@ export const runtimeLibraryZones = [
       any("task/operations.ts", ["nukeTask"]),
       any("library/input.ts", ["requireInput", "requireMarkdown"]),
       any("library/refusal.ts", ["KeiyakuRefused"]),
-      types("world.ts", ["WorldRoot"]),
+      any("world.ts", ["World", "WorldRoot"]),
     ],
   },
   {
@@ -304,7 +304,7 @@ export const runtimeLibraryZones = [
       any("library/repo.ts", ["Repo", "scopeForRepo"]),
       any("workspace-place.ts", ["readManagedWorktreeAppointment"]),
       types("settings.ts"),
-      types("world.ts"),
+      any("world.ts", ["World", "WorldRoot"]),
     ],
   },
   {
@@ -320,7 +320,7 @@ export const runtimeLibraryZones = [
       types("kanshi/index.ts"),
       any("library/input.ts", ["requireInput"]),
       any("library/repo.ts", ["Repo", "scopeForRepo"]),
-      types("world.ts"),
+      any("world.ts", ["World", "WorldRoot"]),
     ],
   },
   {
@@ -354,7 +354,7 @@ export const runtimeLibraryZones = [
       any("library/repo.ts", ["Repo", "scopeForRepo"]),
       types("task/index.ts"),
       any("task/operations.ts", ["observeTaskBoard"]),
-      types("world.ts"),
+      any("world.ts", ["World", "WorldRoot"]),
     ],
   },
   {
@@ -367,7 +367,7 @@ export const runtimeLibraryZones = [
       any("library/contract.ts", ["ContractBoard", "listKeiyaku"]),
       any("library/input.ts", ["requireInput"]),
       any("library/repo.ts", ["Repo"]),
-      types("world.ts"),
+      any("world.ts", ["World", "WorldRoot"]),
     ],
   },
   {

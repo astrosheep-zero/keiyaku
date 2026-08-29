@@ -73,6 +73,13 @@ uses that same owner's strict decoder to rethrow the public typed error. An
 absent, malformed, unknown, or executor failure remains the ordinary generic
 voided error, never an owner result wrapper.
 
+Heart and generic wire keep coordinates as opaque JSON text. After generic
+transport admission, the command owner proves every raw World coordinate once
+before its product executor runs; no decoder, Heart fact, or wire helper mints
+a WorldRoot. A forwarded Contract coordinate first reconstructs its Repo and
+must equal that Repo's canonical primary worktree before World proves the
+repository World used for Settings and the operation.
+
 For call, the claim decoder first validates the action envelope, then selects
 the stated cwd or the hosting parent Soul cwd. Only then does it decode the frozen provider and
 options with the existing owners for that final cwd. The complete validated

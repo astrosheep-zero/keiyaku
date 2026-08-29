@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { moveAlias, resolveAlias } from "../src/alias/index.js";
@@ -35,6 +36,7 @@ import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import { invoke } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
 import { makeGitRepository } from "./support/git.js";
+import type { WorldRoot } from "../src/world.js";
 
 function markdown(title: string): string {
   return [
@@ -125,7 +127,7 @@ async function directBirthSoul(akuma: Akuma, input: AkumaCallInput): Promise<Sou
   return soul!;
 }
 
-async function requestPump(root: string) {
+async function requestPump(root: WorldRoot) {
   const parent = await allocateAkumaDirectory({ worldRoot: root, archetype: "parent", draw: () => "1234abcd" });
   await initializeHeart(parent.paths);
   const soul: Soul = {
@@ -146,6 +148,7 @@ async function requestPump(root: string) {
     bodySequence: 1,
     now: () => "2026-08-11T00:00:01.000Z",
     signal: new AbortController().signal,
+    upstream: { launchWorld: () => root },
     commands: akumaCallRequestCommands(),
     async spawn(launch) {
       const child = (await HeldAkumaLeash.try(launch.paths))!;
@@ -155,6 +158,32 @@ async function requestPump(root: string) {
   });
   return { pump, leash };
 }
+
+test("package-root World inputs reject a forged JavaScript coordinate before effects", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-library-world-proof-")));
+  const forged = `${root}/.`;
+  try {
+    await assert.rejects(
+      Keiyaku.call({ path: forged as never, archetype: "worker", body: "must not start" }),
+      /canonical physical directory/u,
+    );
+    await assert.rejects(Keiyaku.fork({ path: forged as never, akuma: "aku/worker/1234abcd", at: "turn/1" }), /canonical physical directory/u);
+    await assert.rejects(Keiyaku.ls({ query: { kind: "tasks" }, path: forged as never }), /canonical physical directory/u);
+    await assert.rejects(Keiyaku.status({ path: forged as never, akuma: "aku/worker/1234abcd" }), /canonical physical directory/u);
+    await assert.rejects(
+      Keiyaku.wait({ path: forged as never, akuma: ["aku/worker/1234abcd"], completion: "all" }),
+      /canonical physical directory/u,
+    );
+    await assert.rejects(
+      Keiyaku.tell({ path: forged as never, akuma: "aku/worker/1234abcd", body: "must not tell" }),
+      /canonical physical directory/u,
+    );
+    await assert.rejects(Keiyaku.kill({ path: forged as never, akuma: ["aku/worker/1234abcd"] }), /canonical physical directory/u);
+    assert.equal(existsSync(join(root, ".keiyaku", "akuma")), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () => {
   const { raw, repo, git } = await repositoryFixture();

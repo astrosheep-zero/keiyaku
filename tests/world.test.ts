@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join, parse } from "node:path";
+import { join, parse, relative } from "node:path";
 import test from "node:test";
 import { repositoryAt } from "../src/git/repository.js";
 import { resolveCliCoordinates } from "../src/cli/coordinates.js";
@@ -126,6 +126,40 @@ test("World excludes the filesystem root from locate and exact construction", as
   assert.equal(resolution.candidate, null);
   await assert.rejects(resolution.establish(), (error) => error instanceof WorldError && error.kind === "root-world");
   await assert.rejects(World.at(root), (error) => error instanceof WorldError && error.kind === "root-world");
+});
+
+test("World.prove mints only an exact canonical directory without writing", async () => {
+  const root = temporary();
+  const nested = join(root, "nested");
+  const nestedMarker = join(nested, ".keiyaku");
+  const missing = join(root, "missing");
+  const file = join(root, "file");
+  const markerFile = join(root, ".keiyaku-file");
+  mkdirSync(nested);
+  mkdirSync(join(root, ".keiyaku"));
+  writeFileSync(file, "not a directory");
+  writeFileSync(markerFile, "not a marker directory");
+  const canonicalRoot = await realpath(root);
+  const canonicalNested = await realpath(nested);
+  const link = join(canonicalRoot, "world-link");
+  symlinkSync(canonicalRoot, link);
+  const before = [canonicalRoot, canonicalNested].map((path) => [path, readdirSync(path).sort()]);
+
+  assert.equal(await World.prove(canonicalRoot), canonicalRoot);
+  assert.equal(await World.prove(canonicalNested), canonicalNested);
+  await assert.rejects(World.prove(`${canonicalRoot}/.`), (error) => error instanceof WorldError && error.kind === "invalid-world");
+  await assert.rejects(World.prove(relative(process.cwd(), canonicalRoot)), (error) => error instanceof WorldError && error.kind === "invalid-world");
+  await assert.rejects(World.prove(link), (error) => error instanceof WorldError && error.kind === "invalid-world");
+  await assert.rejects(World.prove(missing), (error) => error instanceof WorldError && error.kind === "invalid-world");
+  await assert.rejects(World.prove(file), (error) => error instanceof WorldError && error.kind === "invalid-world");
+  await assert.rejects(World.prove(markerFile), (error) => error instanceof WorldError && error.kind === "invalid-world");
+  await assert.rejects(World.prove(homedir()), (error) => error instanceof WorldError && error.kind === "home-world");
+  await assert.rejects(World.prove(parse(process.cwd()).root), (error) => error instanceof WorldError && error.kind === "root-world");
+  assert.equal(existsSync(nestedMarker), false);
+  assert.deepEqual(
+    [canonicalRoot, canonicalNested].map((path) => [path, readdirSync(path).sort()]),
+    before,
+  );
 });
 
 test("World refuses a non-directory marker", async () => {

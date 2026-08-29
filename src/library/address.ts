@@ -11,7 +11,7 @@ import {
   type AkumaAlias,
   type AkumaGlob,
 } from "../identity/selector.js";
-import type { WorldRoot } from "../world.js";
+import { World, type WorldRoot } from "../world.js";
 import type { KanshiReport, Section } from "../kanshi/index.js";
 import { requireInput } from "./input.js";
 import { scopeForRepo, type Repo } from "./repo.js";
@@ -29,6 +29,12 @@ export type AkumaSetAddressInput = Readonly<{
   path: WorldRoot;
   akuma: readonly string[];
   repo?: Repo;
+}>;
+
+type UncheckedAkumaAddressInput = Readonly<{
+  path: unknown;
+  akuma: unknown;
+  repo?: unknown;
 }>;
 
 export type AkumaWorldScopeRefusal = Readonly<{
@@ -106,7 +112,7 @@ export function resolveNamedAddress(input: NamedAddressInput): NamedAddress {
   throw new TypeError(`unknown selector: ${selector}`);
 }
 
-export async function addressAkuma(input: AkumaAddressInput): Promise<
+export async function addressAkuma(input: UncheckedAkumaAddressInput): Promise<
   Readonly<{
     path: WorldRoot;
     id: AkuId;
@@ -119,7 +125,7 @@ export async function addressAkuma(input: AkumaAddressInput): Promise<
     }
   }
   if (values.repo !== undefined) scopeForRepo(values.repo);
-  const path = nonblank(values.path, "path") as WorldRoot;
+  const path = await World.prove(nonblank(values.path, "path"));
   return { path, id: await directId(path, nonblank(values.akuma, "akuma")) };
 }
 
@@ -198,7 +204,7 @@ async function refuseForeignContractMembers(
   if (foreign.length > 0) throw new AkumaWorldScopeError({ kind: "akuma-not-in-world", ids: foreign, world: path });
 }
 
-export async function addressAkumaSet(input: AkumaSetAddressInput): Promise<
+export async function addressAkumaSet(input: UncheckedAkumaAddressInput): Promise<
   Readonly<{
     path: WorldRoot;
     ids: readonly AkuId[];
@@ -212,7 +218,7 @@ export async function addressAkumaSet(input: AkumaSetAddressInput): Promise<
   }
   if (!Array.isArray(values.akuma) || values.akuma.length === 0)
     throw new TypeError("akuma must be a nonempty selector array");
-  const path = nonblank(values.path, "path") as WorldRoot;
+  const path = await World.prove(nonblank(values.path, "path"));
   const selectors = values.akuma.map(parseSetSelector);
   if (hasSelectorKind(selectors, "contract") && values.repo === undefined) {
     throw new TypeError("Contract Akuma selector requires repo");

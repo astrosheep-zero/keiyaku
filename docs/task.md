@@ -25,6 +25,12 @@ second Task forwarding path. Routing remains neither a Task operation input nor
 Task authority, Task code never reads provider environment to discover it, and
 parent request service always constructs the local Task executor.
 
+`Tasks.of` and Task handles synchronously consume an already minted
+`WorldRoot`; they do not perform filesystem adjudication. A forwarded Task
+World is opaque transport text until the parent Task executor mints it once
+before Task authority effects. Neither Task wire decoding nor Heart mints a
+WorldRoot.
+
 A `TaskId` is `task/<local-id>` at the root or
 `task/<namespace...>/<local-id>` in a nested namespace. Every segment uses the
 registered human-segment grammar. Creation derives the immutable local ID from

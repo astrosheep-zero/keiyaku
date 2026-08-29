@@ -172,6 +172,11 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
   ],
   forbiddenSourcePatterns: [
     {
+      source: "**",
+      pattern: /\bas\s+(?:unknown\s+as\s+)?WorldRoot\b/u,
+      detail: "only World may mint WorldRoot; raw runtime coordinates must use World.prove before product effects",
+    },
+    {
       source: "akuma/providers/index.ts",
       pattern: /^import .*\.\/.*\/index\.js";$/mu,
       detail: "provider resolution imports only the selected adapter at the execution edge",

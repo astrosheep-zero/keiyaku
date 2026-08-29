@@ -59,7 +59,7 @@ async function directory(input: string, label: string): Promise<string> {
 }
 
 function brand(path: string): WorldRoot {
-  return path as WorldRoot;
+  return path as string & { readonly [WORLD_BRAND]: true };
 }
 
 function marker(root: string): string {
@@ -132,6 +132,15 @@ async function exact(input: string): Promise<WorldRoot> {
   return brand(root);
 }
 
+async function proved(input: string): Promise<WorldRoot> {
+  const resolution = await resolved({ cwd: input, repositoryRoot: input });
+  const root = resolution.root;
+  if (root === null || input !== root) {
+    throw new WorldError("invalid-world", "world path must be its canonical physical directory coordinate");
+  }
+  return root;
+}
+
 async function resolved(input: WorldInput): Promise<WorldResolution> {
   const values = await inputValues(input, "world location");
   const root = values.repositoryRoot === undefined ? await locateMarker(values.cwd) : brand(values.repositoryRoot);
@@ -164,5 +173,8 @@ export const World = Object.freeze({
   },
   at(input: string): Promise<WorldRoot> {
     return exact(input);
+  },
+  prove(input: string): Promise<WorldRoot> {
+    return proved(input);
   },
 });

@@ -9,7 +9,7 @@ import { publishDispatch, readDispatch, type Dispatch, type DispatchFailure } fr
 import { parseAkumaAlias, type AkumaAlias } from "../identity/selector.js";
 import { readManagedWorktreeAppointment } from "../workspace-place.js";
 import type { Settings } from "../settings.js";
-import type { WorldRoot } from "../world.js";
+import { World, type WorldRoot } from "../world.js";
 import type { AllowedAction } from "../akuma/allowed.js";
 import { localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
 import { requireInput } from "./input.js";
@@ -298,7 +298,7 @@ export async function beginCall(input: CallInput, context: ExecutionContext): Pr
     ],
     "Keiyaku.call input",
   );
-  const path = nonblank(values.path, "path") as WorldRoot;
+  const path = await World.prove(nonblank(values.path, "path"));
   const archetype = nonblank(values.archetype, "archetype");
   const body = text(values.body, "body");
   const readonlyRequested = callReadonly(values.readonly);
@@ -389,14 +389,9 @@ export async function callKeiyaku(
 export async function forkKeiyaku(input: ForkInput): Promise<ForkResult> {
   const values = requireInput(input, "Keiyaku.fork input");
   onlyKeys(values, ["path", "akuma", "at", "repo"], "Keiyaku.fork input");
-  const path = nonblank(values.path, "path") as WorldRoot;
   const at = nonblank(values.at, "at");
-  const akuma = (
-    await addressAkuma({
-      path,
-      akuma: nonblank(values.akuma, "akuma"),
-    })
-  ).id;
+  const addressed = await addressAkuma({ path: values.path, akuma: nonblank(values.akuma, "akuma") });
+  const { path, id: akuma } = addressed;
   const repository = values.repo === undefined ? undefined : scopeForRepo(values.repo);
 
   const receipt = await Akuma.of(path).of({ id: akuma }).fork({ at });

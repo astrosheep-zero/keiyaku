@@ -33,3 +33,14 @@ test("confirmed nuke retains a nonempty World marker", async () => {
     rmSync(world, { recursive: true, force: true });
   }
 });
+
+test("nuke rejects a noncanonical World before confirmation or deletion", async () => {
+  const world = await worldFixture();
+  const forged = `${world}/.`;
+  try {
+    await assert.rejects(Keiyaku.nuke({ world: forged as never, confirm: forged }), /canonical physical directory/u);
+    assert.equal(existsSync(join(world, ".keiyaku")), true);
+  } finally {
+    rmSync(world, { recursive: true, force: true });
+  }
+});

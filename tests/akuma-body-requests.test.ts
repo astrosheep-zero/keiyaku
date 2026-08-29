@@ -489,6 +489,7 @@ test("call allocation crossing the admission fence settles voided without spawni
       }
       return "2026-08-18T00:00:01.000Z";
     },
+    upstream: { launchWorld: () => root },
     spawn: async () => {
       spawnCalls += 1;
     },
@@ -520,6 +521,49 @@ test("call allocation crossing the admission fence settles voided without spawni
   }
 });
 
+test("routed call proves its transported World before child allocation", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-call-world-proof-")));
+  const parent = await born(root, "parent", "11111111");
+  let spawns = 0;
+  const pump = await BodyRequestPump.open({
+    paths: parent.paths,
+    parent: parent.soul,
+    bodySequence: 1,
+    now: () => "2026-08-18T00:00:01.000Z",
+    upstream: { launchWorld: () => root },
+    spawn: async () => {
+      spawns += 1;
+    },
+    commands: akumaCallRequestCommands(),
+    signal: new AbortController().signal,
+  });
+  const id = randomUUID();
+  try {
+    const request = requestBodyCall({
+      directory: pump.directory,
+      id,
+      world: `${root}/.`,
+      archetype: "worker",
+      body: "must not allocate",
+      recipe: {
+        provider: { name: "claude", kind: "claude-agent-sdk" },
+        options: {},
+        allowed: ALLOWED_ACTIONS,
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(spawns, 0);
+    assert.equal(await readRequest(parent.paths, id), null);
+    await pump.close();
+    await assert.rejects(
+      request,
+      (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "voided",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("semantically invalid call recipes create no Heart fact or child", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-call-invalid-recipe-")));
   const parent = await born(root, "parent", "11111111");
@@ -529,6 +573,7 @@ test("semantically invalid call recipes create no Heart fact or child", async ()
     parent: parent.soul,
     bodySequence: 1,
     now: () => "2026-08-18T00:00:01.000Z",
+    upstream: { launchWorld: () => root },
     spawn: async () => {
       spawnCalls += 1;
       throw new Error("invalid recipe must not spawn");
@@ -585,6 +630,7 @@ test("a terminal Akuma call duplicate projects its stored child without spawning
     parent: parent.soul,
     bodySequence: 1,
     now: () => "2026-08-18T00:00:01.000Z",
+    upstream: { launchWorld: () => root },
     commands: akumaCallRequestCommands(),
     signal: new AbortController().signal,
     async spawn(launch) {
@@ -602,6 +648,7 @@ test("a terminal Akuma call duplicate projects its stored child without spawning
       parent: parent.soul,
       bodySequence: 2,
       now: () => "2026-08-18T00:00:03.000Z",
+      upstream: { launchWorld: () => root },
       commands: akumaCallRequestCommands(),
       signal: new AbortController().signal,
       async spawn() {
@@ -615,6 +662,68 @@ test("a terminal Akuma call duplicate projects its stored child without spawning
       await replay.close();
     }
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Body composition carries its minted launch World through forwarded call execution", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-call-composed-world-")));
+  const parent = await born(root, "parent", "11111111");
+  const inert = await born(root, "inert", "22222222", []);
+  const previousArgv = [...process.argv];
+  process.argv.splice(
+    2,
+    process.argv.length - 2,
+    Buffer.from(JSON.stringify({ paths: inert.paths })).toString("base64url"),
+  );
+  let compositionUpstreamFor: typeof import("../src/akuma-body.js").upstreamFor;
+  try {
+    ({ upstreamFor: compositionUpstreamFor } = await import("../src/akuma-body.js"));
+  } finally {
+    process.argv.splice(0, process.argv.length, ...previousArgv);
+  }
+  const alias = (path: string) => `${root}/.${path.slice(root.length)}`;
+  const paths = {
+    directory: alias(parent.paths.directory),
+    heart: alias(parent.paths.heart),
+    leash: alias(parent.paths.leash),
+    log: alias(parent.paths.log),
+    requests: alias(parent.paths.requests),
+  };
+  let spawns = 0;
+  const pump = await BodyRequestPump.open({
+    paths,
+    parent: parent.soul,
+    bodySequence: 1,
+    now: () => "2026-08-18T00:00:01.000Z",
+    upstream: await compositionUpstreamFor({ paths: parent.paths }, {}),
+    commands: akumaCallRequestCommands(),
+    signal: new AbortController().signal,
+    async spawn(launch) {
+      spawns += 1;
+      const leash = (await HeldAkumaLeash.try(launch.paths))!;
+      await leash.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-18T00:00:02.000Z" });
+      leash.release();
+    },
+  });
+  try {
+    const id = randomUUID();
+    const child = await requestBodyCall({
+      directory: pump.directory,
+      id,
+      world: root,
+      archetype: "worker",
+      body: "carried launch World",
+      recipe: {
+        provider: { name: "claude", kind: "claude-agent-sdk" },
+        options: {},
+        allowed: ALLOWED_ACTIONS,
+      },
+    });
+    assert.equal(spawns, 1);
+    assert.equal((await readRequest(parent.paths, id))?.child, child);
+  } finally {
+    await pump.close();
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -1445,7 +1554,22 @@ test("CLI forwarded deliver preserves its selected Repo and uses parent Settings
   } finally {
     process.argv.splice(0, process.argv.length, ...previousArgv);
   }
-  const pump = await openPump(parent, compositionUpstreamFor({ paths: parent.paths }, { home: parentHome, gitPath }));
+  let pump = await openPump(parent, await compositionUpstreamFor({ paths: parent.paths }, { home: parentHome, gitPath }));
+  const noncanonical = requestBodyDeliver({
+    directory: pump.directory,
+    id: randomUUID(),
+    repoRoot: `${contractRepository.path}/.`,
+    contractId: id,
+    includeDirty: true,
+    materializeConflict: false,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  await pump.close();
+  await assert.rejects(
+    noncanonical,
+    (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "voided",
+  );
+  pump = await openPump(parent, await compositionUpstreamFor({ paths: parent.paths }, { home: parentHome, gitPath }));
   const previous = process.env[AKUMA_REQUESTS_ENV];
   const previousPath = process.env.PATH;
   try {

@@ -82,6 +82,7 @@ test("package root exposes only the ruled library values and declarations", () =
     'const nukeRequired: NukeConfirmationRequiredRefusal = { kind: "nuke-confirmation-required", world };',
     "const nukeKeiyakuRefusal: KeiyakuRefusal = nukeRefusal;",
     'const worldResult: Promise<WorldRoot> = World.at(".");',
+    'const provedWorld: Promise<WorldRoot> = World.prove(".");',
     'const worldInput: WorldResolutionInput = { cwd: "." };',
     "const worldResolution: Promise<WorldResolution> = World.resolve(worldInput);",
     "const worldCandidate: WorldRoot | null = (await worldResolution).candidate;",
@@ -467,7 +468,7 @@ test("Keiyaku owns contract construction over one pinned Repo capability", async
   );
   assert.ok(guidance.includes(markdown("Markdown input")));
   assert.equal(guidance.match(/^## Fulfillment$/gmu)?.length, 1);
-  assert.match(guidance, /keiyaku-deliver\/SKILL\.md[\s\S]*keiyaku-review\/SKILL\.md/);
+  assert.match(guidance, /keiyaku-deliver\/SKILL\.md[\s\S]*keiyaku-review\/SKILL\.md/u);
   const appointment = await readManagedWorktreeAppointment(await repositoryAt(repository.path), state.id);
   assert.equal(appointment.kind, "appointed");
   if (appointment.kind !== "appointed") throw new Error("expected appointed worktree");

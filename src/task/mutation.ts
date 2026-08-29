@@ -293,7 +293,7 @@ export function taskMutationRequestCommand(
     isPermitted: (allowed) => allowed.includes(action),
     decodeExecutionContext: decodeTaskMutationExecutionContext,
     execute: async (request, context) => {
-      const world = await World.at(request.world);
+      const world = await World.prove(request.world);
       return {
         result: await context.upstream.task({
           world,
@@ -447,16 +447,16 @@ export async function executeTaskMutation(
     signal?: AbortSignal;
   }>,
 ): Promise<TaskMutationExecutionResult> {
-  const { request, signal } = input;
+  const { world, request, signal } = input;
   const withSignal = signal === undefined ? {} : { signal };
   switch (request.action) {
     case "task.add":
-      return await addTask(input.world, addTaskOptions(request.input, input.requester, signal));
+      return await addTask(world, addTaskOptions(request.input, input.requester, signal));
     case "task.addDocument":
-      return await addTaskDocument(input.world, { ...request.input, actor: input.requester, ...withSignal });
+      return await addTaskDocument(world, { ...request.input, actor: input.requester, ...withSignal });
     case "task.compose":
       return await composeTasks({
-        world: input.world,
+        world,
         markdown: request.markdown,
         defaultNamespace: request.namespace,
         actor: input.requester,
@@ -464,22 +464,22 @@ export async function executeTaskMutation(
         ...withSignal,
       });
     case "task.update":
-      return await updateTask(input.world, request.id, updateTaskOptions(request.input, signal));
+      return await updateTask(world, request.id, updateTaskOptions(request.input, signal));
     case "task.start":
-      if ("ids" in request) return await batchTasks(input.world, "start", request.ids, signal);
-      return await lifecycleTask(input.world, request.id, "start", signal);
+      if ("ids" in request) return await batchTasks(world, "start", request.ids, signal);
+      return await lifecycleTask(world, request.id, "start", signal);
     case "task.stop":
-      return await lifecycleTask(input.world, request.id, "stop", signal);
+      return await lifecycleTask(world, request.id, "stop", signal);
     case "task.resume":
-      return await lifecycleTask(input.world, request.id, "resume", signal);
+      return await lifecycleTask(world, request.id, "resume", signal);
     case "task.hold":
-      if ("ids" in request) return await batchTasks(input.world, "hold", request.ids, signal);
-      return await lifecycleTask(input.world, request.id, "hold", signal);
+      if ("ids" in request) return await batchTasks(world, "hold", request.ids, signal);
+      return await lifecycleTask(world, request.id, "hold", signal);
     case "task.done":
-      if ("ids" in request) return await batchTasks(input.world, "done", request.ids, signal, request.note);
-      return await lifecycleTask(input.world, request.id, "done", signal, request.note);
+      if ("ids" in request) return await batchTasks(world, "done", request.ids, signal, request.note);
+      return await lifecycleTask(world, request.id, "done", signal, request.note);
     case "task.drop":
-      if ("ids" in request) return await batchTasks(input.world, "drop", request.ids, signal, request.note);
-      return await lifecycleTask(input.world, request.id, "drop", signal, request.note);
+      if ("ids" in request) return await batchTasks(world, "drop", request.ids, signal, request.note);
+      return await lifecycleTask(world, request.id, "drop", signal, request.note);
   }
 }

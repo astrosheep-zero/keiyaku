@@ -16,6 +16,7 @@ import { AKUMA_REQUESTS_ENV, createProviderAttempt, type ProviderAdapter } from 
 import { BodyRequestPump } from "../src/akuma/request-serve.js";
 import { executeKillAkuma, executeTellAkuma, executeWaitAkuma, fleetRequestCommands } from "../src/library/fleet.js";
 import { Keiyaku, type AkumaObservation } from "../src/index.js";
+import { World } from "../src/world.js";
 import { invoke } from "../src/cli/invoke.js";
 import { invokeAkuma } from "../src/cli/commands/akuma-invoke.js";
 import { recognizeAndListen } from "../src/cli/square-edge.js";
@@ -1152,6 +1153,7 @@ test("Akuma status, wait, and history share public observations without embeddin
 test("packaged CLI call writes representative success and failure exits", async () => {
   assert.equal(existsSync(PACKAGED_CLI), true, "npm run build must produce build/src/cli/index.js before this test");
   const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-cli-akuma-call-")));
+  const world = await World.prove(root);
   const home = join(root, ".home");
   mkdirSync(join(home, "akuma"), { recursive: true });
   writeFileSync(join(home, "akuma", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
@@ -1223,6 +1225,7 @@ test("packaged CLI call writes representative success and failure exits", async 
     signal: new AbortController().signal,
     commands: { ...akumaCallRequestCommands(), ...fleetRequestCommands() },
     upstream: {
+      launchWorld: () => world,
       wait: async (input) =>
         await executeWaitAkuma({
           path: root as import("../src/world.js").WorldRoot,

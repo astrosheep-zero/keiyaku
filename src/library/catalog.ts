@@ -5,7 +5,7 @@ import { observeTaskCatalogRows } from "../task/catalog.js";
 import { listKeiyaku, type ContractBoard } from "./contract.js";
 import { requireInput } from "./input.js";
 import { Repo } from "./repo.js";
-import type { WorldRoot } from "../world.js";
+import { World, type WorldRoot } from "../world.js";
 
 export type CatalogQuery =
   | Readonly<{ kind: "tasks"; namespace?: readonly string[] }>
@@ -40,9 +40,9 @@ function optionalHome(value: unknown): string | undefined {
   return value;
 }
 
-function worldRoot(value: unknown): WorldRoot {
+async function worldRoot(value: unknown): Promise<WorldRoot> {
   if (typeof value !== "string" || value.trim().length === 0) throw new TypeError("path must be a WorldRoot");
-  return value as WorldRoot;
+  return await World.prove(value);
 }
 
 function taskQueryValue(query: Readonly<Record<string, unknown>>): CatalogQuery {
@@ -103,7 +103,7 @@ export async function listCatalog(input: CatalogInput): Promise<Catalog> {
       rows: await listArchetypeDefinitions(home === undefined ? {} : { home }),
     };
   }
-  const path = worldRoot(values.path);
+  const path = await worldRoot(values.path);
   if (query.kind === "tasks") {
     return { kind: "tasks", root: path, rows: await observeTaskCatalogRows(path, query.namespace) };
   }

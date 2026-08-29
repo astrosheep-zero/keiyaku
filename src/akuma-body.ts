@@ -1,7 +1,7 @@
 import { LEASH_HELD_EXIT, runAkumaBody, type BodyLaunch } from "./akuma/body.js";
 import { akumaCallRequestCommands } from "./akuma/call-request.js";
 import { worldRootForAkumaPaths } from "./akuma/identity.js";
-import type { WorldRoot } from "./world.js";
+import { World, type WorldRoot } from "./world.js";
 import { executeKillAkuma, executeTellAkuma, executeWaitAkuma } from "./library/fleet.js";
 import { fleetRequestCommands, type FleetRequestPort } from "./library/fleet.js";
 import { requireBranchesToBeUpToDateFrom, worktreeHooksFrom } from "./library/configuration.js";
@@ -19,16 +19,18 @@ import { executeTaskMutation, taskMutationRequestCommands, type TaskMutationRequ
 type BodyProcessConfiguration = Readonly<{ home?: string; gitPath?: string }>;
 
 async function contractDependencies(repoRoot: string, processConfiguration: BodyProcessConfiguration) {
-  return await Promise.all([
-    Repo.at({
-      path: repoRoot,
-      ...(processConfiguration.gitPath === undefined ? {} : { gitPath: processConfiguration.gitPath }),
-    }),
-    settings({
-      root: repoRoot as WorldRoot,
-      ...(processConfiguration.home === undefined ? {} : { home: processConfiguration.home }),
-    }),
-  ]);
+  const repo = await Repo.at({
+    path: repoRoot,
+    ...(processConfiguration.gitPath === undefined ? {} : { gitPath: processConfiguration.gitPath }),
+  });
+  if (repo.root !== repoRoot)
+    throw new TypeError("forwarded Contract repoRoot must equal the canonical primary worktree");
+  const world = await World.prove(repo.root);
+  const configuration = await settings({
+    root: world,
+    ...(processConfiguration.home === undefined ? {} : { home: processConfiguration.home }),
+  });
+  return [repo, configuration] as const;
 }
 
 function contractUpstream(processConfiguration: BodyProcessConfiguration): ContractRequestPort {
@@ -74,16 +76,17 @@ function contractUpstream(processConfiguration: BodyProcessConfiguration): Contr
   };
 }
 
-export function upstreamFor(
+export async function upstreamFor(
   launch: BodyLaunch,
   processConfiguration: BodyProcessConfiguration,
-): FleetRequestPort & ContractRequestPort & TaskMutationRequestPort {
-  const path = worldRootForAkumaPaths(launch.paths) as WorldRoot;
+): Promise<FleetRequestPort & ContractRequestPort & TaskMutationRequestPort & Readonly<{ launchWorld(): WorldRoot }>> {
+  const world = await World.prove(worldRootForAkumaPaths(launch.paths));
   return {
+    launchWorld: () => world,
     ...contractUpstream(processConfiguration),
     wait: async (input) =>
       await executeWaitAkuma({
-        path,
+        path: world,
         ids: input.targets,
         completion: input.completion,
         ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
@@ -91,7 +94,7 @@ export function upstreamFor(
       }),
     tell: async (input) =>
       await executeTellAkuma({
-        path,
+        path: world,
         id: input.target,
         body: input.body,
         tellId: input.tellId,
@@ -99,12 +102,12 @@ export function upstreamFor(
         signal: input.signal,
       }),
     kill: async (input) => {
-      const result = await executeKillAkuma({ path, ids: input.targets, signal: input.signal });
+      const result = await executeKillAkuma({ path: world, ids: input.targets, signal: input.signal });
       return result;
     },
     task: async (input) =>
       await executeTaskMutation({
-        world: input.world as WorldRoot,
+        world: input.world,
         request: input.request,
         requester: input.requester,
         signal: input.signal,
@@ -124,7 +127,7 @@ const configuration = {
   ...(mappedHome === undefined || mappedHome.length === 0 ? {} : { home: mappedHome }),
   ...(mappedGitPath === undefined ? {} : { gitPath: mappedGitPath }),
 };
-const upstream = upstreamFor(launch, configuration);
+const upstream = await upstreamFor(launch, configuration);
 const commands = {
   ...akumaCallRequestCommands(),
   ...fleetRequestCommands(),

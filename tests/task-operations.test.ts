@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { TaskAuthorityCorruptionError, Tasks, type TaskId, type TaskTreeNode } from "../src/task/index.js";
-import { decodeTaskMutationRequest, executeTaskMutation, type TaskMutationBodyRequest } from "../src/task/mutation.js";
+import {
+  decodeTaskMutationRequest,
+  executeTaskMutation,
+  taskMutationRequestCommand,
+  type TaskMutationBodyRequest,
+} from "../src/task/mutation.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { parseTaskDocument, serializeTaskDocument } from "../src/task/document.js";
 import { parseTaskId } from "../src/task/identity.js";
@@ -165,6 +170,27 @@ test("Tasks creates root authority without Contract coupling", async () => {
       { total: 2, returned: 2, truncated: false },
     );
   }
+});
+
+test("Task mutation mints raw World once while Tasks consumes its branded capability", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-tasks-forged-world-"));
+  mkdirSync(join(root, ".keiyaku"));
+  const canonical = await World.at(root);
+  await assert.rejects(
+    taskMutationRequestCommand("task.add").execute(
+      { world: `${canonical}/.`, request: { action: "task.add", input: { title: "must not write" } } },
+      {
+        requester: "aku/parent/00000001",
+        signal: new AbortController().signal,
+        upstream: { task: async () => Promise.reject(new Error("raw World must not reach the Task executor")) },
+      },
+    ),
+    /canonical physical directory/u,
+  );
+  assert.equal(existsSync(join(canonical, ".keiyaku", "tasks")), false);
+  const tasks = Tasks.of(canonical);
+  assert.equal(tasks.root, canonical);
+  assert.equal((await tasks.add({ title: "branded capability" })).kind, "accepted");
 });
 
 test("lifecycle, readiness, blocked projection, update diff, and batch results compose", async () => {

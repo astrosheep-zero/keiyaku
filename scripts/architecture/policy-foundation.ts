@@ -25,7 +25,7 @@ export const foundationZones = [
       ]),
       any("library/repo.ts", ["Repo"]),
       any("settings.ts", ["settings"]),
-      types("world.ts"),
+      any("world.ts", ["World", "WorldRoot"]),
     ],
   },
   { source: "akuma/abort.ts", allow: [] },

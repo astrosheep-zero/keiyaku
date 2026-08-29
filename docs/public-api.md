@@ -58,6 +58,12 @@ JavaScript validation accepts `unknown` and returns a domain or branded value;
 callers never pre-brand. The owning package boundary validates once, with no
 parallel validation model in the public surface.
 
+When a runtime object supplies a value declared as `WorldRoot`, its async
+package boundary performs World-owned exact read-only proof before any product
+effect, then carries that minted coordinate to its inner composition. A caller
+cannot forge the brand with a JavaScript string; this check neither establishes
+a marker nor moves the coordinate to an ancestor World.
+
 Caller value-shape and Markdown errors throw `TypeError` before repository
 observation, including when an addressed contract does not exist. Persisted
 authority that cannot be decoded or legally folded throws the exported

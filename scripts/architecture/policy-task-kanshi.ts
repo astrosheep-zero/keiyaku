@@ -114,7 +114,7 @@ export const taskKanshiZones = [
   {
     source: "task/index.ts",
     allow: [
-      types("world.ts"),
+      any("world.ts", ["World", "WorldRoot"]),
       any("task/board.ts"),
       any("task/compose.ts"),
       any("task/document.ts"),
