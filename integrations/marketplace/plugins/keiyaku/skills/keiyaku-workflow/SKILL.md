@@ -266,24 +266,15 @@ Deliver when the worktree content is the candidate you intend to land:
 keiyaku deliver <contract> --include-dirty
 ```
 
-Use `--include-dirty` only when the complete current workspace is the intended
-candidate; otherwise commit the intended bytes first.
-
-`deliver` prepares the appointed worktree as the Contract's candidate, runs or
-reuses Verification, records or replaces that candidate, and immediately
-requests placement. It does not approve the candidate or satisfy a review gate.
-When every prerequisite and declared gate is already current, the same
-invocation can place and claim the Contract. Otherwise the Contract remains
-`tendered` with that candidate recorded; the receipt names the gate or placement
-stop and any physical-effect lag.
-
-Review is independent testimony about the Contract terms and candidate bytes.
-The usual loop delivers first so the Reviewer judges the exact tendered
-candidate. A satisfied review records that testimony and requests placement
-again; if it is current and every other obligation passes, review may be the
-invocation that claims the Contract. An unsatisfied review never places.
-Pre-delivery review is legal but cannot create a candidate or substitute for
-delivery.
+Deliver when the work is ready to be judged, not when Git looks tidy. `git
+commit` only shapes the candidate; skipping it is fine — `deliver
+--include-dirty` captures the complete non-ignored worktree. Deliver and review
+answer different questions: deliver records the candidate and places and claims
+by itself only when every placement obligation is current; a review gate is
+satisfied only by review testimony over the current candidate, and a satisfied
+review may itself be the invocation that places and claims. Reviewing before any
+delivery is legal but records testimony only — it creates no candidate and
+authorizes nothing. A Contract without a review gate needs no review.
 
 A current audit attestation is reused only when its integration snapshot and
 Verification segment still match; changes to the worktree, target, policy,
@@ -294,11 +285,10 @@ document, Verification, or snapshot-producing options make it stale.
 The Reviewer owns the answer. A gate review compares the full current candidate
 against every journaled Criterion — the floor that cannot be reduced — and
 testifies satisfied or unsatisfied over the current document identity and
-worktree. It does not deliver or replace the candidate; satisfied requests
-placement against the candidate already on record. A current defect, missing,
-failed, or stale required evidence, or terms too ambiguous or contradictory to
-judge all yield unsatisfied, with the summary naming what blocks. Advice beyond
-the terms belongs in the summary and never changes the verdict by itself.
+worktree. A current defect, missing, failed, or stale required evidence, or
+terms too ambiguous or contradictory to judge all yield unsatisfied, with the
+summary naming what blocks. Advice beyond the terms belongs in the summary and
+never changes the verdict by itself.
 
 ```bash
 keiyaku review <contract> --satisfied --summary "<conclusion>"
