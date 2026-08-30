@@ -1,67 +1,28 @@
 # Akuma Allowed Actions
 
-This chapter owns the public `allowed` vocabulary, its birth-time reduction,
-and keyed Body Request admission. It is not a general authorization system.
+This chapter owns the closed public vocabulary of forwarded mutable actions, its
+birth-time reduction, and keyed Body Request admission. It is not a general
+authorization system; exact member names belong to public declarations and help.
 
-## Vocabulary
+## Frozen Permission
 
-`AllowedAction` is the closed set of mutable operations currently forwarded by
-an Akuma:
+An Archetype may declare a complete default set. Its omission means the current
+complete vocabulary, while an explicit empty set means none. Call-time additions
+can add to that default but never clear it. A nested birth clips the resulting
+set to its authenticated direct parent only; it never walks an ancestor chain.
 
-```text
-akuma.call
-akuma.kill
-akuma.tell
-contract.audit
-contract.deliver
-contract.review
-task.add
-task.addDocument
-task.compose
-task.done
-task.drop
-task.hold
-task.resume
-task.start
-task.stop
-task.update
-```
+Every Soul freezes its effective set. Wake and restart retain it, and fork copies
+it exactly without an override. Historical Soul without an explicit set means
+the complete current vocabulary. Forwarded observation remains unkeyed; each
+mutable Task or Contract operation is independently keyed, so one permission
+does not imply another or require a Contract association.
 
-An operation joins this set only when its forwarding ships and it changes
-persistent facts outside the provider. When `akuma.wait` is forwarded, it
-remains observation and is never permission-keyed.
+## Admission Boundary
 
-## Birth
-
-Archetype Markdown may declare `allowed` as a flat list. Omission means the
-complete current vocabulary; a present list is the complete default, including
-the empty list. Unknown values, non-string entries, and duplicates invalidate
-the Archetype or call additions. Valid lists are stored in lexical order.
-
-Call-time `allowed` values are additions to the Archetype base. One birth's
-requested set is the union of that base and the additions; an omitted call set
-therefore leaves the base unchanged. A nested call clips that union to the
-authenticated direct caller Soul. The direct-parent clip is complete: no birth
-reads or walks earlier ancestors.
-
-Every new Soul freezes its effective list. Reading a pre-feature Soul with no
-list means the complete current vocabulary. Wake and restart retain the Soul;
-fork copies the source Soul's effective list exactly and accepts no override.
-
-## Admission
-
-Dispatch lookup never admits an action. The selected operation descriptor applies
-this Soul-owned vocabulary to the authenticated caller's frozen list, including
-the unkeyed `akuma.wait` rule, before its owner executes. It supplies that one
-decision to Heart; Heart authenticates the requester and durably records the
-generic admission or `not-allowed: <action>` refusal without importing or
-interpreting this vocabulary. The child performs no duplicate precheck. Request
-transport remains one hop, and Contract, Task, and Akuma owners remain the sole
-authorities for their operation outcomes.
-
-Every `task.*` member is independently keyed. Permission for one Task mutation
-does not imply another Task action or any Contract action; Task requires no
-Contract association or permission.
-
-`contract.audit`, `contract.deliver`, and `contract.review` are independently
-keyed. Permission for one does not authorize either other Contract action.
+The selected operation descriptor applies the authenticated Soul's frozen
+permission before the owner executes. Heart records that one generic admission
+or refusal after authenticating the requester, but never interprets action
+vocabulary or payload. Dispatch lookup grants nothing. The child performs no
+duplicate precheck, transport remains one hop, and each operation owner remains
+the sole judge of its result. There is no inherited authorization, generic
+capability registry, or second authorization store.

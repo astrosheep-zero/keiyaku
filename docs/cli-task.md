@@ -1,337 +1,39 @@
 # Task CLI
 
-This chapter owns Task subcommands, grammar, and rendering.
+The Task CLI is the user-facing adaptation of the separate Task product. It
+owns Task command intent and Task-oriented presentation; [task.md](task.md)
+owns all Task authority, lifecycle, relationships, persistence, and
+concurrency judgment. Literal forms, flags, properties, and composition syntax
+belong to executable leaf help and the parser, not this chapter.
 
-## Task Commands
+## Commands and judgments
 
-List, ready, blocked, and query share one compact row grammar. Every row keeps
-the complete TaskId and title, shows priority and a render-time nonnegative
-updated age (`m` below an hour, `h` below a day, `d` otherwise), and adds `no
-body` only when `bodyPresent` is false. Parent rows add `children <live>/<total>
-live`. Ready owns its disposition in the heading, so ready rows omit the
-repeated disposition word; mixed views retain it. These text facts are exactly
-the typed `TaskRow` facts; age is presentation only.
+| Verb family | Purpose | Refusal and result boundary |
+| --- | --- | --- |
+| add, update | Create or change a Task fact. | The Task product decides identity, validation, no-op, and authority corruption; accepted results identify the changed Task. |
+| start, stop, hold, resume, done, drop | Request a Task lifecycle change. | The Task product decides legal transition, target availability, and batch outcomes; a refusal or retry remains visible per requested Task. |
+| show, ls, ready, blocked, query, tree | Read Task authority or a derived Task view. | Missing World, empty result, unavailable observation, and corrupt authority are never collapsed together. |
+| compose | Submit a planning intent or ask for its plan. | Task owns aliasing, dependency judgment, admission, partial completion, and reusable recovery intent. |
+| context | Observe or deliberately change the caller's default Task namespace. | Context is not authority and cannot retarget a complete Task identity. |
+| doctor | Diagnose Task authority and relationship health. | It reports; it never repairs. |
 
-Pages retain `rows`, `total`, `returned`, and `truncated`. A truncated text page
-adds the exact remaining count and one complete command repeating the action,
-scope, predicate, and sort with `--limit` set to `total`. Query recovery keeps
-its `--where`, `--sort`, and `--world` flags. JSON has no second footer shape.
+The Task CLI acquires only the input a selected verb permits and refuses an
+ambiguous, surplus, or ill-formed request before invoking Task. It does not
+infer a namespace, Task identity, lifecycle state, association, or actor from
+the caller's directory, Contract, Git state, or Akuma request.
 
-`task query --help` lists the shipped fields `state priority title id parent
-under needs blocks ready blocked created updated`, operators `= != < > <= >= ~
-and or not ( )`, and executable examples including
-`keiyaku task query --where 'updated < 2026-08-06T00:00:00.000Z' --world`.
+## Presentation
 
-`keiyaku task` resolves the global `-C` coordinate once and constructs one
-`Tasks.of` value when a world is present or created. Its parser owns argv shape, stdin selection, mutual exclusion, and
-output selection only. Task Markdown, graph, lifecycle, diff, and compose
-decisions remain in the native Task surface.
+Text helps a caller scan complete Task identity, current disposition, priority,
+and title, then follows an entity with owned relationship and evidence detail
+when requested. Complete identifiers and opaque evidence remain copyable; the
+renderer may wrap prose but must not silently truncate or invent Task facts.
+Task text makes accepted work, a substantive refusal, retryable contention,
+absence, and infrastructure failure distinguishable. JSON remains the same
+public Task value, not a reduced text-derived format.
 
-The CLI captures its declared direct-parent Body Request channel once at the
-invocation root as the shared `bodyRequestExecution({ directory })` carrier.
-It constructs `Tasks.of(world, { execution })` once and uses that native Task
-surface for every command; the CLI does not build a second Task forwarding
-implementation, read environment again, or choose a replacement World.
-Read-only Task observations stay local. The live forwarded result uses the same
-Task JSON, text, and exit projection as an ordinary local result.
-
-```text
-task add <TITLE> [--namespace <ns>] [--priority 0..3]
-  [--state open|in_progress|on_hold|done|drop]
-  [--note <text>] [--actor <actor>]
-  [--needs <TaskId>]... [--parent <TaskId>]
-  [--supersedes <TaskId>]... [--relates <TaskId>]...
-  [--body <text>] [--json]
-task add [--namespace <ns>] [--actor <actor>] [--json] -
-task show <TaskId> [--json]
-task ls [<namespace-selector>] [--closed | --all] [--world] [--limit <n>] [--json]
-task ready [--world] [--parent <TaskId>] [--limit <n>] [--json]
-task blocked [--world] [--parent <TaskId>] [--limit <n>] [--json]
-task query [--where <expression>] [--world]
-  [--sort priority|created|updated|id] [--limit <n>] [--json]
-task tree <TaskId> [--json]
-task doctor [--json]
-task update <TaskId> [--title <text>] [--body <text>|- | --append <text>]
-  [--note <text>]
-  [--priority 0..3] [--needs <TaskId>]... [--drop-needs <TaskId>]...
-  [--parent <TaskId> | --no-parent]
-  [--supersedes <TaskId>]... [--drop-supersedes <TaskId>]...
-  [--relates <TaskId>]... [--drop-relates <TaskId>]... [--json]
-task start <TaskId>... [--json]
-task stop <TaskId> [--json]
-task hold <TaskId>... [--json]
-task resume <TaskId> [--json]
-task done <TaskId>... [--note <text>] [--json]
-task drop <TaskId>... [--note <text>] [--json]
-task context [<namespace>] [--json]
-task compose [--actor <actor>] [--plan] [--json] -
-```
-
-Literal `-` selects creation-document input for add, body input only after
-`--body` for update, and composition input for compose. `--plan` reads and
-validates the composition without writing authority. Unselected piped stdin
-is not consumed. Add requires exactly one
-source: a nonblank TITLE or `-`. Add document input rejects
-creation-owned identity, may declare its initial state, and cannot be combined
-with structured creation flags other than `--namespace` and `--actor`. Update requires at
-least one explicit patch and remains legal when it changes only non-body
-fields. Selected update `--body`, `--append`, `--note`, and `--title` values,
-and selected add TITLE, `--body`, and `--note`, must be nonblank. Done and
-drop `--note` are likewise nonblank when present.
-
-Selected stdin is acquired asynchronously and completely before the Task
-operation begins. The CLI does not expose a synchronous read or retain a
-background input queue. A selected required stdin source that is empty or
-Unicode-whitespace-only is usage after those bytes are acquired and before
-World or Task package invocation. Valid acquired bytes pass through unchanged.
-
-Add `--note` sets the initial note. Update `--note` replaces the note and
-returns the native document diff. Done and drop `--note` replace the note for
-each addressed Task in that Task's independent atomic lifecycle mutation. Batch
-start, hold, done, and drop preserve input order, continue after per-Task
-refusals, and do not consume stdin for notes.
-
-`--actor` is legal only on `task add` (structured and `-` forms) and
-`task compose`. `--plan` is legal only on `task compose`. The invocation edge resolves actor once before reading or
-applying the selected creation input: explicit nonblank `--actor`, then
-nonblank `KEIYAKU_ACTOR_ID`, then unsigned. A blank explicit value is usage; a
-blank environment value is absent. Update, lifecycle, and settlement commands
-do not accept `--actor`. Task code never reads `process.env`.
-
-Namespace selectors share one grammar. Omitted selector means effective
-context, and root only when context is absent. Literal `/` means explicit
-root. A nonblank slash-separated value selects that namespace. `task add
---namespace`, compose `ns=`, and `task context` use these same meanings.
-Empty and Unicode-whitespace-only command values are usage. Empty compose
-`ns=` is invalid input and names `ns=/` in its diagnostic; recovery drafts
-always emit `ns=/` for root. Compose keeps `ns=` as its document-level
-selector and does not gain a `--namespace` flag.
-
-`task context [<namespace>] [--json]` replaced `task namespace`. With no
-argument it observes the effective context. With an argument it writes the
-marker at the invocation directory in Git or at WorldRoot outside Git, then
-observes the resulting effective context. Text identifies the value and
-source. JSON returns an accepted value with `namespace` and `source`, where
-source is `default-root` when no marker is found, `contract-installed` when
-the selected worktree-root marker is the active managed Contract default, and
-`local-override` for a selected local marker that is not that Contract
-default. Source is a read-time classification; it is not persisted
-provenance.
-
-Explicit namespace selection is authoritative over context observation.
-`task add` with `--namespace` must not read or reject on a malformed current
-marker. Compose acquires and parses its complete stdin document first; an
-explicit `ns=` header uses that parsed namespace without reading current
-context. Without an `ns=` header, compose resolves current context and
-reports `invalid-namespace-context` on a malformed marker. The Task-owned
-composition header parser owns recognition and validation. Ordinary
-omitted-selector operations retain the malformed-marker refusal.
-
-`task ls` accepts one trailing-slash namespace selector (`task/` for root or
-`task/<segment>/.../` for a named namespace). Explicit selection bypasses
-context; `--world` is refused with an explicit selector.
-
-`ls`, `ready`, `blocked`, and `query` use current context unless `--world` is
-present. `--world` means every namespace in the current Task world anchored
-at WorldRoot.
-Their observations are bounded and carry the complete matching `total`; ready
-and blocked may additionally select recursive descendants of a complete parent
-TaskId. `ready` selects only open Tasks whose every `needs` target is terminal.
-`show`, `tree`, update, and lifecycle use complete IDs and never infer
-from context. `tree` is parent decomposition traversal.
-
-```text
-task query [--where <expression>] [--world]
-  [--sort priority|created|updated|id] [--limit <n>] [--json]
-```
-
-`query` is a read-only Task-owned predicate surface. Its expression is parsed
-at the CLI boundary into a typed AST; the Task evaluator never receives an
-unparsed shell string. Terms support `and`, `or`, `not`, and parentheses, with
-these predicates: `state`, `priority`, `title`, `id`, `parent`, `under`,
-`needs`, `blocks`, `ready`, `blocked`, `created`, and `updated`. String values
-use double quotes; TaskIds are complete coordinates. Relation predicate words
-are consumed from Task's canonical vocabulary; this chapter does not declare a
-parallel set. Tokenization, quoting, offsets, shorthand, diagnostics, and
-presentation stay with the CLI. `under` selects recursive descendants and
-excludes the addressed parent. `ready` and `blocked` remain named
-high-frequency views backed by the same evaluator. With no `--where`, query
-matches active Tasks and excludes `done` and `drop`.
-
-The default limit is 100; explicit limits are integers from 1 through 1000.
-The default sort is priority ascending then TaskId bytes. `created` and
-`updated` sort by their persisted timestamps (ascending and descending
-respectively, with TaskId bytes as the tie-breaker); `id` sorts by TaskId bytes.
-Filtering happens against one observed board snapshot before `limit` is applied.
-A truncated page renders `<view> <returned> of <total> · limit <returned>`;
-JSON returns `{ rows, total, returned, truncated }` with no second result schema.
-Invalid syntax, fields, operators, values, or a nonpositive limit are typed
-usage refusals. A missing `under`/`parent` target is a Task refusal, not an
-empty result. Query reads only Task persisted and Task-derived facts; it never
-reads Contract, Akuma, Git, or prose-inferred urgency.
-
-`ls`, `ready`, `blocked`, `query`, and `doctor` are Task-world observations.
-Their JSON and native results preserve `{ kind: "present", value }`,
-`{ kind: "absent" }`, or `{ kind: "failed", failure: { message } }`; an absent
-world is not an empty accepted result. A missing Task world renders exactly
-`task world absent` and exit `1`. A failed world renders `task world failed`,
-then `diagnostic`, a blank line, exact diagnostic bytes, a trailing blank line,
-and exit `3`. Neither is an empty Task board. Only a present empty page may
-render `<view> 0`, and only a present doctor report without issues renders
-`healthy`. A present result follows its native exit rule.
-
-`task doctor` scans the complete Task world and renders every graph issue. It
-does not repair authority. A present healthy report exits `0`; a present report
-containing issues exits `1`. An unhealthy report begins `<N> issue` or
-`<N> issues`, then one `!` row per typed issue in public order. Map
-`missing-target`, `self-relation`, and `cycle` directly to their exact
-relation and TaskId scalars; never render explanatory prose or JSON.
-
-Accepted update and compose render native whole-document diffs; the CLI never
-computes them. A plan renders resolved aliases, stable admission order, and
-body byte previews. An incomplete compose writes only its reusable draft to
-stdout, writes its stopped reason and admitted diffs to stderr, and exits `1`. JSON
-writes the unchanged result object to stdout. Task refusal exits `1`, retry
-exits `2`, and corruption or infrastructure failure exits `3`.
-
-Compose input grammar is owned here. Outside body fences, indentation has no
-meaning. A `+ Title` creates a Task and an `@task/<id>` line modifies only a
-pre-existing Task. Properties belong to the nearest node and use one line each:
-`as = <alias>`, `state = open|in_progress|on_hold|done|drop`,
-`pri = 0|1|2|3`, `parent = <ref>|`, and relation properties
-`needs`, `supersedes`, and `relates` with `=`, `+=`, or `-=`. `^alias` refers
-to a new node in this document; `@task/...` refers to the pre-composition board.
-A relation list is comma-separated and may contain spaces after commas. An
-alias is a nonempty single-line token containing neither Unicode whitespace nor
-a comma. `state` is valid only on a new node, accepts only `=`, and defaults to
-`open`; existing Task state remains writable through lifecycle commands.
-
-`body =` clears the body. `body <<TOKEN` replaces it with exact bytes through
-the first line equal to TOKEN. TOKEN must match `[A-Z][A-Z0-9_]*` and be 3 to 32
-characters. Body content has no escape rules and may contain indentation, `+ `,
-`@task/`, or fence-like prose. A token appearing in body is the explicit
-boundary chosen by the caller; the parser stops at its first exact line.
-
-Planning diagnostics are typed and aggregate. Text renders one `line <n> ·
-<reason> · <token>` row per diagnostic; JSON retains `{ line, reason, token }`.
-The plan and accepted result expose aliases and admission order. Admission is
-stable topological order for new `needs`/`parent` dependencies, with document
-order as the tie-break. Recovery drafts use this same grammar and contain only
-remaining intent.
-
-The status board renders one public `KanshiReport`. Default and selected status
-have the same report shape. An explicit Contract selector projects the already
-assembled report to that Contract and its associated source rows; it does not
-switch to another observation result. The Contract section is supplied by
-`Keiyaku.list({ repo })` and exposes lifecycle, integration delivery identity,
-fresh target observation, and every declared gate's current report. Kanshi and
-the renderer copy those discriminants and do not evaluate gate currency, infer
-claimability, or derive terminality.
-Its Akuma section is supplied by `Akuma.list()` as specified by
-[kanshi.md](kanshi.md); the board copies life, identity, pending count, and
-searched coordinates
-without probing, reading history, or reclassifying them.
-
-JSON serializes that complete report without a text-specific projection or
-shortened value. Text chooses density without hiding a product identity that
-has no other text discovery surface. For a present world its first line is the
-one-line Split Horizon signature defined by [cli-output.md](cli-output.md).
-The KEIYAKU, TASK, and FLEET apertures, plumb-line grammar, complete-entity
-retention, and Human/Flagship projection are owned by [kanshi.md](kanshi.md).
-This chapter does not keep a second status board grammar. Aggregate counts
-come from the assembled public sections; they are not persisted counters.
-Absent and failed sections remain explicit and are never rendered as zero.
-The signature is Kanshi-owned; ordinary commands have no global ruler.
-Complete board glyphs are owned only by [kanshi.md](kanshi.md). Ordinary Task
-commands have no Kanshi signature, banner, ruler, table border, or
-section-card heading.
-
-## Task Text
-
-Every Task entity line uses:
-
-```text
-<mark> <complete TaskId> · P<n> <word> — <title>
-```
-
-The indivisible scan unit is `<mark> <complete TaskId> · P<n> <word>`. List
-and query copy `TaskDisposition`; show, mutation, and tree copy persisted
-`TaskState`; a missing referenced Task uses `missing`; unknown priority uses
-`P?` only when the public value lacks priority. Pair marks and words as
-`● in_progress`, `○ ready` or `○ open`, `‖ blocked` or `! missing`, `⧗ on_hold`,
-`✓ done`, `× drop`, and `?` for retry or unknown evidence. These marks are
-shared with world status; do not add a new
-glyph. If the title does not fit after the scan unit, keep the em dash at the
-end of the first line and wrap prose on two-space continuation lines at
-display-word boundaries. Never truncate or split TaskId, path, or another
-opaque token; an indivisible token may overflow the terminal.
-
-Relationship and evidence rows use two-space indentation, one edge per row,
-and singular lowercase labels: `needs`, `blocks`, `child`, `parent`,
-`supersedes`, `superseded-by`, and `related`. Exact body, diff, diagnostic,
-and other labeled payloads use one lowercase label line, one blank line,
-byte-exact payload, and one trailing blank line.
-
-`ls` begins `tasks <returned> · <scope>`, where bare `task ls` names the
-current namespace scope, an explicit selector names its namespace, and
-`--world` names world scope. `ready`, `blocked`, and `query` begin with
-their lowercase view word. A truncated page renders
-`<view> <returned> of <total> · limit <returned> · <scope>` for `ls`; a present
-empty result renders `tasks 0 · <scope>`. Preserve public page order. Rows render only mark,
-complete TaskId, priority, disposition, and title. Query-only timestamps,
-parent, needs, and blocks stay in JSON. Blocked rows alone add one
-`needs <TaskId> · <state>` evidence row per unresolved blocker.
-
-Show begins with the Task entity line using persisted state. Render nonempty
-detail in this order: `created <iso> · updated <iso>`; persisted `createdBy`
-as `created-by <actor>` when present; unresolved needs with
-`! needs`; released terminal needs with `✓ needs`; blocks; parent; children;
-supersedes; superseded-by; related; nonempty note; then nonempty exact body.
-`createdBy` is show and JSON testimony only; list and query text do not
-render it.
-Use one row per relation. Body is introduced by `body`, a blank line, exact
-body bytes, and a trailing blank line.
-
-Tree consumes `TaskDecompositionTree.children`. Render two spaces per parent
-depth and the same entity line with persisted state. A terminal repeated
-ancestor renders `! <TaskId> · cycle` with no reference marker. Tree does not
-display timestamps, note, needs, blockers, or reverse relations.
-
-Single add, update, start, stop, resume, hold, done, and drop outcomes use
-`✓ <verb> accepted — <TaskId>`, `! <verb> refused`, or
-`? <verb> retry — <TaskId when the public result supplies it>`. Accepted
-single mutation follows with the resulting Task entity line. Accepted update
-then renders its exact whole-document diff payload. Batch start, hold, done, and
-drop preserve input order and render exactly one row per item:
-`✓ <verb> <TaskId>` for accepted,
-`! <verb> <TaskId> · <typed refusal kind and exact scalar facts>` for refused,
-and `? <verb> <TaskId> · <typed retry reason>` for retry. Never serialize a
-refusal or retry as JSON in text. Batch exit precedence remains retry `2`,
-otherwise refusal `1`, otherwise `0`.
-
-Accepted compose renders `✓ compose accepted · <N> changed`, alias mappings,
-then each `diff <TaskId>` exact whole-document diff in admission order. A plan
-renders the alias mappings, `admit <n> <TaskId>` rows, and body byte previews.
-Refused compose renders `! compose refused`, the typed refusal kind, and one
-line diagnostic per planning error. Incomplete compose keeps stdout as only the
-exact reusable draft bytes. Stderr begins
-`! compose incomplete · <N> admitted`, renders
-`! stopped <typed refusal kind ...>` or `? stopped <typed retry reason ...>`,
-then each admitted `diff <TaskId>` exact payload in order. Exit remains `1`.
-
-Context text renders `context root` for `[]` and
-`context <segments joined by />` otherwise, then `·` and the source
-classification. JSON retains `{ namespace, source }`. Project every current
-`TaskRefusal` and `TaskRetry` member to its lowercase kind and exact public
-scalar coordinates. Renderer output contains no braces, JSON quotes, or
-implementation-arm prefixes. Do not change public values, JSON, or exit
-status to serve text.
-
-Text wraps at semantic or prose-word boundaries according to display
-columns. A scan head containing a mark, complete identity, and state stays
-indivisible, as do copyable refs, paths, and gate names; one of these units
-may exceed the requested width rather than being split or truncated. The
-renderer applies no arbitrary line cap and does not truncate a complete
-identity, title, path, gate, or relation. Opaque testimony stays on owning
-detail surfaces. Compose incomplete draft is the existing exception: stdout
-contains only exact reusable draft bytes with no label or decoration.
+Composition presentation preserves the Task product's plan, accepted changes,
+and recovery draft boundaries. In particular, an incomplete composition keeps
+its reusable remaining intent separate from diagnostics about already admitted
+work. The Task CLI does not calculate diffs, diagnose graph validity, or make
+another admission decision merely to render output.

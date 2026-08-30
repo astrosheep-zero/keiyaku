@@ -1,162 +1,53 @@
 # Settings
 
-Settings is the public resource value for user and project configuration. It
-owns where settings files live, their common outer grammar, scope precedence,
-failure isolation, entry provenance, and observation. It owns no product
-namespace name or record-internal schema.
+Settings is the read-only shared resource for user and project configuration.
+It owns the caller-supplied project and user coordinates, their precedence,
+failure isolation, provenance, and observation. It owns no product namespace,
+entry name, record grammar, default, or admission policy.
 
-## Public Resource
+## Scope and observation
 
-```ts
-settings(input?: { root?: string; home?: string }): Promise<Settings>
+The process edge supplies an already resolved World coordinate and, when
+needed, a user-home coordinate. Settings does not discover a current directory,
+reinterpret a managed worktree as another project scope, load dotenv files, or
+perform environment interpolation. An omitted project coordinate means there
+is no project scope, rather than permission to guess one.
 
-type Settings = Readonly<{
-  scopes: Readonly<{
-    project: SettingsScopeState
-    user: SettingsScopeState
-  }>
-  namespace(name: string): SettingsNamespaceView
-}>
-```
+Each scope is independently observed as available, absent, or unavailable.
+Missing configuration is ordinary absence; a read, decoding, or outer-resource
+failure remains scoped failure with bounded diagnostic evidence. One scope's
+failure never makes an unrelated scope or namespace look empty.
 
-`root`, when present, is one absolute WorldRoot supplied by the process edge
-and selects `<root>/.keiyaku/settings.json`. Git worktrees of one repository
-receive the same primary-worktree root; Settings never treats a managed
-worktree marker as a separate project scope. An omitted root means there is no
-project scope; Settings never reads `process.cwd()` or discovers a world.
-`home` selects
-`<home>/settings.json`; it defaults to `~/.keiyaku`. A caller-supplied home
-always wins. The library never interprets `KEIYAKU_HOME`; a process edge may
-map that environment value to the explicit `home` input.
+Settings exposes named namespace views as opaque product material. A malformed
+namespace affects that namespace when it is selected, not unrelated namespaces.
+An unavailable higher scope cannot silently fall through to a lower candidate:
+the caller must see that the potential shadowing authority could not be read.
 
-Each scope is `read`, `absent`, or `failed`. Every state exposes its absolute
-path. A read scope exposes its namespace names; a failed scope carries one
-bounded diagnostic. Missing files are lawful absence. JSON, root-grammar, and
-I/O failure fail only that scope.
+## Shadowing and product custody
 
-## Grammar And Shadowing
+When both scopes supply the same named entry, the project entry shadows the
+whole user entry. Settings never deep-merges record fragments or fabricates
+per-field provenance. A resolved value retains whether it came from project or
+user scope and may reveal that it shadowed a lower candidate.
 
-The root is an object from namespace name to namespace value. Every namespace
-is an object from entry name to an opaque JSON value. The resource layer
-validates only those two container levels; a Gate entry and a provider entry
-may each be objects with unrelated product-owned grammars. It treats every
-unknown root key as a possible future namespace and never imports product
-vocabulary.
+The consuming product owns its entry names, internal grammar, defaults,
+validation, and the moment at which an invalid selected value is refused.
+Unknown namespaces and unselected entries remain opaque to Settings so one
+product cannot prevent another product or a future version from reading its
+own material. Settings never imports Contract, Git, Akuma, or provider
+vocabulary to validate it.
 
-Project entries shadow user entries by the complete same-name record. Fields
-never merge. A resolved entry exposes its `project` or `user` source; a project
-entry may expose that it shadows a user candidate. A malformed higher-scope
-namespace or a failed higher scope never silently falls through to the lower
-same-name record.
+Settings observations are immutable input to a consumer's own decision. A
+consumer may freeze the resolved value it used for a durable decision, but
+later edits do not rewrite that decision. Settings itself has no write command,
+no mutation API, no secrets-redaction fiction for the local trusted-user
+boundary, and no execution role.
 
-Namespace container grammar is evaluated when `namespace(name)` is read. A malformed
-namespace fails that namespace view without failing unrelated namespaces. A
-failed scope fails every namespace view because the reader cannot know whether
-that scope contains a shadowing entry. Unread malformed namespaces do not
-block unrelated operations.
+## Presentation and boundary
 
-Settings itself is the complete resource observation. There is no disease
-catalog, registry, deep merge, per-field provenance, eager product validation,
-or second diagnostic model.
-
-## Product Consumption
-
-Products own entry-name grammar, record-internal fields, defaults, validation,
-and admission timing. A missing or malformed selected entry rejects only the
-operation that selected it. Unknown record fields are judged by that product,
-not by Settings.
-
-The Contract product publicly provides `gatesFrom({ settings, names? })`. It
-reads the `gates` namespace and returns one concrete ordered, duplicate-free
-public Gate snapshot. A catalog name and gate word match
-`^[a-z][a-z0-9-]{0,63}$`. Each selected entry is exactly one record of this
-first supported kind:
-
-```json
-{ "kind": "bundle", "gates": ["reviewed", "verified"] }
-```
-
-`bundle.gates` contains leaf producer tokens, not names of other catalog
-entries. This bundle-only grammar admits only the currently dischargeable
-`reviewed` and `verified` leaves; an empty bundle and repeated leaves are
-legal. Selection expands records in caller order and removes duplicate leaves
-stably at their first occurrence. A selected bare array, unknown field,
-unknown kind, invalid leaf, or unknown explicit name is a product Settings
-error. Unselected entries remain opaque and unvalidated so future kinds do not
-break unrelated selections.
-
-Omitted `names` selects `default` and returns `["reviewed"]` when that entry is
-absent. A present empty `default` bundle overrides that built-in default.
-Explicit `names: []` selects nothing. Bind and amend continue to accept
-concrete Gate arrays. Admission freezes only the expanded array into Contract
-terms; catalog names, definitions, and later Settings edits never alter an
-existing Contract or its status.
-
-The Contract product also provides `worktreeHooksFrom({ settings })`. It reads
-the `worktree` namespace and returns one concrete `WorktreeHooks` value. The
-namespace has exactly two optional entries, `create` and `destroy`; an unknown
-entry is a product settings error. Each entry is an ordered array of commands:
-
-```json
-{
-  "worktree": {
-    "create": [
-      { "name": "install", "argv": ["npm", "ci", "--ignore-scripts"], "timeoutMs": 300000 }
-    ],
-    "destroy": [
-      { "name": "teardown", "argv": ["./scripts/teardown.sh"], "timeoutMs": 60000 }
-    ]
-  }
-}
-```
-
-An omitted entry means an empty command array. `argv` must be a nonempty array
-of strings whose executable is nonblank. `timeoutMs` must be an integer from 1
-through 2,147,483,647. Commands execute directly without a shell; interpolation
-and environment loading are not part of Settings. The returned arrays and
-commands are deeply frozen. A Keiyaku-created worktree uses only commands
-decoded from the project Settings bytes in the snapshot it checks out. Managed
-worktrees use those commands for each invocation. Disposable Verification
-scratch uses a project-only reader against its materialized integration tree:
-it does not read user Settings, caller-current Settings, caller lockfiles, or
-caller `node_modules`, and it retains no marker or progress state. Execution
-and durable freezing rules are owned by [git-reconciliation.md](git-reconciliation.md).
-
-The Git integration consumer publicly provides
-`requireBranchesToBeUpToDateFrom({ settings })`. It reads the one optional
-boolean entry `git.requireBranchesToBeUpToDate` and defaults to `false` when
-the entry is absent. The `git` namespace rejects unknown entries and a
-non-boolean selected value with `SettingsError`. The CLI resolves this consumer
-for each deliver and audit invocation and passes only the resulting boolean;
-Git custody never imports Settings. Project/user shadowing and provenance
-remain the generic namespace behavior above.
-
-Akuma owns the `providers` interpreter and record grammar in
-[akuma-provider.md](akuma-provider.md), with Soul freezing in
-[akuma.md](akuma.md). Settings contributes only the resolved opaque
-entry and its provenance. Settings scope paths are observation evidence, not
-Akuma's home coordinate.
-
-Keiyaku does not load `<home>/.env`, `<root>/.keiyaku/.env`, or any other
-dotenv file. It performs no environment interpolation inside settings JSON.
-Shells and environment managers may populate `process.env` before invocation;
-that remains outside the Settings resource.
-
-## Observation
-
-The CLI `settings [--json]` command constructs this public value from its
-resolved `-C` root and explicit edge-mapped home, then renders scope states and
-resolved namespace entries with their source and shadow observation. Its leaf
-help makes the locations, precedence, read-only boundary, outer shape, and
-available setting purposes discoverable without copying product-owned record
-grammar or referring to repository-internal documentation. Each product
-consumer's rejection names the expected shape for an invalid selected value.
-Text is a structured multiline projection: scope facts are indented beneath
-`settings`, and each entry value is emitted as indented pretty JSON. The
-`--json` projection remains the complete typed resource. It is read-only.
-Settings files remain user-edited resources; there is no settings write command
-and no redaction under the local-trusted-user threat model.
-
-The Settings module never names `gates`, `worktree`, `providers`, a provider
-kind, or any other product concept. Product modules never read settings file
-paths. Those two checks are the boundary sentinels.
+The CLI may present scope availability, selected entries, source, and shadowing
+as a read-only diagnostic. That presentation neither validates opaque records
+nor becomes a configuration editor. Product-specific errors identify the
+consumer that selected the material; Settings errors identify only resource or
+scope observation. Literal file layout and configuration shapes belong to the
+resource implementation and leaf help, not Settings law.

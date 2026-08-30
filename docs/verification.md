@@ -1,234 +1,68 @@
 # Verification
 
-This chapter owns the execution-side verification producer and shared process
-control. Verification is methodology, not a core fact vocabulary, core
-declaration type, or core-derived gate. The attestation fact shape is defined by
-[model.md](model.md), and generic gate meaning by [lifecycle.md](lifecycle.md).
-The library owns the `Verification` declaration grammar at this edge:
-ordered `bash`, `zsh`, or `pwsh` fenced scripts, each with an optional
-`timeout=<integer-duration>` fence attribute, using `ms`, `s`, `m`, or `h`. The declaration value and its
-producer-specific dependency rule remain private to this chapter; they are not
-core fact or core gate vocabulary.
+This chapter owns the execution-side Verification producer and the shared
+process runtime. Verification is methodology, not core fact vocabulary, a core
+declaration type, or a core-derived gate. Attestation storage belongs to
+[model.md](model.md), and generic gate currentness to [lifecycle.md](lifecycle.md).
 
-## Execution
+## Verification Producer
 
-### Source-build launcher prerequisite
+The document boundary supplies an ordered private declaration set. Each
+declaration is an executable shell script and may state its own deadline; there
+is no global Verification deadline, setting, flag, or environment override.
+Exact Markdown and duration grammar belong to document parsing, help, and
+executable specifications. The declaration set, its preparation, and its
+dependency selection remain attempt-local and are never core terms, cache,
+producer registry, or durable execution authority.
 
-The source build invokes Zig 0.14.1 or later to compile the Windows launcher. Zig is a
-system prerequisite, not an npm dependency: after `npm ci --ignore-scripts --prefer-offline`,
-run `npm run build` (or `npm test`) with
-`zig` on `PATH`, or set `KEIYAKU_ZIG` to the executable to use. On Windows, a
-missing or unusable selected executable fails the build with its cause. On
-non-Windows hosts, the same condition emits one deterministic skip fact for
-the launcher and lets the remaining TypeScript/package build continue.
+Deliver and audit run the selected declarations against the exact integration
+snapshot in a disposable, snapshot-provisioned environment. Caller-current
+settings, user state, lockfiles, and installed dependencies cannot substitute
+for that snapshot authority. Declarations run in order even after a failing
+command. A terminal run records one ordinary `verified` attestation with a
+satisfied or unsatisfied verdict. A timeout is terminal unsatisfied evidence;
+candidate unavailability, environment setup failure, spawn failure, unknown
+exit, and caller cancellation admit no attestation.
 
-Verification is awaited within the invoking operation. `deliver` and `audit` receive the invocation's
-selected key-stamped `verification` derivation and execute exactly its ordered
-declarations. The presence of
-the `verified` token in `terms.gates` controls whether placement waits for the
-attestation; it does not control whether the producer runs or whether its
-attestation is recorded. A nonzero declaration produces an unsatisfied overall
-verdict but does not skip a later declared executor. A candidate that cannot be
-materialized, whose snapshot-owned environment cannot become ready, a spawn
-failure, an unknown exit, or caller cancellation ends the producer run without
-an attestation. A declaration timeout is instead a terminal unsatisfied
-verdict and does not skip a later declared executor. It does not
-cancel the composed operation's later placement obligation.
+The producer captures its subject before execution, and admission never
+retargets it. A completed older observation remains truthful history even when
+it is no longer current. Generic lifecycle currentness alone decides whether
+that evidence satisfies a declared gate. Audit may create evidence for a
+prospective candidate; it becomes current only if delivery later names the same
+candidate. Deliver can reuse matching current evidence, satisfied or
+unsatisfied, without creating a cache or another evidence source. `verified`
+is only this producer's conventional token; other opaque gates are outside this
+chapter.
 
-Audit may admit an ordinary `verified` attestation against a prospective
-integration snapshot before any delivery fact exists. That testimony is
-initially non-current because the snapshot is not yet a Contract dependency;
-it becomes current when deliver records the identical integration snapshot.
-After admitting a delivery, deliver asks the Verification protocol owner
-for the latest current `verified` evidence. That owner uses the one generic
-currentness implementation and returns only the evidence identity and verdict.
-If an attestation for
-the exact delivered snapshot and current Verification segment exists,
-satisfied or unsatisfied, deliver does not execute the declarations again.
-That skip is not a cache, preview fact, journal kind, result blob, or special
-audit gate. A later testimony for the same gate and subject supersedes the
-prior one under the generic lifecycle rule. The `verified` producer's subject
-is exactly the judged integration snapshot key and the decoded Verification
-segment key. Core only mints and compares those opaque keys; it does not know
-how the producer chose them.
+Terminal output may be rendered as bounded contextual summary on the
+attestation. It is not a log, artifact, report store, or source for callers to
+parse counts. A stopped producer is a typed public stop. Delivery can still
+perform its independent placement duty; audit leaves target state unobserved.
 
-Before execution, the producer captures its `AttestationData.subject`.
-Admission receives that captured value, never re-derives or silently retargets
-it. The sole attestation decision judges contract existence and terminal state
-against its attempt observation. It does not reject an older document or subject:
-the completed run remains a truthful fact about the integration and Verification
-segment it names. Subject currentness remains placement's sole law as defined
-in [lifecycle.md](lifecycle.md). The
-journal attestation is the only durable execution result and the only input to
-gate reading. Its optional `summary` contains the producer's bounded terminal
-diagnostic text. The derivation and resolved declaration list remain
-attempt-local; neither becomes a persisted derivation or second execution
-authority.
+## Process And Cleanup Boundary
 
-When a satisfied review follows an admitted delivery whose target moved,
-Verification runs against the reintegrated snapshot using the same frozen
-declaration and environment hooks. A current matching attestation may be
-reused. Review reintegration never captures the caller workspace or creates a
-new delivery identity; the original ChangeId remains the subject component
-while the current integration snapshot advances.
+The shared runtime owns child spawning, normal completion, timeout,
+cancellation, and termination of the process tree rooted at the child while the
+caller retains that child handle. It is domain-free: it knows no Contract,
+candidate, declaration plan, Akuma, lease, or public operation. Cancellation or
+timeout terminates owned work; releasing a live process relinquishes custody
+without terminating it. Escaped descendants and processes surviving harness
+loss or process crash are outside that portable guarantee. No persisted pid,
+reconstructed process identity, or background disposer supplies a second
+termination authority.
 
-If the edge's `verified` gate is declared without a valid declaration, its
-key-stamped absent declaration enters the owning outer legal decision. That
-decision rejects it after judging document currency; it is not a preflight
-readiness check, a journal deadlock, or a new core fact. Other opaque gate
-tokens belong to their own producers and are outside this chapter.
-
-The library edge performs that declaration preparation once and returns a
-typed prepared or refused value. Protocol may combine that value with a
-mechanical preparation, but it never reads gate names or repeats the
-gate/declaration legality formula. Core receives the composed preparation and
-remains the sole judge of lifecycle and document-currentness priority.
-
-The producer resolves the admitted declarations and runs them against the
-selected integration tree. It accepts the derivation as data; it imports no
-decoded document, callback, or protocol body. Deliver and audit follow one
-scratch path: materialize a fresh detached worktree at the integration
-snapshot; decode its tracked project `.keiyaku/settings.json`; execute its
-ordered `worktree.create` commands; run Verification only after they all
-succeed; execute its `worktree.destroy` commands best-effort; then remove it.
-Scratch path resolution, materialization, and cleanup are awaited filesystem
-operations. No synchronous scratch observer or background disposer exists.
-The create/destroy command primitive is also the one used by managed worktree
-reconciliation, but scratch has no marker, progress, retry, resume, or durable
-record. Its snapshot, Settings, and lockfiles are the only provisioning
-authority: caller-current Settings, user Settings, lockfiles, and `node_modules`
-never enter the run.
-
-A create command failure, timeout, or snapshot Settings decode failure is the
-typed nonterminal `environment-failure`; it skips declarations and admits zero
-attestations. A materialization failure is `candidate-unavailable`. After ready
-execution, a terminal process exit admits a satisfied or unsatisfied
-attestation. For each terminal declaration the runtime retains the last 16 KiB
-of stdout and stderr; the producer renders at most 32 KiB across the ordered run
-into the attestation `summary`, including executor and exit status. Silent
-successful runs omit the summary. `spawn-error`, `unknown-exit`, and caller
-cancellation admit no attestation. A declaration timeout is instead a terminal
-unsatisfied verdict and may be attested. `candidate-unavailable` and
-`spawn-error` carry their verbatim diagnostic through the transient public
-stop so a failed Git executable is not reported without its cause.
-Deliver still attempts placement afterward. Audit does not: a stopped or
-nonterminal Verification answer forces target `not-observed`. The
-integration remains pending only when its declared gates are unsatisfied.
-
-Producer nonterminal outcomes, typed environment failure, and attestation-
-admission refusals or retries are one public Verification-stop vocabulary: the
-obligation ran and admitted no fact, with the typed reason retained. Deliver
-exposes that stop on its accepted value. Audit exposes the same stop as
-`verification.stopped`. A terminal run is `satisfied` or `unsatisfied` with
-producer-owned `passed` and `total`; silent successful declarations omit
-`summary`. No renderer or test may parse summary or process output for counts.
-Audit's leading observation remains accepted with zero facts when no
-attestation lands. It never persists the process outcome, report, artifact, or
-blob evidence outside the bounded attestation summary.
-
-Audit may refuse a missing or moved document before any candidate exists.
-Once a producer has run,
-its captured preparation enters the same attestation decision used by every
-producer, and only that decision may issue `contract-missing` or `terminal`.
-Document movement can make the resulting testimony stale for a gate; it cannot
-erase the completed observation. Verification defines no audit-specific
-eligibility judge.
-
-## Runtime Contract
-
-Verification owns declaration resolution and verdict production. An attempt
-materializes the exact integration snapshot, decodes tracked Settings, runs
-create commands and declarations, runs destroy commands best-effort, and
-disposes scratch. Git scratch and Settings decoding are injected concrete
-capabilities; there is no producer compatibility module, registry, cache, or
-asynchronous runner. Protocol admits only a terminal outcome as an attestation.
-
-Verification owns declaration resolution and verdict production. It
-does not define a core gate vocabulary or declaration type. The shared process
-runtime owns spawn, normal stop, timeout, and process-tree kill. Its input is:
-
-```ts
-type ProcessInput = Readonly<{
-  argv: readonly string[]
-  cwd?: string
-  env?: NodeJS.ProcessEnv
-  timeoutMs?: number
-  signal?: AbortSignal
-}>
-```
-
-Its result is `terminal { code, stdout, stderr, truncated }`, `timeout`,
-`cancelled`, `spawn-error { diagnostic }`, or `unknown-exit`. The producer consumes terminal
-codes and bounded output to choose the verdict and render the fact summary;
-only its typed process outcome crosses that boundary. The runtime knows no contract,
-candidate, Verification plan, Akuma
-projection, lease, mailbox, or public operation. Callers normalize
-paths before invoking it.
-
-The same runtime can consume stdout incrementally for a caller that needs only
-an observation fact. Its consumer receives arbitrary chunks and the runtime
-retains no complete stdout; consumer and stream failures terminate the process
-tree and return a typed stream failure. The Git placement adapter uses this
-capability only for one displaced-directory ignored-byte existence probe. The
-buffered process result and its bounded stdout/stderr semantics remain
-unchanged for every existing caller.
-
-Detached supervisor waits have no timeout because their owning operation
-already enforces one; they never run an unbounded user command directly.
-The same domain-free runtime gives long-lived callers a closure-backed live
-process capability whose termination and release require the actual child
-handle. No persisted pid, process-group, start token, or reconstructed signal
-authority exists.
-
-Each declaration has only its optional Markdown timeout, written with an
-explicit `ms`, `s`, `m`, or `h` unit; omission is unbounded.
-A declaration timeout is terminal unsatisfied testimony. Caller cancellation is
-nonterminal and `deliver`/`audit` accepts an optional `AbortSignal`. There is no
-global Verification timeout, Settings key, CLI flag, library option, or
-environment variable. Execution starts detached on every platform. For timeout,
-POSIX execution starts a new session and process group, sends that group a
-graceful signal, waits a bounded grace interval, then force-kills the group. Windows uses
-`taskkill /PID <pid> /T /F` as its sole termination authority. Windows termination is
-not complete when `taskkill` returns: the runtime waits for the directly owned child
-handle to report exit and then applies one bounded settling window for inherited
-handles and related process artifacts to be released. The window is not silently
-extended; an EPERM or residual process/handle after it expires is a real failure.
-For POSIX group signals, ESRCH remains a completed termination. An EPERM is
-completed only when the directly owned child handle reports exit within a bounded
-settlement window; otherwise it remains the signal failure. This decision uses no
-persisted pid, reconstructed process identity, or probe of another process.
-Retained `release` relinquishes the runtime's custody while leaving the target alive;
-it does not invoke termination. The portable process-tree guarantee covers the
-tree rooted at the directly spawned child while that caller still owns its
-handle. A subprocess that escapes the tree, or remains after SIGKILL,
-harness loss, or a Node crash, lies outside that guarantee.
-
-The runtime result is transient. Only its bounded terminal diagnostic rendering
-may enter the attestation fact; it is neither cache authority nor a separate
-state surface. Journal attestations remain ordinary history. Deliver may omit a later
-declaration run only when generic currentness already names a matching
-`verified` attestation for the delivered snapshot; that is not a second
-evidence source or a different declaration selection.
-
-Disposing the scratch worktree is post-admission physical cleanup. A failed
-destroy command is returned separately from a worktree-removal leak; neither
-throws over an accepted admission or changes an outcome arm. These transient
-reports never become reconcile input or a cleanup ledger. Verification holds
-an exclusive SQLite ownership transaction for the scratch lifetime.
-Reconciliation may independently remove a registered scratch path only after
-nonblocking acquisition of that path's exact sidecar ownership lock, using
-fresh Git topology only; lock acquisition proves the owner released or died.
-Scratch names are random and encode no pid or process identity. Reconciliation
-never recovers the run or executes candidate commands.
+Scratch provisioning and disposal are awaited physical work. They create no
+marker, progress record, retry/resume state, or durable run record. Cleanup
+happens after any admitted fact: a failed destroy action or leaked disposable
+worktree is reported separately and cannot reverse acceptance. Reconciliation
+may remove only a scratch path it can prove is no longer owned; it never recovers
+the run or executes candidate commands.
 
 ## Ownership
 
-The generic gate currentness judge is pure over the declared gate and
-dependency-key set. It performs no IO, candidate recheck, or producer-specific
-declaration interpretation. The Verification protocol owner is the sole
-protocol reader of that judge for current `verified` evidence. The producer
-owns `passed` and `total` on a terminal run. Protocol maps that outcome onto
-the closed audit Verification answer and does not derive a journal timeline,
-rework count, or elapsed-millisecond projection. The package root exports
-readonly reports; the CLI renders those adjudicated arms without journal
-access or timestamp arithmetic.
+Verification resolves declarations and produces terminal verdicts. Protocol
+admits only terminal verdicts as testimony and consults the one generic
+currentness judgment for reusable `verified` evidence. The producer owns its
+terminal counts; package and CLI readers render adjudicated reports without
+parsing process output or creating a timeline, rework count, or elapsed-time
+authority.

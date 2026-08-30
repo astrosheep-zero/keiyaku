@@ -1,275 +1,70 @@
 # Akuma Heart
 
-This chapter owns Akuma durable facts, custody, schemas, and projections.
+Heart is the sole durable Akuma authority. It owns Soul, Body, Turn, session,
+activity, Tell, request, control, kill, hung, and seal facts; schemas, custody,
+transactions, and public projections. Private database layout and row mechanics
+are not law.
 
-## Async Boundary And Transaction Judge
+## Custody And Timeline
 
-Every Heart operation exported through the owner index returns a Promise when
-it observes or changes the Heart or leash. Fulfillment means the requested
-observation or mutation has completed; callers do not receive lazy snapshots
-or synchronous wrappers.
+Heart observation and mutation are asynchronous at its owner boundary. Each
+read observes one consistent snapshot; each mutation is one bounded owner
+transaction. These implementation boundaries do not create synchronous public
+APIs, a cache, a daemon, or a queue. Existing Heart custody is opened without
+creating it; only a true absence becomes absence. Corruption and unsupported
+schema are hard failures, never partial reading, silent repair, migration, or
+compatibility decoding.
 
-Inside that boundary, one `DatabaseSync` connection may remain only for a
-bounded Heart or leash section that reads, adjudicates, and writes one owner
-database transaction before closing or returning custody. The section contains
-no `await`, performs no unrelated filesystem work, and admits no parallel
-writer. This synchronous SQLite section preserves Heart's atomic row order and
-single-writer law; it is not a public synchronous API, cache, mirror, daemon,
-or queue.
+The retained timeline is the sole durable execution order. A Body can drive
+multiple Turns; every admitted Turn starts before provider work and either ends
+once with an answer or typed failure, or remains open after interruption or
+loss. Heart never fabricates a provider outcome. Sessions record a provider
+native resume promise when granted. A later Body resumes only that promise; it
+never reconstructs a broken native session or treats a missing session as a
+resume claim. An answered Turn may retain an exact provider fork point; failure
+and an answer without such a point remain non-forkable.
 
-Any observation assembled from multiple Heart queries uses one read-only
-SQLite transaction. Every returned value therefore comes from one snapshot
-without acquiring writer or leash custody.
+Activity is bounded retained provider narration, not a raw payload log or a
+recovery authority. Compaction retains open work, pending tells, and required
+structure, while old closed groups can become permanently unavailable. The public
+timeline projector is pure and derives snapshots, gaps, history loss, activity
+selection, and reported changes from this one sequence. These projections never
+become facts or cursors of a second store.
 
-SQLite open is the first and sole existence attempt for an existing Heart or
-leash. Existing custody opens read-write without create; initialization is the
-only create-capable path. `CANTOPEN` alone does not prove absence: only after
-that failure may the Heart owner await filesystem metadata, and only `ENOENT`
-becomes the caller's existing null or heart-gone result. An existing path, any
-other metadata result, or a database that opens with an invalid schema
-preserves a hard failure. No filesystem precheck participates in that judgment.
+## Durable Facts And Judges
 
-## Turn Timeline
+Soul freezes birth identity, recipe, cwd, origin, restraint, and permissions.
+Body facts name lifecycle custody but persist no process coordinate or
+reconstructable signal authority. A seal shares the leash's atomic birth judge,
+closing a coordinate permanently. Stop and pause are distinct transient control
+facts; a later leash holder can clear abandoned control but cannot claim physical
+custody of its predecessor. Kill witnesses one exact, explicitly settled Body;
+a successor supersedes its life projection without deleting history.
 
-The retained Heart timeline sequence is the only order visible to public Akuma
-projections. A Body owns its live descendant handles and holds the leash;
-Heart owns Body, stop, pause, kill, and Body Request facts. A Turn is one provider start
-or resume within that Body, and one Body may contain many Turns.
+Hung evidence records failure of a Body's owned provider custody to retire. It
+permanently gates same-identity succession and never clears, changes sessions,
+pending tells, requests, or history. Elapsed time, a held leash alone, provider
+events, or observer inference cannot manufacture it.
 
-Every admitted Turn has a `turn-start` coordinate before provider invocation.
-The optional initial call, provider activity, tell admission and delivery, and
-one `turn-end` refer to that coordinate. An interrupted or crashed Turn may
-remain open; Heart never fabricates a provider outcome. Unsupported resume is
-refused before a Turn is admitted. Old schemas are rejected without migration
-or compatibility reading.
+Tell facts retain admission and only named delivery/terminal-receipt witnesses.
+They fold to `pending` or `told`; these are read models, not durable stages.
+Provider submission can be at least once: lacking durable witness leaves a Tell
+pending for a later Body, while a terminal witness settles it without rollback.
+Kill never settles or discards a Tell. Request facts are the sole durable Body
+Request authority and service reference; their lifecycle is owned by
+[akuma-requests.md](akuma-requests.md).
 
-Retention removes old closed Turn groups as a bounded dependency closure. It
-keeps pending tells, open Turns, and the Turn structure required by retained
-rows. Cursors, gaps, and history loss refer to persisted timeline sequence.
+Heart validates generic request lifecycle and authenticates the caller's
+permission decision, but does not interpret action vocabulary, payload, service
+schema, or operation semantics. Provider adapters own live processes and never
+write Heart. Body is the only mover and tell-fact writer after Heart admission.
+No observer store, capability registry, duplicate tell pipeline, or
+cross-database atomicity exists.
 
-The pure public projector folds that one retained sequence into a Turn ledger.
-Each ledger Turn is a readonly `open` or `closed` arm. An unmatched tool start
-enters an open Turn as `active`; admitting that Turn's end purely rewrites any
-remaining active rows to `unsettled` in the closed arm, without adding a
-completion fact or `ToolResult`.
-Its snapshot frontier is one open Turn, otherwise the latest closed outcome,
-or unborn. The same frontier independently yields a read-time
-`reportedChanges` summary: flatten every successful completed `fileChange`
-tool row in native change-array order, keep the newest five items, and count
-older eligible items as `reportedChangesOmitted`. Unborn and a frontier with
-no eligible rows use `[]` and `0`. The summary never samples earlier Turns,
-never includes active, unsettled, or failed tools, and does not deduplicate,
-net, or invent paths. It is not a Heart fact. Pending tells are the
-body-scoped actionable exception to that Turn
-frontier. For an open Turn, the selector retains the newest three rows as its
-tail and independently retains the newest three `said` or `thought` rows
-strictly before that tail. Every active tool and pending tell is pinned outside
-both budgets; the union is deduplicated, restored to timeline order, and its
-omitted count covers only hidden open-Turn rows. Each contiguous hidden run
-becomes a typed read-time gap entry at its actual position; the gap counts sum
-to `omitted`. These entries are not Heart facts or history cursors. History
-alone owns retained-boundary and loss interpretation. The projector
-may fold a final assistant row whose complete bytes exactly equal its answered
-Turn outcome, but it never changes or creates Heart facts.
+## Boundary
 
-## The heart
-
-Row kinds and their atomic order are law. Table layout is implementation
-freedom.
-
-Heart facts self-date when the event occurs. These timestamps are retained
-because the write-time truth cannot be reconstructed after a detached process
-dies; their existence does not depend on a current control-flow reader.
-
-- **soul** — one row, written at birth: id, archetype, optional description,
-  resolved provider execution, admitted options, optional `ReadonlyRestraint`,
-  summon cwd, origin, effective allowed actions, created-at. The
-  restraint is the exact
-  provider-admission fact, not a Heart judgment. Heart validates known Soul
-  members and their cross-field consistency while ignoring additional members;
-  identity and provider-recipe members are decoded only by their own authorities.
-- **bodies** — one row per Body: sequence, leash-taken-at, and optional explicit
-  end (`exited` / `broke-off` / `put-down`). No process coordinate or
-  reconstructable termination authority is durable.
-- **turns** — one row per admitted Turn, keyed by its `turn-start` timeline
-  sequence. It may remain open or carry exactly one `turn-end` outcome. An
-  answered outcome carries the complete answer and may carry an exact
-  provider-owned fork point; a failed outcome carries only its diagnostic.
-- **session** — the provider's resumable coordinate, written the moment the
-  adapter declares one resumable, not at turn completion. A new body resumes
-  from the latest valid session fact; no
-  session fact, no resume promise — the body starts the provider fresh and
-  says so. Keiyaku never rebuilds a broken native session; it only refuses
-  to lose a coordinate the native harness already granted. Its cwd and
-  provider options preserve the exact native resume recipe.
-  Before any session admission, wake starts fresh from the soul's summon cwd
-  and options.
-  The coordinate is the closed union `{ sessionId } | { sessionFile,
-  sessionId? }`; its strict codec rejects blank, mixed, or additional fields.
-  Claude and Codex use the first arm. Pi uses the exact persisted-file arm.
-  Heart stores that union without provider tags or parallel Pi custody.
-- **launch admissions** — one provider submission fence. Body pairs it with the
-  immutable launch TellIds it supplied and records the admission and each
-  TellId's launch delivery in one Heart transaction. The adapter never echoes
-  those product identities in its admission.
-- **activity** — the persistent execution-history sequence
-  `(sequence, turn_sequence, event_json, at)`. `sequence` is monotonic and
-  never reused. Every row belongs to the Turn that observed it. The body keeps
-  the newest 5,000 rows with a bounded write buffer; crossing that buffer
-  compacts in one batch rather than enforcing an exact count after every write.
-  Recent status is a read-time selection, not a smaller persisted log. Typed, bounded activity is the first and only
-  execution-history log. Raw native payloads are never activity facts.
-- **tells** — the admitted body and recorded timeline sequence, repeatable
-  deliveries with route plus Heart-owned `turnSequence`, provider fence, and
-  the live attempt's receipt requirement, provider-authored terminal receipts
-  with exact or fence correlation;
-  see Tell. Admission allocates its sequence from the same monotonic timeline
-  allocator as activity. The tell remains one Heart fact family; no duplicate
-  activity row is persisted.
-- **requests** — the sole durable authority for Body Request admission and
-  service references. Call reservation names its child; wait stores no answer;
-  tell names its TellId; kill names existing lifecycle evidence. Verb results
-  remain with their operation owner or live receipt. `served`, `refused`, and
-  `voided` are terminal.
-- **stop / pause** — distinct transient control rows. Stop freezes the current
-  Body sequence and asks that Body to end for `kill`; pause asks it to yield for
-  `interrupt`. Only that live Body may terminate its descendants through owned
-  handles. A later leash holder may clear abandoned control but cannot claim
-  physical custody of the predecessor.
-- **kills** — immutable witnesses that `kill` stopped one exact Body sequence.
-  A witness is admitted only after the same Body explicitly ended `put-down`
-  and released the leash. Only the latest Body's witness projects `killed`; a
-  successor Body supersedes it without deleting history.
-- **hung Body** — provider-custody failure evidence `{ diagnostic, at }` that
-  may coexist with that Body's `broke-off` end. Before recording a successor
-  Body under a free leash, Heart refuses when the latest Body is hung. This
-  gate is permanent: no clearing transition exists, and pending tells,
-  requests, sessions, and history remain unchanged.
-
-The seal is the one row that must not live in `heart.db`: the birth claim is a leash
-transaction, and "check the seal in the same claim" is only atomic if the
-seal sits under the same lock. The seal therefore rides the leash's
-database, not `heart.db`. Both schemas and their typed interpretation are
-owned inside the closed Heart custody core; no store or repository interface
-sits between callers and its index.
-
-Heart stores owner-canonical request and service JSON opaquely and validates
-only generic request lifecycle integrity. During request admission it
-authenticates the current Soul and records the caller-supplied permission
-decision, but does not interpret an action vocabulary, payload, service
-evidence, or child-owner meaning. Heart imports neither Task nor any verb
-owner; the Body-only closed request index supplies those descriptors. Heart
-schema version is `21`; leash
-schema version remains `4`. Version 21 permits hung evidence and `broke-off`
-on the same Body, and hard-cuts the
-permanent same-identity successor gate.
-Successful completion remains
-separate from the optional exact provider fork point; session and complete
-answer remain required for an answered Turn. Older hearts
-fail the schema gate; no migration or compatibility decoder exists. Confirmed
-World reset classifies that version without reading Heart facts. An unsupported
-recognized Heart remains Keiyaku-owned custody for the reset owned by
-[akuma.md](akuma.md) and [world.md](world.md). Absence is
-stored as SQL `NULL` and omitted from public values.
-
-Heart custody owns its fact vocabulary, schema gates, row codecs, connections,
-transactions, conditional judgments, custody verbs, and durable timeline
-reads. The shared timeline owns ordering, slicing, and retention across every
-row kind; Tell owns only Tell admission, delivery, receipt, fence, and pending
-state. The public semantic timeline has one pure projector outside custody.
-Consumers do not access its SQLite handles or row statements. Custody is one
-authority boundary; its private file layout is not law.
-
-Every durable fact has a named witness. Heart is the only durable Akuma
-authority; an adapter owns only a live native process and never writes Heart.
-Body is the only mover and, after the caller's recorded admission, the only
-tell-fact writer. A submission acknowledgement or launch admission witnesses
-delivery; a provider receipt witnesses only what its typed evidence says.
-Provider events, turn completion, process liveness, and Body inference cannot
-manufacture tell delivery or processing facts. No observer store, capability
-registry, or compatibility copy of the old tell pipeline exists beside Heart.
-Exact provider receipts name their TellId. Fence receipts are admitted only
-when an existing delivery fact from the same `turnSequence` resolves that fence
-to TellIds; an unknown or differently scoped fence cannot create a receipt fact.
-Delivery and receipt facts have two readers: the replay/terminality fold and the
-public two-state tell projection. They are not a second execution-history log.
-The fold is one total rule: any launch delivery, receipt-free live delivery, or
-terminal receipt yields `told`; otherwise the tell is `pending`. Kill is not a
-Tell fact and cannot settle or discard one.
-Retention removes settled tell facts below the same buffered 5,000-row timeline
-boundary as settled provider activity. Pending tell facts are pinned until they
-become told because Body recovery and status still read them. A
-settled fact may remain in the bounded buffer until a later write crosses the
-compaction threshold; no command promises an exact physical row count.
-
-The sole raw activity-history read returns the complete retained provider and
-tell fact window in ascending timeline order with `lowestRetained` and
-`highest`. It does not copy tell state into activity persistence or apply
-public `before`, `since`, or semantic-row `limit`; those belong to the public
-Turn-ledger selector. The bounds are persisted timeline coordinates, not
-semantic-row counts. A sequence below
-`lowestRetained` is permanently unavailable. Gaps inside the retained range
-are reported arithmetically from the rows, never by persisted marker facts.
-
-The activity fold and the snapshot selector are separate pure readers. The
-fold decodes events, pairs tool start and completion by provider id, retains
-both timestamps, derives completed duration, and keeps a completed tool at its
-start-fact sequence. Completion enriches that row without minting another
-cursor coordinate. Each tell projects as exactly one `pending` or `told`
-semantic row at its recorded sequence before any budget applies. A completed
-event whose start was pruned is settled without duration and does not
-reconstruct that start; a retained start without
-completion is in flight. The snapshot selector pins every in-flight tool and
-every pending tell outside the independent tail-three and voice-three budgets.
-Tail is the newest non-pinned ordinary window rows; voice is the newest eligible
-pre-tail ordinary said or thought rows. Active tools stay at their actual
-positions and do not occupy tail slots. Settled tool rows remain ordinary.
-Voice inside the tail does not consume the voice budget; `note`, `call`, `tell`,
-tool, and outcome rows are not voice candidates. It deduplicates the union,
-restores timeline order, and replaces each contiguous hidden run with a typed
-gap entry carrying that run's semantic-row count. The gap counts sum to the
-snapshot's total omitted count and never represent persisted loss.
-`status()` and `wait()` use this one selector. Full history pages do not apply
-snapshot pinning or category budgets.
-
-The shared timeline is the sole retained Turn projection. Its `turn-start` and
-`turn-end` rows provide answer, failure, and boundary order. The fork-point
-reader is the only targeted `turns` read: it strictly parses one public
-`turn/<turnSequence>` id, exact-matches that answered Turn, and returns its
-private provider `historyId` with that fact's
-inseparable session and native point. It also resolves that session
-coordinate's admitted provider, cwd, and options recipe for the native call and
-child birth; a retained answered turn without that recipe is authority
-corruption, not `unknown-history`.
-
-Heart reads do not reinterpret the timeline. Public history uses the same
-projector without copying answer bytes into activity. `history --last`
-reads at most one answered Turn end, selected by its durable timeline sequence.
-No answered row projects typed absence; an answered row
-retains its exact `answer` bytes, including an empty string. Recovery,
-resume, fork, outcome, failure, and life never read activity. Thus the shared
-timeline owns execution chronology and complete outcome bytes, while session
-rows remain the sole resume authority.
-
-Public Fleet/list behavior is owned by [akuma-public.md](akuma-public.md).
-
-One judge per question:
-
-- Birth vs seal: both live under the same leash claim. Judge: the leash.
-- Kill vs Body replacement: the killer waits for the target Body to release the
-  leash, re-reads that exact Body's explicit `put-down` end, and records its
-  witness in one Heart transaction. A repeated witness is idempotent; a stale,
-  untidy, or superseded sequence is rejected. Judge: leash ownership plus the
-  Heart transaction.
-- Body exit vs concurrent tell: the heart and the leash are two locks, so
-  neither alone may judge. The exit check (no pending tells, same
-  transaction) is necessary but not sufficient; the waker closes the gap —
-  see Wake.
-- Child birth (for forwarded calls): judged by the **child's** leash, never
-  by looking across databases. The parent heart only remembers where to
-  look.
-
-No cross-database atomicity is claimed anywhere. A held leash alone proves only
-that a Body remains live. `hung` requires that Body's durable diagnostic that
-owned provider custody did not retire within the response window. Elapsed time
-at a public boundary never constructs that fact or grants process authority.
+Heart owns durable fact decoding and conditional judgments. Provider owns native
+execution evidence; [akuma-provider.md](akuma-provider.md) defines its boundary.
+The public surface consumes Heart's pure projection without accessing database
+handles. Reset can classify unsupported recognized custody without interpreting
+its facts, as owned by [akuma.md](akuma.md) and [world.md](world.md).

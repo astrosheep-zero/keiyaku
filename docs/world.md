@@ -1,149 +1,62 @@
 # World
 
-World is the shared directory coordinate used by the Task and Akuma products
-and by project-level Settings and Kanshi reads. A Git repository determines one
-World, but World owns neither Git nor product facts.
+World is the shared directory coordinate for Task and Akuma products and
+project-level Settings and Kanshi reads. A Git repository determines one World,
+but World owns neither Git nor product facts.
 
 ## Coordinate
 
-```ts
-type WorldRoot = Brand<string, "WorldRoot">
+World resolution is an asynchronous edge operation. It provides the current
+resolved World, the non-writing candidate it would establish, and an explicit
+establish action. Reading resolution never changes the filesystem; establishment
+creates only the selected World marker. Repository invocation selects the
+canonical primary-worktree World, while a non-repository invocation may use the
+nearest existing marker or establish its invocation directory. Home and the
+filesystem root are deliberately never Worlds.
 
-type WorldResolutionInput = {
-  cwd: string
-  repositoryRoot?: string
-}
+An explicit World construction establishes exactly its selected existing
+directory and never climbs. Exact proof is the read-only capability boundary for
+raw coordinates: it accepts only the canonical physical directory supplied by
+the caller, never substitutes an ancestor, follows an alias, or creates a
+marker. Outer operations prove raw process, transport, and JavaScript values
+once before any product effect; product constructors consume the minted World
+coordinate and do not resolve paths or inspect the current directory.
 
-type WorldResolution = {
-  root: WorldRoot | null
-  candidate: WorldRoot | null
-  establish(): Promise<WorldRoot>
-}
-
-World.resolve(input: string | WorldResolutionInput): Promise<WorldResolution>
-World.locate(input: string | WorldResolutionInput): Promise<WorldRoot | null>
-World.at(path: string): Promise<WorldRoot>
-World.prove(path: string): Promise<WorldRoot>
-```
-
-`World.resolve` resolves the invocation directory once and returns the current
-root, the non-writing candidate root, and the creating operation for that same
-resolution. Reading either coordinate never changes the filesystem;
-`establish()` creates only the selected marker. `World.locate` is the read-only
-projection of `root`.
-
-Each operation completes its filesystem observation before its Promise resolves.
-
-When `repositoryRoot` is supplied, that canonical Git primary worktree is the
-WorldRoot; the marker is not consulted and no filesystem is changed. Without
-it, the resolver climbs toward the filesystem root for the nearest `.keiyaku/`
-marker. It skips the user home directory selected by the process edge (`$HOME`)
-and the filesystem root itself; neither may be a World. A non-Git invocation
-with no marker returns `null` and creates nothing.
-
-`candidate` is the coordinate that `establish()` would select. It equals
-`root` when a marker or repository root selected one; otherwise it is the
-canonical invocation directory. Home and filesystem root yield a null
-candidate and retain their typed refusal when establishment is attempted.
-
-`establish()` is the creating form of the same invocation resolution. With a
-`repositoryRoot` it establishes the primary worktree marker. Without one it
-reuses the nearest marker, or establishes the invocation directory when none
-exists.
-
-`World.at(path)` is different: it constructs an explicitly selected WorldRoot
-and establishes exactly that existing directory. It never climbs. This is the
-library boundary for callers that already hold the coordinate rather than an
-invocation path. A missing directory or non-directory marker is a typed world
-error. Home and filesystem root remain forbidden.
-
-`World.prove(path)` is the read-only exact capability boundary for a raw
-explicit coordinate. It uses the same canonical directory observation as
-`resolve` with that coordinate selected as the repository root, and returns a
-WorldRoot only when the supplied bytes exactly equal the canonical physical
-directory coordinate. It neither consults or creates a marker nor climbs to or
-substitutes an ancestor World. Relative paths, aliases (including symlinks),
-missing paths, nondirectories, home, and the filesystem root reject. It never
-rewrites the caller value or changes the filesystem.
-
-Raw process, transport, and JavaScript-object coordinates cross this proof at
-their owning outer operation before any World-owned product effect. That
-operation carries the returned WorldRoot downward; consumers do not resolve or
-re-prove it. In particular, `Akuma.of` remains a synchronous consumer of an
-already minted WorldRoot.
-
-The CLI resolves the invocation Git repository once, passes its
-`primaryWorktree` as `repositoryRoot`, and retains one `WorldResolution` for
-the invocation. Library callers pass the resulting `WorldRoot`; product
-constructors never resolve a path or inspect the process cwd.
-
-The invocation cwd is an input to this edge policy only. It is not persisted or
-part of any identity. An Akuma persists its execution `cwd` as an answer to
-where its body works, not where its world is stored.
+The invocation directory is edge input, never persisted identity. Linked and
+managed worktrees of one repository share their World; no marker can split that
+product identity. Execution working directories remain a separate Akuma concern.
+Different repositories are different Worlds and are never combined into a
+synthetic aggregate observation.
 
 ## Product Boundaries
 
-Task authority remains tracked Markdown at `<world>/.keiyaku/tasks/**`.
-Linked and managed worktrees are execution views of the same Git World; their
-markers cannot split product identity. Akuma runtime facts remain local under
-`<world>/.keiyaku/akuma/run`, so a body launched from any worktree reads and
-writes the same fleet while retaining its actual execution cwd.
-
-Git discovery is an invocation-edge concern. A command carries one resolved
-`WorldRoot | null` and one optional `Repo` to all sections that need them.
-Explicit Contract `--repo` selection is a separate Git coordinate and never
-changes the invocation World. Contract-selector wait and kill read Dispatch
-from that Repo and operate on the resolved AkuIds in the `-C` World; they do
-not scan another World or replace `-C` with `--repo`.
-Two different repository coordinates name two Worlds and are never composed
-into one aggregate observation.
+Task authority, Akuma runtime facts, Settings, and Kanshi each retain their own
+owner and storage. World only supplies their shared coordinate. Git discovery
+and an explicit Contract repository are separate concerns: selecting a Contract
+repository never rewrites the invocation World, and a Contract-selected Akuma
+operation does not scan or substitute another World.
 
 ## Keiyaku-Owned Data Reset
 
-`nuke` is a Keiyaku-owned data reset for exactly one resolved `WorldRoot`. It
-is not repository cleanup and is not a generic World teardown. World owns the
-reset scope, literal confirmation, preservation rule, and one execution result;
-each product owner owns its deletion custody.
+`nuke` resets Keiyaku-owned management data for exactly one resolved World. It
+is not repository cleanup or a generic directory teardown. World owns the reset
+scope, literal confirmation, preservation rule, and one public execution answer;
+each product owner deletes only its own custody.
 
-A bare operation is the `nuke-confirmation-required` refusal. A confirmation
-must equal the resolved `WorldRoot` byte for byte; mismatch is the
-`nuke-confirmation-mismatch` refusal before every owner effect. Confirmed
-execution stops live writers before deleting their owned state and returns one
-success or failed diagnostic. The same literal confirmation retries remaining
-owned data. No preview, token, snapshot hash, prompt, World-wide lock, reset
-ledger, backup, trash, undo, or lifecycle simulation exists.
+Missing confirmation and a confirmation that differs from the resolved World
+are typed refusals before every owner effect. Confirmed reset stops live writers
+then independently invokes owner-local deletion. A failed owner remains
+retryable under the same literal confirmation, but reset creates no preview,
+token, snapshot hash, prompt, world-wide transaction, ledger, backup, trash,
+undo, or lifecycle simulation.
 
-Only Keiyaku-produced management data owned by the selected World is in scope.
-Repository source and business refs, ordinary worktree bodies, project and
-user Settings, namespace configuration, global Archetypes, and unknown
-`.keiyaku` bytes remain. A managed worktree is removable only because its
-worktree and appointment are Keiyaku-owned custody; this does not authorize
-repository cleanup or deletion of arbitrary worktrees. A marker or directory
-is removed only after owner cleanup leaves it empty. Recognized Akuma entries
-are Keiyaku-owned custody even when their Heart schema is not current: nuke
-removes their known management artifacts and known request-channel protocol
-files, preserves unknown child bytes including unknown descendants inside a
-request channel, and preserves coordination lock files outside the entry. A
-recognized entry and the Akuma run root are removed only when no non-Keiyaku
-bytes remain.
+Only recognized Keiyaku management custody in the selected World is in scope.
+Repository source and business refs, ordinary worktree contents, authored
+settings and configuration, global resources, unknown files, and foreign
+worktrees remain. A marker or directory disappears only after its owner leaves
+it empty. Unrecognized bytes within an otherwise known management area remain
+preserved; reset never adopts arbitrary files merely because they lie nearby.
 
-The reset law maps to one owner per concern:
-
-| Concern | Owner |
-| --- | --- |
-| Resolved World coordinate, literal confirmation, execution result, and preservation rule | This chapter |
-| Runtime-body admission, stoppage, and World-local Alias authority | [akuma.md](akuma.md), [akuma-heart.md](akuma-heart.md), and [alias.md](alias.md) |
-| Keiyaku refs, managed-worktree custody, appointments, locks, and reconciliation residue | [git.md](git.md), [workspace.md](workspace.md), [git-reconciliation.md](git-reconciliation.md), and [settlement.md](settlement.md) |
-| Task authority and Task locks | [task.md](task.md) |
-| Authored Settings, namespace configuration, and global Archetypes that remain | [settings.md](settings.md) |
-| Package-root inputs and result declarations | [public-api.md](public-api.md) and [public-results.md](public-results.md) |
-| Command grammar and output projection | [cli.md](cli.md) and [cli-output.md](cli-output.md) |
-
-The package composition stops active writers, then attempts the owner-local
-deletion entry points independently. It has no fixed cross-owner order,
-storage path, ref, glob, inventory, count, or residue-specific knowledge.
-
-The Git owner performs its reset state-first: it removes the state authority
-with an expected-OID compare-and-swap before deleting regenerable topology.
-This ordering is local to Git and does not create a World-wide reset lock or
-transaction; an owner failure remains retryable under the same confirmation.
+World composition has no fixed cross-owner deletion order, storage inventory, or
+residue-specific knowledge. Git alone applies its state-first local reset rule;
+that rule does not create a World-wide lock or transaction.

@@ -1,401 +1,95 @@
 # Git
 
-Git owns the Git world that carries contract journals, candidate bytes,
-target refs, managed worktrees, and Keiyaku-owned pins. Keiyaku owns the
-deterministic managed path, ref, and pin topology; the agent owns the
-working content; and the journal owns only the tendered candidate. Git is
-the custody layer for physical object availability and the sole owner of
-reconciliation behavior.
+Git owns the physical world that carries Contract journals, candidate bytes,
+target refs, managed worktrees, and Keiyaku-owned reachability. The journal is
+the lifecycle authority; Git is the custody authority for the bytes it names.
+Agents own their working content. Git's private topology is not a public
+identity, an additional state store, or a source of Contract legality.
 
-## Git World
+## World, Reads, And Publication
 
-One Git repository carries the private Git map, target refs, and worktrees.
-The physical map and its layout are implementation-private and reachable under
-one Git ref. A contract's journal blob is its `ContractHead`; unrelated
-Git movement does not change that contract. Discovery follows worktree
-identity to the common repository. Scope resolution pins both the caller
-worktree and the primary worktree for the one Git world. It also resolves the
-absolute common Git directory once when constructing the internal repository
-capability; later operations read that pinned value and do not rediscover it
-per Contract. The capability also pins one nonblank Git executable coordinate;
-ordinary, streamed-output, and environment-augmented Git subprocesses all use
-that exact coordinate. Git modules do not read environment configuration or
-reinterpret the coordinate as a repository path.
+One repository and its linked worktrees share one Git world and one private
+authority root. A Contract journal identity is independent of unrelated Git
+movement. Git resolves the repository and executable once at its outer boundary;
+callers cannot replace either through ambient configuration. Filesystem and Git
+tree coordinates remain distinct domains.
 
-A cancellable Git capability carries its caller's `AbortSignal` through every
-ordinary, streamed-output, and environment-augmented subprocess it starts.
-Cancellation terminates the owned child process tree through the shared process
-runtime, waits for the direct child to close, then returns the existing typed
-operational failure naming the Git operation and cancellation. Git creates no
-separate timeout policy or lock-file recovery: an `index.lock` is neither
-removed nor treated as completion evidence.
+Every product read receives one call-scoped, frozen Git observation. Product
+owners select and decode only their own data; Git supplies object custody but
+does not interpret product codecs. Targeted reads remain proportional to the
+requested authority, while only a deliberate world read enumerates the whole
+world. Observations and object reuse end with the call: there is no cross-call
+cache, second index, or independently updated current-state snapshot.
 
-Filesystem coordinates arrive from the CLI, Repo, or World boundary as
-canonical absolute native paths and pass directly to Git argv and child cwd.
-Git does not convert Windows or MSYS path dialects. Git tree object paths are
-a separate slash-delimited Git grammar; filesystem normalization never applies
-to them.
+Cooperating private-state writers share one repository-local publication seat.
+It coordinates writers but does not decide acceptance: atomic compare-and-swap
+and exact durable read-back remain the only currentness and unknown-outcome
+judges. Target placement and workspace appointment keep their own outer custody
+boundaries. The seat creates no queue, fairness promise, daemon, extra retry
+budget, per-Contract ref, or lock-derived success, and cannot protect against
+uncooperating external writers.
 
-Targeted observation and admission are bounded by the touched journal and
-selected ancestor depth, never by the complete world; a full-world observation
-is the only complete-tree read. The private Git map has no independently
-updated cache, current-state snapshot, second or per-contract Git ref, or fact
-index. Managed refs and pins are topology only.
-Git also owns the invocation worktree's current branch: the canonical
-`refs/heads/...` symbolic `HEAD`, or absence when detached. No higher layer
-runs or interprets Git for this fact.
-Variable-length public identities do not determine Git depth. A journal
-locator uses an `active` or `terminal` class followed by a fixed-width strong
-digest of the complete ContractId as a bounded-fanout Git tree path, while the
-journal bytes retain and canonically verify the complete identity. The digest
-and class are private locators, never contract identity or a second uniqueness
-authority. Each Contract exists at exactly one locator, and its path class must
-equal the class derived by folding that journal. Appending a terminal fact
-moves the complete journal from `active` to `terminal` in the same state-tree
-update and state-ref CAS. A targeted lookup probes both classes; an active-world
-reader enumerates only `contracts/active/**`.
+Git admission publishes a complete decision offer atomically. Opaque companion
+updates may accompany a journal admission, but Git neither decodes them nor
+knows their product meaning. A partial publication is corruption. When an
+outcome is uncertain, only durable read-back can prove the intended admission;
+Git never rebuilds or replays an old offer, parses Git prose, or silently adopts
+newer terms or targets. Coordinate movement demands a fresh semantic attempt;
+an unchanged rejected publication is a typed failure.
 
-The active/terminal layout is the only accepted format; runtime has no
-predecessor-path reader, migration branch, or fallback.
+Confirmed Git reset removes state authority before regenerable topology. It is
+local to Git custody, leaves foreign data alone, and provides no backup, trash,
+undo, world-wide lock, or reset ledger. A failed reset can retain independently
+completed effects and is retried under the World-owned confirmation rule.
 
-## Call-Scoped Read Observation
+## Delivery And Placement
 
-A composite read freezes `refs/heads/keiyaku-state` once and shares one
-immutable path-to-object observation across Contract, TaskHolder, and Dispatch
-readers. Each product selects only its paths and remains the sole decoder,
-canonical-byte validator, duplicate judge, sorter, and projector; Git knows no
-product codec. Missing objects and transport failure remain typed read results.
+Git prepares tenders, integration candidates, content-sensitive candidate
+identity, recorded delivery diffs, and disposable Verification scratch custody.
+It returns mechanical data or typed failures; it does not judge Contract
+lifecycle or decode Contract documents. Document bytes used for delivery are
+opaque Git inputs, and Git never judges their currentness.
 
-Only Git creates and closes the read capability. It memoizes content-addressed
-objects and target refs within the call, is invalid after the call, and never
-restarts a failed transport. Workspace cleanliness is observed separately per
-workspace against the target head frozen in that same call.
+Delivery normally requires a clean managed worktree. Explicit dirty delivery
+captures the complete non-ignored final tree without rewriting the caller's
+checkout; it does not authorize dirty submodule internals. Review can observe
+ordinary dirty work without gaining delivery authority. The candidate's
+worktree-content identity changes only with the captured content, not target
+movement, reintegration, or diff presentation. A judged conflict changes no
+authority unless the caller explicitly asks Git to project that conflict into
+the appointed workspace; that projection chooses no resolution and is not a
+second conflict judgment.
 
-Every decision, recovery, fence, reconciliation, and settlement boundary
-freezes refs independently. Immutable OID-addressed objects may be reused only
-inside that epoch; ref results never authorize a later boundary. Targeted reads
-walk only selected paths and bounded ancestors, while full-world reads alone
-enumerate the complete tree. All repository observations are asynchronous, and
-product owners create neither Git readers nor cross-call caches.
+Targeted placement is serialized per target. It claims only when the target
+still matches the persisted integration predecessor and can move atomically to
+the candidate. If the target moved, Git may reintegrate the original tender
+against fresh target custody, preserving the tender and its content identity.
+Followability is a no-effects judgment before publication: incompatible
+checkouts, untracked displacement, or operational failure refuse placement and
+leave the claim and target untouched. Successful follow preserves unrelated
+workspace changes. Recovery of an interrupted follow belongs to
+[git-reconciliation.md](git-reconciliation.md); later placement cannot bypass a
+checkout that remains behind.
 
-Git mints `ContractCoordinates.start` at bind. With a target it is the
-resolved target head; without a target it is the caller worktree's current
-`HEAD`. It is the initial managed-worktree commit.
+## Custody And Cleanup
 
-Bind derives those coordinates anew inside every semantic attempt from one
-target-selection intent: an explicit target, the current attached branch, or
-targetless. Current-branch intent is resolved in that same observation. An
-attached existing branch becomes the canonical `refs/heads/...` target and
-start snapshot. A detached committed `HEAD` is targetless and starts at that
-`HEAD`. An unborn `HEAD` returns `unborn-head` and is never classified as
-`target-missing`. The same atomic admission transaction asserts only the ref
-fact sealed into `coordinates.start`: the selected target ref's OID, or
-dereferenced `HEAD` OID when there is no target. Every assertion is a
-non-mutating `verify`; apart from the state-ref CAS append, admission never
-updates, creates, deletes, or symbolically updates a ref. An OID movement,
-identity collision, or Git CAS retry therefore discards the attempt and
-re-observes coordinates; a fresh read alone is not the currentness judge.
+Journal facts retain candidate identities, but are not reachability edges. Git
+keeps the tender and integration reachable while a managed worktree or pending
+placement needs them, and a claimed target may become a custodian. Refs are
+released only after an independent surviving custodian proves the required exact
+commit or tender bytes remain available. Equal content never substitutes for
+the integration identity. Cleanup never rewrites a target; a target rewrite or
+deletion that loses custody retains the owned ref for later observation.
 
-An explicit target must exist at bind observation. Absence is returned to
-the library as `target-missing` before any journal or ref publication. Git
-never creates the target branch and never substitutes another ref or the
-caller's current `HEAD` for it. A targetless bind requires a dereferenceable
-`HEAD`; a fresh repository with an unborn `HEAD` returns the typed
-`unborn-head` refusal without inventing a snapshot or publishing state.
+Workspace appointment is owned by [workspace.md](workspace.md). Git consumes an
+explicit appointment and never derives, scans, adopts, or persists a worktree
+coordinate from Contract identity. Its cleanliness and target-lag observations
+are transient, frozen with the relevant target, and never journal facts.
 
-A target is an optional Git ref because a claimed placement may move it.
-`workspace: "worktree"` gives Git ownership of one deterministic delivery ref
-and linked worktree; its branch remains independent from the target.
-
-The Git ref, managed delivery namespace, and candidate-pin namespace have
-this one Git owner. The library boundary rejects a target that names any
-of them before coordinates are recorded; target input and canonicalization are
-defined only in [public-api.md](public-api.md).
-
-The canonical state ref remains `refs/heads/keiyaku-state`. Managed delivery
-and candidate custody live under the distinct owner roots
-`refs/keiyaku/delivery` and `refs/keiyaku/candidate`; they are not branches and
-ordinary branch refspecs do not synchronize them. During the bounded namespace
-transition, `refs/heads/keiyaku-delivery` and
-`refs/heads/keiyaku-candidate` remain recognized as legacy owned roots only for
-per-Contract reconciliation and confirmed reset. Runtime creation and update
-write only the canonical roots. Once both legacy roots are empty, their
-recognition arm may be hard-cut in a later coherent change. Every commit
-installed as the state-ref tip has the exact
-subject `keiyaku authority - do not delete or rewrite`; a state writer's
-operation detail, when present, follows after a blank line. Delivery,
-candidate, and ephemeral recovery commits keep their own subjects and
-identities. This warning does not add deletion detection or recovery behavior.
-
-Git serializes every cooperating writer of `refs/heads/keiyaku-state` with one
-abort-aware SQLite immediate-transaction seat at a fixed private path beneath
-the pinned common Git directory. The seat is shared by worktrees and processes
-of one repository, released by process death, and is not shared between
-repositories. A writer acquires it before observing the private root and holds
-it through its decision, object construction, authoritative unknown-outcome
-read-back, and final known publication result. Contract admission, post-
-admission TaskHolder release, Dispatch publication, and confirmed reset are
-the exhaustive current writers. Existing per-Task and target-placement fences
-remain outer; code holding this seat acquires no other Keiyaku publication,
-Task, target, allocation, or workspace fence.
-
-The seat schedules cooperating writers only. Root CAS and exact durable
-read-back remain the sole currentness and acceptance judges. A state-ref move
-while the seat is held is external movement and retains ordinary read-back and
-redecision behavior; a rejected CAS with no state-ref movement remains
-`publication-failed`. The seat adds no queue, fairness state, backoff, retry
-budget, daemon, per-Contract ref, or lock-derived acceptance. A seat-release
-failure never reverses a known or exact-read-back-proven publication.
-
-The Git owner performs confirmed reset state-first. It snapshots
-`refs/heads/keiyaku-state` and deletes that ref with an expected-OID
-compare-and-swap before deleting regenerable delivery, candidate, worktree, or
-Place topology. If the state OID moved between observation and deletion, the
-owner attempt fails before topology cleanup so a later confirmed reset can
-retry. If the state ref is absent, reset continues against the observed owned
-topology. An unknown deletion outcome requires a fresh state-ref read-back:
-only observed absence permits cleanup. Reset holds its existing Place/appointment
-fence outside the private-state seat, then takes the seat before that snapshot
-and retains both through owned topology cleanup. State-first is the only reset
-ordering law; reset adds no World-wide lock, ledger, backup, trash, undo, or
-repository GC.
-
-During namespace migration, reset enumerates leaves under the distinct legacy
-roots `refs/heads/keiyaku-delivery` and `refs/heads/keiyaku-candidate` and the
-distinct canonical roots `refs/keiyaku/delivery` and `refs/keiyaku/candidate`.
-Each leaf deletion uses that leaf's freshly observed OID as the expected value.
-Ordinary, unknown, and foreign refs remain untouched.
-
-Reset retains a registered appointed worktree whose HEAD is attached, and it
-removes only a detached managed worktree after hook-residue cleanup and proof
-that the path is unregistered and physically absent. An appointment with no
-registered worktree is removable residue only when its Git administration
-pointer resolves under this repository's pinned common Git directory; otherwise
-the path is foreign or unknown and is retained. That proof never scans or
-adopts arbitrary worktrees. Each appointment is released only after its managed
-path is absent. Place authority is removed only after the appointment register
-is empty. SQLite lock files remain.
-
-A failed owner attempt is retryable and may leave independently completed
-effects. Success reports only the effects observed by this Git owner. It does
-not promise a serialized transaction against writers that do not honor
-Keiyaku locks.
-
-Managed delivery and candidate-pin leaves are deterministic private topology
-derived from the complete ContractId. They are never public identity or a
-second legality authority.
-
-Git does not derive a managed worktree path from ContractId. Workspace
-appointment owns Place allocation; Git consumes an explicit appointed Place
-and realizes the worktree only at
-`<primary-worktree>/.keiyaku/wt/<place>`. Primary and linked worktrees
-share that appointed path. Git does not write repository `info/exclude` for
-`.keiyaku/`. The path is not stored in the Contract journal. Git never
-derives, scans, or adopts another managed-worktree coordinate from Contract
-identity.
-
-Terminal cleanup proves the appointed path is physically absent before Place
-release. A retained physical path remains explicit lag; absence is the proof of
-cleanup, not appointment metadata.
-
-Git owns workspace cleanliness and target lag at the appointed path, counting
-workspace `HEAD` against the same-epoch frozen `targetObservation.head` and
-never a live target ref.
-A named target with a missing frozen head is unknown. Clean means empty
-staged, unstaged, untracked, and submodule sets; otherwise dirty;
-unavailable when unobservable. An unappointed managed Contract has no
-worktree to probe. These facts are not persisted.
-
-## Tender, Integration, And Diff Ownership
-
-Git owns tender capture, integration preparation, worktree-content ChangeId
-materialization, recorded integration-pair diff reads, and disposable
-Verification scratch custody. Protocol composes these typed capabilities
-directly; there is no generic preparation wrapper. Managed worktrees remain
-governed by the reconciliation rules below.
-
-## Delivery Preparation And Placement
-
-Delivery preparation consumes the attempt's coordinates, delivery policy,
-dirty authorization, and optional caller testimony. It does not judge Contract
-lifecycle or decode documents. A targeted tender integrates against one frozen
-target head; a targetless tender has no target-ref operation.
-
-Git returns mechanical data or typed failure to the lifecycle decision. Dirty
-content refuses delivery and Verification unless `includeDirty` is true;
-review observes ordinary dirty paths without that authorization. Dirty
-submodule internals always refuse because the superproject tree cannot seal
-them.
-
-`includeDirty` captures the complete non-ignored final tree in a private index
-without changing the real checkout. The tender message contains the Contract
-Markdown and deterministic actor/timestamp testimony; caller message replaces
-only its subject.
-
-After accepted dirty delivery, reconciliation may project the recorded tender
-into an eligible managed worktree without writing later edits. Tender and
-ChangeId remain the candidate identities; target movement never changes them.
-
-`SnapshotId` is commit identity. ChangeId is one byte-sensitive identity for the
-immutable Contract start to captured tender tree, including binary, mode, path,
-and whitespace bytes, independent of diff presentation configuration. Delivery
-and review share it without creating a durable review snapshot. It changes only
-with reviewed content, not target movement; later integration failure is a
-placement stop and never changes the admitted review subject.
-
-`requireBranchesToBeUpToDate` is the target freshness policy. When disabled,
-Git performs one three-way squash integration against the frozen target head.
-Unrelated histories and structured conflicts are typed failures naming the
-judged target and conflict paths; the judge never edits an agent worktree.
-
-Workspace observations expose merge state separately from dirty counts. A
-materialized merge is current workspace state; an unmaterialized deliver
-conflict exists only in its mutation result and is not fabricated into later
-reads.
-
-When deliver asks to materialize a judged conflict, Git projects that judged
-target into the appointed workspace without choosing ours/theirs, committing,
-or moving a ref. This is recovery projection, not a second conflict judge.
-
-Unmerged real-index entries refuse as `unmerged-paths` only when `includeDirty`
-is omitted. `includeDirty` does not refuse solely because the shared index still
-reports `UU`; it captures current non-ignored worktree bytes through the private
-index, leaves that shared index untouched, and keeps captured `MERGE_HEAD` as
-the second tender parent. Conflict markers are caller-authorized final bytes,
-not a second conflict judgment. Without `includeDirty`, any uncommitted
-workspace including unresolved or resolved merge state remains a dirty or
-unmerged refusal.
-
-Integration requires Git's structured merge-tree capability; unsupported Git is
-a typed integration failure. Targetless delivery does not need it.
-
-Targeted claimed placement is one serialized Git operation per canonical
-target ref. Its fence begins before checkout preconditions are observed and
-ends only after the journal and target transaction has been published and the
-target checkout has followed it. Admission atomically asserts
-`target == currentIntegration.predecessor`, moves it to
-`currentIntegration.snapshot`, and appends `claimed`; filesystem materialization
-remains a second physical write inside that same fence. If the target moved after
-delivery admission or Verification, the completion protocol acquires the same
-fence, integrates the persisted tender against the freshly observed target,
-materializes a new integration commit from the original delivery metadata, and
-admits `reintegrated` with the target assertion. Placement then retries against
-that folded integration. The original delivery bytes and ChangeId remain
-unchanged.
-
-The targeted checkout observation is a no-effects precheck. It accepts the
-targeted coordinates and prospective snapshots, lists registered checkouts,
-and returns ready follow arms or typed checkout/workspace refusals. It never
-publishes, follows, or claims. Placement invokes it under the target fence;
-audit may invoke it prospectively. Actual placement remains the only
-publisher. Movement has precedence over placeability, operational observation
-failure is `target.failed`, and stopped Verification answers `not-observed`.
-
-When the target checkout is not the tender source, placement follows Git merge semantics.
-Before publication, each registered checkout must admit the predecessor-to-candidate
-two-tree merge of its current index, have no worktree modification on changed paths,
-and have no untracked collision with a candidate addition. Unchanged staged, unstaged,
-and untracked paths are preserved. A refusal returns `checkout-not-followable` with
-the checkout, target, exact paths, and reason `staged`, `conflict`, or `untracked`;
-the claimed fact and target ref remain untouched. Success performs the same two-tree
-update after publication and reports its checkout effect.
-
-The dry-run is the only followability judge. Ignored-byte custody then examines
-only predecessor-to-candidate writes, never follows symlinks or enumerates
-unrelated siblings, and lets Git judge whether a displaced scope contains
-ignored untracked bytes. Any such byte refuses as `untracked`; observation
-failure is nonpublishing `target-placement-failed`.
-
-The target fence has no post-admission marker or ancestor search. Recovery is
-allowed only while the target names the claimed candidate. Unchanged staged,
-unstaged, and untracked paths are preserved. Interrupted claimed checkout
-recovery is owned by [git-reconciliation.md](git-reconciliation.md); later
-placement cannot pass while that checkout is behind.
-
-Git admission builds raw Git objects and uses one
-`update-ref --stdin --no-deref` transaction. It recognizes canonical admitted
-entry bytes and may classify an unknown result from durable facts, but it never
-redecides an offer. A known rejection preserves its diagnostic and lets
-protocol compare freshly observed asserted coordinates with the failed
-attempt. Movement of the Git or target coordinate invalidates that offer
-and begins a fresh semantic attempt; the old offer bytes are never rebuilt or
-replayed. With no coordinate movement the rejection is a hard
-`publication-failed`. No layer parses Git prose, silently
-adopts a newer document or target, or treats the recovery observation as a
-second acceptance authority.
-
-The same private-tree commit may contain opaque companion updates alongside
-journal appends. A companion is exactly one validated Git path and byte value;
-paths are unique within the Offer and cannot collide with the format marker or
-a touched journal path. Git validates this generic structure, writes the blobs,
-and publishes them under the same root CAS. It does not decode a companion or
-know TaskHolder semantics. Because the root ref is the atomic commit point,
-unknown-outcome recovery from the admitted journal entries also proves that
-every companion in that Offer landed; a partial publication is authority
-corruption, not a recoverable state.
-
-## Document Boundary
-
-The library owns document decoding. Protocol derives the current document once
-from its observed attempt, verifies the stamped `DocumentKey`, and passes the
-title and complete Markdown bytes to Git for delivery preparation. Git treats
-both as opaque commit-message inputs and neither decodes nor caches them. Bind
-protocol receives the title scalar only to mint the normalized ContractId
-defined in [model.md](model.md). Review preparation receives no
-document-derived value. Protocol combines its mechanical patch identity with
-the document key from the attempt observation to form the testimony subject.
-Git does not judge whether that subject is current.
-
-## Identities And Bytes
-
-Keiyaku records the tender snapshot and complete integration identity in
-durable facts. Git stores and resolves the bytes behind those identities. A
-journal entry is not a Git reachability edge. While active, the managed
-delivery ref names the tender snapshot and the candidate pin names the
-integration snapshot. The target makes a claimed integration reachable. Git
-retains no additional Keiyaku diff blob, permanent ref, or state index.
-
-Terminal cleanup removes an eligible managed worktree before releasing any
-redundant ref. It compares the complete private-index workspace tree with the
-journal-sealed start, tender, or integration trees and separately requires
-`HEAD` to be a sealed start, tender, integration, or dirty-tender base commit
-identity. The dirty-tender base is the sealed tender commit's first parent and
-only matters when the complete workspace bytes equal a sealed tree. Matching
-bytes therefore remain removable even when ordinary status is dirty.
-
-An abandoned managed worktree whose `HEAD` or complete non-ignored tree is not
-sealed receives one ephemeral recovery commit before removal. The commit names
-the captured tree, parents the observed workspace `HEAD`, carries the Contract
-identity in its message, and is deliberately left without a ref or durable
-fact. If destroy hooks change the captured `HEAD` or tree, cleanup writes a
-second recovery commit over the final tree with the first recovery as parent;
-the reported tip therefore keeps both captures reachable together while it
-survives. An accepted mutation exposes only that final tip as
-`recoverySnapshot`, with no retention literal or effects collection. Git
-may prune the entire recovery chain at any time allowed by repository policy.
-Ignored bytes are outside the capture and are removed with the worktree. Dirty
-submodule internals cannot be represented by the superproject tree and still
-retain the worktree. Claimed cleanup likewise retains every unsealed `HEAD` or
-tree rather than manufacturing recovery evidence.
-
-Every Keiyaku-owned ref deletion is one atomic transaction that verifies its
-surviving custodian ref. For claimed targeted custody, reconciliation freezes
-the current target tip and treats that target as an integration custodian only
-when the recorded integration commit is an ancestor of that frozen tip. The
-deletion transaction then verifies that the target still names the frozen tip.
-A candidate pin is released only when a surviving custodian preserves the
-exact integration commit, including a target whose frozen history still
-contains it. A delivery ref may be released when the surviving claimed
-integration preserves the exact tender tree; otherwise the tender ref remains.
-Equal trees therefore suffice only for tender-byte custody, never as a
-substitute for integration commit identity. A retained worktree retains its
-reachability topology. Git pruning may make only identities whose custody has
-lawfully ended unavailable. Identity facts remain durable Contract state. The
-public `Delivery.diff()` contract and its git-unavailable result are defined in
-[public-api.md](public-api.md).
-
-No cleanup operation rewrites a target ref. A target that advances while the
-integration remains reachable stays a custodian. A rewrite or deletion that
-removes the integration from target history retains the owned ref for a later
-reconcile to re-observe. A targetless claimed contract still requires another
-surviving custodian of the same byte identity. Nonredundant custody remains.
+Terminal cleanup removes a managed worktree only when its bytes and head are
+sealed by the Contract's recorded custody. Unsealed claimed bytes are retained.
+For abandoned unsealed bytes, Git may produce ephemeral, ref-free recovery
+evidence before removal; it is not a journal fact, retention promise, or source
+of later lifecycle authority. Physical removal precedes Place release and ref
+cleanup. A retained path or nonredundant ref is visible lag, never reversal of
+an accepted outcome.

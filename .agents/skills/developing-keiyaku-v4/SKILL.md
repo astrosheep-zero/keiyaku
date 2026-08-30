@@ -28,18 +28,18 @@ legacy repository at `/Users/astrosheep/Developer/keiyaku`.
 
 ### Owner chapter scope
 
-An owner chapter is a law book, not a specification dump. It records the
-surface's high-level product intent, durable invariants, caller-visible
-semantics, and the ownership boundaries needed to keep one authority. It does
-not recite source code, private helper names, implementation control flow,
-exhaustive provider dialect details, internal field inventories, test cases, or
-replaceable configuration. Public grammar and persisted/public shapes remain
-only to the degree callers or stored authority depend on them; explain their
-meaning and constraints rather than mirroring their TypeScript declarations.
-When a chapter grows, delete implementation narration and duplicated law
-before considering any maintainability exemption. A per-file exemption is
-appropriate only when the remaining text is genuinely irreplaceable law for
-that owner, not when a spec or code summary was left in place.
+An owner chapter is a law book, not a specification dump. It records product
+spirit, durable invariants, deliberate refusals, conceptual caller and
+persistence semantics, and the ownership boundaries needed to keep one
+authority. It explains what must remain true, who judges it, and which states
+are intentionally impossible. It never mirrors executable grammar, schemas,
+field or byte layouts, configuration or output shapes, source files, tests,
+private symbols, path maps, provider dialects, or implementation control flow.
+Literal user-facing grammar belongs to executable leaf help and source. When a
+chapter grows, delete implementation narration and duplicated law before
+considering any maintainability exemption. A per-file exemption is appropriate
+only when the remaining text is genuinely irreplaceable law for that owner,
+not when a spec or code summary was left in place.
 
 ## Repository and task commands
 

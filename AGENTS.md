@@ -22,13 +22,15 @@ modules rather than directories of tiny wrappers.
 Update the owning root document in the same coherent change as any newly
 settled law and its implementation.
 
-Owner chapters state product spirit, core invariants, high-level architecture,
-and the ownership or dependency boundaries needed to prevent a second
-authority. They describe durable behavior conceptually, not by enumerating
-fields, functions, files, tests, private types, byte layouts, or implementation
-control flow. A source change that settles new durable law updates the one
-owner chapter in the same coherent change. Tasks, Contracts, skills, tests,
-and comments remain evidence or procedure, never alternate law.
+Owner chapters state durable product intent, core invariants, deliberate
+refusals, conceptual caller, persistence, failure, recovery, concurrency, and
+ownership direction. They describe behavior conceptually, never as executable
+grammar, schema or field layout, configuration or output shape, source or test
+inventory, byte layout, private symbol, path map, or control-flow mirror.
+Literal user-facing grammar belongs to executable leaf help and source, not
+owner law. A source change that settles new durable law updates the one owner
+chapter in the same coherent change. Tasks, Contracts, skills, tests, and
+comments remain evidence or procedure, never alternate law.
 
 ## Package Manager
 

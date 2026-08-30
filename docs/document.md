@@ -1,186 +1,52 @@
 # Contract Documents
 
-This chapter owns the Keiyaku Markdown methodology at the library edge. It is
-a pure document boundary: it decides edge syntax and private document values,
-never lifecycle legality, journal admission, or Git effects. A decoded
-document remains library-private. Core retains only the opaque whole-document
-bytes, their key, and ordered opaque segment keys defined by [model.md](model.md);
-it knows no section name or Markdown grammar.
+This chapter owns the Markdown boundary for Contracts. It turns caller-authored
+terms into private library values; it does not judge lifecycle legality, admit
+journal facts, or perform Git effects. Core persists opaque document terms and
+their identities, never a decoded body, section tree, or Markdown grammar.
 
-The sole cross-layer output of a decoded document is the key-stamped scalar
-derivation `{ document, title, verification }`. `document` is the `DocumentKey`
-stamp; `title` and the Verification definition are derived from exactly that
-decoded document. The `verification` member carries the one typed declaration
-preparation defined by [verification.md](verification.md); protocol may compose
-that prepared or refused value into a verb input but never re-derive its
-legality. The derivation carries neither a structured body, section tree, raw
-body callback, nor a protocol body reader. It is attempt-local and is never a
-persisted fact, cache, or replacement document authority. Its currency is
-decided against the attempt observation by the one legal `decide` in
-[lifecycle.md](lifecycle.md), not by the document boundary.
+## Contract Terms
 
-Amend, deliver, and audit are the consumers of that decoded-document
-derivation. Review consumes no decoded value. Its testimony subject names the
-document and patch identities actually reviewed, so later document movement is
-handled by generic gate currentness rather than by another document projection.
+A Contract document communicates its context, objective, design, intended
+write Region, acceptance criteria, and optional Verification declarations.
+Those required terms must be structurally valid and nonempty where meaningful;
+invalid documents are rejected before a lifecycle attempt. Extensions may carry
+additional author terms without becoming core vocabulary.
 
-## Markdown Dialect
+`Region` is planning evidence. It lets callers see likely interaction among
+active Contracts, but grants no filesystem authority, predicts no eventual
+diff, and never rejects concurrent work. A real dependency or an irreconcilable
+interaction is instead an `after` relation owned by [lifecycle.md](lifecycle.md).
+Exact document, Region-pattern, and fence grammar belong to leaf help and
+executable specifications, not this owner law.
 
-Fork bind replaces only the source document H1 with `Fork · <source title>` and
-preserves every remaining byte, including extensions and line endings. The
-ordinary decoder recomputes document and section keys; no fork-specific field or
-grammar exists.
+The document boundary reserves machine and guidance sections from author
+extensions. Reserved names cannot silently become structured Contract terms.
+Forking creates an ordinary new Contract from the source terms with a forked
+title; it creates neither a source relationship nor a second document dialect.
 
-The Markdown layer accepts column-zero ATX H1, H2, and H3 headings, one
-repository-wide fence law, YAML frontmatter, blockquotes, nested lists, and
-opaque inline and fence bytes. Setext headings and inline AST interpretation
-are outside this dialect. Parsing is pure and source-aware. Tokens and nodes
-carry UTF-16 `SourceSpan` coordinates that tile the original source after an
-optional BOM without gaps or overlap. Slicing a span returns its exact source
-interval, including CRLF bytes; logical normalization does not change those
-coordinates. Normalized title and level indexes are derived once, and section
-content is read from its source span.
+## Amendments And Arcs
 
-## Contract Document
+An amendment is an explicit operation over whole Contract sections. It may
+replace, append to, add, update, or remove the section forms that support that
+meaning; ambiguous or invalid operations are refused. Untouched source terms
+retain their identity. An amendment never silently retargets its supplied terms
+to a later document: document currency is judged by the lifecycle decision.
 
-A contract document has exactly one H1 title and these required H2 sections:
+An arc is a title, objective, and brief naming the current narrative chapter of
+one active Contract. It frames the currently dispatched work without splitting
+acceptance, gates, or settlement into a second lifecycle. Arc sequence and
+terminal legality belong to [lifecycle.md](lifecycle.md).
 
-| Section | Content |
-| --- | --- |
-| `Context` | Nonblank prose. |
-| `Objective` | Nonblank prose. |
-| `Design` | Nonblank prose. |
-| `Region` | One closed fence with no info string or the exact `txt` info string, and one or more nonblank path patterns. |
-| `Criteria` | One or more H3 criteria. Each title is unique after normalized comparison and each body is nonblank. |
-| `Verification` | Optional ordered executor declarations owned by the library edge. |
+## Boundary
 
-The library owns interpretation of these sections and any extensions. They are
-not structural core facts. In particular, `Region` and every other decoded
-document field remain library methodology, not journal-model vocabulary.
+The library decodes a document once per attempt and may pass only an
+attempt-local, identity-stamped derivation required by the operation, including
+its title and prepared Verification work. That derivation is not persisted,
+cached, or exposed as a second document authority. Review instead testifies to
+the document and worktree it actually observed. The sole lifecycle decision
+judges a derivation's currency.
 
-`Region` declares the author's intended write surface so bind and amend can
-report likely interaction with active Contracts. It is planning evidence, not
-filesystem authority, a Git restriction, or a claim that the eventual diff
-will contain every named path. Concurrent Contracts may declare overlapping
-Regions. The overlap helps the flagship decide whether optimistic parallel work
-is sensible; it does not adjudicate ownership or reject either Contract.
-
-Kanshi may read the current Region declaration directly from active Contract
-documents for planning. Query patterns on that read use this same line grammar
-and the same exact calculator as bind and amend; a literal repository path is
-the grammar's degenerate case. The read creates no journal fact, cache, scope
-alias, ownership decision, or projection of actual touched paths.
-
-Each nonblank line in `Region` is one repository-relative positive path
-pattern. `/` separates segments. Within a segment, `*` matches any number of
-characters other than `/`, and `?` matches exactly one such character. `**`
-matches any depth and may appear only as a complete segment. A final `/` is
-directory shorthand and is normalized to `/**`; no other empty segment is
-valid. A pattern may not contain `!`, `[`, `]`, `{`, or `}`, begin with `/`, or
-contain `..`. Invalid patterns are typed document refusals.
-
-The dialect computes exact intersection between two patterns from this closed
-grammar. It does not use a conservative approximation for the pattern
-calculation. The resulting overlap is still a coarse comparison of declared
-intent, not an exact forecast of future Git writes. This interpretation is pure
-body methodology: only the opaque source document terms may persist below the
-library edge; core, protocol, and Git never receive the decoded body.
-
-The title has no content before the first H2. The document has no nonblank
-bytes outside its H1 and H2 sections, no duplicate top-level H2, and no
-frontmatter. An unrecognized H2 is an extension with its original title and
-content bytes; its content is nonblank. Decoding keeps the complete opaque
-document bytes, mints a whole-document key and ordered segment keys, and
-supplies those opaque terms for persistence. It never supplies the decoded
-body. Core stores the bytes without parsing them. `gates` and `after` are
-machine terms, not Markdown-derived core fields.
-
-`Verification` uses one or more direct closed fences with an exact `bash`,
-`zsh`, or `pwsh` info string, optionally followed by one ASCII space and
-`timeout=<integer-duration>` where the duration has one of the `ms`, `s`, `m`,
-or `h` units, and a nonblank script body.
-The optional timeout belongs to that declaration alone; its absence means no
-Keiyaku deadline. A declaration has no other attributes.
-The resulting declaration values are private library/verification values. Core
-receives only the opaque segment key and never sees executor, script, or section
-name.
-
-## Reserved Sections
-
-The normalized H2 titles `Gates`, `Pipeline`, `After`, `Arc`, and `Fulfillment`
-are refused with the ordinary invalid-document `TypeError`. They are not
-extensions. `Gates`, `Pipeline`, and `After` do not encode structured operation
-inputs. `Arc` and `Fulfillment` are reserved for the derived guidance owned by
-[workspace.md](workspace.md).
-
-## Amend Operations
-
-`Keiyaku.amend` accepts an operation document made solely of H2 sections. It
-has no H1, frontmatter, or nonblank bytes outside those sections. Every H2
-heading has exactly this grammar:
-
-```text
-## Context|Objective|Design|Region|Criteria|Verification|<extension>
-## Replace: Context|Objective|Design|Region|Criteria|Verification|<extension>
-## Append: Context|Objective|Design|Criteria|<extension>
-## Add: Criteria|<new-extension-title>
-## Update: <existing-extension-title>
-## Remove: <existing-extension-title>
-```
-
-A heading with no explicit operation prefix replaces that complete H2 target
-when it already exists, and adds it when it is a new extension title. Explicit
-`Replace` still requires an existing target. `Replace` supplies the target's
-complete canonical content. `Append` adds canonical prose or canonical
-collection entries. `Add` creates an extension or adds one or more H3 criteria.
-Criteria have no criterion-level amendment grammar; removing or rewriting
-entries replaces the complete `Criteria` section. Extension update and remove
-use the exact extension title in the H2 target. A target occurs at most once for
-an operation kind when duplicate application would be ambiguous.
-
-Every operation body uses the grammar of its target section. `Replace:
-Verification` uses the declaration grammar above. The complete amended document is
-produced by applying the ordered operations at the edge; the library then mints
-replacement opaque document keys for core. A derivation selected from an older
-document is never silently retargeted to those replacement keys; the receiving
-attempt's one legal decision determines whether its stamp is current.
-
-Amend rendering preserves the exact source bytes of the H1 and every H2 section
-that no operation addresses. Only an addressed or newly added section is
-rendered from its admitted operation value; removal omits that section. This
-keeps untouched segment identities stable without making formatting or segment
-meaning part of core.
-
-When `Keiyaku.amend` supplies no operation document, the current opaque
-document bytes and ordered segment keys are copied unchanged. That path does
-not apply H2 operations or pass the current document through the amendment
-renderer.
-
-## Arc Document
-
-`Keiyaku.arc` accepts exactly one document in this shape:
-
-```markdown
-# <title>
-
-## Objective
-<nonblank objective>
-
-## Brief
-<nonblank dispatch brief>
-```
-
-It has no frontmatter, no additional top-level section, and no unowned
-nonblank bytes. The decoded value is `{ title, objective, brief }`. The
-contract's current chapter and its sequence are lifecycle state, defined in
-[lifecycle.md](lifecycle.md).
-
-## Rendering Boundary
-
-The decoder, amendment applier, and arc decoder are internal library consumers
-of this methodology. A document is decoded once and its structured edge value
-does not leave the library. Only its key-stamped `{ document, title,
-verification }` derivation may cross to a verb attempt, where the lifecycle
-decision judges its currency. Edge formatting, when needed, does not create
-core facts, persisted derivations, or a second document authority. The
-package-root boundary is owned by [public-api.md](public-api.md).
+Public callers supply Markdown through the package boundary described by
+[public-api.md](public-api.md). Rendering, detailed grammar, and private
+decoded values do not cross that boundary.
