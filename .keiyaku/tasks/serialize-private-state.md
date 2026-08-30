@@ -1,15 +1,15 @@
 ---
 id: task/serialize-private-state
 title: Serialize private state publication across settlement and reconcile
-state: open
+state: done
 priority: 1
 needs: []
 parent: task/reconcile-custody-and-cleanup
 supersedes: []
 relates: []
-note: ""
+note: Git-owned private-state seat law and implementation are on main at bbdc91ff; corrected tender review satisfied and Contract claimed.
 createdAt: 2026-08-22T15:36:03.581Z
-updatedAt: 2026-08-22T15:52:20.627Z
+updatedAt: 2026-08-30T07:02:56.643Z
 ---
 Resolve the mismatch between per-Contract/per-Task SQLite fences and the shared refs/heads/keiyaku-state CAS. The current settleAll uses Promise.all and each post-admission holder release publishes against a frozen state OID without acquiring a shared private-root writer fence. Define the serialization boundary, fresh observation and retry behavior, failure reporting, recovery, tests, and settlement owner law.
 

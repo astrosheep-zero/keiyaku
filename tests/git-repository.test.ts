@@ -11,8 +11,8 @@ import {
   DELIVERY_REF_NAMESPACE,
   GIT_REF,
   isKeiyakuOwnedRef,
-  MIGRATION_CANDIDATE_PIN_REF_NAMESPACE,
-  MIGRATION_DELIVERY_REF_NAMESPACE,
+  LEGACY_CANDIDATE_PIN_REF_NAMESPACE,
+  LEGACY_DELIVERY_REF_NAMESPACE,
   readBlob,
   readRefs,
   repositoryAt,
@@ -45,8 +45,8 @@ test("Keiyaku-owned refs keep delivery and candidate namespaces distinct across 
   for (const root of [
     DELIVERY_REF_NAMESPACE,
     CANDIDATE_PIN_REF_NAMESPACE,
-    MIGRATION_DELIVERY_REF_NAMESPACE,
-    MIGRATION_CANDIDATE_PIN_REF_NAMESPACE,
+    LEGACY_DELIVERY_REF_NAMESPACE,
+    LEGACY_CANDIDATE_PIN_REF_NAMESPACE,
   ]) {
     assert.equal(isKeiyakuOwnedRef(root), true);
     assert.equal(isKeiyakuOwnedRef(`${root}/leaf`), true);
@@ -56,8 +56,8 @@ test("Keiyaku-owned refs keep delivery and candidate namespaces distinct across 
   assert.equal(isKeiyakuOwnedRef("refs/keiyaku/other"), false);
   assert.equal(DELIVERY_REF_NAMESPACE.startsWith(CANDIDATE_PIN_REF_NAMESPACE), false);
   assert.equal(CANDIDATE_PIN_REF_NAMESPACE.startsWith(DELIVERY_REF_NAMESPACE), false);
-  assert.equal(MIGRATION_DELIVERY_REF_NAMESPACE.startsWith(MIGRATION_CANDIDATE_PIN_REF_NAMESPACE), false);
-  assert.equal(MIGRATION_CANDIDATE_PIN_REF_NAMESPACE.startsWith(MIGRATION_DELIVERY_REF_NAMESPACE), false);
+  assert.equal(LEGACY_DELIVERY_REF_NAMESPACE.startsWith(LEGACY_CANDIDATE_PIN_REF_NAMESPACE), false);
+  assert.equal(LEGACY_CANDIDATE_PIN_REF_NAMESPACE.startsWith(LEGACY_DELIVERY_REF_NAMESPACE), false);
 });
 
 test("state commit construction warns while ordinary commit messages stay unchanged", async () => {

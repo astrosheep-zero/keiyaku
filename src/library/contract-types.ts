@@ -50,6 +50,11 @@ export type ForkBindInput = Readonly<{
 }>;
 export type BindInput = MarkdownBindInput | ForkBindInput;
 type ActorOptions = Readonly<{ actor?: string; hooks?: WorktreeHooks }>;
+export type LocalContractComposition = Readonly<{
+  actor?: string;
+  hooks?: WorktreeHooks;
+  requireBranchesToBeUpToDate?: boolean;
+}>;
 
 export type AmendInput = ActorOptions &
   Readonly<{
@@ -61,13 +66,11 @@ export type ArcInput = ActorOptions & Readonly<{ markdown: string }>;
 export type ContractListInput = Readonly<{ repo: Repo }>;
 export type ContractObservationInput = Readonly<{ repo: Repo; id: ContractId }>;
 export type KeiyakuOfInput = Readonly<{ repo: Repo; id: ContractId }>;
-export type ReviewInput = ActorOptions & Readonly<{ verdict: AttestationVerdict; summary?: string }>;
+export type ReviewInput = Readonly<{ verdict: AttestationVerdict; summary?: string }>;
 export type AbandonInput = ActorOptions & Readonly<{ note?: string }>;
-export type DeliverInput = ActorOptions &
-  Readonly<{
-    message?: string;
-    requireBranchesToBeUpToDate?: boolean;
-    includeDirty?: boolean;
-    materializeConflict?: boolean;
-    signal?: AbortSignal;
-  }>;
+export type DeliverInput = Readonly<{
+  message?: string;
+  includeDirty?: boolean;
+  materializeConflict?: boolean;
+  signal?: AbortSignal;
+}>;

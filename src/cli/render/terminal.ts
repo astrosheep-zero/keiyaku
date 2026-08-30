@@ -197,9 +197,22 @@ export function renderOpaqueBlock(value: string, indent: string, columns: number
   return lines;
 }
 
-export function tone(value: string, kind: "dim" | "alert", color: boolean): string {
+export type SemanticTone = "dim" | "recent" | "attention" | "alert";
+
+export const RECENT_TONE_MS = 5 * 60 * 1_000;
+
+export function elapsedMilliseconds(source: string | null | undefined, observedAt: string): number | null {
+  if (source === null || source === undefined) return null;
+  const sourceMs = Date.parse(source);
+  const observedMs = Date.parse(observedAt);
+  if (!Number.isFinite(sourceMs) || !Number.isFinite(observedMs)) return null;
+  return Math.max(0, observedMs - sourceMs);
+}
+
+export function tone(value: string, kind: SemanticTone, color: boolean): string {
   if (!color) return value;
-  return kind === "dim" ? `\u001b[2m${value}\u001b[0m` : `\u001b[31m${value}\u001b[0m`;
+  const code = kind === "dim" ? 2 : kind === "recent" ? 32 : kind === "attention" ? 33 : 31;
+  return `\u001b[${code}m${value}\u001b[0m`;
 }
 
 const KANSHI_NARROW_COLUMNS = 72;

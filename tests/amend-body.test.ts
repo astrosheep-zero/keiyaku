@@ -35,11 +35,12 @@ test("amend H2 operations form one complete body replacement", () => {
       "lib/**",
       "~~~",
       "",
-      "## Add: Criteria",
+      "## Replace: Criteria",
+      "### Keep",
+      "before",
+      "",
       "### Added",
       "added",
-      "",
-      "## Remove: Criterion Drop",
       "",
       "## Append: Notes",
       "second",
@@ -66,6 +67,46 @@ test("amend H2 operations form one complete body replacement", () => {
   assert.deepEqual(
     amended.extensions.map(({ title, content }) => ({ title, content: content.trim() })),
     [{ title: "Notes", content: "first\n\nsecond" }],
+  );
+});
+
+test("bare amend H2 headings replace existing sections and add new extensions", () => {
+  const amended = applyAmendOperations(
+    [
+      "## Context",
+      "bare context",
+      "",
+      "## Criteria",
+      "### Bare criterion",
+      "bare criterion body",
+      "",
+      "## Verification",
+      "```bash",
+      "echo bare",
+      "```",
+      "",
+      "## Notes",
+      "bare notes",
+      "",
+      "## Fresh notes",
+      "new extension",
+      "",
+    ].join("\n"),
+    body,
+  );
+
+  assert.equal(amended.context.trim(), "bare context");
+  assert.deepEqual(
+    amended.criteria.map(({ title, body }) => ({ title, body: body.trim() })),
+    [{ title: "Bare criterion", body: "bare criterion body" }],
+  );
+  assert.deepEqual(amended.verification, [{ executor: "bash", script: "echo bare" }]);
+  assert.deepEqual(
+    amended.extensions.map(({ title, content }) => ({ title, content: content.trim() })),
+    [
+      { title: "Notes", content: "bare notes" },
+      { title: "Fresh notes", content: "new extension" },
+    ],
   );
 });
 
@@ -100,14 +141,12 @@ test("amend supports every ruled core, criterion, and extension operation", () =
       "replacement",
       "",
       "## Append: Criteria",
-      "### Remove me",
-      "remove",
+      "### Appended",
+      "appended",
       "",
       "## Add: Criteria",
       "### Add me",
       "added",
-      "",
-      "## Remove: Criterion Remove me",
       "",
       "## Replace: Verification",
       "```pwsh",
@@ -140,6 +179,7 @@ test("amend supports every ruled core, criterion, and extension operation", () =
     amended.criteria.map(({ title, body }) => ({ title, body: body.trim() })),
     [
       { title: "Replace me", body: "replacement" },
+      { title: "Appended", body: "appended" },
       { title: "Add me", body: "added" },
     ],
   );
@@ -150,15 +190,13 @@ test("amend supports every ruled core, criterion, and extension operation", () =
   );
 });
 
-test("amend keeps criterion and extension targets indexed across ordered mutations", () => {
+test("amend keeps criteria and extension collections coherent across ordered mutations", () => {
   const indexedBody: ContractBodyValue = {
     ...body,
     extensions: [...body.extensions, { title: "Archive", content: "archive\n" }],
   };
   const amended = applyAmendOperations(
     [
-      "## Remove: Criterion Keep",
-      "",
       "## Replace: Criteria",
       "### Replaced",
       "replacement",
@@ -170,8 +208,6 @@ test("amend keeps criterion and extension targets indexed across ordered mutatio
       "## Add: Criteria",
       "### Added",
       "added",
-      "",
-      "## Remove: Criterion Replaced",
       "",
       "## Remove: Notes",
       "",
@@ -199,6 +235,7 @@ test("amend keeps criterion and extension targets indexed across ordered mutatio
   assert.deepEqual(
     amended.criteria.map(({ title, body }) => ({ title, body: body.trim() })),
     [
+      { title: "Replaced", body: "replacement" },
       { title: "Appended", body: "appended" },
       { title: "Added", body: "added" },
     ],
@@ -206,6 +243,13 @@ test("amend keeps criterion and extension targets indexed across ordered mutatio
   assert.deepEqual(
     amended.extensions.map(({ title, content }) => ({ title, content: content.trim() })),
     [{ title: "Archive", content: "updated archive" }],
+  );
+});
+
+test("amend has no criterion-level remove operation", () => {
+  assert.throws(
+    () => applyAmendOperations("## Remove: Criterion Keep\n", body),
+    (error: unknown) => error instanceof TypeError && error.message === "unknown extension 'Criterion Keep'",
   );
 });
 
@@ -223,5 +267,12 @@ test("amend rejects a normalized extension-title collision at the operation boun
   assert.throws(
     () => applyAmendOperations("## Add: notes\nsecond notes\n", body),
     (error: unknown) => error instanceof TypeError && error.message === "extension already exists 'notes'",
+  );
+});
+
+test("explicit Replace still refuses a missing extension", () => {
+  assert.throws(
+    () => applyAmendOperations("## Replace: Fresh notes\nnew extension\n", body),
+    (error: unknown) => error instanceof TypeError && error.message === "unknown extension 'Fresh notes'",
   );
 });

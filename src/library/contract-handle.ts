@@ -60,6 +60,7 @@ import {
   type Review as OperationReview,
 } from "./contract-operations.js";
 import { KeiyakuRefused, requireAccepted } from "./refusal.js";
+import type { LocalContractCompositionCapture } from "./contract.js";
 type Review = OperationReview;
 
 export class KeiyakuHandle {
@@ -67,6 +68,7 @@ export class KeiyakuHandle {
     private readonly id: ContractId,
     private readonly scope: RepositoryScope,
     private readonly execution: ExecutionContext = localExecutionContext(),
+    private readonly composition: LocalContractCompositionCapture,
   ) {
     KEIYAKU_SEATS.set(this, { id, scope });
   }
@@ -205,14 +207,13 @@ export class KeiyakuHandle {
   }
 
   async deliver(input?: DeliverInput): Promise<MutationResult<Delivery> | IntegrationConflictMaterialized> {
-    const values = input === undefined ? undefined : requireInput(input, "deliver input");
-    const hooks = worktreeHooksOption(values?.hooks);
+    const values =
+      input === undefined
+        ? undefined
+        : requireInput(input, "deliver input", ["message", "includeDirty", "materializeConflict", "signal"]);
     const message = optionalNonblank(values?.message, "deliver message");
-    const requireBranchesToBeUpToDate =
-      optionalBoolean(values?.requireBranchesToBeUpToDate, "requireBranchesToBeUpToDate") ?? false;
     const includeDirty = optionalBoolean(values?.includeDirty, "includeDirty") ?? false;
     const materializeConflict = optionalBoolean(values?.materializeConflict, "materializeConflict") ?? false;
-    const actor = actorOption(values?.actor);
     const signal = optionalSignal(values?.signal);
     const channel = executionChannel(this.execution);
     const result =
@@ -220,13 +221,13 @@ export class KeiyakuHandle {
         ? await executeLocalDelivery({
             scope: this.scope,
             contractId: this.id,
-            ...actor,
+            ...(this.composition.actor === undefined ? {} : { actor: this.composition.actor }),
             ...(message === undefined ? {} : { message }),
-            requireBranchesToBeUpToDate,
+            requireBranchesToBeUpToDate: this.composition.requireBranchesToBeUpToDate,
             includeDirty,
             materializeConflict,
             ...(signal === undefined ? {} : { signal }),
-            hooks,
+            hooks: this.composition.hooks,
           })
         : await requestForwardedContractLive({
             directory: channel.directory,
@@ -245,14 +246,12 @@ export class KeiyakuHandle {
   }
 
   async review(input: ReviewInput): Promise<MutationResult<Review>> {
-    const values = requireInput(input, "review input");
-    const hooks = worktreeHooksOption(values.hooks);
+    const values = requireInput(input, "review input", ["verdict", "summary"]);
     const verdict = values.verdict;
     if (verdict !== "satisfied" && verdict !== "unsatisfied") {
       return invalidInput("verdict must be satisfied or unsatisfied");
     }
     const summary = optionalNonblank(values.summary, "review summary");
-    const actor = actorOption(values.actor);
     const channel = executionChannel(this.execution);
     if (channel.kind === "body-request") {
       return await requestForwardedContractLive({
@@ -270,10 +269,10 @@ export class KeiyakuHandle {
     return await executeLocalReview({
       scope: this.scope,
       contractId: this.id,
-      ...actor,
+      ...(this.composition.actor === undefined ? {} : { actor: this.composition.actor }),
       verdict,
       ...(summary === undefined ? {} : { summary }),
-      hooks,
+      hooks: this.composition.hooks,
     });
   }
 
@@ -326,16 +325,18 @@ export class KeiyakuHandle {
   }
 
   async audit(input?: AuditInput): Promise<MutationResult<AuditReport>> {
+    const values =
+      input === undefined ? undefined : requireInput(input, "audit input", ["includeDirty", "showDiff", "signal"]);
+    const includeDirty = optionalBoolean(values?.includeDirty, "includeDirty") ?? false;
+    const showDiff = optionalBoolean(values?.showDiff, "showDiff") ?? false;
+    const signal = optionalSignal(values?.signal);
+    const auditInput = {
+      includeDirty,
+      showDiff,
+      ...(signal === undefined ? {} : { signal }),
+    };
     const channel = executionChannel(this.execution);
     if (channel.kind === "body-request") {
-      const values = input === undefined ? undefined : requireInput(input, "audit input");
-      worktreeHooksOption(values?.hooks);
-      actorOption(values?.actor);
-      const includeDirty = optionalBoolean(values?.includeDirty, "includeDirty") ?? false;
-      const showDiff = optionalBoolean(values?.showDiff, "showDiff") ?? false;
-      const requireBranchesToBeUpToDate =
-        optionalBoolean(values?.requireBranchesToBeUpToDate, "requireBranchesToBeUpToDate") ?? false;
-      const signal = optionalSignal(values?.signal);
       return await requestForwardedContractLive({
         directory: channel.directory,
         action: "contract.audit",
@@ -345,7 +346,6 @@ export class KeiyakuHandle {
           contractId: this.id,
           includeDirty,
           showDiff,
-          requireBranchesToBeUpToDate,
         },
         ...(signal === undefined ? {} : { signal }),
       });
@@ -353,7 +353,8 @@ export class KeiyakuHandle {
     return auditContract({
       scope: this.scope,
       contractId: this.id,
-      ...(input === undefined ? {} : { input }),
+      input: auditInput,
+      composition: this.composition,
     });
   }
 

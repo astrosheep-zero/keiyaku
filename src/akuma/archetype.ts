@@ -107,7 +107,7 @@ function archetypeReadonly(values: Readonly<Record<string, unknown>>): true | un
 
 function decodeArchetype(name: string, path: string, markdown: string): DecodedArchetype {
   const lines = markdown.split(/\r?\n/u);
-  if (lines[0]?.trim() !== "---") throw new TypeError("Akuma configuration must begin with YAML frontmatter");
+  if (lines[0]?.trim() !== "---") throw new TypeError("Akuma file must begin with YAML frontmatter");
   const closing = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
   if (closing < 0) throw new TypeError("Akuma frontmatter is not closed");
   const document = parseDocument(lines.slice(1, closing).join("\n"), { uniqueKeys: true });

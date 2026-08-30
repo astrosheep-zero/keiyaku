@@ -1,31 +1,25 @@
 import { decodeContractDocument } from "../body/decode.js";
-import { contractId, type ContractId, type ContractState } from "../core/facts/types.js";
+import type { ActorId, ContractId, ContractState } from "../core/facts/types.js";
 import { withGitDecodeChannel, type GitDecodeChannel } from "../git/read-observation.js";
 import { deliverOperation, type IntegrationConflictMaterialized } from "../protocol/deliver.js";
 import type { RepositoryScope } from "../protocol/operations.js";
 import { reviewOperation } from "../protocol/review.js";
-import { auditContract, type AuditInput } from "./audit.js";
+import { auditContract, type AuditComposition } from "./audit.js";
 import type { AuditReport } from "../protocol/audit.js";
 import { continueAcceptedCompletion } from "./continuation.js";
 import type { WorktreeHooks } from "./configuration.js";
 import type { DeliveryValue } from "./delivery.js";
-import { actorOption, documentDerivation, invalidInput, optionalNonblank } from "./input.js";
+import { documentDerivation } from "./input.js";
 import { completionInput, completeMutation, type MutationResult } from "./mutation.js";
 import { requireAccepted } from "./refusal.js";
-import {
-  auditReportSchema,
-  auditResultSchema,
-  deliveryResultSchema,
-  reviewResultSchema,
-  type Review,
-} from "./contract-forwarding-result.js";
+import type { Review } from "./contract-forwarding-result.js";
 export type { Review } from "./contract-forwarding-result.js";
 import { Repo, scopeForRepo } from "./repo.js";
 
 export type DeliveryExecutionInput = Readonly<{
   scope: RepositoryScope;
   contractId: ContractId;
-  actor?: ReturnType<typeof actorOption>["actor"];
+  actor?: ActorId;
   message?: string;
   requireBranchesToBeUpToDate: boolean;
   includeDirty: boolean;
@@ -38,7 +32,7 @@ export type AttestationVerdict = "satisfied" | "unsatisfied";
 export type ReviewExecutionInput = Readonly<{
   scope: RepositoryScope;
   contractId: ContractId;
-  actor?: ReturnType<typeof actorOption>["actor"];
+  actor?: ActorId;
   verdict: AttestationVerdict;
   summary?: string;
   hooks: WorktreeHooks;
@@ -108,8 +102,8 @@ export async function executeLocalReview(input: ReviewExecutionInput): Promise<M
 export async function executeForwardedDeliver(
   input: Readonly<{
     repo: Repo;
-    contractId: string;
-    requester: string;
+    contractId: ContractId;
+    requester: ActorId;
     message?: string;
     includeDirty: boolean;
     materializeConflict: boolean;
@@ -120,80 +114,71 @@ export async function executeForwardedDeliver(
 ): Promise<
   Readonly<{ result: MutationResult<DeliveryValue> | IntegrationConflictMaterialized; deliveryFactId?: string }>
 > {
-  const id = contractId(input.contractId);
-  const actor = actorOption(input.requester).actor;
-  const message = optionalNonblank(input.message, "deliver message");
   const result = await executeLocalDelivery({
     scope: scopeForRepo(input.repo),
-    contractId: id,
-    ...(actor === undefined ? {} : { actor }),
-    ...(message === undefined ? {} : { message }),
+    contractId: input.contractId,
+    actor: input.requester,
+    ...(input.message === undefined ? {} : { message: input.message }),
     requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
     includeDirty: input.includeDirty,
     materializeConflict: input.materializeConflict,
     ...(input.signal === undefined ? {} : { signal: input.signal }),
     hooks: input.hooks,
   });
-  if (!("facts" in result)) return { result: deliveryResultSchema.parse(result) };
+  if (!("facts" in result)) return { result };
   const delivery = result.facts.find((fact) => fact.kind === "deliver");
   if (delivery === undefined) throw new Error("accepted delivery is missing its journal fact");
-  return { result: deliveryResultSchema.parse(result), deliveryFactId: delivery.entry };
+  return { result, deliveryFactId: delivery.entry };
 }
 
 export async function executeForwardedReview(
   input: Readonly<{
     repo: Repo;
-    contractId: string;
-    requester: string;
+    contractId: ContractId;
+    requester: ActorId;
     verdict: AttestationVerdict;
     summary?: string;
     hooks: Parameters<typeof executeLocalReview>[0]["hooks"];
   }>,
 ): Promise<Readonly<{ result: MutationResult<Review>; reviewFactId?: string }>> {
-  const id = contractId(input.contractId);
-  const actor = actorOption(input.requester).actor;
-  if (input.verdict !== "satisfied" && input.verdict !== "unsatisfied") {
-    invalidInput("verdict must be satisfied or unsatisfied");
-  }
-  const summary = optionalNonblank(input.summary, "review summary");
   const result = await executeLocalReview({
     scope: scopeForRepo(input.repo),
-    contractId: id,
-    ...(actor === undefined ? {} : { actor }),
+    contractId: input.contractId,
+    actor: input.requester,
     verdict: input.verdict,
-    ...(summary === undefined ? {} : { summary }),
+    ...(input.summary === undefined ? {} : { summary: input.summary }),
     hooks: input.hooks,
   });
   const review = result.facts.find((fact) => fact.kind === "attestation");
   if (review === undefined) throw new Error("accepted review is missing its journal fact");
-  return { result: reviewResultSchema.parse(result), reviewFactId: review.entry };
+  return { result, reviewFactId: review.entry };
 }
 
 export async function executeForwardedAudit(
   input: Readonly<{
     repo: Repo;
-    contractId: string;
-    requester: string;
+    contractId: ContractId;
+    requester: ActorId;
     includeDirty: boolean;
     showDiff: boolean;
     requireBranchesToBeUpToDate: boolean;
-    hooks: AuditInput["hooks"];
+    hooks: NonNullable<AuditComposition["hooks"]>;
     signal?: AbortSignal;
   }>,
 ): Promise<Readonly<{ result: MutationResult<AuditReport>; auditReport?: AuditReport }>> {
-  const id = contractId(input.contractId);
-  const actor = actorOption(input.requester).actor;
   const result = await auditContract({
     scope: scopeForRepo(input.repo),
-    contractId: id,
+    contractId: input.contractId,
     input: {
-      ...(actor === undefined ? {} : { actor }),
       includeDirty: input.includeDirty,
       showDiff: input.showDiff,
-      requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
-      ...(input.hooks === undefined ? {} : { hooks: input.hooks }),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     },
+    composition: {
+      actor: input.requester,
+      hooks: input.hooks,
+      requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
+    },
   });
-  return { result: auditResultSchema.parse(result), auditReport: auditReportSchema.parse(result.value) };
+  return { result, auditReport: result.value };
 }

@@ -1851,6 +1851,77 @@ test("forced disposal failure records hung and broke-off before the Body returns
   }
 });
 
+test("provider closure failure enters Body supervision before session completion", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-closed-failure-"));
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "c0ffee07" });
+    await initializeHeart(allocated.paths);
+    let rejectClosed!: (error: Error) => void;
+    const closed = new Promise<void>((_resolve, reject) => {
+      rejectClosed = reject;
+    });
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const body = driveAkumaBody(
+      {
+        paths: allocated.paths,
+        seed: {
+          id: allocated.id,
+          archetype: "claude",
+          provider: { name: "claude", kind: "claude-agent-sdk" },
+          options: {},
+          origin: { kind: "direct" },
+          cwd: root,
+        },
+        initialBody: "work",
+      },
+      {
+        admitOptions(options) {
+          return { kind: "admitted", options };
+        },
+        start() {
+          markStarted();
+          return {
+            result: Promise.resolve({
+              admission: { fence: "closed-failure-turn" },
+              events: {
+                async *[Symbol.asyncIterator]() {
+                  await new Promise<void>(() => {});
+                },
+              },
+              completion: new Promise<TurnResult>(() => {}),
+              async abort() {},
+              async forceDispose() {},
+            }),
+            closed,
+            async abort() {},
+            async forceDispose() {},
+          };
+        },
+      },
+      { now: () => "2026-08-08T00:00:00.000Z" },
+    );
+    while ((await readHeart(allocated.paths)).latestBody === null)
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    await started;
+    rejectClosed(new Error("provider resource close failed"));
+    await Promise.race([
+      body,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Body did not supervise provider closure")), 1_000)),
+    ]);
+    const heart = await readHeart(allocated.paths);
+    assert.deepEqual(heart.latestBody?.hung, {
+      diagnostic: "provider resource close failed",
+      at: "2026-08-08T00:00:00.000Z",
+    });
+    assert.equal(heart.latestBody?.end, "broke-off");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("durable control aborts an owned session while a live tell is stalled", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-stalled-tell-"));
   try {

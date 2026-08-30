@@ -33,7 +33,7 @@ type ServeClaim = (
       signal: AbortSignal;
       admissionOpen(): boolean;
     }>,
-) => Promise<void>;
+) => Promise<boolean>;
 
 const POLL_MS = 100;
 
@@ -84,7 +84,7 @@ export class BodyRequestPump {
           continue;
         }
         if (!this.admissionClosed) {
-          await this.serveClaim({
+          const served = await this.serveClaim({
             directory: this.directory,
             transportId,
             claim,
@@ -92,6 +92,7 @@ export class BodyRequestPump {
             signal: this.executionSignal.signal,
             admissionOpen: () => !this.admissionClosed,
           });
+          if (!served) await rm(path, { force: true });
         }
         this.handled.add(transportId);
       }

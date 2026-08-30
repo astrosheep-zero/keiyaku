@@ -92,6 +92,7 @@ export type DriveTurnInput = Readonly<{
 type ActiveTurn = Readonly<{
   turnSequence: number;
   attempt: ProviderAttempt<Session>;
+  custodyFailure: Promise<never>;
   drive: Session;
   requests: BodyRequestPump;
   cwd: string;
@@ -195,8 +196,9 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
     session === undefined
       ? input.adapter.start({ ...driveInput, session: { kind: "fresh" } })
       : input.adapter.resume!({ ...driveInput, session: { kind: "resume", coordinate: session } });
+  const custodyFailure = observeFailure(attempt.closed);
   try {
-    const selected = await Promise.race([attempt.result, requests.failure]);
+    const selected = await Promise.race([attempt.result, requests.failure, custodyFailure]);
     if (input.supervisor.signal.aborted) {
       try {
         const retirement = await retireProviderCustody(input, turn.sequence, attempt);
@@ -225,6 +227,7 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
     return {
       turnSequence: turn.sequence,
       attempt,
+      custodyFailure,
       drive: selected,
       requests,
       cwd,
@@ -312,11 +315,15 @@ function pumpReceipts(writers: TurnWriters): Promise<void> {
   })();
 }
 
-function observeReceiptFailure(receiptPump: Promise<void>): Promise<never> {
-  return receiptPump.then(
+function observeFailure(settlement: Promise<unknown>): Promise<never> {
+  return settlement.then(
     () => new Promise<never>(() => {}),
     (error: unknown) => Promise.reject(error),
   );
+}
+
+function observeReceiptFailure(receiptPump: Promise<void>): Promise<never> {
+  return observeFailure(receiptPump);
 }
 
 function observeCompletionFailure(drive: Session): Promise<Readonly<{ kind: "completion-failed"; error: unknown }>> {
@@ -425,6 +432,7 @@ async function consumeTurnDrive(input: DriveTurnInput, active: ActiveTurn): Prom
         receiptFailure,
         requests.failure,
         completionFailure,
+        active.custodyFailure,
       ]);
       if (next.kind === "completion-failed") {
         requests.stopAdmission();

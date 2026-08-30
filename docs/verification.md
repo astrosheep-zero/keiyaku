@@ -14,7 +14,7 @@ core fact or core gate vocabulary.
 
 ### Source-build launcher prerequisite
 
-The source build invokes Zig 0.14.1 to compile the Windows launcher. Zig is a
+The source build invokes Zig 0.14.1 or later to compile the Windows launcher. Zig is a
 system prerequisite, not an npm dependency: after `npm ci --ignore-scripts --prefer-offline`,
 run `npm run build` (or `npm test`) with
 `zig` on `PATH`, or set `KEIYAKU_ZIG` to the executable to use. On Windows, a

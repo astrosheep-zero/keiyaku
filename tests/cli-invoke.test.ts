@@ -49,11 +49,11 @@ import { Tasks } from "../src/task/index.js";
 import { World } from "../src/world.js";
 
 function deliveryRefFor(contract: ContractId): string {
-  return `refs/heads/keiyaku-delivery/kei-${contract.slice("kei/".length)}`;
+  return `refs/keiyaku/delivery/kei-${contract.slice("kei/".length)}`;
 }
 
 function candidatePinRefFor(contract: ContractId): string {
-  return `refs/heads/keiyaku-candidate/kei-${contract.slice("kei/".length)}`;
+  return `refs/keiyaku/candidate/kei-${contract.slice("kei/".length)}`;
 }
 
 function contractDocument(title: string, extra = ""): string {
@@ -1086,7 +1086,7 @@ test("managed delivery follows an eligible deterministic worktree", async () => 
   repository.run(["-C", path, "commit", "--allow-empty", "--quiet", "-m", "managed candidate"]);
   const candidate = repository.run(["-C", path, "rev-parse", "HEAD"]).trim();
 
-  const deliver = await fromManaged(["deliver", "--actor", "external-test"]);
+  const deliver = await fromManaged(["deliver"]);
   assert.equal(deliver.kind, "accepted");
   const state = (await observeContract(await cachedRepositoryAt(repository.path), id)).state;
   assert.equal(state?.delivery?.data.tenderSnapshot, candidate);
@@ -1133,8 +1133,6 @@ test("managed delivery follows an eligible deterministic worktree", async () => 
     "--satisfied",
     "--summary",
     "accepted",
-    "--actor",
-    "external-test",
   ]);
   assert.equal(satisfiedReview.kind, "accepted");
   assert.equal("lag" in satisfiedReview, false);
@@ -1191,7 +1189,7 @@ test("managed abandonment cleans terminal resources from its own worktree cwd", 
   const fromManaged = (argv: readonly string[], source = "") =>
     invoke(parseArgv(["-C", path, ...argv]), { environment: {}, readStdin: () => source });
   repository.run(["-C", path, "commit", "--allow-empty", "--quiet", "-m", "managed candidate"]);
-  const delivered = await fromManaged(["deliver", "--actor", "external-test"]);
+  const delivered = await fromManaged(["deliver"]);
   assert.equal(delivered.kind, "accepted");
   assert.equal((await readRef(await cachedRepositoryAt(repository.path), deliveryRefFor(id))) !== null, true);
   assert.equal((await readRef(await cachedRepositoryAt(repository.path), candidatePinRefFor(id))) !== null, true);
@@ -1226,7 +1224,7 @@ test("a terminal worktree removal failure remains accepted cleanup lag", async (
   const path = await appointedWorktreePath(await cachedRepositoryAt(repository.path), id);
   repository.run(["-C", path, "commit", "--allow-empty", "--quiet", "-m", "retained candidate"]);
   const candidate = repository.run(["-C", path, "rev-parse", "HEAD"]).trim();
-  const delivered = await invoke(parseArgv(["-C", path, "deliver", id, "--actor", "external-test"]), {
+  const delivered = await invoke(parseArgv(["-C", path, "deliver", id]), {
     environment: {},
   });
   assert.equal(delivered.kind, "accepted");
@@ -1358,19 +1356,19 @@ test("selector refusal does not use sole-active fallback and accepts only active
   const id = acceptedContract(bound);
 
   await assert.rejects(
-    () => invokeWithDocument(repository.path, ["deliver", "--actor", "external-test"], ""),
+    () => invokeWithDocument(repository.path, ["deliver"], ""),
     (error: unknown) => error instanceof CliUsageError && /explicit full or @ contract selector/.test(error.message),
   );
   await assert.rejects(
-    () => invokeWithDocument(repository.path, ["deliver", "@unknown", "--actor", "external-test"], ""),
+    () => invokeWithDocument(repository.path, ["deliver", "@unknown"], ""),
     (error: unknown) => error instanceof CliUsageError && /unknown contract selector/.test(error.message),
   );
   await assert.rejects(
-    () => invokeWithDocument(repository.path, ["deliver", `@${id}`, "--actor", "external-test"], ""),
+    () => invokeWithDocument(repository.path, ["deliver", `@${id}`], ""),
     (error: unknown) => error instanceof CliUsageError && /redundant/.test(error.message),
   );
   await assert.rejects(
-    () => invokeWithDocument(repository.path, ["deliver", "selector-check", "--actor", "external-test"], ""),
+    () => invokeWithDocument(repository.path, ["deliver", "selector-check"], ""),
     (error: unknown) => error instanceof CliUsageError && /must be kei\//.test(error.message),
   );
 });
@@ -1478,7 +1476,7 @@ async function conflictedDeliverCommand() {
 
 test("deliver --materialize-conflict returns the exact public materialization object", async () => {
   const { repository, id, worktree, targetHead, command } = await conflictedDeliverCommand();
-  const result = await command(["deliver", "--materialize-conflict", "--actor", "external-test"]);
+  const result = await command(["deliver", "--materialize-conflict"]);
   assert.deepEqual(result, {
     kind: "integration-conflict-materialized",
     targetHead,

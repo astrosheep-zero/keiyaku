@@ -142,7 +142,7 @@ Node ≥ 22.19. Product law lives in [`docs/`](docs/README.md).
 
 ## Source builds
 
-Building from source also builds the Windows launcher with Zig 0.14.1. Install
+Building from source also builds the Windows launcher with Zig 0.14.1 or later. Install
 that system tool separately and make `zig` available on `PATH`, or set
 `KEIYAKU_ZIG` to the selected executable. `npm ci` alone is not sufficient for
 the Windows launcher: use `npm ci --ignore-scripts --prefer-offline` followed by

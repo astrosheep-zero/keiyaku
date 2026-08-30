@@ -120,20 +120,23 @@ has no H1, frontmatter, or nonblank bytes outside those sections. Every H2
 heading has exactly this grammar:
 
 ```text
+## Context|Objective|Design|Region|Criteria|Verification|<extension>
 ## Replace: Context|Objective|Design|Region|Criteria|Verification|<extension>
 ## Append: Context|Objective|Design|Criteria|<extension>
 ## Add: Criteria|<new-extension-title>
 ## Update: <existing-extension-title>
-## Remove: Criterion <existing-title>
 ## Remove: <existing-extension-title>
 ```
 
-`Replace` supplies the target's complete canonical content. `Append` adds
-canonical prose or canonical collection entries. `Add` creates an extension or
-adds one or more H3 criteria. `Remove: Criterion <title>` has no body and
-removes that keyed criterion. Extension update and remove use the exact
-extension title in the H2 target. A target occurs at most once for an operation
-kind when duplicate application would be ambiguous.
+A heading with no explicit operation prefix replaces that complete H2 target
+when it already exists, and adds it when it is a new extension title. Explicit
+`Replace` still requires an existing target. `Replace` supplies the target's
+complete canonical content. `Append` adds canonical prose or canonical
+collection entries. `Add` creates an extension or adds one or more H3 criteria.
+Criteria have no criterion-level amendment grammar; removing or rewriting
+entries replaces the complete `Criteria` section. Extension update and remove
+use the exact extension title in the H2 target. A target occurs at most once for
+an operation kind when duplicate application would be ambiguous.
 
 Every operation body uses the grammar of its target section. `Replace:
 Verification` uses the declaration grammar above. The complete amended document is

@@ -39,6 +39,26 @@ function retryLines(detail: KeiyakuRetryReason, indent: string, columns: number)
   return renderOpaqueBlock(detail.kind, indent, columns);
 }
 
+function refMigrationConflictRows(
+  lag: Extract<Lag, { kind: "ref-migration-conflict" }>,
+  columns: number,
+): readonly string[] {
+  const lines: string[] = [];
+  receiptRow(
+    lines,
+    "!",
+    "lag",
+    [
+      {
+        text: `ref-migration-conflict legacy=${lag.legacyRef}@${lag.legacyOid} current=${lag.currentRef}@${lag.currentOid}`,
+        opaque: true,
+      },
+    ],
+    columns,
+  );
+  return lines;
+}
+
 function lagRows(lag: Lag, columns: number): readonly string[] {
   const lines: string[] = [];
   if (lag.kind === "worktree-retained") {
@@ -101,6 +121,8 @@ function lagRows(lag: Lag, columns: number): readonly string[] {
       columns,
     );
     receiptPayload(lines, "diagnostic", lag.diagnostic);
+  } else if (lag.kind === "ref-migration-conflict") {
+    return refMigrationConflictRows(lag, columns);
   } else {
     receiptRow(lines, "!", "lag", [{ text: `reconcile-failed ${lag.stage}`, opaque: true }], columns);
     receiptPayload(lines, "diagnostic", lag.diagnostic);

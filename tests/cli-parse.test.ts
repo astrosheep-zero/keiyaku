@@ -93,19 +93,11 @@ test("unknown command syntax is refused with the exact command usage", () => {
       error instanceof CliUsageError &&
       error.message.includes("usage: keiyaku bind [--task <task/...>] [--target <ref>]"),
   );
-  assert.throws(() => parseArgv(["unknown"]), /usage: keiyaku \[-C <path>\] \[--repo <path>\] <command>/);
+  assert.throws(() => parseArgv(["unknown"]), /usage: keiyaku <command> \[options\]/);
 });
 
 test("existing selectors are optional and review stdin is a distinct summary source", () => {
-  assert.deepEqual(parseArgv(["deliver", "--actor", "external-test"]), {
-    command: {
-      command: "deliver",
-      output: "text",
-      actor: "external-test",
-      includeDirty: false,
-      materializeConflict: false,
-    },
-  });
+  assert.throws(() => parseArgv(["deliver", "--actor", "external-test"]), /option --actor is not valid for deliver/u);
   assert.deepEqual(parseArgv(["deliver", "kei/example", "--include-dirty", "--json"]), {
     command: {
       command: "deliver",
@@ -277,16 +269,7 @@ test("flag specs preserve value and boolean option behavior", () => {
   assert.deepEqual(parseArgv(["audit", "kei/example", "--diff"]), {
     command: { command: "audit", contract: "kei/example", includeDirty: false, showDiff: true, output: "text" },
   });
-  assert.deepEqual(parseArgv(["audit", "kei/example", "--actor", "audit-user"]), {
-    command: {
-      command: "audit",
-      contract: "kei/example",
-      includeDirty: false,
-      showDiff: false,
-      actor: "audit-user",
-      output: "text",
-    },
-  });
+  assert.throws(() => parseArgv(["audit", "kei/example", "--actor", "audit-user"]), /option --actor is not valid for audit/u);
   assert.deepEqual(parseArgv(["audit", "kei/example", "--include-dirty", "--diff"]), {
     command: { command: "audit", contract: "kei/example", includeDirty: true, showDiff: true, output: "text" },
   });

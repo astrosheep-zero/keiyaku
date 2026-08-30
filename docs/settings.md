@@ -146,12 +146,16 @@ that remains outside the Settings resource.
 
 The CLI `settings [--json]` command constructs this public value from its
 resolved `-C` root and explicit edge-mapped home, then renders scope states and
-resolved namespace entries with their source and shadow observation. Text is a
-structured multiline projection: scope facts are indented beneath `settings`,
-and each entry value is emitted as indented pretty JSON. The `--json` projection
-remains the complete typed resource. It is read-only. Settings files remain
-user-edited resources; there is no settings write command and no redaction under
-the local-trusted-user threat model.
+resolved namespace entries with their source and shadow observation. Its leaf
+help makes the locations, precedence, read-only boundary, outer shape, and
+available setting purposes discoverable without copying product-owned record
+grammar or referring to repository-internal documentation. Each product
+consumer's rejection names the expected shape for an invalid selected value.
+Text is a structured multiline projection: scope facts are indented beneath
+`settings`, and each entry value is emitted as indented pretty JSON. The
+`--json` projection remains the complete typed resource. It is read-only.
+Settings files remain user-edited resources; there is no settings write command
+and no redaction under the local-trusted-user threat model.
 
 The Settings module never names `gates`, `worktree`, `providers`, a provider
 kind, or any other product concept. Product modules never read settings file

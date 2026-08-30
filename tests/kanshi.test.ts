@@ -1089,6 +1089,76 @@ test("bare Contract ages keep every unit boundary, future, and absent evidence d
   assert.match(text, /stillborn · —/u);
 });
 
+test("Kanshi ANSI tones follow status and age while no-color bytes stay exact", () => {
+  const report = attentionReport();
+  if (report.contracts.kind !== "present") throw new Error("fixture contracts must be present");
+  const reviewRows = [
+    contractRow({
+      id: "kei/review-fresh",
+      phase: "tendered",
+      phaseAt: "2026-08-11T23:45:01.000Z",
+      lastJournalAt: "2026-08-11T23:45:01.000Z",
+    }),
+    contractRow({
+      id: "kei/review-aged",
+      phase: "tendered",
+      phaseAt: "2026-08-11T23:45:00.000Z",
+      lastJournalAt: "2026-08-11T23:45:00.000Z",
+    }),
+    contractRow({
+      id: "kei/pending-aged",
+      phase: "bound",
+      phaseAt: "2026-08-11T23:00:00.000Z",
+      lastJournalAt: "2026-08-11T23:00:00.000Z",
+    }),
+    contractRow({
+      id: "kei/recent",
+      phase: "bound",
+      phaseAt: "2026-08-11T23:59:00.000Z",
+      lastJournalAt: "2026-08-11T23:55:00.000Z",
+    }),
+  ];
+  const policyReport = {
+    ...report,
+    contracts: { ...report.contracts, value: { ...report.contracts.value, rows: reviewRows } },
+  };
+  const plain = renderKanshiText(policyReport, { columns: 120, color: false });
+  const colored = renderKanshiText(policyReport, { columns: 120, color: true });
+  assert.equal(colored.replaceAll(/\u001b\[[0-9]+m/gu, ""), plain);
+  assert.match(colored, /● kei\/review-fresh/u);
+  assert.match(colored, /\u001b\[33m●\u001b\[0m kei\/review-aged/u);
+  assert.match(colored, /\u001b\[33m●\u001b\[0m kei\/pending-aged/u);
+  assert.match(colored, /\u001b\[32m●\u001b\[0m kei\/recent/u);
+
+  const attentionPlain = renderKanshiText(report, { columns: 120, color: false });
+  const attentionColored = renderKanshiText(report, { columns: 120, color: true });
+  assert.equal(attentionColored.replaceAll(/\u001b\[[0-9]+m/gu, ""), attentionPlain);
+  assert.match(attentionColored, /\u001b\[31m!\u001b\[0m kei\/active-contract/u);
+  assert.match(attentionColored, /\u001b\[33m●\u001b\[0m kei\/cold-contract/u);
+  assert.match(attentionColored, /\u001b\[32m●\u001b\[0m aku\/worker\/a0000001/u);
+  assert.match(attentionColored, /\u001b\[2m○\u001b\[0m aku\/worker\/a0000002/u);
+  assert.match(attentionColored, /\u001b\[2m×\u001b\[0m aku\/worker\/a0000003/u);
+  assert.match(attentionColored, /\u001b\[31m!\u001b\[0m aku\/worker\/a0000004/u);
+
+  if (report.akuma.kind !== "present") throw new Error("fixture Akuma must be present");
+  const boundaryReport = {
+    ...report,
+    akuma: {
+      ...report.akuma,
+      value: {
+        ...report.akuma.value,
+        rows: report.akuma.value.rows.map((row) =>
+          row.id === "aku/worker/a0000002" ? { ...row, lifeAt: "2026-08-11T23:55:00.000Z" } : row,
+        ),
+      },
+    },
+  };
+  assert.match(
+    renderKanshiText(boundaryReport, { columns: 120, color: true }),
+    /\u001b\[32m○\u001b\[0m aku\/worker\/a0000002/u,
+  );
+});
+
 test("Kanshi text uses live sections, preserves important facts, and omits terminal Contract and Task rows", () => {
   const report = attentionReport();
   const before = structuredClone(report);

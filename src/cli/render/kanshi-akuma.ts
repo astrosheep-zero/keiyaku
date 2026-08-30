@@ -2,17 +2,38 @@ import type { AkumaKanshiRow, KanshiReport } from "../../kanshi/index.js";
 import { visibleFleetRows } from "../../kanshi/fleet.js";
 import {
   boundedActivity,
+  elapsedMilliseconds,
   entityLines,
   identityLine,
   plumbFacts,
+  RECENT_TONE_MS,
   renderSectionBlock,
   safeText,
   tone,
+  type SemanticTone,
   type TextRenderContext,
 } from "./terminal.js";
 
 const PLUMB = "  │ ";
 const NARROW_COLUMNS = 72;
+
+function mostRecentTimestamp(...values: readonly (string | null | undefined)[]): string | null {
+  return values.reduce<string | null>((latest, value) => {
+    if (value === null || value === undefined) return latest;
+    return latest === null || value > latest ? value : latest;
+  }, null);
+}
+
+function akumaStatusTone(row: AkumaKanshiRow, observedAt: string): SemanticTone | null {
+  if (row.life === "stillborn" || row.life === "hung" || row.life === "stranded") return "alert";
+  if (row.life === "killed") return "dim";
+  const lifeAt = "lifeAt" in row ? row.lifeAt : null;
+  const lastActivityAt = "lastActivityAt" in row ? row.lastActivityAt : null;
+  const latestAge = elapsedMilliseconds(mostRecentTimestamp(lifeAt, lastActivityAt), observedAt);
+  if (row.life === "asleep") return latestAge !== null && latestAge <= RECENT_TONE_MS ? "recent" : "dim";
+  if (row.life === "running" && latestAge !== null && latestAge <= RECENT_TONE_MS) return "recent";
+  return null;
+}
 
 function akumaMark(life: string): string {
   return life === "running"
@@ -60,6 +81,8 @@ function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly
     return ["AKUMA // unavailable", "", tone(`! ${safeText(section.failure.message)}`, "alert", context.color)];
   const rows = visibleFleetRows(section.value.rows);
   const rowLines = rows.map((row) => {
+    const statusTone = akumaStatusTone(row, report.observedAt);
+    const mark = statusTone === null ? akumaMark(row.life) : tone(akumaMark(row.life), statusTone, context.color);
     const lifeAt = "lifeAt" in row ? row.lifeAt : null;
     const life = `${row.life} · ${formatAge(lifeAt, report.observedAt)}`;
     const activity =
@@ -74,16 +97,14 @@ function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly
     const snapshot = activitySnapshotLine(row);
     const aliases = akumaLabel(row);
     if (context.columns > NARROW_COLUMNS) {
-      const lines = [
-        identityLine(akumaMark(row.life), row.id, `${aliases} · ${[...key, ...relation].join(" · ")}`.trim()),
-      ];
+      const lines = [identityLine(mark, row.id, `${aliases} · ${[...key, ...relation].join(" · ")}`.trim())];
       return snapshot === undefined
         ? lines
         : [...lines, ...plumbFacts([boundedActivity(snapshot, context.columns, PLUMB)], context.columns)];
     }
     const identity = aliases.length === 0 ? row.id : `${row.id} ${aliases}`;
     const lines = entityLines({
-      mark: akumaMark(row.life),
+      mark,
       identity,
       state: key[0]!,
       title: "",

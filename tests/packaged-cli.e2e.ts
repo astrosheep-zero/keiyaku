@@ -182,7 +182,7 @@ test("published package installs one keiyaku CLI and runs against a real reposit
       inspect([
         "const { resolveProviderExecution } = await import(process.argv.at(-1));",
         'const selected = await resolveProviderExecution({ name: "claude", kind: "claude-agent-sdk" });',
-        'await selected.adapter.start({ body: "start", launchTells: [], cwd: process.cwd(), options: {}, session: { kind: "fresh" } });',
+        'await selected.adapter.start({ body: "start", launchTells: [], cwd: process.cwd(), options: {}, session: { kind: "fresh" } }).result;',
       ]),
     /Cannot find package/u,
   );

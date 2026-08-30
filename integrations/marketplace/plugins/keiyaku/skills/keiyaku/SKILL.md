@@ -41,7 +41,7 @@ keiyaku -C <repo> tell <aku/...|@alias> (<prompt> | -)
 `-C` is the invocation and Akuma execution cwd. Add `--repo <path>` only when
 a Contract or Dispatch reader must use a different Git repository.
 
-Repeated `--allowed` values add actions to the Archetype defaults. Restriction
-comes from the Archetype base and, for nested calls, the direct parent Soul.
+Repeated `--allowed` values add actions to the selected Akuma's defaults. A
+nested call can use only actions permitted by its direct parent Soul.
 
 Use text by default; add `--json` when a script needs structured output.

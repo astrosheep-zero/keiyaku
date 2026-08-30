@@ -99,10 +99,13 @@ async function executeGit(
     inputError = error;
   });
   child.stdin!.end(input);
-  const terminal = await new Promise<Readonly<{ code: number | null; error?: Error }>>((resolveTerminal) => {
-    child.once("error", (error) => resolveTerminal({ code: null, error }));
-    child.once("close", (code) => resolveTerminal({ code }));
-  });
+  const terminal = await Promise.race([
+    new Promise<Readonly<{ code: number | null; error?: Error }>>((resolveTerminal) => {
+      child.once("error", (error) => resolveTerminal({ code: null, error }));
+      child.once("close", (code) => resolveTerminal({ code }));
+    }),
+    owned.terminationFailure,
+  ]);
   await owned.waitTermination();
   const output = Buffer.concat(stdout);
   if (!owned.cancelled() && terminal.code === 0 && inputError === undefined) return output;

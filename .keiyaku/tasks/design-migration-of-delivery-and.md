@@ -1,15 +1,15 @@
 ---
 id: task/design-migration-of-delivery-and
 title: Design migration of delivery and candidate refs out of refs/heads
-state: open
+state: done
 priority: 1
 needs: []
 parent: task/reconcile-custody-and-cleanup
 supersedes: []
 relates: []
-note: ""
+note: Implemented the refs/keiyaku delivery and candidate namespace migration. Runtime writes only canonical roots; per-Contract reconcile observes both pairs, blocks all writes on any divergent collision, and otherwise migrates both pairs in one atomic update-ref transaction. Legacy targets remain rejected and nuke covers both generations. Owner docs, public text/forwarding projections, and focused regressions updated; independent Akuma re-review clean.
 createdAt: 2026-08-22T15:36:03.581Z
-updatedAt: 2026-08-22T15:52:20.373Z
+updatedAt: 2026-08-30T07:44:44.078Z
 ---
 Define the destination namespace, ownership predicates, discovery rules, compatibility window, migration transaction, recovery, tests, and owner-document law for moving Keiyaku delivery and candidate refs out of refs/heads. Preserve object reachability, custody semantics, target rejection, worktree recovery, nuke behavior, and compatibility with existing local refs. Do not migrate by bulk deletion or ad hoc rename.
 

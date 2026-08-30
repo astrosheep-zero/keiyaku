@@ -37,11 +37,12 @@ Each command family owns its help rows. Root help composes those rows;
 validation, usage refusal, namespace help, and leaf help read the same syntax,
 usage, and purpose values. Only Task remains a namespace.
 
-Root help is a compact command index: each row uses the canonical `keiyaku`
-prefix and carries only the command name and purpose. Leaf help carries the
-complete usage, including accepted `--json`, followed by any spec-owned detail
-block. The fork usage documents both complete AkuIds and world-local `@alias`
-selectors. Contract history has no pagination controls; those flags remain
+Root help is a compact index grouped around the three product pillars, with
+repository-level utilities kept separate. Each row carries only the command
+name and its owner-provided purpose. Leaf help is self-contained, cites no
+repository-internal documentation, and carries complete command usage. The
+fork usage documents both complete AkuIds and world-local `@alias` selectors.
+Contract history has no pagination controls; those flags remain
 Akuma-history-only refusals.
 
 `--help` is a reserved parser token. After optional `-C`, its presence requests
@@ -68,6 +69,24 @@ CLI does not prompt.
 
 Plain text is the primary CLI projection. `--json` is a secondary projection
 of the same typed value; it never excuses missing or degraded text facts.
+
+For status rows, ANSI tone is a TTY-only emphasis on the leading glyph, never
+a new status fact; existing section-failure text remains alert. Alert is red
+and takes precedence for Contract error or unavailable observation, and
+stillborn, hung, or stranded Akuma.
+Attention is yellow for a non-alert tendered Contract whose phase is at least
+15 minutes old, or a waiting/bound Contract whose phase is at least one hour
+old. Recent is green when no stronger tone applies and the latest Contract
+journal or running Akuma life/activity timestamp is no more than five minutes
+old. Killed Akuma are dim; an asleep Akuma is recent for five minutes after its
+latest life or activity timestamp and dim afterward. Other rows are unstyled.
+
+Age is derived only from the row timestamp and the report's producer-sampled
+`observedAt`; a future timestamp is `now`. Tone never changes text, ordering,
+width, glyph vocabulary, exit status, or typed values. When color is disabled,
+including `NO_COLOR`, the emitted bytes are exactly the existing uncolored
+projection. JSON, journals, Heart, Kanshi, and persisted authority carry no
+tone, threshold, urgency, or ANSI fact.
 
 The first-party Pi extension is a second window over the Kanshi report. Its
 resident widget is only a compact count summary; `/keiyaku` opens the existing
@@ -97,12 +116,12 @@ using lowercase semantic blocks for `after`, `dependents`, `gates`,
 `namespace tasks`. Git object IDs use the existing unique-prefix primitive;
 Contract, Change, Task, and Akuma identities remain complete.
 
-The archetype catalog is headed `archetypes <N>` so it cannot be mistaken for
-the Akuma instance population. The instance selector renders a bounded text
-view headed `akuma instances <returned> of <total> known`; relative ages are
+The catalog of available Akuma is headed `available Akuma <N>`; it lists names
+that can be called, not Akuma instances. The instance selector renders a
+bounded text view headed `akuma instances <returned> of <total> known`; relative ages are
 derived against the list's producer-sampled `observedAt` fact. A partial
 unscoped view exposes the exact `keiyaku ls "aku/*/*"` recovery command, while
-a scoped view preserves its `aku/<archetype>/` selector. JSON remains the
+a scoped view preserves its `aku/<akuma>/` selector. JSON remains the
 complete catalog with exact timestamps and full rows.
 
 World and catalog Contract attachments show all non-terminal Akuma, or only the
@@ -117,7 +136,7 @@ without a latest activity or idle outcome omits the activity text.
 
 After stdin acquisition, external-command or substantial Git work writes one
 stderr line: `⧖ preparing keiyaku` for bind, `⧖ delivering`,
-`⧖ auditing`, `⧖ reconciling`, or `⧖ installing skills`. It is a start fact,
+`⧖ auditing`, `⧖ reconciling`, or `⧖ installing harness integrations`. It is a start fact,
 not progress or durable state. Wait/Akuma observation add none; `--json`
 suppresses it.
 

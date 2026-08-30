@@ -18,7 +18,15 @@ export type CodexTurnState = {
   tools: Map<string, Readonly<{ name: string; call: ToolCall }>>;
 };
 
-type NotificationDisposition = "note" | "drop" | "error" | "item-completed" | "item-started" | "plan" | "terminal";
+type NotificationDisposition =
+  | "hook-completed"
+  | "note"
+  | "drop"
+  | "error"
+  | "item-completed"
+  | "item-started"
+  | "plan"
+  | "terminal";
 type ItemDisposition = "tool" | "note" | "assistant" | "thought" | "drop" | "plan";
 
 export const CODEX_NOTIFICATION_DISPOSITIONS = {
@@ -36,8 +44,8 @@ export const CODEX_NOTIFICATION_DISPOSITIONS = {
   "fuzzyFileSearch/sessionCompleted": "drop",
   "fuzzyFileSearch/sessionUpdated": "drop",
   guardianWarning: "note",
-  "hook/completed": "drop",
-  "hook/started": "note",
+  "hook/completed": "hook-completed",
+  "hook/started": "drop",
   "item/agentMessage/delta": "drop",
   "item/autoApprovalReview/completed": "note",
   "item/autoApprovalReview/started": "note",
@@ -300,8 +308,6 @@ function notificationAction(method: string, params: Readonly<Record<string, unkn
       return "Filesystem changed";
     case "guardianWarning":
       return `Guardian warning: ${message ?? "action warned"}`;
-    case "hook/started":
-      return `Hook ${codexText(params.name) ?? codexText(params.hookName) ?? codexText(params.hook_name) ?? "unknown"} started`;
     case "item/autoApprovalReview/completed":
       return "Action approval review completed";
     case "item/autoApprovalReview/started":
@@ -325,6 +331,23 @@ function notificationAction(method: string, params: Readonly<Record<string, unkn
     default:
       return method;
   }
+}
+
+function hookCompletionNote(params: Readonly<Record<string, unknown>>): string | undefined {
+  const run = codexObject(params.run);
+  const status = codexText(run?.status);
+  const issue = Array.isArray(run?.entries)
+    ? run.entries.map(codexObject).find((entry) => {
+        const kind = codexText(entry?.kind);
+        return kind === "warning" || kind === "error" || kind === "stop";
+      })
+    : undefined;
+  const issueKind = codexText(issue?.kind);
+  if (status !== "failed" && status !== "blocked" && status !== "stopped" && issueKind === undefined) return undefined;
+  const eventName = codexText(run?.eventName) ?? "unknown";
+  const label = status === "failed" || status === "blocked" || status === "stopped" ? status : issueKind!;
+  const diagnostic = codexText(run?.statusMessage) ?? codexText(issue?.text);
+  return `Hook ${eventName} ${label}${diagnostic === undefined ? "" : `: ${diagnostic}`}`;
 }
 
 function observeError(
@@ -364,6 +387,11 @@ export function codexNotificationResult(
   switch (disposition) {
     case "drop":
       return undefined;
+    case "hook-completed": {
+      const note = hookCompletionNote(params);
+      if (note !== undefined) events.emit(noteEvent(note));
+      return undefined;
+    }
     case "note":
       events.emit(noteEvent(notificationAction(method, params)));
       return undefined;

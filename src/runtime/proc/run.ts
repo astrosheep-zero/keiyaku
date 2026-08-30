@@ -31,9 +31,26 @@ type ProcessSpawnOptions = Readonly<{
 
 type ProcessSpawner = (command: string, args: readonly string[], options: ProcessSpawnOptions) => ChildProcess;
 
+type ProcessEnd =
+  | Readonly<{ kind: "closed"; code: number | null }>
+  | Readonly<{ kind: "spawn-error"; error: Error }>
+  | Readonly<{ kind: "termination-error"; error: unknown }>;
+
+function waitForProcessEnd(
+  child: ChildProcess,
+  terminationFailure: Promise<Readonly<{ kind: "termination-error"; error: unknown }>>,
+): Promise<ProcessEnd> {
+  const childEnd = new Promise<Exclude<ProcessEnd, { kind: "termination-error" }>>((resolve) => {
+    child.once("close", (code) => resolve({ kind: "closed", code }));
+    child.once("error", (error) => resolve({ kind: "spawn-error", error }));
+  });
+  return Promise.race([childEnd, terminationFailure]);
+}
+
 export type CancellableProcess = Readonly<{
   child: ChildProcess;
   cancelled(): boolean;
+  terminationFailure: Promise<never>;
   terminate(force?: boolean): Promise<void>;
   waitTermination(): Promise<void>;
 }>;
@@ -42,8 +59,16 @@ export function spawnCancellableProcess(input: ProcessLaunch): CancellableProces
   const child = spawn(input.argv[0]!, input.argv.slice(1), spawnOptionsFor(input, ["pipe", "pipe", "pipe"]));
   let cancelled = false;
   let termination: Promise<void> | undefined;
+  let reportTerminationFailure!: (error: unknown) => void;
+  const terminationFailure = new Promise<never>((_resolve, reject) => {
+    reportTerminationFailure = reject;
+  });
+  void terminationFailure.catch(() => undefined);
   const terminate = (force = false): Promise<void> => {
-    termination ??= terminateOwnedProcess(child, force);
+    if (termination === undefined) {
+      termination = terminateOwnedProcess(child, force);
+      void termination.catch(reportTerminationFailure);
+    }
     return termination;
   };
   const cancel = (): void => {
@@ -56,6 +81,7 @@ export function spawnCancellableProcess(input: ProcessLaunch): CancellableProces
   return {
     child,
     cancelled: () => cancelled,
+    terminationFailure,
     terminate,
     async waitTermination(): Promise<void> {
       input.signal?.removeEventListener("abort", cancel);
@@ -233,10 +259,15 @@ async function executeProcess(
   let stop: "timeout" | "cancelled" | undefined;
   let streamError: unknown;
   let termination: Promise<void> | undefined;
+  let reportTerminationFailure!: (error: unknown) => void;
+  const terminationFailure = new Promise<Readonly<{ kind: "termination-error"; error: unknown }>>((resolve) => {
+    reportTerminationFailure = (error) => resolve({ kind: "termination-error", error });
+  });
   const requestStop = (reason: "timeout" | "cancelled"): void => {
     if (stop !== undefined) return;
     stop = reason;
     termination = terminateOwnedProcess(child);
+    void termination.catch(reportTerminationFailure);
   };
   const failStream = (error: unknown): void => {
     if (streamError !== undefined) return;
@@ -263,15 +294,10 @@ async function executeProcess(
   input.signal?.addEventListener("abort", cancel, { once: true });
   const timeout = timeoutMs === undefined ? undefined : setTimeout(() => requestStop("timeout"), timeoutMs);
 
-  const terminal = await new Promise<
-    | Readonly<{ readonly kind: "closed"; readonly code: number | null }>
-    | Readonly<{ readonly kind: "spawn-error"; readonly error: Error }>
-  >((resolve) => {
-    child.once("close", (code) => resolve({ kind: "closed", code }));
-    child.once("error", (error) => resolve({ kind: "spawn-error", error }));
-  });
+  const terminal = await waitForProcessEnd(child, terminationFailure);
   if (timeout !== undefined) clearTimeout(timeout);
   input.signal?.removeEventListener("abort", cancel);
+  if (terminal.kind === "termination-error") throw terminal.error;
   await termination;
 
   const pid = child.pid ?? null;

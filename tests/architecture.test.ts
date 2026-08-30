@@ -673,3 +673,31 @@ test("architecture policy matches recursive wildcards between exact path segment
   );
   assert.deepEqual(rules(rejected.diagnostics), ["architecture/dependency-direction"]);
 });
+
+test("library Contract owners cannot import private Akuma creation", () => {
+  const privateLibrary = checkArchitecture(
+    [
+      {
+        path: "library/contract-future.ts",
+        source: 'import { callKeiyaku } from "./akuma-creation.js"; export const run = callKeiyaku;',
+      },
+      { path: "library/akuma-creation.ts", source: "export const callKeiyaku = 1;" },
+    ],
+    KEIYAKU_ARCHITECTURE_POLICY,
+  );
+  assert.deepEqual(rules(privateLibrary.diagnostics), ["architecture/dependency-direction"]);
+});
+
+test("library Contract owners cannot admit their own offers", () => {
+  const attempt = checkArchitecture(
+    [
+      {
+        path: "library/contract-future.ts",
+        source: 'import { admitDecidedOffer } from "../protocol/attempt.js"; export const run = admitDecidedOffer;',
+      },
+      { path: "protocol/attempt.ts", source: "export const admitDecidedOffer = 1;" },
+    ],
+    KEIYAKU_ARCHITECTURE_POLICY,
+  );
+  assert.deepEqual(rules(attempt.diagnostics), ["architecture/dependency-direction"]);
+});

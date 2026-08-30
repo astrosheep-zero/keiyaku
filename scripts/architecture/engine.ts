@@ -23,6 +23,7 @@ export type DependencyAllowance = Readonly<{
 export type DependencyZone = Readonly<{
   source: string;
   allow: readonly DependencyAllowance[];
+  deny?: readonly DependencyAllowance[];
 }>;
 
 export type SensitiveImportRule = Readonly<{
@@ -118,11 +119,25 @@ export type ArchitectureResult = Readonly<{
 function matches(pattern: string, candidate: string): boolean {
   const patternSegments = pattern.split("/");
   const candidateSegments = candidate.split("/");
+  const segmentMatches = (segment: string, value: string): boolean => {
+    if (!segment.includes("*")) return segment === value;
+    const parts = segment.split("*");
+    if (!value.startsWith(parts[0]!)) return false;
+    let offset = parts[0]!.length;
+    for (const part of parts.slice(1, -1)) {
+      const next = value.indexOf(part, offset);
+      if (next < 0) return false;
+      offset = next + part.length;
+    }
+    return value.slice(offset).endsWith(parts.at(-1)!);
+  };
   const visit = (patternIndex: number, candidateIndex: number): boolean => {
     const segment = patternSegments[patternIndex];
     if (segment === undefined) return candidateIndex === candidateSegments.length;
     if (segment !== "**")
-      return segment === candidateSegments[candidateIndex] && visit(patternIndex + 1, candidateIndex + 1);
+      return (
+        segmentMatches(segment, candidateSegments[candidateIndex] ?? "") && visit(patternIndex + 1, candidateIndex + 1)
+      );
     if (patternIndex === patternSegments.length - 1) return true;
     return (
       candidateSegments.slice(candidateIndex).some((_, offset) => visit(patternIndex + 1, candidateIndex + offset)) ||
@@ -144,6 +159,12 @@ function allowanceMatches(reference: ImportReference, allowance: DependencyAllow
     if (importedSymbols(reference).some((symbol) => !permitted.has(symbol))) return false;
   }
   return true;
+}
+
+function denialMatches(reference: ImportReference, denial: DependencyAllowance): boolean {
+  if (!reference.target || !matches(denial.target, reference.target)) return false;
+  if (denial.mode === "type-only" && reference.symbols.runtime.length > 0) return false;
+  return denial.symbols === undefined || importedSymbols(reference).some((symbol) => denial.symbols!.includes(symbol));
 }
 
 function moduleMatches(rule: string, specifier: string): boolean {
@@ -176,7 +197,12 @@ function referenceDiagnostics(
       column: reference.column,
       detail: `${reference.specifier} may be loaded only inside ${providerSdk.root}/`,
     });
-  if (reference.target && zone && !zone.allow.some((allowance) => allowanceMatches(reference, allowance)))
+  if (
+    reference.target &&
+    zone &&
+    (zone.deny?.some((denial) => denialMatches(reference, denial)) ||
+      !zone.allow.some((allowance) => allowanceMatches(reference, allowance)))
+  )
     diagnostics.push({
       rule: "architecture/dependency-direction",
       file: unit.path,

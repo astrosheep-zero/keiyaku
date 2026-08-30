@@ -4,7 +4,7 @@ import { AgentEventChannel, noteEvent, unknownEvent, type ToolCall } from "../..
 type ClaudeMessageType = SDKMessage["type"];
 type ClaudeSystemSubtype = Extract<SDKMessage, { type: "system" }>["subtype"];
 type MessageDisposition = "assistant" | "auth" | "note" | "system" | "tool-results" | "drop" | "terminal";
-type SystemDisposition = "note" | "control-progress" | "drop";
+type SystemDisposition = "hook-response" | "note" | "control-progress" | "drop";
 export type ClaudeObservationState = { tools: Map<string, Readonly<{ name: string; call: ToolCall }>> };
 
 export const CLAUDE_MESSAGE_DISPOSITIONS = {
@@ -30,8 +30,8 @@ export const CLAUDE_SYSTEM_DISPOSITIONS = {
   elicitation_complete: "drop",
   files_persisted: "note",
   hook_progress: "drop",
-  hook_response: "drop",
-  hook_started: "note",
+  hook_response: "hook-response",
+  hook_started: "drop",
   informational: "note",
   init: "drop",
   local_command_output: "drop",
@@ -105,7 +105,6 @@ const CLAUDE_SYSTEM_NOTES = {
     const failed = Array.isArray(message.failed) ? message.failed.length : 0;
     return failed === 0 ? `Persisted ${files} files` : `Persisted ${files} files; ${failed} failed`;
   },
-  hook_started: (message) => `Hook ${nonblank(message.hook_name) ?? "unknown"} started`,
   informational: (message) => nonblank(message.content) ?? "Informational notice",
   mirror_error: (message) =>
     `Transcript mirror warning: ${nonblank(message.error) ?? nonblank(message.message) ?? "unknown error"}`,
@@ -286,6 +285,14 @@ function toolResultEvents(
   }
 }
 
+function hookResponseNote(value: Readonly<Record<string, unknown>>): string | undefined {
+  const outcome = nonblank(value.outcome);
+  if (outcome !== "error" && outcome !== "cancelled") return undefined;
+  const hook = nonblank(value.hook_name) ?? "unknown";
+  const exitCode = number(value.exit_code);
+  return `Hook ${hook} ${outcome}${exitCode === undefined ? "" : ` (exit ${exitCode})`}`;
+}
+
 function emitSystemMessage(value: Readonly<Record<string, unknown>>, events: AgentEventChannel): void {
   const subtype = nonblank(value?.subtype) ?? "unknown";
   if (!Object.hasOwn(CLAUDE_SYSTEM_DISPOSITIONS, subtype)) {
@@ -294,6 +301,11 @@ function emitSystemMessage(value: Readonly<Record<string, unknown>>, events: Age
   }
   const systemDisposition = CLAUDE_SYSTEM_DISPOSITIONS[subtype as ClaudeSystemSubtype];
   if (systemDisposition === "drop") return;
+  if (systemDisposition === "hook-response") {
+    const note = hookResponseNote(value);
+    if (note !== undefined) events.emit(noteEvent(note));
+    return;
+  }
   if (systemDisposition === "control-progress" && value?.status !== "api_retry") return;
   const note = CLAUDE_SYSTEM_NOTES[subtype as keyof typeof CLAUDE_SYSTEM_NOTES];
   events.emit(noteEvent(note?.(value ?? {}) ?? subtype));

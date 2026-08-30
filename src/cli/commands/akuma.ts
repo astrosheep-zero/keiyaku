@@ -67,7 +67,7 @@ const AKUMA_COMMAND_SPECS = {
       "--contract dispatches the born Akuma to that Contract.",
       "--alias assigns the world-local @name selector to the born Akuma.",
       "--readonly adds the one-way read-only birth restriction.",
-      "Repeated --allowed adds actions to the Archetype defaults.",
+      "Repeated --allowed adds actions to the selected Akuma's defaults.",
       "With --contract, Dispatch succeeds first. If @name exists, the alias then moves.",
     ].join("\n"),
   },
@@ -122,7 +122,7 @@ export function isParsedAkumaCommand(command: Readonly<{ command: string }>): co
 }
 
 export function renderAkumaRootRows(): readonly string[] {
-  return Object.entries(AKUMA_COMMAND_SPECS).map(([action, spec]) => `  keiyaku ${action}  ${spec.purpose}`);
+  return Object.entries(AKUMA_COMMAND_SPECS).map(([action, spec]) => `  ${action.padEnd(10)} ${spec.purpose}`);
 }
 
 export function renderAkumaHelp(action: AkumaAction): string {

@@ -142,7 +142,7 @@ export function renderCatalogText(catalog: Catalog): string {
   if (catalog.kind === "contracts") return renderContractCatalog(catalog);
   if (catalog.kind === "archetypes") {
     return [
-      `archetypes ${catalog.rows.length}`,
+      `available Akuma ${catalog.rows.length}`,
       "",
       ...catalog.rows.flatMap((row) => [
         `${safeText(row.name)}${row.model === undefined ? "" : ` - ${safeText(row.model)}`}`,

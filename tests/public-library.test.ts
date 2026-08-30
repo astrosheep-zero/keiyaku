@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { createTwoFilesPatch } from "diff";
-import { Delivery, Keiyaku, KeiyakuRefused, KeiyakuRetry, Repo, type ContractId } from "../src/index.js";
+import { bodyRequestExecution, Delivery, Keiyaku, KeiyakuRefused, KeiyakuRetry, Repo, type ContractId } from "../src/index.js";
 import { contractId, documentKey } from "../src/core/facts/types.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { repositoryAt } from "../src/git/repository.js";
@@ -64,6 +64,7 @@ test("package root exposes only the ruled library values and declarations", () =
     'import type { AkuId, AkumaAlias, AkumaStatus, AliasBinding, AliasStage, CallInput, CallResult, Dispatch, DispatchFailure, DispatchStage, ForkInput, ForkResult, IntegrationFailure } from "@astrosheep/keiyaku";',
     'const repo = await Repo.at({ path: "." });',
     'import { requireBranchesToBeUpToDateFrom } from "@astrosheep/keiyaku";',
+    'import { type LocalContractComposition } from "@astrosheep/keiyaku";',
     'const id = "kei/consumer" as ContractId;',
     'const taskId = "task/consumer" as TaskId;',
     'const input: BindInput = { repo, task: taskId, markdown: "# T\\n\\n## Context\\nC\\n\\n## Objective\\nO\\n\\n## Design\\nD\\n\\n## Region\\n~~~\\nsrc/**\\n~~~\\n\\n## Criteria\\n### C1\\nB\\n", after: [id], gates: ["reviewed"] };',
@@ -73,6 +74,10 @@ test("package root exposes only the ruled library values and declarations", () =
     'const execution: LibraryExecution = bodyRequestExecution({ directory: "/tmp/keiyaku-requests" });',
     "const routedKeiyaku = Keiyaku.withExecution({ execution });",
     "const routedContract = routedKeiyaku.of({ repo, id });",
+    'const local: LocalContractComposition = { actor: "consumer", hooks: { create: [], destroy: [] }, requireBranchesToBeUpToDate: true };',
+    "const localKeiyaku = Keiyaku.withLocal(local);",
+    "const localContract = localKeiyaku.of({ repo, id });",
+    "const localBound: Promise<BindResult> = localKeiyaku.bind(input);",
     'const akuma = "aku/worker/1234abcd" as AkuId;',
     'const alias = "@worker" as AkumaAlias;',
     "const world = null as unknown as WorldRoot;",
@@ -423,6 +428,7 @@ test("Keiyaku owns contract construction over one pinned Repo capability", async
       "tell",
       "wait",
       "withExecution",
+      "withLocal",
     ],
   );
   assert.deepEqual(
@@ -712,6 +718,39 @@ test("ordinary review retains its complete local mutation result without a reque
   assert.equal(attestation?.kind, "attestation");
   assert.equal(attestation?.data.verdict, "unsatisfied");
   assert.equal((await bound.keiyaku.state()).attestations.at(-1)?.data.summary, "needs work");
+});
+
+test("local execution composition reaches Contract handles from bind and of", async () => {
+  const repository = repositoryWithInitialCommit();
+  const repo = await Repo.at({ path: repository.path });
+  const composed = Keiyaku.withLocal({
+    actor: "local-composition",
+    hooks: { create: [], destroy: [] },
+    requireBranchesToBeUpToDate: true,
+  });
+  const reviewed = await composed.bind({ repo, markdown: markdown("Composed review"), workspace: "worktree" });
+  await reviewed.keiyaku.review({ verdict: "satisfied", summary: "bound handle" });
+  await composed.of({ repo, id: reviewed.keiyaku.id }).review({ verdict: "unsatisfied", summary: "of handle" });
+  assert.deepEqual(
+    (await reviewed.keiyaku.state()).attestations.slice(-2).map((attestation) => attestation.actor),
+    ["local-composition", "local-composition"],
+  );
+
+  const delivered = await composed.bind({ repo, markdown: markdown("Composed delivery"), workspace: "worktree" });
+  const appointment = await readManagedWorktreeAppointment(await repositoryAt(repository.path), delivered.keiyaku.id);
+  if (appointment.kind !== "appointed") throw new Error("expected appointed worktree");
+  writeFileSync(join(appointment.path, "candidate.txt"), "candidate\n");
+  repository.run(["-C", appointment.path, "add", "candidate.txt"]);
+  repository.run(["-C", appointment.path, "commit", "--quiet", "-m", "candidate"]);
+  const result = await delivered.keiyaku.deliver();
+  assert.equal(result.value.policy.requireBranchesToBeUpToDate, true);
+  assert.equal((await delivered.keiyaku.state()).delivery?.actor, "local-composition");
+
+  const body = bodyRequestExecution({ directory: "/tmp/keiyaku-requests" });
+  assert.throws(
+    () => Keiyaku.withExecution({ execution: { ...body, contract: { actor: "not-forwarded" } } as never }),
+    /execution has unknown field: contract/u,
+  );
 });
 
 test("Delivery.diff remains a nullable Promise-backed Git read", async () => {

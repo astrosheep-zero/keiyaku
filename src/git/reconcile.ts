@@ -26,6 +26,7 @@ import {
 import { runCreateHooks, type WorktreeHookLag, type WorktreeHooks } from "./hooks.js";
 import { followDependentManagedWorktree, followManagedWorktree, worktreePath } from "./workspace.js";
 import { removeCollectableScratchWorktrees } from "./scratch.js";
+import { migrateContractCustodyRefs, type RefMigrationConflict } from "./ref-migration.js";
 import { reconcileTerminalManagedWorktree, removeRef, updateRef } from "./terminal-reconcile.js";
 import type { UnsealedBytes } from "./terminal-seal.js";
 
@@ -82,6 +83,7 @@ export type ReconcileLag =
   | UnsealedBytes
   | TargetCheckoutLag
   | WorktreeHookLag
+  | RefMigrationConflict
   | ReconcileFailure;
 export type ReconcileResult = Readonly<{
   effects: readonly Effect[];
@@ -275,6 +277,10 @@ async function reconcileWithTopology(
   try {
     await removeCollectableScratch(repository, topology, effects, lag);
     if (!state) return complete(effects, lag);
+    const migration = await migrateContractCustodyRefs(repository, state.id);
+    effects.push(...migration.effects);
+    lag.push(...migration.lag);
+    if (migration.lag.length > 0) return complete(effects, lag);
     const targetCheckouts = await reconcileTargetCheckouts(repository, state);
     effects.push(...targetCheckouts.effects);
     lag.push(...targetCheckouts.lag);

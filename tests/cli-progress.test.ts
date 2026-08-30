@@ -15,7 +15,7 @@ test("opaque text operations announce their work without covering explicit waits
   assert.equal(invocationStart(command(["deliver", "kei/example"])), "⧖ delivering");
   assert.equal(invocationStart(command(["audit", "kei/example"])), "⧖ auditing");
   assert.equal(invocationStart(command(["reconcile"])), "⧖ reconciling");
-  assert.equal(invocationStart(command(["install", "codex"])), "⧖ installing skills");
+  assert.equal(invocationStart(command(["install", "codex"])), "⧖ installing harness integrations");
 
   assert.equal(invocationStart(command(["wait", "aku/codex/12345678", "--timeout", "5m"])), undefined);
   assert.equal(invocationStart(command(["call", "codex", "work"])), undefined);

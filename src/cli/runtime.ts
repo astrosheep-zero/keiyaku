@@ -14,7 +14,7 @@ export function invocationStart(command: ParsedCommand): string | undefined {
   if (command.command === "deliver") return "⧖ delivering";
   if (command.command === "audit") return "⧖ auditing";
   if (command.command === "reconcile") return "⧖ reconciling";
-  return command.command === "install" ? "⧖ installing skills" : undefined;
+  return command.command === "install" ? "⧖ installing harness integrations" : undefined;
 }
 
 function writeCliStream(stream: NodeJS.WritableStream, body: string): void {

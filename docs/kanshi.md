@@ -310,9 +310,8 @@ exactly `  + <N> more live <unit> not shown`; a partial AKUMA writes exactly
 `  + <N> more akuma not shown`; each is followed by
 `    keiyaku ls <selector>/`; the resulting commands are `keiyaku ls kei/`,
 `keiyaku ls aku/`, and `keiyaku ls task/`. FLEET's instance continuation is
-`keiyaku ls "aku/*/*"` when unscoped and `keiyaku ls aku/<archetype>/` when
-scoped; it never points at the archetype directory. The
-omitted count is the relevant section count beyond the ten-row aperture and
+`keiyaku ls "aku/*/*"` when unscoped and `keiyaku ls aku/<akuma>/` when
+scoped. The omitted count is the relevant section count beyond the ten-row aperture and
 never includes terminal Contract or Task rows. TASK continuation is always
 `keiyaku task ls --world`.
 Fleet keeps its ten-row aperture
@@ -350,8 +349,8 @@ failed endpoint section ends in `unavailable`. An unavailable TaskHolder with
 no readable identity renders `! task · unavailable`. These statuses remain
 visible rather than looking like live attachments. Task titles, priorities,
 blockers, bodies, and other Task detail do not appear below a Contract-linked
-line. Akuma snapshots, activity, archetype, and description do not appear
-there either. Selected Contract text then renders `namespace tasks` after the
+line. Detailed Akuma state does not appear there either. Selected Contract
+text then renders `namespace tasks` after the
 attachment block, as every matching row:
 
 ```text

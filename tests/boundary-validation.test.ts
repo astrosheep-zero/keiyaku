@@ -116,7 +116,15 @@ test("boundary validation precedes Git and unrepresentable targets stay typed", 
     gates: ["security-audited"],
   });
   await assert.rejects(
-    () => withGitShim("exit 99", {}, () => bound.keiyaku.deliver({ actor: " " })),
-    (error: unknown) => error instanceof TypeError && error.message === "actor must be a nonblank string",
+    () => withGitShim("exit 99", {}, () => bound.keiyaku.deliver({ actor: " " } as never)),
+    (error: unknown) => error instanceof TypeError && error.message === "deliver input has unknown field: actor",
+  );
+  await assert.rejects(
+    () => bound.keiyaku.review({ verdict: "satisfied", hooks: { create: [], destroy: [] } } as never),
+    (error: unknown) => error instanceof TypeError && error.message === "review input has unknown field: hooks",
+  );
+  await assert.rejects(
+    () => bound.keiyaku.audit({ requireBranchesToBeUpToDate: true } as never),
+    (error: unknown) => error instanceof TypeError && error.message === "audit input has unknown field: requireBranchesToBeUpToDate",
   );
 });

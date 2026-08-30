@@ -110,7 +110,6 @@ type PiCreatedSession = Awaited<ReturnType<PiSdk["createAgentSession"]>>;
 type PiNativeSession = PiCreatedSession["session"];
 type PiDriveState = {
   terminalFailure: string | null;
-  disposed: boolean;
   abortRequest?: Promise<void>;
   aborting: boolean;
   settled: boolean;
@@ -120,7 +119,6 @@ async function createPiSession(
   sdk: PiSdk,
   execution: ProviderExecution,
   input: PiDriveInput,
-  signal: AbortSignal,
 ): Promise<PiCreatedSession> {
   const setup = piCreateOptions(sdk, input).then(async (options) => {
     if (execution.config !== undefined) {
@@ -128,23 +126,7 @@ async function createPiSession(
     }
     return await sdk.createAgentSession(options);
   });
-  const created = await setup;
-  if (signal.aborted) {
-    await created.session.dispose();
-    signal.throwIfAborted();
-  }
-  return created;
-}
-
-function forceDisposePi(
-  dispose: () => void,
-  settle: (result: TurnResult) => void,
-  setAborting: () => void,
-): Promise<void> {
-  setAborting();
-  dispose();
-  settle({ kind: "failed", diagnostic: "Pi session force-disposed" });
-  return Promise.resolve();
+  return await setup;
 }
 
 async function runPiPrompt(
@@ -186,75 +168,70 @@ async function drivePi(
   signal: AbortSignal,
   custody?: AttemptCustody,
 ): Promise<Session> {
-  const created = await createPiSession(sdk, execution, input, signal);
+  const created = await createPiSession(sdk, execution, input);
   const native = created.session;
-  let retired = false;
   let settleRetired!: () => void;
-  const closed = new Promise<void>((resolve) => {
+  let failRetired!: (error: unknown) => void;
+  const closed = new Promise<void>((resolve, reject) => {
     settleRetired = resolve;
+    failRetired = reject;
   });
-  custody?.own({
-    closed,
-    abort: async () => {
-      native.dispose();
-      retired = true;
-      settleRetired();
-    },
-    forceDispose: async () => {
-      native.dispose();
-      retired = true;
-      settleRetired();
-    },
-  });
-  if (signal.aborted) {
-    native.dispose();
-    signal.throwIfAborted();
-  }
-  if (native.sessionFile === undefined || native.sessionFile.trim().length === 0) {
-    native.dispose();
-    throw new Error("Pi session admitted without sessionFile");
-  }
   const events = new AgentEventChannel();
   const eventState: PiEventState = { answer: "", assistantSeen: false, tools: new Map() };
   const state: PiDriveState = {
     terminalFailure: null,
-    disposed: false,
     aborting: false,
     settled: false,
   };
-  const dispose = (): void => {
-    if (state.disposed) return;
-    state.disposed = true;
-    try {
-      unsubscribe();
-    } finally {
-      try {
-        native.dispose();
-        if (!retired) {
-          retired = true;
-          settleRetired();
-        }
-      } finally {
-        events.end();
-      }
-    }
-  };
-  const unsubscribe = native.subscribe((event) => {
-    if (event.type === "agent_end" && !event.willRetry) state.terminalFailure = piTerminalFailure(event.messages);
-    for (const translated of translatePiEvent(event, eventState)) events.emit(translated);
-  });
-  events.emit({ type: "session", coordinate: { sessionFile: native.sessionFile, sessionId: native.sessionId } });
   let settleCompletion!: (result: TurnResult) => void;
   const completion = new Promise<TurnResult>((resolve) => {
     settleCompletion = resolve;
   });
-  const settle = (result: TurnResult): void => {
-    if (state.settled) return;
+  const unsubscribe = native.subscribe((event) => {
+    if (event.type === "agent_end" && !event.willRetry) state.terminalFailure = piTerminalFailure(event.messages);
+    for (const translated of translatePiEvent(event, eventState)) events.emit(translated);
+  });
+  const settle = (result: TurnResult): Promise<void> => {
+    if (state.settled) return closed;
     state.settled = true;
-    dispose();
-    settleCompletion(result);
+    let failure: unknown;
+    try {
+      unsubscribe();
+    } catch (error) {
+      failure = error;
+    } finally {
+      try {
+        events.end();
+      } finally {
+        settleCompletion(result);
+        try {
+          native.dispose();
+        } catch (error) {
+          failure ??= error;
+        }
+      }
+    }
+    if (failure === undefined) settleRetired();
+    else failRetired(failure);
+    return closed;
   };
-  void runPiPrompt(native, input, eventState, state, settle);
+  const forceDispose = async (): Promise<void> => {
+    if (!state.settled) state.aborting = true;
+    await settle({ kind: "failed", diagnostic: "Pi session force-disposed" });
+  };
+  custody?.own({ closed, abort: forceDispose, forceDispose });
+  if (signal.aborted) {
+    await settle({ kind: "failed", diagnostic: "Pi session aborted" });
+    signal.throwIfAborted();
+  }
+  if (native.sessionFile === undefined || native.sessionFile.trim().length === 0) {
+    await settle({ kind: "failed", diagnostic: "Pi session admitted without sessionFile" });
+    throw new Error("Pi session admitted without sessionFile");
+  }
+  events.emit({ type: "session", coordinate: { sessionFile: native.sessionFile, sessionId: native.sessionId } });
+  void runPiPrompt(native, input, eventState, state, (result) => {
+    void settle(result);
+  });
   return {
     admission: { fence: native.sessionId },
     events,
@@ -268,14 +245,11 @@ async function drivePi(
         } catch {
           /* prompt settlement still proves local cleanup */
         }
-        settle({ kind: "failed", diagnostic: "Pi session aborted" });
+        await settle({ kind: "failed", diagnostic: "Pi session aborted" });
       })();
       return state.abortRequest;
     },
-    forceDispose: () =>
-      forceDisposePi(dispose, settle, () => {
-        state.aborting = true;
-      }),
+    forceDispose,
   };
 }
 

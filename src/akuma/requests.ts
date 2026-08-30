@@ -3,7 +3,6 @@ import { isAbsolute, resolve } from "node:path";
 export { AkumaBodyRequestError, requestBodyCommand } from "./request-rendezvous.js";
 
 export type ExecutionChannel = Readonly<{ kind: "local" }> | Readonly<{ kind: "body-request"; directory: string }>;
-
 export type ExecutionContext = Readonly<{ channel: ExecutionChannel }>;
 export type LibraryExecution = ExecutionContext;
 
@@ -17,7 +16,7 @@ export function bodyRequestExecutionContext(directory: unknown): ExecutionContex
   if (typeof directory !== "string" || !isAbsolute(directory) || resolve(directory) !== directory) {
     throw new Error("AKUMA_REQUESTS must be an absolute normalized path");
   }
-  return Object.freeze({ channel: Object.freeze({ kind: "body-request", directory }) });
+  return Object.freeze({ channel: Object.freeze({ kind: "body-request" as const, directory }) });
 }
 
 type ValueRecord = Readonly<Record<string, unknown>>;

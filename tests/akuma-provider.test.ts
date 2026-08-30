@@ -230,6 +230,21 @@ test("ProviderAttempt observes rejecting retirement of a late-owned resource", a
   }
 });
 
+test("ProviderAttempt rejects ownership after establishment settles", async () => {
+  let custody!: AttemptCustody;
+  const attempt = createProviderAttempt(undefined, async (received) => {
+    custody = received;
+    return "ready";
+  });
+
+  assert.equal(await attempt.result, "ready");
+  assert.throws(
+    () => custody.own({ closed: Promise.resolve(), forceDispose: async () => undefined }),
+    /after provider establishment settles/u,
+  );
+  await attempt.closed;
+});
+
 function fakeOpencode() {
   let closed = 0;
   const prompts: unknown[] = [];
@@ -2431,14 +2446,15 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
     ],
   });
   const provider = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk);
-  const drive = await provider.start({
+  const attempt = provider.start({
     body: "work",
     launchTells: [{ id: "tell-1", text: "also" }],
     cwd: tmpdir(),
     options: {},
     session: { kind: "fresh" },
     requests: { dir: "/work/requests" },
-  }).result;
+  });
+  const drive = await attempt.result;
   assert.equal(drive.tell, undefined);
   const events = [];
   for await (const event of drive.events) events.push(event);
@@ -2468,6 +2484,7 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
   );
   assert.deepEqual(result.content, [{ type: "text", text: "/work/requests" }]);
   assert.equal(fake.seen.disposed, 1);
+  await attempt.closed;
 });
 
 test("Pi keeps a completed answer when no exact fork point exists", async () => {
@@ -2543,6 +2560,31 @@ test("Pi adapter disposes once on failure and repeated abort", async () => {
   assert.equal(aborted.seen.aborted, 1);
   assert.equal(aborted.seen.disposed, 1);
   assert.deepEqual(await abortedDrive.completion, { kind: "failed", diagnostic: "Pi session aborted" });
+});
+
+test("Pi attempt disposal closes events and completion before its sole closed proof", async () => {
+  for (const dispose of ["abort", "forceDispose"] as const) {
+    const fake = fakePiSdk({ promptNeverSettles: true });
+    const attempt = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start({
+      body: "wait",
+      launchTells: [],
+      cwd: "/work",
+      options: {},
+      session: { kind: "fresh" },
+    });
+    const drive = await attempt.result;
+    const events: AgentEvent[] = [];
+    const draining = (async () => {
+      for await (const event of drive.events) events.push(event);
+    })();
+
+    await attempt[dispose]();
+    assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "Pi session force-disposed" });
+    await draining;
+    await attempt.closed;
+    assert.deepEqual(events, [{ type: "session", coordinate: { sessionFile: "/sessions/pi.jsonl", sessionId: "pi-session" } }]);
+    assert.equal(fake.seen.disposed, 1);
+  }
 });
 
 test("Pi keeps abort pending when native cleanup refuses to settle", async () => {
@@ -4263,8 +4305,8 @@ test("Claude observation dispositions are closed over the installed SDK union", 
     elicitation_complete: "drop",
     files_persisted: "note",
     hook_progress: "drop",
-    hook_response: "drop",
-    hook_started: "note",
+    hook_response: "hook-response",
+    hook_started: "drop",
     informational: "note",
     init: "drop",
     local_command_output: "drop",
@@ -5155,8 +5197,8 @@ test("Codex observation dispositions pin every currently known method and item",
     "fuzzyFileSearch/sessionCompleted": "drop",
     "fuzzyFileSearch/sessionUpdated": "drop",
     guardianWarning: "note",
-    "hook/completed": "drop",
-    "hook/started": "note",
+    "hook/completed": "hook-completed",
+    "hook/started": "drop",
     "item/agentMessage/delta": "drop",
     "item/autoApprovalReview/completed": "note",
     "item/autoApprovalReview/started": "note",
@@ -5236,31 +5278,70 @@ test("Codex observation dispositions pin every currently known method and item",
   });
 });
 
-test("Codex hook started notes preserve the first usable native hook name spelling", () => {
-  const cases = [
-    { params: { name: "provision-dependencies" }, text: "Hook provision-dependencies started" },
-    { params: { hookName: "run-checks" }, text: "Hook run-checks started" },
-    { params: { hook_name: "publish" }, text: "Hook publish started" },
-    {
-      params: { name: "primary", hookName: "secondary", hook_name: "tertiary" },
-      text: "Hook primary started",
-    },
-    {
-      params: { name: "  ", hookName: "", hook_name: "usable-after-blanks" },
-      text: "Hook usable-after-blanks started",
-    },
-    {
-      params: { name: 42, hookName: false, hook_name: "" },
-      text: "Hook unknown started",
-    },
-  ] as const;
+test("Codex hook-start telemetry does not enter activity", () => {
+  const events = new CollectingChannel();
+  const state = { settled: false, tools: new Map() };
+  assert.equal(
+    codexNotificationResult(
+      {
+        method: "hook/started",
+        params: {
+          threadId: "thread-1",
+          run: { eventName: "preToolUse", status: "running" },
+        },
+      },
+      state,
+      events,
+    ),
+    undefined,
+  );
+  assert.deepEqual(events.collected, []);
+});
 
-  for (const { params, text } of cases) {
+test("Codex retains only anomalous hook completion", () => {
+  const observe = (run: Readonly<Record<string, unknown>>): readonly AgentEvent[] => {
     const events = new CollectingChannel();
     const state = { settled: false, tools: new Map() };
-    assert.equal(codexNotificationResult({ method: "hook/started", params }, state, events), undefined);
-    assert.deepEqual(events.collected, [{ type: "note", text }]);
-  }
+    assert.equal(
+      codexNotificationResult({ method: "hook/completed", params: { threadId: "thread-1", run } }, state, events),
+      undefined,
+    );
+    return events.collected;
+  };
+
+  assert.deepEqual(observe({ eventName: "preToolUse", status: "completed", entries: [] }), []);
+  assert.deepEqual(observe({ eventName: "preToolUse", status: "blocked", statusMessage: "policy denied" }), [
+    { type: "note", text: "Hook preToolUse blocked: policy denied" },
+  ]);
+  assert.deepEqual(
+    observe({
+      eventName: "postToolUse",
+      status: "completed",
+      entries: [{ kind: "warning", text: "workspace modified externally" }],
+    }),
+    [{ type: "note", text: "Hook postToolUse warning: workspace modified externally" }],
+  );
+});
+
+test("Claude retains only anomalous hook response", () => {
+  const observe = (message: Readonly<Record<string, unknown>>): readonly AgentEvent[] => {
+    const events = new CollectingChannel();
+    emitClaudeMessage(message as SDKMessage, events, { tools: new Map() });
+    return events.collected;
+  };
+
+  assert.deepEqual(observe({ type: "system", subtype: "hook_response", hook_name: "verify", outcome: "success" }), []);
+  assert.deepEqual(
+    observe({
+      type: "system",
+      subtype: "hook_response",
+      hook_name: "verify",
+      outcome: "error",
+      exit_code: 7,
+      stderr: "tests failed",
+    }),
+    [{ type: "note", text: "Hook verify error (exit 7)" }],
+  );
 });
 
 test("Codex app-server maps admitted options, native session, answer, and exact turn history", async () => {

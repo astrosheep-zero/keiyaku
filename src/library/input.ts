@@ -30,8 +30,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export function requireInput(value: unknown, label: string): Record<string, unknown> {
+export function requireInput(value: unknown, label: string, allowed?: readonly string[]): Record<string, unknown> {
   if (!isRecord(value)) throw new TypeError(`${label} must be an object`);
+  if (allowed !== undefined) {
+    for (const key of Object.keys(value)) {
+      if (!allowed.includes(key)) throw new TypeError(`${label} has unknown field: ${key}`);
+    }
+  }
   return value;
 }
 

@@ -12,17 +12,46 @@ import {
 } from "./contract-observation.js";
 import {
   entityLines,
+  elapsedMilliseconds,
   identityLine,
   plumbFacts,
+  RECENT_TONE_MS,
   renderTextBlock,
   renderSectionBlock,
   safeText,
   tone,
+  type SemanticTone,
   type TextRenderContext,
 } from "./terminal.js";
 import { akumaMark, endpointFact, formatAge, NARROW_COLUMNS, renderAkuma } from "./kanshi-akuma.js";
 const PLUMB = "  │ ";
 const MAX_VISIBLE_ROWS = 10;
+const REVIEW_ATTENTION_MS = 15 * 60 * 1_000;
+const PENDING_ATTENTION_MS = 60 * 60 * 1_000;
+
+function contractHasError(row: ContractKanshiRow): boolean {
+  return (
+    row.title === null ||
+    row.gates.reports.some(
+      (report) => report.current.kind === "attested" && report.current.verdict === "unsatisfied",
+    ) ||
+    row.targetLag.kind === "unknown" ||
+    row.workspaceObservation.kind === "failed" ||
+    row.workspaceObservation.kind === "unavailable" ||
+    row.issue !== undefined
+  );
+}
+
+function contractStatusTone(row: ContractKanshiRow, observedAt: string): SemanticTone | null {
+  if (contractHasError(row)) return "alert";
+  const phaseAge = elapsedMilliseconds(row.phaseAt, observedAt);
+  if (row.phase === "tendered" && phaseAge !== null && phaseAge >= REVIEW_ATTENTION_MS) return "attention";
+  if ((row.phase === "waiting" || row.phase === "bound") && phaseAge !== null && phaseAge >= PENDING_ATTENTION_MS)
+    return "attention";
+  const journalAge = elapsedMilliseconds(row.lastJournalAt, observedAt);
+  return journalAge !== null && journalAge <= RECENT_TONE_MS ? "recent" : null;
+}
+
 function contractMark(row: ContractKanshiRow): string {
   if (row.phase === "claimed") return "✓";
   if (row.phase === "abandoned") return "×";
@@ -209,9 +238,10 @@ function renderSelectedContractRow(
   abbreviations: ReadonlyMap<string, string>,
 ): readonly string[] {
   const title = row.title ?? "title unavailable";
+  const statusTone = contractStatusTone(row, report.observedAt);
   const lines = [
     ...entityLines({
-      mark: contractMark(row),
+      mark: statusTone === null ? contractMark(row) : tone(contractMark(row), statusTone, context.color),
       identity: row.id,
       state: `${row.phase} · ${formatAge(row.phaseAt, report.observedAt)}`,
       title,
@@ -285,8 +315,9 @@ function renderWorldContractRow(
     ...(row.holder.kind === "unavailable" ? ["! task · unavailable"] : []),
     ...(linkedAkumaSummary(row, report) === undefined ? [] : [linkedAkumaSummary(row, report)!]),
   ];
+  const statusTone = contractStatusTone(row, report.observedAt);
   return entityLines({
-    mark: contractMark(row),
+    mark: statusTone === null ? contractMark(row) : tone(contractMark(row), statusTone, context.color),
     identity: row.id,
     state: `${row.phase} · ${formatAge(row.lastJournalAt, report.observedAt)}`,
     title,

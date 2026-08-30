@@ -143,6 +143,7 @@ repo.currentBranch(): Promise<string | null>
 repo.reconcile(input?: ReconcileInput): Promise<RepoReconcileReport>
 Keiyaku.of(input: { repo: Repo; id: ContractId }): Keiyaku
 Keiyaku.withExecution(input: { execution: LibraryExecution }): KeiyakuLibrary
+Keiyaku.withLocal(input?: LocalContractComposition): KeiyakuLibrary
 Keiyaku.bind(input: BindInput): Promise<BindResult>
 Keiyaku.list(input: { repo: Repo }): Promise<ContractBoard>
 Keiyaku.observe(input: { repo: Repo; id: ContractId }): Promise<ContractObservation>
@@ -158,6 +159,12 @@ type NukeInput = Readonly<{
 ```
 
 ```ts
+type LocalContractComposition = Readonly<{
+  actor?: ActorId
+  hooks?: WorktreeHooks
+  requireBranchesToBeUpToDate?: boolean
+}>
+
 type LibraryExecution = ReturnType<typeof bodyRequestExecution>
 
 bodyRequestExecution(input: { directory: string }): LibraryExecution
@@ -165,9 +172,14 @@ bodyRequestExecution(input: { directory: string }): LibraryExecution
 
 `directory` is one absolute normalized Body Request transport path. It is not
 a general process-environment setting, and ordinary callers need not construct
-it. `KeiyakuLibrary` has the same static Contract, Fleet, Akuma creation, and
-catalog operations as `Keiyaku`, but they all retain the supplied execution
-channel. Its Contract handles keep that channel for their instance operations.
+it. `Keiyaku.withLocal` is the explicit local Contract composition carrier for
+actor testimony, worktree hooks, and Settings-derived branch policy. A Body
+Request execution accepts only its directory and cannot carry local Contract
+composition. `KeiyakuLibrary` has the same static Contract, Fleet, Akuma
+creation, and catalog operations as `Keiyaku`, but they all retain the supplied
+execution channel. `withLocal` captures the local composition. Its Contract
+handles returned by `of` or `bind` keep that composition for their instance
+operations.
 
 The result union is owned by [public-results.md](public-results.md). The
 confirmation and reset semantics are owned by [world.md](world.md).
@@ -370,19 +382,14 @@ keiyaku.amend(input: {
   hooks?: WorktreeHooks
 }): Promise<AmendResult>
 keiyaku.deliver(input?: {
-  actor?: ActorId
   message?: string
-  requireBranchesToBeUpToDate?: boolean
   includeDirty?: boolean
   materializeConflict?: boolean
   signal?: AbortSignal
-  hooks?: WorktreeHooks
 }): Promise<MutationResult<Delivery> | IntegrationConflictMaterialized>
 keiyaku.review(input: {
   verdict: AttestationVerdict
-  actor?: ActorId
   summary?: string
-  hooks?: WorktreeHooks
 }): Promise<MutationResult<Review>>
 keiyaku.abandon(input?: {
   actor?: ActorId
@@ -391,12 +398,9 @@ keiyaku.abandon(input?: {
 }): Promise<MutationResult<void>>
 keiyaku.arc(input: { markdown: string; actor?: ActorId; hooks?: WorktreeHooks }): Promise<MutationResult<void>>
 keiyaku.audit(input?: {
-  actor?: ActorId;
   includeDirty?: boolean;
   showDiff?: boolean;
-  requireBranchesToBeUpToDate?: boolean;
   signal?: AbortSignal;
-  hooks?: WorktreeHooks;
 }): Promise<MutationResult<AuditReport>>
 keiyaku.reconcile(input?: ReconcileInput): Promise<ReconcileReport>
 
@@ -411,6 +415,11 @@ is false by default and can return `IntegrationConflictMaterialized`; its
 conflict and recovery rules belong to [lifecycle.md](lifecycle.md). Audit has
 no message or materialization input;
 `showDiff` includes the requested candidate diff and scope, including `""`.
+Those three operation inputs contain only values that take effect on both local
+and one-hop Body Request execution. Actor testimony, worktree hooks, and the
+Settings-derived up-to-date policy are captured by local composition; a direct
+parent supplies them from its authenticated requester and selected Repo
+Settings when serving a request. They are never per-call forwarding fields.
 Akuma forwarding and Verification retain their owning protocol boundaries.
 
 `state()` and `guidance()` observe and fold afresh. `history()` returns typed

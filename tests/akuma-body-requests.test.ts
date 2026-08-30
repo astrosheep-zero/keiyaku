@@ -148,7 +148,6 @@ async function requestBodyAudit(
     contractId: string;
     includeDirty: boolean;
     showDiff: boolean;
-    requireBranchesToBeUpToDate: boolean;
     signal?: AbortSignal;
   }>,
 ) {
@@ -955,9 +954,8 @@ test("audit claims use the default permission, retain owner report evidence, and
           contractId: input.contractId,
           includeDirty: input.includeDirty,
           showDiff: input.showDiff,
-          requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
         },
-        { contractId, includeDirty: true, showDiff: true, requireBranchesToBeUpToDate: true },
+        { contractId, includeDirty: true, showDiff: true },
       );
       return { result: { facts: [], head: "head", value: report, lags: [], settlementLags: [] }, auditReport: report };
     },
@@ -972,7 +970,6 @@ test("audit claims use the default permission, retain owner report evidence, and
         contractId,
         includeDirty: true,
         showDiff: true,
-        requireBranchesToBeUpToDate: true,
       }),
       { facts: [], head: "head", value: report, lags: [], settlementLags: [] },
     );
@@ -1001,7 +998,6 @@ test("audit claims use the default permission, retain owner report evidence, and
           contractId,
           includeDirty: true,
           showDiff: true,
-          requireBranchesToBeUpToDate: true,
         }),
         { kind: "audit-report", repoRoot: root, contractId, report },
       );
@@ -1581,7 +1577,7 @@ test("CLI forwarded deliver preserves its selected Repo and uses parent Settings
     process.env[AKUMA_REQUESTS_ENV] = pump.directory;
     process.env.PATH = "";
     const result = await invoke(
-      parseArgv(["--repo", contractRepository.path, "deliver", id, "--actor", "child-supplied-actor"]),
+      parseArgv(["--repo", contractRepository.path, "deliver", id]),
       {
         cwd: parentRepository.path,
         environment: {
@@ -1608,8 +1604,6 @@ test("CLI forwarded deliver preserves its selected Repo and uses parent Settings
         "--unsatisfied",
         "--summary",
         "needs work",
-        "--actor",
-        "child-supplied-actor",
       ]),
       {
         cwd: parentRepository.path,
@@ -1756,7 +1750,6 @@ test("Contract forwarding preserves typed live failures for deliver, review, and
         contractId: "kei/missing-audit",
         includeDirty: false,
         showDiff: false,
-        requireBranchesToBeUpToDate: false,
       }),
       (error: unknown) =>
         error instanceof KeiyakuRefused &&

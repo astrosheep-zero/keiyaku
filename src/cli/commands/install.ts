@@ -26,6 +26,7 @@ export type InstallInvocationResult = Readonly<{
 export type InstallRunner = (input: ProcessInput) => Promise<ProcessOutcome>;
 
 export const INSTALL_USAGE = "install <codex|claude|opencode|pi> [--json]\ninstall --all [--json]";
+export const INSTALL_ROOT_PURPOSE = "Install Keiyaku into coding harnesses";
 
 function isHarness(value: string | undefined): value is HarnessName {
   return value !== undefined && (HARNESS_NAMES as readonly string[]).includes(value);
@@ -62,7 +63,7 @@ export function parseInstallCommand(argv: readonly string[]): ParsedInstallComma
 }
 
 export function renderInstallHelp(): string {
-  return `Install the Keiyaku skills into one or more agent harnesses.\n\n${usageLine(INSTALL_USAGE)}`;
+  return `Install Keiyaku into your coding harnesses via each harness's native plugin/package installer. --all continues past failures; any failure exits 1.\n\n${usageLine(INSTALL_USAGE)}`;
 }
 
 const INSTALL_TIMEOUT_MS = 5 * 60 * 1000;

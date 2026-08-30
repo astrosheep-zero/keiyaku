@@ -861,10 +861,7 @@ test("Contract owns the exact normalized deliver payload decoder", () => {
     action: "contract.deliver",
     ...payload,
   });
-  assert.equal(
-    contractRequestCommand("contract.deliver").decodeRequest({ ...payload, extra: true }),
-    null,
-  );
+  assert.equal(contractRequestCommand("contract.deliver").decodeRequest({ ...payload, extra: true }), null);
   const { materializeConflict: _materializeConflict, ...without } = payload;
   assert.equal(contractRequestCommand("contract.deliver").decodeRequest(without), null);
 });

@@ -2449,7 +2449,7 @@ test("Archetype definition catalog decodes metadata without provider admission",
       (error: unknown) =>
         error instanceof AkumaArchetypeError &&
         error.searched[0] === join(home, "akuma", "broken.md") &&
-        /must begin with YAML frontmatter/u.test(error.reason),
+        error.reason === "is invalid: Akuma file must begin with YAML frontmatter",
     );
   } finally {
     rmSync(home, { recursive: true, force: true });
@@ -2469,7 +2469,7 @@ test("Archetype definition catalog reports the first invalid definition in byte 
       (error: unknown) =>
         error instanceof AkumaArchetypeError &&
         error.searched[0] === join(home, "akuma", "alpha.md") &&
-        /must begin with YAML frontmatter/u.test(error.reason),
+        error.reason === "is invalid: Akuma file must begin with YAML frontmatter",
     );
   } finally {
     rmSync(home, { recursive: true, force: true });

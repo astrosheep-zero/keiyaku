@@ -1,6 +1,10 @@
-import type { Keiyaku as KeiyakuType } from "./contract.js";
+import {
+  captureLocalContractComposition,
+  type Keiyaku as KeiyakuType,
+  type LocalContractComposition,
+} from "./contract.js";
 import { composeLibrary } from "./composition.js";
-import { libraryExecutionInput, type LibraryExecution } from "../akuma/requests.js";
+import { libraryExecutionInput, localExecutionContext, type LibraryExecution } from "../akuma/requests.js";
 
 export { AuthorityCorruptionError } from "../core/facts/errors.js";
 export { Delivery, KeiyakuRefused, KeiyakuRetry } from "./contract.js";
@@ -9,6 +13,7 @@ export { gatesFrom, requireBranchesToBeUpToDateFrom, SettingsError, worktreeHook
 export { AkumaWorldScopeError } from "./address.js";
 export { bodyRequestExecution } from "../akuma/requests.js";
 export type { LibraryExecution } from "../akuma/requests.js";
+export type { LocalContractComposition } from "./contract.js";
 
 export type {
   AbandonInput,
@@ -119,7 +124,12 @@ function routedLibrary(input: Readonly<{ execution: LibraryExecution }>): Keiyak
   return composeLibrary(libraryExecutionInput(input));
 }
 
+function localLibrary(input?: LocalContractComposition): KeiyakuLibrary {
+  return composeLibrary(localExecutionContext(), captureLocalContractComposition(input));
+}
+
 export const Keiyaku = Object.freeze({
   ...composeLibrary(),
   withExecution: routedLibrary,
+  withLocal: localLibrary,
 });

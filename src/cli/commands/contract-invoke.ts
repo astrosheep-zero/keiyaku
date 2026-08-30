@@ -3,7 +3,7 @@ import { CliUsageError } from "../usage.js";
 import type { InvocationResult } from "../result.js";
 import type { ParsedCommand } from "../parse.js";
 import type { SelectedContract } from "../selectors.js";
-import type { ActorId, ContractId, Keiyaku as KeiyakuContract } from "../../index.js";
+import type { ActorId, ContractId, Keiyaku as KeiyakuContract, KeiyakuLibrary } from "../../index.js";
 import type { WorktreeHooks } from "../../library/configuration.js";
 import type { Repo } from "../../library/repo.js";
 import type { Settings } from "../../settings.js";
@@ -62,13 +62,14 @@ async function selectContract(
   repo: Repo,
   selector: string | undefined,
   scope: string,
-  execution: ExecutionContext,
+  library: KeiyakuLibrary,
 ): Promise<SelectedContract> {
   const { contractFromInput, resolveContextualContract } = await import("../selectors.js");
-  if (selector !== undefined && !selector.startsWith("@")) return contractFromInput(repo, selector, execution);
-  const { Keiyaku } = await import("../../library/keiyaku.js");
-  const id = resolveContextualContract(await Keiyaku.list({ repo }), selector, scope);
-  return contractFromInput(repo, id, execution);
+  const id =
+    selector !== undefined && !selector.startsWith("@")
+      ? contractFromInput(repo, selector).id
+      : resolveContextualContract(await library.list({ repo }), selector, scope);
+  return { id, contract: library.of({ repo, id }) };
 }
 
 async function bindDraftReceipt(establishWorld: () => Promise<WorldRoot>, markdown: string) {
@@ -148,27 +149,27 @@ function deliverRefusal(refusal: unknown): unknown {
   return { ...refusal, option: { flag: "--include-dirty", available: submodules.length === 0 } };
 }
 
-async function existingSeat(input: ContractMutationInput, parsed: ExistingCommand): Promise<ExistingSeat> {
-  const { repo, edge, scope, hooks, execution } = input;
-  const { id, contract } = await selectContract(repo, parsed.contract, scope, execution);
-  const actor = actorFromEdge(parsed.actor, edge.environment);
+async function existingSeat(
+  input: ContractMutationInput,
+  parsed: ExistingCommand,
+  library: KeiyakuLibrary,
+): Promise<ExistingSeat> {
+  const { repo, edge, scope, hooks } = input;
+  const { id, contract } = await selectContract(repo, parsed.contract, scope, library);
+  const actor = "actor" in parsed ? actorFromEdge(parsed.actor, edge.environment) : undefined;
   return { contract, id, ...(actor === undefined ? {} : { actor }), ...(hooks === undefined ? {} : { hooks }) };
 }
 
 async function invokeDeliver(
   parsed: Extract<ExistingCommand, { command: "deliver" }>,
   seat: ExistingSeat,
-  requireBranchesToBeUpToDate: boolean,
 ): Promise<InvocationResult> {
   const { acceptedDeliver } = await import("../accepted.js");
   try {
     const delivered = await seat.contract.deliver({
-      ...(seat.actor === undefined ? {} : { actor: seat.actor }),
       ...(parsed.message === undefined ? {} : { message: parsed.message }),
-      requireBranchesToBeUpToDate,
       includeDirty: parsed.includeDirty,
       materializeConflict: parsed.materializeConflict,
-      ...(seat.hooks === undefined ? {} : { hooks: seat.hooks }),
     });
     if (!("facts" in delivered)) return delivered;
     return acceptedDeliver(delivered, seat.id);
@@ -195,19 +196,34 @@ async function invokeReview(
     () =>
       seat.contract.review({
         verdict: parsed.verdict,
-        ...(seat.actor === undefined ? {} : { actor: seat.actor }),
         ...(summary === undefined ? {} : { summary }),
-        ...(seat.hooks === undefined ? {} : { hooks: seat.hooks }),
       }),
     (result) => acceptedReview(result, seat.id),
     { coordinate: seat.id },
   );
 }
 
+async function contractLibrary(input: ContractMutationInput, parsed: ExistingCommand): Promise<KeiyakuLibrary> {
+  const { configuration, edge, hooks } = input;
+  if (input.execution.channel.kind !== "local" || !["audit", "deliver", "review"].includes(parsed.command)) {
+    const { Keiyaku } = await import("../../library/keiyaku.js");
+    return Keiyaku.withExecution({ execution: input.execution });
+  }
+  const requireBranchesToBeUpToDate =
+    parsed.command !== "review" && configuration !== undefined ? await selectedGitPolicy(configuration) : false;
+  const actor = actorFromEdge(undefined, edge.environment);
+  const { Keiyaku } = await import("../../library/keiyaku.js");
+  return Keiyaku.withLocal({
+    ...(actor === undefined ? {} : { actor }),
+    ...(hooks === undefined ? {} : { hooks }),
+    requireBranchesToBeUpToDate,
+  });
+}
+
 export async function invokeContractMutation(input: ContractMutationInput): Promise<InvocationResult> {
   const { parsed, repo, edge, configuration, hooks } = input;
   if (parsed.command === "bind") return invokeBind(input);
-  const seat = await existingSeat(input, parsed);
+  const seat = await existingSeat(input, parsed, await contractLibrary(input, parsed));
   const { id, contract, actor } = seat;
   switch (parsed.command) {
     case "amend": {
@@ -233,7 +249,7 @@ export async function invokeContractMutation(input: ContractMutationInput): Prom
       );
     }
     case "deliver":
-      return invokeDeliver(parsed, seat, configuration === undefined ? false : await selectedGitPolicy(configuration));
+      return invokeDeliver(parsed, seat);
     case "review":
       return invokeReview(parsed, seat, edge.readStdin);
     case "arc": {
@@ -266,17 +282,13 @@ export async function invokeContractMutation(input: ContractMutationInput): Prom
       );
     }
     case "audit": {
-      const requireBranchesToBeUpToDate = configuration === undefined ? false : await selectedGitPolicy(configuration);
       const { acceptedAudit, resultFromMutationCall } = await import("../accepted.js");
       return resultFromMutationCall(
         "audit",
         () =>
           contract.audit({
-            ...(actor === undefined ? {} : { actor }),
             includeDirty: parsed.includeDirty,
             showDiff: parsed.showDiff,
-            requireBranchesToBeUpToDate,
-            ...(hooks === undefined ? {} : { hooks }),
           }),
         (result) => acceptedAudit(result, id),
         { coordinate: id },

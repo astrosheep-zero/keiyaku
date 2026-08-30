@@ -362,7 +362,7 @@ test("delivery re-integrates its persisted tender when the target premise moves"
           repo: await Repo.at({ path: repository.path, gitPath }),
           id: result.keiyaku.id,
         })
-      ).deliver({ actor: "delivery-actor", message: "preserve this subject" }),
+      ).deliver({ message: "preserve this subject" }),
   );
 
   assert.deepEqual(

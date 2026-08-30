@@ -16,7 +16,7 @@ import { contractSectionName, RESERVED_SECTIONS } from "./shape.js";
 import { renderAmendedContractBody } from "./render.js";
 
 type Operation = Readonly<{
-  kind: "Add" | "Update" | "Replace" | "Append" | "Remove";
+  kind: "Add" | "Update" | "Replace" | "Append" | "Remove" | "Set";
   target: string;
   section: SectionNode;
 }>;
@@ -27,7 +27,7 @@ type MutableBody = {
   objective: string;
   design: string;
   region: readonly string[];
-  criteria: Array<ContractCriterion | undefined>;
+  criteria: ContractCriterion[];
   verification: readonly VerificationDeclaration[];
   extensions: Array<ContractExtension | undefined>;
   criterionIndexes: Map<string, number>;
@@ -56,9 +56,11 @@ function operationSections(document: DocumentNode): readonly Operation[] {
     refusal("amend operations contain bytes outside H2 sections");
   }
   return sections(document).map((section) => {
-    const match = /^(Add|Update|Replace|Append|Remove):[ ]+(.+)$/.exec(section.title.trim());
-    if (!match) refusal(`invalid amend operation heading: ${section.title}`);
-    return { kind: match[1] as Operation["kind"], target: match[2]!.trim(), section };
+    const title = section.title.trim();
+    const match = /^(Add|Update|Replace|Append|Remove):[ ]+(.+)$/.exec(title);
+    return match
+      ? { kind: match[1] as Operation["kind"], target: match[2]!.trim(), section }
+      : { kind: "Set", target: title, section };
   });
 }
 
@@ -140,7 +142,7 @@ function completeBody(body: MutableBody): ContractBody {
     objective: body.objective,
     design: body.design,
     region: body.region,
-    criteria: body.criteria.filter((criterion): criterion is ContractCriterion => criterion !== undefined),
+    criteria: body.criteria,
     verification: body.verification,
     extensions: body.extensions.filter((extension): extension is ContractExtension => extension !== undefined),
   };
@@ -170,14 +172,6 @@ function alteredText(body: MutableBody, target: "context" | "objective" | "desig
 
 function applyRemove(body: MutableBody, operation: Operation, document: DocumentNode): void {
   requireEmpty(document, operation.section);
-  if (operation.target.startsWith("Criterion ")) {
-    const title = operation.target.slice("Criterion ".length);
-    const index = criterionIndex(body, title);
-    if (index < 0) refusal(`unknown criterion '${title}'`);
-    body.criteria[index] = undefined;
-    body.criterionIndexes.delete(normalizeTitle(title));
-    return;
-  }
   const index = extensionIndex(body, operation.target);
   if (index < 0) refusal(`unknown extension '${operation.target}'`);
   body.extensions[index] = undefined;
@@ -265,6 +259,14 @@ function applyReplace(body: MutableBody, operation: Operation, document: Documen
   body.extensions[index] = { ...extension, content: prose(document, operation.section, "extension") };
 }
 
+function applySet(body: MutableBody, operation: Operation, document: DocumentNode): void {
+  if (contractSectionName(operation.target) !== null || extensionIndex(body, operation.target) >= 0) {
+    applyReplace(body, operation, document);
+    return;
+  }
+  applyAdd(body, operation, document);
+}
+
 function applyOperation(body: MutableBody, operation: Operation, document: DocumentNode): void {
   switch (operation.kind) {
     case "Add":
@@ -282,14 +284,14 @@ function applyOperation(body: MutableBody, operation: Operation, document: Docum
     case "Remove":
       applyRemove(body, operation, document);
       return;
+    case "Set":
+      applySet(body, operation, document);
+      return;
   }
 }
 
 function operationKey(operation: Operation): string {
-  const target = operation.target.startsWith("Criterion ")
-    ? `Criterion ${normalizeTitle(operation.target.slice("Criterion ".length))}`
-    : operation.target;
-  return `${operation.kind}:${target}`;
+  return `${operation.kind}:${operation.target}`;
 }
 
 function apply(source: string, current: ContractBody): Readonly<{ body: ContractBody; changed: ReadonlySet<string> }> {
@@ -303,7 +305,7 @@ function apply(source: string, current: ContractBody): Readonly<{ body: Contract
     const key = operationKey(operation);
     if (seen.has(key)) refusal(`duplicate amend operation '${key}'`);
     seen.add(key);
-    changed.add(normalizeTitle(operation.target.startsWith("Criterion ") ? "Criteria" : operation.target));
+    changed.add(normalizeTitle(operation.target));
     applyOperation(body, operation, document);
   }
   return { body: completeBody(body), changed };

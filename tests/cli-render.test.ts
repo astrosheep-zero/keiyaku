@@ -13,7 +13,7 @@ test("catalog text renders only the selected identity layer", () => {
       kind: "archetypes",
       rows: [{ name: "reviewer", model: "codex-5", description: "Read the complete change without truncation." }],
     }),
-    ["archetypes 1", "", "reviewer - codex-5", "  Read the complete change without truncation."].join("\n"),
+    ["available Akuma 1", "", "reviewer - codex-5", "  Read the complete change without truncation."].join("\n"),
   );
   assert.equal(
     renderCatalogText({

@@ -212,11 +212,11 @@ async function preparedDelivery(repository: TestGitRepository, id: ContractId) {
 }
 
 function deliveryRefFor(contract: ContractId): string {
-  return `refs/heads/keiyaku-delivery/kei-${contract.slice("kei/".length)}`;
+  return `refs/keiyaku/delivery/kei-${contract.slice("kei/".length)}`;
 }
 
 function candidatePinRefFor(contract: ContractId): string {
-  return `refs/heads/keiyaku-candidate/kei-${contract.slice("kei/".length)}`;
+  return `refs/keiyaku/candidate/kei-${contract.slice("kei/".length)}`;
 }
 
 function recoverySnapshot(result: Readonly<{ recoverySnapshot?: string }>): string {

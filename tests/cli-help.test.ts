@@ -38,9 +38,31 @@ test("help resolves the longest legal command-word prefix before syntax scanning
 });
 
 test("each grammar owner renders its own namespace and leaf help", () => {
+  assert.match(renderRootHelp(), /^keiyaku — Contract, Task, and Akuma control for one repository$/mu);
+  assert.match(renderRootHelp(), /^usage: keiyaku <command> \[options\]$/mu);
+  assert.match(renderRootHelp(), /^Contract — standing acceptance$/mu);
+  assert.match(renderRootHelp(), /^Task — plan memory$/mu);
+  assert.match(renderRootHelp(), /^Akuma — invoke capability$/mu);
+  assert.match(renderRootHelp(), /^Workspace$/mu);
+  assert.match(renderRootHelp(), /^  install   Install Keiyaku into coding harnesses$/mu);
+  assert.match(renderRootHelp(), /^  settings  Show effective Settings \(user \+ project, read-only\)$/mu);
   assert.match(renderRootHelp(), /-C, --cwd <path>  Set the invocation working directory\./u);
   assert.match(renderRootHelp(), /--repo <path>     Select the Git repository coordinate\./u);
-  assert.match(renderRootHelp(), /keiyaku task\s+Task coordination; see `keiyaku task --help`\./u);
+  assert.match(renderRootHelp(), /task\s+Task coordination; see `keiyaku task --help`\./u);
+  assert.match(
+    renderInstallHelp(),
+    /Install Keiyaku into your coding harnesses via each harness's native plugin\/package installer\. --all continues past failures; any failure exits 1\./u,
+  );
+  const settingsHelp = renderContractHelp("settings");
+  assert.match(settingsHelp, /^Show effective Settings — the merged read-only view of:$/mu);
+  assert.match(settingsHelp, /^  user      ~\/\.keiyaku\/settings\.json$/mu);
+  assert.match(settingsHelp, /^  project   <WorldRoot>\/\.keiyaku\/settings\.json$/mu);
+  assert.match(settingsHelp, /A project record wholly shadows the same-name user record\./u);
+  assert.match(settingsHelp, /Shape: namespace -> entry -> JSON value\. There is no write/u);
+  assert.match(settingsHelp, /^Recognized settings:$/mu);
+  assert.match(settingsHelp, /^  providers\s+the available Akuma and how each is run$/mu);
+  assert.match(settingsHelp, /A rejected\nvalue's diagnostic states the expected shape\./u);
+  assert.match(settingsHelp, /^usage: keiyaku settings \[--json\]$/mu);
   assert.match(renderContractHelp("bind"), /usage: keiyaku bind \[--task <task\/\.\.\.>\]/u);
   assert.match(renderContractHelp("deliver"), /--message <text>\] \[--include-dirty\] \[--materialize-conflict\]/u);
   assert.match(renderContractHelp("review"), /usage: keiyaku review .*--satisfied \| --unsatisfied/u);
@@ -75,7 +97,7 @@ test("each grammar owner renders its own namespace and leaf help", () => {
   assert.match(renderTaskHelp("compose"), /references: @task\/\.\.\. is pre-existing/u);
   assert.match(renderTaskHelp("ready"), /open Tasks whose every need is terminal/u);
   assert.doesNotMatch(renderRootHelp(), /^  interrupt /mu);
-  assert.match(renderRootHelp(), /keiyaku tell\s+Send one prompt to an existing Akuma/u);
+  assert.match(renderRootHelp(), /tell\s+Send one prompt to an existing Akuma/u);
   assert.equal(
     renderAkumaHelp("tell"),
     [
@@ -99,9 +121,12 @@ test("help projections reflow at the requested terminal width without splitting 
   const root = renderHelp({ kind: "root" }, 72);
   const history = renderHelp({ kind: "akuma", action: "history" }, 72);
   for (const help of [root, history]) {
-    assert.ok(help.split("\n").every((line) => displayColumns(line) <= 72), help);
+    assert.ok(
+      help.split("\n").every((line) => displayColumns(line) <= 72),
+      help,
+    );
   }
-  assert.match(root, /keiyaku bind/u);
+  assert.match(root, /bind\s+Create one Contract/u);
   assert.match(history, /usage: keiyaku history/u);
   assert.match(history, /--limit/u);
   assert.match(history, /<count>/u);
@@ -116,11 +141,11 @@ test("amend leaf help enumerates the operation grammar", () => {
       "",
       "usage: keiyaku amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name,...>] [--actor <actor>] [--json] [-]",
       "",
+      "  ## Context|Objective|Design|Region|Criteria|Verification|<extension>  (replace, or add new extension)",
       "  ## Replace: Context|Objective|Design|Region|Criteria|Verification|<extension>",
       "  ## Append: Context|Objective|Design|Criteria|<extension>",
       "  ## Add: Criteria|<new-extension-title>",
       "  ## Update: <existing-extension-title>",
-      "  ## Remove: Criterion <existing-title>",
       "  ## Remove: <existing-extension-title>",
     ].join("\n"),
   );
@@ -132,7 +157,7 @@ test("deliver leaf help explains candidate capture and conflict continuation", (
     [
       "Deliver one Contract candidate from the appointed worktree.",
       "",
-      "usage: keiyaku deliver [<contract>|@<contract>] [--message <text>] [--include-dirty] [--materialize-conflict] [--actor <actor>] [--json]",
+      "usage: keiyaku deliver [<contract>|@<contract>] [--message <text>] [--include-dirty] [--materialize-conflict] [--json]",
       "",
       "  --include-dirty         Capture the complete non-ignored worktree tree as the",
       "                          candidate; stages nothing, commits nothing, including",
@@ -147,7 +172,9 @@ test("deliver leaf help explains candidate capture and conflict continuation", (
 
 test("supplemental Contract help is owned by command specs", () => {
   assert.doesNotMatch(renderRootHelp(), /stdin operations/u);
-  for (const command of Object.keys(CONTRACT_COMMAND_SPECS) as ContractCommand[]) {
+  for (const command of (Object.keys(CONTRACT_COMMAND_SPECS) as ContractCommand[]).filter(
+    (command) => command !== "settings",
+  )) {
     const spec: ContractCommandSpec = CONTRACT_COMMAND_SPECS[command];
     const expected = `${spec.purpose}\n\n${usageLine(spec.usage)}${spec.details === undefined ? "" : `\n\n${spec.details}`}`;
     assert.equal(renderContractHelp(command), expected);
@@ -254,7 +281,7 @@ test("ordinary CLI help, usage, and JSON end with one LF", async () => {
   assert.equal(usage.stdout, "");
   assert.equal(usage.stderr.endsWith("\n"), true);
   assert.equal(usage.stderr.endsWith("\n\n"), false);
-  assert.match(usage.stderr, /^unknown command: \nusage: keiyaku /u);
+  assert.match(usage.stderr, /^unknown command: \nkeiyaku — Contract, Task, and Akuma control/u);
 
   const json = await captureMain(["-C", mkdtempSync(join(tmpdir(), "keiyaku-cli-lf-")), "task", "ls", "--json"]);
   assert.equal(json.exit, 1);

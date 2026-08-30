@@ -152,10 +152,10 @@ primary results, never a post-action observation. Verb results and operation fai
 in the live receipt and never become permission refusals or a generic result store.
 
 `contract.audit` carries the selected Repo's normalized primary-worktree
-coordinate, a complete ContractId, `includeDirty`, `showDiff`, and the effective
-up-to-date policy flag. The direct parent reconstructs the Repo, supplies the
-authenticated requester and Settings-derived hooks/policy, and runs the same
-forced-local audit executor. Its live receipt is the complete ordinary
+coordinate, a complete ContractId, `includeDirty`, and `showDiff`. The direct
+parent reconstructs the Repo, supplies the authenticated requester and
+Settings-derived hooks/policy, and runs the same forced-local audit executor.
+Its live receipt is the complete ordinary
 `AuditReport`; its service evidence retains that owner-decoded report so a later
 terminal claim can project the same audit result without rerunning Git. Audit is
 independently permission-keyed from delivery and review.
@@ -195,6 +195,10 @@ coordinate, ContractId, and owner-minted review fact id in Heart. A normal
 return without that reference, or an executor throw or cancellation, settles
 Heart `voided`; a later pump projects only an accepted reference and never reads
 or replays Contract state.
+
+Forwarded Contract claims carry only operation values that apply in both
+channels. Actor, hooks, and Settings-derived policy are direct-parent
+composition authority and never claim fields.
 
 Each advertised `task.*` mutation carries its caller-selected normalized World,
 the exact public structured input or Markdown bytes, and every complete TaskId

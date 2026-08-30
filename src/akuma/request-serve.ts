@@ -134,7 +134,7 @@ function encodedFailure(request: ErasedRequest, error: unknown): unknown | undef
   }
 }
 
-export async function serveRequest(input: ServeInput): Promise<void> {
+export async function serveRequest(input: ServeInput): Promise<boolean> {
   const command = input.commands[input.claim.action];
   if (command === undefined) {
     await atomicJson(receiptPath(input.directory, input.transportId), {
@@ -143,14 +143,14 @@ export async function serveRequest(input: ServeInput): Promise<void> {
       state: "refused",
       diagnostic: `request action ${input.claim.action} is not registered`,
     });
-    return;
+    return true;
   }
-  if (await serveCommand(input, command)) return;
+  return await serveCommand(input, command);
 }
 
-async function serveTransportClaim(input: ServeInput): Promise<void> {
+async function serveTransportClaim(input: ServeInput): Promise<boolean> {
   try {
-    await serveRequest(input);
+    return await serveRequest(input);
   } catch (error) {
     if (!isRequestInputConflict(error)) throw error;
     await atomicJson(receiptPath(input.directory, input.transportId), {
@@ -159,6 +159,7 @@ async function serveTransportClaim(input: ServeInput): Promise<void> {
       state: "refused",
       diagnostic: error.message,
     });
+    return true;
   }
 }
 

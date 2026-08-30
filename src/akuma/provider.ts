@@ -492,6 +492,7 @@ export function createProviderAttempt<Result>(
   const setupSettled = new Promise<void>((resolve) => {
     setupComplete = resolve;
   });
+  let establishmentSettled = false;
   let retiring: "abort" | "forceDispose" | undefined;
 
   const remember = (operation: Promise<void>, reportFailure: boolean): Promise<void> => {
@@ -527,6 +528,7 @@ export function createProviderAttempt<Result>(
     return Promise.all(pending).then(() => undefined);
   };
   const own = (resource: AttemptResource): void => {
+    if (establishmentSettled) throw new Error("cannot own a resource after provider establishment settles");
     if (ownedResources.has(resource)) return;
     const owned = { resource };
     resources.push(owned);
@@ -551,7 +553,10 @@ export function createProviderAttempt<Result>(
       if (!controller.signal.aborted) observeBackgroundRetirement(retire("forceDispose"));
       throw error;
     })
-    .finally(() => parent.removeEventListener("abort", cancelFromParent));
+    .finally(() => {
+      establishmentSettled = true;
+      parent.removeEventListener("abort", cancelFromParent);
+    });
 
   void result.then(
     () => setupComplete(),
@@ -567,6 +572,7 @@ export function createProviderAttempt<Result>(
     }
     if (cleanupFailures.length > 0) throw cleanupFailures[0];
   })();
+  void closed.catch(() => undefined);
   const control = async (operation: "abort" | "forceDispose"): Promise<void> => {
     if (!controller.signal.aborted) controller.abort(new Error("provider attempt retired"));
     await retire(operation);

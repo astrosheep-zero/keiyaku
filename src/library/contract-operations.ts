@@ -13,7 +13,7 @@ import type { AuditReport } from "../protocol/audit.js";
 import type { IntegrationConflictMaterialized } from "../protocol/deliver.js";
 import type { DeliveryValue } from "./delivery.js";
 import type { MutationResult } from "./mutation.js";
-import type { Review } from "./contract-forwarding.js";
+import type { DeliveryExecutionInput, Review } from "./contract-forwarding.js";
 import { isAbsolute, resolve } from "node:path";
 import { z } from "zod";
 
@@ -21,6 +21,7 @@ type DeliveryResult = MutationResult<DeliveryValue> | IntegrationConflictMateria
 type ReviewResult = MutationResult<Review>;
 type AuditResult = MutationResult<AuditReport>;
 type ContractResult = DeliveryResult | ReviewResult | AuditResult;
+type ContractRequester = NonNullable<DeliveryExecutionInput["actor"]>;
 
 const absolutePathSchema = z.string().refine((value) => isAbsolute(value) && resolve(value) === value);
 const nonblankStringSchema = z.string().refine((value) => value.trim() !== "");
@@ -37,7 +38,6 @@ const auditRequestSchema = contractRequestBaseSchema
   .extend({
     includeDirty: z.boolean(),
     showDiff: z.boolean(),
-    requireBranchesToBeUpToDate: z.boolean(),
   })
   .transform((request) => ({ action: "contract.audit" as const, ...request }));
 const deliverRequestSchema = contractRequestBaseSchema
@@ -88,16 +88,20 @@ const contractServiceSchema = z.union([auditServiceSchema, deliveryReferenceSche
 export type ContractService = z.infer<typeof contractServiceSchema>;
 export type ContractRequestPort = Readonly<{
   audit(
-    input: AuditRequest & Readonly<{ requester: string; signal: AbortSignal }>,
+    input: AuditRequest & Readonly<{ requester: ContractRequester; signal: AbortSignal }>,
   ): Promise<Readonly<{ result: AuditResult; auditReport?: AuditReport }>>;
   deliver(
-    input: DeliverRequest & Readonly<{ requester: string; signal: AbortSignal }>,
+    input: DeliverRequest & Readonly<{ requester: ContractRequester; signal: AbortSignal }>,
   ): Promise<Readonly<{ result: DeliveryResult; deliveryFactId?: string }>>;
   review(
-    input: ReviewRequest & Readonly<{ requester: string; signal: AbortSignal }>,
+    input: ReviewRequest & Readonly<{ requester: ContractRequester; signal: AbortSignal }>,
   ): Promise<Readonly<{ result: ReviewResult; reviewFactId?: string }>>;
 }>;
-type ContractExecutionContext = Readonly<{ requester: string; signal: AbortSignal; upstream: ContractRequestPort }>;
+type ContractExecutionContext = Readonly<{
+  requester: ContractRequester;
+  signal: AbortSignal;
+  upstream: ContractRequestPort;
+}>;
 
 function decodeContractExecutionContext(value: unknown): ContractExecutionContext {
   const context = contractPayload(value);
@@ -109,7 +113,7 @@ function decodeContractExecutionContext(value: unknown): ContractExecutionContex
     !isContractRequestPort(context.upstream)
   )
     throw new Error("invalid Contract execution context");
-  return { requester: context.requester, signal: context.signal, upstream: context.upstream };
+  return { requester: context.requester as ContractRequester, signal: context.signal, upstream: context.upstream };
 }
 
 function isAbortSignal(value: unknown): value is AbortSignal {
@@ -172,7 +176,7 @@ async function executeContractRequest(
         kind: "audit-report",
         repoRoot: request.repoRoot,
         contractId: request.contractId,
-        report: auditReportSchema.parse(served.auditReport),
+        report: served.auditReport,
       },
     };
   }
@@ -232,7 +236,7 @@ export function contractRequestCommand(
     decodeResult: (value) => decodedContractResult(action, value),
     encodeFailure: encodeContractLiveFailure,
     decodeFailure: decodeContractLiveFailure,
-    encodeService: (service) => decodeContractService(action, service),
+    encodeService: (service) => service,
     decodeService: (service) => decodeContractService(action, service),
     projectService: (service) => decodeContractService(action, service),
     decodeReference: (reference) => decodeContractService(action, reference),

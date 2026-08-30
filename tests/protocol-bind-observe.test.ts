@@ -10,6 +10,8 @@ import {
   CANDIDATE_PIN_REF_NAMESPACE,
   GIT_REF,
   DELIVERY_REF_NAMESPACE,
+  LEGACY_CANDIDATE_PIN_REF_NAMESPACE,
+  LEGACY_DELIVERY_REF_NAMESPACE,
   readBlob,
   readGit,
   repositoryAt as productionRepositoryAt,
@@ -225,6 +227,10 @@ test("refuses targets that name Keiyaku-owned refs", async () => {
     `${DELIVERY_REF_NAMESPACE}/contract`,
     CANDIDATE_PIN_REF_NAMESPACE,
     `${CANDIDATE_PIN_REF_NAMESPACE}/contract`,
+    LEGACY_DELIVERY_REF_NAMESPACE,
+    `${LEGACY_DELIVERY_REF_NAMESPACE}/contract`,
+    LEGACY_CANDIDATE_PIN_REF_NAMESPACE,
+    `${LEGACY_CANDIDATE_PIN_REF_NAMESPACE}/contract`,
   ];
 
   for (const target of ownedTargets) {

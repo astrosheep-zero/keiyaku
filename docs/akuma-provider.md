@@ -105,6 +105,14 @@ crosses the Provider Core boundary. Fork attempt custody includes temporary
 SDK, process, and session-creation resources, but does not claim to revoke a
 durable remote child coordinate already created upstream.
 
+`AttemptCustody.own` is available only while establishment remains unsettled;
+a later call throws rather than adding a resource after the attempt's custody
+set has closed. This is an admission guard, not another lifecycle. Pi has one
+full-disposal representation for normal Session settlement and either attempt
+disposal control: it unsubscribes, ends event delivery, settles subordinate
+completion, disposes the native session, and only then fulfills its owned
+`closed` proof.
+
 `Session` owns only one live native execution. A live `tell` returns `accepted`
 with a provider submission fence, or `turn-ended` when the adapter has already
 observed terminal native evidence and submitted nothing. The adapter is the sole
@@ -180,10 +188,11 @@ started event carries no result; a completed event requires one. Result
 `message` is a bounded diagnostic, never stdout, stderr, or a native result body.
 `thought` is one completed reasoning summary or block bounded at 4,000
 characters, never raw thinking text or a delta stream. `note` is one bounded
-line for non-tool plan, todo, retry, warning, or refusal narration. Codex
-`hook/started` notes preserve the first nonblank native hook name supplied by
-`name`, `hookName`, or `hook_name`, and use `Hook unknown started` only when
-none is usable. Every other
+line for non-tool plan, todo, retry, warning, or refusal narration. Internal
+hook-start telemetry and uneventful successful hook completion are dropped. A
+native hook completion that is failed, blocked, stopped, errored, cancelled,
+or carries a warning is one note with its native hook name or event and bounded
+diagnostic. Every other
 persisted activity text field, including tool names, calls, diagnostics, and
 unknown native names, is bounded at 16,384 characters. The provider codec is
 the sole persistence-bound judge; session coordinates and tool pairing ids are

@@ -41,6 +41,24 @@ that completed before the failure and identifies whether observation or effect
 application failed. It makes no claim that an unreported effect did or did not
 happen. Authority corruption and internal invariant failure remain exceptions.
 
+Before applying one observed Contract's topology, reconciliation converges
+each legacy delivery or candidate leaf into its corresponding canonical
+`refs/keiyaku/` leaf. Reconciliation observes both custody pairs before any
+write. If neither pair conflicts, one `update-ref` transaction moves every
+legacy-only leaf by creating its canonical leaf and deleting the expected
+legacy OID. When both leaves name the same OID, that transaction verifies the
+canonical leaf and deletes only the legacy leaf. Runtime never dual-writes
+these namespaces.
+
+When corresponding legacy and canonical leaves name different OIDs,
+reconciliation changes neither leaf and returns `ref-migration-conflict` with
+both ref names and OIDs. It performs no later topology effect for that Contract
+until the conflict is externally resolved, so neither object loses its
+custodian. A Contract-absent legacy leaf is an orphan and is not adopted or
+deleted by reconciliation. Confirmed reset remains the only owner operation
+that enumerates both roots. No marker, second inventory, bulk migration, or
+standalone migrate command exists.
+
 For an active worktree contract, reconciliation repairs its custody ref, then
 projects an existing managed worktree, runs create-hook recovery, and repairs
 its candidate pin. It creates the deterministic linked worktree only when it
@@ -245,6 +263,13 @@ type ReconcileLag =
       command: number
       name: string
       failure: HookFailure
+    }>
+  | Readonly<{
+      kind: "ref-migration-conflict";
+      legacyRef: string;
+      legacyOid: GitObjectId;
+      currentRef: string;
+      currentOid: GitObjectId;
     }>
   | Readonly<{
       kind: "reconcile-failed";

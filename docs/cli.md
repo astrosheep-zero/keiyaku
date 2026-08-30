@@ -82,7 +82,7 @@ The command vocabulary is:
 | `arc`                             | Calls `keiyaku.arc` with arc Markdown.                                                                                              |
 | `status`                          | Calls Kanshi or one or more exact Contract/Akuma status projections according to its selectors.                                     |
 | `show`                            | Calls `keiyaku.guidance()` for one selected Contract.                                                                               |
-| `ls`                              | Lists exactly one selected Task, Contract, Akuma configuration, or Akuma identity directory.                                        |
+| `ls`                              | Lists exactly one selected Task, Contract, catalog of available Akuma, or Akuma identity directory.                                 |
 | `audit`                           | Calls `keiyaku.audit`; in a declared request channel it forwards one hop through the direct parent.                               |
 | `reconcile`                       | Calls the selected public reconciliation method.                                                                                    |
 | `settings`                        | Constructs and observes the shared read-only Settings resource.                                                                     |
@@ -183,8 +183,12 @@ and `arc` still require `-`. Amend leaf help
 enumerates the operation headings and keeps the target forms distinct for
 criteria and extensions. Body semantics remain owned by the document chapter.
 
-Every Contract mutation and `reconcile` passes one CLI-observed `WorktreeHooks`
-value to the public operation; the CLI never runs hooks or reads markers.
+The CLI creates one Library `Keiyaku.withLocal` composition for local deliver,
+review, and audit execution, carrying actor testimony, `WorktreeHooks`, and
+the Git policy while their public per-call inputs contain none of those values.
+In a request channel the direct parent owns that composition from its
+authenticated requester and selected Repo Settings. The CLI never runs hooks
+or reads markers.
 `--retry-hooks` retries the complete current hook phase; hook authors own
 idempotence. Verification instead reads
 tracked Settings from the integration snapshot. The CLI has no global
@@ -236,8 +240,9 @@ usage. Other listed scalar operands must be nonblank. `--json` affects output
 only.
 
 `install` is the one edge command that does not read a repository or Git. It
-uses native harness installers; `--all` runs the supported harnesses in fixed
-order and continues after failures. Pi installs the published
+installs Keiyaku into coding harnesses through each harness's native
+plugin/package installer. `--all` runs the supported harnesses in fixed order
+and continues after failures. Pi installs the published
 `npm:@astrosheep/keiyaku` package, so its extension and skills are managed by
 Pi rather than by a path into the invoking CLI installation. Text and JSON
 expose one typed result per harness; any failure exits `1`.
@@ -249,8 +254,9 @@ text names the input and points to `keiyaku ls aku/`.
 
 `--contract` accepts one complete `kei/...` and requests Dispatch after birth;
 `--alias` accepts `@name` and moves that world-local Alias only after Dispatch
-succeeds. Repeated `--allowed` values add actions to the Archetype defaults;
-an empty repeated set carries no clearing meaning. The vocabulary is owned by
+succeeds. Repeated `--allowed` values add actions to the selected Akuma
+defaults.
+An empty repeated set carries no clearing meaning. The vocabulary is owned by
 [akuma-allowed.md](akuma-allowed.md). Explicit invocation cwd wins for a
 contracted call, otherwise its
 appointed managed worktree is used. A direct Contract-free call uses ambient
@@ -293,13 +299,13 @@ and are served one hop by the direct parent. CLI parsing, rendering, and public
 input grammar do not change.
 Bare `ls` renders the command's own help and exits successfully. It does not
 locate or create a World, construct a Repo or Settings value, or read Git,
-Task, Akuma configuration, or Akuma state. The accepted path grammar is closed
+Task, catalog of available Akuma, or Akuma state. The accepted path grammar is closed
 and uses the canonical directory spellings above; the final slash is optional
 for those directory selectors. Exact identities, Alias selectors, and other
 paths are usage errors.
 
-Each `ls` path reads only its selected Task, Contract, Akuma configuration, or
-Akuma identity catalog. JSON is that catalog, not an aggregate envelope.
+Each `ls` path reads only its selected Task, Contract, catalog of available
+Akuma, or Akuma identity catalog. JSON is that catalog, not an aggregate envelope.
 `status @name` refuses cross-kind selector ambiguity.
 CLI `wait` uses the Akuma public default completion judgment: life is not
 `running` and the observed snapshot contains no pending Tell row. Its
@@ -334,8 +340,8 @@ available. The facade alone reads and propagates parent Dispatch; CLI never
 reads Dispatch or Alias files.
 
 `call --readonly` adds the one-way read-only restriction to that newly born
-Akuma. Its omission leaves the call RW unless the selected Archetype already
-declares `readonly: true`; the CLI has no `--write` counterpart and no live
+Akuma. Its omission leaves the call RW unless the selected Akuma is already
+restricted to read-only access; the CLI has no `--write` counterpart and no live
 access toggle.
 
 ## Akuma Text Surface

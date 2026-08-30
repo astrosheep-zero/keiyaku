@@ -108,7 +108,7 @@ async function closeBatchProcess(
   stderr: readonly Buffer[],
 ): Promise<void> {
   if (!child.stdin.destroyed) child.stdin.end();
-  const outcome = await closed;
+  const outcome = await Promise.race([closed, process.terminationFailure]);
   await process.waitTermination();
   if (spawnError !== null || outcome.code !== 0) {
     throw batchError(

@@ -1,9 +1,9 @@
-import { snapshotId } from "../core/facts/types.js";
+import { mintSnapshotId } from "../git/identity.js";
 import { z } from "zod";
 
 function canonicalSnapshot(value: string, context: z.RefinementCtx) {
   try {
-    return snapshotId(value);
+    return mintSnapshotId(value);
   } catch {
     context.addIssue({ code: "custom", message: "expected SnapshotId" });
     return z.NEVER;
@@ -62,6 +62,15 @@ export const reconciliationLagSchema = z.union([
       kind: z.literal("reconcile-failed"),
       stage: z.enum(["observation", "effect"]),
       diagnostic: nonblankStringSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("ref-migration-conflict"),
+      legacyRef: nonblankStringSchema,
+      legacyOid: snapshotIdSchema,
+      currentRef: nonblankStringSchema,
+      currentOid: snapshotIdSchema,
     })
     .strict(),
   z

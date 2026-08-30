@@ -43,7 +43,7 @@ const archetypeSchema = z.string().transform((value, context) => {
   try {
     return archetypeName(value);
   } catch {
-    context.addIssue({ code: "custom", message: "expected archetype" });
+    context.addIssue({ code: "custom", message: "expected Akuma name" });
     return z.NEVER;
   }
 });

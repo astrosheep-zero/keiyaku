@@ -318,11 +318,17 @@ export const cliZones = [
       any("cli/render/contract-observation.ts"),
       any("cli/render/terminal.ts"),
       any("cli/render/kanshi-akuma.ts"),
+      any("cli/render/status-tone.ts", ["contractStatusTone"]),
     ],
   },
   {
     source: "cli/render/kanshi-akuma.ts",
-    allow: [types("kanshi/index.ts"), any("kanshi/fleet.ts"), any("cli/render/terminal.ts")],
+    allow: [
+      types("kanshi/index.ts"),
+      any("kanshi/fleet.ts"),
+      any("cli/render/terminal.ts"),
+      any("cli/render/status-tone.ts", ["akumaStatusTone"]),
+    ],
   },
   { source: "cli/render/nuke.ts", allow: [types("index.ts")] },
   {
@@ -352,6 +358,10 @@ export const cliZones = [
       any("cli/render/receipt.ts"),
       any("cli/render/terminal.ts"),
     ],
+  },
+  {
+    source: "cli/render/status-tone.ts",
+    allow: [types("kanshi/index.ts"), types("cli/render/terminal.ts")],
   },
   { source: "cli/render/terminal.ts", allow: [] },
   {

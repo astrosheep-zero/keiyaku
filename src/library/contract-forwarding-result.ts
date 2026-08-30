@@ -507,7 +507,7 @@ const auditTargetSchema = z.union([
   z.object({ kind: z.literal("refused"), refusal: checkoutRefusalSchema }).strict(),
   z.object({ kind: z.literal("failed"), diagnostic: z.string() }).strict(),
 ]);
-export const auditReportSchema = z
+export const auditReportSchema: z.ZodType<AuditReport> = z
   .object({
     candidate: auditCandidateSchema,
     verification: auditVerificationSchema,
@@ -518,9 +518,7 @@ export const auditReportSchema = z
       .optional(),
   })
   .strict()
-  .transform(({ delivery, ...report }) =>
-    delivery === undefined ? report : { ...report, delivery },
-  ) satisfies z.ZodType<AuditReport>;
+  .transform(({ delivery, ...report }) => (delivery === undefined ? report : { ...report, delivery }));
 
 const mutationResultSchema = <Value>(value: z.ZodType<Value>) =>
   z

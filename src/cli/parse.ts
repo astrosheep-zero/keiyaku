@@ -15,7 +15,12 @@ import {
   type AkumaAction,
   type ParsedAkumaCommand,
 } from "./commands/akuma.js";
-import { parseInstallCommand, renderInstallHelp, type ParsedInstallCommand } from "./commands/install.js";
+import {
+  INSTALL_ROOT_PURPOSE,
+  parseInstallCommand,
+  renderInstallHelp,
+  type ParsedInstallCommand,
+} from "./commands/install.js";
 import {
   CONTRACT_COMMAND_SPECS,
   parseContractCommand,
@@ -46,22 +51,36 @@ export { renderContractHelp } from "./commands/contract.js";
 
 export type { Command };
 
-const ROOT_USAGE = "usage: keiyaku [-C <path>] [--repo <path>] <command> [<contract>|@<contract>] [--flag ...] [-]";
+const ROOT_USAGE = [
+  "usage: keiyaku <command> [options]",
+  "       keiyaku <command> --help   shows that command's complete usage",
+].join("\n");
 
 export function renderRootHelp(columns?: number): string {
   return renderHelpText(
     [
+      "keiyaku — Contract, Task, and Akuma control for one repository",
+      "",
       ROOT_USAGE,
       "",
-      "global options:",
+      "Contract — standing acceptance",
+      ...Object.entries(CONTRACT_COMMAND_SPECS)
+        .filter(([command]) => command !== "settings")
+        .map(([command, spec]) => `  ${command.padEnd(10)} ${spec.purpose}`),
+      "",
+      "Task — plan memory",
+      "  task       Task coordination; see `keiyaku task --help`.",
+      "",
+      "Akuma — invoke capability",
+      ...renderAkumaRootRows(),
+      "",
+      "Workspace",
+      `  install   ${INSTALL_ROOT_PURPOSE}`,
+      `  settings  ${CONTRACT_COMMAND_SPECS.settings.purpose}`,
+      "",
+      "Global options:",
       "  -C, --cwd <path>  Set the invocation working directory.",
       "  --repo <path>     Select the Git repository coordinate.",
-      "",
-      "commands:",
-      ...Object.entries(CONTRACT_COMMAND_SPECS).map(([command, spec]) => `  keiyaku ${command}  ${spec.purpose}`),
-      "  keiyaku install  Install the Keiyaku skills into an agent harness.",
-      "  keiyaku task     Task coordination; see `keiyaku task --help`.",
-      ...renderAkumaRootRows(),
     ].join("\n"),
     columns,
   );

@@ -48,7 +48,6 @@ export type ParsedAmend = Output &
     stdin?: true;
   }>;
 export type ParsedDeliver = Output &
-  Actor &
   Readonly<{
     command: "deliver";
     contract?: string;
@@ -57,7 +56,6 @@ export type ParsedDeliver = Output &
     materializeConflict: boolean;
   }>;
 export type ParsedReview = Output &
-  Actor &
   Readonly<{
     command: "review";
     contract?: string;
@@ -90,7 +88,6 @@ export type ParsedAudit = Output &
     contract?: string;
     includeDirty: boolean;
     showDiff: boolean;
-    actor?: string;
   }>;
 export type ParsedReconcile = Output & Readonly<{ command: "reconcile"; contract?: string; retryHooks: boolean }>;
 export type ParsedNuke = Output & Readonly<{ command: "nuke"; confirm?: string }>;
@@ -128,11 +125,11 @@ export const CONTRACT_COMMAND_SPECS = {
       "amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name,...>] [--actor <actor>] [--json] [-]",
     purpose: "Amend one Contract's document operations or structured terms.",
     details: [
+      "  ## Context|Objective|Design|Region|Criteria|Verification|<extension>  (replace, or add new extension)",
       "  ## Replace: Context|Objective|Design|Region|Criteria|Verification|<extension>",
       "  ## Append: Context|Objective|Design|Criteria|<extension>",
       "  ## Add: Criteria|<new-extension-title>",
       "  ## Update: <existing-extension-title>",
-      "  ## Remove: Criterion <existing-title>",
       "  ## Remove: <existing-extension-title>",
     ].join("\n"),
   },
@@ -140,14 +137,12 @@ export const CONTRACT_COMMAND_SPECS = {
     positional: "optional",
     stdin: "none",
     flags: {
-      actor: "value",
       message: "value",
       "include-dirty": "boolean",
       "materialize-conflict": "boolean",
       json: "boolean",
     },
-    usage:
-      "deliver [<contract>|@<contract>] [--message <text>] [--include-dirty] [--materialize-conflict] [--actor <actor>] [--json]",
+    usage: "deliver [<contract>|@<contract>] [--message <text>] [--include-dirty] [--materialize-conflict] [--json]",
     purpose: "Deliver one Contract candidate from the appointed worktree.",
     details: [
       "  --include-dirty         Capture the complete non-ignored worktree tree as the",
@@ -161,9 +156,8 @@ export const CONTRACT_COMMAND_SPECS = {
   review: {
     positional: "optional",
     stdin: "optional",
-    flags: { actor: "value", satisfied: "boolean", unsatisfied: "boolean", summary: "value", json: "boolean" },
-    usage:
-      "review [<contract>|@<contract>] (--satisfied | --unsatisfied) (--summary <text> | -) [--actor <actor>] [--json]",
+    flags: { satisfied: "boolean", unsatisfied: "boolean", summary: "value", json: "boolean" },
+    usage: "review [<contract>|@<contract>] (--satisfied | --unsatisfied) (--summary <text> | -) [--json]",
     purpose: "Record one review verdict.",
   },
   arc: {
@@ -205,8 +199,8 @@ export const CONTRACT_COMMAND_SPECS = {
   audit: {
     positional: "optional",
     stdin: "none",
-    flags: { "include-dirty": "boolean", diff: "boolean", actor: "value", json: "boolean" },
-    usage: "audit [<contract>|@<contract>] [--include-dirty] [--diff] [--actor <actor>] [--json]",
+    flags: { "include-dirty": "boolean", diff: "boolean", json: "boolean" },
+    usage: "audit [<contract>|@<contract>] [--include-dirty] [--diff] [--json]",
     purpose: "Ask what candidate preparation, Verification, and target placement would do.",
   },
   reconcile: {
@@ -228,7 +222,7 @@ export const CONTRACT_COMMAND_SPECS = {
     stdin: "none",
     flags: { json: "boolean" },
     usage: "settings [--json]",
-    purpose: "Read user and project Settings resources.",
+    purpose: "Show effective Settings (user + project, read-only)",
   },
   region: {
     positional: "optional",
@@ -349,7 +343,6 @@ function parseDeliver(parts: ParsedContractParts): ParsedDeliver {
   return {
     command: "deliver",
     ...(contract === undefined ? {} : { contract }),
-    ...(parts.actor === undefined ? {} : { actor: parts.actor }),
     ...(message === undefined ? {} : { message }),
     includeDirty: parts.flags["include-dirty"] === true,
     materializeConflict: parts.flags["materialize-conflict"] === true,
@@ -372,7 +365,6 @@ function parseReview(parts: ParsedContractParts): ParsedReview {
     verdict: parts.flags.satisfied === true ? "satisfied" : "unsatisfied",
     ...(summary === undefined ? {} : { summary }),
     ...(parts.stdin ? { summaryFromStdin: true as const } : {}),
-    ...(parts.actor === undefined ? {} : { actor: parts.actor }),
     output: parts.output,
   };
 }
@@ -430,6 +422,28 @@ function parseLs(parts: ParsedContractParts): ParsedLs {
 
 export function renderContractHelp(command: ContractCommand): string {
   const spec: ContractCommandSpec = CONTRACT_COMMAND_SPECS[command];
+  if (command === "settings") {
+    return [
+      "Show effective Settings — the merged read-only view of:",
+      "  user      ~/.keiyaku/settings.json",
+      "  project   <WorldRoot>/.keiyaku/settings.json",
+      "A project record wholly shadows the same-name user record.",
+      "",
+      "Shape: namespace -> entry -> JSON value. There is no write",
+      "command; edit the files directly.",
+      "",
+      "Recognized settings:",
+      "  gates                            gate bundles selected by bind and amend",
+      "  worktree                         commands run when worktrees are created or destroyed",
+      "  git.requireBranchesToBeUpToDate  whether deliver and audit require up-to-date target branches",
+      "  providers                        the available Akuma and how each is run",
+      "",
+      "Each entry is validated by the feature that reads it. A rejected",
+      "value's diagnostic states the expected shape.",
+      "",
+      usageLine(spec.usage),
+    ].join("\n");
+  }
   const help = `${spec.purpose}\n\n${usageLine(spec.usage)}`;
   return spec.details === undefined ? help : `${help}\n\n${spec.details}`;
 }
@@ -483,7 +497,6 @@ export function parseContractCommand(parts: ParsedContractParts): ParsedContract
         ...(contract === undefined ? {} : { contract }),
         includeDirty: parts.flags["include-dirty"] === true,
         showDiff: parts.flags.diff === true,
-        ...(parts.actor === undefined ? {} : { actor: parts.actor }),
         output: parts.output,
       };
     }

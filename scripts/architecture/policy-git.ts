@@ -20,6 +20,22 @@ export const gitZones = [
     ],
   },
   {
+    source: "git/ref-migration.ts",
+    allow: [
+      types("core/facts/types.ts", ["ContractId"]),
+      any("git/identity.ts", ["contractPhysicalName"]),
+      any("git/process.ts", ["runGit", "GitRepository"]),
+      any("git/repository.ts", [
+        "CANDIDATE_PIN_REF_NAMESPACE",
+        "DELIVERY_REF_NAMESPACE",
+        "LEGACY_CANDIDATE_PIN_REF_NAMESPACE",
+        "LEGACY_DELIVERY_REF_NAMESPACE",
+        "readRef",
+        "GitOid",
+      ]),
+    ],
+  },
+  {
     source: "git/read-observation.ts",
     allow: [
       factErrors,
@@ -111,8 +127,8 @@ export const gitZones = [
         "CANDIDATE_PIN_REF_NAMESPACE",
         "DELIVERY_REF_NAMESPACE",
         "GIT_REF",
-        "MIGRATION_CANDIDATE_PIN_REF_NAMESPACE",
-        "MIGRATION_DELIVERY_REF_NAMESPACE",
+        "LEGACY_CANDIDATE_PIN_REF_NAMESPACE",
+        "LEGACY_DELIVERY_REF_NAMESPACE",
         "NoGitWorldError",
         "readRef",
         "registeredWorktrees",
@@ -151,6 +167,7 @@ export const gitZones = [
       any("git/hooks.ts"),
       any("git/identity.ts"),
       any("git/observe.ts"),
+      any("git/ref-migration.ts", ["migrateContractCustodyRefs", "RefMigrationConflict"]),
       types("git/read-observation.ts", ["GitDecodeChannel"]),
       any("git/read-observation.ts", ["withGitDecodeChannel"]),
       any("git/process.ts", ["GitPlumbingError", "runGit", "GitRepository"]),

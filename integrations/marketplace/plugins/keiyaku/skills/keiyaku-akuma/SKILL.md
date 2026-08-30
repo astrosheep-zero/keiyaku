@@ -6,7 +6,7 @@ description: Use when delegating work to, supervising, steering, inspecting, for
 # Keiyaku Akuma
 
 An Akuma is a durable callable worker. Its complete identity is
-`aku/<archetype>/<hex8>` — keep it; it is how you address the same worker
+`aku/<akuma>/<hex8>` — keep it; it is how you address the same worker
 later. An Alias is a movable world-local selector usable wherever a direct id
 is accepted; the identity underneath never changes.
 
@@ -29,25 +29,25 @@ exclusive. Decide up front whether you will stay:
 Alias already points elsewhere, it moves to the born Akuma. The worker's
 execution cwd is exactly `-C <path>`, or your own cwd when `-C` is omitted.
 
-Repeated `--allowed` values add actions to the Archetype defaults. Restriction
-comes from the Archetype base and, for nested calls, the direct parent Soul.
+Repeated `--allowed` values add actions to the selected Akuma's defaults. A
+nested call can use only actions permitted by its direct parent Soul.
 
-## Archetypes
+## Akuma Names
 
-An Archetype is a Markdown file at `~/.keiyaku/akuma/<name>.md`. Its
-frontmatter selects the provider and may declare `model`, `effort`,
-`readonly`, `network`, and `description`; the body is an optional system
-prompt, and an empty body keeps the harness default. Write a new one when no
-existing file grants the permissions and stance the work needs; a worker never
-outgrows its Archetype mid-life.
+An Akuma name selects a Markdown file at `~/.keiyaku/akuma/<name>.md`; pass
+the filename without `.md` as `<akuma-name>`. Its frontmatter selects the
+provider and may declare `model`, `effort`, `readonly`, `network`, and
+`description`; the body is an optional system prompt, and an empty body keeps
+the harness default. If none grants the permissions and stance the work needs,
+add a new Akuma name. A born Akuma keeps its selected defaults for its lifetime.
 
 ## Commission And Steer
 
-A call assembles a commission from independent inputs: the Archetype fixes
+A call assembles a commission from independent inputs: the selected Akuma fixes
 capability stance for the identity's whole life; the `--contract` Dispatch
-associates standing terms; allowed actions set what the callee may do, always
-under the Archetype base and the parent Soul's ceiling; the prompt carries the
-question. None of these implies another — association is not a seat, forwarded
+associates standing terms; allowed actions set what the callee may do, subject
+to that Akuma's restrictions and the parent Soul's ceiling; the prompt carries
+the question. None of these implies another — association is not a seat, forwarded
 actions are not a seat, and no combination mints a role.
 
 The prompt and every later tell genuinely direct the callee's work: they choose
@@ -67,7 +67,7 @@ not around it.
 ```bash
 keiyaku status                            # deep fleet observation
 keiyaku status <aku/...|@alias>           # one worker's snapshot
-keiyaku ls aku/                           # shallow catalog; also aku/<archetype>/ and "aku/*/*"
+keiyaku ls aku/                           # shallow catalog; also aku/<akuma>/ and "aku/*/*"
 keiyaku wait <selector>... [--any | --all] [--timeout <duration>]
 ```
 

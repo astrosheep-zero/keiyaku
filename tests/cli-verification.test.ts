@@ -65,9 +65,9 @@ async function bindAndDeliver(script?: string, gates: readonly string[] = ["veri
   });
   assert.equal(bound.kind, "accepted");
   if (bound.kind !== "accepted") throw new Error("bind did not return an accepted contract");
-  const result = await invoke(parseArgv(["deliver", bound.contract, "--actor", "external-test"]), {
+  const result = await invoke(parseArgv(["deliver", bound.contract]), {
     cwd: setup.raw.path,
-    environment: {},
+    environment: { KEIYAKU_ACTOR_ID: "external-test" },
   });
   return { ...setup, id: bound.contract, result };
 }
@@ -113,9 +113,9 @@ test("deliver adapts a failing Verification without a private producer injection
 
 test("audit stays accepted when it admits a verified attestation", async () => {
   const pending = await bindAndDeliver("exit 1");
-  const audit = await invoke(parseArgv(["audit", pending.id, "--diff", "--actor", "audit-user"]), {
+  const audit = await invoke(parseArgv(["audit", pending.id, "--diff"]), {
     cwd: pending.raw.path,
-    environment: {},
+    environment: { KEIYAKU_ACTOR_ID: "audit-user" },
   });
   assert.equal(audit.kind, "accepted");
   if (audit.kind !== "accepted") return;
@@ -143,9 +143,9 @@ test("audit renders the complete producer-bounded Verification summary as a subo
       "exit 1",
     ].join("; "),
   );
-  const audit = await invoke(parseArgv(["audit", pending.id, "--actor", "audit-user"]), {
+  const audit = await invoke(parseArgv(["audit", pending.id]), {
     cwd: pending.raw.path,
-    environment: {},
+    environment: { KEIYAKU_ACTOR_ID: "audit-user" },
   });
 
   assert.equal(audit.kind, "accepted");

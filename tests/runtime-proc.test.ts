@@ -10,7 +10,13 @@ import test from "node:test";
 import { createProcessLifecycle } from "../src/runtime/proc/lifecycle.js";
 import { LineRpcProcess } from "../src/runtime/proc/line-rpc.js";
 import { spawnStdioProcess } from "../src/runtime/proc/stdio.js";
-import { consumeProcessStdout, runProcess, spawnDetachedProcess, type ProcessInput } from "../src/runtime/proc/run.js";
+import {
+  consumeProcessStdout,
+  runProcess,
+  spawnCancellableProcess,
+  spawnDetachedProcess,
+  type ProcessInput,
+} from "../src/runtime/proc/run.js";
 import { terminateOwnedProcess } from "../src/runtime/proc/termination.js";
 
 function input(argv: readonly string[], overrides: Partial<ProcessInput> = {}): ProcessInput {
@@ -57,6 +63,67 @@ for (const force of [false, true]) {
     await assert.rejects(terminateOwnedProcess(child, force), /kill EPERM/u);
   });
 }
+
+test("runProcess reports termination failure without waiting for child close", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("POSIX group signals only");
+    return;
+  }
+  const originalKill = process.kill;
+  let ownedPid: number | undefined;
+  t.mock.method(process, "kill", ((pid: number, signal?: NodeJS.Signals | number) => {
+    if (pid < 0 && (signal === "SIGTERM" || signal === "SIGKILL")) {
+      ownedPid = -pid;
+      throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+    }
+    return originalKill(pid, signal as NodeJS.Signals);
+  }) as typeof process.kill);
+
+  try {
+    await assert.rejects(
+      runProcess({ argv: [process.execPath, "-e", "setInterval(() => {}, 1_000)"], timeoutMs: 10 }),
+      /kill EPERM/u,
+    );
+    assert.ok(ownedPid !== undefined);
+  } finally {
+    if (ownedPid !== undefined) {
+      originalKill(-ownedPid, "SIGKILL");
+      await waitForProcessExit(ownedPid);
+    }
+  }
+});
+
+test("cancellable process owns termination failure before a later waiter", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("POSIX group signals only");
+    return;
+  }
+  const originalKill = process.kill;
+  const controller = new AbortController();
+  let ownedPid: number | undefined;
+  t.mock.method(process, "kill", ((pid: number, signal?: NodeJS.Signals | number) => {
+    if (pid < 0 && (signal === "SIGTERM" || signal === "SIGKILL")) {
+      ownedPid = -pid;
+      throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+    }
+    return originalKill(pid, signal as NodeJS.Signals);
+  }) as typeof process.kill);
+  const owned = spawnCancellableProcess({
+    argv: [process.execPath, "-e", "setInterval(() => {}, 1_000)"],
+    signal: controller.signal,
+  });
+
+  try {
+    controller.abort();
+    await assert.rejects(owned.terminationFailure, /kill EPERM/u);
+    assert.equal(ownedPid, owned.child.pid);
+  } finally {
+    if (ownedPid !== undefined) {
+      originalKill(-ownedPid, "SIGKILL");
+      await waitForProcessExit(ownedPid);
+    }
+  }
+});
 
 test("owned-process lifecycle serializes release behind termination", async () => {
   let finish!: () => void;

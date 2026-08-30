@@ -12,7 +12,8 @@ const zigCacheRoot = resolve(tmpdir(), "keiyaku-zig-cache");
 const zigGlobalCacheDirectory = process.env.ZIG_GLOBAL_CACHE_DIR ?? resolve(zigCacheRoot, "global");
 const zigLocalCacheDirectory = process.env.ZIG_LOCAL_CACHE_DIR ?? resolve(zigCacheRoot, "local");
 const zigExecutable = process.env.KEIYAKU_ZIG ?? "zig";
-const requiredZigVersion = "0.14.1";
+const minimumZigVersion = [0, 14, 1];
+const minimumZigVersionText = minimumZigVersion.join(".");
 
 function boundedCause(error) {
   const message = error instanceof Error ? error.message : String(error);
@@ -24,6 +25,17 @@ function boundedCause(error) {
   return detail.replace(/\s+/gu, " ").trim().slice(0, 512);
 }
 
+function supportsWindowsLauncher(reportedVersion) {
+  const match = /^(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.+-]+)?$/u.exec(reportedVersion);
+  if (match === null) return false;
+
+  for (const [index, minimum] of minimumZigVersion.entries()) {
+    const reported = Number(match[index + 1]);
+    if (reported !== minimum) return reported > minimum;
+  }
+  return true;
+}
+
 function zigPreflight() {
   try {
     const reportedVersion = execFileSync(zigExecutable, ["version"], {
@@ -33,8 +45,8 @@ function zigPreflight() {
     })
       .toString()
       .trim();
-    if (reportedVersion !== requiredZigVersion) {
-      throw new Error(`reported version ${reportedVersion || "(empty)"}; expected ${requiredZigVersion}`);
+    if (!supportsWindowsLauncher(reportedVersion)) {
+      throw new Error(`reported version ${reportedVersion || "(empty)"}; require at least ${minimumZigVersionText}`);
     }
   } catch (error) {
     return boundedCause(error);
@@ -45,7 +57,7 @@ function zigPreflight() {
 const preflightFailure = zigPreflight();
 if (preflightFailure !== undefined) {
   const diagnostic =
-    `Zig ${requiredZigVersion} is required for the Windows launcher; ` +
+    `Zig ${minimumZigVersionText} or later is required for the Windows launcher; ` +
     `install it on PATH or set KEIYAKU_ZIG to an executable. ` +
     `Cause: ${preflightFailure}`;
   if (process.platform === "win32") throw new Error(diagnostic);

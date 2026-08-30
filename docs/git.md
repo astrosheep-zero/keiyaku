@@ -112,10 +112,16 @@ this one Git owner. The library boundary rejects a target that names any
 of them before coordinates are recorded; target input and canonicalization are
 defined only in [public-api.md](public-api.md).
 
-The canonical state ref, delivery refs, and candidate pins intentionally live
-under `refs/heads` so ordinary remote branch refspecs synchronize their
-authority and custody. Their visibility in branch-oriented tools is deliberate.
-Every commit installed as the `refs/heads/keiyaku-state` tip has the exact
+The canonical state ref remains `refs/heads/keiyaku-state`. Managed delivery
+and candidate custody live under the distinct owner roots
+`refs/keiyaku/delivery` and `refs/keiyaku/candidate`; they are not branches and
+ordinary branch refspecs do not synchronize them. During the bounded namespace
+transition, `refs/heads/keiyaku-delivery` and
+`refs/heads/keiyaku-candidate` remain recognized as legacy owned roots only for
+per-Contract reconciliation and confirmed reset. Runtime creation and update
+write only the canonical roots. Once both legacy roots are empty, their
+recognition arm may be hard-cut in a later coherent change. Every commit
+installed as the state-ref tip has the exact
 subject `keiyaku authority - do not delete or rewrite`; a state writer's
 operation detail, when present, follows after a blank line. Delivery,
 candidate, and ephemeral recovery commits keep their own subjects and
@@ -156,7 +162,7 @@ repository GC.
 
 During namespace migration, reset enumerates leaves under the distinct legacy
 roots `refs/heads/keiyaku-delivery` and `refs/heads/keiyaku-candidate` and the
-distinct migration roots `refs/keiyaku/delivery` and `refs/keiyaku/candidate`.
+distinct canonical roots `refs/keiyaku/delivery` and `refs/keiyaku/candidate`.
 Each leaf deletion uses that leaf's freshly observed OID as the expected value.
 Ordinary, unknown, and foreign refs remain untouched.
 
