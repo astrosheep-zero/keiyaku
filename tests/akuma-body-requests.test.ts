@@ -309,6 +309,35 @@ test("Fleet decoder rejects noncanonical identities and incomplete terminal evid
     () => fleetRequestCommand("akuma.wait").decodeResult({ completion: "all", observations: [], unobserved: [{}] }),
     /invalid live result for akuma\.wait/u,
   );
+  const tell = {
+    akuma: "aku/worker/11111111",
+    tell: {
+      admission: { fact: "recorded" as const, tellId: "tell" },
+      row: {
+        kind: "tell" as const,
+        sequence: 1,
+        at: "2026-08-20T00:00:00.000Z",
+        tellId: "tell",
+        text: "continue",
+        state: "pending" as const,
+        deliveries: [],
+      },
+      wake: { kind: "held" as const },
+    },
+  };
+  assert.deepEqual(fleetRequestCommand("akuma.tell").decodeResult(tell), tell);
+  assert.throws(
+    () => fleetRequestCommand("akuma.tell").decodeResult({ akuma: tell.akuma, tell: { ...tell.tell, row: undefined } }),
+    /invalid live result for akuma\.tell/u,
+  );
+  assert.throws(
+    () =>
+      fleetRequestCommand("akuma.tell").decodeResult({
+        ...tell,
+        tell: { ...tell.tell, row: { ...tell.tell.row, unexpected: true } },
+      }),
+    /invalid live result for akuma\.tell/u,
+  );
 });
 
 test("an unregistered action reaches a terminal refusal without external cancellation", async () => {
@@ -2464,6 +2493,19 @@ test("a forwarded Tell writes its transport and the direct parent enters the tel
       ),
     );
     assert.equal(outcomes.filter((value) => (value as { kind: string }).kind === "returned").length, 1);
+    const returned = outcomes.find(
+      (value): value is Extract<(typeof outcomes)[number], { kind: "returned" }> => (value as { kind: string }).kind === "returned",
+    );
+    assert.equal(returned?.result.tell.admission.tellId, id);
+    assert.deepEqual(returned?.result.tell.row, {
+      kind: "tell",
+      sequence: returned?.result.tell.row.sequence,
+      at: returned?.result.tell.row.at,
+      tellId: id,
+      text: "continue",
+      state: "pending",
+      deliveries: [],
+    });
     assert.deepEqual(
       outcomes.find((value) => (value as { kind: string }).kind === "reference"),
       {

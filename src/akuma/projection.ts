@@ -1,6 +1,7 @@
 /* eslint-disable max-lines -- Akuma owns one coherent activity projection and strict boundary schema. */
 import { decodeAgentEvent } from "./provider.js";
 import type { TimelineFact, TurnEndFact } from "./heart/index.js";
+import { projectTell, type TellDelivery, type TellRow } from "./heart/facts.js";
 import { z } from "zod";
 
 const nonblankTextSchema = z.string().refine((value) => value.trim() !== "");
@@ -46,7 +47,8 @@ const tellDeliverySchema = z
     turnSequence: countSchema,
     receipt: z.enum(["unavailable", "required"]).optional(),
   })
-  .strict();
+  .strict()
+  .transform(({ receipt, ...delivery }): TellDelivery => (receipt === undefined ? delivery : { ...delivery, receipt }));
 const turnRowSchema = z
   .object({
     kind: z.literal("turn"),
@@ -76,7 +78,7 @@ const textRowSchema = (kind: "said" | "thought" | "note") =>
       truncated: z.literal(true).optional(),
     })
     .strict();
-const tellRowSchema = z
+export const tellRowSchema = z
   .object({
     kind: z.literal("tell"),
     sequence: countSchema,
@@ -86,7 +88,7 @@ const tellRowSchema = z
     state: z.enum(["pending", "told"]),
     deliveries: z.array(tellDeliverySchema).readonly(),
   })
-  .strict();
+  .strict() satisfies z.ZodType<TellRow>;
 const outcomeSchema = z.union([
   z.object({ kind: z.literal("answered"), historyId: nonblankTextSchema, answer: z.string() }).strict(),
   z.object({ kind: z.literal("failed"), historyId: nonblankTextSchema, diagnostic: z.string() }).strict(),
@@ -201,7 +203,7 @@ type SaidRow = z.infer<ReturnType<typeof textRowSchema>>;
 type ThoughtRow = z.infer<ReturnType<typeof textRowSchema>>;
 type NoteRow = z.infer<ReturnType<typeof textRowSchema>>;
 type TurnNarrationRow = CallRow | SaidRow | ThoughtRow | NoteRow;
-export type TellRow = z.infer<typeof tellRowSchema>;
+export type { TellRow } from "./heart/facts.js";
 export type OutcomeRow = z.infer<typeof outcomeRowSchema>;
 
 function publicOutcome(turnSequence: number, outcome: TurnEndFact["outcome"]): TurnOutcome {
@@ -505,15 +507,7 @@ export function projectTurns(
       if (turn === undefined) state.orphanRows.push(row);
       else turn.rows.push(row);
     } else if (fact.kind === "tell") {
-      state.tells.push({
-        kind: "tell",
-        sequence: fact.sequence,
-        at: fact.recordedAt,
-        tellId: fact.id,
-        text: fact.body,
-        state: fact.state,
-        deliveries: fact.deliveries,
-      });
+      state.tells.push(projectTell(fact));
     } else {
       projectActivityEvent(state, fact);
     }

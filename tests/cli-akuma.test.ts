@@ -350,6 +350,21 @@ function tellInvocation(
         child?: { code: number | null; signal: string | null; log: { path: string; from: number; to: number } };
       } = { kind: "pursuing", bodySequence: 1 },
 ) {
+  const observedRow = observation.status.timeline.entries.find(
+    (entry): entry is Extract<(typeof observation.status.timeline.entries)[number], { kind: "row" }> =>
+      entry.kind === "row" && entry.row.kind === "tell" && entry.row.tellId === "tell-1",
+  )?.row;
+  const row =
+    observedRow ??
+    ({
+      kind: "tell" as const,
+      sequence: 1,
+      at: "2026-08-10T16:42:00.000Z",
+      tellId: "tell-1",
+      text: "steer",
+      state: wake.kind === "told" ? "told" : "pending",
+      deliveries: [],
+    } as const);
   return {
     kind: "akuma" as const,
     action: "tell" as const,
@@ -359,6 +374,7 @@ function tellInvocation(
       akuma: observation.status.id,
       tell: {
         admission: { tellId: "tell-1", fact: "recorded" as const },
+        row,
         wake,
       },
     },
@@ -707,7 +723,8 @@ test("Akuma mutation snapshots omit observation context", () => {
     tellInvocation(observation),
   );
   assert.doesNotMatch(told, /^wake pursuing/u);
-  assert.match(told, /✓ tell pursuing body=1/u);
+  assert.match(told, /⧗ tell\s+“steer”/u);
+  assert.doesNotMatch(told, /pursuing|body=1/u);
   assert.doesNotMatch(told, /working/u);
   assert.doesNotMatch(told, /STILL RUNNING/u);
   assert.doesNotMatch(told, /^tasks /mu);
@@ -799,7 +816,7 @@ test("Akuma mutation snapshots omit observation context", () => {
   assert.equal(callText.split("\n").at(-1), "● STILL RUNNING");
 });
 
-test("Tell output preserves only its direct admission and wake evidence", () => {
+test("Tell output renders only its direct timeline row", () => {
   const base = akumaObservation({
     id: "aku/worker/1234abcd",
     life: "asleep",
@@ -825,8 +842,8 @@ test("Tell output preserves only its direct admission and wake evidence", () => 
   });
   const command = parseArgv(["tell", base.status.id, "steer"]).command;
   const told = renderAkumaText(command, tellInvocation(base, { kind: "told" }));
-  assert.match(told, /✓ tell told/u);
-  assert.doesNotMatch(told, /“steer”|wake/u);
+  assert.match(told, /✓ told\s+“steer”/u);
+  assert.doesNotMatch(told, /wake|tell told/u);
 
   const pending = akumaObservation({
     ...base.status,
@@ -851,12 +868,12 @@ test("Tell output preserves only its direct admission and wake evidence", () => 
     },
   });
   const held = renderAkumaText(command, tellInvocation(pending, { kind: "held" }));
-  assert.match(held, /✓ tell held/u);
-  assert.doesNotMatch(held, /wake|pending .* tells|“steer”/u);
+  assert.match(held, /⧗ tell\s+“steer”/u);
+  assert.doesNotMatch(held, /wake|held|pending .* tells/u);
 
   const pursuing = renderAkumaText(command, tellInvocation(pending, { kind: "pursuing", bodySequence: 1 }));
-  assert.match(pursuing, /✓ tell pursuing body=1/u);
-  assert.doesNotMatch(pursuing, /wake|pending .* tells|“steer”/u);
+  assert.match(pursuing, /⧗ tell\s+“steer”/u);
+  assert.doesNotMatch(pursuing, /wake|pursuing|body=1|pending .* tells/u);
 
   const failed = renderAkumaText(
     command,
@@ -868,7 +885,7 @@ test("Tell output preserves only its direct admission and wake evidence", () => 
   );
   assert.equal((failed.match(/tell delivery failed/g) ?? []).length, 1);
   assert.match(failed, /! tell delivery failed · child exited · log \/tmp\/run\.log 3\.\.9/u);
-  assert.doesNotMatch(failed, /⧗ tell\s+“steer”/u);
+  assert.match(failed, /⧗ tell\s+“steer”/u);
   assert.doesNotMatch(failed, /wake failed/u);
 });
 

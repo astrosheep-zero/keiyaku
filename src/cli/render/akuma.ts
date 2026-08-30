@@ -108,7 +108,7 @@ export function renderAkumaText(
       return waitText(result, context);
     case "tell":
       return result.mode === "ordinary"
-        ? tellText(result)
+        ? tellText(result, context)
         : mutationObservationStageText(result.result.id, result.result.observation, context, {
             ...(result.alias === undefined ? {} : { alias: result.alias }),
             showLife: false,

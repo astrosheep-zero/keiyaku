@@ -1,5 +1,6 @@
 import { akumaIdSchema, akumaStatusSchema } from "../akuma/akuma.js";
 import type { KillEvidence, TellResult } from "../akuma/index.js";
+import { tellRowSchema } from "../akuma/projection.js";
 import { contractId } from "../core/facts/types.js";
 import { taskRowsSchema } from "../task/board.js";
 import { z } from "zod";
@@ -60,6 +61,7 @@ const tellWakeSchema = z.union([
 const tellResultSchema = z
   .object({
     admission: z.object({ fact: z.literal("recorded"), tellId: nonblankTextSchema }).strict(),
+    row: tellRowSchema,
     wake: tellWakeSchema,
   })
   .strict() satisfies z.ZodType<TellResult>;

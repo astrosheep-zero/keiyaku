@@ -97,6 +97,28 @@ export type TellFact = Readonly<{
   deliveries: readonly TellDelivery[];
 }>;
 
+export type TellRow = Readonly<{
+  kind: "tell";
+  sequence: number;
+  at: string;
+  tellId: string;
+  text: string;
+  state: "pending" | "told";
+  deliveries: readonly TellDelivery[];
+}>;
+
+export function projectTell(fact: TellFact): TellRow {
+  return {
+    kind: "tell",
+    sequence: fact.sequence,
+    at: fact.recordedAt,
+    tellId: fact.id,
+    text: fact.body,
+    state: fact.state,
+    deliveries: fact.deliveries,
+  };
+}
+
 export type TellDeliveryInput = Readonly<{
   tellId: string;
   turnSequence: number;

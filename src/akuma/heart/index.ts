@@ -81,7 +81,7 @@ export {
   voidRequest,
 } from "./request-authority.js";
 
-export { life, lifeAt } from "./facts.js";
+export { life, lifeAt, projectTell } from "./facts.js";
 export type {
   AkumaLife,
   AkumaOrigin,
@@ -101,6 +101,7 @@ export type {
   Soul,
   StopFact,
   TellFact,
+  TellRow,
   TellDelivery,
   TellDeliveryInput,
   TellReceiptInput,
@@ -184,6 +185,10 @@ export async function recordTell(
       return { kind: "recorded", tell: { sequence, ...tell, state: "pending", deliveries: [] } };
     }),
   );
+}
+
+export async function readTell(paths: AkumaPaths, id: string): Promise<TellFact | null> {
+  return await withHeart(paths, (heart) => readTransaction(heart, () => tellFact(heart, id)));
 }
 
 export async function recordTellDeliveries(paths: AkumaPaths, inputs: readonly TellDeliveryInput[]): Promise<void> {

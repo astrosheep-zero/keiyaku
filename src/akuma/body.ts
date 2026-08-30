@@ -11,10 +11,13 @@ import {
   finishBodyIfIdle,
   heartExists,
   isHeartAbsent,
+  projectTell,
   readHeart,
+  readTell,
   readNonterminalRequests,
   type SessionFact,
   type Soul,
+  type TellRow,
 } from "./heart/index.js";
 import { worldRootForAkumaPaths, type AkumaPaths } from "./identity.js";
 import { keiyakuSquarePath } from "../world.js";
@@ -59,6 +62,7 @@ export type TellWake =
 
 export type TellResult = Readonly<{
   admission: Readonly<{ tellId: string; fact: "recorded" }>;
+  row: TellRow;
   wake: TellWake;
 }>;
 
@@ -463,8 +467,12 @@ export async function wakeRecordedTell(
   tellId: string,
   runtime: TellWakeRuntime = DIRECT_TELL_WAKE,
 ): Promise<TellResult> {
+  const wake = (await wakePendingTells(paths, tellId, runtime))!;
+  const tell = await readTell(paths, tellId);
+  if (tell === null) throw new Error(`recorded Tell ${tellId} is missing from Heart`);
   return {
     admission: { tellId, fact: "recorded" },
-    wake: (await wakePendingTells(paths, tellId, runtime))!,
+    row: projectTell(tell),
+    wake,
   };
 }

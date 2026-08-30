@@ -89,7 +89,12 @@ export const akumaZones = [
   },
   {
     source: "akuma/projection.ts",
-    allow: [types("akuma/heart/index.ts"), any("akuma/provider.ts"), any("akuma/projection-read.ts")],
+    allow: [
+      types("akuma/heart/index.ts"),
+      any("akuma/heart/facts.ts", ["projectTell", "TellDelivery", "TellRow"]),
+      any("akuma/provider.ts"),
+      any("akuma/projection-read.ts"),
+    ],
   },
   { source: "akuma/projection-read.ts", allow: [types("akuma/projection.ts")] },
   {

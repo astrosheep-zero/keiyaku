@@ -1968,6 +1968,15 @@ test("tell after an already stopped Body wakes the same Akuma through its retain
     rmSync(seat, { recursive: true, force: true });
     const told = await handle.tell("continue");
     assert.equal(typeof told.wake, "object");
+    assert.deepEqual(told.row, {
+      kind: "tell",
+      sequence: told.row.sequence,
+      at: told.row.at,
+      tellId: told.admission.tellId,
+      text: "continue",
+      state: "pending",
+      deliveries: [],
+    });
     assert.deepEqual(
       (await readHeart(allocated.paths)).pending.map((tell) => tell.id),
       [told.admission.tellId],

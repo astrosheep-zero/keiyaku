@@ -416,6 +416,15 @@ test("facade tell preserves its primary mutation authority", async () => {
     assert.equal(result.akuma, source.id);
     assert.equal(result.tell.admission.fact, "recorded");
     assert.equal(typeof result.tell.admission.tellId, "string");
+    assert.deepEqual(result.tell.row, {
+      kind: "tell",
+      sequence: result.tell.row.sequence,
+      at: result.tell.row.at,
+      tellId: result.tell.admission.tellId,
+      text: "continue",
+      state: "pending",
+      deliveries: [],
+    });
     assert.equal("observation" in result, false);
     assert.equal("receipt" in result, false);
     assert.equal("status" in result, false);

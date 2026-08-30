@@ -479,12 +479,16 @@ export function historyText(
   ].join("\n");
 }
 
-export function tellText(result: Extract<AkumaInvocationResult, { action: "tell"; mode: "ordinary" }>): string {
+export function tellText(
+  result: Extract<AkumaInvocationResult, { action: "tell"; mode: "ordinary" }>,
+  context: TextRenderContext,
+): string {
   const wake = result.result.tell.wake;
   const target = identity(result.result.akuma, result.alias);
+  const row = groupedRows([result.result.tell.row], context).join("\n");
   if (wake.kind === "failed") {
     const child = "child" in wake ? wake.child : undefined;
-    return `${target}\n${SNAPSHOT_RULER}\n! tell delivery failed · ${safeText(wake.diagnostic)}${child === undefined ? "" : ` · log ${child.log.path} ${child.log.from}..${child.log.to}`}`;
+    return `${target}\n${SNAPSHOT_RULER}\n${row}\n! tell delivery failed · ${safeText(wake.diagnostic)}${child === undefined ? "" : ` · log ${child.log.path} ${child.log.from}..${child.log.to}`}`;
   }
-  return `${target}\n${SNAPSHOT_RULER}\n✓ tell ${wake.kind}${wake.kind === "pursuing" ? ` body=${wake.bodySequence}` : ""}`;
+  return `${target}\n${SNAPSHOT_RULER}\n${row}`;
 }
