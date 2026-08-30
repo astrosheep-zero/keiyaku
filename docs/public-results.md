@@ -38,6 +38,14 @@ state, missing target or workspace, unsupported integration, and target movement
 remain typed public conditions rather than hidden retry policy. Target movement
 never masquerades as claim or already-applied placement.
 
+A materialized handoff is itself a complete no-fact delivery outcome. Its
+forwarded descriptor is durable service evidence sufficient to return that same
+outcome on replay, without rematerializing it or inventing a delivery fact.
+Heart may retain that opaque descriptor but cannot turn it into Git custody or
+cleanup authority. Recorded delivery continues to retain its journal-fact
+evidence, and request service remains incomplete when no required evidence
+exists.
+
 Unmet prerequisites and gates retain the lifecycle decision's ordered,
 adjudicated explanation. Consumers render that result and never recompute
 dependency state, gate currentness, staleness, or terminality. Region overlap is

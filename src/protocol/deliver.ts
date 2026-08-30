@@ -2,7 +2,6 @@ import {
   materializeIntegrationSnapshot,
   materializeJudgedConflict,
   planIntegration,
-  workspaceMergeStatePresent,
   worktreeChangeId,
 } from "../git/integration.js";
 import {
@@ -11,7 +10,12 @@ import {
   materializeTenderSnapshot,
   prepareDeliveryCommitMetadata,
 } from "../git/tender.js";
-import { worktreePath } from "../git/workspace.js";
+import {
+  recordConflictHandoff,
+  retireConflictHandoff,
+  workspaceMergeStatePresent,
+  worktreePath,
+} from "../git/workspace.js";
 import { observeContractsForAdmissionAt } from "../git/observe.js";
 import { withPrivateStatePublicationSeat } from "../git/private-state-seat.js";
 import type { AttemptContext } from "../core/decide.js";
@@ -307,7 +311,7 @@ function conflictDeliverRefusal(refusal: IntegrationConflictRefusal): DeliverCon
 async function appointedDeliverWorkspace(
   input: DeliverOperationInput,
 ): Promise<
-  | Readonly<{ workspace: AppointedWorkspace; coordinates: ContractState["coordinates"] }>
+  | Readonly<{ workspace: AppointedWorkspace; coordinates: ContractState["coordinates"]; state: ContractState }>
   | { kind: "refused"; refusal: DeliveryPreparationRefusal }
 > {
   const observation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
@@ -320,6 +324,7 @@ async function appointedDeliverWorkspace(
   return {
     workspace: { kind: "worktree", path: worktreePath(input.scope, appointment.place) },
     coordinates: state.coordinates,
+    state,
   };
 }
 
@@ -328,6 +333,16 @@ async function materializationMergeStateRefusal(
 ): Promise<DeliveryPreparationRefusal | undefined> {
   const appointed = await appointedDeliverWorkspace(input);
   if ("kind" in appointed) return appointed.refusal;
+  const appointment = appointmentFor(await readPlaceRegister(input.scope), input.contractId);
+  if (appointment === undefined) return { kind: "worktree-missing", contractId: input.contractId };
+  const retirement = await retireConflictHandoff(input.scope, {
+    contractId: input.contractId,
+    place: appointment.place,
+    workspace: appointed.workspace.path,
+    consume: true,
+  });
+  if (retirement.kind === "retained")
+    return { kind: "merge-state-present", contractId: input.contractId, workspace: appointed.workspace };
   return await mergeStatePresentRefusal(input, appointed.workspace);
 }
 
@@ -361,6 +376,13 @@ async function materializeDeliverConflict(
   if (tender.data.dirty || tender.data.changes.submodules.length > 0) {
     return { kind: "refused", refusal: await dirtyTenderRefusal(input.scope, input.contractId, tender.data) };
   }
+  await recordConflictHandoff(input.scope, {
+    contractId: input.contractId,
+    place: appointment.place,
+    workspace: workspace.path,
+    head: tender.data.head,
+    mergeHead: refusal.targetHead,
+  });
   await materializeJudgedConflict(input.scope, workspace.path, refusal.targetHead);
   return {
     kind: "integration-conflict-materialized",

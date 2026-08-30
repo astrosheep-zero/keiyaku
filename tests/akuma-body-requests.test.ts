@@ -1249,3 +1249,97 @@ test("a forwarded Tell writes its transport and the direct parent enters the tel
     rmSync(root, { recursive: true, force: true });
   }
 });
+test("forwarded materialization retains and replays its handoff evidence", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-deliver-materialized-")));
+  const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
+  const materialized = {
+    kind: "integration-conflict-materialized" as const,
+    targetHead: "target-head",
+    conflictPaths: ["shared.txt"],
+    workspace: { kind: "worktree" as const, path: "/tmp/wt" },
+  };
+  let calls = 0;
+  const pump = await openPump(parent, {
+    wait: async () => {
+      throw new Error("unexpected wait");
+    },
+    tell: async () => {
+      throw new Error("unexpected tell");
+    },
+    kill: async () => {
+      throw new Error("unexpected kill");
+    },
+    deliver: async (input) => {
+      calls += 1;
+      assert.equal(input.materializeConflict, true);
+      return { result: materialized };
+    },
+  });
+  try {
+    const id = randomUUID();
+    assert.deepEqual(
+      await requestBodyDeliver({
+        directory: pump.directory,
+        id,
+        repoRoot: root,
+        contractId: "kei/conflicted",
+        includeDirty: false,
+        materializeConflict: true,
+      }),
+      materialized,
+    );
+    assert.equal(calls, 1);
+    const claim = await readTransportClaim(pump.directory, id);
+    assert.deepEqual(claim.payload, {
+      repoRoot: root,
+      contractId: "kei/conflicted",
+      includeDirty: false,
+      materializeConflict: true,
+    });
+    const fact = await readRequest(parent.paths, id);
+    assert.deepEqual(fact?.state === "served" && "serviceJson" in fact ? JSON.parse(fact.serviceJson) : null, {
+      kind: "materialized-handoff",
+      repoRoot: root,
+      contractId: "kei/conflicted",
+      targetHead: "target-head",
+      conflictPaths: ["shared.txt"],
+      workspace: { kind: "worktree", path: "/tmp/wt" },
+    });
+
+    await pump.close();
+    const replayPump = await openPump(parent, {
+      wait: async () => {
+        throw new Error("unexpected wait");
+      },
+      tell: async () => {
+        throw new Error("unexpected tell");
+      },
+      kill: async () => {
+        throw new Error("unexpected kill");
+      },
+      deliver: async () => {
+        calls += 1;
+        throw new Error("materialization must not replay");
+      },
+    });
+    try {
+      assert.deepEqual(
+        await requestBodyDeliver({
+          directory: replayPump.directory,
+          id,
+          repoRoot: root,
+          contractId: "kei/conflicted",
+          includeDirty: false,
+          materializeConflict: true,
+        }),
+        materialized,
+      );
+      assert.equal(calls, 1);
+    } finally {
+      await replayPump.close();
+    }
+  } finally {
+    await pump.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

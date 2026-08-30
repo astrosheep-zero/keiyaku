@@ -60,6 +60,15 @@ authority unless the caller explicitly asks Git to project that conflict into
 the appointed workspace; that projection chooses no resolution and is not a
 second conflict judgment.
 
+Conflict materialization has separate private Git custody. Keiyaku records its
+receipt before projecting the merge, and only a live operation that presents
+the matching unretired receipt is Keiyaku-owned. Equivalent parents, trees,
+index entries, and worktree bytes never establish ownership. The receipt binds
+the materialization to its Contract appointment and live workspace identity;
+its carrier and field layout remain private Git mechanics. An unmatched record
+with no live operation is disposable custody, while a live operation without a
+matching receipt remains foreign.
+
 Targeted placement is serialized per target. It claims only when the target
 still matches the persisted integration predecessor and can move atomically to
 the candidate. If the target moved, Git may reintegrate the original tender
@@ -85,6 +94,14 @@ Workspace appointment is owned by [workspace.md](workspace.md). Git consumes an
 explicit appointment and never derives, scans, adopts, or persists a worktree
 coordinate from Contract identity. Its cleanliness and target-lag observations
 are transient, frozen with the relevant target, and never journal facts.
+
+A durable delivery consumes its matching materialized handoff. Its later
+retirement changes only the proved merge-operation metadata: it preserves the
+real index, including staged versus unstaged distinctions, and every worktree
+byte. Retrying that physical effect is safe; an explicit rematerialization may
+perform the same proved retirement before making a new judged projection.
+Foreign Git state, generic Git-operation recovery, automatic commits, and
+index- or worktree-rewriting cleanup remain outside Keiyaku's authority.
 
 Terminal cleanup removes a managed worktree only when its bytes and head are
 sealed by the Contract's recorded custody. Unsealed claimed bytes are retained.

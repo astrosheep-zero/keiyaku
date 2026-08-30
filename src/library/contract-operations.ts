@@ -1,4 +1,4 @@
-import { contractId } from "../core/facts/types.js";
+import { contractId, snapshotId } from "../core/facts/types.js";
 import { requestBodyCommand } from "../akuma/request-rendezvous.js";
 import { eraseRequestCommand, type ErasedRequestCommand, type RequestCommand } from "../akuma/request-wire.js";
 import {
@@ -30,6 +30,14 @@ const contractIdSchema = z.string().transform((value, context) => {
     return contractId(value);
   } catch {
     context.addIssue({ code: "custom", message: "expected ContractId" });
+    return z.NEVER;
+  }
+});
+const snapshotIdSchema = z.string().transform((value, context) => {
+  try {
+    return snapshotId(value);
+  } catch {
+    context.addIssue({ code: "custom", message: "expected SnapshotId" });
     return z.NEVER;
   }
 });
@@ -84,8 +92,32 @@ const reviewReferenceSchema = z
     reviewFactId: nonblankStringSchema,
   })
   .strict();
-const contractServiceSchema = z.union([auditServiceSchema, deliveryReferenceSchema, reviewReferenceSchema]);
+const materializedHandoffServiceSchema = z
+  .object({
+    kind: z.literal("materialized-handoff"),
+    repoRoot: absolutePathSchema,
+    contractId: contractIdSchema,
+    targetHead: snapshotIdSchema,
+    conflictPaths: z.array(nonblankStringSchema).transform((paths) => Object.freeze(paths) as readonly string[]),
+    workspace: z.object({ kind: z.literal("worktree"), path: nonblankStringSchema }).strict(),
+  })
+  .strict();
+const materializedHandoffReferenceSchema = z
+  .object({
+    kind: z.literal("integration-conflict-materialized"),
+    targetHead: snapshotIdSchema,
+    conflictPaths: z.array(nonblankStringSchema).transform((paths) => Object.freeze(paths) as readonly string[]),
+    workspace: z.object({ kind: z.literal("worktree"), path: nonblankStringSchema }).strict(),
+  })
+  .strict() satisfies z.ZodType<IntegrationConflictMaterialized>;
+const contractServiceSchema = z.union([
+  auditServiceSchema,
+  deliveryReferenceSchema,
+  materializedHandoffServiceSchema,
+  reviewReferenceSchema,
+]);
 export type ContractService = z.infer<typeof contractServiceSchema>;
+type ContractReference = ContractService | z.infer<typeof materializedHandoffReferenceSchema>;
 export type ContractRequestPort = Readonly<{
   audit(
     input: AuditRequest & Readonly<{ requester: ContractRequester; signal: AbortSignal }>,
@@ -154,9 +186,24 @@ function decodeContractService(action: ContractRequest["action"], value: unknown
     action === "contract.audit"
       ? auditServiceSchema
       : action === "contract.deliver"
-        ? deliveryReferenceSchema
+        ? z.union([deliveryReferenceSchema, materializedHandoffServiceSchema])
         : reviewReferenceSchema;
   const parsed = schema.safeParse(value);
+  if (!parsed.success) throw new Error(`malformed stored Contract service evidence for ${action}`);
+  return parsed.data;
+}
+
+function projectContractService(action: ContractRequest["action"], service: ContractService): ContractReference {
+  if (action === "contract.deliver" && service.kind === "materialized-handoff") {
+    const { kind: _kind, repoRoot: _repoRoot, contractId: _contractId, ...handoff } = service;
+    return { kind: "integration-conflict-materialized", ...handoff };
+  }
+  return service;
+}
+
+function decodeContractReference(action: ContractRequest["action"], value: unknown): ContractReference {
+  if (action !== "contract.deliver") return decodeContractService(action, value);
+  const parsed = z.union([deliveryReferenceSchema, materializedHandoffReferenceSchema]).safeParse(value);
   if (!parsed.success) throw new Error(`malformed stored Contract service evidence for ${action}`);
   return parsed.data;
 }
@@ -183,6 +230,19 @@ async function executeContractRequest(
   if (request.action === "contract.deliver") {
     if (typeof context.upstream.deliver !== "function") throw new Error("invalid Contract execution context");
     const served = await context.upstream.deliver({ ...request, requester: context.requester, signal: context.signal });
+    if ("kind" in served.result && served.result.kind === "integration-conflict-materialized") {
+      return {
+        result: served.result,
+        service: {
+          kind: "materialized-handoff",
+          repoRoot: request.repoRoot,
+          contractId: request.contractId,
+          targetHead: served.result.targetHead,
+          conflictPaths: served.result.conflictPaths,
+          workspace: served.result.workspace,
+        },
+      };
+    }
     if (served.deliveryFactId === undefined)
       throw new Error(`Contract ${request.action} completed without durable service evidence`);
     return {
@@ -224,7 +284,7 @@ function decodedContractResult(action: ContractRequest["action"], value: unknown
 
 export function contractRequestCommand(
   action: ContractRequest["action"],
-): RequestCommand<ContractRequest, ContractResult, ContractService, ContractService, ContractExecutionContext> {
+): RequestCommand<ContractRequest, ContractResult, ContractService, ContractReference, ContractExecutionContext> {
   return {
     action,
     encodeRequest: (request) => {
@@ -238,8 +298,8 @@ export function contractRequestCommand(
     decodeFailure: decodeContractLiveFailure,
     encodeService: (service) => service,
     decodeService: (service) => decodeContractService(action, service),
-    projectService: (service) => decodeContractService(action, service),
-    decodeReference: (reference) => decodeContractService(action, reference),
+    projectService: (service) => projectContractService(action, service),
+    decodeReference: (reference) => decodeContractReference(action, reference),
     isPermitted: (allowed) => allowed.includes(action),
     decodeExecutionContext: decodeContractExecutionContext,
     execute: executeContractRequest,

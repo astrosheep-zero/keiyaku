@@ -24,7 +24,7 @@ import {
   type TargetCheckoutLag,
 } from "./target-placement.js";
 import { runCreateHooks, type WorktreeHookLag, type WorktreeHooks } from "./hooks.js";
-import { followDependentManagedWorktree, followManagedWorktree, worktreePath } from "./workspace.js";
+import { followDependentManagedWorktree, retireConflictHandoff, worktreePath } from "./workspace.js";
 import { removeCollectableScratchWorktrees } from "./scratch.js";
 import { migrateContractCustodyRefs, type RefMigrationConflict } from "./ref-migration.js";
 import { reconcileTerminalManagedWorktree, removeRef, updateRef } from "./terminal-reconcile.js";
@@ -229,24 +229,19 @@ async function reconcileActiveManagedWorktree(
   const desired = state.delivery?.data.tenderSnapshot ?? state.coordinates.start;
   effects.push(await updateRef(repository, deliveryRefFor(state.id), desired));
   const projection = await worktree(repository, topology, path, desired);
-  if (projection.kind === "worktree" && projection.action === "unchanged" && state.delivery !== null) {
-    const follow = await followManagedWorktree(repository, path, state.delivery.data.tenderSnapshot);
-    if (follow.kind === "followed") {
-      effects.push({ kind: "worktree", path, action: "followed", before: follow.before, after: follow.after });
-    } else {
-      effects.push(projection);
-      if (follow.kind === "retained") {
-        lag.push({
-          kind: "worktree-follow-retained",
-          path,
-          tender: state.delivery.data.tenderSnapshot,
-          head: follow.head,
-          reason: follow.reason,
-        });
-      }
-    }
-  } else {
-    effects.push(projection);
+  effects.push(projection);
+  const handoff = await retireConflictHandoff(repository, {
+    contractId: state.id,
+    place,
+    workspace: path,
+    consume: state.delivery !== null,
+  });
+  if (state.delivery !== null && handoff.kind === "retained") {
+    lag.push({
+      kind: "reconcile-failed",
+      stage: "effect",
+      diagnostic: `conflict handoff retirement retained: ${handoff.reason}`,
+    });
   }
   if (projection.action === "created" || retryHooks) {
     const hookRun = await runCreateHooks(path, hooks);
@@ -263,6 +258,38 @@ async function reconcileActiveManagedWorktree(
       : await removeRef(repository, candidatePinRefFor(state.id))),
   );
   return complete(effects, lag, hookRuns);
+}
+
+async function terminalHandoffRetained(
+  input: ReconcileEffectsInput,
+  state: ContractState,
+  topology: WorktreeTopology,
+  lag: ReconcileLag[],
+): Promise<boolean> {
+  if (input.place === undefined) return false;
+  const path = worktreePath(input.repository, input.place);
+  if (!topology.paths.has(path) && !(await pathExists(path))) return false;
+  const handoff = await retireConflictHandoff(input.repository, {
+    contractId: state.id,
+    place: input.place,
+    workspace: path,
+    consume: state.delivery !== null,
+  });
+  if (handoff.kind === "active") {
+    lag.push({
+      kind: "reconcile-failed",
+      stage: "effect",
+      diagnostic: "conflict handoff retirement retained: active",
+    });
+    return true;
+  }
+  if (handoff.kind !== "retained") return false;
+  lag.push({
+    kind: "reconcile-failed",
+    stage: "effect",
+    diagnostic: `conflict handoff retirement retained: ${handoff.reason}`,
+  });
+  return true;
 }
 
 async function reconcileWithTopology(
@@ -285,6 +312,7 @@ async function reconcileWithTopology(
     effects.push(...targetCheckouts.effects);
     lag.push(...targetCheckouts.lag);
     if (state.terminal) {
+      if (await terminalHandoffRetained(input, state, topology, lag)) return complete(effects, lag, hookRuns);
       return await reconcileTerminalManagedWorktree(
         input,
         state,

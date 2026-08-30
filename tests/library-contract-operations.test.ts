@@ -8,10 +8,13 @@ import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import { encodeEntry } from "../src/core/facts/codec.js";
 import { changeId, contractId, entryUlid, snapshotId } from "../src/core/facts/types.js";
 import { contractJournalPath } from "../src/git/identity.js";
+import { materializeJudgedConflict } from "../src/git/integration.js";
 import { GIT_REF, readBlob, readGit, readRef, updateGitTree, writeBlob, writeCommit } from "../src/git/repository.js";
 import { acquireTargetPlacementFence } from "../src/git/target-placement.js";
+import { recordConflictHandoff } from "../src/git/workspace.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { completeRepoReconcile } from "../src/library/reconcile.js";
+import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import {
   appointedWorktreePath,
   cachedRepoAt,
@@ -278,6 +281,70 @@ test("explicit materialization projects the judged conflict in the appointed wor
   assert.equal(mergeHead(repository, worktree), targetHead);
 });
 
+test("an orphaned pre-materialization receipt is retired before retry", async () => {
+  const { repository, contract, targetHead } = await reviewGatedConflictCandidateFixture();
+  await assert.rejects(
+    () =>
+      withGitShim(
+        [
+          'if [ "$1" = "-C" ] && [ "$3" = "merge" ] && [ "$4" = "--no-commit" ]; then',
+          '  printf "forced materialization interruption\\n" >&2',
+          "  exit 2",
+          "fi",
+          'exec "$KEIYAKU_REAL_GIT" "$@"',
+        ].join("\n"),
+        {},
+        async (gitPath) =>
+          await Keiyaku.of({ repo: await Repo.at({ path: repository.path, gitPath }), id: contract.id }).deliver({
+            materializeConflict: true,
+          }),
+      ),
+    /git merge --no-commit failed/u,
+  );
+
+  const retried = await contract.deliver({ materializeConflict: true });
+  assert.equal(retried.kind, "integration-conflict-materialized");
+  assert.equal(retried.targetHead, targetHead);
+});
+
+test("a receipt retires a crash after merge before materialization returns", async () => {
+  const { repository, contract, targetHead, worktree } = await reviewGatedConflictCandidateFixture();
+  const git = await cachedRepositoryAt(repository.path);
+  const appointment = await readManagedWorktreeAppointment(git, contract.id);
+  assert.equal(appointment.kind, "appointed");
+  if (appointment.kind !== "appointed") return;
+  await recordConflictHandoff(git, {
+    contractId: contract.id,
+    place: appointment.place,
+    workspace: worktree,
+    head: snapshotId(repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim()),
+    mergeHead: targetHead,
+  });
+  await materializeJudgedConflict(git, worktree, targetHead);
+  const before = {
+    index: repository.run(["-C", worktree, "ls-files", "--stage", "-z"]),
+    status: repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]),
+  };
+
+  await assert.rejects(
+    () => contract.deliver({ materializeConflict: true }),
+    refused({
+      kind: "merge-state-present",
+      contractId: contract.id,
+      workspace: { kind: "worktree", path: worktree },
+    }),
+  );
+
+  assert.equal(mergeHead(repository, worktree), null);
+  assert.deepEqual(
+    {
+      index: repository.run(["-C", worktree, "ls-files", "--stage", "-z"]),
+      status: repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]),
+    },
+    before,
+  );
+});
+
 test("Contract reads observe materialized merge conflicts and staged resolutions", async () => {
   const { repository, contract, targetHead, worktree } = await reviewGatedConflictCandidateFixture();
   const materialized = await contract.deliver({ materializeConflict: true });
@@ -349,6 +416,137 @@ test("resolved merge delivery requires dirty authority and preserves native pare
   ]);
 });
 
+test("delivery retires a resolved Keiyaku handoff without changing its caller state", async () => {
+  const { repository, contract, worktree } = await reviewGatedConflictCandidateFixture();
+  const materialized = await contract.deliver({ materializeConflict: true });
+  assert.equal(materialized.kind, "integration-conflict-materialized");
+  writeFileSync(join(worktree, "a.txt"), "resolved\n");
+  writeFileSync(join(worktree, "z.txt"), "resolved\n");
+  repository.run(["-C", worktree, "add", "a.txt", "z.txt"]);
+  const headBefore = repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim();
+  const indexBefore = repository.run(["-C", worktree, "ls-files", "--stage", "-z"]);
+  const statusBefore = repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]);
+
+  const delivered = await contract.deliver({ includeDirty: true });
+  assert.equal("facts" in delivered, true);
+  if (!("facts" in delivered)) return;
+  assert.equal(mergeHead(repository, worktree), null);
+  assert.equal(repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim(), headBefore);
+  assert.equal(repository.run(["-C", worktree, "ls-files", "--stage", "-z"]), indexBefore);
+  assert.equal(repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]), statusBefore);
+});
+
+test("delivery retirement preserves staged and unstaged caller bytes", async () => {
+  const { repository, contract, worktree } = await reviewGatedConflictCandidateFixture();
+  const materialized = await contract.deliver({ materializeConflict: true });
+  assert.equal(materialized.kind, "integration-conflict-materialized");
+  writeFileSync(join(worktree, "a.txt"), "staged A\n");
+  writeFileSync(join(worktree, "z.txt"), "resolved\n");
+  repository.run(["-C", worktree, "add", "a.txt", "z.txt"]);
+  writeFileSync(join(worktree, "z.txt"), "unstaged B\n");
+  const before = {
+    index: repository.run(["-C", worktree, "ls-files", "--stage", "-z"]),
+    status: repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]),
+    staged: repository.run(["-C", worktree, "diff", "--cached", "--binary"]),
+    unstaged: repository.run(["-C", worktree, "diff", "--binary"]),
+    a: readFileSync(join(worktree, "a.txt"), "utf8"),
+    z: readFileSync(join(worktree, "z.txt"), "utf8"),
+  };
+
+  const delivered = await contract.deliver({ includeDirty: true });
+  assert.equal("facts" in delivered, true);
+  if (!("facts" in delivered)) return;
+  assert.equal(mergeHead(repository, worktree), null);
+  assert.deepEqual(
+    {
+      index: repository.run(["-C", worktree, "ls-files", "--stage", "-z"]),
+      status: repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]),
+      staged: repository.run(["-C", worktree, "diff", "--cached", "--binary"]),
+      unstaged: repository.run(["-C", worktree, "diff", "--binary"]),
+      a: readFileSync(join(worktree, "a.txt"), "utf8"),
+      z: readFileSync(join(worktree, "z.txt"), "utf8"),
+    },
+    before,
+  );
+});
+
+test("reconciliation retries receipt-proved handoff retirement after delivery", async () => {
+  const { repository, contract, worktree } = await reviewGatedConflictCandidateFixture();
+  const materialized = await contract.deliver({ materializeConflict: true });
+  assert.equal(materialized.kind, "integration-conflict-materialized");
+  writeFileSync(join(worktree, "a.txt"), "resolved\n");
+  writeFileSync(join(worktree, "z.txt"), "resolved\n");
+  repository.run(["-C", worktree, "add", "a.txt", "z.txt"]);
+
+  const delivered = await withGitShim(
+    [
+      'if [ "$1" = "-C" ] && [ "$3" = "merge" ] && [ "$4" = "--quit" ]; then',
+      '  printf "forced handoff cleanup failure\\n" >&2',
+      "  exit 1",
+      "fi",
+      'exec "$KEIYAKU_REAL_GIT" "$@"',
+    ].join("\n"),
+    {},
+    async (gitPath) => {
+      const repo = await Repo.at({ path: repository.path, gitPath });
+      return await Keiyaku.of({ repo, id: contract.id }).deliver({ includeDirty: true });
+    },
+  );
+  assert.equal("facts" in delivered, true);
+  if (!("facts" in delivered)) return;
+  assert.equal(mergeHead(repository, worktree), materialized.targetHead);
+  assert.ok(delivered.lags.some((lag) => lag.kind === "reconcile-failed"));
+  const reconciled = await contract.reconcile();
+  assert.equal(reconciled.lag.some((lag) => lag.kind === "reconcile-failed"), false);
+  assert.equal(mergeHead(repository, worktree), null);
+});
+
+test("terminal claim retries a lagged receipt retirement before worktree removal", async () => {
+  const { repository, contract, worktree } = await reviewGatedConflictCandidateFixture();
+  const materialized = await contract.deliver({ materializeConflict: true });
+  assert.equal(materialized.kind, "integration-conflict-materialized");
+  writeFileSync(join(worktree, "a.txt"), "resolved\n");
+  writeFileSync(join(worktree, "z.txt"), "resolved\n");
+  repository.run(["-C", worktree, "add", "a.txt", "z.txt"]);
+
+  const delivered = await withGitShim(
+    [
+      'if [ "$1" = "-C" ] && [ "$3" = "merge" ] && [ "$4" = "--quit" ]; then',
+      '  printf "forced handoff cleanup failure\\n" >&2',
+      "  exit 1",
+      "fi",
+      'exec "$KEIYAKU_REAL_GIT" "$@"',
+    ].join("\n"),
+    {},
+    async (gitPath) => {
+      const repo = await Repo.at({ path: repository.path, gitPath });
+      return await Keiyaku.of({ repo, id: contract.id }).deliver({ includeDirty: true });
+    },
+  );
+  assert.equal("facts" in delivered, true);
+  if (!("facts" in delivered)) return;
+  assert.equal(mergeHead(repository, worktree), materialized.targetHead);
+
+  const reviewed = await withGitShim(
+    [
+      'if [ "$1" = "worktree" ] && [ "$2" = "remove" ]; then',
+      '  printf "forced terminal worktree retention\\n" >&2',
+      "  exit 1",
+      "fi",
+      'exec "$KEIYAKU_REAL_GIT" "$@"',
+    ].join("\n"),
+    {},
+    async (gitPath) => {
+      const repo = await Repo.at({ path: repository.path, gitPath });
+      return await Keiyaku.of({ repo, id: contract.id }).review({ verdict: "satisfied" });
+    },
+  );
+
+  assert.equal((await contract.state()).terminal?.kind, "claimed");
+  assert.equal(mergeHead(repository, worktree), null);
+  assert.ok(reviewed.lags.some((lag) => lag.kind === "worktree-retained"));
+});
+
 test("materializeConflict is inert when the judge reports no conflict", async () => {
   const plain = await disjointTargetedDelivery();
   const flagged = await disjointTargetedDelivery(true);
@@ -382,10 +580,14 @@ test("materialization refuses a dirty workspace even with includeDirty", async (
   assert.equal((await contract.state()).delivery, null);
 });
 
-test("existing merge state refuses materialization without a second judge", async () => {
-  const { repository, contract, targetHead, worktree } = await reviewGatedConflictCandidateFixture();
+test("explicit rematerialization retires an owned handoff without changing unresolved bytes", async () => {
+  const { repository, contract, worktree } = await reviewGatedConflictCandidateFixture();
   const first = await contract.deliver({ materializeConflict: true });
   assert.equal(first.kind, "integration-conflict-materialized");
+  const before = {
+    index: repository.run(["-C", worktree, "ls-files", "--stage", "-z"]),
+    status: repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]),
+  };
   await assert.rejects(
     () => contract.deliver({ includeDirty: true, materializeConflict: true }),
     refused({
@@ -394,8 +596,62 @@ test("existing merge state refuses materialization without a second judge", asyn
       workspace: { kind: "worktree", path: worktree },
     }),
   );
-  assert.equal(mergeHead(repository, worktree), targetHead);
+  assert.equal(mergeHead(repository, worktree), null);
+  assert.deepEqual(
+    {
+      index: repository.run(["-C", worktree, "ls-files", "--stage", "-z"]),
+      status: repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]),
+    },
+    before,
+  );
   assert.equal((await contract.state()).delivery, null);
+});
+
+test("a matching foreign merge is refused without changing Git state", async () => {
+  const { repository, contract, targetHead, worktree } = await reviewGatedConflictCandidateFixture();
+  const git = await cachedRepositoryAt(repository.path);
+  await materializeJudgedConflict(git, worktree, targetHead);
+  writeFileSync(join(worktree, "a.txt"), "resolved\n");
+  writeFileSync(join(worktree, "z.txt"), "resolved\n");
+  repository.run(["-C", worktree, "add", "a.txt", "z.txt"]);
+  const manualHead = repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim();
+  const manualTree = repository.run(["-C", worktree, "write-tree"]).trim();
+  const delivered = await contract.deliver({ includeDirty: true });
+  assert.equal("facts" in delivered, true);
+  if (!("facts" in delivered)) return;
+  assert.deepEqual(repository.run(["show", "-s", "--format=%P", delivered.value.tenderSnapshot]).trim().split(" "), [
+    manualHead,
+    targetHead,
+  ]);
+  assert.equal(repository.run(["show", "-s", "--format=%T", delivered.value.tenderSnapshot]).trim(), manualTree);
+  const mergeMessagePath = repository.run(["-C", worktree, "rev-parse", "--git-path", "MERGE_MSG"]).trim();
+  const before = {
+    head: repository.run(["-C", worktree, "rev-parse", "HEAD"]),
+    mergeHead: mergeHead(repository, worktree),
+    message: readFileSync(mergeMessagePath, "utf8"),
+    index: repository.run(["-C", worktree, "ls-files", "--stage", "-z"]),
+    status: repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]),
+  };
+
+  await assert.rejects(
+    () => contract.deliver({ includeDirty: true, materializeConflict: true }),
+    refused({
+      kind: "merge-state-present",
+      contractId: contract.id,
+      workspace: { kind: "worktree", path: worktree },
+    }),
+  );
+
+  assert.deepEqual(
+    {
+      head: repository.run(["-C", worktree, "rev-parse", "HEAD"]),
+      mergeHead: mergeHead(repository, worktree),
+      message: readFileSync(mergeMessagePath, "utf8"),
+      index: repository.run(["-C", worktree, "ls-files", "--stage", "-z"]),
+      status: repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]),
+    },
+    before,
+  );
 });
 
 test("native resolution continues through plain deliver against the then-current target", async () => {

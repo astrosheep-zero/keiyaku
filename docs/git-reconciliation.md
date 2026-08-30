@@ -27,12 +27,20 @@ Confirmed reset is a separate Git-owned operation, not reconciliation.
 
 For an active Contract, reconciliation repairs necessary custody and realizes
 or retains its appointed managed worktree. It never overwrites an existing
-worktree merely to make it match a delivery. A captured tender may be followed
-only when the current detached worktree state proves that carry-forward is safe;
-attached heads, unrelated movement, incompatible operations, or dirty state are
-retained with a typed lag. Dependency continuation may likewise advance only a
-clean, compatible dependent worktree. These physical repairs create no
-candidate, review, target movement, or journal fact.
+worktree merely to make it match a delivery. Dependency continuation may
+advance only a clean, compatible dependent worktree. These physical repairs
+create no candidate, review, target movement, or journal fact.
+
+Reconciliation observes a materialized handoff through Git's private receipt
+and the receipt's recorded live identity, not through topology or equal bytes.
+It can discard an orphan receipt only when no live operation remains. After
+delivery admission, it retires a fully matching handoff's merge metadata
+without touching the real index or worktree; failure remains recoverable lag
+and never revokes delivery. Terminal reconciliation performs the same
+retirement before it removes a worktree. Mismatched, incomplete, or unrelated
+state is retained unchanged. The same proof permits explicit rematerialization
+to retire a prior handoff; neither conflict resolution completeness nor tree
+equality is an ownership test.
 
 Target-checkout recovery can complete only the current claimed
 predecessor-to-candidate movement while the checkout state proves it can carry

@@ -1,10 +1,10 @@
 import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import type { SnapshotId } from "../core/facts/types.js";
-import { gitObjectId, mintSnapshotId, type GitObjectId } from "./identity.js";
+import type { ContractId, SnapshotId } from "../core/facts/types.js";
+import { contractPhysicalName, gitObjectId, mintSnapshotId, type GitObjectId } from "./identity.js";
 import { GitPlumbingError, runGit, runGitWithEnvironment, type GitRepository } from "./process.js";
-import { worktreeGitDirectory } from "./repository.js";
+import { HANDOFF_RECEIPT_REF_NAMESPACE, readBlob, readRef, worktreeGitDirectory, writeBlob } from "./repository.js";
 
 const WORKTREE_DIRECTORY = [".keiyaku", "wt"] as const;
 
@@ -26,15 +26,6 @@ export type WorkspaceTree = Readonly<{
 export function worktreePath(repository: GitRepository, place: string): string {
   return resolve(repository.primaryWorktree, ...WORKTREE_DIRECTORY, place);
 }
-
-export type ManagedWorktreeFollow =
-  | Readonly<{ kind: "followed"; before: SnapshotId; after: SnapshotId }>
-  | Readonly<{ kind: "unchanged" }>
-  | Readonly<{
-      kind: "retained";
-      head: SnapshotId;
-      reason: "head-moved" | "head-attached" | "operation-in-progress" | "unsupported-parent-shape";
-    }>;
 
 export type DependentWorktreeFollow =
   | Readonly<{ kind: "followed"; before: SnapshotId; after: SnapshotId }>
@@ -80,44 +71,6 @@ async function workspaceOperationState(
   );
   const unmerged = (await runGit(repository, ["-C", workspace, "ls-files", "--unmerged", "-z"])).length > 0;
   return { other: other.some(Boolean), unmerged };
-}
-
-/** Follow an accepted tender only through the native index-and-HEAD transition. */
-export async function followManagedWorktree(
-  repository: GitRepository,
-  workspace: string,
-  tender: SnapshotId,
-): Promise<ManagedWorktreeFollow> {
-  const head = await workspaceRevision(repository, workspace, "HEAD");
-  if (head === null) throw new Error("managed worktree HEAD is missing");
-  const attached = await runGit(repository, ["-C", workspace, "symbolic-ref", "--quiet", "HEAD"]).then(
-    () => true,
-    (error: unknown) => {
-      if (error instanceof GitPlumbingError && error.status === 1) return false;
-      throw error;
-    },
-  );
-  if (attached) return { kind: "retained", head, reason: "head-attached" };
-  if (head === tender) return { kind: "unchanged" };
-  const parents = (await runGit(repository, ["show", "-s", "--format=%P", gitObjectId(tender)]))
-    .toString("utf8")
-    .trim()
-    .split(" ")
-    .filter((parent) => parent.length > 0)
-    .map((parent) => mintSnapshotId(parent));
-  if (parents.length > 0 && head !== parents[0]) return { kind: "retained", head, reason: "head-moved" };
-  if (parents.length !== 1 && parents.length !== 2)
-    return { kind: "retained", head, reason: "unsupported-parent-shape" };
-  const gitDirectory = await worktreeGitDirectory(repository, workspace);
-  const mergeHead = await workspaceRevision(repository, workspace, "MERGE_HEAD");
-  const operation = await workspaceOperationState(repository, workspace, gitDirectory);
-  const admitted =
-    parents.length === 1
-      ? mergeHead === null && !operation.other && !operation.unmerged
-      : mergeHead === parents[1] && !operation.other && !operation.unmerged;
-  if (!admitted) return { kind: "retained", head, reason: "operation-in-progress" };
-  await runGit(repository, ["-C", workspace, "reset", "--mixed", gitObjectId(tender)]);
-  return { kind: "followed", before: head, after: tender };
 }
 
 /** Follow a dependency baseline only through a clean, detached fast-forward. */
@@ -272,7 +225,10 @@ export async function workspaceMergeHead(
 
 /** True when the appointed workspace already has Git MERGE_HEAD. */
 export async function workspaceMergeStatePresent(repository: GitRepository, workspace: string): Promise<boolean> {
-  return (await workspaceMergeHead(repository, workspace)) !== undefined;
+  if ((await workspaceMergeHead(repository, workspace)) !== undefined) return true;
+  const gitDirectory = await worktreeGitDirectory(repository, workspace);
+  const operation = await workspaceOperationState(repository, workspace, gitDirectory);
+  return operation.other || operation.unmerged;
 }
 
 /** Sorted unique unmerged index paths from porcelain status. */
@@ -392,4 +348,122 @@ export async function captureWorkspaceTree(repository: GitRepository, workspace:
       changes,
     };
   });
+}
+
+const handoffRefFor = (contractId: ContractId, place: string) =>
+  `${HANDOFF_RECEIPT_REF_NAMESPACE}/${contractPhysicalName(contractId)}/${place}`;
+
+type HandoffReceipt = Readonly<{
+  version: 1;
+  contractId: ContractId;
+  place: string;
+  workspace: string;
+  head: SnapshotId;
+  mergeHead: SnapshotId;
+}>;
+type StoredHandoffReceipt = Readonly<{ receipt: HandoffReceipt; ref: string; oid: string }>;
+
+export type HandoffRetirement =
+  | Readonly<{ kind: "absent" | "active" | "orphan-retired" | "retired" }>
+  | Readonly<{ kind: "retained"; reason: "receipt-mismatch" | "operation-in-progress" }>;
+
+function receiptFor(value: unknown): HandoffReceipt {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    throw new Error("handoff receipt is malformed");
+  const record = value as Record<string, unknown>;
+  if (
+    record.version !== 1 ||
+    typeof record.contractId !== "string" ||
+    typeof record.place !== "string" ||
+    typeof record.workspace !== "string" ||
+    typeof record.head !== "string" ||
+    typeof record.mergeHead !== "string"
+  ) {
+    throw new Error("handoff receipt is malformed");
+  }
+  return {
+    version: 1,
+    contractId: record.contractId as ContractId,
+    place: record.place,
+    workspace: resolve(record.workspace),
+    head: mintSnapshotId(record.head),
+    mergeHead: mintSnapshotId(record.mergeHead),
+  };
+}
+
+async function storedHandoffReceipt(
+  repository: GitRepository,
+  contractId: ContractId,
+  place: string,
+): Promise<StoredHandoffReceipt | null> {
+  const ref = handoffRefFor(contractId, place);
+  const oid = await readRef(repository, ref);
+  if (oid === null) return null;
+  const receipt = receiptFor(JSON.parse((await readBlob(repository, oid)).toString("utf8")));
+  return { receipt, ref, oid };
+}
+
+async function removeHandoffReceipt(repository: GitRepository, stored: StoredHandoffReceipt): Promise<void> {
+  await runGit(repository, ["update-ref", "--no-deref", "-d", stored.ref, stored.oid]);
+}
+
+export async function recordConflictHandoff(
+  repository: GitRepository,
+  input: Readonly<{
+    contractId: ContractId;
+    place: string;
+    workspace: string;
+    head: SnapshotId;
+    mergeHead: SnapshotId;
+  }>,
+): Promise<void> {
+  const ref = handoffRefFor(input.contractId, input.place);
+  const existing = await readRef(repository, ref);
+  if (existing !== null) throw new Error("a conflict handoff receipt is already active");
+  const receipt: HandoffReceipt = {
+    version: 1,
+    contractId: input.contractId,
+    place: input.place,
+    workspace: resolve(input.workspace),
+    head: input.head,
+    mergeHead: input.mergeHead,
+  };
+  const oid = await writeBlob(repository, `${JSON.stringify(receipt)}\n`);
+  await runGit(repository, ["update-ref", "--no-deref", ref, oid, "0".repeat(oid.length)]);
+}
+
+export async function retireConflictHandoff(
+  repository: GitRepository,
+  input: Readonly<{ contractId: ContractId; place: string; workspace: string; consume: boolean }>,
+): Promise<HandoffRetirement> {
+  const stored = await storedHandoffReceipt(repository, input.contractId, input.place);
+  if (stored === null) return { kind: "absent" };
+  const { receipt } = stored;
+  if (
+    receipt.contractId !== input.contractId ||
+    receipt.place !== input.place ||
+    receipt.workspace !== resolve(input.workspace)
+  ) {
+    return { kind: "retained", reason: "receipt-mismatch" };
+  }
+  const gitDirectory = await worktreeGitDirectory(repository, input.workspace);
+  const operation = await workspaceOperationState(repository, input.workspace, gitDirectory);
+  if (operation.other) return { kind: "retained", reason: "operation-in-progress" };
+  const [head, mergeHead] = await Promise.all([
+    workspaceRevision(repository, input.workspace, "HEAD"),
+    workspaceRevision(repository, input.workspace, "MERGE_HEAD"),
+  ]);
+  if (mergeHead === null) {
+    if (operation.unmerged) return { kind: "retained", reason: "operation-in-progress" };
+    await removeHandoffReceipt(repository, stored);
+    return { kind: "orphan-retired" };
+  }
+  if (head !== receipt.head) return { kind: "retained", reason: "receipt-mismatch" };
+  if (mergeHead !== receipt.mergeHead) {
+    return { kind: "retained", reason: "receipt-mismatch" };
+  }
+  if (!input.consume) return { kind: "active" };
+  await runGit(repository, ["-C", input.workspace, "merge", "--quit"]);
+  await removeHandoffReceipt(repository, stored);
+  return { kind: "retired" };
 }
