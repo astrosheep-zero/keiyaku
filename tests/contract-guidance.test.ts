@@ -72,6 +72,8 @@ test("seat skills distinguish the acceptance floor from round direction", () => 
   assert.match(CONTRACT_DELIVERER_SKILL, /You owe a candidate, not decisions about the Contract/);
   assert.match(CONTRACT_DELIVERER_SKILL, /Stay within the dispatched Arc; Contract lifecycle is not yours to decide/);
   assert.match(CONTRACT_DELIVERER_SKILL, /ungrounded term — one that presupposes a decision nobody has made/);
+  assert.match(CONTRACT_DELIVERER_SKILL, /`deliver` creates the immutable candidate commit/);
+  assert.match(CONTRACT_DELIVERER_SKILL, /without moving this worktree's HEAD or real index/);
   assert.match(CONTRACT_DELIVERER_SKILL, /keiyaku deliver <contract> --include-dirty/);
   assert.match(CONTRACT_DELIVERER_SKILL, /keiyaku deliver <contract> --materialize-conflict/);
 
