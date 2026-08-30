@@ -3,6 +3,16 @@ export { settings } from "./settings.js";
 export { World, WorldError } from "./world.js";
 export type { WorldResolution, WorldResolutionInput, WorldRoot } from "./world.js";
 export type {
+  KeiyakuPlugin,
+  PluginContext,
+  PluginHooks,
+  PluginInstance,
+  PluginManifest,
+  PluginOutcome,
+  PluginSignal,
+  PluginSignalMap,
+} from "./plugin/public.js";
+export type {
   Settings,
   SettingsEntry,
   SettingsInput,

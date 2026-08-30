@@ -36,6 +36,11 @@ and an explicit Contract repository are separate concerns: selecting a Contract
 repository never rewrites the invocation World, and a Contract-selected Akuma
 operation does not scan or substitute another World.
 
+Plugins may receive validated, declared World-relative paths as their own
+custody. Those paths remain ordinary project bytes rather than Keiyaku management
+data; World grants no plugin a raw coordinate resolver, and plugin use never
+extends the reset scope without an explicit owner adoption.
+
 ## Keiyaku-Owned Data Reset
 
 `nuke` resets Keiyaku-owned management data for exactly one resolved World. It

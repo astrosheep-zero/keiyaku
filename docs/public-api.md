@@ -2,9 +2,10 @@
 
 The ESM package root is the sole public Contract import surface. It exposes the
 world/repository construction, Contract handles and operations, delivery view,
-settings construction, and their public errors and values. Task, Kanshi, and
-Akuma remain named product subpaths with their own owner chapters. There is no
-legacy package compatibility export or generic orchestration surface.
+settings construction, plugin contract types, and their public errors and
+values. Task, Kanshi, Akuma, and Plugin remain named product subpaths with their
+own owner chapters. There is no legacy package compatibility export or generic
+orchestration surface.
 
 ## Composition Boundary
 

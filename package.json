@@ -22,6 +22,10 @@
     "./akuma": {
       "types": "./build/src/akuma/index.d.ts",
       "import": "./build/src/akuma/index.js"
+    },
+    "./plugin": {
+      "types": "./build/src/plugin/public.d.ts",
+      "import": "./build/src/plugin/public.js"
     }
   },
   "bin": {

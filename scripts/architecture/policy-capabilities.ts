@@ -2,7 +2,7 @@ import type { ArchitecturePolicy } from "./engine.js";
 
 export const capabilityPolicy = {
   sensitiveImports: [
-    { module: "node:module", owners: [] },
+    { module: "node:module", owners: [{ source: "plugin/runtime.ts" }] },
     { module: "module", owners: [] },
     { module: "zod", owners: [{ source: "akuma/**" }, { source: "library/**" }, { source: "task/**" }] },
     {
@@ -30,6 +30,7 @@ export const capabilityPolicy = {
         { source: "coordination/**" },
         { source: "git/**" },
         { source: "library/**" },
+        { source: "plugin/runtime.ts" },
         { source: "runtime/proc/**" },
         { source: "settings.ts" },
         { source: "settlement/**" },
@@ -112,7 +113,7 @@ export const capabilityPolicy = {
   ],
   forbiddenModules: ["better-sqlite3", "sqlite3"],
   capabilityRules: [
-    { capability: "dynamic-import-nonliteral", owners: [] },
+    { capability: "dynamic-import-nonliteral", owners: ["plugin/runtime.ts"] },
     { capability: "eval", owners: [] },
     { capability: "function-constructor", owners: [] },
     { capability: "math-random", owners: [] },
@@ -143,6 +144,7 @@ export const capabilityPolicy = {
         "identity/**",
         "kanshi/**",
         "library/**",
+        "plugin/**",
         "settings.ts",
         "task/**",
         "workspace-place.ts",

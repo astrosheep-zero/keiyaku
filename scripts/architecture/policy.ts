@@ -330,11 +330,15 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     { source: "identity/**", allow: [any("identity/**")] },
     { source: "coordination/**", allow: [] },
+    { source: "plugin/**", allow: [any("plugin/**"), any("settings.ts"), types("world.ts")] },
     {
       source: "akuma-body.ts",
       allow: [any("akuma/**"), any("library/**"), any("settings.ts"), any("task/**"), any("world.ts")],
     },
-    { source: "index.ts", allow: [any("library/keiyaku.ts"), any("settings.ts"), any("world.ts")] },
+    {
+      source: "index.ts",
+      allow: [any("library/keiyaku.ts"), any("settings.ts"), any("world.ts"), types("plugin/public.ts")],
+    },
     {
       source: "*.ts",
       allow: [

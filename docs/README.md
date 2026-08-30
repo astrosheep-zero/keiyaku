@@ -32,5 +32,6 @@ surface. Read every owner named for the surface being changed.
 | [akuma-provider.md](akuma-provider.md) | Provider boundary, shared event meaning, and adaptation responsibility. |
 | [akuma-public.md](akuma-public.md) | Separate Akuma product handles, status, wait, history, and fleet values. |
 | [settings.md](settings.md) | Shared Settings resource: coordinates, scope, shadowing, failure isolation, provenance, and observation. |
+| [plugins.md](plugins.md) | Plugin contract, selection, process-local activation, World capabilities, signal delivery, and failure isolation. |
 | [kanshi.md](kanshi.md) | Composite World observation, section availability, read-time associations, and selection. |
 | [world.md](world.md) | Shared directory coordinate, marker discovery, exact construction, and edge ownership. |

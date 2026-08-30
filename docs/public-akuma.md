@@ -30,6 +30,11 @@ Contract workspace concern. Birth restrictions only add constraints and freeze
 in Soul. Exact public inputs, result fields, and timeout defaults belong to
 declarations and help.
 
+Plugin activation and delivery are external observation, not an Akuma creation
+or facade integration stage. Their absence or failure neither alters birth nor
+creates an additional public result arm; [plugins.md](plugins.md) owns their
+process-local lifetime and diagnostics.
+
 ## Address, Fleet, And Catalog
 
 The Address facet is the sole selector interpreter. It resolves complete Akuma

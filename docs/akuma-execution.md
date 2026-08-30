@@ -49,3 +49,8 @@ substitutes a nearby turn, latest session, or emulation. A provider without fork
 is categorically unable to fork. Upstream success followed by failed local birth
 is reported honestly without inventing a child Heart; a successful child copies
 the frozen parent Soul except its new identity and fork origin.
+
+An optional plugin signal may observe a committed terminal Turn only after the
+Body has written its outcome. That observation is a non-authoritative side
+effect: it cannot alter the outcome, delay its truth, attach a pre-Body listener,
+make birth reversible, or create rollback or continuation custody.
