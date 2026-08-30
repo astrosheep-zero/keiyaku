@@ -117,12 +117,15 @@ the work converging on the Objective — when successive rounds move the candida
 away from what the Contract set out to make true, judge the premise instead of
 commissioning another round.
 
-The whole loop can be handed to one Aku in a single commission. The duties
-travel with it; the delegate decides for itself when to cut Arcs and Tasks and
-when to call, tell, and review. It needs no title, seat, or identity beyond the
-commission itself. After handing over, the flagship steers only through the
-holder — a tell to the holder, a journaled amend, escalation, or withdrawing
-the commission — and never reaches past it to its subordinates.
+The whole loop can be handed to one Aku in a single commission. Keep the
+Contract association but give that delegate the repository cwd explicitly;
+automatic Contract-worktree cwd resolution is for Deliverer and Reviewer seat
+commissions. The duties travel with it; the delegate decides for itself when
+to cut Arcs and Tasks and when to call, tell, and review. It needs no title,
+seat, or identity beyond the commission itself. After handing over, the
+flagship steers only through the holder — a tell to the holder, a journaled
+amend, escalation, or withdrawing the commission — and never reaches past it
+to its subordinates.
 
 ## Commission A Contract
 
