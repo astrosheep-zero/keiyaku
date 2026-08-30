@@ -110,6 +110,49 @@ or an `--after` edge; read `--path` before touching a file that may belong to
 another lane. Regions are declarations only, a coarse planning signal: actual
 touched paths and conflicts remain Git's.
 
+## Hold the Fulfillment Loop
+
+Every Contract in flight has exactly one holder of its fulfillment
+loop: whoever is currently turning intent into commissions and
+returns into decisions. By default that is the flagship caller.
+Holding the loop means:
+
+- **Decompose before delegating.** Cut the work along its real
+  acceptance boundaries — separate Contracts where they exist, Arcs
+  where they do not, Tasks for what is planned but not yet owed —
+  before any commission goes out. Delegation spends a decision that
+  has already been made; it is not where the decision happens.
+- **Requirements in a tell carry provenance.** A decision that
+  appears in a commission or tell as a requirement must come from
+  user intent, the journaled terms, or standing authority. A
+  hypothesis formed mid-loop is not yet any of those: send it down
+  as a question to investigate, or settle it first — a real
+  decision, a journaled amend — and only then require it.
+- **Returns are inputs to judgment, not the next instruction.**
+  What a worker or reviewer sends back is consumed by the holder,
+  who decides what it is and what happens — see the review section
+  below.
+- **Keep the work converging on the Objective.** The Objective is
+  the direction of the loop. When successive rounds move the
+  candidate away from what the Contract set out to make true, the
+  loop is telling you the premise needs judgment, not that another
+  round is owed.
+
+The whole loop can be handed to one Aku in a single commission. The
+duties above travel with it — the delegate holds them exactly as
+the flagship would, deciding for itself when to cut Arcs and Tasks
+and when to call, tell, and review. It needs no title and no new
+identity beyond the commission itself. After handing over, the
+flagship steers through the holder — a tell to the holder, a
+journaled amend, escalation, or withdrawing the commission — and
+does not reach past it to steer its subordinates directly.
+
+None of this is a required ceremony. Small work is done directly;
+Tasks and Arcs appear when the work calls for them. The loop adds
+no cadence, no threshold, no identity, no state, and nothing the
+tool core enforces — it is how the holder thinks, not a stage the
+work passes through.
+
 ## Commission A Contract
 
 When another agent will fulfill or review the Contract, the commissioning
@@ -181,6 +224,11 @@ intended work is unsafe to run concurrently.
 When a complex Keiyaku cannot be split without breaking one acceptance
 boundary, organize its fulfillment into arcs. Do not hand the whole
 undifferentiated Contract to one Deliverer and trust one pass to finish it.
+Handing over a whole Contract is legitimate in exactly one form: as
+a transfer of its fulfillment loop, not as one oversized Deliverer
+assignment. Commission one Aku to hold the loop and let it decide
+when to cut Arcs and Tasks and when to call, tell, and review. A
+Deliverer owes a candidate; a loop holder owes decisions.
 Record and work one current chapter at a time.
 
 An arc is a chapter as in a work of literature: one named part of the
@@ -288,10 +336,16 @@ without a review receipt until `amend` makes the Contract adjudicable.
 when delivery, prerequisites, and all gates are current. Record it only for the
 bytes intended to land now.
 
-Fixing findings changes the patch and makes earlier evidence stale (`?` in
-`status`). Audit the rework, deliver it, then review again. Record
-`--unsatisfied` only when the negative judgment should remain in Contract
-history.
+A review return is input to the loop holder's judgment, never a
+work order in itself. Classify before anything moves: a current
+defect against the terms is fixed and re-reviewed; advice worth
+keeping but not owed becomes a Task or is consciously declined; a
+problem with the terms or the premise goes up — journaled amend or
+escalation — before any remediation is commissioned; work outside
+the Contract stays outside it. The test for every response is the
+Objective: remediation that drifts the candidate away from what
+the Contract set out to make true is evidence against the premise,
+not a reason for another round.
 
 ## When Multiple Contracts Overlap On One Target
 
