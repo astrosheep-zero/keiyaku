@@ -15,8 +15,10 @@ Transport claims and receipts are ephemeral bytes, not facts. Heart request fact
 are the sole durable authority, use request identity for idempotence, and have
 one writer: the parent Body holding its leash. Same identity with different
 payload refuses at the transport boundary. Missing, malformed, or discarded
-transport bytes neither create nor erase authority. Live results may expire;
-durable terminal facts and owner-minted references remain reproducible.
+transport bytes neither create nor erase authority. A valid envelope for a
+registered action whose owner rejects its payload is instead a diagnostic pump
+failure before admission, without a receipt or Heart fact. Live results may
+expire; durable terminal facts and owner-minted references remain reproducible.
 
 The selected descriptor validates its own request and live result. Heart stores
 only opaque owner service data and validates generic request integrity. Raw World

@@ -74,7 +74,7 @@ async function projectCommandReceipt(
 
 async function serveCommand(input: ServeInput, command: ErasedRequestCommand): Promise<boolean> {
   const request = command.resolve(input.claim.payload);
-  if (request === null) return false;
+  if (request === null) throw new Error(`registered request action ${input.claim.action} rejected its payload`);
   let fact = await admitRequest(input.paths, {
     id: input.claim.id,
     action: input.claim.action,

@@ -770,6 +770,36 @@ test("a drive serves Body Requests through transport while Heart remains authori
   }
 });
 
+test("a registered request payload violation fails the pump before Heart admission", async () => {
+  const value = await fixture();
+  const pump = await BodyRequestPump.open({
+    paths: value.parent.paths,
+    parent: value.soul,
+    bodySequence: 1,
+    now: () => "2026-08-09T00:00:01.000Z",
+    upstream: { launchWorld: () => value.root },
+    commands: akumaCallRequestCommands(),
+    signal: new AbortController().signal,
+    async spawn() {
+      throw new Error("unexpected spawn");
+    },
+  });
+  const id = "00000000-0000-4000-8000-000000000004";
+  try {
+    writeFileSync(
+      join(pump.directory, `${id}.request.json`),
+      JSON.stringify({ id, action: "akuma.call", payload: { unexpected: true } }),
+    );
+    await assert.rejects(pump.failure, /registered request action akuma\.call rejected its payload/u);
+    assert.equal(await readRequest(value.parent.paths, id), null);
+    assert.equal(existsSync(join(pump.directory, `${id}.receipt.json`)), false);
+  } finally {
+    await assert.rejects(pump.close(), /registered request action akuma\.call rejected its payload/u);
+    value.leash.release();
+    value.close();
+  }
+});
+
 test("a new body settles old requests by observation without replay", async () => {
   const value = await fixture();
   try {

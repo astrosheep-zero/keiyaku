@@ -548,7 +548,7 @@ test("call allocation crossing the admission fence settles voided without spawni
   }
 });
 
-test("routed call proves its transported World before child allocation", async () => {
+test("a noncanonical routed call fails the pump before child allocation", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-call-world-proof-")));
   const parent = await born(root, "parent", "11111111");
   let spawns = 0;
@@ -578,10 +578,10 @@ test("routed call proves its transported World before child allocation", async (
         allowed: ALLOWED_ACTIONS,
       },
     });
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await assert.rejects(pump.failure, /registered request action akuma\.call rejected its payload/u);
     assert.equal(spawns, 0);
     assert.equal(await readRequest(parent.paths, id), null);
-    await pump.close();
+    await assert.rejects(pump.close(), /registered request action akuma\.call rejected its payload/u);
     await assert.rejects(
       request,
       (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "voided",
@@ -591,7 +591,7 @@ test("routed call proves its transported World before child allocation", async (
   }
 });
 
-test("semantically invalid call recipes create no Heart fact or child", async () => {
+test("a semantically invalid call recipe fails the pump before Heart admission", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-call-invalid-recipe-")));
   const parent = await born(root, "parent", "11111111");
   let spawnCalls = 0;
@@ -622,11 +622,11 @@ test("semantically invalid call recipes create no Heart fact or child", async ()
         allowed: ALLOWED_ACTIONS,
       },
     });
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await assert.rejects(pump.failure, /registered request action akuma\.call rejected its payload/u);
     const fact = await readRequest(parent.paths, id);
     assert.equal(fact, null);
     assert.equal(spawnCalls, 0);
-    await pump.close();
+    await assert.rejects(pump.close(), /registered request action akuma\.call rejected its payload/u);
     await assert.rejects(
       request,
       (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "voided",
@@ -1593,8 +1593,8 @@ test("CLI forwarded deliver preserves its selected Repo and uses parent Settings
     includeDirty: true,
     materializeConflict: false,
   });
-  await new Promise((resolve) => setTimeout(resolve, 200));
-  await pump.close();
+  await assert.rejects(pump.failure, /registered request action contract\.deliver rejected its payload/u);
+  await assert.rejects(pump.close(), /registered request action contract\.deliver rejected its payload/u);
   await assert.rejects(
     noncanonical,
     (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "voided",
