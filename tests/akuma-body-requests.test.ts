@@ -280,6 +280,12 @@ test("Contract owns strict live domain-failure decoding", () => {
   const decoded = encoded === undefined ? null : command.decodeFailure?.(encoded);
   assert.ok(decoded instanceof KeiyakuRefused);
   assert.deepEqual(decoded.refusal, refusal.refusal);
+  const retry = new KeiyakuRetry({ kind: "collision" });
+  assert.deepEqual(command.encodeFailure?.(retry), { kind: "retry", reason: retry.reason });
+  const receiverDrift = { kind: "receiver-drift" } as never;
+  const driftedRefusal = new KeiyakuRefused(receiverDrift);
+  assert.deepEqual(command.encodeFailure?.(driftedRefusal), { kind: "refused", refusal: receiverDrift });
+  assert.equal(command.decodeFailure?.(command.encodeFailure?.(driftedRefusal)), null);
   assert.equal(command.encodeFailure?.(new Error("executor unavailable")), null);
   assert.equal(command.decodeFailure?.({ kind: "refused", refusal: { kind: "contract-missing" } }), null);
 });

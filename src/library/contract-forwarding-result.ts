@@ -28,6 +28,25 @@ function canonical<Value>(
   });
 }
 
+type WithoutUndefined<Value> = {
+  [Key in keyof Value as undefined extends Value[Key] ? never : Key]: Value[Key];
+} & {
+  [Key in keyof Value as undefined extends Value[Key] ? Key : never]?: Exclude<Value[Key], undefined>;
+};
+
+function withoutUndefined<Value extends Record<string, unknown>>(
+  value: Value,
+  optional: readonly (keyof Value & string)[],
+): WithoutUndefined<Value> {
+  const result: Record<string, unknown> = { ...value };
+  for (const key of optional) {
+    const field = result[key];
+    delete result[key];
+    if (field !== undefined) result[key] = field;
+  }
+  return result as WithoutUndefined<Value>;
+}
+
 const nonblankStringSchema = z.string().refine((value) => value.trim() !== "");
 const contractIdSchema = canonical(contractId, "expected ContractId");
 const contractHeadSchema = canonical(contractHead, "expected ContractHead");
@@ -62,11 +81,7 @@ const settlementLagSchema = z
     diagnostic: nonblankStringSchema,
   })
   .strict()
-  .transform(({ taskId, path, ...lag }) => ({
-    ...lag,
-    ...(taskId === undefined ? {} : { taskId }),
-    ...(path === undefined ? {} : { path }),
-  }));
+  .transform((lag) => withoutUndefined(lag, ["taskId", "path"]));
 const completionSchema = z
   .object({
     integration: snapshotIdSchema,
@@ -76,9 +91,7 @@ const completionSchema = z
       .optional(),
   })
   .strict()
-  .transform(({ verification, ...completion }) =>
-    verification === undefined ? completion : { ...completion, verification },
-  );
+  .transform((completion) => withoutUndefined(completion, ["verification"]));
 const integrationSchema = z
   .object({ predecessor: snapshotIdSchema, snapshot: snapshotIdSchema, changeId: changeIdSchema })
   .strict();
@@ -114,7 +127,7 @@ const targetInputRefusalSchema = z.union([
 const verificationDeclarationRefusalSchema = z
   .object({ kind: z.literal("verification-declaration-invalid"), contractId: contractIdSchema.optional() })
   .strict()
-  .transform(({ contractId, ...refusal }) => (contractId === undefined ? refusal : { ...refusal, contractId }));
+  .transform((refusal) => withoutUndefined(refusal, ["contractId"]));
 const workspaceSchema = z.object({ kind: z.literal("worktree"), path: nonblankStringSchema }).strict();
 const mergeStateRefusalSchema = z
   .object({ kind: z.literal("merge-state-present"), contractId: contractIdSchema, workspace: workspaceSchema })
@@ -148,9 +161,7 @@ const integrationFailureSchema = z
     conflictPaths: z.array(nonblankStringSchema).optional(),
   })
   .strict()
-  .transform(({ conflictPaths, ...failure }) =>
-    conflictPaths === undefined ? failure : { ...failure, conflictPaths },
-  );
+  .transform((failure) => withoutUndefined(failure, ["conflictPaths"]));
 const integrationPreparationRefusalSchema = z.union([
   integrationFailureSchema,
   z
@@ -198,7 +209,7 @@ const gateCurrentSchema = z.union([
       at: z.string(),
     })
     .strict()
-    .transform(({ summary, ...current }) => (summary === undefined ? current : { ...current, summary })),
+    .transform((current) => withoutUndefined(current, ["summary"])),
   z.object({ kind: z.literal("stale"), priorVerdict: z.enum(["satisfied", "unsatisfied"]) }).strict(),
   z.object({ kind: z.literal("missing") }).strict(),
 ]);
@@ -294,7 +305,7 @@ const verificationReuseSchema = z
     summary: z.string().optional(),
   })
   .strict()
-  .transform(({ summary, ...reuse }) => (summary === undefined ? reuse : { ...reuse, summary })) satisfies z.ZodType<
+  .transform((reuse) => withoutUndefined(reuse, ["summary"])) satisfies z.ZodType<
   NonNullable<DeliveryValue["verificationReuse"]>
 >;
 const placementStepRefusalSchema = z.union([
@@ -384,28 +395,17 @@ const deliveryValueSchema = z
     continuation: continuationSchema.optional(),
   })
   .strict()
-  .transform(
-    ({
-      completion,
-      verification,
-      verificationReuse,
-      verificationSummary,
-      placement,
-      cleanup,
-      leak,
-      continuation,
-      ...value
-    }) => ({
-      ...value,
-      ...(completion === undefined ? {} : { completion }),
-      ...(verification === undefined ? {} : { verification }),
-      ...(verificationReuse === undefined ? {} : { verificationReuse }),
-      ...(verificationSummary === undefined ? {} : { verificationSummary }),
-      ...(placement === undefined ? {} : { placement }),
-      ...(cleanup === undefined ? {} : { cleanup }),
-      ...(leak === undefined ? {} : { leak }),
-      ...(continuation === undefined ? {} : { continuation }),
-    }),
+  .transform((value) =>
+    withoutUndefined(value, [
+      "completion",
+      "verification",
+      "verificationReuse",
+      "verificationSummary",
+      "placement",
+      "cleanup",
+      "leak",
+      "continuation",
+    ]),
   ) satisfies z.ZodType<DeliveryValue>;
 const reviewValueSchema = z
   .object({
@@ -420,28 +420,18 @@ const reviewValueSchema = z
     workspace: workspaceDeltaSchema.optional(),
   })
   .strict()
-  .transform(
-    ({
-      completion,
-      verification,
-      verificationReuse,
-      verificationSummary,
-      placement,
-      cleanup,
-      leak,
-      continuation,
-      workspace,
-    }) => ({
-      ...(completion === undefined ? {} : { completion }),
-      ...(verification === undefined ? {} : { verification }),
-      ...(verificationReuse === undefined ? {} : { verificationReuse }),
-      ...(verificationSummary === undefined ? {} : { verificationSummary }),
-      ...(placement === undefined ? {} : { placement }),
-      ...(cleanup === undefined ? {} : { cleanup }),
-      ...(leak === undefined ? {} : { leak }),
-      ...(continuation === undefined ? {} : { continuation }),
-      ...(workspace === undefined ? {} : { workspace }),
-    }),
+  .transform((value) =>
+    withoutUndefined(value, [
+      "completion",
+      "verification",
+      "verificationReuse",
+      "verificationSummary",
+      "placement",
+      "cleanup",
+      "leak",
+      "continuation",
+      "workspace",
+    ]),
   ) satisfies z.ZodType<Review>;
 const deliveryPreparationRefusalSchema = z.union([
   z.object({ kind: z.enum(["target-missing", "worktree-missing"]), contractId: contractIdSchema }).strict(),
@@ -471,11 +461,11 @@ const auditReadyCandidateSchema = z
         paths: z.array(z.string()).optional(),
       })
       .strict()
-      .transform(({ paths, ...scope }) => (paths === undefined ? scope : { ...scope, paths })),
+      .transform((scope) => withoutUndefined(scope, ["paths"])),
     diff: z.string().optional(),
   })
   .strict()
-  .transform(({ diff, ...candidate }) => (diff === undefined ? candidate : { ...candidate, diff }));
+  .transform((candidate) => withoutUndefined(candidate, ["diff"]));
 const auditCandidateSchema = z.union([
   z.object({ kind: z.literal("blocked"), refusal: deliveryPreparationRefusalSchema }).strict(),
   auditReadyCandidateSchema,
@@ -491,7 +481,7 @@ const auditVerificationSchema = z.union([
       summary: z.string().optional(),
     })
     .strict()
-    .transform(({ summary, ...verification }) => (summary === undefined ? verification : { ...verification, summary })),
+    .transform((verification) => withoutUndefined(verification, ["summary"])),
 ]);
 const auditTargetSchema = z.union([
   z.object({ kind: z.literal("not-observed") }).strict(),
@@ -518,7 +508,7 @@ export const auditReportSchema: z.ZodType<AuditReport> = z
       .optional(),
   })
   .strict()
-  .transform(({ delivery, ...report }) => (delivery === undefined ? report : { ...report, delivery }));
+  .transform((report) => withoutUndefined(report, ["delivery"]));
 
 const mutationResultSchema = <Value>(value: z.ZodType<Value>) =>
   z
@@ -533,12 +523,7 @@ const mutationResultSchema = <Value>(value: z.ZodType<Value>) =>
       leak: leakSchema.optional(),
     })
     .strict()
-    .transform(({ recoverySnapshot, cleanup, leak, ...result }) => ({
-      ...result,
-      ...(recoverySnapshot === undefined ? {} : { recoverySnapshot }),
-      ...(cleanup === undefined ? {} : { cleanup }),
-      ...(leak === undefined ? {} : { leak }),
-    }));
+    .transform((result) => withoutUndefined(result, ["recoverySnapshot", "cleanup", "leak"]));
 
 const deliveryMutationResultSchema = mutationResultSchema(deliveryValueSchema);
 const reviewMutationResultSchema = mutationResultSchema(reviewValueSchema);
@@ -558,10 +543,10 @@ const contractLiveFailureSchema = z.union([
 
 export function encodeContractLiveFailure(error: unknown): unknown | null {
   if (error instanceof KeiyakuRefused) {
-    return contractLiveFailureSchema.parse({ kind: "refused", refusal: error.refusal });
+    return { kind: "refused", refusal: error.refusal };
   }
   if (error instanceof KeiyakuRetry) {
-    return contractLiveFailureSchema.parse({ kind: "retry", reason: error.reason });
+    return { kind: "retry", reason: error.reason };
   }
   return null;
 }
