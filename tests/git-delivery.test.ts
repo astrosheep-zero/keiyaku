@@ -1804,9 +1804,10 @@ test("terminal reconcile removes a delivered managed worktree reset to its seale
   assert.equal(repository.run(["cat-file", "-e", `${candidate}^{commit}`]), "");
 });
 
-test("terminal reconcile removes dirty deliver bytes after following the sealed tender", async () => {
+test("terminal reconcile removes sealed dirty bytes over the original HEAD", async () => {
   const repository = makeGitRepository();
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const start = repository.run(["rev-parse", "HEAD"]).trim();
   const bound = await Keiyaku.bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: contractBody(),
@@ -1817,14 +1818,12 @@ test("terminal reconcile removes dirty deliver bytes after following the sealed 
   const path = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (await bound.keiyaku.state()).id);
   writeFileSync(join(path, "candidate.txt"), "dirty candidate\n");
   const delivered = await bound.keiyaku.deliver({ includeDirty: true });
-  const tender = (await bound.keiyaku.state()).delivery?.data.tenderSnapshot;
-  assert.notEqual(tender, undefined);
-  if (tender === undefined) return;
-  assert.equal(repository.run(["-C", path, "rev-parse", "HEAD"]).trim(), tender);
+  assert.equal(repository.run(["-C", path, "rev-parse", "HEAD"]).trim(), start);
   assert.deepEqual(delivered.lags, []);
   const abandoned = await bound.keiyaku.abandon();
 
   assert.deepEqual(abandoned.lags, []);
+  assert.equal(abandoned.recoverySnapshot, undefined);
   assert.equal(existsSync(path), false);
 });
 

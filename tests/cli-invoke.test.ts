@@ -1065,7 +1065,7 @@ test("bind defaults to reviewed unless a present default bundle overrides it", a
   );
 });
 
-test("managed delivery follows an eligible deterministic worktree", async () => {
+test("managed delivery retains an existing deterministic worktree", async () => {
   const repository = repositoryWithMain();
   const target = repository.run(["rev-parse", "refs/heads/main"]).trim();
   const bound = await invokeWithDocument(
@@ -1117,15 +1117,11 @@ test("managed delivery follows an eligible deterministic worktree", async () => 
   );
   assert.equal(
     reconciled.result.effects.some(
-      (effect) =>
-        effect.kind === "worktree" &&
-        effect.action === "followed" &&
-        effect.before === target &&
-        effect.after === candidate,
+      (effect) => effect.kind === "worktree" && effect.path === path && effect.action === "unchanged",
     ),
     true,
   );
-  assert.equal(repository.run(["-C", path, "rev-parse", "HEAD"]).trim(), candidate);
+  assert.equal(repository.run(["-C", path, "rev-parse", "HEAD"]).trim(), target);
 
   const satisfiedReview = await fromManaged([
     "review",
