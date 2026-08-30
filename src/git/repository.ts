@@ -1,5 +1,6 @@
 /* eslint-disable max-lines */
 import { isAbsolute, resolve } from "node:path";
+import { realpath } from "node:fs/promises";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { gitObjectId } from "./identity.js";
 import { GitPlumbingError, runGit, runGitWithEnvironment, type GitRepository } from "./process.js";
@@ -63,10 +64,11 @@ export class NoGitWorldError extends Error {
   }
 }
 export type RegisteredWorktree = Readonly<{ path: string; branch: string | null }>;
+type PorcelainWorktree = RegisteredWorktree & Readonly<{ prunable: boolean }>;
 
-function worktreesFromPorcelain(output: Buffer): readonly RegisteredWorktree[] {
+function worktreesFromPorcelain(output: Buffer): readonly PorcelainWorktree[] {
   const fields = output.toString("utf8").split("\0");
-  const worktrees: RegisteredWorktree[] = [];
+  const worktrees: PorcelainWorktree[] = [];
   let record: string[] = [];
   const finishRecord = (): void => {
     if (record.length === 0) return;
@@ -80,7 +82,11 @@ function worktreesFromPorcelain(output: Buffer): readonly RegisteredWorktree[] {
     const branch = branchField === undefined ? null : branchField.slice("branch ".length);
     if (branch !== null && !branch.startsWith("refs/"))
       throw new Error("Git worktree porcelain output has an invalid branch");
-    worktrees.push({ path: resolve(path), branch });
+    worktrees.push({
+      path: resolve(path),
+      branch,
+      prunable: record.some((field) => field.startsWith("prunable ")),
+    });
     record = [];
   };
   for (const field of fields) {
@@ -96,7 +102,19 @@ function worktreesFromPorcelain(output: Buffer): readonly RegisteredWorktree[] {
 }
 
 export async function registeredWorktrees(repository: GitRepository): Promise<readonly RegisteredWorktree[]> {
-  return worktreesFromPorcelain(await runGit(repository, ["worktree", "list", "--porcelain", "-z"]));
+  return await Promise.all(
+    worktreesFromPorcelain(await runGit(repository, ["worktree", "list", "--porcelain", "-z"])).map(
+      async (worktree) => {
+        const { prunable, ...registered } = worktree;
+        try {
+          return { ...registered, path: await realpath(registered.path) };
+        } catch (error) {
+          if (prunable || (error as NodeJS.ErrnoException).code === "ENOENT") return registered;
+          throw error;
+        }
+      },
+    ),
+  );
 }
 
 export async function registeredWorktreePaths(repository: GitRepository): Promise<readonly string[]> {
@@ -133,7 +151,7 @@ export async function repositoryAt(cwd: string, gitPath = "git"): Promise<GitRep
 async function absoluteGitPath(repository: GitRepository, args: readonly string[], label: string): Promise<string> {
   const value = (await runGit(repository, ["rev-parse", "--path-format=absolute", ...args])).toString("utf8").trim();
   if (value.length === 0) throw new Error(`${label} is empty`);
-  return resolve(isAbsolute(value) ? value : resolve(repository.effectiveCwd, value));
+  return await realpath(resolve(isAbsolute(value) ? value : resolve(repository.effectiveCwd, value)));
 }
 
 export function commonGitDirectory(repository: GitRepository): string {

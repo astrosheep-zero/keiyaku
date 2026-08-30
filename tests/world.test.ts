@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join, parse, relative } from "node:path";
+import { join, parse } from "node:path";
 import test from "node:test";
 import { repositoryAt } from "../src/git/repository.js";
 import { resolveCliCoordinates } from "../src/cli/coordinates.js";
@@ -148,7 +148,7 @@ test("World.prove mints only an exact canonical directory without writing", asyn
   assert.equal(await World.prove(canonicalRoot), canonicalRoot);
   assert.equal(await World.prove(canonicalNested), canonicalNested);
   await assert.rejects(World.prove(`${canonicalRoot}/.`), (error) => error instanceof WorldError && error.kind === "invalid-world");
-  await assert.rejects(World.prove(relative(process.cwd(), canonicalRoot)), (error) => error instanceof WorldError && error.kind === "invalid-world");
+  await assert.rejects(World.prove("."), (error) => error instanceof WorldError && error.kind === "invalid-world");
   await assert.rejects(World.prove(link), (error) => error instanceof WorldError && error.kind === "invalid-world");
   await assert.rejects(World.prove(missing), (error) => error instanceof WorldError && error.kind === "invalid-world");
   await assert.rejects(World.prove(file), (error) => error instanceof WorldError && error.kind === "invalid-world");
