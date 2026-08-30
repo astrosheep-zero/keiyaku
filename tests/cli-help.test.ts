@@ -151,13 +151,21 @@ test("amend leaf help enumerates the operation grammar", () => {
   );
 });
 
-test("deliver leaf help explains candidate capture and conflict continuation", () => {
+test("deliver leaf help explains candidate capture, placement, review, and conflict continuation", () => {
   assert.equal(
     renderContractHelp("deliver"),
     [
-      "Deliver one Contract candidate from the appointed worktree.",
+      "Capture the appointed worktree as the Contract candidate and request placement.",
       "",
       "usage: keiyaku deliver [<contract>|@<contract>] [--message <text>] [--include-dirty] [--materialize-conflict] [--json]",
+      "",
+      "Delivery runs or reuses Verification, records or replaces the candidate, then",
+      "requests placement. It can claim in the same invocation when every prerequisite",
+      "and gate is current; otherwise the Contract remains tendered.",
+      "",
+      "Delivery does not satisfy review. When a required review is missing, stale,",
+      "or unsatisfied, the candidate remains tendered. A later satisfied review of",
+      "that candidate requests placement again and may claim it.",
       "",
       "  --include-dirty         Capture the complete non-ignored worktree tree as the",
       "                          candidate; stages nothing, commits nothing, including",

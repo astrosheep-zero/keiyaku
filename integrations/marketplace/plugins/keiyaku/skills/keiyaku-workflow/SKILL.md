@@ -267,24 +267,38 @@ keiyaku deliver <contract> --include-dirty
 ```
 
 Use `--include-dirty` only when the complete current workspace is the intended
-candidate; otherwise commit the intended bytes first. Read the receipt for the
-candidate, gate/placement stop, and any physical-effect lag. A not-complete
-delivery is still a recorded `tendered` candidate.
+candidate; otherwise commit the intended bytes first.
 
-`deliver` freshly tenders the candidate and requests placement. A current audit
-attestation is reused only when its integration snapshot and Verification
-segment still match; changes to the worktree, target, policy, document,
-Verification, or snapshot-producing options make it stale.
+`deliver` prepares the appointed worktree as the Contract's candidate, runs or
+reuses Verification, records or replaces that candidate, and immediately
+requests placement. It does not approve the candidate or satisfy a review gate.
+When every prerequisite and declared gate is already current, the same
+invocation can place and claim the Contract. Otherwise the Contract remains
+`tendered` with that candidate recorded; the receipt names the gate or placement
+stop and any physical-effect lag.
+
+Review is independent testimony about the Contract terms and candidate bytes.
+The usual loop delivers first so the Reviewer judges the exact tendered
+candidate. A satisfied review records that testimony and requests placement
+again; if it is current and every other obligation passes, review may be the
+invocation that claims the Contract. An unsatisfied review never places.
+Pre-delivery review is legal but cannot create a candidate or substitute for
+delivery.
+
+A current audit attestation is reused only when its integration snapshot and
+Verification segment still match; changes to the worktree, target, policy,
+document, Verification, or snapshot-producing options make it stale.
 
 ## Review Gates
 
 The Reviewer owns the answer. A gate review compares the full current candidate
 against every journaled Criterion — the floor that cannot be reduced — and
 testifies satisfied or unsatisfied over the current document identity and
-worktree; satisfied requests placement. A current defect, missing, failed, or
-stale required evidence, or terms too ambiguous or contradictory to judge all
-yield unsatisfied, with the summary naming what blocks. Advice beyond the terms
-belongs in the summary and never changes the verdict by itself.
+worktree. It does not deliver or replace the candidate; satisfied requests
+placement against the candidate already on record. A current defect, missing,
+failed, or stale required evidence, or terms too ambiguous or contradictory to
+judge all yield unsatisfied, with the summary naming what blocks. Advice beyond
+the terms belongs in the summary and never changes the verdict by itself.
 
 ```bash
 keiyaku review <contract> --satisfied --summary "<conclusion>"
