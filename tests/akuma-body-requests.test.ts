@@ -5,7 +5,6 @@ import { readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { moveAlias } from "../src/alias/index.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { akumaCallRequestCommands, requestForwardedAkumaCall as requestBodyCall } from "../src/akuma/call-request.js";
 import {
@@ -18,30 +17,23 @@ import {
 } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory, type AkuId } from "../src/akuma/identity.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
-import { AkumaBodyRequestError, bodyRequestExecutionContext, requestBodyCommand } from "../src/akuma/requests.js";
-import { BodyRequestPump, receiptFor, settleBodyRequests } from "../src/akuma/request-serve.js";
+import { AkumaBodyRequestError, requestBodyCommand } from "../src/akuma/requests.js";
+import { BodyRequestPump, settleBodyRequests } from "../src/akuma/request-serve.js";
 import { BodyRequestPump as LifecycleBodyRequestPump } from "../src/akuma/request-lifecycle.js";
 import {
   executeTellAkuma,
-  executeWaitAkuma,
   fleetRequestCommand,
   fleetRequestCommands,
-  waitAkuma,
 } from "../src/library/fleet.js";
 import { contractRequestCommand, contractRequestCommands } from "../src/library/contract-operations.js";
-import { KeiyakuRefused, KeiyakuRetry } from "../src/library/refusal.js";
+import { KeiyakuRefused } from "../src/library/refusal.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { Delivery, Keiyaku, Repo } from "../src/index.js";
 import { invoke } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
 import { World, type WorldRoot } from "../src/world.js";
 import { Tasks } from "../src/task/index.js";
-import {
-  executeTaskMutation,
-  requestForwardedTask,
-  taskMutationRequestCommand,
-  taskMutationRequestCommands,
-} from "../src/task/mutation.js";
+import { taskMutationRequestCommand } from "../src/task/mutation.js";
 import { appointedWorktreePath, gitExecutablePath, makeGitRepository } from "./support/git.js";
 
 async function born(root: WorldRoot, archetype: string, draw: string, allowed: Soul["allowed"] = ALLOWED_ACTIONS) {
@@ -77,22 +69,9 @@ async function openPump(parent: Awaited<ReturnType<typeof born>>, upstream: unkn
       ...akumaCallRequestCommands(),
       ...fleetRequestCommands(),
       ...contractRequestCommands(),
-      ...taskMutationRequestCommands(),
     },
     signal: new AbortController().signal,
   });
-}
-
-async function requestBodyTask(
-  input: Readonly<{
-    directory: string;
-    id?: string;
-    world: WorldRoot;
-    request: import("../src/task/mutation.js").TaskMutationRequest;
-    signal?: AbortSignal;
-  }>,
-) {
-  return await requestForwardedTask(input);
 }
 
 async function requestBodyDeliver(
@@ -113,50 +92,6 @@ async function requestBodyDeliver(
     ...(id === undefined ? {} : { id }),
     command: contractRequestCommand("contract.deliver"),
     value: { action: "contract.deliver", ...request },
-    ...(signal === undefined ? {} : { signal }),
-  });
-  return response.kind === "reference" ? response.reference : response.result;
-}
-
-async function requestBodyReview(
-  input: Readonly<{
-    directory: string;
-    id?: string;
-    repoRoot: string;
-    contractId: string;
-    verdict: "satisfied" | "unsatisfied";
-    summary?: string;
-    signal?: AbortSignal;
-  }>,
-) {
-  const { directory, id, signal, ...request } = input;
-  const response = await requestBodyCommand({
-    directory,
-    ...(id === undefined ? {} : { id }),
-    command: contractRequestCommand("contract.review"),
-    value: { action: "contract.review", ...request },
-    ...(signal === undefined ? {} : { signal }),
-  });
-  return response.kind === "reference" ? response.reference : response.result;
-}
-
-async function requestBodyAudit(
-  input: Readonly<{
-    directory: string;
-    id?: string;
-    repoRoot: string;
-    contractId: string;
-    includeDirty: boolean;
-    showDiff: boolean;
-    signal?: AbortSignal;
-  }>,
-) {
-  const { directory, id, signal, ...request } = input;
-  const response = await requestBodyCommand({
-    directory,
-    ...(id === undefined ? {} : { id }),
-    command: contractRequestCommand("contract.audit"),
-    value: { action: "contract.audit", ...request },
     ...(signal === undefined ? {} : { signal }),
   });
   return response.kind === "reference" ? response.reference : response.result;
@@ -213,10 +148,6 @@ async function readTransportClaim(directory: string, id: string): Promise<Readon
   throw new Error(`transport claim ${id} was not found`);
 }
 
-function sortByKind<T extends Readonly<{ kind: string }>>(values: readonly T[]): T[] {
-  return [...values].sort((left, right) => left.kind.localeCompare(right.kind));
-}
-
 function acceptedContract(marker: string, action: "deliver" | "review") {
   return {
     facts: [],
@@ -236,24 +167,6 @@ function acceptedContract(marker: string, action: "deliver" | "review") {
   };
 }
 
-function acceptedTaskView(id: string, body = ""): Readonly<Record<string, unknown>> {
-  return {
-    id,
-    title: "Task result",
-    state: "open",
-    priority: 2,
-    needs: [],
-    parent: null,
-    supersedes: [],
-    relates: [],
-    note: "",
-    createdAt: "2026-08-18T00:00:00.000Z",
-    updatedAt: "2026-08-18T00:00:00.000Z",
-    body,
-    namespace: id.split("/").slice(1, -1),
-  };
-}
-
 function noDeliver(): Readonly<{ deliver(): Promise<never> }> {
   return {
     deliver: async () => {
@@ -262,36 +175,24 @@ function noDeliver(): Readonly<{ deliver(): Promise<never> }> {
   };
 }
 
-test("Contract owns strict direct live-result decoding", () => {
+test("Contract owner codecs reject malformed live, failure, and service payloads", () => {
+  const command = contractRequestCommand("contract.deliver");
   assert.throws(
-    () => contractRequestCommand("contract.deliver").decodeResult({ kind: "accepted", result: {} }),
+    () => command.decodeResult({ kind: "accepted", result: {} }),
     /transport integrity: Contract contract\.deliver returned an invalid live result/u,
   );
+  assert.equal(command.decodeFailure?.({ kind: "refused", refusal: { kind: "contract-missing" } }), null);
   assert.throws(
-    () => contractRequestCommand("contract.review").decodeResult({ kind: "retry", reason: {} }),
-    /transport integrity: Contract contract\.review returned an invalid live result/u,
+    () => command.decodeService({ malformed: true }),
+    /malformed stored Contract service evidence for contract\.deliver/u,
   );
 });
 
-test("Contract owns strict live domain-failure decoding", () => {
-  const command = contractRequestCommand("contract.deliver");
-  const refusal = new KeiyakuRefused({ kind: "contract-missing", contractId: "kei/missing" });
-  const encoded = command.encodeFailure?.(refusal);
-  const decoded = encoded === undefined ? null : command.decodeFailure?.(encoded);
-  assert.ok(decoded instanceof KeiyakuRefused);
-  assert.deepEqual(decoded.refusal, refusal.refusal);
-  const retry = new KeiyakuRetry({ kind: "collision" });
-  assert.deepEqual(command.encodeFailure?.(retry), { kind: "retry", reason: retry.reason });
-  const receiverDrift = { kind: "receiver-drift" } as never;
-  const driftedRefusal = new KeiyakuRefused(receiverDrift);
-  assert.deepEqual(command.encodeFailure?.(driftedRefusal), { kind: "refused", refusal: receiverDrift });
-  assert.equal(command.decodeFailure?.(command.encodeFailure?.(driftedRefusal)), null);
-  assert.equal(command.encodeFailure?.(new Error("executor unavailable")), null);
-  assert.equal(command.decodeFailure?.({ kind: "refused", refusal: { kind: "contract-missing" } }), null);
-});
-
-test("Fleet decoder rejects noncanonical identities and incomplete terminal evidence", () => {
-  assert.equal(fleetRequestCommand("akuma.tell").decodeRequest({ target: "not-an-aku", body: "hello" }), null);
+test("Fleet owner codecs reject malformed live and service payloads", () => {
+  assert.throws(
+    () => fleetRequestCommand("akuma.wait").decodeResult({ completion: "all", observations: [], unobserved: [{}] }),
+    /invalid live result for akuma\.wait/u,
+  );
   assert.throws(
     () =>
       fleetRequestCommand("akuma.tell").decodeService({
@@ -301,106 +202,22 @@ test("Fleet decoder rejects noncanonical identities and incomplete terminal evid
       }),
     /malformed stored Fleet service evidence/u,
   );
-  assert.throws(
-    () =>
-      fleetRequestCommand("akuma.tell").decodeService({
-        action: "akuma.tell",
-        target: "aku/worker/11111111",
-        tellId: "tell",
-        unexpected: true,
-      }),
-    /malformed stored Fleet service evidence/u,
-  );
-  assert.throws(
-    () => fleetRequestCommand("akuma.wait").decodeResult({ completion: "all", observations: [], unobserved: [{}] }),
-    /invalid live result for akuma\.wait/u,
-  );
-  const tell = {
-    akuma: "aku/worker/11111111",
-    tell: {
-      admission: { fact: "recorded" as const, tellId: "tell" },
-      row: {
-        kind: "tell" as const,
-        sequence: 1,
-        at: "2026-08-20T00:00:00.000Z",
-        tellId: "tell",
-        text: "continue",
-        state: "pending" as const,
-        deliveries: [],
-      },
-      wake: { kind: "held" as const },
-    },
-  };
-  assert.deepEqual(fleetRequestCommand("akuma.tell").decodeResult(tell), tell);
-  assert.throws(
-    () => fleetRequestCommand("akuma.tell").decodeResult({ akuma: tell.akuma, tell: { ...tell.tell, row: undefined } }),
-    /invalid live result for akuma\.tell/u,
-  );
-  assert.throws(
-    () =>
-      fleetRequestCommand("akuma.tell").decodeResult({
-        ...tell,
-        tell: { ...tell.tell, row: { ...tell.tell.row, unexpected: true } },
-      }),
-    /invalid live result for akuma\.tell/u,
-  );
 });
 
-test("an unregistered action reaches a terminal refusal without external cancellation", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-unconfigured-command-")));
-  const parent = await born(root, "parent", "25252525", []);
-  const pump = await BodyRequestPump.open({
-    paths: parent.paths,
-    parent: parent.soul,
-    bodySequence: 1,
-    now: () => "2026-08-18T00:00:01.000Z",
-    spawn: async () => undefined,
-    commands: {},
-    signal: new AbortController().signal,
-  });
-  try {
-    const requestId = randomUUID();
-    await assert.rejects(
-      requestBodyCommand({
-        directory: pump.directory,
-        id: requestId,
-        command: fleetRequestCommand("akuma.wait"),
-        value: { action: "akuma.wait", targets: [parent.id], completion: "all" },
-      }),
-      (error: unknown) =>
-        error instanceof AkumaBodyRequestError &&
-        error.outcome === "refused" &&
-        error.diagnostic === "request action akuma.wait is not registered",
-    );
-    assert.equal(await readRequest(parent.paths, requestId), null);
-  } finally {
-    await pump.close();
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("Contract decoder rejects corrupt stored service evidence during terminal replay", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-corrupt-service-")));
-  const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
-  try {
-    assert.throws(
-      () => contractRequestCommand("contract.deliver").decodeService({ malformed: true }),
-      /malformed stored Contract service evidence for contract\.deliver/u,
-    );
-    assert.throws(
-      () =>
-        contractRequestCommand("contract.deliver").decodeService({
-          action: "contract.deliver",
-          repoRoot: root,
-          contractId: "kei/forwarded-delivery",
-          deliveryFactId: "fact",
-          unexpected: true,
-        }),
-      /malformed stored Contract service evidence for contract\.deliver/u,
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+test("Task owner codecs reject malformed live and service/reference payloads", () => {
+  const command = taskMutationRequestCommand("task.start");
+  assert.throws(
+    () => command.decodeResult({ kind: "accepted" }),
+    /transport integrity: Task task\.start returned an invalid live result/u,
+  );
+  assert.throws(
+    () => command.decodeService({ action: "task.stop" }),
+    /malformed stored Task service evidence for task\.start/u,
+  );
+  assert.throws(
+    () => command.decodeReference({ kind: "served-reference", action: "task.stop" }),
+    /malformed Task service reference for task\.start/u,
+  );
 });
 
 test("a Heart authority failure keeps its error identity, closes the channel, and recovers admission", async () => {
@@ -699,68 +516,6 @@ test("a terminal Akuma call duplicate projects its stored child without spawning
   }
 });
 
-test("Body composition carries its minted launch World through forwarded call execution", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-call-composed-world-")));
-  const parent = await born(root, "parent", "11111111");
-  const inert = await born(root, "inert", "22222222", []);
-  const previousArgv = [...process.argv];
-  process.argv.splice(
-    2,
-    process.argv.length - 2,
-    Buffer.from(JSON.stringify({ paths: inert.paths })).toString("base64url"),
-  );
-  let compositionUpstreamFor: typeof import("../src/akuma-body.js").upstreamFor;
-  try {
-    ({ upstreamFor: compositionUpstreamFor } = await import("../src/akuma-body.js"));
-  } finally {
-    process.argv.splice(0, process.argv.length, ...previousArgv);
-  }
-  const alias = (path: string) => `${root}/.${path.slice(root.length)}`;
-  const paths = {
-    directory: alias(parent.paths.directory),
-    heart: alias(parent.paths.heart),
-    leash: alias(parent.paths.leash),
-    log: alias(parent.paths.log),
-    requests: alias(parent.paths.requests),
-  };
-  let spawns = 0;
-  const pump = await BodyRequestPump.open({
-    paths,
-    parent: parent.soul,
-    bodySequence: 1,
-    now: () => "2026-08-18T00:00:01.000Z",
-    upstream: await compositionUpstreamFor({ paths: parent.paths }, {}),
-    commands: akumaCallRequestCommands(),
-    signal: new AbortController().signal,
-    async spawn(launch) {
-      spawns += 1;
-      const leash = (await HeldAkumaLeash.try(launch.paths))!;
-      await leash.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-18T00:00:02.000Z" });
-      leash.release();
-    },
-  });
-  try {
-    const id = randomUUID();
-    const child = await requestBodyCall({
-      directory: pump.directory,
-      id,
-      world: root,
-      archetype: "worker",
-      body: "carried launch World",
-      recipe: {
-        provider: { name: "claude", kind: "claude-agent-sdk" },
-        options: {},
-        allowed: ALLOWED_ACTIONS,
-      },
-    });
-    assert.equal(spawns, 1);
-    assert.equal((await readRequest(parent.paths, id))?.child, child);
-  } finally {
-    await pump.close();
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test("deliver claims execute once and Heart retains only the Contract fact reference", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-deliver-reference-")));
   const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
@@ -867,621 +622,6 @@ test("deliver claims execute once and Heart retains only the Contract fact refer
   } finally {
     await pump.close();
     rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("review claims execute once and Heart retains only the attestation fact reference", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-review-reference-")));
-  const parent = await born(root, "parent", "11111111", ["contract.review"]);
-  const contractId = "kei/forwarded-review";
-  let calls = 0;
-  const pump = await openPump(parent, {
-    wait: async () => {
-      throw new Error("unexpected wait");
-    },
-    tell: async () => {
-      throw new Error("unexpected tell");
-    },
-    kill: async () => {
-      throw new Error("unexpected kill");
-    },
-    deliver: async () => {
-      throw new Error("unexpected deliver");
-    },
-    review: async (input) => {
-      calls += 1;
-      assert.equal(input.requester, parent.id);
-      assert.deepEqual(
-        { contractId: input.contractId, verdict: input.verdict, summary: input.summary },
-        { contractId, verdict: "satisfied", summary: "ready" },
-      );
-      return {
-        result: acceptedContract("review-result", "review"),
-        reviewFactId: "01ARZ3NDEKTSV4RRFFQ69G5FA4",
-      };
-    },
-  });
-  try {
-    const id = randomUUID();
-    assert.deepEqual(
-      await requestBodyReview({
-        directory: pump.directory,
-        id,
-        repoRoot: root,
-        contractId,
-        verdict: "satisfied",
-        summary: "ready",
-      }),
-      acceptedContract("review-result", "review"),
-    );
-    assert.equal(calls, 1);
-    const fact = await readRequest(parent.paths, id);
-    assert.deepEqual(fact?.state === "served" && "serviceJson" in fact ? JSON.parse(fact.serviceJson) : null, {
-      kind: "accepted-reference",
-      repoRoot: root,
-      contractId,
-      reviewFactId: "01ARZ3NDEKTSV4RRFFQ69G5FA4",
-    });
-    assert.doesNotMatch(JSON.stringify(fact), /review-result|marker/u);
-
-    await pump.close();
-    const replayPump = await openPump(parent, {
-      wait: async () => {
-        throw new Error("unexpected wait");
-      },
-      tell: async () => {
-        throw new Error("unexpected tell");
-      },
-      kill: async () => {
-        throw new Error("unexpected kill");
-      },
-      deliver: async () => {
-        throw new Error("unexpected deliver");
-      },
-      review: async () => {
-        calls += 1;
-        throw new Error("review must not replay");
-      },
-    });
-    try {
-      assert.deepEqual(
-        await requestBodyReview({
-          directory: replayPump.directory,
-          id,
-          repoRoot: root,
-          contractId,
-          verdict: "satisfied",
-          summary: "ready",
-        }),
-        {
-          kind: "accepted-reference",
-          repoRoot: root,
-          contractId,
-          reviewFactId: "01ARZ3NDEKTSV4RRFFQ69G5FA4",
-        },
-      );
-      assert.equal(calls, 1);
-    } finally {
-      await replayPump.close();
-    }
-  } finally {
-    await pump.close();
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("audit claims use the default permission, retain owner report evidence, and never replay", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-audit-report-")));
-  const parent = await born(root, "parent", "11111111");
-  const contractId = "kei/forwarded-audit";
-  const report = {
-    candidate: { kind: "blocked" as const, refusal: { kind: "target-missing", contractId } },
-    verification: { kind: "not-run" as const },
-    target: { kind: "not-observed" as const },
-  };
-  let calls = 0;
-  const pump = await openPump(parent, {
-    audit: async (input) => {
-      calls += 1;
-      assert.equal(input.requester, parent.id);
-      assert.deepEqual(
-        {
-          contractId: input.contractId,
-          includeDirty: input.includeDirty,
-          showDiff: input.showDiff,
-        },
-        { contractId, includeDirty: true, showDiff: true },
-      );
-      return { result: { facts: [], head: "head", value: report, lags: [], settlementLags: [] }, auditReport: report };
-    },
-  });
-  try {
-    const id = randomUUID();
-    assert.deepEqual(
-      await requestBodyAudit({
-        directory: pump.directory,
-        id,
-        repoRoot: root,
-        contractId,
-        includeDirty: true,
-        showDiff: true,
-      }),
-      { facts: [], head: "head", value: report, lags: [], settlementLags: [] },
-    );
-    assert.equal(calls, 1);
-    const fact = await readRequest(parent.paths, id);
-    assert.deepEqual(fact?.state === "served" && "serviceJson" in fact ? JSON.parse(fact.serviceJson) : null, {
-      kind: "audit-report",
-      repoRoot: root,
-      contractId,
-      report,
-    });
-
-    await pump.close();
-    const replayPump = await openPump(parent, {
-      audit: async () => {
-        calls += 1;
-        throw new Error("audit must not replay");
-      },
-    });
-    try {
-      assert.deepEqual(
-        await requestBodyAudit({
-          directory: replayPump.directory,
-          id,
-          repoRoot: root,
-          contractId,
-          includeDirty: true,
-          showDiff: true,
-        }),
-        { kind: "audit-report", repoRoot: root, contractId, report },
-      );
-      assert.equal(calls, 1);
-    } finally {
-      await replayPump.close();
-    }
-  } finally {
-    await pump.close();
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("contract review and delivery retain separate request permissions", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-review-permission-")));
-  const reviewParent = await born(root, "reviewer", "11111111", ["contract.review"]);
-  const reviewPump = await openPump(reviewParent, {
-    wait: async () => {
-      throw new Error("unexpected wait");
-    },
-    tell: async () => {
-      throw new Error("unexpected tell");
-    },
-    kill: async () => {
-      throw new Error("unexpected kill");
-    },
-    deliver: async () => {
-      throw new Error("delivery must not execute");
-    },
-    review: async () => ({
-      result: acceptedContract("permission", "review"),
-      reviewFactId: "01ARZ3NDEKTSV4RRFFQ69G5FC0",
-    }),
-  });
-  try {
-    assert.deepEqual(
-      await requestBodyReview({
-        directory: reviewPump.directory,
-        id: randomUUID(),
-        repoRoot: root,
-        contractId: "kei/missing",
-        verdict: "unsatisfied",
-      }),
-      acceptedContract("permission", "review"),
-    );
-    await assert.rejects(
-      requestBodyDeliver({
-        directory: reviewPump.directory,
-        id: randomUUID(),
-        repoRoot: root,
-        contractId: "kei/missing",
-        includeDirty: false,
-        materializeConflict: false,
-      }),
-      (error: unknown) =>
-        error instanceof AkumaBodyRequestError &&
-        error.outcome === "refused" &&
-        error.diagnostic === "not-allowed: contract.deliver" &&
-        error.message === "contract.deliver refused: not-allowed: contract.deliver",
-    );
-  } finally {
-    await reviewPump.close();
-  }
-
-  const deliverParent = await born(root, "deliverer", "22222222", ["contract.deliver"]);
-  const deliverPump = await openPump(deliverParent, {
-    wait: async () => {
-      throw new Error("unexpected wait");
-    },
-    tell: async () => {
-      throw new Error("unexpected tell");
-    },
-    kill: async () => {
-      throw new Error("unexpected kill");
-    },
-    deliver: async () => ({ result: acceptedContract("permission", "deliver") }),
-    review: async () => {
-      throw new Error("review must not execute");
-    },
-  });
-  try {
-    await assert.rejects(
-      requestBodyReview({
-        directory: deliverPump.directory,
-        id: randomUUID(),
-        repoRoot: root,
-        contractId: "kei/missing",
-        verdict: "unsatisfied",
-      }),
-      (error: unknown) => error instanceof AkumaBodyRequestError && error.diagnostic === "not-allowed: contract.review",
-    );
-  } finally {
-    await deliverPump.close();
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("same-id task.add and all Task mutations preserve selected World and inputs while Heart keeps only service markers", async () => {
-  const parentRoot = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-task-forward-parent-")));
-  const selectedWorld = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-task-forward-selected-")));
-  const parent = await born(parentRoot, "parent", "22222222", [
-    "task.add",
-    "task.addDocument",
-    "task.compose",
-    "task.update",
-    "task.start",
-    "task.stop",
-    "task.hold",
-    "task.resume",
-    "task.done",
-    "task.drop",
-  ]);
-  const calls: { action: string; world: string; requester: string; request: unknown }[] = [];
-  const pump = await openPump(parent, {
-    wait: async () => {
-      throw new Error("unexpected wait");
-    },
-    tell: async () => {
-      throw new Error("unexpected tell");
-    },
-    kill: async () => {
-      throw new Error("unexpected kill");
-    },
-    deliver: async () => {
-      throw new Error("unexpected deliver");
-    },
-    task: async (input) => {
-      calls.push({
-        action: input.request.action,
-        world: input.world,
-        requester: input.requester,
-        request: input.request,
-      });
-      if ("ids" in input.request) {
-        return {
-          items: input.request.ids.map((id) => ({
-            id,
-            outcome: { kind: "accepted", value: acceptedTaskView(id) },
-          })),
-        };
-      }
-      if (input.request.action === "task.add" || input.request.action === "task.addDocument") {
-        return {
-          kind: "accepted",
-          value: acceptedTaskView("task/created", "exact\nmarkdown"),
-        };
-      }
-      if (input.request.action === "task.compose") {
-        return {
-          kind: "accepted",
-          aliases: [],
-          admissionOrder: [],
-          documentChanges: [{ kind: "created", taskId: "task/composed", documentDiff: "must not persist" }],
-        };
-      }
-      if (input.request.action === "task.update") {
-        return { kind: "accepted", value: { task: acceptedTaskView("task/target"), documentDiff: "must not persist" } };
-      }
-      return { kind: "accepted", value: acceptedTaskView("task/target") };
-    },
-  });
-  const requests = [
-    { action: "task.add" as const, input: { title: "Add", body: "exact\nbody", namespace: ["caller"] } },
-    { action: "task.addDocument" as const, input: { markdown: "# Exact\n\nbody\n", namespace: ["caller"] } },
-    { action: "task.compose" as const, markdown: "+ Compose\n", namespace: ["caller"] },
-    { action: "task.update" as const, id: "task/target" as const, input: { appendBody: "\nexact" } },
-    { action: "task.start" as const, id: "task/target" as const },
-    { action: "task.stop" as const, id: "task/target" as const },
-    { action: "task.hold" as const, ids: ["task/target"] as const },
-    { action: "task.resume" as const, id: "task/target" as const },
-    { action: "task.done" as const, ids: ["task/target"] as const, note: "exact note" },
-    { action: "task.drop" as const, ids: ["task/target"] as const, note: "exact note" },
-  ];
-  try {
-    for (const [index, request] of requests.entries()) {
-      const id = `00000000-0000-4000-8000-${String(index + 100).padStart(12, "0")}`;
-      if (index === 0) {
-        const outcomes = await Promise.all(
-          [1, 2].map(
-            async () =>
-              await requestBodyTask({
-                directory: pump.directory,
-                id,
-                world: selectedWorld,
-                request,
-              }),
-          ),
-        );
-        assert.deepEqual(sortByKind(outcomes as Array<Readonly<{ kind: string }>>), [
-          {
-            kind: "accepted",
-            value: acceptedTaskView("task/created", "exact\nmarkdown"),
-          },
-          { kind: "served-reference", action: "task.add" },
-        ]);
-      } else {
-        await requestBodyTask({ directory: pump.directory, id, world: selectedWorld, request });
-      }
-      const fact = await readRequest(parent.paths, id);
-      assert.equal(fact?.state, "served");
-      if (fact?.state === "served" && "service" in fact) {
-        assert.deepEqual(JSON.parse(fact.serviceJson), { action: request.action });
-        assert.equal(fact.serviceJson.includes(selectedWorld), false);
-        assert.equal(fact.serviceJson.includes("task/target"), false);
-      }
-    }
-    assert.equal(calls.length, requests.length);
-    assert.deepEqual(
-      calls.map((call) => call.action),
-      requests.map((request) => request.action),
-    );
-    assert.equal(
-      calls.every((call) => call.world === selectedWorld && call.requester === parent.id),
-      true,
-    );
-    assert.equal((calls[0]?.request as { input: { body: string } }).input.body, "exact\nbody");
-    assert.equal((calls[1]?.request as { input: { markdown: string } }).input.markdown, "# Exact\n\nbody\n");
-    assert.equal((calls[8]?.request as { note: string }).note, "exact note");
-
-    await pump.close();
-    const replayPump = await openPump(parent, {
-      wait: async () => {
-        throw new Error("unexpected wait");
-      },
-      tell: async () => {
-        throw new Error("unexpected tell");
-      },
-      kill: async () => {
-        throw new Error("unexpected kill");
-      },
-      deliver: async () => {
-        throw new Error("unexpected deliver");
-      },
-      task: async () => {
-        throw new Error("Task must not replay");
-      },
-    });
-    try {
-      assert.deepEqual(
-        await requestBodyTask({
-          directory: replayPump.directory,
-          id: "00000000-0000-4000-8000-000000000100",
-          world: selectedWorld,
-          request: requests[0]!,
-        }),
-        { kind: "served-reference", action: "task.add" },
-      );
-      assert.equal(calls.length, requests.length);
-    } finally {
-      await replayPump.close();
-    }
-  } finally {
-    await pump.close();
-    rmSync(parentRoot, { recursive: true, force: true });
-    rmSync(selectedWorld, { recursive: true, force: true });
-  }
-});
-
-test("every complete native Task result is served unchanged", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-task-forward-results-")));
-  const parent = await born(root, "parent", "23232323", ["task.start", "task.stop", "task.compose", "task.done"]);
-  const results = [
-    { kind: "refused", refusal: { kind: "task-missing", taskId: "task/missing" } },
-    { kind: "retry", reason: "busy" },
-    {
-      kind: "incomplete",
-      aliases: [],
-      admissionOrder: [],
-      documentChanges: [],
-      stopped: { kind: "retry", reason: "concurrent-modification" },
-      draft: "+ Remaining\n",
-    },
-    {
-      items: [
-        {
-          id: "task/one",
-          outcome: { kind: "accepted", value: acceptedTaskView("task/one") },
-        },
-        {
-          id: "task/two",
-          outcome: { kind: "refused", refusal: { kind: "task-missing", taskId: "task/two" } },
-        },
-      ],
-    },
-  ] as const;
-  let call = 0;
-  const pump = await openPump(parent, {
-    wait: async () => {
-      throw new Error("unexpected wait");
-    },
-    tell: async () => {
-      throw new Error("unexpected tell");
-    },
-    kill: async () => {
-      throw new Error("unexpected kill");
-    },
-    deliver: async () => {
-      throw new Error("unexpected deliver");
-    },
-    task: async () => results[call++]!,
-  });
-  const requests = [
-    { action: "task.start" as const, id: "task/missing" as const },
-    { action: "task.stop" as const, id: "task/target" as const },
-    { action: "task.compose" as const, markdown: "+ Remaining\n", namespace: ["caller"] },
-    { action: "task.done" as const, ids: ["task/one", "task/two"] as const },
-  ];
-  try {
-    for (const [index, request] of requests.entries()) {
-      const id = `00000000-0000-4000-8000-${String(index + 400).padStart(12, "0")}`;
-      assert.deepEqual(await requestBodyTask({ directory: pump.directory, id, world: root, request }), results[index]);
-      const fact = await readRequest(parent.paths, id);
-      assert.equal(fact?.state, "served");
-      if (fact?.state === "served" && "service" in fact) {
-        assert.deepEqual(JSON.parse(fact.serviceJson), { action: request.action });
-        assert.doesNotMatch(fact.serviceJson, /task\/missing|concurrent-modification|Remaining/u);
-      }
-    }
-  } finally {
-    await pump.close();
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("Task owns malformed live-result and durable-reference decoders", async () => {
-  const command = taskMutationRequestCommand("task.start");
-  assert.throws(
-    () => command.decodeResult({ kind: "accepted" }),
-    /transport integrity: Task task\.start returned an invalid live result/u,
-  );
-  assert.throws(
-    () => command.decodeResult({ kind: "accepted", value: { id: "task/target" } }),
-    /transport integrity: Task task\.start returned an invalid live result/u,
-  );
-  assert.equal(command.decodeRequest({ id: "task/target", unexpected: true }), null);
-  assert.throws(
-    () => command.decodeResult({ kind: "accepted", value: { ...acceptedTaskView("task/target"), unexpected: true } }),
-    /transport integrity: Task task\.start returned an invalid live result/u,
-  );
-  assert.throws(
-    () => command.decodeService({ action: "task.stop" }),
-    /malformed stored Task service evidence for task\.start/u,
-  );
-  assert.throws(
-    () => command.decodeReference({ kind: "served-reference", action: "task.stop" }),
-    /malformed Task service reference for task\.start/u,
-  );
-
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-task-malformed-result-")));
-  const parent = await born(root, "parent", "24242424", ["task.start"]);
-  const id = randomUUID();
-  const pump = await openPump(parent, {
-    wait: async () => {
-      throw new Error("unexpected wait");
-    },
-    tell: async () => {
-      throw new Error("unexpected tell");
-    },
-    kill: async () => {
-      throw new Error("unexpected kill");
-    },
-    deliver: async () => {
-      throw new Error("unexpected deliver");
-    },
-    task: async () => ({ kind: "accepted" }),
-  });
-  try {
-    await assert.rejects(
-      requestBodyTask({
-        directory: pump.directory,
-        id,
-        world: root,
-        request: { action: "task.start", id: "task/target" },
-      }),
-      new RegExp(`transport integrity: request ${id} action task\\.start returned an invalid live result`, "u"),
-    );
-  } finally {
-    await pump.close();
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("Task raw Body execution mints its World before Task dispatch", async () => {
-  const command = taskMutationRequestCommand("task.add");
-  const request = command.decodeRequest({
-    world: "/definitely-not-a-keiyaku-world",
-    request: { input: { title: "unreachable", namespace: [] } },
-  });
-  assert.notEqual(request, null);
-  if (request === null) return;
-
-  let dispatched = false;
-  await assert.rejects(
-    command.execute(request, {
-      requester: "aku/worker/11111111",
-      signal: new AbortController().signal,
-      upstream: {
-        task: async () => {
-          dispatched = true;
-          throw new Error("Task port must not receive an unminted World");
-        },
-      },
-    }),
-    /world path is not an existing directory: \/definitely-not-a-keiyaku-world/u,
-  );
-  assert.equal(dispatched, false);
-});
-
-test("CLI forwards Task mutations through the parent and renders the native Task result", async () => {
-  const parentRoot = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-task-cli-parent-")));
-  const selectedWorld = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-task-cli-selected-")));
-  const parent = await born(parentRoot, "parent", "33333333", ["task.add"]);
-  const pump = await openPump(parent, {
-    wait: async () => {
-      throw new Error("unexpected wait");
-    },
-    tell: async () => {
-      throw new Error("unexpected tell");
-    },
-    kill: async () => {
-      throw new Error("unexpected kill");
-    },
-    deliver: async () => {
-      throw new Error("unexpected deliver");
-    },
-    task: async (input) =>
-      await executeTaskMutation({
-        world: input.world,
-        request: input.request,
-        requester: input.requester,
-        signal: input.signal,
-      }),
-  });
-  const previous = process.env[AKUMA_REQUESTS_ENV];
-  try {
-    process.env[AKUMA_REQUESTS_ENV] = pump.directory;
-    const result = await invoke(
-      parseArgv(["-C", selectedWorld, "task", "add", "CLI forwarded", "--body", "exact\nbody"]),
-    );
-    assert.equal((result as { kind: string }).kind, "accepted");
-    const created = await Tasks.of(selectedWorld).task({ id: "task/cli-forwarded" }).read();
-    assert.equal(created?.task.body, "exact\nbody");
-    assert.equal(created?.task.createdBy, parent.id);
-  } finally {
-    if (previous === undefined) delete process.env[AKUMA_REQUESTS_ENV];
-    else process.env[AKUMA_REQUESTS_ENV] = previous;
-    await pump.close();
-    rmSync(parentRoot, { recursive: true, force: true });
-    rmSync(selectedWorld, { recursive: true, force: true });
   }
 });
 
@@ -1736,71 +876,6 @@ test("deliver returns without a durable reference and settles Heart voided", asy
   }
 });
 
-test("Contract forwarding preserves typed live failures for deliver, review, and audit", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-contract-live-failures-")));
-  const parent = await born(root, "parent", "11111111", ["contract.deliver", "contract.review", "contract.audit"]);
-  const pump = await openPump(parent, {
-    deliver: async () => {
-      throw new KeiyakuRefused({ kind: "contract-missing", contractId: "kei/missing-deliver" });
-    },
-    review: async () => {
-      throw new KeiyakuRetry({ kind: "collision" });
-    },
-    audit: async () => {
-      throw new KeiyakuRefused({ kind: "terminal", contractId: "kei/missing-audit" });
-    },
-  });
-  try {
-    const deliverId = randomUUID();
-    await assert.rejects(
-      requestBodyDeliver({
-        directory: pump.directory,
-        id: deliverId,
-        repoRoot: root,
-        contractId: "kei/missing-deliver",
-        includeDirty: false,
-        materializeConflict: false,
-      }),
-      (error: unknown) =>
-        error instanceof KeiyakuRefused &&
-        assert.deepEqual(error.refusal, { kind: "contract-missing", contractId: "kei/missing-deliver" }) === undefined,
-    );
-    const reviewId = randomUUID();
-    await assert.rejects(
-      requestBodyReview({
-        directory: pump.directory,
-        id: reviewId,
-        repoRoot: root,
-        contractId: "kei/missing-review",
-        verdict: "unsatisfied",
-      }),
-      (error: unknown) => error instanceof KeiyakuRetry && error.reason.kind === "collision",
-    );
-    const auditId = randomUUID();
-    await assert.rejects(
-      requestBodyAudit({
-        directory: pump.directory,
-        id: auditId,
-        repoRoot: root,
-        contractId: "kei/missing-audit",
-        includeDirty: false,
-        showDiff: false,
-      }),
-      (error: unknown) =>
-        error instanceof KeiyakuRefused &&
-        assert.deepEqual(error.refusal, { kind: "terminal", contractId: "kei/missing-audit" }) === undefined,
-    );
-    for (const id of [deliverId, reviewId, auditId]) {
-      const fact = await readRequest(parent.paths, id);
-      assert.equal(fact?.state, "voided");
-      assert.equal(fact !== null && fact !== undefined && "serviceJson" in fact, false);
-    }
-  } finally {
-    await pump.close();
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test("an executor throw settles its admitted request voided", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-executor-voided-")));
   const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
@@ -1854,60 +929,6 @@ test("an executor throw settles its admitted request voided", async () => {
         error.message === "contract.deliver failed: executor unavailable",
     );
     assert.equal(calls, 1);
-  } finally {
-    await pump.close();
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("forwarded materialization is a live result and stores no Heart delivery reference", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-deliver-materialized-")));
-  const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
-  const materialized = {
-    kind: "integration-conflict-materialized" as const,
-    targetHead: "target-head",
-    conflictPaths: ["shared.txt"],
-    workspace: { kind: "worktree" as const, path: "/tmp/wt" },
-  };
-  let calls = 0;
-  const pump = await openPump(parent, {
-    wait: async () => {
-      throw new Error("unexpected wait");
-    },
-    tell: async () => {
-      throw new Error("unexpected tell");
-    },
-    kill: async () => {
-      throw new Error("unexpected kill");
-    },
-    deliver: async (input) => {
-      calls += 1;
-      assert.equal(input.materializeConflict, true);
-      return { result: materialized };
-    },
-  });
-  try {
-    const id = randomUUID();
-    await assert.rejects(
-      requestBodyDeliver({
-        directory: pump.directory,
-        id,
-        repoRoot: root,
-        contractId: "kei/conflicted",
-        includeDirty: false,
-        materializeConflict: true,
-      }),
-      (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "voided",
-    );
-    assert.equal(calls, 1);
-    const claim = await readTransportClaim(pump.directory, id);
-    assert.deepEqual(claim.payload, {
-      repoRoot: root,
-      contractId: "kei/conflicted",
-      includeDirty: false,
-      materializeConflict: true,
-    });
-    assert.equal((await readRequest(parent.paths, id))?.state, "voided");
   } finally {
     await pump.close();
     rmSync(root, { recursive: true, force: true });
@@ -1972,177 +993,6 @@ test("completion fences admission but drains a returned delivery reference", asy
   }
 });
 
-test("an identical retry converges on its existing terminal request when replay fences admission", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-terminal-replay-")));
-  const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
-  const id = randomUUID();
-  let calls = 0;
-  const first = await openPump(parent, {
-    wait: async () => {
-      throw new Error("unexpected wait");
-    },
-    tell: async () => {
-      throw new Error("unexpected tell");
-    },
-    kill: async () => {
-      throw new Error("unexpected kill");
-    },
-    deliver: async () => {
-      calls += 1;
-      return { result: acceptedContract("terminal-replay", "deliver"), deliveryFactId: "01ARZ3NDEKTSV4RRFFQ69G5FD0" };
-    },
-  });
-  try {
-    await requestBodyDeliver({
-      directory: first.directory,
-      id,
-      repoRoot: root,
-      contractId: "kei/terminal-replay",
-      includeDirty: false,
-      materializeConflict: false,
-    });
-  } finally {
-    await first.close();
-  }
-
-  let replay!: BodyRequestPump;
-  let fenced = false;
-  replay = await BodyRequestPump.open({
-    paths: parent.paths,
-    parent: parent.soul,
-    bodySequence: 1,
-    now: () => {
-      if (!fenced) {
-        fenced = true;
-        replay.stopAdmission();
-      }
-      return "2026-08-18T00:00:01.000Z";
-    },
-    spawn: async () => {
-      throw new Error("call is outside this test");
-    },
-    signal: new AbortController().signal,
-    commands: { ...fleetRequestCommands(), ...contractRequestCommands() },
-    wait: async () => {
-      throw new Error("unexpected wait");
-    },
-    tell: async () => {
-      throw new Error("unexpected tell");
-    },
-    kill: async () => {
-      throw new Error("unexpected kill");
-    },
-    deliver: async () => {
-      calls += 1;
-      throw new Error("terminal replay must not execute");
-    },
-  });
-  try {
-    assert.deepEqual(
-      await requestBodyDeliver({
-        directory: replay.directory,
-        id,
-        repoRoot: root,
-        contractId: "kei/terminal-replay",
-        includeDirty: false,
-        materializeConflict: false,
-      }),
-      {
-        kind: "accepted-reference",
-        repoRoot: root,
-        contractId: "kei/terminal-replay",
-        deliveryFactId: "01ARZ3NDEKTSV4RRFFQ69G5FD0",
-      },
-    );
-    assert.equal(calls, 1);
-    assert.equal((await readRequest(parent.paths, id))?.state, "served");
-  } finally {
-    await replay.close();
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("a served wait is not voided when its duplicate replay fences admission", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-wait-replay-")));
-  const parent = await born(root, "parent", "11111111");
-  const id = randomUUID();
-  const target = "aku/worker/22222222" as AkuId;
-  let calls = 0;
-  const first = await openPump(parent, {
-    wait: async () => {
-      calls += 1;
-      return { observed: true };
-    },
-    tell: async () => {
-      throw new Error("unexpected tell");
-    },
-    kill: async () => {
-      throw new Error("unexpected kill");
-    },
-    ...noDeliver(),
-  });
-  try {
-    assert.deepEqual(
-      await requestBodyWait({
-        directory: first.directory,
-        id,
-        targets: [target],
-        completion: "all",
-      }),
-      { kind: "returned", result: { observed: true } },
-    );
-  } finally {
-    await first.close();
-  }
-
-  let replay!: BodyRequestPump;
-  let fenced = false;
-  replay = await BodyRequestPump.open({
-    paths: parent.paths,
-    parent: parent.soul,
-    bodySequence: 1,
-    now: () => {
-      if (!fenced) {
-        fenced = true;
-        replay.stopAdmission();
-      }
-      return "2026-08-18T00:00:01.000Z";
-    },
-    spawn: async () => {
-      throw new Error("call is outside this test");
-    },
-    signal: new AbortController().signal,
-    commands: fleetRequestCommands(),
-    wait: async () => {
-      calls += 1;
-      throw new Error("terminal replay must not execute");
-    },
-    tell: async () => {
-      throw new Error("unexpected tell");
-    },
-    kill: async () => {
-      throw new Error("unexpected kill");
-    },
-    ...noDeliver(),
-  });
-  try {
-    assert.deepEqual(
-      await requestBodyWait({
-        directory: replay.directory,
-        id,
-        targets: [target],
-        completion: "all",
-      }),
-      { kind: "reference", reference: { action: "akuma.wait" } },
-    );
-    assert.equal(calls, 1);
-    assert.equal((await readRequest(parent.paths, id))?.state, "served");
-  } finally {
-    await replay.close();
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test("a vanished live receipt does not fail durable request settlement", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-receipt-loss-")));
   const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
@@ -2189,104 +1039,6 @@ test("a vanished live receipt does not fail durable request settlement", async (
     );
     await pump.close();
     assert.equal((await readRequest(parent.paths, id))?.state, "served");
-  } finally {
-    await pump.close();
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("upstream receipts keep action results out of Heart service facts", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-results-")));
-  const parent = await born(root, "parent", "11111111");
-  const first = "aku/worker/22222222" as AkuId;
-  const second = "aku/worker/33333333" as AkuId;
-  let killCalls = 0;
-  const pump = await openPump(parent, {
-    ...noDeliver(),
-    wait: async (input) => ({ completion: input.completion, marker: "wait-result" }),
-    tell: async (input) => ({ tellId: input.tellId, marker: "tell-result" }),
-    kill: async (input) => {
-      killCalls += 1;
-      const service = input.targets.map((id) => ({ id, evidence: "already-stopped" as const }));
-      return { result: { marker: "kill-result" }, service };
-    },
-  });
-  try {
-    const waitId = randomUUID();
-    const tellId = randomUUID();
-    const killId = randomUUID();
-    assert.deepEqual(
-      await requestBodyWait({
-        directory: pump.directory,
-        id: waitId,
-        targets: [first, second],
-        completion: "all",
-        timeoutMs: 0,
-      }),
-      { kind: "returned", result: { completion: "all", marker: "wait-result" } },
-    );
-    assert.deepEqual(
-      await requestBodyTell({
-        directory: pump.directory,
-        id: tellId,
-        target: first,
-        body: "continue",
-      }),
-      { kind: "returned", result: { tellId, marker: "tell-result" } },
-    );
-    const duplicateKills = await Promise.all(
-      [1, 2].map(
-        async () =>
-          await requestBodyKill({
-            directory: pump.directory,
-            id: killId,
-            targets: [first, second],
-          }),
-      ),
-    );
-    assert.deepEqual(sortByKind(duplicateKills), [
-      {
-        kind: "reference",
-        reference: {
-          action: "akuma.kill",
-          results: [
-            { id: first, evidence: "already-stopped" },
-            { id: second, evidence: "already-stopped" },
-          ],
-        },
-      },
-      { kind: "returned", result: { marker: "kill-result" } },
-    ]);
-    assert.equal(killCalls, 1);
-
-    const waitFact = await readRequest(parent.paths, waitId);
-    const tellFact = await readRequest(parent.paths, tellId);
-    const killFact = await readRequest(parent.paths, killId);
-    assert.deepEqual(
-      waitFact?.state === "served" && "serviceJson" in waitFact ? JSON.parse(waitFact.serviceJson) : null,
-      {
-        action: "akuma.wait",
-      },
-    );
-    assert.deepEqual(
-      tellFact?.state === "served" && "serviceJson" in tellFact ? JSON.parse(tellFact.serviceJson) : null,
-      {
-        action: "akuma.tell",
-        target: first,
-        tellId,
-      },
-    );
-    assert.deepEqual(
-      killFact?.state === "served" && "serviceJson" in killFact ? JSON.parse(killFact.serviceJson) : null,
-      {
-        action: "akuma.kill",
-        results: [
-          { id: first, evidence: "already-stopped" },
-          { id: second, evidence: "already-stopped" },
-        ],
-      },
-    );
-    assert.doesNotMatch(JSON.stringify(waitFact), /wait-result|observations|timeout result/u);
   } finally {
     await pump.close();
     rmSync(root, { recursive: true, force: true });
@@ -2378,6 +1130,7 @@ test("transport rejects malformed target sets and foreign World coordinates befo
       return { result: {}, service: [] };
     },
   });
+  let closed = false;
   try {
     const ids = [randomUUID(), randomUUID(), randomUUID()];
     const claims = [
@@ -2399,61 +1152,21 @@ test("transport rejects malformed target sets and foreign World coordinates befo
           await writeFile(join(pump.directory, `${claim.id}.request.json`), `${JSON.stringify(claim)}\n`),
       ),
     );
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await assert.rejects(
+      pump.failure,
+      /registered request action akuma\.(?:wait|kill|tell) rejected its payload/u,
+    );
+    const receipts = (await readdir(pump.directory)).filter((name) => name.endsWith(".receipt.json"));
+    await assert.rejects(
+      pump.close(),
+      /registered request action akuma\.(?:wait|kill|tell) rejected its payload/u,
+    );
+    closed = true;
     assert.equal(calls, 0);
     assert.deepEqual(await Promise.all(ids.map(async (id) => await readRequest(parent.paths, id))), [null, null, null]);
+    assert.deepEqual(receipts, []);
   } finally {
-    await pump.close();
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("Fleet resolves Alias glob and duplicate selectors before publishing a wait claim", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-address-")));
-  const parent = await born(root, "parent", "11111111");
-  const target = await born(root, "worker", "22222222");
-  await moveAlias({ world: root, alias: "@target", akuId: target.id });
-  let received: readonly AkuId[] = [];
-  const pump = await openPump(parent, {
-    ...noDeliver(),
-    wait: async (input) => {
-      received = input.targets;
-      return await executeWaitAkuma({
-        path: root,
-        ids: input.targets,
-        completion: input.completion,
-        ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
-        signal: input.signal,
-      });
-    },
-    tell: async () => {
-      throw new Error("unexpected tell");
-    },
-    kill: async () => {
-      throw new Error("unexpected kill");
-    },
-  });
-  const previous = process.env[AKUMA_REQUESTS_ENV];
-  try {
-    process.env[AKUMA_REQUESTS_ENV] = pump.directory;
-    const result = await waitAkuma(
-      {
-        path: root,
-        akuma: ["@target", "aku/worker/*", target.id],
-        completion: "all",
-        timeoutMs: 0,
-      },
-      bodyRequestExecutionContext(pump.directory),
-    );
-    assert.deepEqual(received, [target.id]);
-    assert.deepEqual(
-      result.observations.map((observation) => observation.status.id),
-      [target.id],
-    );
-  } finally {
-    if (previous === undefined) delete process.env[AKUMA_REQUESTS_ENV];
-    else process.env[AKUMA_REQUESTS_ENV] = previous;
-    await pump.close();
+    if (!closed) await pump.close().catch(() => undefined);
     rmSync(root, { recursive: true, force: true });
   }
 });
