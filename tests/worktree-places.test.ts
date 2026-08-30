@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   unlinkSync,
   writeFileSync,
@@ -656,6 +657,40 @@ test("an unregistered appointed path that still exists keeps the appointment", a
   assert.ok(abandoned.lags.some((lag) => lag.kind === "worktree-retained"));
   assert.equal(readFileSync(join(appointment.path, "hidden.txt"), "utf8"), "hidden\n");
   assert.deepEqual(await readManagedWorktreeAppointment(git, bound.keiyaku.id), appointment);
+});
+
+test("Contract reconcile leaves a refused foreign worktree untouched until recovery realizes it", async () => {
+  const repository = repositoryWithCommit();
+  const bound = await Keiyaku.bind({
+    repo: await Repo.at({ path: repository.path }),
+    markdown: contractBody("Recover foreign worktree"),
+    workspace: "worktree",
+    hooks: { create: [], destroy: [] },
+  });
+  const git = await repositoryAt(repository.path);
+  const appointment = await readManagedWorktreeAppointment(git, bound.keiyaku.id);
+  assert.equal(appointment.kind, "appointed");
+  if (appointment.kind !== "appointed") throw new Error("expected appointment");
+  repository.run(["worktree", "remove", "--force", appointment.path]);
+  const guidance = join(appointment.path, ".keiyaku", "KEIYAKU.md");
+  const foreignBytes = "foreign guidance\n";
+  mkdirSync(join(appointment.path, ".keiyaku"), { recursive: true });
+  writeFileSync(guidance, foreignBytes);
+  writeFileSync(join(appointment.path, "foreign.txt"), "foreign bytes\n");
+
+  const refused = await bound.keiyaku.reconcile();
+  assert.equal(refused.lag[0]?.kind, "reconcile-failed");
+  assert.equal(readFileSync(guidance, "utf8"), foreignBytes);
+  assert.equal(readFileSync(join(appointment.path, "foreign.txt"), "utf8"), "foreign bytes\n");
+  assert.equal(existsSync(join(appointment.path, ".agents")), false);
+
+  const foreignPath = `${appointment.path}-foreign`;
+  renameSync(appointment.path, foreignPath);
+  const recovered = await bound.keiyaku.reconcile();
+  assert.deepEqual(recovered.lag, []);
+  assert.match(readFileSync(guidance, "utf8"), new RegExp(bound.keiyaku.id));
+  assert.equal(readFileSync(join(foreignPath, ".keiyaku", "KEIYAKU.md"), "utf8"), foreignBytes);
+  assert.equal(readFileSync(join(foreignPath, "foreign.txt"), "utf8"), "foreign bytes\n");
 });
 
 test("an already-absent appointed path may release without a removal effect", async () => {

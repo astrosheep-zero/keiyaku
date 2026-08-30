@@ -8,6 +8,7 @@ import {
   type ReconcileReport,
 } from "../protocol/reconcile.js";
 import { reconcileObservationFailure } from "../git/reconcile.js";
+import { worktreePath } from "../git/workspace.js";
 import { stateOperation, type RepositoryScope } from "../protocol/operations.js";
 import { settle, settleAll, type SettlementReport } from "../settlement/settle.js";
 import type { WorktreeHooks } from "./configuration.js";
@@ -71,6 +72,21 @@ function appointableManagedContracts(states: readonly ContractState[]): readonly
 
 async function appointPlaces(scope: RepositoryScope, states: readonly ContractState[]): Promise<PlaceRegister> {
   return await appointManagedWorktrees(scope, appointableManagedContracts(states));
+}
+
+function realizedOrRetainedManagedWorktree(
+  scope: RepositoryScope,
+  report: ReconcileReport,
+  place: string | undefined,
+): boolean {
+  if (place === undefined) return false;
+  const path = worktreePath(scope, place);
+  return report.effects.some(
+    (effect) =>
+      effect.kind === "worktree" &&
+      effect.path === path &&
+      (effect.action === "created" || effect.action === "unchanged" || effect.action === "followed"),
+  );
 }
 
 function releaseEligible(
@@ -146,7 +162,9 @@ export async function completeReconcile(
     retainTerminalWorktree: true,
     ...appointed,
   });
-  const projection = await projectContractWorktree(input.scope, retained.state, appointment.register);
+  const projection = realizedOrRetainedManagedWorktree(input.scope, retained.report, appointment.place)
+    ? await projectContractWorktree(input.scope, retained.state, appointment.register)
+    : { effects: [], lag: [] };
   const settlement = await settle({
     repository: input.scope,
     channel: input.channel,
@@ -243,7 +261,9 @@ export async function completeRepoReconcile(input: ReconcileOptions): Promise<Re
     if (releaseEligible(contract.state, report, places.has(contract.contractId))) {
       released.push(contract.contractId);
     }
-    const projection = await projectContractWorktree(input.scope, contract.state, appointed);
+    const projection = realizedOrRetainedManagedWorktree(input.scope, contract.report, places.get(contract.contractId))
+      ? await projectContractWorktree(input.scope, contract.state, appointed)
+      : { effects: [], lag: [] };
     contracts.push({
       contractId: contract.contractId,
       report: {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -21,6 +21,7 @@ import { encodeEntry } from "../src/core/facts/codec.js";
 import { contractJournalPath } from "../src/git/identity.js";
 import { bindOperation } from "../src/protocol/bind.js";
 import { reconcileAllOperation, worldContractStates } from "../src/protocol/reconcile.js";
+import { completeRepoReconcile } from "../src/library/reconcile.js";
 import { contractObservationOperation, contractsOperation, scopeOperation } from "../src/protocol/operations.js";
 import {
   changeId,
@@ -622,4 +623,40 @@ test("batch reconcile isolates a failed contract and retains successful reports"
   const reconciled = report.contracts.find((contract) => contract.contractId === healthy);
   assert.deepEqual(reconciled?.report.lag, []);
   assert.equal(existsSync(await appointedWorktreePath(git, healthy)), true);
+});
+
+test("repo reconcile leaves a refused foreign worktree untouched until recovery realizes it", async () => {
+  const repository = repositoryWithMain();
+  const id = await bind(repository, "Recover foreign worktree", "worktree");
+  const git = await repositoryAt(repository.path);
+  await appointManagedWorktrees(git, [id]);
+  const path = await appointedWorktreePath(git, id);
+  const guidance = join(path, ".keiyaku", "KEIYAKU.md");
+  const foreignBytes = "foreign guidance\n";
+  mkdirSync(join(path, ".keiyaku"), { recursive: true });
+  writeFileSync(guidance, foreignBytes);
+  writeFileSync(join(path, "foreign.txt"), "foreign bytes\n");
+
+  const scope = await scopeOperation({ coordinate: repository.path });
+  const refused = await withGitDecodeChannel(scope, async (channel) =>
+    await completeRepoReconcile({ scope, channel, hooks: { create: [], destroy: [] }, retryHooks: false }),
+  );
+  assert.equal(refused.kind, "completed");
+  if (refused.kind !== "completed") throw new Error("expected completed repo reconcile");
+  assert.equal(refused.contracts[0]?.report.lag[0]?.kind, "reconcile-failed");
+  assert.equal(readFileSync(guidance, "utf8"), foreignBytes);
+  assert.equal(readFileSync(join(path, "foreign.txt"), "utf8"), "foreign bytes\n");
+  assert.equal(existsSync(join(path, ".agents")), false);
+
+  const foreignPath = `${path}-foreign`;
+  renameSync(path, foreignPath);
+  const recovered = await withGitDecodeChannel(scope, async (channel) =>
+    await completeRepoReconcile({ scope, channel, hooks: { create: [], destroy: [] }, retryHooks: false }),
+  );
+  assert.equal(recovered.kind, "completed");
+  if (recovered.kind !== "completed") throw new Error("expected completed repo reconcile");
+  assert.deepEqual(recovered.contracts[0]?.report.lag, []);
+  assert.match(readFileSync(guidance, "utf8"), new RegExp(id));
+  assert.equal(readFileSync(join(foreignPath, ".keiyaku", "KEIYAKU.md"), "utf8"), foreignBytes);
+  assert.equal(readFileSync(join(foreignPath, "foreign.txt"), "utf8"), "foreign bytes\n");
 });
