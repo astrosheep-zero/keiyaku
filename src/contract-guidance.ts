@@ -22,15 +22,16 @@ export const CONTRACT_DELIVERER_SKILL = [
   "",
   "## Deliver",
   "",
-  "`deliver` creates the immutable candidate commit. When the finished worktree itself is the candidate, use `deliver --include-dirty`;",
-  "Keiyaku captures its complete non-ignored state without moving this worktree's HEAD or real index.",
+  "`deliver` creates the immutable candidate commit and prepares its integration with the target as it exists for that invocation. It runs or reuses Verification, records the candidate, and requests placement. If the target moves, run `deliver` again; Keiyaku recomputes the current-target integration. A manual rebase is optional candidate shaping, not target refresh.",
+  "",
+  "When the finished worktree itself is the candidate, use `deliver --include-dirty`; Keiyaku captures its complete non-ignored state without moving this worktree's HEAD or real index.",
   "",
   "```bash",
   "keiyaku deliver <contract> --include-dirty",
   "keiyaku deliver <contract> --materialize-conflict",
   "```",
   "",
-  "Delivery submits the full current worktree state as the candidate for review and placement. Deliver when Verification passes and the evidence is in place; the Reviewer judges the rest.",
+  "If delivery reports an integration conflict, materialize that judged conflict, resolve it in this worktree, then deliver the resolved bytes with `--include-dirty`. Deliver when the candidate is ready and the evidence is in place; delivery records and requests placement, while the Reviewer independently judges any declared review gate.",
 ]
   .join("\n")
   .concat("\n");

@@ -266,15 +266,27 @@ Deliver when the worktree content is the candidate you intend to land:
 keiyaku deliver <contract> --include-dirty
 ```
 
+Each `deliver` observes the target as it stands for that invocation, prepares
+the candidate's current-target integration in Keiyaku-owned Git custody, runs
+or reuses Verification, records the candidate, and requests placement. If the
+target moves, read the Contract and run `audit` or `deliver` again. Keiyaku
+recomputes the integration; a manual rebase is optional candidate shaping, not
+target refresh.
+
 Deliver when the work is ready to be judged, not when Git looks tidy. `git
 commit` only shapes the candidate; skipping it is fine — `deliver
---include-dirty` captures the complete non-ignored worktree. Deliver and review
-answer different questions: deliver records the candidate and places and claims
-by itself only when every placement obligation is current; a review gate is
-satisfied only by review testimony over the current candidate, and a satisfied
-review may itself be the invocation that places and claims. Reviewing before any
-delivery is legal but records testimony only — it creates no candidate and
-authorizes nothing. A Contract without a review gate needs no review.
+--include-dirty` captures the complete non-ignored worktree. If delivery reports
+an integration conflict, run `deliver --materialize-conflict`, resolve the
+judged conflict in the appointed worktree, then deliver the resolved bytes with
+`--include-dirty`.
+
+Deliver and review answer different questions: deliver records the candidate
+and places and claims by itself only when every placement obligation is current;
+a review gate is satisfied only by review testimony over the current candidate,
+and a satisfied review may itself be the invocation that places and claims.
+Reviewing before any delivery is legal but records testimony only — it creates
+no candidate and authorizes nothing. A Contract without a review gate needs no
+review.
 
 A current audit attestation is reused only when its integration snapshot and
 Verification segment still match; changes to the worktree, target, policy,
@@ -322,22 +334,22 @@ persist a train or add a second placement authority.
   gate-visible judgment for placement.
 - Before recording a satisfied review, or delivering a Contract with no
   declared gates, ask whether the exact patch will survive until placement. A
-  pure rebase whose `ChangeId` is unchanged keeps the existing review current;
-  do not re-review content addressing kept alive. Conflict resolution that
-  changes the `ChangeId` makes earlier testimony stale and requires a fresh
-  review: re-inspect the resolved candidate and record new testimony. Fresh
-  review follows the reviewer-reuse rule above; prefer the existing independent
-  reviewer when its judgment frame remains sound, especially so earlier findings
-  can be checked within the complete fresh judgment.
-- For Contracts known to overlap, resolve the current-target integration before
-  the authoritative review. Preliminary feedback may happen earlier, but it
-  is not a satisfied gate until its reviewed patch is the candidate intended
-  for placement. Land overlapping Contracts one at a time; let independent,
-  non-overlapping Contracts proceed without ceremony. Treat overlap as a
-  planning signal, not a correctness verdict.
+  freshly prepared current-target integration whose `ChangeId` is unchanged
+  keeps the existing review current; do not re-review content addressing kept
+  alive. Conflict resolution that changes the `ChangeId` makes earlier testimony
+  stale and requires a fresh review: re-inspect the resolved candidate and record
+  new testimony. Fresh review follows the reviewer-reuse rule above; prefer the
+  existing independent reviewer when its judgment frame remains sound, especially
+  so earlier findings can be checked within the complete fresh judgment.
+- For Contracts known to overlap, rerun `audit` or `deliver` against the current
+  target before the authoritative review. Preliminary feedback may happen
+  earlier, but it is not a satisfied gate until its reviewed patch is the
+  candidate intended for placement. Land overlapping Contracts one at a time;
+  let independent, non-overlapping Contracts proceed without ceremony. Treat
+  overlap as a planning signal, not a correctness verdict.
 - After target movement, a changed candidate, or a placement refusal, read the
   current Contract facts again. Recompute the next landing judgment from those
-  facts; do not rely on a remembered queue or promise exactly one rebase.
+  facts; do not rely on a remembered target or one-time integration.
 
 ## Target Placement
 
