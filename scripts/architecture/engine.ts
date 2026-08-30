@@ -28,7 +28,7 @@ export type DependencyZone = Readonly<{
 
 export type SensitiveImportRule = Readonly<{
   module: string;
-  owners: readonly Readonly<{ source: string; symbols: readonly string[]; mode?: DependencyMode }>[];
+  owners: readonly Readonly<{ source: string; symbols?: readonly string[]; mode?: DependencyMode }>[];
 }>;
 
 export type ForbiddenSourcePattern = Readonly<{
@@ -223,11 +223,10 @@ function referenceDiagnostics(
   if (!sensitive) return diagnostics;
   const symbols = importedSymbols(reference);
   const allowed = sensitive.owners.some((owner) => {
-    const permitted = new Set(owner.symbols);
     return (
       matches(owner.source, unit.path) &&
       (owner.mode !== "type-only" || reference.symbols.runtime.length === 0) &&
-      symbols.every((symbol) => permitted.has(symbol))
+      (owner.symbols === undefined || symbols.every((symbol) => owner.symbols!.includes(symbol)))
     );
   });
   if (!allowed)
