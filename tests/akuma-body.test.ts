@@ -36,7 +36,54 @@ import {
 } from "../src/akuma/provider.js";
 import { akumaCallRequestCommands, requestForwardedAkumaCall as requestBodyCall } from "../src/akuma/call-request.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
+import type { PluginSignal } from "../src/plugin/public.js";
 import { World } from "../src/world.js";
+
+type InitialTurnPluginRecorder = {
+  activations: number;
+  observations: Array<Readonly<{ signal: PluginSignal; outcomes: unknown }>>;
+  observe(signal: PluginSignal): Promise<void>;
+};
+
+const initialTurnPluginGlobal = globalThis as typeof globalThis & {
+  __keiyakuInitialTurnPluginRecorder?: InitialTurnPluginRecorder;
+};
+
+function configureInitialTurnPlugins(root: string): void {
+  const plugins = join(root, "plugins");
+  mkdirSync(plugins, { recursive: true });
+  writeFileSync(
+    join(plugins, "observer.mjs"),
+    [
+      "export default {",
+      '  manifest: { id: "observer", apiVersion: 1 },',
+      "  activate() {",
+      "    globalThis.__keiyakuInitialTurnPluginRecorder.activations += 1;",
+      '    return { signals: { "akuma.initial-turn": (signal) => globalThis.__keiyakuInitialTurnPluginRecorder.observe(signal) } };',
+      "  },",
+      "};",
+    ].join("\n"),
+  );
+  writeFileSync(
+    join(plugins, "broken.mjs"),
+    [
+      "export default {",
+      '  manifest: { id: "broken", apiVersion: 1 },',
+      '  activate() { return { signals: { "akuma.initial-turn": () => { throw new Error("observer failure"); } } }; },',
+      "};",
+    ].join("\n"),
+  );
+  mkdirSync(join(root, ".keiyaku"), { recursive: true });
+  writeFileSync(
+    join(root, ".keiyaku", "settings.json"),
+    JSON.stringify({
+      plugins: {
+        broken: { package: "./plugins/broken.mjs" },
+        observer: { package: "./plugins/observer.mjs" },
+      },
+    }),
+  );
+}
 
 test("generic handoff with no pending Tell does not spawn", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-empty-handoff-"));
@@ -268,6 +315,146 @@ test("body births, admits native session, records the turn, and exits only when 
     assert.deepEqual(second.pending, []);
     assert.equal(second.latestBody?.end, "exited");
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("initial-turn plugins observe the committed answered outcome once and do not observe Tell turns", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-plugin-initial-answered-"));
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abce" });
+    await initializeHeart(allocated.paths);
+    configureInitialTurnPlugins(root);
+    const recorder: InitialTurnPluginRecorder = {
+      activations: 0,
+      observations: [],
+      async observe(signal) {
+        this.observations.push({ signal, outcomes: await outcomes(allocated.paths) });
+      },
+    };
+    initialTurnPluginGlobal.__keiyakuInitialTurnPluginRecorder = recorder;
+    const launch: BodyLaunch = {
+      paths: allocated.paths,
+      seed: {
+        id: allocated.id,
+        archetype: "claude",
+        provider: { name: "claude", kind: "claude-agent-sdk" },
+        options: {},
+        origin: { kind: "direct" },
+        cwd: root,
+      },
+      initialBody: "build it",
+      completion: { contractId: "kei/example" },
+    };
+    assert.deepEqual(Object.keys(JSON.parse(JSON.stringify(launch))).sort(), [
+      "completion",
+      "initialBody",
+      "paths",
+      "seed",
+    ]);
+
+    await driveAkumaBody(
+      launch,
+      adapter({
+        starts: [],
+        events: [{ type: "session", coordinate: { sessionId: "plugin-session" } }],
+        result: { kind: "answered", answer: "done", historyId: "plugin-history" },
+      }),
+      { now: () => "2026-08-08T00:00:00.000Z" },
+    );
+
+    assert.equal(recorder.activations, 1);
+    assert.deepEqual(recorder.observations, [
+      {
+        signal: {
+          kind: "akuma.initial-turn",
+          akumaId: allocated.id,
+          outcome: { kind: "answered", text: "done" },
+          contractId: "kei/example",
+        },
+        outcomes: [
+          {
+            kind: "answered",
+            answer: "done",
+            historyId: "plugin-history",
+            session: { sessionId: "plugin-session" },
+          },
+        ],
+      },
+    ]);
+    assert.equal((await readHeart(allocated.paths)).latestBody?.end, "exited");
+
+    await recordTell(allocated.paths, {
+      id: "plugin-tell",
+      body: "adjust it",
+      recordedAt: "2026-08-08T00:00:01.000Z",
+    });
+    await driveAkumaBody(
+      { paths: allocated.paths },
+      adapter({
+        starts: [],
+        events: [{ type: "session", coordinate: { sessionId: "plugin-session-2" } }],
+        result: { kind: "answered", answer: "adjusted" },
+      }),
+      { now: () => "2026-08-08T00:00:02.000Z" },
+    );
+
+    assert.equal(recorder.activations, 1);
+    assert.equal(recorder.observations.length, 1);
+  } finally {
+    delete initialTurnPluginGlobal.__keiyakuInitialTurnPluginRecorder;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("initial-turn plugins observe the committed failed outcome without changing it", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-plugin-initial-failed-"));
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abcf" });
+    await initializeHeart(allocated.paths);
+    configureInitialTurnPlugins(root);
+    const recorder: InitialTurnPluginRecorder = {
+      activations: 0,
+      observations: [],
+      async observe(signal) {
+        this.observations.push({ signal, outcomes: await outcomes(allocated.paths) });
+      },
+    };
+    initialTurnPluginGlobal.__keiyakuInitialTurnPluginRecorder = recorder;
+
+    await driveAkumaBody(
+      {
+        paths: allocated.paths,
+        seed: {
+          id: allocated.id,
+          archetype: "claude",
+          provider: { name: "claude", kind: "claude-agent-sdk" },
+          options: {},
+          origin: { kind: "direct" },
+          cwd: root,
+        },
+        initialBody: "build it",
+      },
+      adapter({ starts: [], events: [], result: { kind: "failed", diagnostic: "provider failed" } }),
+      { now: () => "2026-08-08T00:00:00.000Z" },
+    );
+
+    assert.equal(recorder.activations, 1);
+    assert.deepEqual(recorder.observations, [
+      {
+        signal: {
+          kind: "akuma.initial-turn",
+          akumaId: allocated.id,
+          outcome: { kind: "failed", reason: "provider failed" },
+        },
+        outcomes: [{ kind: "failed", diagnostic: "provider failed" }],
+      },
+    ]);
+    const heart = await readHeart(allocated.paths);
+    assert.equal(heart.latestBody?.end, "broke-off");
+    assert.deepEqual(await outcomes(allocated.paths), [{ kind: "failed", diagnostic: "provider failed" }]);
+  } finally {
+    delete initialTurnPluginGlobal.__keiyakuInitialTurnPluginRecorder;
     rmSync(root, { recursive: true, force: true });
   }
 });

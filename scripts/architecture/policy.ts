@@ -280,6 +280,22 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       ],
     },
     {
+      source: "akuma/body.ts",
+      allow: [
+        any("akuma/**"),
+        any("alias/**"),
+        any("core/facts/**"),
+        any("dispatch/**"),
+        any("identity/**"),
+        any("library/**"),
+        any("plugin/runtime.ts", ["pluginRuntime", "PluginRuntime"]),
+        any("runtime/proc/**"),
+        any("settings.ts"),
+        any("task/**"),
+        any("world.ts"),
+      ],
+    },
+    {
       source: "akuma/**",
       allow: [
         any("akuma/**"),

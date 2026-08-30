@@ -26,6 +26,19 @@ test("architecture policy accepts internal owner topology changes", () => {
   assert.deepEqual(moved, []);
 });
 
+test("architecture policy permits Body's initial-turn plugin runtime delivery", () => {
+  const diagnostics = check({
+    "plugin/runtime.ts":
+      "export type PluginRuntime = {}; export function pluginRuntime(): PluginRuntime { return {}; }",
+    "akuma/body.ts": [
+      'import { pluginRuntime, type PluginRuntime } from "../plugin/runtime.js";',
+      "export const runtime: PluginRuntime = pluginRuntime();",
+    ].join("\n"),
+  });
+
+  assert.deepEqual(diagnostics, []);
+});
+
 test("architecture policy rejects reverse owner edges", () => {
   const diagnostics = check({
     "core/facts/types.ts": "export type ContractId = string;",

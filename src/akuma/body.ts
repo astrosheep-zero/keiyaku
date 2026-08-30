@@ -21,6 +21,8 @@ import {
 } from "./heart/index.js";
 import { worldRootForAkumaPaths, type AkumaPaths } from "./identity.js";
 import { keiyakuSquarePath } from "../world.js";
+import { pluginRuntime, type PluginRuntime } from "../plugin/runtime.js";
+import { World } from "../world.js";
 import type { ProviderAdapter } from "./provider.js";
 import { resolveProviderExecution } from "./providers/index.js";
 import { clearBodyRequestTransport, settleBodyRequests } from "./request-serve.js";
@@ -192,6 +194,14 @@ async function expressInitialOutcome(launch: BodyLaunch): Promise<void> {
   }
 }
 
+async function recordPluginDiagnostic(paths: AkumaPaths, error: unknown): Promise<void> {
+  try {
+    await appendFile(paths.log, `plugin initial turn failed: ${boundedDiagnostic(error)}\n`);
+  } catch {
+    /* plugin diagnostic loss never changes Heart truth */
+  }
+}
+
 function defaultRuntime(): BodyRuntime {
   return {
     now: () => new Date().toISOString(),
@@ -253,9 +263,38 @@ async function recoverBodyRequests(input: BodyExecution): Promise<boolean> {
   return false;
 }
 
+function initialTurnEmitter(launch: BodyLaunch, soul: Soul): (outcome: CommittedOutcome) => Promise<void> {
+  let plugins: Promise<PluginRuntime> | undefined;
+  return async (outcome) => {
+    try {
+      plugins ??= (async () =>
+        await pluginRuntime({
+          world: await World.at(worldRootForAkumaPaths(launch.paths)),
+          reportDiagnostic: (message) => {
+            void recordPluginDiagnostic(launch.paths, message);
+          },
+        }))();
+      await (
+        await plugins
+      ).emit({
+        kind: "akuma.initial-turn",
+        akumaId: soul.id,
+        outcome:
+          outcome.outcome === "answered"
+            ? { kind: "answered", text: outcome.answer }
+            : { kind: "failed", reason: outcome.diagnostic },
+        ...(launch.completion?.contractId === undefined ? {} : { contractId: launch.completion.contractId }),
+      });
+    } catch (error) {
+      await recordPluginDiagnostic(launch.paths, error);
+    }
+  };
+}
+
 async function runBodyTurns(input: BodyExecution): Promise<void> {
   const { launch, soul, adapter, bodySequence, supervisor, runtime } = input;
   let initial = launch.initialBody;
+  const emitInitialTurn = initialTurnEmitter(launch, soul);
   for (;;) {
     const launchTells = supervisor.current().pending;
     if (supervisor.signal.aborted) {
@@ -299,7 +338,10 @@ async function runBodyTurns(input: BodyExecution): Promise<void> {
       return;
     }
     const outcome = await persistTurn(launch.paths, result.turnSequence, result, runtime.now());
-    if (initial !== undefined) await expressInitialOutcome(launch);
+    if (initial !== undefined) {
+      await emitInitialTurn(outcome);
+      await expressInitialOutcome(launch);
+    }
     if (outcome.outcome === "failed") {
       await breakBody(launch.paths, { sequence: bodySequence, end: "broke-off", at: runtime.now() });
       return;
