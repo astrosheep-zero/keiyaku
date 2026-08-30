@@ -106,22 +106,36 @@ test("the bundled plugin contains all six skills", () => {
   }
 });
 
-test("workflow delegates bind authorship to the bind skill", () => {
+test("bundled skills give each operating concept one owner", () => {
   const skills = join(installAssetsRoot(), "plugins", "keiyaku", "skills");
   const bind = readFileSync(join(skills, "keiyaku-bind", "SKILL.md"), "utf8");
   const workflow = readFileSync(join(skills, "keiyaku-workflow", "SKILL.md"), "utf8");
+  const task = readFileSync(join(skills, "keiyaku-task", "SKILL.md"), "utf8");
+  const babysit = readFileSync(join(skills, "keiyaku-babysit", "SKILL.md"), "utf8");
+  const akuma = readFileSync(join(skills, "keiyaku-akuma", "SKILL.md"), "utf8");
 
   assert.match(bind, /keiyaku -C <repo> bind/);
+  assert.match(bind, /## What Bind Records/);
   assert.match(bind, /## Authority Order/);
-  assert.match(bind, /brief \(zero authority\)/);
-  assert.match(workflow, /Use `keiyaku-bind`/);
-  assert.match(workflow, /commissioning brief zero-authority/);
-  assert.match(workflow, /new `call --contract`/);
-  assert.match(workflow, /Reuse that reviewer identity by default/);
-  assert.match(workflow, /judgment frame is contaminated/);
-  assert.match(workflow, /second unsatisfied review/);
-  assert.match(workflow, /journaled `amend`/);
-  assert.doesNotMatch(workflow, /### Decide The Threshold|### Write The Document/);
+  assert.match(bind, /journaled terms\s+are the standing acceptance floor/);
+  assert.doesNotMatch(bind, /worker brief \(zero authority\)/);
+  assert.match(workflow, /## Hold the Fulfillment Loop/);
+  assert.match(workflow, /The commission owns the question/);
+  assert.match(workflow, /The Reviewer owns the answer/);
+  assert.match(workflow, /new Contract\s+always gets a new call/);
+  assert.match(workflow, /reuse the same identity\s+across rounds/);
+  assert.match(workflow, /its judgment frame\s+is\s+contaminated/);
+  assert.match(workflow, /Terms change through the journal or not at all/);
+  assert.doesNotMatch(
+    workflow,
+    /adjudicable|constructible current failure|term defect|second unsatisfied review|deletion-litmus/u,
+  );
+  assert.match(task, /## What A Task Is Not/);
+  assert.match(task, /no acceptance, no permission, no\s+scope, no fulfillment loop/);
+  assert.match(babysit, /Babysitting is a method, not a role/);
+  assert.match(babysit, /Babysitting decides only when you look and\s+what you check next/);
+  assert.match(akuma, /## Commission And Steer/);
+  assert.match(akuma, /The prompt and every later tell genuinely direct the callee's\s+work/);
 });
 
 test("bundled instructions keep facade and standalone Akuma call surfaces distinct", () => {
@@ -133,7 +147,7 @@ test("bundled instructions keep facade and standalone Akuma call surfaces distin
   const akumaSkill = readFileSync(join(plugin, "keiyaku-akuma", "SKILL.md"), "utf8");
   assert.equal(rootSkill.includes(canonical), true);
   assert.equal(akumaSkill.includes(standalone), true);
-  assert.doesNotMatch(akumaSkill, /\bpersona\b|--persona|Contract|Dispatch|kei\/|--contract|--repo/iu);
+  assert.doesNotMatch(akumaSkill, /\bpersona\b|--persona/iu);
 });
 
 test("harness manifests share one release version and keep cachebusters host-local", () => {

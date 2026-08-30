@@ -5,51 +5,22 @@ description: Author and bind one Keiyaku delivery Contract. Use when deciding wh
 
 # Keiyaku Bind
 
-A Contract records a decision that already exists; writing terms does not
-produce one. You supply **all high-level design and public-surface facts this
-Keiyaku creates or changes**, and **all** pseudocode where ordering matters.
-The worker is a cheap executor: every choice you leave open, it resolves —
-possibly the way you like least, discovered at review and billed at review
-prices.
+## What Bind Records
 
-## Before You Bind
+Bind journals decisions that have already been made. The Contract author
+arrives with the public outcome decided: Objective, Design, Region, Criteria,
+Verification. A design gap discovered while authoring goes back to whoever
+owns the decision — it is never forwarded into the worktree for a worker to
+resolve.
 
-Bind is the last step of an investigation, never the first step of an idea.
+## Author And Freedom
 
-- Design the delivery to the depth you could implement it yourself, against
-  the code as it is — not as you remember it. An unknown surfacing while
-  you design is the next investigation, not a detail for the worker.
-- Walk the implementation path once, end to end. A step you cannot walk is
-  an unresolved fact.
-- Observe active Contracts whose Regions intersect yours. Region overlap is a
-  prompt signal only; it does not by itself imply a logical conflict. The
-  caller decides autonomously whether to proceed in parallel or serialize.
-- A decision settled elsewhere binds only its explicit words; converting it
-  into concrete shape is your job, and a question it left open goes back to
-  its decider, never to the worker.
-- If the delivery must land documentation, you can draft its exact sentence
-  now. Cannot draft means unresolved design — "the worker will sort out the
-  docs" is a design gap in disguise.
-
-Split complex work wherever independently acceptable delivery boundaries
-exist. When a complex Keiyaku cannot be split without breaking one acceptance
-boundary, bind one Contract and plan its fulfillment as explicit arcs. Treat
-each arc as a chapter as in a work of literature, not as a task sequence.
-Commission one current chapter at a time; never hand the whole undifferentiated
-Contract to one Deliverer and trust it to finish everything in one pass.
-Continue with `keiyaku-workflow` for the arc document and command.
-
-Two tests close the gate:
-
-- **Substitution.** Two workers who never met each deliver test-green from
-  your terms. If any external reader could tell the deliveries apart, that
-  fact is undecided — decide it and write it.
-- **Rework.** For each blank: "if the worker picks what I like least, do I
-  demand rework?" Yes — write it. No — write nothing.
-
-Public — anything visible outside the diff — is always yours to pin.
-Private — helper names, decomposition, control flow — is the worker's;
-its freedom comes from your genuine indifference, not from omission.
+The author pins every public, high-level fact: surfaces, semantics, persisted
+shapes, the observable acceptance boundary. Private decomposition, helper
+names, and control flow belong to the Deliverer — and that freedom comes from
+the author genuinely not caring, never from the author not deciding. Criteria
+are observable accept/reject observations a Reviewer can judge without asking
+the author anything further.
 
 ## Author And Bind
 
@@ -125,11 +96,19 @@ do not create one just to mirror the Contract.
 
 ## Authority Order
 
-> Settled upstream decisions and their documentation → this Contract → worker
-> brief (zero authority) → review evidence (witnessed fact, never law).
+Settled upstream decisions and their documentation → this Contract → commission
+and brief (directs the current round's work and questions; never terms, never
+acceptance) → review evidence (witnessed fact, never law). The journaled terms
+are the standing acceptance floor. A brief or tell genuinely commands what this
+round works on and what evidence it gathers; anything that must survive beyond
+the round as a placement condition enters the journal through bind or amend, or
+it is not acceptance.
 
-Gaps flow upstream, never down: a design gap found by a worker or reviewer
-returns to you, never filled silently downstream.
+## One Boundary, One Contract
+
+One atomic acceptance boundary per Contract. Independent boundaries are
+separate Contracts; a boundary that cannot be split but is too large for one
+pass is chaptered with Arcs, and dispatch carries only the current Arc.
 
 ## Read The Receipt
 

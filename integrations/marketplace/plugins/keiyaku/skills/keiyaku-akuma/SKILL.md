@@ -41,6 +41,27 @@ prompt, and an empty body keeps the harness default. Write a new one when no
 existing file grants the permissions and stance the work needs; a worker never
 outgrows its Archetype mid-life.
 
+## Commission And Steer
+
+A call assembles a commission from independent inputs: the Archetype fixes
+capability stance for the identity's whole life; the `--contract` Dispatch
+associates standing terms; allowed actions set what the callee may do, always
+under the Archetype base and the parent Soul's ceiling; the prompt carries the
+question. None of these implies another — association is not a seat, forwarded
+actions are not a seat, and no combination mints a role.
+
+The prompt and every later tell genuinely direct the callee's work: they choose
+the subject, scope, depth, risks, and deliverable of the round. They spend
+decisions already made and ask questions still open; they never change the
+Dispatch, the journal, or what counts as acceptance, and an expectation stated
+in a prompt is never evidence for the callee's own findings.
+
+A commission can be as large as a whole Contract's fulfillment loop: call one
+Aku with the Contract association, forward the actions the loop needs —
+including nested calls, which stay under this Soul's ceiling — and state the
+loop as the question. Steering that delegation afterwards goes to the holder,
+not around it.
+
 ## Watch
 
 ```bash

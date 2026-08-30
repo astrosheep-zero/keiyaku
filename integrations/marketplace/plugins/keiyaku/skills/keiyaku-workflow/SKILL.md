@@ -23,22 +23,13 @@ immutable. You never push it through states by hand: `deliver` and satisfied
 reviews request placement, and placement claims when every prerequisite and
 gate allows it.
 
-## Choose The Lightest Sufficient Workflow
+## The Lightest Workflow That Fits
 
-Do not put every small change through the full Contract lifecycle.
-
-- Implement directly when the scope is small, understood, and easy to verify.
-- Bind a Contract without a review gate when the work is larger but mechanical,
-  and a bounded worktree or delivery record is useful. Add review when judgment,
-  risk, or independent acceptance makes it valuable.
-- If direct work grows beyond its original scope, stop and bind a Contract then.
-  Capture only the task-owned changes in a commit, cherry-pick that commit into
-  the appointed worktree, and continue there. Preserve unrelated caller changes.
-
-Choose by uncertainty, risk, and coordination cost, not file count. Public or
-persisted semantics, resource ownership, concurrency, security, and disputed
-architecture usually justify full terms and independent review. A narrow
-wording correction or exact mechanical synchronization usually does not.
+Nothing here is required ceremony. Small work is done directly. Larger but
+mechanical work can be bound and delivered without review. Tasks and Arcs
+appear when the work calls for them. There are no cadences, no thresholds, and
+nothing the tool core enforces about how you drive the loop — pick the lightest
+shape that keeps acceptance honest.
 
 ## Bind
 
@@ -112,46 +103,26 @@ touched paths and conflicts remain Git's.
 
 ## Hold the Fulfillment Loop
 
-Every Contract in flight has exactly one holder of its fulfillment
-loop: whoever is currently turning intent into commissions and
-returns into decisions. By default that is the flagship caller.
-Holding the loop means:
+Every Contract in flight has exactly one holder of its fulfillment loop:
+whoever currently turns intent into commissions and returns into decisions. By
+default that is the flagship caller. Holding the loop means four things.
 
-- **Decompose before delegating.** Cut the work along its real
-  acceptance boundaries — separate Contracts where they exist, Arcs
-  where they do not, Tasks for what is planned but not yet owed —
-  before any commission goes out. Delegation spends a decision that
-  has already been made; it is not where the decision happens.
-- **Requirements in a tell carry provenance.** A decision that
-  appears in a commission or tell as a requirement must come from
-  user intent, the journaled terms, or standing authority. A
-  hypothesis formed mid-loop is not yet any of those: send it down
-  as a question to investigate, or settle it first — a real
-  decision, a journaled amend — and only then require it.
-- **Returns are inputs to judgment, not the next instruction.**
-  What a worker or reviewer sends back is consumed by the holder,
-  who decides what it is and what happens — see the review section
-  below.
-- **Keep the work converging on the Objective.** The Objective is
-  the direction of the loop. When successive rounds move the
-  candidate away from what the Contract set out to make true, the
-  loop is telling you the premise needs judgment, not that another
-  round is owed.
+Decompose before delegating — delegation spends a decision already made; it is
+not where the decision happens. Give every requirement in a commission or tell
+a source — user intent, journaled terms, or standing authority; a hypothesis
+formed mid-loop goes down as a question to investigate, or is settled first —
+a real decision, a journaled amend — before it may be required. Treat returns
+as input to judgment, never as the next instruction — see Review Gates. Keep
+the work converging on the Objective — when successive rounds move the candidate
+away from what the Contract set out to make true, judge the premise instead of
+commissioning another round.
 
-The whole loop can be handed to one Aku in a single commission. The
-duties above travel with it — the delegate holds them exactly as
-the flagship would, deciding for itself when to cut Arcs and Tasks
-and when to call, tell, and review. It needs no title and no new
-identity beyond the commission itself. After handing over, the
-flagship steers through the holder — a tell to the holder, a
-journaled amend, escalation, or withdrawing the commission — and
-does not reach past it to steer its subordinates directly.
-
-None of this is a required ceremony. Small work is done directly;
-Tasks and Arcs appear when the work calls for them. The loop adds
-no cadence, no threshold, no identity, no state, and nothing the
-tool core enforces — it is how the holder thinks, not a stage the
-work passes through.
+The whole loop can be handed to one Aku in a single commission. The duties
+travel with it; the delegate decides for itself when to cut Arcs and Tasks and
+when to call, tell, and review. It needs no title, seat, or identity beyond the
+commission itself. After handing over, the flagship steers only through the
+holder — a tell to the holder, a journaled amend, escalation, or withdrawing
+the commission — and never reaches past it to its subordinates.
 
 ## Commission A Contract
 
@@ -181,13 +152,12 @@ frontmatter names `Contract`, then reads the listed owner documents and source
 files before acting. Do not substitute a generic repository tour for the files
 that actually govern the assignment.
 
-The bind skill's authority order makes a commissioning brief zero-authority.
-Use it only to focus attention within the current Contract or Arc, point to
-evidence, and ask questions. It must not add or change acceptance terms, prescribe an
-unsettled implementation mechanism or expected review finding, or ask a
-reviewer to re-prove an earlier judgment. Removing the brief must not change
-the candidate's acceptance basis. Change terms through a journaled `amend`,
-not through `call` or `tell`.
+The commission owns the question: what to work on or examine, how deep, which
+risks to watch, what evidence to produce. It genuinely directs the round — a
+Deliverer's brief commands the work; a Reviewer's commission frames the
+examination. What it can never do is manufacture acceptance: a requirement
+meant to outlive the round goes through bind or amend, and an expectation stated
+in a prompt is never evidence for a finding.
 
 Contract association, available forwarded actions, and the brief are
 independent inputs. Give a Reviewer `--allowed contract.review` only when it
@@ -224,12 +194,11 @@ intended work is unsafe to run concurrently.
 When a complex Keiyaku cannot be split without breaking one acceptance
 boundary, organize its fulfillment into arcs. Do not hand the whole
 undifferentiated Contract to one Deliverer and trust one pass to finish it.
-Handing over a whole Contract is legitimate in exactly one form: as
-a transfer of its fulfillment loop, not as one oversized Deliverer
-assignment. Commission one Aku to hold the loop and let it decide
-when to cut Arcs and Tasks and when to call, tell, and review. A
-Deliverer owes a candidate; a loop holder owes decisions.
-Record and work one current chapter at a time.
+Handing over a whole Contract is legitimate in exactly one form: as a transfer
+of its fulfillment loop, not as one oversized Deliverer assignment. Commission
+one Aku to hold the loop and let it decide when to cut Arcs and Tasks and when
+to call, tell, and review. A Deliverer owes a candidate; a loop holder owes
+decisions.
 
 An arc is a chapter as in a work of literature: one named part of the
 delivery's story, not a task list, progress slice, or claim that the work is
@@ -256,17 +225,17 @@ boundary. The document grammar authority is `docs/document.md`.
 
 ## Amend Or Start Over
 
-Use `amend` when a discovery during the same delivery changes terms but the
-original Objective, Design, and acceptance boundary still truthfully describe
-the result:
+Terms change through the journal or not at all. When delivery or review reveals
+the standing terms are wrong — ambiguous, contradictory, or aimed at the wrong
+outcome — the holder amends, staling old evidence, or abandons and rebinds.
+Remediation that works around a wrong term is the expensive way to keep a
+mistake.
 
 ```bash
 keiyaku amend <contract> -
 ```
 
-See `amend --help` for the operation grammar. If the objective or boundary
-itself changed, `abandon` with a note and bind a new Contract; do not steer an
-old Contract onto a different delivery.
+See `amend --help` for the operation grammar.
 
 ## Audit Before Delivery
 
@@ -306,46 +275,35 @@ Verification, or snapshot-producing options make it stale.
 
 ## Review Gates
 
-A `reviewed` gate wants a recorded judgment of the current patch:
+The Reviewer owns the answer. A gate review compares the full current candidate
+against every journaled Criterion — the floor that cannot be reduced — and
+testifies satisfied or unsatisfied over the current document identity and
+worktree; satisfied requests placement. A current defect, missing, failed, or
+stale required evidence, or terms too ambiguous or contradictory to judge all
+yield unsatisfied, with the summary naming what blocks. Advice beyond the terms
+belongs in the summary and never changes the verdict by itself.
 
 ```bash
 keiyaku review <contract> --satisfied --summary "<conclusion>"
 keiyaku review <contract> --unsatisfied --summary "<finding>"
 ```
 
-Have a reviewer independent from the Deliverer and candidate implementation
-inspect the delivered Contract worktree snapshot. Start a new Contract with a
-new `call --contract`; do not repurpose another Contract's reviewer with
-`tell`. Reuse that reviewer identity by default for later rounds of the same
-Contract. Start a replacement with a recorded reason when the reviewer's
-judgment frame is contaminated or the reviewer is involved in the term defect.
-If it should record the verdict itself, dispatch it with `--allowed
-contract.review` and require it to choose the verdict from its independent
-judgment. Otherwise its answer is review input for the coordinator to record.
-The `review` command records the verdict and `--satisfied` requests placement.
+One Contract, one continuing Reviewer by default: reuse the same identity
+across rounds, replace it with a recorded reason when its judgment frame is
+contaminated, and never carry a Reviewer across Contracts — a new Contract
+always gets a new call. If it should record the verdict itself, dispatch it
+with `--allowed contract.review` and require it to choose the verdict from its
+independent judgment. Otherwise its answer is review input for the coordinator
+to record. The `review` command records the verdict and `--satisfied` requests
+placement.
 
-A repeat review re-judges the complete current snapshot from repository
-authority; checking whether an earlier finding closed is only one part of that
-judgment. If the same root cause produces a second unsatisfied review, stop
-commissioning stronger remediation for the candidate. Amend the Criterion from
-named authority or a constructible current failure, remove it, or escalate the
-unresolved premise. A conflicting, undefined, or ungrounded term is reported
-without a review receipt until `amend` makes the Contract adjudicable.
-
-`review --satisfied` is authoritative gate testimony and may claim the Contract
-when delivery, prerequisites, and all gates are current. Record it only for the
-bytes intended to land now.
-
-A review return is input to the loop holder's judgment, never a
-work order in itself. Classify before anything moves: a current
-defect against the terms is fixed and re-reviewed; advice worth
-keeping but not owed becomes a Task or is consciously declined; a
-problem with the terms or the premise goes up — journaled amend or
-escalation — before any remediation is commissioned; work outside
-the Contract stays outside it. The test for every response is the
-Objective: remediation that drifts the candidate away from what
-the Contract set out to make true is evidence against the premise,
-not a reason for another round.
+A review return is input to the loop holder's judgment, never a work order in
+itself. Classify before anything moves: a current defect against the terms is
+fixed and re-reviewed; advice worth keeping but not owed becomes a Task or is
+consciously declined; a problem with the terms goes up — journaled amend or
+escalation — before any remediation is commissioned; work outside the Contract
+stays outside it. Remediation that drifts the candidate away from the Objective
+is evidence against the premise, not a reason for another round.
 
 ## When Multiple Contracts Overlap On One Target
 

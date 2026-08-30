@@ -7,15 +7,13 @@ description: >-
 
 # Keiyaku Task
 
-Task is a directory-context planning product. It is separate from Contract
-delivery and Akuma execution. A task records intent; `start` does not execute
-it and no task command binds a Contract. Task use is optional: create one only
-when planning needs a durable reader such as priority, dependencies, readiness,
-or coordination across deliveries. Do not create one as boilerplate before
-binding a Contract. Contract `bind --task <task/...>` optionally associates an
-existing Task through Settlement-owned TaskHolder: claim settles the current
-held Task to `done`, and abandon releases it. Task Markdown carries no Contract
-field.
+## What A Task Is Not
+
+A Task remembers a plan: what is intended, what depends on what, what was
+decided about sequence. It grants nothing — no acceptance, no permission, no
+scope, no fulfillment loop. Whoever holds a Contract's loop uses Tasks when the
+plan is worth remembering and skips them when it is not; nothing binds Tasks to
+Arcs, Contracts, or Akuma as a package.
 
 ## Lifecycle
 

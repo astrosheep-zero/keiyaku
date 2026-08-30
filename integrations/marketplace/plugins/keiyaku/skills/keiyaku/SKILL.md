@@ -5,16 +5,17 @@ description: Use the Keiyaku v4 CLI for contract delivery, task coordination, an
 
 # Keiyaku
 
-Use `keiyaku` as an agent-facing ledger. Keep decisions with the flagship;
-read `<command> --help` before using flags.
-
 ## Model
 
-- `task` is planning; see `keiyaku-task`.
-- A Contract is delivery authority; see `keiyaku-bind` to author and bind one,
-  then `keiyaku-workflow` for the remaining lifecycle.
-- An Akuma is a callable worker; see `keiyaku-akuma`.
-- A long-running multi-lane goal needs coordination; see `keiyaku-babysit`.
+Keiyaku is three independent pillars, not a bundle: **Task** remembers plans
+and dependencies, **Contract** makes acceptance standing and auditable,
+**Akuma** invokes capability. Use any one alone; combine them only when the
+work calls for it. Behind every Contract in flight there is one holder of its
+fulfillment loop — whoever turns intent into commissions and returns into
+decisions. The flagship holds it by default, and may hand a whole Contract's
+loop to one Aku in a single commission; the harness serves both styles
+equally. See `keiyaku-workflow` for the loop, `keiyaku-bind` for authoring,
+`keiyaku-akuma` for invocation.
 
 Settings owns named gate bundles. Omitting `--gates` selects `gates.default`,
 or freezes `["reviewed"]` when that entry is absent. `--gates <name,...>`
