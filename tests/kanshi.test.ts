@@ -2072,7 +2072,7 @@ test("Contract namespace Tasks come from one Task board observation", async () =
   const { repository, contract, taskId } = await populatedWorld();
   const world = await World.at(repository.path);
   const segment = contractSegment(contract.id);
-  assert.deepEqual(contractNamespace(contract.id), [segment]);
+  assert.deepEqual(contractNamespace(contract.id), ["kei", segment]);
   const sibling = contractId("kei/other-contract");
   const writeTask = (document: TaskDocument): void => {
     const path = authorityPath(world, document.id);
@@ -2082,7 +2082,7 @@ test("Contract namespace Tasks come from one Task board observation", async () =
   writeTask(taskDocument({ id: "task/root-unbound", title: "Root unbound", priority: 0 }));
   writeTask(
     taskDocument({
-      id: `task/${segment}/alpha`,
+      id: `task/kei/${segment}/alpha`,
       title: "Namespace alpha",
       state: "done",
       priority: 3,
@@ -2090,7 +2090,7 @@ test("Contract namespace Tasks come from one Task board observation", async () =
   );
   writeTask(
     taskDocument({
-      id: `task/${segment}/zeta`,
+      id: `task/kei/${segment}/zeta`,
       title: "Namespace zeta",
       state: "on_hold",
       priority: 0,
@@ -2098,14 +2098,14 @@ test("Contract namespace Tasks come from one Task board observation", async () =
   );
   writeTask(
     taskDocument({
-      id: `task/${segment}/child/nested`,
+      id: `task/kei/${segment}/child/nested`,
       title: "Nested descendant",
       priority: 0,
     }),
   );
   writeTask(
     taskDocument({
-      id: `task/${contractSegment(sibling)}/sibling`,
+      id: `task/kei/${contractSegment(sibling)}/sibling`,
       title: "Sibling namespace",
       priority: 0,
     }),
@@ -2123,7 +2123,7 @@ test("Contract namespace Tasks come from one Task board observation", async () =
   assert.deepEqual(row.namespaceTasks.value, expected);
   assert.deepEqual(
     expected.map((task) => task.id),
-    [`task/${segment}/zeta`, `task/${segment}/alpha`],
+    [`task/kei/${segment}/zeta`, `task/kei/${segment}/alpha`],
   );
   assert.deepEqual(
     expected.map((task) => task.state),
@@ -2142,7 +2142,7 @@ test("Contract namespace Tasks come from one Task board observation", async () =
     false,
   );
   assert.equal(
-    expected.some((task) => task.id === `task/${contractSegment(sibling)}/sibling`),
+    expected.some((task) => task.id === `task/kei/${contractSegment(sibling)}/sibling`),
     false,
   );
   assert.deepEqual(
@@ -2171,8 +2171,8 @@ test("Contract namespace Tasks come from one Task board observation", async () =
   assert.doesNotMatch(sectionBody(worldText, "KEIYAKU"), /namespace tasks /u);
   assert.match(selectedText, new RegExp(String.raw`● ${taskId} · in_progress`, "u"));
   assert.match(selectedText, /  namespace tasks\n/u);
-  assert.match(selectedText, new RegExp(String.raw`⧗ task/${segment}/zeta · P0 on_hold — Namespace zeta`, "u"));
-  assert.match(selectedText, new RegExp(String.raw`✓ task/${segment}/alpha · P3 done — Namespace alpha`, "u"));
+  assert.match(selectedText, new RegExp(String.raw`⧗ task/kei/${segment}/zeta · P0 on_hold — Namespace zeta`, "u"));
+  assert.match(selectedText, new RegExp(String.raw`✓ task/kei/${segment}/alpha · P3 done — Namespace alpha`, "u"));
   assert.doesNotMatch(selectedText, /──\[ (?:KEIYAKU|TASK|FLEET) \]/u);
 });
 

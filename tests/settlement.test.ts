@@ -589,7 +589,7 @@ test("a claimed managed-worktree Contract repairs malformed namespace context be
 
   assert.deepEqual(claimed.settlementLags, []);
   assert.equal(existsSync(path), true);
-  assert.deepEqual(await readNamespaceContext({ directory: path, boundary: path }), [state.id.slice("kei/".length)]);
+  assert.deepEqual(await readNamespaceContext({ directory: path, boundary: path }), ["kei", state.id.slice("kei/".length)]);
 });
 
 test("a retained replay does not report an absent managed worktree to Settlement", async () => {

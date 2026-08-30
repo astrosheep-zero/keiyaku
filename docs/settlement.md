@@ -36,12 +36,14 @@ A terminal Contract without its matching held holder is strictly inert: it does
 not create, repair, or inspect unrelated Task, World, or context state.
 
 For a matching holder, Settlement may install or repair the Contract-derived
-Task namespace context in a managed worktree Git reports as present. A valid
-local override remains intact. This context is convenience for Task work; it
-does not create a holder, alter Task identity, or establish another association.
-Kanshi uses the same Contract-derived namespace only as a read-time matching
-coordinate. Settlement has no Akuma rule, configurable lifecycle hook, event
-bus, or generic cross-product registry.
+Task namespace context in a managed worktree Git reports as present. The
+namespace is the complete Contract coordinate split into segments: a Contract
+`kei/<slug>` uses Task namespace `kei/<slug>`, producing Task identities under
+`task/kei/<slug>/...`. A valid local override remains intact. This context is
+convenience for Task work; it does not create a holder, alter Task identity, or
+establish another association. Kanshi uses the same Contract-derived namespace
+only as a read-time matching coordinate. Settlement has no Akuma rule,
+configurable lifecycle hook, event bus, or generic cross-product registry.
 
 Admission is irreversible. The public sequence is admission, Git reconciliation,
 Settlement, then result projection. Git or Settlement lag cannot reject an

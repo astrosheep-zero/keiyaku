@@ -1,4 +1,5 @@
-import { contractSegment, type ContractId, type ContractState } from "../core/facts/types.js";
+import { identitySegments } from "../identity/coordinates.js";
+import { type ContractId, type ContractState } from "../core/facts/types.js";
 import { observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
 import { withPrivateStatePublicationSeat } from "../git/private-state-seat.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
@@ -44,8 +45,8 @@ export function deferredTaskHolderSettlement(
   return { actions: [], lags: [{ kind: "settlement-failed", surface: "task-holder", ...input }] };
 }
 
-export function contractNamespace(id: ContractId): readonly [string] {
-  return [contractSegment(id)];
+export function contractNamespace(id: ContractId): readonly string[] {
+  return ["kei", ...identitySegments({ family: "kei", value: id })];
 }
 
 export type SettlementInput = Readonly<{
