@@ -11,6 +11,7 @@ import {
   prepareDeliveryCommitMetadata,
 } from "../git/tender.js";
 import {
+  checkoutDetachedSnapshot,
   recordConflictHandoff,
   retireConflictHandoff,
   workspaceMergeStatePresent,
@@ -55,7 +56,7 @@ export type IntegrationConflictMaterialized = Readonly<{
 }>;
 
 const DELIVER_CONFLICT_RECOVERY = Object.freeze({
-  materialize: "deliver --materialize-conflict",
+  materialize: "deliver --materialize-conflict --include-dirty",
   continue: "deliver --include-dirty",
 } as const);
 
@@ -373,14 +374,28 @@ async function materializeDeliverConflict(
     place: appointment.place,
   });
   if (tender.kind === "refused") return tender;
-  if (tender.data.dirty || tender.data.changes.submodules.length > 0) {
+  if (tender.data.changes.submodules.length > 0 || (tender.data.dirty && input.includeDirty !== true)) {
     return { kind: "refused", refusal: await dirtyTenderRefusal(input.scope, input.contractId, tender.data) };
+  }
+  let handoffHead = tender.data.head;
+  if (tender.data.dirty) {
+    const derivation = input.deriveDocument(appointed.state);
+    const commit = await prepareDeliveryCommitMetadata(input.scope, {
+      contractId: input.contractId,
+      title: derivation.title,
+      document: derivation.bytes,
+      at: tender.data.at,
+      ...(input.actor === undefined ? {} : { actor: input.actor }),
+      ...(input.message === undefined ? {} : { message: input.message }),
+    });
+    handoffHead = await materializeTenderSnapshot(input.scope, tender.data, commit);
+    await checkoutDetachedSnapshot(input.scope, workspace.path, handoffHead);
   }
   await recordConflictHandoff(input.scope, {
     contractId: input.contractId,
     place: appointment.place,
     workspace: workspace.path,
-    head: tender.data.head,
+    head: handoffHead,
     mergeHead: refusal.targetHead,
   });
   await materializeJudgedConflict(input.scope, workspace.path, refusal.targetHead);

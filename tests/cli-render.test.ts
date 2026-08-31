@@ -530,6 +530,39 @@ test("direct checkout refusal uses the same exact fact block", () => {
   );
 });
 
+test("dirty delivery refusal explains the cause and include-dirty capture", () => {
+  const contract = contractId("kei/dirty-delivery");
+  assert.equal(
+    renderText({
+      kind: "refused",
+      verb: "deliver",
+      contract,
+      refusal: {
+        kind: "dirty-workspace",
+        contractId: contract,
+        staged: [],
+        unstaged: ["src/file.ts"],
+        untracked: [],
+        submodules: [],
+        shortStat: { filesChanged: 1, insertions: 1, deletions: 0 },
+        option: { flag: "--include-dirty", available: true },
+      },
+    }),
+    [
+      `! deliver refused — ${contract}`,
+      "   dirty-workspace",
+      "   reason worktree has uncommitted changes",
+      "   staged 0",
+      "   unstaged",
+      "   │ src/file.ts",
+      "   untracked 0",
+      "   submodules 0",
+      "   1 file changed, 1 insertion(+)",
+      "   --include-dirty captures all non-ignored worktree bytes in the candidate",
+    ].join("\n"),
+  );
+});
+
 test("continuation checkout stop keeps its exact block after the dependent context", () => {
   const contract = contractId("kei/prerequisite-checkout");
   const dependent = contractId("kei/stopped-checkout-dependent");
@@ -839,7 +872,7 @@ test("deliver conflict text exposes target head, paths, and recovery", () => {
         reason: "conflict",
         targetHead,
         conflictPaths: ["a.txt", "z.txt"],
-        recovery: { materialize: "deliver --materialize-conflict", continue: "deliver --include-dirty" },
+        recovery: { materialize: "deliver --materialize-conflict --include-dirty", continue: "deliver --include-dirty" },
       },
     }),
     [
@@ -848,7 +881,8 @@ test("deliver conflict text exposes target head, paths, and recovery", () => {
       "   conflictPaths",
       "   │ a.txt",
       "   │ z.txt",
-      "   recovery materialize conflicts · deliver --materialize-conflict",
+      "   recovery materialize conflicts · deliver --materialize-conflict --include-dir",
+      "     ty",
       "   recovery continue after resolve and commit · deliver --include-dirty",
     ].join("\n"),
   );

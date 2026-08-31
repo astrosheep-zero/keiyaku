@@ -205,7 +205,7 @@ async function reviewGatedConflictCandidateFixture() {
 }
 
 const DELIVER_CONFLICT_RECOVERY = {
-  materialize: "deliver --materialize-conflict",
+  materialize: "deliver --materialize-conflict --include-dirty",
   continue: "deliver --include-dirty",
 } as const;
 
@@ -565,18 +565,13 @@ test("materializeConflict is inert when the judge reports no conflict", async ()
   );
 });
 
-test("materialization refuses a dirty workspace even with includeDirty", async () => {
+test("materialization preserves a dirty workspace with includeDirty", async () => {
   const { repository, contract, worktree } = await reviewGatedConflictCandidateFixture();
   writeFileSync(join(worktree, "extra.txt"), "dirty\n");
-  await assert.rejects(
-    () => contract.deliver({ includeDirty: true, materializeConflict: true }),
-    (error: unknown) => {
-      assert.ok(error instanceof KeiyakuRefused);
-      assert.equal(error.refusal.kind, "dirty-workspace");
-      return true;
-    },
-  );
-  assert.equal(mergeHead(repository, worktree), null);
+  const materialized = await contract.deliver({ includeDirty: true, materializeConflict: true });
+  assert.equal(materialized.kind, "integration-conflict-materialized");
+  assert.equal(mergeHead(repository, worktree), materialized.targetHead);
+  assert.equal(readFileSync(join(worktree, "extra.txt"), "utf8"), "dirty\n");
   assert.equal((await contract.state()).delivery, null);
 });
 

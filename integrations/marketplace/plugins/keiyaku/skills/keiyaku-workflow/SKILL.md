@@ -65,16 +65,13 @@ never a gate.
 
 ## Decision 3 — commission seats
 
-A Deliverer seat owes a candidate. A Reviewer seat owes independent
-testimony. A commission carries independent facts — Contract
-association, seat, allowed actions, prompt — and asserting one never
-implies another.
-
-Allowed actions are commission configuration, not prompt prose. Your
-decision: grant the seat exactly what its duty needs and nothing more
-— a Deliverer that cannot deliver is a stalled seat, a Reviewer that
-can deliver is a miswired one. Verify the grant when you commission;
-the configuration grammar is keiyaku-akuma's and the command's help.
+A commission names one Contract, one seat, one worktree, and the
+capabilities that seat needs. A Deliverer owes a candidate; a Reviewer
+owes independent testimony. Grant only the actions required by that
+duty and verify them at dispatch. A self-recording Reviewer needs
+`contract.review` and therefore cannot be `--readonly`; use that flag
+only when another actor records the verdict. The configuration grammar
+is keiyaku-akuma's and the command's help.
 
 The prompt conveys the rest, in words this literal:
 

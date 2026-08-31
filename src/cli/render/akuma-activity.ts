@@ -224,39 +224,16 @@ function taskDispositionMark(disposition: CreatedTaskRow["disposition"]): string
   return disposition === "blocked" ? "‖" : "○";
 }
 
-function changeStat(group: readonly RenderedFileChange[]): string {
-  let added = 0;
-  let removed = 0;
-  for (const change of group) {
-    if (change.diffstat === undefined) return "+? -?";
-    added += change.diffstat.added;
-    removed += change.diffstat.removed;
-  }
-  return `+${added} -${removed}`;
-}
-
-function groupedChangeRows(
-  changes: readonly RenderedFileChange[],
-): readonly Readonly<{ path: string; stat: string }>[] {
-  const groups: RenderedFileChange[][] = [];
-  const seen = new Map<string, number>();
-  for (const change of changes) {
-    const index = seen.get(change.path);
-    if (index === undefined) {
-      seen.set(change.path, groups.length);
-      groups.push([change]);
-    } else groups[index]!.push(change);
-  }
-  return groups.map((group) => ({ path: group[0]!.path, stat: changeStat(group) }));
+function changeStat(change: RenderedFileChange): string {
+  return change.diffstat === undefined ? "+? -?" : `+${change.diffstat.added} -${change.diffstat.removed}`;
 }
 
 function renderReportedChangeLines(snapshot: RenderedSnapshot): readonly string[] {
-  const rows = groupedChangeRows(snapshot.reportedChanges);
-  const width = rows.reduce((max, row) => Math.max(max, row.stat.length), 0);
+  const width = snapshot.reportedChanges.reduce((max, change) => Math.max(max, changeStat(change).length), 0);
   return [
     `changes ${snapshot.reportedChanges.length + snapshot.reportedChangesOmitted}`,
-    ...rows.map((row) => `  ${row.stat.padEnd(width)}  ${safeText(row.path)}`),
-    ...(snapshot.reportedChangesOmitted > 0 ? [`  ⋮ ${snapshot.reportedChangesOmitted} earlier changes`] : []),
+    ...snapshot.reportedChanges.map((change) => `  ${changeStat(change).padEnd(width)}  ${safeText(change.path)}`),
+    ...(snapshot.reportedChangesOmitted > 0 ? [`  ⋮ ${snapshot.reportedChangesOmitted} more files`] : []),
   ];
 }
 

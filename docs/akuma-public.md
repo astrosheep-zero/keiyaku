@@ -12,7 +12,10 @@ A status snapshot shows current actionable work: the open Turn when present,
 active tools, pending tells, and otherwise the latest outcome. Bounded ordinary
 detail can become typed gaps, but active work and actionable tells remain
 visible. Reported changes are a read-time summary of successful file-change
-activity on that same frontier, never a file ledger or fact.
+activity on that same frontier, grouped by path and bounded to the five most
+recently changed files. Repeated edits to one path become one summary with
+accumulated known diffstat and the latest event identity; omitted counts refer
+to files, not events. They are never a file ledger or fact.
 
 History pages the same projected ledger and is the sole public execution-history
 read. It retains exact answered outcome bytes, including an empty answer, and

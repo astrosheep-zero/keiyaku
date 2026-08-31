@@ -53,18 +53,14 @@ function renderDirtyRefusal(
 ): readonly string[] {
   const lines: string[] = [];
   wrap(lines, refusalHead(refusal.kind, identity, []), indent, columns);
+  wrap(lines, "reason worktree has uncommitted changes", indent, columns);
   for (const name of ["staged", "unstaged", "untracked", "submodules"] as const) {
     lines.push(...collectionLines(name, refusal[name], indent, columns));
   }
   wrap(lines, gitShortStat(refusal.shortStat), indent, columns);
-  if (refusal.option !== undefined) {
-    wrap(
-      lines,
-      `option ${refusal.option.flag} ${refusal.option.available ? "available" : "unavailable"}`,
-      indent,
-      columns,
-    );
-  }
+  wrap(lines, "--include-dirty captures all non-ignored worktree bytes in the candidate", indent, columns);
+  if (refusal.option?.available === false)
+    wrap(lines, "--include-dirty unavailable while submodules have changes", indent, columns);
   return lines;
 }
 

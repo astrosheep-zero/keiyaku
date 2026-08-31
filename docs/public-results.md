@@ -33,10 +33,13 @@ reuse, not a cache or a new evidence source.
 
 A normal integration conflict is a non-admission refusal. Explicit conflict
 materialization instead returns a handoff result with no admitted fact,
-candidate identity, verification, or placement. Workspace dirtiness, unmerged
-state, missing target or workspace, unsupported integration, and target movement
-remain typed public conditions rather than hidden retry policy. Target movement
-never masquerades as claim or already-applied placement.
+candidate identity, verification, or placement. Dirty bytes may be included in
+that handoff only with explicit dirty-capture authorization; the handoff
+preserves those bytes as its base before projecting the judged conflict.
+Workspace dirtiness without that authorization, unmerged state, missing target or
+workspace, unsupported integration, and target movement remain typed public
+conditions rather than hidden retry policy. Target movement never masquerades as
+claim or already-applied placement.
 
 A materialized handoff is itself a complete no-fact delivery outcome. Its
 forwarded descriptor is durable service evidence sufficient to return that same

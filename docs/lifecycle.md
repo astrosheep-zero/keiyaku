@@ -25,11 +25,13 @@ Delivery captures a candidate and frozen placement policy. A later delivery
 replaces that candidate. A conflict normally refuses without changing Contract
 authority; explicit conflict handoff may project it into the appointed workspace
 without treating the projection as delivery. Dirty workspace bytes require
-explicit delivery authorization. Review may test the actual worktree before a
-delivery and is not delivery authorization. A satisfied review may request
-trailing placement; an unsatisfied review never does. Review and delivery share
-the candidate's worktree-content identity when it becomes relevant, while target
-movement alone does not make a review stale.
+explicit delivery authorization; with that authorization, conflict materialization
+preserves the captured bytes as the handoff base before projecting the judged
+conflict. Review may test the actual worktree before a delivery and is not
+delivery authorization. A satisfied review may request trailing placement; an
+unsatisfied review never does. Review and delivery share the candidate's
+worktree-content identity when it becomes relevant, while target movement alone
+does not make a review stale.
 
 Abandonment is the sole alternate terminal outcome. It neither reads nor moves
 the target and cannot be reopened. An arc is a narrative chapter within one

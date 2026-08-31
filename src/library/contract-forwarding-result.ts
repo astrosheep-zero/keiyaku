@@ -183,7 +183,7 @@ const integrationRefusalSchema = z.union([
       conflictPaths: z.array(nonblankStringSchema),
       recovery: z
         .object({
-          materialize: z.literal("deliver --materialize-conflict"),
+          materialize: z.literal("deliver --materialize-conflict --include-dirty"),
           continue: z.literal("deliver --include-dirty"),
         })
         .strict(),

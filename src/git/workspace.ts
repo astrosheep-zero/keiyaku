@@ -27,6 +27,15 @@ export function worktreePath(repository: GitRepository, place: string): string {
   return resolve(repository.primaryWorktree, ...WORKTREE_DIRECTORY, place);
 }
 
+/** Check out a captured candidate tree in the appointed detached worktree. */
+export async function checkoutDetachedSnapshot(
+  repository: GitRepository,
+  workspace: string,
+  snapshot: SnapshotId,
+): Promise<void> {
+  await runGit(repository, ["-C", workspace, "checkout", "--quiet", "--force", "--detach", gitObjectId(snapshot)]);
+}
+
 export type DependentWorktreeFollow =
   | Readonly<{ kind: "followed"; before: SnapshotId; after: SnapshotId }>
   | Readonly<{ kind: "unchanged" }>

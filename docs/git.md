@@ -52,7 +52,10 @@ opaque Git inputs, and Git never judges their currentness.
 
 Delivery normally requires a clean managed worktree. Explicit dirty delivery
 captures the complete non-ignored final tree without rewriting the caller's
-checkout; it does not authorize dirty submodule internals. Review can observe
+checkout; it does not authorize dirty submodule internals. When conflict
+materialization is explicitly requested with that authorization, it preserves
+the captured bytes as the handoff base before projecting the judged conflict.
+Review can observe
 ordinary dirty work without gaining delivery authority. The candidate's
 worktree-content identity changes only with the captured content, not target
 movement, reintegration, or diff presentation. A judged conflict changes no

@@ -738,7 +738,7 @@ test("snapshot selects one current focus while history keeps honest tool lifecyc
   assert.equal(snapshot(mixedLedger).kind, "idle");
 });
 
-test("reported file changes follow the open or latest closed frontier", () => {
+test("reported file changes follow the open or latest closed frontier and aggregate files", () => {
   const earlierCall = { kind: "fileChange" as const, changes: [{ op: "add" as const, path: "src/earlier.ts" }] };
   const frontierCall = {
     kind: "fileChange" as const,
@@ -888,13 +888,6 @@ test("reported file changes follow the open or latest closed frontier", () => {
     {
       sequence: 6,
       at: "2026-08-10T00:00:06.000Z",
-      op: "update",
-      path: "src/repeated.ts",
-      diffstat: { added: 2, removed: 1 },
-    },
-    {
-      sequence: 6,
-      at: "2026-08-10T00:00:06.000Z",
       op: "delete",
       path: "src/removed.ts",
       diffstat: { added: 0, removed: 3 },
@@ -905,7 +898,7 @@ test("reported file changes follow the open or latest closed frontier", () => {
       at: "2026-08-10T00:00:06.000Z",
       op: "update",
       path: "src/repeated.ts",
-      diffstat: { added: 1, removed: 0 },
+      diffstat: { added: 3, removed: 1 },
     },
   ]);
   assert.equal(open.reportedChangesOmitted, 0);
@@ -940,7 +933,7 @@ test("reported file changes keep the newest five independently of ordinary omiss
     changes: [
       { op: "add" as const, path: "src/one.ts" },
       { op: "update" as const, path: "src/two.ts" },
-      { op: "delete" as const, path: "src/three.ts" },
+      { op: "delete" as const, path: "src/three.ts", diffstat: { added: 0, removed: 3 } },
     ],
   };
   const secondCall = {
@@ -950,6 +943,7 @@ test("reported file changes keep the newest five independently of ordinary omiss
       { op: "update" as const, path: "src/five.ts" },
       { op: "delete" as const, path: "src/six.ts" },
       { op: "add" as const, path: "src/seven.ts" },
+      { op: "update" as const, path: "src/three.ts" },
     ],
   };
   const ledger = projectTurns([
@@ -1022,12 +1016,14 @@ test("reported file changes keep the newest five independently of ordinary omiss
   assert.equal(view.kind, "open");
   assert.deepEqual(
     view.reportedChanges.map((change) => change.path),
-    ["src/three.ts", "src/four.ts", "src/five.ts", "src/six.ts", "src/seven.ts"],
+    ["src/four.ts", "src/five.ts", "src/six.ts", "src/seven.ts", "src/three.ts"],
   );
   assert.deepEqual(
     view.reportedChanges.map((change) => change.sequence),
-    [2, 5, 5, 5, 5],
+    [5, 5, 5, 5, 5],
   );
+  assert.equal(view.reportedChanges.at(-1)?.op, "update");
+  assert.equal(view.reportedChanges.at(-1)?.diffstat, undefined);
   assert.equal(view.reportedChangesOmitted, 2);
   assert.equal(view.omitted, 5);
   assert.deepEqual(view.entries, [{ kind: "gap", count: 5 }]);

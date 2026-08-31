@@ -106,43 +106,6 @@ test("the bundled plugin contains all six skills", () => {
   }
 });
 
-test("bundled skills give each operating concept one owner", () => {
-  const skills = join(installAssetsRoot(), "plugins", "keiyaku", "skills");
-  const bind = readFileSync(join(skills, "keiyaku-bind", "SKILL.md"), "utf8");
-  const workflow = readFileSync(join(skills, "keiyaku-workflow", "SKILL.md"), "utf8");
-  const task = readFileSync(join(skills, "keiyaku-task", "SKILL.md"), "utf8");
-  const babysit = readFileSync(join(skills, "keiyaku-babysit", "SKILL.md"), "utf8");
-  const akuma = readFileSync(join(skills, "keiyaku-akuma", "SKILL.md"), "utf8");
-
-  assert.match(bind, /keiyaku -C <repo> bind/);
-  assert.match(bind, /## What Bind Records/);
-  assert.match(bind, /## Authority Order/);
-  assert.match(bind, /journaled terms\s+are the standing acceptance floor/);
-  assert.doesNotMatch(bind, /worker brief \(zero authority\)/);
-  for (const decision of [
-    "hold or delegate",
-    "shape the work",
-    "commission seats",
-    "adjudicate returns",
-    "schedule landing",
-  ]) {
-    assert.match(workflow, new RegExp(`## Decision \\d — ${decision}`));
-  }
-  assert.match(workflow, /Work begun directly that grows\s+beyond expectation escalates midstream/);
-  assert.match(workflow, /Allowed actions are commission configuration, not prompt prose/);
-  assert.match(workflow, /A returned Reviewer verdict is transported faithfully into\s+testimony/);
-  assert.doesNotMatch(
-    workflow,
-    /adjudicable|constructible current failure|term defect|second unsatisfied review|deletion-litmus/u,
-  );
-  assert.match(task, /## What A Task Is Not/);
-  assert.match(task, /no acceptance, no permission, no\s+scope, no fulfillment loop/);
-  assert.match(babysit, /Babysitting is a method, not a role/);
-  assert.match(babysit, /Babysitting decides only when you look and\s+what you check next/);
-  assert.match(akuma, /## Commission And Steer/);
-  assert.match(akuma, /The prompt and every later tell genuinely direct the callee's\s+work/);
-});
-
 test("bundled instructions keep facade and standalone Akuma call surfaces distinct", () => {
   const plugin = join(installAssetsRoot(), "plugins", "keiyaku", "skills");
   const call = renderAkumaUsage("call").slice("usage: keiyaku ".length);

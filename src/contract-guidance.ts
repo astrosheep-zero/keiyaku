@@ -26,14 +26,14 @@ export const CONTRACT_DELIVERER_SKILL = [
   "",
   "`keiyaku deliver` submits the current state of the whole worktree as the Contract's candidate.",
   "",
-  "When the finished worktree itself is the candidate, use `deliver --include-dirty`; Keiyaku captures its complete non-ignored state without moving this worktree's HEAD or real index.",
+  "When the finished worktree itself is the candidate, use `deliver --include-dirty`; Keiyaku captures its complete non-ignored state without moving this worktree's HEAD or real index. When materializing a conflict, the same flag preserves those bytes as the handoff base before projecting the judged conflict.",
   "",
   "```bash",
   "keiyaku deliver <contract> --include-dirty",
-  "keiyaku deliver <contract> --materialize-conflict",
+  "keiyaku deliver <contract> --materialize-conflict --include-dirty",
   "```",
   "",
-  "If delivery reports an integration conflict, materialize that judged conflict, resolve it in this worktree, then deliver the resolved bytes with `--include-dirty`. Deliver when the candidate is ready and the evidence is in place; delivery records and requests placement, while the Reviewer independently judges any declared review gate.",
+  "If delivery reports an integration conflict, materialize that judged conflict with `--include-dirty`; Keiyaku preserves the complete non-ignored worktree bytes as the handoff base before projecting the conflict. Resolve it in this worktree, then deliver the resolved bytes with `--include-dirty`. Deliver when the candidate is ready and the evidence is in place; delivery records and requests placement, while the Reviewer independently judges any declared review gate.",
 ]
   .join("\n")
   .concat("\n");

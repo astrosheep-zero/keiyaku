@@ -75,8 +75,9 @@ export const CONTRACT_COMMAND_SPECS = {
       "  --include-dirty         Include all non-ignored worktree bytes, including an",
       "                          unmerged shared index, in the candidate commit.",
       "  --materialize-conflict  After a conflict result, project the judged targetHead",
-      "                          into the worktree as an uncommitted merge. Not a",
-      "                          delivery: resolve, then deliver with --include-dirty.",
+      "                          into the worktree as an uncommitted merge. With",
+      "                          --include-dirty, captured non-ignored bytes are kept",
+      "                          as the merge base. Not a delivery: resolve, then deliver with --include-dirty.",
     ].join("\n"),
   },
   review: {

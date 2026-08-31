@@ -597,19 +597,18 @@ test("Akuma snapshot tasks stay compact and do not invent relations", () => {
   assert.match(wrapped, /^ {4}\S/mu);
 });
 
-test("Akuma snapshot changes aggregate paths and leave JSON repeated", () => {
+test("Akuma snapshot changes render file summaries and preserve JSON values", () => {
   const nuke = "/tmp/keiyaku-integration.uAA0a9/repo/tests/nuke.test.ts";
   const valhalla = "/Users/astrosheep/Developer/keiyaku-v4/.git/keiyaku/wt/valhalla/src/cli/invoke.ts";
   const invoke = "/tmp/keiyaku-integration.uAA0a9/repo/src/cli/invoke.ts";
   const reportedChanges = [
     {
-      sequence: 1,
-      at: "2026-08-10T16:42:00.000Z",
+      sequence: 5,
+      at: "2026-08-10T16:42:04.000Z",
       op: "update" as const,
       path: nuke,
-      diffstat: { added: 1, removed: 1 },
+      diffstat: { added: 3, removed: 2 },
     },
-    { sequence: 2, at: "2026-08-10T16:42:01.000Z", op: "add" as const, path: nuke, diffstat: { added: 2, removed: 1 } },
     {
       sequence: 3,
       at: "2026-08-10T16:42:02.000Z",
@@ -623,13 +622,6 @@ test("Akuma snapshot changes aggregate paths and leave JSON repeated", () => {
       op: "update" as const,
       path: invoke,
       diffstat: { added: 10, removed: 10 },
-    },
-    {
-      sequence: 5,
-      at: "2026-08-10T16:42:04.000Z",
-      op: "update" as const,
-      path: nuke,
-      diffstat: { added: 0, removed: 0 },
     },
   ];
   const observation = akumaObservation({
@@ -646,12 +638,12 @@ test("Akuma snapshot changes aggregate paths and leave JSON repeated", () => {
   const result = { kind: "akuma" as const, action: "status" as const, status: observation };
   const text = renderAkumaText(statusCommand(observation.status.id), result, { columns: 20, color: false });
   const lines = text.split("\n");
-  const changesAt = lines.indexOf("changes 15");
-  assert.equal(lines[changesAt], "changes 15");
+  const changesAt = lines.indexOf("changes 13");
+  assert.equal(lines[changesAt], "changes 13");
   assert.equal(lines[changesAt + 1], `  +3 -2    ${nuke}`);
   assert.equal(lines[changesAt + 2], `  +15 -10  ${valhalla}`);
   assert.equal(lines[changesAt + 3], `  +10 -10  ${invoke}`);
-  assert.equal(lines[changesAt + 4], "  ⋮ 10 earlier changes");
+  assert.equal(lines[changesAt + 4], "  ⋮ 10 more files");
   assert.equal(text.split(nuke).length - 1, 1);
   const json = akumaJsonValue(result) as AkumaObservation;
   assert.deepEqual(json.status.timeline.reportedChanges, reportedChanges);
@@ -665,13 +657,6 @@ test("Akuma snapshot changes aggregate paths and leave JSON repeated", () => {
         entries: [],
         omitted: 0,
         reportedChanges: [
-          {
-            sequence: 1,
-            at: "2026-08-10T16:42:00.000Z",
-            op: "update",
-            path: "src/a.ts",
-            diffstat: { added: 1, removed: 1 },
-          },
           { sequence: 2, at: "2026-08-10T16:42:01.000Z", op: "update", path: "src/a.ts" },
           {
             sequence: 3,

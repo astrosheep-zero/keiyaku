@@ -57,7 +57,7 @@ export type DeliverConflictRefusal = Readonly<{
   targetHead: SnapshotId;
   conflictPaths: readonly string[];
   recovery: Readonly<{
-    materialize: "deliver --materialize-conflict";
+    materialize: "deliver --materialize-conflict --include-dirty";
     continue: "deliver --include-dirty";
   }>;
 }>;

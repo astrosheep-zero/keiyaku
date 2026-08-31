@@ -82,11 +82,52 @@ function flattenReportedChanges(rows: readonly (OpenTurnRow | UnsettledToolRow)[
     }));
   });
 }
+
+type AggregatedReportedChange = {
+  latest: ReportedFileChange;
+  lastIndex: number;
+  added: number;
+  removed: number;
+  complete: boolean;
+};
+
+function aggregateReportedChanges(changes: readonly ReportedFileChange[]): readonly ReportedFileChange[] {
+  const groups = new Map<string, AggregatedReportedChange>();
+  changes.forEach((change, index) => {
+    const current = groups.get(change.path);
+    const diffstat = change.diffstat;
+    if (current === undefined) {
+      groups.set(change.path, {
+        latest: change,
+        lastIndex: index,
+        added: diffstat?.added ?? 0,
+        removed: diffstat?.removed ?? 0,
+        complete: diffstat !== undefined,
+      });
+      return;
+    }
+    current.latest = change;
+    current.lastIndex = index;
+    if (diffstat === undefined) current.complete = false;
+    else {
+      current.added += diffstat.added;
+      current.removed += diffstat.removed;
+    }
+  });
+  return [...groups.values()]
+    .sort((left, right) => left.lastIndex - right.lastIndex)
+    .map((group) => {
+      if (group.complete) return { ...group.latest, diffstat: { added: group.added, removed: group.removed } };
+      const { sequence, at, op, path } = group.latest;
+      return { sequence, at, op, path };
+    });
+}
+
 function summarizeReportedChanges(rows: readonly (OpenTurnRow | UnsettledToolRow)[]): ReportedChangeSummary {
-  const eligible = flattenReportedChanges(rows);
+  const files = aggregateReportedChanges(flattenReportedChanges(rows));
   return {
-    reportedChanges: eligible.slice(-REPORTED_CHANGE_LIMIT),
-    reportedChangesOmitted: Math.max(0, eligible.length - REPORTED_CHANGE_LIMIT),
+    reportedChanges: files.slice(-REPORTED_CHANGE_LIMIT),
+    reportedChangesOmitted: Math.max(0, files.length - REPORTED_CHANGE_LIMIT),
   };
 }
 function frontierReportedChanges(ledger: TurnLedger): ReportedChangeSummary {
