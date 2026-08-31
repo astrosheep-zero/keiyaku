@@ -29,6 +29,14 @@ function trace(path: string): readonly string[] {
   return existsSync(path) ? readFileSync(path, "utf8").trim().split("\n").filter(Boolean) : [];
 }
 
+async function eventually(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error("timed out waiting for plugin effect");
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 test("plugin runtime selects project-shadowed enabled plugins in manifest-id order", async () => {
   const value = fixture();
   try {
@@ -82,6 +90,7 @@ test("plugin runtime selects project-shadowed enabled plugins in manifest-id ord
       settings: await settings({ root: value.root, home: value.home }),
       reportDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
     });
+    await eventually(() => trace(output).includes("activate:beta"));
     await runtime.emit({
       kind: "akuma.turn-outcome",
       akumaId: "aku/example",
@@ -90,6 +99,7 @@ test("plugin runtime selects project-shadowed enabled plugins in manifest-id ord
       contractId: "kei/example",
     });
 
+    await eventually(() => trace(output).includes("signal:aku/example:2"));
     assert.deepEqual(trace(output), ["activate:project-alpha", "activate:beta", "signal:aku/example:2"]);
     assert.deepEqual(diagnostics, []);
   } finally {
@@ -140,6 +150,7 @@ test("plugin activation stages handlers and isolates import and activation failu
       world: await World.at(value.root),
       reportDiagnostic: (value) => diagnostics.push(value),
     });
+    await eventually(() => trace(output).includes("broken-activation"));
     await runtime.emit({
       kind: "akuma.turn-outcome",
       akumaId: "aku/example",
@@ -147,7 +158,9 @@ test("plugin activation stages handlers and isolates import and activation failu
       outcome: { kind: "failed", reason: "no" },
     });
 
+    await eventually(() => trace(output).includes("working-signal"));
     assert.deepEqual(trace(output), ["broken-activation", "working-signal"]);
+    await eventually(() => diagnostics.some((value) => value.startsWith("plugin missing import:")));
     assert.equal(
       diagnostics.some((value) => value.startsWith("plugin broken activation:")),
       true,
@@ -199,6 +212,7 @@ test("plugin runtime resolves bare package exports with the ESM import condition
 
     await pluginRuntime({ world: await World.at(value.root) });
 
+    await eventually(() => trace(output).includes("import"));
     assert.deepEqual(trace(output), ["import"]);
   } finally {
     value.close();
@@ -247,9 +261,17 @@ test("plugin delivery starts generic call handlers independently and contains ha
       world: await World.at(value.root),
       reportDiagnostic: (value) => diagnostics.push(value),
     });
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
     await runtime.emit({ kind: "akuma.called", akumaId: "aku/example" });
 
-    assert.deepEqual(trace(output), ["slow-start", "fast:aku/example", "slow-fail"]);
+    await eventually(() => trace(output).includes("slow-start"));
+    await eventually(() => trace(output).includes("slow-fail"));
+    const observed = trace(output);
+    assert.equal(observed.includes("fast:aku/example"), true);
+    assert.equal(observed.indexOf("slow-start") < observed.indexOf("slow-fail"), true);
+    await eventually(() =>
+      diagnostics.some((value) => value.startsWith("plugin alpha signal: handler failed")),
+    );
     assert.equal(
       diagnostics.some((value) => value.startsWith("plugin alpha signal: handler failed")),
       true,
@@ -284,8 +306,11 @@ test("cached plugin handlers report each signal failure to its own diagnostic ca
       world: await World.at(value.root),
       reportDiagnostic: (diagnostic) => first.push(diagnostic),
     });
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
     await runtime.emit({ kind: "akuma.called", akumaId: "aku/first" });
+    await eventually(() => first.length === 1);
     await runtime.emit({ kind: "akuma.called", akumaId: "aku/second" }, (diagnostic) => second.push(diagnostic));
+    await eventually(() => second.length === 1);
 
     assert.deepEqual(first, ["plugin failing signal: handler failed"]);
     assert.deepEqual(second, ["plugin failing signal: handler failed"]);
@@ -347,6 +372,7 @@ test("plugin writable paths reject traversal, management custody, duplicate name
     const diagnostics: string[] = [];
     await pluginRuntime({ world, reportDiagnostic: (value) => diagnostics.push(value) });
 
+    await eventually(() => trace(output).includes("undeclared"));
     assert.deepEqual(trace(output), [join(world, ".square"), "undeclared"]);
     assert.equal(existsSync(join(outside, "escape")), false);
     for (const id of ["case", "duplicate", "reserved", "symlink", "traversal"]) {
@@ -355,6 +381,102 @@ test("plugin writable paths reject traversal, management custody, duplicate name
         true,
       );
     }
+  } finally {
+    value.close();
+  }
+});
+
+test("hanging activation does not block runtime availability or another plugin", async () => {
+  const value = fixture();
+  try {
+    const output = join(value.root, "trace.txt");
+    writePlugin(
+      value.root,
+      "hanging",
+      [
+        "export default {",
+        '  manifest: { id: "hanging", apiVersion: 1 },',
+        "  activate() { return new Promise(() => {}); },",
+        "};",
+      ].join("\n"),
+    );
+    writePlugin(
+      value.root,
+      "working",
+      [
+        'import { appendFileSync } from "node:fs";',
+        "export default {",
+        '  manifest: { id: "working", apiVersion: 1 },',
+        '  activate(context) { appendFileSync(context.config.trace, "activated\\n"); return { signals: { "akuma.called": () => appendFileSync(context.config.trace, "called\\n") } }; },',
+        "};",
+      ].join("\n"),
+    );
+    mkdirSync(join(value.root, ".keiyaku"), { recursive: true });
+    writeFileSync(
+      join(value.root, ".keiyaku", "settings.json"),
+      JSON.stringify({
+        plugins: {
+          hanging: { package: "./plugins/hanging.mjs" },
+          working: { package: "./plugins/working.mjs", config: { trace: output } },
+        },
+      }),
+    );
+
+    const runtime = await Promise.race([
+      pluginRuntime({ world: await World.at(value.root) }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("runtime blocked")), 100)),
+    ]);
+    await eventually(() => trace(output).includes("activated"));
+    await runtime.emit({ kind: "akuma.called", akumaId: "aku/example" });
+    await eventually(() => trace(output).includes("called"));
+  } finally {
+    value.close();
+  }
+});
+
+test("hanging handler does not block another handler or emit completion", async () => {
+  const value = fixture();
+  try {
+    const output = join(value.root, "trace.txt");
+    writePlugin(
+      value.root,
+      "hanging",
+      [
+        "export default {",
+        '  manifest: { id: "hanging", apiVersion: 1 },',
+        '  activate() { return { signals: { "akuma.called": () => new Promise(() => {}) } }; },',
+        "};",
+      ].join("\n"),
+    );
+    writePlugin(
+      value.root,
+      "working",
+      [
+        'import { appendFileSync } from "node:fs";',
+        "export default {",
+        '  manifest: { id: "working", apiVersion: 1 },',
+        '  activate(context) { appendFileSync(context.config.trace, "activated\\n"); return { signals: { "akuma.called": () => appendFileSync(context.config.trace, "called\\n") } }; },',
+        "};",
+      ].join("\n"),
+    );
+    mkdirSync(join(value.root, ".keiyaku"), { recursive: true });
+    writeFileSync(
+      join(value.root, ".keiyaku", "settings.json"),
+      JSON.stringify({
+        plugins: {
+          hanging: { package: "./plugins/hanging.mjs" },
+          working: { package: "./plugins/working.mjs", config: { trace: output } },
+        },
+      }),
+    );
+
+    const runtime = await pluginRuntime({ world: await World.at(value.root) });
+    await eventually(() => trace(output).includes("activated"));
+    await Promise.race([
+      runtime.emit({ kind: "akuma.called", akumaId: "aku/example" }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("emit blocked")), 100)),
+    ]);
+    await eventually(() => trace(output).includes("called"));
   } finally {
     value.close();
   }

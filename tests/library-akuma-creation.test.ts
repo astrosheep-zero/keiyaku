@@ -36,6 +36,7 @@ import {
 } from "../src/git/repository.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { bodyRequestExecution, Keiyaku, Repo, World, settings } from "../src/index.js";
+import { pluginRuntime } from "../src/plugin/runtime.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import { invoke } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
@@ -204,10 +205,11 @@ test("package-root World inputs reject a forged JavaScript coordinate before eff
   }
 });
 
-test("Keiyaku.call emits the admitted generic signal before call completion", async () => {
+test("Keiyaku.call dispatches the admitted generic signal without blocking completion", async () => {
   const { raw, repo } = await repositoryFixture();
   const world = await World.at(raw.path);
   const trace = join(raw.path, "called.json");
+  const ready = join(raw.path, "called.ready");
   mkdirSync(join(raw.path, ".keiyaku"), { recursive: true });
   mkdirSync(join(raw.path, "plugins"), { recursive: true });
   writeFileSync(
@@ -216,25 +218,25 @@ test("Keiyaku.call emits the admitted generic signal before call completion", as
       'import { writeFileSync } from "node:fs";',
       "export default {",
       '  manifest: { id: "called", apiVersion: 1 },',
-      '  activate(context) { return { signals: { "akuma.called": (signal) => writeFileSync(context.config.trace, JSON.stringify(signal)) } }; },',
+      '  activate(context) { writeFileSync(context.config.ready, "ready"); return { signals: { "akuma.called": (signal) => writeFileSync(context.config.trace, JSON.stringify(signal)) } }; },',
       "};",
     ].join("\n"),
   );
   writeFileSync(
     join(raw.path, ".keiyaku", "settings.json"),
-    JSON.stringify({ plugins: { called: { package: "./plugins/called.mjs", config: { trace } } } }),
+    JSON.stringify({ plugins: { called: { package: "./plugins/called.mjs", config: { trace, ready } } } }),
   );
   const configured = await archetypeSettings(world);
+  await pluginRuntime({ world, settings: configured.value });
   const { pump, leash } = await requestPump(world);
   const routedKeiyaku = Keiyaku.withExecution({ execution: bodyRequestExecution({ directory: pump.directory }) });
+  const activationDeadline = Date.now() + 1_000;
+  while (!existsSync(ready)) {
+    if (Date.now() >= activationDeadline) throw new Error("timed out waiting for called plugin activation");
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+  }
   const bound = await Keiyaku.bind({ repo, markdown: markdown("Call plugin signal"), workspace: "worktree" });
   const contractId = (await bound.keiyaku.state()).id;
-  const originalStatus = AkumaHandle.prototype.status;
-  let emittedBeforeFinish = false;
-  AkumaHandle.prototype.status = async function (...args) {
-    emittedBeforeFinish = existsSync(trace);
-    return await originalStatus.apply(this, args);
-  };
   try {
     const result = await routedKeiyaku.call({
       path: world,
@@ -245,7 +247,11 @@ test("Keiyaku.call emits the admitted generic signal before call completion", as
       cwd: raw.path,
       mode: "detach",
     });
-    assert.equal(emittedBeforeFinish, true);
+    const deadline = Date.now() + 1_000;
+    while (!existsSync(trace)) {
+      if (Date.now() >= deadline) throw new Error("timed out waiting for called plugin signal");
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    }
     assert.deepEqual(JSON.parse(readFileSync(trace, "utf8")), {
       kind: "akuma.called",
       akumaId: result.akuma,
@@ -253,7 +259,6 @@ test("Keiyaku.call emits the admitted generic signal before call completion", as
       contractId,
     });
   } finally {
-    AkumaHandle.prototype.status = originalStatus;
     await pump.close();
     leash.release();
     rmSync(raw.path, { recursive: true, force: true });

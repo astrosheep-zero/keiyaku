@@ -37,6 +37,7 @@ import {
 import { akumaCallRequestCommands, requestForwardedAkumaCall as requestBodyCall } from "../src/akuma/call-request.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import type { PluginSignal } from "../src/plugin/public.js";
+import { pluginRuntime } from "../src/plugin/runtime.js";
 import { World } from "../src/world.js";
 
 type TurnOutcomePluginRecorder = {
@@ -161,6 +162,14 @@ function bodyAdapter(adapter: ProviderAdapter): ProviderAdapter {
 async function driveAkumaBody(...input: Parameters<typeof runAkumaBody>): Promise<void> {
   if (input[1] === undefined) await runAkumaBody(...input);
   else await runAkumaBody(input[0], bodyAdapter(input[1]), input[2]);
+}
+
+async function eventually(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error("timed out waiting for plugin observation");
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+  }
 }
 
 function adapter(
@@ -337,6 +346,8 @@ test("turn-outcome plugins observe every committed answered Turn exactly once", 
       },
     };
     turnOutcomePluginGlobal.__keiyakuTurnOutcomePluginRecorder = recorder;
+    await pluginRuntime({ world: await World.at(root) });
+    await eventually(() => recorder.activations === 1);
     const launch: BodyLaunch = {
       paths: allocated.paths,
       seed: {
@@ -367,7 +378,8 @@ test("turn-outcome plugins observe every committed answered Turn exactly once", 
       { now: () => "2026-08-08T00:00:00.000Z" },
     );
 
-    assert.equal(recorder.activations, 1);
+    assert.equal((await readHeart(allocated.paths)).latestBody?.end, "exited");
+    await eventually(() => recorder.activations === 1 && recorder.observations.length === 1);
     assert.deepEqual(recorder.observations, [
       {
         signal: {
@@ -387,8 +399,6 @@ test("turn-outcome plugins observe every committed answered Turn exactly once", 
         ],
       },
     ]);
-    assert.equal((await readHeart(allocated.paths)).latestBody?.end, "exited");
-
     await recordTell(allocated.paths, {
       id: "plugin-tell",
       body: "adjust it",
@@ -404,8 +414,8 @@ test("turn-outcome plugins observe every committed answered Turn exactly once", 
       { now: () => "2026-08-08T00:00:02.000Z" },
     );
 
-    assert.equal(recorder.activations, 1);
-    assert.equal(recorder.observations.length, 2);
+    assert.equal((await readHeart(allocated.paths)).latestBody?.end, "exited");
+    await eventually(() => recorder.activations === 1 && recorder.observations.length === 2);
     const sequences = await committedTurnSequences(allocated.paths);
     assert.deepEqual(
       recorder.observations.map(({ signal }) =>
@@ -454,6 +464,8 @@ test("turn-outcome plugins observe a committed failed Turn without changing it",
       },
     };
     turnOutcomePluginGlobal.__keiyakuTurnOutcomePluginRecorder = recorder;
+    await pluginRuntime({ world: await World.at(root) });
+    await eventually(() => recorder.activations === 1);
 
     await driveAkumaBody(
       {
@@ -472,7 +484,10 @@ test("turn-outcome plugins observe a committed failed Turn without changing it",
       { now: () => "2026-08-08T00:00:00.000Z" },
     );
 
-    assert.equal(recorder.activations, 1);
+    const heart = await readHeart(allocated.paths);
+    assert.equal(heart.latestBody?.end, "broke-off");
+    assert.deepEqual(await outcomes(allocated.paths), [{ kind: "failed", diagnostic: "provider failed" }]);
+    await eventually(() => recorder.activations === 1 && recorder.observations.length === 1);
     assert.deepEqual(recorder.observations, [
       {
         signal: {
@@ -484,11 +499,73 @@ test("turn-outcome plugins observe a committed failed Turn without changing it",
         outcomes: [{ kind: "failed", diagnostic: "provider failed" }],
       },
     ]);
-    const heart = await readHeart(allocated.paths);
-    assert.equal(heart.latestBody?.end, "broke-off");
-    assert.deepEqual(await outcomes(allocated.paths), [{ kind: "failed", diagnostic: "provider failed" }]);
   } finally {
     delete turnOutcomePluginGlobal.__keiyakuTurnOutcomePluginRecorder;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a hanging turn-outcome handler cannot hold Body supervisor close or the leash", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-plugin-hanging-handler-"));
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abda" });
+    await initializeHeart(allocated.paths);
+    const ready = join(root, "plugin.ready");
+    mkdirSync(join(root, "plugins"), { recursive: true });
+    writeFileSync(
+      join(root, "plugins", "hanging.mjs"),
+      [
+        'import { writeFileSync } from "node:fs";',
+        "export default {",
+        '  manifest: { id: "hanging", apiVersion: 1 },',
+        '  activate(context) { writeFileSync(context.config.ready, "ready"); return { signals: { "akuma.turn-outcome": () => new Promise(() => {}) } }; },',
+        "};",
+      ].join("\n"),
+    );
+    mkdirSync(join(root, ".keiyaku"), { recursive: true });
+    writeFileSync(
+      join(root, ".keiyaku", "settings.json"),
+      JSON.stringify({ plugins: { hanging: { package: "./plugins/hanging.mjs", config: { ready } } } }),
+    );
+    await pluginRuntime({ world: await World.at(root) });
+    await eventually(() => existsSync(ready));
+
+    const body = driveAkumaBody(
+      {
+        paths: allocated.paths,
+        seed: {
+          id: allocated.id,
+          archetype: "claude",
+          provider: { name: "claude", kind: "claude-agent-sdk" },
+          options: {},
+          origin: { kind: "direct" },
+          cwd: root,
+        },
+        initialBody: "work",
+      },
+      adapter({
+        starts: [],
+        events: [{ type: "session", coordinate: { sessionId: "hanging-handler-session" } }],
+        result: { kind: "answered", answer: "done", historyId: "hanging-handler-history" },
+      }),
+      { now: () => "2026-08-08T00:00:00.000Z" },
+    );
+    await Promise.race([
+      body,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Body did not close")), 1_000)),
+    ]);
+
+    assert.equal(await probeLeash(allocated.paths), "free");
+    assert.equal((await readHeart(allocated.paths)).latestBody?.end, "exited");
+    assert.deepEqual(await outcomes(allocated.paths), [
+      {
+        kind: "answered",
+        answer: "done",
+        historyId: "hanging-handler-history",
+        session: { sessionId: "hanging-handler-session" },
+      },
+    ]);
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });

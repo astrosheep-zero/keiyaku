@@ -229,39 +229,35 @@ async function recoverBodyRequests(input: BodyExecution): Promise<boolean> {
   return false;
 }
 
-function turnOutcomeEmitter(
-  launch: BodyLaunch,
-  soul: Soul,
-): (turnSequence: number, outcome: CommittedOutcome) => Promise<void> {
+function turnOutcomeEmitter(launch: BodyLaunch, soul: Soul): (turnSequence: number, outcome: CommittedOutcome) => void {
   let plugins: Promise<PluginRuntime> | undefined;
   const reportDiagnostic = (message: string): void => {
     void recordPluginDiagnostic(launch.paths, "turn outcome", message);
   };
-  return async (turnSequence, outcome) => {
-    try {
-      plugins ??= (async () =>
-        await pluginRuntime({
+  return (turnSequence, outcome) => {
+    void (async () => {
+      try {
+        plugins ??= pluginRuntime({
           world: await World.at(worldRootForAkumaPaths(launch.paths)),
           reportDiagnostic,
-        }))();
-      await (
-        await plugins
-      ).emit(
-        {
-          kind: "akuma.turn-outcome",
-          akumaId: soul.id,
-          turnSequence,
-          outcome:
-            outcome.outcome === "answered"
-              ? { kind: "answered", text: outcome.answer }
-              : { kind: "failed", reason: outcome.diagnostic },
-          ...(launch.completion?.contractId === undefined ? {} : { contractId: launch.completion.contractId }),
-        },
-        reportDiagnostic,
-      );
-    } catch (error) {
-      await recordPluginDiagnostic(launch.paths, "turn outcome", error);
-    }
+        });
+        (await plugins).emit(
+          {
+            kind: "akuma.turn-outcome",
+            akumaId: soul.id,
+            turnSequence,
+            outcome:
+              outcome.outcome === "answered"
+                ? { kind: "answered", text: outcome.answer }
+                : { kind: "failed", reason: outcome.diagnostic },
+            ...(launch.completion?.contractId === undefined ? {} : { contractId: launch.completion.contractId }),
+          },
+          reportDiagnostic,
+        );
+      } catch (error) {
+        await recordPluginDiagnostic(launch.paths, "turn outcome", error);
+      }
+    })();
   };
 }
 
@@ -312,7 +308,7 @@ async function runBodyTurns(input: BodyExecution): Promise<void> {
       return;
     }
     const outcome = await persistTurn(launch.paths, result.turnSequence, result, runtime.now());
-    await emitTurnOutcome(result.turnSequence, outcome);
+    emitTurnOutcome(result.turnSequence, outcome);
     if (outcome.outcome === "failed") {
       await breakBody(launch.paths, { sequence: bodySequence, end: "broke-off", at: runtime.now() });
       return;

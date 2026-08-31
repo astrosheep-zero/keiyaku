@@ -253,7 +253,7 @@ async function admitCall(
 ): Promise<Readonly<{ born: AkumaBornCall; akuma: AkuId }>> {
   const born = await input.world.beginCall(input.call, input.context);
   const akuma = born.kind === "requested" ? born.id : born.allocated.id;
-  await emitCalledSignal({
+  void emitCalledSignal({
     path: input.path,
     ...(input.settings === undefined ? {} : { settings: input.settings }),
     born,

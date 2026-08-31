@@ -17,7 +17,7 @@ export async function emitCalledPluginSignal(input: CalledPluginSignalInput): Pr
     ...(input.settings === undefined ? {} : { settings: input.settings }),
     reportDiagnostic: input.reportDiagnostic,
   });
-  await runtime.emit(
+  runtime.emit(
     {
       kind: "akuma.called",
       akumaId: input.akumaId,

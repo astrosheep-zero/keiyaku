@@ -310,20 +310,21 @@ async function createPluginRuntime(input: PluginRuntimeInput): Promise<PluginRun
   const selected = selectedPlugins(input.settings ?? (await settings({ root: input.world })), report);
   const activated = new Set<string>();
   const registered: RegisteredHandler[] = [];
-  for (const entry of selected) registered.push(...(await activate(entry, input.world, activated, report)));
+  for (const entry of selected) {
+    void activate(entry, input.world, activated, report)
+      .then((handlers) => registered.push(...handlers))
+      .catch((error) => diagnostic(report, entry.id, "activation", error));
+  }
 
   return Object.freeze({
-    async emit(signal: PluginSignal, reportDiagnostic: PluginDiagnostic | undefined = report): Promise<void> {
-      const deliveries = registered
-        .filter((handler) => handler.kind === signal.kind)
-        .map((entry) =>
-          Object.freeze({ entry, delivery: Promise.resolve().then(() => entry.handler(signal as never)) }),
-        );
-      const outcomes = await Promise.allSettled(deliveries.map(({ delivery }) => delivery));
-      for (const [index, outcome] of outcomes.entries()) {
-        if (outcome.status === "rejected")
-          diagnostic(reportDiagnostic, deliveries[index]!.entry.pluginId, "signal", outcome.reason);
+    emit(signal: PluginSignal, reportDiagnostic: PluginDiagnostic | undefined = report): Promise<void> {
+      const deliveries = registered.filter((handler) => handler.kind === signal.kind);
+      for (const entry of deliveries) {
+        void Promise.resolve()
+          .then(() => entry.handler(signal as never))
+          .catch((error) => diagnostic(reportDiagnostic, entry.pluginId, "signal", error));
       }
+      return Promise.resolve();
     },
   });
 }
