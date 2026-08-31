@@ -21,7 +21,6 @@ import {
 } from "./heart/index.js";
 import { worldRootForAkumaPaths, type AkumaPaths } from "./identity.js";
 import { pluginRuntime, type PluginRuntime } from "../plugin/runtime.js";
-import type { Settings } from "../settings.js";
 import { World, type WorldRoot } from "../world.js";
 import type { ProviderAdapter } from "./provider.js";
 import { resolveProviderExecution } from "./providers/index.js";
@@ -168,43 +167,6 @@ async function recordPluginDiagnostic(paths: AkumaPaths, occurrence: string, err
     await appendFile(paths.log, `plugin ${occurrence} failed: ${boundedDiagnostic(error)}\n`);
   } catch {
     /* plugin diagnostic loss never changes Heart truth */
-  }
-}
-
-export async function emitCalledPluginSignal(
-  input: Readonly<{
-    world: WorldRoot;
-    settings?: Settings;
-    paths?: AkumaPaths;
-    akumaId: string;
-    callerAkumaId?: string;
-    contractId?: string;
-  }>,
-): Promise<void> {
-  const paths = input.paths;
-  const reportDiagnostic =
-    paths === undefined
-      ? undefined
-      : (message: string) => {
-          void recordPluginDiagnostic(paths, "call admission", message);
-        };
-  try {
-    const runtime = await pluginRuntime({
-      world: input.world,
-      ...(input.settings === undefined ? {} : { settings: input.settings }),
-      ...(reportDiagnostic === undefined ? {} : { reportDiagnostic }),
-    });
-    await runtime.emit(
-      {
-        kind: "akuma.called",
-        akumaId: input.akumaId,
-        ...(input.callerAkumaId === undefined ? {} : { callerAkumaId: input.callerAkumaId }),
-        ...(input.contractId === undefined ? {} : { contractId: input.contractId }),
-      },
-      reportDiagnostic,
-    );
-  } catch (error) {
-    if (input.paths !== undefined) await recordPluginDiagnostic(input.paths, "call admission", error);
   }
 }
 

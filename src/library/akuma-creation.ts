@@ -1,14 +1,14 @@
-import { realpath, stat } from "node:fs/promises";
+import { appendFile, realpath, stat } from "node:fs/promises";
 import { moveAlias, type AliasBinding } from "../alias/index.js";
 import { Akuma, type AkumaStatus, type ForkReceipt, type ReadonlyRestraint } from "../akuma/akuma.js";
-import { emitCalledPluginSignal } from "../akuma/body.js";
 import type { AkumaBornCall } from "../akuma/akuma-product.js";
-import { pathsForAkuId, type AkuId } from "../akuma/identity.js";
+import { pathsForAkuId, type AkumaPaths, type AkuId } from "../akuma/identity.js";
 import { readSoul } from "../akuma/heart/index.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { ContractId } from "../core/facts/types.js";
 import { publishDispatch, readDispatch, type Dispatch, type DispatchFailure } from "../dispatch/index.js";
 import { parseAkumaAlias, type AkumaAlias } from "../identity/selector.js";
+import { emitCalledPluginSignal } from "../plugin/akuma-signals.js";
 import { readManagedWorktreeAppointment } from "../workspace-place.js";
 import type { Settings } from "../settings.js";
 import { World, type WorldRoot } from "../world.js";
@@ -195,6 +195,19 @@ async function callerAkuId(path: WorldRoot, born: AkumaBornCall): Promise<AkuId 
   return soul?.origin.kind === "request" ? soul.origin.parent : undefined;
 }
 
+function pluginDiagnostic(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.length <= 500 ? message : `${message.slice(0, 500)}...`;
+}
+
+async function recordPluginDiagnostic(paths: AkumaPaths, error: unknown): Promise<void> {
+  try {
+    await appendFile(paths.log, `plugin call admission failed: ${pluginDiagnostic(error)}\n`);
+  } catch {
+    // Plugin diagnostic loss must not change an already admitted call.
+  }
+}
+
 async function emitCalledSignal(
   input: Readonly<{
     path: WorldRoot;
@@ -206,14 +219,23 @@ async function emitCalledSignal(
 ): Promise<void> {
   try {
     const callerAkumaId = await callerAkuId(input.path, input.born);
-    await emitCalledPluginSignal({
-      world: input.path,
-      ...(input.settings === undefined ? {} : { settings: input.settings }),
-      paths: input.born.kind === "requested" ? pathsForAkuId(input.path, input.akumaId) : input.born.allocated.paths,
-      akumaId: input.akumaId,
-      ...(callerAkumaId === undefined ? {} : { callerAkumaId }),
-      ...(input.contractId === undefined ? {} : { contractId: input.contractId }),
-    });
+    const paths =
+      input.born.kind === "requested" ? pathsForAkuId(input.path, input.akumaId) : input.born.allocated.paths;
+    const reportDiagnostic = (message: string): void => {
+      void recordPluginDiagnostic(paths, message);
+    };
+    try {
+      await emitCalledPluginSignal({
+        world: input.path,
+        ...(input.settings === undefined ? {} : { settings: input.settings }),
+        reportDiagnostic,
+        akumaId: input.akumaId,
+        ...(callerAkumaId === undefined ? {} : { callerAkumaId }),
+        ...(input.contractId === undefined ? {} : { contractId: input.contractId }),
+      });
+    } catch (error) {
+      await recordPluginDiagnostic(paths, error);
+    }
   } catch {
     // Plugin delivery must not change an already admitted call.
   }

@@ -61,6 +61,7 @@ An admitted Akuma call emits `akuma.called` after admission and before any
 outcome observation. It identifies the called Akuma, its calling Akuma when
 there is one, and any Contract association already known at admission. It
 carries no call contents or provider detail.
+The call-admission producer owns this signal's delivery.
 
 Every committed terminal Akuma Turn emits `akuma.turn-outcome` after its outcome
 is durable, including Turns driven by later Tells. The signal identifies the
