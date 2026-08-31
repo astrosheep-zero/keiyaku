@@ -286,6 +286,66 @@ const TRANSITIONS: Readonly<Record<TaskLifecycleVerb, Readonly<Partial<Record<Ta
   done: { open: "done", in_progress: "done", on_hold: "done" },
   drop: { open: "drop", in_progress: "drop", on_hold: "drop" },
 };
+
+type CurrentTaskBoard = {
+  board: TaskBoard;
+  bytes: Map<TaskId, Uint8Array>;
+};
+
+function currentTaskBoard(board: TaskBoard, bytes: ReadonlyMap<TaskId, Uint8Array>): CurrentTaskBoard {
+  return { board, bytes: new Map(bytes) };
+}
+
+async function transitionLifecycle(
+  world: WorldRoot,
+  id: TaskId,
+  verb: TaskLifecycleVerb,
+  currentBoard: CurrentTaskBoard,
+  note?: string,
+): Promise<TaskMutationResult> {
+  const current = currentBoard.board.tasks.get(id);
+  if (current === undefined) return refused({ kind: "task-missing", taskId: id });
+  const state = TRANSITIONS[verb][current.state];
+  if (state === undefined) {
+    return refused({ kind: "invalid-lifecycle-transition", taskId: id, state: current.state, verb });
+  }
+  const at = currentTimestamp();
+  const next = {
+    ...current,
+    state,
+    ...(note === undefined ? {} : { note }),
+    updatedAt: advanceTaskTimestamp(current.updatedAt, at),
+  };
+  const bytes = serializeTaskDocument(next);
+  if (
+    (await replaceAuthority({
+      path: authorityPath(world, id),
+      expected: currentBoard.bytes.get(id)!,
+      next: bytes,
+    })) !== "replaced"
+  ) {
+    return retry("concurrent-modification");
+  }
+  currentBoard.board = boardWith(currentBoard.board, next);
+  currentBoard.bytes.set(id, bytes);
+  return { kind: "accepted", value: taskView(next) };
+}
+
+async function lifecycleFromCurrentBoard(
+  world: WorldRoot,
+  id: TaskId,
+  verb: TaskLifecycleVerb,
+  currentBoard: CurrentTaskBoard,
+  signal?: AbortSignal,
+  note?: string,
+): Promise<TaskMutationResult> {
+  const result = await withTaskLocks(
+    { world, allocation: false, ids: [id], ...(signal === undefined ? {} : { signal }) },
+    async () => transitionLifecycle(world, id, verb, currentBoard, note),
+  );
+  return result === "busy" ? retry("busy") : result;
+}
+
 export async function lifecycleTask(
   world: WorldRoot,
   id: TaskId,
@@ -296,28 +356,8 @@ export async function lifecycleTask(
   const result = await withTaskLocks(
     { world, allocation: false, ids: [id], ...(signal === undefined ? {} : { signal }) },
     async (): Promise<TaskMutationResult> => {
-      const snapshot = await readBoard(world),
-        current = snapshot.board.tasks.get(id);
-      if (current === undefined) return refused({ kind: "task-missing", taskId: id });
-      const state = TRANSITIONS[verb][current.state];
-      if (state === undefined) {
-        return refused({ kind: "invalid-lifecycle-transition", taskId: id, state: current.state, verb });
-      }
-      const at = currentTimestamp();
-      const next = {
-        ...current,
-        state,
-        ...(note === undefined ? {} : { note }),
-        updatedAt: advanceTaskTimestamp(current.updatedAt, at),
-      };
-      const bytes = serializeTaskDocument(next);
-      return (await replaceAuthority({
-        path: authorityPath(world, id),
-        expected: snapshot.bytes.get(id)!,
-        next: bytes,
-      })) === "replaced"
-        ? { kind: "accepted", value: taskView(next) }
-        : retry("concurrent-modification");
+      const snapshot = await readBoard(world);
+      return transitionLifecycle(world, id, verb, currentTaskBoard(snapshot.board, snapshot.bytes), note);
     },
   );
   return result === "busy" ? retry("busy") : result;
@@ -329,10 +369,13 @@ export async function batchTasks(
   signal?: AbortSignal,
   note?: string,
 ): Promise<TaskBatchResult> {
+  signal?.throwIfAborted();
+  const snapshot = await readBoard(world);
+  const currentBoard = currentTaskBoard(snapshot.board, snapshot.bytes);
   const items = [];
   for (const id of ids) {
     signal?.throwIfAborted();
-    items.push({ id, outcome: await lifecycleTask(world, id, verb, signal, note) });
+    items.push({ id, outcome: await lifecycleFromCurrentBoard(world, id, verb, currentBoard, signal, note) });
   }
   return { items };
 }

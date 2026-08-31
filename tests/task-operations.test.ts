@@ -13,7 +13,7 @@ import {
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { parseTaskDocument, serializeTaskDocument, type TaskDocument } from "../src/task/document.js";
 import { parseTaskId } from "../src/task/identity.js";
-import { settleTask } from "../src/task/operations.js";
+import { batchTasks, settleTask } from "../src/task/operations.js";
 import { DEFAULT_TASK_LOCK_TIMEOUT_MS, authorityPath, replaceAuthority, withTaskLocks } from "../src/task/store.js";
 import { World, type WorldRoot } from "../src/world.js";
 
@@ -135,6 +135,46 @@ test("batch start preserves order and continues after per-task refusals", async 
   assert.equal((await tasks.task({ id: first }).read())?.task.state, "in_progress");
   assert.equal((await tasks.task({ id: third }).read())?.task.state, "in_progress");
   assert.throws(() => tasks.batch({ verb: "start", ids: [] }), /at least one TaskId/u);
+});
+
+test("batch lifecycle advances one current board view in request order", async () => {
+  const { tasks } = await world();
+  const id = acceptedId(await tasks.add({ title: "Batch current view" }));
+
+  const result = await batchTasks(tasks.root, "start", [id, id]);
+  assert.deepEqual(
+    result.items.map((item) => item.outcome.kind),
+    ["accepted", "refused"],
+  );
+  assert.deepEqual(result.items[1]?.outcome, {
+    kind: "refused",
+    refusal: { kind: "invalid-lifecycle-transition", taskId: id, state: "in_progress", verb: "start" },
+  });
+});
+
+test("batch lifecycle reads one board before locks and retries only a concurrently changed Task", async () => {
+  const { root, tasks } = await world();
+  const first = acceptedId(await tasks.add({ title: "Batch snapshot first" }));
+  const second = acceptedId(await tasks.add({ title: "Batch snapshot second" }));
+  const firstLock = await acquireSqliteTransactionLock({
+    path: join(root, ".keiyaku", "locks", "task", "batch-snapshot-first.sqlite"),
+    mode: "immediate",
+    timeoutMs: 100,
+  });
+  const pending = tasks.batch({ verb: "start", ids: [first, second] });
+  try {
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    writeFileSync(join(root, ".keiyaku", "tasks", "batch-snapshot-second.md"), "changed after batch observation\n");
+  } finally {
+    firstLock.close();
+  }
+
+  const result = await pending;
+  assert.deepEqual(
+    result.items.map((item) => item.outcome.kind),
+    ["accepted", "retry"],
+  );
+  assert.deepEqual(result.items[1]?.outcome, { kind: "retry", reason: "concurrent-modification" });
 });
 
 test("Tasks creates root authority without Contract coupling", async () => {

@@ -44,6 +44,11 @@ Readiness means an open Task has no unfinished prerequisites; blocked views
 show work waiting on such prerequisites, while deliberately held work is not
 misrepresented as either ready or blocked.
 
+One batch lifecycle request observes the board once, then judges its requested
+Tasks in caller order against that observation as advanced by its own accepted
+changes. A concurrent authority change remains a retry for its addressed Task;
+it does not make later batch members silently observe a different board.
+
 Task owns dependency, parentage, supersession, and related-work relationships.
 They name complete Task identities and retain their declared order. A mutation
 refuses a missing target, a self relation, a cycle, a duplicate that would
