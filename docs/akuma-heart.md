@@ -31,6 +31,15 @@ timeline projector is pure and derives snapshots, gaps, history loss, activity
 selection, and reported changes from this one sequence. These projections never
 become facts or cursors of a second store.
 
+Recent fleet observations derive their activity order and bounded extent solely
+from that Heart projection. Custody metadata may conservatively bound which
+unread Hearts need opening, but it is never returned, treated as activity, used
+for lifecycle judgment, or allowed to choose membership, order, or extent.
+Heart gains no durable activity index, cache, daemon, or migration for that
+read. When those private bounds cannot prove the semantic observation, the
+remaining candidates are observed through fixed bounded concurrency before it
+is returned.
+
 ## Durable Facts And Judges
 
 Soul freezes birth identity, recipe, cwd, origin, restraint, and permissions.

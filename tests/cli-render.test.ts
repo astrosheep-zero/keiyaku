@@ -23,13 +23,14 @@ test("catalog text renders only the selected identity layer", () => {
       observedAt: "2026-08-12T00:00:00.000Z",
       rows: [{ id: "aku/worker/deadbeef" as never, life: "unborn" }],
       searched: ["/world/.keiyaku/akuma/run"],
+      hasMore: false,
     }),
-    ["akuma instances 1 of 1 known", "  scope worker", "", "○ aku/worker/deadbeef · unborn"].join("\n"),
+    ["akuma instances 1 recent", "  scope worker", "", "○ aku/worker/deadbeef · unborn"].join("\n"),
   );
 });
 
-test("scoped Akuma catalog recovery preserves its instance population", () => {
-  const text = renderCatalogText({
+test("scoped Akuma catalog text preserves bounded membership and marks further rows", () => {
+  const catalog: Catalog = {
     kind: "akuma",
     root: "/world",
     archetype: "worker",
@@ -39,10 +40,15 @@ test("scoped Akuma catalog recovery preserves its instance population", () => {
       life: "unborn" as const,
     })),
     searched: [],
-  });
-  assert.match(text, /akuma instances 10 of 11 known/u);
-  assert.match(text, /keiyaku ls aku\/worker\//u);
+    hasMore: true,
+  };
+  const text = renderCatalogText(catalog);
+  assert.match(text, /akuma instances 11 recent/u);
+  assert.equal(text.endsWith("…"), true);
+  assert.equal((text.match(/aku\/worker\//gu) ?? []).length, catalog.rows.length);
   assert.doesNotMatch(text, /aku\/\*\/\*/u);
+  assert.doesNotMatch(text, /--all|next:|not shown|full|more available/u);
+  assert.deepEqual(JSON.parse(JSON.stringify(catalog)).rows.map((row: { id: string }) => row.id), catalog.rows.map((row) => row.id));
 });
 
 test("Akuma catalog renders future ages as now", () => {
@@ -62,6 +68,7 @@ test("Akuma catalog renders future ages as now", () => {
       },
     ],
     searched: [],
+    hasMore: false,
   });
   assert.match(text, /○ aku\/worker\/future · unborn · now/u);
   assert.doesNotMatch(text, /0s/u);

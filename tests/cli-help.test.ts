@@ -78,10 +78,11 @@ test("each grammar owner renders its own namespace and leaf help", () => {
       "usage: keiyaku ls task[/] [--json]",
       "       keiyaku ls kei[/] [--json]",
       "       keiyaku ls aku[/] [--json]",
-      "       keiyaku ls aku/<akuma>[/] [--json]",
-      '       keiyaku ls "aku/*/*" [--json]',
+      "       keiyaku ls aku/<akuma>[/] [--limit <count>] [--json]",
+      '       keiyaku ls "aku/*/*" [--limit <count>] [--json]',
     ].join("\n"),
   );
+  assert.doesNotMatch(renderContractHelp("ls"), /--all/u);
   assert.match(renderTaskHelp(), /task update <TaskId>/u);
   assert.match(renderTaskHelp("tree"), /usage: keiyaku task tree <TaskId>/u);
   assert.match(renderTaskHelp("update"), /--body <text>\|- \| --append <text>/u);

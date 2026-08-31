@@ -2,7 +2,16 @@ import { randomUUID } from "node:crypto";
 import { readdir, realpath, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { AkumaHandle } from "./akuma-handle.js";
-import type { AkumaCallContext, AkumaCallInput, AkumaConfiguration, AkumaList, AkumaListInput } from "./akuma.js";
+import type {
+  AkumaCallContext,
+  AkumaCallInput,
+  AkumaCompleteList,
+  AkumaConfiguration,
+  AkumaList,
+  AkumaListInput,
+  AkumaListRow,
+  UnbornAkumaListRow,
+} from "./akuma.js";
 import { CALL_WITH_CONTEXT } from "./akuma-product-symbols.js";
 import { fleetListRow, readAkumaBirthCwd } from "./akuma-observe.js";
 import { akuIdFromDirectoryName, akumaPaths, akumaRunRoot, archetypeName, parseAkuId } from "./identity.js";
@@ -39,6 +48,113 @@ export type RequestedAkumaCall = Readonly<{
 export type AkumaBornCall = BornAkumaCall | RequestedAkumaCall;
 
 type AkumaCallLaunchInput = AkumaCallInput;
+type AkumaListRowValue = AkumaListRow | UnbornAkumaListRow;
+type KnownAkuma = Readonly<{
+  id: ReturnType<typeof akuIdFromDirectoryName>["id"];
+  paths: ReturnType<typeof akumaPaths>;
+}>;
+
+const DEFAULT_PAGE_LIMIT = 50;
+const MAX_PAGE_LIMIT = 500;
+export const PAGE_POOL_SIZE = 16;
+
+function activityAt(row: AkumaListRowValue): string | null {
+  if (!("lifeAt" in row)) return null;
+  if (row.lifeAt === null) return row.lastActivityAt;
+  if (row.lastActivityAt === null) return row.lifeAt;
+  return row.lifeAt > row.lastActivityAt ? row.lifeAt : row.lastActivityAt;
+}
+
+function compareActivity(left: string | null, right: string | null): number {
+  if (left === right) return 0;
+  if (left === null) return 1;
+  if (right === null) return -1;
+  return left > right ? -1 : 1;
+}
+
+function compareRows(left: AkumaListRowValue, right: AkumaListRowValue): number {
+  const activity = compareActivity(activityAt(left), activityAt(right));
+  if (activity !== 0) return activity;
+  return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+}
+
+function pageLimit(value: unknown): number {
+  if (value === undefined) return DEFAULT_PAGE_LIMIT;
+  if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > MAX_PAGE_LIMIT)
+    throw new TypeError(`Akuma list limit must be an integer from 1 to ${MAX_PAGE_LIMIT}`);
+  return value as number;
+}
+
+export async function boundedMap<Value, Result>(
+  values: readonly Value[],
+  mapper: (value: Value) => Promise<Result>,
+): Promise<readonly Result[]> {
+  const results: Result[] = [];
+  let index = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const selected = index++;
+      if (selected >= values.length) return;
+      results[selected] = await mapper(values[selected]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(PAGE_POOL_SIZE, values.length) }, worker));
+  return results;
+}
+
+async function mtimeBound(paths: ReturnType<typeof akumaPaths>): Promise<number> {
+  const read = async (path: string): Promise<number> => {
+    try {
+      return (await stat(path)).mtimeMs;
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === "ENOENT" ? 0 : Number.POSITIVE_INFINITY;
+    }
+  };
+  return Math.max(await read(paths.heart), await read(`${paths.heart}-wal`));
+}
+
+async function knownAkuma(
+  path: WorldRoot,
+  selected: string | undefined,
+): Promise<Readonly<{ runRoot: string; rows: readonly KnownAkuma[] }>> {
+  const runRoot = akumaRunRoot(path);
+  let names: string[];
+  try {
+    names = (await readdir(runRoot, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { runRoot, rows: [] };
+    throw error;
+  }
+  const rows: KnownAkuma[] = [];
+  for (const name of names) {
+    let physical: ReturnType<typeof akuIdFromDirectoryName>;
+    try {
+      physical = akuIdFromDirectoryName(name);
+    } catch {
+      continue;
+    }
+    if (selected !== undefined && physical.archetype !== selected) continue;
+    rows.push({
+      id: physical.id,
+      paths: akumaPaths({ runRoot, archetype: physical.archetype, suffix: physical.suffix }),
+    });
+  }
+  return { runRoot, rows };
+}
+
+async function readableRows(rows: readonly KnownAkuma[]): Promise<readonly AkumaListRowValue[]> {
+  const loaded = await boundedMap(rows, async ({ id, paths }) => {
+    try {
+      return await fleetListRow(paths, id);
+    } catch {
+      return null;
+    }
+  });
+  return [...loaded].filter((row): row is AkumaListRowValue => row !== null);
+}
 
 function callReadonly(value: unknown): Readonly<{ readonly?: true }> {
   if (value === undefined) return {};
@@ -161,39 +277,61 @@ export class Akuma {
   async [CALL_WITH_CONTEXT](input: AkumaCallLaunchInput, context: AkumaCallContext): Promise<AkumaHandle> {
     return await this.finishCall(await this.beginCall(input, context));
   }
+  async listComplete(input: Readonly<{ archetype?: string }> = {}): Promise<AkumaCompleteList> {
+    if (typeof input !== "object" || input === null || Array.isArray(input))
+      throw new TypeError("Akuma complete list input must be an object");
+    const unknown = Object.keys(input).find((key) => key !== "archetype");
+    if (unknown !== undefined) throw new TypeError(`Akuma complete list input has unknown field: ${unknown}`);
+    const selected = input.archetype === undefined ? undefined : archetypeName(input.archetype);
+    const known = await knownAkuma(this.path, selected);
+    return {
+      observedAt: new Date().toISOString(),
+      rows: [...(await readableRows(known.rows))].sort(compareRows),
+      searched: [known.runRoot],
+    };
+  }
   async list(input: AkumaListInput = {}): Promise<AkumaList> {
     if (typeof input !== "object" || input === null || Array.isArray(input))
       throw new TypeError("Akuma list input must be an object");
-    const unknown = Object.keys(input).find((key) => key !== "archetype");
+    const unknown = Object.keys(input).find((key) => key !== "archetype" && key !== "limit");
     if (unknown !== undefined) throw new TypeError(`Akuma list input has unknown field: ${unknown}`);
     const selected = input.archetype === undefined ? undefined : archetypeName(input.archetype);
+    const limit = pageLimit(input.limit);
     const observedAt = new Date().toISOString();
-    const runRoot = akumaRunRoot(this.path);
-    let names: string[];
-    try {
-      names = (await readdir(runRoot, { withFileTypes: true }))
-        .filter((entry) => entry.isDirectory())
-        .map((entry) => entry.name)
-        .sort();
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { observedAt, rows: [], searched: [runRoot] };
-      throw error;
-    }
-    const rows: AkumaList["rows"][number][] = [];
-    for (const name of names) {
-      let physical: ReturnType<typeof akuIdFromDirectoryName>;
-      try {
-        physical = akuIdFromDirectoryName(name);
-      } catch {
-        continue;
+    const known = await knownAkuma(this.path, selected);
+    const candidatesWithBounds = await boundedMap(known.rows, async (row) => ({
+      ...row,
+      bound: await mtimeBound(row.paths),
+    }));
+    const candidates = [...candidatesWithBounds].sort((left, right) => right.bound - left.bound);
+    const readable: AkumaListRowValue[] = [];
+    let cursor = 0;
+    while (cursor < candidates.length) {
+      const batch = candidates.slice(cursor, cursor + PAGE_POOL_SIZE);
+      readable.push(...(await readableRows(batch)));
+      cursor += batch.length;
+      const ranked = readable.sort(compareRows);
+      const lookahead = ranked[limit];
+      const activity = lookahead === undefined ? null : activityAt(lookahead);
+      const unreadBound = candidates[cursor]?.bound;
+      if (
+        lookahead !== undefined &&
+        activity !== null &&
+        unreadBound !== undefined &&
+        Number.isFinite(unreadBound) &&
+        Number.isFinite(Date.parse(activity)) &&
+        unreadBound < Date.parse(activity)
+      ) {
+        break;
       }
-      if (selected !== undefined && physical.archetype !== selected) continue;
-      const paths = akumaPaths({ runRoot, archetype: physical.archetype, suffix: physical.suffix });
-      try {
-        rows.push(await fleetListRow(paths, physical.id));
-      } catch {}
     }
-    return { observedAt, rows, searched: [runRoot] };
+    const ranked = readable.sort(compareRows);
+    return {
+      observedAt,
+      rows: ranked.slice(0, limit),
+      searched: [known.runRoot],
+      hasMore: ranked[limit] !== undefined,
+    };
   }
 }
 export async function callAkumaWithContext(

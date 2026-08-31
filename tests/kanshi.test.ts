@@ -903,6 +903,7 @@ function attentionReport(): KanshiReport {
       value: {
         observedAt: "2026-08-12T00:00:00.000Z",
         searched: ["/repo/.keiyaku/akuma/run"],
+        hasMore: false,
         rows: [
           {
             id: "aku/worker/a0000001",
@@ -989,9 +990,9 @@ test("Kanshi text keeps complete identities in the aperture grammar", async () =
   assert.equal(text.includes(contract.id), true);
   assert.equal(text.includes(taskId), true);
   assert.equal(text.includes(akumaId), true);
-  assert.match(text, /CONTRACTS \/\/ 1 live · 0 candidates/u);
-  assert.match(text, /TASKS \/\/ 1 live/u);
-  assert.match(text, /AKUMA \/\/ 1 recent · 1 known/u);
+  assert.match(text, /CONTRACTS \/\/ 1 recent · 0 candidates/u);
+  assert.match(text, /TASKS \/\/ 1 recent/u);
+  assert.match(text, /AKUMA \/\/ 1 recent/u);
   assert.ok(text.indexOf("CONTRACTS //") < text.indexOf("AKUMA //"));
   assert.ok(text.indexOf("AKUMA //") < text.indexOf("TASKS //"));
   assert.doesNotMatch(text, /\bFLEET \d/u);
@@ -1165,8 +1166,8 @@ test("Kanshi text uses live sections, preserves important facts, and omits termi
   const text = renderKanshiText(report, { columns: 120, color: false });
 
   assert.equal(text.split("\n", 1)[0], "契 KEIYAKU // WORLD");
-  assert.match(text, /\n\nAKUMA \/\/ 7 recent · 7 known/u);
-  assert.match(text, /\n\nTASKS \/\/ 4 live/u);
+  assert.match(text, /\n\nAKUMA \/\/ 7 recent/u);
+  assert.match(text, /\n\nTASKS \/\/ 4 recent/u);
   assert.doesNotMatch(text, /attention|kanshi ───|──\[/u);
   assert.doesNotMatch(text, /^ {2}↳ /mu);
   assert.ok(text.indexOf("CONTRACTS //") < text.indexOf("AKUMA //"));
@@ -1240,7 +1241,7 @@ test("Kanshi text uses live sections, preserves important facts, and omits termi
   assert.match(tasks, /-> kei\/active-contract/u);
   assert.match(tasks, /Ready · unbound/u);
   assert.match(tasks, /Held · unbound/u);
-  assert.match(tasks, /\(all 4 live task shown\)/u);
+  assert.doesNotMatch(tasks, /next:/u);
 
   const fleet = sectionBody(text, "FLEET");
   assert.match(fleet, /^● aku\/worker\/a0000001 \(@lead\) · running · 4m/mu);
@@ -1287,7 +1288,7 @@ test("world Contract rows make candidate facts self-describing", () => {
     contracts: { ...report.contracts, value: { ...report.contracts.value, rows: [delivered] } },
   };
   const text = renderKanshiText(deliveredReport, { columns: 120, color: false });
-  assert.match(text, /CONTRACTS \/\/ 1 live · 1 candidates/u);
+  assert.match(text, /CONTRACTS \/\/ 1 recent · 1 candidates/u);
   assert.doesNotMatch(text, /○ no candidate · ● candidate|satisfied  \[✗\] unsatisfied/u);
   const body = sectionBody(text, "KEIYAKU");
   assert.match(body, /│ candidate · target main/u);
@@ -1470,7 +1471,7 @@ test("attachment projection leaves Task holder and report facts unchanged", () =
   assert.equal(JSON.stringify(report).includes('"fleet":[{"id":"aku/worker/a0000001"'), true);
 });
 
-test("Kanshi sections use a ten-row aperture with exact complete and partial footers", () => {
+test("Kanshi preserves the Akuma bounded aperture with one compact marker", () => {
   const report = attentionReport();
   if (report.contracts.kind !== "present" || report.tasks.kind !== "present" || report.akuma.kind !== "present")
     throw new Error("fixture sections must be present");
@@ -1483,9 +1484,12 @@ test("Kanshi sections use a ten-row aperture with exact complete and partial foo
     },
     { columns: 120, color: false },
   );
-  assert.match(empty, /CONTRACTS \/\/ 0 live · 0 candidates[\s\S]*all 0 live keiyaku shown/u);
-  assert.match(empty, /AKUMA \/\/ 0 recent · 0 known[\s\S]*\(all 0 akuma shown\)/u);
-  assert.match(empty, /TASKS \/\/ 0 live[\s\S]*\(all 0 live task shown\)/u);
+  assert.match(empty, /CONTRACTS \/\/ 0 recent · 0 candidates/u);
+  assert.match(empty, /AKUMA \/\/ 0 recent/u);
+  assert.match(empty, /TASKS \/\/ 0 recent/u);
+  for (const section of ["KEIYAKU", "FLEET", "TASK"] as const) {
+    assert.doesNotMatch(sectionBody(empty, section), /…|next:/u);
+  }
 
   const oldAt = "2026-08-11T23:00:00.000Z";
   const newAt = "2026-08-11T23:59:00.000Z";
@@ -1528,34 +1532,21 @@ test("Kanshi sections use a ten-row aperture with exact complete and partial foo
         ...report.akuma,
         value: {
           ...report.akuma.value,
-          rows: [
-            ...hotAkuma,
-            {
-              ...report.akuma.value.rows[2]!,
-              id: "aku/worker/new-cold",
-              lifeAt: newAt,
-              lastActivityAt: oldAt,
-            },
-          ],
+          rows: hotAkuma.slice(0, 10),
+          hasMore: true,
         },
       },
     },
     { columns: 120, color: false },
   );
 
-  for (const [section, unit, selector] of [
-    ["KEIYAKU", "keiyaku", "kei"],
-    ["TASK", "task", "task"],
-  ] as const) {
-    const body = sectionBody(partial, section);
-    assert.match(body, new RegExp(`\\+ 2 more live ${unit} not shown`, "u"));
-    assert.match(body, selector === "task" ? /keiyaku task ls --world/u : new RegExp(`keiyaku ls ${selector}/`, "u"));
-  }
-  assert.match(sectionBody(partial, "FLEET"), /\+ 2 more akuma not shown[\s\S]*keiyaku ls "aku\/\*\/\*"/u);
+  assert.match(partial, /AKUMA \/\/ 10 recent/u);
   assert.match(sectionBody(partial, "KEIYAKU"), /^○ kei\/new-cold · waiting · 1m/mu);
-  assert.match(sectionBody(partial, "FLEET"), /^× aku\/worker\/new-cold · killed · 1m/mu);
+  assert.doesNotMatch(sectionBody(partial, "FLEET"), /new-cold/u);
   assert.match(sectionBody(partial, "TASK"), /^○ task\/new-cold · ready/mu);
   assert.doesNotMatch(partial, /hot-09|hot-10/u);
+  assert.deepEqual(sectionBody(partial, "FLEET").match(/^…$/gmu), ["…"]);
+  assert.doesNotMatch(partial, /all .* shown|not shown|\bfull\b|more available|next:/u);
 });
 
 test("Fleet ranks max owner timestamps and aligns snapshots with its recent-first display", () => {
@@ -1600,14 +1591,14 @@ test("Fleet ranks max owner timestamps and aligns snapshots with its recent-firs
     [
       "aku/worker/activity-newest",
       "aku/worker/life-next",
-      "aku/worker/tie-second",
       "aku/worker/tie-first",
+      "aku/worker/tie-second",
       "aku/worker/no-coordinate-first",
       "aku/worker/no-coordinate-second",
     ],
   );
   const snapshotRows = new Set(visible.slice(0, 3).map((row) => row.id));
-  const decorated = rows.map((row) =>
+  const decorated = visible.map((row) =>
     snapshotRows.has(row.id)
       ? {
           ...row,
@@ -1635,7 +1626,7 @@ test("Fleet ranks max owner timestamps and aligns snapshots with its recent-firs
     },
     { columns: 120, color: false },
   );
-  assert.match(text, /AKUMA \/\/ 6 recent · 6 known/u);
+  assert.match(text, /AKUMA \/\/ 6 recent/u);
   assert.doesNotMatch(text, /SNAPSHOT/u);
   assert.ok(
     text
@@ -1821,7 +1812,7 @@ test("Kanshi retains a Contract whose title is unavailable", () => {
   const contracts = sectionBody(text, "KEIYAKU");
   assert.match(contracts, /^\? kei\/no-target · waiting · 30s · title unavailable$/mu);
   assert.match(contracts, /title unavailable/u);
-  assert.match(text, /CONTRACTS \/\/ 5 live · 0 candidates/u);
+  assert.match(text, /CONTRACTS \/\/ 5 recent · 0 candidates/u);
 });
 
 test("Kanshi wraps complete Task titles on the plumb line", () => {
@@ -1877,7 +1868,7 @@ test("absent and failed Kanshi sections stay typed and distinct from empty prese
       branch: null,
       contracts: { kind: "failed", failure: { message: "broken board" } },
       tasks: { kind: "absent" },
-      akuma: { kind: "present", value: { observedAt: "2026-08-12T00:00:00.000Z", searched: [], rows: [] } },
+      akuma: { kind: "present", value: { observedAt: "2026-08-12T00:00:00.000Z", searched: [], rows: [], hasMore: false } },
     },
     { columns: 80, color: false },
   );
@@ -1885,8 +1876,8 @@ test("absent and failed Kanshi sections stay typed and distinct from empty prese
   assert.match(failed, /! broken board/u);
   assert.match(failed, /TASKS \/\/ absent/u);
   assert.match(failed, /tasks absent/u);
-  assert.match(failed, /AKUMA \/\/ 0 recent · 0 known/u);
-  assert.match(failed, /\(all 0 akuma shown\)/u);
+  assert.match(failed, /AKUMA \/\/ 0 recent/u);
+  assert.doesNotMatch(failed, /next:/u);
 
   const absent = renderKanshiText(
     {

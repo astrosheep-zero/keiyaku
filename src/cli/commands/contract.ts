@@ -257,11 +257,31 @@ function parseRegion(parts: ParsedContractParts): ParsedRegion {
   };
 }
 
+function akumaCatalogQuery(
+  query: Readonly<{ kind: "akuma"; archetype?: string }> | Readonly<{ kind: "archetypes" }>,
+  parts: ParsedContractParts,
+): CatalogQuery {
+  const limit = optionalFlag(parts.flags, "limit");
+  if (query.kind !== "akuma") {
+    if (limit !== undefined) refuse("ls", "--limit requires an Akuma instance directory");
+    return query;
+  }
+  if (limit !== undefined && (!/^[1-9][0-9]*$/u.test(limit) || Number(limit) > 500))
+    refuse("ls", "--limit requires an integer from 1 to 500");
+  return {
+    ...query,
+    ...(limit === undefined ? {} : { limit: Number(limit) }),
+  };
+}
+
 function parseLs(parts: ParsedContractParts): ParsedLs {
   const path = parts.positionals[0]!;
-  if (path === "task" || path === "task/")
+  if (path === "task" || path === "task/") {
+    if (parts.flags.limit !== undefined) refuse("ls", "--limit requires an Akuma instance directory");
     return { command: "ls", query: { kind: "tasks", namespace: [] }, output: parts.output };
+  }
   if (path.startsWith("task/")) {
+    if (parts.flags.limit !== undefined) refuse("ls", "--limit requires an Akuma instance directory");
     if (!path.endsWith("/")) refuse("ls", `invalid Task namespace selector: ${path}`);
     const body = path.slice("task/".length, -1);
     if (body.length === 0 || body.split("/").some((segment) => segment.length === 0))
@@ -273,11 +293,14 @@ function parseLs(parts: ParsedContractParts): ParsedLs {
       refuse("ls", error instanceof Error ? error.message : `invalid Task namespace selector: ${path}`);
     }
   }
-  if (path === "kei" || path === "kei/") return { command: "ls", query: { kind: "contracts" }, output: parts.output };
+  if (path === "kei" || path === "kei/") {
+    if (parts.flags.limit !== undefined) refuse("ls", "--limit requires an Akuma instance directory");
+    return { command: "ls", query: { kind: "contracts" }, output: parts.output };
+  }
   try {
     const query = parseAkumaCatalogPath(path);
     if (query === null) refuse("ls", "ls requires a supported identity directory selector");
-    return { command: "ls", query, output: parts.output };
+    return { command: "ls", query: akumaCatalogQuery(query, parts), output: parts.output };
   } catch (error) {
     if (error instanceof CliUsageError) throw error;
     refuse("ls", error instanceof Error ? error.message : "invalid ls directory");

@@ -347,12 +347,9 @@ function renderContracts(report: KanshiReport, context: TextRenderContext): read
   const candidates = live.filter((row) => row.delivery !== null).length;
   const rendered = renderSectionBlock({
     name: "CONTRACTS",
-    unit: "keiyaku",
-    selector: "kei",
     rows: rows.map((row) => renderWorldContractRow(row, report, context)),
-    total: live.length,
   });
-  const header = `CONTRACTS // ${live.length} live · ${candidates} candidates`;
+  const header = `CONTRACTS // ${rows.length} recent · ${candidates} candidates`;
   return [header, ...rendered.slice(1)];
 }
 
@@ -398,14 +395,10 @@ function renderTasks(report: KanshiReport, context: TextRenderContext): readonly
     });
   });
   return [
-    `TASKS // ${live.length} live`,
+    `TASKS // ${rows.length} recent`,
     ...renderSectionBlock({
       name: "TASKS",
-      unit: "task",
-      selector: "task",
-      continuation: "keiyaku task ls --world",
       rows: rowLines,
-      total: live.length,
     }).slice(1),
   ];
 }

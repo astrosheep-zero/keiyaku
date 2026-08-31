@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { moveAlias } from "../src/alias/index.js";
 import { akumaStatusSchema, type AkumaStatus } from "../src/akuma/akuma.js";
+import { boundedMap, PAGE_POOL_SIZE } from "../src/akuma/akuma-product.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import {
   HeldAkumaLeash,
@@ -482,6 +484,156 @@ test("facade ls reads exactly one selected identity directory", async () => {
   }
 });
 
+test("facade Akuma catalog returns bounded Heart activity in semantic order", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-facade-akuma-page-")));
+  try {
+    const first = await answered(root, "worker", "00000003");
+    const tiedFirst = await answered(root, "worker", "00000001");
+    const tiedSecond = await answered(root, "worker", "00000002");
+    const reviewer = await answered(root, "reviewer", "00000001");
+    await appendActivity(first.paths, {
+      turnSequence: 1,
+      event: { type: "activity", event: { provider: "fixture" } },
+      at: "2026-08-11T00:00:01.000Z",
+    });
+    for (const source of [tiedFirst, tiedSecond]) {
+      await appendActivity(source.paths, {
+        turnSequence: 1,
+        event: { type: "activity", event: { provider: "fixture" } },
+        at: "2026-08-11T00:00:02.000Z",
+      });
+    }
+    await appendActivity(reviewer.paths, {
+      turnSequence: 1,
+      event: { type: "activity", event: { provider: "fixture" } },
+      at: "2026-08-11T00:00:03.000Z",
+    });
+
+    const page = await Keiyaku.ls({ query: { kind: "akuma", archetype: "worker", limit: 2 }, path: root });
+    assert.equal(page.kind, "akuma");
+    assert.deepEqual(page.rows.map((row) => row.id), [tiedFirst.id, tiedSecond.id]);
+    assert.equal(page.hasMore, true);
+    const originalPrepare = DatabaseSync.prototype.prepare;
+    let custodyReads = 0;
+    DatabaseSync.prototype.prepare = function (...args) {
+      custodyReads += 1;
+      return originalPrepare.apply(this, args);
+    };
+    try {
+      await assert.rejects(
+        Keiyaku.ls({ query: { kind: "akuma", limit: 501 }, path: root }),
+        /limit must be an integer from 1 to 500/u,
+      );
+    } finally {
+      DatabaseSync.prototype.prepare = originalPrepare;
+    }
+    assert.equal(custodyReads, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("recent Akuma page prunes old custody bounds without changing Heart membership", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-facade-akuma-page-scale-")));
+  const old = new Date("2000-01-01T00:00:00.000Z");
+  const originalPrepare = DatabaseSync.prototype.prepare;
+  try {
+    const oldIds = [];
+    for (let index = 0; index < 1_000; index += 1) {
+      const suffix = index.toString(16).padStart(8, "0");
+      const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "worker", draw: () => suffix });
+      await initializeHeart(allocated.paths);
+      oldIds.push(allocated.id);
+      utimesSync(allocated.paths.heart, old, old);
+      try {
+        utimesSync(`${allocated.paths.heart}-wal`, old, old);
+      } catch {}
+    }
+    const recent = await Promise.all(
+      Array.from({ length: 11 }, async (_, index) => {
+        const source = await answered(root, "worker", `a00000${index.toString(16).padStart(2, "0")}`);
+        await appendActivity(source.paths, {
+          turnSequence: 1,
+          event: { type: "activity", event: { provider: "fixture" } },
+          at: `2099-01-01T00:00:${String(index).padStart(2, "0")}.000Z`,
+        });
+        return source;
+      }),
+    );
+    let prepareCalls = 0;
+    DatabaseSync.prototype.prepare = function (...args) {
+      prepareCalls += 1;
+      return originalPrepare.apply(this, args);
+    };
+    const world = Akuma.of(await World.at(root));
+    const page = await world.list({ limit: 10 });
+    DatabaseSync.prototype.prepare = originalPrepare;
+    const defaultPage = await world.list();
+    const maximumPage = await world.list({ limit: 500 });
+    const complete = await world.listComplete();
+    const reference = complete.rows.map((row) => row.id);
+    const completeGlob = await addressAkumaSet({ path: root, akuma: ["aku/*/*"] });
+
+    assert.equal(typeof world.listComplete, "function");
+    assert.equal("hasMore" in complete, false);
+    assert.deepEqual(reference, [...recent].reverse().map((source) => source.id).concat(oldIds));
+    assert.deepEqual(completeGlob.ids, [...oldIds, ...recent.map((source) => source.id)].sort());
+    assert.deepEqual(page.rows.map((row) => row.id), reference.slice(0, 10));
+    assert.equal(page.hasMore, true);
+    assert.deepEqual(page.rows.map((row) => row.id), recent.slice().reverse().slice(0, 10).map((row) => row.id));
+    assert.ok(prepareCalls < 500, `expected a bounded Heart read pool, received ${prepareCalls} database prepares`);
+    assert.equal(defaultPage.rows.length, 50);
+    assert.equal(defaultPage.hasMore, true);
+    assert.deepEqual(maximumPage.rows.map((row) => row.id), reference.slice(0, 500));
+    assert.equal(maximumPage.hasMore, true);
+    await assert.rejects(() => world.list({ limit: 501 }), /integer from 1 to 500/u);
+  } finally {
+    DatabaseSync.prototype.prepare = originalPrepare;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("all-null Akuma fallback retains exact membership through the fixed Heart read pool", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-facade-akuma-page-null-")));
+  const originalPrepare = DatabaseSync.prototype.prepare;
+  try {
+    const allocated = [];
+    for (let index = 0; index < PAGE_POOL_SIZE * 2 + 1; index += 1) {
+      const suffix = index.toString(16).padStart(8, "0");
+      const value = await allocateAkumaDirectory({ worldRoot: root, archetype: "worker", draw: () => suffix });
+      await initializeHeart(value.paths);
+      allocated.push(value);
+    }
+
+    let custodyReads = 0;
+    DatabaseSync.prototype.prepare = function (...args) {
+      custodyReads += 1;
+      return originalPrepare.apply(this, args);
+    };
+    const world = Akuma.of(await World.at(root));
+    const page = await world.list({ limit: 7 });
+    DatabaseSync.prototype.prepare = originalPrepare;
+
+    const expected = allocated.map((value) => value.id).sort();
+    assert.deepEqual(page.rows.map((row) => row.id), expected.slice(0, 7));
+    assert.equal(page.hasMore, true);
+    assert.ok(custodyReads >= expected.length, `expected every null activity Heart to be read, received ${custodyReads}`);
+
+    let active = 0;
+    let maximum = 0;
+    await boundedMap(Array.from({ length: PAGE_POOL_SIZE * 3 }), async () => {
+      active += 1;
+      maximum = Math.max(maximum, active);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      active -= 1;
+    });
+    assert.equal(maximum, PAGE_POOL_SIZE);
+  } finally {
+    DatabaseSync.prototype.prepare = originalPrepare;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("Task catalog does not inherit the Task list default page limit", async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-facade-catalog-page-")));
   try {
@@ -654,13 +806,19 @@ test("CLI ls invokes each selected identity directory and emits selected JSON", 
     } finally {
       process.stdout.write = writeStdout;
     }
-    const json = JSON.parse(stdout) as { kind: string; archetype: string | null; rows: readonly { id: string }[] };
+    const json = JSON.parse(stdout) as {
+      kind: string;
+      archetype: string | null;
+      rows: readonly { id: string }[];
+      hasMore: boolean;
+    };
     assert.deepEqual(
-      { kind: json.kind, archetype: json.archetype, rows: json.rows.map((row) => row.id) },
+      { kind: json.kind, archetype: json.archetype, rows: json.rows.map((row) => row.id), hasMore: json.hasMore },
       {
         kind: "akuma",
         archetype: "reviewer",
         rows: [reviewer.id],
+        hasMore: false,
       },
     );
   } finally {

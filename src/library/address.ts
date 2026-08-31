@@ -1,5 +1,5 @@
 import { readAliases, type AliasBinding } from "../alias/index.js";
-import { Akuma, type AkumaList } from "../akuma/akuma.js";
+import { Akuma } from "../akuma/akuma.js";
 import { probeBornAkuma } from "../akuma/index.js";
 import { parseAkuId, type AkuId } from "../akuma/identity.js";
 import { contractId } from "../core/facts/types.js";
@@ -56,10 +56,6 @@ export class AkumaWorldScopeError extends TypeError {
 function nonblank(value: unknown, label: string): string {
   if (typeof value !== "string" || value.trim().length === 0) throw new TypeError(`${label} must be a nonblank string`);
   return value;
-}
-
-function world(path: WorldRoot): Akuma {
-  return Akuma.of(path);
 }
 
 async function directId(path: WorldRoot, selector: string): Promise<AkuId> {
@@ -127,10 +123,6 @@ export async function addressAkuma(input: UncheckedAkumaAddressInput): Promise<
   if (values.repo !== undefined) scopeForRepo(values.repo);
   const path = await World.prove(nonblank(values.path, "path"));
   return { path, id: await directId(path, nonblank(values.akuma, "akuma")) };
-}
-
-function idsFromFleet(fleet: AkumaList): readonly AkuId[] {
-  return fleet.rows.map((row) => row.id);
 }
 
 type ParsedSetSelector =
@@ -223,7 +215,7 @@ export async function addressAkumaSet(input: UncheckedAkumaAddressInput): Promis
   if (hasSelectorKind(selectors, "contract") && values.repo === undefined) {
     throw new TypeError("Contract Akuma selector requires repo");
   }
-  const fleetIds = hasSelectorKind(selectors, "glob") ? idsFromFleet(await world(path).list()) : [];
+  const fleetIds = hasSelectorKind(selectors, "glob") ? (await Akuma.of(path).listComplete()).rows.map((row) => row.id) : [];
   const aliases = hasSelectorKind(selectors, "alias")
     ? new Map((await readAliases(path)).map((binding) => [binding.alias, binding.akuId]))
     : new Map<AkumaAlias, AkuId>();

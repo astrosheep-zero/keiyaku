@@ -17,7 +17,7 @@ export function visibleFleetRows(rows: readonly AkumaKanshiRow[]): readonly Akum
     .sort((left, right) => {
       const leftAt = fleetUpdatedAt(left);
       const rightAt = fleetUpdatedAt(right);
-      if (leftAt === rightAt) return 0;
+      if (leftAt === rightAt) return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
       if (leftAt === null) return 1;
       if (rightAt === null) return -1;
       return leftAt > rightAt ? -1 : 1;

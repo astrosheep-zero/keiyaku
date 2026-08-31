@@ -25,22 +25,12 @@ function targetLine(row: ContractRow, abbreviations: ReadonlyMap<string, string>
   );
 }
 
-const CATALOG_VISIBLE_AKUMA = 10;
-
 function akumaMark(life: string): string {
   if (life === "running") return "●";
   if (life === "asleep" || life === "unborn") return "○";
   if (life === "killed") return "×";
   if (life === "stillborn") return "!";
   return "?";
-}
-
-function akumaUpdatedAt(row: Extract<Catalog, { kind: "akuma" }>["rows"][number]): string | null {
-  const lifeAt = "lifeAt" in row ? row.lifeAt : null;
-  const activityAt = "lastActivityAt" in row ? row.lastActivityAt : null;
-  if (lifeAt === null) return activityAt;
-  if (activityAt === null) return lifeAt;
-  return lifeAt > activityAt ? lifeAt : activityAt;
 }
 
 function relativeAge(source: string | null, observedAt: string): string | null {
@@ -56,17 +46,9 @@ function relativeAge(source: string | null, observedAt: string): string | null {
 }
 
 function renderAkumaCatalog(catalog: Extract<Catalog, { kind: "akuma" }>): string {
-  const ordered = [...catalog.rows].sort((left, right) => {
-    const leftAt = akumaUpdatedAt(left);
-    const rightAt = akumaUpdatedAt(right);
-    if (leftAt === rightAt) return 0;
-    if (leftAt === null) return 1;
-    if (rightAt === null) return -1;
-    return leftAt > rightAt ? -1 : 1;
-  });
-  const rows = ordered.slice(0, CATALOG_VISIBLE_AKUMA);
+  const rows = catalog.rows;
   const lines = [
-    `akuma instances ${rows.length} of ${ordered.length} known`,
+    `akuma instances ${rows.length} recent`,
     ...(catalog.archetype === null ? [] : [`  scope ${safeText(catalog.archetype)}`]),
     "",
   ];
@@ -80,10 +62,7 @@ function renderAkumaCatalog(catalog: Extract<Catalog, { kind: "akuma" }>): strin
       `${akumaMark(row.life)} ${safeText(row.id)} · ${row.life}${ages.length === 0 ? "" : ` · ${ages.join(" · ")}`}`,
     );
   }
-  if (rows.length < ordered.length) {
-    const selector = catalog.archetype === null ? '"aku/*/*"' : `aku/${catalog.archetype}/`;
-    lines.push("", `  + ${ordered.length - rows.length} more akuma not shown`, `    keiyaku ls ${selector}`);
-  }
+  if (catalog.hasMore) lines.push("…");
   return lines.join("\n");
 }
 

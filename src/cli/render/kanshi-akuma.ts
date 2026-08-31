@@ -1,5 +1,4 @@
 import type { AkumaKanshiRow, KanshiReport } from "../../kanshi/index.js";
-import { visibleFleetRows } from "../../kanshi/fleet.js";
 import {
   boundedActivity,
   elapsedMilliseconds,
@@ -79,7 +78,7 @@ function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly
   if (section.kind === "absent") return ["AKUMA // absent", "", `${PLUMB}akuma absent`];
   if (section.kind === "failed")
     return ["AKUMA // unavailable", "", tone(`! ${safeText(section.failure.message)}`, "alert", context.color)];
-  const rows = visibleFleetRows(section.value.rows);
+  const rows = section.value.rows;
   const rowLines = rows.map((row) => {
     const statusTone = akumaStatusTone(row, report.observedAt);
     const mark = statusTone === null ? akumaMark(row.life) : tone(akumaMark(row.life), statusTone, context.color);
@@ -115,15 +114,11 @@ function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly
       ? lines
       : [...lines, ...plumbFacts([boundedActivity(snapshot, context.columns, PLUMB)], context.columns)];
   });
-  const header = `AKUMA // ${rows.length} recent · ${section.value.rows.length} known`;
+  const header = `AKUMA // ${rows.length} recent`;
   const rendered = renderSectionBlock({
     name: "AKUMA",
-    unit: "akuma",
-    selector: "aku",
-    continuation: 'keiyaku ls "aku/*/*"',
     rows: rowLines,
-    total: section.value.rows.length,
-    neutral: true,
+    hasMore: section.value.hasMore,
   });
   return [header, ...rendered.slice(1)];
 }

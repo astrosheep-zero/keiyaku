@@ -266,28 +266,14 @@ export function entityLines(
 
 export function renderSectionBlock({
   name,
-  unit,
-  selector,
-  continuation,
   rows,
-  total,
-  neutral = false,
+  hasMore = false,
 }: Readonly<{
   name: string;
-  unit: string;
-  selector: string;
-  continuation?: string;
   rows: readonly (readonly string[])[];
-  total: number;
-  neutral?: boolean;
+  hasMore?: boolean;
 }>): readonly string[] {
-  const lines = [`[ ${name} ]  ${total}${neutral ? ` ${unit}` : " live"}`, "", ...rows.flat()];
-  if (lines.at(-1) !== "") lines.push("");
-  lines.push(
-    rows.length === total
-      ? `  (all ${total}${neutral ? "" : " live"} ${unit} shown)`
-      : `  + ${total - rows.length} more${neutral ? "" : " live"} ${unit} not shown`,
-  );
-  if (rows.length !== total) lines.push(`    ${continuation ?? `keiyaku ls ${selector}/`}`);
+  const lines = [`[ ${name} ]`, "", ...rows.flat()];
+  if (hasMore) lines.push("…");
   return lines;
 }

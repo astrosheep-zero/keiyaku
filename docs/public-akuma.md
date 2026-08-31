@@ -41,7 +41,9 @@ The Address facet is the sole selector interpreter. It resolves complete Akuma
 identity, Alias, glob, and Contract selection from one frozen owner observation,
 and refuses an ambiguous human selector. Akuma itself remains unaware of Alias,
 Dispatch, Contract, glob, and repository coordinates. A resolved selector is
-not resolved again downstream.
+not resolved again downstream. Address may use the explicit advanced complete
+library observation for this frozen expansion; it never becomes a second public
+catalogue.
 
 Fleet composes public Akuma handles after address expansion. It preserves the
 raw Akuma status and mutation evidence, adding separate read-only Dispatch and
@@ -52,7 +54,9 @@ honestly distinguishes observed and unobserved subjects without fabricating
 completion. Tell and kill return their primary evidence; interrupt retains its
 separate post-action observation.
 
-The catalog invokes exactly one selected product owner. It creates no aggregate,
-cross-product fallback, selector API, history scan, or provider admission. CLI
-and renderer layers consume these adjudicated values without performing their
-own owner lookup.
+The catalog invokes exactly one selected product owner. Its Akuma catalogue is
+one bounded recent-activity observation and preserves the owner's membership,
+semantic order, and observed extent in every presentation; it does not count or
+reopen the whole fleet. It creates no aggregate, cross-product fallback,
+selector API, history scan, or provider admission. CLI and renderer layers
+consume these adjudicated values without performing their own owner lookup.

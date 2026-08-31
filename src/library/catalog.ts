@@ -11,7 +11,7 @@ export type CatalogQuery =
   | Readonly<{ kind: "tasks"; namespace?: readonly string[] }>
   | Readonly<{ kind: "contracts" }>
   | Readonly<{ kind: "archetypes" }>
-  | Readonly<{ kind: "akuma"; archetype?: string }>;
+  | Readonly<{ kind: "akuma"; archetype?: string; limit?: number }>;
 
 export type CatalogInput =
   | Readonly<{ query: Extract<CatalogQuery, { kind: "tasks" }>; path: WorldRoot }>
@@ -30,6 +30,7 @@ export type Catalog =
       observedAt: string;
       rows: AkumaList["rows"];
       searched: readonly string[];
+      hasMore: boolean;
     }>;
 
 function optionalHome(value: unknown): string | undefined {
@@ -65,7 +66,7 @@ function queryValue(value: unknown): CatalogQuery {
   for (const key of Object.keys(query)) {
     if (
       key !== "kind" &&
-      !(query.kind === "akuma" && key === "archetype") &&
+      !(query.kind === "akuma" && (key === "archetype" || key === "limit")) &&
       !(query.kind === "tasks" && key === "namespace")
     ) {
       throw new TypeError(`Keiyaku.ls query has unknown field: ${key}`);
@@ -76,7 +77,16 @@ function queryValue(value: unknown): CatalogQuery {
   if (query.archetype !== undefined && typeof query.archetype !== "string") {
     throw new TypeError("Keiyaku.ls Akuma name must be a string");
   }
-  return { kind: "akuma", ...(query.archetype === undefined ? {} : { archetype: query.archetype }) };
+  if (
+    query.limit !== undefined &&
+    (typeof query.limit !== "number" || !Number.isSafeInteger(query.limit) || query.limit < 1 || query.limit > 500)
+  )
+    throw new TypeError("Keiyaku.ls Akuma limit must be an integer from 1 to 500");
+  return {
+    kind: "akuma",
+    ...(query.archetype === undefined ? {} : { archetype: query.archetype }),
+    ...(query.limit === undefined ? {} : { limit: query.limit as number }),
+  };
 }
 
 export async function listCatalog(input: CatalogInput): Promise<Catalog> {
@@ -107,7 +117,10 @@ export async function listCatalog(input: CatalogInput): Promise<Catalog> {
   if (query.kind === "tasks") {
     return { kind: "tasks", root: path, rows: await observeTaskCatalogRows(path, query.namespace) };
   }
-  const listed = await Akuma.of(path).list(query.archetype === undefined ? undefined : { archetype: query.archetype });
+  const listed = await Akuma.of(path).list({
+    ...(query.archetype === undefined ? {} : { archetype: query.archetype }),
+    ...(query.limit === undefined ? {} : { limit: query.limit }),
+  });
   return {
     kind: "akuma",
     root: path,
@@ -115,5 +128,6 @@ export async function listCatalog(input: CatalogInput): Promise<Catalog> {
     observedAt: listed.observedAt,
     rows: listed.rows,
     searched: listed.searched,
+    hasMore: listed.hasMore,
   };
 }

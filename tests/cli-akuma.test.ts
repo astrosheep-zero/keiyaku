@@ -218,6 +218,17 @@ test("Akuma CLI parses root verbs without the removed namespace", () => {
   assert.deepEqual(parseArgv(["ls", "aku/reviewer/", "--json"]), {
     command: { command: "ls", query: { kind: "akuma", archetype: "reviewer" }, output: "json" },
   });
+  assert.deepEqual(parseArgv(["ls", "aku/reviewer/", "--limit", "10", "--json"]), {
+    command: {
+      command: "ls",
+      query: { kind: "akuma", archetype: "reviewer", limit: 10 },
+      output: "json",
+    },
+  });
+  assert.throws(() => parseArgv(["ls", "aku/reviewer/", "--limit", "0"]), /--limit requires/u);
+  assert.throws(() => parseArgv(["ls", "aku/reviewer/", "--limit", "501"]), /--limit requires/u);
+  assert.throws(() => parseArgv(["ls", "aku/reviewer/", "--before", "cursor"]), /option --before is not valid/u);
+  assert.throws(() => parseArgv(["ls", "aku/reviewer/", "--all"]), /option --all is not valid/u);
   assert.deepEqual(parseArgv(["wait", "aku/claude/1234abcd", "--timeout", "25ms", "--json"]), {
     command: { command: "wait", akuma: ["aku/claude/1234abcd"], timeoutMs: 25, output: "json" },
   });

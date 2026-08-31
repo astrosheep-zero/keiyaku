@@ -14,7 +14,7 @@ import { readDocuments } from "../protocol/read/documents.js";
 import { readRegionDeclarations, validateRegionPatterns } from "../library/region.js";
 import { contractId } from "../core/facts/types.js";
 import { selectKanshi, selectRegion } from "./select.js";
-import { FLEET_SNAPSHOT_ROWS, visibleFleetRows } from "./fleet.js";
+import { FLEET_SNAPSHOT_ROWS, FLEET_VISIBLE_ROWS } from "./fleet.js";
 import type { TaskRow } from "../task/index.js";
 import type {
   AkumaKanshiWorld,
@@ -291,7 +291,7 @@ async function joinAkuma(
 ): Promise<Section<AkumaKanshiWorld>> {
   if (aliases.kind !== "present") return aliases;
   try {
-    const source = await Akuma.of(path).list();
+    const source = await Akuma.of(path).list({ limit: FLEET_VISIBLE_ROWS });
     const aliasById = new Map<string, typeof aliases.value>();
     for (const binding of aliases.value)
       aliasById.set(binding.akuId, [...(aliasById.get(binding.akuId) ?? []), binding]);
@@ -311,7 +311,7 @@ async function joinAkuma(
             }),
       };
     });
-    const snapshotRows = visibleFleetRows(rows).slice(0, FLEET_SNAPSHOT_ROWS);
+    const snapshotRows = rows.slice(0, FLEET_SNAPSHOT_ROWS);
     const snapshots = new Map(
       await Promise.all(
         snapshotRows.map(async (row) => {

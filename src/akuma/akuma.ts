@@ -107,10 +107,14 @@ export type AkumaList = Readonly<{
   observedAt: string;
   rows: readonly (AkumaListRow | UnbornAkumaListRow)[];
   searched: readonly string[];
+  hasMore: boolean;
 }>;
+
+export type AkumaCompleteList = Omit<AkumaList, "hasMore">;
 
 export type AkumaListInput = Readonly<{
   archetype?: string;
+  limit?: number;
 }>;
 
 export type AkumaCallExecution = Readonly<{
