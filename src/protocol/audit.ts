@@ -87,7 +87,6 @@ async function auditCandidateVerification(
     at: timestamp(),
     state,
     snapshot,
-    environment: process.env,
     ...(input.signal === undefined ? {} : { signal: input.signal }),
     verification: definition,
   });

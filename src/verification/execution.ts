@@ -9,6 +9,7 @@ import type { VerificationDeclaration } from "./declaration.js";
 
 type VerificationVerdict = "satisfied" | "unsatisfied";
 const SUMMARY_BYTES = 32 * 1024;
+const CLOSED_VERIFICATION_ENVIRONMENT: NodeJS.ProcessEnv = {};
 
 export type VerificationTerminalOutcome = Readonly<{
   kind: "terminal";
@@ -52,7 +53,6 @@ export type ExecuteVerificationInput = Readonly<{
   repository: GitRepository;
   candidate: SnapshotId;
   declarations: readonly VerificationDeclaration[];
-  environment: NodeJS.ProcessEnv;
   materializeScratchCandidate: (
     repository: GitRepository,
     candidate: SnapshotId,
@@ -146,7 +146,12 @@ export async function executeVerification(input: ExecuteVerificationInput): Prom
     try {
       const hooks = worktreeHooksFrom({ settings: await input.projectSettings(scratch.cwd) });
       destroy = hooks.destroy;
-      const readiness = await runHookCommands(scratch.cwd, hooks.create, input.signal);
+      const readiness = await runHookCommands(
+        scratch.cwd,
+        hooks.create,
+        input.signal,
+        CLOSED_VERIFICATION_ENVIRONMENT,
+      );
       outcome =
         readiness.kind === "cancelled"
           ? { kind: "cancelled" }
@@ -155,7 +160,7 @@ export async function executeVerification(input: ExecuteVerificationInput): Prom
             : await executeDeclarations({
                 declarations: input.declarations,
                 cwd: scratch.cwd,
-                environment: input.environment,
+                environment: CLOSED_VERIFICATION_ENVIRONMENT,
                 ...(input.signal === undefined ? {} : { signal: input.signal }),
               });
     } catch (error) {
@@ -163,7 +168,7 @@ export async function executeVerification(input: ExecuteVerificationInput): Prom
     }
   } finally {
     if (destroy !== undefined) {
-      const result = await runHookCommands(scratch.cwd, destroy);
+      const result = await runHookCommands(scratch.cwd, destroy, undefined, CLOSED_VERIFICATION_ENVIRONMENT);
       if (result.kind === "cancelled") throw new Error("scratch destroy cancelled without a signal");
       if (result.kind === "failed") cleanup = { phase: "destroy", command: result.command, detail: result.failure };
     }

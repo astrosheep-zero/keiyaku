@@ -100,7 +100,6 @@ async function verificationFor(
     at: timestamp(),
     state: admission.state,
     snapshot,
-    environment: process.env,
     ...(input.signal === undefined ? {} : { signal: input.signal }),
     ...(input.verification.data === null ? {} : { verification: input.verification.data }),
   });

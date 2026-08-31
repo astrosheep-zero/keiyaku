@@ -50,6 +50,7 @@ export async function runHookCommands(
   worktree: string,
   commands: readonly HookCommand[],
   signal?: AbortSignal,
+  environment?: NodeJS.ProcessEnv,
 ): Promise<HookCommandRun> {
   for (const [command, value] of commands.entries()) {
     const outcome = await runProcess({
@@ -57,6 +58,7 @@ export async function runHookCommands(
       timeoutMs: value.timeoutMs,
       cwd: worktree,
       ...(signal === undefined ? {} : { signal }),
+      ...(environment === undefined ? {} : { env: environment }),
     });
     if (outcome.kind === "cancelled") return outcome;
     const failure = failedOutcome(outcome);

@@ -106,6 +106,34 @@ test("unchanged deliver reuses unsatisfied pre-delivery audit Verification", asy
   ]);
 });
 
+test("Verification ignores host environment variance and reuses matching testimony", async () => {
+  const environmentName = "KEIYAKU_TEST_VERIFICATION_HOST_ENVIRONMENT";
+  const prior = process.env[environmentName];
+  try {
+    const repository = repositoryWithMain();
+    const contract = await bind(repository, `test -z "\${${environmentName}-}"`);
+    commitCandidate(repository);
+
+    process.env[environmentName] = "first";
+    const first = await contract.audit();
+    process.env[environmentName] = "second";
+    const second = await contract.audit();
+
+    assert.equal(first.value.verification.kind, "satisfied");
+    assert.equal(second.value.verification.kind, "satisfied");
+    assert.deepEqual(first.facts.map((fact) => fact.kind), ["attestation"]);
+    assert.deepEqual(second.facts.map((fact) => fact.kind), ["attestation"]);
+    assert.deepEqual(second.facts[0]?.data.subject, first.facts[0]?.data.subject);
+
+    const delivered = await contract.deliver();
+    assert.equal(delivered.value.verificationReuse?.entry, second.facts[0]?.entry);
+    assert.equal(delivered.facts.some((fact) => fact.kind === "attestation"), false);
+  } finally {
+    if (prior === undefined) delete process.env[environmentName];
+    else process.env[environmentName] = prior;
+  }
+});
+
 test("audit showDiff belongs to this attempt and dirty failure is blocked evidence", async () => {
   const repository = repositoryWithMain();
   const contract = await bind(repository, "exit 0");

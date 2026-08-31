@@ -135,6 +135,14 @@ test("architecture policy assigns process and filesystem capabilities to their o
   assert.deepEqual(rules(rejected), ["architecture/capability-import", "architecture/capability-import"]);
 });
 
+test("architecture policy keeps ambient process environments out of protocol", () => {
+  const diagnostics = check({
+    "protocol/intent.ts": "export const environment = process.env;",
+  });
+
+  assert.ok(rules(diagnostics).includes("architecture/capability-use"));
+});
+
 test("architecture policy keeps provider SDKs inside their adapter owners", () => {
   const accepted = check({
     "akuma/providers/opencode-sdk/client.ts":

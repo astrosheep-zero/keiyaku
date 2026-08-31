@@ -286,6 +286,36 @@ test("Verification provisions only the candidate Settings environment and destro
   assert.equal(existsSync(destroyed), true);
 });
 
+test("Verification setup hooks ignore host environment variance before reuse", async () => {
+  const environmentName = "HOST_FLAG";
+  const prior = process.env[environmentName];
+  try {
+    const repository = repositoryWithMain();
+    const contract = await bind(repository, "test ! -e host-flag");
+    writeCandidateSettings(
+      repository,
+      await candidateWorktree(repository, contract),
+      worktreeSettings([
+        process.execPath,
+        "-e",
+        `if (process.env.${environmentName}) require("node:fs").writeFileSync("host-flag", process.env.${environmentName})`,
+      ]),
+    );
+
+    process.env[environmentName] = "audit";
+    const audited = await contract.audit();
+    process.env[environmentName] = "deliver";
+    const delivered = await contract.deliver();
+
+    assert.equal(audited.value.verification.kind, "satisfied");
+    assert.equal(delivered.value.verificationReuse?.entry, audited.facts[0]?.entry);
+    assert.equal(delivered.facts.some((fact) => fact.kind === "attestation"), false);
+  } finally {
+    if (prior === undefined) delete process.env[environmentName];
+    else process.env[environmentName] = prior;
+  }
+});
+
 test("candidate create failure stops Verification with no attestation and still runs destroy", async () => {
   const repository = repositoryWithMain();
   const contract = await bind(

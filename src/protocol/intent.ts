@@ -84,7 +84,6 @@ type VerifyDeliveryInput = Readonly<{
   at: string;
   state: ContractState;
   snapshot?: SnapshotId;
-  environment: NodeJS.ProcessEnv;
   signal?: AbortSignal;
   verification?: VerificationDefinition;
 }>;
@@ -179,7 +178,6 @@ export async function verifyDelivery(input: VerifyDeliveryInput): Promise<Verifi
     repository: input.repository,
     candidate: snapshot,
     declarations: input.verification.declarations,
-    environment: input.environment,
     materializeScratchCandidate,
     projectSettings,
     ...(input.signal === undefined ? {} : { signal: input.signal }),
