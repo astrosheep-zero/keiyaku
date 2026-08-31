@@ -21,7 +21,8 @@ import {
 } from "./heart/index.js";
 import { worldRootForAkumaPaths, type AkumaPaths } from "./identity.js";
 import { pluginRuntime, type PluginRuntime } from "../plugin/runtime.js";
-import { World } from "../world.js";
+import type { Settings } from "../settings.js";
+import { World, type WorldRoot } from "../world.js";
 import type { ProviderAdapter } from "./provider.js";
 import { resolveProviderExecution } from "./providers/index.js";
 import { clearBodyRequestTransport, settleBodyRequests } from "./request-serve.js";
@@ -162,11 +163,45 @@ function boundedDiagnostic(error: unknown): string {
   return text.length <= 500 ? text : `${text.slice(0, 500)}...`;
 }
 
-async function recordPluginDiagnostic(paths: AkumaPaths, error: unknown): Promise<void> {
+async function recordPluginDiagnostic(paths: AkumaPaths, occurrence: string, error: unknown): Promise<void> {
   try {
-    await appendFile(paths.log, `plugin initial turn failed: ${boundedDiagnostic(error)}\n`);
+    await appendFile(paths.log, `plugin ${occurrence} failed: ${boundedDiagnostic(error)}\n`);
   } catch {
     /* plugin diagnostic loss never changes Heart truth */
+  }
+}
+
+export async function emitCalledPluginSignal(
+  input: Readonly<{
+    world: WorldRoot;
+    settings?: Settings;
+    paths?: AkumaPaths;
+    akumaId: string;
+    callerAkumaId?: string;
+    contractId?: string;
+  }>,
+): Promise<void> {
+  const paths = input.paths;
+  const reportDiagnostic =
+    paths === undefined
+      ? undefined
+      : (message: string) => {
+          void recordPluginDiagnostic(paths, "call admission", message);
+        };
+  try {
+    const runtime = await pluginRuntime({
+      world: input.world,
+      ...(input.settings === undefined ? {} : { settings: input.settings }),
+      ...(reportDiagnostic === undefined ? {} : { reportDiagnostic }),
+    });
+    await runtime.emit({
+      kind: "akuma.called",
+      akumaId: input.akumaId,
+      ...(input.callerAkumaId === undefined ? {} : { callerAkumaId: input.callerAkumaId }),
+      ...(input.contractId === undefined ? {} : { contractId: input.contractId }),
+    }, reportDiagnostic);
+  } catch (error) {
+    if (input.paths !== undefined) await recordPluginDiagnostic(input.paths, "call admission", error);
   }
 }
 
@@ -233,14 +268,15 @@ async function recoverBodyRequests(input: BodyExecution): Promise<boolean> {
 
 function initialTurnEmitter(launch: BodyLaunch, soul: Soul): (outcome: CommittedOutcome) => Promise<void> {
   let plugins: Promise<PluginRuntime> | undefined;
+  const reportDiagnostic = (message: string): void => {
+    void recordPluginDiagnostic(launch.paths, "initial turn", message);
+  };
   return async (outcome) => {
     try {
       plugins ??= (async () =>
         await pluginRuntime({
           world: await World.at(worldRootForAkumaPaths(launch.paths)),
-          reportDiagnostic: (message) => {
-            void recordPluginDiagnostic(launch.paths, message);
-          },
+          reportDiagnostic,
         }))();
       await (
         await plugins
@@ -252,9 +288,9 @@ function initialTurnEmitter(launch: BodyLaunch, soul: Soul): (outcome: Committed
             ? { kind: "answered", text: outcome.answer }
             : { kind: "failed", reason: outcome.diagnostic },
         ...(launch.completion?.contractId === undefined ? {} : { contractId: launch.completion.contractId }),
-      });
+      }, reportDiagnostic);
     } catch (error) {
-      await recordPluginDiagnostic(launch.paths, error);
+      await recordPluginDiagnostic(launch.paths, "initial turn", error);
     }
   };
 }

@@ -1,8 +1,10 @@
 import { realpath, stat } from "node:fs/promises";
 import { moveAlias, type AliasBinding } from "../alias/index.js";
 import { Akuma, type AkumaStatus, type ForkReceipt, type ReadonlyRestraint } from "../akuma/akuma.js";
+import { emitCalledPluginSignal } from "../akuma/body.js";
 import { beginAkumaCall, finishAkumaCall, type AkumaBornCall } from "../akuma/akuma-product.js";
-import type { AkuId } from "../akuma/identity.js";
+import { pathsForAkuId, type AkuId } from "../akuma/identity.js";
+import { readSoul } from "../akuma/heart/index.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { ContractId } from "../core/facts/types.js";
 import { publishDispatch, readDispatch, type Dispatch, type DispatchFailure } from "../dispatch/index.js";
@@ -165,6 +167,13 @@ function callTimeout(value: unknown, mode: "wait" | "detach"): number {
   return value;
 }
 
+function callSeat(contract: unknown) {
+  if (contract === undefined) return undefined;
+  const seat = seatForKeiyaku(contract);
+  if (seat === null) throw new TypeError("contract must be a Keiyaku");
+  return seat;
+}
+
 async function observeCall(
   handle: Awaited<ReturnType<Akuma["call"]>>,
   mode: "wait" | "detach",
@@ -178,6 +187,58 @@ async function observeCall(
   } catch (error) {
     return { kind: "failed", failure: integrationFailure(error) };
   }
+}
+
+async function callerAkuId(path: WorldRoot, born: AkumaBornCall): Promise<AkuId | undefined> {
+  if (born.kind !== "requested") return undefined;
+  const soul = await readSoul(pathsForAkuId(path, born.id));
+  return soul?.origin.kind === "request" ? soul.origin.parent : undefined;
+}
+
+async function emitCalledSignal(
+  input: Readonly<{
+    path: WorldRoot;
+    settings?: Settings;
+    born: AkumaBornCall;
+    akumaId: AkuId;
+    contractId?: ContractId;
+  }>,
+): Promise<void> {
+  try {
+    const callerAkumaId = await callerAkuId(input.path, input.born);
+    await emitCalledPluginSignal({
+      world: input.path,
+      ...(input.settings === undefined ? {} : { settings: input.settings }),
+      paths: input.born.kind === "requested" ? pathsForAkuId(input.path, input.akumaId) : input.born.allocated.paths,
+      akumaId: input.akumaId,
+      ...(callerAkumaId === undefined ? {} : { callerAkumaId }),
+      ...(input.contractId === undefined ? {} : { contractId: input.contractId }),
+    });
+  } catch {
+    // Plugin delivery must not change an already admitted call.
+  }
+}
+
+async function admitCall(
+  input: Readonly<{
+    path: WorldRoot;
+    world: Akuma;
+    call: Parameters<Akuma["call"]>[0];
+    context: Readonly<{ cwdCanonical?: true }>;
+    settings?: Settings;
+    contractId?: ContractId;
+  }>,
+): Promise<Readonly<{ born: AkumaBornCall; akuma: AkuId }>> {
+  const born = await beginAkumaCall(input.world, input.call, input.context);
+  const akuma = born.kind === "requested" ? born.id : born.allocated.id;
+  await emitCalledSignal({
+    path: input.path,
+    ...(input.settings === undefined ? {} : { settings: input.settings }),
+    born,
+    akumaId: akuma,
+    ...(input.contractId === undefined ? {} : { contractId: input.contractId }),
+  });
+  return { born, akuma };
 }
 
 async function dispatchStage(
@@ -309,9 +370,7 @@ export async function beginCall(input: CallInput, context: ExecutionContext): Pr
   const settings = settingsOption(values.settings);
   const alias: AkumaAlias | undefined =
     values.alias === undefined ? undefined : parseAkumaAlias(nonblank(values.alias, "alias"));
-  const selectedSeat = values.contract === undefined ? undefined : seatForKeiyaku(values.contract);
-  if (values.contract !== undefined && selectedSeat === null) throw new TypeError("contract must be a Keiyaku");
-  const seat = selectedSeat ?? undefined;
+  const seat = callSeat(values.contract);
   const execution = await resolveCallExecution({
     path,
     ...(cwd === undefined ? {} : { cwd }),
@@ -325,12 +384,14 @@ export async function beginCall(input: CallInput, context: ExecutionContext): Pr
     ...(values.allowed === undefined ? {} : { allowed: values.allowed as readonly AllowedAction[] }),
     ...(execution === undefined ? {} : { cwd: execution.cwd }),
   };
-  const born = await beginAkumaCall(
+  const { born, akuma } = await admitCall({
+    path,
     world,
-    call as Parameters<Akuma["call"]>[0],
-    execution === undefined ? {} : { cwdCanonical: true },
-  );
-  const akuma = born.kind === "requested" ? born.id : born.allocated.id;
+    call: call as Parameters<Akuma["call"]>[0],
+    context: execution === undefined ? {} : { cwdCanonical: true },
+    ...(settings === undefined ? {} : { settings }),
+    ...(seat === undefined ? {} : { contractId: seat.id }),
+  });
   const completedExecution = execution ?? born.execution;
   const dispatch: DispatchStage =
     seat === undefined

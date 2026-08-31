@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -182,6 +182,62 @@ test("package-root World inputs reject a forged JavaScript coordinate before eff
     assert.equal(existsSync(join(root, ".keiyaku", "akuma")), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Keiyaku.call emits the admitted generic signal before call completion", async () => {
+  const { raw, repo } = await repositoryFixture();
+  const world = await World.at(raw.path);
+  const trace = join(raw.path, "called.json");
+  mkdirSync(join(raw.path, ".keiyaku"), { recursive: true });
+  mkdirSync(join(raw.path, "plugins"), { recursive: true });
+  writeFileSync(
+    join(raw.path, "plugins", "called.mjs"),
+    [
+      'import { writeFileSync } from "node:fs";',
+      "export default {",
+      '  manifest: { id: "called", apiVersion: 1 },',
+      '  activate(context) { return { signals: { "akuma.called": (signal) => writeFileSync(context.config.trace, JSON.stringify(signal)) } }; },',
+      "};",
+    ].join("\n"),
+  );
+  writeFileSync(
+    join(raw.path, ".keiyaku", "settings.json"),
+    JSON.stringify({ plugins: { called: { package: "./plugins/called.mjs", config: { trace } } } }),
+  );
+  const configured = await archetypeSettings(world);
+  const { pump, leash } = await requestPump(world);
+  const routedKeiyaku = Keiyaku.withExecution({ execution: bodyRequestExecution({ directory: pump.directory }) });
+  const bound = await Keiyaku.bind({ repo, markdown: markdown("Call plugin signal"), workspace: "worktree" });
+  const contractId = (await bound.keiyaku.state()).id;
+  const originalStatus = AkumaHandle.prototype.status;
+  let emittedBeforeFinish = false;
+  AkumaHandle.prototype.status = async function (...args) {
+    emittedBeforeFinish = existsSync(trace);
+    return await originalStatus.apply(this, args);
+  };
+  try {
+    const result = await routedKeiyaku.call({
+      path: world,
+      archetype: "worker",
+      body: "called",
+      ...configured.placement,
+      contract: bound.keiyaku,
+      cwd: raw.path,
+      mode: "detach",
+    });
+    assert.equal(emittedBeforeFinish, true);
+    assert.deepEqual(JSON.parse(readFileSync(trace, "utf8")), {
+      kind: "akuma.called",
+      akumaId: result.akuma,
+      callerAkumaId: "aku/parent/1234abcd",
+      contractId,
+    });
+  } finally {
+    AkumaHandle.prototype.status = originalStatus;
+    await pump.close();
+    leash.release();
+    rmSync(raw.path, { recursive: true, force: true });
   }
 });
 

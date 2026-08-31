@@ -26,7 +26,7 @@ async function expressionBodies(path: string): Promise<readonly string[]> {
   }
 }
 
-test("the Square plugin expresses answered and failed initial turns through its public plugin contract", async () => {
+test("the Square plugin expresses calls and initial-turn outcomes through its public plugin contract", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-plugin-square-"));
   const prior = {
     CODEX_THREAD_ID: process.env.CODEX_THREAD_ID,
@@ -52,6 +52,14 @@ test("the Square plugin expresses answered and failed initial turns through its 
     });
     const handler = instance.signals?.["akuma.initial-turn"];
     assert.ok(handler);
+    const called = instance.signals?.["akuma.called"];
+    assert.ok(called);
+    await called({
+      kind: "akuma.called",
+      akumaId: "aku/called",
+      callerAkumaId: "aku/caller",
+      contractId: "kei/example",
+    });
     await handler({
       kind: "akuma.initial-turn",
       akumaId: "aku/answered",
@@ -59,7 +67,10 @@ test("the Square plugin expresses answered and failed initial turns through its 
       contractId: "kei/example",
     });
     assert.equal(existsSync(squarePath(root)), true);
-    assert.deepEqual(await expressionBodies(squarePath(root)), ["aku/answered (@Alice) kei/example\n✓ came back"]);
+    assert.deepEqual(await expressionBodies(squarePath(root)), [
+      "aku/caller called aku/called",
+      "aku/answered (@Alice) kei/example\n✓ came back",
+    ]);
 
     delete process.env.CODEX_THREAD_ID;
     delete process.env.SQUARE_PARTICIPANT_NAME;
@@ -70,13 +81,18 @@ test("the Square plugin expresses answered and failed initial turns through its 
     });
     const fallbackHandler = fallback.signals?.["akuma.initial-turn"];
     assert.ok(fallbackHandler);
+    const externalCalled = fallback.signals?.["akuma.called"];
+    assert.ok(externalCalled);
+    await externalCalled({ kind: "akuma.called", akumaId: "aku/external" });
     await fallbackHandler({
       kind: "akuma.initial-turn",
       akumaId: "aku/failed",
       outcome: { kind: "failed", reason: "provider failed" },
     });
     assert.deepEqual(await expressionBodies(squarePath(root)), [
+      "aku/caller called aku/called",
       "aku/answered (@Alice) kei/example\n✓ came back",
+      "called aku/external",
       "aku/failed\n× provider failed",
     ]);
   } finally {

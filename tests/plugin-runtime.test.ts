@@ -190,7 +190,7 @@ test("plugin runtime resolves bare package exports with the ESM import condition
   }
 });
 
-test("plugin delivery starts handlers independently and contains handler failure", async () => {
+test("plugin delivery starts generic call handlers independently and contains handler failure", async () => {
   const value = fixture();
   try {
     const output = join(value.root, "trace.txt");
@@ -201,7 +201,7 @@ test("plugin delivery starts handlers independently and contains handler failure
         'import { appendFileSync } from "node:fs";',
         "export default {",
         '  manifest: { id: "alpha", apiVersion: 1 },',
-        '  activate(context) { return { signals: { "akuma.initial-turn": async () => { appendFileSync(context.config.trace, "slow-start\\n"); await new Promise((resolve) => setTimeout(resolve, 25)); appendFileSync(context.config.trace, "slow-fail\\n"); throw new Error("handler failed"); } } }; },',
+        '  activate(context) { return { signals: { "akuma.called": async () => { appendFileSync(context.config.trace, "slow-start\\n"); await new Promise((resolve) => setTimeout(resolve, 25)); appendFileSync(context.config.trace, "slow-fail\\n"); throw new Error("handler failed"); } } }; },',
         "};",
       ].join("\n"),
     );
@@ -212,7 +212,7 @@ test("plugin delivery starts handlers independently and contains handler failure
         'import { appendFileSync } from "node:fs";',
         "export default {",
         '  manifest: { id: "beta", apiVersion: 1 },',
-        '  activate(context) { return { signals: { "akuma.initial-turn": (signal) => appendFileSync(context.config.trace, `fast:${signal.outcome.kind}\\n`) } }; },',
+        '  activate(context) { return { signals: { "akuma.called": (signal) => appendFileSync(context.config.trace, `fast:${signal.akumaId}\\n`) } }; },',
         "};",
       ].join("\n"),
     );
@@ -229,10 +229,45 @@ test("plugin delivery starts handlers independently and contains handler failure
 
     const diagnostics: string[] = [];
     const runtime = await pluginRuntime({ world: await World.at(value.root), reportDiagnostic: (value) => diagnostics.push(value) });
-    await runtime.emit({ kind: "akuma.initial-turn", akumaId: "aku/example", outcome: { kind: "answered", text: "done" } });
+    await runtime.emit({ kind: "akuma.called", akumaId: "aku/example" });
 
-    assert.deepEqual(trace(output), ["slow-start", "fast:answered", "slow-fail"]);
+    assert.deepEqual(trace(output), ["slow-start", "fast:aku/example", "slow-fail"]);
     assert.equal(diagnostics.some((value) => value.startsWith("plugin alpha signal: handler failed")), true);
+  } finally {
+    value.close();
+  }
+});
+
+test("cached plugin handlers report each signal failure to its own diagnostic callback", async () => {
+  const value = fixture();
+  try {
+    writePlugin(
+      value.root,
+      "failing",
+      [
+        "export default {",
+        '  manifest: { id: "failing", apiVersion: 1 },',
+        '  activate() { return { signals: { "akuma.called": () => { throw new Error("handler failed"); } } }; },',
+        "};",
+      ].join("\n"),
+    );
+    mkdirSync(join(value.root, ".keiyaku"), { recursive: true });
+    writeFileSync(
+      join(value.root, ".keiyaku", "settings.json"),
+      JSON.stringify({ plugins: { failing: { package: "./plugins/failing.mjs" } } }),
+    );
+
+    const first: string[] = [];
+    const second: string[] = [];
+    const runtime = await pluginRuntime({
+      world: await World.at(value.root),
+      reportDiagnostic: (diagnostic) => first.push(diagnostic),
+    });
+    await runtime.emit({ kind: "akuma.called", akumaId: "aku/first" });
+    await runtime.emit({ kind: "akuma.called", akumaId: "aku/second" }, (diagnostic) => second.push(diagnostic));
+
+    assert.deepEqual(first, ["plugin failing signal: handler failed"]);
+    assert.deepEqual(second, ["plugin failing signal: handler failed"]);
   } finally {
     value.close();
   }

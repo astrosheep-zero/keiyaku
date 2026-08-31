@@ -16,6 +16,7 @@ import type {
 
 const DIAGNOSTIC_LIMIT = 500;
 const PLUGIN_NAMESPACE = "plugins";
+const PROCESS_RUNTIMES = new Map<WorldRoot, Promise<PluginRuntime>>();
 
 type PluginDiagnostic = (diagnostic: string) => void;
 
@@ -32,7 +33,7 @@ type RegisteredHandler = Readonly<{
 }>;
 
 export type PluginRuntime = Readonly<{
-  emit(signal: PluginSignal): Promise<void>;
+  emit(signal: PluginSignal, reportDiagnostic?: PluginDiagnostic): Promise<void>;
 }>;
 
 type SelectedPlugin = Readonly<{
@@ -199,7 +200,9 @@ function handlers(pluginId: string, instance: PluginInstance): readonly Register
   if (!object(instance.signals)) throw new TypeError("plugin signals must be an object");
   const registered: RegisteredHandler[] = [];
   for (const [kind, handler] of Object.entries(instance.signals)) {
-    if (kind !== "akuma.initial-turn") throw new TypeError(`plugin signal is unknown: ${kind}`);
+    if (kind !== "akuma.called" && kind !== "akuma.initial-turn") {
+      throw new TypeError(`plugin signal is unknown: ${kind}`);
+    }
     if (typeof handler !== "function") throw new TypeError(`plugin signal handler is not a function: ${kind}`);
     registered.push({ pluginId, kind, handler });
   }
@@ -294,6 +297,15 @@ async function activate(
 }
 
 export async function pluginRuntime(input: PluginRuntimeInput): Promise<PluginRuntime> {
+  let runtime = PROCESS_RUNTIMES.get(input.world);
+  if (runtime === undefined) {
+    runtime = createPluginRuntime(input);
+    PROCESS_RUNTIMES.set(input.world, runtime);
+  }
+  return await runtime;
+}
+
+async function createPluginRuntime(input: PluginRuntimeInput): Promise<PluginRuntime> {
   const report = input.reportDiagnostic;
   const selected = selectedPlugins(input.settings ?? (await settings({ root: input.world })), report);
   const activated = new Set<string>();
@@ -301,7 +313,7 @@ export async function pluginRuntime(input: PluginRuntimeInput): Promise<PluginRu
   for (const entry of selected) registered.push(...(await activate(entry, input.world, activated, report)));
 
   return Object.freeze({
-    async emit(signal: PluginSignal): Promise<void> {
+    async emit(signal: PluginSignal, reportDiagnostic: PluginDiagnostic | undefined = report): Promise<void> {
       const deliveries = registered
         .filter((handler) => handler.kind === signal.kind)
         .map((entry) =>
@@ -310,7 +322,7 @@ export async function pluginRuntime(input: PluginRuntimeInput): Promise<PluginRu
       const outcomes = await Promise.allSettled(deliveries.map(({ delivery }) => delivery));
       for (const [index, outcome] of outcomes.entries()) {
         if (outcome.status === "rejected")
-          diagnostic(report, deliveries[index]!.entry.pluginId, "signal", outcome.reason);
+          diagnostic(reportDiagnostic, deliveries[index]!.entry.pluginId, "signal", outcome.reason);
       }
     },
   });

@@ -46,6 +46,11 @@ function outcomeExpression(signal, caller) {
     : `${header}\n× ${signal.outcome.reason}`;
 }
 
+function calledExpression(signal, caller) {
+  const source = signal.callerAkumaId ?? (caller === undefined ? undefined : `(@${caller})`);
+  return [source, "called", signal.akumaId].filter((value) => value !== undefined).join(" ");
+}
+
 export default {
   manifest: {
     id: "square",
@@ -62,6 +67,16 @@ export default {
     } catch {}
     return {
       signals: {
+        async "akuma.called"(signal) {
+          const square = await openSquare(path, environment, ledger);
+          try {
+            const joined = await square.implicitJoin(signal.akumaId);
+            if (joined.state === "done" || joined.participant === undefined) return;
+            await joined.participant.express(calledExpression(signal, caller));
+          } finally {
+            await square.close();
+          }
+        },
         async "akuma.initial-turn"(signal) {
           const square = await openSquare(path, environment, ledger);
           try {

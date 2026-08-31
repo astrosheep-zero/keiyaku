@@ -9,6 +9,11 @@ export type PluginManifest = Readonly<{
 export type PluginOutcome = Readonly<{ kind: "answered"; text: string }> | Readonly<{ kind: "failed"; reason: string }>;
 
 export type PluginSignalMap = Readonly<{
+  "akuma.called": Readonly<{
+    akumaId: string;
+    callerAkumaId?: string;
+    contractId?: string;
+  }>;
   "akuma.initial-turn": Readonly<{
     akumaId: string;
     outcome: PluginOutcome;
