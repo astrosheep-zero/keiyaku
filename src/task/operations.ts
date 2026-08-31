@@ -23,7 +23,6 @@ import {
 import { allocateLocalId, deriveLocalStem, formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
 import {
   authorityBytesMatch,
-  authorityPath,
   nukeTaskAuthority,
   readBoard,
   replaceAuthority,
@@ -171,7 +170,8 @@ async function create(
       const problem = relationProblem(boardWith(snapshot.board, next), null, next);
       if (problem !== null) return refused({ kind: "invalid-graph", diagnostic: problem });
       const replaced = await replaceAuthority({
-        path: authorityPath(world, next.id),
+        world,
+        id: next.id,
         expected: null,
         next: serializeTaskDocument(next),
       });
@@ -270,7 +270,7 @@ export async function updateTask(world: WorldRoot, id: TaskId, input: UpdateTask
       const after = Buffer.from(afterBytes).toString("utf8");
       if (
         before !== after &&
-        (await replaceAuthority({ path: authorityPath(world, id), expected: predecessor, next: afterBytes })) !==
+        (await replaceAuthority({ world, id, expected: predecessor, next: afterBytes })) !==
           "replaced"
       ) {
         return { kind: "retry", reason: "concurrent-modification" };
@@ -334,7 +334,8 @@ async function transitionLifecycle(
   const bytes = serializeTaskDocument(next);
   if (
     (await replaceAuthority({
-      path: authorityPath(world, id),
+      world,
+      id,
       expected: currentBoard.bytes.get(id)!,
       next: bytes,
     })) !== "replaced"
@@ -414,7 +415,8 @@ export async function settleTask(world: WorldRoot, id: TaskId): Promise<SettledT
       updatedAt: advanceTaskTimestamp(current.updatedAt, at),
     };
     const replaced = await replaceAuthority({
-      path: authorityPath(world, id),
+      world,
+      id,
       expected: snapshot.bytes.get(id)!,
       next: serializeTaskDocument(next),
     });

@@ -1,5 +1,14 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -14,7 +23,13 @@ import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transac
 import { parseTaskDocument, serializeTaskDocument, type TaskDocument } from "../src/task/document.js";
 import { parseTaskId } from "../src/task/identity.js";
 import { batchTasks, settleTask } from "../src/task/operations.js";
-import { DEFAULT_TASK_LOCK_TIMEOUT_MS, authorityPath, replaceAuthority, withTaskLocks } from "../src/task/store.js";
+import {
+  DEFAULT_TASK_LOCK_TIMEOUT_MS,
+  authorityPath,
+  nukeTaskAuthority,
+  replaceAuthority,
+  withTaskLocks,
+} from "../src/task/store.js";
 import { World, type WorldRoot } from "../src/world.js";
 
 type Assert<Condition extends true> = Condition;
@@ -617,6 +632,32 @@ test("different task IDs and different worlds do not share task locks", async ()
   assert.equal(firstA, secondA);
 });
 
+test("reset re-resolves authority after a namespace swap while the task lock is held", async () => {
+  const { root, tasks } = await world();
+  const id = acceptedId(await tasks.add({ title: "Reset custody race", namespace: ["foo"] }));
+  const lock = await acquireSqliteTransactionLock({
+    path: join(root, ".keiyaku", "locks", "task", "foo", "reset-custody-race.sqlite"),
+    mode: "immediate",
+    timeoutMs: 100,
+  });
+  const outside = mkdtempSync(join(tmpdir(), "keiyaku-task-outside-"));
+  const outsideFile = join(outside, "reset-custody-race.md");
+  writeFileSync(outsideFile, "outside\n");
+  const namespace = join(root, ".keiyaku", "tasks", "foo");
+  const pending = nukeTaskAuthority(tasks.root, { timeoutMs: 1_000 });
+  try {
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    rmSync(namespace, { recursive: true, force: true });
+    symlinkSync(outside, namespace, "dir");
+  } finally {
+    lock.close();
+  }
+
+  await assert.rejects(pending, /Task authority custody violation/u);
+  assert.equal(readFileSync(outsideFile, "utf8"), "outside\n");
+  rmSync(outside, { recursive: true, force: true });
+});
+
 test("allocation contention does not block relation updates", async () => {
   const { tasks } = await world();
   const first = acceptedId(await tasks.add({ title: "First" }));
@@ -679,7 +720,7 @@ test("manual predecessor movement is refused and idle lock deletion never change
     manual = Buffer.concat([original, Buffer.from("manual edit\n")]);
   writeFileSync(path, manual);
   assert.equal(
-    await replaceAuthority({ path, expected: original, next: Buffer.from("replacement") }),
+    await replaceAuthority({ world: tasks.root, id, expected: original, next: Buffer.from("replacement") }),
     "concurrent-modification",
   );
   assert.deepEqual(readFileSync(path), manual);

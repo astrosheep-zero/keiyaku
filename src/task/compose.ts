@@ -10,7 +10,7 @@ import {
 import { serializeTaskDocument } from "./document.js";
 import type { TaskId } from "./identity.js";
 import type { TaskCompositionDiagnostic, TaskRefusal, TaskRetry } from "./operations.js";
-import { authorityPath, readBoard, replaceAuthority, withTaskLocks } from "./store.js";
+import { readBoard, replaceAuthority, withTaskLocks } from "./store.js";
 
 export type { TaskCompositionAlias, TaskCompositionBodyPreview } from "./compose-language.js";
 export { taskCompositionNamespaceHeader } from "./compose-language.js";
@@ -129,7 +129,8 @@ async function admitPlan(
     const before = beforeBytes === null ? "" : Buffer.from(beforeBytes).toString("utf8");
     const after = Buffer.from(afterBytes).toString("utf8");
     const replaced = await replaceAuthority({
-      path: authorityPath(world, item.after.id),
+      world,
+      id: item.after.id,
       expected: beforeBytes,
       next: afterBytes,
     });

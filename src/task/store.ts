@@ -33,19 +33,63 @@ function allocationLockPath(world: WorldRoot): string {
   return resolve(world, ".keiyaku", "locks", "task-allocation.sqlite");
 }
 
-async function authorityFiles(directory: string): Promise<readonly string[]> {
-  const files: string[] = [];
-  let entries;
+function custodyError(path: string): Error {
+  return new Error(`Task authority custody violation: symlink or non-authority component: ${path}`);
+}
+
+async function requireDirectory(path: string, mode: "read" | "write"): Promise<boolean> {
   try {
-    entries = await readdir(directory, { withFileTypes: true });
+    const stat = await lstat(path);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) throw custodyError(path);
+    return true;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    if (mode === "read") return false;
+    try {
+      await mkdir(path);
+    } catch (mkdirError) {
+      if ((mkdirError as NodeJS.ErrnoException).code !== "EEXIST") throw mkdirError;
+    }
+    const stat = await lstat(path);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) throw custodyError(path);
+    return true;
+  }
+}
+
+async function resolveAuthority(
+  world: WorldRoot,
+  id: TaskId,
+  mode: "read" | "write",
+): Promise<{ path: string; exists: boolean }> {
+  const coordinate = parseTaskId(id);
+  const root = tasksDirectory(world);
+  if (!(await requireDirectory(root, mode))) return { path: taskAuthorityPath(root, coordinate), exists: false };
+  let parent = root;
+  for (const segment of coordinate.namespace) {
+    parent = resolve(parent, segment);
+    if (!(await requireDirectory(parent, mode))) return { path: taskAuthorityPath(root, coordinate), exists: false };
+  }
+  const path = taskAuthorityPath(root, coordinate);
+  try {
+    const stat = await lstat(path);
+    if (stat.isSymbolicLink() || !stat.isFile()) throw custodyError(path);
+    return { path, exists: true };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { path, exists: false };
     throw error;
   }
+}
+
+async function authorityFiles(directory: string): Promise<readonly string[]> {
+  if (!(await requireDirectory(directory, "read"))) return [];
+  const files: string[] = [];
+  const entries = await readdir(directory);
   for (const entry of entries) {
-    const path = resolve(directory, entry.name);
-    if (entry.isDirectory()) files.push(...(await authorityFiles(path)));
-    else if (entry.isFile() && entry.name.endsWith(".md")) files.push(path);
+    const path = resolve(directory, entry);
+    const stat = await lstat(path);
+    if (stat.isSymbolicLink()) throw custodyError(path);
+    if (stat.isDirectory()) files.push(...(await authorityFiles(path)));
+    else if (stat.isFile() && entry.endsWith(".md")) files.push(path);
   }
   return files.sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)));
 }
@@ -75,15 +119,13 @@ async function ownedAuthorityCandidates(directory: string): Promise<readonly Rea
 }
 
 async function removeEmptyTaskDirectories(directory: string, removeSelf: boolean): Promise<void> {
-  let entries;
-  try {
-    entries = await readdir(directory, { withFileTypes: true });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
-    throw error;
-  }
+  if (!(await requireDirectory(directory, "read"))) return;
+  const entries = await readdir(directory);
   for (const entry of entries) {
-    if (entry.isDirectory()) await removeEmptyTaskDirectories(resolve(directory, entry.name), true);
+    const path = resolve(directory, entry);
+    const stat = await lstat(path);
+    if (stat.isSymbolicLink()) throw custodyError(path);
+    if (stat.isDirectory()) await removeEmptyTaskDirectories(path, true);
   }
   if (!removeSelf) return;
   try {
@@ -138,39 +180,28 @@ export async function readRecentTaskDocuments(
 }
 
 export async function readTaskDocument(world: WorldRoot, id: TaskId): Promise<TaskDocument | undefined> {
-  const path = authorityPath(world, id);
-  try {
-    const metadata = await lstat(path);
-    if (!metadata.isFile() || metadata.isSymbolicLink())
-      throw new Error(`Task authority is not a regular file: ${path}`);
-    return parseTaskDocument(await readFile(path), parseTaskId(id));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw error;
-  }
+  const resolved = await resolveAuthority(world, id, "read");
+  return resolved.exists ? parseTaskDocument(await readFile(resolved.path), parseTaskId(id)) : undefined;
 }
 
 function equal(left: Uint8Array | null, right: Uint8Array | null): boolean {
   return left === null || right === null ? left === right : Buffer.from(left).equals(Buffer.from(right));
 }
-async function currentBytes(path: string): Promise<Uint8Array | null> {
-  try {
-    return await readFile(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
-  }
+async function currentBytes(world: WorldRoot, id: TaskId): Promise<Uint8Array | null> {
+  const resolved = await resolveAuthority(world, id, "read");
+  return resolved.exists ? readFile(resolved.path) : null;
 }
 
 export async function replaceAuthority(
   input: Readonly<{
-    path: string;
+    world: WorldRoot;
+    id: TaskId;
     expected: Uint8Array | null;
     next: Uint8Array;
   }>,
 ): Promise<"replaced" | "concurrent-modification"> {
-  const parent = dirname(input.path);
-  await mkdir(parent, { recursive: true });
+  const resolved = await resolveAuthority(input.world, input.id, "write");
+  const parent = dirname(resolved.path);
   const temporary = resolve(parent, `.tmp-${randomBytes(8).toString("hex")}`);
   let descriptor: number | undefined;
   try {
@@ -179,8 +210,8 @@ export async function replaceAuthority(
     fsyncSync(descriptor);
     closeSync(descriptor);
     descriptor = undefined;
-    if (!equal(await currentBytes(input.path), input.expected)) return "concurrent-modification";
-    renameSync(temporary, input.path);
+    if (!equal(await currentBytes(input.world, input.id), input.expected)) return "concurrent-modification";
+    renameSync(temporary, resolved.path);
     syncTaskDirectory(parent);
     return "replaced";
   } finally {
@@ -194,7 +225,7 @@ export async function replaceAuthority(
 }
 
 export async function authorityBytesMatch(world: WorldRoot, id: TaskId, expected: Uint8Array | null): Promise<boolean> {
-  return equal(await currentBytes(authorityPath(world, id)), expected);
+  return equal(await currentBytes(world, id), expected);
 }
 
 function lockPath(world: WorldRoot, id: TaskId): string {
@@ -216,8 +247,8 @@ export async function nukeTaskAuthority(
     return await withTaskLocks({ world, allocation: false, ids, ...lockOptions }, async () => {
       for (const candidate of candidates) {
         try {
-          const stat = await lstat(candidate.path);
-          if (stat.isFile() && !stat.isSymbolicLink()) await unlink(candidate.path);
+          const resolved = await resolveAuthority(world, candidate.id, "read");
+          if (resolved.exists) await unlink(resolved.path);
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
         }

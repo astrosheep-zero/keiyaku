@@ -28,6 +28,8 @@ remain intelligible as Task authority. Unrelated, malformed, or unowned
 filesystem entries are not silently adopted as Tasks. Task state is intended to
 be visible to ordinary repository review, but Task never stages, commits, or
 changes Git references.
+Task authority paths contain no symlink component and all Task authority
+observations and replacements use the same Task-owned physical path judgment.
 
 Task reads and writes are asynchronous, complete observations. A Task mutation
 replaces one complete authority document; there is no competing synchronous
@@ -48,6 +50,8 @@ One batch lifecycle request observes the board once, then judges its requested
 Tasks in caller order against that observation as advanced by its own accepted
 changes. A concurrent authority change remains a retry for its addressed Task;
 it does not make later batch members silently observe a different board.
+Batch cancellation stops at an item boundary; already completed items remain
+durable and are observed through the board.
 
 Task owns dependency, parentage, supersession, and related-work relationships.
 They name complete Task identities and retain their declared order. A mutation
