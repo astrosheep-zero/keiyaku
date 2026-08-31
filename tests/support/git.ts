@@ -90,7 +90,19 @@ function initializedGitRepository(): TestGitRepository {
   execFileSync("git", ["init", "--quiet", "--initial-branch=main", path]);
   appendFileSync(
     join(path, ".git", "config"),
-    "\n[user]\n\tname = Keiyaku Test\n\temail = keiyaku-test@example.invalid\n[core]\n\tautocrlf = false\n",
+    [
+      "",
+      "[user]",
+      "\tname = Keiyaku Test",
+      "\temail = keiyaku-test@example.invalid",
+      "[core]",
+      "\tautocrlf = false",
+      "[gc]",
+      "\tauto = 0",
+      "[maintenance]",
+      "\tauto = false",
+      "",
+    ].join("\n"),
   );
   const run = (args: readonly string[], input?: string | Uint8Array): string =>
     execFileSync("git", ["-C", path, ...args], { input, encoding: "utf8" }).toString();
