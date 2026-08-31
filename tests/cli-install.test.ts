@@ -119,13 +119,18 @@ test("bundled skills give each operating concept one owner", () => {
   assert.match(bind, /## Authority Order/);
   assert.match(bind, /journaled terms\s+are the standing acceptance floor/);
   assert.doesNotMatch(bind, /worker brief \(zero authority\)/);
-  assert.match(workflow, /## Hold the Fulfillment Loop/);
-  assert.match(workflow, /The commission owns the question/);
-  assert.match(workflow, /The Reviewer owns the answer/);
-  assert.match(workflow, /new Contract\s+always gets a new call/);
-  assert.match(workflow, /reuse the same identity\s+across rounds/);
-  assert.match(workflow, /its judgment frame\s+is\s+contaminated/);
-  assert.match(workflow, /Terms change through the journal or not at all/);
+  for (const decision of [
+    "hold or delegate",
+    "shape the work",
+    "commission seats",
+    "adjudicate returns",
+    "schedule landing",
+  ]) {
+    assert.match(workflow, new RegExp(`## Decision \\d — ${decision}`));
+  }
+  assert.match(workflow, /Work begun directly that grows\s+beyond expectation escalates midstream/);
+  assert.match(workflow, /Allowed actions are commission configuration, not prompt prose/);
+  assert.match(workflow, /A returned Reviewer verdict is transported faithfully into\s+testimony/);
   assert.doesNotMatch(
     workflow,
     /adjudicable|constructible current failure|term defect|second unsatisfied review|deletion-litmus/u,
