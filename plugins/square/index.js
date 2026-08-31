@@ -9,7 +9,9 @@ function squareEnvironment(environment, path) {
     SQUARE_HOST_LEDGER_USER:
       environment.SQUARE_HOST_LEDGER_USER ?? ledgerRoot ?? join(homedir(), ".square", "host-ledger"),
     SQUARE_HOST_LEDGER_LOCAL:
-      environment.SQUARE_HOST_LEDGER_LOCAL ?? ledgerRoot ?? join(environment.PWD ?? dirname(path), ".square", "host-ledger"),
+      environment.SQUARE_HOST_LEDGER_LOCAL ??
+      ledgerRoot ??
+      join(environment.PWD ?? dirname(path), ".square", "host-ledger"),
   };
 }
 
@@ -38,16 +40,19 @@ async function openSquare(path, environment, ledger) {
 }
 
 function outcomeExpression(signal, caller) {
-  const header = [signal.akumaId, caller === undefined ? undefined : `(@${caller})`, signal.contractId]
+  const header = [
+    signal.akumaId,
+    `turn/${signal.turnSequence}`,
+    caller === undefined ? undefined : `(@${caller})`,
+    signal.contractId,
+  ]
     .filter((value) => value !== undefined)
     .join(" ");
-  return signal.outcome.kind === "answered"
-    ? `${header}\n✓ came back`
-    : `${header}\n× ${signal.outcome.reason}`;
+  return signal.outcome.kind === "answered" ? `${header}\n✓ came back` : `${header}\n× ${signal.outcome.reason}`;
 }
 
-function calledExpression(signal, caller) {
-  const source = signal.callerAkumaId ?? (caller === undefined ? undefined : `(@${caller})`);
+function calledExpression(signal) {
+  const source = signal.callerAkumaId;
   return [source, "called", signal.akumaId].filter((value) => value !== undefined).join(" ");
 }
 
@@ -68,16 +73,17 @@ export default {
     return {
       signals: {
         async "akuma.called"(signal) {
+          if (caller === undefined) return;
           const square = await openSquare(path, environment, ledger);
           try {
-            const joined = await square.implicitJoin(signal.akumaId);
+            const joined = await square.implicitJoin(caller);
             if (joined.state === "done" || joined.participant === undefined) return;
-            await joined.participant.express(calledExpression(signal, caller));
+            await joined.participant.express(calledExpression(signal));
           } finally {
             await square.close();
           }
         },
-        async "akuma.initial-turn"(signal) {
+        async "akuma.turn-outcome"(signal) {
           const square = await openSquare(path, environment, ledger);
           try {
             const joined = await square.implicitJoin(signal.akumaId);

@@ -200,7 +200,7 @@ function handlers(pluginId: string, instance: PluginInstance): readonly Register
   if (!object(instance.signals)) throw new TypeError("plugin signals must be an object");
   const registered: RegisteredHandler[] = [];
   for (const [kind, handler] of Object.entries(instance.signals)) {
-    if (kind !== "akuma.called" && kind !== "akuma.initial-turn") {
+    if (kind !== "akuma.called" && kind !== "akuma.turn-outcome") {
       throw new TypeError(`plugin signal is unknown: ${kind}`);
     }
     if (typeof handler !== "function") throw new TypeError(`plugin signal handler is not a function: ${kind}`);

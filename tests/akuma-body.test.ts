@@ -39,17 +39,17 @@ import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import type { PluginSignal } from "../src/plugin/public.js";
 import { World } from "../src/world.js";
 
-type InitialTurnPluginRecorder = {
+type TurnOutcomePluginRecorder = {
   activations: number;
   observations: Array<Readonly<{ signal: PluginSignal; outcomes: unknown }>>;
   observe(signal: PluginSignal): Promise<void>;
 };
 
-const initialTurnPluginGlobal = globalThis as typeof globalThis & {
-  __keiyakuInitialTurnPluginRecorder?: InitialTurnPluginRecorder;
+const turnOutcomePluginGlobal = globalThis as typeof globalThis & {
+  __keiyakuTurnOutcomePluginRecorder?: TurnOutcomePluginRecorder;
 };
 
-function configureInitialTurnPlugins(root: string): void {
+function configureTurnOutcomePlugins(root: string): void {
   const plugins = join(root, "plugins");
   mkdirSync(plugins, { recursive: true });
   writeFileSync(
@@ -58,8 +58,8 @@ function configureInitialTurnPlugins(root: string): void {
       "export default {",
       '  manifest: { id: "observer", apiVersion: 1 },',
       "  activate() {",
-      "    globalThis.__keiyakuInitialTurnPluginRecorder.activations += 1;",
-      '    return { signals: { "akuma.initial-turn": (signal) => globalThis.__keiyakuInitialTurnPluginRecorder.observe(signal) } };',
+      "    globalThis.__keiyakuTurnOutcomePluginRecorder.activations += 1;",
+      '    return { signals: { "akuma.turn-outcome": (signal) => globalThis.__keiyakuTurnOutcomePluginRecorder.observe(signal) } };',
       "  },",
       "};",
     ].join("\n"),
@@ -69,7 +69,7 @@ function configureInitialTurnPlugins(root: string): void {
     [
       "export default {",
       '  manifest: { id: "broken", apiVersion: 1 },',
-      '  activate() { return { signals: { "akuma.initial-turn": () => { throw new Error("observer failure"); } } }; },',
+      '  activate() { return { signals: { "akuma.turn-outcome": () => { throw new Error("observer failure"); } } }; },',
       "};",
     ].join("\n"),
   );
@@ -103,6 +103,10 @@ test("generic handoff with no pending Tell does not spawn", async () => {
 
 async function outcomes(paths: Parameters<typeof activitySlice>[0]) {
   return (await activitySlice(paths)).rows.filter((fact) => fact.kind === "turn-end").map((fact) => fact.outcome);
+}
+
+async function committedTurnSequences(paths: Parameters<typeof activitySlice>[0]): Promise<readonly number[]> {
+  return (await activitySlice(paths)).rows.filter((fact) => fact.kind === "turn-end").map((fact) => fact.turnSequence);
 }
 
 function sessionResource(session: Session) {
@@ -319,20 +323,20 @@ test("body births, admits native session, records the turn, and exits only when 
   }
 });
 
-test("initial-turn plugins observe the committed answered outcome once and do not observe Tell turns", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-plugin-initial-answered-"));
+test("turn-outcome plugins observe every committed answered Turn exactly once", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-plugin-turn-answered-"));
   try {
     const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abce" });
     await initializeHeart(allocated.paths);
-    configureInitialTurnPlugins(root);
-    const recorder: InitialTurnPluginRecorder = {
+    configureTurnOutcomePlugins(root);
+    const recorder: TurnOutcomePluginRecorder = {
       activations: 0,
       observations: [],
       async observe(signal) {
         this.observations.push({ signal, outcomes: await outcomes(allocated.paths) });
       },
     };
-    initialTurnPluginGlobal.__keiyakuInitialTurnPluginRecorder = recorder;
+    turnOutcomePluginGlobal.__keiyakuTurnOutcomePluginRecorder = recorder;
     const launch: BodyLaunch = {
       paths: allocated.paths,
       seed: {
@@ -367,8 +371,9 @@ test("initial-turn plugins observe the committed answered outcome once and do no
     assert.deepEqual(recorder.observations, [
       {
         signal: {
-          kind: "akuma.initial-turn",
+          kind: "akuma.turn-outcome",
           akumaId: allocated.id,
+          turnSequence: 1,
           outcome: { kind: "answered", text: "done" },
           contractId: "kei/example",
         },
@@ -400,27 +405,55 @@ test("initial-turn plugins observe the committed answered outcome once and do no
     );
 
     assert.equal(recorder.activations, 1);
-    assert.equal(recorder.observations.length, 1);
+    assert.equal(recorder.observations.length, 2);
+    const sequences = await committedTurnSequences(allocated.paths);
+    assert.deepEqual(
+      recorder.observations.map(({ signal }) =>
+        signal.kind === "akuma.turn-outcome" ? signal.turnSequence : undefined,
+      ),
+      sequences,
+    );
+    assert.deepEqual(recorder.observations[1], {
+      signal: {
+        kind: "akuma.turn-outcome",
+        akumaId: allocated.id,
+        turnSequence: sequences[1],
+        outcome: { kind: "answered", text: "adjusted" },
+      },
+      outcomes: [
+        {
+          kind: "answered",
+          answer: "done",
+          historyId: "plugin-history",
+          session: { sessionId: "plugin-session" },
+        },
+        {
+          kind: "answered",
+          answer: "adjusted",
+          session: { sessionId: "plugin-session-2" },
+        },
+      ],
+    });
   } finally {
-    delete initialTurnPluginGlobal.__keiyakuInitialTurnPluginRecorder;
+    delete turnOutcomePluginGlobal.__keiyakuTurnOutcomePluginRecorder;
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("initial-turn plugins observe the committed failed outcome without changing it", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-plugin-initial-failed-"));
+test("turn-outcome plugins observe a committed failed Turn without changing it", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-plugin-turn-failed-"));
   try {
     const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abcf" });
     await initializeHeart(allocated.paths);
-    configureInitialTurnPlugins(root);
-    const recorder: InitialTurnPluginRecorder = {
+    configureTurnOutcomePlugins(root);
+    const recorder: TurnOutcomePluginRecorder = {
       activations: 0,
       observations: [],
       async observe(signal) {
         this.observations.push({ signal, outcomes: await outcomes(allocated.paths) });
       },
     };
-    initialTurnPluginGlobal.__keiyakuInitialTurnPluginRecorder = recorder;
+    turnOutcomePluginGlobal.__keiyakuTurnOutcomePluginRecorder = recorder;
 
     await driveAkumaBody(
       {
@@ -443,8 +476,9 @@ test("initial-turn plugins observe the committed failed outcome without changing
     assert.deepEqual(recorder.observations, [
       {
         signal: {
-          kind: "akuma.initial-turn",
+          kind: "akuma.turn-outcome",
           akumaId: allocated.id,
+          turnSequence: 1,
           outcome: { kind: "failed", reason: "provider failed" },
         },
         outcomes: [{ kind: "failed", diagnostic: "provider failed" }],
@@ -454,7 +488,7 @@ test("initial-turn plugins observe the committed failed outcome without changing
     assert.equal(heart.latestBody?.end, "broke-off");
     assert.deepEqual(await outcomes(allocated.paths), [{ kind: "failed", diagnostic: "provider failed" }]);
   } finally {
-    delete initialTurnPluginGlobal.__keiyakuInitialTurnPluginRecorder;
+    delete turnOutcomePluginGlobal.__keiyakuTurnOutcomePluginRecorder;
     rmSync(root, { recursive: true, force: true });
   }
 });

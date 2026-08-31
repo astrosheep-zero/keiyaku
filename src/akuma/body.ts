@@ -194,12 +194,15 @@ export async function emitCalledPluginSignal(
       ...(input.settings === undefined ? {} : { settings: input.settings }),
       ...(reportDiagnostic === undefined ? {} : { reportDiagnostic }),
     });
-    await runtime.emit({
-      kind: "akuma.called",
-      akumaId: input.akumaId,
-      ...(input.callerAkumaId === undefined ? {} : { callerAkumaId: input.callerAkumaId }),
-      ...(input.contractId === undefined ? {} : { contractId: input.contractId }),
-    }, reportDiagnostic);
+    await runtime.emit(
+      {
+        kind: "akuma.called",
+        akumaId: input.akumaId,
+        ...(input.callerAkumaId === undefined ? {} : { callerAkumaId: input.callerAkumaId }),
+        ...(input.contractId === undefined ? {} : { contractId: input.contractId }),
+      },
+      reportDiagnostic,
+    );
   } catch (error) {
     if (input.paths !== undefined) await recordPluginDiagnostic(input.paths, "call admission", error);
   }
@@ -266,12 +269,15 @@ async function recoverBodyRequests(input: BodyExecution): Promise<boolean> {
   return false;
 }
 
-function initialTurnEmitter(launch: BodyLaunch, soul: Soul): (outcome: CommittedOutcome) => Promise<void> {
+function turnOutcomeEmitter(
+  launch: BodyLaunch,
+  soul: Soul,
+): (turnSequence: number, outcome: CommittedOutcome) => Promise<void> {
   let plugins: Promise<PluginRuntime> | undefined;
   const reportDiagnostic = (message: string): void => {
-    void recordPluginDiagnostic(launch.paths, "initial turn", message);
+    void recordPluginDiagnostic(launch.paths, "turn outcome", message);
   };
-  return async (outcome) => {
+  return async (turnSequence, outcome) => {
     try {
       plugins ??= (async () =>
         await pluginRuntime({
@@ -280,17 +286,21 @@ function initialTurnEmitter(launch: BodyLaunch, soul: Soul): (outcome: Committed
         }))();
       await (
         await plugins
-      ).emit({
-        kind: "akuma.initial-turn",
-        akumaId: soul.id,
-        outcome:
-          outcome.outcome === "answered"
-            ? { kind: "answered", text: outcome.answer }
-            : { kind: "failed", reason: outcome.diagnostic },
-        ...(launch.completion?.contractId === undefined ? {} : { contractId: launch.completion.contractId }),
-      }, reportDiagnostic);
+      ).emit(
+        {
+          kind: "akuma.turn-outcome",
+          akumaId: soul.id,
+          turnSequence,
+          outcome:
+            outcome.outcome === "answered"
+              ? { kind: "answered", text: outcome.answer }
+              : { kind: "failed", reason: outcome.diagnostic },
+          ...(launch.completion?.contractId === undefined ? {} : { contractId: launch.completion.contractId }),
+        },
+        reportDiagnostic,
+      );
     } catch (error) {
-      await recordPluginDiagnostic(launch.paths, "initial turn", error);
+      await recordPluginDiagnostic(launch.paths, "turn outcome", error);
     }
   };
 }
@@ -298,7 +308,7 @@ function initialTurnEmitter(launch: BodyLaunch, soul: Soul): (outcome: Committed
 async function runBodyTurns(input: BodyExecution): Promise<void> {
   const { launch, soul, adapter, bodySequence, supervisor, runtime } = input;
   let initial = launch.initialBody;
-  const emitInitialTurn = initialTurnEmitter(launch, soul);
+  const emitTurnOutcome = turnOutcomeEmitter(launch, soul);
   for (;;) {
     const launchTells = supervisor.current().pending;
     if (supervisor.signal.aborted) {
@@ -342,9 +352,7 @@ async function runBodyTurns(input: BodyExecution): Promise<void> {
       return;
     }
     const outcome = await persistTurn(launch.paths, result.turnSequence, result, runtime.now());
-    if (initial !== undefined) {
-      await emitInitialTurn(outcome);
-    }
+    await emitTurnOutcome(result.turnSequence, outcome);
     if (outcome.outcome === "failed") {
       await breakBody(launch.paths, { sequence: bodySequence, end: "broke-off", at: runtime.now() });
       return;

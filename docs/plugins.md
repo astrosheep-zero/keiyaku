@@ -62,8 +62,10 @@ outcome observation. It identifies the called Akuma, its calling Akuma when
 there is one, and any Contract association already known at admission. It
 carries no call contents or provider detail.
 
-An initial Akuma Turn signal, when produced, follows the committed terminal
-outcome it describes. Plugins cannot participate in providers, generic lifecycle
-verbs, operation inputs, or Settlement. In particular, plugin delivery does not
-make birth reversible, add a pre-Body listener, or create rollback or
-cross-process continuation behavior.
+Every committed terminal Akuma Turn emits `akuma.turn-outcome` after its outcome
+is durable, including Turns driven by later Tells. The signal identifies the
+Akuma and Turn sequence and carries the committed answered or failed outcome;
+it does not expose provider or continuation custody. Plugins cannot participate
+in providers, generic lifecycle verbs, operation inputs, or Settlement. In
+particular, plugin delivery does not make birth reversible, add a pre-Body
+listener, or create rollback or cross-process continuation behavior.

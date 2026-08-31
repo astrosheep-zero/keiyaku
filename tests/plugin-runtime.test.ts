@@ -40,7 +40,7 @@ test("plugin runtime selects project-shadowed enabled plugins in manifest-id ord
         'import { appendFileSync } from "node:fs";',
         "export default {",
         '  manifest: { id: "alpha", apiVersion: 1 },',
-        '  activate(context) { appendFileSync(context.config.trace, `activate:${context.config.label}\\n`); return { signals: { "akuma.initial-turn": (signal) => appendFileSync(context.config.trace, `signal:${signal.akumaId}\\n`) } }; },',
+        '  activate(context) { appendFileSync(context.config.trace, `activate:${context.config.label}\\n`); return { signals: { "akuma.turn-outcome": (signal) => appendFileSync(context.config.trace, `signal:${signal.akumaId}:${signal.turnSequence}\\n`) } }; },',
         "};",
       ].join("\n"),
     );
@@ -51,7 +51,7 @@ test("plugin runtime selects project-shadowed enabled plugins in manifest-id ord
         'import { appendFileSync } from "node:fs";',
         "export default {",
         '  manifest: { id: "beta", apiVersion: 1 },',
-        '  activate(context) { appendFileSync(context.config.trace, `activate:${context.config.label}\\n`); return {}; },',
+        "  activate(context) { appendFileSync(context.config.trace, `activate:${context.config.label}\\n`); return {}; },",
         "};",
       ].join("\n"),
     );
@@ -83,13 +83,14 @@ test("plugin runtime selects project-shadowed enabled plugins in manifest-id ord
       reportDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
     });
     await runtime.emit({
-      kind: "akuma.initial-turn",
+      kind: "akuma.turn-outcome",
       akumaId: "aku/example",
+      turnSequence: 2,
       outcome: { kind: "answered", text: "done" },
       contractId: "kei/example",
     });
 
-    assert.deepEqual(trace(output), ["activate:project-alpha", "activate:beta", "signal:aku/example"]);
+    assert.deepEqual(trace(output), ["activate:project-alpha", "activate:beta", "signal:aku/example:2"]);
     assert.deepEqual(diagnostics, []);
   } finally {
     value.close();
@@ -107,7 +108,7 @@ test("plugin activation stages handlers and isolates import and activation failu
         'import { appendFileSync } from "node:fs";',
         "export default {",
         '  manifest: { id: "broken", apiVersion: 1 },',
-        '  activate(context) { appendFileSync(context.config.trace, "broken-activation\\n"); return { signals: { "akuma.initial-turn": "not-a-handler" } }; },',
+        '  activate(context) { appendFileSync(context.config.trace, "broken-activation\\n"); return { signals: { "akuma.turn-outcome": "not-a-handler" } }; },',
         "};",
       ].join("\n"),
     );
@@ -118,7 +119,7 @@ test("plugin activation stages handlers and isolates import and activation failu
         'import { appendFileSync } from "node:fs";',
         "export default {",
         '  manifest: { id: "working", apiVersion: 1 },',
-        '  activate(context) { return { signals: { "akuma.initial-turn": () => appendFileSync(context.config.trace, "working-signal\\n") } }; },',
+        '  activate(context) { return { signals: { "akuma.turn-outcome": () => appendFileSync(context.config.trace, "working-signal\\n") } }; },',
         "};",
       ].join("\n"),
     );
@@ -135,12 +136,26 @@ test("plugin activation stages handlers and isolates import and activation failu
     );
 
     const diagnostics: string[] = [];
-    const runtime = await pluginRuntime({ world: await World.at(value.root), reportDiagnostic: (value) => diagnostics.push(value) });
-    await runtime.emit({ kind: "akuma.initial-turn", akumaId: "aku/example", outcome: { kind: "failed", reason: "no" } });
+    const runtime = await pluginRuntime({
+      world: await World.at(value.root),
+      reportDiagnostic: (value) => diagnostics.push(value),
+    });
+    await runtime.emit({
+      kind: "akuma.turn-outcome",
+      akumaId: "aku/example",
+      turnSequence: 1,
+      outcome: { kind: "failed", reason: "no" },
+    });
 
     assert.deepEqual(trace(output), ["broken-activation", "working-signal"]);
-    assert.equal(diagnostics.some((value) => value.startsWith("plugin broken activation:")), true);
-    assert.equal(diagnostics.some((value) => value.startsWith("plugin missing import:")), true);
+    assert.equal(
+      diagnostics.some((value) => value.startsWith("plugin broken activation:")),
+      true,
+    );
+    assert.equal(
+      diagnostics.some((value) => value.startsWith("plugin missing import:")),
+      true,
+    );
   } finally {
     value.close();
   }
@@ -228,11 +243,17 @@ test("plugin delivery starts generic call handlers independently and contains ha
     );
 
     const diagnostics: string[] = [];
-    const runtime = await pluginRuntime({ world: await World.at(value.root), reportDiagnostic: (value) => diagnostics.push(value) });
+    const runtime = await pluginRuntime({
+      world: await World.at(value.root),
+      reportDiagnostic: (value) => diagnostics.push(value),
+    });
     await runtime.emit({ kind: "akuma.called", akumaId: "aku/example" });
 
     assert.deepEqual(trace(output), ["slow-start", "fast:aku/example", "slow-fail"]);
-    assert.equal(diagnostics.some((value) => value.startsWith("plugin alpha signal: handler failed")), true);
+    assert.equal(
+      diagnostics.some((value) => value.startsWith("plugin alpha signal: handler failed")),
+      true,
+    );
   } finally {
     value.close();
   }
@@ -290,7 +311,11 @@ test("plugin writable paths reject traversal, management custody, duplicate name
     writePlugin(value.root, "traversal", invalid("traversal", '[{ name: "state", path: "../escape" }]'));
     writePlugin(value.root, "reserved", invalid("reserved", '[{ name: "state", path: ".keiyaku/plugin" }]'));
     writePlugin(value.root, "case", invalid("case", '[{ name: "state", path: ".KEIYAKU/plugin" }]'));
-    writePlugin(value.root, "duplicate", invalid("duplicate", '[{ name: "state", path: "one" }, { name: "state", path: "two" }]'));
+    writePlugin(
+      value.root,
+      "duplicate",
+      invalid("duplicate", '[{ name: "state", path: "one" }, { name: "state", path: "two" }]'),
+    );
     writePlugin(value.root, "symlink", invalid("symlink", '[{ name: "state", path: "linked/escape" }]'));
     writePlugin(
       value.root,
@@ -325,7 +350,10 @@ test("plugin writable paths reject traversal, management custody, duplicate name
     assert.deepEqual(trace(output), [join(world, ".square"), "undeclared"]);
     assert.equal(existsSync(join(outside, "escape")), false);
     for (const id of ["case", "duplicate", "reserved", "symlink", "traversal"]) {
-      assert.equal(diagnostics.some((value) => value.startsWith(`plugin ${id} validation:`)), true);
+      assert.equal(
+        diagnostics.some((value) => value.startsWith(`plugin ${id} validation:`)),
+        true,
+      );
     }
   } finally {
     value.close();

@@ -17,16 +17,18 @@ function restoreEnvironment(values: Readonly<Record<string, string | undefined>>
   }
 }
 
-async function expressionBodies(path: string): Promise<readonly string[]> {
+async function expressions(path: string): Promise<readonly Readonly<{ actor: string; body: string }>[]> {
   const square = await Square.at({ path });
   try {
-    return (await square.history()).flatMap((activity) => (activity.body === undefined ? [] : [activity.body]));
+    return (await square.history()).flatMap((activity) =>
+      activity.kind === "say" && activity.body !== undefined ? [{ actor: activity.actor, body: activity.body }] : [],
+    );
   } finally {
     await square.close();
   }
 }
 
-test("the Square plugin expresses calls and initial-turn outcomes through its public plugin contract", async () => {
+test("the Square plugin attributes calls to their caller and expresses every Turn outcome", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-plugin-square-"));
   const prior = {
     CODEX_THREAD_ID: process.env.CODEX_THREAD_ID,
@@ -50,7 +52,7 @@ test("the Square plugin expresses calls and initial-turn outcomes through its pu
       config: undefined,
       writablePath: () => join(root, ".square"),
     });
-    const handler = instance.signals?.["akuma.initial-turn"];
+    const handler = instance.signals?.["akuma.turn-outcome"];
     assert.ok(handler);
     const called = instance.signals?.["akuma.called"];
     assert.ok(called);
@@ -61,15 +63,24 @@ test("the Square plugin expresses calls and initial-turn outcomes through its pu
       contractId: "kei/example",
     });
     await handler({
-      kind: "akuma.initial-turn",
+      kind: "akuma.turn-outcome",
       akumaId: "aku/answered",
+      turnSequence: 1,
       outcome: { kind: "answered", text: "done" },
       contractId: "kei/example",
     });
+    await handler({
+      kind: "akuma.turn-outcome",
+      akumaId: "aku/answered",
+      turnSequence: 2,
+      outcome: { kind: "answered", text: "adjusted" },
+      contractId: "kei/example",
+    });
     assert.equal(existsSync(squarePath(root)), true);
-    assert.deepEqual(await expressionBodies(squarePath(root)), [
-      "aku/caller called aku/called",
-      "aku/answered (@Alice) kei/example\n✓ came back",
+    assert.deepEqual(await expressions(squarePath(root)), [
+      { actor: "Alice", body: "aku/caller called aku/called" },
+      { actor: "aku/answered", body: "aku/answered turn/1 (@Alice) kei/example\n✓ came back" },
+      { actor: "aku/answered", body: "aku/answered turn/2 (@Alice) kei/example\n✓ came back" },
     ]);
 
     delete process.env.CODEX_THREAD_ID;
@@ -79,22 +90,33 @@ test("the Square plugin expresses calls and initial-turn outcomes through its pu
       config: undefined,
       writablePath: () => join(root, ".square"),
     });
-    const fallbackHandler = fallback.signals?.["akuma.initial-turn"];
+    const fallbackHandler = fallback.signals?.["akuma.turn-outcome"];
     assert.ok(fallbackHandler);
     const externalCalled = fallback.signals?.["akuma.called"];
     assert.ok(externalCalled);
     await externalCalled({ kind: "akuma.called", akumaId: "aku/external" });
     await fallbackHandler({
-      kind: "akuma.initial-turn",
+      kind: "akuma.turn-outcome",
       akumaId: "aku/failed",
+      turnSequence: 3,
       outcome: { kind: "failed", reason: "provider failed" },
     });
-    assert.deepEqual(await expressionBodies(squarePath(root)), [
-      "aku/caller called aku/called",
-      "aku/answered (@Alice) kei/example\n✓ came back",
-      "called aku/external",
-      "aku/failed\n× provider failed",
+    assert.deepEqual(await expressions(squarePath(root)), [
+      { actor: "Alice", body: "aku/caller called aku/called" },
+      { actor: "aku/answered", body: "aku/answered turn/1 (@Alice) kei/example\n✓ came back" },
+      { actor: "aku/answered", body: "aku/answered turn/2 (@Alice) kei/example\n✓ came back" },
+      { actor: "aku/failed", body: "aku/failed turn/3\n× provider failed" },
     ]);
+    const square = await Square.at({ path: squarePath(root) });
+    try {
+      assert.deepEqual((await square.participants()).map(({ name }) => name).sort(), [
+        "Alice",
+        "aku/answered",
+        "aku/failed",
+      ]);
+    } finally {
+      await square.close();
+    }
   } finally {
     restoreEnvironment(prior);
     rmSync(root, { recursive: true, force: true });
@@ -129,11 +151,15 @@ test("the host isolates a Square plugin handler failure", async (t) => {
       reportDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
     });
     await runtime.emit({
-      kind: "akuma.initial-turn",
+      kind: "akuma.turn-outcome",
       akumaId: "aku/failed",
+      turnSequence: 1,
       outcome: { kind: "failed", reason: "provider failed" },
     });
-    assert.equal(diagnostics.some((diagnostic) => diagnostic.startsWith("plugin square signal: injected Square failure")), true);
+    assert.equal(
+      diagnostics.some((diagnostic) => diagnostic.startsWith("plugin square signal: injected Square failure")),
+      true,
+    );
   } finally {
     restoreEnvironment(prior);
     rmSync(root, { recursive: true, force: true });

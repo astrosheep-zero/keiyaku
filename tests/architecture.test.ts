@@ -18,7 +18,8 @@ test("architecture policy accepts internal owner topology changes", () => {
     "git/owner-state.ts": "export const readOwnerState = 1;",
   });
   const moved = check({
-    "git/repository.ts": 'import { readOwnerState } from "./internal/owner-state.js"; export const read = readOwnerState;',
+    "git/repository.ts":
+      'import { readOwnerState } from "./internal/owner-state.js"; export const read = readOwnerState;',
     "git/internal/owner-state.ts": "export const readOwnerState = 1;",
   });
 
@@ -26,7 +27,7 @@ test("architecture policy accepts internal owner topology changes", () => {
   assert.deepEqual(moved, []);
 });
 
-test("architecture policy permits Body's initial-turn plugin runtime delivery", () => {
+test("architecture policy permits Body's turn-outcome plugin runtime delivery", () => {
   const diagnostics = check({
     "plugin/runtime.ts":
       "export type PluginRuntime = {}; export function pluginRuntime(): PluginRuntime { return {}; }",
@@ -46,7 +47,8 @@ test("architecture policy rejects reverse owner edges", () => {
     "git/repository.ts": "export function repositoryAt(): void {}",
     "git/target-placement.ts": "export function observeTargetPlacement(): void {}",
     "cli/commands/bind.ts": 'import { decideBind } from "../../core/verbs/bind.js"; export const bind = decideBind;',
-    "library/audit.ts": 'import { observeTargetPlacement } from "../git/target-placement.js"; export const audit = observeTargetPlacement;',
+    "library/audit.ts":
+      'import { observeTargetPlacement } from "../git/target-placement.js"; export const audit = observeTargetPlacement;',
     "core/facts/fold.ts": 'import { repositoryAt } from "../../git/repository.js"; export const fold = repositoryAt;',
   });
 
@@ -72,7 +74,8 @@ test("architecture policy keeps the Contract handle on its public neighbors", ()
 test("architecture policy keeps Kanshi on public-owner composition", () => {
   const accepted = check({
     "git/read-observation.ts": "export function withGitReadObservation(): void {}",
-    "kanshi/read.ts": 'import { withGitReadObservation } from "../git/read-observation.js"; export const read = withGitReadObservation;',
+    "kanshi/read.ts":
+      'import { withGitReadObservation } from "../git/read-observation.js"; export const read = withGitReadObservation;',
   });
   const rejected = check({
     "git/read-observation.ts": "export function withGitTargetedReadObservation(): void {}",
@@ -103,11 +106,13 @@ test("architecture policy keeps Contract edges forbidden after a move", () => {
 test("architecture policy keeps provider adapters out of Heart writes", () => {
   const accepted = check({
     "akuma/heart/index.ts": "export type Heart = {};",
-    "akuma/providers/example/adapter.ts": 'import type { Heart } from "../../heart/index.js"; export type Adapter = Heart;',
+    "akuma/providers/example/adapter.ts":
+      'import type { Heart } from "../../heart/index.js"; export type Adapter = Heart;',
   });
   const rejected = check({
     "akuma/heart/index.ts": "export function writeFact(): void {}",
-    "akuma/providers/example/adapter.ts": 'import { writeFact } from "../../heart/index.js"; export const adapter = writeFact;',
+    "akuma/providers/example/adapter.ts":
+      'import { writeFact } from "../../heart/index.js"; export const adapter = writeFact;',
   });
 
   assert.deepEqual(accepted, []);
@@ -132,7 +137,8 @@ test("architecture policy assigns process and filesystem capabilities to their o
 
 test("architecture policy keeps provider SDKs inside their adapter owners", () => {
   const accepted = check({
-    "akuma/providers/opencode-sdk/client.ts": 'import { client } from "@opencode-ai/sdk"; export const adapter = client;',
+    "akuma/providers/opencode-sdk/client.ts":
+      'import { client } from "@opencode-ai/sdk"; export const adapter = client;',
   });
   const rejected = check({
     "protocol/attempt.ts": 'import { client } from "@opencode-ai/sdk"; export const attempt = client;',
