@@ -153,10 +153,8 @@ async function readContracts(
   }
 }
 
-type HolderRead =
-  | Readonly<{ kind: "present"; value: TaskHolderProjection }>
-  | Readonly<{ kind: "absent" }>
-  | Readonly<{ kind: "failed"; failure: Readonly<{ message: string }> }>;
+type HolderRead = Section<TaskHolderProjection>;
+type DispatchRead = Exclude<Section<readonly Dispatch[]>, Readonly<{ kind: "absent" }>>;
 
 async function readHolders(observation: GitReadObservation): Promise<HolderRead> {
   try {
@@ -358,12 +356,7 @@ async function readAliasBindings(path: WorldRoot): Promise<Section<readonly Alia
   }
 }
 
-async function readDispatches(
-  observation: GitReadObservation,
-): Promise<
-  | Readonly<{ kind: "present"; value: readonly Dispatch[] }>
-  | Readonly<{ kind: "failed"; failure: Readonly<{ message: string }> }>
-> {
+async function readDispatches(observation: GitReadObservation): Promise<DispatchRead> {
   try {
     return { kind: "present", value: await readDispatchesAt(observation) };
   } catch (error) {
