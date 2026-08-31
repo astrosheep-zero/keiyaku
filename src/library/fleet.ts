@@ -17,7 +17,12 @@ import {
   requestBodyCommand,
   type ExecutionContext,
 } from "../akuma/requests.js";
-import { eraseRequestCommand, type ErasedRequestCommand, type RequestCommand } from "../akuma/request-wire.js";
+import {
+  eraseRequestCommand,
+  type ErasedRequestCommand,
+  type RequestProtocol,
+  type ServiceRequestCommand,
+} from "../akuma/request-wire.js";
 import { readDispatch } from "../dispatch/index.js";
 import { observeTaskBoard } from "../task/operations.js";
 import type { WorldRoot } from "../world.js";
@@ -405,56 +410,6 @@ export type FleetRequestPort = Readonly<{
     | Readonly<{ result: unknown; service: readonly Readonly<{ id: AkumaStatus["id"]; evidence: KillEvidence }>[] }>
   >;
 }>;
-type FleetExecutionContext = Readonly<{
-  id: string;
-  admittedAt: string;
-  signal: AbortSignal;
-  upstream: FleetRequestPort;
-}>;
-
-function decodeFleetExecutionContext(value: unknown): FleetExecutionContext {
-  const context = fleetPayload(value);
-  if (
-    context === null ||
-    typeof context.id !== "string" ||
-    context.id.trim() === "" ||
-    typeof context.admittedAt !== "string" ||
-    !isAbortSignal(context.signal) ||
-    !isFleetRequestPort(context.upstream)
-  )
-    throw new Error("invalid Fleet execution context");
-  return {
-    id: context.id,
-    admittedAt: context.admittedAt,
-    signal: context.signal,
-    upstream: context.upstream,
-  };
-}
-
-function isAbortSignal(value: unknown): value is AbortSignal {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    typeof (value as { throwIfAborted?: unknown }).throwIfAborted === "function"
-  );
-}
-
-function isFleetRequestPort(value: unknown): value is FleetRequestPort {
-  const port = fleetPayload(value);
-  return (
-    port !== null &&
-    typeof port.wait === "function" &&
-    typeof port.tell === "function" &&
-    typeof port.kill === "function"
-  );
-}
-
-function fleetPayload(value: unknown): Readonly<Record<string, unknown>> | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
-}
-
 function decodeFleetRequest(action: FleetRequest["action"], value: unknown): FleetRequest | null {
   const schema =
     action === "akuma.wait" ? waitRequestSchema : action === "akuma.tell" ? tellRequestSchema : killRequestSchema;
@@ -471,9 +426,9 @@ function decodeFleetService(action: FleetRequest["action"], value: unknown): Fle
 }
 
 /** Fleet owns its Body Request payload, live result, and durable service codecs. */
-export function fleetRequestCommand(
+export function fleetRequestProtocol(
   action: FleetRequest["action"],
-): RequestCommand<FleetRequest, unknown, FleetService, FleetService, FleetExecutionContext> {
+): RequestProtocol<FleetRequest, unknown, FleetService> {
   return {
     action,
     encodeRequest: (request) => {
@@ -493,32 +448,41 @@ export function fleetRequestCommand(
       if (!parsed.success) throw new Error(`Akuma body request returned an invalid live result for ${action}`);
       return parsed.data;
     },
+    decodeReference: (reference) => decodeFleetService(action, reference),
+    isPermitted: (allowed) => action === "akuma.wait" || allowed.includes(action),
+  };
+}
+
+export function fleetRequestCommand(
+  action: FleetRequest["action"],
+  port: FleetRequestPort,
+): ServiceRequestCommand<FleetRequest, unknown, FleetService, FleetService> {
+  return {
+    completion: "service",
+    protocol: fleetRequestProtocol(action),
     encodeService: (service) => decodeFleetService(action, service),
     decodeService: (service) => decodeFleetService(action, service),
     projectService: (service) => decodeFleetService(action, service),
-    decodeReference: (reference) => decodeFleetService(action, reference),
-    isPermitted: (allowed) => action === "akuma.wait" || allowed.includes(action),
-    decodeExecutionContext: decodeFleetExecutionContext,
-    execute: async (request, context) => {
+    execute: async (request, facts) => {
       if (request.action === "akuma.wait") {
         return {
-          result: await context.upstream.wait({ ...request, signal: context.signal }),
+          result: await port.wait({ ...request, signal: facts.signal }),
           service: { action: request.action },
         };
       }
       if (request.action === "akuma.tell") {
         return {
-          result: await context.upstream.tell({
+          result: await port.tell({
             target: request.target,
             body: request.body,
-            tellId: context.id,
-            recordedAt: context.admittedAt,
-            signal: context.signal,
+            tellId: facts.id,
+            recordedAt: facts.admittedAt,
+            signal: facts.signal,
           }),
-          service: { action: request.action, target: request.target, tellId: context.id },
+          service: { action: request.action, target: request.target, tellId: facts.id },
         };
       }
-      const result = await context.upstream.kill({ targets: request.targets, signal: context.signal });
+      const result = await port.kill({ targets: request.targets, signal: facts.signal });
       if ("result" in result)
         return { result: result.result, service: { action: request.action, results: result.service } };
       return {
@@ -529,13 +493,13 @@ export function fleetRequestCommand(
   };
 }
 
-export function fleetRequestCommands(): Readonly<
-  Record<"akuma.wait" | "akuma.tell" | "akuma.kill", ErasedRequestCommand>
-> {
+export function fleetRequestCommands(
+  port: FleetRequestPort,
+): Readonly<Record<"akuma.wait" | "akuma.tell" | "akuma.kill", ErasedRequestCommand>> {
   return {
-    "akuma.wait": eraseRequestCommand(fleetRequestCommand("akuma.wait")),
-    "akuma.tell": eraseRequestCommand(fleetRequestCommand("akuma.tell")),
-    "akuma.kill": eraseRequestCommand(fleetRequestCommand("akuma.kill")),
+    "akuma.wait": eraseRequestCommand(fleetRequestCommand("akuma.wait", port)),
+    "akuma.tell": eraseRequestCommand(fleetRequestCommand("akuma.tell", port)),
+    "akuma.kill": eraseRequestCommand(fleetRequestCommand("akuma.kill", port)),
   };
 }
 
@@ -606,7 +570,7 @@ export async function waitAkuma(
   if (channel.kind === "body-request") {
     const response = await requestBodyCommand({
       directory: channel.directory,
-      command: fleetRequestCommand("akuma.wait"),
+      command: fleetRequestProtocol("akuma.wait"),
       value: {
         action: "akuma.wait",
         targets: addressed.ids,
@@ -637,7 +601,7 @@ export async function killAkuma(
   if (channel.kind === "body-request") {
     const response = await requestBodyCommand({
       directory: channel.directory,
-      command: fleetRequestCommand("akuma.kill"),
+      command: fleetRequestProtocol("akuma.kill"),
       value: { action: "akuma.kill", targets: addressed.ids },
     });
     return forwardedFleetCommandResult(response, "akuma.kill");
@@ -665,7 +629,7 @@ export async function tellAkuma(
   if (channel.kind === "body-request") {
     const response = await requestBodyCommand({
       directory: channel.directory,
-      command: fleetRequestCommand("akuma.tell"),
+      command: fleetRequestProtocol("akuma.tell"),
       value: { action: "akuma.tell", target: addressed.id, body: values.body },
     });
     return forwardedFleetCommandResult(response, "akuma.tell");

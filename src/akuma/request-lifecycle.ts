@@ -16,11 +16,9 @@ import { decodeEnvelope, type RequestEnvelope } from "./request-wire.js";
 
 export type PumpInput = Readonly<{
   paths: AkumaPaths;
-  parent: Soul;
+  allowed: readonly string[];
   bodySequence: number;
   now(): string;
-  spawn(launch: unknown): Promise<unknown>;
-  upstream?: unknown;
   signal: AbortSignal;
 }>;
 

@@ -6,7 +6,13 @@ import { publishAkuma } from "./publication.js";
 import { decodeProviderOptions, decodeReadonlyRestraint } from "./provider-recipe.js";
 import { decodeProviderExecution } from "./providers/index.js";
 import { requestBodyCommand } from "./request-rendezvous.js";
-import { eraseRequestCommand, type ErasedRequestCommand, type RequestCommand } from "./request-wire.js";
+import {
+  eraseRequestCommand,
+  type ChildRequestCommand,
+  type ErasedRequestCommand,
+  type ExecutionFacts,
+  type RequestProtocol,
+} from "./request-wire.js";
 import type { OwnedProcess } from "../runtime/proc/run.js";
 import { z } from "zod";
 import { World, type WorldRoot } from "../world.js";
@@ -86,63 +92,12 @@ export type AkumaCallRequestChildLaunch = Readonly<{
   initialBody: string;
 }>;
 
-type CallExecutionContext = Readonly<{
-  id: string;
-  requester: string;
-  signal: AbortSignal;
+type AkumaCallRequestCapabilities = Readonly<{
   world: WorldRoot;
   paths: AkumaPaths;
   parent: Soul;
   spawn(launch: AkumaCallRequestChildLaunch): Promise<OwnedProcess | void>;
-  admissionOpen(): boolean;
 }>;
-
-function carriesLaunchWorld(value: unknown): value is Readonly<{ launchWorld(): WorldRoot }> {
-  const upstream = object(value);
-  return upstream !== null && typeof upstream.launchWorld === "function";
-}
-
-function decodeCallExecutionContext(value: unknown): CallExecutionContext {
-  const context = object(value);
-  const paths = object(context?.paths);
-  const parent = object(context?.parent);
-  const parentId = akuIdSchema.safeParse(parent?.id);
-  if (
-    context === null ||
-    typeof context.id !== "string" ||
-    context.id.trim() === "" ||
-    typeof context.requester !== "string" ||
-    typeof context.signal !== "object" ||
-    context.signal === null ||
-    typeof (context.signal as { throwIfAborted?: unknown }).throwIfAborted !== "function" ||
-    paths === null ||
-    !["directory", "heart", "leash", "log", "requests"].every((key) => typeof paths[key] === "string") ||
-    parent === null ||
-    !parentId.success ||
-    typeof parent.cwd !== "string" ||
-    !Array.isArray(parent.allowed) ||
-    typeof context.spawn !== "function" ||
-    typeof context.admissionOpen !== "function"
-  )
-    throw new Error("invalid Akuma call execution context");
-  if (!carriesLaunchWorld(context.upstream)) throw new Error("Akuma call requires a minted launch World");
-  return {
-    id: context.id,
-    requester: context.requester,
-    signal: context.signal as AbortSignal,
-    world: context.upstream.launchWorld(),
-    paths: context.paths as AkumaPaths,
-    parent: context.parent as Soul,
-    spawn: context.spawn as CallExecutionContext["spawn"],
-    admissionOpen: context.admissionOpen as CallExecutionContext["admissionOpen"],
-  };
-}
-
-function object(value: unknown): Readonly<Record<string, unknown>> | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
-}
 
 export function decodeAkumaCallRequest(value: unknown): AkumaCallRequest | null {
   const parsed = akumaCallPayloadSchema.safeParse(value);
@@ -156,17 +111,18 @@ function callPayload(request: AkumaCallRequest): unknown {
 
 async function executeAkumaCall(
   request: AkumaCallRequest,
-  context: CallExecutionContext,
+  facts: ExecutionFacts,
+  capabilities: AkumaCallRequestCapabilities,
 ): Promise<Readonly<{ result: AkuId; child: string }>> {
-  const world = context.world;
+  const { world, paths, parent, spawn } = capabilities;
   const requestWorld = await World.prove(request.world);
   if (requestWorld !== world) {
-    await refuseRequest(context.paths, context.id, `request world ${requestWorld} does not match ${world}`);
+    await refuseRequest(paths, facts.id, `request world ${requestWorld} does not match ${world}`);
     throw new Error(`request world ${requestWorld} does not match ${world}`);
   }
   const recipe = {
     ...(request.recipe.description === undefined ? {} : { description: request.recipe.description }),
-    allowed: clipAllowedActions(request.recipe.allowed, context.parent.allowed),
+    allowed: clipAllowedActions(request.recipe.allowed, parent.allowed),
     provider: request.recipe.provider,
     options: request.recipe.options,
     ...(request.recipe.readonly === undefined ? {} : { readonly: request.recipe.readonly }),
@@ -174,18 +130,18 @@ async function executeAkumaCall(
   const published = await publishAkuma({
     worldPath: world,
     archetype: request.archetype,
-    signal: context.signal,
+    signal: facts.signal,
     launch: async (allocated) => {
-      if (!context.admissionOpen()) throw new Error("body closed request admission");
-      await reserveRequest(context.paths, context.id, allocated.id);
-      return await context.spawn({
+      if (!facts.admissionOpen()) throw new Error("body closed request admission");
+      await reserveRequest(paths, facts.id, allocated.id);
+      return await spawn({
         paths: allocated.paths,
         seed: {
           id: allocated.id,
           archetype: allocated.archetype,
           ...recipe,
-          cwd: request.cwd ?? context.parent.cwd,
-          origin: { kind: "request", parent: context.parent.id, requestId: context.id },
+          cwd: request.cwd ?? parent.cwd,
+          origin: { kind: "request", parent: parent.id, requestId: facts.id },
         },
         initialBody: request.body,
       });
@@ -194,7 +150,7 @@ async function executeAkumaCall(
   return { result: published.id, child: published.id };
 }
 
-export function akumaCallRequestCommand(): RequestCommand<AkumaCallRequest, AkuId, never, AkuId, CallExecutionContext> {
+export function akumaCallRequestProtocol(): RequestProtocol<AkumaCallRequest, AkuId, AkuId> {
   return {
     action: "akuma.call",
     encodeRequest: callPayload,
@@ -205,31 +161,34 @@ export function akumaCallRequestCommand(): RequestCommand<AkumaCallRequest, AkuI
       if (!child.success) throw new Error("Akuma call returned an invalid child");
       return child.data;
     },
-    encodeService: (service) => service,
-    decodeService: (_service) => {
-      throw new Error("Akuma call has no service evidence");
-    },
-    projectService: (_service) => {
-      throw new Error("Akuma call has no service evidence");
-    },
-    projectChild: (child) => {
-      const id = akuIdSchema.safeParse(child);
-      if (!id.success) throw new Error("Akuma call stored an invalid child reference");
-      return id.data;
-    },
     decodeReference: (reference) => {
       const child = akuIdSchema.safeParse(reference);
       if (!child.success) throw new Error("Akuma call stored an invalid child reference");
       return child.data;
     },
     isPermitted: (allowed) => allowed.includes("akuma.call"),
-    decodeExecutionContext: decodeCallExecutionContext,
-    execute: executeAkumaCall,
   };
 }
 
-export function akumaCallRequestCommands(): Readonly<Record<"akuma.call", ErasedRequestCommand>> {
-  return { "akuma.call": eraseRequestCommand(akumaCallRequestCommand()) };
+export function akumaCallRequestCommand(
+  capabilities: AkumaCallRequestCapabilities,
+): ChildRequestCommand<AkumaCallRequest, AkuId, AkuId> {
+  return {
+    completion: "child",
+    protocol: akumaCallRequestProtocol(),
+    projectChild: (child) => {
+      const id = akuIdSchema.safeParse(child);
+      if (!id.success) throw new Error("Akuma call stored an invalid child reference");
+      return id.data;
+    },
+    execute: async (request, facts) => await executeAkumaCall(request, facts, capabilities),
+  };
+}
+
+export function akumaCallRequestCommands(
+  capabilities: AkumaCallRequestCapabilities,
+): Readonly<Record<"akuma.call", ErasedRequestCommand>> {
+  return { "akuma.call": eraseRequestCommand(akumaCallRequestCommand(capabilities)) };
 }
 
 export async function requestForwardedAkumaCall(
@@ -239,7 +198,7 @@ export async function requestForwardedAkumaCall(
   const response = await requestBodyCommand({
     directory,
     id,
-    command: akumaCallRequestCommand(),
+    command: akumaCallRequestProtocol(),
     value: { ...request, action: "akuma.call" },
     ...(signal === undefined ? {} : { signal }),
   });

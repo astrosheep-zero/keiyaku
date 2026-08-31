@@ -1240,8 +1240,7 @@ test("a drive drains Body Requests before recording its terminal turn", async ()
       provider,
       {
         now: () => "2026-08-09T00:00:00.000Z",
-        upstream: { launchWorld: () => world },
-        commands: akumaCallRequestCommands(),
+        world,
         async spawnChild(launch) {
           const child = (await HeldAkumaLeash.try(launch.paths))!;
           await child.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-09T00:00:01.000Z" });

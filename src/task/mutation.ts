@@ -1,7 +1,12 @@
 /* eslint-disable max-lines -- Task owns one coherent forwarded mutation boundary. */
 import { World, type WorldRoot } from "../world.js";
 import { requestBodyCommand } from "../akuma/request-rendezvous.js";
-import { eraseRequestCommand, type ErasedRequestCommand, type RequestCommand } from "../akuma/request-wire.js";
+import {
+  eraseRequestCommand,
+  type ErasedRequestCommand,
+  type RequestProtocol,
+  type ServiceRequestCommand,
+} from "../akuma/request-wire.js";
 import {
   addTask,
   addTaskDocument,
@@ -188,44 +193,6 @@ export type TaskMutationRequestPort = Readonly<{
     input: Readonly<{ world: WorldRoot; request: TaskMutationRequest; requester: string; signal: AbortSignal }>,
   ): Promise<TaskMutationExecutionResult>;
 }>;
-type TaskMutationExecutionContext = Readonly<{
-  requester: string;
-  signal: AbortSignal;
-  upstream: TaskMutationRequestPort;
-}>;
-
-function decodeTaskMutationExecutionContext(value: unknown): TaskMutationExecutionContext {
-  const context = resultRecord(value);
-  if (
-    context === null ||
-    typeof context.requester !== "string" ||
-    context.requester.trim() === "" ||
-    !isAbortSignal(context.signal) ||
-    !isTaskMutationRequestPort(context.upstream)
-  )
-    throw new Error("invalid Task execution context");
-  return { requester: context.requester, signal: context.signal, upstream: context.upstream };
-}
-
-function isAbortSignal(value: unknown): value is AbortSignal {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    typeof (value as { throwIfAborted?: unknown }).throwIfAborted === "function"
-  );
-}
-
-function isTaskMutationRequestPort(value: unknown): value is TaskMutationRequestPort {
-  const port = resultRecord(value);
-  return port !== null && typeof port.task === "function";
-}
-
-function resultRecord(value: unknown): Readonly<Record<string, unknown>> | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
-}
-
 function decodeTaskBodyRequest(action: TaskMutationAction, value: unknown): TaskMutationBodyRequest | null {
   const parsed = taskBodyRequestSchemas[action].safeParse(value);
   return parsed.success ? parsed.data : null;
@@ -246,15 +213,9 @@ function decodeTaskReference(action: TaskMutationAction, value: unknown): Forwar
 }
 
 /** Task owns forwarded mutation payload, live result, and durable service evidence. */
-export function taskMutationRequestCommand(
+export function taskMutationRequestProtocol(
   action: TaskMutationAction,
-): RequestCommand<
-  TaskMutationBodyRequest,
-  TaskMutationExecutionResult,
-  TaskMutationService,
-  ForwardedTaskReference,
-  TaskMutationExecutionContext
-> {
+): RequestProtocol<TaskMutationBodyRequest, TaskMutationExecutionResult, ForwardedTaskReference> {
   return {
     action,
     encodeRequest: (input) => {
@@ -269,20 +230,34 @@ export function taskMutationRequestCommand(
       }
       return result;
     },
+    decodeReference: (reference) => decodeTaskReference(action, reference),
+    isPermitted: (allowed) => allowed.includes(action),
+  };
+}
+
+export function taskMutationRequestCommand(
+  action: TaskMutationAction,
+  port: TaskMutationRequestPort,
+): ServiceRequestCommand<
+  TaskMutationBodyRequest,
+  TaskMutationExecutionResult,
+  TaskMutationService,
+  ForwardedTaskReference
+> {
+  return {
+    completion: "service",
+    protocol: taskMutationRequestProtocol(action),
     encodeService: (service) => decodeTaskService(action, service),
     decodeService: (service) => decodeTaskService(action, service),
     projectService: (service) => decodeTaskReference(action, { kind: "served-reference", action: service.action }),
-    decodeReference: (reference) => decodeTaskReference(action, reference),
-    isPermitted: (allowed) => allowed.includes(action),
-    decodeExecutionContext: decodeTaskMutationExecutionContext,
-    execute: async (request, context) => {
+    execute: async (request, facts) => {
       const world = await World.prove(request.world);
       return {
-        result: await context.upstream.task({
+        result: await port.task({
           world,
           request: request.request,
-          requester: context.requester,
-          signal: context.signal,
+          requester: facts.requester,
+          signal: facts.signal,
         }),
         service: { action: request.request.action },
       };
@@ -290,9 +265,11 @@ export function taskMutationRequestCommand(
   };
 }
 
-export function taskMutationRequestCommands(): Readonly<Record<TaskMutationAction, ErasedRequestCommand>> {
+export function taskMutationRequestCommands(
+  port: TaskMutationRequestPort,
+): Readonly<Record<TaskMutationAction, ErasedRequestCommand>> {
   return Object.fromEntries(
-    TASK_MUTATION_ACTIONS.map((action) => [action, eraseRequestCommand(taskMutationRequestCommand(action))]),
+    TASK_MUTATION_ACTIONS.map((action) => [action, eraseRequestCommand(taskMutationRequestCommand(action, port))]),
   ) as Record<TaskMutationAction, ErasedRequestCommand>;
 }
 
@@ -341,7 +318,7 @@ export async function requestForwardedTask<Request extends TaskMutationRequest>(
   const response = await requestBodyCommand({
     directory: input.directory,
     ...(input.id === undefined ? {} : { id: input.id }),
-    command: taskMutationRequestCommand(input.request.action),
+    command: taskMutationRequestProtocol(input.request.action),
     value: { world: input.world, request: input.request },
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });

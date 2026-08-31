@@ -42,7 +42,7 @@ export type RequestEnvelope = z.infer<typeof requestEnvelopeSchema>;
  * A Body Request operation is owned by the verb that defines its public
  * values.  Transport only carries the opaque values produced here.
  */
-export type RequestCommand<Input, Output, Service, Reference = Service, Context = unknown> = Readonly<{
+export type RequestProtocol<Input, Output, Reference> = Readonly<{
   action: string;
   encodeRequest(input: Input): unknown;
   decodeRequest(payload: unknown): Input | null;
@@ -50,69 +50,131 @@ export type RequestCommand<Input, Output, Service, Reference = Service, Context 
   decodeResult(result: unknown): Output;
   encodeFailure?(error: unknown): unknown | null;
   decodeFailure?(failure: unknown): Error | null;
+  decodeReference(reference: unknown): Reference;
+  isPermitted(allowed: readonly string[]): boolean;
+}>;
+
+export type ExecutionFacts = Readonly<{
+  id: string;
+  admittedAt: string;
+  requester: string;
+  signal: AbortSignal;
+  admissionOpen(): boolean;
+}>;
+
+export type ChildRequestCommand<Input, Output, Reference> = Readonly<{
+  completion: "child";
+  protocol: RequestProtocol<Input, Output, Reference>;
+  projectChild(child: string): Reference;
+  execute(input: Input, facts: ExecutionFacts): Promise<Readonly<{ result: Output; child: string }>>;
+}>;
+
+export type ServiceRequestCommand<Input, Output, Service, Reference> = Readonly<{
+  completion: "service";
+  protocol: RequestProtocol<Input, Output, Reference>;
   encodeService(service: Service): unknown;
   decodeService(service: unknown): Service;
   projectService(service: Service): Reference;
-  projectChild?(child: string): Reference;
-  decodeReference(reference: unknown): Reference;
-  /** The operation owner proves the Body-owned execution capability before use. */
-  decodeExecutionContext(value: unknown): Context;
-  isPermitted(allowed: readonly string[]): boolean;
-  execute(
-    input: Input,
-    context: Context,
-  ): Promise<Readonly<{ result: Output }> & (Readonly<{ service: Service }> | Readonly<{ child: string }>)>;
+  execute(input: Input, facts: ExecutionFacts): Promise<Readonly<{ result: Output; service: Service }>>;
 }>;
 
-export type ErasedRequestCommand = Readonly<{
-  action: string;
-  resolve(payload: unknown): ErasedRequest | null;
-}>;
-
-export type ErasedRequest = Readonly<{
+type ErasedRequest = Readonly<{
   payloadJson: string;
   isPermitted(allowed: readonly string[]): boolean;
-  execute(context: unknown): Promise<ErasedRequestExecution>;
   encodeFailure(error: unknown): unknown | null;
-  projectServiceJson(serviceJson: string): unknown;
-  projectChild(child: string): unknown;
 }>;
 
-export type ErasedRequestExecution =
-  | Readonly<{ result: unknown; serviceJson: string }>
-  | Readonly<{ result: unknown; child: string }>;
+type ErasedChildRequest = ErasedRequest &
+  Readonly<{
+    execute(facts: ExecutionFacts): Promise<Readonly<{ result: unknown; child: string }>>;
+  }>;
+
+type ErasedServiceRequest = ErasedRequest &
+  Readonly<{
+    execute(facts: ExecutionFacts): Promise<Readonly<{ result: unknown; serviceJson: string }>>;
+  }>;
+
+export type ErasedRequestCommand =
+  | Readonly<{
+      action: string;
+      completion: "child";
+      projectChild(child: string): unknown;
+      resolve(payload: unknown): ErasedChildRequest | null;
+    }>
+  | Readonly<{
+      action: string;
+      completion: "service";
+      projectServiceJson(serviceJson: string): unknown;
+      resolve(payload: unknown): ErasedServiceRequest | null;
+    }>;
 
 /** Erases only static TypeScript parameters; each operation codec remains captured by its owner descriptor. */
-export function eraseRequestCommand<Input, Output, Service, Reference, Context>(
-  command: RequestCommand<Input, Output, Service, Reference, Context>,
+export function eraseRequestCommand<Input, Output, Reference>(
+  command: ChildRequestCommand<Input, Output, Reference>,
+): ErasedRequestCommand;
+export function eraseRequestCommand<Input, Output, Service, Reference>(
+  command: ServiceRequestCommand<Input, Output, Service, Reference>,
+): ErasedRequestCommand;
+export function eraseRequestCommand<Input, Output, Service, Reference>(
+  command: ChildRequestCommand<Input, Output, Reference> | ServiceRequestCommand<Input, Output, Service, Reference>,
 ): ErasedRequestCommand {
-  return {
-    action: command.action,
-    resolve: (payload) => {
-      const input = command.decodeRequest(payload);
-      if (input === null) return null;
+  const { protocol } = command;
+  switch (command.completion) {
+    case "child":
       return {
-        payloadJson: JSON.stringify(command.encodeRequest(input)),
-        isPermitted: (allowed) => command.isPermitted(allowed),
-        execute: async (context) => {
-          const served = await command.execute(input, command.decodeExecutionContext(context));
-          return "child" in served
-            ? { result: command.encodeResult(served.result), child: served.child }
-            : {
-                result: command.encodeResult(served.result),
-                serviceJson: JSON.stringify(command.encodeService(served.service)),
-              };
-        },
-        encodeFailure: (error) => command.encodeFailure?.(error) ?? null,
-        projectServiceJson: (serviceJson) => command.projectService(command.decodeService(JSON.parse(serviceJson))),
-        projectChild: (child) => {
-          if (command.projectChild === undefined)
-            throw new Error(`request ${command.action} has no child reference codec`);
-          return command.projectChild(child);
+        action: protocol.action,
+        completion: "child",
+        projectChild: command.projectChild,
+        resolve: (payload) => {
+          const input = protocol.decodeRequest(payload);
+          if (input === null) return null;
+          return {
+            payloadJson: JSON.stringify(protocol.encodeRequest(input)),
+            isPermitted: (allowed) => protocol.isPermitted(allowed),
+            execute: async (facts) => {
+              const served = await command.execute(input, facts);
+              return { result: protocol.encodeResult(served.result), child: served.child };
+            },
+            encodeFailure: (error) => protocol.encodeFailure?.(error) ?? null,
+          };
         },
       };
-    },
-  };
+    case "service":
+      return {
+        action: protocol.action,
+        completion: "service",
+        projectServiceJson: (serviceJson) => command.projectService(command.decodeService(JSON.parse(serviceJson))),
+        resolve: (payload) => {
+          const input = protocol.decodeRequest(payload);
+          if (input === null) return null;
+          return {
+            payloadJson: JSON.stringify(protocol.encodeRequest(input)),
+            isPermitted: (allowed) => protocol.isPermitted(allowed),
+            execute: async (facts) => {
+              const served = await command.execute(input, facts);
+              return {
+                result: protocol.encodeResult(served.result),
+                serviceJson: JSON.stringify(command.encodeService(served.service)),
+              };
+            },
+            encodeFailure: (error) => protocol.encodeFailure?.(error) ?? null,
+          };
+        },
+      };
+  }
+}
+
+export function composeRequestCommands(
+  ...maps: readonly Readonly<Record<string, ErasedRequestCommand>>[]
+): Readonly<Record<string, ErasedRequestCommand>> {
+  const commands: Record<string, ErasedRequestCommand> = Object.create(null);
+  for (const map of maps) {
+    for (const [action, command] of Object.entries(map)) {
+      if (Object.hasOwn(commands, action)) throw new Error(`duplicate request command action: ${action}`);
+      commands[action] = command;
+    }
+  }
+  return commands;
 }
 export type UpstreamRequestFailure = z.infer<typeof upstreamRequestFailureSchema>;
 export type ReturnedEnvelope = z.infer<typeof returnedEnvelopeSchema>;

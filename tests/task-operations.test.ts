@@ -214,12 +214,16 @@ test("Task mutation mints raw World once while Tasks consumes its branded capabi
   mkdirSync(join(root, ".keiyaku"));
   const canonical = await World.at(root);
   await assert.rejects(
-    taskMutationRequestCommand("task.add").execute(
+    taskMutationRequestCommand("task.add", {
+      task: async () => Promise.reject(new Error("raw World must not reach the Task executor")),
+    }).execute(
       { world: `${canonical}/.`, request: { action: "task.add", input: { title: "must not write" } } },
       {
+        id: "00000000-0000-4000-8000-000000000001",
+        admittedAt: "2026-08-18T00:00:00.000Z",
         requester: "aku/parent/00000001",
         signal: new AbortController().signal,
-        upstream: { task: async () => Promise.reject(new Error("raw World must not reach the Task executor")) },
+        admissionOpen: () => true,
       },
     ),
     /canonical physical directory/u,

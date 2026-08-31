@@ -1,5 +1,4 @@
 import { abortableDelay } from "./abort.js";
-
 /* eslint-disable max-lines-per-function -- Turn setup and consumption each preserve one ordered lifecycle transaction. */
 import {
   appendActivity,
@@ -23,9 +22,9 @@ import {
   type Session,
   type TurnResult,
 } from "./provider.js";
-import type { AkumaCallRequestChildLaunch } from "./call-request.js";
+import { akumaCallRequestCommands, type AkumaCallRequestChildLaunch } from "./call-request.js";
 import { BodyRequestPump } from "./request-serve.js";
-import type { ErasedRequestCommand } from "./request-wire.js";
+import { composeRequestCommands, type ErasedRequestCommand } from "./request-wire.js";
 import { BodySupervisor, CONTROL_RESPONSE_MS } from "./body-supervisor.js";
 import type { OwnedProcess } from "../runtime/proc/run.js";
 
@@ -84,8 +83,8 @@ export type DriveTurnInput = Readonly<{
   launchTells: readonly TellFact[];
   supervisor: BodySupervisor;
   runtimeSpawn(launch: AkumaCallRequestChildLaunch): Promise<OwnedProcess | void>;
-  upstream?: unknown;
-  commands: Readonly<Record<string, ErasedRequestCommand>>;
+  world: import("../world.js").WorldRoot;
+  externalCommands: Readonly<Record<string, ErasedRequestCommand>>;
   now(): string;
 }>;
 
@@ -165,14 +164,14 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
     startedAt: input.now(),
     ...(input.call === undefined ? {} : { call: input.call }),
   });
+  const { world, paths, soul: parent, runtimeSpawn: spawn, externalCommands } = input;
+  const commands = composeRequestCommands(akumaCallRequestCommands({ world, paths, parent, spawn }), externalCommands);
   const requests = await BodyRequestPump.open({
     paths: input.paths,
-    parent: input.soul,
+    allowed: input.soul.allowed,
     bodySequence: input.bodySequence,
     now: input.now,
-    spawn: input.runtimeSpawn,
-    ...(input.upstream === undefined ? {} : { upstream: input.upstream }),
-    commands: input.commands,
+    commands,
     signal: input.supervisor.signal,
   });
   const driveController = new AbortController();

@@ -1,7 +1,6 @@
 import { LEASH_HELD_EXIT, runAkumaBody, type BodyLaunch } from "./akuma/body.js";
-import { akumaCallRequestCommands } from "./akuma/call-request.js";
 import { worldRootForAkumaPaths } from "./akuma/identity.js";
-import { World, type WorldRoot } from "./world.js";
+import { World } from "./world.js";
 import { executeKillAkuma, executeTellAkuma, executeWaitAkuma } from "./library/fleet.js";
 import { fleetRequestCommands, type FleetRequestPort } from "./library/fleet.js";
 import { requireBranchesToBeUpToDateFrom, worktreeHooksFrom } from "./library/configuration.js";
@@ -15,6 +14,7 @@ import {
 import { Repo } from "./library/repo.js";
 import { settings } from "./settings.js";
 import { executeTaskMutation, taskMutationRequestCommands, type TaskMutationRequestPort } from "./task/mutation.js";
+import { composeRequestCommands } from "./akuma/request-wire.js";
 
 type BodyProcessConfiguration = Readonly<{ home?: string; gitPath?: string }>;
 
@@ -76,14 +76,8 @@ function contractUpstream(processConfiguration: BodyProcessConfiguration): Contr
   };
 }
 
-export async function upstreamFor(
-  launch: BodyLaunch,
-  processConfiguration: BodyProcessConfiguration,
-): Promise<FleetRequestPort & ContractRequestPort & TaskMutationRequestPort & Readonly<{ launchWorld(): WorldRoot }>> {
-  const world = await World.prove(worldRootForAkumaPaths(launch.paths));
+function fleetRequestPort(world: Awaited<ReturnType<typeof World.prove>>): FleetRequestPort {
   return {
-    launchWorld: () => world,
-    ...contractUpstream(processConfiguration),
     wait: async (input) =>
       await executeWaitAkuma({
         path: world,
@@ -105,6 +99,11 @@ export async function upstreamFor(
       const result = await executeKillAkuma({ path: world, ids: input.targets, signal: input.signal });
       return result;
     },
+  };
+}
+
+function taskMutationRequestPort(): TaskMutationRequestPort {
+  return {
     task: async (input) =>
       await executeTaskMutation({
         world: input.world,
@@ -127,11 +126,25 @@ const configuration = {
   ...(mappedHome === undefined || mappedHome.length === 0 ? {} : { home: mappedHome }),
   ...(mappedGitPath === undefined ? {} : { gitPath: mappedGitPath }),
 };
-const upstream = await upstreamFor(launch, configuration);
-const commands = {
-  ...akumaCallRequestCommands(),
-  ...fleetRequestCommands(),
-  ...contractRequestCommands(),
-  ...taskMutationRequestCommands(),
-};
-if ((await runAkumaBody(launch, upstream, commands)) === "held") process.exitCode = LEASH_HELD_EXIT;
+export async function externalRequestCommandsFor(
+  launch: BodyLaunch,
+  processConfiguration: BodyProcessConfiguration,
+): Promise<
+  Readonly<{
+    world: Awaited<ReturnType<typeof World.prove>>;
+    commands: Readonly<Record<string, import("./akuma/request-wire.js").ErasedRequestCommand>>;
+  }>
+> {
+  const world = await World.prove(worldRootForAkumaPaths(launch.paths));
+  return {
+    world,
+    commands: composeRequestCommands(
+      fleetRequestCommands(fleetRequestPort(world)),
+      contractRequestCommands(contractUpstream(processConfiguration)),
+      taskMutationRequestCommands(taskMutationRequestPort()),
+    ),
+  };
+}
+
+const { world, commands: externalCommands } = await externalRequestCommandsFor(launch, configuration);
+if ((await runAkumaBody(launch, world, externalCommands)) === "held") process.exitCode = LEASH_HELD_EXIT;

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { access, readFile } from "node:fs/promises";
 import { abortableDelay } from "./abort.js";
-import { atomicJson, decodeReceiptEnvelope, receiptPath, requestPath, type RequestCommand } from "./request-wire.js";
+import { atomicJson, decodeReceiptEnvelope, receiptPath, requestPath, type RequestProtocol } from "./request-wire.js";
 
 const POLL_MS = 100;
 
@@ -53,11 +53,11 @@ function withRequestMetadata<Response extends object>(
 }
 
 /** Generic rendezvous only: operation owners supply their own request and result codecs. */
-export async function requestBodyCommand<Input, Output, Service, Reference = Service>(
+export async function requestBodyCommand<Input, Output, Reference>(
   input: Readonly<{
     directory: string;
     id?: string;
-    command: RequestCommand<Input, Output, Service, Reference>;
+    command: RequestProtocol<Input, Output, Reference>;
     value: Input;
     signal?: AbortSignal;
   }>,

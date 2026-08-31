@@ -1,6 +1,12 @@
 import { contractId, snapshotId } from "../core/facts/types.js";
 import { requestBodyCommand } from "../akuma/request-rendezvous.js";
-import { eraseRequestCommand, type ErasedRequestCommand, type RequestCommand } from "../akuma/request-wire.js";
+import {
+  eraseRequestCommand,
+  type ErasedRequestCommand,
+  type ExecutionFacts,
+  type RequestProtocol,
+  type ServiceRequestCommand,
+} from "../akuma/request-wire.js";
 import {
   auditReportSchema,
   auditResultSchema,
@@ -129,47 +135,6 @@ export type ContractRequestPort = Readonly<{
     input: ReviewRequest & Readonly<{ requester: ContractRequester; signal: AbortSignal }>,
   ): Promise<Readonly<{ result: ReviewResult; reviewFactId?: string }>>;
 }>;
-type ContractExecutionContext = Readonly<{
-  requester: ContractRequester;
-  signal: AbortSignal;
-  upstream: ContractRequestPort;
-}>;
-
-function decodeContractExecutionContext(value: unknown): ContractExecutionContext {
-  const context = contractPayload(value);
-  if (
-    context === null ||
-    typeof context.requester !== "string" ||
-    context.requester.trim() === "" ||
-    !isAbortSignal(context.signal) ||
-    !isContractRequestPort(context.upstream)
-  )
-    throw new Error("invalid Contract execution context");
-  return { requester: context.requester as ContractRequester, signal: context.signal, upstream: context.upstream };
-}
-
-function isAbortSignal(value: unknown): value is AbortSignal {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    typeof (value as { throwIfAborted?: unknown }).throwIfAborted === "function"
-  );
-}
-
-function isContractRequestPort(value: unknown): value is ContractRequestPort {
-  const port = contractPayload(value);
-  return (
-    port !== null &&
-    (typeof port.audit === "function" || typeof port.deliver === "function" || typeof port.review === "function")
-  );
-}
-
-function contractPayload(value: unknown): Readonly<Record<string, unknown>> | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
-}
-
 function decodeContractRequest(action: ContractRequest["action"], value: unknown): ContractRequest | null {
   const schema =
     action === "contract.audit"
@@ -210,11 +175,15 @@ function decodeContractReference(action: ContractRequest["action"], value: unkno
 
 async function executeContractRequest(
   request: ContractRequest,
-  context: ContractExecutionContext,
+  facts: ExecutionFacts,
+  port: ContractRequestPort,
 ): Promise<Readonly<{ result: ContractResult; service: ContractService }>> {
   if (request.action === "contract.audit") {
-    if (typeof context.upstream.audit !== "function") throw new Error("invalid Contract execution context");
-    const served = await context.upstream.audit({ ...request, requester: context.requester, signal: context.signal });
+    const served = await port.audit({
+      ...request,
+      requester: facts.requester as ContractRequester,
+      signal: facts.signal,
+    });
     if (served.auditReport === undefined)
       throw new Error(`Contract ${request.action} completed without durable service evidence`);
     return {
@@ -228,8 +197,11 @@ async function executeContractRequest(
     };
   }
   if (request.action === "contract.deliver") {
-    if (typeof context.upstream.deliver !== "function") throw new Error("invalid Contract execution context");
-    const served = await context.upstream.deliver({ ...request, requester: context.requester, signal: context.signal });
+    const served = await port.deliver({
+      ...request,
+      requester: facts.requester as ContractRequester,
+      signal: facts.signal,
+    });
     if ("kind" in served.result && served.result.kind === "integration-conflict-materialized") {
       return {
         result: served.result,
@@ -255,8 +227,11 @@ async function executeContractRequest(
       },
     };
   }
-  if (typeof context.upstream.review !== "function") throw new Error("invalid Contract execution context");
-  const served = await context.upstream.review({ ...request, requester: context.requester, signal: context.signal });
+  const served = await port.review({
+    ...request,
+    requester: facts.requester as ContractRequester,
+    signal: facts.signal,
+  });
   if (served.reviewFactId === undefined)
     throw new Error(`Contract ${request.action} completed without durable service evidence`);
   return {
@@ -282,9 +257,9 @@ function decodedContractResult(action: ContractRequest["action"], value: unknown
   return parsed.data;
 }
 
-export function contractRequestCommand(
+export function contractRequestProtocol(
   action: ContractRequest["action"],
-): RequestCommand<ContractRequest, ContractResult, ContractService, ContractReference, ContractExecutionContext> {
+): RequestProtocol<ContractRequest, ContractResult, ContractReference> {
   return {
     action,
     encodeRequest: (request) => {
@@ -296,23 +271,32 @@ export function contractRequestCommand(
     decodeResult: (value) => decodedContractResult(action, value),
     encodeFailure: encodeContractLiveFailure,
     decodeFailure: decodeContractLiveFailure,
-    encodeService: (service) => service,
-    decodeService: (service) => decodeContractService(action, service),
-    projectService: (service) => projectContractService(action, service),
     decodeReference: (reference) => decodeContractReference(action, reference),
     isPermitted: (allowed) => allowed.includes(action),
-    decodeExecutionContext: decodeContractExecutionContext,
-    execute: executeContractRequest,
   };
 }
 
-export function contractRequestCommands(): Readonly<
-  Record<"contract.audit" | "contract.deliver" | "contract.review", ErasedRequestCommand>
-> {
+export function contractRequestCommand(
+  action: ContractRequest["action"],
+  port: ContractRequestPort,
+): ServiceRequestCommand<ContractRequest, ContractResult, ContractService, ContractReference> {
   return {
-    "contract.audit": eraseRequestCommand(contractRequestCommand("contract.audit")),
-    "contract.deliver": eraseRequestCommand(contractRequestCommand("contract.deliver")),
-    "contract.review": eraseRequestCommand(contractRequestCommand("contract.review")),
+    completion: "service",
+    protocol: contractRequestProtocol(action),
+    encodeService: (service) => service,
+    decodeService: (service) => decodeContractService(action, service),
+    projectService: (service) => projectContractService(action, service),
+    execute: async (request, facts) => await executeContractRequest(request, facts, port),
+  };
+}
+
+export function contractRequestCommands(
+  port: ContractRequestPort,
+): Readonly<Record<"contract.audit" | "contract.deliver" | "contract.review", ErasedRequestCommand>> {
+  return {
+    "contract.audit": eraseRequestCommand(contractRequestCommand("contract.audit", port)),
+    "contract.deliver": eraseRequestCommand(contractRequestCommand("contract.deliver", port)),
+    "contract.review": eraseRequestCommand(contractRequestCommand("contract.review", port)),
   };
 }
 
@@ -324,7 +308,7 @@ export async function requestForwardedContractLive<Action extends ContractReques
     signal?: AbortSignal;
   }>,
 ): Promise<ContractResultFor<Action>> {
-  const command = contractRequestCommand(input.action);
+  const command = contractRequestProtocol(input.action);
   const response = await requestBodyCommand({
     directory: input.directory,
     command,

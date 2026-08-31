@@ -8,13 +8,20 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { moveAlias } from "../src/alias/index.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
-import { akumaCallRequestCommands } from "../src/akuma/call-request.js";
+import { akumaCallRequestCommands, type AkumaCallRequestChildLaunch } from "../src/akuma/call-request.js";
 import { HeldAkumaLeash, initializeHeart, readSoul, recordTell, type Soul } from "../src/akuma/heart/index.js";
 import { decodeSoul } from "../src/akuma/heart/soul.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { AKUMA_REQUESTS_ENV, createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import { BodyRequestPump } from "../src/akuma/request-serve.js";
-import { executeKillAkuma, executeTellAkuma, executeWaitAkuma, fleetRequestCommands } from "../src/library/fleet.js";
+import { composeRequestCommands } from "../src/akuma/request-wire.js";
+import {
+  executeKillAkuma,
+  executeTellAkuma,
+  executeWaitAkuma,
+  fleetRequestCommands,
+  type FleetRequestPort,
+} from "../src/library/fleet.js";
 import { Keiyaku, type AkumaObservation } from "../src/index.js";
 import { World } from "../src/world.js";
 import { invoke } from "../src/cli/invoke.js";
@@ -1230,51 +1237,53 @@ test("packaged CLI call writes representative success and failure exits", async 
     },
   };
   const held: HeldAkumaLeash[] = [];
+  const fleet: FleetRequestPort = {
+    wait: async (input) =>
+      await executeWaitAkuma({
+        path: root as import("../src/world.js").WorldRoot,
+        ids: input.targets,
+        completion: input.completion,
+        ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+        signal: input.signal,
+      }),
+    tell: async (input) =>
+      await executeTellAkuma({
+        path: root as import("../src/world.js").WorldRoot,
+        id: input.target,
+        body: input.body,
+        ...(input.tellId === undefined ? {} : { tellId: input.tellId }),
+        ...(input.recordedAt === undefined ? {} : { recordedAt: input.recordedAt }),
+        signal: input.signal,
+      }),
+    kill: async (input) => {
+      const result = await executeKillAkuma({
+        path: root as import("../src/world.js").WorldRoot,
+        ids: input.targets,
+        signal: input.signal,
+      });
+      return { result, service: result.results.map(({ id, evidence }) => ({ id, evidence })) };
+    },
+  };
+  const spawn = async (launch: AkumaCallRequestChildLaunch): Promise<void> => {
+    const adapter = launch.initialBody === "fail" ? failing : answering;
+    if (launch.initialBody === "hang") {
+      const child = (await HeldAkumaLeash.try(launch.paths))!;
+      await child.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-15T00:00:02.000Z" });
+      held.push(child);
+      return;
+    }
+    await driveAkumaBody(launch, adapter, { now: () => "2026-08-15T00:00:02.000Z" });
+  };
   const pump = await BodyRequestPump.open({
     paths: parent.paths,
-    parent: soul,
+    allowed: soul.allowed,
     bodySequence: 1,
     now: () => "2026-08-15T00:00:01.000Z",
     signal: new AbortController().signal,
-    commands: { ...akumaCallRequestCommands(), ...fleetRequestCommands() },
-    upstream: {
-      launchWorld: () => world,
-      wait: async (input) =>
-        await executeWaitAkuma({
-          path: root as import("../src/world.js").WorldRoot,
-          ids: input.targets,
-          completion: input.completion,
-          ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
-          signal: input.signal,
-        }),
-      tell: async (input) =>
-        await executeTellAkuma({
-          path: root as import("../src/world.js").WorldRoot,
-          id: input.target,
-          body: input.body,
-          tellId: input.tellId,
-          recordedAt: input.recordedAt,
-          signal: input.signal,
-        }),
-      kill: async (input) => {
-        const result = await executeKillAkuma({
-          path: root as import("../src/world.js").WorldRoot,
-          ids: input.targets,
-          signal: input.signal,
-        });
-        return { result, service: result.results.map(({ id, evidence }) => ({ id, evidence })) };
-      },
-    },
-    async spawn(launch) {
-      const adapter = launch.initialBody === "fail" ? failing : answering;
-      if (launch.initialBody === "hang") {
-        const child = (await HeldAkumaLeash.try(launch.paths))!;
-        await child.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-15T00:00:02.000Z" });
-        held.push(child);
-        return;
-      }
-      await driveAkumaBody(launch, adapter, { now: () => "2026-08-15T00:00:02.000Z" });
-    },
+    commands: composeRequestCommands(
+      akumaCallRequestCommands({ world, paths: parent.paths, parent: soul, spawn }),
+      fleetRequestCommands(fleet),
+    ),
   });
   const env = { ...process.env, KEIYAKU_HOME: home, [AKUMA_REQUESTS_ENV]: pump.directory };
   try {

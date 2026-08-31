@@ -20,12 +20,20 @@ import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { AkumaBodyRequestError, requestBodyCommand } from "../src/akuma/requests.js";
 import { BodyRequestPump, settleBodyRequests } from "../src/akuma/request-serve.js";
 import { BodyRequestPump as LifecycleBodyRequestPump } from "../src/akuma/request-lifecycle.js";
+import { composeRequestCommands } from "../src/akuma/request-wire.js";
 import {
   executeTellAkuma,
   fleetRequestCommand,
+  fleetRequestProtocol,
   fleetRequestCommands,
+  type FleetRequestPort,
 } from "../src/library/fleet.js";
-import { contractRequestCommand, contractRequestCommands } from "../src/library/contract-operations.js";
+import {
+  contractRequestCommand,
+  contractRequestProtocol,
+  contractRequestCommands,
+  type ContractRequestPort,
+} from "../src/library/contract-operations.js";
 import { KeiyakuRefused } from "../src/library/refusal.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { Delivery, Keiyaku, Repo } from "../src/index.js";
@@ -33,7 +41,11 @@ import { invoke } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
 import { World, type WorldRoot } from "../src/world.js";
 import { Tasks } from "../src/task/index.js";
-import { taskMutationRequestCommand } from "../src/task/mutation.js";
+import {
+  taskMutationRequestCommand,
+  taskMutationRequestProtocol,
+  type TaskMutationRequestPort,
+} from "../src/task/mutation.js";
 import { appointedWorktreePath, gitExecutablePath, makeGitRepository } from "./support/git.js";
 
 async function born(root: WorldRoot, archetype: string, draw: string, allowed: Soul["allowed"] = ALLOWED_ACTIONS) {
@@ -55,24 +67,78 @@ async function born(root: WorldRoot, archetype: string, draw: string, allowed: S
   return { ...allocated, soul };
 }
 
-async function openPump(parent: Awaited<ReturnType<typeof born>>, upstream: unknown): Promise<BodyRequestPump> {
+async function openFleetPump(
+  parent: Awaited<ReturnType<typeof born>>,
+  port: FleetRequestPort,
+): Promise<BodyRequestPump> {
   return await BodyRequestPump.open({
     paths: parent.paths,
-    parent: parent.soul,
+    allowed: parent.soul.allowed,
     bodySequence: 1,
     now: () => "2026-08-18T00:00:01.000Z",
-    spawn: async () => {
-      throw new Error("call is outside this test");
-    },
-    upstream,
-    commands: {
-      ...akumaCallRequestCommands(),
-      ...fleetRequestCommands(),
-      ...contractRequestCommands(),
-    },
+    commands: fleetRequestCommands(port),
     signal: new AbortController().signal,
   });
 }
+
+async function openContractPump(
+  parent: Awaited<ReturnType<typeof born>>,
+  port: ContractRequestPort,
+): Promise<BodyRequestPump> {
+  return await BodyRequestPump.open({
+    paths: parent.paths,
+    allowed: parent.soul.allowed,
+    bodySequence: 1,
+    now: () => "2026-08-18T00:00:01.000Z",
+    commands: contractRequestCommands(port),
+    signal: new AbortController().signal,
+  });
+}
+
+async function openFleetAndContractPump(
+  parent: Awaited<ReturnType<typeof born>>,
+  fleet: FleetRequestPort,
+  contract: ContractRequestPort,
+): Promise<BodyRequestPump> {
+  return await BodyRequestPump.open({
+    paths: parent.paths,
+    allowed: parent.soul.allowed,
+    bodySequence: 1,
+    now: () => "2026-08-18T00:00:01.000Z",
+    commands: composeRequestCommands(fleetRequestCommands(fleet), contractRequestCommands(contract)),
+    signal: new AbortController().signal,
+  });
+}
+
+const unusedFleetPort: FleetRequestPort = {
+  wait: async () => {
+    throw new Error("unexpected Fleet request");
+  },
+  tell: async () => {
+    throw new Error("unexpected Fleet request");
+  },
+  kill: async () => {
+    throw new Error("unexpected Fleet request");
+  },
+};
+
+const unusedContractPort: ContractRequestPort = {
+  audit: async () => {
+    throw new Error("unexpected Contract request");
+  },
+  deliver: async () => {
+    throw new Error("unexpected Contract request");
+  },
+  review: async () => {
+    throw new Error("unexpected Contract request");
+  },
+};
+
+const unusedTaskPort: TaskMutationRequestPort = {
+  task: async () => {
+    throw new Error("unexpected Task request");
+  },
+};
 
 async function requestBodyDeliver(
   input: Readonly<{
@@ -90,7 +156,7 @@ async function requestBodyDeliver(
   const response = await requestBodyCommand({
     directory,
     ...(id === undefined ? {} : { id }),
-    command: contractRequestCommand("contract.deliver"),
+    command: contractRequestProtocol("contract.deliver"),
     value: { action: "contract.deliver", ...request },
     ...(signal === undefined ? {} : { signal }),
   });
@@ -106,10 +172,10 @@ async function requestBodyWait(
     timeoutMs?: number;
   }>,
 ) {
-  const command = fleetRequestCommand("akuma.wait");
+  const command = fleetRequestProtocol("akuma.wait");
   return await requestBodyCommand({
     ...input,
-    command: { ...command, decodeResult: (result) => result },
+    command,
     value: {
       action: "akuma.wait",
       targets: input.targets,
@@ -120,22 +186,24 @@ async function requestBodyWait(
 }
 
 async function requestBodyTell(input: Readonly<{ directory: string; id?: string; target: AkuId; body: string }>) {
-  const command = fleetRequestCommand("akuma.tell");
+  const command = fleetRequestProtocol("akuma.tell");
   return await requestBodyCommand({
     ...input,
-    command: { ...command, decodeResult: (result) => result },
+    command,
     value: { action: "akuma.tell", target: input.target, body: input.body },
   });
 }
 
 async function requestBodyKill(input: Readonly<{ directory: string; id?: string; targets: readonly AkuId[] }>) {
-  const command = fleetRequestCommand("akuma.kill");
+  const command = fleetRequestProtocol("akuma.kill");
   return await requestBodyCommand({
     ...input,
-    command: { ...command, decodeResult: (result) => result },
+    command,
     value: { action: "akuma.kill", targets: input.targets },
   });
 }
+
+const emptyWaitResult = { completion: "all" as const, observations: [], unobserved: [] };
 
 async function readTransportClaim(directory: string, id: string): Promise<Readonly<{ payload: unknown }>> {
   for (const name of (await readdir(directory)).filter((value) => value.endsWith(".request.json"))) {
@@ -176,12 +244,13 @@ function noDeliver(): Readonly<{ deliver(): Promise<never> }> {
 }
 
 test("Contract owner codecs reject malformed live, failure, and service payloads", () => {
-  const command = contractRequestCommand("contract.deliver");
+  const protocol = contractRequestProtocol("contract.deliver");
+  const command = contractRequestCommand("contract.deliver", unusedContractPort);
   assert.throws(
-    () => command.decodeResult({ kind: "accepted", result: {} }),
+    () => protocol.decodeResult({ kind: "accepted", result: {} }),
     /transport integrity: Contract contract\.deliver returned an invalid live result/u,
   );
-  assert.equal(command.decodeFailure?.({ kind: "refused", refusal: { kind: "contract-missing" } }), null);
+  assert.equal(protocol.decodeFailure?.({ kind: "refused", refusal: { kind: "contract-missing" } }), null);
   assert.throws(
     () => command.decodeService({ malformed: true }),
     /malformed stored Contract service evidence for contract\.deliver/u,
@@ -190,12 +259,12 @@ test("Contract owner codecs reject malformed live, failure, and service payloads
 
 test("Fleet owner codecs reject malformed live and service payloads", () => {
   assert.throws(
-    () => fleetRequestCommand("akuma.wait").decodeResult({ completion: "all", observations: [], unobserved: [{}] }),
+    () => fleetRequestProtocol("akuma.wait").decodeResult({ completion: "all", observations: [], unobserved: [{}] }),
     /invalid live result for akuma\.wait/u,
   );
   assert.throws(
     () =>
-      fleetRequestCommand("akuma.tell").decodeService({
+      fleetRequestCommand("akuma.tell", unusedFleetPort).decodeService({
         action: "akuma.tell",
         target: "aku/worker/nothex",
         tellId: "tell",
@@ -205,9 +274,10 @@ test("Fleet owner codecs reject malformed live and service payloads", () => {
 });
 
 test("Task owner codecs reject malformed live and service/reference payloads", () => {
-  const command = taskMutationRequestCommand("task.start");
+  const protocol = taskMutationRequestProtocol("task.start");
+  const command = taskMutationRequestCommand("task.start", unusedTaskPort);
   assert.throws(
-    () => command.decodeResult({ kind: "accepted" }),
+    () => protocol.decodeResult({ kind: "accepted" }),
     /transport integrity: Task task\.start returned an invalid live result/u,
   );
   assert.throws(
@@ -215,8 +285,15 @@ test("Task owner codecs reject malformed live and service/reference payloads", (
     /malformed stored Task service evidence for task\.start/u,
   );
   assert.throws(
-    () => command.decodeReference({ kind: "served-reference", action: "task.stop" }),
+    () => protocol.decodeReference({ kind: "served-reference", action: "task.stop" }),
     /malformed Task service reference for task\.start/u,
+  );
+});
+
+test("request command composition rejects a duplicate action", () => {
+  assert.throws(
+    () => composeRequestCommands(fleetRequestCommands(unusedFleetPort), fleetRequestCommands(unusedFleetPort)),
+    /duplicate request command action: akuma\.wait/u,
   );
 });
 
@@ -232,12 +309,9 @@ test("a Heart authority failure keeps its error identity, closes the channel, an
   const pump = await LifecycleBodyRequestPump.openWithService(
     {
       paths: parent.paths,
-      parent: parent.soul,
+      allowed: parent.soul.allowed,
       bodySequence: 1,
       now: () => "2026-08-18T00:00:01.000Z",
-      spawn: async () => {
-        throw new Error("call is outside this test");
-      },
       signal: new AbortController().signal,
     },
     async (input) => {
@@ -288,10 +362,10 @@ test("a same-id different-payload conflict is refused without changing the admit
   const parent = await born(root, "parent", "11111111");
   const id = randomUUID();
   let calls = 0;
-  const pump = await openPump(parent, {
+  const pump = await openFleetPump(parent, {
     wait: async () => {
       calls += 1;
-      return { observed: true };
+      return emptyWaitResult;
     },
     tell: async () => {
       throw new Error("unexpected tell");
@@ -308,7 +382,7 @@ test("a same-id different-payload conflict is refused without changing the admit
       targets: ["aku/worker/22222222" as AkuId],
       completion: "all" as const,
     };
-    assert.deepEqual(await requestBodyWait(first), { kind: "returned", result: { observed: true } });
+    assert.deepEqual(await requestBodyWait(first), { kind: "returned", result: emptyWaitResult });
     const fact = await readRequest(parent.paths, id);
     await assert.rejects(
       requestBodyWait({ ...first, targets: ["aku/worker/33333333" as AkuId] }),
@@ -330,7 +404,7 @@ test("call allocation crossing the admission fence settles voided without spawni
   let spawnCalls = 0;
   pump = await BodyRequestPump.open({
     paths: parent.paths,
-    parent: parent.soul,
+    allowed: parent.soul.allowed,
     bodySequence: 1,
     now: () => {
       if (!fenceScheduled) {
@@ -339,11 +413,14 @@ test("call allocation crossing the admission fence settles voided without spawni
       }
       return "2026-08-18T00:00:01.000Z";
     },
-    upstream: { launchWorld: () => root },
-    spawn: async () => {
-      spawnCalls += 1;
-    },
-    commands: akumaCallRequestCommands(),
+    commands: akumaCallRequestCommands({
+      world: root,
+      paths: parent.paths,
+      parent: parent.soul,
+      spawn: async () => {
+        spawnCalls += 1;
+      },
+    }),
     signal: new AbortController().signal,
   });
   const id = randomUUID();
@@ -377,14 +454,17 @@ test("a noncanonical routed call fails the pump before child allocation", async 
   let spawns = 0;
   const pump = await BodyRequestPump.open({
     paths: parent.paths,
-    parent: parent.soul,
+    allowed: parent.soul.allowed,
     bodySequence: 1,
     now: () => "2026-08-18T00:00:01.000Z",
-    upstream: { launchWorld: () => root },
-    spawn: async () => {
-      spawns += 1;
-    },
-    commands: akumaCallRequestCommands(),
+    commands: akumaCallRequestCommands({
+      world: root,
+      paths: parent.paths,
+      parent: parent.soul,
+      spawn: async () => {
+        spawns += 1;
+      },
+    }),
     signal: new AbortController().signal,
   });
   const id = randomUUID();
@@ -420,15 +500,18 @@ test("a semantically invalid call recipe fails the pump before Heart admission",
   let spawnCalls = 0;
   const pump = await BodyRequestPump.open({
     paths: parent.paths,
-    parent: parent.soul,
+    allowed: parent.soul.allowed,
     bodySequence: 1,
     now: () => "2026-08-18T00:00:01.000Z",
-    upstream: { launchWorld: () => root },
-    spawn: async () => {
-      spawnCalls += 1;
-      throw new Error("invalid recipe must not spawn");
-    },
-    commands: akumaCallRequestCommands(),
+    commands: akumaCallRequestCommands({
+      world: root,
+      paths: parent.paths,
+      parent: parent.soul,
+      spawn: async () => {
+        spawnCalls += 1;
+        throw new Error("invalid recipe must not spawn");
+      },
+    }),
     signal: new AbortController().signal,
   });
   try {
@@ -477,33 +560,39 @@ test("a terminal Akuma call duplicate projects its stored child without spawning
   let spawns = 0;
   const first = await BodyRequestPump.open({
     paths: parent.paths,
-    parent: parent.soul,
+    allowed: parent.soul.allowed,
     bodySequence: 1,
     now: () => "2026-08-18T00:00:01.000Z",
-    upstream: { launchWorld: () => root },
-    commands: akumaCallRequestCommands(),
+    commands: akumaCallRequestCommands({
+      world: root,
+      paths: parent.paths,
+      parent: parent.soul,
+      spawn: async (launch) => {
+        spawns += 1;
+        const leash = (await HeldAkumaLeash.try(launch.paths))!;
+        await leash.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-18T00:00:02.000Z" });
+        leash.release();
+      },
+    }),
     signal: new AbortController().signal,
-    async spawn(launch) {
-      spawns += 1;
-      const leash = (await HeldAkumaLeash.try(launch.paths))!;
-      await leash.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-18T00:00:02.000Z" });
-      leash.release();
-    },
   });
   try {
     const child = await requestBodyCall({ directory: first.directory, ...request });
     await first.close();
     const replay = await BodyRequestPump.open({
       paths: parent.paths,
-      parent: parent.soul,
+      allowed: parent.soul.allowed,
       bodySequence: 2,
       now: () => "2026-08-18T00:00:03.000Z",
-      upstream: { launchWorld: () => root },
-      commands: akumaCallRequestCommands(),
+      commands: akumaCallRequestCommands({
+        world: root,
+        paths: parent.paths,
+        parent: parent.soul,
+        spawn: async () => {
+          throw new Error("terminal call must not spawn again");
+        },
+      }),
       signal: new AbortController().signal,
-      async spawn() {
-        throw new Error("terminal call must not spawn again");
-      },
     });
     try {
       assert.equal(await requestBodyCall({ directory: replay.directory, ...request }), child);
@@ -521,7 +610,7 @@ test("deliver claims execute once and Heart retains only the Contract fact refer
   const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
   const contractId = "kei/forwarded-delivery";
   let calls = 0;
-  const pump = await openPump(parent, {
+  const pump = await openContractPump(parent, {
     wait: async () => {
       throw new Error("unexpected wait");
     },
@@ -582,7 +671,7 @@ test("deliver claims execute once and Heart retains only the Contract fact refer
     assert.doesNotMatch(JSON.stringify(fact), /delivery-result|marker|tenderSnapshot/u);
 
     await pump.close();
-    const replayPump = await openPump(parent, {
+    const replayPump = await openContractPump(parent, {
       wait: async () => {
         throw new Error("unexpected wait");
       },
@@ -724,16 +813,21 @@ test("CLI forwarded deliver preserves its selected Repo and uses parent Settings
     process.argv.length - 2,
     Buffer.from(JSON.stringify({ paths: inert.paths })).toString("base64url"),
   );
-  let compositionUpstreamFor: typeof import("../src/akuma-body.js").upstreamFor;
+  let externalRequestCommandsFor: typeof import("../src/akuma-body.js").externalRequestCommandsFor;
   try {
-    ({ upstreamFor: compositionUpstreamFor } = await import("../src/akuma-body.js"));
+    ({ externalRequestCommandsFor } = await import("../src/akuma-body.js"));
   } finally {
     process.argv.splice(0, process.argv.length, ...previousArgv);
   }
-  let pump = await openPump(
-    parent,
-    await compositionUpstreamFor({ paths: parent.paths }, { home: parentHome, gitPath }),
-  );
+  let composition = await externalRequestCommandsFor({ paths: parent.paths }, { home: parentHome, gitPath });
+  let pump = await BodyRequestPump.open({
+    paths: parent.paths,
+    allowed: parent.soul.allowed,
+    bodySequence: 1,
+    now: () => "2026-08-18T00:00:01.000Z",
+    commands: composition.commands,
+    signal: new AbortController().signal,
+  });
   const noncanonical = requestBodyDeliver({
     directory: pump.directory,
     id: randomUUID(),
@@ -748,24 +842,29 @@ test("CLI forwarded deliver preserves its selected Repo and uses parent Settings
     noncanonical,
     (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "voided",
   );
-  pump = await openPump(parent, await compositionUpstreamFor({ paths: parent.paths }, { home: parentHome, gitPath }));
+  composition = await externalRequestCommandsFor({ paths: parent.paths }, { home: parentHome, gitPath });
+  pump = await BodyRequestPump.open({
+    paths: parent.paths,
+    allowed: parent.soul.allowed,
+    bodySequence: 1,
+    now: () => "2026-08-18T00:00:01.000Z",
+    commands: composition.commands,
+    signal: new AbortController().signal,
+  });
   const previous = process.env[AKUMA_REQUESTS_ENV];
   const previousPath = process.env.PATH;
   try {
     process.env[AKUMA_REQUESTS_ENV] = pump.directory;
     process.env.PATH = "";
-    const result = await invoke(
-      parseArgv(["--repo", contractRepository.path, "deliver", id]),
-      {
-        cwd: parentRepository.path,
-        environment: {
-          KEIYAKU_HOME: childHome,
-          KEIYAKU_GIT_PATH: gitPath,
-          PATH: "",
-          [AKUMA_REQUESTS_ENV]: pump.directory,
-        },
+    const result = await invoke(parseArgv(["--repo", contractRepository.path, "deliver", id]), {
+      cwd: parentRepository.path,
+      environment: {
+        KEIYAKU_HOME: childHome,
+        KEIYAKU_GIT_PATH: gitPath,
+        PATH: "",
+        [AKUMA_REQUESTS_ENV]: pump.directory,
       },
-    );
+    });
     const state = await bound.keiyaku.state();
     assert.equal(result.kind, "accepted");
     assert.equal((await bound.keiyaku.delivery()) instanceof Delivery, true);
@@ -774,15 +873,7 @@ test("CLI forwarded deliver preserves its selected Repo and uses parent Settings
     assert.equal(existsSync(hookLog), false);
 
     const reviewed = await invoke(
-      parseArgv([
-        "--repo",
-        contractRepository.path,
-        "review",
-        id,
-        "--unsatisfied",
-        "--summary",
-        "needs work",
-      ]),
+      parseArgv(["--repo", contractRepository.path, "review", id, "--unsatisfied", "--summary", "needs work"]),
       {
         cwd: parentRepository.path,
         environment: {
@@ -814,7 +905,7 @@ test("deliver returns without a durable reference and settles Heart voided", asy
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-deliver-voided-")));
   const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
   const id = randomUUID();
-  const pump = await openPump(parent, {
+  const pump = await openContractPump(parent, {
     wait: async () => {
       throw new Error("unexpected wait");
     },
@@ -847,7 +938,7 @@ test("deliver returns without a durable reference and settles Heart voided", asy
     await pump.close();
   }
 
-  const replay = await openPump(parent, {
+  const replay = await openContractPump(parent, {
     wait: async () => {
       throw new Error("unexpected wait");
     },
@@ -884,7 +975,7 @@ test("an executor throw settles its admitted request voided", async () => {
   const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
   const id = randomUUID();
   let calls = 0;
-  const pump = await openPump(parent, {
+  const pump = await openContractPump(parent, {
     wait: async () => {
       throw new Error("unexpected wait");
     },
@@ -950,7 +1041,7 @@ test("completion fences admission but drains a returned delivery reference", asy
     release = resolve;
   });
   const id = randomUUID();
-  const pump = await openPump(parent, {
+  const pump = await openContractPump(parent, {
     wait: async () => {
       throw new Error("unexpected wait");
     },
@@ -1008,7 +1099,7 @@ test("a vanished live receipt does not fail durable request settlement", async (
     release = resolve;
   });
   const id = randomUUID();
-  const pump = await openPump(parent, {
+  const pump = await openContractPump(parent, {
     wait: async () => {
       throw new Error("unexpected wait");
     },
@@ -1053,21 +1144,35 @@ test("Heart leaves wait unkeyed and refuses disabled mutations before their exec
   const parent = await born(root, "parent", "11111111", []);
   const target = "aku/worker/22222222" as AkuId;
   const calls: string[] = [];
-  const pump = await openPump(parent, {
-    ...noDeliver(),
+  const fleet: FleetRequestPort = {
     wait: async () => {
       calls.push("wait");
-      return { observed: true };
+      return emptyWaitResult;
     },
     tell: async () => {
       calls.push("tell");
-      return {};
+      return {} as never;
     },
     kill: async () => {
       calls.push("kill");
-      return { result: {}, service: [] };
+      return {} as never;
     },
-  });
+  };
+  const contract: ContractRequestPort = {
+    audit: async () => {
+      calls.push("audit");
+      return {} as never;
+    },
+    deliver: async () => {
+      calls.push("deliver");
+      return {} as never;
+    },
+    review: async () => {
+      calls.push("review");
+      return {} as never;
+    },
+  };
+  const pump = await openFleetAndContractPump(parent, fleet, contract);
   try {
     assert.deepEqual(
       await requestBodyWait({
@@ -1076,7 +1181,7 @@ test("Heart leaves wait unkeyed and refuses disabled mutations before their exec
         targets: [target],
         completion: "all",
       }),
-      { kind: "returned", result: { observed: true } },
+      { kind: "returned", result: emptyWaitResult },
     );
     await assert.rejects(
       requestBodyTell({
@@ -1118,7 +1223,7 @@ test("transport rejects malformed target sets and foreign World coordinates befo
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-malformed-")));
   const parent = await born(root, "parent", "11111111");
   let calls = 0;
-  const pump = await openPump(parent, {
+  const pump = await openFleetPump(parent, {
     ...noDeliver(),
     wait: async () => {
       calls += 1;
@@ -1155,15 +1260,9 @@ test("transport rejects malformed target sets and foreign World coordinates befo
           await writeFile(join(pump.directory, `${claim.id}.request.json`), `${JSON.stringify(claim)}\n`),
       ),
     );
-    await assert.rejects(
-      pump.failure,
-      /registered request action akuma\.(?:wait|kill|tell) rejected its payload/u,
-    );
+    await assert.rejects(pump.failure, /registered request action akuma\.(?:wait|kill|tell) rejected its payload/u);
     const receipts = (await readdir(pump.directory)).filter((name) => name.endsWith(".receipt.json"));
-    await assert.rejects(
-      pump.close(),
-      /registered request action akuma\.(?:wait|kill|tell) rejected its payload/u,
-    );
+    await assert.rejects(pump.close(), /registered request action akuma\.(?:wait|kill|tell) rejected its payload/u);
     closed = true;
     assert.equal(calls, 0);
     assert.deepEqual(await Promise.all(ids.map(async (id) => await readRequest(parent.paths, id))), [null, null, null]);
@@ -1181,7 +1280,7 @@ test("a forwarded Tell writes its transport and the direct parent enters the tel
   const targetLeash = (await HeldAkumaLeash.try(target.paths))!;
   await targetLeash.recordBody(target.paths, { leashTakenAt: "2026-08-18T00:00:01.000Z" });
   let calls = 0;
-  const pump = await openPump(parent, {
+  const pump = await openFleetPump(parent, {
     ...noDeliver(),
     wait: async () => {
       throw new Error("unexpected wait");
@@ -1216,7 +1315,8 @@ test("a forwarded Tell writes its transport and the direct parent enters the tel
     );
     assert.equal(outcomes.filter((value) => (value as { kind: string }).kind === "returned").length, 1);
     const returned = outcomes.find(
-      (value): value is Extract<(typeof outcomes)[number], { kind: "returned" }> => (value as { kind: string }).kind === "returned",
+      (value): value is Extract<(typeof outcomes)[number], { kind: "returned" }> =>
+        (value as { kind: string }).kind === "returned",
     );
     assert.equal(returned?.result.tell.admission.tellId, id);
     assert.deepEqual(returned?.result.tell.row, {
@@ -1262,7 +1362,7 @@ test("forwarded materialization retains and replays its handoff evidence", async
     workspace: { kind: "worktree" as const, path: "/tmp/wt" },
   };
   let calls = 0;
-  const pump = await openPump(parent, {
+  const pump = await openContractPump(parent, {
     wait: async () => {
       throw new Error("unexpected wait");
     },
@@ -1310,7 +1410,7 @@ test("forwarded materialization retains and replays its handoff evidence", async
     });
 
     await pump.close();
-    const replayPump = await openPump(parent, {
+    const replayPump = await openContractPump(parent, {
       wait: async () => {
         throw new Error("unexpected wait");
       },

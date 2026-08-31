@@ -22,7 +22,7 @@ import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { akumaCallRequestCommands, requestForwardedAkumaCall as requestBodyCall } from "../src/akuma/call-request.js";
 import { AkumaBodyRequestError, bodyRequestExecutionContext } from "../src/akuma/requests.js";
 import { BodyRequestPump, settleBodyRequests } from "../src/akuma/request-serve.js";
-import { contractRequestCommand } from "../src/library/contract-operations.js";
+import { contractRequestProtocol } from "../src/library/contract-operations.js";
 import { World } from "../src/world.js";
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
 
@@ -336,17 +336,20 @@ test("Heart clips nested allowed at each direct parent and cannot regain removed
   process.env.HOME = home;
   const first = await BodyRequestPump.open({
     paths: value.parent.paths,
-    parent: value.soul,
+    allowed: value.soul.allowed,
     bodySequence: 1,
     now: () => "2026-08-09T00:00:01.000Z",
-    upstream: { launchWorld: () => value.root },
-    commands: akumaCallRequestCommands(),
+    commands: akumaCallRequestCommands({
+      world: value.root,
+      paths: value.parent.paths,
+      parent: value.soul,
+      spawn: async (launch) => {
+        const leash = (await HeldAkumaLeash.try(launch.paths))!;
+        await leash.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-09T00:00:02.000Z" });
+        leash.release();
+      },
+    }),
     signal: new AbortController().signal,
-    async spawn(launch) {
-      const leash = (await HeldAkumaLeash.try(launch.paths))!;
-      await leash.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-09T00:00:02.000Z" });
-      leash.release();
-    },
   });
   try {
     const child = await (
@@ -362,17 +365,20 @@ test("Heart clips nested allowed at each direct parent and cannot regain removed
     const childPaths = pathsForAkuId(value.root, child.id);
     const second = await BodyRequestPump.open({
       paths: childPaths,
-      parent: childSoul,
+      allowed: childSoul.allowed,
       bodySequence: 1,
       now: () => "2026-08-09T00:00:03.000Z",
-      upstream: { launchWorld: () => value.root },
-      commands: akumaCallRequestCommands(),
+      commands: akumaCallRequestCommands({
+        world: value.root,
+        paths: childPaths,
+        parent: childSoul,
+        spawn: async (launch) => {
+          const leash = (await HeldAkumaLeash.try(launch.paths))!;
+          await leash.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-09T00:00:04.000Z" });
+          leash.release();
+        },
+      }),
       signal: new AbortController().signal,
-      async spawn(launch) {
-        const leash = (await HeldAkumaLeash.try(launch.paths))!;
-        await leash.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-09T00:00:04.000Z" });
-        leash.release();
-      },
     });
     try {
       const grandchild = await (
@@ -401,15 +407,18 @@ test("Heart refuses a disabled call before child publication", async () => {
   const value = await fixture([]);
   const pump = await BodyRequestPump.open({
     paths: value.parent.paths,
-    parent: value.soul,
+    allowed: value.soul.allowed,
     bodySequence: 1,
     now: () => "2026-08-09T00:00:01.000Z",
-    upstream: { launchWorld: () => value.root },
-    commands: akumaCallRequestCommands(),
+    commands: akumaCallRequestCommands({
+      world: value.root,
+      paths: value.parent.paths,
+      parent: value.soul,
+      spawn: async () => {
+        assert.fail("disabled request reached child publication");
+      },
+    }),
     signal: new AbortController().signal,
-    async spawn() {
-      assert.fail("disabled request reached child publication");
-    },
   });
   try {
     await assert.rejects(
@@ -636,17 +645,20 @@ test("a drive serves Body Requests through transport while Heart remains authori
   process.env.HOME = home;
   const pump = await BodyRequestPump.open({
     paths: value.parent.paths,
-    parent: value.soul,
+    allowed: value.soul.allowed,
     bodySequence: 1,
     now: () => "2026-08-09T00:00:01.000Z",
-    upstream: { launchWorld: () => value.root },
-    commands: akumaCallRequestCommands(),
+    commands: akumaCallRequestCommands({
+      world: value.root,
+      paths: value.parent.paths,
+      parent: value.soul,
+      spawn: async (launch) => {
+        const child = (await HeldAkumaLeash.try(launch.paths))!;
+        await child.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-09T00:00:02.000Z" });
+        child.release();
+      },
+    }),
     signal: new AbortController().signal,
-    async spawn(launch) {
-      const child = (await HeldAkumaLeash.try(launch.paths))!;
-      await child.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-09T00:00:02.000Z" });
-      child.release();
-    },
   });
   try {
     const childId = (
@@ -774,15 +786,18 @@ test("a registered request payload violation fails the pump before Heart admissi
   const value = await fixture();
   const pump = await BodyRequestPump.open({
     paths: value.parent.paths,
-    parent: value.soul,
+    allowed: value.soul.allowed,
     bodySequence: 1,
     now: () => "2026-08-09T00:00:01.000Z",
-    upstream: { launchWorld: () => value.root },
-    commands: akumaCallRequestCommands(),
+    commands: akumaCallRequestCommands({
+      world: value.root,
+      paths: value.parent.paths,
+      parent: value.soul,
+      spawn: async () => {
+        throw new Error("unexpected spawn");
+      },
+    }),
     signal: new AbortController().signal,
-    async spawn() {
-      throw new Error("unexpected spawn");
-    },
   });
   const id = "00000000-0000-4000-8000-000000000004";
   try {
@@ -887,11 +902,11 @@ test("Contract owns the exact normalized deliver payload decoder", () => {
     includeDirty: false,
     materializeConflict: true,
   };
-  assert.deepEqual(contractRequestCommand("contract.deliver").decodeRequest(payload), {
+  assert.deepEqual(contractRequestProtocol("contract.deliver").decodeRequest(payload), {
     action: "contract.deliver",
     ...payload,
   });
-  assert.equal(contractRequestCommand("contract.deliver").decodeRequest({ ...payload, extra: true }), null);
+  assert.equal(contractRequestProtocol("contract.deliver").decodeRequest({ ...payload, extra: true }), null);
   const { materializeConflict: _materializeConflict, ...without } = payload;
-  assert.equal(contractRequestCommand("contract.deliver").decodeRequest(without), null);
+  assert.equal(contractRequestProtocol("contract.deliver").decodeRequest(without), null);
 });

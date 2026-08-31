@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -138,17 +148,20 @@ async function requestPump(root: WorldRoot) {
   await leash.birth(parent.paths, soul);
   const pump = await BodyRequestPump.open({
     paths: parent.paths,
-    parent: soul,
+    allowed: soul.allowed,
     bodySequence: 1,
     now: () => "2026-08-11T00:00:01.000Z",
     signal: new AbortController().signal,
-    upstream: { launchWorld: () => root },
-    commands: akumaCallRequestCommands(),
-    async spawn(launch) {
-      const child = (await HeldAkumaLeash.try(launch.paths))!;
-      await child.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-11T00:00:02.000Z" });
-      child.release();
-    },
+    commands: akumaCallRequestCommands({
+      world: root,
+      paths: parent.paths,
+      parent: soul,
+      spawn: async (launch) => {
+        const child = (await HeldAkumaLeash.try(launch.paths))!;
+        await child.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-11T00:00:02.000Z" });
+        child.release();
+      },
+    }),
   });
   return { pump, leash };
 }
@@ -161,9 +174,18 @@ test("package-root World inputs reject a forged JavaScript coordinate before eff
       Keiyaku.call({ path: forged as never, archetype: "worker", body: "must not start" }),
       /canonical physical directory/u,
     );
-    await assert.rejects(Keiyaku.fork({ path: forged as never, akuma: "aku/worker/1234abcd", at: "turn/1" }), /canonical physical directory/u);
-    await assert.rejects(Keiyaku.ls({ query: { kind: "tasks" }, path: forged as never }), /canonical physical directory/u);
-    await assert.rejects(Keiyaku.status({ path: forged as never, akuma: "aku/worker/1234abcd" }), /canonical physical directory/u);
+    await assert.rejects(
+      Keiyaku.fork({ path: forged as never, akuma: "aku/worker/1234abcd", at: "turn/1" }),
+      /canonical physical directory/u,
+    );
+    await assert.rejects(
+      Keiyaku.ls({ query: { kind: "tasks" }, path: forged as never }),
+      /canonical physical directory/u,
+    );
+    await assert.rejects(
+      Keiyaku.status({ path: forged as never, akuma: "aku/worker/1234abcd" }),
+      /canonical physical directory/u,
+    );
     await assert.rejects(
       Keiyaku.wait({ path: forged as never, akuma: ["aku/worker/1234abcd"], completion: "all" }),
       /canonical physical directory/u,
@@ -172,7 +194,10 @@ test("package-root World inputs reject a forged JavaScript coordinate before eff
       Keiyaku.tell({ path: forged as never, akuma: "aku/worker/1234abcd", body: "must not tell" }),
       /canonical physical directory/u,
     );
-    await assert.rejects(Keiyaku.kill({ path: forged as never, akuma: ["aku/worker/1234abcd"] }), /canonical physical directory/u);
+    await assert.rejects(
+      Keiyaku.kill({ path: forged as never, akuma: ["aku/worker/1234abcd"] }),
+      /canonical physical directory/u,
+    );
     assert.equal(existsSync(join(root, ".keiyaku", "akuma")), false);
   } finally {
     rmSync(root, { recursive: true, force: true });

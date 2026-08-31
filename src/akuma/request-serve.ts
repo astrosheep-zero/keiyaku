@@ -10,8 +10,8 @@ import {
 import {
   atomicJson,
   receiptPath,
-  type ErasedRequest,
   type ErasedRequestCommand,
+  type ExecutionFacts,
   type RequestEnvelope,
 } from "./request-wire.js";
 import {
@@ -20,8 +20,7 @@ import {
 } from "./request-lifecycle.js";
 export { clearBodyRequestTransport, settleBodyRequests } from "./request-lifecycle.js";
 
-type PumpInput = Omit<LifecyclePumpInput, "upstream"> &
-  Readonly<{ upstream?: unknown; commands: Readonly<Record<string, ErasedRequestCommand>> }>;
+type PumpInput = LifecyclePumpInput & Readonly<{ commands: Readonly<Record<string, ErasedRequestCommand>> }>;
 export type ServeInput = Omit<PumpInput, "bodySequence"> &
   Readonly<{
     directory: string;
@@ -29,10 +28,45 @@ export type ServeInput = Omit<PumpInput, "bodySequence"> &
     claim: RequestEnvelope;
     admissionOpen(): boolean;
   }>;
+
+type ResolvedRequest = Readonly<{
+  payloadJson: string;
+  isPermitted(allowed: readonly string[]): boolean;
+  encodeFailure(error: unknown): unknown | null;
+}>;
+
+type ExecutedRequest = Readonly<{
+  fact: RequestFact;
+  outcome: Readonly<{ kind: "returned"; result: unknown }>;
+}>;
+
+type ExecuteRequest = (
+  fact: Extract<RequestFact, { state: "admitted" }>,
+  facts: ExecutionFacts,
+) => Promise<ExecutedRequest>;
+
+function replayReference(fact: RequestFact, command: ErasedRequestCommand): unknown {
+  if (fact.state !== "served") {
+    throw new Error(`request ${fact.id} completion corruption: cannot replay ${fact.state} request`);
+  }
+  switch (command.completion) {
+    case "child":
+      if (!("child" in fact)) {
+        throw new Error(`request ${fact.id} completion corruption: child command has a service settlement`);
+      }
+      return command.projectChild(fact.child);
+    case "service":
+      if (!("serviceJson" in fact)) {
+        throw new Error(`request ${fact.id} completion corruption: service command has a child settlement`);
+      }
+      return command.projectServiceJson(fact.serviceJson);
+  }
+}
+
 async function projectCommandReceipt(
   input: ServeInput,
   fact: RequestFact,
-  command: ErasedRequest,
+  command: ErasedRequestCommand,
   outcome?: Readonly<{ kind: "returned"; result: unknown }>,
   failure?: unknown,
 ): Promise<void> {
@@ -48,23 +82,13 @@ async function projectCommandReceipt(
             ...(failure === undefined ? {} : { failure }),
           }
         : outcome === undefined
-          ? "serviceJson" in fact
-            ? {
-                id: fact.id,
-                action: fact.action,
-                state: "served" as const,
-                reference: command.projectServiceJson(fact.serviceJson),
-              }
-            : "child" in fact
-              ? {
-                  id: fact.id,
-                  action: fact.action,
-                  state: "served" as const,
-                  reference: command.projectChild(fact.child),
-                }
-              : null
+          ? {
+              id: fact.id,
+              action: fact.action,
+              state: "served" as const,
+              reference: replayReference(fact, command),
+            }
           : { id: fact.id, action: fact.action, state: "served" as const, outcome };
-  if (receipt === null) return;
   try {
     await atomicJson(receiptPath(input.directory, input.transportId), receipt);
   } catch (error) {
@@ -72,42 +96,39 @@ async function projectCommandReceipt(
   }
 }
 
-async function serveCommand(input: ServeInput, command: ErasedRequestCommand): Promise<boolean> {
-  const request = command.resolve(input.claim.payload);
-  if (request === null) throw new Error(`registered request action ${input.claim.action} rejected its payload`);
+async function serveResolvedCommand(
+  input: ServeInput,
+  command: ErasedRequestCommand,
+  request: ResolvedRequest,
+  execute: ExecuteRequest,
+): Promise<boolean> {
   let fact = await admitRequest(input.paths, {
     id: input.claim.id,
     action: input.claim.action,
     payloadJson: request.payloadJson,
     admittedAt: input.now(),
-    permitted: request.isPermitted(input.parent.allowed),
+    permitted: request.isPermitted(input.allowed),
   });
   if (fact.state !== "admitted") {
-    await projectCommandReceipt(input, fact, request);
+    await projectCommandReceipt(input, fact, command);
     return true;
   }
   if (!input.admissionOpen()) {
     fact = await voidRequest(input.paths, fact.id, "body closed request admission");
-    await projectCommandReceipt(input, fact, request);
+    await projectCommandReceipt(input, fact, command);
     return true;
   }
   try {
-    const served = await request.execute({
+    const facts: ExecutionFacts = {
       id: fact.id,
       admittedAt: fact.admittedAt,
       requester: fact.requester,
       signal: input.signal,
-      upstream: input.upstream,
-      paths: input.paths,
-      parent: input.parent,
-      spawn: input.spawn,
       admissionOpen: input.admissionOpen,
-    });
-    fact =
-      "child" in served
-        ? await serveChildRequest(input.paths, fact.id, served.child)
-        : await serveUpstreamRequest(input.paths, fact.id, served.serviceJson);
-    await projectCommandReceipt(input, fact, request, { kind: "returned", result: served.result });
+    };
+    const served = await execute(fact, facts);
+    fact = served.fact;
+    await projectCommandReceipt(input, fact, command, served.outcome);
   } catch (error) {
     const failure = encodedFailure(request, error);
     const current = await readRequest(input.paths, fact.id);
@@ -116,16 +137,58 @@ async function serveCommand(input: ServeInput, command: ErasedRequestCommand): P
       current.state === "admitted" || current.state === "reserved"
         ? await voidRequest(input.paths, fact.id, diagnostic(error))
         : current;
-    await projectCommandReceipt(input, fact, request, undefined, failure);
+    await projectCommandReceipt(input, fact, command, undefined, failure);
   }
   return true;
+}
+
+async function serveChildCommand(
+  input: ServeInput,
+  command: Extract<ErasedRequestCommand, { completion: "child" }>,
+): Promise<boolean> {
+  const request = command.resolve(input.claim.payload);
+  if (request === null) throw new Error(`registered request action ${input.claim.action} rejected its payload`);
+  return await serveResolvedCommand(input, command, request, async (fact, facts) => {
+    const served = await request.execute(facts);
+    return {
+      fact: await serveChildRequest(input.paths, fact.id, served.child),
+      outcome: { kind: "returned", result: served.result },
+    };
+  });
+}
+
+async function serveServiceCommand(
+  input: ServeInput,
+  command: Extract<ErasedRequestCommand, { completion: "service" }>,
+): Promise<boolean> {
+  const request = command.resolve(input.claim.payload);
+  if (request === null) throw new Error(`registered request action ${input.claim.action} rejected its payload`);
+  return await serveResolvedCommand(input, command, request, async (fact, facts) => {
+    const served = await request.execute(facts);
+    return {
+      fact: await serveUpstreamRequest(input.paths, fact.id, served.serviceJson),
+      outcome: { kind: "returned", result: served.result },
+    };
+  });
+}
+
+async function serveCommand(input: ServeInput, command: ErasedRequestCommand): Promise<boolean> {
+  switch (command.completion) {
+    case "child":
+      return await serveChildCommand(input, command);
+    case "service":
+      return await serveServiceCommand(input, command);
+  }
 }
 
 function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function encodedFailure(request: ErasedRequest, error: unknown): unknown | undefined {
+function encodedFailure(
+  request: Readonly<{ encodeFailure(error: unknown): unknown | null }>,
+  error: unknown,
+): unknown | undefined {
   try {
     const failure = request.encodeFailure(error);
     return failure === null ? undefined : failure;

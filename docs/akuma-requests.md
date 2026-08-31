@@ -11,6 +11,12 @@ that explicit direct-parent channel once; public inputs never carry routes and
 the parent serves requests with forced-local composition. There is no second
 public verb, generic messaging surface, or multi-hop forwarding.
 
+Each registered command binds its operation-owned capabilities at composition before any request can be served. Per-request
+execution carries only request-service facts and never transports product capabilities.
+
+Completion kind is a static descriptor fact: a command completes either with a child reference or with opaque service evidence,
+and its descriptor exposes only that kind's projection.
+
 Transport claims and receipts are ephemeral bytes, not facts. Heart request facts
 are the sole durable authority, use request identity for idempotence, and have
 one writer: the parent Body holding its leash. Same identity with different

@@ -77,8 +77,8 @@ type BodyRuntime = Readonly<{
   now(): string;
   spawnChild?(launch: AkumaCallRequestChildLaunch): Promise<OwnedProcess>;
   spawnBody?(launch: BodyLaunch): Promise<OwnedProcess>;
-  upstream?: unknown;
-  commands: Readonly<Record<string, ErasedRequestCommand>>;
+  world: WorldRoot;
+  externalCommands: Readonly<Record<string, ErasedRequestCommand>>;
 }>;
 
 function missing(error: unknown): boolean {
@@ -208,14 +208,12 @@ export async function emitCalledPluginSignal(
   }
 }
 
-function defaultRuntime(): BodyRuntime {
-  return {
-    now: () => new Date().toISOString(),
-    spawnChild: spawnAkumaBody,
-    commands: {},
-    spawnBody: spawnAkumaBody,
-  };
-}
+const DEFAULT_RUNTIME: Omit<BodyRuntime, "world"> = {
+  now: () => new Date().toISOString(),
+  spawnChild: spawnAkumaBody,
+  externalCommands: {},
+  spawnBody: spawnAkumaBody,
+};
 
 export async function bodyProcessInput(launch: BodyLaunch, bodyModuleUrl = import.meta.url) {
   const encoded = Buffer.from(JSON.stringify(launch), "utf8").toString("base64url");
@@ -334,8 +332,8 @@ async function runBodyTurns(input: BodyExecution): Promise<void> {
       body: initial ?? "",
       ...(initial === undefined ? {} : { call: initial }),
       launchTells,
-      ...(runtime.upstream === undefined ? {} : { upstream: runtime.upstream }),
-      commands: runtime.commands,
+      world: runtime.world,
+      externalCommands: runtime.externalCommands,
       now: runtime.now,
     });
     if (result.kind === "hung") return;
@@ -377,8 +375,10 @@ export async function handoffPendingTells(
 export async function driveAkumaBody(
   launch: BodyLaunch,
   adapter?: ProviderAdapter,
-  runtime: BodyRuntime = defaultRuntime(),
+  runtimeInput: Partial<BodyRuntime> = {},
 ): Promise<"held" | void> {
+  const world = runtimeInput.world ?? (await World.at(worldRootForAkumaPaths(launch.paths)));
+  const runtime: BodyRuntime = { ...DEFAULT_RUNTIME, ...runtimeInput, world };
   const acquired = await takeLeash(launch.paths, launch.refuseIfHeld);
   if (acquired === "held") return "held";
   if (acquired === "absent") return;
@@ -425,10 +425,10 @@ export async function spawnAkumaBody(launch: BodyLaunch): Promise<OwnedProcess> 
 
 export async function runAkumaBody(
   launch: BodyLaunch,
-  upstream: unknown,
-  commands: Readonly<Record<string, ErasedRequestCommand>>,
+  world: WorldRoot,
+  externalCommands: Readonly<Record<string, ErasedRequestCommand>>,
 ): Promise<"held" | void> {
-  return await driveAkumaBody(launch, undefined, { ...defaultRuntime(), upstream, commands });
+  return await driveAkumaBody(launch, undefined, { world, externalCommands });
 }
 
 const DIRECT_TELL_WAKE: TellWakeRuntime = {
