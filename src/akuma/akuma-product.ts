@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readdir, realpath, stat } from "node:fs/promises";
-import { resolve } from "node:path";
+import { readdir, stat } from "node:fs/promises";
 import { boundedListLimit, projectBoundedList } from "../bounded-list.js";
 import { AkumaHandle } from "./akuma-handle.js";
 import type {
@@ -14,6 +13,7 @@ import type {
   UnbornAkumaListRow,
 } from "./akuma.js";
 import { CALL_WITH_CONTEXT } from "./akuma-product-symbols.js";
+import { callReadonly, canonicalBirthCwd } from "./call-input.js";
 import { fleetListRow, readAkumaBirthCwd } from "./akuma-observe.js";
 import { akuIdFromDirectoryName, akumaPaths, akumaRunRoot, archetypeName, parseAkuId } from "./identity.js";
 import { loadArchetype, listArchetypes as readArchetypes } from "./archetype.js";
@@ -146,23 +146,6 @@ async function readableRows(rows: readonly KnownAkuma[]): Promise<readonly Akuma
     }
   });
   return [...loaded].filter((row): row is AkumaListRowValue => row !== null);
-}
-
-function callReadonly(value: unknown): Readonly<{ readonly?: true }> {
-  if (value === undefined) return {};
-  if (value !== true) throw new TypeError("Akuma call readonly must be true");
-  return { readonly: true };
-}
-
-async function canonicalBirthCwd(input: string): Promise<string> {
-  const selected = resolve(input);
-  try {
-    const canonical = await realpath(selected);
-    if (!(await stat(canonical)).isDirectory()) throw new Error("not a directory");
-    return canonical;
-  } catch {
-    throw new Error(`cwd is not an existing directory: ${input}`);
-  }
 }
 
 export class Akuma {
