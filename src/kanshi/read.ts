@@ -2,7 +2,7 @@ import { Repo } from "../library/repo.js";
 import type { ContractBoard, ContractCatalogue, ContractDisposition } from "../library/contract.js";
 import { scopeForRepo } from "../library/repo.js";
 import { observeTaskBoard } from "../task/operations.js";
-import { contractNamespace } from "../settlement/settle.js";
+import { contractNamespace } from "../task/identity.js";
 import { Akuma } from "../akuma/index.js";
 import { readAliases, type AliasBinding } from "../alias/index.js";
 import { readDispatchesAt, type Dispatch } from "../dispatch/index.js";

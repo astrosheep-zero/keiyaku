@@ -26,7 +26,7 @@ import { lastJournalAtFor, phaseAtFor } from "../src/protocol/read/status.js";
 import { changeId, contractId, contractSegment, snapshotId } from "../src/core/facts/types.js";
 import { kanshi, selectKanshi, type KanshiReport } from "../src/kanshi/index.js";
 import { visibleFleetRows } from "../src/kanshi/fleet.js";
-import { contractNamespace } from "../src/settlement/settle.js";
+import { contractNamespace } from "../src/task/identity.js";
 import { projectTaskBoardObservation } from "../src/task/board.js";
 import { serializeTaskDocument, type TaskDocument } from "../src/task/document.js";
 import { Tasks, type TaskId } from "../src/task/index.js";

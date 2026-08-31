@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { contractSegment, type ContractId } from "../core/facts/types.js";
 import { identityCoordinate, identitySegments } from "../identity/coordinates.js";
 import { normalizeIdentityStem } from "../identity/normalize.js";
 
@@ -31,6 +32,10 @@ export function formatTaskId(coordinate: TaskCoordinate): TaskId {
   if (![...coordinate.namespace, coordinate.localId].every(isTaskSegment))
     throw new TypeError("task coordinate contains a noncanonical segment");
   return identityCoordinate({ family: "task", segments: [...coordinate.namespace, coordinate.localId] }) as TaskId;
+}
+
+export function contractNamespace(id: ContractId): readonly string[] {
+  return ["kei", contractSegment(id)];
 }
 
 export function taskAuthorityPath(tasksDirectory: string, coordinate: TaskCoordinate): string {
