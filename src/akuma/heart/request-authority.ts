@@ -5,8 +5,10 @@ import {
   nonterminalRequestFacts,
   requestFact,
   updateRequestRefused,
+  updateRequestBegun,
   updateRequestReserved,
   updateRequestServed,
+  updateRequestUnproven,
   updateRequestVoided,
   updateUpstreamRequestServed,
 } from "./request-rows.js";
@@ -94,7 +96,7 @@ export async function serveUpstreamRequest(paths: AkumaPaths, id: string, servic
     transaction(heart, () => {
       const before = requestFact(heart, id);
       if (before === null) throw new Error(`unknown Akuma request ${id}`);
-      if (before.state === "admitted") updateUpstreamRequestServed(heart, id, serviceJson);
+      if (before.state === "begun") updateUpstreamRequestServed(heart, id, serviceJson);
       else if (before.state !== "served" || !("serviceJson" in before) || before.serviceJson !== serviceJson) {
         throw new Error(`Akuma request ${id} cannot be served with this service reference`);
       }
@@ -122,10 +124,36 @@ export async function voidRequest(paths: AkumaPaths, id: string, evidence: strin
     transaction(heart, () => {
       const before = requestFact(heart, id);
       if (before === null) throw new Error(`unknown Akuma request ${id}`);
-      if (before.state === "admitted" || before.state === "reserved") {
+      if (before.state === "admitted" || before.state === "reserved" || before.state === "begun") {
         updateRequestVoided(heart, id, evidence);
       } else if (before.state !== "voided" || before.evidence !== evidence) {
         throw new Error(`Akuma request ${id} cannot be voided`);
+      }
+      return requestFact(heart, id)!;
+    }),
+  );
+}
+
+export async function beginRequest(paths: AkumaPaths, id: string): Promise<RequestFact> {
+  return await withHeart(paths, (heart) =>
+    transaction(heart, () => {
+      const before = requestFact(heart, id);
+      if (before === null) throw new Error(`unknown Akuma request ${id}`);
+      if (before.state === "admitted") updateRequestBegun(heart, id);
+      else if (before.state !== "begun") throw new Error(`Akuma request ${id} cannot begin`);
+      return requestFact(heart, id)!;
+    }),
+  );
+}
+
+export async function unproveRequest(paths: AkumaPaths, id: string, evidence: string): Promise<RequestFact> {
+  return await withHeart(paths, (heart) =>
+    transaction(heart, () => {
+      const before = requestFact(heart, id);
+      if (before === null) throw new Error(`unknown Akuma request ${id}`);
+      if (before.state === "begun") updateRequestUnproven(heart, id, evidence);
+      else if (before.state !== "unproven" || before.evidence !== evidence) {
+        throw new Error(`Akuma request ${id} cannot be marked unproven`);
       }
       return requestFact(heart, id)!;
     }),

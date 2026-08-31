@@ -35,6 +35,15 @@ const receiptEnvelopeSchema = z.union([
       failure: z.unknown().optional(),
     })
     .strict(),
+  z
+    .object({
+      id: requestIdSchema,
+      action: actionSchema,
+      state: z.literal("unproven"),
+      evidence: z.string(),
+      failure: z.unknown().optional(),
+    })
+    .strict(),
 ]);
 
 export type RequestEnvelope = z.infer<typeof requestEnvelopeSchema>;

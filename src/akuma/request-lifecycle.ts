@@ -6,6 +6,7 @@ import {
   readNonterminalRequests,
   readSoul,
   serveRequest,
+  unproveRequest,
   voidRequest,
   type RequestFact,
   type Soul,
@@ -105,6 +106,7 @@ export class BodyRequestPump {
 
   async close(): Promise<void> {
     this.stopAdmission();
+    if (!this.executionSignal.signal.aborted) this.executionSignal.abort(new Error("Body request pump closed"));
     try {
       await this.running;
     } finally {
@@ -203,6 +205,8 @@ export async function settleBodyRequests(
     if (request.state === "admitted") await voidRequest(paths, request.id, "body died before serving the request");
     else if (request.state === "reserved" && !(await settleReserved(paths, parent, request, now, signal)))
       pending = true;
+    else if (request.state === "begun")
+      await unproveRequest(paths, request.id, "body died after service request began");
   }
   return pending ? "pending" : "settled";
 }

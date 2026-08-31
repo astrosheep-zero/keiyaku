@@ -9,10 +9,10 @@ export class AkumaBodyRequestError extends Error {
   readonly kind = "akuma-body-request";
   constructor(
     readonly action: string,
-    readonly outcome: "refused" | "voided",
+    readonly outcome: "refused" | "voided" | "unproven",
     readonly diagnostic: string,
   ) {
-    super(`${action} ${outcome === "voided" ? "failed" : "refused"}: ${diagnostic}`);
+    super(`${action} ${outcome === "refused" ? "refused" : outcome}: ${diagnostic}`);
     this.name = "AkumaBodyRequestError";
   }
 }
@@ -26,6 +26,10 @@ function throwVoidedRequestFailure(
   const ownerFailure = decodeVoidedOwnerFailure(failure, decodeFailure);
   if (ownerFailure !== null) throw ownerFailure;
   throw new AkumaBodyRequestError(action, "voided", evidence);
+}
+
+function throwUnprovenRequestFailure(action: string, evidence: string): never {
+  throw new AkumaBodyRequestError(action, "unproven", evidence);
 }
 
 function decodeVoidedOwnerFailure(
@@ -82,6 +86,7 @@ export async function requestBodyCommand<Input, Output, Reference>(
       if (receipt.state === "voided") {
         throwVoidedRequestFailure(receipt.action, receipt.evidence, receipt.failure, input.command.decodeFailure);
       }
+      if (receipt.state === "unproven") throwUnprovenRequestFailure(receipt.action, receipt.evidence);
       if ("reference" in receipt) {
         let reference: Reference;
         try {

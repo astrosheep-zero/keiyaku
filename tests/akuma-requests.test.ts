@@ -9,6 +9,7 @@ import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import {
   HeldAkumaLeash,
   admitRequest,
+  beginRequest,
   initializeHeart,
   readRequest,
   readSeal,
@@ -889,6 +890,26 @@ test("a new body settles old requests by observation without replay", async () =
     assert.equal((await readRequest(value.parent.paths, unbornId))?.state, "voided");
     assert.equal((await readRequest(value.parent.paths, mismatchId))?.state, "voided");
     assert.equal((await readSeal(unborn.paths))?.evidence, "request settlement");
+
+    const begunId = "00000000-0000-4000-8000-000000000015";
+    await admitRequest(value.parent.paths, {
+      id: begunId,
+      action: "contract.deliver",
+      payloadJson: JSON.stringify({ body: "begun" }),
+      admittedAt: "2026-08-09T00:00:05.000Z",
+      permitted: true,
+    });
+    await beginRequest(value.parent.paths, begunId);
+    assert.equal(await settleBodyRequests(value.parent.paths, value.soul, () => "2026-08-09T00:00:06.000Z"), "settled");
+    assert.deepEqual(await readRequest(value.parent.paths, begunId), {
+      id: begunId,
+      requester: value.parent.id,
+      action: "contract.deliver",
+      payloadJson: JSON.stringify({ body: "begun" }),
+      admittedAt: "2026-08-09T00:00:05.000Z",
+      state: "unproven",
+      evidence: "body died after service request began",
+    });
   } finally {
     value.leash.release();
     value.close();

@@ -151,9 +151,11 @@ type AdmittedRequest = RequestInput &
 export type RequestFact =
   | (AdmittedRequest & Readonly<{ state: "admitted" }>)
   | (AdmittedRequest & Readonly<{ state: "reserved"; child: AkuId }>)
+  | (AdmittedRequest & Readonly<{ state: "begun" }>)
   | (AdmittedRequest & Readonly<{ state: "served"; child: AkuId }>)
   | (AdmittedRequest & Readonly<{ state: "served"; serviceJson: string }>)
   | (AdmittedRequest & Readonly<{ state: "refused"; diagnostic: string }>)
+  | (AdmittedRequest & Readonly<{ state: "unproven"; evidence: string }>)
   | (AdmittedRequest & Readonly<{ state: "voided"; evidence: string }>);
 
 export type KillEvidence = "killed" | "already-killed" | "already-stopped" | "hung" | "untidy" | "unavailable";

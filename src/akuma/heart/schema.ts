@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-const HEART_SCHEMA_VERSION = 21;
+const HEART_SCHEMA_VERSION = 22;
 const LEASH_SCHEMA_VERSION = 4;
 
 function assertSchemaVersion(database: DatabaseSync, table: "akuma_schema" | "leash_schema", expected: number): void {
@@ -132,7 +132,7 @@ export const HEART_SCHEMA = `
     action TEXT NOT NULL,
     payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
     admitted_at TEXT NOT NULL,
-    state TEXT NOT NULL CHECK (state IN ('admitted', 'reserved', 'served', 'refused', 'voided')),
+    state TEXT NOT NULL CHECK (state IN ('admitted', 'reserved', 'begun', 'served', 'refused', 'voided', 'unproven')),
     child TEXT,
     service_json TEXT CHECK (service_json IS NULL OR json_valid(service_json)),
     diagnostic TEXT,
@@ -141,12 +141,14 @@ export const HEART_SCHEMA = `
       (state = 'admitted' AND child IS NULL AND service_json IS NULL AND diagnostic IS NULL AND evidence IS NULL)
       OR (state = 'reserved' AND child IS NOT NULL AND service_json IS NULL
         AND diagnostic IS NULL AND evidence IS NULL)
+      OR (state = 'begun' AND child IS NULL AND service_json IS NULL AND diagnostic IS NULL AND evidence IS NULL)
       OR (state = 'served'
         AND ((child IS NOT NULL AND service_json IS NULL)
           OR (child IS NULL AND service_json IS NOT NULL))
         AND diagnostic IS NULL AND evidence IS NULL)
       OR (state = 'refused' AND child IS NULL AND service_json IS NULL AND diagnostic IS NOT NULL AND evidence IS NULL)
       OR (state = 'voided' AND child IS NULL AND service_json IS NULL AND diagnostic IS NULL AND evidence IS NOT NULL)
+      OR (state = 'unproven' AND child IS NULL AND service_json IS NULL AND diagnostic IS NULL AND evidence IS NOT NULL)
     )
   ) STRICT;
   CREATE TABLE IF NOT EXISTS control (

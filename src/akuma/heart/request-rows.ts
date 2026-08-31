@@ -40,6 +40,12 @@ function decodeRequestRow(row: RequestRow): RequestFact {
     }
     return { ...input, state: row.state, child: row.child as AkuId };
   }
+  if (row.state === "begun") {
+    if (row.child !== null || row.service_json !== null || row.diagnostic !== null || row.evidence !== null) {
+      throw new Error("Akuma authority contains an invalid begun request");
+    }
+    return { ...input, state: row.state };
+  }
   if (row.state === "served") {
     if (row.child !== null && row.service_json === null) {
       return { ...input, state: row.state, child: row.child as AkuId };
@@ -50,6 +56,7 @@ function decodeRequestRow(row: RequestRow): RequestFact {
     throw new Error("Akuma authority contains an invalid served request");
   }
   if (row.state === "refused") return { ...input, state: row.state, diagnostic: row.diagnostic! };
+  if (row.state === "unproven") return { ...input, state: row.state, evidence: row.evidence! };
   if (row.state === "voided") return { ...input, state: row.state, evidence: row.evidence! };
   return { ...input, state: "admitted" };
 }
@@ -88,7 +95,7 @@ export function nonterminalRequestFacts(database: DatabaseSync): readonly Reques
   const rows = database
     .prepare(
       `SELECT ${REQUEST_COLUMNS} FROM requests
-    WHERE state IN ('admitted', 'reserved') ORDER BY sequence`,
+    WHERE state IN ('admitted', 'reserved', 'begun') ORDER BY sequence`,
     )
     .all() as unknown as readonly RequestRow[];
   return rows.map(decodeRequestRow);
@@ -109,11 +116,15 @@ export function updateRequestServed(database: DatabaseSync, id: string, child: A
     .run(child, id);
 }
 
+export function updateRequestBegun(database: DatabaseSync, id: string): void {
+  database.prepare("UPDATE requests SET state = 'begun' WHERE id = ? AND state = 'admitted'").run(id);
+}
+
 export function updateUpstreamRequestServed(database: DatabaseSync, id: string, service: unknown): void {
   database
     .prepare(
       `UPDATE requests SET state = 'served', service_json = ?
-    WHERE id = ? AND state = 'admitted'`,
+    WHERE id = ? AND state = 'begun'`,
     )
     .run(assertJsonText(service), id);
 }
@@ -130,8 +141,17 @@ export function updateRequestRefused(database: DatabaseSync, id: string, diagnos
 export function updateRequestVoided(database: DatabaseSync, id: string, evidence: string): void {
   database
     .prepare(
-      `UPDATE requests SET state = 'voided', child = NULL, service_json = NULL, evidence = ?
-    WHERE id = ? AND state IN ('admitted', 'reserved')`,
+      `UPDATE requests SET state = 'voided', child = NULL, service_json = NULL, diagnostic = NULL, evidence = ?
+    WHERE id = ? AND state IN ('admitted', 'reserved', 'begun')`,
+    )
+    .run(evidence, id);
+}
+
+export function updateRequestUnproven(database: DatabaseSync, id: string, evidence: string): void {
+  database
+    .prepare(
+      `UPDATE requests SET state = 'unproven', child = NULL, service_json = NULL, diagnostic = NULL, evidence = ?
+    WHERE id = ? AND state = 'begun'`,
     )
     .run(evidence, id);
 }

@@ -970,7 +970,7 @@ test("deliver returns without a durable reference and settles Heart voided", asy
   }
 });
 
-test("an executor throw settles its admitted request voided", async () => {
+test("an executor throw settles its begun request unproven", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-executor-voided-")));
   const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
   const id = randomUUID();
@@ -985,8 +985,10 @@ test("an executor throw settles its admitted request voided", async () => {
     kill: async () => {
       throw new Error("unexpected kill");
     },
-    deliver: async () => {
+    deliver: async (input) => {
       calls += 1;
+      assert.equal((await readRequest(parent.paths, id))?.state, "begun");
+      assert.equal(input.signal.aborted, false);
       throw new Error("executor unavailable");
     },
   });
@@ -1002,11 +1004,11 @@ test("an executor throw settles its admitted request voided", async () => {
       }),
       (error: unknown) =>
         error instanceof AkumaBodyRequestError &&
-        error.outcome === "voided" &&
+        error.outcome === "unproven" &&
         error.diagnostic === "executor unavailable" &&
-        error.message === "contract.deliver failed: executor unavailable",
+        error.message === "contract.deliver unproven: executor unavailable",
     );
-    assert.equal((await readRequest(parent.paths, id))?.state, "voided");
+    assert.equal((await readRequest(parent.paths, id))?.state, "unproven");
     await assert.rejects(
       requestBodyDeliver({
         directory: pump.directory,
@@ -1018,9 +1020,9 @@ test("an executor throw settles its admitted request voided", async () => {
       }),
       (error: unknown) =>
         error instanceof AkumaBodyRequestError &&
-        error.outcome === "voided" &&
+        error.outcome === "unproven" &&
         error.diagnostic === "executor unavailable" &&
-        error.message === "contract.deliver failed: executor unavailable",
+        error.message === "contract.deliver unproven: executor unavailable",
     );
     assert.equal(calls, 1);
   } finally {
@@ -1051,9 +1053,11 @@ test("completion fences admission but drains a returned delivery reference", asy
     kill: async () => {
       throw new Error("unexpected kill");
     },
-    deliver: async () => {
+    deliver: async (input) => {
       started();
-      return await executorReleased;
+      const result = await executorReleased;
+      assert.equal(input.signal.aborted, true);
+      return result;
     },
   });
   try {

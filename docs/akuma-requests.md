@@ -36,16 +36,19 @@ child's own leash and Soul remain the sole birth judge.
 
 Service is serial in Heart admission order. The descriptor checks authenticated
 frozen permission before generic admission; refusal runs no operation owner.
-An admitted call reserves its child before spawn and settles served only after
-birth. A failed reservation or publication settles voided without claiming
+An admitted service call durably marks begun before owner execution; voided
+proves no product effect, while unproven records an effect whose absence or
+success is not proven. An admitted call reserves its child before spawn and settles served only after birth. A failed reservation or publication settles voided without claiming
 cross-database atomicity. Fleet requests cross only canonical resolved Akuma
 targets; Contract and Task requests invoke their same direct-parent local
 executors, retaining only owner-minted terminal references rather than replayable
 results or caller composition authority.
 
 Before a successor drive, recovery observes every nonterminal request. It never
-re-executes an old request: abandoned unreserved work voids, while a reservation
-is settled only from child Soul, seal, or current leash evidence. It never spawns
+re-executes an old request: begun service requests settle to unproven without
+re-execution; explicit pump close stops admission before aborting execution and
+waits for truthful in-flight settlement; abandoned unreserved work voids,
+while a reservation is settled only from child Soul, seal, or current leash evidence. It never spawns
 a child, reads Contract or Task authority to infer an attempt, or claims
 exactly-once execution.
 

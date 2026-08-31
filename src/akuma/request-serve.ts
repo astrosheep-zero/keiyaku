@@ -1,10 +1,12 @@
 import {
   admitRequest,
+  beginRequest,
   isRequestInputConflict,
   readRequest,
   serveRequest as serveChildRequest,
   serveUpstreamRequest,
   voidRequest,
+  unproveRequest,
   type RequestFact,
 } from "./heart/index.js";
 import {
@@ -81,14 +83,22 @@ async function projectCommandReceipt(
             evidence: fact.evidence,
             ...(failure === undefined ? {} : { failure }),
           }
-        : outcome === undefined
+        : fact.state === "unproven"
           ? {
               id: fact.id,
               action: fact.action,
-              state: "served" as const,
-              reference: replayReference(fact, command),
+              state: "unproven" as const,
+              evidence: fact.evidence,
+              ...(failure === undefined ? {} : { failure }),
             }
-          : { id: fact.id, action: fact.action, state: "served" as const, outcome };
+          : outcome === undefined
+            ? {
+                id: fact.id,
+                action: fact.action,
+                state: "served" as const,
+                reference: replayReference(fact, command),
+              }
+            : { id: fact.id, action: fact.action, state: "served" as const, outcome };
   try {
     await atomicJson(receiptPath(input.directory, input.transportId), receipt);
   } catch (error) {
@@ -136,7 +146,11 @@ async function serveResolvedCommand(
     fact =
       current.state === "admitted" || current.state === "reserved"
         ? await voidRequest(input.paths, fact.id, diagnostic(error))
-        : current;
+        : current.state === "begun"
+          ? provesNoProductEffect(failure)
+            ? await voidRequest(input.paths, fact.id, diagnostic(error))
+            : await unproveRequest(input.paths, fact.id, diagnostic(error))
+          : current;
     await projectCommandReceipt(input, fact, command, undefined, failure);
   }
   return true;
@@ -164,6 +178,7 @@ async function serveServiceCommand(
   const request = command.resolve(input.claim.payload);
   if (request === null) throw new Error(`registered request action ${input.claim.action} rejected its payload`);
   return await serveResolvedCommand(input, command, request, async (fact, facts) => {
+    await beginRequest(input.paths, fact.id);
     const served = await request.execute(facts);
     return {
       fact: await serveUpstreamRequest(input.paths, fact.id, served.serviceJson),
@@ -195,6 +210,10 @@ function encodedFailure(
   } catch {
     return undefined;
   }
+}
+
+function provesNoProductEffect(failure: unknown): boolean {
+  return failure !== null && typeof failure === "object" && (failure as { kind?: unknown }).kind === "refused";
 }
 
 export async function serveRequest(input: ServeInput): Promise<boolean> {

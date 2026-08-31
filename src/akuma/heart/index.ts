@@ -71,6 +71,7 @@ export {
 } from "./storage.js";
 export {
   admitRequest,
+  beginRequest,
   isRequestInputConflict,
   readNonterminalRequests,
   readRequest,
@@ -78,6 +79,7 @@ export {
   reserveRequest,
   serveRequest,
   serveUpstreamRequest,
+  unproveRequest,
   voidRequest,
 } from "./request-authority.js";
 
