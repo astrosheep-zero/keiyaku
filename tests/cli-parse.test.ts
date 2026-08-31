@@ -175,6 +175,10 @@ test("ls parses only canonical identity directories", () => {
       command: { command: "ls", query: { kind: "contracts" }, output: "json" },
     });
   }
+  assert.deepEqual(parseArgv(["ls", "kei/", "--limit", "100"]), {
+    command: { command: "ls", query: { kind: "contracts", limit: 100 }, output: "text" },
+  });
+  assert.throws(() => parseArgv(["ls", "kei/", "--limit", "0"]), /positive safe integer/u);
   for (const path of ["aku", "aku/"]) {
     assert.deepEqual(parseArgv(["ls", path]), {
       command: { command: "ls", query: { kind: "archetypes" }, output: "text" },
@@ -269,7 +273,10 @@ test("flag specs preserve value and boolean option behavior", () => {
   assert.deepEqual(parseArgv(["audit", "kei/example", "--diff"]), {
     command: { command: "audit", contract: "kei/example", includeDirty: false, showDiff: true, output: "text" },
   });
-  assert.throws(() => parseArgv(["audit", "kei/example", "--actor", "audit-user"]), /option --actor is not valid for audit/u);
+  assert.throws(
+    () => parseArgv(["audit", "kei/example", "--actor", "audit-user"]),
+    /option --actor is not valid for audit/u,
+  );
   assert.deepEqual(parseArgv(["audit", "kei/example", "--include-dirty", "--diff"]), {
     command: { command: "audit", contract: "kei/example", includeDirty: true, showDiff: true, output: "text" },
   });

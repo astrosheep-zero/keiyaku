@@ -26,6 +26,14 @@ relationships already observed for those rows, while a selected Contract's
 owned Task section retains the complete owner view required to explain that
 Contract.
 
+The bare World Contract section is likewise a recent bounded catalogue. A
+selected Contract retains its exact owner observation, so the convenience of a
+World aperture never weakens the detail that selection asks the Contract owner
+to explain.
+An association outside that aperture is unavailable rather than missing; Kanshi
+uses missing only when the Contract observation is complete enough to establish
+absence.
+
 For bare World status, Kanshi obtains one bounded recent Akuma observation and
 keeps that owner order. It observes detailed activity only for its first few
 returned rows and retains whether that observation reaches farther without

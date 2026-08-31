@@ -39,6 +39,7 @@ export type ContractKanshiRow = ContractBoard["rows"][number] &
 export type ContractKanshiBoard = Omit<ContractBoard, "rows"> &
   Readonly<{
     rows: readonly ContractKanshiRow[];
+    hasMore?: boolean;
   }>;
 
 export type TaskKanshiRow = TaskRow &

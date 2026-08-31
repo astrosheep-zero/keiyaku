@@ -59,6 +59,11 @@ not pretend to know the world-wide reverse-dependency view. Text rendering may
 shorten physical Git identities only when unambiguous; product identities remain
 complete.
 
+The explicit repository Contract board read is complete: callers choose it
+when they need the whole board as an SDK fact. Mutable catalogue composition is
+a separate bounded recent observation for presentation; it never turns a
+catalogue request into an exhaustive board read or a lifecycle judgment.
+
 `Delivery` exposes the captured candidate identity and a presentation diff.
 The diff may be unavailable when Git can no longer supply the recorded bytes;
 that absence is not a lifecycle error and the diff is never persisted, gated, or

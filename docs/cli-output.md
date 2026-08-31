@@ -29,6 +29,8 @@ identity or replace a public discriminant with decoration.
 When an owner reports a bounded catalogue with additional rows, text signals
 that single public fact without adding counts, an exhaustive-mode claim, or a
 continuation instruction. A complete catalogue has no omission tail.
+The omission marker is therefore only a rendering of bounded observation, not
+a recovery route or an instruction to obtain more rows.
 
 Kanshi owns what a composite report means; this chapter owns its terminal
 projection. Task owns Task facts and [cli-task.md](cli-task.md) owns their

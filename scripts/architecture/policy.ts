@@ -50,7 +50,6 @@ const kanshiGitObservation = any("git/read-observation.ts", [
   "withGitReadObservation",
 ]);
 const boundedList = any("bounded-list.ts");
-
 export const KEIYAKU_ARCHITECTURE_POLICY = {
   zones: [
     { source: "scripts/**", allow: [any("scripts/**")] },
@@ -109,12 +108,20 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     {
       source: "protocol/read/**",
-      allow: [any("body/**"), any("core/**"), any("git/**"), any("protocol/read/**"), any("workspace-place.ts")],
+      allow: [
+        any("body/**"),
+        boundedList,
+        any("core/**"),
+        any("git/**"),
+        any("protocol/read/**"),
+        any("workspace-place.ts"),
+      ],
     },
     {
       source: "protocol/**",
       allow: [
         any("body/**"),
+        boundedList,
         any("coordination/**"),
         any("core/**"),
         any("git/**"),

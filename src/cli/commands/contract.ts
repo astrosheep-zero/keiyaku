@@ -304,8 +304,11 @@ function parseLs(parts: ParsedContractParts): ParsedLs {
   const taskQuery = taskCatalogQuery(path, limit);
   if (taskQuery !== null) return { command: "ls", query: taskQuery, output: parts.output };
   if (path === "kei" || path === "kei/") {
-    if (parts.flags.limit !== undefined) refuse("ls", "--limit requires an Akuma instance directory");
-    return { command: "ls", query: { kind: "contracts" }, output: parts.output };
+    return {
+      command: "ls",
+      query: { kind: "contracts", ...(limit === undefined ? {} : { limit }) },
+      output: parts.output,
+    };
   }
   try {
     const query = parseAkumaCatalogPath(path);

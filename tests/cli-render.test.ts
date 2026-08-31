@@ -67,7 +67,10 @@ test("scoped Akuma catalog text preserves bounded membership and marks further r
   assert.equal((text.match(/aku\/worker\//gu) ?? []).length, catalog.rows.length);
   assert.doesNotMatch(text, /aku\/\*\/\*/u);
   assert.doesNotMatch(text, /--all|next:|not shown|full|more available/u);
-  assert.deepEqual(JSON.parse(JSON.stringify(catalog)).rows.map((row: { id: string }) => row.id), catalog.rows.map((row) => row.id));
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(catalog)).rows.map((row: { id: string }) => row.id),
+    catalog.rows.map((row) => row.id),
+  );
 });
 
 test("Akuma catalog renders future ages as now", () => {
@@ -137,10 +140,11 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
     state,
     observedAt: "2026-08-12T00:00:00.000Z",
     rows: [row],
+    hasMore: true,
   };
   const text = renderCatalogText(catalog);
 
-  assert.match(text, /1 active · 0 candidates/u);
+  assert.doesNotMatch(text, /^\d+ active · \d+ candidates?$/mu);
   assert.match(text, /contract state aaaaaaa · observedAt 2026-08-12T00:00:00.000Z/u);
   assert.match(text, /! kei\/selected-contract · waiting · 0s · Selected Contract/u);
   assert.match(text, /^  no candidate · no target$/mu);
@@ -153,6 +157,9 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
   assert.match(text, /blocked by kei\/abandoned-prerequisite \(abandoned\)/u);
   assert.match(text, /blocked by kei\/missing-prerequisite \(missing\)/u);
   assert.match(text, /dependents kei\/dependent-contract \(waiting\)/u);
+  assert.equal((text.match(/…/gu) ?? []).length, 1);
+  assert.equal(text.endsWith("…"), true);
+  assert.doesNotMatch(text, /not shown|full|next:|--all/u);
 
   const snap = snapshotId("b".repeat(40));
   const delivered = renderCatalogText({
@@ -170,7 +177,7 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
       },
     ],
   });
-  assert.match(delivered, /1 active · 1 candidate(?!s)/u);
+  assert.doesNotMatch(delivered, /^\d+ active · \d+ candidates?$/mu);
   assert.match(delivered, /^  candidate · no target$/mu);
   assert.doesNotMatch(delivered, /○ no candidate · ● candidate|satisfied  \[✗\] unsatisfied/u);
   assert.doesNotMatch(delivered, /tender |integration /u);

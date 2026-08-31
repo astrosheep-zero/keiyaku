@@ -92,14 +92,11 @@ function renderContractCatalog(catalog: Extract<Catalog, { kind: "contracts" }>)
     ...(catalog.state === null ? [] : [catalog.state]),
     ...catalog.rows.flatMap(gitIdsInRow),
   ]);
-  const rows = catalog.rows.filter((row) => row.disposition === "active");
-  const candidates = rows.filter((row) => row.delivery !== null).length;
-  const header = [
-    `${rows.length} active · ${candidates} candidate${candidates === 1 ? "" : "s"}`,
+  const rows = catalog.rows;
+  const header =
     catalog.state === null
       ? `observedAt ${catalog.observedAt}`
-      : `contract state ${displayGitId(catalog.state, abbreviations)} · observedAt ${catalog.observedAt}`,
-  ];
+      : `contract state ${displayGitId(catalog.state, abbreviations)} · observedAt ${catalog.observedAt}`;
   const blocks = rows.map((row) => {
     const lines = [
       `${catalogMark(row)} ${safeText(row.id)} · ${row.phase} · ${formatAge(row.phaseAt, catalog.observedAt)} · ${safeText(row.title ?? "title unavailable")}`,
@@ -110,7 +107,7 @@ function renderContractCatalog(catalog: Extract<Catalog, { kind: "contracts" }>)
     ];
     return lines.join("\n");
   });
-  return [...header, ...(blocks.length === 0 ? [] : ["", ...blocks])].join("\n");
+  return [header, ...(blocks.length === 0 ? [] : ["", ...blocks]), ...(catalog.hasMore ? ["…"] : [])].join("\n");
 }
 export function renderCatalogText(catalog: Catalog): string {
   if (catalog.kind === "tasks") {

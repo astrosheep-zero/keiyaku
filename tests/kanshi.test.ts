@@ -121,6 +121,30 @@ async function populatedWorld() {
   return { repository, contract, keiyaku: bound.keiyaku, taskId: added.value.id, akumaId };
 }
 
+async function publishNewerActiveContractCopies(
+  repository: ReturnType<typeof makeGitRepository>,
+  sourceId: string,
+): Promise<void> {
+  const git = await repositoryAt(repository.path);
+  const snapshot = await readGit(git);
+  const source = repository.run(["show", `${GIT_REF}:${contractJournalPath(sourceId as never)}`]);
+  const ids = Array.from({ length: 11 }, (_, index) => `kei/omitted-associated-${String(index).padStart(2, "0")}`);
+  const entries = await Promise.all(
+    ids.map(async (id) => {
+      const journal = JSON.parse(source) as { contract: string; at: string };
+      journal.contract = id;
+      journal.at = "2099-01-01T00:00:00.000Z";
+      return [contractJournalPath(id as never), { oid: await writeBlob(git, `${JSON.stringify(journal)}\n`) }] as const;
+    }),
+  );
+  const tree = await updateGitTree(git, snapshot.tree, new Map(entries));
+  const commit = await writeCommit({ repository: git, tree, parent: snapshot.commit });
+  assert.equal(
+    (await updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind,
+    "published",
+  );
+}
+
 function gitInvocations(path: string): readonly string[] {
   const text = readFileSync(path, "utf8").trim();
   return text.length === 0 ? [] : text.split("\n");
@@ -989,7 +1013,8 @@ test("Kanshi text keeps complete identities in the aperture grammar", async () =
   assert.equal(text.includes(contract.id), true);
   assert.equal(text.includes(taskId), true);
   assert.equal(text.includes(akumaId), true);
-  assert.match(text, /CONTRACTS \/\/ 1 recent · 0 candidates/u);
+  assert.match(text, /CONTRACTS \/\/ recent/u);
+  assert.doesNotMatch(text, /CONTRACTS \/\/ \d+ recent|CONTRACTS \/\/ .*candidates?/u);
   assert.match(text, /TASKS \/\/ recent/u);
   assert.match(text, /AKUMA \/\/ 1 recent/u);
   assert.ok(text.indexOf("CONTRACTS //") < text.indexOf("AKUMA //"));
@@ -1002,6 +1027,47 @@ test("Kanshi text keeps complete identities in the aperture grammar", async () =
   assert.match(json, /"lifeAt":/u);
   assert.match(json, /"lastActivityAt":/u);
   assert.doesNotMatch(json, /"(?:age|lifeSince)":|\u001b/u);
+});
+
+test("bare Kanshi marks an associated Contract outside its bounded aperture unavailable", async () => {
+  const { repository, contract, taskId } = await populatedWorld();
+  await publishNewerActiveContractCopies(repository, contract.id);
+
+  const report = await kanshi({
+    world: await World.at(repository.path),
+    repo: await Repo.at({ path: repository.path }),
+  });
+
+  assert.equal(report.contracts.kind, "present");
+  assert.equal(report.tasks.kind, "present");
+  if (report.contracts.kind !== "present" || report.tasks.kind !== "present") return;
+  assert.equal(report.contracts.value.hasMore, true);
+  assert.equal(report.contracts.value.rows.some((row) => row.id === contract.id), false);
+  assert.deepEqual(
+    report.tasks.value.rows.find((row) => row.id === taskId)?.contract,
+    { id: contract.id, observed: "unavailable" },
+  );
+});
+
+test("bare Kanshi treats a terminal Dispatch Contract as unavailable in an active-only catalogue", async () => {
+  const { repository, contract, keiyaku, akumaId } = await populatedWorld();
+  await keiyaku.abandon();
+
+  const report = await kanshi({
+    world: await World.at(repository.path),
+    repo: await Repo.at({ path: repository.path }),
+  });
+
+  assert.equal((await keiyaku.state()).terminal?.kind, "abandoned");
+  assert.equal(report.contracts.kind, "present");
+  assert.equal(report.akuma.kind, "present");
+  if (report.contracts.kind !== "present" || report.akuma.kind !== "present") return;
+  assert.equal(report.contracts.value.hasMore, false);
+  assert.equal(report.contracts.value.rows.some((row) => row.id === contract.id), false);
+  assert.deepEqual(
+    report.akuma.value.rows.find((row) => row.id === akumaId)?.contract,
+    { id: contract.id, observed: "unavailable" },
+  );
 });
 
 test("Contract phase timestamps select the owning journal entry", () => {
@@ -1159,10 +1225,20 @@ test("Kanshi ANSI tones follow status and age while no-color bytes stay exact", 
   );
 });
 
-test("Kanshi text uses live sections, preserves important facts, and omits terminal Contract and Task rows", () => {
+test("Kanshi text preserves owner-active Contract row order and omits terminal Task rows", () => {
   const report = attentionReport();
-  const before = structuredClone(report);
-  const text = renderKanshiText(report, { columns: 120, color: false });
+  if (report.contracts.kind !== "present" || report.tasks.kind !== "present" || report.akuma.kind !== "present") {
+    throw new Error("fixture sections must be present");
+  }
+  const rows = report.contracts.value.rows.filter(
+    (row) => row.disposition === "active",
+  );
+  const worldReport = {
+    ...report,
+    contracts: { ...report.contracts, value: { ...report.contracts.value, rows } },
+  };
+  const before = structuredClone(worldReport);
+  const text = renderKanshiText(worldReport, { columns: 120, color: false });
 
   assert.equal(text.split("\n", 1)[0], "契 KEIYAKU // WORLD");
   assert.match(text, /\n\nAKUMA \/\/ 7 recent/u);
@@ -1172,13 +1248,7 @@ test("Kanshi text uses live sections, preserves important facts, and omits termi
   assert.ok(text.indexOf("CONTRACTS //") < text.indexOf("AKUMA //"));
   assert.ok(text.indexOf("AKUMA //") < text.indexOf("TASKS //"));
 
-  if (report.contracts.kind !== "present" || report.tasks.kind !== "present" || report.akuma.kind !== "present") {
-    throw new Error("fixture sections must be present");
-  }
-  for (const row of report.contracts.value.rows.filter(
-    (candidate) => candidate.phase !== "claimed" && candidate.phase !== "abandoned",
-  ))
-    assert.equal(text.includes(row.id), true);
+  for (const row of rows) assert.equal(text.includes(row.id), true);
   for (const row of report.tasks.value.rows.filter(
     (candidate) => candidate.disposition !== "done" && candidate.disposition !== "drop",
   ))
@@ -1186,6 +1256,10 @@ test("Kanshi text uses live sections, preserves important facts, and omits termi
   for (const row of report.akuma.value.rows) assert.equal(text.includes(row.id), true);
 
   const contracts = sectionBody(text, "KEIYAKU");
+  assert.deepEqual(
+    [...contracts.matchAll(/^[!●○✓?×] (kei\/[^ ]+) ·/gmu)].map((match) => match[1]),
+    rows.map((row) => row.id),
+  );
   assert.match(contracts, /^! kei\/active-contract · tendered · 30s · Active Contract$/mu);
   assert.match(contracts, /Active Contract/u);
   assert.match(contracts, /tendered/u);
@@ -1261,7 +1335,7 @@ test("Kanshi text uses live sections, preserves important facts, and omits termi
   assert.match(fleet, /hung · —/u);
   assert.match(fleet, /stillborn · —/u);
   assert.match(fleet, /unborn · —/u);
-  assert.deepEqual(report, before);
+  assert.deepEqual(worldReport, before);
 });
 
 test("world Contract rows make candidate facts self-describing", () => {
@@ -1287,7 +1361,8 @@ test("world Contract rows make candidate facts self-describing", () => {
     contracts: { ...report.contracts, value: { ...report.contracts.value, rows: [delivered] } },
   };
   const text = renderKanshiText(deliveredReport, { columns: 120, color: false });
-  assert.match(text, /CONTRACTS \/\/ 1 recent · 1 candidates/u);
+  assert.match(text, /CONTRACTS \/\/ recent/u);
+  assert.doesNotMatch(text, /CONTRACTS \/\/ \d+ recent|CONTRACTS \/\/ .*candidates?/u);
   assert.doesNotMatch(text, /○ no candidate · ● candidate|satisfied  \[✗\] unsatisfied/u);
   const body = sectionBody(text, "KEIYAKU");
   assert.match(body, /│ candidate · target main/u);
@@ -1483,7 +1558,8 @@ test("Kanshi preserves the Akuma bounded aperture with one compact marker", () =
     },
     { columns: 120, color: false },
   );
-  assert.match(empty, /CONTRACTS \/\/ 0 recent · 0 candidates/u);
+  assert.match(empty, /CONTRACTS \/\/ recent/u);
+  assert.doesNotMatch(empty, /CONTRACTS \/\/ \d+ recent|CONTRACTS \/\/ .*candidates?/u);
   assert.match(empty, /AKUMA \/\/ 0 recent/u);
   assert.match(empty, /TASKS \/\/ recent/u);
   for (const section of ["KEIYAKU", "FLEET", "TASK"] as const) {
@@ -1517,7 +1593,8 @@ test("Kanshi preserves the Akuma bounded aperture with one compact marker", () =
         ...report.contracts,
         value: {
           ...report.contracts.value,
-          rows: [...hotContracts, contractRow({ id: "kei/new-cold", lastJournalAt: newAt })],
+          rows: [contractRow({ id: "kei/new-cold", lastJournalAt: newAt }), ...hotContracts].slice(0, 10),
+          hasMore: true,
         },
       },
       tasks: {
@@ -1542,9 +1619,11 @@ test("Kanshi preserves the Akuma bounded aperture with one compact marker", () =
 
   assert.match(partial, /AKUMA \/\/ 10 recent/u);
   assert.match(sectionBody(partial, "KEIYAKU"), /^○ kei\/new-cold · waiting · 1m/mu);
+  assert.match(sectionBody(partial, "KEIYAKU"), /^● kei\/hot-0 · tendered/mu);
   assert.doesNotMatch(sectionBody(partial, "FLEET"), /new-cold/u);
   assert.match(sectionBody(partial, "TASK"), /^○ task\/new-cold · ready/mu);
   assert.doesNotMatch(partial, /hot-09|hot-10/u);
+  assert.deepEqual(sectionBody(partial, "KEIYAKU").match(/^…$/gmu), ["…"]);
   assert.deepEqual(sectionBody(partial, "FLEET").match(/^…$/gmu), ["…"]);
   assert.deepEqual(sectionBody(partial, "TASK").match(/^…$/gmu), ["…"]);
   assert.doesNotMatch(partial, /all .* shown|not shown|\bfull\b|more available|next:/u);
@@ -1813,7 +1892,8 @@ test("Kanshi retains a Contract whose title is unavailable", () => {
   const contracts = sectionBody(text, "KEIYAKU");
   assert.match(contracts, /^\? kei\/no-target · waiting · 30s · title unavailable$/mu);
   assert.match(contracts, /title unavailable/u);
-  assert.match(text, /CONTRACTS \/\/ 5 recent · 0 candidates/u);
+  assert.match(text, /CONTRACTS \/\/ recent/u);
+  assert.doesNotMatch(text, /CONTRACTS \/\/ \d+ recent|CONTRACTS \/\/ .*candidates?/u);
 });
 
 test("Kanshi wraps complete Task titles on the plumb line", () => {

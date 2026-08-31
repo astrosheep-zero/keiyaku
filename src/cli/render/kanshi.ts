@@ -25,7 +25,6 @@ import {
 } from "./terminal.js";
 import { akumaMark, endpointFact, formatAge, NARROW_COLUMNS, renderAkuma } from "./kanshi-akuma.js";
 const PLUMB = "  │ ";
-const MAX_VISIBLE_ROWS = 10;
 const REVIEW_ATTENTION_MS = 15 * 60 * 1_000;
 const PENDING_ATTENTION_MS = 60 * 60 * 1_000;
 
@@ -290,10 +289,6 @@ function candidateFacts(row: ContractKanshiRow, abbreviations: ReadonlyMap<strin
   ];
 }
 
-function isTerminalContract(row: ContractKanshiRow): boolean {
-  return row.phase === "claimed" || row.phase === "abandoned";
-}
-
 function renderWorldContractRow(
   row: ContractKanshiRow,
   report: KanshiReport,
@@ -323,31 +318,17 @@ function renderWorldContractRow(
   }).concat(plumbFacts(linkedFacts, context.columns));
 }
 
-function selectRecentRows<T>(rows: readonly T[], timestamp: (row: T) => string): readonly T[] {
-  return [...rows]
-    .sort((left, right) => {
-      const leftAt = timestamp(left);
-      const rightAt = timestamp(right);
-      if (leftAt === rightAt) return 0;
-      return leftAt > rightAt ? -1 : 1;
-    })
-    .slice(0, MAX_VISIBLE_ROWS);
-}
-
 function renderContracts(report: KanshiReport, context: TextRenderContext): readonly string[] {
   const section = report.contracts;
   if (section.kind === "absent") return ["CONTRACTS // absent", "", `${PLUMB}contracts absent`];
   if (section.kind === "failed")
     return ["CONTRACTS // unavailable", "", tone(`! ${safeText(section.failure.message)}`, "alert", context.color)];
-  const live = section.value.rows.filter((row) => !isTerminalContract(row));
-  const rows = selectRecentRows(live, (row) => row.lastJournalAt);
-  const candidates = live.filter((row) => row.delivery !== null).length;
   const rendered = renderSectionBlock({
     name: "CONTRACTS",
-    rows: rows.map((row) => renderWorldContractRow(row, report, context)),
+    rows: section.value.rows.map((row) => renderWorldContractRow(row, report, context)),
   });
-  const header = `CONTRACTS // ${rows.length} recent · ${candidates} candidates`;
-  return [header, ...rendered.slice(1)];
+  const header = "CONTRACTS // recent";
+  return [header, ...rendered.slice(1), ...(section.value.hasMore === true ? ["…"] : [])];
 }
 
 function renderSelectedContract(report: KanshiReport, context: TextRenderContext): readonly string[] {

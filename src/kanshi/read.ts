@@ -1,5 +1,5 @@
 import { Repo } from "../library/repo.js";
-import type { ContractBoard, ContractDisposition } from "../library/contract.js";
+import type { ContractBoard, ContractCatalogue, ContractDisposition } from "../library/contract.js";
 import { scopeForRepo } from "../library/repo.js";
 import { observeTaskBoard } from "../task/operations.js";
 import { contractNamespace } from "../settlement/settle.js";
@@ -8,7 +8,7 @@ import { readAliases, type AliasBinding } from "../alias/index.js";
 import { readDispatchesAt, type Dispatch } from "../dispatch/index.js";
 import { readTaskHolderProjectionAt, type TaskHolderProjection } from "../settlement/holder.js";
 import { observeCurrentPhysicalIssue } from "../protocol/read/observation.js";
-import { readContractBoard } from "../protocol/read/status.js";
+import { readContractBoard, readContractCatalogue } from "../protocol/read/status.js";
 import { withGitDecodeChannel, withGitReadObservation, type GitReadObservation } from "../git/read-observation.js";
 import { readDocuments } from "../protocol/read/documents.js";
 import { readRegionDeclarations, validateRegionPatterns } from "../library/region.js";
@@ -139,11 +139,14 @@ async function readBranch(repo?: Repo): Promise<string | null> {
 async function readContracts(
   observation: GitReadObservation,
   include?: ContractBoard["rows"][number]["id"],
-): Promise<Section<ContractBoard>> {
+): Promise<Section<ContractBoard | ContractCatalogue>> {
   try {
     return {
       kind: "present",
-      value: await readContractBoard(observation, include),
+      value:
+        include === undefined
+          ? await readContractCatalogue(observation, 10)
+          : await readContractBoard(observation, include),
     };
   } catch (error) {
     return { kind: "failed", failure: { message: diagnostic(error) } };
@@ -187,7 +190,7 @@ function attachFleet(
 }
 
 function decorateContracts(
-  contracts: Section<ContractBoard>,
+  contracts: Section<ContractBoard | ContractCatalogue>,
   holders: HolderRead,
   namespaceTasks?: (id: ContractBoard["rows"][number]["id"]) => Section<readonly TaskRow[]> | undefined,
 ): Section<ContractKanshiBoard> {
@@ -224,11 +227,15 @@ function decorateContracts(
 type ObserveContractEndpoint = (id: string) => ContractEndpointObservation;
 
 function contractEndpointObserver(contracts: Section<ContractKanshiBoard>): ObserveContractEndpoint {
-  const dispositions =
-    contracts.kind === "present"
-      ? new Map<string, ContractDisposition>(contracts.value.rows.map((row) => [row.id, row.disposition]))
-      : null;
-  return (id) => (dispositions === null ? "unavailable" : (dispositions.get(id) ?? "missing"));
+  if (contracts.kind !== "present") return () => "unavailable";
+  const dispositions = new Map<string, ContractDisposition>(
+    contracts.value.rows.map((row) => [row.id, row.disposition]),
+  );
+  return (id) => {
+    const disposition = dispositions.get(id);
+    if (disposition !== undefined) return disposition;
+    return "hasMore" in contracts.value ? "unavailable" : "missing";
+  };
 }
 
 function joinTasks(

@@ -12,6 +12,7 @@ import type { GitRepository } from "../../git/process.js";
 import type { GitDecodeChannel, GitReadObservation } from "../../git/read-observation.js";
 import { gateReports, type GateCurrent } from "../../core/facts/gate.js";
 import type { ContractId, ContractState, DeliverData, JournalEntry, SnapshotId } from "../../core/facts/types.js";
+import { projectBoundedList, type BoundedList } from "../../bounded-list.js";
 
 export type ContractPhase = "waiting" | "bound" | "tendered" | "claimed" | "abandoned";
 export type ContractDisposition = "active" | "terminal";
@@ -66,6 +67,13 @@ export type ContractBoard = Readonly<{
   observedAt: string;
   rows: readonly ContractRow[];
 }>;
+
+export type ContractCatalogue = Readonly<{
+  root: string;
+  state: SnapshotId | null;
+  observedAt: string;
+}> &
+  BoundedList<ContractRow>;
 
 export type ContractObservation =
   | Readonly<{ kind: "missing"; id: ContractId }>
@@ -259,6 +267,81 @@ export async function readContractBoard(observation: GitReadObservation, include
     state: observed.snapshot,
     observedAt,
     rows,
+  };
+}
+
+type ActiveContractState = Readonly<{
+  state: ContractState;
+  bindAt: string;
+  lastJournalAt: string;
+}>;
+
+function compareRecentContracts(left: ActiveContractState, right: ActiveContractState): number {
+  return (
+    right.lastJournalAt.localeCompare(left.lastJournalAt) ||
+    Buffer.compare(Buffer.from(left.state.id), Buffer.from(right.state.id))
+  );
+}
+
+function activeContractStates(
+  contracts: ReadonlyMap<ContractId, Readonly<{ state: ContractState | null; entries: readonly JournalEntry[] }>>,
+): readonly ActiveContractState[] {
+  return [...contracts.values()].flatMap((record) =>
+    record.state === null || record.state.terminal !== null
+      ? []
+      : [
+          {
+            state: record.state,
+            bindAt: record.entries[0]!.at,
+            lastJournalAt: lastJournalAtFor(record.entries),
+          },
+        ],
+  );
+}
+
+function reverseDependentsFromStates(
+  id: ContractId,
+  states: readonly ActiveContractState[],
+): readonly ContractDependent[] {
+  return states
+    .filter(({ state }) => state.terms.after.includes(id))
+    .map(({ state }) => ({ contractId: state.id, phase: phaseFor(state) }))
+    .sort((left, right) => left.contractId.localeCompare(right.contractId));
+}
+
+/** Observe a bounded recent active Contract catalogue from one immutable git observation. */
+export async function readContractCatalogue(
+  observation: GitReadObservation,
+  limit: number,
+): Promise<ContractCatalogue> {
+  const observedAt = new Date().toISOString();
+  const observed = await observeActiveContractWorld(observation);
+  const active = activeContractStates(observed.contracts);
+  const selected = projectBoundedList([...active].sort(compareRecentContracts), limit);
+  const afterIds = selected.rows.flatMap(({ state }) => state.terms.after);
+  const endpoints = await afterEndpointMap(observation, new Map(observed.eligibility), afterIds);
+  const register = await readPlaceRegister(observation.repository);
+  const rows = await Promise.all(
+    selected.rows.map(
+      async ({ state, bindAt, lastJournalAt }) =>
+        await rowFor({
+          repository: observation.repository,
+          state,
+          bindAt,
+          lastJournalAt,
+          targetObservation: await observeDeliveryTargetAt(observation, state),
+          register,
+          after: afterEdges(state, endpoints),
+          dependents: reverseDependentsFromStates(state.id, active),
+        }),
+    ),
+  );
+  return {
+    root: observation.repository.primaryWorktree,
+    state: observed.snapshot,
+    observedAt,
+    rows,
+    hasMore: selected.hasMore,
   };
 }
 

@@ -27,10 +27,13 @@ import type { ProtocolResult, ProtocolTerminal } from "./run.js";
 import { readDocuments, type ContractDocumentProjection } from "./read/documents.js";
 import {
   readContractBoard,
+  readContractCatalogue,
   readContractObservationAt,
   type ContractBoard,
+  type ContractCatalogue,
   type ContractObservation,
 } from "./read/status.js";
+import { boundedListLimit } from "../bounded-list.js";
 
 export type MergeStatePresentRefusal = Readonly<{
   kind: "merge-state-present";
@@ -209,6 +212,17 @@ export async function contractsOperation(
   }>,
 ): Promise<ContractBoard> {
   return withGitReadObservation(input.scope, input.channel, (observation) => readContractBoard(observation));
+}
+
+export async function contractCatalogueOperation(
+  input: Readonly<{
+    scope: RepositoryScope;
+    channel: GitDecodeChannel;
+    limit?: number;
+  }>,
+): Promise<ContractCatalogue> {
+  const limit = boundedListLimit(input.limit);
+  return withGitReadObservation(input.scope, input.channel, (observation) => readContractCatalogue(observation, limit));
 }
 
 export async function contractObservationOperation(

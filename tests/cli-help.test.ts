@@ -76,7 +76,7 @@ test("each grammar owner renders its own namespace and leaf help", () => {
       "List one identity directory.",
       "",
       "usage: keiyaku ls task[/] [--limit <count>] [--json]",
-      "       keiyaku ls kei[/] [--json]",
+      "       keiyaku ls kei[/] [--limit <count>] [--json]",
       "       keiyaku ls aku[/] [--json]",
       "       keiyaku ls aku/<akuma>[/] [--limit <count>] [--json]",
       '       keiyaku ls "aku/*/*" [--limit <count>] [--json]',

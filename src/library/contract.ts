@@ -12,6 +12,7 @@ import {
 } from "../core/facts/types.js";
 export { AuthorityCorruptionError } from "../core/facts/errors.js";
 import {
+  contractCatalogueOperation,
   contractObservationOperation,
   contractsOperation,
   type PlacementStop,
@@ -20,6 +21,7 @@ import {
 } from "../protocol/operations.js";
 import type {
   ContractBoard,
+  ContractCatalogue,
   ContractDisposition,
   ContractGateCurrent,
   ContractGateReport,
@@ -35,7 +37,7 @@ import type { AuditReport } from "../protocol/audit.js";
 import type { IntegrationConflictMaterialized, VerificationReuse } from "../protocol/deliver.js";
 import { withGitDecodeChannel } from "../git/read-observation.js";
 import type { TaskId } from "../task/identity.js";
-import { scopeForRepo } from "./repo.js";
+import { scopeForRepo, type Repo } from "./repo.js";
 import { localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
 import type { AuditInput } from "./audit.js";
 import { Delivery } from "./delivery.js";
@@ -92,6 +94,7 @@ export type {
   ChangeId,
   ContinuationReport,
   ContractBoard,
+  ContractCatalogue,
   ContractDisposition,
   ContractGateCurrent,
   ContractGateReport,
@@ -179,6 +182,28 @@ export async function listKeiyaku(input: ContractListInput): Promise<ContractBoa
     if (key !== "repo") throw new TypeError(`Keiyaku.list input has unknown field: ${key}`);
   const scope = scopeForRepo(values.repo);
   return withGitDecodeChannel(scope, (channel) => contractsOperation({ scope, channel }));
+}
+
+/** Internal bounded catalogue composition; the public Contract board remains complete. */
+export async function listContractCatalogue(
+  input: Readonly<{ repo: Repo; limit?: number }>,
+): Promise<ContractCatalogue> {
+  const values = requireInput(input, "Contract catalogue input");
+  for (const key of Object.keys(values)) {
+    if (key !== "repo" && key !== "limit") throw new TypeError(`Contract catalogue input has unknown field: ${key}`);
+  }
+  const limit = values.limit;
+  if (limit !== undefined && typeof limit !== "number") {
+    throw new TypeError("Contract catalogue limit must be a number");
+  }
+  const scope = scopeForRepo(values.repo);
+  return withGitDecodeChannel(scope, (channel) =>
+    contractCatalogueOperation({
+      scope,
+      channel,
+      ...(limit === undefined ? {} : { limit }),
+    }),
+  );
 }
 
 export async function observeKeiyaku(input: ContractObservationInput): Promise<ContractObservation> {

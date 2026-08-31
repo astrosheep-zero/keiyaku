@@ -56,3 +56,6 @@ retry, and unavailable observation rather than recasting any of them as an
 empty success. Task command intent and Task presentation are owned by
 [cli-task.md](cli-task.md). Literal help rows, flags, positional forms, stdin
 rules, and parser recovery are executable interface detail, not CLI law.
+
+Mutable catalogue commands adapt their owner's bounded recent observation;
+they do not offer an edge-level route to an exhaustive SDK board.
