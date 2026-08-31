@@ -335,12 +335,6 @@ export async function runCrossPlatformProcess(input: ProcessInput): Promise<Proc
   return result.outcome;
 }
 
-export async function runProcessToExit(input: ProcessLaunch): Promise<ProcessOutcome> {
-  const result = await executeProcess(input, undefined);
-  if (result.outcome.kind === "stream-error") throw new Error("buffered process produced a stream consumer error");
-  return result.outcome;
-}
-
 export function consumeProcessStdout(
   input: ProcessInput,
   consume: (chunk: Buffer) => void,

@@ -24,9 +24,8 @@ const VERB_WIDTH = 6;
 
 type FleetTimeline = AkumaObservation["status"]["timeline"];
 type FleetTimelineEntry = FleetTimeline["entries"][number];
-type FleetSnapshotRow = Extract<FleetTimelineEntry, { kind: "row" }>["row"];
 type FleetReportedFileChange = FleetTimeline["reportedChanges"][number];
-type RenderRow = ActivityRow | FleetSnapshotRow;
+type RenderRow = ActivityRow | Extract<FleetTimelineEntry, { kind: "row" }>["row"];
 type RenderEntry = Readonly<{ kind: "gap"; count: number }> | Readonly<{ kind: "row"; row: RenderRow }>;
 type RenderedSnapshot = FleetTimeline;
 type RenderedFileChange = ReportedFileChange | FleetReportedFileChange;
@@ -344,27 +343,6 @@ function killResultLabel(evidence: KillEvidence): string {
   if (evidence === "already-killed") return "✓ already killed";
   if (evidence === "already-stopped") return "✓ already stopped";
   return `! not killed · ${evidence}`;
-}
-
-function latestKillActivity(snapshot: RenderedSnapshot, context: TextRenderContext): readonly string[] {
-  const rows: FleetSnapshotRow[] = snapshot.entries.flatMap((entry) => (entry.kind === "row" ? [entry.row] : []));
-  const latest = rows.reduce<(typeof rows)[number] | undefined>(
-    (selected, row) => (selected === undefined || row.sequence > selected.sequence ? row : selected),
-    undefined,
-  );
-  return latest === undefined ? [] : groupedRows([latest], context);
-}
-
-export function killObservationText(
-  id: string,
-  evidence: KillEvidence,
-  observation: AkumaObservationStage,
-  context: TextRenderContext,
-  alias?: string,
-): string {
-  const heading = snapshotHeading(id, alias, observation.kind === "observed" ? observation.contract : undefined);
-  const activity = observation.kind === "observed" ? latestKillActivity(observation.status.timeline, context) : [];
-  return [...heading, ...activity, "", killResultLabel(evidence)].join("\n");
 }
 
 export function killResultText(id: string, evidence: KillEvidence, alias?: string): string {

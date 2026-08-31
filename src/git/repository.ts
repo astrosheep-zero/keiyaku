@@ -397,6 +397,20 @@ async function writePreparedTrees(repository: GitRepository, prepared: readonly 
   }
 }
 
+async function writeTreeUpdate(
+  repository: GitRepository,
+  baseTree: GitOid | null,
+  changes: ReadonlyMap<string, TreeChange>,
+  update: ReturnType<typeof treeUpdate>,
+  bases: ReadonlyMap<string, ReadonlyMap<string, TreeEntry>>,
+): Promise<GitOid> {
+  const representativeOid = baseTree ?? [...changes.values()].find((change) => change !== null)?.oid;
+  if (representativeOid === undefined) throw new Error("cannot write an empty Git tree without an object format");
+  const prepared = prepareTreeUpdate({ update, bases, oidBytes: representativeOid.length / 2 });
+  await writePreparedTrees(repository, prepared.trees);
+  return prepared.root;
+}
+
 /** Copy only the changed paths' tree ancestors, preserving untouched subtrees by object ID. */
 export async function updateGitTree(
   repository: GitRepository,
@@ -405,11 +419,7 @@ export async function updateGitTree(
 ): Promise<GitOid> {
   const update = treeUpdate(changes);
   const bases = await baseTreeEntries(repository, baseTree, [...changes.keys()], update.nodePaths);
-  const representativeOid = baseTree ?? [...changes.values()].find((change) => change !== null)?.oid;
-  if (representativeOid === undefined) throw new Error("cannot write an empty Git tree without an object format");
-  const prepared = prepareTreeUpdate({ update, bases, oidBytes: representativeOid.length / 2 });
-  await writePreparedTrees(repository, prepared.trees);
-  return prepared.root;
+  return writeTreeUpdate(repository, baseTree, changes, update, bases);
 }
 
 /** Write a tree update from directory entries frozen with the admitted base tree. */
@@ -420,15 +430,7 @@ export async function updateGitTreeFromFrozenDirectories(
   changes: ReadonlyMap<string, TreeChange>,
 ): Promise<GitOid> {
   const update = treeUpdate(changes);
-  const representativeOid = baseTree ?? [...changes.values()].find((change) => change !== null)?.oid;
-  if (representativeOid === undefined) throw new Error("cannot write an empty Git tree without an object format");
-  const prepared = prepareTreeUpdate({
-    update,
-    bases: directories,
-    oidBytes: representativeOid.length / 2,
-  });
-  await writePreparedTrees(repository, prepared.trees);
-  return prepared.root;
+  return writeTreeUpdate(repository, baseTree, changes, update, directories);
 }
 
 async function writeCommitObject(

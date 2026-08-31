@@ -308,26 +308,3 @@ export class Akuma {
     };
   }
 }
-export async function callAkumaWithContext(
-  akuma: Akuma,
-  input: AkumaCallLaunchInput,
-  context: AkumaCallContext,
-): Promise<AkumaHandle> {
-  return await akuma[CALL_WITH_CONTEXT](input, context);
-}
-
-export async function beginAkumaCall(
-  akuma: Akuma,
-  input: AkumaCallLaunchInput,
-  context: AkumaCallContext,
-): Promise<AkumaBornCall> {
-  return await akuma.beginCall(input, context);
-}
-
-export async function finishAkumaCall(
-  akuma: Akuma,
-  born: AkumaBornCall,
-  completion: Readonly<{ contractId?: string }> = {},
-): Promise<AkumaHandle> {
-  return await akuma.finishCall(born, completion);
-}

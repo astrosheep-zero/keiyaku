@@ -10,6 +10,7 @@ import { spawnOptionsFor, spawnWindowsLauncher } from "../src/runtime/proc/launc
 import { consumeProcessStdout, runProcess, spawnDetachedProcess } from "../src/runtime/proc/run.js";
 import { spawnStdioProcess } from "../src/runtime/proc/stdio.js";
 import { World } from "../src/world.js";
+import { removeTempDirectory, waitForProcessExit as waitForExit } from "./support/process.js";
 
 const IMAGE_SUBSYSTEM_WINDOWS_GUI = 2;
 const packagedLauncher = resolve("build/src/runtime/proc/windows-launch.exe");
@@ -25,19 +26,6 @@ function peSubsystem(path: string): number {
   return bytes.readUInt16LE(optional + 68);
 }
 
-async function waitForExit(pid: number): Promise<void> {
-  const deadline = performance.now() + 2_000;
-  while (true) {
-    try {
-      process.kill(pid, 0);
-    } catch {
-      return;
-    }
-    if (performance.now() >= deadline) throw new Error(`process ${pid} survived`);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-}
-
 async function waitForFile(path: string, timeoutMs = 2_000): Promise<string> {
   const deadline = performance.now() + timeoutMs;
   while (!existsSync(path)) {
@@ -45,20 +33,6 @@ async function waitForFile(path: string, timeoutMs = 2_000): Promise<string> {
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   return readFileSync(path, "utf8");
-}
-
-async function removeTempDirectory(path: string): Promise<void> {
-  const deadline = performance.now() + 2_000;
-  while (true) {
-    try {
-      rmSync(path, { recursive: true, force: true });
-      return;
-    } catch (error) {
-      if (process.platform !== "win32" || (error as NodeJS.ErrnoException).code !== "EPERM") throw error;
-      if (performance.now() >= deadline) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-  }
 }
 
 function restoreEnvironment(name: string, value: string | undefined): void {

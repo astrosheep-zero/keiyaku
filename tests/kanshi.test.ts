@@ -35,6 +35,7 @@ import { World } from "../src/world.js";
 import { moveAlias } from "../src/alias/index.js";
 import { publishDispatch } from "../src/dispatch/index.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
+import { taskDocument, writeTaskAuthority } from "./support/task.js";
 
 async function observe(path: string, repo?: Repo) {
   return kanshi({ world: await World.at(path), ...(repo === undefined ? {} : { repo }) });
@@ -2114,45 +2115,15 @@ test("default CLI status returns the Kanshi report instead of a generic observat
   }
 });
 
-function taskDocument(
-  input: Readonly<{
-    id: TaskId;
-    title: string;
-    state?: TaskDocument["state"];
-    priority?: TaskDocument["priority"];
-    createdBy?: string;
-  }>,
-): TaskDocument {
-  return {
-    id: input.id,
-    title: input.title,
-    body: "",
-    note: "",
-    state: input.state ?? "open",
-    priority: input.priority ?? 2,
-    needs: [],
-    parent: null,
-    supersedes: [],
-    relates: [],
-    ...(input.createdBy === undefined ? {} : { createdBy: input.createdBy }),
-    createdAt: "2026-08-17T00:00:00.000Z",
-    updatedAt: "2026-08-17T00:00:00.000Z",
-  };
-}
-
 test("Contract namespace Tasks come from one Task board observation", async () => {
   const { repository, contract, taskId } = await populatedWorld();
   const world = await World.at(repository.path);
   const segment = contractSegment(contract.id);
   assert.deepEqual(contractNamespace(contract.id), ["kei", segment]);
   const sibling = contractId("kei/other-contract");
-  const writeTask = (document: TaskDocument): void => {
-    const path = authorityPath(world, document.id);
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, serializeTaskDocument(document));
-  };
-  writeTask(taskDocument({ id: "task/root-unbound", title: "Root unbound", priority: 0 }));
-  writeTask(
+  writeTaskAuthority(world, taskDocument({ id: "task/root-unbound", title: "Root unbound", priority: 0 }));
+  writeTaskAuthority(
+    world,
     taskDocument({
       id: `task/kei/${segment}/alpha`,
       title: "Namespace alpha",
@@ -2160,7 +2131,8 @@ test("Contract namespace Tasks come from one Task board observation", async () =
       priority: 3,
     }),
   );
-  writeTask(
+  writeTaskAuthority(
+    world,
     taskDocument({
       id: `task/kei/${segment}/zeta`,
       title: "Namespace zeta",
@@ -2168,14 +2140,16 @@ test("Contract namespace Tasks come from one Task board observation", async () =
       priority: 0,
     }),
   );
-  writeTask(
+  writeTaskAuthority(
+    world,
     taskDocument({
       id: `task/kei/${segment}/child/nested`,
       title: "Nested descendant",
       priority: 0,
     }),
   );
-  writeTask(
+  writeTaskAuthority(
+    world,
     taskDocument({
       id: `task/kei/${contractSegment(sibling)}/sibling`,
       title: "Sibling namespace",

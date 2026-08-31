@@ -2,7 +2,7 @@ import { realpath, stat } from "node:fs/promises";
 import { moveAlias, type AliasBinding } from "../alias/index.js";
 import { Akuma, type AkumaStatus, type ForkReceipt, type ReadonlyRestraint } from "../akuma/akuma.js";
 import { emitCalledPluginSignal } from "../akuma/body.js";
-import { beginAkumaCall, finishAkumaCall, type AkumaBornCall } from "../akuma/akuma-product.js";
+import type { AkumaBornCall } from "../akuma/akuma-product.js";
 import { pathsForAkuId, type AkuId } from "../akuma/identity.js";
 import { readSoul } from "../akuma/heart/index.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
@@ -229,7 +229,7 @@ async function admitCall(
     contractId?: ContractId;
   }>,
 ): Promise<Readonly<{ born: AkumaBornCall; akuma: AkuId }>> {
-  const born = await beginAkumaCall(input.world, input.call, input.context);
+  const born = await input.world.beginCall(input.call, input.context);
   const akuma = born.kind === "requested" ? born.id : born.allocated.id;
   await emitCalledSignal({
     path: input.path,
@@ -423,7 +423,7 @@ export async function beginCall(input: CallInput, context: ExecutionContext): Pr
 export async function finishCall(born: BornCall): Promise<CallResult> {
   const world = akumaWorld(born.path);
   const contractId = born.dispatch.kind === "dispatched" ? born.dispatch.dispatch.contractId : undefined;
-  const handle = await finishAkumaCall(world, born.born, {
+  const handle = await world.finishCall(born.born, {
     ...(contractId === undefined ? {} : { contractId }),
   });
   const readonly = (await handle.status()).readonly;

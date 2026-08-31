@@ -1,25 +1,17 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { withGitAbortSignal } from "../src/git/process.js";
 import { GIT_REF, repositoryAt } from "../src/git/repository.js";
 import { withGitDecodeChannel, withGitReadObservation, type GitReadObservation } from "../src/git/read-observation.js";
-import { gitExecutablePath, makeGitRepository, withGitShim } from "./support/git.js";
+import { gitExecutablePath, makeGitRepository, waitForFile, withGitShim } from "./support/git.js";
 
 const MISSING_OID = "0000000000000000000000000000000000000000";
 
 function invocations(path: string): readonly string[] {
   const text = readFileSync(path, "utf8").trim();
   return text.length === 0 ? [] : text.split("\n");
-}
-
-async function waitForFile(path: string): Promise<void> {
-  for (let attempts = 0; attempts < 100; attempts += 1) {
-    if (existsSync(path)) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  throw new Error(`timed out waiting for ${path}`);
 }
 
 test("empty Git read observation memoizes refs without starting object transport", async () => {

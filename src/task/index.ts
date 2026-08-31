@@ -462,10 +462,6 @@ class TasksHandle {
   }
 }
 export type Tasks = TasksHandle;
-export function tasksForExecution(world: WorldRoot, execution: ExecutionContext): Tasks {
-  if (typeof world !== "string") throw new TypeError("Tasks.of world must be a WorldRoot");
-  return new TasksHandle(world, execution);
-}
 
 type TasksOfInput = Readonly<{ execution?: LibraryExecution }>;
 
@@ -478,6 +474,8 @@ function tasksOfExecution(input: TasksOfInput | undefined): ExecutionContext {
 
 export const Tasks = Object.freeze({
   of(world: WorldRoot, input?: TasksOfInput): Tasks {
-    return tasksForExecution(world, tasksOfExecution(input));
+    const execution = tasksOfExecution(input);
+    if (typeof world !== "string") throw new TypeError("Tasks.of world must be a WorldRoot");
+    return new TasksHandle(world, execution);
   },
 });

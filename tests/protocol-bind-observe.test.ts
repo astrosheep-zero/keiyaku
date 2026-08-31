@@ -38,7 +38,6 @@ import {
   type JournalEntry,
   type SnapshotId,
 } from "../src/core/facts/types.js";
-import { fitIdentityStem, normalizeIdentityStem } from "../src/identity/normalize.js";
 import { decideArc } from "../src/core/verbs/arc.js";
 import { decideDeliver } from "../src/core/verbs/deliver.js";
 import { admitIntent } from "../src/protocol/intent.js";
@@ -50,6 +49,7 @@ import {
   cachedRepositoryAt,
   makeGitRepository,
   observeContract,
+  protocolContractId,
   snapshotGitRepository,
   type TestGitRepository,
   withGitShim,
@@ -59,15 +59,6 @@ const repositoryAt = cachedRepositoryAt;
 
 const NO_VERIFICATION = { kind: "prepared", data: null } as const;
 const DELIVERY_DOCUMENT = "# Contract\n";
-
-function protocolContractId(title: string): ContractId {
-  return contractIdFromSegment(
-    fitIdentityStem({
-      stem: normalizeIdentityStem({ source: title }) || "contract",
-      maxBytes: 48,
-    }),
-  );
-}
 
 let untitledBind = 0;
 

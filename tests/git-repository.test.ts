@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync } from "node:fs";
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,7 +22,7 @@ import {
 } from "../src/git/repository.js";
 import { GitPlumbingError, consumeGitStdout, runGit, runGitWithEnvironment, withGitAbortSignal } from "../src/git/process.js";
 import { worktreePath } from "../src/git/workspace.js";
-import { gitExecutablePath, makeGitRepository, withGitShim } from "./support/git.js";
+import { gitExecutablePath, makeGitRepository, waitForFile, withGitShim } from "./support/git.js";
 
 function repositoryWithCommit() {
   const repository = makeGitRepository();
@@ -30,14 +30,6 @@ function repositoryWithCommit() {
   repository.run(["config", "user.email", "keiyaku@example.invalid"]);
   repository.run(["commit", "--quiet", "--allow-empty", "-m", "initial"]);
   return repository;
-}
-
-async function waitForFile(path: string): Promise<void> {
-  for (let attempts = 0; attempts < 100; attempts += 1) {
-    if (existsSync(path)) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  throw new Error(`timed out waiting for ${path}`);
 }
 
 test("Keiyaku-owned refs keep delivery and candidate namespaces distinct across generations", () => {

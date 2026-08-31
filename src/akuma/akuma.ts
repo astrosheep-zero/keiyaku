@@ -230,4 +230,4 @@ export {
 export type AkumaConfiguration = Readonly<{ home?: string; settings?: Settings; execution?: ExecutionContext }>;
 
 export { AkumaHandle, akumaCallExecution, type LastAnswer } from "./akuma-handle.js";
-export { Akuma, callAkumaWithContext } from "./akuma-product.js";
+export { Akuma } from "./akuma-product.js";

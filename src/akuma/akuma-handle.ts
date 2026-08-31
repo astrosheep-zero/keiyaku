@@ -114,6 +114,11 @@ export class AkumaHandle {
     return pathsForAkuId(this.worldPath, this.id);
   }
 
+  private async projectHistoryTurns() {
+    const slice = await activitySlice(this.paths);
+    return projectTurns(slice.rows, { lowestRetained: slice.lowestRetained, highest: slice.highest });
+  }
+
   private async exactHistory(
     input: Readonly<{ id?: string; before?: number; since?: number; limit?: number }>,
   ): Promise<ExactHistory> {
@@ -123,11 +128,7 @@ export class AkumaHandle {
       throw new TypeError("Akuma history id cannot be combined with before, since, or limit");
     if (parsePublicHistoryId(input.id) === null)
       throw new TypeError("Akuma history id must match turn/<positive safe integer>");
-    const slice = await activitySlice(this.paths);
-    return selectExactHistory(
-      projectTurns(slice.rows, { lowestRetained: slice.lowestRetained, highest: slice.highest }).rows,
-      input.id,
-    );
+    return selectExactHistory((await this.projectHistoryTurns()).rows, input.id);
   }
 
   async status(): Promise<AkumaStatus> {
@@ -153,18 +154,11 @@ export class AkumaHandle {
     if (!Number.isSafeInteger(limit) || limit <= 0 || limit > 5_000) {
       throw new TypeError("Akuma history limit must be a positive safe integer no greater than 5000");
     }
-    const slice = await activitySlice(this.paths);
-    return selectHistory(
-      projectTurns(slice.rows, {
-        lowestRetained: slice.lowestRetained,
-        highest: slice.highest,
-      }),
-      {
-        ...(input.before === undefined ? {} : { before: input.before }),
-        ...(input.since === undefined ? {} : { since: input.since }),
-        limit,
-      },
-    );
+    return selectHistory(await this.projectHistoryTurns(), {
+      ...(input.before === undefined ? {} : { before: input.before }),
+      ...(input.since === undefined ? {} : { since: input.since }),
+      limit,
+    });
   }
 
   async wait(

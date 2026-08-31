@@ -25,14 +25,13 @@ import { completeRepoReconcile } from "../src/library/reconcile.js";
 import { contractObservationOperation, contractsOperation, scopeOperation } from "../src/protocol/operations.js";
 import {
   changeId,
-  contractIdFromSegment,
   entryUlid,
   snapshotId,
   type ContractId,
   type JournalEntry,
 } from "../src/core/facts/types.js";
 import { renderCatalogText } from "../src/cli/render/catalog.js";
-import { fitIdentityStem, normalizeIdentityStem } from "../src/identity/normalize.js";
+import { protocolContractId } from "./support/git.js";
 
 function firstJournalAt(repository: TestGitRepository, id: ContractId): string {
   const path = contractJournalPath(id, "active");
@@ -68,15 +67,6 @@ function terms(title: string, after: readonly ContractId[] = []) {
     ].join("\n"),
   );
   return { document: document.document, segments: document.segments, gates: [], after };
-}
-
-function protocolContractId(title: string): ContractId {
-  return contractIdFromSegment(
-    fitIdentityStem({
-      stem: normalizeIdentityStem({ source: title }) || "contract",
-      maxBytes: 48,
-    }),
-  );
 }
 
 async function bind(

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { Keiyaku, KeiyakuRefused, Repo, type KeiyakuRefusal } from "../src/index.js";
+import { Keiyaku, Repo } from "../src/index.js";
 import { decodeContractDocument, verificationDefinition } from "../src/body/decode.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
@@ -15,15 +15,7 @@ import { scopeOperation } from "../src/protocol/operations.js";
 import { observeContractAt } from "../src/git/observe.js";
 import { prepareVerificationDeclaration } from "../src/verification/declaration.js";
 import { appointedWorktreePath, type TestGitRepository } from "./support/git.js";
-import { repositoryWithMain } from "./support/library-verbs.js";
-
-function refused(expected: KeiyakuRefusal): (error: unknown) => boolean {
-  return (error) => {
-    assert.ok(error instanceof KeiyakuRefused);
-    assert.deepEqual(error.refusal, expected);
-    return true;
-  };
-}
+import { refused, repositoryWithMain } from "./support/library-verbs.js";
 
 function verificationBody(script: string | null = "exit 1"): string {
   return [

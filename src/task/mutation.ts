@@ -42,11 +42,6 @@ export const TASK_MUTATION_ACTIONS = Object.freeze([
 ] as const);
 
 export type TaskMutationAction = (typeof TASK_MUTATION_ACTIONS)[number];
-const TASK_MUTATION_ACTION_SET: ReadonlySet<string> = new Set(TASK_MUTATION_ACTIONS);
-
-export function isTaskMutationAction(value: unknown): value is TaskMutationAction {
-  return typeof value === "string" && TASK_MUTATION_ACTION_SET.has(value);
-}
 
 const nonblankTextSchema = z.string().refine((value) => value.trim() !== "");
 const namespaceSchema = z.array(z.string().refine(isTaskSegment)).readonly();
@@ -296,18 +291,9 @@ export function taskMutationRequestCommand(
 }
 
 export function taskMutationRequestCommands(): Readonly<Record<TaskMutationAction, ErasedRequestCommand>> {
-  return {
-    "task.add": eraseRequestCommand(taskMutationRequestCommand("task.add")),
-    "task.addDocument": eraseRequestCommand(taskMutationRequestCommand("task.addDocument")),
-    "task.compose": eraseRequestCommand(taskMutationRequestCommand("task.compose")),
-    "task.done": eraseRequestCommand(taskMutationRequestCommand("task.done")),
-    "task.drop": eraseRequestCommand(taskMutationRequestCommand("task.drop")),
-    "task.hold": eraseRequestCommand(taskMutationRequestCommand("task.hold")),
-    "task.resume": eraseRequestCommand(taskMutationRequestCommand("task.resume")),
-    "task.start": eraseRequestCommand(taskMutationRequestCommand("task.start")),
-    "task.stop": eraseRequestCommand(taskMutationRequestCommand("task.stop")),
-    "task.update": eraseRequestCommand(taskMutationRequestCommand("task.update")),
-  };
+  return Object.fromEntries(
+    TASK_MUTATION_ACTIONS.map((action) => [action, eraseRequestCommand(taskMutationRequestCommand(action))]),
+  ) as Record<TaskMutationAction, ErasedRequestCommand>;
 }
 
 function taskResultForRequest<Request extends TaskMutationRequest>(

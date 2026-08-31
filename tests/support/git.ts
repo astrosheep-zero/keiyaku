@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { appendFileSync, chmodSync, cpSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, cpSync, existsSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Repo } from "../../src/index.js";
@@ -9,6 +9,8 @@ import { observeContractAt } from "../../src/git/observe.js";
 import { withGitDecodeChannel } from "../../src/git/read-observation.js";
 import type { GitRepository } from "../../src/git/process.js";
 import { repositoryAt as productionRepositoryAt } from "../../src/git/repository.js";
+import { contractIdFromSegment } from "../../src/core/facts/types.js";
+import { fitIdentityStem, normalizeIdentityStem } from "../../src/identity/normalize.js";
 
 const repositoryCapabilities = new Map<string, Promise<GitRepository>>();
 const repositoryTemplateHasTrackedEntries = new WeakMap<TestGitRepository, boolean>();
@@ -38,6 +40,23 @@ export function cachedRepositoryAt(cwd: string, gitPath = "git"): Promise<GitRep
     if (repositoryCapabilities.get(key) === capability) repositoryCapabilities.delete(key);
   });
   return capability;
+}
+
+export function protocolContractId(title: string): ContractId {
+  return contractIdFromSegment(
+    fitIdentityStem({
+      stem: normalizeIdentityStem({ source: title }) || "contract",
+      maxBytes: 48,
+    }),
+  );
+}
+
+export async function waitForFile(path: string): Promise<void> {
+  for (let attempts = 0; attempts < 100; attempts += 1) {
+    if (existsSync(path)) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`timed out waiting for ${path}`);
 }
 
 export interface TestGitRepository {

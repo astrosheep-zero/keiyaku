@@ -7,7 +7,7 @@ import {
 import type { ContractId, ContractState, SnapshotId } from "../core/facts/types.js";
 import type { RefOperation } from "../core/facts/offer.js";
 import { gitObjectId, gitObjectIdForSnapshot, gitRefLocator, mintSnapshotId, type GitObjectId } from "./identity.js";
-import { commonGitDirectory, readRef, registeredWorktrees } from "./repository.js";
+import { commonGitDirectory, decodeGitNameOnly, readRef, registeredWorktrees } from "./repository.js";
 import { consumeGitStdout, GitPlumbingError, runGit, type GitRepository } from "./process.js";
 import { captureWorkspaceTree } from "./workspace.js";
 
@@ -61,14 +61,8 @@ function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function nulPaths(bytes: Buffer): readonly string[] {
-  const fields = bytes.toString("utf8").split("\0");
-  if (fields.at(-1) !== "") throw new Error("Git path output is not NUL terminated");
-  return [...new Set(fields.slice(0, -1))].sort();
-}
-
 async function gitPaths(repository: GitRepository, path: string, args: readonly string[]): Promise<readonly string[]> {
-  return nulPaths(await runGit(repository, ["-C", path, ...args]));
+  return [...new Set(decodeGitNameOnly(await runGit(repository, ["-C", path, ...args])))].sort();
 }
 
 function literalPath(path: string): string {

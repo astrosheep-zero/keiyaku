@@ -314,14 +314,7 @@ const placementStepRefusalSchema = z.union([
     .strict(),
   placementRefusalSchema,
   checkoutRefusalSchema,
-  integrationFailureSchema,
-  z
-    .object({
-      kind: z.literal("integration-unsupported"),
-      contractId: contractIdSchema,
-      requiredGit: z.literal("2.38"),
-    })
-    .strict(),
+  integrationPreparationRefusalSchema,
   z.object({ kind: z.literal("target-missing"), contractId: contractIdSchema }).strict(),
 ]);
 const placementStopSchema = z.union([

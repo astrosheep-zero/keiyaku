@@ -5,13 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { moveAlias, resolveAlias } from "../src/alias/index.js";
-import {
-  Akuma,
-  AkumaHandle,
-  akumaCallExecution,
-  callAkumaWithContext,
-  type AkumaCallInput,
-} from "../src/akuma/akuma.js";
+import { Akuma, AkumaHandle, akumaCallExecution, type AkumaCallInput } from "../src/akuma/akuma.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { akumaCallRequestCommands } from "../src/akuma/call-request.js";
 import { HeldAkumaLeash, initializeHeart, readSoul, type Soul } from "../src/akuma/heart/index.js";
@@ -405,7 +399,7 @@ test("direct Akuma birth reports process cwd and the embedding World fallback", 
       source: "process",
     });
 
-    const fallback = await callAkumaWithContext(akuma, { archetype: "worker", body: "world" }, {});
+    const fallback = await akuma.finishCall(await akuma.beginCall({ archetype: "worker", body: "world" }, {}));
     assert.deepEqual(akumaCallExecution(fallback), { cwd: world, source: "world" });
     assert.equal((await direct.wait(undefined, { timeoutMs: 2_000 })).life, "asleep");
     assert.equal((await fallback.wait(undefined, { timeoutMs: 2_000 })).life, "asleep");

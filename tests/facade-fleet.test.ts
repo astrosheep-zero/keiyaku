@@ -39,6 +39,7 @@ import { observeKanshi } from "../src/kanshi/read.js";
 import { publishDispatch } from "../src/dispatch/index.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { contractId } from "../src/core/facts/types.js";
+import { taskDocument as creatorTask, writeTaskAuthority as writeCreatorTask } from "./support/task.js";
 
 const provider: ProviderAdapter = {
   admitOptions(options) {
@@ -1518,38 +1519,6 @@ test("exact set selection does not read unrelated Alias authority", async () => 
     rmSync(root, { recursive: true, force: true });
   }
 });
-
-function creatorTask(
-  input: Readonly<{
-    id: TaskId;
-    title: string;
-    createdBy?: string;
-    state?: TaskDocument["state"];
-    priority?: TaskDocument["priority"];
-  }>,
-): TaskDocument {
-  return {
-    id: input.id,
-    title: input.title,
-    body: "",
-    note: "",
-    state: input.state ?? "open",
-    priority: input.priority ?? 2,
-    needs: [],
-    parent: null,
-    supersedes: [],
-    relates: [],
-    ...(input.createdBy === undefined ? {} : { createdBy: input.createdBy }),
-    createdAt: "2026-08-17T00:00:00.000Z",
-    updatedAt: "2026-08-17T00:00:00.000Z",
-  };
-}
-
-function writeCreatorTask(world: string, document: TaskDocument): void {
-  const path = authorityPath(world, document.id);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, serializeTaskDocument(document));
-}
 
 test("creator testimony appears on Fleet observation carriers", async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-facade-created-tasks-")));
