@@ -203,6 +203,7 @@ test("batched ref reads reject malformed Git output", async () => {
   await withGitShim(
     [
       'if [ "$1" = "cat-file" ]; then',
+      "  cat >/dev/null",
       "  printf 'not-an-oid\\n'",
       "  exit 0",
       "fi",
