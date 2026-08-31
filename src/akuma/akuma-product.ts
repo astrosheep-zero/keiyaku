@@ -139,10 +139,7 @@ export class Akuma {
       },
     };
   }
-  async finishCall(
-    born: AkumaBornCall,
-    completion: Readonly<{ participantName?: string; contractId?: string }> = {},
-  ): Promise<AkumaHandle> {
+  async finishCall(born: AkumaBornCall, completion: Readonly<{ contractId?: string }> = {}): Promise<AkumaHandle> {
     if (born.kind === "requested") {
       return new AkumaHandle(born.id, this.path, { cwd: born.cwd, source: born.execution.source });
     }
@@ -218,7 +215,7 @@ export async function beginAkumaCall(
 export async function finishAkumaCall(
   akuma: Akuma,
   born: AkumaBornCall,
-  completion: Readonly<{ participantName?: string; contractId?: string }> = {},
+  completion: Readonly<{ contractId?: string }> = {},
 ): Promise<AkumaHandle> {
   return await akuma.finishCall(born, completion);
 }

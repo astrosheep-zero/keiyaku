@@ -20,7 +20,6 @@ import {
   type TellRow,
 } from "./heart/index.js";
 import { worldRootForAkumaPaths, type AkumaPaths } from "./identity.js";
-import { keiyakuSquarePath } from "../world.js";
 import { pluginRuntime, type PluginRuntime } from "../plugin/runtime.js";
 import { World } from "../world.js";
 import type { ProviderAdapter } from "./provider.js";
@@ -45,7 +44,7 @@ export type BodyLaunch = Readonly<{
   birthSession?: Omit<SessionFact, "sequence">;
   initialBody?: string;
   refuseIfHeld?: boolean;
-  completion?: Readonly<{ participantName?: string; contractId?: string }>;
+  completion?: Readonly<{ contractId?: string }>;
 }>;
 
 export type TellWake =
@@ -158,40 +157,9 @@ type CommittedOutcome =
   | Readonly<{ outcome: "answered"; answer: string }>
   | Readonly<{ outcome: "failed"; diagnostic: string }>;
 
-function completionMessage(identity: string, completion: BodyLaunch["completion"]): string {
-  const participant = completion?.participantName;
-  const contract = completion?.contractId;
-  const header = [identity, participant === undefined ? undefined : `(@${participant})`, contract]
-    .filter((value): value is string => value !== undefined)
-    .join(" ");
-  return `${header}\n✓ came back`;
-}
-
 function boundedDiagnostic(error: unknown): string {
   const text = diagnostic(error);
   return text.length <= 500 ? text : `${text.slice(0, 500)}...`;
-}
-
-async function expressInitialOutcome(launch: BodyLaunch): Promise<void> {
-  try {
-    const { Square } = await import("@astrosheep/square");
-    const identity = launch.seed?.id ?? (await readHeart(launch.paths)).soul?.id;
-    if (identity === undefined) return;
-    const square = await Square.at({ path: keiyakuSquarePath(worldRootForAkumaPaths(launch.paths)) });
-    try {
-      const joined = await square.implicitJoin(identity);
-      if (joined.state === "done" || joined.participant === undefined) return;
-      await joined.participant.express(completionMessage(identity, launch.completion));
-    } finally {
-      await square.close();
-    }
-  } catch (error) {
-    try {
-      await appendFile(launch.paths.log, `square outcome express failed: ${boundedDiagnostic(error)}\n`);
-    } catch {
-      /* express loss never changes Heart truth */
-    }
-  }
 }
 
 async function recordPluginDiagnostic(paths: AkumaPaths, error: unknown): Promise<void> {
@@ -340,7 +308,6 @@ async function runBodyTurns(input: BodyExecution): Promise<void> {
     const outcome = await persistTurn(launch.paths, result.turnSequence, result, runtime.now());
     if (initial !== undefined) {
       await emitInitialTurn(outcome);
-      await expressInitialOutcome(launch);
     }
     if (outcome.outcome === "failed") {
       await breakBody(launch.paths, { sequence: bodySequence, end: "broke-off", at: runtime.now() });

@@ -17,14 +17,6 @@ import type { AkumaPromptSource, InvokedAkumaCommand } from "./akuma.js";
 import { beginCall, finishCall } from "../../library/akuma-creation.js";
 import { killAkuma, tellAkuma, waitAkuma } from "../../library/fleet.js";
 import { localExecutionContext, type ExecutionContext } from "../../akuma/requests.js";
-import { recognizeAndListen } from "../square-edge.js";
-
-function withRollbackDiagnostic(primary: unknown, rollback: unknown): Error {
-  const primaryText = primary instanceof Error ? primary.message : String(primary);
-  const rollbackText = rollback instanceof Error ? rollback.message : String(rollback);
-  const error = new Error(`${primaryText}; ${rollbackText}`, { cause: primary });
-  return error;
-}
 
 export type AkumaInvocationResult =
   | Readonly<{ kind: "akuma"; action: "call"; result: CallResult; world: WorldRoot }>
@@ -241,23 +233,7 @@ export async function invokeAkuma(command: InvokedAkumaCommand, input: InvokeInp
         },
         input.execution ?? localExecutionContext(),
       );
-      const listener =
-        born.born.kind === "born"
-          ? await recognizeAndListen(input.path, input.environment, born.born.allocated)
-          : undefined;
-      let result: CallResult;
-      try {
-        result = await (input.finishCall ?? finishCall)(born, listener?.participantName);
-      } catch (error) {
-        if (listener?.committed === true) {
-          try {
-            await listener.rollback();
-          } catch (rollbackError) {
-            throw withRollbackDiagnostic(error, rollbackError);
-          }
-        }
-        throw error;
-      }
+      const result = await (input.finishCall ?? finishCall)(born);
       return { kind: "akuma", action: "call", result, world: input.path };
     }
     case "wait":

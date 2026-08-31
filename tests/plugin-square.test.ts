@@ -1,0 +1,125 @@
+import assert from "node:assert/strict";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { Square } from "@astrosheep/square";
+import squarePlugin from "../plugins/square/index.js";
+import { pluginRuntime } from "../src/plugin/runtime.js";
+import { World } from "../src/world.js";
+
+const squarePath = (root: string): string => join(root, ".square", "KEIYAKU.square");
+
+function restoreEnvironment(values: Readonly<Record<string, string | undefined>>): void {
+  for (const [name, value] of Object.entries(values)) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
+}
+
+async function expressionBodies(path: string): Promise<readonly string[]> {
+  const square = await Square.at({ path });
+  try {
+    return (await square.history()).flatMap((activity) => (activity.body === undefined ? [] : [activity.body]));
+  } finally {
+    await square.close();
+  }
+}
+
+test("the Square plugin expresses answered and failed initial turns through its public plugin contract", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-plugin-square-"));
+  const prior = {
+    CODEX_THREAD_ID: process.env.CODEX_THREAD_ID,
+    SQUARE_PARTICIPANT_NAME: process.env.SQUARE_PARTICIPANT_NAME,
+    SQUARE_HOST_LEDGER_LOCAL: process.env.SQUARE_HOST_LEDGER_LOCAL,
+    SQUARE_HOST_LEDGER_USER: process.env.SQUARE_HOST_LEDGER_USER,
+  };
+  try {
+    assert.deepEqual(squarePlugin.manifest, {
+      id: "square",
+      apiVersion: 1,
+      writablePaths: [{ name: "square", path: ".square" }],
+    });
+    mkdirSync(join(root, ".square"), { recursive: true });
+    process.env.CODEX_THREAD_ID = "caller";
+    process.env.SQUARE_PARTICIPANT_NAME = "Alice";
+    process.env.SQUARE_HOST_LEDGER_LOCAL = join(root, "local-ledger");
+    process.env.SQUARE_HOST_LEDGER_USER = join(root, "user-ledger");
+    const instance = await squarePlugin.activate({
+      world: root,
+      config: undefined,
+      writablePath: () => join(root, ".square"),
+    });
+    const handler = instance.signals?.["akuma.initial-turn"];
+    assert.ok(handler);
+    await handler({
+      kind: "akuma.initial-turn",
+      akumaId: "aku/answered",
+      outcome: { kind: "answered", text: "done" },
+      contractId: "kei/example",
+    });
+    assert.equal(existsSync(squarePath(root)), true);
+    assert.deepEqual(await expressionBodies(squarePath(root)), ["aku/answered (@Alice) kei/example\n✓ came back"]);
+
+    delete process.env.CODEX_THREAD_ID;
+    delete process.env.SQUARE_PARTICIPANT_NAME;
+    const fallback = await squarePlugin.activate({
+      world: root,
+      config: undefined,
+      writablePath: () => join(root, ".square"),
+    });
+    const fallbackHandler = fallback.signals?.["akuma.initial-turn"];
+    assert.ok(fallbackHandler);
+    await fallbackHandler({
+      kind: "akuma.initial-turn",
+      akumaId: "aku/failed",
+      outcome: { kind: "failed", reason: "provider failed" },
+    });
+    assert.deepEqual(await expressionBodies(squarePath(root)), [
+      "aku/answered (@Alice) kei/example\n✓ came back",
+      "aku/failed\n× provider failed",
+    ]);
+  } finally {
+    restoreEnvironment(prior);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the host isolates a Square plugin handler failure", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-plugin-square-isolation-"));
+  const prior = {
+    SQUARE_HOST_LEDGER_LOCAL: process.env.SQUARE_HOST_LEDGER_LOCAL,
+    SQUARE_HOST_LEDGER_USER: process.env.SQUARE_HOST_LEDGER_USER,
+  };
+  try {
+    mkdirSync(join(root, ".keiyaku"), { recursive: true });
+    mkdirSync(join(root, "plugins"), { recursive: true });
+    process.env.SQUARE_HOST_LEDGER_LOCAL = join(root, "local-ledger");
+    process.env.SQUARE_HOST_LEDGER_USER = join(root, "user-ledger");
+    writeFileSync(
+      join(root, "plugins", "square.mjs"),
+      `export { default } from ${JSON.stringify(new URL("../plugins/square/index.js", import.meta.url).href)};\n`,
+    );
+    writeFileSync(
+      join(root, ".keiyaku", "settings.json"),
+      JSON.stringify({ plugins: { square: { package: "./plugins/square.mjs" } } }),
+    );
+    t.mock.method(Square.prototype, "implicitJoin", async () => {
+      throw new Error("injected Square failure");
+    });
+    const diagnostics: string[] = [];
+    const runtime = await pluginRuntime({
+      world: await World.at(root),
+      reportDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    });
+    await runtime.emit({
+      kind: "akuma.initial-turn",
+      akumaId: "aku/failed",
+      outcome: { kind: "failed", reason: "provider failed" },
+    });
+    assert.equal(diagnostics.some((diagnostic) => diagnostic.startsWith("plugin square signal: injected Square failure")), true);
+  } finally {
+    restoreEnvironment(prior);
+    rmSync(root, { recursive: true, force: true });
+  }
+});

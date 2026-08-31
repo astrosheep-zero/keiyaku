@@ -1,5 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "entry": ["src/akuma-body.ts"],
-  "project": ["src/**/*.ts", "scripts/**/*.ts"]
+  "project": ["src/**/*.ts", "scripts/**/*.ts"],
+  "ignoreDependencies": ["prettier"]
 }

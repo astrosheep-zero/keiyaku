@@ -359,11 +359,10 @@ export async function beginCall(input: CallInput, context: ExecutionContext): Pr
   };
 }
 
-export async function finishCall(born: BornCall, participantName?: string): Promise<CallResult> {
+export async function finishCall(born: BornCall): Promise<CallResult> {
   const world = akumaWorld(born.path);
   const contractId = born.dispatch.kind === "dispatched" ? born.dispatch.dispatch.contractId : undefined;
   const handle = await finishAkumaCall(world, born.born, {
-    ...(participantName === undefined ? {} : { participantName }),
     ...(contractId === undefined ? {} : { contractId }),
   });
   const readonly = (await handle.status()).readonly;

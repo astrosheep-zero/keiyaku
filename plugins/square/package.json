@@ -1,0 +1,17 @@
+{
+  "name": "@astrosheep/keiyaku-plugin-square",
+  "version": "0.1.0",
+  "type": "module",
+  "files": [
+    "index.js"
+  ],
+  "exports": {
+    ".": "./index.js"
+  },
+  "peerDependencies": {
+    "@astrosheep/keiyaku": "^4.5.11"
+  },
+  "dependencies": {
+    "@astrosheep/square": "0.3.32"
+  }
+}
