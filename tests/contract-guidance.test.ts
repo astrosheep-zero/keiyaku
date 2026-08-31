@@ -42,12 +42,10 @@ test("guidance preserves source bytes and projects the lawful fulfillment struct
   );
   assert.ok(guidance.includes(source.trimEnd()));
   assert.equal(fulfillment.match(/^## Fulfillment$/gm)?.length, 1);
-  assert.deepEqual([...fulfillment.matchAll(/^### (.+)$/gm)].map((match) => match[1]), [
-    "Appointment",
-    "Worktree",
-    "Deliverer",
-    "Reviewer",
-  ]);
+  assert.deepEqual(
+    [...fulfillment.matchAll(/^### (.+)$/gm)].map((match) => match[1]),
+    ["Appointment", "Worktree", "Deliverer", "Reviewer"],
+  );
   assert.match(fulfillment, /every commission into it names exactly one seat — Deliverer or Reviewer/);
   assert.match(fulfillment, /terms are the standing acceptance floor, changed only by journaled amend/);
   assert.match(fulfillment, /full current worktree state is the candidate/);
@@ -76,6 +74,7 @@ test("seat skills distinguish the acceptance floor from round direction", () => 
   assert.match(CONTRACT_DELIVERER_SKILL, /prepares its integration with the target as it exists for that invocation/);
   assert.match(CONTRACT_DELIVERER_SKILL, /If the target moves, run `deliver` again/);
   assert.match(CONTRACT_DELIVERER_SKILL, /manual rebase is optional candidate shaping, not target refresh/);
+  assert.match(CONTRACT_DELIVERER_SKILL, /submits the current state of the whole worktree as the Contract's candidate/);
   assert.match(CONTRACT_DELIVERER_SKILL, /without moving this worktree's HEAD or real index/);
   assert.match(CONTRACT_DELIVERER_SKILL, /keiyaku deliver <contract> --include-dirty/);
   assert.match(CONTRACT_DELIVERER_SKILL, /keiyaku deliver <contract> --materialize-conflict/);
@@ -91,6 +90,13 @@ test("seat skills distinguish the acceptance floor from round direction", () => 
   assert.match(CONTRACT_REVIEWER_SKILL, /required evidence is missing, failed, or stale/);
   assert.match(CONTRACT_REVIEWER_SKILL, /term defect is not a third outcome: testify unsatisfied/);
   assert.match(CONTRACT_REVIEWER_SKILL, /covered, your findings, any term defects, and any missing evidence/);
+  assert.match(CONTRACT_REVIEWER_SKILL, /`keiyaku review` records a verdict on the whole Contract/);
+  assert.match(CONTRACT_REVIEWER_SKILL, /current worktree meets every Criterion/);
+  assert.match(CONTRACT_REVIEWER_SKILL, /result actually achieves what the Objective set out to do/);
+  assert.match(CONTRACT_REVIEWER_SKILL, /passes every check but misses the intent is not satisfied/);
+  assert.match(CONTRACT_REVIEWER_SKILL, /result does not achieve the Objective's intent/);
+  assert.match(CONTRACT_REVIEWER_SKILL, /Contract is claimed immediately and cannot be reopened/);
+  assert.match(CONTRACT_REVIEWER_SKILL, /findings rather than a verdict[\s\S]*without running `keiyaku review`/);
   assert.match(CONTRACT_REVIEWER_SKILL, /keiyaku review <contract> --satisfied --summary <conclusion>/);
   assert.match(CONTRACT_REVIEWER_SKILL, /keiyaku review <contract> --unsatisfied --summary <finding>/);
 
