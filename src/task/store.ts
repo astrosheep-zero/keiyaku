@@ -193,6 +193,10 @@ export async function replaceAuthority(
   }
 }
 
+export async function authorityBytesMatch(world: WorldRoot, id: TaskId, expected: Uint8Array | null): Promise<boolean> {
+  return equal(await currentBytes(authorityPath(world, id)), expected);
+}
+
 function lockPath(world: WorldRoot, id: TaskId): string {
   const coordinate = parseTaskId(id);
   return resolve(world, ".keiyaku", "locks", "task", ...coordinate.namespace, `${coordinate.localId}.sqlite`);

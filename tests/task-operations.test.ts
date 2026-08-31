@@ -177,6 +177,52 @@ test("batch lifecycle reads one board before locks and retries only a concurrent
   assert.deepEqual(result.items[1]?.outcome, { kind: "retry", reason: "concurrent-modification" });
 });
 
+test("batch invalid refusal retries when the Task becomes valid before its lock", async () => {
+  const { root, tasks } = await world();
+  const id = acceptedId(await tasks.add({ title: "Batch stale invalid", state: "done" }));
+  const lock = await acquireSqliteTransactionLock({
+    path: join(root, ".keiyaku", "locks", "task", "batch-stale-invalid.sqlite"),
+    mode: "immediate",
+    timeoutMs: 100,
+  });
+  const pending = tasks.batch({ verb: "start", ids: [id] });
+  try {
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    const current = await tasks.task({ id }).read();
+    assert.notEqual(current, null);
+    if (current === null) return;
+    writeFileSync(authorityPath(root, id), serializeTaskDocument({ ...current.task, state: "open" }));
+  } finally {
+    lock.close();
+  }
+
+  const result = await pending;
+  assert.deepEqual(result.items[0]?.outcome, { kind: "retry", reason: "concurrent-modification" });
+});
+
+test("batch missing refusal retries when the Task is created before its lock", async () => {
+  const { root, tasks } = await world();
+  const id = "task/batch-stale-missing" as TaskId;
+  const lock = await acquireSqliteTransactionLock({
+    path: join(root, ".keiyaku", "locks", "task", "batch-stale-missing.sqlite"),
+    mode: "immediate",
+    timeoutMs: 100,
+  });
+  const pending = tasks.batch({ verb: "start", ids: [id] });
+  try {
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    const created = await tasks.add({ title: "Batch stale missing" });
+    assert.equal(created.kind, "accepted");
+    if (created.kind !== "accepted") return;
+    assert.equal(created.value.id, id);
+  } finally {
+    lock.close();
+  }
+
+  const result = await pending;
+  assert.deepEqual(result.items[0]?.outcome, { kind: "retry", reason: "concurrent-modification" });
+});
+
 test("Tasks creates root authority without Contract coupling", async () => {
   const { tasks } = await world();
   const rootId = acceptedId(await tasks.add({ title: "Root task" }));

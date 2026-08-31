@@ -21,7 +21,14 @@ import {
   type TaskState,
 } from "./document.js";
 import { allocateLocalId, deriveLocalStem, formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
-import { authorityPath, nukeTaskAuthority, readBoard, replaceAuthority, withTaskLocks } from "./store.js";
+import {
+  authorityBytesMatch,
+  authorityPath,
+  nukeTaskAuthority,
+  readBoard,
+  replaceAuthority,
+  withTaskLocks,
+} from "./store.js";
 import type { WorldRoot } from "../world.js";
 import { projectBoundedList } from "../bounded-list.js";
 import { taskRowViewLimit } from "./input.js";
@@ -291,6 +298,7 @@ type CurrentTaskBoard = {
   board: TaskBoard;
   bytes: Map<TaskId, Uint8Array>;
 };
+type LifecycleFreshness = "batch" | "none";
 
 function currentTaskBoard(board: TaskBoard, bytes: ReadonlyMap<TaskId, Uint8Array>): CurrentTaskBoard {
   return { board, bytes: new Map(bytes) };
@@ -302,12 +310,19 @@ async function transitionLifecycle(
   verb: TaskLifecycleVerb,
   currentBoard: CurrentTaskBoard,
   note?: string,
+  freshness: LifecycleFreshness = "none",
 ): Promise<TaskMutationResult> {
   const current = currentBoard.board.tasks.get(id);
-  if (current === undefined) return refused({ kind: "task-missing", taskId: id });
+  if (current === undefined) {
+    return freshness === "batch" && !(await authorityBytesMatch(world, id, null))
+      ? retry("concurrent-modification")
+      : refused({ kind: "task-missing", taskId: id });
+  }
   const state = TRANSITIONS[verb][current.state];
   if (state === undefined) {
-    return refused({ kind: "invalid-lifecycle-transition", taskId: id, state: current.state, verb });
+    return freshness === "batch" && !(await authorityBytesMatch(world, id, currentBoard.bytes.get(id)!))
+      ? retry("concurrent-modification")
+      : refused({ kind: "invalid-lifecycle-transition", taskId: id, state: current.state, verb });
   }
   const at = currentTimestamp();
   const next = {
@@ -341,7 +356,7 @@ async function lifecycleFromCurrentBoard(
 ): Promise<TaskMutationResult> {
   const result = await withTaskLocks(
     { world, allocation: false, ids: [id], ...(signal === undefined ? {} : { signal }) },
-    async () => transitionLifecycle(world, id, verb, currentBoard, note),
+    async () => transitionLifecycle(world, id, verb, currentBoard, note, "batch"),
   );
   return result === "busy" ? retry("busy") : result;
 }
