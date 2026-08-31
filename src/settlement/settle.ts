@@ -188,7 +188,10 @@ async function releaseHeldTaskHolder(
   }
 }
 
-async function settleTasks(input: SettleTasksInput): Promise<boolean> {
+async function settleTasks(
+  input: SettleTasksInput,
+  beforeRelease: () => Promise<void>,
+): Promise<boolean> {
   const { repository, channel, candidate, actions, lags } = input;
   const hint = await observeApplicableHolder({ repository, channel, candidate, lags });
   if (hint === null) return false;
@@ -210,8 +213,9 @@ async function settleTasks(input: SettleTasksInput): Promise<boolean> {
   try {
     const holder = await observeApplicableHolder({ repository, channel, candidate, lags });
     if (holder === null || holder.taskId !== taskId) return false;
-    if (!(await completeHeldTask({ repository, candidate, actions, lags, taskId }))) return true;
-    taskSettled = true;
+    taskSettled = await completeHeldTask({ repository, candidate, actions, lags, taskId });
+    await beforeRelease();
+    if (!taskSettled) return true;
     await releaseHeldTaskHolder({ repository, channel, candidate, taskId, lags });
     return true;
   } finally {
@@ -264,26 +268,25 @@ async function settleObserved(input: SettlementInput): Promise<SettlementReport>
   if (input.state === null) return { actions: [], lags: [] };
   const actions: SettlementAction[] = [],
     lags: SettlementLag[] = [];
-  let holderApplies = false;
-  if (input.state.terminal?.kind === "claimed") {
+  const candidate = input.state;
+  if (candidate.terminal?.kind === "claimed") {
     try {
-      holderApplies = await settleTasks({
+      await settleTasks({
         repository: input.repository,
         channel: input.channel,
-        candidate: input.state,
+        candidate,
         actions,
         lags,
-      });
+      }, async () => await settleNamespace(candidate, input.effects, actions, lags));
     } catch (error) {
       lags.push({
         kind: "settlement-failed",
         surface: "task",
-        contractId: input.state.id,
+        contractId: candidate.id,
         diagnostic: diagnostic(error),
       });
     }
   }
-  if (holderApplies) await settleNamespace(input.state, input.effects, actions, lags);
   return { actions, lags };
 }
 
