@@ -152,29 +152,25 @@ test("amend leaf help enumerates the operation grammar", () => {
 });
 
 test("deliver leaf help explains candidate capture, placement, review, and conflict continuation", () => {
-  assert.equal(
-    renderContractHelp("deliver"),
-    [
-      "Deliver your work as this Contract's candidate.",
-      "",
-      "usage: keiyaku deliver [<contract>|@<contract>] [--message <text>] [--include-dirty] [--materialize-conflict] [--json]",
-      "",
-      "A clean worktree delivers its HEAD; --include-dirty captures every non-ignored",
-      "byte as an immutable commit object without changing the appointed worktree's HEAD",
-      "or real index. Runs or reuses Verification and requests placement: when every",
-      "prerequisite and declared gate is current, the same invocation places and claims.",
-      "Otherwise the candidate is recorded and the Contract is tendered. A prior git",
-      "commit is optional preparation — it never delivers, and delivering never",
-      "satisfies a review gate.",
-      "",
-      "  --include-dirty         Include all non-ignored worktree bytes, including an",
-      "                          unmerged shared index, in the candidate commit.",
-      "  --materialize-conflict  After a conflict result, project the judged targetHead",
-      "                          into the worktree as an uncommitted merge. Not a",
-      "                          delivery: resolve, then deliver with --include-dirty.",
-    ].join("\n"),
-  );
+  const help = renderContractHelp("deliver");
+  assert.match(help, /The subject is the whole Contract\. An Arc names the chapter/u);
+  assert.match(help, /--include-dirty captures every non-ignored\s+change as an immutable commit/u);
+  assert.match(help, /Delivering again replaces the candidate and stales any earlier review/u);
+  assert.match(help, /Deliver never satisfies a review gate/u);
+  assert.match(help, /--materialize-conflict[\s\S]*resolve, then deliver with --include-dirty/u);
   assert.doesNotMatch(renderRootHelp(), /Capture the complete non-ignored worktree tree/u);
+});
+
+test("review leaf help distinguishes pre-delivery testimony from placement", () => {
+  const help = renderContractHelp("review");
+  assert.match(help, /delivered candidate if one exists, or the current\s+document and worktree state/u);
+  assert.match(
+    help,
+    /Pre-delivery review is real\s+testimony[\s\S]*without a delivered\s+candidate it can never place/u,
+  );
+  assert.match(help, /a verdict that places cannot be taken back/u);
+  assert.match(help, /Verify the complete current subject first, then testify/u);
+  assert.match(help, /--unsatisfied records what is not met and never requests placement/u);
 });
 
 test("supplemental Contract help is owned by command specs", () => {
