@@ -16,6 +16,7 @@ import {
   type TaskQuerySort,
   type TaskState,
   type TaskUpdateResult,
+  taskRowViewLimit,
 } from "../../task/index.js";
 import { taskCompositionNamespaceHeader } from "../../task/compose-language.js";
 import { observeTaskDetails } from "../../task/operations.js";
@@ -111,6 +112,17 @@ function ids(items: readonly string[] | undefined): readonly TaskId[] | undefine
 function limit(command: ParsedTaskCommand): number | undefined {
   const raw = value(command, "limit");
   return raw === undefined ? undefined : Number(raw);
+}
+
+function validateTaskRowView(command: ParsedTaskCommand): void {
+  if (
+    command.action === "ls" ||
+    command.action === "ready" ||
+    command.action === "blocked" ||
+    command.action === "query"
+  ) {
+    taskRowViewLimit(limit(command));
+  }
 }
 
 function explicitListNamespace(command: ParsedTaskCommand): readonly string[] | undefined {
@@ -368,6 +380,7 @@ function establishesWorld(command: ParsedTaskCommand): boolean {
 
 // eslint-disable-next-line complexity -- this is the single CLI edge ordering world, context, forwarding, and local execution.
 export async function invokeTask(command: ParsedTaskCommand, input: TaskInput): Promise<TaskInvocationResult> {
+  validateTaskRowView(command);
   const planOnly = command.action === "compose" && command.flags.plan === true;
   const composeMarkdown = command.action === "compose" ? await input.readStdin() : undefined;
   const composition = composeMarkdown === undefined ? undefined : taskCompositionNamespaceHeader(composeMarkdown);

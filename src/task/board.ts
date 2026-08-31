@@ -1,6 +1,7 @@
 import type { TaskDocument, TaskPriority, TaskState } from "./document.js";
 import { formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
 import { z } from "zod";
+import { boundedListLimit, projectBoundedList, type BoundedList } from "../bounded-list.js";
 
 export type TaskRef = Readonly<{ id: TaskId; title: string | null; state: TaskState | "missing" }>;
 const taskRowIdSchema = z.string().transform((value, context) => {
@@ -197,6 +198,7 @@ export function projectStatusRows(
 
 export type TaskBoardObservation = Readonly<{
   statusRows: ReturnType<typeof projectStatusRows>;
+  selectRecentStatus(limit?: number): BoundedList<ReturnType<typeof projectStatusRows>[number]>;
   selectNamespace(namespace: readonly string[]): readonly TaskRow[];
   selectCreatedBy(createdBy: string): readonly TaskRow[];
 }>;
@@ -204,8 +206,20 @@ export type TaskBoardObservation = Readonly<{
 export function projectTaskBoardObservation(board: TaskBoard): TaskBoardObservation {
   const relations = createTaskRelations(board);
   const rows = projectRows(board, relations, null, "all");
+  const statusRows = projectStatusRows(board, relations, null);
   return {
-    statusRows: projectStatusRows(board, relations, null),
+    statusRows,
+    selectRecentStatus: (limit) =>
+      projectBoundedList(
+        statusRows
+          .filter((row) => row.state !== "done" && row.state !== "drop")
+          .sort(
+            (left, right) =>
+              right.updatedAt.localeCompare(left.updatedAt) ||
+              Buffer.compare(Buffer.from(left.id), Buffer.from(right.id)),
+          ),
+        boundedListLimit(limit),
+      ),
     selectNamespace: (namespace) => projectRows(board, relations, namespace, "all"),
     selectCreatedBy: (createdBy) => rows.filter((row) => board.tasks.get(row.id)?.createdBy === createdBy),
   };

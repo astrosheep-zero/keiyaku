@@ -25,6 +25,7 @@ import type { WorldRoot } from "../world.js";
 import type { AllowedAction } from "./allowed.js";
 import type { ExecutionContext } from "./requests.js";
 import { z } from "zod";
+import type { BoundedList } from "../bounded-list.js";
 
 export const POLL_MS = 100;
 
@@ -103,12 +104,11 @@ export type UnbornAkumaListRow = Readonly<{
   seal?: Readonly<{ evidence: string; at: string }>;
 }>;
 
-export type AkumaList = Readonly<{
-  observedAt: string;
-  rows: readonly (AkumaListRow | UnbornAkumaListRow)[];
-  searched: readonly string[];
-  hasMore: boolean;
-}>;
+export type AkumaList = BoundedList<AkumaListRow | UnbornAkumaListRow> &
+  Readonly<{
+    observedAt: string;
+    searched: readonly string[];
+  }>;
 
 export type AkumaCompleteList = Omit<AkumaList, "hasMore">;
 

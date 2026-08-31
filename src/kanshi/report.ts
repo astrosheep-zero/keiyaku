@@ -6,6 +6,7 @@ import type { WorldRoot } from "../world.js";
 import type { ContractId } from "../library/contract.js";
 import type { RegionOverlap } from "../library/region.js";
 import type { CurrentPhysicalIssue } from "../protocol/read/observation.js";
+import type { BoundedList } from "../bounded-list.js";
 
 export type { RegionOverlap };
 
@@ -31,7 +32,7 @@ export type ContractKanshiRow = ContractBoard["rows"][number] &
     phase: ContractPhase;
     holder: ContractHolderObservation;
     fleet: readonly ContractFleetAttachment[];
-    namespaceTasks: Section<readonly TaskRow[]>;
+    namespaceTasks?: Section<readonly TaskRow[]>;
     issue?: CurrentPhysicalIssue;
   }>;
 
@@ -46,10 +47,7 @@ export type TaskKanshiRow = TaskRow &
     blockers?: readonly TaskRef[];
   }>;
 
-export type TaskKanshiWorld = Readonly<{
-  root: WorldRoot;
-  rows: readonly TaskKanshiRow[];
-}>;
+export type TaskKanshiWorld = BoundedList<TaskKanshiRow> & Readonly<{ root: WorldRoot }>;
 
 export type AkumaKanshiRow = (AkumaListRow | UnbornAkumaListRow) &
   Readonly<{

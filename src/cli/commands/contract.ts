@@ -266,33 +266,43 @@ function akumaCatalogQuery(
     if (limit !== undefined) refuse("ls", "--limit requires an Akuma instance directory");
     return query;
   }
-  if (limit !== undefined && (!/^[1-9][0-9]*$/u.test(limit) || Number(limit) > 500))
-    refuse("ls", "--limit requires an integer from 1 to 500");
+  if (limit !== undefined && (!/^[1-9][0-9]*$/u.test(limit) || !Number.isSafeInteger(Number(limit))))
+    refuse("ls", "--limit requires a positive safe integer");
   return {
     ...query,
     ...(limit === undefined ? {} : { limit: Number(limit) }),
   };
 }
 
+function listLimit(parts: ParsedContractParts): number | undefined {
+  const limit = optionalFlag(parts.flags, "limit");
+  if (limit !== undefined && (!/^[1-9][0-9]*$/u.test(limit) || !Number.isSafeInteger(Number(limit))))
+    refuse("ls", "--limit requires a positive safe integer");
+  return limit === undefined ? undefined : Number(limit);
+}
+
+function taskCatalogQuery(path: string, limit: number | undefined): CatalogQuery | null {
+  if (path === "task" || path === "task/") {
+    return { kind: "tasks", namespace: [], ...(limit === undefined ? {} : { limit }) };
+  }
+  if (!path.startsWith("task/")) return null;
+  if (!path.endsWith("/")) refuse("ls", `invalid Task namespace selector: ${path}`);
+  const body = path.slice("task/".length, -1);
+  if (body.length === 0 || body.split("/").some((segment) => segment.length === 0))
+    refuse("ls", `invalid Task namespace selector: ${path}`);
+  try {
+    const namespace = parseTaskNamespaceSelector(path);
+    return { kind: "tasks", namespace, ...(limit === undefined ? {} : { limit }) };
+  } catch (error) {
+    refuse("ls", error instanceof Error ? error.message : `invalid Task namespace selector: ${path}`);
+  }
+}
+
 function parseLs(parts: ParsedContractParts): ParsedLs {
   const path = parts.positionals[0]!;
-  if (path === "task" || path === "task/") {
-    if (parts.flags.limit !== undefined) refuse("ls", "--limit requires an Akuma instance directory");
-    return { command: "ls", query: { kind: "tasks", namespace: [] }, output: parts.output };
-  }
-  if (path.startsWith("task/")) {
-    if (parts.flags.limit !== undefined) refuse("ls", "--limit requires an Akuma instance directory");
-    if (!path.endsWith("/")) refuse("ls", `invalid Task namespace selector: ${path}`);
-    const body = path.slice("task/".length, -1);
-    if (body.length === 0 || body.split("/").some((segment) => segment.length === 0))
-      refuse("ls", `invalid Task namespace selector: ${path}`);
-    try {
-      const namespace = parseTaskNamespaceSelector(path);
-      return { command: "ls", query: { kind: "tasks", namespace }, output: parts.output };
-    } catch (error) {
-      refuse("ls", error instanceof Error ? error.message : `invalid Task namespace selector: ${path}`);
-    }
-  }
+  const limit = listLimit(parts);
+  const taskQuery = taskCatalogQuery(path, limit);
+  if (taskQuery !== null) return { command: "ls", query: taskQuery, output: parts.output };
   if (path === "kei" || path === "kei/") {
     if (parts.flags.limit !== undefined) refuse("ls", "--limit requires an Akuma instance directory");
     return { command: "ls", query: { kind: "contracts" }, output: parts.output };

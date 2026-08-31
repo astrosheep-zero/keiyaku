@@ -2,9 +2,8 @@ import type { TaskDocument, TaskPriority, TaskState } from "./document.js";
 import { formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
 import type { BlockedTaskRow, TaskBoard, TaskRef, TaskRelationProjection, TaskRow } from "./board.js";
 import { projectTaskRow, taskBlocked, taskDisposition, taskRef } from "./board.js";
+import { projectBoundedList, type BoundedList } from "../bounded-list.js";
 
-export const DEFAULT_TASK_LIMIT = 100;
-export const MAX_TASK_LIMIT = 1_000;
 export const TASK_RELATION_PREDICATE_FIELDS = ["under", "needs", "blocks"] as const;
 export type TaskRelationPredicateField = (typeof TASK_RELATION_PREDICATE_FIELDS)[number];
 function isTaskRelationPredicateField(value: string): value is TaskRelationPredicateField {
@@ -36,12 +35,7 @@ export type TaskQueryRow = TaskRow &
     createdAt: string;
     updatedAt: string;
   }>;
-export type TaskPage<Row> = Readonly<{
-  rows: readonly Row[];
-  total: number;
-  returned: number;
-  truncated: boolean;
-}>;
+export type TaskPage<Row> = BoundedList<Row>;
 
 const states: readonly TaskState[] = ["open", "in_progress", "on_hold", "done", "drop"];
 const comparisons: readonly TaskQueryComparison[] = ["=", "!=", "<", "<=", ">", ">=", "~"];
@@ -310,6 +304,25 @@ function sortTasks(tasks: readonly TaskDocument[], sort: TaskQuerySort): readonl
     return (sort === "updated" ? -compared : compared) || tie;
   });
 }
+export function projectQueryRows(
+  board: TaskBoard,
+  relations: TaskRelationProjection,
+  input: Readonly<{
+    scope: readonly string[] | null;
+    expression: TaskQueryExpression;
+    sort?: TaskQuerySort;
+  }>,
+): readonly TaskQueryRow[] {
+  const { scope, expression, sort = "priority" } = input;
+  const under = new Map(queryUnderTargets(expression).map((target) => [target, descendants(relations, target)]));
+  return sortTasks(
+    [...board.tasks.values()]
+      .filter((task) => scope === null || sameNamespace(parseTaskId(task.id).namespace, scope))
+      .filter((task) => matches(board, relations, task, expression, under)),
+    sort,
+  ).map((task) => row(board, relations, task));
+}
+
 export function projectQuery(
   board: TaskBoard,
   relations: TaskRelationProjection,
@@ -317,24 +330,10 @@ export function projectQuery(
     scope: readonly string[] | null;
     expression: TaskQueryExpression;
     sort?: TaskQuerySort;
-    limit?: number;
+    limit: number;
   }>,
 ): TaskPage<TaskQueryRow> {
-  const { scope, expression, sort = "priority", limit = DEFAULT_TASK_LIMIT } = input;
-  const under = new Map(queryUnderTargets(expression).map((target) => [target, descendants(relations, target)]));
-  const selected = sortTasks(
-    [...board.tasks.values()]
-      .filter((task) => scope === null || sameNamespace(parseTaskId(task.id).namespace, scope))
-      .filter((task) => matches(board, relations, task, expression, under)),
-    sort,
-  );
-  const rows = selected.slice(0, limit).map((task) => row(board, relations, task));
-  return { rows, total: selected.length, returned: rows.length, truncated: rows.length < selected.length };
-}
-
-export function projectPage<Row>(rows: readonly Row[], limit = DEFAULT_TASK_LIMIT): TaskPage<Row> {
-  const visible = rows.slice(0, limit);
-  return { rows: visible, total: rows.length, returned: visible.length, truncated: visible.length < rows.length };
+  return projectBoundedList(projectQueryRows(board, relations, input), input.limit);
 }
 
 export function underExpression(parent: TaskId): TaskQueryExpression {
@@ -350,10 +349,6 @@ export function queryUnderTargets(expression: TaskQueryExpression): readonly Tas
   }
   collect(expression);
   return [...targets];
-}
-
-export function isValidTaskLimit(value: number): boolean {
-  return Number.isInteger(value) && value > 0 && value <= MAX_TASK_LIMIT;
 }
 
 export type TaskQueryPage = TaskPage<TaskQueryRow>;

@@ -60,10 +60,15 @@ authority, so a synthetic history would be dishonest.
 ## Views, composition, and recovery
 
 Task's board, readiness, blocked, query, tree, and diagnostic views are
-read-only interpretations of current Task authority. A missing World, an empty
-board, a corrupt document, and an unavailable observation remain distinct
-outcomes. Diagnosis explains graph or authority problems but never repairs
-them merely by observing them.
+read-only interpretations of current Task authority. Growing row catalogues
+are bounded observations: they retain the selected rows and whether the same
+observation establishes another matching row, without becoming a traversal or
+counting interface. Recent package catalogue order remains canonical Task
+activity and reads its selected Task authority before projection; filesystem
+metadata never becomes Task authority or a returned fact. A missing World, an empty board, a corrupt
+document, and an unavailable observation remain distinct outcomes. Diagnosis
+explains graph or authority problems but never repairs them merely by observing
+them.
 
 Composition accepts one Task planning intent and first judges it against one
 board observation. A caller may ask for a plan or for admission. Accepted work

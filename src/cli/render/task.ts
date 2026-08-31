@@ -11,7 +11,6 @@ import type {
   TaskList,
   TaskMutationResult,
   TaskContextResult,
-  TaskPage,
   TaskQueryResult,
   TaskQueryRow,
   TaskRef,
@@ -134,9 +133,8 @@ function edge(label: string, ref: TaskRef, mark?: string): string {
   return `${prefix} ${ref.id} · ${ref.state}`;
 }
 
-function pageHeading(view: string, page: TaskPage<TaskRow | TaskQueryRow>): string {
-  if (page.truncated) return `${view} ${page.returned} of ${page.total} · limit ${page.returned}`;
-  return `${view} ${page.returned}`;
+function pageHeading(view: string): string {
+  return view;
 }
 
 function updatedAge(updatedAt: string): string {
@@ -178,28 +176,6 @@ function renderListRow(
   return lines;
 }
 
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
-}
-
-function recoveryCommand(command: ParsedTaskCommand, total: number): string {
-  const parts = ["keiyaku", "task", command.action];
-  if (command.action === "ls") {
-    if (command.positionals.length > 0) parts.push(command.positionals[0]!);
-    if (command.flags.closed === true) parts.push("--closed");
-    if (command.flags.all === true) parts.push("--all");
-  }
-  if (command.flags.world === true) parts.push("--world");
-  if ((command.action === "ready" || command.action === "blocked") && typeof command.flags.parent === "string") {
-    parts.push("--parent", command.flags.parent);
-  }
-  if (command.action === "query" && typeof command.flags.where === "string")
-    parts.push("--where", shellQuote(command.flags.where));
-  if (command.action === "query" && typeof command.flags.sort === "string") parts.push("--sort", command.flags.sort);
-  parts.push("--limit", String(total));
-  return parts.join(" ");
-}
-
 function renderRows(
   command: ParsedTaskCommand,
   result: TaskList | BlockedTaskList | TaskQueryResult,
@@ -207,13 +183,7 @@ function renderRows(
 ): string {
   if (result.kind !== "accepted") return renderFailure(command.action, result, columns);
   const view = command.action === "ls" ? "tasks" : command.action;
-  const footer = result.value.truncated
-    ? [
-        "",
-        `  + ${result.value.total - result.value.returned} more not shown`,
-        `    ${recoveryCommand(command, result.value.total)}`,
-      ]
-    : [];
+  const footer = result.value.hasMore ? ["…"] : [];
   const scope =
     command.action === "ls"
       ? command.flags.world === true
@@ -222,8 +192,7 @@ function renderRows(
           ? `namespace ${command.positionals[0]!.replace(/^task\//u, "").replace(/\/$/u, "") || "root"}`
           : "current namespace"
       : undefined;
-  const heading =
-    scope === undefined ? pageHeading(view, result.value) : `${pageHeading(view, result.value)} · ${scope}`;
+  const heading = scope === undefined ? pageHeading(view) : `${pageHeading(view)} · ${scope}`;
   return [
     heading,
     ...result.value.rows.flatMap((item) => renderListRow(item, columns, command.action === "ready")),

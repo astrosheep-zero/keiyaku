@@ -142,7 +142,7 @@ export const CONTRACT_COMMAND_SPECS = {
     stdin: "none",
     flags: { limit: "value", json: "boolean" },
     usage:
-      'ls task[/] [--json]\nls kei[/] [--json]\nls aku[/] [--json]\nls aku/<akuma>[/] [--limit <count>] [--json]\nls "aku/*/*" [--limit <count>] [--json]',
+      'ls task[/] [--limit <count>] [--json]\nls kei[/] [--json]\nls aku[/] [--json]\nls aku/<akuma>[/] [--limit <count>] [--json]\nls "aku/*/*" [--limit <count>] [--json]',
     purpose: "List one identity directory.",
   },
   audit: {

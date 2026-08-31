@@ -222,6 +222,7 @@ function semanticBlock(name: string, facts: readonly string[], context: TextRend
 }
 
 function namespaceTaskFacts(row: ContractKanshiRow): readonly string[] {
+  if (row.namespaceTasks === undefined) return [];
   if (row.namespaceTasks.kind === "absent") return [];
   if (row.namespaceTasks.kind === "failed") {
     return [`failed ${row.namespaceTasks.failure.message}`];
@@ -291,10 +292,6 @@ function candidateFacts(row: ContractKanshiRow, abbreviations: ReadonlyMap<strin
 
 function isTerminalContract(row: ContractKanshiRow): boolean {
   return row.phase === "claimed" || row.phase === "abandoned";
-}
-
-function isTerminalTask(row: TaskKanshiRow): boolean {
-  return row.disposition === "done" || row.disposition === "drop";
 }
 
 function renderWorldContractRow(
@@ -368,8 +365,7 @@ function renderTasks(report: KanshiReport, context: TextRenderContext): readonly
   if (section.kind === "absent") return ["TASKS // absent", "", `${PLUMB}tasks absent`];
   if (section.kind === "failed")
     return ["TASKS // unavailable", "", tone(`! ${safeText(section.failure.message)}`, "alert", context.color)];
-  const live = section.value.rows.filter((row) => !isTerminalTask(row));
-  const rows = selectRecentRows(live, (row) => row.updatedAt);
+  const rows = section.value.rows;
   const rowLines: readonly (readonly string[])[] = rows.map((row) => {
     const relation = row.contract === undefined ? ["unbound"] : [endpointFact(row.contract.id, row.contract.observed)];
     const childFacts =
@@ -395,11 +391,12 @@ function renderTasks(report: KanshiReport, context: TextRenderContext): readonly
     });
   });
   return [
-    `TASKS // ${rows.length} recent`,
+    "TASKS // recent",
     ...renderSectionBlock({
       name: "TASKS",
       rows: rowLines,
     }).slice(1),
+    ...(section.value.hasMore ? ["…"] : []),
   ];
 }
 

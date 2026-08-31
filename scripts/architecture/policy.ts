@@ -49,6 +49,7 @@ const kanshiGitObservation = any("git/read-observation.ts", [
   "withGitDecodeChannel",
   "withGitReadObservation",
 ]);
+const boundedList = any("bounded-list.ts");
 
 export const KEIYAKU_ARCHITECTURE_POLICY = {
   zones: [
@@ -206,6 +207,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("akuma/requests.ts"),
         any("akuma/request-*.ts"),
         any("coordination/**"),
+        boundedList,
         any("identity/**"),
         any("markdown/**"),
         any("task/**"),
@@ -230,6 +232,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("alias/**"),
         any("core/facts/types.ts"),
         any("dispatch/**"),
+        boundedList,
         kanshiGitObservation,
         any("kanshi/**"),
         any("library/contract.ts"),
@@ -246,6 +249,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "kanshi/**",
       allow: [
         any("akuma/index.ts"),
+        boundedList,
         any("identity/selector.ts"),
         any("index.ts"),
         any("kanshi/**"),
@@ -299,6 +303,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "akuma/**",
       allow: [
         any("akuma/**"),
+        boundedList,
         any("alias/**"),
         any("core/facts/**"),
         any("dispatch/**"),

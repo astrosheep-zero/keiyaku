@@ -10,6 +10,25 @@ import type { ContractRow } from "../src/protocol/read/status.js";
 test("catalog text renders only the selected identity layer", () => {
   assert.equal(
     renderCatalogText({
+      kind: "tasks",
+      root: "/world" as never,
+      rows: [
+        {
+          id: "task/catalog-row" as never,
+          title: "Catalog row",
+          state: "open",
+          priority: 2,
+          disposition: "ready",
+          updatedAt: "2026-08-12T00:00:00.000Z",
+          bodyPresent: false,
+        },
+      ],
+      hasMore: true,
+    }),
+    ["task/catalog-row - P2 - ready - Catalog row", "…"].join("\n"),
+  );
+  assert.equal(
+    renderCatalogText({
       kind: "archetypes",
       rows: [{ name: "reviewer", model: "codex-5", description: "Read the complete change without truncation." }],
     }),

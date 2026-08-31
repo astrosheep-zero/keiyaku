@@ -446,7 +446,7 @@ test("a missing TaskHolder object fails only the TaskHolder-dependent section", 
       true,
     );
     assert.equal(
-      report.contracts.value.rows.every((row) => row.namespaceTasks.kind === "present"),
+      report.contracts.value.rows.every((row) => row.namespaceTasks === undefined),
       true,
     );
   }
@@ -585,7 +585,7 @@ test("a malformed TaskHolder root fails only the Kanshi Task section", async () 
       true,
     );
     assert.equal(
-      report.contracts.value.rows.every((row) => row.namespaceTasks.kind === "present"),
+      report.contracts.value.rows.every((row) => row.namespaceTasks === undefined),
       true,
     );
   }
@@ -870,6 +870,7 @@ function attentionReport(): KanshiReport {
       kind: "present",
       value: {
         root: "/repo",
+        hasMore: false,
         rows: [
           {
             id: "task/blocked",
@@ -893,8 +894,6 @@ function attentionReport(): KanshiReport {
           },
           { id: "task/held", title: "Held", state: "on_hold", priority: 1, disposition: "on_hold" },
           { id: "task/ready", title: "Ready", state: "open", priority: 1, disposition: "ready" },
-          { id: "task/done", title: "Done", state: "done", priority: 2, disposition: "done" },
-          { id: "task/dropped", title: "Dropped", state: "drop", priority: 2, disposition: "drop" },
         ],
       },
     },
@@ -991,7 +990,7 @@ test("Kanshi text keeps complete identities in the aperture grammar", async () =
   assert.equal(text.includes(taskId), true);
   assert.equal(text.includes(akumaId), true);
   assert.match(text, /CONTRACTS \/\/ 1 recent · 0 candidates/u);
-  assert.match(text, /TASKS \/\/ 1 recent/u);
+  assert.match(text, /TASKS \/\/ recent/u);
   assert.match(text, /AKUMA \/\/ 1 recent/u);
   assert.ok(text.indexOf("CONTRACTS //") < text.indexOf("AKUMA //"));
   assert.ok(text.indexOf("AKUMA //") < text.indexOf("TASKS //"));
@@ -1167,7 +1166,7 @@ test("Kanshi text uses live sections, preserves important facts, and omits termi
 
   assert.equal(text.split("\n", 1)[0], "契 KEIYAKU // WORLD");
   assert.match(text, /\n\nAKUMA \/\/ 7 recent/u);
-  assert.match(text, /\n\nTASKS \/\/ 4 recent/u);
+  assert.match(text, /\n\nTASKS \/\/ recent/u);
   assert.doesNotMatch(text, /attention|kanshi ───|──\[/u);
   assert.doesNotMatch(text, /^ {2}↳ /mu);
   assert.ok(text.indexOf("CONTRACTS //") < text.indexOf("AKUMA //"));
@@ -1486,7 +1485,7 @@ test("Kanshi preserves the Akuma bounded aperture with one compact marker", () =
   );
   assert.match(empty, /CONTRACTS \/\/ 0 recent · 0 candidates/u);
   assert.match(empty, /AKUMA \/\/ 0 recent/u);
-  assert.match(empty, /TASKS \/\/ 0 recent/u);
+  assert.match(empty, /TASKS \/\/ recent/u);
   for (const section of ["KEIYAKU", "FLEET", "TASK"] as const) {
     assert.doesNotMatch(sectionBody(empty, section), /…|next:/u);
   }
@@ -1525,7 +1524,8 @@ test("Kanshi preserves the Akuma bounded aperture with one compact marker", () =
         ...report.tasks,
         value: {
           ...report.tasks.value,
-          rows: [...hotTasks, { ...report.tasks.value.rows[3]!, id: "task/new-cold", updatedAt: newAt }],
+          rows: [{ ...report.tasks.value.rows[3]!, id: "task/new-cold", updatedAt: newAt }, ...hotTasks].slice(0, 10),
+          hasMore: true,
         },
       },
       akuma: {
@@ -1546,6 +1546,7 @@ test("Kanshi preserves the Akuma bounded aperture with one compact marker", () =
   assert.match(sectionBody(partial, "TASK"), /^○ task\/new-cold · ready/mu);
   assert.doesNotMatch(partial, /hot-09|hot-10/u);
   assert.deepEqual(sectionBody(partial, "FLEET").match(/^…$/gmu), ["…"]);
+  assert.deepEqual(sectionBody(partial, "TASK").match(/^…$/gmu), ["…"]);
   assert.doesNotMatch(partial, /all .* shown|not shown|\bfull\b|more available|next:/u);
 });
 
@@ -2103,11 +2104,18 @@ test("Contract namespace Tasks come from one Task board observation", async () =
   );
 
   const report = await observe(repository.path, await Repo.at({ path: repository.path }));
+  const selected = await kanshi({
+    world,
+    repo: await Repo.at({ path: repository.path }),
+    contract: contract.id,
+  });
   const board = projectTaskBoardObservation((await readBoard(world)).board);
   assert.equal(report.contracts.kind, "present");
   assert.equal(report.tasks.kind, "present");
-  if (report.contracts.kind !== "present" || report.tasks.kind !== "present") return;
-  const row = report.contracts.value.rows.find((candidate) => candidate.id === contract.id);
+  assert.equal(selected.contracts.kind, "present");
+  if (report.contracts.kind !== "present" || report.tasks.kind !== "present" || selected.contracts.kind !== "present") return;
+  assert.equal(report.contracts.value.rows.every((candidate) => candidate.namespaceTasks === undefined), true);
+  const row = selected.contracts.value.rows.find((candidate) => candidate.id === contract.id);
   assert.equal(row?.namespaceTasks.kind, "present");
   if (row?.namespaceTasks.kind !== "present") return;
   const expected = board.selectNamespace(contractNamespace(contract.id));
@@ -2138,14 +2146,14 @@ test("Contract namespace Tasks come from one Task board observation", async () =
   );
   assert.deepEqual(
     report.tasks.value.rows.map((task) => ({ id: task.id, disposition: task.disposition, blockers: task.blockers })),
-    board.statusRows.map((task) => ({
+    board.selectRecentStatus(10).rows.map((task) => ({
       id: task.id,
       disposition: task.disposition,
       blockers: task.blockers,
     })),
   );
+  assert.equal(report.tasks.value.hasMore, board.selectRecentStatus(10).hasMore);
 
-  const selected = selectKanshi({ report, contract: contract.id });
   assert.equal(selected.tasks.kind, "present");
   if (selected.tasks.kind === "present") {
     assert.deepEqual(
@@ -2170,7 +2178,11 @@ test("Contract namespace Tasks come from one Task board observation", async () =
 test("Task board failure fails namespace context without suppressing Contract or Akuma", async () => {
   const { repository, contract, akumaId } = await populatedWorld();
   writeFileSync(join(repository.path, ".keiyaku", "tasks", "bad.md"), "not a task document\n");
-  const report = await observe(repository.path, await Repo.at({ path: repository.path }));
+  const report = await kanshi({
+    world: await World.at(repository.path),
+    repo: await Repo.at({ path: repository.path }),
+    contract: contract.id,
+  });
   assert.equal(report.contracts.kind, "present");
   assert.equal(report.akuma.kind, "present");
   assert.equal(report.tasks.kind, "failed");

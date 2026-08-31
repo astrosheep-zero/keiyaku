@@ -11,10 +11,10 @@ import {
   type TaskMutationBodyRequest,
 } from "../src/task/mutation.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
-import { parseTaskDocument, serializeTaskDocument } from "../src/task/document.js";
+import { parseTaskDocument, serializeTaskDocument, type TaskDocument } from "../src/task/document.js";
 import { parseTaskId } from "../src/task/identity.js";
 import { settleTask } from "../src/task/operations.js";
-import { DEFAULT_TASK_LOCK_TIMEOUT_MS, replaceAuthority, withTaskLocks } from "../src/task/store.js";
+import { DEFAULT_TASK_LOCK_TIMEOUT_MS, authorityPath, replaceAuthority, withTaskLocks } from "../src/task/store.js";
 import { World, type WorldRoot } from "../src/world.js";
 
 type Assert<Condition extends true> = Condition;
@@ -165,10 +165,7 @@ test("Tasks creates root authority without Contract coupling", async () => {
   assert.equal(worldList.kind, "accepted");
   if (worldList.kind === "accepted") {
     assert.deepEqual(worldList.value.rows.map((row) => row.id).sort(), [nestedId, rootId].sort());
-    assert.deepEqual(
-      { total: worldList.value.total, returned: worldList.value.returned, truncated: worldList.value.truncated },
-      { total: 2, returned: 2, truncated: false },
-    );
+    assert.equal(worldList.value.hasMore, false);
   }
 });
 
@@ -277,10 +274,7 @@ test("bounded Task query filters before limit and parent views recurse", async (
       selected.value.rows.map((row) => row.id),
       [need],
     );
-    assert.deepEqual(
-      { total: selected.value.total, returned: selected.value.returned, truncated: selected.value.truncated },
-      { total: 2, returned: 1, truncated: true },
-    );
+    assert.equal(selected.value.hasMore, true);
   }
 
   const descendants = await tasks.ready({ scope: "world", parent });
@@ -307,6 +301,70 @@ test("bounded Task query filters before limit and parent views recurse", async (
     }),
     { kind: "refused", refusal: { kind: "task-missing", taskId: "task/missing" } },
   );
+});
+
+test("Task row views share the bounded-list contract and complete their graph judgment first", async () => {
+  const { root, tasks } = await world();
+  mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });
+  const document = (id: TaskId, needs: readonly TaskId[] = []): TaskDocument => ({
+    id,
+    title: id,
+    body: "",
+    note: "",
+    state: "open",
+    priority: 2,
+    needs,
+    parent: null,
+    supersedes: [],
+    relates: [],
+    createdAt: "2026-08-31T00:00:00.000Z",
+    updatedAt: "2026-08-31T00:00:00.000Z",
+  });
+  for (let index = 0; index < 51; index += 1) {
+    const ready = `task/ready-${String(index).padStart(2, "0")}` as TaskId;
+    const blocked = `task/blocked-${String(index).padStart(2, "0")}` as TaskId;
+    writeFileSync(authorityPath(root as WorldRoot, ready), serializeTaskDocument(document(ready)));
+    writeFileSync(
+      authorityPath(root as WorldRoot, blocked),
+      serializeTaskDocument(document(blocked, ["task/missing" as TaskId])),
+    );
+  }
+
+  const views = [
+    await tasks.list({ scope: "world", selection: "all" }),
+    await tasks.ready({ scope: "world" }),
+    await tasks.blocked({ scope: "world" }),
+    await tasks.query({ scope: "world" }),
+  ];
+  for (const view of views) {
+    assert.equal(view.kind, "accepted");
+    if (view.kind !== "accepted") continue;
+    assert.deepEqual(Object.keys(view.value).sort(), ["hasMore", "rows"]);
+    assert.equal(view.value.rows.length, 50);
+    assert.equal(view.value.hasMore, true);
+  }
+  const maximum = await tasks.list({ scope: "world", selection: "all", limit: 500 });
+  assert.equal(maximum.kind, "accepted");
+  if (maximum.kind === "accepted") {
+    assert.equal(maximum.value.rows.length, 102);
+    assert.equal(maximum.value.hasMore, false);
+  }
+  await assert.rejects(() => tasks.list({ scope: "world", limit: 501 }), /integer from 1 to 500/u);
+});
+
+test("Task row-view limits refuse before reading Task authority", async () => {
+  const { root, tasks } = await world();
+  const directory = join(root, ".keiyaku", "tasks");
+  mkdirSync(directory);
+  writeFileSync(join(directory, "broken.md"), "not Task authority\n");
+
+  const reads = [
+    () => tasks.list({ scope: "world", limit: 501 }),
+    () => tasks.ready({ scope: "world", limit: 501 }),
+    () => tasks.blocked({ scope: "world", limit: 501 }),
+    () => tasks.query({ scope: "world", limit: 501 }),
+  ];
+  for (const read of reads) await assert.rejects(read, /integer from 1 to 500/u);
 });
 
 test("detail and query agree that blocks is reverse needs membership", async () => {

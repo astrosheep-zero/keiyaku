@@ -164,7 +164,12 @@ test("compose plan returns stable admission and body previews without writing", 
   if (result.kind !== "planned") return;
   assert.deepEqual(result.admissionOrder, ["task/parent", "task/child"]);
   assert.equal(result.bodies[0]?.bytes, 10);
-  assert.equal((await product.list({ scope: "world", selection: "all" })).value?.total, 0);
+  const listed = await product.list({ scope: "world", selection: "all" });
+  assert.equal(listed.kind, "accepted");
+  if (listed.kind === "accepted") {
+    assert.deepEqual(listed.value.rows, []);
+    assert.equal(listed.value.hasMore, false);
+  }
 });
 
 test("busy compose returns a reusable fenced recovery document", async () => {

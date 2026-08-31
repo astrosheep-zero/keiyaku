@@ -139,6 +139,7 @@ export const capabilityPolicy = {
         "akuma-body.ts",
         "alias/**",
         "body/**",
+        "bounded-list.ts",
         "cli/**",
         "contract-worktree.ts",
         "identity/**",

@@ -1,7 +1,6 @@
 import type { TaskPriority, TaskState } from "../../task/document.js";
 import type { TaskId } from "../../task/identity.js";
 import {
-  MAX_TASK_LIMIT,
   TASK_RELATION_PREDICATE_FIELDS,
   normalizeTaskQuery,
   type TaskQueryExpression,
@@ -275,9 +274,8 @@ export function parseTaskQueryExpression(source: string): TaskQueryExpression {
 }
 
 export function validateTaskLimit(source: string): void {
-  if (!/^[1-9][0-9]*$/u.test(source) || Number(source) > MAX_TASK_LIMIT) {
-    throw new Error(`--limit must be an integer from 1 to ${MAX_TASK_LIMIT}`);
-  }
+  if (!/^[1-9][0-9]*$/u.test(source) || !Number.isSafeInteger(Number(source)))
+    throw new Error("--limit requires a positive safe integer");
 }
 
 export function validateTaskParent(source: string): void {

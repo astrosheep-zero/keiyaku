@@ -28,6 +28,9 @@ Text helps a caller scan complete Task identity, current disposition, priority,
 and title, then follows an entity with owned relationship and evidence detail
 when requested. Complete identifiers and opaque evidence remain copyable; the
 renderer may wrap prose but must not silently truncate or invent Task facts.
+Bounded Task catalogues distinguish a complete observation from one with more
+matching rows, but do not turn that distinction into counts, recovery advice,
+or another traversal interface.
 Task text makes accepted work, a substantive refusal, retryable contention,
 absence, and infrastructure failure distinguishable. JSON remains the same
 public Task value, not a reduced text-derived format.

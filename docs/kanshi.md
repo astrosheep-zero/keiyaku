@@ -21,6 +21,11 @@ or an assertion of causality between producers. Kanshi does not reread a
 section while formatting it, synthesize history, probe provider state, or
 repair an inconsistency it encountered.
 
+The World Task section is a recent bounded catalogue. It attaches only
+relationships already observed for those rows, while a selected Contract's
+owned Task section retains the complete owner view required to explain that
+Contract.
+
 For bare World status, Kanshi obtains one bounded recent Akuma observation and
 keeps that owner order. It observes detailed activity only for its first few
 returned rows and retains whether that observation reaches farther without

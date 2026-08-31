@@ -77,6 +77,23 @@ const provider: ProviderAdapter = {
   },
 };
 
+function taskCatalogDocument(id: TaskId, updatedAt: string): TaskDocument {
+  return {
+    id,
+    title: id,
+    body: "",
+    note: "",
+    state: "open",
+    priority: 2,
+    needs: [],
+    parent: null,
+    supersedes: [],
+    relates: [],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt,
+  };
+}
+
 test("Akuma and Task owner schemas strictly decode Fleet projections", () => {
   const status: AkumaStatus = {
     id: akuId({ archetype: "worker", suffix: "00000001" }),
@@ -511,7 +528,10 @@ test("facade Akuma catalog returns bounded Heart activity in semantic order", as
 
     const page = await Keiyaku.ls({ query: { kind: "akuma", archetype: "worker", limit: 2 }, path: root });
     assert.equal(page.kind, "akuma");
-    assert.deepEqual(page.rows.map((row) => row.id), [tiedFirst.id, tiedSecond.id]);
+    assert.deepEqual(
+      page.rows.map((row) => row.id),
+      [tiedFirst.id, tiedSecond.id],
+    );
     assert.equal(page.hasMore, true);
     const originalPrepare = DatabaseSync.prototype.prepare;
     let custodyReads = 0;
@@ -576,15 +596,34 @@ test("recent Akuma page prunes old custody bounds without changing Heart members
 
     assert.equal(typeof world.listComplete, "function");
     assert.equal("hasMore" in complete, false);
-    assert.deepEqual(reference, [...recent].reverse().map((source) => source.id).concat(oldIds));
+    assert.deepEqual(
+      reference,
+      [...recent]
+        .reverse()
+        .map((source) => source.id)
+        .concat(oldIds),
+    );
     assert.deepEqual(completeGlob.ids, [...oldIds, ...recent.map((source) => source.id)].sort());
-    assert.deepEqual(page.rows.map((row) => row.id), reference.slice(0, 10));
+    assert.deepEqual(
+      page.rows.map((row) => row.id),
+      reference.slice(0, 10),
+    );
     assert.equal(page.hasMore, true);
-    assert.deepEqual(page.rows.map((row) => row.id), recent.slice().reverse().slice(0, 10).map((row) => row.id));
+    assert.deepEqual(
+      page.rows.map((row) => row.id),
+      recent
+        .slice()
+        .reverse()
+        .slice(0, 10)
+        .map((row) => row.id),
+    );
     assert.ok(prepareCalls < 500, `expected a bounded Heart read pool, received ${prepareCalls} database prepares`);
     assert.equal(defaultPage.rows.length, 50);
     assert.equal(defaultPage.hasMore, true);
-    assert.deepEqual(maximumPage.rows.map((row) => row.id), reference.slice(0, 500));
+    assert.deepEqual(
+      maximumPage.rows.map((row) => row.id),
+      reference.slice(0, 500),
+    );
     assert.equal(maximumPage.hasMore, true);
     await assert.rejects(() => world.list({ limit: 501 }), /integer from 1 to 500/u);
   } finally {
@@ -615,9 +654,15 @@ test("all-null Akuma fallback retains exact membership through the fixed Heart r
     DatabaseSync.prototype.prepare = originalPrepare;
 
     const expected = allocated.map((value) => value.id).sort();
-    assert.deepEqual(page.rows.map((row) => row.id), expected.slice(0, 7));
+    assert.deepEqual(
+      page.rows.map((row) => row.id),
+      expected.slice(0, 7),
+    );
     assert.equal(page.hasMore, true);
-    assert.ok(custodyReads >= expected.length, `expected every null activity Heart to be read, received ${custodyReads}`);
+    assert.ok(
+      custodyReads >= expected.length,
+      `expected every null activity Heart to be read, received ${custodyReads}`,
+    );
 
     let active = 0;
     let maximum = 0;
@@ -634,7 +679,7 @@ test("all-null Akuma fallback retains exact membership through the fixed Heart r
   }
 });
 
-test("Task catalog does not inherit the Task list default page limit", async () => {
+test("Task catalog uses the shared bounded-list default", async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-facade-catalog-page-")));
   try {
     const first = await Tasks.of(await World.at(root)).add({ title: "Catalog 000" });
@@ -663,7 +708,144 @@ test("Task catalog does not inherit the Task list default page limit", async () 
 
     const catalog = await Keiyaku.ls({ query: { kind: "tasks" }, path: root });
     assert.equal(catalog.kind, "tasks");
-    assert.equal(catalog.rows.length, 101);
+    assert.equal(catalog.rows.length, 50);
+    assert.equal(catalog.hasMore, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("recent Task catalog projects the complete authoritative selection", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-facade-task-catalog-scale-")));
+  try {
+    mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });
+    const world = await World.at(root);
+    const old = new Date("2000-01-01T00:00:00.000Z");
+    const recent = new Date("2099-01-01T00:00:00.000Z");
+    const documents: TaskDocument[] = [
+      ...Array.from({ length: 989 }, (_, index) =>
+        taskCatalogDocument(`task/old-${String(index).padStart(4, "0")}`, "2026-01-01T00:00:00.000Z"),
+      ),
+      ...Array.from({ length: 11 }, (_, index) =>
+        taskCatalogDocument(
+          `task/recent-${String(index).padStart(2, "0")}`,
+          `2026-08-31T00:00:${String(index).padStart(2, "0")}.000Z`,
+        ),
+      ),
+    ];
+    for (const document of documents) {
+      const path = authorityPath(world, document.id);
+      writeFileSync(path, serializeTaskDocument(document));
+      utimesSync(
+        path,
+        document.id.startsWith("task/recent-") ? recent : old,
+        document.id.startsWith("task/recent-") ? recent : old,
+      );
+    }
+
+    const catalog = await Keiyaku.ls({ query: { kind: "tasks", limit: 10 }, path: root });
+
+    const reference = [...documents].sort(
+      (left, right) =>
+        right.updatedAt.localeCompare(left.updatedAt) || Buffer.compare(Buffer.from(left.id), Buffer.from(right.id)),
+    );
+    assert.equal(catalog.kind, "tasks");
+    assert.deepEqual(
+      catalog.rows.map((row) => row.id),
+      reference.slice(0, 10).map((document) => document.id),
+    );
+    assert.equal(catalog.hasMore, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("recent Task catalog returns newer canonical activity despite an older mtime", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-facade-task-catalog-mtime-")));
+  try {
+    mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });
+    const world = await World.at(root);
+    const canonicalNew = taskCatalogDocument("task/canonical-new", "2026-08-31T00:00:00.000Z");
+    const mtimeNew = taskCatalogDocument("task/mtime-new", "2026-08-01T00:00:00.000Z");
+    for (const [document, bound] of [
+      [canonicalNew, new Date("2000-01-01T00:00:00.000Z")],
+      [mtimeNew, new Date("2099-01-01T00:00:00.000Z")],
+    ] as const) {
+      const path = authorityPath(world, document.id);
+      writeFileSync(path, serializeTaskDocument(document));
+      utimesSync(path, bound, bound);
+    }
+
+    const catalog = await Keiyaku.ls({ query: { kind: "tasks", limit: 1 }, path: root });
+    assert.equal(catalog.kind, "tasks");
+    assert.deepEqual(
+      catalog.rows.map((row) => row.id),
+      [canonicalNew.id],
+    );
+    assert.equal(catalog.hasMore, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("recent Task catalog does not skip older-mtime malformed authority", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-facade-task-catalog-malformed-")));
+  try {
+    mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });
+    const world = await World.at(root);
+    const older = authorityPath(world, "task/older-malformed");
+    const newer = taskCatalogDocument("task/newer-valid", "2026-08-31T00:00:00.000Z");
+    writeFileSync(older, "not a task document\n");
+    utimesSync(older, new Date("2000-01-01T00:00:00.000Z"), new Date("2000-01-01T00:00:00.000Z"));
+    writeFileSync(authorityPath(world, newer.id), serializeTaskDocument(newer));
+    utimesSync(
+      authorityPath(world, newer.id),
+      new Date("2099-01-01T00:00:00.000Z"),
+      new Date("2099-01-01T00:00:00.000Z"),
+    );
+
+    await assert.rejects(Keiyaku.ls({ query: { kind: "tasks", limit: 1 }, path: root }), /front matter/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("bare Kanshi uses the 10-row recent Task catalogue", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-kanshi-task-window-")));
+  try {
+    mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });
+    const world = await World.at(root);
+    const old = taskCatalogDocument("task/old-0000", "2026-01-01T00:00:00.000Z");
+    for (let index = 0; index < 1_000; index += 1) {
+      const document = { ...old, id: `task/old-${String(index).padStart(4, "0")}` as TaskId };
+      writeFileSync(authorityPath(world, document.id), serializeTaskDocument(document));
+    }
+    const documents = Array.from({ length: 11 }, (_, index) =>
+      taskCatalogDocument(
+        `task/recent-${String(index).padStart(2, "0")}`,
+        `2026-08-31T00:00:${String(index).padStart(2, "0")}.000Z`,
+      ),
+    );
+    for (const document of documents) {
+      writeFileSync(authorityPath(world, document.id), serializeTaskDocument(document));
+    }
+
+    const { report } = await observeKanshi({ world });
+
+    assert.equal(report.tasks.kind, "present");
+    if (report.tasks.kind !== "present") return;
+    assert.deepEqual(
+      report.tasks.value.rows.map((row) => row.id),
+      [...documents]
+        .sort(
+          (left, right) =>
+            right.updatedAt.localeCompare(left.updatedAt) ||
+            Buffer.compare(Buffer.from(left.id), Buffer.from(right.id)),
+        )
+        .slice(0, 10)
+        .map((document) => document.id),
+    );
+    assert.equal(report.tasks.value.hasMore, true);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -684,8 +866,9 @@ test("Task catalog namespace queries distinguish omitted, root, and named scope"
     const featureOnly = await Keiyaku.ls({ query: { kind: "tasks", namespace: ["feature"] }, path: root });
     assert.deepEqual(
       all.rows.map((row) => row.id),
-      ["task/catalog-root", "task/feature/catalog-feature", "task/feature/ui/catalog-nested"],
+      ["task/feature/ui/catalog-nested", "task/feature/catalog-feature", "task/catalog-root"],
     );
+    assert.equal(all.hasMore, false);
     assert.deepEqual(
       rootOnly.rows.map((row) => row.id),
       ["task/catalog-root"],

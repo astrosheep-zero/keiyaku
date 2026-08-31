@@ -1,14 +1,14 @@
 import { Akuma, type AkumaList } from "../akuma/akuma.js";
 import { listArchetypeDefinitions, type ArchetypeCatalogRow } from "../akuma/archetype.js";
 import type { TaskRow } from "../task/index.js";
-import { observeTaskCatalogRows } from "../task/catalog.js";
+import { observeTaskCatalog } from "../task/catalog.js";
 import { listKeiyaku, type ContractBoard } from "./contract.js";
 import { requireInput } from "./input.js";
 import { Repo } from "./repo.js";
 import { World, type WorldRoot } from "../world.js";
 
 export type CatalogQuery =
-  | Readonly<{ kind: "tasks"; namespace?: readonly string[] }>
+  | Readonly<{ kind: "tasks"; namespace?: readonly string[]; limit?: number }>
   | Readonly<{ kind: "contracts" }>
   | Readonly<{ kind: "archetypes" }>
   | Readonly<{ kind: "akuma"; archetype?: string; limit?: number }>;
@@ -20,7 +20,7 @@ export type CatalogInput =
   | Readonly<{ query: Extract<CatalogQuery, { kind: "akuma" }>; path: WorldRoot }>;
 
 export type Catalog =
-  | Readonly<{ kind: "tasks"; root: WorldRoot; rows: readonly TaskRow[] }>
+  | Readonly<{ kind: "tasks"; root: WorldRoot; rows: readonly TaskRow[]; hasMore: boolean }>
   | Readonly<{ kind: "contracts"; root: string; state: string | null; observedAt: string; rows: ContractBoard["rows"] }>
   | Readonly<{ kind: "archetypes"; rows: readonly ArchetypeCatalogRow[] }>
   | Readonly<{
@@ -49,9 +49,45 @@ async function worldRoot(value: unknown): Promise<WorldRoot> {
 function taskQueryValue(query: Readonly<Record<string, unknown>>): CatalogQuery {
   if (query.namespace !== undefined && !Array.isArray(query.namespace))
     throw new TypeError("Keiyaku.ls Task namespace must be an array");
+  if (query.limit !== undefined && typeof query.limit !== "number")
+    throw new TypeError("Keiyaku.ls Task limit must be a number");
   return {
     kind: "tasks",
     ...(query.namespace === undefined ? {} : { namespace: query.namespace as readonly string[] }),
+    ...(query.limit === undefined ? {} : { limit: query.limit }),
+  };
+}
+
+type CatalogQueryKind = CatalogQuery["kind"];
+
+const catalogQueryKeys: Readonly<Record<CatalogQueryKind, readonly string[]>> = {
+  tasks: ["kind", "namespace", "limit"],
+  contracts: ["kind"],
+  archetypes: ["kind"],
+  akuma: ["kind", "archetype", "limit"],
+};
+
+function catalogQueryKind(value: unknown): CatalogQueryKind {
+  if (value === "tasks" || value === "contracts" || value === "archetypes" || value === "akuma") return value;
+  throw new TypeError("Keiyaku.ls query kind is invalid");
+}
+
+function assertCatalogQueryKeys(query: Readonly<Record<string, unknown>>, kind: CatalogQueryKind): void {
+  for (const key of Object.keys(query)) {
+    if (!catalogQueryKeys[kind].includes(key)) throw new TypeError(`Keiyaku.ls query has unknown field: ${key}`);
+  }
+}
+
+function akumaQueryValue(query: Readonly<Record<string, unknown>>): CatalogQuery {
+  if (query.archetype !== undefined && typeof query.archetype !== "string") {
+    throw new TypeError("Keiyaku.ls Akuma name must be a string");
+  }
+  if (query.limit !== undefined && typeof query.limit !== "number")
+    throw new TypeError("Keiyaku.ls Akuma limit must be a number");
+  return {
+    kind: "akuma",
+    ...(query.archetype === undefined ? {} : { archetype: query.archetype }),
+    ...(query.limit === undefined ? {} : { limit: query.limit }),
   };
 }
 
@@ -60,33 +96,11 @@ function queryValue(value: unknown): CatalogQuery {
     throw new TypeError("Keiyaku.ls query must be an object");
   }
   const query = value as Readonly<Record<string, unknown>>;
-  if (query.kind !== "tasks" && query.kind !== "contracts" && query.kind !== "archetypes" && query.kind !== "akuma") {
-    throw new TypeError("Keiyaku.ls query kind is invalid");
-  }
-  for (const key of Object.keys(query)) {
-    if (
-      key !== "kind" &&
-      !(query.kind === "akuma" && (key === "archetype" || key === "limit")) &&
-      !(query.kind === "tasks" && key === "namespace")
-    ) {
-      throw new TypeError(`Keiyaku.ls query has unknown field: ${key}`);
-    }
-  }
-  if (query.kind === "tasks") return taskQueryValue(query);
-  if (query.kind !== "akuma") return { kind: query.kind };
-  if (query.archetype !== undefined && typeof query.archetype !== "string") {
-    throw new TypeError("Keiyaku.ls Akuma name must be a string");
-  }
-  if (
-    query.limit !== undefined &&
-    (typeof query.limit !== "number" || !Number.isSafeInteger(query.limit) || query.limit < 1 || query.limit > 500)
-  )
-    throw new TypeError("Keiyaku.ls Akuma limit must be an integer from 1 to 500");
-  return {
-    kind: "akuma",
-    ...(query.archetype === undefined ? {} : { archetype: query.archetype }),
-    ...(query.limit === undefined ? {} : { limit: query.limit as number }),
-  };
+  const kind = catalogQueryKind(query.kind);
+  assertCatalogQueryKeys(query, kind);
+  if (kind === "tasks") return taskQueryValue(query);
+  if (kind === "contracts" || kind === "archetypes") return { kind };
+  return akumaQueryValue(query);
 }
 
 export async function listCatalog(input: CatalogInput): Promise<Catalog> {
@@ -115,7 +129,7 @@ export async function listCatalog(input: CatalogInput): Promise<Catalog> {
   }
   const path = await worldRoot(values.path);
   if (query.kind === "tasks") {
-    return { kind: "tasks", root: path, rows: await observeTaskCatalogRows(path, query.namespace) };
+    return { kind: "tasks", root: path, ...(await observeTaskCatalog(path, query)) };
   }
   const listed = await Akuma.of(path).list({
     ...(query.archetype === undefined ? {} : { archetype: query.archetype }),

@@ -56,11 +56,11 @@ import {
   actor,
   addInput,
   closed,
-  limit,
   namespace,
   record,
   signal,
   sort,
+  taskRowViewLimit,
   taskId as id,
   taskIds,
   text,
@@ -75,7 +75,6 @@ import {
   type TaskQueryRow,
   type TaskQuerySort,
   type TaskRelationPredicateField,
-  DEFAULT_TASK_LIMIT,
 } from "./query.js";
 
 export type TaskDetail = Omit<TaskDetailFacts, "task"> & Readonly<{ task: TaskView }>;
@@ -122,6 +121,8 @@ export type {
 };
 export type { LibraryExecution } from "../akuma/requests.js";
 export { TaskAuthorityCorruptionError, TASK_RELATION_PREDICATE_FIELDS };
+export { observeRecentTaskStatus, type RecentTaskStatusRow } from "./catalog.js";
+export { taskRowViewLimit } from "./input.js";
 
 function forwardTask<Request extends TaskMutationRequest>(
   directory: string,
@@ -289,12 +290,13 @@ class TasksHandle {
       throw new TypeError("selection must be active, closed, or all");
     if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world")
       throw new TypeError("scope must be namespace or world");
+    const selectedLimit = taskRowViewLimit(v.limit);
     return listTasks(
       this.world,
       namespace(v.namespace),
       v.selection ?? "active",
       v.scope as "namespace" | "world" | undefined,
-      limit(v.limit) ?? DEFAULT_TASK_LIMIT,
+      selectedLimit,
     );
   }
   async ready(
@@ -310,12 +312,13 @@ class TasksHandle {
     if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world")
       throw new TypeError("scope must be namespace or world");
     const parent = v.parent === undefined ? undefined : id(v.parent);
+    const selectedLimit = taskRowViewLimit(v.limit);
     return readyTasks(
       this.world,
       namespace(v.namespace),
       v.scope as "namespace" | "world" | undefined,
       parent,
-      limit(v.limit) ?? DEFAULT_TASK_LIMIT,
+      selectedLimit,
     );
   }
   async blocked(
@@ -331,12 +334,13 @@ class TasksHandle {
     if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world")
       throw new TypeError("scope must be namespace or world");
     const parent = v.parent === undefined ? undefined : id(v.parent);
+    const selectedLimit = taskRowViewLimit(v.limit);
     return blockedTasks(
       this.world,
       namespace(v.namespace),
       v.scope as "namespace" | "world" | undefined,
       parent,
-      limit(v.limit) ?? DEFAULT_TASK_LIMIT,
+      selectedLimit,
     );
   }
   async query(
@@ -363,13 +367,14 @@ class TasksHandle {
           } as const)
         : normalizeTaskQuery(v.where);
     const selected = namespace(v.namespace);
+    const selectedLimit = taskRowViewLimit(v.limit);
     return queryTasks({
       world: this.world,
       ...(selected === undefined ? {} : { namespace: selected }),
       expression,
       ...(v.scope === undefined ? {} : { scope: v.scope as "namespace" | "world" }),
       sort: sort(v.sort) ?? "priority",
-      limit: limit(v.limit) ?? DEFAULT_TASK_LIMIT,
+      limit: selectedLimit,
     });
   }
   async doctor(): Promise<TaskDoctorReport> {

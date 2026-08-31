@@ -641,7 +641,10 @@ test("Task request recovery voids an unserved claim without replaying Task autho
     assert.equal((await readRequest(parent.paths, id))?.state, "voided");
     const board = await Tasks.of(root).list({ selection: "all", scope: "world" });
     assert.equal(board.kind, "accepted");
-    if (board.kind === "accepted") assert.equal(board.value.total, 0);
+    if (board.kind === "accepted") {
+      assert.deepEqual(board.value.rows, []);
+      assert.equal(board.value.hasMore, false);
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

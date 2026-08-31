@@ -114,9 +114,12 @@ function renderContractCatalog(catalog: Extract<Catalog, { kind: "contracts" }>)
 }
 export function renderCatalogText(catalog: Catalog): string {
   if (catalog.kind === "tasks") {
-    return catalog.rows
-      .map((row) => `${safeText(row.id)} - P${row.priority} - ${row.disposition} - ${safeText(row.title)}`)
-      .join("\n");
+    return [
+      ...catalog.rows.map(
+        (row) => `${safeText(row.id)} - P${row.priority} - ${row.disposition} - ${safeText(row.title)}`,
+      ),
+      ...(catalog.hasMore ? ["…"] : []),
+    ].join("\n");
   }
   if (catalog.kind === "contracts") return renderContractCatalog(catalog);
   if (catalog.kind === "archetypes") {

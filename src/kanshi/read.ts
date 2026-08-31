@@ -15,7 +15,7 @@ import { readRegionDeclarations, validateRegionPatterns } from "../library/regio
 import { contractId } from "../core/facts/types.js";
 import { selectKanshi, selectRegion } from "./select.js";
 import { FLEET_SNAPSHOT_ROWS, FLEET_VISIBLE_ROWS } from "./fleet.js";
-import type { TaskRow } from "../task/index.js";
+import { observeRecentTaskStatus, type TaskRow } from "../task/index.js";
 import type {
   AkumaKanshiWorld,
   ContractEndpointObservation,
@@ -189,7 +189,7 @@ function attachFleet(
 function decorateContracts(
   contracts: Section<ContractBoard>,
   holders: HolderRead,
-  namespaceTasks: (id: ContractBoard["rows"][number]["id"]) => Section<readonly TaskRow[]>,
+  namespaceTasks?: (id: ContractBoard["rows"][number]["id"]) => Section<readonly TaskRow[]> | undefined,
 ): Section<ContractKanshiBoard> {
   if (contracts.kind !== "present") return contracts;
   return {
@@ -197,15 +197,20 @@ function decorateContracts(
     value: {
       ...contracts.value,
       rows: contracts.value.rows.map((row) => {
-        const selected = namespaceTasks(row.id);
+        const selected = namespaceTasks?.(row.id);
         if (holders.kind === "failed") {
-          return { ...row, holder: { kind: "unavailable" as const }, fleet: [], namespaceTasks: selected };
+          return {
+            ...row,
+            holder: { kind: "unavailable" as const },
+            fleet: [],
+            ...(selected === undefined ? {} : { namespaceTasks: selected }),
+          };
         }
         const holder = holders.kind === "present" ? holders.value.get(row.id) : undefined;
         return {
           ...row,
           fleet: [],
-          namespaceTasks: selected,
+          ...(selected === undefined ? {} : { namespaceTasks: selected }),
           holder:
             holder?.disposition === "held"
               ? { kind: "held" as const, taskId: holder.taskId }
@@ -227,7 +232,7 @@ function contractEndpointObserver(contracts: Section<ContractKanshiBoard>): Obse
 }
 
 function joinTasks(
-  rows: Awaited<ReturnType<typeof observeTaskBoard>>["statusRows"],
+  rows: ReadonlyArray<Awaited<ReturnType<typeof observeRecentTaskStatus>>["rows"][number]>,
   holders: HolderRead,
   observeContract: ObserveContractEndpoint,
 ): readonly TaskKanshiRow[] {
@@ -268,19 +273,19 @@ function namespaceTaskSection(
   return { kind: "present", value: board.observation.selectNamespace(contractNamespace(id)) };
 }
 
-function readTasks(
+async function readTasks(
   path: WorldRoot,
-  board: TaskWorldRead,
   holders: HolderRead,
   observeContract: ObserveContractEndpoint,
-): Section<TaskKanshiWorld> {
+): Promise<Section<TaskKanshiWorld>> {
   if (holders.kind === "failed") return { kind: "failed", failure: holders.failure };
-  if (board.kind === "failed") return { kind: "failed", failure: board.failure };
-  if (board.kind === "absent") return { kind: "absent" };
-  return {
-    kind: "present",
-    value: { root: path, rows: joinTasks(board.observation.statusRows, holders, observeContract) },
-  };
+  return observeRecentTaskStatus(path, { limit: 10 }).then(
+    (recent) => ({
+      kind: "present" as const,
+      value: { root: path, hasMore: recent.hasMore, rows: joinTasks(recent.rows, holders, observeContract) },
+    }),
+    (error: unknown) => ({ kind: "failed" as const, failure: { message: diagnostic(error) } }),
+  );
 }
 
 async function joinAkuma(
@@ -368,8 +373,7 @@ async function observeWithoutRepo(
   const contracts = { kind: "absent" as const };
   const holders = { kind: "absent" as const };
   const observeContract = contractEndpointObserver(contracts);
-  const board = await readTaskWorld(world);
-  const tasks = world === null ? { kind: "absent" as const } : readTasks(world, board, holders, observeContract);
+  const tasks = world === null ? { kind: "absent" as const } : await readTasks(world, holders, observeContract);
   const aliases = world === null ? { kind: "absent" as const } : await readAliasBindings(world);
   const akuma = world === null ? { kind: "absent" as const } : await joinAkuma(world, observeContract, [], aliases);
   return {
@@ -400,17 +404,25 @@ async function observeRepo(input: RepoObservationInput): Promise<KanshiObservati
   try {
     return await withGitDecodeChannel(repo, (channel) =>
       withGitReadObservation(repo, channel, async (observation) => {
-        const [contractSection, holders, dispatches, regionSection, board] = await Promise.all([
+        const [contractSection, holders, dispatches, regionSection] = await Promise.all([
           readContracts(observation, contract),
           readHolders(observation),
           readDispatches(observation),
           region === undefined ? Promise.resolve(undefined) : readRegion(observation, region),
-          readTaskWorld(world),
         ]);
-        const contracts = decorateContracts(contractSection, holders, (id) => namespaceTaskSection(board, id));
+        const selectedContract =
+          contract !== undefined &&
+          contractSection.kind === "present" &&
+          contractSection.value.rows.some((row) => row.id === contract);
+        const board = selectedContract ? await readTaskWorld(world) : undefined;
+        const contracts = decorateContracts(
+          contractSection,
+          holders,
+          selectedContract ? (id) => (id === contract ? namespaceTaskSection(board!, id) : undefined) : undefined,
+        );
         const observeContract = contractEndpointObserver(contracts);
         const aliases = world === null ? { kind: "absent" as const } : await readAliasBindings(world);
-        const tasks = world === null ? { kind: "absent" as const } : readTasks(world, board, holders, observeContract);
+        const tasks = world === null ? { kind: "absent" as const } : await readTasks(world, holders, observeContract);
         const akuma =
           world === null
             ? { kind: "absent" as const }

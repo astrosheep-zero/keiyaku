@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readdir, realpath, stat } from "node:fs/promises";
 import { resolve } from "node:path";
+import { boundedListLimit, projectBoundedList } from "../bounded-list.js";
 import { AkumaHandle } from "./akuma-handle.js";
 import type {
   AkumaCallContext,
@@ -54,8 +55,6 @@ type KnownAkuma = Readonly<{
   paths: ReturnType<typeof akumaPaths>;
 }>;
 
-const DEFAULT_PAGE_LIMIT = 50;
-const MAX_PAGE_LIMIT = 500;
 export const PAGE_POOL_SIZE = 16;
 
 function activityAt(row: AkumaListRowValue): string | null {
@@ -76,13 +75,6 @@ function compareRows(left: AkumaListRowValue, right: AkumaListRowValue): number 
   const activity = compareActivity(activityAt(left), activityAt(right));
   if (activity !== 0) return activity;
   return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
-}
-
-function pageLimit(value: unknown): number {
-  if (value === undefined) return DEFAULT_PAGE_LIMIT;
-  if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > MAX_PAGE_LIMIT)
-    throw new TypeError(`Akuma list limit must be an integer from 1 to ${MAX_PAGE_LIMIT}`);
-  return value as number;
 }
 
 export async function boundedMap<Value, Result>(
@@ -296,7 +288,7 @@ export class Akuma {
     const unknown = Object.keys(input).find((key) => key !== "archetype" && key !== "limit");
     if (unknown !== undefined) throw new TypeError(`Akuma list input has unknown field: ${unknown}`);
     const selected = input.archetype === undefined ? undefined : archetypeName(input.archetype);
-    const limit = pageLimit(input.limit);
+    const limit = boundedListLimit(input.limit);
     const observedAt = new Date().toISOString();
     const known = await knownAkuma(this.path, selected);
     const candidatesWithBounds = await boundedMap(known.rows, async (row) => ({
@@ -328,9 +320,8 @@ export class Akuma {
     const ranked = readable.sort(compareRows);
     return {
       observedAt,
-      rows: ranked.slice(0, limit),
       searched: [known.runRoot],
-      hasMore: ranked[limit] !== undefined,
+      ...projectBoundedList(ranked, limit),
     };
   }
 }

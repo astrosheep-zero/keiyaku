@@ -8,8 +8,9 @@ import {
   type HeldSqliteTransactionLock,
 } from "../coordination/sqlite-transaction-lock.js";
 import type { WorldRoot } from "../world.js";
+import { boundedListLimit, projectBoundedList, type BoundedList } from "../bounded-list.js";
 import { parseTaskDocument, type TaskDocument } from "./document.js";
-import { formatTaskId, parseTaskId, taskAuthorityPath, type TaskId } from "./identity.js";
+import { formatTaskId, parseTaskId, sameNamespace, taskAuthorityPath, type TaskId } from "./identity.js";
 import type { TaskBoard } from "./board.js";
 
 export type BoardSnapshot = Readonly<{ board: TaskBoard; bytes: ReadonlyMap<TaskId, Uint8Array> }>;
@@ -109,6 +110,44 @@ export async function readBoard(world: WorldRoot): Promise<BoardSnapshot> {
     bytes.set(id, source);
   }
   return { board: { tasks }, bytes };
+}
+
+function compareRecentTasks(left: TaskDocument, right: TaskDocument): number {
+  const updated = right.updatedAt.localeCompare(left.updatedAt);
+  return updated === 0 ? Buffer.compare(Buffer.from(left.id), Buffer.from(right.id)) : updated;
+}
+
+export async function readRecentTaskDocuments(
+  world: WorldRoot,
+  input: Readonly<{ namespace?: readonly string[]; selection?: "all" | "active"; limit?: number }>,
+): Promise<BoundedList<TaskDocument>> {
+  const limit = boundedListLimit(input.limit);
+  const directory = tasksDirectory(world);
+  const tasks: TaskDocument[] = [];
+  for (const path of await authorityFiles(directory)) {
+    const metadata = await lstat(path);
+    if (!metadata.isFile() || metadata.isSymbolicLink())
+      throw new Error(`Task authority is not a regular file: ${path}`);
+    const coordinate = coordinateFromPath(directory, path);
+    if (input.namespace !== undefined && !sameNamespace(coordinate.namespace, input.namespace)) continue;
+    const task = parseTaskDocument(await readFile(path), coordinate);
+    if (input.selection === "active" && (task.state === "done" || task.state === "drop")) continue;
+    tasks.push(task);
+  }
+  return projectBoundedList(tasks.sort(compareRecentTasks), limit);
+}
+
+export async function readTaskDocument(world: WorldRoot, id: TaskId): Promise<TaskDocument | undefined> {
+  const path = authorityPath(world, id);
+  try {
+    const metadata = await lstat(path);
+    if (!metadata.isFile() || metadata.isSymbolicLink())
+      throw new Error(`Task authority is not a regular file: ${path}`);
+    return parseTaskDocument(await readFile(path), parseTaskId(id));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
 }
 
 function equal(left: Uint8Array | null, right: Uint8Array | null): boolean {

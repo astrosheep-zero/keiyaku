@@ -26,6 +26,10 @@ into a positive result. They may make a terminal-readable view denser, wrap
 prose, and use non-semantic terminal emphasis, but cannot truncate a copyable
 identity or replace a public discriminant with decoration.
 
+When an owner reports a bounded catalogue with additional rows, text signals
+that single public fact without adding counts, an exhaustive-mode claim, or a
+continuation instruction. A complete catalogue has no omission tail.
+
 Kanshi owns what a composite report means; this chapter owns its terminal
 projection. Task owns Task facts and [cli-task.md](cli-task.md) owns their
 Task-facing presentation. Contract, Git, and Akuma renderers receive their

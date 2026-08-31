@@ -215,7 +215,9 @@ export async function addressAkumaSet(input: UncheckedAkumaAddressInput): Promis
   if (hasSelectorKind(selectors, "contract") && values.repo === undefined) {
     throw new TypeError("Contract Akuma selector requires repo");
   }
-  const fleetIds = hasSelectorKind(selectors, "glob") ? (await Akuma.of(path).listComplete()).rows.map((row) => row.id) : [];
+  const fleetIds = hasSelectorKind(selectors, "glob")
+    ? (await Akuma.of(path).listComplete()).rows.map((row) => row.id)
+    : [];
   const aliases = hasSelectorKind(selectors, "alias")
     ? new Map((await readAliases(path)).map((binding) => [binding.alias, binding.akuId]))
     : new Map<AkumaAlias, AkuId>();

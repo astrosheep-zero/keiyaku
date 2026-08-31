@@ -23,10 +23,11 @@ import {
 import { allocateLocalId, deriveLocalStem, formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
 import { authorityPath, nukeTaskAuthority, readBoard, replaceAuthority, withTaskLocks } from "./store.js";
 import type { WorldRoot } from "../world.js";
+import { projectBoundedList } from "../bounded-list.js";
+import { taskRowViewLimit } from "./input.js";
 import {
-  DEFAULT_TASK_LIMIT,
-  projectPage,
   projectQuery,
+  projectQueryRows,
   queryUnderTargets,
   type TaskPage,
   type TaskQueryExpression,
@@ -377,13 +378,14 @@ export async function listTasks(
   namespace: readonly string[] | undefined,
   selection: "active" | "closed" | "all",
   scope?: "namespace" | "world",
-  limit = DEFAULT_TASK_LIMIT,
+  limit?: number,
 ): Promise<TaskOutcome<TaskPage<TaskRow>>> {
+  const selectedLimit = taskRowViewLimit(limit);
   const selected = readScope(namespace, scope);
   const board = (await readBoard(world)).board;
   return {
     kind: "accepted",
-    value: projectPage(projectRows(board, createTaskRelations(board), selected, selection), limit),
+    value: projectBoundedList(projectRows(board, createTaskRelations(board), selected, selection), selectedLimit),
   };
 }
 export async function readTaskDetails(
@@ -411,8 +413,9 @@ export async function readyTasks(
   namespace: readonly string[] | undefined,
   scope?: "namespace" | "world",
   parent?: TaskId,
-  limit = DEFAULT_TASK_LIMIT,
+  limit?: number,
 ): Promise<TaskOutcome<TaskPage<TaskRow>>> {
+  const selectedLimit = taskRowViewLimit(limit);
   const selected = readScope(namespace, scope);
   const board = (await readBoard(world)).board;
   if (parent !== undefined && !board.tasks.has(parent))
@@ -421,23 +424,23 @@ export async function readyTasks(
   const ready: TaskQueryExpression = { kind: "predicate", predicate: { field: "ready", operator: "=", value: true } };
   const expression: TaskQueryExpression =
     parent === undefined ? ready : { kind: "and", terms: [ready, underExpression(parent)] };
-  const selectedRows = projectQuery(board, relations, {
+  const selectedRows = projectQueryRows(board, relations, {
     scope: selected as readonly string[] | null,
     expression,
-    limit: Math.max(1, board.tasks.size),
-  }).rows;
+  });
   const rows = selectedRows.map(
     ({ parent: _parent, needs: _needs, blocks: _blocks, createdAt: _createdAt, ...row }) => row,
   );
-  return { kind: "accepted", value: projectPage(rows, limit) };
+  return { kind: "accepted", value: projectBoundedList(rows, selectedLimit) };
 }
 export async function blockedTasks(
   world: WorldRoot,
   namespace: readonly string[] | undefined,
   scope?: "namespace" | "world",
   parent?: TaskId,
-  limit = DEFAULT_TASK_LIMIT,
+  limit?: number,
 ): Promise<TaskOutcome<TaskPage<BlockedTaskRow>>> {
+  const selectedLimit = taskRowViewLimit(limit);
   const selected = readScope(namespace, scope);
   const board = (await readBoard(world)).board;
   if (parent !== undefined && !board.tasks.has(parent))
@@ -449,17 +452,16 @@ export async function blockedTasks(
   };
   const expression: TaskQueryExpression =
     parent === undefined ? blocked : { kind: "and", terms: [blocked, underExpression(parent)] };
-  const selectedRows = projectQuery(board, relations, {
+  const selectedRows = projectQueryRows(board, relations, {
     scope: selected as readonly string[] | null,
     expression,
-    limit: Math.max(1, board.tasks.size),
-  }).rows;
+  });
   const ids = new Set(selectedRows.map((row) => row.id));
   return {
     kind: "accepted",
-    value: projectPage(
+    value: projectBoundedList(
       projectBlocked(board, selected as readonly string[] | null, relations).filter((row) => ids.has(row.id)),
-      limit,
+      selectedLimit,
     ),
   };
 }
@@ -473,6 +475,7 @@ export async function queryTasks(
     limit?: number;
   }>,
 ): Promise<TaskOutcome<TaskPage<TaskQueryRow>>> {
+  const selectedLimit = taskRowViewLimit(input.limit);
   const selected = readScope(input.namespace, input.scope);
   const board = (await readBoard(input.world)).board;
   const relations = createTaskRelations(board);
@@ -486,7 +489,7 @@ export async function queryTasks(
       scope: selected as readonly string[] | null,
       expression: input.expression,
       sort: input.sort ?? "priority",
-      limit: input.limit ?? DEFAULT_TASK_LIMIT,
+      limit: selectedLimit,
     }),
   };
 }

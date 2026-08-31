@@ -1,7 +1,8 @@
 import { type TaskPriority, type TaskState } from "./document.js";
 import { isTaskSegment, parseTaskId, type TaskId } from "./identity.js";
 import type { AddTaskInput, UpdateTaskInput } from "./operations.js";
-import { isValidTaskLimit, MAX_TASK_LIMIT, type TaskQuerySort } from "./query.js";
+import type { TaskQuerySort } from "./query.js";
+import { boundedListLimit } from "../bounded-list.js";
 
 export function record(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -75,10 +76,13 @@ export function priority(value: unknown): TaskPriority | undefined {
 
 export function limit(value: unknown): number | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "number" || !isValidTaskLimit(value)) {
-    throw new TypeError(`limit must be an integer from 1 to ${MAX_TASK_LIMIT}`);
-  }
+  if (typeof value !== "number") throw new TypeError("limit must be a number");
   return value;
+}
+
+/** Validates and supplies the shared bounded-list limit for Task row views. */
+export function taskRowViewLimit(value: unknown): number {
+  return boundedListLimit(value);
 }
 
 export function sort(value: unknown): TaskQuerySort | undefined {
