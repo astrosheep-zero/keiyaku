@@ -84,10 +84,7 @@ test("ordinary mutations advance a non-later timestamp by one millisecond", asyn
   const before = await tasks.task({ id }).read();
   if (before === null) return;
   const future = "2099-01-01T00:00:00.000Z";
-  writeFileSync(
-    authorityPath(root, id),
-    serializeTaskDocument({ ...before.task, updatedAt: future }),
-  );
+  writeFileSync(authorityPath(root, id), serializeTaskDocument({ ...before.task, updatedAt: future }));
 
   const updated = await tasks.task({ id }).update({ note: "changed" });
   assert.equal(updated.kind, "accepted");
@@ -795,7 +792,7 @@ test("task lock acquisition failure retains a held-lock cleanup failure", { conc
   const first = acceptedId(await tasks.add({ title: "Acquire failure first" }));
   const second = acceptedId(await tasks.add({ title: "Acquire failure second" }));
   const blocked = await acquireSqliteTransactionLock({
-    path: join(tasks.root, ".keiyaku", "locks", "task", "acquire-failure-second.sqlite"),
+    path: join(tasks.root, ".keiyaku", "locks", "task", `${parseTaskId(second).localId}.sqlite`),
     mode: "immediate",
   });
   const originalClose = DatabaseSync.prototype.close;
@@ -810,7 +807,10 @@ test("task lock acquisition failure retains a held-lock cleanup failure", { conc
   };
   try {
     await assert.rejects(
-      withTaskLocks({ world: tasks.root, allocation: false, ids: [first, second], timeoutMs: 25 }, async () => "unreachable"),
+      withTaskLocks(
+        { world: tasks.root, allocation: false, ids: [first, second], timeoutMs: 25 },
+        async () => "unreachable",
+      ),
       (error: unknown) => {
         assert.ok(error instanceof AggregateError);
         assert.equal(error.errors.length, 2);
@@ -860,14 +860,17 @@ test("task action failure retains a close failure", { concurrency: false }, asyn
 
 test("partial task composition retains committed changes when lock cleanup fails", { concurrency: false }, async () => {
   const { tasks, root } = await world();
-  assert.equal((await tasks.add({ title: "Partial first" })).kind, "accepted");
-  assert.equal((await tasks.add({ title: "Partial second" })).kind, "accepted");
+  const first = await tasks.add({ title: "Partial first" });
+  const second = await tasks.add({ title: "Partial second" });
+  assert.equal(first.kind, "accepted");
+  assert.equal(second.kind, "accepted");
+  if (first.kind !== "accepted" || second.kind !== "accepted") return;
   const originalClose = DatabaseSync.prototype.close;
   let signalCalls = 0;
   const controller = new AbortController();
   controller.signal.throwIfAborted = (): void => {
     signalCalls += 1;
-    if (signalCalls === 4) writeFileSync(join(root, ".keiyaku", "tasks", "partial-second.md"), "changed\n");
+    if (signalCalls === 4) writeFileSync(authorityPath(root, second.value.id), "changed\n");
   };
   DatabaseSync.prototype.close = function patchedClose(this: DatabaseSync): void {
     try {
@@ -878,7 +881,7 @@ test("partial task composition retains committed changes when lock cleanup fails
   };
   try {
     const result = await tasks.compose({
-      markdown: ["@task/partial-first", "pri = 1", "@task/partial-second", "pri = 1", ""].join("\n"),
+      markdown: [`@${first.value.id}`, "pri = 1", `@${second.value.id}`, "pri = 1", ""].join("\n"),
       signal: controller.signal,
     });
     assert.equal(result.kind, "incomplete");
@@ -1071,7 +1074,10 @@ test("creation actor persists as createdBy and later mutations leave it unchange
     assert.equal(composed.kind, "accepted");
     if (composed.kind !== "accepted") return;
     assert.equal(composed.documentChanges.length, 2);
-    const composedId = composed.kind === "accepted" ? composed.documentChanges.find((change) => change.taskId.startsWith("task/composed-"))?.taskId : undefined;
+    const composedId =
+      composed.kind === "accepted"
+        ? composed.documentChanges.find((change) => change.taskId.startsWith("task/composed-"))?.taskId
+        : undefined;
     const composedTask = composedId === undefined ? null : await tasks.task({ id: composedId }).read();
     const updatedExisting = await tasks.task({ id: added.value.id }).read();
     assert.equal(composedTask?.task.createdBy, "composer");

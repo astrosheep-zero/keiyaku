@@ -6,7 +6,13 @@ import {
   serializeTaskDocument,
   TaskAuthorityCorruptionError,
 } from "../src/task/document.js";
-import { deriveLocalStem, formatTaskId, parseTaskId } from "../src/task/identity.js";
+import {
+  deriveLocalStem,
+  formatTaskId,
+  parseTaskId,
+  physicalTaskSegment,
+  TASK_LOCAL_ID_BYTES,
+} from "../src/task/identity.js";
 
 test("task identity normalizes titles, fits new stems by whole words, and supports nested namespaces", () => {
   assert.equal(deriveLocalStem("  Ship Native Task!  "), "ship-native-task");
@@ -18,6 +24,15 @@ test("task identity normalizes titles, fits new stems by whole words, and suppor
   const id = formatTaskId({ namespace: ["contract", "internal"], localId: "ship-native-task" });
   assert.equal(id, "task/contract/internal/ship-native-task");
   assert.deepEqual(parseTaskId(id), { namespace: ["contract", "internal"], localId: "ship-native-task" });
+});
+
+test("task physical local-ID budget fits authority and lock components", () => {
+  assert.equal(TASK_LOCAL_ID_BYTES, 240);
+  assert.equal(physicalTaskSegment("a".repeat(TASK_LOCAL_ID_BYTES)), "a".repeat(TASK_LOCAL_ID_BYTES));
+  assert.throws(
+    () => physicalTaskSegment("a".repeat(TASK_LOCAL_ID_BYTES + 1)),
+    /task identity cannot fit the physical filename budget/u,
+  );
 });
 
 test("creation and authority documents contain no Contract association", () => {

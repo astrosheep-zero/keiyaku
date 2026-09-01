@@ -8,7 +8,7 @@ import {
   type TaskCompositionPlan,
 } from "./compose-language.js";
 import { serializeTaskDocument } from "./document.js";
-import type { TaskId } from "./identity.js";
+import { parseTaskId, taskAuthorityPath, type TaskId } from "./identity.js";
 import type { TaskCleanupFailure, TaskCompositionDiagnostic, TaskRefusal, TaskRetry } from "./operations.js";
 import { readBoard, replaceAuthority, withTaskLocks } from "./store.js";
 
@@ -32,8 +32,11 @@ export type TaskCompositionResult =
       bodies: readonly TaskCompositionBodyPreview[];
     }>
   | Readonly<
-      { kind: "accepted"; documentChanges: readonly TaskDocumentChange[]; cleanup?: TaskCleanupFailure } &
-        TaskCompositionFacts
+      {
+        kind: "accepted";
+        documentChanges: readonly TaskDocumentChange[];
+        cleanup?: TaskCleanupFailure;
+      } & TaskCompositionFacts
     >
   | Readonly<{ kind: "refused"; refusal: Extract<TaskRefusal, { kind: "invalid-composition" }> }>
   | (Readonly<{
@@ -106,6 +109,18 @@ function recoveryDraft(namespace: readonly string[], remaining: readonly Planned
 
 function plannedResult(plan: TaskCompositionPlan): Extract<TaskCompositionResult, { kind: "planned" }> {
   return { kind: "planned", ...facts(plan), bodies: plan.bodies };
+}
+
+function physicalPlanDiagnostics(plan: TaskCompositionPlan): readonly TaskCompositionDiagnostic[] {
+  try {
+    taskAuthorityPath("", { namespace: plan.namespace, localId: "placeholder" });
+    for (const task of plan.tasks) taskAuthorityPath("", parseTaskId(task.after.id));
+    return [];
+  } catch (error) {
+    return [
+      { line: 1, reason: error instanceof Error ? error.message : String(error), token: plan.namespace.join("/") },
+    ];
+  }
 }
 
 function planAgainst(
@@ -201,32 +216,45 @@ export async function composeTasks(
   }>,
 ): Promise<TaskCompositionResult> {
   const { world, markdown, signal, actor, defaultNamespace = [], planOnly = false } = input;
-  const at = currentTimestamp();
-  const initial = await readBoard(world);
-  const initialPlan = planAgainst(markdown, initial.board, defaultNamespace, at, actor);
-  if (initialPlan.kind === "refused") return refusal(initialPlan.diagnostics);
-  if (planOnly) return plannedResult(initialPlan.plan);
-  const request = composeInput({
-    world,
-    markdown,
-    namespace: defaultNamespace,
-    at,
-    ...(actor === undefined ? {} : { actor }),
-    ...(signal === undefined ? {} : { signal }),
-  });
-  const allocation = initialPlan.plan.tasks.some((task) => task.kind === "new");
-  const admitted = allocation
-    ? await withTaskLocks(
-        { world, allocation: true, ids: [], ...(signal === undefined ? {} : { signal }) },
-        async () => await composeUnderLocks(request),
+  try {
+    const at = currentTimestamp();
+    const initial = await readBoard(world);
+    const initialPlan = planAgainst(markdown, initial.board, defaultNamespace, at, actor);
+    if (initialPlan.kind === "refused") return refusal(initialPlan.diagnostics);
+    const physicalDiagnostics = physicalPlanDiagnostics(initialPlan.plan);
+    if (physicalDiagnostics.length > 0) return refusal(physicalDiagnostics);
+    if (planOnly) return plannedResult(initialPlan.plan);
+    const request = composeInput({
+      world,
+      markdown,
+      namespace: defaultNamespace,
+      at,
+      ...(actor === undefined ? {} : { actor }),
+      ...(signal === undefined ? {} : { signal }),
+    });
+    const allocation = initialPlan.plan.tasks.some((task) => task.kind === "new");
+    const admitted = allocation
+      ? await withTaskLocks(
+          { world, allocation: true, ids: [], ...(signal === undefined ? {} : { signal }) },
+          async () => await composeUnderLocks(request),
+        )
+      : await composeUnderLocks(request);
+    if (admitted !== "busy") return admitted;
+    return {
+      kind: "incomplete",
+      ...facts(initialPlan.plan),
+      documentChanges: [],
+      stopped: { kind: "retry", reason: "busy" },
+      draft: recoveryDraft(initialPlan.plan.namespace, initialPlan.plan.tasks),
+    };
+  } catch (error) {
+    if (
+      error instanceof TypeError &&
+      /task identity (?:cannot fit the physical filename budget|contains a Windows-reserved physical segment)/u.test(
+        error.message,
       )
-    : await composeUnderLocks(request);
-  if (admitted !== "busy") return admitted;
-  return {
-    kind: "incomplete",
-    ...facts(initialPlan.plan),
-    documentChanges: [],
-    stopped: { kind: "retry", reason: "busy" },
-    draft: recoveryDraft(initialPlan.plan.namespace, initialPlan.plan.tasks),
-  };
+    )
+      return refusal([{ line: 1, reason: error.message, token: defaultNamespace.join("/") }]);
+    throw error;
+  }
 }

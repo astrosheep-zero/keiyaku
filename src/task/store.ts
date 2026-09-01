@@ -10,7 +10,15 @@ import {
 import type { WorldRoot } from "../world.js";
 import { boundedListLimit, projectBoundedList, type BoundedList } from "../bounded-list.js";
 import { parseTaskDocument, type TaskDocument } from "./document.js";
-import { formatTaskId, parseTaskId, sameNamespace, taskAuthorityPath, type TaskId } from "./identity.js";
+import {
+  formatTaskId,
+  parseTaskId,
+  physicalTaskSegment,
+  TASK_LOCAL_ID_BYTES,
+  sameNamespace,
+  taskAuthorityPath,
+  type TaskId,
+} from "./identity.js";
 import type { TaskBoard } from "./board.js";
 
 export type BoardSnapshot = Readonly<{ board: TaskBoard; bytes: ReadonlyMap<TaskId, Uint8Array> }>;
@@ -64,13 +72,14 @@ async function resolveAuthority(
 ): Promise<{ path: string; exists: boolean }> {
   const coordinate = parseTaskId(id);
   const root = tasksDirectory(world);
-  if (!(await requireDirectory(root, mode))) return { path: taskAuthorityPath(root, coordinate), exists: false };
+  const safePath = taskAuthorityPath(root, coordinate);
+  if (!(await requireDirectory(root, mode))) return { path: safePath, exists: false };
   let parent = root;
   for (const segment of coordinate.namespace) {
-    parent = resolve(parent, segment);
-    if (!(await requireDirectory(parent, mode))) return { path: taskAuthorityPath(root, coordinate), exists: false };
+    parent = resolve(parent, physicalTaskSegment(segment));
+    if (!(await requireDirectory(parent, mode))) return { path: safePath, exists: false };
   }
-  const path = taskAuthorityPath(root, coordinate);
+  const path = safePath;
   try {
     const stat = await lstat(path);
     if (stat.isSymbolicLink() || !stat.isFile()) throw custodyError(path);
@@ -99,7 +108,9 @@ function coordinateFromPath(tasksDirectory: string, path: string) {
   const local = relative(tasksDirectory, path);
   if (local.startsWith("..") || resolve(tasksDirectory, local) !== path || !local.endsWith(".md"))
     throw new Error(`invalid Task authority path: ${path}`);
-  return parseTaskId(`task/${local.slice(0, -3).split(sep).join("/")}`);
+  const segments = local.slice(0, -3).split(sep);
+  segments.forEach((segment) => physicalTaskSegment(segment));
+  return parseTaskId(`task/${segments.join("/")}`);
 }
 
 async function ownedAuthorityCandidates(directory: string): Promise<readonly Readonly<{ id: TaskId; path: string }>[]> {
@@ -226,7 +237,14 @@ export async function authorityBytesMatch(world: WorldRoot, id: TaskId, expected
 
 function lockPath(world: WorldRoot, id: TaskId): string {
   const coordinate = parseTaskId(id);
-  return resolve(world, ".keiyaku", "locks", "task", ...coordinate.namespace, `${coordinate.localId}.sqlite`);
+  return resolve(
+    world,
+    ".keiyaku",
+    "locks",
+    "task",
+    ...coordinate.namespace.map((segment) => physicalTaskSegment(segment)),
+    `${physicalTaskSegment(coordinate.localId, TASK_LOCAL_ID_BYTES)}.sqlite`,
+  );
 }
 
 function errorDetail(error: unknown): string {
@@ -322,11 +340,9 @@ export async function withTaskLocks<T>(
       else if (failure === undefined) failure = new AggregateError(cleanupErrors, "Task lock cleanup failed");
       else {
         const originalFailure = failure;
-        failure = new AggregateError(
-          [originalFailure, ...cleanupErrors],
-          errorDetail(originalFailure),
-          { cause: originalFailure },
-        );
+        failure = new AggregateError([originalFailure, ...cleanupErrors], errorDetail(originalFailure), {
+          cause: originalFailure,
+        });
       }
     }
   }

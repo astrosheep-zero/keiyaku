@@ -117,24 +117,36 @@ async function create(
   signal?: AbortSignal,
   actor?: string,
 ): Promise<TaskMutationResult> {
-  const result = await withTaskLocks(
-    { world, allocation: true, ids: [], ...(signal === undefined ? {} : { signal }) },
-    async () => {
-      const snapshot = await readBoard(world),
-        next = addDocument(base, namespace, snapshot.board, currentTimestamp(), actor);
-      const problem = relationProblem(boardWith(snapshot.board, next), null, next);
-      if (problem !== null) return refused({ kind: "invalid-graph", diagnostic: problem });
-      const replaced = await replaceAuthority({
-        world,
-        id: next.id,
-        expected: null,
-        next: serializeTaskDocument(next),
-      });
-      return replaced === "replaced"
-        ? ({ kind: "accepted", value: taskView(next) } as const)
-        : retry("concurrent-modification");
-    },
-  );
+  let result: TaskMutationResult | "busy";
+  try {
+    result = await withTaskLocks(
+      { world, allocation: true, ids: [], ...(signal === undefined ? {} : { signal }) },
+      async () => {
+        const snapshot = await readBoard(world),
+          next = addDocument(base, namespace, snapshot.board, currentTimestamp(), actor);
+        const problem = relationProblem(boardWith(snapshot.board, next), null, next);
+        if (problem !== null) return refused({ kind: "invalid-graph", diagnostic: problem });
+        const replaced = await replaceAuthority({
+          world,
+          id: next.id,
+          expected: null,
+          next: serializeTaskDocument(next),
+        });
+        return replaced === "replaced"
+          ? ({ kind: "accepted", value: taskView(next) } as const)
+          : retry("concurrent-modification");
+      },
+    );
+  } catch (error) {
+    if (
+      error instanceof TypeError &&
+      /task identity (?:cannot fit the physical filename budget|contains a Windows-reserved physical segment)/u.test(
+        error.message,
+      )
+    )
+      return refused({ kind: "invalid-namespace-context", path: namespace.join("/") });
+    throw error;
+  }
   return result === "busy" ? retry("busy") : result;
 }
 

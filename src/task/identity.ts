@@ -7,6 +7,15 @@ import { normalizeIdentityStem } from "../identity/normalize.js";
 export type TaskId = `task/${string}`;
 export type TaskCoordinate = Readonly<{ namespace: readonly string[]; localId: string }>;
 const STEM_CODE_POINTS = 32;
+const TASK_FILENAME_BYTES = 255;
+const TASK_EXTENSION_BYTES = Buffer.byteLength(".md");
+const TASK_LOCK_EXTENSION_BYTES = Buffer.byteLength(".sqlite");
+const GENERATED_SUFFIX = "-0000";
+export const TASK_LOCK_ID_BYTES = TASK_FILENAME_BYTES - TASK_LOCK_EXTENSION_BYTES;
+export const TASK_LOCAL_ID_BYTES =
+  TASK_FILENAME_BYTES - TASK_EXTENSION_BYTES - TASK_LOCK_EXTENSION_BYTES - Buffer.byteLength(GENERATED_SUFFIX);
+const GENERATED_STEM_BYTES = TASK_LOCAL_ID_BYTES - Buffer.byteLength(GENERATED_SUFFIX);
+const WINDOWS_RESERVED = /^(?:con|prn|aux|nul|clock\$|com[1-9]|lpt[1-9])(?:\..*)?$/iu;
 
 export function isTaskSegment(value: string): boolean {
   return (
@@ -40,7 +49,13 @@ export function contractNamespace(id: ContractId): readonly string[] {
 }
 
 export function taskAuthorityPath(tasksDirectory: string, coordinate: TaskCoordinate): string {
-  return join(tasksDirectory, ...coordinate.namespace, `${coordinate.localId}.md`);
+  if (![...coordinate.namespace, coordinate.localId].every(isTaskSegment))
+    throw new TypeError("task coordinate contains a noncanonical segment");
+  return join(
+    tasksDirectory,
+    ...coordinate.namespace.map((segment) => physicalTaskSegment(segment)),
+    `${physicalTaskSegment(coordinate.localId)}.md`,
+  );
 }
 
 export function deriveLocalStem(title: string): string {
@@ -55,17 +70,36 @@ export function deriveLocalStem(title: string): string {
     fitted += `-${word}`;
     count = candidate;
   }
-  return fitted;
+  return fitPhysicalStem(fitted);
 }
 
 export function allocateLocalId(stem: string, occupied: ReadonlySet<string>): string {
   const seed = randomBytes(2).readUInt16BE(0);
   for (let offset = 0; offset <= 0xffff; offset += 1) {
     const suffix = ((seed + offset) & 0xffff).toString(16).padStart(4, "0");
-    const candidate = `${stem}-${suffix}`;
+    const candidate = `${fitPhysicalStem(stem, suffix)}-${suffix}`;
     if (!occupied.has(candidate)) return candidate;
   }
   throw new Error("task identity hexadecimal suffix space exhausted");
+}
+
+function fitPhysicalStem(stem: string, suffix?: string): string {
+  const maxBytes = suffix === undefined ? GENERATED_STEM_BYTES : TASK_LOCAL_ID_BYTES - Buffer.byteLength(`-${suffix}`);
+  let result = "";
+  for (const segment of new Intl.Segmenter("und", { granularity: "grapheme" }).segment(stem)) {
+    if (Buffer.byteLength(result + segment.segment) > maxBytes) break;
+    result += segment.segment;
+  }
+  result = result.replace(/-+$/u, "");
+  if (result.length === 0) throw new TypeError("task title cannot fit the physical filename budget");
+  return result;
+}
+
+export function physicalTaskSegment(segment: string, maxBytes = TASK_LOCAL_ID_BYTES): string {
+  if (Buffer.byteLength(segment) <= maxBytes && !WINDOWS_RESERVED.test(segment)) return segment;
+  if (Buffer.byteLength(segment) > maxBytes)
+    throw new TypeError("task identity cannot fit the physical filename budget");
+  throw new TypeError("task identity contains a Windows-reserved physical segment");
 }
 
 export function sameNamespace(left: readonly string[], right: readonly string[]): boolean {

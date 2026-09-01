@@ -6,6 +6,8 @@ import test from "node:test";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { Tasks } from "../src/task/index.js";
 import { nukeTask } from "../src/task/operations.js";
+import { parseTaskId } from "../src/task/identity.js";
+import { authorityPath } from "../src/task/store.js";
 import { World } from "../src/world.js";
 
 async function world() {
@@ -16,16 +18,19 @@ test("Task nuke lock contention is busy and does not delete unlocked files", asy
   const root = await world();
   try {
     const tasks = Tasks.of(root);
-    assert.equal((await tasks.add({ title: "Keep locked" })).kind, "accepted");
-    assert.equal((await tasks.add({ title: "Also owned" })).kind, "accepted");
-    const owned = join(root, ".keiyaku", "tasks", "keep-locked.md");
-    const other = join(root, ".keiyaku", "tasks", "also-owned.md");
+    const locked = await tasks.add({ title: "Keep locked" });
+    const otherTask = await tasks.add({ title: "Also owned" });
+    assert.equal(locked.kind, "accepted");
+    assert.equal(otherTask.kind, "accepted");
+    if (locked.kind !== "accepted" || otherTask.kind !== "accepted") return;
+    const owned = authorityPath(root, locked.value.id);
+    const other = authorityPath(root, otherTask.value.id);
     const foreign = join(root, ".keiyaku", "tasks", "Not-Valid.md");
     writeFileSync(foreign, "invalid coordinate\n");
     const ownedBytes = readFileSync(owned);
     const otherBytes = readFileSync(other);
     const held = await acquireSqliteTransactionLock({
-      path: join(root, ".keiyaku", "locks", "task", "keep-locked.sqlite"),
+      path: join(root, ".keiyaku", "locks", "task", `${parseTaskId(locked.value.id).localId}.sqlite`),
       mode: "immediate",
       timeoutMs: 100,
     });
@@ -46,8 +51,10 @@ test("Task nuke re-enumerates after the allocation lock so a Task created while 
   const root = await world();
   try {
     const tasks = Tasks.of(root);
-    assert.equal((await tasks.add({ title: "Already owned" })).kind, "accepted");
-    const existing = join(root, ".keiyaku", "tasks", "already-owned.md");
+    const ownedTask = await tasks.add({ title: "Already owned" });
+    assert.equal(ownedTask.kind, "accepted");
+    if (ownedTask.kind !== "accepted") return;
+    const existing = authorityPath(root, ownedTask.value.id);
     const created = join(root, ".keiyaku", "tasks", "created-while-waiting.md");
     const held = await acquireSqliteTransactionLock({
       path: join(root, ".keiyaku", "locks", "task-allocation.sqlite"),
@@ -96,7 +103,11 @@ test("nested Task authority remains discoverable after a fresh World observation
     assert.equal(read?.task.title, "Nested durable");
     const listed = await second.list({ namespace: ["deep", "inside"] });
     assert.equal(listed.kind, "accepted");
-    if (listed.kind === "accepted") assert.deepEqual(listed.value.rows.map((row) => row.id), [added.value.id]);
+    if (listed.kind === "accepted")
+      assert.deepEqual(
+        listed.value.rows.map((row) => row.id),
+        [added.value.id],
+      );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
