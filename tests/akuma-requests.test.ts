@@ -63,7 +63,7 @@ async function fixture(allowed?: Soul["allowed"]) {
   return { root, parent, soul, leash, close: () => rmSync(root, { recursive: true, force: true }) };
 }
 
-test("a caller gets a retryable transport outcome when its request channel disappears before a receipt", async () => {
+test("a caller gets an unknown transport outcome when its request channel disappears before a receipt", async () => {
   const directory = mkdtempSync(join(tmpdir(), "keiyaku-request-claim-loss-"));
   const id = "00000000-0000-4000-8000-000000000001";
   try {
@@ -87,7 +87,7 @@ test("a caller gets a retryable transport outcome when its request channel disap
       request,
       (error: unknown) =>
         error instanceof AkumaBodyRequestError &&
-        error.outcome === "retryable" &&
+        error.outcome === "unknown" &&
         error.diagnostic === "parent request channel closed before a receipt" &&
         error.requestId === id,
     );
@@ -491,9 +491,7 @@ test("a closed request channel does not report a reserved child as voided", asyn
     await assert.rejects(
       request,
       (error: unknown) =>
-        error instanceof AkumaBodyRequestError &&
-        error.outcome === "retryable" &&
-        error.requestId === id,
+        error instanceof AkumaBodyRequestError && error.outcome === "unknown" && error.requestId === id,
     );
     assert.equal((await readRequest(value.parent.paths, id))?.state, "reserved");
   } finally {

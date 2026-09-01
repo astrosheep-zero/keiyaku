@@ -9,7 +9,7 @@ export class AkumaBodyRequestError extends Error {
   readonly kind = "akuma-body-request";
   constructor(
     readonly action: string,
-    readonly outcome: "refused" | "voided" | "unproven" | "retryable",
+    readonly outcome: "refused" | "voided" | "unproven" | "unknown",
     readonly diagnostic: string,
     readonly requestId: string,
   ) {
@@ -145,7 +145,7 @@ export async function requestBodyCommand<Input, Output, Reference>(
     ) {
       throw new AkumaBodyRequestError(
         input.command.action,
-        "retryable",
+        "unknown",
         "parent request channel closed before a receipt",
         id,
       );
