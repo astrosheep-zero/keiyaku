@@ -5,7 +5,16 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { createTwoFilesPatch } from "diff";
-import { bodyRequestExecution, Delivery, Keiyaku, KeiyakuRefused, KeiyakuRetry, Repo, type ContractId } from "../src/index.js";
+import {
+  bodyRequestExecution,
+  Delivery,
+  Keiyaku,
+  KeiyakuRefused,
+  Repo,
+  type ContractId,
+  type IntegrationConflictMaterialized,
+  type MutationResult,
+} from "../src/index.js";
 import { contractId, documentKey } from "../src/core/facts/types.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { repositoryAt } from "../src/git/repository.js";
@@ -14,6 +23,17 @@ import { bindOperation } from "../src/protocol/bind.js";
 import { makeGitRepository } from "./support/git.js";
 
 const root = resolve(import.meta.dirname, "..");
+
+type ContractHandle = Pick<Keiyaku, "state">;
+
+async function publicContractId(handle: ContractHandle): Promise<ContractId> {
+  return (await handle.state()).id;
+}
+
+function expectMutation<Value>(result: MutationResult<Value> | IntegrationConflictMaterialized): MutationResult<Value> {
+  if (!("value" in result)) throw new Error("expected an admitted mutation result");
+  return result;
+}
 
 function externalConsumer(): string {
   const directory = mkdtempSync(join(tmpdir(), "keiyaku-v4-consumer-"));
@@ -60,7 +80,7 @@ function repositoryWithInitialCommit() {
 test("package root exposes only the ruled library values and declarations", () => {
   const directory = externalConsumer();
   const source = [
-    'import { AuthorityCorruptionError, AkumaWorldScopeError, bodyRequestExecution, Delivery, gatesFrom, Keiyaku, KeiyakuRefused, KeiyakuRetry, Repo, settings, SettingsError, worktreeHooksFrom, World, type AbandonInput, type ActorId, type AkumaHistoryResult, type AkumaObservation, type AkumaWorldScopeRefusal, type AmendInput, type AmendResult, type ArcInput, type AuditInput, type AuditReport, type AttestationVerdict, type BindInput, type BindResult, type ChangeId, type ContractAfterEdge, type ContractBoard, type ContractDependent, type ContractDisposition, type ContractGateCurrent, type ContractGateReport, type ContractHistory, type ContractHistoryEvent, type ContractId, type ContractObservation, type ContractObservationInput, type ContractListInput, type ContractPhase, type ContractRow, type ContractState, type ContractWorkspaceObservation, type CreatedTaskObservation, type DeliverInput, type DeliveryPreparationRefusal, type Fact, type FactKind, type Gate, type HookCommand, type KeiyakuRefusal, type KeiyakuRetryReason, type Lag, type LibraryExecution, type MutationResult, type NukeConfirmationRefusal, type NukeConfirmationRequiredRefusal, type NukeInput, type NukeResult, type ReconcileReport, type RegionOverlap, type RepoAtInput, type RepoReconcileReport, type Review, type ReviewInput, type Settings, type SettingsEntry, type SettingsNamespaceView, type SettingsScopeState, type SettlementAction, type SettlementLag, type SettlementReport, type SnapshotId, type TaskId, type TopologyEffect, type VerificationReuse, type WorktreeHooks, type WorldResolution, type WorldResolutionInput, type WorldRoot } from "@astrosheep/keiyaku";',
+    'import { AuthorityCorruptionError, AkumaWorldScopeError, bodyRequestExecution, canonicalMutationFinality, Delivery, gatesFrom, Keiyaku, KeiyakuRefused, KeiyakuRetry, mutationFinality, projectMutationFinality, Repo, settings, SettingsError, worktreeHooksFrom, World, type AbandonInput, type ActorId, type AkumaHistoryResult, type AkumaObservation, type AkumaWorldScopeRefusal, type AmendInput, type AmendResult, type ArcInput, type AuditInput, type AuditReport, type AttestationVerdict, type BindInput, type BindResult, type ChangeId, type ContractAfterEdge, type ContractBoard, type ContractDependent, type ContractDisposition, type ContractGateCurrent, type ContractGateReport, type ContractHistory, type ContractHistoryEvent, type ContractId, type ContractObservation, type ContractObservationInput, type ContractListInput, type ContractPhase, type ContractRow, type ContractState, type ContractWorkspaceObservation, type CreatedTaskObservation, type DeliverInput, type DeliveryPreparationRefusal, type Fact, type FactKind, type Gate, type HookCommand, type KeiyakuRefusal, type KeiyakuRetryReason, type Lag, type LibraryExecution, type MutationFinality, type MutationFinalityInput, type MutationFinalitySurface, type MutationResult, type NukeConfirmationRefusal, type NukeConfirmationRequiredRefusal, type NukeInput, type NukeResult, type ReconcileReport, type RegionOverlap, type RepoAtInput, type RepoReconcileReport, type Review, type ReviewInput, type Settings, type SettingsEntry, type SettingsNamespaceView, type SettingsScopeState, type SettlementAction, type SettlementLag, type SettlementReport, type SnapshotId, type TaskId, type TopologyEffect, type VerificationReuse, type WorktreeHooks, type WorldResolution, type WorldResolutionInput, type WorldRoot } from "@astrosheep/keiyaku";',
     'import type { AkuId, AkumaAlias, AkumaStatus, AliasBinding, AliasStage, CallInput, CallResult, Dispatch, DispatchFailure, DispatchStage, ForkInput, ForkResult, IntegrationFailure } from "@astrosheep/keiyaku";',
     'const repo = await Repo.at({ path: "." });',
     'import { requireBranchesToBeUpToDateFrom } from "@astrosheep/keiyaku";',
@@ -196,6 +216,9 @@ test("package root exposes only the ruled library values and declarations", () =
     "const refusal = null as unknown as KeiyakuRefusal;",
     "const retry = null as unknown as KeiyakuRetryReason;",
     "const mutation = null as unknown as MutationResult<void>;",
+    "const mutationFinalityType = null as unknown as MutationFinality;",
+    "const mutationFinalityInputType = null as unknown as MutationFinalityInput;",
+    "const mutationFinalitySurfaceType = null as unknown as MutationFinalitySurface;",
     "const effect = null as unknown as TopologyEffect;",
     "const lag = null as unknown as Lag;",
     "const settlementAction = null as unknown as SettlementAction;",
@@ -245,7 +268,7 @@ test("package root exposes only the ruled library values and declarations", () =
     'type InternalReviewValue = import("@astrosheep/keiyaku").ReviewValue;',
     "// @ts-expect-error legacy DeliverValue alias is not a package-root export",
     'type InternalDeliverValue = import("@astrosheep/keiyaku").DeliverValue;',
-    'void new AuthorityCorruptionError("corrupt"); void new AkumaWorldScopeError({ kind: "akuma-not-in-world", ids: [akuma], world }); void (null as unknown as AkumaWorldScopeRefusal); void new SettingsError("invalid"); void existing; void routedContract; void delivery; void bound; void repo; void taskId; void akuma; void alias; void worldInput; void worldResolution; void callResult; void routedCall; void callStatus; void forkResult; void statusResult; void createdTasks; void historyResult; void contractHistory; void contractHistoryEvent; void aliasBinding; void aliasStage; void dispatch; void dispatchFailure; void dispatchStage; void integrationFailure; void report; void preparationRefusal; void verificationReuse; void kind; void amendment; void termsOnly; void invalidBind; void invalidAmend; void customGate; void settingsValue; void selectedGates; void hook; void selectedHooks; void settingsEntry; void settingsView; void settingsScope; void contractListInput; void contractObservationInput; void contractPhase; void tenderedPhase; void contractDisposition; void contractGateCurrent; void contractGateReport; void workspaceObservation; void failedWorkspaceObservation; void statusRow; void statusBoard; void statusObservation; void deliverInput; void fact; void gate; void reconcile; void atInput; void repoReconcile; void emptyWorld; void failedWorld; void completedWorld; void invalidFailedWorld; void invalidCompletedWorld; void failedAsCompleted; void reviewInput; void review; void regionOverlap; void snapshot; void refusal; void retry; void settlementAction; void settlementLag; void settlementReport; void nukeResult; void nukeKeiyakuRefusal; void nukeRequired; void bindResult; void amendResult; void amendWithoutRegion; void invalidBindRegion;',
+    'void new AuthorityCorruptionError("corrupt"); void new AkumaWorldScopeError({ kind: "akuma-not-in-world", ids: [akuma], world }); void (null as unknown as AkumaWorldScopeRefusal); void new SettingsError("invalid"); void existing; void routedContract; void delivery; void bound; void repo; void taskId; void akuma; void alias; void worldInput; void worldResolution; void callResult; void routedCall; void callStatus; void forkResult; void statusResult; void createdTasks; void historyResult; void contractHistory; void contractHistoryEvent; void aliasBinding; void aliasStage; void dispatch; void dispatchFailure; void dispatchStage; void integrationFailure; void report; void preparationRefusal; void verificationReuse; void kind; void amendment; void termsOnly; void invalidBind; void invalidAmend; void customGate; void settingsValue; void selectedGates; void hook; void selectedHooks; void settingsEntry; void settingsView; void settingsScope; void contractListInput; void contractObservationInput; void contractPhase; void tenderedPhase; void contractDisposition; void contractGateCurrent; void contractGateReport; void workspaceObservation; void failedWorkspaceObservation; void statusRow; void statusBoard; void statusObservation; void deliverInput; void fact; void gate; void reconcile; void atInput; void repoReconcile; void emptyWorld; void failedWorld; void completedWorld; void invalidFailedWorld; void invalidCompletedWorld; void failedAsCompleted; void reviewInput; void review; void regionOverlap; void snapshot; void refusal; void retry; void mutationFinalityType; void mutationFinalityInputType; void mutationFinalitySurfaceType; void settlementAction; void settlementLag; void settlementReport; void nukeResult; void nukeKeiyakuRefusal; void nukeRequired; void bindResult; void amendResult; void amendWithoutRegion; void invalidBindRegion;',
   ].join("\n");
   writeFileSync(join(directory, "consumer.ts"), source);
   execFileSync(
@@ -276,7 +299,7 @@ test("package root exposes only the ruled library values and declarations", () =
   );
   assert.equal(
     output.trim(),
-    "AkumaWorldScopeError,AuthorityCorruptionError,Delivery,Keiyaku,KeiyakuRefused,KeiyakuRetry,NoGitWorldError,Repo,SettingsError,World,WorldError,bodyRequestExecution,gatesFrom,settings,worktreeHooksFrom",
+    "AkumaWorldScopeError,AuthorityCorruptionError,Delivery,Keiyaku,KeiyakuRefused,KeiyakuRetry,NoGitWorldError,Repo,SettingsError,World,WorldError,bodyRequestExecution,canonicalMutationFinality,gatesFrom,mutationFinality,projectMutationFinality,settings,worktreeHooksFrom",
   );
 });
 
@@ -508,12 +531,13 @@ test("package-root observe and list carry managed workspace observations", async
   const repository = repositoryWithInitialCommit();
   const repo = await Repo.at({ path: repository.path });
   const bound = await Keiyaku.bind({ repo, markdown: markdown("Managed workspace"), workspace: "worktree" });
+  const boundId = await publicContractId(bound.keiyaku);
 
-  const observed = await Keiyaku.observe({ repo, id: bound.keiyaku.id });
+  const observed = await Keiyaku.observe({ repo, id: boundId });
   assert.equal(observed.kind, "present");
   if (observed.kind !== "present") return;
   const listed = await Keiyaku.list({ repo });
-  const listedRow = listed.rows.find((row) => row.id === bound.keiyaku.id);
+  const listedRow = listed.rows.find((row) => row.id === boundId);
 
   assert.equal(typeof observed.row.worktreePath, "string");
   assert.equal(listedRow?.workspaceObservation.kind, "clean");
@@ -729,20 +753,22 @@ test("local execution composition reaches Contract handles from bind and of", as
     requireBranchesToBeUpToDate: true,
   });
   const reviewed = await composed.bind({ repo, markdown: markdown("Composed review"), workspace: "worktree" });
+  const reviewedId = await publicContractId(reviewed.keiyaku);
   await reviewed.keiyaku.review({ verdict: "satisfied", summary: "bound handle" });
-  await composed.of({ repo, id: reviewed.keiyaku.id }).review({ verdict: "unsatisfied", summary: "of handle" });
+  await composed.of({ repo, id: reviewedId }).review({ verdict: "unsatisfied", summary: "of handle" });
   assert.deepEqual(
     (await reviewed.keiyaku.state()).attestations.slice(-2).map((attestation) => attestation.actor),
     ["local-composition", "local-composition"],
   );
 
   const delivered = await composed.bind({ repo, markdown: markdown("Composed delivery"), workspace: "worktree" });
-  const appointment = await readManagedWorktreeAppointment(await repositoryAt(repository.path), delivered.keiyaku.id);
+  const deliveredId = await publicContractId(delivered.keiyaku);
+  const appointment = await readManagedWorktreeAppointment(await repositoryAt(repository.path), deliveredId);
   if (appointment.kind !== "appointed") throw new Error("expected appointed worktree");
   writeFileSync(join(appointment.path, "candidate.txt"), "candidate\n");
   repository.run(["-C", appointment.path, "add", "candidate.txt"]);
   repository.run(["-C", appointment.path, "commit", "--quiet", "-m", "candidate"]);
-  const result = await delivered.keiyaku.deliver();
+  const result = expectMutation(await delivered.keiyaku.deliver());
   assert.equal(result.value.policy.requireBranchesToBeUpToDate, true);
   assert.equal((await delivered.keiyaku.state()).delivery?.actor, "local-composition");
 
@@ -760,13 +786,15 @@ test("Delivery.diff remains a nullable Promise-backed Git read", async () => {
     markdown: markdown("Diff input"),
     workspace: "worktree",
   });
-  const appointment = await readManagedWorktreeAppointment(await repositoryAt(repository.path), bound.keiyaku.id);
+  const boundId = await publicContractId(bound.keiyaku);
+  const appointment = await readManagedWorktreeAppointment(await repositoryAt(repository.path), boundId);
   if (appointment.kind !== "appointed") throw new Error("expected appointed worktree");
   writeFileSync(join(appointment.path, "candidate.txt"), "candidate\n");
   repository.run(["-C", appointment.path, "add", "candidate.txt"]);
   repository.run(["-C", appointment.path, "commit", "--quiet", "-m", "candidate"]);
-  const delivered = await bound.keiyaku.deliver();
+  const delivered = expectMutation(await bound.keiyaku.deliver());
   const diff = await delivered.value.diff();
   assert.equal(typeof diff, "string");
+  if (diff === null) throw new Error("missing delivery diff");
   assert.match(diff, /candidate\.txt/);
 });

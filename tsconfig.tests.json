@@ -13,7 +13,10 @@
     "tests/akuma-physical.test.ts",
     "tests/plugin-square.test.ts",
     "tests/task-cli.test.ts",
-    "tests/cli-invoke.test.ts"
+    "tests/cli-invoke.test.ts",
+    "tests/library-contract-operations.test.ts",
+    "tests/public-library.test.ts",
+    "tests/facade-contract.test.ts"
   ],
   "exclude": []
 }

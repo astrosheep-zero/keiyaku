@@ -3,10 +3,17 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
-import { Keiyaku, KeiyakuRefused, Repo } from "../src/index.js";
+import {
+  Keiyaku,
+  KeiyakuRefused,
+  Repo,
+  type IntegrationConflictMaterialized,
+  type MutationResult,
+  type PlacementStop,
+} from "../src/index.js";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import { encodeEntry } from "../src/core/facts/codec.js";
-import { changeId, contractId, entryUlid, snapshotId } from "../src/core/facts/types.js";
+import { changeId, contractId, entryUlid, snapshotId, type ContractId } from "../src/core/facts/types.js";
 import { contractJournalPath } from "../src/git/identity.js";
 import { materializeJudgedConflict } from "../src/git/integration.js";
 import { GIT_REF, readBlob, readGit, readRef, updateGitTree, writeBlob, writeCommit } from "../src/git/repository.js";
@@ -24,6 +31,32 @@ import {
   withGitShim,
 } from "./support/git.js";
 import { bind, commitCandidate, document, refused, repositoryWithMain } from "./support/library-verbs.js";
+
+type ContractHandle = Pick<Keiyaku, "state">;
+
+async function publicContractId(handle: ContractHandle): Promise<ContractId> {
+  return (await handle.state()).id;
+}
+
+function expectMaterialized(
+  result: MutationResult<unknown> | IntegrationConflictMaterialized,
+): IntegrationConflictMaterialized {
+  if (!("kind" in result) || result.kind !== "integration-conflict-materialized") {
+    throw new Error("expected an integration conflict materialization");
+  }
+  return result;
+}
+
+function expectMutation<Value>(result: MutationResult<Value> | IntegrationConflictMaterialized): MutationResult<Value> {
+  if (!("value" in result)) throw new Error("expected an admitted mutation result");
+  return result;
+}
+
+function placementRefusalKind(
+  placement: PlacementStop | Readonly<{ kind: "already-terminal" }> | undefined,
+): string | undefined {
+  return placement !== undefined && "refusal" in placement ? placement.refusal.kind : undefined;
+}
 
 type GeneratedWorktreeFile = Readonly<{ path: string; bytes: Buffer; mode: number }>;
 type DefaultPostBindTemplate = Readonly<{
@@ -154,7 +187,8 @@ async function buildReviewGatedConflictCandidateTemplate(): Promise<ReviewGatedC
     target: "refs/heads/main",
     gates: ["reviewed"],
   });
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), bound.keiyaku.id);
+  const boundId = await publicContractId(bound.keiyaku);
+  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), boundId);
   writeFileSync(join(repository.path, "a.txt"), "target\n");
   writeFileSync(join(repository.path, "z.txt"), "target\n");
   repository.run(["add", "a.txt", "z.txt"]);
@@ -178,7 +212,7 @@ async function buildReviewGatedConflictCandidateTemplate(): Promise<ReviewGatedC
     mode: statSync(join(worktree, path)).mode & 0o777,
   }));
   repository.run(["worktree", "remove", "--force", worktree]);
-  return { repository, id: bound.keiyaku.id, targetHead: snapshotId(targetHead), candidateHead, generatedFiles };
+  return { repository, id: boundId, targetHead: snapshotId(targetHead), candidateHead, generatedFiles };
 }
 
 async function reviewGatedConflictCandidateFixture() {
@@ -228,7 +262,8 @@ async function disjointTargetedDelivery(materializeConflict?: boolean) {
     workspace: "worktree",
     target: "refs/heads/main",
   });
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), bound.keiyaku.id);
+  const boundId = await publicContractId(bound.keiyaku);
+  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), boundId);
   writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
   repository.run(["-C", worktree, "add", "candidate.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
@@ -247,7 +282,7 @@ test("plain deliver conflict is an executable handoff and does not mutate", asyn
     () => contract.deliver(),
     refused({
       kind: "integration-failed",
-      contractId: contract.id,
+      contractId: await publicContractId(contract),
       reason: "conflict",
       targetHead,
       conflictPaths: ["a.txt", "z.txt"],
@@ -266,7 +301,7 @@ test("explicit materialization projects the judged conflict in the appointed wor
   const { repository, contract, targetHead, worktree } = await reviewGatedConflictCandidateFixture();
   const git = await cachedRepositoryAt(repository.path);
   const journal = await readRef(git, GIT_REF);
-  const materialized = await contract.deliver({ materializeConflict: true });
+  const materialized = expectMaterialized(await contract.deliver({ materializeConflict: true }));
   assert.deepEqual(materialized, {
     kind: "integration-conflict-materialized",
     targetHead,
@@ -295,14 +330,17 @@ test("an orphaned pre-materialization receipt is retired before retry", async ()
         ].join("\n"),
         {},
         async (gitPath) =>
-          await Keiyaku.of({ repo: await Repo.at({ path: repository.path, gitPath }), id: contract.id }).deliver({
+          await Keiyaku.of({
+            repo: await Repo.at({ path: repository.path, gitPath }),
+            id: await publicContractId(contract),
+          }).deliver({
             materializeConflict: true,
           }),
       ),
     /git merge --no-commit failed/u,
   );
 
-  const retried = await contract.deliver({ materializeConflict: true });
+  const retried = expectMaterialized(await contract.deliver({ materializeConflict: true }));
   assert.equal(retried.kind, "integration-conflict-materialized");
   assert.equal(retried.targetHead, targetHead);
 });
@@ -310,11 +348,12 @@ test("an orphaned pre-materialization receipt is retired before retry", async ()
 test("a receipt retires a crash after merge before materialization returns", async () => {
   const { repository, contract, targetHead, worktree } = await reviewGatedConflictCandidateFixture();
   const git = await cachedRepositoryAt(repository.path);
-  const appointment = await readManagedWorktreeAppointment(git, contract.id);
+  const contractId = await publicContractId(contract);
+  const appointment = await readManagedWorktreeAppointment(git, contractId);
   assert.equal(appointment.kind, "appointed");
   if (appointment.kind !== "appointed") return;
   await recordConflictHandoff(git, {
-    contractId: contract.id,
+    contractId,
     place: appointment.place,
     workspace: worktree,
     head: snapshotId(repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim()),
@@ -330,7 +369,7 @@ test("a receipt retires a crash after merge before materialization returns", asy
     () => contract.deliver({ materializeConflict: true }),
     refused({
       kind: "merge-state-present",
-      contractId: contract.id,
+      contractId,
       workspace: { kind: "worktree", path: worktree },
     }),
   );
@@ -347,10 +386,11 @@ test("a receipt retires a crash after merge before materialization returns", asy
 
 test("Contract reads observe materialized merge conflicts and staged resolutions", async () => {
   const { repository, contract, targetHead, worktree } = await reviewGatedConflictCandidateFixture();
-  const materialized = await contract.deliver({ materializeConflict: true });
+  const materialized = expectMaterialized(await contract.deliver({ materializeConflict: true }));
+  const contractId = await publicContractId(contract);
   assert.equal(materialized.kind, "integration-conflict-materialized");
   const conflict = (await Keiyaku.list({ repo: await cachedRepoAt(repository.path) })).rows.find(
-    (row) => row.id === contract.id,
+    (row) => row.id === contractId,
   )?.workspaceObservation;
   assert.deepEqual(conflict?.kind === "dirty" ? conflict.merge : undefined, {
     head: targetHead,
@@ -361,7 +401,7 @@ test("Contract reads observe materialized merge conflicts and staged resolutions
   writeFileSync(join(worktree, "z.txt"), "resolved\n");
   repository.run(["-C", worktree, "add", "a.txt", "z.txt"]);
   const staged = (await Keiyaku.list({ repo: await cachedRepoAt(repository.path) })).rows.find(
-    (row) => row.id === contract.id,
+    (row) => row.id === contractId,
   )?.workspaceObservation;
   assert.deepEqual(staged?.kind === "dirty" ? staged.merge : undefined, {
     head: targetHead,
@@ -372,7 +412,7 @@ test("Contract reads observe materialized merge conflicts and staged resolutions
 test("resolved merge delivery requires dirty authority and preserves native parents", async () => {
   const { repository, contract, targetHead, worktree } = await reviewGatedConflictCandidateFixture();
   const git = await cachedRepositoryAt(repository.path);
-  const materialized = await contract.deliver({ materializeConflict: true });
+  const materialized = expectMaterialized(await contract.deliver({ materializeConflict: true }));
   assert.equal(materialized.kind, "integration-conflict-materialized");
   const journal = await readRef(git, GIT_REF);
 
@@ -415,7 +455,7 @@ test("resolved merge delivery requires dirty authority and preserves native pare
 
 test("delivery retires a resolved Keiyaku handoff without changing its caller state", async () => {
   const { repository, contract, worktree } = await reviewGatedConflictCandidateFixture();
-  const materialized = await contract.deliver({ materializeConflict: true });
+  const materialized = expectMaterialized(await contract.deliver({ materializeConflict: true }));
   assert.equal(materialized.kind, "integration-conflict-materialized");
   writeFileSync(join(worktree, "a.txt"), "resolved\n");
   writeFileSync(join(worktree, "z.txt"), "resolved\n");
@@ -435,7 +475,7 @@ test("delivery retires a resolved Keiyaku handoff without changing its caller st
 
 test("delivery retirement preserves staged and unstaged caller bytes", async () => {
   const { repository, contract, worktree } = await reviewGatedConflictCandidateFixture();
-  const materialized = await contract.deliver({ materializeConflict: true });
+  const materialized = expectMaterialized(await contract.deliver({ materializeConflict: true }));
   assert.equal(materialized.kind, "integration-conflict-materialized");
   writeFileSync(join(worktree, "a.txt"), "staged A\n");
   writeFileSync(join(worktree, "z.txt"), "resolved\n");
@@ -469,7 +509,7 @@ test("delivery retirement preserves staged and unstaged caller bytes", async () 
 
 test("reconciliation retries receipt-proved handoff retirement after delivery", async () => {
   const { repository, contract, worktree } = await reviewGatedConflictCandidateFixture();
-  const materialized = await contract.deliver({ materializeConflict: true });
+  const materialized = expectMaterialized(await contract.deliver({ materializeConflict: true }));
   assert.equal(materialized.kind, "integration-conflict-materialized");
   writeFileSync(join(worktree, "a.txt"), "resolved\n");
   writeFileSync(join(worktree, "z.txt"), "resolved\n");
@@ -486,7 +526,7 @@ test("reconciliation retries receipt-proved handoff retirement after delivery", 
     {},
     async (gitPath) => {
       const repo = await Repo.at({ path: repository.path, gitPath });
-      return await Keiyaku.of({ repo, id: contract.id }).deliver({ includeDirty: true });
+      return await Keiyaku.of({ repo, id: await publicContractId(contract) }).deliver({ includeDirty: true });
     },
   );
   assert.equal("facts" in delivered, true);
@@ -503,7 +543,7 @@ test("reconciliation retries receipt-proved handoff retirement after delivery", 
 
 test("terminal claim retries a lagged receipt retirement before worktree removal", async () => {
   const { repository, contract, worktree } = await reviewGatedConflictCandidateFixture();
-  const materialized = await contract.deliver({ materializeConflict: true });
+  const materialized = expectMaterialized(await contract.deliver({ materializeConflict: true }));
   assert.equal(materialized.kind, "integration-conflict-materialized");
   writeFileSync(join(worktree, "a.txt"), "resolved\n");
   writeFileSync(join(worktree, "z.txt"), "resolved\n");
@@ -520,7 +560,7 @@ test("terminal claim retries a lagged receipt retirement before worktree removal
     {},
     async (gitPath) => {
       const repo = await Repo.at({ path: repository.path, gitPath });
-      return await Keiyaku.of({ repo, id: contract.id }).deliver({ includeDirty: true });
+      return await Keiyaku.of({ repo, id: await publicContractId(contract) }).deliver({ includeDirty: true });
     },
   );
   assert.equal("facts" in delivered, true);
@@ -538,7 +578,7 @@ test("terminal claim retries a lagged receipt retirement before worktree removal
     {},
     async (gitPath) => {
       const repo = await Repo.at({ path: repository.path, gitPath });
-      return await Keiyaku.of({ repo, id: contract.id }).review({ verdict: "satisfied" });
+      return await Keiyaku.of({ repo, id: await publicContractId(contract) }).review({ verdict: "satisfied" });
     },
   );
 
@@ -568,7 +608,7 @@ test("materializeConflict is inert when the judge reports no conflict", async ()
 test("materialization preserves a dirty workspace with includeDirty", async () => {
   const { repository, contract, worktree } = await reviewGatedConflictCandidateFixture();
   writeFileSync(join(worktree, "extra.txt"), "dirty\n");
-  const materialized = await contract.deliver({ includeDirty: true, materializeConflict: true });
+  const materialized = expectMaterialized(await contract.deliver({ includeDirty: true, materializeConflict: true }));
   assert.equal(materialized.kind, "integration-conflict-materialized");
   assert.equal(mergeHead(repository, worktree), materialized.targetHead);
   assert.equal(readFileSync(join(worktree, "extra.txt"), "utf8"), "dirty\n");
@@ -577,7 +617,7 @@ test("materialization preserves a dirty workspace with includeDirty", async () =
 
 test("explicit rematerialization retires an owned handoff without changing unresolved bytes", async () => {
   const { repository, contract, worktree } = await reviewGatedConflictCandidateFixture();
-  const first = await contract.deliver({ materializeConflict: true });
+  const first = expectMaterialized(await contract.deliver({ materializeConflict: true }));
   assert.equal(first.kind, "integration-conflict-materialized");
   const before = {
     index: repository.run(["-C", worktree, "ls-files", "--stage", "-z"]),
@@ -587,7 +627,7 @@ test("explicit rematerialization retires an owned handoff without changing unres
     () => contract.deliver({ includeDirty: true, materializeConflict: true }),
     refused({
       kind: "merge-state-present",
-      contractId: contract.id,
+      contractId: await publicContractId(contract),
       workspace: { kind: "worktree", path: worktree },
     }),
   );
@@ -632,7 +672,7 @@ test("a matching foreign merge is refused without changing Git state", async () 
     () => contract.deliver({ includeDirty: true, materializeConflict: true }),
     refused({
       kind: "merge-state-present",
-      contractId: contract.id,
+      contractId: await publicContractId(contract),
       workspace: { kind: "worktree", path: worktree },
     }),
   );
@@ -651,7 +691,7 @@ test("a matching foreign merge is refused without changing Git state", async () 
 
 test("native resolution continues through plain deliver against the then-current target", async () => {
   const { repository, contract, worktree } = await reviewGatedConflictCandidateFixture();
-  const materialized = await contract.deliver({ materializeConflict: true });
+  const materialized = expectMaterialized(await contract.deliver({ materializeConflict: true }));
   assert.equal(materialized.kind, "integration-conflict-materialized");
   writeFileSync(join(worktree, "a.txt"), "resolved\n");
   writeFileSync(join(worktree, "z.txt"), "resolved\n");
@@ -673,7 +713,10 @@ test("native resolution continues through plain deliver against the then-current
 test("Delivery.diff freshly reads its pinned candidate diff", async () => {
   const repository = repositoryWithMain();
   const contract = await bind(repository);
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), contract.id);
+  const worktree = await appointedWorktreePath(
+    await cachedRepositoryAt(repository.path),
+    await publicContractId(contract),
+  );
   commitCandidate(repository, worktree);
   await contract.deliver();
 
@@ -691,6 +734,7 @@ test("Delivery.diff freshly reads its pinned candidate diff", async () => {
   const first = await withGitShim(shim, variables, readDiff);
   const second = await withGitShim(shim, variables, readDiff);
 
+  if (first === null) throw new Error("missing delivery diff");
   assert.match(first, /diff --git a\/candidate\.txt b\/candidate\.txt/);
   assert.equal(second, first);
   assert.equal(readFileSync(log, "utf8").trim().split("\n").length, 2);
@@ -718,7 +762,7 @@ test("one public handle reuses its resolved repository scope", async () => {
       return [contract.state(), contract.deliver(), contract.reconcile()] as const;
     },
   );
-  const [state, delivered] = await Promise.all(operations);
+  const [state] = await Promise.all(operations);
 
   assert.equal(state.id, id);
   assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), ["discovery"]);
@@ -787,6 +831,7 @@ test("repo reconcile still throws authority corruption during world discovery", 
     new Map([[contractJournalPath(id), { oid: await writeBlob(git, Buffer.from("not-a-journal\n")) }]]),
   );
   const commit = await writeCommit({ repository: git, tree, parent: before.commit, message: "corrupt journal" });
+  if (before.commit === null) throw new Error("missing state ref");
   repository.run(["update-ref", GIT_REF, commit, before.commit]);
   await assert.rejects(
     () => cachedRepoAt(repository.path).then((repo) => repo.reconcile()),
@@ -843,7 +888,7 @@ test("public review, abandon, and Arc preserve their ruled testimony", async () 
   const { repository, contract } = await defaultBoundFixture();
   assert.equal(await contract.delivery(), null);
 
-  const arc = await contract.arc({
+  await contract.arc({
     markdown: [
       "# Implementation",
       "",
@@ -857,14 +902,17 @@ test("public review, abandon, and Arc preserve their ruled testimony", async () 
   });
   assert.equal((await contract.state()).currentArc?.data.seq, 1);
 
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), contract.id);
+  const worktree = await appointedWorktreePath(
+    await cachedRepositoryAt(repository.path),
+    await publicContractId(contract),
+  );
   commitCandidate(repository, worktree);
-  const delivered = await contract.deliver();
+  const delivered = expectMutation(await contract.deliver());
   const recovered = await contract.delivery();
   assert.equal(recovered?.integration.snapshot, delivered.value.integration.snapshot);
   assert.equal(recovered?.integration.changeId, delivered.value.integration.changeId);
 
-  const reviewed = await contract.review({
+  await contract.review({
     verdict: "unsatisfied",
     summary: "The candidate still needs one correction.",
   });
@@ -875,7 +923,7 @@ test("public review, abandon, and Arc preserve their ruled testimony", async () 
     () => contract.abandon("manual"),
     /abandon input must be an object/,
   );
-  const abandoned = await contract.abandon({ note: "Return the task to planning." });
+  await contract.abandon({ note: "Return the task to planning." });
   assert.equal((await contract.state()).terminal?.kind, "abandoned");
   assert.deepEqual((await contract.state()).terminal?.data, { note: "Return the task to planning." });
   const terminalDelivery = await contract.delivery();
@@ -920,13 +968,15 @@ test("claim continues one retained dependent without another delivery", async ()
   const repository = repositoryWithMain();
   const repo = await cachedRepoAt(repository.path);
   const prerequisite = await bindRetained(repo, "Prerequisite");
-  const dependent = await bindRetained(repo, "Dependent", [prerequisite.keiyaku.id]);
-  const retained = await dependent.keiyaku.deliver();
-  assert.equal(retained.value.placement?.refusal.kind, "prerequisites-unsatisfied");
-  const delivered = await prerequisite.keiyaku.deliver();
+  const prerequisiteId = await publicContractId(prerequisite.keiyaku);
+  const dependent = await bindRetained(repo, "Dependent", [prerequisiteId]);
+  const retained = expectMutation(await dependent.keiyaku.deliver());
+  assert.equal(placementRefusalKind(retained.value.placement), "prerequisites-unsatisfied");
+  const delivered = expectMutation(await prerequisite.keiyaku.deliver());
+  const dependentId = await publicContractId(dependent.keiyaku);
 
   assert.deepEqual(delivered.value.continuation, {
-    claimed: [dependent.keiyaku.id],
+    claimed: [dependentId],
     stopped: [],
   });
   assert.equal(delivered.head, (await prerequisite.keiyaku.state()).head);
@@ -942,19 +992,26 @@ test("a stopped continuation does not block an eligible sibling", async () => {
   const repository = repositoryWithMain();
   const repo = await cachedRepoAt(repository.path);
   const prerequisite = await bindRetained(repo, "Prerequisite");
-  const blocked = await bindRetained(repo, "Blocked dependent", [prerequisite.keiyaku.id], true);
-  const eligible = await bindRetained(repo, "Eligible dependent", [prerequisite.keiyaku.id]);
+  const prerequisiteId = await publicContractId(prerequisite.keiyaku);
+  const blocked = await bindRetained(repo, "Blocked dependent", [prerequisiteId], true);
+  const eligible = await bindRetained(repo, "Eligible dependent", [prerequisiteId]);
   await blocked.keiyaku.deliver();
   await eligible.keiyaku.deliver();
-  const delivered = await prerequisite.keiyaku.deliver();
+  const delivered = expectMutation(await prerequisite.keiyaku.deliver());
+  const blockedId = await publicContractId(blocked.keiyaku);
+  const eligibleId = await publicContractId(eligible.keiyaku);
 
-  assert.deepEqual(delivered.value.continuation?.claimed, [eligible.keiyaku.id]);
+  assert.deepEqual(delivered.value.continuation?.claimed, [eligibleId]);
   const stopped = delivered.value.continuation?.stopped;
   assert.equal(stopped?.length, 1);
   const blockedStop = stopped?.[0];
-  assert.equal(blockedStop?.contractId, blocked.keiyaku.id);
-  assert.equal("kind" in (blockedStop?.stop ?? {}) ? undefined : blockedStop?.stop.refusal.kind, "gates-unsatisfied");
-  if (blockedStop === undefined || "kind" in blockedStop.stop || blockedStop.stop.refusal.kind !== "gates-unsatisfied")
+  assert.equal(blockedStop?.contractId, blockedId);
+  assert.equal(placementRefusalKind(blockedStop?.stop), "gates-unsatisfied");
+  if (
+    blockedStop === undefined ||
+    !("refusal" in blockedStop.stop) ||
+    blockedStop.stop.refusal.kind !== "gates-unsatisfied"
+  )
     return;
   assert.deepEqual(blockedStop.stop.refusal.unmet, [{ gate: "reviewed", current: { kind: "missing" } }]);
   assert.equal((await prerequisite.keiyaku.state()).terminal?.kind, "claimed");
@@ -966,14 +1023,17 @@ test("claim continuation walks a retained dependency chain once", async () => {
   const repository = repositoryWithMain();
   const repo = await cachedRepoAt(repository.path);
   const root = await bindRetained(repo, "Root");
-  const middle = await bindRetained(repo, "Middle", [root.keiyaku.id]);
-  const leaf = await bindRetained(repo, "Leaf", [middle.keiyaku.id]);
+  const rootId = await publicContractId(root.keiyaku);
+  const middle = await bindRetained(repo, "Middle", [rootId]);
+  const middleId = await publicContractId(middle.keiyaku);
+  const leaf = await bindRetained(repo, "Leaf", [middleId]);
   await leaf.keiyaku.deliver();
   await middle.keiyaku.deliver();
-  const delivered = await root.keiyaku.deliver();
+  const delivered = expectMutation(await root.keiyaku.deliver());
+  const leafId = await publicContractId(leaf.keiyaku);
 
   assert.deepEqual(delivered.value.continuation, {
-    claimed: [middle.keiyaku.id, leaf.keiyaku.id],
+    claimed: [middleId, leafId],
     stopped: [],
   });
   for (const contract of [middle.keiyaku, leaf.keiyaku]) {
@@ -989,13 +1049,15 @@ test("a dependent claimed during continuation reports already-terminal", async (
   const repository = repositoryWithMain();
   const repo = await cachedRepoAt(repository.path);
   const prerequisite = await bindRetained(repo, "Prerequisite");
-  const dependent = await bindRetained(repo, "Dependent", [prerequisite.keiyaku.id], true, "true");
+  const prerequisiteId = await publicContractId(prerequisite.keiyaku);
+  const dependent = await bindRetained(repo, "Dependent", [prerequisiteId], true, "true");
+  const dependentId = await publicContractId(dependent.keiyaku);
   await dependent.keiyaku.deliver();
 
   const reviewScript = [
     `const { Keiyaku, Repo } = await import(${JSON.stringify(new URL("../src/index.ts", import.meta.url).href)});`,
     `const repo = await Repo.at({ path: ${JSON.stringify(repository.path)} });`,
-    `await Keiyaku.of({ repo, id: ${JSON.stringify(dependent.keiyaku.id)} }).review({ verdict: "satisfied" });`,
+    `await Keiyaku.of({ repo, id: ${JSON.stringify(dependentId)} }).review({ verdict: "satisfied" });`,
   ].join(" ");
   const encoded = Buffer.from(`(async () => { ${reviewScript} })()`).toString("base64");
   const verification = [
@@ -1006,13 +1068,13 @@ test("a dependent claimed during continuation reports already-terminal", async (
     "",
   ].join("\n");
   await dependent.keiyaku.amend({ markdown: verification });
-  const delivered = await prerequisite.keiyaku.deliver();
+  const delivered = expectMutation(await prerequisite.keiyaku.deliver());
 
   assert.deepEqual(delivered.value.continuation, {
     claimed: [],
     stopped: [
       {
-        contractId: dependent.keiyaku.id,
+        contractId: dependentId,
         stop: { kind: "already-terminal" },
       },
     ],
@@ -1022,7 +1084,8 @@ test("a dependent claimed during continuation reports already-terminal", async (
 
 test("review records before delivery and the same patch can be placed", async () => {
   const { repository, contract } = await defaultBoundFixture();
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), contract.id);
+  const contractId = await publicContractId(contract);
+  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), contractId);
   writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
 
   const reviewed = await contract.review({ verdict: "satisfied" });
@@ -1036,13 +1099,13 @@ test("review records before delivery and the same patch can be placed", async ()
     untracked: ["candidate.txt"],
     shortStat: { filesChanged: 1, insertions: 1, deletions: 0 },
   });
-  assert.equal(reviewed.value.placement?.refusal.kind, "delivery-missing");
+  assert.equal(placementRefusalKind(reviewed.value.placement), "delivery-missing");
   const subject = (await contract.state()).attestations.at(-1)?.data.subject;
   const testimony = JSON.stringify((await contract.state()).attestations.at(-1)?.data);
   assert.equal(testimony.includes("workspace"), false);
   assert.equal(testimony.includes("dirty"), false);
 
-  const delivered = await contract.deliver({ includeDirty: true });
+  const delivered = expectMutation(await contract.deliver({ includeDirty: true }));
   assert.deepEqual(
     delivered.facts.map((fact) => fact.kind),
     ["bound", "deliver", "claimed"],
@@ -1053,6 +1116,7 @@ test("review records before delivery and the same patch can be placed", async ()
 
 test("a satisfied review before delivery records testimony and reports delivery-missing", async () => {
   const { repository, contract, targetHead } = await reviewGatedConflictCandidateFixture();
+  const contractId = await publicContractId(contract);
 
   const reviewed = await contract.review({ verdict: "satisfied" });
 
@@ -1061,14 +1125,14 @@ test("a satisfied review before delivery records testimony and reports delivery-
     ["attestation"],
   );
   assert.deepEqual(reviewed.value.placement, {
-    refusal: { kind: "delivery-missing", contractId: contract.id },
+    refusal: { kind: "delivery-missing", contractId },
   });
   assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), targetHead);
   const reviewedState = await contract.state();
   assert.equal(reviewedState.delivery, null);
   assert.equal(reviewedState.terminal, null);
   assert.equal(reviewedState.attestations.at(-1)?.data.verdict, "satisfied");
-  const reviewedObservation = await Keiyaku.observe({ repo: await cachedRepoAt(repository.path), id: contract.id });
+  const reviewedObservation = await Keiyaku.observe({ repo: await cachedRepoAt(repository.path), id: contractId });
   assert.equal(reviewedObservation.kind, "present");
   if (reviewedObservation.kind !== "present") throw new Error("contract was not observed");
   assert.deepEqual(reviewedObservation.row.gates, {
@@ -1080,7 +1144,7 @@ test("a satisfied review before delivery records testimony and reports delivery-
   writeFileSync(join(repository.path, "z.txt"), "base\n");
   repository.run(["add", "a.txt", "z.txt"]);
   repository.run(["commit", "--quiet", "-m", "resolve target"]);
-  const delivered = await contract.deliver();
+  const delivered = expectMutation(await contract.deliver());
   const reviewedSubject = reviewedState.attestations.at(-1)?.data.subject;
   const reviewedChangeId = changeIdFromSubject(reviewedSubject);
 
@@ -1089,7 +1153,7 @@ test("a satisfied review before delivery records testimony and reports delivery-
     ["bound", "deliver", "claimed"],
   );
   assert.equal(delivered.value.integration.changeId, reviewedChangeId);
-  const claimedObservation = await Keiyaku.observe({ repo: await cachedRepoAt(repository.path), id: contract.id });
+  const claimedObservation = await Keiyaku.observe({ repo: await cachedRepoAt(repository.path), id: contractId });
   assert.equal(claimedObservation.kind, "present");
   if (claimedObservation.kind !== "present") throw new Error("contract was not observed");
   const claimedGate = claimedObservation.row.gates;
@@ -1114,7 +1178,8 @@ test("target movement alone does not stale reviewed worktree content", async () 
     target: "refs/heads/main",
     gates: ["reviewed"],
   });
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), bound.keiyaku.id);
+  const boundId = await publicContractId(bound.keiyaku);
+  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), boundId);
   writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
   repository.run(["-C", worktree, "add", "candidate.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
@@ -1124,9 +1189,9 @@ test("target movement alone does not stale reviewed worktree content", async () 
   writeFileSync(join(repository.path, "unrelated.txt"), "target only\n");
   repository.run(["add", "unrelated.txt"]);
   repository.run(["commit", "--quiet", "-m", "move target"]);
-  const delivered = await bound.keiyaku.deliver();
+  const delivered = expectMutation(await bound.keiyaku.deliver());
 
-  assert.equal(reviewed.value.placement?.refusal.kind, "delivery-missing");
+  assert.equal(placementRefusalKind(reviewed.value.placement), "delivery-missing");
   assert.equal(delivered.value.integration.changeId, reviewedChangeId);
   assert.deepEqual(
     delivered.facts.map((fact) => fact.kind),
@@ -1146,7 +1211,8 @@ test("review and delivery share a worktree ChangeId after the tender incorporate
     target: "refs/heads/main",
     gates: ["reviewed"],
   });
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), bound.keiyaku.id);
+  const boundId = await publicContractId(bound.keiyaku);
+  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), boundId);
   writeFileSync(join(repository.path, "target.txt"), "target advance\n");
   repository.run(["add", "target.txt"]);
   repository.run(["commit", "--quiet", "-m", "advance target"]);
@@ -1157,9 +1223,9 @@ test("review and delivery share a worktree ChangeId after the tender incorporate
 
   const reviewed = await bound.keiyaku.review({ verdict: "satisfied" });
   const reviewedChangeId = changeIdFromSubject((await bound.keiyaku.state()).attestations.at(-1)?.data.subject);
-  const delivered = await bound.keiyaku.deliver();
+  const delivered = expectMutation(await bound.keiyaku.deliver());
 
-  assert.equal(reviewed.value.placement?.refusal.kind, "delivery-missing");
+  assert.equal(placementRefusalKind(reviewed.value.placement), "delivery-missing");
   assert.equal(delivered.value.integration.changeId, reviewedChangeId);
   assert.deepEqual(
     delivered.facts.map((fact) => fact.kind),
@@ -1181,7 +1247,7 @@ test("an unsatisfied conflicted review records the same subject without requesti
   const satisfied = await contract.review({ verdict: "satisfied" });
   const satisfiedState = await contract.state();
   assert.equal(satisfiedState.attestations.at(-1)?.data.subject, unsatisfiedSubject);
-  assert.equal(satisfied.value.placement?.refusal.kind, "delivery-missing");
+  assert.equal(placementRefusalKind(satisfied.value.placement), "delivery-missing");
 });
 
 test("diff presentation config does not change a reviewed worktree ChangeId", async () => {
@@ -1200,7 +1266,8 @@ test("diff presentation config does not change a reviewed worktree ChangeId", as
     workspace: "worktree",
     gates: ["reviewed"],
   });
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), result.keiyaku.id);
+  const resultId = await publicContractId(result.keiyaku);
+  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), resultId);
   writeFileSync(join(worktree, "dir", "nested.txt"), "nested2\n");
   writeFileSync(join(worktree, "hunks.txt"), "X\n2\n3\n4\n5\n6\n7\n8\n9\nY\n");
   writeFileSync(join(worktree, "blank.txt"), "KEEP\n\nkeep2\nkeep3\n");
@@ -1235,11 +1302,13 @@ test("diff presentation config does not change a reviewed worktree ChangeId", as
   ] as const)
     repository.run(["config", key, value]);
 
-  const delivered = await Keiyaku.of({
-    repo: await Repo.at({ path: join(worktree, "dir") }),
-    id: result.keiyaku.id,
-  }).deliver();
-  assert.equal(reviewed.value.placement?.refusal.kind, "delivery-missing");
+  const delivered = expectMutation(
+    await Keiyaku.of({
+      repo: await Repo.at({ path: join(worktree, "dir") }),
+      id: resultId,
+    }).deliver(),
+  );
+  assert.equal(placementRefusalKind(reviewed.value.placement), "delivery-missing");
   assert.equal(delivered.value.integration.changeId, reviewedChangeId);
   assert.deepEqual(
     delivered.facts.map((fact) => fact.kind),
@@ -1264,7 +1333,7 @@ test("a satisfied review waits on the target-placement fence before reporting de
     reviewed.facts.map((fact) => fact.kind),
     ["attestation"],
   );
-  assert.equal(reviewed.value.placement?.refusal.kind, "delivery-missing");
+  assert.equal(placementRefusalKind(reviewed.value.placement), "delivery-missing");
 });
 
 test("a satisfied review cannot interleave a stale integration stop across the target fence", async () => {
@@ -1325,6 +1394,7 @@ test("a satisfied review cannot interleave a stale integration stop across the t
   );
   const tree = await updateGitTree(git, before.tree, new Map([[journalPath, { oid }]]));
   const commit = await writeCommit({ repository: git, tree, parent: before.commit });
+  if (before.commit === null) throw new Error("missing state ref");
   repository.run(["update-ref", "refs/heads/keiyaku-state", commit, before.commit]);
   writeFileSync(join(repository.path, "unrelated-target.txt"), "moved\n");
   repository.run(["add", "unrelated-target.txt"]);
@@ -1350,37 +1420,43 @@ test("a satisfied review cannot interleave a stale integration stop across the t
 
 test("a whitespace-only worktree change stales prior review testimony", async () => {
   const { repository, contract } = await defaultBoundFixture();
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), contract.id);
+  const worktree = await appointedWorktreePath(
+    await cachedRepositoryAt(repository.path),
+    await publicContractId(contract),
+  );
   writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
   const reviewed = await contract.review({ verdict: "satisfied" });
   const reviewedChangeId = changeIdFromSubject((await contract.state()).attestations.at(-1)?.data.subject);
   writeFileSync(join(worktree, "candidate.txt"), "candidate \n");
 
-  const delivered = await contract.deliver({ includeDirty: true });
-  assert.equal(reviewed.value.placement?.refusal.kind, "delivery-missing");
+  const delivered = expectMutation(await contract.deliver({ includeDirty: true }));
+  assert.equal(placementRefusalKind(reviewed.value.placement), "delivery-missing");
   assert.notEqual(delivered.value.integration.changeId, reviewedChangeId);
   assert.deepEqual(
     delivered.facts.map((fact) => fact.kind),
     ["bound", "deliver"],
   );
-  assert.equal(delivered.value.placement?.refusal.kind, "gates-unsatisfied");
+  assert.equal(placementRefusalKind(delivered.value.placement), "gates-unsatisfied");
   assert.equal((await contract.state()).terminal, null);
 });
 
 test("a changed worktree patch leaves the reviewed placement pending", async () => {
   const { repository, contract } = await defaultBoundFixture();
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), contract.id);
+  const worktree = await appointedWorktreePath(
+    await cachedRepositoryAt(repository.path),
+    await publicContractId(contract),
+  );
   writeFileSync(join(worktree, "candidate.txt"), "first\n");
   const reviewed = await contract.review({ verdict: "satisfied" });
   assert.deepEqual(reviewed.value.workspace?.untracked, ["candidate.txt"]);
   writeFileSync(join(worktree, "candidate.txt"), "second\n");
 
-  const delivered = await contract.deliver({ includeDirty: true });
+  const delivered = expectMutation(await contract.deliver({ includeDirty: true }));
   assert.deepEqual(
     delivered.facts.map((fact) => fact.kind),
     ["bound", "deliver"],
   );
-  assert.equal(delivered.value.placement?.refusal.kind, "gates-unsatisfied");
+  assert.equal(placementRefusalKind(delivered.value.placement), "gates-unsatisfied");
   assert.equal((await contract.state()).terminal, null);
 });
 
@@ -1398,42 +1474,47 @@ test("terms-only amend copies Markdown bytes and identities without rendering", 
     workspace: "worktree",
     gates: ["reviewed", "held"],
   });
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), bound.keiyaku.id);
+  const boundId = await publicContractId(bound.keiyaku);
+  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), boundId);
   commitCandidate(repository, worktree);
   await bound.keiyaku.deliver();
   await bound.keiyaku.review({ verdict: "satisfied" });
   const before = await bound.keiyaku.state();
-  const reviewed = await Keiyaku.observe({ repo: await cachedRepoAt(repository.path), id: bound.keiyaku.id });
+  const reviewed = await Keiyaku.observe({ repo: await cachedRepoAt(repository.path), id: boundId });
   assert.equal(reviewed.kind === "present" && reviewed.row.gates.reports[0]?.current.kind, "attested");
 
-  const amended = await bound.keiyaku.amend({ after: [prerequisite.keiyaku.id] });
+  const prerequisiteId = await publicContractId(prerequisite.keiyaku);
+  const amended = await bound.keiyaku.amend({ after: [prerequisiteId] });
   const after = await bound.keiyaku.state();
   assert.equal(amended.documentDiff, "");
-  assert.deepEqual(after.terms.after, [prerequisite.keiyaku.id]);
+  assert.deepEqual(after.terms.after, [prerequisiteId]);
   assert.deepEqual(after.terms.gates, before.terms.gates);
   assert.equal(after.terms.document.bytes, markdown);
   assert.equal(after.terms.document.key, before.terms.document.key);
   assert.deepEqual(after.terms.segments, before.terms.segments);
-  const observed = await Keiyaku.observe({ repo: await cachedRepoAt(repository.path), id: bound.keiyaku.id });
+  const observed = await Keiyaku.observe({ repo: await cachedRepoAt(repository.path), id: boundId });
   assert.equal(observed.kind === "present" && observed.row.gates.reports[0]?.current.kind, "attested");
 });
 
 test("a changed document leaves an otherwise unchanged reviewed patch pending", async () => {
   const { repository, contract } = await defaultBoundFixture();
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), contract.id);
+  const worktree = await appointedWorktreePath(
+    await cachedRepositoryAt(repository.path),
+    await publicContractId(contract),
+  );
   writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
-  const reviewed = await contract.review({ verdict: "satisfied" });
+  await contract.review({ verdict: "satisfied" });
 
-  const amended = await contract.amend({
+  await contract.amend({
     markdown: "## Replace: Objective\nRequire review of the current contract document.\n",
   });
 
-  const delivered = await contract.deliver({ includeDirty: true });
+  const delivered = expectMutation(await contract.deliver({ includeDirty: true }));
   assert.deepEqual(
     delivered.facts.map((fact) => fact.kind),
     ["bound", "deliver"],
   );
-  assert.equal(delivered.value.placement?.refusal.kind, "gates-unsatisfied");
+  assert.equal(placementRefusalKind(delivered.value.placement), "gates-unsatisfied");
   assert.equal((await contract.state()).terminal, null);
 });
 
@@ -1445,7 +1526,8 @@ test("review testimony is recorded when reviewed is not a placement gate", async
     workspace: "worktree",
     gates: [],
   });
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), result.keiyaku.id);
+  const resultId = await publicContractId(result.keiyaku);
+  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), resultId);
   writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
 
   const reviewed = await result.keiyaku.review({ verdict: "unsatisfied" });
@@ -1532,7 +1614,7 @@ test("contract history composes one frozen journal and Dispatch observation", as
 });
 
 test("contract history reports only journal events when Dispatch is absent", async () => {
-  const { repository, contract } = await defaultBoundFixture();
+  const { contract } = await defaultBoundFixture();
   const history = await contract.history();
   assert.equal(
     history.events.every((event) => event.source === "journal"),
@@ -1564,6 +1646,7 @@ test("contract history fails the whole read when journal or Dispatch is corrupt"
     new Map([[contractJournalPath(id), { oid: await writeBlob(git, Buffer.from("not-a-journal\n")) }]]),
   );
   const commit = await writeCommit({ repository: git, tree, parent: before.commit, message: "corrupt journal" });
+  if (before.commit === null) throw new Error("missing state ref");
   repository.run(["update-ref", GIT_REF, commit, before.commit]);
   await assert.rejects(
     async () => Keiyaku.of({ repo: await cachedRepoAt(repository.path), id }).history(),

@@ -66,11 +66,7 @@ async function populateContractCatalogue(
       }>;
     };
     const at =
-      index < 2
-        ? "2099-03-01T00:00:00.000Z"
-        : index === 2
-          ? "2099-02-01T00:00:00.000Z"
-          : "2099-01-01T00:00:00.000Z";
+      index < 2 ? "2099-03-01T00:00:00.000Z" : index === 2 ? "2099-02-01T00:00:00.000Z" : "2099-01-01T00:00:00.000Z";
     journal.contract = id;
     journal.at = at;
     journal.data.coordinates.target =
@@ -117,7 +113,8 @@ test("Contract catalogue is bounded while Keiyaku.list remains a complete board"
       target: "main",
       gates: [],
     });
-    const source = repository.run(["show", `${GIT_REF}:${contractJournalPath(bound.keiyaku.id)}`]);
+    const boundId = (await bound.keiyaku.state()).id;
+    const source = repository.run(["show", `${GIT_REF}:${contractJournalPath(boundId)}`]);
     const fixture = await populateContractCatalogue(repository, source);
 
     const complete = await Keiyaku.list({ repo });
@@ -158,7 +155,10 @@ test("Contract catalogue is bounded while Keiyaku.list remains a complete board"
       catalogue.rows.map((row) => row.lastJournalAt),
       ["2099-03-01T00:00:00.000Z", "2099-03-01T00:00:00.000Z", "2099-02-01T00:00:00.000Z"],
     );
-    assert.deepEqual(catalogue.rows.map((row) => row.id), expected.slice(0, 3).map((row) => row.id));
+    assert.deepEqual(
+      catalogue.rows.map((row) => row.id),
+      expected.slice(0, 3).map((row) => row.id),
+    );
     assert.equal(catalogue.rows[0]?.target, "refs/heads/catalogue-000");
     assert.deepEqual(catalogue.rows[0]?.targetObservation, { head: null, drift: false });
     assert.equal(catalogue.rows[0]?.workspaceObservation.kind, "unappointed");
