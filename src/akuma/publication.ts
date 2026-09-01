@@ -86,6 +86,19 @@ async function observeExitWithin(
   ]);
 }
 
+async function attemptTermination(owned: OwnedProcess, force = false): Promise<unknown | undefined> {
+  const outcome = await Promise.race([
+    Promise.resolve()
+      .then(() => owned.terminate(force))
+      .then(
+        () => ({ kind: "terminated" as const }),
+        (error) => ({ kind: "error" as const, error }),
+      ),
+    abortableDelay(CUSTODY_HANDOFF_MS).then(() => ({ kind: "timeout" as const })),
+  ]);
+  return outcome.kind === "error" ? outcome.error : undefined;
+}
+
 async function awaitBirth(paths: AkumaPaths, owned: OwnedProcess | undefined, signal?: AbortSignal): Promise<Soul> {
   const deadline = performance.now() + BIRTH_TIMEOUT_MS;
   for (;;) {
@@ -102,7 +115,7 @@ async function awaitBirth(paths: AkumaPaths, owned: OwnedProcess | undefined, si
     if (performance.now() >= deadline) {
       const settled = await settleTimedOutBirth(paths);
       if (settled !== null) return settled;
-      if (owned !== undefined) await owned.terminate(true);
+      if (owned !== undefined) await attemptTermination(owned, true);
       throw new Error("Akuma birth timed out before Soul admission");
     }
     if (owned === undefined) {
@@ -175,31 +188,9 @@ async function settleLaunch(
   const preAdmissionExit = diagnostic(failure).startsWith("pre-admission ");
   const settled = preAdmissionExit ? await observeSettledExit(owned) : { kind: "pending" as const };
   if (settled.kind !== "exited") {
-    try {
-      await owned.terminate();
-    } catch (error) {
-      terminationError = error;
-    }
-    if (terminationError !== undefined) {
-      const exit = await observeExitWithin(owned, CUSTODY_HANDOFF_MS);
-      if (exit.kind === "timeout") {
-        const leash = await HeldAkumaLeash.try(allocated.paths);
-        if (leash === null) return "handoff";
-        leash.release();
-        exitError = new Error("process did not exit after termination failure");
-      }
-      if (exit.kind === "exited") {
-        exitError = undefined;
-      } else if (exit.kind === "exit-error") {
-        exitError = exit.error;
-      }
-    } else {
-      try {
-        await owned.exited;
-      } catch (error) {
-        exitError = error;
-      }
-    }
+    terminationError = await attemptTermination(owned);
+    const exit = await observeSettledExit(owned);
+    if (exit.kind === "exit-error") exitError = exit.error;
   } else {
     /* An already-settled pre-admission exit needs no second termination request. */
   }
@@ -283,8 +274,12 @@ export async function launchAkuma(input: LaunchInput): Promise<AllocatedAkuma> {
     return allocated;
   } catch (error) {
     if (owned !== undefined) {
-      const outcome = await settleLaunch(allocated, owned, error);
-      owned.release();
+      let outcome: "born" | "sealed" | "handoff";
+      try {
+        outcome = await settleLaunch(allocated, owned, error);
+      } finally {
+        owned.release();
+      }
       if (outcome === "born" && input.signal?.aborted && error === input.signal.reason) {
         if (input.awaitAsleep === true) await awaitAsleepBirth(allocated.paths);
         return allocated;

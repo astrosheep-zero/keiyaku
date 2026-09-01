@@ -21,19 +21,12 @@ never a persisted process description. No successor reconstructs its
 predecessor's process authority.
 
 Birth becomes visible only when the child proves Soul under the leash. Failure
-before Soul seals the coordinate with durable birth evidence. An uncertain or
-crashed birth remains unborn until a contender pays the same leash judgment;
-age never decides it. A seal is permanent: stillborn cannot be reborn. Caller
+before Soul seals the coordinate with durable birth evidence. An uncertain or crashed birth remains unborn until a contender pays the same leash judgment; age never decides it. A seal is permanent: stillborn cannot be reborn. Caller
 cancellation asks the publication owner to close only its retained unborn child;
 it cannot invent a third birth result. No blind cleaner adjudicates abandoned
 births.
 
-Publication custody ends only with proven exit, a permanent Seal, or a durable
-leash handoff. A successful launch may release process custody once Soul is
-proven; post-launch failure and cancellation use the same evidence rule. A
-termination or exit error is evidence to adjudicate, never a reason to wait
-forever or release blindly; when exit is not yet proven, publication hands the
-unborn coordinate to the retained leash for later judgment.
+Publication ends process custody by writing a durable verdict — Soul proves birth, a Seal under the leash proves failure — or by leaving the unborn child to leash judgment when the leash is unavailable; proven exit is welcome evidence but never a custody precondition, and a termination or exit error by itself changes nothing durable.
 
 Life is derived solely from leash and latest Heart evidence. A live Body is
 running; an explicitly completed one is asleep; an unsuccessful one is stranded;

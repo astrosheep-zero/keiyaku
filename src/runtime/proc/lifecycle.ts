@@ -24,7 +24,7 @@ export function createProcessLifecycle(
       return termination;
     },
     release(): void {
-      if (state !== "active") return;
+      if (state === "inert") return;
       state = "inert";
       releaseCustody();
     },

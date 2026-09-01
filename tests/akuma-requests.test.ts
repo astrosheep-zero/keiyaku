@@ -425,6 +425,27 @@ test("reserved child request is adjudicated from child Soul after publication fa
   }
 });
 
+test("reserved child request with incomplete evidence remains reserved for recovery", async () => {
+  const value = await fixture(["akuma.call"]);
+  value.leash.release();
+  const id = randomUUID();
+  const child = "aku/worker/ffffffff" as Parameters<typeof reserveRequest>[2];
+  try {
+    await admitRequest(value.parent.paths, {
+      id,
+      action: "akuma.call",
+      payloadJson: JSON.stringify({ body: "pending" }),
+      admittedAt: "2026-08-26T00:00:01.000Z",
+      permitted: true,
+    });
+    await reserveRequest(value.parent.paths, id, child);
+    assert.equal(await settleBodyRequests(value.parent.paths, value.soul, () => "2026-08-26T00:00:02.000Z"), "pending");
+    assert.equal((await readRequest(value.parent.paths, id))?.state, "reserved");
+  } finally {
+    value.close();
+  }
+});
+
 test("publication hands off an unborn child when termination fails and custody remains held", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-publication-handoff-")));
   const controller = new AbortController();
@@ -464,6 +485,61 @@ test("publication hands off an unborn child when termination fails and custody r
     );
     assert.equal(released, true);
     assert.equal(await readSoul(childPaths!), null);
+  } finally {
+    held?.release();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("publication releases process custody after bounded observation of unsettled termination", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-publication-unsettled-custody-")));
+  const controller = new AbortController();
+  const reason = new Error("cancel unsettled custody");
+  let started!: () => void;
+  const launchStarted = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  let held: HeldAkumaLeash | undefined;
+  let childPaths: Awaited<ReturnType<typeof allocateAkumaDirectory>>["paths"] | undefined;
+  let released = false;
+  try {
+    const publication = publishAkuma({
+      worldPath: root,
+      archetype: "worker",
+      signal: controller.signal,
+      async launch(allocated) {
+        childPaths = allocated.paths;
+        held = (await HeldAkumaLeash.try(allocated.paths))!;
+        started();
+        return {
+          pid: 4253,
+          exited: new Promise<Awaited<OwnedProcess["exited"]>>(() => {}),
+          terminate: async () => await new Promise<void>(() => {}),
+          release: () => {
+            released = true;
+          },
+        } satisfies OwnedProcess;
+      },
+    });
+    await launchStarted;
+    controller.abort(reason);
+    const began = performance.now();
+    await assert.rejects(publication, (error: unknown) => error === reason);
+    assert.ok(performance.now() - began < 2_000);
+    assert.equal(released, true);
+    assert.equal(await readSoul(childPaths!), null);
+    held!.release();
+    held = undefined;
+    const leash = (await HeldAkumaLeash.try(childPaths!))!;
+    try {
+      assert.equal(
+        await leash.sealIfUnborn(childPaths!, { evidence: "later leash judgment", at: "2026-08-26T00:00:03.000Z" }),
+        "sealed",
+      );
+    } finally {
+      leash.release();
+    }
+    assert.equal((await readSeal(childPaths!))?.evidence, "later leash judgment");
   } finally {
     held?.release();
     rmSync(root, { recursive: true, force: true });

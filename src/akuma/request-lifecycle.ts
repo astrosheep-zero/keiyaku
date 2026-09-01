@@ -166,8 +166,7 @@ export async function settleReserved(
         () => false,
       ))
     ) {
-      await voidRequest(paths, request.id, "reserved child directory is absent");
-      return true;
+      return false;
     }
     const soul = await readSoul(childPaths);
     if (soul !== null) {
@@ -180,8 +179,13 @@ export async function settleReserved(
         const settled = await readSoul(childPaths);
         if (settled !== null) await settleReservedSoul(paths, parent, request, settled);
         else {
-          await leash.sealIfUnborn(childPaths, { evidence: "request settlement", at: now() });
-          await voidRequest(paths, request.id, "reserved child was sealed unborn");
+          const outcome = await leash.sealIfUnborn(childPaths, { evidence: "request settlement", at: now() });
+          if (outcome === "born") {
+            const born = await readSoul(childPaths);
+            if (born !== null) await settleReservedSoul(paths, parent, request, born);
+          } else {
+            await voidRequest(paths, request.id, "reserved child was sealed unborn");
+          }
         }
       } finally {
         leash.release();

@@ -126,7 +126,7 @@ test("cancellable process owns termination failure before a later waiter", async
   }
 });
 
-test("owned-process lifecycle serializes release behind termination", async () => {
+test("owned-process lifecycle releases during pending termination exactly once", async () => {
   let finish!: () => void;
   let terminations = 0;
   let releases = 0;
@@ -143,13 +143,15 @@ test("owned-process lifecycle serializes release behind termination", async () =
   );
   const termination = lifecycle.terminate();
   lifecycle.release();
-  assert.equal(releases, 0);
+  assert.equal(releases, 1);
+  lifecycle.release();
+  assert.equal(releases, 1);
   finish();
   await termination;
   await lifecycle.terminate();
   assert.equal(terminations, 1);
   lifecycle.release();
-  assert.equal(releases, 0);
+  assert.equal(releases, 1);
 });
 function waitForOutputLine(
   expected: string,
