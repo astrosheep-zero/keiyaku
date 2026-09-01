@@ -12,7 +12,7 @@ export type Diagnostic = Readonly<{
   detail: string;
 }>;
 
-export type DependencyMode = "any" | "type-only";
+export type DependencyMode = "any" | "type-only" | "runtime-only";
 
 export type DependencyAllowance = Readonly<{
   target: string;
@@ -24,6 +24,12 @@ export type DependencyZone = Readonly<{
   source: string;
   allow: readonly DependencyAllowance[];
   deny?: readonly DependencyAllowance[];
+}>;
+
+export type CompositionBoundary = Readonly<{
+  source: string;
+  ownerPaths: readonly string[];
+  allowedSources: readonly string[];
 }>;
 
 export type SensitiveImportRule = Readonly<{
@@ -44,6 +50,7 @@ export type CapabilityRule = Readonly<{
 
 export type ArchitecturePolicy = Readonly<{
   zones: readonly DependencyZone[];
+  compositionBoundaries?: readonly CompositionBoundary[];
   sensitiveImports: readonly SensitiveImportRule[];
   forbiddenSourcePatterns: readonly ForbiddenSourcePattern[];
   forbiddenModules: readonly string[];
@@ -154,6 +161,7 @@ function importedSymbols(reference: ImportReference): readonly string[] {
 function allowanceMatches(reference: ImportReference, allowance: DependencyAllowance): boolean {
   if (!reference.target || !matches(allowance.target, reference.target)) return false;
   if (allowance.mode === "type-only" && reference.symbols.runtime.length > 0) return false;
+  if (allowance.mode === "runtime-only" && reference.symbols.runtime.length === 0) return false;
   if (allowance.symbols) {
     const permitted = new Set(allowance.symbols);
     if (importedSymbols(reference).some((symbol) => !permitted.has(symbol))) return false;
@@ -164,6 +172,7 @@ function allowanceMatches(reference: ImportReference, allowance: DependencyAllow
 function denialMatches(reference: ImportReference, denial: DependencyAllowance): boolean {
   if (!reference.target || !matches(denial.target, reference.target)) return false;
   if (denial.mode === "type-only" && reference.symbols.runtime.length > 0) return false;
+  if (denial.mode === "runtime-only" && reference.symbols.runtime.length === 0) return false;
   return denial.symbols === undefined || importedSymbols(reference).some((symbol) => denial.symbols!.includes(symbol));
 }
 
@@ -253,6 +262,37 @@ function dependencyDiagnostics(units: readonly ParsedSource[], policy: Architect
         detail: "source file has no declared owner zone",
       });
     for (const reference of unit.references) diagnostics.push(...referenceDiagnostics(unit, reference, zone, policy));
+  }
+  return diagnostics;
+}
+
+function compositionDiagnostics(units: readonly ParsedSource[], policy: ArchitecturePolicy): Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
+  for (const unit of units) {
+    for (const boundary of policy.compositionBoundaries ?? []) {
+      if (!matches(boundary.source, unit.path) || boundary.allowedSources.some((source) => matches(source, unit.path)))
+        continue;
+      const ownerReferences = unit.references.filter(
+        (reference) =>
+          reference.target !== null &&
+          reference.symbols.runtime.length > 0 &&
+          boundary.ownerPaths.some((ownerPath) => matches(ownerPath, reference.target!)),
+      );
+      const owners = new Set(
+        ownerReferences.flatMap((reference) =>
+          boundary.ownerPaths.filter((ownerPath) => matches(ownerPath, reference.target!)),
+        ),
+      );
+      if (owners.size < 2) continue;
+      const first = ownerReferences[0]!;
+      diagnostics.push({
+        rule: "architecture/composition-boundary",
+        file: unit.path,
+        line: first.line,
+        column: first.column,
+        detail: `${unit.path} wires multiple product owners (${[...owners].sort().join(", ")}); use an allowlisted composition boundary`,
+      });
+    }
   }
   return diagnostics;
 }
@@ -406,6 +446,7 @@ export function checkArchitecture(inputs: readonly SourceInput[], policy: Archit
   const units = parseSources(inputs);
   const diagnostics = [
     ...dependencyDiagnostics(units, policy),
+    ...compositionDiagnostics(units, policy),
     ...structureDiagnostics(units, policy),
     ...runtimeGraphDiagnostics(units, policy),
   ];

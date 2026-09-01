@@ -143,6 +143,78 @@ test("architecture policy keeps ambient process environments out of protocol", (
   assert.ok(rules(diagnostics).includes("architecture/capability-use"));
 });
 
+test("architecture policy keeps generic Protocol runtime away from target placement", () => {
+  const accepted = check({
+    "git/target-placement.ts": "export type TargetPlacementRefusal = { kind: string };",
+    "protocol/operations.ts":
+      'import type { TargetPlacementRefusal } from "../git/target-placement.js"; export type Refusal = TargetPlacementRefusal;',
+  });
+  const diagnostics = check({
+    "git/target-placement.ts": "export function prepareTargetPlacement(): void {}",
+    "protocol/run.ts":
+      'import { prepareTargetPlacement } from "../git/target-placement.js"; export const run = prepareTargetPlacement;',
+  });
+
+  assert.deepEqual(accepted, []);
+  assert.deepEqual(rules(diagnostics), ["architecture/dependency-direction"]);
+});
+
+test("architecture policy keeps Akuma runtime away from generic Library", () => {
+  const diagnostics = check({
+    "library/contract.ts": "export function contract(): void {}",
+    "akuma/akuma.ts": 'import { contract } from "../library/contract.js"; export const runtime = contract;',
+  });
+
+  assert.deepEqual(rules(diagnostics), ["architecture/dependency-direction"]);
+});
+
+test("architecture policy keeps cross-product wiring in the named Library composition root", () => {
+  const accepted = check({
+    "akuma/requests.ts": "export function executionChannel(): void {}",
+    "library/contract.ts": "export function contract(): void {}",
+    "library/composition.ts": [
+      'import { executionChannel } from "../akuma/requests.js";',
+      'import { contract } from "./contract.js";',
+      "export const compose = [executionChannel, contract];",
+    ].join("\n"),
+  });
+  const knownComposition = check({
+    "akuma/akuma.ts": "export function runtime(): void {}",
+    "task/catalog.ts": "export function catalog(): void {}",
+    "library/catalog.ts": [
+      'import { runtime } from "../akuma/akuma.js";',
+      'import { catalog } from "../task/catalog.js";',
+      "export const list = [runtime, catalog];",
+    ].join("\n"),
+  });
+
+  const diagnostics = check({
+    "akuma/akuma.ts": "export function runtime(): void {}",
+    "task/index.ts": "export function tasks(): void {}",
+    "library/rogue-composition.ts": [
+      'import { runtime } from "../akuma/akuma.js";',
+      'import { tasks } from "../task/index.js";',
+      "export const compose = [runtime, tasks];",
+    ].join("\n"),
+  });
+  const ordinaryDiagnostics = check({
+    "akuma/akuma.ts": "export function runtime(): void {}",
+    "task/index.ts": "export function tasks(): void {}",
+    "workspace-place.ts": "export function appoint(): void {}",
+    "library/rogue.ts": [
+      'import { runtime } from "../akuma/akuma.js";',
+      'import { tasks } from "../task/index.js";',
+      'import { appoint } from "../workspace-place.js";',
+      "export const compose = [runtime, tasks, appoint];",
+    ].join("\n"),
+  });
+
+  assert.deepEqual(accepted, []);
+  assert.deepEqual(knownComposition, []);
+  assert.deepEqual(rules(diagnostics), ["architecture/composition-boundary"]);
+  assert.deepEqual(rules(ordinaryDiagnostics), ["architecture/composition-boundary"]);
+});
+
 test("architecture policy keeps provider SDKs inside their adapter owners", () => {
   const accepted = check({
     "akuma/providers/opencode-sdk/client.ts":

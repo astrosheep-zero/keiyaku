@@ -1,6 +1,6 @@
 import type { ArchitecturePolicy } from "./engine.js";
 import { capabilityPolicy } from "./policy-capabilities.js";
-import { any, types } from "./policy-helpers.js";
+import { any, runtime, types } from "./policy-helpers.js";
 
 const protocolOperations = [
   any("protocol/abandon.ts"),
@@ -50,6 +50,7 @@ const kanshiGitObservation = any("git/read-observation.ts", [
   "withGitReadObservation",
 ]);
 const boundedList = any("bounded-list.ts");
+const targetPlacementRuntime = runtime("git/target-placement.ts");
 const libraryOwner = {
   allow: [
     any("akuma/**"),
@@ -82,7 +83,26 @@ const libraryOwner = {
     any("protocol/run.ts"),
   ],
 } as const;
+
+const knownLibraryCompositions = [
+  "library/address.ts",
+  "library/akuma-creation.ts",
+  "library/catalog.ts",
+  "library/composition.ts",
+  "library/contract-handle.ts",
+  "library/fleet-result.ts",
+  "library/fleet.ts",
+  "library/nuke.ts",
+  "library/reconcile.ts",
+] as const;
 export const KEIYAKU_ARCHITECTURE_POLICY = {
+  compositionBoundaries: [
+    {
+      source: "library/**",
+      ownerPaths: ["akuma/**", "alias/**", "dispatch/**", "settlement/**", "task/**", "workspace-place.ts"],
+      allowedSources: knownLibraryCompositions,
+    },
+  ],
   zones: [
     { source: "scripts/**", allow: [any("scripts/**")] },
     { source: "core/verbs/**", allow: [any("core/decide.ts"), any("core/facts/**"), any("core/subject.ts")] },
@@ -126,11 +146,25 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("verification/declaration.ts", ["VERIFIED", "VerificationDefinition"]),
         any("verification/execution.ts"),
       ],
+      deny: [targetPlacementRuntime],
     },
     {
       source: "protocol/audit.ts",
       allow: [
         any("body/**"),
+        any("core/**"),
+        any("git/**"),
+        any("protocol/**"),
+        any("verification/**"),
+        any("workspace-place.ts"),
+      ],
+    },
+    {
+      source: "protocol/placement.ts",
+      allow: [
+        any("body/**"),
+        boundedList,
+        any("coordination/**"),
         any("core/**"),
         any("git/**"),
         any("protocol/**"),
@@ -161,7 +195,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("verification/**"),
         any("workspace-place.ts"),
       ],
-      deny: [any("core/facts/gate.ts")],
+      deny: [any("core/facts/gate.ts"), targetPlacementRuntime],
     },
     {
       source: "library/contract-bind.ts",
@@ -312,6 +346,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("task/**"),
         any("world.ts"),
       ],
+      deny: [any("library/**")],
     },
     {
       source: "akuma/**",
@@ -328,6 +363,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("task/**"),
         any("world.ts"),
       ],
+      deny: [any("library/**")],
     },
     { source: "runtime/proc/**", allow: [any("runtime/proc/**")] },
     {
