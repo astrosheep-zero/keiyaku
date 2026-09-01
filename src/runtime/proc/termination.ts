@@ -25,6 +25,16 @@ async function signalOwnedProcessGroup(pid: number, signal: NodeJS.Signals, exit
   }
 }
 
+function ownedProcessGroupExists(pid: number): boolean {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    if (isMissingProcess(error)) return false;
+    throw error;
+  }
+}
+
 export async function terminateWindowsTree(pid: number): Promise<void> {
   try {
     await execFileAsync("taskkill", ["/PID", String(pid), "/T", "/F"], {
@@ -85,9 +95,7 @@ export async function terminateOwnedProcess(child: ChildProcess, force = false):
     return;
   }
   await signalOwnedProcessGroup(pid, "SIGTERM", exit);
-  if (exited || child.exitCode !== null || child.signalCode !== null) return;
-  await Promise.race([exit, delay(TERMINATION_GRACE_MS)]);
-  if (exited || child.exitCode !== null || child.signalCode !== null) return;
-  await signalOwnedProcessGroup(pid, "SIGKILL", exit);
+  await delay(TERMINATION_GRACE_MS);
+  if (ownedProcessGroupExists(pid)) await signalOwnedProcessGroup(pid, "SIGKILL", exit);
   await exit;
 }

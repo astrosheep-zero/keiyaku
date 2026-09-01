@@ -41,6 +41,7 @@ for (const force of [false, true]) {
     const child = ownedChild(10_000 + Number(force));
     t.mock.method(process, "kill", ((pid: number, signal?: NodeJS.Signals | number) => {
       assert.equal(pid, -child.pid);
+      if (signal === 0) throw Object.assign(new Error("group gone"), { code: "ESRCH" });
       assert.equal(signal, force ? "SIGKILL" : "SIGTERM");
       child.emit("exit", 0, null);
       throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
@@ -64,6 +65,30 @@ for (const force of [false, true]) {
     await assert.rejects(terminateOwnedProcess(child, force), /kill EPERM/u);
   });
 }
+
+test("graceful termination cleans the group after SIGTERM EPERM and leader exit", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("POSIX process groups only");
+    return;
+  }
+  const child = ownedChild(10_200);
+  const signals: Array<NodeJS.Signals | number> = [];
+  t.mock.method(process, "kill", ((pid: number, signal?: NodeJS.Signals | number) => {
+    assert.equal(pid, -child.pid);
+    signals.push(signal ?? 0);
+    if (signal === "SIGTERM") {
+      child.emit("exit", 0, null);
+      throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+    }
+    if (signal === 0) return true;
+    assert.equal(signal, "SIGKILL");
+    child.emit("close", 0, null);
+    return true;
+  }) as typeof process.kill);
+
+  await terminateOwnedProcess(child);
+  assert.deepEqual(signals, ["SIGTERM", 0, "SIGKILL"]);
+});
 
 test("runProcess reports termination failure without waiting for child close", async (t) => {
   if (process.platform === "win32") {
@@ -333,6 +358,90 @@ test("runProcess timeout closes the directly-owned helper boundary", async () =>
     else assert.match(output.join(""), /descendant\/exited/);
   } finally {
     ready.dispose();
+    if (pending !== undefined) await pending;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Unix graceful termination cleans an owned group after its leader exits", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("POSIX process groups only");
+    return;
+  }
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-runtime-leader-exit-"));
+  const descendantPidPath = join(root, "descendant-pid");
+  const descendant = [
+    `require("node:fs").writeFileSync(${JSON.stringify(descendantPidPath)}, String(process.pid));`,
+    "process.on(\"SIGTERM\", () => {});",
+    "setInterval(() => {}, 1_000);",
+  ].join(" ");
+  const parent = [
+    'const { spawn } = require("node:child_process");',
+    `spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: ["ignore", "inherit", "inherit"] });`,
+    'process.on("SIGTERM", () => process.exit(0));',
+    "setInterval(() => {}, 1_000);",
+  ].join(" ");
+  let owned: Awaited<ReturnType<typeof spawnDetachedProcess>> | undefined;
+  let descendantPid: number | undefined;
+  try {
+    owned = await spawnDetachedProcess({
+      argv: [process.execPath, "-e", parent],
+      cwd: root,
+      log: join(root, "stdio.log"),
+    });
+    descendantPid = Number.parseInt(await waitForFile(descendantPidPath), 10);
+    await owned.terminate();
+    await waitForProcessExit(descendantPid);
+  } finally {
+    if (descendantPid !== undefined) {
+      try {
+        process.kill(descendantPid, "SIGKILL");
+      } catch {
+        /* already stopped */
+      }
+    }
+    if (owned !== undefined) await owned.terminate(true).catch(() => undefined);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("runProcess timeout settles after cleaning inherited pipes from an owned group", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("POSIX process groups only");
+    return;
+  }
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-runtime-inherited-pipes-"));
+  const descendantPidPath = join(root, "descendant-pid");
+  const descendant = [
+    'process.stdout.write("descendant/ready\\n");',
+    "process.on(\"SIGTERM\", () => {});",
+    "setInterval(() => {}, 1_000);",
+  ].join(" ");
+  const parent = [
+    'const { spawn } = require("node:child_process");',
+    'const { writeFileSync } = require("node:fs");',
+    `const descendant = spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: ["ignore", "inherit", "inherit"] });`,
+    `writeFileSync(${JSON.stringify(descendantPidPath)}, String(descendant.pid));`,
+    'process.on("SIGTERM", () => process.exit(0));',
+    "setInterval(() => {}, 1_000);",
+  ].join(" ");
+  let pending: ReturnType<typeof runProcess> | undefined;
+  let descendantPid: number | undefined;
+  try {
+    pending = runProcess({ ...input([process.execPath, "-e", parent]), cwd: root, timeoutMs: 1_000 });
+    descendantPid = Number.parseInt(await waitForFile(descendantPidPath), 10);
+    const started = performance.now();
+    assert.deepEqual(await pending, { kind: "timeout" });
+    assert.ok(performance.now() - started < 3_000);
+    await waitForProcessExit(descendantPid);
+  } finally {
+    if (descendantPid !== undefined) {
+      try {
+        process.kill(descendantPid, "SIGKILL");
+      } catch {
+        /* already stopped */
+      }
+    }
     if (pending !== undefined) await pending;
     rmSync(root, { recursive: true, force: true });
   }
