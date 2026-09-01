@@ -1,7 +1,11 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "noEmit": true
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@astrosheep/keiyaku/plugin": ["src/plugin/public.ts"]
+    }
   },
   "include": [
     "tests/actor.test.ts",

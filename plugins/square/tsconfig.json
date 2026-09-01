@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": ".",
+    "baseUrl": ".",
+    "paths": {
+      "@astrosheep/keiyaku/plugin": ["../../build/src/plugin/public.d.ts"]
+    }
+  },
+  "include": ["index.ts"],
+  "exclude": []
+}

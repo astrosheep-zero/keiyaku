@@ -2,6 +2,10 @@
   "name": "@astrosheep/keiyaku-plugin-square",
   "version": "0.1.0",
   "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build"
+  },
   "files": [
     "index.js",
     "index.d.ts"

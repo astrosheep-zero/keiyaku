@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { Square } from "@astrosheep/square";
 import squarePlugin from "../plugins/square/index.js";
+import type { WorldRoot } from "../src/world.js";
 import { pluginRuntime } from "../src/plugin/runtime.js";
 import { World } from "../src/world.js";
 
@@ -48,7 +49,7 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     process.env.SQUARE_HOST_LEDGER_LOCAL = join(root, "local-ledger");
     process.env.SQUARE_HOST_LEDGER_USER = join(root, "user-ledger");
     const instance = await squarePlugin.activate({
-      world: root,
+      world: root as unknown as WorldRoot,
       config: undefined,
       writablePath: () => join(root, ".square"),
     });
@@ -86,7 +87,7 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     delete process.env.CODEX_THREAD_ID;
     delete process.env.SQUARE_PARTICIPANT_NAME;
     const fallback = await squarePlugin.activate({
-      world: root,
+      world: root as unknown as WorldRoot,
       config: undefined,
       writablePath: () => join(root, ".square"),
     });
