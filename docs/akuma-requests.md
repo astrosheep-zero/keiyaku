@@ -57,8 +57,9 @@ A reserved request settles only from child Soul, Seal, or current leash evidence
 The live pump exists only while its parent Body holds the leash. Completion,
 control, or Heart loss closes admission, drains in-flight service to terminal
 Heart settlement, then disposes the channel. Receipt projection follows durable
-settlement; a missing caller cannot reverse it. Losing the ephemeral channel
-before a receipt is a transport-only unknown outcome carrying the same logical
-identity for diagnosis only; no safe-retry guarantee is implied, and it is
-never a claim that the request was voided. Requests never enter the idle
-predicate.
+settlement; a missing caller cannot reverse it. Caller cancellation before
+request publication remains cancellation. Cancellation after durable
+publication, or losing the ephemeral channel before a receipt, is a
+transport-only unknown outcome carrying the same logical identity for diagnosis
+only; no safe-retry guarantee is implied, and it is never a claim that the
+request was voided. Requests never enter the idle predicate.

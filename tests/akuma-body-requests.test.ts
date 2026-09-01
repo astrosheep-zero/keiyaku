@@ -20,7 +20,7 @@ import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { AkumaBodyRequestError, requestBodyCommand } from "../src/akuma/requests.js";
 import { BodyRequestPump, settleBodyRequests } from "../src/akuma/request-serve.js";
 import { BodyRequestPump as LifecycleBodyRequestPump } from "../src/akuma/request-lifecycle.js";
-import { composeRequestCommands } from "../src/akuma/request-wire.js";
+import { atomicJson, composeRequestCommands } from "../src/akuma/request-wire.js";
 import {
   executeTellAkuma,
   fleetRequestCommand,
@@ -170,6 +170,7 @@ async function requestBodyWait(
     targets: readonly AkuId[];
     completion: "any" | "all";
     timeoutMs?: number;
+    signal?: AbortSignal;
   }>,
 ) {
   const command = fleetRequestProtocol("akuma.wait");
@@ -182,6 +183,7 @@ async function requestBodyWait(
       completion: input.completion,
       ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
     },
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
 }
 
@@ -311,6 +313,134 @@ test("initial request publication loss is unknown with its request identity", as
     (error: unknown) =>
       error instanceof AkumaBodyRequestError && error.outcome === "unknown" && error.requestId === id,
   );
+});
+
+test("cancellation before request publication retains the caller cancellation", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "keiyaku-request-cancel-before-publication-"));
+  const controller = new AbortController();
+  const reason = new Error("cancel before publication");
+  controller.abort(reason);
+  try {
+    await assert.rejects(
+      requestBodyWait({
+        directory,
+        id: randomUUID(),
+        targets: ["aku/worker/22222222" as AkuId],
+        completion: "all",
+        signal: controller.signal,
+      }),
+      (error: unknown) => error === reason,
+    );
+    assert.deepEqual((await readdir(directory)).filter((name) => name.endsWith(".request.json")), []);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("cancellation during request publication retains the caller cancellation before rename", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "keiyaku-request-cancel-during-publication-"));
+  const controller = new AbortController();
+  const reason = new Error("cancel during publication");
+  let entered!: () => void;
+  let paused!: () => void;
+  const publicationEntered = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const publicationPaused = new Promise<void>((resolve) => {
+    paused = resolve;
+  });
+  try {
+    const publication = atomicJson(
+      join(directory, "request.json"),
+      { id: randomUUID(), action: "akuma.wait" },
+      controller.signal,
+      async () => {
+        entered();
+        await publicationPaused;
+      },
+    );
+    await publicationEntered;
+    controller.abort(reason);
+    paused();
+    await assert.rejects(
+      publication,
+      (error: unknown) => error === reason,
+    );
+    assert.equal(existsSync(join(directory, "request.json")), false);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("cancellation after publication is unknown and same-id retry reuses Heart service evidence", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-request-cancel-after-publication-")));
+  const parent = await born(root, "parent", "11111111");
+  let started!: () => void;
+  const executionStarted = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  let release!: () => void;
+  const executionReleased = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let calls = 0;
+  const pump = await openFleetPump(parent, {
+    wait: async () => {
+      calls += 1;
+      started();
+      await executionReleased;
+      return emptyWaitResult;
+    },
+    tell: async () => {
+      throw new Error("unexpected tell");
+    },
+    kill: async () => {
+      throw new Error("unexpected kill");
+    },
+  });
+  const id = randomUUID();
+  const controller = new AbortController();
+  try {
+    const request = requestBodyWait({
+      directory: pump.directory,
+      id,
+      targets: ["aku/worker/22222222" as AkuId],
+      completion: "all",
+      signal: controller.signal,
+    });
+    await executionStarted;
+    assert.equal((await readRequest(parent.paths, id))?.state, "begun");
+    controller.abort(new Error("cancel after publication"));
+    await assert.rejects(
+      request,
+      (error: unknown) =>
+        error instanceof AkumaBodyRequestError &&
+        error.outcome === "unknown" &&
+        error.requestId === id &&
+        error.action === "akuma.wait",
+    );
+
+    release();
+    while ((await readRequest(parent.paths, id))?.state !== "served")
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.deepEqual(
+      await requestBodyWait({
+        directory: pump.directory,
+        id,
+        targets: ["aku/worker/22222222" as AkuId],
+        completion: "all",
+      }),
+      { kind: "reference", reference: { action: "akuma.wait" } },
+    );
+    assert.equal(calls, 1);
+    const fact = await readRequest(parent.paths, id);
+    assert.deepEqual(fact?.state === "served" && "serviceJson" in fact ? JSON.parse(fact.serviceJson) : null, {
+      action: "akuma.wait",
+    });
+  } finally {
+    await pump.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("a Heart authority failure keeps its error identity, closes the channel, and recovers admission", async () => {

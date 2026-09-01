@@ -130,13 +130,18 @@ export async function requestBodyCommand<Input, Output, Reference>(
   const transportId = randomUUID();
   const payload = input.command.encodeRequest(input.value);
   try {
-    await atomicJson(requestPath(input.directory, transportId), {
-      id,
-      action: input.command.action,
-      payload,
-    });
+    await atomicJson(
+      requestPath(input.directory, transportId),
+      {
+        id,
+        action: input.command.action,
+        payload,
+      },
+      input.signal,
+    );
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    if (input.signal?.aborted) input.signal.throwIfAborted();
     throw new AkumaBodyRequestError(
       input.command.action,
       "unknown",
@@ -161,6 +166,18 @@ export async function requestBodyCommand<Input, Output, Reference>(
         id,
       );
     }
-    await abortableDelay(POLL_MS, input.signal);
+    try {
+      await abortableDelay(POLL_MS, input.signal);
+    } catch (error) {
+      if (input.signal?.aborted) {
+        throw new AkumaBodyRequestError(
+          input.command.action,
+          "unknown",
+          "request was cancelled after publication and before a receipt",
+          id,
+        );
+      }
+      throw error;
+    }
   }
 }

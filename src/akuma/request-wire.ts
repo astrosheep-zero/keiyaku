@@ -219,10 +219,17 @@ export function receiptPath(directory: string, id: string): string {
   return join(directory, `${id}.receipt.json`);
 }
 
-export async function atomicJson(path: string, value: unknown): Promise<void> {
+export async function atomicJson(
+  path: string,
+  value: unknown,
+  signal?: AbortSignal,
+  beforeRename?: () => void | Promise<void>,
+): Promise<void> {
   const temporary = `${path}.${randomUUID()}.tmp`;
   try {
     await writeFile(temporary, `${JSON.stringify(value)}\n`, { flag: "wx" });
+    await beforeRename?.();
+    signal?.throwIfAborted();
     await rename(temporary, path);
   } finally {
     await rm(temporary, { force: true });
