@@ -12,7 +12,6 @@ import {
   buildTree,
   createTaskRelations,
   diagnoseBoard,
-  projectDetailFacts,
   type BlockedTaskRow,
   type TaskDetailFacts,
   type TaskDoctorIssue,
@@ -36,6 +35,7 @@ import {
   lifecycleTask,
   listTasks,
   queryTasks,
+  readTaskDetail,
   readyTasks,
   taskView,
   updateTask,
@@ -145,8 +145,7 @@ class TaskHandle {
     private readonly execution: ExecutionContext,
   ) {}
   async read(): Promise<TaskDetail | null> {
-    const board = (await readBoard(this.world)).board;
-    const facts = projectDetailFacts(board, this.id, createTaskRelations(board));
+    const facts = await readTaskDetail(this.world, this.id);
     return facts === null ? null : { ...facts, task: taskView(facts.task) };
   }
   async tree(): Promise<TaskDecompositionTree> {

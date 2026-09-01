@@ -19,7 +19,7 @@ import {
   type TaskDocument,
 } from "./document.js";
 import { allocateLocalId, deriveLocalStem, formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
-import { nukeTaskAuthority, readBoard, replaceAuthority, withTaskLocks } from "./store.js";
+import { nukeTaskAuthority, readBoard, readTaskDocument, replaceAuthority, withTaskLocks } from "./store.js";
 import type { WorldRoot } from "../world.js";
 import { projectBoundedList } from "../bounded-list.js";
 import { taskRowViewLimit } from "./input.js";
@@ -272,6 +272,28 @@ export async function readTaskDetails(
   return missing < 0
     ? { kind: "accepted", value: details as readonly TaskDetailFacts[] }
     : { kind: "refused", refusal: { kind: "task-missing", taskId: ids[missing]! } };
+}
+
+export async function readTaskDetail(world: WorldRoot, id: TaskId): Promise<TaskDetailFacts | null> {
+  const task = await readTaskDocument(world, id);
+  if (task === undefined) return null;
+  const selected = new Map<TaskId, TaskDocument>();
+  selected.set(id, task);
+  const related = new Map<TaskId, TaskDocument>(selected);
+  const references = [...selected.values()].flatMap((task) => [
+    ...task.needs,
+    ...(task.parent === null ? [] : [task.parent]),
+    ...task.supersedes,
+    ...task.relates,
+  ]);
+  for (const id of references) {
+    if (related.has(id)) continue;
+    const task = await readTaskDocument(world, id);
+    if (task !== undefined) related.set(id, task);
+  }
+  const board = { tasks: related };
+  const relations = createTaskRelations(board);
+  return projectDetailFacts(board, id, relations);
 }
 export async function observeTaskDetails(
   world: WorldRoot,

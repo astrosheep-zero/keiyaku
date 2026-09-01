@@ -22,7 +22,7 @@ import {
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { parseTaskDocument, serializeTaskDocument, type TaskDocument } from "../src/task/document.js";
 import { parseTaskId } from "../src/task/identity.js";
-import { batchTasks, settleTask } from "../src/task/operations.js";
+import { batchTasks, observeTaskDetails, settleTask } from "../src/task/operations.js";
 import {
   DEFAULT_TASK_LOCK_TIMEOUT_MS,
   authorityPath,
@@ -475,7 +475,7 @@ test("Task row-view limits refuse before reading Task authority", async () => {
   for (const read of reads) await assert.rejects(read, /integer from 1 to 500/u);
 });
 
-test("detail and query agree that blocks is reverse needs membership", async () => {
+test("targeted reads stay local while detail retains reverse blocks", async () => {
   const { tasks } = await world();
   const blocker = acceptedId(await tasks.add({ title: "A" }));
   const blocked = acceptedId(await tasks.add({ title: "B", needs: [blocker] }));
@@ -484,13 +484,20 @@ test("detail and query agree that blocks is reverse needs membership", async () 
   const shown = await tasks.task({ id: blocker }).read();
   assert.deepEqual(
     shown?.blocks.map((item) => item.id),
-    [blocked],
+    [],
   );
   const shownBlocked = await tasks.task({ id: blocked }).read();
   assert.deepEqual(
     shownBlocked?.blocks.map((item) => item.id),
     [],
   );
+  const detailed = await observeTaskDetails(tasks.root, [blocker]);
+  assert.equal(detailed.kind, "accepted");
+  if (detailed.kind === "accepted")
+    assert.deepEqual(
+      detailed.value[0]?.blocks.map((item) => item.id),
+      [blocked],
+    );
 
   const selectsBlocker = await tasks.query({
     scope: "world",
@@ -960,6 +967,18 @@ test("board reports malformed Markdown Task authority as corruption", async () =
   writeFileSync(join(root, ".keiyaku", "tasks", "corrupted-authority.md"), "not a Task document\n");
 
   await assert.rejects(tasks.list({ scope: "world", selection: "all" }), TaskAuthorityCorruptionError);
+});
+
+test("targeted reads ignore unrelated malformed and symlink authorities", async () => {
+  const { root, tasks } = await world();
+  const id = acceptedId(await tasks.add({ title: "Targeted authority" }));
+  const directory = join(root, ".keiyaku", "tasks");
+  for (let index = 0; index < 25; index += 1)
+    writeFileSync(join(directory, `unrelated-${String(index).padStart(2, "0")}.md`), "not a Task document\n");
+  symlinkSync(join(root, "outside.md"), join(directory, "unrelated-link.md"));
+
+  const shown = await tasks.task({ id }).read();
+  assert.equal(shown?.task.id, id);
 });
 
 test("forced-local Task mutation execution preserves owner validation and authenticated creation actor", async () => {
