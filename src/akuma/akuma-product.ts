@@ -161,7 +161,10 @@ export class Akuma {
     return new AkumaHandle(parseAkuId(input.id).id, this.path);
   }
   async listArchetypes(): Promise<readonly string[]> {
-    return readArchetypes(this.configuration.home === undefined ? {} : { home: this.configuration.home });
+    return readArchetypes({
+      project: this.path,
+      ...(this.configuration.home === undefined ? {} : { home: this.configuration.home }),
+    });
   }
   async call(input: AkumaCallLaunchInput): Promise<AkumaHandle> {
     return await this[CALL_WITH_CONTEXT](input, { initiatorCwd: process.cwd() });
@@ -171,7 +174,7 @@ export class Akuma {
     const name = archetypeName(input.archetype);
     const home = this.configuration.home === undefined ? {} : { home: this.configuration.home };
     const settings = this.configuration.settings ?? (await readSettings({ root: this.path, ...home }));
-    const archetype = await loadArchetype({ name, ...home, settings, ...readonly });
+    const archetype = await loadArchetype({ name, project: this.path, ...home, settings, ...readonly });
     const allowed =
       input.allowed === undefined
         ? archetype.allowed

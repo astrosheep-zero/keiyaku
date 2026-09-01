@@ -36,6 +36,8 @@ import { createProviderAttempt, type ProviderAdapter, type Session } from "../sr
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import { settings } from "../src/settings.js";
 import { Keiyaku } from "../src/index.js";
+import { invoke } from "../src/cli/invoke.js";
+import { parseArgv } from "../src/cli/parse.js";
 import { World } from "../src/world.js";
 
 const CLAUDE_EXECUTION = { name: "claude", kind: "claude-agent-sdk" } as const;
@@ -2477,6 +2479,58 @@ test("Archetype definition catalog reports the first invalid definition in byte 
         error.reason === "is invalid: Akuma file must begin with YAML frontmatter",
     );
   } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("Project Archetype definitions shadow Home while Home remains the fallback", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-project-archetypes-"));
+  const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-project-archetypes-home-"));
+  try {
+    mkdirSync(join(root, ".keiyaku", "akuma"), { recursive: true });
+    mkdirSync(join(home, "akuma"));
+    writeFileSync(join(root, ".keiyaku", "akuma", "project-only.md"), "---\nprovider: claude\n---\nProject only.\n");
+    writeFileSync(join(home, "akuma", "home-only.md"), "---\nprovider: claude\n---\nHome only.\n");
+    writeFileSync(join(root, ".keiyaku", "akuma", "shared.md"), "---\nprovider: claude\ndescription: Project\n---\nProject body.\n");
+    writeFileSync(join(home, "akuma", "shared.md"), "---\nprovider: claude\ndescription: Home\n---\nHome body.\n");
+
+    const settingsValue = await settings({ root, home });
+    const world = await akumaAt(root, { home, settings: settingsValue });
+    assert.deepEqual(await world.listArchetypes(), ["home-only", "project-only", "shared"]);
+
+    const catalog = await Keiyaku.ls({ query: { kind: "archetypes" }, path: await World.at(root), home });
+    assert.deepEqual(catalog, {
+      kind: "archetypes",
+      rows: [
+        { name: "home-only" },
+        { name: "project-only" },
+        { name: "shared", description: "Project" },
+      ],
+    });
+
+    const cli = await invoke(parseArgv(["-C", root, "ls", "aku/"]), {
+      environment: { KEIYAKU_HOME: home },
+    });
+    assert.deepEqual(cli, { kind: "catalog", catalog });
+
+    const shared = await loadArchetype({ name: "shared", project: root, home, settings: settingsValue });
+    assert.equal(shared.path, join(root, ".keiyaku", "akuma", "shared.md"));
+    assert.equal(shared.description, "Project");
+    const fallback = await loadArchetype({ name: "home-only", project: root, home, settings: settingsValue });
+    assert.equal(fallback.path, join(home, "akuma", "home-only.md"));
+
+    await assert.rejects(
+      loadArchetype({ name: "missing", project: root, home, settings: settingsValue }),
+      (error: unknown) =>
+        error instanceof AkumaArchetypeError &&
+        error.searched.join("\n") ===
+          [
+            join(root, ".keiyaku", "akuma", "missing.md"),
+            join(home, "akuma", "missing.md"),
+          ].join("\n"),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
   }
 });

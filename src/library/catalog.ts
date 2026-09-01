@@ -16,7 +16,7 @@ export type CatalogQuery =
 export type CatalogInput =
   | Readonly<{ query: Extract<CatalogQuery, { kind: "tasks" }>; path: WorldRoot }>
   | Readonly<{ query: Extract<CatalogQuery, { kind: "contracts" }>; repo: Repo }>
-  | Readonly<{ query: Extract<CatalogQuery, { kind: "archetypes" }>; home?: string }>
+  | Readonly<{ query: Extract<CatalogQuery, { kind: "archetypes" }>; path?: WorldRoot; home?: string }>
   | Readonly<{ query: Extract<CatalogQuery, { kind: "akuma" }>; path: WorldRoot }>;
 
 export type Catalog =
@@ -124,7 +124,7 @@ export async function listCatalog(input: CatalogInput): Promise<Catalog> {
     query.kind === "contracts"
       ? ["query", "repo"]
       : query.kind === "archetypes"
-        ? ["query", "home"]
+        ? ["query", "path", "home"]
         : ["query", "path"];
   for (const key of Object.keys(values)) {
     if (!allowed.includes(key)) throw new TypeError(`Keiyaku.ls input has unknown field: ${key}`);
@@ -138,10 +138,14 @@ export async function listCatalog(input: CatalogInput): Promise<Catalog> {
     return { kind: "contracts", ...catalogue };
   }
   if (query.kind === "archetypes") {
+    const path = values.path === undefined ? undefined : await worldRoot(values.path);
     const home = optionalHome(values.home);
     return {
       kind: "archetypes",
-      rows: await listArchetypeDefinitions(home === undefined ? {} : { home }),
+      rows: await listArchetypeDefinitions({
+        ...(path === undefined ? {} : { project: path }),
+        ...(home === undefined ? {} : { home }),
+      }),
     };
   }
   const path = await worldRoot(values.path);

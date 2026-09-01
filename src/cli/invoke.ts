@@ -244,7 +244,11 @@ async function invokeCatalog(
     if (parsed.query.kind === "archetypes") {
       return {
         kind: "catalog" as const,
-        catalog: await Keiyaku.ls({ query: parsed.query, ...(home === undefined ? {} : { home }) }),
+        catalog: await Keiyaku.ls({
+          query: parsed.query,
+          ...(world === null ? {} : { path: world }),
+          ...(home === undefined ? {} : { home }),
+        }),
       };
     }
     if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");

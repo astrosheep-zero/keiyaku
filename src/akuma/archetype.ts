@@ -51,12 +51,23 @@ export class AkumaArchetypeError extends Error {
   }
 }
 
-function archetypeDirectory(home?: string): string {
+type ArchetypeCoordinates = Readonly<{ project?: string; home?: string }>;
+
+function projectArchetypeDirectory(project?: string): string | undefined {
+  return project === undefined ? undefined : join(project, ".keiyaku", "akuma");
+}
+
+function homeArchetypeDirectory(home?: string): string {
   return join(home ?? join(homedir(), ".keiyaku"), "akuma");
 }
 
-async function archetypePaths(home?: string): Promise<readonly Readonly<{ name: string; path: string }>[]> {
-  const directory = archetypeDirectory(home);
+function archetypeDirectories(input: ArchetypeCoordinates): readonly string[] {
+  return [projectArchetypeDirectory(input.project), homeArchetypeDirectory(input.home)].filter(
+    (directory): directory is string => directory !== undefined,
+  );
+}
+
+async function pathsInDirectory(directory: string): Promise<readonly Readonly<{ name: string; path: string }>[]> {
   try {
     return (await readdir(directory, { withFileTypes: true }))
       .flatMap((entry) => {
@@ -75,8 +86,23 @@ async function archetypePaths(home?: string): Promise<readonly Readonly<{ name: 
   }
 }
 
-export async function listArchetypes(input: Readonly<{ home?: string }> = {}): Promise<readonly string[]> {
-  return (await archetypePaths(input.home)).map(({ name }) => name);
+async function archetypePaths(
+  input: ArchetypeCoordinates = {},
+): Promise<readonly Readonly<{ name: string; path: string }>[]> {
+  const scopes = await Promise.all(archetypeDirectories(input).map(pathsInDirectory));
+  const selected = new Map<string, Readonly<{ name: string; path: string }>>();
+  for (const scope of scopes) {
+    for (const entry of scope) if (!selected.has(entry.name)) selected.set(entry.name, entry);
+  }
+  return [...selected.values()].sort((left, right) => Buffer.compare(Buffer.from(left.name), Buffer.from(right.name)));
+}
+
+function archetypeCandidatePaths(name: string, input: ArchetypeCoordinates): readonly string[] {
+  return [...new Set(archetypeDirectories(input).map((directory) => join(directory, `${name}.md`)))];
+}
+
+export async function listArchetypes(input: ArchetypeCoordinates = {}): Promise<readonly string[]> {
+  return (await archetypePaths(input)).map(({ name }) => name);
 }
 
 function archetypeField(values: Readonly<Record<string, unknown>>, key: string, required = false): string | undefined {
@@ -152,12 +178,12 @@ function decodeArchetype(name: string, path: string, markdown: string): DecodedA
 }
 
 export async function listArchetypeDefinitions(
-  input: Readonly<{ home?: string }> = {},
+  input: ArchetypeCoordinates = {},
 ): Promise<readonly ArchetypeCatalogRow[]> {
   // Reads still run concurrently, but the reported failure is the first invalid
   // definition in catalog byte order, not whichever read happened to finish first.
   const settled = await Promise.allSettled(
-    (await archetypePaths(input.home)).map(async ({ name, path }) => {
+    (await archetypePaths(input)).map(async ({ name, path }) => {
       try {
         const definition = decodeArchetype(name, path, await readFile(path, "utf8"));
         return Object.freeze({
@@ -271,32 +297,34 @@ async function admitArchetype(
 }
 
 export async function loadArchetype(
-  input: Readonly<{ name: string; home?: string; settings: Settings; readonly?: true }>,
+  input: Readonly<{ name: string; project?: string; home?: string; settings: Settings; readonly?: true }>,
 ): Promise<AdmittedArchetype> {
   const name = archetypeName(input.name);
-  const directory = archetypeDirectory(input.home);
-  const path = join(directory, `${name}.md`);
+  const candidates = archetypeCandidatePaths(name, input);
   const missing = () =>
-    new AkumaArchetypeError(name, [path], "was not found", "use `keiyaku ls aku/` to list available Akuma");
-  let markdown: string;
-  try {
-    markdown = await readFile(path, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") throw missing();
-    throw new AkumaArchetypeError(
-      name,
-      [path],
-      `could not be read: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    new AkumaArchetypeError(name, candidates, "was not found", "use `keiyaku ls aku/` to list available Akuma");
+  for (const path of candidates) {
+    let markdown: string;
+    try {
+      markdown = await readFile(path, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw new AkumaArchetypeError(
+        name,
+        [path],
+        `could not be read: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    try {
+      return await admitArchetype(decodeArchetype(name, path, markdown), input.settings, input.readonly);
+    } catch (error) {
+      if (error instanceof AkumaArchetypeError) throw error;
+      throw new AkumaArchetypeError(
+        name,
+        [path],
+        `is invalid: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
-  try {
-    return await admitArchetype(decodeArchetype(name, path, markdown), input.settings, input.readonly);
-  } catch (error) {
-    if (error instanceof AkumaArchetypeError) throw error;
-    throw new AkumaArchetypeError(
-      name,
-      [path],
-      `is invalid: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
+  throw missing();
 }

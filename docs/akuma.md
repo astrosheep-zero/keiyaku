@@ -28,6 +28,8 @@ cancellation asks the publication owner to close only its retained unborn child;
 it cannot invent a third birth result. No blind cleaner adjudicates abandoned
 births.
 
+Publication releases process custody only after the child has retired and the retained leash has proved Soul or permanent Seal; a termination or exit error is evidence to adjudicate, never a reason to wait forever or release blindly.
+
 Life is derived solely from leash and latest Heart evidence. A live Body is
 running; an explicitly completed one is asleep; an unsuccessful one is stranded;
 a witnessed stop is killed only while that Body remains latest. Free leash with
@@ -47,12 +49,18 @@ adds a frozen birth restriction; it can never be loosened or toggled later.
 Later Archetype or Settings edits affect only future births. A missing native
 resume promise never authorizes reconstructing one.
 
+Archetype definitions may come from both the current project and Home. A
+project definition shadows a Home definition with the same canonical name;
+Home remains the fallback when the project has no definition. This precedence
+applies only to call-time definition configuration and never changes World
+runtime custody, Heart evidence, or leash ownership.
+
 All worktrees of one repository share one Akuma World, fleet, Alias authority,
 and Heart storage. Soul cwd is execution input, not World identity. Akuma state
 lives in the World rather than a Contract worktree, so ordinary worktree cleanup
 cannot erase it. Home supplies Archetype configuration only, never runtime
-authority. The accepted risk of force-cleaning repository-local management state
-is not hidden by a second store or automatic defense.
+authority. The accepted risk of force-cleaning repository-local management
+state is not hidden by a second store or automatic defense.
 
 Confirmed World reset stops and retains each recognized Akuma's leash through
 deletion of its known custody. It removes only known management material and
