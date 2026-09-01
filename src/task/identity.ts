@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { randomBytes } from "node:crypto";
 import { contractSegment, type ContractId } from "../core/facts/types.js";
 import { identityCoordinate, identitySegments } from "../identity/coordinates.js";
 import { normalizeIdentityStem } from "../identity/normalize.js";
@@ -58,12 +59,13 @@ export function deriveLocalStem(title: string): string {
 }
 
 export function allocateLocalId(stem: string, occupied: ReadonlySet<string>): string {
-  if (!occupied.has(stem)) return stem;
-  for (let suffix = 2; Number.isSafeInteger(suffix); suffix += 1) {
+  const seed = randomBytes(2).readUInt16BE(0);
+  for (let offset = 0; offset <= 0xffff; offset += 1) {
+    const suffix = ((seed + offset) & 0xffff).toString(16).padStart(4, "0");
     const candidate = `${stem}-${suffix}`;
     if (!occupied.has(candidate)) return candidate;
   }
-  throw new Error("task identity collision ordinal exceeded the safe integer range");
+  throw new Error("task identity hexadecimal suffix space exhausted");
 }
 
 export function sameNamespace(left: readonly string[], right: readonly string[]): boolean {

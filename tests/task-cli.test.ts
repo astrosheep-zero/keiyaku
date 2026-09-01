@@ -268,11 +268,13 @@ test("Task commands reject the removed Contract association flags", () => {
 });
 test("plural show is all-or-nothing and preserves input order", async () => {
   const root = world();
+  const created: string[] = [];
   for (const title of ["First detail", "Second detail", "Third detail"]) {
     const added = (await invoke(parseArgv(["-C", root, "task", "add", title]))) as TaskInvocationResult;
     assert.equal((added as { kind: string }).kind, "accepted");
+    if ((added as { kind: string }).kind === "accepted") created.push((added as { value: { id: string } }).value.id);
   }
-  const ids = ["task/first-detail", "task/second-detail", "task/third-detail"] as const;
+  const ids = created as readonly string[];
   const textCommand = parseArgv(["task", "show", ...ids]).command;
   const textResult = (await invoke(parseArgv(["-C", root, "task", "show", ...ids]))) as TaskInvocationResult;
   assert.deepEqual(
@@ -307,8 +309,10 @@ test("task invocation works outside Git and consumes stdin only when selected", 
     },
   )) as TaskInvocationResult;
   assert.equal((add as { kind: string }).kind, "accepted");
+  if ((add as { kind: string }).kind !== "accepted") throw new Error("expected task add");
+  const nativeId = (add as { value: { id: string } }).value.id;
   assert.equal(reads, 0);
-  const update = (await invoke(parseArgv(["-C", root, "task", "update", "task/native-cli", "--body", "-"]), {
+  const update = (await invoke(parseArgv(["-C", root, "task", "update", nativeId, "--body", "-"]), {
     readStdin: () => {
       reads += 1;
       return "body from stdin\n";
@@ -316,13 +320,13 @@ test("task invocation works outside Git and consumes stdin only when selected", 
   })) as TaskInvocationResult;
   assert.equal((update as { kind: string }).kind, "accepted");
   assert.equal(reads, 1);
-  const shown = (await invoke(parseArgv(["-C", root, "task", "show", "task/native-cli"]))) as TaskInvocationResult;
+  const shown = (await invoke(parseArgv(["-C", root, "task", "show", nativeId]))) as TaskInvocationResult;
   assert.equal((shown as { task: { body: string } }).task.body, "body from stdin\n");
   assert.equal((shown as { task: { state: string } }).task.state, "on_hold");
   assert.equal((shown as { task: { note: string } }).task.note, "initial");
 
   const noteUpdate = (await invoke(
-    parseArgv(["-C", root, "task", "update", "task/native-cli", "--note", "replacement"]),
+    parseArgv(["-C", root, "task", "update", nativeId, "--note", "replacement"]),
     {
       readStdin: () => {
         reads += 1;
@@ -332,32 +336,34 @@ test("task invocation works outside Git and consumes stdin only when selected", 
   )) as TaskInvocationResult;
   assert.equal((noteUpdate as { kind: string }).kind, "accepted");
   assert.equal(reads, 1);
-  const noteShown = (await invoke(parseArgv(["-C", root, "task", "show", "task/native-cli"]))) as TaskInvocationResult;
+  const noteShown = (await invoke(parseArgv(["-C", root, "task", "show", nativeId]))) as TaskInvocationResult;
   assert.equal((noteShown as { task: { note: string } }).task.note, "replacement");
-  const showCommand = parseArgv(["task", "show", "task/native-cli"]).command;
+  const showCommand = parseArgv(["task", "show", nativeId]).command;
   if (showCommand.command !== "task") throw new Error("not a task command");
   assert.match(renderTaskText(showCommand, noteShown), /created .* · updated .*/u);
   assert.match(renderTaskText(showCommand, noteShown), /note\n\nreplacement\n/u);
-  assert.match(renderTaskText(showCommand, noteShown), /⧗ task\/native-cli · P2 on_hold — Native CLI/u);
+  assert.match(renderTaskText(showCommand, noteShown), new RegExp(`⧗ ${nativeId} · P2 on_hold — Native CLI`));
 
   const document = "---\ntitle: From document\nstate: done\n---\ncreated closed\n";
   const documentAdd = (await invoke(parseArgv(["-C", root, "task", "add", "-"]), {
     readStdin: () => document,
   })) as TaskInvocationResult;
   assert.equal((documentAdd as { kind: string }).kind, "accepted");
+  if ((documentAdd as { kind: string }).kind !== "accepted") throw new Error("expected document add");
+  const documentId = (documentAdd as { value: { id: string } }).value.id;
   const documentShown = (await invoke(
-    parseArgv(["-C", root, "task", "show", "task/from-document"]),
+    parseArgv(["-C", root, "task", "show", documentId]),
   )) as TaskInvocationResult;
   assert.equal((documentShown as { task: { state: string } }).task.state, "done");
 
-  const priorityOnly = (await invoke(parseArgv(["-C", root, "task", "update", "task/native-cli", "--priority", "1"]), {
+  const priorityOnly = (await invoke(parseArgv(["-C", root, "task", "update", nativeId, "--priority", "1"]), {
     readStdin: () => {
       throw new Error("task update without body must not read stdin");
     },
   })) as TaskInvocationResult;
   assert.equal((priorityOnly as { kind: string }).kind, "accepted");
   const afterPriority = (await invoke(
-    parseArgv(["-C", root, "task", "show", "task/native-cli"]),
+    parseArgv(["-C", root, "task", "show", nativeId]),
   )) as TaskInvocationResult;
   assert.equal((afterPriority as { task: { body: string; priority: number } }).task.body, "body from stdin\n");
   assert.equal((afterPriority as { task: { body: string; priority: number } }).task.priority, 1);
@@ -370,12 +376,12 @@ test("task invocation works outside Git and consumes stdin only when selected", 
       !/invocation cwd is not an existing directory/u.test(error.message),
   );
   const padded = "  keep body  \n";
-  const paddedUpdate = (await invoke(parseArgv(["-C", root, "task", "update", "task/native-cli", "--body", "-"]), {
+  const paddedUpdate = (await invoke(parseArgv(["-C", root, "task", "update", nativeId, "--body", "-"]), {
     readStdin: () => padded,
   })) as TaskInvocationResult;
   assert.equal((paddedUpdate as { kind: string }).kind, "accepted");
   const paddedShown = (await invoke(
-    parseArgv(["-C", root, "task", "show", "task/native-cli"]),
+    parseArgv(["-C", root, "task", "show", nativeId]),
   )) as TaskInvocationResult;
   assert.equal((paddedShown as { task: { body: string } }).task.body, padded);
 });
@@ -387,9 +393,10 @@ test("literal slash context selects root; empty and whitespace-only context are 
     parseArgv(["-C", root, "task", "add", "Rooted", "--namespace", "/"]),
   )) as TaskInvocationResult;
   assert.equal((added as { kind: string }).kind, "accepted");
-  const shown = (await invoke(parseArgv(["-C", root, "task", "show", "task/rooted"]))) as TaskInvocationResult;
+  const rootedId = (added as { value: { id: string } }).value.id;
+  const shown = (await invoke(parseArgv(["-C", root, "task", "show", rootedId]))) as TaskInvocationResult;
   assert.equal((shown as { task: { title: string; id: string } }).task.title, "Rooted");
-  assert.equal((shown as { task: { title: string; id: string } }).task.id, "task/rooted");
+  assert.equal((shown as { task: { title: string; id: string } }).task.id, rootedId);
   const current = await invoke(parseArgv(["-C", root, "task", "context"]));
   assert.deepEqual(current, {
     kind: "accepted",
@@ -431,8 +438,10 @@ test("Task, Settings, and Kanshi share the primary WorldRoot across Git worktree
     parseArgv(["-C", linked, "task", "add", "Shared worktree task"]),
   )) as TaskInvocationResult;
   assert.equal((added as { kind: string }).kind, "accepted");
+  if ((added as { kind: string }).kind !== "accepted") throw new Error("expected task add");
+  const sharedId = (added as { value: { id: string } }).value.id;
   const shown = (await invoke(
-    parseArgv(["-C", repository.path, "task", "show", "task/shared-worktree-task"]),
+    parseArgv(["-C", repository.path, "task", "show", sharedId]),
   )) as TaskInvocationResult;
   assert.equal((shown as { task: { title: string } }).task.title, "Shared worktree task");
   assert.equal(existsSync(join(linked, ".keiyaku", "tasks")), false);
@@ -451,20 +460,22 @@ test("Task, Settings, and Kanshi share the primary WorldRoot across Git worktree
   assert.equal(status.report.tasks.kind, "present");
   if (status.report.tasks.kind !== "present") throw new Error("expected Task section");
   assert.equal(
-    status.report.tasks.value.rows.some((row) => row.id === "task/shared-worktree-task"),
+    status.report.tasks.value.rows.some((row) => row.id === sharedId),
     true,
   );
 });
 
 test("task drop note is passed to each independent lifecycle mutation", async () => {
   const root = world();
-  await invoke(parseArgv(["-C", root, "task", "add", "First"]));
-  await invoke(parseArgv(["-C", root, "task", "add", "Second"]));
+  const first = (await invoke(parseArgv(["-C", root, "task", "add", "First"]))) as { value: { id: string } };
+  const second = (await invoke(parseArgv(["-C", root, "task", "add", "Second"]))) as { value: { id: string } };
+  const firstId = first.value.id;
+  const secondId = second.value.id;
   const result = (await invoke(
-    parseArgv(["-C", root, "task", "drop", "task/first", "task/second", "--note", "cancelled"]),
+    parseArgv(["-C", root, "task", "drop", firstId, secondId, "--note", "cancelled"]),
   )) as TaskInvocationResult;
   assert.equal(taskExitCode(result), 0);
-  for (const id of ["task/first", "task/second"]) {
+  for (const id of [firstId, secondId]) {
     const shown = (await invoke(parseArgv(["-C", root, "task", "show", id]))) as TaskInvocationResult;
     assert.equal((shown as { task: { note: string } }).task.note, "cancelled");
   }
@@ -472,10 +483,12 @@ test("task drop note is passed to each independent lifecycle mutation", async ()
 
 test("task done note is passed to each independent lifecycle mutation", async () => {
   const root = world();
-  await invoke(parseArgv(["-C", root, "task", "add", "First"]));
-  await invoke(parseArgv(["-C", root, "task", "add", "Second"]));
+  const first = (await invoke(parseArgv(["-C", root, "task", "add", "First"]))) as { value: { id: string } };
+  const second = (await invoke(parseArgv(["-C", root, "task", "add", "Second"]))) as { value: { id: string } };
+  const firstId = first.value.id;
+  const secondId = second.value.id;
   const result = (await invoke(
-    parseArgv(["-C", root, "task", "done", "task/first", "task/missing", "task/second", "--note", "finished"]),
+    parseArgv(["-C", root, "task", "done", firstId, "task/missing", secondId, "--note", "finished"]),
   )) as TaskInvocationResult;
   assert.equal(taskExitCode(result), 1);
   if (!("items" in result)) throw new Error("expected batch result");
@@ -484,13 +497,13 @@ test("task done note is passed to each independent lifecycle mutation", async ()
     ["accepted", "refused", "accepted"],
   );
   assert.equal(
-    ((await invoke(parseArgv(["-C", root, "task", "show", "task/first"]))) as { task: { note: string; state: string } })
+    ((await invoke(parseArgv(["-C", root, "task", "show", firstId]))) as { task: { note: string; state: string } })
       .task.note,
     "finished",
   );
   assert.equal(
     (
-      (await invoke(parseArgv(["-C", root, "task", "show", "task/second"]))) as {
+      (await invoke(parseArgv(["-C", root, "task", "show", secondId]))) as {
         task: { note: string; state: string };
       }
     ).task.state,
@@ -502,26 +515,26 @@ test("task add and compose persist resolved actor only on new documents", async 
   const root = world();
   const environment = { KEIYAKU_ACTOR_ID: "env-actor" };
   const unsigned = (await invoke(parseArgv(["-C", root, "task", "add", "Unsigned"]), { environment: {} })) as {
-    value: { createdBy?: string };
+    value: { id: string; createdBy?: string };
   };
   assert.equal("createdBy" in unsigned.value, false);
-  const unsignedShown = (await invoke(parseArgv(["-C", root, "task", "show", "task/unsigned"]))) as {
+  const unsignedShown = (await invoke(parseArgv(["-C", root, "task", "show", unsigned.value.id]))) as {
     task: { createdBy?: string };
   };
   assert.equal(unsignedShown.task.createdBy, undefined);
 
   const added = (await invoke(parseArgv(["-C", root, "task", "add", "Authored", "--actor", "explicit-actor"]), {
     environment,
-  })) as { value: { createdBy: string } };
+  })) as { value: { id: string; createdBy: string } };
   assert.equal(added.value.createdBy, "explicit-actor");
   const inherited = (await invoke(parseArgv(["-C", root, "task", "add", "Inherited"]), { environment })) as {
-    value: { createdBy: string };
+    value: { id: string; createdBy: string };
   };
   assert.equal(inherited.value.createdBy, "env-actor");
   const fromDocument = (await invoke(parseArgv(["-C", root, "task", "add", "--actor", "document-actor", "-"]), {
     environment,
     readStdin: () => "---\ntitle: From stdin\n---\n",
-  })) as { value: { createdBy: string } };
+  })) as { value: { id: string; createdBy: string } };
   assert.equal(fromDocument.value.createdBy, "document-actor");
   await assert.rejects(
     () =>
@@ -533,19 +546,25 @@ test("task add and compose persist resolved actor only on new documents", async 
   );
   const composed = (await invoke(parseArgv(["-C", root, "task", "compose", "-"]), {
     environment,
-    readStdin: () => ["+ Composed", "as = composed", "@task/authored", "pri = 0", ""].join("\n"),
+    readStdin: () => ["+ Composed", "as = composed", `@${added.value.id}`, "pri = 0", ""].join("\n"),
   })) as { kind: string };
   assert.equal(composed.kind, "accepted");
-  const composedShown = (await invoke(parseArgv(["-C", root, "task", "show", "task/composed"]))) as {
+  const composedList = (await Tasks.of(await World.at(root)).list({ selection: "all" })) as {
+    kind: string;
+    value?: { rows: readonly { id: string; title: string }[] };
+  };
+  const composedId = composedList.value?.rows.find((row) => row.title === "Composed")?.id;
+  if (composedId === undefined) throw new Error("composed task missing");
+  const composedShown = (await invoke(parseArgv(["-C", root, "task", "show", composedId]))) as {
     task: { createdBy?: string };
   };
-  const authoredShown = (await invoke(parseArgv(["-C", root, "task", "show", "task/authored"]))) as {
+  const authoredShown = (await invoke(parseArgv(["-C", root, "task", "show", added.value.id]))) as {
     task: { createdBy?: string; priority: number };
   };
   assert.equal(composedShown.task.createdBy, "env-actor");
   assert.equal(authoredShown.task.createdBy, "explicit-actor");
-  const showCommand = parseArgv(["task", "show", "task/authored"]).command;
-  const unsignedShowCommand = parseArgv(["task", "show", "task/unsigned"]).command;
+  const showCommand = parseArgv(["task", "show", added.value.id]).command;
+  const unsignedShowCommand = parseArgv(["task", "show", unsigned.value.id]).command;
   const lsCommand = parseArgv(["task", "ls"]).command;
   if (showCommand.command !== "task" || unsignedShowCommand.command !== "task" || lsCommand.command !== "task") {
     throw new Error("not a task command");
@@ -557,9 +576,9 @@ test("task add and compose persist resolved actor only on new documents", async 
   assert.doesNotMatch(renderTaskText(unsignedShowCommand, unsignedShown), /created-by/u);
   const listed = (await invoke(parseArgv(["-C", root, "task", "ls"]))) as TaskInvocationResult;
   assert.doesNotMatch(renderTaskText(lsCommand, listed), /created-by |createdBy/u);
-  await invoke(parseArgv(["-C", root, "task", "update", "task/authored", "--note", "later"]));
-  await invoke(parseArgv(["-C", root, "task", "start", "task/authored"]));
-  const afterLifecycle = (await invoke(parseArgv(["-C", root, "task", "show", "task/authored"]))) as {
+  await invoke(parseArgv(["-C", root, "task", "update", added.value.id, "--note", "later"]));
+  await invoke(parseArgv(["-C", root, "task", "start", added.value.id]));
+  const afterLifecycle = (await invoke(parseArgv(["-C", root, "task", "show", added.value.id]))) as {
     task: { createdBy?: string };
   };
   assert.equal(afterLifecycle.task.createdBy, "explicit-actor");
@@ -577,8 +596,8 @@ test("task compose --plan is read-only and exposes the planned order", async () 
   if (command.command !== "task") throw new Error("not a task command");
   const text = renderTaskText(command, result);
   assert.match(text, /^compose plan · 2 documents$/mu);
-  assert.match(text, /^admit 1 task\/parent$/mu);
-  assert.match(text, /^admit 2 task\/child$/mu);
+  assert.match(text, /^admit 1 task\/parent-[0-9a-f]{4}$/mu);
+  assert.match(text, /^admit 2 task\/child-[0-9a-f]{4}$/mu);
   assert.deepEqual(await invoke(parseArgv(["-C", root, "task", "ls", "--world"])), {
     kind: "present",
     value: { kind: "accepted", value: { rows: [], hasMore: false } },
@@ -595,7 +614,7 @@ test("task compose and views flow through native results", async () => {
   if (composeCommand.command !== "task") throw new Error("not a task command");
   const composedText = renderTaskText(composeCommand, composed);
   assert.match(composedText, /^✓ compose accepted · 2 changed$/mu);
-  assert.match(composedText, /^alias \^parent task\/parent$/mu);
+  assert.match(composedText, /^alias \^parent task\/parent-[0-9a-f]{4}$/mu);
   for (const change of (composed as { documentChanges: readonly { taskId: string; documentDiff: string }[] })
     .documentChanges) {
     assert.equal(composedText.includes(`diff ${change.taskId}\n\n${change.documentDiff}\n`), true);
@@ -606,7 +625,7 @@ test("task compose and views flow through native results", async () => {
   assert.match(renderTaskText(command, listed), /^tasks · current namespace$/mu);
   assert.match(
     renderTaskText(command, listed),
-    /^○ task\/parent · P2 ready · updated .* · no body · children 1 live · 1 total —$/mu,
+    /^○ task\/parent-[0-9a-f]{4} · P2 ready · updated .* · no body · children 1 live · 1 total —$/mu,
   );
   assert.equal(taskExitCode(listed), 0);
 });
@@ -631,9 +650,11 @@ test("task ls accepts exact namespace selectors and bypasses malformed context",
     value: { kind: string; value: { rows: readonly { id: string }[]; hasMore: boolean } };
   };
   assert.equal(selected.kind, "present");
+  const featureOneId = (featureOne as { value: { id: string } }).value.id;
+  const rootTaskId = (rootTask as { value: { id: string } }).value.id;
   assert.deepEqual(
     selected.value.value.rows.map((row) => row.id),
-    ["task/feature/feature-one"],
+    [featureOneId],
   );
   assert.equal(selected.value.value.hasMore, true);
 
@@ -643,7 +664,7 @@ test("task ls accepts exact namespace selectors and bypasses malformed context",
   };
   assert.deepEqual(
     rootPage.value.value.rows.map((row) => row.id),
-    ["task/root-task"],
+    [rootTaskId],
   );
   assert.throws(() => parseArgv(["task", "ls", "task/feature", "--all"]), /Task namespace selector/u);
   assert.throws(() => parseArgv(["task", "ls", "task/Feature/", "--all"]), /Task namespace selector/u);
@@ -663,7 +684,7 @@ test("task query keeps text and JSON membership on one typed page", async () => 
   assert.match(renderTaskText(command, result), /^query$/mu);
   assert.match(
     renderTaskText(command, result),
-    /^○ task\/critical-auth · P0 ready · updated .* · no body — Critical auth$/mu,
+    /^○ task\/critical-auth-[0-9a-f]{4} · P0 ready · updated .* · no body — Critical auth$/mu,
   );
   const hostileArgv = ["-C", root, "task", "query", "--where", 'title ~ "auth\nforged heading"'] as const;
   const hostile = (await invoke(parseArgv(hostileArgv))) as TaskInvocationResult;
@@ -680,7 +701,7 @@ test("task query keeps text and JSON membership on one typed page", async () => 
   assert.equal(parsed.kind, "present");
   assert.deepEqual(
     parsed.value.value.rows.map((row) => row.id),
-    ["task/critical-auth"],
+    [parsed.value.value.rows[0]!.id],
   );
   assert.equal(parsed.value.value.hasMore, false);
 });
@@ -763,43 +784,47 @@ test("Task row-view limit refusals precede authority observation", async () => {
 
 test("task doctor renders graph disease and controls exit status", async () => {
   const root = world();
-  await invoke(parseArgv(["-C", root, "task", "add", "First"]));
-  await invoke(parseArgv(["-C", root, "task", "add", "Second"]));
-  await invoke(parseArgv(["-C", root, "task", "update", "task/first", "--needs", "task/second"]));
-  await invoke(parseArgv(["-C", root, "task", "update", "task/second", "--needs", "task/first"]));
+  const first = (await invoke(parseArgv(["-C", root, "task", "add", "First"]))) as { value: { id: string } };
+  const second = (await invoke(parseArgv(["-C", root, "task", "add", "Second"]))) as { value: { id: string } };
+  await invoke(parseArgv(["-C", root, "task", "update", first.value.id, "--needs", second.value.id]));
+  await invoke(parseArgv(["-C", root, "task", "update", second.value.id, "--needs", first.value.id]));
   const result = (await invoke(parseArgv(["-C", root, "task", "doctor"]))) as TaskInvocationResult;
   const command = parseArgv(["task", "doctor"]).command;
   if (command.command !== "task") throw new Error("not a task command");
-  assert.match(renderTaskText(command, result), /^1 issue\n! cycle needs task\/first task\/second$/u);
+  assert.match(renderTaskText(command, result), new RegExp(`^1 issue\\n! cycle needs ${first.value.id} ${second.value.id}$`));
   assert.equal(taskExitCode(result), 1);
 });
 
 test("task tree text follows parent children and marks parent cycles", async () => {
   const root = world();
-  await invoke(parseArgv(["-C", root, "task", "add", "Area"]));
-  await invoke(parseArgv(["-C", root, "task", "add", "Need"]));
-  await invoke(parseArgv(["-C", root, "task", "add", "Child", "--parent", "task/area"]));
-  await invoke(parseArgv(["-C", root, "task", "add", "Nested", "--parent", "task/child"]));
-  await invoke(parseArgv(["-C", root, "task", "update", "task/area", "--needs", "task/need"]));
-  const tree = (await invoke(parseArgv(["-C", root, "task", "tree", "task/area"]))) as TaskInvocationResult;
-  const command = parseArgv(["task", "tree", "task/area"]).command;
+  const area = (await invoke(parseArgv(["-C", root, "task", "add", "Area"]))) as { value: { id: string } };
+  const need = (await invoke(parseArgv(["-C", root, "task", "add", "Need"]))) as { value: { id: string } };
+  const child = (await invoke(parseArgv(["-C", root, "task", "add", "Child", "--parent", area.value.id]))) as {
+    value: { id: string };
+  };
+  const nested = (await invoke(parseArgv(["-C", root, "task", "add", "Nested", "--parent", child.value.id]))) as {
+    value: { id: string };
+  };
+  await invoke(parseArgv(["-C", root, "task", "update", area.value.id, "--needs", need.value.id]));
+  const tree = (await invoke(parseArgv(["-C", root, "task", "tree", area.value.id]))) as TaskInvocationResult;
+  const command = parseArgv(["task", "tree", area.value.id]).command;
   if (command.command !== "task") throw new Error("not a task command");
   const text = renderTaskText(command, tree);
-  assert.match(text, /^○ task\/area · P2 open — Area$/mu);
-  assert.match(text, /^  ○ task\/child · P2 open — Child$/mu);
-  assert.match(text, /^    ○ task\/nested · P2 open — Nested$/mu);
-  assert.doesNotMatch(text, /task\/need/u);
+  assert.match(text, new RegExp(`^○ ${area.value.id} · P2 open — Area$`, "mu"));
+  assert.match(text, new RegExp(`^  ○ ${child.value.id} · P2 open — Child$`, "mu"));
+  assert.match(text, new RegExp(`^    ○ ${nested.value.id} · P2 open — Nested$`, "mu"));
+  assert.doesNotMatch(text, new RegExp(need.value.id));
   assert.doesNotMatch(text, /reference/u);
 
-  await invoke(parseArgv(["-C", root, "task", "update", "task/area", "--parent", "task/nested"]));
-  const cycled = (await invoke(parseArgv(["-C", root, "task", "tree", "task/area"]))) as TaskInvocationResult;
+  await invoke(parseArgv(["-C", root, "task", "update", area.value.id, "--parent", nested.value.id]));
+  const cycled = (await invoke(parseArgv(["-C", root, "task", "tree", area.value.id]))) as TaskInvocationResult;
   const cycledText = renderTaskText(command, cycled);
-  assert.match(cycledText, /! task\/area · cycle/u);
+  assert.match(cycledText, new RegExp(`! ${area.value.id} · cycle`));
   assert.doesNotMatch(cycledText, /reference/u);
   const doctor = (await invoke(parseArgv(["-C", root, "task", "doctor"]))) as TaskInvocationResult;
   const doctorCommand = parseArgv(["task", "doctor"]).command;
   if (doctorCommand.command !== "task") throw new Error("not a task command");
-  assert.match(renderTaskText(doctorCommand, doctor), /! cycle parent task\/area task\/child task\/nested/u);
+  assert.match(renderTaskText(doctorCommand, doctor), new RegExp(`! cycle parent ${area.value.id} ${child.value.id} ${nested.value.id}`));
 });
 
 test("built CLI task tree follows parent decomposition at 36 columns", async () => {
@@ -810,18 +835,20 @@ test("built CLI task tree follows parent decomposition at 36 columns", async () 
     "Child under the alpha parent root",
     "Nested grandchild under the child",
   ] as const;
+  const createdIds: string[] = [];
   for (const title of titles) {
     const added = (await invoke(parseArgv(["-C", root, "task", "add", title]))) as {
       kind: string;
       value?: { id: string };
     };
     assert.equal(added.kind, "accepted");
+    if (added.kind === "accepted") createdIds.push(added.value.id);
   }
   const ids = {
-    root: "task/alpha-parent-decomposition-root",
-    need: "task/need-only-blocker-outside-the",
-    child: "task/child-under-the-alpha-parent",
-    nested: "task/nested-grandchild-under-the",
+    root: createdIds[0]!,
+    need: createdIds[1]!,
+    child: createdIds[2]!,
+    nested: createdIds[3]!,
   };
   assert.equal(
     ((await invoke(parseArgv(["-C", root, "task", "update", ids.child, "--parent", ids.root]))) as { kind: string })
@@ -915,17 +942,19 @@ test("incomplete compose keeps an unterminated draft byte-exact at the CLI bound
 
 test("Task list, blocked, show, mutation, and batch text use one scan grammar", async () => {
   const root = world();
-  await invoke(parseArgv(["-C", root, "task", "add", "Need"]));
-  await invoke(parseArgv(["-C", root, "task", "add", "Blocked", "--needs", "task/need"]));
-  await invoke(parseArgv(["-C", root, "task", "add", "Ready"]));
-  await invoke(parseArgv(["-C", root, "task", "update", "task/blocked", "--body", "exact body\nbytes"]));
+  const need = (await invoke(parseArgv(["-C", root, "task", "add", "Need"]))) as { value: { id: string } };
+  const blockedTask = (await invoke(parseArgv(["-C", root, "task", "add", "Blocked", "--needs", need.value.id]))) as {
+    value: { id: string };
+  };
+  const ready = (await invoke(parseArgv(["-C", root, "task", "add", "Ready"]))) as { value: { id: string } };
+  await invoke(parseArgv(["-C", root, "task", "update", blockedTask.value.id, "--body", "exact body\nbytes"]));
 
   const lsCommand = parseArgv(["task", "ls"]).command;
   if (lsCommand.command !== "task") throw new Error("not a task command");
   const listed = (await invoke(parseArgv(["-C", root, "task", "ls", "--limit", "1"]))) as TaskInvocationResult;
   const listedText = renderTaskText(lsCommand, listed);
   assert.match(listedText, /^tasks · current namespace$/mu);
-  assert.match(listedText, /^‖ task\/blocked · P2 blocked · updated .* — Blocked$/mu);
+  assert.match(listedText, new RegExp(`^‖ ${blockedTask.value.id} · P2 blocked · updated .* — Blocked$`, "mu"));
   assert.match(listedText, /^…$/mu);
   assert.doesNotMatch(listedText, /needs |created |parent /u);
 
@@ -934,39 +963,41 @@ test("Task list, blocked, show, mutation, and batch text use one scan grammar", 
   const blocked = (await invoke(parseArgv(["-C", root, "task", "blocked"]))) as TaskInvocationResult;
   const blockedText = renderTaskText(blockedCommand, blocked);
   assert.match(blockedText, /^blocked$/mu);
-  assert.match(blockedText, /^‖ task\/blocked · P2 blocked · updated .* — Blocked$/mu);
-  assert.match(blockedText, /^  needs task\/need · open$/mu);
+  assert.match(blockedText, new RegExp(`^‖ ${blockedTask.value.id} · P2 blocked · updated .* — Blocked$`, "mu"));
+  assert.match(blockedText, new RegExp(`^  needs ${need.value.id} · open$`, "mu"));
 
-  await invoke(parseArgv(["-C", root, "task", "add", "Open need"]));
-  await invoke(parseArgv(["-C", root, "task", "update", "task/blocked", "--needs", "task/open-need"]));
-  await invoke(parseArgv(["-C", root, "task", "done", "task/need"]));
+  const openNeed = (await invoke(parseArgv(["-C", root, "task", "add", "Open need"]))) as { value: { id: string } };
+  await invoke(parseArgv(["-C", root, "task", "update", blockedTask.value.id, "--needs", openNeed.value.id]));
+  await invoke(parseArgv(["-C", root, "task", "done", need.value.id]));
 
-  const showCommand = parseArgv(["task", "show", "task/blocked"]).command;
+  const showCommand = parseArgv(["task", "show", blockedTask.value.id]).command;
   if (showCommand.command !== "task") throw new Error("not a task command");
-  const shown = (await invoke(parseArgv(["-C", root, "task", "show", "task/blocked"]))) as TaskInvocationResult;
+  const shown = (await invoke(parseArgv(["-C", root, "task", "show", blockedTask.value.id]))) as TaskInvocationResult;
   const shownText = renderTaskText(showCommand, shown);
-  assert.match(shownText, /^○ task\/blocked · P2 open — Blocked$/mu);
+  assert.match(shownText, new RegExp(`^○ ${blockedTask.value.id} · P2 open — Blocked$`, "mu"));
   assert.match(shownText, /^created .* · updated .*$/mu);
-  assert.match(shownText, /^  ! needs task\/open-need · open$/mu);
-  assert.match(shownText, /^  ✓ needs task\/need · done$/mu);
+  assert.match(shownText, new RegExp(`^  ! needs ${openNeed.value.id} · open$`, "mu"));
+  assert.match(shownText, new RegExp(`^  ✓ needs ${need.value.id} · done$`, "mu"));
   assert.match(shownText, /body\n\nexact body\nbytes\n/u);
   assert.doesNotMatch(shownText, /\{/u);
 
   const addCommand = parseArgv(["task", "add", "Fresh"]).command;
   if (addCommand.command !== "task") throw new Error("not a task command");
   const added = (await invoke(parseArgv(["-C", root, "task", "add", "Fresh"]))) as TaskInvocationResult;
+  if ((added as { kind: string }).kind !== "accepted") throw new Error("expected task add");
+  const freshId = (added as { value: { id: string } }).value.id;
   const addedText = renderTaskText(addCommand, added);
-  assert.match(addedText, /^✓ add accepted — task\/fresh$/mu);
-  assert.match(addedText, /^○ task\/fresh · P2 open — Fresh$/mu);
+  assert.match(addedText, new RegExp(`^✓ add accepted — ${freshId}$`, "mu"));
+  assert.match(addedText, new RegExp(`^○ ${freshId} · P2 open — Fresh$`, "mu"));
 
-  const updateCommand = parseArgv(["task", "update", "task/fresh", "--title", "Fresh title"]).command;
+  const updateCommand = parseArgv(["task", "update", freshId, "--title", "Fresh title"]).command;
   if (updateCommand.command !== "task") throw new Error("not a task command");
   const updated = (await invoke(
-    parseArgv(["-C", root, "task", "update", "task/fresh", "--title", "Fresh title"]),
+    parseArgv(["-C", root, "task", "update", freshId, "--title", "Fresh title"]),
   )) as TaskInvocationResult;
   const updatedText = renderTaskText(updateCommand, updated);
-  assert.match(updatedText, /^✓ update accepted — task\/fresh$/mu);
-  assert.match(updatedText, /^○ task\/fresh · P2 open — Fresh title$/mu);
+  assert.match(updatedText, new RegExp(`^✓ update accepted — ${freshId}$`, "mu"));
+  assert.match(updatedText, new RegExp(`^○ ${freshId} · P2 open — Fresh title$`, "mu"));
   assert.match(updatedText, /^diff\n\n/mu);
   assert.equal(updatedText.includes((updated as { value: { documentDiff: string } }).value.documentDiff), true);
 
@@ -979,36 +1010,36 @@ test("Task list, blocked, show, mutation, and batch text use one scan grammar", 
   assert.doesNotMatch(missingText, /\{|"kind"/u);
 
   const batch = (await invoke(
-    parseArgv(["-C", root, "task", "done", "task/fresh", "task/missing", "task/ready"]),
+    parseArgv(["-C", root, "task", "done", freshId, "task/missing", ready.value.id]),
   )) as TaskInvocationResult;
-  const doneCommand = parseArgv(["task", "done", "task/fresh", "task/missing", "task/ready"]).command;
+  const doneCommand = parseArgv(["task", "done", freshId, "task/missing", ready.value.id]).command;
   if (doneCommand.command !== "task") throw new Error("not a task command");
   assert.equal(
     renderTaskText(doneCommand, batch),
-    ["✓ done task/fresh", "! done task/missing · task-missing task/missing", "✓ done task/ready"].join("\n"),
+    [`✓ done ${freshId}`, "! done task/missing · task-missing task/missing", `✓ done ${ready.value.id}`].join("\n"),
   );
   assert.equal(taskExitCode(batch), 1);
 });
 
 test("singleton hold, done, and drop keep the batch item grammar", async () => {
   const root = world();
-  await invoke(parseArgv(["-C", root, "task", "add", "Hold me"]));
-  await invoke(parseArgv(["-C", root, "task", "add", "Done me"]));
-  await invoke(parseArgv(["-C", root, "task", "add", "Drop me"]));
+  const holdId = ((await invoke(parseArgv(["-C", root, "task", "add", "Hold me"]))) as { value: { id: string } }).value.id;
+  const doneId = ((await invoke(parseArgv(["-C", root, "task", "add", "Done me"]))) as { value: { id: string } }).value.id;
+  const dropId = ((await invoke(parseArgv(["-C", root, "task", "add", "Drop me"]))) as { value: { id: string } }).value.id;
 
-  const holdCommand = parseArgv(["task", "hold", "task/hold-me"]).command;
-  const doneCommand = parseArgv(["task", "done", "task/done-me"]).command;
-  const dropCommand = parseArgv(["task", "drop", "task/drop-me"]).command;
+  const holdCommand = parseArgv(["task", "hold", holdId]).command;
+  const doneCommand = parseArgv(["task", "done", doneId]).command;
+  const dropCommand = parseArgv(["task", "drop", dropId]).command;
   if (holdCommand.command !== "task" || doneCommand.command !== "task" || dropCommand.command !== "task") {
     throw new Error("not a task command");
   }
 
-  const held = (await invoke(parseArgv(["-C", root, "task", "hold", "task/hold-me"]))) as TaskInvocationResult;
-  const finished = (await invoke(parseArgv(["-C", root, "task", "done", "task/done-me"]))) as TaskInvocationResult;
-  const dropped = (await invoke(parseArgv(["-C", root, "task", "drop", "task/drop-me"]))) as TaskInvocationResult;
-  assert.equal(renderTaskText(holdCommand, held), "✓ hold task/hold-me");
-  assert.equal(renderTaskText(doneCommand, finished), "✓ done task/done-me");
-  assert.equal(renderTaskText(dropCommand, dropped), "✓ drop task/drop-me");
+  const held = (await invoke(parseArgv(["-C", root, "task", "hold", holdId]))) as TaskInvocationResult;
+  const finished = (await invoke(parseArgv(["-C", root, "task", "done", doneId]))) as TaskInvocationResult;
+  const dropped = (await invoke(parseArgv(["-C", root, "task", "drop", dropId]))) as TaskInvocationResult;
+  assert.equal(renderTaskText(holdCommand, held), `✓ hold ${holdId}`);
+  assert.equal(renderTaskText(doneCommand, finished), `✓ done ${doneId}`);
+  assert.equal(renderTaskText(dropCommand, dropped), `✓ drop ${dropId}`);
 
   const missingHold = (await invoke(parseArgv(["-C", root, "task", "hold", "task/missing"]))) as TaskInvocationResult;
   const missingDone = (await invoke(parseArgv(["-C", root, "task", "done", "task/missing"]))) as TaskInvocationResult;
@@ -1046,21 +1077,21 @@ test("singleton hold, done, and drop keep the batch item grammar", async () => {
 
 test("task start accepts multiple IDs while preserving singleton output", async () => {
   const root = world();
-  await invoke(parseArgv(["-C", root, "task", "add", "First start"]));
-  await invoke(parseArgv(["-C", root, "task", "add", "Second start"]));
-  const singleCommand = parseArgv(["task", "start", "task/first-start"]).command;
+  const first = ((await invoke(parseArgv(["-C", root, "task", "add", "First start"]))) as { value: { id: string } }).value.id;
+  const second = ((await invoke(parseArgv(["-C", root, "task", "add", "Second start"]))) as { value: { id: string } }).value.id;
+  const singleCommand = parseArgv(["task", "start", first]).command;
   if (singleCommand.command !== "task") throw new Error("not a task command");
-  const single = (await invoke(parseArgv(["-C", root, "task", "start", "task/first-start"]))) as TaskInvocationResult;
-  assert.match(renderTaskText(singleCommand, single), /^✓ start accepted — task\/first-start$/mu);
+  const single = (await invoke(parseArgv(["-C", root, "task", "start", first]))) as TaskInvocationResult;
+  assert.match(renderTaskText(singleCommand, single), new RegExp(`^✓ start accepted — ${first}$`, "mu"));
 
-  const multiCommand = parseArgv(["task", "start", "task/second-start", "task/missing"]).command;
+  const multiCommand = parseArgv(["task", "start", second, "task/missing"]).command;
   if (multiCommand.command !== "task") throw new Error("not a task command");
   const multi = (await invoke(
-    parseArgv(["-C", root, "task", "start", "task/second-start", "task/missing"]),
+    parseArgv(["-C", root, "task", "start", second, "task/missing"]),
   )) as TaskInvocationResult;
   assert.equal(
     renderTaskText(multiCommand, multi),
-    ["✓ start task/second-start", "! start task/missing · task-missing task/missing"].join("\n"),
+    [`✓ start ${second}`, "! start task/missing · task-missing task/missing"].join("\n"),
   );
   assert.equal(taskExitCode(multi), 1);
 });

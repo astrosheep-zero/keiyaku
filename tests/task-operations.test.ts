@@ -84,7 +84,7 @@ test("ordinary mutations advance a non-later timestamp by one millisecond", asyn
   if (before === null) return;
   const future = "2099-01-01T00:00:00.000Z";
   writeFileSync(
-    join(root, ".keiyaku", "tasks", "future-timestamp.md"),
+    authorityPath(root, id),
     serializeTaskDocument({ ...before.task, updatedAt: future }),
   );
 
@@ -172,14 +172,14 @@ test("batch lifecycle reads one board before locks and retries only a concurrent
   const first = acceptedId(await tasks.add({ title: "Batch snapshot first" }));
   const second = acceptedId(await tasks.add({ title: "Batch snapshot second" }));
   const firstLock = await acquireSqliteTransactionLock({
-    path: join(root, ".keiyaku", "locks", "task", "batch-snapshot-first.sqlite"),
+    path: join(root, ".keiyaku", "locks", "task", `${parseTaskId(first).localId}.sqlite`),
     mode: "immediate",
     timeoutMs: 100,
   });
   const pending = tasks.batch({ verb: "start", ids: [first, second] });
   try {
     await new Promise<void>((resolve) => setTimeout(resolve, 25));
-    writeFileSync(join(root, ".keiyaku", "tasks", "batch-snapshot-second.md"), "changed after batch observation\n");
+    writeFileSync(authorityPath(root, second), "changed after batch observation\n");
   } finally {
     firstLock.close();
   }
@@ -196,7 +196,7 @@ test("batch invalid refusal retries when the Task becomes valid before its lock"
   const { root, tasks } = await world();
   const id = acceptedId(await tasks.add({ title: "Batch stale invalid", state: "done" }));
   const lock = await acquireSqliteTransactionLock({
-    path: join(root, ".keiyaku", "locks", "task", "batch-stale-invalid.sqlite"),
+    path: join(root, ".keiyaku", "locks", "task", `${parseTaskId(id).localId}.sqlite`),
     mode: "immediate",
     timeoutMs: 100,
   });
@@ -217,9 +217,9 @@ test("batch invalid refusal retries when the Task becomes valid before its lock"
 
 test("batch missing refusal retries when the Task is created before its lock", async () => {
   const { root, tasks } = await world();
-  const id = "task/batch-stale-missing" as TaskId;
+  const id = "task/batch-stale-missing-0000" as TaskId;
   const lock = await acquireSqliteTransactionLock({
-    path: join(root, ".keiyaku", "locks", "task", "batch-stale-missing.sqlite"),
+    path: join(root, ".keiyaku", "locks", "task", "batch-stale-missing-0000.sqlite"),
     mode: "immediate",
     timeoutMs: 100,
   });
@@ -229,7 +229,10 @@ test("batch missing refusal retries when the Task is created before its lock", a
     const created = await tasks.add({ title: "Batch stale missing" });
     assert.equal(created.kind, "accepted");
     if (created.kind !== "accepted") return;
-    assert.equal(created.value.id, id);
+    const source = authorityPath(root, created.value.id);
+    const document = parseTaskDocument(readFileSync(source), parseTaskId(created.value.id));
+    writeFileSync(authorityPath(root, id), serializeTaskDocument({ ...document, id }));
+    unlinkSync(source);
   } finally {
     lock.close();
   }
@@ -241,11 +244,11 @@ test("batch missing refusal retries when the Task is created before its lock", a
 test("Tasks creates root authority without Contract coupling", async () => {
   const { tasks } = await world();
   const rootId = acceptedId(await tasks.add({ title: "Root task" }));
-  assert.equal(rootId, "task/root-task");
+  assert.match(rootId, /^task\/root-task-[0-9a-f]{4}$/u);
   const nestedId = acceptedId(
     await tasks.add({ title: "Nested task", namespace: ["contract", "inside"], state: "in_progress" }),
   );
-  assert.equal(nestedId, "task/contract/inside/nested-task");
+  assert.match(nestedId, /^task\/contract\/inside\/nested-task-[0-9a-f]{4}$/u);
   assert.equal((await tasks.task({ id: nestedId }).read())?.task.state, "in_progress");
   assert.throws(
     () => tasks.add({ title: "Coupled", contractId: "kei/forbidden" } as never),
@@ -326,7 +329,7 @@ test("lifecycle, readiness, blocked projection, update diff, and batch results c
   assert.equal(updated.kind, "accepted");
   if (updated.kind === "accepted") {
     assert.match(updated.value.documentDiff, /Dependent renamed/u);
-    assert.match(updated.value.documentDiff, /task\/dependent\.md/u);
+    assert.match(updated.value.documentDiff, /task\/dependent-[0-9a-f]{4}\.md/u);
     assert.equal(updated.value.documentDiff.includes(tasks.root), false);
     assert.equal(updated.value.task.body, "body");
   }
@@ -562,14 +565,8 @@ test("concurrent same-title creation allocates stable unique suffixes", async ()
   const outcomes = await Promise.all(Array.from({ length: 6 }, () => tasks.add({ title: "Collision" })));
   assert.ok(outcomes.every((outcome) => outcome.kind === "accepted"));
   const ids = outcomes.flatMap((outcome) => (outcome.kind === "accepted" ? [outcome.value.id] : []));
-  assert.deepEqual(ids.sort(), [
-    "task/collision",
-    "task/collision-2",
-    "task/collision-3",
-    "task/collision-4",
-    "task/collision-5",
-    "task/collision-6",
-  ]);
+  assert.equal(new Set(ids).size, 6);
+  assert.ok(ids.every((id) => /^task\/collision-[0-9a-f]{4}$/u.test(id)));
 });
 
 test("reverse dependency writers both admit and leave diagnosis to doctor", async () => {
@@ -602,7 +599,7 @@ test("existing graph disease does not adjudicate an unrelated relation addition"
   const { root, tasks } = await world();
   const subject = acceptedId(await tasks.add({ title: "Subject" }));
   const valid = acceptedId(await tasks.add({ title: "Valid target" }));
-  const path = join(root, ".keiyaku", "tasks", "subject.md");
+  const path = authorityPath(root, subject);
   const document = parseTaskDocument(readFileSync(path), parseTaskId(subject));
   writeFileSync(path, serializeTaskDocument({ ...document, needs: ["task/missing"] }));
 
@@ -619,7 +616,7 @@ test("different task IDs and different worlds do not share task locks", async ()
   const firstB = acceptedId(await firstWorld.tasks.add({ title: "B" }));
   const secondA = acceptedId(await secondWorld.tasks.add({ title: "A" }));
   const held = await acquireSqliteTransactionLock({
-    path: join(firstWorld.tasks.root, ".keiyaku", "locks", "task", "a.sqlite"),
+    path: join(firstWorld.tasks.root, ".keiyaku", "locks", "task", "a", `${parseTaskId(firstA).localId}.sqlite`),
     mode: "immediate",
     timeoutMs: 100,
   });
@@ -629,14 +626,15 @@ test("different task IDs and different worlds do not share task locks", async ()
   } finally {
     held.close();
   }
-  assert.equal(firstA, secondA);
+  assert.match(firstA, /^task\/a-[0-9a-f]{4}$/u);
+  assert.match(secondA, /^task\/a-[0-9a-f]{4}$/u);
 });
 
 test("reset re-resolves authority after a namespace swap while the task lock is held", async () => {
   const { root, tasks } = await world();
   const id = acceptedId(await tasks.add({ title: "Reset custody race", namespace: ["foo"] }));
   const lock = await acquireSqliteTransactionLock({
-    path: join(root, ".keiyaku", "locks", "task", "foo", "reset-custody-race.sqlite"),
+    path: join(root, ".keiyaku", "locks", "task", "foo", `${parseTaskId(id).localId}.sqlite`),
     mode: "immediate",
     timeoutMs: 100,
   });
@@ -674,7 +672,7 @@ test("allocation contention does not block relation updates", async () => {
 test("task lock cancellation propagates and exceptional actions release held locks", async () => {
   const { tasks } = await world(),
     id = acceptedId(await tasks.add({ title: "Cancel" }));
-  const path = join(tasks.root, ".keiyaku", "locks", "task", "cancel.sqlite");
+  const path = join(tasks.root, ".keiyaku", "locks", "task", `${parseTaskId(id).localId}.sqlite`);
   const held = await acquireSqliteTransactionLock({ path, mode: "immediate", timeoutMs: 100 });
   const controller = new AbortController();
   const pending = tasks.task({ id }).start({ signal: controller.signal });
@@ -694,7 +692,7 @@ test("task lock cancellation propagates and exceptional actions release held loc
 test("task lock wait budget defaults to three seconds and classifies busy cheaply", async () => {
   const { tasks } = await world(),
     id = acceptedId(await tasks.add({ title: "Busy" }));
-  const path = join(tasks.root, ".keiyaku", "locks", "task", "busy.sqlite");
+  const path = join(tasks.root, ".keiyaku", "locks", "task", `${parseTaskId(id).localId}.sqlite`);
   const held = await acquireSqliteTransactionLock({ path, mode: "immediate", timeoutMs: 100 });
   const started = performance.now();
   try {
@@ -715,7 +713,7 @@ test("task lock wait budget defaults to three seconds and classifies busy cheapl
 test("manual predecessor movement is best-effort detected and idle lock deletion never changes authority", async () => {
   const { tasks } = await world(),
     id = acceptedId(await tasks.add({ title: "Manual" }));
-  const path = join(tasks.root, ".keiyaku", "tasks", "manual.md"),
+  const path = authorityPath(tasks.root, id),
     original = readFileSync(path),
     manual = Buffer.concat([original, Buffer.from("manual edit\n")]);
   writeFileSync(path, manual);
@@ -728,7 +726,7 @@ test("manual predecessor movement is best-effort detected and idle lock deletion
   assert.deepEqual(readFileSync(path), manual);
   writeFileSync(path, original);
   assert.equal((await tasks.task({ id }).start()).kind, "accepted");
-  const lock = join(tasks.root, ".keiyaku", "locks", "task", "manual.sqlite");
+  const lock = join(tasks.root, ".keiyaku", "locks", "task", `${parseTaskId(id).localId}.sqlite`);
   unlinkSync(lock);
   assert.equal((await tasks.task({ id }).done()).kind, "accepted");
   assert.equal((await tasks.task({ id }).read())?.task.state, "done");
@@ -844,7 +842,7 @@ test("creation actor persists as createdBy and later mutations leave it unchange
     assert.equal(added.kind, "accepted");
     if (added.kind !== "accepted") return;
     assert.equal(added.value.createdBy, "flagship");
-    const addedPath = join(root, ".keiyaku", "tasks", "authored.md");
+    const addedPath = authorityPath(root, added.value.id);
     assert.match(readFileSync(addedPath, "utf8"), /^createdBy: flagship$/mu);
 
     const fromDocument = await tasks.addDocument({
@@ -860,13 +858,14 @@ test("creation actor persists as createdBy and later mutations leave it unchange
     assert.equal(await tasks.task({ id: "task/illegal" }).read(), null);
 
     const composed = await tasks.compose({
-      markdown: ["+ Composed", "as = composed", "@task/authored", "pri = 1"].join("\n"),
+      markdown: ["+ Composed", "as = composed", `@${added.value.id}`, "pri = 1"].join("\n"),
       actor: "composer",
     });
     assert.equal(composed.kind, "accepted");
     if (composed.kind !== "accepted") return;
     assert.equal(composed.documentChanges.length, 2);
-    const composedTask = await tasks.task({ id: "task/composed" }).read();
+    const composedId = composed.kind === "accepted" ? composed.documentChanges.find((change) => change.taskId.startsWith("task/composed-"))?.taskId : undefined;
+    const composedTask = composedId === undefined ? null : await tasks.task({ id: composedId }).read();
     const updatedExisting = await tasks.task({ id: added.value.id }).read();
     assert.equal(composedTask?.task.createdBy, "composer");
     assert.equal(updatedExisting?.task.createdBy, "flagship");
@@ -976,7 +975,7 @@ test("forced-local Task mutation execution preserves owner validation and authen
   assert.equal(
     (
       await Tasks.of(await World.at(root))
-        .task({ id: "task/forwarded" })
+        .task({ id: result.value.id })
         .read()
     )?.task.body,
     "exact\nbody",
