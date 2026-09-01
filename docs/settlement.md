@@ -56,6 +56,34 @@ publication leaves the matching holder held for a later replay. Settlement
 reports completed actions and independent lags, without inventing a second
 lifecycle state or nested receipt.
 
+## Cross-owner replay review
+
+Every Settlement review records the same small set of facts without creating a
+second authority:
+
+- **Leading irreversible fact:** Contract admission is published before Git
+  reconciliation and Settlement. Once admitted, later lag cannot reject or
+  erase that Contract fact.
+- **Durable replay token:** The current matching held TaskHolder is the sole
+  durable token that says this claimed Contract still owes Task settlement.
+- **Token consumption point:** Settlement consumes that token only when it
+  publishes the holder as released, after Task completion and the namespace
+  projection opportunity have been attempted.
+- **Crash windows:** A crash after admission, during Git reconciliation, after
+  Task completion but before holder release, or while holder release is being
+  published is resolved by re-observing current Contract, Task, and Git facts.
+  A still-held matching holder means replay is owed; a released holder means
+  token consumption succeeded. A publication that remains held is observable
+  lag for a later replay.
+- **Cleanup requirement:** The holder release is the final Settlement action;
+  Task-scoped coordination is closed, and terminal managed-worktree removal
+  waits until this invocation's settlement opportunity has ended. Failed
+  release publication retains the held token for replay.
+- **Post-consumption failure:** Coordination cleanup, terminal cleanup, or
+  result projection may still report invocation lag after release. Such a
+  failure cannot recreate a holder or repeat the settled Task effect; a
+  released holder makes later Settlement inert.
+
 ## Boundary
 
 Settlement is not a hook. Hooks are external commands attached to physical
