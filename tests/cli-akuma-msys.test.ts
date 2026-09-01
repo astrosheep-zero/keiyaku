@@ -5,14 +5,21 @@ import type { AkuId } from "../src/akuma/identity.js";
 import type { AkumaAlias } from "../src/identity/selector.js";
 import type { CallResult } from "../src/library/akuma-creation.js";
 import type { WorldRoot } from "../src/world.js";
-import { parseArgv } from "../src/cli/parse.js";
+import { parseArgv, type ParsedExecution } from "../src/cli/parse.js";
+import type { AkumaInvocationResult } from "../src/cli/commands/akuma-invoke.js";
 import { renderAkumaJson, renderAkumaText } from "../src/cli/render/akuma.js";
 
 const world = "D:\\dev\\repo with $tag\\it's" as WorldRoot;
 const akuma = "aku/worker/1234abcd" as AkuId;
-const command = parseArgv(["call", "worker", "-d", "prompt"]).command;
+function parseExecution(argv: readonly string[]): ParsedExecution {
+  const parsed = parseArgv(argv);
+  if (!("command" in parsed)) throw new Error("expected command invocation");
+  return parsed;
+}
 
-function detachedCall(result: Pick<CallResult, "dispatch" | "alias">): Parameters<typeof renderAkumaText>[1] {
+const command = parseExecution(["call", "worker", "-d", "prompt"]).command;
+
+function detachedCall(result: Pick<CallResult, "dispatch" | "alias">): Extract<AkumaInvocationResult, { action: "call" }> {
   return {
     kind: "akuma",
     action: "call",

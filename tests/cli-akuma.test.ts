@@ -3,18 +3,17 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { moveAlias } from "../src/alias/index.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { akumaCallRequestCommands, type AkumaCallRequestChildLaunch } from "../src/akuma/call-request.js";
 import { HeldAkumaLeash, initializeHeart, readSoul, recordTell, type Soul } from "../src/akuma/heart/index.js";
-import { decodeSoul } from "../src/akuma/heart/soul.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { AKUMA_REQUESTS_ENV, createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import { BodyRequestPump } from "../src/akuma/request-serve.js";
 import { composeRequestCommands } from "../src/akuma/request-wire.js";
+import type { ActivityHistory, ActivityRow } from "../src/akuma/index.js";
 import {
   executeKillAkuma,
   executeTellAkuma,
@@ -22,11 +21,11 @@ import {
   fleetRequestCommands,
   type FleetRequestPort,
 } from "../src/library/fleet.js";
-import { Keiyaku, type AkumaObservation } from "../src/index.js";
+import { type AkumaObservation } from "../src/index.js";
 import { World } from "../src/world.js";
 import { invoke } from "../src/cli/invoke.js";
-import { invokeAkuma } from "../src/cli/commands/akuma-invoke.js";
-import { CliUsageError, parseArgv } from "../src/cli/parse.js";
+import type { AkumaInvocationResult } from "../src/cli/commands/akuma-invoke.js";
+import { CliUsageError, parseArgv, type ParsedExecution } from "../src/cli/parse.js";
 import {
   akumaExitCode,
   akumaJsonValue,
@@ -36,21 +35,29 @@ import {
 } from "../src/cli/render/akuma.js";
 import type { TextRenderContext } from "../src/cli/render/terminal.js";
 import type { AkuId } from "../src/akuma/identity.js";
+import type { AkumaAlias } from "../src/identity/selector.js";
 import { makeGitRepository } from "./support/git.js";
 
 const PACKAGED_CLI = fileURLToPath(new URL("../build/src/cli/index.js", import.meta.url));
 const emptyCreatedTasks = { kind: "present" as const, rows: [] };
 const emptyReported = { reportedChanges: [] as const, reportedChangesOmitted: 0 as const };
+const fixtureAkuId = "aku/worker/00000001" as AkuId;
 function akumaObservation(
-  status: AkumaObservation["status"],
+  status: Omit<AkumaObservation["status"], "id"> & { id: string },
   extra: Omit<Partial<AkumaObservation>, "status"> = {},
 ): AkumaObservation {
   return {
-    status: { ...status, timeline: { ...emptyReported, ...status.timeline } },
+    status: { ...status, id: status.id as AkuId, timeline: { ...emptyReported, ...status.timeline } },
     contract: { kind: "none" },
     createdTasks: extra.createdTasks ?? emptyCreatedTasks,
     ...extra,
   };
+}
+
+function parseExecution(argv: readonly string[]): ParsedExecution {
+  const parsed = parseArgv(argv);
+  if (!("command" in parsed)) throw new Error("expected command invocation");
+  return parsed;
 }
 
 function packagedCliEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -245,9 +252,18 @@ test("Akuma CLI parses root verbs without the removed namespace", () => {
     command: { command: "wait", akuma: ["aku/claude/*", "kei/review"], completion: "any", output: "text" },
   });
   assert.throws(() => parseArgv(["wait", "aku/claude/*", "kei/review"]), /requires --any or --all/u);
-  assert.equal(parseArgv(["wait", "aku/claude/1234abcd", "--timeout", "50s"]).command.timeoutMs, 50_000);
-  assert.equal(parseArgv(["wait", "aku/claude/1234abcd", "--timeout", "10m"]).command.timeoutMs, 600_000);
-  assert.equal(parseArgv(["wait", "aku/claude/1234abcd", "--timeout", "2h"]).command.timeoutMs, 7_200_000);
+  assert.equal(
+    (parseExecution(["wait", "aku/claude/1234abcd", "--timeout", "50s"]).command as Extract<ParsedExecution["command"], { command: "wait" }>).timeoutMs,
+    50_000,
+  );
+  assert.equal(
+    (parseExecution(["wait", "aku/claude/1234abcd", "--timeout", "10m"]).command as Extract<ParsedExecution["command"], { command: "wait" }>).timeoutMs,
+    600_000,
+  );
+  assert.equal(
+    (parseExecution(["wait", "aku/claude/1234abcd", "--timeout", "2h"]).command as Extract<ParsedExecution["command"], { command: "wait" }>).timeoutMs,
+    7_200_000,
+  );
   for (const duration of ["5000", "1.5m", "01s", "-1s", "1d"]) {
     assert.throws(() => parseArgv(["wait", "aku/claude/1234abcd", "--timeout", duration]), /--timeout requires/u);
   }
@@ -320,10 +336,10 @@ test("Akuma CLI parses root verbs without the removed namespace", () => {
 test("blank Akuma stdin is usage before World or package invocation", async () => {
   await assert.rejects(
     () =>
-      invoke(parseArgv(["call", "claude", "-"]), {
+      invoke(parseExecution(["call", "claude", "-"]), {
         cwd: "/absent/akuma-blank-stdin",
         environment: {},
-        readStdin: () => " \n",
+        readStdin: async () => " \n",
       }),
     (error: unknown) =>
       error instanceof CliUsageError &&
@@ -333,7 +349,7 @@ test("blank Akuma stdin is usage before World or package invocation", async () =
 });
 
 function statusCommand(id: string) {
-  return parseArgv(["status", id]).command;
+  return parseExecution(["status", id]).command;
 }
 
 function renderStatus(observation: AkumaObservation, context?: TextRenderContext): string {
@@ -345,7 +361,7 @@ function renderStatus(observation: AkumaObservation, context?: TextRenderContext
 }
 
 function waitCommand(id: string) {
-  return parseArgv(["wait", id]).command;
+  return parseExecution(["wait", id]).command;
 }
 
 function waitInvocation(observation: AkumaObservation) {
@@ -367,22 +383,28 @@ function tellInvocation(
         diagnostic: string;
         child?: { code: number | null; signal: string | null; log: { path: string; from: number; to: number } };
       } = { kind: "pursuing", bodySequence: 1 },
-) {
+  ): Extract<AkumaInvocationResult, { action: "tell"; mode: "ordinary" }> {
+  type TellEntry = Extract<
+    (typeof observation.status.timeline.entries)[number],
+    { kind: "row"; row: { kind: "tell" } }
+  >;
   const observedRow = observation.status.timeline.entries.find(
-    (entry): entry is Extract<(typeof observation.status.timeline.entries)[number], { kind: "row" }> =>
-      entry.kind === "row" && entry.row.kind === "tell" && entry.row.tellId === "tell-1",
-  )?.row;
-  const row =
-    observedRow ??
-    ({
-      kind: "tell" as const,
-      sequence: 1,
-      at: "2026-08-10T16:42:00.000Z",
-      tellId: "tell-1",
-      text: "steer",
-      state: wake.kind === "told" ? "told" : "pending",
-      deliveries: [],
-    } as const);
+    (entry): entry is TellEntry =>
+      entry.kind === "row" && "row" in entry && entry.row.kind === "tell" && entry.row.tellId === "tell-1",
+  );
+  const row = observedRow?.kind === "row" ? observedRow.row : undefined;
+  const selectedRow = (row ?? {
+    kind: "tell" as const,
+    sequence: 1,
+    at: "2026-08-10T16:42:00.000Z",
+    tellId: "tell-1",
+    text: "steer",
+    state: wake.kind === "told" ? "told" : "pending",
+    deliveries: [],
+  }) as Extract<
+    AkumaObservation["status"]["timeline"]["entries"][number],
+    { kind: "row"; row: { kind: "tell" } }
+  >["row"];
   return {
     kind: "akuma" as const,
     action: "tell" as const,
@@ -392,7 +414,7 @@ function tellInvocation(
       akuma: observation.status.id,
       tell: {
         admission: { tellId: "tell-1", fact: "recorded" as const },
-        row,
+        row: selectedRow,
         wake,
       },
     },
@@ -404,7 +426,7 @@ function glyph(line: string): string {
 }
 
 test("Akuma snapshots preserve typed omission", () => {
-  const result = {
+  const result: Extract<AkumaInvocationResult, { action: "status" }> = {
     kind: "akuma" as const,
     action: "status" as const,
     status: akumaObservation({
@@ -419,7 +441,7 @@ test("Akuma snapshots preserve typed omission", () => {
       },
     }),
   };
-  const projected = akumaJsonValue(result) as { status: typeof result.status };
+  const projected = akumaJsonValue(result) as typeof result.status;
   assert.equal(projected.status.id, "aku/worker/1234abcd");
   assert.equal(projected.status.timeline.omitted, 12);
   assert.deepEqual(projected.status.timeline.entries, [{ kind: "gap", count: 12 }]);
@@ -506,31 +528,52 @@ test("Akuma snapshot text keeps timeline order and uses ordinary vertical marks"
             state: "active",
           },
         },
-        {
-          kind: "row",
-          row: {
-            kind: "tool",
-            sequence: 9,
-            turnSequence: 1,
-            at: "2026-08-10T16:50:00.000Z",
-            name: "Bash",
-            call: { kind: "run", command: "npm run lint" },
-            state: "unsettled",
-          },
-        },
       ],
       omitted: 199,
       ...emptyReported,
     },
   });
   const text = renderStatus(observation);
+  const unsettledRow: ActivityRow = {
+    kind: "tool",
+    sequence: 9,
+    turnSequence: 1,
+    at: "2026-08-10T16:50:00.000Z",
+    name: "Bash",
+    call: { kind: "run", command: "npm run lint" },
+    state: "unsettled",
+  };
+  const history: ActivityHistory = {
+    rows: [unsettledRow],
+    omitted: 0,
+    hasEarlier: false,
+    hasLater: false,
+    historyLost: false,
+    lowestRetained: unsettledRow.sequence,
+    highest: unsettledRow.sequence,
+  };
+  const historyResult: Extract<AkumaInvocationResult, { action: "history"; mode: "page" }> = {
+    kind: "akuma",
+    action: "history",
+    akuma: observation.status.id,
+    mode: "page",
+    history,
+    historyResult: { kind: "history", id: observation.status.id, history, contract: { kind: "none" } },
+  };
+  const historyText = renderAkumaText(parseExecution(["history", observation.status.id]).command, historyResult);
   const lines = text.split("\n");
   const gaps = lines.filter((line) => /⋮ \d+ omitted/u.test(line));
   assert.deepEqual(gaps, ["      ⋮ 171 omitted", "      ⋮ 17 omitted", "      ⋮ 11 omitted"]);
   const activity = lines.slice(lines.indexOf("      ⋮ 171 omitted"), lines.indexOf("tasks 0"));
   const verbs = activity
     .filter((line) => / (say|think|run|tell) /u.test(line) && line[5] === " ")
-    .map((line) => `${glyph(line)} ${line.slice(8, 14).trimEnd()}`);
+    .map((line) => `${glyph(line)} ${line.slice(8, 14).trimEnd()}`)
+    .concat(
+      historyText
+        .split("\n")
+        .filter((line) => / (say|think|run|tell) /u.test(line) && line[5] === " ")
+        .map((line) => `${glyph(line)} ${line.slice(8, 14).trimEnd()}`),
+    );
   assert.deepEqual(verbs, ["│ say", "│ think", "✓ run", "! run", "✓ run", "⧗ tell", "⧖ run", "? run"]);
   const sayAt = activity.findIndex((line) => line.includes("say"));
   assert.equal(glyph(activity[sayAt]!), "│");
@@ -558,6 +601,8 @@ test("Akuma snapshot tasks stay compact and do not invent relations", () => {
             state: "in_progress",
             priority: 0,
             disposition: "in_progress",
+            updatedAt: "2026-08-10T16:42:00.000Z",
+            bodyPresent: false,
           },
           {
             id: "task/restore-nuke-fixture",
@@ -565,6 +610,8 @@ test("Akuma snapshot tasks stay compact and do not invent relations", () => {
             state: "open",
             priority: 1,
             disposition: "blocked",
+            updatedAt: "2026-08-10T16:42:00.000Z",
+            bodyPresent: false,
           },
         ],
       },
@@ -708,6 +755,8 @@ test("Akuma mutation snapshots omit observation context", () => {
             state: "in_progress",
             priority: 0,
             disposition: "in_progress",
+            updatedAt: "2026-08-10T16:42:00.000Z",
+            bodyPresent: false,
           },
         ],
       },
@@ -722,7 +771,7 @@ test("Akuma mutation snapshots omit observation context", () => {
   assert.ok(waitLines.indexOf("changes 0") < waitLines.length - 1);
   assert.equal(waitLines.at(-2), "");
   const told = renderAkumaText(
-    parseArgv(["tell", observation.status.id, "steer"]).command,
+    parseExecution(["tell", observation.status.id, "steer"]).command,
     tellInvocation(observation),
   );
   assert.doesNotMatch(told, /^wake pursuing/u);
@@ -733,7 +782,7 @@ test("Akuma mutation snapshots omit observation context", () => {
   assert.doesNotMatch(told, /^tasks /mu);
   assert.doesNotMatch(told, /^changes /mu);
   assert.notEqual(told.split("\n").at(-1), "");
-  const killed = renderAkumaText(parseArgv(["kill", observation.status.id]).command, {
+  const killed = renderAkumaText(parseExecution(["kill", observation.status.id]).command, {
     kind: "akuma",
     action: "kill",
     result: {
@@ -754,7 +803,7 @@ test("Akuma mutation snapshots omit observation context", () => {
   assert.equal(killed.split("\n").at(-1), "✓ killed");
 
   for (const evidence of ["already-killed", "already-stopped", "hung", "untidy", "unavailable"] as const) {
-    const receipt = renderAkumaText(parseArgv(["kill", observation.status.id]).command, {
+    const receipt = renderAkumaText(parseExecution(["kill", observation.status.id]).command, {
       kind: "akuma",
       action: "kill",
       result: {
@@ -771,7 +820,7 @@ test("Akuma mutation snapshots omit observation context", () => {
     assert.doesNotMatch(receipt, new RegExp(`^kill ${evidence}$`, "mu"));
   }
 
-  const emptyKill = renderAkumaText(parseArgv(["kill", observation.status.id]).command, {
+  const emptyKill = renderAkumaText(parseExecution(["kill", observation.status.id]).command, {
     kind: "akuma",
     action: "kill",
     result: {
@@ -801,7 +850,7 @@ test("Akuma mutation snapshots omit observation context", () => {
     }),
   );
   assert.equal(hung.split("\n").at(-1), "? hung");
-  const callText = renderAkumaText(parseArgv(["call", "claude", "prompt"]).command, {
+  const callText = renderAkumaText(parseExecution(["call", "claude", "prompt"]).command, {
     kind: "akuma",
     action: "call",
     world: "/world" as import("../src/world.js").WorldRoot,
@@ -843,7 +892,7 @@ test("Tell output renders only its direct timeline row", () => {
       ...emptyReported,
     },
   });
-  const command = parseArgv(["tell", base.status.id, "steer"]).command;
+  const command = parseExecution(["tell", base.status.id, "steer"]).command;
   const told = renderAkumaText(command, tellInvocation(base, { kind: "told" }));
   assert.match(told, /✓ told\s+“steer”/u);
   assert.doesNotMatch(told, /wake|tell told/u);
@@ -893,15 +942,18 @@ test("Tell output renders only its direct timeline row", () => {
 });
 
 test("Akuma output preserves a complete associated Contract identity", () => {
-  const result = {
+  const result: Extract<AkumaInvocationResult, { action: "history"; mode: "no-answer" }> = {
     kind: "akuma" as const,
     action: "history" as const,
-    akuma: "aku/worker/00000001" as const,
+    akuma: fixtureAkuId,
     mode: "no-answer" as const,
     historyResult: {
       kind: "no-answer" as const,
-      id: "aku/worker/00000001" as const,
-      contract: { kind: "associated" as const, contractId: "kei/provider-core-review" as const },
+      id: fixtureAkuId,
+      contract: {
+        kind: "associated" as const,
+        contractId: "kei/provider-core-review" as import("../src/core/facts/types.js").ContractId,
+      },
     },
   };
   assert.deepEqual(akumaJsonValue(result), {
@@ -912,15 +964,15 @@ test("Akuma output preserves a complete associated Contract identity", () => {
 });
 
 test("Akuma history --id reads an exact failed outcome without a failure exit", () => {
-  const command = parseArgv(["history", "aku/worker/00000001", "--id", "turn/7"]).command;
-  const failed = {
+  const command = parseExecution(["history", "aku/worker/00000001", "--id", "turn/7"]).command;
+  const failed: Extract<AkumaInvocationResult, { action: "history"; mode: "exact" }> = {
     kind: "akuma" as const,
     action: "history" as const,
-    akuma: "aku/worker/00000001" as const,
+    akuma: fixtureAkuId,
     mode: "exact" as const,
     historyResult: {
       kind: "exact" as const,
-      id: "aku/worker/00000001" as const,
+      id: fixtureAkuId,
       outcome: {
         kind: "outcome" as const,
         sequence: 7,
@@ -963,12 +1015,12 @@ test("Akuma history --id reads an exact failed outcome without a failure exit", 
     },
     answer: "retained answer",
   };
-  assert.equal(renderAkumaText(parseArgv(["history", failed.akuma, "--last"]).command, last), "retained answer");
+  assert.equal(renderAkumaText(parseExecution(["history", failed.akuma, "--last"]).command, last), "retained answer");
   assert.equal(akumaExitCode(last), 0);
 });
 
 test("Akuma status keeps a complete Contract ID at narrow width", () => {
-  const contractId = "kei/provider-core-review" as const;
+  const contractId = "kei/provider-core-review" as import("../src/core/facts/types.js").ContractId;
   const status = akumaObservation(
     {
       id: "aku/worker/00000001",
@@ -979,7 +1031,7 @@ test("Akuma status keeps a complete Contract ID at narrow width", () => {
   );
   const context: TextRenderContext = { columns: 20, color: false };
   const text = renderAkumaText(
-    parseArgv(["status", status.status.id]).command,
+    parseExecution(["status", status.status.id]).command,
     { kind: "akuma", action: "status", status },
     context,
   );
@@ -1006,6 +1058,7 @@ test("Akuma status, wait, and history share public observations without embeddin
       options: {},
       origin: { kind: "direct" },
       cwd: root,
+      allowed: [],
       createdAt: "2026-08-08T00:00:00.000Z",
     });
     leash.release();
@@ -1053,6 +1106,7 @@ test("Akuma status, wait, and history share public observations without embeddin
           options: {},
           origin: { kind: "direct" },
           cwd: root,
+          allowed: [],
         },
         initialBody: "work",
       },
@@ -1062,7 +1116,7 @@ test("Akuma status, wait, and history share public observations without embeddin
       },
     );
 
-    const parsedStatus = parseArgv(["-C", root, "status", allocated.id]);
+    const parsedStatus = parseExecution(["-C", root, "status", allocated.id]);
     const statusResult = await invoke(parsedStatus, {
       environment,
       readStdin: () => {
@@ -1070,7 +1124,9 @@ test("Akuma status, wait, and history share public observations without embeddin
       },
     });
     assert.equal("kind" in statusResult && statusResult.kind, "akuma");
-    if (!("kind" in statusResult) || statusResult.kind !== "akuma" || statusResult.action !== "status") return;
+    if (!("kind" in statusResult) || statusResult.kind !== "akuma" || statusResult.action !== "status") {
+      throw new Error("expected Akuma status result");
+    }
     assert.equal(
       statusResult.status.status.timeline.kind === "idle" &&
         statusResult.status.status.timeline.outcome?.outcome.kind === "answered",
@@ -1090,10 +1146,11 @@ test("Akuma status, wait, and history share public observations without embeddin
       }),
     };
     assert.deepEqual(waitResult.result.observations, [statusResult.status]);
-    assert.equal(renderAkumaText(parseArgv(["wait", allocated.id]).command, waitResult), "cli answer");
+    assert.equal(renderAkumaText(parseExecution(["wait", allocated.id]).command, waitResult), "cli answer");
     assert.equal(akumaRawAnswer(waitResult), "cli answer");
 
     await recordTell(allocated.paths, {
+      kind: "tell",
       id: "queued-cli-tell",
       body: "continue",
       recordedAt: "2026-08-16T00:00:01.000Z",
@@ -1109,29 +1166,35 @@ test("Akuma status, wait, and history share public observations without embeddin
       }),
     };
     assert.equal(akumaRawAnswer(pendingWait), undefined);
-    assert.match(renderAkumaText(parseArgv(["wait", allocated.id]).command, pendingWait), /continue/u);
+    assert.match(renderAkumaText(parseExecution(["wait", allocated.id]).command, pendingWait), /continue/u);
 
-    const historyParsed = parseArgv(["-C", root, "history", allocated.id]);
+    const historyParsed = parseExecution(["-C", root, "history", allocated.id]);
     const historyResult = await invoke(historyParsed, {
       environment,
       readStdin: () => {
         throw new Error("history must not read stdin");
       },
     });
-    if (!("kind" in historyResult) || historyResult.kind !== "akuma" || historyResult.action !== "history") return;
+    if (!("kind" in historyResult) || historyResult.kind !== "akuma" || historyResult.action !== "history") {
+      throw new Error("expected Akuma history result");
+    }
+    if (historyResult.mode !== "page") throw new Error("expected history page");
     assert.deepEqual(
       historyResult.history.rows.filter((row) => row.kind === "outcome").map((row) => row.outcome),
       [{ kind: "answered", answer: "cli answer", historyId: "turn/1" }],
     );
-    const exact = await invoke(parseArgv(["-C", root, "history", allocated.id, "--id", "turn/1"]), {
+    const exact = await invoke(parseExecution(["-C", root, "history", allocated.id, "--id", "turn/1"]), {
       environment,
       readStdin: () => {
         throw new Error("history must not read stdin");
       },
     });
-    if (!("kind" in exact) || exact.kind !== "akuma" || exact.action !== "history") return;
+    if (!("kind" in exact) || exact.kind !== "akuma" || exact.action !== "history") {
+      throw new Error("expected Akuma history result");
+    }
     assert.equal(exact.mode, "exact");
-    assert.equal(renderAkumaText(parseArgv(["history", allocated.id, "--id", "turn/1"]).command, exact), "cli answer");
+    if (exact.mode !== "exact") throw new Error("expected exact history result");
+    assert.equal(renderAkumaText(parseExecution(["history", allocated.id, "--id", "turn/1"]).command, exact), "cli answer");
     assert.deepEqual(JSON.parse(renderAkumaJson(exact)), {
       kind: "exact",
       id: allocated.id,
@@ -1146,16 +1209,19 @@ test("Akuma status, wait, and history share public observations without embeddin
     });
     assert.equal(akumaExitCode(exact), 0);
 
-    const unknown = await invoke(parseArgv(["-C", root, "history", allocated.id, "--id", "turn/404"]), {
+    const unknown = await invoke(parseExecution(["-C", root, "history", allocated.id, "--id", "turn/404"]), {
       environment,
       readStdin: () => {
         throw new Error("history must not read stdin");
       },
     });
-    if (!("kind" in unknown) || unknown.kind !== "akuma" || unknown.action !== "history") return;
+    if (!("kind" in unknown) || unknown.kind !== "akuma" || unknown.action !== "history") {
+      throw new Error("expected Akuma history result");
+    }
     assert.equal(unknown.mode, "exact");
+    if (unknown.mode !== "exact") throw new Error("expected exact history result");
     assert.equal(
-      renderAkumaText(parseArgv(["history", allocated.id, "--id", "turn/404"]).command, unknown),
+      renderAkumaText(parseExecution(["history", allocated.id, "--id", "turn/404"]).command, unknown),
       "turn/404 has no matching retained outcome",
     );
     assert.deepEqual(JSON.parse(renderAkumaJson(unknown)), {
@@ -1359,6 +1425,7 @@ test("packaged CLI wait and history --last write exact multiline and empty answe
       options: {},
       origin: { kind: "direct" },
       cwd: root,
+      allowed: [],
       createdAt: "2026-08-16T00:00:00.000Z",
     });
     leash.release();
@@ -1372,7 +1439,7 @@ test("packaged CLI wait and history --last write exact multiline and empty answe
           options: {},
           origin: { kind: "direct" },
           cwd: root,
-          createdAt: "2026-08-16T00:00:00.000Z",
+          allowed: [],
         },
         initialBody: "work",
       },
@@ -1393,6 +1460,7 @@ test("packaged CLI wait and history --last write exact multiline and empty answe
       }
     ).history.rows;
     const value = rows.find((row) => row.kind === "outcome")?.outcome?.historyId;
+    assert.ok(value);
     assert.match(value, /^turn\/[1-9][0-9]*$/u);
     return value!;
   };
@@ -1467,18 +1535,6 @@ test("packaged CLI wait and history --last write exact multiline and empty answe
   }
 });
 
-function fixtureSoul(id: Soul["id"], name: string): Record<string, unknown> {
-  return {
-    id,
-    archetype: name,
-    provider: { name: "claude", kind: "claude-agent-sdk" },
-    options: {},
-    cwd: "/tmp",
-    origin: { kind: "direct" },
-    createdAt: "2026-08-15T00:00:00.000Z",
-  };
-}
-
 test("linked and primary worktrees observe one Akuma World while Soul retains its execution cwd", async () => {
   const repository = makeGitRepository();
   repository.run(["config", "user.name", "Keiyaku Test"]);
@@ -1517,6 +1573,7 @@ test("linked and primary worktrees observe one Akuma World while Soul retains it
         options: {},
         origin: { kind: "direct" },
         cwd: linked,
+        allowed: [],
       },
       initialBody: "work",
     },
@@ -1526,12 +1583,17 @@ test("linked and primary worktrees observe one Akuma World while Soul retains it
     },
   );
 
-  const fromLinked = await invoke(parseArgv(["-C", linked, "status", allocated.id]));
-  const fromPrimary = await invoke(parseArgv(["-C", repository.path, "status", allocated.id]));
+  const fromLinked = await invoke(parseExecution(["-C", linked, "status", allocated.id]));
+  const fromPrimary = await invoke(parseExecution(["-C", repository.path, "status", allocated.id]));
+  if (!("kind" in fromLinked) || fromLinked.kind !== "akuma") throw new Error("expected linked Akuma status");
+  if (!("kind" in fromPrimary) || fromPrimary.kind !== "akuma") throw new Error("expected primary Akuma status");
   assert.equal(fromLinked.kind, "akuma");
   assert.deepEqual(fromLinked, fromPrimary);
-  await moveAlias({ world: repository.path, alias: "@shared", akuId: allocated.id });
-  const fromLinkedAlias = await invoke(parseArgv(["-C", linked, "status", "@shared"]));
+  await moveAlias({ world: repository.path as import("../src/world.js").WorldRoot, alias: "@shared" as AkumaAlias, akuId: allocated.id });
+  const fromLinkedAlias = await invoke(parseExecution(["-C", linked, "status", "@shared"]));
+  if (!("kind" in fromLinkedAlias) || fromLinkedAlias.kind !== "akuma" || fromLinkedAlias.action !== "status") {
+    throw new Error("expected linked alias Akuma status");
+  }
   assert.equal(fromLinkedAlias.kind === "akuma" ? fromLinkedAlias.status.status.id : undefined, allocated.id);
   assert.equal((await readSoul(allocated.paths))?.cwd, linked);
   assert.equal(existsSync(join(linked, ".keiyaku", "akuma", "run")), false);
