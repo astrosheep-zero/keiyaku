@@ -79,7 +79,17 @@
     "tests/normalized-identity.test.ts",
     "tests/model-impact.test.ts",
     "tests/sqlite-transaction-lock.test.ts",
-    "tests/dispatch-alias.test.ts"
+    "tests/dispatch-alias.test.ts",
+    "tests/amend-body.test.ts",
+    "tests/architecture.test.ts",
+    "tests/build-windows-launcher.test.ts",
+    "tests/cli-task.test.ts",
+    "tests/contract-document.test.ts",
+    "tests/fold.test.ts",
+    "tests/git-repository.test.ts",
+    "tests/markdown-ast.test.ts",
+    "tests/plugin-runtime.test.ts",
+    "tests/plugin-types.test.ts"
   ],
   "exclude": []
 }
