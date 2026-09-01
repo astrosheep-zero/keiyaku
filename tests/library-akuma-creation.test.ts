@@ -18,6 +18,7 @@ import { moveAlias, resolveAlias } from "../src/alias/index.js";
 import { Akuma, AkumaHandle, akumaCallExecution, type AkumaCallInput } from "../src/akuma/akuma.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { akumaCallRequestCommands } from "../src/akuma/call-request.js";
+import { AkumaArchetypeError, listArchetypeDefinitions, loadArchetype } from "../src/akuma/archetype.js";
 import { HeldAkumaLeash, initializeHeart, readSoul, type Soul } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
@@ -573,6 +574,148 @@ test("Archetype allowed rejects unknown duplicate and non-string entries", async
     assert.deepEqual((await akuma.list()).rows, []);
   } finally {
     rmSync(raw.path, { recursive: true, force: true });
+  }
+});
+
+test("Archetype base inheritance resolves one frozen effective definition", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-archetype-base-"));
+  const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-archetype-base-home-"));
+  try {
+    mkdirSync(join(root, ".keiyaku", "akuma"), { recursive: true });
+    mkdirSync(join(home, "akuma"));
+    writeFileSync(
+      join(home, "akuma", "base.md"),
+      [
+        "---",
+        "provider: codex-app-server",
+        "model: base-model",
+        "effort: high",
+        "network: disabled",
+        "description: Base description",
+        "allowed:",
+        "  - akuma.call",
+        "readonly: true",
+        "---",
+        "Base body.",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(root, ".keiyaku", "akuma", "child.md"),
+      ["---", "base: base", "model: child-model", "allowed: []", "---", ""].join("\n"),
+    );
+    const settingsValue = await settings({ root, home });
+    const loaded = await loadArchetype({ name: "child", project: root, home, settings: settingsValue });
+    assert.equal(loaded.provider.name, "codex-app-server");
+    assert.deepEqual(loaded.options, {
+      model: "child-model",
+      effort: "high",
+      network: "disabled",
+      readonly: true,
+      systemPrompt: "Base body.\n",
+      systemPromptMode: "append",
+    });
+    assert.equal(loaded.description, "Base description");
+    assert.deepEqual(loaded.allowed, []);
+    assert.deepEqual(loaded.readonly, { enforcement: "native" });
+    assert.deepEqual(await listArchetypeDefinitions({ project: root, home }), [
+      { name: "base", model: "base-model", description: "Base description" },
+      { name: "child", model: "child-model", description: "Base description" },
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("Archetype base lookup uses project precedence and Home fallback", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-archetype-precedence-"));
+  const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-archetype-precedence-home-"));
+  try {
+    mkdirSync(join(root, ".keiyaku", "akuma"), { recursive: true });
+    mkdirSync(join(home, "akuma"));
+    writeFileSync(join(home, "akuma", "base.md"), "---\nprovider: claude\ndescription: Home\n---\nHome body.\n");
+    writeFileSync(join(root, ".keiyaku", "akuma", "base.md"), "---\nprovider: claude\ndescription: Project\n---\nProject body.\n");
+    writeFileSync(join(root, ".keiyaku", "akuma", "child.md"), "---\nbase: base\n---\n");
+    writeFileSync(join(root, ".keiyaku", "akuma", "fallback.md"), "---\nbase: home-base\n---\n");
+    writeFileSync(join(home, "akuma", "home-base.md"), "---\nprovider: claude\n---\nFallback body.\n");
+    const settingsValue = await settings({ root, home });
+    assert.equal(
+      (await loadArchetype({ name: "child", project: root, home, settings: settingsValue })).description,
+      "Project",
+    );
+    assert.equal(
+      (await loadArchetype({ name: "fallback", project: root, home, settings: settingsValue })).path,
+      join(root, ".keiyaku", "akuma", "fallback.md"),
+    );
+    assert.equal(
+      (await loadArchetype({ name: "fallback", project: root, home, settings: settingsValue })).options.systemPrompt,
+      "Fallback body.\n",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("Archetype inheritance freezes the resolved birth snapshot without base metadata", async () => {
+  const { raw } = await repositoryFixture();
+  const world = await World.at(raw.path);
+  const configured = await directArchetypeSettings(world);
+  try {
+    writeFileSync(
+      join(configured.home, "akuma", "base.md"),
+      "---\nprovider: local\nmodel: base\nallowed:\n  - task.add\nreadonly: true\n---\nBase body.\n",
+    );
+    writeFileSync(
+      join(configured.home, "akuma", "child.md"),
+      "---\nbase: base\nmodel: child\n---\nChild body.\n",
+    );
+    const soul = await directBirthSoul(Akuma.of(world, configured), { archetype: "child", body: "run" });
+    assert.equal(soul.provider.name, "local");
+    assert.deepEqual(soul.options, {
+      model: "child",
+      readonly: true,
+      systemPrompt: "Child body.\n",
+      systemPromptMode: "append",
+    });
+    assert.deepEqual(soul.allowed, ["task.add"]);
+    assert.deepEqual(soul.readonly, { enforcement: "native" });
+    assert.equal("base" in soul, false);
+  } finally {
+    rmSync(raw.path, { recursive: true, force: true });
+  }
+});
+
+test("Archetype base chains refuse missing providers, malformed names, and cycles", async () => {
+  const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-archetype-invalid-base-"));
+  try {
+    mkdirSync(join(home, "akuma"));
+    writeFileSync(join(home, "akuma", "missing.md"), "---\nbase: absent\n---\n");
+    writeFileSync(join(home, "akuma", "malformed.md"), "---\nbase: 'bad/name'\n---\n");
+    writeFileSync(join(home, "akuma", "a.md"), "---\nbase: b\n---\n");
+    writeFileSync(join(home, "akuma", "b.md"), "---\nbase: a\n---\n");
+    writeFileSync(join(home, "akuma", "noprov.md"), "---\nbase: empty\n---\n");
+    writeFileSync(join(home, "akuma", "empty.md"), "---\n{}\n---\n");
+    const settingsValue = await settings({ home });
+    await assert.rejects(
+      loadArchetype({ name: "missing", home, settings: settingsValue }),
+      (error: unknown) => error instanceof AkumaArchetypeError && error.message.includes("missing -> absent"),
+    );
+    await assert.rejects(
+      loadArchetype({ name: "malformed", home, settings: settingsValue }),
+      (error: unknown) => error instanceof AkumaArchetypeError && error.reason.includes("Akuma name"),
+    );
+    await assert.rejects(
+      loadArchetype({ name: "a", home, settings: settingsValue }),
+      (error: unknown) => error instanceof AkumaArchetypeError && error.message.includes("a -> b -> a"),
+    );
+    await assert.rejects(
+      loadArchetype({ name: "noprov", home, settings: settingsValue }),
+      (error: unknown) => error instanceof AkumaArchetypeError && error.message.includes("provider must be"),
+    );
+  } finally {
+    rmSync(home, { recursive: true, force: true });
   }
 });
 

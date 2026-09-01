@@ -53,6 +53,21 @@ Home remains the fallback when the project has no definition. This precedence
 applies only to call-time definition configuration and never changes World
 runtime custody, Heart evidence, or leash ownership.
 
+An Archetype may name one `base` Archetype at load time. The base is resolved
+using the same project-over-Home precedence, then the child is merged into one
+complete snapshot before catalog presentation or birth. Provider, model,
+effort, network, and description are replaced only when present on the child;
+otherwise the base value remains. A nonempty child body replaces the base body,
+while an empty body inherits it. A child may add readonly restriction but can
+never clear an inherited restriction. The resolved base relation is not part of
+AkuId, Soul, Heart, Dispatch, or any public call input, and later file edits
+affect only future loads.
+
+An explicit base is never silently ignored. Missing or malformed bases,
+invalid inherited data, repeated or cyclic chains, and a final snapshot without
+a provider refuse before allocation. Refusals identify the reference chain
+and the paths searched.
+
 All worktrees of one repository share one Akuma World, fleet, Alias authority,
 and Heart storage. Soul cwd is execution input, not World identity. Akuma state
 lives in the World rather than a Contract worktree, so ordinary worktree cleanup

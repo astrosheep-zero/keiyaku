@@ -15,6 +15,18 @@ import {
 import { resolveProviderExecution } from "./providers/index.js";
 import { effectiveAllowedActions, type AllowedActions } from "./allowed.js";
 
+type LocalArchetype = Readonly<{
+  name: string;
+  path: string;
+  base?: string;
+  provider?: string;
+  description?: string;
+  options: ProviderOptions;
+  readonly?: true;
+  allowed?: AllowedActions;
+  allowedPresent: boolean;
+}>;
+
 type DecodedArchetype = Readonly<{
   name: string;
   path: string;
@@ -97,8 +109,36 @@ async function archetypePaths(
   return [...selected.values()].sort((left, right) => Buffer.compare(Buffer.from(left.name), Buffer.from(right.name)));
 }
 
-function archetypeCandidatePaths(name: string, input: ArchetypeCoordinates): readonly string[] {
-  return [...new Set(archetypeDirectories(input).map((directory) => join(directory, `${name}.md`)))];
+type ArchetypeSource = "project" | "home";
+type ArchetypeLookup = Readonly<{ path: string; source: ArchetypeSource }>;
+
+function sourceLookups(name: string, input: ArchetypeCoordinates, source: ArchetypeSource): readonly ArchetypeLookup[] {
+  if (source === "home" || input.project === undefined) {
+    return [{ path: join(homeArchetypeDirectory(input.home), `${name}.md`), source: "home" }];
+  }
+  return [
+    { path: join(projectArchetypeDirectory(input.project)!, `${name}.md`), source: "project" },
+    { path: join(homeArchetypeDirectory(input.home), `${name}.md`), source: "home" },
+  ];
+}
+
+function rootLookups(name: string, input: ArchetypeCoordinates): readonly ArchetypeLookup[] {
+  return input.project === undefined ? sourceLookups(name, input, "home") : sourceLookups(name, input, "project");
+}
+
+function chainText(chain: readonly string[]): string {
+  return chain.join(" -> ");
+}
+
+function archetypeError(
+  name: string,
+  searched: readonly string[],
+  reason: string,
+  chain: readonly string[],
+  guidance?: string,
+): AkumaArchetypeError {
+  const withChain = chain.length === 0 ? reason : `${reason} (base chain: ${chainText(chain)})`;
+  return new AkumaArchetypeError(name, searched, withChain, guidance);
 }
 
 export async function listArchetypes(input: ArchetypeCoordinates = {}): Promise<readonly string[]> {
@@ -131,7 +171,7 @@ function archetypeReadonly(values: Readonly<Record<string, unknown>>): true | un
   return true;
 }
 
-function decodeArchetype(name: string, path: string, markdown: string): DecodedArchetype {
+function decodeArchetype(name: string, path: string, markdown: string): LocalArchetype {
   const lines = markdown.split(/\r?\n/u);
   if (lines[0]?.trim() !== "---") throw new TypeError("Akuma file must begin with YAML frontmatter");
   const closing = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
@@ -143,14 +183,17 @@ function decodeArchetype(name: string, path: string, markdown: string): DecodedA
     throw new TypeError("Akuma frontmatter must be one mapping");
   }
   const values = decoded as Readonly<Record<string, unknown>>;
-  const provider = archetypeField(values, "provider", true)!;
+  const provider = archetypeField(values, "provider");
+  const baseValue = archetypeField(values, "base");
+  const base = baseValue === undefined ? undefined : archetypeName(baseValue);
   if ("access" in values) throw new TypeError("Akuma access is not supported; use readonly: true");
   const model = archetypeField(values, "model");
   const effort = archetypeField(values, "effort");
   const readonly = archetypeReadonly(values);
   const network = archetypeEnum(values, "network", ["disabled", "enabled"] as const);
   const description = archetypeField(values, "description");
-  const allowed = effectiveAllowedActions(values.allowed);
+  const allowedPresent = "allowed" in values;
+  const allowed = allowedPresent ? effectiveAllowedActions(values.allowed) : undefined;
   const systemPromptMode = archetypeEnum(values, "systemPromptMode", ["append", "replace"] as const);
   const systemPrompt = lines.slice(closing + 1).join("\n");
   if (systemPromptMode !== undefined && systemPrompt.length === 0) {
@@ -159,7 +202,8 @@ function decodeArchetype(name: string, path: string, markdown: string): DecodedA
   return Object.freeze({
     name,
     path,
-    provider,
+    ...(base === undefined ? {} : { base }),
+    ...(provider === undefined ? {} : { provider }),
     ...(description === undefined ? {} : { description }),
     options: decodeProviderOptions({
       ...(model === undefined ? {} : { model }),
@@ -173,8 +217,95 @@ function decodeArchetype(name: string, path: string, markdown: string): DecodedA
           }),
     }),
     ...(readonly === undefined ? {} : { readonly }),
+    ...(allowed === undefined ? {} : { allowed }),
+    allowedPresent,
+  });
+}
+
+function mergeArchetype(base: DecodedArchetype | undefined, local: LocalArchetype): DecodedArchetype {
+  const provider = local.provider ?? base?.provider;
+  if (provider === undefined) throw new TypeError("Akuma provider must be a nonblank string");
+  const options = decodeProviderOptions({ ...(base?.options ?? {}), ...local.options });
+  const allowed = local.allowedPresent ? local.allowed! : (base?.allowed ?? effectiveAllowedActions(undefined));
+  return Object.freeze({
+    name: local.name,
+    path: local.path,
+    provider,
+    ...(local.description === undefined
+      ? base?.description === undefined
+        ? {}
+        : { description: base.description }
+      : { description: local.description }),
+    options,
+    ...(local.readonly === true || base?.readonly === true ? { readonly: true as const } : {}),
     allowed,
   });
+}
+
+async function resolveArchetype(
+  name: string,
+  input: ArchetypeCoordinates,
+  source: ArchetypeSource | undefined,
+  chain: readonly string[] = [],
+): Promise<DecodedArchetype> {
+  if (chain.includes(name)) {
+    const lookups = source === undefined ? rootLookups(name, input) : sourceLookups(name, input, source);
+    throw archetypeError(
+      name,
+      lookups.map(({ path }) => path),
+      "has a cyclic base reference",
+      [...chain, name],
+    );
+  }
+  const lookups = source === undefined ? rootLookups(name, input) : sourceLookups(name, input, source);
+  const searched = lookups.map(({ path }) => path);
+  for (const lookup of lookups) {
+    let markdown: string;
+    try {
+      markdown = await readFile(lookup.path, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw archetypeError(
+        name,
+        [lookup.path],
+        `could not be read: ${error instanceof Error ? error.message : String(error)}`,
+        chain,
+      );
+    }
+    let local: LocalArchetype;
+    try {
+      local = decodeArchetype(name, lookup.path, markdown);
+    } catch (error) {
+      throw archetypeError(
+        name,
+        [lookup.path],
+        `is invalid: ${error instanceof Error ? error.message : String(error)}`,
+        chain,
+      );
+    }
+    let inherited: DecodedArchetype | undefined;
+    if (local.base !== undefined) {
+      inherited = await resolveArchetype(local.base, input, lookup.source, [...chain, name]);
+    }
+    try {
+      return mergeArchetype(inherited, local);
+    } catch (error) {
+      throw archetypeError(
+        name,
+        [lookup.path],
+        `is invalid: ${error instanceof Error ? error.message : String(error)}`,
+        chain,
+      );
+    }
+  }
+  const missingChain = chain.length === 0 ? chain : [...chain, name];
+  throw archetypeError(
+    name,
+    searched,
+    "was not found",
+    missingChain,
+    chain.length === 0 ? "use `keiyaku ls aku/` to list available Akuma" : undefined,
+  );
 }
 
 export async function listArchetypeDefinitions(
@@ -185,13 +316,14 @@ export async function listArchetypeDefinitions(
   const settled = await Promise.allSettled(
     (await archetypePaths(input)).map(async ({ name, path }) => {
       try {
-        const definition = decodeArchetype(name, path, await readFile(path, "utf8"));
+        const definition = await resolveArchetype(name, input, undefined);
         return Object.freeze({
           name: definition.name,
           ...(definition.options.model === undefined ? {} : { model: definition.options.model }),
           ...(definition.description === undefined ? {} : { description: definition.description }),
         });
       } catch (error) {
+        if (error instanceof AkumaArchetypeError) throw error;
         throw new AkumaArchetypeError(
           name,
           [path],
@@ -300,31 +432,6 @@ export async function loadArchetype(
   input: Readonly<{ name: string; project?: string; home?: string; settings: Settings; readonly?: true }>,
 ): Promise<AdmittedArchetype> {
   const name = archetypeName(input.name);
-  const candidates = archetypeCandidatePaths(name, input);
-  const missing = () =>
-    new AkumaArchetypeError(name, candidates, "was not found", "use `keiyaku ls aku/` to list available Akuma");
-  for (const path of candidates) {
-    let markdown: string;
-    try {
-      markdown = await readFile(path, "utf8");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
-      throw new AkumaArchetypeError(
-        name,
-        [path],
-        `could not be read: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-    try {
-      return await admitArchetype(decodeArchetype(name, path, markdown), input.settings, input.readonly);
-    } catch (error) {
-      if (error instanceof AkumaArchetypeError) throw error;
-      throw new AkumaArchetypeError(
-        name,
-        [path],
-        `is invalid: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  }
-  throw missing();
+  const definition = await resolveArchetype(name, input, undefined);
+  return await admitArchetype(definition, input.settings, input.readonly);
 }
