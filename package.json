@@ -46,6 +46,7 @@
     "review:model-impact": "node --import tsx scripts/model-change-impact.ts",
     "format": "prettier --write --print-width 120 \"src/**/*.ts\" \"scripts/**/*.ts\"",
     "format:check": "prettier --check --print-width 120 \"src/**/*.ts\" \"scripts/**/*.ts\"",
+    "lint": "eslint src scripts tests",
     "test": "node scripts/test-entry.mjs",
     "test:all": "npm run format:check && npm run build && npm run test:architecture && npm run test:maintainability && npm run test:reachability && npm run test:parallel",
     "test:architecture": "node --import tsx scripts/check-architecture.ts",
@@ -57,7 +58,9 @@
     "test:focused": "node scripts/run-tests.mjs",
     "test:focused:serial": "node scripts/run-tests.mjs --test-concurrency=1",
     "test:reachability": "knip --include files,dependencies,unlisted,unresolved,duplicates",
-    "test:typecheck": "tsc -p tsconfig.json --noEmit"
+    "test:typecheck": "tsc -p tsconfig.json --noEmit && npm run test:typecheck:scoped-tests && npm run test:typecheck:scripts",
+    "test:typecheck:scoped-tests": "tsc -p tsconfig.tests.json",
+    "test:typecheck:scripts": "tsc -p tsconfig.scripts.json"
   },
   "devDependencies": {
     "@types/cross-spawn": "^6.0.6",

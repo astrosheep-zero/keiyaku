@@ -137,8 +137,8 @@ test("execution returns an unsatisfied verdict, unknown-exit, and spawn-error wi
     const unknownExit = await executeVerification(input(root, [declaration("kill -TERM $$")]));
     assert.deepEqual(unknownExit, { outcome: { kind: "unknown-exit" } });
 
-    const missingExecutor = process.platform === "win32" ? "zsh" : "pwsh";
-    const spawnError = await executeVerification(input(root, [declaration("true", missingExecutor as "zsh" | "pwsh")]));
+    const missingExecutor = "keiyaku-v4-no-such-executable" as VerificationDeclaration["executor"];
+    const spawnError = await executeVerification(input(root, [declaration("true", missingExecutor)]));
     assert.equal(spawnError.outcome.kind, "spawn-error");
     if (spawnError.outcome.kind !== "spawn-error") return;
     assert.match(spawnError.outcome.diagnostic, new RegExp(`spawn ${missingExecutor} ENOENT`));
@@ -169,10 +169,10 @@ test("producer preserves ordered terminal diagnostics within one 32 KiB summary"
   });
 });
 
-test("an unavailable PowerShell executor returns a spawn error", async () => {
+test("a deterministic missing executor returns a spawn error", async () => {
   await inTemporaryDirectory(async (root) => {
-    const missingExecutor = process.platform === "win32" ? "zsh" : "pwsh";
-    const outcome = await executeVerification(input(root, [declaration("true", missingExecutor as "zsh" | "pwsh")]));
+    const missingExecutor = "keiyaku-v4-no-such-executable" as VerificationDeclaration["executor"];
+    const outcome = await executeVerification(input(root, [declaration("true", missingExecutor)]));
     assert.equal(outcome.outcome.kind, "spawn-error");
   });
 });

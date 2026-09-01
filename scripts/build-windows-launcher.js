@@ -15,6 +15,7 @@ const zigExecutable = process.env.KEIYAKU_ZIG ?? "zig";
 const minimumZigVersion = [0, 14, 1];
 const minimumZigVersionText = minimumZigVersion.join(".");
 
+/** @param {unknown} error */
 function boundedCause(error) {
   const message = error instanceof Error ? error.message : String(error);
   const stderr =
@@ -25,6 +26,7 @@ function boundedCause(error) {
   return detail.replace(/\s+/gu, " ").trim().slice(0, 512);
 }
 
+/** @param {string} reportedVersion */
 function supportsWindowsLauncher(reportedVersion) {
   const match = /^(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.+-]+)?$/u.exec(reportedVersion);
   if (match === null) return false;

@@ -19,4 +19,14 @@ export default [
       "max-params": ["error", 5],
     },
   },
+  {
+    files: ["scripts/**/*.{js,mjs}", "tests/**/*.{ts,js,mjs}"],
+    languageOptions: {
+      parser,
+      parserOptions: {
+        ecmaVersion: "latest",
+        sourceType: "module",
+      },
+    },
+  },
 ];

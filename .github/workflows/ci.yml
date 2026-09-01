@@ -57,14 +57,45 @@ jobs:
       - name: Run packaged CLI end-to-end test
         run: npm run test:e2e
 
-      - name: Typecheck
+      - name: Typecheck source, scripts, and scoped semantic tests
         run: npm run test:typecheck
+
+      - name: Lint source, scripts, and tests
+        run: npm run lint
 
       - name: Build
         run: npm run build
 
       - name: Check patch whitespace
         run: git diff --check
+
+  minimum-node:
+    name: ubuntu-24.04 / minimum Node.js verification
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.windows_test_files == '' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22.19.0
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --prefer-offline
+
+      - name: Run repository verification
+        run: npm test -- --runInBand
+
+      - name: Typecheck source, scripts, and scoped semantic tests
+        run: npm run test:typecheck
+
+      - name: Lint source, scripts, and tests
+        run: npm run lint
 
   windows-native:
     name: windows-2022 / native behavioral suite
@@ -234,7 +265,7 @@ jobs:
       - name: Run packaged CLI end-to-end test
         run: npm run test:e2e
 
-      - name: Typecheck
+      - name: Typecheck source, scripts, and scoped semantic tests
         run: npm run test:typecheck
 
   macos-e2e:
@@ -267,5 +298,5 @@ jobs:
       - name: Run filesystem coordinate tests
         run: npm run test:focused -- tests/path-coordinates.test.ts
 
-      - name: Typecheck
+      - name: Typecheck source, scripts, and scoped semantic tests
         run: npm run test:typecheck

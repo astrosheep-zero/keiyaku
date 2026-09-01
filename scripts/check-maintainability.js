@@ -9,6 +9,10 @@ const MARKDOWN_EXCLUDED_DIRECTORIES = new Set([".git", ".keiyaku", ".square", "b
 const LINE_LIMIT = 500;
 const MAX_LINES_RULE = /(?:^|[\s,])max-lines(?=$|[\s,])/u;
 
+/** @typedef {{absolute: string, file: string}} FileEntry */
+/** @typedef {{file?: unknown, ceiling?: unknown, reason?: unknown}} FileLineException */
+/** @typedef {{kind: string, file?: string | undefined, index: number}} ExceptionFinding */
+
 export const FILE_LINE_EXCEPTIONS = Object.freeze([
   {
     file: "src/akuma/body.ts",
@@ -57,6 +61,7 @@ export const FILE_LINE_EXCEPTIONS = Object.freeze([
   },
 ]);
 
+/** @param {string} directory @param {string} relative @param {(name: string) => boolean} matches @param {Set<string>} [excluded] @returns {FileEntry[]} */
 function files(directory, relative, matches, excluded = new Set()) {
   if (!existsSync(directory)) return [];
   const found = [];
@@ -76,6 +81,7 @@ function files(directory, relative, matches, excluded = new Set()) {
   return found;
 }
 
+/** @param {string} rootDirectory @returns {FileEntry[]} */
 const productionFiles = (rootDirectory) =>
   ["src", "scripts"]
     .flatMap((directory) =>
@@ -83,9 +89,11 @@ const productionFiles = (rootDirectory) =>
     )
     .sort((left, right) => left.file.localeCompare(right.file));
 
+/** @param {string} source */
 export const physicalLineCount = (source) =>
   source.length === 0 ? 0 : source.split(/\r\n?|\n/u).length - Number(/(?:\r\n?|\n)$/u.test(source));
 
+/** @param {ReadonlyArray<FileLineException | null>} exceptions @param {ReadonlyArray<FileEntry>} knownFiles @returns {ExceptionFinding[]} */
 export function validateFileLineExceptions(exceptions, knownFiles) {
   const known = new Set(knownFiles.map(({ file }) => file));
   const seen = new Set();
@@ -105,21 +113,26 @@ export function validateFileLineExceptions(exceptions, knownFiles) {
           ? "duplicate"
           : !known.has(file)
             ? "unknown"
-            : ceiling < LINE_LIMIT
+            : typeof ceiling === "number" && ceiling < LINE_LIMIT
               ? "below-limit"
               : reason.trim().length === 0
                 ? "malformed"
                 : null;
     if (valid) seen.add(file);
-    return kind === null ? [] : [{ kind, file: kind === "malformed" ? undefined : file, index }];
+    return kind === null
+      ? []
+      : [{ kind, file: kind === "malformed" ? undefined : /** @type {string} */ (file), index }];
   });
 }
 
+/** @param {string} [rootDirectory] @param {ReadonlyArray<FileLineException | null>} [exceptions] */
 export function productionFileLineFindings(rootDirectory = root, exceptions = FILE_LINE_EXCEPTIONS) {
   const sourceFiles = productionFiles(rootDirectory);
   const exceptionFindings = validateFileLineExceptions(exceptions, sourceFiles);
   const accepted =
-    exceptionFindings.length === 0 ? new Map(exceptions.map((exception) => [exception.file, exception])) : new Map();
+    exceptionFindings.length === 0
+      ? new Map(exceptions.flatMap((exception) => (exception === null ? [] : [[exception.file, exception]])))
+      : new Map();
   const fileFindings = [];
   const disableFindings = [];
   for (const { absolute, file } of sourceFiles) {
@@ -139,16 +152,20 @@ export function productionFileLineFindings(rootDirectory = root, exceptions = FI
   return { disableFindings, exceptionFindings, fileFindings };
 }
 
+/** @template {Record<string, unknown>} T @param {string} label @param {ReadonlyArray<T>} findings @param {(finding: T) => string} render */
 function reportFindings(label, findings, render) {
   if (findings.length === 0) return;
   console.log(label);
   for (const finding of findings) console.log(`- ${render(finding)}`);
 }
 
+/** @param {string} source */
 export const markdownCharacterCount = (source) => [...source.replace(/\r\n?|\n/gu, "\n")].length;
+/** @param {number} characters @returns {"error" | "warning" | null} */
 export const markdownCharacterSeverity = (characters) =>
   characters > 30_000 ? "error" : characters > 20_000 ? "warning" : null;
 
+/** @param {string} [rootDirectory] */
 export function markdownCharacterFindings(rootDirectory = root) {
   return files(rootDirectory, "", (name) => name.endsWith(".md"), MARKDOWN_EXCLUDED_DIRECTORIES).flatMap(
     ({ absolute, file }) => {
@@ -162,7 +179,7 @@ export function markdownCharacterFindings(rootDirectory = root) {
 async function run() {
   const eslint = new ESLint({ cwd: root });
   const results = await eslint.lintFiles(["src", "scripts"]);
-  const output = (await eslint.loadFormatter("stylish")).format(results);
+  const output = await (await eslint.loadFormatter("stylish")).format(results);
   if (output.length > 0) console.log(output);
   const checks = productionFileLineFindings();
   reportFindings(

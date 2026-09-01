@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
+/** @param {string} cwd */
 async function installDependencies(cwd) {
   const child = spawn("npm", ["ci", "--ignore-scripts", "--prefer-offline"], { cwd, stdio: "inherit" });
   const code = await new Promise((resolveExit, reject) => {
@@ -17,6 +18,7 @@ async function installDependencies(cwd) {
   if (code !== 0) throw new Error(`npm ci exited with code ${code}`);
 }
 
+/** @param {string} output */
 function firstWorktreeFromPorcelain(output) {
   const worktree = output.split("\0")[0];
   if (worktree === undefined || !worktree.startsWith("worktree ")) {
@@ -27,6 +29,7 @@ function firstWorktreeFromPorcelain(output) {
   return resolve(path);
 }
 
+/** @param {string} path */
 async function insideWorkTree(path) {
   try {
     const { stdout } = await execFileAsync("git", ["rev-parse", "--is-inside-work-tree"], { cwd: path });
@@ -36,6 +39,7 @@ async function insideWorkTree(path) {
   }
 }
 
+/** @param {string} cwd */
 function primaryFromManagedCwd(cwd) {
   const parent = dirname(cwd);
   return basename(parent) === "wt" && basename(dirname(parent)) === ".keiyaku" ? dirname(dirname(parent)) : undefined;
@@ -65,7 +69,7 @@ if (!isManagedWorktree) {
       throw new Error(`${worktreeDependencies} already exists and is not the shared dependency link`);
     }
   } catch (error) {
-    if (error?.code !== "ENOENT") throw error;
+    if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error;
     await symlink(relative(cwd, sharedDependencies), worktreeDependencies, "dir");
   }
 }

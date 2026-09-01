@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 const root = resolve(import.meta.dirname, "..");
 const artifact = resolve(root, "build/src/runtime/proc/windows-launch.exe");
 
+/** @param {string} path */
 function assertWindowsArtifact(path) {
   if (!existsSync(path)) throw new Error(`Windows launcher artifact is missing: ${path}`);
   const bytes = readFileSync(path);
@@ -18,6 +19,7 @@ function assertWindowsArtifact(path) {
   if (bytes.readUInt16LE(optionalHeader + 68) !== 2) throw new Error("Windows launcher is not a GUI-subsystem image");
 }
 
+/** @param {string} path */
 function assertArchive(path) {
   const listing = execFileSync("tar", ["-tzf", path], { cwd: root, encoding: "utf8" });
   if (!listing.split(/\r?\n/u).includes("package/build/src/runtime/proc/windows-launch.exe")) {

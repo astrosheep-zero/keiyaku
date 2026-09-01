@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": [
+    "tests/actor.test.ts",
+    "tests/akuma-identity.test.ts",
+    "tests/akuma-physical.test.ts"
+  ],
+  "exclude": []
+}

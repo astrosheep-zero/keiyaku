@@ -62,7 +62,7 @@ export type ArchitecturePolicy = Readonly<{
   runtimeGraphRoots: readonly string[];
 }>;
 
-type Capability =
+export type Capability =
   | "dynamic-import-nonliteral"
   | "eval"
   | "function-constructor"
@@ -78,12 +78,12 @@ type Capability =
   | "require"
   | "type-error-construction";
 
-type ImportedSymbols = Readonly<{
+export type ImportedSymbols = Readonly<{
   runtime: readonly string[];
   types: readonly string[];
 }>;
 
-type ImportReference = Readonly<{
+export type ImportReference = Readonly<{
   from: string;
   specifier: string;
   target: string | null;
@@ -93,7 +93,7 @@ type ImportReference = Readonly<{
   column: number;
 }>;
 
-type Declaration = Readonly<{
+export type Declaration = Readonly<{
   name: string;
   exported: boolean;
   runtime: boolean;
@@ -103,13 +103,13 @@ type Declaration = Readonly<{
   column: number;
 }>;
 
-type CapabilityUse = Readonly<{
+export type CapabilityUse = Readonly<{
   capability: Capability;
   line: number;
   column: number;
 }>;
 
-type ParsedSource = Readonly<{
+export type ParsedSource = Readonly<{
   path: string;
   sourceFile: ts.SourceFile;
   references: readonly ImportReference[];
