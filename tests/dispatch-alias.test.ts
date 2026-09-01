@@ -15,6 +15,20 @@ import { parseAkumaAlias } from "../src/identity/selector.js";
 import type { WorldRoot } from "../src/world.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
 
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value?: T | PromiseLike<T>) => void;
+  reject: (reason?: unknown) => void;
+} {
+  let resolve!: (value?: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = (value) => resolvePromise(value as T | PromiseLike<T>);
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 test("Dispatch publishes one immutable association and preserves its first timestamp", async () => {
   const raw = makeGitRepository();
   const repository = await repositoryAt(raw.path);
@@ -53,7 +67,7 @@ test("concurrent distinct Dispatch publications wait for one repository seat", a
     parseAkuId("aku/reviewer/33333333").id,
   ];
   const held = await acquireSqliteTransactionLock({ path: privateStatePublicationSeatPath(repository), mode: "immediate" });
-  const arrivals = ids.map(() => Promise.withResolvers<void>());
+  const arrivals = ids.map(() => deferred<void>());
   const pending = ids.map((akuId, index) =>
     publishDispatch({
       repository: { ...repository, onPrivateStateSeatContention: arrivals[index]!.resolve },
@@ -93,7 +107,7 @@ test("Dispatch publication seats are exact to one Git common directory", async (
       path: privateStatePublicationSeatPath(primary),
       mode: "immediate",
     });
-    const arrival = Promise.withResolvers<void>();
+    const arrival = deferred<void>();
     const blocked = publishDispatch({
       repository: { ...worktree, onPrivateStateSeatContention: arrival.resolve },
       akuId: parseAkuId("aku/worker/44444444").id,
