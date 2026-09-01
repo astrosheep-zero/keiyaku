@@ -8,7 +8,6 @@ import {
   readFileSync,
   renameSync,
   rmSync,
-  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -33,9 +32,8 @@ import { contractId } from "../src/core/facts/types.js";
 import { worktreePath } from "../src/git/workspace.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { resolveContextualContract } from "../src/cli/selectors.js";
-import { invoke } from "../src/cli/invoke.js";
-import { parseArgv } from "../src/cli/parse.js";
-import { worldContractStates } from "../src/protocol/reconcile.js";
+import { invoke as invokeRaw, type InvocationResult } from "../src/cli/invoke.js";
+import { parseArgv as parseInvocation } from "../src/cli/parse.js";
 import { readContractObservationAt } from "../src/protocol/read/status.js";
 import { Keiyaku, Repo, type ContractBoard, type ContractId } from "../src/index.js";
 import { Tasks } from "../src/task/index.js";
@@ -44,6 +42,19 @@ import { cachedRepositoryAt, makeGitRepository } from "./support/git.js";
 
 const repositoryAt = cachedRepositoryAt;
 import * as workspace from "../src/git/workspace.js";
+
+function parseArgv(argv: readonly string[]) {
+  const parsed = parseInvocation(argv);
+  if ("help" in parsed) throw new Error("expected executable command");
+  return parsed;
+}
+
+async function invoke(
+  invocation: Parameters<typeof invokeRaw>[0],
+  runtime?: Parameters<typeof invokeRaw>[1],
+) {
+  return (await invokeRaw(invocation, runtime)) as InvocationResult;
+}
 
 const EXAMPLE = contractId("kei/example");
 const OTHER = contractId("kei/other");
@@ -443,12 +454,14 @@ test("contextual selection matches the appointed Place path", () => {
   const board = {
     root: "/repo",
     state: null,
+    observedAt: "2026-08-12T00:00:00.000Z",
     rows: [
       {
         id,
         title: "Active",
         phase: "bound",
         phaseAt: "2026-08-12T00:00:00.000Z",
+        lastJournalAt: "2026-08-12T00:00:00.000Z",
         disposition: "active",
         workspace: "worktree",
         worktreePath: path,
@@ -456,12 +469,15 @@ test("contextual selection matches the appointed Place path", () => {
           kind: "clean",
           location: { kind: "worktree", path },
           counts: { staged: 0, unstaged: 0, untracked: 0, submodules: 0 },
+          merge: null,
         },
         target: null,
         targetLag: { kind: "none" },
         delivery: null,
         targetObservation: null,
         gates: { reports: [], satisfied: true },
+        after: [],
+        dependents: [],
       },
     ],
   } satisfies ContractBoard;
@@ -495,13 +511,13 @@ test("terminal cleanup releases the Place only after hooks and removal succeed",
     hooks,
   });
   const git = await repositoryAt(repository.path);
-  const appointment = await readManagedWorktreeAppointment(git, bound.keiyaku.id);
+  const appointment = await readManagedWorktreeAppointment(git, (await bound.keiyaku.state()).id);
   assert.equal(appointment.kind, "appointed");
   if (appointment.kind !== "appointed") throw new Error("expected appointment");
   const failed = await bound.keiyaku.abandon({ hooks });
   assert.ok(failed.lags.length > 0);
   assert.equal(existsSync(appointment.path), true);
-  assert.deepEqual(await readManagedWorktreeAppointment(git, bound.keiyaku.id), appointment);
+  assert.deepEqual(await readManagedWorktreeAppointment(git, (await bound.keiyaku.state()).id), appointment);
   const other = await appointManagedWorktrees(git, [OTHER]);
   assert.equal(
     other.byContract.get(OTHER)?.place,
@@ -511,7 +527,7 @@ test("terminal cleanup releases the Place only after hooks and removal succeed",
   const released = await bound.keiyaku.reconcile({ hooks, retryHooks: true });
   assert.deepEqual(released.lag, []);
   assert.equal(existsSync(appointment.path), false);
-  assert.deepEqual(await readManagedWorktreeAppointment(git, bound.keiyaku.id), { kind: "unappointed" });
+  assert.deepEqual(await readManagedWorktreeAppointment(git, (await bound.keiyaku.state()).id), { kind: "unappointed" });
 });
 
 test("corrupt Place register fails mutation and isolates the Contract status section", async () => {
@@ -567,7 +583,7 @@ test("appoint write failure causes no Git ref or worktree effect", async () => {
     assert.equal(repository.run(["worktree", "list", "--porcelain"]), worktrees);
     assert.doesNotMatch(repository.run(["show-ref"]), /refs\/keiyaku\/delivery\//u);
     rmSync(target, { recursive: true });
-    assert.deepEqual(await readManagedWorktreeAppointment(git, bound.keiyaku.id), { kind: "unappointed" });
+    assert.deepEqual(await readManagedWorktreeAppointment(git, (await bound.keiyaku.state()).id), { kind: "unappointed" });
   } finally {
     rmSync(target, { recursive: true, force: true });
   }
@@ -582,7 +598,7 @@ test("release write failure keeps the appointment after physical removal", async
     hooks: { create: [], destroy: [] },
   });
   const git = await repositoryAt(repository.path);
-  const appointment = await readManagedWorktreeAppointment(git, bound.keiyaku.id);
+  const appointment = await readManagedWorktreeAppointment(git, (await bound.keiyaku.state()).id);
   assert.equal(appointment.kind, "appointed");
   if (appointment.kind !== "appointed") throw new Error("expected appointment");
   const bytes = readFileSync(placeRegisterPath(git), "utf8");
@@ -597,13 +613,13 @@ test("release write failure keeps the appointment after physical removal", async
   assert.equal(existsSync(appointment.path), false);
   assert.ok(abandoned.lags.some((lag) => lag.kind === "contract-file-failed"));
   assert.equal(readFileSync(placeRegisterPath(git), "utf8"), bytes);
-  assert.deepEqual(await readManagedWorktreeAppointment(git, bound.keiyaku.id), appointment);
+  assert.deepEqual(await readManagedWorktreeAppointment(git, (await bound.keiyaku.state()).id), appointment);
   const repaired = await bound.keiyaku.reconcile();
   assert.deepEqual(repaired.lag, []);
-  assert.deepEqual(await readManagedWorktreeAppointment(git, bound.keiyaku.id), { kind: "unappointed" });
+  assert.deepEqual(await readManagedWorktreeAppointment(git, (await bound.keiyaku.state()).id), { kind: "unappointed" });
   const again = await bound.keiyaku.reconcile();
   assert.deepEqual(again.lag, []);
-  assert.deepEqual(await readManagedWorktreeAppointment(git, bound.keiyaku.id), { kind: "unappointed" });
+  assert.deepEqual(await readManagedWorktreeAppointment(git, (await bound.keiyaku.state()).id), { kind: "unappointed" });
 });
 
 test("a clean terminal stays unappointed across per-Contract and repo reconcile", async () => {
@@ -617,10 +633,10 @@ test("a clean terminal stays unappointed across per-Contract and repo reconcile"
   const git = await repositoryAt(repository.path);
   const abandoned = await bound.keiyaku.abandon();
   assert.deepEqual(abandoned.lags, []);
-  assert.deepEqual(await readManagedWorktreeAppointment(git, bound.keiyaku.id), { kind: "unappointed" });
+  assert.deepEqual(await readManagedWorktreeAppointment(git, (await bound.keiyaku.state()).id), { kind: "unappointed" });
   const once = await bound.keiyaku.reconcile();
   assert.deepEqual(once.lag, []);
-  assert.deepEqual(await readManagedWorktreeAppointment(git, bound.keiyaku.id), { kind: "unappointed" });
+  assert.deepEqual(await readManagedWorktreeAppointment(git, (await bound.keiyaku.state()).id), { kind: "unappointed" });
   const world = await (await Repo.at({ path: repository.path })).reconcile();
   assert.equal(world.kind, "completed");
   if (world.kind !== "completed") throw new Error("expected completed repo reconcile");
@@ -628,9 +644,9 @@ test("a clean terminal stays unappointed across per-Contract and repo reconcile"
     world.contracts.every((contract) => contract.report.lag.length === 0),
     true,
   );
-  assert.deepEqual(await readManagedWorktreeAppointment(git, bound.keiyaku.id), { kind: "unappointed" });
-  const observed = await withGitDecodeChannel(git, (channel) =>
-    readContractObservationAt(git, channel, bound.keiyaku.id),
+  assert.deepEqual(await readManagedWorktreeAppointment(git, (await bound.keiyaku.state()).id), { kind: "unappointed" });
+  const observed = await withGitDecodeChannel(git, async (channel) =>
+    readContractObservationAt(git, channel, (await bound.keiyaku.state()).id),
   );
   assert.equal(observed.kind, "present");
   if (observed.kind !== "present") throw new Error("expected present observation");
@@ -647,7 +663,7 @@ test("an unregistered appointed path that still exists keeps the appointment", a
     hooks: { create: [], destroy: [] },
   });
   const git = await repositoryAt(repository.path);
-  const appointment = await readManagedWorktreeAppointment(git, bound.keiyaku.id);
+  const appointment = await readManagedWorktreeAppointment(git, (await bound.keiyaku.state()).id);
   assert.equal(appointment.kind, "appointed");
   if (appointment.kind !== "appointed") throw new Error("expected appointment");
   repository.run(["worktree", "remove", "--force", appointment.path]);
@@ -656,7 +672,7 @@ test("an unregistered appointed path that still exists keeps the appointment", a
   const abandoned = await bound.keiyaku.abandon();
   assert.ok(abandoned.lags.some((lag) => lag.kind === "worktree-retained"));
   assert.equal(readFileSync(join(appointment.path, "hidden.txt"), "utf8"), "hidden\n");
-  assert.deepEqual(await readManagedWorktreeAppointment(git, bound.keiyaku.id), appointment);
+  assert.deepEqual(await readManagedWorktreeAppointment(git, (await bound.keiyaku.state()).id), appointment);
 });
 
 test("Contract reconcile leaves a refused foreign worktree untouched until recovery realizes it", async () => {
@@ -668,7 +684,7 @@ test("Contract reconcile leaves a refused foreign worktree untouched until recov
     hooks: { create: [], destroy: [] },
   });
   const git = await repositoryAt(repository.path);
-  const appointment = await readManagedWorktreeAppointment(git, bound.keiyaku.id);
+  const appointment = await readManagedWorktreeAppointment(git, (await bound.keiyaku.state()).id);
   assert.equal(appointment.kind, "appointed");
   if (appointment.kind !== "appointed") throw new Error("expected appointment");
   repository.run(["worktree", "remove", "--force", appointment.path]);
@@ -688,7 +704,7 @@ test("Contract reconcile leaves a refused foreign worktree untouched until recov
   renameSync(appointment.path, foreignPath);
   const recovered = await bound.keiyaku.reconcile();
   assert.deepEqual(recovered.lag, []);
-  assert.match(readFileSync(guidance, "utf8"), new RegExp(bound.keiyaku.id));
+  assert.match(readFileSync(guidance, "utf8"), new RegExp((await bound.keiyaku.state()).id));
   assert.equal(readFileSync(join(foreignPath, ".keiyaku", "KEIYAKU.md"), "utf8"), foreignBytes);
   assert.equal(readFileSync(join(foreignPath, "foreign.txt"), "utf8"), "foreign bytes\n");
 });
@@ -702,12 +718,12 @@ test("an already-absent appointed path may release without a removal effect", as
     hooks: { create: [], destroy: [] },
   });
   const git = await repositoryAt(repository.path);
-  const appointment = await readManagedWorktreeAppointment(git, bound.keiyaku.id);
+  const appointment = await readManagedWorktreeAppointment(git, (await bound.keiyaku.state()).id);
   assert.equal(appointment.kind, "appointed");
   if (appointment.kind !== "appointed") throw new Error("expected appointment");
   repository.run(["worktree", "remove", "--force", appointment.path]);
   const abandoned = await bound.keiyaku.abandon();
   assert.deepEqual(abandoned.lags, []);
   assert.equal(existsSync(appointment.path), false);
-  assert.deepEqual(await readManagedWorktreeAppointment(git, bound.keiyaku.id), { kind: "unappointed" });
+  assert.deepEqual(await readManagedWorktreeAppointment(git, (await bound.keiyaku.state()).id), { kind: "unappointed" });
 });

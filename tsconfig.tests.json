@@ -18,7 +18,21 @@
     "tests/cli-invoke.test.ts",
     "tests/library-contract-operations.test.ts",
     "tests/public-library.test.ts",
-    "tests/facade-contract.test.ts"
+    "tests/facade-contract.test.ts",
+    "tests/cli-verification.test.ts",
+    "tests/git-delivery.test.ts",
+    "tests/git-reconciliation.test.ts",
+    "tests/library-audit.test.ts",
+    "tests/library-concurrency-placement.test.ts",
+    "tests/library-nuke.test.ts",
+    "tests/library-verification.test.ts",
+    "tests/protocol-bind-observe.test.ts",
+    "tests/settlement.test.ts",
+    "tests/target-checkout-reconcile.test.ts",
+    "tests/task-operations.test.ts",
+    "tests/verification-producer.test.ts",
+    "tests/worktree-hooks.test.ts",
+    "tests/worktree-places.test.ts"
   ],
   "exclude": []
 }

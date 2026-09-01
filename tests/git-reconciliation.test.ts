@@ -47,7 +47,8 @@ async function buildTenderedReviewGatedTargetTemplate(): Promise<TenderedReviewG
     gates: ["reviewed"],
   });
   const contract = bound.keiyaku;
-  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), contract.id);
+  const contractId = (await contract.state()).id;
+  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), contractId);
   writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
   repository.run(["-C", worktree, "add", "candidate.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
@@ -66,7 +67,7 @@ async function buildTenderedReviewGatedTargetTemplate(): Promise<TenderedReviewG
     mode: statSync(join(worktree, path)).mode & 0o777,
   }));
   repository.run(["worktree", "remove", "--force", worktree]);
-  return { repository, id: contract.id, workspaceHead, generatedFiles };
+  return { repository, id: contractId, workspaceHead, generatedFiles };
 }
 
 async function tenderedReviewGatedTargetFixture() {
@@ -100,7 +101,8 @@ test("reconciliation repairs sentinelled skills and preserves a tracked user ove
     workspace: "worktree",
   });
   const contract = bound.keiyaku;
-  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), contract.id);
+  const contractId = (await contract.state()).id;
+  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), contractId);
   const deliverLeaf = join(worktree, ".agents", "skills", "keiyaku-deliver");
   const deliverSkill = join(deliverLeaf, "SKILL.md");
   const reviewSkill = join(worktree, ".agents", "skills", "keiyaku-review", "SKILL.md");
@@ -201,7 +203,7 @@ test("abandoned tender custody remains when it is the sole proof", async () => {
   const integration = delivered.currentIntegration?.snapshot ?? delivered.delivery?.data.integration.snapshot;
   assert.ok(tender);
   assert.ok(integration);
-  const abandoned = await contract.abandon();
+  await contract.abandon();
   const id = (await contract.state()).id;
   const git = await repositoryAt(repository.path);
 

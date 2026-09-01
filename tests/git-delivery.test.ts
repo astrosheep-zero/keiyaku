@@ -21,10 +21,9 @@ import { adjudicateAuditTarget, observeTargetPlacement } from "../src/git/target
 import { readRef } from "../src/git/repository.js";
 import { materializeJudgedConflict, readDeliveryDiff, workspaceMergeStatePresent } from "../src/git/integration.js";
 import { materializeScratchCandidate } from "../src/git/scratch.js";
-import { reconcile } from "../src/git/reconcile.js";
 import { followDependentManagedWorktree, worktreePath } from "../src/git/workspace.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
-import { AuthorityCorruptionError, Keiyaku, Repo, type ContractId } from "../src/index.js";
+import { AuthorityCorruptionError, Keiyaku, Repo, type ContractId, type Keiyaku as KeiyakuHandle } from "../src/index.js";
 import { deliveryDiffOperation, scopeOperation } from "../src/protocol/operations.js";
 import {
   appointedWorktreePath,
@@ -35,6 +34,13 @@ import {
   type TestGitRepository,
   withGitShim,
 } from "./support/git.js";
+
+type AcceptedDelivery = Exclude<Awaited<ReturnType<KeiyakuHandle["deliver"]>>, { kind: "integration-conflict-materialized" }>;
+
+function acceptedDelivery(result: Awaited<ReturnType<KeiyakuHandle["deliver"]>>): AcceptedDelivery {
+  if ("kind" in result) throw new Error(`unexpected integration conflict: ${result.conflictPaths.join(",")}`);
+  return result;
+}
 
 function contractBody(): string {
   return [
@@ -673,7 +679,11 @@ test("one preparation freezes Contract content, actor identity, and dates across
   assert.equal(prepared.kind, "prepared");
   if (prepared.kind !== "prepared") return;
 
-  const commits = [prepared.data.tenderSnapshot, prepared.data.integration.snapshot];
+  const tenderSnapshot = prepared.data.tenderSnapshot;
+  const integrationSnapshot = prepared.data.integration.snapshot;
+  assert.ok(tenderSnapshot);
+  assert.ok(integrationSnapshot);
+  const commits = [tenderSnapshot, integrationSnapshot];
   const expectedMessage = `Chosen subject\n\n${contractBody()}\n\nKeiyaku-Contract: ${preparation.contractId}\n`;
   for (const commit of commits) {
     assert.equal(commitMessage(repository, commit), expectedMessage);
@@ -688,7 +698,7 @@ test("one preparation freezes Contract content, actor identity, and dates across
     assert.equal(authoredAt, committedAt);
     assert.equal(authoredAt, expectedAt);
   }
-  assert.deepEqual(commitSignature(repository, commits[0]), commitSignature(repository, commits[1]));
+  assert.deepEqual(commitSignature(repository, tenderSnapshot), commitSignature(repository, integrationSnapshot));
 });
 
 test("materialized delivery identity uses the complete repository pair or the neutral fallback", async () => {
@@ -840,8 +850,11 @@ test("target placement observation reports checkout collisions without moving th
   assert.equal(repository.run(["status", "--porcelain=v1", "--untracked-files=all"]), worktreeBefore);
   assert.equal(readFileSync(join(repository.path, collision), "utf8"), "local\n");
 
-  const delivered = await contract.deliver();
-  assert.deepEqual(delivered.value.placement?.refusal, observed.refusal);
+  const delivered = acceptedDelivery(await contract.deliver());
+  const placement = delivered.value.placement;
+  assert.ok(placement);
+  if (!("refusal" in placement)) assert.fail("expected placement refusal");
+  assert.deepEqual(placement.refusal, observed.refusal);
 });
 
 test("target placement observation reports a ready targeted candidate without following it", async () => {
@@ -985,12 +998,14 @@ test("ignored custody treats candidate metacharacters as a literal path", async 
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "literal candidate"]);
   const target = repository.run(["rev-parse", "refs/heads/main"]).trim();
 
-  const delivered = await contract.deliver();
+  const delivered = acceptedDelivery(await contract.deliver());
 
-  assert.equal(delivered.value.placement?.refusal?.kind, "checkout-not-followable");
-  if (delivered.value.placement?.refusal?.kind !== "checkout-not-followable") return;
-  assert.equal(delivered.value.placement.refusal.reason, "untracked");
-  assert.deepEqual(delivered.value.placement.refusal.paths, [collision]);
+  const placement = delivered.value.placement;
+  assert.ok(placement);
+  if (!("refusal" in placement) || placement.refusal.kind !== "checkout-not-followable")
+    assert.fail("expected checkout-not-followable placement refusal");
+  assert.equal(placement.refusal.reason, "untracked");
+  assert.deepEqual(placement.refusal.paths, [collision]);
   assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), target);
   assert.equal(readFileSync(join(repository.path, collision), "utf8"), "local\n");
 });
@@ -1006,12 +1021,14 @@ test("ignored custody stops at an ignored physical ancestor leaf", async () => {
   repository.run(["-C", worktree, "add", "artifact/result.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "replace ancestor"]);
 
-  const delivered = await contract.deliver();
+  const delivered = acceptedDelivery(await contract.deliver());
 
-  assert.equal(delivered.value.placement?.refusal?.kind, "checkout-not-followable");
-  if (delivered.value.placement?.refusal?.kind !== "checkout-not-followable") return;
-  assert.equal(delivered.value.placement.refusal.reason, "untracked");
-  assert.deepEqual(delivered.value.placement.refusal.paths, ["artifact"]);
+  const placement = delivered.value.placement;
+  assert.ok(placement);
+  if (!("refusal" in placement) || placement.refusal.kind !== "checkout-not-followable")
+    assert.fail("expected checkout-not-followable placement refusal");
+  assert.equal(placement.refusal.reason, "untracked");
+  assert.deepEqual(placement.refusal.paths, ["artifact"]);
   assert.equal(readFileSync(join(repository.path, "artifact"), "utf8"), "local leaf\n");
 });
 
@@ -1028,18 +1045,20 @@ test("ignored custody treats a symlink ancestor as a leaf", async () => {
   repository.run(["-C", worktree, "add", "link/result.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "replace symlink"]);
 
-  const delivered = await contract.deliver();
+  const delivered = acceptedDelivery(await contract.deliver());
 
-  assert.equal(delivered.value.placement?.refusal?.kind, "checkout-not-followable");
-  if (delivered.value.placement?.refusal?.kind !== "checkout-not-followable") return;
-  assert.deepEqual(delivered.value.placement.refusal.paths, ["link"]);
+  const placement = delivered.value.placement;
+  assert.ok(placement);
+  if (!("refusal" in placement) || placement.refusal.kind !== "checkout-not-followable")
+    assert.fail("expected checkout-not-followable placement refusal");
+  assert.deepEqual(placement.refusal.paths, ["link"]);
   assert.equal(readFileSync(join(repository.path, "elsewhere", "retained.txt"), "utf8"), "retained\n");
 });
 
 test("a clean tracked directory may be replaced by a candidate file", async () => {
   const { contract, repository } = await directoryReplacementContract();
 
-  const delivered = await contract.deliver();
+  const delivered = acceptedDelivery(await contract.deliver());
 
   assert.equal(delivered.value.placement, undefined);
   assert.equal(readFileSync(join(repository.path, "artifact"), "utf8"), "candidate file\n");
@@ -1054,12 +1073,14 @@ test("a displaced directory with ignored contents refuses at the directory", asy
   }
   const target = repository.run(["rev-parse", "refs/heads/main"]).trim();
 
-  const delivered = await contract.deliver();
+  const delivered = acceptedDelivery(await contract.deliver());
 
-  assert.equal(delivered.value.placement?.refusal?.kind, "checkout-not-followable");
-  if (delivered.value.placement?.refusal?.kind !== "checkout-not-followable") return;
-  assert.equal(delivered.value.placement.refusal.reason, "untracked");
-  assert.deepEqual(delivered.value.placement.refusal.paths, ["artifact"]);
+  const placement = delivered.value.placement;
+  assert.ok(placement);
+  if (!("refusal" in placement) || placement.refusal.kind !== "checkout-not-followable")
+    assert.fail("expected checkout-not-followable placement refusal");
+  assert.equal(placement.refusal.reason, "untracked");
+  assert.deepEqual(placement.refusal.paths, ["artifact"]);
   assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), target);
   assert.equal(readFileSync(join(repository.path, "artifact", "tracked.txt"), "utf8"), "tracked\n");
 });
@@ -1073,12 +1094,14 @@ test("a displaced directory with untracked contents refuses at the directory", a
   }
   const target = repository.run(["rev-parse", "refs/heads/main"]).trim();
 
-  const delivered = await contract.deliver();
+  const delivered = acceptedDelivery(await contract.deliver());
 
-  assert.equal(delivered.value.placement?.refusal?.kind, "checkout-not-followable");
-  if (delivered.value.placement?.refusal?.kind !== "checkout-not-followable") return;
-  assert.equal(delivered.value.placement.refusal.reason, "untracked");
-  assert.deepEqual(delivered.value.placement.refusal.paths, ["artifact"]);
+  const placement = delivered.value.placement;
+  assert.ok(placement);
+  if (!("refusal" in placement) || placement.refusal.kind !== "checkout-not-followable")
+    assert.fail("expected checkout-not-followable placement refusal");
+  assert.equal(placement.refusal.reason, "untracked");
+  assert.deepEqual(placement.refusal.paths, ["artifact"]);
   assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), target);
   assert.equal(readFileSync(join(repository.path, "artifact", "tracked.txt"), "utf8"), "tracked\n");
 });
@@ -1264,7 +1287,7 @@ test("dirty managed delivery preserves its caller checkout", async () => {
   writeFileSync(join(path, "tracked.txt"), "delivered\n");
   writeFileSync(join(path, "delivered.txt"), "delivered\n");
 
-  const delivered = await bound.keiyaku.deliver({ includeDirty: true });
+  await bound.keiyaku.deliver({ includeDirty: true });
   const tender = (await bound.keiyaku.state()).delivery?.data.tenderSnapshot;
 
   assert.notEqual(tender, undefined);
@@ -1472,7 +1495,6 @@ test("delivery diff leaves probe diagnostics as Git errors", async () => {
 test("targetless terminal cleanup retains tender custody for Delivery.diff", async () => {
   const repository = makeGitRepository();
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const predecessor = repository.run(["rev-parse", "HEAD"]).trim();
   const bound = await Keiyaku.bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: contractBody(),
@@ -1491,7 +1513,7 @@ test("targetless terminal cleanup retains tender custody for Delivery.diff", asy
   await bound.keiyaku.deliver();
   await bound.keiyaku.reconcile();
 
-  const reviewed = await bound.keiyaku.review({ verdict: "satisfied" });
+  await bound.keiyaku.review({ verdict: "satisfied" });
   assert.ok((await bound.keiyaku.state()).terminal);
 
   repository.run(["reflog", "expire", "--expire=now", "--all"]);
@@ -1817,7 +1839,7 @@ test("terminal reconcile removes sealed dirty bytes over the original HEAD", asy
   await bound.keiyaku.reconcile();
   const path = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (await bound.keiyaku.state()).id);
   writeFileSync(join(path, "candidate.txt"), "dirty candidate\n");
-  const delivered = await bound.keiyaku.deliver({ includeDirty: true });
+  const delivered = acceptedDelivery(await bound.keiyaku.deliver({ includeDirty: true }));
   assert.equal(repository.run(["-C", path, "rev-parse", "HEAD"]).trim(), start);
   assert.deepEqual(delivered.lags, []);
   const abandoned = await bound.keiyaku.abandon();

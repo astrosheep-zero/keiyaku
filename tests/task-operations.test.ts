@@ -13,7 +13,13 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { TaskAuthorityCorruptionError, Tasks, type TaskId, type TaskTreeNode } from "../src/task/index.js";
+import {
+  TaskAuthorityCorruptionError,
+  Tasks,
+  type TaskId,
+  type TaskMutationResult,
+  type TaskTreeNode,
+} from "../src/task/index.js";
 import {
   decodeTaskMutationRequest,
   executeTaskMutation,
@@ -39,13 +45,32 @@ export type TaskBodyWorldRequiresCanonicalMint = Assert<
   [TaskMutationBodyRequest["world"]] extends [WorldRoot] ? false : true
 >;
 
-async function world(): { root: string; tasks: ReturnType<typeof Tasks.of> } {
+async function world(): Promise<{ root: WorldRoot; tasks: ReturnType<typeof Tasks.of> }> {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-tasks-"));
   mkdirSync(join(root, ".keiyaku"));
+  const worldRoot = await World.at(root);
   return {
-    root,
-    tasks: Tasks.of(await World.at(root)),
+    root: worldRoot,
+    tasks: Tasks.of(worldRoot),
   };
+}
+
+async function lifecycle(
+  task: ReturnType<ReturnType<typeof Tasks.of>["task"]>,
+  verb: "start" | "stop" | "hold" | "resume" | "done",
+): Promise<TaskMutationResult> {
+  switch (verb) {
+    case "start":
+      return await task.start();
+    case "stop":
+      return await task.stop();
+    case "hold":
+      return await task.hold();
+    case "resume":
+      return await task.resume();
+    case "done":
+      return await task.done();
+  }
 }
 function acceptedId(result: Awaited<ReturnType<ReturnType<typeof Tasks.of>["add"]>>): TaskId {
   assert.equal(result.kind, "accepted");
@@ -120,7 +145,7 @@ test("done and drop replace note while preserving creation time", async () => {
   assert.ok(
     batch.items
       .filter((item) => item.outcome.kind === "accepted")
-      .every((item) => item.outcome.value.note === "completed"),
+      .every((item) => item.outcome.kind !== "accepted" || item.outcome.value.note === "completed"),
   );
   assert.equal((await tasks.task({ id: three }).read())?.task.state, "done");
   const dropped = await tasks.task({ id: two }).drop({ note: "cancelled" });
@@ -279,7 +304,7 @@ test("Task mutation mints raw World once while Tasks consumes its branded capabi
     taskMutationRequestCommand("task.add", {
       task: async () => Promise.reject(new Error("raw World must not reach the Task executor")),
     }).execute(
-      { world: `${canonical}/.`, request: { action: "task.add", input: { title: "must not write" } } },
+      { world: `${canonical}/.` as WorldRoot, request: { action: "task.add", input: { title: "must not write", namespace: [] } } },
       {
         id: "00000000-0000-4000-8000-000000000001",
         admittedAt: "2026-08-18T00:00:00.000Z",
@@ -1011,7 +1036,10 @@ test("task tree is parent decomposition with no needs residue", async () => {
     kind: "refused",
     refusal: { kind: "task-missing", taskId: "task/missing" },
   });
-  await assert.rejects(tasks.task({ id: root }).tree({ full: true } as never), /tree accepts no input/u);
+  await assert.rejects(
+    () => (tasks.task({ id: root }).tree as unknown as (input: unknown) => Promise<unknown>)({ full: true }),
+    /tree accepts no input/u,
+  );
 });
 
 test("task tree renders a parent cycle as a terminal cycle node", async () => {
@@ -1088,7 +1116,7 @@ test("creation actor persists as createdBy and later mutations leave it unchange
     assert.equal(mutated.kind, "accepted");
     if (mutated.kind === "accepted") assert.equal(mutated.value.task.createdBy, "flagship");
     for (const verb of ["start", "stop", "hold", "resume", "done"] as const) {
-      const next = await tasks.task({ id: added.value.id })[verb]();
+      const next = await lifecycle(tasks.task({ id: added.value.id }), verb);
       assert.equal(next.kind, "accepted");
       if (next.kind === "accepted") assert.equal(next.value.createdBy, "flagship");
     }
@@ -1192,10 +1220,11 @@ test("forced-local Task mutation execution preserves owner validation and authen
   const result = await executeTaskMutation({
     world: tasks.root,
     requester: "aku/parent/00000001",
-    request: { action: "task.add", input: { title: "Forwarded", body: "exact\nbody" } },
+    request: { action: "task.add", input: { title: "Forwarded", body: "exact\nbody", namespace: [] } },
   });
-  assert.equal(result.kind, "accepted");
-  if (result.kind !== "accepted" || !("value" in result)) return;
+  assert.equal("kind" in result && result.kind, "accepted");
+  if (!("kind" in result) || result.kind !== "accepted" || !("value" in result) || "task" in result.value)
+    assert.fail("expected accepted task mutation result");
   assert.equal(result.value.createdBy, "aku/parent/00000001");
   assert.equal(
     (

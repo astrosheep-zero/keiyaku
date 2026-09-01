@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -104,7 +104,7 @@ test("concurrent reconcile runs one frozen hook sequence and destroy removes onl
     markdown: contractBody("Concurrent hooks"),
     hooks,
   });
-  const id = bound.keiyaku.id;
+  const id = (await bound.keiyaku.state()).id;
   const worktree = await appointedWorktreePath(git, id);
   const administration = await worktreeGitDirectory(git, worktree);
   const reports = await Promise.all([bound.keiyaku.reconcile({ hooks }), bound.keiyaku.reconcile({ hooks })]);
@@ -144,7 +144,7 @@ test("abandon chains destroy-hook changes after the initial ephemeral recovery",
     markdown: contractBody("Recovery around destroy hooks"),
     hooks,
   });
-  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), bound.keiyaku.id);
+  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), (await bound.keiyaku.state()).id);
   const originalHead = repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim();
   writeFileSync(join(worktree, "before-destroy-hook.txt"), "initial bytes\n");
 
@@ -168,7 +168,7 @@ test("a reconcile queued on the effect lock reobserves terminal state before app
     markdown: contractBody("Terminal wins"),
     hooks: EMPTY_HOOKS,
   });
-  const id = bound.keiyaku.id;
+  const id = (await bound.keiyaku.state()).id;
   const worktree = await appointedWorktreePath(git, id);
   const held = await acquireSqliteTransactionLock({ path: lockPath(git, id), mode: "immediate", timeoutMs: 100 });
   const pending = bound.keiyaku.reconcile();

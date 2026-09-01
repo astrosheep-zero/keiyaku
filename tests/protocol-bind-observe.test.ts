@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { AuthorityCorruptionError, Keiyaku } from "../src/index.js";
@@ -346,7 +346,6 @@ test("known publication failure is returned without a post-result ref read", asy
     workspace: "worktree",
   });
   const id = (await bound.keiyaku.state()).id;
-  const git = await repositoryAt(repository.path);
   const failed = join(repository.path, "publication-failed.marker");
   const postRead = join(repository.path, "post-publication-read.marker");
 
@@ -559,7 +558,7 @@ async function appendUnrelatedGitJournals(
 async function amendObjectIo(
   repository: Awaited<ReturnType<typeof repositoryAt>>,
   id: ContractId,
-): Record<string, number> {
+): Promise<Record<string, number>> {
   const state = (await observeContract(repository, id)).state;
   if (state === null) throw new Error("bound contract state was not observed");
   const log = join(repository.effectiveCwd, "amend-object-io.log");
@@ -925,7 +924,7 @@ test("placement claims only the selected contract", async () => {
         at: "2026-08-07T00:00:00Z",
         preparation: { kind: "prepared", document: sourceState.terms.document.key, data: prepared.data },
       },
-      decideDeliver,
+      decideDeliver<never>,
     ),
   );
   assert.equal(delivered.kind, "accepted");
@@ -1197,7 +1196,7 @@ test("delivery binds before after and placement reads amended prerequisites", as
           data: dependentDelivery.data,
         },
       },
-      decideDeliver,
+      decideDeliver<never>,
     ),
   );
   assert.equal(delivered.kind, "accepted");
@@ -1260,7 +1259,7 @@ test("delivery binds before after and placement reads amended prerequisites", as
           data: prerequisiteDelivery.data,
         },
       },
-      decideDeliver,
+      decideDeliver<never>,
     ),
   );
   assert.equal(prerequisiteDelivered.kind, "accepted");
@@ -1348,7 +1347,7 @@ test("bind and amend leave eligible prerequisites unmaterialized", async () => {
         at: "2026-08-06T00:00:00Z",
         preparation: { kind: "prepared", document: state.terms.document.key, data: delivery.data },
       },
-      decideDeliver,
+      decideDeliver<never>,
     ),
   );
   assert.equal(delivered.kind, "accepted");
@@ -1419,7 +1418,7 @@ test("placement redecides after a world advance without binding a dependent", as
         at: "2026-08-06T00:00:00Z",
         preparation: { kind: "prepared", document: sourceState.terms.document.key, data: prepared.data },
       },
-      decideDeliver,
+      decideDeliver<never>,
     ),
   );
   assert.equal(delivered.kind, "accepted");

@@ -3,9 +3,9 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { Keiyaku, World } from "../src/index.js";
+import { Keiyaku, World, type WorldRoot } from "../src/index.js";
 
-async function worldFixture(): Promise<string> {
+async function worldFixture(): Promise<WorldRoot> {
   return await World.at(mkdtempSync(join(tmpdir(), "keiyaku-v4-library-nuke-")));
 }
 

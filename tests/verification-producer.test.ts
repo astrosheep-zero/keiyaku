@@ -30,7 +30,6 @@ function input(
     repository: {} as ExecuteVerificationInput["repository"],
     candidate: "snapshot" as ExecuteVerificationInput["candidate"],
     declarations,
-    environment: process.env,
     materializeScratchCandidate: async () => scratch,
     projectSettings: async () => await settings({ root }),
     ...overrides,
@@ -67,7 +66,7 @@ test("producer leaves an omitted declaration unbounded", async (t) => {
   t.mock.method(globalThis, "setTimeout", ((_callback: () => void, milliseconds?: number) => {
     timeouts.push(milliseconds ?? 0);
     return undefined;
-  }) as typeof setTimeout);
+  }) as unknown as typeof setTimeout);
 
   const outcome = await executeVerification(input("/tmp", [declaration("true")]));
 

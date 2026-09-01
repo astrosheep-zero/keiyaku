@@ -2,17 +2,23 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { Keiyaku, Repo } from "../src/index.js";
+import { Keiyaku, Repo, type Keiyaku as KeiyakuHandle } from "../src/index.js";
 import { acceptedDeliver } from "../src/cli/accepted.js";
-import type { ContractId } from "../src/core/facts/types.js";
 import { appointedWorktreePath, cachedRepoAt, cachedRepositoryAt, withGitShim } from "./support/git.js";
 import { bind, commitCandidate, document, repositoryWithMain } from "./support/library-verbs.js";
 
 async function candidateWorktree(
   repository: ReturnType<typeof repositoryWithMain>,
-  contract: { readonly id: ContractId },
+  contract: KeiyakuHandle,
 ): Promise<string> {
-  return appointedWorktreePath(await cachedRepositoryAt(repository.path), contract.id);
+  return appointedWorktreePath(await cachedRepositoryAt(repository.path), (await contract.state()).id);
+}
+
+type AcceptedDelivery = Exclude<Awaited<ReturnType<KeiyakuHandle["deliver"]>>, { kind: "integration-conflict-materialized" }>;
+
+function acceptedDelivery(result: Awaited<ReturnType<KeiyakuHandle["deliver"]>>): AcceptedDelivery {
+  if ("kind" in result) throw new Error(`unexpected integration conflict: ${result.conflictPaths.join(",")}`);
+  return result;
 }
 
 test("changed worktree after audit prevents Verification reuse", async () => {
@@ -27,7 +33,7 @@ test("changed worktree after audit prevents Verification reuse", async () => {
   repository.run(["-C", worktree, "add", "candidate.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "changed"]);
 
-  const delivered = await contract.deliver();
+  const delivered = acceptedDelivery(await contract.deliver());
   assert.equal(delivered.value.verificationReuse, undefined);
   assert.deepEqual(
     delivered.facts.map((fact) => fact.kind),
@@ -44,7 +50,7 @@ test("public deliver keeps its Verification admission in accepted facts", async 
   const contract = await bind(repository, "exit 0");
   commitCandidate(repository, await candidateWorktree(repository, contract));
 
-  const delivered = await contract.deliver();
+  const delivered = acceptedDelivery(await contract.deliver());
   assert.deepEqual(
     delivered.facts.map((fact) => fact.kind),
     ["bound", "deliver", "attestation", "claimed"],
@@ -73,7 +79,7 @@ test("completion omits Verification when no declaration applies", async () => {
   });
   commitCandidate(repository, await candidateWorktree(repository, bound.keiyaku));
 
-  const delivered = await bound.keiyaku.deliver();
+  const delivered = acceptedDelivery(await bound.keiyaku.deliver());
 
   assert.deepEqual(
     delivered.facts.map((fact) => fact.kind),
@@ -93,7 +99,7 @@ test("status and audit expose only current Verification testimony", async () => 
   });
   commitCandidate(repository, await candidateWorktree(repository, bound.keiyaku));
 
-  const delivered = await bound.keiyaku.deliver();
+  await bound.keiyaku.deliver();
   const state = await bound.keiyaku.state();
   const expected = {
     verdict: "satisfied" as const,
@@ -122,7 +128,7 @@ test("status and audit expose only current Verification testimony", async () => 
   assert.equal(audited.value.verification.total, 1);
   assert.equal(audited.value.verification.summary, expected.summary);
 
-  const amended = await bound.keiyaku.amend({
+  await bound.keiyaku.amend({
     markdown: "## Replace: Verification\n~~~bash\nprintf changed\n~~~\n",
   });
   const after = await Keiyaku.observe({ repo, id: state.id });
@@ -147,9 +153,9 @@ test("amend preserves untouched Verification bytes and currentness", async () =>
   });
   const verificationSegment = (await bound.keiyaku.state()).terms.segments.at(-1);
   commitCandidate(repository, await candidateWorktree(repository, bound.keiyaku));
-  const delivered = await bound.keiyaku.deliver();
+  const delivered = acceptedDelivery(await bound.keiyaku.deliver());
 
-  const amended = await bound.keiyaku.amend({ markdown: "## Replace: Objective\nA narrower objective.\n" });
+  await bound.keiyaku.amend({ markdown: "## Replace: Objective\nA narrower objective.\n" });
   const after = await bound.keiyaku.state();
   assert.equal(after.terms.segments.at(-1), verificationSegment);
   assert.match(after.terms.document.bytes, /~~~bash\nexit 0\n~~~/);
@@ -174,7 +180,7 @@ test("a declaration timeout admits unsatisfied testimony and leaves placement to
     gates: [],
   });
   commitCandidate(openRepository, await candidateWorktree(openRepository, open.keiyaku));
-  const openDelivery = await open.keiyaku.deliver();
+  const openDelivery = acceptedDelivery(await open.keiyaku.deliver());
   assert.deepEqual(
     openDelivery.facts.map((fact) => fact.kind),
     ["bound", "deliver", "attestation", "claimed"],
@@ -197,7 +203,7 @@ test("a declaration timeout admits unsatisfied testimony and leaves placement to
     gates: ["verified"],
   });
   commitCandidate(gatedRepository, await candidateWorktree(gatedRepository, gated.keiyaku));
-  const gatedDelivery = await gated.keiyaku.deliver();
+  const gatedDelivery = acceptedDelivery(await gated.keiyaku.deliver());
   assert.deepEqual(
     gatedDelivery.facts.map((fact) => fact.kind),
     ["bound", "deliver", "attestation"],
@@ -205,8 +211,9 @@ test("a declaration timeout admits unsatisfied testimony and leaves placement to
   assert.equal(gatedDelivery.facts.find((fact) => fact.kind === "attestation")?.data.verdict, "unsatisfied");
   assert.equal(gatedDelivery.value.verification, undefined);
   const gatedPlacement = gatedDelivery.value.placement;
-  assert.equal(gatedPlacement?.refusal.kind, "gates-unsatisfied");
-  if (gatedPlacement?.refusal.kind !== "gates-unsatisfied") return;
+  assert.ok(gatedPlacement);
+  if (!("refusal" in gatedPlacement) || gatedPlacement.refusal.kind !== "gates-unsatisfied")
+    assert.fail("expected gates-unsatisfied placement refusal");
   assert.deepEqual(
     gatedPlacement.refusal.unmet.map(({ gate, current }) => ({
       gate,
@@ -216,7 +223,7 @@ test("a declaration timeout admits unsatisfied testimony and leaves placement to
     [{ gate: "verified", kind: "attested", verdict: "unsatisfied" }],
   );
   assert.match(gatedDelivery.value.verificationSummary ?? "", /timeout after 25ms/);
-  const accepted = acceptedDeliver(gatedDelivery, gated.keiyaku.id);
+  const accepted = acceptedDeliver(gatedDelivery, (await gated.keiyaku.state()).id);
   assert.match(accepted.verificationSummary ?? "", /timeout after 25ms/);
 });
 
@@ -283,7 +290,7 @@ test("Verification provisions candidate settings with ambient environment and de
     writeFileSync(join(repository.path, "node_modules", "caller-only"), "caller\n");
     process.env[environmentName] = "deliver";
 
-    const delivered = await contract.deliver();
+    const delivered = acceptedDelivery(await contract.deliver());
 
     assert.deepEqual(
       delivered.facts.map((fact) => fact.kind),
@@ -321,7 +328,7 @@ test("Verification setup hooks receive caller environment before reuse", async (
     process.env[environmentName] = "audit";
     const audited = await contract.audit();
     process.env[environmentName] = "deliver";
-    const delivered = await contract.deliver();
+    const delivered = acceptedDelivery(await contract.deliver());
 
     assert.equal(audited.value.verification.kind, "satisfied");
     assert.equal(delivered.value.verificationReuse?.entry, audited.facts[0]?.entry);
@@ -351,13 +358,15 @@ test("candidate create failure stops Verification with no attestation and still 
   ];
   writeCandidateSettings(repository, worktree, worktreeSettings(create, destroy));
 
-  const delivered = await contract.deliver();
+  const delivered = acceptedDelivery(await contract.deliver());
 
   assert.deepEqual(
     delivered.facts.map((fact) => fact.kind),
     ["bound", "deliver"],
   );
-  assert.equal(delivered.value.verification?.failure, "environment-failure");
+  if (delivered.value.verification === undefined || !("failure" in delivered.value.verification))
+    assert.fail("expected Verification environment failure");
+  assert.equal(delivered.value.verification.failure, "environment-failure");
   assert.equal(existsSync(join(repository.path, "verification-ran")), false);
   assert.equal(existsSync(destroyed), true);
 });
@@ -367,7 +376,7 @@ test("candidate Settings failure is honest and has no command sentinel", async (
   const contract = await bind(repository, "exit 0");
   writeCandidateSettings(repository, await candidateWorktree(repository, contract), "{ not-json\n");
 
-  const delivered = await contract.deliver();
+  const delivered = acceptedDelivery(await contract.deliver());
 
   assert.equal(
     delivered.facts.some((fact) => fact.kind === "attestation"),
@@ -414,7 +423,7 @@ test("caller cancellation admits no attestation and still destroys scratch", asy
   await waitForFile(started);
   controller.abort();
 
-  const delivered = await pending;
+  const delivered = acceptedDelivery(await pending);
   assert.equal(
     delivered.facts.some((fact) => fact.kind === "attestation"),
     false,
@@ -433,7 +442,7 @@ test("destroy failure is cleanup evidence, not a leak after successful removal",
     worktreeSettings([], [process.execPath, "-e", "process.exit(19)"]),
   );
 
-  const delivered = await contract.deliver();
+  const delivered = acceptedDelivery(await contract.deliver());
 
   assert.deepEqual(delivered.value.cleanup, {
     phase: "destroy",
@@ -458,12 +467,12 @@ test("public deliver preserves admission when Verification cleanup leaks a workt
     ].join("\n"),
     {},
     async (gitPath) =>
-      (
+      acceptedDelivery(
         await Keiyaku.of({
           repo: await Repo.at({ path: repository.path, gitPath }),
-          id: contract.id,
-        })
-      ).deliver(),
+          id: (await contract.state()).id,
+        }).deliver(),
+      ),
   );
   assert.deepEqual(
     delivered.facts.map((fact) => fact.kind),

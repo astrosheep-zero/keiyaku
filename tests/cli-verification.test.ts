@@ -3,11 +3,24 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 import { repositoryAt } from "../src/git/repository.js";
-import { invoke, type InvocationResult } from "../src/cli/invoke.js";
-import { parseArgv } from "../src/cli/parse.js";
+import { invoke as invokeRaw, type InvocationResult } from "../src/cli/invoke.js";
+import { parseArgv as parseInvocation } from "../src/cli/parse.js";
 import { renderText } from "../src/cli/render/text.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import { makeGitRepository, observeContract, withGitShim } from "./support/git.js";
+
+function parseArgv(argv: readonly string[]) {
+  const parsed = parseInvocation(argv);
+  if ("help" in parsed) throw new Error("expected executable command");
+  return parsed;
+}
+
+async function invoke(
+  invocation: Parameters<typeof invokeRaw>[0],
+  runtime?: Parameters<typeof invokeRaw>[1],
+): Promise<InvocationResult> {
+  return (await invokeRaw(invocation, runtime)) as InvocationResult;
+}
 
 async function repositoryWithCandidate() {
   const raw = makeGitRepository();
@@ -61,7 +74,7 @@ async function bindAndDeliver(script?: string, gates: readonly string[] = ["veri
   const bound = await invoke(parseArgv(["bind", "--target", "refs/heads/main", "--actor", "external-test", "-"]), {
     cwd: setup.raw.path,
     environment: {},
-    readStdin: () => document(script),
+    readStdin: async () => document(script),
   });
   assert.equal(bound.kind, "accepted");
   if (bound.kind !== "accepted") throw new Error("bind did not return an accepted contract");
@@ -118,7 +131,8 @@ test("audit stays accepted when it admits a verified attestation", async () => {
     environment: { KEIYAKU_ACTOR_ID: "audit-user" },
   });
   assert.equal(audit.kind, "accepted");
-  if (audit.kind !== "accepted") return;
+  if (audit.kind !== "accepted" || audit.verb !== "audit" || audit.report === undefined)
+    assert.fail("expected accepted audit report");
   assert.deepEqual(
     audit.facts.map((fact) => fact.kind),
     ["attestation"],
@@ -149,7 +163,8 @@ test("audit renders the complete producer-bounded Verification summary as a subo
   });
 
   assert.equal(audit.kind, "accepted");
-  if (audit.kind !== "accepted") return;
+  if (audit.kind !== "accepted" || audit.verb !== "audit" || audit.report === undefined)
+    assert.fail("expected accepted audit report");
   assert.equal(audit.report.verification.kind, "unsatisfied");
   if (audit.report.verification.kind !== "unsatisfied") return;
   const summary = audit.report.verification.summary;
@@ -198,7 +213,8 @@ test("audit renders transient Verification cleanup leaks after accepted and obse
   );
 
   assert.equal(acceptedAudit.kind, "accepted");
-  if (acceptedAudit.kind !== "accepted") return;
+  if (acceptedAudit.kind !== "accepted" || acceptedAudit.verb !== "audit" || acceptedAudit.report === undefined)
+    assert.fail("expected accepted audit report");
   assert.deepEqual(
     acceptedAudit.facts.map((fact) => fact.kind),
     ["attestation"],
@@ -220,7 +236,8 @@ test("audit renders transient Verification cleanup leaks after accepted and obse
   };
   assert.equal(observedAudit.report.verification.kind, "stopped");
   if (observedAudit.report.verification.kind === "stopped") {
-    assert.equal(observedAudit.report.verification.stop.failure, "unknown-exit");
+    if ("failure" in observedAudit.report.verification.stop)
+      assert.equal(observedAudit.report.verification.stop.failure, "unknown-exit");
   }
   assert.equal(observedAudit.report.target.kind, "not-observed");
   assert.equal("leak" in observedAudit.report, false);

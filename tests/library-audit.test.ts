@@ -2,11 +2,19 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { Keiyaku, Repo, type ContractId } from "../src/index.js";
+import { Keiyaku, Repo, type ContractId, type Keiyaku as KeiyakuHandle } from "../src/index.js";
+import { contractId, snapshotId } from "../src/core/facts/types.js";
 import { adjudicateAuditTarget } from "../src/git/target-placement.js";
 import { releaseManagedWorktrees } from "../src/workspace-place.js";
 import { appointedWorktreePath, cachedRepoAt, cachedRepositoryAt, withGitShim } from "./support/git.js";
 import { bind, commitCandidate, document, refused, repositoryWithMain } from "./support/library-verbs.js";
+
+type AcceptedDelivery = Exclude<Awaited<ReturnType<KeiyakuHandle["deliver"]>>, { kind: "integration-conflict-materialized" }>;
+
+function acceptedDelivery(result: Awaited<ReturnType<KeiyakuHandle["deliver"]>>): AcceptedDelivery {
+  if ("kind" in result) throw new Error(`unexpected integration conflict: ${result.conflictPaths.join(",")}`);
+  return result;
+}
 
 test("pre-delivery audit candidate matches a later unchanged deliver", async () => {
   const repository = repositoryWithMain();
@@ -32,7 +40,7 @@ test("pre-delivery audit candidate matches a later unchanged deliver", async () 
   assert.equal((await contract.state()).delivery, null);
   assert.equal((await contract.state()).terminal, null);
 
-  const delivered = await contract.deliver();
+  const delivered = acceptedDelivery(await contract.deliver());
   assert.equal(delivered.value.tenderSnapshot, audited.value.candidate.identity.tenderSnapshot);
   assert.deepEqual(delivered.value.integration, audited.value.candidate.identity.integration);
   assert.equal(delivered.value.method, audited.value.candidate.identity.method);
@@ -60,7 +68,9 @@ test("unchanged deliver reuses unsatisfied pre-delivery audit Verification", asy
     audited.facts.map((fact) => fact.kind),
     ["attestation"],
   );
-  assert.equal(audited.facts[0]?.data.verdict, "unsatisfied");
+  const attestation = audited.facts[0];
+  if (attestation?.kind !== "attestation") return;
+  assert.equal(attestation.data.verdict, "unsatisfied");
   assert.equal(audited.value.verification.kind, "unsatisfied");
   if (audited.value.verification.kind !== "unsatisfied") return;
   assert.equal(audited.value.verification.passed, 0);
@@ -68,7 +78,7 @@ test("unchanged deliver reuses unsatisfied pre-delivery audit Verification", asy
   const reused = audited.facts[0];
   if (reused === undefined) return;
 
-  const delivered = await contract.deliver();
+  const delivered = acceptedDelivery(await contract.deliver());
   assert.deepEqual(delivered.value.integration, audited.value.candidate.identity.integration);
   assert.equal(delivered.value.verificationReuse?.verdict, "unsatisfied");
   assert.equal(delivered.value.verificationReuse?.entry, reused.entry);
@@ -77,8 +87,9 @@ test("unchanged deliver reuses unsatisfied pre-delivery audit Verification", asy
     false,
   );
   const placement = delivered.value.placement;
-  assert.equal(placement?.refusal.kind, "gates-unsatisfied");
-  if (placement?.refusal.kind !== "gates-unsatisfied") return;
+  if (placement === undefined || !("refusal" in placement)) assert.fail("expected placement refusal");
+  assert.equal(placement.refusal.kind, "gates-unsatisfied");
+  if (placement.refusal.kind !== "gates-unsatisfied") return;
   assert.deepEqual(
     placement.refusal.unmet.map(({ gate, current }) => ({
       gate,
@@ -129,9 +140,12 @@ test("Verification declarations receive ambient environment and reuse matching t
       second.facts.map((fact) => fact.kind),
       ["attestation"],
     );
-    assert.deepEqual(second.facts[0]?.data.subject, first.facts[0]?.data.subject);
+    const firstAttestation = first.facts[0];
+    const secondAttestation = second.facts[0];
+    if (firstAttestation?.kind !== "attestation" || secondAttestation?.kind !== "attestation") return;
+    assert.deepEqual(secondAttestation.data.subject, firstAttestation.data.subject);
 
-    const delivered = await contract.deliver();
+    const delivered = acceptedDelivery(await contract.deliver());
     assert.equal(delivered.value.verificationReuse?.entry, second.facts[0]?.entry);
     assert.equal(delivered.value.verificationReuse?.verdict, "unsatisfied");
     assert.equal(
@@ -148,7 +162,7 @@ test("Verification declarations receive ambient environment and reuse matching t
 test("audit showDiff belongs to this attempt and dirty failure is blocked evidence", async () => {
   const repository = repositoryWithMain();
   const contract = await bind(repository, "exit 0");
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), contract.id);
+  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (await contract.state()).id);
   writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
 
   const blocked = await contract.audit();
@@ -243,15 +257,16 @@ test("later target checkout mutation is reobserved at placement", async () => {
   assert.equal((await bound.keiyaku.state()).delivery, null);
 
   writeFileSync(join(repository.path, "candidate.txt"), "local\n");
-  const delivered = await bound.keiyaku.deliver();
+  const delivered = acceptedDelivery(await bound.keiyaku.deliver());
   assert.equal(audited.value.candidate.kind, "ready");
   if (audited.value.candidate.kind !== "ready") return;
   assert.deepEqual(delivered.value.integration, audited.value.candidate.identity.integration);
   assert.equal(delivered.value.verificationReuse?.verdict, "satisfied");
-  assert.equal(delivered.value.placement?.refusal?.kind, "checkout-not-followable");
-  if (delivered.value.placement?.refusal?.kind !== "checkout-not-followable") return;
-  assert.equal(delivered.value.placement.refusal.reason, "untracked");
-  assert.deepEqual(delivered.value.placement.refusal.paths, ["candidate.txt"]);
+  const placement = delivered.value.placement;
+  if (placement === undefined || !("refusal" in placement) || placement.refusal.kind !== "checkout-not-followable")
+    assert.fail("expected checkout-not-followable placement refusal");
+  assert.equal(placement.refusal.reason, "untracked");
+  assert.deepEqual(placement.refusal.paths, ["candidate.txt"]);
   assert.equal((await bound.keiyaku.state()).terminal, null);
   assert.equal(existsSync(join(repository.path, "candidate.txt")), true);
   assert.equal(readFileSync(join(repository.path, "candidate.txt"), "utf8"), "local\n");
@@ -274,10 +289,10 @@ test("operational target observation failure is target.failed", async () => {
       adjudicateAuditTarget(
         { ...git, gitPath },
         {
-          contractId: "kei/target-observation",
-          coordinates: { workspace: "worktree", target: "refs/heads/main" },
-          predecessor,
-          candidate: predecessor,
+          contractId: contractId("kei/target-observation"),
+          coordinates: { workspace: "worktree", start: snapshotId(predecessor), target: "refs/heads/main" },
+          predecessor: snapshotId(predecessor),
+          candidate: snapshotId(predecessor),
         },
       ),
   );
@@ -333,6 +348,8 @@ test("stopped Verification forces target not-observed", async () => {
   assert.equal(audited.value.candidate.kind, "ready");
   assert.equal(audited.value.verification.kind, "stopped");
   if (audited.value.verification.kind !== "stopped") return;
+  assert.ok("failure" in audited.value.verification.stop);
+  if (!("failure" in audited.value.verification.stop)) return;
   assert.equal(audited.value.verification.stop.failure, "unknown-exit");
   assert.equal(audited.value.target.kind, "not-observed");
 });
@@ -352,7 +369,7 @@ test("completeMutation preserves accepted cleanup and leak", async () => {
     (
       await Keiyaku.of({
         repo: await Repo.at({ path: repository.path, gitPath }),
-        id: contract.id,
+        id: (await contract.state()).id,
       })
     ).audit(),
   );
@@ -405,7 +422,7 @@ test("audit keeps its leading observation when the delivery candidate is unavail
       (
         await Keiyaku.of({
           repo: await Repo.at({ path: repository.path, gitPath }),
-          id: bound.keiyaku.id,
+          id: (await bound.keiyaku.state()).id,
         })
       ).audit(),
   );
@@ -413,6 +430,8 @@ test("audit keeps its leading observation when the delivery candidate is unavail
   assert.equal(audited.value.candidate.kind, "ready");
   assert.equal(audited.value.verification.kind, "stopped");
   if (audited.value.verification.kind !== "stopped") return;
+  assert.ok("failure" in audited.value.verification.stop);
+  if (!("failure" in audited.value.verification.stop)) return;
   assert.equal(audited.value.verification.stop.failure, "candidate-unavailable");
   const stop = audited.value.verification.stop;
   assert.ok("diagnostic" in stop);
