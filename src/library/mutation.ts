@@ -8,6 +8,120 @@ import { deferredTaskHolderSettlement, type SettlementReport } from "../settleme
 import type { TaskHolderAdmission } from "../settlement/holder.js";
 import type { WorktreeHooks } from "./configuration.js";
 import { completeReconcile, type ReconcileCompletion } from "./reconcile.js";
+import type { AuditReport } from "../protocol/audit.js";
+import type { IntegrationConflictMaterialized } from "../protocol/deliver.js";
+import type { CompletionEvidence } from "../protocol/completion.js";
+import type { ContinuationReport } from "./continuation.js";
+import { Delivery, type Delivery as DeliveryHandle } from "./delivery.js";
+import type { Review } from "./contract-forwarding-result.js";
+import type { AmendResult, BindResult } from "./contract-types.js";
+import { KeiyakuRefused, KeiyakuRetry } from "./refusal.js";
+
+export type MutationFinalitySurface =
+  | "verification"
+  | "placement"
+  | "continuation"
+  | "reconciliation"
+  | "settlement"
+  | "cleanup";
+
+export type MutationFinality =
+  | Readonly<{ kind: "complete" }>
+  | Readonly<{
+      kind: "accepted-pending";
+      pending: readonly Readonly<{ surface: MutationFinalitySurface; required: boolean }>[];
+    }>
+  | Readonly<{ kind: "not-admitted" }>;
+
+export type MutationFinalityInput =
+  | MutationResult<AuditReport>
+  | MutationResult<DeliveryHandle>
+  | MutationResult<Review>
+  | MutationResult<void>
+  | BindResult
+  | AmendResult
+  | IntegrationConflictMaterialized
+  | KeiyakuRefused
+  | KeiyakuRetry;
+
+function pendingSurface(surface: MutationFinalitySurface, required: boolean) {
+  return { surface, required } as const;
+}
+
+/** Purely projects the leading mutation's finality without changing its details. */
+export function projectMutationFinality(input: MutationFinalityInput): MutationFinality {
+  if (input instanceof KeiyakuRefused || input instanceof KeiyakuRetry || isIntegrationConflictMaterialized(input)) {
+    return { kind: "not-admitted" };
+  }
+  const pending: Array<Readonly<{ surface: MutationFinalitySurface; required: boolean }>> = [];
+  if ("value" in input) {
+    const value = input.value;
+    if (isAuditReport(value)) {
+      if (value.verification.kind === "stopped") pending.push(pendingSurface("verification", true));
+      if (input.cleanup !== undefined || input.leak !== undefined) pending.push(pendingSurface("cleanup", false));
+    } else if (isDelivery(value)) {
+      completionPending(value, pending);
+      if (
+        value.cleanup !== undefined ||
+        value.leak !== undefined ||
+        input.cleanup !== undefined ||
+        input.leak !== undefined
+      ) {
+        pending.push(pendingSurface("cleanup", false));
+      }
+    } else if (isCompletionValue(value)) {
+      completionPending(value, pending);
+      if (value.cleanup !== undefined || value.leak !== undefined || input.cleanup !== undefined || input.leak !== undefined) {
+        pending.push(pendingSurface("cleanup", false));
+      }
+    }
+  }
+  if (input.lags.length > 0) pending.push(pendingSurface("reconciliation", true));
+  if (input.settlementLags.length > 0) pending.push(pendingSurface("settlement", true));
+  return pending.length === 0 ? { kind: "complete" } : { kind: "accepted-pending", pending };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
+}
+
+function isAuditReport(value: unknown): value is AuditReport {
+  return isRecord(value) && "candidate" in value && "verification" in value && "target" in value;
+}
+
+function isIntegrationConflictMaterialized(value: unknown): value is IntegrationConflictMaterialized {
+  return isRecord(value) && value.kind === "integration-conflict-materialized";
+}
+
+function isDelivery(value: unknown): value is DeliveryHandle {
+  return Delivery[Symbol.hasInstance](value);
+}
+
+type CompletionValue = Readonly<{
+  verification?: CompletionEvidence["verification"] | undefined;
+  placement?: CompletionEvidence["placement"] | undefined;
+  cleanup?: CompletionEvidence["cleanup"] | undefined;
+  leak?: CompletionEvidence["leak"] | undefined;
+  continuation?: ContinuationReport | undefined;
+}>;
+
+function isCompletionValue(value: unknown): value is CompletionValue {
+  return isRecord(value) && !isAuditReport(value);
+}
+
+function completionPending(
+  value: CompletionValue,
+  pending: Array<Readonly<{ surface: MutationFinalitySurface; required: boolean }>>,
+) {
+  if (value.verification !== undefined) pending.push(pendingSurface("verification", true));
+  if (value.placement !== undefined) pending.push(pendingSurface("placement", true));
+  if (value.continuation !== undefined && value.continuation.stopped.length > 0) {
+    pending.push(pendingSurface("continuation", true));
+  }
+}
+
+export const mutationFinality = projectMutationFinality;
+export const canonicalMutationFinality = projectMutationFinality;
 
 export type AcceptedIntent<Value> = Readonly<
   {

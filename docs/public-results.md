@@ -14,6 +14,14 @@ invocation-scoped, not Contract state, a durable receipt, an effects log, or a
 result retained on a handle. Local and forwarded execution return this same
 answer without a transport-specific receipt.
 
+Callers may derive one pure finality projection from these public outcomes. It
+distinguishes a fully settled accepted outcome, an accepted outcome with
+pending surfaces, and an outcome that admitted no fact. The projection does not
+replace the detailed result or become a second adjudicator: audit uses its own
+terminal Verification testimony, while audit and delivery expose required
+operational work separately from optional cleanup or retained-residue reporting.
+An explicit no-fact integration handoff likewise projects as not-admitted.
+
 `KeiyakuRefused` and `KeiyakuRetry` identify a leading attempt that admitted no
 fact. Their machine-readable code derives from their one structured reason. A
 post-admission physical, reconciliation, or settlement failure remains a typed
