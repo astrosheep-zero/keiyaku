@@ -3,10 +3,15 @@
   "version": "0.1.0",
   "type": "module",
   "files": [
-    "index.js"
+    "index.js",
+    "index.d.ts"
   ],
+  "types": "./index.d.ts",
   "exports": {
-    ".": "./index.js"
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
   },
   "peerDependencies": {
     "@astrosheep/keiyaku": "^4.5.11"
