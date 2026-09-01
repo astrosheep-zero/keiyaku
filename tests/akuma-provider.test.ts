@@ -30,6 +30,11 @@ import { decodeProviderExecution, resolveProviderExecution } from "../src/akuma/
 import { EMPTY_ACP_EVENT_STATE, mapAcpUpdate } from "../src/akuma/providers/acp/events.js";
 import type { StdioProcess } from "../src/runtime/proc/stdio.js";
 
+const DRIVE_DEFAULTS = {
+  signal: new AbortController().signal,
+  requests: { dir: "/tmp/akuma-test-requests" },
+} as const;
+
 function attemptResult<Result>(attempt: ProviderAttempt<Result>): Promise<Result> {
   return attempt.result;
 }
@@ -486,6 +491,7 @@ test("ACP uses stable initialization, fresh sessions, mapped profile arguments, 
     });
     assert.equal(provider.admitOptions({ network: "enabled" }).kind, "refused");
     const drive = await provider.start({
+      ...DRIVE_DEFAULTS,
       body: "build",
       launchTells: [{ id: "tell-1", text: "then test" }],
       cwd: root,
@@ -552,6 +558,7 @@ test("ACP load retains the exact session ID without a fork or live tell capabili
     const provider = createAcpProvider(fake.execution);
     assert.equal(provider.fork, undefined);
     const drive = await provider.resume!({
+      ...DRIVE_DEFAULTS,
       body: "continue",
       launchTells: [],
       cwd: root,
@@ -575,6 +582,7 @@ test("ACP forced disposal closes its owned process tree after standard session/c
   try {
     const fake = fakeAcp(root, "cancel");
     const drive = await createAcpProvider(fake.execution).start({
+      ...DRIVE_DEFAULTS,
       body: "wait",
       launchTells: [],
       cwd: root,
@@ -779,6 +787,7 @@ test("Grok Build uses fixed launch arguments and admits queued interject on the 
     },
   });
   const drive = await provider.start({
+    ...DRIVE_DEFAULTS,
     body: "build",
     launchTells: [],
     cwd: "/tmp",
@@ -818,13 +827,8 @@ test("Grok Build returns turn-ended when completion wins before interject acknow
   const controlled = controlledAcpProcess({ stallPrompt: true, interject: "pending" });
   const drive = await createGrokBuildProvider(controlledGrokExecution, {
     spawnProcess: () => controlled.process,
-  }).start({
-    body: "build",
-    launchTells: [],
-    cwd: "/tmp",
-    options: {},
-    session: { kind: "fresh" },
-  }).result;
+  }).start({ ...DRIVE_DEFAULTS, body: "build", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" } })
+    .result;
   const submission = drive.tell!({ id: "tell-late", text: "too late" });
   await controlled.interjectStarted;
   controlled.resolvePrompt();
@@ -838,6 +842,7 @@ test("Grok Build returns turn-ended when completion wins before interject acknow
 test("ACP completion waits for owned process cleanup", async () => {
   const controlled = controlledAcpProcess();
   const drive = await createAcpProvider(controlledAcpExecution, { spawnProcess: () => controlled.process }).start({
+    ...DRIVE_DEFAULTS,
     body: "build",
     launchTells: [],
     cwd: "/tmp",
@@ -857,6 +862,7 @@ test("ACP completion waits for owned process cleanup", async () => {
 test("ACP cleanup failure settles a typed failed Turn", async () => {
   const controlled = controlledAcpProcess();
   const drive = await createAcpProvider(controlledAcpExecution, { spawnProcess: () => controlled.process }).start({
+    ...DRIVE_DEFAULTS,
     body: "build",
     launchTells: [],
     cwd: "/tmp",
@@ -872,6 +878,7 @@ test("ACP setup abort closes a child stalled during initialization", async () =>
   const controlled = controlledAcpProcess({ stallInitialize: true });
   const controller = new AbortController();
   const setup = createAcpProvider(controlledAcpExecution, { spawnProcess: () => controlled.process }).start({
+    ...DRIVE_DEFAULTS,
     body: "build",
     launchTells: [],
     cwd: "/tmp",
@@ -890,6 +897,7 @@ test("ACP setup abort closes a child stalled during initialization", async () =>
 test("ACP ignores assistant updates after terminal prompt evidence", async () => {
   const controlled = controlledAcpProcess({ assistant: "before" });
   const drive = await createAcpProvider(controlledAcpExecution, { spawnProcess: () => controlled.process }).start({
+    ...DRIVE_DEFAULTS,
     body: "build",
     launchTells: [],
     cwd: "/tmp",
@@ -984,7 +992,7 @@ function fakePiSdk(
   };
   class ResourceLoader {
     constructor(options?: Record<string, unknown>) {
-      seen.loader = options;
+      if (options !== undefined) seen.loader = options;
     }
     async reload() {}
   }
@@ -1014,6 +1022,7 @@ test("OpenCode V1 adapter admits with promptAsync and completes from terminal ev
   const provider = createOpencodeProvider({ loader: fake.loader });
   assert.equal(provider.admitOptions({ network: "enabled" }).kind, "refused");
   const drive = await provider.start({
+    ...DRIVE_DEFAULTS,
     body: "build",
     launchTells: [{ id: "tell-1", text: "also check" }],
     cwd: "/tmp",
@@ -1050,8 +1059,16 @@ test("OpenCode start and resume reject closed when readiness cleanup fails", asy
     });
     const attempt =
       mode === "start"
-        ? provider.start({ body: "wait", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" } })
+        ? provider.start({
+            ...DRIVE_DEFAULTS,
+            body: "wait",
+            launchTells: [],
+            cwd: "/tmp",
+            options: {},
+            session: { kind: "fresh" },
+          })
         : provider.resume!({
+            ...DRIVE_DEFAULTS,
             body: "wait",
             launchTells: [],
             cwd: "/tmp",
@@ -1071,6 +1088,7 @@ test("OpenCode V1 adapter resumes the supplied coordinate and forks the exact po
   const fake = fakeOpencode();
   const provider = createOpencodeProvider({ loader: fake.loader });
   const drive = await provider.resume!({
+    ...DRIVE_DEFAULTS,
     body: "continue",
     launchTells: [],
     cwd: "/tmp",
@@ -1128,6 +1146,7 @@ test("OpenCode V1 refuses a Pi coordinate before loading its native runtime", as
   await assert.rejects(
     attemptResult(
       provider.resume!({
+        ...DRIVE_DEFAULTS,
         body: "continue",
         launchTells: [],
         cwd: "/tmp",
@@ -1176,7 +1195,14 @@ test("OpenCode V1 rejects failed prompt admission and cleans up", async () => {
   });
   await assert.rejects(
     attemptResult(
-      provider.start({ body: "fail", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" } }),
+      provider.start({
+        ...DRIVE_DEFAULTS,
+        body: "fail",
+        launchTells: [],
+        cwd: "/tmp",
+        options: {},
+        session: { kind: "fresh" },
+      }),
     ),
     /prompt rejected/u,
   );
@@ -1231,6 +1257,7 @@ test("OpenCode V1 fails terminal observation without native assistant evidence",
     }),
   });
   const drive = await provider.start({
+    ...DRIVE_DEFAULTS,
     body: "idle",
     launchTells: [],
     cwd: "/tmp",
@@ -1287,6 +1314,7 @@ test("OpenCode V1 isolates other sessions and accepts the current Turn error", a
     }),
   });
   const drive = await provider.start({
+    ...DRIVE_DEFAULTS,
     body: "fail",
     launchTells: [],
     cwd: "/tmp",
@@ -1318,6 +1346,7 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
   });
   const provider = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk);
   const attempt = provider.start({
+    ...DRIVE_DEFAULTS,
     body: "work",
     launchTells: [{ id: "tell-1", text: "also" }],
     cwd: tmpdir(),
@@ -1362,6 +1391,7 @@ test("Pi attempt disposal closes events and completion before its sole closed pr
   for (const dispose of ["abort", "forceDispose"] as const) {
     const fake = fakePiSdk({ promptNeverSettles: true });
     const attempt = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start({
+      ...DRIVE_DEFAULTS,
       body: "wait",
       launchTells: [],
       cwd: "/work",
@@ -1378,7 +1408,9 @@ test("Pi attempt disposal closes events and completion before its sole closed pr
     assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "Pi session force-disposed" });
     await draining;
     await attempt.closed;
-    assert.deepEqual(events, [{ type: "session", coordinate: { sessionFile: "/sessions/pi.jsonl", sessionId: "pi-session" } }]);
+    assert.deepEqual(events, [
+      { type: "session", coordinate: { sessionFile: "/sessions/pi.jsonl", sessionId: "pi-session" } },
+    ]);
     assert.equal(fake.seen.disposed, 1);
   }
 });
@@ -1386,6 +1418,7 @@ test("Pi attempt disposal closes events and completion before its sole closed pr
 test("Pi keeps abort pending when native cleanup refuses to settle", async () => {
   const fake = fakePiSdk({ promptNeverSettles: true, abortNeverSettles: true });
   const drive = await createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start({
+    ...DRIVE_DEFAULTS,
     body: "wait",
     launchTells: [],
     cwd: "/work",
@@ -1410,6 +1443,7 @@ test("Pi preserves thinking-only and explicit empty assistant answers", async ()
     ],
   });
   const drive = await createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start({
+    ...DRIVE_DEFAULTS,
     body: "wait",
     launchTells: [],
     cwd: "/work",
@@ -1429,6 +1463,7 @@ test("Pi preserves thinking-only and explicit empty assistant answers", async ()
     events: [{ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "" }] } }],
   });
   const emptyDrive = await createPiProvider({ name: "pi", kind: "pi" }, async () => empty.sdk).start({
+    ...DRIVE_DEFAULTS,
     body: "wait",
     launchTells: [],
     cwd: "/work",
@@ -1450,6 +1485,7 @@ test("Pi adapter resumes and forks only exact sessionFile coordinates", async ()
   });
   const provider = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk);
   const drive = await provider.resume!({
+    ...DRIVE_DEFAULTS,
     body: "continue",
     launchTells: [],
     cwd: "/work",
@@ -1470,6 +1506,7 @@ test("Pi adapter resumes and forks only exact sessionFile coordinates", async ()
   await assert.rejects(
     attemptResult(
       provider.resume!({
+        ...DRIVE_DEFAULTS,
         body: "bad",
         launchTells: [],
         cwd: "/work",
@@ -1491,6 +1528,7 @@ test("Pi readonly admits native enforcement and removes every task-surface mutat
   });
   const provider = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk);
   const drive = await provider.start({
+    ...DRIVE_DEFAULTS,
     body: "inspect",
     launchTells: [],
     cwd: "/work",
@@ -1526,8 +1564,6 @@ test("provider recipe preserves opaque config until adapter construction", async
   );
   assert.doesNotThrow(() =>
     createClaudeProvider({
-      name: "claude",
-      kind: "claude-agent-sdk",
       config: { unexpected: true },
     }),
   );
@@ -1916,6 +1952,7 @@ test("Claude maps narration, drops native streams, and contains runtime skew", a
     },
   }));
   const drive = await provider.start({
+    ...DRIVE_DEFAULTS,
     body: "observe",
     launchTells: [],
     cwd: "/work",
@@ -1980,6 +2017,7 @@ test("Claude adapter admits the native session before returning its answer", asy
     },
   }));
   const drive = await provider.start({
+    ...DRIVE_DEFAULTS,
     body: "build it",
     launchTells: [],
     cwd: "/work",
@@ -1992,16 +2030,20 @@ test("Claude adapter admits the native session before returning its answer", asy
   assert.deepEqual(events[0], { type: "session", coordinate: { sessionId: "session-1" } });
   assert.ok(events.some((event) => event.type === "assistant" && event.text === "working"));
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "done", historyId: "assistant-history-1" });
-  assert.deepEqual(seenOptions, [
-    {
-      cwd: "/work",
-      abortController:
-        seenOptions.length === 0 ? undefined : (seenOptions[0] as { abortController: unknown }).abortController,
-      permissionMode: "bypassPermissions",
-      allowDangerouslySkipPermissions: true,
-      settingSources: ["user", "project", "local"],
-    },
-  ]);
+  const nativeOptions = seenOptions[0] as {
+    cwd: string;
+    permissionMode: string;
+    allowDangerouslySkipPermissions: boolean;
+    settingSources: readonly string[];
+    additionalDirectories?: readonly string[];
+    env?: Readonly<Record<string, string>>;
+  };
+  assert.equal(nativeOptions.cwd, "/work");
+  assert.equal(nativeOptions.permissionMode, "bypassPermissions");
+  assert.equal(nativeOptions.allowDangerouslySkipPermissions, true);
+  assert.deepEqual(nativeOptions.settingSources, ["user", "project", "local"]);
+  assert.deepEqual(nativeOptions.additionalDirectories, ["/tmp/akuma-test-requests"]);
+  assert.equal(nativeOptions.env?.AKUMA_REQUESTS, "/tmp/akuma-test-requests");
 });
 
 test("Claude closes the terminal gate before a delayed Query iterator tail", async () => {
@@ -2051,6 +2093,7 @@ test("Claude closes the terminal gate before a delayed Query iterator tail", asy
     },
   }));
   const drive = await provider.start({
+    ...DRIVE_DEFAULTS,
     body: "initial",
     launchTells: [],
     cwd: "/work",
@@ -2086,6 +2129,7 @@ test("Claude live tell waits for a post-yield source pull and shares one Query",
     },
   }));
   const drive = await provider.start({
+    ...DRIVE_DEFAULTS,
     body: "initial",
     launchTells: [],
     cwd: "/work",
@@ -2140,6 +2184,7 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
     const requestDirectory = join(root, "body-requests");
     mkdirSync(requestDirectory);
     const drive = await provider.start({
+      ...DRIVE_DEFAULTS,
       body: "build",
       launchTells: [],
       cwd: root,
@@ -2191,6 +2236,7 @@ test("Codex maps observations without leaking output or unknown payloads", async
   try {
     const provider = createCodexAppServerProvider(fakeCodex(root, "observations").executable);
     const drive = await provider.start({
+      ...DRIVE_DEFAULTS,
       body: "observe",
       launchTells: [],
       cwd: root,
@@ -2240,6 +2286,7 @@ test("Codex drains admitted native completion narration before terminal closure"
   const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-terminal-drain-"));
   try {
     const drive = await createCodexAppServerProvider(fakeCodex(root, "terminal-drain").executable).start({
+      ...DRIVE_DEFAULTS,
       body: "drain",
       launchTells: [],
       cwd: root,
@@ -2283,6 +2330,7 @@ test("Codex terminal drain has a bounded fallback for a hung producer", async ()
   const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-terminal-hang-"));
   try {
     const drive = await createCodexAppServerProvider(fakeCodex(root, "terminal-hang").executable).start({
+      ...DRIVE_DEFAULTS,
       body: "observe",
       launchTells: [],
       cwd: root,
@@ -2304,6 +2352,7 @@ test("Codex settles when the native process exits without turn completion", asyn
   const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-exit-before-completion-"));
   try {
     const drive = await createCodexAppServerProvider(fakeCodex(root, "exit-before-completion").executable).start({
+      ...DRIVE_DEFAULTS,
       body: "exit",
       launchTells: [],
       cwd: root,
@@ -2327,6 +2376,7 @@ test("Codex app-server abort interrupts and releases its owned child", async () 
     const fake = fakeCodex(root, "interrupt");
     const provider = createCodexAppServerProvider(fake.executable);
     const drive = await provider.start({
+      ...DRIVE_DEFAULTS,
       body: "wait",
       launchTells: [],
       cwd: root,
@@ -2347,6 +2397,7 @@ test("Codex terminal closure fails a hung steer acknowledgement without waiting"
   const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-steer-hung-terminal-"));
   try {
     const drive = await createCodexAppServerProvider(fakeCodex(root, "steer-hung-terminal").executable).start({
+      ...DRIVE_DEFAULTS,
       body: "work",
       launchTells: [],
       cwd: root,
