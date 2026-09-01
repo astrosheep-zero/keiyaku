@@ -12,6 +12,7 @@ import { publishDispatch, readDispatch, readDispatches } from "../src/dispatch/i
 import { privateStatePublicationSeatPath } from "../src/git/private-state-seat.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
+import type { WorldRoot } from "../src/world.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
 
 test("Dispatch publishes one immutable association and preserves its first timestamp", async () => {
@@ -205,7 +206,7 @@ test("Dispatch keeps non-Dispatch CAS failure classifications", async () => {
 });
 
 test("Alias moves are serialized, canonical, and expose the previous target", async () => {
-  const world = mkdtempSync(join(tmpdir(), "keiyaku-alias-"));
+  const world = mkdtempSync(join(tmpdir(), "keiyaku-alias-")) as WorldRoot;
   const alpha = parseAkumaAlias("@alpha");
   const beta = parseAkumaAlias("@beta");
   const first = parseAkuId("aku/worker/11111111").id;
@@ -235,7 +236,7 @@ test("Alias moves are serialized, canonical, and expose the previous target", as
 });
 
 test("Alias corruption is visible instead of becoming an empty authority", async () => {
-  const world = mkdtempSync(join(tmpdir(), "keiyaku-alias-corrupt-"));
+  const world = mkdtempSync(join(tmpdir(), "keiyaku-alias-corrupt-")) as WorldRoot;
   const directory = join(world, ".keiyaku", "akuma");
   try {
     mkdirSync(directory, { recursive: true });
@@ -247,5 +248,5 @@ test("Alias corruption is visible instead of becoming an empty authority", async
 });
 
 test("Alias world coordinates never fall back to process cwd", async () => {
-  await assert.rejects(readAliases(""), /Alias world must be a nonblank path/u);
+  await assert.rejects(readAliases("" as WorldRoot), /Alias world must be a nonblank path/u);
 });

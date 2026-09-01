@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import test from "node:test";
 import { invoke as invokeRaw, type InvocationResult } from "../src/cli/invoke.js";
 import { parseArgv as parseInvocation, type ParsedExecution } from "../src/cli/parse.js";
@@ -23,13 +23,12 @@ import {
 } from "../src/git/repository.js";
 import { contractJournalPath } from "../src/git/identity.js";
 import { lastJournalAtFor, phaseAtFor } from "../src/protocol/read/status.js";
-import { changeId, contractId, contractSegment, snapshotId, type ContractId } from "../src/core/facts/types.js";
+import { changeId, contractId, contractSegment, snapshotId } from "../src/core/facts/types.js";
 import { kanshi, selectKanshi, type KanshiReport, type ContractKanshiRow, type AkumaKanshiRow, type TaskKanshiRow } from "../src/kanshi/index.js";
 import { visibleFleetRows } from "../src/kanshi/fleet.js";
 import { contractNamespace } from "../src/task/identity.js";
 import { projectTaskBoardObservation } from "../src/task/board.js";
-import { serializeTaskDocument, type TaskDocument } from "../src/task/document.js";
-import { Tasks, type TaskId } from "../src/task/index.js";
+import { Tasks } from "../src/task/index.js";
 import { authorityPath, readBoard } from "../src/task/store.js";
 import { World } from "../src/world.js";
 import type { WorldRoot } from "../src/world.js";

@@ -39,7 +39,7 @@ import { bodyRequestExecution, Keiyaku, Repo, World, settings } from "../src/ind
 import { pluginRuntime } from "../src/plugin/runtime.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import { invoke } from "../src/cli/invoke.js";
-import { parseArgv } from "../src/cli/parse.js";
+import { parseArgv, type ParsedExecution } from "../src/cli/parse.js";
 import { makeGitRepository } from "./support/git.js";
 import type { WorldRoot } from "../src/world.js";
 
@@ -66,6 +66,12 @@ function markdown(title: string): string {
     "criterion",
     "",
   ].join("\n");
+}
+
+function executable(argv: readonly string[]): ParsedExecution {
+  const parsed = parseArgv(argv);
+  if (!("command" in parsed)) throw new Error("expected executable command");
+  return parsed;
 }
 
 async function repositoryFixture() {
@@ -292,10 +298,10 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
     const executionCwd = join(raw.path, "nested-worktree");
     mkdirSync(executionCwd);
     const invoked = await invoke(
-      parseArgv(["-C", executionCwd, "call", "worker", "--repo", "..", "--contract", owner, "--alias", alias, "-"]),
+      executable(["-C", executionCwd, "call", "worker", "--repo", "..", "--contract", owner, "--alias", alias, "-"]),
       {
         environment: { ...process.env, KEIYAKU_HOME: configured.home },
-        readStdin: () => "associated",
+        readStdin: async () => "associated",
       },
     );
     assert.equal("kind" in invoked && invoked.kind, "akuma");
@@ -383,10 +389,10 @@ test("managed Contract calls use the appointed Place only when cwd is omitted", 
     assert.equal(appointment.kind, "appointed");
     if (appointment.kind !== "appointed") return;
 
-    const invoked = await invoke(parseArgv(["call", "worker", "--contract", managedId, "-"]), {
+    const invoked = await invoke(executable(["call", "worker", "--contract", managedId, "-"]), {
       cwd: raw.path,
       environment: { ...process.env, KEIYAKU_HOME: configured.home },
-      readStdin: () => "implicit",
+      readStdin: async () => "implicit",
     });
     assert.equal("kind" in invoked && invoked.kind, "akuma");
     if (!("kind" in invoked) || invoked.kind !== "akuma" || invoked.action !== "call") return;
@@ -734,7 +740,8 @@ test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async ()
     if (partial.dispatch.kind !== "failed") return;
     assert.equal(partial.dispatch.failure.kind, "authority-corruption");
   } finally {
-    mutable.fork = originalFork;
+    if (originalFork === undefined) delete mutable.fork;
+    else mutable.fork = originalFork;
     rmSync(raw.path, { recursive: true, force: true });
   }
 });
