@@ -78,7 +78,8 @@
     "tests/namespace-context.test.ts",
     "tests/normalized-identity.test.ts",
     "tests/model-impact.test.ts",
-    "tests/sqlite-transaction-lock.test.ts"
+    "tests/sqlite-transaction-lock.test.ts",
+    "tests/dispatch-alias.test.ts"
   ],
   "exclude": []
 }
