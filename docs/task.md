@@ -32,10 +32,12 @@ Task authority paths contain no symlink component and all Task authority
 observations and replacements use the same Task-owned physical path judgment.
 
 Task reads and writes are asynchronous, complete observations. A Task mutation
-replaces one complete authority document; there is no competing synchronous
-writer. A confirmed Task reset acts only on Task authority under Task custody,
-leaves other product authority alone, and does not turn corruption into a
-general-purpose deletion right.
+replaces one complete authority document. Keiyaku locks serialize cooperating
+writers; an external writer may still race the portable compare-then-rename
+sequence, so detection of that change is best effort rather than an arbitrary-
+writer compare-and-swap guarantee. A confirmed Task reset acts only on Task
+authority under Task custody, leaves other product authority alone, and does
+not turn corruption into a general-purpose deletion right.
 
 ## Lifecycle and relationships
 
@@ -90,8 +92,10 @@ not mutate Contract or Akuma authority.
 ## Coordination and the Contract boundary
 
 Task serializes cooperating allocation and addressed writes, but serialization
-is not truth: comparison with the predecessor observation detects a manual or
-non-cooperating concurrent change and returns a retryable conflict. Lock
+is not truth: comparison with the predecessor observation best-effort detects a
+manual or other non-cooperating concurrent change and returns a retryable
+conflict when observed. Portable filesystems do not provide an arbitrary-writer
+compare-and-swap guarantee between that comparison and replacement. Lock
 cleanup carries no Task fact and cannot alter authority.
 
 Task Markdown deliberately contains no Contract association. Settlement owns

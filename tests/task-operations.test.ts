@@ -712,13 +712,15 @@ test("task lock wait budget defaults to three seconds and classifies busy cheapl
   }
 });
 
-test("manual predecessor movement is refused and idle lock deletion never changes authority", async () => {
+test("manual predecessor movement is best-effort detected and idle lock deletion never changes authority", async () => {
   const { tasks } = await world(),
     id = acceptedId(await tasks.add({ title: "Manual" }));
   const path = join(tasks.root, ".keiyaku", "tasks", "manual.md"),
     original = readFileSync(path),
     manual = Buffer.concat([original, Buffer.from("manual edit\n")]);
   writeFileSync(path, manual);
+  // This covers an external edit observed before replacement; portable rename
+  // cannot prove an arbitrary writer stayed absent after the comparison.
   assert.equal(
     await replaceAuthority({ world: tasks.root, id, expected: original, next: Buffer.from("replacement") }),
     "concurrent-modification",
