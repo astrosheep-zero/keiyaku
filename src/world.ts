@@ -1,4 +1,4 @@
-import { mkdir, realpath, stat } from "node:fs/promises";
+import { lstat, mkdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, parse, resolve } from "node:path";
 
@@ -72,7 +72,7 @@ async function rejectReservedRoot(root: string): Promise<void> {
 async function ensureMarker(root: string): Promise<void> {
   const path = marker(root);
   try {
-    if (!(await stat(path)).isDirectory()) throw new Error("not a directory");
+    if (!(await lstat(path)).isDirectory()) throw new Error("not a directory");
     return;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
@@ -102,7 +102,7 @@ async function locateMarker(input: string): Promise<WorldRoot | null> {
     const filesystemRoot = parse(candidate).root;
     if (candidate !== home && candidate !== filesystemRoot) {
       try {
-        if (!(await stat(marker(candidate))).isDirectory()) {
+        if (!(await lstat(marker(candidate))).isDirectory()) {
           throw new WorldError("invalid-world", `world marker is not a directory: ${marker(candidate)}`);
         }
         return brand(candidate);

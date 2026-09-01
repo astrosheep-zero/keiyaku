@@ -52,6 +52,11 @@ while a reservation is settled only from child Soul, seal, or current leash evid
 a child, reads Contract or Task authority to infer an attempt, or claims
 exactly-once execution.
 
+An execution failure never directly settles a reserved child request. The same
+Soul, seal, and leash adjudication is the sole authority in the serving body
+and in successor recovery; if its evidence is incomplete, the reservation
+remains pending.
+
 The live pump exists only while its parent Body holds the leash. Completion,
 control, or Heart loss closes admission, drains in-flight service to terminal
 Heart settlement, then disposes the channel. Receipt projection follows durable

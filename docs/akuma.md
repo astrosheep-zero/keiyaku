@@ -28,7 +28,12 @@ cancellation asks the publication owner to close only its retained unborn child;
 it cannot invent a third birth result. No blind cleaner adjudicates abandoned
 births.
 
-Publication releases process custody only after the child has retired and the retained leash has proved Soul or permanent Seal; a termination or exit error is evidence to adjudicate, never a reason to wait forever or release blindly.
+Publication custody ends only with proven exit, a permanent Seal, or a durable
+leash handoff. A successful launch may release process custody once Soul is
+proven; post-launch failure and cancellation use the same evidence rule. A
+termination or exit error is evidence to adjudicate, never a reason to wait
+forever or release blindly; when exit is not yet proven, publication hands the
+unborn coordinate to the retained leash for later judgment.
 
 Life is derived solely from leash and latest Heart evidence. A live Body is
 running; an explicitly completed one is asleep; an unsuccessful one is stranded;

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -162,11 +163,7 @@ test("cancelled publication returns born when Soul appears during termination be
         const leash = (await HeldAkumaLeash.try(allocated.paths))!;
         const child: OwnedProcess = {
           pid: 4246,
-          exited: Promise.resolve({
-            code: null,
-            signal: "SIGTERM",
-            log: { path: "/tmp/request-child.log", from: 0, to: 0 },
-          }),
+          exited: Promise.resolve({ code: null, signal: "SIGTERM", log: { path: "/tmp/request-child.log", from: 0, to: 0 } }),
           terminate: async () => {
             terminateCount += 1;
             await leash.birth(allocated.paths, {
@@ -381,6 +378,94 @@ test("cancelled publication remains pending with child custody until termination
     await assert.rejects(publication, /cancelled publication/u);
     assert.equal(releaseCount, 1);
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("reserved child request is adjudicated from child Soul after publication failure", async () => {
+  const value = await fixture(["akuma.call"]);
+  value.leash.release();
+  const id = randomUUID();
+  const pump = await BodyRequestPump.open({
+    paths: value.parent.paths,
+    allowed: value.soul.allowed,
+    bodySequence: 1,
+    now: () => "2026-08-26T00:00:01.000Z",
+    commands: akumaCallRequestCommands({
+      world: value.root,
+      paths: value.parent.paths,
+      parent: value.soul,
+      spawn: async (launch) => {
+        const leash = (await HeldAkumaLeash.try(launch.paths))!;
+        await leash.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-26T00:00:02.000Z" });
+        leash.release();
+        throw new Error("publication exit evidence unavailable");
+      },
+    }),
+    signal: new AbortController().signal,
+  });
+  try {
+    const child = await requestBodyCall({
+      directory: pump.directory,
+      id,
+      world: value.root,
+      archetype: "worker",
+      body: "child",
+      recipe: {
+        provider: { name: "claude", kind: "claude-agent-sdk" },
+        options: {},
+        allowed: ALLOWED_ACTIONS,
+      },
+    });
+    assert.equal((await readRequest(value.parent.paths, id))?.state, "served");
+    assert.equal(child, (await readRequest(value.parent.paths, id))?.child);
+  } finally {
+    await pump.close();
+    value.close();
+  }
+});
+
+test("publication hands off an unborn child when termination fails and custody remains held", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-publication-handoff-")));
+  const controller = new AbortController();
+  let started!: () => void;
+  const launchStarted = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  let held: HeldAkumaLeash | undefined;
+  let childPaths: Awaited<ReturnType<typeof allocateAkumaDirectory>>["paths"] | undefined;
+  let released = false;
+  try {
+    const publication = publishAkuma({
+      worldPath: root,
+      archetype: "worker",
+      signal: controller.signal,
+      async launch(allocated) {
+        childPaths = allocated.paths;
+        held = (await HeldAkumaLeash.try(allocated.paths))!;
+        started();
+        return {
+          pid: 4252,
+          exited: new Promise<Awaited<OwnedProcess["exited"]>>(() => {}),
+          terminate: async () => {
+            throw new Error("terminate denied");
+          },
+          release: () => {
+            released = true;
+          },
+        } satisfies OwnedProcess;
+      },
+    });
+    await launchStarted;
+    controller.abort(new Error("cancel with retained custody"));
+    await assert.rejects(
+      publication,
+      (error: unknown) => error instanceof Error && error.message === "cancel with retained custody",
+    );
+    assert.equal(released, true);
+    assert.equal(await readSoul(childPaths!), null);
+  } finally {
+    held?.release();
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -711,7 +796,11 @@ test("cancelled publication records a termination rejection and still seals befo
         started();
         return {
           pid: 4250,
-          exited: Promise.resolve({ code: null, signal: "SIGTERM", log: { path: "/tmp/request-child.log", from: 0, to: 0 } }),
+          exited: Promise.resolve({
+            code: null,
+            signal: "SIGTERM",
+            log: { path: "/tmp/request-child.log", from: 0, to: 0 },
+          }),
           terminate: async () => {
             leash.release();
             throw new Error("terminate denied");

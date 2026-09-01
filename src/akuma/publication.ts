@@ -4,6 +4,7 @@ import { abortableDelay } from "./abort.js";
 import type { DetachedProcessExit, OwnedProcess } from "../runtime/proc/run.js";
 
 const POLL_MS = 100;
+const CUSTODY_HANDOFF_MS = 1_000;
 export const BIRTH_TIMEOUT_MS = 30_000;
 
 export type BirthInput = Readonly<{ worldPath: string; archetype: string; signal?: AbortSignal }>;
@@ -70,6 +71,21 @@ async function observeSettledExit(
   }
 }
 
+async function observeExitWithin(
+  owned: OwnedProcess,
+  milliseconds: number,
+): Promise<
+  { kind: "timeout" } | { kind: "exited"; exit: DetachedProcessExit } | { kind: "exit-error"; error: unknown }
+> {
+  return await Promise.race([
+    owned.exited.then(
+      (exit) => ({ kind: "exited" as const, exit }),
+      (error) => ({ kind: "exit-error" as const, error }),
+    ),
+    abortableDelay(milliseconds).then(() => ({ kind: "timeout" as const })),
+  ]);
+}
+
 async function awaitBirth(paths: AkumaPaths, owned: OwnedProcess | undefined, signal?: AbortSignal): Promise<Soul> {
   const deadline = performance.now() + BIRTH_TIMEOUT_MS;
   for (;;) {
@@ -119,14 +135,6 @@ async function takeLeashUntil(paths: AkumaPaths, deadline: number): Promise<Held
   }
 }
 
-async function takeLeash(paths: AkumaPaths): Promise<HeldAkumaLeash> {
-  for (;;) {
-    const leash = await HeldAkumaLeash.try(paths);
-    if (leash !== null) return leash;
-    await abortableDelay(POLL_MS);
-  }
-}
-
 async function allocatedSoul(allocated: AllocatedAkuma): Promise<Soul> {
   const soul = await readSoul(allocated.paths);
   if (soul === null) throw new Error("Akuma birth settled without a soul");
@@ -148,20 +156,22 @@ async function settleLaunch(
   allocated: AllocatedAkuma,
   owned: OwnedProcess,
   failure: unknown,
-): Promise<"born" | "sealed"> {
+): Promise<"born" | "sealed" | "handoff"> {
   if ((await readSoul(allocated.paths)) !== null) {
     await allocatedSoul(allocated);
-    try {
-      await owned.exited;
-    } catch {
-      /* Exit diagnostics cannot replace the original publication failure. */
-      throw failure;
+    const settled = await observeExitWithin(owned, CUSTODY_HANDOFF_MS);
+    if (settled.kind === "timeout") {
+      const leash = await HeldAkumaLeash.try(allocated.paths);
+      if (leash === null) return "handoff";
+      leash.release();
     }
+    if (settled.kind === "exit-error") throw failure;
     return "born";
   }
 
   let terminationError: unknown;
   let exitError: unknown;
+  let outcome: "born" | "sealed";
   const preAdmissionExit = diagnostic(failure).startsWith("pre-admission ");
   const settled = preAdmissionExit ? await observeSettledExit(owned) : { kind: "pending" as const };
   if (settled.kind !== "exited") {
@@ -170,10 +180,25 @@ async function settleLaunch(
     } catch (error) {
       terminationError = error;
     }
-    try {
-      await owned.exited;
-    } catch (error) {
-      exitError = error;
+    if (terminationError !== undefined) {
+      const exit = await observeExitWithin(owned, CUSTODY_HANDOFF_MS);
+      if (exit.kind === "timeout") {
+        const leash = await HeldAkumaLeash.try(allocated.paths);
+        if (leash === null) return "handoff";
+        leash.release();
+        exitError = new Error("process did not exit after termination failure");
+      }
+      if (exit.kind === "exited") {
+        exitError = undefined;
+      } else if (exit.kind === "exit-error") {
+        exitError = exit.error;
+      }
+    } else {
+      try {
+        await owned.exited;
+      } catch (error) {
+        exitError = error;
+      }
     }
   } else {
     /* An already-settled pre-admission exit needs no second termination request. */
@@ -184,8 +209,8 @@ async function settleLaunch(
     return "born";
   }
 
-  const leash = await takeLeash(allocated.paths);
-  let outcome: "born" | "sealed";
+  const leash = await HeldAkumaLeash.try(allocated.paths);
+  if (leash === null) return "handoff";
   try {
     outcome = await leash.sealIfUnborn(allocated.paths, {
       evidence: settlementEvidence(failure, terminationError, exitError),

@@ -149,7 +149,7 @@ async function settleReservedSoul(
     : voidRequest(paths, request.id, "reserved child origin does not match the request"));
 }
 
-async function settleReserved(
+export async function settleReserved(
   paths: AkumaPaths,
   parent: Soul,
   request: Extract<RequestFact, { state: "reserved" }>,

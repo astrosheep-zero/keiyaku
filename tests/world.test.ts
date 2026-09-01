@@ -168,3 +168,12 @@ test("World refuses a non-directory marker", async () => {
   await assert.rejects(World.locate(root), /world marker is not a directory/u);
   await assert.rejects(World.at(root), /world marker is not a directory/u);
 });
+
+test("World refuses a symlink marker instead of following it", async () => {
+  const root = temporary();
+  const outside = temporary();
+  mkdirSync(join(outside, "tasks"));
+  symlinkSync(outside, join(root, ".keiyaku"));
+  await assert.rejects(World.locate(root), /world marker is not a directory/u);
+  await assert.rejects(World.at(root), /world marker is not a directory/u);
+});

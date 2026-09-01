@@ -2,6 +2,7 @@ import {
   admitRequest,
   beginRequest,
   isRequestInputConflict,
+  readHeart,
   readRequest,
   serveRequest as serveChildRequest,
   serveUpstreamRequest,
@@ -18,6 +19,7 @@ import {
 } from "./request-wire.js";
 import {
   BodyRequestPump as LifecycleBodyRequestPump,
+  settleReserved,
   type PumpInput as LifecyclePumpInput,
 } from "./request-lifecycle.js";
 export { clearBodyRequestTransport, settleBodyRequests } from "./request-lifecycle.js";
@@ -143,14 +145,21 @@ async function serveResolvedCommand(
     const failure = encodedFailure(request, error);
     const current = await readRequest(input.paths, fact.id);
     if (current === null) throw error;
-    fact =
-      current.state === "admitted" || current.state === "reserved"
-        ? await voidRequest(input.paths, fact.id, diagnostic(error))
-        : current.state === "begun"
-          ? provesNoProductEffect(failure)
-            ? await voidRequest(input.paths, fact.id, diagnostic(error))
-            : await unproveRequest(input.paths, fact.id, diagnostic(error))
-          : current;
+    if (current.state === "reserved") {
+      const parent = (await readHeart(input.paths)).soul;
+      if (parent === null) throw new Error("reserved request settlement requires a born parent Soul");
+      if (!(await settleReserved(input.paths, parent, current, input.now, input.signal))) return true;
+      fact = (await readRequest(input.paths, fact.id)) ?? current;
+    } else {
+      fact =
+        current.state === "admitted"
+          ? await voidRequest(input.paths, fact.id, diagnostic(error))
+          : current.state === "begun"
+            ? provesNoProductEffect(failure)
+              ? await voidRequest(input.paths, fact.id, diagnostic(error))
+              : await unproveRequest(input.paths, fact.id, diagnostic(error))
+            : current;
+    }
     await projectCommandReceipt(input, fact, command, undefined, failure);
   }
   return true;
