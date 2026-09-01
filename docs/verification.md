@@ -19,12 +19,13 @@ Deliver and audit run the selected declarations against the exact integration
 snapshot in a disposable, snapshot-provisioned environment. Caller-current
 settings, user state, lockfiles, and installed dependencies cannot substitute
 for that snapshot authority. Each declaration and scratch setup or cleanup
-hook receives a closed child environment with an explicit empty allowlist: no
-caller process-environment variable is inherited or recorded. Thus matching
-snapshot and declaration subjects execute under the same environment boundary
-and their testimony may be reused. Declarations run in order even after a
-failing command. A terminal run records one ordinary `verified` attestation with a
-satisfied or unsatisfied verdict. A timeout is terminal unsatisfied evidence;
+hook inherits the caller process environment through the shared runtime. That
+ambient environment is execution input only: it is intentionally not captured
+in evidence or made part of Contract/Core authority. Matching snapshot and
+declaration subjects may therefore reuse testimony; this is an accepted
+product tradeoff, not a reproducibility claim. Declarations run in order even
+after a failing command. A terminal run records one ordinary `verified`
+attestation with a satisfied or unsatisfied verdict. A timeout is terminal unsatisfied evidence;
 candidate unavailability, environment setup failure, spawn failure, unknown
 exit, and caller cancellation admit no attestation.
 

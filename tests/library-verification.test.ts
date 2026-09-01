@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { Keiyaku, Repo } from "../src/index.js";
@@ -249,49 +249,65 @@ async function waitForFile(path: string): Promise<void> {
   }
 }
 
-test("Verification provisions only the candidate Settings environment and destroys it afterward", async () => {
-  const repository = repositoryWithMain();
-  writeFileSync(join(repository.path, ".gitignore"), "node_modules/\n");
-  repository.run(["add", ".gitignore"]);
-  repository.run(["commit", "--quiet", "-m", "ignore caller dependencies"]);
-  const contract = await bind(repository, "test -f node_modules/candidate-ready && test ! -e node_modules/caller-only");
-  const worktree = await candidateWorktree(repository, contract);
-  const destroyed = join(worktree, "destroyed");
-  const create = [
-    process.execPath,
-    "-e",
-    [
-      "const fs = require('node:fs');",
-      "if (!fs.existsSync('package-lock.json')) process.exit(1);",
-      "fs.mkdirSync('node_modules', { recursive: true });",
-      "fs.writeFileSync('node_modules/candidate-ready', 'ready');",
-    ].join(" "),
-  ];
-  const destroy = [
-    process.execPath,
-    "-e",
-    `require('node:fs').writeFileSync(${JSON.stringify(destroyed)}, 'destroyed')`,
-  ];
-  writeCandidateSettings(repository, worktree, worktreeSettings(create, destroy));
-  mkdirSync(join(repository.path, "node_modules"), { recursive: true });
-  writeFileSync(join(repository.path, "node_modules", "caller-only"), "caller\n");
+test("Verification provisions candidate settings with ambient environment and destroys it afterward", async () => {
+  const environmentName = "KEIYAKU_TEST_VERIFICATION_AMBIENT";
+  const prior = process.env[environmentName];
+  try {
+    const repository = repositoryWithMain();
+    writeFileSync(join(repository.path, ".gitignore"), "node_modules/\n");
+    repository.run(["add", ".gitignore"]);
+    repository.run(["commit", "--quiet", "-m", "ignore caller dependencies"]);
+    const contract = await bind(
+      repository,
+      `test "\${${environmentName}-}" = deliver && test -f node_modules/candidate-ready && test ! -e node_modules/caller-only`,
+    );
+    const worktree = await candidateWorktree(repository, contract);
+    const destroyed = join(worktree, "destroyed");
+    const create = [
+      process.execPath,
+      "-e",
+      [
+        "const fs = require('node:fs');",
+        "if (!fs.existsSync('package-lock.json')) process.exit(1);",
+        "fs.mkdirSync('node_modules', { recursive: true });",
+        "fs.writeFileSync('node_modules/candidate-ready', 'ready');",
+      ].join(" "),
+    ];
+    const destroy = [
+      process.execPath,
+      "-e",
+      `require('node:fs').writeFileSync(${JSON.stringify(destroyed)}, process.env.${environmentName} ?? '')`,
+    ];
+    writeCandidateSettings(repository, worktree, worktreeSettings(create, destroy));
+    mkdirSync(join(repository.path, "node_modules"), { recursive: true });
+    writeFileSync(join(repository.path, "node_modules", "caller-only"), "caller\n");
+    process.env[environmentName] = "deliver";
 
-  const delivered = await contract.deliver();
+    const delivered = await contract.deliver();
 
-  assert.deepEqual(
-    delivered.facts.map((fact) => fact.kind),
-    ["bound", "deliver", "attestation", "claimed"],
-  );
-  assert.equal(delivered.facts.find((fact) => fact.kind === "attestation")?.data.verdict, "satisfied");
-  assert.equal(existsSync(destroyed), true);
+    assert.deepEqual(
+      delivered.facts.map((fact) => fact.kind),
+      ["bound", "deliver", "attestation", "claimed"],
+    );
+    assert.equal(delivered.facts.find((fact) => fact.kind === "attestation")?.data.verdict, "satisfied");
+    assert.equal(existsSync(destroyed), true);
+    assert.equal(readFileSync(destroyed, "utf8"), "deliver");
+    assert.equal(
+      JSON.stringify(delivered.facts.find((fact) => fact.kind === "attestation")?.data).includes("deliver"),
+      false,
+    );
+  } finally {
+    if (prior === undefined) delete process.env[environmentName];
+    else process.env[environmentName] = prior;
+  }
 });
 
-test("Verification setup hooks ignore host environment variance before reuse", async () => {
+test("Verification setup hooks receive caller environment before reuse", async () => {
   const environmentName = "HOST_FLAG";
   const prior = process.env[environmentName];
   try {
     const repository = repositoryWithMain();
-    const contract = await bind(repository, "test ! -e host-flag");
+    const contract = await bind(repository, `test "\${${environmentName}-}" = audit && test -e host-flag`);
     writeCandidateSettings(
       repository,
       await candidateWorktree(repository, contract),
@@ -309,7 +325,10 @@ test("Verification setup hooks ignore host environment variance before reuse", a
 
     assert.equal(audited.value.verification.kind, "satisfied");
     assert.equal(delivered.value.verificationReuse?.entry, audited.facts[0]?.entry);
-    assert.equal(delivered.facts.some((fact) => fact.kind === "attestation"), false);
+    assert.equal(
+      delivered.facts.some((fact) => fact.kind === "attestation"),
+      false,
+    );
   } finally {
     if (prior === undefined) delete process.env[environmentName];
     else process.env[environmentName] = prior;

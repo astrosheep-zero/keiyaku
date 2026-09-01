@@ -106,12 +106,12 @@ test("unchanged deliver reuses unsatisfied pre-delivery audit Verification", asy
   ]);
 });
 
-test("Verification ignores host environment variance and reuses matching testimony", async () => {
+test("Verification declarations receive ambient environment and reuse matching testimony", async () => {
   const environmentName = "KEIYAKU_TEST_VERIFICATION_HOST_ENVIRONMENT";
   const prior = process.env[environmentName];
   try {
     const repository = repositoryWithMain();
-    const contract = await bind(repository, `test -z "\${${environmentName}-}"`);
+    const contract = await bind(repository, `test "\${${environmentName}-}" = first`);
     commitCandidate(repository);
 
     process.env[environmentName] = "first";
@@ -120,14 +120,25 @@ test("Verification ignores host environment variance and reuses matching testimo
     const second = await contract.audit();
 
     assert.equal(first.value.verification.kind, "satisfied");
-    assert.equal(second.value.verification.kind, "satisfied");
-    assert.deepEqual(first.facts.map((fact) => fact.kind), ["attestation"]);
-    assert.deepEqual(second.facts.map((fact) => fact.kind), ["attestation"]);
+    assert.equal(second.value.verification.kind, "unsatisfied");
+    assert.deepEqual(
+      first.facts.map((fact) => fact.kind),
+      ["attestation"],
+    );
+    assert.deepEqual(
+      second.facts.map((fact) => fact.kind),
+      ["attestation"],
+    );
     assert.deepEqual(second.facts[0]?.data.subject, first.facts[0]?.data.subject);
 
     const delivered = await contract.deliver();
     assert.equal(delivered.value.verificationReuse?.entry, second.facts[0]?.entry);
-    assert.equal(delivered.facts.some((fact) => fact.kind === "attestation"), false);
+    assert.equal(delivered.value.verificationReuse?.verdict, "unsatisfied");
+    assert.equal(
+      delivered.facts.some((fact) => fact.kind === "attestation"),
+      false,
+    );
+    assert.equal(JSON.stringify(second.facts[0]?.data).includes("second"), false);
   } finally {
     if (prior === undefined) delete process.env[environmentName];
     else process.env[environmentName] = prior;
