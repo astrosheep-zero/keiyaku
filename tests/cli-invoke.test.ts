@@ -9,7 +9,6 @@ import { GIT_REF, readRef } from "../src/git/repository.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { HeartAbsentError } from "../src/akuma/heart/index.js";
 import {
-  Delivery,
   Keiyaku,
   KeiyakuRefused,
   KeiyakuRetry,
@@ -39,14 +38,31 @@ const repositoryWithMain = () =>
       }),
     },
   });
-import { invoke } from "../src/cli/invoke.js";
-import { CliUsageError, parseArgv } from "../src/cli/parse.js";
+import { invoke as invokeRaw } from "../src/cli/invoke.js";
+import type { InvocationResult } from "../src/cli/result.js";
+import { CliUsageError, parseArgv as parseInvocation } from "../src/cli/parse.js";
 import { renderText } from "../src/cli/render/text.js";
 import { BindDraftError, preserveBindDraft } from "../src/cli/draft.js";
 import { acceptedDeliver, acceptedReview } from "../src/cli/accepted.js";
-import { contractHead, contractId } from "../src/core/facts/types.js";
+import { changeId, contractHead, contractId, snapshotId } from "../src/core/facts/types.js";
+import { deliveryHandle } from "../src/library/delivery.js";
 import { Tasks } from "../src/task/index.js";
 import { World } from "../src/world.js";
+
+function parseArgv(argv: readonly string[]) {
+  const parsed = parseInvocation(argv);
+  if ("help" in parsed) throw new Error("expected executable command");
+  return parsed;
+}
+
+async function invokeContract(
+  invocation: Parameters<typeof invokeRaw>[0],
+  runtime?: Parameters<typeof invokeRaw>[1],
+): Promise<InvocationResult> {
+  return (await invokeRaw(invocation, runtime)) as InvocationResult;
+}
+
+const invoke = invokeContract;
 
 function deliveryRefFor(contract: ContractId): string {
   return `refs/keiyaku/delivery/kei-${contract.slice("kei/".length)}`;
@@ -91,7 +107,7 @@ async function invokeWithDocument(
   return invoke(parseArgv(argv), {
     cwd: repositoryPath,
     environment,
-    readStdin: () => source,
+    readStdin: async () => source,
   });
 }
 
@@ -142,7 +158,7 @@ function sourceModulesLoadedByCli(
       "",
     ].join("\n"),
   );
-  const env = { ...process.env, ...environment };
+  const env: NodeJS.ProcessEnv = { ...process.env, ...environment };
   delete env.FORCE_COLOR;
   const result = spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), tracer], {
     cwd,
@@ -236,7 +252,7 @@ test("an implicit Contract call refuses before creating its candidate World", as
       invoke(parseArgv(["call", "worker", "--contract", "kei/missing", "-"]), {
         cwd: repository.path,
         environment: {},
-        readStdin: () => Promise.resolve("work"),
+        readStdin: async () => Promise.resolve("work"),
       }),
     (error: unknown) =>
       error instanceof KeiyakuRefused &&
@@ -294,14 +310,27 @@ test("deliver exposes the core-owned unmet prerequisites unchanged in its JSON r
     unmet: [{ contractId: prerequisiteId, state: "active" as const }],
   };
   const placement = { refusal: expected };
+  const delivery = deliveryHandle(
+    {
+      tenderSnapshot: snapshotId("tender"),
+      integration: {
+        predecessor: snapshotId("predecessor"),
+        snapshot: snapshotId("integration"),
+        changeId: changeId("change"),
+      },
+      method: "squash",
+      policy: { requireBranchesToBeUpToDate: false },
+      placement,
+    },
+    async () => null,
+  );
   const delivered = acceptedDeliver(
     {
       facts: [],
       head: contractHead("head"),
-      value: { placement } as Delivery,
-      effects: [],
+      value: delivery,
       lags: [],
-      settlement: { actions: [], lags: [] },
+      settlementLags: [],
     },
     dependentId,
   );
@@ -313,7 +342,7 @@ test("deliver exposes the core-owned unmet prerequisites unchanged in its JSON r
 test("accepted deliver and review transport completion consequences without reconstructing facts", () => {
   const contract = contractId("kei/completion-result");
   const completion = {
-    integration: "final-integration",
+    integration: snapshotId("final-integration"),
     verification: { mode: "reused" as const, verdict: "unsatisfied" as const },
   };
   const continuation = {
@@ -322,16 +351,31 @@ test("accepted deliver and review transport completion consequences without reco
   };
   const envelope = {
     head: contractHead("head"),
-    effects: [],
     lags: [],
-    settlement: { actions: [], lags: [] },
+    settlementLags: [],
   };
+  const delivery = deliveryHandle(
+    {
+      tenderSnapshot: snapshotId("tender"),
+      integration: {
+        predecessor: snapshotId("predecessor"),
+        snapshot: snapshotId("integration"),
+        changeId: changeId("change"),
+      },
+      method: "squash",
+      policy: { requireBranchesToBeUpToDate: false },
+      completion,
+      continuation,
+    },
+    async () => null,
+  );
+  const reviewValue = { completion, continuation };
 
   const delivered = acceptedDeliver(
     {
       ...envelope,
       facts: [],
-      value: { completion, continuation } as Delivery,
+      value: delivery,
     },
     contract,
   );
@@ -349,7 +393,7 @@ test("accepted deliver and review transport completion consequences without reco
           data: { gate: "reviewed", verdict: "satisfied" },
         },
       ] as never,
-      value: { completion, continuation },
+      value: reviewValue,
     },
     contract,
   );
@@ -403,7 +447,7 @@ test("explicit Repo selects Contract storage without replacing the invocation Wo
     parseArgv(["-C", invocationRepository.path, "--repo", contractRepository.path, "bind", "-"]),
     {
       environment: {},
-      readStdin: () => contractDocument("Orthogonal coordinates"),
+      readStdin: async () => contractDocument("Orthogonal coordinates"),
     },
   );
   const id = acceptedContract(result);
@@ -583,7 +627,7 @@ test("journal-writing commands preserve optional actor testimony", async () => {
     invoke(parseArgv(argv), {
       cwd: repository.path,
       environment,
-      readStdin: () => contractDocument("Optional Actor"),
+      readStdin: async () => contractDocument("Optional Actor"),
     });
 
   const unsigned = await command(["bind", "-"], {});
@@ -624,24 +668,26 @@ test("journal-writing commands preserve optional actor testimony", async () => {
 
 test("task creation resolves actor before applying the selected input", async () => {
   const repository = repositoryWithMain();
-  const inherited = (await invoke(parseArgv(["-C", repository.path, "task", "add", "Inherited"]), {
+  const inherited = (await invokeRaw(parseArgv(["-C", repository.path, "task", "add", "Inherited"]), {
     environment: { KEIYAKU_ACTOR_ID: "env-actor" },
   })) as { value: { createdBy?: string } };
   assert.equal(inherited.value.createdBy, "env-actor");
-  const explicit = (await invoke(parseArgv(["-C", repository.path, "task", "add", "Explicit", "--actor", "flag"]), {
+  const explicit = (await invokeRaw(parseArgv(["-C", repository.path, "task", "add", "Explicit", "--actor", "flag"]), {
     environment: { KEIYAKU_ACTOR_ID: "env-actor" },
   })) as { value: { createdBy?: string } };
   assert.equal(explicit.value.createdBy, "flag");
-  const composed = (await invoke(parseArgv(["-C", repository.path, "task", "compose", "-"]), {
+  const composed = (await invokeRaw(parseArgv(["-C", repository.path, "task", "compose", "-"]), {
     environment: { KEIYAKU_ACTOR_ID: "env-actor" },
-    readStdin: () => "+ Composed\n",
-  })) as { kind: string };
+    readStdin: async () => "+ Composed\n",
+  })) as { kind: string; documentChanges?: readonly { taskId: string }[] };
   assert.equal(composed.kind, "accepted");
-  const shown = (await invoke(parseArgv(["-C", repository.path, "task", "show", "task/composed"]))) as {
+  const composedId = composed.documentChanges?.[0]?.taskId;
+  if (composedId === undefined) throw new Error("composed task was not accepted");
+  const shown = (await invokeRaw(parseArgv(["-C", repository.path, "task", "show", composedId]))) as {
     task: { createdBy?: string };
   };
   assert.equal(shown.task.createdBy, "env-actor");
-  const blankEnv = (await invoke(parseArgv(["-C", repository.path, "task", "add", "Blank Env"]), {
+  const blankEnv = (await invokeRaw(parseArgv(["-C", repository.path, "task", "add", "Blank Env"]), {
     environment: { KEIYAKU_ACTOR_ID: "  " },
   })) as { value: { createdBy?: string } };
   assert.equal("createdBy" in blankEnv.value, false);
@@ -887,6 +933,7 @@ test("amend accepts changed prerequisites after delivery and still rejects cycle
   const id = acceptedContract(bound);
   const contract = Keiyaku.of({ repo: await cachedRepoAt(repository.path), id });
   const delivered = await contract.deliver();
+  if (!("facts" in delivered)) throw new Error("delivery did not produce an accepted mutation");
   assert.deepEqual(
     delivered.facts.map((fact) => fact.kind),
     ["bound", "deliver"],
@@ -923,7 +970,6 @@ test("concurrent amend diff uses the accepted predecessor after a competing amen
     contractDocument("Concurrent original"),
   );
   const id = acceptedContract(bound);
-  const contract = Keiyaku.of({ repo: await cachedRepoAt(repository.path), id });
   const amend = Keiyaku.prototype.amend;
   let injected = false;
 
@@ -1079,7 +1125,7 @@ test("managed delivery retains an existing deterministic worktree", async () => 
   assert.equal(managedRepository.effectiveCwd, path);
   assert.equal(managedRepository.primaryWorktree, (await cachedRepositoryAt(repository.path)).primaryWorktree);
   const fromManaged = (argv: readonly string[], source = "") =>
-    invoke(parseArgv(["-C", path, ...argv]), { environment: {}, readStdin: () => source });
+    invoke(parseArgv(["-C", path, ...argv]), { environment: {}, readStdin: async () => source });
   assert.equal(await appointedWorktreePath(managedRepository, id), path);
   assert.notEqual(path, resolve(path, ".keiyaku-v4", "worktrees", "managed-worktree"));
   assert.match(path, /[\\/]\.keiyaku[\\/]wt[\\/]/u);
@@ -1183,7 +1229,7 @@ test("managed abandonment cleans terminal resources from its own worktree cwd", 
 
   const path = await appointedWorktreePath(await cachedRepositoryAt(repository.path), id);
   const fromManaged = (argv: readonly string[], source = "") =>
-    invoke(parseArgv(["-C", path, ...argv]), { environment: {}, readStdin: () => source });
+    invoke(parseArgv(["-C", path, ...argv]), { environment: {}, readStdin: async () => source });
   repository.run(["-C", path, "commit", "--allow-empty", "--quiet", "-m", "managed candidate"]);
   const delivered = await fromManaged(["deliver"]);
   assert.equal(delivered.kind, "accepted");
@@ -1197,10 +1243,9 @@ test("managed abandonment cleans terminal resources from its own worktree cwd", 
     (await observeContract(await cachedRepositoryAt(repository.path), id)).state?.terminal?.kind,
     "abandoned",
   );
-  assert.equal(
-    (await observeContract(await cachedRepositoryAt(repository.path), id)).state?.terminal?.data.note,
-    "scope changed",
-  );
+  const observed = (await observeContract(await cachedRepositoryAt(repository.path), id)).state;
+  if (observed?.terminal?.kind !== "abandoned") throw new Error("abandonment was not persisted");
+  assert.equal(observed.terminal.data.note, "scope changed");
   assert.equal((await readRef(await cachedRepositoryAt(repository.path), deliveryRefFor(id))) !== null, true);
   assert.equal(
     await readRef(await cachedRepositoryAt(repository.path), candidatePinRefFor(id)),
@@ -1219,7 +1264,6 @@ test("a terminal worktree removal failure remains accepted cleanup lag", async (
   const id = acceptedContract(bound);
   const path = await appointedWorktreePath(await cachedRepositoryAt(repository.path), id);
   repository.run(["-C", path, "commit", "--allow-empty", "--quiet", "-m", "retained candidate"]);
-  const candidate = repository.run(["-C", path, "rev-parse", "HEAD"]).trim();
   const delivered = await invoke(parseArgv(["-C", path, "deliver", id]), {
     environment: {},
   });
@@ -1297,7 +1341,7 @@ test("reconcile world command carries a typed discovery failure", async () => {
         cwd: repository.path,
         environment: { KEIYAKU_GIT_PATH: gitPath },
       });
-      const env = { ...process.env, KEIYAKU_GIT_PATH: gitPath, NO_COLOR: "1" };
+      const env: NodeJS.ProcessEnv = { ...process.env, KEIYAKU_GIT_PATH: gitPath, NO_COLOR: "1" };
       delete env.FORCE_COLOR;
       const run = (args: readonly string[]) =>
         spawnSync(
@@ -1384,7 +1428,7 @@ test("blank acquired stdin is usage before World, Repo, or package invocation", 
   ];
   for (const [argv, stdin, pattern] of cases) {
     await assert.rejects(
-      () => invoke(parseArgv(argv), { cwd: missing, environment: {}, readStdin: () => stdin }),
+      () => invoke(parseArgv(argv), { cwd: missing, environment: {}, readStdin: async () => stdin }),
       (error: unknown) =>
         error instanceof CliUsageError &&
         pattern.test(error.message) &&
@@ -1466,7 +1510,7 @@ async function conflictedDeliverCommand() {
   repository.run(["-C", worktree, "add", "shared.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "tender change"]);
   const command = (argv: readonly string[]) =>
-    invoke(parseArgv(["-C", worktree, ...argv]), { environment: {}, readStdin: () => "" });
+    invoke(parseArgv(["-C", worktree, ...argv]), { environment: {}, readStdin: async () => "" });
   return { repository, id, worktree, targetHead, command };
 }
 

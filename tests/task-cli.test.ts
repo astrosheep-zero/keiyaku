@@ -4,9 +4,9 @@ import { existsSync, mkdtempSync, mkdirSync, realpathSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
-import { invoke } from "../src/cli/invoke.js";
+import { invoke as invokeRaw } from "../src/cli/invoke.js";
 import { main } from "../src/cli/main.js";
-import { CliUsageError, parseArgv } from "../src/cli/parse.js";
+import { CliUsageError, parseArgv as parseInvocation } from "../src/cli/parse.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { parseTaskQueryExpression } from "../src/cli/commands/task-query.js";
 import { renderTaskIncompleteDiagnostic, renderTaskText, taskExitCode } from "../src/cli/render/task.js";
@@ -15,7 +15,18 @@ import { displayColumns } from "../src/cli/render/terminal.js";
 import type { TaskInvocationResult } from "../src/cli/commands/task-invoke.js";
 import { Tasks } from "../src/task/index.js";
 import { World } from "../src/world.js";
+import type { SettingsInvocationResult } from "../src/cli/invoke.js";
 import { makeGitRepository } from "./support/git.js";
+
+function parseArgv(argv: readonly string[]) {
+  const parsed = parseInvocation(argv);
+  if ("help" in parsed) throw new Error("expected executable command");
+  return parsed;
+}
+
+async function invoke(invocation: Parameters<typeof invokeRaw>[0], runtime?: Parameters<typeof invokeRaw>[1]) {
+  return (await invokeRaw(invocation, runtime)) as TaskInvocationResult;
+}
 
 function world(): string {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-task-cli-"));
@@ -57,7 +68,7 @@ function shellQuote(value: string): string {
 }
 
 function cliEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env, NO_COLOR: "1" };
+  const env: NodeJS.ProcessEnv = { ...process.env, NO_COLOR: "1" };
   delete env.FORCE_COLOR;
   return env;
 }
@@ -94,7 +105,7 @@ function runCli(args: readonly string[], columns?: number, stdin = ""): Promise<
       stderr += String(chunk);
     });
     child.on("error", reject);
-    if (columns === undefined) child.stdin.end(stdin);
+    if (columns === undefined) child.stdin?.end(stdin);
     child.on("close", (code) =>
       resolveRun({
         code: code ?? 1,
@@ -291,7 +302,7 @@ test("plural show is all-or-nothing and preserves input order", async () => {
   );
 
   const missing = (await invoke(
-    parseArgv(["-C", root, "task", "show", ids[0], "task/missing", ids[2]]),
+    parseArgv(["-C", root, "task", "show", ids[0]!, "task/missing", ids[2]!]),
   )) as TaskInvocationResult;
   assert.deepEqual(missing, { kind: "refused", refusal: { kind: "task-missing", taskId: "task/missing" } });
   assert.doesNotMatch(renderTaskText(textCommand, missing), /first-detail|third-detail/u);
@@ -302,7 +313,7 @@ test("task invocation works outside Git and consumes stdin only when selected", 
   const add = (await invoke(
     parseArgv(["-C", root, "task", "add", "Native CLI", "--state", "on_hold", "--note", "initial"]),
     {
-      readStdin: () => {
+      readStdin: async () => {
         reads += 1;
         return "unused";
       },
@@ -313,7 +324,7 @@ test("task invocation works outside Git and consumes stdin only when selected", 
   const nativeId = (add as { value: { id: string } }).value.id;
   assert.equal(reads, 0);
   const update = (await invoke(parseArgv(["-C", root, "task", "update", nativeId, "--body", "-"]), {
-    readStdin: () => {
+    readStdin: async () => {
       reads += 1;
       return "body from stdin\n";
     },
@@ -328,7 +339,7 @@ test("task invocation works outside Git and consumes stdin only when selected", 
   const noteUpdate = (await invoke(
     parseArgv(["-C", root, "task", "update", nativeId, "--note", "replacement"]),
     {
-      readStdin: () => {
+      readStdin: async () => {
         reads += 1;
         return "unused";
       },
@@ -346,7 +357,7 @@ test("task invocation works outside Git and consumes stdin only when selected", 
 
   const document = "---\ntitle: From document\nstate: done\n---\ncreated closed\n";
   const documentAdd = (await invoke(parseArgv(["-C", root, "task", "add", "-"]), {
-    readStdin: () => document,
+    readStdin: async () => document,
   })) as TaskInvocationResult;
   assert.equal((documentAdd as { kind: string }).kind, "accepted");
   if ((documentAdd as { kind: string }).kind !== "accepted") throw new Error("expected document add");
@@ -357,7 +368,7 @@ test("task invocation works outside Git and consumes stdin only when selected", 
   assert.equal((documentShown as { task: { state: string } }).task.state, "done");
 
   const priorityOnly = (await invoke(parseArgv(["-C", root, "task", "update", nativeId, "--priority", "1"]), {
-    readStdin: () => {
+    readStdin: async () => {
       throw new Error("task update without body must not read stdin");
     },
   })) as TaskInvocationResult;
@@ -369,7 +380,7 @@ test("task invocation works outside Git and consumes stdin only when selected", 
   assert.equal((afterPriority as { task: { body: string; priority: number } }).task.priority, 1);
 
   await assert.rejects(
-    () => invoke(parseArgv(["task", "add", "-"]), { cwd: "/absent/task-blank-stdin", readStdin: () => " \n" }),
+    () => invoke(parseArgv(["task", "add", "-"]), { cwd: "/absent/task-blank-stdin", readStdin: async () => " \n" }),
     (error: unknown) =>
       error instanceof CliUsageError &&
       /task add requires a nonblank stdin document/.test(error.message) &&
@@ -377,7 +388,7 @@ test("task invocation works outside Git and consumes stdin only when selected", 
   );
   const padded = "  keep body  \n";
   const paddedUpdate = (await invoke(parseArgv(["-C", root, "task", "update", nativeId, "--body", "-"]), {
-    readStdin: () => padded,
+    readStdin: async () => padded,
   })) as TaskInvocationResult;
   assert.equal((paddedUpdate as { kind: string }).kind, "accepted");
   const paddedShown = (await invoke(
@@ -449,12 +460,15 @@ test("Task, Settings, and Kanshi share the primary WorldRoot across Git worktree
   const namespace = await invoke(parseArgv(["-C", repository.path, "task", "context"]));
   assert.deepEqual(namespace, { kind: "accepted", value: { namespace: [], source: "default-root" } });
 
-  const settings = await invoke(parseArgv(["-C", linked, "settings"]));
+  const settings = (await invokeRaw(parseArgv(["-C", linked, "settings"]))) as SettingsInvocationResult;
   if (settings.kind !== "settings") throw new Error("expected settings result");
   const primary = realpathSync(repository.path);
   assert.equal(settings.value.scopes.project.path, join(primary, ".keiyaku", "settings.json"));
 
-  const status = await invoke(parseArgv(["-C", linked, "status"]));
+  const status = (await invokeRaw(parseArgv(["-C", linked, "status"]))) as Extract<
+    Awaited<ReturnType<typeof invokeRaw>>,
+    { kind: "status" }
+  >;
   if (status.kind !== "status") throw new Error("expected status result");
   assert.equal(status.report.root, primary);
   assert.equal(status.report.tasks.kind, "present");
@@ -533,20 +547,20 @@ test("task add and compose persist resolved actor only on new documents", async 
   assert.equal(inherited.value.createdBy, "env-actor");
   const fromDocument = (await invoke(parseArgv(["-C", root, "task", "add", "--actor", "document-actor", "-"]), {
     environment,
-    readStdin: () => "---\ntitle: From stdin\n---\n",
+    readStdin: async () => "---\ntitle: From stdin\n---\n",
   })) as { value: { id: string; createdBy: string } };
   assert.equal(fromDocument.value.createdBy, "document-actor");
   await assert.rejects(
     () =>
       invoke(parseArgv(["-C", root, "task", "add", "-"]), {
         environment,
-        readStdin: () => "---\ntitle: Illegal\ncreatedBy: sneaky\n---\n",
+        readStdin: async () => "---\ntitle: Illegal\ncreatedBy: sneaky\n---\n",
       }),
     /unknown task front matter key/u,
   );
   const composed = (await invoke(parseArgv(["-C", root, "task", "compose", "-"]), {
     environment,
-    readStdin: () => ["+ Composed", "as = composed", `@${added.value.id}`, "pri = 0", ""].join("\n"),
+    readStdin: async () => ["+ Composed", "as = composed", `@${added.value.id}`, "pri = 0", ""].join("\n"),
   })) as { kind: string };
   assert.equal(composed.kind, "accepted");
   const composedList = (await Tasks.of(await World.at(root)).list({ selection: "all" })) as {
@@ -569,11 +583,11 @@ test("task add and compose persist resolved actor only on new documents", async 
   if (showCommand.command !== "task" || unsignedShowCommand.command !== "task" || lsCommand.command !== "task") {
     throw new Error("not a task command");
   }
-  const authoredText = renderTaskText(showCommand, authoredShown);
+  const authoredText = renderTaskText(showCommand, authoredShown as TaskInvocationResult);
   assert.match(authoredText, /^created .* · updated .*$/mu);
   assert.match(authoredText, /^created-by explicit-actor$/mu);
   assert.doesNotMatch(authoredText, /createdBy:/u);
-  assert.doesNotMatch(renderTaskText(unsignedShowCommand, unsignedShown), /created-by/u);
+  assert.doesNotMatch(renderTaskText(unsignedShowCommand, unsignedShown as TaskInvocationResult), /created-by/u);
   const listed = (await invoke(parseArgv(["-C", root, "task", "ls"]))) as TaskInvocationResult;
   assert.doesNotMatch(renderTaskText(lsCommand, listed), /created-by |createdBy/u);
   await invoke(parseArgv(["-C", root, "task", "update", added.value.id, "--note", "later"]));
@@ -589,7 +603,7 @@ test("task compose --plan is read-only and exposes the planned order", async () 
   const root = world();
   const argv = ["-C", root, "task", "compose", "--plan", "-"] as const;
   const result = (await invoke(parseArgv(argv), {
-    readStdin: () => ["+ Child", "as = child", "needs = ^parent", "+ Parent", "as = parent", ""].join("\n"),
+    readStdin: async () => ["+ Child", "as = child", "needs = ^parent", "+ Parent", "as = parent", ""].join("\n"),
   })) as TaskInvocationResult;
   assert.equal((result as { kind: string }).kind, "planned");
   const command = parseArgv(["task", "compose", "--plan", "-"]).command;
@@ -607,7 +621,7 @@ test("task compose --plan is read-only and exposes the planned order", async () 
 test("task compose and views flow through native results", async () => {
   const root = world();
   const composed = (await invoke(parseArgv(["-C", root, "task", "compose", "-"]), {
-    readStdin: () => ["+ Parent", "as = parent", "+ Child", "parent = ^parent", ""].join("\n"),
+    readStdin: async () => ["+ Parent", "as = parent", "+ Child", "parent = ^parent", ""].join("\n"),
   })) as TaskInvocationResult;
   assert.equal((composed as { kind: string }).kind, "accepted");
   const composeCommand = parseArgv(["task", "compose", "-"]).command;
@@ -839,7 +853,7 @@ test("built CLI task tree follows parent decomposition at 36 columns", async () 
   for (const title of titles) {
     const added = (await invoke(parseArgv(["-C", root, "task", "add", title]))) as {
       kind: string;
-      value?: { id: string };
+      value: { id: string };
     };
     assert.equal(added.kind, "accepted");
     if (added.kind === "accepted") createdIds.push(added.value.id);
@@ -896,7 +910,9 @@ test("incomplete compose rendering keeps draft on stdout and diagnostics separat
   if (command.command !== "task") throw new Error("not a task command");
   const result = {
     kind: "incomplete" as const,
-    documentChanges: [{ taskId: "task/a" as const, kind: "created" as const, documentDiff: "diff bytes" }],
+    aliases: [],
+    admissionOrder: ["task/a" as import("../src/task/index.js").TaskId],
+    documentChanges: [{ taskId: "task/a" as import("../src/task/index.js").TaskId, kind: "created" as const, documentDiff: "diff bytes" }],
     stopped: { kind: "retry" as const, reason: "busy" as const },
     draft: "ns=/\n+ Remaining body=\n",
   };
@@ -913,6 +929,8 @@ test("incomplete compose keeps an unterminated draft byte-exact at the CLI bound
   if (command.command !== "task") throw new Error("not a task command");
   const result = {
     kind: "incomplete" as const,
+    aliases: [],
+    admissionOrder: [],
     documentChanges: [],
     stopped: { kind: "retry" as const, reason: "busy" as const },
     draft: "ns=/\n+ Remaining",
@@ -1155,6 +1173,7 @@ test("built CLI Task text stays one scan grammar at 80 and 36 columns", async ()
   assert.equal(taskExitCode(presentEmpty), 0);
 
   const absentCommand = parseArgv(["task", "ls"]).command;
+  if (absentCommand.command !== "task") throw new Error("not a task command");
   const missing = (await invoke(parseArgv(["-C", absent, "task", "ls"]))) as TaskInvocationResult;
   assert.deepEqual(missing, { kind: "absent" });
   assert.equal(renderTaskText(absentCommand, missing), "task world absent");
@@ -1174,7 +1193,7 @@ test("built CLI Task text stays one scan grammar at 80 and 36 columns", async ()
   let incomplete: TaskInvocationResult;
   try {
     incomplete = (await invoke(parseArgv(["-C", root, "task", "compose", "-"]), {
-      readStdin: () => ["+ Remaining", "as = remaining", "body <<BODY", "+ literal", "BODY", ""].join("\n"),
+      readStdin: async () => ["+ Remaining", "as = remaining", "body <<BODY", "+ literal", "BODY", ""].join("\n"),
     })) as TaskInvocationResult;
   } finally {
     held.close();
