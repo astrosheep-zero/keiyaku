@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, rmSync, unlinkSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,6 +28,7 @@ import {
   fleetRequestCommands,
   type FleetRequestPort,
 } from "../src/library/fleet.js";
+import { isTellResult, type AkumaTellResult } from "../src/library/fleet-result.js";
 import {
   contractRequestCommand,
   contractRequestProtocol,
@@ -35,6 +36,7 @@ import {
   type ContractRequestPort,
 } from "../src/library/contract-operations.js";
 import { KeiyakuRefused } from "../src/library/refusal.js";
+import { changeId, contractHead, contractId as makeContractId, snapshotId } from "../src/core/facts/types.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { Delivery, Keiyaku, Repo } from "../src/index.js";
 import { invoke } from "../src/cli/invoke.js";
@@ -83,14 +85,16 @@ async function openFleetPump(
 
 async function openContractPump(
   parent: Awaited<ReturnType<typeof born>>,
-  port: ContractRequestPort,
+  port: Pick<ContractRequestPort, "deliver"> &
+    Partial<Pick<ContractRequestPort, "audit" | "review">> &
+    Partial<FleetRequestPort>,
 ): Promise<BodyRequestPump> {
   return await BodyRequestPump.open({
     paths: parent.paths,
     allowed: parent.soul.allowed,
     bodySequence: 1,
     now: () => "2026-08-18T00:00:01.000Z",
-    commands: contractRequestCommands(port),
+    commands: contractRequestCommands(port as ContractRequestPort),
     signal: new AbortController().signal,
   });
 }
@@ -157,7 +161,7 @@ async function requestBodyDeliver(
     directory,
     ...(id === undefined ? {} : { id }),
     command: contractRequestProtocol("contract.deliver"),
-    value: { action: "contract.deliver", ...request },
+    value: { action: "contract.deliver", ...request, contractId: makeContractId(request.contractId) },
     ...(signal === undefined ? {} : { signal }),
   });
   return response.kind === "reference" ? response.reference : response.result;
@@ -218,15 +222,24 @@ async function readTransportClaim(directory: string, id: string): Promise<Readon
   throw new Error(`transport claim ${id} was not found`);
 }
 
-function acceptedContract(marker: string, action: "deliver" | "review") {
-  return {
+type FixtureDeliveryResult = Awaited<ReturnType<ContractRequestPort["deliver"]>>["result"];
+type FixtureReviewResult = Awaited<ReturnType<ContractRequestPort["review"]>>["result"];
+
+function acceptedContract(marker: string, action: "deliver"): FixtureDeliveryResult;
+function acceptedContract(marker: string, action: "review"): FixtureReviewResult;
+function acceptedContract(marker: string, action: "deliver" | "review"): FixtureDeliveryResult | FixtureReviewResult {
+  const result = {
     facts: [],
-    head: "head",
+    head: contractHead("head"),
     value:
       action === "deliver"
         ? {
-            tenderSnapshot: "tender",
-            integration: { predecessor: "predecessor", snapshot: "snapshot", changeId: "change" },
+            tenderSnapshot: snapshotId("tender"),
+            integration: {
+              predecessor: snapshotId("predecessor"),
+              snapshot: snapshotId("snapshot"),
+              changeId: changeId("change"),
+            },
             method: "squash",
             policy: { requireBranchesToBeUpToDate: false },
             verificationSummary: marker,
@@ -235,6 +248,7 @@ function acceptedContract(marker: string, action: "deliver" | "review") {
     lags: [],
     settlementLags: [],
   };
+  return result as FixtureDeliveryResult | FixtureReviewResult;
 }
 
 function noDeliver(): Readonly<{ deliver(): Promise<never> }> {
@@ -1002,7 +1016,9 @@ test("CLI forwarded deliver preserves its selected Repo and uses parent Settings
   try {
     process.env[AKUMA_REQUESTS_ENV] = pump.directory;
     process.env.PATH = "";
-    const result = await invoke(parseArgv(["--repo", contractRepository.path, "deliver", id]), {
+    const parsedDeliver = parseArgv(["--repo", contractRepository.path, "deliver", id]);
+    if (!("command" in parsedDeliver)) throw new Error("expected deliver invocation");
+    const result = await invoke(parsedDeliver, {
       cwd: parentRepository.path,
       environment: {
         KEIYAKU_HOME: childHome,
@@ -1012,14 +1028,17 @@ test("CLI forwarded deliver preserves its selected Repo and uses parent Settings
       },
     });
     const state = await bound.keiyaku.state();
+    if (!("kind" in result)) throw new Error("expected an invocation result");
     assert.equal(result.kind, "accepted");
     assert.equal((await bound.keiyaku.delivery()) instanceof Delivery, true);
     assert.equal(state.delivery?.actor, parent.id);
     assert.equal(state.delivery?.data.policy.requireBranchesToBeUpToDate, true);
     assert.equal(existsSync(hookLog), false);
 
+    const parsedReview = parseArgv(["--repo", contractRepository.path, "review", id, "--unsatisfied", "--summary", "needs work"]);
+    if (!("command" in parsedReview)) throw new Error("expected review invocation");
     const reviewed = await invoke(
-      parseArgv(["--repo", contractRepository.path, "review", id, "--unsatisfied", "--summary", "needs work"]),
+      parsedReview,
       {
         cwd: parentRepository.path,
         environment: {
@@ -1030,6 +1049,7 @@ test("CLI forwarded deliver preserves its selected Repo and uses parent Settings
         },
       },
     );
+    if (!("kind" in reviewed)) throw new Error("expected an invocation result");
     assert.equal(reviewed.kind, "accepted");
     const reviewedState = await bound.keiyaku.state();
     assert.equal(reviewedState.attestations.at(-1)?.actor, parent.id);
@@ -1062,7 +1082,7 @@ test("deliver returns without a durable reference and settles Heart voided", asy
       throw new Error("unexpected kill");
     },
     deliver: async () => {
-      throw new KeiyakuRefused({ kind: "contract-missing", contractId: "kei/not-accepted" });
+      throw new KeiyakuRefused({ kind: "contract-missing", contractId: makeContractId("kei/not-accepted") });
     },
   });
   try {
@@ -1182,11 +1202,11 @@ test("completion fences admission but drains a returned delivery reference", asy
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-deliver-drain-")));
   const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
   let started!: () => void;
-  let release!: (value: Readonly<{ result: unknown; deliveryFactId: string }>) => void;
+  let release!: (value: Readonly<{ result: FixtureDeliveryResult; deliveryFactId: string }>) => void;
   const executorStarted = new Promise<void>((resolve) => {
     started = resolve;
   });
-  const executorReleased = new Promise<Readonly<{ result: unknown; deliveryFactId: string }>>((resolve) => {
+  const executorReleased = new Promise<Readonly<{ result: FixtureDeliveryResult; deliveryFactId: string }>>((resolve) => {
     release = resolve;
   });
   const id = randomUUID();
@@ -1378,15 +1398,15 @@ test("transport rejects malformed target sets and foreign World coordinates befo
     ...noDeliver(),
     wait: async () => {
       calls += 1;
-      return {};
+      throw new Error("unexpected wait");
     },
     tell: async () => {
       calls += 1;
-      return {};
+      throw new Error("unexpected tell");
     },
     kill: async () => {
       calls += 1;
-      return { result: {}, service: [] };
+      throw new Error("unexpected kill");
     },
   });
   let closed = false;
@@ -1466,8 +1486,9 @@ test("a forwarded Tell writes its transport and the direct parent enters the tel
     );
     assert.equal(outcomes.filter((value) => (value as { kind: string }).kind === "returned").length, 1);
     const returned = outcomes.find(
-      (value): value is Extract<(typeof outcomes)[number], { kind: "returned" }> =>
-        (value as { kind: string }).kind === "returned",
+      (value): value is Extract<(typeof outcomes)[number], { kind: "returned" }> & { result: AkumaTellResult } =>
+        (value as { kind: string }).kind === "returned" &&
+        isTellResult((value as Extract<(typeof outcomes)[number], { kind: "returned" }>).result),
     );
     assert.equal(returned?.result.tell.admission.tellId, id);
     assert.deepEqual(returned?.result.tell.row, {
@@ -1508,7 +1529,7 @@ test("forwarded materialization retains and replays its handoff evidence", async
   const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
   const materialized = {
     kind: "integration-conflict-materialized" as const,
-    targetHead: "target-head",
+    targetHead: snapshotId("target-head"),
     conflictPaths: ["shared.txt"],
     workspace: { kind: "worktree" as const, path: "/tmp/wt" },
   };

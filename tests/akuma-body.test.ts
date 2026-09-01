@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { CONTROL_RESPONSE_MS, handoffPendingTells } from "../src/akuma/body.js";
-import { driveAkumaBody as runAkumaBody, type BodyLaunch, type TellWakeRuntime } from "../src/akuma/body.js";
+import { driveAkumaBody as runAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import {
   HeldAkumaLeash,
@@ -17,15 +17,14 @@ import {
   readRequest,
   readSoul,
   recordSession,
-  recordTell,
+  recordTell as heartRecordTell,
   requestPause,
   requestStop,
   reserveRequest,
   stopRequested,
-  type AkuId,
 } from "../src/akuma/heart/index.js";
 import type { ProviderOptions } from "../src/akuma/provider-recipe.js";
-import { allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
+import { allocateAkumaDirectory, pathsForAkuId, type AkuId } from "../src/akuma/identity.js";
 import {
   createProviderAttempt,
   type AgentEvent,
@@ -34,7 +33,7 @@ import {
   type Session,
   type TurnResult,
 } from "../src/akuma/provider.js";
-import { akumaCallRequestCommands, requestForwardedAkumaCall as requestBodyCall } from "../src/akuma/call-request.js";
+import { requestForwardedAkumaCall as requestBodyCall } from "../src/akuma/call-request.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import type { PluginSignal } from "../src/plugin/public.js";
 import { pluginRuntime } from "../src/plugin/runtime.js";
@@ -137,31 +136,65 @@ function sessionAttempt(establish: () => Promise<Session>) {
   });
 }
 
-function attemptForSession(value: Promise<Session> | ProviderAttempt<Session>): ProviderAttempt<Session> {
-  if ("result" in value) return value;
+type FixtureProviderAdapter = Omit<ProviderAdapter, "start" | "resume"> & {
+  start: (
+    input: Parameters<ProviderAdapter["start"]>[0],
+  ) => Promise<FixtureSession> | ProviderAttempt<FixtureSession>;
+  resume?: (
+    input: Parameters<NonNullable<ProviderAdapter["resume"]>>[0],
+  ) => Promise<FixtureSession> | ProviderAttempt<FixtureSession>;
+};
+
+type FixtureSession = Omit<Session, "forceDispose"> & { forceDispose?: () => Promise<void> };
+
+function normalizeSession(session: FixtureSession): Session {
+  return { ...session, forceDispose: session.forceDispose ?? (async () => {}) };
+}
+
+function attemptForFixtureSession(value: Promise<FixtureSession> | ProviderAttempt<FixtureSession>): ProviderAttempt<Session> {
+  if ("result" in value) return value as unknown as ProviderAttempt<Session>;
   return createProviderAttempt(undefined, async (custody) => {
-    const session = await value;
+    const session = normalizeSession(await value);
     custody.own(sessionResource(session));
     return session;
   });
 }
 
-function bodyAdapter(adapter: ProviderAdapter): ProviderAdapter {
+function bodyAdapter(adapter: FixtureProviderAdapter): ProviderAdapter {
   return {
     ...adapter,
-    start: (input) => attemptForSession(adapter.start(input) as Promise<Session> | ProviderAttempt<Session>),
+    start: (input) => attemptForFixtureSession(adapter.start(input)),
     ...(adapter.resume === undefined
       ? {}
       : {
           resume: (input: Parameters<NonNullable<ProviderAdapter["resume"]>>[0]) =>
-            attemptForSession(adapter.resume!(input) as Promise<Session> | ProviderAttempt<Session>),
+            attemptForFixtureSession(adapter.resume!(input)),
         }),
-  };
+  } as ProviderAdapter;
 }
 
-async function driveAkumaBody(...input: Parameters<typeof runAkumaBody>): Promise<void> {
-  if (input[1] === undefined) await runAkumaBody(...input);
-  else await runAkumaBody(input[0], bodyAdapter(input[1]), input[2]);
+type FixtureBodyLaunch = Omit<BodyLaunch, "seed"> & {
+  seed?: Omit<NonNullable<BodyLaunch["seed"]>, "allowed"> & { allowed?: NonNullable<BodyLaunch["seed"]>["allowed"] };
+};
+
+function normalizeLaunch(launch: FixtureBodyLaunch): BodyLaunch {
+  return (launch.seed === undefined
+    ? launch
+    : { ...launch, seed: { allowed: ALLOWED_ACTIONS, ...launch.seed } }) as BodyLaunch;
+}
+
+async function driveAkumaBody(
+  launch: FixtureBodyLaunch,
+  adapter: FixtureProviderAdapter | undefined,
+  runtime: Parameters<typeof runAkumaBody>[2],
+): Promise<void> {
+  const normalized = normalizeLaunch(launch);
+  if (adapter === undefined) await runAkumaBody(normalized, undefined, runtime);
+  else await runAkumaBody(normalized, bodyAdapter(adapter), runtime);
+}
+
+async function recordTell(paths: Parameters<typeof heartRecordTell>[0], tell: Readonly<{ id: string; body: string; recordedAt: string }>) {
+  return await heartRecordTell(paths, { kind: "tell", ...tell });
 }
 
 async function eventually(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
@@ -194,11 +227,13 @@ function adapter(
       finishEvents = resolve;
     });
     assert.ok(call.requests);
+    const sessionId = call.session.kind === "fresh" ? "fresh" : call.session.coordinate.sessionId;
+    if (sessionId !== "fresh") assert.ok(sessionId);
     input.starts.push({
       body: call.body,
       launchTells: call.launchTells,
       options: call.options,
-      session: call.session.kind === "fresh" ? "fresh" : call.session.coordinate.sessionId,
+      session: sessionId,
     });
     return {
       admission: { fence: `fixture-${input.starts.length}` },
@@ -227,7 +262,7 @@ test("body births, admits native session, records the turn, and exits only when 
   try {
     const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abcd" });
     await initializeHeart(allocated.paths);
-    const launch: BodyLaunch = {
+    const launch: FixtureBodyLaunch = {
       paths: allocated.paths,
       seed: {
         id: allocated.id,
@@ -296,7 +331,7 @@ test("body births, admits native session, records the turn, and exits only when 
       { paths: allocated.paths },
       adapter({
         starts,
-        events: [{ type: "action", note: "Started" }],
+        events: [{ type: "note", text: "Started" }],
         result: { kind: "answered", answer: "adjusted", historyId: "history-2" },
       }),
       {
@@ -348,7 +383,7 @@ test("turn-outcome plugins observe every committed answered Turn exactly once", 
     turnOutcomePluginGlobal.__keiyakuTurnOutcomePluginRecorder = recorder;
     await pluginRuntime({ world: await World.at(root) });
     await eventually(() => recorder.activations === 1);
-    const launch: BodyLaunch = {
+    const launch: FixtureBodyLaunch = {
       paths: allocated.paths,
       seed: {
         id: allocated.id,
@@ -587,7 +622,7 @@ test("live receipt persistence waits for its Body-scoped delivery mapping", asyn
     const observed = new Promise<void>((resolve) => {
       tellObserved = resolve;
     });
-    const live: ProviderAdapter = {
+    const live: FixtureProviderAdapter = {
       admitOptions(options) {
         return { kind: "admitted", options };
       },
@@ -667,7 +702,7 @@ test("a receipt-free live acknowledgement settles the tell in the current Body",
     const observed = new Promise<void>((resolve) => {
       tellObserved = resolve;
     });
-    const live: ProviderAdapter = {
+    const live: FixtureProviderAdapter = {
       admitOptions(options) {
         return { kind: "admitted", options };
       },
@@ -741,7 +776,7 @@ test("a Session without live tell hands off while narration remains open", async
     });
     await initializeHeart(allocated.paths);
     let aborts = 0;
-    const incumbent: ProviderAdapter = {
+    const incumbent: FixtureProviderAdapter = {
       admitOptions(options) {
         return { kind: "admitted", options };
       },
@@ -824,7 +859,9 @@ test("a Session without live tell hands off while narration remains open", async
     assert.equal(released, 1);
 
     const launches: Array<readonly Readonly<{ id: string; text: string }>[]> = [];
-    const successorStart = async (input: Parameters<ProviderAdapter["start"]>[0]) => {
+    const successorStart = async (
+      input: Parameters<ProviderAdapter["start"]>[0] | Parameters<NonNullable<ProviderAdapter["resume"]>>[0],
+    ) => {
       launches.push(input.launchTells);
       return {
         admission: { fence: "successor" },
@@ -974,7 +1011,7 @@ test("a Tell after Session terminality stays pending without replacing the answe
         async abort() {},
       };
     };
-    const provider: ProviderAdapter = {
+    const provider: FixtureProviderAdapter = {
       admitOptions(options) {
         return { kind: "admitted", options };
       },
@@ -1266,7 +1303,7 @@ test("a drive drains Body Requests before recording its terminal turn", async ()
     writeFileSync(staleTransport, "stale");
     let requestDirectory: string | undefined;
     let childId: AkuId | undefined;
-    const provider: ProviderAdapter = {
+    const provider: FixtureProviderAdapter = {
       admitOptions(options) {
         return { kind: "admitted", options };
       },
@@ -1322,6 +1359,12 @@ test("a drive drains Body Requests before recording its terminal turn", async ()
           const child = (await HeldAkumaLeash.try(launch.paths))!;
           await child.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-09T00:00:01.000Z" });
           child.release();
+          return {
+            pid: 0,
+            exited: Promise.resolve({ code: 0, signal: null, log: { path: "", from: 0, to: 0 } }),
+            async terminate() {},
+            release() {},
+          } satisfies OwnedProcess;
         },
       },
     );
@@ -1424,7 +1467,7 @@ test("the soul retains the summon cwd before native session admission", async ()
   try {
     const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "87654321" });
     await initializeHeart(allocated.paths);
-    const launch: BodyLaunch = {
+    const launch: FixtureBodyLaunch = {
       paths: allocated.paths,
       seed: {
         id: allocated.id,
@@ -1506,6 +1549,7 @@ test("a successor admits through the leash without reconstructing custody of an 
       options: {},
       origin: { kind: "direct" as const },
       cwd: root,
+      allowed: ALLOWED_ACTIONS,
       createdAt: "2026-08-08T00:00:00.000Z",
     };
     const predecessorLeash = (await HeldAkumaLeash.try(allocated.paths))!;
@@ -1697,7 +1741,7 @@ test("pause aborts the current drive and records the body as put down", async ()
     const completion = new Promise<TurnResult>((resolve) => {
       settle = resolve;
     });
-    const running: ProviderAdapter = {
+    const running: FixtureProviderAdapter = {
       admitOptions(options) {
         return { kind: "admitted", options };
       },
@@ -1707,7 +1751,7 @@ test("pause aborts the current drive and records the body as put down", async ()
           events: {
             async *[Symbol.asyncIterator]() {
               while (!aborted) {
-                yield { type: "action" as const, note: "Working" };
+                yield { type: "note" as const, text: "Working" };
                 await new Promise((resolve) => setTimeout(resolve, 10));
               }
             },

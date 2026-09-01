@@ -18,7 +18,7 @@ import {
   reserveRequest,
   type Soul,
 } from "../src/akuma/heart/index.js";
-import { allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
+import { allocateAkumaDirectory, pathsForAkuId, type AkuId } from "../src/akuma/identity.js";
 import { publishAkuma } from "../src/akuma/publication.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { akumaCallRequestCommands, requestForwardedAkumaCall as requestBodyCall } from "../src/akuma/call-request.js";
@@ -79,8 +79,7 @@ test("a caller gets an unknown transport outcome when its request channel disapp
         allowed: ALLOWED_ACTIONS,
       },
     });
-    let path: string | undefined;
-    while ((path = requestTransportPath(directory, id)) === undefined)
+    while (requestTransportPath(directory, id) === undefined)
       await new Promise((resolve) => setTimeout(resolve, 5));
     rmSync(directory, { recursive: true, force: true });
     await assert.rejects(
@@ -311,7 +310,7 @@ test("cancelled publication terminates its child, observes Seal, and then reject
     try {
       assert.equal(
         await leash.birth(childPaths!, {
-          id: "aku/worker/00000000",
+          id: "aku/worker/00000000" as AkuId,
           archetype: "worker",
           provider: { name: "codex-app-server", kind: "codex-app-server" },
           options: {},
@@ -419,7 +418,8 @@ test("reserved child request is adjudicated from child Soul after publication fa
       },
     });
     assert.equal((await readRequest(value.parent.paths, id))?.state, "served");
-    assert.equal(child, (await readRequest(value.parent.paths, id))?.child);
+    const fact = await readRequest(value.parent.paths, id);
+    assert.equal(child, fact?.state === "served" && "child" in fact ? fact.child : null);
   } finally {
     await pump.close();
     value.close();
@@ -495,7 +495,7 @@ test("a closed request channel does not report a reserved child as voided", asyn
     );
     assert.equal((await readRequest(value.parent.paths, id))?.state, "reserved");
   } finally {
-    childLeash?.release();
+    (childLeash as HeldAkumaLeash | null)?.release();
     await pump.close().catch(() => undefined);
     value.close();
   }

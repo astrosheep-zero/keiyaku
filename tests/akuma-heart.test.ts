@@ -29,7 +29,7 @@ import {
   readNonterminalRequests,
   readRequest,
   recordSession,
-  recordTell,
+  recordTell as heartRecordTell,
   recordTellDeliveries,
   recordTellReceipt,
   requestPause,
@@ -47,9 +47,10 @@ import { decodeSoul, decodeSoulRow, encodeSoul, encodeSoulRow } from "../src/aku
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { insertTellFact } from "../src/akuma/heart/tells.js";
 import { turnRecipe } from "../src/akuma/turn-drive.js";
+import { World } from "../src/world.js";
 
 async function fixture() {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-heart-"));
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-heart-")));
   const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abcd" });
   await initializeHeart(allocated.paths);
   const soul: Soul = {
@@ -64,6 +65,13 @@ async function fixture() {
     createdAt: "2026-08-08T00:00:00.000Z",
   };
   return { root, allocated, soul, close: () => rmSync(root, { recursive: true, force: true }) };
+}
+
+async function recordTell(
+  paths: Parameters<typeof heartRecordTell>[0],
+  tell: Readonly<{ id: string; body: string; recordedAt: string }>,
+) {
+  return await heartRecordTell(paths, { kind: "tell", ...tell });
 }
 
 test("existing Heart opens adjudicate absence without recreating heart.db", async () => {
@@ -381,7 +389,6 @@ test("Tell reports held only from its spawned child's private leash refusal", as
 
 test("Tell lets a durably told successor win against a losing child exit", async () => {
   const value = await fixture();
-  let winnerSequence: number | undefined;
   try {
     const born = (await HeldAkumaLeash.try(value.allocated.paths))!;
     await born.birth(value.allocated.paths, value.soul);
@@ -396,7 +403,6 @@ test("Tell lets a durably told successor win against a losing child exit", async
         async spawn(): Promise<OwnedProcess> {
           const winner = (await HeldAkumaLeash.try(value.allocated.paths))!;
           const body = await winner.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
-          winnerSequence = body.sequence;
           const turn = await beginTurn(value.allocated.paths, {
             bodySequence: body.sequence,
             startedAt: value.soul.createdAt,
@@ -1306,9 +1312,9 @@ test("soul codec hard-fails invalid known members", () => {
     { name: "non-string allowed action", change: (soul) => ({ ...soul, allowed: [1] }) },
   ];
   for (const { name, change } of corruptions) {
-    assert.throws(() => decodeSoul(change(codecSoul())), undefined, name);
-    assert.throws(() => decodeSoulRow({ soul_json: JSON.stringify(change(codecSoul())) }), undefined, name);
-    assert.throws(() => encodeSoulRow(change(codecSoul()) as Soul), undefined, name);
+    assert.throws(() => decodeSoul(change(codecSoul())), undefined as never, name);
+    assert.throws(() => decodeSoulRow({ soul_json: JSON.stringify(change(codecSoul())) }), undefined as never, name);
+    assert.throws(() => encodeSoulRow(change(codecSoul()) as Soul), undefined as never, name);
   }
   assert.throws(() => decodeSoulRow({ soul_json: "not json" }), SyntaxError);
   assert.throws(() => decodeSoulRow({ soul_json: JSON.stringify("garbage") }));
@@ -1380,8 +1386,8 @@ test("soul codec decodes canonically, deep-freezes, and round-trips", () => {
   assert.deepEqual(JSON.parse(encodeSoul(decodeSoul(preFeature))).allowed, ALLOWED_ACTIONS);
 
   assert.throws(
-    () => encodeSoulRow({ ...codecSoul(), options: { readonly: true }, readonly: undefined }),
-    undefined,
+    () => encodeSoulRow({ ...codecSoul(), options: { readonly: true }, readonly: undefined } as unknown as Soul),
+    undefined as never,
     "encode validates the consistency rule",
   );
   assert.equal(
@@ -1413,16 +1419,16 @@ function afterSnapshotQuery(after: () => void): () => void {
       fired = true;
       after();
     };
-    statement.get = function (this: typeof statement, ...args: Parameters<typeof statement.get>) {
-      const result = get.apply(this, args);
+    statement.get = function (this: typeof statement, ...args: unknown[]) {
+      const result = Reflect.apply(get, this, args);
       fire();
       return result;
-    };
-    statement.all = function (this: typeof statement, ...args: Parameters<typeof statement.all>) {
-      const result = all.apply(this, args);
+    } as unknown as typeof statement.get;
+    statement.all = function (this: typeof statement, ...args: unknown[]) {
+      const result = Reflect.apply(all, this, args);
       fire();
       return result;
-    };
+    } as unknown as typeof statement.all;
     return statement;
   };
   return () => {
@@ -1551,6 +1557,7 @@ test("readHeart returns one related Heart-fact epoch", async () => {
         admittedAt: "2026-08-08T00:00:01.000Z",
       });
       insertTellFact(writer, {
+        kind: "tell",
         id: "tell-concurrent",
         body: "concurrent",
         recordedAt: "2026-08-08T00:00:02.000Z",
