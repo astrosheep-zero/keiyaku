@@ -18,7 +18,13 @@ import {
   writeCommit,
   writeStateCommit,
 } from "../src/git/repository.js";
-import { GitPlumbingError, consumeGitStdout, runGit, runGitWithEnvironment, withGitAbortSignal } from "../src/git/process.js";
+import {
+  GitPlumbingError,
+  consumeGitStdout,
+  runGit,
+  runGitWithEnvironment,
+  withGitAbortSignal,
+} from "../src/git/process.js";
 import { worktreePath } from "../src/git/workspace.js";
 import { gitExecutablePath, makeGitRepository, waitForFile, withGitShim } from "./support/git.js";
 
@@ -245,7 +251,8 @@ test("cancelling streamed Git execution uses its capability signal", async () =>
       controller.abort();
       await assert.rejects(
         pending,
-        (error: unknown) => error instanceof GitPlumbingError && /--version: git process ended with cancelled/u.test(error.message),
+        (error: unknown) =>
+          error instanceof GitPlumbingError && /--version: git process ended with cancelled/u.test(error.message),
       );
     },
   );

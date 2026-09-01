@@ -146,12 +146,7 @@ export async function executeVerification(input: ExecuteVerificationInput): Prom
     try {
       const hooks = worktreeHooksFrom({ settings: await input.projectSettings(scratch.cwd) });
       destroy = hooks.destroy;
-      const readiness = await runHookCommands(
-        scratch.cwd,
-        hooks.create,
-        input.signal,
-        CLOSED_VERIFICATION_ENVIRONMENT,
-      );
+      const readiness = await runHookCommands(scratch.cwd, hooks.create, input.signal, CLOSED_VERIFICATION_ENVIRONMENT);
       outcome =
         readiness.kind === "cancelled"
           ? { kind: "cancelled" }

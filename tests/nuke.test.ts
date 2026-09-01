@@ -91,18 +91,18 @@ async function runningAkuma(world: Awaited<ReturnType<typeof testWorld>>) {
           settle({ kind: "failed", diagnostic: "stopped" });
         };
         const session = {
-        admission: { fence: "nuke-fixture-turn" },
-        events: {
-          async *[Symbol.asyncIterator]() {
-            while (!aborted) {
-              yield { type: "note" as const, text: "working" };
-              await new Promise((resolve) => setTimeout(resolve, 10));
-            }
+          admission: { fence: "nuke-fixture-turn" },
+          events: {
+            async *[Symbol.asyncIterator]() {
+              while (!aborted) {
+                yield { type: "note" as const, text: "working" };
+                await new Promise((resolve) => setTimeout(resolve, 10));
+              }
+            },
           },
-        },
-        completion,
-        abort: stop,
-        forceDispose: stop,
+          completion,
+          abort: stop,
+          forceDispose: stop,
         };
         custody.own({
           closed: completion.then(() => undefined),
@@ -258,7 +258,7 @@ test("confirmed nuke cleans a legacy Heart schema and continues independent owne
       "CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)",
     );
     leash.close();
-    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 21/u);
+    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 22/u);
     await assert.rejects(HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
     writeFileSync(allocated.paths.log, "stdio\n");
     writeFileSync(`${allocated.paths.heart}-wal`, "wal\n");
@@ -460,7 +460,10 @@ test("Git nuke exact-read-backs an unknown state deletion before topology cleanu
   const marker = join(mkdtempSync(join(tmpdir(), "keiyaku-v4-nuke-unknown-state-")), "done");
   try {
     const capability = await repositoryAt(fixture.world);
-    const held = await acquireSqliteTransactionLock({ path: privateStatePublicationSeatPath(capability), mode: "immediate" });
+    const held = await acquireSqliteTransactionLock({
+      path: privateStatePublicationSeatPath(capability),
+      mode: "immediate",
+    });
     const arrival = Promise.withResolvers<void>();
     const pending = withGitShim(
       gitNukeShim(

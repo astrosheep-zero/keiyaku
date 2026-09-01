@@ -101,19 +101,14 @@ function coordinateFromPath(tasksDirectory: string, path: string) {
   return parseTaskId(`task/${local.slice(0, -3).split(sep).join("/")}`);
 }
 
-function ownedTaskId(tasksDirectory: string, path: string): TaskId | null {
-  try {
-    return formatTaskId(coordinateFromPath(tasksDirectory, path));
-  } catch {
-    return null;
-  }
-}
-
 async function ownedAuthorityCandidates(directory: string): Promise<readonly Readonly<{ id: TaskId; path: string }>[]> {
   const candidates: Readonly<{ id: TaskId; path: string }>[] = [];
   for (const path of await authorityFiles(directory)) {
-    const id = ownedTaskId(directory, path);
-    if (id !== null) candidates.push({ id, path });
+    try {
+      candidates.push({ id: formatTaskId(coordinateFromPath(directory, path)), path });
+    } catch {
+      // Files outside the Task identity grammar are not owned candidates.
+    }
   }
   return candidates;
 }

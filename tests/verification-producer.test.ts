@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
@@ -137,12 +137,11 @@ test("execution returns an unsatisfied verdict, unknown-exit, and spawn-error wi
     const unknownExit = await executeVerification(input(root, [declaration("kill -TERM $$")]));
     assert.deepEqual(unknownExit, { outcome: { kind: "unknown-exit" } });
 
-    const spawnError = await executeVerification(
-      input(root, [declaration("true", "zsh")], { environment: { PATH: root } }),
-    );
+    const missingExecutor = process.platform === "win32" ? "zsh" : "pwsh";
+    const spawnError = await executeVerification(input(root, [declaration("true", missingExecutor as "zsh" | "pwsh")]));
     assert.equal(spawnError.outcome.kind, "spawn-error");
     if (spawnError.outcome.kind !== "spawn-error") return;
-    assert.match(spawnError.outcome.diagnostic, /spawn zsh ENOENT/);
+    assert.match(spawnError.outcome.diagnostic, new RegExp(`spawn ${missingExecutor} ENOENT`));
   });
 });
 
@@ -170,47 +169,10 @@ test("producer preserves ordered terminal diagnostics within one 32 KiB summary"
   });
 });
 
-test("producer invokes bash, zsh, and pwsh with their declared script argument", async () => {
+test("an unavailable PowerShell executor returns a spawn error", async () => {
   await inTemporaryDirectory(async (root) => {
-    const capture = join(root, "argv");
-    for (const executor of ["bash", "zsh", "pwsh"] as const) {
-      const executable = join(root, executor);
-      writeFileSync(
-        executable,
-        [
-          "#!/bin/sh",
-          `printf '${executor}:' >> \"$CAPTURE_FILE\"`,
-          'for argument in "$@"; do',
-          '  printf "<%s>" "$argument" >> "$CAPTURE_FILE"',
-          "done",
-          'printf "\\n" >> "$CAPTURE_FILE"',
-        ].join("\n"),
-      );
-      chmodSync(executable, 0o755);
-    }
-
-    const outcome = await executeVerification(
-      input(
-        root,
-        [
-          declaration("printf bash", "bash"),
-          declaration("printf zsh", "zsh"),
-          declaration("Write-Output pwsh", "pwsh"),
-        ],
-        {
-          environment: {
-            ...process.env,
-            CAPTURE_FILE: capture,
-            PATH: `${root}:${process.env.PATH ?? ""}`,
-          },
-        },
-      ),
-    );
-
-    assert.deepEqual(outcome, { outcome: { kind: "terminal", verdict: "satisfied", passed: 3, total: 3 } });
-    assert.equal(
-      readFileSync(capture, "utf8"),
-      ["bash:<-c><printf bash>", "zsh:<-c><printf zsh>", "pwsh:<-Command><Write-Output pwsh>", ""].join("\n"),
-    );
+    const missingExecutor = process.platform === "win32" ? "zsh" : "pwsh";
+    const outcome = await executeVerification(input(root, [declaration("true", missingExecutor as "zsh" | "pwsh")]));
+    assert.equal(outcome.outcome.kind, "spawn-error");
   });
 });

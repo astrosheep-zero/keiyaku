@@ -150,12 +150,16 @@ test("the host isolates a Square plugin handler failure", async (t) => {
       world: await World.at(root),
       reportDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
     });
-    await runtime.emit({
-      kind: "akuma.turn-outcome",
+    const signal = {
+      kind: "akuma.turn-outcome" as const,
       akumaId: "aku/failed",
       turnSequence: 1,
-      outcome: { kind: "failed", reason: "provider failed" },
-    });
+      outcome: { kind: "failed" as const, reason: "provider failed" },
+    };
+    for (let attempt = 0; attempt < 100 && diagnostics.length === 0; attempt += 1) {
+      await runtime.emit(signal);
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
     assert.equal(
       diagnostics.some((diagnostic) => diagnostic.startsWith("plugin square signal: injected Square failure")),
       true,

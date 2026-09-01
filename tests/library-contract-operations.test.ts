@@ -406,10 +406,7 @@ test("resolved merge delivery requires dirty authority and preserves native pare
   assert.notEqual(await readRef(git, GIT_REF), journal);
   assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), targetHead);
   assert.equal(repository.run(["-C", worktree, "diff", "--cached", "--binary"]), unresolvedIndex);
-  assert.equal(
-    repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]),
-    unresolvedStatus,
-  );
+  assert.equal(repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]), unresolvedStatus);
   assert.deepEqual(repository.run(["show", "-s", "--format=%P", delivered.value.tenderSnapshot]).trim().split(" "), [
     workspaceHead,
     targetHead,
@@ -497,7 +494,10 @@ test("reconciliation retries receipt-proved handoff retirement after delivery", 
   assert.equal(mergeHead(repository, worktree), materialized.targetHead);
   assert.ok(delivered.lags.some((lag) => lag.kind === "reconcile-failed"));
   const reconciled = await contract.reconcile();
-  assert.equal(reconciled.lag.some((lag) => lag.kind === "reconcile-failed"), false);
+  assert.equal(
+    reconciled.lag.some((lag) => lag.kind === "reconcile-failed"),
+    false,
+  );
   assert.equal(mergeHead(repository, worktree), null);
 });
 
@@ -953,11 +953,9 @@ test("a stopped continuation does not block an eligible sibling", async () => {
   assert.equal(stopped?.length, 1);
   const blockedStop = stopped?.[0];
   assert.equal(blockedStop?.contractId, blocked.keiyaku.id);
-  assert.equal(
-    "kind" in (blockedStop?.stop ?? {}) ? undefined : blockedStop?.stop.refusal.kind,
-    "gates-unsatisfied",
-  );
-  if (blockedStop === undefined || "kind" in blockedStop.stop || blockedStop.stop.refusal.kind !== "gates-unsatisfied") return;
+  assert.equal("kind" in (blockedStop?.stop ?? {}) ? undefined : blockedStop?.stop.refusal.kind, "gates-unsatisfied");
+  if (blockedStop === undefined || "kind" in blockedStop.stop || blockedStop.stop.refusal.kind !== "gates-unsatisfied")
+    return;
   assert.deepEqual(blockedStop.stop.refusal.unmet, [{ gate: "reviewed", current: { kind: "missing" } }]);
   assert.equal((await prerequisite.keiyaku.state()).terminal?.kind, "claimed");
   assert.equal((await eligible.keiyaku.state()).terminal?.kind, "claimed");
@@ -1003,7 +1001,7 @@ test("a dependent claimed during continuation reports already-terminal", async (
   const verification = [
     "## Replace: Verification",
     "~~~bash",
-    `node --import '${new URL("../node_modules/tsx/dist/loader.mjs", import.meta.url).href}' --input-type=module -e 'await eval(Buffer.from("${encoded}", "base64").toString())'`,
+    `${JSON.stringify(process.execPath)} --import '${new URL("../node_modules/tsx/dist/loader.mjs", import.meta.url).href}' --input-type=module -e 'await eval(Buffer.from("${encoded}", "base64").toString())'`,
     "~~~",
     "",
   ].join("\n");

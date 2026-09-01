@@ -17,17 +17,9 @@ import {
   serializeTaskDocument,
   type TaskCreationDocument,
   type TaskDocument,
-  type TaskPriority,
-  type TaskState,
 } from "./document.js";
 import { allocateLocalId, deriveLocalStem, formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
-import {
-  authorityBytesMatch,
-  nukeTaskAuthority,
-  readBoard,
-  replaceAuthority,
-  withTaskLocks,
-} from "./store.js";
+import { nukeTaskAuthority, readBoard, replaceAuthority, withTaskLocks } from "./store.js";
 import type { WorldRoot } from "../world.js";
 import { projectBoundedList } from "../bounded-list.js";
 import { taskRowViewLimit } from "./input.js";
@@ -41,77 +33,42 @@ import {
   type TaskQuerySort,
   underExpression,
 } from "./query.js";
+import { advanceTaskTimestamp, taskView } from "./view.js";
+export { advanceTaskTimestamp, taskView } from "./view.js";
+export type {
+  AddTaskDocumentInput,
+  AddTaskInput,
+  SettledTaskAction,
+  SettledTaskResult,
+  TaskBatchResult,
+  TaskCompositionDiagnostic,
+  TaskLifecycleVerb,
+  TaskMutationResult,
+  TaskOutcome,
+  TaskRefusal,
+  TaskRetry,
+  TaskUpdateResult,
+  TaskView,
+  UpdateTaskInput,
+} from "./operation-types.js";
+import type {
+  AddTaskDocumentInput,
+  AddTaskInput,
+  TaskMutationResult,
+  TaskOutcome,
+  TaskRefusal,
+  TaskRetry,
+  TaskUpdateResult,
+  TaskView,
+  UpdateTaskInput,
+} from "./operation-types.js";
 
-export type TaskView = Readonly<TaskDocument & { namespace: readonly string[] }>;
 export async function nukeTask(world: WorldRoot, options?: Readonly<{ timeoutMs?: number }>): Promise<void> {
   if ((await nukeTaskAuthority(world, options)) === "busy") throw new Error("Task reset lock contention");
 }
 
-export type TaskCompositionDiagnostic = Readonly<{ line: number; reason: string; token: string }>;
-export type TaskRefusal =
-  | Readonly<{ kind: "task-missing"; taskId: TaskId }>
-  | Readonly<{ kind: "invalid-lifecycle-transition"; taskId: TaskId; state: TaskState; verb: TaskLifecycleVerb }>
-  | Readonly<{ kind: "invalid-graph"; diagnostic: string }>
-  | Readonly<{ kind: "invalid-namespace-context"; path: string }>
-  | Readonly<{ kind: "relation-owned-by-other"; taskId: TaskId; related: TaskId; declaringTask: TaskId }>
-  | Readonly<{ kind: "invalid-composition"; diagnostics: readonly TaskCompositionDiagnostic[] }>;
-export type TaskRetry = "busy" | "concurrent-modification";
-export type TaskOutcome<A> =
-  | Readonly<{ kind: "accepted"; value: A }>
-  | Readonly<{ kind: "refused"; refusal: TaskRefusal }>
-  | Readonly<{ kind: "retry"; reason: TaskRetry }>;
-export type TaskMutationResult = TaskOutcome<TaskView>;
-export type TaskUpdateResult = TaskOutcome<Readonly<{ task: TaskView; documentDiff: string }>>;
-export type TaskLifecycleVerb = "start" | "stop" | "hold" | "resume" | "done" | "drop";
-export type TaskBatchResult = Readonly<{ items: readonly Readonly<{ id: TaskId; outcome: TaskMutationResult }>[] }>;
-export type SettledTaskAction = "done";
-export type SettledTaskResult =
-  | Readonly<{ kind: "changed"; task: TaskView; action: SettledTaskAction }>
-  | Readonly<{ kind: "unchanged" }>
-  | Readonly<{ kind: "refused"; refusal: TaskRefusal }>
-  | Readonly<{ kind: "retry"; reason: TaskRetry }>;
-export type AddTaskInput = Readonly<{
-  title: string;
-  namespace?: readonly string[];
-  body?: string;
-  note?: string;
-  state?: TaskState;
-  priority?: TaskPriority;
-  needs?: readonly TaskId[];
-  parent?: TaskId | null;
-  supersedes?: readonly TaskId[];
-  relates?: readonly TaskId[];
-  actor?: string;
-  signal?: AbortSignal;
-}>;
-export type AddTaskDocumentInput = Readonly<{
-  markdown: string;
-  namespace?: readonly string[];
-  actor?: string;
-  signal?: AbortSignal;
-}>;
-export type UpdateTaskInput = Readonly<{
-  title?: string;
-  body?: string;
-  appendBody?: string;
-  note?: string;
-  priority?: TaskPriority;
-  needs?: readonly TaskId[];
-  addNeeds?: readonly TaskId[];
-  dropNeeds?: readonly TaskId[];
-  parent?: TaskId | null;
-  supersedes?: readonly TaskId[];
-  addSupersedes?: readonly TaskId[];
-  dropSupersedes?: readonly TaskId[];
-  relates?: readonly TaskId[];
-  addRelates?: readonly TaskId[];
-  dropRelates?: readonly TaskId[];
-  signal?: AbortSignal;
-}>;
+export type { TaskState } from "./document.js";
 
-export function taskView(document: TaskDocument): TaskView {
-  return { ...document, namespace: parseTaskId(document.id).namespace };
-}
 function refused(refusal: TaskRefusal): TaskMutationResult {
   return { kind: "refused", refusal };
 }
@@ -131,9 +88,6 @@ function currentTimestamp(): string {
 }
 
 /** Internal Task timestamp rule shared by ordinary mutations and compose. */
-export function advanceTaskTimestamp(previous: string, candidate: string): string {
-  return candidate > previous ? candidate : new Date(Date.parse(previous) + 1).toISOString();
-}
 function addDocument(
   base: TaskCreationDocument,
   namespace: readonly string[],
@@ -270,8 +224,7 @@ export async function updateTask(world: WorldRoot, id: TaskId, input: UpdateTask
       const after = Buffer.from(afterBytes).toString("utf8");
       if (
         before !== after &&
-        (await replaceAuthority({ world, id, expected: predecessor, next: afterBytes })) !==
-          "replaced"
+        (await replaceAuthority({ world, id, expected: predecessor, next: afterBytes })) !== "replaced"
       ) {
         return { kind: "retry", reason: "concurrent-modification" };
       }
@@ -285,147 +238,7 @@ export async function updateTask(world: WorldRoot, id: TaskId, input: UpdateTask
   return result === "busy" ? { kind: "retry", reason: "busy" } : result;
 }
 
-const TRANSITIONS: Readonly<Record<TaskLifecycleVerb, Readonly<Partial<Record<TaskState, TaskState>>>>> = {
-  start: { open: "in_progress" },
-  stop: { in_progress: "open" },
-  hold: { open: "on_hold", in_progress: "on_hold" },
-  resume: { on_hold: "open" },
-  done: { open: "done", in_progress: "done", on_hold: "done" },
-  drop: { open: "drop", in_progress: "drop", on_hold: "drop" },
-};
-
-type CurrentTaskBoard = {
-  board: TaskBoard;
-  bytes: Map<TaskId, Uint8Array>;
-};
-type LifecycleFreshness = "batch" | "none";
-
-function currentTaskBoard(board: TaskBoard, bytes: ReadonlyMap<TaskId, Uint8Array>): CurrentTaskBoard {
-  return { board, bytes: new Map(bytes) };
-}
-
-async function transitionLifecycle(
-  world: WorldRoot,
-  id: TaskId,
-  verb: TaskLifecycleVerb,
-  currentBoard: CurrentTaskBoard,
-  note?: string,
-  freshness: LifecycleFreshness = "none",
-): Promise<TaskMutationResult> {
-  const current = currentBoard.board.tasks.get(id);
-  if (current === undefined) {
-    return freshness === "batch" && !(await authorityBytesMatch(world, id, null))
-      ? retry("concurrent-modification")
-      : refused({ kind: "task-missing", taskId: id });
-  }
-  const state = TRANSITIONS[verb][current.state];
-  if (state === undefined) {
-    return freshness === "batch" && !(await authorityBytesMatch(world, id, currentBoard.bytes.get(id)!))
-      ? retry("concurrent-modification")
-      : refused({ kind: "invalid-lifecycle-transition", taskId: id, state: current.state, verb });
-  }
-  const at = currentTimestamp();
-  const next = {
-    ...current,
-    state,
-    ...(note === undefined ? {} : { note }),
-    updatedAt: advanceTaskTimestamp(current.updatedAt, at),
-  };
-  const bytes = serializeTaskDocument(next);
-  if (
-    (await replaceAuthority({
-      world,
-      id,
-      expected: currentBoard.bytes.get(id)!,
-      next: bytes,
-    })) !== "replaced"
-  ) {
-    return retry("concurrent-modification");
-  }
-  currentBoard.board = boardWith(currentBoard.board, next);
-  currentBoard.bytes.set(id, bytes);
-  return { kind: "accepted", value: taskView(next) };
-}
-
-async function lifecycleFromCurrentBoard(
-  world: WorldRoot,
-  id: TaskId,
-  verb: TaskLifecycleVerb,
-  currentBoard: CurrentTaskBoard,
-  signal?: AbortSignal,
-  note?: string,
-): Promise<TaskMutationResult> {
-  const result = await withTaskLocks(
-    { world, allocation: false, ids: [id], ...(signal === undefined ? {} : { signal }) },
-    async () => transitionLifecycle(world, id, verb, currentBoard, note, "batch"),
-  );
-  return result === "busy" ? retry("busy") : result;
-}
-
-export async function lifecycleTask(
-  world: WorldRoot,
-  id: TaskId,
-  verb: TaskLifecycleVerb,
-  signal?: AbortSignal,
-  note?: string,
-): Promise<TaskMutationResult> {
-  const result = await withTaskLocks(
-    { world, allocation: false, ids: [id], ...(signal === undefined ? {} : { signal }) },
-    async (): Promise<TaskMutationResult> => {
-      const snapshot = await readBoard(world);
-      return transitionLifecycle(world, id, verb, currentTaskBoard(snapshot.board, snapshot.bytes), note);
-    },
-  );
-  return result === "busy" ? retry("busy") : result;
-}
-export async function batchTasks(
-  world: WorldRoot,
-  verb: "start" | "done" | "drop" | "hold",
-  ids: readonly TaskId[],
-  signal?: AbortSignal,
-  note?: string,
-): Promise<TaskBatchResult> {
-  signal?.throwIfAborted();
-  const snapshot = await readBoard(world);
-  const currentBoard = currentTaskBoard(snapshot.board, snapshot.bytes);
-  const items = [];
-  for (const id of ids) {
-    signal?.throwIfAborted();
-    items.push({ id, outcome: await lifecycleFromCurrentBoard(world, id, verb, currentBoard, signal, note) });
-  }
-  return { items };
-}
-
-export async function settleTask(world: WorldRoot, id: TaskId): Promise<SettledTaskResult> {
-  const result = await withTaskLocks({ world, allocation: false, ids: [id] }, async (): Promise<SettledTaskResult> => {
-    const snapshot = await readBoard(world),
-      current = snapshot.board.tasks.get(id);
-    if (current === undefined) return { kind: "refused", refusal: { kind: "task-missing", taskId: id } };
-    if (current.state === "done") return { kind: "unchanged" };
-    if (current.state === "drop") {
-      return {
-        kind: "refused",
-        refusal: { kind: "invalid-lifecycle-transition", taskId: id, state: current.state, verb: "done" },
-      };
-    }
-    const at = currentTimestamp();
-    const next: TaskDocument = {
-      ...current,
-      state: "done",
-      updatedAt: advanceTaskTimestamp(current.updatedAt, at),
-    };
-    const replaced = await replaceAuthority({
-      world,
-      id,
-      expected: snapshot.bytes.get(id)!,
-      next: serializeTaskDocument(next),
-    });
-    return replaced === "replaced"
-      ? { kind: "changed", task: taskView(next), action: "done" }
-      : { kind: "retry", reason: "concurrent-modification" };
-  });
-  return result === "busy" ? { kind: "retry", reason: "busy" } : result;
-}
+export { batchTasks, lifecycleTask, settleTask } from "./lifecycle-operations.js";
 
 function readScope(
   namespace: readonly string[] | undefined,

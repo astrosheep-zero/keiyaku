@@ -184,10 +184,7 @@ async function releaseHeldTaskHolder(
   }
 }
 
-async function settleTasks(
-  input: SettleTasksInput,
-  beforeRelease: () => Promise<void>,
-): Promise<boolean> {
+async function settleTasks(input: SettleTasksInput, beforeRelease: () => Promise<void>): Promise<boolean> {
   const { repository, channel, candidate, actions, lags } = input;
   const hint = await observeApplicableHolder({ repository, channel, candidate, lags });
   if (hint === null) return false;
@@ -267,13 +264,16 @@ async function settleObserved(input: SettlementInput): Promise<SettlementReport>
   const candidate = input.state;
   if (candidate.terminal?.kind === "claimed") {
     try {
-      await settleTasks({
-        repository: input.repository,
-        channel: input.channel,
-        candidate,
-        actions,
-        lags,
-      }, async () => await settleNamespace(candidate, input.effects, actions, lags));
+      await settleTasks(
+        {
+          repository: input.repository,
+          channel: input.channel,
+          candidate,
+          actions,
+          lags,
+        },
+        async () => await settleNamespace(candidate, input.effects, actions, lags),
+      );
     } catch (error) {
       lags.push({
         kind: "settlement-failed",

@@ -917,7 +917,33 @@ test("Body Request facts have one idempotent monotonic authority", async () => {
   }
 });
 
-test("heart schema version 21 and leash schema version 4 hard-refuse old authority", async () => {
+test("unknown Body Request state is authority corruption", async () => {
+  const value = await fixture();
+  try {
+    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await leash.birth(value.allocated.paths, value.soul);
+    await admitRequest(value.allocated.paths, {
+      id: "00000000-0000-4000-8000-000000000004",
+      action: "akuma.call",
+      payloadJson: "{}",
+      admittedAt: "2026-08-08T00:00:01.000Z",
+      permitted: true,
+    });
+    leash.release();
+    const heart = new DatabaseSync(value.allocated.paths.heart);
+    heart.exec("PRAGMA ignore_check_constraints = ON");
+    heart.prepare("UPDATE requests SET state = 'unknown' WHERE id = ?").run("00000000-0000-4000-8000-000000000004");
+    heart.close();
+    await assert.rejects(
+      readRequest(value.allocated.paths, "00000000-0000-4000-8000-000000000004"),
+      /unknown request state: unknown/u,
+    );
+  } finally {
+    value.close();
+  }
+});
+
+test("heart schema version 22 and leash schema version 4 hard-refuse old authority", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-schema-cut-"));
   const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "30000000" });
   try {
@@ -931,7 +957,7 @@ test("heart schema version 21 and leash schema version 4 hard-refuse old authori
       "CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)",
     );
     leash.close();
-    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 21/u);
+    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 22/u);
     await assert.rejects(HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
   } finally {
     rmSync(root, { recursive: true, force: true });

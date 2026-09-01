@@ -55,10 +55,11 @@ function decodeRequestRow(row: RequestRow): RequestFact {
     }
     throw new Error("Akuma authority contains an invalid served request");
   }
+  if (row.state === "admitted") return { ...input, state: row.state };
   if (row.state === "refused") return { ...input, state: row.state, diagnostic: row.diagnostic! };
   if (row.state === "unproven") return { ...input, state: row.state, evidence: row.evidence! };
   if (row.state === "voided") return { ...input, state: row.state, evidence: row.evidence! };
-  return { ...input, state: "admitted" };
+  throw new Error(`Akuma authority contains an unknown request state: ${row.state}`);
 }
 
 const REQUEST_COLUMNS = `sequence, id, requester, action, payload_json, admitted_at,

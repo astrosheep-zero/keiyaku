@@ -105,7 +105,7 @@ function selectedPlugins(input: Settings, report: PluginDiagnostic | undefined):
   );
 }
 
-function manifest(value: unknown): PluginManifest {
+function manifest(value: unknown): KeiyakuPlugin {
   if (!object(value)) throw new TypeError("plugin default export must be an object");
   if (!object(value.manifest)) throw new TypeError("plugin manifest must be an object");
   const candidate = value.manifest;
@@ -121,12 +121,7 @@ function manifest(value: unknown): PluginManifest {
     throw new TypeError("plugin writablePaths must be an array");
   }
   if (typeof value.activate !== "function") throw new TypeError("plugin activate must be a function");
-  return value as KeiyakuPlugin as unknown as PluginManifest;
-}
-
-function plugin(value: unknown): KeiyakuPlugin {
-  const validated = manifest(value);
-  return value as KeiyakuPlugin & Readonly<{ manifest: typeof validated }>;
+  return value as KeiyakuPlugin;
 }
 
 function writablePathDeclaration(
@@ -258,7 +253,7 @@ async function activate(
 
   let candidate: KeiyakuPlugin;
   try {
-    candidate = plugin(module.default);
+    candidate = manifest(module.default);
     if (candidate.manifest.id !== selected.id) {
       throw new TypeError(`plugin manifest id does not match selected entry: ${candidate.manifest.id}`);
     }
