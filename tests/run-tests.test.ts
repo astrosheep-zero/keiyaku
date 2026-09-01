@@ -4,7 +4,15 @@ import { globSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { TEST_MANIFESTS } from "../scripts/test-manifests.mjs";
+
+type TestManifestsModule = {
+  TEST_MANIFESTS: {
+    local: readonly string[];
+    integration: readonly string[];
+  };
+};
+
+const { TEST_MANIFESTS } = (await import(new URL("../scripts/test-manifests.mjs", import.meta.url).href)) as TestManifestsModule;
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 

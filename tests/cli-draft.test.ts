@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { preserveBindDraft } from "../src/cli/draft.js";
 import { renderBindDraftReceipt } from "../src/cli/render/refusal.js";
-import { World } from "../src/world.js";
+import { World, type WorldRoot } from "../src/world.js";
 
-async function draftWorld() {
+async function draftWorld(): Promise<WorldRoot> {
   return World.at(mkdtempSync(join(tmpdir(), "keiyaku-bind-draft-")));
 }
 

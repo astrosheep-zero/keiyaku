@@ -32,8 +32,10 @@ test("JSON operations never announce work", () => {
 
 test("an operation starts only after selected stdin is fully acquired", async () => {
   const events: string[] = [];
+  const parsed = parseArgv(["-C", "/definitely/absent/keiyaku-progress-test", "bind", "-"]);
+  if (!("command" in parsed)) throw new Error("expected an executable command");
   await assert.rejects(
-    invoke(parseArgv(["-C", "/definitely/absent/keiyaku-progress-test", "bind", "-"]), {
+    invoke(parsed, {
       readStdin: async () => {
         events.push("stdin");
         return "contract document";

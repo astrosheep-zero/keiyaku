@@ -10,9 +10,9 @@ import {
   type ContractCommandSpec,
 } from "../src/cli/commands/contract.js";
 import { CliUsageError, parseArgv, renderContractHelp, renderHelp, renderRootHelp } from "../src/cli/parse.js";
-import { renderAkumaHelp, type AkumaAction } from "../src/cli/commands/akuma.js";
+import { renderAkumaHelp } from "../src/cli/commands/akuma.js";
 import { renderInstallHelp } from "../src/cli/commands/install.js";
-import { renderTaskHelp, type TaskAction } from "../src/cli/commands/task.js";
+import { renderTaskHelp } from "../src/cli/commands/task.js";
 import { usageLine } from "../src/cli/usage.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
 

@@ -119,7 +119,7 @@ test("Pi command skips no-UI calls and preserves status diagnostics", async () =
   for (const [stderr, expected] of [
     ["database unreachable", "database unreachable"],
     ["", "status unavailable"],
-  ]) {
+  ] as const) {
     let displayed: string[] = [];
     const { command } = install(async () => ({ stdout: "", stderr, code: 1, killed: false }));
     await command("", {

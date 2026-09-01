@@ -123,7 +123,7 @@ test("harness manifests share one release version and keep cachebusters host-loc
   const versionAt = (path: string): string => {
     const version = (JSON.parse(readFileSync(path, "utf8")) as { version?: unknown }).version;
     assert.equal(typeof version, "string", `${path} must declare a version`);
-    return version;
+    return version as string;
   };
   const codexVersion = versionAt(join(plugin, ".codex-plugin", "plugin.json"));
   const claudeVersion = versionAt(join(plugin, ".claude-plugin", "plugin.json"));

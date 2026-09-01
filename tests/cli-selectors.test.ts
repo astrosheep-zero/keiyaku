@@ -1,22 +1,26 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ContractBoard, ContractId } from "../src/index.js";
+import type { ContractKanshiBoard } from "../src/kanshi/index.js";
+import type { WorldRoot } from "../src/world.js";
 import type { KanshiReport } from "../src/kanshi/index.js";
 import { resolveContextualContract, resolveKanshiContract } from "../src/cli/selectors.js";
 import { CliUsageError } from "../src/cli/parse.js";
 
 const active = "kei/active-contract" as ContractId;
 
-function board(): ContractBoard {
+function board(): ContractKanshiBoard {
   return {
     root: "/repo",
     state: null,
+    observedAt: "2026-08-12T00:00:00.000Z",
     rows: [
       {
         id: active,
         title: "Active contract",
         phase: "bound",
         phaseAt: "2026-08-12T00:00:00.000Z",
+        lastJournalAt: "2026-08-12T00:00:00.000Z",
         disposition: "active",
         workspace: "worktree",
         worktreePath: "/repo/.keiyaku/wt/active-contract",
@@ -24,12 +28,17 @@ function board(): ContractBoard {
           kind: "clean",
           location: { kind: "worktree", path: "/repo/.keiyaku/wt/active-contract" },
           counts: { staged: 0, unstaged: 0, untracked: 0, submodules: 0 },
+          merge: null,
         },
         target: "refs/heads/main",
         targetLag: { kind: "counted", behind: 0 },
         delivery: null,
         targetObservation: null,
         gates: { reports: [], satisfied: true },
+        after: [],
+        dependents: [],
+        holder: { kind: "none" },
+        fleet: [],
       },
     ],
   };
@@ -76,7 +85,7 @@ test("selectors use disposition rather than reinterpreting terminal phases", () 
 
 function kanshiReport(contracts: KanshiReport["contracts"]): KanshiReport {
   return {
-    root: "/repo",
+    root: "/repo" as WorldRoot,
     observedAt: "2026-08-12T00:00:00.000Z",
     branch: null,
     contracts,

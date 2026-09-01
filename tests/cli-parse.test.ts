@@ -3,7 +3,13 @@ import test from "node:test";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import { decodeJournal } from "../src/core/facts/codec.js";
 import { contractId, documentKey, entryUlid, snapshotId } from "../src/core/facts/types.js";
-import { CliUsageError, parseArgv, renderContractHelp, renderRootHelp } from "../src/cli/parse.js";
+import { CliUsageError, parseArgv, renderContractHelp, renderRootHelp, type ParsedCommand } from "../src/cli/parse.js";
+
+function command(argv: readonly string[]): ParsedCommand {
+  const parsed = parseArgv(argv);
+  if (!("command" in parsed)) throw new Error("expected an executable command");
+  return parsed.command;
+}
 
 test("bind mints its contract identity and keeps JSON output separate from input", () => {
   assert.deepEqual(parseArgv(["bind", "--target", "refs/heads/main", "--json", "-"]), {
@@ -330,16 +336,16 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
       (error: unknown) => error instanceof CliUsageError && pattern.test(error.message),
     );
   }
-  assert.deepEqual(parseArgv(["review", "--unsatisfied", "--summary", "  keep  "]).command, {
+  assert.deepEqual(command(["review", "--unsatisfied", "--summary", "  keep  "]), {
     command: "review",
     verdict: "unsatisfied",
     summary: "  keep  ",
     output: "text",
   });
-  const called = parseArgv(["call", "worker", "  keep  "]).command;
+  const called = command(["call", "worker", "  keep  "]);
   assert.equal(called.command, "call");
   if (called.command === "call") assert.deepEqual(called.prompt, { kind: "argument", value: "  keep  " });
-  assert.deepEqual(parseArgv(["task", "update", "task/a", "--priority", "1"]).command, {
+  assert.deepEqual(command(["task", "update", "task/a", "--priority", "1"]), {
     command: "task",
     action: "update",
     output: "text",
@@ -349,12 +355,12 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
 });
 
 test("region accepts repeated --path patterns and omits deleted overlap grammar", () => {
-  assert.deepEqual(parseArgv(["region", "--path", "src/**", "--path", "tests/**", "--json"]).command, {
+  assert.deepEqual(command(["region", "--path", "src/**", "--path", "tests/**", "--json"]), {
     command: "region",
     paths: ["src/**", "tests/**"],
     output: "json",
   });
-  assert.deepEqual(parseArgv(["region", "kei/example"]).command, {
+  assert.deepEqual(command(["region", "kei/example"]), {
     command: "region",
     contract: "kei/example",
     output: "text",

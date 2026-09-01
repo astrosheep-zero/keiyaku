@@ -28,8 +28,8 @@ function input(argv: readonly string[], overrides: Partial<ProcessInput> = {}): 
   };
 }
 
-function ownedChild(pid: number): ChildProcess {
-  return Object.assign(new EventEmitter(), { pid, exitCode: null, signalCode: null }) as ChildProcess;
+function ownedChild(pid: number): ChildProcess & { pid: number } {
+  return Object.assign(new EventEmitter(), { pid, exitCode: null, signalCode: null }) as ChildProcess & { pid: number };
 }
 
 for (const force of [false, true]) {
@@ -809,18 +809,19 @@ test("an owned process capability is inert after termination and repeated termin
       cwd: root,
       log: join(root, "stdio.log"),
     });
-    await owned.terminate();
+    const ownedProcess = owned;
+    await ownedProcess.terminate();
     terminated = true;
     let signals = 0;
     const originalKill = process.kill;
     const kill = ((pid: number, signal?: NodeJS.Signals | number) => {
-      if (pid === -owned.pid && signal !== 0) signals += 1;
+      if (pid === -ownedProcess.pid && signal !== 0) signals += 1;
       return originalKill(pid, signal as NodeJS.Signals);
     }) as typeof process.kill;
     process.kill = kill;
     try {
-      await owned.terminate();
-      await owned.terminate();
+      await ownedProcess.terminate();
+      await ownedProcess.terminate();
     } finally {
       process.kill = originalKill;
     }
@@ -841,18 +842,19 @@ test("an owned process capability is inert after release and repeated terminate"
       cwd: root,
       log: join(root, "stdio.log"),
     });
-    owned.release();
+    const ownedProcess = owned;
+    ownedProcess.release();
     released = true;
     let signals = 0;
     const originalKill = process.kill;
     const kill = ((pid: number, signal?: NodeJS.Signals | number) => {
-      if (pid === -owned.pid && signal !== 0) signals += 1;
+      if (pid === -ownedProcess.pid && signal !== 0) signals += 1;
       return originalKill(pid, signal as NodeJS.Signals);
     }) as typeof process.kill;
     process.kill = kill;
     try {
-      await owned.terminate();
-      await owned.terminate();
+      await ownedProcess.terminate();
+      await ownedProcess.terminate();
     } finally {
       process.kill = originalKill;
     }

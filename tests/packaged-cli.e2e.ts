@@ -15,6 +15,11 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
 
+type PackageManifest = {
+  dependencies?: Readonly<Record<string, string>>;
+  version: string;
+};
+
 const root = resolve(import.meta.dirname, "..");
 
 function command(executable: string, args: readonly string[], cwd: string, shell = false): string {
@@ -57,10 +62,7 @@ test("published package installs one keiyaku CLI and runs against a real reposit
   );
   assert.equal(claudeArchives.length, 1, `expected one Claude package archive, got ${claudeArchives.join(", ")}`);
 
-  const packageManifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
-    dependencies?: Readonly<Record<string, string>>;
-    version: string;
-  };
+  const packageManifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as PackageManifest;
   const dependencies = Object.fromEntries(
     Object.keys(packageManifest.dependencies ?? {}).map((name) => [
       name,

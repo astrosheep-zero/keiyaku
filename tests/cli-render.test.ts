@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { changeId, contractHead, contractId, snapshotId } from "../src/core/facts/types.js";
+import { changeId, contractHead, contractId, gate, snapshotId } from "../src/core/facts/types.js";
 import type { InvocationResult } from "../src/cli/result.js";
 import { renderCatalogText } from "../src/cli/render/catalog.js";
 import { renderText } from "../src/cli/render/text.js";
 import type { Catalog } from "../src/library/catalog.js";
 import type { ContractRow } from "../src/protocol/read/status.js";
+import type { WorldRoot } from "../src/world.js";
+
+const worldRoot = "/world" as WorldRoot;
 
 test("catalog text renders only the selected identity layer", () => {
   assert.equal(
@@ -37,7 +40,7 @@ test("catalog text renders only the selected identity layer", () => {
   assert.equal(
     renderCatalogText({
       kind: "akuma",
-      root: "/world",
+      root: worldRoot,
       archetype: "worker",
       observedAt: "2026-08-12T00:00:00.000Z",
       rows: [{ id: "aku/worker/deadbeef" as never, life: "unborn" }],
@@ -49,9 +52,9 @@ test("catalog text renders only the selected identity layer", () => {
 });
 
 test("scoped Akuma catalog text preserves bounded membership and marks further rows", () => {
-  const catalog: Catalog = {
+  const catalog: Extract<Catalog, { kind: "akuma" }> = {
     kind: "akuma",
-    root: "/world",
+    root: worldRoot,
     archetype: "worker",
     observedAt: "2026-08-12T00:00:00.000Z",
     rows: Array.from({ length: 11 }, (_, index) => ({
@@ -74,20 +77,21 @@ test("scoped Akuma catalog text preserves bounded membership and marks further r
 });
 
 test("Akuma catalog renders future ages as now", () => {
+  const futureRow = {
+    id: "aku/worker/future" as never,
+    archetype: "worker",
+    life: "unborn" as const,
+    lifeAt: "2026-08-12T00:00:01.000Z",
+    lastActivityAt: null,
+    pending: [],
+  };
   const text = renderCatalogText({
     kind: "akuma",
-    root: "/world",
+    root: worldRoot,
     archetype: "worker",
     observedAt: "2026-08-12T00:00:00.000Z",
     rows: [
-      {
-        id: "aku/worker/future" as never,
-        archetype: "worker",
-        life: "unborn",
-        lifeAt: "2026-08-12T00:00:01.000Z",
-        lastActivityAt: null,
-        pending: [],
-      },
+      futureRow,
     ],
     searched: [],
     hasMore: false,
@@ -109,7 +113,7 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
     worktreePath: null,
     workspaceObservation: {
       kind: "clean",
-      location: { kind: "worktree" },
+      location: { kind: "worktree", path: "/tmp/wt" },
       counts: { staged: 0, unstaged: 0, untracked: 0, submodules: 0 },
       merge: null,
     },
@@ -290,7 +294,7 @@ test("accepted results preserve reconciliation lag without telemetry", () => {
     contract,
     head: contractHead("record"),
     facts: [],
-    lag: [{ kind: "worktree-follow-retained" as const, path: "/tmp/wt", tender, head, reason: "head-moved" as const }],
+    lag: [{ kind: "worktree-follow-retained" as const, path: "/tmp/wt", tender, head, reason: "head-moved" as const }] as const,
     settlementLags: [],
   };
   assert.equal(
@@ -401,7 +405,7 @@ test("direct gate stops render the sole placement report without another read", 
           contractId: contract,
           unmet: [
             {
-              gate: "verified",
+              gate: gate("verified"),
               current: {
                 kind: "attested",
                 verdict: "unsatisfied",
@@ -409,8 +413,8 @@ test("direct gate stops render the sole placement report without another read", 
                 at: "2026-08-01T00:00:00.000Z",
               },
             },
-            { gate: "reviewed", current: { kind: "stale", priorVerdict: "satisfied" } },
-            { gate: "manual", current: { kind: "missing" } },
+            { gate: gate("reviewed"), current: { kind: "stale", priorVerdict: "satisfied" } },
+            { gate: gate("manual"), current: { kind: "missing" } },
           ],
         },
       },
@@ -658,7 +662,7 @@ test("deliver renders claimed and stopped continuations from the accepted result
               refusal: {
                 kind: "gates-unsatisfied",
                 contractId: stopped,
-                unmet: [{ gate: "reviewed", current: { kind: "missing" } }],
+                unmet: [{ gate: gate("reviewed"), current: { kind: "missing" } }],
               },
             },
           },
@@ -796,7 +800,7 @@ test("movement projects its deviation and reintegration coordinates", () => {
     head: contractHead("head"),
     settlementLags: [],
   };
-  const facts = [
+  const facts: readonly import("../src/cli/result.js").AcceptedFact[] = [
     {
       contract,
       entry: "reintegration",
@@ -843,6 +847,7 @@ test("movement projects its deviation and reintegration coordinates", () => {
         integratedAt: integrated,
         observed: null,
         attempts: 3,
+        observedTreeEqualsCandidate: false,
       },
     }),
     [
