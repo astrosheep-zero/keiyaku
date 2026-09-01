@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
-import { invoke } from "../src/cli/invoke.js";
-import { parseArgv } from "../src/cli/parse.js";
+import { invoke as invokeRaw, type InvocationResult } from "../src/cli/invoke.js";
+import { parseArgv as parseInvocation, type ParsedExecution } from "../src/cli/parse.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
 import { AkumaHandle } from "../src/akuma/index.js";
@@ -23,8 +23,8 @@ import {
 } from "../src/git/repository.js";
 import { contractJournalPath } from "../src/git/identity.js";
 import { lastJournalAtFor, phaseAtFor } from "../src/protocol/read/status.js";
-import { changeId, contractId, contractSegment, snapshotId } from "../src/core/facts/types.js";
-import { kanshi, selectKanshi, type KanshiReport } from "../src/kanshi/index.js";
+import { changeId, contractId, contractSegment, snapshotId, type ContractId } from "../src/core/facts/types.js";
+import { kanshi, selectKanshi, type KanshiReport, type ContractKanshiRow, type AkumaKanshiRow, type TaskKanshiRow } from "../src/kanshi/index.js";
 import { visibleFleetRows } from "../src/kanshi/fleet.js";
 import { contractNamespace } from "../src/task/identity.js";
 import { projectTaskBoardObservation } from "../src/task/board.js";
@@ -32,10 +32,22 @@ import { serializeTaskDocument, type TaskDocument } from "../src/task/document.j
 import { Tasks, type TaskId } from "../src/task/index.js";
 import { authorityPath, readBoard } from "../src/task/store.js";
 import { World } from "../src/world.js";
+import type { WorldRoot } from "../src/world.js";
+import type { AkumaAlias } from "../src/identity/selector.js";
 import { moveAlias } from "../src/alias/index.js";
 import { publishDispatch } from "../src/dispatch/index.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
 import { taskDocument, writeTaskAuthority } from "./support/task.js";
+
+function parseArgv(argv: readonly string[]): ParsedExecution {
+  const parsed = parseInvocation(argv);
+  if ("help" in parsed) throw new Error("expected executable command");
+  return parsed;
+}
+
+async function invoke(invocation: Parameters<typeof invokeRaw>[0], runtime?: Parameters<typeof invokeRaw>[1]): Promise<InvocationResult> {
+  return (await invokeRaw(invocation, runtime)) as InvocationResult;
+}
 
 async function observe(path: string, repo?: Repo) {
   return kanshi({ world: await World.at(path), ...(repo === undefined ? {} : { repo }) });
@@ -75,6 +87,7 @@ async function bornAkuma(root: string, suffix: string, createdAt = "2026-08-09T0
     archetype: "watcher",
     provider: { name: "claude", kind: "claude-agent-sdk" },
     options: {},
+    allowed: [],
     cwd: root,
     origin: { kind: "direct" },
     createdAt,
@@ -118,7 +131,7 @@ async function populatedWorld() {
     ).kind,
     "dispatched",
   );
-  await moveAlias({ world: repository.path, alias: "@watch", akuId: akumaId });
+  await moveAlias({ world: repository.path as WorldRoot, alias: "@watch" as AkumaAlias, akuId: akumaId });
   return { repository, contract, keiyaku: bound.keiyaku, taskId: added.value.id, akumaId };
 }
 
@@ -284,7 +297,7 @@ test("canonical and Contract-alias status both assemble selected-only current ph
       destroy: [],
     },
   });
-  const id = bound.keiyaku.id;
+  const id = (await bound.keiyaku.state()).id;
   const world = await World.at(repository.path);
   const unselected = await kanshi({ world, repo: await Repo.at({ path: repository.path }) });
   assert.equal(unselected.contracts.kind, "present");
@@ -317,8 +330,8 @@ test("complete Contract status exposes a corrupt active dependency as a Contract
   const repo = await Repo.at({ path: repository.path });
   const selected = await Keiyaku.bind({ repo, markdown: document("Selected"), workspace: "worktree" });
   const unrelated = await Keiyaku.bind({ repo, markdown: document("Unrelated"), workspace: "worktree" });
-  const selectedId = selected.keiyaku.id;
-  const unrelatedId = unrelated.keiyaku.id;
+  const selectedId = (await selected.keiyaku.state()).id;
+  const unrelatedId = (await unrelated.keiyaku.state()).id;
   const git = await repositoryAt(repository.path);
   const snapshot = await readGit(git);
   const tree = await updateGitTree(
@@ -372,7 +385,8 @@ test("same-target lag counts each workspace HEAD against the one frozen target h
 
   assert.equal(report.contracts.kind, "present");
   if (report.contracts.kind !== "present") return;
-  const rows = [contract.id, second.id].map((id) => report.contracts.value.rows.find((row) => row.id === id));
+  const contracts = report.contracts;
+  const rows = [contract.id, second.id].map((id) => contracts.value.rows.find((row: ContractKanshiRow) => row.id === id));
   const head = rows[0]?.targetObservation?.head;
   assert.equal(typeof head, "string");
   assert.equal(
@@ -555,7 +569,7 @@ test("kanshi keeps absent Contract and Task worlds explicit", async () => {
     const row = report.akuma.value.rows.find((candidate) => candidate.id === akumaId);
     assert.equal(row?.id, akumaId);
     assert.equal("lastActivityAt" in (row ?? {}), true);
-    assert.equal("lastActivityAt" in (row ?? {}) ? row.lastActivityAt : undefined, null);
+    assert.equal("lastActivityAt" in (row ?? {}) ? (row as { lastActivityAt?: string | null }).lastActivityAt : undefined, null);
     assert.equal(row === undefined ? false : "contract" in row, false);
   }
 });
@@ -688,7 +702,7 @@ test("blocked Kanshi rows preserve ordered structured Task blocker refs", async 
   const blocked = await tasks.add({ title: "Blocked work", needs: [second.value.id, first.value.id] });
   assert.equal(blocked.kind, "accepted");
   if (blocked.kind !== "accepted") return;
-  unlinkSync(authorityPath(root, first.value.id));
+  unlinkSync(authorityPath(root as WorldRoot, first.value.id));
 
   const report = await observe(root);
 
@@ -753,9 +767,7 @@ function worktreeObservation(path: string, kind: "clean" | "dirty" | "unavailabl
     : { kind, location: { kind: "worktree" as const, path }, counts, merge: null };
 }
 
-function contractRow(
-  input: Partial<Extract<KanshiReport["contracts"], { kind: "present" }>["value"]["rows"][number]> & { id: string },
-) {
+function contractRow(input: Partial<Omit<ContractKanshiRow, "id">> & { id: string }): ContractKanshiRow {
   const workspace = input.workspace ?? "worktree";
   const path = input.worktreePath ?? `/repo/.keiyaku/wt/${input.id.slice("kei/".length)}`;
   return {
@@ -770,7 +782,7 @@ function contractRow(
     target: "refs/heads/main",
     targetLag: { kind: "counted" as const, behind: 0 },
     delivery: null,
-    targetObservation: { head: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", drift: false },
+    targetObservation: { head: snapshotId("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), drift: false },
     holder: { kind: "none" as const },
     fleet: [],
     namespaceTasks: { kind: "present" as const, value: [] },
@@ -778,20 +790,21 @@ function contractRow(
     after: [],
     dependents: [],
     ...input,
+    id: contractId(input.id),
   };
 }
 
 function attentionReport(): KanshiReport {
   const dirtyPath = "/repo/.keiyaku/wt/active-contract";
   return {
-    root: "/repo",
+    root: "/repo" as WorldRoot,
     observedAt: "2026-08-12T00:00:00.000Z",
     branch: "refs/heads/main",
     contracts: {
       kind: "present",
       value: {
-        root: "/repo",
-        state: "cccccccccccccccccccccccccccccccccccccccc",
+        root: "/repo" as WorldRoot,
+        state: snapshotId("cccccccccccccccccccccccccccccccccccccccc"),
         observedAt: "2026-08-12T00:00:00.000Z",
         rows: [
           contractRow({
@@ -830,9 +843,9 @@ function attentionReport(): KanshiReport {
               submodules: 0,
             }),
             targetLag: { kind: "counted", behind: 7 },
-            targetObservation: { head: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", drift: true },
+            targetObservation: { head: snapshotId("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), drift: true },
             holder: { kind: "held", taskId: "task/running" },
-            fleet: [{ id: "aku/worker/a0000001", aliases: ["@lead"] }],
+            fleet: [{ id: "aku/worker/a0000001", aliases: ["@lead" as AkumaAlias] }],
             gates: {
               satisfied: false,
               reports: [
@@ -987,7 +1000,7 @@ function attentionReport(): KanshiReport {
         ],
       },
     },
-  } as KanshiReport;
+  } as unknown as KanshiReport;
 }
 
 function sectionBody(text: string, name: string): string {
@@ -1360,7 +1373,7 @@ test("world Contract rows make candidate facts self-describing", () => {
   const deliveredReport = {
     ...report,
     contracts: { ...report.contracts, value: { ...report.contracts.value, rows: [delivered] } },
-  };
+  } as unknown as KanshiReport;
   const text = renderKanshiText(deliveredReport, { columns: 120, color: false });
   assert.match(text, /CONTRACTS \/\/ recent/u);
   assert.doesNotMatch(text, /CONTRACTS \/\/ \d+ recent|CONTRACTS \/\/ .*candidates?/u);
@@ -1381,7 +1394,7 @@ test("Contract LINKED entries stay compact and preserve endpoint disposition", (
   if (row === undefined) throw new Error("fixture Contract must be present");
   const linkedRow = {
     ...row,
-    fleet: [...row.fleet, { id: "aku/worker/missing", aliases: ["@missing"] }],
+    fleet: [...row.fleet, { id: "aku/worker/missing", aliases: ["@missing" as AkumaAlias] }],
   };
   const compact = renderKanshiText(
     {
@@ -1451,9 +1464,9 @@ test("world Contract attachments keep non-terminal Akuma and omit terminal retry
   const linkedRow = {
     ...row,
     fleet: [
-      { id: "aku/worker/a0000001", aliases: ["@lead"] },
-      { id: "aku/worker/a0000002", aliases: [] },
-      { id: "aku/worker/a0000003", aliases: [] },
+      { id: "aku/worker/a0000001", aliases: ["@lead" as AkumaAlias] },
+      { id: "aku/worker/a0000002", aliases: [] as AkumaAlias[] },
+      { id: "aku/worker/a0000003", aliases: [] as AkumaAlias[] },
     ],
   };
   const text = renderKanshiText(
@@ -1474,7 +1487,7 @@ test("world Contract attachments keep one latest terminal Akuma when no executor
     throw new Error("fixture sections must be present");
   const row = report.contracts.value.rows.find((candidate) => candidate.id === "kei/active-contract");
   if (row === undefined) throw new Error("fixture Contract must be present");
-  const older = { ...report.akuma.value.rows[2]!, id: "aku/worker/a0000008", lifeAt: "2026-08-11T23:00:00.000Z" };
+  const older = { ...report.akuma.value.rows[2]!, id: "aku/worker/a0000008", lifeAt: "2026-08-11T23:00:00.000Z" } as AkumaKanshiRow;
   const text = renderKanshiText(
     {
       ...report,
@@ -1508,7 +1521,7 @@ test("selected Contract attachments retain terminal retry history", () => {
     throw new Error("fixture sections must be present");
   const row = report.contracts.value.rows.find((candidate) => candidate.id === "kei/active-contract");
   if (row === undefined) throw new Error("fixture Contract must be present");
-  const older = { ...report.akuma.value.rows[2]!, id: "aku/worker/a0000008", lifeAt: "2026-08-11T23:00:00.000Z" };
+  const older = { ...report.akuma.value.rows[2]!, id: "aku/worker/a0000008", lifeAt: "2026-08-11T23:00:00.000Z" } as AkumaKanshiRow;
   const selected = renderKanshiText(
     {
       ...report,
@@ -1576,17 +1589,19 @@ test("Kanshi preserves the Akuma bounded aperture with one compact marker", () =
       lastJournalAt: oldAt,
     }),
   );
+  const taskRows = report.tasks.value.rows;
+  const akumaRows = report.akuma.value.rows;
   const hotTasks = Array.from({ length: 11 }, (_, index) => ({
-    ...report.tasks.value.rows[1]!,
+    ...taskRows[1]!,
     id: `task/hot-${index}`,
     updatedAt: oldAt,
-  }));
+  })) as unknown as TaskKanshiRow[];
   const hotAkuma = Array.from({ length: 11 }, (_, index) => ({
-    ...report.akuma.value.rows[0]!,
+    ...akumaRows[0]!,
     id: `aku/worker/hot${String(index).padStart(4, "0")}`,
     lifeAt: oldAt,
     lastActivityAt: oldAt,
-  }));
+  })) as unknown as AkumaKanshiRow[];
   const partial = renderKanshiText(
     {
       ...report,
@@ -1602,7 +1617,7 @@ test("Kanshi preserves the Akuma bounded aperture with one compact marker", () =
         ...report.tasks,
         value: {
           ...report.tasks.value,
-          rows: [{ ...report.tasks.value.rows[3]!, id: "task/new-cold", updatedAt: newAt }, ...hotTasks].slice(0, 10),
+          rows: ([{ ...report.tasks.value.rows[3]!, id: "task/new-cold", updatedAt: newAt }, ...hotTasks] as unknown as TaskKanshiRow[]).slice(0, 10),
           hasMore: true,
         },
       },
@@ -1665,7 +1680,7 @@ test("Fleet ranks max owner timestamps and aligns snapshots with its recent-firs
       lifeAt: "2026-08-11T23:57:00.000Z",
       lastActivityAt: null,
     },
-  ];
+  ] as unknown as AkumaKanshiRow[];
   const visible = visibleFleetRows(rows);
   assert.deepEqual(
     visible.map((row) => row.id),
@@ -1766,7 +1781,7 @@ test("Fleet keeps a complete long Akuma identity beside narrow activity text", (
       omitted: 0,
       outcome: { outcome: { kind: "answered" as const, answer: "long semantic activity" } },
     },
-  };
+  } as unknown as AkumaKanshiRow;
   const text = renderKanshiText(
     {
       ...report,
@@ -1945,7 +1960,7 @@ test("Kanshi has no Contract gate-block cap", () => {
 test("absent and failed Kanshi sections stay typed and distinct from empty present sections", () => {
   const failed = renderKanshiText(
     {
-      root: "/repo",
+      root: "/repo" as WorldRoot,
       observedAt: "2026-08-12T00:00:00.000Z",
       branch: null,
       contracts: { kind: "failed", failure: { message: "broken board" } },
@@ -1963,7 +1978,7 @@ test("absent and failed Kanshi sections stay typed and distinct from empty prese
 
   const absent = renderKanshiText(
     {
-      root: "/repo",
+      root: "/repo" as WorldRoot,
       observedAt: "2026-08-12T00:00:00.000Z",
       branch: null,
       contracts: { kind: "absent" },
@@ -1998,6 +2013,7 @@ test("Kanshi selection is a projection that preserves source presence", async ()
   assert.equal(selected.akuma.kind, "present");
   if (selected.contracts.kind !== "present" || selected.tasks.kind !== "present" || selected.akuma.kind !== "present")
     return;
+  if (report.akuma.kind !== "present") throw new Error("fixture Akuma must be present");
   assert.deepEqual(
     selected.contracts.value.rows.map((row) => row.id),
     [contract.id],
@@ -2015,7 +2031,7 @@ test("Kanshi selection is a projection that preserves source presence", async ()
 test("Kanshi text neutralizes control characters from source diagnostics", () => {
   const text = renderKanshiText(
     {
-      root: "/repo\u001b[31m\nforged",
+      root: "/repo\u001b[31m\nforged" as WorldRoot,
       observedAt: "2026-08-12T00:00:00.000Z",
       branch: null,
       contracts: { kind: "failed", failure: { message: "broken\u001b[2J\nforged\u2028again\u2029end" } },
@@ -2170,8 +2186,9 @@ test("Contract namespace Tasks come from one Task board observation", async () =
   if (report.contracts.kind !== "present" || report.tasks.kind !== "present" || selected.contracts.kind !== "present") return;
   assert.equal(report.contracts.value.rows.every((candidate) => candidate.namespaceTasks === undefined), true);
   const row = selected.contracts.value.rows.find((candidate) => candidate.id === contract.id);
-  assert.equal(row?.namespaceTasks.kind, "present");
-  if (row?.namespaceTasks.kind !== "present") return;
+  if (row === undefined || row.namespaceTasks === undefined) throw new Error("fixture namespace tasks must be present");
+  assert.equal(row.namespaceTasks.kind, "present");
+  if (row.namespaceTasks.kind !== "present") return;
   const expected = board.selectNamespace(contractNamespace(contract.id));
   assert.deepEqual(row.namespaceTasks.value, expected);
   assert.deepEqual(
@@ -2203,7 +2220,7 @@ test("Contract namespace Tasks come from one Task board observation", async () =
     board.selectRecentStatus(10).rows.map((task) => ({
       id: task.id,
       disposition: task.disposition,
-      blockers: task.blockers,
+      blockers: "blockers" in task ? task.blockers : undefined,
     })),
   );
   assert.equal(report.tasks.value.hasMore, board.selectRecentStatus(10).hasMore);
@@ -2242,8 +2259,9 @@ test("Task board failure fails namespace context without suppressing Contract or
   assert.equal(report.tasks.kind, "failed");
   if (report.contracts.kind !== "present" || report.akuma.kind !== "present") return;
   const row = report.contracts.value.rows.find((candidate) => candidate.id === contract.id);
-  assert.equal(row?.namespaceTasks.kind, "failed");
-  if (row?.namespaceTasks.kind === "failed") assert.match(row.namespaceTasks.failure.message, /front matter/u);
+  if (row === undefined || row.namespaceTasks === undefined) throw new Error("fixture namespace tasks must be present");
+  assert.equal(row.namespaceTasks.kind, "failed");
+  if (row.namespaceTasks.kind === "failed") assert.match(row.namespaceTasks.failure.message, /front matter/u);
   assert.equal(
     report.akuma.value.rows.some((candidate) => candidate.id === akumaId),
     true,

@@ -6,9 +6,15 @@ import { join, parse } from "node:path";
 import test from "node:test";
 import { repositoryAt } from "../src/git/repository.js";
 import { resolveCliCoordinates } from "../src/cli/coordinates.js";
-import { parseArgv } from "../src/cli/parse.js";
+import { parseArgv as parseInvocation, type ParsedExecution } from "../src/cli/parse.js";
 import { World, WorldError } from "../src/world.js";
 import { makeGitRepository } from "./support/git.js";
+
+function parseArgv(argv: readonly string[]): ParsedExecution {
+  const parsed = parseInvocation(argv);
+  if ("help" in parsed) throw new Error("expected executable command");
+  return parsed;
+}
 
 function temporary(): string {
   return mkdtempSync(join(tmpdir(), "keiyaku-world-"));

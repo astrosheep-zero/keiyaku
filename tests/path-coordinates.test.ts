@@ -6,11 +6,21 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import test from "node:test";
 import { resolveCliCoordinates } from "../src/cli/coordinates.js";
-import { invoke } from "../src/cli/invoke.js";
-import { parseArgv } from "../src/cli/parse.js";
+import { invoke as invokeRaw, type InvocationResult } from "../src/cli/invoke.js";
+import { parseArgv as parseInvocation, type ParsedExecution } from "../src/cli/parse.js";
 import { Keiyaku, Repo } from "../src/index.js";
 import { World } from "../src/world.js";
 import { registeredWorktrees, repositoryAt } from "../src/git/repository.js";
+
+function parseArgv(argv: readonly string[]): ParsedExecution {
+  const parsed = parseInvocation(argv);
+  if ("help" in parsed) throw new Error("expected executable command");
+  return parsed;
+}
+
+async function invoke(invocation: Parameters<typeof invokeRaw>[0], runtime?: Parameters<typeof invokeRaw>[1]): Promise<InvocationResult> {
+  return (await invokeRaw(invocation, runtime)) as InvocationResult;
+}
 
 function repositoryWithSpaces(): string {
   const parent = mkdtempSync(join(tmpdir(), "keiyaku coordinates with spaces-"));
@@ -96,7 +106,7 @@ test("CLI accepts native repository coordinate spellings through managed worktre
     const result = await invoke(parseArgv(["-C", coordinate, "--repo", ".", "bind", "-"]), {
       cwd: process.cwd(),
       environment: {},
-      readStdin: () => contractDocument(`Native coordinate ${index}`),
+      readStdin: async () => contractDocument(`Native coordinate ${index}`),
     });
     assert.equal(result.kind, "accepted");
     if (result.kind !== "accepted") continue;
