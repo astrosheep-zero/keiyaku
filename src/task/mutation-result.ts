@@ -1,6 +1,13 @@
 import type { TaskCompositionResult } from "./compose.js";
 import { isTaskSegment, formatTaskId, parseTaskId } from "./identity.js";
-import type { TaskBatchResult, TaskMutationResult, TaskRefusal, TaskUpdateResult, TaskView } from "./operations.js";
+import type {
+  TaskBatchResult,
+  TaskCleanupFailure,
+  TaskMutationResult,
+  TaskRefusal,
+  TaskUpdateResult,
+  TaskView,
+} from "./operations.js";
 import { z } from "zod";
 
 export type TaskMutationExecutionResult =
@@ -10,6 +17,23 @@ export type TaskMutationExecutionResult =
   | TaskCompositionResult;
 
 const nonblankTextSchema = z.string().refine((value) => value.trim() !== "");
+type WithoutUndefined<Value> = {
+  [Key in keyof Value as undefined extends Value[Key] ? never : Key]: Value[Key];
+} & {
+  [Key in keyof Value as undefined extends Value[Key] ? Key : never]?: Exclude<Value[Key], undefined>;
+};
+function withoutUndefined<Value extends Record<string, unknown>>(
+  value: Value,
+  keys: readonly (keyof Value & string)[],
+): WithoutUndefined<Value> {
+  const result: Record<string, unknown> = { ...value };
+  for (const key of keys) {
+    const field = result[key];
+    delete result[key];
+    if (field !== undefined) result[key] = field;
+  }
+  return result as WithoutUndefined<Value>;
+}
 const timestampSchema = z.string().refine((value) => {
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) && new Date(parsed).toISOString() === value;
@@ -32,6 +56,9 @@ const taskPrioritySchema = z.union([z.literal(0), z.literal(1), z.literal(2), z.
 const taskRetrySchema = z
   .object({ kind: z.literal("retry"), reason: z.enum(["busy", "concurrent-modification"]) })
   .strict();
+const taskCleanupFailureSchema = z
+  .object({ kind: z.literal("lock-release-failed"), diagnostics: z.array(z.string()) })
+  .strict() satisfies z.ZodType<TaskCleanupFailure>;
 const taskViewSchema = z
   .object({
     id: taskMutationIdSchema,
@@ -83,7 +110,10 @@ const taskRefusalSchema = z.union([
   z.object({ kind: z.literal("invalid-composition"), diagnostics: z.array(compositionDiagnosticSchema) }).strict(),
 ]) satisfies z.ZodType<TaskRefusal>;
 export const taskMutationResultSchema = z.union([
-  z.object({ kind: z.literal("accepted"), value: taskViewSchema }).strict(),
+  z
+    .object({ kind: z.literal("accepted"), value: taskViewSchema, cleanup: taskCleanupFailureSchema.optional() })
+    .strict()
+    .transform((value) => withoutUndefined(value, ["cleanup"])),
   z.object({ kind: z.literal("refused"), refusal: taskRefusalSchema }).strict(),
   taskRetrySchema,
 ]) satisfies z.ZodType<TaskMutationResult>;
@@ -92,8 +122,10 @@ export const taskUpdateResultSchema = z.union([
     .object({
       kind: z.literal("accepted"),
       value: z.object({ task: taskViewSchema, documentDiff: z.string() }).strict(),
+      cleanup: taskCleanupFailureSchema.optional(),
     })
-    .strict(),
+    .strict()
+    .transform((value) => withoutUndefined(value, ["cleanup"])),
   z.object({ kind: z.literal("refused"), refusal: taskRefusalSchema }).strict(),
   taskRetrySchema,
 ]) satisfies z.ZodType<TaskUpdateResult>;
@@ -122,7 +154,15 @@ export const taskCompositionResultSchema = z.union([
       ),
     })
     .strict(),
-  z.object({ kind: z.literal("accepted"), ...compositionFactsSchema, documentChanges: documentChangesSchema }).strict(),
+  z
+    .object({
+      kind: z.literal("accepted"),
+      ...compositionFactsSchema,
+      documentChanges: documentChangesSchema,
+      cleanup: taskCleanupFailureSchema.optional(),
+    })
+    .strict()
+    .transform((value) => withoutUndefined(value, ["cleanup"])),
   z
     .object({
       kind: z.literal("refused"),
@@ -136,10 +176,12 @@ export const taskCompositionResultSchema = z.union([
       kind: z.literal("incomplete"),
       ...compositionFactsSchema,
       documentChanges: documentChangesSchema,
+      cleanup: taskCleanupFailureSchema.optional(),
       stopped: z.union([taskRefusalSchema, taskRetrySchema]),
       draft: z.string(),
     })
-    .strict(),
+    .strict()
+    .transform((value) => withoutUndefined(value, ["cleanup"])),
 ]) satisfies z.ZodType<TaskCompositionResult>;
 
 export const taskMutationExecutionResultSchema = z.union([

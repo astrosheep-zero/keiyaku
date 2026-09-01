@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
 import {
   existsSync,
   mkdtempSync,
@@ -694,6 +695,205 @@ test("task lock cancellation propagates and exceptional actions release held loc
     /action failed/u,
   );
   assert.equal((await tasks.task({ id }).start()).kind, "accepted");
+});
+
+test("task lock cleanup attempts every release and preserves a committed result", { concurrency: false }, async () => {
+  const { tasks } = await world();
+  const first = acceptedId(await tasks.add({ title: "Cleanup first" }));
+  const second = acceptedId(await tasks.add({ title: "Cleanup second" }));
+  const originalClose = DatabaseSync.prototype.close;
+  let releases = 0;
+  DatabaseSync.prototype.close = function patchedClose(this: DatabaseSync): void {
+    releases += 1;
+    try {
+      if (releases <= 2) throw new Error(`release-${releases}`);
+    } finally {
+      originalClose.call(this);
+    }
+  };
+  try {
+    const result = await withTaskLocks({ world: tasks.root, allocation: false, ids: [first, second] }, async () => ({
+      kind: "accepted" as const,
+      value: "committed",
+    }));
+    assert.equal(releases, 2);
+    assert.deepEqual(result, {
+      kind: "accepted",
+      value: "committed",
+      cleanup: {
+        kind: "lock-release-failed",
+        diagnostics: ["cannot release SQLite lock: release-1", "cannot release SQLite lock: release-2"],
+      },
+    });
+  } finally {
+    DatabaseSync.prototype.close = originalClose;
+  }
+});
+
+test(
+  "a committed lifecycle action remains visible when cleanup fails and retry does not duplicate it",
+  { concurrency: false },
+  async () => {
+    const { tasks } = await world();
+    const id = acceptedId(await tasks.add({ title: "Cleanup retry" }));
+    const originalClose = DatabaseSync.prototype.close;
+    let fail = true;
+    DatabaseSync.prototype.close = function patchedClose(this: DatabaseSync): void {
+      try {
+        if (fail) throw new Error("release failed");
+      } finally {
+        originalClose.call(this);
+      }
+    };
+    try {
+      const committed = await tasks.task({ id }).start();
+      assert.equal(committed.kind, "accepted");
+      if (committed.kind !== "accepted") return;
+      assert.deepEqual(committed.cleanup, {
+        kind: "lock-release-failed",
+        diagnostics: ["cannot release SQLite lock: release failed"],
+      });
+    } finally {
+      fail = false;
+      DatabaseSync.prototype.close = originalClose;
+    }
+    assert.deepEqual(await tasks.task({ id }).start(), {
+      kind: "refused",
+      refusal: { kind: "invalid-lifecycle-transition", taskId: id, state: "in_progress", verb: "start" },
+    });
+    assert.equal((await tasks.task({ id }).read())?.task.state, "in_progress");
+  },
+);
+
+test("nested compose retains cleanup diagnostics from inner and outer locks", { concurrency: false }, async () => {
+  const { tasks } = await world();
+  const originalClose = DatabaseSync.prototype.close;
+  let releases = 0;
+  DatabaseSync.prototype.close = function patchedClose(this: DatabaseSync): void {
+    releases += 1;
+    try {
+      throw new Error(`release-${releases}`);
+    } finally {
+      originalClose.call(this);
+    }
+  };
+  try {
+    const result = await tasks.compose({ markdown: "+ Nested compose\n" });
+    assert.equal(result.kind, "accepted");
+    if (result.kind !== "accepted") return;
+    assert.deepEqual(result.cleanup, {
+      kind: "lock-release-failed",
+      diagnostics: ["cannot release SQLite lock: release-1", "cannot release SQLite lock: release-2"],
+    });
+  } finally {
+    DatabaseSync.prototype.close = originalClose;
+  }
+});
+
+test("task lock acquisition failure retains a held-lock cleanup failure", { concurrency: false }, async () => {
+  const { tasks } = await world();
+  const first = acceptedId(await tasks.add({ title: "Acquire failure first" }));
+  const second = acceptedId(await tasks.add({ title: "Acquire failure second" }));
+  const blocked = await acquireSqliteTransactionLock({
+    path: join(tasks.root, ".keiyaku", "locks", "task", "acquire-failure-second.sqlite"),
+    mode: "immediate",
+  });
+  const originalClose = DatabaseSync.prototype.close;
+  let releases = 0;
+  DatabaseSync.prototype.close = function patchedClose(this: DatabaseSync): void {
+    releases += 1;
+    try {
+      throw new Error("release after acquire failure");
+    } finally {
+      originalClose.call(this);
+    }
+  };
+  try {
+    await assert.rejects(
+      withTaskLocks({ world: tasks.root, allocation: false, ids: [first, second], timeoutMs: 25 }, async () => "unreachable"),
+      (error: unknown) => {
+        assert.ok(error instanceof AggregateError);
+        assert.equal(error.errors.length, 2);
+        assert.match(String(error.errors[0]), /SQLite lock timed out/u);
+        assert.match(String(error.errors[1]), /cannot release SQLite lock: release after acquire failure/u);
+        return true;
+      },
+    );
+    assert.ok(releases >= 1);
+  } finally {
+    DatabaseSync.prototype.close = originalClose;
+    blocked.close();
+  }
+});
+
+test("task action failure retains a close failure", { concurrency: false }, async () => {
+  const { tasks } = await world();
+  const id = acceptedId(await tasks.add({ title: "Action failure" }));
+  const originalClose = DatabaseSync.prototype.close;
+  let releases = 0;
+  DatabaseSync.prototype.close = function patchedClose(this: DatabaseSync): void {
+    releases += 1;
+    try {
+      throw new Error("release after action failure");
+    } finally {
+      originalClose.call(this);
+    }
+  };
+  try {
+    await assert.rejects(
+      withTaskLocks({ world: tasks.root, allocation: false, ids: [id] }, async () => {
+        throw new Error("action failure");
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof AggregateError);
+        assert.equal(error.errors.length, 2);
+        assert.match(String(error.errors[0]), /action failure/u);
+        assert.match(String(error.errors[1]), /cannot release SQLite lock: release after action failure/u);
+        return true;
+      },
+    );
+    assert.equal(releases, 1);
+  } finally {
+    DatabaseSync.prototype.close = originalClose;
+  }
+});
+
+test("partial task composition retains committed changes when lock cleanup fails", { concurrency: false }, async () => {
+  const { tasks, root } = await world();
+  assert.equal((await tasks.add({ title: "Partial first" })).kind, "accepted");
+  assert.equal((await tasks.add({ title: "Partial second" })).kind, "accepted");
+  const originalClose = DatabaseSync.prototype.close;
+  let signalCalls = 0;
+  const controller = new AbortController();
+  controller.signal.throwIfAborted = (): void => {
+    signalCalls += 1;
+    if (signalCalls === 4) writeFileSync(join(root, ".keiyaku", "tasks", "partial-second.md"), "changed\n");
+  };
+  DatabaseSync.prototype.close = function patchedClose(this: DatabaseSync): void {
+    try {
+      throw new Error("release after partial composition");
+    } finally {
+      originalClose.call(this);
+    }
+  };
+  try {
+    const result = await tasks.compose({
+      markdown: ["@task/partial-first", "pri = 1", "@task/partial-second", "pri = 1", ""].join("\n"),
+      signal: controller.signal,
+    });
+    assert.equal(result.kind, "incomplete");
+    if (result.kind !== "incomplete") return;
+    assert.equal(result.documentChanges.length, 1);
+    assert.deepEqual(result.cleanup, {
+      kind: "lock-release-failed",
+      diagnostics: [
+        "cannot release SQLite lock: release after partial composition",
+        "cannot release SQLite lock: release after partial composition",
+      ],
+    });
+  } finally {
+    DatabaseSync.prototype.close = originalClose;
+  }
 });
 
 test("task lock wait budget defaults to three seconds and classifies busy cheaply", async () => {

@@ -9,7 +9,7 @@ import {
 } from "./compose-language.js";
 import { serializeTaskDocument } from "./document.js";
 import type { TaskId } from "./identity.js";
-import type { TaskCompositionDiagnostic, TaskRefusal, TaskRetry } from "./operations.js";
+import type { TaskCleanupFailure, TaskCompositionDiagnostic, TaskRefusal, TaskRetry } from "./operations.js";
 import { readBoard, replaceAuthority, withTaskLocks } from "./store.js";
 
 export type { TaskCompositionAlias, TaskCompositionBodyPreview } from "./compose-language.js";
@@ -31,11 +31,15 @@ export type TaskCompositionResult =
       admissionOrder: readonly TaskId[];
       bodies: readonly TaskCompositionBodyPreview[];
     }>
-  | Readonly<{ kind: "accepted"; documentChanges: readonly TaskDocumentChange[] } & TaskCompositionFacts>
+  | Readonly<
+      { kind: "accepted"; documentChanges: readonly TaskDocumentChange[]; cleanup?: TaskCleanupFailure } &
+        TaskCompositionFacts
+    >
   | Readonly<{ kind: "refused"; refusal: Extract<TaskRefusal, { kind: "invalid-composition" }> }>
   | (Readonly<{
       kind: "incomplete";
       documentChanges: readonly TaskDocumentChange[];
+      cleanup?: TaskCleanupFailure;
       stopped: TaskRefusal | Readonly<{ kind: "retry"; reason: TaskRetry }>;
       draft: string;
     }> &

@@ -2,6 +2,10 @@ import type { TaskDocument, TaskPriority, TaskState } from "./document.js";
 import type { TaskId } from "./identity.js";
 
 export type TaskView = Readonly<TaskDocument & { namespace: readonly string[] }>;
+export type TaskCleanupFailure = Readonly<{
+  kind: "lock-release-failed";
+  diagnostics: readonly string[];
+}>;
 export type TaskCompositionDiagnostic = Readonly<{ line: number; reason: string; token: string }>;
 export type TaskRefusal =
   | Readonly<{ kind: "task-missing"; taskId: TaskId }>
@@ -12,7 +16,7 @@ export type TaskRefusal =
   | Readonly<{ kind: "invalid-composition"; diagnostics: readonly TaskCompositionDiagnostic[] }>;
 export type TaskRetry = "busy" | "concurrent-modification";
 export type TaskOutcome<A> =
-  | Readonly<{ kind: "accepted"; value: A }>
+  | Readonly<{ kind: "accepted"; value: A; cleanup?: TaskCleanupFailure }>
   | Readonly<{ kind: "refused"; refusal: TaskRefusal }>
   | Readonly<{ kind: "retry"; reason: TaskRetry }>;
 export type TaskMutationResult = TaskOutcome<TaskView>;
@@ -21,7 +25,7 @@ export type TaskLifecycleVerb = "start" | "stop" | "hold" | "resume" | "done" | 
 export type TaskBatchResult = Readonly<{ items: readonly Readonly<{ id: TaskId; outcome: TaskMutationResult }>[] }>;
 export type SettledTaskAction = "done";
 export type SettledTaskResult =
-  | Readonly<{ kind: "changed"; task: TaskView; action: SettledTaskAction }>
+  | Readonly<{ kind: "changed"; task: TaskView; action: SettledTaskAction; cleanup?: TaskCleanupFailure }>
   | Readonly<{ kind: "unchanged" }>
   | Readonly<{ kind: "refused"; refusal: TaskRefusal }>
   | Readonly<{ kind: "retry"; reason: TaskRetry }>;

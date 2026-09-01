@@ -38,6 +38,7 @@ export { advanceTaskTimestamp, taskView } from "./view.js";
 export type {
   AddTaskDocumentInput,
   AddTaskInput,
+  TaskCleanupFailure,
   SettledTaskAction,
   SettledTaskResult,
   TaskBatchResult,

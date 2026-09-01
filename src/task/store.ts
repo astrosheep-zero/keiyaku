@@ -229,6 +229,27 @@ function lockPath(world: WorldRoot, id: TaskId): string {
   return resolve(world, ".keiyaku", "locks", "task", ...coordinate.namespace, `${coordinate.localId}.sqlite`);
 }
 
+function errorDetail(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function preserveCommittedResult<T>(result: T, errors: readonly unknown[]): T {
+  if (typeof result === "object" && result !== null && "kind" in result) {
+    const kind = (result as { kind?: unknown }).kind;
+    if (kind === "accepted" || kind === "changed" || kind === "incomplete") {
+      const previous = (result as { cleanup?: { diagnostics: readonly string[] } }).cleanup;
+      return {
+        ...(result as object),
+        cleanup: {
+          kind: "lock-release-failed",
+          diagnostics: [...(previous?.diagnostics ?? []), ...errors.map(errorDetail)],
+        },
+      } as T;
+    }
+  }
+  throw new AggregateError(errors, "Task lock cleanup failed");
+}
+
 export async function nukeTaskAuthority(
   world: WorldRoot,
   options?: Readonly<{ timeoutMs?: number }>,
@@ -272,6 +293,8 @@ export async function withTaskLocks<T>(
       .map((id) => lockPath(input.world, id)),
   ];
   const held: HeldSqliteTransactionLock[] = [];
+  let result: T | undefined;
+  let failure: unknown;
   try {
     for (const path of paths)
       held.push(
@@ -282,13 +305,36 @@ export async function withTaskLocks<T>(
           ...(input.signal === undefined ? {} : { signal: input.signal }),
         }),
       );
-    return await action();
+    result = await action();
   } catch (error) {
-    if (error instanceof SqliteTransactionLockError && error.reason === "timeout") return "busy";
-    throw error;
+    failure = error;
   } finally {
-    for (const lock of held.reverse()) lock.close();
+    const cleanupErrors: unknown[] = [];
+    for (const lock of held.reverse()) {
+      try {
+        lock.close();
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+    }
+    if (cleanupErrors.length > 0) {
+      if (failure === undefined && result !== undefined) result = preserveCommittedResult(result, cleanupErrors);
+      else if (failure === undefined) failure = new AggregateError(cleanupErrors, "Task lock cleanup failed");
+      else {
+        const originalFailure = failure;
+        failure = new AggregateError(
+          [originalFailure, ...cleanupErrors],
+          errorDetail(originalFailure),
+          { cause: originalFailure },
+        );
+      }
+    }
   }
+  if (failure !== undefined) {
+    if (failure instanceof SqliteTransactionLockError && failure.reason === "timeout") return "busy";
+    throw failure;
+  }
+  return result as T;
 }
 
 export function authorityPath(world: WorldRoot, id: TaskId): string {
