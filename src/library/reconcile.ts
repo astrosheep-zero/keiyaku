@@ -12,7 +12,12 @@ import { worktreePath } from "../git/workspace.js";
 import { stateOperation, type RepositoryScope } from "../protocol/operations.js";
 import { settle, settleAll, type SettlementReport } from "../settlement/settle.js";
 import type { WorktreeHooks } from "./configuration.js";
-import { projectContractWorktree, type ContractFileEffect, type ContractFileLag } from "../contract-worktree.js";
+import {
+  projectContractWorktree,
+  type ContractFileEffect,
+  type ContractFileLag,
+  type ContractWorktreeResult,
+} from "../contract-worktree.js";
 import {
   appointManagedWorktrees,
   placeRegisterPath,
@@ -241,6 +246,14 @@ export async function completeRepoReconcile(input: ReconcileOptions): Promise<Re
     retainTerminalWorktree: true,
     places,
   });
+  const projections: ContractWorktreeResult[] = [];
+  for (const contract of retained.contracts) {
+    projections.push(
+      realizedOrRetainedManagedWorktree(input.scope, contract.report, places.get(contract.contractId))
+        ? await projectContractWorktree(input.scope, contract.state, appointed)
+        : { effects: [], lag: [] },
+    );
+  }
   const settlements = await settleAll({
     repository: input.scope,
     channel: input.channel,
@@ -261,9 +274,7 @@ export async function completeRepoReconcile(input: ReconcileOptions): Promise<Re
     if (releaseEligible(contract.state, report, places.has(contract.contractId))) {
       released.push(contract.contractId);
     }
-    const projection = realizedOrRetainedManagedWorktree(input.scope, contract.report, places.get(contract.contractId))
-      ? await projectContractWorktree(input.scope, contract.state, appointed)
-      : { effects: [], lag: [] };
+    const projection = projections[index]!;
     contracts.push({
       contractId: contract.contractId,
       report: {

@@ -49,17 +49,24 @@ tombstone, cursor, or filesystem-derived appointment authority.
 
 ## Derived Files And Cleanup
 
-The workspace owner atomically creates or repairs its guidance and narrow local
-ignore protection after the managed worktree exists. These files keep derived
-management material out of ordinary status and delivery capture without hiding
-project-owned data. A tracked generated location is a failure. A recognized
-user-owned skill leaf remains untouched; static seat skills contain procedure
-only, while Contract and arc facts remain in canonical guidance.
+The workspace owner atomically creates or repairs its guidance, namespace
+context, and narrow local ignore protection after an active managed worktree
+exists. These files keep derived management material out of ordinary status and
+delivery capture without hiding project-owned data. Namespace context is the
+Contract-derived coordinate for active Task work; a valid local override remains
+intact. The complete Contract coordinate is split into segments, so `kei/<slug>`
+provides Task namespace `kei/<slug>` and identities under `task/kei/<slug>/...`.
+Terminal Contracts never receive a new active context projection. A tracked
+generated location is a failure. A recognized user-owned skill leaf remains
+untouched; static seat skills contain procedure only, while Contract and arc
+facts remain in canonical guidance.
 
 All workspace reads, writes, protection, and cleanup are awaited. There is no
 synchronous appointment surface or deferred cleanup queue. A derived-file
 failure is a typed post-admission lag and preserves accepted facts and completed
 Git effects. Git reconciliation does not parse guidance or invoke a projection
-callback; it completes Git effects first, then workspace projection runs as the
-separate owner step. Terminal byte custody and recovery remain owned by
+callback; it completes Git effects first, then active workspace projection runs
+as the separate owner step. Terminal cleanup runs after the settlement
+opportunity and may remove the managed worktree, including its active-only
+derived context. Terminal byte custody and recovery remain owned by
 [git-reconciliation.md](git-reconciliation.md).

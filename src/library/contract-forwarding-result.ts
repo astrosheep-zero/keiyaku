@@ -74,7 +74,7 @@ const journalFactSchema = z.unknown().transform((value, context) => {
 const settlementLagSchema = z
   .object({
     kind: z.literal("settlement-failed"),
-    surface: z.enum(["task-holder", "task", "namespace-context"]),
+    surface: z.enum(["task-holder", "task"]),
     contractId: contractIdSchema,
     taskId: taskIdSchema.optional(),
     path: nonblankStringSchema.optional(),

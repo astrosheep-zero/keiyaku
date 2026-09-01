@@ -4,9 +4,8 @@ import { withPrivateStatePublicationSeat } from "../git/private-state-seat.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import type { Effect } from "../git/reconcile.js";
 import type { GitRepository } from "../git/process.js";
-import { repairNamespaceContext } from "../task/context.js";
 import { settleTask, type SettledTaskResult } from "../task/operations.js";
-import { contractNamespace, type TaskId } from "../task/identity.js";
+import { type TaskId } from "../task/identity.js";
 import {
   publishTaskHolderRelease,
   readTaskHolderProjectionFromDecision,
@@ -16,13 +15,11 @@ import {
 import { acquireTaskSettlementFence } from "./fence.js";
 import { World, type WorldRoot } from "../world.js";
 
-export type SettlementAction =
-  | Readonly<{ kind: "task"; taskId: TaskId; action: "done" }>
-  | Readonly<{ kind: "namespace-context"; path: string; action: "installed" | "kept" }>;
+export type SettlementAction = Readonly<{ kind: "task"; taskId: TaskId; action: "done" }>;
 
 export type SettlementLag = Readonly<{
   kind: "settlement-failed";
-  surface: "task-holder" | "task" | "namespace-context";
+  surface: "task-holder" | "task";
   contractId: ContractId;
   taskId?: TaskId;
   path?: string;
@@ -184,7 +181,7 @@ async function releaseHeldTaskHolder(
   }
 }
 
-async function settleTasks(input: SettleTasksInput, beforeRelease: () => Promise<void>): Promise<boolean> {
+async function settleTasks(input: SettleTasksInput): Promise<boolean> {
   const { repository, channel, candidate, actions, lags } = input;
   const hint = await observeApplicableHolder({ repository, channel, candidate, lags });
   if (hint === null) return false;
@@ -207,7 +204,6 @@ async function settleTasks(input: SettleTasksInput, beforeRelease: () => Promise
     const holder = await observeApplicableHolder({ repository, channel, candidate, lags });
     if (holder === null || holder.taskId !== taskId) return false;
     taskSettled = await completeHeldTask({ repository, candidate, actions, lags, taskId });
-    await beforeRelease();
     if (!taskSettled) return true;
     await releaseHeldTaskHolder({ repository, channel, candidate, taskId, lags });
     return true;
@@ -227,36 +223,6 @@ async function settleTasks(input: SettleTasksInput, beforeRelease: () => Promise
   }
 }
 
-async function settleNamespace(
-  state: ContractState,
-  effects: readonly Effect[],
-  actions: SettlementAction[],
-  lags: SettlementLag[],
-): Promise<void> {
-  if (state.coordinates.workspace !== "worktree") return;
-  const worktrees = effects.filter(
-    (effect): effect is Extract<Effect, { kind: "worktree" }> =>
-      effect.kind === "worktree" && effect.action !== "removed",
-  );
-  for (const effect of worktrees) {
-    try {
-      actions.push({
-        kind: "namespace-context",
-        path: effect.path,
-        action: await repairNamespaceContext(effect.path, contractNamespace(state.id)),
-      });
-    } catch (error) {
-      lags.push({
-        kind: "settlement-failed",
-        surface: "namespace-context",
-        contractId: state.id,
-        path: effect.path,
-        diagnostic: diagnostic(error),
-      });
-    }
-  }
-}
-
 async function settleObserved(input: SettlementInput): Promise<SettlementReport> {
   if (input.state === null) return { actions: [], lags: [] };
   const actions: SettlementAction[] = [],
@@ -264,16 +230,13 @@ async function settleObserved(input: SettlementInput): Promise<SettlementReport>
   const candidate = input.state;
   if (candidate.terminal?.kind === "claimed") {
     try {
-      await settleTasks(
-        {
-          repository: input.repository,
-          channel: input.channel,
-          candidate,
-          actions,
-          lags,
-        },
-        async () => await settleNamespace(candidate, input.effects, actions, lags),
-      );
+      await settleTasks({
+        repository: input.repository,
+        channel: input.channel,
+        candidate,
+        actions,
+        lags,
+      });
     } catch (error) {
       lags.push({
         kind: "settlement-failed",

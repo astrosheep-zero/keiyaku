@@ -565,6 +565,7 @@ test("a claimed managed-worktree Contract installs namespace context before remo
   });
   const state = await bound.keiyaku.state();
   const path = await appointedWorktreePath(await cachedRepositoryAt(world.path), state.id);
+  assert.deepEqual(await readNamespaceContext({ directory: path, boundary: path }), ["kei", state.id.slice("kei/".length)]);
   const fromWorktree = Keiyaku.of({ repo: await Repo.at({ path }), id: state.id });
   writeFileSync(`${path}/candidate.txt`, "candidate\n");
   const claimed = await fromWorktree.deliver({ includeDirty: true });
@@ -574,7 +575,7 @@ test("a claimed managed-worktree Contract installs namespace context before remo
   assert.equal(existsSync(path), false);
 });
 
-test("a claimed managed-worktree Contract repairs malformed namespace context before removal", async () => {
+test("an active managed-worktree projection repairs malformed namespace context", async () => {
   const world = repository(),
     repo = await cachedRepoAt(world.path);
   const taskId = await task(world.path, "Namespace repair holder");
@@ -587,18 +588,16 @@ test("a claimed managed-worktree Contract repairs malformed namespace context be
   });
   const state = await bound.keiyaku.state();
   const path = await appointedWorktreePath(await cachedRepositoryAt(world.path), state.id);
-  const fromWorktree = Keiyaku.of({ repo: await Repo.at({ path }), id: state.id });
   mkdirSync(join(path, ".keiyaku", "namespace"), { recursive: true });
   writeFileSync(join(path, ".keiyaku", "namespace", "current"), "malformed\ncontext\n");
-  writeFileSync(`${path}/candidate.txt`, "namespace repair\n");
-  const claimed = await fromWorktree.deliver({ includeDirty: true });
+  const repaired = await bound.keiyaku.reconcile();
 
-  assert.deepEqual(claimed.settlementLags, []);
+  assert.deepEqual(repaired.lag, []);
   assert.equal(existsSync(path), true);
   assert.deepEqual(await readNamespaceContext({ directory: path, boundary: path }), ["kei", state.id.slice("kei/".length)]);
 });
 
-test("Settlement completes Task and namespace projection before releasing its holder", async () => {
+test("Settlement completes Task before releasing its holder", async () => {
   const world = repository(),
     repo = await cachedRepoAt(world.path);
   const taskId = await task(world.path, "Projection before holder release", "drop");
@@ -627,8 +626,9 @@ test("Settlement completes Task and namespace projection before releasing its ho
       effects: [{ kind: "worktree", path: refusedProjection, action: "created" }],
     }),
   );
-  assert.deepEqual(refused.actions, [{ kind: "namespace-context", path: refusedProjection, action: "installed" }]);
+  assert.deepEqual(refused.actions, []);
   assert.equal(refused.lags[0]?.surface, "task");
+  assert.equal(existsSync(join(refusedProjection, ".keiyaku")), false);
   assert.deepEqual(await holders(world), [
     { version: 1, taskId, contractId: state.id, disposition: "held" },
   ]);
@@ -640,13 +640,11 @@ test("Settlement completes Task and namespace projection before releasing its ho
     [
       'if [ "$1" = "update-ref" ] && [ "$2" = "--stdin" ]; then',
       '  grep -qx "state: done" "$SETTLEMENT_TASK" || exit 1',
-      '  test -f "$SETTLEMENT_CONTEXT" || exit 1',
       "fi",
       'exec "$KEIYAKU_REAL_GIT" "$@"',
     ].join("\n"),
     {
       SETTLEMENT_TASK: join(world.path, taskPath(taskId)),
-      SETTLEMENT_CONTEXT: join(projection, ".keiyaku", "namespace", "current"),
     },
     async (gitPath) => {
       const git = await cachedRepositoryAt(world.path, gitPath);
@@ -664,7 +662,6 @@ test("Settlement completes Task and namespace projection before releasing its ho
   assert.deepEqual(report, {
     actions: [
       { kind: "task", taskId, action: "done" },
-      { kind: "namespace-context", path: projection, action: "installed" },
     ],
     lags: [],
   });
@@ -673,10 +670,10 @@ test("Settlement completes Task and namespace projection before releasing its ho
   ]);
 });
 
-test("a namespace projection lag is invocation-only after durable Task settlement", async () => {
+test("an active namespace projection failure remains a workspace lag", async () => {
   const world = repository(),
     repo = await cachedRepoAt(world.path);
-  const taskId = await task(world.path, "Projection lag", "drop");
+  const taskId = await task(world.path, "Projection lag");
   const bound = await Keiyaku.bind({
     repo,
     task: taskId,
@@ -686,44 +683,18 @@ test("a namespace projection lag is invocation-only after durable Task settlemen
   });
   const state = await bound.keiyaku.state();
   const path = await appointedWorktreePath(await cachedRepositoryAt(world.path), state.id);
-  const fromWorktree = Keiyaku.of({ repo: await Repo.at({ path }), id: state.id });
-  writeFileSync(`${path}/candidate.txt`, "held retry\n");
-  const claimed = await fromWorktree.deliver({ includeDirty: true });
-  assert.equal(claimed.settlementLags[0]?.surface, "task");
-  replaceTaskState(world.path, taskId, "drop", "open");
-  const projection = join(world.path, "projection-lag");
-  mkdirSync(projection);
-  writeFileSync(join(projection, ".keiyaku"), "not a directory\n");
-  const git = await cachedRepositoryAt(world.path);
-  const claimedState = await bound.keiyaku.state();
+  rmSync(join(path, ".keiyaku"), { recursive: true, force: true });
+  writeFileSync(join(path, ".keiyaku"), "not a directory\n");
 
-  const report = await withGitDecodeChannel(git, (channel) =>
-    settle({
-      repository: git,
-      channel,
-      state: claimedState,
-      effects: [{ kind: "worktree", path: projection, action: "created" }],
-    }),
-  );
+  const report = await bound.keiyaku.reconcile();
 
-  assert.deepEqual(report.actions, [{ kind: "task", taskId, action: "done" }]);
-  assert.equal(report.lags.length, 1);
-  assert.equal(report.lags[0]?.surface, "namespace-context");
-  assert.equal((await bound.keiyaku.state()).terminal?.kind, "claimed");
-  assert.equal(await taskState(world.path, taskId), "done");
+  assert.equal(report.lag.length, 1);
+  assert.equal(report.lag[0]?.kind, "contract-file-failed");
+  assert.equal(report.lag[0]?.path, join(path, ".keiyaku", "namespace", "current"));
+  assert.equal((await bound.keiyaku.state()).terminal, null);
   assert.deepEqual(await holders(world), [
-    { version: 1, taskId, contractId: state.id, disposition: "released" },
+    { version: 1, taskId, contractId: state.id, disposition: "held" },
   ]);
-  const replay = await withGitDecodeChannel(git, (channel) =>
-    settle({
-      repository: git,
-      channel,
-      state: claimedState,
-      effects: [{ kind: "worktree", path: projection, action: "created" }],
-    }),
-  );
-  assert.deepEqual(replay, { actions: [], lags: [] });
-  assert.equal(readFileSync(join(projection, ".keiyaku"), "utf8"), "not a directory\n");
 });
 
 test("a retained replay does not report an absent managed worktree to Settlement", async () => {

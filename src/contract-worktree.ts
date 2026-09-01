@@ -13,6 +13,8 @@ import { worktreeGitDirectory, worktreeRoot } from "./git/repository.js";
 import { GitPlumbingError, runGit, type GitRepository } from "./git/process.js";
 import { worktreePath } from "./git/workspace.js";
 import { appointmentFor, placeRegisterPath, type PlaceRegister } from "./workspace-place.js";
+import { repairNamespaceContext } from "./task/context.js";
+import { contractNamespace } from "./task/identity.js";
 
 const IGNORE_BYTES = ".gitignore\nKEIYAKU.md\n";
 const PRIMARY_IGNORE_BYTES = "*\n!settings.json\n!tasks/\n!tasks/**\n";
@@ -155,6 +157,7 @@ async function materialize(
   repository: GitRepository,
   worktree: string,
   guidance: string,
+  namespace: readonly string[],
 ): Promise<ContractWorktreeResult> {
   const effects: ContractFileEffect[] = [];
   const failed = (target: string, path: string, error: unknown): ContractWorktreeResult => ({
@@ -198,6 +201,11 @@ async function materialize(
     };
   }
   const scoped = { ...repository, effectiveCwd: worktree };
+  try {
+    await repairNamespaceContext(worktree, namespace);
+  } catch (error) {
+    return failed(worktree, join(worktree, ".keiyaku", "namespace", "current"), error);
+  }
   for (const [relativePath, bytes] of [
     [".keiyaku/.gitignore", IGNORE_BYTES],
     [".keiyaku/KEIYAKU.md", guidance],
@@ -239,5 +247,10 @@ export async function projectContractWorktree(
       ],
     };
   }
-  return await materialize(repository, worktreePath(repository, appointed.place), renderContractGuidance(state));
+  return await materialize(
+    repository,
+    worktreePath(repository, appointed.place),
+    renderContractGuidance(state),
+    contractNamespace(state.id),
+  );
 }
