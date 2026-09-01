@@ -581,6 +581,67 @@ test("LineRpcProcess endInputAndDrain force-closes an uncooperative producer", a
   }
 });
 
+test("LineRpcProcess rejects pending requests and closes on malformed JSON", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-line-rpc-malformed-"));
+  const child = [
+    "process.stdin.on('data', () => process.stdout.write('{malformed}\\n'));",
+    "process.stdin.resume();",
+  ].join(" ");
+  let rpc: LineRpcProcess | undefined;
+  try {
+    rpc = new LineRpcProcess({ argv: [process.execPath, "-e", child], cwd: root, requestTimeoutMs: 1_000 });
+    await assert.rejects(rpc.request("probe"), /malformed JSON/u);
+  } finally {
+    await rpc?.close(true);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("LineRpcProcess rejects pending requests and closes on oversized input", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-line-rpc-oversized-"));
+  const child = [
+    "process.stdin.on('data', () => process.stdout.write('x'.repeat(300000) + '\\n'));",
+    "process.stdin.resume();",
+  ].join(" ");
+  let rpc: LineRpcProcess | undefined;
+  try {
+    rpc = new LineRpcProcess({ argv: [process.execPath, "-e", child], cwd: root, requestTimeoutMs: 1_000 });
+    await assert.rejects(rpc.request("probe"), /maximum size/u);
+  } finally {
+    await rpc?.close(true);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("LineRpcProcess rejects pending requests and closes on an oversized unterminated buffer", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-line-rpc-buffer-"));
+  const child = [
+    "process.stdin.on('data', () => process.stdout.write('x'.repeat(1100000)));",
+    "process.stdin.resume();",
+  ].join(" ");
+  let rpc: LineRpcProcess | undefined;
+  try {
+    rpc = new LineRpcProcess({ argv: [process.execPath, "-e", child], cwd: root, requestTimeoutMs: 1_000 });
+    await assert.rejects(rpc.request("probe"), /maximum size/u);
+  } finally {
+    await rpc?.close(true);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("LineRpcProcess times out a stalled request", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-line-rpc-timeout-"));
+  const child = ["process.stdin.resume();", "setInterval(() => {}, 1_000);"].join(" ");
+  let rpc: LineRpcProcess | undefined;
+  try {
+    rpc = new LineRpcProcess({ argv: [process.execPath, "-e", child], cwd: root, requestTimeoutMs: 25 });
+    await assert.rejects(rpc.request("probe"), /timed out after 25ms/u);
+  } finally {
+    await rpc?.close(true);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("StdioProcess endInputAndDrain retains output until producer EOF", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-stdio-drain-"));
   const child = [

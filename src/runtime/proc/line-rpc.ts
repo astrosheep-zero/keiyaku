@@ -1,6 +1,14 @@
 import { spawnStdioProcess, type StdioProcess, type StdioProcessExit } from "./stdio.js";
 
-type Pending = Readonly<{ resolve(value: unknown): void; reject(error: unknown): void }>;
+const MAX_LINE_BYTES = 256 * 1024;
+const MAX_BUFFER_BYTES = 1024 * 1024;
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
+type Pending = {
+  resolve(value: unknown): void;
+  reject(error: unknown): void;
+  timer?: ReturnType<typeof setTimeout>;
+};
 export type LineRpcNotification = Readonly<{ method: string; params?: Readonly<Record<string, unknown>> }>;
 export type LineRpcServerRequest = LineRpcNotification & Readonly<{ id: number | string }>;
 export type LineRpcExit = StdioProcessExit;
@@ -20,11 +28,24 @@ export class LineRpcProcess {
   private readonly pending = new Map<number, Pending>();
   private readonly notifications = new Set<(value: LineRpcNotification) => void>();
   private readonly serverRequests = new Set<(value: LineRpcServerRequest) => void>();
+  private readonly requestTimeoutMs: number;
   private nextId = 1;
   private stdout = "";
   private closed = false;
 
-  constructor(input: Readonly<{ argv: readonly [string, ...string[]]; cwd: string; env?: NodeJS.ProcessEnv }>) {
+  constructor(
+    input: Readonly<{
+      argv: readonly [string, ...string[]];
+      cwd: string;
+      env?: NodeJS.ProcessEnv;
+      requestTimeoutMs?: number;
+      timeoutMs?: number;
+    }>,
+  ) {
+    this.requestTimeoutMs = input.requestTimeoutMs ?? input.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    if (!Number.isFinite(this.requestTimeoutMs) || this.requestTimeoutMs < 0) {
+      throw new TypeError("line RPC request timeout must be a nonnegative finite millisecond duration");
+    }
     this.process = spawnStdioProcess(input);
     this.process.output.setEncoding("utf8");
     this.process.output.on("data", (chunk: string) => this.consume(chunk));
@@ -45,13 +66,27 @@ export class LineRpcProcess {
   }
 
   private consume(chunk: string): void {
-    this.stdout += chunk;
-    for (;;) {
-      const newline = this.stdout.indexOf("\n");
-      if (newline < 0) return;
-      const line = this.stdout.slice(0, newline).trim();
-      this.stdout = this.stdout.slice(newline + 1);
+    let offset = 0;
+    while (offset < chunk.length) {
+      const newline = chunk.indexOf("\n", offset);
+      if (newline < 0) {
+        this.stdout += chunk.slice(offset);
+        if (Buffer.byteLength(this.stdout, "utf8") > MAX_BUFFER_BYTES) {
+          this.failAndClose(new Error("line RPC protocol buffer exceeded maximum size"));
+        }
+        return;
+      }
+      this.stdout += chunk.slice(offset, newline);
+      const rawLine = this.stdout;
+      this.stdout = "";
+      offset = newline + 1;
+      if (Buffer.byteLength(rawLine, "utf8") > MAX_LINE_BYTES) {
+        this.failAndClose(new Error("line RPC protocol line exceeded maximum size"));
+        return;
+      }
+      const line = rawLine.trim();
       if (line.length > 0) this.receive(line);
+      if (this.closed) return;
     }
   }
 
@@ -60,6 +95,7 @@ export class LineRpcProcess {
     try {
       decoded = JSON.parse(line);
     } catch {
+      this.failAndClose(new Error("line RPC protocol received malformed JSON"));
       return;
     }
     const message = object(decoded);
@@ -68,6 +104,7 @@ export class LineRpcProcess {
       const pending = this.pending.get(message.id);
       if (pending === undefined) return;
       this.pending.delete(message.id);
+      if (pending.timer !== undefined) clearTimeout(pending.timer);
       const error = object(message.error);
       if (error !== undefined) pending.reject(new Error(text(error.message) ?? "line RPC error"));
       else pending.resolve(message.result);
@@ -85,20 +122,46 @@ export class LineRpcProcess {
   }
 
   private fail(error: unknown): void {
-    for (const pending of this.pending.values()) pending.reject(error);
+    for (const pending of this.pending.values()) {
+      if (pending.timer !== undefined) clearTimeout(pending.timer);
+      pending.reject(error);
+    }
     this.pending.clear();
   }
 
-  request(method: string, params?: Readonly<Record<string, unknown>>): Promise<unknown> {
+  private failAndClose(error: unknown): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.fail(error);
+    void this.process.close(true).catch(() => undefined);
+  }
+
+  request(
+    method: string,
+    params?: Readonly<Record<string, unknown>>,
+    options: Readonly<{ timeoutMs?: number }> = {},
+  ): Promise<unknown> {
     if (this.closed) return Promise.reject(new Error("line RPC process is closed"));
+    const timeoutMs = options.timeoutMs ?? this.requestTimeoutMs;
+    if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
+      return Promise.reject(new TypeError("line RPC request timeout must be a nonnegative finite millisecond duration"));
+    }
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      const pending: Pending = { resolve, reject };
+      pending.timer = setTimeout(() => {
+        if (this.pending.get(id) !== pending) return;
+        this.pending.delete(id);
+        reject(new Error(`line RPC request timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      pending.timer.unref?.();
+      this.pending.set(id, pending);
       this.process.input.write(
         `${JSON.stringify({ id, method, ...(params === undefined ? {} : { params }) })}\n`,
         (error) => {
           if (error === null || error === undefined) return;
           this.pending.delete(id);
+          if (pending.timer !== undefined) clearTimeout(pending.timer);
           reject(error);
         },
       );
