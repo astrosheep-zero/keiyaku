@@ -9,7 +9,9 @@ import * as acp from "@agentclientprotocol/sdk";
 import type { CreateAgentSessionOptions } from "@earendil-works/pi-coding-agent";
 import {
   AKUMA_REQUESTS_ENV,
+  AGENT_EVENT_QUEUE_LIMIT,
   createProviderAttempt,
+  AgentEventChannel,
   noteEvent,
   type AgentEvent,
   type AttemptCustody,
@@ -31,6 +33,68 @@ import type { StdioProcess } from "../src/runtime/proc/stdio.js";
 function attemptResult<Result>(attempt: ProviderAttempt<Result>): Promise<Result> {
   return attempt.result;
 }
+
+test("AgentEventChannel bounds reconstructible activity while retaining session and error events", async () => {
+  const channel = new AgentEventChannel();
+  const session: AgentEvent = { type: "session", coordinate: { sessionId: "session-1" } };
+  channel.emit(session);
+  for (let index = 0; index < AGENT_EVENT_QUEUE_LIMIT + 8; index += 1)
+    channel.emit({ type: "assistant", text: `update-${index}` });
+  const error = {
+    type: "tool",
+    phase: "completed",
+    id: "tool-1",
+    name: "shell",
+    call: { kind: "run", command: "false" },
+    result: { status: "error", message: "failed" },
+  } satisfies AgentEvent;
+  channel.emit(error);
+  channel.end();
+
+  const events: AgentEvent[] = [];
+  for await (const event of channel) events.push(event);
+  assert.equal(events.length, AGENT_EVENT_QUEUE_LIMIT);
+  assert.deepEqual(events[0], session);
+  assert.deepEqual(events.at(-1), error);
+  assert.equal(
+    events.some((event) => event.type === "assistant" && event.text === "update-0"),
+    false,
+  );
+  assert.equal(
+    events.some((event) => event.type === "assistant" && event.text === "update-7"),
+    false,
+  );
+  assert.equal(
+    events.some((event) => event.type === "assistant" && event.text === `update-${AGENT_EVENT_QUEUE_LIMIT + 7}`),
+    true,
+  );
+});
+
+test("AgentEventChannel ignores post-end events before queue mutation", async () => {
+  const channel = new AgentEventChannel();
+  channel.end();
+  for (let index = 0; index < AGENT_EVENT_QUEUE_LIMIT + 1; index += 1)
+    assert.doesNotThrow(() => channel.emit(noteEvent(`late-${index}`)));
+  const iterator = channel[Symbol.asyncIterator]();
+  assert.deepEqual(await iterator.next(), { done: true, value: undefined });
+});
+
+test("AgentEventChannel coalesces protected overflow without throwing", async () => {
+  const channel = new AgentEventChannel();
+  for (let index = 0; index < AGENT_EVENT_QUEUE_LIMIT + 1; index += 1)
+    assert.doesNotThrow(() => channel.emit(noteEvent(`error-${index}`)));
+  channel.end();
+
+  const events: AgentEvent[] = [];
+  for await (const event of channel) events.push(event);
+  const markers = events.filter(
+    (event): event is Extract<AgentEvent, { type: "note" }> =>
+      event.type === "note" && event.text.startsWith("Agent event queue overflow"),
+  );
+  assert.equal(events.length, AGENT_EVENT_QUEUE_LIMIT);
+  assert.equal(markers.length, 1);
+  assert.equal(markers[0]?.text, "Agent event queue overflow: 2 terminal/error events coalesced");
+});
 
 test("ProviderAttempt retires each owned resource once while allowing force escalation", async () => {
   const setup = deferred<void>();

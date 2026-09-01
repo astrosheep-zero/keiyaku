@@ -8,6 +8,7 @@ export const AKUMA_REQUESTS_ENV = "AKUMA_REQUESTS";
 
 export const AGENT_EVENT_TEXT_LIMIT = 16_384;
 export const AGENT_THOUGHT_TEXT_LIMIT = 4_000;
+export const AGENT_EVENT_QUEUE_LIMIT = 256;
 
 export type SearchScope = "content" | "files" | "web";
 
@@ -393,15 +394,65 @@ export function unknownEvent(kind: string): Extract<AgentEvent, { type: "unknown
 
 type EventWaiter = Readonly<{ resolve(value: IteratorResult<AgentEvent>): void }>;
 
+// Slow consumers may lose reconstructible narration, but session coordinates,
+// notes, and error events stay observable. A full protected queue replaces one
+// protected item with a bounded aggregate note; `end` ignores later emission.
+function isErrorEvent(event: AgentEvent): boolean {
+  if (event.type === "note") return true;
+  if (event.type === "tool" && event.phase === "completed") return event.result.status === "error";
+  return event.type === "unknown" && /(?:error|fail|abort|cancel|stop|terminal)/iu.test(event.kind);
+}
+
+function isReconstructibleEvent(event: AgentEvent): boolean {
+  return event.type !== "session" && !isErrorEvent(event);
+}
+
+const AGENT_EVENT_OVERFLOW_PREFIX = "Agent event queue overflow";
+
+function overflowEvent(count: number): Extract<AgentEvent, { type: "note" }> {
+  return { type: "note", text: `${AGENT_EVENT_OVERFLOW_PREFIX}: ${count} terminal/error events coalesced` };
+}
+
 export class AgentEventChannel implements AsyncIterable<AgentEvent> {
   private readonly queued: AgentEvent[] = [];
   private readonly waiters: EventWaiter[] = [];
+  private overflowMarker: Extract<AgentEvent, { type: "note" }> | undefined;
+  private overflowCount = 0;
   private ended = false;
 
   emit(event: AgentEvent): void {
+    if (this.ended) return;
     const waiter = this.waiters.shift();
-    if (waiter === undefined) this.queued.push(event);
-    else waiter.resolve({ done: false, value: event });
+    if (waiter !== undefined) {
+      waiter.resolve({ done: false, value: event });
+      return;
+    }
+    if (this.queued.length >= AGENT_EVENT_QUEUE_LIMIT) {
+      const reconstructible = this.queued.findIndex(isReconstructibleEvent);
+      if (reconstructible === -1) {
+        if (isReconstructibleEvent(event)) return;
+        this.overflowCount += 1;
+        if (this.overflowMarker !== undefined) {
+          const marker = overflowEvent(this.overflowCount);
+          const markerIndex = this.queued.indexOf(this.overflowMarker);
+          if (markerIndex !== -1) {
+            this.queued[markerIndex] = marker;
+            this.overflowMarker = marker;
+            return;
+          }
+          this.overflowMarker = undefined;
+        }
+        const protectedIndex = this.queued.findIndex((queued) => queued.type !== "session");
+        const replacement = protectedIndex === -1 ? 0 : protectedIndex;
+        this.overflowCount += 1;
+        const marker = overflowEvent(this.overflowCount);
+        this.queued[replacement] = marker;
+        this.overflowMarker = marker;
+        return;
+      }
+      this.queued.splice(reconstructible, 1);
+    }
+    this.queued.push(event);
   }
 
   end(): void {
@@ -414,6 +465,10 @@ export class AgentEventChannel implements AsyncIterable<AgentEvent> {
     return {
       next: () => {
         const event = this.queued.shift();
+        if (event === this.overflowMarker) {
+          this.overflowMarker = undefined;
+          this.overflowCount = 0;
+        }
         if (event !== undefined) return Promise.resolve({ done: false, value: event });
         if (this.ended) return Promise.resolve({ done: true, value: undefined });
         return new Promise((resolve) => this.waiters.push({ resolve }));
