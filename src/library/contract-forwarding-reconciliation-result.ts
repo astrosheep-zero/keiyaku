@@ -66,15 +66,6 @@ export const reconciliationLagSchema = z.union([
     .strict(),
   z
     .object({
-      kind: z.literal("ref-migration-conflict"),
-      legacyRef: nonblankStringSchema,
-      legacyOid: snapshotIdSchema,
-      currentRef: nonblankStringSchema,
-      currentOid: snapshotIdSchema,
-    })
-    .strict(),
-  z
-    .object({
       kind: z.literal("worktree-hook-failed"),
       phase: z.enum(["create", "destroy"]),
       path: nonblankStringSchema,

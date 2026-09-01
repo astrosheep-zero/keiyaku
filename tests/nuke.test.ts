@@ -59,8 +59,8 @@ async function gitNukeFixture() {
   const managedPath = worktreePath(repository, place.place);
   raw.run(["worktree", "add", "--detach", managedPath, "HEAD"]);
   raw.run(["branch", "business-branch"]);
-  raw.run(["update-ref", "refs/heads/keiyaku-delivery/nuke-managed", "HEAD"]);
-  raw.run(["update-ref", "refs/heads/keiyaku-candidate/nuke-managed", "HEAD"]);
+  raw.run(["update-ref", "refs/keiyaku/delivery/nuke-managed", "HEAD"]);
+  raw.run(["update-ref", "refs/keiyaku/candidate/nuke-managed", "HEAD"]);
   raw.run(["update-ref", "refs/heads/keiyaku-state", "HEAD"]);
   const foreign = `${raw.path}-foreign`;
   raw.run(["worktree", "add", "--detach", foreign, "HEAD"]);
@@ -392,53 +392,6 @@ test("confirmed nuke preserves recognized entries when stop cannot take custody"
   }
 });
 
-test("Git nuke removes legacy and migration leaves but preserves ordinary refs", async () => {
-  const raw = makeGitRepository();
-  raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const world = await World.at(raw.path);
-  for (const ref of [
-    "refs/heads/keiyaku-delivery/legacy",
-    "refs/heads/keiyaku-candidate/legacy",
-    "refs/keiyaku/delivery/current",
-    "refs/keiyaku/candidate/current",
-    "refs/heads/keiyaku-delivery-extra",
-    "refs/heads/business-branch",
-  ])
-    raw.run(["update-ref", ref, "HEAD"]);
-  raw.run(["update-ref", "refs/heads/keiyaku-state", "HEAD"]);
-  try {
-    await nukeGit(world);
-    for (const ref of [
-      "refs/heads/keiyaku-delivery/legacy",
-      "refs/heads/keiyaku-candidate/legacy",
-      "refs/keiyaku/delivery/current",
-      "refs/keiyaku/candidate/current",
-      "refs/heads/keiyaku-state",
-    ])
-      assert.equal(refPresent(raw, ref), false);
-    assert.equal(refPresent(raw, "refs/heads/business-branch"), true);
-    assert.equal(refPresent(raw, "refs/heads/keiyaku-delivery-extra"), true);
-  } finally {
-    rmSync(raw.path, { recursive: true, force: true });
-  }
-});
-
-test("Git nuke continues owned topology cleanup when the state ref is absent", async () => {
-  const raw = makeGitRepository();
-  raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const world = await World.at(raw.path);
-  raw.run(["update-ref", "refs/heads/keiyaku-delivery/legacy", "HEAD"]);
-  raw.run(["update-ref", "refs/keiyaku/candidate/current", "HEAD"]);
-  try {
-    assert.equal(refPresent(raw, "refs/heads/keiyaku-state"), false);
-    await nukeGit(world);
-    assert.equal(refPresent(raw, "refs/heads/keiyaku-delivery/legacy"), false);
-    assert.equal(refPresent(raw, "refs/keiyaku/candidate/current"), false);
-  } finally {
-    rmSync(raw.path, { recursive: true, force: true });
-  }
-});
-
 test("Git nuke deletes keiyaku-state with expected-OID CAS before topology deletion", async () => {
   const fixture = await gitNukeFixture();
   const calls = join(mkdtempSync(join(tmpdir(), "keiyaku-v4-nuke-calls-")), "calls");
@@ -490,8 +443,8 @@ test("Git nuke refuses a changed state OID before deleting regenerable topology"
     );
     assert.equal(existsSync(fixture.managedPath), true);
     assert.equal(refPresent(fixture.raw, "refs/heads/keiyaku-state"), true);
-    assert.equal(refPresent(fixture.raw, "refs/heads/keiyaku-delivery/nuke-managed"), true);
-    assert.equal(refPresent(fixture.raw, "refs/heads/keiyaku-candidate/nuke-managed"), true);
+    assert.equal(refPresent(fixture.raw, "refs/keiyaku/delivery/nuke-managed"), true);
+    assert.equal(refPresent(fixture.raw, "refs/keiyaku/candidate/nuke-managed"), true);
     assert.equal(readFileSync(calls, "utf8").includes("worktree remove --force "), false);
     await nukeGit(fixture.world);
     assert.equal(existsSync(fixture.managedPath), false);
@@ -529,7 +482,7 @@ test("Git nuke exact-read-backs an unknown state deletion before topology cleanu
     await pending;
     assert.equal(refPresent(fixture.raw, "refs/heads/keiyaku-state"), false);
     assert.equal(existsSync(fixture.managedPath), false);
-    assert.equal(refPresent(fixture.raw, "refs/heads/keiyaku-delivery/nuke-managed"), false);
+    assert.equal(refPresent(fixture.raw, "refs/keiyaku/delivery/nuke-managed"), false);
   } finally {
     rmSync(fixture.raw.path, { recursive: true, force: true });
     rmSync(fixture.foreign, { recursive: true, force: true });
@@ -540,10 +493,10 @@ test("Git nuke retains a leaf whose expected OID changed and retries later", asy
   const raw = makeGitRepository();
   raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const world = await World.at(raw.path);
-  const racedRef = "refs/heads/keiyaku-delivery/legacy";
+  const racedRef = "refs/keiyaku/delivery/legacy";
   for (const ref of [
     racedRef,
-    "refs/heads/keiyaku-candidate/legacy",
+    "refs/keiyaku/candidate/legacy",
     "refs/keiyaku/delivery/current",
     "refs/keiyaku/candidate/current",
     "refs/heads/business-branch",
@@ -574,7 +527,7 @@ test("Git nuke retains a leaf whose expected OID changed and retries later", asy
     assert.equal(refPresent(raw, "refs/heads/business-branch"), true);
     await nukeGit(world);
     assert.equal(refPresent(raw, racedRef), false);
-    assert.equal(refPresent(raw, "refs/heads/keiyaku-candidate/legacy"), false);
+    assert.equal(refPresent(raw, "refs/keiyaku/candidate/legacy"), false);
     assert.equal(refPresent(raw, "refs/keiyaku/delivery/current"), false);
     assert.equal(refPresent(raw, "refs/keiyaku/candidate/current"), false);
     assert.equal(refPresent(raw, "refs/heads/business-branch"), true);
@@ -615,7 +568,7 @@ test("Git nuke removes a registered detached managed worktree after verification
     assert.equal(existsSync(placeRegisterPath(repository)), false);
     assert.equal(existsSync(placeLockPath(repository)), true);
     assert.equal(refPresent(fixture.raw, "refs/heads/keiyaku-state"), false);
-    assert.equal(refPresent(fixture.raw, "refs/heads/keiyaku-delivery/nuke-managed"), false);
+    assert.equal(refPresent(fixture.raw, "refs/keiyaku/delivery/nuke-managed"), false);
   } finally {
     rmSync(fixture.raw.path, { recursive: true, force: true });
     rmSync(fixture.foreign, { recursive: true, force: true });

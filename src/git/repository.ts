@@ -18,8 +18,6 @@ export const GIT_REF = "refs/heads/keiyaku-state";
 export const DELIVERY_REF_NAMESPACE = "refs/keiyaku/delivery";
 export const CANDIDATE_PIN_REF_NAMESPACE = "refs/keiyaku/candidate";
 export const HANDOFF_RECEIPT_REF_NAMESPACE = "refs/keiyaku/handoff";
-export const LEGACY_DELIVERY_REF_NAMESPACE = "refs/heads/keiyaku-delivery";
-export const LEGACY_CANDIDATE_PIN_REF_NAMESPACE = "refs/heads/keiyaku-candidate";
 export const GIT_FORMAT_PATH = "meta/format.json";
 const CURRENT_FORMAT_VERSION = 4;
 export const GIT_FORMAT_BYTES = `{"version":${CURRENT_FORMAT_VERSION}}\n`;
@@ -32,11 +30,7 @@ export function isKeiyakuOwnedRef(ref: string): boolean {
     ref === CANDIDATE_PIN_REF_NAMESPACE ||
     ref.startsWith(`${CANDIDATE_PIN_REF_NAMESPACE}/`) ||
     ref === HANDOFF_RECEIPT_REF_NAMESPACE ||
-    ref.startsWith(`${HANDOFF_RECEIPT_REF_NAMESPACE}/`) ||
-    ref === LEGACY_DELIVERY_REF_NAMESPACE ||
-    ref.startsWith(`${LEGACY_DELIVERY_REF_NAMESPACE}/`) ||
-    ref === LEGACY_CANDIDATE_PIN_REF_NAMESPACE ||
-    ref.startsWith(`${LEGACY_CANDIDATE_PIN_REF_NAMESPACE}/`)
+    ref.startsWith(`${HANDOFF_RECEIPT_REF_NAMESPACE}/`)
   );
 }
 

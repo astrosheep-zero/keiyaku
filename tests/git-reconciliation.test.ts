@@ -16,14 +16,6 @@ function candidatePinRefFor(contract: ContractId): string {
   return `refs/keiyaku/candidate/kei-${contract.slice("kei/".length)}`;
 }
 
-function legacyDeliveryRefFor(contract: ContractId): string {
-  return `refs/heads/keiyaku-delivery/kei-${contract.slice("kei/".length)}`;
-}
-
-function legacyCandidatePinRefFor(contract: ContractId): string {
-  return `refs/heads/keiyaku-candidate/kei-${contract.slice("kei/".length)}`;
-}
-
 function unchangedRef(effects: readonly TopologyEffect[], name: string, oid: string): boolean {
   return effects.some(
     (effect) =>
@@ -137,120 +129,6 @@ async function restoreOwnedRefs(
   repository.run(["update-ref", deliveryRefFor(id), tender]);
   repository.run(["update-ref", candidatePinRefFor(id), integration]);
 }
-
-test("reconciliation atomically migrates legacy custody refs into the current namespace", async () => {
-  const { contract, repository } = await tenderedReviewGatedTargetFixture();
-  const state = await contract.state();
-  const tender = state.delivery?.data.tenderSnapshot;
-  const integration = state.currentIntegration?.snapshot ?? state.delivery?.data.integration.snapshot;
-  assert.ok(tender);
-  assert.ok(integration);
-  repository.run(["update-ref", legacyDeliveryRefFor(state.id), tender]);
-  repository.run(["update-ref", "-d", deliveryRefFor(state.id), tender]);
-  repository.run(["update-ref", legacyCandidatePinRefFor(state.id), integration]);
-  repository.run(["update-ref", "-d", candidatePinRefFor(state.id), integration]);
-
-  const report = await contract.reconcile();
-  const git = await repositoryAt(repository.path);
-
-  assert.deepEqual(report.lag, []);
-  assert.equal(await readRef(git, legacyDeliveryRefFor(state.id)), null);
-  assert.equal(await readRef(git, legacyCandidatePinRefFor(state.id)), null);
-  assert.equal(await readRef(git, deliveryRefFor(state.id)), tender);
-  assert.equal(await readRef(git, candidatePinRefFor(state.id)), integration);
-  assert.equal(
-    report.effects.some(
-      (effect) =>
-        effect.kind === "ref" && effect.name === legacyDeliveryRefFor(state.id) && effect.action === "removed",
-    ),
-    true,
-  );
-  assert.equal(
-    report.effects.some(
-      (effect) => effect.kind === "ref" && effect.name === deliveryRefFor(state.id) && effect.action === "created",
-    ),
-    true,
-  );
-});
-
-test("reconciliation deletes an equal legacy ref and preserves a conflicting legacy ref as lag", async () => {
-  const equal = await tenderedReviewGatedTargetFixture();
-  const equalState = await equal.contract.state();
-  const equalTender = equalState.delivery?.data.tenderSnapshot;
-  assert.ok(equalTender);
-  equal.repository.run(["update-ref", legacyDeliveryRefFor(equalState.id), equalTender]);
-
-  const equalReport = await equal.contract.reconcile();
-  const equalGit = await repositoryAt(equal.repository.path);
-  assert.deepEqual(equalReport.lag, []);
-  assert.equal(await readRef(equalGit, legacyDeliveryRefFor(equalState.id)), null);
-  assert.equal(await readRef(equalGit, deliveryRefFor(equalState.id)), equalTender);
-
-  const conflict = await tenderedReviewGatedTargetFixture();
-  const conflictState = await conflict.contract.state();
-  const current = conflictState.delivery?.data.tenderSnapshot;
-  const currentCandidate =
-    conflictState.currentIntegration?.snapshot ?? conflictState.delivery?.data.integration.snapshot;
-  assert.ok(current);
-  assert.ok(currentCandidate);
-  const legacy = conflict.repository.run(["rev-parse", "refs/heads/main"]).trim();
-  assert.notEqual(legacy, current);
-  conflict.repository.run(["update-ref", legacyDeliveryRefFor(conflictState.id), legacy]);
-  conflict.repository.run(["update-ref", legacyCandidatePinRefFor(conflictState.id), currentCandidate]);
-
-  const conflictReport = await conflict.contract.reconcile();
-  const conflictGit = await repositoryAt(conflict.repository.path);
-  assert.deepEqual(conflictReport.lag, [
-    {
-      kind: "ref-migration-conflict",
-      legacyRef: legacyDeliveryRefFor(conflictState.id),
-      legacyOid: legacy,
-      currentRef: deliveryRefFor(conflictState.id),
-      currentOid: current,
-    },
-  ]);
-  assert.equal(await readRef(conflictGit, legacyDeliveryRefFor(conflictState.id)), legacy);
-  assert.equal(await readRef(conflictGit, deliveryRefFor(conflictState.id)), current);
-  assert.equal(await readRef(conflictGit, legacyCandidatePinRefFor(conflictState.id)), currentCandidate);
-  assert.equal(await readRef(conflictGit, candidatePinRefFor(conflictState.id)), currentCandidate);
-});
-
-test("a failed custody migration transaction leaves both legacy pairs unchanged", async () => {
-  const { contract, repository } = await tenderedReviewGatedTargetFixture();
-  const state = await contract.state();
-  const tender = state.delivery?.data.tenderSnapshot;
-  const integration = state.currentIntegration?.snapshot ?? state.delivery?.data.integration.snapshot;
-  assert.ok(tender);
-  assert.ok(integration);
-  repository.run(["update-ref", legacyDeliveryRefFor(state.id), tender]);
-  repository.run(["update-ref", "-d", deliveryRefFor(state.id), tender]);
-  repository.run(["update-ref", legacyCandidatePinRefFor(state.id), integration]);
-  repository.run(["update-ref", "-d", candidatePinRefFor(state.id), integration]);
-
-  const report = await withGitShim(
-    [
-      'if [ "$1" = "update-ref" ] && [ "$2" = "--stdin" ] && [ "$3" = "--no-deref" ]; then',
-      '  printf "%s\\n" "injected migration failure" >&2',
-      "  exit 1",
-      "fi",
-      'exec "$KEIYAKU_REAL_GIT" "$@"',
-    ].join("\n"),
-    {},
-    async (gitPath) =>
-      await Keiyaku.of({ repo: await Repo.at({ path: repository.path, gitPath }), id: state.id }).reconcile(),
-  );
-  const git = await repositoryAt(repository.path);
-
-  assert.equal(report.lag[0]?.kind, "reconcile-failed");
-  assert.equal(await readRef(git, legacyDeliveryRefFor(state.id)), tender);
-  assert.equal(await readRef(git, legacyCandidatePinRefFor(state.id)), integration);
-  assert.equal(await readRef(git, deliveryRefFor(state.id)), null);
-  assert.equal(await readRef(git, candidatePinRefFor(state.id)), null);
-  assert.equal(
-    report.effects.some((effect) => effect.kind === "ref"),
-    false,
-  );
-});
 
 test("rewritten target history retains owned refs with unchanged effects", async () => {
   const { contract, repository } = await tenderedReviewGatedTargetFixture();
