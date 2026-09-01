@@ -96,8 +96,10 @@ function namespaceEntries(
   if (loaded.state.kind === "failed") {
     return { entries: [], failure: { scope, diagnostic: loaded.state.diagnostic } };
   }
-  const value = loaded.root?.[name];
-  if (value === undefined) return { entries: [] };
+  if (loaded.root === undefined || !Object.prototype.hasOwnProperty.call(loaded.root, name)) {
+    return { entries: [] };
+  }
+  const value = loaded.root[name];
   if (!object(value)) {
     return { entries: [], failure: { scope, diagnostic: `${name} must be an object of named values` } };
   }

@@ -79,6 +79,38 @@ test("Settings resolves opaque entries by whole-record project shadow", async ()
   }
 });
 
+test("Settings ignores inherited namespace names while preserving explicit prototype names", async () => {
+  const value = fixture();
+  try {
+    writeFileSync(join(value.home, "settings.json"), JSON.stringify({ plain: {} }));
+    const loaded = await settings({ home: value.home });
+    for (const name of ["toString", "constructor", "__proto__"]) {
+      assert.deepEqual(loaded.namespace(name), { kind: "read", name, entries: [] });
+    }
+
+    writeFileSync(
+      join(value.home, "settings.json"),
+      JSON.stringify({
+        toString: { own: "toString" },
+        constructor: { own: "constructor" },
+        ["__proto__"]: { own: "__proto__" },
+      }),
+    );
+    const explicit = await settings({ home: value.home });
+    assert.deepEqual(explicit.namespace("toString").entries, [
+      { name: "own", value: "toString", source: "user", shadows: false },
+    ]);
+    assert.deepEqual(explicit.namespace("constructor").entries, [
+      { name: "own", value: "constructor", source: "user", shadows: false },
+    ]);
+    assert.deepEqual(explicit.namespace("__proto__").entries, [
+      { name: "own", value: "__proto__", source: "user", shadows: false },
+    ]);
+  } finally {
+    value.close();
+  }
+});
+
 test("Settings isolates malformed namespaces but never falls through a failed higher scope", async () => {
   const value = fixture();
   try {
