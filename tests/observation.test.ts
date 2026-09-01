@@ -7,7 +7,16 @@ import { decideAttestation } from "../src/core/verbs/attestation.js";
 import { decideDeliver } from "../src/core/verbs/deliver.js";
 import { decidePlacement } from "../src/core/verbs/placement.js";
 import { foldJournal } from "../src/core/facts/fold.js";
-import { changeId, contractId, documentKey, entryUlid, snapshotId } from "../src/core/facts/types.js";
+import {
+  changeId,
+  contractId,
+  documentKey,
+  entryUlid,
+  snapshotId,
+  type ContractId,
+  type ContractState,
+  type JournalEntry,
+} from "../src/core/facts/types.js";
 
 const id = contractId("kei/observation-test");
 const dependency = contractId("kei/observation-dependency");
@@ -78,7 +87,7 @@ function deliveredState(contract: ReturnType<typeof contractId>, after: readonly
   ]);
 }
 
-function terminalState(contract: ReturnType<typeof contractId>, terminal: "claimed" | "abandoned") {
+function terminalState(contract: ReturnType<typeof contractId>, terminal: "claimed" | "abandoned"): ContractState {
   const delivered = deliveredState(contract);
   return {
     ...delivered,
@@ -173,7 +182,7 @@ test("placement projects every non-claimed prerequisite from its one observation
   const decision = decidePlacement({
     input: { contractId: id, at: "2026-08-07T00:00:04Z" },
     attempt: { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAZ")] },
-    observation: new Map([
+    observation: new Map<ContractId, ContractState | null>([
       [id, dependent],
       [active, waitingState(active)],
       [abandoned, terminalState(abandoned, "abandoned")],
@@ -246,7 +255,7 @@ test("amend refuses direct and transitive prerequisite cycles", () => {
 });
 
 test("lifecycle and document refusals outrank a refused preparation", () => {
-  const bind = {
+  const bind: Extract<JournalEntry, { kind: "bind" }> = {
     v: 1,
     kind: "bind",
     contract: id,
@@ -257,7 +266,6 @@ test("lifecycle and document refusals outrank a refused preparation", () => {
       terms: terms(),
     },
   };
-  const bound = foldJournal(id, [bind]);
   const active = foldJournal(id, [
     bind,
     {

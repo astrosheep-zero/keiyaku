@@ -11,6 +11,7 @@ import {
   gate,
   snapshotId,
   type ContractState,
+  type JournalEntry,
 } from "../src/core/facts/types.js";
 
 function state(candidate: string, document = "document-1"): ContractState {
@@ -30,7 +31,7 @@ function state(candidate: string, document = "document-1"): ContractState {
       method: "squash",
       policy: { requireBranchesToBeUpToDate: false },
     },
-  };
+  } satisfies Extract<JournalEntry, { kind: "deliver" }>;
   return {
     id,
     head: null,
@@ -43,6 +44,7 @@ function state(candidate: string, document = "document-1"): ContractState {
     },
     bound: null,
     delivery,
+    currentIntegration: null,
     attestations: [
       {
         v: 1,

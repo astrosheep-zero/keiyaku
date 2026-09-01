@@ -3,6 +3,7 @@ import test from "node:test";
 import { Keiyaku, KeiyakuRefused, Repo } from "../src/index.js";
 import { invoke } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
+import type { AcceptedResult } from "../src/cli/result.js";
 import { GIT_REF } from "../src/git/repository.js";
 import { document, repositoryWithMain } from "./support/library-verbs.js";
 import { withGitShim } from "./support/git.js";
@@ -15,17 +16,19 @@ test("fork bind copies current terms and the exact source start into fresh custo
     markdown: document().replace("# Library verbs", "# Prerequisite"),
     gates: [],
   });
+  const prerequisiteState = await prerequisite.keiyaku.state();
   const sourceMarkdown = document().replace("# Library verbs", "# Source terms");
   const source = await Keiyaku.bind({
     repo,
     markdown: sourceMarkdown,
     workspace: "worktree",
     gates: ["reviewed"],
-    after: [prerequisite.keiyaku.id],
+    after: [prerequisiteState.id],
   });
   const sourceState = await source.keiyaku.state();
+  const sourceId = sourceState.id;
 
-  const fork = await Keiyaku.bind({ repo, forkOf: source.keiyaku.id });
+  const fork = await Keiyaku.bind({ repo, forkOf: sourceId });
   const forkState = await fork.keiyaku.state();
 
   assert.equal(forkState.terms.document.bytes, sourceMarkdown.replace("# Source terms", "# Fork · Source terms"));
@@ -34,7 +37,7 @@ test("fork bind copies current terms and the exact source start into fresh custo
   assert.equal(forkState.coordinates.workspace, "worktree");
   assert.deepEqual(forkState.terms.gates, sourceState.terms.gates);
   assert.deepEqual(forkState.terms.after, sourceState.terms.after);
-  assert.notEqual(fork.keiyaku.id, source.keiyaku.id);
+  assert.notEqual(forkState.id, sourceId);
   assert.equal(forkState.delivery, null);
   assert.equal(forkState.terminal, null);
 
@@ -57,7 +60,7 @@ test("fork bind copies the source target and does not substitute the caller bran
   assert.equal(sourceState.coordinates.target, "refs/heads/release");
 
   repository.run(["checkout", "-B", "caller"]);
-  const fork = await Keiyaku.bind({ repo, forkOf: source.keiyaku.id });
+  const fork = await Keiyaku.bind({ repo, forkOf: sourceState.id });
   const forkState = await fork.keiyaku.state();
   assert.equal(forkState.coordinates.target, "refs/heads/release");
   assert.equal(forkState.coordinates.start, sourceState.coordinates.start);
@@ -88,26 +91,32 @@ test("fork CLI reads no stdin and keeps its form disjoint", async () => {
     workspace: "worktree",
     gates: [],
   });
-  const result = await invoke(parseArgv(["bind", "--fork-of", source.keiyaku.id]), {
+  const sourceId = (await source.keiyaku.state()).id;
+  const parsed = parseArgv(["bind", "--fork-of", sourceId]);
+  if ("help" in parsed) throw new Error("fork bind parsed as help");
+  const result = await invoke(parsed, {
     cwd: repository.path,
     environment: {},
     readStdin: () => {
       throw new Error("fork bind must not read stdin");
     },
   });
-  assert.equal(result.kind, "accepted");
-  assert.equal(result.verb, "bind");
-  assert.throws(() => parseArgv(["bind", "--fork-of", source.keiyaku.id, "-"]), /fork bind reads no stdin/u);
+  assert.equal("kind" in result ? result.kind : undefined, "accepted");
+  if (!("kind" in result) || result.kind !== "accepted" || !("verb" in result) || result.verb !== "bind") {
+    throw new Error("fork bind did not return an accepted result");
+  }
+  assert.equal((result as Extract<AcceptedResult, { verb: "bind" }>).verb, "bind");
+  assert.throws(() => parseArgv(["bind", "--fork-of", sourceId, "-"]), /fork bind reads no stdin/u);
   assert.throws(
-    () => parseArgv(["bind", "--fork-of", source.keiyaku.id, "--gates", "default"]),
+    () => parseArgv(["bind", "--fork-of", sourceId, "--gates", "default"]),
     /not valid with --fork-of/u,
   );
   assert.throws(
-    () => parseArgv(["bind", "--fork-of", source.keiyaku.id, "--after", source.keiyaku.id]),
+    () => parseArgv(["bind", "--fork-of", sourceId, "--after", sourceId]),
     /not valid with --fork-of/u,
   );
   assert.throws(
-    () => parseArgv(["bind", "--fork-of", source.keiyaku.id, "--task", "task/example"]),
+    () => parseArgv(["bind", "--fork-of", sourceId, "--task", "task/example"]),
     /not valid with --fork-of/u,
   );
 });
@@ -121,6 +130,7 @@ test("fork admission rejects a source amend interleaved at the state transaction
     workspace: "worktree",
     gates: [],
   });
+  const sourceState = await source.keiyaku.state();
   const oldState = repository.run(["rev-parse", GIT_REF]).trim();
   await source.keiyaku.amend({ gates: ["reviewed"] });
   const movedState = repository.run(["rev-parse", GIT_REF]).trim();
@@ -143,12 +153,12 @@ test("fork admission rejects a source amend interleaved at the state transaction
         KEIYAKU_FORK_RACE_MOVED: movedState,
       },
       async (gitPath) =>
-        Keiyaku.bind({ repo: await Repo.at({ path: repository.path, gitPath }), forkOf: source.keiyaku.id }),
+        Keiyaku.bind({ repo: await Repo.at({ path: repository.path, gitPath }), forkOf: sourceState.id }),
     ),
     (error: unknown) =>
       error instanceof KeiyakuRefused &&
       error.refusal.kind === "fork-source-moved" &&
-      error.refusal.contractId === source.keiyaku.id,
+      error.refusal.contractId === sourceState.id,
   );
   assert.deepEqual((await source.keiyaku.state()).terms.gates, ["reviewed"]);
 });

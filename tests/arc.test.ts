@@ -11,6 +11,7 @@ import { decodeContractDocument } from "../src/body/decode.js";
 import { decideArc } from "../src/core/verbs/arc.js";
 import { invoke } from "../src/cli/invoke.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
+import type { AcceptedResult } from "../src/cli/result.js";
 import { observeContract } from "./support/git.js";
 import { repositoryWithMain } from "./support/library-verbs.js";
 
@@ -152,23 +153,32 @@ test("Arc CLI admits explicit chapters without changing the status result shape"
     cwd: repository.path,
     environment: { KEIYAKU_HOME: `${repository.path}/empty-home` },
   };
-  const command = (argv: readonly string[], source = "") =>
-    invoke(parseArgv(argv), {
+  const command = (argv: readonly string[], source = "") => {
+    const parsed = parseArgv(argv);
+    if ("help" in parsed) throw new Error("arc test command parsed as help");
+    return invoke(parsed, {
       ...runtime,
-      readStdin: () => source,
+      readStdin: async () => source,
     });
+  };
 
   const bound = await command(["bind", "-"], contractDocument("Arc CLI"));
-  assert.equal(bound.kind, "accepted");
-  if (bound.kind !== "accepted") throw new Error("bind did not return an accepted contract");
-  const contract = bound.contract;
+  assert.equal("kind" in bound ? bound.kind : undefined, "accepted");
+  if (!("kind" in bound) || bound.kind !== "accepted" || !("verb" in bound) || bound.verb !== "bind") {
+    throw new Error("bind did not return an accepted contract");
+  }
+  const contract = (bound as Extract<AcceptedResult, { verb: "bind" }>).contract;
   const before = await command(["status", contract]);
   assert.doesNotMatch(JSON.stringify(before), /currentArc/);
 
   const admitted = await command(["arc", contract, "-"], arcDocument("CLI Chapter"));
-  assert.equal(admitted.kind, "accepted");
+  assert.equal("kind" in admitted ? admitted.kind : undefined, "accepted");
+  if (!("kind" in admitted) || admitted.kind !== "accepted" || !("verb" in admitted) || admitted.verb !== "arc") {
+    throw new Error("arc did not return an accepted result");
+  }
+  const admittedArc = admitted as Extract<AcceptedResult, { verb: "arc" }>;
   assert.deepEqual(
-    admitted.facts.map((fact) => fact.kind),
+    admittedArc.facts.map((fact) => fact.kind),
     ["arc"],
   );
   const state = (await observeContract(await repositoryAt(repository.path), contract)).state;
@@ -176,14 +186,17 @@ test("Arc CLI admits explicit chapters without changing the status result shape"
   assert.equal(state?.currentArc?.data.title, "CLI Chapter");
 
   const second = await command(["arc", contract, "-"], arcDocument("CLI Chapter Two"));
-  assert.equal(second.kind, "accepted");
+  assert.equal("kind" in second ? second.kind : undefined, "accepted");
+  if (!("kind" in second) || second.kind !== "accepted" || !("verb" in second) || second.verb !== "arc") {
+    throw new Error("second arc did not return an accepted result");
+  }
   const secondState = (await observeContract(await repositoryAt(repository.path), contract)).state;
   assert.equal(secondState?.currentArc?.data.seq, 2);
   assert.equal(secondState?.currentArc?.data.title, "CLI Chapter Two");
 
   const after = await command(["status", contract]);
-  assert.equal(after.kind, "status");
-  if (after.kind === "status" && after.report.contracts.kind === "present") {
+  assert.equal("kind" in after ? after.kind : undefined, "status");
+  if ("kind" in after && after.kind === "status" && after.report.contracts.kind === "present") {
     assert.deepEqual(
       after.report.contracts.value.rows.map((row) => row.id),
       [contract],

@@ -11,8 +11,10 @@ import { HeldAkumaLeash, initializeHeart, readHeart, type Soul } from "../src/ak
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import { moveAlias } from "../src/alias/index.js";
+import { parseAkumaAlias } from "../src/identity/selector.js";
 import { invoke } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
+import type { RefusedResult } from "../src/cli/result.js";
 import { renderRefusal } from "../src/cli/render/refusal.js";
 import { nukeExitCode } from "../src/cli/render/nuke.js";
 import { nukeGit } from "../src/git/nuke.js";
@@ -122,6 +124,7 @@ async function runningAkuma(world: Awaited<ReturnType<typeof testWorld>>) {
       options: {},
       origin: { kind: "direct" },
       cwd: world,
+      allowed: ALLOWED_ACTIONS,
     },
     initialBody: "keep working",
   };
@@ -165,7 +168,7 @@ test("confirmed nuke stops live writers and removes owned state while preserving
     mkdirSync(join(world, ".keiyaku", "namespace"), { recursive: true });
     writeFileSync(namespace, "retained\n");
     const running = await runningAkuma(world);
-    await moveAlias({ world, alias: "@running", akuId: running.allocated.id });
+    await moveAlias({ world, alias: parseAkumaAlias("@running"), akuId: running.allocated.id });
     const settings = join(world, ".keiyaku", "settings.json");
     const unknown = join(world, ".keiyaku", "unknown.bin");
     const unknownRun = join(world, ".keiyaku", "akuma", "run", "foreign-12345678");
@@ -464,7 +467,10 @@ test("Git nuke exact-read-backs an unknown state deletion before topology cleanu
       path: privateStatePublicationSeatPath(capability),
       mode: "immediate",
     });
-    const arrival = Promise.withResolvers<void>();
+    let resolveArrival!: () => void;
+    const arrival = new Promise<void>((resolve) => {
+      resolveArrival = resolve;
+    });
     const pending = withGitShim(
       gitNukeShim(
         [
@@ -476,9 +482,9 @@ test("Git nuke exact-read-backs an unknown state deletion before topology cleanu
         ].join("\n"),
       ),
       { KEIYAKU_UNKNOWN_DONE: marker },
-      (gitPath) => nukeGit(fixture.world, gitPath, { onPrivateStateSeatContention: arrival.resolve }),
+      (gitPath) => nukeGit(fixture.world, gitPath, { onPrivateStateSeatContention: resolveArrival }),
     );
-    await arrival.promise;
+    await arrival;
     assert.equal(refPresent(fixture.raw, "refs/heads/keiyaku-state"), true);
     assert.equal(existsSync(fixture.managedPath), true);
     held.close();
@@ -671,14 +677,18 @@ test("CLI renders confirmation-required and confirmation-mismatch refusals", asy
     if ("help" in bare || "help" in mismatch) throw new Error("nuke invocation parsed as help");
     const required = await invoke(bare, { cwd: world });
     const rejected = await invoke(mismatch, { cwd: world });
+    if (!("kind" in required) || required.kind !== "refused") throw new Error("nuke did not return a refusal");
+    if (!("kind" in rejected) || rejected.kind !== "refused") throw new Error("nuke did not return a refusal");
+    const requiredRefusal = required as RefusedResult;
+    const rejectedRefusal = rejected as RefusedResult;
     assert.equal(
-      renderRefusal(required as Extract<typeof required, { kind: "refused" }>, { columns: 1000, color: false }),
+      renderRefusal(requiredRefusal, { columns: 1000, color: false }),
       ["! nuke refused", `   nuke confirmation required world=${world}`, `   keiyaku nuke --confirm ${world}`].join(
         "\n",
       ),
     );
     assert.equal(
-      renderRefusal(rejected as Extract<typeof rejected, { kind: "refused" }>, { columns: 1000, color: false }),
+      renderRefusal(rejectedRefusal, { columns: 1000, color: false }),
       [
         "! nuke refused",
         `   nuke confirmation mismatch world=${world} confirmation=wrong`,

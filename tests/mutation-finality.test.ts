@@ -9,13 +9,12 @@ import {
   projectMutationFinality,
   type AuditReport,
   type ChangeId,
-  type ContractHead,
   type IntegrationConflictMaterialized,
   type MutationResult,
   type Review,
   type SnapshotId,
 } from "../src/index.js";
-import { contractId } from "../src/core/facts/types.js";
+import { contractId, type ContractHead } from "../src/core/facts/types.js";
 import { document, repositoryWithMain } from "./support/library-verbs.js";
 
 function accepted<Value>(value: Value, extras: Partial<MutationResult<Value>> = {}): MutationResult<Value> {

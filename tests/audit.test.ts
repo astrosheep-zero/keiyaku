@@ -57,11 +57,12 @@ async function failedStoredVerification(): Promise<
     workspace: "worktree",
     gates: ["verified"],
   });
-  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), bound.keiyaku.id);
+  const boundState = await bound.keiyaku.state();
+  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), boundState.id);
   writeFileSync(`${worktree}/candidate.txt`, "candidate\n");
   repository.run(["-C", worktree, "add", "candidate.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
-  const delivered = await bound.keiyaku.deliver();
+  await bound.keiyaku.deliver();
   const state = await bound.keiyaku.state();
   assert.equal(state.attestations.at(-1)?.data.verdict, "unsatisfied");
   assert.equal(state.attestations.at(-1)?.data.summary, "[1 bash exit 1]");
@@ -133,6 +134,7 @@ test("a stale document derivation is refused inside its E-decision", async () =>
   const decoded = decodeContractDocument(state.terms.document.bytes);
   const derivation = {
     document: decoded.document.key,
+    bytes: state.terms.document.bytes,
     title: decoded.title,
     verification: prepareVerificationDeclaration({
       gates: [gate("verified")],
@@ -230,7 +232,10 @@ test("audit blocks an unresolved materialized merge with the delivery refusal", 
   repository.run(["-C", worktree, "add", "shared.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "tender"]);
   const materialized = await bound.keiyaku.deliver({ materializeConflict: true });
-  assert.equal(materialized.kind, "integration-conflict-materialized");
+  assert.equal("kind" in materialized ? materialized.kind : undefined, "integration-conflict-materialized");
+  if (!("kind" in materialized) || materialized.kind !== "integration-conflict-materialized") {
+    throw new Error("conflict was not materialized");
+  }
   const indexBefore = repository.run(["-C", worktree, "diff", "--cached", "--binary"]);
   const statusBefore = repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]);
 
@@ -262,14 +267,14 @@ test("audit blocks an unresolved materialized merge with the delivery refusal", 
 
 test("audit accepts an attestation refusal as a stopped answer without facts", async () => {
   const { contract } = await failedStoredVerification();
-  const amended = await contract.amend({
+  await contract.amend({
     markdown: ["## Replace: Verification", "~~~bash", "sleep 0.2", "~~~", ""].join("\n"),
   });
 
   const pending = contract.audit();
   const abandoned = new Promise<void>((resolve, reject) => {
     setTimeout(() => {
-      void contract.abandon().then((result) => {
+      void contract.abandon().then(() => {
         try {
           resolve();
         } catch (error) {
@@ -291,7 +296,7 @@ test("audit accepts an attestation refusal as a stopped answer without facts", a
 
 test("audit admits Verification testimony for its captured old subject", async () => {
   const { contract } = await failedStoredVerification();
-  const delayed = await contract.amend({
+  await contract.amend({
     markdown: ["## Replace: Verification", "~~~bash", "sleep 0.2", "~~~", ""].join("\n"),
   });
   const state = await contract.state();
@@ -303,7 +308,7 @@ test("audit admits Verification testimony for its captured old subject", async (
     setTimeout(() => {
       void contract
         .amend({ markdown: ["## Replace: Verification", "~~~bash", "exit 0", "~~~", ""].join("\n") })
-        .then((result) => {
+        .then(() => {
           try {
             resolve();
           } catch (error) {
@@ -339,8 +344,6 @@ test("Verification reuse requires its exact producer subject", async () => {
       verdict: "satisfied" as const,
     },
   };
-  let executions = 0;
-
   const git = await repositoryAt(repository.path);
   const result = await withGitDecodeChannel(git, (channel) =>
     verifyDelivery({
@@ -350,8 +353,9 @@ test("Verification reuse requires its exact producer subject", async () => {
       at: "2026-08-06T00:00:03.000Z",
       state: { ...state, attestations: [...state.attestations, unrelated] },
       verification: definition,
-      environment: {},
     }),
   );
-  assert.equal(result?.step.kind, "accepted");
+  assert.ok(result !== null);
+  if (!("kind" in result.step)) throw new Error("verification did not return a protocol result");
+  assert.equal(result.step.kind, "accepted");
 });

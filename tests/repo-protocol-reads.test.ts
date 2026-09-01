@@ -351,6 +351,7 @@ test("public Contract rows select the source entry for every phase", async () =>
     state: board.state,
     observedAt: board.observedAt,
     rows: board.rows,
+    hasMore: false,
   });
   assert.match(catalog, new RegExp(`${ids.tendered} · tendered · .* · Phase tendered`, "u"));
 });

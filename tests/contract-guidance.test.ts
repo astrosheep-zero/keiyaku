@@ -25,6 +25,7 @@ function state(currentArc: ContractState["currentArc"]): ContractState {
     },
     bound: null,
     delivery: null,
+    currentIntegration: null,
     attestations: [],
     ...(currentArc === undefined ? {} : { currentArc }),
     terminal: null,
