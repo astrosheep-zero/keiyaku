@@ -297,6 +297,22 @@ test("request command composition rejects a duplicate action", () => {
   );
 });
 
+test("initial request publication loss is unknown with its request identity", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "keiyaku-request-publication-loss-"));
+  rmSync(directory, { recursive: true, force: true });
+  const id = randomUUID();
+  await assert.rejects(
+    requestBodyWait({
+      directory,
+      id,
+      targets: ["aku/worker/22222222" as AkuId],
+      completion: "all",
+    }),
+    (error: unknown) =>
+      error instanceof AkumaBodyRequestError && error.outcome === "unknown" && error.requestId === id,
+  );
+});
+
 test("a Heart authority failure keeps its error identity, closes the channel, and recovers admission", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-request-authority-failure-")));
   const parent = await born(root, "parent", "11111111");
@@ -931,6 +947,7 @@ test("deliver returns without a durable reference and settles Heart voided", asy
       }),
       (error: unknown) =>
         error instanceof KeiyakuRefused &&
+        (error as KeiyakuRefused & { requestId?: string }).requestId === id &&
         assert.deepEqual(error.refusal, { kind: "contract-missing", contractId: "kei/not-accepted" }) === undefined,
     );
     assert.equal((await readRequest(parent.paths, id))?.state, "voided");

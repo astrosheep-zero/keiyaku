@@ -26,7 +26,7 @@ function throwVoidedRequestFailure(
   requestId: string,
 ): never {
   const ownerFailure = decodeVoidedOwnerFailure(failure, decodeFailure);
-  if (ownerFailure !== null) throw ownerFailure;
+  if (ownerFailure !== null) throw withRequestMetadata(ownerFailure, requestId, action);
   throw new AkumaBodyRequestError(action, "voided", evidence, requestId);
 }
 
@@ -128,11 +128,22 @@ export async function requestBodyCommand<Input, Output, Reference>(
   const id = input.id ?? randomUUID();
   input.signal?.throwIfAborted();
   const transportId = randomUUID();
-  await atomicJson(requestPath(input.directory, transportId), {
-    id,
-    action: input.command.action,
-    payload: input.command.encodeRequest(input.value),
-  });
+  const payload = input.command.encodeRequest(input.value);
+  try {
+    await atomicJson(requestPath(input.directory, transportId), {
+      id,
+      action: input.command.action,
+      payload,
+    });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    throw new AkumaBodyRequestError(
+      input.command.action,
+      "unknown",
+      "parent request channel closed before request publication",
+      id,
+    );
+  }
   const path = receiptPath(input.directory, transportId);
   for (;;) {
     const response = await readRequestReceipt(input, path, id);
