@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Akuma owns one coherent activity projection and strict boundary schema. */
 import { decodeAgentEvent } from "./provider.js";
 import type { TimelineFact, TurnEndFact } from "./heart/index.js";
 import { projectTell, type TellDelivery, type TellRow } from "./heart/facts.js";

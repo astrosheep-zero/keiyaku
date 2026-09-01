@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Task owns one coherent forwarded mutation boundary. */
 import { World, type WorldRoot } from "../world.js";
 import { requestBodyCommand } from "../akuma/request-rendezvous.js";
 import {

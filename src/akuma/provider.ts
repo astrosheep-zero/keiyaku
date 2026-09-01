@@ -1,7 +1,7 @@
 import { decodeResumeCoordinate, encodeResumeCoordinate, type ResumeCoordinate } from "./coordinate.js";
 import type { ProviderOptions, ReadonlyRestraint } from "./provider-recipe.js";
 
-/* eslint-disable max-lines, max-lines-per-function -- Provider custody is the single owner boundary for its public protocol. */
+/* eslint-disable max-lines-per-function -- Provider custody is the single owner boundary for its public protocol. */
 export type { ResumeCoordinate } from "./coordinate.js";
 
 export const AKUMA_REQUESTS_ENV = "AKUMA_REQUESTS";

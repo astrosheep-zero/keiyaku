@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Task edge keeps native reads, forwarding, and local dispatch together. */
 import {
   Tasks,
   type BlockedTaskList,

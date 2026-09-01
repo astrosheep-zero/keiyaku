@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Contract owns one coherent forwarded result boundary. */
 import { decodeJournalEntry } from "../core/facts/codec.js";
 import { changeId, contractHead, contractId, entryUlid, gate, snapshotId } from "../core/facts/types.js";
 import type { AuditReport } from "../protocol/audit.js";

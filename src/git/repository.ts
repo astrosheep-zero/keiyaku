@@ -1,4 +1,3 @@
-/* eslint-disable max-lines */
 import { isAbsolute, resolve } from "node:path";
 import { realpath } from "node:fs/promises";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";

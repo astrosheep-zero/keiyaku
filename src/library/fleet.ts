@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Fleet owns one coherent public operation surface. */
 import {
   Akuma,
   AkumaNotBornError,

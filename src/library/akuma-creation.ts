@@ -1,4 +1,4 @@
-import { appendFile, realpath, stat } from "node:fs/promises";
+import { appendFile } from "node:fs/promises";
 import { moveAlias, type AliasBinding } from "../alias/index.js";
 import { Akuma, type AkumaStatus, type ForkReceipt, type ReadonlyRestraint } from "../akuma/akuma.js";
 import type { AkumaBornCall } from "../akuma/akuma-product.js";
@@ -14,6 +14,7 @@ import type { Settings } from "../settings.js";
 import { World, type WorldRoot } from "../world.js";
 import type { AllowedAction } from "../akuma/allowed.js";
 import { localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
+import { callReadonly, canonicalBirthCwd } from "../akuma/call-input.js";
 import { requireInput } from "./input.js";
 import { addressAkuma } from "./address.js";
 import { KeiyakuRefused, type Keiyaku } from "./contract.js";
@@ -149,11 +150,6 @@ function callMode(value: unknown): "wait" | "detach" {
   if (value === undefined || value === "wait") return "wait";
   if (value === "detach") return "detach";
   throw new TypeError("mode must be wait or detach");
-}
-
-function callReadonly(value: unknown): true | undefined {
-  if (value === undefined || value === true) return value;
-  throw new TypeError("readonly must be true");
 }
 
 function callTimeout(value: unknown, mode: "wait" | "detach"): number {
@@ -297,17 +293,6 @@ async function forkDispatchStage(
   }
 }
 
-async function canonicalizeExistingDirectory(path: string, diagnostic: string): Promise<string> {
-  try {
-    const real = await realpath(path);
-    if (!(await stat(real)).isDirectory()) throw new Error(diagnostic);
-    return real;
-  } catch (error) {
-    if (error instanceof Error && error.message === diagnostic) throw error;
-    throw new Error(diagnostic);
-  }
-}
-
 function unavailableWorkspace(contractId: ContractId, detail: string): Error {
   return new Error(`Contract workspace is unavailable: ${contractId} ${detail}`);
 }
@@ -335,7 +320,7 @@ async function resolveCallExecution(
 ): Promise<CallExecution | undefined> {
   if (input.cwd !== undefined) {
     return {
-      cwd: await canonicalizeExistingDirectory(input.cwd, `cwd is not an existing directory: ${input.cwd}`),
+      cwd: await canonicalBirthCwd(input.cwd),
       source: "input",
     };
   }
@@ -351,10 +336,7 @@ async function resolveCallExecution(
       throw new Error(`${appointment.diagnostic}; use reconcile`);
     }
     return {
-      cwd: await canonicalizeExistingDirectory(
-        appointment.path,
-        `Contract workspace is unavailable: ${appointment.path}`,
-      ),
+      cwd: await canonicalBirthCwd(appointment.path, `Contract workspace is unavailable: ${appointment.path}`),
       source: "contract-worktree",
     };
   }
@@ -384,7 +366,7 @@ export async function beginCall(input: CallInput, context: ExecutionContext): Pr
   const path = await World.prove(nonblank(values.path, "path"));
   const archetype = nonblank(values.archetype, "archetype");
   const body = text(values.body, "body");
-  const readonlyRequested = callReadonly(values.readonly);
+  const readonlyRequested = callReadonly(values.readonly, "readonly must be true").readonly;
   const cwd = values.cwd === undefined ? undefined : nonblank(values.cwd, "cwd");
   const mode = callMode(values.mode);
   const timeoutMs = callTimeout(values.timeoutMs, mode);
