@@ -31,6 +31,12 @@ changes Git references.
 Task authority paths contain no symlink component and all Task authority
 observations and replacements use the same Task-owned physical path judgment.
 
+Completed Task mutations provide a crash-durable namespace boundary: after a
+successful creation, the canonical Markdown and every namespace directory
+needed to reach it survive a crash as one accessible authority. A crash may
+leave the predecessor or the complete successor, but never a partially
+written document or an unreachable newly created namespace.
+
 Task reads and writes are asynchronous, complete observations. A Task mutation
 replaces one complete authority document. Keiyaku locks serialize cooperating
 writers; an external writer may still race the portable compare-then-rename

@@ -82,3 +82,22 @@ test("Task nuke removes empty nested Task directories when there are no owned fi
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("nested Task authority remains discoverable after a fresh World observation", async () => {
+  const root = await world();
+  try {
+    const first = Tasks.of(root);
+    const added = await first.add({ title: "Nested durable", namespace: ["deep", "inside"] });
+    assert.equal(added.kind, "accepted");
+    if (added.kind !== "accepted") return;
+
+    const second = Tasks.of(await World.at(root));
+    const read = await second.task({ id: added.value.id }).read();
+    assert.equal(read?.task.title, "Nested durable");
+    const listed = await second.list({ namespace: ["deep", "inside"] });
+    assert.equal(listed.kind, "accepted");
+    if (listed.kind === "accepted") assert.deepEqual(listed.value.rows.map((row) => row.id), [added.value.id]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

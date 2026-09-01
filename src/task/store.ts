@@ -47,6 +47,7 @@ async function requireDirectory(path: string, mode: "read" | "write"): Promise<b
     if (mode === "read") return false;
     try {
       await mkdir(path);
+      syncTaskDirectory(dirname(path));
     } catch (mkdirError) {
       if ((mkdirError as NodeJS.ErrnoException).code !== "EEXIST") throw mkdirError;
     }
