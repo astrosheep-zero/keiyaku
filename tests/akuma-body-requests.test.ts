@@ -345,7 +345,7 @@ test("a Heart authority failure keeps its error identity, closes the channel, an
     closed = true;
     await assert.rejects(
       request,
-      (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "voided",
+      (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "retryable",
     );
     assert.equal(existsSync(pump.directory), false);
     assert.equal((await readRequest(parent.paths, id))?.state, "admitted");
@@ -487,7 +487,7 @@ test("a noncanonical routed call fails the pump before child allocation", async 
     await assert.rejects(pump.close(), /registered request action akuma\.call rejected its payload/u);
     await assert.rejects(
       request,
-      (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "voided",
+      (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "retryable",
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -535,7 +535,7 @@ test("a semantically invalid call recipe fails the pump before Heart admission",
     await assert.rejects(pump.close(), /registered request action akuma\.call rejected its payload/u);
     await assert.rejects(
       request,
-      (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "voided",
+      (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "retryable",
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -840,7 +840,7 @@ test("CLI forwarded deliver preserves its selected Repo and uses parent Settings
   await assert.rejects(pump.close(), /registered request action contract\.deliver rejected its payload/u);
   await assert.rejects(
     noncanonical,
-    (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "voided",
+    (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "retryable",
   );
   composition = await externalRequestCommandsFor({ paths: parent.paths }, { home: parentHome, gitPath });
   pump = await BodyRequestPump.open({
@@ -1076,7 +1076,7 @@ test("completion fences admission but drains a returned delivery reference", asy
     await closing;
     await assert.rejects(
       request,
-      (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "voided",
+      (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "retryable",
     );
     const fact = await readRequest(parent.paths, id);
     assert.deepEqual(fact?.state === "served" && "serviceJson" in fact ? JSON.parse(fact.serviceJson) : null, {
@@ -1133,7 +1133,7 @@ test("a vanished live receipt does not fail durable request settlement", async (
     release();
     await assert.rejects(
       request,
-      (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "voided",
+      (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "retryable",
     );
     await pump.close();
     assert.equal((await readRequest(parent.paths, id))?.state, "served");

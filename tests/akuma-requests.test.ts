@@ -63,7 +63,7 @@ async function fixture(allowed?: Soul["allowed"]) {
   return { root, parent, soul, leash, close: () => rmSync(root, { recursive: true, force: true }) };
 }
 
-test("a caller voids when its request transport disappears before a receipt", async () => {
+test("a caller gets a retryable transport outcome when its request channel disappears before a receipt", async () => {
   const directory = mkdtempSync(join(tmpdir(), "keiyaku-request-claim-loss-"));
   const id = "00000000-0000-4000-8000-000000000001";
   try {
@@ -87,8 +87,9 @@ test("a caller voids when its request transport disappears before a receipt", as
       request,
       (error: unknown) =>
         error instanceof AkumaBodyRequestError &&
-        error.outcome === "voided" &&
-        error.diagnostic === "parent request channel closed before a receipt",
+        error.outcome === "retryable" &&
+        error.diagnostic === "parent request channel closed before a receipt" &&
+        error.requestId === id,
     );
     assert.equal(existsSync(directory), false);
   } finally {
@@ -442,6 +443,62 @@ test("reserved child request with incomplete evidence remains reserved for recov
     assert.equal(await settleBodyRequests(value.parent.paths, value.soul, () => "2026-08-26T00:00:02.000Z"), "pending");
     assert.equal((await readRequest(value.parent.paths, id))?.state, "reserved");
   } finally {
+    value.close();
+  }
+});
+
+test("a closed request channel does not report a reserved child as voided", async () => {
+  const value = await fixture(["akuma.call"]);
+  value.leash.release();
+  const id = randomUUID();
+  let childLeash: HeldAkumaLeash | null = null;
+  const pump = await BodyRequestPump.open({
+    paths: value.parent.paths,
+    allowed: value.soul.allowed,
+    bodySequence: 1,
+    now: () => "2026-08-26T00:00:01.000Z",
+    commands: akumaCallRequestCommands({
+      world: value.root,
+      paths: value.parent.paths,
+      parent: value.soul,
+      spawn: async (launch) => {
+        childLeash = await HeldAkumaLeash.try(launch.paths);
+        assert.notEqual(childLeash, null);
+        throw new Error("publication failed after reservation");
+      },
+    }),
+    signal: new AbortController().signal,
+  });
+  try {
+    const request = requestBodyCall({
+      directory: pump.directory,
+      id,
+      world: value.root,
+      archetype: "worker",
+      body: "child",
+      recipe: {
+        provider: { name: "claude", kind: "claude-agent-sdk" },
+        options: {},
+        allowed: ALLOWED_ACTIONS,
+      },
+    });
+    while ((await readRequest(value.parent.paths, id))?.state !== "reserved") {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    const pumpFailure = assert.rejects(pump.failure, /Body request pump closed/u);
+    await pump.close().catch(() => undefined);
+    await pumpFailure;
+    await assert.rejects(
+      request,
+      (error: unknown) =>
+        error instanceof AkumaBodyRequestError &&
+        error.outcome === "retryable" &&
+        error.requestId === id,
+    );
+    assert.equal((await readRequest(value.parent.paths, id))?.state, "reserved");
+  } finally {
+    childLeash?.release();
+    await pump.close().catch(() => undefined);
     value.close();
   }
 });

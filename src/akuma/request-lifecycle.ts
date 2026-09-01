@@ -149,6 +149,32 @@ async function settleReservedSoul(
     : voidRequest(paths, request.id, "reserved child origin does not match the request"));
 }
 
+async function settleReservedWithLeash(
+  paths: AkumaPaths,
+  parent: Soul,
+  request: Extract<RequestFact, { state: "reserved" }>,
+  leash: HeldAkumaLeash,
+  now: () => string,
+): Promise<void> {
+  const childPaths = pathsForAkuId(worldRootForAkumaPaths(paths), request.child);
+  try {
+    const settled = await readSoul(childPaths);
+    if (settled !== null) {
+      await settleReservedSoul(paths, parent, request, settled);
+      return;
+    }
+    const outcome = await leash.sealIfUnborn(childPaths, { evidence: "request settlement", at: now() });
+    if (outcome === "sealed") {
+      await voidRequest(paths, request.id, "reserved child was sealed unborn");
+      return;
+    }
+    const born = await readSoul(childPaths);
+    if (born !== null) await settleReservedSoul(paths, parent, request, born);
+  } finally {
+    leash.release();
+  }
+}
+
 export async function settleReserved(
   paths: AkumaPaths,
   parent: Soul,
@@ -175,21 +201,7 @@ export async function settleReserved(
     }
     const leash = await HeldAkumaLeash.try(childPaths);
     if (leash !== null) {
-      try {
-        const settled = await readSoul(childPaths);
-        if (settled !== null) await settleReservedSoul(paths, parent, request, settled);
-        else {
-          const outcome = await leash.sealIfUnborn(childPaths, { evidence: "request settlement", at: now() });
-          if (outcome === "born") {
-            const born = await readSoul(childPaths);
-            if (born !== null) await settleReservedSoul(paths, parent, request, born);
-          } else {
-            await voidRequest(paths, request.id, "reserved child was sealed unborn");
-          }
-        }
-      } finally {
-        leash.release();
-      }
+      await settleReservedWithLeash(paths, parent, request, leash, now);
       return true;
     }
     if (performance.now() >= deadline) return false;

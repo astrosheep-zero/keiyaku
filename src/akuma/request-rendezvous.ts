@@ -9,8 +9,9 @@ export class AkumaBodyRequestError extends Error {
   readonly kind = "akuma-body-request";
   constructor(
     readonly action: string,
-    readonly outcome: "refused" | "voided" | "unproven",
+    readonly outcome: "refused" | "voided" | "unproven" | "retryable",
     readonly diagnostic: string,
+    readonly requestId: string,
   ) {
     super(`${action} ${outcome === "refused" ? "refused" : outcome}: ${diagnostic}`);
     this.name = "AkumaBodyRequestError";
@@ -22,14 +23,15 @@ function throwVoidedRequestFailure(
   evidence: string,
   failure: unknown | undefined,
   decodeFailure: ((failure: unknown) => Error | null) | undefined,
+  requestId: string,
 ): never {
   const ownerFailure = decodeVoidedOwnerFailure(failure, decodeFailure);
   if (ownerFailure !== null) throw ownerFailure;
-  throw new AkumaBodyRequestError(action, "voided", evidence);
+  throw new AkumaBodyRequestError(action, "voided", evidence, requestId);
 }
 
-function throwUnprovenRequestFailure(action: string, evidence: string): never {
-  throw new AkumaBodyRequestError(action, "unproven", evidence);
+function throwUnprovenRequestFailure(action: string, evidence: string, requestId: string): never {
+  throw new AkumaBodyRequestError(action, "unproven", evidence, requestId);
 }
 
 function decodeVoidedOwnerFailure(
@@ -56,6 +58,63 @@ function withRequestMetadata<Response extends object>(
   return response as Response & Readonly<{ requestId: string; action: string }>;
 }
 
+type RequestResponse<Output, Reference> =
+  | Readonly<{ kind: "returned"; result: Output; requestId: string; action: string }>
+  | Readonly<{ kind: "reference"; reference: Reference; requestId: string; action: string }>;
+
+async function readRequestReceipt<Input, Output, Reference>(
+  input: Readonly<{ command: RequestProtocol<Input, Output, Reference> }>,
+  path: string,
+  id: string,
+): Promise<RequestResponse<Output, Reference> | undefined> {
+  try {
+    const receipt = decodeReceiptEnvelope(await readFile(path, "utf8"), id, input.command.action);
+    if (receipt === null) throw new Error(`Akuma body request ${id} has an invalid receipt`);
+    if (receipt.state === "refused") {
+      throw new AkumaBodyRequestError(receipt.action, "refused", receipt.diagnostic, receipt.id);
+    }
+    if (receipt.state === "voided") {
+      throwVoidedRequestFailure(
+        receipt.action,
+        receipt.evidence,
+        receipt.failure,
+        input.command.decodeFailure,
+        receipt.id,
+      );
+    }
+    if (receipt.state === "unproven") throwUnprovenRequestFailure(receipt.action, receipt.evidence, receipt.id);
+    if ("reference" in receipt) {
+      let reference: Reference;
+      try {
+        reference = input.command.decodeReference(receipt.reference);
+      } catch (error) {
+        const diagnostic = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `transport integrity: request ${id} action ${input.command.action} returned an invalid durable reference: ${diagnostic}`,
+        );
+      }
+      return withRequestMetadata({ kind: "reference" as const, reference }, id, input.command.action);
+    }
+    if (receipt.outcome.kind === "failed") {
+      const failure = receipt.outcome.failure;
+      throw new Error(failure.kind === "failed" ? failure.diagnostic : `Akuma ${failure.id} was not born`);
+    }
+    let result: Output;
+    try {
+      result = input.command.decodeResult(receipt.outcome.result);
+    } catch (error) {
+      const diagnostic = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `transport integrity: request ${id} action ${input.command.action} returned an invalid live result: ${diagnostic}`,
+      );
+    }
+    return withRequestMetadata({ kind: "returned" as const, result }, id, input.command.action);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
 /** Generic rendezvous only: operation owners supply their own request and result codecs. */
 export async function requestBodyCommand<Input, Output, Reference>(
   input: Readonly<{
@@ -65,10 +124,7 @@ export async function requestBodyCommand<Input, Output, Reference>(
     value: Input;
     signal?: AbortSignal;
   }>,
-): Promise<
-  | Readonly<{ kind: "returned"; result: Output; requestId: string; action: string }>
-  | Readonly<{ kind: "reference"; reference: Reference; requestId: string; action: string }>
-> {
+): Promise<RequestResponse<Output, Reference>> {
   const id = input.id ?? randomUUID();
   input.signal?.throwIfAborted();
   const transportId = randomUUID();
@@ -79,57 +135,20 @@ export async function requestBodyCommand<Input, Output, Reference>(
   });
   const path = receiptPath(input.directory, transportId);
   for (;;) {
-    try {
-      const receipt = decodeReceiptEnvelope(await readFile(path, "utf8"), id, input.command.action);
-      if (receipt === null) throw new Error(`Akuma body request ${id} has an invalid receipt`);
-      if (receipt.state === "refused") throw new AkumaBodyRequestError(receipt.action, "refused", receipt.diagnostic);
-      if (receipt.state === "voided") {
-        throwVoidedRequestFailure(receipt.action, receipt.evidence, receipt.failure, input.command.decodeFailure);
-      }
-      if (receipt.state === "unproven") throwUnprovenRequestFailure(receipt.action, receipt.evidence);
-      if ("reference" in receipt) {
-        let reference: Reference;
-        try {
-          reference = input.command.decodeReference(receipt.reference);
-        } catch (error) {
-          const diagnostic = error instanceof Error ? error.message : String(error);
-          throw new Error(
-            `transport integrity: request ${id} action ${input.command.action} returned an invalid durable reference: ${diagnostic}`,
-          );
-        }
-        return withRequestMetadata(
-          {
-            kind: "reference" as const,
-            reference,
-          },
-          id,
-          input.command.action,
-        );
-      }
-      if (receipt.outcome.kind === "failed") {
-        const failure = receipt.outcome.failure;
-        throw new Error(failure.kind === "failed" ? failure.diagnostic : `Akuma ${failure.id} was not born`);
-      }
-      let result: Output;
-      try {
-        result = input.command.decodeResult(receipt.outcome.result);
-      } catch (error) {
-        const diagnostic = error instanceof Error ? error.message : String(error);
-        throw new Error(
-          `transport integrity: request ${id} action ${input.command.action} returned an invalid live result: ${diagnostic}`,
-        );
-      }
-      return withRequestMetadata({ kind: "returned" as const, result }, id, input.command.action);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
+    const response = await readRequestReceipt(input, path, id);
+    if (response !== undefined) return response;
     if (
       !(await access(input.directory).then(
         () => true,
         () => false,
       ))
     ) {
-      throw new AkumaBodyRequestError(input.command.action, "voided", "parent request channel closed before a receipt");
+      throw new AkumaBodyRequestError(
+        input.command.action,
+        "retryable",
+        "parent request channel closed before a receipt",
+        id,
+      );
     }
     await abortableDelay(POLL_MS, input.signal);
   }
