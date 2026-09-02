@@ -600,32 +600,18 @@ test("LineRpcProcess rejects pending requests and closes on malformed JSON", asy
   }
 });
 
-test("LineRpcProcess rejects pending requests and closes on oversized input", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-line-rpc-oversized-"));
+test("LineRpcProcess accepts a valid oversized response", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-line-rpc-large-response-"));
   const child = [
-    "process.stdin.on('data', () => process.stdout.write('x'.repeat(300000) + '\\n'));",
+    "process.stdin.on('data', () => process.stdout.write(JSON.stringify({id:1,result:'x'.repeat(300000)}) + '\\n'));",
     "process.stdin.resume();",
   ].join(" ");
   let rpc: LineRpcProcess | undefined;
   try {
     rpc = new LineRpcProcess({ argv: [process.execPath, "-e", child], cwd: root, requestTimeoutMs: 1_000 });
-    await assert.rejects(rpc.request("probe"), /maximum size/u);
-  } finally {
-    await rpc?.close(true);
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("LineRpcProcess rejects pending requests and closes on an oversized unterminated buffer", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-line-rpc-buffer-"));
-  const child = [
-    "process.stdin.on('data', () => process.stdout.write('x'.repeat(1100000)));",
-    "process.stdin.resume();",
-  ].join(" ");
-  let rpc: LineRpcProcess | undefined;
-  try {
-    rpc = new LineRpcProcess({ argv: [process.execPath, "-e", child], cwd: root, requestTimeoutMs: 1_000 });
-    await assert.rejects(rpc.request("probe"), /maximum size/u);
+    const result = await rpc.request("probe");
+    assert.equal(typeof result, "string");
+    assert.equal((result as string).length, 300_000);
   } finally {
     await rpc?.close(true);
     rmSync(root, { recursive: true, force: true });

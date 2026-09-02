@@ -1,7 +1,5 @@
 import { spawnStdioProcess, type StdioProcess, type StdioProcessExit } from "./stdio.js";
 
-const MAX_LINE_BYTES = 256 * 1024;
-const MAX_BUFFER_BYTES = 1024 * 1024;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
 type Pending = {
@@ -71,19 +69,12 @@ export class LineRpcProcess {
       const newline = chunk.indexOf("\n", offset);
       if (newline < 0) {
         this.stdout += chunk.slice(offset);
-        if (Buffer.byteLength(this.stdout, "utf8") > MAX_BUFFER_BYTES) {
-          this.failAndClose(new Error("line RPC protocol buffer exceeded maximum size"));
-        }
         return;
       }
       this.stdout += chunk.slice(offset, newline);
       const rawLine = this.stdout;
       this.stdout = "";
       offset = newline + 1;
-      if (Buffer.byteLength(rawLine, "utf8") > MAX_LINE_BYTES) {
-        this.failAndClose(new Error("line RPC protocol line exceeded maximum size"));
-        return;
-      }
       const line = rawLine.trim();
       if (line.length > 0) this.receive(line);
       if (this.closed) return;
