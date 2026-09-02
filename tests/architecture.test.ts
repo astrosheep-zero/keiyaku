@@ -168,6 +168,15 @@ test("architecture policy keeps Akuma runtime away from generic Library", () => 
   assert.deepEqual(rules(diagnostics), ["architecture/dependency-direction"]);
 });
 
+test("architecture policy keeps denied Akuma Library edges closed for type imports", () => {
+  const diagnostics = check({
+    "library/contract.ts": "export type Contract = string;",
+    "akuma/akuma.ts": 'import type { Contract } from "../library/contract.js"; export type RuntimeContract = Contract;',
+  });
+
+  assert.deepEqual(rules(diagnostics), ["architecture/dependency-direction"]);
+});
+
 test("architecture policy keeps cross-product wiring in the named Library composition root", () => {
   const accepted = check({
     "akuma/requests.ts": "export function executionChannel(): void {}",

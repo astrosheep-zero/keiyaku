@@ -356,7 +356,6 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("core/facts/**"),
         any("dispatch/**"),
         any("identity/**"),
-        any("library/**"),
         any("runtime/proc/**"),
         any("settings.ts"),
         any("task/**"),
