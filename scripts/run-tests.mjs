@@ -49,10 +49,10 @@ const rawSuite =
       : options[suiteOption + 1];
 /** @param {string | undefined} value */
 function isTestSuite(value) {
-  return value === "local" || value === "integration";
+  return value === "pure" || value === "isolated" || value === "local" || value === "integration";
 }
 if (suiteOption !== -1 && !isTestSuite(rawSuite)) {
-  console.error(`Unknown test suite: ${rawSuite ?? "(missing value)"}. Expected local or integration.`);
+  console.error(`Unknown test suite: ${rawSuite ?? "(missing value)"}. Expected pure, isolated, local, or integration.`);
   process.exit(1);
 }
 const suite = isTestSuite(rawSuite) ? rawSuite : undefined;
@@ -70,12 +70,21 @@ if (missingTestFiles.length > 0) {
   console.error(`Test manifest contains missing file(s): ${missingTestFiles.join(", ")}`);
   process.exit(1);
 }
-const testOptions =
+const selectedOptions =
   suiteOption === -1
     ? options
     : options.filter(
         (_, index) => index !== suiteOption && !(suiteFlag === "--suite" && index === suiteOption + 1),
       );
+const noTestIsolation = selectedOptions.includes("--no-test-isolation");
+const testOptions = selectedOptions.filter((option) => option !== "--no-test-isolation");
+const isolationOptions = noTestIsolation
+  ? [
+      Number.parseInt(process.versions.node, 10) >= 23
+        ? "--test-isolation=none"
+        : "--experimental-test-isolation=none",
+    ]
+  : [];
 const reporterOptions = testOptions.some(
   (option) => option === "--test-reporter" || option.startsWith("--test-reporter="),
 )
@@ -85,7 +94,7 @@ const environment = { ...process.env };
 delete environment.AKUMA_REQUESTS;
 const result = spawnSync(
   process.execPath,
-  ["--import", "tsx", "--test", ...reporterOptions, ...testOptions, ...testFiles],
+  ["--import", "tsx", "--test", ...isolationOptions, ...reporterOptions, ...testOptions, ...testFiles],
   { stdio: "inherit", env: environment },
 );
 
