@@ -55,7 +55,7 @@
     "test:e2e:built": "node scripts/run-tests.mjs tests/packaged-cli.e2e.ts",
     "test:local": "node scripts/run-tests.mjs --suite local",
     "test:integration": "node scripts/run-tests.mjs --suite integration",
-    "test:parallel": "node scripts/run-tests.mjs --suite pure --no-test-isolation --test-concurrency=1 && node scripts/run-tests.mjs --suite isolated --test-concurrency=8",
+    "test:parallel": "node scripts/run-tests.mjs --suite pure --no-test-isolation --test-concurrency=1 && node scripts/run-tests.mjs --suite isolated --test-concurrency=8 --test-reporter=spec",
     "test:maintainability": "node scripts/check-maintainability.js",
     "test:focused": "node scripts/run-tests.mjs",
     "test:focused:serial": "node scripts/run-tests.mjs --test-concurrency=1",
