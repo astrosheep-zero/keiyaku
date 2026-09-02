@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -37,6 +37,7 @@ import { requestForwardedAkumaCall as requestBodyCall } from "../src/akuma/call-
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import type { PluginSignal } from "../src/plugin/public.js";
 import { pluginRuntime } from "../src/plugin/runtime.js";
+import { createCodexAppServerProvider } from "../src/akuma/providers/codex-app-server/index.js";
 import { World } from "../src/world.js";
 
 type TurnOutcomePluginRecorder = {
@@ -855,8 +856,8 @@ test("a Session without live tell hands off while narration remains open", async
       (await readHeart(allocated.paths)).pending.map((tell) => tell.id),
       ["tell-handoff"],
     );
-    assert.equal(automaticLaunches, 1);
-    assert.equal(released, 1);
+    assert.equal(automaticLaunches, 0);
+    assert.equal(released, 0);
 
     const launches: Array<readonly Readonly<{ id: string; text: string }>[]> = [];
     const successorStart = async (
@@ -952,11 +953,158 @@ test("a failed release recovery spawn leaves its Tell pending", async () => {
         setTimeout(() => reject(new Error("Body did not release after spawn failure")), 1_000),
       ),
     ]);
-    assert.equal(spawnAttempts, 1);
+    assert.equal(spawnAttempts, 0);
     assert.equal(await probeLeash(allocated.paths), "free");
     assert.deepEqual(
       (await readHeart(allocated.paths)).pending.map((tell) => tell.id),
       ["release-spawn-failure"],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+function fakeCodexAdmissionFailure(root: string, mode: "rpc-reject" | "missing-turn-id"): string {
+  const executable = join(root, "codex");
+  writeFileSync(
+    executable,
+    [
+      "#!/usr/bin/env node",
+      "const readline=require('node:readline');",
+      `const mode=${JSON.stringify(mode)};`,
+      "const send=(value)=>process.stdout.write(JSON.stringify(value)+'\\n');",
+      "const reply=(message,result)=>send({id:message.id,result});",
+      "const lines=readline.createInterface({input:process.stdin,crlfDelay:Infinity});",
+      "lines.on('line',(line)=>{",
+      "  const message=JSON.parse(line);",
+      "  if(message.method==='initialize') return reply(message,{userAgent:'codex-cli/0.146.0'});",
+      "  if(message.method==='initialized') return;",
+      "  if(message.method==='thread/start') return reply(message,{thread:{id:'thread-fresh'}});",
+      "  if(message.method==='turn/start'){",
+      "    if(mode==='rpc-reject') return send({id:message.id,error:{message:'turn start refused'}});",
+      "    return reply(message,{turn:{}});",
+      "  }",
+      "});",
+    ].join("\n"),
+  );
+  chmodSync(executable, 0o755);
+  return executable;
+}
+
+test("a provider admission failure ends the Body without spawning a successor for a pending Tell", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-admission-no-handoff-"));
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1a2b3c50" });
+    await initializeHeart(allocated.paths);
+    const seed = {
+      id: allocated.id,
+      archetype: "claude",
+      provider: { name: "claude", kind: "claude-agent-sdk" as const },
+      options: {},
+      origin: { kind: "direct" as const },
+      cwd: root,
+    };
+    await driveAkumaBody(
+      { paths: allocated.paths, seed, initialBody: "build it" },
+      adapter({
+        starts: [],
+        events: [{ type: "session", coordinate: { sessionId: "native-1" } }],
+        result: { kind: "answered", answer: "done", historyId: "history-1" },
+      }),
+      { now: () => "2026-08-08T00:00:00.000Z" },
+    );
+    await recordTell(allocated.paths, {
+      id: "tell-retry",
+      body: "try again",
+      recordedAt: "2026-08-08T00:00:01.000Z",
+    });
+
+    let starts = 0;
+    let automaticLaunches = 0;
+    const failingStart = async () => {
+      starts += 1;
+      throw new Error("native admission refused");
+    };
+    await driveAkumaBody(
+      { paths: allocated.paths },
+      {
+        admitOptions(options) {
+          return { kind: "admitted", options };
+        },
+        start: failingStart,
+        resume: failingStart,
+      },
+      {
+        now: () => "2026-08-08T00:00:02.000Z",
+        async spawnBody() {
+          automaticLaunches += 1;
+          throw new Error("must not spawn");
+        },
+      },
+    );
+
+    const failed = await readHeart(allocated.paths);
+    assert.equal(starts, 1);
+    assert.equal(automaticLaunches, 0);
+    assert.equal(await probeLeash(allocated.paths), "free");
+    assert.equal(failed.latestBody?.end, "broke-off");
+    assert.equal(failed.latestBody?.sequence, 2);
+    assert.deepEqual(
+      failed.pending.map((tell) => tell.id),
+      ["tell-retry"],
+    );
+    assert.deepEqual((await outcomes(allocated.paths)).at(-1), {
+      kind: "failed",
+      diagnostic: "native admission refused",
+    });
+
+    await driveAkumaBody(
+      { paths: allocated.paths },
+      adapter({
+        starts: [],
+        events: [{ type: "session", coordinate: { sessionId: "native-1" } }],
+        result: { kind: "answered", answer: "adjusted", historyId: "history-2" },
+      }),
+      { now: () => "2026-08-08T00:00:03.000Z" },
+    );
+    assert.deepEqual((await readHeart(allocated.paths)).pending, []);
+    assert.equal((await readHeart(allocated.paths)).latestBody?.end, "exited");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Body persists the original Codex admission diagnostic as the failed Turn reason", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-codex-admission-diagnostic-"));
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "codex", draw: () => "1a2b3c51" });
+    await initializeHeart(allocated.paths);
+    await driveAkumaBody(
+      {
+        paths: allocated.paths,
+        seed: {
+          id: allocated.id,
+          archetype: "codex",
+          provider: { name: "codex", kind: "codex-app-server" },
+          options: {},
+          origin: { kind: "direct" },
+          cwd: root,
+        },
+        initialBody: "build it",
+      },
+      createCodexAppServerProvider(fakeCodexAdmissionFailure(root, "rpc-reject")),
+      { now: () => "2026-08-08T00:00:00.000Z" },
+    );
+    const heart = await readHeart(allocated.paths);
+    assert.equal(await probeLeash(allocated.paths), "free");
+    assert.equal(heart.latestBody?.end, "broke-off");
+    assert.deepEqual(await outcomes(allocated.paths), [{ kind: "failed", diagnostic: "turn start refused" }]);
+    assert.equal(
+      (await outcomes(allocated.paths)).some(
+        (outcome) =>
+          outcome.kind === "failed" && outcome.diagnostic.includes("codex app-server did not admit a turn"),
+      ),
+      false,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });

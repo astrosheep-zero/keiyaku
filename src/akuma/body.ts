@@ -341,7 +341,6 @@ export async function driveAkumaBody(
   if (acquired === "held") return "held";
   if (acquired === "absent") return;
   const leash = acquired;
-  let bodyStarted = false;
   try {
     const soul = await bornSoul(launch, leash, runtime.now());
     if (soul === null) return;
@@ -352,7 +351,6 @@ export async function driveAkumaBody(
     const selected = adapter ?? (await resolveProviderExecution(soul.provider)).adapter;
     if (!(await prepareBodyStart(launch.paths, leash))) return;
     const body = await leash.recordBody(launch.paths, { leashTakenAt: runtime.now() });
-    bodyStarted = true;
     const supervisor = await BodySupervisor.open(launch.paths, body.sequence, leash);
     const execution = { launch, soul, adapter: selected, bodySequence: body.sequence, supervisor, runtime };
     try {
@@ -373,7 +371,6 @@ export async function driveAkumaBody(
     throw error;
   } finally {
     leash.release();
-    if (bodyStarted) await handoffPendingTells(launch.paths, runtime.spawnBody ?? spawnAkumaBody);
   }
 }
 

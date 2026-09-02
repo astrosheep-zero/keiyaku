@@ -192,11 +192,8 @@ async function startCodex(execution: ProviderExecution, input: StartInput, custo
   const events = new AgentEventChannel();
   const server = codexServer(execution, input);
   const closed = new Promise<void>((resolve) => server.onExit(() => resolve()));
-  custody.own({
-    closed,
-    abort: async () => await server.close(true),
-    forceDispose: async () => await server.close(true),
-  });
+  const close = async () => await server.close(true);
+  custody.own({ closed, abort: close, forceDispose: close });
   const state: CodexTurnState = { settled: false, tools: new Map() };
   let settle!: (result: TurnResult) => void;
   const completion = new Promise<TurnResult>((resolve) => {
@@ -207,16 +204,11 @@ async function startCodex(execution: ProviderExecution, input: StartInput, custo
     if (terminal !== undefined) return;
     terminal = result;
     state.settled = true;
-    void server.endInputAndDrain().then(
-      () => {
-        events.end();
-        settle(result);
-      },
-      () => {
-        events.end();
-        settle(result);
-      },
-    );
+    const done = () => {
+      events.end();
+      settle(result);
+    };
+    void server.endInputAndDrain().then(done, done);
   };
   server.onNotification((notification) => {
     const result = codexNotificationResult(notification, state, events);
@@ -246,11 +238,17 @@ async function startCodex(execution: ProviderExecution, input: StartInput, custo
       await server.close(true);
       throw signal.reason;
     }
-    finish({ kind: "failed", diagnostic: diagnostic(error) });
+    const message = diagnostic(error);
+    finish({ kind: "failed", diagnostic: message });
+    await server.close(true);
+    throw error instanceof Error ? error : new Error(message);
   } finally {
     signal.removeEventListener("abort", abortSetup);
   }
-  if (state.turnId === undefined) throw new Error("codex app-server did not admit a turn");
+  if (state.turnId === undefined) {
+    if (terminal?.kind === "failed" && terminal.diagnostic.length > 0) throw new Error(terminal.diagnostic);
+    throw new Error("codex app-server did not admit a turn");
+  }
   return {
     admission: { fence: state.turnId },
     events,

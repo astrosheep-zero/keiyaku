@@ -1682,6 +1682,9 @@ function fakeCodex(
     | "terminal-drain"
     | "terminal-hang"
     | "exit-before-completion"
+    | "exit-before-admit"
+    | "rpc-reject"
+    | "missing-turn-id"
     | "steer-hung-terminal" = "complete",
 ): Readonly<{
   executable: string;
@@ -1716,10 +1719,15 @@ function fakeCodex(
       "  const message=JSON.parse(line); fs.appendFileSync(log,JSON.stringify(message)+'\\n');",
       "  if(message.method==='initialize') return reply(message,{userAgent:'codex-cli/0.146.0'});",
       "  if(message.method==='initialized') return;",
-      "  if(message.method==='thread/start') return reply(message,{thread:{id:'thread-fresh'}});",
+      "  if(message.method==='thread/start'){",
+      "    if(mode==='exit-before-admit') process.exit(7);",
+      "    return reply(message,{thread:{id:'thread-fresh'}});",
+      "  }",
       "  if(message.method==='thread/resume') return reply(message,{thread:{id:message.params.threadId}});",
       "  if(message.method==='thread/fork') return reply(message,{thread:{id:'thread-child'}});",
       "  if(message.method==='turn/start'){",
+      "    if(mode==='rpc-reject') return send({id:message.id,error:{message:'turn start refused'}});",
+      "    if(mode==='missing-turn-id') return reply(message,{turn:{}});",
       "    reply(message,{turn:{id:'turn-1'}});",
       "    if(mode==='complete'){",
       "      send({method:'item/completed',params:{item:{id:'item-1',type:'agentMessage',text:'codex answer'}}});",
@@ -2345,6 +2353,37 @@ test("Codex terminal drain has a bounded fallback for a hung producer", async ()
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Codex admission failures preserve the original diagnostic", async () => {
+  const cases = [
+    { mode: "rpc-reject", diagnostic: "turn start refused" },
+    { mode: "missing-turn-id", diagnostic: "codex app-server did not return a turn id" },
+    { mode: "exit-before-admit", diagnostic: "line RPC process exited with code 7" },
+  ] as const;
+  for (const fixture of cases) {
+    const root = mkdtempSync(join(tmpdir(), `keiyaku-codex-admission-${fixture.mode}-`));
+    try {
+      await assert.rejects(
+        attemptResult(
+          createCodexAppServerProvider(fakeCodex(root, fixture.mode).executable).start({
+            ...DRIVE_DEFAULTS,
+            body: "build",
+            launchTells: [],
+            cwd: root,
+            options: {},
+            session: { kind: "fresh" },
+          }),
+        ),
+        (error: unknown) =>
+          error instanceof Error &&
+          error.message === fixture.diagnostic &&
+          !error.message.includes("codex app-server did not admit a turn"),
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   }
 });
 
