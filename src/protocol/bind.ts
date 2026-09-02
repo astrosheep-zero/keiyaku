@@ -4,7 +4,7 @@ import { gitObjectIdForSnapshot } from "../git/identity.js";
 import type { GitRefAssertion } from "../git/repository.js";
 import type { GitRepository } from "../git/process.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
-import type { BindData, ActorId, ContractId } from "../core/facts/types.js";
+import { contractId, type BindData, type ActorId, type ContractId } from "../core/facts/types.js";
 import { decideBind, type BindInput, type BindRefusal } from "../core/verbs/bind.js";
 export type { BindRefusal } from "../core/verbs/bind.js";
 import type {
@@ -19,6 +19,30 @@ export type TargetInputRefusal =
   | Readonly<{ kind: "target-missing" }>
   | Readonly<{ kind: "unborn-head" }>;
 export type ForkSourceMovedRefusal = Readonly<{ kind: "fork-source-moved"; contractId: ContractId }>;
+
+export function decodeTargetInputRefusal(value: unknown): TargetInputRefusal {
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    throw new Error("malformed target input refusal");
+  const object = value as Record<string, unknown>;
+  if (object.kind !== "invalid-target" && object.kind !== "target-missing" && object.kind !== "unborn-head")
+    throw new Error("malformed target input refusal");
+  if (Object.keys(object).length !== 1) throw new Error("malformed target input refusal");
+  return { kind: object.kind };
+}
+
+export function decodeForkSourceMovedRefusal(value: unknown): ForkSourceMovedRefusal {
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    throw new Error("malformed fork-source refusal");
+  const object = value as Record<string, unknown>;
+  if (object.kind !== "fork-source-moved") throw new Error("malformed fork-source refusal");
+  if (Object.keys(object).some((key) => key !== "kind" && key !== "contractId"))
+    throw new Error("malformed fork-source refusal");
+  try {
+    return { kind: "fork-source-moved", contractId: contractId(String(object.contractId)) };
+  } catch {
+    throw new Error("malformed fork-source refusal");
+  }
+}
 
 type BindOperationInput = Readonly<{
   scope: GitRepository;

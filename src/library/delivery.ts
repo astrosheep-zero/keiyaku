@@ -1,8 +1,57 @@
+import { decodeDeliverData } from "../core/facts/codec.js";
 import type { SnapshotId } from "../core/facts/types.js";
 import type { DeliverValue as ProtocolDeliverValue } from "../protocol/deliver.js";
-import type { ContinuationReport } from "./continuation.js";
+import { decodeCompletionEvidence } from "../protocol/result-codec.js";
+import { decodeContinuationReport, type ContinuationReport } from "./continuation.js";
+import { ownerSchema } from "./result-codec.js";
+import { z } from "zod";
 
 export type DeliveryValue = ProtocolDeliverValue & Readonly<{ continuation?: ContinuationReport }>;
+
+export function decodeDeliveryValue(value: unknown): DeliveryValue {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("malformed delivery value");
+  const object = value as Record<string, unknown>;
+  const allowed = new Set([
+    "tenderSnapshot",
+    "integration",
+    "method",
+    "policy",
+    "completion",
+    "verification",
+    "verificationReuse",
+    "verificationSummary",
+    "placement",
+    "cleanup",
+    "leak",
+    "continuation",
+  ]);
+  for (const key of Object.keys(object)) if (!allowed.has(key)) throw new Error("malformed delivery value");
+  const identity = decodeDeliverData({
+    tenderSnapshot: object.tenderSnapshot,
+    integration: object.integration,
+    method: object.method,
+    policy: object.policy,
+  });
+  const evidence = decodeCompletionEvidence({
+    ...(object.completion === undefined ? {} : { completion: object.completion }),
+    ...(object.verification === undefined ? {} : { verification: object.verification }),
+    ...(object.verificationReuse === undefined ? {} : { verificationReuse: object.verificationReuse }),
+    ...(object.verificationSummary === undefined ? {} : { verificationSummary: object.verificationSummary }),
+    ...(object.placement === undefined ? {} : { placement: object.placement }),
+    ...(object.cleanup === undefined ? {} : { cleanup: object.cleanup }),
+    ...(object.leak === undefined ? {} : { leak: object.leak }),
+  });
+  return {
+    ...identity,
+    ...evidence,
+    ...(object.continuation === undefined ? {} : { continuation: decodeContinuationReport(object.continuation) }),
+  };
+}
+
+export const deliveryValueSchema = ownerSchema(
+  decodeDeliveryValue,
+  "expected delivery value",
+) satisfies z.ZodType<DeliveryValue>;
 
 class DeliveryHandle {
   declare readonly completion?: DeliveryValue["completion"];

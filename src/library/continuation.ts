@@ -1,4 +1,4 @@
-import type { ContractId, ContractState, JournalEntry } from "../core/facts/types.js";
+import { contractId, type ContractId, type ContractState, type JournalEntry } from "../core/facts/types.js";
 import { observeActiveContractWorld } from "../git/observe.js";
 import { withGitReadObservation, type GitDecodeChannel } from "../git/read-observation.js";
 import { reconcileDependentWorktree } from "../git/reconcile.js";
@@ -6,9 +6,12 @@ import type { ReconcileResult } from "../git/reconcile.js";
 import { worktreePath } from "../git/workspace.js";
 import { continueDeliveryOperation } from "../protocol/deliver.js";
 import type { DocumentDerivation, PlacementStop, RepositoryScope } from "../protocol/operations.js";
+import { decodePlacementStop } from "../protocol/result-codec.js";
 import { concatenatePrivateStateSeatClose } from "../git/private-state-seat.js";
 import type { AcceptedIntent } from "./mutation.js";
+import { ownerSchema } from "./result-codec.js";
 import { appointmentFor, readPlaceRegister } from "../workspace-place.js";
+import { z } from "zod";
 
 export type ContinuationReport = Readonly<{
   claimed: readonly ContractId[];
@@ -17,6 +20,42 @@ export type ContinuationReport = Readonly<{
     stop: PlacementStop | Readonly<{ kind: "already-terminal" }>;
   }>[];
 }>;
+
+export function decodeContinuationReport(value: unknown): ContinuationReport {
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    throw new Error("malformed continuation report");
+  const object = value as Record<string, unknown>;
+  if (!Array.isArray(object.claimed) || !Array.isArray(object.stopped))
+    throw new Error("malformed continuation report");
+  if (Object.keys(object).some((key) => key !== "claimed" && key !== "stopped"))
+    throw new Error("malformed continuation report");
+  return {
+    claimed: object.claimed.map((id) => contractId(String(id))),
+    stopped: object.stopped.map((item) => {
+      if (item === null || typeof item !== "object" || Array.isArray(item))
+        throw new Error("malformed continuation report");
+      const stopped = item as Record<string, unknown>;
+      if (Object.keys(stopped).some((key) => key !== "contractId" && key !== "stop"))
+        throw new Error("malformed continuation report");
+      const stopValue = stopped.stop;
+      const alreadyTerminal =
+        stopValue !== null &&
+        typeof stopValue === "object" &&
+        !Array.isArray(stopValue) &&
+        (stopValue as Record<string, unknown>).kind === "already-terminal" &&
+        Object.keys(stopValue as Record<string, unknown>).length === 1;
+      return {
+        contractId: contractId(String(stopped.contractId)),
+        stop: alreadyTerminal ? { kind: "already-terminal" as const } : decodePlacementStop(stopValue),
+      };
+    }),
+  };
+}
+
+export const continuationReportSchema = ownerSchema(
+  decodeContinuationReport,
+  "expected continuation report",
+) satisfies z.ZodType<ContinuationReport>;
 
 type RetainedDependent = Readonly<{
   state: ContractState;

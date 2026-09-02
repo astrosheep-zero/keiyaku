@@ -1,6 +1,6 @@
-import { gateReports, type GateReport } from "../facts/gate.js";
+import { decodeGateReport, gateReports, type GateReport } from "../facts/gate.js";
 import { activeContract, contractState } from "../facts/observation.js";
-import type { ActorId, ContractId, ContractState, JournalEntry } from "../facts/types.js";
+import { contractId, type ActorId, type ContractId, type ContractState, type JournalEntry } from "../facts/types.js";
 import type { DecideInput, OfferDecision } from "../decide.js";
 
 type PlacementInput = Readonly<{
@@ -29,6 +29,56 @@ export type PlacementRefusal =
       contractId: ContractId;
       unmet: readonly UnmetPrerequisite[];
     }>;
+export function decodePlacementRefusal(value: unknown): PlacementRefusal {
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    throw new Error("malformed placement refusal");
+  const object = value as Record<string, unknown>;
+  if (object.kind === "contract-missing" || object.kind === "delivery-missing" || object.kind === "terminal") {
+    if (Object.keys(object).some((key) => key !== "kind" && key !== "contractId"))
+      throw new Error("malformed placement refusal");
+    try {
+      return { kind: object.kind, contractId: contractId(String(object.contractId)) };
+    } catch {
+      throw new Error("malformed placement refusal");
+    }
+  }
+  if (object.kind === "gates-unsatisfied") {
+    if (Object.keys(object).some((key) => key !== "kind" && key !== "contractId" && key !== "unmet"))
+      throw new Error("malformed placement refusal");
+    if (!Array.isArray(object.unmet)) throw new Error("malformed placement refusal");
+    try {
+      return {
+        kind: "gates-unsatisfied",
+        contractId: contractId(String(object.contractId)),
+        unmet: object.unmet.map(decodeGateReport),
+      };
+    } catch {
+      throw new Error("malformed placement refusal");
+    }
+  }
+  if (object.kind !== "prerequisites-unsatisfied") throw new Error("malformed placement refusal");
+  if (Object.keys(object).some((key) => key !== "kind" && key !== "contractId" && key !== "unmet"))
+    throw new Error("malformed placement refusal");
+  if (!Array.isArray(object.unmet)) throw new Error("malformed placement refusal");
+  try {
+    return {
+      kind: "prerequisites-unsatisfied",
+      contractId: contractId(String(object.contractId)),
+      unmet: object.unmet.map((item) => {
+        if (item === null || typeof item !== "object" || Array.isArray(item))
+          throw new Error("malformed placement refusal");
+        const unmet = item as Record<string, unknown>;
+        if (Object.keys(unmet).some((key) => key !== "contractId" && key !== "state"))
+          throw new Error("malformed placement refusal");
+        if (unmet.state !== "missing" && unmet.state !== "active" && unmet.state !== "abandoned")
+          throw new Error("malformed placement refusal");
+        return { contractId: contractId(String(unmet.contractId)), state: unmet.state };
+      }),
+    };
+  } catch {
+    throw new Error("malformed placement refusal");
+  }
+}
 
 function unmetPrerequisites(
   prerequisites: readonly ContractId[],

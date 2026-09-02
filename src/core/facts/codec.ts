@@ -284,6 +284,10 @@ export function decodeJournalEntry(value: unknown): JournalEntry {
   return validateEntry(value);
 }
 
+export function decodeDeliverData(value: unknown): DeliverData {
+  return validateData("deliver", value) as DeliverData;
+}
+
 function canonicalValue(value: unknown): string {
   if (value === null) return "null";
   if (typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);

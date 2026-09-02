@@ -1,21 +1,31 @@
-import type { ContractHead, ContractId, JournalEntry, SnapshotId } from "../core/facts/types.js";
+import { decodeJournalEntry } from "../core/facts/codec.js";
 import {
-  concatenatePrivateStateSeatClose,
-  type PrivateStateSeatCloseLag,
-} from "../git/private-state-seat.js";
+  contractHead,
+  snapshotId,
+  type ContractHead,
+  type ContractId,
+  type JournalEntry,
+  type SnapshotId,
+} from "../core/facts/types.js";
+import { decodePrivateStateSeatCloseLag, decodeWorktreeLeak } from "../git/result-codec.js";
+import { concatenatePrivateStateSeatClose, type PrivateStateSeatCloseLag } from "../git/private-state-seat.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import type { ReconcileReport } from "../protocol/reconcile.js";
 import type { RepositoryScope } from "../protocol/operations.js";
 import type { IntentOutcome } from "../protocol/operations.js";
 import type { AcceptedObligations } from "../protocol/outcome.js";
+import { decodeVerificationCleanupFailure } from "../protocol/result-codec.js";
+import { decodeSettlementLag } from "../settlement/result-codec.js";
 import type { SettlementReport } from "../settlement/settle.js";
 import type { TaskHolderAdmission } from "../settlement/holder.js";
 import type { WorktreeHooks } from "./configuration.js";
-import { completeReconcile, type ReconcileCompletion } from "./reconcile.js";
+import { completeReconcile, decodeReconciliationLag, type ReconcileCompletion } from "./reconcile.js";
 import type { AuditReport } from "../protocol/audit.js";
 import type { IntegrationConflictMaterialized } from "../protocol/deliver.js";
 import type { ContinuationReport } from "./continuation.js";
 import type { KeiyakuRefused, KeiyakuRetry } from "./refusal.js";
+import { ownerSchema } from "./result-codec.js";
+import { z } from "zod";
 
 export type MutationFinalitySurface =
   | "verification"
@@ -56,6 +66,84 @@ function pendingSurface(surface: MutationFinalitySurface, required: boolean) {
 }
 
 export type MutationPendingSurface = Readonly<{ surface: MutationFinalitySurface; required: boolean }>;
+
+export function decodeMutationPendingSurface(value: unknown): MutationPendingSurface {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("malformed pending surface");
+  const object = value as Record<string, unknown>;
+  if (Object.keys(object).some((key) => key !== "surface" && key !== "required"))
+    throw new Error("malformed pending surface");
+  if (
+    object.surface !== "verification" &&
+    object.surface !== "placement" &&
+    object.surface !== "continuation" &&
+    object.surface !== "reconciliation" &&
+    object.surface !== "settlement" &&
+    object.surface !== "cleanup"
+  )
+    throw new Error("malformed pending surface");
+  if (typeof object.required !== "boolean") throw new Error("malformed pending surface");
+  return { surface: object.surface, required: object.required };
+}
+
+export const mutationPendingSurfaceSchema = ownerSchema(
+  decodeMutationPendingSurface,
+  "expected pending surface",
+) satisfies z.ZodType<MutationPendingSurface>;
+
+export const mutationResultSchema = <Value>(value: z.ZodType<Value>): z.ZodType<MutationResult<Value>> =>
+  ownerSchema((input): MutationResult<Value> => {
+    if (input === null || typeof input !== "object" || Array.isArray(input))
+      throw new Error("malformed mutation result");
+    const object = input as Record<string, unknown>;
+    if (object.kind !== "accepted") throw new Error("malformed mutation result");
+    if (typeof object.head !== "string") throw new Error("malformed mutation result");
+    const parsedValue = value.safeParse(object.value);
+    if (!parsedValue.success) throw new Error("malformed mutation result");
+    if (
+      !Array.isArray(object.facts) ||
+      !Array.isArray(object.lags) ||
+      !Array.isArray(object.settlementLags) ||
+      !Array.isArray(object.pending)
+    )
+      throw new Error("malformed mutation result");
+    const allowed = new Set([
+      "kind",
+      "facts",
+      "head",
+      "value",
+      "lags",
+      "settlementLags",
+      "pending",
+      "recoverySnapshot",
+      "cleanup",
+      "leak",
+      "seatClose",
+    ]);
+    for (const key of Object.keys(object)) if (!allowed.has(key)) throw new Error("malformed mutation result");
+    return {
+      kind: "accepted",
+      facts: object.facts.map(decodeJournalEntry),
+      head: contractHead(object.head),
+      value: parsedValue.data,
+      lags: object.lags.map(decodeReconciliationLag),
+      settlementLags: object.settlementLags.map(decodeSettlementLag),
+      pending: object.pending.map(decodeMutationPendingSurface),
+      ...(object.recoverySnapshot === undefined
+        ? {}
+        : { recoverySnapshot: snapshotId(String(object.recoverySnapshot)) }),
+      ...(object.cleanup === undefined ? {} : { cleanup: decodeVerificationCleanupFailure(object.cleanup) }),
+      ...(object.leak === undefined ? {} : { leak: decodeWorktreeLeak(object.leak) }),
+      ...(object.seatClose === undefined
+        ? {}
+        : {
+            seatClose: Array.isArray(object.seatClose)
+              ? object.seatClose.map(decodePrivateStateSeatCloseLag)
+              : (() => {
+                  throw new Error("malformed mutation result");
+                })(),
+          }),
+    };
+  }, "expected mutation result");
 
 type ObligationPendingInput = Readonly<{
   lags: MutationResult<unknown>["lags"];

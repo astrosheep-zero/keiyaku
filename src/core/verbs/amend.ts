@@ -1,7 +1,14 @@
 import type { DecideInput, OfferDecision, Preparation } from "../decide.js";
 import { prerequisitesReach, samePrerequisites } from "../facts/eligibility.js";
 import { activeContract, prerequisiteStatus } from "../facts/observation.js";
-import type { ActorId, AmendData, ContractId, ContractTerms, JournalEntry } from "../facts/types.js";
+import {
+  contractId,
+  type ActorId,
+  type AmendData,
+  type ContractId,
+  type ContractTerms,
+  type JournalEntry,
+} from "../facts/types.js";
 
 export type AmendInput<Failure = never> = Readonly<{
   contractId: ContractId;
@@ -15,6 +22,26 @@ export type AmendRefusal = Readonly<{
   kind: "contract-missing" | "terminal" | "terms-moved" | "unknown-prerequisite" | "cyclic-prerequisite";
   contractId: ContractId;
 }>;
+
+export function decodeAmendRefusal(value: unknown): AmendRefusal {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("malformed amend refusal");
+  const object = value as Record<string, unknown>;
+  if (
+    object.kind !== "contract-missing" &&
+    object.kind !== "terminal" &&
+    object.kind !== "terms-moved" &&
+    object.kind !== "unknown-prerequisite" &&
+    object.kind !== "cyclic-prerequisite"
+  )
+    throw new Error("malformed amend refusal");
+  if (Object.keys(object).some((key) => key !== "kind" && key !== "contractId"))
+    throw new Error("malformed amend refusal");
+  try {
+    return { kind: object.kind, contractId: contractId(String(object.contractId)) };
+  } catch {
+    throw new Error("malformed amend refusal");
+  }
+}
 
 export function decideAmend<Failure>({
   input,

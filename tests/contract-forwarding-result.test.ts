@@ -119,13 +119,22 @@ test("malformed settlement lag and extra envelope fields are transport-integrity
     false,
   );
   assert.equal(deliveryResultSchema.safeParse({ ...acceptedDelivery(), extra: true }).success, false);
+  assert.equal(deliveryResultSchema.safeParse(acceptedDelivery({ extra: true })).success, false);
+  assert.equal(
+    deliveryResultSchema.safeParse(
+      acceptedDelivery({}, { pending: [{ surface: "cleanup", required: false, extra: true }] }),
+    ).success,
+    false,
+  );
 });
 
 test("refusal, retry, review, audit, and materialized conflict variants round-trip", () => {
   const refused = new KeiyakuRefused({ kind: "contract-missing", contractId: contract });
   const retry = new KeiyakuRetry({ kind: "publication-failed", diagnostic: "busy" });
+  const retryEmpty = new KeiyakuRetry({ kind: "publication-failed", diagnostic: "" });
   assert.deepEqual(decodeContractLiveFailure(encodeContractLiveFailure(refused)), refused);
   assert.deepEqual(decodeContractLiveFailure(encodeContractLiveFailure(retry)), retry);
+  assert.deepEqual(decodeContractLiveFailure(encodeContractLiveFailure(retryEmpty)), retryEmpty);
   assert.equal(decodeContractLiveFailure({ kind: "refused", refusal: { kind: "contract-missing" } }), null);
 
   const review = {
@@ -140,6 +149,10 @@ test("refusal, retry, review, audit, and materialized conflict variants round-tr
         shortStat: { filesChanged: 1, insertions: 1, deletions: 0 },
       },
       verification: { retry: { kind: "exhausted" } },
+      continuation: {
+        claimed: [contract],
+        stopped: [{ contractId: contract, stop: { kind: "already-terminal" } }],
+      },
     },
     lags: [],
     settlementLags: [],
@@ -169,4 +182,174 @@ test("refusal, retry, review, audit, and materialized conflict variants round-tr
     workspace: { kind: "worktree", path: "/tmp/worktree" },
   };
   assert.deepEqual(deliveryResultSchema.parse(JSON.parse(JSON.stringify(conflict))), conflict);
+});
+
+test("accepted mutation refuses a missing head", () => {
+  const { head: _head, ...withoutHead } = acceptedDelivery();
+  void _head;
+  assert.equal(deliveryResultSchema.safeParse(withoutHead).success, false);
+});
+
+test("union branches refuse keys that belong to a different arm", () => {
+  assert.equal(
+    decodeContractLiveFailure({
+      kind: "refused",
+      refusal: { kind: "fork-source-missing", contractId: contract, extra: true },
+    }),
+    null,
+  );
+  assert.equal(
+    decodeContractLiveFailure({
+      kind: "refused",
+      refusal: { kind: "nuke-confirmation-required", world: "world", extra: true },
+    }),
+    null,
+  );
+  assert.equal(
+    auditResultSchema.safeParse({
+      kind: "accepted",
+      facts: [],
+      head,
+      value: {
+        candidate: { kind: "blocked", refusal: { kind: "target-missing", contractId: contract } },
+        verification: { kind: "not-run", extra: true },
+        target: { kind: "not-observed" },
+      },
+      lags: [],
+      settlementLags: [],
+      pending: [],
+    }).success,
+    false,
+  );
+  assert.equal(
+    deliveryResultSchema.safeParse(
+      acceptedDelivery({
+        placement: { failure: "target-placement-failed", diagnostic: "blocked", extra: true },
+      }),
+    ).success,
+    false,
+  );
+  assert.equal(
+    deliveryResultSchema.safeParse(
+      acceptedDelivery({
+        placement: {
+          refusal: {
+            kind: "gates-unsatisfied",
+            contractId: contract,
+            unmet: [{ gate: "reviewed", current: { kind: "missing" } }],
+            extra: true,
+          },
+        },
+      }),
+    ).success,
+    false,
+  );
+  assert.equal(
+    deliveryResultSchema.safeParse(
+      acceptedDelivery({
+        placement: {
+          refusal: {
+            kind: "prerequisites-unsatisfied",
+            contractId: contract,
+            unmet: [{ contractId: contract, state: "missing" }],
+            extra: true,
+          },
+        },
+      }),
+    ).success,
+    false,
+  );
+  assert.equal(
+    deliveryResultSchema.safeParse(
+      acceptedDelivery({
+        placement: {
+          refusal: {
+            kind: "prerequisites-unsatisfied",
+            contractId: contract,
+            unmet: [{ contractId: contract, state: "missing", extra: true }],
+          },
+        },
+      }),
+    ).success,
+    false,
+  );
+  assert.equal(
+    deliveryResultSchema.safeParse(
+      acceptedDelivery({
+        placement: {
+          refusal: {
+            kind: "gates-unsatisfied",
+            contractId: contract,
+            unmet: [{ gate: "reviewed", current: { kind: "attested", verdict: "unsatisfied", at: "t", extra: true } }],
+          },
+        },
+      }),
+    ).success,
+    false,
+  );
+});
+
+function acceptedAudit(target: Record<string, unknown>) {
+  return {
+    kind: "accepted",
+    facts: [],
+    head,
+    value: {
+      candidate: { kind: "blocked", refusal: { kind: "target-missing", contractId: contract } },
+      verification: { kind: "not-run" },
+      target,
+    },
+    lags: [],
+    settlementLags: [],
+    pending: [],
+  };
+}
+
+test("audit target and git lag arms refuse keys that belong to a different arm", () => {
+  assert.equal(auditResultSchema.safeParse(acceptedAudit({ kind: "not-observed", diagnostic: "no" })).success, false);
+  assert.equal(
+    auditResultSchema.safeParse(
+      acceptedAudit({ kind: "placeable", ref: "refs/heads/main", head: snapshot, diagnostic: "no" }),
+    ).success,
+    false,
+  );
+  assert.equal(
+    auditResultSchema.safeParse(
+      acceptedAudit({
+        kind: "moved",
+        ref: "refs/heads/main",
+        expected: snapshot,
+        observed: null,
+        diagnostic: "no",
+      }),
+    ).success,
+    false,
+  );
+  assert.equal(
+    auditResultSchema.safeParse(acceptedAudit({ kind: "failed", diagnostic: "boom", ref: "refs/heads/main" })).success,
+    false,
+  );
+  assert.equal(
+    auditResultSchema.safeParse(
+      acceptedAudit({
+        kind: "refused",
+        refusal: {
+          kind: "checkout-not-followable",
+          contractId: contract,
+          target: "refs/heads/main",
+          path: "/tmp/worktree",
+          reason: "staged",
+          paths: ["a"],
+        },
+        diagnostic: "no",
+      }),
+    ).success,
+    false,
+  );
+  assert.equal(
+    deliveryResultSchema.safeParse(
+      acceptedDelivery({}, { lags: [{ kind: "worktree-retained", path: "/tmp/worktree", diagnostic: "no" }] }),
+    ).success,
+    false,
+  );
 });

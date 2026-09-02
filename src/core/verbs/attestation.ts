@@ -1,6 +1,6 @@
 import type { DecideInput, OfferDecision, Preparation } from "../decide.js";
 import { activeContract } from "../facts/observation.js";
-import type { ActorId, AttestationData, ContractId, JournalEntry } from "../facts/types.js";
+import { contractId, type ActorId, type AttestationData, type ContractId, type JournalEntry } from "../facts/types.js";
 
 export type AttestationInput<Failure = never> = Readonly<{
   contractId: ContractId;
@@ -10,6 +10,21 @@ export type AttestationInput<Failure = never> = Readonly<{
 }>;
 
 export type AttestationRefusal = Readonly<{ kind: "contract-missing" | "terminal"; contractId: ContractId }>;
+
+export function decodeAttestationRefusal(value: unknown): AttestationRefusal {
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    throw new Error("malformed attestation refusal");
+  const object = value as Record<string, unknown>;
+  if (object.kind !== "contract-missing" && object.kind !== "terminal")
+    throw new Error("malformed attestation refusal");
+  if (Object.keys(object).some((key) => key !== "kind" && key !== "contractId"))
+    throw new Error("malformed attestation refusal");
+  try {
+    return { kind: object.kind, contractId: contractId(String(object.contractId)) };
+  } catch {
+    throw new Error("malformed attestation refusal");
+  }
+}
 
 export function decideAttestation<Failure>({
   input,

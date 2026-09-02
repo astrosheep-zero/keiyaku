@@ -13,11 +13,15 @@ import { stateOperation, type RepositoryScope } from "../protocol/operations.js"
 import { settle, settleAll, type SettlementReport } from "../settlement/settle.js";
 import type { WorktreeHooks } from "./configuration.js";
 import {
+  decodeContractFileLag,
   projectContractWorktree,
   type ContractFileEffect,
   type ContractFileLag,
   type ContractWorktreeResult,
 } from "../contract-worktree.js";
+import { decodeGitReconcileLag } from "../git/result-codec.js";
+import { ownerSchema } from "./result-codec.js";
+import { z } from "zod";
 import {
   appointManagedWorktrees,
   placeRegisterPath,
@@ -31,6 +35,19 @@ export type ReconcileCompletion = Readonly<{
   settlement: SettlementReport;
   hookRuns?: readonly { phase: "create" | "destroy"; name: string }[];
 }>;
+
+export function decodeReconciliationLag(value: unknown): ReconcileCompletion["lag"][number] {
+  try {
+    return decodeGitReconcileLag(value);
+  } catch {
+    return decodeContractFileLag(value);
+  }
+}
+
+export const reconciliationLagSchema = ownerSchema(
+  decodeReconciliationLag,
+  "expected reconciliation lag",
+) satisfies z.ZodType<ReconcileCompletion["lag"][number]>;
 
 export type RepoContractReconcileReport = ReconcileCompletion;
 

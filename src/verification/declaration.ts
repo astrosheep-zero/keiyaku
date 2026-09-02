@@ -1,5 +1,5 @@
 import type { Preparation } from "../core/decide.js";
-import { gate, type ContractId, type DocumentSegmentKey, type Gate } from "../core/facts/types.js";
+import { contractId, gate, type ContractId, type DocumentSegmentKey, type Gate } from "../core/facts/types.js";
 
 export type VerificationExecutor = "bash" | "zsh" | "pwsh";
 
@@ -18,6 +18,21 @@ export type VerificationDeclarationRefusal = Readonly<{
   kind: "verification-declaration-invalid";
   contractId?: ContractId;
 }>;
+
+export function decodeVerificationDeclarationRefusal(value: unknown): VerificationDeclarationRefusal {
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    throw new Error("malformed verification declaration refusal");
+  const object = value as Record<string, unknown>;
+  if (object.kind !== "verification-declaration-invalid") throw new Error("malformed verification declaration refusal");
+  if (Object.keys(object).some((key) => key !== "kind" && key !== "contractId"))
+    throw new Error("malformed verification declaration refusal");
+  if (object.contractId === undefined) return { kind: "verification-declaration-invalid" };
+  try {
+    return { kind: "verification-declaration-invalid", contractId: contractId(String(object.contractId)) };
+  } catch {
+    throw new Error("malformed verification declaration refusal");
+  }
+}
 
 export type VerificationDeclarationPreparation = Preparation<
   VerificationDefinition | null,

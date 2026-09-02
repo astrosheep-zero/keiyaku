@@ -1,6 +1,6 @@
 import type { DecideInput, OfferDecision, StampedPreparation } from "../decide.js";
 import { activeContract, documentIsCurrent } from "../facts/observation.js";
-import type { ActorId, ContractId, DeliverData, JournalEntry } from "../facts/types.js";
+import { contractId, type ActorId, type ContractId, type DeliverData, type JournalEntry } from "../facts/types.js";
 
 export type DeliverInput<Failure = never> = Readonly<{
   contractId: ContractId;
@@ -13,6 +13,20 @@ export type DeliverRefusal = Readonly<{
   kind: "contract-missing" | "terminal" | "document-moved";
   contractId: ContractId;
 }>;
+
+export function decodeDeliverRefusal(value: unknown): DeliverRefusal {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("malformed deliver refusal");
+  const object = value as Record<string, unknown>;
+  if (object.kind !== "contract-missing" && object.kind !== "terminal" && object.kind !== "document-moved")
+    throw new Error("malformed deliver refusal");
+  if (Object.keys(object).some((key) => key !== "kind" && key !== "contractId"))
+    throw new Error("malformed deliver refusal");
+  try {
+    return { kind: object.kind, contractId: contractId(String(object.contractId)) };
+  } catch {
+    throw new Error("malformed deliver refusal");
+  }
+}
 
 export function decideDeliver<Failure>({
   input,

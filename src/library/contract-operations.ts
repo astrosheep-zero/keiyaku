@@ -8,7 +8,6 @@ import {
   type ServiceRequestCommand,
 } from "../akuma/request-wire.js";
 import {
-  auditReportSchema,
   auditResultSchema,
   decodeContractLiveFailure,
   deliveryResultSchema,
@@ -16,6 +15,7 @@ import {
   reviewResultSchema,
 } from "./contract-forwarding-result.js";
 import type { AuditReport } from "../protocol/audit.js";
+import { auditReportSchema } from "./contract-forwarding-result.js";
 import type { IntegrationConflictMaterialized } from "../protocol/deliver.js";
 import type { DeliveryValue } from "./delivery.js";
 import type { MutationResult } from "./mutation.js";

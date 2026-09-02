@@ -40,6 +40,21 @@ export type ContractFileLag = Readonly<{
   diagnostic: string;
 }>;
 
+export function decodeContractFileLag(value: unknown): ContractFileLag {
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    throw new Error("malformed contract-file lag");
+  const object = value as Record<string, unknown>;
+  if (object.kind !== "contract-file-failed") throw new Error("malformed contract-file lag");
+  if (Object.keys(object).some((key) => key !== "kind" && key !== "worktree" && key !== "path" && key !== "diagnostic"))
+    throw new Error("malformed contract-file lag");
+  if (typeof object.worktree !== "string" || object.worktree.trim() === "")
+    throw new Error("malformed contract-file lag");
+  if (typeof object.path !== "string" || object.path.trim() === "") throw new Error("malformed contract-file lag");
+  if (typeof object.diagnostic !== "string" || object.diagnostic.trim() === "")
+    throw new Error("malformed contract-file lag");
+  return { kind: "contract-file-failed", worktree: object.worktree, path: object.path, diagnostic: object.diagnostic };
+}
+
 export type ContractWorktreeResult = Readonly<{
   effects: readonly ContractFileEffect[];
   lag: readonly ContractFileLag[];

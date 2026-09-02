@@ -1,6 +1,6 @@
 import type { DecideInput, OfferDecision, Preparation } from "../decide.js";
 import { contractState, prerequisiteStatus } from "../facts/observation.js";
-import type { ActorId, BindData, ContractId, JournalEntry } from "../facts/types.js";
+import { contractId, type ActorId, type BindData, type ContractId, type JournalEntry } from "../facts/types.js";
 
 export type BindInput<Failure = never> = Readonly<{
   contractId: ContractId;
@@ -13,6 +13,20 @@ export type BindRefusal = Readonly<{
   kind: "contract-exists" | "invalid-after" | "unknown-prerequisite";
   contractId: ContractId;
 }>;
+
+export function decodeBindRefusal(value: unknown): BindRefusal {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("malformed bind refusal");
+  const object = value as Record<string, unknown>;
+  if (object.kind !== "contract-exists" && object.kind !== "invalid-after" && object.kind !== "unknown-prerequisite")
+    throw new Error("malformed bind refusal");
+  if (Object.keys(object).some((key) => key !== "kind" && key !== "contractId"))
+    throw new Error("malformed bind refusal");
+  try {
+    return { kind: object.kind, contractId: contractId(String(object.contractId)) };
+  } catch {
+    throw new Error("malformed bind refusal");
+  }
+}
 
 export function decideBind<Failure>({
   input,
