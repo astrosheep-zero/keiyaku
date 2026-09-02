@@ -606,15 +606,48 @@ test("a terminal held Contract completes placement and Task settlement after its
   assert.equal((await bound.keiyaku.state()).terminal?.kind, "claimed");
   assert.match(world.run(["ls-tree", "-r", "--name-only", "HEAD"]), /^terminal\.txt$/mu);
   assert.equal(await taskState(world.path, taskId), "done");
-  assert.deepEqual(completed.settlementLags, [
+  // Fence teardown after confirmed admission is not an owed holder publication once
+  // Settlement has released the TaskHolder.
+  assert.deepEqual(completed.settlementLags, []);
+});
+
+test("settlement preserves seat-close source after releasing a TaskHolder", async () => {
+  const world = repository(),
+    repo = await cachedRepoAt(world.path);
+  const taskId = await task(world.path, "Seat close after release", "drop");
+  const bound = await Keiyaku.bind({
+    repo,
+    task: taskId,
+    markdown: document("Seat close after release"),
+    workspace: "worktree",
+    gates: [],
+  });
+  writeFileSync(`${world.path}/candidate.txt`, "candidate\n");
+  const delivered = acceptedDelivery(await bound.keiyaku.deliver({ includeDirty: true }));
+  assert.equal(delivered.settlementLags[0]?.surface, "task");
+  assert.deepEqual(await holders(world), [
+    { version: 1, taskId, contractId: (await bound.keiyaku.state()).id, disposition: "held" },
+  ]);
+  replaceTaskState(world.path, taskId, "drop", "open");
+  const state = await bound.keiyaku.state();
+  const git = {
+    ...(await cachedRepositoryAt(world.path)),
+    onPrivateStateSeatClose: () => {
+      throw new Error("settlement seat close failed after release");
+    },
+  };
+  const report = await withGitDecodeChannel(git, (channel) =>
+    settle({ repository: git, channel, state, effects: [] }),
+  );
+  assert.deepEqual(report.actions, [{ kind: "task", taskId, action: "done" }]);
+  assert.deepEqual(report.lags, []);
+  assert.deepEqual(report.seatClose, [
     {
-      kind: "settlement-failed",
-      surface: "task-holder",
-      contractId: state.id,
-      taskId,
-      diagnostic: "fence close failed",
+      kind: "private-state-seat-close-failed",
+      diagnostic: "settlement seat close failed after release",
     },
   ]);
+  assert.deepEqual(await holders(world), [{ version: 1, taskId, contractId: state.id, disposition: "released" }]);
 });
 
 test("a released holder replays with zero settlement effects from the primary worktree", async () => {

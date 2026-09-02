@@ -197,21 +197,70 @@ test("merged admissions concatenate every confirmed seat-close lag in order", ()
   });
 });
 
-test("explicit pending on a result type is projected without structural probing", () => {
-  const result = {
+test("mutation finality ignores transported pending without authoritative surfaces", () => {
+  const authoritative = {
     kind: "accepted" as const,
     facts: [],
     head: "head" as ContractHead,
     value: undefined as void,
     lags: [],
     settlementLags: [],
-    pending: [{ surface: "cleanup" as const, required: false }],
+    pending: [] as MutationResult<void>["pending"],
     seatClose: [{ kind: "private-state-seat-close-failed" as const, diagnostic: "seat close failed" }],
   };
-  assert.deepEqual(projectMutationFinality(result), {
+  assert.deepEqual(projectMutationFinality(authoritative), {
     kind: "accepted-pending",
     pending: [{ surface: "cleanup", required: false }],
   });
+  assert.deepEqual(
+    projectMutationFinality({
+      ...authoritative,
+      pending: [{ surface: "placement", required: true }],
+      seatClose: undefined,
+    }),
+    { kind: "complete" },
+  );
+  assert.deepEqual(projectMutationFinality(authoritative), projectMutationFinality({ ...authoritative }));
+});
+
+test("mutation nuke confirmed seat-close failure remains a typed outcome", async () => {
+  const { rmSync, writeFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { World } = await import("../src/world.js");
+  const { nukeGit } = await import("../src/git/nuke.js");
+  const { nukeKeiyaku } = await import("../src/library/nuke.js");
+  const { makeGitRepository } = await import("./support/git.js");
+  const raw = makeGitRepository();
+  raw.run(["config", "user.name", "Test User"]);
+  raw.run(["config", "user.email", "test@example.com"]);
+  raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  raw.run(["update-ref", "refs/heads/keiyaku-state", "HEAD"]);
+  writeFileSync(join(raw.path, ".git", "info", "exclude"), ".keiyaku/locks/\n");
+  try {
+    const world = await World.at(raw.path);
+    const close = () => {
+      throw new Error("nuke seat close failed after publication");
+    };
+    const outcome = await nukeGit(world, "git", { onPrivateStateSeatClose: close });
+    assert.equal("value" in outcome, true);
+    assert.deepEqual(outcome.closeLag, {
+      kind: "private-state-seat-close-failed",
+      diagnostic: "nuke seat close failed after publication",
+    });
+
+    raw.run(["update-ref", "refs/heads/keiyaku-state", "HEAD"]);
+    const publicResult = await nukeKeiyaku({ world, confirm: world }, { onPrivateStateSeatClose: close });
+    assert.equal(publicResult.kind, "success");
+    assert.notDeepEqual(publicResult, { kind: "success", world });
+    assert.deepEqual(publicResult.seatClose, [
+      {
+        kind: "private-state-seat-close-failed",
+        diagnostic: "nuke seat close failed after publication",
+      },
+    ]);
+  } finally {
+    rmSync(raw.path, { recursive: true, force: true });
+  }
 });
 
 test("public refusal and retry results project not-admitted", () => {

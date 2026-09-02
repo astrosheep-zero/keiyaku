@@ -2,6 +2,11 @@ import { rmdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { stopAkuma } from "../akuma/nuke.js";
 import { nukeGit } from "../git/nuke.js";
+import {
+  appendPrivateStateSeatClose,
+  type PrivateStateSeatCloseLag,
+} from "../git/private-state-seat.js";
+import type { GitRepository } from "../git/process.js";
 import { nukeTask } from "../task/operations.js";
 import { World, type WorldRoot } from "../world.js";
 import { KeiyakuRefused } from "./refusal.js";
@@ -16,12 +21,16 @@ export type NukeResult =
   | Readonly<{
       kind: "success";
       world: WorldRoot;
+      seatClose?: readonly PrivateStateSeatCloseLag[];
     }>
   | Readonly<{
       kind: "failed";
       world: WorldRoot;
       diagnostic: string;
+      seatClose?: readonly PrivateStateSeatCloseLag[];
     }>;
+
+type NukeGitOptions = Readonly<Pick<GitRepository, "onPrivateStateSeatContention" | "onPrivateStateSeatClose">>;
 
 function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -43,7 +52,14 @@ async function nukeInput(input: NukeInput): Promise<NukeInput> {
   return { world, ...(confirm === undefined ? {} : { confirm }) };
 }
 
-export async function nukeKeiyaku(input: NukeInput): Promise<NukeResult> {
+function withSeatClose<T extends { kind: "success" | "failed" }>(
+  result: T,
+  seatClose: readonly PrivateStateSeatCloseLag[] | undefined,
+): T & Pick<NukeResult, "seatClose"> {
+  return seatClose === undefined || seatClose.length === 0 ? result : { ...result, seatClose };
+}
+
+export async function nukeKeiyaku(input: NukeInput, gitOptions?: NukeGitOptions): Promise<NukeResult> {
   const value = await nukeInput(input);
   if (value.confirm === undefined) {
     throw new KeiyakuRefused({ kind: "nuke-confirmation-required", world: value.world });
@@ -55,6 +71,7 @@ export async function nukeKeiyaku(input: NukeInput): Promise<NukeResult> {
       confirmation: value.confirm,
     });
   }
+  let seatClose: readonly PrivateStateSeatCloseLag[] | undefined;
   try {
     const deleteAkuma = await stopAkuma(value.world);
     let failed = false;
@@ -69,11 +86,21 @@ export async function nukeKeiyaku(input: NukeInput): Promise<NukeResult> {
         }
       }
     };
-    await Promise.all([attempt(deleteAkuma()), attempt(nukeGit(value.world)), attempt(nukeTask(value.world))]);
+    await Promise.all([
+      attempt(deleteAkuma()),
+      attempt(
+        nukeGit(value.world, "git", gitOptions).then((outcome) => {
+          if (outcome.closeLag !== undefined) {
+            seatClose = appendPrivateStateSeatClose(seatClose, outcome.closeLag);
+          }
+        }),
+      ),
+      attempt(nukeTask(value.world)),
+    ]);
     if (failed) throw firstDiagnostic;
     await removeEmptyWorldMarker(value.world);
-    return { kind: "success", world: value.world };
+    return withSeatClose({ kind: "success", world: value.world }, seatClose);
   } catch (error) {
-    return { kind: "failed", world: value.world, diagnostic: diagnostic(error) };
+    return withSeatClose({ kind: "failed", world: value.world, diagnostic: diagnostic(error) }, seatClose);
   }
 }

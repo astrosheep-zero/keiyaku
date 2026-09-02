@@ -1,10 +1,14 @@
 import type { ContractHead, ContractId, JournalEntry, SnapshotId } from "../core/facts/types.js";
+import {
+  concatenatePrivateStateSeatClose,
+  type PrivateStateSeatCloseLag,
+} from "../git/private-state-seat.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import type { ReconcileReport } from "../protocol/reconcile.js";
 import type { RepositoryScope } from "../protocol/operations.js";
 import type { IntentOutcome } from "../protocol/operations.js";
 import type { AcceptedObligations } from "../protocol/outcome.js";
-import { deferredTaskHolderSettlement, type SettlementReport } from "../settlement/settle.js";
+import type { SettlementReport } from "../settlement/settle.js";
 import type { TaskHolderAdmission } from "../settlement/holder.js";
 import type { WorktreeHooks } from "./configuration.js";
 import { completeReconcile, type ReconcileCompletion } from "./reconcile.js";
@@ -31,7 +35,14 @@ export type MutationFinality =
 
 type AcceptedFinalityInput = Readonly<{
   kind: "accepted";
-  pending: readonly MutationPendingSurface[];
+  lags: MutationResult<unknown>["lags"];
+  settlementLags: MutationResult<unknown>["settlementLags"];
+  value?: unknown;
+  cleanup?: AcceptedObligations["cleanup"];
+  leak?: AcceptedObligations["leak"];
+  seatClose?: AcceptedObligations["seatClose"];
+  /** Transport/display convenience only; never finality authority. */
+  pending?: readonly MutationPendingSurface[];
 }>;
 
 export type MutationFinalityInput =
@@ -95,12 +106,36 @@ export function collectAcceptedPending(
   return [...valuePending, ...obligationPending(obligations)];
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
+}
+
+function phasePendingFromValue(value: unknown): readonly MutationPendingSurface[] {
+  if (!isRecord(value)) return [];
+  if ("candidate" in value && "verification" in value && "target" in value) {
+    return auditPending(value as AuditReport);
+  }
+  if ("verification" in value || "placement" in value || "continuation" in value) {
+    return completionPending(value as CompletionPendingValue);
+  }
+  return [];
+}
+
+function obligationSurfacesFromAccepted(input: AcceptedFinalityInput): ObligationPendingInput {
+  return {
+    lags: input.lags,
+    settlementLags: input.settlementLags,
+    ...(input.cleanup === undefined ? {} : { cleanup: input.cleanup }),
+    ...(input.leak === undefined ? {} : { leak: input.leak }),
+    ...(input.seatClose === undefined || input.seatClose.length === 0 ? {} : { seatClose: input.seatClose }),
+  };
+}
+
 /** Purely projects the leading mutation's finality without changing its details. */
 export function projectMutationFinality(input: MutationFinalityInput): MutationFinality {
-  if (input.kind === "accepted") {
-    return input.pending.length === 0 ? { kind: "complete" } : { kind: "accepted-pending", pending: input.pending };
-  }
-  return { kind: "not-admitted" };
+  if (input.kind !== "accepted") return { kind: "not-admitted" };
+  const pending = collectAcceptedPending(phasePendingFromValue(input.value), obligationSurfacesFromAccepted(input));
+  return pending.length === 0 ? { kind: "complete" } : { kind: "accepted-pending", pending };
 }
 
 export type AcceptedIntent<Value> = Readonly<
@@ -149,6 +184,16 @@ export function completionInput<Value, PublicValue>(
   return { ...input, valuePending: input.valuePending ?? noValuePending };
 }
 
+function concatenateSettlementSeatClose(
+  current: readonly PrivateStateSeatCloseLag[] | undefined,
+  reports: readonly ReconcileCompletion[],
+): readonly PrivateStateSeatCloseLag[] | undefined {
+  return reports.reduce<readonly PrivateStateSeatCloseLag[] | undefined>(
+    (seatClose, report) => concatenatePrivateStateSeatClose(seatClose, report.settlement.seatClose),
+    current,
+  );
+}
+
 export async function completeMutation<Value, PublicValue>(
   input: Completion<Value, PublicValue>,
 ): Promise<MutationResult<PublicValue>> {
@@ -159,10 +204,11 @@ export async function completeMutation<Value, PublicValue>(
   for (const affected of contracts) {
     reports.push(await completeReconcile({ scope, channel, contractId: affected, hooks, retryHooks: false }));
   }
+  const seatClose = concatenateSettlementSeatClose(accepted.seatClose, reports);
   const obligations: AcceptedObligations = {
     ...(accepted.cleanup === undefined ? {} : { cleanup: accepted.cleanup }),
     ...(accepted.leak === undefined ? {} : { leak: accepted.leak }),
-    ...(accepted.seatClose === undefined || accepted.seatClose.length === 0 ? {} : { seatClose: accepted.seatClose }),
+    ...(seatClose === undefined || seatClose.length === 0 ? {} : { seatClose }),
   };
   const effects = [...(accepted.physical?.effects ?? []), ...reports.flatMap((report) => report.effects)];
   const recoverySnapshot = effects.findLast((effect) => effect.kind === "recovery-snapshot")?.snapshot;
@@ -194,25 +240,8 @@ export async function completeHolderMutation<Value, PublicValue, Refusal>(
   }>,
 ): Promise<MutationResult<PublicValue>> {
   const accepted = input.requireAccepted(input.admission.result);
-  const completed = await completeMutation({ ...input.completion, accepted });
-  if (input.admission.kind === "completed") return completed;
-  const deferred = deferredTaskHolderSettlement({
-    contractId: input.completion.contractId,
-    taskId: input.admission.taskId,
-    diagnostic: input.admission.diagnostic,
-  });
-  const settlementLags = [...completed.settlementLags, ...deferred.lags];
-  return {
-    ...completed,
-    settlementLags,
-    pending: collectAcceptedPending((input.completion.valuePending ?? noValuePending)(completed.value), {
-      lags: completed.lags,
-      settlementLags,
-      ...(completed.cleanup === undefined ? {} : { cleanup: completed.cleanup }),
-      ...(completed.leak === undefined ? {} : { leak: completed.leak }),
-      ...(completed.seatClose === undefined || completed.seatClose.length === 0
-        ? {}
-        : { seatClose: completed.seatClose }),
-    }),
-  };
+  // Fence teardown after confirmed admission is custodial residue. Settlement in
+  // completeMutation already reports any still-owed holder publication; do not
+  // invent a second owed-holder lag from fence close alone.
+  return await completeMutation({ ...input.completion, accepted });
 }

@@ -11,8 +11,8 @@ import type { WorldRoot } from "../world.js";
 import { GitPlumbingError, runGit, type GitRepository } from "./process.js";
 import {
   confirmPrivateStatePublication,
-  requireClosedPrivateStateSeat,
   withPrivateStatePublicationSeat,
+  type PrivateStateSeatOutcome,
 } from "./private-state-seat.js";
 import {
   CANDIDATE_PIN_REF_NAMESPACE,
@@ -150,30 +150,28 @@ async function removeOwnedRefs(repository: GitRepository): Promise<void> {
 export async function nukeGit(
   world: WorldRoot,
   gitPath = "git",
-  options?: Readonly<Pick<GitRepository, "onPrivateStateSeatContention">>,
-): Promise<void> {
+  options?: Readonly<Pick<GitRepository, "onPrivateStateSeatContention" | "onPrivateStateSeatClose">>,
+): Promise<PrivateStateSeatOutcome<void>> {
   let repository: GitRepository;
   try {
     repository = { ...(await repositoryAt(world, gitPath)), ...options };
   } catch (error) {
-    if (error instanceof NoGitWorldError) return;
+    if (error instanceof NoGitWorldError) return { value: undefined };
     throw error;
   }
-  await withPlaceAuthorityFence(repository, async (placeFence) => {
+  return await withPlaceAuthorityFence(repository, async (placeFence) => {
     const custody = await managedCustody(repository);
-    requireClosedPrivateStateSeat(
-      await withPrivateStatePublicationSeat(repository, async (seat) => {
-        const state = await readRef(repository, GIT_REF);
-        if (state !== null) await deleteObservedStateRef(repository, state, seat);
+    return await withPrivateStatePublicationSeat(repository, async (seat) => {
+      const state = await readRef(repository, GIT_REF);
+      if (state !== null) await deleteObservedStateRef(repository, state, seat);
 
-        for (const entry of custody.entries) {
-          if (await removeManagedWorktree(repository, entry)) {
-            await releaseManagedWorktrees(repository, [entry.contract], placeFence);
-          }
+      for (const entry of custody.entries) {
+        if (await removeManagedWorktree(repository, entry)) {
+          await releaseManagedWorktrees(repository, [entry.contract], placeFence);
         }
-        await nukeEmptyPlaceAuthority(repository, placeFence);
-        await removeOwnedRefs(repository);
-      }),
-    );
+      }
+      await nukeEmptyPlaceAuthority(repository, placeFence);
+      await removeOwnedRefs(repository);
+    });
   });
 }
