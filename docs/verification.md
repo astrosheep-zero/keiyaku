@@ -49,8 +49,12 @@ perform its independent placement duty; audit leaves target state unobserved.
 The shared runtime owns child spawning, normal completion, timeout,
 cancellation, and termination of the process tree rooted at the child while the
 caller retains that child handle. It is domain-free: it knows no Contract,
-candidate, declaration plan, Akuma, lease, or public operation. Cancellation or
-timeout terminates owned work; releasing a live process relinquishes custody
+candidate, declaration plan, Akuma, lease, or public operation. Natural
+completion of the owned child is the end of termination duty: the runtime
+performs one cleanup of any surviving owned descendants, then that handle is
+inert, then exit evidence is exposed. Later terminate against that handle is a
+no-op and never signals a former process identity. Cancellation or timeout
+while live terminates owned work; releasing a live process relinquishes custody
 without terminating it. Escaped descendants and processes surviving harness
 loss or process crash are outside that portable guarantee. No persisted pid,
 reconstructed process identity, or background disposer supplies a second

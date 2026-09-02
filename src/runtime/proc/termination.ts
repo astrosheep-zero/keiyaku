@@ -26,7 +26,7 @@ async function signalOwnedProcessGroup(pid: number, signal: NodeJS.Signals, exit
   }
 }
 
-function ownedProcessGroupExists(pid: number): boolean {
+export function ownedProcessGroupExists(pid: number): boolean {
   try {
     process.kill(-pid, 0);
     return true;
@@ -75,21 +75,39 @@ function closeWindowsStreams(child: ChildProcess): void {
   child.stderr?.destroy();
 }
 
-export async function terminateOwnedProcess(child: ChildProcess, force = false): Promise<void> {
-  const pid = child.pid;
-  if (pid === undefined) return;
-  const exit = new Promise<void>((resolve) => {
+function waitForOwnedChildExit(child: ChildProcess, pid: number): Promise<void> {
+  return new Promise((resolve) => {
     if (child.exitCode !== null || child.signalCode !== null) {
       resolve();
       return;
     }
-    child.once("exit", () => {
+    let settled = false;
+    const settle = (): void => {
+      if (settled) return;
+      settled = true;
       resolve();
-    });
-    child.once("close", () => {
-      resolve();
+    };
+    child.once("exit", settle);
+    child.once("close", settle);
+    // Unknown exit can leave exitCode/signalCode both null after close; settle if the leader pid is gone.
+    process.nextTick(() => {
+      if (child.exitCode !== null || child.signalCode !== null) {
+        settle();
+        return;
+      }
+      try {
+        process.kill(pid, 0);
+      } catch {
+        settle();
+      }
     });
   });
+}
+
+export async function terminateOwnedProcess(child: ChildProcess, force = false): Promise<void> {
+  const pid = child.pid;
+  if (pid === undefined) return;
+  const exit = waitForOwnedChildExit(child, pid);
   if (process.platform === "win32") {
     try {
       await terminateWindowsTree(pid);
@@ -106,6 +124,10 @@ export async function terminateOwnedProcess(child: ChildProcess, force = false):
     return;
   }
   await signalOwnedProcessGroup(pid, "SIGTERM", exit);
+  if (!ownedProcessGroupExists(pid)) {
+    await exit;
+    return;
+  }
   await delay(TERMINATION_GRACE_MS);
   if (ownedProcessGroupExists(pid)) {
     await signalOwnedProcessGroup(pid, "SIGKILL", exit);

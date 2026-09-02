@@ -181,6 +181,7 @@ export async function spawnDetachedProcess(input: DetachedProcessInput): Promise
     const exited = new Promise<DetachedProcessExit>((resolve, reject) => {
       child.once("close", (code, signal) => {
         void (async () => {
+          await lifecycle.terminate();
           const status = detachedExitStatus(code, signal);
           let failure: unknown;
           let result: DetachedProcessExit | undefined;

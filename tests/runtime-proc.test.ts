@@ -40,6 +40,7 @@ for (const force of [false, true]) {
     }
     const child = ownedChild(10_000 + Number(force));
     t.mock.method(process, "kill", ((pid: number, signal?: NodeJS.Signals | number) => {
+      if (pid === child.pid && signal === 0) return true;
       assert.equal(pid, -child.pid);
       if (signal === 0) throw Object.assign(new Error("group gone"), { code: "ESRCH" });
       assert.equal(signal, force ? "SIGKILL" : "SIGTERM");
@@ -57,6 +58,7 @@ for (const force of [false, true]) {
     }
     const child = ownedChild(10_100 + Number(force));
     t.mock.method(process, "kill", ((pid: number, signal?: NodeJS.Signals | number) => {
+      if (pid === child.pid && signal === 0) return true;
       assert.equal(pid, -child.pid);
       assert.equal(signal, force ? "SIGKILL" : "SIGTERM");
       throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
@@ -75,6 +77,7 @@ test("graceful termination cleans the group after SIGTERM EPERM and leader exit"
   const signals: Array<NodeJS.Signals | number> = [];
   let groupGone = false;
   t.mock.method(process, "kill", ((pid: number, signal?: NodeJS.Signals | number) => {
+    if (pid === child.pid && signal === 0) return true;
     assert.equal(pid, -child.pid);
     signals.push(signal ?? 0);
     if (signal === 0) {
@@ -92,7 +95,28 @@ test("graceful termination cleans the group after SIGTERM EPERM and leader exit"
   }) as typeof process.kill);
 
   await terminateOwnedProcess(child);
-  assert.deepEqual(signals, ["SIGTERM", 0, "SIGKILL", 0]);
+  assert.deepEqual(signals, ["SIGTERM", 0, 0, "SIGKILL", 0]);
+});
+
+test("terminateOwnedProcess does not hang after unknown exit with null code and signal", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("POSIX group signals only");
+    return;
+  }
+  const child = ownedChild(10_250);
+  t.mock.method(process, "kill", ((pid: number, signal?: NodeJS.Signals | number) => {
+    if (pid === child.pid && signal === 0) {
+      throw Object.assign(new Error("leader gone"), { code: "ESRCH" });
+    }
+    assert.equal(pid, -child.pid);
+    throw Object.assign(new Error("group gone"), { code: "ESRCH" });
+  }) as typeof process.kill);
+
+  const result = await Promise.race([
+    terminateOwnedProcess(child).then(() => "ok" as const),
+    new Promise<"hung">((resolve) => setTimeout(() => resolve("hung"), 500)),
+  ]);
+  assert.equal(result, "ok");
 });
 
 test("runProcess reports termination failure without waiting for child close", async (t) => {
@@ -368,7 +392,7 @@ test("runProcess timeout closes the directly-owned helper boundary", async () =>
   }
 });
 
-test("Unix termination cleans an owned group after its leader exits first", async (t) => {
+test("Unix natural leader exit cleans a surviving descendant once", async (t) => {
   if (process.platform === "win32") {
     t.skip("POSIX process groups only");
     return;
@@ -382,7 +406,9 @@ test("Unix termination cleans an owned group after its leader exits first", asyn
   ].join(" ");
   const parent = [
     'const { spawn } = require("node:child_process");',
+    'const { existsSync } = require("node:fs");',
     `spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: ["ignore", "inherit", "inherit"] });`,
+    `while (!existsSync(${JSON.stringify(descendantPidPath)})) {}`,
     "process.exit(0);",
   ].join(" ");
   let owned: Awaited<ReturnType<typeof spawnDetachedProcess>> | undefined;
@@ -393,9 +419,79 @@ test("Unix termination cleans an owned group after its leader exits first", asyn
       cwd: root,
       log: join(root, "stdio.log"),
     });
+    const ownedProcess = owned;
     descendantPid = Number.parseInt(await waitForFile(descendantPidPath), 10);
-    await owned.terminate();
+    await ownedProcess.exited;
     await waitForProcessExit(descendantPid);
+    let signals = 0;
+    const originalKill = process.kill;
+    const kill = ((pid: number, signal?: NodeJS.Signals | number) => {
+      if ((pid === ownedProcess.pid || pid === -ownedProcess.pid) && signal !== 0) signals += 1;
+      return originalKill(pid, signal as NodeJS.Signals);
+    }) as typeof process.kill;
+    process.kill = kill;
+    try {
+      await ownedProcess.terminate();
+      await ownedProcess.terminate(true);
+    } finally {
+      process.kill = originalKill;
+    }
+    assert.equal(signals, 0);
+  } finally {
+    if (descendantPid !== undefined) {
+      try {
+        process.kill(descendantPid, "SIGKILL");
+      } catch {
+        /* already stopped */
+      }
+    }
+    if (owned !== undefined) await owned.terminate(true).catch(() => undefined);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Unix natural leader exit leaves no stale terminate after descendants are already gone", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("POSIX process groups only");
+    return;
+  }
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-runtime-leader-gone-descendants-"));
+  const descendantPidPath = join(root, "descendant-pid");
+  const descendant = [
+    `require("node:fs").writeFileSync(${JSON.stringify(descendantPidPath)}, String(process.pid));`,
+    "setTimeout(() => process.exit(0), 200);",
+  ].join(" ");
+  const parent = [
+    'const { spawn } = require("node:child_process");',
+    `const child = spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: ["ignore", "inherit", "inherit"] });`,
+    "child.on(\"exit\", () => process.exit(0));",
+  ].join(" ");
+  let owned: Awaited<ReturnType<typeof spawnDetachedProcess>> | undefined;
+  let descendantPid: number | undefined;
+  try {
+    owned = await spawnDetachedProcess({
+      argv: [process.execPath, "-e", parent],
+      cwd: root,
+      log: join(root, "stdio.log"),
+    });
+    const ownedProcess = owned;
+    descendantPid = Number.parseInt(await waitForFile(descendantPidPath), 10);
+    await waitForProcessExit(descendantPid);
+    await ownedProcess.exited;
+    let signals = 0;
+    const originalKill = process.kill;
+    const kill = ((pid: number, signal?: NodeJS.Signals | number) => {
+      if ((pid === ownedProcess.pid || pid === -ownedProcess.pid) && signal !== 0) signals += 1;
+      return originalKill(pid, signal as NodeJS.Signals);
+    }) as typeof process.kill;
+    process.kill = kill;
+    try {
+      await ownedProcess.terminate();
+      await ownedProcess.terminate(true);
+    } finally {
+      process.kill = originalKill;
+    }
+    assert.equal(signals, 0);
   } finally {
     if (descendantPid !== undefined) {
       try {
@@ -788,6 +884,39 @@ test("a direct spawner rejects exit evidence when its run-log path disappears", 
   }
 });
 
+test("Unix natural exit followed by terminate emits no signal", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("POSIX group signals only");
+    return;
+  }
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-owned-process-natural-exit-"));
+  try {
+    const owned = await spawnDetachedProcess({
+      argv: [process.execPath, "-e", "process.exit(0)"],
+      cwd: root,
+      log: join(root, "stdio.log"),
+    });
+    const exit = await owned.exited;
+    assert.deepEqual({ code: exit.code, signal: exit.signal }, { code: 0, signal: null });
+    let signals = 0;
+    const originalKill = process.kill;
+    const kill = ((pid: number, signal?: NodeJS.Signals | number) => {
+      if ((pid === owned.pid || pid === -owned.pid) && signal !== 0) signals += 1;
+      return originalKill(pid, signal as NodeJS.Signals);
+    }) as typeof process.kill;
+    process.kill = kill;
+    try {
+      await owned.terminate();
+      await owned.terminate(true);
+    } finally {
+      process.kill = originalKill;
+    }
+    assert.equal(signals, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("an owned process capability is inert after termination and repeated terminate", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-owned-process-reap-"));
   let owned: Awaited<ReturnType<typeof spawnDetachedProcess>> | undefined;
@@ -873,7 +1002,11 @@ test("release lets the parent reach beforeExit while the detached child continue
       "owned.release();",
       'process.once("beforeExit", () => console.log("before-exit"));',
     ].join("\n");
-    const outcome = await runProcess(input([process.execPath, "--import", "tsx", "--input-type=module", "-e", script]));
+    const env: NodeJS.ProcessEnv = { ...process.env, NO_COLOR: "1" };
+    delete env.FORCE_COLOR;
+    const outcome = await runProcess(
+      input([process.execPath, "--import", "tsx", "--input-type=module", "-e", script], { env }),
+    );
     assert.deepEqual(outcome, { kind: "terminal", code: 0, stdout: "before-exit\n", stderr: "", truncated: false });
   } finally {
     if (existsSync(childPidPath)) {
