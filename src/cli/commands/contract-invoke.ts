@@ -72,12 +72,39 @@ async function selectContract(
   return { id, contract: library.of({ repo, id }) };
 }
 
+function draftWarning(error: unknown): Readonly<{ warning: string }> {
+  return { warning: `bind draft could not be preserved: ${error instanceof Error ? error.message : String(error)}` };
+}
+
 async function bindDraftReceipt(establishWorld: () => Promise<WorldRoot>, markdown: string) {
   const { preserveBindDraft } = await import("../draft.js");
   try {
     return preserveBindDraft(await establishWorld(), markdown);
   } catch (error) {
-    return { warning: `bind draft could not be preserved: ${error instanceof Error ? error.message : String(error)}` };
+    return draftWarning(error);
+  }
+}
+
+async function bindDraftReceiptAtCwd(input: Readonly<{ processCwd?: string; cwd?: string }>, markdown: string) {
+  const { preserveBindDraft } = await import("../draft.js");
+  try {
+    const { resolveInvocationCwd } = await import("../coordinates.js");
+    return await preserveBindDraft(await resolveInvocationCwd(input), markdown);
+  } catch (error) {
+    return draftWarning(error);
+  }
+}
+
+export async function admitMarkdownBindSyntax(
+  input: Readonly<{ markdown: string; processCwd?: string; cwd?: string }>,
+): Promise<void> {
+  try {
+    const { parseMarkdownBindDocument } = await import("../../library/contract.js");
+    parseMarkdownBindDocument(input.markdown);
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error;
+    const { BindDraftError } = await import("../draft.js");
+    throw new BindDraftError(error, await bindDraftReceiptAtCwd(input, input.markdown));
   }
 }
 

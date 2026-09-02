@@ -231,6 +231,8 @@ export async function bindKeiyaku(
   return bindKeiyakuImplementation(input, (id, scope) => new KeiyakuHandle(id, scope, execution, composition));
 }
 
+export { parseMarkdownBindDocument } from "./contract-bind.js";
+
 /** Internal CLI composition; not exported from the package root. */
 export async function bindFromCli(
   input: BindInput,

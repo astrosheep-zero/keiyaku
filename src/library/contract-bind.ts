@@ -86,6 +86,10 @@ export async function bindKeiyaku<Handle>(
   return bindMarkdownFromValues(values, "targetless", createHandle);
 }
 
+export function parseMarkdownBindDocument(markdown: string) {
+  return decodeContractDocument(requireMarkdown(markdown));
+}
+
 /** Internal CLI composition; not exported from the package root. */
 export async function bindFromCli<Handle>(
   input: BindInput,
@@ -105,7 +109,7 @@ async function bindMarkdownFromValues<Handle>(
   const hooks = worktreeHooksOption(values.hooks);
   const scope = scopeForRepo(values.repo as Repo);
   const task = taskOption(values.task);
-  const document = decodeContractDocument(requireMarkdown(values.markdown));
+  const document = parseMarkdownBindDocument(requireMarkdown(values.markdown));
   if ((values.workspace ?? "worktree") !== "worktree") throw new TypeError("workspace must be worktree");
   const target = values.target;
   if (target !== undefined && typeof target !== "string") throw new TypeError("target must be a string");

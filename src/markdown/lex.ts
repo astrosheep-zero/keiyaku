@@ -128,9 +128,18 @@ function frontmatterValue(value: unknown): FrontmatterValue {
   throw new MarkdownParseError("unsupported frontmatter value");
 }
 
+function parserDiagnostics(errors: readonly Readonly<{ message: string; pos: [number, number] }>[]): readonly string[] {
+  return [...errors]
+    .sort((left, right) => left.pos[0] - right.pos[0] || left.pos[1] - right.pos[1])
+    .map((error) => error.message);
+}
+
 function parseFrontmatter(source: string): Readonly<Record<string, FrontmatterValue>> {
   const parsed = parseDocument(source, { merge: false, prettyErrors: false, strict: true, uniqueKeys: true });
-  if (parsed.errors.length > 0) throw new MarkdownParseError(parsed.errors[0]!.message);
+  if (parsed.errors.length > 0) {
+    const diagnostics = parserDiagnostics(parsed.errors);
+    throw new MarkdownParseError(diagnostics.join("\n"), diagnostics);
+  }
   validateFrontmatterNode(parsed.contents);
   if (!isMap(parsed.contents)) throw new MarkdownParseError("frontmatter must be a mapping");
   for (const item of parsed.contents.items) {

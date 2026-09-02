@@ -37,7 +37,7 @@ function sweep(directory: string, now: number): void {
 }
 
 export async function preserveBindDraft(
-  world: WorldRoot,
+  world: WorldRoot | string,
   markdown: string,
   now = Date.now(),
 ): Promise<BindDraftReceipt> {

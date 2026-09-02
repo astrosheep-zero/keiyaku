@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { lexMarkdown } from "../src/markdown/lex.js";
 import { parseToAST } from "../src/markdown/parse.js";
+import { MarkdownParseError } from "../src/markdown/types.js";
 import { directChildren, indexDocument, indexedHeadings, rawSlice, sectionContent } from "../src/markdown/query.js";
 
 test("token spans tile exact BOM and CRLF source", () => {
@@ -128,4 +129,32 @@ test("heading-looking bytes inside blockquotes and list bodies stay structured, 
   assert.equal(body?.type, "text");
   if (body?.type !== "text") return;
   assert.equal(body.value, "## Fake Heading");
+});
+
+test("frontmatter YAML parse failures carry every diagnostic in source order", () => {
+  const diagnostics = [
+    "Flow sequence in block collection must be sufficiently indented and end with a ]",
+    "Flow map in block collection must be sufficiently indented and end with a }",
+  ];
+  assert.throws(
+    () => parseToAST("---\na: [\nb: {\n---\n# Title\n"),
+    (error: unknown) => {
+      if (!(error instanceof MarkdownParseError)) return false;
+      assert.deepEqual(error.diagnostics, diagnostics);
+      assert.equal(error.message, diagnostics.join("\n"));
+      return true;
+    },
+  );
+});
+
+test("a single frontmatter YAML diagnostic remains the Markdown parse failure message", () => {
+  const diagnostic = "Flow sequence in block collection must be sufficiently indented and end with a ]";
+  assert.throws(
+    () => lexMarkdown("---\ninvalid: [\n---\n# Title\n"),
+    (error: unknown) =>
+      error instanceof MarkdownParseError &&
+      error.message === diagnostic &&
+      error.diagnostics.length === 1 &&
+      error.diagnostics[0] === diagnostic,
+  );
 });

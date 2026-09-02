@@ -143,8 +143,11 @@ export type MarkdownBlockNode = SectionNode | ListNode | CodeBlockNode | Blockqu
 export type MarkdownNode = DocumentNode | MarkdownBlockNode | ListItemNode;
 
 export class MarkdownParseError extends Error {
-  constructor(message: string) {
+  readonly diagnostics: readonly string[];
+
+  constructor(message: string, diagnostics: readonly string[] = [message]) {
     super(message);
     this.name = "MarkdownParseError";
+    this.diagnostics = diagnostics;
   }
 }

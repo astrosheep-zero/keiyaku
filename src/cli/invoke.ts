@@ -504,6 +504,15 @@ export async function invoke(
       );
     }
     const acquiredRuntime = await withAcquiredStdin(command, withResolvedTaskActor(command, runtime));
+    if (command.command === "bind" && command.forkOf === undefined) {
+      const markdown = await (acquiredRuntime.readStdin ?? readStdin)();
+      const { admitMarkdownBindSyntax } = await import("./commands/contract-invoke.js");
+      await admitMarkdownBindSyntax({
+        markdown,
+        ...(runtime.cwd === undefined ? {} : { processCwd: runtime.cwd }),
+        ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
+      });
+    }
     runtime.onOperationStart?.();
     return await invokeParsed(
       {

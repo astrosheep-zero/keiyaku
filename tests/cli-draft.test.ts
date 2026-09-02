@@ -3,7 +3,7 @@ import test from "node:test";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { preserveBindDraft } from "../src/cli/draft.js";
+import { BindDraftError, preserveBindDraft } from "../src/cli/draft.js";
 import { renderBindDraftReceipt } from "../src/cli/render/refusal.js";
 import { World, type WorldRoot } from "../src/world.js";
 
@@ -66,6 +66,35 @@ test("a successful draft write sweeps only expired content-addressed bind drafts
   assert.notEqual(receipt.path, undefined);
   assert.equal(existsSync(expired), false);
   assert.equal(readFileSync(unrelated, "utf8"), "keep");
+});
+
+test("BindDraftError keeps the combined original message and exact draft receipt", async () => {
+  const world = await draftWorld();
+  const bytes = "---\r\na: [\r\nb: {\r\n---\r\n";
+  const combined = ["first diagnostic", "second diagnostic"].join("\n");
+  const original = new TypeError(combined);
+  const draft = await preserveBindDraft(world, bytes);
+  const error = new BindDraftError(original, draft);
+
+  assert.equal(error.message, combined);
+  assert.equal(error.original, original);
+  assert.equal(error.draft, draft);
+  if (draft.path === undefined) throw new Error(draft.warning);
+  assert.equal(readFileSync(resolve(world, draft.path), "utf8"), bytes);
+});
+
+test("BindDraftError keeps the original failure when draft custody is a warning", async () => {
+  const world = await draftWorld();
+  writeFileSync(resolve(world, ".keiyaku/draft"), "not a directory");
+  const original = new TypeError("first diagnostic\nsecond diagnostic");
+  const draft = await preserveBindDraft(world, "cannot persist\n");
+  const error = new BindDraftError(original, draft);
+
+  assert.equal(error.message, original.message);
+  assert.equal(error.original, original);
+  assert.equal(error.draft.path, undefined);
+  assert.match(error.draft.warning ?? "", /could not be preserved/u);
+  assert.match(renderBindDraftReceipt(error.draft), /^warning: /u);
 });
 
 test("draft custody failures become warnings instead of replacing bind failure", async () => {

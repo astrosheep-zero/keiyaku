@@ -38,6 +38,7 @@ const repositoryWithMain = () =>
       }),
     },
   });
+import { cliCoordinateDiscovery } from "../src/cli/coordinates.js";
 import { invoke as invokeRaw } from "../src/cli/invoke.js";
 import type { InvocationResult } from "../src/cli/result.js";
 import { CliUsageError, parseArgv as parseInvocation } from "../src/cli/parse.js";
@@ -785,6 +786,130 @@ test("invalid bind Markdown preserves exact stdin while retaining the original e
   assert.notEqual(observed, undefined);
   if (observed?.draft.path === undefined) throw new Error("invalid document did not return a draft path");
   assert.equal(readFileSync(resolve(repository.path, observed.draft.path), "utf8"), source);
+  assert.equal(observed.original instanceof Error ? observed.original.message : "", observed.message);
+  assert.match(observed.message, /Flow sequence in block collection must be sufficiently indented and end with a \]/u);
+  assert.doesNotMatch(observed.message, /\n/u);
+  assert.deepEqual((await Keiyaku.list({ repo: await cachedRepoAt(repository.path) })).rows, []);
+});
+
+test("aggregated bind syntax failures preserve exact stdin and perform no Contract or Task effects", async () => {
+  const repository = repositoryWithMain();
+  const tasks = Tasks.of(await World.at(repository.path));
+  const added = await tasks.add({ title: "Still Open After Syntax" });
+  assert.equal(added.kind, "accepted");
+  if (added.kind !== "accepted") throw new Error("Task setup was refused");
+  const source = `---\r\na: [\r\nb: {\r\n---\r\n${contractDocument("Invalid YAML")}`;
+  let observed: BindDraftError | undefined;
+
+  await assert.rejects(
+    () => invokeWithDocument(repository.path, ["bind", "--task", added.value.id, "-"], source),
+    (error: unknown) => {
+      if (!(error instanceof BindDraftError)) return false;
+      observed = error;
+      return error.original instanceof TypeError;
+    },
+  );
+
+  assert.notEqual(observed, undefined);
+  if (observed?.draft.path === undefined) throw new Error("aggregated syntax failure did not return a draft path");
+  assert.equal(readFileSync(resolve(repository.path, observed.draft.path), "utf8"), source);
+  const first = "Flow sequence in block collection must be sufficiently indented and end with a ]";
+  const second = "Flow map in block collection must be sufficiently indented and end with a }";
+  assert.equal(observed.message, `${first}\n${second}`);
+  assert.equal(observed.original instanceof Error ? observed.original.message : "", observed.message);
+  assert.deepEqual((await Keiyaku.list({ repo: await cachedRepoAt(repository.path) })).rows, []);
+  const board = await tasks.list({ selection: "all", scope: "world" });
+  assert.equal(board.kind, "accepted");
+  if (board.kind === "accepted") assert.equal(board.value.rows.find((row) => row.id === added.value.id)?.state, "open");
+});
+
+test("aggregated bind syntax failures keep draft-custody warnings on the same error", async () => {
+  const repository = repositoryWithMain();
+  writeFileSync(resolve(repository.path, ".keiyaku/draft"), "not a directory");
+  const source = `---\r\na: [\r\nb: {\r\n---\r\n${contractDocument("Invalid YAML")}`;
+  let observed: BindDraftError | undefined;
+
+  await assert.rejects(
+    () => invokeWithDocument(repository.path, ["bind", "-"], source),
+    (error: unknown) => {
+      if (!(error instanceof BindDraftError)) return false;
+      observed = error;
+      return error.original instanceof TypeError;
+    },
+  );
+
+  assert.notEqual(observed, undefined);
+  assert.equal(observed?.draft.path, undefined);
+  assert.match(observed?.draft.warning ?? "", /could not be preserved/u);
+  assert.equal(
+    observed?.message,
+    [
+      "Flow sequence in block collection must be sufficiently indented and end with a ]",
+      "Flow map in block collection must be sufficiently indented and end with a }",
+    ].join("\n"),
+  );
+  assert.deepEqual((await Keiyaku.list({ repo: await cachedRepoAt(repository.path) })).rows, []);
+});
+
+test("malformed bind syntax fails before Repo or World coordinate discovery", async () => {
+  const repository = repositoryWithMain();
+  const source = `---\r\na: [\r\nb: {\r\n---\r\n${contractDocument("Invalid YAML")}`;
+  const first = "Flow sequence in block collection must be sufficiently indented and end with a ]";
+  const second = "Flow map in block collection must be sufficiently indented and end with a }";
+  const at = Repo.at;
+  const discoverRepo = cliCoordinateDiscovery.repoAt;
+  const discoverWorld = cliCoordinateDiscovery.worldResolve;
+  const discoverCoordinates = cliCoordinateDiscovery.resolve;
+  let observations = 0;
+  let reads = 0;
+  const fail = (label: string) => {
+    observations += 1;
+    throw new Error(`${label} must not observe a syntax failure`);
+  };
+  Repo.at = async function () {
+    return fail("Repo.at");
+  };
+  cliCoordinateDiscovery.repoAt = async function () {
+    return fail("repo discovery");
+  };
+  cliCoordinateDiscovery.worldResolve = async function () {
+    return fail("world discovery");
+  };
+  cliCoordinateDiscovery.resolve = async function () {
+    return fail("resolveCliCoordinates");
+  };
+  let observed: BindDraftError | undefined;
+  try {
+    await assert.rejects(
+      () =>
+        invoke(parseArgv(["bind", "-"]), {
+          cwd: repository.path,
+          environment: {},
+          readStdin: async () => {
+            reads += 1;
+            return source;
+          },
+        }),
+      (error: unknown) => {
+        if (!(error instanceof BindDraftError)) return false;
+        observed = error;
+        return error.original instanceof TypeError;
+      },
+    );
+  } finally {
+    Repo.at = at;
+    cliCoordinateDiscovery.repoAt = discoverRepo;
+    cliCoordinateDiscovery.worldResolve = discoverWorld;
+    cliCoordinateDiscovery.resolve = discoverCoordinates;
+  }
+
+  assert.equal(observations, 0);
+  assert.equal(reads, 1);
+  assert.notEqual(observed, undefined);
+  if (observed?.draft.path === undefined) throw new Error("syntax failure did not return a draft path");
+  assert.equal(readFileSync(resolve(repository.path, observed.draft.path), "utf8"), source);
+  assert.equal(observed.message, `${first}\n${second}`);
+  assert.equal(observed.original instanceof Error ? observed.original.message : "", observed.message);
   assert.deepEqual((await Keiyaku.list({ repo: await cachedRepoAt(repository.path) })).rows, []);
 });
 
