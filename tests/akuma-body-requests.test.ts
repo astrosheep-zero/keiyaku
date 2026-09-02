@@ -21,7 +21,7 @@ import { AkumaBodyRequestError, requestBodyCommand } from "../src/akuma/requests
 import { BodyRequestPump, settleBodyRequests } from "../src/akuma/request-serve.js";
 import { BodyRequestPump as LifecycleBodyRequestPump } from "../src/akuma/request-lifecycle.js";
 import { atomicJson, composeRequestCommands } from "../src/akuma/request-wire.js";
-import { executeTellAkuma } from "../src/library/fleet.js";
+import { executeTellAkuma } from "../src/akuma/fleet-execution.js";
 import {
   fleetRequestCommand,
   fleetRequestProtocol,

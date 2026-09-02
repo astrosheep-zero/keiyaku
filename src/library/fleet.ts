@@ -1,53 +1,36 @@
 import {
   Akuma,
   AkumaNotBornError,
-  defaultWaitComplete,
   type ActivityHistory,
   type OutcomeRow,
   type AkumaStatus,
   type InterruptReceipt,
 } from "../akuma/index.js";
-import { readBudgetedStatus, tellAkumaWithId } from "../akuma/akuma.js";
+import { readBudgetedStatus } from "../akuma/akuma.js";
 import { executionChannel, localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
 import {
   requestForwardedFleetKill,
   requestForwardedFleetTell,
   requestForwardedFleetWait,
 } from "../akuma/fleet-request.js";
-import { readDispatch } from "../dispatch/index.js";
-import { observeTaskBoard } from "../task/operations.js";
+import { executeKillAkuma, executeTellAkuma, executeWaitAkuma } from "../akuma/fleet-execution.js";
+import { observeDispatchAssociation, type DispatchAssociation } from "../dispatch/index.js";
+import {
+  observeCreatedTaskObservations,
+  type CreatedTaskObservation,
+} from "../task/created-observation.js";
 import type { WorldRoot } from "../world.js";
 import { addressAkuma, addressAkumaSet, type AkumaAddressInput, type AkumaSetAddressInput } from "./address.js";
 import { requireInput } from "./input.js";
 import {
   fleetResultSchemas,
   parseAkumaObservation,
-  parseCreatedTaskObservation,
   type AkumaKillResult,
   type AkumaObservation,
   type AkumaObservationStage,
   type AkumaTellResult,
-  type AkumaUnobserved,
   type AkumaWaitResult,
-  type CreatedTaskObservation,
-  type DispatchAssociation,
 } from "../akuma/fleet-observation.js";
-export type {
-  AkumaKillResult,
-  AkumaObservation,
-  AkumaObservationStage,
-  AkumaTellResult,
-  AkumaUnobserved,
-  AkumaWaitResult,
-  CreatedTaskObservation,
-  DispatchAssociation,
-} from "../akuma/fleet-observation.js";
-export {
-  fleetRequestCommand,
-  fleetRequestCommands,
-  fleetRequestProtocol,
-  type FleetRequestPort,
-} from "../akuma/fleet-request.js";
 import { scopeForRepo, type Repo } from "./repo.js";
 import { parsePublicHistoryId } from "../akuma/identity.js";
 
@@ -93,35 +76,17 @@ function observationDiagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-const NO_DISPATCH: DispatchAssociation = { kind: "none" };
-
 async function dispatchAssociation(repo: Repo | undefined, id: AkumaStatus["id"]): Promise<DispatchAssociation> {
-  if (repo === undefined) return NO_DISPATCH;
-  try {
-    const dispatch = await readDispatch(scopeForRepo(repo), id);
-    return dispatch === null ? NO_DISPATCH : { kind: "associated", contractId: dispatch.contractId };
-  } catch (error) {
-    return { kind: "failed", diagnostic: observationDiagnostic(error) };
-  }
-}
-
-function createdTaskDiagnostic(error: unknown): string {
-  return observationDiagnostic(error);
+  return await observeDispatchAssociation(repo === undefined ? undefined : scopeForRepo(repo), id);
 }
 
 async function createdTasksFor(
   path: WorldRoot,
   statuses: readonly AkumaStatus[],
 ): Promise<readonly CreatedTaskObservation[]> {
-  let board;
-  try {
-    board = await observeTaskBoard(path);
-  } catch (error) {
-    const failed = { kind: "failed" as const, diagnostic: createdTaskDiagnostic(error) };
-    return statuses.map(() => failed);
-  }
-  return statuses.map((status) =>
-    parseCreatedTaskObservation({ kind: "present", rows: board.selectCreatedBy(status.id) }),
+  return await observeCreatedTaskObservations(
+    path,
+    statuses.map((status) => status.id),
   );
 }
 
@@ -172,157 +137,25 @@ function timeout(value: unknown): number | undefined {
   return value;
 }
 
-function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    let timer: ReturnType<typeof setTimeout>;
-    const done = (): void => {
-      signal?.removeEventListener("abort", abort);
-      resolve();
-    };
-    const abort = (): void => {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", abort);
-      reject(signal?.reason ?? new Error("upstream request aborted"));
-    };
-    timer = setTimeout(done, milliseconds);
-    if (signal?.aborted) abort();
-    else signal?.addEventListener("abort", abort, { once: true });
-  });
-}
-
-const SHARED_ORDINARY_BUDGET = 30;
-const POLL_MS = 100;
-
-type WaitRound = Readonly<{
-  statuses: readonly AkumaStatus[];
-  unobserved: readonly AkumaUnobserved[];
-}>;
-
-async function observeWaitRound(
+async function attachWaitAssociations(
   path: WorldRoot,
-  ids: readonly AkumaStatus["id"][],
-  signal?: AbortSignal,
-): Promise<WaitRound> {
-  signal?.throwIfAborted();
-  if (ids.length <= 1) {
-    return {
-      statuses: await Promise.all(ids.map(async (id) => await source(path).of({ id }).status())),
-      unobserved: [],
-    };
-  }
-  let remaining = SHARED_ORDINARY_BUDGET;
-  const statuses: AkumaStatus[] = [];
-  const unobserved: AkumaUnobserved[] = [];
-  for (const id of ids) {
-    signal?.throwIfAborted();
-    try {
-      const observed = await readBudgetedStatus(path, id, { aperture: "monitoring", ordinaryBudget: remaining });
-      statuses.push(observed.status);
-      remaining -= observed.ordinarySelected;
-    } catch (error) {
-      if (error instanceof AkumaNotBornError) throw error;
-      unobserved.push({ id, diagnostic: observationDiagnostic(error) });
-    }
-  }
-  return { statuses, unobserved };
-}
-
-type WaitExecutionInput = Readonly<{
-  path: WorldRoot;
-  ids: readonly AkumaStatus["id"][];
-  completion: "any" | "all";
-  timeoutMs?: number;
-  repo?: Repo;
-  signal?: AbortSignal;
-}>;
-
-export async function executeWaitAkuma(input: WaitExecutionInput): Promise<AkumaWaitResult> {
-  const deadline = input.timeoutMs === undefined ? undefined : performance.now() + input.timeoutMs;
-  for (;;) {
-    const round = await observeWaitRound(input.path, input.ids, input.signal);
-    const settled = round.statuses.map(defaultWaitComplete);
-    const completed =
-      round.statuses.length > 0 &&
-      (input.completion === "any" ? settled.some(Boolean) : round.unobserved.length === 0 && settled.every(Boolean));
-    if (completed || (deadline !== undefined && performance.now() >= deadline)) {
-      return fleetResultSchemas.wait.parse({
-        completion: input.completion,
-        observations: await observeAkumaSet(round.statuses, input.path, input.repo),
-        unobserved: round.unobserved,
-      });
-    }
-    await delay(
-      deadline === undefined ? POLL_MS : Math.min(POLL_MS, Math.max(0, deadline - performance.now())),
-      input.signal,
-    );
-  }
-}
-
-type TellExecutionInput = Readonly<{
-  path: WorldRoot;
-  id: AkumaStatus["id"];
-  body: string;
-  tellId?: string;
-  recordedAt?: string;
-  repo?: Repo;
-  signal?: AbortSignal;
-}>;
-
-export async function executeTellAkuma(input: TellExecutionInput): Promise<AkumaTellResult> {
-  input.signal?.throwIfAborted();
-  const handle = source(input.path).of({ id: input.id });
-  const tell =
-    input.tellId === undefined
-      ? await handle.tell(input.body)
-      : await tellAkumaWithId({
-          worldPath: input.path,
-          id: input.id,
-          body: input.body,
-          tellId: input.tellId,
-          ...(input.recordedAt === undefined ? {} : { recordedAt: input.recordedAt }),
-        });
-  input.signal?.throwIfAborted();
-  return fleetResultSchemas.tell.parse({
-    akuma: input.id,
-    tell,
-  });
-}
-
-type KillExecutionInput = Readonly<{
-  path: WorldRoot;
-  ids: readonly AkumaStatus["id"][];
-  repo?: Repo;
-  signal?: AbortSignal;
-}>;
-
-export async function executeKillAkuma(input: KillExecutionInput): Promise<AkumaKillResult> {
-  input.signal?.throwIfAborted();
-  const handles = input.ids.map((id) => source(input.path).of({ id }));
-  const evidence = await Promise.all(handles.map(async (handle) => await handle.kill()));
-  input.signal?.throwIfAborted();
-  return fleetResultSchemas.kill.parse({
-    results: input.ids.map((id, index) => ({ id, evidence: evidence[index]! })),
-  });
-}
-
-function needsDispatchAttach(association: DispatchAssociation): boolean {
-  return association.kind === "none";
-}
-
-async function attachObservationContract(
   repo: Repo | undefined,
-  observation: AkumaObservation,
-): Promise<AkumaObservation> {
-  if (repo === undefined || !needsDispatchAttach(observation.contract)) return observation;
-  return { ...observation, contract: await dispatchAssociation(repo, observation.status.id) };
-}
-
-async function attachWaitContracts(repo: Repo | undefined, result: AkumaWaitResult): Promise<AkumaWaitResult> {
-  if (repo === undefined) return result;
+  result: AkumaWaitResult,
+): Promise<AkumaWaitResult> {
+  const created = await createdTasksFor(
+    path,
+    result.observations.map((observation) => observation.status),
+  );
   return fleetResultSchemas.wait.parse({
     ...result,
     observations: await Promise.all(
-      result.observations.map((observation) => attachObservationContract(repo, observation)),
+      result.observations.map(async (observation, index) =>
+        parseAkumaObservation({
+          status: observation.status,
+          contract: await dispatchAssociation(repo, observation.status.id),
+          createdTasks: created[index]!,
+        }),
+      ),
     ),
   });
 }
@@ -369,9 +202,11 @@ export async function waitAkuma(
   const selected = completion ?? "all";
   const timeoutMs = timeout(values.timeoutMs);
   const channel = executionChannel(execution);
+  const repo = values.repo as Repo | undefined;
   if (channel.kind === "body-request") {
-    return await attachWaitContracts(
-      values.repo as Repo | undefined,
+    return await attachWaitAssociations(
+      addressed.path,
+      repo,
       await requestForwardedFleetWait({
         directory: channel.directory,
         targets: addressed.ids,
@@ -380,13 +215,16 @@ export async function waitAkuma(
       }),
     );
   }
-  return await executeWaitAkuma({
-    path: addressed.path,
-    ids: addressed.ids,
-    completion: selected,
-    ...(timeoutMs === undefined ? {} : { timeoutMs }),
-    ...(values.repo === undefined ? {} : { repo: values.repo as Repo }),
-  });
+  return await attachWaitAssociations(
+    addressed.path,
+    repo,
+    await executeWaitAkuma({
+      path: addressed.path,
+      ids: addressed.ids,
+      completion: selected,
+      ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    }),
+  );
 }
 
 export async function killAkuma(
@@ -404,7 +242,6 @@ export async function killAkuma(
   return await executeKillAkuma({
     path: addressed.path,
     ids: addressed.ids,
-    ...(input.repo === undefined ? {} : { repo: input.repo }),
   });
 }
 
@@ -432,7 +269,6 @@ export async function tellAkuma(
     path: addressed.path,
     id: addressed.id,
     body: values.body,
-    ...(values.repo === undefined ? {} : { repo: values.repo as Repo }),
   });
 }
 

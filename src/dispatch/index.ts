@@ -25,6 +25,7 @@ import {
 } from "../git/repository.js";
 import type { GitRepository } from "../git/process.js";
 import { withGitDecodeChannel, withGitReadObservation, type GitReadObservation } from "../git/read-observation.js";
+import { NO_DISPATCH_ASSOCIATION, type DispatchAssociation } from "./association.js";
 
 const DISPATCH_ROOT = "dispatch";
 const DISPATCH_PREFIX = `${DISPATCH_ROOT}/`;
@@ -239,4 +240,31 @@ export async function publishDispatch(
       };
     }),
   );
+}
+
+export {
+  dispatchAssociationSchema,
+  NO_DISPATCH_ASSOCIATION,
+  parseDispatchAssociation,
+  type DispatchAssociation,
+} from "./association.js";
+
+function associationDiagnostic(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Read-only Dispatch association projection for one Akuma identity. */
+export async function observeDispatchAssociation(
+  repository: GitRepository | undefined,
+  akuId: AkuId,
+): Promise<DispatchAssociation> {
+  if (repository === undefined) return NO_DISPATCH_ASSOCIATION;
+  try {
+    const dispatch = await readDispatch(repository, akuId);
+    return dispatch === null
+      ? NO_DISPATCH_ASSOCIATION
+      : { kind: "associated", contractId: dispatch.contractId };
+  } catch (error) {
+    return { kind: "failed", diagnostic: associationDiagnostic(error) };
+  }
 }

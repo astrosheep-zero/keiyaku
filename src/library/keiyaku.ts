@@ -93,7 +93,7 @@ export type { Dispatch, DispatchFailure } from "../dispatch/index.js";
 export type { AkumaAlias } from "../identity/selector.js";
 export type { AkumaGlob } from "../identity/selector.js";
 export type { AkuId } from "../akuma/identity.js";
-export type { TellResult, TellWake } from "./fleet.js";
+export type { TellResult, TellWake } from "../akuma/index.js";
 export type { AllowedAction, AllowedActions } from "../akuma/allowed.js";
 export type { Catalog, CatalogInput, CatalogQuery } from "./catalog.js";
 export type { NukeInput, NukeResult } from "./nuke.js";
@@ -105,21 +105,23 @@ export type {
   DirectAkumaSelector,
   SetAkumaSelector,
 } from "./address.js";
+export type { CreatedTaskObservation } from "../task/created-observation.js";
+export type { DispatchAssociation } from "../dispatch/association.js";
+export type {
+  AkumaKillResult,
+  AkumaObservation,
+  AkumaObservationStage,
+  AkumaTellResult,
+  AkumaUnobserved,
+  AkumaWaitResult,
+} from "../akuma/fleet-observation.js";
 export type {
   AkumaHistoryInput,
   AkumaHistoryResult,
   AkumaInterruptInput,
   AkumaInterruptResult,
-  AkumaKillResult,
-  AkumaObservation,
-  AkumaObservationStage,
   AkumaTellInput,
-  AkumaUnobserved,
-  CreatedTaskObservation,
-  DispatchAssociation,
-  AkumaTellResult,
   AkumaWaitInput,
-  AkumaWaitResult,
 } from "./fleet.js";
 
 export type Keiyaku = KeiyakuType;

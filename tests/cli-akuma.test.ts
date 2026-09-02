@@ -14,7 +14,7 @@ import { AKUMA_REQUESTS_ENV, createProviderAttempt, type ProviderAdapter } from 
 import { BodyRequestPump } from "../src/akuma/request-serve.js";
 import { composeRequestCommands } from "../src/akuma/request-wire.js";
 import type { ActivityHistory, ActivityRow } from "../src/akuma/index.js";
-import { executeKillAkuma, executeTellAkuma, executeWaitAkuma } from "../src/library/fleet.js";
+import { executeKillAkuma, executeTellAkuma, executeWaitAkuma } from "../src/akuma/fleet-execution.js";
 import { fleetRequestCommands, type FleetRequestPort } from "../src/akuma/fleet-request.js";
 import { type AkumaObservation } from "../src/index.js";
 import { World } from "../src/world.js";

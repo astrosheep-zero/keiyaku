@@ -2,19 +2,11 @@ import { akumaIdSchema, akumaStatusSchema } from "./akuma.js";
 import type { TellResult } from "./akuma.js";
 import type { KillEvidence } from "./heart/index.js";
 import { tellRowSchema } from "./projection.js";
-import { contractId } from "../core/facts/types.js";
-import { taskRowsSchema } from "../task/board.js";
+import { dispatchAssociationSchema } from "../dispatch/association.js";
+import { createdTaskObservationSchema } from "../task/created-observation.js";
 import { z } from "zod";
 
 const nonblankTextSchema = z.string().refine((value) => value.trim() !== "");
-const contractIdSchema = z.string().transform((value, context) => {
-  try {
-    return contractId(value);
-  } catch {
-    context.addIssue({ code: "custom", message: "expected ContractId" });
-    return z.NEVER;
-  }
-});
 const killEvidenceSchema = z.enum([
   "killed",
   "already-killed",
@@ -23,15 +15,6 @@ const killEvidenceSchema = z.enum([
   "untidy",
   "unavailable",
 ]) satisfies z.ZodType<KillEvidence>;
-const dispatchAssociationSchema = z.union([
-  z.object({ kind: z.literal("none") }).strict(),
-  z.object({ kind: z.literal("associated"), contractId: contractIdSchema }).strict(),
-  z.object({ kind: z.literal("failed"), diagnostic: z.string() }).strict(),
-]);
-const createdTaskObservationSchema = z.union([
-  z.object({ kind: z.literal("present"), rows: taskRowsSchema }).strict(),
-  z.object({ kind: z.literal("failed"), diagnostic: z.string() }).strict(),
-]);
 const akumaObservationSchema = z
   .object({
     status: akumaStatusSchema,
@@ -78,8 +61,6 @@ const akumaWaitResultSchema = z
 const akumaKillResultSchema = z.object({ results: z.array(akumaKillResultItemSchema) }).strict();
 const akumaTellResultSchema = z.object({ akuma: akumaIdSchema, tell: tellResultSchema }).strict();
 
-export type CreatedTaskObservation = z.infer<typeof createdTaskObservationSchema>;
-export type DispatchAssociation = z.infer<typeof dispatchAssociationSchema>;
 export type AkumaObservation = z.infer<typeof akumaObservationSchema>;
 export type AkumaObservationStage =
   | (Readonly<{ kind: "observed" }> & AkumaObservation)
@@ -88,10 +69,6 @@ export type AkumaUnobserved = z.infer<typeof akumaUnobservedSchema>;
 export type AkumaWaitResult = z.infer<typeof akumaWaitResultSchema>;
 export type AkumaKillResult = z.infer<typeof akumaKillResultSchema>;
 export type AkumaTellResult = z.infer<typeof akumaTellResultSchema>;
-
-export function parseCreatedTaskObservation(value: unknown): CreatedTaskObservation {
-  return createdTaskObservationSchema.parse(value);
-}
 
 export function parseAkumaObservation(value: unknown): AkumaObservation {
   return akumaObservationSchema.parse(value);
