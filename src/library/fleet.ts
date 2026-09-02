@@ -1,3 +1,4 @@
+/** @architectureCompositionRoot */
 import {
   Akuma,
   AkumaNotBornError,

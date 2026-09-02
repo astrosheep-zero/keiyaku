@@ -1,3 +1,4 @@
+/** @architectureCompositionRoot */
 import { readAliases, type AliasBinding } from "../alias/index.js";
 import { Akuma } from "../akuma/akuma.js";
 import { probeBornAkuma } from "../akuma/index.js";

@@ -29,7 +29,7 @@ export type DependencyZone = Readonly<{
 export type CompositionBoundary = Readonly<{
   source: string;
   ownerPaths: readonly string[];
-  allowedSources: readonly string[];
+  rootMarker: string;
 }>;
 
 export type SensitiveImportRule = Readonly<{
@@ -122,6 +122,39 @@ export type ArchitectureResult = Readonly<{
   files: readonly string[];
   diagnostics: readonly Diagnostic[];
 }>;
+
+function rootMarkerName(marker: string): string {
+  return marker.startsWith("@") ? marker.slice(1) : marker;
+}
+
+function commentDeclaresRootMarker(comment: string, marker: string): boolean {
+  const tag = `@${rootMarkerName(marker)}`;
+  return new RegExp(`(?:^|\\W)${tag}(?:\\W|$)`).test(comment);
+}
+
+function hasCompositionRootMarker(sourceFile: ts.SourceFile, marker: string): boolean {
+  const tag = rootMarkerName(marker);
+  const text = sourceFile.getFullText();
+  const commentDeclares = (ranges: readonly ts.CommentRange[] | undefined): boolean =>
+    ranges?.some((range) => commentDeclaresRootMarker(text.slice(range.pos, range.end), marker)) === true;
+  if (commentDeclares(ts.getLeadingCommentRanges(text, 0))) return true;
+  const visit = (node: ts.Node): boolean => {
+    if (commentDeclares(ts.getLeadingCommentRanges(text, node.getFullStart()))) return true;
+    if (ts.getJSDocTags(node).some((jsdoc) => jsdoc.tagName.text === tag)) return true;
+    if (
+      (ts.isTypeAliasDeclaration(node) ||
+        ts.isInterfaceDeclaration(node) ||
+        ts.isClassDeclaration(node) ||
+        ts.isFunctionDeclaration(node) ||
+        ts.isEnumDeclaration(node)) &&
+      node.name?.text === tag
+    )
+      return true;
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === tag) return true;
+    return ts.forEachChild(node, visit) === true;
+  };
+  return visit(sourceFile);
+}
 
 function matches(pattern: string, candidate: string): boolean {
   const patternSegments = pattern.split("/");
@@ -270,7 +303,7 @@ function compositionDiagnostics(units: readonly ParsedSource[], policy: Architec
   const diagnostics: Diagnostic[] = [];
   for (const unit of units) {
     for (const boundary of policy.compositionBoundaries ?? []) {
-      if (!matches(boundary.source, unit.path) || boundary.allowedSources.some((source) => matches(source, unit.path)))
+      if (!matches(boundary.source, unit.path) || hasCompositionRootMarker(unit.sourceFile, boundary.rootMarker))
         continue;
       const ownerReferences = unit.references.filter(
         (reference) =>
@@ -290,7 +323,7 @@ function compositionDiagnostics(units: readonly ParsedSource[], policy: Architec
         file: unit.path,
         line: first.line,
         column: first.column,
-        detail: `${unit.path} wires multiple product owners (${[...owners].sort().join(", ")}); use an allowlisted composition boundary`,
+        detail: `${unit.path} wires multiple product owners (${[...owners].sort().join(", ")}); use a declared composition root`,
       });
     }
   }

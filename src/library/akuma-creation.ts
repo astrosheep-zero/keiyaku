@@ -1,3 +1,4 @@
+/** @architectureCompositionRoot */
 import { appendFile } from "node:fs/promises";
 import { moveAlias, type AliasBinding } from "../alias/index.js";
 import { Akuma, type AkumaStatus, type ForkReceipt, type ReadonlyRestraint } from "../akuma/akuma.js";

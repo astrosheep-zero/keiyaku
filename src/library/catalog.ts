@@ -1,3 +1,4 @@
+/** @architectureCompositionRoot */
 import { Akuma, type AkumaList } from "../akuma/akuma.js";
 import { listArchetypeDefinitions, type ArchetypeCatalogRow } from "../akuma/archetype.js";
 import type { TaskRow } from "../task/index.js";

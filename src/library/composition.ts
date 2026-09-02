@@ -1,3 +1,4 @@
+/** @architectureCompositionRoot */
 import { KeiyakuHandle, bindKeiyaku, keiyakuOf, listKeiyaku, observeKeiyaku } from "./contract.js";
 import { callKeiyaku, forkKeiyaku } from "./akuma-creation.js";
 import { historyAkuma, interruptAkuma, killAkuma, statusAkuma, tellAkuma, waitAkuma } from "./fleet.js";

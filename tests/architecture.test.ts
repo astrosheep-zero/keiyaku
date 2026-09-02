@@ -193,17 +193,61 @@ test("architecture policy keeps denied Akuma Library edges closed for type impor
   assert.deepEqual(rules(diagnostics), ["architecture/dependency-direction"]);
 });
 
-test("architecture policy keeps cross-product wiring in the named Library composition root", () => {
-  const accepted = check({
+test("architecture policy keeps cross-product wiring in marked Library composition roots", () => {
+  const compositionRoot = check({
     "akuma/requests.ts": "export function executionChannel(): void {}",
     "library/contract.ts": "export function contract(): void {}",
     "library/composition.ts": [
+      "/** @architectureCompositionRoot */",
       'import { executionChannel } from "../akuma/requests.js";',
       'import { contract } from "./contract.js";',
       "export const compose = [executionChannel, contract];",
     ].join("\n"),
   });
-  const knownComposition = check({
+  const catalogRoot = check({
+    "akuma/akuma.ts": "export function runtime(): void {}",
+    "task/catalog.ts": "export function catalog(): void {}",
+    "library/catalog.ts": [
+      "/** @architectureCompositionRoot */",
+      'import { runtime } from "../akuma/akuma.js";',
+      'import { catalog } from "../task/catalog.js";',
+      "export const list = [runtime, catalog];",
+    ].join("\n"),
+  });
+  const movedCatalogRoot = check({
+    "akuma/akuma.ts": "export function runtime(): void {}",
+    "task/catalog.ts": "export function catalog(): void {}",
+    "library/catalog/index.ts": [
+      "/** @architectureCompositionRoot */",
+      'import { runtime } from "../../akuma/akuma.js";',
+      'import { catalog } from "../../task/catalog.js";',
+      "export const list = [runtime, catalog];",
+    ].join("\n"),
+  });
+  const renamedFleetRoot = check({
+    "akuma/akuma.ts": "export function runtime(): void {}",
+    "dispatch/index.ts": "export function observeDispatch(): void {}",
+    "task/created-observation.ts": "export function observeCreatedTask(): void {}",
+    "library/fleet.js": [
+      "/** @architectureCompositionRoot */",
+      'import { runtime } from "../akuma/akuma.js";',
+      'import { observeDispatch } from "../dispatch/index.js";',
+      'import { observeCreatedTask } from "../task/created-observation.js";',
+      "export const fleet = [runtime, observeDispatch, observeCreatedTask];",
+    ].join("\n"),
+  });
+  const relocatedMarkedRoot = check({
+    "akuma/akuma.ts": "export function runtime(): void {}",
+    "task/index.ts": "export function tasks(): void {}",
+    "library/moved-root.ts": [
+      "/** @architectureCompositionRoot */",
+      'import { runtime } from "../akuma/akuma.js";',
+      'import { tasks } from "../task/index.js";',
+      "export const compose = [runtime, tasks];",
+    ].join("\n"),
+  });
+
+  const unmarkedHistoricalPath = check({
     "akuma/akuma.ts": "export function runtime(): void {}",
     "task/catalog.ts": "export function catalog(): void {}",
     "library/catalog.ts": [
@@ -212,8 +256,7 @@ test("architecture policy keeps cross-product wiring in the named Library compos
       "export const list = [runtime, catalog];",
     ].join("\n"),
   });
-
-  const diagnostics = check({
+  const unregisteredComposition = check({
     "akuma/akuma.ts": "export function runtime(): void {}",
     "task/index.ts": "export function tasks(): void {}",
     "library/rogue-composition.ts": [
@@ -233,11 +276,25 @@ test("architecture policy keeps cross-product wiring in the named Library compos
       "export const compose = [runtime, tasks, appoint];",
     ].join("\n"),
   });
+  const rootPrefixEscape = check({
+    "akuma/akuma.ts": "export function runtime(): void {}",
+    "task/index.ts": "export function tasks(): void {}",
+    "library/fleet-extra.ts": [
+      'import { runtime } from "../akuma/akuma.js";',
+      'import { tasks } from "../task/index.js";',
+      "export const compose = [runtime, tasks];",
+    ].join("\n"),
+  });
 
-  assert.deepEqual(accepted, []);
-  assert.deepEqual(knownComposition, []);
-  assert.deepEqual(rules(diagnostics), ["architecture/composition-boundary"]);
+  assert.deepEqual(compositionRoot, []);
+  assert.deepEqual(catalogRoot, []);
+  assert.deepEqual(movedCatalogRoot, []);
+  assert.deepEqual(renamedFleetRoot, []);
+  assert.deepEqual(relocatedMarkedRoot, []);
+  assert.deepEqual(rules(unmarkedHistoricalPath), ["architecture/composition-boundary"]);
+  assert.deepEqual(rules(unregisteredComposition), ["architecture/composition-boundary"]);
   assert.deepEqual(rules(ordinaryDiagnostics), ["architecture/composition-boundary"]);
+  assert.deepEqual(rules(rootPrefixEscape), ["architecture/composition-boundary"]);
 });
 
 test("architecture policy keeps provider SDKs inside their adapter owners", () => {

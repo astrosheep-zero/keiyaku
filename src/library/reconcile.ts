@@ -1,3 +1,4 @@
+/** @architectureCompositionRoot */
 import type { ContractId, ContractState } from "../core/facts/types.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";

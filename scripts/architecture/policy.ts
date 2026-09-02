@@ -86,22 +86,12 @@ const libraryOwner = {
   ],
 } as const;
 
-const knownLibraryCompositions = [
-  "library/address.ts",
-  "library/akuma-creation.ts",
-  "library/catalog.ts",
-  "library/composition.ts",
-  "library/contract-handle.ts",
-  "library/fleet.ts",
-  "library/nuke.ts",
-  "library/reconcile.ts",
-] as const;
 export const KEIYAKU_ARCHITECTURE_POLICY = {
   compositionBoundaries: [
     {
       source: "library/**",
       ownerPaths: ["akuma/**", "alias/**", "dispatch/**", "settlement/**", "task/**", "workspace-place.ts"],
-      allowedSources: knownLibraryCompositions,
+      rootMarker: "architectureCompositionRoot",
     },
   ],
   zones: [

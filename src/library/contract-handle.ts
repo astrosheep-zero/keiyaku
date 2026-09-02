@@ -1,3 +1,4 @@
+/** @architectureCompositionRoot */
 import { documentDiff } from "../markdown/diff.js";
 import { applyAmendDocument } from "../body/amend.js";
 import { decodeArcDocument } from "../body/arc.js";
