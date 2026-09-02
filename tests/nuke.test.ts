@@ -158,6 +158,31 @@ test("bare and mismatched nuke confirmations refuse before deletion", async () =
   }
 });
 
+test("confirmed nuke retains the coordination lock marker and World residue", async () => {
+  const world = await testWorld();
+  try {
+    const residue = join(world, ".keiyaku", "unknown.bin");
+    writeFileSync(residue, "retain\n");
+    assert.deepEqual(await Keiyaku.nuke({ world, confirm: world }), { kind: "success", world });
+    assert.equal(existsSync(join(world, ".keiyaku")), true);
+    assert.equal(existsSync(join(world, ".keiyaku", "locks", "task-allocation.sqlite")), true);
+    assert.equal(existsSync(residue), true);
+  } finally {
+    rmSync(world, { recursive: true, force: true });
+  }
+});
+
+test("nuke rejects a noncanonical World before confirmation or deletion", async () => {
+  const world = await testWorld();
+  const forged = `${world}/.`;
+  try {
+    await assert.rejects(Keiyaku.nuke({ world: forged as never, confirm: forged }), /canonical physical directory/u);
+    assert.equal(existsSync(join(world, ".keiyaku")), true);
+  } finally {
+    rmSync(world, { recursive: true, force: true });
+  }
+});
+
 test("confirmed nuke stops live writers and removes owned state while preserving boundaries", async () => {
   const fixture = await gitNukeFixture();
   try {

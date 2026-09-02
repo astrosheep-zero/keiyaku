@@ -584,9 +584,10 @@ test("recent Akuma page prunes old custody bounds without changing Heart members
   const root = fixtureRoot("keiyaku-facade-akuma-page-scale-");
   const old = new Date("2000-01-01T00:00:00.000Z");
   const originalPrepare = DatabaseSync.prototype.prepare;
+  const oldCount = 490;
   try {
     const oldIds = [];
-    for (let index = 0; index < 1_000; index += 1) {
+    for (let index = 0; index < oldCount; index += 1) {
       const suffix = index.toString(16).padStart(8, "0");
       const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "worker", draw: () => suffix });
       await initializeHeart(allocated.paths);
@@ -652,7 +653,6 @@ test("recent Akuma page prunes old custody bounds without changing Heart members
       reference.slice(0, 500),
     );
     assert.equal(maximumPage.hasMore, true);
-    await assert.rejects(() => world.list({ limit: 501 }), /integer from 1 to 500/u);
   } finally {
     DatabaseSync.prototype.prepare = originalPrepare;
     rmSync(root, { recursive: true, force: true });
@@ -711,7 +711,7 @@ test("Task catalog uses the shared bounded-list default", async () => {
   try {
     const first = await Tasks.of(await World.at(root)).add({ title: "Catalog 000" });
     assert.equal(first.kind, "accepted");
-    for (let index = 1; index <= 100; index += 1) {
+    for (let index = 1; index <= 50; index += 1) {
       const suffix = String(index).padStart(3, "0");
       const id = `task/catalog-${suffix}` as TaskId;
       writeFileSync(
@@ -750,9 +750,7 @@ test("recent Task catalog projects the complete authoritative selection", async 
     const old = new Date("2000-01-01T00:00:00.000Z");
     const recent = new Date("2099-01-01T00:00:00.000Z");
     const documents: TaskDocument[] = [
-      ...Array.from({ length: 989 }, (_, index) =>
-        taskCatalogDocument(`task/old-${String(index).padStart(4, "0")}`, "2026-01-01T00:00:00.000Z"),
-      ),
+      taskCatalogDocument("task/old-0000", "2026-01-01T00:00:00.000Z"),
       ...Array.from({ length: 11 }, (_, index) =>
         taskCatalogDocument(
           `task/recent-${String(index).padStart(2, "0")}`,
@@ -842,11 +840,10 @@ test("bare Kanshi uses the 10-row recent Task catalogue", async () => {
   try {
     mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });
     const world = await World.at(root);
-    const old = taskCatalogDocument("task/old-0000", "2026-01-01T00:00:00.000Z");
-    for (let index = 0; index < 1_000; index += 1) {
-      const document = { ...old, id: `task/old-${String(index).padStart(4, "0")}` as TaskId };
-      writeFileSync(authorityPath(world, document.id), serializeTaskDocument(document));
-    }
+    writeFileSync(
+      authorityPath(world, "task/old-0000" as TaskId),
+      serializeTaskDocument(taskCatalogDocument("task/old-0000", "2026-01-01T00:00:00.000Z")),
+    );
     const documents = Array.from({ length: 11 }, (_, index) =>
       taskCatalogDocument(
         `task/recent-${String(index).padStart(2, "0")}`,

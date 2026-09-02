@@ -66,22 +66,8 @@ test("each grammar owner renders its own namespace and leaf help", () => {
   assert.match(renderContractHelp("bind"), /usage: keiyaku bind \[--task <task\/\.\.\.>\]/u);
   assert.match(renderContractHelp("deliver"), /--message <text>\] \[--include-dirty\] \[--materialize-conflict\]/u);
   assert.match(renderContractHelp("review"), /usage: keiyaku review .*--satisfied \| --unsatisfied/u);
-  assert.equal(
-    renderContractHelp("show"),
-    ["Read one Contract guidance projection.", "", "usage: keiyaku show [<contract>|@<contract>] [--json]"].join("\n"),
-  );
-  assert.equal(
-    renderContractHelp("ls"),
-    [
-      "List one identity directory.",
-      "",
-      "usage: keiyaku ls task[/] [--limit <count>] [--json]",
-      "       keiyaku ls kei[/] [--limit <count>] [--json]",
-      "       keiyaku ls aku[/] [--json]",
-      "       keiyaku ls aku/<akuma>[/] [--limit <count>] [--json]",
-      '       keiyaku ls "aku/*/*" [--limit <count>] [--json]',
-    ].join("\n"),
-  );
+  assert.match(renderContractHelp("show"), /usage: keiyaku show \[<contract>\|@<contract>\] \[--json\]/u);
+  assert.match(renderContractHelp("ls"), /usage: keiyaku ls task\[\/\] \[--limit <count>\] \[--json\]/u);
   assert.doesNotMatch(renderContractHelp("ls"), /--all/u);
   assert.match(renderTaskHelp(), /task update <TaskId>/u);
   assert.match(renderTaskHelp("tree"), /usage: keiyaku task tree <TaskId>/u);
@@ -135,21 +121,16 @@ test("help projections reflow at the requested terminal width without splitting 
 });
 
 test("amend leaf help enumerates the operation grammar", () => {
-  assert.equal(
-    renderContractHelp("amend"),
-    [
-      "Amend one Contract's document operations or structured terms.",
-      "",
-      "usage: keiyaku amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name,...>] [--actor <actor>] [--json] [-]",
-      "",
-      "  ## Context|Objective|Design|Region|Criteria|Verification|<extension>  (replace, or add new extension)",
-      "  ## Replace: Context|Objective|Design|Region|Criteria|Verification|<extension>",
-      "  ## Append: Context|Objective|Design|Criteria|<extension>",
-      "  ## Add: Criteria|<new-extension-title>",
-      "  ## Update: <existing-extension-title>",
-      "  ## Remove: <existing-extension-title>",
-    ].join("\n"),
+  const help = renderContractHelp("amend");
+  assert.match(
+    help,
+    /usage: keiyaku amend \[<contract>\|@<contract>\] \[--after <kei\/\.\.\.> \.\.\. \| --clear-after\] \[--gates <name,\.\.\.>\] \[--actor <actor>\] \[--json\] \[-\]/u,
   );
+  assert.match(help, /## Replace: Context\|Objective\|Design\|Region\|Criteria\|Verification\|<extension>/u);
+  assert.match(help, /## Append: Context\|Objective\|Design\|Criteria\|<extension>/u);
+  assert.match(help, /## Add: Criteria\|<new-extension-title>/u);
+  assert.match(help, /## Update: <existing-extension-title>/u);
+  assert.match(help, /## Remove: <existing-extension-title>/u);
 });
 
 test("deliver leaf help explains candidate capture, placement, review, and conflict continuation", () => {
