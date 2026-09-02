@@ -83,6 +83,7 @@ const reporterOptions = testOptions.some(
   : ["--test-reporter=dot"];
 const environment = { ...process.env };
 delete environment.AKUMA_REQUESTS;
+const started = performance.now();
 const result = spawnSync(
   process.execPath,
   ["--import", "tsx", "--test", ...reporterOptions, ...testOptions, ...testFiles],
@@ -90,4 +91,10 @@ const result = spawnSync(
 );
 
 if (result.error) throw result.error;
-process.exit(result.status ?? 1);
+const status = result.status ?? 1;
+if (suite !== undefined) {
+  console.error(
+    `[run-tests] suite=${suite} files=${testFiles.length} elapsed=${Math.round(performance.now() - started)} status=${status}`,
+  );
+}
+process.exit(status);
