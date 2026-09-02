@@ -315,36 +315,38 @@ async function createPluginRuntime(input: PluginRuntimeInput): Promise<PluginRun
   const report = input.reportDiagnostic;
   const selected = selectedPlugins(input.settings ?? (await settings({ root: input.world })), report);
   const activated = new Set<string>();
-  const registered = new Map<number, readonly RegisteredHandler[]>();
+  const activations: Promise<readonly RegisteredHandler[]>[] = [];
   let previousStarted = Promise.resolve();
-  for (const [index, entry] of selected.entries()) {
+  for (const entry of selected) {
     let releaseStarted!: () => void;
     const started = new Promise<void>((resolve) => {
       releaseStarted = resolve;
     });
-    void previousStarted.then(async () => {
+    const activation = previousStarted.then(async () => {
       try {
-        const handlers = await activate(entry, input.world, activated, report, releaseStarted);
-        if (handlers.length > 0) registered.set(index, handlers);
+        return await activate(entry, input.world, activated, report, releaseStarted);
       } catch (error) {
         diagnostic(report, entry.id, "activation", error);
+        return [];
       } finally {
         releaseStarted();
       }
     });
+    activations.push(activation);
     previousStarted = started;
   }
 
   return Object.freeze({
     emit(signal: PluginSignal, reportDiagnostic: PluginDiagnostic | undefined = report): Promise<void> {
-      const deliveries = [...registered.entries()]
-        .sort(([left], [right]) => left - right)
-        .flatMap(([, handlers]) => handlers)
-        .filter((handler) => handler.kind === signal.kind);
-      for (const entry of deliveries) {
-        void Promise.resolve()
-          .then(() => entry.handler(signal as never))
-          .catch((error) => diagnostic(reportDiagnostic, entry.pluginId, "signal", error));
+      for (const activation of activations) {
+        void activation.then((handlers) => {
+          for (const entry of handlers) {
+            if (entry.kind !== signal.kind) continue;
+            void Promise.resolve()
+              .then(() => entry.handler(signal as never))
+              .catch((error) => diagnostic(reportDiagnostic, entry.pluginId, "signal", error));
+          }
+        });
       }
       return Promise.resolve();
     },
