@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-const HEART_SCHEMA_VERSION = 22;
+const HEART_SCHEMA_VERSION = 23;
 const LEASH_SCHEMA_VERSION = 4;
 
 function assertSchemaVersion(database: DatabaseSync, table: "akuma_schema" | "leash_schema", expected: number): void {
@@ -125,6 +125,13 @@ export const HEART_SCHEMA = `
     ON tell_receipts(tell_id, kind) WHERE evidence = 'exact';
   CREATE UNIQUE INDEX IF NOT EXISTS tell_receipts_fence
     ON tell_receipts(turn_sequence, fence, kind) WHERE evidence = 'fence';
+  CREATE TABLE IF NOT EXISTS tell_dispositions (
+    body_sequence INTEGER NOT NULL REFERENCES bodies(sequence),
+    tell_id TEXT NOT NULL REFERENCES tells(id),
+    decided_at TEXT NOT NULL,
+    resolved_at TEXT,
+    PRIMARY KEY (body_sequence, tell_id)
+  ) STRICT;
   CREATE TABLE IF NOT EXISTS requests (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
     id TEXT NOT NULL UNIQUE,

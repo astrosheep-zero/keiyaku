@@ -7,14 +7,21 @@ import { driveTurn, turnRecipe, type DrivenTurn } from "./turn-drive.js";
 import {
   HeldAkumaLeash,
   breakBody,
+  decidePendingTellDisposition,
   endTurn,
   finishBodyIfIdle,
   heartExists,
   isHeartAbsent,
+  probeLeash,
   projectTell,
+  provePendingTellDispositionCustody,
   readHeart,
+  readOpenPendingTellDisposition,
   readTell,
   readNonterminalRequests,
+  recordUndeliveredPendingTells,
+  resolvePendingTellDisposition,
+  type PendingTellDisposition,
   type SessionFact,
   type Soul,
   type TellRow,
@@ -301,10 +308,7 @@ async function runBodyTurns(input: BodyExecution): Promise<BodyTurnEnd> {
       await putDownIfControlled(launch.paths, supervisor, bodySequence, runtime.now);
       return;
     }
-    if (result.kind === "handoff") {
-      await breakBody(launch.paths, { sequence: bodySequence, end: "put-down", at: runtime.now() });
-      return "handoff";
-    }
+    if (result.kind === "handoff") return "handoff";
     if (result.kind === "resume-unsupported") {
       await breakBody(launch.paths, { sequence: bodySequence, end: "broke-off", at: runtime.now() });
       return;
@@ -320,11 +324,99 @@ async function runBodyTurns(input: BodyExecution): Promise<BodyTurnEnd> {
   }
 }
 
-async function projectUndeliveredPendingTell(paths: AkumaPaths, error: unknown): Promise<void> {
+async function projectUndeliveredPendingTellEvidence(paths: AkumaPaths, error: unknown): Promise<void> {
   try {
     await appendFile(paths.log, `pending Tell disposition undelivered: ${boundedDiagnostic(error)}\n`);
   } catch {
-    /* undelivered projection loss never changes Heart truth */
+    /* log evidence loss never changes Heart truth */
+  }
+}
+
+async function settleUndeliveredDisposition(
+  paths: AkumaPaths,
+  disposition: PendingTellDisposition,
+  error: unknown,
+): Promise<void> {
+  await projectUndeliveredPendingTellEvidence(paths, error);
+  if (!(await heartExists(paths))) return;
+  const at = new Date().toISOString();
+  await recordUndeliveredPendingTells(paths, at, disposition.tellIds);
+  await resolvePendingTellDisposition(paths, disposition.bodySequence, at);
+}
+
+async function consumeProvenDisposition(
+  paths: AkumaPaths,
+  disposition: PendingTellDisposition,
+): Promise<boolean> {
+  const proof = await provePendingTellDispositionCustody(paths, disposition);
+  if (proof.kind !== "proven") return false;
+  await resolvePendingTellDisposition(paths, disposition.bodySequence, new Date().toISOString());
+  return true;
+}
+
+/**
+ * Wait for Heart custody proof of the frozen Tell-id snapshot, or for the
+ * spawned child to exit without that proof. Sequence growth, spawn resolution,
+ * and an unqualified held leash never consume the disposition.
+ */
+async function awaitDispositionCustody(
+  paths: AkumaPaths,
+  disposition: PendingTellDisposition,
+  child: OwnedProcess,
+  schedule: (milliseconds: number, signal: AbortSignal) => Promise<void>,
+): Promise<TellWake | Readonly<{ kind: "proven" }>> {
+  for (;;) {
+    if ((await provePendingTellDispositionCustody(paths, disposition)).kind === "proven") {
+      child.release();
+      return { kind: "proven" };
+    }
+    const timerController = new AbortController();
+    const timer = schedule(WAKE_REREAD_MS, timerController.signal).then(() => ({ kind: "timer" as const }));
+    let winner: Awaited<typeof timer> | { kind: "exited"; exit: DetachedProcessExit };
+    try {
+      winner = await Promise.race([child.exited.then((exit) => ({ kind: "exited" as const, exit })), timer]);
+    } catch (error) {
+      timerController.abort();
+      await timer.catch(() => undefined);
+      throw error;
+    }
+    if (winner.kind === "timer") continue;
+    timerController.abort();
+    await timer.catch(() => undefined);
+    if ((await provePendingTellDispositionCustody(paths, disposition)).kind === "proven") {
+      child.release();
+      return { kind: "proven" };
+    }
+    return winner.exit.code === LEASH_HELD_EXIT ? { kind: "held" } : failedChild(winner.exit);
+  }
+}
+
+async function resolveDecidedPendingTellDisposition(
+  paths: AkumaPaths,
+  disposition: PendingTellDisposition,
+  spawn: (launch: BodyLaunch) => Promise<OwnedProcess>,
+): Promise<void> {
+  try {
+    if (await consumeProvenDisposition(paths, disposition)) return;
+    const wake = await awaitDispositionCustody(
+      paths,
+      disposition,
+      await spawn({ paths, refuseIfHeld: true }),
+      abortableDelay,
+    );
+    if (wake.kind === "proven") {
+      await resolvePendingTellDisposition(paths, disposition.bodySequence, new Date().toISOString());
+      return;
+    }
+    // Predecessor still holds the leash: leave the Heart disposition open.
+    if (wake.kind === "held") return;
+    await settleUndeliveredDisposition(
+      paths,
+      disposition,
+      wake.kind === "failed" ? wake.diagnostic : "successor custody unproven",
+    );
+  } catch (error) {
+    await settleUndeliveredDisposition(paths, disposition, error);
   }
 }
 
@@ -332,12 +424,23 @@ export async function handoffPendingTells(
   paths: AkumaPaths,
   spawn: (launch: BodyLaunch) => Promise<OwnedProcess> = spawnAkumaBody,
 ): Promise<void> {
-  try {
-    if ((await readHeart(paths)).pending.length === 0) return;
-    (await spawn({ paths, refuseIfHeld: true })).release();
-  } catch (error) {
-    await projectUndeliveredPendingTell(paths, error);
+  const open = await readOpenPendingTellDisposition(paths);
+  if (open !== null) {
+    await resolveDecidedPendingTellDisposition(paths, open, spawn);
+    return;
   }
+  const before = await readHeart(paths);
+  if (before.pending.length === 0) return;
+  if ((await probeLeash(paths)) === "held") return;
+  const bodySequence = before.latestBody?.sequence;
+  if (bodySequence === undefined || before.latestBody?.end === undefined) return;
+  const decided = await decidePendingTellDisposition(paths, {
+    bodySequence,
+    at: new Date().toISOString(),
+    handoff: before.latestBody.end === "put-down",
+  });
+  if (decided === null) return;
+  await resolveDecidedPendingTellDisposition(paths, decided, spawn);
 }
 
 export async function driveAkumaBody(
@@ -352,6 +455,8 @@ export async function driveAkumaBody(
   if (acquired === "absent") return;
   const leash = acquired;
   let pendingTellDisposition: BodyTurnEnd = undefined;
+  let bodySequence: number | undefined;
+  let decidedDisposition: PendingTellDisposition | null = null;
   try {
     const soul = await bornSoul(launch, leash, runtime.now());
     if (soul === null) return;
@@ -362,6 +467,7 @@ export async function driveAkumaBody(
     const selected = adapter ?? (await resolveProviderExecution(soul.provider)).adapter;
     if (!(await prepareBodyStart(launch.paths, leash))) return;
     const body = await leash.recordBody(launch.paths, { leashTakenAt: runtime.now() });
+    bodySequence = body.sequence;
     const supervisor = await BodySupervisor.open(launch.paths, body.sequence, leash);
     const execution = { launch, soul, adapter: selected, bodySequence: body.sequence, supervisor, runtime };
     try {
@@ -381,9 +487,20 @@ export async function driveAkumaBody(
     }
     throw error;
   } finally {
+    if (bodySequence !== undefined && (await heartExists(launch.paths))) {
+      decidedDisposition = await decidePendingTellDisposition(launch.paths, {
+        bodySequence,
+        at: runtime.now(),
+        handoff: pendingTellDisposition === "handoff",
+      });
+    }
     leash.release();
-    if (pendingTellDisposition === "handoff") {
-      await handoffPendingTells(launch.paths, runtime.spawnBody ?? spawnAkumaBody);
+    if (decidedDisposition !== null) {
+      await resolveDecidedPendingTellDisposition(
+        launch.paths,
+        decidedDisposition,
+        runtime.spawnBody ?? spawnAkumaBody,
+      );
     }
   }
 }

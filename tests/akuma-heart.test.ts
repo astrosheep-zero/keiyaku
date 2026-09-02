@@ -15,6 +15,7 @@ import {
   appendActivity,
   beginTurn,
   breakBody,
+  decidePendingTellDisposition,
   endTurn,
   finishBodyIfIdle,
   heartExists,
@@ -22,6 +23,7 @@ import {
   HeartAbsentError,
   life,
   probeLeash,
+  provePendingTellDispositionCustody,
   pauseRequested,
   readHeart,
   readForkPoint,
@@ -46,6 +48,7 @@ import { insertActivityFact, insertKillFact, insertSessionFact, insertStopContro
 import { decodeSoul, decodeSoulRow, encodeSoul, encodeSoulRow } from "../src/akuma/heart/soul.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { insertTellFact } from "../src/akuma/heart/tells.js";
+import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import { turnRecipe } from "../src/akuma/turn-drive.js";
 import { World } from "../src/world.js";
 
@@ -949,7 +952,7 @@ test("unknown Body Request state is authority corruption", async () => {
   }
 });
 
-test("heart schema version 22 and leash schema version 4 hard-refuse old authority", async () => {
+test("heart schema version 23 and leash schema version 4 hard-refuse old authority", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-schema-cut-"));
   const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "30000000" });
   try {
@@ -963,7 +966,7 @@ test("heart schema version 22 and leash schema version 4 hard-refuse old authori
       "CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)",
     );
     leash.close();
-    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 22/u);
+    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 23/u);
     await assert.rejects(HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -1526,6 +1529,41 @@ test("Heart reads lastActivityAt from the final retained timeline row", async ()
     });
     assert.equal((await readHeart(value.allocated.paths)).lastActivityAt, "2026-08-08T00:00:03.000Z");
     body.release();
+  } finally {
+    value.close();
+  }
+});
+
+test("pending Tell disposition rejects a missing Tell as authority corruption", async () => {
+  const value = await fixture();
+  try {
+    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await leash.birth(value.allocated.paths, value.soul);
+    const body = await leash.recordBody(value.allocated.paths, {
+      leashTakenAt: "2026-08-08T00:00:00.000Z",
+    });
+    leash.release();
+    await recordTell(value.allocated.paths, {
+      id: "tell-corrupt-disposition",
+      body: "continue",
+      recordedAt: "2026-08-08T00:00:01.000Z",
+    });
+    const disposition = await decidePendingTellDisposition(value.allocated.paths, {
+      bodySequence: body.sequence,
+      at: "2026-08-08T00:00:02.000Z",
+      handoff: true,
+    });
+    assert.deepEqual(disposition, { bodySequence: body.sequence, tellIds: ["tell-corrupt-disposition"] });
+
+    const database = writeHeart(value.allocated.paths.heart);
+    database.exec("PRAGMA foreign_keys=OFF");
+    database.prepare("DELETE FROM tells WHERE id = ?").run("tell-corrupt-disposition");
+    database.close();
+
+    await assert.rejects(
+      provePendingTellDispositionCustody(value.allocated.paths, disposition!),
+      (error: unknown) => error instanceof AuthorityCorruptionError && /missing tell/u.test(String(error)),
+    );
   } finally {
     value.close();
   }

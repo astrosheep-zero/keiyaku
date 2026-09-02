@@ -28,23 +28,36 @@ history, but hung permanently refuses them and untidy remains conservative.
 
 Normal session completion is distinct from admission-failure termination. When a
 Body ends a live session normally with pending Tell and no live tell channel, that
-ending Body decides exactly one disposition once, records it, then causes exactly
-one successor or an explicit undelivered terminal projection. Successor creation is
-a consequence of that recorded disposition, never a second decision, and duplicate
-wake must not create two successors. Admission failure remains terminal: it
-produces no automatic handoff or retry. There is no generalized retry loop and no
-change to provider tell capability.
+ending Body decides exactly one disposition once. Heart records that decision in
+the same atomic operation as ending-Body state, capturing the exact pending-Tell
+identity snapshot before leash release. There is no async window between body end,
+leash release, and handoff that leaves those Tell identities without a Heart
+disposition decision. A successor holds the snapshotted pending Tell only after
+Heart proves that exact successor took those identities; sequence growth, spawn
+resolution, Body existence alone, or an unqualified held leash is not proof. Until
+that proof, those Tell identities remain pending and the disposition is not
+consumed. If spawn, release, or custody proof fails, the same session-end step
+records a Heart-owned undelivered terminal projection for exactly that snapshot.
+Concurrent Tells admitted after the snapshot remain pending for their own wake. A
+Body log line is never the disposition; it is at most evidence of one. No path
+leaves a disposition's Tell identities with neither a proven successor nor a
+Heart-owned undelivered projection. Successor creation is a consequence of that
+disposition, never a second decision, and duplicate wake must not create two
+dispositions. Admission failure remains terminal: it produces no automatic handoff
+or retry. There is no generalized retry loop and no change to provider tell
+capability.
 
 ## Tell And Control
 
 Tell admission is atomic with Soul existence, so unborn targets refuse without
 leaving future input behind. Body records delivery only after provider submission
-evidence and terminal receipts only from provider evidence. Tell is at-least-once
-by stable identity, not exactly-once: lost unrecorded submission remains pending,
-while any terminal witness settles it without rollback. Kill never discards a
-Tell. A durable resume promise with no adapter resume capability refuses without
-starting fresh, deleting the promise, or creating a recovery machine. There is
-no public resume verb.
+evidence and provider terminal receipts only from provider evidence. Session-end
+pending-Tell disposition may record a Heart undelivered terminal witness when
+successor custody is not proven. Tell is at-least-once by stable identity, not
+exactly-once: lost unrecorded submission remains pending, while any terminal
+witness settles it without rollback. Kill never discards a Tell. A durable resume
+promise with no adapter resume capability refuses without starting fresh, deleting
+the promise, or creating a recovery machine. There is no public resume verb.
 
 Interrupt asks the current Body to yield, then requires its explicit settlement
 and leash proof before atomically recording the Tell and waking a successor.

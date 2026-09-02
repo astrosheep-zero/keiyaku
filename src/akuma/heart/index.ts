@@ -40,9 +40,16 @@ import {
 import type { ActivityFact } from "./rows.js";
 import {
   insertTellDeliveryFact,
+  dispositionSnapshotProven,
+  insertTellDispositionSnapshot,
   insertTellFact,
   insertTellReceiptFact,
+  insertUndeliveredTellReceipts,
+  latestOpenTellDisposition,
+  openTellDispositionIds,
   pendingTellFacts,
+  resolveTellDispositionSnapshot,
+  successorBodyHoldingDisposition,
   tellFact,
   tellIdsForFence,
 } from "./tells.js";
@@ -213,6 +220,89 @@ export async function recordTellReceipt(paths: AkumaPaths, input: TellReceiptInp
         input.evidence === "exact" ? [input.tellId] : tellIdsForFence(heart, input.turnSequence, input.fence);
       if (tellIds.length === 0) throw new Error("tell receipt has no delivery mapping");
       insertTellReceiptFact(heart, input);
+      pruneActivityFacts(heart, ACTIVITY_LIMIT);
+    }),
+  );
+}
+
+export type PendingTellDisposition = Readonly<{
+  bodySequence: number;
+  tellIds: readonly string[];
+}>;
+
+export async function decidePendingTellDisposition(
+  paths: AkumaPaths,
+  input: Readonly<{ bodySequence: number; at: string; handoff: boolean }>,
+): Promise<PendingTellDisposition | null> {
+  return await withHeart(paths, (heart) =>
+    transaction(heart, () => {
+      const body = latestBodyFact(heart);
+      if (body === null || body.sequence !== input.bodySequence) return null;
+      const existing = openTellDispositionIds(heart, input.bodySequence);
+      if (existing !== null) return { bodySequence: input.bodySequence, tellIds: existing };
+      const pending = pendingTellFacts(heart);
+      const tellIds = pending.map((tell) => tell.id);
+      if (tellIds.length === 0) return null;
+      if (body.end === undefined) {
+        if (!input.handoff) return null;
+        endBodyFact(heart, { sequence: input.bodySequence, end: "put-down", at: input.at });
+      } else if (body.end === "broke-off") {
+        return null;
+      }
+      insertTellDispositionSnapshot(heart, input.bodySequence, tellIds, input.at);
+      pruneActivityFacts(heart, ACTIVITY_LIMIT);
+      return { bodySequence: input.bodySequence, tellIds };
+    }),
+  );
+}
+
+export async function readOpenPendingTellDisposition(paths: AkumaPaths): Promise<PendingTellDisposition | null> {
+  return await withHeart(paths, (heart) => readTransaction(heart, () => latestOpenTellDisposition(heart)));
+}
+
+export async function resolvePendingTellDisposition(
+  paths: AkumaPaths,
+  bodySequence: number,
+  at: string,
+): Promise<void> {
+  await withHeart(paths, (heart) =>
+    transaction(heart, () => {
+      resolveTellDispositionSnapshot(heart, bodySequence, at);
+      pruneActivityFacts(heart, ACTIVITY_LIMIT);
+    }),
+  );
+}
+
+/**
+ * Heart-owned disposition custody proof. Sequence growth, spawn resolution, and
+ * an unqualified held leash are never proof. Returns the successor Body sequence
+ * when that exact Body took the frozen Tell-id snapshot by delivery, or true when
+ * the snapshot is already fully settled (no longer pending).
+ */
+export async function provePendingTellDispositionCustody(
+  paths: AkumaPaths,
+  disposition: PendingTellDisposition,
+): Promise<Readonly<{ kind: "proven"; successorBodySequence?: number } | { kind: "unproven" }>> {
+  return await withHeart(paths, (heart) =>
+    readTransaction(heart, () => {
+      if (!dispositionSnapshotProven(heart, disposition)) return { kind: "unproven" as const };
+      const successorBodySequence = successorBodyHoldingDisposition(heart, disposition);
+      return successorBodySequence === null
+        ? { kind: "proven" as const }
+        : { kind: "proven" as const, successorBodySequence };
+    }),
+  );
+}
+
+export async function recordUndeliveredPendingTells(
+  paths: AkumaPaths,
+  at: string,
+  tellIds: readonly string[],
+): Promise<void> {
+  if (tellIds.length === 0) return;
+  await withHeart(paths, (heart) =>
+    transaction(heart, () => {
+      insertUndeliveredTellReceipts(heart, tellIds, at);
       pruneActivityFacts(heart, ACTIVITY_LIMIT);
     }),
   );
