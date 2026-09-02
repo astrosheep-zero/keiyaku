@@ -1,6 +1,7 @@
-import { akumaIdSchema, akumaStatusSchema } from "../akuma/akuma.js";
-import type { KillEvidence, TellResult } from "../akuma/index.js";
-import { tellRowSchema } from "../akuma/projection.js";
+import { akumaIdSchema, akumaStatusSchema } from "./akuma.js";
+import type { TellResult } from "./akuma.js";
+import type { KillEvidence } from "./heart/index.js";
+import { tellRowSchema } from "./projection.js";
 import { contractId } from "../core/facts/types.js";
 import { taskRowsSchema } from "../task/board.js";
 import { z } from "zod";

@@ -2,7 +2,7 @@ import { LEASH_HELD_EXIT, runAkumaBody, type BodyLaunch } from "./akuma/body.js"
 import { worldRootForAkumaPaths } from "./akuma/identity.js";
 import { World } from "./world.js";
 import { executeKillAkuma, executeTellAkuma, executeWaitAkuma } from "./library/fleet.js";
-import { fleetRequestCommands, type FleetRequestPort } from "./library/fleet.js";
+import { fleetRequestCommands, type FleetRequestPort } from "./akuma/fleet-request.js";
 import { requireBranchesToBeUpToDateFrom, worktreeHooksFrom } from "./library/configuration.js";
 import {
   contractRequestCommands,

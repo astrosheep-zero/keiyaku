@@ -90,7 +90,6 @@ const knownLibraryCompositions = [
   "library/catalog.ts",
   "library/composition.ts",
   "library/contract-handle.ts",
-  "library/fleet-result.ts",
   "library/fleet.ts",
   "library/nuke.ts",
   "library/reconcile.ts",
