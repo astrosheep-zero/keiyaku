@@ -54,6 +54,7 @@ export const INTEGRATION_TEST_FILES = [
   "tests/akuma-body.test.ts",
   "tests/akuma-heart.test.ts",
   "tests/akuma-identity.test.ts",
+  "tests/akuma-list-page.test.ts",
   "tests/akuma-physical.test.ts",
   "tests/akuma-provider.test.ts",
   "tests/akuma-public.test.ts",
