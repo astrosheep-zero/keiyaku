@@ -88,6 +88,7 @@
     "tests/build-windows-launcher.test.ts",
     "tests/contract-document.test.ts",
     "tests/fold.test.ts",
+    "tests/lifecycle.test.ts",
     "tests/git-repository.test.ts",
     "tests/markdown-ast.test.ts",
     "tests/plugin-runtime.test.ts",
