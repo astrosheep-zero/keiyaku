@@ -4,13 +4,15 @@ import { fileURLToPath } from "node:url";
 import { checkArchitecture, type Diagnostic, type SourceInput } from "./architecture/engine.js";
 import { KEIYAKU_ARCHITECTURE_POLICY } from "./architecture/policy.js";
 
+export const ARCHITECTURE_SOURCE_EXTENSION = /\.(?:cjs|cts|js|mjs|mts|ts|tsx)$/;
+
 function sourceInputs(directory: string, prefix = ""): SourceInput[] {
   const inputs: SourceInput[] = [];
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const absolute = path.join(directory, entry.name);
     const relative = path.posix.join(prefix, entry.name);
     if (entry.isDirectory()) inputs.push(...sourceInputs(absolute, relative));
-    else if (entry.isFile() && /\.(?:cts|mts|ts|tsx)$/.test(entry.name)) {
+    else if (entry.isFile() && ARCHITECTURE_SOURCE_EXTENSION.test(entry.name)) {
       inputs.push({ path: relative, source: readFileSync(absolute, "utf8") });
     }
   }

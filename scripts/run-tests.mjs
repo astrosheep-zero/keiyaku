@@ -14,25 +14,30 @@ const valueOptions = new Set([
   "--test-timeout",
   "--suite",
 ]);
-/** @type {string[]} */
-const options = [];
-/** @type {string[]} */
-const files = [];
-
-for (let index = 0; index < supplied.length; index += 1) {
-  const argument = supplied[index];
-  if (argument === undefined) continue;
-  if (!argument.startsWith("--")) {
-    files.push(argument);
-    continue;
+/** @param {string[]} suppliedArguments @returns {{ options: string[], files: string[] }} */
+function parseArguments(suppliedArguments) {
+  /** @type {string[]} */
+  const options = [];
+  /** @type {string[]} */
+  const files = [];
+  for (let index = 0; index < suppliedArguments.length; index += 1) {
+    const argument = suppliedArguments[index];
+    if (argument === undefined) continue;
+    if (!argument.startsWith("--")) {
+      files.push(argument);
+      continue;
+    }
+    options.push(argument);
+    const value = suppliedArguments[index + 1];
+    if (valueOptions.has(argument) && value !== undefined) {
+      options.push(value);
+      index += 1;
+    }
   }
-  options.push(argument);
-  const value = supplied[index + 1];
-  if (valueOptions.has(argument) && value !== undefined) {
-    options.push(value);
-    index += 1;
-  }
+  return { options, files };
 }
+
+const { options, files } = parseArguments(supplied);
 
 const suiteOption = options.findIndex((option) => option === "--suite" || option.startsWith("--suite="));
 const suiteFlag = options[suiteOption];

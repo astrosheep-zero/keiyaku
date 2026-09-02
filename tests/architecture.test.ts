@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { checkArchitecture, type Diagnostic, type SourceInput } from "../scripts/architecture/engine.js";
 import { KEIYAKU_ARCHITECTURE_POLICY } from "../scripts/architecture/policy.js";
+import { ARCHITECTURE_SOURCE_EXTENSION, runArchitectureCheck } from "../scripts/check-architecture.js";
 
 function check(files: Readonly<Record<string, string>>): readonly Diagnostic[] {
   const inputs: SourceInput[] = Object.entries(files).map(([path, source]) => ({ path, source }));
@@ -279,4 +283,115 @@ test("architecture policy reserves Verification currentness for its protocol own
 
   assert.deepEqual(accepted, []);
   assert.deepEqual(rules(rejected), ["architecture/dependency-direction"]);
+});
+
+test("architecture analysis covers executable JS, MJS, and CJS capability uses", () => {
+  const spawn = 'import { spawn } from "node:child_process"; export const run = spawn;';
+  const accepted = check({
+    "scripts/owned.js": spawn,
+    "scripts/owned.mjs": spawn,
+    "scripts/owned.cjs": spawn,
+    "runtime/proc/run.js": spawn,
+  });
+  const rejected = check({
+    "core/verbs/bind.js": spawn,
+    "core/verbs/bind.mjs": 'import { readFileSync } from "node:fs"; export const read = readFileSync;',
+    "core/verbs/bind.cjs": "export const environment = process.env;",
+  });
+
+  assert.deepEqual(accepted, []);
+  assert.deepEqual(rules(rejected), [
+    "architecture/capability-use",
+    "architecture/capability-import",
+    "architecture/capability-import",
+  ]);
+});
+
+test("architecture analysis detects top-level const container mutation without alias analysis", () => {
+  const rejected = check({
+    "core/facts/state.ts": [
+      "const map = new Map();",
+      "const set = new Set();",
+      "const list = [];",
+      "const record = {};",
+      "map.set(1, 2);",
+      "set.add(1);",
+      "list.push(1);",
+      "record.flag = true;",
+    ].join("\n"),
+  });
+  const beforeDeclaration = check({
+    "core/facts/state.ts": [
+      "function mutate(): void { map.set(1, 2); list.push(1); record.flag = true; set.add(1); }",
+      "const map = new Map();",
+      "const set = new Set();",
+      "const list = [];",
+      "const record = {};",
+    ].join("\n"),
+    "core/facts/state.js": [
+      "function mutate() { map.set(1, 2); list.push(1); }",
+      "const map = new Map();",
+      "const list = [];",
+    ].join("\n"),
+  });
+  const accepted = check({
+    "core/facts/state.ts": [
+      "const count = 1;",
+      "const nested = { items: [] };",
+      "export function local(): void {",
+      "  const map = new Map();",
+      "  map.set(1, 2);",
+      "  const list = [];",
+      "  list.push(1);",
+      "}",
+      "nested.items.push(1);",
+    ].join("\n"),
+  });
+
+  assert.equal(rules(rejected).filter((rule) => rule === "architecture/capability-use").length, 4);
+  assert.ok(rejected.every((diagnostic) => diagnostic.detail.includes("module-mutable-state")));
+  assert.equal(rules(beforeDeclaration).filter((rule) => rule === "architecture/capability-use").length, 6);
+  assert.ok(beforeDeclaration.every((diagnostic) => diagnostic.detail.includes("module-mutable-state")));
+  assert.deepEqual(accepted, []);
+});
+
+test("architecture policy owns plugin runtime module mutable state exactly", () => {
+  const accepted = check({
+    "plugin/runtime.ts": "const PROCESS_RUNTIMES = new Map();\nPROCESS_RUNTIMES.set(1, 2);\n",
+  });
+  const rejected = check({
+    "core/facts/state.ts": "const map = new Map();\nmap.set(1, 2);\n",
+    "core/facts/state.js": "const list = [];\nlist.push(1);\n",
+    "core/facts/state.mjs": "const set = new Set();\nset.add(1);\n",
+    "core/facts/state.cjs": "const record = {};\nrecord.flag = true;\n",
+  });
+
+  assert.deepEqual(accepted, []);
+  assert.equal(rules(rejected).filter((rule) => rule === "architecture/capability-use").length, 4);
+  assert.ok(rejected.every((diagnostic) => diagnostic.detail.includes("module-mutable-state")));
+});
+
+test("architecture source discovery includes executable JS, MJS, and CJS scripts", () => {
+  assert.match("owned.js", ARCHITECTURE_SOURCE_EXTENSION);
+  assert.match("owned.mjs", ARCHITECTURE_SOURCE_EXTENSION);
+  assert.match("owned.cjs", ARCHITECTURE_SOURCE_EXTENSION);
+  assert.doesNotMatch("owned.json", ARCHITECTURE_SOURCE_EXTENSION);
+
+  const root = mkdtempSync(path.join(tmpdir(), "keiyaku-architecture-"));
+  try {
+    mkdirSync(path.join(root, "src", "core", "verbs"), { recursive: true });
+    mkdirSync(path.join(root, "scripts"), { recursive: true });
+    writeFileSync(path.join(root, "src", "core", "verbs", "bind.ts"), "export function decideBind(): void {}");
+    writeFileSync(
+      path.join(root, "scripts", "owned.mjs"),
+      'import { spawn } from "node:child_process"; export const run = spawn;\n',
+    );
+    writeFileSync(
+      path.join(root, "src", "core", "verbs", "bind.js"),
+      'import { spawn } from "node:child_process"; export const run = spawn;\n',
+    );
+    assert.equal(runArchitectureCheck(root), 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

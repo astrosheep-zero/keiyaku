@@ -99,7 +99,11 @@ function resolveRelative(from: string, specifier: string, known: ReadonlySet<str
     `${extensionless}.mts`,
     `${extensionless}.cts`,
     `${extensionless}.tsx`,
+    `${extensionless}.js`,
+    `${extensionless}.mjs`,
+    `${extensionless}.cjs`,
     `${extensionless}/index.ts`,
+    `${extensionless}/index.js`,
   ];
   return candidates.find((candidate) => known.has(candidate)) ?? null;
 }
@@ -207,14 +211,96 @@ function constructedCapability(node: ts.NewExpression): Capability | null {
   return null;
 }
 
-function capabilityOf(node: ts.Node): Capability | null {
+const CONTAINER_CONSTRUCTORS = new Set(["Array", "Map", "Object", "Set"]);
+const MUTATING_METHODS = new Set([
+  "add",
+  "clear",
+  "copyWithin",
+  "delete",
+  "fill",
+  "pop",
+  "push",
+  "reverse",
+  "set",
+  "shift",
+  "sort",
+  "splice",
+  "unshift",
+]);
+
+function unwrapExpression(node: ts.Expression): ts.Expression {
+  let current = node;
+  while (
+    ts.isParenthesizedExpression(current) ||
+    ts.isAsExpression(current) ||
+    ts.isTypeAssertionExpression(current) ||
+    ts.isSatisfiesExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
+function isContainerInitializer(node: ts.Expression): boolean {
+  const initializer = unwrapExpression(node);
+  if (ts.isArrayLiteralExpression(initializer) || ts.isObjectLiteralExpression(initializer)) return true;
+  return (
+    ts.isNewExpression(initializer) &&
+    ts.isIdentifier(initializer.expression) &&
+    CONTAINER_CONSTRUCTORS.has(initializer.expression.text)
+  );
+}
+
+function topLevelConstContainerNames(node: ts.VariableStatement): readonly string[] {
+  if (!ts.isSourceFile(node.parent) || (node.declarationList.flags & ts.NodeFlags.Const) === 0) return [];
+  return node.declarationList.declarations.flatMap((declaration) =>
+    ts.isIdentifier(declaration.name) && declaration.initializer && isContainerInitializer(declaration.initializer)
+      ? [declaration.name.text]
+      : [],
+  );
+}
+
+function topLevelConstContainers(sourceFile: ts.SourceFile): ReadonlySet<string> {
+  const containers = new Set<string>();
+  for (const statement of sourceFile.statements) {
+    if (ts.isVariableStatement(statement)) {
+      for (const name of topLevelConstContainerNames(statement)) containers.add(name);
+    }
+  }
+  return containers;
+}
+
+function assignmentTargetExpression(node: ts.Node): ts.Expression | undefined {
+  if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) return node.expression;
+  return undefined;
+}
+
+function capabilityOf(node: ts.Node, containers: ReadonlySet<string>): Capability | null {
   if (ts.isPropertyAccessExpression(node)) return propertyCapability(node);
   if (ts.isNewExpression(node)) return constructedCapability(node);
   if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
     const argument = node.arguments[0];
     return argument && ts.isStringLiteral(argument) ? null : "dynamic-import-nonliteral";
   }
-  if (ts.isCallExpression(node)) return calledGlobalCapability(node);
+  if (ts.isCallExpression(node)) {
+    if (
+      ts.isPropertyAccessExpression(node.expression) &&
+      ts.isIdentifier(node.expression.expression) &&
+      containers.has(node.expression.expression.text) &&
+      MUTATING_METHODS.has(node.expression.name.text)
+    ) {
+      return "module-mutable-state";
+    }
+    return calledGlobalCapability(node);
+  }
+  if (
+    ts.isBinaryExpression(node) &&
+    node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+    node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+  ) {
+    const target = assignmentTargetExpression(node.left);
+    if (target && ts.isIdentifier(target) && containers.has(target.text)) return "module-mutable-state";
+  }
   if (
     ts.isVariableStatement(node) &&
     ts.isSourceFile(node.parent) &&
@@ -233,6 +319,7 @@ function parseSources(inputs: readonly SourceInput[]): readonly ParsedSource[] {
     const declarations: Declaration[] = [];
     const runtimeReExports: Array<Readonly<{ line: number; column: number }>> = [];
     const capabilities: CapabilityUse[] = [];
+    const containers = topLevelConstContainers(sourceFile);
     const visit = (node: ts.Node): void => {
       const specifier = moduleSpecifier(node);
       if (specifier !== null) {
@@ -252,7 +339,7 @@ function parseSources(inputs: readonly SourceInput[]): readonly ParsedSource[] {
       if (declaration) declarations.push(declaration);
       const reExport = runtimeReExport(node, sourceFile);
       if (reExport) runtimeReExports.push(reExport);
-      const capability = capabilityOf(node);
+      const capability = capabilityOf(node, containers);
       if (capability) {
         const at = location(sourceFile, node);
         capabilities.push({ capability, line: at.line, column: at.column });
