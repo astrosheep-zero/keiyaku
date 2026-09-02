@@ -26,6 +26,15 @@ Tell pending for a later ordinary interaction; no daemon guarantees recovery.
 Successors never reconstruct predecessor custody. They may continue from clean
 history, but hung permanently refuses them and untidy remains conservative.
 
+Normal session completion is distinct from admission-failure termination. When a
+Body ends a live session normally with pending Tell and no live tell channel, that
+ending Body decides exactly one disposition once, records it, then causes exactly
+one successor or an explicit undelivered terminal projection. Successor creation is
+a consequence of that recorded disposition, never a second decision, and duplicate
+wake must not create two successors. Admission failure remains terminal: it
+produces no automatic handoff or retry. There is no generalized retry loop and no
+change to provider tell capability.
+
 ## Tell And Control
 
 Tell admission is atomic with Soul existence, so unborn targets refuse without

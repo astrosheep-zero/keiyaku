@@ -261,7 +261,9 @@ function turnOutcomeEmitter(launch: BodyLaunch, soul: Soul): (turnSequence: numb
   };
 }
 
-async function runBodyTurns(input: BodyExecution): Promise<void> {
+type BodyTurnEnd = "handoff" | undefined;
+
+async function runBodyTurns(input: BodyExecution): Promise<BodyTurnEnd> {
   const { launch, soul, adapter, bodySequence, supervisor, runtime } = input;
   let initial = launch.initialBody;
   const emitTurnOutcome = turnOutcomeEmitter(launch, soul);
@@ -301,7 +303,7 @@ async function runBodyTurns(input: BodyExecution): Promise<void> {
     }
     if (result.kind === "handoff") {
       await breakBody(launch.paths, { sequence: bodySequence, end: "put-down", at: runtime.now() });
-      return;
+      return "handoff";
     }
     if (result.kind === "resume-unsupported") {
       await breakBody(launch.paths, { sequence: bodySequence, end: "broke-off", at: runtime.now() });
@@ -318,6 +320,14 @@ async function runBodyTurns(input: BodyExecution): Promise<void> {
   }
 }
 
+async function projectUndeliveredPendingTell(paths: AkumaPaths, error: unknown): Promise<void> {
+  try {
+    await appendFile(paths.log, `pending Tell disposition undelivered: ${boundedDiagnostic(error)}\n`);
+  } catch {
+    /* undelivered projection loss never changes Heart truth */
+  }
+}
+
 export async function handoffPendingTells(
   paths: AkumaPaths,
   spawn: (launch: BodyLaunch) => Promise<OwnedProcess> = spawnAkumaBody,
@@ -325,8 +335,8 @@ export async function handoffPendingTells(
   try {
     if ((await readHeart(paths)).pending.length === 0) return;
     (await spawn({ paths, refuseIfHeld: true })).release();
-  } catch {
-    /* a later Heart interaction retries the unchanged pending Tell */
+  } catch (error) {
+    await projectUndeliveredPendingTell(paths, error);
   }
 }
 
@@ -341,6 +351,7 @@ export async function driveAkumaBody(
   if (acquired === "held") return "held";
   if (acquired === "absent") return;
   const leash = acquired;
+  let pendingTellDisposition: BodyTurnEnd = undefined;
   try {
     const soul = await bornSoul(launch, leash, runtime.now());
     if (soul === null) return;
@@ -354,7 +365,7 @@ export async function driveAkumaBody(
     const supervisor = await BodySupervisor.open(launch.paths, body.sequence, leash);
     const execution = { launch, soul, adapter: selected, bodySequence: body.sequence, supervisor, runtime };
     try {
-      if (await recoverBodyRequests(execution)) await runBodyTurns(execution);
+      if (await recoverBodyRequests(execution)) pendingTellDisposition = await runBodyTurns(execution);
     } finally {
       await supervisor.close();
     }
@@ -371,6 +382,9 @@ export async function driveAkumaBody(
     throw error;
   } finally {
     leash.release();
+    if (pendingTellDisposition === "handoff") {
+      await handoffPendingTells(launch.paths, runtime.spawnBody ?? spawnAkumaBody);
+    }
   }
 }
 
