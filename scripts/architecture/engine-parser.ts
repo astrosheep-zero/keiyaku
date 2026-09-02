@@ -275,38 +275,41 @@ function assignmentTargetExpression(node: ts.Node): ts.Expression | undefined {
   return undefined;
 }
 
-function capabilityOf(node: ts.Node, containers: ReadonlySet<string>): Capability | null {
-  if (ts.isPropertyAccessExpression(node)) return propertyCapability(node);
-  if (ts.isNewExpression(node)) return constructedCapability(node);
-  if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+function callCapability(node: ts.CallExpression, containers: ReadonlySet<string>): Capability | null {
+  if (node.expression.kind === ts.SyntaxKind.ImportKeyword) {
     const argument = node.arguments[0];
     return argument && ts.isStringLiteral(argument) ? null : "dynamic-import-nonliteral";
   }
-  if (ts.isCallExpression(node)) {
-    if (
-      ts.isPropertyAccessExpression(node.expression) &&
-      ts.isIdentifier(node.expression.expression) &&
-      containers.has(node.expression.expression.text) &&
-      MUTATING_METHODS.has(node.expression.name.text)
-    ) {
-      return "module-mutable-state";
-    }
-    return calledGlobalCapability(node);
-  }
   if (
-    ts.isBinaryExpression(node) &&
-    node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
-    node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+    ts.isPropertyAccessExpression(node.expression) &&
+    ts.isIdentifier(node.expression.expression) &&
+    containers.has(node.expression.expression.text) &&
+    MUTATING_METHODS.has(node.expression.name.text)
   ) {
-    const target = assignmentTargetExpression(node.left);
-    if (target && ts.isIdentifier(target) && containers.has(target.text)) return "module-mutable-state";
-  }
-  if (
-    ts.isVariableStatement(node) &&
-    ts.isSourceFile(node.parent) &&
-    (node.declarationList.flags & ts.NodeFlags.Const) === 0
-  )
     return "module-mutable-state";
+  }
+  return calledGlobalCapability(node);
+}
+
+function assignmentCapability(node: ts.BinaryExpression, containers: ReadonlySet<string>): Capability | null {
+  if (node.operatorToken.kind < ts.SyntaxKind.FirstAssignment || node.operatorToken.kind > ts.SyntaxKind.LastAssignment)
+    return null;
+  const target = assignmentTargetExpression(node.left);
+  return target && ts.isIdentifier(target) && containers.has(target.text) ? "module-mutable-state" : null;
+}
+
+function variableCapability(node: ts.VariableStatement): Capability | null {
+  return ts.isSourceFile(node.parent) && (node.declarationList.flags & ts.NodeFlags.Const) === 0
+    ? "module-mutable-state"
+    : null;
+}
+
+function capabilityOf(node: ts.Node, containers: ReadonlySet<string>): Capability | null {
+  if (ts.isPropertyAccessExpression(node)) return propertyCapability(node);
+  if (ts.isNewExpression(node)) return constructedCapability(node);
+  if (ts.isCallExpression(node)) return callCapability(node, containers);
+  if (ts.isBinaryExpression(node)) return assignmentCapability(node, containers);
+  if (ts.isVariableStatement(node)) return variableCapability(node);
   return null;
 }
 

@@ -11,6 +11,7 @@ export const LOCAL_TEST_FILES = [
   "tests/cli-render.test.ts",
   "tests/cli-selectors.test.ts",
   "tests/contract-document.test.ts",
+  "tests/contract-forwarding-result.test.ts",
   "tests/contract-guidance.test.ts",
   "tests/dependency-currentness.test.ts",
   "tests/fold.test.ts",

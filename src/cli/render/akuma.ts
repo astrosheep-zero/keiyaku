@@ -21,9 +21,7 @@ export { akumaRawAnswer } from "./akuma-activity.js";
 function dispatchLines(stage: DispatchStage): readonly string[] {
   if (stage.kind === "none") return [];
   if (stage.kind === "dispatched") {
-    return (stage.seatClose ?? []).map(
-      (lag) => `dispatch lag ${lag.kind} ${safeText(lag.diagnostic)}`,
-    );
+    return (stage.seatClose ?? []).map((lag) => `dispatch lag ${lag.kind} ${safeText(lag.diagnostic)}`);
   }
   if (stage.failure.kind === "conflict") return [`dispatch failed conflict ${stage.failure.current.contractId}`];
   return [`dispatch failed ${stage.failure.kind} ${safeText(stage.failure.diagnostic)}`];

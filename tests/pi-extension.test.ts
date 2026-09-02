@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -16,7 +16,10 @@ const piExtension = packageJson.pi?.extensions;
 if (!Array.isArray(piExtension) || typeof piExtension[0] !== "string") {
   throw new Error("Pi package extension is missing");
 }
-execFileSync("npm", ["run", "build"], { cwd: fileURLToPath(rootUrl), stdio: "inherit" });
+const builtExtension = fileURLToPath(new URL("build/integrations/pi/keiyaku.ts", rootUrl));
+if (!existsSync(builtExtension)) {
+  execFileSync("npm", ["run", "build"], { cwd: fileURLToPath(rootUrl), stdio: "inherit" });
+}
 const { default: keiyakuExtension } = (await import(new URL(piExtension[0], rootUrl).href)) as {
   default: (pi: ExtensionAPI) => void;
 };
@@ -101,7 +104,10 @@ test("Pi command runs one text status and does not refresh when dismissed", asyn
   assert.equal(calls[0]?.args.at(-1), "status");
   assert.equal(calls[0]?.args.includes("--json"), false);
   assert.ok(overlay);
-  assert.equal(overlay.render(80).some((line) => line.includes("Contract status")), true);
+  assert.equal(
+    overlay.render(80).some((line) => line.includes("Contract status")),
+    true,
+  );
   overlay.handleInput("\r");
   await invocation;
   assert.equal(calls.length, 1);
@@ -139,6 +145,9 @@ test("Pi command skips no-UI calls and preserves status diagnostics", async () =
         },
       },
     } as ExtensionContext);
-    assert.equal(displayed.some((line) => line.includes(expected)), true);
+    assert.equal(
+      displayed.some((line) => line.includes(expected)),
+      true,
+    );
   }
 });

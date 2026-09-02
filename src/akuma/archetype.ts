@@ -171,7 +171,13 @@ function archetypeReadonly(values: Readonly<Record<string, unknown>>): true | un
   return true;
 }
 
-function decodeArchetype(name: string, path: string, markdown: string): LocalArchetype {
+type ArchetypeFrontmatter = Readonly<{
+  lines: readonly string[];
+  closing: number;
+  values: Readonly<Record<string, unknown>>;
+}>;
+
+function parseArchetypeFrontmatter(markdown: string): ArchetypeFrontmatter {
   const lines = markdown.split(/\r?\n/u);
   if (lines[0]?.trim() !== "---") throw new TypeError("Akuma file must begin with YAML frontmatter");
   const closing = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
@@ -182,7 +188,23 @@ function decodeArchetype(name: string, path: string, markdown: string): LocalArc
   if (decoded === null || typeof decoded !== "object" || Array.isArray(decoded)) {
     throw new TypeError("Akuma frontmatter must be one mapping");
   }
-  const values = decoded as Readonly<Record<string, unknown>>;
+  return { lines, closing, values: decoded as Readonly<Record<string, unknown>> };
+}
+
+type ArchetypeFields = Readonly<{
+  base?: string;
+  provider?: string;
+  model?: string;
+  effort?: string;
+  readonly?: true;
+  network?: "disabled" | "enabled";
+  description?: string;
+  allowed?: AllowedActions;
+  allowedPresent: boolean;
+  systemPromptMode?: "append" | "replace";
+}>;
+
+function decodeArchetypeFields(values: Readonly<Record<string, unknown>>): ArchetypeFields {
   const provider = archetypeField(values, "provider");
   const baseValue = archetypeField(values, "base");
   const base = baseValue === undefined ? undefined : archetypeName(baseValue);
@@ -195,30 +217,47 @@ function decodeArchetype(name: string, path: string, markdown: string): LocalArc
   const allowedPresent = "allowed" in values;
   const allowed = allowedPresent ? effectiveAllowedActions(values.allowed) : undefined;
   const systemPromptMode = archetypeEnum(values, "systemPromptMode", ["append", "replace"] as const);
+  return {
+    ...(base === undefined ? {} : { base }),
+    ...(provider === undefined ? {} : { provider }),
+    ...(model === undefined ? {} : { model }),
+    ...(effort === undefined ? {} : { effort }),
+    ...(readonly === undefined ? {} : { readonly }),
+    ...(network === undefined ? {} : { network }),
+    ...(description === undefined ? {} : { description }),
+    ...(allowed === undefined ? {} : { allowed }),
+    allowedPresent,
+    ...(systemPromptMode === undefined ? {} : { systemPromptMode }),
+  };
+}
+
+function decodeArchetype(name: string, path: string, markdown: string): LocalArchetype {
+  const { lines, closing, values } = parseArchetypeFrontmatter(markdown);
+  const fields = decodeArchetypeFields(values);
   const systemPrompt = lines.slice(closing + 1).join("\n");
-  if (systemPromptMode !== undefined && systemPrompt.length === 0) {
+  if (fields.systemPromptMode !== undefined && systemPrompt.length === 0) {
     throw new TypeError("Akuma systemPromptMode requires a nonempty Markdown body");
   }
   return Object.freeze({
     name,
     path,
-    ...(base === undefined ? {} : { base }),
-    ...(provider === undefined ? {} : { provider }),
-    ...(description === undefined ? {} : { description }),
+    ...(fields.base === undefined ? {} : { base: fields.base }),
+    ...(fields.provider === undefined ? {} : { provider: fields.provider }),
+    ...(fields.description === undefined ? {} : { description: fields.description }),
     options: decodeProviderOptions({
-      ...(model === undefined ? {} : { model }),
-      ...(effort === undefined ? {} : { effort }),
-      ...(network === undefined ? {} : { network }),
+      ...(fields.model === undefined ? {} : { model: fields.model }),
+      ...(fields.effort === undefined ? {} : { effort: fields.effort }),
+      ...(fields.network === undefined ? {} : { network: fields.network }),
       ...(systemPrompt.length === 0
         ? {}
         : {
             systemPrompt,
-            systemPromptMode: systemPromptMode ?? "append",
+            systemPromptMode: fields.systemPromptMode ?? "append",
           }),
     }),
-    ...(readonly === undefined ? {} : { readonly }),
-    ...(allowed === undefined ? {} : { allowed }),
-    allowedPresent,
+    ...(fields.readonly === undefined ? {} : { readonly: fields.readonly }),
+    ...(fields.allowed === undefined ? {} : { allowed: fields.allowed }),
+    allowedPresent: fields.allowedPresent,
   });
 }
 

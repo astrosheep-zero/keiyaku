@@ -242,11 +242,19 @@ async function activate(
   world: WorldRoot,
   activated: Set<string>,
   report: PluginDiagnostic | undefined,
+  onStarted: () => void,
 ): Promise<readonly RegisteredHandler[]> {
+  let started = false;
+  const markStarted = () => {
+    if (started) return;
+    started = true;
+    onStarted();
+  };
   let module: Record<string, unknown>;
   try {
     module = await importFromWorld(world, selected.package);
   } catch (error) {
+    markStarted();
     diagnostic(report, selected.id, "import", error);
     return [];
   }
@@ -259,6 +267,7 @@ async function activate(
     }
     if (activated.has(candidate.manifest.id)) throw new TypeError(`plugin id is duplicated: ${candidate.manifest.id}`);
   } catch (error) {
+    markStarted();
     diagnostic(report, selected.id, "validation", error);
     return [];
   }
@@ -276,10 +285,12 @@ async function activate(
       },
     });
   } catch (error) {
+    markStarted();
     diagnostic(report, selected.id, "validation", error);
     return [];
   }
 
+  markStarted();
   try {
     const instance = await candidate.activate(context);
     const registered = handlers(candidate.manifest.id, instance);
@@ -304,16 +315,32 @@ async function createPluginRuntime(input: PluginRuntimeInput): Promise<PluginRun
   const report = input.reportDiagnostic;
   const selected = selectedPlugins(input.settings ?? (await settings({ root: input.world })), report);
   const activated = new Set<string>();
-  const registered: RegisteredHandler[] = [];
-  for (const entry of selected) {
-    void activate(entry, input.world, activated, report)
-      .then((handlers) => registered.push(...handlers))
-      .catch((error) => diagnostic(report, entry.id, "activation", error));
+  const registered = new Map<number, readonly RegisteredHandler[]>();
+  let previousStarted = Promise.resolve();
+  for (const [index, entry] of selected.entries()) {
+    let releaseStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      releaseStarted = resolve;
+    });
+    void previousStarted.then(async () => {
+      try {
+        const handlers = await activate(entry, input.world, activated, report, releaseStarted);
+        if (handlers.length > 0) registered.set(index, handlers);
+      } catch (error) {
+        diagnostic(report, entry.id, "activation", error);
+      } finally {
+        releaseStarted();
+      }
+    });
+    previousStarted = started;
   }
 
   return Object.freeze({
     emit(signal: PluginSignal, reportDiagnostic: PluginDiagnostic | undefined = report): Promise<void> {
-      const deliveries = registered.filter((handler) => handler.kind === signal.kind);
+      const deliveries = [...registered.entries()]
+        .sort(([left], [right]) => left - right)
+        .flatMap(([, handlers]) => handlers)
+        .filter((handler) => handler.kind === signal.kind);
       for (const entry of deliveries) {
         void Promise.resolve()
           .then(() => entry.handler(signal as never))

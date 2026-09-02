@@ -9,12 +9,8 @@ import type { TaskHolderAdmission } from "../settlement/holder.js";
 import type { WorktreeHooks } from "./configuration.js";
 import { completeReconcile, type ReconcileCompletion } from "./reconcile.js";
 import type { AuditReport } from "../protocol/audit.js";
-import type { CompletionEvidence } from "../protocol/completion.js";
 import type { IntegrationConflictMaterialized } from "../protocol/deliver.js";
-import type { Delivery } from "./delivery.js";
 import type { ContinuationReport } from "./continuation.js";
-import type { Review } from "./contract-forwarding-result.js";
-import type { AmendResult, BindResult } from "./contract-types.js";
 import type { KeiyakuRefused, KeiyakuRetry } from "./refusal.js";
 
 export type MutationFinalitySurface =
@@ -33,13 +29,13 @@ export type MutationFinality =
     }>
   | Readonly<{ kind: "not-admitted" }>;
 
+type AcceptedFinalityInput = Readonly<{
+  kind: "accepted";
+  pending: readonly MutationPendingSurface[];
+}>;
+
 export type MutationFinalityInput =
-  | MutationResult<AuditReport>
-  | MutationResult<Delivery>
-  | MutationResult<Review>
-  | MutationResult<void>
-  | BindResult
-  | AmendResult
+  | AcceptedFinalityInput
   | IntegrationConflictMaterialized
   | KeiyakuRefused
   | KeiyakuRetry;
@@ -58,6 +54,12 @@ type ObligationPendingInput = Readonly<{
   seatClose?: AcceptedObligations["seatClose"];
 }>;
 
+type CompletionPendingValue = Readonly<{
+  verification?: unknown | undefined;
+  placement?: unknown | undefined;
+  continuation?: ContinuationReport | undefined;
+}>;
+
 export function noValuePending(_value?: unknown): readonly MutationPendingSurface[] {
   return [];
 }
@@ -66,11 +68,7 @@ export function auditPending(value: AuditReport): readonly MutationPendingSurfac
   return value.verification.kind === "stopped" ? [pendingSurface("verification", true)] : [];
 }
 
-export function completionPending(value: {
-  verification?: CompletionEvidence["verification"] | undefined;
-  placement?: CompletionEvidence["placement"] | undefined;
-  continuation?: ContinuationReport | undefined;
-}): readonly MutationPendingSurface[] {
+export function completionPending(value: CompletionPendingValue): readonly MutationPendingSurface[] {
   const pending: MutationPendingSurface[] = [];
   if (value.verification !== undefined) pending.push(pendingSurface("verification", true));
   if (value.placement !== undefined) pending.push(pendingSurface("placement", true));
@@ -100,9 +98,7 @@ export function collectAcceptedPending(
 /** Purely projects the leading mutation's finality without changing its details. */
 export function projectMutationFinality(input: MutationFinalityInput): MutationFinality {
   if (input.kind === "accepted") {
-    return input.pending.length === 0
-      ? { kind: "complete" }
-      : { kind: "accepted-pending", pending: input.pending };
+    return input.pending.length === 0 ? { kind: "complete" } : { kind: "accepted-pending", pending: input.pending };
   }
   return { kind: "not-admitted" };
 }
@@ -141,14 +137,16 @@ type Completion<Value, PublicValue> = Readonly<{
 }>;
 
 export function completionInput<Value, PublicValue>(
-  scope: RepositoryScope,
-  channel: GitDecodeChannel,
-  contractId: ContractId,
-  value: (result: Value) => PublicValue,
-  hooks: WorktreeHooks,
-  valuePending: (value: PublicValue) => readonly MutationPendingSurface[] = noValuePending,
+  input: Readonly<{
+    scope: RepositoryScope;
+    channel: GitDecodeChannel;
+    contractId: ContractId;
+    value: (result: Value) => PublicValue;
+    hooks: WorktreeHooks;
+    valuePending?: (value: PublicValue) => readonly MutationPendingSurface[];
+  }>,
 ): Omit<Completion<Value, PublicValue>, "accepted"> {
-  return { scope, channel, contractId, value, valuePending, hooks };
+  return { ...input, valuePending: input.valuePending ?? noValuePending };
 }
 
 export async function completeMutation<Value, PublicValue>(

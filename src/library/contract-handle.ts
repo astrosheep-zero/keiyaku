@@ -178,7 +178,7 @@ export class KeiyakuHandle {
         }),
       );
       const completed = await completeMutation({
-        ...completionInput(this.scope, channel, this.id, () => undefined, hooks),
+        ...completionInput({ scope: this.scope, channel, contractId: this.id, value: () => undefined, hooks }),
         accepted,
       });
       return {
@@ -296,7 +296,7 @@ export class KeiyakuHandle {
         }),
       );
       return completeHolderMutation({
-        completion: completionInput(this.scope, channel, this.id, () => undefined, hooks),
+        completion: completionInput({ scope: this.scope, channel, contractId: this.id, value: () => undefined, hooks }),
         admission,
         requireAccepted,
       });
@@ -318,7 +318,7 @@ export class KeiyakuHandle {
         }),
       );
       return completeMutation({
-        ...completionInput(this.scope, channel, this.id, () => undefined, hooks),
+        ...completionInput({ scope: this.scope, channel, contractId: this.id, value: () => undefined, hooks }),
         accepted,
       });
     });

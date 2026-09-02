@@ -163,16 +163,16 @@ export async function nukeGit(
     const custody = await managedCustody(repository);
     requireClosedPrivateStateSeat(
       await withPrivateStatePublicationSeat(repository, async (seat) => {
-      const state = await readRef(repository, GIT_REF);
-      if (state !== null) await deleteObservedStateRef(repository, state, seat);
+        const state = await readRef(repository, GIT_REF);
+        if (state !== null) await deleteObservedStateRef(repository, state, seat);
 
-      for (const entry of custody.entries) {
-        if (await removeManagedWorktree(repository, entry)) {
-          await releaseManagedWorktrees(repository, [entry.contract], placeFence);
+        for (const entry of custody.entries) {
+          if (await removeManagedWorktree(repository, entry)) {
+            await releaseManagedWorktrees(repository, [entry.contract], placeFence);
+          }
         }
-      }
-      await nukeEmptyPlaceAuthority(repository, placeFence);
-      await removeOwnedRefs(repository);
+        await nukeEmptyPlaceAuthority(repository, placeFence);
+        await removeOwnedRefs(repository);
       }),
     );
   });

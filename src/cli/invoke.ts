@@ -504,6 +504,7 @@ export async function invoke(
       );
     }
     const acquiredRuntime = await withAcquiredStdin(command, withResolvedTaskActor(command, runtime));
+    runtime.onOperationStart?.();
     if (command.command === "bind" && command.forkOf === undefined) {
       const markdown = await (acquiredRuntime.readStdin ?? readStdin)();
       const { admitMarkdownBindSyntax } = await import("./commands/contract-invoke.js");
@@ -513,7 +514,6 @@ export async function invoke(
         ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
       });
     }
-    runtime.onOperationStart?.();
     return await invokeParsed(
       {
         ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),

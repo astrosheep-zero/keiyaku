@@ -87,44 +87,44 @@ async function runFencedPlacement(
   let preparedPhysical: PreparedTargetPlacement | undefined;
   const result: PlacementProtocolResult = placementResultWithSeatClose(
     await withPrivateStatePublicationSeat(repository, async (seat) => {
-    for (let index = 0; index < protocol.attempts.length; index += 1) {
-      const prepared = await prepareProtocolAttempt(protocol, protocol.attempts[index]!);
-      if (prepared.kind === "refused") return prepared;
-      const state = contractState(prepared.observation.decision, input.contractId);
-      if (state === null) throw new Error("placement offer has no contract state");
-      if (prepared.offer.target === undefined)
-        throw new Error("targeted placement offer is missing its target movement");
-      const observed = await observeTargetHead(repository, prepared.offer.target.target);
-      if (observed !== prepared.offer.target.expectedOid) {
-        const treeEquals = await observedTreeEqualsCandidate(repository, observed, prepared.offer.target.newOid);
-        return {
-          kind: "target-moved",
-          contractId: input.contractId,
-          target: prepared.offer.target.target,
-          expected: prepared.offer.target.expectedOid,
-          observed,
-          observedTreeEqualsCandidate: treeEquals,
-        };
+      for (let index = 0; index < protocol.attempts.length; index += 1) {
+        const prepared = await prepareProtocolAttempt(protocol, protocol.attempts[index]!);
+        if (prepared.kind === "refused") return prepared;
+        const state = contractState(prepared.observation.decision, input.contractId);
+        if (state === null) throw new Error("placement offer has no contract state");
+        if (prepared.offer.target === undefined)
+          throw new Error("targeted placement offer is missing its target movement");
+        const observed = await observeTargetHead(repository, prepared.offer.target.target);
+        if (observed !== prepared.offer.target.expectedOid) {
+          const treeEquals = await observedTreeEqualsCandidate(repository, observed, prepared.offer.target.newOid);
+          return {
+            kind: "target-moved",
+            contractId: input.contractId,
+            target: prepared.offer.target.target,
+            expected: prepared.offer.target.expectedOid,
+            observed,
+            observedTreeEqualsCandidate: treeEquals,
+          };
+        }
+        const physical = await prepareTargetPlacement(repository, state, prepared.offer.target);
+        if (physical.kind === "refused") return physical;
+        const result = await admitDecidedOffer({
+          channel: protocol.channel,
+          repository,
+          seat,
+          decisionObservation: prepared.observation,
+          attempt: prepared.attempt,
+          offer: prepared.offer,
+          primaryContract: input.contractId,
+        });
+        if (result.kind === "accepted") {
+          preparedPhysical = physical.placement;
+          return result;
+        }
+        if (result.kind === "publication-failed") return result;
+        if (result.kind === "collision" && index + 1 === protocol.attempts.length) return result;
       }
-      const physical = await prepareTargetPlacement(repository, state, prepared.offer.target);
-      if (physical.kind === "refused") return physical;
-      const result = await admitDecidedOffer({
-        channel: protocol.channel,
-        repository,
-        seat,
-        decisionObservation: prepared.observation,
-        attempt: prepared.attempt,
-        offer: prepared.offer,
-        primaryContract: input.contractId,
-      });
-      if (result.kind === "accepted") {
-        preparedPhysical = physical.placement;
-        return result;
-      }
-      if (result.kind === "publication-failed") return result;
-      if (result.kind === "collision" && index + 1 === protocol.attempts.length) return result;
-    }
-    return { kind: "exhausted" };
+      return { kind: "exhausted" };
     }),
   );
   if (result.kind !== "accepted") return result;

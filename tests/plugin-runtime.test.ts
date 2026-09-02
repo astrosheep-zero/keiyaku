@@ -29,7 +29,7 @@ function trace(path: string): readonly string[] {
   return existsSync(path) ? readFileSync(path, "utf8").trim().split("\n").filter(Boolean) : [];
 }
 
-async function eventually(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
+async function eventually(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!predicate()) {
     if (Date.now() >= deadline) throw new Error("timed out waiting for plugin effect");

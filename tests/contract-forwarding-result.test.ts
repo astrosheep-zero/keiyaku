@@ -33,6 +33,7 @@ const fact = {
 
 function acceptedDelivery(value: Record<string, unknown> = {}, extras: Record<string, unknown> = {}) {
   return {
+    kind: "accepted",
     facts: [fact],
     head,
     value: {
@@ -44,6 +45,7 @@ function acceptedDelivery(value: Record<string, unknown> = {}, extras: Record<st
     },
     lags: [],
     settlementLags: [],
+    pending: [],
     ...extras,
   };
 }
@@ -75,6 +77,14 @@ test("accepted delivery round-trips owner settlement, verification, placement, c
         }),
       ],
       recoverySnapshot: snapshot,
+      pending: [
+        { surface: "verification", required: true },
+        { surface: "placement", required: true },
+        { surface: "continuation", required: true },
+        { surface: "reconciliation", required: true },
+        { surface: "settlement", required: true },
+        { surface: "cleanup", required: false },
+      ],
     },
   );
   const parsed = deliveryResultSchema.parse(JSON.parse(JSON.stringify(result)));
@@ -119,6 +129,7 @@ test("refusal, retry, review, audit, and materialized conflict variants round-tr
   assert.equal(decodeContractLiveFailure({ kind: "refused", refusal: { kind: "contract-missing" } }), null);
 
   const review = {
+    kind: "accepted",
     facts: [],
     head,
     value: {
@@ -132,10 +143,12 @@ test("refusal, retry, review, audit, and materialized conflict variants round-tr
     },
     lags: [],
     settlementLags: [],
+    pending: [],
   };
   assert.deepEqual(reviewResultSchema.parse(JSON.parse(JSON.stringify(review))), review);
 
   const audit = {
+    kind: "accepted",
     facts: [],
     head,
     value: {
@@ -145,6 +158,7 @@ test("refusal, retry, review, audit, and materialized conflict variants round-tr
     },
     lags: [],
     settlementLags: [],
+    pending: [],
   };
   assert.deepEqual(auditResultSchema.parse(JSON.parse(JSON.stringify(audit))), audit);
 

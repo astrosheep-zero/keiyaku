@@ -70,14 +70,14 @@ export async function executeLocalDelivery(
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
     return completeMutation({
-      ...completionInput(
+      ...completionInput({
         scope,
         channel,
-        input.contractId,
-        (delivery: DeliveryValue) => delivery,
-        input.hooks,
-        completionPending,
-      ),
+        contractId: input.contractId,
+        value: (delivery: DeliveryValue) => delivery,
+        hooks: input.hooks,
+        valuePending: completionPending,
+      }),
       accepted: continued,
     });
   });
@@ -100,14 +100,14 @@ export async function executeLocalReview(input: ReviewExecutionInput): Promise<M
       ...(input.actor === undefined ? {} : { actor: input.actor }),
     });
     return completeMutation({
-      ...completionInput(
-        input.scope,
+      ...completionInput({
+        scope: input.scope,
         channel,
-        input.contractId,
-        (review: Review) => review,
-        input.hooks,
-        completionPending,
-      ),
+        contractId: input.contractId,
+        value: (review: Review) => review,
+        hooks: input.hooks,
+        valuePending: completionPending,
+      }),
       accepted: continued,
     });
   });
