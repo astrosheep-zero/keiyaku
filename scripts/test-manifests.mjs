@@ -1,3 +1,22 @@
+export const PURE_TEST_FILES = [
+  "tests/amend-body.test.ts",
+  "tests/cli-parse.test.ts",
+  "tests/cli-render.test.ts",
+  "tests/cli-selectors.test.ts",
+  "tests/contract-document.test.ts",
+  "tests/contract-forwarding-result.test.ts",
+  "tests/dependency-currentness.test.ts",
+  "tests/fold.test.ts",
+  "tests/markdown-ast.test.ts",
+  "tests/model-impact.test.ts",
+  "tests/mutation-finality.test.ts",
+  "tests/normalized-identity.test.ts",
+  "tests/observation.test.ts",
+  "tests/region.test.ts",
+  "tests/task-document.test.ts",
+  "tests/v4-cut.test.ts",
+];
+
 export const LOCAL_TEST_FILES = [
   "tests/actor.test.ts",
   "tests/amend-body.test.ts",
@@ -88,7 +107,12 @@ export const INTEGRATION_TEST_FILES = [
   "tests/world.test.ts",
 ];
 
+const pure = new Set(PURE_TEST_FILES);
+export const ISOLATED_TEST_FILES = [...LOCAL_TEST_FILES.filter((file) => !pure.has(file)), ...INTEGRATION_TEST_FILES].sort();
+
 export const TEST_MANIFESTS = Object.freeze({
+  pure: Object.freeze(PURE_TEST_FILES),
+  isolated: Object.freeze(ISOLATED_TEST_FILES),
   local: Object.freeze(LOCAL_TEST_FILES),
   integration: Object.freeze(INTEGRATION_TEST_FILES),
 });
