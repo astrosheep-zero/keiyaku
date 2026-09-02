@@ -191,6 +191,30 @@ test("observes current-branch intent from the attached HEAD without a second res
   });
 });
 
+test("confirmed private-state seat close failure remains typed lag on an accepted bind", async () => {
+  const repository = repositoryWithHead();
+  const git = {
+    ...(await repositoryAt(repository.path)),
+    onPrivateStateSeatClose: () => {
+      throw new Error("seat close failed after publication");
+    },
+  };
+  const bound = await bindOperation({
+    scope: git,
+    terms: terms([]),
+    workspace: "worktree",
+  });
+  assert.equal(bound.kind, "accepted");
+  if (bound.kind !== "accepted") return;
+  assert.equal(bound.facts.length > 0, true);
+  assert.deepEqual(bound.seatClose, [
+    {
+      kind: "private-state-seat-close-failed",
+      diagnostic: "seat close failed after publication",
+    },
+  ]);
+});
+
 test("current-branch intent on an unborn HEAD remains unborn-head", async () => {
   const repository = makeGitRepository();
   assert.deepEqual(await observeBindCoordinates(await repositoryAt(repository.path), { kind: "current-branch" }), {

@@ -64,7 +64,9 @@ type ManagedCandidateTemplate = Readonly<{
 type AcceptedDelivery = Exclude<Awaited<ReturnType<KeiyakuHandle["deliver"]>>, { kind: "integration-conflict-materialized" }>;
 
 function acceptedDelivery(result: Awaited<ReturnType<KeiyakuHandle["deliver"]>>): AcceptedDelivery {
-  if ("kind" in result) throw new Error(`unexpected integration conflict: ${result.conflictPaths.join(",")}`);
+  if (result.kind === "integration-conflict-materialized") {
+    throw new Error(`unexpected integration conflict: ${result.conflictPaths.join(",")}`);
+  }
   return result;
 }
 
@@ -342,7 +344,8 @@ async function admitClaimWithoutFollow(
     );
     assert.equal(attested.kind, "accepted");
 
-    const admitted = await withPrivateStatePublicationSeat(git, async (seat) => {
+    const admitted = (
+      await withPrivateStatePublicationSeat(git, async (seat) => {
       const observation = await observeContractsForAdmissionAt(git, channel, [contractId]);
       const attempt = mintAttempts({ entryCount: 2 })[0]!;
       const decision = decidePlacement({
@@ -361,7 +364,8 @@ async function admitClaimWithoutFollow(
         offer: decision.offer,
         primaryContract: contractId,
       });
-    });
+    })
+    ).value;
     assert.equal(admitted.kind, "accepted");
   });
 }

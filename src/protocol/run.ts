@@ -1,12 +1,18 @@
 import { extendAdmissionPathsAt, observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
-import { withPrivateStatePublicationSeat } from "../git/private-state-seat.js";
+import {
+  appendPrivateStateSeatClose,
+  mergePrivateStateSeatClose,
+  withPrivateStatePublicationSeat,
+  type PrivateStateSeatCloseLag,
+  type PrivateStateSeatOutcome,
+} from "../git/private-state-seat.js";
 import type { GitDecodeChannel, GitTreeSelection } from "../git/read-observation.js";
 import type { GitRepository } from "../git/process.js";
 import type { GitRefAssertion } from "../git/repository.js";
 import type { AttemptContext, DecideInput, OfferDecision } from "../core/decide.js";
 import type { Offer, TreeUpdate } from "../core/facts/offer.js";
 import { type ContractId } from "../core/facts/types.js";
-import { admitDecidedOffer, type AcceptedAdmission, type AttemptTerminal } from "./attempt.js";
+import { admitDecidedOffer, type AcceptedAdmission, type AttemptTerminal, type DecidedOfferResult } from "./attempt.js";
 
 export type ProtocolTerminal = Readonly<{ kind: "exhausted" }> | AttemptTerminal;
 
@@ -135,6 +141,15 @@ export async function prepareProtocolAttempt<
   };
 }
 
+function protocolAttemptWithSeatClose<Refusal>(
+  outcome: PrivateStateSeatOutcome<DecidedOfferResult<Refusal>>,
+): DecidedOfferResult<Refusal> {
+  return mergePrivateStateSeatClose(outcome, (value, closeLag: PrivateStateSeatCloseLag) => {
+    if (value.kind !== "accepted") throw new Error(closeLag.diagnostic);
+    return { ...value, seatClose: appendPrivateStateSeatClose(value.seatClose, closeLag) };
+  });
+}
+
 /** Run bounded, verb-neutral attempts and return one real admission on acceptance. */
 export async function runProtocol<
   Input extends Readonly<{ contractId: ContractId }>,
@@ -144,21 +159,23 @@ export async function runProtocol<
   const attempts = input.attempts;
 
   for (let index = 0; index < attempts.length; index += 1) {
-    const result = await withPrivateStatePublicationSeat(input.repository, async (seat) => {
-      const prepared = await prepareProtocolAttempt(input, attempts[index]!);
-      if (prepared.kind === "refused") return prepared;
-      return await admitDecidedOffer<Refusal>({
-        channel: input.channel,
-        repository: input.repository,
-        seat,
-        decisionObservation: prepared.observation,
-        attempt: prepared.attempt,
-        offer: prepared.offer,
-        primaryContract: input.input.contractId,
-        assertions: prepared.assertions,
-        ...(input.validateAdmission === undefined ? {} : { validateAdmission: input.validateAdmission }),
-      });
-    });
+    const result = protocolAttemptWithSeatClose(
+      await withPrivateStatePublicationSeat(input.repository, async (seat) => {
+        const prepared = await prepareProtocolAttempt(input, attempts[index]!);
+        if (prepared.kind === "refused") return prepared;
+        return await admitDecidedOffer<Refusal>({
+          channel: input.channel,
+          repository: input.repository,
+          seat,
+          decisionObservation: prepared.observation,
+          attempt: prepared.attempt,
+          offer: prepared.offer,
+          primaryContract: input.input.contractId,
+          assertions: prepared.assertions,
+          ...(input.validateAdmission === undefined ? {} : { validateAdmission: input.validateAdmission }),
+        });
+      }),
+    );
     if (result.kind === "refused" || result.kind === "accepted" || result.kind === "publication-failed") return result;
     if (result.kind === "collision" && index + 1 === attempts.length) return result;
   }

@@ -31,7 +31,7 @@ async function publicContractId(handle: ContractHandle): Promise<ContractId> {
 }
 
 function expectMutation<Value>(result: MutationResult<Value> | IntegrationConflictMaterialized): MutationResult<Value> {
-  if (!("value" in result)) throw new Error("expected an admitted mutation result");
+  if (result.kind !== "accepted") throw new Error("expected an admitted mutation result");
   return result;
 }
 

@@ -7,6 +7,7 @@ import { readSoul } from "../akuma/heart/index.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { ContractId } from "../core/facts/types.js";
 import { publishDispatch, readDispatch, type Dispatch, type DispatchFailure } from "../dispatch/index.js";
+import type { PrivateStateSeatCloseLag } from "../git/private-state-seat.js";
 import { parseAkumaAlias, type AkumaAlias } from "../identity/selector.js";
 import { emitCalledPluginSignal } from "../plugin/akuma-signals.js";
 import { readManagedWorktreeAppointment } from "../workspace-place.js";
@@ -30,7 +31,7 @@ export type IntegrationFailure = Readonly<{
 
 export type DispatchStage =
   | Readonly<{ kind: "none" }>
-  | Readonly<{ kind: "dispatched"; dispatch: Dispatch }>
+  | Readonly<{ kind: "dispatched"; dispatch: Dispatch; seatClose?: readonly PrivateStateSeatCloseLag[] }>
   | Readonly<{ kind: "failed"; failure: DispatchFailure | IntegrationFailure }>;
 
 export type AliasStage =
@@ -269,7 +270,13 @@ async function dispatchStage(
   try {
     const published = await publishDispatch(input);
     return published.kind === "dispatched"
-      ? { kind: "dispatched", dispatch: published.dispatch }
+      ? {
+          kind: "dispatched",
+          dispatch: published.dispatch,
+          ...(published.seatClose === undefined || published.seatClose.length === 0
+            ? {}
+            : { seatClose: published.seatClose }),
+        }
       : { kind: "failed", failure: published.failure };
   } catch (error) {
     return { kind: "failed", failure: integrationFailure(error) };

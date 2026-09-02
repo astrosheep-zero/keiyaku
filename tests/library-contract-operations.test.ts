@@ -41,14 +41,14 @@ async function publicContractId(handle: ContractHandle): Promise<ContractId> {
 function expectMaterialized(
   result: MutationResult<unknown> | IntegrationConflictMaterialized,
 ): IntegrationConflictMaterialized {
-  if (!("kind" in result) || result.kind !== "integration-conflict-materialized") {
+  if (result.kind !== "integration-conflict-materialized") {
     throw new Error("expected an integration conflict materialization");
   }
   return result;
 }
 
 function expectMutation<Value>(result: MutationResult<Value> | IntegrationConflictMaterialized): MutationResult<Value> {
-  if (!("value" in result)) throw new Error("expected an admitted mutation result");
+  if (result.kind !== "accepted") throw new Error("expected an admitted mutation result");
   return result;
 }
 

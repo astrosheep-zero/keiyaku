@@ -4,7 +4,13 @@ import { contractState } from "../core/facts/observation.js";
 import type { ActorId, ContractId, SnapshotId } from "../core/facts/types.js";
 import { decidePlacement, type PlacementRefusal } from "../core/verbs/placement.js";
 import { observeGitForAdmissionAt } from "../git/observe.js";
-import { withPrivateStatePublicationSeat } from "../git/private-state-seat.js";
+import {
+  appendPrivateStateSeatClose,
+  mergePrivateStateSeatClose,
+  withPrivateStatePublicationSeat,
+  type PrivateStateSeatCloseLag,
+  type PrivateStateSeatOutcome,
+} from "../git/private-state-seat.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import { reconcileEffectFailure, type ReconcileResult } from "../git/reconcile.js";
 import { GitPlumbingError, type GitRepository } from "../git/process.js";
@@ -64,13 +70,23 @@ function expectedPlacementFailure(error: unknown): PlacementExecutionFailure {
   return { kind: "placement-failed", diagnostic: expectedOperationalDiagnostic(error) };
 }
 
+function placementResultWithSeatClose<ExtraRefusal = never>(
+  outcome: PrivateStateSeatOutcome<PlacementProtocolResult<ExtraRefusal>>,
+): PlacementProtocolResult<ExtraRefusal> {
+  return mergePrivateStateSeatClose(outcome, (value, closeLag: PrivateStateSeatCloseLag) => {
+    if (value.kind !== "accepted") throw new Error(closeLag.diagnostic);
+    return { ...value, seatClose: appendPrivateStateSeatClose(value.seatClose, closeLag) };
+  });
+}
+
 async function runFencedPlacement(
   repository: GitRepository,
   input: PlacementProtocolInput,
   protocol: RunProtocolInput<PlacementProtocolInput, PlacementRefusal | TargetPlacementRefusal>,
 ): Promise<PlacementProtocolResult> {
   let preparedPhysical: PreparedTargetPlacement | undefined;
-  const result: PlacementProtocolResult = await withPrivateStatePublicationSeat(repository, async (seat) => {
+  const result: PlacementProtocolResult = placementResultWithSeatClose(
+    await withPrivateStatePublicationSeat(repository, async (seat) => {
     for (let index = 0; index < protocol.attempts.length; index += 1) {
       const prepared = await prepareProtocolAttempt(protocol, protocol.attempts[index]!);
       if (prepared.kind === "refused") return prepared;
@@ -109,7 +125,8 @@ async function runFencedPlacement(
       if (result.kind === "collision" && index + 1 === protocol.attempts.length) return result;
     }
     return { kind: "exhausted" };
-  });
+    }),
+  );
   if (result.kind !== "accepted") return result;
   if (preparedPhysical === undefined) {
     throw new Error("accepted placement has no prepared target checkout");

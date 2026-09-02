@@ -9,12 +9,13 @@ import type { TaskHolderAdmission } from "../settlement/holder.js";
 import type { WorktreeHooks } from "./configuration.js";
 import { completeReconcile, type ReconcileCompletion } from "./reconcile.js";
 import type { AuditReport } from "../protocol/audit.js";
+import type { CompletionEvidence } from "../protocol/completion.js";
 import type { IntegrationConflictMaterialized } from "../protocol/deliver.js";
-import type { ContinuationReport } from "./continuation.js";
 import type { Delivery } from "./delivery.js";
+import type { ContinuationReport } from "./continuation.js";
 import type { Review } from "./contract-forwarding-result.js";
 import type { AmendResult, BindResult } from "./contract-types.js";
-import { KeiyakuRefused, KeiyakuRetry } from "./refusal.js";
+import type { KeiyakuRefused, KeiyakuRetry } from "./refusal.js";
 
 export type MutationFinalitySurface =
   | "verification"
@@ -47,67 +48,63 @@ function pendingSurface(surface: MutationFinalitySurface, required: boolean) {
   return { surface, required } as const;
 }
 
-/** Purely projects the leading mutation's finality without changing its details. */
-export function projectMutationFinality(input: MutationFinalityInput): MutationFinality {
-  if (input instanceof KeiyakuRefused || input instanceof KeiyakuRetry || isIntegrationConflictMaterialized(input)) {
-    return { kind: "not-admitted" };
-  }
-  const pending: Array<Readonly<{ surface: MutationFinalitySurface; required: boolean }>> = [];
-  if ("value" in input) {
-    const value = input.value;
-    if (isAuditReport(value)) {
-      if (value.verification.kind === "stopped") pending.push(pendingSurface("verification", true));
-      if (input.cleanup !== undefined || input.leak !== undefined) pending.push(pendingSurface("cleanup", false));
-    } else if (isCompletionValue(value)) {
-      completionPending(value, pending);
-      if (
-        value.cleanup !== undefined ||
-        value.leak !== undefined ||
-        input.cleanup !== undefined ||
-        input.leak !== undefined
-      ) {
-        pending.push(pendingSurface("cleanup", false));
-      }
-    }
-  }
-  if (input.lags.length > 0) pending.push(pendingSurface("reconciliation", true));
-  if (input.settlementLags.length > 0) pending.push(pendingSurface("settlement", true));
-  return pending.length === 0 ? { kind: "complete" } : { kind: "accepted-pending", pending };
-}
+export type MutationPendingSurface = Readonly<{ surface: MutationFinalitySurface; required: boolean }>;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
-}
-
-function isAuditReport(value: unknown): value is AuditReport {
-  return isRecord(value) && "candidate" in value && "verification" in value && "target" in value;
-}
-
-function isIntegrationConflictMaterialized(value: unknown): value is IntegrationConflictMaterialized {
-  return isRecord(value) && value.kind === "integration-conflict-materialized";
-}
-
-type CompletionValue = Readonly<{
-  verification?: unknown;
-  placement?: unknown;
-  cleanup?: unknown;
-  leak?: unknown;
-  continuation?: ContinuationReport | undefined;
+type ObligationPendingInput = Readonly<{
+  lags: MutationResult<unknown>["lags"];
+  settlementLags: MutationResult<unknown>["settlementLags"];
+  cleanup?: AcceptedObligations["cleanup"];
+  leak?: AcceptedObligations["leak"];
+  seatClose?: AcceptedObligations["seatClose"];
 }>;
 
-function isCompletionValue(value: unknown): value is CompletionValue {
-  return isRecord(value) && !isAuditReport(value);
+export function noValuePending(_value?: unknown): readonly MutationPendingSurface[] {
+  return [];
 }
 
-function completionPending(
-  value: CompletionValue,
-  pending: Array<Readonly<{ surface: MutationFinalitySurface; required: boolean }>>,
-) {
+export function auditPending(value: AuditReport): readonly MutationPendingSurface[] {
+  return value.verification.kind === "stopped" ? [pendingSurface("verification", true)] : [];
+}
+
+export function completionPending(value: {
+  verification?: CompletionEvidence["verification"] | undefined;
+  placement?: CompletionEvidence["placement"] | undefined;
+  continuation?: ContinuationReport | undefined;
+}): readonly MutationPendingSurface[] {
+  const pending: MutationPendingSurface[] = [];
   if (value.verification !== undefined) pending.push(pendingSurface("verification", true));
   if (value.placement !== undefined) pending.push(pendingSurface("placement", true));
   if (value.continuation !== undefined && value.continuation.stopped.length > 0) {
     pending.push(pendingSurface("continuation", true));
   }
+  return pending;
+}
+
+export function obligationPending(input: ObligationPendingInput): readonly MutationPendingSurface[] {
+  const pending: MutationPendingSurface[] = [];
+  if (input.lags.length > 0) pending.push(pendingSurface("reconciliation", true));
+  if (input.settlementLags.length > 0) pending.push(pendingSurface("settlement", true));
+  if (input.cleanup !== undefined || input.leak !== undefined || (input.seatClose?.length ?? 0) > 0) {
+    pending.push(pendingSurface("cleanup", false));
+  }
+  return pending;
+}
+
+export function collectAcceptedPending(
+  valuePending: readonly MutationPendingSurface[],
+  obligations: ObligationPendingInput,
+): readonly MutationPendingSurface[] {
+  return [...valuePending, ...obligationPending(obligations)];
+}
+
+/** Purely projects the leading mutation's finality without changing its details. */
+export function projectMutationFinality(input: MutationFinalityInput): MutationFinality {
+  if (input.kind === "accepted") {
+    return input.pending.length === 0
+      ? { kind: "complete" }
+      : { kind: "accepted-pending", pending: input.pending };
+  }
+  return { kind: "not-admitted" };
 }
 
 export type AcceptedIntent<Value> = Readonly<
@@ -122,12 +119,14 @@ export type AcceptedIntent<Value> = Readonly<
 
 export type MutationResult<Value> = Readonly<
   {
+    kind: "accepted";
     facts: readonly JournalEntry[];
     head: ContractHead;
     value: Value;
     lags: ReconcileCompletion["lag"];
     settlementLags: SettlementReport["lags"];
     recoverySnapshot?: SnapshotId;
+    pending: readonly MutationPendingSurface[];
   } & AcceptedObligations
 >;
 
@@ -137,6 +136,7 @@ type Completion<Value, PublicValue> = Readonly<{
   contractId: ContractId;
   accepted: AcceptedIntent<Value>;
   value: (result: Value) => PublicValue;
+  valuePending?: (value: PublicValue) => readonly MutationPendingSurface[];
   hooks: WorktreeHooks;
 }>;
 
@@ -146,14 +146,16 @@ export function completionInput<Value, PublicValue>(
   contractId: ContractId,
   value: (result: Value) => PublicValue,
   hooks: WorktreeHooks,
+  valuePending: (value: PublicValue) => readonly MutationPendingSurface[] = noValuePending,
 ): Omit<Completion<Value, PublicValue>, "accepted"> {
-  return { scope, channel, contractId, value, hooks };
+  return { scope, channel, contractId, value, valuePending, hooks };
 }
 
 export async function completeMutation<Value, PublicValue>(
   input: Completion<Value, PublicValue>,
 ): Promise<MutationResult<PublicValue>> {
   const { scope, channel, contractId, accepted, value, hooks } = input;
+  const valuePending = input.valuePending ?? noValuePending;
   const contracts = [...new Set([contractId, ...accepted.facts.map((fact) => fact.contract)])];
   const reports: ReconcileCompletion[] = [];
   for (const affected of contracts) {
@@ -162,15 +164,25 @@ export async function completeMutation<Value, PublicValue>(
   const obligations: AcceptedObligations = {
     ...(accepted.cleanup === undefined ? {} : { cleanup: accepted.cleanup }),
     ...(accepted.leak === undefined ? {} : { leak: accepted.leak }),
+    ...(accepted.seatClose === undefined || accepted.seatClose.length === 0 ? {} : { seatClose: accepted.seatClose }),
   };
   const effects = [...(accepted.physical?.effects ?? []), ...reports.flatMap((report) => report.effects)];
   const recoverySnapshot = effects.findLast((effect) => effect.kind === "recovery-snapshot")?.snapshot;
+  const publicValue = value(accepted.value);
+  const lags = [...(accepted.physical?.lag ?? []), ...reports.flatMap((report) => report.lag)];
+  const settlementLags = reports.flatMap((report) => report.settlement.lags);
   return {
+    kind: "accepted",
     facts: accepted.facts,
     head: accepted.head,
-    value: value(accepted.value),
-    lags: [...(accepted.physical?.lag ?? []), ...reports.flatMap((report) => report.lag)],
-    settlementLags: reports.flatMap((report) => report.settlement.lags),
+    value: publicValue,
+    lags,
+    settlementLags,
+    pending: collectAcceptedPending(valuePending(publicValue), {
+      lags,
+      settlementLags,
+      ...obligations,
+    }),
     ...(recoverySnapshot === undefined ? {} : { recoverySnapshot }),
     ...obligations,
   };
@@ -191,8 +203,18 @@ export async function completeHolderMutation<Value, PublicValue, Refusal>(
     taskId: input.admission.taskId,
     diagnostic: input.admission.diagnostic,
   });
+  const settlementLags = [...completed.settlementLags, ...deferred.lags];
   return {
     ...completed,
-    settlementLags: [...completed.settlementLags, ...deferred.lags],
+    settlementLags,
+    pending: collectAcceptedPending((input.completion.valuePending ?? noValuePending)(completed.value), {
+      lags: completed.lags,
+      settlementLags,
+      ...(completed.cleanup === undefined ? {} : { cleanup: completed.cleanup }),
+      ...(completed.leak === undefined ? {} : { leak: completed.leak }),
+      ...(completed.seatClose === undefined || completed.seatClose.length === 0
+        ? {}
+        : { seatClose: completed.seatClose }),
+    }),
   };
 }

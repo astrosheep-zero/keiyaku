@@ -37,7 +37,7 @@ import type {
   IntentRefusal,
   MutationOperationInput,
 } from "./operations.js";
-import { timestamp } from "./operations.js";
+import { attemptDecisionWithSeatClose, timestamp } from "./operations.js";
 
 type DeliveryIdentity = DeliverData;
 export type VerificationReuse = CurrentVerifiedAttestation;
@@ -158,9 +158,11 @@ async function deliverAttempt(
   input: DeliverOperationInput,
   attempt: AttemptContext,
 ): Promise<AttemptDecision<PreparedDelivery>> {
-  return await withPrivateStatePublicationSeat(
-    input.scope,
-    async (seat) => await deliverAttemptInPrivateStateSeat(input, attempt, seat),
+  return attemptDecisionWithSeatClose(
+    await withPrivateStatePublicationSeat(
+      input.scope,
+      async (seat) => await deliverAttemptInPrivateStateSeat(input, attempt, seat),
+    ),
   );
 }
 

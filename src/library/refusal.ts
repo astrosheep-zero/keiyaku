@@ -25,6 +25,8 @@ export type KeiyakuRefusal =
 export type KeiyakuRetryReason = IntentRetry;
 
 export class KeiyakuRefused extends Error {
+  readonly kind = "refused" as const;
+
   constructor(readonly refusal: KeiyakuRefusal) {
     super(`Keiyaku refused: ${refusal.kind}`);
     this.name = "KeiyakuRefused";
@@ -36,6 +38,8 @@ export class KeiyakuRefused extends Error {
 }
 
 export class KeiyakuRetry extends Error {
+  readonly kind = "retry" as const;
+
   constructor(readonly reason: KeiyakuRetryReason) {
     super(reason.kind === "publication-failed" ? reason.diagnostic : `Keiyaku retry required: ${reason.kind}`);
     this.name = "KeiyakuRetry";

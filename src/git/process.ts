@@ -15,6 +15,8 @@ export type GitRepository = Readonly<{
   readonly signal?: AbortSignal;
   /** Test-only observation that this capability is waiting for the private-state seat. */
   readonly onPrivateStateSeatContention?: () => void;
+  /** Test-only hook after the private-state seat close attempt. */
+  readonly onPrivateStateSeatClose?: () => void;
 }>;
 
 /** Give one caller's Git capability view its cancellation boundary. */

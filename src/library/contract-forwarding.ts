@@ -10,7 +10,7 @@ import { continueAcceptedCompletion } from "./continuation.js";
 import type { WorktreeHooks } from "./configuration.js";
 import type { DeliveryValue } from "./delivery.js";
 import { documentDerivation } from "./input.js";
-import { completionInput, completeMutation, type MutationResult } from "./mutation.js";
+import { completionInput, completeMutation, completionPending, type MutationResult } from "./mutation.js";
 import { requireAccepted } from "./refusal.js";
 import type { Review } from "./contract-forwarding-result.js";
 export type { Review } from "./contract-forwarding-result.js";
@@ -70,7 +70,14 @@ export async function executeLocalDelivery(
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
     return completeMutation({
-      ...completionInput(scope, channel, input.contractId, (delivery: DeliveryValue) => delivery, input.hooks),
+      ...completionInput(
+        scope,
+        channel,
+        input.contractId,
+        (delivery: DeliveryValue) => delivery,
+        input.hooks,
+        completionPending,
+      ),
       accepted: continued,
     });
   });
@@ -93,7 +100,14 @@ export async function executeLocalReview(input: ReviewExecutionInput): Promise<M
       ...(input.actor === undefined ? {} : { actor: input.actor }),
     });
     return completeMutation({
-      ...completionInput(input.scope, channel, input.contractId, (review: Review) => review, input.hooks),
+      ...completionInput(
+        input.scope,
+        channel,
+        input.contractId,
+        (review: Review) => review,
+        input.hooks,
+        completionPending,
+      ),
       accepted: continued,
     });
   });
@@ -125,7 +139,7 @@ export async function executeForwardedDeliver(
     ...(input.signal === undefined ? {} : { signal: input.signal }),
     hooks: input.hooks,
   });
-  if (!("facts" in result)) return { result };
+  if (result.kind !== "accepted") return { result };
   const delivery = result.facts.find((fact) => fact.kind === "deliver");
   if (delivery === undefined) throw new Error("accepted delivery is missing its journal fact");
   return { result, deliveryFactId: delivery.entry };

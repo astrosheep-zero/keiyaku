@@ -25,7 +25,7 @@ import type {
   MutationOperationInput,
   RepositoryScope,
 } from "./operations.js";
-import { timestamp } from "./operations.js";
+import { attemptDecisionWithSeatClose, timestamp } from "./operations.js";
 
 const REVIEWED = gate("reviewed");
 type ReviewPreparationRefusal =
@@ -125,9 +125,11 @@ async function reviewAttempt(
   input: ReviewOperationInput,
   attempt: AttemptContext,
 ): Promise<AttemptDecision<PreparedReview, ReviewRefusal>> {
-  return await withPrivateStatePublicationSeat(
-    input.scope,
-    async (seat) => await reviewAttemptInPrivateStateSeat(input, attempt, seat),
+  return attemptDecisionWithSeatClose(
+    await withPrivateStatePublicationSeat(
+      input.scope,
+      async (seat) => await reviewAttemptInPrivateStateSeat(input, attempt, seat),
+    ),
   );
 }
 

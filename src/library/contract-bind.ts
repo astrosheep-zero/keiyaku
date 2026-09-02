@@ -27,14 +27,19 @@ type BindResult<Handle> = Readonly<Omit<MutationResult<Handle>, "value"> & { kei
 type HandleFactory<Handle> = (contractId: ContractId, scope: RepositoryScope) => Handle;
 
 function acceptedBindResult<Handle>(result: MutationResult<Handle>, region: RegionObservation): BindResult<Handle> {
-  const { facts, head, lags, settlementLags, recoverySnapshot } = result;
+  const { facts, head, lags, settlementLags, recoverySnapshot, pending, cleanup, leak, seatClose } = result;
   return {
+    kind: "accepted",
     facts,
     head,
     keiyaku: result.value,
     lags,
     settlementLags,
+    pending,
     ...(recoverySnapshot === undefined ? {} : { recoverySnapshot }),
+    ...(cleanup === undefined ? {} : { cleanup }),
+    ...(leak === undefined ? {} : { leak }),
+    ...(seatClose === undefined || seatClose.length === 0 ? {} : { seatClose }),
     ...region,
   };
 }

@@ -327,11 +327,13 @@ test("deliver exposes the core-owned unmet prerequisites unchanged in its JSON r
   );
   const delivered = acceptedDeliver(
     {
+      kind: "accepted",
       facts: [],
       head: contractHead("head"),
       value: delivery,
       lags: [],
       settlementLags: [],
+      pending: [],
     },
     dependentId,
   );
@@ -351,9 +353,11 @@ test("accepted deliver and review transport completion consequences without reco
     stopped: [],
   };
   const envelope = {
+    kind: "accepted" as const,
     head: contractHead("head"),
     lags: [],
     settlementLags: [],
+    pending: [],
   };
   const delivery = deliveryHandle(
     {

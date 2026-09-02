@@ -2,7 +2,14 @@ import { createHash } from "node:crypto";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { contractId, type ContractId } from "../core/facts/types.js";
 import { parseAkuId, type AkuId } from "../akuma/identity.js";
-import { confirmPrivateStatePublication, withPrivateStatePublicationSeat } from "../git/private-state-seat.js";
+import {
+  appendPrivateStateSeatClose,
+  confirmPrivateStatePublication,
+  mergePrivateStateSeatClose,
+  withPrivateStatePublicationSeat,
+  type PrivateStateSeatCloseLag,
+  type PrivateStateSeatOutcome,
+} from "../git/private-state-seat.js";
 import {
   GIT_FORMAT_BYTES,
   GIT_FORMAT_PATH,
@@ -34,7 +41,7 @@ export type DispatchFailure =
   | Readonly<{ kind: "publication-failed"; diagnostic: string }>;
 
 export type DispatchPublication =
-  | Readonly<{ kind: "dispatched"; dispatch: Dispatch }>
+  | Readonly<{ kind: "dispatched"; dispatch: Dispatch; seatClose?: readonly PrivateStateSeatCloseLag[] }>
   | Readonly<{ kind: "failed"; failure: DispatchFailure }>;
 
 function pathFor(akuId: AkuId): string {
@@ -158,6 +165,15 @@ function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function dispatchPublicationWithSeatClose(
+  outcome: PrivateStateSeatOutcome<DispatchPublication>,
+): DispatchPublication {
+  return mergePrivateStateSeatClose(outcome, (value, closeLag) => {
+    if (value.kind !== "dispatched") throw new Error(closeLag.diagnostic);
+    return { ...value, seatClose: appendPrivateStateSeatClose(value.seatClose, closeLag) };
+  });
+}
+
 export async function publishDispatch(
   input: Readonly<{
     repository: GitRepository;
@@ -169,7 +185,8 @@ export async function publishDispatch(
   const owner = contractId(input.contractId);
   const intended: Dispatch = { akuId, contractId: owner, dispatchedAt: new Date().toISOString() };
   const path = pathFor(akuId);
-  return await withPrivateStatePublicationSeat(input.repository, async (seat) => {
+  return dispatchPublicationWithSeatClose(
+    await withPrivateStatePublicationSeat(input.repository, async (seat) => {
     const snapshot = await readGitPaths(input.repository, [path]);
     const current = await dispatchFromSnapshot(input.repository, snapshot, akuId);
     if (current !== null) {
@@ -222,5 +239,6 @@ export async function publishDispatch(
       kind: "failed",
       failure: { kind: "publication-failed", diagnostic: "Dispatch publication outcome is unknown" },
     };
-  });
+    }),
+  );
 }

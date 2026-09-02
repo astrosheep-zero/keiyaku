@@ -12,7 +12,9 @@ import { bind, commitCandidate, document, refused, repositoryWithMain } from "./
 type AcceptedDelivery = Exclude<Awaited<ReturnType<KeiyakuHandle["deliver"]>>, { kind: "integration-conflict-materialized" }>;
 
 function acceptedDelivery(result: Awaited<ReturnType<KeiyakuHandle["deliver"]>>): AcceptedDelivery {
-  if ("kind" in result) throw new Error(`unexpected integration conflict: ${result.conflictPaths.join(",")}`);
+  if (result.kind === "integration-conflict-materialized") {
+    throw new Error(`unexpected integration conflict: ${result.conflictPaths.join(",")}`);
+  }
   return result;
 }
 

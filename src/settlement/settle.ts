@@ -1,6 +1,10 @@
 import { type ContractId, type ContractState } from "../core/facts/types.js";
 import { observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
-import { withPrivateStatePublicationSeat } from "../git/private-state-seat.js";
+import {
+  mergePrivateStateSeatClose,
+  withPrivateStatePublicationSeat,
+  type PrivateStateSeatCloseLag,
+} from "../git/private-state-seat.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import type { Effect } from "../git/reconcile.js";
 import type { GitRepository } from "../git/process.js";
@@ -159,28 +163,39 @@ async function releaseHeldTaskHolder(
 ): Promise<void> {
   const { repository, channel, candidate, lags, taskId } = input;
   try {
-    await withPrivateStatePublicationSeat(repository, async (seat) => {
-      const observation = await observeContractsForAdmissionAt(
-        repository,
-        channel,
-        [candidate.id],
-        taskHolderObservationSelection(),
-      );
-      const state = observation.journals.get(candidate.id)?.state ?? null;
-      if (state === null || state.terminal?.kind !== "claimed") return;
-      const holder = (await readTaskHolderProjectionFromDecision(channel, observation)).get(candidate.id) ?? null;
-      if (holder === null || holder.disposition !== "held" || holder.taskId !== taskId) return;
-      const publication = await publishTaskHolderRelease(repository, channel, observation, candidate.id, seat);
-      if (publication.kind === "non-published") {
+    mergePrivateStateSeatClose(
+      await withPrivateStatePublicationSeat(repository, async (seat) => {
+        const observation = await observeContractsForAdmissionAt(
+          repository,
+          channel,
+          [candidate.id],
+          taskHolderObservationSelection(),
+        );
+        const state = observation.journals.get(candidate.id)?.state ?? null;
+        if (state === null || state.terminal?.kind !== "claimed") return;
+        const holder = (await readTaskHolderProjectionFromDecision(channel, observation)).get(candidate.id) ?? null;
+        if (holder === null || holder.disposition !== "held" || holder.taskId !== taskId) return;
+        const publication = await publishTaskHolderRelease(repository, channel, observation, candidate.id, seat);
+        if (publication.kind === "non-published") {
+          lags.push({
+            kind: "settlement-failed",
+            surface: "task-holder",
+            contractId: candidate.id,
+            taskId,
+            diagnostic: `Task holder release requires retry: ${publication.diagnostic}`,
+          });
+        }
+      }),
+      (_value, closeLag: PrivateStateSeatCloseLag) => {
         lags.push({
           kind: "settlement-failed",
           surface: "task-holder",
           contractId: candidate.id,
           taskId,
-          diagnostic: `Task holder release requires retry: ${publication.diagnostic}`,
+          diagnostic: closeLag.diagnostic,
         });
-      }
-    });
+      },
+    );
   } catch (error) {
     lags.push({
       kind: "settlement-failed",

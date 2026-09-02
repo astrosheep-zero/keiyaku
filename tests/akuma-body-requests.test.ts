@@ -229,6 +229,7 @@ function acceptedContract(marker: string, action: "deliver"): FixtureDeliveryRes
 function acceptedContract(marker: string, action: "review"): FixtureReviewResult;
 function acceptedContract(marker: string, action: "deliver" | "review"): FixtureDeliveryResult | FixtureReviewResult {
   const result = {
+    kind: "accepted" as const,
     facts: [],
     head: contractHead("head"),
     value:
@@ -247,6 +248,7 @@ function acceptedContract(marker: string, action: "deliver" | "review"): Fixture
         : { verificationSummary: marker },
     lags: [],
     settlementLags: [],
+    pending: [],
   };
   return result as FixtureDeliveryResult | FixtureReviewResult;
 }

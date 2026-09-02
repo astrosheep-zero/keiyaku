@@ -44,7 +44,12 @@ import { Delivery } from "./delivery.js";
 import { type ContinuationReport } from "./continuation.js";
 import type { MutationResult } from "./mutation.js";
 export { projectMutationFinality } from "./mutation.js";
-export type { MutationFinality, MutationFinalityInput, MutationFinalitySurface } from "./mutation.js";
+export type {
+  MutationFinality,
+  MutationFinalityInput,
+  MutationFinalitySurface,
+  MutationPendingSurface,
+} from "./mutation.js";
 import { bindFromCli as bindFromCliImplementation, bindKeiyaku as bindKeiyakuImplementation } from "./contract-bind.js";
 export { KeiyakuHandle } from "./contract-handle.js";
 import { KeiyakuHandle } from "./contract-handle.js";

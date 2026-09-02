@@ -8,7 +8,13 @@ import {
   type IntegrationPreparationRefusal,
 } from "../git/integration.js";
 import { observeContractsForAdmissionAt } from "../git/observe.js";
-import { withPrivateStatePublicationSeat } from "../git/private-state-seat.js";
+import {
+  appendPrivateStateSeatClose,
+  mergePrivateStateSeatClose,
+  withPrivateStatePublicationSeat,
+  type PrivateStateSeatCloseLag,
+  type PrivateStateSeatOutcome,
+} from "../git/private-state-seat.js";
 import type { GitRepository } from "../git/process.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import type { GitRefAssertion } from "../git/repository.js";
@@ -33,10 +39,20 @@ type ReintegrationInput = Readonly<{
   actor?: ActorId;
 }>;
 
+function reintegrationResultWithSeatClose(
+  outcome: PrivateStateSeatOutcome<Exclude<ReintegrationResult, PlacementExecutionFailure>>,
+): Exclude<ReintegrationResult, PlacementExecutionFailure> {
+  return mergePrivateStateSeatClose(outcome, (value, closeLag: PrivateStateSeatCloseLag) => {
+    if (value.kind !== "accepted") throw new Error(closeLag.diagnostic);
+    return { ...value, seatClose: appendPrivateStateSeatClose(value.seatClose, closeLag) };
+  });
+}
+
 async function runReintegration(
   input: ReintegrationInput,
 ): Promise<Exclude<ReintegrationResult, PlacementExecutionFailure>> {
-  return await withPrivateStatePublicationSeat(input.repository, async (seat) => {
+  return reintegrationResultWithSeatClose(
+    await withPrivateStatePublicationSeat(input.repository, async (seat) => {
     const attempts = mintAttempts({ entryCount: 1 });
     for (let index = 0; index < attempts.length; index += 1) {
       const attempt = attempts[index]!;
@@ -104,7 +120,8 @@ async function runReintegration(
       if (result.kind === "collision" && index + 1 === attempts.length) return { kind: "retry", reason: result };
     }
     return { kind: "retry", reason: { kind: "exhausted" } };
-  });
+    }),
+  );
 }
 
 export async function reintegrateOperation(input: ReintegrationInput): Promise<ReintegrationResult> {

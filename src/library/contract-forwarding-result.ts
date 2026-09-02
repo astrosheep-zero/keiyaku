@@ -502,20 +502,32 @@ export const auditReportSchema: z.ZodType<AuditReport> = z
   .strict()
   .transform((report) => withoutUndefined(report, ["delivery"]));
 
+const pendingSurfaceSchema = z
+  .object({
+    surface: z.enum(["verification", "placement", "continuation", "reconciliation", "settlement", "cleanup"]),
+    required: z.boolean(),
+  })
+  .strict();
+const seatCloseSchema = z
+  .object({ kind: z.literal("private-state-seat-close-failed"), diagnostic: nonblankStringSchema })
+  .strict();
 const mutationResultSchema = <Value>(value: z.ZodType<Value>) =>
   z
     .object({
+      kind: z.literal("accepted"),
       facts: z.array(journalFactSchema),
       head: contractHeadSchema,
       value,
       lags: z.array(reconciliationLagSchema),
       settlementLags: z.array(settlementLagSchema),
+      pending: z.array(pendingSurfaceSchema),
       recoverySnapshot: snapshotIdSchema.optional(),
       cleanup: cleanupSchema.optional(),
       leak: leakSchema.optional(),
+      seatClose: z.array(seatCloseSchema).optional(),
     })
     .strict()
-    .transform((result) => withoutUndefined(result, ["recoverySnapshot", "cleanup", "leak"]));
+    .transform((result) => withoutUndefined(result, ["recoverySnapshot", "cleanup", "leak", "seatClose"]));
 
 const deliveryMutationResultSchema = mutationResultSchema(deliveryValueSchema);
 const reviewMutationResultSchema = mutationResultSchema(reviewValueSchema);

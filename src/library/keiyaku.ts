@@ -56,6 +56,7 @@ export type {
   MutationFinality,
   MutationFinalityInput,
   MutationFinalitySurface,
+  MutationPendingSurface,
   PlacementStop,
   ReconcileReport,
   Review,

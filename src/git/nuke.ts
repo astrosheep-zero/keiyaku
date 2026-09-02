@@ -9,7 +9,11 @@ import {
 } from "../workspace-place.js";
 import type { WorldRoot } from "../world.js";
 import { GitPlumbingError, runGit, type GitRepository } from "./process.js";
-import { confirmPrivateStatePublication, withPrivateStatePublicationSeat } from "./private-state-seat.js";
+import {
+  confirmPrivateStatePublication,
+  requireClosedPrivateStateSeat,
+  withPrivateStatePublicationSeat,
+} from "./private-state-seat.js";
 import {
   CANDIDATE_PIN_REF_NAMESPACE,
   DELIVERY_REF_NAMESPACE,
@@ -157,7 +161,8 @@ export async function nukeGit(
   }
   await withPlaceAuthorityFence(repository, async (placeFence) => {
     const custody = await managedCustody(repository);
-    await withPrivateStatePublicationSeat(repository, async (seat) => {
+    requireClosedPrivateStateSeat(
+      await withPrivateStatePublicationSeat(repository, async (seat) => {
       const state = await readRef(repository, GIT_REF);
       if (state !== null) await deleteObservedStateRef(repository, state, seat);
 
@@ -168,6 +173,7 @@ export async function nukeGit(
       }
       await nukeEmptyPlaceAuthority(repository, placeFence);
       await removeOwnedRefs(repository);
-    });
+      }),
+    );
   });
 }

@@ -1,6 +1,6 @@
 import type { AuditReport } from "../../index.js";
 import type { AcceptedAuditResult } from "../result.js";
-import { cleanupLines, leakLines, receiptPayload, receiptRow, stopLines, titleLines } from "./receipt.js";
+import { cleanupLines, leakLines, receiptPayload, receiptRow, seatCloseLines, stopLines, titleLines } from "./receipt.js";
 import { renderRefusalFacts } from "./refusal.js";
 import { gitShortStat, renderOpaqueBlock, type TextRenderContext } from "./terminal.js";
 
@@ -112,6 +112,9 @@ function obligationLines(result: AcceptedAuditResult, columns: number): readonly
   return [
     ...(result.cleanup === undefined ? [] : cleanupLines(result.cleanup, columns)),
     ...(result.leak === undefined ? [] : leakLines(result.leak, columns)),
+    ...(result.seatClose === undefined || result.seatClose.length === 0
+      ? []
+      : seatCloseLines(result.seatClose, columns)),
   ];
 }
 

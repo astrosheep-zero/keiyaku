@@ -317,6 +317,38 @@ test("accepted results preserve reconciliation lag without telemetry", () => {
   });
 });
 
+test("accepted bind receipts expose confirmed private-state seat close lag", () => {
+  const contract = contractId("kei/bound");
+  const result: InvocationResult = {
+    kind: "accepted",
+    verb: "bind",
+    contract,
+    head: contractHead("head"),
+    facts: [{ contract, entry: "bind", kind: "bound" }],
+    settlementLags: [],
+    workspace: "worktree",
+    target: null,
+    overlaps: [],
+    seatClose: [{ kind: "private-state-seat-close-failed", diagnostic: "seat close failed after publication" }],
+  };
+  assert.equal(
+    renderText(result),
+    [
+      "✓ bound — kei/bound",
+      "  workspace managed worktree",
+      "  no target",
+      "  record",
+      "    journal bind · bound",
+      "    head head",
+      "  ! lag private-state-seat-close-failed",
+      "  diagnostic",
+      "",
+      "seat close failed after publication",
+      "",
+    ].join("\n"),
+  );
+});
+
 test("accepted receipts omit execution telemetry and retain recovery snapshots", () => {
   const contract = contractId("kei/unchanged-mechanics");
   const head = contractHead("head");

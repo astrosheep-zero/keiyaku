@@ -43,7 +43,7 @@ export type AcceptedFact =
 
 export type Lag = ReconcileReport["lag"][number];
 
-type MutationEnvelope = Pick<MutationResult<unknown>, "head" | "settlementLags" | "recoverySnapshot">;
+type MutationEnvelope = Pick<MutationResult<unknown>, "head" | "settlementLags" | "recoverySnapshot" | "seatClose">;
 
 export type AcceptedEnvelope = Readonly<{
   kind: "accepted";
@@ -53,6 +53,7 @@ export type AcceptedEnvelope = Readonly<{
   settlementLags: MutationEnvelope["settlementLags"];
   recoverySnapshot?: MutationEnvelope["recoverySnapshot"];
   lag?: readonly [Lag, ...Lag[]];
+  seatClose?: MutationEnvelope["seatClose"];
 }>;
 
 export type AcceptedBindResult = AcceptedEnvelope &

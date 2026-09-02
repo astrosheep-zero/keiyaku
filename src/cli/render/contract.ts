@@ -18,6 +18,7 @@ import {
   hookFailureSummary,
   leakLines,
   outcomeLines,
+  seatCloseLines,
   receiptPayload,
   receiptRow,
   reuseLines,
@@ -213,6 +214,9 @@ function acceptedLagRows(result: AcceptedEnvelope, columns: number): readonly st
   }
   for (const lag of result.settlementLags) {
     pushBlock(obligations, settlementLagRows(lag, columns));
+  }
+  if (result.seatClose !== undefined && result.seatClose.length > 0) {
+    pushBlock(obligations, seatCloseLines(result.seatClose, columns));
   }
   return obligations;
 }

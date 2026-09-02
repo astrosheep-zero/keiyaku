@@ -8,7 +8,7 @@ import type {
   VerificationDeclarationRefusal,
 } from "../verification/declaration.js";
 import { admitDecidedOffer, mintAttempts } from "./attempt.js";
-import { admitted } from "./outcome.js";
+import { admitted, intentOutcomeWithSeatClose } from "./outcome.js";
 import type { GitDecisionObservation } from "../git/observe.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import type { MutationOperationInput, IntentOutcome } from "./operations.js";
@@ -55,7 +55,8 @@ export async function amendOperation(
     const initial = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
     source = contractState(initial.decision, input.contractId)?.terms;
   }
-  return await withPrivateStatePublicationSeat(input.scope, async (seat) => {
+  return intentOutcomeWithSeatClose(
+    await withPrivateStatePublicationSeat(input.scope, async (seat) => {
     const attempts = mintAttempts({ entryCount: 1 });
     for (let index = 0; index < attempts.length; index += 1) {
       let observation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
@@ -104,5 +105,6 @@ export async function amendOperation(
       if (admission.kind === "collision" && index + 1 === attempts.length) return { kind: "retry", reason: admission };
     }
     return { kind: "retry", reason: { kind: "exhausted" } };
-  });
+    }),
+  );
 }

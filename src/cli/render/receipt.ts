@@ -231,3 +231,15 @@ export function leakLines(leak: NonNullable<AcceptedDeliverResult["leak"]>, colu
   receiptPayload(lines, "diagnostic", leak.diagnostic);
   return lines;
 }
+
+export function seatCloseLines(
+  seatClose: NonNullable<AcceptedDeliverResult["seatClose"]>,
+  columns: number,
+): readonly string[] {
+  const lines: string[] = [];
+  for (const lag of seatClose) {
+    receiptRow(lines, "!", "lag", [{ text: lag.kind }], columns);
+    receiptPayload(lines, "diagnostic", lag.diagnostic);
+  }
+  return lines;
+}

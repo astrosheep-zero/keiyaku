@@ -18,7 +18,7 @@ import {
   writeCommit,
 } from "../src/git/repository.js";
 import { finishTaskHolderAdmission, readTaskHoldersAt } from "../src/settlement/holder.js";
-import { completeHolderMutation } from "../src/library/mutation.js";
+import { completeHolderMutation, completionPending } from "../src/library/mutation.js";
 import { EMPTY_WORKTREE_HOOKS } from "../src/library/configuration.js";
 import { requireAccepted } from "../src/library/refusal.js";
 import { reviewOperation } from "../src/protocol/review.js";
@@ -31,7 +31,9 @@ type AcceptedDelivery = Exclude<
 >;
 
 function acceptedDelivery(result: Awaited<ReturnType<KeiyakuHandle["deliver"]>>): AcceptedDelivery {
-  if ("kind" in result) throw new Error(`unexpected integration conflict: ${result.conflictPaths.join(",")}`);
+  if (result.kind === "integration-conflict-materialized") {
+    throw new Error(`unexpected integration conflict: ${result.conflictPaths.join(",")}`);
+  }
   return result;
 }
 
@@ -593,6 +595,7 @@ test("a terminal held Contract completes placement and Task settlement after its
         channel,
         contractId: state.id,
         value: (review) => review,
+        valuePending: completionPending,
         hooks: EMPTY_WORKTREE_HOOKS,
       },
       admission,

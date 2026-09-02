@@ -57,6 +57,28 @@ test("Dispatch publishes one immutable association and preserves its first times
   });
 });
 
+test("confirmed private-state seat close failure remains lag on a dispatched association", async () => {
+  const raw = makeGitRepository();
+  const repository = {
+    ...(await repositoryAt(raw.path)),
+    onPrivateStateSeatClose: () => {
+      throw new Error("seat close failed after publication");
+    },
+  };
+  const akuma = parseAkuId("aku/worker/1234abcd").id;
+  const owner = contractId("kei/dispatch-owner");
+  const published = await publishDispatch({ repository, akuId: akuma, contractId: owner });
+  assert.equal(published.kind, "dispatched");
+  if (published.kind !== "dispatched") return;
+  assert.deepEqual(await readDispatch(repository, akuma), published.dispatch);
+  assert.deepEqual(published.seatClose, [
+    {
+      kind: "private-state-seat-close-failed",
+      diagnostic: "seat close failed after publication",
+    },
+  ]);
+});
+
 test("concurrent distinct Dispatch publications wait for one repository seat", async () => {
   const raw = makeGitRepository();
   const repository = await repositoryAt(raw.path);

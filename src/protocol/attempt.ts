@@ -2,7 +2,11 @@ import { randomBytes } from "node:crypto";
 import { encodeEntry } from "../core/facts/codec.js";
 import { admit, type PublicationFailed } from "../git/admission.js";
 import { observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
-import { confirmPrivateStatePublication, type PrivateStatePublicationSeat } from "../git/private-state-seat.js";
+import {
+  confirmPrivateStatePublication,
+  type PrivateStatePublicationSeat,
+  type PrivateStateSeatCloseLag,
+} from "../git/private-state-seat.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import { GIT_REF, readRefs, type GitRefAssertion } from "../git/repository.js";
 import type { GitRepository } from "../git/process.js";
@@ -64,6 +68,7 @@ export type AcceptedAdmission = Readonly<{
   facts: readonly JournalEntry[];
   state: ContractState;
   journal: readonly JournalEntry[];
+  seatClose?: readonly PrivateStateSeatCloseLag[];
 }>;
 
 export type AttemptTerminal = Readonly<{ kind: "collision" }> | PublicationFailed;

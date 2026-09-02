@@ -5,7 +5,7 @@ import { auditOperation, type AuditReport } from "../protocol/audit.js";
 import { withScopeAbortSignal, type RepositoryScope } from "../protocol/operations.js";
 import { worktreeHooksOption, type WorktreeHooks } from "./configuration.js";
 import { documentDerivation } from "./input.js";
-import { completeMutation, type MutationResult } from "./mutation.js";
+import { auditPending, completeMutation, type MutationResult } from "./mutation.js";
 import { requireAccepted } from "./refusal.js";
 
 export type AuditInput = Readonly<{
@@ -58,6 +58,7 @@ export async function auditContract(
       contractId: input.contractId,
       accepted,
       value: (report: AuditReport) => report,
+      valuePending: auditPending,
       hooks: composition?.hooks ?? worktreeHooksOption(undefined),
     });
   });

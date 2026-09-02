@@ -6,6 +6,7 @@ import type { ReconcileResult } from "../git/reconcile.js";
 import { worktreePath } from "../git/workspace.js";
 import { continueDeliveryOperation } from "../protocol/deliver.js";
 import type { DocumentDerivation, PlacementStop, RepositoryScope } from "../protocol/operations.js";
+import { concatenatePrivateStateSeatClose } from "../git/private-state-seat.js";
 import type { AcceptedIntent } from "./mutation.js";
 import { appointmentFor, readPlaceRegister } from "../workspace-place.js";
 
@@ -43,14 +44,16 @@ function reverseDependents(
 
 function appendAccepted<Value>(
   primary: AcceptedIntent<Value>,
-  child: Readonly<Pick<AcceptedIntent<unknown>, "facts" | "physical">>,
+  child: Readonly<Pick<AcceptedIntent<unknown>, "facts" | "physical" | "seatClose">>,
 ): AcceptedIntent<Value> {
   const effects = [...(primary.physical?.effects ?? []), ...(child.physical?.effects ?? [])];
   const lag = [...(primary.physical?.lag ?? []), ...(child.physical?.lag ?? [])];
+  const seatClose = concatenatePrivateStateSeatClose(primary.seatClose, child.seatClose);
   return {
     ...primary,
     facts: [...primary.facts, ...child.facts],
     ...(effects.length === 0 && lag.length === 0 ? {} : { physical: { effects, lag } }),
+    ...(seatClose === undefined ? {} : { seatClose }),
   };
 }
 

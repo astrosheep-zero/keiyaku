@@ -20,6 +20,13 @@ import type {
   VerificationDeclarationPreparation,
   VerificationDeclarationRefusal,
 } from "../verification/declaration.js";
+import {
+  appendPrivateStateSeatClose,
+  concatenatePrivateStateSeatClose,
+  mergePrivateStateSeatClose,
+  type PrivateStateSeatCloseLag,
+  type PrivateStateSeatOutcome,
+} from "../git/private-state-seat.js";
 import type { PlacementProtocolResult } from "./placement.js";
 import type { AcceptedAdmission, DecidedOfferResult } from "./attempt.js";
 import type { AcceptedProtocolStep, IntentOutcome as ProtocolIntentOutcome } from "./outcome.js";
@@ -143,13 +150,24 @@ export function timestamp(): string {
   return new Date().toISOString();
 }
 
+export function attemptDecisionWithSeatClose<Value, Refusal = IntentRefusal>(
+  outcome: PrivateStateSeatOutcome<AttemptDecision<Value, Refusal>>,
+): AttemptDecision<Value, Refusal> {
+  return mergePrivateStateSeatClose(outcome, (value, closeLag: PrivateStateSeatCloseLag) => {
+    if (value.kind !== "accepted") throw new Error(closeLag.diagnostic);
+    return { ...value, seatClose: appendPrivateStateSeatClose(value.seatClose, closeLag) };
+  });
+}
+
 export function mergeAdmissions(current: AcceptedProtocolStep, next: AcceptedProtocolStep): AcceptedProtocolStep {
   const effects = [...(current.physical?.effects ?? []), ...(next.physical?.effects ?? [])];
   const lag = [...(current.physical?.lag ?? []), ...(next.physical?.lag ?? [])];
+  const seatClose = concatenatePrivateStateSeatClose(current.seatClose, next.seatClose);
   return {
     ...next,
     facts: [...current.facts, ...next.facts],
     ...(effects.length === 0 && lag.length === 0 ? {} : { physical: { effects, lag } }),
+    ...(seatClose === undefined ? {} : { seatClose }),
   };
 }
 
