@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
@@ -24,7 +25,10 @@ import { reviewOperation } from "../src/protocol/review.js";
 import type { IntentOutcome } from "../src/protocol/operations.js";
 import { settle } from "../src/settlement/settle.js";
 
-type AcceptedDelivery = Exclude<Awaited<ReturnType<KeiyakuHandle["deliver"]>>, { kind: "integration-conflict-materialized" }>;
+type AcceptedDelivery = Exclude<
+  Awaited<ReturnType<KeiyakuHandle["deliver"]>>,
+  { kind: "integration-conflict-materialized" }
+>;
 
 function acceptedDelivery(result: Awaited<ReturnType<KeiyakuHandle["deliver"]>>): AcceptedDelivery {
   if ("kind" in result) throw new Error(`unexpected integration conflict: ${result.conflictPaths.join(",")}`);
@@ -34,7 +38,13 @@ function acceptedDelivery(result: Awaited<ReturnType<KeiyakuHandle["deliver"]>>)
 import { readNamespaceContext } from "../src/task/context.js";
 import { Tasks } from "../src/task/index.js";
 import { World } from "../src/world.js";
-import { appointedWorktreePath, cachedRepoAt, cachedRepositoryAt, makeGitRepository, withGitShim } from "./support/git.js";
+import {
+  appointedWorktreePath,
+  cachedRepoAt,
+  cachedRepositoryAt,
+  makeGitRepository,
+  withGitShim,
+} from "./support/git.js";
 
 function repository() {
   const value = makeGitRepository();
@@ -131,7 +141,10 @@ test("a Task document untracked in Git still completes through delivery", async 
   const delivered = acceptedDelivery(await bound.keiyaku.deliver({ includeDirty: true }));
 
   assert.equal((await bound.keiyaku.state()).terminal?.kind, "claimed");
-  assert.equal(world.run(["log", "-1", "--format=%s", "refs/heads/keiyaku-state"]).trim(), "keiyaku authority - do not delete or rewrite");
+  assert.equal(
+    world.run(["log", "-1", "--format=%s", "refs/heads/keiyaku-state"]).trim(),
+    "keiyaku authority - do not delete or rewrite",
+  );
   assert.equal(await taskState(world.path, taskId), "done");
   assert.deepEqual(delivered.settlementLags, []);
   assert.deepEqual(await holders(world), [
@@ -237,6 +250,67 @@ test("reconcile replay of an owed completion is an idempotent no-op the second t
   assert.equal(await taskState(world.path, taskId), "done");
 });
 
+test(
+  "settlement reports committed Task cleanup failure before releasing its holder",
+  { concurrency: false },
+  async () => {
+    const world = repository(),
+      repo = await cachedRepoAt(world.path);
+    const taskId = await task(world.path, "Settlement cleanup", "drop");
+    const bound = await Keiyaku.bind({
+      repo,
+      task: taskId,
+      markdown: document("Settlement cleanup"),
+      workspace: "worktree",
+      gates: [],
+    });
+    writeFileSync(join(world.path, "cleanup.txt"), "cleanup\n");
+    const delivered = acceptedDelivery(await bound.keiyaku.deliver({ includeDirty: true }));
+    assert.equal(delivered.settlementLags[0]?.surface, "task");
+    assert.deepEqual(await holders(world), [
+      { version: 1, taskId, contractId: (await bound.keiyaku.state()).id, disposition: "held" },
+    ]);
+    replaceTaskState(world.path, taskId, "drop", "open");
+    assert.equal(await taskState(world.path, taskId), "open");
+
+    const originalClose = DatabaseSync.prototype.close;
+    let fail = true;
+    DatabaseSync.prototype.close = function patchedClose(this: DatabaseSync): void {
+      try {
+        if (
+          fail &&
+          (this.location() ?? "").includes(
+            `${join(".keiyaku", "locks", "task")}${process.platform === "win32" ? "\\" : "/"}`,
+          )
+        ) {
+          fail = false;
+          throw new Error("task lock release failed");
+        }
+      } finally {
+        originalClose.call(this);
+      }
+    };
+    try {
+      const replayed = await bound.keiyaku.reconcile();
+      const state = await bound.keiyaku.state();
+      assert.deepEqual(replayed.settlement.actions, [{ kind: "task", taskId, action: "done" }]);
+      assert.deepEqual(replayed.settlement.lags, [
+        {
+          kind: "settlement-failed",
+          surface: "task",
+          contractId: state.id,
+          taskId,
+          diagnostic: "cannot release SQLite lock: task lock release failed",
+        },
+      ]);
+      assert.equal(await taskState(world.path, taskId), "done");
+      assert.deepEqual(await holders(world), [{ version: 1, taskId, contractId: state.id, disposition: "released" }]);
+    } finally {
+      DatabaseSync.prototype.close = originalClose;
+    }
+  },
+);
+
 test("abandon releases the holder without reopening Task authority", async () => {
   const world = repository(),
     repo = await cachedRepoAt(world.path);
@@ -320,7 +394,11 @@ test("Settlement exact-read-backs an unknown TaskHolder release after external s
   writeFileSync(`${world.path}/unknown-holder.txt`, "candidate\n");
   const delivered = acceptedDelivery(await bound.keiyaku.deliver({ includeDirty: true }));
   assert.equal(delivered.settlementLags[0]?.surface, "task");
+  assert.deepEqual(await holders(world), [
+    { version: 1, taskId, contractId: (await bound.keiyaku.state()).id, disposition: "held" },
+  ]);
   replaceTaskState(world.path, taskId, "drop", "open");
+  assert.equal(await taskState(world.path, taskId), "open");
   const state = await bound.keiyaku.state();
 
   const git = await cachedRepositoryAt(world.path);
@@ -347,7 +425,9 @@ test("Settlement exact-read-backs an unknown TaskHolder release after external s
         ...(await cachedRepositoryAt(world.path, gitPath)),
         onPrivateStateSeatContention: resolveArrival,
       };
-      return await withGitDecodeChannel(git, async (channel) => settle({ repository: git, channel, state, effects: [] }));
+      return await withGitDecodeChannel(git, async (channel) =>
+        settle({ repository: git, channel, state, effects: [] }),
+      );
     },
   );
   await arrival;
@@ -359,9 +439,7 @@ test("Settlement exact-read-backs an unknown TaskHolder release after external s
   assert.deepEqual(report.actions, [{ kind: "task", taskId, action: "done" }]);
   assert.deepEqual(report.lags, []);
   assert.equal(await taskState(world.path, taskId), "done");
-  assert.deepEqual(await holders(world), [
-    { version: 1, taskId, contractId: state.id, disposition: "released" },
-  ]);
+  assert.deepEqual(await holders(world), [{ version: 1, taskId, contractId: state.id, disposition: "released" }]);
 });
 
 test("abandon rejects corrupt authority assigning one Contract multiple holders", async () => {
@@ -506,7 +584,7 @@ test("a terminal held Contract completes placement and Task settlement after its
       taskId,
       accepted as IntentOutcome<typeof accepted.value, import("../src/library/refusal.js").KeiyakuRefusal>,
       () => {
-      throw new Error("fence close failed");
+        throw new Error("fence close failed");
       },
     );
     return completeHolderMutation({
@@ -574,7 +652,10 @@ test("a claimed managed-worktree Contract installs namespace context before remo
   });
   const state = await bound.keiyaku.state();
   const path = await appointedWorktreePath(await cachedRepositoryAt(world.path), state.id);
-  assert.deepEqual(await readNamespaceContext({ directory: path, boundary: path }), ["kei", state.id.slice("kei/".length)]);
+  assert.deepEqual(await readNamespaceContext({ directory: path, boundary: path }), [
+    "kei",
+    state.id.slice("kei/".length),
+  ]);
   const fromWorktree = Keiyaku.of({ repo: await Repo.at({ path }), id: state.id });
   writeFileSync(`${path}/candidate.txt`, "candidate\n");
   const claimed = acceptedDelivery(await fromWorktree.deliver({ includeDirty: true }));
@@ -603,7 +684,10 @@ test("an active managed-worktree projection repairs malformed namespace context"
 
   assert.deepEqual(repaired.lag, []);
   assert.equal(existsSync(path), true);
-  assert.deepEqual(await readNamespaceContext({ directory: path, boundary: path }), ["kei", state.id.slice("kei/".length)]);
+  assert.deepEqual(await readNamespaceContext({ directory: path, boundary: path }), [
+    "kei",
+    state.id.slice("kei/".length),
+  ]);
 });
 
 test("Settlement completes Task before releasing its holder", async () => {
@@ -638,9 +722,7 @@ test("Settlement completes Task before releasing its holder", async () => {
   assert.deepEqual(refused.actions, []);
   assert.equal(refused.lags[0]?.surface, "task");
   assert.equal(existsSync(join(refusedProjection, ".keiyaku")), false);
-  assert.deepEqual(await holders(world), [
-    { version: 1, taskId, contractId: state.id, disposition: "held" },
-  ]);
+  assert.deepEqual(await holders(world), [{ version: 1, taskId, contractId: state.id, disposition: "held" }]);
   replaceTaskState(world.path, taskId, "drop", "open");
   const projection = join(world.path, "projection-before-release");
   mkdirSync(projection);
@@ -669,14 +751,10 @@ test("Settlement completes Task before releasing its holder", async () => {
   );
 
   assert.deepEqual(report, {
-    actions: [
-      { kind: "task", taskId, action: "done" },
-    ],
+    actions: [{ kind: "task", taskId, action: "done" }],
     lags: [],
   });
-  assert.deepEqual(await holders(world), [
-    { version: 1, taskId, contractId: state.id, disposition: "released" },
-  ]);
+  assert.deepEqual(await holders(world), [{ version: 1, taskId, contractId: state.id, disposition: "released" }]);
 });
 
 test("an active namespace projection failure remains a workspace lag", async () => {
@@ -701,9 +779,7 @@ test("an active namespace projection failure remains a workspace lag", async () 
   assert.equal(report.lag[0]?.kind, "contract-file-failed");
   assert.equal(report.lag[0]?.path, join(path, ".keiyaku", "namespace", "current"));
   assert.equal((await bound.keiyaku.state()).terminal, null);
-  assert.deepEqual(await holders(world), [
-    { version: 1, taskId, contractId: state.id, disposition: "held" },
-  ]);
+  assert.deepEqual(await holders(world), [{ version: 1, taskId, contractId: state.id, disposition: "held" }]);
 });
 
 test("a retained replay does not report an absent managed worktree to Settlement", async () => {
@@ -738,7 +814,10 @@ test("a retained replay does not report an absent managed worktree to Settlement
 
   assert.deepEqual(replayed.settlement.actions, []);
   assert.equal(replayed.settlement.lags[0]?.surface, "task");
-  assert.equal(replayed.effects.some((effect) => effect.kind === "worktree" && effect.path === path), false);
+  assert.equal(
+    replayed.effects.some((effect) => effect.kind === "worktree" && effect.path === path),
+    false,
+  );
   assert.equal(existsSync(path), false);
 });
 

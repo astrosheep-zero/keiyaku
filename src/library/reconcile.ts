@@ -267,13 +267,14 @@ export async function completeRepoReconcile(input: ReconcileOptions): Promise<Re
     : null;
   const later =
     cleanup === null ? null : new Map(cleanup.contracts.map((contract) => [contract.contractId, contract.report]));
-  const released: ContractId[] = [];
+  const released: ContractId[] = retained.contracts
+    .filter((contract) =>
+      releaseEligible(contract.state, later?.get(contract.contractId), places.has(contract.contractId)),
+    )
+    .map((contract) => contract.contractId);
   const contracts: RepoReconcileContracts[number][] = [];
   for (const [index, contract] of retained.contracts.entries()) {
     const report = later?.get(contract.contractId);
-    if (releaseEligible(contract.state, report, places.has(contract.contractId))) {
-      released.push(contract.contractId);
-    }
     const projection = projections[index]!;
     contracts.push({
       contractId: contract.contractId,

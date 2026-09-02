@@ -73,21 +73,26 @@ test("graceful termination cleans the group after SIGTERM EPERM and leader exit"
   }
   const child = ownedChild(10_200);
   const signals: Array<NodeJS.Signals | number> = [];
+  let groupGone = false;
   t.mock.method(process, "kill", ((pid: number, signal?: NodeJS.Signals | number) => {
     assert.equal(pid, -child.pid);
     signals.push(signal ?? 0);
+    if (signal === 0) {
+      if (groupGone) throw Object.assign(new Error("group gone"), { code: "ESRCH" });
+      return true;
+    }
     if (signal === "SIGTERM") {
       child.emit("exit", 0, null);
       throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
     }
-    if (signal === 0) return true;
     assert.equal(signal, "SIGKILL");
+    groupGone = true;
     child.emit("close", 0, null);
     return true;
   }) as typeof process.kill);
 
   await terminateOwnedProcess(child);
-  assert.deepEqual(signals, ["SIGTERM", 0, "SIGKILL"]);
+  assert.deepEqual(signals, ["SIGTERM", 0, "SIGKILL", 0]);
 });
 
 test("runProcess reports termination failure without waiting for child close", async (t) => {
@@ -363,7 +368,7 @@ test("runProcess timeout closes the directly-owned helper boundary", async () =>
   }
 });
 
-test("Unix graceful termination cleans an owned group after its leader exits", async (t) => {
+test("Unix termination cleans an owned group after its leader exits first", async (t) => {
   if (process.platform === "win32") {
     t.skip("POSIX process groups only");
     return;
@@ -378,8 +383,7 @@ test("Unix graceful termination cleans an owned group after its leader exits", a
   const parent = [
     'const { spawn } = require("node:child_process");',
     `spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: ["ignore", "inherit", "inherit"] });`,
-    'process.on("SIGTERM", () => process.exit(0));',
-    "setInterval(() => {}, 1_000);",
+    "process.exit(0);",
   ].join(" ");
   let owned: Awaited<ReturnType<typeof spawnDetachedProcess>> | undefined;
   let descendantPid: number | undefined;
@@ -422,8 +426,7 @@ test("runProcess timeout settles after cleaning inherited pipes from an owned gr
     'const { writeFileSync } = require("node:fs");',
     `const descendant = spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: ["ignore", "inherit", "inherit"] });`,
     `writeFileSync(${JSON.stringify(descendantPidPath)}, String(descendant.pid));`,
-    'process.on("SIGTERM", () => process.exit(0));',
-    "setInterval(() => {}, 1_000);",
+    "process.exit(0);",
   ].join(" ");
   let pending: ReturnType<typeof runProcess> | undefined;
   let descendantPid: number | undefined;

@@ -127,7 +127,7 @@ export const capabilityPolicy = {
     },
     {
       capability: "process-environment",
-      owners: ["akuma-body.ts", "akuma/**", "cli/**", "git/**", "runtime/proc/**"],
+      owners: ["akuma-body.ts", "akuma/**", "cli/**", "git/**", "runtime/proc/**", "verification/**"],
     },
     { capability: "process-output", owners: ["akuma-body.ts", "cli/**", "scripts/**"] },
     { capability: "process-pid", owners: ["runtime/proc/**"] },
@@ -146,6 +146,7 @@ export const capabilityPolicy = {
         "kanshi/**",
         "library/**",
         "plugin/**",
+        "runtime/proc/**",
         "settings.ts",
         "task/**",
         "workspace-place.ts",

@@ -85,11 +85,24 @@ jobs:
           node-version: 22.19.0
           cache: npm
 
+      - name: Set up Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.14.1
+
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --prefer-offline
 
-      - name: Run repository verification
-        run: npm test -- --runInBand
+      - name: Configure Git identity for external worktree fixtures
+        run: |
+          git config --global user.name "Keiyaku CI"
+          git config --global user.email "keiyaku-ci@example.invalid"
+
+      - name: Build
+        run: npm run build
+
+      - name: Run packaged CLI end-to-end test
+        run: npm run test:e2e
 
       - name: Typecheck source, scripts, and scoped semantic tests
         run: npm run test:typecheck

@@ -132,6 +132,17 @@ async function completeHeldTask(
     return false;
   }
   if (result.kind === "changed") actions.push({ kind: "task", taskId, action: "done" });
+  if (result.kind === "changed" && result.cleanup !== undefined) {
+    for (const detail of result.cleanup.diagnostics) {
+      lags.push({
+        kind: "settlement-failed",
+        surface: "task",
+        contractId: candidate.id,
+        taskId,
+        diagnostic: detail,
+      });
+    }
+  }
   if (result.kind === "changed" || result.kind === "unchanged") return true;
   lags.push({
     kind: "settlement-failed",

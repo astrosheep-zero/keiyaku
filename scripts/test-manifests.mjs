@@ -17,6 +17,7 @@ export const LOCAL_TEST_FILES = [
   "tests/maintainability.test.js",
   "tests/markdown-ast.test.ts",
   "tests/model-impact.test.ts",
+  "tests/mutation-finality.test.ts",
   "tests/namespace-context.test.ts",
   "tests/normalized-identity.test.ts",
   "tests/observation.test.ts",

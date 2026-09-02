@@ -8,7 +8,7 @@ import { libraryExecutionInput, localExecutionContext, type LibraryExecution } f
 
 export { AuthorityCorruptionError } from "../core/facts/errors.js";
 export { Delivery, KeiyakuRefused, KeiyakuRetry } from "./contract.js";
-export { canonicalMutationFinality, mutationFinality, projectMutationFinality } from "./contract.js";
+export { projectMutationFinality } from "./contract.js";
 export { NoGitWorldError, Repo } from "./repo.js";
 export { gatesFrom, requireBranchesToBeUpToDateFrom, SettingsError, worktreeHooksFrom } from "./configuration.js";
 export { AkumaWorldScopeError } from "./address.js";

@@ -178,11 +178,6 @@ export async function spawnDetachedProcess(input: DetachedProcessInput): Promise
       (force) => terminateOwnedProcess(child, force),
       () => child.unref(),
     );
-    const invalidate = (): void => {
-      lifecycle.markInert();
-    };
-    child.once("exit", invalidate);
-    child.once("close", invalidate);
     const exited = new Promise<DetachedProcessExit>((resolve, reject) => {
       child.once("close", (code, signal) => {
         void (async () => {

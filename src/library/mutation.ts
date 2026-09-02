@@ -10,9 +10,8 @@ import type { WorktreeHooks } from "./configuration.js";
 import { completeReconcile, type ReconcileCompletion } from "./reconcile.js";
 import type { AuditReport } from "../protocol/audit.js";
 import type { IntegrationConflictMaterialized } from "../protocol/deliver.js";
-import type { CompletionEvidence } from "../protocol/completion.js";
 import type { ContinuationReport } from "./continuation.js";
-import { Delivery, type Delivery as DeliveryHandle } from "./delivery.js";
+import type { Delivery } from "./delivery.js";
 import type { Review } from "./contract-forwarding-result.js";
 import type { AmendResult, BindResult } from "./contract-types.js";
 import { KeiyakuRefused, KeiyakuRetry } from "./refusal.js";
@@ -35,7 +34,7 @@ export type MutationFinality =
 
 export type MutationFinalityInput =
   | MutationResult<AuditReport>
-  | MutationResult<DeliveryHandle>
+  | MutationResult<Delivery>
   | MutationResult<Review>
   | MutationResult<void>
   | BindResult
@@ -59,7 +58,7 @@ export function projectMutationFinality(input: MutationFinalityInput): MutationF
     if (isAuditReport(value)) {
       if (value.verification.kind === "stopped") pending.push(pendingSurface("verification", true));
       if (input.cleanup !== undefined || input.leak !== undefined) pending.push(pendingSurface("cleanup", false));
-    } else if (isDelivery(value)) {
+    } else if (isCompletionValue(value)) {
       completionPending(value, pending);
       if (
         value.cleanup !== undefined ||
@@ -67,11 +66,6 @@ export function projectMutationFinality(input: MutationFinalityInput): MutationF
         input.cleanup !== undefined ||
         input.leak !== undefined
       ) {
-        pending.push(pendingSurface("cleanup", false));
-      }
-    } else if (isCompletionValue(value)) {
-      completionPending(value, pending);
-      if (value.cleanup !== undefined || value.leak !== undefined || input.cleanup !== undefined || input.leak !== undefined) {
         pending.push(pendingSurface("cleanup", false));
       }
     }
@@ -93,15 +87,11 @@ function isIntegrationConflictMaterialized(value: unknown): value is Integration
   return isRecord(value) && value.kind === "integration-conflict-materialized";
 }
 
-function isDelivery(value: unknown): value is DeliveryHandle {
-  return Delivery[Symbol.hasInstance](value);
-}
-
 type CompletionValue = Readonly<{
-  verification?: CompletionEvidence["verification"] | undefined;
-  placement?: CompletionEvidence["placement"] | undefined;
-  cleanup?: CompletionEvidence["cleanup"] | undefined;
-  leak?: CompletionEvidence["leak"] | undefined;
+  verification?: unknown;
+  placement?: unknown;
+  cleanup?: unknown;
+  leak?: unknown;
   continuation?: ContinuationReport | undefined;
 }>;
 
@@ -119,9 +109,6 @@ function completionPending(
     pending.push(pendingSurface("continuation", true));
   }
 }
-
-export const mutationFinality = projectMutationFinality;
-export const canonicalMutationFinality = projectMutationFinality;
 
 export type AcceptedIntent<Value> = Readonly<
   {

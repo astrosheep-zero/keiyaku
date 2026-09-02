@@ -144,7 +144,9 @@ export class LineRpcProcess {
     if (this.closed) return Promise.reject(new Error("line RPC process is closed"));
     const timeoutMs = options.timeoutMs ?? this.requestTimeoutMs;
     if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
-      return Promise.reject(new TypeError("line RPC request timeout must be a nonnegative finite millisecond duration"));
+      return Promise.reject(
+        new TypeError("line RPC request timeout must be a nonnegative finite millisecond duration"),
+      );
     }
     const id = this.nextId++;
     return new Promise((resolve, reject) => {

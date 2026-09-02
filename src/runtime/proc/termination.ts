@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 const TERMINATION_GRACE_MS = 250;
 const WINDOWS_TERMINATION_SETTLE_MS = 250;
 const WINDOWS_TERMINATION_TIMEOUT_MS = 1_000;
+const PROCESS_GROUP_POLL_MS = 10;
 const execFileAsync = promisify(execFile);
 
 function isMissingProcess(error: unknown): boolean {
@@ -31,8 +32,18 @@ function ownedProcessGroupExists(pid: number): boolean {
     return true;
   } catch (error) {
     if (isMissingProcess(error)) return false;
+    if ((error as NodeJS.ErrnoException).code === "EPERM") return true;
     throw error;
   }
+}
+
+async function waitForOwnedProcessGroupExit(pid: number): Promise<void> {
+  const attempts = Math.ceil(TERMINATION_GRACE_MS / PROCESS_GROUP_POLL_MS);
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (!ownedProcessGroupExists(pid)) return;
+    await delay(PROCESS_GROUP_POLL_MS, undefined, { ref: false });
+  }
+  if (ownedProcessGroupExists(pid)) throw new Error("owned process group did not exit after termination");
 }
 
 export async function terminateWindowsTree(pid: number): Promise<void> {
@@ -66,20 +77,19 @@ function closeWindowsStreams(child: ChildProcess): void {
 
 export async function terminateOwnedProcess(child: ChildProcess, force = false): Promise<void> {
   const pid = child.pid;
-  if (pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
-  let exited = false;
+  if (pid === undefined) return;
   const exit = new Promise<void>((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      resolve();
+      return;
+    }
     child.once("exit", () => {
-      exited = true;
       resolve();
     });
     child.once("close", () => {
-      exited = true;
       resolve();
     });
   });
-  await new Promise<void>((resolve) => setImmediate(resolve));
-  if (exited || child.exitCode !== null || child.signalCode !== null) return;
   if (process.platform === "win32") {
     try {
       await terminateWindowsTree(pid);
@@ -91,11 +101,15 @@ export async function terminateOwnedProcess(child: ChildProcess, force = false):
   }
   if (force) {
     await signalOwnedProcessGroup(pid, "SIGKILL", exit);
+    await waitForOwnedProcessGroupExit(pid);
     await exit;
     return;
   }
   await signalOwnedProcessGroup(pid, "SIGTERM", exit);
   await delay(TERMINATION_GRACE_MS);
-  if (ownedProcessGroupExists(pid)) await signalOwnedProcessGroup(pid, "SIGKILL", exit);
+  if (ownedProcessGroupExists(pid)) {
+    await signalOwnedProcessGroup(pid, "SIGKILL", exit);
+    await waitForOwnedProcessGroupExit(pid);
+  }
   await exit;
 }

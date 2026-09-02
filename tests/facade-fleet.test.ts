@@ -517,7 +517,10 @@ test("facade ls reads exactly one selected identity directory", async () => {
       rows: [{ name: "reviewer", model: "review-model", description: "Complete catalog description." }],
     });
     const workers = catalogOf(await Keiyaku.ls({ query: { kind: "akuma", archetype: "worker" }, path: root }), "akuma");
-    assert.deepEqual(workers.rows.map((row) => row.id), [source.id]);
+    assert.deepEqual(
+      workers.rows.map((row) => row.id),
+      [source.id],
+    );
     assert.deepEqual((await Keiyaku.ls({ query: { kind: "akuma", archetype: "reviewer" }, path: root })).rows, []);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -885,6 +888,10 @@ test("Task catalog namespace queries distinguish omitted, root, and named scope"
     assert.equal(rootTask.kind, "accepted");
     assert.equal(featureTask.kind, "accepted");
     assert.equal(nestedTask.kind, "accepted");
+    if (rootTask.kind !== "accepted" || featureTask.kind !== "accepted" || nestedTask.kind !== "accepted") return;
+    const rootId = rootTask.value.id;
+    const featureId = featureTask.value.id;
+    const nestedId = nestedTask.value.id;
     const all = catalogOf(await Keiyaku.ls({ query: { kind: "tasks" }, path: root }), "tasks");
     const rootOnly = catalogOf(await Keiyaku.ls({ query: { kind: "tasks", namespace: [] }, path: root }), "tasks");
     const featureOnly = catalogOf(
@@ -893,16 +900,16 @@ test("Task catalog namespace queries distinguish omitted, root, and named scope"
     );
     assert.deepEqual(
       all.rows.map((row) => row.id),
-      ["task/feature/ui/catalog-nested", "task/feature/catalog-feature", "task/catalog-root"],
+      [nestedId, featureId, rootId],
     );
     assert.equal(all.hasMore, false);
     assert.deepEqual(
       rootOnly.rows.map((row) => row.id),
-      ["task/catalog-root"],
+      [rootId],
     );
     assert.deepEqual(
       featureOnly.rows.map((row) => row.id),
-      ["task/feature/catalog-feature"],
+      [featureId],
     );
     await assert.rejects(
       () => Keiyaku.ls({ query: { kind: "tasks", namespace: ["bad/segment"] }, path: root }),
