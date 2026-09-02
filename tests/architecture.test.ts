@@ -147,6 +147,18 @@ test("architecture policy keeps ambient process environments out of protocol", (
   assert.ok(rules(diagnostics).includes("architecture/capability-use"));
 });
 
+test("architecture policy accepts Verification process-environment use and rejects unrelated owners", () => {
+  const accepted = check({
+    "verification/execution.ts": "export const environment = process.env;",
+  });
+  const rejected = check({
+    "core/facts/state.ts": "export const environment = process.env;",
+  });
+
+  assert.deepEqual(accepted, []);
+  assert.deepEqual(rules(rejected), ["architecture/capability-use"]);
+});
+
 test("architecture policy keeps generic Protocol runtime away from target placement", () => {
   const accepted = check({
     "git/target-placement.ts": "export type TargetPlacementRefusal = { kind: string };",
