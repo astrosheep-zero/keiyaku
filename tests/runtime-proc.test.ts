@@ -262,6 +262,25 @@ async function waitForFile(path: string): Promise<string> {
   return readFileSync(path, "utf8");
 }
 
+async function expectLaterTerminateIsInert(
+  owned: Awaited<ReturnType<typeof spawnDetachedProcess>>,
+): Promise<void> {
+  let signals = 0;
+  const originalKill = process.kill;
+  const kill = ((pid: number, signal?: NodeJS.Signals | number) => {
+    if ((pid === owned.pid || pid === -owned.pid) && signal !== 0) signals += 1;
+    return originalKill(pid, signal as NodeJS.Signals);
+  }) as typeof process.kill;
+  process.kill = kill;
+  try {
+    await owned.terminate();
+    await owned.terminate(true);
+  } finally {
+    process.kill = originalKill;
+  }
+  assert.equal(signals, 0);
+}
+
 test("runProcess returns terminal diagnostics from both streams", async () => {
   const outcome = await runProcess(
     input([process.execPath, "-e", 'process.stdout.write("out"); process.stderr.write("err");']),
@@ -423,20 +442,7 @@ test("Unix natural leader exit cleans a surviving descendant once", async (t) =>
     descendantPid = Number.parseInt(await waitForFile(descendantPidPath), 10);
     await ownedProcess.exited;
     await waitForProcessExit(descendantPid);
-    let signals = 0;
-    const originalKill = process.kill;
-    const kill = ((pid: number, signal?: NodeJS.Signals | number) => {
-      if ((pid === ownedProcess.pid || pid === -ownedProcess.pid) && signal !== 0) signals += 1;
-      return originalKill(pid, signal as NodeJS.Signals);
-    }) as typeof process.kill;
-    process.kill = kill;
-    try {
-      await ownedProcess.terminate();
-      await ownedProcess.terminate(true);
-    } finally {
-      process.kill = originalKill;
-    }
-    assert.equal(signals, 0);
+    await expectLaterTerminateIsInert(ownedProcess);
   } finally {
     if (descendantPid !== undefined) {
       try {
@@ -478,20 +484,7 @@ test("Unix natural leader exit leaves no stale terminate after descendants are a
     descendantPid = Number.parseInt(await waitForFile(descendantPidPath), 10);
     await waitForProcessExit(descendantPid);
     await ownedProcess.exited;
-    let signals = 0;
-    const originalKill = process.kill;
-    const kill = ((pid: number, signal?: NodeJS.Signals | number) => {
-      if ((pid === ownedProcess.pid || pid === -ownedProcess.pid) && signal !== 0) signals += 1;
-      return originalKill(pid, signal as NodeJS.Signals);
-    }) as typeof process.kill;
-    process.kill = kill;
-    try {
-      await ownedProcess.terminate();
-      await ownedProcess.terminate(true);
-    } finally {
-      process.kill = originalKill;
-    }
-    assert.equal(signals, 0);
+    await expectLaterTerminateIsInert(ownedProcess);
   } finally {
     if (descendantPid !== undefined) {
       try {
@@ -898,20 +891,7 @@ test("Unix natural exit followed by terminate emits no signal", async (t) => {
     });
     const exit = await owned.exited;
     assert.deepEqual({ code: exit.code, signal: exit.signal }, { code: 0, signal: null });
-    let signals = 0;
-    const originalKill = process.kill;
-    const kill = ((pid: number, signal?: NodeJS.Signals | number) => {
-      if ((pid === owned.pid || pid === -owned.pid) && signal !== 0) signals += 1;
-      return originalKill(pid, signal as NodeJS.Signals);
-    }) as typeof process.kill;
-    process.kill = kill;
-    try {
-      await owned.terminate();
-      await owned.terminate(true);
-    } finally {
-      process.kill = originalKill;
-    }
-    assert.equal(signals, 0);
+    await expectLaterTerminateIsInert(owned);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

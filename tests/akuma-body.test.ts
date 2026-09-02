@@ -213,6 +213,65 @@ async function recordTell(paths: Parameters<typeof heartRecordTell>[0], tell: Re
   return await heartRecordTell(paths, { kind: "tell", ...tell });
 }
 
+function unresolved<T = never>(): Promise<T> {
+  return new Promise<T>(() => undefined);
+}
+
+function hangingSession(fence: string, abort: () => Promise<void> = async () => {}): FixtureSession {
+  return {
+    admission: { fence },
+    events: {
+      async *[Symbol.asyncIterator]() {
+        await unresolved();
+      },
+    },
+    completion: unresolved<TurnResult>(),
+    abort,
+  };
+}
+
+function hangingAdapter(fence: string, abort?: () => Promise<void>): FixtureProviderAdapter {
+  return {
+    admitOptions(options) {
+      return { kind: "admitted", options };
+    },
+    async start() {
+      return hangingSession(fence, abort);
+    },
+  };
+}
+
+function acpLaunch(
+  allocated: Awaited<ReturnType<typeof allocateAkumaDirectory>>,
+  root: string,
+): FixtureBodyLaunch {
+  return {
+    paths: allocated.paths,
+    seed: {
+      id: allocated.id,
+      archetype: "acp",
+      provider: { name: "acp", kind: "acp" },
+      options: {},
+      origin: { kind: "direct" },
+      cwd: root,
+    },
+    initialBody: "work",
+  };
+}
+
+async function waitUntilLatestBody(paths: Parameters<typeof readHeart>[0]): Promise<void> {
+  while ((await readHeart(paths)).latestBody === null) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+async function expectBodySettles(body: Promise<unknown>, message: string, timeoutMs = 1_000): Promise<void> {
+  await Promise.race([
+    body,
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error(message)), timeoutMs)),
+  ]);
+}
+
 async function eventually(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!predicate()) {
@@ -792,30 +851,6 @@ test("a Session without live tell hands off while narration remains open", async
     });
     await initializeHeart(allocated.paths);
     let aborts = 0;
-    const incumbent: FixtureProviderAdapter = {
-      admitOptions(options) {
-        return { kind: "admitted", options };
-      },
-      async start() {
-        return {
-          admission: { fence: "incumbent" },
-          events: {
-            async *[Symbol.asyncIterator]() {
-              await new Promise(() => undefined);
-            },
-          },
-          completion: new Promise<TurnResult>(() => undefined),
-          async abort() {
-            aborts += 1;
-            assert.equal(await probeLeash(allocated.paths), "held");
-            assert.deepEqual(
-              (await readHeart(allocated.paths)).pending.map((tell) => tell.id),
-              ["tell-handoff"],
-            );
-          },
-        };
-      },
-    };
     let automaticLaunches = 0;
     let released = 0;
     const launches: Array<readonly Readonly<{ id: string; text: string }>[]> = [];
@@ -835,19 +870,15 @@ test("a Session without live tell hands off while narration remains open", async
       };
     };
     const body = driveAkumaBody(
-      {
-        paths: allocated.paths,
-        seed: {
-          id: allocated.id,
-          archetype: "acp",
-          provider: { name: "acp", kind: "acp" },
-          options: {},
-          origin: { kind: "direct" },
-          cwd: root,
-        },
-        initialBody: "work",
-      },
-      incumbent,
+      acpLaunch(allocated, root),
+      hangingAdapter("incumbent", async () => {
+        aborts += 1;
+        assert.equal(await probeLeash(allocated.paths), "held");
+        assert.deepEqual(
+          (await readHeart(allocated.paths)).pending.map((tell) => tell.id),
+          ["tell-handoff"],
+        );
+      }),
       {
         now: () => "2026-08-08T00:00:00.000Z",
         async spawnBody(launch) {
@@ -866,7 +897,7 @@ test("a Session without live tell hands off while narration remains open", async
           );
           return {
             pid: 1,
-            exited: new Promise<never>(() => undefined),
+            exited: unresolved(),
             async terminate() {},
             release() {
               released += 1;
@@ -875,20 +906,13 @@ test("a Session without live tell hands off while narration remains open", async
         },
       },
     );
-    while ((await readHeart(allocated.paths)).latestBody === null) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
+    await waitUntilLatestBody(allocated.paths);
     await recordTell(allocated.paths, {
       id: "tell-handoff",
       body: "continue promptly",
       recordedAt: "2026-08-08T00:00:01.000Z",
     });
-    await Promise.race([
-      body,
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Body did not hand off pending Tell")), 1_000),
-      ),
-    ]);
+    await expectBodySettles(body, "Body did not hand off pending Tell");
     while ((await readHeart(allocated.paths)).pending.length > 0) {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
@@ -911,58 +935,24 @@ test("a failed release recovery spawn records Heart undelivered disposition", as
     const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "acp", draw: () => "1a2b3c45" });
     await initializeHeart(allocated.paths);
     let spawnAttempts = 0;
-    const body = driveAkumaBody(
-      {
-        paths: allocated.paths,
-        seed: {
-          id: allocated.id,
-          archetype: "acp",
-          provider: { name: "acp", kind: "acp" },
-          options: {},
-          origin: { kind: "direct" },
-          cwd: root,
-        },
-        initialBody: "work",
+    const body = driveAkumaBody(acpLaunch(allocated, root), hangingAdapter("release-spawn-failure"), {
+      now: () => "2026-08-08T00:00:00.000Z",
+      async spawnBody() {
+        spawnAttempts += 1;
+        const open = await readOpenPendingTellDisposition(allocated.paths);
+        assert.deepEqual(open?.tellIds, ["release-spawn-failure"]);
+        assert.equal((await readHeart(allocated.paths)).latestBody?.end, "put-down");
+        assert.equal(await probeLeash(allocated.paths), "free");
+        throw new Error("spawn denied");
       },
-      {
-        admitOptions(options) {
-          return { kind: "admitted", options };
-        },
-        async start() {
-          return {
-            admission: { fence: "release-spawn-failure" },
-            events: {
-              async *[Symbol.asyncIterator]() {
-                await new Promise<void>(() => undefined);
-              },
-            },
-            completion: new Promise<TurnResult>(() => undefined),
-            async abort() {},
-          };
-        },
-      },
-      {
-        now: () => "2026-08-08T00:00:00.000Z",
-        async spawnBody() {
-          spawnAttempts += 1;
-          throw new Error("spawn denied");
-        },
-      },
-    );
-    while ((await readHeart(allocated.paths)).latestBody === null) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
+    });
+    await waitUntilLatestBody(allocated.paths);
     await recordTell(allocated.paths, {
       id: "release-spawn-failure",
       body: "continue",
       recordedAt: "2026-08-08T00:00:01.000Z",
     });
-    await Promise.race([
-      body,
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Body did not release after spawn failure")), 1_000),
-      ),
-    ]);
+    await expectBodySettles(body, "Body did not release after spawn failure");
     assert.equal(spawnAttempts, 1);
     assert.equal(await probeLeash(allocated.paths), "free");
     assert.deepEqual((await readHeart(allocated.paths)).pending, []);
@@ -974,146 +964,33 @@ test("a failed release recovery spawn records Heart undelivered disposition", as
   }
 });
 
-test("termination during the handoff window keeps a Heart disposition decision", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-handoff-window-"));
-  try {
-    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "acp", draw: () => "1a2b3c48" });
-    await initializeHeart(allocated.paths);
-    let sawDurableDecision = false;
-    const body = driveAkumaBody(
-      {
-        paths: allocated.paths,
-        seed: {
-          id: allocated.id,
-          archetype: "acp",
-          provider: { name: "acp", kind: "acp" },
-          options: {},
-          origin: { kind: "direct" },
-          cwd: root,
-        },
-        initialBody: "work",
-      },
-      {
-        admitOptions(options) {
-          return { kind: "admitted", options };
-        },
-        async start() {
-          return {
-            admission: { fence: "handoff-window" },
-            events: {
-              async *[Symbol.asyncIterator]() {
-                await new Promise<void>(() => undefined);
-              },
-            },
-            completion: new Promise<TurnResult>(() => undefined),
-            async abort() {},
-          };
-        },
-      },
-      {
-        now: () => "2026-08-08T00:00:00.000Z",
-        async spawnBody() {
-          const open = await readOpenPendingTellDisposition(allocated.paths);
-          assert.deepEqual(open?.tellIds, ["tell-window"]);
-          assert.equal((await readHeart(allocated.paths)).latestBody?.end, "put-down");
-          assert.equal(await probeLeash(allocated.paths), "free");
-          sawDurableDecision = true;
-          throw new Error("terminated during handoff window");
-        },
-      },
-    );
-    while ((await readHeart(allocated.paths)).latestBody === null) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-    await recordTell(allocated.paths, {
-      id: "tell-window",
-      body: "continue",
-      recordedAt: "2026-08-08T00:00:01.000Z",
-    });
-    await Promise.race([
-      body,
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Body did not settle handoff window termination")), 1_000),
-      ),
-    ]);
-    assert.equal(sawDurableDecision, true);
-    assert.deepEqual((await readHeart(allocated.paths)).pending, []);
-    assert.equal((await readTell(allocated.paths, "tell-window"))?.state, "told");
-    assert.equal(await readOpenPendingTellDisposition(allocated.paths), null);
-    assert.match(
-      readFileSync(allocated.paths.log, "utf8"),
-      /pending Tell disposition undelivered: terminated during handoff window/,
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test("a new Tell arriving while spawn fails stays pending for its own wake", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-disposition-snapshot-"));
   try {
     const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "acp", draw: () => "1a2b3c49" });
     await initializeHeart(allocated.paths);
     let spawnAttempts = 0;
-    const body = driveAkumaBody(
-      {
-        paths: allocated.paths,
-        seed: {
-          id: allocated.id,
-          archetype: "acp",
-          provider: { name: "acp", kind: "acp" },
-          options: {},
-          origin: { kind: "direct" },
-          cwd: root,
-        },
-        initialBody: "work",
+    const body = driveAkumaBody(acpLaunch(allocated, root), hangingAdapter("disposition-snapshot"), {
+      now: () => "2026-08-08T00:00:00.000Z",
+      async spawnBody() {
+        spawnAttempts += 1;
+        const open = await readOpenPendingTellDisposition(allocated.paths);
+        assert.deepEqual(open?.tellIds, ["tell-snapshot"]);
+        await recordTell(allocated.paths, {
+          id: "tell-concurrent",
+          body: "later",
+          recordedAt: "2026-08-08T00:00:02.000Z",
+        });
+        throw new Error("spawn denied after concurrent tell");
       },
-      {
-        admitOptions(options) {
-          return { kind: "admitted", options };
-        },
-        async start() {
-          return {
-            admission: { fence: "disposition-snapshot" },
-            events: {
-              async *[Symbol.asyncIterator]() {
-                await new Promise<void>(() => undefined);
-              },
-            },
-            completion: new Promise<TurnResult>(() => undefined),
-            async abort() {},
-          };
-        },
-      },
-      {
-        now: () => "2026-08-08T00:00:00.000Z",
-        async spawnBody() {
-          spawnAttempts += 1;
-          const open = await readOpenPendingTellDisposition(allocated.paths);
-          assert.deepEqual(open?.tellIds, ["tell-snapshot"]);
-          await recordTell(allocated.paths, {
-            id: "tell-concurrent",
-            body: "later",
-            recordedAt: "2026-08-08T00:00:02.000Z",
-          });
-          throw new Error("spawn denied after concurrent tell");
-        },
-      },
-    );
-    while ((await readHeart(allocated.paths)).latestBody === null) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
+    });
+    await waitUntilLatestBody(allocated.paths);
     await recordTell(allocated.paths, {
       id: "tell-snapshot",
       body: "continue",
       recordedAt: "2026-08-08T00:00:01.000Z",
     });
-    await Promise.race([
-      body,
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Body did not settle snapshot disposition")), 1_000),
-      ),
-    ]);
+    await expectBodySettles(body, "Body did not settle snapshot disposition");
     assert.equal(spawnAttempts, 1);
     assert.equal((await readTell(allocated.paths, "tell-snapshot"))?.state, "told");
     assert.deepEqual(
@@ -1134,63 +1011,25 @@ test("unproven successor custody records Heart undelivered disposition", async (
     await initializeHeart(allocated.paths);
     const emptyLog = { path: allocated.paths.log, from: 0, to: 0 };
     let spawnAttempts = 0;
-    const body = driveAkumaBody(
-      {
-        paths: allocated.paths,
-        seed: {
-          id: allocated.id,
-          archetype: "acp",
-          provider: { name: "acp", kind: "acp" },
-          options: {},
-          origin: { kind: "direct" },
-          cwd: root,
-        },
-        initialBody: "work",
+    const body = driveAkumaBody(acpLaunch(allocated, root), hangingAdapter("unproven-custody"), {
+      now: () => "2026-08-08T00:00:00.000Z",
+      async spawnBody() {
+        spawnAttempts += 1;
+        return {
+          pid: 1,
+          exited: Promise.resolve({ code: 1, signal: null, log: emptyLog }),
+          async terminate() {},
+          release() {},
+        } satisfies OwnedProcess;
       },
-      {
-        admitOptions(options) {
-          return { kind: "admitted", options };
-        },
-        async start() {
-          return {
-            admission: { fence: "unproven-custody" },
-            events: {
-              async *[Symbol.asyncIterator]() {
-                await new Promise<void>(() => undefined);
-              },
-            },
-            completion: new Promise<TurnResult>(() => undefined),
-            async abort() {},
-          };
-        },
-      },
-      {
-        now: () => "2026-08-08T00:00:00.000Z",
-        async spawnBody() {
-          spawnAttempts += 1;
-          return {
-            pid: 1,
-            exited: Promise.resolve({ code: 1, signal: null, log: emptyLog }),
-            async terminate() {},
-            release() {},
-          } satisfies OwnedProcess;
-        },
-      },
-    );
-    while ((await readHeart(allocated.paths)).latestBody === null) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
+    });
+    await waitUntilLatestBody(allocated.paths);
     await recordTell(allocated.paths, {
       id: "tell-unproven",
       body: "continue",
       recordedAt: "2026-08-08T00:00:01.000Z",
     });
-    await Promise.race([
-      body,
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Body did not settle unproven custody")), 1_000),
-      ),
-    ]);
+    await expectBodySettles(body, "Body did not settle unproven custody");
     assert.equal(spawnAttempts, 1);
     assert.equal(await probeLeash(allocated.paths), "free");
     assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, 1);
@@ -1211,84 +1050,28 @@ test("duplicate wake after a recorded successor disposition does not create a se
     const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "acp", draw: () => "1a2b3c46" });
     await initializeHeart(allocated.paths);
     let spawnCount = 0;
-    const body = driveAkumaBody(
-      {
-        paths: allocated.paths,
-        seed: {
-          id: allocated.id,
-          archetype: "acp",
-          provider: { name: "acp", kind: "acp" },
-          options: {},
-          origin: { kind: "direct" },
-          cwd: root,
-        },
-        initialBody: "work",
+    const body = driveAkumaBody(acpLaunch(allocated, root), hangingAdapter("duplicate-wake"), {
+      now: () => "2026-08-08T00:00:00.000Z",
+      async spawnBody(launch) {
+        spawnCount += 1;
+        void driveAkumaBody(launch, hangingAdapter("successor-held"), {
+          now: () => "2026-08-08T00:00:02.000Z",
+        });
+        return {
+          pid: spawnCount,
+          exited: unresolved(),
+          async terminate() {},
+          release() {},
+        } satisfies OwnedProcess;
       },
-      {
-        admitOptions(options) {
-          return { kind: "admitted", options };
-        },
-        async start() {
-          return {
-            admission: { fence: "duplicate-wake" },
-            events: {
-              async *[Symbol.asyncIterator]() {
-                await new Promise<void>(() => undefined);
-              },
-            },
-            completion: new Promise<TurnResult>(() => undefined),
-            async abort() {},
-          };
-        },
-      },
-      {
-        now: () => "2026-08-08T00:00:00.000Z",
-        async spawnBody(launch) {
-          spawnCount += 1;
-          void driveAkumaBody(
-            launch,
-            {
-              admitOptions(options) {
-                return { kind: "admitted", options };
-              },
-              async start() {
-                return {
-                  admission: { fence: "successor-held" },
-                  events: {
-                    async *[Symbol.asyncIterator]() {
-                      await new Promise<void>(() => undefined);
-                    },
-                  },
-                  completion: new Promise<TurnResult>(() => undefined),
-                  async abort() {},
-                };
-              },
-            },
-            { now: () => "2026-08-08T00:00:02.000Z" },
-          );
-          return {
-            pid: spawnCount,
-            exited: new Promise<never>(() => undefined),
-            async terminate() {},
-            release() {},
-          } satisfies OwnedProcess;
-        },
-      },
-    );
-    while ((await readHeart(allocated.paths)).latestBody === null) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
+    });
+    await waitUntilLatestBody(allocated.paths);
     await recordTell(allocated.paths, {
       id: "tell-duplicate",
       body: "once",
       recordedAt: "2026-08-08T00:00:01.000Z",
     });
-    await Promise.race([
-      body,
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Body did not dispose pending Tell")), 1_000),
-      ),
-    ]);
+    await expectBodySettles(body, "Body did not dispose pending Tell");
     while ((await readHeart(allocated.paths)).latestBody?.sequence !== 2) {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
@@ -1319,77 +1102,39 @@ test("successor Body record before admission failure yields Heart undelivered fo
     await initializeHeart(allocated.paths);
     const emptyLog = { path: allocated.paths.log, from: 0, to: 0 };
     let spawnAttempts = 0;
-    const body = driveAkumaBody(
-      {
-        paths: allocated.paths,
-        seed: {
-          id: allocated.id,
-          archetype: "acp",
-          provider: { name: "acp", kind: "acp" },
-          options: {},
-          origin: { kind: "direct" },
-          cwd: root,
-        },
-        initialBody: "work",
-      },
-      {
-        admitOptions(options) {
-          return { kind: "admitted", options };
-        },
-        async start() {
-          return {
-            admission: { fence: "parent-before-successor-fail" },
-            events: {
-              async *[Symbol.asyncIterator]() {
-                await new Promise<void>(() => undefined);
+    const body = driveAkumaBody(acpLaunch(allocated, root), hangingAdapter("parent-before-successor-fail"), {
+      now: () => "2026-08-08T00:00:00.000Z",
+      async spawnBody(launch) {
+        spawnAttempts += 1;
+        const exited = new Promise<Awaited<OwnedProcess["exited"]>>((resolve) => {
+          void driveAkumaBody(
+            launch,
+            {
+              admitOptions(options) {
+                return { kind: "admitted", options };
+              },
+              async start() {
+                throw new Error("native admission refused after body record");
               },
             },
-            completion: new Promise<TurnResult>(() => undefined),
-            async abort() {},
-          };
-        },
+            { now: () => "2026-08-08T00:00:02.000Z" },
+          ).finally(() => resolve({ code: 1, signal: null, log: emptyLog }));
+        });
+        return {
+          pid: spawnAttempts,
+          exited,
+          async terminate() {},
+          release() {},
+        } satisfies OwnedProcess;
       },
-      {
-        now: () => "2026-08-08T00:00:00.000Z",
-        async spawnBody(launch) {
-          spawnAttempts += 1;
-          const exited = new Promise<Awaited<OwnedProcess["exited"]>>((resolve) => {
-            void driveAkumaBody(
-              launch,
-              {
-                admitOptions(options) {
-                  return { kind: "admitted", options };
-                },
-                async start() {
-                  throw new Error("native admission refused after body record");
-                },
-              },
-              { now: () => "2026-08-08T00:00:02.000Z" },
-            ).finally(() => resolve({ code: 1, signal: null, log: emptyLog }));
-          });
-          return {
-            pid: spawnAttempts,
-            exited,
-            async terminate() {},
-            release() {},
-          } satisfies OwnedProcess;
-        },
-      },
-    );
-    while ((await readHeart(allocated.paths)).latestBody === null) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
+    });
+    await waitUntilLatestBody(allocated.paths);
     await recordTell(allocated.paths, {
       id: "tell-admission-fail",
       body: "continue",
       recordedAt: "2026-08-08T00:00:01.000Z",
     });
-    await Promise.race([
-      body,
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Body did not settle successor admission failure")), 2_000),
-      ),
-    ]);
+    await expectBodySettles(body, "Body did not settle successor admission failure", 2_000);
     assert.equal(spawnAttempts, 1);
     const heart = await readHeart(allocated.paths);
     assert.ok((heart.latestBody?.sequence ?? 0) > 1);
