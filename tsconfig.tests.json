@@ -12,6 +12,7 @@
     "tests/akuma-public.test.ts",
     "tests/akuma-provider.test.ts",
     "tests/akuma-identity.test.ts",
+    "tests/akuma-list-page.test.ts",
     "tests/akuma-physical.test.ts",
     "tests/plugin-square.test.ts",
     "tests/task-cli.test.ts",

@@ -1,13 +1,23 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
+import ts from "typescript";
 
 const root = resolve(import.meta.dirname, "..");
 
-test("package root, plugin subpath, and Square plugin expose the typed plugin contract", () => {
+function diagnosticText(diagnostics: readonly ts.Diagnostic[]): string {
+  return ts.formatDiagnosticsWithColorAndContext(diagnostics, {
+    getCanonicalFileName: (file) => file,
+    getCurrentDirectory: () => root,
+    getNewLine: () => "\n",
+  });
+}
+
+test("package root, plugin subpath, and Square plugin expose the typed plugin contract", async () => {
   const directory = mkdtempSync(join(tmpdir(), "keiyaku-plugin-types-"));
   try {
     mkdirSync(join(directory, "node_modules", "@astrosheep"), { recursive: true });
@@ -21,8 +31,9 @@ test("package root, plugin subpath, and Square plugin expose the typed plugin co
     symlinkSync(join(root, "node_modules", "@types", "node"), join(directory, "node_modules", "@types", "node"), "dir");
     symlinkSync(join(root, "node_modules", "undici-types"), join(directory, "node_modules", "undici-types"), "dir");
     writeFileSync(join(directory, "package.json"), '{"type":"module"}\n');
+    const consumer = join(directory, "consumer.ts");
     writeFileSync(
-      join(directory, "consumer.ts"),
+      consumer,
       [
         'import type { KeiyakuPlugin as RootPlugin, PluginContext as RootContext, PluginHooks as RootHooks, PluginSignal as RootSignal } from "@astrosheep/keiyaku";',
         'import type { KeiyakuPlugin, PluginContext, PluginHooks, PluginSignal } from "@astrosheep/keiyaku/plugin";',
@@ -45,42 +56,27 @@ test("package root, plugin subpath, and Square plugin expose the typed plugin co
         "void plugin; void context; void signal; void rootHooks; void installedPlugin;",
       ].join("\n"),
     );
-    execFileSync(
-      process.execPath,
-      [
-        join(root, "node_modules", "typescript", "bin", "tsc"),
-        "--noEmit",
-        "--strict",
-        "--target",
-        "ES2023",
-        "--module",
-        "NodeNext",
-        "--moduleResolution",
-        "NodeNext",
-        "--preserveSymlinks",
-        "consumer.ts",
-      ],
-      { cwd: directory, stdio: "ignore" },
+    const program = ts.createProgram([consumer], {
+      noEmit: true,
+      strict: true,
+      skipLibCheck: true,
+      target: ts.ScriptTarget.ES2023,
+      module: ts.ModuleKind.NodeNext,
+      moduleResolution: ts.ModuleResolutionKind.NodeNext,
+      preserveSymlinks: true,
+    });
+    const diagnostics = ts.getPreEmitDiagnostics(program);
+    assert.equal(diagnostics.length, 0, diagnosticText(diagnostics));
+
+    const runtime = join(directory, "runtime.mjs");
+    writeFileSync(
+      runtime,
+      'import plugin from "@astrosheep/keiyaku-plugin-square"; if (plugin.manifest.id !== "square") throw new Error("wrong plugin");\n',
     );
-    execFileSync(
-      process.execPath,
-      [
-        "--input-type=module",
-        "--eval",
-        'const plugin = (await import("@astrosheep/keiyaku-plugin-square")).default; if (plugin.manifest.id !== "square") process.exit(1);',
-      ],
-      { cwd: directory, stdio: "ignore" },
-    );
-    execFileSync(
-      process.execPath,
-      [
-        "--input-type=commonjs",
-        "--eval",
-        'const { basename } = require("node:path"); if (basename(require.resolve("@astrosheep/keiyaku-plugin-square")) !== "index.js") process.exit(1);',
-      ],
-      { cwd: directory, stdio: "ignore" },
-    );
-    assert.ok(true);
+    await import(pathToFileURL(runtime).href);
+
+    const requireFromConsumer = createRequire(join(directory, "consumer.cjs"));
+    assert.equal(basename(requireFromConsumer.resolve("@astrosheep/keiyaku-plugin-square")), "index.js");
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
