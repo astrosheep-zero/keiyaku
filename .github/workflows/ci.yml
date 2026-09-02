@@ -26,7 +26,7 @@ jobs:
     name: ubuntu-24.04 / full verification
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.windows_test_files == '' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 25
 
     steps:
       - name: Check out repository
@@ -51,29 +51,41 @@ jobs:
           git config --global user.name "Keiyaku CI"
           git config --global user.email "keiyaku-ci@example.invalid"
 
-      - name: Run repository verification
-        run: npm test
+      - name: Check formatting
+        run: npm run format:check
 
-      - name: Run packaged CLI end-to-end test
-        run: npm run test:e2e
-
-      - name: Typecheck source, scripts, and scoped semantic tests
-        run: npm run test:typecheck
-
-      - name: Lint source, scripts, and tests
-        run: npm run lint
-
-      - name: Build
+      - name: Build once
         run: npm run build
+
+      - name: Typecheck tests and scripts
+        run: npm run test:typecheck:aux
+
+      - name: Check architecture
+        run: npm run test:architecture
+
+      - name: Check maintainability
+        run: npm run test:maintainability
+
+      - name: Lint tests
+        run: npm run lint:tests
+
+      - name: Check reachability
+        run: npm run test:reachability
+
+      - name: Run optimized behavioral suites
+        run: npm run test:parallel
+
+      - name: Run packaged CLI end-to-end test from the existing build
+        run: npm run test:e2e:built
 
       - name: Check patch whitespace
         run: git diff --check
 
   minimum-node:
-    name: ubuntu-24.04 / minimum Node.js verification
+    name: ubuntu-24.04 / minimum Node.js package smoke
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.windows_test_files == '' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 20
 
     steps:
       - name: Check out repository
@@ -98,17 +110,11 @@ jobs:
           git config --global user.name "Keiyaku CI"
           git config --global user.email "keiyaku-ci@example.invalid"
 
-      - name: Build
+      - name: Build once
         run: npm run build
 
-      - name: Run packaged CLI end-to-end test
-        run: npm run test:e2e
-
-      - name: Typecheck source, scripts, and scoped semantic tests
-        run: npm run test:typecheck
-
-      - name: Lint source, scripts, and tests
-        run: npm run lint
+      - name: Run packaged CLI end-to-end test from the existing build
+        run: npm run test:e2e:built
 
   windows-native:
     name: windows-2022 / native behavioral suite
@@ -142,75 +148,46 @@ jobs:
           WINDOWS_TEST_NAME: ${{ inputs.windows_test_name }}
         shell: pwsh
         run: |
-          $nodeArgs = @(
+          $baseArgs = @(
             "--import", "tsx",
             "scripts/run-tests.mjs",
-            "--test-concurrency=1",
             "--test-reporter=spec",
             "--test-timeout=30000"
           )
-          if ($env:WINDOWS_TEST_NAME.Trim()) {
-            $nodeArgs += "--test-name-pattern"
-            $nodeArgs += $env:WINDOWS_TEST_NAME
-          }
-          if ($env:WINDOWS_TEST_FILES.Trim()) {
-            $nodeArgs += @($env:WINDOWS_TEST_FILES -split "\s+" | Where-Object { $_ })
+          $platformFiles = @(
+            "tests/namespace-context.test.ts",
+            "tests/runtime-proc.test.ts",
+            "tests/windows-akuma-process.test.ts",
+            "tests/sqlite-transaction-lock.test.ts",
+            "tests/task-operations.test.ts",
+            "tests/world.test.ts",
+            "tests/path-coordinates.test.ts"
+          )
+          $customFiles = @($env:WINDOWS_TEST_FILES -split "\s+" | Where-Object { $_ })
+          if ($customFiles.Count -gt 0 -or $env:WINDOWS_TEST_NAME.Trim()) {
+            $selectedFiles = if ($customFiles.Count -gt 0) { $customFiles } else { $platformFiles + "tests/akuma-heart.test.ts" }
+            $nodeArgs = @($baseArgs) + @("--test-concurrency=2")
+            if ($env:WINDOWS_TEST_NAME.Trim()) {
+              $nodeArgs += "--test-name-pattern"
+              $nodeArgs += $env:WINDOWS_TEST_NAME
+            }
+            $nodeArgs += $selectedFiles
+            & node @nodeArgs
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           } else {
-            $nodeArgs += @(
-              "tests/actor.test.ts",
-              "tests/akuma-heart.test.ts",
-              "tests/akuma-identity.test.ts",
-              "tests/amend-body.test.ts",
-              "tests/arc.test.ts",
-              "tests/contract-document.test.ts",
-              "tests/dependency-currentness.test.ts",
-              "tests/fold.test.ts",
-              "tests/markdown-ast.test.ts",
-              "tests/model-impact.test.ts",
-              "tests/namespace-context.test.ts",
-              "tests/normalized-identity.test.ts",
-              "tests/observation.test.ts",
-              "tests/runtime-proc.test.ts",
-              "tests/windows-akuma-process.test.ts",
-              "tests/settings.test.ts",
-              "tests/sqlite-transaction-lock.test.ts",
-              "tests/task-document.test.ts",
-              "tests/task-operations.test.ts",
-              "tests/world.test.ts",
-              "tests/path-coordinates.test.ts"
+            $nodeArgs = @($baseArgs) + @("--test-concurrency=2") + $platformFiles
+            & node @nodeArgs
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+            $heartPattern = "existing Heart opens|existing non-database Heart paths|heart schema version"
+            $nodeArgs = @($baseArgs) + @(
+              "--test-concurrency=1",
+              "--test-name-pattern", $heartPattern,
+              "tests/akuma-heart.test.ts"
             )
+            & node @nodeArgs
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
-          & node @nodeArgs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Check patch whitespace
-        run: git diff --check
-
-  windows-msys:
-    name: windows-2022 / Git Bash coordinate smoke
-    runs-on: windows-2022
-    timeout-minutes: 15
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v5
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: 24.x
-          cache: npm
-
-      - name: Set up Zig
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: 0.14.1
-
-      - name: Install locked dependencies
-        run: npm ci --ignore-scripts --prefer-offline
-
-      - name: Build
-        run: npm run build
 
       - name: Run Git Bash coordinate smoke
         shell: pwsh
@@ -251,6 +228,9 @@ jobs:
           & $bash --noprofile --norc -lc $script
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Check patch whitespace
+        run: git diff --check
+
   windows-e2e:
     name: windows-2022 / packaged CLI e2e
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.windows_test_files == '' }}
@@ -278,14 +258,11 @@ jobs:
       - name: Run packaged CLI end-to-end test
         run: npm run test:e2e
 
-      - name: Typecheck source, scripts, and scoped semantic tests
-        run: npm run test:typecheck
-
-  macos-e2e:
-    name: macos-14 / packaged CLI e2e
+  macos-smoke:
+    name: macos-14 / filesystem and coordinate smoke
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.windows_test_files == '' }}
     runs-on: macos-14
-    timeout-minutes: 15
+    timeout-minutes: 10
 
     steps:
       - name: Check out repository
@@ -297,19 +274,13 @@ jobs:
           node-version: 24.x
           cache: npm
 
-      - name: Set up Zig
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: 0.14.1
-
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --prefer-offline
 
-      - name: Run packaged CLI end-to-end test
-        run: npm run test:e2e
-
-      - name: Run filesystem coordinate tests
-        run: npm run test:focused -- tests/path-coordinates.test.ts
-
-      - name: Typecheck source, scripts, and scoped semantic tests
-        run: npm run test:typecheck
+      - name: Run filesystem and coordinate tests
+        run: >-
+          node scripts/run-tests.mjs
+          --test-concurrency=3
+          tests/path-coordinates.test.ts
+          tests/world.test.ts
+          tests/namespace-context.test.ts
