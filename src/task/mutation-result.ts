@@ -1,5 +1,5 @@
 import type { TaskCompositionResult } from "./compose.js";
-import { isTaskSegment, formatTaskId, parseTaskId } from "./identity.js";
+import { isTaskSegment, canonicalTaskId, parseTaskId } from "./identity.js";
 import type {
   TaskBatchResult,
   TaskCleanupFailure,
@@ -40,9 +40,7 @@ const timestampSchema = z.string().refine((value) => {
 }, "expected canonical UTC timestamp");
 export const taskMutationIdSchema = z.string().transform((value, context) => {
   try {
-    const id = formatTaskId(parseTaskId(value));
-    if (id !== value) throw new Error("not canonical");
-    return id;
+    return canonicalTaskId(value);
   } catch {
     context.addIssue({ code: "custom", message: "expected canonical TaskId" });
     return z.NEVER;

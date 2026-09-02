@@ -44,6 +44,12 @@ export function formatTaskId(coordinate: TaskCoordinate): TaskId {
   return identityCoordinate({ family: "task", segments: [...coordinate.namespace, coordinate.localId] }) as TaskId;
 }
 
+export function canonicalTaskId(value: string): TaskId {
+  const id = formatTaskId(parseTaskId(value));
+  if (id !== value) throw new TypeError("task ID is not canonical");
+  return id;
+}
+
 export function contractNamespace(id: ContractId): readonly string[] {
   return ["kei", contractSegment(id)];
 }

@@ -3,7 +3,7 @@ import { changeId, contractHead, contractId, entryUlid, gate, snapshotId } from 
 import type { AuditReport } from "../protocol/audit.js";
 import type { IntegrationConflictMaterialized } from "../protocol/deliver.js";
 import type { ReviewValue } from "../protocol/review.js";
-import { formatTaskId, parseTaskId } from "../task/identity.js";
+import { decodeSettlementLag } from "../settlement/settle.js";
 import type { ContinuationReport } from "./continuation.js";
 import type { DeliveryValue } from "./delivery.js";
 import type { MutationResult } from "./mutation.js";
@@ -51,16 +51,6 @@ const contractIdSchema = canonical(contractId, "expected ContractId");
 const contractHeadSchema = canonical(contractHead, "expected ContractHead");
 const snapshotIdSchema = canonical(snapshotId, "expected SnapshotId");
 const changeIdSchema = canonical(changeId, "expected ChangeId");
-const taskIdSchema = z.string().transform((value, context) => {
-  try {
-    const id = formatTaskId(parseTaskId(value));
-    if (id !== value) throw new Error("not canonical");
-    return id;
-  } catch {
-    context.addIssue({ code: "custom", message: "expected canonical TaskId" });
-    return z.NEVER;
-  }
-});
 const journalFactSchema = z.unknown().transform((value, context) => {
   try {
     return decodeJournalEntry(value);
@@ -70,17 +60,14 @@ const journalFactSchema = z.unknown().transform((value, context) => {
   }
 });
 
-const settlementLagSchema = z
-  .object({
-    kind: z.literal("settlement-failed"),
-    surface: z.enum(["task-holder", "task"]),
-    contractId: contractIdSchema,
-    taskId: taskIdSchema.optional(),
-    path: nonblankStringSchema.optional(),
-    diagnostic: nonblankStringSchema,
-  })
-  .strict()
-  .transform((lag) => withoutUndefined(lag, ["taskId", "path"]));
+const settlementLagSchema = z.unknown().transform((value, context) => {
+  try {
+    return decodeSettlementLag(value);
+  } catch {
+    context.addIssue({ code: "custom", message: "expected settlement lag" });
+    return z.NEVER;
+  }
+});
 const completionSchema = z
   .object({
     integration: snapshotIdSchema,

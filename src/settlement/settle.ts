@@ -18,6 +18,7 @@ import {
 } from "./holder.js";
 import { acquireTaskSettlementFence } from "./fence.js";
 import { World, type WorldRoot } from "../world.js";
+export { decodeSettlementLag } from "./result-codec.js";
 
 export type SettlementAction = Readonly<{ kind: "task"; taskId: TaskId; action: "done" }>;
 
