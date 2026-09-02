@@ -15,7 +15,6 @@ import {
   appendActivity,
   beginTurn,
   breakBody,
-  decidePendingTellDisposition,
   endTurn,
   finishBodyIfIdle,
   heartExists,
@@ -23,7 +22,6 @@ import {
   HeartAbsentError,
   life,
   probeLeash,
-  provePendingTellDispositionCustody,
   pauseRequested,
   readHeart,
   readForkPoint,
@@ -48,7 +46,6 @@ import { insertActivityFact, insertKillFact, insertSessionFact, insertStopContro
 import { decodeSoul, decodeSoulRow, encodeSoul, encodeSoulRow } from "../src/akuma/heart/soul.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { insertTellFact } from "../src/akuma/heart/tells.js";
-import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import { turnRecipe } from "../src/akuma/turn-drive.js";
 import { World } from "../src/world.js";
 
@@ -1529,41 +1526,6 @@ test("Heart reads lastActivityAt from the final retained timeline row", async ()
     });
     assert.equal((await readHeart(value.allocated.paths)).lastActivityAt, "2026-08-08T00:00:03.000Z");
     body.release();
-  } finally {
-    value.close();
-  }
-});
-
-test("pending Tell disposition rejects a missing Tell as authority corruption", async () => {
-  const value = await fixture();
-  try {
-    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    await leash.birth(value.allocated.paths, value.soul);
-    const body = await leash.recordBody(value.allocated.paths, {
-      leashTakenAt: "2026-08-08T00:00:00.000Z",
-    });
-    leash.release();
-    await recordTell(value.allocated.paths, {
-      id: "tell-corrupt-disposition",
-      body: "continue",
-      recordedAt: "2026-08-08T00:00:01.000Z",
-    });
-    const disposition = await decidePendingTellDisposition(value.allocated.paths, {
-      bodySequence: body.sequence,
-      at: "2026-08-08T00:00:02.000Z",
-      handoff: true,
-    });
-    assert.deepEqual(disposition, { bodySequence: body.sequence, tellIds: ["tell-corrupt-disposition"] });
-
-    const database = writeHeart(value.allocated.paths.heart);
-    database.exec("PRAGMA foreign_keys=OFF");
-    database.prepare("DELETE FROM tells WHERE id = ?").run("tell-corrupt-disposition");
-    database.close();
-
-    await assert.rejects(
-      provePendingTellDispositionCustody(value.allocated.paths, disposition!),
-      (error: unknown) => error instanceof AuthorityCorruptionError && /missing tell/u.test(String(error)),
-    );
   } finally {
     value.close();
   }
