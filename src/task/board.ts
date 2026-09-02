@@ -123,11 +123,7 @@ export function taskDisposition(board: TaskBoard, task: TaskDocument): TaskDispo
 export function taskBlocked(board: TaskBoard, task: TaskDocument): boolean {
   return (task.state === "open" || task.state === "in_progress") && hasUnresolvedNeeds(board, task);
 }
-export function projectDetailFacts(
-  board: TaskBoard,
-  id: TaskId,
-  relations: TaskRelationProjection,
-): TaskDetailFacts | null {
+export function projectOwnedDetailFacts(board: TaskBoard, id: TaskId): TaskDetailFacts | null {
   const task = board.tasks.get(id);
   if (task === undefined) return null;
   const needs = task.needs.map((need) => ({ ...taskRef(board, need), released: needReleased(board, need) }));
@@ -135,10 +131,26 @@ export function projectDetailFacts(
     task,
     needs,
     blockers: needs.filter((need) => !need.released).map(({ released: _released, ...ref }) => ref),
-    blocks: relations.blocks(id),
+    blocks: none,
     parent: task.parent === null ? null : taskRef(board, task.parent),
-    children: relations.children(id),
+    children: none,
     supersedes: task.supersedes.map((target) => taskRef(board, target)),
+    supersededBy: none,
+    related: task.relates.length === 0 ? none : sorted(task.relates.map((target) => taskRef(board, target))),
+  };
+}
+
+export function projectDetailFacts(
+  board: TaskBoard,
+  id: TaskId,
+  relations: TaskRelationProjection,
+): TaskDetailFacts | null {
+  const owned = projectOwnedDetailFacts(board, id);
+  if (owned === null) return null;
+  return {
+    ...owned,
+    blocks: relations.blocks(id),
+    children: relations.children(id),
     supersededBy: relations.supersededBy(id),
     related: relations.related(id),
   };

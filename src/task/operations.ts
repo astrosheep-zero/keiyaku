@@ -1,7 +1,7 @@
 import { documentDiff } from "../markdown/diff.js";
 import {
   createTaskRelations,
-  projectDetailFacts,
+  projectOwnedDetailFacts,
   projectTaskBoardObservation,
   relationProblem,
   projectBlocked,
@@ -274,39 +274,35 @@ export async function listTasks(
     value: projectBoundedList(projectRows(board, createTaskRelations(board), selected, selection), selectedLimit),
   };
 }
-export async function readTaskDetails(
-  world: WorldRoot,
-  ids: readonly TaskId[],
-): Promise<TaskOutcome<readonly TaskDetailFacts[]>> {
-  const board = (await readBoard(world)).board;
-  const relations = createTaskRelations(board);
-  const details = ids.map((id) => projectDetailFacts(board, id, relations));
-  const missing = details.findIndex((detail) => detail === null);
-  return missing < 0
-    ? { kind: "accepted", value: details as readonly TaskDetailFacts[] }
-    : { kind: "refused", refusal: { kind: "task-missing", taskId: ids[missing]! } };
-}
-
 export async function readTaskDetail(world: WorldRoot, id: TaskId): Promise<TaskDetailFacts | null> {
   const task = await readTaskDocument(world, id);
   if (task === undefined) return null;
-  const selected = new Map<TaskId, TaskDocument>();
-  selected.set(id, task);
-  const related = new Map<TaskId, TaskDocument>(selected);
-  const references = [...selected.values()].flatMap((task) => [
+  const selected = new Map<TaskId, TaskDocument>([[id, task]]);
+  const references = [
     ...task.needs,
     ...(task.parent === null ? [] : [task.parent]),
     ...task.supersedes,
     ...task.relates,
-  ]);
-  for (const id of references) {
-    if (related.has(id)) continue;
-    const task = await readTaskDocument(world, id);
-    if (task !== undefined) related.set(id, task);
+  ];
+  for (const reference of references) {
+    if (selected.has(reference)) continue;
+    const document = await readTaskDocument(world, reference);
+    if (document !== undefined) selected.set(reference, document);
   }
-  const board = { tasks: related };
-  const relations = createTaskRelations(board);
-  return projectDetailFacts(board, id, relations);
+  return projectOwnedDetailFacts({ tasks: selected }, id);
+}
+
+export async function readTaskDetails(
+  world: WorldRoot,
+  ids: readonly TaskId[],
+): Promise<TaskOutcome<readonly TaskDetailFacts[]>> {
+  const details: TaskDetailFacts[] = [];
+  for (const id of ids) {
+    const detail = await readTaskDetail(world, id);
+    if (detail === null) return { kind: "refused", refusal: { kind: "task-missing", taskId: id } };
+    details.push(detail);
+  }
+  return { kind: "accepted", value: details };
 }
 export async function observeTaskDetails(
   world: WorldRoot,

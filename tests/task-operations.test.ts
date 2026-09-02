@@ -498,29 +498,32 @@ test("Task row-view limits refuse before reading Task authority", async () => {
   for (const read of reads) await assert.rejects(read, /integer from 1 to 500/u);
 });
 
-test("targeted reads stay local while detail retains reverse blocks", async () => {
+test("targeted reads expose outbound relations only; board projections derive reverse edges", async () => {
   const { tasks } = await world();
   const blocker = acceptedId(await tasks.add({ title: "A" }));
   const blocked = acceptedId(await tasks.add({ title: "B", needs: [blocker] }));
   const other = acceptedId(await tasks.add({ title: "C" }));
+  const relatedFrom = acceptedId(await tasks.add({ title: "D", relates: [blocker] }));
 
   const shown = await tasks.task({ id: blocker }).read();
-  assert.deepEqual(
-    shown?.blocks.map((item) => item.id),
-    [],
-  );
+  assert.deepEqual(shown?.blocks.map((item) => item.id), []);
+  assert.deepEqual(shown?.children.map((item) => item.id), []);
+  assert.deepEqual(shown?.supersededBy.map((item) => item.id), []);
+  assert.deepEqual(shown?.related.map((item) => item.id), []);
   const shownBlocked = await tasks.task({ id: blocked }).read();
-  assert.deepEqual(
-    shownBlocked?.blocks.map((item) => item.id),
-    [],
-  );
-  const detailed = await observeTaskDetails(tasks.root, [blocker]);
+  assert.deepEqual(shownBlocked?.needs.map((item) => item.id), [blocker]);
+  assert.deepEqual(shownBlocked?.blocks.map((item) => item.id), []);
+  const shownRelatedFrom = await tasks.task({ id: relatedFrom }).read();
+  assert.deepEqual(shownRelatedFrom?.related.map((item) => item.id), [blocker]);
+
+  const detailed = await observeTaskDetails(tasks.root, [blocker, blocked]);
   assert.equal(detailed.kind, "accepted");
-  if (detailed.kind === "accepted")
-    assert.deepEqual(
-      detailed.value[0]?.blocks.map((item) => item.id),
-      [blocked],
-    );
+  if (detailed.kind === "accepted") {
+    assert.deepEqual(detailed.value[0]?.blocks.map((item) => item.id), []);
+    assert.deepEqual(detailed.value[0]?.related.map((item) => item.id), []);
+    assert.deepEqual(detailed.value[1]?.needs.map((item) => item.id), [blocker]);
+    assert.deepEqual(detailed.value[1]?.blocks.map((item) => item.id), []);
+  }
 
   const selectsBlocker = await tasks.query({
     scope: "world",
@@ -558,7 +561,7 @@ test("targeted reads stay local while detail retains reverse blocks", async () =
   if (complement.kind === "accepted") {
     assert.deepEqual(
       complement.value.rows.map((row) => row.id),
-      [blocked, other],
+      [blocked, other, relatedFrom],
     );
   }
 });

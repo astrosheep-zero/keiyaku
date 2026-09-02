@@ -76,8 +76,10 @@ authority, so a synthetic history would be dishonest.
 
 ## Views, composition, and recovery
 
-Task's board, readiness, blocked, query, tree, and diagnostic views are
-read-only interpretations of current Task authority. Growing row catalogues
+A targeted Task read exposes only Task-owned outbound relations; reverse
+relations are derived only by named board projections. Task's board,
+readiness, blocked, query, tree, and diagnostic views are read-only
+interpretations of current Task authority. Growing row catalogues
 are bounded observations: they retain the selected rows and whether the same
 observation establishes another matching row, without becoming a traversal or
 counting interface. Recent package catalogue order remains canonical Task

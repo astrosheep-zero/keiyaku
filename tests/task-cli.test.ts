@@ -319,6 +319,70 @@ test("Task commands reject the removed Contract association flags", () => {
     /option --no-contract is not valid for task update/u,
   );
 });
+test("task show matches SDK targeted reads and leaves reverse edges to board query", async () => {
+  const root = world();
+  const blockerAdd = (await invoke(parseArgv(["-C", root, "task", "add", "Blocker"]))) as {
+    kind: string;
+    value: { id: string };
+  };
+  assert.equal(blockerAdd.kind, "accepted");
+  const blockedAdd = (await invoke(
+    parseArgv(["-C", root, "task", "add", "Blocked", "--needs", blockerAdd.value.id]),
+  )) as { kind: string; value: { id: string } };
+  assert.equal(blockedAdd.kind, "accepted");
+
+  type Detail = {
+    blocks: readonly { id: string }[];
+    children: readonly { id: string }[];
+    supersededBy: readonly { id: string }[];
+    related: readonly { id: string }[];
+    needs: readonly { id: string }[];
+  };
+  const cliShown = (await invoke(parseArgv(["-C", root, "task", "show", blockerAdd.value.id]))) as Detail;
+  const sdkShown = await Tasks.of(await World.at(root)).task({ id: blockerAdd.value.id }).read();
+  assert.deepEqual(
+    {
+      blocks: cliShown.blocks.map((item) => item.id),
+      children: cliShown.children.map((item) => item.id),
+      supersededBy: cliShown.supersededBy.map((item) => item.id),
+      related: cliShown.related.map((item) => item.id),
+      needs: cliShown.needs.map((item) => item.id),
+    },
+    {
+      blocks: sdkShown?.blocks.map((item) => item.id) ?? null,
+      children: sdkShown?.children.map((item) => item.id) ?? null,
+      supersededBy: sdkShown?.supersededBy.map((item) => item.id) ?? null,
+      related: sdkShown?.related.map((item) => item.id) ?? null,
+      needs: sdkShown?.needs.map((item) => item.id) ?? null,
+    },
+  );
+  assert.deepEqual(cliShown.blocks.map((item) => item.id), []);
+  assert.deepEqual(cliShown.children.map((item) => item.id), []);
+  assert.deepEqual(cliShown.supersededBy.map((item) => item.id), []);
+  assert.deepEqual(cliShown.related.map((item) => item.id), []);
+
+  const showCommand = parseArgv(["task", "show", blockerAdd.value.id]).command;
+  if (showCommand.command !== "task") throw new Error("not a task command");
+  assert.doesNotMatch(renderTaskText(showCommand, cliShown as TaskInvocationResult), /\bblocks\b/u);
+
+  const queried = (await invoke(
+    parseArgv(["-C", root, "task", "query", "--where", `blocks=${blockedAdd.value.id}`, "--json"]),
+  )) as {
+    kind: string;
+    value: { kind: string; value: { rows: readonly { id: string; blocks: readonly { id: string }[] }[] } };
+  };
+  assert.equal(queried.kind, "present");
+  assert.equal(queried.value.kind, "accepted");
+  assert.deepEqual(
+    queried.value.value.rows.map((row) => row.id),
+    [blockerAdd.value.id],
+  );
+  assert.deepEqual(
+    queried.value.value.rows[0]?.blocks.map((item) => item.id),
+    [blockedAdd.value.id],
+  );
+});
+
 test("plural show is all-or-nothing and preserves input order", async () => {
   const root = world();
   const created: string[] = [];
