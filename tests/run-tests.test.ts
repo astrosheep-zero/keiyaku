@@ -7,19 +7,27 @@ import test from "node:test";
 
 type TestManifestsModule = {
   TEST_MANIFESTS: {
+    pure: readonly string[];
+    isolated: readonly string[];
     local: readonly string[];
     integration: readonly string[];
   };
 };
 
-const { TEST_MANIFESTS } = (await import(new URL("../scripts/test-manifests.mjs", import.meta.url).href)) as TestManifestsModule;
+const { TEST_MANIFESTS } = (await import(
+  new URL("../scripts/test-manifests.mjs", import.meta.url).href,
+)) as TestManifestsModule;
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 test("test runner removes ambient Akuma requests and preserves unrelated environment", () => {
   const result = spawnSync(
     process.execPath,
-    [resolve(root, "scripts/run-tests.mjs"), "tests/fixtures/run-tests-environment.test.mjs"],
+    [
+      resolve(root, "scripts/run-tests.mjs"),
+      "--no-test-isolation",
+      "tests/fixtures/run-tests-environment.test.mjs",
+    ],
     {
       cwd: root,
       encoding: "utf8",
@@ -35,14 +43,18 @@ test("test runner removes ambient Akuma requests and preserves unrelated environ
 });
 
 test("test runner suite selection is explicit and fail-closed", () => {
-  assert.deepEqual([...TEST_MANIFESTS.local].sort(), TEST_MANIFESTS.local);
-  assert.deepEqual([...TEST_MANIFESTS.integration].sort(), TEST_MANIFESTS.integration);
-  assert.equal(
-    new Set([...TEST_MANIFESTS.local, ...TEST_MANIFESTS.integration]).size,
-    TEST_MANIFESTS.local.length + TEST_MANIFESTS.integration.length,
-  );
+  for (const files of Object.values(TEST_MANIFESTS)) assert.deepEqual([...files].sort(), files);
+
+  const complete = [...TEST_MANIFESTS.local, ...TEST_MANIFESTS.integration];
+  assert.equal(new Set(complete).size, complete.length);
+
+  const scheduled = [...TEST_MANIFESTS.pure, ...TEST_MANIFESTS.isolated];
+  assert.equal(new Set(scheduled).size, scheduled.length);
+  assert.ok(TEST_MANIFESTS.pure.every((file) => TEST_MANIFESTS.local.includes(file)));
+
   const defaultFiles = [...globSync("tests/**/*.test.ts"), ...globSync("tests/maintainability.test.js")].sort();
-  assert.deepEqual([...TEST_MANIFESTS.local, ...TEST_MANIFESTS.integration].sort(), defaultFiles);
+  assert.deepEqual(complete.sort(), defaultFiles);
+  assert.deepEqual(scheduled.sort(), defaultFiles);
 
   const unknown = spawnSync(process.execPath, [resolve(root, "scripts/run-tests.mjs"), "--suite", "unknown"], {
     cwd: root,
