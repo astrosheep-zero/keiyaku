@@ -23,6 +23,8 @@
     "tests/facade-contract.test.ts",
     "tests/cli-verification.test.ts",
     "tests/git-delivery.test.ts",
+    "tests/private-state-seat.test.ts",
+    "tests/protocol-run.test.ts",
     "tests/git-reconciliation.test.ts",
     "tests/library-audit.test.ts",
     "tests/library-concurrency-placement.test.ts",

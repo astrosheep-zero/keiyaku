@@ -6,8 +6,14 @@ import {
   type TenderCapture,
   type WorkspaceDirtyDelta,
 } from "../git/tender.js";
-import { observeContractsForAdmissionAt } from "../git/observe.js";
-import { withPrivateStatePublicationSeat } from "../git/private-state-seat.js";
+import { observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
+import { type PrivateStatePublicationSeat } from "../git/private-state-seat.js";
+import {
+  matchingPrivateRootObservation,
+  privateStateSeatAttempt,
+  sameSpeculativeWorktreeInput,
+  type SpeculativeWorktreeInput,
+} from "./run.js";
 import { dependencyKeySet } from "../core/subject.js";
 import { contractState } from "../core/facts/observation.js";
 import type { AttestationData, ContractState, DeliverData } from "../core/facts/types.js";
@@ -121,82 +127,146 @@ function reviewValue(value: PreparedReview, completion: CompletionEvidence = {})
   };
 }
 
-async function reviewAttempt(
+type SpeculativeReview = Readonly<{
+  observation: GitDecisionObservation;
+  preparation?: AttestationInput<ReviewRefusal>["preparation"];
+  workspace?: WorkspaceDirtyDelta;
+  tender?: TenderCapture;
+  worktree?: SpeculativeWorktreeInput;
+}>;
+
+function preparedReviewCapture(
   input: ReviewOperationInput,
-  attempt: AttemptContext,
-): Promise<AttemptDecision<PreparedReview, ReviewRefusal>> {
-  return attemptDecisionWithSeatClose(
-    await withPrivateStatePublicationSeat(
-      input.scope,
-      async (seat) => await reviewAttemptInPrivateStateSeat(input, attempt, seat),
-    ),
-  );
+  state: ContractState,
+  prepared: Extract<Awaited<ReturnType<typeof captureReviewableWorktree>>, { kind: "prepared" }>,
+): SpeculativeReview["preparation"] {
+  return {
+    kind: "prepared",
+    data: {
+      gate: REVIEWED,
+      subject: dependencyKeySet([
+        { kind: "document", value: state.terms.document.key },
+        { kind: "change", value: prepared.data.changeId },
+      ]),
+      verdict: input.verdict,
+      ...(input.summary === undefined ? {} : { summary: input.summary }),
+    },
+  };
 }
 
-async function reviewAttemptInPrivateStateSeat(
+function reviewWorktreeInput(
+  prepared: Extract<Awaited<ReturnType<typeof captureReviewableWorktree>>, { kind: "prepared" }>,
+): SpeculativeWorktreeInput {
+  return {
+    tree: prepared.data.tender.tree,
+    head: prepared.data.tender.head,
+    ...(prepared.data.tender.mergeHead === undefined ? {} : { mergeHead: prepared.data.tender.mergeHead }),
+    dirty: prepared.data.tender.dirty,
+    changeId: prepared.data.changeId,
+  };
+}
+
+async function recaptureReviewWorktree(
+  input: ReviewOperationInput,
+  state: ContractState,
+): Promise<SpeculativeWorktreeInput | undefined> {
+  const prepared = await captureReviewableWorktree(input.scope, {
+    contractId: state.id,
+    coordinates: state.coordinates,
+  });
+  return prepared.kind === "prepared" ? reviewWorktreeInput(prepared) : undefined;
+}
+
+async function speculateReview(input: ReviewOperationInput): Promise<SpeculativeReview> {
+  const observation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
+  const state = contractState(observation.decision, input.contractId);
+  if (state === null) return { observation };
+  const prepared = await captureReviewableWorktree(input.scope, {
+    contractId: state.id,
+    coordinates: state.coordinates,
+  });
+  if (prepared.kind === "refused") {
+    return { observation, preparation: { kind: "refused", refusal: prepared.refusal } };
+  }
+  return {
+    observation,
+    preparation: preparedReviewCapture(input, state, prepared),
+    ...(prepared.data.workspace === undefined ? {} : { workspace: prepared.data.workspace }),
+    tender: prepared.data.tender,
+    worktree: reviewWorktreeInput(prepared),
+  };
+}
+
+async function decideAndAdmitReview(
   input: ReviewOperationInput,
   attempt: AttemptContext,
-  seat: import("../git/private-state-seat.js").PrivateStatePublicationSeat,
+  seat: PrivateStatePublicationSeat,
+  observation: GitDecisionObservation,
+  speculated: SpeculativeReview,
 ): Promise<AttemptDecision<PreparedReview, ReviewRefusal>> {
-  const decisionObservation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
-  const state = contractState(decisionObservation.decision, input.contractId);
-  let preparation: AttestationInput<ReviewRefusal>["preparation"];
-  let workspace: WorkspaceDirtyDelta | undefined;
-  let tender: TenderCapture | undefined;
-  if (state !== null) {
-    const prepared = await captureReviewableWorktree(input.scope, {
-      contractId: state.id,
-      coordinates: state.coordinates,
-    });
-    preparation =
-      prepared.kind === "refused"
-        ? { kind: "refused", refusal: prepared.refusal }
-        : {
-            kind: "prepared",
-            data: {
-              gate: REVIEWED,
-              subject: dependencyKeySet([
-                { kind: "document", value: state.terms.document.key },
-                { kind: "change", value: prepared.data.changeId },
-              ]),
-              verdict: input.verdict,
-              ...(input.summary === undefined ? {} : { summary: input.summary }),
-            },
-          };
-    if (prepared.kind === "prepared") {
-      workspace = prepared.data.workspace;
-      tender = prepared.data.tender;
-    }
-  }
   const decision = decideAttestation({
     input: {
       contractId: input.contractId,
       ...(input.actor === undefined ? {} : { actor: input.actor }),
       at: timestamp(),
-      ...(preparation === undefined ? {} : { preparation }),
+      ...(speculated.preparation === undefined ? {} : { preparation: speculated.preparation }),
     },
     attempt,
-    observation: decisionObservation.decision,
+    observation: observation.decision,
   });
   if (decision.kind === "refused") return { kind: "refused", refusal: decision.refusal };
   const admission = await admitDecidedOffer({
     channel: input.channel,
     repository: input.scope,
     seat,
-    decisionObservation,
+    decisionObservation: observation,
     attempt,
     offer: decision.offer,
     primaryContract: input.contractId,
   });
-  if (admission.kind === "accepted")
-    return {
-      ...admission,
-      value: {
-        ...(workspace === undefined ? {} : { workspace }),
-        ...(tender === undefined ? {} : { tender }),
-      },
-    };
-  return admission;
+  if (admission.kind !== "accepted") return admission;
+  return {
+    ...admission,
+    value: {
+      ...(speculated.workspace === undefined ? {} : { workspace: speculated.workspace }),
+      ...(speculated.tender === undefined ? {} : { tender: speculated.tender }),
+    },
+  };
+}
+
+async function reviewAttemptInPrivateStateSeat(
+  input: ReviewOperationInput,
+  attempt: AttemptContext,
+  seat: PrivateStatePublicationSeat,
+  speculated: SpeculativeReview,
+): Promise<AttemptDecision<PreparedReview, ReviewRefusal>> {
+  const observation = await matchingPrivateRootObservation(
+    input.scope,
+    input.channel,
+    input.contractId,
+    speculated.observation,
+    async (fresh) => {
+      if (speculated.worktree === undefined) return true;
+      const state = contractState(fresh.decision, input.contractId);
+      if (state === null) return false;
+      return sameSpeculativeWorktreeInput(speculated.worktree, await recaptureReviewWorktree(input, state));
+    },
+  );
+  return "kind" in observation
+    ? observation
+    : await decideAndAdmitReview(input, attempt, seat, observation, speculated);
+}
+
+async function reviewAttempt(
+  input: ReviewOperationInput,
+  attempt: AttemptContext,
+): Promise<AttemptDecision<PreparedReview, ReviewRefusal>> {
+  const speculated = await speculateReview(input);
+  return await privateStateSeatAttempt(
+    input.scope,
+    async (seat) => await reviewAttemptInPrivateStateSeat(input, attempt, seat, speculated),
+    attemptDecisionWithSeatClose,
+  );
 }
 
 export async function reviewOperation(input: ReviewOperationInput): Promise<IntentOutcome<ReviewValue, ReviewRefusal>> {

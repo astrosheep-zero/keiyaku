@@ -72,11 +72,14 @@ stamped derivation; review's later currency is a gate question.
 Protocol alone joins that decision to Git observation and admission. It holds
 the necessary publication custody, submits at most one decision offer, and Git
 atomically proves its expected durable state. Mechanical preparation cannot
-override lifecycle legality. A failed publication discards the offer and any
-retry uses a fresh observation and preparation; uncertain outcomes are resolved
-only from durable journal facts. Bounded retries eventually return a typed
-non-admission outcome. The journal, rather than a queue or cache, is the only
-recovery and handoff receipt.
+override lifecycle legality. Custody binds observation, decision, and admission;
+preparation may precede that custody when it declares the observed inputs it
+used, and those inputs must match the in-custody observation. A mismatched
+artifact is a stale preparation of the same class as a failed publication. A
+failed publication discards the offer and any retry uses a fresh observation and
+preparation; uncertain outcomes are resolved only from durable journal facts.
+Bounded retries eventually return a typed non-admission outcome. The journal,
+rather than a queue or cache, is the only recovery and handoff receipt.
 
 Audit judges an active Contract and may create ordinary producer testimony, but
 never requests placement, claims, or moves a target. Once a leading act is

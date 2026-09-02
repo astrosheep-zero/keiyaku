@@ -17,8 +17,14 @@ import {
   workspaceMergeStatePresent,
   worktreePath,
 } from "../git/workspace.js";
-import { observeContractsForAdmissionAt } from "../git/observe.js";
-import { withPrivateStatePublicationSeat } from "../git/private-state-seat.js";
+import { observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
+import { type PrivateStatePublicationSeat } from "../git/private-state-seat.js";
+import {
+  matchingPrivateRootObservation,
+  privateStateSeatAttempt,
+  sameSpeculativeWorktreeInput,
+  type SpeculativeWorktreeInput,
+} from "./run.js";
 import type { AttemptContext } from "../core/decide.js";
 import { contractState } from "../core/facts/observation.js";
 import type { ActorId, ContractId, ContractState, DeliverData, JournalEntry, SnapshotId } from "../core/facts/types.js";
@@ -82,22 +88,18 @@ type PreparedDelivery = Readonly<{
   workspacePath?: string;
 }>;
 
-export async function prepareDelivery(
+async function captureAuthorizedDeliveryTender(
   repository: import("../git/process.js").GitRepository,
   stage: Readonly<{
     contractId: ContractId;
     coordinates: ContractState["coordinates"];
     appointment?: Extract<ManagedWorktreeAppointment, { kind: "appointed" }>;
   }>,
-  input: Readonly<{
-    title: string;
-    document: string;
-    actor?: ActorId;
-    message?: string;
-    requireBranchesToBeUpToDate?: boolean;
-    includeDirty?: boolean;
-  }>,
-): Promise<{ kind: "prepared"; data: DeliverData } | { kind: "refused"; refusal: DeliveryPreparationRefusal }> {
+  includeDirty: boolean | undefined,
+): Promise<
+  | { kind: "prepared"; data: import("../git/tender.js").TenderCapture }
+  | { kind: "refused"; refusal: DeliveryPreparationRefusal }
+> {
   const { contractId, coordinates } = stage;
   const appointed =
     coordinates.workspace === "worktree"
@@ -113,11 +115,36 @@ export async function prepareDelivery(
   });
   if (tender.kind === "refused") return tender;
   if (
-    ((tender.data.dirty || tender.data.mergeHead !== undefined) && input.includeDirty !== true) ||
+    ((tender.data.dirty || tender.data.mergeHead !== undefined) && includeDirty !== true) ||
     tender.data.changes.submodules.length > 0
   ) {
     return { kind: "refused", refusal: await dirtyTenderRefusal(repository, contractId, tender.data) };
   }
+  return { kind: "prepared", data: tender.data };
+}
+
+async function prepareDeliveryWithWorktree(
+  repository: import("../git/process.js").GitRepository,
+  stage: Readonly<{
+    contractId: ContractId;
+    coordinates: ContractState["coordinates"];
+    appointment?: Extract<ManagedWorktreeAppointment, { kind: "appointed" }>;
+  }>,
+  input: Readonly<{
+    title: string;
+    document: string;
+    actor?: ActorId;
+    message?: string;
+    requireBranchesToBeUpToDate?: boolean;
+    includeDirty?: boolean;
+  }>,
+): Promise<
+  | { kind: "prepared"; data: DeliverData; worktree: SpeculativeWorktreeInput }
+  | { kind: "refused"; refusal: DeliveryPreparationRefusal }
+> {
+  const { contractId, coordinates } = stage;
+  const tender = await captureAuthorizedDeliveryTender(repository, stage, input.includeDirty);
+  if (tender.kind === "refused") return tender;
   const commit = await prepareDeliveryCommitMetadata(repository, {
     contractId,
     title: input.title,
@@ -135,6 +162,7 @@ export async function prepareDelivery(
     requireBranchesToBeUpToDate,
   );
   if (integration.kind === "refused") return integration;
+  const changeId = await worktreeChangeId(repository, { contractId, coordinates }, tender.data);
   const integrationSnapshot =
     coordinates.target === undefined
       ? tenderSnapshot
@@ -146,71 +174,158 @@ export async function prepareDelivery(
       integration: {
         predecessor: integration.data.predecessor,
         snapshot: integrationSnapshot,
-        changeId: await worktreeChangeId(repository, { contractId, coordinates }, tender.data),
+        changeId,
       },
       method: "squash",
       policy: { requireBranchesToBeUpToDate },
     },
+    worktree: {
+      tree: tender.data.tree,
+      head: tender.data.head,
+      ...(tender.data.mergeHead === undefined ? {} : { mergeHead: tender.data.mergeHead }),
+      dirty: tender.data.dirty,
+      changeId,
+    },
   };
 }
 
-async function deliverAttempt(
-  input: DeliverOperationInput,
-  attempt: AttemptContext,
-): Promise<AttemptDecision<PreparedDelivery>> {
-  return attemptDecisionWithSeatClose(
-    await withPrivateStatePublicationSeat(
-      input.scope,
-      async (seat) => await deliverAttemptInPrivateStateSeat(input, attempt, seat),
-    ),
-  );
+export async function prepareDelivery(
+  repository: import("../git/process.js").GitRepository,
+  stage: Readonly<{
+    contractId: ContractId;
+    coordinates: ContractState["coordinates"];
+    appointment?: Extract<ManagedWorktreeAppointment, { kind: "appointed" }>;
+  }>,
+  input: Readonly<{
+    title: string;
+    document: string;
+    actor?: ActorId;
+    message?: string;
+    requireBranchesToBeUpToDate?: boolean;
+    includeDirty?: boolean;
+  }>,
+): Promise<{ kind: "prepared"; data: DeliverData } | { kind: "refused"; refusal: DeliveryPreparationRefusal }> {
+  const prepared = await prepareDeliveryWithWorktree(repository, stage, input);
+  return prepared.kind === "refused" ? prepared : { kind: "prepared", data: prepared.data };
 }
 
-async function deliverAttemptInPrivateStateSeat(
+type SpeculativeDelivery = Readonly<{
+  observation: GitDecisionObservation;
+  state: ContractState | null;
+  derivation?: DocumentDerivation;
+  preparation?: DeliverInput<DeliveryFailure>["preparation"];
+  worktree?: SpeculativeWorktreeInput;
+}>;
+
+function deliveryPreparationInput(input: DeliverOperationInput, derivation: DocumentDerivation) {
+  return {
+    title: derivation.title,
+    document: derivation.bytes,
+    ...(input.actor === undefined ? {} : { actor: input.actor }),
+    ...(input.message === undefined ? {} : { message: input.message }),
+    requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
+    includeDirty: input.includeDirty,
+  };
+}
+
+async function recaptureDeliveryWorktree(
+  input: DeliverOperationInput,
+  state: ContractState,
+): Promise<SpeculativeWorktreeInput | undefined> {
+  const tender = await captureAuthorizedDeliveryTender(
+    input.scope,
+    { contractId: state.id, coordinates: state.coordinates },
+    input.includeDirty,
+  );
+  if (tender.kind === "refused") return undefined;
+  return {
+    tree: tender.data.tree,
+    head: tender.data.head,
+    ...(tender.data.mergeHead === undefined ? {} : { mergeHead: tender.data.mergeHead }),
+    dirty: tender.data.dirty,
+    changeId: await worktreeChangeId(
+      input.scope,
+      { contractId: state.id, coordinates: state.coordinates },
+      tender.data,
+    ),
+  };
+}
+
+async function mechanicalDeliveryPreparation(
+  input: DeliverOperationInput,
+  state: ContractState,
+  derivation: DocumentDerivation,
+): Promise<
+  | Extract<DeliverInput<DeliveryFailure>["preparation"], { kind: "refused" }>
+  | Readonly<{
+      kind: "prepared";
+      document: DocumentDerivation["document"];
+      data: DeliveryIdentity;
+      worktree: SpeculativeWorktreeInput;
+    }>
+> {
+  const prepared = await prepareDeliveryWithWorktree(
+    input.scope,
+    { contractId: state.id, coordinates: state.coordinates },
+    deliveryPreparationInput(input, derivation),
+  );
+  if (prepared.kind === "refused") {
+    return { kind: "refused", document: derivation.document, refusal: prepared.refusal };
+  }
+  return {
+    kind: "prepared",
+    document: derivation.document,
+    data: prepared.data,
+    worktree: prepared.worktree,
+  };
+}
+
+async function speculateDelivery(input: DeliverOperationInput): Promise<SpeculativeDelivery> {
+  const observation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
+  const state = contractState(observation.decision, input.contractId);
+  const derivation = state === null ? undefined : input.deriveDocument(state);
+  if (state === null || derivation === undefined) {
+    return { observation, state, preparation: { kind: "unavailable" } };
+  }
+  if (derivation.verification.kind === "refused") {
+    return {
+      observation,
+      state,
+      derivation,
+      preparation: { kind: "refused", document: derivation.document, refusal: derivation.verification.refusal },
+    };
+  }
+  if (input.materializeConflict === true && state.terminal === null) return { observation, state, derivation };
+  const prepared = await mechanicalDeliveryPreparation(input, state, derivation);
+  return prepared.kind === "prepared"
+    ? { observation, state, derivation, preparation: prepared, worktree: prepared.worktree }
+    : { observation, state, derivation, preparation: prepared };
+}
+
+async function resolveDeliveryPreparation(
+  input: DeliverOperationInput,
+  speculated: SpeculativeDelivery,
+): Promise<DeliverInput<DeliveryFailure>["preparation"]> {
+  if (speculated.preparation !== undefined) return speculated.preparation;
+  if (speculated.state === null || speculated.derivation === undefined) return { kind: "unavailable" };
+  const materialization = await materializationMergeStateRefusal(input);
+  if (materialization !== undefined) {
+    return { kind: "refused", document: speculated.derivation.document, refusal: materialization };
+  }
+  const prepared = await mechanicalDeliveryPreparation(input, speculated.state, speculated.derivation);
+  return prepared.kind === "prepared"
+    ? { kind: "prepared", document: prepared.document, data: prepared.data }
+    : prepared;
+}
+
+async function decideAndAdmitDelivery(
   input: DeliverOperationInput,
   attempt: AttemptContext,
-  seat: import("../git/private-state-seat.js").PrivateStatePublicationSeat,
+  seat: PrivateStatePublicationSeat,
+  observation: GitDecisionObservation,
+  speculated: SpeculativeDelivery,
 ): Promise<AttemptDecision<PreparedDelivery>> {
-  const decisionObservation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
-  const state = contractState(decisionObservation.decision, input.contractId);
-  const derivation = state === null ? undefined : input.deriveDocument(state);
-  let preparation: DeliverInput<DeliveryFailure>["preparation"];
-  if (state === null || derivation === undefined) {
-    preparation = { kind: "unavailable" };
-  } else if (derivation.verification.kind === "refused") {
-    preparation = { kind: "refused", document: derivation.document, refusal: derivation.verification.refusal };
-  } else {
-    const materialization =
-      input.materializeConflict === true && state.terminal === null
-        ? await materializationMergeStateRefusal(input)
-        : undefined;
-    const prepared =
-      materialization === undefined
-        ? await prepareDelivery(
-            input.scope,
-            {
-              contractId: state.id,
-              coordinates: state.coordinates,
-            },
-            {
-              title: derivation.title,
-              document: derivation.bytes,
-              ...(input.actor === undefined ? {} : { actor: input.actor }),
-              ...(input.message === undefined ? {} : { message: input.message }),
-              requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
-              includeDirty: input.includeDirty,
-            },
-          )
-        : { kind: "refused" as const, refusal: materialization };
-    preparation =
-      prepared.kind === "refused"
-        ? { kind: "refused", document: derivation.document, refusal: prepared.refusal }
-        : {
-            kind: "prepared",
-            document: derivation.document,
-            data: prepared.data,
-          };
-  }
+  const preparation = await resolveDeliveryPreparation(input, speculated);
   const decision = decideDeliver({
     input: {
       contractId: input.contractId,
@@ -219,7 +334,7 @@ async function deliverAttemptInPrivateStateSeat(
       preparation,
     },
     attempt,
-    observation: decisionObservation.decision,
+    observation: observation.decision,
   });
   if (decision.kind === "refused") return { kind: "refused", refusal: decision.refusal };
   if (preparation.kind !== "prepared") throw new Error("offered delivery is missing its mechanical preparation");
@@ -227,22 +342,52 @@ async function deliverAttemptInPrivateStateSeat(
     channel: input.channel,
     repository: input.scope,
     seat,
-    decisionObservation,
+    decisionObservation: observation,
     attempt,
     offer: decision.offer,
     primaryContract: input.contractId,
   });
-  if (admission.kind === "accepted") {
-    if (derivation === undefined) throw new Error("accepted delivery is missing its document derivation");
-    return {
-      ...admission,
-      value: {
-        delivery: preparation.data,
-        derivation,
-      },
-    };
-  }
-  return admission;
+  if (admission.kind !== "accepted") return admission;
+  if (speculated.derivation === undefined) throw new Error("accepted delivery is missing its document derivation");
+  return {
+    ...admission,
+    value: { delivery: preparation.data, derivation: speculated.derivation },
+  };
+}
+
+async function deliverAttemptInPrivateStateSeat(
+  input: DeliverOperationInput,
+  attempt: AttemptContext,
+  seat: PrivateStatePublicationSeat,
+  speculated: SpeculativeDelivery,
+): Promise<AttemptDecision<PreparedDelivery>> {
+  const observation = await matchingPrivateRootObservation(
+    input.scope,
+    input.channel,
+    input.contractId,
+    speculated.observation,
+    async (fresh) => {
+      if (speculated.worktree === undefined) return true;
+      const state = contractState(fresh.decision, input.contractId);
+      if (state === null) return false;
+      return sameSpeculativeWorktreeInput(speculated.worktree, await recaptureDeliveryWorktree(input, state));
+    },
+  );
+  return "kind" in observation
+    ? observation
+    : await decideAndAdmitDelivery(input, attempt, seat, observation, speculated);
+}
+
+async function deliverAttempt(
+  input: DeliverOperationInput,
+  attempt: AttemptContext,
+): Promise<AttemptDecision<PreparedDelivery>> {
+  const speculated = await speculateDelivery(input);
+  return await privateStateSeatAttempt(
+    input.scope,
+    async (seat) => await deliverAttemptInPrivateStateSeat(input, attempt, seat, speculated),
+    attemptDecisionWithSeatClose,
+  );
 }
 
 async function completeDelivery(

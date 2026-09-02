@@ -16,6 +16,7 @@ import test from "node:test";
 import { prepareDelivery } from "../src/protocol/deliver.js";
 import { prepareReview } from "../src/protocol/review.js";
 import { actorId } from "../src/core/facts/types.js";
+import { withPrivateStatePublicationSeat } from "../src/git/private-state-seat.js";
 import { mintSnapshotId } from "../src/git/identity.js";
 import { adjudicateAuditTarget, observeTargetPlacement } from "../src/git/target-placement.js";
 import { readRef } from "../src/git/repository.js";
@@ -269,6 +270,15 @@ async function directoryReplacementContract(ignore = "artifact/*.tmp\n") {
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "replace directory"]);
   return { contract: bound.keiyaku, repository, worktree };
 }
+
+test("delivery preparation proceeds while the private-state seat is held", async () => {
+  const { repository, id } = await boundContract();
+  const git = await cachedRepositoryAt(repository.path);
+  await withPrivateStatePublicationSeat(git, async () => {
+    const prepared = await preparedDelivery(repository, id);
+    assert.equal(typeof prepared.tenderSnapshot, "string");
+  });
+});
 
 test("permissive targeted delivery integrates tender bytes over the observed target head", async () => {
   const { repository, preparation, worktree } = await targetedContract();

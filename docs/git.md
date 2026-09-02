@@ -25,7 +25,10 @@ Cooperating private-state writers share one repository-local publication seat.
 It coordinates writers but does not decide acceptance: atomic compare-and-swap
 and exact durable read-back remain the only currentness and unknown-outcome
 judges. Target placement and workspace appointment keep their own outer custody
-boundaries. The seat creates no queue, fairness promise, daemon, extra retry
+boundaries. Waiting to acquire the seat has a default bound and never a held
+deadline; a timed-out wait is typed contention, not a broken lock. The seat is
+not reentrant: same-context reacquisition is an invariant failure, not a wait.
+The seat creates no queue, fairness promise, daemon, extra retry
 budget, per-Contract ref, or lock-derived success, and cannot protect against
 uncooperating external writers.
 
