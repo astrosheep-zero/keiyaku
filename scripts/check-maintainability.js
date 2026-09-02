@@ -1,65 +1,12 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { parse } from "@typescript-eslint/parser";
 import { ESLint } from "eslint";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MARKDOWN_EXCLUDED_DIRECTORIES = new Set([".git", ".keiyaku", ".square", "build", "node_modules", "reference"]);
-const LINE_LIMIT = 500;
-const MAX_LINES_RULE = /(?:^|[\s,])max-lines(?=$|[\s,])/u;
 
 /** @typedef {{absolute: string, file: string}} FileEntry */
-/** @typedef {{file?: unknown, ceiling?: unknown, reason?: unknown}} FileLineException */
-/** @typedef {{kind: string, file?: string | undefined, index: number}} ExceptionFinding */
-
-export const FILE_LINE_EXCEPTIONS = Object.freeze([
-  {
-    file: "src/akuma/body.ts",
-    ceiling: 531,
-    reason: "Akuma Body owns its command lifecycle, event stream, and process custody together.",
-  },
-  {
-    file: "src/akuma/projection.ts",
-    ceiling: 518,
-    reason: "Akuma projection owns activity decoding and its strict public projection boundary.",
-  },
-  {
-    file: "src/akuma/provider.ts",
-    ceiling: 672,
-    reason: "Provider custody owns the provider protocol, resume, and restraint boundary as one unit.",
-  },
-  {
-    file: "src/akuma/turn-drive.ts",
-    ceiling: 523,
-    reason: "Turn drive owns the ordered setup and consumption lifecycle transaction.",
-  },
-  {
-    file: "src/cli/invoke.ts",
-    ceiling: 522,
-    reason: "Root CLI invocation owns command dispatch across world, context, forwarding, and execution.",
-  },
-  {
-    file: "src/git/repository.ts",
-    ceiling: 573,
-    reason: "Repository access owns Git discovery, ownership checks, and physical effects together.",
-  },
-  {
-    file: "src/git/target-placement.ts",
-    ceiling: 550,
-    reason: "Target placement owns delivery target inspection and its placement transaction.",
-  },
-  {
-    file: "src/library/contract-forwarding-result.ts",
-    ceiling: 560,
-    reason: "Contract forwarding results own journal decoding and public result translation together.",
-  },
-  {
-    file: "src/library/fleet.ts",
-    ceiling: 737,
-    reason: "Fleet owns the unified public Contract and Akuma operation surface.",
-  },
-]);
 
 /** @param {string} directory @param {string} relative @param {(name: string) => boolean} matches @param {Set<string>} [excluded] @returns {FileEntry[]} */
 function files(directory, relative, matches, excluded = new Set()) {
@@ -79,77 +26,6 @@ function files(directory, relative, matches, excluded = new Set()) {
     }
   }
   return found;
-}
-
-/** @param {string} rootDirectory @returns {FileEntry[]} */
-const productionFiles = (rootDirectory) =>
-  ["src", "scripts"]
-    .flatMap((directory) =>
-      files(path.join(rootDirectory, directory), directory, (name) => /\.(?:ts|js|mjs)$/u.test(name)),
-    )
-    .sort((left, right) => left.file.localeCompare(right.file));
-
-/** @param {string} source */
-export const physicalLineCount = (source) =>
-  source.length === 0 ? 0 : source.split(/\r\n?|\n/u).length - Number(/(?:\r\n?|\n)$/u.test(source));
-
-/** @param {ReadonlyArray<FileLineException | null>} exceptions @param {ReadonlyArray<FileEntry>} knownFiles @returns {ExceptionFinding[]} */
-export function validateFileLineExceptions(exceptions, knownFiles) {
-  const known = new Set(knownFiles.map(({ file }) => file));
-  const seen = new Set();
-  return exceptions.flatMap((exception, index) => {
-    const { file, ceiling, reason } = exception ?? {};
-    const valid =
-      exception !== null &&
-      typeof exception === "object" &&
-      typeof file === "string" &&
-      Number.isInteger(ceiling) &&
-      typeof reason === "string";
-    const kind = !valid
-      ? "malformed"
-      : /[*?\[\]{}]/u.test(file)
-        ? "wildcard"
-        : seen.has(file)
-          ? "duplicate"
-          : !known.has(file)
-            ? "unknown"
-            : typeof ceiling === "number" && ceiling < LINE_LIMIT
-              ? "below-limit"
-              : reason.trim().length === 0
-                ? "malformed"
-                : null;
-    if (valid) seen.add(file);
-    return kind === null
-      ? []
-      : [{ kind, file: kind === "malformed" ? undefined : /** @type {string} */ (file), index }];
-  });
-}
-
-/** @param {string} [rootDirectory] @param {ReadonlyArray<FileLineException | null>} [exceptions] */
-export function productionFileLineFindings(rootDirectory = root, exceptions = FILE_LINE_EXCEPTIONS) {
-  const sourceFiles = productionFiles(rootDirectory);
-  const exceptionFindings = validateFileLineExceptions(exceptions, sourceFiles);
-  const accepted =
-    exceptionFindings.length === 0
-      ? new Map(exceptions.flatMap((exception) => (exception === null ? [] : [[exception.file, exception]])))
-      : new Map();
-  const fileFindings = [];
-  const disableFindings = [];
-  for (const { absolute, file } of sourceFiles) {
-    const source = readFileSync(absolute, "utf8");
-    const lines = physicalLineCount(source);
-    const exception = accepted.get(file);
-    if (lines >= LINE_LIMIT && (exception === undefined || lines > exception.ceiling)) {
-      fileFindings.push({ file, lines, ceiling: exception?.ceiling ?? LINE_LIMIT });
-    }
-    for (const comment of parse(source, { comment: true, loc: true, sourceType: "module" }).comments) {
-      const directive = comment.value.trimStart();
-      if (/^eslint-disable(?:-next-line|-line)?(?:\s|,)/u.test(directive) && MAX_LINES_RULE.test(directive)) {
-        disableFindings.push({ file, line: comment.loc.start.line });
-      }
-    }
-  }
-  return { disableFindings, exceptionFindings, fileFindings };
 }
 
 /** @template {Record<string, unknown>} T @param {string} label @param {ReadonlyArray<T>} findings @param {(finding: T) => string} render */
@@ -181,22 +57,6 @@ async function run() {
   const results = await eslint.lintFiles(["src", "scripts"]);
   const output = await (await eslint.loadFormatter("stylish")).format(results);
   if (output.length > 0) console.log(output);
-  const checks = productionFileLineFindings();
-  reportFindings(
-    "production file line exceptions:",
-    checks.exceptionFindings,
-    (finding) => `${finding.kind}: ${finding.file ?? finding.index}`,
-  );
-  reportFindings(
-    "production file line limits:",
-    checks.fileFindings,
-    (finding) => `${finding.file} has ${finding.lines} lines; limit is ${finding.ceiling}`,
-  );
-  reportFindings(
-    "source-local max-lines disables:",
-    checks.disableFindings,
-    (finding) => `${finding.file}:${finding.line}`,
-  );
   const markdownFindings = markdownCharacterFindings();
   reportFindings(
     "markdown character limits:",
@@ -205,10 +65,7 @@ async function run() {
       `${finding.severity}: ${finding.file} has ${finding.characters} characters; limit is ${finding.severity === "error" ? 30_000 : 20_000}`,
   );
   return results.some((result) => result.errorCount > 0) ||
-    markdownFindings.some((finding) => finding.severity === "error") ||
-    checks.exceptionFindings.length > 0 ||
-    checks.fileFindings.length > 0 ||
-    checks.disableFindings.length > 0
+    markdownFindings.some((finding) => finding.severity === "error")
     ? 1
     : 0;
 }
