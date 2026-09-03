@@ -26,6 +26,7 @@ import type { ExecutionContext } from "./requests.js";
 import { z } from "zod";
 import type { BoundedList } from "../bounded-list.js";
 import type { Schema } from "./schema.js";
+import { createAkumaProduct } from "./akuma-product.js";
 
 export const POLL_MS = 100;
 
@@ -104,8 +105,6 @@ export type AkumaCallExecution = Readonly<{
   cwd: string;
   source: "input" | "caller" | "process" | "world";
 }>;
-
-export { CALL_WITH_CONTEXT } from "./akuma-product-symbols.js";
 
 export type AkumaCallInput = Readonly<{
   archetype: string;
@@ -232,6 +231,14 @@ export {
 
 export type AkumaConfiguration = Readonly<{ home?: string; settings?: Settings; execution?: ExecutionContext }>;
 
-export { AkumaHandle, akumaCallExecution, type LastAnswer } from "./akuma-handle.js";
-export { Akuma } from "./akuma-product.js";
+/** Internal catalog observation for composition owners. */
+export async function readAkumaCatalog(path: WorldRoot, input: AkumaListInput = {}): Promise<AkumaList> {
+  return await createAkumaProduct(path).list(input);
+}
+
+/** Internal timeline observation for composition owners. */
+export async function readAkumaTimeline(path: WorldRoot, id: AkuId): Promise<AkumaStatus["timeline"]> {
+  return (await createAkumaProduct(path).selectHandle({ id }).status()).timeline;
+}
+
 export { AkumaBusyError, AkumaDecodeError, AkumaProviderError } from "./akuma-errors.js";

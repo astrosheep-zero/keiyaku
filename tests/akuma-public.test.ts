@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { Akuma, AkumaNotBornError, defaultWaitComplete, killAkumaWithRecovery } from "../src/akuma/akuma.js";
+import { AkumaNotBornError, defaultWaitComplete, killAkumaWithRecovery } from "../src/akuma/akuma.js";
+import { AkumaComposition as Akuma } from "./support/akuma-composition.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import {
   ordinarySnapshotBudget,

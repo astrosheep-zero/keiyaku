@@ -19,6 +19,8 @@ import {
 } from "./fleet-observation.js";
 import { z } from "zod";
 import type { Schema } from "./schema.js";
+import { schemaJsonText } from "./schema.js";
+import { AkumaDecodeError } from "./akuma-errors.js";
 
 const nonblankTextSchema = z.string().refine((value) => value.trim() !== "");
 const fleetTargetsSchema = z
@@ -253,14 +255,21 @@ export async function requestForwardedFleetTellAnswer(
       action: "akuma.tell-answer",
       target: input.target,
       body: input.body,
-      schemaJson: input.schema.jsonText,
+      schemaJson: schemaJsonText(input.schema),
       ...(input.interrupt === undefined ? {} : { interrupt: input.interrupt }),
     },
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
   if (response.kind !== "returned")
     throw new Error("Akuma body request terminal schema answer cannot reproduce an expired live result");
-  return response.result;
+  try {
+    return input.schema.decode(response.result);
+  } catch (error) {
+    throw new AkumaDecodeError(
+      error instanceof Error ? error.message : "Answer failed schema decode",
+      typeof response.result === "string" ? response.result : JSON.stringify(response.result),
+    );
+  }
 }
 
 function forwardedFleetCommandResult(

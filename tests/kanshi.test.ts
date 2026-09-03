@@ -7,7 +7,7 @@ import { invoke as invokeRaw, type InvocationResult } from "../src/cli/invoke.js
 import { parseArgv as parseInvocation, type ParsedExecution } from "../src/cli/parse.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
-import { AkumaHandle } from "../src/akuma/akuma.js";
+import { AkumaHandle } from "../src/akuma/akuma-handle.js";
 import { breakBody, HeldAkumaLeash, initializeHeart } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { Keiyaku, Repo } from "../src/index.js";

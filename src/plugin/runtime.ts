@@ -319,6 +319,34 @@ async function activate(
   }
 }
 
+function deliver(
+  entry: RegisteredHandler,
+  signal: PluginSignal,
+  reportDiagnostic: PluginDiagnostic | undefined,
+  inFlight: Set<Promise<void>>,
+): void {
+  try {
+    const delivery = Promise.resolve(entry.handler(signal as never)).catch((error) =>
+      diagnostic(reportDiagnostic, entry.pluginId, "signal", error),
+    );
+    inFlight.add(delivery);
+    void delivery.finally(() => inFlight.delete(delivery));
+  } catch (error) {
+    diagnostic(reportDiagnostic, entry.pluginId, "signal", error);
+  }
+}
+
+function deliverTo(
+  handlers: readonly RegisteredHandler[],
+  signal: PluginSignal,
+  reportDiagnostic: PluginDiagnostic | undefined,
+  inFlight: Set<Promise<void>>,
+): void {
+  for (const entry of handlers) {
+    if (entry.kind === signal.kind) deliver(entry, signal, reportDiagnostic, inFlight);
+  }
+}
+
 export async function pluginRuntime(input: PluginRuntimeInput): Promise<PluginRuntime> {
   let runtime = PROCESS_RUNTIMES.get(input.world);
   if (runtime === undefined) {
@@ -342,30 +370,6 @@ async function createPluginRuntime(input: PluginRuntimeInput): Promise<PluginRun
   const pending = new Map<number, PluginSignal[]>();
   const settledPromises: Promise<void>[] = [];
   const inFlight = new Set<Promise<void>>();
-  const deliver = (
-    entry: RegisteredHandler,
-    signal: PluginSignal,
-    reportDiagnostic: PluginDiagnostic | undefined,
-  ): void => {
-    try {
-      const delivery = Promise.resolve(entry.handler(signal as never)).catch((error) =>
-        diagnostic(reportDiagnostic, entry.pluginId, "signal", error),
-      );
-      inFlight.add(delivery);
-      void delivery.finally(() => inFlight.delete(delivery));
-    } catch (error) {
-      diagnostic(reportDiagnostic, entry.pluginId, "signal", error);
-    }
-  };
-  const deliverTo = (
-    handlers: readonly RegisteredHandler[],
-    signal: PluginSignal,
-    reportDiagnostic: PluginDiagnostic | undefined,
-  ): void => {
-    for (const entry of handlers) {
-      if (entry.kind === signal.kind) deliver(entry, signal, reportDiagnostic);
-    }
-  };
   let previousStarted = Promise.resolve();
   for (const [index, entry] of selected.entries()) {
     let releaseStarted!: () => void;
@@ -386,7 +390,7 @@ async function createPluginRuntime(input: PluginRuntimeInput): Promise<PluginRun
         const queued = pending.get(index);
         if (queued !== undefined) {
           pending.delete(index);
-          for (const signal of queued) deliverTo(handlers, signal, report);
+          for (const signal of queued) deliverTo(handlers, signal, report, inFlight);
         }
       } catch (error) {
         diagnostic(report, entry.id, "activation", error);
@@ -413,7 +417,7 @@ async function createPluginRuntime(input: PluginRuntimeInput): Promise<PluginRun
           else queue.push(signal);
         }
       }
-      for (const entry of deliveries) deliver(entry, signal, reportDiagnostic);
+      for (const entry of deliveries) deliver(entry, signal, reportDiagnostic, inFlight);
       return Promise.resolve();
     },
     async drain(): Promise<void> {

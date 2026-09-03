@@ -1,11 +1,31 @@
-import { fromJSONSchema, toJSONSchema, type ZodType } from "zod";
+import { toJSONSchema, type ZodType } from "zod";
 
 const SCHEMA_JSON_MAX_BYTES = 65_536;
 
 export type JsonSchemaDocument = Readonly<{ readonly [key: string]: unknown }>;
+export type JsonSchema = JsonSchemaDocument;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function assertJsonValue(value: unknown, path: string): void {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return;
+  if (typeof value === "number") {
+    if (Number.isFinite(value)) return;
+    throw new TypeError(`${path} contains a non-JSON number`);
+  }
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) assertJsonValue(value[index], `${path}[${index}]`);
+    return;
+  }
+  if (isPlainObject(value)) {
+    for (const [key, entry] of Object.entries(value)) assertJsonValue(entry, `${path}.${key}`);
+    return;
+  }
+  throw new TypeError(`${path} contains a non-JSON value`);
 }
 
 function sortValue(value: unknown): unknown {
@@ -30,6 +50,7 @@ function freezeValue(value: unknown): unknown {
 }
 
 function canonicalDocument(value: unknown, label: string): Readonly<{ json: JsonSchemaDocument; jsonText: string }> {
+  assertJsonValue(value, label);
   const sorted = sortValue(value);
   if (!isPlainObject(sorted)) throw new TypeError(`${label} must be a JSON object`);
   const jsonText = JSON.stringify(sorted);
@@ -39,54 +60,29 @@ function canonicalDocument(value: unknown, label: string): Readonly<{ json: Json
   return { json: freezeValue(JSON.parse(jsonText)) as JsonSchemaDocument, jsonText };
 }
 
-function decodeJsonDocument(schema: unknown): unknown {
-  if (typeof schema === "string") {
-    try {
-      return JSON.parse(schema);
-    } catch (error) {
-      throw new TypeError(error instanceof Error ? error.message : "JSON Schema is not valid JSON");
-    }
-  }
-  if (isPlainObject(schema) || Array.isArray(schema)) return schema;
-  throw new TypeError("JSON Schema must be a JSON object or JSON text");
-}
-
 export class Schema<T> {
   private constructor(
     readonly jsonSchema: JsonSchemaDocument,
-    readonly jsonText: string,
     readonly decode: (value: unknown) => T,
   ) {
     Object.freeze(this);
   }
 
-  get json(): JsonSchemaDocument {
-    return this.jsonSchema;
-  }
-
   static zod<Output>(schema: ZodType<Output>): Schema<Output> {
     const payload = toJSONSchema(schema, { target: "draft-07", unrepresentable: "throw", cycles: "throw" });
     const canonical = canonicalDocument(payload, "Zod JSON Schema");
-    return new Schema(canonical.json, canonical.jsonText, (value) => schema.parse(value));
+    return new Schema(canonical.json, (value) => schema.parse(value));
   }
 
-  static json(schema: unknown): Schema<unknown>;
-  static json<Output>(schema: unknown, decode: (value: unknown) => Output): Schema<Output>;
-  static json<Output>(schema: unknown, decode?: (value: unknown) => Output): Schema<Output> {
-    const document = decodeJsonDocument(schema);
+  static json<Output>(schema: JsonSchemaDocument, decode: (value: unknown) => Output): Schema<Output> {
+    if (typeof decode !== "function") throw new TypeError("JSON Schema decoder must be a function");
+    const document = schema;
     const canonical = canonicalDocument(document, "JSON Schema");
-    const decoder =
-      decode ??
-      ((value: unknown) =>
-        fromJSONSchema(JSON.parse(canonical.jsonText) as Parameters<typeof fromJSONSchema>[0]).parse(value) as Output);
-    return new Schema(canonical.json, canonical.jsonText, decoder);
-  }
-
-  parse(value: unknown): T {
-    return this.decode(value);
+    return new Schema(canonical.json, decode);
   }
 }
 
-export function JsonSchema(schema: unknown): Schema<unknown> {
-  return Schema.json(schema);
+/** Internal neutral serialization for Heart/provider forwarding. */
+export function schemaJsonText(schema: Schema<unknown>): string {
+  return JSON.stringify(schema.jsonSchema);
 }

@@ -3,7 +3,7 @@ import { worldRootForAkumaPaths } from "./akuma/identity.js";
 import { World } from "./world.js";
 import { executeKillAkuma, executeTellAkuma, executeWaitAkuma } from "./akuma/fleet-execution.js";
 import { Akuma as PublicAkuma } from "./akuma/akuma-instance.js";
-import { JsonSchema } from "./akuma/schema.js";
+import { Schema } from "./akuma/schema.js";
 import { fleetRequestCommands, type FleetRequestPort } from "./akuma/fleet-request.js";
 import { worktreeHooksFrom } from "./git/hooks.js";
 import {
@@ -99,7 +99,7 @@ function fleetRequestPort(world: Awaited<ReturnType<typeof World.prove>>): Fleet
       }),
     tellAnswer: async (input) =>
       await PublicAkuma.select(world, input.target).tell(input.body, {
-        schema: JsonSchema(input.schemaJson),
+        schema: Schema.json(JSON.parse(input.schemaJson) as Record<string, unknown>, (value) => value),
         ...(input.interrupt === undefined ? {} : { interrupt: input.interrupt }),
       }),
     kill: async (input) => {

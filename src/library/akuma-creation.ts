@@ -1,8 +1,8 @@
 /** @architectureCompositionRoot */
 import { appendFile } from "node:fs/promises";
 import { moveAlias, type AliasBinding } from "../alias/index.js";
-import { Akuma, type AkumaStatus, type ForkReceipt, type ReadonlyRestraint } from "../akuma/akuma.js";
-import type { AkumaBornCall } from "../akuma/akuma-product.js";
+import { type AkumaStatus, type ForkReceipt, type ReadonlyRestraint } from "../akuma/akuma.js";
+import { createAkumaProduct, type AkumaBornCall } from "../akuma/akuma-product.js";
 import { pathsForAkuId, type AkumaPaths, type AkuId } from "../akuma/identity.js";
 import { readSoul } from "../akuma/heart/index.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
@@ -16,6 +16,8 @@ import type { Settings } from "../settings.js";
 import { World, type WorldRoot } from "../world.js";
 import type { AllowedAction } from "../akuma/allowed.js";
 import type { Schema } from "../akuma/schema.js";
+import { Akuma as PublicAkuma } from "../akuma/akuma-instance.js";
+import { requestForwardedFleetTellAnswer } from "../akuma/fleet-request.js";
 import { localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
 import { callReadonly, canonicalBirthCwd } from "../akuma/call-input.js";
 import { requireInput } from "./input.js";
@@ -74,6 +76,7 @@ export type CallResult = Readonly<{
   dispatch: DispatchStage;
   alias: AliasStage;
   observation: CallObservation;
+  schemaAnswer?: unknown;
 }>;
 
 type CallExecution = CallResult["execution"];
@@ -86,6 +89,7 @@ export type BornCall = Readonly<{
   timeoutMs: number;
   dispatch: DispatchStage;
   alias: AliasStage;
+  schemaTell?: Readonly<{ body: string; schema: Schema<unknown> }>;
 }>;
 
 export type ForkInput = Readonly<{
@@ -129,7 +133,7 @@ function homeOption(value: unknown): string | undefined {
 }
 
 function akumaWorld(path: WorldRoot, home?: string, settings?: Settings, execution?: ExecutionContext) {
-  return Akuma.of(path, {
+  return createAkumaProduct(path, {
     ...(home === undefined ? {} : { home }),
     ...(settings === undefined ? {} : { settings }),
     ...(execution === undefined ? {} : { execution }),
@@ -175,7 +179,7 @@ function callSeat(contract: unknown) {
 }
 
 async function observeCall(
-  handle: Awaited<ReturnType<Akuma["call"]>>,
+  handle: ReturnType<ReturnType<typeof createAkumaProduct>["selectHandle"]>,
   mode: "wait" | "detach",
   timeoutMs: number,
 ): Promise<CallObservation> {
@@ -244,14 +248,14 @@ async function emitCalledSignal(
 async function admitCall(
   input: Readonly<{
     path: WorldRoot;
-    world: Akuma;
-    call: Parameters<Akuma["call"]>[0];
+    world: ReturnType<typeof createAkumaProduct>;
+    call: Parameters<ReturnType<typeof createAkumaProduct>["invoke"]>[0];
     context: Readonly<{ cwdCanonical?: true }>;
     settings?: Settings;
     contractId?: ContractId;
   }>,
 ): Promise<Readonly<{ born: AkumaBornCall; akuma: AkuId }>> {
-  const born = await input.world.beginCall(input.call, input.context);
+  const born = await input.world.admit(input.call, input.context);
   const akuma = born.kind === "requested" ? born.id : born.allocated.id;
   void emitCalledSignal({
     path: input.path,
@@ -353,7 +357,23 @@ async function resolveCallExecution(
   return undefined;
 }
 
-export async function beginCall(input: CallInput, context: ExecutionContext): Promise<BornCall> {
+async function resolveAliasStage(
+  path: WorldRoot,
+  alias: AkumaAlias | undefined,
+  dispatch: DispatchStage,
+  akuma: AkuId,
+): Promise<AliasStage> {
+  if (alias === undefined) return { kind: "none" };
+  if (dispatch.kind === "failed") return { kind: "skipped", reason: "dispatch-failed" };
+  try {
+    const moved = await moveAlias({ world: path, alias, akuId: akuma });
+    return { kind: "aliased", alias: moved.alias, previous: moved.previous };
+  } catch (error) {
+    return { kind: "failed", failure: integrationFailure(error) };
+  }
+}
+
+async function prepareCall(input: CallInput, context: ExecutionContext): Promise<BornCall> {
   const values = requireInput(input, "Keiyaku.call input");
   onlyKeys(
     values,
@@ -394,7 +414,7 @@ export async function beginCall(input: CallInput, context: ExecutionContext): Pr
   const world = akumaWorld(path, home, settings, context);
   const call = {
     archetype,
-    body,
+    ...(values.schema === undefined ? { body } : {}),
     ...(readonlyRequested === undefined ? {} : { readonly: readonlyRequested }),
     ...(values.allowed === undefined ? {} : { allowed: values.allowed as readonly AllowedAction[] }),
     ...(values.schema === undefined ? {} : { schema: values.schema as Schema<unknown> }),
@@ -403,7 +423,7 @@ export async function beginCall(input: CallInput, context: ExecutionContext): Pr
   const { born, akuma } = await admitCall({
     path,
     world,
-    call: call as Parameters<Akuma["call"]>[0],
+    call: call as Parameters<ReturnType<typeof createAkumaProduct>["invoke"]>[0],
     context: execution === undefined ? {} : { cwdCanonical: true },
     ...(settings === undefined ? {} : { settings }),
     ...(seat === undefined ? {} : { contractId: seat.id }),
@@ -413,18 +433,7 @@ export async function beginCall(input: CallInput, context: ExecutionContext): Pr
     seat === undefined
       ? { kind: "none" }
       : await dispatchStage({ repository: seat.scope, akuId: akuma, contractId: seat.id });
-  let aliasStage: AliasStage = { kind: "none" };
-  if (alias !== undefined) {
-    if (dispatch.kind === "failed") aliasStage = { kind: "skipped", reason: "dispatch-failed" };
-    else {
-      try {
-        const moved = await moveAlias({ world: path, alias, akuId: akuma });
-        aliasStage = { kind: "aliased", alias: moved.alias, previous: moved.previous };
-      } catch (error) {
-        aliasStage = { kind: "failed", failure: integrationFailure(error) };
-      }
-    }
-  }
+  const aliasStage = await resolveAliasStage(path, alias, dispatch, akuma);
   return {
     path,
     born,
@@ -433,16 +442,32 @@ export async function beginCall(input: CallInput, context: ExecutionContext): Pr
     timeoutMs,
     dispatch,
     alias: aliasStage,
+    ...(values.schema === undefined ? {} : { schemaTell: { body, schema: values.schema as Schema<unknown> } }),
   };
 }
 
-export async function finishCall(born: BornCall): Promise<CallResult> {
+async function publishCall(born: BornCall, execution: ExecutionContext): Promise<CallResult> {
   const world = akumaWorld(born.path);
   const contractId = born.dispatch.kind === "dispatched" ? born.dispatch.dispatch.contractId : undefined;
-  const handle = await world.finishCall(born.born, {
+  const handle = await world.publish(born.born, {
     ...(contractId === undefined ? {} : { contractId }),
   });
   const readonly = (await handle.status()).readonly;
+  let schemaAnswer: unknown;
+  if (born.schemaTell !== undefined) {
+    const tell = born.schemaTell;
+    const pending =
+      execution.channel.kind === "body-request"
+        ? requestForwardedFleetTellAnswer({
+            directory: execution.channel.directory,
+            target: handle.id,
+            body: tell.body,
+            schema: tell.schema,
+          })
+        : PublicAkuma.select(born.path, handle.id).tell(tell.body, { schema: tell.schema });
+    if (born.mode === "detach") void pending.catch(() => undefined);
+    else schemaAnswer = await pending;
+  }
   const observation = await observeCall(handle, born.mode, born.timeoutMs);
   return {
     kind: "called",
@@ -451,6 +476,7 @@ export async function finishCall(born: BornCall): Promise<CallResult> {
     execution: born.execution,
     dispatch: born.dispatch,
     alias: born.alias,
+    ...(schemaAnswer === undefined ? {} : { schemaAnswer }),
     observation,
   };
 }
@@ -459,7 +485,7 @@ export async function callKeiyaku(
   input: CallInput,
   execution: ExecutionContext = localExecutionContext(),
 ): Promise<CallResult> {
-  return await finishCall(await beginCall(input, execution));
+  return await publishCall(await prepareCall(input, execution), execution);
 }
 
 export async function forkKeiyaku(input: ForkInput): Promise<ForkResult> {
@@ -470,7 +496,7 @@ export async function forkKeiyaku(input: ForkInput): Promise<ForkResult> {
   const { path, id: akuma } = addressed;
   const repository = values.repo === undefined ? undefined : scopeForRepo(values.repo);
 
-  const receipt = await Akuma.of(path).of({ id: akuma }).fork({ at });
+  const receipt = await createAkumaProduct(path).selectHandle({ id: akuma }).fork({ at });
   if (receipt.kind !== "forked") return { ...receipt, parent: akuma };
   const dispatch =
     repository === undefined

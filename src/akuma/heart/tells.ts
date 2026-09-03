@@ -1,6 +1,12 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { TellBinding, TellDelivery, TellDeliveryInput, TellFact, TellReceiptInput } from "./facts.js";
-import { AuthorityCorruptionError } from "../../core/facts/errors.js";
+import {
+  HeartAuthorityCorruptionError,
+  type TellBinding,
+  type TellDelivery,
+  type TellDeliveryInput,
+  type TellFact,
+  type TellReceiptInput,
+} from "./facts.js";
 
 type TellRow = Readonly<{
   sequence: number;
@@ -221,7 +227,7 @@ export function resolveTellDispositionSnapshot(database: DatabaseSync, bodySeque
 function requireDispositionTell(database: DatabaseSync, tellId: string): TellFact {
   const tell = tellFact(database, tellId);
   if (tell === null) {
-    throw new AuthorityCorruptionError(`Akuma disposition references missing tell ${tellId}`);
+    throw new HeartAuthorityCorruptionError(`Akuma disposition references missing tell ${tellId}`);
   }
   return tell;
 }

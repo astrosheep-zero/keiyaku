@@ -22,7 +22,8 @@ import {
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { allocateAkumaDirectory, akuId } from "../src/akuma/identity.js";
 import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
-import { Akuma, AkumaNotBornError } from "../src/akuma/akuma.js";
+import { AkumaNotBornError } from "../src/akuma/akuma.js";
+import { AkumaComposition as Akuma } from "./support/akuma-composition.js";
 import { AkumaWorldScopeError, Keiyaku, Repo, type Catalog, type WorldRoot } from "../src/index.js";
 import { invoke } from "../src/cli/invoke.js";
 import type { InvocationResult } from "../src/cli/invoke.js";

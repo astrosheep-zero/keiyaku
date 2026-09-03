@@ -1,8 +1,15 @@
 # Akuma Public Surface
 
-This chapter owns Akuma public handles, status, wait, history, and compact fleet
-values. Exact TypeScript shapes, field budgets, and rendering
-belong to declarations, help, and executable specifications.
+This chapter owns the small `./akuma` product surface and its lifecycle
+evidence. Exact TypeScript shapes, field budgets, and rendering belong to
+declarations, help, and executable specifications.
+
+The public caller path is `Akuma.birth`, synchronous `Akuma.select`, and
+`Akuma.tell`. Birth submits no prompt; selection performs no read. A selected
+Akuma exposes its identity, plain text Tell, and schema-decoded Tell answer,
+along with the lifecycle-only idle, history, and kill observations. The
+composition facade owns root, alias, dispatch, and request routing around this
+product; those concerns do not become Akuma handle methods.
 
 ## One Public Timeline
 
@@ -25,17 +32,16 @@ snapshots do not fabricate a cursor, result, or loss marker.
 
 ## Handles And Lifecycle Evidence
 
-Handle construction over an already resolved World and identity is synchronous;
-every operation that reads Heart, leash, or filesystem state is asynchronous.
-The surface exposes call, selection, status, wait, history, tell, interrupt,
-fork, and kill under their owner semantics. It contains no process coordinate or
-capability to signal a described process.
+Selection over an already resolved World and identity is synchronous; every
+operation that reads Heart, leash, or filesystem state is asynchronous. The
+surface contains no owner, born, Turn, status, wait, interrupt, call, fork,
+receipt, ledger, provider-event, or process-signaling handle.
 
-Plain Tell returns its durable admission and wake evidence; it does not promise
-provider delivery or a Turn entry. Pending and told are the sole public detailed
-Tell states. A Schema-bearing Tell instead awaits the exact terminal Turn answer
-and decodes it; schema failure remains distinct from provider failure. Both forms
-retain the same routing and lifecycle semantics.
+Plain Tell returns the answer text for its exact Tell after ordinary wake and
+settlement. A Schema-bearing Tell instead awaits the terminal Turn bound to that
+Tell and decodes its raw answer; schema failure remains distinct from provider
+failure. Both forms retain the same busy, interrupt, routing, and recovery
+semantics.
 Wait observes status until its Akuma-owned default completion judgment or a
 caller override; timeout returns a current observation rather than manufacturing
 a timeout lifecycle arm. Interrupt and kill expose only honest settlement or

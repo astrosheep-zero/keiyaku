@@ -10,7 +10,6 @@ import {
   AkumaDecodeError,
   AkumaNotBornError,
   AkumaProviderError,
-  JsonSchema,
   Schema,
 } from "../src/akuma/index.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
@@ -18,6 +17,7 @@ import { driveAkumaBody } from "../src/akuma/body.js";
 import { HeldAkumaLeash, initializeHeart, readTell, recordTell } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { createProviderAttempt, type ProviderAdapter, type Session } from "../src/akuma/provider.js";
+import { schemaJsonText } from "../src/akuma/schema.js";
 import { World } from "../src/world.js";
 
 function freezeWalk(value: unknown): void {
@@ -33,23 +33,26 @@ function freezeWalk(value: unknown): void {
 test("Schema.zod and JsonSchema freeze a canonical bounded document", () => {
   const fromZod = Schema.zod(z.object({ ok: z.boolean() }).strict());
   const again = Schema.zod(z.object({ ok: z.boolean() }).strict());
-  const fromJson = JsonSchema('{"required":["ok"],"type":"object","properties":{"ok":{"type":"boolean"}}}');
-  const shuffled = JsonSchema({ properties: { ok: { type: "boolean" } }, required: ["ok"], type: "object" });
+  const fromJson = Schema.json(
+    { required: ["ok"], type: "object", properties: { ok: { type: "boolean" } } },
+    (value) => value as { ok: boolean },
+  );
+  const shuffled = Schema.json(
+    { properties: { ok: { type: "boolean" } }, required: ["ok"], type: "object" },
+    (value) => value as { ok: boolean },
+  );
   freezeWalk(fromZod);
   freezeWalk(fromZod.json);
   freezeWalk(fromJson.json);
-  assert.deepEqual(fromJson.jsonSchema, fromJson.json);
+  assert.deepEqual(fromJson.jsonSchema, shuffled.jsonSchema);
   assert.equal(typeof fromJson.decode, "function");
-  assert.equal(fromZod.jsonText, again.jsonText);
-  assert.equal(fromJson.jsonText, shuffled.jsonText);
-  assert.deepEqual(fromZod.parse({ ok: true }), { ok: true });
-  assert.deepEqual(fromJson.parse({ ok: false }), { ok: false });
+  assert.deepEqual(fromZod.jsonSchema, again.jsonSchema);
+  assert.deepEqual(fromJson.decode({ ok: false }), { ok: false });
   const custom = Schema.json({ type: "string" }, (value) => String(value).toUpperCase());
   assert.equal(custom.decode("ok"), "OK");
   assert.throws(() => Schema.zod(z.bigint()), /represented in JSON Schema/u);
-  assert.throws(() => JsonSchema("not-json"), /JSON/u);
-  assert.throws(() => JsonSchema({ type: "object", extra: "x".repeat(70_000) }), /byte/u);
-  assert.throws(() => JsonSchema({ type: "object", description: "é".repeat(40_000) }), /byte/u);
+  assert.throws(() => Schema.json({ type: "object", extra: "x".repeat(70_000) }, (value) => value), /byte/u);
+  assert.throws(() => Schema.json({ type: "object", description: "é".repeat(40_000) }, (value) => value), /byte/u);
 });
 
 test("public ./akuma barrel exposes only the contracted names", async () => {
@@ -63,7 +66,6 @@ test("public ./akuma barrel exposes only the contracted names", async () => {
       "AkumaDecodeError",
       "AkumaNotBornError",
       "AkumaProviderError",
-      "JsonSchema",
       "Schema",
     ].sort(),
   );
@@ -199,7 +201,7 @@ test("schema tell decodes JSON and typed failures stay distinct", async () => {
     assert.equal(fact?.kind, "tell");
     if (fact?.kind === "tell") {
       const recorded = await readTell(decoded.allocated.paths, fact.tellId);
-      assert.equal(recorded?.schemaJson, schema.jsonText);
+      assert.equal(recorded?.schemaJson, schemaJsonText(schema));
     }
 
     const invalid = await bornWorld(root, "a1000003");
@@ -285,6 +287,7 @@ test("schema tell on a running Body is busy unless interrupt is set", async () =
     release();
     await assert.rejects(interrupting, AkumaDecodeError);
     await body;
+    await akuma.idle();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -15,7 +15,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { moveAlias, resolveAlias } from "../src/alias/index.js";
-import { Akuma, AkumaHandle, akumaCallExecution, type AkumaCallInput } from "../src/akuma/akuma.js";
+import { type AkumaCallInput } from "../src/akuma/akuma.js";
+import { Akuma as PublicAkuma, Schema } from "../src/akuma/index.js";
+import { AkumaComposition as Akuma, AkumaHandle, akumaCallExecution } from "./support/akuma-composition.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { akumaCallRequestCommands } from "../src/akuma/call-request.js";
 import { AkumaArchetypeError, listArchetypeDefinitions, loadArchetype } from "../src/akuma/archetype.js";
@@ -121,15 +123,55 @@ async function directArchetypeSettings(root: string) {
       "  if (message.method === 'thread/start') return reply(message, { thread: { id: 'thread-1' } });",
       "  if (message.method !== 'turn/start') return;",
       "  reply(message, { turn: { id: 'turn-1' } });",
+      "  send({ method: 'item/completed', params: { item: { type: 'agentMessage', text: '{\"ok\":true}' } } });",
       "  send({ method: 'turn/completed', params: { turn: { id: 'turn-1', status: 'completed' } } });",
       "});",
     ].join("\n"),
   );
   chmodSync(executable, 0o755);
-  return { home, value: await settings({ root, home }) };
+  const value = await settings({ root, home });
+  return { home, value, placement: { home, settings: value } };
 }
 
-async function directBirthSoul(akuma: Akuma, input: AkumaCallInput): Promise<Soul> {
+test("schema Keiyaku.call births without a prompt and records its body as one public Tell", async () => {
+  const { raw } = await repositoryFixture();
+  const world = await World.at(raw.path);
+  const configured = await directArchetypeSettings(world);
+  const schema = Schema.json(
+    { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
+    (value) => value as { ok: boolean },
+  );
+  let akumaId: string | undefined;
+  try {
+    const result = await Keiyaku.call({
+      path: world,
+      archetype: "worker",
+      body: "schema-call",
+      cwd: world,
+      ...configured.placement,
+      schema,
+    });
+    akumaId = result.akuma;
+    assert.deepEqual(result.schemaAnswer, { ok: true });
+    const history = await PublicAkuma.select(world, result.akuma).history();
+    const tells = history.rows.filter((row) => row.kind === "tell");
+    assert.equal(tells.length, 1);
+    assert.equal(tells[0]?.kind, "tell");
+    if (tells[0]?.kind === "tell") assert.equal(tells[0].text, "schema-call");
+    assert.equal(
+      history.rows.some((row) => row.kind === "call"),
+      false,
+    );
+  } finally {
+    if (akumaId !== undefined)
+      await PublicAkuma.select(world, akumaId)
+        .kill()
+        .catch(() => undefined);
+    rmSync(raw.path, { recursive: true, force: true });
+  }
+});
+
+async function directBirthSoul(akuma: ReturnType<typeof Akuma.of>, input: AkumaCallInput): Promise<Soul> {
   const born = await akuma.beginCall(input, { initiatorCwd: process.cwd() });
   assert.equal(born.kind, "born");
   if (born.kind !== "born") throw new Error("direct call unexpectedly entered the Body Request path");
@@ -635,7 +677,10 @@ test("Archetype base lookup uses project precedence and Home fallback", async ()
     mkdirSync(join(root, ".keiyaku", "akuma"), { recursive: true });
     mkdirSync(join(home, "akuma"));
     writeFileSync(join(home, "akuma", "base.md"), "---\nprovider: claude\ndescription: Home\n---\nHome body.\n");
-    writeFileSync(join(root, ".keiyaku", "akuma", "base.md"), "---\nprovider: claude\ndescription: Project\n---\nProject body.\n");
+    writeFileSync(
+      join(root, ".keiyaku", "akuma", "base.md"),
+      "---\nprovider: claude\ndescription: Project\n---\nProject body.\n",
+    );
     writeFileSync(join(root, ".keiyaku", "akuma", "child.md"), "---\nbase: base\n---\n");
     writeFileSync(join(root, ".keiyaku", "akuma", "fallback.md"), "---\nbase: home-base\n---\n");
     writeFileSync(join(home, "akuma", "home-base.md"), "---\nprovider: claude\n---\nFallback body.\n");
@@ -667,10 +712,7 @@ test("Archetype inheritance freezes the resolved birth snapshot without base met
       join(configured.home, "akuma", "base.md"),
       "---\nprovider: local\nmodel: base\nallowed:\n  - task.add\nreadonly: true\n---\nBase body.\n",
     );
-    writeFileSync(
-      join(configured.home, "akuma", "child.md"),
-      "---\nbase: base\nmodel: child\n---\nChild body.\n",
-    );
+    writeFileSync(join(configured.home, "akuma", "child.md"), "---\nbase: base\nmodel: child\n---\nChild body.\n");
     const soul = await directBirthSoul(Akuma.of(world, configured), { archetype: "child", body: "run" });
     assert.equal(soul.provider.name, "local");
     assert.deepEqual(soul.options, {

@@ -5,7 +5,7 @@ const APPOINTMENT_DESCRIPTION = "This is a read-only projection. Do not edit man
 export const CONTRACT_DELIVERER_SKILL = [
   "---",
   "name: keiyaku-deliver",
-  "description: Fulfill the appointed Contract as its Deliverer — produce the candidate the journaled terms describe.",
+  "description: Must read this before you do ANY delivery work.",
   "---",
   "",
   "# Deliverer",
@@ -41,7 +41,7 @@ export const CONTRACT_DELIVERER_SKILL = [
 export const CONTRACT_REVIEWER_SKILL = [
   "---",
   "name: keiyaku-review",
-  "description: Review the appointed Contract's candidate — the commission owns the question, you own the answer.",
+  "description: Must read this before you do ANY review work.",
   "---",
   "",
   "# Reviewer",

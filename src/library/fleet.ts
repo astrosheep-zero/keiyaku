@@ -1,6 +1,5 @@
 /** @architectureCompositionRoot */
 import {
-  Akuma,
   AkumaNotBornError,
   type ActivityHistory,
   type OutcomeRow,
@@ -8,6 +7,7 @@ import {
   type InterruptReceipt,
   readBudgetedStatus,
 } from "../akuma/akuma.js";
+import { createAkumaProduct } from "../akuma/akuma-product.js";
 import { executionChannel, localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
 import {
   requestForwardedFleetKill,
@@ -40,6 +40,16 @@ export type AkumaWaitInput = AkumaSetAddressInput &
 
 export type AkumaTellInput = AkumaAddressInput & Readonly<{ body: string }>;
 export type { TellResult, TellWake } from "../akuma/akuma.js";
+export type { CreatedTaskObservation } from "../task/created-observation.js";
+export type { DispatchAssociation } from "../dispatch/association.js";
+export type {
+  AkumaKillResult,
+  AkumaObservation,
+  AkumaObservationStage,
+  AkumaTellResult,
+  AkumaUnobserved,
+  AkumaWaitResult,
+} from "../akuma/fleet-observation.js";
 export type AkumaInterruptInput = AkumaAddressInput & Readonly<{ body: string }>;
 export type AkumaInterruptResult = Readonly<{
   id: AkumaStatus["id"];
@@ -66,8 +76,8 @@ export type AkumaHistoryResult =
   | Readonly<{ kind: "last"; id: AkumaStatus["id"]; answer: string; contract: DispatchAssociation }>
   | Readonly<{ kind: "no-answer"; id: AkumaStatus["id"]; contract: DispatchAssociation }>;
 
-function source(path: WorldRoot): Akuma {
-  return Akuma.of(path);
+function source(path: WorldRoot): ReturnType<typeof createAkumaProduct> {
+  return createAkumaProduct(path);
 }
 
 function observationDiagnostic(error: unknown): string {
@@ -176,7 +186,11 @@ function setAddress(values: Record<string, unknown>): Parameters<typeof addressA
 
 export async function statusAkuma(input: AkumaAddressInput): Promise<AkumaObservation> {
   const addressed = await addressAkuma(input);
-  return await observeAkuma(await source(addressed.path).of({ id: addressed.id }).status(), addressed.path, input.repo);
+  return await observeAkuma(
+    await source(addressed.path).selectHandle({ id: addressed.id }).status(),
+    addressed.path,
+    input.repo,
+  );
 }
 
 export async function waitAkuma(
@@ -279,7 +293,7 @@ export async function interruptAkuma(input: AkumaInterruptInput): Promise<AkumaI
   }
   if (typeof values.body !== "string") throw new TypeError("body must be a string");
   const addressed = await addressAkuma(directAddress(values));
-  const handle = source(addressed.path).of({ id: addressed.id });
+  const handle = source(addressed.path).selectHandle({ id: addressed.id });
   const receipt = await handle.interrupt(values.body);
   const observation = await observeAkumaStage(addressed.path, addressed.id, values.repo as Repo | undefined);
   return { id: addressed.id, receipt, observation };
@@ -306,7 +320,7 @@ export async function historyAkuma(input: AkumaHistoryInput): Promise<AkumaHisto
   const values = requireInput(input, "Keiyaku.history input");
   validateHistoryInput(values);
   const addressed = await addressAkuma(directAddress(values));
-  const handle = source(addressed.path).of({ id: addressed.id });
+  const handle = source(addressed.path).selectHandle({ id: addressed.id });
   const contract = await dispatchAssociation(values.repo as Repo | undefined, addressed.id);
   if (values.last === true) {
     const answer = await handle.lastAnswer();

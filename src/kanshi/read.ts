@@ -3,7 +3,7 @@ import type { ContractBoard, ContractCatalogue, ContractDisposition } from "../l
 import { scopeForRepo } from "../library/repo.js";
 import { observeTaskBoard } from "../task/operations.js";
 import { contractNamespace } from "../task/identity.js";
-import { Akuma } from "../akuma/akuma.js";
+import { readAkumaCatalog, readAkumaTimeline } from "../akuma/akuma.js";
 import { readAliases, type AliasBinding } from "../alias/index.js";
 import { readDispatchesAt, type Dispatch } from "../dispatch/index.js";
 import { readTaskHolderProjectionAt, type TaskHolderProjection } from "../settlement/holder.js";
@@ -318,7 +318,7 @@ async function joinAkuma(
 ): Promise<Section<AkumaKanshiWorld>> {
   if (aliases.kind !== "present") return aliases;
   try {
-    const source = await Akuma.of(path).list({ limit: FLEET_VISIBLE_ROWS });
+    const source = await readAkumaCatalog(path, { limit: FLEET_VISIBLE_ROWS });
     const aliasById = new Map<string, typeof aliases.value>();
     for (const binding of aliases.value)
       aliasById.set(binding.akuId, [...(aliasById.get(binding.akuId) ?? []), binding]);
@@ -343,7 +343,7 @@ async function joinAkuma(
       await Promise.all(
         snapshotRows.map(async (row) => {
           try {
-            return [row.id, (await Akuma.of(path).of({ id: row.id }).status()).timeline] as const;
+            return [row.id, await readAkumaTimeline(path, row.id)] as const;
           } catch {
             return [row.id, undefined] as const;
           }

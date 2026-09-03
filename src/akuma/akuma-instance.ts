@@ -15,9 +15,12 @@ import { projectTurns, selectHistory, type ActivityHistory } from "./projection.
 import { settings as readSettings } from "../settings.js";
 import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
-import type { Schema } from "./schema.js";
+import { schemaJsonText, type Schema } from "./schema.js";
 
 const HISTORY_LIMIT = 12;
+
+export type AkumaIdleOptions = Readonly<{ timeoutMs?: number }>;
+export type AkumaHistoryOptions = Readonly<{ before?: number; since?: number; limit?: number }>;
 
 export type AkumaBirthInput = Readonly<{
   root: WorldRoot;
@@ -44,15 +47,18 @@ async function recordPlainTell(paths: AkumaPaths, id: AkuId, body: string, tellI
 }
 
 async function recordSchemaTell<T>(
-  paths: AkumaPaths,
-  id: AkuId,
-  body: string,
-  tellId: string,
-  options: AkumaTellOptions<T>,
-  root: WorldRoot,
+  input: Readonly<{
+    paths: AkumaPaths;
+    id: AkuId;
+    body: string;
+    tellId: string;
+    options: AkumaTellOptions<T>;
+    root: WorldRoot;
+  }>,
 ): Promise<string> {
+  const { paths, id, body, tellId, options, root } = input;
   if (options.interrupt === true) {
-    const interrupted = await new AkumaHandle(id, root).interruptSchema(body, options.schema.jsonText);
+    const interrupted = await new AkumaHandle(id, root).interruptSchema(body, schemaJsonText(options.schema), tellId);
     return interrupted.admission.tellId;
   }
   const recordedAt = new Date().toISOString();
@@ -61,7 +67,7 @@ async function recordSchemaTell<T>(
     id: tellId,
     body,
     recordedAt,
-    schemaJson: options.schema.jsonText,
+    schemaJson: schemaJsonText(options.schema),
   };
   const admitted = await recordTell(paths, tell);
   if (admitted.kind === "not-born") throw new AkumaNotBornError(id);
@@ -157,7 +163,7 @@ export class Akuma {
     const recorded =
       options === undefined
         ? await recordPlainTell(this.paths, this.id, text, tellId)
-        : await recordSchemaTell(this.paths, this.id, text, tellId, options, this.root);
+        : await recordSchemaTell({ paths: this.paths, id: this.id, body: text, tellId, options, root: this.root });
     const outcome = await awaitTellOutcome(this.paths, recorded);
     if (outcome.kind !== "answered") outcomeError(outcome);
     if (options === undefined) return outcome.answer;
@@ -169,7 +175,7 @@ export class Akuma {
       throw new AkumaDecodeError(error instanceof Error ? error.message : "Answer is not valid JSON", outcome.answer);
     }
     try {
-      return options.schema.parse(parsed);
+      return options.schema.decode(parsed);
     } catch (error) {
       throw new AkumaDecodeError(
         error instanceof Error ? error.message : "Answer failed schema decode",
@@ -178,18 +184,49 @@ export class Akuma {
     }
   }
 
-  async idle(): Promise<void> {
+  async idle(options: AkumaIdleOptions = {}): Promise<void> {
+    if (typeof options !== "object" || options === null || Array.isArray(options)) {
+      throw new TypeError("Akuma idle options must be an object");
+    }
+    const unknown = Object.keys(options).find((key) => key !== "timeoutMs");
+    if (unknown !== undefined) throw new TypeError(`Akuma idle options has unknown field: ${unknown}`);
+    if (options.timeoutMs !== undefined && (!Number.isFinite(options.timeoutMs) || options.timeoutMs < 0)) {
+      throw new TypeError("Akuma idle timeoutMs must be a nonnegative finite millisecond duration");
+    }
+    const deadline = options.timeoutMs === undefined ? undefined : performance.now() + options.timeoutMs;
     for (;;) {
       const observed = await bornStatus(this.paths, this.id, { aperture: "monitoring" });
-      if (defaultWaitComplete(observed.status)) return;
-      await wait(POLL_MS);
+      if (defaultWaitComplete(observed.status) || (deadline !== undefined && performance.now() >= deadline)) return;
+      await wait(deadline === undefined ? POLL_MS : Math.min(POLL_MS, Math.max(0, deadline - performance.now())));
     }
   }
 
-  async history(): Promise<ActivityHistory> {
+  async history(options: AkumaHistoryOptions = {}): Promise<ActivityHistory> {
+    if (typeof options !== "object" || options === null || Array.isArray(options)) {
+      throw new TypeError("Akuma history options must be an object");
+    }
+    const unknown = Object.keys(options).find((key) => !["before", "since", "limit"].includes(key));
+    if (unknown !== undefined) throw new TypeError(`Akuma history options has unknown field: ${unknown}`);
+    if (options.before !== undefined && options.since !== undefined) {
+      throw new TypeError("Akuma history before and since are mutually exclusive");
+    }
+    for (const [name, value] of [
+      ["before", options.before],
+      ["since", options.since],
+    ] as const) {
+      if (value !== undefined && (!Number.isSafeInteger(value) || value <= 0)) {
+        throw new TypeError(`Akuma history ${name} must be a positive safe integer`);
+      }
+    }
+    const limit = options.limit ?? HISTORY_LIMIT;
+    if (!Number.isSafeInteger(limit) || limit <= 0 || limit > 5_000) {
+      throw new TypeError("Akuma history limit must be a positive safe integer no greater than 5000");
+    }
     const slice = await activitySlice(this.paths);
     return selectHistory(projectTurns(slice.rows, { lowestRetained: slice.lowestRetained, highest: slice.highest }), {
-      limit: HISTORY_LIMIT,
+      ...(options.before === undefined ? {} : { before: options.before }),
+      ...(options.since === undefined ? {} : { since: options.since }),
+      limit,
     });
   }
 

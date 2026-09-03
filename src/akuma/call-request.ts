@@ -77,7 +77,7 @@ const akumaCallPayloadSchema = z
   .object({
     world: absolutePathSchema,
     archetype: archetypeSchema,
-    body: z.string(),
+    body: z.string().optional(),
     cwd: absolutePathSchema.optional(),
     recipe: akumaCallRecipeSchema,
   })
@@ -89,7 +89,7 @@ export type AkumaCallRequest = z.infer<typeof akumaCallPayloadSchema> & Readonly
 export type AkumaCallRequestChildLaunch = Readonly<{
   paths: AkumaPaths;
   seed: Omit<Soul, "createdAt">;
-  initialBody: string;
+  initialBody?: string;
 }>;
 
 type AkumaCallRequestCapabilities = Readonly<{
@@ -143,7 +143,7 @@ async function executeAkumaCall(
           cwd: request.cwd ?? parent.cwd,
           origin: { kind: "request", parent: parent.id, requestId: facts.id },
         },
-        initialBody: request.body,
+        ...(request.body === undefined ? {} : { initialBody: request.body }),
       });
     },
   });

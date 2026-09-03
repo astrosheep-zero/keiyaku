@@ -16,10 +16,9 @@ import {
 import type { Settings } from "../../settings.js";
 import type { WorldRoot } from "../../world.js";
 import type { AkumaPromptSource, InvokedAkumaCommand } from "./akuma.js";
-import { beginCall, finishCall } from "../../library/akuma-creation.js";
 import { killAkuma, tellAkuma, waitAkuma } from "../../library/fleet.js";
 import { localExecutionContext, type ExecutionContext } from "../../akuma/requests.js";
-import { Akuma, JsonSchema } from "../../akuma/index.js";
+import { Akuma, Schema, type JsonSchemaDocument } from "../../akuma/index.js";
 import { addressAkuma } from "../../library/address.js";
 import { executionChannel } from "../../akuma/requests.js";
 import { requestForwardedFleetTellAnswer } from "../../akuma/fleet-request.js";
@@ -84,35 +83,16 @@ type InvokeInput = Readonly<{
   repo?: Repo;
   environment: NodeJS.ProcessEnv;
   readStdin(): Promise<string>;
-  finishCall?: typeof finishCall;
   execution?: ExecutionContext;
 }>;
 
-async function schemaFromFile(path: string) {
+async function schemaFromFile(path: string): Promise<Schema<unknown>> {
   try {
-    return JsonSchema(await readFile(path, "utf8"));
+    const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
+    return Schema.json(parsed as JsonSchemaDocument, (value) => value);
   } catch (error) {
     throw new Error(`cannot read JSON Schema file ${path}: ${error instanceof Error ? error.message : String(error)}`);
   }
-}
-
-async function firstSchemaAnswer(
-  id: string,
-  world: WorldRoot,
-  schema: ReturnType<typeof JsonSchema>,
-): Promise<unknown> {
-  const history = await Akuma.select(world, id).history();
-  const outcome = history.rows.find((row) => row.kind === "outcome" && row.outcome.kind === "answered");
-  if (outcome === undefined || outcome.kind !== "outcome" || outcome.outcome.kind !== "answered") {
-    throw new Error("schema call completed without an answered Turn");
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(outcome.outcome.answer);
-  } catch (error) {
-    throw new Error(`schema answer is not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  return schema.decode(parsed);
 }
 
 function inputAlias(selector: string): string | undefined {
@@ -282,28 +262,24 @@ export async function invokeAkuma(command: InvokedAkumaCommand, input: InvokeInp
     case "call": {
       const body = await promptBody(command, input);
       const schema = command.schema === undefined ? undefined : await schemaFromFile(command.schema);
-      const born = await beginCall(
-        {
-          path: input.path,
-          archetype: command.archetype,
-          body,
-          ...(input.home === undefined ? {} : { home: input.home }),
-          ...(input.settings === undefined ? {} : { settings: input.settings }),
-          ...(input.statedCwd === undefined ? {} : { cwd: input.statedCwd }),
-          mode: command.mode,
-          ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
-          ...(command.readonly === undefined ? {} : { readonly: command.readonly }),
-          ...(input.contract === undefined ? {} : { contract: input.contract }),
-          ...(command.alias === undefined ? {} : { alias: command.alias }),
-          ...(command.allowed === undefined ? {} : { allowed: command.allowed }),
-          ...(schema === undefined ? {} : { schema }),
-        },
-        input.execution ?? localExecutionContext(),
-      );
-      const result = await (input.finishCall ?? finishCall)(born);
-      if (schema !== undefined && command.mode === "wait" && result.observation.kind === "observed") {
-        const answer = await firstSchemaAnswer(result.akuma, input.path, schema);
-        return { kind: "akuma", action: "call", result, world: input.path, schemaAnswer: answer };
+      const caller = input.execution === undefined ? Keiyaku : Keiyaku.withExecution({ execution: input.execution });
+      const result = await caller.call({
+        path: input.path,
+        archetype: command.archetype,
+        body,
+        ...(input.home === undefined ? {} : { home: input.home }),
+        ...(input.settings === undefined ? {} : { settings: input.settings }),
+        ...(input.statedCwd === undefined ? {} : { cwd: input.statedCwd }),
+        mode: command.mode,
+        ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
+        ...(command.readonly === undefined ? {} : { readonly: command.readonly }),
+        ...(input.contract === undefined ? {} : { contract: input.contract }),
+        ...(command.alias === undefined ? {} : { alias: command.alias }),
+        ...(command.allowed === undefined ? {} : { allowed: command.allowed }),
+        ...(schema === undefined ? {} : { schema }),
+      });
+      if (schema !== undefined && command.mode === "wait" && result.schemaAnswer !== undefined) {
+        return { kind: "akuma", action: "call", result, world: input.path, schemaAnswer: result.schemaAnswer };
       }
       return { kind: "akuma", action: "call", result, world: input.path };
     }

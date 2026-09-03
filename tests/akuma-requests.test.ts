@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { Akuma } from "../src/akuma/akuma.js";
+import { AkumaComposition as Akuma } from "./support/akuma-composition.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import {

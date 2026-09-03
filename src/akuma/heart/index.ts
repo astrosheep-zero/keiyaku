@@ -20,7 +20,6 @@ import type {
 export type { CallFact } from "./facts.js";
 import {
   answeredTurnFact,
-  decodeTurnRow,
   endBodyFact,
   finishBodyFact,
   insertActivityFact,
@@ -37,6 +36,7 @@ import {
   pauseFact,
   sessionFactForCoordinate,
   stopFact,
+  turnFact,
 } from "./rows.js";
 import type { ActivityFact } from "./rows.js";
 import {
@@ -438,17 +438,7 @@ export async function failOpenBoundTurns(
 }
 
 export async function readTurn(paths: AkumaPaths, sequence: number): Promise<TurnFact | null> {
-  return await withHeart(paths, (heart) =>
-    readTransaction(heart, () => {
-      const row = heart
-        .prepare(
-          `SELECT sequence, body_sequence, started_at, end_sequence, outcome, history_id,
-        session_json, answer, answer_json, schema_json, diagnostic, completed_at FROM turns WHERE sequence = ?`,
-        )
-        .get(sequence) as import("./rows.js").TurnRow | undefined;
-      return row === undefined ? null : decodeTurnRow(row);
-    }),
-  );
+  return await withHeart(paths, (heart) => readTransaction(heart, () => turnFact(heart, sequence)));
 }
 
 export async function endTurn(

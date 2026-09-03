@@ -1,7 +1,7 @@
 export { Akuma } from "./akuma-instance.js";
-export type { AkumaBirthInput, AkumaTellOptions } from "./akuma-instance.js";
-export { Schema, JsonSchema } from "./schema.js";
-export type { JsonSchemaDocument } from "./schema.js";
+export type { AkumaBirthInput, AkumaHistoryOptions, AkumaIdleOptions, AkumaTellOptions } from "./akuma-instance.js";
+export { Schema } from "./schema.js";
+export type { JsonSchema, JsonSchemaDocument } from "./schema.js";
 export type { AkuId } from "./identity.js";
 export type { ActivityHistory, ActivityRow } from "./projection.js";
 export { ALLOWED_ACTIONS } from "./allowed.js";

@@ -459,3 +459,13 @@ export function answeredTurnFact(database: DatabaseSync, turnSequence: number): 
     .get(turnSequence) as TurnRow | undefined;
   return row === undefined ? null : decodeTurnRow(row);
 }
+
+export function turnFact(database: DatabaseSync, turnSequence: number): TurnFact | null {
+  const row = database
+    .prepare(
+      `SELECT sequence, body_sequence, started_at, end_sequence, outcome, history_id,
+    session_json, answer, answer_json, schema_json, diagnostic, completed_at FROM turns WHERE sequence = ?`,
+    )
+    .get(turnSequence) as TurnRow | undefined;
+  return row === undefined ? null : decodeTurnRow(row);
+}

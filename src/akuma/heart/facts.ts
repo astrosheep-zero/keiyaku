@@ -4,6 +4,13 @@ import type { ProviderExecution, ProviderOptions, ReadonlyRestraint } from "../p
 import type { AllowedActions } from "../allowed.js";
 export type { ResumeCoordinate } from "../coordinate.js";
 
+export class HeartAuthorityCorruptionError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "HeartAuthorityCorruptionError";
+  }
+}
+
 export type AkumaOrigin =
   | Readonly<{ kind: "direct" }>
   | Readonly<{ kind: "request"; parent: AkuId; requestId: string }>

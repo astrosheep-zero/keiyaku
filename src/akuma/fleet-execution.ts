@@ -1,6 +1,7 @@
-import { Akuma, AkumaNotBornError, defaultWaitComplete, type AkumaStatus } from "./akuma.js";
+import { AkumaNotBornError, defaultWaitComplete, type AkumaStatus } from "./akuma.js";
+import { createAkumaProduct } from "./akuma-product.js";
 import { readBudgetedStatus, tellAkumaWithId } from "./akuma.js";
-import { NO_DISPATCH_ASSOCIATION } from "../dispatch/association.js";
+import { NO_DISPATCH_ASSOCIATION } from "./dispatch-association.js";
 import { EMPTY_CREATED_TASK_OBSERVATION } from "../task/created-observation.js";
 import type { WorldRoot } from "../world.js";
 import {
@@ -12,8 +13,8 @@ import {
   type AkumaWaitResult,
 } from "./fleet-observation.js";
 
-function source(path: WorldRoot): Akuma {
-  return Akuma.of(path);
+function source(path: WorldRoot) {
+  return createAkumaProduct(path);
 }
 
 function observationDiagnostic(error: unknown): string {
@@ -44,7 +45,7 @@ async function observeWaitRound(
   signal?.throwIfAborted();
   if (ids.length <= 1) {
     return {
-      statuses: await Promise.all(ids.map(async (id) => await source(path).of({ id }).status())),
+      statuses: await Promise.all(ids.map(async (id) => await source(path).selectHandle({ id }).status())),
       unobserved: [],
     };
   }
@@ -124,7 +125,7 @@ export type TellExecutionInput = Readonly<{
 
 export async function executeTellAkuma(input: TellExecutionInput): Promise<AkumaTellResult> {
   input.signal?.throwIfAborted();
-  const handle = source(input.path).of({ id: input.id });
+  const handle = source(input.path).selectHandle({ id: input.id });
   const tell =
     input.tellId === undefined
       ? await handle.tell(input.body)
@@ -150,7 +151,7 @@ export type KillExecutionInput = Readonly<{
 
 export async function executeKillAkuma(input: KillExecutionInput): Promise<AkumaKillResult> {
   input.signal?.throwIfAborted();
-  const handles = input.ids.map((id) => source(input.path).of({ id }));
+  const handles = input.ids.map((id) => source(input.path).selectHandle({ id }));
   const evidence = await Promise.all(handles.map(async (handle) => await handle.kill()));
   input.signal?.throwIfAborted();
   return fleetResultSchemas.kill.parse({

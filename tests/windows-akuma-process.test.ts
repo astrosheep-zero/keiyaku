@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
-import { Akuma } from "../src/akuma/akuma.js";
+import { AkumaComposition as Akuma } from "./support/akuma-composition.js";
 import { spawnOptionsFor, spawnWindowsLauncher } from "../src/runtime/proc/launch.js";
 import { consumeProcessStdout, runProcess, spawnDetachedProcess } from "../src/runtime/proc/run.js";
 import { spawnStdioProcess } from "../src/runtime/proc/stdio.js";

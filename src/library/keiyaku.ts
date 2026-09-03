@@ -93,7 +93,7 @@ export type { Dispatch, DispatchFailure } from "../dispatch/index.js";
 export type { AkumaAlias } from "../identity/selector.js";
 export type { AkumaGlob } from "../identity/selector.js";
 export type { AkuId } from "../akuma/identity.js";
-export type { TellResult, TellWake } from "../akuma/akuma.js";
+export type { TellResult, TellWake } from "./fleet.js";
 export type { AllowedAction, AllowedActions } from "../akuma/allowed.js";
 export type { Catalog, CatalogInput, CatalogQuery } from "./catalog.js";
 export type { NukeInput, NukeResult } from "./nuke.js";
@@ -105,16 +105,16 @@ export type {
   DirectAkumaSelector,
   SetAkumaSelector,
 } from "./address.js";
-export type { CreatedTaskObservation } from "../task/created-observation.js";
-export type { DispatchAssociation } from "../dispatch/association.js";
 export type {
+  CreatedTaskObservation,
+  DispatchAssociation,
   AkumaKillResult,
   AkumaObservation,
   AkumaObservationStage,
   AkumaTellResult,
   AkumaUnobserved,
   AkumaWaitResult,
-} from "../akuma/fleet-observation.js";
+} from "./fleet.js";
 export type {
   AkumaHistoryInput,
   AkumaHistoryResult,

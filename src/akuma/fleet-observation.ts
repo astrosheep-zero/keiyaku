@@ -2,7 +2,7 @@ import { akumaIdSchema, akumaStatusSchema } from "./akuma.js";
 import type { TellResult } from "./akuma.js";
 import type { KillEvidence } from "./heart/index.js";
 import { tellRowSchema } from "./projection.js";
-import { dispatchAssociationSchema } from "../dispatch/association.js";
+import { dispatchAssociationSchema } from "./dispatch-association.js";
 import { createdTaskObservationSchema } from "../task/created-observation.js";
 import { z } from "zod";
 

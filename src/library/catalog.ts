@@ -1,5 +1,6 @@
 /** @architectureCompositionRoot */
-import { Akuma, type AkumaList } from "../akuma/akuma.js";
+import { type AkumaList } from "../akuma/akuma.js";
+import { createAkumaProduct } from "../akuma/akuma-product.js";
 import { listArchetypeDefinitions, type ArchetypeCatalogRow } from "../akuma/archetype.js";
 import type { TaskRow } from "../task/index.js";
 import { observeTaskCatalog } from "../task/catalog.js";
@@ -153,7 +154,7 @@ export async function listCatalog(input: CatalogInput): Promise<Catalog> {
   if (query.kind === "tasks") {
     return { kind: "tasks", root: path, ...(await observeTaskCatalog(path, query)) };
   }
-  const listed = await Akuma.of(path).list({
+  const listed = await createAkumaProduct(path).list({
     ...(query.archetype === undefined ? {} : { archetype: query.archetype }),
     ...(query.limit === undefined ? {} : { limit: query.limit }),
   });
