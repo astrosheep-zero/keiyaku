@@ -285,6 +285,17 @@ test("architecture policy keeps cross-product wiring in marked Library compositi
       "export const compose = [runtime, tasks];",
     ].join("\n"),
   });
+  const nestedMarkerEscape = check({
+    "akuma/akuma.ts": "export function runtime(): void {}",
+    "task/index.ts": "export function tasks(): void {}",
+    "library/nested-marker.ts": [
+      "export const architectureCompositionRoot = true;",
+      "/** @architectureCompositionRoot */",
+      "export function nested(): void {}",
+      'import { runtime } from "../akuma/akuma.js";',
+      'import { tasks } from "../task/index.js";',
+    ].join("\n"),
+  });
 
   assert.deepEqual(compositionRoot, []);
   assert.deepEqual(catalogRoot, []);
@@ -295,6 +306,7 @@ test("architecture policy keeps cross-product wiring in marked Library compositi
   assert.deepEqual(rules(unregisteredComposition), ["architecture/composition-boundary"]);
   assert.deepEqual(rules(ordinaryDiagnostics), ["architecture/composition-boundary"]);
   assert.deepEqual(rules(rootPrefixEscape), ["architecture/composition-boundary"]);
+  assert.deepEqual(rules(nestedMarkerEscape), ["architecture/composition-boundary"]);
 });
 
 test("architecture policy keeps provider SDKs inside their adapter owners", () => {

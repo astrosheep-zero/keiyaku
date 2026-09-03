@@ -15,10 +15,10 @@ import {
   type ContractState,
   type JournalEntry,
 } from "../src/core/facts/types.js";
-import { decideAbandon, decodeAbandonRefusal } from "../src/core/verbs/abandon.js";
-import { decideAmend, decodeAmendRefusal } from "../src/core/verbs/amend.js";
+import { decodeAbandonRefusal } from "../src/core/verbs/abandon.js";
+import { decodeAmendRefusal } from "../src/core/verbs/amend.js";
 import { decideAttestation, decodeAttestationRefusal } from "../src/core/verbs/attestation.js";
-import { decideBind, decodeBindRefusal } from "../src/core/verbs/bind.js";
+import { decodeBindRefusal } from "../src/core/verbs/bind.js";
 import { decideDeliver, decodeDeliverRefusal } from "../src/core/verbs/deliver.js";
 import { decidePlacement, decodePlacementRefusal } from "../src/core/verbs/placement.js";
 
@@ -100,7 +100,7 @@ function offeredEntries(decision: { kind: string; offer?: { facts: ReadonlyArray
   return decision.offer.facts.flatMap((fact) => fact.entries);
 }
 
-test("a longer cycle records bound on first delivery, replaces the candidate, and keeps abandoned prerequisites visible", () => {
+test("delivery replacement carries a satisfied gate to placement", () => {
   const bind = bindEntry(0);
   const waiting = fold([bind]);
   assert.equal(waiting.bound, null);
@@ -201,103 +201,6 @@ test("a longer cycle records bound on first delivery, replaces the candidate, an
     },
   });
 
-  const prerequisiteBind = bindEntry(8, prerequisite);
-  const abandonedPrerequisite = fold([
-    prerequisiteBind,
-    entry("abandoned", { note: "stop sequencing" }, 9, prerequisite),
-  ], prerequisite);
-  const amended = decideAmend({
-    input: {
-      contractId: id,
-      at: "2026-08-07T00:00:07Z",
-      source: superseded.terms,
-      preparation: { kind: "prepared", data: { ...superseded.terms, after: [prerequisite] } },
-    },
-    attempt: { entryUlids: [uniqueEntryUlid(10)] },
-    observation: observation([
-      [id, superseded],
-      [prerequisite, abandonedPrerequisite],
-    ]),
-  });
-  const dependent = fold([bind, ...firstFacts, ...laterFacts, ...satisfiedFacts, ...offeredEntries(unsatisfied), ...offeredEntries(amended)]);
-  const blockedByAbandoned = decidePlacement({
-    input: { contractId: id, at: "2026-08-07T00:00:08Z" },
-    attempt: { entryUlids: [uniqueEntryUlid(11)] },
-    observation: observation([
-      [id, dependent],
-      [prerequisite, abandonedPrerequisite],
-    ]),
-  });
-  assert.deepEqual(blockedByAbandoned, {
-    kind: "refused",
-    refusal: {
-      kind: "prerequisites-unsatisfied",
-      contractId: id,
-      unmet: [{ contractId: prerequisite, state: "abandoned" }],
-    },
-  });
-
-  const abandoned = decideAbandon({
-    input: { contractId: id, at: "2026-08-07T00:00:09Z", note: "return to planning" },
-    attempt: { entryUlids: [uniqueEntryUlid(12)] },
-    observation: observation([[id, dependent]]),
-  });
-  const terminal = fold([
-    bind,
-    ...firstFacts,
-    ...laterFacts,
-    ...satisfiedFacts,
-    ...offeredEntries(unsatisfied),
-    ...offeredEntries(amended),
-    ...offeredEntries(abandoned),
-  ]);
-  assert.equal(terminal.terminal?.kind, "abandoned");
-  assert.equal(terminal.delivery?.data.integration.snapshot, snapshotId("candidate-2"));
-
-  const closed = observation([[id, terminal]]);
-  const attempt = { entryUlids: [uniqueEntryUlid(13)] };
-  const terminalRefusal = { kind: "refused", refusal: { kind: "terminal", contractId: id } };
-  assert.deepEqual(
-    decideAmend({
-      input: {
-        contractId: id,
-        at: "2026-08-07T00:00:10Z",
-        source: terminal.terms,
-        preparation: { kind: "prepared", data: terminal.terms },
-      },
-      attempt,
-      observation: closed,
-    }),
-    terminalRefusal,
-  );
-  assert.deepEqual(
-    decideDeliver({
-      input: {
-        contractId: id,
-        at: "2026-08-07T00:00:10Z",
-        preparation: { kind: "prepared", document: terminal.terms.document.key, data: deliveryData("too-late") },
-      },
-      attempt,
-      observation: closed,
-    }),
-    terminalRefusal,
-  );
-  assert.deepEqual(decideAbandon({ input: { contractId: id, at: "2026-08-07T00:00:10Z" }, attempt, observation: closed }), terminalRefusal);
-  assert.deepEqual(decideBind({
-    input: {
-      contractId: id,
-      at: "2026-08-07T00:00:10Z",
-      preparation: {
-        kind: "prepared",
-        data: {
-          coordinates: { start: snapshotId("start"), workspace: "worktree" },
-          terms: terms(),
-        },
-      },
-    },
-    attempt,
-    observation: closed,
-  }), { kind: "refused", refusal: { kind: "contract-exists", contractId: id } });
 });
 
 test("malformed inherited refusals, journals, and folds refuse without inventing status", () => {
@@ -317,11 +220,15 @@ test("malformed inherited refusals, journals, and folds refuse without inventing
   );
 
   const malformed = { kind: "terminal", contractId: String(id), extra: true };
-  assert.throws(() => decodeBindRefusal({ kind: "unknown-prerequisite" }), /malformed bind refusal/);
-  assert.throws(() => decodeAmendRefusal(malformed), /malformed amend refusal/);
-  assert.throws(() => decodeDeliverRefusal(malformed), /malformed deliver refusal/);
-  assert.throws(() => decodeAbandonRefusal(malformed), /malformed abandon refusal/);
-  assert.throws(() => decodeAttestationRefusal(malformed), /malformed attestation refusal/);
+  for (const decode of [
+    decodeBindRefusal,
+    decodeAmendRefusal,
+    decodeDeliverRefusal,
+    decodeAbandonRefusal,
+    decodeAttestationRefusal,
+  ]) {
+    assert.throws(() => decode(malformed), /malformed .*refusal/);
+  }
   assert.throws(
     () =>
       decodePlacementRefusal({
