@@ -7,8 +7,13 @@ import { renderText } from "../src/cli/render/text.js";
 import type { Catalog } from "../src/library/catalog.js";
 import type { ContractRow } from "../src/protocol/read/status.js";
 import type { WorldRoot } from "../src/world.js";
+import { renderHelp } from "../src/cli/parse.js";
 
 const worldRoot = "/world" as WorldRoot;
+
+test("Akuma call help omits the caller readonly flag", () => {
+  assert.doesNotMatch(renderHelp({ kind: "akuma", action: "call" }), /--readonly/u);
+});
 
 test("catalog text renders only the selected identity layer", () => {
   assert.equal(

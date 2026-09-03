@@ -132,6 +132,16 @@ test("install does not consume KEIYAKU_GIT_PATH before coordinate resolution", a
   });
 });
 
+test("Akuma call rejects the removed --readonly option before invocation", () => {
+  assert.throws(
+    () => parseInvocation(["call", "worker", "--readonly", "work"]),
+    (error: unknown) =>
+      error instanceof CliUsageError &&
+      /option --readonly is not valid for call/u.test(error.message) &&
+      !/--readonly/u.test(error.message.split("\n").slice(1).join("\n")),
+  );
+});
+
 function sourceModulesLoadedByCli(
   argv: readonly string[],
   cwd: string,

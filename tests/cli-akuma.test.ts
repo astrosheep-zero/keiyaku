@@ -116,16 +116,13 @@ test("Akuma CLI parses root verbs without the removed namespace", () => {
     },
   });
   assert.throws(() => parseArgv(["call", "claude", "--allowed", "none", "-"]), /unknown action: none/u);
-  assert.deepEqual(parseArgv(["call", "claude", "--readonly", "-"]), {
-    command: {
-      command: "call",
-      archetype: "claude",
-      mode: "wait",
-      readonly: true,
-      prompt: { kind: "stdin" },
-      output: "text",
-    },
-  });
+  assert.throws(
+    () => parseArgv(["call", "claude", "--readonly", "-"]),
+    (error: unknown) =>
+      error instanceof CliUsageError &&
+      /option --readonly is not valid for call/u.test(error.message) &&
+      !/--readonly/u.test(error.message.split("\n").slice(1).join("\n")),
+  );
   assert.deepEqual(parseArgv(["call", "claude", "--schema", "answer.schema.json", "--detach", "ship it"]), {
     command: {
       command: "call",
