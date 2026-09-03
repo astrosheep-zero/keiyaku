@@ -3,10 +3,7 @@ import { rmdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { stopAkuma } from "../akuma/nuke.js";
 import { nukeGit } from "../git/nuke.js";
-import {
-  appendPrivateStateSeatClose,
-  type PrivateStateSeatCloseLag,
-} from "../git/private-state-seat.js";
+import { appendPrivateStateSeatClose, type PrivateStateSeatCloseLag } from "../git/private-state-seat.js";
 import type { GitRepository } from "../git/process.js";
 import { nukeTask } from "../task/operations.js";
 import { World, type WorldRoot } from "../world.js";

@@ -1,11 +1,12 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { TellDelivery, TellDeliveryInput, TellFact, TellReceiptInput } from "./facts.js";
+import type { TellBinding, TellDelivery, TellDeliveryInput, TellFact, TellReceiptInput } from "./facts.js";
 import { AuthorityCorruptionError } from "../../core/facts/errors.js";
 
 type TellRow = Readonly<{
   sequence: number;
   id: string;
   body: string;
+  schema_json: string | null;
   recorded_at: string;
   state: TellFact["state"];
 }>;
@@ -50,22 +51,32 @@ function tellDeliveries(database: DatabaseSync, id: string): readonly TellDelive
   );
 }
 
+function tellBinding(database: DatabaseSync, id: string): TellBinding | undefined {
+  const row = database
+    .prepare("SELECT turn_sequence, bound_at FROM tell_bindings WHERE tell_id = ?")
+    .get(id) as { turn_sequence: number; bound_at: string } | undefined;
+  return row === undefined ? undefined : { turnSequence: row.turn_sequence, boundAt: row.bound_at };
+}
+
 function decodeTellRow(database: DatabaseSync, row: TellRow): TellFact {
+  const binding = tellBinding(database, row.id);
   return {
     kind: "tell",
     sequence: row.sequence,
     id: row.id,
     body: row.body,
+    ...(row.schema_json === null ? {} : { schemaJson: row.schema_json }),
     state: row.state,
     recordedAt: row.recorded_at,
     deliveries: tellDeliveries(database, row.id),
+    ...(binding === undefined ? {} : { binding }),
   };
 }
 
 export function decodeTellAtSequence(database: DatabaseSync, sequence: number): TellFact {
   const row = database
     .prepare(
-      `SELECT sequence, id, body, recorded_at, ${tellStateSql} AS state
+      `SELECT sequence, id, body, schema_json, recorded_at, ${tellStateSql} AS state
     FROM tells WHERE sequence = ?`,
     )
     .get(sequence) as TellRow | undefined;
@@ -79,15 +90,15 @@ export function insertTellFact(
 ): number {
   const sequence = Number(database.prepare("INSERT INTO timeline(kind) VALUES ('tell')").run().lastInsertRowid);
   database
-    .prepare("INSERT INTO tells(id, sequence, body, recorded_at) VALUES (?, ?, ?, ?)")
-    .run(tell.id, sequence, tell.body, tell.recordedAt);
+    .prepare("INSERT INTO tells(id, sequence, body, schema_json, recorded_at) VALUES (?, ?, ?, ?, ?)")
+    .run(tell.id, sequence, tell.body, tell.schemaJson ?? null, tell.recordedAt);
   return sequence;
 }
 
 export function tellFact(database: DatabaseSync, id: string): TellFact | null {
   const row = database
     .prepare(
-      `SELECT sequence, id, body, recorded_at, ${tellStateSql} AS state
+      `SELECT sequence, id, body, schema_json, recorded_at, ${tellStateSql} AS state
     FROM tells WHERE id = ?`,
     )
     .get(id) as TellRow | undefined;
@@ -154,7 +165,7 @@ export function tellIdsForFence(database: DatabaseSync, turnSequence: number, fe
 export function pendingTellFacts(database: DatabaseSync): readonly TellFact[] {
   const rows = database
     .prepare(
-      `SELECT sequence, id, body, recorded_at, ${tellStateSql} AS state FROM tells
+      `SELECT sequence, id, body, schema_json, recorded_at, ${tellStateSql} AS state FROM tells
     WHERE ${tellStateSql} = 'pending' ORDER BY sequence`,
     )
     .all() as unknown as readonly TellRow[];
@@ -198,11 +209,7 @@ export function insertTellDispositionSnapshot(
   for (const tellId of tellIds) insert.run(bodySequence, tellId, at);
 }
 
-export function resolveTellDispositionSnapshot(
-  database: DatabaseSync,
-  bodySequence: number,
-  at: string,
-): void {
+export function resolveTellDispositionSnapshot(database: DatabaseSync, bodySequence: number, at: string): void {
   database
     .prepare(
       `UPDATE tell_dispositions SET resolved_at = ?
@@ -263,11 +270,7 @@ export function successorBodyHoldingDisposition(
   return successor;
 }
 
-export function insertUndeliveredTellReceipts(
-  database: DatabaseSync,
-  tellIds: readonly string[],
-  at: string,
-): void {
+export function insertUndeliveredTellReceipts(database: DatabaseSync, tellIds: readonly string[], at: string): void {
   for (const tellId of tellIds) {
     const current = requireDispositionTell(database, tellId);
     if (current.state !== "pending") continue;
@@ -278,4 +281,44 @@ export function insertUndeliveredTellReceipts(
       receivedAt: at,
     });
   }
+}
+
+export function insertTellBindingFact(
+  database: DatabaseSync,
+  input: Readonly<{ tellId: string; turnSequence: number; boundAt: string }>,
+): void {
+  const result = database
+    .prepare("INSERT OR IGNORE INTO tell_bindings(tell_id, turn_sequence, bound_at) VALUES (?, ?, ?)")
+    .run(input.tellId, input.turnSequence, input.boundAt);
+  const row = database
+    .prepare("SELECT turn_sequence FROM tell_bindings WHERE tell_id = ?")
+    .get(input.tellId) as { turn_sequence: number } | undefined;
+  if (row === undefined || (result.changes === 0 && row.turn_sequence !== input.turnSequence)) {
+    throw new Error(`tell ${input.tellId} is already bound to a different Turn`);
+  }
+}
+
+export function drainPendingTells(pending: readonly TellFact[]): readonly TellFact[] {
+  const unbound = pending.filter((tell) => tell.binding === undefined);
+  if (unbound.length === 0) return [];
+  const first = unbound[0]!;
+  const drained: TellFact[] = [first];
+  for (const tell of unbound.slice(1)) {
+    if (tell.schemaJson !== undefined) break;
+    drained.push(tell);
+  }
+  return drained;
+}
+
+export function openBoundTurns(database: DatabaseSync, bodySequence: number): readonly number[] {
+  return database
+    .prepare(
+      `SELECT DISTINCT turns.sequence AS sequence
+    FROM turns
+    JOIN tell_bindings ON tell_bindings.turn_sequence = turns.sequence
+    WHERE turns.body_sequence = ? AND turns.end_sequence IS NULL
+    ORDER BY turns.sequence`,
+    )
+    .all(bodySequence)
+    .map((row) => (row as { sequence: number }).sequence);
 }

@@ -137,7 +137,14 @@ async function runPiPrompt(
   settle: (result: TurnResult) => void,
 ): Promise<void> {
   try {
-    await native.prompt([input.body, ...input.launchTells.map((tell) => tell.text)].join("\n\n"));
+    const prompt = [input.body, ...input.launchTells.map((tell) => tell.text)].filter((part) => part.length > 0).join("\n\n");
+    const schemaPrompt =
+      input.schemaJson === undefined
+        ? prompt
+        : [prompt, "Respond with JSON matching this JSON Schema and no other text:", input.schemaJson]
+            .filter((part) => part.length > 0)
+            .join("\n\n");
+    await native.prompt(schemaPrompt);
     let result: TurnResult;
     if (state.aborting) result = { kind: "failed", diagnostic: "Pi session aborted" };
     else if (state.terminalFailure !== null) result = { kind: "failed", diagnostic: state.terminalFailure };

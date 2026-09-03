@@ -219,6 +219,41 @@ test("plugin runtime resolves bare package exports with the ESM import condition
   }
 });
 
+test("plugin runtime preserves a signal emitted before activation settles", async () => {
+  const value = fixture();
+  try {
+    const output = join(value.root, "trace.txt");
+    writePlugin(
+      value.root,
+      "delayed",
+      [
+        'import { appendFileSync } from "node:fs";',
+        "export default {",
+        '  manifest: { id: "delayed", apiVersion: 1 },',
+        '  async activate(context) { await Promise.resolve(); return { signals: { "akuma.turn-outcome": (signal) => appendFileSync(context.config.trace, `signal:${signal.akumaId}:${signal.turnSequence}\\n`) } }; },',
+        "};",
+      ].join("\n"),
+    );
+    mkdirSync(join(value.root, ".keiyaku"), { recursive: true });
+    writeFileSync(
+      join(value.root, ".keiyaku", "settings.json"),
+      JSON.stringify({ plugins: { delayed: { package: "./plugins/delayed.mjs", config: { trace: output } } } }),
+    );
+
+    const runtime = await pluginRuntime({ world: await World.at(value.root) });
+    await runtime.emit({
+      kind: "akuma.turn-outcome",
+      akumaId: "aku/early",
+      turnSequence: 1,
+      outcome: { kind: "answered", text: "done" },
+    });
+
+    await eventually(() => trace(output).includes("signal:aku/early:1"));
+  } finally {
+    value.close();
+  }
+});
+
 test("plugin delivery starts generic call handlers independently and contains handler failure", async () => {
   const value = fixture();
   try {
@@ -276,6 +311,44 @@ test("plugin delivery starts generic call handlers independently and contains ha
       diagnostics.some((value) => value.startsWith("plugin alpha signal: handler failed")),
       true,
     );
+  } finally {
+    value.close();
+  }
+});
+
+test("plugin runtime drain waits for in-flight signal handlers", async () => {
+  const value = fixture();
+  try {
+    const output = join(value.root, "trace.txt");
+    writePlugin(
+      value.root,
+      "delayed",
+      [
+        'import { appendFileSync } from "node:fs";',
+        "export default {",
+        '  manifest: { id: "delayed", apiVersion: 1 },',
+        '  activate(context) { return { signals: { "akuma.turn-outcome": async () => { appendFileSync(context.config.trace, "start\\n"); await new Promise((resolve) => setTimeout(resolve, 25)); appendFileSync(context.config.trace, "done\\n"); } } }; },',
+        "};",
+      ].join("\n"),
+    );
+    mkdirSync(join(value.root, ".keiyaku"), { recursive: true });
+    writeFileSync(
+      join(value.root, ".keiyaku", "settings.json"),
+      JSON.stringify({ plugins: { delayed: { package: "./plugins/delayed.mjs", config: { trace: output } } } }),
+    );
+
+    const runtime = await pluginRuntime({ world: await World.at(value.root) });
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    await runtime.emit({
+      kind: "akuma.turn-outcome",
+      akumaId: "aku/example",
+      turnSequence: 1,
+      outcome: { kind: "answered", text: "done" },
+    });
+
+    assert.deepEqual(trace(output), ["start"]);
+    await runtime.drain();
+    assert.deepEqual(trace(output), ["start", "done"]);
   } finally {
     value.close();
   }

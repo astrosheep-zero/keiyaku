@@ -3,7 +3,9 @@ import { abortableDelay } from "./abort.js";
 import {
   appendActivity,
   beginTurn,
+  bindTellsToTurn,
   breakBody,
+  drainPendingTells,
   heartExists,
   readHeart,
   recordSession,
@@ -81,6 +83,7 @@ export type DriveTurnInput = Readonly<{
   body: string;
   call?: string;
   launchTells: readonly TellFact[];
+  schemaJson?: string;
   supervisor: BodySupervisor;
   runtimeSpawn(launch: AkumaCallRequestChildLaunch): Promise<OwnedProcess | void>;
   world: import("../world.js").WorldRoot;
@@ -159,11 +162,21 @@ async function writeProviderEvent(input: DriveTurnInput, active: ActiveTurn, eve
 async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
   const { cwd, options, session } = await turnRecipe(input.paths, input.soul);
   if (session !== undefined && input.adapter.resume === undefined) return { kind: "resume-unsupported" };
+  const boundTells = drainPendingTells(input.launchTells);
+  const schemaJson = input.schemaJson ?? boundTells.find((tell) => tell.schemaJson !== undefined)?.schemaJson;
   const turn = await beginTurn(input.paths, {
     bodySequence: input.bodySequence,
     startedAt: input.now(),
     ...(input.call === undefined ? {} : { call: input.call }),
+    ...(schemaJson === undefined ? {} : { schemaJson }),
   });
+  if (boundTells.length > 0) {
+    await bindTellsToTurn(input.paths, {
+      turnSequence: turn.sequence,
+      tellIds: boundTells.map((tell) => tell.id),
+      boundAt: input.now(),
+    });
+  }
   const { world, paths, soul: parent, runtimeSpawn: spawn, externalCommands } = input;
   const commands = composeRequestCommands(akumaCallRequestCommands({ world, paths, parent, spawn }), externalCommands);
   const requests = await BodyRequestPump.open({
@@ -185,11 +198,12 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
   });
   const driveInput = {
     body: input.body,
-    launchTells: input.launchTells.map((tell) => ({ id: tell.id, text: tell.body })),
+    launchTells: boundTells.map((tell) => ({ id: tell.id, text: tell.body })),
     cwd,
     options,
     signal: driveController.signal,
     requests: { dir: requests.directory },
+    ...(schemaJson === undefined ? {} : { schemaJson }),
   };
   const attempt =
     session === undefined
@@ -208,10 +222,10 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
       }
       return { kind: "stopped" };
     }
-    if (input.launchTells.length > 0)
+    if (boundTells.length > 0)
       await recordTellDeliveries(
         input.paths,
-        input.launchTells.map((tell) => ({
+        boundTells.map((tell) => ({
           tellId: tell.id,
           route: "launch" as const,
           turnSequence: turn.sequence,
@@ -340,11 +354,12 @@ async function submitPendingLiveTells(
 ): Promise<"live" | "turn-ended"> {
   const { input, turnSequence, drive, writeWitness, mayWrite } = writers;
   for (const tell of pending) {
-    if (attempted.has(tell.id)) continue;
+    if (attempted.has(tell.id) || tell.schemaJson !== undefined) continue;
     attempted.add(tell.id);
     const outcome = await writeWitness(async () => {
       const submission = await tellLive({ id: tell.id, text: tell.body });
       if (!mayWrite() || submission.kind === "turn-ended") return "turn-ended" as const;
+      await bindTellsToTurn(input.paths, { turnSequence, tellIds: [tell.id], boundAt: input.now() });
       await recordTellDeliveries(input.paths, [
         {
           tellId: tell.id,
@@ -377,8 +392,14 @@ function hasUnattemptedTell(
   pending: readonly TellFact[],
   attempted: ReadonlySet<string>,
 ): boolean {
-  return liveTells && tellPump === null && pending.some((tell) => !attempted.has(tell.id));
+  return (
+    liveTells &&
+    tellPump === null &&
+    pending.some((tell) => !attempted.has(tell.id) && tell.schemaJson === undefined)
+  );
 }
+
+
 async function settleCompletion(
   result: TurnResult,
   session: ResumeCoordinate | undefined,
@@ -396,7 +417,7 @@ async function consumeTurnDrive(input: DriveTurnInput, active: ActiveTurn): Prom
   const { turnSequence, drive, requests, resume } = active;
   let heart = input.supervisor.current();
   let turnSession = resume;
-  const attempted = new Set(input.launchTells.map((tell) => tell.id));
+  const attempted = new Set(drainPendingTells(input.launchTells).map((tell) => tell.id));
   const writeWitness = serializeEffects();
   let writesOpen = true;
   const mayWrite = (): boolean => writesOpen && !input.supervisor.signal.aborted;

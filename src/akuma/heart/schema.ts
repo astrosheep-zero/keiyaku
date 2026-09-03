@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-const HEART_SCHEMA_VERSION = 23;
+const HEART_SCHEMA_VERSION = 24;
 const LEASH_SCHEMA_VERSION = 4;
 
 function assertSchemaVersion(database: DatabaseSync, table: "akuma_schema" | "leash_schema", expected: number): void {
@@ -63,16 +63,23 @@ export const HEART_SCHEMA = `
     body_sequence INTEGER NOT NULL REFERENCES bodies(sequence),
     started_at TEXT NOT NULL,
     end_sequence INTEGER UNIQUE REFERENCES timeline(sequence) ON DELETE SET NULL,
-    outcome TEXT CHECK (outcome IN ('answered', 'failed')),
+    outcome TEXT CHECK (outcome IN ('answered', 'failed', 'invalid-output')),
     history_id TEXT UNIQUE,
     session_json TEXT CHECK (session_json IS NULL OR json_valid(session_json)),
     answer TEXT,
+    answer_json TEXT CHECK (answer_json IS NULL OR json_valid(answer_json)),
+    schema_json TEXT CHECK (schema_json IS NULL OR json_valid(schema_json)),
     diagnostic TEXT,
     completed_at TEXT,
     CHECK (
-      (outcome = 'answered' AND session_json IS NOT NULL AND answer IS NOT NULL AND diagnostic IS NULL)
-      OR (outcome = 'failed' AND history_id IS NULL AND session_json IS NULL AND answer IS NULL AND diagnostic IS NOT NULL)
-      OR (outcome IS NULL AND end_sequence IS NULL AND history_id IS NULL AND session_json IS NULL AND answer IS NULL AND diagnostic IS NULL AND completed_at IS NULL)
+      (outcome = 'answered' AND session_json IS NOT NULL AND answer IS NOT NULL AND diagnostic IS NULL
+        AND ((schema_json IS NULL AND answer_json IS NULL) OR (schema_json IS NOT NULL AND answer_json IS NOT NULL)))
+      OR (outcome = 'failed' AND history_id IS NULL AND session_json IS NULL AND answer IS NULL
+        AND answer_json IS NULL AND diagnostic IS NOT NULL)
+      OR (outcome = 'invalid-output' AND answer IS NOT NULL AND answer_json IS NULL
+        AND diagnostic IS NOT NULL AND schema_json IS NOT NULL)
+      OR (outcome IS NULL AND end_sequence IS NULL AND history_id IS NULL AND session_json IS NULL
+        AND answer IS NULL AND answer_json IS NULL AND diagnostic IS NULL AND completed_at IS NULL)
     )
   ) STRICT;
   CREATE TABLE IF NOT EXISTS timeline (
@@ -95,7 +102,13 @@ export const HEART_SCHEMA = `
     id TEXT PRIMARY KEY,
     sequence INTEGER NOT NULL UNIQUE REFERENCES timeline(sequence) ON DELETE CASCADE,
     body TEXT NOT NULL,
+    schema_json TEXT CHECK (schema_json IS NULL OR json_valid(schema_json)),
     recorded_at TEXT NOT NULL
+  ) STRICT;
+  CREATE TABLE IF NOT EXISTS tell_bindings (
+    tell_id TEXT PRIMARY KEY REFERENCES tells(id) ON DELETE CASCADE,
+    turn_sequence INTEGER NOT NULL REFERENCES turns(sequence) ON DELETE CASCADE,
+    bound_at TEXT NOT NULL
   ) STRICT;
   CREATE TABLE IF NOT EXISTS tell_deliveries (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,

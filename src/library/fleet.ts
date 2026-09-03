@@ -16,10 +16,7 @@ import {
 } from "../akuma/fleet-request.js";
 import { executeKillAkuma, executeTellAkuma, executeWaitAkuma } from "../akuma/fleet-execution.js";
 import { observeDispatchAssociation, type DispatchAssociation } from "../dispatch/index.js";
-import {
-  observeCreatedTaskObservations,
-  type CreatedTaskObservation,
-} from "../task/created-observation.js";
+import { observeCreatedTaskObservations, type CreatedTaskObservation } from "../task/created-observation.js";
 import type { WorldRoot } from "../world.js";
 import { addressAkuma, addressAkumaSet, type AkumaAddressInput, type AkumaSetAddressInput } from "./address.js";
 import { requireInput } from "./input.js";

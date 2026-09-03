@@ -52,14 +52,22 @@ export type ForkPoint = Readonly<{
 }>;
 
 export type TurnOutcome =
-  | Readonly<{ kind: "answered"; historyId?: string; session: ResumeCoordinate; answer: string }>
-  | Readonly<{ kind: "failed"; diagnostic: string }>;
+  | Readonly<{
+      kind: "answered";
+      historyId?: string;
+      session: ResumeCoordinate;
+      answer: string;
+      answerJson?: string;
+    }>
+  | Readonly<{ kind: "failed"; diagnostic: string }>
+  | Readonly<{ kind: "invalid-output"; diagnostic: string; answer: string; historyId?: string; session?: ResumeCoordinate }>;
 
 export type TurnStartFact = Readonly<{
   kind: "turn-start";
   sequence: number;
   bodySequence: number;
   startedAt: string;
+  schemaJson?: string;
 }>;
 
 export type TurnEndFact = Readonly<{
@@ -87,14 +95,21 @@ export type TellDelivery = Readonly<{
   deliveredAt: string;
 }>;
 
+export type TellBinding = Readonly<{
+  turnSequence: number;
+  boundAt: string;
+}>;
+
 export type TellFact = Readonly<{
   kind: "tell";
   sequence: number;
   id: string;
   body: string;
+  schemaJson?: string;
   recordedAt: string;
   state: "pending" | "told";
   deliveries: readonly TellDelivery[];
+  binding?: TellBinding;
 }>;
 
 export type TellRow = Readonly<{
@@ -117,6 +132,14 @@ export function projectTell(fact: TellFact): TellRow {
     state: fact.state,
     deliveries: fact.deliveries,
   };
+}
+
+export class AkumaBusyError extends Error {
+  readonly kind = "akuma-busy";
+  constructor() {
+    super("Akuma is busy");
+    this.name = "AkumaBusyError";
+  }
 }
 
 export type TellDeliveryInput = Readonly<{

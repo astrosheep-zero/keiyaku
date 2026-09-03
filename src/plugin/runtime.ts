@@ -15,7 +15,12 @@ import type {
 } from "./public.js";
 
 const DIAGNOSTIC_LIMIT = 500;
+const PLUGIN_DRAIN_TIMEOUT_MS = 5_000;
 const PLUGIN_NAMESPACE = "plugins";
+const SQUARE_PLUGIN_PACKAGE = "@astrosheep/keiyaku-plugin-square";
+const BUILTIN_PLUGINS: readonly SelectedPlugin[] = Object.freeze([
+  Object.freeze({ id: "square", package: SQUARE_PLUGIN_PACKAGE, config: undefined }),
+]);
 const PROCESS_RUNTIMES = new Map<WorldRoot, Promise<PluginRuntime>>();
 
 type PluginDiagnostic = (diagnostic: string) => void;
@@ -34,6 +39,7 @@ type RegisteredHandler = Readonly<{
 
 export type PluginRuntime = Readonly<{
   emit(signal: PluginSignal, reportDiagnostic?: PluginDiagnostic): Promise<void>;
+  drain(): Promise<void>;
 }>;
 
 type SelectedPlugin = Readonly<{
@@ -95,14 +101,24 @@ function selectedPlugins(input: Settings, report: PluginDiagnostic | undefined):
   const view = input.namespace(PLUGIN_NAMESPACE);
   if (view.kind === "failed") {
     for (const failure of view.failures) diagnostic(report, "settings", failure.scope, failure.diagnostic);
-    return [];
+    return BUILTIN_PLUGINS;
   }
-  return Object.freeze(
+  if (view.entries.length === 0) return BUILTIN_PLUGINS;
+  const configured = new Map(
     view.entries
-      .map((entry) => selectedEntry(entry, report))
-      .filter((entry): entry is SelectedPlugin => entry !== null)
-      .sort((left, right) => left.id.localeCompare(right.id)),
+      .map((entry) => [entry.name, selectedEntry(entry, report)] as const)
+      .filter((entry): entry is readonly [string, SelectedPlugin] => entry[1] !== null),
   );
+  const disabled = new Set(
+    view.entries.filter((entry) => object(entry.value) && entry.value.enabled === false).map((entry) => entry.name),
+  );
+  const selected = [
+    ...BUILTIN_PLUGINS.filter((entry) => !configured.has(entry.id) && !disabled.has(entry.id)),
+    ...configured.values(),
+  ]
+    .filter((entry): entry is SelectedPlugin => entry !== null)
+    .sort((left, right) => left.id.localeCompare(right.id));
+  return Object.freeze(selected);
 }
 
 function manifest(value: unknown): KeiyakuPlugin {
@@ -219,6 +235,7 @@ function sourceUrl(world: WorldRoot, packageName: string): string | null {
 }
 
 async function importFromWorld(world: WorldRoot, packageName: string): Promise<Record<string, unknown>> {
+  if (packageName === SQUARE_PLUGIN_PACKAGE) return (await import(packageName)) as Record<string, unknown>;
   const direct = sourceUrl(world, packageName);
   if (direct !== null) return (await import(direct)) as Record<string, unknown>;
   const parentURL = pathToFileURL(join(world, "package.json")).href;
@@ -311,25 +328,73 @@ export async function pluginRuntime(input: PluginRuntimeInput): Promise<PluginRu
   return await runtime;
 }
 
+export async function drainPluginRuntime(world: WorldRoot): Promise<void> {
+  const runtime = PROCESS_RUNTIMES.get(world);
+  if (runtime !== undefined) await (await runtime).drain();
+}
+
 async function createPluginRuntime(input: PluginRuntimeInput): Promise<PluginRuntime> {
   const report = input.reportDiagnostic;
   const selected = selectedPlugins(input.settings ?? (await settings({ root: input.world })), report);
   const activated = new Set<string>();
   const registered = new Map<number, readonly RegisteredHandler[]>();
+  const settled = new Set<number>();
+  const pending = new Map<number, PluginSignal[]>();
+  const settledPromises: Promise<void>[] = [];
+  const inFlight = new Set<Promise<void>>();
+  const deliver = (
+    entry: RegisteredHandler,
+    signal: PluginSignal,
+    reportDiagnostic: PluginDiagnostic | undefined,
+  ): void => {
+    try {
+      const delivery = Promise.resolve(entry.handler(signal as never)).catch((error) =>
+        diagnostic(reportDiagnostic, entry.pluginId, "signal", error),
+      );
+      inFlight.add(delivery);
+      void delivery.finally(() => inFlight.delete(delivery));
+    } catch (error) {
+      diagnostic(reportDiagnostic, entry.pluginId, "signal", error);
+    }
+  };
+  const deliverTo = (
+    handlers: readonly RegisteredHandler[],
+    signal: PluginSignal,
+    reportDiagnostic: PluginDiagnostic | undefined,
+  ): void => {
+    for (const entry of handlers) {
+      if (entry.kind === signal.kind) deliver(entry, signal, reportDiagnostic);
+    }
+  };
   let previousStarted = Promise.resolve();
   for (const [index, entry] of selected.entries()) {
     let releaseStarted!: () => void;
+    let releaseSettled!: () => void;
     const started = new Promise<void>((resolve) => {
       releaseStarted = resolve;
     });
+    settledPromises.push(
+      new Promise<void>((resolve) => {
+        releaseSettled = resolve;
+      }),
+    );
     void previousStarted.then(async () => {
       try {
         const handlers = await activate(entry, input.world, activated, report, releaseStarted);
         if (handlers.length > 0) registered.set(index, handlers);
+        settled.add(index);
+        const queued = pending.get(index);
+        if (queued !== undefined) {
+          pending.delete(index);
+          for (const signal of queued) deliverTo(handlers, signal, report);
+        }
       } catch (error) {
         diagnostic(report, entry.id, "activation", error);
+        settled.add(index);
+        pending.delete(index);
       } finally {
         releaseStarted();
+        releaseSettled();
       }
     });
     previousStarted = started;
@@ -341,12 +406,25 @@ async function createPluginRuntime(input: PluginRuntimeInput): Promise<PluginRun
         .sort(([left], [right]) => left - right)
         .flatMap(([, handlers]) => handlers)
         .filter((handler) => handler.kind === signal.kind);
-      for (const entry of deliveries) {
-        void Promise.resolve()
-          .then(() => entry.handler(signal as never))
-          .catch((error) => diagnostic(reportDiagnostic, entry.pluginId, "signal", error));
+      for (const [index] of selected.entries()) {
+        if (!settled.has(index)) {
+          const queue = pending.get(index);
+          if (queue === undefined) pending.set(index, [signal]);
+          else queue.push(signal);
+        }
       }
+      for (const entry of deliveries) deliver(entry, signal, reportDiagnostic);
       return Promise.resolve();
+    },
+    async drain(): Promise<void> {
+      const settle = async (): Promise<void> => {
+        await Promise.all(settledPromises);
+        while (inFlight.size > 0) await Promise.all([...inFlight]);
+      };
+      await Promise.race([
+        settle(),
+        new Promise<void>((resolve) => setTimeout(resolve, PLUGIN_DRAIN_TIMEOUT_MS)),
+      ]);
     },
   });
 }

@@ -64,6 +64,9 @@ test("each grammar owner renders its own namespace and leaf help", () => {
   assert.match(settingsHelp, /A rejected\nvalue's diagnostic states the expected shape\./u);
   assert.match(settingsHelp, /^usage: keiyaku settings \[--json\]$/mu);
   assert.match(renderContractHelp("bind"), /usage: keiyaku bind \[--task <task\/\.\.\.>\]/u);
+  assert.match(renderContractHelp("bind"), /stdin is Contract Markdown:/u);
+  assert.match(renderContractHelp("bind"), /Region uses one closed fence with no info string or exactly 'txt'/u);
+  assert.match(renderContractHelp("bind"), /Verification uses one or more closed bash, zsh, or pwsh fences/u);
   assert.match(renderContractHelp("deliver"), /--message <text>\] \[--include-dirty\] \[--materialize-conflict\]/u);
   assert.match(renderContractHelp("review"), /usage: keiyaku review .*--satisfied \| --unsatisfied/u);
   assert.match(renderContractHelp("show"), /usage: keiyaku show \[<contract>\|@<contract>\] \[--json\]/u);

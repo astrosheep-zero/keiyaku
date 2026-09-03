@@ -288,7 +288,7 @@ export class HeldAkumaLeash {
 
   async recordInterruptTell(
     paths: AkumaPaths,
-    tell: Omit<TellFact, "sequence" | "state" | "deliveries">,
+    tell: Omit<TellFact, "sequence" | "state" | "deliveries" | "binding">,
   ): Promise<Readonly<{ kind: "not-born" } | { kind: "recorded"; tell: TellFact }>> {
     return await withHeart(paths, (heart) =>
       transaction(heart, () => {

@@ -261,9 +261,7 @@ export async function observeDispatchAssociation(
   if (repository === undefined) return NO_DISPATCH_ASSOCIATION;
   try {
     const dispatch = await readDispatch(repository, akuId);
-    return dispatch === null
-      ? NO_DISPATCH_ASSOCIATION
-      : { kind: "associated", contractId: dispatch.contractId };
+    return dispatch === null ? NO_DISPATCH_ASSOCIATION : { kind: "associated", contractId: dispatch.contractId };
   } catch (error) {
     return { kind: "failed", diagnostic: associationDiagnostic(error) };
   }

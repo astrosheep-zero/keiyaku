@@ -207,9 +207,8 @@ export type OutcomeRow = z.infer<typeof outcomeRowSchema>;
 
 function publicOutcome(turnSequence: number, outcome: TurnEndFact["outcome"]): TurnOutcome {
   const historyId = `turn/${turnSequence}`;
-  return outcome.kind === "answered"
-    ? { kind: "answered", historyId, answer: outcome.answer }
-    : { kind: "failed", historyId, diagnostic: outcome.diagnostic };
+  if (outcome.kind === "answered") return { kind: "answered", historyId, answer: outcome.answer };
+  return { kind: "failed", historyId, diagnostic: outcome.diagnostic };
 }
 
 export type ActiveToolRow = z.infer<typeof activeToolRowSchema>;

@@ -128,6 +128,7 @@ async function admitTurn(
       ...(input.options.effort === undefined ? {} : { effort: input.options.effort }),
       approvalPolicy: "never",
       sandboxPolicy: sandbox(input.cwd, input.options, input.requests),
+      ...(input.schemaJson === undefined ? {} : { outputSchema: JSON.parse(input.schemaJson) as unknown }),
     }),
   );
 }

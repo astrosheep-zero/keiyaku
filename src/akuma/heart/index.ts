@@ -20,6 +20,7 @@ import type {
 export type { CallFact } from "./facts.js";
 import {
   answeredTurnFact,
+  decodeTurnRow,
   endBodyFact,
   finishBodyFact,
   insertActivityFact,
@@ -41,11 +42,13 @@ import type { ActivityFact } from "./rows.js";
 import {
   insertTellDeliveryFact,
   dispositionSnapshotProven,
+  insertTellBindingFact,
   insertTellDispositionSnapshot,
   insertTellFact,
   insertTellReceiptFact,
   insertUndeliveredTellReceipts,
   latestOpenTellDisposition,
+  openBoundTurns,
   openTellDispositionIds,
   pendingTellFacts,
   resolveTellDispositionSnapshot,
@@ -68,6 +71,7 @@ import {
   withReadOnlyHeart,
 } from "./storage.js";
 import { soulFact } from "./soul.js";
+import { AkumaBusyError } from "./facts.js";
 export {
   HeartAbsentError,
   HeldAkumaLeash,
@@ -90,7 +94,8 @@ export {
   voidRequest,
 } from "./request-authority.js";
 
-export { life, lifeAt, projectTell } from "./facts.js";
+export { AkumaBusyError, life, lifeAt, projectTell } from "./facts.js";
+export { drainPendingTells } from "./tells.js";
 export type {
   AkumaLife,
   AkumaOrigin,
@@ -109,6 +114,7 @@ export type {
   SessionFact,
   Soul,
   StopFact,
+  TellBinding,
   TellFact,
   TellRow,
   TellDelivery,
@@ -175,20 +181,29 @@ export async function activitySlice(paths: AkumaPaths): Promise<ActivitySlice> {
   return await withHeart(paths, (heart) => readTransaction(heart, () => activityFactSlice(heart)));
 }
 
+function sameTellInput(
+  existing: TellFact,
+  tell: Omit<TellFact, "sequence" | "state" | "deliveries" | "binding">,
+): boolean {
+  return existing.body === tell.body && existing.recordedAt === tell.recordedAt && existing.schemaJson === tell.schemaJson;
+}
+
 export async function recordTell(
   paths: AkumaPaths,
-  tell: Omit<TellFact, "sequence" | "state" | "deliveries">,
+  tell: Omit<TellFact, "sequence" | "state" | "deliveries" | "binding">,
+  options: Readonly<{ interrupt?: boolean }> = {},
 ): Promise<Readonly<{ kind: "not-born" } | { kind: "recorded"; tell: TellFact }>> {
   return await withHeart(paths, (heart) =>
     transaction(heart, () => {
       if (soulFact(heart) === null) return { kind: "not-born" };
       const existing = tellFact(heart, tell.id);
       if (existing !== null) {
-        if (existing.body !== tell.body || existing.recordedAt !== tell.recordedAt) {
-          throw new Error(`tell ${tell.id} reused different input`);
-        }
+        if (!sameTellInput(existing, tell)) throw new Error(`tell ${tell.id} reused different input`);
         return { kind: "recorded", tell: existing };
       }
+      const body = latestBodyFact(heart);
+      const running = body !== null && body.end === undefined && body.hung === undefined;
+      if (tell.schemaJson !== undefined && running && options.interrupt !== true) throw new AkumaBusyError();
       const sequence = insertTellFact(heart, tell);
       pruneActivityFacts(heart, ACTIVITY_LIMIT);
       return { kind: "recorded", tell: { sequence, ...tell, state: "pending", deliveries: [] } };
@@ -373,13 +388,63 @@ export async function breakBody(
 
 export async function beginTurn(
   paths: AkumaPaths,
-  input: Readonly<{ bodySequence: number; startedAt: string; call?: string }>,
+  input: Readonly<{ bodySequence: number; startedAt: string; call?: string; schemaJson?: string }>,
 ): Promise<TurnStartFact> {
   return await withHeart(paths, (heart) =>
     transaction(heart, () => {
       const fact = insertTurnStartFact(heart, input);
       pruneActivityFacts(heart, ACTIVITY_LIMIT);
       return fact;
+    }),
+  );
+}
+
+export async function bindTellsToTurn(
+  paths: AkumaPaths,
+  input: Readonly<{ turnSequence: number; tellIds: readonly string[]; boundAt: string }>,
+): Promise<void> {
+  await withHeart(paths, (heart) =>
+    transaction(heart, () => {
+      for (const tellId of input.tellIds) {
+        if (tellFact(heart, tellId) === null) throw new Error(`unknown tell ${tellId}`);
+        insertTellBindingFact(heart, { tellId, turnSequence: input.turnSequence, boundAt: input.boundAt });
+      }
+      pruneActivityFacts(heart, ACTIVITY_LIMIT);
+    }),
+  );
+}
+
+export async function failOpenBoundTurns(
+  paths: AkumaPaths,
+  input: Readonly<{ bodySequence: number; diagnostic: string; completedAt: string }>,
+): Promise<readonly number[]> {
+  return await withHeart(paths, (heart) =>
+    transaction(heart, () => {
+      const sequences = openBoundTurns(heart, input.bodySequence);
+      for (const turnSequence of sequences) {
+        insertTurnEndFact(heart, {
+          kind: "turn-end",
+          turnSequence,
+          outcome: { kind: "failed", diagnostic: input.diagnostic },
+          completedAt: input.completedAt,
+        });
+      }
+      pruneActivityFacts(heart, ACTIVITY_LIMIT);
+      return sequences;
+    }),
+  );
+}
+
+export async function readTurn(paths: AkumaPaths, sequence: number): Promise<TurnFact | null> {
+  return await withHeart(paths, (heart) =>
+    readTransaction(heart, () => {
+      const row = heart
+        .prepare(
+          `SELECT sequence, body_sequence, started_at, end_sequence, outcome, history_id,
+        session_json, answer, answer_json, schema_json, diagnostic, completed_at FROM turns WHERE sequence = ?`,
+        )
+        .get(sequence) as import("./rows.js").TurnRow | undefined;
+      return row === undefined ? null : decodeTurnRow(row);
     }),
   );
 }

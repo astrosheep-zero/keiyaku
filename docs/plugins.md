@@ -14,13 +14,15 @@ another process produced it, and it supplies neither a continuation channel nor
 cross-process instance identity.
 
 Settings remains the sole owner of configuration scope, shadowing, provenance,
-and read failure. The `plugins` namespace selects named packages explicitly;
-Settings never loads code. A producing process observes its World Settings once
-after dependency-light help selection and keeps that selection and its activated
-instances for the rest of the process. A later process may ordinarily observe a
-different configuration or installed package byte. Runtime loading neither
-acquires packages nor promises content identity, and it never discovers plugins
-by scanning dependencies or process directories.
+and read failure. When the `plugins` namespace is absent, the shipped Square
+observer is selected by default. A present namespace is an explicit plugin set;
+its named Square entry may enable, replace, or disable that observer. Settings
+never loads code. A producing process observes its World Settings once after
+dependency-light help selection and keeps that selection and its activated
+instances for the rest of the process. A later process may
+ordinarily observe a different configuration or installed package byte. Runtime
+loading neither acquires packages nor discovers optional plugins by scanning
+dependencies or process directories.
 
 Plugin identity is declared by the activated package and must agree with the
 selected name. In one process it is unique and activation follows that identity's
@@ -46,7 +48,9 @@ Activation is all-or-nothing for each plugin. The host validates a package and
 its declarations, then activates it before retaining any handlers. Import,
 validation, activation, or handler failure is attributed to that plugin through
 the producing process's diagnostic channel, is bounded, and does not prevent
-other selected plugins from proceeding.
+other selected plugins from proceeding. A signal that arrives while a selected
+plugin is still activating remains eligible for that plugin's one delivery once
+activation settles; a failed activation drops that signal.
 
 ## Signals And Boundaries
 

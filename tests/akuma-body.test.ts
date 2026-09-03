@@ -31,6 +31,7 @@ import {
   readRequest,
   readSoul,
   readTell,
+  readTurn,
   recordSession,
   recordTell as heartRecordTell,
   requestPause,
@@ -288,6 +289,7 @@ function adapter(
       Readonly<{
         body: string;
         launchTells: readonly Readonly<{ id: string; text: string }>[];
+        schemaJson?: string;
         options: ProviderOptions;
         session: "fresh" | string;
       }>
@@ -307,6 +309,7 @@ function adapter(
     input.starts.push({
       body: call.body,
       launchTells: call.launchTells,
+      ...(call.schemaJson === undefined ? {} : { schemaJson: call.schemaJson }),
       options: call.options,
       session: sessionId,
     });
@@ -2463,6 +2466,166 @@ test("a stalled Tell is fenced by Body cancellation before leash release", async
     releaseTell();
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal((await readHeart(allocated.paths)).pending.length, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("successor drain binds admission-order Tells and keeps a later schema Tell for the next Turn", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-drain-"));
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "drain0001" });
+    await initializeHeart(allocated.paths);
+    const schemaJson = '{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"]}';
+    const starts: Array<
+      Readonly<{
+        body: string;
+        launchTells: readonly Readonly<{ id: string; text: string }>[];
+        schemaJson?: string;
+        options: ProviderOptions;
+        session: "fresh" | string;
+      }>
+    > = [];
+    const answers = ["plain", '{"ok":true}'];
+    const adapterForDrain: FixtureProviderAdapter = {
+      admitOptions(options) {
+        return { kind: "admitted", options };
+      },
+      async start(input) {
+        starts.push({
+          body: input.body,
+          launchTells: input.launchTells,
+          ...(input.schemaJson === undefined ? {} : { schemaJson: input.schemaJson }),
+          options: input.options,
+          session: "fresh",
+        });
+        const answer = answers.shift() ?? "done";
+        return {
+          admission: { fence: `drain-${starts.length}` },
+          events: {
+            async *[Symbol.asyncIterator]() {
+              yield { type: "session", coordinate: { sessionId: `native-${starts.length}` } } satisfies AgentEvent;
+            },
+          },
+          completion: Promise.resolve({ kind: "answered" as const, answer, historyId: `history-${starts.length}` }),
+          async abort() {},
+        };
+      },
+    };
+    const born = (await HeldAkumaLeash.try(allocated.paths))!;
+    await born.birth(allocated.paths, {
+      id: allocated.id,
+      archetype: "claude",
+      provider: { name: "claude", kind: "claude-agent-sdk" },
+      options: {},
+      origin: { kind: "direct" },
+      cwd: root,
+      allowed: ALLOWED_ACTIONS,
+      createdAt: "2026-08-08T00:00:00.000Z",
+    });
+    born.release();
+    await recordTell(allocated.paths, {
+      id: "plain-1",
+      body: "first",
+      recordedAt: "2026-08-08T00:00:01.000Z",
+    });
+    await recordTell(allocated.paths, {
+      id: "plain-2",
+      body: "join",
+      recordedAt: "2026-08-08T00:00:02.000Z",
+    });
+    await heartRecordTell(allocated.paths, {
+      kind: "tell",
+      id: "schema-2",
+      body: "structured",
+      recordedAt: "2026-08-08T00:00:03.000Z",
+      schemaJson,
+    });
+    await driveAkumaBody({ paths: allocated.paths }, adapterForDrain, { now: () => "2026-08-08T00:00:04.000Z" });
+    assert.deepEqual(
+      starts.map((start) => start.launchTells.map((tell) => tell.id)),
+      [["plain-1", "plain-2"], ["schema-2"]],
+    );
+    assert.equal(starts[1]?.schemaJson, schemaJson);
+    const firstTell = await readTell(allocated.paths, "plain-1");
+    const schemaTell = await readTell(allocated.paths, "schema-2");
+    assert.equal(firstTell?.binding?.turnSequence, schemaTell?.binding?.turnSequence === undefined ? undefined : firstTell?.binding?.turnSequence);
+    assert.notEqual(firstTell?.binding?.turnSequence, schemaTell?.binding?.turnSequence);
+    const schemaTurn = schemaTell?.binding === undefined ? null : await readTurn(allocated.paths, schemaTell.binding.turnSequence);
+    assert.equal(schemaTurn?.schemaJson, schemaJson);
+    assert.equal(schemaTurn?.end?.outcome.kind, "answered");
+    if (schemaTurn?.end?.outcome.kind === "answered") assert.equal(schemaTurn.end.outcome.answerJson, '{"ok":true}');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("schema Turn malformed JSON is invalid-output and open bound Turns fail when Body is put down", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-invalid-output-"));
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "invalid1" });
+    await initializeHeart(allocated.paths);
+    const schemaJson = '{"type":"object"}';
+    const born = (await HeldAkumaLeash.try(allocated.paths))!;
+    await born.birth(allocated.paths, {
+      id: allocated.id,
+      archetype: "claude",
+      provider: { name: "claude", kind: "claude-agent-sdk" },
+      options: {},
+      origin: { kind: "direct" },
+      cwd: root,
+      allowed: ALLOWED_ACTIONS,
+      createdAt: "2026-08-08T00:00:00.000Z",
+    });
+    born.release();
+    await heartRecordTell(allocated.paths, {
+      kind: "tell",
+      id: "schema-bad",
+      body: "structured",
+      recordedAt: "2026-08-08T00:00:01.000Z",
+      schemaJson,
+    });
+    await driveAkumaBody(
+      { paths: allocated.paths },
+      {
+        admitOptions(options) {
+          return { kind: "admitted", options };
+        },
+        async start() {
+          return {
+            admission: { fence: "bad-json" },
+            events: {
+              async *[Symbol.asyncIterator]() {
+                yield { type: "session", coordinate: { sessionId: "native-bad" } } satisfies AgentEvent;
+              },
+            },
+            completion: Promise.resolve({ kind: "answered" as const, answer: "not-json", historyId: "history-bad" }),
+            async abort() {},
+          };
+        },
+      },
+      { now: () => "2026-08-08T00:00:02.000Z" },
+    );
+    const tell = await readTell(allocated.paths, "schema-bad");
+    const turn = tell?.binding === undefined ? null : await readTurn(allocated.paths, tell.binding.turnSequence);
+    assert.equal(turn?.end?.outcome.kind, "invalid-output");
+    if (turn?.end?.outcome.kind === "invalid-output") assert.equal(turn.end.outcome.answer, "not-json");
+
+    await recordTell(allocated.paths, {
+      id: "open-bound",
+      body: "steer",
+      recordedAt: "2026-08-08T00:00:03.000Z",
+    });
+    const hanging = driveAkumaBody({ paths: allocated.paths }, hangingAdapter("g4-open"), {
+      now: () => "2026-08-08T00:00:04.000Z",
+    });
+    while ((await readTell(allocated.paths, "open-bound"))?.binding === undefined)
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    const bound = await readTell(allocated.paths, "open-bound");
+    await requestPause(allocated.paths, "2026-08-08T00:00:05.000Z");
+    await expectBodySettles(hanging, "Body did not put down open bound Turn");
+    const failed = bound?.binding === undefined ? null : await readTurn(allocated.paths, bound.binding.turnSequence);
+    assert.equal(failed?.end?.outcome.kind, "failed");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

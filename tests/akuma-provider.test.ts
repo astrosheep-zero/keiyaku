@@ -943,7 +943,14 @@ function fakePiSdk(
   } = {},
 ): {
   sdk: PiSdk;
-  seen: { options?: Record<string, unknown>; opened?: string; branched?: string; aborted: number; disposed: number };
+  seen: {
+    options?: Record<string, unknown>;
+    opened?: string;
+    branched?: string;
+    aborted: number;
+    disposed: number;
+    prompt?: string;
+  };
 } {
   const seen = { aborted: 0, disposed: 0 } as {
     options?: Record<string, unknown>;
@@ -952,6 +959,7 @@ function fakePiSdk(
     branched?: string;
     aborted: number;
     disposed: number;
+    prompt?: string;
   };
   const manager = {
     getLeafId: () => (input.historyId === undefined ? "entry-final" : input.historyId),
@@ -971,7 +979,8 @@ function fakePiSdk(
       };
     },
     listener: undefined as ((event: Record<string, unknown>) => void) | undefined,
-    async prompt() {
+    async prompt(text?: string) {
+      if (typeof text === "string") seen.prompt = text;
       if (input.fail !== undefined) throw input.fail;
       if (input.promptNeverSettles === true) await new Promise<void>(() => undefined);
       if (input.waitForAbort === true)
@@ -1385,6 +1394,30 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
   assert.deepEqual(result.content, [{ type: "text", text: "/work/requests" }]);
   assert.equal(fake.seen.disposed, 1);
   await attempt.closed;
+});
+
+test("Pi appends JSON Schema text when native structured output is unavailable", async () => {
+  const fake = fakePiSdk({
+    events: [
+      {
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: '{"ok":true}' }] },
+      },
+    ],
+  });
+  const schemaJson = '{"type":"object","properties":{"ok":{"type":"boolean"}}}';
+  const drive = await createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start({
+    ...DRIVE_DEFAULTS,
+    body: "work",
+    launchTells: [],
+    cwd: tmpdir(),
+    options: {},
+    session: { kind: "fresh" },
+    schemaJson,
+  }).result;
+  await drive.completion;
+  assert.match(fake.seen.prompt ?? "", /Respond with JSON matching this JSON Schema/u);
+  assert.match(fake.seen.prompt ?? "", /"ok"/u);
 });
 
 test("Pi attempt disposal closes events and completion before its sole closed proof", async () => {
@@ -1898,6 +1931,46 @@ function controlledClaude() {
   };
 }
 
+test("Claude maps provider-neutral schema JSON to outputFormat json_schema", async () => {
+  let seen: Record<string, unknown> | undefined;
+  const provider = createClaudeProvider(async () => ({
+    query(input) {
+      seen = input.options as Record<string, unknown> | undefined;
+      return fakeQuery([
+        { type: "system", subtype: "init", session_id: "session-schema" } as unknown as SDKMessage,
+        {
+          type: "assistant",
+          uuid: "assistant-schema",
+          session_id: "session-schema",
+          parent_tool_use_id: null,
+          message: { content: [{ type: "text", text: '{"ok":true}' }] },
+        } as unknown as SDKMessage,
+        {
+          type: "result",
+          subtype: "success",
+          session_id: "session-schema",
+          result: '{"ok":true}',
+        } as unknown as SDKMessage,
+      ]);
+    },
+  }));
+  const schemaJson = '{"type":"object","properties":{"ok":{"type":"boolean"}}}';
+  const drive = await provider.start({
+    ...DRIVE_DEFAULTS,
+    body: "structured",
+    launchTells: [],
+    cwd: "/work",
+    options: {},
+    session: { kind: "fresh" },
+    schemaJson,
+  }).result;
+  await drive.completion;
+  assert.deepEqual(seen?.outputFormat, {
+    type: "json_schema",
+    schema: { type: "object", properties: { ok: { type: "boolean" } } },
+  });
+});
+
 test("Claude maps narration, drops native streams, and contains runtime skew", async () => {
   const longNotice = `line one\n${"x".repeat(220)}`;
   const provider = createClaudeProvider(async () => ({
@@ -2234,6 +2307,29 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
       },
     });
     assert.deepEqual(fake.requestEnvironment(), { requests: requestDirectory, literal: "from-settings", actor: "" });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Codex maps provider-neutral schema JSON to turn/start outputSchema", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-schema-"));
+  try {
+    const fake = fakeCodex(root, "complete");
+    const provider = createCodexAppServerProvider(fake.executable);
+    const schemaJson = '{"type":"object","properties":{"ok":{"type":"boolean"}}}';
+    const drive = await provider.start({
+      ...DRIVE_DEFAULTS,
+      body: "build",
+      launchTells: [],
+      cwd: root,
+      options: {},
+      session: { kind: "fresh" },
+      schemaJson,
+    }).result;
+    await drive.completion;
+    const turn = fake.requests().find((request) => request.method === "turn/start")?.params as Record<string, unknown>;
+    assert.deepEqual(turn.outputSchema, { type: "object", properties: { ok: { type: "boolean" } } });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

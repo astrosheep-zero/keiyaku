@@ -99,7 +99,10 @@ const plugin: KeiyakuPlugin = {
           try {
             const joined = await square.implicitJoin(signal.akumaId);
             if (joined.state === "done" || joined.participant === undefined) return;
-            await joined.participant.express(outcomeExpression(signal, caller));
+            await joined.participant.express(
+              outcomeExpression(signal, caller),
+              caller === undefined ? {} : { mentions: [caller] },
+            );
           } finally {
             await square.close();
           }

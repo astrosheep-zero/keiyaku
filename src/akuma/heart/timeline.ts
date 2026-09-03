@@ -76,7 +76,7 @@ function turn(database: DatabaseSync, sequence: number): TurnFact {
   const row = database
     .prepare(
       `SELECT sequence, body_sequence, started_at, end_sequence, outcome,
-    history_id, session_json, answer, diagnostic, completed_at FROM turns WHERE sequence = ?`,
+    history_id, session_json, answer, answer_json, schema_json, diagnostic, completed_at FROM turns WHERE sequence = ?`,
     )
     .get(sequence) as TurnRow | undefined;
   if (row === undefined) throw new Error(`Akuma timeline references missing Turn ${sequence}`);
@@ -85,10 +85,21 @@ function turn(database: DatabaseSync, sequence: number): TurnFact {
 
 function turnStart(database: DatabaseSync, sequence: number): TurnStartFact {
   const row = database
-    .prepare("SELECT sequence, body_sequence, started_at FROM turns WHERE sequence = ?")
-    .get(sequence) as { sequence: number; body_sequence: number; started_at: string } | undefined;
+    .prepare("SELECT sequence, body_sequence, started_at, schema_json FROM turns WHERE sequence = ?")
+    .get(sequence) as {
+    sequence: number;
+    body_sequence: number;
+    started_at: string;
+    schema_json: string | null;
+  } | undefined;
   if (row === undefined) throw new Error(`Akuma timeline references missing Turn ${sequence}`);
-  return { kind: "turn-start", sequence: row.sequence, bodySequence: row.body_sequence, startedAt: row.started_at };
+  return {
+    kind: "turn-start",
+    sequence: row.sequence,
+    bodySequence: row.body_sequence,
+    startedAt: row.started_at,
+    ...(row.schema_json === null ? {} : { schemaJson: row.schema_json }),
+  };
 }
 
 function decodeTimelineRow(database: DatabaseSync, row: TimelineRow): TimelineFact {

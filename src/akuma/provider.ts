@@ -647,6 +647,7 @@ export type DriveInput = Readonly<{
   options: ProviderOptions;
   signal: AbortSignal;
   requests: Readonly<{ dir: string }>;
+  schemaJson?: string;
 }>;
 
 export type ProviderOptionAdmission =

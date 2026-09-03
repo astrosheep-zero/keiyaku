@@ -13,8 +13,11 @@ import {
   admitRequest,
   activitySlice,
   appendActivity,
+  AkumaBusyError,
   beginTurn,
+  bindTellsToTurn,
   breakBody,
+  drainPendingTells,
   endTurn,
   finishBodyIfIdle,
   heartExists,
@@ -32,6 +35,7 @@ import {
   recordTell as heartRecordTell,
   recordTellDeliveries,
   recordTellReceipt,
+  readTurn,
   requestPause,
   requestStop,
   reserveRequest,
@@ -949,7 +953,7 @@ test("unknown Body Request state is authority corruption", async () => {
   }
 });
 
-test("heart schema version 23 and leash schema version 4 hard-refuse old authority", async () => {
+test("heart schema version 24 and leash schema version 4 hard-refuse old authority", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-schema-cut-"));
   const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "30000000" });
   try {
@@ -963,7 +967,7 @@ test("heart schema version 23 and leash schema version 4 hard-refuse old authori
       "CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)",
     );
     leash.close();
-    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 23/u);
+    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 24/u);
     await assert.rejects(HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -1005,6 +1009,110 @@ test("answered Turns persist without a provider fork point", async () => {
         },
       ],
     );
+  } finally {
+    value.close();
+  }
+});
+
+test("schema Tell admission refuses a running Body and binds once with frozen schema JSON", async () => {
+  const value = await fixture();
+  try {
+    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await leash.birth(value.allocated.paths, value.soul);
+    const body = await leash.recordBody(value.allocated.paths, {
+      leashTakenAt: "2026-08-08T00:00:00.000Z",
+    });
+    const schemaJson = '{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"]}';
+    await assert.rejects(
+      heartRecordTell(value.allocated.paths, {
+        kind: "tell",
+        id: "schema-busy",
+        body: "return structured",
+        recordedAt: "2026-08-08T00:00:01.000Z",
+        schemaJson,
+      }),
+      AkumaBusyError,
+    );
+    assert.equal((await readHeart(value.allocated.paths)).pending.length, 0);
+
+    await breakBody(value.allocated.paths, {
+      sequence: body.sequence,
+      end: "put-down",
+      at: "2026-08-08T00:00:02.000Z",
+    });
+    const admitted = await heartRecordTell(value.allocated.paths, {
+      kind: "tell",
+      id: "schema-idle",
+      body: "return structured",
+      recordedAt: "2026-08-08T00:00:03.000Z",
+      schemaJson,
+    });
+    assert.equal(admitted.kind, "recorded");
+    if (admitted.kind !== "recorded") return;
+    const following = await heartRecordTell(value.allocated.paths, {
+      kind: "tell",
+      id: "plain-join",
+      body: "also",
+      recordedAt: "2026-08-08T00:00:04.000Z",
+    });
+    const laterSchema = await heartRecordTell(value.allocated.paths, {
+      kind: "tell",
+      id: "schema-later",
+      body: "next turn",
+      recordedAt: "2026-08-08T00:00:05.000Z",
+      schemaJson,
+    });
+    assert.equal(following.kind, "recorded");
+    assert.equal(laterSchema.kind, "recorded");
+    const pending = (await readHeart(value.allocated.paths)).pending;
+    assert.deepEqual(
+      drainPendingTells(pending).map((tell) => tell.id),
+      ["schema-idle", "plain-join"],
+    );
+    const turn = await beginTurn(value.allocated.paths, {
+      bodySequence: body.sequence,
+      startedAt: "2026-08-08T00:00:06.000Z",
+      schemaJson,
+    });
+    await bindTellsToTurn(value.allocated.paths, {
+      turnSequence: turn.sequence,
+      tellIds: ["schema-idle", "plain-join"],
+      boundAt: "2026-08-08T00:00:06.000Z",
+    });
+    await bindTellsToTurn(value.allocated.paths, {
+      turnSequence: turn.sequence,
+      tellIds: ["schema-idle"],
+      boundAt: "2026-08-08T00:00:07.000Z",
+    });
+    assert.deepEqual(
+      drainPendingTells((await readHeart(value.allocated.paths)).pending).map((tell) => tell.id),
+      ["schema-later"],
+    );
+    await assert.rejects(
+      bindTellsToTurn(value.allocated.paths, {
+        turnSequence: turn.sequence + 1,
+        tellIds: ["schema-idle"],
+        boundAt: "2026-08-08T00:00:08.000Z",
+      }),
+      /already bound to a different Turn/u,
+    );
+    const started = await readTurn(value.allocated.paths, turn.sequence);
+    assert.equal(started?.schemaJson, schemaJson);
+    await endTurn(value.allocated.paths, {
+      turnSequence: turn.sequence,
+      outcome: {
+        kind: "invalid-output",
+        diagnostic: "Unexpected token",
+        answer: "not-json",
+      },
+      completedAt: "2026-08-08T00:00:09.000Z",
+    });
+    const ended = await readTurn(value.allocated.paths, turn.sequence);
+    assert.equal(ended?.end?.outcome.kind, "invalid-output");
+    if (ended?.end?.outcome.kind === "invalid-output") {
+      assert.equal(ended.end.outcome.answer, "not-json");
+    }
+    leash.release();
   } finally {
     value.close();
   }

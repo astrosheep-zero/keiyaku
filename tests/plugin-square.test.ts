@@ -18,11 +18,15 @@ function restoreEnvironment(values: Readonly<Record<string, string | undefined>>
   }
 }
 
-async function expressions(path: string): Promise<readonly Readonly<{ actor: string; body: string }>[]> {
+async function expressions(
+  path: string,
+): Promise<readonly Readonly<{ actor: string; body: string; mentions: readonly string[] }>[]> {
   const square = await Square.at({ path });
   try {
     return (await square.history()).flatMap((activity) =>
-      activity.kind === "say" && activity.body !== undefined ? [{ actor: activity.actor, body: activity.body }] : [],
+      activity.kind === "say" && activity.body !== undefined
+        ? [{ actor: activity.actor, body: activity.body, mentions: activity.mentions ?? [] }]
+        : [],
     );
   } finally {
     await square.close();
@@ -79,9 +83,9 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     });
     assert.equal(existsSync(squarePath(root)), true);
     assert.deepEqual(await expressions(squarePath(root)), [
-      { actor: "Alice", body: "aku/caller called aku/called" },
-      { actor: "aku/answered", body: "aku/answered turn/1 (@Alice) kei/example\n✓ came back" },
-      { actor: "aku/answered", body: "aku/answered turn/2 (@Alice) kei/example\n✓ came back" },
+      { actor: "Alice", body: "aku/caller called aku/called", mentions: [] },
+      { actor: "aku/answered", body: "aku/answered turn/1 (@Alice) kei/example\n✓ came back", mentions: ["Alice"] },
+      { actor: "aku/answered", body: "aku/answered turn/2 (@Alice) kei/example\n✓ came back", mentions: ["Alice"] },
     ]);
 
     delete process.env.CODEX_THREAD_ID;
@@ -103,10 +107,10 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
       outcome: { kind: "failed", reason: "provider failed" },
     });
     assert.deepEqual(await expressions(squarePath(root)), [
-      { actor: "Alice", body: "aku/caller called aku/called" },
-      { actor: "aku/answered", body: "aku/answered turn/1 (@Alice) kei/example\n✓ came back" },
-      { actor: "aku/answered", body: "aku/answered turn/2 (@Alice) kei/example\n✓ came back" },
-      { actor: "aku/failed", body: "aku/failed turn/3\n× provider failed" },
+      { actor: "Alice", body: "aku/caller called aku/called", mentions: [] },
+      { actor: "aku/answered", body: "aku/answered turn/1 (@Alice) kei/example\n✓ came back", mentions: ["Alice"] },
+      { actor: "aku/answered", body: "aku/answered turn/2 (@Alice) kei/example\n✓ came back", mentions: ["Alice"] },
+      { actor: "aku/failed", body: "aku/failed turn/3\n× provider failed", mentions: [] },
     ]);
     const square = await Square.at({ path: squarePath(root) });
     try {

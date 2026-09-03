@@ -1,398 +1,294 @@
-# Draft: Akuma Structured Answer API
+# Design Draft: Akuma API And Structured Answers
 
-> Status: non-authoritative design draft, last updated 2026-08-27.
->
-> Current law and implementation still expose string Turn answers and the
-> existing `call`, `tell`, `wait`, and `history` behavior. This draft records
-> Faye's revised ruling after the earlier Ask/Result recommendation was rejected
-> on usability grounds. It is not product authority.
+> Status: design for Faye review. This is not authority until the reviewed
+> decisions are promoted to the owning `docs/` chapters in the same accepted
+> change.
 
-## Decision
+## Goal
 
-Add structured answers without adding CLI commands or requiring the caller to
-predict whether an Akuma is running or idle.
+The public library presents one thing: an Akuma. A caller creates one, tells it
+something, receives that tell's answer, waits for its lifecycle when needed,
+reads its timeline, and kills it. The caller never names an owner, Body, born
+record, handle, Turn, provider session, or routing mode.
 
-```text
-call     create an Akuma and submit its initial input
-tell     submit later input to an existing Akuma
-wait     observe lifecycle, or await one explicitly addressed input
-history  read lifecycle history, or read one explicitly addressed input
-```
+The CLI is a consumer of this library. It keeps its existing command vocabulary
+and output contracts by composing the library operations; the library does not
+imitate CLI command shape.
 
-There is no public `spawn`, `ask`, `exchange`, `result`, or `steer` command.
+## Public Akuma API
 
-## Overruling Constraint
-
-The caller must not inspect Akuma state and choose between steering the current
-Turn and starting a successor Turn. Such a choice leaks Body/provider mechanics
-and creates a check-then-act race because state can move after observation.
-
-The caller knows only:
-
-- the input bytes;
-- whether it declares a schema-constrained answer contract;
-- whether it waits now or detaches;
-- whether a later read wants lifecycle state or its own receipt's result.
-
-Routing remains Keiyaku's atomic responsibility.
-
-## Current Execution Fact
-
-Tell admission records a durable TellId before it knows which Turn will consume
-the input. Delivery later records the actual `turnSequence`:
-
-- a plain Tell may enter an open Turn;
-- a plain Tell may remain pending and wake successor execution;
-- several plain pending Tells may fold into one successor Turn;
-- Tell delivery is at-least-once and may replay after uncertain custody.
-
-Closed Turns remain distinct `turn/N` entries in Heart history. A later Turn
-does not overwrite or reopen an earlier one.
-
-The existing TellId and delivery-to-`turnSequence` evidence provide the needed
-coordinates. No Exchange or Ask identity is required.
-
-## Invariants
-
-1. A schema freezes in the same durable admission that creates its answer
-   contract.
-2. One Turn carries at most one answer contract because one Turn has one
-   terminal outcome.
-3. Caller input is admitted without a runtime-state precondition.
-4. Runtime routing is atomic inside Keiyaku, never selected by a caller verb.
-5. One input id binds to at most one Turn. Replay after binding cannot create a
-   second answer binding.
-
-## Routing Law
-
-### Plain Input
-
-A Tell without schema preserves current behavior:
-
-```text
-open live-capable Turn  -> deliver into that Turn
-ended/non-live Turn     -> remain pending
-idle Akuma              -> wake successor execution
-multiple pending Tells  -> may fold into one successor Turn
-```
-
-It means "these words belong to whichever execution consumes them." It owns no
-independent answer.
-
-### Contract Input
-
-A Tell carrying schema declares an answer contract:
-
-1. admission records TellId, body, schema, and ordering atomically;
-2. it is never delivered into an already-open Turn;
-3. it remains pending until a Turn opens specifically for that input;
-4. at most one contract input opens each Turn;
-5. contract inputs pending together open successor Turns in admission order;
-6. ordinary plain inputs may fold into or steer that contract-owned Turn;
-7. Turn open writes the TellId-to-`turnSequence` binding once;
-8. later replay of the same TellId is a no-op against that binding.
-
-This is exactly-once answer binding over at-least-once input delivery.
-
-The same distinction applies to fresh Call. A schema on the initial input
-freezes the initial Turn's answer contract and exposes that initial input id.
-
-## Owner Library API
+The `keiyaku/akuma` export contains one public class and supporting value/type
+exports. Construction over an existing identity is synchronous and read-free;
+birth and all Heart/provider operations are asynchronous.
 
 ```ts
-type InputId = string;
-type TurnId = `turn/${number}`;
+import { Akuma, Schema } from "keiyaku/akuma";
 
-type Answer<T> =
-  | Readonly<{ kind: "pending"; input: InputId }>
-  | Readonly<{
-      kind: "value";
-      input: InputId;
-      turn: TurnId;
-      value: T;
-    }>
-  | Readonly<{
-      kind: "invalid-output" | "failed";
-      input: InputId;
-      turn: TurnId;
-      diagnostic: string;
-    }>;
-```
+const aku = await Akuma.birth("reviewer", { root, alias: "reviewer" });
+const existing = Akuma.select(root, "aku/reviewer/0123abcd");
 
-Fresh input:
-
-```ts
-const worker = await world.call({
-  archetype: "worker",
-  body: "Audit src/routes.",
-  schema: routeAuditSchema,
-  cwd,
+const text: string = await existing.tell("continue");
+const result = await existing.tell("return the audit", {
+  schema: Schema.zod(auditSchema),
 });
-
-worker.id;
-worker.initialInput; // InputId for the first schema-bearing input
-```
-
-Existing Akuma input:
-
-```ts
-const receipt = await worker.tell("Audit the fixes.", {
-  schema: fixAuditSchema,
+await existing.tell("stop and take this path", {
+  schema: Schema.zod(nextSchema),
+  interrupt: true,
 });
-
-receipt.admission.tellId; // answer coordinate
+await existing.idle({ timeoutMs: 300_000 });
+const timeline = await existing.history({ limit: 100 });
+await existing.kill();
 ```
 
-Plain automatic routing remains:
+The exact public declarations are:
 
 ```ts
-await worker.tell("Also inspect generated routes.");
-```
+export type JsonSchema = Readonly<Record<string, unknown>>;
 
-Observation and result reads are distinguished by receiver or argument rather
-than by another input verb:
-
-```ts
-await worker.wait();
-// Akuma lifecycle observation, unchanged.
-
-await worker.answer<FixAudit>(receipt.admission.tellId, {
-  timeoutMs: 120_000,
-});
-// Exact result for that input id.
-
-await worker.history({ for: receipt.admission.tellId });
-// After-the-fact exact result read.
-```
-
-The exact spelling of the initial input receipt remains open. It may be an
-immutable handle property or a Call return wrapper, but it must not require a
-second birth or input operation.
-
-## Package-Root Facade API
-
-```ts
-Keiyaku.call<T>({
-  path,
-  archetype,
-  body,
-  schema?,
-  mode?: "wait" | "detach",
-  timeoutMs?,
-  cwd?,
-  readonly?,
-  allowed?,
-  contract?,
-  alias?,
-}): Promise<ComposedCallResult<T>>;
-
-Keiyaku.tell<T>({
-  path,
-  akuma,
-  body,
-  schema?,
-  repo?,
-}): Promise<ComposedTellResult<T>>;
-```
-
-Wait remains one operation with two closed input arms:
-
-```ts
-type LifecycleWaitInput = Readonly<{
-  path: WorldRoot;
-  akuma: readonly string[];
-  completion?: "any" | "all";
-  timeoutMs?: number;
-  repo?: Repo;
+export type Schema<T> = Readonly<{
+  readonly jsonSchema: JsonSchema;
+  readonly decode: (value: unknown) => T;
 }>;
 
-type InputWaitInput = Readonly<{
-  path: WorldRoot;
-  akuma: string;
-  for: InputId;
-  timeoutMs?: number;
-  repo?: Repo;
+export const Schema: Readonly<{
+  zod<T extends import("zod").$ZodType>(schema: T): Schema<import("zod").output<T>>;
+  json<T>(jsonSchema: JsonSchema, decode: (value: unknown) => T): Schema<T>;
 }>;
 
-Keiyaku.wait(input: LifecycleWaitInput): Promise<AkumaWaitResult>;
-Keiyaku.wait<T>(input: InputWaitInput): Promise<InputAnswerObservation<T>>;
+export class Akuma {
+  static birth(
+    archetype: string,
+    options: Readonly<{
+      root: WorldRoot;
+      alias?: string;
+      readonly?: true;
+      allowed?: readonly AllowedAction[];
+      contract?: string;
+    }>,
+  ): Promise<Akuma>;
+  static select(root: WorldRoot, selector: string): Akuma;
+
+  readonly id: AkuId;
+  tell(text: string): Promise<string>;
+  tell<T>(text: string, options: Readonly<{ schema: Schema<T>; interrupt?: boolean }>): Promise<T>;
+  idle(options?: Readonly<{ timeoutMs?: number }>): Promise<void>;
+  history(options?: HistoryOptions): Promise<ActivityHistory>;
+  kill(): Promise<void>;
+}
 ```
 
-The `for` arm requires exactly one directly addressed Akuma or Alias. It cannot
-combine with set selectors, `any`, or `all`.
+There is no public `call`, `of`, `status`, `wait`, `interrupt`, `AkumaHandle`,
+Turn type, or result/receipt object. `birth` creates only the Akuma; it does not
+submit a prompt. A fresh prompt is an ordinary `tell`, so CLI `call` is simply
+`birth` followed by `tell`.
 
-History gains the same exact input addressing:
+The return type of `tell` has only a static overload distinction: no schema is a
+string answer; a statically typed `Schema<T>` is a `T` answer. Runtime flags do
+not change the return type. Admission, routing, provider failure, and output
+decode failure all reject this same Promise with typed errors. An empty provider
+answer is a successful empty string (or a schema decode failure), never a
+special missing-answer value.
 
-```ts
-Keiyaku.history<T>({
-  path,
-  akuma,
-  for: inputId,
-  repo?,
-}): Promise<InputAnswerRead<T>>;
-```
+`Schema.zod` uses the installed Zod v4 `toJSONSchema` conversion and `parse`
+decoding. `Schema.json` is the provider-neutral escape hatch for callers that
+already own a JSON Schema and decoder. Both constructors clone/freeze the JSON
+Schema, reject non-JSON values, and enforce the same size and keyword limits.
+The public schema object is immutable; provider adapters never receive the
+decoder function.
 
-## CLI API
+## Tell Semantics
 
-No commands are added:
+Tell admission is one Heart transaction. It verifies Soul existence, allocates
+an opaque internal TellId, stores the text and (when present) canonical schema
+JSON, and records ordering. The transaction either admits the Tell or rejects
+without leaving future input behind.
+
+Plain Tell keeps its current meaning: an open live-capable Body may consume it;
+otherwise it remains pending and wake starts a successor. Several plain Tells
+may be consumed by one successor Turn. The caller never chooses this route.
+
+A schema-bearing Tell is an answer contract for one new Turn. If a live Body is
+running, admission without `interrupt: true` rejects with a typed busy refusal
+and does not record the Tell. Busy is judged solely by the Heart's Body life
+fact, using the same running/non-running split as lifecycle completion; whether
+a Turn row is currently open is not a busy test. With `interrupt: true`, the existing interrupt
+protocol settles the exact Body and proves leash custody, then records this Tell
+and wakes a successor. When no live Body is open, the Tell is recorded and wake
+starts the successor directly. A schema-bearing Tell is never inserted into an
+already-open Turn and never silently interrupts one. On an idle Akuma,
+`interrupt: true` has no Body to settle and is equivalent to record-plus-wake.
+
+The busy judgment and Tell admission are one Heart transaction. Body life is a
+durable Heart fact; no provider-process observation may be performed between a
+busy check and admission. Concurrent schema Tells therefore cannot both pass a
+stale observation during a wake window.
+
+The Turn is born with at most one schema. Every Tell, plain or schema-bearing,
+is bound exactly once to the Turn that consumes it: a live steer binds while the
+open Turn is selected, and successor drain binds pending Tells as the Turn is
+opened. The binding is immutable and idempotent under at-least-once delivery.
+Drain is admission order: the first pending Tell opens the Turn; following
+plain Tells join it; a schema Tell stops the drain when that Turn is already
+open and is opened by a later successor Turn. Plain Tells may join a
+schema-owned Turn because they declare no competing answer contract. Multiple
+schema Tells therefore receive separate Turns and separate answers rather than
+being refused merely because another schema Tell is pending.
+
+After provider terminal evidence, Body parses JSON syntax for a schema-owned
+Turn. Valid JSON is persisted as `answer_json`; malformed JSON persists an
+`invalid-output` terminal with the original raw answer. Schema decoding is a
+caller-side operation: the owner invokes the frozen decoder after reading the
+exact answer. Decode success resolves the tell Promise with `T`; decoder
+failure rejects with `AkumaInvalidOutputError` and is not persisted. Provider
+failure rejects with `AkumaTurnFailedError`. These terminal facts remain in
+Heart and are visible in the ordinary activity timeline; waiting never selects
+a latest Turn.
+
+## Exact Answer Association
+
+The Promise returned by `tell` closes over its generated TellId. The owner does
+not inspect status and does not infer a frontier. It waits for one of the
+following durable facts for that TellId: terminal provider outcome, typed
+undelivered outcome, or a terminal admission/routing failure. Delivery rows
+provide the TellId-to-Turn sequence for every Tell, plain or schema-bearing;
+the owner then waits on that exact Turn until its terminal outcome. A later Turn
+cannot satisfy an earlier Tell. If a Body becomes inert through crash, kill, or
+hung cleanup while a bound Turn is open, that same owned cleanup pass writes a
+failed terminal with exit evidence. Every Tell bound to that Turn rejects with
+`AkumaTurnFailedError`; the Turn is never replayed. Unconsumed pending Tells
+retain the existing disposition and wake rules.
+
+`idle()` is lifecycle-only and returns `void`. It waits until the Akuma is not
+running and has no pending Tell, or until its timeout, then resolves with no
+answer. `history()` remains the activity timeline and accepts the existing
+history selectors; it is not converted into prompt/answer pairs. Public history
+rows retain opaque `turn/N` ids for exact internal/fork operations without
+exporting a Turn type.
+
+## Heart Persistence
+
+Heart remains the sole durable authority. The schema cut adds only facts read by
+the new behavior:
+
+- `tells.schema_json`: canonical provider-neutral schema for a schema-bearing
+  Tell, null for plain input;
+- `turns.schema_json`: the frozen schema copied at Turn birth, null for a plain
+  Turn;
+- `turns.answer_json`: the exact provider answer bytes when the Turn is
+  schema-owned;
+- `turns.outcome = 'invalid-output'` with a diagnostic when JSON parsing or
+  decoding fails.
+
+Existing string answers remain in the existing answer column for plain Turns.
+The migration is a versioned Heart schema cut, never an in-place best-effort
+upgrade: old Hearts are refused as unsupported until the repository migration
+command creates the new schema. No schema or answer is reconstructed from
+provider events. Kill, timeout, and process loss never discard an admitted Tell
+or fabricate an answer.
+
+## Ownership By Layer
+
+**Owner (`src/akuma/akuma-product.ts` and the internal Akuma owner):** owns the
+public object, Tell Promise lifetime, selector validation, and the exact
+TellId-to-terminal-outcome wait. It translates durable facts into the typed
+public errors and values. It never reads latest status to answer a Tell.
+
+**Facade/composition (`src/library/`, CLI invocation):** resolves WorldRoot and
+selectors, chooses local versus Body Request execution, forwards the same
+provider-neutral schema JSON, and renders CLI receipts/results. It does not
+create a second answer authority, expose owner/Body/Turn concepts, or redefine
+schema routing.
+
+**Heart (`src/akuma/heart/`):** atomically admits Tells, persists schemas,
+binds each schema Tell once to its birth Turn, records raw and decoded terminal
+outcomes, and projects the existing timeline. It owns migrations and crash
+recovery.
+
+**Body/execution (`src/akuma/body.ts` and execution modules):** performs the
+existing plain Tell wake/steer behavior, explicit interrupt settlement, and
+successor launch. At Turn start it passes the frozen schema to the provider and
+records every Tell binding before provider work. Its owned cleanup pass writes
+failed outcomes for open bound Turns before releasing custody.
+
+**Provider (`src/akuma/provider.ts` and adapters):** accepts only a
+provider-neutral JSON Schema and returns provider-neutral raw answer text plus
+native session/fork evidence. It never sees a public Schema decoder, TellId,
+AkuId, or product error. Codex maps the JSON Schema to `turn/start`'s
+turn-scoped `outputSchema`; Claude and Pi use their native structured-output
+hooks when available and otherwise request JSON text under the same neutral
+contract. Native refusal or malformed output is provider evidence, not a new
+lifecycle state.
+
+## CLI Composition
+
+No command is added. Existing commands are projections of the library:
 
 ```text
-keiyaku call <archetype> [birth/composition flags]
-  [--schema <file>] [--wait <duration> | --detach]
-  (<prompt> | -)
+call <archetype> <prompt> [--schema file] [--wait duration|--detach]
+  = Akuma.birth(...) + aku.tell(prompt, schema?)
 
-keiyaku tell <aku/...|@alias>
-  [--schema <file>]
-  (<prompt> | -)
+tell <aku|alias> <prompt> [--schema file] [--interrupt]
+  = Akuma.select(...) + aku.tell(prompt, options?)
 
-keiyaku wait [--any | --all] [--timeout <duration>]
-  [--for <input-id>]
-  <selector>...
+wait <selectors> [--any|--all] [--timeout duration]
+  = idle() for each selected Akuma; CLI may then render history --last
 
-keiyaku history <aku/...|@alias>
-  [--for <input-id> | --last | --id turn/N | --before N | --since N | --limit N]
+history <aku|alias> [existing history selectors]
+  = aku.history(...)
+
+kill <selectors> = kill() for each selected Akuma
 ```
 
-`--schema` names a separate file because stdin remains the prompt source. The
-schema dialect and file codec are settled separately.
+`call --wait` races the Tell Promise against its existing observation timer. A
+completed schema Tell prints the decoded JSON; timeout prints the current
+snapshot and leaves the Akuma alive. Detached call/tell print the existing
+admission/wake evidence and attach no answer handle. CLI schema files contain
+JSON Schema; the CLI decoder is identity after JSON parsing, so output is JSON.
 
-### Fresh Structured, Detached
+## Refusals And Recovery
 
-```sh
-keiyaku call worker --schema route-audit.schema.json --detach "Audit src/routes."
+- schema Tell against an active Body without `interrupt` is a typed busy refusal;
+  no Tell is persisted;
+- `interrupt: true` uses only the existing settle-and-successor protocol; hung,
+  untidy, unavailable, or changed custody rejects honestly;
+- timeout is an observation result and never kills or changes the eventual Turn;
+- kill settles the exact Body, preserves Soul/Heart/history/pending Tells, and
+  resolves `void` only after the existing kill evidence is durable;
+- unborn, stillborn, corrupt, unsupported, and out-of-world selectors reject
+  with existing typed errors;
+- replay after a crash is idempotent on TellId and Turn binding; no duplicate
+  answer is exposed.
+
+## Package And Compatibility Cut
+
+`package.json` keeps the `./akuma` export. Its barrel changes to export only
+`Akuma`, `AkuId`, `Schema`, `JsonSchema`, `ActivityHistory` and row types,
+`AllowedAction(s)`, `WorldRoot`, and typed public error classes. Existing
+internal projections, receipts, Turn ledgers, and handles move behind internal
+imports used by CLI and composition. The package-root facade remains available
+for Contract APIs but does not re-export Akuma implementation objects.
+
+The old public `Akuma.of`, instance `call`, `beginCall`, `interrupt`, `status`,
+`fork`, `lastAnswer`, and Tell receipt unions are removed in the same major
+clean-v4 cut. CLI behavior and existing history text remain compatible except
+for the new `--schema` input and structured result rendering.
+
+## Verification Plan
+
+Add focused tests for schema construction and limits, static Tell overloads,
+busy refusal versus explicit interrupt, exact Tell-to-Turn association under
+concurrent and replayed delivery, provider-neutral schema mapping for Codex,
+Claude, and Pi, invalid-output persistence, timeout/kill preservation, Body
+Request forwarding, and CLI call/tell/wait/history rendering. Finish with:
+
+```bash
+npm test
+npm run test:typecheck
+npm run build
 ```
 
-The receipt prints AkuId, input id, and the canonical exact wait command:
-
-```sh
-keiyaku wait aku/worker/0123abcd --for input/456
-```
-
-### Existing Akuma, Structured
-
-The same command is valid whether the Akuma is running or idle:
-
-```sh
-keiyaku tell aku/worker/0123abcd \
-  --schema fix-audit.schema.json \
-  "Audit the fixes."
-```
-
-No status read or routing choice precedes it. The receipt exposes its input id.
-
-### Live Plain Input
-
-```sh
-keiyaku tell aku/worker/0123abcd "Also inspect generated routes."
-```
-
-This remains current Tell behavior.
-
-### Ordinary Detached Workflow
-
-```sh
-keiyaku call worker --detach "Audit src/routes."
-keiyaku wait aku/worker/0123abcd
-```
-
-No ceremony is added.
-
-### Later Exact Read
-
-```sh
-keiyaku history aku/worker/0123abcd --for input/456
-```
-
-## Structured Outcome
-
-Keiyaku validates the complete terminal provider answer against the frozen
-schema. Provider-native structured output may constrain generation but remains
-an optional optimization; it cannot define the cross-provider guarantee.
-
-Validation success persists the validated value. Parse or validation failure
-persists typed `invalid-output`. Provider execution failure remains `failed`.
-Observation timeout does not mutate the eventual terminal outcome.
-
-One Turn cannot carry two answer schemas. Pending schema-bearing inputs
-therefore serialize into separate Turns. Plain input may still contribute to a
-contract-owned Turn because it declares no competing answer contract.
-
-## Honest Cost
-
-- A schema-bearing Tell never live-steers an already-open Turn. The caller
-  cannot both retroactively steer that Turn and claim a new independently
-  validated answer from its single outcome.
-- Contract inputs waiting behind an open Turn require durable ordered pending
-  admission and one-per-Turn service.
-- `wait` is bivalent: set lifecycle observation by default, exact one-input
-  result observation with `--for`. Grammar and types make the modes exclusive.
-- Plain exact-answer ownership without schema is not introduced because no
-  current requirement demonstrates it. Schema presence is the current answer
-  contract signal.
-
-## Superseded Alternatives
-
-### Ask And Result Verbs
-
-Rejected after user review. It exported answer ownership as a caller verb
-choice and either required predicting idle state or returned a running refusal
-after a check-then-act race. It also expanded the CLI with Ask and Result.
-
-### Durable Exchange
-
-Rejected because it added `exchangeId` beside `turn/N`, requiring a permanent
-binding table and duplicate retrieval/history semantics to buy an unproven
-general queue.
-
-### Schema Tell With Frontier Retrieval
-
-Rejected because selecting the first Turn after a Tell sequence is not causal.
-Multiple pending Tells can fold into one Turn and at-least-once replay can move
-delivery. The revised design instead reserves one contract input per Turn and
-writes the input-id-to-Turn binding exactly once.
-
-### Separate Steer
-
-Rejected because the caller cannot safely decide routing from runtime state.
-Plain Tell retains automatic current-versus-successor routing.
-
-## Open Rulings Before Implementation
-
-1. Settle atomic contract-input admission, ordered service, one-time Turn
-   binding, and crash recovery.
-2. Settle the initial Call input id surface in the owner library.
-3. Settle public InputId grammar. TellId storage exists, but no public browsing
-   grammar currently exists.
-4. Settle schema dialect, codec, validator, limits, references, and diagnostics.
-5. Settle persisted schema, validated value, invalid-output, and raw-answer
-   byte shapes and the Heart schema cut.
-6. Settle status/history/fork projections for structured and invalid outcomes.
-7. Settle forwarded Body Request transport for schema-bearing Call, Tell,
-   Wait-for-input, and History-for-input.
-8. Settle CLI text/JSON receipt and result rendering.
-
-## Authority Promotion Map
-
-If accepted, promote the design through these owner chapters:
-
-- [`akuma-execution.md`](../akuma-execution.md): plain versus contract input
-  routing, ordered successor Turns, one-time binding, and replay.
-- [`akuma-heart.md`](../akuma-heart.md): schema-bearing Tell admission,
-  input-to-Turn binding, structured outcomes, and persisted bytes.
-- [`akuma-provider.md`](../akuma-provider.md): provider-neutral schema input and
-  result, plus optional native mapping.
-- [`akuma-public.md`](../akuma-public.md): widened Tell, answer/history reads,
-  initial input receipt, and lifecycle-versus-input Wait.
-- [`akuma.md`](../akuma.md): schema-bearing initial Call input.
-- [`public-akuma.md`](../public-akuma.md): facade composition and result shapes.
-- [`akuma-requests.md`](../akuma-requests.md): forwarded transport and recovery.
-- [`cli.md`](../cli.md) and [`cli-output.md`](../cli-output.md): flags, mutual
-  exclusions, receipts, and text/JSON projection.
-
-## Provenance
-
-Faye's first 2026-08-27 ruling recommended Call/Ask/Tell/Result. The user
-rejected its command count and the requirement to choose steering versus
-successor work. Faye explicitly overruled that export in her second ruling and
-retained only the answer-contract invariant. This draft records the revised
-Call/Tell/Wait/History design.
+After Faye review, promote the settled law to `docs/akuma.md`,
+`docs/akuma-public.md`, `docs/akuma-execution.md`, `docs/akuma-heart.md`,
+`docs/akuma-provider.md`, `docs/public-akuma.md`, `docs/akuma-requests.md`,
+`docs/cli.md`, and `docs/cli-output.md`, then bind one complete refactor
+Contract over the implementation and those owner updates.

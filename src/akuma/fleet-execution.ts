@@ -1,9 +1,4 @@
-import {
-  Akuma,
-  AkumaNotBornError,
-  defaultWaitComplete,
-  type AkumaStatus,
-} from "./akuma.js";
+import { Akuma, AkumaNotBornError, defaultWaitComplete, type AkumaStatus } from "./akuma.js";
 import { readBudgetedStatus, tellAkumaWithId } from "./akuma.js";
 import { NO_DISPATCH_ASSOCIATION } from "../dispatch/association.js";
 import { EMPTY_CREATED_TASK_OBSERVATION } from "../task/created-observation.js";

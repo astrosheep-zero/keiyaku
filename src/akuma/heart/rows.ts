@@ -9,6 +9,7 @@ import type {
   SessionFact,
   StopFact,
   TurnFact,
+  TurnOutcome,
   TurnStartFact,
   TurnEndFact,
 } from "./facts.js";
@@ -40,10 +41,12 @@ export type TurnRow = Readonly<{
   body_sequence: number;
   started_at: string;
   end_sequence: number | null;
-  outcome: "answered" | "failed" | null;
+  outcome: "answered" | "failed" | "invalid-output" | null;
   history_id: string | null;
   session_json: string | null;
   answer: string | null;
+  answer_json: string | null;
+  schema_json: string | null;
   diagnostic: string | null;
   completed_at: string | null;
 }>;
@@ -123,27 +126,42 @@ export function decodeBodyRow(row: BodyRow): BodyFact {
   };
 }
 
+function decodeTurnOutcome(row: TurnRow): TurnOutcome {
+  if (row.outcome === "answered") {
+    return {
+      kind: "answered",
+      ...(row.history_id === null ? {} : { historyId: row.history_id }),
+      session: resumeCoordinate(parsed<unknown>(row.session_json)),
+      answer: row.answer!,
+      ...(row.answer_json === null ? {} : { answerJson: row.answer_json }),
+    };
+  }
+  if (row.outcome === "invalid-output") {
+    return {
+      kind: "invalid-output",
+      diagnostic: row.diagnostic!,
+      answer: row.answer!,
+      ...(row.history_id === null ? {} : { historyId: row.history_id }),
+      ...(row.session_json === null ? {} : { session: resumeCoordinate(parsed<unknown>(row.session_json)) }),
+    };
+  }
+  return { kind: "failed", diagnostic: row.diagnostic! };
+}
+
 export function decodeTurnRow(row: TurnRow): TurnFact {
   const start: TurnStartFact = {
     kind: "turn-start",
     sequence: row.sequence,
     bodySequence: row.body_sequence,
     startedAt: row.started_at,
+    ...(row.schema_json === null || row.schema_json === undefined ? {} : { schemaJson: row.schema_json }),
   };
   if (row.outcome === null) return start;
   const end: TurnEndFact = {
     kind: "turn-end",
     sequence: row.end_sequence!,
     turnSequence: row.sequence,
-    outcome:
-      row.outcome === "answered"
-        ? {
-            kind: "answered",
-            ...(row.history_id === null ? {} : { historyId: row.history_id }),
-            session: resumeCoordinate(parsed<unknown>(row.session_json)),
-            answer: row.answer!,
-          }
-        : { kind: "failed", diagnostic: row.diagnostic! },
+    outcome: decodeTurnOutcome(row),
     completedAt: row.completed_at!,
   };
   return { ...start, end };
@@ -287,19 +305,25 @@ export function markBodyHung(
 
 export function insertTurnStartFact(
   database: DatabaseSync,
-  input: Readonly<{ bodySequence: number; startedAt: string; call?: string }>,
+  input: Readonly<{ bodySequence: number; startedAt: string; call?: string; schemaJson?: string }>,
 ): TurnStartFact {
   const sequence = Number(database.prepare("INSERT INTO timeline(kind) VALUES ('turn-start')").run().lastInsertRowid);
   database
-    .prepare("INSERT INTO turns(sequence, body_sequence, started_at) VALUES (?, ?, ?)")
-    .run(sequence, input.bodySequence, input.startedAt);
+    .prepare("INSERT INTO turns(sequence, body_sequence, started_at, schema_json) VALUES (?, ?, ?, ?)")
+    .run(sequence, input.bodySequence, input.startedAt, input.schemaJson ?? null);
   if (input.call !== undefined) {
     const callSequence = Number(database.prepare("INSERT INTO timeline(kind) VALUES ('call')").run().lastInsertRowid);
     database
       .prepare("INSERT INTO calls(sequence, turn_sequence, body, at) VALUES (?, ?, ?, ?)")
       .run(callSequence, sequence, input.call, input.startedAt);
   }
-  return { kind: "turn-start", sequence, bodySequence: input.bodySequence, startedAt: input.startedAt };
+  return {
+    kind: "turn-start",
+    sequence,
+    bodySequence: input.bodySequence,
+    startedAt: input.startedAt,
+    ...(input.schemaJson === undefined ? {} : { schemaJson: input.schemaJson }),
+  };
 }
 
 export function insertTurnEndFact(database: DatabaseSync, input: Omit<TurnEndFact, "sequence">): TurnEndFact {
@@ -309,22 +333,39 @@ export function insertTurnEndFact(database: DatabaseSync, input: Omit<TurnEndFac
       ? database
           .prepare(
             `UPDATE turns SET end_sequence = ?, outcome = 'answered', history_id = ?,
-        session_json = ?, answer = ?, completed_at = ? WHERE sequence = ? AND end_sequence IS NULL`,
+        session_json = ?, answer = ?, answer_json = ?, completed_at = ? WHERE sequence = ? AND end_sequence IS NULL`,
           )
           .run(
             sequence,
             input.outcome.historyId ?? null,
             encodeResumeCoordinate(input.outcome.session),
             input.outcome.answer,
+            input.outcome.answerJson ?? null,
             input.completedAt,
             input.turnSequence,
           )
-      : database
-          .prepare(
-            `UPDATE turns SET end_sequence = ?, outcome = 'failed', diagnostic = ?, completed_at = ?
-        WHERE sequence = ? AND end_sequence IS NULL`,
-          )
-          .run(sequence, input.outcome.diagnostic, input.completedAt, input.turnSequence);
+      : input.outcome.kind === "invalid-output"
+        ? database
+            .prepare(
+              `UPDATE turns SET end_sequence = ?, outcome = 'invalid-output', history_id = ?,
+          session_json = ?, answer = ?, diagnostic = ?, completed_at = ?
+          WHERE sequence = ? AND end_sequence IS NULL`,
+            )
+            .run(
+              sequence,
+              input.outcome.historyId ?? null,
+              input.outcome.session === undefined ? null : encodeResumeCoordinate(input.outcome.session),
+              input.outcome.answer,
+              input.outcome.diagnostic,
+              input.completedAt,
+              input.turnSequence,
+            )
+        : database
+            .prepare(
+              `UPDATE turns SET end_sequence = ?, outcome = 'failed', diagnostic = ?, completed_at = ?
+          WHERE sequence = ? AND end_sequence IS NULL`,
+            )
+            .run(sequence, input.outcome.diagnostic, input.completedAt, input.turnSequence);
   if (result.changes !== 1) throw new Error(`Akuma Turn ${input.turnSequence} is not open`);
   return { ...input, kind: "turn-end", sequence };
 }
@@ -403,7 +444,7 @@ export function lastAnsweredTurnFact(database: DatabaseSync): TurnFact | null {
   const row = database
     .prepare(
       `SELECT sequence, body_sequence, started_at, end_sequence, outcome, history_id,
-    session_json, answer, diagnostic, completed_at FROM turns WHERE outcome = 'answered' ORDER BY end_sequence DESC LIMIT 1`,
+    session_json, answer, answer_json, schema_json, diagnostic, completed_at FROM turns WHERE outcome = 'answered' ORDER BY end_sequence DESC LIMIT 1`,
     )
     .get() as TurnRow | undefined;
   return row === undefined ? null : decodeTurnRow(row);
@@ -413,7 +454,7 @@ export function answeredTurnFact(database: DatabaseSync, turnSequence: number): 
   const row = database
     .prepare(
       `SELECT sequence, body_sequence, started_at, end_sequence, outcome, history_id,
-    session_json, answer, diagnostic, completed_at FROM turns WHERE outcome = 'answered' AND sequence = ?`,
+    session_json, answer, answer_json, schema_json, diagnostic, completed_at FROM turns WHERE outcome = 'answered' AND sequence = ?`,
     )
     .get(turnSequence) as TurnRow | undefined;
   return row === undefined ? null : decodeTurnRow(row);
