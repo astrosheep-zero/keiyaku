@@ -9,6 +9,8 @@ type SquareEnvironment = NodeJS.ProcessEnv &
     SQUARE_HOST_LEDGER_LOCAL: string;
   }>;
 
+const DUPLICATE_HINT = "ignore if you have already seen this.";
+
 function squareEnvironment(environment: NodeJS.ProcessEnv, path: string): SquareEnvironment {
   const ledgerRoot = environment.SQUARE_REGISTRY === undefined ? undefined : dirname(environment.SQUARE_REGISTRY);
   return {
@@ -59,12 +61,13 @@ function outcomeExpression(signal: PluginSignalMap["akuma.turn-outcome"], caller
   ]
     .filter((value) => value !== undefined)
     .join(" ");
-  return signal.outcome.kind === "answered" ? `${header}\n✓ came back` : `${header}\n× ${signal.outcome.reason}`;
+  const outcome = signal.outcome.kind === "answered" ? "✓ came back" : `× ${signal.outcome.reason}`;
+  return `${header}\n${outcome}\n${DUPLICATE_HINT}`;
 }
 
 function calledExpression(signal: PluginSignalMap["akuma.called"]): string {
   const source = signal.callerAkumaId;
-  return [source, "called", signal.akumaId].filter((value) => value !== undefined).join(" ");
+  return `${[source, "called", signal.akumaId].filter((value) => value !== undefined).join(" ")}\n${DUPLICATE_HINT}`;
 }
 
 const plugin: KeiyakuPlugin = {

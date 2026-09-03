@@ -1,6 +1,7 @@
 import { createHostLedgerPort, Square, squareAssignedParticipantName } from "@astrosheep/square";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+const DUPLICATE_HINT = "ignore if you have already seen this.";
 function squareEnvironment(environment, path) {
     const ledgerRoot = environment.SQUARE_REGISTRY === undefined ? undefined : dirname(environment.SQUARE_REGISTRY);
     return {
@@ -49,11 +50,12 @@ function outcomeExpression(signal, caller) {
     ]
         .filter((value) => value !== undefined)
         .join(" ");
-    return signal.outcome.kind === "answered" ? `${header}\n✓ came back` : `${header}\n× ${signal.outcome.reason}`;
+    const outcome = signal.outcome.kind === "answered" ? "✓ came back" : `× ${signal.outcome.reason}`;
+    return `${header}\n${outcome}\n${DUPLICATE_HINT}`;
 }
 function calledExpression(signal) {
     const source = signal.callerAkumaId;
-    return [source, "called", signal.akumaId].filter((value) => value !== undefined).join(" ");
+    return `${[source, "called", signal.akumaId].filter((value) => value !== undefined).join(" ")}\n${DUPLICATE_HINT}`;
 }
 const plugin = {
     manifest: {

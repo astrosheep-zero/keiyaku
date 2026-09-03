@@ -83,9 +83,9 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     });
     assert.equal(existsSync(squarePath(root)), true);
     assert.deepEqual(await expressions(squarePath(root)), [
-      { actor: "Alice", body: "aku/caller called aku/called", mentions: [] },
-      { actor: "aku/answered", body: "aku/answered turn/1 (@Alice) kei/example\n✓ came back", mentions: ["Alice"] },
-      { actor: "aku/answered", body: "aku/answered turn/2 (@Alice) kei/example\n✓ came back", mentions: ["Alice"] },
+      { actor: "Alice", body: "aku/caller called aku/called\nignore if you have already seen this.", mentions: [] },
+      { actor: "aku/answered", body: "aku/answered turn/1 (@Alice) kei/example\n✓ came back\nignore if you have already seen this.", mentions: ["Alice"] },
+      { actor: "aku/answered", body: "aku/answered turn/2 (@Alice) kei/example\n✓ came back\nignore if you have already seen this.", mentions: ["Alice"] },
     ]);
 
     delete process.env.CODEX_THREAD_ID;
@@ -107,10 +107,10 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
       outcome: { kind: "failed", reason: "provider failed" },
     });
     assert.deepEqual(await expressions(squarePath(root)), [
-      { actor: "Alice", body: "aku/caller called aku/called", mentions: [] },
-      { actor: "aku/answered", body: "aku/answered turn/1 (@Alice) kei/example\n✓ came back", mentions: ["Alice"] },
-      { actor: "aku/answered", body: "aku/answered turn/2 (@Alice) kei/example\n✓ came back", mentions: ["Alice"] },
-      { actor: "aku/failed", body: "aku/failed turn/3\n× provider failed", mentions: [] },
+      { actor: "Alice", body: "aku/caller called aku/called\nignore if you have already seen this.", mentions: [] },
+      { actor: "aku/answered", body: "aku/answered turn/1 (@Alice) kei/example\n✓ came back\nignore if you have already seen this.", mentions: ["Alice"] },
+      { actor: "aku/answered", body: "aku/answered turn/2 (@Alice) kei/example\n✓ came back\nignore if you have already seen this.", mentions: ["Alice"] },
+      { actor: "aku/failed", body: "aku/failed turn/3\n× provider failed\nignore if you have already seen this.", mentions: [] },
     ]);
     const square = await Square.at({ path: squarePath(root) });
     try {
