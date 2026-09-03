@@ -18,6 +18,7 @@ import {
   projectTell,
   provePendingTellDispositionCustody,
   readHeart,
+  readOpenBoundTurns,
   readOpenPendingTellDisposition,
   readTell,
   readTurn,
@@ -429,7 +430,10 @@ async function runBodyTurns(input: BodyExecution): Promise<BodyTurnEnd> {
   const emitTurnOutcome = turnOutcomeEmitter(launch, soul);
   try {
     for (;;) {
-      const launchTells = drainPendingTells(supervisor.current().pending);
+      const launchTells = drainPendingTells(
+        supervisor.current().pending,
+        await readOpenBoundTurns(launch.paths, bodySequence),
+      );
       if (supervisor.signal.aborted) {
         await putDownIfControlled(launch.paths, supervisor, bodySequence, runtime.now);
         return;

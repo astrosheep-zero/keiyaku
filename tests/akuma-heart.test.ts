@@ -17,6 +17,7 @@ import {
   beginTurn,
   bindTellsToTurn,
   breakBody,
+  decidePendingTellDisposition,
   drainPendingTells,
   endTurn,
   finishBodyIfIdle,
@@ -29,6 +30,7 @@ import {
   readHeart,
   readForkPoint,
   readSoul,
+  readTell,
   readNonterminalRequests,
   readRequest,
   recordSession,
@@ -953,7 +955,7 @@ test("unknown Body Request state is authority corruption", async () => {
   }
 });
 
-test("heart schema version 24 and leash schema version 4 hard-refuse old authority", async () => {
+test("heart schema version 25 and leash schema version 4 hard-refuse old authority", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-schema-cut-"));
   const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "30000000" });
   try {
@@ -967,7 +969,7 @@ test("heart schema version 24 and leash schema version 4 hard-refuse old authori
       "CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)",
     );
     leash.close();
-    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 24/u);
+    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 25/u);
     await assert.rejects(HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -1086,16 +1088,17 @@ test("schema Tell admission refuses a running Body and binds once with frozen sc
     });
     assert.deepEqual(
       drainPendingTells((await readHeart(value.allocated.paths)).pending).map((tell) => tell.id),
-      ["schema-later"],
+      ["schema-idle", "plain-join"],
     );
-    await assert.rejects(
-      bindTellsToTurn(value.allocated.paths, {
-        turnSequence: turn.sequence + 1,
-        tellIds: ["schema-idle"],
-        boundAt: "2026-08-08T00:00:08.000Z",
-      }),
-      /already bound to a different Turn/u,
-    );
+    const rebindingTurn = await beginTurn(value.allocated.paths, {
+      bodySequence: body.sequence,
+      startedAt: "2026-08-08T00:00:08.000Z",
+    });
+    await bindTellsToTurn(value.allocated.paths, {
+      turnSequence: rebindingTurn.sequence,
+      tellIds: ["schema-idle"],
+      boundAt: "2026-08-08T00:00:08.000Z",
+    });
     const started = await readTurn(value.allocated.paths, turn.sequence);
     assert.equal(started?.schemaJson, schemaJson);
     await endTurn(value.allocated.paths, {
@@ -1112,6 +1115,88 @@ test("schema Tell admission refuses a running Body and binds once with frozen sc
     if (ended?.end?.outcome.kind === "invalid-output") {
       assert.equal(ended.end.outcome.answer, "not-json");
     }
+    leash.release();
+  } finally {
+    value.close();
+  }
+});
+
+test("a binding-before-delivery crash remains recoverable without predecessor terminality", async () => {
+  const value = await fixture();
+  try {
+    const predecessor = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await predecessor.birth(value.allocated.paths, value.soul);
+    const firstBody = await predecessor.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
+    await heartRecordTell(value.allocated.paths, {
+      kind: "tell",
+      id: "crash-window",
+      body: "resume after crash",
+      recordedAt: "2026-08-08T00:00:01.000Z",
+    });
+    const firstTurn = await beginTurn(value.allocated.paths, {
+      bodySequence: firstBody.sequence,
+      startedAt: "2026-08-08T00:00:02.000Z",
+    });
+    await bindTellsToTurn(value.allocated.paths, {
+      turnSequence: firstTurn.sequence,
+      tellIds: ["crash-window"],
+      boundAt: "2026-08-08T00:00:02.000Z",
+    });
+    predecessor.release();
+
+    const pending = (await readHeart(value.allocated.paths)).pending;
+    assert.deepEqual(drainPendingTells(pending).map((tell) => tell.id), ["crash-window"]);
+    assert.deepEqual(drainPendingTells(pending, [firstTurn.sequence]), []);
+
+    const successor = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    const secondBody = await successor.recordBody(value.allocated.paths, { leashTakenAt: "2026-08-08T00:00:03.000Z" });
+    const secondTurn = await beginTurn(value.allocated.paths, {
+      bodySequence: secondBody.sequence,
+      startedAt: "2026-08-08T00:00:03.000Z",
+    });
+    await bindTellsToTurn(value.allocated.paths, {
+      turnSequence: secondTurn.sequence,
+      tellIds: ["crash-window"],
+      boundAt: "2026-08-08T00:00:03.000Z",
+    });
+    const recovered = await readTell(value.allocated.paths, "crash-window");
+    assert.equal(recovered?.state, "pending");
+    assert.equal(recovered?.binding?.turnSequence, secondTurn.sequence);
+    assert.equal((await readTurn(value.allocated.paths, firstTurn.sequence))?.end, undefined);
+    assert.equal((await readHeart(value.allocated.paths)).latestBody?.sequence, secondBody.sequence);
+    successor.release();
+  } finally {
+    value.close();
+  }
+});
+
+test("an unresolved Tell disposition remains eligible for recovery", async () => {
+  const value = await fixture();
+  try {
+    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await leash.birth(value.allocated.paths, value.soul);
+    const body = await leash.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
+    await heartRecordTell(value.allocated.paths, {
+      kind: "tell",
+      id: "unresolved-disposition",
+      body: "recover me",
+      recordedAt: "2026-08-08T00:00:01.000Z",
+    });
+    await breakBody(value.allocated.paths, {
+      sequence: body.sequence,
+      end: "put-down",
+      at: "2026-08-08T00:00:02.000Z",
+    });
+    const disposition = await decidePendingTellDisposition(value.allocated.paths, {
+      bodySequence: body.sequence,
+      at: "2026-08-08T00:00:02.000Z",
+      handoff: true,
+    });
+    assert.deepEqual(disposition?.tellIds, ["unresolved-disposition"]);
+    assert.deepEqual(
+      drainPendingTells((await readHeart(value.allocated.paths)).pending).map((tell) => tell.id),
+      ["unresolved-disposition"],
+    );
     leash.release();
   } finally {
     value.close();

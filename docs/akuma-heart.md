@@ -57,6 +57,13 @@ events, or observer inference cannot manufacture it.
 
 Tell facts retain admission and only named delivery/terminal-receipt witnesses.
 They fold to `pending` or `told`; these are read models, not durable stages.
+Pending selection is governed by the absence of a terminal receipt, not by
+historical Turn binding or an unresolved disposition. Binding is Turn-side
+evidence: a Tell may retain bindings for multiple historical Turns, and a
+successor may bind and deliver the same stable Tell identity after a crash
+between binding and delivery. A binding on an open Turn of the currently
+running Body remains in that Body's active attempt; it does not settle the
+Tell for later recovery.
 Provider submission can be at least once: lacking durable witness leaves a Tell
 pending for a later Body, while a terminal witness settles it without rollback.
 Kill never settles or discards a Tell. Request facts are the sole durable Body

@@ -416,6 +416,10 @@ export async function bindTellsToTurn(
   );
 }
 
+export async function readOpenBoundTurns(paths: AkumaPaths, bodySequence: number): Promise<readonly number[]> {
+  return await withHeart(paths, (heart) => readTransaction(heart, () => openBoundTurns(heart, bodySequence)));
+}
+
 export async function failOpenBoundTurns(
   paths: AkumaPaths,
   input: Readonly<{ bodySequence: number; diagnostic: string; completedAt: string }>,

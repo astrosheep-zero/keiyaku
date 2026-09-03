@@ -58,7 +58,11 @@ function tellDeliveries(database: DatabaseSync, id: string): readonly TellDelive
 }
 
 function tellBinding(database: DatabaseSync, id: string): TellBinding | undefined {
-  const row = database.prepare("SELECT turn_sequence, bound_at FROM tell_bindings WHERE tell_id = ?").get(id) as
+  const row = database
+    .prepare(
+      "SELECT turn_sequence, bound_at FROM tell_bindings WHERE tell_id = ? ORDER BY sequence DESC LIMIT 1",
+    )
+    .get(id) as
     | { turn_sequence: number; bound_at: string }
     | undefined;
   return row === undefined ? undefined : { turnSequence: row.turn_sequence, boundAt: row.bound_at };
@@ -296,20 +300,25 @@ export function insertTellBindingFact(
   const result = database
     .prepare("INSERT OR IGNORE INTO tell_bindings(tell_id, turn_sequence, bound_at) VALUES (?, ?, ?)")
     .run(input.tellId, input.turnSequence, input.boundAt);
-  const row = database.prepare("SELECT turn_sequence FROM tell_bindings WHERE tell_id = ?").get(input.tellId) as
-    | { turn_sequence: number }
-    | undefined;
-  if (row === undefined || (result.changes === 0 && row.turn_sequence !== input.turnSequence)) {
-    throw new Error(`tell ${input.tellId} is already bound to a different Turn`);
+  if (result.changes === 0) {
+    const row = database
+      .prepare("SELECT 1 FROM tell_bindings WHERE tell_id = ? AND turn_sequence = ?")
+      .get(input.tellId, input.turnSequence);
+    if (row === undefined) throw new Error(`tell ${input.tellId} binding was not retained`);
   }
 }
 
-export function drainPendingTells(pending: readonly TellFact[]): readonly TellFact[] {
-  const unbound = pending.filter((tell) => tell.binding === undefined);
-  if (unbound.length === 0) return [];
-  const first = unbound[0]!;
+export function drainPendingTells(
+  pending: readonly TellFact[],
+  activeTurnSequences: readonly number[] = [],
+): readonly TellFact[] {
+  const eligible = pending.filter(
+    (tell) => tell.binding === undefined || !activeTurnSequences.includes(tell.binding.turnSequence),
+  );
+  if (eligible.length === 0) return [];
+  const first = eligible[0]!;
   const drained: TellFact[] = [first];
-  for (const tell of unbound.slice(1)) {
+  for (const tell of eligible.slice(1)) {
     if (tell.schemaJson !== undefined) break;
     drained.push(tell);
   }

@@ -21,6 +21,8 @@ import {
   HeldAkumaLeash,
   activitySlice,
   admitRequest,
+  beginTurn,
+  bindTellsToTurn,
   decidePendingTellDisposition,
   initializeHeart,
   pauseRequested,
@@ -39,6 +41,7 @@ import {
   reserveRequest,
   stopRequested,
 } from "../src/akuma/heart/index.js";
+import type { Soul } from "../src/akuma/heart/facts.js";
 import type { ProviderOptions } from "../src/akuma/provider-recipe.js";
 import { allocateAkumaDirectory, pathsForAkuId, type AkuId } from "../src/akuma/identity.js";
 import {
@@ -1021,6 +1024,72 @@ test("a Session without live tell hands off while narration remains open", async
     assert.deepEqual(launches, [[{ id: "tell-handoff", text: "continue promptly" }]]);
     assert.deepEqual((await readHeart(allocated.paths)).pending, []);
     assert.equal((await outcomes(allocated.paths)).length, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a successor Body redelivers a Tell left bound before predecessor delivery", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-crash-window-recovery-"));
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1a2b3c46" });
+    await initializeHeart(allocated.paths);
+    const soul: Soul = {
+      id: allocated.id,
+      archetype: "claude",
+      provider: { name: "claude", kind: "claude-agent-sdk" },
+      options: {},
+      origin: { kind: "direct" },
+      cwd: root,
+      allowed: ALLOWED_ACTIONS,
+      createdAt: "2026-08-08T00:00:00.000Z",
+    };
+    const predecessor = (await HeldAkumaLeash.try(allocated.paths))!;
+    await predecessor.birth(allocated.paths, soul);
+    const firstBody = await predecessor.recordBody(allocated.paths, { leashTakenAt: soul.createdAt });
+    await recordTell(allocated.paths, {
+      id: "crash-window-body",
+      body: "resume after crash",
+      recordedAt: "2026-08-08T00:00:01.000Z",
+    });
+    const firstTurn = await beginTurn(allocated.paths, {
+      bodySequence: firstBody.sequence,
+      startedAt: "2026-08-08T00:00:02.000Z",
+    });
+    await bindTellsToTurn(allocated.paths, {
+      turnSequence: firstTurn.sequence,
+      tellIds: ["crash-window-body"],
+      boundAt: "2026-08-08T00:00:02.000Z",
+    });
+    predecessor.release();
+
+    const starts: Parameters<typeof adapter>[0]["starts"] = [];
+    await driveAkumaBody(
+      { paths: allocated.paths },
+      adapter({
+        starts,
+        events: [{ type: "session", coordinate: { sessionId: "successor-session" } }],
+        result: { kind: "answered", answer: "continued", historyId: "successor-history" },
+      }),
+      { now: () => "2026-08-08T00:00:03.000Z" },
+    );
+
+    const recovered = await readTell(allocated.paths, "crash-window-body");
+    assert.deepEqual(starts.map((start) => start.launchTells), [[{ id: "crash-window-body", text: "resume after crash" }]]);
+    assert.equal(recovered?.state, "told");
+    assert.equal(recovered?.deliveries.length, 1);
+    assert.deepEqual(recovered?.deliveries[0]?.route, "launch");
+    assert.deepEqual(recovered?.deliveries[0]?.deliveredAt, "2026-08-08T00:00:03.000Z");
+    assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, 2);
+    assert.equal((await readHeart(allocated.paths)).latestBody?.end, "exited");
+    assert.equal((await readTurn(allocated.paths, firstTurn.sequence))?.end, undefined);
+    const database = new DatabaseSync(allocated.paths.heart);
+    const predecessorRow = database
+      .prepare("SELECT end, hung_diagnostic FROM bodies WHERE sequence = ?")
+      .get(firstBody.sequence) as { end: string | null; hung_diagnostic: string | null } | undefined;
+    database.close();
+    assert.equal(predecessorRow?.end, null);
+    assert.equal(predecessorRow?.hung_diagnostic, null);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
