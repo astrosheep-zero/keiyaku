@@ -20,9 +20,11 @@ import type { SettlementReport } from "../settlement/settle.js";
 import type { TaskHolderAdmission } from "../settlement/holder.js";
 import type { WorktreeHooks } from "./configuration.js";
 import { completeReconcile, decodeReconciliationLag, type ReconcileCompletion } from "./reconcile.js";
-import type { AuditReport } from "../protocol/audit.js";
-import type { IntegrationConflictMaterialized } from "../protocol/deliver.js";
-import type { ContinuationReport } from "./continuation.js";
+import { decodeAuditReport, type AuditReport } from "../protocol/audit.js";
+import { decodeMaterializedConflict, type IntegrationConflictMaterialized } from "../protocol/deliver.js";
+import { decodeReviewValue, type ReviewValue } from "../protocol/review.js";
+import { decodeContinuationReport, type ContinuationReport } from "./continuation.js";
+import { deliveryValueSchema, type DeliveryValue } from "./delivery.js";
 import type { KeiyakuRefused, KeiyakuRetry } from "./refusal.js";
 import { ownerSchema } from "./result-codec.js";
 import { z } from "zod";
@@ -90,6 +92,25 @@ export const mutationPendingSurfaceSchema = ownerSchema(
   "expected pending surface",
 ) satisfies z.ZodType<MutationPendingSurface>;
 
+export type Review = ReviewValue & Readonly<{ continuation?: ContinuationReport }>;
+
+export function decodeReview(value: unknown): Review {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("malformed review");
+  const { continuation, ...protocol } = value as Record<string, unknown>;
+  const review = decodeReviewValue(protocol);
+  return continuation === undefined ? review : { ...review, continuation: decodeContinuationReport(continuation) };
+}
+
+export const auditReportSchema = ownerSchema(
+  decodeAuditReport,
+  "expected audit report",
+) satisfies z.ZodType<AuditReport>;
+const reviewSchema = ownerSchema(decodeReview, "expected review") satisfies z.ZodType<Review>;
+const materializedConflictSchema = ownerSchema(
+  decodeMaterializedConflict,
+  "expected materialized conflict",
+) satisfies z.ZodType<IntegrationConflictMaterialized>;
+
 export const mutationResultSchema = <Value>(value: z.ZodType<Value>): z.ZodType<MutationResult<Value>> =>
   ownerSchema((input): MutationResult<Value> => {
     if (input === null || typeof input !== "object" || Array.isArray(input))
@@ -144,6 +165,15 @@ export const mutationResultSchema = <Value>(value: z.ZodType<Value>): z.ZodType<
           }),
     };
   }, "expected mutation result");
+
+export const deliveryResultSchema = z.union([
+  mutationResultSchema(deliveryValueSchema),
+  materializedConflictSchema,
+]) satisfies z.ZodType<MutationResult<DeliveryValue> | IntegrationConflictMaterialized>;
+export const reviewResultSchema = mutationResultSchema(reviewSchema) satisfies z.ZodType<MutationResult<Review>>;
+export const auditResultSchema = mutationResultSchema(auditReportSchema) satisfies z.ZodType<
+  MutationResult<AuditReport>
+>;
 
 type ObligationPendingInput = Readonly<{
   lags: MutationResult<unknown>["lags"];

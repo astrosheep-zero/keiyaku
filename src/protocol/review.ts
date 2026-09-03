@@ -48,6 +48,7 @@ type ReviewOperationInput = MutationOperationInput &
     deriveDocument?: (state: ContractState) => DocumentDerivation;
   }>;
 export type ReviewValue = CompletionEvidence & Readonly<{ workspace?: WorkspaceDirtyDelta }>;
+export { decodeReviewValue } from "./result-codec.js";
 type PreparedReview = Readonly<{
   workspace?: WorkspaceDirtyDelta;
   tender?: TenderCapture;

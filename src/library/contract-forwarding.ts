@@ -12,8 +12,8 @@ import type { DeliveryValue } from "./delivery.js";
 import { documentDerivation } from "./input.js";
 import { completionInput, completeMutation, completionPending, type MutationResult } from "./mutation.js";
 import { requireAccepted } from "./refusal.js";
-import type { Review } from "./contract-forwarding-result.js";
-export type { Review } from "./contract-forwarding-result.js";
+import type { Review } from "./mutation.js";
+export type { Review } from "./mutation.js";
 import { Repo, scopeForRepo } from "./repo.js";
 
 export type DeliveryExecutionInput = Readonly<{

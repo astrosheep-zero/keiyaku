@@ -217,6 +217,27 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("protocol/run.ts"),
       ],
     },
+    {
+      source: "library/contract-operations.ts",
+      allow: [
+        any("akuma/requests.ts"),
+        any("akuma/request-*.ts"),
+        any("core/facts/types.ts"),
+        any("library/**"),
+        types("protocol/audit.ts"),
+        types("protocol/deliver.ts"),
+        types("protocol/review.ts"),
+      ],
+      deny: [
+        any("library/akuma-creation.ts"),
+        any("library/bind.ts"),
+        any("protocol/attempt.ts"),
+        any("protocol/audit.ts", ["auditOperation"]),
+        any("protocol/placement.ts"),
+        any("protocol/run.ts"),
+        any("protocol/result-codec.ts"),
+      ],
+    },
     { source: "library/contract*.ts", ...contractOwner },
     { source: "library/contract/**", ...contractOwner },
     {

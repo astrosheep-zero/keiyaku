@@ -107,6 +107,29 @@ export class KeiyakuRetry extends Error {
   }
 }
 
+const contractLiveFailureSchema = z.union([
+  z.object({ kind: z.literal("refused"), refusal: keiyakuRefusalSchema }).strict(),
+  z.object({ kind: z.literal("retry"), reason: keiyakuRetryReasonSchema }).strict(),
+]);
+
+export function encodeContractLiveFailure(error: unknown): unknown | null {
+  if (error instanceof KeiyakuRefused) {
+    return { kind: "refused", refusal: error.refusal };
+  }
+  if (error instanceof KeiyakuRetry) {
+    return { kind: "retry", reason: error.reason };
+  }
+  return null;
+}
+
+export function decodeContractLiveFailure(value: unknown): Error | null {
+  const parsed = contractLiveFailureSchema.safeParse(value);
+  if (!parsed.success) return null;
+  return parsed.data.kind === "refused"
+    ? new KeiyakuRefused(decodeKeiyakuRefusal(parsed.data.refusal))
+    : new KeiyakuRetry(parsed.data.reason);
+}
+
 export function requireAccepted<Value, Refusal extends KeiyakuRefusal>(
   result: IntentOutcome<Value, Refusal>,
 ): AcceptedIntent<Value> {

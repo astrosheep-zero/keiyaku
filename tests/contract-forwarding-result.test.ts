@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   auditResultSchema,
-  decodeContractLiveFailure,
   deliveryResultSchema,
-  encodeContractLiveFailure,
   reviewResultSchema,
-} from "../src/library/contract-forwarding-result.js";
-import { KeiyakuRefused, KeiyakuRetry } from "../src/library/refusal.js";
+} from "../src/library/mutation.js";
+import {
+  decodeContractLiveFailure,
+  encodeContractLiveFailure,
+  KeiyakuRefused,
+  KeiyakuRetry,
+} from "../src/library/refusal.js";
 import { changeId, contractHead, contractId, entryUlid, snapshotId } from "../src/core/facts/types.js";
 import { decodeSettlementLag } from "../src/settlement/settle.js";
 

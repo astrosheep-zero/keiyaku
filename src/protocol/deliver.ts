@@ -60,6 +60,7 @@ export type IntegrationConflictMaterialized = Readonly<{
   conflictPaths: readonly string[];
   workspace: AppointedWorkspace;
 }>;
+export { decodeMaterializedConflict } from "./result-codec.js";
 
 const DELIVER_CONFLICT_RECOVERY = Object.freeze({
   materialize: "deliver --materialize-conflict --include-dirty",

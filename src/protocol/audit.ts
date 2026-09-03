@@ -16,6 +16,7 @@ import type {
   VerificationStop,
 } from "./operations.js";
 import { timestamp, unpackVerificationOutcome } from "./operations.js";
+export { decodeAuditReport } from "./result-codec.js";
 
 type AuditWorkspace = Readonly<{
   kind: "worktree";

@@ -114,6 +114,22 @@ test("architecture policy keeps Kanshi on public-owner composition", () => {
   ]);
 });
 
+test("architecture policy keeps Contract request transport off lifecycle implementation", () => {
+  const diagnostics = check({
+    "protocol/attempt.ts": "export function admitDecidedOffer(): void {}",
+    "protocol/placement.ts": "export function place(): void {}",
+    "protocol/result-codec.ts": "export function decodeAuditReport(): void {}",
+    "library/contract-operations.ts": [
+      'import { admitDecidedOffer } from "../protocol/attempt.js";',
+      'import { place } from "../protocol/placement.js";',
+      'import { decodeAuditReport } from "../protocol/result-codec.js";',
+      "export const transport = [admitDecidedOffer, place, decodeAuditReport];",
+    ].join("\n"),
+  });
+
+  assert.deepEqual(rules(diagnostics), Array(3).fill("architecture/dependency-direction"));
+});
+
 test("architecture policy keeps Contract edges forbidden after a move", () => {
   const diagnostics = check({
     "library/akuma-creation.ts": "export function createAkuma(): void {}",
