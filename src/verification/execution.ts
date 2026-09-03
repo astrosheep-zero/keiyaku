@@ -1,6 +1,5 @@
 import type { SnapshotId } from "../core/facts/types.js";
-import { runHookCommands, type HookCommand, type HookFailure } from "../git/hooks.js";
-import { worktreeHooksFrom } from "../library/configuration.js";
+import { runHookCommands, worktreeHooksFrom, type HookCommand, type HookFailure } from "../git/hooks.js";
 import type { MaterializedScratchCandidate, WorktreeLeak } from "../git/scratch.js";
 import type { GitRepository } from "../git/process.js";
 import type { Settings } from "../settings.js";

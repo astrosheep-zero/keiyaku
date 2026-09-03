@@ -111,6 +111,10 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     { source: "markdown/**", allow: [any("markdown/**")] },
     {
+      source: "git/hooks.ts",
+      allow: [any("git/**"), any("runtime/proc/**"), any("settings.ts")],
+    },
+    {
       source: "git/**",
       allow: [
         any("contract-worktree.ts"),
@@ -361,7 +365,6 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [
         any("core/**"),
         any("git/**"),
-        any("library/configuration.ts"),
         any("runtime/proc/**"),
         any("settings.ts"),
         any("verification/**"),
@@ -394,7 +397,14 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { source: "plugin/**", allow: [any("plugin/**"), any("settings.ts"), types("world.ts")] },
     {
       source: "akuma-body.ts",
-      allow: [any("akuma/**"), any("library/**"), any("settings.ts"), any("task/**"), any("world.ts")],
+      allow: [
+        any("akuma/**"),
+        any("git/hooks.ts"),
+        any("library/**"),
+        any("settings.ts"),
+        any("task/**"),
+        any("world.ts"),
+      ],
     },
     {
       source: "index.ts",

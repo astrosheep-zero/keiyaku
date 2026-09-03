@@ -143,6 +143,7 @@ export const capabilityPolicy = {
         "bounded-list.ts",
         "cli/**",
         "contract-worktree.ts",
+        "git/hooks.ts",
         "identity/**",
         "kanshi/**",
         "library/**",

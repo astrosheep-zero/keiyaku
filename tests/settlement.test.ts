@@ -19,7 +19,7 @@ import {
 } from "../src/git/repository.js";
 import { finishTaskHolderAdmission, readTaskHoldersAt } from "../src/settlement/holder.js";
 import { completeHolderMutation, completionPending } from "../src/library/mutation.js";
-import { EMPTY_WORKTREE_HOOKS } from "../src/library/configuration.js";
+import { EMPTY_WORKTREE_HOOKS } from "../src/git/hooks.js";
 import { requireAccepted } from "../src/library/refusal.js";
 import { reviewOperation } from "../src/protocol/review.js";
 import type { IntentOutcome } from "../src/protocol/operations.js";

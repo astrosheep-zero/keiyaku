@@ -3,7 +3,7 @@ import { worldRootForAkumaPaths } from "./akuma/identity.js";
 import { World } from "./world.js";
 import { executeKillAkuma, executeTellAkuma, executeWaitAkuma } from "./akuma/fleet-execution.js";
 import { fleetRequestCommands, type FleetRequestPort } from "./akuma/fleet-request.js";
-import { requireBranchesToBeUpToDateFrom, worktreeHooksFrom } from "./library/configuration.js";
+import { worktreeHooksFrom } from "./git/hooks.js";
 import {
   contractRequestCommands,
   executeForwardedAudit,
@@ -12,7 +12,7 @@ import {
   type ContractRequestPort,
 } from "./library/contract-operations.js";
 import { Repo } from "./library/repo.js";
-import { settings } from "./settings.js";
+import { requireBranchesToBeUpToDateFrom, settings } from "./settings.js";
 import { executeTaskMutation, taskMutationRequestCommands, type TaskMutationRequestPort } from "./task/mutation.js";
 import { composeRequestCommands } from "./akuma/request-wire.js";
 
