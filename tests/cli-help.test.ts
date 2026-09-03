@@ -93,10 +93,11 @@ test("each grammar owner renders its own namespace and leaf help", () => {
     [
       "Send one prompt to an existing Akuma and wake it.",
       "",
-      "usage: keiyaku tell <aku/...|@alias> [--interrupt] [--json] (<prompt> | -)",
+      "usage: keiyaku tell <aku/...|@alias> [--interrupt] [--schema <file>] [--json] (<prompt> | -)",
       "",
       "Give <prompt> as one argument, or use - to read stdin.",
       "--interrupt ends the current Body before recording the prompt and waking its successor.",
+      "--schema reads a JSON Schema file for the answer contract; stdin remains the prompt source.",
     ].join("\n"),
   );
   assert.match(renderAkumaHelp("history"), /\[--limit <count>\] \[--last\]/u);
@@ -167,6 +168,12 @@ test("supplemental Contract help is owned by command specs", () => {
     const expected = `${spec.purpose}\n\n${usageLine(spec.usage)}${spec.details === undefined ? "" : `\n\n${spec.details}`}`;
     assert.equal(renderContractHelp(command), expected);
   }
+});
+
+test("Akuma call and tell help expose schema files", () => {
+  assert.match(renderAkumaHelp("call"), /--schema <file>/u);
+  assert.match(renderAkumaHelp("tell"), /--schema <file>/u);
+  assert.match(renderAkumaHelp("tell"), /stdin remains the prompt source/u);
 });
 
 test("help contains no Markdown file pointers", () => {

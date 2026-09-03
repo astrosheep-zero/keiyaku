@@ -6,8 +6,8 @@ import {
   type OutcomeRow,
   type AkumaStatus,
   type InterruptReceipt,
-} from "../akuma/index.js";
-import { readBudgetedStatus } from "../akuma/akuma.js";
+  readBudgetedStatus,
+} from "../akuma/akuma.js";
 import { executionChannel, localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
 import {
   requestForwardedFleetKill,
@@ -39,7 +39,7 @@ export type AkumaWaitInput = AkumaSetAddressInput &
   }>;
 
 export type AkumaTellInput = AkumaAddressInput & Readonly<{ body: string }>;
-export type { TellResult, TellWake } from "../akuma/index.js";
+export type { TellResult, TellWake } from "../akuma/akuma.js";
 export type AkumaInterruptInput = AkumaAddressInput & Readonly<{ body: string }>;
 export type AkumaInterruptResult = Readonly<{
   id: AkumaStatus["id"];

@@ -211,6 +211,13 @@ async function requestBodyKill(input: Readonly<{ directory: string; id?: string;
 
 const emptyWaitResult = { completion: "all" as const, observations: [], unobserved: [] };
 
+test("fleet request permissions stay separated by action", () => {
+  assert.equal(fleetRequestProtocol("akuma.wait").isPermitted([]), true);
+  assert.equal(fleetRequestProtocol("akuma.tell").isPermitted(["akuma.tell"]), true);
+  assert.equal(fleetRequestProtocol("akuma.tell-answer").isPermitted(["akuma.tell"]), true);
+  assert.equal(fleetRequestProtocol("akuma.kill").isPermitted(["akuma.tell"]), false);
+});
+
 async function readTransportClaim(directory: string, id: string): Promise<Readonly<{ payload: unknown }>> {
   for (const name of (await readdir(directory)).filter((value) => value.endsWith(".request.json"))) {
     const claim = JSON.parse(await readFile(join(directory, name), "utf8")) as Readonly<{

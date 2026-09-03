@@ -86,12 +86,14 @@ function turn(database: DatabaseSync, sequence: number): TurnFact {
 function turnStart(database: DatabaseSync, sequence: number): TurnStartFact {
   const row = database
     .prepare("SELECT sequence, body_sequence, started_at, schema_json FROM turns WHERE sequence = ?")
-    .get(sequence) as {
-    sequence: number;
-    body_sequence: number;
-    started_at: string;
-    schema_json: string | null;
-  } | undefined;
+    .get(sequence) as
+    | {
+        sequence: number;
+        body_sequence: number;
+        started_at: string;
+        schema_json: string | null;
+      }
+    | undefined;
   if (row === undefined) throw new Error(`Akuma timeline references missing Turn ${sequence}`);
   return {
     kind: "turn-start",

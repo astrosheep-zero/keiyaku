@@ -2,6 +2,8 @@ import { LEASH_HELD_EXIT, runAkumaBody, type BodyLaunch } from "./akuma/body.js"
 import { worldRootForAkumaPaths } from "./akuma/identity.js";
 import { World } from "./world.js";
 import { executeKillAkuma, executeTellAkuma, executeWaitAkuma } from "./akuma/fleet-execution.js";
+import { Akuma as PublicAkuma } from "./akuma/akuma-instance.js";
+import { JsonSchema } from "./akuma/schema.js";
 import { fleetRequestCommands, type FleetRequestPort } from "./akuma/fleet-request.js";
 import { worktreeHooksFrom } from "./git/hooks.js";
 import {
@@ -94,6 +96,11 @@ function fleetRequestPort(world: Awaited<ReturnType<typeof World.prove>>): Fleet
         tellId: input.tellId,
         recordedAt: input.recordedAt,
         signal: input.signal,
+      }),
+    tellAnswer: async (input) =>
+      await PublicAkuma.select(world, input.target).tell(input.body, {
+        schema: JsonSchema(input.schemaJson),
+        ...(input.interrupt === undefined ? {} : { interrupt: input.interrupt }),
       }),
     kill: async (input) => {
       const result = await executeKillAkuma({ path: world, ids: input.targets, signal: input.signal });

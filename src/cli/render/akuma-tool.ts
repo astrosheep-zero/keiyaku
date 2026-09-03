@@ -1,4 +1,4 @@
-import type { ActivityRow, SnapshotRow } from "../../akuma/index.js";
+import type { ActivityRow, SnapshotRow } from "../../akuma/akuma.js";
 import type { AkumaObservation } from "../../index.js";
 import { normalizeToolCommand } from "./akuma-tool-command.js";
 

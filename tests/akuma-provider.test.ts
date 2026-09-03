@@ -1936,7 +1936,8 @@ test("Claude maps provider-neutral schema JSON to outputFormat json_schema", asy
   const provider = createClaudeProvider(async () => ({
     query(input) {
       seen = input.options as Record<string, unknown> | undefined;
-      return fakeQuery([
+      return fakeQuery(
+        [
         { type: "system", subtype: "init", session_id: "session-schema" } as unknown as SDKMessage,
         {
           type: "assistant",
@@ -1951,7 +1952,9 @@ test("Claude maps provider-neutral schema JSON to outputFormat json_schema", asy
           session_id: "session-schema",
           result: '{"ok":true}',
         } as unknown as SDKMessage,
-      ]);
+        ],
+        input.prompt as AsyncIterable<unknown>,
+      );
     },
   }));
   const schemaJson = '{"type":"object","properties":{"ok":{"type":"boolean"}}}';

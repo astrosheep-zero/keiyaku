@@ -35,6 +35,10 @@ or facade integration stage. Their absence or failure neither alters birth nor
 creates an additional public result arm; [plugins.md](plugins.md) owns their
 process-local lifetime and diagnostics.
 
+Schema-bearing call and tell inputs are composed through the public Akuma
+surface. The schema is frozen at input admission and does not create a second
+route or alter ordinary lifecycle, wait, history, or kill behavior.
+
 ## Address, Fleet, And Catalog
 
 The Address facet is the sole selector interpreter. It resolves complete Akuma

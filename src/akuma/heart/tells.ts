@@ -52,9 +52,9 @@ function tellDeliveries(database: DatabaseSync, id: string): readonly TellDelive
 }
 
 function tellBinding(database: DatabaseSync, id: string): TellBinding | undefined {
-  const row = database
-    .prepare("SELECT turn_sequence, bound_at FROM tell_bindings WHERE tell_id = ?")
-    .get(id) as { turn_sequence: number; bound_at: string } | undefined;
+  const row = database.prepare("SELECT turn_sequence, bound_at FROM tell_bindings WHERE tell_id = ?").get(id) as
+    | { turn_sequence: number; bound_at: string }
+    | undefined;
   return row === undefined ? undefined : { turnSequence: row.turn_sequence, boundAt: row.bound_at };
 }
 
@@ -290,9 +290,9 @@ export function insertTellBindingFact(
   const result = database
     .prepare("INSERT OR IGNORE INTO tell_bindings(tell_id, turn_sequence, bound_at) VALUES (?, ?, ?)")
     .run(input.tellId, input.turnSequence, input.boundAt);
-  const row = database
-    .prepare("SELECT turn_sequence FROM tell_bindings WHERE tell_id = ?")
-    .get(input.tellId) as { turn_sequence: number } | undefined;
+  const row = database.prepare("SELECT turn_sequence FROM tell_bindings WHERE tell_id = ?").get(input.tellId) as
+    | { turn_sequence: number }
+    | undefined;
   if (row === undefined || (result.changes === 0 && row.turn_sequence !== input.turnSequence)) {
     throw new Error(`tell ${input.tellId} is already bound to a different Turn`);
   }

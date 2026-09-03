@@ -60,7 +60,13 @@ export type TurnOutcome =
       answerJson?: string;
     }>
   | Readonly<{ kind: "failed"; diagnostic: string }>
-  | Readonly<{ kind: "invalid-output"; diagnostic: string; answer: string; historyId?: string; session?: ResumeCoordinate }>;
+  | Readonly<{
+      kind: "invalid-output";
+      diagnostic: string;
+      answer: string;
+      historyId?: string;
+      session?: ResumeCoordinate;
+    }>;
 
 export type TurnStartFact = Readonly<{
   kind: "turn-start";

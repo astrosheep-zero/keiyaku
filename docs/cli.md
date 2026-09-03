@@ -59,3 +59,8 @@ rules, and parser recovery are executable interface detail, not CLI law.
 
 Mutable catalogue commands adapt their owner's bounded recent observation;
 they do not offer an edge-level route to an exhaustive SDK board.
+
+The call and tell edges may acquire a JSON Schema from a caller-selected file;
+the file is decoded once at the edge and passed to the public Akuma surface.
+Schema acquisition failures are usage or input failures, while ordinary call,
+tell, wait, history, and kill behavior remains unchanged.

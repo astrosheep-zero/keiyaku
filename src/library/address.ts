@@ -1,7 +1,7 @@
 /** @architectureCompositionRoot */
 import { readAliases, type AliasBinding } from "../alias/index.js";
 import { Akuma } from "../akuma/akuma.js";
-import { probeBornAkuma } from "../akuma/index.js";
+import { probeBornAkuma } from "../akuma/akuma-probe.js";
 import { parseAkuId, type AkuId } from "../akuma/identity.js";
 import { contractId } from "../core/facts/types.js";
 import { readDispatches } from "../dispatch/index.js";

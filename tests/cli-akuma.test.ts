@@ -13,7 +13,7 @@ import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { AKUMA_REQUESTS_ENV, createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import { BodyRequestPump } from "../src/akuma/request-serve.js";
 import { composeRequestCommands } from "../src/akuma/request-wire.js";
-import type { ActivityHistory, ActivityRow } from "../src/akuma/index.js";
+import type { ActivityHistory, ActivityRow } from "../src/akuma/akuma.js";
 import { executeKillAkuma, executeTellAkuma, executeWaitAkuma } from "../src/akuma/fleet-execution.js";
 import { fleetRequestCommands, type FleetRequestPort } from "../src/akuma/fleet-request.js";
 import { type AkumaObservation } from "../src/index.js";
@@ -126,6 +126,16 @@ test("Akuma CLI parses root verbs without the removed namespace", () => {
       output: "text",
     },
   });
+  assert.deepEqual(parseArgv(["call", "claude", "--schema", "answer.schema.json", "--detach", "ship it"]), {
+    command: {
+      command: "call",
+      archetype: "claude",
+      schema: "answer.schema.json",
+      mode: "detach",
+      prompt: { kind: "argument", value: "ship it" },
+      output: "text",
+    },
+  });
   assert.throws(() => parseArgv(["call", "claude", "--write", "-"]), /option --write is not valid/u);
   assert.throws(
     () => parseArgv(["call", "claude", "--allowed", "task.add", "--allowed", "task.add", "-"]),
@@ -174,6 +184,26 @@ test("Akuma CLI parses root verbs without the removed namespace", () => {
       akuma: "@review",
       interrupt: true,
       prompt: { kind: "argument", value: "continue from the failure" },
+      output: "text",
+    },
+  });
+  assert.deepEqual(parseArgv(["tell", "aku/claude/1234abcd", "--schema", "answer.schema.json", "-"]), {
+    command: {
+      command: "tell",
+      akuma: "aku/claude/1234abcd",
+      interrupt: false,
+      schema: "answer.schema.json",
+      prompt: { kind: "stdin" },
+      output: "text",
+    },
+  });
+  assert.deepEqual(parseArgv(["tell", "@review", "--schema", "answer.schema.json", "--interrupt", "x"]), {
+    command: {
+      command: "tell",
+      akuma: "@review",
+      interrupt: true,
+      schema: "answer.schema.json",
+      prompt: { kind: "argument", value: "x" },
       output: "text",
     },
   });

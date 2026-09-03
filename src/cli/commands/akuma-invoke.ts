@@ -1,4 +1,6 @@
-import { type AkuId, type ActivityHistory } from "../../akuma/index.js";
+import { readFile } from "node:fs/promises";
+import { type AkuId } from "../../akuma/identity.js";
+import { type ActivityHistory } from "../../akuma/akuma.js";
 import {
   Keiyaku,
   type AkumaKillResult,
@@ -17,12 +19,17 @@ import type { AkumaPromptSource, InvokedAkumaCommand } from "./akuma.js";
 import { beginCall, finishCall } from "../../library/akuma-creation.js";
 import { killAkuma, tellAkuma, waitAkuma } from "../../library/fleet.js";
 import { localExecutionContext, type ExecutionContext } from "../../akuma/requests.js";
+import { Akuma, JsonSchema } from "../../akuma/index.js";
+import { addressAkuma } from "../../library/address.js";
+import { executionChannel } from "../../akuma/requests.js";
+import { requestForwardedFleetTellAnswer } from "../../akuma/fleet-request.js";
 
 export type AkumaInvocationResult =
-  | Readonly<{ kind: "akuma"; action: "call"; result: CallResult; world: WorldRoot }>
+  | Readonly<{ kind: "akuma"; action: "call"; result: CallResult; world: WorldRoot; schemaAnswer?: unknown }>
   | Readonly<{ kind: "akuma"; action: "status"; status: AkumaObservation; alias?: string }>
   | Readonly<{ kind: "akuma"; action: "wait"; result: AkumaWaitResult; alias?: string }>
   | Readonly<{ kind: "akuma"; action: "tell"; mode: "ordinary"; result: AkumaTellResult; body: string; alias?: string }>
+  | Readonly<{ kind: "akuma"; action: "tell"; mode: "schema"; result: unknown; body: string; alias?: string }>
   | Readonly<{
       kind: "akuma";
       action: "tell";
@@ -81,6 +88,33 @@ type InvokeInput = Readonly<{
   execution?: ExecutionContext;
 }>;
 
+async function schemaFromFile(path: string) {
+  try {
+    return JsonSchema(await readFile(path, "utf8"));
+  } catch (error) {
+    throw new Error(`cannot read JSON Schema file ${path}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function firstSchemaAnswer(
+  id: string,
+  world: WorldRoot,
+  schema: ReturnType<typeof JsonSchema>,
+): Promise<unknown> {
+  const history = await Akuma.select(world, id).history();
+  const outcome = history.rows.find((row) => row.kind === "outcome" && row.outcome.kind === "answered");
+  if (outcome === undefined || outcome.kind !== "outcome" || outcome.outcome.kind !== "answered") {
+    throw new Error("schema call completed without an answered Turn");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(outcome.outcome.answer);
+  } catch (error) {
+    throw new Error(`schema answer is not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return schema.decode(parsed);
+}
+
 function inputAlias(selector: string): string | undefined {
   return selector.startsWith("@") ? selector : undefined;
 }
@@ -116,6 +150,37 @@ async function invokeTell(
   input: InvokeInput,
 ): Promise<AkumaInvocationResult> {
   const body = await promptBody(command, input);
+  if (command.schema !== undefined) {
+    const schema = await schemaFromFile(command.schema);
+    const addressed = await addressAkuma({
+      path: input.path,
+      akuma: command.akuma,
+      ...(input.repo === undefined ? {} : { repo: input.repo }),
+    });
+    const channel = executionChannel(input.execution);
+    const answer =
+      channel.kind === "body-request"
+        ? await requestForwardedFleetTellAnswer({
+            directory: channel.directory,
+            target: addressed.id,
+            body,
+            schema,
+            interrupt: command.interrupt,
+          })
+        : await Akuma.select(addressed.path, addressed.id).tell(body, {
+            schema,
+            ...(command.interrupt ? { interrupt: true } : {}),
+          });
+    const alias = inputAlias(command.akuma);
+    return {
+      kind: "akuma",
+      action: "tell",
+      mode: "schema",
+      result: answer,
+      body,
+      ...(alias === undefined ? {} : { alias }),
+    };
+  }
   if (command.interrupt) {
     const result = await Keiyaku.interrupt({
       path: input.path,
@@ -216,6 +281,7 @@ export async function invokeAkuma(command: InvokedAkumaCommand, input: InvokeInp
   switch (command.command) {
     case "call": {
       const body = await promptBody(command, input);
+      const schema = command.schema === undefined ? undefined : await schemaFromFile(command.schema);
       const born = await beginCall(
         {
           path: input.path,
@@ -230,10 +296,15 @@ export async function invokeAkuma(command: InvokedAkumaCommand, input: InvokeInp
           ...(input.contract === undefined ? {} : { contract: input.contract }),
           ...(command.alias === undefined ? {} : { alias: command.alias }),
           ...(command.allowed === undefined ? {} : { allowed: command.allowed }),
+          ...(schema === undefined ? {} : { schema }),
         },
         input.execution ?? localExecutionContext(),
       );
       const result = await (input.finishCall ?? finishCall)(born);
+      if (schema !== undefined && command.mode === "wait" && result.observation.kind === "observed") {
+        const answer = await firstSchemaAnswer(result.akuma, input.path, schema);
+        return { kind: "akuma", action: "call", result, world: input.path, schemaAnswer: answer };
+      }
       return { kind: "akuma", action: "call", result, world: input.path };
     }
     case "wait":

@@ -4,10 +4,7 @@ import type { KanshiRegionSelection, RegionDeclaration, RegionOverlap, RegionRea
 
 export type KanshiSelection = Readonly<{ contract: string }>;
 
-function regionOverlaps(
-  mine: readonly string[],
-  declarations: readonly RegionDeclaration[],
-): readonly RegionOverlap[] {
+function regionOverlaps(mine: readonly string[], declarations: readonly RegionDeclaration[]): readonly RegionOverlap[] {
   const overlaps: RegionOverlap[] = [];
   for (const declaration of declarations) {
     const pairs = regionsOverlap(mine, declaration.patterns);

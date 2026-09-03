@@ -237,6 +237,38 @@ export class AkumaHandle {
     return { kind: "interrupted", putDown, tell: await wakeRecordedTell(this.paths, recorded.tellId) };
   }
 
+  async interruptSchema(body: string, schemaJson: string): Promise<TellResult> {
+    const request = await requestPause(this.paths, new Date().toISOString());
+    if (request.kind === "not-born") throw new AkumaNotBornError(this.id);
+    let tellId: string;
+    let leash = await HeldAkumaLeash.try(this.paths);
+    if (leash === null) leash = await takeLeashUntil(this.paths, performance.now() + CONTROL_RESPONSE_MS);
+    if (leash === null) throw new Error("schema interrupt could not acquire Body leash");
+    try {
+      const settledBody = (await readHeart(this.paths)).latestBody;
+      if (settledBody?.sequence === request.body.sequence && settledBody.hung !== undefined) {
+        await leash.clearPause(this.paths);
+        throw new Error("schema interrupt found a hung Body");
+      }
+      if (settledBody?.sequence !== request.body.sequence || settledBody.end === undefined) {
+        await leash.clearPause(this.paths);
+        throw new Error("schema interrupt could not prove Body settlement");
+      }
+      const admitted = await leash.recordInterruptTell(this.paths, {
+        kind: "tell",
+        id: randomUUID(),
+        body,
+        recordedAt: new Date().toISOString(),
+        schemaJson,
+      });
+      if (admitted.kind === "not-born") throw new AkumaNotBornError(this.id);
+      tellId = admitted.tell.id;
+    } finally {
+      leash.release();
+    }
+    return await wakeRecordedTell(this.paths, tellId!);
+  }
+
   async fork(input: Readonly<{ at: string }>): Promise<ForkReceipt> {
     const source = await readSoul(this.paths);
     if (source === null) throw new AkumaNotBornError(this.id);

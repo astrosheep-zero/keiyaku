@@ -31,8 +31,11 @@ The surface exposes call, selection, status, wait, history, tell, interrupt,
 fork, and kill under their owner semantics. It contains no process coordinate or
 capability to signal a described process.
 
-Tell returns its durable admission and wake evidence, not a promise of provider
-delivery or turn entry. Pending and told are the sole public detailed Tell states.
+Plain Tell returns its durable admission and wake evidence; it does not promise
+provider delivery or a Turn entry. Pending and told are the sole public detailed
+Tell states. A Schema-bearing Tell instead awaits the exact terminal Turn answer
+and decodes it; schema failure remains distinct from provider failure. Both forms
+retain the same routing and lifecycle semantics.
 Wait observes status until its Akuma-owned default completion judgment or a
 caller override; timeout returns a current observation rather than manufacturing
 a timeout lifecycle arm. Interrupt and kill expose only honest settlement or

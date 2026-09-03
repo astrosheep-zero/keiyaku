@@ -18,6 +18,7 @@ import {
   type AkumaWaitResult,
 } from "./fleet-observation.js";
 import { z } from "zod";
+import type { Schema } from "./schema.js";
 
 const nonblankTextSchema = z.string().refine((value) => value.trim() !== "");
 const fleetTargetsSchema = z
@@ -43,6 +44,15 @@ const tellRequestSchema = z
   .object({ target: akumaIdSchema, body: z.string() })
   .strict()
   .transform((request) => ({ action: "akuma.tell" as const, ...request }));
+const tellAnswerRequestSchema = z
+  .object({
+    target: akumaIdSchema,
+    body: z.string(),
+    schemaJson: nonblankTextSchema,
+    interrupt: z.boolean().optional(),
+  })
+  .strict()
+  .transform((request) => ({ action: "akuma.tell-answer" as const, ...request }));
 const killRequestSchema = z
   .object({ targets: fleetTargetsSchema })
   .strict()
@@ -61,6 +71,7 @@ const killServiceSchema = z
 export type FleetRequest =
   | (Omit<z.infer<typeof waitRequestSchema>, "targets"> & Readonly<{ targets: readonly AkumaStatus["id"][] }>)
   | z.infer<typeof tellRequestSchema>
+  | z.infer<typeof tellAnswerRequestSchema>
   | (Omit<z.infer<typeof killRequestSchema>, "targets"> & Readonly<{ targets: readonly AkumaStatus["id"][] }>);
 export type FleetService =
   | z.infer<typeof waitServiceSchema>
@@ -86,6 +97,15 @@ export type FleetRequestPort = Readonly<{
       signal: AbortSignal;
     }>,
   ): Promise<AkumaTellResult>;
+  tellAnswer?(
+    input: Readonly<{
+      target: AkumaStatus["id"];
+      body: string;
+      schemaJson: string;
+      interrupt?: boolean;
+      signal: AbortSignal;
+    }>,
+  ): Promise<unknown>;
   kill(
     input: Readonly<{ targets: readonly AkumaStatus["id"][]; signal: AbortSignal }>,
   ): Promise<
@@ -96,20 +116,31 @@ export type FleetRequestPort = Readonly<{
 
 function decodeFleetRequest(action: FleetRequest["action"], value: unknown): FleetRequest | null {
   const schema =
-    action === "akuma.wait" ? waitRequestSchema : action === "akuma.tell" ? tellRequestSchema : killRequestSchema;
+    action === "akuma.wait"
+      ? waitRequestSchema
+      : action === "akuma.tell"
+        ? tellRequestSchema
+        : action === "akuma.tell-answer"
+          ? tellAnswerRequestSchema
+          : killRequestSchema;
   const parsed = schema.safeParse(value);
   return parsed.success ? parsed.data : null;
 }
 
 function decodeFleetService(action: FleetRequest["action"], value: unknown): FleetService {
   const schema =
-    action === "akuma.wait" ? waitServiceSchema : action === "akuma.tell" ? tellServiceSchema : killServiceSchema;
+    action === "akuma.wait"
+      ? waitServiceSchema
+      : action === "akuma.tell" || action === "akuma.tell-answer"
+        ? tellServiceSchema
+        : killServiceSchema;
   const parsed = schema.safeParse(value);
   if (!parsed.success) throw new Error("malformed stored Fleet service evidence");
   return parsed.data;
 }
 
 function decodedFleetResult(action: FleetRequest["action"], value: unknown): unknown {
+  if (action === "akuma.tell-answer") return value;
   const schema =
     action === "akuma.wait"
       ? fleetResultSchemas.wait
@@ -135,7 +166,9 @@ export function fleetRequestProtocol(
     encodeResult: (result) => result,
     decodeResult: (result) => decodedFleetResult(action, result),
     decodeReference: (reference) => decodeFleetService(action, reference),
-    isPermitted: (allowed) => action === "akuma.wait" || allowed.includes(action),
+    isPermitted: (allowed) =>
+      action === "akuma.wait" ||
+      ((action === "akuma.tell" || action === "akuma.tell-answer") && allowed.includes("akuma.tell")),
   };
 }
 
@@ -168,6 +201,19 @@ export function fleetRequestCommand(
           service: { action: request.action, target: request.target, tellId: facts.id },
         };
       }
+      if (request.action === "akuma.tell-answer") {
+        if (port.tellAnswer === undefined) throw new Error("schema answer Fleet port is unavailable");
+        return {
+          result: await port.tellAnswer({
+            target: request.target,
+            body: request.body,
+            schemaJson: request.schemaJson,
+            ...(request.interrupt === undefined ? {} : { interrupt: request.interrupt }),
+            signal: facts.signal,
+          }),
+          service: { action: "akuma.tell", target: request.target, tellId: facts.id },
+        };
+      }
       const result = await port.kill({ targets: request.targets, signal: facts.signal });
       if ("result" in result)
         return { result: result.result, service: { action: request.action, results: result.service } };
@@ -181,12 +227,40 @@ export function fleetRequestCommand(
 
 export function fleetRequestCommands(
   port: FleetRequestPort,
-): Readonly<Record<"akuma.wait" | "akuma.tell" | "akuma.kill", ErasedRequestCommand>> {
+): Readonly<Record<"akuma.wait" | "akuma.tell" | "akuma.tell-answer" | "akuma.kill", ErasedRequestCommand>> {
   return {
     "akuma.wait": eraseRequestCommand(fleetRequestCommand("akuma.wait", port)),
     "akuma.tell": eraseRequestCommand(fleetRequestCommand("akuma.tell", port)),
+    "akuma.tell-answer": eraseRequestCommand(fleetRequestCommand("akuma.tell-answer", port)),
     "akuma.kill": eraseRequestCommand(fleetRequestCommand("akuma.kill", port)),
   };
+}
+
+export async function requestForwardedFleetTellAnswer(
+  input: Readonly<{
+    directory: string;
+    target: AkumaStatus["id"];
+    body: string;
+    schema: Schema<unknown>;
+    interrupt?: boolean;
+    signal?: AbortSignal;
+  }>,
+): Promise<unknown> {
+  const response = await requestBodyCommand({
+    directory: input.directory,
+    command: fleetRequestProtocol("akuma.tell-answer"),
+    value: {
+      action: "akuma.tell-answer",
+      target: input.target,
+      body: input.body,
+      schemaJson: input.schema.jsonText,
+      ...(input.interrupt === undefined ? {} : { interrupt: input.interrupt }),
+    },
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
+  if (response.kind !== "returned")
+    throw new Error("Akuma body request terminal schema answer cannot reproduce an expired live result");
+  return response.result;
 }
 
 function forwardedFleetCommandResult(

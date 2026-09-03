@@ -16,6 +16,7 @@ import {
   type KillEvidence,
   type ResumeCoordinate,
 } from "./heart/index.js";
+export type { KillEvidence };
 import { parseAkuId, pathsForAkuId, type AkuId, type AkumaPaths } from "./identity.js";
 import { activitySnapshotSchema } from "./projection.js";
 import type { Settings } from "../settings.js";
@@ -24,6 +25,7 @@ import type { AllowedAction } from "./allowed.js";
 import type { ExecutionContext } from "./requests.js";
 import { z } from "zod";
 import type { BoundedList } from "../bounded-list.js";
+import type { Schema } from "./schema.js";
 
 export const POLL_MS = 100;
 
@@ -111,6 +113,7 @@ export type AkumaCallInput = Readonly<{
   cwd?: string;
   readonly?: true;
   allowed?: readonly AllowedAction[];
+  schema?: Schema<unknown>;
 }>;
 export type AkumaCallContext = Readonly<{
   initiatorCwd?: string;
@@ -231,3 +234,4 @@ export type AkumaConfiguration = Readonly<{ home?: string; settings?: Settings; 
 
 export { AkumaHandle, akumaCallExecution, type LastAnswer } from "./akuma-handle.js";
 export { Akuma } from "./akuma-product.js";
+export { AkumaBusyError, AkumaDecodeError, AkumaProviderError } from "./akuma-errors.js";

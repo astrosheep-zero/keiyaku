@@ -36,6 +36,7 @@ function posixShellArgument(value: string): string {
 }
 
 function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, context: TextRenderContext): string {
+  if (result.schemaAnswer !== undefined) return JSON.stringify(result.schemaAnswer);
   const alias = result.result.alias.kind === "aliased" ? result.result.alias.alias.alias : undefined;
   const contractId =
     result.result.dispatch.kind === "dispatched" ? result.result.dispatch.dispatch.contractId : undefined;
@@ -102,6 +103,7 @@ export function renderAkumaText(
     const cwd = executionCwdLine(result.result);
     return cwd.length === 0 ? answer : `${cwd.join("\n")}\n${answer}`;
   }
+  if (result.action === "tell" && result.mode === "schema") return JSON.stringify(result.result);
   switch (result.action) {
     case "call":
       return callText(result, context);
@@ -159,6 +161,7 @@ function killExitCode(result: Extract<AkumaInvocationResult, { action: "kill" }>
     : 0;
 }
 function tellExitCode(result: Extract<AkumaInvocationResult, { action: "tell" }>): number {
+  if (result.mode === "schema") return 0;
   return result.mode === "ordinary"
     ? result.result.tell.wake.kind === "failed"
       ? 2
@@ -192,11 +195,11 @@ export function akumaExitCode(result: AkumaInvocationResult): number {
   }
 }
 export function akumaJsonValue(result: AkumaInvocationResult): unknown {
-  if (result.action === "call") return result.result;
+  if (result.action === "call") return result.schemaAnswer === undefined ? result.result : result.schemaAnswer;
   if (result.action === "fork") return result.receipt;
   if (result.action === "status") return result.status;
   if (result.action === "wait") return result.result;
-  if (result.action === "tell") return result.result;
+  if (result.action === "tell") return result.mode === "schema" ? result.result : result.result;
   if (result.action === "kill") return result.result;
   return result.historyResult;
 }

@@ -3,7 +3,7 @@ import type { ContractBoard, ContractCatalogue, ContractDisposition } from "../l
 import { scopeForRepo } from "../library/repo.js";
 import { observeTaskBoard } from "../task/operations.js";
 import { contractNamespace } from "../task/identity.js";
-import { Akuma } from "../akuma/index.js";
+import { Akuma } from "../akuma/akuma.js";
 import { readAliases, type AliasBinding } from "../alias/index.js";
 import { readDispatchesAt, type Dispatch } from "../dispatch/index.js";
 import { readTaskHolderProjectionAt, type TaskHolderProjection } from "../settlement/holder.js";

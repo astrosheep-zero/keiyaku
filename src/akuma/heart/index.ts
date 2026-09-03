@@ -185,7 +185,9 @@ function sameTellInput(
   existing: TellFact,
   tell: Omit<TellFact, "sequence" | "state" | "deliveries" | "binding">,
 ): boolean {
-  return existing.body === tell.body && existing.recordedAt === tell.recordedAt && existing.schemaJson === tell.schemaJson;
+  return (
+    existing.body === tell.body && existing.recordedAt === tell.recordedAt && existing.schemaJson === tell.schemaJson
+  );
 }
 
 export async function recordTell(

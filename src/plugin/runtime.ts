@@ -421,10 +421,7 @@ async function createPluginRuntime(input: PluginRuntimeInput): Promise<PluginRun
         await Promise.all(settledPromises);
         while (inFlight.size > 0) await Promise.all([...inFlight]);
       };
-      await Promise.race([
-        settle(),
-        new Promise<void>((resolve) => setTimeout(resolve, PLUGIN_DRAIN_TIMEOUT_MS)),
-      ]);
+      await Promise.race([settle(), new Promise<void>((resolve) => setTimeout(resolve, PLUGIN_DRAIN_TIMEOUT_MS))]);
     },
   });
 }

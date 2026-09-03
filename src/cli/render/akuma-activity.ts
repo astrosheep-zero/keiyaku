@@ -1,4 +1,4 @@
-import type { ActivityRow, KillEvidence, ReportedFileChange } from "../../akuma/index.js";
+import type { ActivityRow, KillEvidence, ReportedFileChange } from "../../akuma/akuma.js";
 import type {
   AkumaObservation,
   AkumaObservationStage,

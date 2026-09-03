@@ -1,6 +1,6 @@
 import type { ContractBoard, ContractDisposition, ContractPhase } from "../library/contract.js";
 import type { TaskId, TaskRef, TaskRow } from "../task/index.js";
-import type { AkumaList, AkumaListRow, UnbornAkumaListRow, ActivitySnapshot } from "../akuma/index.js";
+import type { AkumaList, AkumaListRow, UnbornAkumaListRow, ActivitySnapshot } from "../akuma/akuma.js";
 import type { AkumaAlias } from "../identity/selector.js";
 import type { WorldRoot } from "../world.js";
 import type { ContractId } from "../library/contract.js";

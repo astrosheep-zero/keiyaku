@@ -54,6 +54,7 @@ export type BodyLaunch = Readonly<{
   seed?: Omit<Soul, "createdAt">;
   birthSession?: Omit<SessionFact, "sequence">;
   initialBody?: string;
+  initialSchemaJson?: string;
   refuseIfHeld?: boolean;
   completion?: Readonly<{ contractId?: string }>;
 }>;
@@ -151,7 +152,9 @@ async function launchCwd(launch: BodyLaunch): Promise<string> {
   return (await turnRecipe(launch.paths, soul)).cwd;
 }
 
-function parseSchemaAnswerJson(raw: string): Readonly<{ kind: "json"; json: string }> | Readonly<{ kind: "invalid"; diagnostic: string }> {
+function parseSchemaAnswerJson(
+  raw: string,
+): Readonly<{ kind: "json"; json: string }> | Readonly<{ kind: "invalid"; diagnostic: string }> {
   try {
     JSON.parse(raw);
     return { kind: "json", json: raw };
@@ -355,19 +358,16 @@ async function runBodyTurns(input: BodyExecution): Promise<BodyTurnEnd> {
       ...(initial === undefined ? {} : { call: initial }),
       launchTells,
       ...(launchTells.find((tell) => tell.schemaJson !== undefined)?.schemaJson === undefined
-        ? {}
+        ? launch.initialSchemaJson === undefined
+          ? {}
+          : { schemaJson: launch.initialSchemaJson }
         : { schemaJson: launchTells.find((tell) => tell.schemaJson !== undefined)!.schemaJson }),
       world: runtime.world,
       externalCommands: runtime.externalCommands,
       now: runtime.now,
     });
     if (result.kind === "hung") {
-      await failOpenBoundTurnsIfPresent(
-        launch.paths,
-        bodySequence,
-        "Body hung with open bound Turns",
-        runtime.now(),
-      );
+      await failOpenBoundTurnsIfPresent(launch.paths, bodySequence, "Body hung with open bound Turns", runtime.now());
       return;
     }
     if (result.kind === "stopped") {

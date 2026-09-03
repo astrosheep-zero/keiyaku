@@ -36,6 +36,7 @@ export type BornAkumaCall = Readonly<{
   seed: AkumaCallRecipe &
     Readonly<{ id: AllocatedAkuma["id"]; archetype: string; cwd: string; origin: { kind: "direct" } }>;
   initialBody: string;
+  initialSchemaJson?: string;
   execution: BornExecution;
 }>;
 
@@ -227,6 +228,7 @@ export class Akuma {
         origin: { kind: "direct" },
       },
       initialBody: input.body,
+      ...(input.schema === undefined ? {} : { initialSchemaJson: input.schema.jsonText }),
       execution: {
         cwd,
         source: input.cwd !== undefined ? "input" : initiatorCwd === undefined ? "world" : "process",
@@ -244,6 +246,7 @@ export class Akuma {
           paths: allocated.paths,
           seed: born.seed,
           initialBody: born.initialBody,
+          ...(born.initialSchemaJson === undefined ? {} : { initialSchemaJson: born.initialSchemaJson }),
           ...(Object.keys(completion).length === 0 ? {} : { completion }),
         }),
     });

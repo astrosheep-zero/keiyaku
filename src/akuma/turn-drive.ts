@@ -393,12 +393,9 @@ function hasUnattemptedTell(
   attempted: ReadonlySet<string>,
 ): boolean {
   return (
-    liveTells &&
-    tellPump === null &&
-    pending.some((tell) => !attempted.has(tell.id) && tell.schemaJson === undefined)
+    liveTells && tellPump === null && pending.some((tell) => !attempted.has(tell.id) && tell.schemaJson === undefined)
   );
 }
-
 
 async function settleCompletion(
   result: TurnResult,

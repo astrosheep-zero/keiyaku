@@ -21,11 +21,12 @@ export type ParsedAkumaCommand = Output &
         timeoutMs?: number;
         readonly?: true;
         allowed?: AllowedActions;
+        schema?: string;
       }> &
         Prompted)
     | Readonly<{ command: "kill"; akuma: readonly string[] }>
     | Readonly<{ command: "wait"; akuma: readonly string[]; completion?: "any" | "all"; timeoutMs?: number }>
-    | (Readonly<{ command: "tell"; interrupt: boolean }> & Addressed & Prompted)
+    | (Readonly<{ command: "tell"; interrupt: boolean; schema?: string }> & Addressed & Prompted)
     | (Readonly<{ command: "history"; last: boolean; id?: string; before?: number; since?: number; limit?: number }> &
         Addressed)
     | Readonly<{ command: "history"; contract: string }>
@@ -57,9 +58,10 @@ const AKUMA_COMMAND_SPECS = {
       readonly: "boolean",
       allowed: "repeatable",
       json: "boolean",
+      schema: "value",
     },
     usage:
-      "call <akuma-name> [--contract <kei/...>] [--alias @name] [--readonly] [--allowed <product.action>]... [--wait <duration> | -d | --detach] [--json] (<prompt> | -)",
+      "call <akuma-name> [--contract <kei/...>] [--alias @name] [--readonly] [--allowed <product.action>]... [--schema <file>] [--wait <duration> | -d | --detach] [--json] (<prompt> | -)",
     purpose: "Birth an Akuma from <akuma-name> with one prompt.",
     details: [
       "Give <prompt> as one argument, or use - to read stdin.",
@@ -68,6 +70,7 @@ const AKUMA_COMMAND_SPECS = {
       "--alias assigns the world-local @name selector to the born Akuma.",
       "--readonly adds the one-way read-only birth restriction.",
       "Repeated --allowed adds actions to the selected Akuma's defaults.",
+      "--schema reads a JSON Schema file for the answer contract; stdin remains the prompt source.",
       "With --contract, Dispatch succeeds first. If @name exists, the alias then moves.",
     ].join("\n"),
   },
@@ -81,12 +84,13 @@ const AKUMA_COMMAND_SPECS = {
   tell: {
     arity: 1,
     stdin: true,
-    flags: { interrupt: "boolean", json: "boolean" },
-    usage: "tell <aku/...|@alias> [--interrupt] [--json] (<prompt> | -)",
+    flags: { interrupt: "boolean", schema: "value", json: "boolean" },
+    usage: "tell <aku/...|@alias> [--interrupt] [--schema <file>] [--json] (<prompt> | -)",
     purpose: "Send one prompt to an existing Akuma and wake it.",
     details: [
       "Give <prompt> as one argument, or use - to read stdin.",
       "--interrupt ends the current Body before recording the prompt and waking its successor.",
+      "--schema reads a JSON Schema file for the answer contract; stdin remains the prompt source.",
     ].join("\n"),
   },
   history: {
@@ -339,7 +343,16 @@ function parseTell(
   output: "text" | "json",
   fail: (message: string) => never,
 ): Extract<ParsedAkumaCommand, { command: "tell" }> {
-  return { command: "tell", akuma: validateDirect(subject, fail), interrupt: flags.interrupt === true, prompt, output };
+  const schema =
+    flags.schema === undefined ? undefined : stringFlag(flags.schema, "tell --schema requires a file", fail);
+  return {
+    command: "tell",
+    akuma: validateDirect(subject, fail),
+    interrupt: flags.interrupt === true,
+    ...(schema === undefined ? {} : { schema }),
+    prompt,
+    output,
+  };
 }
 
 function parseAllowedFlag(raw: FlagValue | undefined, fail: (message: string) => never): AllowedActions | undefined {
@@ -372,6 +385,8 @@ function parseCall(
   const mode = flags.detach === true ? ("detach" as const) : ("wait" as const);
   const timeoutMs = flags.wait === undefined ? undefined : parseDuration(flags.wait, "--wait", fail);
   const allowed = parseAllowedFlag(flags.allowed, fail);
+  const schema =
+    flags.schema === undefined ? undefined : stringFlag(flags.schema, "call --schema requires a file", fail);
   return {
     command: "call",
     archetype,
@@ -381,6 +396,7 @@ function parseCall(
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
     ...(flags.readonly === true ? { readonly: true } : {}),
     ...(allowed === undefined ? {} : { allowed }),
+    ...(schema === undefined ? {} : { schema }),
     prompt,
     output,
   };

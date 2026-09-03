@@ -291,7 +291,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "kanshi/read.ts",
       allow: [
-        any("akuma/index.ts"),
+        any("akuma/akuma.ts"),
         any("alias/**"),
         any("body/decode.ts"),
         any("body/region.ts"),
@@ -313,7 +313,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "kanshi/**",
       allow: [
-        any("akuma/index.ts"),
+        any("akuma/akuma.ts"),
         any("body/region.ts"),
         boundedList,
         any("identity/selector.ts"),
@@ -385,13 +385,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { source: "runtime/proc/**", allow: [any("runtime/proc/**")] },
     {
       source: "verification/**",
-      allow: [
-        any("core/**"),
-        any("git/**"),
-        any("runtime/proc/**"),
-        any("settings.ts"),
-        any("verification/**"),
-      ],
+      allow: [any("core/**"), any("git/**"), any("runtime/proc/**"), any("settings.ts"), any("verification/**")],
     },
     {
       source: "alias/**",

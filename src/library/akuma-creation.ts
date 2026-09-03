@@ -15,6 +15,7 @@ import { readManagedWorktreeAppointment } from "../workspace-place.js";
 import type { Settings } from "../settings.js";
 import { World, type WorldRoot } from "../world.js";
 import type { AllowedAction } from "../akuma/allowed.js";
+import type { Schema } from "../akuma/schema.js";
 import { localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
 import { callReadonly, canonicalBirthCwd } from "../akuma/call-input.js";
 import { requireInput } from "./input.js";
@@ -54,6 +55,7 @@ export type CallInput = Readonly<{
   contract?: Keiyaku;
   alias?: AkumaAlias;
   allowed?: readonly AllowedAction[];
+  schema?: Schema<unknown>;
 }>;
 
 export type CallObservation =
@@ -368,6 +370,7 @@ export async function beginCall(input: CallInput, context: ExecutionContext): Pr
       "contract",
       "alias",
       "allowed",
+      "schema",
     ],
     "Keiyaku.call input",
   );
@@ -394,6 +397,7 @@ export async function beginCall(input: CallInput, context: ExecutionContext): Pr
     body,
     ...(readonlyRequested === undefined ? {} : { readonly: readonlyRequested }),
     ...(values.allowed === undefined ? {} : { allowed: values.allowed as readonly AllowedAction[] }),
+    ...(values.schema === undefined ? {} : { schema: values.schema as Schema<unknown> }),
     ...(execution === undefined ? {} : { cwd: execution.cwd }),
   };
   const { born, akuma } = await admitCall({

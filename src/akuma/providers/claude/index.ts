@@ -124,7 +124,12 @@ function claudeQueryOptions(
     ...(input.session.kind === "fresh" ? {} : { resume: claudeSessionId(input.session.coordinate) }),
     ...(input.schemaJson === undefined
       ? {}
-      : { outputFormat: { type: "json_schema" as const, schema: JSON.parse(input.schemaJson) as Record<string, unknown> } }),
+      : {
+          outputFormat: {
+            type: "json_schema" as const,
+            schema: JSON.parse(input.schemaJson) as Record<string, unknown>,
+          },
+        }),
   };
 }
 

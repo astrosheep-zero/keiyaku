@@ -137,7 +137,9 @@ async function runPiPrompt(
   settle: (result: TurnResult) => void,
 ): Promise<void> {
   try {
-    const prompt = [input.body, ...input.launchTells.map((tell) => tell.text)].filter((part) => part.length > 0).join("\n\n");
+    const prompt = [input.body, ...input.launchTells.map((tell) => tell.text)]
+      .filter((part) => part.length > 0)
+      .join("\n\n");
     const schemaPrompt =
       input.schemaJson === undefined
         ? prompt
