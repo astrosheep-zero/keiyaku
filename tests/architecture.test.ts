@@ -78,17 +78,40 @@ test("architecture policy keeps the Contract handle on its public neighbors", ()
 test("architecture policy keeps Kanshi on public-owner composition", () => {
   const accepted = check({
     "git/read-observation.ts": "export function withGitReadObservation(): void {}",
-    "kanshi/read.ts":
-      'import { withGitReadObservation } from "../git/read-observation.js"; export const read = withGitReadObservation;',
+    "body/decode.ts": "export function decodeContractDocument(): { region: string[] } { return { region: [] }; }",
+    "body/region.ts": "export function assertRegionPattern(pattern: string): string { return pattern; }",
+    "library/region.ts": "export type RegionOverlap = { contract: string };",
+    "kanshi/read.ts": [
+      'import { withGitReadObservation } from "../git/read-observation.js";',
+      'import { decodeContractDocument } from "../body/decode.js";',
+      'import { assertRegionPattern } from "../body/region.js";',
+      "export const read = withGitReadObservation;",
+      "export const decode = decodeContractDocument;",
+      "export const validate = assertRegionPattern;",
+    ].join("\n"),
+    "kanshi/report.ts": 'import type { RegionOverlap } from "../library/region.js"; export type Overlap = RegionOverlap;',
+    "kanshi/select.ts":
+      'import { assertRegionPattern } from "../body/region.js"; export const validate = assertRegionPattern;',
   });
   const rejected = check({
     "git/read-observation.ts": "export function withGitTargetedReadObservation(): void {}",
-    "kanshi/read.ts":
-      'import { withGitTargetedReadObservation } from "../git/read-observation.js"; export const read = withGitTargetedReadObservation;',
+    "library/region.ts": "export function regionOverlaps(): never[] { return []; }",
+    "kanshi/read.ts": [
+      'import { withGitTargetedReadObservation } from "../git/read-observation.js";',
+      'import { regionOverlaps } from "../library/region.js";',
+      "export const read = withGitTargetedReadObservation;",
+      "export const overlaps = regionOverlaps;",
+    ].join("\n"),
+    "kanshi/select.ts":
+      'import { regionOverlaps } from "../library/region.js"; export const overlaps = regionOverlaps;',
   });
 
   assert.deepEqual(accepted, []);
-  assert.deepEqual(rules(rejected), ["architecture/dependency-direction"]);
+  assert.deepEqual(rules(rejected), [
+    "architecture/dependency-direction",
+    "architecture/dependency-direction",
+    "architecture/dependency-direction",
+  ]);
 });
 
 test("architecture policy keeps Contract edges forbidden after a move", () => {

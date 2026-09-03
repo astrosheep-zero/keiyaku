@@ -10,8 +10,9 @@ import { readTaskHolderProjectionAt, type TaskHolderProjection } from "../settle
 import { observeCurrentPhysicalIssue } from "../protocol/read/observation.js";
 import { readContractBoard, readContractCatalogue } from "../protocol/read/status.js";
 import { withGitDecodeChannel, withGitReadObservation, type GitReadObservation } from "../git/read-observation.js";
-import { readDocuments } from "../protocol/read/documents.js";
-import { readRegionDeclarations, validateRegionPatterns } from "../library/region.js";
+import { decodeContractDocument } from "../body/decode.js";
+import { assertRegionPattern } from "../body/region.js";
+import { readDocuments, type ContractDocumentProjection } from "../protocol/read/documents.js";
 import { contractId } from "../core/facts/types.js";
 import { selectKanshi, selectRegion } from "./select.js";
 import { FLEET_SNAPSHOT_ROWS, FLEET_VISIBLE_ROWS } from "./fleet.js";
@@ -65,6 +66,22 @@ function record(value: unknown, label: string): Record<string, unknown> {
 function exactKeys(value: Record<string, unknown>, allowed: readonly string[], label: string): void {
   for (const key of Object.keys(value))
     if (!allowed.includes(key)) throw new TypeError(`kanshi ${label} has unknown field: ${key}`);
+}
+
+function validateRegionPatterns(patterns: unknown): readonly [string, ...string[]] {
+  if (!Array.isArray(patterns) || patterns.length === 0)
+    throw new Error("Region query requires one or more path patterns");
+  return patterns.map((pattern) => {
+    if (typeof pattern !== "string") throw new Error("Region path patterns must be strings");
+    return assertRegionPattern(pattern);
+  }) as [string, ...string[]];
+}
+
+function readRegionDeclarations(documents: readonly ContractDocumentProjection[]): readonly RegionDeclaration[] {
+  return documents.map((document) => ({
+    contract: document.contract,
+    patterns: decodeContractDocument(document.documentBytes).region,
+  }));
 }
 
 function regionSelection(value: unknown): KanshiRegionSelection {
