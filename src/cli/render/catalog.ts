@@ -16,9 +16,9 @@ function targetLine(row: ContractRow, abbreviations: ReadonlyMap<string, string>
   const target = row.target.startsWith("refs/heads/") ? row.target.slice("refs/heads/".length) : row.target;
   const lag =
     row.targetLag.kind === "counted"
-      ? `${row.targetLag.behind} commits behind ${target}`
+      ? `${row.targetLag.behind} commits behind ${target}${row.targetLag.subject === undefined ? "" : ` · worktree ${row.targetLag.subject.path}`}`
       : row.targetLag.kind === "unknown"
-        ? `commits behind ${target} unknown`
+        ? `commits behind ${target} unknown${row.targetLag.subject === undefined ? "" : ` · worktree ${row.targetLag.subject.path}`}`
         : undefined;
   return [`target ${target}`, ...(lag === undefined ? [] : [lag]), ...targetMovementFacts(row, abbreviations)].join(
     " · ",

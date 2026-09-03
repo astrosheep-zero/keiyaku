@@ -31,20 +31,15 @@ function candidateLines(report: AuditReport, columns: number, addressed: string)
   }
   const identity = candidate.identity;
   receiptRow(lines, "✓", "candidate", [{ text: "ready" }], columns);
-  lines.push(...renderOpaqueBlock(`tender=${identity.tenderSnapshot}`, CHILD, columns));
-  lines.push(...renderOpaqueBlock(`integration=${identity.integration.snapshot}`, CHILD, columns));
-  lines.push(...renderOpaqueBlock(`change=${identity.integration.changeId}`, CHILD, columns));
+  lines.push(...renderOpaqueBlock(`tender commit ${identity.tenderSnapshot}`, CHILD, columns));
+  lines.push(...renderOpaqueBlock(`integration commit ${identity.integration.snapshot}`, CHILD, columns));
+  lines.push(...renderOpaqueBlock(`content identity (not commit) ${identity.integration.changeId}`, CHILD, columns));
   lines.push(...workspaceEvidence(candidate.workspace, columns));
   lines.push(...renderOpaqueBlock(gitShortStat(candidate.scope), CHILD, columns));
   if (candidate.scope.paths !== undefined) {
     for (const path of candidate.scope.paths) {
       lines.push(...renderOpaqueBlock(path, CHILD, columns));
     }
-  }
-  if (report.delivery !== undefined) {
-    lines.push(
-      ...renderOpaqueBlock(`delivery change=${report.delivery.changeId} ${report.delivery.relation}`, CHILD, columns),
-    );
   }
   if (candidate.diff !== undefined) receiptPayload(lines, "diff", candidate.diff);
   return lines;
@@ -132,7 +127,6 @@ function recordLines(result: AcceptedAuditResult, columns: number): readonly str
   for (const fact of result.facts) {
     receiptRow(rows, " ", "journal", [{ text: fact.entry, opaque: true }, { text: `· ${fact.kind}` }], columns);
   }
-  receiptRow(rows, " ", "head", [{ text: result.head, opaque: true }], columns);
   return ["  record", ...rows.map((line) => `  ${line}`)];
 }
 

@@ -123,7 +123,7 @@ export function safeText(value: string): string {
 }
 
 type CheckoutNotFollowable = Readonly<{
-  reason: "staged" | "conflict" | "untracked";
+  reason: "staged" | "dirty-tracked" | "unmerged" | "untracked";
   path: string;
   target: string;
   paths: readonly string[];

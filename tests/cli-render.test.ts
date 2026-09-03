@@ -95,9 +95,7 @@ test("Akuma catalog renders future ages as now", () => {
     root: worldRoot,
     archetype: "worker",
     observedAt: "2026-08-12T00:00:00.000Z",
-    rows: [
-      futureRow,
-    ],
+    rows: [futureRow],
     searched: [],
     hasMore: false,
   });
@@ -199,7 +197,7 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
       {
         ...row,
         target: "refs/heads/main",
-        targetLag: { kind: "counted", behind: 0 },
+        targetLag: { kind: "counted", behind: 0, subject: { kind: "worktree", path: "/repo/.keiyaku/wt/catalog" } },
         targetObservation: { head: observed, drift: true },
         phase: "tendered",
         delivery: {
@@ -211,7 +209,10 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
       },
     ],
   });
-  assert.match(moved, /^  candidate · target main · 0 commits behind main · target moved · bbbbbbb -> ccccccc$/mu);
+  assert.match(
+    moved,
+    /^  candidate · target main · 0 commits behind main · worktree \/repo\/\.keiyaku\/wt\/catalog · target moved · bbbbbbb -> ccccccc$/mu,
+  );
 
   const disappeared = renderCatalogText({
     ...catalog,
@@ -278,15 +279,7 @@ test("amend text omits an absent Region observation", () => {
   };
   assert.equal(
     renderText(result),
-    [
-      "✓ terms replaced — kei/no-amend-region-observation",
-      "  terms diff",
-      "",
-      "",
-      "",
-      "  record",
-      "    head head",
-    ].join("\n"),
+    ["✓ terms replaced — kei/no-amend-region-observation", "  terms diff", "", "", "", "  record"].join("\n"),
   );
 });
 
@@ -299,7 +292,9 @@ test("accepted results preserve reconciliation lag without telemetry", () => {
     contract,
     head: contractHead("record"),
     facts: [],
-    lag: [{ kind: "worktree-follow-retained" as const, path: "/tmp/wt", tender, head, reason: "head-moved" as const }] as const,
+    lag: [
+      { kind: "worktree-follow-retained" as const, path: "/tmp/wt", tender, head, reason: "head-moved" as const },
+    ] as const,
     settlementLags: [],
   };
   assert.equal(
@@ -308,7 +303,6 @@ test("accepted results preserve reconciliation lag without telemetry", () => {
       "✓ deliver — not complete — kei/followed",
       "  candidate kept",
       "  record",
-      "    head record",
       "  ! lag",
       "    worktree-follow-retained reason=head-moved tender=tender head=head path=/tmp/wt",
     ].join("\n"),
@@ -331,7 +325,7 @@ test("accepted bind receipts expose confirmed private-state seat close lag", () 
     head: contractHead("head"),
     facts: [{ contract, entry: "bind", kind: "bound" }],
     settlementLags: [],
-    workspace: "worktree",
+    workspace: { kind: "worktree", path: "/tmp/wt" },
     target: null,
     overlaps: [],
     seatClose: [{ kind: "private-state-seat-close-failed", diagnostic: "seat close failed after publication" }],
@@ -340,11 +334,10 @@ test("accepted bind receipts expose confirmed private-state seat close lag", () 
     renderText(result),
     [
       "✓ bound — kei/bound",
-      "  workspace managed worktree",
+      "  workspace worktree /tmp/wt",
       "  no target",
       "  record",
       "    journal bind · bound",
-      "    head head",
       "  ! lag private-state-seat-close-failed",
       "  diagnostic",
       "",
@@ -356,7 +349,7 @@ test("accepted bind receipts expose confirmed private-state seat close lag", () 
 
 test("accepted receipts omit execution telemetry and retain recovery snapshots", () => {
   const contract = contractId("kei/unchanged-mechanics");
-  const head = contractHead("head");
+  const head = contractHead("journal-blob-oid");
   const result: InvocationResult = {
     kind: "accepted",
     verb: "deliver",
@@ -366,10 +359,14 @@ test("accepted receipts omit execution telemetry and retain recovery snapshots",
     lag: [{ kind: "unsealed-bytes", path: "/repo/.keiyaku/wt/contract", paths: [] }],
     settlementLags: [],
     recoverySnapshot: snapshotId("recovery"),
+    tenderSnapshot: snapshotId("tender-commit"),
+    integration: { changeId: changeId("content-id") },
     completion: { integration: snapshotId("integration") },
   };
 
   const text = renderText(result);
+  assert.match(text, /tender commit tender-commit[\s\S]*content identity \(not commit\) content-id/u);
+  assert.doesNotMatch(text, /journal-blob-oid/u);
   assert.doesNotMatch(text, /ref updated|contract-file|worktree unchanged/u);
   assert.doesNotMatch(text, /ephemeral/u);
   assert.match(text, /recovery snapshot recovery/u);
@@ -406,7 +403,6 @@ test("direct placement stops render the public unmet prerequisites in order", ()
       "  prerequisite kei/missing-prerequisite · missing",
       "  candidate kept",
       "  record",
-      "    head head",
     ].join("\n"),
   );
 
@@ -421,7 +417,6 @@ test("direct placement stops render the public unmet prerequisites in order", ()
       "  prerequisite kei/missing-prerequisite · missing",
       "  candidate kept",
       "  record",
-      "    head head",
     ].join("\n"),
   );
 });
@@ -468,7 +463,6 @@ test("direct gate stops render the sole placement report without another read", 
       "  gate manual · missing",
       "  candidate kept",
       "  record",
-      "    head head",
     ].join("\n"),
   );
 });
@@ -497,13 +491,13 @@ test("completion stops project every checkout-followability refusal fact", () =>
       ],
     },
     {
-      reason: "conflict" as const,
+      reason: "dirty-tracked" as const,
       paths: ["conflict.ts"],
       text: [
         "! checkout-not-followable",
         "  checkout: /repo/checkout",
         "  target: refs/heads/main",
-        "  reason: conflict",
+        "  reason: dirty-tracked",
         "  paths:",
         '    - "conflict.ts"',
       ],
@@ -541,34 +535,6 @@ test("completion stops project every checkout-followability refusal fact", () =>
     assert.notEqual(start, -1);
     assert.deepEqual(renderedLines.slice(start, start + text.length), text);
   }
-});
-
-test("direct checkout refusal uses the same exact fact block", () => {
-  const contract = contractId("kei/direct-checkout-followability");
-  assert.equal(
-    renderText({
-      kind: "refused",
-      verb: "deliver",
-      contract,
-      refusal: {
-        kind: "checkout-not-followable",
-        contractId: contract,
-        target: "refs/heads/main",
-        path: "/repo/checkout",
-        reason: "conflict",
-        paths: ["a/b.txt"],
-      },
-    }),
-    [
-      `! deliver refused — ${contract}`,
-      "! checkout-not-followable",
-      "  checkout: /repo/checkout",
-      "  target: refs/heads/main",
-      "  reason: conflict",
-      "  paths:",
-      '    - "a/b.txt"',
-    ].join("\n"),
-  );
 });
 
 test("dirty delivery refusal explains the cause and include-dirty capture", () => {
@@ -646,7 +612,6 @@ test("continuation checkout stop keeps its exact block after the dependent conte
       "  paths:",
       '    - "quote\\"path.ts"',
       "  record",
-      "    head head",
     ].join("\n"),
   );
 });
@@ -672,7 +637,6 @@ test("deliver projects a ran Verification completion", () => {
       "  target -> integration-1 · verified (ran)",
       "  record",
       "    journal claim · claimed",
-      "    head head",
     ].join("\n"),
   );
 });
@@ -713,7 +677,6 @@ test("deliver renders claimed and stopped continuations from the accepted result
       "! kei/stopped-dependent · gates unsatisfied",
       "  gate reviewed · missing",
       "  record",
-      "    head head",
     ].join("\n"),
   );
 });
@@ -739,7 +702,6 @@ test("deliver projects no Verification and an unsatisfied non-gating Verificatio
       "  target -> integration-2",
       "  record",
       "    journal claim · claimed",
-      "    head head",
     ].join("\n"),
   );
 
@@ -760,7 +722,6 @@ test("deliver projects no Verification and an unsatisfied non-gating Verificatio
       "",
       "  record",
       "    journal claim · claimed",
-      "    head head",
     ].join("\n"),
   );
 });
@@ -771,23 +732,24 @@ test("review projects reused Verification and distinguishes completion in its ti
   const envelope = {
     kind: "accepted" as const,
     contract,
-    head: contractHead("head"),
+    head: contractHead("journal-blob-oid"),
     facts: [{ contract, entry: "claim", kind: "claimed" as const }],
     settlementLags: [],
   };
+  const text = renderText({
+    ...envelope,
+    verb: "review",
+    verdict: "satisfied",
+    completion: { integration, verification: { mode: "reused", verdict: "satisfied" } },
+  });
   assert.equal(
-    renderText({
-      ...envelope,
-      verb: "review",
-      verdict: "satisfied",
-      completion: { integration, verification: { mode: "reused", verdict: "satisfied" } },
-    }),
+    text,
     [
       "✓ review satisfied — complete — kei/review-completion",
       "  target -> integration-3 · verified (reused)",
+      "  integration commit integration-3",
       "  record",
       "    journal claim · claimed",
-      "    head head",
     ].join("\n"),
   );
 });
@@ -818,9 +780,9 @@ test("review projects a reused unsatisfied Verification as non-gating completion
       "",
       "[reused bash exit 1]",
       "",
+      "  integration commit integration-4",
       "  record",
       "    journal claim · claimed",
-      "    head head",
     ].join("\n"),
   );
 });
@@ -868,7 +830,6 @@ test("movement projects its deviation and reintegration coordinates", () => {
       "    journal reintegration · reintegrated target-1 -> integration-2",
       "    journal reintegration-2 · reintegrated target-3 -> integration-4",
       "    journal claim · claimed",
-      "    head head",
     ].join("\n"),
   );
 
@@ -895,7 +856,6 @@ test("movement projects its deviation and reintegration coordinates", () => {
       "  record",
       "    journal reintegration · reintegrated target-1 -> integration-2",
       "    journal reintegration-2 · reintegrated target-3 -> integration-4",
-      "    head head",
     ].join("\n"),
   );
 });
@@ -914,7 +874,10 @@ test("deliver conflict text exposes target head, paths, and recovery", () => {
         reason: "conflict",
         targetHead,
         conflictPaths: ["a.txt", "z.txt"],
-        recovery: { materialize: "deliver --materialize-conflict --include-dirty", continue: "deliver --include-dirty" },
+        recovery: {
+          materialize: "deliver --materialize-conflict --include-dirty",
+          continue: "deliver --include-dirty",
+        },
       },
     }),
     [

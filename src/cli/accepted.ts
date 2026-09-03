@@ -80,14 +80,11 @@ function acceptedAmendRegion(result: AmendResult): AmendRegionObservation {
   return {};
 }
 
-export function acceptedBind(
-  result: BindResult,
-  coordinates: Readonly<{ workspace: "worktree"; target?: string }>,
-): AcceptedBindResult {
+export function acceptedBind(result: BindResult, coordinates: Readonly<{ target?: string }>): AcceptedBindResult {
   return {
     ...acceptedEnvelope(result, undefined),
     verb: "bind",
-    workspace: coordinates.workspace,
+    ...(result.workspace === undefined ? {} : { workspace: result.workspace }),
     target: coordinates.target ?? null,
     ...acceptedRegion(result),
   };
@@ -109,6 +106,8 @@ export function acceptedDeliver(result: MutationResult<Delivery>, coordinate: Co
   return {
     ...acceptedEnvelope(result, coordinate),
     verb: "deliver",
+    tenderSnapshot: value.tenderSnapshot,
+    integration: { changeId: value.integration.changeId },
     ...(value.completion === undefined ? {} : { completion: value.completion }),
     ...(verificationVerdict === undefined ? {} : { verificationVerdict }),
     ...(value.verification === undefined ? {} : { verification: value.verification }),

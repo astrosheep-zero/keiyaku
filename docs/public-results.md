@@ -12,7 +12,7 @@ reports every fact admitted by that invocation, the addressed Contract's
 resulting head, its operation value, and any post-admission lags. The answer is
 invocation-scoped, not Contract state, a durable receipt, an effects log, or a
 result retained on a handle. Local and forwarded execution return this same
-answer without a transport-specific receipt.
+answer without a transport-specific receipt. Text names tender and integration as `tender commit` and `integration commit`, patch-id as `content identity (not commit)`, keeps ContractHead and journal blob custody private, and leaves typed fields unchanged.
 
 Callers may derive one pure finality projection from these public outcomes. It
 distinguishes a fully settled accepted outcome, an accepted outcome with

@@ -198,7 +198,6 @@ function acceptedRecord(
       columns,
     );
   }
-  receiptRow(record, " ", "head", [{ text: result.head, opaque: true }], columns);
   if (result.recoverySnapshot !== undefined)
     receiptRow(record, " ", "recovery snapshot", [{ text: result.recoverySnapshot, opaque: true }], columns);
   if (result.verb === "deliver") {
@@ -318,7 +317,8 @@ function continuationLines(result: AcceptedDeliverResult | AcceptedReviewResult,
 
 function renderAcceptedBind(result: AcceptedBindResult, columns: number): string {
   const lines = titleLines("✓", "bound", result.contract, columns);
-  receiptRow(lines, " ", "workspace", [{ text: "managed worktree" }], columns);
+  if (result.workspace !== undefined)
+    receiptRow(lines, " ", "workspace", [{ text: "worktree" }, { text: result.workspace.path, opaque: true }], columns);
   if (result.target === null) receiptRow(lines, " ", "no target", [], columns);
   else receiptRow(lines, " ", "target", [{ text: result.target, opaque: true }], columns);
   lines.push(...acceptedDeviations(result, columns), ...recordBlock(result, columns));
@@ -336,6 +336,16 @@ function renderAcceptedDeliver(result: AcceptedDeliverResult, columns: number): 
   const complete = result.completion !== undefined;
   const title = complete ? "delivered" : "deliver — not complete";
   const lines = titleLines("✓", title, result.contract, columns);
+  if (result.tenderSnapshot !== undefined)
+    receiptRow(lines, " ", "tender commit", [{ text: result.tenderSnapshot, opaque: true }], columns);
+  if (result.integration !== undefined)
+    receiptRow(
+      lines,
+      " ",
+      "content identity (not commit)",
+      [{ text: result.integration.changeId, opaque: true }],
+      columns,
+    );
   lines.push(...movementLines(result, columns), ...completionLines(result, columns));
   if (result.verification !== undefined) {
     lines.push(...stopLines(result.verification, columns, result.contract));
@@ -360,6 +370,8 @@ function renderAcceptedReview(result: AcceptedReviewResult, columns: number): st
     columns,
   );
   lines.push(...movementLines(result, columns), ...completionLines(result, columns));
+  if (result.completion !== undefined)
+    receiptRow(lines, " ", "integration commit", [{ text: result.completion.integration, opaque: true }], columns);
   if (result.verification !== undefined) {
     lines.push(...stopLines(result.verification, columns, result.contract));
   }

@@ -47,8 +47,9 @@ completed effects and is retried under the World-owned confirmation rule.
 
 ## Delivery And Placement
 
-Git prepares tenders, integration candidates, content-sensitive candidate
-identity, recorded delivery diffs, and disposable Verification scratch custody.
+Git prepares tenders, target-specific integration commits, content identity from
+patch-id (not a commit), recorded delivery diffs, and disposable Verification
+scratch custody.
 It returns mechanical data or typed failures; it does not judge Contract
 lifecycle or decode Contract documents. Document bytes used for delivery are
 opaque Git inputs, and Git never judges their currentness.
@@ -75,16 +76,7 @@ its carrier and field layout remain private Git mechanics. An unmatched record
 with no live operation is disposable custody, while a live operation without a
 matching receipt remains foreign.
 
-Targeted placement is serialized per target. It claims only when the target
-still matches the persisted integration predecessor and can move atomically to
-the candidate. If the target moved, Git may reintegrate the original tender
-against fresh target custody, preserving the tender and its content identity.
-Followability is a no-effects judgment before publication: incompatible
-checkouts, untracked displacement, or operational failure refuse placement and
-leave the claim and target untouched. Successful follow preserves unrelated
-workspace changes. Recovery of an interrupted follow belongs to
-[git-reconciliation.md](git-reconciliation.md); later placement cannot bypass a
-checkout that remains behind.
+Targeted placement is serialized per target and claims only when its persisted predecessor still matches. Followability is a no-effects judgment: incompatible checkouts or operational failure leave claim and target untouched; recovery belongs to [git-reconciliation.md](git-reconciliation.md). Refusals preserve the first actual physical category: staged, dirty-tracked, unmerged, or untracked; `conflict` is integration-only. Target lag names the appointed worktree against the frozen target. ContractHead and journal blob custody identifiers remain private to ordinary text.
 
 ## Custody And Cleanup
 

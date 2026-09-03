@@ -10,6 +10,11 @@ import { Repo, scopeForRepo } from "./repo.js";
 import { worktreeHooksOption } from "./configuration.js";
 import type { WorktreeHooks } from "./configuration.js";
 import type { RepositoryScope } from "../protocol/operations.js";
+import {
+  placeRegisterPath,
+  readManagedWorktreeAppointment,
+  type ContractWorkspaceLocation,
+} from "../workspace-place.js";
 
 type BindInput = Readonly<{
   repo: Repo;
@@ -23,23 +28,41 @@ type BindInput = Readonly<{
   gates?: unknown;
   hooks?: WorktreeHooks;
 }>;
-type BindResult<Handle> = Readonly<Omit<MutationResult<Handle>, "value"> & { keiyaku: Handle } & RegionObservation>;
+type BindResult<Handle> = Readonly<
+  Omit<MutationResult<Handle>, "value"> & { keiyaku: Handle; workspace?: ContractWorkspaceLocation } & RegionObservation
+>;
 type HandleFactory<Handle> = (contractId: ContractId, scope: RepositoryScope) => Handle;
 
-function acceptedBindResult<Handle>(result: MutationResult<Handle>, region: RegionObservation): BindResult<Handle> {
-  const { facts, head, lags, settlementLags, recoverySnapshot, pending, cleanup, leak, seatClose } = result;
+async function acceptedBindResult<Handle>(
+  result: MutationResult<Handle>,
+  region: RegionObservation,
+  scope: RepositoryScope,
+  contractId: ContractId,
+): Promise<BindResult<Handle>> {
+  const { value: keiyaku, ...base } = result;
+  const appointment = await readManagedWorktreeAppointment(scope, contractId);
+  const registerPath = placeRegisterPath(scope);
+  const appointmentLag =
+    appointment.kind === "appointed" ||
+    base.lags.some((lag) => lag.kind === "contract-file-failed" && lag.path === registerPath)
+      ? []
+      : [
+          {
+            kind: "contract-file-failed" as const,
+            worktree: scope.primaryWorktree,
+            path: registerPath,
+            diagnostic: appointment.kind === "failed" ? appointment.diagnostic : "Place appointment missing",
+          },
+        ];
   return {
-    kind: "accepted",
-    facts,
-    head,
-    keiyaku: result.value,
-    lags,
-    settlementLags,
-    pending,
-    ...(recoverySnapshot === undefined ? {} : { recoverySnapshot }),
-    ...(cleanup === undefined ? {} : { cleanup }),
-    ...(leak === undefined ? {} : { leak }),
-    ...(seatClose === undefined || seatClose.length === 0 ? {} : { seatClose }),
+    ...base,
+    keiyaku,
+    ...(appointment.kind !== "appointed" ? {} : { workspace: { kind: "worktree" as const, path: appointment.path } }),
+    lags: [...base.lags, ...appointmentLag],
+    pending:
+      appointmentLag.length === 0
+        ? base.pending
+        : [...base.pending, { surface: "reconciliation" as const, required: true }],
     ...region,
   };
 }
@@ -85,7 +108,8 @@ export async function bindKeiyaku<Handle>(
         ...completionInput({ scope: sourceScope, channel, contractId: id, value: toHandle, hooks }),
         accepted: admission,
       });
-      return acceptedBindResult(result, await observeRegion(sourceScope, channel, id, fork.document.region));
+      const region = await observeRegion(sourceScope, channel, id, fork.document.region);
+      return await acceptedBindResult(result, region, sourceScope, id);
     });
   }
   return bindMarkdownFromValues(values, "targetless", createHandle);
@@ -148,6 +172,6 @@ async function bindMarkdownFromValues<Handle>(
             admission: admission.admission,
             requireAccepted,
           });
-    return acceptedBindResult(result, await observeRegion(scope, channel, id, document.region));
+    return await acceptedBindResult(result, await observeRegion(scope, channel, id, document.region), scope, id);
   });
 }

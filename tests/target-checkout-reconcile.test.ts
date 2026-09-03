@@ -238,7 +238,7 @@ test("conflicting target bytes refuse placement before claimed or target movemen
       contractId: (await contract.state()).id,
       target: "refs/heads/main",
       path: realpathSync(repository.path),
-      reason: "conflict",
+      reason: "dirty-tracked",
       paths: ["delivered.txt"],
     },
   });
@@ -315,6 +315,23 @@ test("a staged candidate-changed path refuses placement with its exact path", as
   assert.equal(repository.run(["diff", "--cached", "--", "delivered.txt"]), stagedPatch);
   assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "staged conflict\n");
   assert.deepEqual(delivered.lags, []);
+});
+
+test("an unmerged candidate-changed path is classified before staged", async () => {
+  const { repository, contract } = await ordinaryCandidateFixture();
+  const base = repository.run(["rev-parse", "HEAD:delivered.txt"]).trim();
+  const ours = repository.run(["hash-object", "-w", "--stdin"], "ours\n").trim();
+  const theirs = repository.run(["hash-object", "-w", "--stdin"], "theirs\n").trim();
+  repository.run(["update-index", "--index-info"], `100644 ${base} 1\tdelivered.txt\n100644 ${ours} 2\tdelivered.txt\n100644 ${theirs} 3\tdelivered.txt\n`);
+  writeFileSync(resolve(repository.path, "delivered.txt"), "unresolved\n");
+  assert.equal(repository.run(["ls-files", "-u", "--", "delivered.txt"]).split("\n").filter(Boolean).length, 3);
+
+  const delivered = acceptedDelivery(await contract.deliver());
+  const placement = delivered.value.placement;
+  assert.ok(placement && "refusal" in placement && placement.refusal.kind === "checkout-not-followable");
+  if (!placement || !("refusal" in placement) || placement.refusal.kind !== "checkout-not-followable") return;
+  assert.equal(placement.refusal.reason, "unmerged");
+  assert.deepEqual(placement.refusal.paths, ["delivered.txt"]);
 });
 
 async function admitClaimWithoutFollow(
@@ -509,8 +526,7 @@ test("an incompatible relevant index is retained without mutation", async () => 
 test("a relevant staged change after classification fails into lag without overwriting it", async () => {
   const candidate = await claimedUnfollowedCandidateFixture();
   const { repository } = candidate;
-  const delivery = (await observeContract(await cachedRepositoryAt(repository.path), candidate.id)).state
-    ?.delivery?.data;
+  const delivery = (await observeContract(await cachedRepositoryAt(repository.path), candidate.id)).state?.delivery?.data;
   assert.ok(delivery);
   const marker = `${repository.path}/recovery-relevant-stage.marker`;
   const stagedBytes = "relevant concurrent stage\n";

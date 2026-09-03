@@ -171,12 +171,21 @@ test("audit renders the complete producer-bounded Verification summary as a subo
   assert.notEqual(summary, undefined);
   if (summary === undefined) return;
 
-  const text = renderText(audit, { columns: 20, color: false });
+  const text = renderText(audit, { columns: 400, color: false });
   const payload = `summary\n\n${summary}\n\n`;
-  assert.equal(text.includes(payload), true);
-  assert.equal(text.includes("final stderr diagnostic"), true);
+  assert.ok(text.includes(payload) && text.includes("final stderr diagnostic"));
   assert.ok(text.indexOf("✓ candidate") < text.indexOf("! verification"));
   assert.ok(text.indexOf(payload) < text.indexOf("✓ target"));
+  if (audit.report.candidate.kind === "ready") {
+    const { identity } = audit.report.candidate;
+    assert.match(
+      text,
+      new RegExp(
+        `tender commit ${identity.tenderSnapshot}[\\s\\S]*integration commit ${identity.integration.snapshot}[\\s\\S]*content identity \\(not commit\\) ${identity.integration.changeId}`,
+      ),
+    );
+  }
+  assert.doesNotMatch(text, new RegExp(audit.head));
 });
 
 test("audit refuses a claimed contract before observing its released workspace", async () => {

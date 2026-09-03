@@ -59,7 +59,7 @@ export type AcceptedEnvelope = Readonly<{
 export type AcceptedBindResult = AcceptedEnvelope &
   Readonly<{
     verb: "bind";
-    workspace: "worktree";
+    workspace?: Readonly<{ kind: "worktree"; path: string }>;
     target: string | null;
     completion?: never;
     verification?: never;
@@ -103,6 +103,8 @@ export type AcceptedAmendResult = AcceptedEnvelope &
 export type AcceptedDeliverResult = AcceptedEnvelope &
   Readonly<{
     verb: "deliver";
+    tenderSnapshot?: Delivery["tenderSnapshot"];
+    integration?: Readonly<Pick<Delivery["integration"], "changeId">>;
     completion?: Delivery["completion"];
     verificationVerdict?: "satisfied" | "unsatisfied";
     verification?: VerificationStop;

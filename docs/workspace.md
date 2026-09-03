@@ -30,22 +30,9 @@ to serve at most one Contract. Its allocation is deterministic and stable once
 written. Derived lookup indexes, filesystem occupancy, Git registration, and
 guidance do not replace that authority.
 
-Readers see one complete old or new register state. Writers serialize a fresh
-read, appointment or release, and durable replacement; a caller-held snapshot
-cannot authorize a later mutation. A corrupt or unavailable register is a
-reported appointment failure, never a partly repaired map. Only an active
-managed Contract can receive a missing appointment. A terminal Contract may
-retain its existing appointment for cleanup but is never newly appointed after
-release.
+Writers serialize a fresh read and durable replacement; corrupt or unavailable state is an appointment failure. Only active Contracts receive missing appointments; terminal ones retain an existing Place for cleanup.
 
-After admission, workspace composition appoints before Git realizes the
-worktree, then projects guidance. An appointment survives later physical failure
-and retry uses that same Place. Git receives the explicit appointment and does
-not derive a workspace path from Contract identity. Terminal release happens
-only after Git proves the appointed path is absent; a remaining path, hook
-failure, or register-write failure retains the appointment. Thus no reusable
-Place can hide managed bytes, and there is no release marker, free list,
-tombstone, cursor, or filesystem-derived appointment authority.
+After admission, composition appoints before Git realizes the worktree and retries use that Place. Release waits for Git to prove the path absent; failures retain the appointment, so no reusable Place hides managed bytes. Bind returns the appointed path, and target lag identifies that worktree subject.
 
 ## Derived Files And Cleanup
 

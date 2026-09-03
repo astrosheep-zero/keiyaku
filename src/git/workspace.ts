@@ -5,6 +5,7 @@ import type { ContractId, SnapshotId } from "../core/facts/types.js";
 import { contractPhysicalName, gitObjectId, mintSnapshotId, type GitObjectId } from "./identity.js";
 import { GitPlumbingError, runGit, runGitWithEnvironment, type GitRepository } from "./process.js";
 import { HANDOFF_RECEIPT_REF_NAMESPACE, readBlob, readRef, worktreeGitDirectory, writeBlob } from "./repository.js";
+import type { ContractWorkspaceLocation } from "../workspace-place.js";
 
 const WORKTREE_DIRECTORY = [".keiyaku", "wt"] as const;
 
@@ -252,8 +253,6 @@ export type WorkspaceChangeCounts = Readonly<{
   submodules: number;
 }>;
 
-export type ContractWorkspaceLocation = Readonly<{ kind: "worktree"; path: string }>;
-
 export type ContractWorkspaceMerge = Readonly<{
   head: SnapshotId;
   unmergedPaths: readonly string[];
@@ -271,8 +270,8 @@ export type ContractWorkspaceObservation =
   | Readonly<{ kind: "failed"; diagnostic: string }>;
 
 export type ContractTargetLag =
-  | Readonly<{ kind: "counted"; behind: number }>
-  | Readonly<{ kind: "unknown" }>
+  | Readonly<{ kind: "counted"; behind: number; subject?: ContractWorkspaceLocation }>
+  | Readonly<{ kind: "unknown"; subject?: ContractWorkspaceLocation }>
   | Readonly<{ kind: "none" }>;
 
 function countsOf(changes: WorkspaceChanges): WorkspaceChangeCounts {
@@ -307,15 +306,16 @@ export async function observeTargetLag(
   head: SnapshotId | null | undefined,
 ): Promise<ContractTargetLag> {
   if (head === undefined) return { kind: "none" };
-  if (head === null) return { kind: "unknown" };
+  const subject = { kind: "worktree" as const, path: resolve(workspace) };
+  if (head === null) return { kind: "unknown", subject };
   try {
     const text = (await runGit(repository, ["-C", workspace, "rev-list", "--count", `HEAD..${head}`]))
       .toString("utf8")
       .trim();
-    if (!/^[0-9]+$/u.test(text)) return { kind: "unknown" };
-    return { kind: "counted", behind: Number(text) };
+    if (!/^[0-9]+$/u.test(text)) return { kind: "unknown", subject };
+    return { kind: "counted", behind: Number(text), subject };
   } catch {
-    return { kind: "unknown" };
+    return { kind: "unknown", subject };
   }
 }
 

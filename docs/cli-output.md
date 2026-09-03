@@ -15,8 +15,7 @@ refusal points to the deepest applicable help without trying the command.
 Text is the primary readable projection and JSON is the complete typed
 projection of the same result. Rendering retains the meaningful distinctions
 between success, substantive refusal, retryable conflict, absent authority,
-and operational failure. The process outcome makes those categories available
-to callers without imposing a new lifecycle on the underlying product.
+and operational failure. Contract text labels tender and target integration as `tender commit` and `integration commit`, patch-id as `content identity (not commit)`, keeps ContractHead and journal blob custody out of ordinary text, and retains typed fields in JSON.
 
 ## Shared rendering
 

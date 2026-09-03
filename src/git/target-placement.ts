@@ -16,7 +16,7 @@ export type CheckoutNotFollowableRefusal = Readonly<{
   contractId: ContractId;
   target: string;
   path: string;
-  reason: "staged" | "conflict" | "untracked";
+  reason: "staged" | "dirty-tracked" | "unmerged" | "untracked";
   paths: readonly string[];
 }>;
 
@@ -79,10 +79,10 @@ async function commitTree(repository: GitRepository, snapshot: SnapshotId): Prom
 export async function observedTreeEqualsCandidate(
   repository: GitRepository,
   observed: SnapshotId | null,
-  candidate: SnapshotId,
+  snapshot: SnapshotId,
 ) {
   if (observed === null) return false;
-  return (await commitTree(repository, observed)) === (await commitTree(repository, candidate));
+  return (await commitTree(repository, observed)) === (await commitTree(repository, snapshot));
 }
 
 function checkoutRefusal(
@@ -125,11 +125,21 @@ async function changedPaths(
 async function dryRunRefusal(
   input: CheckoutObservation,
   scopes: readonly PhysicalScope[],
-): Promise<CheckoutNotFollowableRefusal> {
+): Promise<CheckoutNotFollowableRefusal | null> {
   const { repository, contractId, target, path, predecessor, candidate } = input;
   const changed = await changedPaths(repository, path, predecessor, candidate);
   const pathspecs = changed.map(literalPath);
-  if (pathspecs.length === 0) return checkoutRefusal(contractId, target, path, "conflict", []);
+  if (pathspecs.length === 0) return null;
+
+  const unmerged = await gitPaths(repository, path, [
+    "diff",
+    "--name-only",
+    "--diff-filter=U",
+    "-z",
+    "--",
+    ...pathspecs,
+  ]);
+  if (unmerged.length > 0) return checkoutRefusal(contractId, target, path, "unmerged", unmerged);
 
   const staged = await gitPaths(repository, path, [
     "diff",
@@ -143,22 +153,9 @@ async function dryRunRefusal(
   if (staged.length > 0) return checkoutRefusal(contractId, target, path, "staged", staged);
 
   const dirty = await gitPaths(repository, path, ["diff-files", "--name-only", "-z", "--", ...pathspecs]);
-  if (dirty.length > 0) return checkoutRefusal(contractId, target, path, "conflict", dirty);
+  if (dirty.length > 0) return checkoutRefusal(contractId, target, path, "dirty-tracked", dirty);
 
-  const unmerged = await gitPaths(repository, path, [
-    "diff",
-    "--name-only",
-    "--diff-filter=U",
-    "-z",
-    "--",
-    ...pathspecs,
-  ]);
-  if (unmerged.length > 0) return checkoutRefusal(contractId, target, path, "conflict", unmerged);
-
-  return (
-    (await untrackedRefusalWithinScopes(input, scopes, false)) ??
-    checkoutRefusal(contractId, target, path, "conflict", [])
-  );
+  return await untrackedRefusalWithinScopes(input, scopes, false);
 }
 
 type PhysicalScope = Readonly<{
@@ -187,10 +184,10 @@ async function physicalScope(worktree: string, candidatePath: string): Promise<P
 async function candidateEntryIsBlob(
   repository: GitRepository,
   path: string,
-  candidate: GitObjectId,
+  snapshot: GitObjectId,
   candidatePath: string,
 ): Promise<boolean> {
-  const output = await runGit(repository, ["-C", path, "ls-tree", "-z", candidate, "--", literalPath(candidatePath)]);
+  const output = await runGit(repository, ["-C", path, "ls-tree", "-z", snapshot, "--", literalPath(candidatePath)]);
   const records = output
     .toString("utf8")
     .split("\0")
@@ -205,14 +202,14 @@ async function candidateEntryIsBlob(
 async function destructionScopes(
   repository: GitRepository,
   path: string,
-  candidate: GitObjectId,
+  snapshot: GitObjectId,
   writes: readonly string[],
 ): Promise<readonly PhysicalScope[]> {
   const scopes = new Map<string, PhysicalScope>();
   for (const write of writes) {
     const scope = await physicalScope(path, write);
     if (scope === null) continue;
-    if (scope.kind === "directory" && !(await candidateEntryIsBlob(repository, path, candidate, write))) continue;
+    if (scope.kind === "directory" && !(await candidateEntryIsBlob(repository, path, snapshot, write))) continue;
     scopes.set(scope.path, scope);
   }
   return [...scopes.values()].sort((left, right) => left.path.localeCompare(right.path));

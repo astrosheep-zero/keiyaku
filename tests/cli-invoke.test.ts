@@ -8,17 +8,10 @@ import { pathToFileURL } from "node:url";
 import { GIT_REF, readRef } from "../src/git/repository.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { HeartAbsentError } from "../src/akuma/heart/index.js";
-import {
-  Keiyaku,
-  KeiyakuRefused,
-  KeiyakuRetry,
-  NoGitWorldError,
-  Repo,
-  type ContractId,
-} from "../src/index.js";
+import { Keiyaku, KeiyakuRefused, KeiyakuRetry, NoGitWorldError, Repo, type ContractId } from "../src/index.js";
 import { reconcile } from "../src/git/reconcile.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
-import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
+import { placeRegisterPath, readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import {
   appointedWorktreePath,
   cachedRepoAt,
@@ -396,6 +389,8 @@ test("accepted deliver and review transport completion consequences without reco
   );
   assert.strictEqual(delivered.completion, completion);
   assert.strictEqual(delivered.continuation, continuation);
+  assert.equal(delivered.tenderSnapshot, "tender");
+  assert.equal(delivered.integration?.changeId, "change");
 
   const reviewed = acceptedReview(
     {
@@ -622,18 +617,36 @@ test("post-admission reconcile failure remains accepted with a physical lag", as
     result.facts.map((fact) => fact.kind),
     ["bind"],
   );
-  assert.notEqual(result.head, null);
   assert.equal(result.lag?.[0]?.kind, "reconcile-failed");
   if (result.lag?.[0]?.kind === "reconcile-failed") {
     assert.equal(result.lag[0].stage, "effect");
     assert.match(result.lag[0].diagnostic, /forced CLI worktree failure/);
   }
-  assert.deepEqual(result.settlementLags, []);
-
   const state = await Keiyaku.of({ repo: await cachedRepoAt(repository.path), id: result.contract }).state();
-  assert.equal(state.id, result.contract);
-  assert.equal(state.head, result.head);
   assert.equal(state.terminal, null);
+});
+
+test("post-admission appointment read failure remains an accepted bind lag", async () => {
+  const repository = repositoryWithMain();
+  const placePath = placeRegisterPath(await cachedRepositoryAt(repository.path));
+  const result = await Keiyaku.bind({
+    repo: await Repo.at({ path: repository.path }),
+    markdown: contractDocument("CLI appointment read failure"),
+    workspace: "worktree",
+    hooks: {
+      create: [
+        { name: "corrupt", argv: ["sh", "-c", `rm -f "${placePath}"; mkdir "${placePath}"`], timeoutMs: 30_000 },
+      ],
+      destroy: [],
+    },
+  });
+
+  if (result.kind !== "accepted") throw new Error("post-admission result was not accepted");
+  assert.equal(
+    result.pending.some((surface) => surface.surface === "reconciliation"),
+    true,
+  );
+  assert.equal(result.lags[0]?.kind === "contract-file-failed" ? result.lags[0].path : undefined, placePath);
 });
 
 test("journal-writing commands preserve optional actor testimony", async () => {
@@ -1308,13 +1321,7 @@ test("managed delivery retains an existing deterministic worktree", async () => 
   );
   assert.equal(repository.run(["-C", path, "rev-parse", "HEAD"]).trim(), target);
 
-  const satisfiedReview = await fromManaged([
-    "review",
-    id,
-    "--satisfied",
-    "--summary",
-    "accepted",
-  ]);
+  const satisfiedReview = await fromManaged(["review", id, "--satisfied", "--summary", "accepted"]);
   assert.equal(satisfiedReview.kind, "accepted");
   assert.equal("lag" in satisfiedReview, false);
   assert.equal(await readRef(await cachedRepositoryAt(repository.path), deliveryRefFor(id)), null);

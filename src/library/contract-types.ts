@@ -9,8 +9,14 @@ import type { MutationResult } from "./mutation.js";
 import type { SettlementReport } from "../settlement/settle.js";
 import type { Keiyaku, AttestationVerdict } from "./contract.js";
 import type { TaskId } from "../task/identity.js";
+import type { ContractWorkspaceLocation } from "../workspace-place.js";
 
-export type BindResult = Readonly<Omit<MutationResult<Keiyaku>, "value"> & { keiyaku: Keiyaku } & RegionObservation>;
+export type BindResult = Readonly<
+  Omit<MutationResult<Keiyaku>, "value"> & {
+    keiyaku: Keiyaku;
+    workspace?: ContractWorkspaceLocation;
+  } & RegionObservation
+>;
 export type Fact = JournalEntry;
 export type ContractHistoryEvent =
   | Readonly<{ source: "journal"; fact: Fact }>

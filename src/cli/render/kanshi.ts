@@ -87,8 +87,14 @@ function targetFacts(row: ContractKanshiRow, abbreviations: ReadonlyMap<string, 
   const name = branchName(row.target);
   if (name === null) return ["no target"];
   const facts = [`target ${name}`];
-  if (row.targetLag.kind === "unknown") facts.push(`commits behind ${name} unknown`);
-  if (row.targetLag.kind === "counted") facts.push(`${row.targetLag.behind} commits behind ${name}`);
+  if (row.targetLag.kind === "unknown")
+    facts.push(
+      `commits behind ${name} unknown${row.targetLag.subject === undefined ? "" : ` · worktree ${row.targetLag.subject.path}`}`,
+    );
+  if (row.targetLag.kind === "counted")
+    facts.push(
+      `${row.targetLag.behind} commits behind ${name}${row.targetLag.subject === undefined ? "" : ` · worktree ${row.targetLag.subject.path}`}`,
+    );
   return [...facts, ...targetMovementFacts(row, abbreviations)];
 }
 

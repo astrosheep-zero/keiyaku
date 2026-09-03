@@ -193,6 +193,7 @@ export type Place = string & { readonly [placeBrand]: "Place" };
 declare const placeBrand: unique symbol;
 
 export type PlaceAppointment = Readonly<{ place: Place; contract: ContractId }>;
+export type ContractWorkspaceLocation = Readonly<{ kind: "worktree"; path: string }>;
 export type PlaceRegister = Readonly<{
   appointments: readonly PlaceAppointment[];
   byPlace: ReadonlyMap<Place, PlaceAppointment>;
