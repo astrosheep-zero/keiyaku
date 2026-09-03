@@ -59,6 +59,11 @@ witness settles it without rollback. Kill never discards a Tell. A durable resum
 promise with no adapter resume capability refuses without starting fresh, deleting
 the promise, or creating a recovery machine. There is no public resume verb.
 
+Schema remains a Tell input property and does not invent a second route or
+recovery machine; busy, interrupt, routing, and recovery stay shared with ordinary
+Tell. A schema Tell is answered by a Turn dedicated to that schema Tell. Drain
+groups ordinary Tells only until the next schema Tell.
+
 Interrupt asks the current Body to yield, then requires its explicit settlement
 and leash proof before atomically recording the Tell and waking a successor.
 The control caller does not manufacture a hung or unavailable result from
