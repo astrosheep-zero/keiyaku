@@ -61,6 +61,10 @@ the promise, or creating a recovery machine. There is no public resume verb.
 
 Interrupt asks the current Body to yield, then requires its explicit settlement
 and leash proof before atomically recording the Tell and waking a successor.
+The control caller does not manufacture a hung or unavailable result from
+elapsed time while that settlement is in progress; it may stop waiting through
+its own signal. Hung remains a Body/provider-custody fact, and a settled or hung
+Body is reported through the existing structured unavailable evidence.
 Kill similarly requires explicit settlement of the exact stopped Body before it
 can record a witness. Hung, untidy, held, or changed custody returns the existing
 unavailable evidence and never authorizes external signaling. Pause and stop are

@@ -6,6 +6,8 @@ import type { AllowedAction } from "./allowed.js";
 import { AkumaDecodeError, AkumaNotBornError, AkumaProviderError } from "./akuma-errors.js";
 import { AkumaHandle } from "./akuma-handle.js";
 import { POLL_MS, defaultWaitComplete, killAkumaWithRecovery } from "./akuma.js";
+import type { AkumaStatus } from "./akuma.js";
+import type { InterruptReceipt, KillEvidence } from "./akuma.js";
 import { bornStatus } from "./akuma-observe.js";
 import { loadArchetype } from "./archetype.js";
 import { activitySlice, readTell, readTurn, recordTell, type TellFact, type TurnOutcome } from "./heart/index.js";
@@ -16,11 +18,13 @@ import { settings as readSettings } from "../settings.js";
 import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
 import { schemaJsonText, type Schema } from "./schema.js";
+import { abortable } from "./abort.js";
 
 const HISTORY_LIMIT = 12;
 
 export type AkumaIdleOptions = Readonly<{ timeoutMs?: number }>;
 export type AkumaHistoryOptions = Readonly<{ before?: number; since?: number; limit?: number }>;
+export type AkumaSignalOptions = Readonly<{ signal?: AbortSignal }>;
 
 export type AkumaBirthInput = Readonly<{
   root: WorldRoot;
@@ -34,16 +38,27 @@ export type AkumaBirthInput = Readonly<{
 export type AkumaTellOptions<T> = Readonly<{
   schema: Schema<T>;
   interrupt?: boolean;
+  signal?: AbortSignal;
 }>;
+
+type TellAdmission =
+  | Readonly<{ kind: "recorded"; tellId: string }>
+  | Readonly<{ kind: "unavailable"; receipt: InterruptReceipt }>;
+
+function signalOption(value: unknown): AbortSignal | undefined {
+  if (value === undefined) return undefined;
+  if (!(value instanceof AbortSignal)) throw new TypeError("signal must be an AbortSignal");
+  return value;
+}
 
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function recordPlainTell(paths: AkumaPaths, id: AkuId, body: string, tellId: string): Promise<string> {
+async function recordPlainTell(paths: AkumaPaths, id: AkuId, body: string, tellId: string): Promise<TellAdmission> {
   const admitted = await recordTell(paths, { kind: "tell", id: tellId, body, recordedAt: new Date().toISOString() });
   if (admitted.kind === "not-born") throw new AkumaNotBornError(id);
-  return admitted.tell.id;
+  return { kind: "recorded", tellId: admitted.tell.id };
 }
 
 async function recordSchemaTell<T>(
@@ -55,11 +70,17 @@ async function recordSchemaTell<T>(
     options: AkumaTellOptions<T>;
     root: WorldRoot;
   }>,
-): Promise<string> {
+): Promise<TellAdmission> {
   const { paths, id, body, tellId, options, root } = input;
   if (options.interrupt === true) {
-    const interrupted = await new AkumaHandle(id, root).interruptSchema(body, schemaJsonText(options.schema), tellId);
-    return interrupted.admission.tellId;
+    const interrupted = await new AkumaHandle(id, root).interrupt(body, {
+      tellId,
+      schemaJson: schemaJsonText(options.schema),
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+    });
+    return interrupted.kind === "interrupted"
+      ? { kind: "recorded", tellId: interrupted.tell.admission.tellId }
+      : { kind: "unavailable", receipt: interrupted };
   }
   const recordedAt = new Date().toISOString();
   const tell = {
@@ -71,7 +92,7 @@ async function recordSchemaTell<T>(
   };
   const admitted = await recordTell(paths, tell);
   if (admitted.kind === "not-born") throw new AkumaNotBornError(id);
-  return admitted.tell.id;
+  return { kind: "recorded", tellId: admitted.tell.id };
 }
 
 function outcomeError(outcome: TurnOutcome): never {
@@ -156,17 +177,36 @@ export class Akuma {
   }
 
   async tell(text: string): Promise<string>;
-  async tell<T>(text: string, options: AkumaTellOptions<T>): Promise<T>;
-  async tell<T>(text: string, options?: AkumaTellOptions<T>): Promise<string | T> {
+  async tell(text: string, options: AkumaSignalOptions): Promise<string>;
+  async tell<T>(text: string, options: AkumaTellOptions<T>): Promise<T | InterruptReceipt>;
+  async tell<T>(
+    text: string,
+    options?: AkumaTellOptions<T> | AkumaSignalOptions,
+  ): Promise<string | T | InterruptReceipt> {
     if (typeof text !== "string") throw new TypeError("Akuma tell text must be a string");
+    const signal = signalOption(options?.signal);
+    signal?.throwIfAborted();
     const tellId = randomUUID();
+    const schemaOptions = options !== undefined && "schema" in options ? options : undefined;
     const recorded =
-      options === undefined
+      schemaOptions === undefined
         ? await recordPlainTell(this.paths, this.id, text, tellId)
-        : await recordSchemaTell({ paths: this.paths, id: this.id, body: text, tellId, options, root: this.root });
-    const outcome = await awaitTellOutcome(this.paths, recorded);
+        : await recordSchemaTell({
+            paths: this.paths,
+            id: this.id,
+            body: text,
+            tellId,
+            options: schemaOptions,
+            root: this.root,
+          });
+    if (recorded.kind === "unavailable") return recorded.receipt;
+    const recordedTellId = recorded.tellId;
+    const outcome = await abortable(
+      awaitTellOutcome(this.paths, recordedTellId),
+      signal ?? new AbortController().signal,
+    );
     if (outcome.kind !== "answered") outcomeError(outcome);
-    if (options === undefined) return outcome.answer;
+    if (schemaOptions === undefined) return outcome.answer;
     const raw = outcome.answerJson ?? outcome.answer;
     let parsed: unknown;
     try {
@@ -175,13 +215,28 @@ export class Akuma {
       throw new AkumaDecodeError(error instanceof Error ? error.message : "Answer is not valid JSON", outcome.answer);
     }
     try {
-      return options.schema.decode(parsed);
+      return schemaOptions.schema.decode(parsed);
     } catch (error) {
       throw new AkumaDecodeError(
         error instanceof Error ? error.message : "Answer failed schema decode",
         outcome.answer,
       );
     }
+  }
+
+  async status(): Promise<AkumaStatus> {
+    return (await bornStatus(this.paths, this.id, { aperture: "monitoring" })).status;
+  }
+
+  async interrupt(text: string, options: AkumaSignalOptions = {}): Promise<InterruptReceipt> {
+    if (typeof text !== "string") throw new TypeError("Akuma interrupt text must be a string");
+    if (typeof options !== "object" || options === null || Array.isArray(options)) {
+      throw new TypeError("Akuma interrupt options must be an object");
+    }
+    const signal = signalOption(options.signal);
+    signal?.throwIfAborted();
+    const operation = new AkumaHandle(this.id, this.root).interrupt(text, signal === undefined ? {} : { signal });
+    return await abortable(operation, signal ?? new AbortController().signal);
   }
 
   async idle(options: AkumaIdleOptions = {}): Promise<void> {
@@ -230,7 +285,12 @@ export class Akuma {
     });
   }
 
-  async kill(): Promise<void> {
-    await killAkumaWithRecovery(this.paths);
+  async kill(options: AkumaSignalOptions = {}): Promise<KillEvidence> {
+    if (typeof options !== "object" || options === null || Array.isArray(options)) {
+      throw new TypeError("Akuma kill options must be an object");
+    }
+    const signal = signalOption(options.signal);
+    signal?.throwIfAborted();
+    return await abortable(killAkumaWithRecovery(this.paths), signal ?? new AbortController().signal);
   }
 }

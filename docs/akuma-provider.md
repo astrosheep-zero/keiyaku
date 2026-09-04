@@ -39,6 +39,11 @@ history only: deleting retained activity never changes recovery, resume, fork,
 outcome, failure, or life. Complete answers and native fork coordinates remain
 Turn authority; sessions remain resume authority.
 
+Provider context compaction is retained as bounded narration when the native
+adapter reports it. Compaction is execution housekeeping, not a Turn failure,
+retry, or lifecycle transition; a compaction error may be narrated separately
+when the provider supplies an error detail.
+
 Option admission happens once before identity allocation. Readonly realization
 is an adapter fact, not a generic promise; unsupported enforcement remains an
 honest admitted gap. Prompt and structured-answer changes apply only when the

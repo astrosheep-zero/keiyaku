@@ -6,8 +6,8 @@ declarations, help, and executable specifications.
 
 The public caller path is `Akuma.birth`, synchronous `Akuma.select`, and
 `Akuma.tell`. Birth submits no prompt; selection performs no read. A selected
-Akuma exposes its identity, plain text Tell, and schema-decoded Tell answer,
-along with the lifecycle-only idle, history, and kill observations. The
+Akuma exposes its identity, status, plain text Tell, and schema-decoded Tell
+answer, along with the lifecycle-only idle, history, and kill observations. The
 composition facade owns root, alias, dispatch, and request routing around this
 product; those concerns do not become Akuma handle methods.
 
@@ -34,14 +34,18 @@ snapshots do not fabricate a cursor, result, or loss marker.
 
 Selection over an already resolved World and identity is synchronous; every
 operation that reads Heart, leash, or filesystem state is asynchronous. The
-surface contains no owner, born, Turn, status, wait, interrupt, call, fork,
-receipt, ledger, provider-event, or process-signaling handle.
+surface contains no owner, born, Turn, call, fork, receipt, ledger,
+provider-event, or process-signaling handle.
 
 Plain Tell returns the answer text for its exact Tell after ordinary wake and
 settlement. A Schema-bearing Tell instead awaits the terminal Turn bound to that
 Tell and decodes its raw answer; schema failure remains distinct from provider
 failure. Both forms retain the same busy, interrupt, routing, and recovery
-semantics.
+semantics. A caller signal may stop awaiting the result, but never retracts a
+Tell already admitted to Heart. Interrupt combines Body put-down with delivery
+of a new Tell and exposes its settlement receipt; kill exposes its kill evidence.
+Interrupt control has no local elapsed-time failure boundary: it waits for leash
+custody or durable Body settlement, unless the caller's signal stops waiting.
 Wait observes status until its Akuma-owned default completion judgment or a
 caller override; timeout returns a current observation rather than manufacturing
 a timeout lifecycle arm. Interrupt and kill expose only honest settlement or

@@ -18,7 +18,7 @@ import {
 } from "./terminal.js";
 
 export const DEFAULT_CONTEXT: TextRenderContext = { columns: 80, color: false };
-const SNAPSHOT_RULER = "────────────";
+const SNAPSHOT_RULER = "────────────────";
 const TIME_WIDTH = 5;
 const VERB_WIDTH = 6;
 
@@ -49,7 +49,7 @@ export function snapshotHeading(
   contract: DispatchAssociation | undefined,
 ): readonly string[] {
   const contractId = contract === undefined ? undefined : associatedContractId(contract);
-  return [identity(id, alias), SNAPSHOT_RULER, ...(contractId === undefined ? [] : [`└─ ${contractId}`])];
+  return [identity(id, alias), contractId === undefined ? SNAPSHOT_RULER : `└─ ${contractId}`];
 }
 
 function answeredHeading(id: string, alias: string | undefined): string {

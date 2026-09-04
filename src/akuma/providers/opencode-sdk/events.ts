@@ -28,7 +28,7 @@ export const OPENCODE_EVENT_DISPOSITIONS = {
   "permission.replied": "dropped",
   "session.status": "dropped",
   "session.idle": "dropped",
-  "session.compacted": "dropped",
+  "session.compacted": "note",
   "file.edited": "dropped",
   "todo.updated": "mapped",
   "command.executed": "dropped",
@@ -47,7 +47,7 @@ export const OPENCODE_EVENT_DISPOSITIONS = {
   "pty.exited": "dropped",
   "pty.deleted": "dropped",
   "server.connected": "dropped",
-} as const satisfies Record<NativeEventKind, "mapped" | "dropped">;
+} as const satisfies Record<NativeEventKind, "mapped" | "dropped" | "note">;
 
 // OpenCode may emit these server-side metadata events before the generated
 // SDK union catches up. They are all non-narrative and therefore remain drop
@@ -307,6 +307,10 @@ export function mapEvent(value: unknown, events: Emitter, state: State): void {
     return;
   }
   if (event.type === "session.error") return mapSessionError(properties, events, state);
+  if (event.type === "session.compacted") {
+    events.emit(noteEvent("Context compacted"));
+    return;
+  }
   if (event.type === "todo.updated") return mapTodo(properties, events, state);
   if (ignoredEvent(event.type)) return;
   events.emit({ type: "unknown", kind: typeof event.type === "string" ? event.type : "unknown" });

@@ -83,6 +83,7 @@ test("Akuma.birth has no prompt and select is synchronous", async () => {
     const born = await Akuma.birth("worker", { root: world, home, cwd: root });
     const selected = Akuma.select(world, born.id);
     assert.equal(selected.id, born.id);
+    assert.equal((await selected.status()).id, born.id);
     await born.idle();
     const page = await born.history();
     assert.equal(Array.isArray(page.rows), true);

@@ -25,7 +25,7 @@ export const CLAUDE_SYSTEM_DISPOSITIONS = {
   api_retry: "note",
   background_tasks_changed: "note",
   commands_changed: "drop",
-  compact_boundary: "drop",
+  compact_boundary: "note",
   control_request_progress: "control-progress",
   elicitation_complete: "drop",
   files_persisted: "note",
@@ -99,6 +99,7 @@ const CLAUDE_SYSTEM_NOTES = {
       ? "Retrying request"
       : `Retrying request ${attempt}/${maximum}`;
   },
+  compact_boundary: () => "Context compacted",
   background_tasks_changed: (message) => `Background tasks: ${Array.isArray(message.tasks) ? message.tasks.length : 0}`,
   files_persisted: (message) => {
     const files = Array.isArray(message.files) ? message.files.length : 0;

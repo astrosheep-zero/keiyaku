@@ -786,7 +786,7 @@ test("Akuma mutation snapshots omit observation context", () => {
   );
   const waitText = renderAkumaText(waitCommand(observation.status.id), waitInvocation(observation));
   const waitLines = waitText.split("\n");
-  assert.equal(waitLines[1], "────────────");
+  assert.equal(waitLines[1], "────────────────");
   assert.equal(waitLines.at(-1), "● STILL RUNNING");
   assert.equal(waitLines[waitLines.indexOf("tasks 1") - 1], "");
   assert.ok(waitLines.indexOf("tasks 1") < waitLines.indexOf("changes 0"));
@@ -854,7 +854,7 @@ test("Akuma mutation snapshots omit observation context", () => {
       ],
     },
   });
-  assert.match(emptyKill, new RegExp(`^${observation.status.id}\\n────────────`, "mu"));
+  assert.match(emptyKill, new RegExp(`^${observation.status.id}\\n────────────────`, "mu"));
   assert.equal(emptyKill.split("\n").at(-1), "✓ already stopped");
   const asleep = renderStatus(
     akumaObservation({

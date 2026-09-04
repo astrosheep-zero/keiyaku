@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { CONTROL_RESPONSE_MS, type TellResult, wakeRecordedTell } from "./body.js";
+import { abortableDelay } from "./abort.js";
 import {
   HeldAkumaLeash,
   activitySlice,
@@ -50,6 +51,23 @@ async function takeLeashUntil(paths: AkumaPaths, deadline: number): Promise<Held
     if (leash !== null) return leash;
     if (performance.now() >= deadline) return null;
     await wait(Math.min(POLL_MS, Math.max(0, deadline - performance.now())));
+  }
+}
+
+async function takeLeashUntilSignal(
+  paths: AkumaPaths,
+  bodySequence: number,
+  signal?: AbortSignal,
+): Promise<HeldAkumaLeash | Readonly<{ kind: "unavailable"; evidence: "hung" | "unavailable" }>> {
+  for (;;) {
+    signal?.throwIfAborted();
+    const leash = await HeldAkumaLeash.try(paths);
+    if (leash !== null) return leash;
+    const latestBody = (await readHeart(paths)).latestBody;
+    if (latestBody?.sequence === bodySequence && latestBody.hung !== undefined)
+      return { kind: "unavailable", evidence: "hung" };
+    if (latestBody?.sequence !== bodySequence) return { kind: "unavailable", evidence: "unavailable" };
+    await abortableDelay(POLL_MS, signal);
   }
 }
 async function recordTellBody(
@@ -181,7 +199,10 @@ export class AkumaHandle {
     return await wakeRecordedTell(this.paths, recorded.tellId);
   }
 
-  async interrupt(body: string): Promise<InterruptReceipt> {
+  async interrupt(
+    body: string,
+    options: Readonly<{ tellId?: string; schemaJson?: string; signal?: AbortSignal }> = {},
+  ): Promise<InterruptReceipt> {
     const request = await requestPause(this.paths, new Date().toISOString());
     if (request.kind === "not-born") {
       throw new AkumaNotBornError(this.id);
@@ -190,44 +211,34 @@ export class AkumaHandle {
     let putDown: "was-idle" | "self-aborted" = "was-idle";
     let leash = await HeldAkumaLeash.try(this.paths);
     if (leash === null) {
-      leash = await takeLeashUntil(this.paths, performance.now() + CONTROL_RESPONSE_MS);
+      const waited = await takeLeashUntilSignal(this.paths, request.body.sequence, options.signal);
+      if ("kind" in waited) return waited;
+      leash = waited;
       putDown = "self-aborted";
     }
-    if (leash === null) {
-      const body = (await readHeart(this.paths)).latestBody;
-      return {
-        kind: "unavailable",
-        evidence: body?.sequence === request.body.sequence && body.hung !== undefined ? "hung" : "unavailable",
-      };
-    }
-
-    const settledBody = (await readHeart(this.paths)).latestBody;
-    if (settledBody?.sequence === request.body.sequence && settledBody.hung !== undefined) {
-      try {
-        await leash.clearPause(this.paths);
-      } finally {
-        leash.release();
-      }
-      return { kind: "unavailable", evidence: "hung" };
-    }
-    if (settledBody?.sequence !== request.body.sequence || settledBody.end === undefined) {
-      try {
-        await leash.clearPause(this.paths);
-      } finally {
-        leash.release();
-      }
-      return { kind: "unavailable", evidence: "untidy" };
-    }
-    if (request.body.end !== undefined || settledBody.end !== "put-down") putDown = "was-idle";
-
     let recorded: Readonly<{ kind: "recorded"; tellId: string }>;
     try {
+      options.signal?.throwIfAborted();
+
+      const settledBody = (await readHeart(this.paths)).latestBody;
+      if (settledBody?.sequence === request.body.sequence && settledBody.hung !== undefined) {
+        await leash.clearPause(this.paths);
+        return { kind: "unavailable", evidence: "hung" };
+      }
+      if (settledBody?.sequence !== request.body.sequence || settledBody.end === undefined) {
+        await leash.clearPause(this.paths);
+        return { kind: "unavailable", evidence: "untidy" };
+      }
+      if (request.body.end !== undefined || settledBody.end !== "put-down") putDown = "was-idle";
+
+      options.signal?.throwIfAborted();
       const id = randomUUID();
       const admitted = await leash.recordInterruptTell(this.paths, {
         kind: "tell",
-        id,
+        id: options.tellId ?? id,
         body,
         recordedAt: new Date().toISOString(),
+        ...(options.schemaJson === undefined ? {} : { schemaJson: options.schemaJson }),
       });
       if (admitted.kind === "not-born") throw new AkumaNotBornError(this.id);
       recorded = { kind: "recorded", tellId: admitted.tell.id };
@@ -235,36 +246,6 @@ export class AkumaHandle {
       leash.release();
     }
     return { kind: "interrupted", putDown, tell: await wakeRecordedTell(this.paths, recorded.tellId) };
-  }
-
-  async interruptSchema(body: string, schemaJson: string, tellId: string): Promise<TellResult> {
-    const request = await requestPause(this.paths, new Date().toISOString());
-    if (request.kind === "not-born") throw new AkumaNotBornError(this.id);
-    let leash = await HeldAkumaLeash.try(this.paths);
-    if (leash === null) leash = await takeLeashUntil(this.paths, performance.now() + CONTROL_RESPONSE_MS);
-    if (leash === null) throw new Error("schema interrupt could not acquire Body leash");
-    try {
-      const settledBody = (await readHeart(this.paths)).latestBody;
-      if (settledBody?.sequence === request.body.sequence && settledBody.hung !== undefined) {
-        await leash.clearPause(this.paths);
-        throw new Error("schema interrupt found a hung Body");
-      }
-      if (settledBody?.sequence !== request.body.sequence || settledBody.end === undefined) {
-        await leash.clearPause(this.paths);
-        throw new Error("schema interrupt could not prove Body settlement");
-      }
-      const admitted = await leash.recordInterruptTell(this.paths, {
-        kind: "tell",
-        id: tellId,
-        body,
-        recordedAt: new Date().toISOString(),
-        schemaJson,
-      });
-      if (admitted.kind === "not-born") throw new AkumaNotBornError(this.id);
-    } finally {
-      leash.release();
-    }
-    return await wakeRecordedTell(this.paths, tellId);
   }
 
   async fork(input: Readonly<{ at: string }>): Promise<ForkReceipt> {

@@ -74,7 +74,7 @@ export const CODEX_NOTIFICATION_DISPOSITIONS = {
   "skills/changed": "drop",
   "thread/archived": "drop",
   "thread/closed": "drop",
-  "thread/compacted": "drop",
+  "thread/compacted": "note",
   "thread/deleted": "drop",
   "thread/environment/connected": "drop",
   "thread/environment/disconnected": "drop",
@@ -108,7 +108,7 @@ export const CODEX_ITEM_DISPOSITIONS = {
   agentMessage: "assistant",
   collabAgentToolCall: "tool",
   commandExecution: "tool",
-  contextCompaction: "drop",
+  contextCompaction: "note",
   dynamicToolCall: "tool",
   enteredReviewMode: "note",
   exitedReviewMode: "note",
@@ -314,6 +314,10 @@ function notificationAction(method: string, params: Readonly<Record<string, unkn
       return "Action approval review started";
     case "model/rerouted":
       return `Model rerouted${message === undefined ? "" : `: ${message}`}`;
+    case "thread/compacted":
+      return "Context compacted";
+    case "contextCompaction":
+      return "Context compaction completed";
     case "thread/goal/cleared":
       return "Goal cleared";
     case "thread/goal/updated":
