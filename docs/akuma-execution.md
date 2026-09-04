@@ -77,3 +77,7 @@ by an optional plugin signal carrying that Turn's sequence and outcome. That
 observation is a non-authoritative side effect: it cannot alter the outcome,
 delay its truth, attach a pre-Body listener, make birth reversible, or create
 rollback or continuation custody.
+
+When a Body reaches a durable terminal state, it may emit a separate optional
+Body-end observation carrying that Body's sequence and terminal reason. This is
+not an Akuma-wide idle event: a successor Body may begin immediately afterward.

@@ -8,6 +8,8 @@ export type PluginManifest = Readonly<{
 
 export type PluginOutcome = Readonly<{ kind: "answered"; text: string }> | Readonly<{ kind: "failed"; reason: string }>;
 
+export type PluginBodyEnd = "exited" | "broke-off" | "put-down" | "hung";
+
 export type PluginSignalMap = Readonly<{
   "akuma.called": Readonly<{
     akumaId: string;
@@ -18,6 +20,13 @@ export type PluginSignalMap = Readonly<{
     akumaId: string;
     turnSequence: number;
     outcome: PluginOutcome;
+    contractId?: string;
+  }>;
+  "akuma.body-ended": Readonly<{
+    akumaId: string;
+    bodySequence: number;
+    end: PluginBodyEnd;
+    diagnostic?: string;
     contractId?: string;
   }>;
 }>;

@@ -62,8 +62,18 @@ type TurnOutcomePluginRecorder = {
   observe(signal: PluginSignal): Promise<void>;
 };
 
+type BodyEndPluginRecorder = {
+  activations: number;
+  observations: Array<Readonly<{ signal: PluginSignal; end: string | undefined; hung: boolean }>>;
+  observe(signal: PluginSignal): Promise<void>;
+};
+
 const turnOutcomePluginGlobal = globalThis as typeof globalThis & {
   __keiyakuTurnOutcomePluginRecorder?: TurnOutcomePluginRecorder;
+};
+
+const bodyEndPluginGlobal = globalThis as typeof globalThis & {
+  __keiyakuBodyEndPluginRecorder?: BodyEndPluginRecorder;
 };
 
 function configureTurnOutcomePlugins(root: string): void {
@@ -99,6 +109,28 @@ function configureTurnOutcomePlugins(root: string): void {
         observer: { package: "./plugins/observer.mjs" },
       },
     }),
+  );
+}
+
+function configureBodyEndPlugin(root: string): void {
+  const plugins = join(root, "plugins");
+  mkdirSync(plugins, { recursive: true });
+  writeFileSync(
+    join(plugins, "observer.mjs"),
+    [
+      "export default {",
+      '  manifest: { id: "observer", apiVersion: 1 },',
+      "  activate() {",
+      "    globalThis.__keiyakuBodyEndPluginRecorder.activations += 1;",
+      '    return { signals: { "akuma.body-ended": (signal) => globalThis.__keiyakuBodyEndPluginRecorder.observe(signal) } };',
+      "  },",
+      "};",
+    ].join("\n"),
+  );
+  mkdirSync(join(root, ".keiyaku"), { recursive: true });
+  writeFileSync(
+    join(root, ".keiyaku", "settings.json"),
+    JSON.stringify({ plugins: { observer: { package: "./plugins/observer.mjs" } } }),
   );
 }
 
@@ -441,6 +473,68 @@ test("body births, admits native session, records the turn, and exits only when 
     assert.deepEqual(second.pending, []);
     assert.equal(second.latestBody?.end, "exited");
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("body-ended plugins observe the durable terminal Body fact", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-plugin-body-ended-"));
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abce" });
+    await initializeHeart(allocated.paths);
+    configureBodyEndPlugin(root);
+    const recorder: BodyEndPluginRecorder = {
+      activations: 0,
+      observations: [],
+      async observe(signal) {
+        const heart = await readHeart(allocated.paths);
+        this.observations.push({
+          signal,
+          end: heart.latestBody?.end,
+          hung: heart.latestBody?.hung !== undefined,
+        });
+      },
+    };
+    bodyEndPluginGlobal.__keiyakuBodyEndPluginRecorder = recorder;
+    await pluginRuntime({ world: await World.at(root) });
+    await eventually(() => recorder.activations === 1);
+
+    await driveAkumaBody(
+      {
+        paths: allocated.paths,
+        seed: {
+          id: allocated.id,
+          archetype: "claude",
+          provider: { name: "claude", kind: "claude-agent-sdk" },
+          options: {},
+          origin: { kind: "direct" },
+          cwd: root,
+        },
+        initialBody: "build it",
+      },
+      adapter({
+        starts: [],
+        events: [{ type: "session", coordinate: { sessionId: "body-ended-session" } }],
+        result: { kind: "answered", answer: "done", historyId: "body-ended-history" },
+      }),
+      { now: () => "2026-08-08T00:00:00.000Z" },
+    );
+
+    await eventually(() => recorder.observations.length === 1);
+    assert.deepEqual(recorder.observations, [
+      {
+        signal: {
+          kind: "akuma.body-ended",
+          akumaId: allocated.id,
+          bodySequence: 1,
+          end: "exited",
+        },
+        end: "exited",
+        hung: false,
+      },
+    ]);
+  } finally {
+    delete bodyEndPluginGlobal.__keiyakuBodyEndPluginRecorder;
     rmSync(root, { recursive: true, force: true });
   }
 });

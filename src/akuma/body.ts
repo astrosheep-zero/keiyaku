@@ -25,6 +25,7 @@ import {
   recordUndeliveredPendingTells,
   resolvePendingTellDisposition,
   type PendingTellDisposition,
+  type BodyEnd,
   type SessionFact,
   type Soul,
   type TellRow,
@@ -326,6 +327,40 @@ function turnOutcomeEmitter(launch: BodyLaunch, soul: Soul): (turnSequence: numb
   };
 }
 
+function bodyEndEmitter(
+  launch: BodyLaunch,
+  soul: Soul,
+): (bodySequence: number, end: BodyEnd | "hung", diagnostic?: string) => void {
+  let plugins: Promise<PluginRuntime> | undefined;
+  const reportDiagnostic = (message: string): void => {
+    void recordPluginDiagnostic(launch.paths, "body end", message);
+  };
+  return (bodySequence, end, diagnostic) => {
+    void (async () => {
+      try {
+        plugins ??= pluginRuntime({
+          world: await World.at(worldRootForAkumaPaths(launch.paths)),
+          reportDiagnostic,
+        });
+        const runtime = await plugins;
+        await runtime.emit(
+          {
+            kind: "akuma.body-ended",
+            akumaId: soul.id,
+            bodySequence,
+            end,
+            ...(diagnostic === undefined ? {} : { diagnostic }),
+            ...(launch.completion?.contractId === undefined ? {} : { contractId: launch.completion.contractId }),
+          },
+          reportDiagnostic,
+        );
+      } catch (error) {
+        await recordPluginDiagnostic(launch.paths, "body end", error);
+      }
+    })();
+  };
+}
+
 type BodyTurnEnd = "handoff" | undefined;
 
 async function runBodyTurns(input: BodyExecution): Promise<BodyTurnEnd> {
@@ -527,9 +562,11 @@ export async function driveAkumaBody(
   let pendingTellDisposition: BodyTurnEnd = undefined;
   let bodySequence: number | undefined;
   let decidedDisposition: PendingTellDisposition | null = null;
+  let emitBodyEnd: ReturnType<typeof bodyEndEmitter> | undefined;
   try {
     const soul = await bornSoul(launch, leash, runtime.now());
     if (soul === null) return;
+    emitBodyEnd = bodyEndEmitter(launch, soul);
     if (launch.seed === undefined && launch.initialBody === undefined) {
       const [heart, requests] = await Promise.all([readHeart(launch.paths), readNonterminalRequests(launch.paths)]);
       if (heart.pending.length === 0 && requests.length === 0) return;
@@ -572,6 +609,14 @@ export async function driveAkumaBody(
         at: runtime.now(),
         handoff: pendingTellDisposition === "handoff",
       });
+      const finalBody = (await readHeart(launch.paths)).latestBody;
+      if (
+        emitBodyEnd !== undefined &&
+        finalBody?.sequence === bodySequence &&
+        (finalBody.end !== undefined || finalBody.hung !== undefined)
+      ) {
+        emitBodyEnd(bodySequence, finalBody.hung === undefined ? finalBody.end! : "hung", finalBody.hung?.diagnostic);
+      }
     }
     leash.release();
     if (decidedDisposition !== null) {

@@ -114,13 +114,20 @@ function grokSessionMeta(
   config: ProviderExecution["config"],
   options: ProviderOptions,
 ): Pick<AcpDependencies, "freshSessionMeta" | "loadSessionMeta"> {
-  const configured = config === undefined ? {} : { freshSessionMeta: config, loadSessionMeta: config };
+  // Keiyaku does not implement Grok's reverse ask_user_question request, so
+  // keep that unsupported tool out of every session's advertised toolset.
+  const sessionMeta = { ...(config ?? {}), askUserQuestion: false };
+  const configured = { freshSessionMeta: sessionMeta, loadSessionMeta: sessionMeta };
   if (options.systemPrompt === undefined || options.systemPrompt.length === 0) return configured;
   if (options.systemPromptMode === "append")
-    return { ...configured, freshSessionMeta: { ...config, rules: options.systemPrompt } };
+    return { ...configured, freshSessionMeta: { ...sessionMeta, rules: options.systemPrompt } };
   if (options.systemPromptMode === "replace") {
     const meta = { systemPromptOverride: options.systemPrompt };
-    return { ...configured, freshSessionMeta: { ...config, ...meta }, loadSessionMeta: { ...config, ...meta } };
+    return {
+      ...configured,
+      freshSessionMeta: { ...sessionMeta, ...meta },
+      loadSessionMeta: { ...sessionMeta, ...meta },
+    };
   }
   return configured;
 }
@@ -163,6 +170,7 @@ export function createGrokBuildProvider(
       argv: argv(execution, input.options),
       ...(execution.env === undefined ? {} : { env: execution.env }),
     };
+    const sessionMeta = grokSessionMeta(execution.config, input.options);
     return withInterject(
       await startAcpSession(
         launch,
@@ -170,7 +178,8 @@ export function createGrokBuildProvider(
         {
           ...dependencies,
           interpretTool: interpretGrokTool,
-          ...grokSessionMeta(execution.config, input.options),
+          freshSessionMeta: { ...(dependencies.freshSessionMeta ?? {}), ...(sessionMeta.freshSessionMeta ?? {}) },
+          loadSessionMeta: { ...(dependencies.loadSessionMeta ?? {}), ...(sessionMeta.loadSessionMeta ?? {}) },
         },
         custody,
       ),

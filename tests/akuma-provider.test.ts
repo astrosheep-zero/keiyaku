@@ -773,6 +773,7 @@ test("Grok Build uses fixed launch arguments and admits queued interject on the 
   const controlled = controlledAcpProcess({ stallPrompt: true, interject: "queued" });
   let spawned: readonly string[] = [];
   const provider = createGrokBuildProvider(controlledGrokExecution, {
+    freshSessionMeta: { custom: "preserved" },
     spawnProcess: (input) => {
       spawned = input.argv;
       return controlled.process;
@@ -794,6 +795,10 @@ test("Grok Build uses fixed launch arguments and admits queued interject on the 
     options: { model: "grok-4.6", effort: "high" },
     session: { kind: "fresh" },
   }).result;
+  assert.deepEqual((controlled.sessionNew as { _meta?: Readonly<Record<string, unknown>> })._meta, {
+    custom: "preserved",
+    askUserQuestion: false,
+  });
   assert.equal(drive.receipts, undefined);
   assert.ok(drive.tell);
   assert.deepEqual(await drive.tell({ id: "tell-123", text: "change direction" }), {

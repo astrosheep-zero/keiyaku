@@ -74,3 +74,9 @@ it does not expose provider or continuation custody. Plugins cannot participate
 in providers, generic lifecycle verbs, operation inputs, or Settlement. In
 particular, plugin delivery does not make birth reversible, add a pre-Body
 listener, or create rollback or cross-process continuation behavior.
+
+Every Body that reaches a durable terminal state emits `akuma.body-ended` after
+that Body fact is durable. The signal identifies the Akuma and Body sequence
+and carries the terminal reason, including hung custody. It observes that Body
+only; a successor may already be running when the signal is delivered, and the
+signal does not redefine it as an Akuma-wide idle notification.

@@ -59,6 +59,7 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     });
     const handler = instance.signals?.["akuma.turn-outcome"];
     assert.ok(handler);
+    assert.equal(instance.signals?.["akuma.body-ended"], undefined);
     const called = instance.signals?.["akuma.called"];
     assert.ok(called);
     await called({
@@ -97,6 +98,7 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     });
     const fallbackHandler = fallback.signals?.["akuma.turn-outcome"];
     assert.ok(fallbackHandler);
+    assert.equal(fallback.signals?.["akuma.body-ended"], undefined);
     const externalCalled = fallback.signals?.["akuma.called"];
     assert.ok(externalCalled);
     await externalCalled({ kind: "akuma.called", akumaId: "aku/external" });

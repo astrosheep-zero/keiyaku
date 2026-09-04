@@ -8,6 +8,7 @@ export type {
   PluginHooks,
   PluginInstance,
   PluginManifest,
+  PluginBodyEnd,
   PluginOutcome,
   PluginSignal,
   PluginSignalMap,
