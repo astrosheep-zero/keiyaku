@@ -1,4 +1,5 @@
 import { HeldAkumaLeash, initializeHeart, readHeart, readSeal, readSoul, type Soul } from "./heart/index.js";
+import { acquireLeash } from "./control.js";
 import { allocateAkumaDirectory, type AllocatedAkuma, type AkumaPaths } from "./identity.js";
 import { abortableDelay } from "./abort.js";
 import type { DetachedProcessExit, OwnedProcess } from "../runtime/proc/run.js";
@@ -139,15 +140,6 @@ async function awaitBirth(paths: AkumaPaths, owned: OwnedProcess | undefined, si
   }
 }
 
-async function takeLeashUntil(paths: AkumaPaths, deadline: number): Promise<HeldAkumaLeash | null> {
-  for (;;) {
-    const leash = await HeldAkumaLeash.try(paths);
-    if (leash !== null) return leash;
-    if (performance.now() >= deadline) return null;
-    await abortableDelay(Math.min(POLL_MS, Math.max(0, deadline - performance.now())));
-  }
-}
-
 async function allocatedSoul(allocated: AllocatedAkuma): Promise<Soul> {
   const soul = await readSoul(allocated.paths);
   if (soul === null) throw new Error("Akuma birth settled without a soul");
@@ -219,7 +211,7 @@ async function settleLaunch(
 }
 
 async function awaitAsleepBirth(paths: AkumaPaths): Promise<void> {
-  const leash = await takeLeashUntil(paths, performance.now() + BIRTH_TIMEOUT_MS);
+  const leash = await acquireLeash(paths, { deadline: performance.now() + BIRTH_TIMEOUT_MS });
   if (leash === null) throw new Error("Forked Akuma did not finish its birth body");
   try {
     if ((await readHeart(paths)).latestBody?.end !== "exited") {

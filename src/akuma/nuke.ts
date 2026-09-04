@@ -2,11 +2,10 @@ import { lstat, readdir, rm, rmdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { nukeAliases } from "../alias/index.js";
 import type { WorldRoot } from "../world.js";
-import { CONTROL_RESPONSE_MS } from "./body.js";
-import { HeldAkumaLeash, classifyHeartSchema, readHeart, readKill, requestStop } from "./heart/index.js";
+import { HeldAkumaLeash, classifyHeartSchema, readHeart } from "./heart/index.js";
+import { acquireLeash } from "./control.js";
+import { settleAkumaKill } from "./akuma-handle.js";
 import { akuIdFromDirectoryName, akumaPaths, akumaRunRoot, type AkuId, type AkumaPaths } from "./identity.js";
-
-const POLL_MS = 100;
 
 type NukeAkumaEntry = Readonly<{ id: AkuId; paths: AkumaPaths }>;
 
@@ -20,43 +19,10 @@ async function hasAkumaCustody(paths: AkumaPaths): Promise<boolean> {
   }
 }
 
-function wait(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
-async function takeLeashUntil(paths: AkumaPaths, deadline: number): Promise<HeldAkumaLeash | null> {
-  for (;;) {
-    const leash = await HeldAkumaLeash.try(paths);
-    if (leash !== null) return leash;
-    if (performance.now() >= deadline) return null;
-    await wait(Math.min(POLL_MS, Math.max(0, deadline - performance.now())));
-  }
-}
-
 async function stopRunningAkuma(entry: NukeAkumaEntry): Promise<HeldAkumaLeash> {
-  const request = await requestStop(entry.paths, new Date().toISOString());
-  const leash = await takeLeashUntil(entry.paths, performance.now() + CONTROL_RESPONSE_MS);
-  if (leash === null) throw new Error(`Akuma ${entry.id} could not be stopped: unavailable`);
-  try {
-    if (request.kind === "already-killed" || request.kind === "already-stopped") return leash;
-    if ((await readKill(entry.paths, request.body.sequence)) !== null) return leash;
-    const current = await readHeart(entry.paths);
-    if (current.latestBody?.sequence !== request.body.sequence) {
-      if ((await readKill(entry.paths, request.body.sequence)) !== null) return leash;
-      throw new Error(`Akuma ${entry.id} could not be stopped: unavailable`);
-    }
-    if (current.latestBody.end !== "put-down") {
-      await leash.clearStop(entry.paths);
-      throw new Error(`Akuma ${entry.id} could not be stopped: untidy`);
-    }
-    if ((await leash.settleStop(entry.paths, request.body.sequence)) === null) {
-      throw new Error(`Akuma ${entry.id} could not be stopped: unavailable`);
-    }
-    return leash;
-  } catch (error) {
-    leash.release();
-    throw error;
-  }
+  const settled = await settleAkumaKill(entry.paths, undefined, true);
+  if (settled.leash !== undefined) return settled.leash;
+  throw new Error(`Akuma ${entry.id} could not be stopped: ${settled.evidence}`);
 }
 
 async function removeKnownRegularFile(path: string): Promise<void> {
@@ -196,7 +162,7 @@ export async function stopAkuma(world: WorldRoot): Promise<() => Promise<void>> 
       const leash =
         snapshot.soul !== null && snapshot.latestBody?.end === undefined
           ? await stopRunningAkuma(entry)
-          : await takeLeashUntil(entry.paths, performance.now() + CONTROL_RESPONSE_MS);
+          : await acquireLeash(entry.paths);
       if (leash === null) throw new Error(`Akuma ${entry.id} could not be verified stopped`);
       try {
         const after = await readHeart(entry.paths);

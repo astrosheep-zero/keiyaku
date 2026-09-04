@@ -2351,6 +2351,19 @@ test("interrupt reports hung when the Body does not release its held leash", asy
   }
 });
 
+test("kill returns unavailable when an unsettled Body keeps the leash", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-kill-held-"));
+  const value = await bornHistoryHandle(root, "1d1e0008");
+  try {
+    const started = performance.now();
+    assert.equal(await value.handle.kill(), "unavailable");
+    assert.ok(performance.now() - started < 3_000);
+  } finally {
+    value.holder.release();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("Archetype Markdown is strict call-time input with a durable option shape", async () => {
   const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-archetype-"));
   try {

@@ -1,6 +1,6 @@
 import { AkumaNotBornError, defaultWaitComplete, type AkumaStatus } from "./akuma.js";
 import { createAkumaProduct } from "./akuma-product.js";
-import { readBudgetedStatus, tellAkumaWithId } from "./akuma.js";
+import { readBudgetedStatus } from "./akuma.js";
 import { NO_DISPATCH_ASSOCIATION } from "./dispatch-association.js";
 import { EMPTY_CREATED_TASK_OBSERVATION } from "../task/created-observation.js";
 import type { WorldRoot } from "../world.js";
@@ -129,13 +129,7 @@ export async function executeTellAkuma(input: TellExecutionInput): Promise<Akuma
   const tell =
     input.tellId === undefined
       ? await handle.tell(input.body)
-      : await tellAkumaWithId({
-          worldPath: input.path,
-          id: input.id,
-          body: input.body,
-          tellId: input.tellId,
-          ...(input.recordedAt === undefined ? {} : { recordedAt: input.recordedAt }),
-        });
+      : await handle.tell(input.body, input.tellId, input.recordedAt);
   input.signal?.throwIfAborted();
   return fleetResultSchemas.tell.parse({
     akuma: input.id,
@@ -152,7 +146,9 @@ export type KillExecutionInput = Readonly<{
 export async function executeKillAkuma(input: KillExecutionInput): Promise<AkumaKillResult> {
   input.signal?.throwIfAborted();
   const handles = input.ids.map((id) => source(input.path).selectHandle({ id }));
-  const evidence = await Promise.all(handles.map(async (handle) => await handle.kill()));
+  const evidence = await Promise.all(
+    handles.map(async (handle) => await handle.kill(input.signal === undefined ? {} : { signal: input.signal })),
+  );
   input.signal?.throwIfAborted();
   return fleetResultSchemas.kill.parse({
     results: input.ids.map((id, index) => ({ id, evidence: evidence[index]! })),

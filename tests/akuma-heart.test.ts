@@ -6,7 +6,8 @@ import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
-import { killAkumaWithRecovery, tellAkumaWithId } from "../src/akuma/akuma.js";
+import { killAkumaWithRecovery } from "../src/akuma/akuma.js";
+import { AkumaHandle } from "../src/akuma/akuma-handle.js";
 import { LEASH_HELD_EXIT } from "../src/akuma/body.js";
 import {
   HeldAkumaLeash,
@@ -78,6 +79,23 @@ async function recordTell(
   tell: Readonly<{ id: string; body: string; recordedAt: string }>,
 ) {
   return await heartRecordTell(paths, { kind: "tell", ...tell });
+}
+
+async function tellFixture(
+  value: Awaited<ReturnType<typeof fixture>>,
+  input: Readonly<{
+    body: string;
+    tellId: string;
+    recordedAt?: string;
+    runtime?: Parameters<AkumaHandle["tell"]>[3];
+  }>,
+) {
+  return await new AkumaHandle(value.allocated.id, value.root).tell(
+    input.body,
+    input.tellId,
+    input.recordedAt,
+    input.runtime,
+  );
 }
 
 test("existing Heart opens adjudicate absence without recreating heart.db", async () => {
@@ -290,9 +308,7 @@ test("Tell observes Body admission after spawning its child", async () => {
   try {
     const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
     await leash.birth(value.allocated.paths, value.soul);
-    const result = await tellAkumaWithId({
-      worldPath: value.root,
-      id: value.allocated.id,
+    const result = await tellFixture(value, {
       body: "continue",
       tellId: "tell-registered-body",
       recordedAt: value.soul.createdAt,
@@ -329,9 +345,7 @@ test("Tell reports spawn failure and leaves the Tell pending", async () => {
     const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
     await leash.birth(value.allocated.paths, value.soul);
     leash.release();
-    const result = await tellAkumaWithId({
-      worldPath: value.root,
-      id: value.allocated.id,
+    const result = await tellFixture(value, {
       body: "continue",
       tellId: "tell-observation-denied",
       recordedAt: value.soul.createdAt,
@@ -359,9 +373,7 @@ test("Tell reports held only from its spawned child's private leash refusal", as
   try {
     const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
     await leash.birth(value.allocated.paths, value.soul);
-    const result = await tellAkumaWithId({
-      worldPath: value.root,
-      id: value.allocated.id,
+    const result = await tellFixture(value, {
       body: "continue",
       tellId: "tell-held",
       recordedAt: value.soul.createdAt,
@@ -399,9 +411,7 @@ test("Tell lets a durably told successor win against a losing child exit", async
     const born = (await HeldAkumaLeash.try(value.allocated.paths))!;
     await born.birth(value.allocated.paths, value.soul);
     born.release();
-    const result = await tellAkumaWithId({
-      worldPath: value.root,
-      id: value.allocated.id,
+    const result = await tellFixture(value, {
       body: "continue",
       tellId: "tell-won-before-exit",
       recordedAt: value.soul.createdAt,
@@ -456,9 +466,7 @@ test("Tell lets a successor Body win when its child exit races Heart observation
     const born = (await HeldAkumaLeash.try(value.allocated.paths))!;
     await born.birth(value.allocated.paths, value.soul);
     born.release();
-    const result = await tellAkumaWithId({
-      worldPath: value.root,
-      id: value.allocated.id,
+    const result = await tellFixture(value, {
       body: "continue",
       tellId: "tell-successor-race",
       recordedAt: value.soul.createdAt,
@@ -494,9 +502,7 @@ test("Tell gives a selected child exit one final Heart adjudication", async () =
     const born = (await HeldAkumaLeash.try(value.allocated.paths))!;
     await born.birth(value.allocated.paths, value.soul);
     born.release();
-    const result = await tellAkumaWithId({
-      worldPath: value.root,
-      id: value.allocated.id,
+    const result = await tellFixture(value, {
       body: "continue",
       tellId: "tell-final-heart-after-exit",
       recordedAt: value.soul.createdAt,
@@ -534,9 +540,7 @@ test("a Heart re-read cannot hide pre-admission child exit", async () => {
     const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
     await leash.birth(value.allocated.paths, value.soul);
     leash.release();
-    const result = await tellAkumaWithId({
-      worldPath: value.root,
-      id: value.allocated.id,
+    const result = await tellFixture(value, {
       body: "continue",
       tellId: "tell-pre-admission-exit",
       recordedAt: value.soul.createdAt,

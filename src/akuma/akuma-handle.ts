@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { CONTROL_RESPONSE_MS, type TellResult, wakeRecordedTell } from "./body.js";
-import { abortableDelay } from "./abort.js";
+import { handoffPendingTells, type TellResult, type TellWakeRuntime, wakeRecordedTell } from "./body.js";
 import {
   HeldAkumaLeash,
   activitySlice,
@@ -16,6 +15,7 @@ import {
   type ResumeCoordinate,
   type SessionFact,
 } from "./heart/index.js";
+import { acquireLeash } from "./control.js";
 import { parsePublicHistoryId, pathsForAkuId, type AkuId, type AkumaPaths } from "./identity.js";
 import {
   projectTurns,
@@ -45,75 +45,85 @@ function defaultWaitComplete(status: AkumaStatus): boolean {
     )
   );
 }
-async function takeLeashUntil(paths: AkumaPaths, deadline: number): Promise<HeldAkumaLeash | null> {
-  for (;;) {
-    const leash = await HeldAkumaLeash.try(paths);
-    if (leash !== null) return leash;
-    if (performance.now() >= deadline) return null;
-    await wait(Math.min(POLL_MS, Math.max(0, deadline - performance.now())));
-  }
-}
-
 async function takeLeashUntilSignal(
   paths: AkumaPaths,
   bodySequence: number,
   signal?: AbortSignal,
-): Promise<HeldAkumaLeash | Readonly<{ kind: "unavailable"; evidence: "hung" | "unavailable" }>> {
-  for (;;) {
-    signal?.throwIfAborted();
-    const leash = await HeldAkumaLeash.try(paths);
-    if (leash !== null) return leash;
-    const latestBody = (await readHeart(paths)).latestBody;
-    if (latestBody?.sequence === bodySequence && latestBody.hung !== undefined)
-      return { kind: "unavailable", evidence: "hung" };
-    if (latestBody?.sequence !== bodySequence) return { kind: "unavailable", evidence: "unavailable" };
-    await abortableDelay(POLL_MS, signal);
-  }
+): Promise<HeldAkumaLeash | Readonly<{ kind: "unavailable"; evidence: "hung" | "untidy" | "unavailable" }>> {
+  const leash = await acquireLeash(paths, { bodySequence, ...(signal === undefined ? {} : { signal }) });
+  if (leash !== null) return leash;
+  const latestBody = (await readHeart(paths)).latestBody;
+  if (latestBody?.sequence === bodySequence && latestBody.hung !== undefined)
+    return { kind: "unavailable", evidence: "hung" };
+  if (latestBody?.sequence === bodySequence && latestBody.end !== undefined)
+    return { kind: "unavailable", evidence: "untidy" };
+  return { kind: "unavailable", evidence: "unavailable" };
 }
 async function recordTellBody(
   paths: AkumaPaths,
   akuma: AkuId,
   body: string,
-  id = randomUUID(),
+  id: string = randomUUID(),
   recordedAt = new Date().toISOString(),
+  schemaJson?: string,
 ): Promise<Readonly<{ kind: "recorded"; tellId: string }>> {
-  const admitted = await recordTell(paths, { kind: "tell", id, body, recordedAt });
+  const admitted = await recordTell(paths, {
+    kind: "tell",
+    id,
+    body,
+    recordedAt,
+    ...(schemaJson === undefined ? {} : { schemaJson }),
+  });
   if (admitted.kind === "not-born") throw new AkumaNotBornError(akuma);
   return { kind: "recorded", tellId: admitted.tell.id };
 }
-async function killAkumaWithRecovery(
+export async function settleAkumaKill(
   paths: AkumaPaths,
-  recover: (paths: AkumaPaths) => Promise<void> = async () => {},
+  signal?: AbortSignal,
+  retainLeash = false,
+): Promise<Readonly<{ evidence: KillEvidence; leash?: HeldAkumaLeash }>> {
+  const request = await requestStop(paths, new Date().toISOString());
+  if (request.kind !== "requested") {
+    if (!retainLeash) return { evidence: request.kind };
+    const leash = await acquireLeash(paths, signal === undefined ? {} : { signal });
+    return leash === null ? { evidence: "unavailable" } : { evidence: request.kind, leash };
+  }
+  const target = request.body;
+  const waited = await takeLeashUntilSignal(paths, target.sequence, signal);
+  if ("kind" in waited) {
+    if ((await readKill(paths, target.sequence)) !== null) return { evidence: "killed" };
+    return { evidence: waited.evidence };
+  }
+  const leash = waited;
+  let retain = false;
+  try {
+    if ((await readKill(paths, target.sequence)) !== null) return { evidence: "killed" };
+    const settledBody = (await readHeart(paths)).latestBody;
+    if (settledBody?.sequence !== target.sequence) {
+      return { evidence: (await readKill(paths, target.sequence)) === null ? "unavailable" : "killed" };
+    }
+    if (settledBody.end !== "put-down") {
+      await leash.clearStop(paths);
+      return { evidence: "untidy" };
+    }
+    const settled = await leash.settleStop(paths, target.sequence);
+    if (settled === null) return { evidence: "unavailable" };
+    retain = retainLeash;
+    return retainLeash ? { evidence: "killed", leash } : { evidence: "killed" };
+  } finally {
+    if (!retain) leash.release();
+  }
+}
+
+export async function killAkumaWithRecovery(
+  paths: AkumaPaths,
+  recover?: (paths: AkumaPaths) => Promise<void>,
+  signal?: AbortSignal,
 ): Promise<KillEvidence> {
   try {
-    const request = await requestStop(paths, new Date().toISOString());
-    if (request.kind !== "requested") return request.kind;
-    const target = request.body;
-    const leash = await takeLeashUntil(paths, performance.now() + CONTROL_RESPONSE_MS);
-    if ((await readKill(paths, target.sequence)) !== null) {
-      leash?.release();
-      return "killed";
-    }
-    if (leash === null) {
-      if ((await readKill(paths, target.sequence)) !== null) return "killed";
-      const body = (await readHeart(paths)).latestBody;
-      return body?.sequence === target.sequence && body.hung !== undefined ? "hung" : "unavailable";
-    }
-    try {
-      const settledBody = (await readHeart(paths)).latestBody;
-      if (settledBody?.sequence !== target.sequence)
-        return (await readKill(paths, target.sequence)) === null ? "unavailable" : "killed";
-      if (settledBody.end !== "put-down") {
-        await leash.clearStop(paths);
-        return "untidy";
-      }
-      const settled = await leash.settleStop(paths, target.sequence);
-      return settled === null ? "unavailable" : "killed";
-    } finally {
-      leash.release();
-    }
+    return (await settleAkumaKill(paths, signal)).evidence;
   } finally {
-    void recover(paths).catch(() => undefined);
+    if (recover !== undefined) void recover(paths).catch(() => undefined);
   }
 }
 
@@ -194,9 +204,15 @@ export class AkumaHandle {
     }
   }
 
-  async tell(body: string): Promise<TellResult> {
-    const recorded = await recordTellBody(this.paths, this.id, body);
-    return await wakeRecordedTell(this.paths, recorded.tellId);
+  async tell(
+    body: string,
+    tellId?: string,
+    recordedAt?: string,
+    runtime?: TellWakeRuntime,
+    schemaJson?: string,
+  ): Promise<TellResult> {
+    const recorded = await recordTellBody(this.paths, this.id, body, tellId, recordedAt, schemaJson);
+    return await wakeRecordedTell(this.paths, recorded.tellId, runtime);
   }
 
   async interrupt(
@@ -309,8 +325,8 @@ export class AkumaHandle {
     }
   }
 
-  async kill(): Promise<KillEvidence> {
-    return await killAkumaWithRecovery(this.paths);
+  async kill(options: Readonly<{ signal?: AbortSignal }> = {}): Promise<KillEvidence> {
+    return await killAkumaWithRecovery(this.paths, handoffPendingTells, options.signal);
   }
 
   async lastAnswer(): Promise<LastAnswer> {
