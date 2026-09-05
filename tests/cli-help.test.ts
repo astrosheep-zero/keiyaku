@@ -140,10 +140,12 @@ test("amend leaf help enumerates the operation grammar", () => {
 test("deliver leaf help explains candidate capture, placement, review, and conflict continuation", () => {
   const help = renderContractHelp("deliver");
   assert.match(help, /The subject is the whole Contract\. An Arc names the chapter/u);
-  assert.match(help, /--include-dirty captures every non-ignored\s+change as an immutable commit/u);
+  assert.match(help, /--include-dirty captures the complete final\s+non-ignored worktree bytes through a private index/u);
+  assert.match(help, /shared index\s+is unmerged \(UU\); the branch and real index stay untouched/u);
   assert.match(help, /Delivering again replaces the candidate and stales any earlier review/u);
   assert.match(help, /Deliver never satisfies a review gate/u);
-  assert.match(help, /--materialize-conflict[\s\S]*resolve, then deliver with --include-dirty/u);
+  assert.match(help, /--materialize-conflict[\s\S]*preserved\s+as the handoff base/u);
+  assert.match(help, /After conflict resolution,[\s\S]*without git add or commit/u);
   assert.doesNotMatch(renderRootHelp(), /Capture the complete non-ignored worktree tree/u);
 });
 
