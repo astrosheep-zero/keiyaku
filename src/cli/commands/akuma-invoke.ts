@@ -20,7 +20,7 @@ import {
   type Keiyaku as KeiyakuContract,
   type Repo,
 } from "../../index.js";
-import { snapshotActivityLines } from "../render/akuma-activity.js";
+import { activityStream, waitObservationStream } from "../render/akuma-activity.js";
 import { renderAkumaText } from "../render/akuma.js";
 import type { TextRenderContext } from "../render/terminal.js";
 import type { Settings } from "../../settings.js";
@@ -121,29 +121,11 @@ function writeProgress(body: string): void {
   process.stderr.write(body.endsWith("\n") ? body : `${body}\n`);
 }
 
-/** The projection the shared snapshot renderer consumes. */
-type StreamedTimeline = Parameters<typeof snapshotActivityLines>[0];
-
 /**
- * One status' timeline without its newest entry. The newest entry is still
- * moving, and the window's last observation renders it as the command result.
- */
-function settledTimeline(timeline: StreamedTimeline): StreamedTimeline {
-  switch (timeline.kind) {
-    case "unborn":
-      return timeline;
-    case "open":
-      return { ...timeline, entries: timeline.entries.slice(0, -1) };
-    case "idle":
-      return { ...timeline, entries: timeline.entries.slice(0, -1) };
-  }
-}
-
-/**
- * The live half of an observe-mode call: the birth receipt prints as soon as the
- * identity exists, and every later observation prints the transcript rows that
- * have settled. Rows are rendered by the shared snapshot renderer, so what the
- * stream shows is always a prefix of the transcript the closing window renders.
+ * The live half of an observe-mode call: the birth receipt prints as soon as
+ * the identity exists, and every later observation prints the transcript rows
+ * that have settled since the previous one. The stream is append-only and
+ * shares the snapshot renderer, so a folded tool burst never reopens.
  */
 function callObservationStream(
   command: Extract<InvokedAkumaCommand, { command: "call" }>,
@@ -152,17 +134,15 @@ function callObservationStream(
 ): (status: AkumaStatus) => void {
   const context = resultContext();
   const receipt = renderAkumaText(command, { kind: "akuma", action: "call", result: born, world: input.path }, context);
+  const stream = activityStream(context);
   let opened = false;
-  let printedRows = 0;
   return (status) => {
     if (!opened) {
       opened = true;
       writeProgress(receipt);
     }
-    const settled = snapshotActivityLines(settledTimeline(status.timeline), context);
-    if (settled.length <= printedRows) return;
-    writeProgress(settled.slice(printedRows).join("\n"));
-    printedRows = settled.length;
+    const lines = stream(status.timeline);
+    if (lines.length > 0) writeProgress(lines.join("\n"));
   };
 }
 
@@ -199,6 +179,19 @@ async function promptBody(command: Readonly<{ prompt: AkumaPromptSource }>, inpu
   return command.prompt.kind === "stdin" ? await input.readStdin() : command.prompt.value;
 }
 
+/**
+ * The live half of a local wait: each observation round prints rows that
+ * settled since the previous round. The first sighting of an Akuma only
+ * establishes its baseline, so an already settled Akuma prints nothing extra.
+ */
+function waitProgressStream(): (statuses: readonly AkumaStatus[]) => void {
+  const render = waitObservationStream(resultContext());
+  return (statuses) => {
+    const lines = render(statuses);
+    if (lines.length > 0) writeProgress(lines.join("\n"));
+  };
+}
+
 async function invokeWait(
   command: Extract<InvokedAkumaCommand, { command: "wait" }>,
   input: InvokeInput,
@@ -216,6 +209,7 @@ async function invokeWait(
         ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
       },
       input.execution ?? localExecutionContext(),
+      command.output === "text" ? waitProgressStream() : undefined,
     ),
     ...(alias === undefined ? {} : { alias }),
   };

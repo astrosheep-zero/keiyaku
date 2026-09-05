@@ -74,6 +74,7 @@ const AKUMA_COMMAND_SPECS = {
       "A nested birth is clipped to its direct parent's frozen actions. status <aku/...|@alias> shows the born effective set.",
       "--schema reads a JSON Schema file for the answer contract; stdin remains the prompt source.",
       "With --contract, Dispatch succeeds first. If @name exists, the alias then moves.",
+      "While it waits, settled timeline rows stream on stderr; the final answer is written to stdout once.",
     ].join("\n"),
   },
   wait: {
@@ -82,6 +83,7 @@ const AKUMA_COMMAND_SPECS = {
     flags: { any: "boolean", all: "boolean", timeout: "value", json: "boolean" },
     usage: "wait <akuma-selector>... [--any | --all] [--timeout <duration>]",
     purpose: "Wait for one Akuma or an explicitly selected Akuma set.",
+    details: "Settled timeline rows stream on stderr as they settle; the final result stays on stdout.",
   },
   tell: {
     arity: 1,

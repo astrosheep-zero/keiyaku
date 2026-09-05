@@ -27,10 +27,6 @@ function dispatchLines(stage: DispatchStage): readonly string[] {
   return [`dispatch failed ${stage.failure.kind} ${safeText(stage.failure.diagnostic)}`];
 }
 
-function executionCwdLine(result: Extract<AkumaInvocationResult, { action: "call" }>["result"]): readonly string[] {
-  return [`cwd  ${safeText(result.execution.cwd)}`];
-}
-
 function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, context: TextRenderContext): string {
   if (result.schemaAnswer !== undefined) return JSON.stringify(result.schemaAnswer);
   const alias = result.result.alias.kind === "aliased" ? result.result.alias.alias.alias : undefined;
@@ -41,7 +37,6 @@ function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, co
     result.result.readonly?.enforcement === "none" ? [`! ${safeText(result.result.readonly.diagnostic)}`] : [];
   if (result.result.alias.kind === "failed")
     facts.push(`alias failed ${result.result.alias.failure.kind} ${safeText(result.result.alias.failure.diagnostic)}`);
-  const cwd = executionCwdLine(result.result);
   if (result.result.observation.kind === "detached") {
     const lines = [
       associatedIdentity(result.result.akuma, alias),
@@ -59,7 +54,6 @@ function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, co
         alias,
         contractId === undefined ? { kind: "none" } : { kind: "associated", contractId },
       ),
-      ...cwd,
       ...restraint,
       ...facts,
       `! error ${safeText(result.result.observation.failure.diagnostic)}`,
@@ -71,7 +65,7 @@ function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, co
       contract: contractId === undefined ? { kind: "none" } : { kind: "associated", contractId },
     },
     context,
-    { ...(alias === undefined ? {} : { alias }), facts: [...cwd, ...facts] },
+    { ...(alias === undefined ? {} : { alias }), facts: [...facts] },
   );
 }
 
@@ -81,11 +75,7 @@ export function renderAkumaText(
   context: TextRenderContext = DEFAULT_CONTEXT,
 ): string {
   const answer = akumaRawAnswer(result);
-  if (answer !== undefined) {
-    if (result.action !== "call") return answer;
-    const cwd = executionCwdLine(result.result);
-    return `${cwd.join("\n")}\n\n${answer}`;
-  }
+  if (answer !== undefined) return answer;
   if (result.action === "tell" && result.mode === "schema") return JSON.stringify(result.result);
   switch (result.action) {
     case "call":

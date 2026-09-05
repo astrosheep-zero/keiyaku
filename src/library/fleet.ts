@@ -196,6 +196,7 @@ export async function statusAkuma(input: AkumaAddressInput): Promise<AkumaObserv
 export async function waitAkuma(
   input: AkumaWaitInput,
   execution: ExecutionContext = localExecutionContext(),
+  observe?: (statuses: readonly AkumaStatus[]) => void,
 ): Promise<AkumaWaitResult> {
   const values = requireInput(input, "Keiyaku.wait input");
   for (const key of Object.keys(values)) {
@@ -235,6 +236,7 @@ export async function waitAkuma(
       ids: addressed.ids,
       completion: selected,
       ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      ...(observe === undefined ? {} : { observe }),
     }),
   );
 }

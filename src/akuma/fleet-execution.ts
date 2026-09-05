@@ -114,14 +114,18 @@ export type WaitExecutionInput = Readonly<{
   completion: "any" | "all";
   timeoutMs?: number;
   signal?: AbortSignal;
+  /** Reports every observation round to a live viewer; absent keeps the cheap completion probe. */
+  observe?: (statuses: readonly AkumaStatus[]) => void;
 }>;
 
 export async function executeWaitAkuma(input: WaitExecutionInput): Promise<AkumaWaitResult> {
   const deadline = input.timeoutMs === undefined ? undefined : performance.now() + input.timeoutMs;
   for (;;) {
-    if ((deadline !== undefined && performance.now() >= deadline) || (await probeWaitRound(input))) {
+    const expired = deadline !== undefined && performance.now() >= deadline;
+    if (expired || input.observe !== undefined || (await probeWaitRound(input))) {
       const round = await observeWaitRound(input.path, input.ids, input.signal);
       input.signal?.throwIfAborted();
+      input.observe?.(round.statuses);
       // The probe is not a completion receipt. Judge the actual returned values.
       if (roundComplete(round, input.completion) || (deadline !== undefined && performance.now() >= deadline)) {
         return fleetResultSchemas.wait.parse({

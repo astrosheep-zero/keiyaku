@@ -56,8 +56,10 @@ presence and attention is reversed: waiting is not absence, and an unsatisfied
 gate is not generic attention. `│` is the neutral continuation and ordinary-row
 mark and carries no state; `NAME // qualifier` frames a catalogue section
 rather than a banner. Facts are label-value rows joined
-with ` · `; `key=value`, decorative rulers, banners, and bracket state
-alphabets are not text vocabulary. Git identities render at 7 characters in
+with ` · `; `key=value`, banners, and bracket state alphabets are not text
+vocabulary. The horizontal rule is structure rather than decoration, with one
+blessed use: it is the boundary of an observation frame between that frame's
+identity and its content, and content otherwise stays mark-and-fact based. Git identities render at 7 characters in
 text and full length in JSON. Paths stay absolute and copyable where they are
 the answer, and stay out of board and catalogue rows where they are not.
 Absent facts are absent rows; zero counts and empty containers print nothing.
@@ -155,6 +157,14 @@ channel as the window advances, while its one complete final result stays on
 stdout. The stream restates the timeline's own rows in their final form rather
 than inventing a private vocabulary or standing in for the final result; a call
 that answers a schema, renders JSON, or detaches has no such stream.
+
+A wait reports the same kind of progress. It announces no birth and streams
+each newly settled timeline row on the progress channel through the same
+renderer, while its one complete final result stays on stdout; a wait that
+renders JSON, or one forwarded to a Body, has no such stream. A live stream
+never re-renders a settled row: when one observation cycle settles more tool
+rows than its streaming budget allows, the surplus folds in place as the same
+omission marker, and narrative rows always appear in order.
 
 When an exceptional Contract execution already confirmed admissions, the CLI
 reports the failure together with those receipts instead of projecting a usage

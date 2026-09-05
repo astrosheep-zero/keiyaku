@@ -3,7 +3,7 @@ import test from "node:test";
 import { changeId, contractHead, contractId, gate, snapshotId } from "../src/core/facts/types.js";
 import type { InvocationResult, Lag } from "../src/cli/result.js";
 import { renderCatalogText } from "../src/cli/render/catalog.js";
-import { snapshotActivityLines, snapshotText, waitText } from "../src/cli/render/akuma-activity.js";
+import { activityStream, FRAME_RULE, snapshotActivityLines, snapshotText, waitObservationStream, waitText } from "../src/cli/render/akuma-activity.js";
 import { parseAkumaStatus } from "../src/akuma/akuma.js";
 import { renderAkuma } from "../src/cli/render/kanshi-akuma.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
@@ -1423,4 +1423,106 @@ test("a sleeping worker reports its return as an event", () => {
     { columns: 80, color: false },
   );
   assert.match(returned, /^✓ came back aku\/worker\/abcd0001$/mu);
+});
+
+test("an observation frame places the rule between the frame and its content", () => {
+  const sleeping = parseAkumaStatus({
+    id: "aku/worker/abcd0001",
+    life: "asleep",
+    allowed: [],
+    timeline: idleAkumaSnapshot([], answeredOutcome(1, "the answer")),
+  });
+  const snapshot = snapshotText({ status: sleeping, contract: { kind: "none" } }, { columns: 80, color: false });
+  assert.deepEqual(snapshot.split("\n").slice(0, 2), ["aku/worker/abcd0001", FRAME_RULE]);
+
+  const returned = waitText(
+    {
+      kind: "akuma",
+      action: "wait",
+      result: {
+        completion: "all",
+        observations: [{ status: sleeping, contract: { kind: "none" }, createdTasks: { kind: "present", rows: [] } }],
+        unobserved: [],
+      },
+    },
+    { columns: 80, color: false },
+  );
+  assert.deepEqual(returned.split("\n").slice(0, 3), [
+    "✓ came back aku/worker/abcd0001",
+    FRAME_RULE,
+    "the answer",
+  ]);
+});
+
+test("the live stream folds a tool burst and never drops a narrative row", () => {
+  const lines = activityStream({ columns: 120, color: false })(
+    idleAkumaSnapshot([
+      snapshotRow(completedTool(1, "bash", { kind: "run", command: "first" })),
+      snapshotRow(completedTool(2, "bash", { kind: "run", command: "second" })),
+      snapshotRow(completedTool(3, "bash", { kind: "run", command: "third" })),
+      snapshotRow(completedTool(4, "bash", { kind: "run", command: "fourth" })),
+      snapshotRow({ kind: "said", sequence: 5, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "kept prose" }),
+      snapshotRow(completedTool(6, "bash", { kind: "run", command: "sixth" })),
+      snapshotRow(completedTool(7, "bash", { kind: "run", command: "seventh" })),
+    ]),
+  );
+  const text = lines.join("\n");
+  assert.match(text, /first/u);
+  assert.match(text, /third/u);
+  assert.doesNotMatch(text, /fourth|sixth|seventh/u);
+  assert.match(text, /⋮ 1 omitted/u);
+  assert.match(text, /⋮ 2 omitted/u);
+  assert.ok(text.indexOf("kept prose") > text.indexOf("⋮ 1 omitted"));
+  assert.ok(text.indexOf("kept prose") < text.indexOf("⋮ 2 omitted"));
+});
+
+test("the live stream appends each settled chunk once and never regrows a marker", () => {
+  const stream = activityStream({ columns: 120, color: false });
+  const tool = (sequence: number) => snapshotRow(completedTool(sequence, "bash", { kind: "run", command: `c${sequence}` }));
+  const first = stream(idleAkumaSnapshot([tool(1), tool(2), tool(3), tool(4)]));
+  assert.match(first.join("\n"), /⋮ 1 omitted/u);
+  assert.equal(first.filter((line) => line.includes("c1")).length, 1);
+
+  const second = stream(idleAkumaSnapshot([tool(1), tool(2), tool(3), tool(4), tool(5), tool(6)]));
+  assert.doesNotMatch(second.join("\n"), /c1|c2|c3|c4|omitted/u);
+  assert.match(second.join("\n"), /c5/u);
+  assert.match(second.join("\n"), /c6/u);
+});
+
+test("the live stream settles rows without rendering the outcome row", () => {
+  const lines = activityStream({ columns: 120, color: false })(
+    idleAkumaSnapshot(
+      [snapshotRow(completedTool(1, "bash", { kind: "run", command: "kept" }))],
+      answeredOutcome(2, "the full answer"),
+    ),
+  );
+  assert.match(lines.join("\n"), /kept/u);
+  assert.doesNotMatch(lines.join("\n"), /the full answer|came back/u);
+});
+
+test("a wait stream leaves an already settled Akuma silent", () => {
+  const settled = parseAkumaStatus({
+    id: "aku/worker/abcd0001",
+    life: "asleep",
+    allowed: [],
+    timeline: idleAkumaSnapshot([], answeredOutcome(1, "the answer")),
+  });
+  const stream = waitObservationStream({ columns: 120, color: false });
+  assert.deepEqual(stream([settled]), []);
+  assert.deepEqual(stream([settled]), []);
+});
+
+test("a wait stream prints only rows that settle after its baseline", () => {
+  const running = (entries: Parameters<typeof openAkumaSnapshot>[0]) =>
+    parseAkumaStatus({ id: "aku/worker/abcd0002", life: "running", allowed: [], timeline: openAkumaSnapshot(entries) });
+  const stream = waitObservationStream({ columns: 120, color: false });
+  assert.deepEqual(stream([running([snapshotRow(completedTool(1, "bash", { kind: "run", command: "first" }))])]), []);
+  const streamed = stream([
+    running([
+      snapshotRow(completedTool(1, "bash", { kind: "run", command: "first" })),
+      snapshotRow(completedTool(2, "bash", { kind: "run", command: "second" })),
+    ]),
+  ]).join("\n");
+  assert.match(streamed, /first/u);
+  assert.doesNotMatch(streamed, /second/u);
 });

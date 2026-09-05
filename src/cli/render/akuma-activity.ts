@@ -21,6 +21,12 @@ export const DEFAULT_CONTEXT: TextRenderContext = { columns: 80, color: false };
 const TIME_WIDTH = 5;
 const VERB_WIDTH = 6;
 
+/** The one blessed ruler: the boundary between an observation frame and its content. */
+export const FRAME_RULE = "────────────────";
+
+/** Tool rows one observation cycle may print before the rest fold in place. */
+const STREAM_TOOL_BUDGET = 3;
+
 type FleetTimeline = AkumaObservation["status"]["timeline"];
 type FleetTimelineEntry = FleetTimeline["entries"][number];
 type FleetReportedFileChange = FleetTimeline["reportedChanges"][number];
@@ -47,7 +53,7 @@ export function snapshotHeading(
   contract: DispatchAssociation | undefined,
 ): readonly string[] {
   const contractId = contract === undefined ? undefined : associatedContractId(contract);
-  return [identity(id, alias), ...(contractId === undefined ? [] : [`-> ${contractId}`])];
+  return [identity(id, alias), ...(contractId === undefined ? [] : [`-> ${contractId}`]), FRAME_RULE];
 }
 
 function answeredHeading(id: string, alias: string | undefined): string {
@@ -252,6 +258,94 @@ export function snapshotActivityLines(
   return latest === undefined ? [] : groupedEntries([latest], context);
 }
 
+/**
+ * One status' timeline without its conclusion: the newest open entry is still
+ * moving, and an idle outcome is the command's final result rather than a
+ * settled row.
+ */
+function settledTimeline(snapshot: RenderedSnapshot): RenderedSnapshot {
+  switch (snapshot.kind) {
+    case "unborn":
+      return snapshot;
+    case "open":
+      return { ...snapshot, entries: snapshot.entries.slice(0, -1) };
+    case "idle": {
+      const { outcome: _outcome, ...rest } = snapshot;
+      return { ...rest, entries: snapshot.entries };
+    }
+  }
+}
+
+/**
+ * Append-only live view over successive settled snapshots of one Akuma. Each
+ * call reports the entries that settled since the previous call — never
+ * re-rendering an earlier row — and folds each tool burst beyond the streaming
+ * budget into one in-place omission marker, so a marker never grows.
+ */
+export function activityStream(context: TextRenderContext): (snapshot: RenderedSnapshot) => readonly string[] {
+  let emitted = 0;
+  let previousClock: string | undefined;
+  return (snapshot) => {
+    const entries = orderedSnapshotEntries(settledTimeline(snapshot));
+    const delta = entries.slice(emitted);
+    emitted = entries.length;
+    if (delta.length === 0) return [];
+    const lines: string[] = [];
+    let budget = STREAM_TOOL_BUDGET;
+    let omitted = 0;
+    const flushOmitted = (): void => {
+      if (omitted === 0) return;
+      lines.push(`${" ".repeat(TIME_WIDTH)} ⋮ ${omitted} omitted`);
+      omitted = 0;
+    };
+    for (const entry of delta) {
+      if (entry.kind === "gap") {
+        flushOmitted();
+        lines.push(`${" ".repeat(TIME_WIDTH)} ⋮ ${entry.count} omitted`);
+        continue;
+      }
+      const row = entry.row;
+      if (row.kind === "tool" && budget === 0) {
+        omitted += 1;
+        continue;
+      }
+      flushOmitted();
+      if (row.kind === "tool") budget -= 1;
+      const at = clock(row.at);
+      const changed = previousClock === undefined || at !== previousClock;
+      lines.push(...renderRow(row, context, false, eventPrefix(mark(row), label(row), changed ? at : undefined)));
+      previousClock = at;
+    }
+    flushOmitted();
+    return lines;
+  };
+}
+
+/**
+ * Live view over a wait's successive observation rounds, one append-only
+ * stream per selected Akuma. The first sighting of an Akuma only establishes
+ * its baseline, so an already settled Akuma streams nothing.
+ */
+export function waitObservationStream(
+  context: TextRenderContext,
+): (statuses: readonly AkumaObservation["status"][]) => readonly string[] {
+  const streams = new Map<string, (snapshot: RenderedSnapshot) => readonly string[]>();
+  return (statuses) => {
+    const lines: string[] = [];
+    for (const status of statuses) {
+      const known = streams.get(status.id);
+      if (known !== undefined) {
+        lines.push(...known(status.timeline));
+        continue;
+      }
+      const stream = activityStream(context);
+      streams.set(status.id, stream);
+      stream(status.timeline);
+    }
+    return lines;
+  };
+}
+
 type CreatedTaskRow = Extract<CreatedTaskObservation, { kind: "present" }>["rows"][number];
 
 function taskDispositionMark(disposition: CreatedTaskRow["disposition"]): string {
@@ -309,10 +403,11 @@ function answeredBlock(
   alias: string | undefined,
   columns: number,
 ): string {
+  const frame = `${answeredHeading(observation.status.id, alias)}\n${FRAME_RULE}`;
   const context = answerContextLines(observation, columns).join("\n");
-  if (context.length === 0) return `${answeredHeading(observation.status.id, alias)}\n${answer}`;
+  if (context.length === 0) return `${frame}\n${answer}`;
   const separator = answer.endsWith("\n") ? "\n" : "\n\n";
-  return `${answeredHeading(observation.status.id, alias)}\n${answer}${separator}${context}`;
+  return `${frame}\n${answer}${separator}${context}`;
 }
 
 type SnapshotView = Readonly<{
