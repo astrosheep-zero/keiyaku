@@ -39,7 +39,7 @@ type RegisteredHandler = Readonly<{
 
 export type PluginRuntime = Readonly<{
   emit(signal: PluginSignal, reportDiagnostic?: PluginDiagnostic): Promise<void>;
-  drain(): Promise<void>;
+  drain(kind?: keyof PluginSignalMap): Promise<void>;
 }>;
 
 type SelectedPlugin = Readonly<{
@@ -323,14 +323,16 @@ function deliver(
   entry: RegisteredHandler,
   signal: PluginSignal,
   reportDiagnostic: PluginDiagnostic | undefined,
-  inFlight: Set<Promise<void>>,
+  inFlight: Map<keyof PluginSignalMap, Set<Promise<void>>>,
 ): void {
   try {
     const delivery = Promise.resolve(entry.handler(signal as never)).catch((error) =>
       diagnostic(reportDiagnostic, entry.pluginId, "signal", error),
     );
-    inFlight.add(delivery);
-    void delivery.finally(() => inFlight.delete(delivery));
+    const deliveries = inFlight.get(signal.kind) ?? new Set<Promise<void>>();
+    deliveries.add(delivery);
+    inFlight.set(signal.kind, deliveries);
+    void delivery.finally(() => deliveries.delete(delivery));
   } catch (error) {
     diagnostic(reportDiagnostic, entry.pluginId, "signal", error);
   }
@@ -340,7 +342,7 @@ function deliverTo(
   handlers: readonly RegisteredHandler[],
   signal: PluginSignal,
   reportDiagnostic: PluginDiagnostic | undefined,
-  inFlight: Set<Promise<void>>,
+  inFlight: Map<keyof PluginSignalMap, Set<Promise<void>>>,
 ): void {
   for (const entry of handlers) {
     if (entry.kind === signal.kind) deliver(entry, signal, reportDiagnostic, inFlight);
@@ -369,7 +371,7 @@ async function createPluginRuntime(input: PluginRuntimeInput): Promise<PluginRun
   const settled = new Set<number>();
   const pending = new Map<number, PluginSignal[]>();
   const settledPromises: Promise<void>[] = [];
-  const inFlight = new Set<Promise<void>>();
+  const inFlight = new Map<keyof PluginSignalMap, Set<Promise<void>>>();
   let previousStarted = Promise.resolve();
   for (const [index, entry] of selected.entries()) {
     let releaseStarted!: () => void;
@@ -420,10 +422,17 @@ async function createPluginRuntime(input: PluginRuntimeInput): Promise<PluginRun
       for (const entry of deliveries) deliver(entry, signal, reportDiagnostic, inFlight);
       return Promise.resolve();
     },
-    async drain(): Promise<void> {
+    async drain(kind?: keyof PluginSignalMap): Promise<void> {
       const settle = async (): Promise<void> => {
         await Promise.all(settledPromises);
-        while (inFlight.size > 0) await Promise.all([...inFlight]);
+        for (;;) {
+          const pending =
+            kind === undefined
+              ? [...inFlight.values()].flatMap((deliveries) => [...deliveries])
+              : [...(inFlight.get(kind) ?? [])];
+          if (pending.length === 0) return;
+          await Promise.all(pending);
+        }
       };
       await Promise.race([settle(), new Promise<void>((resolve) => setTimeout(resolve, PLUGIN_DRAIN_TIMEOUT_MS))]);
     },

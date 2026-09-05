@@ -267,6 +267,7 @@ type BodyExecution = Readonly<{
   bodySequence: number;
   supervisor: BodySupervisor;
   runtime: BodyRuntime;
+  turnOutcome: TurnOutcomeEmitter;
 }>;
 
 async function prepareBodyExecution(
@@ -383,7 +384,7 @@ function turnOutcomeEmitter(launch: BodyLaunch, soul: Soul): TurnOutcomeEmitter 
   };
   const drain = async (): Promise<void> => {
     while (pending.size > 0) await Promise.all([...pending]);
-    if (plugins !== undefined) await (await plugins).drain();
+    if (plugins !== undefined) await (await plugins).drain("akuma.turn-outcome");
   };
   return { emit, drain };
 }
@@ -391,13 +392,13 @@ function turnOutcomeEmitter(launch: BodyLaunch, soul: Soul): TurnOutcomeEmitter 
 function bodyEndEmitter(
   launch: BodyLaunch,
   soul: Soul,
-): (bodySequence: number, end: BodyEnd | "hung", diagnostic?: string) => void {
+): (bodySequence: number, end: BodyEnd | "hung", diagnostic?: string) => Promise<void> {
   let plugins: Promise<PluginRuntime> | undefined;
   const reportDiagnostic = (message: string): void => {
     void recordPluginDiagnostic(launch.paths, "body end", message);
   };
-  return (bodySequence, end, diagnostic) => {
-    void (async () => {
+  return (bodySequence, end, diagnostic) =>
+    (async () => {
       try {
         plugins ??= pluginRuntime({
           world: await World.at(worldRootForAkumaPaths(launch.paths)),
@@ -415,85 +416,80 @@ function bodyEndEmitter(
           },
           reportDiagnostic,
         );
+        await (await plugins).drain("akuma.body-ended");
       } catch (error) {
         await recordPluginDiagnostic(launch.paths, "body end", error);
       }
     })();
-  };
 }
 
 type BodyTurnEnd = "handoff" | undefined;
 
 async function runBodyTurns(input: BodyExecution): Promise<BodyTurnEnd> {
-  const { launch, soul, adapter, bodySequence, supervisor, runtime } = input;
+  const { launch, soul, adapter, bodySequence, supervisor, runtime, turnOutcome } = input;
   let initial = launch.initialBody;
-  const emitTurnOutcome = turnOutcomeEmitter(launch, soul);
-  try {
-    for (;;) {
-      const launchTells = drainPendingTells(
-        supervisor.current().pending,
-        await readOpenBoundTurns(launch.paths, bodySequence),
-      );
-      if (supervisor.signal.aborted) {
-        await putDownIfControlled(launch.paths, supervisor, bodySequence, runtime.now);
-        return;
-      }
-      if (initial === undefined && launchTells.length === 0) {
-        const finished = await finishBodyIfIdle(launch.paths, { sequence: bodySequence, at: runtime.now() });
-        if (finished.kind === "finished") return;
-        if (finished.kind === "controlled") {
-          supervisor.cancel("control");
-          return;
-        }
-        continue;
-      }
-      const schema = launchTells.find((tell) => tell.schemaJson !== undefined)?.schemaJson ?? launch.initialSchemaJson;
-      const result = await driveTurn({
-        paths: launch.paths,
-        soul,
-        adapter,
-        bodySequence,
-        supervisor,
-        runtimeSpawn: runtime.spawnChild ?? spawnAkumaBody,
-        body: initial ?? "",
-        ...(initial === undefined ? {} : { call: initial }),
-        launchTells,
-        ...(schema === undefined ? {} : { schemaJson: schema }),
-        world: runtime.world,
-        externalCommands: runtime.externalCommands,
-        now: runtime.now,
-      });
-      if (result.kind === "hung") {
-        await failOpenBoundTurnsIfPresent(launch.paths, bodySequence, "Body hung with open bound Turns", runtime.now());
-        return;
-      }
-      if (result.kind === "stopped") {
-        await putDownIfControlled(launch.paths, supervisor, bodySequence, runtime.now);
-        return;
-      }
-      if (result.kind === "handoff") return "handoff";
-      if (result.kind === "resume-unsupported") {
-        await failOpenBoundTurnsIfPresent(
-          launch.paths,
-          bodySequence,
-          "resume-unsupported with open bound Turns",
-          runtime.now(),
-        );
-        await breakBody(launch.paths, { sequence: bodySequence, end: "broke-off", at: runtime.now() });
-        return;
-      }
-      const outcome = await persistTurn(launch.paths, result.turnSequence, result, runtime.now());
-      void emitTurnOutcome.emit(result.turnSequence, outcome);
-      if (outcome.outcome === "failed") {
-        await failOpenBoundTurnsIfPresent(launch.paths, bodySequence, outcome.diagnostic, runtime.now());
-        await breakBody(launch.paths, { sequence: bodySequence, end: "broke-off", at: runtime.now() });
-        return;
-      }
-      await supervisor.refresh();
-      initial = undefined;
+  for (;;) {
+    const launchTells = drainPendingTells(
+      supervisor.current().pending,
+      await readOpenBoundTurns(launch.paths, bodySequence),
+    );
+    if (supervisor.signal.aborted) {
+      await putDownIfControlled(launch.paths, supervisor, bodySequence, runtime.now);
+      return;
     }
-  } finally {
-    await emitTurnOutcome.drain();
+    if (initial === undefined && launchTells.length === 0) {
+      const finished = await finishBodyIfIdle(launch.paths, { sequence: bodySequence, at: runtime.now() });
+      if (finished.kind === "finished") return;
+      if (finished.kind === "controlled") {
+        supervisor.cancel("control");
+        return;
+      }
+      continue;
+    }
+    const schema = launchTells.find((tell) => tell.schemaJson !== undefined)?.schemaJson ?? launch.initialSchemaJson;
+    const result = await driveTurn({
+      paths: launch.paths,
+      soul,
+      adapter,
+      bodySequence,
+      supervisor,
+      runtimeSpawn: runtime.spawnChild ?? spawnAkumaBody,
+      body: initial ?? "",
+      ...(initial === undefined ? {} : { call: initial }),
+      launchTells,
+      ...(schema === undefined ? {} : { schemaJson: schema }),
+      world: runtime.world,
+      externalCommands: runtime.externalCommands,
+      now: runtime.now,
+    });
+    if (result.kind === "hung") {
+      await failOpenBoundTurnsIfPresent(launch.paths, bodySequence, "Body hung with open bound Turns", runtime.now());
+      return;
+    }
+    if (result.kind === "stopped") {
+      await putDownIfControlled(launch.paths, supervisor, bodySequence, runtime.now);
+      return;
+    }
+    if (result.kind === "handoff") return "handoff";
+    if (result.kind === "resume-unsupported") {
+      await failOpenBoundTurnsIfPresent(
+        launch.paths,
+        bodySequence,
+        "resume-unsupported with open bound Turns",
+        runtime.now(),
+      );
+      await breakBody(launch.paths, { sequence: bodySequence, end: "broke-off", at: runtime.now() });
+      return;
+    }
+    const outcome = await persistTurn(launch.paths, result.turnSequence, result, runtime.now());
+    void turnOutcome.emit(result.turnSequence, outcome);
+    if (outcome.outcome === "failed") {
+      await failOpenBoundTurnsIfPresent(launch.paths, bodySequence, outcome.diagnostic, runtime.now());
+      await breakBody(launch.paths, { sequence: bodySequence, end: "broke-off", at: runtime.now() });
+      return;
+    }
+    await supervisor.refresh();
+    initial = undefined;
   }
 }
 
@@ -619,8 +615,8 @@ async function finishBody(
   handoff: boolean,
   emitBodyEnd: ReturnType<typeof bodyEndEmitter> | undefined,
   now: () => string,
-): Promise<PendingTellDisposition | null> {
-  if (bodySequence === undefined || !(await heartExists(paths))) return null;
+): Promise<Readonly<{ decided: PendingTellDisposition | null; notification?: Promise<void> }>> {
+  if (bodySequence === undefined || !(await heartExists(paths))) return { decided: null };
   const body = (await readHeart(paths)).latestBody;
   if (body?.sequence === bodySequence && (body.end !== undefined || body.hung !== undefined))
     await failOpenBoundTurns(paths, {
@@ -630,9 +626,14 @@ async function finishBody(
     });
   const decided = await decidePendingTellDisposition(paths, { bodySequence, at: now(), handoff });
   const finalBody = (await readHeart(paths)).latestBody;
+  let notification: Promise<void> | undefined;
   if (emitBodyEnd && finalBody?.sequence === bodySequence && (finalBody.end || finalBody.hung))
-    emitBodyEnd(bodySequence, finalBody.hung === undefined ? finalBody.end! : "hung", finalBody.hung?.diagnostic);
-  return decided;
+    notification = emitBodyEnd(
+      bodySequence,
+      finalBody.hung === undefined ? finalBody.end! : "hung",
+      finalBody.hung?.diagnostic,
+    );
+  return { decided, ...(notification === undefined ? {} : { notification }) };
 }
 
 export async function driveAkumaBody(
@@ -649,10 +650,12 @@ export async function driveAkumaBody(
   let pendingTellDisposition: BodyTurnEnd = undefined;
   let bodySequence: number | undefined;
   let emitBodyEnd: ReturnType<typeof bodyEndEmitter> | undefined;
+  let emitTurnOutcome: TurnOutcomeEmitter | undefined;
   try {
     const prepared = await prepareBodyExecution(launch, leash, runtime, adapter);
     if (prepared === null) return;
     emitBodyEnd = bodyEndEmitter(launch, prepared.soul);
+    emitTurnOutcome = turnOutcomeEmitter(launch, prepared.soul);
     const body = await leash.recordBody(launch.paths, { leashTakenAt: runtime.now() });
     bodySequence = body.sequence;
     const supervisor = await BodySupervisor.open(launch.paths, body.sequence, leash);
@@ -663,12 +666,13 @@ export async function driveAkumaBody(
       bodySequence: body.sequence,
       supervisor,
       runtime,
+      turnOutcome: emitTurnOutcome,
     });
   } catch (error) {
     await preserveBodyFailure(launch.paths, leash, error, runtime.now());
     throw error;
   } finally {
-    const decided = await finishBody(
+    const finished = await finishBody(
       launch.paths,
       bodySequence,
       pendingTellDisposition === "handoff",
@@ -676,8 +680,10 @@ export async function driveAkumaBody(
       runtime.now,
     );
     leash.release();
-    if (decided !== null)
-      await resolveDecidedPendingTellDisposition(launch.paths, decided, runtime.spawnBody ?? spawnAkumaBody);
+    if (finished.decided !== null)
+      await resolveDecidedPendingTellDisposition(launch.paths, finished.decided, runtime.spawnBody ?? spawnAkumaBody);
+    if (finished.notification !== undefined) await finished.notification;
+    void emitTurnOutcome?.drain();
   }
 }
 
