@@ -277,11 +277,18 @@ export function executionCleanupLines(
 
 export function executionFailureLines(
   receipt: ExecutionReceipt,
+  category: string,
   diagnostic: string,
   columns: number,
 ): readonly string[] {
   const lines: string[] = [];
-  receiptRow(lines, "!", "execution failed after admission", [{ text: receipt.contractId, opaque: true }], columns);
+  receiptRow(
+    lines,
+    "!",
+    "execution failed after admission",
+    [{ text: category }, { text: receipt.contractId, opaque: true }],
+    columns,
+  );
   receiptPayload(lines, "diagnostic", diagnostic);
   for (const fact of receipt.facts)
     receiptRow(

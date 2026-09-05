@@ -110,6 +110,16 @@ export class KeiyakuRetry extends Error {
   }
 }
 
+export type PostAdmissionFailureCategory = "authority-corruption" | "type-error" | "error";
+
+export function postAdmissionFailureCategory(error: unknown): PostAdmissionFailureCategory {
+  return error instanceof AuthorityCorruptionError
+    ? "authority-corruption"
+    : error instanceof TypeError
+      ? "type-error"
+      : "error";
+}
+
 const contractLiveFailureSchema = z.union([
   z
     .object({
@@ -128,12 +138,7 @@ export function encodeContractLiveFailure(error: unknown): unknown | null {
   if (receipt !== undefined)
     return {
       kind: "post-admission-failure",
-      category:
-        error instanceof AuthorityCorruptionError
-          ? "authority-corruption"
-          : error instanceof TypeError
-            ? "type-error"
-            : "error",
+      category: postAdmissionFailureCategory(error),
       diagnostic: error instanceof Error ? error.message : String(error),
       receipt,
     };

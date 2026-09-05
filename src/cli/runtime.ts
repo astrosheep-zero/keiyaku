@@ -173,12 +173,14 @@ export async function runCliCommand(invocation: ParsedExecution): Promise<number
     const receipt = executionReceipt(error);
     if (receipt !== undefined) {
       const diagnostic = error instanceof Error ? error.message : String(error);
+      const { postAdmissionFailureCategory } = await import("../library/refusal.js");
+      const category = postAdmissionFailureCategory(error);
       const { executionFailureLines } = await import("./render/receipt.js");
       writeCliStream(
         process.stdout,
         command.output === "json"
-          ? JSON.stringify({ kind: "execution-failed", diagnostic, receipt })
-          : executionFailureLines(receipt, diagnostic, displayContext().columns).join("\n"),
+          ? JSON.stringify({ kind: "execution-failed", category, diagnostic, receipt })
+          : executionFailureLines(receipt, category, diagnostic, displayContext().columns).join("\n"),
       );
       return 3;
     }

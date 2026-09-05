@@ -245,3 +245,11 @@ test("cancellation cannot launder programming errors into operational stops", ()
     );
   }
 });
+
+test("untyped error codes and unproven AbortError names remain exceptional", () => {
+  const id = contractId("kei/stop");
+  const coded = Object.assign(new Error("internal bug"), { code: "EBUG" });
+  assert.throws(() => executionStop(id, "verification", coded), (actual) => actual === coded);
+  const abortError = Object.assign(new Error("not cancelled"), { name: "AbortError" });
+  assert.throws(() => executionStop(id, "verification", abortError), (actual) => actual === abortError);
+});

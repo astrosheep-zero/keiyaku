@@ -50,13 +50,9 @@ export function executionStop(
 ): ExecutionStop {
   if (error instanceof AuthorityCorruptionError || error instanceof TypeError) throw error;
   const cancelled =
-    (signal?.aborted === true && error === signal.reason) ||
-    (error instanceof Error && error.name === "AbortError") ||
-    (signal?.aborted === true && (error instanceof GitPlumbingError || error instanceof SqliteTransactionLockError));
-  const errno =
-    error instanceof Error && "code" in error && typeof error.code === "string" && /^E[A-Z0-9]+$/u.test(error.code);
-  if (!cancelled && !errno && !(error instanceof GitPlumbingError) && !(error instanceof SqliteTransactionLockError))
-    throw error;
+    signal?.aborted === true &&
+    (error === signal.reason || error instanceof GitPlumbingError || error instanceof SqliteTransactionLockError);
+  if (!cancelled && !(error instanceof GitPlumbingError) && !(error instanceof SqliteTransactionLockError)) throw error;
   return {
     kind: "execution-stopped",
     contractId,
