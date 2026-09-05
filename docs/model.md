@@ -26,6 +26,14 @@ most one terminal outcome. An impossible fold, malformed durable authority, or
 partial admission is corruption, surfaced at the package boundary as
 `AuthorityCorruptionError`, rather than a normal refusal or retry.
 
+A captured execution checkpoint is an interpretation, not testimony that the
+current invocation admitted anything. Completion may advance an existing
+Contract without inventing a leading act. Only newly admitted facts belong to
+that completion's execution progress; historical facts remain in its observed
+journal. Combining progress with a leading receipt preserves the addressed
+Contract's identity and does not turn a dependent's head into the leading head.
+Execution progress is transient and never a second recovery authority.
+
 ## Identity And Custody
 
 Public coordinates are complete, prefixed identities. Each product family owns

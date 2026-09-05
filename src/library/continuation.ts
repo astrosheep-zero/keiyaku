@@ -4,7 +4,7 @@ import { withGitReadObservation, type GitDecodeChannel } from "../git/read-obser
 import { reconcileDependentWorktree } from "../git/reconcile.js";
 import type { ReconcileResult } from "../git/reconcile.js";
 import { worktreePath } from "../git/workspace.js";
-import { continueDeliveryOperation } from "../protocol/deliver.js";
+import { continueDeliveryOperation, type DeliverValue } from "../protocol/deliver.js";
 import type { DocumentDerivation, PlacementStop, RepositoryScope } from "../protocol/operations.js";
 import { decodePlacementStop } from "../protocol/result-codec.js";
 import { concatenatePrivateStateSeatClose } from "../git/private-state-seat.js";
@@ -12,6 +12,8 @@ import type { AcceptedIntent } from "./mutation.js";
 import { ownerSchema } from "./result-codec.js";
 import { appointmentFor, readPlaceRegister } from "../workspace-place.js";
 import { z } from "zod";
+
+type CandidateCompletion = NonNullable<DeliverValue["completion"]>;
 
 export type ContinuationReport = Readonly<{
   claimed: readonly ContractId[];
@@ -81,9 +83,9 @@ function reverseDependents(
   return index;
 }
 
-function appendAccepted<Value>(
+function appendCompletionProgress<Value>(
   primary: AcceptedIntent<Value>,
-  child: Readonly<Pick<AcceptedIntent<unknown>, "facts" | "physical" | "seatClose">>,
+  child: Awaited<ReturnType<typeof continueDeliveryOperation>>["progress"],
 ): AcceptedIntent<Value> {
   const effects = [...(primary.physical?.effects ?? []), ...(child.physical?.effects ?? [])];
   const lag = [...(primary.physical?.lag ?? []), ...(child.physical?.lag ?? [])];
@@ -113,6 +115,7 @@ export async function continueDeliveredDependents<Value extends object>(
     channel: GitDecodeChannel;
     contractId: ContractId;
     accepted: AcceptedIntent<Value>;
+    completion: CandidateCompletion;
     deriveDocument: (state: ContractState) => DocumentDerivation;
     actor?: import("../core/facts/types.js").ActorId;
     signal?: AbortSignal;
@@ -125,12 +128,7 @@ export async function continueDeliveredDependents<Value extends object>(
   );
   const dependents = reverseDependents(world);
   const places = await readPlaceRegister(input.scope);
-  const initialTarget =
-    typeof input.accepted.value === "object" && input.accepted.value !== null && "completion" in input.accepted.value
-      ? ((input.accepted.value as { completion?: { integration?: import("../core/facts/types.js").SnapshotId } })
-          .completion?.integration ?? undefined)
-      : undefined;
-  const pending = [{ contractId: input.contractId, target: initialTarget }];
+  const pending = [{ contractId: input.contractId, target: input.completion.integration }];
   const attempted = new Set<ContractId>();
   const newlyClaimed = new Set<ContractId>([input.contractId]);
   const claimed: ContractId[] = [];
@@ -141,11 +139,8 @@ export async function continueDeliveredDependents<Value extends object>(
     candidate: RetainedDependent,
     predecessorTarget: import("../core/facts/types.js").SnapshotId | undefined,
   ): Promise<
-    Readonly<{
-      accepted: AcceptedIntent<Value>;
-      outcome: "claimed" | "stopped" | "skip";
-      stop?: ContinuationReport["stopped"][number]["stop"];
-    }>
+    | Readonly<{ outcome: "claimed" | "skip" | "physical-lag" }>
+    | Readonly<{ outcome: "stopped"; stop: ContinuationReport["stopped"][number]["stop"] }>
   > => {
     const contractId = candidate.state.id;
     if (
@@ -153,7 +148,7 @@ export async function continueDeliveredDependents<Value extends object>(
         (dependency) => newlyClaimed.has(dependency) || world.eligibility.get(dependency)?.terminal?.kind === "claimed",
       )
     ) {
-      return { accepted, outcome: "skip" };
+      return { outcome: "skip" };
     }
     attempted.add(contractId);
     if (predecessorTarget !== undefined && candidate.state.coordinates.workspace === "worktree") {
@@ -166,7 +161,7 @@ export async function continueDeliveredDependents<Value extends object>(
           predecessorTarget,
         );
         accepted = appendPhysical(accepted, reconciled);
-        if (reconciled.lag.length > 0) return { accepted, outcome: "stopped" };
+        if (reconciled.lag.length > 0) return { outcome: "physical-lag" };
       }
     }
     const child = await continueDeliveryOperation({
@@ -178,16 +173,14 @@ export async function continueDeliveredDependents<Value extends object>(
       ...(input.actor === undefined ? {} : { actor: input.actor }),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
-    accepted = appendAccepted(accepted, child.admission);
-    if (child.evidence.completion !== undefined) {
+    accepted = appendCompletionProgress(accepted, child.progress);
+    if (child.kind === "completed") {
       newlyClaimed.add(contractId);
       pending.push({ contractId, target: child.evidence.completion.integration });
-      return { accepted, outcome: "claimed" };
+      return { outcome: "claimed" };
     }
     const stop = child.evidence.placement;
-    if (stop === undefined) throw new Error("incomplete continuation is missing its placement stop");
     return {
-      accepted,
       outcome: "stopped",
       stop: "refusal" in stop && stop.refusal.kind === "terminal" ? { kind: "already-terminal" } : stop,
     };
@@ -199,9 +192,8 @@ export async function continueDeliveredDependents<Value extends object>(
       const contractId = candidate.state.id;
       if (attempted.has(contractId)) continue;
       const result = await process(candidate, parent.target);
-      accepted = result.accepted;
       if (result.outcome === "claimed") claimed.push(contractId);
-      if (result.outcome === "stopped" && result.stop !== undefined) stopped.push({ contractId, stop: result.stop });
+      if (result.outcome === "stopped") stopped.push({ contractId, stop: result.stop });
     }
   }
 
@@ -214,7 +206,7 @@ export async function continueDeliveredDependents<Value extends object>(
   };
 }
 
-export async function continueAcceptedCompletion<Value extends Readonly<{ completion?: unknown }>>(
+export async function continueAcceptedCompletion<Value extends Readonly<{ completion?: CandidateCompletion }>>(
   input: Readonly<{
     scope: RepositoryScope;
     channel: GitDecodeChannel;
@@ -225,6 +217,7 @@ export async function continueAcceptedCompletion<Value extends Readonly<{ comple
     signal?: AbortSignal;
   }>,
 ): Promise<AcceptedIntent<Value & Readonly<{ continuation?: ContinuationReport }>>> {
-  if (input.accepted.value.completion === undefined) return input.accepted;
-  return await continueDeliveredDependents(input);
+  const completion = input.accepted.value.completion;
+  if (completion === undefined) return input.accepted;
+  return await continueDeliveredDependents({ ...input, completion });
 }
