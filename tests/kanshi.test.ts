@@ -977,7 +977,7 @@ test("Contract namespace Tasks come from one Task board observation", async (t) 
   const segment = contractSegment(contract.id);
   assert.deepEqual(contractNamespace(contract.id), ["kei", segment]);
   const sibling = contractId("kei/other-contract");
-  writeTaskAuthority(world, taskDocument({ id: "task/root-unbound", title: "Root unbound", priority: 0 }));
+  writeTaskAuthority(world, taskDocument({ id: "task/root-standalone", title: "Root standalone", priority: 0 }));
   writeTaskAuthority(
     world,
     taskDocument({
@@ -1048,7 +1048,7 @@ test("Contract namespace Tasks come from one Task board observation", async (t) 
     false,
   );
   assert.equal(
-    expected.some((task) => task.id === "task/root-unbound"),
+    expected.some((task) => task.id === "task/root-standalone"),
     false,
   );
   assert.equal(

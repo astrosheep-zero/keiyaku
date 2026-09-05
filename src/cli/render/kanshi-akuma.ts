@@ -62,7 +62,7 @@ function akumaLabel(row: AkumaKanshiRow): string {
 function endpointFact(id: string, observed: string | undefined): string {
   // A bounded or failed Contract read leaves the disposition unknown; a parenthetical that
   // cannot name the reason is absent, while a complete read that established absence says so.
-  return observed === "missing" ? `bound to ${id} (missing)` : `bound to ${id}`;
+  return observed === "missing" ? `${id} (missing)` : id;
 }
 
 function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly string[] {
@@ -87,7 +87,7 @@ function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly
       row.life === "stranded" && "strandedReason" in row && row.strandedReason === "resume-unsupported"
         ? [life, ...activity, "resume unsupported"]
         : [life, ...activity];
-    const relation = row.contract === undefined ? ["unbound"] : [endpointFact(row.contract.id, row.contract.observed)];
+    const relation = row.contract === undefined ? [] : [endpointFact(row.contract.id, row.contract.observed)];
     const snapshot = row.snapshot;
     const snapshotLines = snapshot === undefined ? [] : latestActivityLines(snapshot, context);
     const aliases = akumaLabel(row);

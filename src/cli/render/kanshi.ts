@@ -320,16 +320,17 @@ function renderTasks(report: KanshiReport, context: TextRenderContext): readonly
   const rows = section.value.rows;
   if (rows.length === 0) return [];
   const rowLines: readonly (readonly string[])[] = rows.map((row) => {
-    const relation = row.contract === undefined ? ["unbound"] : [endpointFact(row.contract.id, row.contract.observed)];
+    const relation = row.contract === undefined ? [] : [endpointFact(row.contract.id, row.contract.observed)];
     const childFacts =
       row.children === undefined ? [] : [`children ${row.children.live} live · ${row.children.total} total`];
     const blockerFacts = (row.blockers ?? []).map((blocker) => `blocked ${blocker.id}`);
+    const association = relation.length === 0 ? "" : ` · ${relation.join(" · ")}`;
     if (context.columns > NARROW_COLUMNS) {
       return [
         identityLine(
           taskMark(row),
           row.id,
-          `· ${dispositionText(row.disposition)} · P${row.priority} · ${row.title} · ${relation.join(" · ")}`,
+          `· ${dispositionText(row.disposition)} · P${row.priority} · ${row.title}${association}`,
         ),
         ...plumbFacts([...childFacts, ...blockerFacts], context.columns),
       ];

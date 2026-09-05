@@ -6,6 +6,7 @@ import { renderCatalogText } from "../src/cli/render/catalog.js";
 import { snapshotActivityLines, snapshotText, waitText } from "../src/cli/render/akuma-activity.js";
 import { parseAkumaStatus } from "../src/akuma/akuma.js";
 import { renderAkuma } from "../src/cli/render/kanshi-akuma.js";
+import { renderKanshiText } from "../src/cli/render/kanshi.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
 import { renderText } from "../src/cli/render/text.js";
 import {
@@ -117,18 +118,44 @@ test("World roster names a bound Contract once without a bare unavailable parent
     contract: { id: contractId("kei/bound-contract"), observed },
   });
   const boundText = renderAkuma(akumaWorldReport([bound("terminal")]), { columns: 120, color: false }).join("\n");
-  assert.match(boundText, /bound to kei\/bound-contract/u);
+  assert.match(boundText, /· kei\/bound-contract$/mu);
+  assert.doesNotMatch(boundText, /bound to|unbound/u);
   assert.doesNotMatch(boundText, /->/u);
   const unresolved = renderAkuma(akumaWorldReport([bound("unavailable")]), { columns: 120, color: false }).join("\n");
-  assert.match(unresolved, /bound to kei\/bound-contract/u);
-  assert.doesNotMatch(unresolved, /unavailable/u);
+  assert.match(unresolved, /· kei\/bound-contract$/mu);
+  assert.doesNotMatch(unresolved, /bound to|unbound|unavailable/u);
   const missing = renderAkuma(akumaWorldReport([bound("missing")]), { columns: 120, color: false }).join("\n");
-  assert.match(missing, /bound to kei\/bound-contract \(missing\)/u);
+  assert.match(missing, /· kei\/bound-contract \(missing\)$/mu);
+  assert.doesNotMatch(missing, /bound to|unbound/u);
   const free = renderAkuma(akumaWorldReport([activityAkumaRow("aku/worker/22220002", "asleep", snapshot)]), {
     columns: 120,
     color: false,
   }).join("\n");
-  assert.match(free, /unbound/u);
+  assert.match(free, /○ aku\/worker\/22220002 · asleep · 5s$/mu);
+  assert.doesNotMatch(free, /bound to|unbound/u);
+  assert.doesNotMatch(free, /·\s*$/mu);
+});
+
+test("World status task rows state a Contract association only when one exists", () => {
+  const taskRow = {
+    id: "task/standalone" as never,
+    title: "Standalone task",
+    state: "open" as const,
+    priority: 1 as const,
+    disposition: "ready" as const,
+    updatedAt: "2026-01-01T09:00:00.000Z",
+    bodyPresent: false,
+  };
+  const text = renderKanshiText(
+    {
+      ...akumaWorldReport([]),
+      tasks: { kind: "present", value: { root: worldRoot, rows: [taskRow], hasMore: false } },
+    },
+    { columns: 120, color: false },
+  );
+  assert.match(text, /○ task\/standalone · ready · P1 · Standalone task$/mu);
+  assert.doesNotMatch(text, /bound to|unbound/u);
+  assert.doesNotMatch(text, /·\s*$/mu);
 });
 
 test("World roster states the activity age only when it differs from the state age", () => {

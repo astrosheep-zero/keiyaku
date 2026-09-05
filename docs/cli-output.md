@@ -94,13 +94,14 @@ report. Shared presentation changes preserve the Akuma timeline's activity,
 time, continuity, and running-tool distinctions; they do not restyle that
 surface into ordinary fact rows.
 
-Roster, world-status, and task rows state each fact once in words. A bound
-Akuma reads `bound to <contract>` and a free one `unbound`, and the roster
-association never uses an arrow. A Contract association carries a parenthetical
-only when the read established a reason a person can act on, as `missing` does
-from a complete observation; an association a bounded or failed read could not
-resolve prints none. A row prints its activity age only when that age differs
-from the state age. Activity previews strip emphasis asterisks, code backticks,
+Roster, world-status, and task rows state each fact once in words. An
+association prints as the bare Contract id, as `· kei/...`, and a free row
+states no association at all; the association never uses an arrow. A Contract
+association carries a parenthetical only when the read established a reason a
+person can act on, as `missing` does from a complete observation; an
+association a bounded or failed read could not resolve prints none. A row
+prints its activity age only when that age differs from the state age.
+Activity previews strip emphasis asterisks, code backticks,
 heading hashes, and list bullets and collapse whitespace while keeping their
 width-aware truncation, undecorating the content without rewording it. A
 present but empty world-status section omits its header entirely instead of
