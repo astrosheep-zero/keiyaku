@@ -1884,17 +1884,11 @@ test("fork publishes a sleeping child with lineage and its native birth session"
     unlinkSync(deferred.settled);
     unlinkSync(deferred.turnStarted);
     unlinkSync(deferred.turnRelease);
-    let forkSettled = false;
-    forkPromise = world
-      .of({ id: source.id })
-      .fork({ at: "turn/1" })
-      .then((receipt) => {
-        forkSettled = true;
-        return receipt;
-      });
+    forkPromise = world.of({ id: source.id }).fork({ at: "turn/1" });
     await waitForFile(deferred.started);
-    await Promise.resolve();
-    assert.equal(forkSettled, false);
+    const childRows = (await world.list()).rows.filter((row) => row.id !== source.id);
+    assert.equal(childRows.length, 1);
+    assert.equal(await probeLeash(pathsForAkuId(root, childRows[0]!.id)), "free");
     writeFileSync(deferred.release, "release\n");
     const receipt = await forkPromise;
     await waitForFile(deferred.settled);
@@ -1974,17 +1968,11 @@ test("fork preserves the exact admitted readonly restraint byte-for-byte", async
     unlinkSync(deferred.settled);
     unlinkSync(deferred.turnStarted);
     unlinkSync(deferred.turnRelease);
-    let forkSettled = false;
-    forkPromise = world
-      .of({ id: source.id })
-      .fork({ at: "turn/1" })
-      .then((receipt) => {
-        forkSettled = true;
-        return receipt;
-      });
+    forkPromise = world.of({ id: source.id }).fork({ at: "turn/1" });
     await waitForFile(deferred.started);
-    await Promise.resolve();
-    assert.equal(forkSettled, false);
+    const childRows = (await world.list()).rows.filter((row) => row.id !== source.id);
+    assert.equal(childRows.length, 1);
+    assert.equal(await probeLeash(pathsForAkuId(root, childRows[0]!.id)), "free");
     writeFileSync(deferred.release, "release\n");
     const receipt = await forkPromise;
     await waitForFile(deferred.settled);
