@@ -1,0 +1,88 @@
+name: Completion refactor workbench
+
+on:
+  push:
+    branches: [codex/complete-contract-execution-20260905]
+    paths: ['.completion-refactor.py', '.github/workflows/completion-workbench.yml']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: completion-refactor-workbench
+  cancel-in-progress: false
+
+jobs:
+  workbench:
+    if: github.ref == 'refs/heads/codex/complete-contract-execution-20260905'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: codex/complete-contract-execution-20260905
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24.x
+          cache: npm
+      - uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.14.1
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --prefer-offline
+      - name: Configure fixture identity
+        run: |
+          git config --global user.name 'Keiyaku CI'
+          git config --global user.email 'keiyaku-ci@example.invalid'
+      - name: Apply explicitly supplied refactor
+        run: |
+          if test -f .completion-refactor.py; then python3 .completion-refactor.py; fi
+          npx prettier --write --print-width 120 'src/**/*.ts' 'scripts/**/*.ts'
+          git diff --check
+      - name: Record only this branch's generated changes
+        run: |
+          test "$(git branch --show-current)" = codex/complete-contract-execution-20260905
+          git add src scripts tests docs package.json package-lock.json tsconfig.tests.json
+          if ! git diff --cached --quiet; then
+            git -c user.name='Keiyaku refactor' -c user.email='refactor@example.invalid' commit -m 'refactor: complete contract execution ownership'
+            git push origin HEAD:refs/heads/codex/complete-contract-execution-20260905
+          fi
+          git rev-parse HEAD
+          git diff --stat 53a5e7229c2360b676134824e6828638b12af001 HEAD
+      - name: Typecheck
+        id: types
+        continue-on-error: true
+        run: npm run test:typecheck
+      - name: Architecture
+        id: architecture
+        continue-on-error: true
+        run: npm run test:architecture
+      - name: Lint
+        id: lint
+        continue-on-error: true
+        run: npm run lint
+      - name: Build
+        id: build
+        continue-on-error: true
+        run: npm run build
+      - name: Contract regression tests
+        id: regression
+        continue-on-error: true
+        run: >-
+          npm run test:focused -- --test-concurrency=1 --test-reporter=spec
+          tests/completion-progress.test.ts tests/contract-completion.test.ts
+          tests/library-contract-operations.test.ts tests/library-concurrency-placement.test.ts
+          tests/library-verification.test.ts tests/library-audit.test.ts
+          tests/git-delivery.test.ts tests/contract-forwarding-result.test.ts
+          tests/mutation-finality.test.ts tests/private-state-seat.test.ts
+          tests/protocol-run.test.ts tests/target-checkout-reconcile.test.ts
+          tests/settlement.test.ts tests/cli-invoke.test.ts tests/akuma-body-requests.test.ts
+      - name: Preserve failing checks
+        if: always()
+        run: |
+          test '${{ steps.types.outcome }}' = success
+          test '${{ steps.architecture.outcome }}' = success
+          test '${{ steps.lint.outcome }}' = success
+          test '${{ steps.build.outcome }}' = success
+          test '${{ steps.regression.outcome }}' = success
