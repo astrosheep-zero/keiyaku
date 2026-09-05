@@ -16,6 +16,10 @@ import {
   type JournalEntry,
 } from "../src/core/facts/types.js";
 import { decodeAbandonRefusal } from "../src/core/verbs/abandon.js";
+import { applyAmendDocument } from "../src/body/amend.js";
+import { decodeContractDocument } from "../src/body/decode.js";
+import { renderContractBody } from "../src/body/render.js";
+import type { ContractBody } from "../src/body/types.js";
 import { decodeAmendRefusal } from "../src/core/verbs/amend.js";
 import { decideAttestation, decodeAttestationRefusal } from "../src/core/verbs/attestation.js";
 import { decodeBindRefusal } from "../src/core/verbs/bind.js";
@@ -246,4 +250,55 @@ test("malformed inherited refusals, journals, and folds refuse without inventing
     kind: "delivery-missing",
     contractId: id,
   });
+});
+
+const amendmentBody: ContractBody = {
+  title: "Heading cycle",
+  context: "before\n",
+  objective: "objective\n",
+  design: "design\n",
+  region: ["src/**"],
+  criteria: [{ title: "Keep", body: "kept\n" }],
+  verification: [{ executor: "bash", script: "true" }],
+  extensions: [],
+};
+
+function currentAmendmentDocument() {
+  return decodeContractDocument(renderContractBody(amendmentBody));
+}
+
+test("an amendment document may open with one optional H1 heading", () => {
+  const operations = "## Replace: Objective\nwith heading\n";
+  const bare = applyAmendDocument(operations, currentAmendmentDocument());
+  const headed = applyAmendDocument(`# Contract terms\n\n${operations}`, currentAmendmentDocument());
+
+  assert.equal(headed.document, bare.document);
+  assert.deepEqual([...headed.changedSections].sort(), [...bare.changedSections].sort());
+  assert.equal(decodeContractDocument(headed.document).objective.trim(), "with heading");
+});
+
+test("an amendment still refuses every byte outside its H2 operations", () => {
+  const replacement = "## Replace: Objective\nchanged\n";
+  const refusals: ReadonlyArray<readonly [string, string]> = [
+    [`${replacement}\n# Late heading\n`, "amend operations may contain H2 sections only"],
+    [`# One\n\n# Two\n\n${replacement}`, "amend operations may contain H2 sections only"],
+    [`stray prose\n${replacement}`, "amend operations contain bytes outside H2 sections"],
+    [`# Title\nstray prose\n${replacement}`, "amend operations contain bytes outside H2 sections"],
+  ];
+
+  for (const [source, diagnostic] of refusals) {
+    assert.throws(
+      () => applyAmendDocument(source, currentAmendmentDocument()),
+      (error: unknown) => error instanceof TypeError && error.message === diagnostic,
+      source,
+    );
+  }
+});
+
+test("a bind document still requires exactly one H1 title", () => {
+  assert.throws(
+    () => decodeContractDocument("## Context\nfacts\n"),
+    (error: unknown) =>
+      error instanceof TypeError && error.message === "contract document requires exactly one H1 title",
+  );
 });

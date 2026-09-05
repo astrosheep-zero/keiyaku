@@ -50,11 +50,13 @@ function sections(document: DocumentNode): readonly SectionNode[] {
 
 function operationSections(document: DocumentNode): readonly Operation[] {
   if (document.frontmatter !== undefined) refusal("amend operations may not contain frontmatter");
-  if (indexedHeadings(indexDocument(document), { level: 1 }).length > 0)
+  const openedBy = document.children.find((node) => nonblank(document, node));
+  const heading = openedBy?.type === "section" && openedBy.level === 1 ? openedBy : undefined;
+  if (indexedHeadings(indexDocument(document), { level: 1 }).length > (heading === undefined ? 0 : 1))
     refusal("amend operations may contain H2 sections only");
-  if (document.children.some((node) => node.type !== "section" && nonblank(document, node))) {
+  const outside = [...document.children, ...(heading?.children ?? [])];
+  if (outside.some((node) => node.type !== "section" && nonblank(document, node)))
     refusal("amend operations contain bytes outside H2 sections");
-  }
   return sections(document).map((section) => {
     const title = section.title.trim();
     const match = /^(Add|Update|Replace|Append|Remove):[ ]+(.+)$/.exec(title);

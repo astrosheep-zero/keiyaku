@@ -31,9 +31,12 @@ title; it creates neither a source relationship nor a second document dialect.
 
 An amendment is an explicit operation over whole Contract sections. It may
 replace, append to, add, update, or remove the section forms that support that
-meaning; ambiguous or invalid operations are refused. Untouched source terms
-retain their identity. An amendment never silently retargets its supplied terms
-to a later document: document currency is judged by the lifecycle decision.
+meaning; ambiguous or invalid operations are refused. Unlike a bind document,
+whose H1 fixes the Contract's name, an amendment may open with one optional
+title heading that carries no operation meaning; any other content outside its
+operation sections is refused. Untouched source terms retain their identity. An
+amendment never silently retargets its supplied terms to a later document:
+document currency is judged by the lifecycle decision.
 
 An arc is a title, objective, and brief naming the current narrative chapter of
 one active Contract. It frames the currently dispatched work without splitting
