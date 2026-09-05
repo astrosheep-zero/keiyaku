@@ -59,24 +59,6 @@ async function takeLeashUntilSignal(
     return { kind: "unavailable", evidence: "untidy" };
   return { kind: "unavailable", evidence: "unavailable" };
 }
-async function recordTellBody(
-  paths: AkumaPaths,
-  akuma: AkuId,
-  body: string,
-  id: string = randomUUID(),
-  recordedAt = new Date().toISOString(),
-  schemaJson?: string,
-): Promise<Readonly<{ kind: "recorded"; tellId: string }>> {
-  const admitted = await recordTell(paths, {
-    kind: "tell",
-    id,
-    body,
-    recordedAt,
-    ...(schemaJson === undefined ? {} : { schemaJson }),
-  });
-  if (admitted.kind === "not-born") throw new AkumaNotBornError(akuma);
-  return { kind: "recorded", tellId: admitted.tell.id };
-}
 export async function settleAkumaKill(
   paths: AkumaPaths,
   signal?: AbortSignal,
@@ -206,13 +188,20 @@ export class AkumaHandle {
 
   async tell(
     body: string,
-    tellId?: string,
-    recordedAt?: string,
+    tellId: string = randomUUID(),
+    recordedAt = new Date().toISOString(),
     runtime?: TellWakeRuntime,
     schemaJson?: string,
   ): Promise<TellResult> {
-    const recorded = await recordTellBody(this.paths, this.id, body, tellId, recordedAt, schemaJson);
-    return await wakeRecordedTell(this.paths, recorded.tellId, runtime);
+    const admitted = await recordTell(this.paths, {
+      kind: "tell",
+      id: tellId,
+      body,
+      recordedAt,
+      ...(schemaJson === undefined ? {} : { schemaJson }),
+    });
+    if (admitted.kind === "not-born") throw new AkumaNotBornError(this.id);
+    return await wakeRecordedTell(this.paths, admitted.tell.id, runtime);
   }
 
   async interrupt(
