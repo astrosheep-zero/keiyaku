@@ -11,12 +11,7 @@ import {
 } from "./intent.js";
 import { admitPlacement } from "./placement.js";
 import { reintegrateOperation, type ReintegrationResult } from "./reintegrate.js";
-import {
-  beginCompletion,
-  recordCompletionStep,
-  type CompletionProgress,
-  type ContractCheckpoint,
-} from "./progress.js";
+import { beginCompletion, recordCompletionStep, type CompletionProgress, type ContractCheckpoint } from "./progress.js";
 import type { PlacementStop, VerificationStop } from "./operations.js";
 import { placementStop, timestamp, unpackVerificationOutcome } from "./operations.js";
 
