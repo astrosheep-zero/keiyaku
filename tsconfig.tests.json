@@ -9,6 +9,7 @@
   },
   "include": [
     "tests/actor.test.ts",
+    "tests/akuma-api.test.ts",
     "tests/completion-progress.test.ts",
     "tests/contract-completion.test.ts",
     "tests/akuma-api.test.ts",

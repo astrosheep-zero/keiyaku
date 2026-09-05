@@ -9,7 +9,10 @@ import { releaseManagedWorktrees } from "../src/workspace-place.js";
 import { appointedWorktreePath, cachedRepoAt, cachedRepositoryAt, withGitShim } from "./support/git.js";
 import { bind, commitCandidate, document, refused, repositoryWithMain } from "./support/library-verbs.js";
 
-type AcceptedDelivery = Exclude<Awaited<ReturnType<KeiyakuHandle["deliver"]>>, { kind: "integration-conflict-materialized" }>;
+type AcceptedDelivery = Exclude<
+  Awaited<ReturnType<KeiyakuHandle["deliver"]>>,
+  { kind: "integration-conflict-materialized" }
+>;
 
 function acceptedDelivery(result: Awaited<ReturnType<KeiyakuHandle["deliver"]>>): AcceptedDelivery {
   if (result.kind === "integration-conflict-materialized") {
@@ -376,10 +379,11 @@ test("completeMutation preserves accepted cleanup and leak", async () => {
     ).audit(),
   );
   assert.equal(audited.value.candidate.kind, "ready");
-  assert.match(audited.leak?.diagnostic ?? "", /forced verification cleanup failure/);
+  const retainedLeak = audited.cleanup.find((item) => item.kind === "worktree-leak")?.leak;
+  assert.match(retainedLeak?.diagnostic ?? "", /forced verification cleanup failure/);
   assert.equal("leak" in audited.value, false);
   assert.equal("cleanup" in audited.value, false);
-  repository.run(["worktree", "remove", "--force", audited.leak!.path]);
+  repository.run(["worktree", "remove", "--force", retainedLeak!.path]);
 });
 
 test("public audit exposes admitted verified attestations through facts", async () => {

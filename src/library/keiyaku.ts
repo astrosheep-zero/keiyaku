@@ -140,3 +140,6 @@ export const Keiyaku = Object.freeze({
   withExecution: routedLibrary,
   withLocal: localLibrary,
 });
+
+export { executionReceipt } from "./execution-result.js";
+export type { ExecutionCleanup, ExecutionStop, ExecutionReceipt, MutationOperation } from "./execution-result.js";

@@ -60,6 +60,19 @@ successful claim may synchronously continue already-delivered dependents under
 the same rules, but that continuation creates no queue, background worker,
 retry ledger, or new lifecycle authority.
 
+Leading testimony and completion have different ownership. Review admits its
+captured testimony; delivery admits its captured candidate. Their shared
+completion node judges one Contract at a time. Satisfied review enters at
+placement, while delivery and delivered-dependent continuation first obtain
+current Verification evidence. Unsatisfied review and audit do not trigger
+placement. The trigger changes the entry point, never the placement rules.
+
+The invocation composes those steps synchronously. Dependent discovery is a
+bounded scheduling observation, not permission to mutate a stale worktree or
+skip the current placement decision. Each attempted dependent uses a fresh
+Contract observation; an unready dependent may become eligible after another
+prerequisite completes in the same walk. No background queue is created.
+
 ## Decisions, Admission, And Recovery
 
 Pact makes one pure legal decision for one immutable observation per semantic

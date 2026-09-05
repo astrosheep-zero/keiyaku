@@ -108,3 +108,10 @@ evidence before removal; it is not a journal fact, retention promise, or source
 of later lifecycle authority. Physical removal precedes Place release and ref
 cleanup. A retained path or nonredundant ref is visible lag, never reversal of
 an accepted outcome.
+
+Target-placement fence acquisition is bounded and cancellable without breaking
+its current holder. Cancellation does not replace the expected-reference proof
+or undo a confirmed publication. Resolving an uncertain publication uses its
+original fact identities and independent bounded observation, not the cancelled
+execution channel. A successful readback confirms only the original offer; it
+does not authorize replaying that offer's product effects.

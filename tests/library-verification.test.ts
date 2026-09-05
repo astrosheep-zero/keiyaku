@@ -14,7 +14,10 @@ async function candidateWorktree(
   return appointedWorktreePath(await cachedRepositoryAt(repository.path), (await contract.state()).id);
 }
 
-type AcceptedDelivery = Exclude<Awaited<ReturnType<KeiyakuHandle["deliver"]>>, { kind: "integration-conflict-materialized" }>;
+type AcceptedDelivery = Exclude<
+  Awaited<ReturnType<KeiyakuHandle["deliver"]>>,
+  { kind: "integration-conflict-materialized" }
+>;
 
 function acceptedDelivery(result: Awaited<ReturnType<KeiyakuHandle["deliver"]>>): AcceptedDelivery {
   if (result.kind === "integration-conflict-materialized") {
@@ -446,12 +449,12 @@ test("destroy failure is cleanup evidence, not a leak after successful removal",
 
   const delivered = acceptedDelivery(await contract.deliver());
 
-  assert.deepEqual(delivered.value.cleanup, {
+  assert.deepEqual(delivered.cleanup.find((item) => item.kind === "verification-cleanup")?.failure, {
     phase: "destroy",
     command: 0,
     detail: { kind: "exit", code: 19, stdout: "", stderr: "", truncated: false },
   });
-  assert.equal(delivered.value.leak, undefined);
+  assert.equal(delivered.cleanup.find((item) => item.kind === "worktree-leak")?.leak, undefined);
   assert.equal(repository.run(["worktree", "list", "--porcelain"]).includes("keiyaku-v4-verify-"), false);
 });
 
@@ -480,7 +483,15 @@ test("public deliver preserves admission when Verification cleanup leaks a workt
     delivered.facts.map((fact) => fact.kind),
     ["bound", "deliver", "attestation", "claimed"],
   );
-  assert.equal(delivered.value.leak?.path.startsWith("/"), true);
-  assert.match(delivered.value.leak?.diagnostic ?? "", /worktree remove --force .*forced verification cleanup failure/);
-  repository.run(["worktree", "remove", "--force", delivered.value.leak!.path]);
+  assert.equal(delivered.cleanup.find((item) => item.kind === "worktree-leak")?.leak?.path.startsWith("/"), true);
+  assert.match(
+    delivered.cleanup.find((item) => item.kind === "worktree-leak")?.leak?.diagnostic ?? "",
+    /worktree remove --force .*forced verification cleanup failure/,
+  );
+  repository.run([
+    "worktree",
+    "remove",
+    "--force",
+    delivered.cleanup.find((item) => item.kind === "worktree-leak")?.leak.path!,
+  ]);
 });

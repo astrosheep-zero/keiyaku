@@ -82,12 +82,6 @@ type DeliveryFailure =
   | DeliveryPreparationRefusal
   | import("../verification/declaration.js").VerificationDeclarationRefusal
   | DeliverRefusal;
-type PreparedDelivery = Readonly<{
-  delivery: DeliveryIdentity;
-  derivation: DocumentDerivation;
-  workspacePath?: string;
-}>;
-
 async function captureAuthorizedDeliveryTender(
   repository: import("../git/process.js").GitRepository,
   stage: Readonly<{
@@ -324,7 +318,7 @@ async function decideAndAdmitDelivery(
   seat: PrivateStatePublicationSeat,
   observation: GitDecisionObservation,
   speculated: SpeculativeDelivery,
-): Promise<AttemptDecision<PreparedDelivery>> {
+): Promise<AttemptDecision<DeliveryIdentity>> {
   const preparation = await resolveDeliveryPreparation(input, speculated);
   const decision = decideDeliver({
     input: {
@@ -346,13 +340,12 @@ async function decideAndAdmitDelivery(
     attempt,
     offer: decision.offer,
     primaryContract: input.contractId,
-    progress: input.progress,
+    ...(input.progress === undefined ? {} : input.progress === undefined ? {} : { progress: input.progress }),
   });
   if (admission.kind !== "accepted") return admission;
-  if (speculated.derivation === undefined) throw new Error("accepted delivery is missing its document derivation");
   return {
     ...admission,
-    value: { delivery: preparation.data, derivation: speculated.derivation },
+    value: preparation.data,
   };
 }
 
@@ -361,7 +354,7 @@ async function deliverAttemptInPrivateStateSeat(
   attempt: AttemptContext,
   seat: PrivateStatePublicationSeat,
   speculated: SpeculativeDelivery,
-): Promise<AttemptDecision<PreparedDelivery>> {
+): Promise<AttemptDecision<DeliveryIdentity>> {
   const observation = await matchingPrivateRootObservation(
     input.scope,
     input.channel,
@@ -382,7 +375,7 @@ async function deliverAttemptInPrivateStateSeat(
 async function deliverAttempt(
   input: DeliverOperationInput,
   attempt: AttemptContext,
-): Promise<AttemptDecision<PreparedDelivery>> {
+): Promise<AttemptDecision<DeliveryIdentity>> {
   const speculated = await speculateDelivery(input);
   return await privateStateSeatAttempt(
     input.scope,
@@ -518,7 +511,7 @@ export async function admitDeliveryOperation(
   input: DeliverOperationInput,
 ): Promise<LeadingOutcome<DeliveryIdentity, IntentRefusal> | IntegrationConflictMaterialized> {
   const attempts = mintAttempts({ entryCount: 2 });
-  let first: Extract<AttemptDecision<PreparedDelivery>, { kind: "accepted" }> | null = null;
+  let first: Extract<AttemptDecision<DeliveryIdentity>, { kind: "accepted" }> | null = null;
   for (let index = 0; index < attempts.length; index += 1) {
     const result = await deliverAttempt(input, attempts[index]!);
     if (result.kind === "accepted") {
@@ -531,5 +524,5 @@ export async function admitDeliveryOperation(
   }
   if (first === null) return { kind: "retry", reason: { kind: "exhausted" } };
   input.progress?.recordResidue(input.contractId, first);
-  return { ...first, value: first.value.delivery };
+  return first;
 }

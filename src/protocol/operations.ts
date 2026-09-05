@@ -212,7 +212,9 @@ export function placementStop(
 export type RepositoryScope = GitRepository;
 
 export function withScopeAbortSignal(scope: RepositoryScope, signal: AbortSignal | undefined): RepositoryScope {
-  return signal === undefined ? scope : { ...scope, signal };
+  return signal === undefined
+    ? scope
+    : { ...scope, signal: scope.signal === undefined ? signal : AbortSignal.any([scope.signal, signal]) };
 }
 
 export async function scopeOperation(

@@ -75,3 +75,14 @@ currentness judgment for reusable `verified` evidence. The producer owns its
 terminal counts; package and CLI readers render adjudicated reports without
 parsing process output or creating a timeline, rework count, or elapsed-time
 authority.
+
+Each verification attempt retains its captured snapshot and declaration subject.
+After reintegration, completion obtains the then-applicable declaration for the
+new candidate, without retargeting testimony already produced. A completion's
+verification conclusion must belong to its final integration; an older run's
+verdict is never attached merely because it ran earlier in the invocation.
+
+Scratch retirement uses bounded custody independent of caller cancellation.
+Resource problems from successive attempts and dependent Contracts accumulate
+on the invocation answer; replacement of current verification evidence does not
+consume or clear those problems.

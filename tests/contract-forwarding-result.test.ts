@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  auditResultSchema,
-  deliveryResultSchema,
-  reviewResultSchema,
-} from "../src/library/mutation.js";
+import { auditResultSchema, deliveryResultSchema, reviewResultSchema } from "../src/library/mutation.js";
 import {
   decodeContractLiveFailure,
   encodeContractLiveFailure,
@@ -37,6 +33,9 @@ const fact = {
 function acceptedDelivery(value: Record<string, unknown> = {}, extras: Record<string, unknown> = {}) {
   return {
     kind: "accepted",
+    operation: "deliver",
+    cleanup: [],
+    executionStops: [],
     facts: [fact],
     head,
     value: {
@@ -61,8 +60,6 @@ test("accepted delivery round-trips owner settlement, verification, placement, c
       verificationReuse: { entry: fact.entry, verdict: "unsatisfied", summary: "reuse" },
       verificationSummary: "ran",
       placement: { failure: "target-placement-failed", diagnostic: "blocked" },
-      cleanup: { phase: "destroy", command: 0, detail: { kind: "timeout" } },
-      leak: { path: "/tmp/leak", diagnostic: "retained" },
       continuation: {
         claimed: [contract],
         stopped: [{ contractId: contract, stop: { kind: "already-terminal" } }],
@@ -78,6 +75,24 @@ test("accepted delivery round-trips owner settlement, verification, placement, c
           taskId: "task/forwarding",
           diagnostic: "task settlement refused",
         }),
+      ],
+      cleanup: [
+        {
+          kind: "verification-cleanup",
+          contractId: contract,
+          snapshot,
+          failure: { phase: "destroy", command: 0, detail: { kind: "timeout" } },
+        },
+        { kind: "worktree-leak", contractId: contract, snapshot, leak: { path: "/tmp/leak", diagnostic: "retained" } },
+      ],
+      executionStops: [
+        {
+          kind: "execution-stopped",
+          contractId: contract,
+          stage: "continuation",
+          reason: "failed",
+          diagnostic: "discovery failed",
+        },
       ],
       recoverySnapshot: snapshot,
       pending: [
@@ -142,6 +157,9 @@ test("refusal, retry, review, audit, and materialized conflict variants round-tr
 
   const review = {
     kind: "accepted",
+    operation: "review",
+    cleanup: [],
+    executionStops: [],
     facts: [],
     head,
     value: {
@@ -165,6 +183,9 @@ test("refusal, retry, review, audit, and materialized conflict variants round-tr
 
   const audit = {
     kind: "accepted",
+    operation: "audit",
+    cleanup: [],
+    executionStops: [],
     facts: [],
     head,
     value: {
@@ -211,6 +232,9 @@ test("union branches refuse keys that belong to a different arm", () => {
   assert.equal(
     auditResultSchema.safeParse({
       kind: "accepted",
+      operation: "deliver",
+      cleanup: [],
+      executionStops: [],
       facts: [],
       head,
       value: {
@@ -295,6 +319,9 @@ test("union branches refuse keys that belong to a different arm", () => {
 function acceptedAudit(target: Record<string, unknown>) {
   return {
     kind: "accepted",
+    operation: "audit",
+    cleanup: [],
+    executionStops: [],
     facts: [],
     head,
     value: {
@@ -353,6 +380,52 @@ test("audit target and git lag arms refuse keys that belong to a different arm",
     deliveryResultSchema.safeParse(
       acceptedDelivery({}, { lags: [{ kind: "worktree-retained", path: "/tmp/worktree", diagnostic: "no" }] }),
     ).success,
+    false,
+  );
+});
+
+import { withExecutionReceipt, executionReceipt } from "../src/library/execution-result.js";
+import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
+
+test("post-admission failures round-trip their category and receipt without becoming no-effect refusals", () => {
+  for (const original of [new Error("unexpected"), new TypeError("bug"), new AuthorityCorruptionError("corrupt")]) {
+    const receipt = {
+      operation: "deliver" as const,
+      contractId: contract,
+      head,
+      facts: [fact],
+      cleanup: [],
+      executionStops: [],
+    };
+    const encoded = encodeContractLiveFailure(withExecutionReceipt(original, receipt));
+    assert.equal((encoded as { kind: string }).kind, "post-admission-failure");
+    const decoded = decodeContractLiveFailure(encoded);
+    assert.ok(decoded instanceof original.constructor);
+    assert.equal(decoded instanceof KeiyakuRefused, false);
+    assert.deepEqual(executionReceipt(decoded), receipt);
+  }
+});
+
+test("result codecs reject obsolete cleanup fields, missing operation and cross-operation answers", () => {
+  const result = acceptedDelivery();
+  assert.equal(reviewResultSchema.safeParse(result).success, false);
+  const { operation: _operation, ...untagged } = result;
+  assert.equal(deliveryResultSchema.safeParse(untagged).success, false);
+  assert.equal(deliveryResultSchema.safeParse({ ...result, cleanup: {} }).success, false);
+  assert.equal(deliveryResultSchema.safeParse({ ...result, leak: { path: "/old", diagnostic: "old" } }).success, false);
+  assert.equal(
+    deliveryResultSchema.safeParse(
+      acceptedDelivery({ cleanup: { phase: "destroy", command: 0, detail: { kind: "timeout" } } }),
+    ).success,
+    false,
+  );
+  assert.equal(
+    deliveryResultSchema.safeParse({
+      ...result,
+      cleanup: [
+        { kind: "worktree-leak", contractId: contract, leak: { path: "/new", diagnostic: "retained" }, extra: true },
+      ],
+    }).success,
     false,
   );
 });

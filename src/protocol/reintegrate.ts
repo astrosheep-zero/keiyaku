@@ -112,7 +112,7 @@ async function runReintegration(
           attempt,
           offer: decision.offer,
           primaryContract: input.contractId,
-          progress: input.progress,
+          ...(input.progress === undefined ? {} : input.progress === undefined ? {} : { progress: input.progress }),
           assertions,
         });
         if (result.kind === "accepted") {

@@ -9,8 +9,8 @@ import { GIT_REF, readGit, updateRefsAtomically, writeCommit } from "../src/git/
 import { withPrivateStatePublicationSeat } from "../src/git/private-state-seat.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { documentDerivation } from "../src/library/input.js";
-import { deliverOperation } from "../src/protocol/deliver.js";
-import { reviewOperation } from "../src/protocol/review.js";
+import { admitDeliveryOperation } from "../src/protocol/deliver.js";
+import { admitReviewOperation } from "../src/protocol/review.js";
 import { STALE_PRIVATE_STATE_PREPARATION, runProtocol } from "../src/protocol/run.js";
 import { Keiyaku } from "../src/index.js";
 import {
@@ -192,7 +192,7 @@ test("stale delivery worktree inputs retry without admission or a partial write"
   const waiting = deferred();
   const waitingGit = { ...git, onPrivateStateSeatContention: waiting.resolve };
   const resultPromise = withGitDecodeChannel(waitingGit, (channel) =>
-    deliverOperation({
+    admitDeliveryOperation({
       scope: waitingGit,
       channel,
       contractId: id,
@@ -239,7 +239,7 @@ test("stale review worktree inputs retry without admission or a partial write", 
   const waiting = deferred();
   const waitingGit = { ...git, onPrivateStateSeatContention: waiting.resolve };
   const resultPromise = withGitDecodeChannel(waitingGit, (channel) =>
-    reviewOperation({
+    admitReviewOperation({
       scope: waitingGit,
       channel,
       contractId: id,

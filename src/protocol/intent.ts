@@ -70,7 +70,7 @@ export function admitIntent<
     contracts,
     attempts: mintAttempts({ entryCount: 2 }),
     decide,
-    progress: options.progress,
+    ...(options.progress === undefined ? {} : { progress: options.progress }),
     ...(options.observe === undefined ? {} : { observe: options.observe }),
     ...(options.decorateOffer === undefined ? {} : { decorateOffer: options.decorateOffer }),
     ...(options.validateAdmission === undefined ? {} : { validateAdmission: options.validateAdmission }),
@@ -169,6 +169,10 @@ export function currentVerifiedAttestation(state: ContractState): CurrentVerifie
       };
 }
 
+function retainVerificationReceipt(input: VerifyDeliveryInput, step: VerificationStep): void {
+  if (!("failure" in step) && step.kind === "accepted") input.progress?.recordResidue(input.contractId, step);
+}
+
 /** Run Verification against an explicit or admitted integration snapshot. */
 export async function verifyDelivery(input: VerifyDeliveryInput): Promise<VerificationResult | null> {
   const snapshot = input.snapshot ?? input.state.currentIntegration?.snapshot;
@@ -194,7 +198,7 @@ export async function verifyDelivery(input: VerifyDeliveryInput): Promise<Verifi
       input.repository,
       verificationInput(execution.outcome, input, subject),
       decideAttestation,
-      { progress: input.progress },
+      input.progress === undefined ? {} : { progress: input.progress },
     );
   } else if (execution.outcome.kind === "candidate-unavailable") {
     step = { failure: "candidate-unavailable", diagnostic: execution.outcome.diagnostic };
@@ -212,7 +216,7 @@ export async function verifyDelivery(input: VerifyDeliveryInput): Promise<Verifi
   } else {
     throw new Error("Verification execution returned an invalid outcome");
   }
-  if (!("failure" in step) && step.kind === "accepted") input.progress?.recordResidue(input.contractId, step);
+  retainVerificationReceipt(input, step);
   return {
     step,
     ...(execution.outcome.kind === "terminal"

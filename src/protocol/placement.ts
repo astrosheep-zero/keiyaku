@@ -118,7 +118,7 @@ async function runFencedPlacement(
           attempt: prepared.attempt,
           offer: prepared.offer,
           primaryContract: input.contractId,
-          progress: protocol.progress,
+          ...(protocol.progress === undefined ? {} : { progress: protocol.progress }),
         });
         if (result.kind === "accepted") {
           preparedPhysical = physical.placement;
@@ -137,6 +137,15 @@ async function runFencedPlacement(
   return { ...result, physical: await followTargetPlacement(repository, preparedPhysical) };
 }
 
+function isPlacementCancellation(repository: GitRepository, error: unknown): boolean {
+  return (
+    repository.signal?.aborted === true &&
+    (error === repository.signal.reason ||
+      error instanceof GitPlumbingError ||
+      error instanceof SqliteTransactionLockError)
+  );
+}
+
 /** Hold the existing target-placement fence for one owner callback. */
 export async function runUnderTargetPlacementFence<T>(
   repository: GitRepository,
@@ -148,6 +157,7 @@ export async function runUnderTargetPlacementFence<T>(
   try {
     held = await acquireTargetPlacementFence(repository, target);
   } catch (error) {
+    if (isPlacementCancellation(repository, error)) throw error;
     return placementFailure(error);
   }
   let produced: T | undefined;
@@ -158,6 +168,7 @@ export async function runUnderTargetPlacementFence<T>(
     result = produced;
   } catch (error) {
     if (error instanceof AuthorityCorruptionError || error instanceof TypeError) exceptional = error;
+    else if (isPlacementCancellation(repository, error)) exceptional = error;
     else {
       try {
         result = expectedPlacementFailure(error);
@@ -199,7 +210,7 @@ export async function admitPlacement<ExtraRefusal = never>(
     contracts: [input.contractId],
     attempts,
     decide: decidePlacement,
-    progress: admission.progress,
+    ...(admission.progress === undefined ? {} : { progress: admission.progress }),
     observe: (observedRepository, observedChannel, contracts) =>
       observeGitForAdmissionAt(observedRepository, observedChannel, contracts),
   };

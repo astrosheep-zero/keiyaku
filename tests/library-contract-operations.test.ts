@@ -1,3 +1,4 @@
+import type { ContinuationStop } from "../src/library/continuation.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -9,7 +10,6 @@ import {
   Repo,
   type IntegrationConflictMaterialized,
   type MutationResult,
-  type PlacementStop,
 } from "../src/index.js";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import { encodeEntry } from "../src/core/facts/codec.js";
@@ -52,9 +52,7 @@ function expectMutation<Value>(result: MutationResult<Value> | IntegrationConfli
   return result;
 }
 
-function placementRefusalKind(
-  placement: PlacementStop | Readonly<{ kind: "already-terminal" }> | undefined,
-): string | undefined {
+function placementRefusalKind(placement: ContinuationStop | undefined): string | undefined {
   return placement !== undefined && "refusal" in placement ? placement.refusal.kind : undefined;
 }
 

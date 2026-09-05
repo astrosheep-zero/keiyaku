@@ -116,7 +116,7 @@ export async function materializeScratchCandidate(
       if (disposed) return null;
       disposed = true;
       try {
-        await runGit(repository, ["worktree", "remove", "--force", cwd]);
+        await runGit({ ...repository, signal: AbortSignal.timeout(5_000) }, ["worktree", "remove", "--force", cwd]);
         return null;
       } catch (error) {
         return {

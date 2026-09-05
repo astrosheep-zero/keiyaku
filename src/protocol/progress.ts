@@ -1,6 +1,6 @@
 import { encodeEntry } from "../core/facts/codec.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
-import type { ContractId, ContractState, JournalEntry, SnapshotId } from "../core/facts/types.js";
+import type { ContractHead, ContractId, ContractState, JournalEntry, SnapshotId } from "../core/facts/types.js";
 import { GitPlumbingError } from "../git/process.js";
 import { SqliteTransactionLockError } from "../coordination/sqlite-transaction-lock.js";
 import type { ReconcileResult } from "../git/reconcile.js";
@@ -49,7 +49,10 @@ export function executionStop(
   signal?: AbortSignal,
 ): ExecutionStop {
   if (error instanceof AuthorityCorruptionError || error instanceof TypeError) throw error;
-  const cancelled = signal?.aborted === true || (error instanceof Error && error.name === "AbortError");
+  const cancelled =
+    (signal?.aborted === true && error === signal.reason) ||
+    (error instanceof Error && error.name === "AbortError") ||
+    (signal?.aborted === true && (error instanceof GitPlumbingError || error instanceof SqliteTransactionLockError));
   const errno =
     error instanceof Error && "code" in error && typeof error.code === "string" && /^E[A-Z0-9]+$/u.test(error.code);
   if (!cancelled && !errno && !(error instanceof GitPlumbingError) && !(error instanceof SqliteTransactionLockError))
@@ -66,6 +69,7 @@ export function executionStop(
 export type ExecutionSnapshot = Readonly<{
   facts: readonly JournalEntry[];
   checkpoints: ReadonlyMap<ContractId, ContractCheckpoint>;
+  heads: ReadonlyMap<ContractId, ContractHead>;
   affected: readonly ContractId[];
   physical: ReconcileResult;
   cleanup: readonly ExecutionCleanup[];
@@ -78,6 +82,7 @@ type Residue = Readonly<{ physical?: ReconcileResult; seatClose?: readonly Priva
 export class ExecutionProgress {
   private readonly entries = new Map<string, string>();
   private readonly admittedFacts: JournalEntry[] = [];
+  private readonly admittedHeads = new Map<ContractId, ContractHead>();
   private readonly admittedCheckpoints = new Map<ContractId, ContractCheckpoint>();
   private readonly affectedContracts = new Set<ContractId>();
   private readonly effects: ReconcileResult["effects"][number][] = [];
@@ -86,28 +91,43 @@ export class ExecutionProgress {
   private readonly executionStops: ExecutionStop[] = [];
   private readonly reportedResidue = new WeakSet<object>();
 
-  /** Called synchronously at the confirmed publication boundary, before trailing awaits. */
-  recordAdmission(step: AcceptedProtocolStep): void {
-    const incoming = step.facts.map((fact) => ({
-      fact,
-      key: `${fact.contract}\0${fact.entry}`,
-      bytes: encodeEntry(fact),
-    }));
-    for (const { key, bytes } of incoming) {
-      const previous = this.entries.get(key);
+  /** A confirmed publication is retained even if folding or later physical work throws. */
+  recordPublication(contractId: ContractId, head: ContractHead, facts: readonly JournalEntry[]): void {
+    const incoming = new Map<string, Readonly<{ fact: JournalEntry; bytes: string }>>();
+    for (const fact of facts) {
+      const key = `${fact.contract}\0${fact.entry}`;
+      const bytes = encodeEntry(fact);
+      const previous = incoming.get(key)?.bytes ?? this.entries.get(key);
       if (previous !== undefined && previous !== bytes)
         throw new AuthorityCorruptionError("conflicting invocation receipt");
+      incoming.set(key, { fact, bytes });
     }
     let fresh = false;
-    for (const { fact, key, bytes } of incoming) {
+    for (const [key, { fact, bytes }] of incoming) {
       if (this.entries.has(key)) continue;
       this.entries.set(key, bytes);
       this.admittedFacts.push(fact);
       this.affectedContracts.add(fact.contract);
       fresh = true;
     }
-    if (fresh) this.admittedCheckpoints.set(step.state.id, contractCheckpoint(step));
+    if (fresh) this.admittedHeads.set(contractId, head);
+  }
+
+  recordAdmission(step: AcceptedProtocolStep): void {
+    if (step.state.head === null) throw new Error("admission requires a journal head");
+    this.recordPublication(step.state.id, step.state.head, step.facts);
+    if (this.admittedHeads.get(step.state.id) === step.state.head) {
+      this.admittedCheckpoints.set(step.state.id, contractCheckpoint(step));
+    }
     this.recordResidue(step.state.id, step);
+  }
+
+  hasFact(fact: JournalEntry): boolean {
+    return this.entries.get(`${fact.contract}\0${fact.entry}`) === encodeEntry(fact);
+  }
+
+  head(contractId: ContractId): ContractHead | undefined {
+    return this.admittedHeads.get(contractId);
   }
 
   recordResidue(contractId: ContractId, residue: Residue): void {
@@ -135,17 +155,27 @@ export class ExecutionProgress {
 
   recordVerification(
     contractId: ContractId,
-    snapshot: SnapshotId,
+    snapshot: SnapshotId | undefined,
     result: Readonly<{ cleanup?: VerificationCleanupFailure; leak?: WorktreeLeak }>,
   ): void {
     if (result.cleanup !== undefined)
-      this.cleanupIssues.push({ kind: "verification-cleanup", contractId, snapshot, failure: result.cleanup });
+      this.cleanupIssues.push({
+        kind: "verification-cleanup",
+        contractId,
+        ...(snapshot === undefined ? {} : { snapshot }),
+        failure: result.cleanup,
+      });
     if (result.leak !== undefined)
-      this.cleanupIssues.push({ kind: "worktree-leak", contractId, snapshot, leak: result.leak });
+      this.cleanupIssues.push({
+        kind: "worktree-leak",
+        contractId,
+        ...(snapshot === undefined ? {} : { snapshot }),
+        leak: result.leak,
+      });
   }
 
   recordStop(stop: ExecutionStop): void {
-    this.executionStops.push(stop);
+    if (!this.executionStops.includes(stop)) this.executionStops.push(stop);
   }
 
   checkpoint(contractId: ContractId): ContractCheckpoint | undefined {
@@ -156,6 +186,7 @@ export class ExecutionProgress {
     return {
       facts: Object.freeze([...this.admittedFacts]),
       checkpoints: new Map(this.admittedCheckpoints),
+      heads: new Map(this.admittedHeads),
       affected: Object.freeze([...this.affectedContracts]),
       physical: { effects: Object.freeze([...this.effects]), lag: Object.freeze([...this.lags]) },
       cleanup: Object.freeze([...this.cleanupIssues]),
@@ -165,10 +196,9 @@ export class ExecutionProgress {
 
   /** One final assembly; a dependent's checkpoint can never replace the addressed head. */
   accepted<Value>(contractId: ContractId, value: Value): Extract<IntentOutcome<Value>, { kind: "accepted" }> {
-    const checkpoint = this.checkpoint(contractId);
-    if (checkpoint === undefined || checkpoint.state.head === null)
-      throw new Error("missing leading admission receipt");
+    const head = this.head(contractId);
+    if (head === undefined) throw new Error("missing leading admission receipt");
     const snapshot = this.snapshot();
-    return { kind: "accepted", head: checkpoint.state.head, facts: snapshot.facts, value, physical: snapshot.physical };
+    return { kind: "accepted", head, facts: snapshot.facts, value, physical: snapshot.physical };
   }
 }

@@ -1624,14 +1624,15 @@ test("creator testimony appears on Fleet observation carriers", async () => {
     try {
       const told = await Keiyaku.tell({ path: root, akuma: worker.id, body: "continue" });
       assert.equal("observation" in told, false);
-      const interrupted = await Keiyaku.interrupt({ path: root, akuma: worker.id, body: "stop" });
-      if (interrupted.observation.kind !== "observed") throw new Error(interrupted.observation.diagnostic);
-      assert.deepEqual(interrupted.observation.createdTasks, { kind: "present", rows: workerRows });
       const killed = await Keiyaku.kill({ path: root, akuma: [worker.id] });
       assert.equal("observation" in killed.results[0]!, false);
     } finally {
       leash!.release();
     }
+    // Interrupt acquires the leash itself; this fixture must not hold its prerequisite lock.
+    const interrupted = await Keiyaku.interrupt({ path: root, akuma: worker.id, body: "stop" });
+    if (interrupted.observation.kind !== "observed") throw new Error(interrupted.observation.diagnostic);
+    assert.deepEqual(interrupted.observation.createdTasks, { kind: "present", rows: workerRows });
     await workerHandle.wait(undefined, { timeoutMs: 2_000 });
   } finally {
     rmSync(root, { recursive: true, force: true });

@@ -331,6 +331,9 @@ test("deliver exposes the core-owned unmet prerequisites unchanged in its JSON r
   const delivered = acceptedDeliver(
     {
       kind: "accepted",
+      operation: "deliver",
+      cleanup: [],
+      executionStops: [],
       facts: [],
       head: contractHead("head"),
       value: delivery,
@@ -357,6 +360,9 @@ test("accepted deliver and review transport completion consequences without reco
   };
   const envelope = {
     kind: "accepted" as const,
+    operation: "deliver" as const,
+    cleanup: [],
+    executionStops: [],
     head: contractHead("head"),
     lags: [],
     settlementLags: [],
@@ -395,6 +401,7 @@ test("accepted deliver and review transport completion consequences without reco
   const reviewed = acceptedReview(
     {
       ...envelope,
+      operation: "review",
       facts: [
         {
           contract,
@@ -1681,4 +1688,61 @@ test("deliver --materialize-conflict returns the exact public materialization ob
   const state = (await observeContract(await cachedRepositoryAt(repository.path), id)).state;
   assert.equal(state?.delivery, null);
   assert.equal(state?.terminal, null);
+});
+
+test("CLI preserves a real admission receipt when later execution throws TypeError", async () => {
+  const repository = repositoryWithMain();
+  const bound = await invokeWithDocument(repository.path, ["bind", "-"], contractDocument("Exceptional receipt"));
+  const id = acceptedContract(bound);
+  for (const output of ["json", "text"]) {
+    const script = [
+      `import { Keiyaku } from ${JSON.stringify(new URL("../src/index.ts", import.meta.url).href)};`,
+      `import { withExecutionReceipt } from ${JSON.stringify(new URL("../src/library/execution-result.ts", import.meta.url).href)};`,
+      `import { runCliCommand } from ${JSON.stringify(new URL("../src/cli/runtime.ts", import.meta.url).href)};`,
+      `import { parseArgv } from ${JSON.stringify(new URL("../src/cli/parse.ts", import.meta.url).href)};`,
+      "const original = Keiyaku.prototype.review;",
+      "Keiyaku.prototype.review = async function(input) {",
+      "  const result = await original.call(this, input);",
+      "  throw withExecutionReceipt(new TypeError('post-admission failure'), {",
+      `    operation: 'review', contractId: ${JSON.stringify(id)}, head: result.head,`,
+      "    facts: result.facts, cleanup: result.cleanup, executionStops: result.executionStops,",
+      "  });",
+      "};",
+      `process.exitCode = await runCliCommand(parseArgv(${JSON.stringify([
+        "--repo",
+        repository.path,
+        "review",
+        id,
+        "--satisfied",
+        "--summary",
+        "accepted",
+        ...(output === "json" ? ["--json"] : []),
+      ])}));`,
+    ].join("\n");
+    const environment = { ...process.env };
+    delete environment.AKUMA_REQUESTS;
+    const result = spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), "--input-type=module", "-"], {
+      input: script,
+      cwd: repository.path,
+      env: environment,
+      encoding: "utf8",
+      timeout: 15_000,
+    });
+    assert.equal(result.status, 3, result.stderr);
+    assert.equal(result.stderr, "");
+    if (output === "json") {
+      const parsed = JSON.parse(result.stdout);
+      assert.equal(parsed.kind, "execution-failed");
+      assert.equal(parsed.diagnostic, "post-admission failure");
+      assert.equal(parsed.receipt.contractId, id);
+      assert.deepEqual(
+        parsed.receipt.facts.map((fact: { kind: string }) => fact.kind),
+        ["attestation"],
+      );
+    } else {
+      assert.match(result.stdout, /execution failed after admission/u);
+      assert.match(result.stdout, /journal[\s\S]*attestation/u);
+      assert.doesNotMatch(result.stdout, /usage:|review refused/u);
+    }
+  }
 });

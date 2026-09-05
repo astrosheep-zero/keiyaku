@@ -10,7 +10,7 @@ import { entryUlid, gate } from "../src/core/facts/types.js";
 import { dependencyKeySet } from "../src/core/subject.js";
 import { verifyDelivery } from "../src/protocol/intent.js";
 import { auditOperation } from "../src/protocol/audit.js";
-import { deliverOperation } from "../src/protocol/deliver.js";
+import { admitDeliveryOperation } from "../src/protocol/deliver.js";
 import { scopeOperation } from "../src/protocol/operations.js";
 import { observeContractAt } from "../src/git/observe.js";
 import { prepareVerificationDeclaration } from "../src/verification/declaration.js";
@@ -148,7 +148,7 @@ test("a stale document derivation is refused inside its E-decision", async () =>
 
   await withGitDecodeChannel(scope, async (channel) => {
     assert.deepEqual(
-      await deliverOperation({
+      await admitDeliveryOperation({
         scope,
         channel,
         contractId: state.id,

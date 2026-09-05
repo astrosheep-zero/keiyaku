@@ -8,7 +8,7 @@ import {
   type PrivateStatePublicationSeat,
   type PrivateStateSeatCloseLag,
 } from "../git/private-state-seat.js";
-import type { GitDecodeChannel } from "../git/read-observation.js";
+import { withGitDecodeChannel, type GitDecodeChannel } from "../git/read-observation.js";
 import { GIT_REF, readRefs, type GitRefAssertion } from "../git/repository.js";
 import type { GitRepository } from "../git/process.js";
 import type { AttemptContext } from "../core/decide.js";
@@ -170,7 +170,7 @@ export async function admitDecidedOffer<Refusal = never>(
     progress?: ExecutionProgress;
   }>,
 ): Promise<DecidedOfferResult<Refusal>> {
-  const { channel, repository, decisionObservation, attempt, offer, primaryContract } = input;
+  const { repository, decisionObservation, attempt, offer, primaryContract } = input;
   const assertions = input.assertions ?? [];
   validateOffer(offer, attempt);
   const primary = primaryAppend(offer, primaryContract);
@@ -181,6 +181,7 @@ export async function admitDecidedOffer<Refusal = never>(
   const admission = await admit(repository, offer, decisionObservation.admission, assertions);
   if (admission.kind === "accepted") {
     confirmPrivateStatePublication(input.seat);
+    input.progress?.recordPublication(primaryContract, admission.heads[primary.contractId]!, offerEntries(offer));
     const accepted: AcceptedAdmission = {
       kind: "accepted",
       facts: offerEntries(offer),
@@ -195,10 +196,13 @@ export async function admitDecidedOffer<Refusal = never>(
       ? { kind: "redecide" }
       : admission;
   }
-  const recovered = await observeContractsForAdmissionAt(
-    { ...repository, signal: AbortSignal.timeout(5_000) },
-    channel,
-    offer.facts.map((append) => append.contractId),
+  const recoveryRepository = { ...repository, signal: AbortSignal.timeout(5_000) };
+  const recovered = await withGitDecodeChannel(recoveryRepository, async (recoveryChannel) =>
+    observeContractsForAdmissionAt(
+      recoveryRepository,
+      recoveryChannel,
+      offer.facts.map((append) => append.contractId),
+    ),
   );
   const classification = classifyUnknownAttempt({ contracts: recovered.journals }, offer);
   if (classification.kind === "accepted") {

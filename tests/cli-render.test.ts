@@ -328,7 +328,13 @@ test("accepted bind receipts expose confirmed private-state seat close lag", () 
     workspace: { kind: "worktree", path: "/tmp/wt" },
     target: null,
     overlaps: [],
-    seatClose: [{ kind: "private-state-seat-close-failed", diagnostic: "seat close failed after publication" }],
+    cleanup: [
+      {
+        kind: "private-state-seat-close",
+        contractId: contract,
+        failure: { kind: "private-state-seat-close-failed", diagnostic: "seat close failed after publication" },
+      },
+    ],
   };
   assert.equal(
     renderText(result),

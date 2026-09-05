@@ -133,6 +133,7 @@ function consumeSettings<T>(run: () => T, ErrorType: new (message: string) => Er
   try {
     return run();
   } catch (error) {
+    if (error instanceof Error && "executionReceipt" in error) throw error;
     if (error instanceof ErrorType) throw new CliUsageError(error.message);
     throw error;
   }
@@ -143,6 +144,7 @@ function actorFromEdge(actor: string | undefined, environment: NodeJS.ProcessEnv
   try {
     resolved = resolveActor({ env: environment, ...(actor === undefined ? {} : { actor }) });
   } catch (error) {
+    if (error instanceof Error && "executionReceipt" in error) throw error;
     throw new CliUsageError(error instanceof Error ? error.message : String(error));
   }
   return resolved;
@@ -211,6 +213,7 @@ async function invokeAkumaFromEdge(parsed: InvokedAkumaCommand, input: AkumaEdge
       execution: input.execution,
     });
   } catch (error) {
+    if (error instanceof Error && "executionReceipt" in error) throw error;
     const { AkumaWorldScopeError } = await import("../library/address.js");
     if (error instanceof AkumaWorldScopeError) throw error;
     if (error instanceof TypeError) throw new CliUsageError(error.message);
@@ -257,6 +260,7 @@ async function invokeCatalog(
     }
     return { kind: "catalog" as const, catalog: await Keiyaku.ls({ query: parsed.query, path: world }) };
   } catch (error) {
+    if (error instanceof Error && "executionReceipt" in error) throw error;
     if (error instanceof TypeError) throw new CliUsageError(error.message);
     throw error;
   }
@@ -301,6 +305,7 @@ async function invokeStatus(
         selection: "contract" as const,
       };
     } catch (error) {
+      if (error instanceof Error && "executionReceipt" in error) throw error;
       if (error instanceof TypeError) throw new CliUsageError(error.message);
       throw error;
     }
@@ -331,6 +336,7 @@ async function invokeRegion(
     try {
       return await kanshi({ world, repo, region });
     } catch (error) {
+      if (error instanceof Error && "executionReceipt" in error) throw error;
       if (error instanceof TypeError) throw new CliUsageError(error.message);
       throw error;
     }
@@ -374,6 +380,7 @@ async function invokeContractHistory(repo: Repo | undefined, contract: string): 
   try {
     return { kind: "contract-history" as const, history: await selected.contract.history() };
   } catch (error) {
+    if (error instanceof Error && "executionReceipt" in error) throw error;
     if (error instanceof TypeError) throw new CliUsageError(error.message);
     const { KeiyakuRefused } = await import("../library/keiyaku.js");
     if (error instanceof KeiyakuRefused) {
@@ -523,6 +530,7 @@ export async function invoke(
       acquiredRuntime,
     );
   } catch (error) {
+    if (error instanceof Error && "executionReceipt" in error) throw error;
     if (error instanceof CliUsageError && error.projection === undefined) {
       throw new CliUsageError(error.diagnostic, renderCommandUsage(invocation.command));
     }

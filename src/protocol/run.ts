@@ -315,7 +315,7 @@ async function admitSpeculativeProtocolAttempt<
     attempt: decided.attempt,
     offer: decided.offer,
     primaryContract: input.input.contractId,
-    progress: input.progress,
+    ...(input.progress === undefined ? {} : input.progress === undefined ? {} : { progress: input.progress }),
     assertions: decided.assertions,
     ...(input.validateAdmission === undefined ? {} : { validateAdmission: input.validateAdmission }),
   });

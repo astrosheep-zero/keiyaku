@@ -1,3 +1,7 @@
+import { completeCandidate } from "../src/protocol/completion.js";
+import { ExecutionProgress, contractCheckpoint } from "../src/protocol/progress.js";
+import { documentDerivation } from "../src/library/input.js";
+import { decodeContractDocument } from "../src/body/decode.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
@@ -18,10 +22,10 @@ import {
   writeCommit,
 } from "../src/git/repository.js";
 import { finishTaskHolderAdmission, readTaskHoldersAt } from "../src/settlement/holder.js";
-import { completeHolderMutation, completionPending } from "../src/library/mutation.js";
+import { completeHolderMutation } from "../src/library/mutation.js";
 import { EMPTY_WORKTREE_HOOKS } from "../src/git/hooks.js";
-import { requireAccepted } from "../src/library/refusal.js";
-import { reviewOperation } from "../src/protocol/review.js";
+import { requireAccepted, requireLeadingAdmission } from "../src/library/refusal.js";
+import { admitReviewOperation } from "../src/protocol/review.js";
 import type { IntentOutcome } from "../src/protocol/operations.js";
 import { settle } from "../src/settlement/settle.js";
 
@@ -574,14 +578,26 @@ test("a terminal held Contract completes placement and Task settlement after its
 
   const scope = await cachedRepositoryAt(world.path);
   const completed = await withGitDecodeChannel(scope, async (channel) => {
-    const accepted = requireAccepted(
-      await reviewOperation({
+    const progress = new ExecutionProgress();
+    const leading = requireLeadingAdmission(
+      await admitReviewOperation({
+        progress,
         scope,
         channel,
         contractId: state.id,
         verdict: "satisfied",
       }),
     );
+    const completedNode = await completeCandidate({
+      repository: scope,
+      channel,
+      checkpoint: contractCheckpoint(leading),
+      progress,
+      start: "placement",
+      deriveDocument: (current) =>
+        documentDerivation(decodeContractDocument(current.terms.document.bytes), current.terms.gates, current.id),
+    });
+    const accepted = progress.accepted(state.id, { ...leading.value, ...completedNode.evidence });
     const admission = finishTaskHolderAdmission(
       taskId,
       accepted as IntentOutcome<typeof accepted.value, import("../src/library/refusal.js").KeiyakuRefusal>,
@@ -595,7 +611,8 @@ test("a terminal held Contract completes placement and Task settlement after its
         channel,
         contractId: state.id,
         value: (review) => review,
-        valuePending: completionPending,
+        operation: "review",
+        progress,
         hooks: EMPTY_WORKTREE_HOOKS,
       },
       admission,
@@ -636,9 +653,7 @@ test("settlement preserves seat-close source after releasing a TaskHolder", asyn
       throw new Error("settlement seat close failed after release");
     },
   };
-  const report = await withGitDecodeChannel(git, (channel) =>
-    settle({ repository: git, channel, state, effects: [] }),
-  );
+  const report = await withGitDecodeChannel(git, (channel) => settle({ repository: git, channel, state, effects: [] }));
   assert.deepEqual(report.actions, [{ kind: "task", taskId, action: "done" }]);
   assert.deepEqual(report.lags, []);
   assert.deepEqual(report.seatClose, [

@@ -15,7 +15,6 @@ import {
   decodeIntegrationPreparationRefusal,
   decodePublicationFailed,
   decodeUnmergedPathsRefusal,
-  decodeWorktreeLeak,
   decodeWorktreeMissingRefusal,
   decodeWorktreeWorkspace,
   decodeWorkspaceDirtyDelta,
@@ -345,7 +344,7 @@ export function decodeCompletionEvidence(value: unknown): CompletionEvidence {
   const object = record(
     value,
     [],
-    ["completion", "verification", "verificationReuse", "verificationSummary", "placement", "cleanup", "leak"],
+    ["completion", "verification", "verificationReuse", "verificationSummary", "placement"],
   );
   return {
     ...(object.completion === undefined ? {} : { completion: decodeCandidateCompletion(object.completion) }),
@@ -355,8 +354,6 @@ export function decodeCompletionEvidence(value: unknown): CompletionEvidence {
       : { verificationReuse: decodeVerificationReuse(object.verificationReuse) }),
     ...(object.verificationSummary === undefined ? {} : { verificationSummary: nonblank(object.verificationSummary) }),
     ...(object.placement === undefined ? {} : { placement: decodePlacementStop(object.placement) }),
-    ...(object.cleanup === undefined ? {} : { cleanup: decodeVerificationCleanupFailure(object.cleanup) }),
-    ...(object.leak === undefined ? {} : { leak: decodeWorktreeLeak(object.leak) }),
   };
 }
 
@@ -464,16 +461,7 @@ export function decodeReviewValue(value: unknown): ReviewValue {
   const object = record(
     value,
     [],
-    [
-      "completion",
-      "verification",
-      "verificationReuse",
-      "verificationSummary",
-      "placement",
-      "cleanup",
-      "leak",
-      "workspace",
-    ],
+    ["completion", "verification", "verificationReuse", "verificationSummary", "placement", "workspace"],
   );
   const evidence = decodeCompletionEvidence({
     ...(object.completion === undefined ? {} : { completion: object.completion }),
@@ -481,8 +469,6 @@ export function decodeReviewValue(value: unknown): ReviewValue {
     ...(object.verificationReuse === undefined ? {} : { verificationReuse: object.verificationReuse }),
     ...(object.verificationSummary === undefined ? {} : { verificationSummary: object.verificationSummary }),
     ...(object.placement === undefined ? {} : { placement: object.placement }),
-    ...(object.cleanup === undefined ? {} : { cleanup: object.cleanup }),
-    ...(object.leak === undefined ? {} : { leak: object.leak }),
   });
   return {
     ...evidence,

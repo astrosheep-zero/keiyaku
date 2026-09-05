@@ -1,4 +1,5 @@
 import {
+  executionReceipt,
   KeiyakuRefused,
   KeiyakuRetry,
   type AmendResult,
@@ -27,7 +28,7 @@ import type {
 
 type MutationObservation = Pick<
   MutationResult<unknown>,
-  "facts" | "head" | "lags" | "settlementLags" | "recoverySnapshot" | "seatClose"
+  "facts" | "head" | "lags" | "settlementLags" | "recoverySnapshot" | "cleanup" | "executionStops"
 >;
 
 type MutationCallOptions = Readonly<{
@@ -47,9 +48,11 @@ function acceptedFacts(result: MutationObservation): readonly AcceptedFact[] {
 function attestationFor(
   facts: readonly Fact[],
   gate: "reviewed" | "verified",
+  coordinate: ContractId,
 ): Extract<Fact, { kind: "attestation" }> | undefined {
   return facts.findLast(
-    (fact): fact is Extract<Fact, { kind: "attestation" }> => fact.kind === "attestation" && fact.data.gate === gate,
+    (fact): fact is Extract<Fact, { kind: "attestation" }> =>
+      fact.contract === coordinate && fact.kind === "attestation" && fact.data.gate === gate,
   );
 }
 
@@ -65,7 +68,8 @@ function acceptedEnvelope(result: MutationObservation, coordinate: ContractId | 
     settlementLags: result.settlementLags,
     ...(result.recoverySnapshot === undefined ? {} : { recoverySnapshot: result.recoverySnapshot }),
     ...(result.lags.length === 0 || firstLag === undefined ? {} : { lag: [firstLag, ...result.lags.slice(1)] }),
-    ...(result.seatClose === undefined || result.seatClose.length === 0 ? {} : { seatClose: result.seatClose }),
+    ...(result.cleanup.length === 0 ? {} : { cleanup: result.cleanup }),
+    ...(result.executionStops.length === 0 ? {} : { executionStops: result.executionStops }),
   };
 }
 
@@ -101,8 +105,9 @@ export function acceptedAmend(result: AmendResult, coordinate: ContractId): Acce
 
 export function acceptedDeliver(result: MutationResult<Delivery>, coordinate: ContractId): AcceptedDeliverResult {
   const value = result.value;
-  const attestation = attestationFor(result.facts, "verified");
-  const verificationVerdict = attestation?.data.verdict ?? value.verificationReuse?.verdict;
+  const attestation = attestationFor(result.facts, "verified", coordinate);
+  const verificationVerdict =
+    value.completion?.verification?.verdict ?? attestation?.data.verdict ?? value.verificationReuse?.verdict;
   return {
     ...acceptedEnvelope(result, coordinate),
     verb: "deliver",
@@ -115,17 +120,18 @@ export function acceptedDeliver(result: MutationResult<Delivery>, coordinate: Co
     ...(value.verificationSummary === undefined ? {} : { verificationSummary: value.verificationSummary }),
     ...(value.placement === undefined ? {} : { placement: value.placement }),
     ...(value.continuation === undefined ? {} : { continuation: value.continuation }),
-    ...(value.cleanup === undefined ? {} : { cleanup: value.cleanup }),
-    ...(value.leak === undefined ? {} : { leak: value.leak }),
   };
 }
 
 export function acceptedReview(result: MutationResult<Review>, coordinate: ContractId): AcceptedReviewResult {
   const value = result.value;
-  const reviewAttestation = attestationFor(result.facts, "reviewed");
+  const reviewAttestation = attestationFor(result.facts, "reviewed", coordinate);
   if (reviewAttestation === undefined) throw new Error("accepted review is missing its attestation fact");
-  const verificationAttestation = attestationFor(result.facts, "verified");
-  const verificationVerdict = verificationAttestation?.data.verdict ?? value.verificationReuse?.verdict;
+  const verificationAttestation = attestationFor(result.facts, "verified", coordinate);
+  const verificationVerdict =
+    value.completion?.verification?.verdict ??
+    verificationAttestation?.data.verdict ??
+    value.verificationReuse?.verdict;
   return {
     ...acceptedEnvelope(result, coordinate),
     verb: "review",
@@ -138,8 +144,6 @@ export function acceptedReview(result: MutationResult<Review>, coordinate: Contr
     ...(value.placement === undefined ? {} : { placement: value.placement }),
     ...(value.continuation === undefined ? {} : { continuation: value.continuation }),
     ...(value.workspace === undefined ? {} : { workspace: value.workspace }),
-    ...(value.cleanup === undefined ? {} : { cleanup: value.cleanup }),
-    ...(value.leak === undefined ? {} : { leak: value.leak }),
   };
 }
 
@@ -168,8 +172,6 @@ export function acceptedAudit(result: MutationResult<AuditReport>, coordinate: C
     ...acceptedEnvelope(result, coordinate),
     verb: "audit",
     report: result.value,
-    ...(result.cleanup === undefined ? {} : { cleanup: result.cleanup }),
-    ...(result.leak === undefined ? {} : { leak: result.leak }),
   };
 }
 
@@ -185,6 +187,7 @@ export async function resultFromMutationCall<
   try {
     return project(await call());
   } catch (error) {
+    if (executionReceipt(error) !== undefined) throw error;
     if (error instanceof KeiyakuRefused) {
       return {
         kind: "refused",
