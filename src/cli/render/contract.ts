@@ -257,8 +257,10 @@ function shortGitId(value: string): string {
 
 /**
  * Shared presentation of a completed placement, so a deliver and a review that placed the same candidate read
- * identically: one git-shaped target movement row, naming the reference it advanced and its Verification
- * provenance, then the final lifecycle state. A completion without an advanced reference states no movement.
+ * identically: one git-shaped target movement row, naming the reference it advanced, then the final lifecycle
+ * state. Satisfied Verification adds one fact row naming the commit the verdict ran against; placement made that
+ * commit the reference's new head, so the two rows share one sha. Verification mode words stay in JSON and
+ * `history`, never in ordinary receipt text. A completion without an advanced reference states no movement.
  * Journal ULIDs stay in JSON and `history`, never in ordinary receipt text.
  */
 function completedPlacementLines(
@@ -267,11 +269,6 @@ function completedPlacementLines(
 ): readonly string[] {
   const completion = result.completion;
   if (completion === undefined) return [];
-  const verification = completion.verification;
-  const provenance =
-    verification === undefined || verification.verdict !== "satisfied"
-      ? []
-      : [{ text: verification.mode === "reused" ? "· verification reused from delivery" : "· verified now" }];
   const lines: string[] = [];
   if (completion.predecessor !== undefined && completion.target !== undefined) {
     receiptRow(
@@ -281,8 +278,16 @@ function completedPlacementLines(
       [
         { text: `${shortGitId(completion.predecessor)}..${shortGitId(completion.integration)}` },
         { text: completion.target, opaque: true },
-        ...provenance,
       ],
+      columns,
+    );
+  }
+  if (completion.verification?.verdict === "satisfied") {
+    receiptRow(
+      lines,
+      " ",
+      "verification",
+      [{ text: "satisfied" }, { text: `· on ${shortGitId(completion.integration)}` }],
       columns,
     );
   }

@@ -23,13 +23,16 @@ and operational failure. Contract text labels tender and target integration as `
 reads like Git movement, identically for a review and a deliver that placed
 the candidate: the title states the verdict or delivery and the Contract, one
 movement row states the reference the placement advanced as `old..new  ref`,
-naming its Verification provenance — `verification reused from delivery` when
-the verdict rests on Verification already recorded over the same integrated
-candidate, and the fresh-run equivalent when this invocation ran it — and the
-final lifecycle state is one explicit `claimed` row. A deliver that did not
-complete placement keeps its tender and content-identity rows and its current
-diagnostic shape. Journal entry ids are evidence handles carried by JSON and
-`history`; they are not ordinary receipt text.
+satisfied Verification adds one fact row `verification satisfied · on <sha>`
+naming the commit the verdict ran against — placement made that commit the
+reference's new head, so the two rows share one sha — and the final lifecycle
+state is one explicit `claimed` row. Receipt, status, and history render that
+fact with the same `verification satisfied` vocabulary; Verification mode
+words never appear in ordinary receipt text and stay in JSON and `history`. A
+deliver that did not complete placement keeps its tender and
+content-identity rows and its current diagnostic shape. Journal entry ids are
+evidence handles carried by JSON and `history`; they are not ordinary receipt
+text.
 
 ## Shared rendering
 

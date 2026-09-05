@@ -750,21 +750,26 @@ test("deliver projects a ran Verification completion", () => {
     facts: [{ contract, entry: "claim", kind: "claimed" as const }],
     settlementLags: [],
   };
+  const text = renderText({
+    ...envelope,
+    verb: "deliver",
+    completion: {
+      integration,
+      predecessor: snapshotId("3".repeat(40)),
+      target: "refs/heads/main",
+      verification: { mode: "ran", verdict: "satisfied" },
+    },
+  });
   assert.equal(
-    renderText({
-      ...envelope,
-      verb: "deliver",
-      completion: {
-        integration,
-        predecessor: snapshotId("3".repeat(40)),
-        target: "refs/heads/main",
-        verification: { mode: "ran", verdict: "satisfied" },
-      },
-    }),
-    ["✓ delivered  kei/completion", "  target  3333333..4444444  refs/heads/main  · verified now", "● claimed"].join(
-      "\n",
-    ),
+    text,
+    [
+      "✓ delivered  kei/completion",
+      "  target  3333333..4444444  refs/heads/main",
+      "  verification  satisfied  · on 4444444",
+      "● claimed",
+    ].join("\n"),
   );
+  assertModeWordingAbsent(text);
 });
 
 test("deliver renders claimed and stopped continuations from the accepted result", () => {
@@ -863,7 +868,11 @@ function assertNoWorkspaceRows(text: string): void {
   assert.doesNotMatch(text, /files? changed/u);
 }
 
-test("review projects a git-shaped movement row with named reused Verification", () => {
+function assertModeWordingAbsent(text: string): void {
+  assert.doesNotMatch(text, /verified now|verification reused from delivery/u);
+}
+
+test("review projects a git-shaped movement row with a satisfied Verification fact row", () => {
   const contract = contractId("kei/review-completion");
   const predecessor = snapshotId("1".repeat(40));
   const integration = snapshotId("2".repeat(40));
@@ -893,43 +902,48 @@ test("review projects a git-shaped movement row with named reused Verification",
     text,
     [
       "✓ review satisfied  kei/review-completion",
-      "  target  1111111..2222222  refs/heads/main  · verification reused from delivery",
+      "  target  1111111..2222222  refs/heads/main",
+      "  verification  satisfied  · on 2222222",
       "● claimed",
     ].join("\n"),
   );
+  assertModeWordingAbsent(text);
   assertNoWorkspaceRows(text);
   assert.doesNotMatch(text, /recorded|->|journal|integration commit|placement/u);
 });
 
-test("review names a fresh Verification run and keeps the verdict title unadorned", () => {
+test("review names the verified sha and keeps the verdict title unadorned", () => {
   const contract = contractId("kei/review-fresh-verification");
   const predecessor = snapshotId("3".repeat(40));
   const integration = snapshotId("4".repeat(40));
+  const text = renderText({
+    kind: "accepted",
+    verb: "review",
+    contract,
+    head: contractHead("head"),
+    facts: [
+      { contract, entry: "reintegration", kind: "reintegrated", data: { predecessor, snapshot: integration } },
+      { contract, entry: "claim", kind: "claimed" },
+    ],
+    settlementLags: [],
+    verdict: "satisfied",
+    completion: {
+      integration,
+      predecessor,
+      target: "refs/heads/main",
+      verification: { mode: "ran", verdict: "satisfied" },
+    },
+  });
   assert.equal(
-    renderText({
-      kind: "accepted",
-      verb: "review",
-      contract,
-      head: contractHead("head"),
-      facts: [
-        { contract, entry: "reintegration", kind: "reintegrated", data: { predecessor, snapshot: integration } },
-        { contract, entry: "claim", kind: "claimed" },
-      ],
-      settlementLags: [],
-      verdict: "satisfied",
-      completion: {
-        integration,
-        predecessor,
-        target: "refs/heads/main",
-        verification: { mode: "ran", verdict: "satisfied" },
-      },
-    }),
+    text,
     [
       "✓ review satisfied  kei/review-fresh-verification",
-      "  target  3333333..4444444  refs/heads/main  · verified now",
+      "  target  3333333..4444444  refs/heads/main",
+      "  verification  satisfied  · on 4444444",
       "● claimed",
     ].join("\n"),
   );
+  assertModeWordingAbsent(text);
 });
 
 test("review projects a reused unsatisfied Verification as non-gating completion", () => {
