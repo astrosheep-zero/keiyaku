@@ -106,8 +106,40 @@ test("root Task catalogue marks every disposition with its own state", () => {
   };
   assert.equal(
     renderCatalogText(catalog),
-    cases.map(([state, mark]) => `${mark} task/${state} · ${state} · P1 — ${state}`).join("\n"),
+    cases.map(([state, mark]) => `${mark} task/${state} · ${state.replaceAll("_", " ")} · P1 — ${state}`).join("\n"),
   );
+});
+
+test("World roster names a bound Contract once without a bare unavailable parenthetical", () => {
+  const snapshot = idleAkumaSnapshot([]);
+  const bound = (observed: "active" | "terminal" | "missing" | "unavailable") => ({
+    ...activityAkumaRow("aku/worker/11110001", "asleep", snapshot),
+    contract: { id: contractId("kei/bound-contract"), observed },
+  });
+  const boundText = renderAkuma(akumaWorldReport([bound("terminal")]), { columns: 120, color: false }).join("\n");
+  assert.match(boundText, /bound to kei\/bound-contract/u);
+  assert.doesNotMatch(boundText, /->/u);
+  const unresolved = renderAkuma(akumaWorldReport([bound("unavailable")]), { columns: 120, color: false }).join("\n");
+  assert.match(unresolved, /bound to kei\/bound-contract/u);
+  assert.doesNotMatch(unresolved, /unavailable/u);
+  const missing = renderAkuma(akumaWorldReport([bound("missing")]), { columns: 120, color: false }).join("\n");
+  assert.match(missing, /bound to kei\/bound-contract \(missing\)/u);
+  const free = renderAkuma(akumaWorldReport([activityAkumaRow("aku/worker/22220002", "asleep", snapshot)]), {
+    columns: 120,
+    color: false,
+  }).join("\n");
+  assert.match(free, /unbound/u);
+});
+
+test("World roster states the activity age only when it differs from the state age", () => {
+  const snapshot = idleAkumaSnapshot([]);
+  const equal = activityAkumaRow("aku/worker/33330003", "asleep", snapshot);
+  const equalText = renderAkuma(akumaWorldReport([equal]), { columns: 120, color: false }).join("\n");
+  assert.match(equalText, /asleep · 5s/u);
+  assert.doesNotMatch(equalText, /activity/u);
+  const distinct = { ...equal, lastActivityAt: "2026-01-01T09:59:00.000Z" };
+  const distinctText = renderAkuma(akumaWorldReport([distinct]), { columns: 120, color: false }).join("\n");
+  assert.match(distinctText, /activity 1m/u);
 });
 
 test("pre-delivery review records testimony without claiming a retained candidate", () => {
@@ -1305,6 +1337,24 @@ test("World roster keeps active, error and truncated activity marks truthful", (
   ).join("\n");
   assert.match(truncatedRoster, /…”/u);
   assert.ok(!truncatedRoster.includes("x".repeat(200)), "truncation bounds retained said text");
+});
+
+test("World roster previews strip markdown decoration without rewording", () => {
+  const snapshot = openAkumaSnapshot([
+    snapshotRow({
+      kind: "said",
+      sequence: 1,
+      turnSequence: 1,
+      at: AKUMA_ACTIVITY_AT,
+      text: "**Source —** `src/a.ts`\n## Heading\n- *italic* and src/**/*.ts",
+    }),
+  ]);
+  const roster = renderAkuma(akumaWorldReport([activityAkumaRow("aku/worker/44440004", "running", snapshot)]), {
+    columns: 120,
+    color: false,
+  }).join("\n");
+  assert.doesNotMatch(roster, /`|##|^- |\*\*Source/mu);
+  assert.match(roster, /Source — src\/a\.ts Heading italic and src\/\*\*\/\*\.ts/u);
 });
 
 test("a sleeping worker reports its return as an event", () => {

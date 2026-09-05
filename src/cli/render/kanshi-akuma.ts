@@ -60,11 +60,9 @@ function akumaLabel(row: AkumaKanshiRow): string {
 }
 
 function endpointFact(id: string, observed: string | undefined): string {
-  return observed === "missing"
-    ? `-> ${id} (missing)`
-    : observed === "unavailable"
-      ? `-> ${id} (unavailable)`
-      : `-> ${id}`;
+  // A bounded or failed Contract read leaves the disposition unknown; a parenthetical that
+  // cannot name the reason is absent, while a complete read that established absence says so.
+  return observed === "missing" ? `bound to ${id} (missing)` : `bound to ${id}`;
 }
 
 function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly string[] {
@@ -73,15 +71,18 @@ function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly
   if (section.kind === "failed")
     return ["AKUMA // unavailable", "", tone(`! ${safeText(section.failure.message)}`, "alert", context.color)];
   const rows = section.value.rows;
+  if (rows.length === 0) return [];
   const rowLines = rows.map((row) => {
     const statusTone = akumaStatusTone(row, report.observedAt);
     const mark = statusTone === null ? akumaMark(row.life) : tone(akumaMark(row.life), statusTone, context.color);
     const lifeAt = "lifeAt" in row ? row.lifeAt : null;
-    const life = `${row.life} · ${formatAge(lifeAt, report.observedAt)}`;
-    const activity =
+    const lifeAge = formatAge(lifeAt, report.observedAt);
+    const life = `${row.life} · ${lifeAge}`;
+    const activityAge =
       "lastActivityAt" in row && row.lastActivityAt !== null
-        ? [`activity ${formatAge(row.lastActivityAt, report.observedAt)}`]
-        : [];
+        ? formatAge(row.lastActivityAt, report.observedAt)
+        : null;
+    const activity = activityAge === null || activityAge === lifeAge ? [] : [`activity ${activityAge}`];
     const key =
       row.life === "stranded" && "strandedReason" in row && row.strandedReason === "resume-unsupported"
         ? [life, ...activity, "resume unsupported"]

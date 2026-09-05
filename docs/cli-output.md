@@ -94,6 +94,21 @@ report. Shared presentation changes preserve the Akuma timeline's activity,
 time, continuity, and running-tool distinctions; they do not restyle that
 surface into ordinary fact rows.
 
+Roster, world-status, and task rows state each fact once in words. A bound
+Akuma reads `bound to <contract>` and a free one `unbound`, and the roster
+association never uses an arrow. A Contract association carries a parenthetical
+only when the read established a reason a person can act on, as `missing` does
+from a complete observation; an association a bounded or failed read could not
+resolve prints none. A row prints its activity age only when that age differs
+from the state age. Activity previews strip emphasis asterisks, code backticks,
+heading hashes, and list bullets and collapse whitespace while keeping their
+width-aware truncation, undecorating the content without rewording it. A
+present but empty world-status section omits its header entirely instead of
+printing a bare heading, while a fully empty view keeps whatever empty state
+the law already blesses. Task dispositions render as words — `in progress`,
+`on hold`, and every other de-dashed disposition — wherever task rows appear,
+in the task view, Kanshi, and the catalog.
+
 Detached call receipts foreground the complete Akuma identity with any alias
 as a parenthetical supplement. Compact resource rows name the associated
 Contract and the actual execution directory; the invocation World is not an

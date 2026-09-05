@@ -10,7 +10,7 @@ import {
   targetFacts,
 } from "./contract-observation.js";
 import { safeText } from "./terminal.js";
-import { taskMark } from "./task.js";
+import { dispositionText, taskMark } from "./task.js";
 
 function akumaMark(life: string): string {
   if (life === "running") return "●";
@@ -42,9 +42,12 @@ function renderAkumaCatalog(catalog: Extract<Catalog, { kind: "akuma" }>): strin
   for (const row of rows) {
     const lifeAt = "lifeAt" in row ? row.lifeAt : null;
     const activityAt = "lastActivityAt" in row ? row.lastActivityAt : null;
-    const ages = [relativeAge(lifeAt, catalog.observedAt), relativeAge(activityAt, catalog.observedAt)].filter(
-      (age): age is string => age !== null,
-    );
+    const lifeAge = relativeAge(lifeAt, catalog.observedAt);
+    const activityAge = relativeAge(activityAt, catalog.observedAt);
+    const ages = [
+      ...(lifeAge === null ? [] : [lifeAge]),
+      ...(activityAge === null || activityAge === lifeAge ? [] : [`activity ${activityAge}`]),
+    ];
     lines.push(
       `${akumaMark(row.life)} ${safeText(row.id)} · ${row.life}${ages.length === 0 ? "" : ` · ${ages.join(" · ")}`}`,
     );
@@ -101,7 +104,7 @@ export function renderCatalogText(catalog: Catalog): string {
     return [
       ...catalog.rows.map(
         (row) =>
-          `${taskMark(row.disposition)} ${safeText(row.id)} · ${row.disposition} · P${row.priority} — ${safeText(row.title)}`,
+          `${taskMark(row.disposition)} ${safeText(row.id)} · ${dispositionText(row.disposition)} · P${row.priority} — ${safeText(row.title)}`,
       ),
       ...(catalog.hasMore ? ["…"] : []),
     ].join("\n");

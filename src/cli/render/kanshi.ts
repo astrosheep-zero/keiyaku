@@ -25,6 +25,7 @@ import {
   type TextRenderContext,
 } from "./terminal.js";
 import { akumaMark, endpointFact, formatAge, NARROW_COLUMNS, renderAkuma } from "./kanshi-akuma.js";
+import { dispositionText } from "./task.js";
 const REVIEW_ATTENTION_MS = 15 * 60 * 1_000;
 const PENDING_ATTENTION_MS = 60 * 60 * 1_000;
 
@@ -119,7 +120,9 @@ function mergeFacts(
 function linkedTask(report: KanshiReport, taskId: string): string {
   if (report.tasks.kind !== "present") return `! ${taskId} · unavailable`;
   const task = report.tasks.value.rows.find((candidate) => candidate.id === taskId);
-  return task === undefined ? `! ${taskId} · unavailable` : `${taskMark(task)} ${task.id} · ${task.disposition}`;
+  return task === undefined
+    ? `! ${taskId} · unavailable`
+    : `${taskMark(task)} ${task.id} · ${dispositionText(task.disposition)}`;
 }
 
 function linkedAkuma(report: KanshiReport, id: string, aliases: readonly string[]): string {
@@ -174,7 +177,8 @@ function namespaceTaskFacts(row: ContractKanshiRow): readonly string[] {
     return [`failed ${row.namespaceTasks.failure.message}`];
   }
   return row.namespaceTasks.value.map(
-    (task) => `${taskMark(task)} ${task.id} · ${task.disposition} · P${task.priority} · ${task.title}`,
+    (task) =>
+      `${taskMark(task)} ${task.id} · ${dispositionText(task.disposition)} · P${task.priority} · ${task.title}`,
   );
 }
 
@@ -281,6 +285,7 @@ function renderContracts(report: KanshiReport, context: TextRenderContext): read
   if (section.kind === "absent") return ["CONTRACTS // absent", "", "  contracts absent"];
   if (section.kind === "failed")
     return ["CONTRACTS // unavailable", "", tone(`! ${safeText(section.failure.message)}`, "alert", context.color)];
+  if (section.value.rows.length === 0) return [];
   const rendered = renderSectionBlock({
     name: "CONTRACTS",
     rows: section.value.rows.map((row) => renderWorldContractRow(row, report, context)),
@@ -313,6 +318,7 @@ function renderTasks(report: KanshiReport, context: TextRenderContext): readonly
       tone(`! ${safeText(taskFailureFact(section.failure))}`, "alert", context.color),
     ];
   const rows = section.value.rows;
+  if (rows.length === 0) return [];
   const rowLines: readonly (readonly string[])[] = rows.map((row) => {
     const relation = row.contract === undefined ? ["unbound"] : [endpointFact(row.contract.id, row.contract.observed)];
     const childFacts =
@@ -323,7 +329,7 @@ function renderTasks(report: KanshiReport, context: TextRenderContext): readonly
         identityLine(
           taskMark(row),
           row.id,
-          `· ${row.disposition} · P${row.priority} · ${row.title} · ${relation.join(" · ")}`,
+          `· ${dispositionText(row.disposition)} · P${row.priority} · ${row.title} · ${relation.join(" · ")}`,
         ),
         ...plumbFacts([...childFacts, ...blockerFacts], context.columns),
       ];
@@ -331,7 +337,7 @@ function renderTasks(report: KanshiReport, context: TextRenderContext): readonly
     return entityLines({
       mark: taskMark(row),
       identity: row.id,
-      state: `${row.disposition} · P${row.priority}`,
+      state: `${dispositionText(row.disposition)} · P${row.priority}`,
       title: row.title,
       facts: [...relation, ...childFacts, ...blockerFacts],
       context,
@@ -353,11 +359,8 @@ export function renderKanshiText(
   selection: "world" | "contract" = "world",
 ): string {
   if (selection === "contract") return renderSelectedContract(report, context).join("\n");
-  return [
-    ...renderContracts(report, context),
-    "",
-    ...renderAkuma(report, context),
-    "",
-    ...renderTasks(report, context),
-  ].join("\n");
+  return [renderContracts(report, context), renderAkuma(report, context), renderTasks(report, context)]
+    .filter((block) => block.length > 0)
+    .map((block) => block.join("\n"))
+    .join("\n\n");
 }

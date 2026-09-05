@@ -67,6 +67,11 @@ export function taskMark(word: string): string {
   return "?";
 }
 
+/** Task dispositions and relation states are snake_case facts; people read them as words. */
+export function dispositionText(word: string): string {
+  return word.replaceAll("_", " ");
+}
+
 function priorityText(priority: number | null): string {
   return priority === null ? "P?" : `P${priority}`;
 }
@@ -74,7 +79,7 @@ function priorityText(priority: number | null): string {
 function scanUnit(id: string, priority: number | null, word: TaskWord | undefined): string {
   return word === undefined
     ? `${taskMark("ready")} ${id} · ${priorityText(priority)}`
-    : `${taskMark(word)} ${id} · ${word} · ${priorityText(priority)}`;
+    : `${taskMark(word)} ${id} · ${dispositionText(word)} · ${priorityText(priority)}`;
 }
 
 function entityLines(entity: TaskEntity, columns: number, indent = ""): readonly string[] {
@@ -130,7 +135,7 @@ function renderFailure(verb: string, result: TaskFailure, columns: number): stri
 
 function edge(label: string, ref: TaskRef, mark?: string): string {
   const prefix = mark === undefined ? `  ${label}` : `  ${mark} ${label}`;
-  return `${prefix} ${ref.id} · ${ref.state}`;
+  return `${prefix} ${ref.id} · ${dispositionText(ref.state)}`;
 }
 
 function pageHeading(view: string): string {
@@ -171,7 +176,7 @@ function renderListRow(
 ): readonly string[] {
   const lines = [...entityLines(listEntity(item, omitDisposition), columns)];
   if ("blockers" in item) {
-    for (const blocker of item.blockers) lines.push(`  needs ${blocker.id} · ${blocker.state}`);
+    for (const blocker of item.blockers) lines.push(`  needs ${blocker.id} · ${dispositionText(blocker.state)}`);
   }
   return lines;
 }

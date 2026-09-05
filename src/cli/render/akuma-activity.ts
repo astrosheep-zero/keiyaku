@@ -101,6 +101,19 @@ function mark(row: RenderRow): "│" | "⧖" | "⧗" | "✓" | "!" | "?" {
   return "│";
 }
 
+/** Strip Markdown decoration from preview prose without rewriting the words. */
+function undecorated(text: string): string {
+  return text
+    .replace(/^ {0,3}#{1,6}[ \t]+/gmu, "")
+    .replace(/^ {0,3}(?:[-*+]|\d+\.)[ \t]+/gmu, "")
+    .replace(/\*\*([^*\n]+?)\*\*/gu, "$1")
+    // A single pair of asterisks is emphasis only when it does not sit inside a word, path, or glob.
+    .replace(/(?<![\w*/\\])\*([^\s*/\\](?:[^*/\\\n]*[^\s*/\\])?)\*(?![\w*/\\])/gu, "$1")
+    .replace(/`([^`\n]+?)`/gu, "$1")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
 function rowText(row: RenderRow): Readonly<{ text: string; lines: number; middle?: true; suffix?: string }> {
   if (
     row.kind === "said" ||
@@ -110,13 +123,13 @@ function rowText(row: RenderRow): Readonly<{ text: string; lines: number; middle
     row.kind === "tell"
   ) {
     return {
-      text: row.text,
+      text: undecorated(row.text),
       lines: row.kind === "said" || row.kind === "thought" ? 2 : row.kind === "tell" || row.kind === "call" ? 1 : 2,
     };
   }
   if (row.kind === "outcome")
     return row.outcome.kind === "answered"
-      ? { text: row.outcome.answer, lines: 3 }
+      ? { text: undecorated(row.outcome.answer), lines: 3 }
       : { text: row.outcome.diagnostic, lines: 2 };
   if (row.kind === "turn") return { text: "", lines: 1 };
   if (row.kind !== "tool") return { text: "", lines: 1 };
