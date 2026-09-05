@@ -33,6 +33,7 @@ export const LOCAL_TEST_FILES = [
 ];
 
 export const INTEGRATION_TEST_FILES = [
+  "tests/akuma-api.test.ts",
   "tests/akuma-body-requests.test.ts",
   "tests/akuma-body.test.ts",
   "tests/akuma-heart.test.ts",
