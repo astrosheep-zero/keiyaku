@@ -29,6 +29,7 @@ import {
   makeGitRepository,
   snapshotGitRepository,
   withGitShim,
+  waitForFile,
 } from "./support/git.js";
 import { bind, commitCandidate, document, refused, repositoryWithMain } from "./support/library-verbs.js";
 
@@ -938,6 +939,77 @@ test("public review, abandon, and Arc preserve their ruled testimony", async () 
       }),
     refused({ kind: "terminal", contractId }),
   );
+});
+
+test("same captured content continues an admitted delivery without another delivery fact", async () => {
+  const repository = repositoryWithMain();
+  const marker = join(repository.path, "verification-started");
+  const script = `${process.execPath} -e ${JSON.stringify(
+    `const fs=require("node:fs"); const p=${JSON.stringify(marker)}; if (!fs.existsSync(p)) { fs.writeFileSync(p, "started"); setTimeout(() => {}, 30000); }`,
+  )}`;
+  const contract = (
+    await Keiyaku.bind({
+      repo: await cachedRepoAt(repository.path),
+      markdown: document(script),
+      workspace: "worktree",
+      target: "refs/heads/main",
+      gates: ["verified"],
+    })
+  ).keiyaku;
+  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), await publicContractId(contract));
+  writeFileSync(join(worktree, "candidate.txt"), "same\n");
+
+  const controller = new AbortController();
+  const pending = contract.deliver({ includeDirty: true, signal: controller.signal });
+  await waitForFile(marker);
+  controller.abort();
+  const interrupted = expectMutation(await pending);
+  const admittedState = await contract.state();
+  const deliveryEntry = admittedState.delivery?.entry;
+  const changeId = admittedState.delivery?.data.integration.changeId;
+  const predecessor = admittedState.delivery?.data.integration.predecessor;
+  assert.ok(deliveryEntry);
+  assert.ok(changeId);
+  assert.ok(predecessor);
+  assert.deepEqual(interrupted.facts.map((fact) => fact.kind), ["bound", "deliver"]);
+
+  const resumed = expectMutation(await contract.deliver({ includeDirty: true }));
+  assert.deepEqual(resumed.facts.map((fact) => fact.kind), ["attestation", "claimed"]);
+  const finalState = await contract.state();
+  assert.equal(finalState.delivery?.entry, deliveryEntry);
+  assert.equal(finalState.delivery?.data.integration.changeId, changeId);
+  assert.equal(finalState.delivery?.data.integration.predecessor, predecessor);
+  assert.equal(finalState.terminal?.kind, "claimed");
+});
+
+test("changed captured content replaces an admitted delivery candidate", async () => {
+  const repository = repositoryWithMain();
+  const marker = join(repository.path, "verification-started");
+  const script = `${process.execPath} -e ${JSON.stringify(
+    `const fs=require("node:fs"); const p=${JSON.stringify(marker)}; if (!fs.existsSync(p)) { fs.writeFileSync(p, "started"); setTimeout(() => {}, 30000); }`,
+  )}`;
+  const contract = await bind(repository, script);
+  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), await publicContractId(contract));
+  writeFileSync(join(worktree, "candidate.txt"), "first\n");
+
+  const controller = new AbortController();
+  const pending = contract.deliver({ includeDirty: true, signal: controller.signal });
+  await waitForFile(marker);
+  controller.abort();
+  await pending;
+  const first = await contract.state();
+  const firstEntry = first.delivery?.entry;
+  const firstChangeId = first.delivery?.data.integration.changeId;
+  assert.ok(firstEntry);
+  assert.ok(firstChangeId);
+
+  writeFileSync(join(worktree, "candidate.txt"), "changed\n");
+  const replaced = expectMutation(await contract.deliver({ includeDirty: true }));
+  assert.deepEqual(replaced.facts.map((fact) => fact.kind), ["deliver", "attestation", "claimed"]);
+  const finalState = await contract.state();
+  assert.notEqual(finalState.delivery?.entry, firstEntry);
+  assert.notEqual(finalState.delivery?.data.integration.changeId, firstChangeId);
+  assert.equal(finalState.terminal?.kind, "claimed");
 });
 
 test("delivery terminal refusal outranks a missing managed worktree", async () => {

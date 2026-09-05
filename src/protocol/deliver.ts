@@ -9,6 +9,7 @@ import {
   dirtyTenderRefusal,
   materializeTenderSnapshot,
   prepareDeliveryCommitMetadata,
+  type TenderCapture,
 } from "../git/tender.js";
 import {
   checkoutDetachedSnapshot,
@@ -29,7 +30,7 @@ import type { AttemptContext } from "../core/decide.js";
 import { contractState } from "../core/facts/observation.js";
 import type { ActorId, ContractId, ContractState, DeliverData, JournalEntry, SnapshotId } from "../core/facts/types.js";
 import { decideDeliver, type DeliverInput, type DeliverRefusal } from "../core/verbs/deliver.js";
-import type { CurrentVerifiedAttestation } from "./intent.js";
+import { currentVerifiedAttestation, type CurrentVerifiedAttestation } from "./intent.js";
 import { admitDecidedOffer, mintAttempts } from "./attempt.js";
 import { admitted } from "./outcome.js";
 import { completeCandidate, type CompletionEvidence, type CompletionResult } from "./completion.js";
@@ -140,12 +141,16 @@ async function prepareDeliveryWithWorktree(
     requireBranchesToBeUpToDate?: boolean;
     includeDirty?: boolean;
   }>,
+  captured?: TenderCapture,
 ): Promise<
   | { kind: "prepared"; data: DeliverData; worktree: SpeculativeWorktreeInput }
   | { kind: "refused"; refusal: DeliveryPreparationRefusal }
 > {
   const { contractId, coordinates } = stage;
-  const tender = await captureAuthorizedDeliveryTender(repository, stage, input.includeDirty);
+  const tender =
+    captured === undefined
+      ? await captureAuthorizedDeliveryTender(repository, stage, input.includeDirty)
+      : { kind: "prepared" as const, data: captured };
   if (tender.kind === "refused") return tender;
   const commit = await prepareDeliveryCommitMetadata(repository, {
     contractId,
@@ -217,6 +222,7 @@ type SpeculativeDelivery = Readonly<{
   derivation?: DocumentDerivation;
   preparation?: DeliverInput<DeliveryFailure>["preparation"];
   worktree?: SpeculativeWorktreeInput;
+  continuation?: boolean;
 }>;
 
 function deliveryPreparationInput(input: DeliverOperationInput, derivation: DocumentDerivation) {
@@ -257,6 +263,7 @@ async function mechanicalDeliveryPreparation(
   input: DeliverOperationInput,
   state: ContractState,
   derivation: DocumentDerivation,
+  captured?: TenderCapture,
 ): Promise<
   | Extract<DeliverInput<DeliveryFailure>["preparation"], { kind: "refused" }>
   | Readonly<{
@@ -270,6 +277,7 @@ async function mechanicalDeliveryPreparation(
     input.scope,
     { contractId: state.id, coordinates: state.coordinates },
     deliveryPreparationInput(input, derivation),
+    captured,
   );
   if (prepared.kind === "refused") {
     return { kind: "refused", document: derivation.document, refusal: prepared.refusal };
@@ -280,6 +288,34 @@ async function mechanicalDeliveryPreparation(
     data: prepared.data,
     worktree: prepared.worktree,
   };
+}
+
+function worktreeInput(
+  repository: import("../git/process.js").GitRepository,
+  state: ContractState,
+  tender: TenderCapture,
+): Promise<SpeculativeWorktreeInput> {
+  return worktreeChangeId(repository, { contractId: state.id, coordinates: state.coordinates }, tender).then(
+    (changeId) => ({
+      tree: tender.tree,
+      head: tender.head,
+      ...(tender.mergeHead === undefined ? {} : { mergeHead: tender.mergeHead }),
+      dirty: tender.dirty,
+      changeId,
+    }),
+  );
+}
+
+function hasSupersedingVerification(
+  state: ContractState,
+  journal: readonly JournalEntry[],
+): boolean {
+  if (state.delivery === null) return false;
+  const current = currentVerifiedAttestation(state);
+  if (current === undefined) return false;
+  const deliveryIndex = journal.findIndex((entry) => entry.entry === state.delivery?.entry);
+  const verificationIndex = journal.findIndex((entry) => entry.entry === current.entry);
+  return deliveryIndex >= 0 && verificationIndex > deliveryIndex;
 }
 
 async function speculateDelivery(input: DeliverOperationInput): Promise<SpeculativeDelivery> {
@@ -298,7 +334,31 @@ async function speculateDelivery(input: DeliverOperationInput): Promise<Speculat
     };
   }
   if (input.materializeConflict === true && state.terminal === null) return { observation, state, derivation };
-  const prepared = await mechanicalDeliveryPreparation(input, state, derivation);
+  const captured = await captureAuthorizedDeliveryTender(
+    input.scope,
+    { contractId: state.id, coordinates: state.coordinates },
+    input.includeDirty,
+  );
+  if (captured.kind === "refused") {
+    return { observation, state, derivation, preparation: { kind: "refused", document: derivation.document, refusal: captured.refusal } };
+  }
+  const capturedWorktree = await worktreeInput(input.scope, state, captured.data);
+  if (
+    state.terminal === null &&
+    state.delivery !== null &&
+    capturedWorktree.changeId === state.delivery.data.integration.changeId &&
+    !hasSupersedingVerification(state, observation.journals.get(state.id)?.entries ?? [])
+  ) {
+    return {
+      observation,
+      state,
+      derivation,
+      preparation: { kind: "prepared", document: derivation.document, data: state.delivery.data },
+      worktree: capturedWorktree,
+      continuation: true,
+    };
+  }
+  const prepared = await mechanicalDeliveryPreparation(input, state, derivation, captured.data);
   return prepared.kind === "prepared"
     ? { observation, state, derivation, preparation: prepared, worktree: prepared.worktree }
     : { observation, state, derivation, preparation: prepared };
@@ -327,6 +387,20 @@ async function decideAndAdmitDelivery(
   observation: GitDecisionObservation,
   speculated: SpeculativeDelivery,
 ): Promise<AttemptDecision<PreparedDelivery>> {
+  if (speculated.continuation === true) {
+    const record = observation.journals.get(input.contractId);
+    const state = record?.state;
+    if (record === undefined || state === null || state === undefined || state.delivery === null || speculated.derivation === undefined) {
+      return { kind: "redecide" };
+    }
+    return {
+      kind: "accepted",
+      facts: [],
+      state,
+      journal: record.entries,
+      value: { delivery: state.delivery.data, derivation: speculated.derivation },
+    };
+  }
   const preparation = await resolveDeliveryPreparation(input, speculated);
   const decision = decideDeliver({
     input: {

@@ -6,6 +6,11 @@ the lifecycle authority; Git is the custody authority for the bytes it names.
 Agents own their working content. Git's private topology is not a public
 identity, an additional state store, or a source of Contract legality.
 
+The Git-custody execution Body performs a forwarded `contract.deliver` for a
+worker that has no `.git` custody; forwarding does not grant that worker Git
+access. Private-index capture reads the appointed worktree bytes, including a
+real unmerged index, while preserving the worker's index and branch.
+
 ## World, Reads, And Publication
 
 One repository and its linked worktrees share one Git world and one private

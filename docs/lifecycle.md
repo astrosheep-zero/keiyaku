@@ -21,8 +21,12 @@ v4 does not admit an unfulfillable forward dependency. Placement judges only the
 current direct prerequisites: every one must be claimed. A prerequisite that
 later abandons remains visible as an unsatisfied dependency, not an unknown one.
 
-Delivery captures a candidate and frozen placement policy. A later delivery
-replaces that candidate. A conflict normally refuses without changing Contract
+Delivery captures a candidate and frozen placement policy. After that leading
+fact is admitted, a later delivery with the same worktree-content identity
+continues the non-terminal candidate and reuses its delivery data and recorded
+target base without adding another delivery fact. A terminal current
+Verification testimony supersedes that continuation; changed content replaces
+the candidate under the ordinary delivery rules. A conflict normally refuses without changing Contract
 authority; explicit conflict handoff may project it into the appointed workspace
 without treating the projection as delivery. Dirty workspace bytes require
 explicit delivery authorization; with that authorization, conflict materialization

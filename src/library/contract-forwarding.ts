@@ -6,6 +6,8 @@ import { executeLocalDelivery, executeLocalReview, type AttestationVerdict } fro
 import type { DeliveryValue } from "./delivery.js";
 import type { MutationResult, Review } from "./mutation.js";
 import { Repo, scopeForRepo } from "./repo.js";
+import { withGitDecodeChannel } from "../git/read-observation.js";
+import { observeContractAt } from "../git/observe.js";
 
 export { executeLocalDelivery, executeLocalReview } from "./contract-execution.js";
 export type { AttestationVerdict, DeliveryExecutionInput, ReviewExecutionInput } from "./contract-execution.js";
@@ -39,8 +41,12 @@ export async function executeForwardedDeliver(
   });
   if (result.kind !== "accepted") return { result };
   const delivery = result.facts.find((fact) => fact.kind === "deliver");
-  if (delivery === undefined) throw new Error("accepted delivery is missing its journal fact");
-  return { result, deliveryFactId: delivery.entry };
+  if (delivery !== undefined) return { result, deliveryFactId: delivery.entry };
+  const scope = scopeForRepo(input.repo);
+  const record = await withGitDecodeChannel(scope, (channel) => observeContractAt(scope, channel, input.contractId));
+  if (record.state?.delivery === null || record.state?.delivery === undefined)
+    throw new Error("accepted delivery is missing its journal fact");
+  return { result, deliveryFactId: record.state.delivery.entry };
 }
 
 export async function executeForwardedReview(
