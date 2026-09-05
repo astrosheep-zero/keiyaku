@@ -37,13 +37,13 @@ export type VerificationExecutionStop =
     }>
   | Readonly<{
       kind: "environment-failure";
-      command: number;
+      name: string;
       detail: HookFailure;
     }>;
 
 export type VerificationExecution = Readonly<{
   outcome: VerificationTerminalOutcome | VerificationExecutionStop;
-  cleanup?: Readonly<{ phase: "destroy"; command: number; detail: HookFailure }>;
+  cleanup?: Readonly<{ phase: "destroy"; name: string; detail: HookFailure }>;
   leak?: WorktreeLeak;
 }>;
 
@@ -150,7 +150,7 @@ export async function executeVerification(input: ExecuteVerificationInput): Prom
         readiness.kind === "cancelled"
           ? { kind: "cancelled" }
           : readiness.kind === "failed"
-            ? { kind: "environment-failure", command: readiness.command, detail: readiness.failure }
+            ? { kind: "environment-failure", name: readiness.name, detail: readiness.failure }
             : await executeDeclarations({
                 declarations: input.declarations,
                 cwd: scratch.cwd,
@@ -164,7 +164,7 @@ export async function executeVerification(input: ExecuteVerificationInput): Prom
     if (destroy !== undefined) {
       const result = await runHookCommands(scratch.cwd, destroy, undefined, environment);
       if (result.kind === "cancelled") throw new Error("scratch destroy cancelled without a signal");
-      if (result.kind === "failed") cleanup = { phase: "destroy", command: result.command, detail: result.failure };
+      if (result.kind === "failed") cleanup = { phase: "destroy", name: result.name, detail: result.failure };
     }
     leak = await scratch.dispose();
   }

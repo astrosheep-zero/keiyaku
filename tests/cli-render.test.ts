@@ -266,6 +266,79 @@ test("world observation failure text is exact", () => {
   assert.equal(renderText(result), "reconcile: world observation failed · git failed");
 });
 
+test("Verification create action names are safe in text receipts", () => {
+  const name = "prepare\nINJECT\u001b[31m";
+  const result: InvocationResult = {
+    kind: "accepted",
+    verb: "deliver",
+    contract: contractId("kei/hostile-create-name"),
+    head: contractHead("head"),
+    facts: [],
+    settlementLags: [],
+    verification: {
+      failure: "environment-failure",
+      name,
+      detail: { kind: "exit", code: 17, stdout: "", stderr: "", truncated: false },
+    },
+  };
+
+  const text = renderText(result, { columns: 200, color: false });
+  assert.equal(text.includes('name="prepare\\nINJECT\\u001b[31m"'), true);
+  assert.doesNotMatch(text, /\nINJECT/u);
+  assert.doesNotMatch(text, /\u001b/u);
+  const verification = result.verification;
+  assert.equal(verification !== undefined && "name" in verification ? verification.name : undefined, name);
+});
+
+test("Verification cleanup action names are safe in text receipts", () => {
+  const name = "destroy\rINJECT\u001b[2J";
+  const result: InvocationResult = {
+    kind: "accepted",
+    verb: "deliver",
+    contract: contractId("kei/hostile-cleanup-name"),
+    head: contractHead("head"),
+    facts: [],
+    settlementLags: [],
+    cleanup: {
+      phase: "destroy",
+      name,
+      detail: { kind: "timeout" },
+    },
+  };
+
+  const text = renderText(result, { columns: 200, color: false });
+  assert.equal(text.includes('name="destroy\\rINJECT\\u001b[2J"'), true);
+  assert.doesNotMatch(text, /\rINJECT/u);
+  assert.doesNotMatch(text, /\u001b/u);
+  assert.equal(result.cleanup?.name, name);
+});
+
+test("Verification text receipts distinguish configured action names", () => {
+  const receipt = (name: string) =>
+    renderText(
+      {
+        kind: "accepted",
+        verb: "deliver",
+        contract: contractId("kei/action-name-collision"),
+        head: contractHead("head"),
+        facts: [],
+        settlementLags: [],
+        verification: {
+          failure: "environment-failure",
+          name,
+          detail: { kind: "timeout" },
+        },
+      },
+      { columns: 200, color: false },
+    );
+
+  const newline = receipt("prepare\nx");
+  const space = receipt("prepare x");
+  assert.equal(newline.includes('name="prepare\\nx"'), true);
+  assert.equal(space.includes('name="prepare x"'), true);
+  assert.notEqual(newline, space);
+});
+
 test("amend text omits an absent Region observation", () => {
   const contract = contractId("kei/no-amend-region-observation");
   const result: InvocationResult = {

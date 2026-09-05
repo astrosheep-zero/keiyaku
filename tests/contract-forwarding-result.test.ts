@@ -61,7 +61,7 @@ test("accepted delivery round-trips owner settlement, verification, placement, c
       verificationReuse: { entry: fact.entry, verdict: "unsatisfied", summary: "reuse" },
       verificationSummary: "ran",
       placement: { failure: "target-placement-failed", diagnostic: "blocked" },
-      cleanup: { phase: "destroy", command: 0, detail: { kind: "timeout" } },
+      cleanup: { phase: "destroy", name: "destroy", detail: { kind: "timeout" } },
       leak: { path: "/tmp/leak", diagnostic: "retained" },
       continuation: {
         claimed: [contract],

@@ -179,21 +179,21 @@ export function decodeIntentRefusal(value: unknown): IntentRefusal {
 }
 
 export function decodeVerificationRuntimeStop(value: unknown): VerificationRuntimeStop {
-  const object = record(value, ["failure"], ["diagnostic", "command", "detail"]);
+  const object = record(value, ["failure"], ["diagnostic", "name", "detail"]);
   if (object.failure === "unknown-exit" || object.failure === "cancelled") {
-    if ("diagnostic" in object || "command" in object || "detail" in object) fail();
+    if ("diagnostic" in object || "name" in object || "detail" in object) fail();
     return { failure: object.failure };
   }
   if (object.failure === "candidate-unavailable" || object.failure === "spawn-error") {
-    if ("command" in object || "detail" in object) fail();
+    if ("name" in object || "detail" in object) fail();
     return { failure: object.failure, diagnostic: nonblank(object.diagnostic) };
   }
   if (object.failure !== "environment-failure") fail();
-  if ("command" in object || "detail" in object) {
+  if ("name" in object || "detail" in object) {
     if ("diagnostic" in object) fail();
     return {
       failure: "environment-failure",
-      command: integer(object.command),
+      name: nonblank(object.name),
       detail: decodeHookFailure(object.detail),
     };
   }
@@ -318,9 +318,9 @@ export function decodePlacementStop(value: unknown): PlacementStop {
 }
 
 export function decodeVerificationCleanupFailure(value: unknown): VerificationCleanupFailure {
-  const object = record(value, ["phase", "command", "detail"]);
+  const object = record(value, ["phase", "name", "detail"]);
   if (object.phase !== "destroy") fail();
-  return { phase: "destroy", command: integer(object.command), detail: decodeHookFailure(object.detail) };
+  return { phase: "destroy", name: nonblank(object.name), detail: decodeHookFailure(object.detail) };
 }
 
 export function decodeCandidateCompletion(value: unknown): CandidateCompletion {

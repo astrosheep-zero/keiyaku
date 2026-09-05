@@ -44,6 +44,10 @@ attestation. It is not a log, artifact, report store, or source for callers to
 parse counts. A stopped producer is a typed public stop. Delivery can still
 perform its independent placement duty; audit leaves target state unobserved.
 
+Environment failures from configured scratch hooks preserve the hook's configured
+name and typed failure detail as their public recovery identity; the hook's
+private array position is never exposed.
+
 ## Process And Cleanup Boundary
 
 The shared runtime owns child spawning, normal completion, timeout,

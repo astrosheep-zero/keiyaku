@@ -7,6 +7,18 @@ export type ReceiptSegment = Readonly<{ text: string; opaque?: boolean }>;
 
 type HookFailure = Extract<Lag, { kind: "worktree-hook-failed" }>["failure"];
 
+function escapedControlCharacter(character: string): string {
+  const codePoint = character.codePointAt(0);
+  if (codePoint === undefined) throw new Error("control character code point expected");
+  if (codePoint <= 0xffff) return `\\u${codePoint.toString(16).padStart(4, "0")}`;
+  const surrogate = codePoint - 0x10000;
+  return `\\u${(0xd800 + (surrogate >> 10)).toString(16)}\\u${(0xdc00 + (surrogate & 0x3ff)).toString(16)}`;
+}
+
+function renderedHookName(name: string): string {
+  return JSON.stringify(name).replaceAll(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, escapedControlCharacter);
+}
+
 export function receiptRow(
   lines: string[],
   mark: string,
@@ -189,12 +201,15 @@ export function stopLines(
   const lines: string[] = [];
   const segments: ReceiptSegment[] = dependent === undefined ? [] : [{ text: "·" }, { text: directStopName(stop) }];
   if ("failure" in stop && stop.failure === "target-moved") segments.push(...targetMovedDetail(stop));
-  if ("failure" in stop && stop.failure === "environment-failure" && "command" in stop) {
-    segments.push({ text: `command=${stop.command}` }, { text: hookFailureSummary(stop.detail), opaque: true });
+  if ("failure" in stop && stop.failure === "environment-failure" && "name" in stop) {
+    segments.push(
+      { text: `name=${renderedHookName(stop.name)}` },
+      { text: hookFailureSummary(stop.detail), opaque: true },
+    );
   }
   receiptRow(lines, "!", dependent === undefined ? directStopName(stop) : dependent, segments, columns);
   lines.push(...refusalEvidence(stop, columns));
-  if ("failure" in stop && stop.failure === "environment-failure" && "command" in stop) {
+  if ("failure" in stop && stop.failure === "environment-failure" && "name" in stop) {
     appendHookPayload(lines, stop.detail);
   }
   if ("retry" in stop && stop.retry?.kind === "publication-failed") {
@@ -216,7 +231,7 @@ export function cleanupLines(
     "cleanup",
     [
       { text: cleanup.phase },
-      { text: `command=${cleanup.command}` },
+      { text: `name=${renderedHookName(cleanup.name)}` },
       { text: hookFailureSummary(cleanup.detail), opaque: true },
     ],
     columns,

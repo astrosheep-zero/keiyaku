@@ -93,7 +93,7 @@ test("audit terminal verification projects complete", () => {
 
 test("accepted audit cleanup and leak residue are optional pending work", () => {
   const residues: readonly Partial<Pick<MutationResult<AuditReport>, "cleanup" | "leak">>[] = [
-    { cleanup: { phase: "destroy", command: 0, detail: { kind: "timeout" } } },
+    { cleanup: { phase: "destroy", name: "destroy", detail: { kind: "timeout" } } },
     { leak: { path: "/tmp/leak", diagnostic: "retained" } },
   ];
   for (const residue of residues) {
@@ -120,7 +120,7 @@ test("review placement is required pending work without a verb envelope", () => 
 
 test("accepted delivery cleanup and leak residue are optional pending work", () => {
   const residues: readonly Partial<Pick<MutationResult<Delivery>, "cleanup" | "leak">>[] = [
-    { cleanup: { phase: "destroy", command: 0, detail: { kind: "timeout" } } },
+    { cleanup: { phase: "destroy", name: "destroy", detail: { kind: "timeout" } } },
     { leak: { path: "/tmp/leak", diagnostic: "retained" } },
   ];
   for (const residue of residues) {

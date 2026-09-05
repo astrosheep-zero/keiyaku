@@ -369,6 +369,7 @@ test("candidate create failure stops Verification with no attestation and still 
   if (delivered.value.verification === undefined || !("failure" in delivered.value.verification))
     assert.fail("expected Verification environment failure");
   assert.equal(delivered.value.verification.failure, "environment-failure");
+  assert.equal("name" in delivered.value.verification ? delivered.value.verification.name : undefined, "create");
   assert.equal(existsSync(join(repository.path, "verification-ran")), false);
   assert.equal(existsSync(destroyed), true);
 });
@@ -448,7 +449,7 @@ test("destroy failure is cleanup evidence, not a leak after successful removal",
 
   assert.deepEqual(delivered.value.cleanup, {
     phase: "destroy",
-    command: 0,
+    name: "destroy",
     detail: { kind: "exit", code: 19, stdout: "", stderr: "", truncated: false },
   });
   assert.equal(delivered.value.leak, undefined);

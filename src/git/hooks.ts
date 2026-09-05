@@ -64,7 +64,13 @@ function commands(
   ErrorType: typeof TypeError | typeof SettingsError,
 ): readonly HookCommand[] {
   if (!Array.isArray(value)) throw new ErrorType(`${coordinate} must be an array`);
-  return Object.freeze(value.map((item, index) => command(item, `${coordinate}[${index}]`, ErrorType)));
+  const parsed = value.map((item, index) => command(item, `${coordinate}[${index}]`, ErrorType));
+  const names = new Set<string>();
+  for (const [index, item] of parsed.entries()) {
+    if (names.has(item.name)) throw new ErrorType(`${coordinate}[${index}].name must be unique within its phase`);
+    names.add(item.name);
+  }
+  return Object.freeze(parsed);
 }
 
 export function worktreeHooksFrom(input: WorktreeHooksFromInput): WorktreeHooks {
@@ -124,7 +130,7 @@ export type HookCommandRun =
   | Readonly<{ kind: "cancelled" }>
   | Readonly<{
       kind: "failed";
-      command: number;
+      name: string;
       failure: HookFailure;
     }>;
 
@@ -135,7 +141,7 @@ export async function runHookCommands(
   signal?: AbortSignal,
   environment?: NodeJS.ProcessEnv,
 ): Promise<HookCommandRun> {
-  for (const [command, value] of commands.entries()) {
+  for (const value of commands) {
     const outcome = await runProcess({
       argv: value.argv,
       timeoutMs: value.timeoutMs,
@@ -145,7 +151,7 @@ export async function runHookCommands(
     });
     if (outcome.kind === "cancelled") return outcome;
     const failure = failedOutcome(outcome);
-    if (failure !== null) return { kind: "failed", command, failure };
+    if (failure !== null) return { kind: "failed", name: value.name, failure };
   }
   return { kind: "ok" };
 }

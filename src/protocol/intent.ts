@@ -102,13 +102,13 @@ export type VerificationRuntimeStop =
     }>
   | Readonly<{
       failure: "environment-failure";
-      command: number;
+      name: string;
       detail: HookFailure;
     }>;
 
 export type VerificationCleanupFailure = Readonly<{
   phase: "destroy";
-  command: number;
+  name: string;
   detail: HookFailure;
 }>;
 
@@ -196,7 +196,7 @@ export async function verifyDelivery(input: VerifyDeliveryInput): Promise<Verifi
     step =
       "diagnostic" in execution.outcome
         ? { failure: "environment-failure", diagnostic: execution.outcome.diagnostic }
-        : { failure: "environment-failure", command: execution.outcome.command, detail: execution.outcome.detail };
+        : { failure: "environment-failure", name: execution.outcome.name, detail: execution.outcome.detail };
   } else if (
     execution.outcome.kind === "unknown-exit" ||
     execution.outcome.kind === "cancelled" ||
