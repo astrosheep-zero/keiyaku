@@ -49,8 +49,13 @@ async function takeLeashUntilSignal(
   paths: AkumaPaths,
   bodySequence: number,
   signal?: AbortSignal,
+  unbounded = false,
 ): Promise<HeldAkumaLeash | Readonly<{ kind: "unavailable"; evidence: "hung" | "untidy" | "unavailable" }>> {
-  const leash = await acquireLeash(paths, { bodySequence, ...(signal === undefined ? {} : { signal }) });
+  const leash = await acquireLeash(paths, {
+    bodySequence,
+    ...(signal === undefined && unbounded ? { deadline: Number.POSITIVE_INFINITY } : {}),
+    ...(signal === undefined ? {} : { signal }),
+  });
   if (leash !== null) return leash;
   const latestBody = (await readHeart(paths)).latestBody;
   if (latestBody?.sequence === bodySequence && latestBody.hung !== undefined)
@@ -206,7 +211,7 @@ export class AkumaHandle {
 
   async interrupt(
     body: string,
-    options: Readonly<{ tellId?: string; schemaJson?: string; signal?: AbortSignal }> = {},
+    options: Readonly<{ tellId?: string; schemaJson?: string; signal?: AbortSignal; runtime?: TellWakeRuntime }> = {},
   ): Promise<InterruptReceipt> {
     const request = await requestPause(this.paths, new Date().toISOString());
     if (request.kind === "not-born") {
@@ -216,7 +221,7 @@ export class AkumaHandle {
     let putDown: "was-idle" | "self-aborted" = "was-idle";
     let leash = await HeldAkumaLeash.try(this.paths);
     if (leash === null) {
-      const waited = await takeLeashUntilSignal(this.paths, request.body.sequence, options.signal);
+      const waited = await takeLeashUntilSignal(this.paths, request.body.sequence, options.signal, true);
       if ("kind" in waited) return waited;
       leash = waited;
       putDown = "self-aborted";
@@ -250,7 +255,11 @@ export class AkumaHandle {
     } finally {
       leash.release();
     }
-    return { kind: "interrupted", putDown, tell: await wakeRecordedTell(this.paths, recorded.tellId) };
+    return {
+      kind: "interrupted",
+      putDown,
+      tell: await wakeRecordedTell(this.paths, recorded.tellId, options.runtime),
+    };
   }
 
   async fork(input: Readonly<{ at: string }>): Promise<ForkReceipt> {

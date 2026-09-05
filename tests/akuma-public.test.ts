@@ -36,6 +36,7 @@ import {
 } from "../src/akuma/heart/index.js";
 import { akumaRunRoot, allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
 import { createProviderAttempt, type ProviderAdapter, type Session } from "../src/akuma/provider.js";
+import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import { settings } from "../src/settings.js";
 import { Keiyaku } from "../src/index.js";
@@ -2265,6 +2266,90 @@ test("interrupt waits for a running body to self-abort before recording the tell
       await handle.wait();
     }
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("interrupt waits for leash release after a durable Body end beyond the default retry window", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-interrupt-ended-held-"));
+  let releaseHolder: (() => void) | undefined;
+  let operation: ReturnType<AkumaHandle["interrupt"]> | undefined;
+  let restoreTry: (() => void) | undefined;
+  try {
+    const value = await bornHistoryHandle(root, "1d1e0009");
+    releaseHolder = value.holder.release.bind(value.holder);
+    await breakBody(value.allocated.paths, {
+      sequence: value.turn.bodySequence,
+      end: "put-down",
+      at: "2026-08-08T00:00:02.000Z",
+    });
+    const runtime = {
+      async spawn(paths: typeof value.allocated.paths): Promise<OwnedProcess> {
+        return {
+          pid: 0,
+          exited: Promise.resolve({ code: 0, signal: null, log: { path: paths.log, from: 0, to: 0 } }),
+          async terminate() {},
+          release() {},
+        };
+      },
+    };
+    let failedTries = 0;
+    let acquireRetryObserved = false;
+    const targetLeash = value.allocated.paths.leash.replace(/^\/private/u, "");
+    let witnessRetry!: () => void;
+    const retryObserved = new Promise<void>((resolve) => {
+      witnessRetry = resolve;
+    });
+    const originalTry = HeldAkumaLeash.try;
+    const mockedTry = t.mock.method(HeldAkumaLeash, "try", async (paths: typeof value.allocated.paths) => {
+      const leash = await originalTry(paths);
+      if (paths.leash.replace(/^\/private/u, "") === targetLeash && leash === null) {
+        failedTries += 1;
+        if (failedTries === 3) acquireRetryObserved = true;
+        if (failedTries === 13) witnessRetry();
+      }
+      return leash;
+    });
+    restoreTry = () => mockedTry.mock.restore();
+    operation = value.handle.interrupt("after end", { runtime });
+    const first = await Promise.race([
+      retryObserved.then(() => "retry" as const),
+      operation.then(
+        () => "settled" as const,
+        () => "settled" as const,
+      ),
+    ]);
+    assert.equal(first, "retry", `failed leash tries: ${failedTries}`);
+    assert.equal(acquireRetryObserved, true);
+    releaseHolder?.();
+    releaseHolder = undefined;
+    const receipt = await operation;
+    assert.equal(receipt.kind, "interrupted");
+    if (receipt.kind === "interrupted") assert.equal(receipt.putDown, "was-idle");
+  } finally {
+    restoreTry?.();
+    releaseHolder?.();
+    await operation?.catch(() => undefined);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("interrupt caller cancellation stops waiting without manufacturing control evidence", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-interrupt-cancelled-"));
+  let releaseHolder: (() => void) | undefined;
+  try {
+    const value = await bornHistoryHandle(root, "1d1e000a");
+    releaseHolder = value.holder.release.bind(value.holder);
+    const controller = new AbortController();
+    const operation = value.handle.interrupt("cancelled", { signal: controller.signal });
+    setTimeout(() => controller.abort(new Error("caller stopped waiting")), 20);
+    await assert.rejects(operation, /caller stopped waiting/u);
+    assert.equal(await pauseRequested(value.allocated.paths), true);
+    assert.deepEqual((await readHeart(value.allocated.paths)).pending, []);
+    releaseHolder?.();
+    releaseHolder = undefined;
+  } finally {
+    releaseHolder?.();
     rmSync(root, { recursive: true, force: true });
   }
 });

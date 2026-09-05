@@ -11,6 +11,7 @@
     "tests/actor.test.ts",
     "tests/completion-progress.test.ts",
     "tests/contract-completion.test.ts",
+    "tests/akuma-api.test.ts",
     "tests/akuma-public.test.ts",
     "tests/akuma-provider.test.ts",
     "tests/akuma-identity.test.ts",
