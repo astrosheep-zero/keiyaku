@@ -1662,17 +1662,24 @@ async function conflictedDeliverCommand() {
   writeFileSync(join(worktree, "shared.txt"), "tender\n");
   repository.run(["-C", worktree, "add", "shared.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "tender change"]);
+  const handoffBase = repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim();
   const command = (argv: readonly string[]) =>
     invoke(parseArgv(["-C", worktree, ...argv]), { environment: {}, readStdin: async () => "" });
-  return { repository, id, worktree, targetHead, command };
+  return { repository, id, worktree, targetHead, handoffBase, command };
 }
 
 test("deliver --materialize-conflict returns the exact public materialization object", async () => {
-  const { repository, id, worktree, targetHead, command } = await conflictedDeliverCommand();
+  const { repository, id, worktree, targetHead, handoffBase, command } = await conflictedDeliverCommand();
   const result = await command(["deliver", "--materialize-conflict"]);
   assert.deepEqual(result, {
     kind: "integration-conflict-materialized",
     targetHead,
+    handoffBase,
+    recovery: {
+      materialize: "deliver --materialize-conflict --include-dirty",
+      continue: "deliver --include-dirty",
+      staging: "not-required",
+    },
     conflictPaths: ["shared.txt"],
     workspace: { kind: "worktree", path: worktree },
   });
@@ -1683,6 +1690,12 @@ test("deliver --materialize-conflict returns the exact public materialization ob
   const json = JSON.parse(JSON.stringify(result));
   assert.equal(json.kind, "integration-conflict-materialized");
   assert.equal(json.targetHead, targetHead);
+  assert.equal(json.handoffBase, handoffBase);
+  assert.deepEqual(json.recovery, {
+    materialize: "deliver --materialize-conflict --include-dirty",
+    continue: "deliver --include-dirty",
+    staging: "not-required",
+  });
   assert.deepEqual(json.conflictPaths, ["shared.txt"]);
   assert.deepEqual(json.workspace, { kind: "worktree", path: worktree });
   const state = (await observeContract(await cachedRepositoryAt(repository.path), id)).state;

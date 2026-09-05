@@ -61,6 +61,16 @@ workspace, unsupported integration, and target movement remain typed public
 conditions rather than hidden retry policy. Target movement never masquerades as
 claim or already-applied placement.
 
+A materialized handoff returns the captured handoff base, the target head and
+conflict paths, plus the recovery projection. The continuation is explicitly
+`deliver --include-dirty` with staging `not-required`: callers resolve the
+appointed worktree by editing its final bytes, while the parent Body retains
+Git custody and private-index capture preserves the real index, including
+`UU`. Materialization admits no delivery fact. Review results likewise expose
+captured `unmergedPaths` as evidence without turning them into a blanket
+refusal. A stale gate may explain that candidate content changed during
+reintegration; target movement alone is not that reason.
+
 A materialized handoff is itself a complete no-fact delivery outcome. Its
 forwarded descriptor is durable service evidence sufficient to return that same
 outcome on replay, without rematerializing it or inventing a delivery fact.

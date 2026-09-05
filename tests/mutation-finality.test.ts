@@ -139,6 +139,12 @@ test("materialized integration conflicts project not-admitted", () => {
     targetHead: "target" as SnapshotId,
     conflictPaths: ["src/index.ts"],
     workspace: { kind: "worktree", path: "/tmp/worktree" },
+    handoffBase: "base" as SnapshotId,
+    recovery: {
+      materialize: "deliver --materialize-conflict --include-dirty",
+      continue: "deliver --include-dirty",
+      staging: "not-required",
+    },
   };
   assert.deepEqual(projectMutationFinality(result), { kind: "not-admitted" });
 });

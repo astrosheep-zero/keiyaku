@@ -253,9 +253,23 @@ export type WorkspaceChangeCounts = Readonly<{
   submodules: number;
 }>;
 
+export type ConflictRecovery = Readonly<{
+  materialize: "deliver --materialize-conflict --include-dirty";
+  continue: "deliver --include-dirty";
+  staging: "not-required";
+}>;
+
+export const conflictRecovery: ConflictRecovery = Object.freeze({
+  materialize: "deliver --materialize-conflict --include-dirty",
+  continue: "deliver --include-dirty",
+  staging: "not-required",
+});
+
 export type ContractWorkspaceMerge = Readonly<{
   head: SnapshotId;
   unmergedPaths: readonly string[];
+  handoffBase?: SnapshotId;
+  recovery?: ConflictRecovery;
 }>;
 
 export type ContractWorkspaceObservation =
@@ -439,6 +453,22 @@ export async function recordConflictHandoff(
   };
   const oid = await writeBlob(repository, `${JSON.stringify(receipt)}\n`);
   await runGit(repository, ["update-ref", "--no-deref", ref, oid, "0".repeat(oid.length)]);
+}
+
+export async function conflictHandoffFor(
+  repository: GitRepository,
+  input: Readonly<{ contractId: ContractId; place: string; workspace: string }>,
+): Promise<Readonly<{ base: SnapshotId; mergeHead: SnapshotId }> | undefined> {
+  const stored = await storedHandoffReceipt(repository, input.contractId, input.place);
+  if (stored === null) return undefined;
+  if (
+    stored.receipt.contractId !== input.contractId ||
+    stored.receipt.place !== input.place ||
+    stored.receipt.workspace !== resolve(input.workspace)
+  ) {
+    return undefined;
+  }
+  return { base: stored.receipt.head, mergeHead: stored.receipt.mergeHead };
 }
 
 export async function retireConflictHandoff(

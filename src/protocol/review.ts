@@ -7,6 +7,7 @@ import {
   type WorkspaceDirtyDelta,
 } from "../git/tender.js";
 import { observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
+import { unmergedWorkspacePaths, worktreePath } from "../git/workspace.js";
 import { type PrivateStatePublicationSeat } from "../git/private-state-seat.js";
 import {
   matchingPrivateRootObservation,
@@ -40,10 +41,14 @@ type ReviewOperationInput = MutationOperationInput &
     verdict: AttestationData["verdict"];
     summary?: string;
   }>;
-export type ReviewAdmissionValue = Readonly<{ workspace?: WorkspaceDirtyDelta }>;
+export type ReviewWorkspaceEvidence = WorkspaceDirtyDelta & Readonly<{ unmergedPaths: readonly string[] }>;
+export type ReviewAdmissionValue = Readonly<{ workspace?: ReviewWorkspaceEvidence }>;
 export type ReviewValue = CompletionEvidence & ReviewAdmissionValue;
 export { decodeReviewValue } from "./result-codec.js";
-type PreparedReview = ReviewAdmissionValue;
+type PreparedReview = Readonly<{
+  workspace?: ReviewWorkspaceEvidence;
+  tender?: TenderCapture;
+}>;
 
 async function captureReviewableWorktree(
   repository: RepositoryScope,
@@ -57,7 +62,7 @@ async function captureReviewableWorktree(
       data: Readonly<{
         changeId: DeliverData["integration"]["changeId"];
         tender: TenderCapture;
-        workspace?: WorkspaceDirtyDelta;
+        workspace?: ReviewWorkspaceEvidence;
       }>;
     }
   | { kind: "refused"; refusal: ReviewPreparationRefusal }
@@ -75,12 +80,24 @@ async function captureReviewableWorktree(
     return { kind: "refused", refusal: await dirtyTenderRefusal(repository, stage.contractId, tender.data) };
   }
   const workspace = await dirtyTenderDelta(repository, tender.data);
+  const workspacePath = appointed === undefined ? undefined : worktreePath(repository, appointed.place);
+  const unmergedPaths = workspacePath === undefined ? [] : await unmergedWorkspacePaths(repository, workspacePath);
+  const workspaceEvidence =
+    workspace === undefined && unmergedPaths.length === 0
+      ? undefined
+      : {
+          staged: workspace?.staged ?? [],
+          unstaged: workspace?.unstaged ?? [],
+          untracked: workspace?.untracked ?? [],
+          shortStat: workspace?.shortStat ?? { filesChanged: 0, insertions: 0, deletions: 0 },
+          unmergedPaths,
+        };
   return {
     kind: "prepared",
     data: {
       changeId: await worktreeChangeId(repository, stage, tender.data),
       tender: tender.data,
-      ...(workspace === undefined ? {} : { workspace }),
+      ...(workspaceEvidence === undefined ? {} : { workspace: workspaceEvidence }),
     },
   };
 }
@@ -96,7 +113,7 @@ export async function prepareReview(
       kind: "prepared";
       data: Readonly<{
         changeId: DeliverData["integration"]["changeId"];
-        workspace?: WorkspaceDirtyDelta;
+        workspace?: ReviewWorkspaceEvidence;
       }>;
     }
   | { kind: "refused"; refusal: ReviewPreparationRefusal }
@@ -115,7 +132,8 @@ export async function prepareReview(
 type SpeculativeReview = Readonly<{
   observation: GitDecisionObservation;
   preparation?: AttestationInput<ReviewRefusal>["preparation"];
-  workspace?: WorkspaceDirtyDelta;
+  workspace?: ReviewWorkspaceEvidence;
+  tender?: TenderCapture;
   worktree?: SpeculativeWorktreeInput;
 }>;
 

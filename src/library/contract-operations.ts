@@ -48,6 +48,13 @@ const snapshotIdSchema = z.string().transform((value, context) => {
   }
 });
 const contractRequestBaseSchema = z.object({ repoRoot: absolutePathSchema, contractId: contractIdSchema }).strict();
+const conflictRecoverySchema = z
+  .object({
+    materialize: z.literal("deliver --materialize-conflict --include-dirty"),
+    continue: z.literal("deliver --include-dirty"),
+    staging: z.literal("not-required"),
+  })
+  .strict();
 const auditRequestSchema = contractRequestBaseSchema
   .extend({
     includeDirty: z.boolean(),
@@ -104,6 +111,8 @@ const materializedHandoffServiceSchema = z
     repoRoot: absolutePathSchema,
     contractId: contractIdSchema,
     targetHead: snapshotIdSchema,
+    handoffBase: snapshotIdSchema,
+    recovery: conflictRecoverySchema,
     conflictPaths: z.array(nonblankStringSchema).transform((paths) => Object.freeze(paths) as readonly string[]),
     workspace: z.object({ kind: z.literal("worktree"), path: nonblankStringSchema }).strict(),
   })
@@ -112,6 +121,8 @@ const materializedHandoffReferenceSchema = z
   .object({
     kind: z.literal("integration-conflict-materialized"),
     targetHead: snapshotIdSchema,
+    handoffBase: snapshotIdSchema,
+    recovery: conflictRecoverySchema,
     conflictPaths: z.array(nonblankStringSchema).transform((paths) => Object.freeze(paths) as readonly string[]),
     workspace: z.object({ kind: z.literal("worktree"), path: nonblankStringSchema }).strict(),
   })
@@ -210,6 +221,8 @@ async function executeContractRequest(
           repoRoot: request.repoRoot,
           contractId: request.contractId,
           targetHead: served.result.targetHead,
+          handoffBase: served.result.handoffBase,
+          recovery: served.result.recovery,
           conflictPaths: served.result.conflictPaths,
           workspace: served.result.workspace,
         },

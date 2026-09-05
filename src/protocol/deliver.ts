@@ -17,6 +17,8 @@ import {
   retireConflictHandoff,
   workspaceMergeStatePresent,
   worktreePath,
+  conflictRecovery,
+  type ConflictRecovery,
 } from "../git/workspace.js";
 import { observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
 import { type PrivateStatePublicationSeat } from "../git/private-state-seat.js";
@@ -59,13 +61,12 @@ export type IntegrationConflictMaterialized = Readonly<{
   targetHead: SnapshotId;
   conflictPaths: readonly string[];
   workspace: AppointedWorkspace;
+  handoffBase: SnapshotId;
+  recovery: ConflictRecovery;
 }>;
 export { decodeMaterializedConflict } from "./result-codec.js";
 
-const DELIVER_CONFLICT_RECOVERY = Object.freeze({
-  materialize: "deliver --materialize-conflict --include-dirty",
-  continue: "deliver --include-dirty",
-} as const);
+const DELIVER_CONFLICT_RECOVERY = conflictRecovery;
 
 type DeliverOperationInput = MutationOperationInput &
   Readonly<{
@@ -384,7 +385,13 @@ async function decideAndAdmitDelivery(
   if (speculated.continuation === true) {
     const record = observation.journals.get(input.contractId);
     const state = record?.state;
-    if (record === undefined || state === null || state === undefined || state.delivery === null) {
+    if (
+      record === undefined ||
+      state === null ||
+      state === undefined ||
+      state.delivery === null ||
+      speculated.derivation === undefined
+    ) {
       return { kind: "redecide" };
     }
     input.progress?.recordAdmission({ kind: "accepted", facts: [], state, journal: record.entries });
@@ -572,6 +579,8 @@ async function materializeDeliverConflict(
     targetHead: refusal.targetHead,
     conflictPaths: refusal.conflictPaths,
     workspace,
+    handoffBase: handoffHead,
+    recovery: DELIVER_CONFLICT_RECOVERY,
   };
 }
 

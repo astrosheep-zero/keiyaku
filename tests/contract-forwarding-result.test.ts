@@ -167,6 +167,7 @@ test("refusal, retry, review, audit, and materialized conflict variants round-tr
         unstaged: ["a"],
         untracked: [],
         shortStat: { filesChanged: 1, insertions: 1, deletions: 0 },
+        unmergedPaths: [],
       },
       verification: { retry: { kind: "exhausted" } },
       continuation: {
@@ -201,6 +202,12 @@ test("refusal, retry, review, audit, and materialized conflict variants round-tr
   const conflict = {
     kind: "integration-conflict-materialized",
     targetHead: snapshot,
+    handoffBase: snapshot,
+    recovery: {
+      materialize: "deliver --materialize-conflict --include-dirty",
+      continue: "deliver --include-dirty",
+      staging: "not-required",
+    },
     conflictPaths: ["src/a.ts"],
     workspace: { kind: "worktree", path: "/tmp/worktree" },
   };

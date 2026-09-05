@@ -5,7 +5,13 @@ import {
   withContractReadObservationAt,
 } from "../../git/observe.js";
 import { decodeContractDocument } from "../../body/decode.js";
-import { observeTargetLag, observeWorkspace, worktreePath } from "../../git/workspace.js";
+import {
+  observeTargetLag,
+  observeWorkspace,
+  conflictHandoffFor,
+  conflictRecovery,
+  worktreePath,
+} from "../../git/workspace.js";
 import { appointmentFor, readPlaceRegister, type PlaceRegister } from "../../workspace-place.js";
 import type { ContractTargetLag, ContractWorkspaceObservation } from "../../git/workspace.js";
 import type { GitRepository } from "../../git/process.js";
@@ -127,11 +133,25 @@ async function managedWorkspaceFacts(
     };
   }
   const path = worktreePath(repository, appointed.place);
-  const [workspaceObservation, targetLag] = await Promise.all([
+  const [workspaceObservation, targetLag, handoff] = await Promise.all([
     observeWorkspace(repository, { kind: "worktree", path }, path),
     observeTargetLag(repository, path, targetObservation?.head),
+    conflictHandoffFor(repository, { contractId: state.id, place: appointed.place, workspace: path }),
   ]);
-  return { appointed, workspaceObservation, targetLag };
+  const projectedWorkspaceObservation =
+    handoff !== undefined &&
+    (workspaceObservation.kind === "clean" || workspaceObservation.kind === "dirty") &&
+    workspaceObservation.merge !== null
+      ? {
+          ...workspaceObservation,
+          merge: {
+            ...workspaceObservation.merge,
+            handoffBase: handoff.base,
+            recovery: conflictRecovery,
+          },
+        }
+      : workspaceObservation;
+  return { appointed, workspaceObservation: projectedWorkspaceObservation, targetLag };
 }
 
 type ContractRowInput = Readonly<{

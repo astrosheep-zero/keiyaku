@@ -667,6 +667,7 @@ test("dirty delivery materializes a candidate without changing the caller index"
     unstaged: [],
     untracked: ["candidate.txt"],
     shortStat: { filesChanged: 1, insertions: 1, deletions: 0 },
+    unmergedPaths: [],
   });
   assert.equal(repository.run(["-C", worktree, "diff", "--cached", "--binary"]), indexBefore);
   assert.match(

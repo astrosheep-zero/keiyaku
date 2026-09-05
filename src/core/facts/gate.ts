@@ -1,9 +1,16 @@
-import { currentSubjectPredicate } from "../subject.js";
-import { gate, type AttestationEntry, type ContractState, type Gate } from "./types.js";
+import { dependencyKeys, currentSubjectPredicate } from "../subject.js";
+import { gate, type AttestationEntry, type ChangeId, type ContractState, type Gate } from "./types.js";
+
+export type GateStaleReason = Readonly<{
+  kind: "candidate-content-changed";
+  target?: string;
+  previousChange: ChangeId;
+  currentChange: ChangeId;
+}>;
 
 export type GateCurrent =
   | Readonly<{ kind: "attested"; verdict: "satisfied" | "unsatisfied"; summary?: string; at: string }>
-  | Readonly<{ kind: "stale"; priorVerdict: "satisfied" | "unsatisfied" }>
+  | Readonly<{ kind: "stale"; priorVerdict: "satisfied" | "unsatisfied"; reason?: GateStaleReason }>
   | Readonly<{ kind: "missing" }>;
 
 export type GateReport = Readonly<{ gate: Gate; current: GateCurrent }>;
@@ -34,6 +41,26 @@ function decodeAttestedGateCurrent(current: Record<string, unknown>): Extract<Ga
   };
 }
 
+function decodeStaleReason(value: unknown): GateStaleReason {
+  const reasonObject = object(value);
+  for (const key of Object.keys(reasonObject)) {
+    if (key !== "kind" && key !== "target" && key !== "previousChange" && key !== "currentChange") fail();
+  }
+  if (
+    reasonObject.kind !== "candidate-content-changed" ||
+    (reasonObject.target !== undefined && typeof reasonObject.target !== "string") ||
+    typeof reasonObject.previousChange !== "string" ||
+    typeof reasonObject.currentChange !== "string"
+  )
+    fail();
+  return {
+    kind: "candidate-content-changed",
+    ...(reasonObject.target === undefined ? {} : { target: reasonObject.target }),
+    previousChange: reasonObject.previousChange as ChangeId,
+    currentChange: reasonObject.currentChange as ChangeId,
+  };
+}
+
 function decodeGateCurrent(value: unknown): GateCurrent {
   const current = object(value);
   if (current.kind === "missing") {
@@ -42,8 +69,9 @@ function decodeGateCurrent(value: unknown): GateCurrent {
   }
   if (current.kind === "stale") {
     if (current.priorVerdict !== "satisfied" && current.priorVerdict !== "unsatisfied") fail();
-    if (Object.keys(current).length !== 2) fail();
-    return { kind: "stale", priorVerdict: current.priorVerdict };
+    const reason = current.reason === undefined ? undefined : decodeStaleReason(current.reason);
+    if (Object.keys(current).length !== (reason === undefined ? 2 : 3)) fail();
+    return { kind: "stale", priorVerdict: current.priorVerdict, ...(reason === undefined ? {} : { reason }) };
   }
   return decodeAttestedGateCurrent(current);
 }
@@ -60,6 +88,20 @@ export function decodeGateReport(value: unknown): GateReport {
     fail();
   }
   return { gate: decodedGate, current: decodeGateCurrent(record.current) };
+}
+
+function staleReason(state: ContractState, previous: AttestationEntry): GateStaleReason | undefined {
+  const target = state.coordinates.target;
+  const currentChange = state.currentIntegration?.changeId ?? state.delivery?.data.integration.changeId;
+  if (currentChange === undefined) return undefined;
+  const previousChange = dependencyKeys(previous.data.subject).find((key) => key.kind === "change")?.value;
+  if (previousChange === undefined || previousChange === currentChange) return undefined;
+  return {
+    kind: "candidate-content-changed",
+    ...(target === undefined ? {} : { target }),
+    previousChange,
+    currentChange,
+  };
 }
 
 export type GateReports = Readonly<{
@@ -114,9 +156,16 @@ export function gateReports(state: ContractState): GateReports {
       };
     }
     const previous = prior.get(gate);
-    return previous === undefined
-      ? { gate, current: { kind: "missing" } }
-      : { gate, current: { kind: "stale", priorVerdict: previous.data.verdict } };
+    if (previous === undefined) return { gate, current: { kind: "missing" } };
+    const reason = staleReason(state, previous);
+    return {
+      gate,
+      current: {
+        kind: "stale",
+        priorVerdict: previous.data.verdict,
+        ...(reason === undefined ? {} : { reason }),
+      },
+    };
   });
   return {
     reports,

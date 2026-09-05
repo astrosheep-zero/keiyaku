@@ -240,6 +240,7 @@ async function reviewGatedConflictCandidateFixture() {
 const DELIVER_CONFLICT_RECOVERY = {
   materialize: "deliver --materialize-conflict --include-dirty",
   continue: "deliver --include-dirty",
+  staging: "not-required",
 } as const;
 
 function mergeHead(repository: ReturnType<typeof repositoryWithMain>, worktree: string): string | null {
@@ -306,6 +307,8 @@ test("explicit materialization projects the judged conflict in the appointed wor
     targetHead,
     conflictPaths: ["a.txt", "z.txt"],
     workspace: { kind: "worktree", path: worktree },
+    handoffBase: materialized.handoffBase,
+    recovery: materialized.recovery,
   });
   const state = await contract.state();
   assert.equal(state.delivery, null);
@@ -394,6 +397,8 @@ test("Contract reads observe materialized merge conflicts and staged resolutions
   assert.deepEqual(conflict?.kind === "dirty" ? conflict.merge : undefined, {
     head: targetHead,
     unmergedPaths: ["a.txt", "z.txt"],
+    handoffBase: materialized.handoffBase,
+    recovery: materialized.recovery,
   });
 
   writeFileSync(join(worktree, "a.txt"), "resolved\n");
@@ -405,7 +410,22 @@ test("Contract reads observe materialized merge conflicts and staged resolutions
   assert.deepEqual(staged?.kind === "dirty" ? staged.merge : undefined, {
     head: targetHead,
     unmergedPaths: [],
+    handoffBase: materialized.handoffBase,
+    recovery: materialized.recovery,
   });
+});
+
+test("review exposes unresolved paths without refusing the UU worktree", async () => {
+  const { contract, targetHead } = await reviewGatedConflictCandidateFixture();
+  const materialized = expectMaterialized(await contract.deliver({ materializeConflict: true }));
+  assert.equal(materialized.targetHead, targetHead);
+
+  const reviewed = await contract.review({ verdict: "unsatisfied", summary: "conflict remains" });
+  assert.deepEqual(reviewed.value.workspace?.unmergedPaths, ["a.txt", "z.txt"]);
+  assert.deepEqual(
+    reviewed.facts.map((fact) => fact.kind),
+    ["attestation"],
+  );
 });
 
 test("resolved merge delivery requires dirty authority and preserves native parents", async () => {
@@ -954,7 +974,10 @@ test("same captured content continues an admitted delivery without another deliv
       gates: ["verified"],
     })
   ).keiyaku;
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), await publicContractId(contract));
+  const worktree = await appointedWorktreePath(
+    await cachedRepositoryAt(repository.path),
+    await publicContractId(contract),
+  );
   writeFileSync(join(worktree, "candidate.txt"), "same\n");
 
   const controller = new AbortController();
@@ -969,10 +992,16 @@ test("same captured content continues an admitted delivery without another deliv
   assert.ok(deliveryEntry);
   assert.ok(changeId);
   assert.ok(predecessor);
-  assert.deepEqual(interrupted.facts.map((fact) => fact.kind), ["bound", "deliver"]);
+  assert.deepEqual(
+    interrupted.facts.map((fact) => fact.kind),
+    ["bound", "deliver"],
+  );
 
   const resumed = expectMutation(await contract.deliver({ includeDirty: true }));
-  assert.deepEqual(resumed.facts.map((fact) => fact.kind), ["attestation", "claimed"]);
+  assert.deepEqual(
+    resumed.facts.map((fact) => fact.kind),
+    ["attestation", "claimed"],
+  );
   const finalState = await contract.state();
   assert.equal(finalState.delivery?.entry, deliveryEntry);
   assert.equal(finalState.delivery?.data.integration.changeId, changeId);
@@ -987,7 +1016,10 @@ test("changed captured content replaces an admitted delivery candidate", async (
     `const fs=require("node:fs"); const p=${JSON.stringify(marker)}; if (!fs.existsSync(p)) { fs.writeFileSync(p, "started"); setTimeout(() => {}, 30000); }`,
   )}`;
   const contract = await bind(repository, script);
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), await publicContractId(contract));
+  const worktree = await appointedWorktreePath(
+    await cachedRepositoryAt(repository.path),
+    await publicContractId(contract),
+  );
   writeFileSync(join(worktree, "candidate.txt"), "first\n");
 
   const controller = new AbortController();
@@ -1003,7 +1035,10 @@ test("changed captured content replaces an admitted delivery candidate", async (
 
   writeFileSync(join(worktree, "candidate.txt"), "changed\n");
   const replaced = expectMutation(await contract.deliver({ includeDirty: true }));
-  assert.deepEqual(replaced.facts.map((fact) => fact.kind), ["deliver", "attestation", "claimed"]);
+  assert.deepEqual(
+    replaced.facts.map((fact) => fact.kind),
+    ["deliver", "attestation", "claimed"],
+  );
   const finalState = await contract.state();
   assert.notEqual(finalState.delivery?.entry, firstEntry);
   assert.notEqual(finalState.delivery?.data.integration.changeId, firstChangeId);
@@ -1168,6 +1203,7 @@ test("review records before delivery and the same patch can be placed", async ()
     unstaged: [],
     untracked: ["candidate.txt"],
     shortStat: { filesChanged: 1, insertions: 1, deletions: 0 },
+    unmergedPaths: [],
   });
   assert.equal(placementRefusalKind(reviewed.value.placement), "delivery-missing");
   const subject = (await contract.state()).attestations.at(-1)?.data.subject;
@@ -1508,6 +1544,45 @@ test("a whitespace-only worktree change stales prior review testimony", async ()
   );
   assert.equal(placementRefusalKind(delivered.value.placement), "gates-unsatisfied");
   assert.equal((await contract.state()).terminal, null);
+});
+
+test("candidate identity stale reason names the changed content", async () => {
+  const repository = repositoryWithMain();
+  writeFileSync(join(repository.path, "base.txt"), "base\n");
+  repository.run(["add", "base.txt"]);
+  repository.run(["commit", "--quiet", "-m", "base"]);
+  const bound = await Keiyaku.bind({
+    repo: await cachedRepoAt(repository.path),
+    markdown: document(),
+    workspace: "worktree",
+    target: "refs/heads/main",
+    gates: ["reviewed"],
+  });
+  const contractId = await publicContractId(bound.keiyaku);
+  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), contractId);
+  writeFileSync(join(worktree, "candidate.txt"), "first\n");
+  await bound.keiyaku.review({ verdict: "satisfied" });
+  const previousChange = changeIdFromSubject((await bound.keiyaku.state()).attestations.at(-1)?.data.subject);
+  writeFileSync(join(worktree, "candidate.txt"), "second\n");
+  const delivered = expectMutation(await bound.keiyaku.deliver({ includeDirty: true }));
+  assert.notEqual(delivered.value.integration.changeId, previousChange);
+  if (delivered.value.placement === undefined || !("refusal" in delivered.value.placement)) {
+    throw new Error("expected gates-unsatisfied placement refusal");
+  }
+  const gateReport =
+    delivered.value.placement.refusal.kind === "gates-unsatisfied"
+      ? delivered.value.placement.refusal.unmet[0]
+      : undefined;
+  assert.deepEqual(gateReport?.current, {
+    kind: "stale",
+    priorVerdict: "satisfied",
+    reason: {
+      kind: "candidate-content-changed",
+      target: "refs/heads/main",
+      previousChange,
+      currentChange: delivered.value.integration.changeId,
+    },
+  });
 });
 
 test("a changed worktree patch leaves the reviewed placement pending", async () => {

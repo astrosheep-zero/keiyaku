@@ -162,6 +162,8 @@ export function renderConflictMaterialized(
       columns,
     ),
     ...renderOpaqueBlock("real index including UU", indent, columns),
+    ...renderOpaqueBlock(`handoff base ${result.handoffBase}`, indent, columns),
+    ...renderOpaqueBlock(`recovery ${result.recovery.continue} · staging ${result.recovery.staging}`, indent, columns),
     ...collectionLines("conflictPaths", result.conflictPaths, indent, columns),
     ...renderOpaqueBlock(`workspace ${result.workspace.kind} ${result.workspace.path}`, indent, columns),
   ].join("\n");

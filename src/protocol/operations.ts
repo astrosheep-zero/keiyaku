@@ -6,6 +6,7 @@ import type { GitRepository } from "../git/process.js";
 import { repositoryAt } from "../git/repository.js";
 import { withGitReadObservation, type GitDecodeChannel } from "../git/read-observation.js";
 import type { WorktreeLeak } from "../git/scratch.js";
+import type { ConflictRecovery } from "../git/workspace.js";
 import type { AbandonRefusal } from "../core/verbs/abandon.js";
 import type { AmendRefusal } from "../core/verbs/amend.js";
 import type { ArcRefusal } from "../core/verbs/arc.js";
@@ -64,10 +65,7 @@ export type DeliverConflictRefusal = Readonly<{
   reason: "conflict";
   targetHead: SnapshotId;
   conflictPaths: readonly string[];
-  recovery: Readonly<{
-    materialize: "deliver --materialize-conflict --include-dirty";
-    continue: "deliver --include-dirty";
-  }>;
+  recovery: ConflictRecovery;
 }>;
 
 export type DeliveryPreparationRefusal =

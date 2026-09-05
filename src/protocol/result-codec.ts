@@ -34,7 +34,7 @@ import type {
   PlacementStop,
   VerificationStop,
 } from "./operations.js";
-import type { ReviewValue } from "./review.js";
+import type { ReviewValue, ReviewWorkspaceEvidence } from "./review.js";
 import type { ProtocolTerminal } from "./run.js";
 
 function fail(): never {
@@ -126,9 +126,10 @@ export function decodeMergeStatePresentRefusal(value: unknown): MergeStatePresen
 export function decodeDeliverConflictRefusal(value: unknown): DeliverConflictRefusal {
   const object = record(value, ["kind", "contractId", "reason", "targetHead", "conflictPaths", "recovery"]);
   if (object.kind !== "integration-failed" || object.reason !== "conflict") fail();
-  const recovery = record(object.recovery, ["materialize", "continue"]);
+  const recovery = record(object.recovery, ["materialize", "continue", "staging"]);
   if (recovery.materialize !== "deliver --materialize-conflict --include-dirty") fail();
   if (recovery.continue !== "deliver --include-dirty") fail();
+  if (recovery.staging !== "not-required") fail();
   return {
     kind: "integration-failed",
     contractId: decodeContractId(object.contractId),
@@ -138,6 +139,7 @@ export function decodeDeliverConflictRefusal(value: unknown): DeliverConflictRef
     recovery: {
       materialize: "deliver --materialize-conflict --include-dirty",
       continue: "deliver --include-dirty",
+      staging: "not-required",
     },
   };
 }
@@ -358,13 +360,23 @@ export function decodeCompletionEvidence(value: unknown): CompletionEvidence {
 }
 
 export function decodeMaterializedConflict(value: unknown): IntegrationConflictMaterialized {
-  const object = record(value, ["kind", "targetHead", "conflictPaths", "workspace"]);
+  const object = record(value, ["kind", "targetHead", "conflictPaths", "workspace", "handoffBase", "recovery"]);
   if (object.kind !== "integration-conflict-materialized") fail();
+  const recovery = record(object.recovery, ["materialize", "continue", "staging"]);
+  if (recovery.materialize !== "deliver --materialize-conflict --include-dirty") fail();
+  if (recovery.continue !== "deliver --include-dirty") fail();
+  if (recovery.staging !== "not-required") fail();
   return {
     kind: "integration-conflict-materialized",
     targetHead: decodeSnapshotId(object.targetHead),
     conflictPaths: strings(object.conflictPaths),
     workspace: decodeWorktreeWorkspace(object.workspace),
+    handoffBase: decodeSnapshotId(object.handoffBase),
+    recovery: {
+      materialize: "deliver --materialize-conflict --include-dirty",
+      continue: "deliver --include-dirty",
+      staging: "not-required",
+    },
   };
 }
 
@@ -457,6 +469,17 @@ export function decodeAuditReport(value: unknown): AuditReport {
   };
 }
 
+function decodeReviewWorkspaceEvidence(value: unknown): ReviewWorkspaceEvidence {
+  const object = record(value, ["staged", "unstaged", "untracked", "shortStat", "unmergedPaths"]);
+  const workspace = decodeWorkspaceDirtyDelta({
+    staged: object.staged,
+    unstaged: object.unstaged,
+    untracked: object.untracked,
+    shortStat: object.shortStat,
+  });
+  return { ...workspace, unmergedPaths: strings(object.unmergedPaths) };
+}
+
 export function decodeReviewValue(value: unknown): ReviewValue {
   const object = record(
     value,
@@ -472,6 +495,6 @@ export function decodeReviewValue(value: unknown): ReviewValue {
   });
   return {
     ...evidence,
-    ...(object.workspace === undefined ? {} : { workspace: decodeWorkspaceDirtyDelta(object.workspace) }),
+    ...(object.workspace === undefined ? {} : { workspace: decodeReviewWorkspaceEvidence(object.workspace) }),
   };
 }

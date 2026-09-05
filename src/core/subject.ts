@@ -12,7 +12,7 @@ import {
 } from "./facts/types.js";
 import { AuthorityCorruptionError } from "./facts/errors.js";
 
-type DependencyKey = Readonly<
+export type DependencyKey = Readonly<
   | { readonly kind: "document"; readonly value: DocumentKey }
   | { readonly kind: "segment"; readonly value: DocumentSegmentKey }
   | { readonly kind: "snapshot"; readonly value: SnapshotId }
@@ -30,6 +30,7 @@ function encodeKey(key: DependencyKey): string {
 type DecodedDependencyKeySet = Readonly<{
   canonical: DependencyKeySet;
   encodedKeys: readonly string[];
+  keys: readonly DependencyKey[];
 }>;
 
 function parseKey(value: unknown, index: number): DependencyKey {
@@ -89,12 +90,17 @@ function decodeDependencyKeySet(value: string): DecodedDependencyKeySet {
   const encodedKeys = canonicalEncodedKeys(keys);
   const canonical = `[${encodedKeys.join(",")}]`;
   if (canonical !== value) throw new AuthorityCorruptionError("dependency key set must be canonical JSON");
-  return { canonical: canonical as DependencyKeySet, encodedKeys };
+  return { canonical: canonical as DependencyKeySet, encodedKeys, keys };
 }
 
-/** Parse and canonicalize the opaque dependency-key-set fact value. */
+/** Parse and canonicalize the opaque dependency-key set. */
 export function parseDependencyKeySet(value: string): DependencyKeySet {
   return decodeDependencyKeySet(value).canonical;
+}
+
+/** Return the validated dependency keys in a persisted subject. */
+export function dependencyKeys(value: DependencyKeySet): readonly DependencyKey[] {
+  return decodeDependencyKeySet(value).keys;
 }
 
 function currentKeys(state: ContractState): ReadonlySet<string> {

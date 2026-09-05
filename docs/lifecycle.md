@@ -26,16 +26,24 @@ fact is admitted, a later delivery with the same worktree-content identity
 continues the non-terminal candidate and reuses its delivery data and recorded
 target base without adding another delivery fact. A terminal current
 Verification testimony supersedes that continuation; changed content replaces
-the candidate under the ordinary delivery rules. A conflict normally refuses without changing Contract
-authority; explicit conflict handoff may project it into the appointed workspace
-without treating the projection as delivery. Dirty workspace bytes require
-explicit delivery authorization; with that authorization, conflict materialization
-preserves the captured bytes as the handoff base before projecting the judged
-conflict. Review may test the actual worktree before a delivery and is not
-delivery authorization. A satisfied review may request trailing placement; an
-unsatisfied review never does. Review and delivery share the candidate's
-worktree-content identity when it becomes relevant, while target movement alone
-does not make a review stale.
+the candidate under the ordinary delivery rules. A conflict normally refuses
+without changing Contract authority; explicit conflict handoff may project it
+into the appointed workspace without treating the projection as delivery. Its
+public result names the handoff base and the recovery projection: callers
+continue with `deliver --include-dirty`, and staging is `not-required`.
+Resolution operates on final worktree bytes through private-index capture while
+the real index and its `UU` state remain under parent Body custody. Dirty
+workspace bytes require explicit delivery authorization; with that
+authorization, conflict materialization preserves the captured bytes as the
+handoff base before projecting the judged conflict. Review records observed
+`unmergedPaths` as evidence without blanket refusal. Review may test the actual
+worktree before a delivery and is not delivery authorization. A satisfied
+review may request trailing placement; an unsatisfied review never does.
+Review and delivery share the candidate's worktree-content identity when it
+becomes relevant, while target movement alone does not make a review stale. A
+changed candidate content identity makes prior testimony stale with an explicit
+candidate-content-change reason; the reason names the pinned target when one
+exists and includes the previous and current ChangeIds.
 
 Abandonment is the sole alternate terminal outcome. It neither reads nor moves
 the target and cannot be reopened. An arc is a narrative chapter within one

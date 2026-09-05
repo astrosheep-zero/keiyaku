@@ -1550,6 +1550,12 @@ test("forwarded materialization retains and replays its handoff evidence", async
     targetHead: snapshotId("target-head"),
     conflictPaths: ["shared.txt"],
     workspace: { kind: "worktree" as const, path: "/tmp/wt" },
+    handoffBase: snapshotId("handoff-base"),
+    recovery: {
+      materialize: "deliver --materialize-conflict --include-dirty" as const,
+      continue: "deliver --include-dirty" as const,
+      staging: "not-required" as const,
+    },
   };
   let calls = 0;
   const pump = await openContractPump(parent, {
@@ -1595,6 +1601,12 @@ test("forwarded materialization retains and replays its handoff evidence", async
       repoRoot: root,
       contractId: "kei/conflicted",
       targetHead: "target-head",
+      handoffBase: "handoff-base",
+      recovery: {
+        materialize: "deliver --materialize-conflict --include-dirty",
+        continue: "deliver --include-dirty",
+        staging: "not-required",
+      },
       conflictPaths: ["shared.txt"],
       workspace: { kind: "worktree", path: "/tmp/wt" },
     });
