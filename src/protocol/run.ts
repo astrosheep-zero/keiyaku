@@ -1,3 +1,4 @@
+import type { ExecutionProgress } from "./progress.js";
 import { extendAdmissionPathsAt, observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
 import {
   appendPrivateStateSeatClose,
@@ -45,6 +46,7 @@ export type RunProtocolInput<
 > = Readonly<{
   channel: GitDecodeChannel;
   repository: GitRepository;
+  progress?: ExecutionProgress;
   contracts: readonly ContractId[];
   attempts: readonly AttemptContext[];
   decide: (input: DecideInput<Input>) => OfferDecision<Refusal>;
@@ -313,6 +315,7 @@ async function admitSpeculativeProtocolAttempt<
     attempt: decided.attempt,
     offer: decided.offer,
     primaryContract: input.input.contractId,
+    progress: input.progress,
     assertions: decided.assertions,
     ...(input.validateAdmission === undefined ? {} : { validateAdmission: input.validateAdmission }),
   });

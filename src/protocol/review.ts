@@ -20,18 +20,11 @@ import type { AttestationData, ContractState, DeliverData } from "../core/facts/
 import { gate } from "../core/facts/types.js";
 import { decideAttestation, type AttestationInput, type AttestationRefusal } from "../core/verbs/attestation.js";
 import { admitDecidedOffer, mintAttempts } from "./attempt.js";
-import { admitted } from "./outcome.js";
-import { completeCandidate, type CompletionEvidence } from "./completion.js";
-import { completeLeadingAdmission, contractCheckpoint } from "./progress.js";
+import type { LeadingOutcome } from "./outcome.js";
+import type { CompletionEvidence } from "./completion.js";
 import { appointmentFor, readPlaceRegister } from "../workspace-place.js";
 import type { AttemptContext } from "../core/decide.js";
-import type {
-  AttemptDecision,
-  DocumentDerivation,
-  IntentOutcome,
-  MutationOperationInput,
-  RepositoryScope,
-} from "./operations.js";
+import type { AttemptDecision, DocumentDerivation, MutationOperationInput, RepositoryScope } from "./operations.js";
 import { attemptDecisionWithSeatClose, timestamp } from "./operations.js";
 
 const REVIEWED = gate("reviewed");
@@ -225,6 +218,7 @@ async function decideAndAdmitReview(
     attempt,
     offer: decision.offer,
     primaryContract: input.contractId,
+    progress: input.progress,
   });
   if (admission.kind !== "accepted") return admission;
   return {
@@ -271,8 +265,9 @@ async function reviewAttempt(
   );
 }
 
-export async function reviewOperation(input: ReviewOperationInput): Promise<IntentOutcome<ReviewValue, ReviewRefusal>> {
-  const git = input.scope;
+export async function admitReviewOperation(
+  input: ReviewOperationInput,
+): Promise<LeadingOutcome<ReviewValue, ReviewRefusal>> {
   const attempts = mintAttempts({ entryCount: 1 });
   let review: Extract<AttemptDecision<PreparedReview, ReviewRefusal>, { kind: "accepted" | "refused" }> | null = null;
   for (let index = 0; index < attempts.length; index += 1) {
@@ -286,17 +281,6 @@ export async function reviewOperation(input: ReviewOperationInput): Promise<Inte
   }
   if (review === null) return { kind: "retry", reason: { kind: "exhausted" } };
   if (review.kind !== "accepted") return review;
-  if (input.verdict !== "satisfied") return admitted(review, reviewValue(review.value));
-  const derivation = input.deriveDocument?.(review.state);
-  const completed = await completeCandidate({
-    channel: input.channel,
-    repository: git,
-    contractId: input.contractId,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
-    ...(review.state.coordinates.target === undefined ? {} : { target: review.state.coordinates.target }),
-    verification: derivation?.verification ?? { kind: "prepared", data: null },
-    checkpoint: contractCheckpoint(review),
-    verifyInitial: false,
-  });
-  return admitted(completeLeadingAdmission(review, completed.progress), reviewValue(review.value, completed.evidence));
+  input.progress?.recordResidue(input.contractId, review);
+  return { ...review, value: reviewValue(review.value) };
 }

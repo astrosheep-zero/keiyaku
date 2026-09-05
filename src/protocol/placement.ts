@@ -1,3 +1,4 @@
+import type { ExecutionProgress } from "./progress.js";
 import { SqliteTransactionLockError } from "../coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { contractState } from "../core/facts/observation.js";
@@ -53,6 +54,7 @@ type PlacementAdmissionInput<ExtraRefusal> = Readonly<{
   target: string | undefined;
   placement: PlacementProtocolInput;
   onDeliveryMissing?: () => Promise<PlacementProtocolResult<ExtraRefusal> | undefined>;
+  progress?: ExecutionProgress;
 }>;
 
 function placementFailure(error: unknown): PlacementExecutionFailure {
@@ -116,6 +118,7 @@ async function runFencedPlacement(
           attempt: prepared.attempt,
           offer: prepared.offer,
           primaryContract: input.contractId,
+          progress: protocol.progress,
         });
         if (result.kind === "accepted") {
           preparedPhysical = physical.placement;
@@ -196,6 +199,7 @@ export async function admitPlacement<ExtraRefusal = never>(
     contracts: [input.contractId],
     attempts,
     decide: decidePlacement,
+    progress: admission.progress,
     observe: (observedRepository, observedChannel, contracts) =>
       observeGitForAdmissionAt(observedRepository, observedChannel, contracts),
   };

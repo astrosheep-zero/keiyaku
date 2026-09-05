@@ -1,3 +1,4 @@
+import type { ExecutionProgress } from "./progress.js";
 import { randomBytes } from "node:crypto";
 import { encodeEntry } from "../core/facts/codec.js";
 import { admit, type PublicationFailed } from "../git/admission.js";
@@ -166,6 +167,7 @@ export async function admitDecidedOffer<Refusal = never>(
     primaryContract: ContractId;
     assertions?: readonly GitRefAssertion[];
     validateAdmission?: (observation: GitDecisionObservation) => Refusal | undefined | Promise<Refusal | undefined>;
+    progress?: ExecutionProgress;
   }>,
 ): Promise<DecidedOfferResult<Refusal>> {
   const { channel, repository, decisionObservation, attempt, offer, primaryContract } = input;
@@ -179,12 +181,14 @@ export async function admitDecidedOffer<Refusal = never>(
   const admission = await admit(repository, offer, decisionObservation.admission, assertions);
   if (admission.kind === "accepted") {
     confirmPrivateStatePublication(input.seat);
-    return {
+    const accepted: AcceptedAdmission = {
       kind: "accepted",
       facts: offerEntries(offer),
       state: snapshotFor(primary, decisionObservation.journals, admission.heads[primary.contractId]!),
       journal: journalFor(primary, decisionObservation.journals),
     };
+    input.progress?.recordAdmission(accepted);
+    return accepted;
   }
   if (admission.kind === "publication-failed") {
     return (await publicationPremiseMoved(repository, decisionObservation, offer, assertions))
@@ -192,13 +196,16 @@ export async function admitDecidedOffer<Refusal = never>(
       : admission;
   }
   const recovered = await observeContractsForAdmissionAt(
-    repository,
+    { ...repository, signal: AbortSignal.timeout(5_000) },
     channel,
     offer.facts.map((append) => append.contractId),
   );
   const classification = classifyUnknownAttempt({ contracts: recovered.journals }, offer);
-  if (classification.kind === "accepted")
-    return confirmRecoveredAcceptance(input.seat, { contracts: recovered.journals }, offer, primaryContract);
+  if (classification.kind === "accepted") {
+    const accepted = confirmRecoveredAcceptance(input.seat, { contracts: recovered.journals }, offer, primaryContract);
+    input.progress?.recordAdmission(accepted);
+    return accepted;
+  }
   return classification.kind === "collision" ? { kind: "collision" } : { kind: "redecide" };
 }
 

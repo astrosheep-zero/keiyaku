@@ -1,3 +1,4 @@
+import type { ExecutionProgress } from "./progress.js";
 import type { GitDecisionObservation } from "../git/observe.js";
 import type { GitDecodeChannel, GitTreeSelection } from "../git/read-observation.js";
 import type { GitRepository } from "../git/process.js";
@@ -27,6 +28,7 @@ import { runProtocol, type CompanionDecorator, type ProtocolResult } from "./run
 import { mintAttempts } from "./attempt.js";
 
 type IntentAdmissionOptions<Input, Refusal, Seed> = Readonly<{
+  progress?: ExecutionProgress;
   observedContracts?: readonly ContractId[];
   observe?: (
     repository: GitRepository,
@@ -68,6 +70,7 @@ export function admitIntent<
     contracts,
     attempts: mintAttempts({ entryCount: 2 }),
     decide,
+    progress: options.progress,
     ...(options.observe === undefined ? {} : { observe: options.observe }),
     ...(options.decorateOffer === undefined ? {} : { decorateOffer: options.decorateOffer }),
     ...(options.validateAdmission === undefined ? {} : { validateAdmission: options.validateAdmission }),
@@ -86,6 +89,7 @@ type VerifyDeliveryInput = Readonly<{
   snapshot?: SnapshotId;
   signal?: AbortSignal;
   verification?: VerificationDefinition;
+  progress?: ExecutionProgress;
 }>;
 
 export type VerificationRuntimeStop =
@@ -182,6 +186,7 @@ export async function verifyDelivery(input: VerifyDeliveryInput): Promise<Verifi
     projectSettings,
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
+  input.progress?.recordVerification(input.contractId, snapshot, execution);
   let step: VerificationStep;
   if (execution.outcome.kind === "terminal") {
     step = await admitIntent<AttestationInput<never>, AttestationRefusal>(
@@ -189,6 +194,7 @@ export async function verifyDelivery(input: VerifyDeliveryInput): Promise<Verifi
       input.repository,
       verificationInput(execution.outcome, input, subject),
       decideAttestation,
+      { progress: input.progress },
     );
   } else if (execution.outcome.kind === "candidate-unavailable") {
     step = { failure: "candidate-unavailable", diagnostic: execution.outcome.diagnostic };
@@ -206,6 +212,7 @@ export async function verifyDelivery(input: VerifyDeliveryInput): Promise<Verifi
   } else {
     throw new Error("Verification execution returned an invalid outcome");
   }
+  if (!("failure" in step) && step.kind === "accepted") input.progress?.recordResidue(input.contractId, step);
   return {
     step,
     ...(execution.outcome.kind === "terminal"

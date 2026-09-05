@@ -1,3 +1,4 @@
+import type { ExecutionProgress } from "./progress.js";
 import { contractState } from "../core/facts/observation.js";
 import type { ActorId, ContractId, ReintegratedData } from "../core/facts/types.js";
 import { decideReintegrate, type ReintegrateInput, type ReintegrateRefusal } from "../core/verbs/reintegrate.js";
@@ -37,6 +38,7 @@ type ReintegrationInput = Readonly<{
   contractId: ContractId;
   target: string;
   actor?: ActorId;
+  progress?: ExecutionProgress;
 }>;
 
 function reintegrationResultWithSeatClose(
@@ -110,6 +112,7 @@ async function runReintegration(
           attempt,
           offer: decision.offer,
           primaryContract: input.contractId,
+          progress: input.progress,
           assertions,
         });
         if (result.kind === "accepted") {

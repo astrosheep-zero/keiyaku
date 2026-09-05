@@ -13,6 +13,11 @@ import type { ProtocolResult, ProtocolTerminal } from "./run.js";
 
 export type AcceptedProtocolStep = AcceptedAdmission & Readonly<{ physical?: ReconcileResult }>;
 
+export type LeadingOutcome<Value, Refusal> =
+  | (AcceptedProtocolStep & Readonly<{ value: Value }>)
+  | Readonly<{ kind: "refused"; refusal: Refusal }>
+  | Readonly<{ kind: "retry"; reason: ProtocolTerminal }>;
+
 export type AcceptedObligations = Readonly<{
   cleanup?: VerificationCleanupFailure;
   leak?: WorktreeLeak;
