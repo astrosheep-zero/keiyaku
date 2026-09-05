@@ -8,7 +8,7 @@ import {
   gateFact,
   gitIdsInRow,
   mergeSummary,
-  targetMovementFacts,
+  targetFacts,
 } from "./contract-observation.js";
 import {
   entityLines,
@@ -16,15 +16,14 @@ import {
   identityLine,
   plumbFacts,
   RECENT_TONE_MS,
-  renderTextBlock,
   renderSectionBlock,
+  linkedEntityLines,
   safeText,
   tone,
   type SemanticTone,
   type TextRenderContext,
 } from "./terminal.js";
 import { akumaMark, endpointFact, formatAge, NARROW_COLUMNS, renderAkuma } from "./kanshi-akuma.js";
-const PLUMB = "  │ ";
 const REVIEW_ATTENTION_MS = 15 * 60 * 1_000;
 const PENDING_ATTENTION_MS = 60 * 60 * 1_000;
 
@@ -53,7 +52,7 @@ function contractStatusTone(row: ContractKanshiRow, observedAt: string): Semanti
 
 function contractMark(row: ContractKanshiRow): string {
   if (row.phase === "claimed") return "✓";
-  if (row.phase === "abandoned") return "×";
+  if (row.phase === "abandoned") return "✕";
   if (row.title === null) return "?";
   if (
     row.gates.reports.some((report) => report.current.kind === "attested" && report.current.verdict === "unsatisfied")
@@ -66,7 +65,7 @@ function contractMark(row: ContractKanshiRow): string {
 
 function taskMark(row: TaskKanshiRow): string {
   if (row.disposition === "done") return "✓";
-  if (row.disposition === "drop") return "×";
+  if (row.disposition === "drop") return "✕";
   if (row.disposition === "on_hold") return "⧗";
   return row.disposition === "in_progress" ? "●" : row.disposition === "blocked" ? "‖" : "○";
 }
@@ -79,43 +78,16 @@ function gitAbbreviations(report: KanshiReport): ReadonlyMap<string, string> {
   return abbreviateGitIds(ids);
 }
 
-function branchName(target: string | null): string | null {
-  return target === null ? null : target.startsWith("refs/heads/") ? target.slice("refs/heads/".length) : target;
-}
-
-function targetFacts(row: ContractKanshiRow, abbreviations: ReadonlyMap<string, string>): readonly string[] {
-  const name = branchName(row.target);
-  if (name === null) return ["no target"];
-  const facts = [`target ${name}`];
-  if (row.targetLag.kind === "unknown")
-    facts.push(
-      `commits behind ${name} unknown${row.targetLag.subject === undefined ? "" : ` · worktree ${row.targetLag.subject.path}`}`,
-    );
-  if (row.targetLag.kind === "counted")
-    facts.push(
-      `${row.targetLag.behind} commits behind ${name}${row.targetLag.subject === undefined ? "" : ` · worktree ${row.targetLag.subject.path}`}`,
-    );
-  return [...facts, ...targetMovementFacts(row, abbreviations)];
-}
-
-function selectedTargetFacts(row: ContractKanshiRow, abbreviations: ReadonlyMap<string, string>): readonly string[] {
-  const head = row.targetObservation?.head;
-  return [
-    ...targetFacts(row, abbreviations),
-    ...(row.target !== null && head ? [`target head ${displayGitId(head, abbreviations)}`] : []),
-  ];
-}
-
 function workspaceState(row: ContractKanshiRow): string {
   const observation = row.workspaceObservation;
-  if (observation.kind === "failed") return `worktree unavailable · ${observation.diagnostic}`;
-  if (observation.kind === "unappointed") return "worktree unappointed";
-  if (observation.kind === "unavailable") return "worktree unavailable";
-  if (observation.kind === "clean") return "worktree clean";
+  if (observation.kind === "failed") return `workspace  unavailable · ${observation.diagnostic}`;
+  if (observation.kind === "unappointed") return "workspace  unappointed";
+  if (observation.kind === "unavailable") return "workspace  unavailable";
+  if (observation.kind === "clean") return "workspace  clean";
   const counts = Object.entries(observation.counts)
     .filter(([, count]) => count > 0)
     .map(([name, count]) => `${name} ${count}`);
-  return counts.length === 0 ? "worktree dirty" : `worktree dirty · ${counts.join(" · ")}`;
+  return counts.length === 0 ? "workspace  dirty" : `workspace  dirty · ${counts.join(" · ")}`;
 }
 
 function mergeFacts(
@@ -135,22 +107,27 @@ function mergeFacts(
   const paths = observation.merge.unmergedPaths;
   return [
     summary,
-    `merge head ${displayGitId(observation.merge.head, abbreviations)}`,
-    ...(paths.length === 0 ? ["0 paths"] : paths),
+    `merge head  ${displayGitId(observation.merge.head, abbreviations)}`,
+    ...(paths.length === 0 ? ["unmerged paths  none"] : paths.map((path) => `unmerged path  ${path}`)),
+    ...(observation.merge.handoffBase === undefined
+      ? []
+      : ["saved  worktree bytes before projection", `handoff base  ${observation.merge.handoffBase}`]),
   ];
 }
 
 function linkedTask(report: KanshiReport, taskId: string): string {
   if (report.tasks.kind !== "present") return `! ${taskId} · unavailable`;
   const task = report.tasks.value.rows.find((candidate) => candidate.id === taskId);
-  return task === undefined ? `! ${taskId} · missing` : `${taskMark(task)} ${task.id} · ${task.disposition}`;
+  return task === undefined ? `! ${taskId} · unavailable` : `${taskMark(task)} ${task.id} · ${task.disposition}`;
 }
 
 function linkedAkuma(report: KanshiReport, id: string, aliases: readonly string[]): string {
   const alias = aliases.length === 0 ? "" : ` (${aliases.join(" ")})`;
   if (report.akuma.kind !== "present") return `! ${id}${alias} · unavailable`;
   const akuma = report.akuma.value.rows.find((candidate) => candidate.id === id);
-  return akuma === undefined ? `! ${id}${alias} · missing` : `${akumaMark(akuma.life)} ${id}${alias} · ${akuma.life}`;
+  return akuma === undefined
+    ? `! ${id}${alias} · unavailable`
+    : `${akumaMark(akuma.life)} ${id}${alias} · ${akuma.life} · ${formatAge("lifeAt" in akuma ? akuma.lifeAt : null, report.observedAt)}`;
 }
 
 type AkumaAttachmentRow = Extract<KanshiReport["akuma"], { kind: "present" }>["value"]["rows"][number];
@@ -159,70 +136,35 @@ function isTerminalAkuma(life: string): boolean {
   return life === "killed" || life === "stillborn";
 }
 
-function attachmentTimestamp(akuma: AkumaAttachmentRow): string | null {
-  return "lifeAt" in akuma && akuma.lifeAt !== null
-    ? akuma.lifeAt
-    : "lastActivityAt" in akuma
-      ? akuma.lastActivityAt
-      : null;
-}
-
-function worldAttachments(row: ContractKanshiRow, report: KanshiReport): readonly ContractKanshiRow["fleet"][number][] {
-  if (report.akuma.kind !== "present") return row.fleet;
-  const byId = new Map<string, AkumaAttachmentRow>(report.akuma.value.rows.map((akuma) => [akuma.id, akuma]));
-  const nonTerminal = new Set<ContractKanshiRow["fleet"][number]["id"]>();
-  const unknown = new Set<ContractKanshiRow["fleet"][number]["id"]>();
-  let latestTerminal: { id: ContractKanshiRow["fleet"][number]["id"]; at: string | null } | undefined;
-  row.fleet.forEach((attached) => {
-    const akuma = byId.get(attached.id);
-    if (akuma === undefined) {
-      unknown.add(attached.id);
-      return;
-    }
-    if (!isTerminalAkuma(akuma.life)) {
-      nonTerminal.add(attached.id);
-      return;
-    }
-    const at = attachmentTimestamp(akuma);
-    if (latestTerminal === undefined || (at !== null && (latestTerminal.at === null || at > latestTerminal.at))) {
-      latestTerminal = { id: attached.id, at };
-    }
-  });
-  const retained = new Set(unknown);
-  for (const id of nonTerminal) retained.add(id);
-  if (nonTerminal.size === 0 && latestTerminal !== undefined) retained.add(latestTerminal.id);
-  return row.fleet.filter((attached) => retained.has(attached.id));
-}
-
-function linkedFacts(row: ContractKanshiRow, report: KanshiReport, mode: "world" | "selected"): readonly string[] {
+function linkedFacts(row: ContractKanshiRow, report: KanshiReport): readonly string[] {
   const linked: string[] = [];
   if (row.holder.kind === "held") linked.push(linkedTask(report, row.holder.taskId));
   if (row.holder.kind === "unavailable") linked.push("! task · unavailable");
-  const attachments = mode === "world" ? worldAttachments(row, report) : row.fleet;
-  for (const attached of attachments) linked.push(linkedAkuma(report, attached.id, attached.aliases));
+  for (const attached of row.fleet) linked.push(linkedAkuma(report, attached.id, attached.aliases));
   return linked;
 }
 
 function linkedAkumaSummary(row: ContractKanshiRow, report: KanshiReport): string | undefined {
   if (row.fleet.length === 0) return undefined;
-  if (report.akuma.kind !== "present") return "akuma unavailable";
+  if (report.akuma.kind !== "present") return "akuma  unavailable";
   const byId = new Map<string, AkumaAttachmentRow>(report.akuma.value.rows.map((akuma) => [akuma.id, akuma]));
   const known = row.fleet
     .map((attached) => byId.get(attached.id))
     .filter((akuma): akuma is AkumaAttachmentRow => akuma !== undefined);
-  if (known.length === 0) return `akuma ${row.fleet.length} missing`;
+  if (known.length === 0) return `akuma  ${row.fleet.length} · unavailable`;
   const live = known.filter((akuma) => !isTerminalAkuma(akuma.life)).length;
   const terminal = known.length - live;
-  const facts = [`akuma ${row.fleet.length}`];
+  const facts = [`akuma  ${row.fleet.length}`];
   if (live > 0) facts.push(`${live} live`);
   if (terminal > 0) facts.push(`${terminal} terminal`);
+  if (known.length < row.fleet.length) facts.push(`${row.fleet.length - known.length} unavailable`);
   return facts.join(" · ");
 }
 
-function semanticBlock(name: string, facts: readonly string[], context: TextRenderContext): readonly string[] {
+function semanticBlock(name: string, facts: readonly string[], _context: TextRenderContext): readonly string[] {
   if (facts.length === 0) return [];
   const lines = [`  ${name}`];
-  for (const fact of facts) lines.push(...renderTextBlock(safeText(fact), "    ", context.columns));
+  for (const fact of facts) lines.push(`    ${safeText(fact)}`);
   return lines;
 }
 
@@ -233,7 +175,7 @@ function namespaceTaskFacts(row: ContractKanshiRow): readonly string[] {
     return [`failed ${row.namespaceTasks.failure.message}`];
   }
   return row.namespaceTasks.value.map(
-    (task) => `${taskMark(task)} ${task.id} · P${task.priority} ${task.disposition} — ${task.title}`,
+    (task) => `${taskMark(task)} ${task.id} · ${task.disposition} · P${task.priority} · ${task.title}`,
   );
 }
 
@@ -258,29 +200,34 @@ function renderSelectedContractRow(
   lines.push(...semanticBlock("after", row.after.map(afterWording), context));
   lines.push(...semanticBlock("dependents", row.dependents.map(dependentWording), context));
   const gateFacts = row.gates.reports.flatMap((gate) => [
-    `${gateFact(gate)} ${formatAge(gate.current.kind === "attested" ? gate.current.at : null, report.observedAt)}`,
+    `${gateFact(gate)}${gate.current.kind === "attested" ? ` · ${formatAge(gate.current.at, report.observedAt)}` : ""}`,
     ...(gate.current.kind === "attested" && gate.current.summary !== undefined
-      ? [`${gate.gate}: ${gate.current.summary}`]
+      ? [`summary  ${gate.gate} · ${gate.current.summary}`]
       : []),
   ]);
   lines.push(...semanticBlock("gates", gateFacts, context));
   lines.push(...semanticBlock("candidate/integration", candidateFacts(row, abbreviations), context));
-  lines.push(...semanticBlock("target", selectedTargetFacts(row, abbreviations), context));
+  lines.push(...semanticBlock("target", targetFacts(row, abbreviations), context));
   const workspaceFacts = [workspaceState(row)];
   if (
     row.workspaceObservation.kind !== "unappointed" &&
     row.workspaceObservation.kind !== "failed" &&
     row.workspaceObservation.location.kind === "worktree"
   ) {
-    workspaceFacts.push(`path ${row.workspaceObservation.location.path}`);
+    workspaceFacts.push(`worktree  ${row.workspaceObservation.location.path}`);
   }
   lines.push(
     ...semanticBlock("workspace/merge", [...workspaceFacts, ...mergeFacts(row, true, abbreviations)], context),
   );
-  const attachments = [...linkedFacts(row, report, "selected")];
-  if (row.issue !== undefined) attachments.push(`lag (observed now): target-checkout-retained ${row.issue.target}`);
-  lines.push(...semanticBlock("attachments", attachments, context));
+  const attachments = [...linkedFacts(row, report)];
+  if (row.issue !== undefined)
+    lines.push(...plumbFacts([`lag  target-checkout-retained · ${row.issue.target}`], context.columns));
+  lines.push(...linkedEntityLines(attachments, context.columns));
   lines.push(...semanticBlock("namespace tasks", namespaceTaskFacts(row), context));
+  const observation = row.workspaceObservation;
+  if ((observation.kind === "clean" || observation.kind === "dirty") && observation.merge?.recovery !== undefined) {
+    lines.push(`  deliver  ${safeText(observation.merge.recovery.continue)} · reads worktree bytes, not index`);
+  }
   return lines;
 }
 
@@ -288,10 +235,11 @@ function candidateFacts(row: ContractKanshiRow, abbreviations: ReadonlyMap<strin
   if (row.delivery === null) return [candidateFact(row.delivery)];
   const delivery = row.delivery;
   return [
-    `tender ${displayGitId(delivery.tenderSnapshot, abbreviations)}`,
-    `integration ${displayGitId(delivery.integration.predecessor, abbreviations)} -> ${displayGitId(delivery.integration.snapshot, abbreviations)}`,
-    `method ${delivery.method}`,
-    `change ${delivery.integration.changeId}`,
+    candidateFact(delivery),
+    `tender commit  ${displayGitId(delivery.tenderSnapshot, abbreviations)}`,
+    `integration commit  ${displayGitId(delivery.integration.snapshot, abbreviations)} · predecessor ${displayGitId(delivery.integration.predecessor, abbreviations)}`,
+    `method  ${delivery.method}`,
+    `content identity (not commit)  ${delivery.integration.changeId}`,
   ];
 }
 
@@ -304,14 +252,15 @@ function renderWorldContractRow(
   const contractFacts = [
     candidateFact(row.delivery),
     ...targetFacts(row, gitAbbreviations(report)),
+    ...(row.worktreePath === null ? [] : [`worktree  ${row.worktreePath}`]),
+    ...(linkedAkumaSummary(row, report) === undefined ? [] : [linkedAkumaSummary(row, report)!]),
     ...row.after.map(afterWording),
-    ...(row.dependents.length === 0 ? [] : [`dependents ${row.dependents.map(dependentWording).join(" · ")}`]),
+    ...(row.dependents.length === 0 ? [] : [`dependents  ${row.dependents.map(dependentWording).join(" · ")}`]),
     ...row.gates.reports.map(gateFact),
   ];
   const linkedFacts = [
     ...(row.holder.kind === "held" ? [linkedTask(report, row.holder.taskId)] : []),
     ...(row.holder.kind === "unavailable" ? ["! task · unavailable"] : []),
-    ...(linkedAkumaSummary(row, report) === undefined ? [] : [linkedAkumaSummary(row, report)!]),
   ];
   const statusTone = contractStatusTone(row, report.observedAt);
   return entityLines({
@@ -321,12 +270,12 @@ function renderWorldContractRow(
     title,
     facts: contractFacts,
     context,
-  }).concat(plumbFacts(linkedFacts, context.columns));
+  }).concat(linkedEntityLines(linkedFacts, context.columns));
 }
 
 function renderContracts(report: KanshiReport, context: TextRenderContext): readonly string[] {
   const section = report.contracts;
-  if (section.kind === "absent") return ["CONTRACTS // absent", "", `${PLUMB}contracts absent`];
+  if (section.kind === "absent") return ["CONTRACTS // absent", "", "  contracts absent"];
   if (section.kind === "failed")
     return ["CONTRACTS // unavailable", "", tone(`! ${safeText(section.failure.message)}`, "alert", context.color)];
   const rendered = renderSectionBlock({
@@ -339,17 +288,17 @@ function renderContracts(report: KanshiReport, context: TextRenderContext): read
 
 function renderSelectedContract(report: KanshiReport, context: TextRenderContext): readonly string[] {
   const section = report.contracts;
-  if (section.kind === "absent") return [`${PLUMB}keiyaku absent`];
+  if (section.kind === "absent") return ["  keiyaku absent"];
   if (section.kind === "failed") return [tone(`! ${safeText(section.failure.message)}`, "alert", context.color)];
   const row = section.value.rows[0];
   return row === undefined
-    ? [`${PLUMB}keiyaku absent`]
+    ? ["  keiyaku absent"]
     : renderSelectedContractRow(row, report, context, gitAbbreviations(report));
 }
 
 function renderTasks(report: KanshiReport, context: TextRenderContext): readonly string[] {
   const section = report.tasks;
-  if (section.kind === "absent") return ["TASKS // absent", "", `${PLUMB}tasks absent`];
+  if (section.kind === "absent") return ["TASKS // absent", "", "  tasks absent"];
   if (section.kind === "failed")
     return ["TASKS // unavailable", "", tone(`! ${safeText(section.failure.message)}`, "alert", context.color)];
   const rows = section.value.rows;

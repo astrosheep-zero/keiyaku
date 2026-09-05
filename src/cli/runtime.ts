@@ -4,17 +4,19 @@ import type { InstallInvocationResult } from "./commands/install.js";
 import type { AkumaInvocationResult } from "./commands/akuma-invoke.js";
 import type { TaskInvocationResult } from "./commands/task-invoke.js";
 import type { ParsedCommand, ParsedExecution } from "./parse.js";
-import { CliUsageError } from "./parse.js";
+import { CliUsageError, usageGuideForCommand } from "./parse.js";
+import { renderUsageMessage } from "./usage.js";
+import { safeText } from "./render/terminal.js";
 import type { InvocationResult } from "./result.js";
 import type { Settings } from "../settings.js";
 
 export function invocationStart(command: ParsedCommand): string | undefined {
   if (command.output === "json") return undefined;
-  if (command.command === "bind") return "⧖ preparing keiyaku";
-  if (command.command === "deliver") return "⧖ delivering";
-  if (command.command === "audit") return "⧖ auditing";
-  if (command.command === "reconcile") return "⧖ reconciling";
-  return command.command === "install" ? "⧖ installing harness integrations" : undefined;
+  if (command.command === "bind") return "● preparing keiyaku";
+  if (command.command === "deliver") return "● delivering";
+  if (command.command === "audit") return "● auditing";
+  if (command.command === "reconcile") return "● reconciling";
+  return command.command === "install" ? "● installing harness integrations" : undefined;
 }
 
 function writeCliStream(stream: NodeJS.WritableStream, body: string): void {
@@ -142,14 +144,44 @@ async function writeResult(command: ParsedCommand, result: unknown): Promise<num
 
 function writeWorldScopeRefusal(
   error: Readonly<{ refusal: { kind: string; world: string; ids: readonly string[] } }>,
-  output: "text" | "json",
+  command: ParsedCommand,
 ): number {
+  const guide = usageGuideForCommand(command);
   const body =
-    output === "json"
+    command.output === "json"
       ? JSON.stringify(error.refusal)
-      : `${error.refusal.kind} ${error.refusal.world} ${error.refusal.ids.join(" ")}`;
+      : [
+          `✕ selector  ${error.refusal.kind}`,
+          `  world  ${safeText(error.refusal.world)}`,
+          ...error.refusal.ids.map((id) => `  given  ${safeText(id)}`),
+          `  accepts  ${guide.accepts}`,
+          `  help  ${guide.help}`,
+        ].join("\n");
   writeCliStream(process.stderr, body);
   return 1;
+}
+
+async function commandFailureText(error: unknown, command: ParsedCommand): Promise<string> {
+  const diagnostic = error instanceof Error ? error.message : String(error);
+  if (command.output === "json" || error instanceof CliUsageError) return diagnostic;
+  const { KeiyakuRefused } = await import("../index.js");
+  if (error instanceof KeiyakuRefused) {
+    if (error.refusal.kind === "contract-missing") {
+      return renderUsageMessage(
+        diagnostic,
+        {
+          ...usageGuideForCommand(command),
+          given: error.refusal.contractId,
+        },
+        "selector",
+      );
+    }
+    const { renderRefusalFacts } = await import("./render/refusal.js");
+    return [`✕ ${command.command} refused`, ...renderRefusalFacts(error.refusal, "  ", displayContext().columns)].join(
+      "\n",
+    );
+  }
+  return `✕ ${command.command} failed\n  diagnostic  ${safeText(diagnostic)}`;
 }
 
 export async function runCliCommand(invocation: ParsedExecution): Promise<number> {
@@ -186,21 +218,18 @@ export async function runCliCommand(invocation: ParsedExecution): Promise<number
     }
     if (command.command !== "install") {
       const { AkumaWorldScopeError } = await import("../library/address.js");
-      if (error instanceof AkumaWorldScopeError) return writeWorldScopeRefusal(error, command.output);
+      if (error instanceof AkumaWorldScopeError) return writeWorldScopeRefusal(error, command);
     }
     if (command.command === "bind") {
       const { BindDraftError } = await import("./draft.js");
       if (error instanceof BindDraftError) {
-        writeCliStream(
-          process.stderr,
-          error.original instanceof Error ? error.original.message : String(error.original),
-        );
+        writeCliStream(process.stderr, await commandFailureText(error.original, command));
         const { renderBindDraftReceipt } = await import("./render/refusal.js");
         writeCliStream(process.stderr, renderBindDraftReceipt(error.draft));
         return error.original instanceof CliUsageError ? 1 : 3;
       }
     }
-    writeCliStream(process.stderr, error instanceof Error ? error.message : String(error));
+    writeCliStream(process.stderr, await commandFailureText(error, command));
     return error instanceof CliUsageError ? 1 : 3;
   }
 }

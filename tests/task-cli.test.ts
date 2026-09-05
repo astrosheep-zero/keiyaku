@@ -148,8 +148,8 @@ test("task parser owns subcommand arity, repeat flags, and selected stdin", () =
     positionals: ["task/one", "task/two"],
     flags: {},
   });
-  assert.throws(() => parseArgv(["tasks", "start", "task/one"]), /usage: keiyaku/u);
-  assert.throws(() => parseArgv(["task", "star", "task/one"]), /usage: keiyaku/u);
+  assert.throws(() => parseArgv(["tasks", "start", "task/one"]), /usage  keiyaku/u);
+  assert.throws(() => parseArgv(["task", "star", "task/one"]), /usage  keiyaku/u);
   assert.deepEqual(
     parseArgv([
       "-C",
@@ -457,9 +457,10 @@ test("task invocation works outside Git and consumes stdin only when selected", 
   assert.equal((noteShown as { task: { note: string } }).task.note, "replacement");
   const showCommand = parseArgv(["task", "show", nativeId]).command;
   if (showCommand.command !== "task") throw new Error("not a task command");
-  assert.match(renderTaskText(showCommand, noteShown), /created .* · updated .*/u);
+  assert.match(renderTaskText(showCommand, noteShown), /created  /u);
+  assert.match(renderTaskText(showCommand, noteShown), /updated  /u);
   assert.match(renderTaskText(showCommand, noteShown), /note\n\nreplacement\n/u);
-  assert.match(renderTaskText(showCommand, noteShown), new RegExp(`⧗ ${nativeId} · P2 on_hold — Native CLI`));
+  assert.match(renderTaskText(showCommand, noteShown), new RegExp(`⧗ ${nativeId} · on_hold · P2 — Native CLI`));
 
   const document = "---\ntitle: From document\nstate: done\n---\ncreated closed\n";
   const documentAdd = (await invoke(parseArgv(["-C", root, "task", "add", "-"]), {
@@ -690,12 +691,13 @@ test("task add and compose persist resolved actor only on new documents", async 
     throw new Error("not a task command");
   }
   const authoredText = renderTaskText(showCommand, authoredShown as TaskInvocationResult);
-  assert.match(authoredText, /^created .* · updated .*$/mu);
-  assert.match(authoredText, /^created-by explicit-actor$/mu);
+  assert.match(authoredText, /^  created  /mu);
+  assert.match(authoredText, /^  updated  /mu);
+  assert.match(authoredText, /^  created by  explicit-actor$/mu);
   assert.doesNotMatch(authoredText, /createdBy:/u);
-  assert.doesNotMatch(renderTaskText(unsignedShowCommand, unsignedShown as TaskInvocationResult), /created-by/u);
+  assert.doesNotMatch(renderTaskText(unsignedShowCommand, unsignedShown as TaskInvocationResult), /created by/u);
   const listed = (await invoke(parseArgv(["-C", root, "task", "ls"]))) as TaskInvocationResult;
-  assert.doesNotMatch(renderTaskText(lsCommand, listed), /created-by |createdBy/u);
+  assert.doesNotMatch(renderTaskText(lsCommand, listed), /created by |createdBy/u);
   await invoke(parseArgv(["-C", root, "task", "update", added.value.id, "--note", "later"]));
   await invoke(parseArgv(["-C", root, "task", "start", added.value.id]));
   const afterLifecycle = (await invoke(parseArgv(["-C", root, "task", "show", added.value.id]))) as {
@@ -745,7 +747,7 @@ test("task compose and views flow through native results", async () => {
   assert.match(renderTaskText(command, listed), /^tasks · current namespace$/mu);
   assert.match(
     renderTaskText(command, listed),
-    /^○ task\/parent-[0-9a-f]{4} · P2 ready · updated .* · no body · children 1 live · 1 total —$/mu,
+    /^○ task\/parent-[0-9a-f]{4} · ready · P2 · updated .* · no body · children 1 live · 1 total —$/mu,
   );
   assert.equal(taskExitCode(listed), 0);
 });
@@ -804,7 +806,7 @@ test("task query keeps text and JSON membership on one typed page", async () => 
   assert.match(renderTaskText(command, result), /^query$/mu);
   assert.match(
     renderTaskText(command, result),
-    /^○ task\/critical-auth-[0-9a-f]{4} · P0 ready · updated .* · no body — Critical auth$/mu,
+    /^○ task\/critical-auth-[0-9a-f]{4} · ready · P0 · updated .* · no body — Critical auth$/mu,
   );
   const hostileArgv = ["-C", root, "task", "query", "--where", 'title ~ "auth\nforged heading"'] as const;
   const hostile = (await invoke(parseArgv(hostileArgv))) as TaskInvocationResult;
@@ -850,7 +852,7 @@ test("Task world reads distinguish absent authority from a present empty world",
     assert.deepEqual(value, action === "doctor" ? { issues: [] } : emptyPage);
     assert.equal(
       renderTaskText(command, observed),
-      action === "doctor" ? "healthy" : action === "ls" ? "tasks · current namespace" : action,
+      action === "doctor" ? "✓ doctor  healthy" : action === "ls" ? "tasks · current namespace" : action,
     );
     assert.equal(taskExitCode(observed), 0);
   }
@@ -898,7 +900,7 @@ test("Task row-view limit refusals precede authority observation", async () => {
     const output = await runMain(["-C", root, "task", action, "--limit", "501"]);
     assert.equal(output.exit, 1);
     assert.equal(output.stdout, "");
-    assert.match(output.stderr, /^limit must be an integer from 1 to 500\nusage: keiyaku task /u);
+    assert.match(output.stderr, /^✕ usage  keiyaku task (?:ls|ready|blocked|query)\n  diagnostic  limit must be an integer from 1 to 500\n  accepts  keiyaku task /u);
   }
 });
 
@@ -911,7 +913,7 @@ test("task doctor renders graph disease and controls exit status", async () => {
   const result = (await invoke(parseArgv(["-C", root, "task", "doctor"]))) as TaskInvocationResult;
   const command = parseArgv(["task", "doctor"]).command;
   if (command.command !== "task") throw new Error("not a task command");
-  assert.match(renderTaskText(command, result), new RegExp(`^1 issue\\n! cycle needs ${first.value.id} ${second.value.id}$`));
+  assert.match(renderTaskText(command, result), new RegExp(`^! doctor  1 issue\\n! cycle needs ${first.value.id} ${second.value.id}$`));
   assert.equal(taskExitCode(result), 1);
 });
 
@@ -930,9 +932,9 @@ test("task tree text follows parent children and marks parent cycles", async () 
   const command = parseArgv(["task", "tree", area.value.id]).command;
   if (command.command !== "task") throw new Error("not a task command");
   const text = renderTaskText(command, tree);
-  assert.match(text, new RegExp(`^○ ${area.value.id} · P2 open — Area$`, "mu"));
-  assert.match(text, new RegExp(`^  ○ ${child.value.id} · P2 open — Child$`, "mu"));
-  assert.match(text, new RegExp(`^    ○ ${nested.value.id} · P2 open — Nested$`, "mu"));
+  assert.match(text, new RegExp(`^○ ${area.value.id} · open · P2 — Area$`, "mu"));
+  assert.match(text, new RegExp(`^  ○ ${child.value.id} · open · P2 — Child$`, "mu"));
+  assert.match(text, new RegExp(`^    ○ ${nested.value.id} · open · P2 — Nested$`, "mu"));
   assert.doesNotMatch(text, new RegExp(need.value.id));
   assert.doesNotMatch(text, /reference/u);
 
@@ -1025,7 +1027,7 @@ test("incomplete compose rendering keeps draft on stdout and diagnostics separat
   assert.equal(renderTaskText(command, result), "");
   assert.equal(
     renderTaskIncompleteDiagnostic(result),
-    ["! compose incomplete · 1 admitted", "? stopped busy", "diff task/a", "", "diff bytes", ""].join("\n"),
+    ["! compose incomplete  1 admitted", "? stopped busy", "diff task/a", "", "diff bytes", ""].join("\n"),
   );
   assert.equal(taskExitCode(result), 1);
 });
@@ -1061,7 +1063,7 @@ test("incomplete compose keeps an unterminated draft byte-exact at the CLI bound
   }
   assert.equal(stdout, result.draft);
   assert.equal(stdout.endsWith("\n"), false);
-  assert.equal(stderr, "! compose incomplete · 0 admitted\n? stopped busy\n");
+  assert.equal(stderr, "! compose incomplete  0 admitted\n? stopped busy\n");
 });
 
 test("Task list, blocked, show, mutation, and batch text use one scan grammar", async () => {
@@ -1078,7 +1080,7 @@ test("Task list, blocked, show, mutation, and batch text use one scan grammar", 
   const listed = (await invoke(parseArgv(["-C", root, "task", "ls", "--limit", "1"]))) as TaskInvocationResult;
   const listedText = renderTaskText(lsCommand, listed);
   assert.match(listedText, /^tasks · current namespace$/mu);
-  assert.match(listedText, new RegExp(`^‖ ${blockedTask.value.id} · P2 blocked · updated .* — Blocked$`, "mu"));
+  assert.match(listedText, new RegExp(`^‖ ${blockedTask.value.id} · blocked · P2 · updated .* — Blocked$`, "mu"));
   assert.match(listedText, /^…$/mu);
   assert.doesNotMatch(listedText, /needs |created |parent /u);
 
@@ -1087,7 +1089,7 @@ test("Task list, blocked, show, mutation, and batch text use one scan grammar", 
   const blocked = (await invoke(parseArgv(["-C", root, "task", "blocked"]))) as TaskInvocationResult;
   const blockedText = renderTaskText(blockedCommand, blocked);
   assert.match(blockedText, /^blocked$/mu);
-  assert.match(blockedText, new RegExp(`^‖ ${blockedTask.value.id} · P2 blocked · updated .* — Blocked$`, "mu"));
+  assert.match(blockedText, new RegExp(`^‖ ${blockedTask.value.id} · blocked · P2 · updated .* — Blocked$`, "mu"));
   assert.match(blockedText, new RegExp(`^  needs ${need.value.id} · open$`, "mu"));
 
   const openNeed = (await invoke(parseArgv(["-C", root, "task", "add", "Open need"]))) as { value: { id: string } };
@@ -1098,8 +1100,9 @@ test("Task list, blocked, show, mutation, and batch text use one scan grammar", 
   if (showCommand.command !== "task") throw new Error("not a task command");
   const shown = (await invoke(parseArgv(["-C", root, "task", "show", blockedTask.value.id]))) as TaskInvocationResult;
   const shownText = renderTaskText(showCommand, shown);
-  assert.match(shownText, new RegExp(`^○ ${blockedTask.value.id} · P2 open — Blocked$`, "mu"));
-  assert.match(shownText, /^created .* · updated .*$/mu);
+  assert.match(shownText, new RegExp(`^○ ${blockedTask.value.id} · open · P2 — Blocked$`, "mu"));
+  assert.match(shownText, /^  created  /mu);
+  assert.match(shownText, /^  updated  /mu);
   assert.match(shownText, new RegExp(`^  ! needs ${openNeed.value.id} · open$`, "mu"));
   assert.match(shownText, new RegExp(`^  ✓ needs ${need.value.id} · done$`, "mu"));
   assert.match(shownText, /body\n\nexact body\nbytes\n/u);
@@ -1111,8 +1114,8 @@ test("Task list, blocked, show, mutation, and batch text use one scan grammar", 
   if ((added as { kind: string }).kind !== "accepted") throw new Error("expected task add");
   const freshId = (added as { value: { id: string } }).value.id;
   const addedText = renderTaskText(addCommand, added);
-  assert.match(addedText, new RegExp(`^✓ add accepted — ${freshId}$`, "mu"));
-  assert.match(addedText, new RegExp(`^○ ${freshId} · P2 open — Fresh$`, "mu"));
+  assert.match(addedText, new RegExp(`^✓ add accepted  ${freshId}$`, "mu"));
+  assert.match(addedText, new RegExp(`^○ ${freshId} · open · P2 — Fresh$`, "mu"));
 
   const updateCommand = parseArgv(["task", "update", freshId, "--title", "Fresh title"]).command;
   if (updateCommand.command !== "task") throw new Error("not a task command");
@@ -1120,8 +1123,8 @@ test("Task list, blocked, show, mutation, and batch text use one scan grammar", 
     parseArgv(["-C", root, "task", "update", freshId, "--title", "Fresh title"]),
   )) as TaskInvocationResult;
   const updatedText = renderTaskText(updateCommand, updated);
-  assert.match(updatedText, new RegExp(`^✓ update accepted — ${freshId}$`, "mu"));
-  assert.match(updatedText, new RegExp(`^○ ${freshId} · P2 open — Fresh title$`, "mu"));
+  assert.match(updatedText, new RegExp(`^✓ update accepted  ${freshId}$`, "mu"));
+  assert.match(updatedText, new RegExp(`^○ ${freshId} · open · P2 — Fresh title$`, "mu"));
   assert.match(updatedText, /^diff\n\n/mu);
   assert.equal(updatedText.includes((updated as { value: { documentDiff: string } }).value.documentDiff), true);
 
@@ -1129,7 +1132,7 @@ test("Task list, blocked, show, mutation, and batch text use one scan grammar", 
   const startCommand = parseArgv(["task", "start", "task/missing"]).command;
   if (startCommand.command !== "task") throw new Error("not a task command");
   const missingText = renderTaskText(startCommand, missing);
-  assert.equal(missingText.split("\n")[0], "! start refused");
+  assert.equal(missingText.split("\n")[0], "✕ start refused");
   assert.match(missingText, /^task-missing task\/missing$/mu);
   assert.doesNotMatch(missingText, /\{|"kind"/u);
 
@@ -1140,7 +1143,7 @@ test("Task list, blocked, show, mutation, and batch text use one scan grammar", 
   if (doneCommand.command !== "task") throw new Error("not a task command");
   assert.equal(
     renderTaskText(doneCommand, batch),
-    [`✓ done ${freshId}`, "! done task/missing · task-missing task/missing", `✓ done ${ready.value.id}`].join("\n"),
+    [`✓ done  ${freshId}`, `✕ done  task/missing  task-missing task/missing`, `✓ done  ${ready.value.id}`].join("\n"),
   );
   assert.equal(taskExitCode(batch), 1);
 });
@@ -1161,9 +1164,9 @@ test("singleton hold, done, and drop keep the batch item grammar", async () => {
   const held = (await invoke(parseArgv(["-C", root, "task", "hold", holdId]))) as TaskInvocationResult;
   const finished = (await invoke(parseArgv(["-C", root, "task", "done", doneId]))) as TaskInvocationResult;
   const dropped = (await invoke(parseArgv(["-C", root, "task", "drop", dropId]))) as TaskInvocationResult;
-  assert.equal(renderTaskText(holdCommand, held), `✓ hold ${holdId}`);
-  assert.equal(renderTaskText(doneCommand, finished), `✓ done ${doneId}`);
-  assert.equal(renderTaskText(dropCommand, dropped), `✓ drop ${dropId}`);
+  assert.equal(renderTaskText(holdCommand, held), `✓ hold  ${holdId}`);
+  assert.equal(renderTaskText(doneCommand, finished), `✓ done  ${doneId}`);
+  assert.equal(renderTaskText(dropCommand, dropped), `✓ drop  ${dropId}`);
 
   const missingHold = (await invoke(parseArgv(["-C", root, "task", "hold", "task/missing"]))) as TaskInvocationResult;
   const missingDone = (await invoke(parseArgv(["-C", root, "task", "done", "task/missing"]))) as TaskInvocationResult;
@@ -1178,9 +1181,9 @@ test("singleton hold, done, and drop keep the batch item grammar", async () => {
   ) {
     throw new Error("not a task command");
   }
-  assert.equal(renderTaskText(holdMissingCommand, missingHold), "! hold task/missing · task-missing task/missing");
-  assert.equal(renderTaskText(doneMissingCommand, missingDone), "! done task/missing · task-missing task/missing");
-  assert.equal(renderTaskText(dropMissingCommand, missingDrop), "! drop task/missing · task-missing task/missing");
+  assert.equal(renderTaskText(holdMissingCommand, missingHold), "✕ hold  task/missing  task-missing task/missing");
+  assert.equal(renderTaskText(doneMissingCommand, missingDone), "✕ done  task/missing  task-missing task/missing");
+  assert.equal(renderTaskText(dropMissingCommand, missingDrop), "✕ drop  task/missing  task-missing task/missing");
 
   const retryHold = {
     items: [{ id: "task/hold-me" as const, outcome: { kind: "retry" as const, reason: "busy" as const } }],
@@ -1193,9 +1196,9 @@ test("singleton hold, done, and drop keep the batch item grammar", async () => {
   const retryDrop = {
     items: [{ id: "task/drop-me" as const, outcome: { kind: "retry" as const, reason: "busy" as const } }],
   };
-  assert.equal(renderTaskText(holdCommand, retryHold), "? hold task/hold-me · busy");
-  assert.equal(renderTaskText(doneCommand, retryDone), "? done task/done-me · concurrent-modification");
-  assert.equal(renderTaskText(dropCommand, retryDrop), "? drop task/drop-me · busy");
+  assert.equal(renderTaskText(holdCommand, retryHold), "? hold  task/hold-me  busy");
+  assert.equal(renderTaskText(doneCommand, retryDone), "? done  task/done-me  concurrent-modification");
+  assert.equal(renderTaskText(dropCommand, retryDrop), "? drop  task/drop-me  busy");
   assert.equal(taskExitCode(retryHold), 2);
 });
 
@@ -1206,7 +1209,7 @@ test("task start accepts multiple IDs while preserving singleton output", async 
   const singleCommand = parseArgv(["task", "start", first]).command;
   if (singleCommand.command !== "task") throw new Error("not a task command");
   const single = (await invoke(parseArgv(["-C", root, "task", "start", first]))) as TaskInvocationResult;
-  assert.match(renderTaskText(singleCommand, single), new RegExp(`^✓ start accepted — ${first}$`, "mu"));
+  assert.match(renderTaskText(singleCommand, single), new RegExp(`^✓ start accepted  ${first}$`, "mu"));
 
   const multiCommand = parseArgv(["task", "start", second, "task/missing"]).command;
   if (multiCommand.command !== "task") throw new Error("not a task command");
@@ -1215,7 +1218,7 @@ test("task start accepts multiple IDs while preserving singleton output", async 
   )) as TaskInvocationResult;
   assert.equal(
     renderTaskText(multiCommand, multi),
-    [`✓ start ${second}`, "! start task/missing · task-missing task/missing"].join("\n"),
+    [`✓ start  ${second}`, `✕ start  task/missing  task-missing task/missing`].join("\n"),
   );
   assert.equal(taskExitCode(multi), 1);
 });
@@ -1260,7 +1263,7 @@ test("built CLI Task text stays one scan grammar at 80 and 36 columns", async ()
   assert.notEqual(narrow.code, 3, narrow.stderr);
   assert.doesNotMatch(narrow.stdout, /\{"kind"|TaskId - P/u);
   assertCopyable(narrow.stdout, [longId, blockerId]);
-  assert.equal(narrow.stdout.includes(`‖ ${longId} · P2 blocked · updated`), true);
+  assert.equal(narrow.stdout.includes(`‖ ${longId} · blocked · P2 · updated`), true);
   assertFitsOrOverflowsLawfully(narrow.stdout, 36);
 
   const empty = world();
@@ -1311,7 +1314,7 @@ test("built CLI Task text stays one scan grammar at 80 and 36 columns", async ()
   assert.equal(renderTaskText(composeCommand, incomplete), "");
   assert.match(
     renderTaskIncompleteDiagnostic(incomplete as never),
-    /^! compose incomplete · 0 admitted\n\? stopped busy$/mu,
+    /^! compose incomplete  0 admitted\n\? stopped busy$/mu,
   );
   assert.equal(taskExitCode(incomplete), 1);
 });

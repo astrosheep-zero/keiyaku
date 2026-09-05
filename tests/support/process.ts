@@ -29,6 +29,14 @@ export async function waitForProcessExit(pid: number, timeoutMs = PROCESS_EXIT_T
   }
 }
 
+export async function waitForFixtureFile(path: string, timeoutMs = 5_000): Promise<void> {
+  const deadline = performance.now() + timeoutMs;
+  while (!existsSync(path)) {
+    if (performance.now() >= deadline) throw new Error(`timed out waiting for barrier file: ${path}`);
+    await new Promise((resolve) => setTimeout(resolve, PROCESS_EXIT_POLL_MS));
+  }
+}
+
 export function akumaBodyPidReceiptImport(): string {
   return pathToFileURL(resolve("tests/support/akuma-body-pid-receipt.mjs")).href;
 }

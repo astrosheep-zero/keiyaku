@@ -9,15 +9,14 @@ import {
   titleLines,
 } from "./receipt.js";
 import { renderRefusalFacts } from "./refusal.js";
-import { gitShortStat, renderOpaqueBlock, type TextRenderContext } from "./terminal.js";
+import { gitShortStat, renderTextBlock, safeText, type TextRenderContext } from "./terminal.js";
 
 const CHILD = "  ";
 
 function workspaceEvidence(
   workspace: Extract<AuditReport["candidate"], { kind: "ready" }>["workspace"],
-  columns: number,
 ): readonly string[] {
-  return renderOpaqueBlock(`workspace ${workspace.kind} ${workspace.path}`, CHILD, columns);
+  return [`${CHILD}workspace  ${workspace.kind}`, `${CHILD}worktree  ${safeText(workspace.path)}`];
 }
 
 function candidateLines(report: AuditReport, columns: number, addressed: string): readonly string[] {
@@ -29,15 +28,15 @@ function candidateLines(report: AuditReport, columns: number, addressed: string)
     return lines;
   }
   const identity = candidate.identity;
-  receiptRow(lines, "✓", "candidate", [{ text: "ready" }], columns);
-  lines.push(...renderOpaqueBlock(`tender commit ${identity.tenderSnapshot}`, CHILD, columns));
-  lines.push(...renderOpaqueBlock(`integration commit ${identity.integration.snapshot}`, CHILD, columns));
-  lines.push(...renderOpaqueBlock(`content identity (not commit) ${identity.integration.changeId}`, CHILD, columns));
-  lines.push(...workspaceEvidence(candidate.workspace, columns));
-  lines.push(...renderOpaqueBlock(gitShortStat(candidate.scope), CHILD, columns));
+  receiptRow(lines, " ", "candidate", [{ text: "ready" }], columns);
+  lines.push(`${CHILD}tender commit  ${identity.tenderSnapshot}`);
+  lines.push(`${CHILD}integration commit  ${identity.integration.snapshot}`);
+  lines.push(`${CHILD}content identity (not commit)  ${identity.integration.changeId}`);
+  lines.push(...workspaceEvidence(candidate.workspace));
+  lines.push(...renderTextBlock(gitShortStat(candidate.scope), CHILD, columns));
   if (candidate.scope.paths !== undefined) {
     for (const path of candidate.scope.paths) {
-      lines.push(...renderOpaqueBlock(path, CHILD, columns));
+      lines.push(`${CHILD}${safeText(path)}`);
     }
   }
   if (candidate.diff !== undefined) receiptPayload(lines, "diff", candidate.diff);
@@ -51,7 +50,7 @@ function verificationLines(
 ): readonly string[] {
   const lines: string[] = [];
   if (verification.kind === "not-run") {
-    receiptRow(lines, "·", "verification", [{ text: "not-run" }], columns);
+    receiptRow(lines, " ", "verification", [{ text: "not-run" }], columns);
     return lines;
   }
   if (verification.kind === "stopped") {
@@ -59,7 +58,7 @@ function verificationLines(
   }
   receiptRow(
     lines,
-    verification.kind === "satisfied" ? "✓" : "!",
+    verification.kind === "satisfied" ? " " : "!",
     "verification",
     [{ text: verification.kind }, { text: `${verification.passed} of ${verification.total}` }],
     columns,
@@ -73,13 +72,13 @@ function verificationLines(
 function targetLines(target: AuditReport["target"], columns: number, addressed: string): readonly string[] {
   const lines: string[] = [];
   if (target.kind === "not-observed") {
-    receiptRow(lines, "·", "target", [{ text: "not-observed" }], columns);
+    receiptRow(lines, " ", "target", [{ text: "not-observed" }], columns);
     return lines;
   }
   if (target.kind === "placeable") {
     receiptRow(
       lines,
-      "✓",
+      " ",
       "target",
       [{ text: "placeable" }, { text: target.ref, opaque: true }, { text: target.head, opaque: true }],
       columns,

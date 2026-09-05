@@ -142,14 +142,14 @@ test("CLI Region renders grouped overlaps, empty facts, and refuses deleted dial
   assert.equal(empty.kind, "region");
   if (empty.kind === "region") {
     assert.deepEqual(empty.region, { kind: "present", value: { kind: "declarations", declarations: [] } });
-    assert.equal(renderText(empty), "no active Region declarations");
+    assert.equal(renderText(empty), "region  none");
   }
 
   const world = await invoke(parseArgv(["region"]), { cwd: repository.path, environment: {} });
   assert.equal(world.kind, "region");
   if (world.kind === "region") {
-    assert.match(renderText(world), new RegExp(`^region ${first.id} src/\\*\\* docs/guide/\\*\\*$`, "m"));
-    assert.match(renderText(world), new RegExp(`^region ${second.id} src/cli/\\*\\* tests/\\*\\*$`, "m"));
+    assert.match(renderText(world), new RegExp(`^region  ${first.id}  src/\\*\\* docs/guide/\\*\\*$`, "m"));
+    assert.match(renderText(world), new RegExp(`^region  ${second.id}  src/cli/\\*\\* tests/\\*\\*$`, "m"));
   }
 
   const declaration = await invoke(parseArgv(["region", first.id, "--json"]), {
@@ -165,14 +165,14 @@ test("CLI Region renders grouped overlaps, empty facts, and refuses deleted dial
   });
   assert.equal(
     renderText(declaration),
-    [`region ${first.id} src/** docs/guide/**`, `overlap ${second.id} 1 pair`, "  src/** ~ src/cli/**"].join("\n"),
+    [`region  ${first.id}  src/** docs/guide/**`, `overlap  ${second.id}  1 pair`, "  src/** ~ src/cli/**"].join("\n"),
   );
 
   const isolated = await bind(repository, "CLI region isolated", ["lib/**"]);
   const noOverlap = await invoke(parseArgv(["region", isolated.id]), { cwd: repository.path, environment: {} });
   assert.equal(noOverlap.kind, "region");
   if (noOverlap.kind === "region") {
-    assert.equal(renderText(noOverlap), `region ${isolated.id} lib/**\nno overlap with active declarations`);
+    assert.equal(renderText(noOverlap), `region  ${isolated.id}  lib/**\n  overlap  none`);
   }
 
   const path = await invoke(parseArgv(["region", "--path", "src/**", "--path", "tests/**"]), {
@@ -200,10 +200,10 @@ test("CLI Region renders grouped overlaps, empty facts, and refuses deleted dial
       },
     );
     const text = renderText(path);
-    assert.match(text, new RegExp(`overlap ${second.id} 1 pair`));
+    assert.match(text, new RegExp(`overlap  ${second.id}  1 pair`));
     assert.match(text, /^ {2}src\/\*\* ~ src\/cli\/\*\*$/m);
     assert.doesNotMatch(text, /tests\/\*\* ~ tests\/\*\*/u);
-    assert.match(text, new RegExp(`overlap ${first.id} exact match`, "u"));
+    assert.match(text, new RegExp(`overlap  ${first.id}  exact match`, "u"));
   }
 
   const exactPath = await invoke(parseArgv(["region", "--path", "docs/guide/**"]), {
@@ -212,12 +212,12 @@ test("CLI Region renders grouped overlaps, empty facts, and refuses deleted dial
   });
   assert.equal(exactPath.kind, "region");
   if (exactPath.kind === "region") {
-    assert.equal(renderText(exactPath), [`overlap ${first.id} exact match`].join("\n"));
+    assert.equal(renderText(exactPath), [`overlap  ${first.id}  exact match`].join("\n"));
   }
 
   const miss = await invoke(parseArgv(["region", "--path", "other/**"]), { cwd: repository.path, environment: {} });
   assert.equal(miss.kind, "region");
-  if (miss.kind === "region") assert.equal(renderText(miss), "no active Region declares: other/**");
+  if (miss.kind === "region") assert.equal(renderText(miss), "region  none\n  patterns  other/**");
 
   await assert.rejects(
     () => invoke(parseArgv(["region", "--path", "../outside"]), { cwd: repository.path, environment: {} }),
@@ -344,5 +344,5 @@ test("a malformed active document fails only the selected Region section", async
   assert.equal(report.region?.kind, "failed");
   const failed = await invoke(parseArgv(["region"]), { cwd: repository.path, environment: {} });
   assert.equal(failed.kind, "region");
-  if (failed.kind === "region") assert.match(renderText(failed), /^region failed /);
+  if (failed.kind === "region") assert.match(renderText(failed), /^✕ region\n  diagnostic  /);
 });

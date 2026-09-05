@@ -1,7 +1,7 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ProcessInput, ProcessOutcome } from "../../runtime/proc/run.js";
-import { CliUsageError, usageLine } from "../usage.js";
+import { CliUsageError, commandGuide, usageLine } from "../usage.js";
 
 export const HARNESS_NAMES = ["codex", "claude", "opencode", "pi"] as const;
 export type HarnessName = (typeof HARNESS_NAMES)[number];
@@ -32,29 +32,30 @@ function isHarness(value: string | undefined): value is HarnessName {
   return value !== undefined && (HARNESS_NAMES as readonly string[]).includes(value);
 }
 
+const INSTALL_GUIDE = commandGuide("install", INSTALL_USAGE);
+
 export function parseInstallCommand(argv: readonly string[]): ParsedInstallCommand {
   let all = false;
   let json = false;
   const positionals: string[] = [];
   for (const token of argv) {
     if (token === "--all") {
-      if (all) throw new CliUsageError("duplicate option: --all", usageLine(INSTALL_USAGE));
+      if (all) throw new CliUsageError("duplicate option: --all", INSTALL_GUIDE);
       all = true;
     } else if (token === "--json") {
-      if (json) throw new CliUsageError("duplicate option: --json", usageLine(INSTALL_USAGE));
+      if (json) throw new CliUsageError("duplicate option: --json", INSTALL_GUIDE);
       json = true;
     } else if (token.startsWith("--")) {
-      throw new CliUsageError(`option ${token} is not valid for install`, usageLine(INSTALL_USAGE));
+      throw new CliUsageError(`option ${token} is not valid for install`, INSTALL_GUIDE);
     } else {
       positionals.push(token);
     }
   }
-  if (positionals.length > 1) throw new CliUsageError("install accepts at most one harness", usageLine(INSTALL_USAGE));
+  if (positionals.length > 1) throw new CliUsageError("install accepts at most one harness", INSTALL_GUIDE);
   const harness = positionals[0];
-  if (all && harness !== undefined)
-    throw new CliUsageError("install accepts either a harness or --all", usageLine(INSTALL_USAGE));
+  if (all && harness !== undefined) throw new CliUsageError("install accepts either a harness or --all", INSTALL_GUIDE);
   if (!all && !isHarness(harness))
-    throw new CliUsageError("install requires a supported harness or --all", usageLine(INSTALL_USAGE));
+    throw new CliUsageError("install requires a supported harness or --all", INSTALL_GUIDE);
   return {
     command: "install",
     harnesses: all ? HARNESS_NAMES : [harness as HarnessName],

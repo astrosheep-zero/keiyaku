@@ -12,7 +12,7 @@ function journalHead(fact: Fact): string {
 }
 
 function listFact(label: string, values: readonly string[]): readonly string[] {
-  return values.length === 0 ? [`  ${label} 0`] : [`  ${label} ${values.join(" · ")}`];
+  return values.length === 0 ? [`  ${label}  0`] : [`  ${label}  ${values.join(" · ")}`];
 }
 
 function journalBody(fact: Fact): readonly string[] {
@@ -20,44 +20,43 @@ function journalBody(fact: Fact): readonly string[] {
     case "bind": {
       const { coordinates, terms } = fact.data;
       return [
-        `  start ${coordinates.start}`,
-        ...(coordinates.target === undefined ? [] : [`  target ${coordinates.target}`]),
-        `  workspace ${coordinates.workspace}`,
-        `  document ${terms.document.key}`,
+        `  start commit  ${coordinates.start}`,
+        ...(coordinates.target === undefined ? [] : [`  target  ${coordinates.target}`]),
+        `  workspace  ${coordinates.workspace}`,
         ...listFact("gates", terms.gates),
         ...listFact("after", terms.after),
       ];
     }
     case "amend":
-      return [
-        `  document ${fact.data.document.key}`,
-        ...listFact("gates", fact.data.gates),
-        ...listFact("after", fact.data.after),
-      ];
+      return [...listFact("gates", fact.data.gates), ...listFact("after", fact.data.after)];
     case "bound":
       return [];
     case "deliver": {
       const { tenderSnapshot, integration, method, policy } = fact.data;
       return [
-        `  tender ${tenderSnapshot}`,
-        `  predecessor ${integration.predecessor}`,
-        `  snapshot ${integration.snapshot}`,
-        `  change ${integration.changeId}`,
-        `  method ${method}`,
-        `  require-branches-to-be-up-to-date ${String(policy.requireBranchesToBeUpToDate)}`,
+        `  tender commit  ${tenderSnapshot}`,
+        `  predecessor commit  ${integration.predecessor}`,
+        `  integration commit  ${integration.snapshot}`,
+        `  content identity (not commit)  ${integration.changeId}`,
+        `  method  ${method}`,
+        `  require-branches-to-be-up-to-date  ${String(policy.requireBranchesToBeUpToDate)}`,
       ];
     }
     case "reintegrated":
-      return [`  predecessor ${fact.data.predecessor}`, `  snapshot ${fact.data.snapshot}`];
+      return [`  predecessor commit  ${fact.data.predecessor}`, `  integration commit  ${fact.data.snapshot}`];
     case "attestation": {
-      const lines = [`  gate ${fact.data.gate}`, `  verdict ${fact.data.verdict}`, `  subject ${fact.data.subject}`];
+      const lines = [
+        `  gate  ${fact.data.gate}`,
+        `  verdict  ${fact.data.verdict}`,
+        `  subject identity  ${fact.data.subject}`,
+      ];
       if (fact.data.summary !== undefined) receiptPayload(lines, "summary", fact.data.summary);
       return lines;
     }
     case "claimed":
-      return [`  delivery ${fact.data.delivery}`];
+      return [`  delivery  ${fact.data.delivery}`];
     case "arc": {
-      const lines = [`  sequence ${String(fact.data.seq)}`, `  title ${fact.data.title}`];
+      const lines = [`  sequence  ${String(fact.data.seq)}`, `  title  ${fact.data.title}`];
       receiptPayload(lines, "objective", fact.data.objective);
       receiptPayload(lines, "brief", fact.data.brief);
       return lines;
@@ -80,7 +79,7 @@ export function renderContractHistory(history: ContractHistory): string {
   const journals = journalCount(history.events, "journal");
   const dispatches = journalCount(history.events, "dispatch");
   return [
-    `history ${history.id} · ${journals} journal · ${dispatches} dispatch`,
+    `history  ${history.id} · ${journals} journal · ${dispatches} dispatch`,
     "",
     ...history.events.flatMap(contractHistoryEventLines),
   ].join("\n");

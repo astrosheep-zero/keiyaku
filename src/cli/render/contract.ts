@@ -26,7 +26,7 @@ import {
 } from "./receipt.js";
 import { gitShortStat, renderOpaqueBlock, type TextRenderContext } from "./terminal.js";
 
-const HANG = "   ";
+const HANG = "  ";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -50,7 +50,7 @@ function lagRows(lag: Lag, columns: number): readonly string[] {
       "lag",
       [
         {
-          text: `${lag.kind} reason=${lag.reason} tender=${lag.tender} head=${lag.head}${lag.paths === undefined || lag.paths.length === 0 ? "" : ` paths=${lag.paths.join(",")}`} path=${lag.path}`,
+          text: `${lag.kind} reason ${lag.reason} tender ${lag.tender} head ${lag.head}${lag.paths === undefined || lag.paths.length === 0 ? "" : ` paths ${lag.paths.join(",")}`} path ${lag.path}`,
           opaque: true,
         },
       ],
@@ -63,7 +63,7 @@ function lagRows(lag: Lag, columns: number): readonly string[] {
       "lag",
       [
         {
-          text: `unsealed-bytes ${lag.path}${lag.head === undefined ? "" : ` head=${lag.head}`}${lag.paths.length === 0 ? "" : ` paths=${lag.paths.join(",")}`}`,
+          text: `unsealed-bytes ${lag.path}${lag.head === undefined ? "" : ` head ${lag.head}`}${lag.paths.length === 0 ? "" : ` paths ${lag.paths.join(",")}`}`,
           opaque: true,
         },
       ],
@@ -85,7 +85,7 @@ function lagRows(lag: Lag, columns: number): readonly string[] {
       "lag",
       [
         {
-          text: `worktree-hook-failed ${lag.phase} ${lag.path} command=${lag.command} name=${lag.name} ${hookFailureSummary(lag.failure)}`,
+          text: `worktree-hook-failed ${lag.phase} ${lag.path} command ${lag.command} name ${lag.name} ${hookFailureSummary(lag.failure)}`,
           opaque: true,
         },
       ],
@@ -117,9 +117,9 @@ function settlementLagRows(lag: AcceptedEnvelope["settlementLags"][number], colu
     [
       {
         text: [
-          `surface=${lag.surface}`,
-          lag.taskId === undefined ? undefined : `task=${lag.taskId}`,
-          lag.path === undefined ? undefined : `path=${lag.path}`,
+          `surface ${lag.surface}`,
+          lag.taskId === undefined ? undefined : `task ${lag.taskId}`,
+          lag.path === undefined ? undefined : `path ${lag.path}`,
         ]
           .filter((part): part is string => part !== undefined)
           .join(" "),
@@ -134,7 +134,7 @@ function settlementLagRows(lag: AcceptedEnvelope["settlementLags"][number], colu
 
 function workspaceRows(workspace: NonNullable<AcceptedReviewResult["workspace"]>, columns: number): readonly string[] {
   const lines: string[] = [];
-  receiptRow(lines, "~", "workspace", [{ text: gitShortStat(workspace.shortStat) }], columns);
+  receiptRow(lines, " ", "workspace", [{ text: gitShortStat(workspace.shortStat) }], columns);
   for (const name of ["staged", "unstaged", "untracked"] as const) {
     for (const path of workspace[name]) {
       receiptRow(lines, " ", name, [{ text: path, opaque: true }], columns);
@@ -149,7 +149,7 @@ function overlapRows(overlaps: readonly RegionOverlap[], columns: number): reado
     for (const pattern of overlap.patterns) {
       receiptRow(
         lines,
-        "~",
+        " ",
         "overlap",
         [
           { text: overlap.contract, opaque: true },
@@ -240,7 +240,7 @@ function acceptedDeviations(
   }
   if (result.overlaps !== undefined) pushBlock(deviations, overlapRows(result.overlaps, columns));
   if (result.overlapFailure !== undefined) {
-    receiptRow(deviations, "~", "overlap", [{ text: "unavailable" }], columns);
+    receiptRow(deviations, "!", "overlap", [{ text: "unavailable" }], columns);
     receiptPayload(deviations, "diagnostic", result.overlapFailure);
   }
   return deviations;
@@ -295,7 +295,7 @@ function movementLines(result: AcceptedDeliverResult | AcceptedReviewResult, col
   const count = result.facts.filter((fact) => fact.kind === "reintegrated").length;
   if (count === 0) return [];
   const lines: string[] = [];
-  receiptRow(lines, "~", "target", [{ text: `moved · re-integrated x${count}` }], columns);
+  receiptRow(lines, "!", "target", [{ text: `moved · re-integrated x${count}` }], columns);
   return lines;
 }
 
@@ -368,23 +368,18 @@ function renderAcceptedDeliver(result: AcceptedDeliverResult, columns: number): 
 }
 
 function renderAcceptedReview(result: AcceptedReviewResult, columns: number): string {
-  const complete = result.completion !== undefined;
-  const lines = titleLines(
-    "✓",
-    `review ${result.verdict} — ${complete ? "complete" : "not complete"}`,
-    result.contract,
-    columns,
-  );
+  const lines = titleLines("✓", `review ${result.verdict} recorded`, result.contract, columns);
   lines.push(...movementLines(result, columns), ...completionLines(result, columns));
-  if (result.completion !== undefined)
+  if (result.completion !== undefined) {
+    receiptRow(lines, " ", "placement", [{ text: "complete" }], columns);
     receiptRow(lines, " ", "integration commit", [{ text: result.completion.integration, opaque: true }], columns);
+  }
   if (result.verification !== undefined) {
     lines.push(...stopLines(result.verification, columns, result.contract));
   }
   if (result.placement !== undefined) {
     lines.push(...stopLines(result.placement, columns, result.contract));
   }
-  if (!complete) receiptRow(lines, " ", "candidate", [{ text: "kept" }], columns);
   lines.push(...continuationLines(result, columns));
   lines.push(...acceptedDeviations(result, columns), ...recordBlock(result, columns));
   return lines.join("\n");

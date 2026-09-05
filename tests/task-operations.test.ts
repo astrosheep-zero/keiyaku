@@ -12,7 +12,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import {
   TaskAuthorityCorruptionError,
   Tasks,
@@ -190,7 +190,21 @@ test("batch lifecycle advances one current board view in request order", async (
   });
 });
 
-test("batch lifecycle reads one board before locks and retries only a concurrently changed Task", async () => {
+function nextTaskLockAttempt(t: TestContext): Promise<void> {
+  let observed!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    observed = resolve;
+  });
+  const exec = DatabaseSync.prototype.exec;
+  t.mock.method(DatabaseSync.prototype, "exec", function (this: DatabaseSync, sql: string) {
+    // Lock initialization occurs after the batch has captured its board.
+    if (sql === "PRAGMA busy_timeout=0") observed();
+    return exec.call(this, sql);
+  });
+  return pending;
+}
+
+test("batch lifecycle reads one board before locks and retries only a concurrently changed Task", async (t) => {
   const { root, tasks } = await world();
   const first = acceptedId(await tasks.add({ title: "Batch snapshot first" }));
   const second = acceptedId(await tasks.add({ title: "Batch snapshot second" }));
@@ -199,9 +213,10 @@ test("batch lifecycle reads one board before locks and retries only a concurrent
     mode: "immediate",
     timeoutMs: 100,
   });
+  const lockAttempt = nextTaskLockAttempt(t);
   const pending = tasks.batch({ verb: "start", ids: [first, second] });
   try {
-    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    await lockAttempt;
     writeFileSync(authorityPath(root, second), "changed after batch observation\n");
   } finally {
     firstLock.close();
@@ -215,7 +230,7 @@ test("batch lifecycle reads one board before locks and retries only a concurrent
   assert.deepEqual(result.items[1]?.outcome, { kind: "retry", reason: "concurrent-modification" });
 });
 
-test("batch invalid refusal retries when the Task becomes valid before its lock", async () => {
+test("batch invalid refusal retries when the Task becomes valid before its lock", async (t) => {
   const { root, tasks } = await world();
   const id = acceptedId(await tasks.add({ title: "Batch stale invalid", state: "done" }));
   const lock = await acquireSqliteTransactionLock({
@@ -223,9 +238,10 @@ test("batch invalid refusal retries when the Task becomes valid before its lock"
     mode: "immediate",
     timeoutMs: 100,
   });
+  const lockAttempt = nextTaskLockAttempt(t);
   const pending = tasks.batch({ verb: "start", ids: [id] });
   try {
-    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    await lockAttempt;
     const current = await tasks.task({ id }).read();
     assert.notEqual(current, null);
     if (current === null) return;
@@ -238,7 +254,7 @@ test("batch invalid refusal retries when the Task becomes valid before its lock"
   assert.deepEqual(result.items[0]?.outcome, { kind: "retry", reason: "concurrent-modification" });
 });
 
-test("batch missing refusal retries when the Task is created before its lock", async () => {
+test("batch missing refusal retries when the Task is created before its lock", async (t) => {
   const { root, tasks } = await world();
   const id = "task/batch-stale-missing-0000" as TaskId;
   const lock = await acquireSqliteTransactionLock({
@@ -246,9 +262,10 @@ test("batch missing refusal retries when the Task is created before its lock", a
     mode: "immediate",
     timeoutMs: 100,
   });
+  const lockAttempt = nextTaskLockAttempt(t);
   const pending = tasks.batch({ verb: "start", ids: [id] });
   try {
-    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    await lockAttempt;
     const created = await tasks.add({ title: "Batch stale missing" });
     assert.equal(created.kind, "accepted");
     if (created.kind !== "accepted") return;
@@ -304,7 +321,10 @@ test("Task mutation mints raw World once while Tasks consumes its branded capabi
     taskMutationRequestCommand("task.add", {
       task: async () => Promise.reject(new Error("raw World must not reach the Task executor")),
     }).execute(
-      { world: `${canonical}/.` as WorldRoot, request: { action: "task.add", input: { title: "must not write", namespace: [] } } },
+      {
+        world: `${canonical}/.` as WorldRoot,
+        request: { action: "task.add", input: { title: "must not write", namespace: [] } },
+      },
       {
         id: "00000000-0000-4000-8000-000000000001",
         admittedAt: "2026-08-18T00:00:00.000Z",
@@ -506,23 +526,56 @@ test("targeted reads expose outbound relations only; board projections derive re
   const relatedFrom = acceptedId(await tasks.add({ title: "D", relates: [blocker] }));
 
   const shown = await tasks.task({ id: blocker }).read();
-  assert.deepEqual(shown?.blocks.map((item) => item.id), []);
-  assert.deepEqual(shown?.children.map((item) => item.id), []);
-  assert.deepEqual(shown?.supersededBy.map((item) => item.id), []);
-  assert.deepEqual(shown?.related.map((item) => item.id), []);
+  assert.deepEqual(
+    shown?.blocks.map((item) => item.id),
+    [],
+  );
+  assert.deepEqual(
+    shown?.children.map((item) => item.id),
+    [],
+  );
+  assert.deepEqual(
+    shown?.supersededBy.map((item) => item.id),
+    [],
+  );
+  assert.deepEqual(
+    shown?.related.map((item) => item.id),
+    [],
+  );
   const shownBlocked = await tasks.task({ id: blocked }).read();
-  assert.deepEqual(shownBlocked?.needs.map((item) => item.id), [blocker]);
-  assert.deepEqual(shownBlocked?.blocks.map((item) => item.id), []);
+  assert.deepEqual(
+    shownBlocked?.needs.map((item) => item.id),
+    [blocker],
+  );
+  assert.deepEqual(
+    shownBlocked?.blocks.map((item) => item.id),
+    [],
+  );
   const shownRelatedFrom = await tasks.task({ id: relatedFrom }).read();
-  assert.deepEqual(shownRelatedFrom?.related.map((item) => item.id), [blocker]);
+  assert.deepEqual(
+    shownRelatedFrom?.related.map((item) => item.id),
+    [blocker],
+  );
 
   const detailed = await observeTaskDetails(tasks.root, [blocker, blocked]);
   assert.equal(detailed.kind, "accepted");
   if (detailed.kind === "accepted") {
-    assert.deepEqual(detailed.value[0]?.blocks.map((item) => item.id), []);
-    assert.deepEqual(detailed.value[0]?.related.map((item) => item.id), []);
-    assert.deepEqual(detailed.value[1]?.needs.map((item) => item.id), [blocker]);
-    assert.deepEqual(detailed.value[1]?.blocks.map((item) => item.id), []);
+    assert.deepEqual(
+      detailed.value[0]?.blocks.map((item) => item.id),
+      [],
+    );
+    assert.deepEqual(
+      detailed.value[0]?.related.map((item) => item.id),
+      [],
+    );
+    assert.deepEqual(
+      detailed.value[1]?.needs.map((item) => item.id),
+      [blocker],
+    );
+    assert.deepEqual(
+      detailed.value[1]?.blocks.map((item) => item.id),
+      [],
+    );
   }
 
   const selectsBlocker = await tasks.query({

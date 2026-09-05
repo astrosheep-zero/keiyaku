@@ -118,6 +118,15 @@ export function renderBoundedTextBlock(
   return lines.length === 0 ? [input.first.trimEnd()] : lines;
 }
 
+export function quotedText(value: string): string {
+  return JSON.stringify(value).replaceAll(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (character) =>
+    character
+      .split("")
+      .map((unit) => `\\u${unit.charCodeAt(0).toString(16).padStart(4, "0")}`)
+      .join(""),
+  );
+}
+
 export function safeText(value: string): string {
   return value.replaceAll(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (character) => (/\s/u.test(character) ? " " : "�"));
 }
@@ -132,15 +141,15 @@ type CheckoutNotFollowable = Readonly<{
 export function checkoutNotFollowableLines(refusal: CheckoutNotFollowable): readonly string[] {
   const lines = [
     "! checkout-not-followable",
-    `  checkout: ${safeText(refusal.path)}`,
-    `  target: ${safeText(refusal.target)}`,
-    `  reason: ${refusal.reason}`,
+    `  checkout  ${safeText(refusal.path)}`,
+    `  target  ${safeText(refusal.target)}`,
+    `  reason  ${refusal.reason}`,
   ];
   if (refusal.paths.length === 0) {
-    lines.push("  paths: (none)");
+    lines.push("  paths  none");
   } else {
-    lines.push("  paths:");
-    lines.push(...refusal.paths.map((path) => `    - ${JSON.stringify(path)}`));
+    lines.push("  paths");
+    lines.push(...refusal.paths.map((path) => `    ${safeText(path)}`));
   }
   return lines;
 }
@@ -215,27 +224,30 @@ export function tone(value: string, kind: SemanticTone, color: boolean): string 
   return `\u001b[${code}m${value}\u001b[0m`;
 }
 
-const KANSHI_NARROW_COLUMNS = 72;
-
 export function boundedActivity(value: string, columns: number, prefix: string): string {
   const budget = Math.max(1, columns - displayColumns(prefix));
   return `activity "${truncateDisplayText(value, Math.max(1, budget - displayColumns('activity ""')))}` + `"`;
 }
 
 export function plumbFacts(facts: readonly string[], columns: number): readonly string[] {
-  const clean = facts.map(safeText).filter((fact) => fact.length > 0);
-  if (clean.length === 0) return [];
   const lines: string[] = [];
-  let current = "  │ ";
-  for (const fact of clean) {
-    const candidate = current === "  │ " ? `  │ ${fact}` : `${current} · ${fact}`;
-    if (current !== "  │ " && displayColumns(candidate) > columns) {
+  let current = "  ";
+  for (const fact of facts.map(safeText).filter((value) => value.length > 0)) {
+    const candidate = current === "  " ? `  ${fact}` : `${current} · ${fact}`;
+    if (current !== "  " && displayColumns(candidate) > columns) {
       lines.push(current);
-      current = `  │ ${fact}`;
+      current = `  ${fact}`;
     } else current = candidate;
   }
-  lines.push(current);
+  if (current !== "  ") lines.push(current);
   return lines;
+}
+
+export function linkedEntityLines(facts: readonly string[], _columns: number): readonly string[] {
+  return facts
+    .map(safeText)
+    .filter((fact) => fact.length > 0)
+    .map((fact) => `  │ ${fact}`);
 }
 
 export function identityLine(mark: string, identity: string, extra = ""): string {
@@ -253,13 +265,16 @@ export function entityLines(
   }>,
 ): readonly string[] {
   const { mark, identity, state, title, facts, context } = entity;
-  if (context.columns > KANSHI_NARROW_COLUMNS) {
-    return [identityLine(mark, identity, `· ${state} · ${title}`), ...plumbFacts(facts, context.columns)];
+  if (context.columns <= 72) {
+    return [
+      `${mark} ${safeText(state)}`,
+      `  ${safeText(identity)}`,
+      ...(title.length === 0 ? [] : renderTextBlock(title, "  ", context.columns)),
+      ...plumbFacts(facts, context.columns),
+    ];
   }
   return [
-    `${mark} ${safeText(state)}`,
-    `  ${safeText(identity)}`,
-    ...(title.length === 0 ? [] : renderTextBlock(safeText(title), "  ", context.columns)),
+    identityLine(mark, identity, `· ${state}${title.length === 0 ? "" : ` · ${title}`}`),
     ...plumbFacts(facts, context.columns),
   ];
 }

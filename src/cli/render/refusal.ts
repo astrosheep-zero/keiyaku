@@ -22,12 +22,9 @@ function wrap(lines: string[], text: string, indent: string, columns: number): v
   lines.push(...renderOpaqueBlock(text, indent, columns));
 }
 
-function collectionLines(name: string, members: readonly string[], indent: string, columns: number): readonly string[] {
-  if (members.length === 0) return renderOpaqueBlock(`${name} 0`, indent, columns);
-  return [
-    ...renderOpaqueBlock(name, indent, columns),
-    ...members.flatMap((member) => renderOpaqueBlock(member, `${indent}│ `, columns)),
-  ];
+function collectionLines(name: string, members: readonly string[], indent: string): readonly string[] {
+  if (members.length === 0) return [`${indent}${name}  0`];
+  return [`${indent}${name}`, ...members.map((member) => `${indent}  ${safeText(member)}`)];
 }
 
 function skipAddressedContract(addressed: string | undefined, contractId: string | undefined): boolean {
@@ -40,9 +37,7 @@ function refusalIdentity(refusal: RenderableRefusal, addressed?: string): string
 }
 
 function refusalHead(kind: string, identity: string | undefined, details: readonly string[]): string {
-  return [kind, identity === undefined ? undefined : `contractId=${identity}`, ...details]
-    .filter((part): part is string => part !== undefined)
-    .join(" ");
+  return [kind, identity, ...details].filter((part): part is string => part !== undefined).join("  ");
 }
 
 function renderDirtyRefusal(
@@ -53,15 +48,18 @@ function renderDirtyRefusal(
 ): readonly string[] {
   const lines: string[] = [];
   wrap(lines, refusalHead(refusal.kind, identity, []), indent, columns);
-  wrap(lines, "reason worktree has uncommitted changes", indent, columns);
+  wrap(lines, "reason  worktree has uncommitted changes", indent, columns);
   for (const name of ["staged", "unstaged", "untracked", "submodules"] as const) {
-    lines.push(...collectionLines(name, refusal[name], indent, columns));
+    lines.push(...collectionLines(name, refusal[name], indent));
   }
   wrap(lines, gitShortStat(refusal.shortStat), indent, columns);
-  wrap(lines, "--include-dirty captures complete non-ignored final bytes via private index", indent, columns);
-  wrap(lines, "real index including UU stays untouched; no git add or commit needed", indent, columns);
-  if (refusal.option?.available === false)
-    wrap(lines, "--include-dirty unavailable while submodules have changes", indent, columns);
+  if (refusal.option?.available === false) {
+    lines.push(`${indent}option  --include-dirty · unavailable with submodule changes`);
+  } else {
+    lines.push(`${indent}option  --include-dirty · captures complete non-ignored worktree bytes`);
+    lines.push(`${indent}capture index  private · real index unchanged, including any unmerged entries`);
+    lines.push(`${indent}staging  not required for --include-dirty`);
+  }
   return lines;
 }
 
@@ -72,58 +70,46 @@ export function renderRefusalFacts(
   addressed?: string,
 ): readonly string[] {
   const identity = refusalIdentity(refusal, addressed);
-  if (refusal.kind === "nuke-confirmation-mismatch") {
+  if (refusal.kind === "nuke-confirmation-mismatch" || refusal.kind === "nuke-confirmation-required") {
+    const world = safeText(refusal.world);
     return [
-      ...renderOpaqueBlock(
-        `nuke confirmation mismatch world=${refusal.world} confirmation=${refusal.confirmation}`,
-        indent,
-        columns,
-      ),
-      ...renderOpaqueBlock(`keiyaku nuke --confirm ${refusal.world}`, indent, columns),
-    ];
-  }
-  if (refusal.kind === "nuke-confirmation-required") {
-    return [
-      ...renderOpaqueBlock(`nuke confirmation required world=${refusal.world}`, indent, columns),
-      ...renderOpaqueBlock(`keiyaku nuke --confirm ${refusal.world}`, indent, columns),
+      `${indent}nuke confirmation ${refusal.kind === "nuke-confirmation-mismatch" ? "mismatch" : "required"}`,
+      `${indent}world  ${world}`,
+      ...(refusal.kind === "nuke-confirmation-mismatch"
+        ? [`${indent}confirmation  ${safeText(refusal.confirmation)}`]
+        : []),
+      `${indent}nuke  keiyaku nuke --confirm '${world.replaceAll("'", "'\"'\"'")}'`,
     ];
   }
   if (refusal.kind === "dirty-workspace") return renderDirtyRefusal(refusal, indent, columns, identity);
   if (refusal.kind === "unmerged-paths") {
     return [
       ...renderOpaqueBlock(refusalHead(refusal.kind, identity, []), indent, columns),
-      ...collectionLines("paths", refusal.paths, indent, columns),
+      ...collectionLines("paths", refusal.paths, indent),
     ];
   }
   if (refusal.kind === "integration-failed") {
-    const lines = [
-      ...renderOpaqueBlock(
-        refusalHead(refusal.kind, identity, [`reason=${refusal.reason}`, `targetHead=${refusal.targetHead}`]),
-        indent,
-        columns,
-      ),
-    ];
-    if (refusal.conflictPaths !== undefined)
-      lines.push(...collectionLines("conflictPaths", refusal.conflictPaths, indent, columns));
+    const lines = [...renderOpaqueBlock(refusalHead(refusal.kind, identity, []), indent, columns)];
+    lines.push(`${indent}reason  ${safeText(refusal.reason)}`, `${indent}target  ${safeText(refusal.targetHead)}`);
+    if (refusal.conflictPaths !== undefined) lines.push(...collectionLines("conflicts", refusal.conflictPaths, indent));
     if ("recovery" in refusal && refusal.recovery !== undefined) {
-      wrap(lines, `recovery materialize conflicts · ${refusal.recovery.materialize}`, indent, columns);
-      wrap(lines, `recovery continue · ${refusal.recovery.continue}`, indent, columns);
+      lines.push(`${indent}materialize  ${safeText(refusal.recovery.materialize)}`);
+      lines.push(`${indent}deliver  ${safeText(refusal.recovery.continue)}`);
     }
     return lines;
   }
   if (refusal.kind === "merge-state-present") {
-    return renderOpaqueBlock(
-      refusalHead(refusal.kind, identity, [`workspace=${refusal.workspace.kind}`, `path=${refusal.workspace.path}`]),
-      indent,
-      columns,
-    );
+    return [
+      ...renderOpaqueBlock(refusalHead(refusal.kind, identity, []), indent, columns),
+      `${indent}workspace kind  ${refusal.workspace.kind}`,
+      `${indent}workspace  ${safeText(refusal.workspace.path)}`,
+    ];
   }
   if (refusal.kind === "integration-unsupported") {
-    return renderOpaqueBlock(
-      refusalHead(refusal.kind, identity, [`requiredGit=${refusal.requiredGit}`]),
-      indent,
-      columns,
-    );
+    return [
+      ...renderOpaqueBlock(refusalHead(refusal.kind, identity, []), indent, columns),
+      `${indent}required Git  ${safeText(refusal.requiredGit)}`,
+    ];
   }
   if (refusal.kind === "checkout-not-followable") {
     return checkoutNotFollowableLines(refusal);
@@ -133,15 +119,15 @@ export function renderRefusalFacts(
 
 export function renderRefusal(result: RefusedResult, context?: TextRenderContext): string {
   const columns = context?.columns ?? 80;
-  const base = `! ${result.verb} refused`;
+  const base = `✕ ${result.verb} refused`;
   const lines =
     result.contract === undefined
       ? [base]
-      : displayColumns(`${base} — ${result.contract}`) <= columns
-        ? [`${base} — ${result.contract}`]
-        : [`${base} —`, `  ${safeText(result.contract)}`];
+      : displayColumns(`${base}  ${result.contract}`) <= columns
+        ? [`${base}  ${result.contract}`]
+        : [base, `  contract  ${safeText(result.contract)}`];
   if (isRecord(result.refusal) && typeof result.refusal.kind === "string") {
-    lines.push(...renderRefusalFacts(result.refusal as RenderableRefusal, "   ", columns, result.contract));
+    lines.push(...renderRefusalFacts(result.refusal as RenderableRefusal, "  ", columns, result.contract));
   }
   const output = lines.join("\n");
   return result.draft === undefined ? output : `${output}\n${renderBindDraftReceipt(result.draft)}`;
@@ -149,29 +135,25 @@ export function renderRefusal(result: RefusedResult, context?: TextRenderContext
 
 export function renderConflictMaterialized(
   result: IntegrationConflictMaterialized,
-  context?: TextRenderContext,
+  _context?: TextRenderContext,
 ): string {
-  const columns = context?.columns ?? 80;
-  const indent = "   ";
+  const indent = "  ";
   return [
-    ...renderOpaqueBlock(`integration-conflict-materialized targetHead=${result.targetHead}`, "", columns),
-    ...renderOpaqueBlock("no delivery fact is admitted; deliver --include-dirty captures complete", indent, columns),
-    ...renderOpaqueBlock(
-      "non-ignored final worktree bytes without git add or commit and preserves the",
-      indent,
-      columns,
-    ),
-    ...renderOpaqueBlock("real index including UU", indent, columns),
-    ...renderOpaqueBlock(`handoff base ${result.handoffBase}`, indent, columns),
-    ...renderOpaqueBlock(`recovery ${result.recovery.continue} · staging ${result.recovery.staging}`, indent, columns),
-    ...collectionLines("conflictPaths", result.conflictPaths, indent, columns),
-    ...renderOpaqueBlock(`workspace ${result.workspace.kind} ${result.workspace.path}`, indent, columns),
+    "! integration-conflict-materialized",
+    `${indent}target  ${safeText(result.targetHead)}`,
+    `${indent}recorded  no delivery`,
+    `${indent}index  unmerged`,
+    `${indent}saved  worktree bytes before projection`,
+    `${indent}handoff base  ${safeText(result.handoffBase)}`,
+    ...collectionLines("conflicts", result.conflictPaths, indent),
+    `${indent}workspace  ${safeText(result.workspace.path)}`,
+    `${indent}deliver  ${safeText(result.recovery.continue)} · reads worktree bytes, not index`,
   ].join("\n");
 }
 
 export function renderBindDraftReceipt(receipt: BindDraftReceipt): string {
   return [
-    ...(receipt.path === undefined ? [] : [`draft preserved: ${receipt.path}`]),
-    ...(receipt.warning === undefined ? [] : [`warning: ${receipt.warning}`]),
+    ...(receipt.path === undefined ? [] : [`  draft  ${safeText(receipt.path)}`]),
+    ...(receipt.warning === undefined ? [] : [`! draft warning  ${safeText(receipt.warning)}`]),
   ].join("\n");
 }

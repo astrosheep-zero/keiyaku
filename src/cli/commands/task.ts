@@ -1,4 +1,12 @@
-import { CliUsageError, isBlankInput, usageLine } from "../usage.js";
+import {
+  CliUsageError,
+  commandGuide,
+  isBlankInput,
+  TASK_FAMILY_USAGE_GUIDE,
+  unknownCommandGuide,
+  usageLine,
+  type CliUsageGuide,
+} from "../usage.js";
 import { parseTaskNamespaceSelector } from "../../task/catalog.js";
 import {
   parseTaskQueryExpression,
@@ -233,7 +241,7 @@ export function renderTaskHelp(action?: TaskAction): string {
     return `${spec.purpose}\n\n${usageLine(spec.usage)}${spec.details === undefined ? "" : `\n\n${spec.details}`}`;
   }
   return [
-    "usage: keiyaku task <command> ...",
+    "usage  keiyaku task <command> ...",
     "",
     "commands:",
     ...Object.values(TASK_COMMAND_SPECS).flatMap((spec) =>
@@ -247,6 +255,10 @@ export function renderTaskHelp(action?: TaskAction): string {
 
 export function renderTaskUsage(action: TaskAction): string {
   return usageLine(TASK_COMMAND_SPECS[action].usage);
+}
+
+export function taskUsageGuide(action: TaskAction): CliUsageGuide {
+  return commandGuide(`task ${action}`, TASK_COMMAND_SPECS[action].usage);
 }
 
 function setFlag(
@@ -408,10 +420,15 @@ function validateTaskScan(action: TaskAction, scanned: ScannedTask, fail: (messa
 
 export function parseTaskCommand(argv: readonly string[]): ParsedTaskCommand {
   const candidate = argv[0];
-  if (!isTaskAction(candidate)) throw new CliUsageError(`unknown task command: ${candidate ?? ""}`, renderTaskHelp());
+  if (!isTaskAction(candidate)) {
+    throw new CliUsageError(
+      `unknown task command: ${candidate ?? ""}`,
+      unknownCommandGuide(TASK_FAMILY_USAGE_GUIDE, candidate ?? ""),
+    );
+  }
   const action = candidate;
   const fail = (message: string): never => {
-    throw new CliUsageError(message, renderTaskUsage(action));
+    throw new CliUsageError(message, taskUsageGuide(action));
   };
   const scanned = scanTaskArgv(action, argv, fail);
   validateTaskScan(action, scanned, fail);

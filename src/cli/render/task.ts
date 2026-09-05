@@ -56,14 +56,14 @@ function isWorldObservation(result: TaskInvocationResult): result is TaskWorldOb
   );
 }
 
-function markFor(word: string): string {
+export function taskMark(word: string): string {
   if (word === "in_progress") return "●";
   if (word === "ready" || word === "open") return "○";
   if (word === "blocked") return "‖";
   if (word === "missing") return "!";
   if (word === "on_hold") return "⧗";
   if (word === "done") return "✓";
-  if (word === "drop") return "×";
+  if (word === "drop") return "✕";
   return "?";
 }
 
@@ -73,8 +73,8 @@ function priorityText(priority: number | null): string {
 
 function scanUnit(id: string, priority: number | null, word: TaskWord | undefined): string {
   return word === undefined
-    ? `${markFor("ready")} ${id} · ${priorityText(priority)}`
-    : `${markFor(word)} ${id} · ${priorityText(priority)} ${word}`;
+    ? `${taskMark("ready")} ${id} · ${priorityText(priority)}`
+    : `${taskMark(word)} ${id} · ${word} · ${priorityText(priority)}`;
 }
 
 function entityLines(entity: TaskEntity, columns: number, indent = ""): readonly string[] {
@@ -118,7 +118,7 @@ function renderFailure(verb: string, result: TaskFailure, columns: number): stri
   if (result.kind === "retry") {
     return [...outcomeLines("?", verb, "retry", undefined, columns), result.reason].join("\n");
   }
-  const lines = [...outcomeLines("!", verb, "refused", undefined, columns)];
+  const lines = [...outcomeLines("✕", verb, "refused", undefined, columns)];
   const facts = projectRefusal(result.refusal);
   lines.push(facts.line);
   appendDiagnostic(lines, facts.diagnostic);
@@ -204,8 +204,9 @@ function renderShowDetail(result: TaskDetail, columns: number): string {
   const task = result.task;
   const lines = [
     ...entityLines(stateEntity(task), columns),
-    ...renderTextBlock(`created ${task.createdAt} · updated ${task.updatedAt}`, "", columns),
-    ...(task.createdBy === undefined ? [] : [`created-by ${task.createdBy}`]),
+    `  created  ${task.createdAt}`,
+    `  updated  ${task.updatedAt}`,
+    ...(task.createdBy === undefined ? [] : [`  created by  ${task.createdBy}`]),
   ];
   for (const need of result.needs.filter((item) => !item.released)) lines.push(edge("needs", need, "!"));
   for (const need of result.needs.filter((item) => item.released)) lines.push(edge("needs", need, "✓"));
@@ -242,9 +243,9 @@ function doctorIssue(issue: TaskDoctorIssue): string {
 }
 
 function renderDoctor(report: TaskDoctorReport): string {
-  if (report.issues.length === 0) return "healthy";
+  if (report.issues.length === 0) return "✓ doctor  healthy";
   const noun = report.issues.length === 1 ? "issue" : "issues";
-  return [`${report.issues.length} ${noun}`, ...report.issues.map(doctorIssue)].join("\n");
+  return [`! doctor  ${report.issues.length} ${noun}`, ...report.issues.map(doctorIssue)].join("\n");
 }
 
 function renderAcceptedMutation(verb: string, task: TaskView, columns: number, documentDiff?: string): string {
@@ -271,10 +272,10 @@ function renderMutation(
 }
 
 function renderBatchItem(verb: string, item: TaskBatchResult["items"][number]): string {
-  if (item.outcome.kind === "accepted") return `✓ ${verb} ${item.id}`;
-  if (item.outcome.kind === "retry") return `? ${verb} ${item.id} · ${item.outcome.reason}`;
+  if (item.outcome.kind === "accepted") return `✓ ${verb}  ${item.id}`;
+  if (item.outcome.kind === "retry") return `? ${verb}  ${item.id}  ${item.outcome.reason}`;
   const facts = projectRefusal(item.outcome.refusal);
-  const lines = [`! ${verb} ${item.id} · ${facts.line}`];
+  const lines = [`✕ ${verb}  ${item.id}  ${facts.line}`];
   appendDiagnostic(lines, facts.diagnostic);
   return lines.join("\n");
 }
@@ -293,7 +294,7 @@ function composeDiffs(
 function stoppedLines(stopped: ComposeStop): string[] {
   if (stopped.kind === "retry") return [`? stopped ${stopped.reason}`];
   const facts = projectRefusal(stopped);
-  const lines = [`! stopped ${facts.line}`];
+  const lines = [`✕ stopped  ${facts.line}`];
   appendDiagnostic(lines, facts.diagnostic);
   return lines;
 }
@@ -385,7 +386,7 @@ function renderTaskValue(
 
 export function renderTaskIncompleteDiagnostic(result: TaskCompositionResult): string {
   if (result.kind !== "incomplete") return "";
-  const lines = [`! compose incomplete · ${result.documentChanges.length} admitted`, ...stoppedLines(result.stopped)];
+  const lines = [`! compose incomplete  ${result.documentChanges.length} admitted`, ...stoppedLines(result.stopped)];
   composeDiffs(lines, result.documentChanges);
   return lines.join("\n");
 }

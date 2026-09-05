@@ -128,10 +128,17 @@ test("install does not consume KEIYAKU_GIT_PATH before coordinate resolution", a
 test("Akuma call rejects the removed --readonly option before invocation", () => {
   assert.throws(
     () => parseInvocation(["call", "worker", "--readonly", "work"]),
-    (error: unknown) =>
-      error instanceof CliUsageError &&
-      /option --readonly is not valid for call/u.test(error.message) &&
-      !/--readonly/u.test(error.message.split("\n").slice(1).join("\n")),
+    (error: unknown) => {
+      if (!(error instanceof CliUsageError)) return false;
+      const accepts = error.guide?.accepts ?? "";
+      const help = error.guide?.help ?? "";
+      return (
+        error.diagnostic === "option --readonly is not valid for call" &&
+        /option --readonly is not valid for call/u.test(error.message) &&
+        !/--readonly/u.test(accepts) &&
+        !/--readonly/u.test(help)
+      );
+    },
   );
 });
 
@@ -1474,7 +1481,7 @@ test("reconcile world command adapts the public repository report", async () => 
   assert.equal(json.kind, "observation");
   assert.equal(json.command, "reconcile");
   assert.equal(json.report.kind, "completed");
-  assert.match(renderText(result), /^observation reconcile\n/u);
+  assert.match(renderText(result), /^observation  reconcile\n  report  object \(2\)\n    kind  "completed"\n    contracts  list \(1\)$/mu);
   assert.doesNotMatch(renderText(result), /world observation failed/u);
 });
 
@@ -1515,7 +1522,7 @@ test("reconcile world command carries a typed discovery failure", async () => {
   assert.equal(report.kind, "world-observation-failed");
   assert.equal("contracts" in report, false);
   assert.match(String(report.diagnostic), /forced world observation failure/u);
-  assert.equal(renderText(captured.result), `reconcile: world observation failed · ${report.diagnostic}`);
+  assert.equal(renderText(captured.result), `✕ observation  reconcile\n  diagnostic  ${report.diagnostic}`);
   const json = JSON.parse(JSON.stringify(captured.result)) as {
     kind: string;
     command: string;
@@ -1685,8 +1692,9 @@ test("deliver --materialize-conflict returns the exact public materialization ob
   });
   assert.equal(repository.run(["-C", worktree, "rev-parse", "MERGE_HEAD"]).trim(), targetHead);
   const text = renderText(result);
-  assert.match(text, /integration-conflict-materialized targetHead=/u);
-  assert.match(text, /workspace worktree /u);
+  assert.match(text, /^! integration-conflict-materialized$/mu);
+  assert.match(text, new RegExp(`^  target  ${targetHead}$`, "mu"));
+  assert.match(text, /workspace  /u);
   const json = JSON.parse(JSON.stringify(result));
   assert.equal(json.kind, "integration-conflict-materialized");
   assert.equal(json.targetHead, targetHead);
@@ -1737,8 +1745,9 @@ test("CLI preserves a real admission receipt and failure category", async () => 
           ...(output === "json" ? ["--json"] : []),
         ])}));`,
       ].join("\n");
-      const environment = { ...process.env };
+      const environment: NodeJS.ProcessEnv = { ...process.env, NO_COLOR: "1" };
       delete environment.AKUMA_REQUESTS;
+      delete environment.FORCE_COLOR;
       const result = spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), "--input-type=module", "-"], {
         input: script,
         cwd: repository.path,
@@ -1759,7 +1768,7 @@ test("CLI preserves a real admission receipt and failure category", async () => 
           ["attestation"],
         );
       } else {
-        assert.match(result.stdout, new RegExp(`execution failed after admission ${category}`, "u"));
+        assert.match(result.stdout, new RegExp(`execution failed after admission  ${category}`, "u"));
         assert.match(result.stdout, /journal[\s\S]*attestation/u);
         assert.doesNotMatch(result.stdout, /usage:|review refused/u);
       }

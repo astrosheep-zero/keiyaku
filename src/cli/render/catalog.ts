@@ -7,28 +7,15 @@ import {
   displayGitId,
   gateFact,
   gitIdsInRow,
-  targetMovementFacts,
+  targetFacts,
 } from "./contract-observation.js";
 import { safeText } from "./terminal.js";
-
-function targetLine(row: ContractRow, abbreviations: ReadonlyMap<string, string>): string {
-  if (row.target === null) return "no target";
-  const target = row.target.startsWith("refs/heads/") ? row.target.slice("refs/heads/".length) : row.target;
-  const lag =
-    row.targetLag.kind === "counted"
-      ? `${row.targetLag.behind} commits behind ${target}${row.targetLag.subject === undefined ? "" : ` · worktree ${row.targetLag.subject.path}`}`
-      : row.targetLag.kind === "unknown"
-        ? `commits behind ${target} unknown${row.targetLag.subject === undefined ? "" : ` · worktree ${row.targetLag.subject.path}`}`
-        : undefined;
-  return [`target ${target}`, ...(lag === undefined ? [] : [lag]), ...targetMovementFacts(row, abbreviations)].join(
-    " · ",
-  );
-}
+import { taskMark } from "./task.js";
 
 function akumaMark(life: string): string {
   if (life === "running") return "●";
   if (life === "asleep" || life === "unborn") return "○";
-  if (life === "killed") return "×";
+  if (life === "killed") return "✕";
   if (life === "stillborn") return "!";
   return "?";
 }
@@ -48,8 +35,8 @@ function relativeAge(source: string | null, observedAt: string): string | null {
 function renderAkumaCatalog(catalog: Extract<Catalog, { kind: "akuma" }>): string {
   const rows = catalog.rows;
   const lines = [
-    `akuma instances ${rows.length} recent`,
-    ...(catalog.archetype === null ? [] : [`  scope ${safeText(catalog.archetype)}`]),
+    `akuma  ${rows.length} recent`,
+    ...(catalog.archetype === null ? [] : [`  scope  ${safeText(catalog.archetype)}`]),
     "",
   ];
   for (const row of rows) {
@@ -68,7 +55,7 @@ function renderAkumaCatalog(catalog: Extract<Catalog, { kind: "akuma" }>): strin
 
 function catalogMark(row: ContractRow): string {
   if (row.phase === "claimed") return "✓";
-  if (row.phase === "abandoned") return "×";
+  if (row.phase === "abandoned") return "✕";
   if (row.title === null) return "?";
   if (row.gates.reports.some((gate) => gate.current.kind === "attested" && gate.current.verdict === "unsatisfied"))
     return "!";
@@ -95,14 +82,16 @@ function renderContractCatalog(catalog: Extract<Catalog, { kind: "contracts" }>)
   const rows = catalog.rows;
   const header =
     catalog.state === null
-      ? `observedAt ${catalog.observedAt}`
-      : `contract state ${displayGitId(catalog.state, abbreviations)} · observedAt ${catalog.observedAt}`;
+      ? `observedAt  ${catalog.observedAt}`
+      : `contract state  ${displayGitId(catalog.state, abbreviations)} · observedAt  ${catalog.observedAt}`;
   const blocks = rows.map((row) => {
     const lines = [
       `${catalogMark(row)} ${safeText(row.id)} · ${row.phase} · ${formatAge(row.phaseAt, catalog.observedAt)} · ${safeText(row.title ?? "title unavailable")}`,
-      `  ${candidateFact(row.delivery)} · ${targetLine(row, abbreviations)}`,
+      `  ${candidateFact(row.delivery)}`,
+      ...targetFacts(row, abbreviations).map((fact) => `  ${safeText(fact)}`),
+      ...(row.worktreePath === null ? [] : [`  worktree  ${safeText(row.worktreePath)}`]),
       ...row.after.map((edge) => `  ${afterWording(edge)}`),
-      ...(row.dependents.length === 0 ? [] : [`  dependents ${row.dependents.map(dependentWording).join(" · ")}`]),
+      ...(row.dependents.length === 0 ? [] : [`  dependents  ${row.dependents.map(dependentWording).join(" · ")}`]),
       ...(row.gates.reports.length === 0 ? [] : [`  ${row.gates.reports.map(gateFact).join("  ")}`]),
     ];
     return lines.join("\n");
@@ -113,7 +102,8 @@ export function renderCatalogText(catalog: Catalog): string {
   if (catalog.kind === "tasks") {
     return [
       ...catalog.rows.map(
-        (row) => `${safeText(row.id)} - P${row.priority} - ${row.disposition} - ${safeText(row.title)}`,
+        (row) =>
+          `${taskMark(row.disposition)} ${safeText(row.id)} · ${row.disposition} · P${row.priority} — ${safeText(row.title)}`,
       ),
       ...(catalog.hasMore ? ["…"] : []),
     ].join("\n");
@@ -121,10 +111,10 @@ export function renderCatalogText(catalog: Catalog): string {
   if (catalog.kind === "contracts") return renderContractCatalog(catalog);
   if (catalog.kind === "archetypes") {
     return [
-      `available Akuma ${catalog.rows.length}`,
+      `available Akuma  ${catalog.rows.length}`,
       "",
       ...catalog.rows.flatMap((row) => [
-        `${safeText(row.name)}${row.model === undefined ? "" : ` - ${safeText(row.model)}`}`,
+        `${safeText(row.name)}${row.model === undefined ? "" : `  ${safeText(row.model)}`}`,
         ...(row.description === undefined ? [] : [`  ${safeText(row.description)}`]),
       ]),
     ].join("\n");

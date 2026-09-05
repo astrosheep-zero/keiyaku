@@ -28,11 +28,7 @@ function dispatchLines(stage: DispatchStage): readonly string[] {
 }
 
 function executionCwdLine(result: Extract<AkumaInvocationResult, { action: "call" }>["result"]): readonly string[] {
-  return result.execution.source === "contract-worktree" ? [`cwd ${result.execution.cwd}`] : [];
-}
-
-function posixShellArgument(value: string): string {
-  return `'${value.replace(/'/g, `'\"'\"'`)}'`;
+  return [`cwd  ${safeText(result.execution.cwd)}`];
 }
 
 function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, context: TextRenderContext): string {
@@ -65,7 +61,8 @@ function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, co
       )
     ) {
       const selector = result.result.alias.kind === "aliased" ? result.result.alias.alias.alias : result.result.akuma;
-      lines.push(`$ keiyaku -C ${posixShellArgument(result.world)} wait ${selector} --timeout 5m`);
+      if (result.world !== result.result.execution.cwd) lines.push(`  world  ${safeText(result.world)}`);
+      lines.push(`  wait  keiyaku wait ${selector} --timeout 5m`);
     }
     return lines.join("\n");
   }
@@ -101,7 +98,7 @@ export function renderAkumaText(
   if (answer !== undefined) {
     if (result.action !== "call") return answer;
     const cwd = executionCwdLine(result.result);
-    return cwd.length === 0 ? answer : `${cwd.join("\n")}\n${answer}`;
+    return `${cwd.join("\n")}\n\n${answer}`;
   }
   if (result.action === "tell" && result.mode === "schema") return JSON.stringify(result.result);
   switch (result.action) {

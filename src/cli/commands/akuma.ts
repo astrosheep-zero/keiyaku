@@ -1,4 +1,4 @@
-import { CliUsageError, isBlankInput, usageLine } from "../usage.js";
+import { CliUsageError, commandGuide, isBlankInput, usageLine, type CliUsageGuide } from "../usage.js";
 import { parseAkuId } from "../../akuma/identity.js";
 import { parseDuration as decodeDuration } from "../../duration.js";
 import { parseAkumaAlias, parseAkumaGlob, type AkumaAlias } from "../../identity/selector.js";
@@ -133,6 +133,10 @@ export function renderAkumaHelp(action: AkumaAction): string {
 
 export function renderAkumaUsage(action: AkumaAction): string {
   return usageLine(AKUMA_COMMAND_SPECS[action].usage);
+}
+
+export function akumaUsageGuide(action: AkumaAction): CliUsageGuide {
+  return commandGuide(action, AKUMA_COMMAND_SPECS[action].usage);
 }
 
 type Scanned = Readonly<{ flags: Readonly<Record<string, FlagValue>>; positionals: readonly string[]; stdin: boolean }>;
@@ -404,7 +408,7 @@ export function parseAkumaCommand(argv: readonly string[]): ParsedAkumaCommand {
   const action = candidate;
   const spec = AKUMA_COMMAND_SPECS[action];
   const fail = (message: string): never => {
-    throw new CliUsageError(message, renderAkumaUsage(action));
+    throw new CliUsageError(message, akumaUsageGuide(action));
   };
   const { flags, positionals, stdin } = scanAkuma(action, argv, fail);
   const output = flags.json === true ? ("json" as const) : ("text" as const);

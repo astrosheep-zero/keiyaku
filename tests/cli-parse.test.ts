@@ -32,7 +32,7 @@ test("nuke admits only a literal WorldRoot confirmation", () => {
   assert.throws(() => parseArgv(["nuke", "-"]), /nuke reads no stdin/u);
   assert.throws(() => parseArgv(["nuke", "--confirm", " "]), /requires a nonblank value/u);
   assert.throws(() => parseArgv(["nuke", "--confirm", "/one", "--confirm", "/two"]), /duplicate option/u);
-  assert.match(renderContractHelp("nuke"), /usage: keiyaku nuke \[--confirm <WorldRoot>\] \[--json\]/u);
+  assert.match(renderContractHelp("nuke"), /usage  keiyaku nuke \[--confirm <WorldRoot>\] \[--json\]/u);
   assert.match(renderContractHelp("nuke"), /Remove Keiyaku-owned data/u);
 });
 
@@ -97,9 +97,17 @@ test("unknown command syntax is refused with the exact command usage", () => {
     () => parseArgv(["bind", "--workspace-mode", "-"]),
     (error: unknown) =>
       error instanceof CliUsageError &&
-      error.message.includes("usage: keiyaku bind [--task <task/...>] [--target <ref>]"),
+      error.message.includes("accepts  keiyaku bind [--task <task/...>] [--target <ref>]") &&
+      error.message.includes("help  keiyaku bind --help") &&
+      error.message.includes("option --workspace-mode is not valid for bind"),
   );
-  assert.throws(() => parseArgv(["unknown"]), /usage: keiyaku <command> \[options\]/);
+  assert.throws(
+    () => parseArgv(["unknown"]),
+    (error: unknown) =>
+      error instanceof CliUsageError &&
+      error.message ===
+        ["✕ usage  keiyaku", "  given  unknown", "  accepts  keiyaku <command> [options]", "  help  keiyaku --help"].join("\n"),
+  );
 });
 
 test("existing selectors are optional and review stdin is a distinct summary source", () => {
@@ -365,7 +373,7 @@ test("region accepts repeated --path patterns and omits deleted overlap grammar"
     contract: "kei/example",
     output: "text",
   });
-  assert.match(renderContractHelp("region"), /usage: keiyaku region \[<contract>\] \[--json\]/);
+  assert.match(renderContractHelp("region"), /usage  keiyaku region \[<contract>\] \[--json\]/);
   assert.doesNotMatch(renderRootHelp(), /--overlap/);
   assert.doesNotMatch(renderContractHelp("region"), /--overlap/);
 });

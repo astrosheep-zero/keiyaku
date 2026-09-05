@@ -19,7 +19,9 @@ function parseExecution(argv: readonly string[]): ParsedExecution {
 
 const command = parseExecution(["call", "worker", "-d", "prompt"]).command;
 
-function detachedCall(result: Pick<CallResult, "dispatch" | "alias">): Extract<AkumaInvocationResult, { action: "call" }> {
+function detachedCall(
+  result: Pick<CallResult, "dispatch" | "alias">,
+): Extract<AkumaInvocationResult, { action: "call" }> {
   return {
     kind: "akuma",
     action: "call",
@@ -39,14 +41,19 @@ function renderedWait(result: Parameters<typeof renderAkumaText>[1]): string {
 }
 
 function posixArgv(line: string): string[] {
-  const parsed = spawnSync("bash", ["-c", `set -- ${line.slice(2)}; printf '%s\\0' "$@"`], { encoding: "utf8" });
+  const parsed = spawnSync("bash", ["-c", `set -- ${line.slice("  wait  ".length)}; printf '%s\\0' "$@"`], {
+    encoding: "utf8",
+  });
   assert.equal(parsed.status, 0, parsed.stderr);
   return parsed.stdout.split("\0").slice(0, -1);
 }
 
-test("detached wait command preserves a Windows World through POSIX shell parsing", () => {
-  const argv = posixArgv(renderedWait(detachedCall({ dispatch: { kind: "none" }, alias: { kind: "none" } })));
-  assert.deepEqual(argv, ["keiyaku", "-C", world, "wait", akuma, "--timeout", "5m"]);
+test("detached wait keeps Windows cwd separate from its POSIX-copyable handle", () => {
+  const result = detachedCall({ dispatch: { kind: "none" }, alias: { kind: "none" } });
+  assert.ok(renderAkumaText(command, result).split("\n").includes(`cwd  ${world}`));
+  const argv = posixArgv(renderedWait(result));
+  assert.deepEqual(argv, ["keiyaku", "wait", akuma, "--timeout", "5m"]);
+  assert.doesNotMatch(renderedWait(result), /-C |--cwd |\$ /u);
 });
 
 test("detached wait command keeps alias, timeout, failed silence, and JSON", () => {
@@ -54,13 +61,13 @@ test("detached wait command keeps alias, timeout, failed silence, and JSON", () 
     dispatch: { kind: "none" },
     alias: { kind: "aliased", alias: { alias: "@ship" as AkumaAlias, akuId: akuma }, previous: null },
   });
-  assert.deepEqual(posixArgv(renderedWait(aliased)), ["keiyaku", "-C", world, "wait", "@ship", "--timeout", "5m"]);
+  assert.deepEqual(posixArgv(renderedWait(aliased)), ["keiyaku", "wait", "@ship", "--timeout", "5m"]);
 
   const failed = detachedCall({
     dispatch: { kind: "failed", failure: { kind: "infrastructure", diagnostic: "busy" } },
     alias: { kind: "skipped", reason: "dispatch-failed" },
   });
-  assert.doesNotMatch(renderAkumaText(command, failed), /\$ keiyaku /u);
+  assert.doesNotMatch(renderAkumaText(command, failed), /keiyaku wait/u);
   assert.equal(renderAkumaJson(failed), JSON.stringify(failed.result));
 
   const successful = detachedCall({ dispatch: { kind: "none" }, alias: { kind: "none" } });

@@ -2,23 +2,11 @@ import type { ExecutionCleanup, ExecutionStop, ExecutionReceipt } from "../../in
 import type { PlacementStop, VerificationReuse, VerificationStop } from "../../index.js";
 import type { Lag } from "../result.js";
 import { renderRefusalFacts } from "./refusal.js";
-import { displayColumns, renderOpaqueBlock, safeText } from "./terminal.js";
+import { displayColumns, renderOpaqueBlock, safeText, quotedText } from "./terminal.js";
 
 export type ReceiptSegment = Readonly<{ text: string; opaque?: boolean }>;
 
 type HookFailure = Extract<Lag, { kind: "worktree-hook-failed" }>["failure"];
-
-function escapedControlCharacter(character: string): string {
-  const codePoint = character.codePointAt(0);
-  if (codePoint === undefined) throw new Error("control character code point expected");
-  if (codePoint <= 0xffff) return `\\u${codePoint.toString(16).padStart(4, "0")}`;
-  const surrogate = codePoint - 0x10000;
-  return `\\u${(0xd800 + (surrogate >> 10)).toString(16)}\\u${(0xdc00 + (surrogate & 0x3ff)).toString(16)}`;
-}
-
-function renderedHookName(name: string): string {
-  return JSON.stringify(name).replaceAll(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, escapedControlCharacter);
-}
 
 export function receiptRow(
   lines: string[],
@@ -27,15 +15,16 @@ export function receiptRow(
   segments: readonly ReceiptSegment[],
   columns: number,
 ): void {
-  let current = `${mark} ${label}`;
+  const prefix = mark.trim().length === 0 ? "  " : `${mark} `;
+  let current = `${prefix}${label}`;
   for (const segment of segments) {
     const text = segment.opaque === true ? safeText(segment.text) : segment.text;
-    const candidate = `${current} ${text}`;
+    const candidate = `${current}  ${text}`;
     if (displayColumns(candidate) <= columns) {
       current = candidate;
       continue;
     }
-    if (current === `${mark} ${label}` && segment.opaque === true) {
+    if (current === `${prefix}${label}` && segment.opaque === true) {
       lines.push(current);
       current = `  ${text}`;
       continue;
@@ -51,7 +40,7 @@ export function receiptPayload(lines: string[], label: string, payload: string):
 }
 
 export function outcomeLines(
-  mark: "✓" | "!" | "?",
+  mark: "✓" | "✕" | "!" | "?",
   verb: string,
   word: "accepted" | "refused" | "retry",
   contract: string | undefined,
@@ -59,22 +48,22 @@ export function outcomeLines(
 ): string[] {
   const base = `${mark} ${verb} ${word}`;
   if (contract === undefined) return [base];
-  const inline = `${base} — ${contract}`;
+  const inline = `${base}  ${contract}`;
   if (displayColumns(inline) <= columns) return [inline];
-  return [`${base} —`, `  ${safeText(contract)}`];
+  return [`${base}`, `  contract  ${safeText(contract)}`];
 }
 
 export function titleLines(mark: string, title: string, contract: string, columns = 80): string[] {
   const base = `${mark} ${title}`;
-  const inline = `${base} — ${contract}`;
+  const inline = `${base}  ${contract}`;
   if (displayColumns(inline) <= columns) return [inline];
-  return [`${base} —`, `  ${safeText(contract)}`];
+  return [`${base}`, `  contract  ${safeText(contract)}`];
 }
 
 export function hookFailureSummary(failure: HookFailure): string {
   if (failure.kind === "timeout" || failure.kind === "unknown-exit") return failure.kind;
   if (failure.kind === "spawn-error") return failure.kind;
-  return `exit=${failure.code} · truncated=${failure.truncated}`;
+  return `exit ${failure.code} · output ${failure.truncated ? "truncated" : "complete"}`;
 }
 
 export function appendHookPayload(lines: string[], failure: HookFailure): void {
@@ -114,7 +103,7 @@ function gateRows(stop: VerificationStop | PlacementStop, columns: number): read
         lines,
         " ",
         "gate",
-        [{ text: gate, opaque: true }, { text: "·" }, { text: current.verdict }, { text: `· at=${current.at}` }],
+        [{ text: gate, opaque: true }, { text: "·" }, { text: current.verdict }, { text: `· at ${current.at}` }],
         columns,
       );
       if (current.summary !== undefined) receiptPayload(lines, `  summary ${gate}`, current.summary);
@@ -123,7 +112,7 @@ function gateRows(stop: VerificationStop | PlacementStop, columns: number): read
         lines,
         " ",
         "gate",
-        [{ text: gate, opaque: true }, { text: "· stale" }, { text: `· prior=${current.priorVerdict}` }],
+        [{ text: gate, opaque: true }, { text: "· stale" }, { text: `· prior ${current.priorVerdict}` }],
         columns,
       );
     } else {
@@ -138,14 +127,14 @@ function targetMovedDetail(stop: Extract<PlacementStop, { failure: "target-moved
     return [
       { text: stop.target, opaque: true },
       { text: `${stop.integratedAt} -> ${stop.observed}`, opaque: true },
-      { text: `attempts=${stop.attempts}` },
-      ...(stop.observedTreeEqualsCandidate ? [{ text: "content=identical" }] : []),
+      { text: `attempts ${stop.attempts}` },
+      ...(stop.observedTreeEqualsCandidate ? [{ text: "content identical" }] : []),
     ];
   }
   return [
     { text: stop.target, opaque: true },
     { text: `${stop.expected} -> ${stop.observed}`, opaque: true },
-    ...(stop.observedTreeEqualsCandidate ? [{ text: "content=identical" }] : []),
+    ...(stop.observedTreeEqualsCandidate ? [{ text: "content identical" }] : []),
   ];
 }
 
@@ -177,8 +166,8 @@ function refusalEvidence(stop: VerificationStop | PlacementStop, columns: number
       "continue" in recovery &&
       typeof recovery.continue === "string"
     ) {
-      receiptRow(lines, " ", "recovery materialize conflicts", [{ text: recovery.materialize }], columns);
-      receiptRow(lines, " ", "recovery continue after resolve", [{ text: recovery.continue }], columns);
+      receiptRow(lines, " ", "materialize", [{ text: recovery.materialize }], columns);
+      receiptRow(lines, " ", "deliver", [{ text: recovery.continue }], columns);
     }
   } else if (refusal.kind === "integration-unsupported") {
     receiptRow(lines, " ", "required Git", [{ text: refusal.requiredGit }], columns);
@@ -203,10 +192,7 @@ export function stopLines(
   const segments: ReceiptSegment[] = dependent === undefined ? [] : [{ text: "·" }, { text: directStopName(stop) }];
   if ("failure" in stop && stop.failure === "target-moved") segments.push(...targetMovedDetail(stop));
   if ("failure" in stop && stop.failure === "environment-failure" && "name" in stop) {
-    segments.push(
-      { text: `name=${renderedHookName(stop.name)}` },
-      { text: hookFailureSummary(stop.detail), opaque: true },
-    );
+    segments.push({ text: `name ${quotedText(stop.name)}` }, { text: hookFailureSummary(stop.detail), opaque: true });
   }
   receiptRow(lines, "!", dependent === undefined ? directStopName(stop) : dependent, segments, columns);
   lines.push(...refusalEvidence(stop, columns));
@@ -232,7 +218,7 @@ export function cleanupLines(
     "cleanup",
     [
       { text: cleanup.phase },
-      { text: `name=${renderedHookName(cleanup.name)}` },
+      { text: `name ${quotedText(cleanup.name)}` },
       { text: hookFailureSummary(cleanup.detail), opaque: true },
     ],
     columns,

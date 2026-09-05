@@ -67,7 +67,7 @@ function unobservedText(id: string, diagnostic: string): string {
 function lifeLabel(life: AkumaObservation["status"]["life"]): string {
   if (life === "running") return "● STILL RUNNING";
   if (life === "asleep") return "✓ came back";
-  if (life === "killed") return "× killed";
+  if (life === "killed") return "✕ killed";
   return `? ${life}`;
 }
 
@@ -217,7 +217,7 @@ type CreatedTaskRow = Extract<CreatedTaskObservation, { kind: "present" }>["rows
 
 function taskDispositionMark(disposition: CreatedTaskRow["disposition"]): string {
   if (disposition === "done") return "✓";
-  if (disposition === "drop") return "×";
+  if (disposition === "drop") return "✕";
   if (disposition === "on_hold") return "⧗";
   if (disposition === "in_progress") return "●";
   return disposition === "blocked" ? "‖" : "○";

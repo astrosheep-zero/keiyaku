@@ -17,7 +17,7 @@ import type { ActivityHistory, ActivityRow } from "../src/akuma/akuma.js";
 import { executeKillAkuma, executeTellAkuma, executeWaitAkuma } from "../src/akuma/fleet-execution.js";
 import { fleetRequestCommands, type FleetRequestPort } from "../src/akuma/fleet-request.js";
 import { type AkumaObservation } from "../src/index.js";
-import { World } from "../src/world.js";
+import { World, type WorldRoot } from "../src/world.js";
 import { invoke } from "../src/cli/invoke.js";
 import type { AkumaInvocationResult } from "../src/cli/commands/akuma-invoke.js";
 import { CliUsageError, parseArgv, type ParsedExecution } from "../src/cli/parse.js";
@@ -86,6 +86,79 @@ function runPackagedCli(
   });
 }
 
+test("call separates one cwd fact from exact answer bytes for every execution source", () => {
+  const command = parseExecution(["call", "worker", "work"]).command;
+  for (const source of ["input", "caller", "process", "world", "contract-worktree"] as const) {
+    for (const answer of ["", "answer", " leading\r\n\tlast\n", "\u{1f680}\u200dend"]) {
+      const result: Extract<AkumaInvocationResult, { action: "call" }> = {
+        kind: "akuma",
+        action: "call",
+        world: "/world" as WorldRoot,
+        result: {
+          kind: "called",
+          akuma: fixtureAkuId,
+          execution: { cwd: "/world/worktree", source },
+          dispatch: { kind: "none" },
+          alias: { kind: "none" },
+          observation: {
+            kind: "observed",
+            status: akumaObservation({
+              id: fixtureAkuId,
+              life: "asleep",
+              timeline: {
+                kind: "idle",
+                entries: [],
+                omitted: 0,
+                ...emptyReported,
+                outcome: {
+                  kind: "outcome",
+                  sequence: 1,
+                  turnSequence: 1,
+                  at: "2026-08-12T00:00:00.000Z",
+                  outcome: { kind: "answered", answer, historyId: "turn/1" },
+                },
+              },
+            }).status,
+          },
+        },
+      };
+      const prefix = "cwd  /world/worktree\n\n";
+      const text = renderAkumaText(command, result);
+      assert.equal(text, prefix + answer);
+      assert.deepEqual(Buffer.from(text.slice(prefix.length)), Buffer.from(answer));
+      assert.deepEqual(JSON.parse(renderAkumaJson(result)), result.result);
+    }
+  }
+});
+
+test("detached call exposes a cwd-free wait handle and separate coordinates", () => {
+  const result: Extract<AkumaInvocationResult, { action: "call" }> = {
+    kind: "akuma",
+    action: "call",
+    world: "/world" as WorldRoot,
+    result: {
+      kind: "called",
+      akuma: fixtureAkuId,
+      execution: { cwd: "/world/worktree", source: "contract-worktree" },
+      dispatch: { kind: "none" },
+      alias: { kind: "none" },
+      observation: { kind: "detached" },
+    },
+  };
+  const output = renderAkumaText(parseExecution(["call", "worker", "work"]).command, result);
+  assert.equal(
+    output,
+    [
+      fixtureAkuId,
+      "────────────────",
+      "cwd  /world/worktree",
+      "  world  /world",
+      `  wait  keiyaku wait ${fixtureAkuId} --timeout 5m`,
+    ].join("\n"),
+  );
+  assert.doesNotMatch(output, /-C |--cwd |next|please/u);
+});
+
 test("Akuma CLI parses root verbs without the removed namespace", () => {
   assert.deepEqual(parseArgv(["-C", "/world", "call", "claude", "-"]), {
     cwd: "/world",
@@ -118,10 +191,12 @@ test("Akuma CLI parses root verbs without the removed namespace", () => {
   assert.throws(() => parseArgv(["call", "claude", "--allowed", "none", "-"]), /unknown action: none/u);
   assert.throws(
     () => parseArgv(["call", "claude", "--readonly", "-"]),
-    (error: unknown) =>
-      error instanceof CliUsageError &&
-      /option --readonly is not valid for call/u.test(error.message) &&
-      !/--readonly/u.test(error.message.split("\n").slice(1).join("\n")),
+    (error: unknown) => {
+      if (!(error instanceof CliUsageError)) return false;
+      if (!/option --readonly is not valid for call/u.test(error.message)) return false;
+      const usage = error.message.split("\n").find((line) => line.startsWith("  accepts  keiyaku call "));
+      return usage !== undefined && !/--readonly/u.test(usage);
+    },
   );
   assert.deepEqual(parseArgv(["call", "claude", "--schema", "answer.schema.json", "--detach", "ship it"]), {
     command: {
@@ -275,15 +350,30 @@ test("Akuma CLI parses root verbs without the removed namespace", () => {
   });
   assert.throws(() => parseArgv(["wait", "aku/claude/*", "kei/review"]), /requires --any or --all/u);
   assert.equal(
-    (parseExecution(["wait", "aku/claude/1234abcd", "--timeout", "50s"]).command as Extract<ParsedExecution["command"], { command: "wait" }>).timeoutMs,
+    (
+      parseExecution(["wait", "aku/claude/1234abcd", "--timeout", "50s"]).command as Extract<
+        ParsedExecution["command"],
+        { command: "wait" }
+      >
+    ).timeoutMs,
     50_000,
   );
   assert.equal(
-    (parseExecution(["wait", "aku/claude/1234abcd", "--timeout", "10m"]).command as Extract<ParsedExecution["command"], { command: "wait" }>).timeoutMs,
+    (
+      parseExecution(["wait", "aku/claude/1234abcd", "--timeout", "10m"]).command as Extract<
+        ParsedExecution["command"],
+        { command: "wait" }
+      >
+    ).timeoutMs,
     600_000,
   );
   assert.equal(
-    (parseExecution(["wait", "aku/claude/1234abcd", "--timeout", "2h"]).command as Extract<ParsedExecution["command"], { command: "wait" }>).timeoutMs,
+    (
+      parseExecution(["wait", "aku/claude/1234abcd", "--timeout", "2h"]).command as Extract<
+        ParsedExecution["command"],
+        { command: "wait" }
+      >
+    ).timeoutMs,
     7_200_000,
   );
   for (const duration of ["5000", "1.5m", "01s", "-1s", "1d"]) {
@@ -306,7 +396,10 @@ test("Akuma CLI parses root verbs without the removed namespace", () => {
     () => parseArgv(["call", "claude", "reviewer", "-"]),
     /accepts either a prompt argument or stdin, not both/u,
   );
-  assert.throws(() => parseArgv(["interrupt", "aku\/claude\/1234abcd", "-"]), /unknown command/u);
+  assert.throws(() => parseArgv(["interrupt", "aku\/claude\/1234abcd", "-"]), {
+    name: "CliUsageError",
+    message: "✕ usage  keiyaku\n  given  interrupt\n  accepts  keiyaku <command> [options]\n  help  keiyaku --help",
+  });
   assert.throws(
     () => parseArgv(["tell", "aku\/claude\/1234abcd", "--interrupt"]),
     /requires a prompt argument or stdin/u,
@@ -405,7 +498,7 @@ function tellInvocation(
         diagnostic: string;
         child?: { code: number | null; signal: string | null; log: { path: string; from: number; to: number } };
       } = { kind: "pursuing", bodySequence: 1 },
-  ): Extract<AkumaInvocationResult, { action: "tell"; mode: "ordinary" }> {
+): Extract<AkumaInvocationResult, { action: "tell"; mode: "ordinary" }> {
   type TellEntry = Extract<
     (typeof observation.status.timeline.entries)[number],
     { kind: "row"; row: { kind: "tell" } }
@@ -1216,7 +1309,10 @@ test("Akuma status, wait, and history share public observations without embeddin
     }
     assert.equal(exact.mode, "exact");
     if (exact.mode !== "exact") throw new Error("expected exact history result");
-    assert.equal(renderAkumaText(parseExecution(["history", allocated.id, "--id", "turn/1"]).command, exact), "cli answer");
+    assert.equal(
+      renderAkumaText(parseExecution(["history", allocated.id, "--id", "turn/1"]).command, exact),
+      "cli answer",
+    );
     assert.deepEqual(JSON.parse(renderAkumaJson(exact)), {
       kind: "exact",
       id: allocated.id,
@@ -1377,7 +1473,7 @@ test("packaged CLI call writes representative success and failure exits", async 
   try {
     const answered = await runPackagedCli(["-C", root, "call", "worker", "answer"], { cwd: root, env });
     assert.equal(answered.code, 0);
-    assert.equal(answered.stdout, "finished");
+    assert.equal(answered.stdout, `cwd  ${realpathSync(root)}\n\nfinished`);
     assert.equal(answered.stderr, "");
     const answeredJson = await runPackagedCli(["-C", root, "call", "worker", "--json", "answer"], { cwd: root, env });
     assert.equal(answeredJson.code, 0);
@@ -1611,7 +1707,11 @@ test("linked and primary worktrees observe one Akuma World while Soul retains it
   if (!("kind" in fromPrimary) || fromPrimary.kind !== "akuma") throw new Error("expected primary Akuma status");
   assert.equal(fromLinked.kind, "akuma");
   assert.deepEqual(fromLinked, fromPrimary);
-  await moveAlias({ world: repository.path as import("../src/world.js").WorldRoot, alias: "@shared" as AkumaAlias, akuId: allocated.id });
+  await moveAlias({
+    world: repository.path as import("../src/world.js").WorldRoot,
+    alias: "@shared" as AkumaAlias,
+    akuId: allocated.id,
+  });
   const fromLinkedAlias = await invoke(parseExecution(["-C", linked, "status", "@shared"]));
   if (!("kind" in fromLinkedAlias) || fromLinkedAlias.kind !== "akuma" || fromLinkedAlias.action !== "status") {
     throw new Error("expected linked alias Akuma status");

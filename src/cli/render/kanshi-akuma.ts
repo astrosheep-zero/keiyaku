@@ -13,7 +13,6 @@ import {
   type TextRenderContext,
 } from "./terminal.js";
 
-const PLUMB = "  │ ";
 const NARROW_COLUMNS = 72;
 
 function mostRecentTimestamp(...values: readonly (string | null | undefined)[]): string | null {
@@ -42,7 +41,7 @@ function akumaMark(life: string): string {
       : life === "asleep"
         ? "○"
         : life === "killed"
-          ? "×"
+          ? "✕"
           : "?";
 }
 
@@ -75,7 +74,7 @@ function endpointFact(id: string, observed: string | undefined): string {
 
 function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly string[] {
   const section = report.akuma;
-  if (section.kind === "absent") return ["AKUMA // absent", "", `${PLUMB}akuma absent`];
+  if (section.kind === "absent") return ["AKUMA // absent", "", "  akuma absent"];
   if (section.kind === "failed")
     return ["AKUMA // unavailable", "", tone(`! ${safeText(section.failure.message)}`, "alert", context.color)];
   const rows = section.value.rows;
@@ -99,7 +98,7 @@ function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly
       const lines = [identityLine(mark, row.id, `${aliases} · ${[...key, ...relation].join(" · ")}`.trim())];
       return snapshot === undefined
         ? lines
-        : [...lines, ...plumbFacts([boundedActivity(snapshot, context.columns, PLUMB)], context.columns)];
+        : [...lines, ...plumbFacts([boundedActivity(snapshot, context.columns, "  ")], context.columns)];
     }
     const identity = aliases.length === 0 ? row.id : `${row.id} ${aliases}`;
     const lines = entityLines({
@@ -112,14 +111,14 @@ function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly
     });
     return snapshot === undefined
       ? lines
-      : [...lines, ...plumbFacts([boundedActivity(snapshot, context.columns, PLUMB)], context.columns)];
+      : [...lines, ...plumbFacts([boundedActivity(snapshot, context.columns, "  ")], context.columns)];
   });
-  const header = `AKUMA // ${rows.length} recent`;
   const rendered = renderSectionBlock({
     name: "AKUMA",
     rows: rowLines,
     hasMore: section.value.hasMore,
   });
+  const header = `AKUMA // ${rows.length} recent`;
   return [header, ...rendered.slice(1)];
 }
 

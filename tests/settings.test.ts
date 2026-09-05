@@ -529,8 +529,8 @@ test("settings CLI maps KEIYAKU_HOME only at the process edge", async () => {
     const result = await invoke(parsed, { cwd: value.project, environment: { KEIYAKU_HOME: value.home } });
     const observed = result as SettingsInvocationResult;
     assert.equal(observed.kind, "settings");
-    assert.match(renderSettingsText(observed.value), /^settings\n  user read(?:\n    )?/u);
-    assert.match(renderSettingsText(observed.value), /    entry default user\n      \{/u);
+    assert.match(renderSettingsText(observed.value), /^settings\n  user  read(?:\n    )?/u);
+    assert.match(renderSettingsText(observed.value), /    entry  default · user\n      value  object \(2\)\n        kind  "bundle"\n        gates  list \(1\)\n          "0"  "reviewed"/u);
     assert.deepEqual((settingsJsonValue(observed.value) as { namespaces: readonly unknown[] }).namespaces, [
       observed.value.namespace("gates"),
     ]);
@@ -552,11 +552,11 @@ test("settings text preserves long paths and opaque provider values at the termi
     const observed = await settings({ root: value.project, home: longHome });
     const text = renderSettingsText(observed, 72);
     assert.match(text, new RegExp(longPath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
-    assert.match(text, /"LONG_VALUE": "x{100}"/u);
+    assert.match(text, /LONG_VALUE  "x{100}"/u);
     assert.ok(
       text
         .split("\n")
-        .filter((line) => !line.includes("settings.json") && !line.includes('"LONG_VALUE"'))
+        .filter((line) => !line.includes("settings.json") && !line.includes("LONG_VALUE"))
         .every((line) => displayColumns(line) <= 72),
     );
   } finally {

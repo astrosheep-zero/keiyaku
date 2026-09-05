@@ -708,16 +708,21 @@ test("CLI renders confirmation-required and confirmation-mismatch refusals", asy
     const rejectedRefusal = rejected as RefusedResult;
     assert.equal(
       renderRefusal(requiredRefusal, { columns: 1000, color: false }),
-      ["! nuke refused", `   nuke confirmation required world=${world}`, `   keiyaku nuke --confirm ${world}`].join(
-        "\n",
-      ),
+      [
+        "✕ nuke refused",
+        "  nuke confirmation required",
+        `  world  ${world}`,
+        `  nuke  keiyaku nuke --confirm '${world}'`,
+      ].join("\n"),
     );
     assert.equal(
       renderRefusal(rejectedRefusal, { columns: 1000, color: false }),
       [
-        "! nuke refused",
-        `   nuke confirmation mismatch world=${world} confirmation=wrong`,
-        `   keiyaku nuke --confirm ${world}`,
+        "✕ nuke refused",
+        "  nuke confirmation mismatch",
+        `  world  ${world}`,
+        "  confirmation  wrong",
+        `  nuke  keiyaku nuke --confirm '${world}'`,
       ].join("\n"),
     );
   } finally {

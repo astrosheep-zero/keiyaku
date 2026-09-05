@@ -1,8 +1,8 @@
 import { archetypeName } from "../../akuma/identity.js";
 import type { CatalogQuery } from "../../library/catalog.js";
 import { parseTaskNamespaceSelector } from "../../task/catalog.js";
-import { CliUsageError } from "../usage.js";
-import { renderContractUsage, type ContractCommand } from "./contract-help.js";
+import { CliUsageError, commandGuide } from "../usage.js";
+import { CONTRACT_COMMAND_SPECS, type ContractCommand } from "./contract-help.js";
 
 export {
   CONTRACT_COMMAND_SPECS,
@@ -133,7 +133,7 @@ function optionalFlag(
 }
 
 function refuse(command: ContractCommand, message: string): never {
-  throw new CliUsageError(message, renderContractUsage(command));
+  throw new CliUsageError(message, commandGuide(command, CONTRACT_COMMAND_SPECS[command].usage));
 }
 
 function parseGateBundleNames(parts: ParsedContractParts, command: "bind" | "amend"): readonly string[] | undefined {

@@ -19,13 +19,13 @@ export function gateFact(report: ContractGateReport): string {
 }
 
 export function candidateFact(delivery: ContractRow["delivery"]): string {
-  return delivery === null ? "no candidate" : "candidate";
+  return `candidate  ${delivery === null ? "none" : "present"}`;
 }
 
 export function afterWording(edge: ContractAfterEdge): string {
-  if (edge.endpoint.kind === "claimed") return `after ${edge.contractId} (claimed)`;
+  if (edge.endpoint.kind === "claimed") return `after  ${edge.contractId} · claimed`;
   const condition = edge.endpoint.kind === "active" ? edge.endpoint.phase : edge.endpoint.kind;
-  return `blocked by ${edge.contractId} (${condition})`;
+  return `blocked by  ${edge.contractId} · ${condition}`;
 }
 
 export function dependentWording(dependent: ContractDependent): string {
@@ -67,14 +67,33 @@ export function displayGitId(value: string, abbreviations: ReadonlyMap<string, s
   return abbreviations.get(value) ?? value;
 }
 
+export function targetFacts(row: ContractRow, abbreviations: ReadonlyMap<string, string>): readonly string[] {
+  if (row.target === null) return ["target  none"];
+  const name = row.target.startsWith("refs/heads/") ? row.target.slice("refs/heads/".length) : row.target;
+  const head = row.targetObservation?.head;
+  const coordinate = head ? ` @ ${displayGitId(head, abbreviations)}` : head === null ? " · head absent" : "";
+  const lag =
+    row.targetLag.kind === "unknown"
+      ? " · behind unknown"
+      : row.targetLag.kind === "counted"
+        ? ` · behind ${row.targetLag.behind}`
+        : "";
+  const subject =
+    row.targetLag.kind === "unknown" || row.targetLag.kind === "counted" ? row.targetLag.subject : undefined;
+  return [
+    `target  ${name}${coordinate}${lag}`,
+    ...(subject === undefined || subject.path === row.worktreePath ? [] : [`lag worktree  ${subject.path}`]),
+    ...targetMovementFacts(row, abbreviations),
+  ];
+}
+
 /** Render the pinned delivery target and the same-epoch observed target head. */
 export function targetMovementFacts(row: ContractRow, abbreviations: ReadonlyMap<string, string>): readonly string[] {
   if (row.target === null || row.targetObservation?.drift !== true) return [];
-  if (row.delivery === null) return ["target moved"];
+  if (row.delivery === null) return ["target moved  observed"];
   return [
-    "target moved",
-    `${displayGitId(row.delivery.integration.snapshot, abbreviations)} -> ${
-      row.targetObservation.head === null ? "null" : displayGitId(row.targetObservation.head, abbreviations)
+    `target moved  ${displayGitId(row.delivery.integration.snapshot, abbreviations)} -> ${
+      row.targetObservation.head === null ? "absent" : displayGitId(row.targetObservation.head, abbreviations)
     }`,
   ];
 }

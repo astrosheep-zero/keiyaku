@@ -94,7 +94,7 @@ test("BindDraftError keeps the original failure when draft custody is a warning"
   assert.equal(error.original, original);
   assert.equal(error.draft.path, undefined);
   assert.match(error.draft.warning ?? "", /could not be preserved/u);
-  assert.match(renderBindDraftReceipt(error.draft), /^warning: /u);
+  assert.match(renderBindDraftReceipt(error.draft), /^! draft warning  /u);
 });
 
 test("draft custody failures become warnings instead of replacing bind failure", async () => {
@@ -105,5 +105,5 @@ test("draft custody failures become warnings instead of replacing bind failure",
 
   assert.equal(receipt.path, undefined);
   assert.match(receipt.warning ?? "", /could not be preserved/u);
-  assert.match(renderBindDraftReceipt(receipt), /^warning: /u);
+  assert.match(renderBindDraftReceipt(receipt), /^! draft warning  /u);
 });

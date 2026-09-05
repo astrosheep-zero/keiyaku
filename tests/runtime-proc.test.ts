@@ -24,6 +24,7 @@ import {
   processExists,
   readPidReceipt,
   removeTempDirectory,
+  waitForFixtureFile,
   waitForProcessExit,
 } from "./support/process.js";
 
@@ -43,6 +44,73 @@ function restoreEnvironment(name: string, value: string | undefined): void {
   if (value === undefined) delete process.env[name];
   else process.env[name] = value;
 }
+
+test("fixture file barriers observe present and later files and reject missing evidence", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-file-barrier-"));
+  const file = join(root, "ready");
+  try {
+    await assert.rejects(waitForFixtureFile(file, 0), /timed out waiting for barrier file/u);
+    const waiting = waitForFixtureFile(file);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    writeFileSync(file, "ready");
+    await waiting;
+    await waitForFixtureFile(file, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("spawn-capable fixture cleanup waits for a live writer before deleting its directory", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-live-body-cleanup-"));
+  const body = join(root, "akuma-body.mjs");
+  const receipt = join(root, "body-pids");
+  const restoreReceipt = installAkumaBodyPidReceipt(receipt);
+  writeFileSync(
+    body,
+    [
+      'import { writeFileSync } from "node:fs";',
+      `process.stdin.once("data", () => { writeFileSync(${JSON.stringify(join(root, "late-write"))}, "done"); process.stdin.pause(); });`,
+      "process.stdin.resume();",
+    ].join("\n"),
+  );
+  const child = spawn(process.execPath, [body], { env: process.env, stdio: ["pipe", "ignore", "pipe"] });
+  const exited = new Promise<number | null>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", resolve);
+  });
+  let cleanup: ReturnType<typeof cleanupSpawnCapableFixture> | undefined;
+  try {
+    await waitForFile(receipt);
+    let settled = false;
+    cleanup = cleanupSpawnCapableFixture({
+      fixturePath: root,
+      pidReceiptPath: receipt,
+      timeoutMs: 2_000,
+      operationFailed: false,
+    });
+    void cleanup.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(settled, false);
+    assert.equal(existsSync(root), true);
+    child.stdin?.end("release\n");
+    assert.equal(await exited, 0, "the child must finish its late write before directory removal");
+    assert.deepEqual(await cleanup, { kind: "removed" });
+    assert.equal(existsSync(root), false);
+  } finally {
+    restoreReceipt();
+    if (child.pid !== undefined && processExists(child.pid)) child.kill("SIGKILL");
+    await exited;
+    await cleanup?.catch(() => undefined);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("spawn-capable fixture cleanup retains both delayed and settled ambiguous failed launches", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-delayed-body-receipt-"));

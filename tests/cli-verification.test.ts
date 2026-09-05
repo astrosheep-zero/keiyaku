@@ -174,14 +174,15 @@ test("audit renders the complete producer-bounded Verification summary as a subo
   const text = renderText(audit, { columns: 400, color: false });
   const payload = `summary\n\n${summary}\n\n`;
   assert.ok(text.includes(payload) && text.includes("final stderr diagnostic"));
-  assert.ok(text.indexOf("✓ candidate") < text.indexOf("! verification"));
-  assert.ok(text.indexOf(payload) < text.indexOf("✓ target"));
+  assert.ok(text.includes("  candidate") && text.indexOf("  candidate") < text.indexOf("! verification"));
+  assert.ok(text.indexOf(payload) < text.indexOf("  target"));
+  assert.doesNotMatch(text, /^✓ (?:candidate|target)/mu);
   if (audit.report.candidate.kind === "ready") {
     const { identity } = audit.report.candidate;
     assert.match(
       text,
       new RegExp(
-        `tender commit ${identity.tenderSnapshot}[\\s\\S]*integration commit ${identity.integration.snapshot}[\\s\\S]*content identity \\(not commit\\) ${identity.integration.changeId}`,
+        `tender commit  ${identity.tenderSnapshot}[\\s\\S]*integration commit  ${identity.integration.snapshot}[\\s\\S]*content identity \\(not commit\\)  ${identity.integration.changeId}`,
       ),
     );
   }

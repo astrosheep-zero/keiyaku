@@ -39,7 +39,7 @@ test("help resolves the longest legal command-word prefix before syntax scanning
 
 test("each grammar owner renders its own namespace and leaf help", () => {
   assert.match(renderRootHelp(), /^keiyaku — Contract, Task, and Akuma control for one repository$/mu);
-  assert.match(renderRootHelp(), /^usage: keiyaku <command> \[options\]$/mu);
+  assert.match(renderRootHelp(), /^usage  keiyaku <command> \[options\]$/mu);
   assert.match(renderRootHelp(), /^Contract — standing acceptance$/mu);
   assert.match(renderRootHelp(), /^Task — plan memory$/mu);
   assert.match(renderRootHelp(), /^Akuma — invoke capability$/mu);
@@ -62,23 +62,23 @@ test("each grammar owner renders its own namespace and leaf help", () => {
   assert.match(settingsHelp, /^Recognized settings:$/mu);
   assert.match(settingsHelp, /^  providers\s+the available Akuma and how each is run$/mu);
   assert.match(settingsHelp, /A rejected\nvalue's diagnostic states the expected shape\./u);
-  assert.match(settingsHelp, /^usage: keiyaku settings \[--json\]$/mu);
-  assert.match(renderContractHelp("bind"), /usage: keiyaku bind \[--task <task\/\.\.\.>\]/u);
+  assert.match(settingsHelp, /^usage  keiyaku settings \[--json\]$/mu);
+  assert.match(renderContractHelp("bind"), /usage  keiyaku bind \[--task <task\/\.\.\.>\]/u);
   assert.match(renderContractHelp("bind"), /stdin is Contract Markdown:/u);
   assert.match(renderContractHelp("bind"), /Region uses one closed fence with no info string or exactly 'txt'/u);
   assert.match(renderContractHelp("bind"), /Verification uses one or more closed bash, zsh, or pwsh fences/u);
   assert.match(renderContractHelp("deliver"), /--message <text>\] \[--include-dirty\] \[--materialize-conflict\]/u);
-  assert.match(renderContractHelp("review"), /usage: keiyaku review .*--satisfied \| --unsatisfied/u);
-  assert.match(renderContractHelp("show"), /usage: keiyaku show \[<contract>\|@<contract>\] \[--json\]/u);
-  assert.match(renderContractHelp("ls"), /usage: keiyaku ls task\[\/\] \[--limit <count>\] \[--json\]/u);
+  assert.match(renderContractHelp("review"), /usage  keiyaku review .*--satisfied \| --unsatisfied/u);
+  assert.match(renderContractHelp("show"), /usage  keiyaku show \[<contract>\|@<contract>\] \[--json\]/u);
+  assert.match(renderContractHelp("ls"), /usage  keiyaku ls task\[\/\] \[--limit <count>\] \[--json\]/u);
   assert.doesNotMatch(renderContractHelp("ls"), /--all/u);
   assert.match(renderTaskHelp(), /task update <TaskId>/u);
-  assert.match(renderTaskHelp("tree"), /usage: keiyaku task tree <TaskId>/u);
+  assert.match(renderTaskHelp("tree"), /usage  keiyaku task tree <TaskId>/u);
   assert.match(renderTaskHelp("update"), /--body <text>\|- \| --append <text>/u);
   assert.doesNotMatch(renderTaskHelp("update"), /--append <text>\|-|--note <text>\|-/u);
   assert.doesNotMatch(renderTaskHelp(), /--full/u);
   assert.doesNotMatch(renderTaskHelp(), /--contract|--no-contract/u);
-  assert.match(renderTaskHelp("compose"), /usage: keiyaku task compose \[--actor <actor>\] \[--plan\] \[--json\] -/u);
+  assert.match(renderTaskHelp("compose"), /usage  keiyaku task compose \[--actor <actor>\] \[--plan\] \[--json\] -/u);
   assert.match(renderTaskHelp("add"), /--actor <actor>/u);
   assert.doesNotMatch(renderTaskHelp("update"), /--actor/u);
   assert.doesNotMatch(renderTaskHelp("start"), /--actor/u);
@@ -93,7 +93,7 @@ test("each grammar owner renders its own namespace and leaf help", () => {
     [
       "Send one prompt to an existing Akuma and wake it.",
       "",
-      "usage: keiyaku tell <aku/...|@alias> [--interrupt] [--schema <file>] [--json] (<prompt> | -)",
+      "usage  keiyaku tell <aku/...|@alias> [--interrupt] [--schema <file>] [--json] (<prompt> | -)",
       "",
       "Give <prompt> as one argument, or use - to read stdin.",
       "--interrupt ends the current Body before recording the prompt and waking its successor.",
@@ -118,7 +118,7 @@ test("help projections reflow at the requested terminal width without splitting 
     );
   }
   assert.match(root, /bind\s+Create one Contract/u);
-  assert.match(history, /usage: keiyaku history/u);
+  assert.match(history, /usage  keiyaku history/u);
   assert.match(history, /--limit/u);
   assert.match(history, /<count>/u);
   assert.match(history, /--last/u);
@@ -128,7 +128,7 @@ test("amend leaf help enumerates the operation grammar", () => {
   const help = renderContractHelp("amend");
   assert.match(
     help,
-    /usage: keiyaku amend \[<contract>\|@<contract>\] \[--after <kei\/\.\.\.> \.\.\. \| --clear-after\] \[--gates <name,\.\.\.>\] \[--actor <actor>\] \[--json\] \[-\]/u,
+    /usage  keiyaku amend \[<contract>\|@<contract>\] \[--after <kei\/\.\.\.> \.\.\. \| --clear-after\] \[--gates <name,\.\.\.>\] \[--actor <actor>\] \[--json\] \[-\]/u,
   );
   assert.match(help, /## Replace: Context\|Objective\|Design\|Region\|Criteria\|Verification\|<extension>/u);
   assert.match(help, /## Append: Context\|Objective\|Design\|Criteria\|<extension>/u);
@@ -140,12 +140,20 @@ test("amend leaf help enumerates the operation grammar", () => {
 test("deliver leaf help explains candidate capture, placement, review, and conflict continuation", () => {
   const help = renderContractHelp("deliver");
   assert.match(help, /The subject is the whole Contract\. An Arc names the chapter/u);
-  assert.match(help, /--include-dirty captures the complete final\s+non-ignored worktree bytes through a private index/u);
+  assert.match(
+    help,
+    /--include-dirty captures the complete final\s+non-ignored worktree bytes through a private index/u,
+  );
   assert.match(help, /shared index\s+is unmerged \(UU\); the branch and real index stay untouched/u);
-  assert.match(help, /Delivering again replaces the candidate and stales any earlier review/u);
-  assert.match(help, /Deliver never satisfies a review gate/u);
+  assert.match(help, /same captured content\s+continues its non-terminal completion/u);
+  assert.match(help, /Only changed candidate content stales earlier review evidence/u);
+  assert.match(help, /Deliver records no review verdict/u);
+  assert.doesNotMatch(help, /Delivering again replaces|first, then|then testify/u);
   assert.match(help, /--materialize-conflict[\s\S]*preserved\s+as the handoff base/u);
-  assert.match(help, /After conflict resolution,[\s\S]*without git add or commit/u);
+  assert.match(
+    help,
+    /--include-dirty reads complete final non-ignored worktree\s+bytes without requiring git add or commit/u,
+  );
   assert.doesNotMatch(renderRootHelp(), /Capture the complete non-ignored worktree tree/u);
 });
 
@@ -157,7 +165,8 @@ test("review leaf help distinguishes pre-delivery testimony from placement", () 
     /Pre-delivery review is real\s+testimony[\s\S]*without a delivered\s+candidate it can never place/u,
   );
   assert.match(help, /a verdict that places cannot be taken back/u);
-  assert.match(help, /Verify the complete current subject first, then testify/u);
+  assert.match(help, /A blocked placement leaves the verdict recorded and the Contract active/u);
+  assert.doesNotMatch(help, /Verify the complete current subject first|then testify|next step/iu);
   assert.match(help, /--unsatisfied records what is not met and never requests placement/u);
 });
 
@@ -195,7 +204,8 @@ test("amend syntax refusal keeps the stored usage block", () => {
     (error: unknown) =>
       error instanceof CliUsageError &&
       error.message.includes("amend requires stdin or --after, --clear-after, or --gates") &&
-      error.message.includes("usage: keiyaku amend [<contract>|@<contract>]") &&
+      error.message.includes("accepts  keiyaku amend [<contract>|@<contract>]") &&
+      error.message.includes("help  keiyaku amend --help") &&
       !error.message.includes("minimal stdin"),
   );
 });
@@ -205,8 +215,13 @@ test("syntax refusal retains the deepest reached grammar", () => {
     () => parseArgv(["task", "unknown"]),
     (error: unknown) =>
       error instanceof CliUsageError &&
-      error.message.includes("usage: keiyaku task <command>") &&
-      error.message.includes("task show <TaskId>"),
+      error.message ===
+        [
+          "✕ usage  keiyaku task",
+          "  given  unknown",
+          "  accepts  keiyaku task <command> ...",
+          "  help  keiyaku task --help",
+        ].join("\n"),
   );
 });
 
@@ -230,7 +245,7 @@ test("help is stdout zero and does not enter an absent world", async () => {
     process.stdout.write = writeStdout;
     process.stderr.write = writeStderr;
   }
-  assert.match(stdout, /^usage: keiyaku task <command>/u);
+  assert.match(stdout, /^usage  keiyaku task <command>/u);
   assert.equal(stderr, "");
   assert.doesNotMatch(stdout, /^\{/u);
 });
@@ -278,7 +293,10 @@ test("ordinary CLI help, usage, and JSON end with one LF", async () => {
   assert.equal(usage.stdout, "");
   assert.equal(usage.stderr.endsWith("\n"), true);
   assert.equal(usage.stderr.endsWith("\n\n"), false);
-  assert.match(usage.stderr, /^unknown command: \nkeiyaku — Contract, Task, and Akuma control/u);
+  assert.equal(
+    usage.stderr,
+    ["✕ usage  keiyaku", "  accepts  keiyaku <command> [options]", "  help  keiyaku --help", ""].join("\n"),
+  );
 
   const json = await captureMain(["-C", mkdtempSync(join(tmpdir(), "keiyaku-cli-lf-")), "task", "ls", "--json"]);
   assert.equal(json.exit, 1);
@@ -305,6 +323,6 @@ test("bare ls is help-only even when its cwd cannot be read", async () => {
     process.stdout.write = writeStdout;
     process.stderr.write = writeStderr;
   }
-  assert.match(stdout, /^List one identity directory\.\n\nusage: keiyaku ls task\[\/\]/u);
+  assert.match(stdout, /^List one identity directory\.\n\nusage  keiyaku ls task\[\/\]/u);
   assert.equal(stderr, "");
 });

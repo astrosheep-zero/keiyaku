@@ -37,6 +37,9 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
   const root = mkdtempSync(join(tmpdir(), "keiyaku-plugin-square-"));
   const prior = {
     CODEX_THREAD_ID: process.env.CODEX_THREAD_ID,
+    CLAUDE_CODE_SESSION_ID: process.env.CLAUDE_CODE_SESSION_ID,
+    OPENCODE_SESSION_ID: process.env.OPENCODE_SESSION_ID,
+    SQUARE_PI_SESSION_ID: process.env.SQUARE_PI_SESSION_ID,
     SQUARE_PARTICIPANT_NAME: process.env.SQUARE_PARTICIPANT_NAME,
     SQUARE_HOST_LEDGER_LOCAL: process.env.SQUARE_HOST_LEDGER_LOCAL,
     SQUARE_HOST_LEDGER_USER: process.env.SQUARE_HOST_LEDGER_USER,
@@ -49,6 +52,7 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     });
     mkdirSync(join(root, ".square"), { recursive: true });
     process.env.CODEX_THREAD_ID = "caller";
+    process.env.SQUARE_PI_SESSION_ID = "fixture-pi-session";
     process.env.SQUARE_PARTICIPANT_NAME = "Alice";
     process.env.SQUARE_HOST_LEDGER_LOCAL = join(root, "local-ledger");
     process.env.SQUARE_HOST_LEDGER_USER = join(root, "user-ledger");
@@ -85,11 +89,22 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     assert.equal(existsSync(squarePath(root)), true);
     assert.deepEqual(await expressions(squarePath(root)), [
       { actor: "Alice", body: "aku/caller called aku/called\nignore if you have already seen this.", mentions: [] },
-      { actor: "aku/answered", body: "aku/answered turn/1 (@Alice) kei/example\n✓ came back\nignore if you have already seen this.", mentions: ["Alice"] },
-      { actor: "aku/answered", body: "aku/answered turn/2 (@Alice) kei/example\n✓ came back\nignore if you have already seen this.", mentions: ["Alice"] },
+      {
+        actor: "aku/answered",
+        body: "aku/answered turn/1 (@Alice) kei/example\n✓ came back\nignore if you have already seen this.",
+        mentions: ["Alice"],
+      },
+      {
+        actor: "aku/answered",
+        body: "aku/answered turn/2 (@Alice) kei/example\n✓ came back\nignore if you have already seen this.",
+        mentions: ["Alice"],
+      },
     ]);
 
     delete process.env.CODEX_THREAD_ID;
+    delete process.env.CLAUDE_CODE_SESSION_ID;
+    delete process.env.OPENCODE_SESSION_ID;
+    delete process.env.SQUARE_PI_SESSION_ID;
     delete process.env.SQUARE_PARTICIPANT_NAME;
     const fallback = await squarePlugin.activate({
       world: root as unknown as WorldRoot,
@@ -110,9 +125,21 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     });
     assert.deepEqual(await expressions(squarePath(root)), [
       { actor: "Alice", body: "aku/caller called aku/called\nignore if you have already seen this.", mentions: [] },
-      { actor: "aku/answered", body: "aku/answered turn/1 (@Alice) kei/example\n✓ came back\nignore if you have already seen this.", mentions: ["Alice"] },
-      { actor: "aku/answered", body: "aku/answered turn/2 (@Alice) kei/example\n✓ came back\nignore if you have already seen this.", mentions: ["Alice"] },
-      { actor: "aku/failed", body: "aku/failed turn/3\n× provider failed\nignore if you have already seen this.", mentions: [] },
+      {
+        actor: "aku/answered",
+        body: "aku/answered turn/1 (@Alice) kei/example\n✓ came back\nignore if you have already seen this.",
+        mentions: ["Alice"],
+      },
+      {
+        actor: "aku/answered",
+        body: "aku/answered turn/2 (@Alice) kei/example\n✓ came back\nignore if you have already seen this.",
+        mentions: ["Alice"],
+      },
+      {
+        actor: "aku/failed",
+        body: "aku/failed turn/3\n× provider failed\nignore if you have already seen this.",
+        mentions: [],
+      },
     ]);
     const square = await Square.at({ path: squarePath(root) });
     try {

@@ -108,7 +108,7 @@ test("the bundled plugin contains all six skills", () => {
 
 test("bundled instructions keep facade and standalone Akuma call surfaces distinct", () => {
   const plugin = join(installAssetsRoot(), "plugins", "keiyaku", "skills");
-  const call = renderAkumaUsage("call").slice("usage: keiyaku ".length);
+  const call = renderAkumaUsage("call").slice("usage  keiyaku ".length);
   const canonical = `keiyaku -C <cwd> ${call}`;
   const standalone = canonical.replace(" [--contract <kei/...>]", "");
   const rootSkill = readFileSync(join(plugin, "keiyaku", "SKILL.md"), "utf8");

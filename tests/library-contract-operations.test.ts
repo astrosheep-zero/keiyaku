@@ -29,8 +29,8 @@ import {
   makeGitRepository,
   snapshotGitRepository,
   withGitShim,
-  waitForFile,
 } from "./support/git.js";
+import { waitForFixtureFile } from "./support/process.js";
 import { bind, commitCandidate, document, refused, repositoryWithMain } from "./support/library-verbs.js";
 
 type ContractHandle = Pick<Keiyaku, "state">;
@@ -959,6 +959,25 @@ test("public review, abandon, and Arc preserve their ruled testimony", async () 
   );
 });
 
+async function interruptStartedDelivery(contract: Keiyaku, marker: string) {
+  const controller = new AbortController();
+  const pending = contract.deliver({ includeDirty: true, signal: controller.signal });
+  try {
+    await Promise.race([
+      waitForFixtureFile(marker),
+      pending.then(() => {
+        throw new Error("delivery completed before verification-start evidence");
+      }),
+    ]);
+  } catch (error) {
+    controller.abort();
+    await pending.catch(() => undefined);
+    throw error;
+  }
+  controller.abort();
+  return await pending;
+}
+
 test("same captured content continues an admitted delivery without another delivery fact", async () => {
   const repository = repositoryWithMain();
   const marker = join(repository.path, "verification-started");
@@ -980,11 +999,7 @@ test("same captured content continues an admitted delivery without another deliv
   );
   writeFileSync(join(worktree, "candidate.txt"), "same\n");
 
-  const controller = new AbortController();
-  const pending = contract.deliver({ includeDirty: true, signal: controller.signal });
-  await waitForFile(marker);
-  controller.abort();
-  const interrupted = expectMutation(await pending);
+  const interrupted = expectMutation(await interruptStartedDelivery(contract, marker));
   const admittedState = await contract.state();
   const deliveryEntry = admittedState.delivery?.entry;
   const changeId = admittedState.delivery?.data.integration.changeId;
@@ -1022,11 +1037,7 @@ test("changed captured content replaces an admitted delivery candidate", async (
   );
   writeFileSync(join(worktree, "candidate.txt"), "first\n");
 
-  const controller = new AbortController();
-  const pending = contract.deliver({ includeDirty: true, signal: controller.signal });
-  await waitForFile(marker);
-  controller.abort();
-  await pending;
+  await interruptStartedDelivery(contract, marker);
   const first = await contract.state();
   const firstEntry = first.delivery?.entry;
   const firstChangeId = first.delivery?.data.integration.changeId;

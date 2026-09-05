@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, unlinkSync, watch, writeFileSync } from "node:fs";
+import { drainPluginRuntime } from "../src/plugin/runtime.js";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { waitForFixtureFile as waitForFile } from "./support/process.js";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
@@ -128,43 +130,6 @@ function configureDeferredBodyEndPlugin(root: string): DeferredBodyEnd {
     }),
   );
   return { started, release, settled, turnStarted, turnRelease, turnSettled };
-}
-
-async function waitForFile(path: string): Promise<void> {
-  if (existsSync(path)) return;
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const watcher = watch(dirname(path), (_event, name) => {
-        if (name === basename(path) && existsSync(path)) {
-          clearTimeout(timeout);
-          watcher.close();
-          resolve();
-        }
-      });
-      const timeout = setTimeout(() => {
-        watcher.close();
-        reject(new Error(`timed out waiting for barrier file: ${path}`));
-      }, 5_000);
-      if (existsSync(path)) {
-        clearTimeout(timeout);
-        watcher.close();
-        resolve();
-        return;
-      }
-      watcher.on("error", (error) => {
-        clearTimeout(timeout);
-        watcher.close();
-        reject(error);
-      });
-    });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EMFILE") throw error;
-    const deadline = Date.now() + 5_000;
-    while (!existsSync(path)) {
-      if (Date.now() >= deadline) throw new Error(`timed out waiting for barrier file: ${path}`);
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
-  }
 }
 
 async function akumaAt(root: string, input?: { home?: string; settings?: Awaited<ReturnType<typeof settings>> }) {
@@ -673,6 +638,7 @@ test("turn owner folds a rejected completion while the event stream remains open
     assert.ok(outcome, JSON.stringify(rows));
     assert.deepEqual(outcome.outcome, { kind: "failed", diagnostic: "completion rejected" });
   } finally {
+    await drainPluginRuntime(root);
     rmSync(root, { recursive: true, force: true });
   }
 });

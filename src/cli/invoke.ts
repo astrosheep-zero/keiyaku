@@ -7,7 +7,7 @@ import type { TaskInvocationResult } from "./commands/task-invoke.js";
 import {
   assertExplicitRepoUse,
   CliUsageError,
-  renderCommandUsage,
+  usageGuideForCommand,
   type ParsedCommand,
   type ParsedExecution,
 } from "./parse.js";
@@ -531,8 +531,8 @@ export async function invoke(
     );
   } catch (error) {
     if (error instanceof Error && "executionReceipt" in error) throw error;
-    if (error instanceof CliUsageError && error.projection === undefined) {
-      throw new CliUsageError(error.diagnostic, renderCommandUsage(invocation.command));
+    if (error instanceof CliUsageError && error.guide === undefined) {
+      throw new CliUsageError(error.diagnostic, usageGuideForCommand(invocation.command));
     }
     throw error;
   }

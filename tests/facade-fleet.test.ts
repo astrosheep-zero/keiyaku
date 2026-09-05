@@ -40,6 +40,7 @@ import { matchesAkumaGlob, parseAkumaAlias, parseAkumaGlob } from "../src/identi
 import { addressAkumaSet, resolveNamedAddress } from "../src/library/address.js";
 import { observeKanshi } from "../src/kanshi/read.js";
 import { publishDispatch } from "../src/dispatch/index.js";
+import { drainPluginRuntime } from "../src/plugin/runtime.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { contractId } from "../src/core/facts/types.js";
 import { taskDocument as creatorTask, writeTaskAuthority as writeCreatorTask } from "./support/task.js";
@@ -597,6 +598,7 @@ test("facade ls reads exactly one selected identity directory", async () => {
     );
     assert.deepEqual((await Keiyaku.ls({ query: { kind: "akuma", archetype: "reviewer" }, path: root })).rows, []);
   } finally {
+    await drainPluginRuntime(root);
     rmSync(root, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
   }
@@ -1594,7 +1596,10 @@ test("CLI wait and kill expose Contract selector world refusal as typed usage", 
   const text = await capture(["-C", worldB, "--repo", worldB, "wait", "kei/foreign", "--timeout", "0ms"]);
   assert.equal(text.code, 1);
   assert.equal(text.stdout, "");
-  assert.equal(text.stderr, `akuma-not-in-world ${worldB} ${born.id}\n`);
+  assert.equal(
+    text.stderr,
+    `✕ selector  akuma-not-in-world\n  world  ${worldB}\n  given  ${born.id}\n  accepts  keiyaku wait <akuma-selector>... [--any | --all] [--timeout <duration>] [--json]\n  help  keiyaku wait --help\n`,
+  );
   assert.doesNotMatch(text.stderr, /is not born/u);
   const json = await capture(["-C", worldB, "--repo", worldB, "wait", "kei/foreign", "--json", "--timeout", "0ms"]);
   assert.equal(json.code, 1);
@@ -1604,7 +1609,10 @@ test("CLI wait and kill expose Contract selector world refusal as typed usage", 
   const killText = await capture(["-C", worldB, "--repo", worldB, "kill", "kei/foreign"]);
   assert.equal(killText.code, 1);
   assert.equal(killText.stdout, "");
-  assert.equal(killText.stderr, `akuma-not-in-world ${worldB} ${born.id}\n`);
+  assert.equal(
+    killText.stderr,
+    `✕ selector  akuma-not-in-world\n  world  ${worldB}\n  given  ${born.id}\n  accepts  keiyaku kill <akuma-selector>... [--json]\n  help  keiyaku kill --help\n`,
+  );
   assert.doesNotMatch(killText.stderr, /is not born/u);
   const killJson = await capture(["-C", worldB, "--repo", worldB, "kill", "kei/foreign", "--json"]);
   assert.equal(killJson.code, 1);

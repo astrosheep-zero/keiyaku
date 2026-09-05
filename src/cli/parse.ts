@@ -3,10 +3,12 @@ import {
   parseTaskCommand,
   renderTaskHelp,
   renderTaskUsage,
+  taskUsageGuide,
   type ParsedTaskCommand,
   type TaskAction,
 } from "./commands/task.js";
 import {
+  akumaUsageGuide,
   isAkumaAction,
   parseAkumaCommand,
   renderAkumaHelp,
@@ -17,6 +19,7 @@ import {
 } from "./commands/akuma.js";
 import {
   INSTALL_ROOT_PURPOSE,
+  INSTALL_USAGE,
   parseInstallCommand,
   renderInstallHelp,
   type ParsedInstallCommand,
@@ -44,16 +47,24 @@ import {
   type ParsedShow,
   type ParsedStatus,
 } from "./commands/contract.js";
-import { renderTextBlock } from "./render/terminal.js";
-import { CliUsageError, isBlankInput } from "./usage.js";
+import { renderOpaqueBlock, renderTextBlock } from "./render/terminal.js";
+import {
+  CliUsageError,
+  commandGuide,
+  isBlankInput,
+  ROOT_USAGE_GUIDE,
+  unknownCommandGuide,
+  type CliUsageGuide,
+} from "./usage.js";
 export { CliUsageError } from "./usage.js";
+export type { CliUsageGuide } from "./usage.js";
 export { renderContractHelp } from "./commands/contract.js";
 
 export type { Command };
 
 const ROOT_USAGE = [
-  "usage: keiyaku <command> [options]",
-  "       keiyaku <command> --help   shows that command's complete usage",
+  "usage  keiyaku <command> [options]",
+  "      keiyaku <command> --help   shows that command's complete usage",
 ].join("\n");
 
 export function renderRootHelp(columns?: number): string {
@@ -93,7 +104,11 @@ function renderHelpText(help: string, columns: number | undefined): string {
     .flatMap((line) => {
       if (line.trim().length === 0) return [line];
       const indent = line.match(/^\s*/u)?.[0] ?? "";
-      return renderTextBlock(line.slice(indent.length), indent, columns);
+      const body = line.slice(indent.length);
+      if (body.startsWith("usage  ") || indent.startsWith("      ")) {
+        return renderOpaqueBlock(body, indent, columns);
+      }
+      return renderTextBlock(body, indent, columns);
     })
     .join("\n");
 }
@@ -107,6 +122,13 @@ export function renderCommandUsage(command: ParsedCommand): string {
   if (command.command === "task") return renderTaskUsage(command.action);
   if (isAkumaAction(command.command)) return renderAkumaUsage(command.command);
   return contractUsage(command.command);
+}
+
+export function usageGuideForCommand(command: ParsedCommand): CliUsageGuide {
+  if (command.command === "install") return commandGuide("install", INSTALL_USAGE);
+  if (command.command === "task") return taskUsageGuide(command.action);
+  if (isAkumaAction(command.command)) return akumaUsageGuide(command.command);
+  return commandGuide(command.command, CONTRACT_COMMAND_SPECS[command.command].usage);
 }
 
 export function renderHelp(coordinate: CliHelpCoordinate, columns?: number): string {
@@ -217,7 +239,7 @@ type ScanState = {
 };
 
 function refuse(command: Command, message: string): never {
-  throw new CliUsageError(message, contractUsage(command));
+  throw new CliUsageError(message, commandGuide(command, CONTRACT_COMMAND_SPECS[command].usage));
 }
 
 function scanStdin(command: Command, state: ScanState): void {
@@ -255,7 +277,10 @@ function scanOption(command: Command, argv: readonly string[], state: ScanState,
 function scanArgv(argv: readonly string[]): ParsedContractParts {
   const candidate = argv[0];
   if (!candidate || !Object.prototype.hasOwnProperty.call(CONTRACT_COMMAND_SPECS, candidate)) {
-    throw new CliUsageError(`unknown command: ${candidate ?? ""}`, renderRootHelp());
+    throw new CliUsageError(
+      `unknown command: ${candidate ?? ""}`,
+      unknownCommandGuide(ROOT_USAGE_GUIDE, candidate ?? ""),
+    );
   }
   const command = candidate as Command;
   const spec: CommandSpec = CONTRACT_COMMAND_SPECS[command];
@@ -303,14 +328,14 @@ function invocationOptions(
       continue;
     }
     if (token === "--repo" && repo !== undefined) {
-      throw new CliUsageError("--repo may appear only once", renderRootHelp());
+      throw new CliUsageError("--repo may appear only once", ROOT_USAGE_GUIDE);
     }
     if (token !== "--repo" && cwd !== undefined) {
-      throw new CliUsageError("-C/--cwd may appear only once", renderRootHelp());
+      throw new CliUsageError("-C/--cwd may appear only once", ROOT_USAGE_GUIDE);
     }
     const value = argv[index + 1];
     if (value === undefined || value === "-" || value.startsWith("-") || isBlankInput(value)) {
-      throw new CliUsageError(`${token} requires a path`, renderRootHelp());
+      throw new CliUsageError(`${token} requires a path`, ROOT_USAGE_GUIDE);
     }
     if (token === "--repo") repo = value;
     else cwd = value;

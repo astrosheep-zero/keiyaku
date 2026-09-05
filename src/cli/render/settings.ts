@@ -1,5 +1,6 @@
 import type { Settings, SettingsScopeState } from "../../settings.js";
 import { displayColumns, renderTextBlock } from "./terminal.js";
+import { fieldName, namedValueLines } from "./value.js";
 
 function namespaceNames(value: Settings): readonly string[] {
   return [
@@ -9,15 +10,15 @@ function namespaceNames(value: Settings): readonly string[] {
   ].sort();
 }
 
-function jsonLines(value: unknown, indent: string): readonly string[] {
-  return JSON.stringify(value, null, 2)
-    .split("\n")
-    .map((line) => `${indent}${line}`);
-}
-
 function labeledTokens(label: string, tokens: readonly string[], indent: string, columns: number): readonly string[] {
-  const inline = [label, ...tokens].filter((part) => part.length > 0).join(" ");
+  const inline = [label, ...tokens].filter((part) => part.length > 0).join("  ");
   if (displayColumns(`${indent}${inline}`) <= columns) return [`${indent}${inline}`];
+  if (tokens.length > 0) {
+    const head = `${label}  ${tokens[0]}`;
+    if (displayColumns(`${indent}${head}`) <= columns) {
+      return [`${indent}${head}`, ...tokens.slice(1).map((token) => `${indent}  ${token}`)];
+    }
+  }
   return [...renderTextBlock(label, indent, columns), ...tokens.map((token) => `${indent}  ${token}`)];
 }
 
@@ -36,20 +37,13 @@ export function renderSettingsText(value: Settings, columns = 80): string {
   ];
   for (const name of namespaceNames(value)) {
     const view = value.namespace(name);
-    lines.push(...renderTextBlock(`namespace ${name} ${view.kind}`, "  ", columns));
+    lines.push(`  namespace  ${fieldName(name)}  ${view.kind}`);
     if (view.kind === "failed") {
-      for (const failure of view.failures)
-        lines.push(...renderTextBlock(`failure ${failure.scope} ${failure.diagnostic}`, "    ", columns));
+      for (const failure of view.failures) lines.push(`    failure  ${failure.scope}  ${failure.diagnostic}`);
     }
     for (const entry of view.entries) {
-      lines.push(
-        ...renderTextBlock(
-          `entry ${entry.name} ${entry.source}${entry.shadows ? " shadows user" : ""}`,
-          "    ",
-          columns,
-        ),
-      );
-      lines.push(...jsonLines(entry.value, "      "));
+      lines.push(`    entry  ${fieldName(entry.name)} · ${entry.source}${entry.shadows ? " · shadows user" : ""}`);
+      lines.push(...namedValueLines("value", entry.value, "      "));
     }
   }
   return lines.join("\n");
@@ -58,5 +52,5 @@ export function renderSettingsText(value: Settings, columns = 80): string {
 function scopeLines(name: string, value: SettingsScopeState, columns: number): readonly string[] {
   const tokens = value.path === undefined ? [] : [value.path];
   if (value.kind === "failed") tokens.push(value.diagnostic);
-  return labeledTokens(`${name} ${value.kind}`, tokens, "  ", columns);
+  return labeledTokens(name, [value.kind, ...tokens], "  ", columns);
 }

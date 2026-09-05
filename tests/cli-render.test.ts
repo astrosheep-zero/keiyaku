@@ -33,14 +33,14 @@ test("catalog text renders only the selected identity layer", () => {
       ],
       hasMore: true,
     }),
-    ["task/catalog-row - P2 - ready - Catalog row", "…"].join("\n"),
+    ["○ task/catalog-row · ready · P2 — Catalog row", "…"].join("\n"),
   );
   assert.equal(
     renderCatalogText({
       kind: "archetypes",
       rows: [{ name: "reviewer", model: "codex-5", description: "Read the complete change without truncation." }],
     }),
-    ["available Akuma 1", "", "reviewer - codex-5", "  Read the complete change without truncation."].join("\n"),
+    ["available Akuma  1", "", "reviewer  codex-5", "  Read the complete change without truncation."].join("\n"),
   );
   assert.equal(
     renderCatalogText({
@@ -52,8 +52,53 @@ test("catalog text renders only the selected identity layer", () => {
       searched: ["/world/.keiyaku/akuma/run"],
       hasMore: false,
     }),
-    ["akuma instances 1 recent", "  scope worker", "", "○ aku/worker/deadbeef · unborn"].join("\n"),
+    ["akuma  1 recent", "  scope  worker", "", "○ aku/worker/deadbeef · unborn"].join("\n"),
   );
+});
+
+test("root Task catalogue marks every disposition without inventing waiting state", () => {
+  const cases = [
+    ["ready", "○"],
+    ["in_progress", "●"],
+    ["blocked", "‖"],
+    ["on_hold", "⧗"],
+    ["done", "✓"],
+    ["drop", "✕"],
+  ] as const;
+  const catalog: Extract<Catalog, { kind: "tasks" }> = {
+    kind: "tasks",
+    root: worldRoot,
+    hasMore: false,
+    rows: cases.map(([disposition]) => ({
+      id: `task/${disposition}` as never,
+      title: disposition,
+      priority: 1,
+      state: disposition === "ready" || disposition === "blocked" ? "open" : disposition,
+      disposition,
+      updatedAt: "2026-08-12T00:00:00.000Z",
+      bodyPresent: false,
+    })),
+  };
+  assert.equal(
+    renderCatalogText(catalog),
+    cases.map(([state, mark]) => `${mark} task/${state} · ${state} · P1 — ${state}`).join("\n"),
+  );
+});
+
+test("pre-delivery review records testimony without claiming a retained candidate", () => {
+  for (const verdict of ["satisfied", "unsatisfied"] as const) {
+    const output = renderText({
+      kind: "accepted",
+      verb: "review",
+      contract: contractId("kei/not-delivered"),
+      head: contractHead("head"),
+      facts: [],
+      settlementLags: [],
+      verdict,
+    });
+    assert.equal(output, `✓ review ${verdict} recorded  kei/not-delivered\n  record`);
+    assert.doesNotMatch(output, /candidate|not complete|placement/u);
+  }
 });
 
 test("scoped Akuma catalog text preserves bounded membership and marks further rows", () => {
@@ -70,7 +115,7 @@ test("scoped Akuma catalog text preserves bounded membership and marks further r
     hasMore: true,
   };
   const text = renderCatalogText(catalog);
-  assert.match(text, /akuma instances 11 recent/u);
+  assert.match(text, /akuma  11 recent/u);
   assert.equal(text.endsWith("…"), true);
   assert.equal((text.match(/aku\/worker\//gu) ?? []).length, catalog.rows.length);
   assert.doesNotMatch(text, /aku\/\*\/\*/u);
@@ -152,18 +197,18 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
   const text = renderCatalogText(catalog);
 
   assert.doesNotMatch(text, /^\d+ active · \d+ candidates?$/mu);
-  assert.match(text, /contract state aaaaaaa · observedAt 2026-08-12T00:00:00.000Z/u);
+  assert.match(text, /contract state  aaaaaaa · observedAt  2026-08-12T00:00:00.000Z/u);
   assert.match(text, /! kei\/selected-contract · waiting · 0s · Selected Contract/u);
-  assert.match(text, /^  no candidate · no target$/mu);
+  assert.match(text, /^  candidate  none\n  target  none$/mu);
   assert.doesNotMatch(text, /○ no candidate · ● candidate|satisfied  \[✗\] unsatisfied/u);
   assert.doesNotMatch(text, /worktree clean|tender |integration |merge /u);
   assert.doesNotMatch(text, new RegExp(state, "u"));
   assert.match(text, /\[✓\] reviewed  \[✗\] verified  \[~\] security \(stale\)  \[ \] manual/u);
-  assert.match(text, /after kei\/claimed-prerequisite \(claimed\)/u);
-  assert.match(text, /blocked by kei\/active-prerequisite \(waiting\)/u);
-  assert.match(text, /blocked by kei\/abandoned-prerequisite \(abandoned\)/u);
-  assert.match(text, /blocked by kei\/missing-prerequisite \(missing\)/u);
-  assert.match(text, /dependents kei\/dependent-contract \(waiting\)/u);
+  assert.match(text, /after  kei\/claimed-prerequisite · claimed/u);
+  assert.match(text, /blocked by  kei\/active-prerequisite · waiting/u);
+  assert.match(text, /blocked by  kei\/abandoned-prerequisite · abandoned/u);
+  assert.match(text, /blocked by  kei\/missing-prerequisite · missing/u);
+  assert.match(text, /dependents  kei\/dependent-contract \(waiting\)/u);
   assert.equal((text.match(/…/gu) ?? []).length, 1);
   assert.equal(text.endsWith("…"), true);
   assert.doesNotMatch(text, /not shown|full|next:|--all/u);
@@ -185,7 +230,7 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
     ],
   });
   assert.doesNotMatch(delivered, /^\d+ active · \d+ candidates?$/mu);
-  assert.match(delivered, /^  candidate · no target$/mu);
+  assert.match(delivered, /^  candidate  present\n  target  none$/mu);
   assert.doesNotMatch(delivered, /○ no candidate · ● candidate|satisfied  \[✗\] unsatisfied/u);
   assert.doesNotMatch(delivered, /tender |integration /u);
 
@@ -211,7 +256,7 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
   });
   assert.match(
     moved,
-    /^  candidate · target main · 0 commits behind main · worktree \/repo\/\.keiyaku\/wt\/catalog · target moved · bbbbbbb -> ccccccc$/mu,
+    /^  candidate  present\n  target  main @ ccccccc · behind 0\n  lag worktree  \/repo\/\.keiyaku\/wt\/catalog\n  target moved  bbbbbbb -> ccccccc$/mu,
   );
 
   const disappeared = renderCatalogText({
@@ -234,13 +279,13 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
   });
   assert.match(
     disappeared,
-    /^  candidate · target main · commits behind main unknown · target moved · bbbbbbb -> null$/mu,
+    /^  candidate  present\n  target  main · head absent · behind unknown\n  target moved  bbbbbbb -> absent$/mu,
   );
 });
 
 test("observation text keeps the command and view data together", () => {
   const result: InvocationResult = { kind: "observation", command: "status", contracts: [] };
-  assert.equal(renderText(result), 'observation status\n{\n  "contracts": []\n}');
+  assert.equal(renderText(result), "observation  status\n  contracts  list (0)");
 });
 
 test("world reconcile text keeps a completed report under report", () => {
@@ -251,9 +296,7 @@ test("world reconcile text keeps a completed report under report", () => {
   };
   assert.equal(
     renderText(result),
-    ["observation reconcile", "{", '  "report": {', '    "kind": "completed",', '    "contracts": []', "  }", "}"].join(
-      "\n",
-    ),
+    'observation  reconcile\n  report  object (2)\n    kind  "completed"\n    contracts  list (0)',
   );
 });
 
@@ -263,7 +306,7 @@ test("world observation failure text is exact", () => {
     command: "reconcile",
     report: { kind: "world-observation-failed", diagnostic: "git failed" },
   };
-  assert.equal(renderText(result), "reconcile: world observation failed · git failed");
+  assert.equal(renderText(result), "✕ observation  reconcile\n  diagnostic  git failed");
 });
 
 test("Verification create action names are safe in text receipts", () => {
@@ -283,7 +326,7 @@ test("Verification create action names are safe in text receipts", () => {
   };
 
   const text = renderText(result, { columns: 200, color: false });
-  assert.equal(text.includes('name="prepare\\nINJECT\\u001b[31m"'), true);
+  assert.equal(text.includes('name "prepare\\nINJECT\\u001b[31m"'), true);
   assert.doesNotMatch(text, /\nINJECT/u);
   assert.doesNotMatch(text, /\u001b/u);
   const verification = result.verification;
@@ -309,7 +352,7 @@ test("Verification cleanup action names are safe in text receipts", () => {
   };
 
   const text = renderText(result, { columns: 200, color: false });
-  assert.equal(text.includes('name="destroy\\rINJECT\\u001b[2J"'), true);
+  assert.equal(text.includes('name "destroy\\rINJECT\\u001b[2J"'), true);
   assert.doesNotMatch(text, /\rINJECT/u);
   assert.doesNotMatch(text, /\u001b/u);
   const cleanup = result.cleanup?.[0];
@@ -337,8 +380,8 @@ test("Verification text receipts distinguish configured action names", () => {
 
   const newline = receipt("prepare\nx");
   const space = receipt("prepare x");
-  assert.equal(newline.includes('name="prepare\\nx"'), true);
-  assert.equal(space.includes('name="prepare x"'), true);
+  assert.equal(newline.includes('name "prepare\\nx"'), true);
+  assert.equal(space.includes('name "prepare x"'), true);
   assert.notEqual(newline, space);
 });
 
@@ -355,7 +398,7 @@ test("amend text omits an absent Region observation", () => {
   };
   assert.equal(
     renderText(result),
-    ["✓ terms replaced — kei/no-amend-region-observation", "  terms diff", "", "", "", "  record"].join("\n"),
+    ["✓ terms replaced  kei/no-amend-region-observation", "  terms diff", "", "", "", "  record"].join("\n"),
   );
 });
 
@@ -376,11 +419,11 @@ test("accepted results preserve reconciliation lag without telemetry", () => {
   assert.equal(
     renderText({ ...envelope, verb: "deliver" }),
     [
-      "✓ deliver — not complete — kei/followed",
-      "  candidate kept",
+      "✓ deliver — not complete  kei/followed",
+      "  candidate  kept",
       "  record",
       "  ! lag",
-      "    worktree-follow-retained reason=head-moved tender=tender head=head path=/tmp/wt",
+      "    worktree-follow-retained reason head-moved tender tender head head path /tmp/wt",
     ].join("\n"),
   );
   assert.deepEqual(envelope.lag[0], {
@@ -415,12 +458,12 @@ test("accepted bind receipts expose confirmed private-state seat close lag", () 
   assert.equal(
     renderText(result),
     [
-      "✓ bound — kei/bound",
-      "  workspace worktree /tmp/wt",
+      "✓ bound  kei/bound",
+      "  workspace  worktree  /tmp/wt",
       "  no target",
       "  record",
-      "    journal bind · bound",
-      "  ! lag private-state-seat-close-failed",
+      "    journal  bind  · bound",
+      "  ! lag  private-state-seat-close-failed",
       "  diagnostic",
       "",
       "seat close failed after publication",
@@ -447,11 +490,11 @@ test("accepted receipts omit execution telemetry and retain recovery snapshots",
   };
 
   const text = renderText(result);
-  assert.match(text, /tender commit tender-commit[\s\S]*content identity \(not commit\) content-id/u);
+  assert.match(text, /tender commit  tender-commit[\s\S]*content identity \(not commit\)  content-id/u);
   assert.doesNotMatch(text, /journal-blob-oid/u);
   assert.doesNotMatch(text, /ref updated|contract-file|worktree unchanged/u);
   assert.doesNotMatch(text, /ephemeral/u);
-  assert.match(text, /recovery snapshot recovery/u);
+  assert.match(text, /recovery snapshot  recovery/u);
   assert.match(text, /unsealed-bytes \/repo\/\.keiyaku\/wt\/contract/u);
   assert.equal(JSON.parse(JSON.stringify(result)).recoverySnapshot, result.recoverySnapshot);
 });
@@ -478,12 +521,12 @@ test("direct placement stops render the public unmet prerequisites in order", ()
   assert.equal(
     renderText(deliver),
     [
-      "✓ deliver — not complete — kei/waiting-on-prerequisites",
+      "✓ deliver — not complete  kei/waiting-on-prerequisites",
       "! prerequisites unsatisfied",
-      "  prerequisite kei/active-prerequisite · active",
-      "  prerequisite kei/abandoned-prerequisite · abandoned",
-      "  prerequisite kei/missing-prerequisite · missing",
-      "  candidate kept",
+      "  prerequisite  kei/active-prerequisite  ·  active",
+      "  prerequisite  kei/abandoned-prerequisite  ·  abandoned",
+      "  prerequisite  kei/missing-prerequisite  ·  missing",
+      "  candidate  kept",
       "  record",
     ].join("\n"),
   );
@@ -492,12 +535,11 @@ test("direct placement stops render the public unmet prerequisites in order", ()
   assert.equal(
     renderText(review),
     [
-      "✓ review satisfied — not complete — kei/waiting-on-prerequisites",
+      "✓ review satisfied recorded  kei/waiting-on-prerequisites",
       "! prerequisites unsatisfied",
-      "  prerequisite kei/active-prerequisite · active",
-      "  prerequisite kei/abandoned-prerequisite · abandoned",
-      "  prerequisite kei/missing-prerequisite · missing",
-      "  candidate kept",
+      "  prerequisite  kei/active-prerequisite  ·  active",
+      "  prerequisite  kei/abandoned-prerequisite  ·  abandoned",
+      "  prerequisite  kei/missing-prerequisite  ·  missing",
       "  record",
     ].join("\n"),
   );
@@ -534,16 +576,16 @@ test("direct gate stops render the sole placement report without another read", 
       },
     }),
     [
-      "✓ deliver — not complete — kei/waiting-on-gates",
+      "✓ deliver — not complete  kei/waiting-on-gates",
       "! gates unsatisfied",
-      "  gate verified · unsatisfied · at=2026-08-01T00:00:00.000Z",
+      "  gate  verified  ·  unsatisfied  · at 2026-08-01T00:00:00.000Z",
       "  summary verified",
       "",
       "[1 bash exit 1]",
       "",
-      "  gate reviewed · stale · prior=satisfied",
-      "  gate manual · missing",
-      "  candidate kept",
+      "  gate  reviewed  · stale  · prior satisfied",
+      "  gate  manual  · missing",
+      "  candidate  kept",
       "  record",
     ].join("\n"),
   );
@@ -564,12 +606,12 @@ test("completion stops project every checkout-followability refusal fact", () =>
       paths: ["staged.ts", 'quote"path.ts'],
       text: [
         "! checkout-not-followable",
-        "  checkout: /repo/checkout",
-        "  target: refs/heads/main",
-        "  reason: staged",
-        "  paths:",
-        '    - "staged.ts"',
-        '    - "quote\\"path.ts"',
+        "  checkout  /repo/checkout",
+        "  target  refs/heads/main",
+        "  reason  staged",
+        "  paths",
+        "    staged.ts",
+        '    quote"path.ts',
       ],
     },
     {
@@ -577,11 +619,11 @@ test("completion stops project every checkout-followability refusal fact", () =>
       paths: ["conflict.ts"],
       text: [
         "! checkout-not-followable",
-        "  checkout: /repo/checkout",
-        "  target: refs/heads/main",
-        "  reason: dirty-tracked",
-        "  paths:",
-        '    - "conflict.ts"',
+        "  checkout  /repo/checkout",
+        "  target  refs/heads/main",
+        "  reason  dirty-tracked",
+        "  paths",
+        "    conflict.ts",
       ],
     },
     {
@@ -589,10 +631,10 @@ test("completion stops project every checkout-followability refusal fact", () =>
       paths: [],
       text: [
         "! checkout-not-followable",
-        "  checkout: /repo/checkout",
-        "  target: refs/heads/main",
-        "  reason: untracked",
-        "  paths: (none)",
+        "  checkout  /repo/checkout",
+        "  target  refs/heads/main",
+        "  reason  untracked",
+        "  paths  none",
       ],
     },
   ];
@@ -651,15 +693,15 @@ test("continuation checkout stop keeps its exact block after the dependent conte
       },
     }),
     [
-      "✓ delivered — kei/prerequisite-checkout",
-      "  target -> integration",
-      "! continuation kei/stopped-checkout-dependent",
+      "✓ delivered  kei/prerequisite-checkout",
+      "  target  ->  integration",
+      "! continuation  kei/stopped-checkout-dependent",
       "! checkout-not-followable",
-      "  checkout: /repo/checkout",
-      "  target: refs/heads/main",
-      "  reason: untracked",
-      "  paths:",
-      '    - "quote\\"path.ts"',
+      "  checkout  /repo/checkout",
+      "  target  refs/heads/main",
+      "  reason  untracked",
+      "  paths",
+      '    quote"path.ts',
       "  record",
     ].join("\n"),
   );
@@ -682,10 +724,10 @@ test("deliver projects a ran Verification completion", () => {
       completion: { integration, verification: { mode: "ran", verdict: "satisfied" } },
     }),
     [
-      "✓ delivered — kei/completion",
-      "  target -> integration-1 · verified (ran)",
+      "✓ delivered  kei/completion",
+      "  target  ->  integration-1  · verified (ran)",
       "  record",
-      "    journal claim · claimed",
+      "    journal  claim  · claimed",
     ].join("\n"),
   );
 });
@@ -720,11 +762,11 @@ test("deliver renders claimed and stopped continuations from the accepted result
       },
     }),
     [
-      "✓ delivered — kei/prerequisite",
-      "  target -> integration",
-      "✓ continuation complete kei/claimed-dependent",
-      "! kei/stopped-dependent · gates unsatisfied",
-      "  gate reviewed · missing",
+      "✓ delivered  kei/prerequisite",
+      "  target  ->  integration",
+      "✓ continuation  complete  kei/claimed-dependent",
+      "! kei/stopped-dependent  ·  gates unsatisfied",
+      "  gate  reviewed  · missing",
       "  record",
     ].join("\n"),
   );
@@ -747,10 +789,10 @@ test("deliver projects no Verification and an unsatisfied non-gating Verificatio
       completion: { integration },
     }),
     [
-      "✓ delivered — kei/completion-states",
-      "  target -> integration-2",
+      "✓ delivered  kei/completion-states",
+      "  target  ->  integration-2",
       "  record",
-      "    journal claim · claimed",
+      "    journal  claim  · claimed",
     ].join("\n"),
   );
 
@@ -762,20 +804,20 @@ test("deliver projects no Verification and an unsatisfied non-gating Verificatio
       verificationSummary: "[1 bash exit 1]",
     }),
     [
-      "✓ delivered — kei/completion-states",
-      "  target -> integration-2",
-      "! verification unsatisfied (ran) · not required by Contract gates",
+      "✓ delivered  kei/completion-states",
+      "  target  ->  integration-2",
+      "! verification  unsatisfied  (ran)  · not required by Contract gates",
       "  summary",
       "",
       "[1 bash exit 1]",
       "",
       "  record",
-      "    journal claim · claimed",
+      "    journal  claim  · claimed",
     ].join("\n"),
   );
 });
 
-test("review projects reused Verification and distinguishes completion in its title", () => {
+test("review projects reused Verification and distinguishes placement from testimony", () => {
   const contract = contractId("kei/review-completion");
   const integration = snapshotId("integration-3");
   const envelope = {
@@ -794,11 +836,12 @@ test("review projects reused Verification and distinguishes completion in its ti
   assert.equal(
     text,
     [
-      "✓ review satisfied — complete — kei/review-completion",
-      "  target -> integration-3 · verified (reused)",
-      "  integration commit integration-3",
+      "✓ review satisfied recorded  kei/review-completion",
+      "  target  ->  integration-3  · verified (reused)",
+      "  placement  complete",
+      "  integration commit  integration-3",
       "  record",
-      "    journal claim · claimed",
+      "    journal  claim  · claimed",
     ].join("\n"),
   );
 });
@@ -822,16 +865,17 @@ test("review projects a reused unsatisfied Verification as non-gating completion
       verificationSummary: "[reused bash exit 1]",
     }),
     [
-      "✓ review satisfied — complete — kei/review-completion-unsatisfied",
-      "  target -> integration-4",
-      "! verification unsatisfied (reused) · not required by Contract gates",
+      "✓ review satisfied recorded  kei/review-completion-unsatisfied",
+      "  target  ->  integration-4",
+      "! verification  unsatisfied  (reused)  · not required by Contract gates",
       "  summary",
       "",
       "[reused bash exit 1]",
       "",
-      "  integration commit integration-4",
+      "  placement  complete",
+      "  integration commit  integration-4",
       "  record",
-      "    journal claim · claimed",
+      "    journal  claim  · claimed",
     ].join("\n"),
   );
 });
@@ -872,13 +916,13 @@ test("movement projects its deviation and reintegration coordinates", () => {
       completion: { integration: secondIntegrated },
     }),
     [
-      "✓ delivered — kei/reintegrated",
-      "~ target moved · re-integrated x2",
-      "  target -> integration-4",
+      "✓ delivered  kei/reintegrated",
+      "! target  moved · re-integrated x2",
+      "  target  ->  integration-4",
       "  record",
-      "    journal reintegration · reintegrated target-1 -> integration-2",
-      "    journal reintegration-2 · reintegrated target-3 -> integration-4",
-      "    journal claim · claimed",
+      "    journal  reintegration  · reintegrated  target-1  ->  integration-2",
+      "    journal  reintegration-2  · reintegrated  target-3  ->  integration-4",
+      "    journal  claim  · claimed",
     ].join("\n"),
   );
 
@@ -898,13 +942,13 @@ test("movement projects its deviation and reintegration coordinates", () => {
       },
     }),
     [
-      "✓ deliver — not complete — kei/reintegrated",
-      "~ target moved · re-integrated x2",
-      "! target moved refs/heads/main integration-2 -> null attempts=3",
-      "  candidate kept",
+      "✓ deliver — not complete  kei/reintegrated",
+      "! target  moved · re-integrated x2",
+      "! target moved  refs/heads/main  integration-2 -> null  attempts 3",
+      "  candidate  kept",
       "  record",
-      "    journal reintegration · reintegrated target-1 -> integration-2",
-      "    journal reintegration-2 · reintegrated target-3 -> integration-4",
+      "    journal  reintegration  · reintegrated  target-1  ->  integration-2",
+      "    journal  reintegration-2  · reintegrated  target-3  ->  integration-4",
     ].join("\n"),
   );
 });
@@ -918,6 +962,39 @@ test("unmerged index paths render as a complete public refusal", () => {
       contract,
       refusal: { kind: "unmerged-paths", contractId: contract, paths: ["a.txt", "z.txt"] },
     }),
-    ["! deliver refused — kei/conflicted", "   unmerged-paths", "   paths", "   │ a.txt", "   │ z.txt"].join("\n"),
+    ["✕ deliver refused  kei/conflicted", "  unmerged-paths", "  paths", "    a.txt", "    z.txt"].join("\n"),
   );
+});
+
+test("materialized conflict text keeps the exact recovery projection", () => {
+  const result: InvocationResult = {
+    kind: "integration-conflict-materialized",
+    targetHead: snapshotId("b".repeat(40)),
+    conflictPaths: ["a.txt", "b.txt"],
+    workspace: { kind: "worktree", path: "/repo/.keiyaku/wt/x" },
+    handoffBase: snapshotId("a".repeat(40)),
+    recovery: {
+      continue: "deliver --include-dirty",
+      staging: "not-required",
+      materialize: "deliver --materialize-conflict --include-dirty",
+    },
+  };
+  assert.equal(
+    renderText(result),
+    [
+      "! integration-conflict-materialized",
+      `  target  ${"b".repeat(40)}`,
+      "  recorded  no delivery",
+      "  index  unmerged",
+      "  saved  worktree bytes before projection",
+      `  handoff base  ${"a".repeat(40)}`,
+      "  conflicts",
+      "    a.txt",
+      "    b.txt",
+      "  workspace  /repo/.keiyaku/wt/x",
+      "  deliver  deliver --include-dirty · reads worktree bytes, not index",
+    ].join("\n"),
+  );
+  assert.equal(JSON.parse(JSON.stringify(result)).handoffBase, result.handoffBase);
+  assert.doesNotMatch(renderText(result), /staging|not-required|UU|please|next|then/u);
 });
