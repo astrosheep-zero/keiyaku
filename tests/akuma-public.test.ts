@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, unlinkSync, watch, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { AkumaNotBornError, defaultWaitComplete, killAkumaWithRecovery } from "../src/akuma/akuma.js";
@@ -28,13 +29,14 @@ import {
   initializeHeart,
   lifeAt,
   pauseRequested,
+  probeLeash,
   readHeart,
   recordTell,
   requestStop,
   type Soul,
   type TimelineFact,
 } from "../src/akuma/heart/index.js";
-import { akumaRunRoot, allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
+import { akumaPaths, akumaRunRoot, allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
 import { createProviderAttempt, type ProviderAdapter, type Session } from "../src/akuma/provider.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import { settings } from "../src/settings.js";
@@ -45,6 +47,124 @@ import { World } from "../src/world.js";
 import type { AkumaHandle } from "../src/akuma/akuma-handle.js";
 
 const CLAUDE_EXECUTION = { name: "claude", kind: "claude-agent-sdk" } as const;
+
+type DeferredBodyEnd = Readonly<{
+  started: string;
+  release: string;
+  settled: string;
+  turnStarted: string;
+  turnRelease: string;
+  turnSettled: string;
+}>;
+
+function configureDeferredBodyEndPlugin(root: string): DeferredBodyEnd {
+  const plugins = join(root, "plugins");
+  const started = join(root, "body-ended-started");
+  const release = join(root, "body-ended-release");
+  const settled = join(root, "body-ended-settled");
+  const turnStarted = join(root, "turn-outcome-started");
+  const turnRelease = join(root, "turn-outcome-release");
+  const turnSettled = join(root, "turn-outcome-settled");
+  const ledger = join(root, "square-ledger");
+  mkdirSync(plugins, { recursive: true });
+  writeFileSync(
+    join(plugins, "square-wrapper.mjs"),
+    [
+      `import square from ${JSON.stringify(pathToFileURL(resolve(process.cwd(), "plugins/square/index.js")).href)};`,
+      'import { appendFileSync, existsSync } from "node:fs";',
+      "async function waitForRelease(path) {",
+      "  if (existsSync(path)) return;",
+      "  while (!existsSync(path)) await new Promise((resolve) => setImmediate(resolve));",
+      "}",
+      "export default {",
+      '  manifest: { id: "square", apiVersion: 1, writablePaths: [{ name: "square", path: ".square" }] },',
+      "  activate(context) {",
+      "    const previousUser = process.env.SQUARE_HOST_LEDGER_USER;",
+      "    const previousLocal = process.env.SQUARE_HOST_LEDGER_LOCAL;",
+      "    process.env.SQUARE_HOST_LEDGER_USER = context.config.ledgerUser;",
+      "    process.env.SQUARE_HOST_LEDGER_LOCAL = context.config.ledgerLocal;",
+      "    const actual = square.activate(context);",
+      "    if (previousUser === undefined) delete process.env.SQUARE_HOST_LEDGER_USER; else process.env.SQUARE_HOST_LEDGER_USER = previousUser;",
+      "    if (previousLocal === undefined) delete process.env.SQUARE_HOST_LEDGER_LOCAL; else process.env.SQUARE_HOST_LEDGER_LOCAL = previousLocal;",
+      '    const handler = actual.signals?.["akuma.turn-outcome"];',
+      '    if (handler === undefined) throw new Error("Square plugin has no turn-outcome handler");',
+      '    return { signals: { ...(actual.signals ?? {}), "akuma.turn-outcome": async (signal) => { appendFileSync(context.config.turnStarted, "turn-outcome\\n"); await waitForRelease(context.config.turnRelease); try { await handler(signal); } finally { appendFileSync(context.config.turnSettled, "turn-outcome\\n"); } } } };',
+      "  },",
+      "};",
+    ].join("\n"),
+  );
+  writeFileSync(
+    join(plugins, "deferred.mjs"),
+    [
+      'import { appendFileSync, existsSync } from "node:fs";',
+      "async function waitForRelease(path) {",
+      "  if (existsSync(path)) return Promise.resolve();",
+      "  while (!existsSync(path)) await new Promise((resolve) => setImmediate(resolve));",
+      "}",
+      "export default {",
+      '  manifest: { id: "deferred", apiVersion: 1 },',
+      '  activate(context) { return { signals: { "akuma.body-ended": async () => { appendFileSync(context.config.started, "started\\n"); try { await waitForRelease(context.config.release); } finally { appendFileSync(context.config.settled, "settled\\n"); } } } }; },',
+      "};",
+    ].join("\n"),
+  );
+  mkdirSync(join(root, ".keiyaku"), { recursive: true });
+  writeFileSync(
+    join(root, ".keiyaku", "settings.json"),
+    JSON.stringify({
+      plugins: {
+        square: {
+          package: "./plugins/square-wrapper.mjs",
+          config: {
+            turnStarted,
+            turnRelease,
+            turnSettled,
+            ledgerUser: join(ledger, "user"),
+            ledgerLocal: join(ledger, "local"),
+          },
+        },
+        deferred: { package: "./plugins/deferred.mjs", config: { started, release, settled } },
+      },
+    }),
+  );
+  return { started, release, settled, turnStarted, turnRelease, turnSettled };
+}
+
+async function waitForFile(path: string): Promise<void> {
+  if (existsSync(path)) return;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const watcher = watch(dirname(path), (_event, name) => {
+        if (name === basename(path) && existsSync(path)) {
+          clearTimeout(timeout);
+          watcher.close();
+          resolve();
+        }
+      });
+      const timeout = setTimeout(() => {
+        watcher.close();
+        reject(new Error(`timed out waiting for barrier file: ${path}`));
+      }, 5_000);
+      if (existsSync(path)) {
+        clearTimeout(timeout);
+        watcher.close();
+        resolve();
+        return;
+      }
+      watcher.on("error", (error) => {
+        clearTimeout(timeout);
+        watcher.close();
+        reject(error);
+      });
+    });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EMFILE") throw error;
+    const deadline = Date.now() + 5_000;
+    while (!existsSync(path)) {
+      if (Date.now() >= deadline) throw new Error(`timed out waiting for barrier file: ${path}`);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+  }
+}
 
 async function akumaAt(root: string, input?: { home?: string; settings?: Awaited<ReturnType<typeof settings>> }) {
   return Akuma.of(await World.at(root), input);
@@ -1719,12 +1839,35 @@ test("an answered Turn without a fork point remains visible and keeps its answer
   }
 });
 
-test.skip("fork publishes a sleeping child with lineage and its native birth session", async () => {
-  const root = mkdtempSync(join(process.cwd(), ".tmp-keiyaku-akuma-fork-"));
+test("fork publishes a sleeping child with lineage and its native birth session", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-fork-"));
   const mutable = claudeProvider as MutableProvider;
   const originalFork = mutable.fork;
+  const deferred = configureDeferredBodyEndPlugin(root);
+  let sourcePromise: Promise<Awaited<ReturnType<typeof answeredSource>>> | undefined;
+  let forkPromise: Promise<Awaited<ReturnType<AkumaHandle["fork"]>>> | undefined;
   try {
-    const source = await answeredSource(root, "f0a10001");
+    let sourceSettled = false;
+    sourcePromise = answeredSource(root, "f0a10001").then((source) => {
+      sourceSettled = true;
+      return source;
+    });
+    await waitForFile(deferred.turnStarted);
+    await Promise.resolve();
+    assert.equal(sourceSettled, false);
+    writeFileSync(deferred.turnRelease, "release\n");
+    await waitForFile(deferred.started);
+    await Promise.resolve();
+    assert.equal(sourceSettled, false);
+    assert.equal(
+      await probeLeash(akumaPaths({ runRoot: akumaRunRoot(root), archetype: "claude", suffix: "f0a10001" })),
+      "free",
+    );
+    writeFileSync(deferred.release, "release\n");
+    const source = await sourcePromise;
+    await waitForFile(deferred.settled);
+    await waitForFile(deferred.turnSettled);
+    assert.equal(existsSync(join(root, ".square", "KEIYAKU.square")), true);
     const world = await akumaAt(root);
     const worldRoot = await World.at(root);
     assert.equal(await world.of({ id: source.id }).kill(), "already-stopped");
@@ -1735,7 +1878,25 @@ test.skip("fork publishes a sleeping child with lineage and its native birth ses
         return { session: { sessionId: "fork-child-session" } };
       });
 
-    const receipt = await world.of({ id: source.id }).fork({ at: "turn/1" });
+    unlinkSync(deferred.started);
+    unlinkSync(deferred.release);
+    unlinkSync(deferred.settled);
+    unlinkSync(deferred.turnStarted);
+    unlinkSync(deferred.turnRelease);
+    let forkSettled = false;
+    forkPromise = world
+      .of({ id: source.id })
+      .fork({ at: "turn/1" })
+      .then((receipt) => {
+        forkSettled = true;
+        return receipt;
+      });
+    await waitForFile(deferred.started);
+    await Promise.resolve();
+    assert.equal(forkSettled, false);
+    writeFileSync(deferred.release, "release\n");
+    const receipt = await forkPromise;
+    await waitForFile(deferred.settled);
     assert.equal(receipt.kind, "forked", JSON.stringify(receipt));
     if (receipt.kind !== "forked") return;
     assert.deepEqual(nativeInput, {
@@ -1764,20 +1925,68 @@ test.skip("fork publishes a sleeping child with lineage and its native birth ses
     );
   } finally {
     mutable.fork = originalFork;
+    writeFileSync(deferred.release, "release\n");
+    writeFileSync(deferred.turnRelease, "release\n");
+    await sourcePromise?.catch(() => undefined);
+    await forkPromise?.catch(() => undefined);
+    if (existsSync(deferred.started)) await waitForFile(deferred.settled).catch(() => undefined);
+    if (existsSync(deferred.turnStarted)) await waitForFile(deferred.turnSettled).catch(() => undefined);
     rmSync(root, { recursive: true, force: true });
+    assert.equal(existsSync(root), false);
   }
 });
 
-test.skip("fork preserves the exact admitted readonly restraint byte-for-byte", async () => {
-  const root = mkdtempSync(join(process.cwd(), ".tmp-keiyaku-akuma-fork-restraint-"));
+test("fork preserves the exact admitted readonly restraint byte-for-byte", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-fork-restraint-"));
   const mutable = claudeProvider as MutableProvider;
   const originalFork = mutable.fork;
+  const deferred = configureDeferredBodyEndPlugin(root);
+  let sourcePromise: Promise<Awaited<ReturnType<typeof answeredSource>>> | undefined;
+  let forkPromise: Promise<Awaited<ReturnType<AkumaHandle["fork"]>>> | undefined;
   try {
-    const source = await answeredSource(root, "f0a10007", { enforcement: "native" });
+    let sourceSettled = false;
+    sourcePromise = answeredSource(root, "f0a10007", { enforcement: "native" }).then((source) => {
+      sourceSettled = true;
+      return source;
+    });
+    await waitForFile(deferred.turnStarted);
+    await Promise.resolve();
+    assert.equal(sourceSettled, false);
+    writeFileSync(deferred.turnRelease, "release\n");
+    await waitForFile(deferred.started);
+    await Promise.resolve();
+    assert.equal(sourceSettled, false);
+    assert.equal(
+      await probeLeash(akumaPaths({ runRoot: akumaRunRoot(root), archetype: "claude", suffix: "f0a10007" })),
+      "free",
+    );
+    writeFileSync(deferred.release, "release\n");
+    const source = await sourcePromise;
+    await waitForFile(deferred.settled);
+    await waitForFile(deferred.turnSettled);
+    assert.equal(existsSync(join(root, ".square", "KEIYAKU.square")), true);
     mutable.fork = () =>
       createProviderAttempt(undefined, async () => ({ session: { sessionId: "fork-restraint-child" } }));
     const world = await akumaAt(root);
-    const receipt = await world.of({ id: source.id }).fork({ at: "turn/1" });
+    unlinkSync(deferred.started);
+    unlinkSync(deferred.release);
+    unlinkSync(deferred.settled);
+    unlinkSync(deferred.turnStarted);
+    unlinkSync(deferred.turnRelease);
+    let forkSettled = false;
+    forkPromise = world
+      .of({ id: source.id })
+      .fork({ at: "turn/1" })
+      .then((receipt) => {
+        forkSettled = true;
+        return receipt;
+      });
+    await waitForFile(deferred.started);
+    await Promise.resolve();
+    assert.equal(forkSettled, false);
+    writeFileSync(deferred.release, "release\n");
+    const receipt = await forkPromise;
+    await waitForFile(deferred.settled);
     assert.equal(receipt.kind, "forked", JSON.stringify(receipt));
     if (receipt.kind !== "forked") return;
     const child = world.of({ id: receipt.child });
@@ -1785,7 +1994,14 @@ test.skip("fork preserves the exact admitted readonly restraint byte-for-byte", 
     assert.equal((await child.status()).readonly?.enforcement, "native");
   } finally {
     mutable.fork = originalFork;
+    writeFileSync(deferred.release, "release\n");
+    writeFileSync(deferred.turnRelease, "release\n");
+    await sourcePromise?.catch(() => undefined);
+    await forkPromise?.catch(() => undefined);
+    if (existsSync(deferred.started)) await waitForFile(deferred.settled).catch(() => undefined);
+    if (existsSync(deferred.turnStarted)) await waitForFile(deferred.turnSettled).catch(() => undefined);
     rmSync(root, { recursive: true, force: true });
+    assert.equal(existsSync(root), false);
   }
 });
 
