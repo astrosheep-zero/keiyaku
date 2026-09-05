@@ -113,8 +113,8 @@ test("bundled instructions keep facade and standalone Akuma call surfaces distin
   const standalone = canonical.replace(" [--contract <kei/...>]", "");
   const rootSkill = readFileSync(join(plugin, "keiyaku", "SKILL.md"), "utf8");
   const akumaSkill = readFileSync(join(plugin, "keiyaku-akuma", "SKILL.md"), "utf8");
-  assert.equal(rootSkill.includes(canonical), true);
-  assert.equal(akumaSkill.includes(standalone), true);
+  assert.ok(rootSkill.includes(canonical));
+  assert.ok(akumaSkill.includes(standalone));
   assert.doesNotMatch(akumaSkill, /\bpersona\b|--persona/iu);
 });
 

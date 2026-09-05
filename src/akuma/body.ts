@@ -287,7 +287,7 @@ async function prepareBodyExecution(
 }
 
 async function runPreparedBody(input: BodyExecution): Promise<BodyTurnEnd> {
-  let pendingTellDisposition: BodyTurnEnd = undefined;
+  let pendingTellDisposition: BodyTurnEnd;
   try {
     if (await recoverBodyRequests(input)) pendingTellDisposition = await runBodyTurns(input);
   } finally {
@@ -447,6 +447,7 @@ async function runBodyTurns(input: BodyExecution): Promise<BodyTurnEnd> {
         }
         continue;
       }
+      const schema = launchTells.find((tell) => tell.schemaJson !== undefined)?.schemaJson ?? launch.initialSchemaJson;
       const result = await driveTurn({
         paths: launch.paths,
         soul,
@@ -457,11 +458,7 @@ async function runBodyTurns(input: BodyExecution): Promise<BodyTurnEnd> {
         body: initial ?? "",
         ...(initial === undefined ? {} : { call: initial }),
         launchTells,
-        ...(launchTells.find((tell) => tell.schemaJson !== undefined)?.schemaJson === undefined
-          ? launch.initialSchemaJson === undefined
-            ? {}
-            : { schemaJson: launch.initialSchemaJson }
-          : { schemaJson: launchTells.find((tell) => tell.schemaJson !== undefined)!.schemaJson }),
+        ...(schema === undefined ? {} : { schemaJson: schema }),
         world: runtime.world,
         externalCommands: runtime.externalCommands,
         now: runtime.now,
@@ -616,6 +613,28 @@ export async function handoffPendingTells(
   await resolveDecidedPendingTellDisposition(paths, decided, spawn);
 }
 
+async function finishBody(
+  paths: AkumaPaths,
+  bodySequence: number | undefined,
+  handoff: boolean,
+  emitBodyEnd: ReturnType<typeof bodyEndEmitter> | undefined,
+  now: () => string,
+): Promise<PendingTellDisposition | null> {
+  if (bodySequence === undefined || !(await heartExists(paths))) return null;
+  const body = (await readHeart(paths)).latestBody;
+  if (body?.sequence === bodySequence && (body.end !== undefined || body.hung !== undefined))
+    await failOpenBoundTurns(paths, {
+      bodySequence,
+      diagnostic: body.hung?.diagnostic ?? `Body ${body.end ?? "ended"} with open bound Turns`,
+      completedAt: now(),
+    });
+  const decided = await decidePendingTellDisposition(paths, { bodySequence, at: now(), handoff });
+  const finalBody = (await readHeart(paths)).latestBody;
+  if (emitBodyEnd && finalBody?.sequence === bodySequence && (finalBody.end || finalBody.hung))
+    emitBodyEnd(bodySequence, finalBody.hung === undefined ? finalBody.end! : "hung", finalBody.hung?.diagnostic);
+  return decided;
+}
+
 export async function driveAkumaBody(
   launch: BodyLaunch,
   adapter?: ProviderAdapter,
@@ -629,7 +648,6 @@ export async function driveAkumaBody(
   const leash = acquired;
   let pendingTellDisposition: BodyTurnEnd = undefined;
   let bodySequence: number | undefined;
-  let decidedDisposition: PendingTellDisposition | null = null;
   let emitBodyEnd: ReturnType<typeof bodyEndEmitter> | undefined;
   try {
     const prepared = await prepareBodyExecution(launch, leash, runtime, adapter);
@@ -650,34 +668,16 @@ export async function driveAkumaBody(
     await preserveBodyFailure(launch.paths, leash, error, runtime.now());
     throw error;
   } finally {
-    if (bodySequence !== undefined && (await heartExists(launch.paths))) {
-      const body = (await readHeart(launch.paths)).latestBody;
-      const inert = body?.sequence === bodySequence && (body.end !== undefined || body.hung !== undefined);
-      if (inert) {
-        await failOpenBoundTurns(launch.paths, {
-          bodySequence,
-          diagnostic: body.hung?.diagnostic ?? `Body ${body.end ?? "ended"} with open bound Turns`,
-          completedAt: runtime.now(),
-        });
-      }
-      decidedDisposition = await decidePendingTellDisposition(launch.paths, {
-        bodySequence,
-        at: runtime.now(),
-        handoff: pendingTellDisposition === "handoff",
-      });
-      const finalBody = (await readHeart(launch.paths)).latestBody;
-      if (
-        emitBodyEnd !== undefined &&
-        finalBody?.sequence === bodySequence &&
-        (finalBody.end !== undefined || finalBody.hung !== undefined)
-      ) {
-        emitBodyEnd(bodySequence, finalBody.hung === undefined ? finalBody.end! : "hung", finalBody.hung?.diagnostic);
-      }
-    }
+    const decided = await finishBody(
+      launch.paths,
+      bodySequence,
+      pendingTellDisposition === "handoff",
+      emitBodyEnd,
+      runtime.now,
+    );
     leash.release();
-    if (decidedDisposition !== null) {
-      await resolveDecidedPendingTellDisposition(launch.paths, decidedDisposition, runtime.spawnBody ?? spawnAkumaBody);
-    }
+    if (decided !== null)
+      await resolveDecidedPendingTellDisposition(launch.paths, decided, runtime.spawnBody ?? spawnAkumaBody);
   }
 }
 

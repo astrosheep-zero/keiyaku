@@ -59,12 +59,8 @@ function tellDeliveries(database: DatabaseSync, id: string): readonly TellDelive
 
 function tellBinding(database: DatabaseSync, id: string): TellBinding | undefined {
   const row = database
-    .prepare(
-      "SELECT turn_sequence, bound_at FROM tell_bindings WHERE tell_id = ? ORDER BY sequence DESC LIMIT 1",
-    )
-    .get(id) as
-    | { turn_sequence: number; bound_at: string }
-    | undefined;
+    .prepare("SELECT turn_sequence, bound_at FROM tell_bindings WHERE tell_id = ? ORDER BY sequence DESC LIMIT 1")
+    .get(id) as { turn_sequence: number; bound_at: string } | undefined;
   return row === undefined ? undefined : { turnSequence: row.turn_sequence, boundAt: row.bound_at };
 }
 
