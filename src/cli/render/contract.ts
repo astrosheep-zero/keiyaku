@@ -231,40 +231,77 @@ function recordBlock(
   return rows;
 }
 
-function completionLines(result: AcceptedDeliverResult | AcceptedReviewResult, columns: number): readonly string[] {
+function nonGatingVerificationLines(
+  result: AcceptedDeliverResult | AcceptedReviewResult,
+  columns: number,
+): readonly string[] {
   const lines: string[] = [];
-  const completion = result.completion;
-  if (completion === undefined) return lines;
-  const verification = completion.verification;
+  const verification = result.completion?.verification;
+  if (verification === undefined || verification.verdict !== "unsatisfied") return lines;
   receiptRow(
     lines,
-    " ",
-    "target",
-    [
-      { text: "->" },
-      { text: completion.integration, opaque: true },
-      ...(verification !== undefined && "verdict" in verification && verification.verdict === "satisfied"
-        ? [{ text: `· verified (${verification.mode})` }]
-        : []),
-    ],
+    "!",
+    "verification",
+    [{ text: "unsatisfied" }, { text: `(${verification.mode})` }, { text: "· not required by Contract gates" }],
     columns,
   );
-  if (verification !== undefined && "verdict" in verification && verification.verdict === "unsatisfied") {
-    receiptRow(
-      lines,
-      "!",
-      "verification",
-      [{ text: "unsatisfied" }, { text: `(${verification.mode})` }, { text: "· not required by Contract gates" }],
-      columns,
-    );
-    if (result.verificationSummary !== undefined) {
-      receiptPayload(lines, "  summary", result.verificationSummary);
-    }
+  if (result.verificationSummary !== undefined) {
+    receiptPayload(lines, "  summary", result.verificationSummary);
   }
   return lines;
 }
 
-function movementLines(result: AcceptedDeliverResult | AcceptedReviewResult, columns: number): readonly string[] {
+function shortGitId(value: string): string {
+  return /^[0-9a-f]{40}$/iu.test(value) ? value.slice(0, 7) : value;
+}
+
+/**
+ * Shared presentation of a completed placement, so a deliver and a review that placed the same candidate read
+ * identically: one git-shaped target movement row, naming the reference it advanced and its Verification
+ * provenance, then the final lifecycle state. A completion without an advanced reference states no movement.
+ * Journal ULIDs stay in JSON and `history`, never in ordinary receipt text.
+ */
+function completedPlacementLines(
+  result: AcceptedDeliverResult | AcceptedReviewResult,
+  columns: number,
+): readonly string[] {
+  const completion = result.completion;
+  if (completion === undefined) return [];
+  const verification = completion.verification;
+  const provenance =
+    verification === undefined || verification.verdict !== "satisfied"
+      ? []
+      : [{ text: verification.mode === "reused" ? "· verification reused from delivery" : "· verified now" }];
+  const lines: string[] = [];
+  if (completion.predecessor !== undefined && completion.target !== undefined) {
+    receiptRow(
+      lines,
+      " ",
+      "target",
+      [
+        { text: `${shortGitId(completion.predecessor)}..${shortGitId(completion.integration)}` },
+        { text: completion.target, opaque: true },
+        ...provenance,
+      ],
+      columns,
+    );
+  }
+  lines.push(...nonGatingVerificationLines(result, columns));
+  // Placement admission always admits the claim entry beside the movement, so a completed placement is claimed.
+  receiptRow(lines, "●", "claimed", [], columns);
+  return lines;
+}
+
+/** Evidence handles stay in JSON and history; ordinary receipt text carries only outstanding obligations. */
+function obligationLines(result: AcceptedDeliverResult | AcceptedReviewResult, columns: number): readonly string[] {
+  const rows: string[] = [];
+  if (result.recoverySnapshot !== undefined)
+    receiptRow(rows, " ", "recovery snapshot", [{ text: result.recoverySnapshot, opaque: true }], columns);
+  rows.push(...acceptedLagRows(result, columns));
+  return rows;
+}
+
+function movementLines(result: AcceptedDeliverResult, columns: number): readonly string[] {
   const count = result.facts.filter((fact) => fact.kind === "reintegrated").length;
   if (count === 0) return [];
   const lines: string[] = [];
@@ -337,7 +374,8 @@ function renderAcceptedDeliver(result: AcceptedDeliverResult, columns: number): 
       [{ text: result.integration.changeId, opaque: true }],
       columns,
     );
-  lines.push(...movementLines(result, columns), ...completionLines(result, columns));
+  if (complete) lines.push(...completedPlacementLines(result, columns));
+  else lines.push(...movementLines(result, columns));
   if (result.verification !== undefined) {
     lines.push(...stopLines(result.verification, columns, result.contract));
   }
@@ -346,17 +384,13 @@ function renderAcceptedDeliver(result: AcceptedDeliverResult, columns: number): 
   }
   if (!complete) receiptRow(lines, " ", "candidate", [{ text: "kept" }], columns);
   lines.push(...continuationLines(result, columns));
-  lines.push(...recordBlock(result, columns));
+  lines.push(...(complete ? obligationLines(result, columns) : recordBlock(result, columns)));
   return lines.join("\n");
 }
 
 function renderAcceptedReview(result: AcceptedReviewResult, columns: number): string {
-  const lines = titleLines("✓", `review ${result.verdict} recorded`, result.contract, columns);
-  lines.push(...movementLines(result, columns), ...completionLines(result, columns));
-  if (result.completion !== undefined) {
-    receiptRow(lines, " ", "placement", [{ text: "complete" }], columns);
-    receiptRow(lines, " ", "integration commit", [{ text: result.completion.integration, opaque: true }], columns);
-  }
+  const lines = titleLines("✓", `review ${result.verdict}`, result.contract, columns);
+  lines.push(...completedPlacementLines(result, columns));
   if (result.verification !== undefined) {
     lines.push(...stopLines(result.verification, columns, result.contract));
   }
@@ -364,7 +398,7 @@ function renderAcceptedReview(result: AcceptedReviewResult, columns: number): st
     lines.push(...stopLines(result.placement, columns, result.contract));
   }
   lines.push(...continuationLines(result, columns));
-  lines.push(...recordBlock(result, columns));
+  lines.push(...obligationLines(result, columns));
   return lines.join("\n");
 }
 

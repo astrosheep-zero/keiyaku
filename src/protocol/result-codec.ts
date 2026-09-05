@@ -344,9 +344,11 @@ export function decodeVerificationCleanupFailure(value: unknown): VerificationCl
 }
 
 export function decodeCandidateCompletion(value: unknown): CandidateCompletion {
-  const object = record(value, ["integration"], ["verification"]);
+  const object = record(value, ["integration"], ["predecessor", "target", "verification"]);
   const completion: CandidateCompletion = {
     integration: decodeSnapshotId(object.integration),
+    ...(object.predecessor === undefined ? {} : { predecessor: decodeSnapshotId(object.predecessor) }),
+    ...(object.target === undefined ? {} : { target: nonblank(object.target) }),
     ...(object.verification === undefined
       ? {}
       : {

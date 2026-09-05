@@ -19,6 +19,9 @@ const MAX_REINTEGRATION_CYCLES = 3;
 
 export type CandidateCompletion = Readonly<{
   integration: SnapshotId;
+  /** The reference this placement advanced and the head it advanced from, both observed at completion time. */
+  predecessor?: SnapshotId;
+  target?: string;
   verification?: Readonly<{ mode: "ran" | "reused"; verdict: "satisfied" | "unsatisfied" }>;
 }>;
 
@@ -141,6 +144,8 @@ function completedResult(cursor: CompletionCursor): Extract<CompletionResult, { 
   const state = cursor.checkpoint.state;
   const integration = state.currentIntegration?.snapshot;
   if (integration === undefined) throw new Error("accepted placement requires its integration snapshot");
+  const target = state.coordinates.target;
+  const predecessor = state.currentIntegration?.predecessor;
   // Never attach a superseded run's verdict to the final integration.
   const current = currentVerifiedAttestation(state);
   const verification =
@@ -156,7 +161,11 @@ function completedResult(cursor: CompletionCursor): Extract<CompletionResult, { 
     checkpoint: cursor.checkpoint,
     evidence: {
       ...evidence,
-      completion: { integration, ...(verification === undefined ? {} : { verification }) },
+      completion: {
+        integration,
+        ...(predecessor === undefined || target === undefined ? {} : { predecessor, target }),
+        ...(verification === undefined ? {} : { verification }),
+      },
       ...(current === undefined || verification?.mode !== "reused" ? {} : { verificationReuse: current }),
       ...(current?.verdict !== "unsatisfied" || current.summary === undefined
         ? {}

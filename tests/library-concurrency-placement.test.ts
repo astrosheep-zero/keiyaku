@@ -525,7 +525,11 @@ test("delivery re-integrates its persisted tender when the target premise moves"
     "preserve this subject",
   );
   assert.equal(repository.run(["rev-parse", "refs/heads/release"]).trim(), reintegrated.data.snapshot);
-  assert.deepEqual(delivered.value.completion, { integration: reintegrated.data.snapshot });
+  assert.deepEqual(delivered.value.completion, {
+    integration: reintegrated.data.snapshot,
+    predecessor: reintegrated.data.predecessor,
+    target: "refs/heads/release",
+  });
   const current = await result.keiyaku.delivery();
   assert.equal(current?.tenderSnapshot, delivered.value.tenderSnapshot);
   assert.equal(current?.integration.predecessor, reintegrated.data.predecessor);
@@ -771,7 +775,11 @@ test("review re-integrates its accepted delivery when the target premise moves",
   );
   const reintegrated = reviewed.facts.find((fact) => fact.kind === "reintegrated");
   assert.ok(reintegrated);
-  assert.deepEqual(reviewed.value.completion, { integration: reintegrated.data.snapshot });
+  assert.deepEqual(reviewed.value.completion, {
+    integration: reintegrated.data.snapshot,
+    predecessor: reintegrated.data.predecessor,
+    target: "refs/heads/release",
+  });
   assert.equal(reintegrated?.data.predecessor, repository.run(["rev-parse", "HEAD"]).trim());
   const state = await result.keiyaku.state();
   assert.equal(state.attestations.at(-1)?.data.verdict, "satisfied");

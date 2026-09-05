@@ -53,8 +53,11 @@ verification or placement stop cannot undo an accepted delivery or review.
 Recovery names an existing delivery fact as already admitted, reports only this
 invocation's facts, and does not disguise later workspace bytes as a candidate.
 Successful placement is represented once as completion; callers do not rebuild
-it from facts or folded state. Reused Verification evidence is identified as
-reuse, not a cache or a new evidence source.
+it from facts or folded state. A completed placement also carries the movement
+it made — the reference it advanced and the head it advanced from — so a
+receipt states the target's movement instead of deriving it from journal
+facts or folded state. Reused Verification evidence is identified as reuse,
+not a cache or a new evidence source.
 An admitted current candidate with declared Verification but no terminal fact
 is `unrecorded`, distinct from undeclared or terminal Verification and implying
 no timeout, liveness, or retry state.

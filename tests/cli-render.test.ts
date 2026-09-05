@@ -120,7 +120,7 @@ test("pre-delivery review records testimony without claiming a retained candidat
       settlementLags: [],
       verdict,
     });
-    assert.equal(output, `✓ review ${verdict} recorded  kei/not-delivered`);
+    assert.equal(output, `✓ review ${verdict}  kei/not-delivered`);
     assert.doesNotMatch(output, /candidate|not complete|placement/u);
   }
 });
@@ -567,7 +567,7 @@ test("direct placement stops render the public unmet prerequisites in order", ()
   assert.equal(
     renderText(review),
     [
-      "✓ review satisfied recorded  kei/waiting-on-prerequisites",
+      "✓ review satisfied  kei/waiting-on-prerequisites",
       "! prerequisites unsatisfied",
       "  prerequisite  kei/active-prerequisite  ·  active",
       "  prerequisite  kei/abandoned-prerequisite  ·  abandoned",
@@ -701,7 +701,11 @@ test("continuation checkout stop keeps its exact block after the dependent conte
       head: contractHead("head"),
       facts: [],
       settlementLags: [],
-      completion: { integration: snapshotId("integration") },
+      completion: {
+        integration: snapshotId("2".repeat(40)),
+        predecessor: snapshotId("1".repeat(40)),
+        target: "refs/heads/main",
+      },
       continuation: {
         claimed: [],
         stopped: [
@@ -723,7 +727,8 @@ test("continuation checkout stop keeps its exact block after the dependent conte
     }),
     [
       "✓ delivered  kei/prerequisite-checkout",
-      "  target  ->  integration",
+      "  target  1111111..2222222  refs/heads/main",
+      "● claimed",
       "! continuation  kei/stopped-checkout-dependent",
       "! checkout-not-followable",
       "  checkout  /repo/checkout",
@@ -737,7 +742,7 @@ test("continuation checkout stop keeps its exact block after the dependent conte
 
 test("deliver projects a ran Verification completion", () => {
   const contract = contractId("kei/completion");
-  const integration = snapshotId("integration-1");
+  const integration = snapshotId("4".repeat(40));
   const envelope = {
     kind: "accepted" as const,
     contract,
@@ -749,13 +754,16 @@ test("deliver projects a ran Verification completion", () => {
     renderText({
       ...envelope,
       verb: "deliver",
-      completion: { integration, verification: { mode: "ran", verdict: "satisfied" } },
+      completion: {
+        integration,
+        predecessor: snapshotId("3".repeat(40)),
+        target: "refs/heads/main",
+        verification: { mode: "ran", verdict: "satisfied" },
+      },
     }),
-    [
-      "✓ delivered  kei/completion",
-      "  target  ->  integration-1  · verified (ran)",
-      "  journal  claim  · claimed",
-    ].join("\n"),
+    ["✓ delivered  kei/completion", "  target  3333333..4444444  refs/heads/main  · verified now", "● claimed"].join(
+      "\n",
+    ),
   );
 });
 
@@ -771,7 +779,11 @@ test("deliver renders claimed and stopped continuations from the accepted result
       head: contractHead("head"),
       facts: [],
       settlementLags: [],
-      completion: { integration: snapshotId("integration") },
+      completion: {
+        integration: snapshotId("6".repeat(40)),
+        predecessor: snapshotId("5".repeat(40)),
+        target: "refs/heads/main",
+      },
       continuation: {
         claimed: [claimed],
         stopped: [
@@ -790,7 +802,8 @@ test("deliver renders claimed and stopped continuations from the accepted result
     }),
     [
       "✓ delivered  kei/prerequisite",
-      "  target  ->  integration",
+      "  target  5555555..6666666  refs/heads/main",
+      "● claimed",
       "✓ continuation  complete  kei/claimed-dependent",
       "! kei/stopped-dependent  ·  gates unsatisfied",
       "  gate  reviewed  · missing",
@@ -800,7 +813,8 @@ test("deliver renders claimed and stopped continuations from the accepted result
 
 test("deliver projects no Verification and an unsatisfied non-gating Verification", () => {
   const contract = contractId("kei/completion-states");
-  const integration = snapshotId("integration-2");
+  const integration = snapshotId("8".repeat(40));
+  const movement = { predecessor: snapshotId("7".repeat(40)), target: "refs/heads/main" };
   const envelope = {
     kind: "accepted" as const,
     contract,
@@ -812,26 +826,26 @@ test("deliver projects no Verification and an unsatisfied non-gating Verificatio
     renderText({
       ...envelope,
       verb: "deliver",
-      completion: { integration },
+      completion: { integration, ...movement },
     }),
-    ["✓ delivered  kei/completion-states", "  target  ->  integration-2", "  journal  claim  · claimed"].join("\n"),
+    ["✓ delivered  kei/completion-states", "  target  7777777..8888888  refs/heads/main", "● claimed"].join("\n"),
   );
 
   assert.equal(
     renderText({
       ...envelope,
       verb: "deliver",
-      completion: { integration, verification: { mode: "ran", verdict: "unsatisfied" } },
+      completion: { integration, ...movement, verification: { mode: "ran", verdict: "unsatisfied" } },
       verificationSummary: "[1 bash exit 1]",
     }),
     [
       "✓ delivered  kei/completion-states",
-      "  target  ->  integration-2",
+      "  target  7777777..8888888  refs/heads/main",
       "! verification  unsatisfied  (ran)  · not required by Contract gates",
       "  summary",
       "  [1 bash exit 1]",
       "",
-      "  journal  claim  · claimed",
+      "● claimed",
     ].join("\n"),
   );
 });
@@ -849,39 +863,79 @@ function assertNoWorkspaceRows(text: string): void {
   assert.doesNotMatch(text, /files? changed/u);
 }
 
-test("review projects reused Verification and distinguishes placement from testimony", () => {
+test("review projects a git-shaped movement row with named reused Verification", () => {
   const contract = contractId("kei/review-completion");
-  const integration = snapshotId("integration-3");
+  const predecessor = snapshotId("1".repeat(40));
+  const integration = snapshotId("2".repeat(40));
   const envelope = {
     kind: "accepted" as const,
     contract,
     head: contractHead("journal-blob-oid"),
-    facts: [{ contract, entry: "claim", kind: "claimed" as const }],
+    facts: [
+      { contract, entry: "reintegration", kind: "reintegrated" as const, data: { predecessor, snapshot: integration } },
+      { contract, entry: "claim", kind: "claimed" as const },
+    ],
     settlementLags: [],
   };
   const text = renderText({
     ...envelope,
     verb: "review",
     verdict: "satisfied",
-    completion: { integration, verification: { mode: "reused", verdict: "satisfied" } },
+    completion: {
+      integration,
+      predecessor,
+      target: "refs/heads/main",
+      verification: { mode: "reused", verdict: "satisfied" },
+    },
     workspace: reviewWorkspace,
   });
   assert.equal(
     text,
     [
-      "✓ review satisfied recorded  kei/review-completion",
-      "  target  ->  integration-3  · verified (reused)",
-      "  placement  complete",
-      "  integration commit  integration-3",
-      "  journal  claim  · claimed",
+      "✓ review satisfied  kei/review-completion",
+      "  target  1111111..2222222  refs/heads/main  · verification reused from delivery",
+      "● claimed",
     ].join("\n"),
   );
   assertNoWorkspaceRows(text);
+  assert.doesNotMatch(text, /recorded|->|journal|integration commit|placement/u);
+});
+
+test("review names a fresh Verification run and keeps the verdict title unadorned", () => {
+  const contract = contractId("kei/review-fresh-verification");
+  const predecessor = snapshotId("3".repeat(40));
+  const integration = snapshotId("4".repeat(40));
+  assert.equal(
+    renderText({
+      kind: "accepted",
+      verb: "review",
+      contract,
+      head: contractHead("head"),
+      facts: [
+        { contract, entry: "reintegration", kind: "reintegrated", data: { predecessor, snapshot: integration } },
+        { contract, entry: "claim", kind: "claimed" },
+      ],
+      settlementLags: [],
+      verdict: "satisfied",
+      completion: {
+        integration,
+        predecessor,
+        target: "refs/heads/main",
+        verification: { mode: "ran", verdict: "satisfied" },
+      },
+    }),
+    [
+      "✓ review satisfied  kei/review-fresh-verification",
+      "  target  3333333..4444444  refs/heads/main  · verified now",
+      "● claimed",
+    ].join("\n"),
+  );
 });
 
 test("review projects a reused unsatisfied Verification as non-gating completion", () => {
   const contract = contractId("kei/review-completion-unsatisfied");
-  const integration = snapshotId("integration-4");
+  const predecessor = snapshotId("7".repeat(40));
+  const integration = snapshotId("8".repeat(40));
   const envelope = {
     kind: "accepted" as const,
     contract,
@@ -894,20 +948,23 @@ test("review projects a reused unsatisfied Verification as non-gating completion
       ...envelope,
       verb: "review",
       verdict: "satisfied",
-      completion: { integration, verification: { mode: "reused", verdict: "unsatisfied" } },
+      completion: {
+        integration,
+        predecessor,
+        target: "refs/heads/main",
+        verification: { mode: "reused", verdict: "unsatisfied" },
+      },
       verificationSummary: "[reused bash exit 1]",
       workspace: reviewWorkspace,
     }),
     [
-      "✓ review satisfied recorded  kei/review-completion-unsatisfied",
-      "  target  ->  integration-4",
+      "✓ review satisfied  kei/review-completion-unsatisfied",
+      "  target  7777777..8888888  refs/heads/main",
       "! verification  unsatisfied  (reused)  · not required by Contract gates",
       "  summary",
       "  [reused bash exit 1]",
       "",
-      "  placement  complete",
-      "  integration commit  integration-4",
-      "  journal  claim  · claimed",
+      "● claimed",
     ].join("\n"),
   );
 });
@@ -920,7 +977,7 @@ test("an unsatisfied review verdict and a claimed continuation stay outcome-only
     verb: "review",
     contract,
     head: contractHead("head"),
-    facts: [{ contract, entry: "testimony", kind: "claimed" as const }],
+    facts: [{ contract, entry: "testimony", kind: "attestation" }],
     settlementLags: [],
     verdict: "unsatisfied",
     continuation: { claimed: [claimed], stopped: [] },
@@ -928,11 +985,7 @@ test("an unsatisfied review verdict and a claimed continuation stay outcome-only
   });
   assert.equal(
     text,
-    [
-      "✓ review unsatisfied recorded  kei/review-outcome-only",
-      "✓ continuation  complete  kei/claimed-by-review",
-      "  journal  testimony  · claimed",
-    ].join("\n"),
+    ["✓ review unsatisfied  kei/review-outcome-only", "✓ continuation  complete  kei/claimed-by-review"].join("\n"),
   );
   assertNoWorkspaceRows(text);
 });
@@ -970,16 +1023,9 @@ test("movement projects its deviation and reintegration coordinates", () => {
       ...envelope,
       verb: "deliver",
       facts,
-      completion: { integration: secondIntegrated },
+      completion: { integration: secondIntegrated, predecessor: secondPredecessor, target: "refs/heads/main" },
     }),
-    [
-      "✓ delivered  kei/reintegrated",
-      "! target  moved · re-integrated x2",
-      "  target  ->  integration-4",
-      "  journal  reintegration  · reintegrated  target-1  ->  integration-2",
-      "  journal  reintegration-2  · reintegrated  target-3  ->  integration-4",
-      "  journal  claim  · claimed",
-    ].join("\n"),
+    ["✓ delivered  kei/reintegrated", "  target  target-3..integration-4  refs/heads/main", "● claimed"].join("\n"),
   );
 
   assert.equal(

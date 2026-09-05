@@ -19,7 +19,17 @@ workspace coordinate is a separate fact for the caller to use.
 Text is the primary readable projection and JSON is the complete typed
 projection of the same result. Rendering retains the meaningful distinctions
 between success, substantive refusal, retryable conflict, absent authority,
-and operational failure. Contract text labels tender and target integration as `tender commit` and `integration commit`, patch-id as `content identity (not commit)`, keeps ContractHead and journal blob custody out of ordinary text, and retains typed fields in JSON.
+and operational failure. Contract text labels tender and target integration as `tender commit` and `integration commit`, patch-id as `content identity (not commit)`, keeps ContractHead and journal blob custody out of ordinary text, and retains typed fields in JSON. A completed placement
+reads like Git movement, identically for a review and a deliver that placed
+the candidate: the title states the verdict or delivery and the Contract, one
+movement row states the reference the placement advanced as `old..new  ref`,
+naming its Verification provenance — `verification reused from delivery` when
+the verdict rests on Verification already recorded over the same integrated
+candidate, and the fresh-run equivalent when this invocation ran it — and the
+final lifecycle state is one explicit `claimed` row. A deliver that did not
+complete placement keeps its tender and content-identity rows and its current
+diagnostic shape. Journal entry ids are evidence handles carried by JSON and
+`history`; they are not ordinary receipt text.
 
 ## Shared rendering
 

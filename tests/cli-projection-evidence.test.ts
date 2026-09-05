@@ -420,14 +420,25 @@ test("accepted review keeps its typed workspace evidence in JSON while text stay
     facts: [{ contract, entry: "claim", kind: "claimed" as const }],
     settlementLags: [],
     verdict: "satisfied" as const,
+    completion: {
+      integration: snapshotId("2".repeat(40)),
+      predecessor: snapshotId("1".repeat(40)),
+      target: "refs/heads/main",
+    },
     workspace,
   };
   const text = renderText(result);
   assert.equal(
     text,
-    ["✓ review satisfied recorded  kei/review-workspace-projection", "  journal  claim  · claimed"].join("\n"),
+    [
+      "✓ review satisfied  kei/review-workspace-projection",
+      "  target  1111111..2222222  refs/heads/main",
+      "● claimed",
+    ].join("\n"),
   );
   assert.doesNotMatch(text, /^\s+(?:workspace|staged|unstaged|untracked|unmerged)\s/mu);
   assert.doesNotMatch(text, /files? changed/u);
   assert.deepEqual(JSON.parse(JSON.stringify(result)).workspace, workspace);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)).completion, result.completion);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)).facts, result.facts);
 });
