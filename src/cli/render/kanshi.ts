@@ -225,7 +225,7 @@ function renderSelectedContractRow(
   lines.push(...semanticBlock("namespace tasks", namespaceTaskFacts(row), context));
   const observation = row.workspaceObservation;
   if ((observation.kind === "clean" || observation.kind === "dirty") && observation.merge?.recovery !== undefined) {
-    lines.push(`  deliver  ${safeText(observation.merge.recovery.continue)} · reads worktree bytes, not index`);
+    lines.push(`  deliver  ${safeText(observation.merge.recovery.deliver)} · reads worktree bytes, not index`);
   }
   return lines;
 }

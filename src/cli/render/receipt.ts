@@ -163,11 +163,11 @@ function refusalEvidence(stop: VerificationStop | PlacementStop, columns: number
       recovery !== null &&
       "materialize" in recovery &&
       typeof recovery.materialize === "string" &&
-      "continue" in recovery &&
-      typeof recovery.continue === "string"
+      "deliver" in recovery &&
+      typeof recovery.deliver === "string"
     ) {
       receiptRow(lines, " ", "materialize", [{ text: recovery.materialize }], columns);
-      receiptRow(lines, " ", "deliver", [{ text: recovery.continue }], columns);
+      receiptRow(lines, " ", "deliver", [{ text: recovery.deliver }], columns);
     }
   } else if (refusal.kind === "integration-unsupported") {
     receiptRow(lines, " ", "required Git", [{ text: refusal.requiredGit }], columns);

@@ -52,7 +52,7 @@ const contractRequestBaseSchema = z.object({ repoRoot: absolutePathSchema, contr
 const conflictRecoverySchema = z
   .object({
     materialize: z.literal("deliver --materialize-conflict --include-dirty"),
-    continue: z.literal("deliver --include-dirty"),
+    deliver: z.literal("deliver --include-dirty"),
     staging: z.literal("not-required"),
   })
   .strict();

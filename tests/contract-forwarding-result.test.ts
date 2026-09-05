@@ -8,7 +8,7 @@ import {
   KeiyakuRetry,
 } from "../src/library/refusal.js";
 import { changeId, contractHead, contractId, entryUlid, snapshotId } from "../src/core/facts/types.js";
-import { decodeVerificationRuntimeStop } from "../src/protocol/result-codec.js";
+import { decodeDeliverConflictRefusal, decodeVerificationRuntimeStop } from "../src/protocol/result-codec.js";
 import { decodeSettlementLag } from "../src/settlement/settle.js";
 
 const contract = contractId("kei/forwarding-codec");
@@ -262,13 +262,50 @@ test("refusal, retry, review, audit, and materialized conflict variants round-tr
     handoffBase: snapshot,
     recovery: {
       materialize: "deliver --materialize-conflict --include-dirty",
-      continue: "deliver --include-dirty",
+      deliver: "deliver --include-dirty",
       staging: "not-required",
     },
     conflictPaths: ["src/a.ts"],
     workspace: { kind: "worktree", path: "/tmp/worktree" },
   };
   assert.deepEqual(deliveryResultSchema.parse(JSON.parse(JSON.stringify(conflict))), conflict);
+});
+
+test("conflict recovery codecs reject the legacy continue field", () => {
+  const recovery = {
+    materialize: "deliver --materialize-conflict --include-dirty",
+    deliver: "deliver --include-dirty",
+    staging: "not-required",
+  };
+  const materialized = {
+    kind: "integration-conflict-materialized",
+    targetHead: snapshot,
+    handoffBase: snapshot,
+    recovery,
+    conflictPaths: ["src/a.ts"],
+    workspace: { kind: "worktree", path: "/tmp/worktree" },
+  };
+  assert.deepEqual(deliveryResultSchema.parse(JSON.parse(JSON.stringify(materialized))), materialized);
+  const legacyRecovery = { materialize: recovery.materialize, continue: recovery.deliver, staging: recovery.staging };
+  assert.equal(deliveryResultSchema.safeParse({ ...materialized, recovery: legacyRecovery }).success, false);
+  assert.equal(
+    deliveryResultSchema.safeParse({ ...materialized, recovery: { ...recovery, continue: recovery.deliver } }).success,
+    false,
+  );
+
+  const refusal = {
+    kind: "integration-failed",
+    contractId: contract,
+    reason: "conflict",
+    targetHead: snapshot,
+    conflictPaths: ["src/a.ts"],
+    recovery,
+  };
+  assert.deepEqual(decodeDeliverConflictRefusal(JSON.parse(JSON.stringify(refusal))), refusal);
+  assert.throws(() => decodeDeliverConflictRefusal({ ...refusal, recovery: legacyRecovery }));
+  assert.throws(() =>
+    decodeDeliverConflictRefusal({ ...refusal, recovery: { ...recovery, continue: recovery.deliver } }),
+  );
 });
 
 test("Verification runtime stops preserve only canonical captured output fields", () => {

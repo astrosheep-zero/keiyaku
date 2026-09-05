@@ -98,7 +98,7 @@ export function renderRefusalFacts(
     if (refusal.conflictPaths !== undefined) lines.push(...collectionLines("conflicts", refusal.conflictPaths, indent));
     if ("recovery" in refusal && refusal.recovery !== undefined) {
       lines.push(`${indent}materialize  ${safeText(refusal.recovery.materialize)}`);
-      lines.push(`${indent}deliver  ${safeText(refusal.recovery.continue)}`);
+      lines.push(`${indent}deliver  ${safeText(refusal.recovery.deliver)}`);
     }
     return lines;
   }
@@ -151,7 +151,7 @@ export function renderConflictMaterialized(
     `${indent}handoff base  ${shortGitId(result.handoffBase)}`,
     ...collectionLines("conflicts", result.conflictPaths, indent),
     `${indent}workspace  ${safeText(result.workspace.path)}`,
-    `${indent}deliver  ${safeText(result.recovery.continue)} · reads worktree bytes, not index`,
+    `${indent}deliver  ${safeText(result.recovery.deliver)} · reads worktree bytes, not index`,
   ].join("\n");
 }
 

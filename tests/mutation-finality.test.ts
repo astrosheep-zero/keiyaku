@@ -175,7 +175,7 @@ test("materialized integration conflicts project not-admitted", () => {
     handoffBase: "base" as SnapshotId,
     recovery: {
       materialize: "deliver --materialize-conflict --include-dirty",
-      continue: "deliver --include-dirty",
+      deliver: "deliver --include-dirty",
       staging: "not-required",
     },
   };

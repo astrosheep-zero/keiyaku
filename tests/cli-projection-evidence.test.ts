@@ -216,7 +216,7 @@ test("materialized conflict keeps copyable handoff and target coordinates", () =
       workspace: { kind: "worktree", path: "/repo/.keiyaku/wt/example" },
       conflictPaths: ["file.txt"],
       recovery: {
-        continue: "deliver --include-dirty",
+        deliver: "deliver --include-dirty",
         materialize: "deliver --materialize-conflict --include-dirty",
         staging: "not-required",
       },
@@ -376,7 +376,7 @@ test("narrow conflict output keeps its label, paths and handles whole", () => {
       workspace: { kind: "worktree", path: "/worktree" },
       conflictPaths: [path],
       recovery: {
-        continue: "deliver --include-dirty",
+        deliver: "deliver --include-dirty",
         materialize: "deliver --materialize-conflict --include-dirty",
         staging: "not-required",
       },

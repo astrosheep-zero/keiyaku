@@ -988,7 +988,7 @@ test("materialized conflict text keeps the exact recovery projection", () => {
     workspace: { kind: "worktree", path: "/repo/.keiyaku/wt/x" },
     handoffBase: snapshotId("a".repeat(40)),
     recovery: {
-      continue: "deliver --include-dirty",
+      deliver: "deliver --include-dirty",
       staging: "not-required",
       materialize: "deliver --materialize-conflict --include-dirty",
     },

@@ -291,7 +291,7 @@ async function reviewGatedConflictCandidateFixture() {
 
 const DELIVER_CONFLICT_RECOVERY = {
   materialize: "deliver --materialize-conflict --include-dirty",
-  continue: "deliver --include-dirty",
+  deliver: "deliver --include-dirty",
   staging: "not-required",
 } as const;
 

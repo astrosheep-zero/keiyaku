@@ -255,13 +255,13 @@ export type WorkspaceChangeCounts = Readonly<{
 
 export type ConflictRecovery = Readonly<{
   materialize: "deliver --materialize-conflict --include-dirty";
-  continue: "deliver --include-dirty";
+  deliver: "deliver --include-dirty";
   staging: "not-required";
 }>;
 
 export const conflictRecovery: ConflictRecovery = Object.freeze({
   materialize: "deliver --materialize-conflict --include-dirty",
-  continue: "deliver --include-dirty",
+  deliver: "deliver --include-dirty",
   staging: "not-required",
 });
 

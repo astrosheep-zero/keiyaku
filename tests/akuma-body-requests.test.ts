@@ -375,6 +375,34 @@ test("Contract owner codecs reject malformed live, failure, and service payloads
     () => command.decodeService({ malformed: true }),
     /malformed stored Contract service evidence for contract\.deliver/u,
   );
+  const handoff = {
+    kind: "materialized-handoff",
+    repoRoot: "/tmp/repo",
+    contractId: "kei/conflicted",
+    targetHead: "target-head",
+    handoffBase: "handoff-base",
+    recovery: {
+      materialize: "deliver --materialize-conflict --include-dirty",
+      deliver: "deliver --include-dirty",
+      staging: "not-required",
+    },
+    conflictPaths: ["shared.txt"],
+    workspace: { kind: "worktree", path: "/tmp/wt" },
+  };
+  assert.deepEqual(command.decodeService(handoff), handoff);
+  const legacyRecovery = {
+    materialize: handoff.recovery.materialize,
+    continue: handoff.recovery.deliver,
+    staging: handoff.recovery.staging,
+  };
+  assert.throws(
+    () => command.decodeService({ ...handoff, recovery: legacyRecovery }),
+    /malformed stored Contract service evidence for contract\.deliver/u,
+  );
+  assert.throws(
+    () => command.decodeService({ ...handoff, recovery: { ...handoff.recovery, continue: handoff.recovery.deliver } }),
+    /malformed stored Contract service evidence for contract\.deliver/u,
+  );
 });
 
 test("Fleet owner codecs reject malformed live and service payloads", () => {
@@ -1919,7 +1947,7 @@ test("forwarded materialization retains and replays its handoff evidence", async
     handoffBase: snapshotId("handoff-base"),
     recovery: {
       materialize: "deliver --materialize-conflict --include-dirty" as const,
-      continue: "deliver --include-dirty" as const,
+      deliver: "deliver --include-dirty" as const,
       staging: "not-required" as const,
     },
   };
@@ -1970,7 +1998,7 @@ test("forwarded materialization retains and replays its handoff evidence", async
       handoffBase: "handoff-base",
       recovery: {
         materialize: "deliver --materialize-conflict --include-dirty",
-        continue: "deliver --include-dirty",
+        deliver: "deliver --include-dirty",
         staging: "not-required",
       },
       conflictPaths: ["shared.txt"],

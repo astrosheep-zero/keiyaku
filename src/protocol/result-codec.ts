@@ -139,9 +139,9 @@ export function decodeMergeStatePresentRefusal(value: unknown): MergeStatePresen
 export function decodeDeliverConflictRefusal(value: unknown): DeliverConflictRefusal {
   const object = record(value, ["kind", "contractId", "reason", "targetHead", "conflictPaths", "recovery"]);
   if (object.kind !== "integration-failed" || object.reason !== "conflict") fail();
-  const recovery = record(object.recovery, ["materialize", "continue", "staging"]);
+  const recovery = record(object.recovery, ["materialize", "deliver", "staging"]);
   if (recovery.materialize !== "deliver --materialize-conflict --include-dirty") fail();
-  if (recovery.continue !== "deliver --include-dirty") fail();
+  if (recovery.deliver !== "deliver --include-dirty") fail();
   if (recovery.staging !== "not-required") fail();
   return {
     kind: "integration-failed",
@@ -151,7 +151,7 @@ export function decodeDeliverConflictRefusal(value: unknown): DeliverConflictRef
     conflictPaths: strings(object.conflictPaths),
     recovery: {
       materialize: "deliver --materialize-conflict --include-dirty",
-      continue: "deliver --include-dirty",
+      deliver: "deliver --include-dirty",
       staging: "not-required",
     },
   };
@@ -387,9 +387,9 @@ export function decodeDeliverLeading(value: unknown): DeliverLeading {
 export function decodeMaterializedConflict(value: unknown): IntegrationConflictMaterialized {
   const object = record(value, ["kind", "targetHead", "conflictPaths", "workspace", "handoffBase", "recovery"]);
   if (object.kind !== "integration-conflict-materialized") fail();
-  const recovery = record(object.recovery, ["materialize", "continue", "staging"]);
+  const recovery = record(object.recovery, ["materialize", "deliver", "staging"]);
   if (recovery.materialize !== "deliver --materialize-conflict --include-dirty") fail();
-  if (recovery.continue !== "deliver --include-dirty") fail();
+  if (recovery.deliver !== "deliver --include-dirty") fail();
   if (recovery.staging !== "not-required") fail();
   return {
     kind: "integration-conflict-materialized",
@@ -399,7 +399,7 @@ export function decodeMaterializedConflict(value: unknown): IntegrationConflictM
     handoffBase: decodeSnapshotId(object.handoffBase),
     recovery: {
       materialize: "deliver --materialize-conflict --include-dirty",
-      continue: "deliver --include-dirty",
+      deliver: "deliver --include-dirty",
       staging: "not-required",
     },
   };
