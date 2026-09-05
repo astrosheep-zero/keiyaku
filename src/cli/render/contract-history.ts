@@ -19,6 +19,24 @@ function shortId(value: string): string {
   return /^[0-9a-f]{40}$/iu.test(value) ? value.slice(0, 7) : value;
 }
 
+/**
+ * A persisted subject is a canonical `[kind, value]` key set. Only its snapshot names the commit the verdict
+ * covers, so history speaks that component and leaves the segment and document keys to JSON.
+ */
+function subjectSnapshot(subject: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(subject) as unknown;
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(parsed)) return undefined;
+  for (const key of parsed) {
+    if (Array.isArray(key) && key[0] === "snapshot" && typeof key[1] === "string") return key[1];
+  }
+  return undefined;
+}
+
 function journalBody(fact: Fact): readonly string[] {
   switch (fact.kind) {
     case "bind": {
@@ -43,7 +61,7 @@ function journalBody(fact: Fact): readonly string[] {
         `  integration commit  ${shortId(integration.snapshot)}`,
         `  content identity (not commit)  ${integration.changeId}`,
         `  method  ${method}`,
-        `  require-branches-to-be-up-to-date  ${String(policy.requireBranchesToBeUpToDate)}`,
+        `  require branches up to date  ${String(policy.requireBranchesToBeUpToDate)}`,
       ];
     }
     case "reintegrated":
@@ -52,10 +70,11 @@ function journalBody(fact: Fact): readonly string[] {
         `  integration commit  ${shortId(fact.data.snapshot)}`,
       ];
     case "attestation": {
+      const snapshot = subjectSnapshot(fact.data.subject);
       const lines = [
         `  gate  ${fact.data.gate}`,
         `  verdict  ${fact.data.verdict}`,
-        `  subject  verification · snapshot ${shortId(fact.data.subject)}`,
+        snapshot === undefined ? "  subject  verification" : `  subject  verification  · snapshot ${shortId(snapshot)}`,
       ];
       if (fact.data.summary !== undefined) {
         const clipped =

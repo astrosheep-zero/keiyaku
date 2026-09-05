@@ -42,33 +42,23 @@ function retryLines(detail: KeiyakuRetryReason, indent: string, columns: number)
 function lagRows(lag: Lag, columns: number): readonly string[] {
   const lines: string[] = [];
   if (lag.kind === "worktree-retained") {
-    receiptRow(lines, "!", "lag", [{ text: `worktree-retained ${lag.path}`, opaque: true }], columns);
+    receiptRow(lines, "!", "lag", [{ text: "worktree retained" }, { text: lag.path, opaque: true }], columns);
   } else if (lag.kind === "worktree-follow-retained") {
     receiptRow(
       lines,
       "!",
       "lag",
       [
-        {
-          text: `${lag.kind} reason ${lag.reason} tender ${lag.tender} head ${lag.head}${lag.paths === undefined || lag.paths.length === 0 ? "" : ` paths ${lag.paths.join(",")}`} path ${lag.path}`,
-          opaque: true,
-        },
+        { text: "worktree follow retained" },
+        { text: "·" },
+        { text: lag.reason.replaceAll("-", " ") },
+        { text: "·" },
+        { text: lag.path, opaque: true },
       ],
       columns,
     );
   } else if (lag.kind === "unsealed-bytes") {
-    receiptRow(
-      lines,
-      "!",
-      "lag",
-      [
-        {
-          text: `unsealed-bytes ${lag.path}${lag.head === undefined ? "" : ` head ${lag.head}`}${lag.paths.length === 0 ? "" : ` paths ${lag.paths.join(",")}`}`,
-          opaque: true,
-        },
-      ],
-      columns,
-    );
+    receiptRow(lines, "!", "lag", [{ text: "unsealed bytes" }, { text: lag.path, opaque: true }], columns);
   } else if (lag.kind === "target-checkout-retained") {
     receiptRow(
       lines,
@@ -110,24 +100,9 @@ function lagRows(lag: Lag, columns: number): readonly string[] {
 
 function settlementLagRows(lag: AcceptedEnvelope["settlementLags"][number], columns: number): readonly string[] {
   const lines: string[] = [];
-  receiptRow(
-    lines,
-    "!",
-    "settlement",
-    [
-      {
-        text: [
-          `surface ${lag.surface}`,
-          lag.taskId === undefined ? undefined : `task ${lag.taskId}`,
-          lag.path === undefined ? undefined : `path ${lag.path}`,
-        ]
-          .filter((part): part is string => part !== undefined)
-          .join(" "),
-        opaque: true,
-      },
-    ],
-    columns,
-  );
+  receiptRow(lines, "!", "settlement", [{ text: lag.surface.replaceAll("-", " ") }], columns);
+  if (lag.taskId !== undefined) receiptRow(lines, " ", "task", [{ text: lag.taskId, opaque: true }], columns);
+  if (lag.path !== undefined) receiptRow(lines, " ", "path", [{ text: lag.path, opaque: true }], columns);
   receiptPayload(lines, "diagnostic", lag.diagnostic);
   return lines;
 }
@@ -167,25 +142,6 @@ function acceptedRecord(
   columns: number,
 ): readonly string[] {
   const record: string[] = [];
-  for (const fact of result.facts) {
-    const contract = fact.contract === result.contract ? [] : [{ text: fact.contract, opaque: true }];
-    receiptRow(
-      record,
-      " ",
-      "journal",
-      fact.kind === "reintegrated"
-        ? [
-            ...contract,
-            { text: fact.entry, opaque: true },
-            { text: "· reintegrated" },
-            { text: fact.data.predecessor, opaque: true },
-            { text: "->" },
-            { text: fact.data.snapshot, opaque: true },
-          ]
-        : [...contract, { text: fact.entry, opaque: true }, { text: `· ${fact.kind}` }],
-      columns,
-    );
-  }
   if (result.recoverySnapshot !== undefined)
     receiptRow(record, " ", "recovery snapshot", [{ text: result.recoverySnapshot, opaque: true }], columns);
   if (result.verb === "deliver") {
@@ -349,25 +305,19 @@ function renderAcceptedBind(result: AcceptedBindResult, columns: number): string
 }
 
 function renderAcceptedAmend(result: AcceptedAmendResult, columns: number): string {
-  const lines = titleLines("✓", "terms replaced", result.contract, columns);
-  if (result.diff.length === 0) lines.push("  terms unchanged", "");
-  else receiptPayload(lines, "  terms diff", result.diff);
+  const changed = result.diff.length > 0;
+  const lines = titleLines("✓", changed ? "terms replaced" : "terms unchanged", result.contract, columns);
+  if (changed) receiptPayload(lines, "  terms diff", result.diff);
   lines.push(...acceptedDeviations(result, columns), ...recordBlock(result, columns));
   return lines.join("\n");
 }
 
 function renderAcceptedDeliver(result: AcceptedDeliverResult, columns: number): string {
   const complete = result.completion !== undefined;
-  const title = complete ? "delivered" : "deliver — not complete";
+  const title = complete ? "delivered" : "deliver incomplete";
   const lines = titleLines("✓", title, result.contract, columns);
   if (result.leading !== undefined) {
-    receiptRow(
-      lines,
-      " ",
-      "leading",
-      [{ text: result.leading.kind }, { text: result.leading.fact, opaque: true }],
-      columns,
-    );
+    receiptRow(lines, " ", "leading", [{ text: result.leading.kind.replaceAll("-", " ") }], columns);
   }
   if (result.tenderSnapshot !== undefined)
     receiptRow(lines, " ", "tender commit", [{ text: result.tenderSnapshot, opaque: true }], columns);
@@ -408,7 +358,7 @@ function renderAcceptedReview(result: AcceptedReviewResult, columns: number): st
 }
 
 function renderAcceptedArc(result: AcceptedArcResult, columns: number): string {
-  const lines = titleLines("✓", "chapter recorded", result.contract, columns);
+  const lines = titleLines("✓", `entered chapter ${result.chapter.seq}`, result.contract, columns);
   receiptRow(
     lines,
     " ",

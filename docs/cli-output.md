@@ -27,12 +27,19 @@ satisfied Verification adds one fact row `verification satisfied · on <sha>`
 naming the commit the verdict ran against — placement made that commit the
 reference's new head, so the two rows share one sha — and the final lifecycle
 state is one explicit `claimed` row. Receipt, status, and history render that
-fact with the same `verification satisfied` vocabulary; Verification mode
-words never appear in ordinary receipt text and stay in JSON and `history`. A
-deliver that did not complete placement keeps its tender and
-content-identity rows and its current diagnostic shape. Journal entry ids are
-evidence handles carried by JSON and `history`; they are not ordinary receipt
-text.
+verified commit with one `verification satisfied · on <sha>` vocabulary;
+status falls back to the bare verdict only when the recorded subject names no
+snapshot. Verification mode words never appear in ordinary receipt text and
+stay in JSON and `history`. A deliver that did not complete placement keeps
+its tender and content-identity rows and its current diagnostic shape.
+
+Ordinary fact rows state labeled human facts. No verb receipt states its own
+recording with a `journal` row, and no ordinary receipt text carries a
+26-character journal entry id; entry ids are evidence handles carried by JSON
+and `history` alone. Fact rows never enumerate persisted record fields or
+splice raw JSON into text, and an attestation subject renders only its
+snapshot as a short sha while segment components stay in JSON. Dashed machine
+keys render as words, as in `require branches up to date`.
 
 ## Shared rendering
 

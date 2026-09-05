@@ -4,6 +4,7 @@ import test from "node:test";
 import { namedValueLines } from "../src/cli/render/value.js";
 import { renderObservation } from "../src/cli/render/board.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
+import { renderCatalogText } from "../src/cli/render/catalog.js";
 import { renderSettingsText } from "../src/cli/render/settings.js";
 import { renderBindDraftReceipt, renderRefusalFacts, renderConflictMaterialized } from "../src/cli/render/refusal.js";
 import { gateFact } from "../src/cli/render/contract-observation.js";
@@ -14,10 +15,15 @@ import {
   contractHead,
   contractId,
   documentKey,
+  documentSegmentKey,
   entryUlid,
+  gate,
   snapshotId,
 } from "../src/core/facts/types.js";
+import { dependencyKeySet } from "../src/core/subject.js";
 import type { ContractHistory, Fact } from "../src/library/contract-types.js";
+import type { Catalog } from "../src/library/catalog.js";
+import type { ContractKanshiRow, KanshiReport } from "../src/kanshi/index.js";
 import { renderText } from "../src/cli/render/text.js";
 import type { Settings } from "../src/settings.js";
 import {
@@ -261,7 +267,8 @@ test("Contract history keeps event evidence and commit labels without exposing d
     after: [],
   };
   const base = { v: 1 as const, contract: id, at, actor: actorId("reviewer") };
-  const entries = [0, 1, 2].map((value) => entryUlid("0".repeat(25) + value));
+  const entries = [0, 1, 2, 3].map((value) => entryUlid("0".repeat(25) + value));
+  const verificationSnapshot = snapshotId("4".repeat(40));
   const facts: Fact[] = [
     {
       ...base,
@@ -285,6 +292,19 @@ test("Contract history keeps event evidence and commit labels without exposing d
         policy: { requireBranchesToBeUpToDate: false },
       },
     },
+    {
+      ...base,
+      kind: "attestation",
+      entry: entries[3]!,
+      data: {
+        gate: gate("verified"),
+        subject: dependencyKeySet([
+          { kind: "segment", value: documentSegmentKey("segment:sha256:private") },
+          { kind: "snapshot", value: verificationSnapshot },
+        ]),
+        verdict: "satisfied",
+      },
+    },
   ];
   const history: ContractHistory = {
     id,
@@ -295,7 +315,7 @@ test("Contract history keeps event evidence and commit labels without exposing d
   assert.equal(
     output,
     [
-      "history  kei/history · 3 journal · 0 dispatch",
+      "history  kei/history · 4 journal · 0 dispatch",
       "",
       `${at} bind · ${entries[0]} · reviewer`,
       "  start commit  start",
@@ -308,11 +328,66 @@ test("Contract history keeps event evidence and commit labels without exposing d
       "  integration commit  integration",
       "  content identity (not commit)  content-id",
       "  method  squash",
-      "  require-branches-to-be-up-to-date  false",
+      "  require branches up to date  false",
+      `${at} attestation · ${entries[3]} · reviewer`,
+      "  gate  verified",
+      "  verdict  satisfied",
+      `  subject  verification  · snapshot ${verificationSnapshot.slice(0, 7)}`,
     ].join("\n"),
   );
-  assert.doesNotMatch(output, /private-|\bdocument\b|^\s+(?:snapshot|change) |next|then|please|key=/mu);
+  assert.doesNotMatch(
+    output,
+    /private-|\bdocument\b|segment:sha256|^\s+(?:snapshot|change) |\[\[|require-branches|next|then|please|key=/mu,
+  );
   assert.equal(JSON.parse(JSON.stringify(history)).events[0].fact.data.terms.document.key, "private-document-blob");
+});
+
+function verifiedContractRow(): ContractKanshiRow {
+  const integration = snapshotId("4".repeat(40));
+  return {
+    id: contractId("kei/verified-commit"),
+    title: "Verified commit",
+    phase: "claimed",
+    phaseAt: "2026-08-12T00:00:00.000Z",
+    lastJournalAt: "2026-08-12T00:00:00.000Z",
+    disposition: "terminal",
+    workspace: "worktree",
+    worktreePath: null,
+    workspaceObservation: { kind: "unappointed" },
+    target: "refs/heads/main",
+    targetLag: { kind: "none" },
+    delivery: null,
+    targetObservation: null,
+    verification: { kind: "recorded", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z", snapshot: integration },
+    gates: { satisfied: true, reports: [] },
+    after: [],
+    dependents: [],
+    holder: { kind: "none" },
+    fleet: [],
+  };
+}
+
+test("catalogue and Kanshi state the verified commit with one vocabulary", () => {
+  const row = verifiedContractRow();
+  const observedAt = "2026-08-12T00:00:00.000Z";
+  const catalog: Catalog = { kind: "contracts", root: "/repo", state: null, observedAt, rows: [row], hasMore: false };
+  assert.match(renderCatalogText(catalog), /^  verification satisfied · on 4444444$/mu);
+
+  const report: KanshiReport = {
+    root: null,
+    observedAt,
+    branch: null,
+    contracts: {
+      kind: "present",
+      value: { root: "/repo", state: null, observedAt, rows: [row], hasMore: false },
+    },
+    tasks: { kind: "absent" },
+    akuma: { kind: "absent" },
+  };
+  assert.match(
+    renderKanshiText(report, { columns: 80, color: false }, "contract"),
+    /^  verification satisfied · on 4444444$/mu,
+  );
 });
 
 test("audit separates its observation outcome from complete candidate coordinates", () => {

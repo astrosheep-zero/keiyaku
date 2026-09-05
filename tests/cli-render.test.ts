@@ -309,6 +309,79 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
   );
 });
 
+function catalogRow(verification?: ContractRow["verification"]): ContractRow {
+  return {
+    id: contractId("kei/verified-commit"),
+    title: "Verified commit",
+    phase: "claimed",
+    phaseAt: "2026-08-12T00:00:00.000Z",
+    lastJournalAt: "2026-08-12T00:00:00.000Z",
+    disposition: "terminal",
+    workspace: "worktree",
+    worktreePath: null,
+    workspaceObservation: { kind: "unappointed" },
+    target: "refs/heads/main",
+    targetLag: { kind: "none" },
+    delivery: null,
+    targetObservation: null,
+    ...(verification === undefined ? {} : { verification }),
+    gates: { satisfied: true, reports: [] },
+    after: [],
+    dependents: [],
+  };
+}
+
+test("recorded verification names the commit the verdict covers", () => {
+  const integration = snapshotId("4".repeat(40));
+  const catalog: Catalog = {
+    kind: "contracts",
+    root: "/repo",
+    state: null,
+    observedAt: "2026-08-12T00:00:00.000Z",
+    rows: [
+      catalogRow({ kind: "recorded", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z", snapshot: integration }),
+    ],
+    hasMore: false,
+  };
+  assert.match(renderCatalogText(catalog), /^  verification satisfied · on 4444444$/mu);
+
+  const bare = renderCatalogText({
+    ...catalog,
+    rows: [catalogRow({ kind: "recorded", verdict: "unsatisfied", at: "2026-08-12T00:00:00.000Z" })],
+  });
+  assert.match(bare, /^  verification unsatisfied$/mu);
+  assert.doesNotMatch(bare, / · on /u);
+});
+
+test("every verb receipt states facts without journal rows or entry ids", () => {
+  const contract = contractId("kei/receipt-vocabulary");
+  const entry = "01K4AJ8F6K7JH8Y6Q5NEPRT41V";
+  const envelope = {
+    kind: "accepted" as const,
+    contract,
+    head: contractHead("head"),
+    facts: [{ contract, entry, kind: "bound" as const }],
+    settlementLags: [],
+  };
+  const receipts: readonly InvocationResult[] = [
+    { ...envelope, verb: "bind", target: null, overlaps: [] },
+    { ...envelope, verb: "amend", diff: "" },
+    { ...envelope, verb: "arc", chapter: { seq: 2, title: "Second chapter" } },
+    { ...envelope, verb: "abandon" },
+    { ...envelope, verb: "deliver" },
+    { ...envelope, verb: "review", verdict: "satisfied" },
+  ];
+  for (const receipt of receipts) {
+    const text = renderText(receipt);
+    assert.doesNotMatch(text, /journal/u, text);
+    assert.doesNotMatch(text, new RegExp(entry, "u"), text);
+  }
+  assert.equal(
+    renderText(receipts[2]!),
+    ["✓ entered chapter 2  kei/receipt-vocabulary", "  chapter  2  ·  Second chapter"].join("\n"),
+  );
+});
+
 test("observation text keeps the command and view data together", () => {
   const result: InvocationResult = { kind: "observation", command: "status", contracts: [] };
   assert.equal(renderText(result), "observation  status\n  contracts  list (0)");
@@ -422,10 +495,7 @@ test("amend text omits an absent Region observation", () => {
     settlementLags: [],
     diff: "",
   };
-  assert.equal(
-    renderText(result),
-    ["✓ terms replaced  kei/no-amend-region-observation", "  terms unchanged", ""].join("\n"),
-  );
+  assert.equal(renderText(result), ["✓ terms unchanged  kei/no-amend-region-observation"].join("\n"));
 });
 
 test("accepted results preserve reconciliation lag without telemetry", () => {
@@ -452,10 +522,9 @@ test("accepted results preserve reconciliation lag without telemetry", () => {
   assert.equal(
     renderText({ ...envelope, verb: "deliver" }),
     [
-      "✓ deliver — not complete  kei/followed",
+      "✓ deliver incomplete  kei/followed",
       "  candidate  kept",
-      "! lag",
-      "  worktree-follow-retained reason head-moved tender tender head head path /tmp/wt",
+      "! lag  worktree follow retained  ·  head moved  ·  /tmp/wt",
     ].join("\n"),
   );
   assert.deepEqual(envelope.lag[0], {
@@ -494,7 +563,6 @@ test("accepted bind receipts expose confirmed private-state seat close lag", () 
       "✓ bound  kei/bound",
       "  workspace  worktree  /tmp/wt",
       "  no target",
-      "  journal  bind  · bound",
       "! lag  private-state-seat-close-failed",
       "diagnostic",
       "  seat close failed after publication",
@@ -523,12 +591,13 @@ test("accepted receipts omit execution telemetry and retain recovery snapshots",
 
   const text = renderText(result);
   assert.match(text, /tender commit  tender-commit[\s\S]*content identity \(not commit\)  content-id/u);
-  assert.match(text, /leading\s+already-admitted\s+01K4AJ8F6K7JH8Y6Q5NEPRT41V/u);
+  assert.match(text, /leading\s+already admitted/u);
+  assert.doesNotMatch(text, /01K4AJ8F6K7JH8Y6Q5NEPRT41V/u);
   assert.doesNotMatch(text, /journal-blob-oid/u);
   assert.doesNotMatch(text, /ref updated|contract-file|worktree unchanged/u);
   assert.doesNotMatch(text, /ephemeral/u);
   assert.match(text, /recovery snapshot  recovery/u);
-  assert.match(text, /unsealed-bytes \/repo\/\.keiyaku\/wt\/contract/u);
+  assert.match(text, /unsealed bytes  \/repo\/\.keiyaku\/wt\/contract/u);
   assert.equal(JSON.parse(JSON.stringify(result)).recoverySnapshot, result.recoverySnapshot);
 });
 
@@ -554,7 +623,7 @@ test("direct placement stops render the public unmet prerequisites in order", ()
   assert.equal(
     renderText(deliver),
     [
-      "✓ deliver — not complete  kei/waiting-on-prerequisites",
+      "✓ deliver incomplete  kei/waiting-on-prerequisites",
       "! prerequisites unsatisfied",
       "  prerequisite  kei/active-prerequisite  ·  active",
       "  prerequisite  kei/abandoned-prerequisite  ·  abandoned",
@@ -607,7 +676,7 @@ test("direct gate stops render the sole placement report without another read", 
       },
     }),
     [
-      "✓ deliver — not complete  kei/waiting-on-gates",
+      "✓ deliver incomplete  kei/waiting-on-gates",
       "! gates unsatisfied",
       "  gate  verified  ·  unsatisfied  · at 2026-08-01T00:00:00.000Z",
       "  summary verified",
@@ -1058,12 +1127,10 @@ test("movement projects its deviation and reintegration coordinates", () => {
       },
     }),
     [
-      "✓ deliver — not complete  kei/reintegrated",
+      "✓ deliver incomplete  kei/reintegrated",
       "! target  moved · re-integrated x2",
       "! target moved  refs/heads/main  integration-2 -> null  attempts 3",
       "  candidate  kept",
-      "  journal  reintegration  · reintegrated  target-1  ->  integration-2",
-      "  journal  reintegration-2  · reintegrated  target-3  ->  integration-4",
     ].join("\n"),
   );
 });

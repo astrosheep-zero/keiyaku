@@ -5,6 +5,7 @@ import {
   withContractReadObservationAt,
 } from "../../git/observe.js";
 import { decodeContractDocument, verificationDefinition } from "../../body/decode.js";
+import { dependencyKeys } from "../../core/subject.js";
 import {
   observeTargetLag,
   observeWorkspace,
@@ -37,7 +38,7 @@ export type ContractGateReport = Readonly<{ gate: string; current: ContractGateC
 export type ContractVerificationStatus =
   | Readonly<{ kind: "undeclared" }>
   | Readonly<{ kind: "unrecorded" }>
-  | Readonly<{ kind: "recorded"; verdict: "satisfied" | "unsatisfied"; at: string }>;
+  | Readonly<{ kind: "recorded"; verdict: "satisfied" | "unsatisfied"; at: string; snapshot?: SnapshotId }>;
 
 export type ContractTargetLag =
   | GitContractTargetLag
@@ -131,7 +132,15 @@ function verificationFor(
   if (verificationDefinition(document) === null) return { kind: "undeclared" };
   const verifiedGate = gate("verified");
   const current = latestCurrentAttestations(state, new Set([verifiedGate])).get(verifiedGate);
-  if (current !== undefined) return { kind: "recorded", verdict: current.data.verdict, at: current.at };
+  if (current !== undefined) {
+    const snapshot = dependencyKeys(current.data.subject).find((key) => key.kind === "snapshot")?.value;
+    return {
+      kind: "recorded",
+      verdict: current.data.verdict,
+      at: current.at,
+      ...(snapshot === undefined ? {} : { snapshot: snapshot as SnapshotId }),
+    };
+  }
   return state.delivery === null ? undefined : { kind: "unrecorded" };
 }
 

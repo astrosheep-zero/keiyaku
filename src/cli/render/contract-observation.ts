@@ -8,6 +8,10 @@ import type {
 
 const GIT_OBJECT_ID = /^[0-9a-f]{40}$/iu;
 
+function shortGitId(value: string): string {
+  return GIT_OBJECT_ID.test(value) ? value.slice(0, 7) : value;
+}
+
 export function gateGlyph(report: ContractGateReport): string {
   if (report.current.kind === "stale") return "!";
   if (report.current.kind === "missing") return "○";
@@ -24,7 +28,8 @@ export function candidateFact(delivery: ContractRow["delivery"]): string {
 
 export function verificationFact(status: ContractRow["verification"]): string | undefined {
   if (status === undefined) return undefined;
-  if (status.kind === "recorded") return `verification ${status.verdict}`;
+  if (status.kind === "recorded")
+    return `verification ${status.verdict}${status.snapshot === undefined ? "" : ` · on ${shortGitId(status.snapshot)}`}`;
   return `verification ${status.kind}`;
 }
 
