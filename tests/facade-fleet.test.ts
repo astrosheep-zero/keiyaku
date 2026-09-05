@@ -8,7 +8,7 @@ import test from "node:test";
 import { moveAlias } from "../src/alias/index.js";
 import { akumaStatusSchema, type AkumaStatus } from "../src/akuma/akuma.js";
 import { boundedMap, PAGE_POOL_SIZE } from "../src/akuma/akuma-product.js";
-import { driveAkumaBody } from "../src/akuma/body.js";
+import { driveAkumaBody, LEASH_HELD_EXIT, type TellWakeRuntime } from "../src/akuma/body.js";
 import {
   HeldAkumaLeash,
   appendActivity,
@@ -23,7 +23,7 @@ import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { allocateAkumaDirectory, akuId } from "../src/akuma/identity.js";
 import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import { AkumaNotBornError } from "../src/akuma/akuma.js";
-import { AkumaComposition as Akuma } from "./support/akuma-composition.js";
+import { AkumaComposition as Akuma, AkumaHandle } from "./support/akuma-composition.js";
 import { AkumaWorldScopeError, Keiyaku, Repo, type Catalog, type WorldRoot } from "../src/index.js";
 import { invoke } from "../src/cli/invoke.js";
 import type { InvocationResult } from "../src/cli/invoke.js";
@@ -44,42 +44,103 @@ import { repositoryAt } from "../src/git/repository.js";
 import { contractId } from "../src/core/facts/types.js";
 import { taskDocument as creatorTask, writeTaskAuthority as writeCreatorTask } from "./support/task.js";
 
+let fixtureHistory = 0;
+
+function fixtureSession(input: Readonly<{ signal: AbortSignal }>) {
+  return createProviderAttempt(input.signal, async (custody) => {
+    let finishEvents!: () => void;
+    const eventsFinished = new Promise<void>((resolve) => {
+      finishEvents = resolve;
+    });
+    const completion = eventsFinished.then(() => ({
+      kind: "answered" as const,
+      answer: "done",
+      historyId: `fleet-history-${fixtureHistory++}`,
+    }));
+    const session = {
+      admission: { fence: "fleet-fixture-turn" },
+      events: {
+        async *[Symbol.asyncIterator]() {
+          yield { type: "session" as const, coordinate: { sessionId: "fixture" } };
+          finishEvents();
+        },
+      },
+      completion,
+      async abort() {},
+      async forceDispose() {},
+    };
+    custody.own({
+      closed: completion.then(() => undefined),
+      abort: session.abort,
+      forceDispose: session.forceDispose,
+    });
+    return session;
+  });
+}
+
 const provider: ProviderAdapter = {
   admitOptions(options) {
     return { kind: "admitted", options };
   },
-  start(input) {
-    return createProviderAttempt(input.signal, async (custody) => {
-      let finishEvents!: () => void;
-      const eventsFinished = new Promise<void>((resolve) => {
-        finishEvents = resolve;
-      });
-      const completion = eventsFinished.then(() => ({
-        kind: "answered" as const,
-        answer: "done",
-        historyId: "history",
-      }));
-      const session = {
-        admission: { fence: "fleet-fixture-turn" },
-        events: {
-          async *[Symbol.asyncIterator]() {
-            yield { type: "session" as const, coordinate: { sessionId: "fixture" } };
-            finishEvents();
-          },
-        },
-        completion,
-        async abort() {},
-        async forceDispose() {},
-      };
-      custody.own({
-        closed: completion.then(() => undefined),
-        abort: session.abort,
-        forceDispose: session.forceDispose,
-      });
-      return session;
-    });
-  },
+  start: fixtureSession,
+  resume: fixtureSession,
 };
+
+async function settleFixtureBodies(bodies: readonly Promise<unknown>[]): Promise<void> {
+  await Promise.all(bodies.map((body) => body.catch(() => undefined)));
+}
+
+function fixtureRuntime(bodies: Promise<unknown>[], fixtures: ReadonlyMap<string, ProviderAdapter>): TellWakeRuntime {
+  return {
+    async spawn(paths) {
+      const adapter = fixtures.get(paths.directory);
+      if (adapter === undefined) throw new Error(`missing Fleet fixture adapter for ${paths.directory}`);
+      const body = driveAkumaBody({ paths, refuseIfHeld: true }, adapter, {
+        now: () => "2026-08-11T00:00:00.000Z",
+      });
+      bodies.push(body);
+      return {
+        pid: 0,
+        exited: body.then(
+          (result) => ({
+            code: result === "held" ? LEASH_HELD_EXIT : 0,
+            signal: null,
+            log: { path: paths.log, from: 0, to: 0 },
+          }),
+          () => ({ code: 1, signal: null, log: { path: paths.log, from: 0, to: 0 } }),
+        ),
+        async terminate() {},
+        release() {},
+      };
+    },
+  };
+}
+
+const fixtureRuntimes = new Map<WorldRoot, TellWakeRuntime>();
+const originalTell = AkumaHandle.prototype.tell;
+const originalInterrupt = AkumaHandle.prototype.interrupt;
+AkumaHandle.prototype.tell = function (body, tellId, recordedAt, existingRuntime, schemaJson) {
+  const runtime = fixtureRuntimes.get((this as unknown as { worldPath: WorldRoot }).worldPath);
+  return originalTell.call(this, body, tellId, recordedAt, existingRuntime ?? runtime, schemaJson);
+};
+AkumaHandle.prototype.interrupt = function (body, options = {}) {
+  const runtime = fixtureRuntimes.get((this as unknown as { worldPath: WorldRoot }).worldPath);
+  return originalInterrupt.call(
+    this,
+    body,
+    options.runtime !== undefined || runtime === undefined ? options : { ...options, runtime },
+  );
+};
+
+function registerTellRuntime(
+  root: WorldRoot,
+  bodies: Promise<unknown>[],
+  fixtures: ReadonlyMap<string, ProviderAdapter>,
+) {
+  const runtime = fixtureRuntime(bodies, fixtures);
+  fixtureRuntimes.set(root, runtime);
+  return () => fixtureRuntimes.delete(root);
+}
 
 function fixtureRoot(prefix: string): WorldRoot {
   return realpathSync(mkdtempSync(join(tmpdir(), prefix))) as WorldRoot;
@@ -432,9 +493,13 @@ test("plural wait carries unused allowance and keeps pins after exhaustion", asy
 
 test("status and wait do not fabricate a settled Tell; tell and kill do not carry observations", async () => {
   const root = fixtureRoot("keiyaku-facade-tell-pin-");
+  const bodies: Promise<unknown>[] = [];
+  const fixtures = new Map<string, ProviderAdapter>();
+  const restoreTellRuntime = registerTellRuntime(root, bodies, fixtures);
   let held: HeldAkumaLeash | undefined;
   try {
     const source = await answered(root, "worker", "00000001");
+    fixtures.set(source.paths.directory, provider);
     const hasTold = (entries: Awaited<ReturnType<typeof Keiyaku.status>>["status"]["timeline"]["entries"]) =>
       entries.some((entry) => entry.kind === "row" && entry.row.kind === "tell" && entry.row.state === "told");
     const status = await Keiyaku.status({ path: root, akuma: source.id });
@@ -448,15 +513,21 @@ test("status and wait do not fabricate a settled Tell; tell and kill do not carr
     assert.equal("observation" in told, false);
   } finally {
     held?.release();
+    restoreTellRuntime();
+    await settleFixtureBodies(bodies);
     rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("facade tell preserves its primary mutation authority", async () => {
   const root = fixtureRoot("keiyaku-facade-tell-");
+  const bodies: Promise<unknown>[] = [];
+  const fixtures = new Map<string, ProviderAdapter>();
+  const restoreTellRuntime = registerTellRuntime(root, bodies, fixtures);
   let held: HeldAkumaLeash | undefined;
   try {
     const source = await answered(root, "worker", "00000001");
+    fixtures.set(source.paths.directory, provider);
     held = (await HeldAkumaLeash.try(source.paths))!;
     const result = await Keiyaku.tell({ path: root, akuma: source.id, body: "continue" });
     assert.equal(result.akuma, source.id);
@@ -476,6 +547,8 @@ test("facade tell preserves its primary mutation authority", async () => {
     assert.equal("status" in result, false);
   } finally {
     held?.release();
+    restoreTellRuntime();
+    await settleFixtureBodies(bodies);
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -1554,10 +1627,16 @@ test("exact set selection does not read unrelated Alias authority", async () => 
 
 test("creator testimony appears on Fleet observation carriers", async () => {
   const root = fixtureRoot("keiyaku-facade-created-tasks-");
+  const bodies: Promise<unknown>[] = [];
+  const fixtures = new Map<string, ProviderAdapter>();
+  const restoreTellRuntime = registerTellRuntime(root, bodies, fixtures);
+  let leash: HeldAkumaLeash | undefined;
   try {
     const worker = await answered(root, "worker", "00000001");
+    fixtures.set(worker.paths.directory, provider);
     const workerHandle = Akuma.of(await World.at(root)).of({ id: worker.id });
     const reviewer = await answered(root, "reviewer", "00000002");
+    fixtures.set(reviewer.paths.directory, provider);
     const world = await World.at(root);
     writeCreatorTask(
       world,
@@ -1619,21 +1698,29 @@ test("creator testimony appears on Fleet observation carriers", async () => {
     assert.deepEqual(status.createdTasks, { kind: "present", rows: workerRows });
     const waited = await Keiyaku.wait({ path: root, akuma: [worker.id], timeoutMs: 0 });
     assert.deepEqual(waited.observations[0]!.createdTasks, { kind: "present", rows: workerRows });
-    const leash = await HeldAkumaLeash.try(worker.paths);
-    assert.notEqual(leash, null);
+    const acquired = await HeldAkumaLeash.try(worker.paths);
+    assert.notEqual(acquired, null);
+    if (acquired === null) return;
+    leash = acquired;
     try {
       const told = await Keiyaku.tell({ path: root, akuma: worker.id, body: "continue" });
       assert.equal("observation" in told, false);
+      acquired.release();
+      leash = undefined;
       const interrupted = await Keiyaku.interrupt({ path: root, akuma: worker.id, body: "stop" });
       if (interrupted.observation.kind !== "observed") throw new Error(interrupted.observation.diagnostic);
       assert.deepEqual(interrupted.observation.createdTasks, { kind: "present", rows: workerRows });
       const killed = await Keiyaku.kill({ path: root, akuma: [worker.id] });
       assert.equal("observation" in killed.results[0]!, false);
     } finally {
-      leash!.release();
+      leash?.release();
+      leash = undefined;
     }
     await workerHandle.wait(undefined, { timeoutMs: 2_000 });
   } finally {
+    leash?.release();
+    restoreTellRuntime();
+    await settleFixtureBodies(bodies);
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -1697,10 +1784,16 @@ test("multi-member wait and kill project every member from one Task board snapsh
 
 test("Task board failure keeps Fleet status and aggregate members", async () => {
   const root = fixtureRoot("keiyaku-facade-created-failed-");
+  const bodies: Promise<unknown>[] = [];
+  const fixtures = new Map<string, ProviderAdapter>();
+  const restoreTellRuntime = registerTellRuntime(root, bodies, fixtures);
+  let leash: HeldAkumaLeash | undefined;
   try {
     const worker = await answered(root, "worker", "00000001");
+    fixtures.set(worker.paths.directory, provider);
     const workerHandle = Akuma.of(await World.at(root)).of({ id: worker.id });
     const reviewer = await answered(root, "reviewer", "00000002");
+    fixtures.set(reviewer.paths.directory, provider);
     mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });
     writeFileSync(join(root, ".keiyaku", "tasks", "bad.md"), "not a task document\n");
     const status = await Keiyaku.status({ path: root, akuma: worker.id });
@@ -1725,8 +1818,10 @@ test("Task board failure keeps Fleet status and aggregate members", async () => 
       waited.observations.map((observation) => observation.createdTasks),
       [status.createdTasks, status.createdTasks],
     );
-    const leash = await HeldAkumaLeash.try(worker.paths);
-    assert.notEqual(leash, null);
+    const acquired = await HeldAkumaLeash.try(worker.paths);
+    assert.notEqual(acquired, null);
+    if (acquired === null) return;
+    leash = acquired;
     try {
       const told = await Keiyaku.tell({ path: root, akuma: worker.id, body: "continue" });
       assert.equal(told.akuma, worker.id);
@@ -1737,12 +1832,15 @@ test("Task board failure keeps Fleet status and aggregate members", async () => 
       assert.equal(killed.results[0]!.id, reviewer.id);
       assert.equal(killed.results[0]!.evidence, "already-stopped");
       assert.equal("observation" in killed.results[0]!, false);
-      await Keiyaku.kill({ path: root, akuma: [worker.id] });
     } finally {
-      leash!.release();
+      leash?.release();
+      leash = undefined;
     }
     await workerHandle.wait(undefined, { timeoutMs: 2_000 });
   } finally {
+    leash?.release();
+    restoreTellRuntime();
+    await settleFixtureBodies(bodies);
     rmSync(root, { recursive: true, force: true });
   }
 });
