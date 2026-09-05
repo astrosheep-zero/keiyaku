@@ -313,6 +313,19 @@ test("retry reuses the durable Place and never inspects Git topology", async () 
   );
 });
 
+test("physical unregistered Place paths are occupied without being adopted", async () => {
+  const repository = await repositoryAt(repositoryWithCommit().path);
+  const expected = expectedForwardAllocation(EXAMPLE_START_INDEX, new Set());
+  mkdirSync(worktreePath(repository, expected), { recursive: true });
+
+  const register = await appointManagedWorktrees(repository, [EXAMPLE]);
+  const appointed = register.byContract.get(EXAMPLE)!;
+
+  assert.notEqual(appointed.place, expected);
+  assert.equal(existsSync(worktreePath(repository, expected)), true);
+  assert.equal(register.byPlace.has(place(expected)), false);
+});
+
 test("the three-arm reader does not inspect the journal or filesystem", async () => {
   const repository = await repositoryAt(repositoryWithCommit().path);
   assert.deepEqual(await readManagedWorktreeAppointment(repository, EXAMPLE), { kind: "unappointed" });

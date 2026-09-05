@@ -343,11 +343,11 @@ export async function withPlaceAuthorityFence<T>(
 
 async function mutatePlaceRegisterInFence(
   repository: GitRepository,
-  mutate: (register: PlaceRegister) => PlaceRegister,
+  mutate: (register: PlaceRegister) => PlaceRegister | Promise<PlaceRegister>,
 ): Promise<PlaceRegister> {
   const location = placePaths(repository);
   const current = await readPlaceRegister(repository);
-  const next = mutate(current);
+  const next = await mutate(current);
   const bytes = canonicalPlaceRegister(next);
   try {
     if ((await readFile(location.authority, "utf8")) === bytes) return next;
@@ -361,20 +361,24 @@ async function mutatePlaceRegisterInFence(
 
 async function mutatePlaceRegister(
   repository: GitRepository,
-  mutate: (register: PlaceRegister) => PlaceRegister,
+  mutate: (register: PlaceRegister) => PlaceRegister | Promise<PlaceRegister>,
   fence?: PlaceAuthorityFence,
 ): Promise<PlaceRegister> {
   if (fence !== undefined) return await mutatePlaceRegisterInFence(repository, mutate);
   return await withPlaceAuthorityFence(repository, async () => await mutatePlaceRegisterInFence(repository, mutate));
 }
 
-function withAppointments(register: PlaceRegister, contracts: readonly ContractId[]): PlaceRegister {
+async function withAppointments(
+  repository: GitRepository,
+  register: PlaceRegister,
+  contracts: readonly ContractId[],
+): Promise<PlaceRegister> {
   const additions: PlaceAppointment[] = [];
   const occupied = new Set(register.byPlace.keys());
   const known = new Set(register.byContract.keys());
   for (const contract of contracts) {
     if (known.has(contract)) continue;
-    const candidate = firstUnoccupiedPlace(contract, occupied);
+    const candidate = await firstUnoccupiedPlace(repository, contract, occupied);
     additions.push({ place: candidate, contract });
     occupied.add(candidate);
     known.add(contract);
@@ -387,13 +391,23 @@ function stableStartIndex(contract: ContractId): number {
   return Number(BigInt(`0x${digest}`) % BigInt(CONTRACT_PLACES.length));
 }
 
-function firstUnoccupiedPlace(contract: ContractId, occupied: ReadonlySet<Place>): Place {
+async function firstUnoccupiedPlace(
+  repository: GitRepository,
+  contract: ContractId,
+  occupied: ReadonlySet<Place>,
+): Promise<Place> {
   const start = stableStartIndex(contract);
   for (let generation = 1n; ; generation += 1n) {
     for (let offset = 0; offset < CONTRACT_PLACES.length; offset += 1) {
       const base = CONTRACT_PLACES[(start + offset) % CONTRACT_PLACES.length]!;
       const candidate = composePlace(base, generation);
-      if (!occupied.has(candidate)) return candidate;
+      if (occupied.has(candidate)) continue;
+      try {
+        await lstat(worktreePath(repository, candidate));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return candidate;
+        throw error;
+      }
     }
   }
 }
@@ -402,7 +416,7 @@ export async function appointManagedWorktrees(
   repository: GitRepository,
   contracts: readonly ContractId[],
 ): Promise<PlaceRegister> {
-  return await mutatePlaceRegister(repository, (current) => withAppointments(current, contracts));
+  return await mutatePlaceRegister(repository, (current) => withAppointments(repository, current, contracts));
 }
 
 export async function releaseManagedWorktrees(

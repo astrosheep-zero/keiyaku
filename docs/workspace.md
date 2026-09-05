@@ -27,8 +27,10 @@ is neither a Git identity, a journal field, nor a second product. The workspace
 owner maintains one canonical appointment register and its coordination boundary;
 the register gives each Contract at most one current Place and allows each Place
 to serve at most one Contract. Its allocation is deterministic and stable once
-written. Derived lookup indexes, filesystem occupancy, Git registration, and
-guidance do not replace that authority.
+written. A physically existing candidate path is unavailable for a new
+allocation even when it is absent from the register and Git topology; allocation
+skips it and never adopts it. Derived lookup indexes, filesystem occupancy, Git
+registration, and guidance do not replace the register's appointment authority.
 
 Writers serialize a fresh read and durable replacement; corrupt or unavailable state is an appointment failure. Only active Contracts receive missing appointments; terminal ones retain an existing Place for cleanup.
 
