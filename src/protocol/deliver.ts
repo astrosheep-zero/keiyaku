@@ -33,6 +33,7 @@ import type { CurrentVerifiedAttestation } from "./intent.js";
 import { admitDecidedOffer, mintAttempts } from "./attempt.js";
 import { admitted } from "./outcome.js";
 import { completeCandidate, type CompletionEvidence, type CompletionResult } from "./completion.js";
+import { completeLeadingAdmission, contractCheckpoint } from "./progress.js";
 import { appointmentFor, readPlaceRegister, type ManagedWorktreeAppointment } from "../workspace-place.js";
 import type {
   AttemptDecision,
@@ -407,10 +408,10 @@ async function completeDelivery(
     ...(input.signal === undefined ? {} : { signal: input.signal }),
     ...(first.state.coordinates.target === undefined ? {} : { target: first.state.coordinates.target }),
     verification: derivation.verification,
-    initial: first,
+    checkpoint: contractCheckpoint(first),
     verifyInitial: true,
   });
-  return admitted(completed.admission, {
+  return admitted(completeLeadingAdmission(first, completed.progress), {
     ...first.value.delivery,
     ...completed.evidence,
   });
@@ -436,7 +437,7 @@ export async function continueDeliveryOperation(
     ...(input.signal === undefined ? {} : { signal: input.signal }),
     ...(input.state.coordinates.target === undefined ? {} : { target: input.state.coordinates.target }),
     verification: input.deriveDocument(input.state).verification,
-    initial: { kind: "accepted", state: input.state, journal: input.journal, facts: [] },
+    checkpoint: contractCheckpoint(input),
     verifyInitial: true,
   });
 }
