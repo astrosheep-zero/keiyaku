@@ -11,54 +11,50 @@ import {
   type ChangeId,
   type IntegrationConflictMaterialized,
   type MutationFinalityInput,
-  type MutationPendingSurface,
+  type MutationOperation,
+  type ExecutionCleanup,
   type MutationResult,
   type Review,
   type SnapshotId,
 } from "../src/index.js";
 import { concatenatePrivateStateSeatClose } from "../src/git/private-state-seat.js";
-import {
-  contractId,
-  documentKey,
-  snapshotId,
-  type ContractHead,
-  type ContractState,
-} from "../src/core/facts/types.js";
-import {
-  auditPending,
-  collectAcceptedPending,
-  completionPending,
-  noValuePending,
-} from "../src/library/mutation.js";
+import { contractId, documentKey, snapshotId, type ContractHead, type ContractState } from "../src/core/facts/types.js";
 import { mergeAdmissions } from "../src/protocol/operations.js";
 import { document, repositoryWithMain } from "./support/library-verbs.js";
 
 function accepted<Value>(
   value: Value,
   extras: Partial<MutationResult<Value>> = {},
-  valuePending: (value: Value) => readonly MutationPendingSurface[] = noValuePending,
+  operation: MutationOperation = "review",
 ): MutationResult<Value> {
-  const result = {
-    kind: "accepted" as const,
+  const result: MutationResult<Value> = {
+    kind: "accepted",
+    operation,
     facts: [],
     head: "head" as ContractHead,
     value,
     lags: [],
     settlementLags: [],
-    pending: [] as MutationResult<Value>["pending"],
+    pending: [],
+    cleanup: [],
+    executionStops: [],
     ...extras,
   };
   if (extras.pending !== undefined) return result;
-  return {
-    ...result,
-    pending: collectAcceptedPending(valuePending(value), {
-      lags: result.lags,
-      settlementLags: result.settlementLags,
-      ...(result.cleanup === undefined ? {} : { cleanup: result.cleanup }),
-      ...(result.leak === undefined ? {} : { leak: result.leak }),
-      ...(result.seatClose === undefined || result.seatClose.length === 0 ? {} : { seatClose: result.seatClose }),
-    }),
-  };
+  const finality = projectMutationFinality(result);
+  return { ...result, pending: finality.kind === "accepted-pending" ? finality.pending : [] };
+}
+
+function cleanupResidues(): readonly ExecutionCleanup[] {
+  const id = contractId("kei/mutation-finality-test");
+  return [
+    {
+      kind: "verification-cleanup",
+      contractId: id,
+      failure: { phase: "destroy", command: 0, detail: { kind: "timeout" } },
+    },
+    { kind: "worktree-leak", contractId: id, leak: { path: "/tmp/leak", diagnostic: "retained" } },
+  ];
 }
 
 function auditReport(): AuditReport {
@@ -88,29 +84,26 @@ function deliveryValue(): Delivery {
 }
 
 test("audit terminal verification projects complete", () => {
-  assert.deepEqual(projectMutationFinality(accepted(auditReport(), {}, auditPending)), { kind: "complete" });
+  assert.deepEqual(projectMutationFinality(accepted(auditReport(), {}, "audit")), { kind: "complete" });
 });
 
 test("accepted audit cleanup and leak residue are optional pending work", () => {
-  const residues: readonly Partial<Pick<MutationResult<AuditReport>, "cleanup" | "leak">>[] = [
-    { cleanup: { phase: "destroy", command: 0, detail: { kind: "timeout" } } },
-    { leak: { path: "/tmp/leak", diagnostic: "retained" } },
-  ];
+  const residues = cleanupResidues().map((issue) => ({ cleanup: [issue] }));
   for (const residue of residues) {
-    assert.deepEqual(projectMutationFinality(accepted(auditReport(), residue, auditPending)), {
+    assert.deepEqual(projectMutationFinality(accepted(auditReport(), residue, "audit")), {
       kind: "accepted-pending",
       pending: [{ surface: "cleanup", required: false }],
     });
   }
 });
 
-test("review placement is required pending work without a verb envelope", () => {
+test("review placement is required pending work through its explicit operation", () => {
   const result: MutationResult<Review> = accepted(
     {
       placement: { failure: "target-placement-failed", diagnostic: "blocked" },
     },
     {},
-    completionPending,
+    "review",
   );
   assert.deepEqual(projectMutationFinality(result), {
     kind: "accepted-pending",
@@ -119,12 +112,9 @@ test("review placement is required pending work without a verb envelope", () => 
 });
 
 test("accepted delivery cleanup and leak residue are optional pending work", () => {
-  const residues: readonly Partial<Pick<MutationResult<Delivery>, "cleanup" | "leak">>[] = [
-    { cleanup: { phase: "destroy", command: 0, detail: { kind: "timeout" } } },
-    { leak: { path: "/tmp/leak", diagnostic: "retained" } },
-  ];
+  const residues = cleanupResidues().map((issue) => ({ cleanup: [issue] }));
   for (const residue of residues) {
-    assert.deepEqual(projectMutationFinality(accepted(deliveryValue(), residue, completionPending)), {
+    assert.deepEqual(projectMutationFinality(accepted(deliveryValue(), residue, "deliver")), {
       kind: "accepted-pending",
       pending: [{ surface: "cleanup", required: false }],
     });
@@ -191,10 +181,25 @@ test("merged admissions concatenate every confirmed seat-close lag in order", ()
   assert.deepEqual(merged.seatClose, [first, second]);
   const seatClose = concatenatePrivateStateSeatClose(current.seatClose, next.seatClose);
   assert.deepEqual(seatClose, [first, second]);
-  assert.deepEqual(projectMutationFinality(accepted(undefined, { seatClose: merged.seatClose })), {
-    kind: "accepted-pending",
-    pending: [{ surface: "cleanup", required: false }],
-  });
+  assert.deepEqual(
+    projectMutationFinality(
+      accepted(
+        undefined,
+        {
+          cleanup: merged.seatClose!.map((failure) => ({
+            kind: "private-state-seat-close",
+            contractId: state.id,
+            failure,
+          })),
+        },
+        "amend",
+      ),
+    ),
+    {
+      kind: "accepted-pending",
+      pending: [{ surface: "cleanup", required: false }],
+    },
+  );
 });
 
 test("mutation finality ignores transported pending without authoritative surfaces", () => {
@@ -206,7 +211,15 @@ test("mutation finality ignores transported pending without authoritative surfac
     lags: [],
     settlementLags: [],
     pending: [] as MutationResult<void>["pending"],
-    seatClose: [{ kind: "private-state-seat-close-failed" as const, diagnostic: "seat close failed" }],
+    operation: "amend" as const,
+    executionStops: [],
+    cleanup: [
+      {
+        kind: "private-state-seat-close" as const,
+        contractId: contractId("kei/mutation-finality-test"),
+        failure: { kind: "private-state-seat-close-failed" as const, diagnostic: "seat close failed" },
+      },
+    ],
   };
   assert.deepEqual(projectMutationFinality(authoritative), {
     kind: "accepted-pending",
@@ -216,7 +229,7 @@ test("mutation finality ignores transported pending without authoritative surfac
     projectMutationFinality({
       ...authoritative,
       pending: [{ surface: "placement", required: true }],
-      seatClose: undefined,
+      cleanup: [],
     }),
     { kind: "complete" },
   );
@@ -278,7 +291,10 @@ test("structurally similar values without an accepted discriminant are not compl
     facts: [],
     head: "head" as ContractHead,
     value: {
-      candidate: { kind: "blocked" as const, refusal: { kind: "target-missing" as const, contractId: contractId("kei/mutation-finality-test") } },
+      candidate: {
+        kind: "blocked" as const,
+        refusal: { kind: "target-missing" as const, contractId: contractId("kei/mutation-finality-test") },
+      },
       verification: { kind: "stopped" as const, stop: { retry: { kind: "exhausted" as const } } },
       target: { kind: "not-observed" as const },
       placement: { failure: "target-placement-failed" as const, diagnostic: "blocked" },

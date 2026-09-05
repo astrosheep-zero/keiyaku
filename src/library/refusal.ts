@@ -1,3 +1,6 @@
+import type { LeadingOutcome } from "../protocol/outcome.js";
+import { AuthorityCorruptionError } from "../core/facts/errors.js";
+import { executionReceipt, executionReceiptSchema, withExecutionReceipt } from "./execution-result.js";
 import { contractId, type ContractId } from "../core/facts/types.js";
 import type { IntentOutcome, IntentRefusal, IntentRetry } from "../protocol/operations.js";
 import { decodeIntentRefusal, decodeProtocolTerminal } from "../protocol/result-codec.js";
@@ -108,11 +111,32 @@ export class KeiyakuRetry extends Error {
 }
 
 const contractLiveFailureSchema = z.union([
+  z
+    .object({
+      kind: z.literal("post-admission-failure"),
+      category: z.enum(["authority-corruption", "type-error", "error"]),
+      diagnostic: z.string(),
+      receipt: executionReceiptSchema,
+    })
+    .strict(),
   z.object({ kind: z.literal("refused"), refusal: keiyakuRefusalSchema }).strict(),
   z.object({ kind: z.literal("retry"), reason: keiyakuRetryReasonSchema }).strict(),
 ]);
 
 export function encodeContractLiveFailure(error: unknown): unknown | null {
+  const receipt = executionReceipt(error);
+  if (receipt !== undefined)
+    return {
+      kind: "post-admission-failure",
+      category:
+        error instanceof AuthorityCorruptionError
+          ? "authority-corruption"
+          : error instanceof TypeError
+            ? "type-error"
+            : "error",
+      diagnostic: error instanceof Error ? error.message : String(error),
+      receipt,
+    };
   if (error instanceof KeiyakuRefused) {
     return { kind: "refused", refusal: error.refusal };
   }
@@ -125,6 +149,15 @@ export function encodeContractLiveFailure(error: unknown): unknown | null {
 export function decodeContractLiveFailure(value: unknown): Error | null {
   const parsed = contractLiveFailureSchema.safeParse(value);
   if (!parsed.success) return null;
+  if (parsed.data.kind === "post-admission-failure") {
+    const failure =
+      parsed.data.category === "authority-corruption"
+        ? new AuthorityCorruptionError(parsed.data.diagnostic)
+        : parsed.data.category === "type-error"
+          ? new TypeError(parsed.data.diagnostic)
+          : new Error(parsed.data.diagnostic);
+    return withExecutionReceipt(failure, parsed.data.receipt);
+  }
   return parsed.data.kind === "refused"
     ? new KeiyakuRefused(decodeKeiyakuRefusal(parsed.data.refusal))
     : new KeiyakuRetry(parsed.data.reason);
@@ -133,6 +166,14 @@ export function decodeContractLiveFailure(value: unknown): Error | null {
 export function requireAccepted<Value, Refusal extends KeiyakuRefusal>(
   result: IntentOutcome<Value, Refusal>,
 ): AcceptedIntent<Value> {
+  if (result.kind === "refused") throw new KeiyakuRefused(result.refusal);
+  if (result.kind === "retry") throw new KeiyakuRetry(result.reason);
+  return result;
+}
+
+export function requireLeadingAdmission<Value, Refusal extends KeiyakuRefusal>(
+  result: LeadingOutcome<Value, Refusal>,
+): Extract<LeadingOutcome<Value, Refusal>, { kind: "accepted" }> {
   if (result.kind === "refused") throw new KeiyakuRefused(result.refusal);
   if (result.kind === "retry") throw new KeiyakuRetry(result.reason);
   return result;

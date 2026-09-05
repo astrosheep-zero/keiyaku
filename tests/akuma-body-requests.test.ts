@@ -237,6 +237,9 @@ function acceptedContract(marker: string, action: "review"): FixtureReviewResult
 function acceptedContract(marker: string, action: "deliver" | "review"): FixtureDeliveryResult | FixtureReviewResult {
   const result = {
     kind: "accepted" as const,
+    operation: action,
+    cleanup: [],
+    executionStops: [],
     facts: [],
     head: contractHead("head"),
     value:
@@ -333,8 +336,7 @@ test("initial request publication loss is unknown with its request identity", as
       targets: ["aku/worker/22222222" as AkuId],
       completion: "all",
     }),
-    (error: unknown) =>
-      error instanceof AkumaBodyRequestError && error.outcome === "unknown" && error.requestId === id,
+    (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "unknown" && error.requestId === id,
   );
 });
 
@@ -354,7 +356,10 @@ test("cancellation before request publication retains the caller cancellation", 
       }),
       (error: unknown) => error === reason,
     );
-    assert.deepEqual((await readdir(directory)).filter((name) => name.endsWith(".request.json")), []);
+    assert.deepEqual(
+      (await readdir(directory)).filter((name) => name.endsWith(".request.json")),
+      [],
+    );
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -385,10 +390,7 @@ test("cancellation during request publication retains the caller cancellation be
     await publicationEntered;
     controller.abort(reason);
     paused();
-    await assert.rejects(
-      publication,
-      (error: unknown) => error === reason,
-    );
+    await assert.rejects(publication, (error: unknown) => error === reason);
     assert.equal(existsSync(join(directory, "request.json")), false);
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -1044,20 +1046,25 @@ test("CLI forwarded deliver preserves its selected Repo and uses parent Settings
     assert.equal(state.delivery?.data.policy.requireBranchesToBeUpToDate, true);
     assert.equal(existsSync(hookLog), false);
 
-    const parsedReview = parseArgv(["--repo", contractRepository.path, "review", id, "--unsatisfied", "--summary", "needs work"]);
+    const parsedReview = parseArgv([
+      "--repo",
+      contractRepository.path,
+      "review",
+      id,
+      "--unsatisfied",
+      "--summary",
+      "needs work",
+    ]);
     if (!("command" in parsedReview)) throw new Error("expected review invocation");
-    const reviewed = await invoke(
-      parsedReview,
-      {
-        cwd: parentRepository.path,
-        environment: {
-          KEIYAKU_HOME: childHome,
-          KEIYAKU_GIT_PATH: gitPath,
-          PATH: "",
-          [AKUMA_REQUESTS_ENV]: pump.directory,
-        },
+    const reviewed = await invoke(parsedReview, {
+      cwd: parentRepository.path,
+      environment: {
+        KEIYAKU_HOME: childHome,
+        KEIYAKU_GIT_PATH: gitPath,
+        PATH: "",
+        [AKUMA_REQUESTS_ENV]: pump.directory,
       },
-    );
+    });
     if (!("kind" in reviewed)) throw new Error("expected an invocation result");
     assert.equal(reviewed.kind, "accepted");
     const reviewedState = await bound.keiyaku.state();
@@ -1215,9 +1222,11 @@ test("completion fences admission but drains a returned delivery reference", asy
   const executorStarted = new Promise<void>((resolve) => {
     started = resolve;
   });
-  const executorReleased = new Promise<Readonly<{ result: FixtureDeliveryResult; deliveryFactId: string }>>((resolve) => {
-    release = resolve;
-  });
+  const executorReleased = new Promise<Readonly<{ result: FixtureDeliveryResult; deliveryFactId: string }>>(
+    (resolve) => {
+      release = resolve;
+    },
+  );
   const id = randomUUID();
   const pump = await openContractPump(parent, {
     wait: async () => {
@@ -1625,5 +1634,126 @@ test("forwarded materialization retains and replays its handoff evidence", async
   } finally {
     await pump.close();
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+import { executeForwardedReview, requestForwardedContractLive } from "../src/library/contract-operations.js";
+import { withExecutionReceipt, executionReceipt } from "../src/library/execution-result.js";
+import { entryUlid } from "../src/core/facts/types.js";
+import { acquireTargetPlacementFence } from "../src/git/target-placement.js";
+import { EMPTY_WORKTREE_HOOKS } from "../src/git/hooks.js";
+import { document as completionDocument, repositoryWithMain } from "./support/library-verbs.js";
+
+// A partial owner receipt does not turn Heart's unproven service into a voided request.
+test("forwarded fatal receipts survive unproven transport without claiming no product effect", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-forwarded-fatal-")));
+  const parent = await born(root, "parent", "11111111", ["contract.review"]);
+  const contract = makeContractId("kei/partial");
+  const receipt = {
+    operation: "review" as const,
+    contractId: contract,
+    head: contractHead("accepted-head"),
+    facts: [
+      {
+        v: 1 as const,
+        kind: "arc" as const,
+        contract,
+        entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+        at: "2026-09-05T00:00:00.000Z",
+        data: { seq: 1, title: "test", objective: "test", brief: "test" },
+      },
+    ],
+    cleanup: [],
+    executionStops: [],
+  };
+  let requestId: string | undefined;
+  const pump = await openContractPump(parent, {
+    ...unusedContractPort,
+    review: async () => {
+      throw withExecutionReceipt(new TypeError("failed after admission"), receipt);
+    },
+  });
+  try {
+    await assert.rejects(
+      requestForwardedContractLive({
+        directory: pump.directory,
+        action: "contract.review",
+        request: { action: "contract.review", repoRoot: root, contractId: contract, verdict: "satisfied" },
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof TypeError);
+        assert.deepEqual(executionReceipt(error), receipt);
+        assert.equal((error as Error & { requestOutcome: string }).requestOutcome, "unproven");
+        requestId = (error as Error & { requestId: string }).requestId;
+        return true;
+      },
+    );
+    assert.ok(requestId);
+    assert.equal((await readRequest(parent.paths, requestId))?.state, "unproven");
+  } finally {
+    await pump.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("closing a Body pump cancels a real forwarded review waiting for target placement", async () => {
+  const raw = repositoryWithMain(),
+    repo = await Repo.at({ path: raw.path });
+  const root = await World.at(raw.path);
+  const primary = (
+    await Keiyaku.bind({
+      repo,
+      markdown: completionDocument(),
+      workspace: "worktree",
+      target: "refs/heads/main",
+      gates: ["reviewed"],
+    })
+  ).keiyaku;
+  const state = await primary.state();
+  await primary.deliver();
+  const parent = await born(root, "parent", "11111111", ["contract.review"]);
+  const held = await acquireTargetPlacementFence(await repositoryAt(raw.path), "refs/heads/main");
+  let markStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const requestId = randomUUID();
+  const pump = await openContractPump(parent, {
+    ...unusedContractPort,
+    review: async (input) => {
+      markStarted();
+      return await executeForwardedReview({
+        repo,
+        contractId: input.contractId,
+        requester: input.requester,
+        verdict: input.verdict,
+        signal: input.signal,
+        hooks: EMPTY_WORKTREE_HOOKS,
+      });
+    },
+  });
+  const pending = requestBodyCommand({
+    directory: pump.directory,
+    id: requestId,
+    command: contractRequestProtocol("contract.review"),
+    value: { action: "contract.review", repoRoot: raw.path, contractId: state.id, verdict: "satisfied" },
+  }).catch((error: unknown) => error);
+  try {
+    await started;
+    // Observe the committed leading fact, not elapsed wall-clock time.
+    for (let attempt = 0; ; attempt += 1) {
+      if ((await primary.state()).attestations.length > 0) break;
+      assert.ok(attempt < 100, "review never admitted its leading fact");
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    await pump.close();
+    const fact = await readRequest(parent.paths, requestId);
+    assert.equal(fact?.state, "served");
+    assert.equal((await primary.state()).terminal, null);
+    assert.equal((await primary.state()).attestations.length, 1);
+  } finally {
+    held.close();
+    await pending;
+    await pump.close();
   }
 });

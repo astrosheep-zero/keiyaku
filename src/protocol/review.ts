@@ -20,18 +20,11 @@ import type { AttestationData, ContractState, DeliverData } from "../core/facts/
 import { gate } from "../core/facts/types.js";
 import { decideAttestation, type AttestationInput, type AttestationRefusal } from "../core/verbs/attestation.js";
 import { admitDecidedOffer, mintAttempts } from "./attempt.js";
-import { admitted } from "./outcome.js";
-import { completeCandidate, type CompletionEvidence } from "./completion.js";
-import { completeLeadingAdmission, contractCheckpoint } from "./progress.js";
+import type { LeadingOutcome } from "./outcome.js";
+import type { CompletionEvidence } from "./completion.js";
 import { appointmentFor, readPlaceRegister } from "../workspace-place.js";
 import type { AttemptContext } from "../core/decide.js";
-import type {
-  AttemptDecision,
-  DocumentDerivation,
-  IntentOutcome,
-  MutationOperationInput,
-  RepositoryScope,
-} from "./operations.js";
+import type { AttemptDecision, MutationOperationInput, RepositoryScope } from "./operations.js";
 import { attemptDecisionWithSeatClose, timestamp } from "./operations.js";
 
 const REVIEWED = gate("reviewed");
@@ -46,14 +39,11 @@ type ReviewOperationInput = MutationOperationInput &
   Readonly<{
     verdict: AttestationData["verdict"];
     summary?: string;
-    deriveDocument?: (state: ContractState) => DocumentDerivation;
   }>;
-export type ReviewValue = CompletionEvidence & Readonly<{ workspace?: WorkspaceDirtyDelta }>;
+export type ReviewAdmissionValue = Readonly<{ workspace?: WorkspaceDirtyDelta }>;
+export type ReviewValue = CompletionEvidence & ReviewAdmissionValue;
 export { decodeReviewValue } from "./result-codec.js";
-type PreparedReview = Readonly<{
-  workspace?: WorkspaceDirtyDelta;
-  tender?: TenderCapture;
-}>;
+type PreparedReview = ReviewAdmissionValue;
 
 async function captureReviewableWorktree(
   repository: RepositoryScope,
@@ -122,18 +112,10 @@ export async function prepareReview(
   };
 }
 
-function reviewValue(value: PreparedReview, completion: CompletionEvidence = {}): ReviewValue {
-  return {
-    ...(value.workspace === undefined ? {} : { workspace: value.workspace }),
-    ...completion,
-  };
-}
-
 type SpeculativeReview = Readonly<{
   observation: GitDecisionObservation;
   preparation?: AttestationInput<ReviewRefusal>["preparation"];
   workspace?: WorkspaceDirtyDelta;
-  tender?: TenderCapture;
   worktree?: SpeculativeWorktreeInput;
 }>;
 
@@ -194,7 +176,6 @@ async function speculateReview(input: ReviewOperationInput): Promise<Speculative
     observation,
     preparation: preparedReviewCapture(input, state, prepared),
     ...(prepared.data.workspace === undefined ? {} : { workspace: prepared.data.workspace }),
-    tender: prepared.data.tender,
     worktree: reviewWorktreeInput(prepared),
   };
 }
@@ -225,13 +206,13 @@ async function decideAndAdmitReview(
     attempt,
     offer: decision.offer,
     primaryContract: input.contractId,
+    ...(input.progress === undefined ? {} : input.progress === undefined ? {} : { progress: input.progress }),
   });
   if (admission.kind !== "accepted") return admission;
   return {
     ...admission,
     value: {
       ...(speculated.workspace === undefined ? {} : { workspace: speculated.workspace }),
-      ...(speculated.tender === undefined ? {} : { tender: speculated.tender }),
     },
   };
 }
@@ -271,8 +252,9 @@ async function reviewAttempt(
   );
 }
 
-export async function reviewOperation(input: ReviewOperationInput): Promise<IntentOutcome<ReviewValue, ReviewRefusal>> {
-  const git = input.scope;
+export async function admitReviewOperation(
+  input: ReviewOperationInput,
+): Promise<LeadingOutcome<ReviewAdmissionValue, ReviewRefusal>> {
   const attempts = mintAttempts({ entryCount: 1 });
   let review: Extract<AttemptDecision<PreparedReview, ReviewRefusal>, { kind: "accepted" | "refused" }> | null = null;
   for (let index = 0; index < attempts.length; index += 1) {
@@ -286,17 +268,6 @@ export async function reviewOperation(input: ReviewOperationInput): Promise<Inte
   }
   if (review === null) return { kind: "retry", reason: { kind: "exhausted" } };
   if (review.kind !== "accepted") return review;
-  if (input.verdict !== "satisfied") return admitted(review, reviewValue(review.value));
-  const derivation = input.deriveDocument?.(review.state);
-  const completed = await completeCandidate({
-    channel: input.channel,
-    repository: git,
-    contractId: input.contractId,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
-    ...(review.state.coordinates.target === undefined ? {} : { target: review.state.coordinates.target }),
-    verification: derivation?.verification ?? { kind: "prepared", data: null },
-    checkpoint: contractCheckpoint(review),
-    verifyInitial: false,
-  });
-  return admitted(completeLeadingAdmission(review, completed.progress), reviewValue(review.value, completed.evidence));
+  input.progress?.recordResidue(input.contractId, review);
+  return review;
 }

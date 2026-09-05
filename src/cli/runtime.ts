@@ -169,6 +169,19 @@ export async function runCliCommand(invocation: ParsedExecution): Promise<number
     });
     return await writeResult(command, result);
   } catch (error) {
+    const { executionReceipt } = await import("../index.js");
+    const receipt = executionReceipt(error);
+    if (receipt !== undefined) {
+      const diagnostic = error instanceof Error ? error.message : String(error);
+      const { executionFailureLines } = await import("./render/receipt.js");
+      writeCliStream(
+        process.stdout,
+        command.output === "json"
+          ? JSON.stringify({ kind: "execution-failed", diagnostic, receipt })
+          : executionFailureLines(receipt, diagnostic, displayContext().columns).join("\n"),
+      );
+      return 3;
+    }
     if (command.command !== "install") {
       const { AkumaWorldScopeError } = await import("../library/address.js");
       if (error instanceof AkumaWorldScopeError) return writeWorldScopeRefusal(error, command.output);

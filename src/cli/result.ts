@@ -43,7 +43,10 @@ export type AcceptedFact =
 
 export type Lag = ReconcileReport["lag"][number];
 
-type MutationEnvelope = Pick<MutationResult<unknown>, "head" | "settlementLags" | "recoverySnapshot" | "seatClose">;
+type MutationEnvelope = Pick<
+  MutationResult<unknown>,
+  "head" | "settlementLags" | "recoverySnapshot" | "cleanup" | "executionStops"
+>;
 
 export type AcceptedEnvelope = Readonly<{
   kind: "accepted";
@@ -53,7 +56,8 @@ export type AcceptedEnvelope = Readonly<{
   settlementLags: MutationEnvelope["settlementLags"];
   recoverySnapshot?: MutationEnvelope["recoverySnapshot"];
   lag?: readonly [Lag, ...Lag[]];
-  seatClose?: MutationEnvelope["seatClose"];
+  cleanup?: MutationEnvelope["cleanup"];
+  executionStops?: MutationEnvelope["executionStops"];
 }>;
 
 export type AcceptedBindResult = AcceptedEnvelope &
@@ -67,8 +71,6 @@ export type AcceptedBindResult = AcceptedEnvelope &
     verificationSummary?: never;
     placement?: never;
     continuation?: never;
-    cleanup?: never;
-    leak?: never;
     report?: never;
     diff?: never;
     verificationVerdict?: never;
@@ -89,8 +91,6 @@ export type AcceptedAmendResult = AcceptedEnvelope &
     verificationSummary?: never;
     placement?: never;
     continuation?: never;
-    cleanup?: never;
-    leak?: never;
     report?: never;
     workspace?: never;
     verificationVerdict?: never;
@@ -112,8 +112,6 @@ export type AcceptedDeliverResult = AcceptedEnvelope &
     verificationSummary?: string;
     placement?: PlacementStop;
     continuation?: ContinuationReport;
-    cleanup?: MutationResult<unknown>["cleanup"];
-    leak?: MutationResult<unknown>["leak"];
     target?: never;
     overlaps?: never;
     overlapFailure?: never;
@@ -137,8 +135,6 @@ export type AcceptedReviewResult = AcceptedEnvelope &
     placement?: PlacementStop;
     continuation?: ContinuationReport;
     workspace?: Review["workspace"];
-    cleanup?: MutationResult<unknown>["cleanup"];
-    leak?: MutationResult<unknown>["leak"];
     target?: never;
     overlaps?: never;
     overlapFailure?: never;
@@ -159,8 +155,6 @@ export type AcceptedArcResult = AcceptedEnvelope &
     verificationSummary?: never;
     placement?: never;
     continuation?: never;
-    cleanup?: never;
-    leak?: never;
     overlaps?: never;
     overlapFailure?: never;
     report?: never;
@@ -182,8 +176,6 @@ export type AcceptedAbandonResult = AcceptedEnvelope &
     verificationSummary?: never;
     placement?: never;
     continuation?: never;
-    cleanup?: never;
-    leak?: never;
     overlaps?: never;
     overlapFailure?: never;
     report?: never;
@@ -198,8 +190,6 @@ export type AcceptedAuditResult = AcceptedEnvelope &
   Readonly<{
     verb: "audit";
     report: AuditReport;
-    cleanup?: MutationResult<unknown>["cleanup"];
-    leak?: MutationResult<unknown>["leak"];
     target?: never;
     completion?: never;
     verification?: never;

@@ -1,5 +1,6 @@
+import type { ExecutionCleanup, ExecutionStop, ExecutionReceipt } from "../../index.js";
 import type { PlacementStop, VerificationReuse, VerificationStop } from "../../index.js";
-import type { AcceptedDeliverResult, Lag } from "../result.js";
+import type { Lag } from "../result.js";
 import { renderRefusalFacts } from "./refusal.js";
 import { displayColumns, renderOpaqueBlock, safeText } from "./terminal.js";
 
@@ -206,7 +207,7 @@ export function stopLines(
 }
 
 export function cleanupLines(
-  cleanup: NonNullable<AcceptedDeliverResult["cleanup"]>,
+  cleanup: Extract<ExecutionCleanup, { kind: "verification-cleanup" }>["failure"],
   columns: number,
 ): readonly string[] {
   const lines: string[] = [];
@@ -225,7 +226,10 @@ export function cleanupLines(
   return lines;
 }
 
-export function leakLines(leak: NonNullable<AcceptedDeliverResult["leak"]>, columns: number): readonly string[] {
+export function leakLines(
+  leak: Extract<ExecutionCleanup, { kind: "worktree-leak" }>["leak"],
+  columns: number,
+): readonly string[] {
   const lines: string[] = [];
   receiptRow(lines, "!", "leak", [{ text: "worktree" }, { text: leak.path, opaque: true }], columns);
   receiptPayload(lines, "diagnostic", leak.diagnostic);
@@ -233,7 +237,7 @@ export function leakLines(leak: NonNullable<AcceptedDeliverResult["leak"]>, colu
 }
 
 export function seatCloseLines(
-  seatClose: NonNullable<AcceptedDeliverResult["seatClose"]>,
+  seatClose: readonly Extract<ExecutionCleanup, { kind: "private-state-seat-close" }>["failure"][],
   columns: number,
 ): readonly string[] {
   const lines: string[] = [];
@@ -241,5 +245,55 @@ export function seatCloseLines(
     receiptRow(lines, "!", "lag", [{ text: lag.kind }], columns);
     receiptPayload(lines, "diagnostic", lag.diagnostic);
   }
+  return lines;
+}
+
+export function executionStopLines(stops: readonly ExecutionStop[], columns: number): readonly string[] {
+  const lines: string[] = [];
+  for (const stop of stops) {
+    receiptRow(lines, "!", stop.stage, [{ text: stop.reason }, { text: stop.contractId, opaque: true }], columns);
+    receiptPayload(lines, "diagnostic", stop.diagnostic);
+  }
+  return lines;
+}
+
+export function executionCleanupLines(
+  cleanup: readonly ExecutionCleanup[],
+  columns: number,
+  primary?: string,
+): readonly string[] {
+  const lines: string[] = [];
+  for (const issue of cleanup) {
+    if (primary !== undefined && issue.contractId !== primary)
+      receiptRow(lines, "!", "cleanup owner", [{ text: issue.contractId, opaque: true }], columns);
+    if ("snapshot" in issue && issue.snapshot !== undefined)
+      receiptRow(lines, " ", "cleanup snapshot", [{ text: issue.snapshot, opaque: true }], columns);
+    if (issue.kind === "verification-cleanup") lines.push(...cleanupLines(issue.failure, columns));
+    else if (issue.kind === "worktree-leak") lines.push(...leakLines(issue.leak, columns));
+    else lines.push(...seatCloseLines([issue.failure], columns));
+  }
+  return lines;
+}
+
+export function executionFailureLines(
+  receipt: ExecutionReceipt,
+  diagnostic: string,
+  columns: number,
+): readonly string[] {
+  const lines: string[] = [];
+  receiptRow(lines, "!", "execution failed after admission", [{ text: receipt.contractId, opaque: true }], columns);
+  receiptPayload(lines, "diagnostic", diagnostic);
+  for (const fact of receipt.facts)
+    receiptRow(
+      lines,
+      " ",
+      "journal",
+      [{ text: fact.contract, opaque: true }, { text: fact.entry, opaque: true }, { text: fact.kind }],
+      columns,
+    );
+  lines.push(
+    ...executionStopLines(receipt.executionStops, columns),
+    ...executionCleanupLines(receipt.cleanup, columns, receipt.contractId),
+  );
   return lines;
 }

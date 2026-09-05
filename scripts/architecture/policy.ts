@@ -86,6 +86,30 @@ const libraryOwner = {
   ],
 } as const;
 
+const protocolOwner = {
+  allow: [
+    any("body/**"),
+    boundedList,
+    any("coordination/**"),
+    any("core/**"),
+    any("git/**"),
+    any("protocol/**"),
+    any("verification/**"),
+    any("workspace-place.ts"),
+  ],
+  deny: [any("core/facts/gate.ts"), targetPlacementRuntime],
+} as const;
+
+const leadingAdmissionOwner = {
+  allow: protocolOwner.allow,
+  deny: [
+    ...protocolOwner.deny,
+    runtime("protocol/completion.ts"),
+    runtime("protocol/placement.ts"),
+    runtime("protocol/reintegrate.ts"),
+  ],
+} as const;
+
 export const KEIYAKU_ARCHITECTURE_POLICY = {
   compositionBoundaries: [
     {
@@ -178,20 +202,9 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("workspace-place.ts"),
       ],
     },
-    {
-      source: "protocol/**",
-      allow: [
-        any("body/**"),
-        boundedList,
-        any("coordination/**"),
-        any("core/**"),
-        any("git/**"),
-        any("protocol/**"),
-        any("verification/**"),
-        any("workspace-place.ts"),
-      ],
-      deny: [any("core/facts/gate.ts"), targetPlacementRuntime],
-    },
+    { source: "protocol/review.ts", ...leadingAdmissionOwner },
+    { source: "protocol/deliver.ts", ...leadingAdmissionOwner },
+    { source: "protocol/**", ...protocolOwner },
     {
       source: "library/contract-bind.ts",
       allow: [
@@ -237,6 +250,26 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("protocol/run.ts"),
         any("protocol/result-codec.ts"),
       ],
+    },
+    {
+      source: "library/contract-execution.ts",
+      allow: [...contractOwner.allow, any("protocol/completion.ts"), any("protocol/progress.ts")],
+      deny: contractOwner.deny,
+    },
+    {
+      source: "library/continuation.ts",
+      allow: [...libraryOwner.allow, any("protocol/completion.ts"), any("protocol/progress.ts")],
+      deny: libraryOwner.deny,
+    },
+    {
+      source: "library/execution-result.ts",
+      allow: [...libraryOwner.allow, types("protocol/progress.ts")],
+      deny: libraryOwner.deny,
+    },
+    {
+      source: "library/mutation.ts",
+      allow: [...libraryOwner.allow, any("protocol/progress.ts")],
+      deny: libraryOwner.deny,
     },
     { source: "library/contract*.ts", ...contractOwner },
     { source: "library/contract/**", ...contractOwner },

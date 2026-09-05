@@ -179,7 +179,14 @@ export class KeiyakuHandle {
         }),
       );
       const completed = await completeMutation({
-        ...completionInput({ scope: this.scope, channel, contractId: this.id, value: () => undefined, hooks }),
+        ...completionInput({
+          operation: "amend",
+          scope: this.scope,
+          channel,
+          contractId: this.id,
+          value: () => undefined,
+          hooks,
+        }),
         accepted,
       });
       return {
@@ -247,17 +254,19 @@ export class KeiyakuHandle {
   }
 
   async review(input: ReviewInput): Promise<MutationResult<Review>> {
-    const values = requireInput(input, "review input", ["verdict", "summary"]);
+    const values = requireInput(input, "review input", ["verdict", "summary", "signal"]);
     const verdict = values.verdict;
     if (verdict !== "satisfied" && verdict !== "unsatisfied") {
       return invalidInput("verdict must be satisfied or unsatisfied");
     }
     const summary = optionalNonblank(values.summary, "review summary");
+    const signal = optionalSignal(values.signal);
     const channel = executionChannel(this.execution);
     if (channel.kind === "body-request") {
       return await requestForwardedContractLive({
         directory: channel.directory,
         action: "contract.review",
+        ...(signal === undefined ? {} : { signal }),
         request: {
           action: "contract.review",
           repoRoot: this.scope.primaryWorktree,
@@ -274,6 +283,7 @@ export class KeiyakuHandle {
       verdict,
       ...(summary === undefined ? {} : { summary }),
       hooks: this.composition.hooks,
+      ...(signal === undefined ? {} : { signal }),
     });
   }
 
@@ -297,7 +307,14 @@ export class KeiyakuHandle {
         }),
       );
       return completeHolderMutation({
-        completion: completionInput({ scope: this.scope, channel, contractId: this.id, value: () => undefined, hooks }),
+        completion: completionInput({
+          operation: "abandon",
+          scope: this.scope,
+          channel,
+          contractId: this.id,
+          value: () => undefined,
+          hooks,
+        }),
         admission,
         requireAccepted,
       });
@@ -319,7 +336,14 @@ export class KeiyakuHandle {
         }),
       );
       return completeMutation({
-        ...completionInput({ scope: this.scope, channel, contractId: this.id, value: () => undefined, hooks }),
+        ...completionInput({
+          operation: "arc",
+          scope: this.scope,
+          channel,
+          contractId: this.id,
+          value: () => undefined,
+          hooks,
+        }),
         accepted,
       });
     });

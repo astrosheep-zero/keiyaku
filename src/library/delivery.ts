@@ -21,8 +21,6 @@ export function decodeDeliveryValue(value: unknown): DeliveryValue {
     "verificationReuse",
     "verificationSummary",
     "placement",
-    "cleanup",
-    "leak",
     "continuation",
   ]);
   for (const key of Object.keys(object)) if (!allowed.has(key)) throw new Error("malformed delivery value");
@@ -38,8 +36,6 @@ export function decodeDeliveryValue(value: unknown): DeliveryValue {
     ...(object.verificationReuse === undefined ? {} : { verificationReuse: object.verificationReuse }),
     ...(object.verificationSummary === undefined ? {} : { verificationSummary: object.verificationSummary }),
     ...(object.placement === undefined ? {} : { placement: object.placement }),
-    ...(object.cleanup === undefined ? {} : { cleanup: object.cleanup }),
-    ...(object.leak === undefined ? {} : { leak: object.leak }),
   });
   return {
     ...identity,
@@ -59,8 +55,6 @@ class DeliveryHandle {
   declare readonly verificationReuse?: DeliveryValue["verificationReuse"];
   declare readonly verificationSummary?: DeliveryValue["verificationSummary"];
   declare readonly placement?: DeliveryValue["placement"];
-  declare readonly cleanup?: DeliveryValue["cleanup"];
-  declare readonly leak?: DeliveryValue["leak"];
   declare readonly continuation?: DeliveryValue["continuation"];
   declare readonly tenderSnapshot: SnapshotId;
   declare readonly integration: DeliveryValue["integration"];
@@ -73,14 +67,7 @@ class DeliveryHandle {
     outcomes: Partial<
       Pick<
         DeliveryValue,
-        | "completion"
-        | "verification"
-        | "verificationReuse"
-        | "verificationSummary"
-        | "placement"
-        | "cleanup"
-        | "leak"
-        | "continuation"
+        "completion" | "verification" | "verificationReuse" | "verificationSummary" | "placement" | "continuation"
       >
     > = {},
   ) {

@@ -1,11 +1,10 @@
 import type { AuditReport } from "../../index.js";
 import type { AcceptedAuditResult } from "../result.js";
 import {
-  cleanupLines,
-  leakLines,
+  executionCleanupLines,
+  executionStopLines,
   receiptPayload,
   receiptRow,
-  seatCloseLines,
   stopLines,
   titleLines,
 } from "./receipt.js";
@@ -113,11 +112,8 @@ function targetLines(target: AuditReport["target"], columns: number, addressed: 
 
 function obligationLines(result: AcceptedAuditResult, columns: number): readonly string[] {
   return [
-    ...(result.cleanup === undefined ? [] : cleanupLines(result.cleanup, columns)),
-    ...(result.leak === undefined ? [] : leakLines(result.leak, columns)),
-    ...(result.seatClose === undefined || result.seatClose.length === 0
-      ? []
-      : seatCloseLines(result.seatClose, columns)),
+    ...executionCleanupLines(result.cleanup ?? [], columns, result.contract),
+    ...executionStopLines(result.executionStops ?? [], columns),
   ];
 }
 

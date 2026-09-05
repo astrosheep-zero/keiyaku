@@ -105,7 +105,7 @@ export async function bindKeiyaku<Handle>(
       const toHandle = ({ contractId: contract }: { contractId: ContractId }): Handle =>
         createHandle(contract, sourceScope);
       const result = await completeMutation({
-        ...completionInput({ scope: sourceScope, channel, contractId: id, value: toHandle, hooks }),
+        ...completionInput({ operation: "bind", scope: sourceScope, channel, contractId: id, value: toHandle, hooks }),
         accepted: admission,
       });
       const region = await observeRegion(sourceScope, channel, id, fork.document.region);
@@ -164,11 +164,11 @@ async function bindMarkdownFromValues<Handle>(
     const result =
       admission.admission === null
         ? await completeMutation({
-            ...completionInput({ scope, channel, contractId: id, value: toHandle, hooks }),
+            ...completionInput({ operation: "bind", scope, channel, contractId: id, value: toHandle, hooks }),
             accepted,
           })
         : await completeHolderMutation({
-            completion: completionInput({ scope, channel, contractId: id, value: toHandle, hooks }),
+            completion: completionInput({ operation: "bind", scope, channel, contractId: id, value: toHandle, hooks }),
             admission: admission.admission,
             requireAccepted,
           });

@@ -228,12 +228,13 @@ test("audit renders transient Verification cleanup leaks after accepted and obse
     acceptedAudit.facts.map((fact) => fact.kind),
     ["attestation"],
   );
-  assert.match(acceptedAudit.leak?.diagnostic ?? "", /forced verification cleanup failure/);
+  const retainedLeak = acceptedAudit.cleanup?.find((item) => item.kind === "worktree-leak")?.leak;
+  assert.match(retainedLeak?.diagnostic ?? "", /forced verification cleanup failure/);
   assert.equal("leak" in acceptedAudit.report, false);
   const acceptedText = renderText(acceptedAudit, { columns: 400, color: false });
-  assert.equal(acceptedText.includes(acceptedAudit.leak!.path), true);
-  assert.equal(acceptedText.includes(acceptedAudit.leak!.diagnostic.trimEnd()), true);
-  accepted.raw.run(["worktree", "remove", "--force", acceptedAudit.leak!.path]);
+  assert.equal(acceptedText.includes(retainedLeak!.path), true);
+  assert.equal(acceptedText.includes(retainedLeak!.diagnostic.trimEnd()), true);
+  accepted.raw.run(["worktree", "remove", "--force", retainedLeak!.path]);
 
   const observedAudit: Extract<InvocationResult, { kind: "accepted"; verb: "audit" }> = {
     ...acceptedAudit,
@@ -250,7 +251,7 @@ test("audit renders transient Verification cleanup leaks after accepted and obse
   }
   assert.equal(observedAudit.report.target.kind, "not-observed");
   assert.equal("leak" in observedAudit.report, false);
-  const leak = observedAudit.leak;
+  const leak = observedAudit.cleanup?.find((item) => item.kind === "worktree-leak")?.leak;
   assert.match(leak?.diagnostic ?? "", /forced verification cleanup failure/);
   const observedText = renderText(observedAudit, { columns: 400, color: false });
   assert.match(observedText, /unknown exit/);
