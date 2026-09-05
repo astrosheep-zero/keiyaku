@@ -300,6 +300,7 @@ function renderAcceptedBind(result: AcceptedBindResult, columns: number): string
     receiptRow(lines, " ", "workspace", [{ text: "worktree" }, { text: result.workspace.path, opaque: true }], columns);
   if (result.target === null) receiptRow(lines, " ", "no target", [], columns);
   else receiptRow(lines, " ", "target", [{ text: result.target, opaque: true }], columns);
+  for (const warning of result.warnings ?? []) receiptRow(lines, "!", "region warning", [{ text: warning }], columns);
   lines.push(...acceptedDeviations(result, columns), ...recordBlock(result, columns));
   return lines.join("\n");
 }

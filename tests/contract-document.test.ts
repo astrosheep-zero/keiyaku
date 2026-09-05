@@ -89,6 +89,13 @@ test("contract Markdown rejects frontmatter, duplicate sections, and missing str
     (error: unknown) =>
       error instanceof TypeError && error.message.includes("contract document is missing ## Objective"),
   );
+  assert.throws(
+    () =>
+      decodeContractDocument(
+        contractMarkdown("No Region", { Context: "facts.", Objective: "ship.", Design: "adapter." }),
+      ),
+    (error: unknown) => error instanceof TypeError && error.message.includes("contract document is missing ## Region"),
+  );
 });
 
 test("contract Markdown reports independent structural diagnostics together", () => {
@@ -105,7 +112,7 @@ test("contract Markdown reports independent structural diagnostics together", ()
     "~~~",
     "src/**",
     "~~~",
-    "prose outside the fence",
+    "### Region heading",
     "",
     "## Criteria",
     "- flat criterion",
@@ -125,7 +132,7 @@ test("contract Markdown reports independent structural diagnostics together", ()
         [
           "contract document is missing ## Design",
           "gates is not a contract Markdown section",
-          "Region may contain only its fenced declaration",
+          "Region may not contain a heading block",
           "Criteria must contain one or more H3 entries",
           "Verification must contain one or more fenced executor declarations",
         ].join("\n"),
@@ -147,14 +154,12 @@ test("structure-dependent diagnostics stay fail-first behind the aggregated laye
     Context: "facts.",
     Objective: "ship.",
     Design: "adapter.",
-    Region: ["~~~", "src//", "~~~", "~~~", "tests/**", "~~~"].join("\n"),
+    Region: ["~~~", "src//", "~~~", "### Region heading"].join("\n"),
     Criteria: "### One\nbody",
   });
   assert.throws(
     () => decodeContractDocument(malformedRegion),
-    (error: unknown) =>
-      error instanceof TypeError &&
-      error.message === "Region must contain one closed fence with no info string or the exact 'txt' info string",
+    (error: unknown) => error instanceof TypeError && error.message === "Region may not contain a heading block",
   );
 
   const malformedCriteria = contractMarkdown("Day One", {

@@ -59,11 +59,10 @@ they are the worker's.>
 ```
 
 ## Region
-```
-<intended write patterns — planning evidence for overlap detection, never
-ownership or the exact diff. Narrow enough that overlap is a real signal;
-directory patterns end with `/`.>
-```
+<one intended write pattern per line — planning evidence for overlap
+ detection, never ownership or the exact diff. Narrow enough that overlap is a
+ real signal; directory patterns end with `/`. Fenced lines, list items, and
+ bare lines are equivalent and union.>
 
 ## Criteria
 ### <one observable condition>

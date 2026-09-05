@@ -32,6 +32,17 @@ async function bind(repository: TestGitRepository, title: string, region: readon
   return result;
 }
 
+test("bind warns about a whitespace Region pattern and still admits the Contract", async () => {
+  const repository = repositoryWithHead();
+  const bound = await bind(repository, "Whitespace", ["src/a b", "docs/**"]);
+  assert.deepEqual(bound.warnings, ["Region pattern 'src/a b' contains whitespace and will never match a path"]);
+  assert.deepEqual(
+    bound.facts.map((fact) => fact.kind),
+    ["bind"],
+  );
+  assert.notEqual(bound.head, null);
+});
+
 test("bind and amend expose only live-peer Region witnesses from one document read", async () => {
   const repository = repositoryWithHead();
   const first = await bind(repository, "First", ["src/**"]);

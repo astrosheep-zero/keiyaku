@@ -19,8 +19,15 @@ may carry additional author terms without becoming core vocabulary.
 active Contracts, but grants no filesystem authority, predicts no eventual
 diff, and never rejects concurrent work. A real dependency or an irreconcilable
 interaction is instead an `after` relation owned by [lifecycle.md](lifecycle.md).
-Exact document, Region-pattern, and fence grammar belong to leaf help and
-executable specifications, not this owner law.
+A Region section is mandatory and accepts path patterns written as fenced
+lines, list items, or bare lines; the forms union, blank lines never count, and
+a genuinely foreign block kind is refused as a structural failure. Because
+Region is planning evidence rather than authority, a pattern carrying
+whitespace is almost certainly strayed prose: it warns during bind and never
+rejects. Where Keiyaku writes Region content back, it writes one bare pattern
+per line whatever form the author used. Exact document, Region-pattern, and
+fence grammar belong to leaf help and executable specifications, not this owner
+law.
 
 The document boundary reserves machine and guidance sections from author
 extensions. Reserved names cannot silently become structured Contract terms.

@@ -15,6 +15,7 @@ export type BindResult = Readonly<
   Omit<MutationResult<Keiyaku>, "value"> & {
     keiyaku: Keiyaku;
     workspace?: ContractWorkspaceLocation;
+    warnings?: readonly string[];
   } & RegionObservation
 >;
 export type Fact = JournalEntry;

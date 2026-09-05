@@ -104,6 +104,7 @@ export function acceptedBind(result: BindResult, coordinates: Readonly<{ target?
     verb: "bind",
     ...(result.workspace === undefined ? {} : { workspace: result.workspace }),
     target: coordinates.target ?? null,
+    ...(result.warnings === undefined ? {} : { warnings: result.warnings }),
     ...acceptedRegion(result),
   };
 }

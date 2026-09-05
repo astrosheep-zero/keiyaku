@@ -63,7 +63,7 @@ export function renderContractBody(body: ContractBody, currentArc?: ArcData): st
     section(CONTRACT_SECTIONS.context.title, body.context),
     section(CONTRACT_SECTIONS.objective.title, body.objective),
     section(CONTRACT_SECTIONS.design.title, body.design),
-    section(CONTRACT_SECTIONS.region.title, fenced(body.region.join("\n"))),
+    section(CONTRACT_SECTIONS.region.title, body.region.join("\n")),
     section(CONTRACT_SECTIONS.criteria.title, criteria),
     ...(verification.length === 0 ? [] : [section(CONTRACT_SECTIONS.verification.title, verification)]),
     ...body.extensions.map((extension) => section(extension.title, extension.content)),

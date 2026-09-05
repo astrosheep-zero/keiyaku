@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { applyAmendDocument } from "../src/body/amend.js";
 import { decodeContractDocument } from "../src/body/decode.js";
-import { decodeRegion, RegionDocumentError, regionsOverlap } from "../src/body/region.js";
+import { decodeRegion, regionWarnings, RegionDocumentError, regionsOverlap } from "../src/body/region.js";
 import { renderContractBody } from "../src/body/render.js";
 import { parseToAST } from "../src/markdown/parse.js";
 import type { SectionNode } from "../src/markdown/types.js";
@@ -46,7 +46,7 @@ test("Region accepts only its closed positive path grammar", () => {
   }
 });
 
-test("Region accepts only one closed fence with no info string or exact txt", () => {
+test("Region accepts one fence with no info string or the exact txt, and refuses an unclosed fence", () => {
   assert.deepEqual(region(["src/**"]), ["src/**"]);
   assert.deepEqual(region(["src/**"], "txt"), ["src/**"]);
   const invalidLabels = [
@@ -61,17 +61,60 @@ test("Region accepts only one closed fence with no info string or exact txt", ()
     assert.throws(
       () => decodeRegion(document, section as SectionNode),
       (error: unknown) =>
-        error instanceof RegionDocumentError && error.message.includes("no info string or the exact 'txt' info string"),
+        error instanceof RegionDocumentError && error.message.includes("info string other than the exact 'txt'"),
     );
   }
 
-  const invalidStructure = ["## Region\n~~~\nsrc/**", "## Region\n~~~\nsrc/**\n~~~\nextra"];
-  for (const source of invalidStructure) {
+  const unclosed = parseToAST("## Region\n~~~\nsrc/**");
+  const unclosedSection = unclosed.children[0];
+  assert.ok(unclosedSection?.type === "section");
+  assert.throws(
+    () => decodeRegion(unclosed, unclosedSection as SectionNode),
+    (error: unknown) => error instanceof RegionDocumentError && error.message === "Region fence must be closed",
+  );
+});
+
+test("Region decodes fences, list items, and bare lines to the same patterns and unions them", () => {
+  const decode = (source: string) => {
     const document = parseToAST(source);
     const section = document.children[0];
     assert.ok(section?.type === "section");
-    assert.throws(() => decodeRegion(document, section as SectionNode), RegionDocumentError);
+    return decodeRegion(document, section as SectionNode);
+  };
+
+  assert.deepEqual(decode("## Region\n~~~\nsrc/a\nsrc/b\n~~~"), ["src/a", "src/b"]);
+  assert.deepEqual(decode("## Region\n- src/a\n- src/b\n"), ["src/a", "src/b"]);
+  assert.deepEqual(decode("## Region\nsrc/a\nsrc/b\n"), ["src/a", "src/b"]);
+  assert.deepEqual(decode("## Region\n~~~\nsrc/a\n~~~\n\n- src/b\n"), ["src/a", "src/b"]);
+  assert.deepEqual(decode("## Region\n~~~\nsrc/a\n~~~\nextra\n"), ["src/a", "extra"]);
+  assert.deepEqual(decode("## Region\n\n\nsrc/a\n\n"), ["src/a"]);
+});
+
+test("Region refuses foreign block kinds by name", () => {
+  const cases: readonly (readonly [string, string])[] = [
+    ["## Region\n### heading\n", "Region may not contain a heading block"],
+    ["## Region\n> quoted\n", "Region may not contain a blockquote block"],
+    ["## Region\n---\n", "Region may not contain a thematic break block"],
+    ["## Region\n<div>\n", "Region may not contain an HTML block"],
+    ["## Region\n| path | note |\n| --- | --- |\n| src/** | x |\n", "Region may not contain a table block"],
+  ];
+  for (const [source, diagnostic] of cases) {
+    const document = parseToAST(source);
+    const section = document.children[0];
+    assert.ok(section?.type === "section");
+    assert.throws(
+      () => decodeRegion(document, section as SectionNode),
+      (error: unknown) => error instanceof RegionDocumentError && error.message === diagnostic,
+    );
   }
+});
+
+test("Region pattern whitespace warns without rejecting", () => {
+  assert.deepEqual(regionWarnings(["src/a b"]), [
+    "Region pattern 'src/a b' contains whitespace and will never match a path",
+  ]);
+  assert.deepEqual(regionWarnings(["src/a", "docs/**"]), []);
+  assert.deepEqual(region(["src/a b"]), ["src/a b"]);
 });
 
 test("Region preserves nonblank pattern lines exactly", () => {
@@ -79,10 +122,11 @@ test("Region preserves nonblank pattern lines exactly", () => {
   assert.deepEqual(regionsOverlap(["src/file "], ["src/file"]), []);
 });
 
-test("contract rendering chooses a fence that preserves legal delimiter path bytes", () => {
-  const decoded = decodeContractDocument(contract("```"));
+test("contract rendering writes Region as canonical bare lines", () => {
+  const decoded = decodeContractDocument(contract("src/```.ts"));
   const rendered = renderContractBody(decoded);
-  assert.deepEqual(decodeContractDocument(rendered).region, ["```"]);
+  assert.match(rendered, /\n## Region\n\nsrc\/```\.ts\n/u);
+  assert.deepEqual(decodeContractDocument(rendered).region, ["src/```.ts"]);
 });
 
 test("contract decoding and amendment share Region validation", () => {

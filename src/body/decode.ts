@@ -4,7 +4,7 @@ import { decodeDocumentEnvelope } from "./envelope.js";
 import { directChildren, normalizeTitle, rawSlice, sectionContent } from "../markdown/query.js";
 import type { DocumentNode, SectionNode } from "../markdown/types.js";
 import { CONTRACT_SECTIONS, RESERVED_SECTIONS, type ContractSectionName } from "./shape.js";
-import { decodeRegion, RegionDocumentError } from "./region.js";
+import { decodeRegion, regionStructure, RegionDocumentError } from "./region.js";
 import { decodeVerificationDeclarations, VerificationDocumentError } from "./verification.js";
 import type { VerificationDefinition } from "../verification/declaration.js";
 
@@ -26,17 +26,6 @@ function requireSections(sections: ReadonlyMap<string, SectionNode>): string[] {
 
 function requiredSection(sections: ReadonlyMap<string, SectionNode>, name: RequiredSectionName): SectionNode {
   return sections.get(name)!;
-}
-
-function regionStructure(document: DocumentNode, section: SectionNode): string | null {
-  const blocks = directChildren(section, "code_block");
-  if (blocks.length !== 1 || !blocks[0]!.closed || (blocks[0]!.info !== "" && blocks[0]!.info !== "txt")) {
-    return "Region must contain one closed fence with no info string or the exact 'txt' info string";
-  }
-  const other = section.children.filter(
-    (node) => node !== blocks[0] && rawSlice(document, node.span).trim().length > 0,
-  );
-  return other.length === 0 ? null : "Region may contain only its fenced declaration";
 }
 
 function criteriaStructure(document: DocumentNode, section: SectionNode): string | null {
@@ -64,7 +53,7 @@ function structuralDiagnostics(document: DocumentNode, sections: ReadonlyMap<str
     if (sections.has(name)) diagnostics.push(`${name} is not a contract Markdown section`);
   }
   const checks = [
-    ["region", regionStructure],
+    ["region", (_document: DocumentNode, section: SectionNode) => regionStructure(section)],
     ["criteria", criteriaStructure],
     ["verification", verificationStructure],
   ] as const;

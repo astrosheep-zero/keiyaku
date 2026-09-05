@@ -7,6 +7,7 @@ import { completionInput, completeHolderMutation, completeMutation, type Mutatio
 import { reconcileLagScope } from "./reconcile.js";
 import { requireAccepted } from "./refusal.js";
 import { observeRegion, type RegionObservation } from "./region.js";
+import { regionWarnings } from "../body/region.js";
 import { Repo, scopeForRepo } from "./repo.js";
 import { worktreeHooksOption } from "./configuration.js";
 import type { WorktreeHooks } from "./configuration.js";
@@ -30,7 +31,12 @@ type BindInput = Readonly<{
   hooks?: WorktreeHooks;
 }>;
 type BindResult<Handle> = Readonly<
-  Omit<MutationResult<Handle>, "value"> & { keiyaku: Handle; workspace?: ContractWorkspaceLocation } & RegionObservation
+  Omit<MutationResult<Handle>, "value"> & {
+    keiyaku: Handle;
+    workspace?: ContractWorkspaceLocation;
+  } & RegionObservation & {
+      warnings?: readonly string[];
+    }
 >;
 type HandleFactory<Handle> = (contractId: ContractId, scope: RepositoryScope) => Handle;
 
@@ -39,6 +45,7 @@ async function acceptedBindResult<Handle>(
   region: RegionObservation,
   scope: RepositoryScope,
   contractId: ContractId,
+  warnings: readonly string[] = [],
 ): Promise<BindResult<Handle>> {
   const { value: keiyaku, ...base } = result;
   const appointment = await readManagedWorktreeAppointment(scope, contractId);
@@ -65,6 +72,7 @@ async function acceptedBindResult<Handle>(
       scopedAppointmentLag.length === 0
         ? base.pending
         : [...base.pending, { surface: "reconciliation" as const, required: true }],
+    ...(warnings.length === 0 ? {} : { warnings }),
     ...region,
   };
 }
@@ -174,6 +182,12 @@ async function bindMarkdownFromValues<Handle>(
             admission: admission.admission,
             requireAccepted,
           });
-    return await acceptedBindResult(result, await observeRegion(scope, channel, id, document.region), scope, id);
+    return await acceptedBindResult(
+      result,
+      await observeRegion(scope, channel, id, document.region),
+      scope,
+      id,
+      regionWarnings(document.region),
+    );
   });
 }

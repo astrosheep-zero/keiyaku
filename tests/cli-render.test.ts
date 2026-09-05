@@ -631,6 +631,22 @@ test("accepted bind receipts expose confirmed private-state seat close lag", () 
   );
 });
 
+test("accepted bind receipts surface Region lint warnings", () => {
+  const contract = contractId("kei/warned");
+  const result: InvocationResult = {
+    kind: "accepted",
+    verb: "bind",
+    contract,
+    head: contractHead("head"),
+    facts: [{ contract, entry: "bind", kind: "bound" }],
+    settlementLags: [],
+    target: null,
+    overlaps: [],
+    warnings: ["Region pattern 'src/a b' contains whitespace and will never match a path"],
+  };
+  assert.match(renderText(result), /! region warning[\s\S]*src\/a b[\s\S]*contains whitespace/u);
+});
+
 test("accepted receipts omit execution telemetry and retain recovery snapshots", () => {
   const contract = contractId("kei/unchanged-mechanics");
   const head = contractHead("journal-blob-oid");

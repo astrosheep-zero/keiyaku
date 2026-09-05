@@ -1,5 +1,4 @@
-import { directChildren, rawSlice } from "../markdown/query.js";
-import type { DocumentNode, MarkdownBlockNode, SectionNode } from "../markdown/types.js";
+import type { DocumentNode, ListItemNode, MarkdownBlockNode, SectionNode } from "../markdown/types.js";
 
 type RegionSegment =
   | Readonly<{ readonly kind: "deep" }>
@@ -24,10 +23,6 @@ export class RegionDocumentError extends Error {
 
 function refusal(message: string): never {
   throw new RegionDocumentError(message);
-}
-
-function nonblank(document: DocumentNode, node: MarkdownBlockNode): boolean {
-  return rawSlice(document, node.span).trim().length > 0;
 }
 
 function compileSegment(segment: string, pattern: string): RegionSegment {
@@ -131,14 +126,89 @@ function patternsOverlap(left: readonly RegionSegment[], right: readonly RegionS
   return false;
 }
 
-export function decodeRegion(document: DocumentNode, section: SectionNode): readonly string[] {
-  const blocks = directChildren(section, "code_block");
-  if (blocks.length !== 1 || !blocks[0]!.closed || (blocks[0]!.info !== "" && blocks[0]!.info !== "txt")) {
-    refusal("Region must contain one closed fence with no info string or the exact 'txt' info string");
+const THEMATIC_BREAK = /^ {0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$/u;
+const TABLE_DELIMITER = /^ {0,3}\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/u;
+
+function nonblank(line: string): boolean {
+  return line.trim().length > 0;
+}
+
+/** The AST has no table, thematic-break, or HTML block kind, so the Region boundary classifies that prose itself. */
+function foreignProseKind(lines: readonly string[]): string | null {
+  for (const line of lines) {
+    if (THEMATIC_BREAK.test(line)) return "thematic break";
+    if (/^ {0,3}</u.test(line)) return "HTML";
   }
-  const other = section.children.filter((node) => node !== blocks[0] && nonblank(document, node));
-  if (other.length > 0) refusal("Region may contain only its fenced declaration");
-  const patterns = blocks[0]!.lines.slice(1, -1).filter((line) => line.trim().length > 0);
+  for (let index = 1; index < lines.length; index += 1) {
+    if (lines[index - 1]!.includes("|") && TABLE_DELIMITER.test(lines[index]!)) return "table";
+  }
+  return null;
+}
+
+function nodeKind(node: MarkdownBlockNode): string {
+  return node.type.replaceAll("_", " ");
+}
+
+function article(kind: string): string {
+  return kind === "HTML" || /^[aeiou]/iu.test(kind) ? "an" : "a";
+}
+
+function itemLines(item: ListItemNode): string[] {
+  const lines: string[] = [];
+  for (const child of item.children) {
+    if (child.type === "text") lines.push(...child.lines);
+    else if (child.type === "list") for (const nested of child.items) lines.push(...itemLines(nested));
+  }
+  return lines.filter(nonblank);
+}
+
+/**
+ * Structural refusals are separate from pattern compilation so a caller may aggregate every independent failure.
+ * The three authoring forms — fenced lines, list items, and bare paragraph lines — union freely. Blank lines never
+ * count, and an info string beyond the exact `txt` still implies executable content that belongs to Verification.
+ */
+export function regionStructure(section: SectionNode): string | null {
+  for (const node of section.children) {
+    if (node.type === "code_block") {
+      if (!node.closed) return "Region fence must be closed";
+      if (node.info !== "" && node.info !== "txt") {
+        return "Region fence may not carry an info string other than the exact 'txt'";
+      }
+      continue;
+    }
+    if (node.type === "list") continue;
+    if (node.type === "text") {
+      const foreign = foreignProseKind(node.lines);
+      if (foreign !== null) return `Region may not contain ${article(foreign)} ${foreign} block`;
+      continue;
+    }
+    const kind = nodeKind(node);
+    return `Region may not contain ${article(kind)} ${kind} block`;
+  }
+  return null;
+}
+
+function regionPatterns(section: SectionNode): readonly string[] {
+  const patterns: string[] = [];
+  for (const node of section.children) {
+    if (node.type === "code_block") patterns.push(...node.lines.slice(1, -1).filter(nonblank));
+    else if (node.type === "list") for (const item of node.items) patterns.push(...itemLines(item));
+    else if (node.type === "text") patterns.push(...node.lines.filter(nonblank));
+  }
+  return patterns;
+}
+
+/** A whitespace-bearing pattern is almost certainly strayed prose; bind warns and proceeds rather than rejecting. */
+export function regionWarnings(patterns: readonly string[]): readonly string[] {
+  return patterns
+    .filter((pattern) => /\s/u.test(pattern))
+    .map((pattern) => `Region pattern '${pattern}' contains whitespace and will never match a path`);
+}
+
+export function decodeRegion(_document: DocumentNode, section: SectionNode): readonly string[] {
+  const structural = regionStructure(section);
+  if (structural !== null) refusal(structural);
+  const patterns = regionPatterns(section);
   if (patterns.length === 0) refusal("Region must declare at least one path pattern");
   return patterns.map((pattern) => compileRegionPattern(pattern).source);
 }
