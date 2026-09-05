@@ -3,7 +3,8 @@ import test from "node:test";
 import { changeId, contractHead, contractId, gate, snapshotId } from "../src/core/facts/types.js";
 import type { InvocationResult, Lag } from "../src/cli/result.js";
 import { renderCatalogText } from "../src/cli/render/catalog.js";
-import { snapshotActivityLines } from "../src/cli/render/akuma-activity.js";
+import { snapshotActivityLines, snapshotText, waitText } from "../src/cli/render/akuma-activity.js";
+import { parseAkumaStatus } from "../src/akuma/akuma.js";
 import { renderAkuma } from "../src/cli/render/kanshi-akuma.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
 import { renderText } from "../src/cli/render/text.js";
@@ -80,12 +81,12 @@ test("catalog text renders only the selected identity layer", () => {
   );
 });
 
-test("root Task catalogue marks every disposition without inventing waiting state", () => {
+test("root Task catalogue marks every disposition with its own state", () => {
   const cases = [
     ["ready", "○"],
     ["in_progress", "●"],
-    ["blocked", "!"],
-    ["on_hold", "○"],
+    ["blocked", "‖"],
+    ["on_hold", "⧗"],
     ["done", "✓"],
     ["drop", "×"],
   ] as const;
@@ -227,7 +228,7 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
   assert.doesNotMatch(text, /○ no candidate · ● candidate|satisfied  \[✗\] unsatisfied/u);
   assert.doesNotMatch(text, /worktree clean|tender |integration |merge /u);
   assert.doesNotMatch(text, new RegExp(state, "u"));
-  assert.match(text, /✓ reviewed  ! verified  ! security · stale  ○ manual/u);
+  assert.match(text, /✓ reviewed  × verified  ! security · stale  ○ manual/u);
   assert.match(text, /after  kei\/claimed-prerequisite · claimed/u);
   assert.match(text, /blocked by  kei\/active-prerequisite · waiting/u);
   assert.match(text, /blocked by  kei\/abandoned-prerequisite · abandoned/u);
@@ -1281,7 +1282,7 @@ test("World roster keeps active, error and truncated activity marks truthful", (
     columns: 120,
     color: false,
   }).join("\n");
-  assert.match(activeRoster, /● run    \$ keiyaku wait --all/u);
+  assert.match(activeRoster, /⧖ run    \$ keiyaku wait --all/u);
   assert.doesNotMatch(activeRoster, /— ok/u);
 
   const failed = openAkumaSnapshot([
@@ -1304,4 +1305,29 @@ test("World roster keeps active, error and truncated activity marks truthful", (
   ).join("\n");
   assert.match(truncatedRoster, /…”/u);
   assert.ok(!truncatedRoster.includes("x".repeat(200)), "truncation bounds retained said text");
+});
+
+test("a sleeping worker reports its return as an event", () => {
+  const sleeping = parseAkumaStatus({
+    id: "aku/worker/abcd0001",
+    life: "asleep",
+    allowed: [],
+    timeline: idleAkumaSnapshot([], answeredOutcome(1, "the answer")),
+  });
+  const snapshot = snapshotText({ status: sleeping, contract: { kind: "none" } }, { columns: 80, color: false });
+  assert.match(snapshot, /^✓ came back$/mu);
+
+  const returned = waitText(
+    {
+      kind: "akuma",
+      action: "wait",
+      result: {
+        completion: "all",
+        observations: [{ status: sleeping, contract: { kind: "none" }, createdTasks: { kind: "present", rows: [] } }],
+        unobserved: [],
+      },
+    },
+    { columns: 80, color: false },
+  );
+  assert.match(returned, /^✓ came back aku\/worker\/abcd0001$/mu);
 });

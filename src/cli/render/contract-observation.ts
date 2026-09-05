@@ -15,7 +15,7 @@ function shortGitId(value: string): string {
 export function gateGlyph(report: ContractGateReport): string {
   if (report.current.kind === "stale") return "!";
   if (report.current.kind === "missing") return "○";
-  return report.current.verdict === "satisfied" ? "✓" : "!";
+  return report.current.verdict === "satisfied" ? "✓" : "×";
 }
 
 export function gateFact(report: ContractGateReport): string {

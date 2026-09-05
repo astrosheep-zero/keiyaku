@@ -115,7 +115,7 @@ test("unknown command syntax is refused with the exact command usage", () => {
     (error: unknown) =>
       error instanceof CliUsageError &&
       error.message ===
-        ["✕ usage  keiyaku", "  given  unknown", "  accepts  keiyaku <command> [options]", "  help  keiyaku --help"].join("\n"),
+        ["× usage  keiyaku", "  given  unknown", "  accepts  keiyaku <command> [options]", "  help  keiyaku --help"].join("\n"),
   );
 });
 

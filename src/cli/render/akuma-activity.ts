@@ -51,7 +51,7 @@ export function snapshotHeading(
 }
 
 function answeredHeading(id: string, alias: string | undefined): string {
-  return `✓ answered ${identity(id, alias)}`;
+  return `✓ came back ${identity(id, alias)}`;
 }
 
 function contractFacts(contract: DispatchAssociation): readonly string[] {
@@ -64,7 +64,7 @@ function unobservedText(id: string, diagnostic: string): string {
 
 function lifeLabel(life: AkumaObservation["status"]["life"]): string {
   if (life === "running") return "● running";
-  if (life === "asleep") return "✓ asleep";
+  if (life === "asleep") return "✓ came back";
   if (life === "killed") return "× killed";
   if (life === "hung") return "? hung";
   return "! stranded";
@@ -89,12 +89,12 @@ function label(row: RenderRow): string {
   return toolRepr(row).label;
 }
 
-function mark(row: RenderRow): "│" | "●" | "○" | "✓" | "!" | "?" {
+function mark(row: RenderRow): "│" | "⧖" | "⧗" | "✓" | "!" | "?" {
   if (row.kind === "outcome") return row.outcome.kind === "answered" ? "✓" : "!";
   if (row.kind === "tell" && row.state === "told") return "✓";
-  if (row.kind === "tell" && row.state === "pending") return "○";
+  if (row.kind === "tell" && row.state === "pending") return "⧗";
   if (row.kind === "tool") {
-    if (row.state === "active") return "●";
+    if (row.state === "active") return "⧖";
     if (row.state === "unsettled") return "?";
     return row.state.status === "ok" ? "✓" : "!";
   }
@@ -242,9 +242,9 @@ type CreatedTaskRow = Extract<CreatedTaskObservation, { kind: "present" }>["rows
 function taskDispositionMark(disposition: CreatedTaskRow["disposition"]): string {
   if (disposition === "done") return "✓";
   if (disposition === "drop") return "×";
-  if (disposition === "on_hold") return "○";
+  if (disposition === "on_hold") return "⧗";
   if (disposition === "in_progress") return "●";
-  return disposition === "blocked" ? "!" : "○";
+  return disposition === "blocked" ? "‖" : "○";
 }
 
 function changeStat(change: RenderedFileChange): string {

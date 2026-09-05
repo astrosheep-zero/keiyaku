@@ -59,9 +59,9 @@ function isWorldObservation(result: TaskInvocationResult): result is TaskWorldOb
 export function taskMark(word: string): string {
   if (word === "in_progress") return "●";
   if (word === "ready" || word === "open") return "○";
-  if (word === "blocked") return "!";
+  if (word === "blocked") return "‖";
   if (word === "missing") return "!";
-  if (word === "on_hold") return "○";
+  if (word === "on_hold") return "⧗";
   if (word === "done") return "✓";
   if (word === "drop") return "×";
   return "?";

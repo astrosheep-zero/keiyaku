@@ -60,7 +60,7 @@ function catalogMark(row: ContractRow): string {
   if (row.gates.reports.some((gate) => gate.current.kind === "attested" && gate.current.verdict === "unsatisfied"))
     return "!";
   if (row.targetLag.kind === "unknown") return "?";
-  if (row.phase === "waiting") return "○";
+  if (row.phase === "waiting" || row.phase === "tendered") return "⧗";
   return "●";
 }
 

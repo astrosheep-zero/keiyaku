@@ -136,7 +136,7 @@ test("all four gate states keep the declared gate identity", () => {
       gateFact({ gate: "security", current: { kind: "stale", priorVerdict: "satisfied" } }),
       gateFact({ gate: "customGate", current: { kind: "missing" } }),
     ],
-    ["✓ reviewed", "! verified", "! security · stale", "○ customGate"],
+    ["✓ reviewed", "× verified", "! security · stale", "○ customGate"],
   );
 });
 

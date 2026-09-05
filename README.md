@@ -94,11 +94,11 @@ did not land until the gates had current evidence.
 kanshi ─ 7 keiyaku · 18 akuma · 286 task ─ /Users/astrosheep/Developer/keiyaku-v4 main 9cfdca6017633e51827b9b2eba3c76a7fe08e05f
 
 keiyaku 7
-⧗ kei/add-acp-provider-and-grok-build-profile tendered
+! kei/add-acp-provider-and-grok-build-profile tendered
   worktree · integration c5cafef6 · -> refs/heads/main
-  ! reviewed
+  × reviewed
 ⧗ kei/align-task-cli-truth-promises waiting
-  ? reviewed
+  ! reviewed
   held by task/align-task-cli-truth-promises-for-ready-compose
 
 akuma 18
@@ -107,7 +107,7 @@ akuma 18
   keiyaku kei/make-process-custody-capability-honest (active)
 ○ aku/design-akuma/cc53ef08 asleep
   alias @timeline-design
-? aku/grok/95d90b7d stranded
+! aku/grok/95d90b7d stranded
   alias @acp-provider-impl
 
 task 8 · 5 ready · 2 held

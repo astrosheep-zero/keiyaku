@@ -60,15 +60,15 @@ function contractMark(row: ContractKanshiRow): string {
   )
     return "!";
   if (row.targetLag.kind === "unknown") return "?";
-  if (row.phase === "waiting") return "○";
+  if (row.phase === "waiting" || row.phase === "tendered") return "⧗";
   return "●";
 }
 
 function taskMark(row: TaskKanshiRow): string {
   if (row.disposition === "done") return "✓";
   if (row.disposition === "drop") return "×";
-  if (row.disposition === "on_hold") return "○";
-  return row.disposition === "in_progress" ? "●" : row.disposition === "blocked" ? "!" : "○";
+  if (row.disposition === "on_hold") return "⧗";
+  return row.disposition === "in_progress" ? "●" : row.disposition === "blocked" ? "‖" : "○";
 }
 
 function gitAbbreviations(report: KanshiReport): ReadonlyMap<string, string> {

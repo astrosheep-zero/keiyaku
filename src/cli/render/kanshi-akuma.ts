@@ -36,15 +36,13 @@ function akumaStatusTone(row: AkumaKanshiRow, observedAt: string): SemanticTone 
 function akumaMark(life: string): string {
   return life === "running"
     ? "●"
-    : life === "stillborn"
-      ? "!"
-      : life === "asleep"
-        ? "○"
-        : life === "killed"
-          ? "×"
-          : life === "stranded" || life === "stillborn" || life === "untidy"
-            ? "!"
-            : "?";
+    : life === "asleep"
+      ? "○"
+      : life === "killed"
+        ? "×"
+        : life === "stranded" || life === "stillborn" || life === "untidy"
+          ? "!"
+          : "?";
 }
 
 /** Bounded latest semantic entry, rendered by the same activity renderer as a targeted snapshot. */

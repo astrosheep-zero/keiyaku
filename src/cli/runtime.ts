@@ -172,7 +172,7 @@ function writeWorldScopeRefusal(
     command.output === "json"
       ? JSON.stringify(error.refusal)
       : [
-          `✕ selector  ${error.refusal.kind}`,
+          `× selector  ${error.refusal.kind}`,
           `  world  ${safeText(error.refusal.world)}`,
           ...error.refusal.ids.map((id) => `  given  ${safeText(id)}`),
           `  accepts  ${guide.accepts}`,
@@ -198,11 +198,11 @@ async function commandFailureText(error: unknown, command: ParsedCommand): Promi
       );
     }
     const { renderRefusalFacts } = await import("./render/refusal.js");
-    return [`✕ ${command.command} refused`, ...renderRefusalFacts(error.refusal, "  ", displayContext().columns)].join(
+    return [`× ${command.command} refused`, ...renderRefusalFacts(error.refusal, "  ", displayContext().columns)].join(
       "\n",
     );
   }
-  return `✕ ${command.command} failed\n  diagnostic  ${safeText(diagnostic)}`;
+  return `× ${command.command} failed\n  diagnostic  ${safeText(diagnostic)}`;
 }
 
 export async function runCliCommand(invocation: ParsedExecution): Promise<number> {

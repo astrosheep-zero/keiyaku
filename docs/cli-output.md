@@ -45,9 +45,17 @@ keys render as words, as in `require branches up to date`.
 
 Renderers show complete public identity and decision-relevant evidence without
 inventing status, hiding section failure as zero, or turning unknown evidence
-into a positive result. The text vocabulary is closed: six marks `● ○ ✓ × ! ?`
-cover moving, calmly waiting, done, refused-or-failed, attention, and unknown;
-the word after a mark carries the detail. Facts are label-value rows joined
+into a positive result. The text vocabulary is closed and eight marks wide:
+`●` moving or present, `○` calmly waiting or absent, `⧖` time in flight —
+running and in-flight activity, `⧗` time spent waiting — pending tells, on-hold
+Tasks, and tendered or otherwise waiting Contracts, `✓` an affirmed verdict,
+`×` a denied verdict, `!` attention, and `?` unknown; the word after a mark
+carries the detail. The hourglass marks are temporal and the verdict marks are
+affirmative or negative, so the earlier fold that reduced time and verdict to
+presence and attention is reversed: waiting is not absence, and an unsatisfied
+gate is not generic attention. `│` is the neutral continuation and ordinary-row
+mark and carries no state; `NAME // qualifier` frames a catalogue section
+rather than a banner. Facts are label-value rows joined
 with ` · `; `key=value`, decorative rulers, banners, and bracket state
 alphabets are not text vocabulary. Git identities render at 7 characters in
 text and full length in JSON. Paths stay absolute and copyable where they are

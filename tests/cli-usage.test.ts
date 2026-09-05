@@ -40,7 +40,7 @@ test("unknown root command renders exact minimal usage", async () => {
   assert.equal(
     result.stderr,
     [
-      "✕ usage  keiyaku",
+      "× usage  keiyaku",
       "  given  nonsense",
       "  accepts  keiyaku <command> [options]",
       "  help  keiyaku --help",
@@ -57,7 +57,7 @@ test("unknown task command scopes minimal usage to task", () => {
       error.diagnostic === "unknown task command: nonsense" &&
       error.message ===
         [
-          "✕ usage  keiyaku task",
+          "× usage  keiyaku task",
           "  given  nonsense",
           "  accepts  keiyaku task <command> ...",
           "  help  keiyaku task --help",
@@ -71,7 +71,7 @@ test("invalid args keep diagnostic with deepest leaf usage", () => {
     (error: unknown) =>
       error instanceof CliUsageError &&
       error.diagnostic === "--task requires a value" &&
-      error.message.includes("✕ usage  keiyaku bind") &&
+      error.message.includes("× usage  keiyaku bind") &&
       error.message.includes("  diagnostic  --task requires a value") &&
       error.message.includes("  accepts  keiyaku bind ") &&
       error.message.includes("  help  keiyaku bind --help") &&
@@ -84,7 +84,7 @@ test("invalid args keep diagnostic with deepest leaf usage", () => {
       error.diagnostic === "--repo may appear only once" &&
       error.message ===
         [
-          "✕ usage  keiyaku",
+          "× usage  keiyaku",
           "  diagnostic  --repo may appear only once",
           "  accepts  keiyaku <command> [options]",
           "  help  keiyaku --help",
@@ -118,7 +118,7 @@ test("unmatched Contract selectors preserve exit and JSON behavior while exposin
     assert.equal(
       text.stderr,
       [
-        "✕ selector  keiyaku show",
+        "× selector  keiyaku show",
         "  diagnostic  Keiyaku refused: contract-missing",
         "  given  kei/missing",
         "  accepts  keiyaku show [<contract>|@<contract>]",
@@ -180,7 +180,7 @@ test("usage refusal exits 1 without touching an absent world", async () => {
   const result = await captureMain(["-C", cwd, "nonsense"]);
   assert.equal(result.exit, 1);
   assert.equal(result.stdout, "");
-  assert.match(result.stderr, /^✕ usage  keiyaku$/mu);
+  assert.match(result.stderr, /^× usage  keiyaku$/mu);
   assert.match(result.stderr, /^  given  nonsense$/mu);
   assert.doesNotMatch(result.stderr, /no Keiyaku world/u);
 });

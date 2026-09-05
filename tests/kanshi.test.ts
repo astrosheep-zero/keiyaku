@@ -1080,7 +1080,7 @@ test("Contract namespace Tasks come from one Task board observation", async (t) 
   const selectedText = renderKanshiText(selected, { columns: 120, color: false }, "contract");
   assert.doesNotMatch(sectionBody(worldText, "KEIYAKU"), /namespace tasks /u);
   assert.match(selectedText, new RegExp(String.raw`● ${taskId} · in_progress`, "u"));
-  assert.match(selectedText, new RegExp(String.raw`○ task/kei/${segment}/zeta · on_hold · P0 · Namespace zeta`, "u"));
+  assert.match(selectedText, new RegExp(String.raw`⧗ task/kei/${segment}/zeta · on_hold · P0 · Namespace zeta`, "u"));
   assert.match(selectedText, new RegExp(String.raw`✓ task/kei/${segment}/alpha · done · P3 · Namespace alpha`, "u"));
   assert.doesNotMatch(selectedText, /──\[ (?:KEIYAKU|TASK|FLEET) \]/u);
 });
