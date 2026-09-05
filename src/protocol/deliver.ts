@@ -276,7 +276,7 @@ async function mechanicalDeliveryPreparation(
   }
   return {
     kind: "prepared",
-    document: prepared.document,
+    document: derivation.document,
     data: prepared.data,
     worktree: prepared.worktree,
   };
