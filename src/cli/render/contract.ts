@@ -24,7 +24,7 @@ import {
   stopLines,
   titleLines,
 } from "./receipt.js";
-import { gitShortStat, renderOpaqueBlock, type TextRenderContext } from "./terminal.js";
+import { renderOpaqueBlock, type TextRenderContext } from "./terminal.js";
 
 const HANG = "  ";
 
@@ -132,17 +132,6 @@ function settlementLagRows(lag: AcceptedEnvelope["settlementLags"][number], colu
   return lines;
 }
 
-function workspaceRows(workspace: NonNullable<AcceptedReviewResult["workspace"]>, columns: number): readonly string[] {
-  const lines: string[] = [];
-  receiptRow(lines, " ", "workspace", [{ text: gitShortStat(workspace.shortStat) }], columns);
-  for (const name of ["staged", "unstaged", "untracked"] as const) {
-    for (const path of workspace[name]) {
-      receiptRow(lines, " ", name, [{ text: path, opaque: true }], columns);
-    }
-  }
-  return lines;
-}
-
 function overlapRows(overlaps: readonly RegionOverlap[], columns: number): readonly string[] {
   const lines: string[] = [];
   for (const overlap of overlaps) {
@@ -218,15 +207,8 @@ function acceptedLagRows(result: AcceptedEnvelope, columns: number): readonly st
   return obligations;
 }
 
-function acceptedDeviations(
-  result: AcceptedBindResult | AcceptedAmendResult | AcceptedReviewResult,
-  columns: number,
-): readonly string[] {
+function acceptedDeviations(result: AcceptedBindResult | AcceptedAmendResult, columns: number): readonly string[] {
   const deviations: string[] = [];
-  if (result.verb === "review") {
-    if (result.workspace !== undefined) pushBlock(deviations, workspaceRows(result.workspace, columns));
-    return deviations;
-  }
   if (result.overlaps !== undefined) pushBlock(deviations, overlapRows(result.overlaps, columns));
   if (result.overlapFailure !== undefined) {
     receiptRow(deviations, "!", "overlap", [{ text: "unavailable" }], columns);
@@ -382,7 +364,7 @@ function renderAcceptedReview(result: AcceptedReviewResult, columns: number): st
     lines.push(...stopLines(result.placement, columns, result.contract));
   }
   lines.push(...continuationLines(result, columns));
-  lines.push(...acceptedDeviations(result, columns), ...recordBlock(result, columns));
+  lines.push(...recordBlock(result, columns));
   return lines.join("\n");
 }
 

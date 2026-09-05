@@ -402,3 +402,32 @@ test("World roster keeps concrete activity evidence without duplicating snapshot
   for (const line of renderKanshiText(report, { columns: 60, color: false }).split("\n"))
     assert.ok(displayColumns(line) <= 60, line);
 });
+
+test("accepted review keeps its typed workspace evidence in JSON while text stays outcome-only", () => {
+  const contract = contractId("kei/review-workspace-projection");
+  const workspace = {
+    staged: ["src/staged.ts"],
+    unstaged: ["src/unstaged.ts"],
+    untracked: ["untracked.txt"],
+    unmergedPaths: ["conflict.txt"],
+    shortStat: { filesChanged: 3, insertions: 4, deletions: 1 },
+  };
+  const result = {
+    kind: "accepted" as const,
+    verb: "review" as const,
+    contract,
+    head: contractHead("head"),
+    facts: [{ contract, entry: "claim", kind: "claimed" as const }],
+    settlementLags: [],
+    verdict: "satisfied" as const,
+    workspace,
+  };
+  const text = renderText(result);
+  assert.equal(
+    text,
+    ["✓ review satisfied recorded  kei/review-workspace-projection", "  journal  claim  · claimed"].join("\n"),
+  );
+  assert.doesNotMatch(text, /^\s+(?:workspace|staged|unstaged|untracked|unmerged)\s/mu);
+  assert.doesNotMatch(text, /files? changed/u);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)).workspace, workspace);
+});

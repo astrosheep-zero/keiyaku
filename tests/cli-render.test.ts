@@ -836,6 +836,19 @@ test("deliver projects no Verification and an unsatisfied non-gating Verificatio
   );
 });
 
+const reviewWorkspace = {
+  staged: ["src/staged.ts"],
+  unstaged: ["src/unstaged.ts"],
+  untracked: ["untracked.txt"],
+  unmergedPaths: [],
+  shortStat: { filesChanged: 3, insertions: 4, deletions: 1 },
+} as const;
+
+function assertNoWorkspaceRows(text: string): void {
+  assert.doesNotMatch(text, /^\s+(?:workspace|staged|unstaged|untracked|unmerged)\s/mu);
+  assert.doesNotMatch(text, /files? changed/u);
+}
+
 test("review projects reused Verification and distinguishes placement from testimony", () => {
   const contract = contractId("kei/review-completion");
   const integration = snapshotId("integration-3");
@@ -851,6 +864,7 @@ test("review projects reused Verification and distinguishes placement from testi
     verb: "review",
     verdict: "satisfied",
     completion: { integration, verification: { mode: "reused", verdict: "satisfied" } },
+    workspace: reviewWorkspace,
   });
   assert.equal(
     text,
@@ -862,6 +876,7 @@ test("review projects reused Verification and distinguishes placement from testi
       "  journal  claim  · claimed",
     ].join("\n"),
   );
+  assertNoWorkspaceRows(text);
 });
 
 test("review projects a reused unsatisfied Verification as non-gating completion", () => {
@@ -881,6 +896,7 @@ test("review projects a reused unsatisfied Verification as non-gating completion
       verdict: "satisfied",
       completion: { integration, verification: { mode: "reused", verdict: "unsatisfied" } },
       verificationSummary: "[reused bash exit 1]",
+      workspace: reviewWorkspace,
     }),
     [
       "✓ review satisfied recorded  kei/review-completion-unsatisfied",
@@ -894,6 +910,31 @@ test("review projects a reused unsatisfied Verification as non-gating completion
       "  journal  claim  · claimed",
     ].join("\n"),
   );
+});
+
+test("an unsatisfied review verdict and a claimed continuation stay outcome-only", () => {
+  const contract = contractId("kei/review-outcome-only");
+  const claimed = contractId("kei/claimed-by-review");
+  const text = renderText({
+    kind: "accepted",
+    verb: "review",
+    contract,
+    head: contractHead("head"),
+    facts: [{ contract, entry: "testimony", kind: "claimed" as const }],
+    settlementLags: [],
+    verdict: "unsatisfied",
+    continuation: { claimed: [claimed], stopped: [] },
+    workspace: reviewWorkspace,
+  });
+  assert.equal(
+    text,
+    [
+      "✓ review unsatisfied recorded  kei/review-outcome-only",
+      "✓ continuation  complete  kei/claimed-by-review",
+      "  journal  testimony  · claimed",
+    ].join("\n"),
+  );
+  assertNoWorkspaceRows(text);
 });
 
 test("movement projects its deviation and reintegration coordinates", () => {
