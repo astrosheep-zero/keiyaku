@@ -13,10 +13,12 @@ import {
   Schema,
 } from "../src/akuma/index.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
-import { driveAkumaBody } from "../src/akuma/body.js";
-import { HeldAkumaLeash, initializeHeart, readTell, recordTell } from "../src/akuma/heart/index.js";
+import { AkumaHandle } from "../src/akuma/akuma-handle.js";
+import { driveAkumaBody, type TellWakeRuntime } from "../src/akuma/body.js";
+import { HeldAkumaLeash, initializeHeart, readTell, readTurn, recordTell } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { createProviderAttempt, type ProviderAdapter, type Session } from "../src/akuma/provider.js";
+import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import { schemaJsonText } from "../src/akuma/schema.js";
 import { World } from "../src/world.js";
 
@@ -42,8 +44,8 @@ test("Schema.zod and JsonSchema freeze a canonical bounded document", () => {
     (value) => value as { ok: boolean },
   );
   freezeWalk(fromZod);
-  freezeWalk(fromZod.json);
-  freezeWalk(fromJson.json);
+  freezeWalk(fromZod.jsonSchema);
+  freezeWalk(fromJson.jsonSchema);
   assert.deepEqual(fromJson.jsonSchema, shuffled.jsonSchema);
   assert.equal(typeof fromJson.decode, "function");
   assert.deepEqual(fromZod.jsonSchema, again.jsonSchema);
@@ -144,8 +146,47 @@ function answering(answer: string): ProviderAdapter {
   };
 }
 
+async function settleFixtureBodies(bodies: readonly Promise<unknown>[]): Promise<void> {
+  await Promise.all(bodies.map((body) => body.catch(() => undefined)));
+}
+
+function fixtureRuntime(
+  bodies: Promise<unknown>[],
+  fixtures: ReadonlyMap<string, Readonly<{ adapter: ProviderAdapter; now: string }>>,
+): TellWakeRuntime {
+  return {
+    async spawn(paths) {
+      const fixture = fixtures.get(paths.directory);
+      if (fixture === undefined) throw new Error(`missing fixture adapter for ${paths.directory}`);
+      const body = driveAkumaBody({ paths }, fixture.adapter, { now: () => fixture.now });
+      bodies.push(body);
+      return {
+        pid: 0,
+        exited: body.then(
+          () => ({ code: 0, signal: null, log: { path: paths.log, from: 0, to: 0 } }),
+          () => ({ code: 1, signal: null, log: { path: paths.log, from: 0, to: 0 } }),
+        ),
+        async terminate() {},
+        release() {},
+      };
+    },
+  };
+}
+
+function installTellRuntime(runtime: TellWakeRuntime): () => void {
+  const originalTell = AkumaHandle.prototype.tell;
+  AkumaHandle.prototype.tell = function (body, tellId, recordedAt, existingRuntime, schemaJson) {
+    return originalTell.call(this, body, tellId, recordedAt, existingRuntime ?? runtime, schemaJson);
+  };
+  return () => {
+    AkumaHandle.prototype.tell = originalTell;
+  };
+}
+
 async function bornWorld(root: string, suffix: string) {
   const world = await World.at(root);
+  mkdirSync(join(root, ".keiyaku"), { recursive: true });
+  writeFileSync(join(root, ".keiyaku", "settings.json"), JSON.stringify({ plugins: { square: { enabled: false } } }));
   const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => suffix });
   await initializeHeart(allocated.paths);
   const holder = (await HeldAkumaLeash.try(allocated.paths))!;
@@ -165,13 +206,14 @@ async function bornWorld(root: string, suffix: string) {
 
 test("plain tell returns the answer and binds an exact TellId", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-tell-"));
+  const bodies: Promise<unknown>[] = [];
+  const fixtures = new Map<string, Readonly<{ adapter: ProviderAdapter; now: string }>>();
+  const restoreTellRuntime = installTellRuntime(fixtureRuntime(bodies, fixtures));
   try {
     const { allocated, akuma } = await bornWorld(root, "a1000001");
-    const answeringBody = driveAkumaBody({ paths: allocated.paths }, answering("plain answer"), {
-      now: () => "2026-08-10T00:00:01.000Z",
-    });
+    fixtures.set(allocated.paths.directory, { adapter: answering("plain answer"), now: "2026-08-10T00:00:01.000Z" });
     const answered = await akuma.tell("hello");
-    await answeringBody;
+    await settleFixtureBodies(bodies);
     assert.equal(answered, "plain answer");
     const page = await akuma.history();
     const tell = page.rows.find((row) => row.kind === "tell");
@@ -183,6 +225,8 @@ test("plain tell returns the answer and binds an exact TellId", async () => {
       assert.notEqual(fact?.binding, undefined);
     }
   } finally {
+    restoreTellRuntime();
+    await settleFixtureBodies(bodies);
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -190,13 +234,17 @@ test("plain tell returns the answer and binds an exact TellId", async () => {
 test("schema tell decodes JSON and typed failures stay distinct", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-schema-tell-"));
   const schema = Schema.zod(z.object({ ok: z.boolean() }).strict());
+  const bodies: Promise<unknown>[] = [];
+  const fixtures = new Map<string, Readonly<{ adapter: ProviderAdapter; now: string }>>();
+  const restoreTellRuntime = installTellRuntime(fixtureRuntime(bodies, fixtures));
   try {
     const decoded = await bornWorld(root, "a1000002");
-    const decodedBody = driveAkumaBody({ paths: decoded.allocated.paths }, answering('{"ok":true}'), {
-      now: () => "2026-08-10T00:00:01.000Z",
+    fixtures.set(decoded.allocated.paths.directory, {
+      adapter: answering('{"ok":true}'),
+      now: "2026-08-10T00:00:01.000Z",
     });
     const value = await decoded.akuma.tell("structured", { schema });
-    await decodedBody;
+    await settleFixtureBodies(bodies);
     assert.deepEqual(value, { ok: true });
     const fact = (await decoded.akuma.history()).rows.find((row) => row.kind === "tell");
     assert.equal(fact?.kind, "tell");
@@ -206,18 +254,18 @@ test("schema tell decodes JSON and typed failures stay distinct", async () => {
     }
 
     const invalid = await bornWorld(root, "a1000003");
-    const invalidBody = driveAkumaBody({ paths: invalid.allocated.paths }, answering("not-json"), {
-      now: () => "2026-08-10T00:00:01.000Z",
+    fixtures.set(invalid.allocated.paths.directory, {
+      adapter: answering("not-json"),
+      now: "2026-08-10T00:00:01.000Z",
     });
     await assert.rejects(invalid.akuma.tell("structured", { schema }), AkumaDecodeError);
-    await invalidBody;
 
     const mismatch = await bornWorld(root, "a1000004");
-    const mismatchBody = driveAkumaBody({ paths: mismatch.allocated.paths }, answering('{"ok":1}'), {
-      now: () => "2026-08-10T00:00:01.000Z",
+    fixtures.set(mismatch.allocated.paths.directory, {
+      adapter: answering('{"ok":1}'),
+      now: "2026-08-10T00:00:01.000Z",
     });
     await assert.rejects(mismatch.akuma.tell("structured", { schema }), AkumaDecodeError);
-    await mismatchBody;
 
     const failed = await bornWorld(root, "a1000005");
     const failing: ProviderAdapter = {
@@ -237,12 +285,12 @@ test("schema tell decodes JSON and typed failures stay distinct", async () => {
         }));
       },
     };
-    const failedBody = driveAkumaBody({ paths: failed.allocated.paths }, failing, {
-      now: () => "2026-08-10T00:00:01.000Z",
-    });
+    fixtures.set(failed.allocated.paths.directory, { adapter: failing, now: "2026-08-10T00:00:01.000Z" });
     await assert.rejects(failed.akuma.tell("structured", { schema }), AkumaProviderError);
-    await failedBody;
+    await settleFixtureBodies(bodies);
   } finally {
+    restoreTellRuntime();
+    await settleFixtureBodies(bodies);
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -250,11 +298,17 @@ test("schema tell decodes JSON and typed failures stay distinct", async () => {
 test("schema tell on a running Body is busy unless interrupt is set", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-busy-"));
   const schema = Schema.zod(z.object({ ok: z.boolean() }).strict());
+  let release: (() => void) | undefined;
+  let body: Promise<unknown> | undefined;
+  let successorBody: Promise<unknown> | undefined;
   try {
     const { allocated, akuma } = await bornWorld(root, "a1000006");
-    let release!: () => void;
     const held = new Promise<void>((resolve) => {
       release = resolve;
+    });
+    let signalAbort!: () => void;
+    const aborted = new Promise<void>((resolve) => {
+      signalAbort = resolve;
     });
     const hanging: ProviderAdapter = {
       admitOptions(options) {
@@ -265,11 +319,14 @@ test("schema tell on a running Body is busy unless interrupt is set", async () =
           admission: { fence: "api-hang" },
           events: {
             async *[Symbol.asyncIterator]() {
+              yield { type: "session" as const, coordinate: { sessionId: "api-predecessor" } };
               await held;
             },
           },
-          completion: held.then(() => ({ kind: "answered" as const, answer: "done", historyId: "hang" })),
-          async abort() {},
+          completion: held.then(() => ({ kind: "answered" as const, answer: '{"ok":true}', historyId: "hang" })),
+          async abort() {
+            signalAbort();
+          },
         }));
       },
     };
@@ -279,17 +336,81 @@ test("schema tell on a running Body is busy unless interrupt is set", async () =
       body: "start",
       recordedAt: "2026-08-10T00:00:01.000Z",
     });
-    const body = driveAkumaBody({ paths: allocated.paths }, hanging, { now: () => "2026-08-10T00:00:02.000Z" });
+    body = driveAkumaBody({ paths: allocated.paths }, hanging, { now: () => "2026-08-10T00:00:02.000Z" });
     while ((await readTell(allocated.paths, "seed"))?.binding === undefined) {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
     await assert.rejects(akuma.tell("structured", { schema }), AkumaBusyError);
-    const interrupting = akuma.tell("structured", { schema, interrupt: true });
-    release();
-    await assert.rejects(interrupting, AkumaDecodeError);
+    const successor: ProviderAdapter = {
+      admitOptions(options) {
+        return { kind: "admitted", options };
+      },
+      start(input) {
+        return fixtureAttempt(input, async () => ({
+          events: {
+            async *[Symbol.asyncIterator]() {
+              yield { type: "session" as const, coordinate: { sessionId: "api-successor" } };
+            },
+          },
+          completion: Promise.resolve({ kind: "answered" as const, answer: "not-json", historyId: "successor" }),
+          async abort() {},
+        }));
+      },
+      resume(input) {
+        return fixtureAttempt(input, async () => ({
+          events: {
+            async *[Symbol.asyncIterator]() {
+              yield { type: "session" as const, coordinate: { sessionId: "api-successor" } };
+            },
+          },
+          completion: Promise.resolve({ kind: "answered" as const, answer: "not-json", historyId: "successor" }),
+          async abort() {},
+        }));
+      },
+    };
+    const runtime = {
+      async spawn(paths: typeof allocated.paths): Promise<OwnedProcess> {
+        successorBody = driveAkumaBody({ paths }, successor, { now: () => "2026-08-10T00:00:03.000Z" });
+        return {
+          pid: 0,
+          exited: successorBody.then(() => ({ code: 0, signal: null, log: { path: paths.log, from: 0, to: 0 } })),
+          async terminate() {},
+          release() {},
+        };
+      },
+    };
+    const originalInterrupt = AkumaHandle.prototype.interrupt;
+    AkumaHandle.prototype.interrupt = function (body, options) {
+      return originalInterrupt.call(this, body, { ...options, runtime });
+    };
+    try {
+      const interrupting = akuma.tell("structured", { schema, interrupt: true });
+      await aborted;
+      release?.();
+      release = undefined;
+      await assert.rejects(interrupting, AkumaDecodeError);
+      const tell = (await akuma.history()).rows.find((row) => row.kind === "tell" && row.text === "structured");
+      assert.equal(tell?.kind, "tell");
+      if (tell?.kind === "tell") {
+        const fact = await readTell(allocated.paths, tell.tellId);
+        assert.notEqual(fact?.binding, undefined);
+        if (fact?.binding !== undefined) {
+          const turn = await readTurn(allocated.paths, fact.binding.turnSequence);
+          const outcome = turn?.end?.outcome;
+          assert.equal(outcome?.kind, "invalid-output");
+          if (outcome?.kind === "invalid-output") assert.equal(outcome.answer, "not-json");
+        }
+      }
+    } finally {
+      AkumaHandle.prototype.interrupt = originalInterrupt;
+    }
     await body;
+    await successorBody;
     await akuma.idle();
   } finally {
+    release?.();
+    await body?.catch(() => undefined);
+    await successorBody?.catch(() => undefined);
     rmSync(root, { recursive: true, force: true });
   }
 });

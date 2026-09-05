@@ -18,7 +18,7 @@ export async function acquireLeash(
     if (leash !== null) return leash;
     if (input.bodySequence !== undefined) {
       const latest = (await readHeart(paths)).latestBody;
-      if (latest?.sequence !== input.bodySequence || latest.end !== undefined || latest.hung !== undefined) return null;
+      if (latest?.sequence !== input.bodySequence || latest.hung !== undefined) return null;
     }
     if (deadline !== undefined && performance.now() >= deadline) return null;
     const remaining =
