@@ -1,8 +1,9 @@
 ---
 name: keiyaku-task
 description: >-
-  Use when recording, decomposing, or tracking a complex task, typically
-  involving three or more steps.
+  Organizing, tracking progress and status, or binding work of three or more
+  steps as a Keiyaku Task: what to do, in what order, what depends on what,
+  what is done and what is blocked.
 ---
 
 # Keiyaku Task

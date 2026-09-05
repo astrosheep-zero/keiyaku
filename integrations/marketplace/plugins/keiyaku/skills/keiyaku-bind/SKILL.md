@@ -1,6 +1,8 @@
 ---
 name: keiyaku-bind
-description: Author and bind one Keiyaku delivery Contract. Use when deciding whether a bounded delivery is ready for Contract terms, writing those terms for an implementer, binding an existing Task with `bind --task`, choosing bind inputs, or interpreting the bind receipt and worktree handoff.
+description: >-
+  Binding a Keiyaku: writing down what a bounded piece of work must deliver and
+  how it will be judged, so it can be handed off.
 ---
 
 # Keiyaku Bind

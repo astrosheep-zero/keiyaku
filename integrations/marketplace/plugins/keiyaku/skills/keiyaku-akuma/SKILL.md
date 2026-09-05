@@ -1,6 +1,8 @@
 ---
 name: keiyaku-akuma
-description: Use when delegating work to, supervising, steering, inspecting, forking, or stopping a Keiyaku v4 Akuma.
+description: >-
+  Calling an Akuma: delegating scouting, mechanical chores, or fanned-out
+  parallel work instead of doing it inline.
 ---
 
 # Keiyaku Akuma

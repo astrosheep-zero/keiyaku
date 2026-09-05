@@ -58,7 +58,8 @@ function renderDirtyRefusal(
     lines.push(...collectionLines(name, refusal[name], indent, columns));
   }
   wrap(lines, gitShortStat(refusal.shortStat), indent, columns);
-  wrap(lines, "--include-dirty captures all non-ignored worktree bytes in the candidate", indent, columns);
+  wrap(lines, "--include-dirty captures complete non-ignored final bytes via private index", indent, columns);
+  wrap(lines, "real index including UU stays untouched; no git add or commit needed", indent, columns);
   if (refusal.option?.available === false)
     wrap(lines, "--include-dirty unavailable while submodules have changes", indent, columns);
   return lines;
@@ -106,7 +107,7 @@ export function renderRefusalFacts(
       lines.push(...collectionLines("conflictPaths", refusal.conflictPaths, indent, columns));
     if ("recovery" in refusal && refusal.recovery !== undefined) {
       wrap(lines, `recovery materialize conflicts · ${refusal.recovery.materialize}`, indent, columns);
-      wrap(lines, `recovery continue after resolve and commit · ${refusal.recovery.continue}`, indent, columns);
+      wrap(lines, `recovery continue · ${refusal.recovery.continue}`, indent, columns);
     }
     return lines;
   }
@@ -154,6 +155,13 @@ export function renderConflictMaterialized(
   const indent = "   ";
   return [
     ...renderOpaqueBlock(`integration-conflict-materialized targetHead=${result.targetHead}`, "", columns),
+    ...renderOpaqueBlock("no delivery fact is admitted; deliver --include-dirty captures complete", indent, columns),
+    ...renderOpaqueBlock(
+      "non-ignored final worktree bytes without git add or commit and preserves the",
+      indent,
+      columns,
+    ),
+    ...renderOpaqueBlock("real index including UU", indent, columns),
     ...collectionLines("conflictPaths", result.conflictPaths, indent, columns),
     ...renderOpaqueBlock(`workspace ${result.workspace.kind} ${result.workspace.path}`, indent, columns),
   ].join("\n");

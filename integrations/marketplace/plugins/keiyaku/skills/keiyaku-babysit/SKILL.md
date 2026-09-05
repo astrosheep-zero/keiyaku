@@ -1,6 +1,8 @@
 ---
 name: keiyaku-babysit
-description: Babysit a long-running multi-lane goal — a room of lanes that advance on their own, call for you on their schedule, and hold each other up while you are busy being productive.
+description: >-
+  Entering babysit mode: supervising parallel work across multiple Akuma and
+  Contracts as they advance, instead of doing the work yourself.
 ---
 
 # Keiyaku Babysit

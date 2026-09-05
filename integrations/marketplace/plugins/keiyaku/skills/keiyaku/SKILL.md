@@ -1,6 +1,9 @@
 ---
 name: keiyaku
-description: Use the Keiyaku v4 CLI for contract delivery, task coordination, and Akuma work.
+description: >-
+  Keiyaku is a CLI that records plans, writes handoff terms for deliveries,
+  and calls delegates. Use this skill when you need to figure out which
+  Keiyaku skill or command to reach for.
 ---
 
 # Keiyaku

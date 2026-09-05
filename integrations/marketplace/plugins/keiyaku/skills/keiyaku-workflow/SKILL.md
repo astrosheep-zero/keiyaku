@@ -1,6 +1,9 @@
 ---
 name: keiyaku-workflow
-description: Hold a Contract's fulfillment loop — the loop-holder's five decisions across the whole active loop, from a waiting or bound Contract to claimed or abandoned. Hold or delegate; shape the work into Contracts, Arcs, and Tasks; commission Deliverer and Reviewer seats; adjudicate deliver, review, and audit returns, amend or abandon; schedule landing. For the flagship or the single delegate holding a whole loop.
+description: >-
+  The Keiyaku workflow: how work moves through Keiyaku from planning through
+  binding, commissioning, delivery, review, and landing, and what you decide
+  at each stage.
 ---
 
 # Holding a fulfillment loop
@@ -110,6 +113,15 @@ HEAD; a dirty delivery captures the complete non-ignored state as an
 immutable commit without moving the branch or the real index — a
 prior git commit is optional shaping, never a prerequisite. Deliver
 never satisfies a review gate.
+
+Conflict materialization projects an uncommitted merge; it does not resolve
+its contents or record a delivery. After editing the final worktree bytes,
+`deliver --include-dirty` can capture them even while the real index still
+reports `UU`. No `git add` or commit is required, and capture preserves the
+real index. The candidate includes the complete non-ignored worktree, not
+just the Contract's Region or the conflict paths. Candidate capture and target
+placement are separate: this authorization does not permit overwriting
+blocking changes in the target checkout.
 
 Audit observes: prospective candidate, integration, Verification,
 diff, target. It records no candidate and satisfies no gate.
