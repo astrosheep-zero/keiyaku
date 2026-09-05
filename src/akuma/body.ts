@@ -624,7 +624,9 @@ async function finishBody(
       diagnostic: body.hung?.diagnostic ?? `Body ${body.end ?? "ended"} with open bound Turns`,
       completedAt: now(),
     });
-  const decided = await decidePendingTellDisposition(paths, { bodySequence, at: now(), handoff });
+  // A controlled put-down preserves pending Tells for a later ordinary wake.
+  // Only provider handoff creates this Body's frozen disposition snapshot.
+  const decided = handoff ? await decidePendingTellDisposition(paths, { bodySequence, at: now(), handoff }) : null;
   const finalBody = (await readHeart(paths)).latestBody;
   let notification: Promise<void> | undefined;
   if (emitBodyEnd && finalBody?.sequence === bodySequence && (finalBody.end || finalBody.hung))

@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { CONTROL_RESPONSE_MS, handoffPendingTells } from "../src/akuma/body.js";
+import { CONTROL_RESPONSE_MS, LEASH_HELD_EXIT, handoffPendingTells } from "../src/akuma/body.js";
 import { driveAkumaBody as runAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import {
@@ -2554,6 +2554,7 @@ test("provider closure failure enters Body supervision before session completion
 
 test("a stalled Tell is fenced by Body cancellation before leash release", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-violating-tell-"));
+  let releaseTell: (() => void) | undefined;
   try {
     const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "c0ffee02" });
     await initializeHeart(allocated.paths);
@@ -2562,14 +2563,18 @@ test("a stalled Tell is fenced by Body cancellation before leash release", async
     const started = new Promise<void>((resolve) => {
       tellStarted = resolve;
     });
-    let releaseTell!: () => void;
     const tellReleased = new Promise<void>((resolve) => {
       releaseTell = resolve;
+    });
+    let tellReturned!: () => void;
+    const returned = new Promise<void>((resolve) => {
+      tellReturned = resolve;
     });
     let settle!: (result: TurnResult) => void;
     const completion = new Promise<TurnResult>((resolve) => {
       settle = resolve;
     });
+    let successorSpawns = 0;
     const body = driveAkumaBody(
       {
         paths: allocated.paths,
@@ -2599,6 +2604,7 @@ test("a stalled Tell is fenced by Body cancellation before leash release", async
             async tell() {
               tellStarted();
               await tellReleased;
+              tellReturned();
               return { kind: "turn-ended" as const };
             },
             async abort() {
@@ -2608,7 +2614,22 @@ test("a stalled Tell is fenced by Body cancellation before leash release", async
           };
         },
       },
-      { now: () => new Date().toISOString() },
+      {
+        now: () => new Date().toISOString(),
+        async spawnBody() {
+          successorSpawns += 1;
+          return {
+            pid: 0,
+            exited: Promise.resolve({
+              code: LEASH_HELD_EXIT,
+              signal: null,
+              log: { path: allocated.paths.log, from: 0, to: 0 },
+            }),
+            async terminate() {},
+            release() {},
+          } satisfies OwnedProcess;
+        },
+      },
     );
     while ((await readHeart(allocated.paths)).latestBody === null)
       await new Promise((resolve) => setTimeout(resolve, 5));
@@ -2622,10 +2643,13 @@ test("a stalled Tell is fenced by Body cancellation before leash release", async
     await body;
     assert.equal(await probeLeash(allocated.paths), "free");
     assert.equal((await readHeart(allocated.paths)).latestBody?.end, "put-down");
+    assert.equal(successorSpawns, 0);
+    if (releaseTell === undefined) throw new Error("stalled Tell did not retain a release handle");
     releaseTell();
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await returned;
     assert.equal((await readHeart(allocated.paths)).pending.length, 1);
   } finally {
+    releaseTell?.();
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -2770,11 +2794,21 @@ test("schema Turn malformed JSON is invalid-output and open bound Turns fail whe
       body: "steer",
       recordedAt: "2026-08-08T00:00:03.000Z",
     });
-    const hanging = driveAkumaBody({ paths: allocated.paths }, hangingAdapter("g4-open"), {
+    let resumed!: () => void;
+    const resumeStarted = new Promise<void>((resolve) => {
+      resumed = resolve;
+    });
+    const resumableHanging = {
+      ...hangingAdapter("g4-open"),
+      async resume() {
+        resumed();
+        return hangingSession("g4-open");
+      },
+    } satisfies FixtureProviderAdapter;
+    const hanging = driveAkumaBody({ paths: allocated.paths }, resumableHanging, {
       now: () => "2026-08-08T00:00:04.000Z",
     });
-    while ((await readTell(allocated.paths, "open-bound"))?.binding === undefined)
-      await new Promise((resolve) => setTimeout(resolve, 5));
+    await resumeStarted;
     const bound = await readTell(allocated.paths, "open-bound");
     await requestPause(allocated.paths, "2026-08-08T00:00:05.000Z");
     await expectBodySettles(hanging, "Body did not put down open bound Turn");
