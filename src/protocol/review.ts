@@ -22,6 +22,7 @@ import { decideAttestation, type AttestationInput, type AttestationRefusal } fro
 import { admitDecidedOffer, mintAttempts } from "./attempt.js";
 import { admitted } from "./outcome.js";
 import { completeCandidate, type CompletionEvidence } from "./completion.js";
+import { completeLeadingAdmission, contractCheckpoint } from "./progress.js";
 import { appointmentFor, readPlaceRegister } from "../workspace-place.js";
 import type { AttemptContext } from "../core/decide.js";
 import type {
@@ -294,8 +295,8 @@ export async function reviewOperation(input: ReviewOperationInput): Promise<Inte
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     ...(review.state.coordinates.target === undefined ? {} : { target: review.state.coordinates.target }),
     verification: derivation?.verification ?? { kind: "prepared", data: null },
-    initial: review,
+    checkpoint: contractCheckpoint(review),
     verifyInitial: false,
   });
-  return admitted(completed.admission, reviewValue(review.value, completed.evidence));
+  return admitted(completeLeadingAdmission(review, completed.progress), reviewValue(review.value, completed.evidence));
 }

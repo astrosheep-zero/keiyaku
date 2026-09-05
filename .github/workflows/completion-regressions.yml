@@ -1,0 +1,52 @@
+name: Completion regressions
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/completion-regressions.yml'
+      - 'src/**'
+      - 'tests/**'
+      - 'scripts/test-manifests.mjs'
+      - 'scripts/run-tests.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig*.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: completion-regressions-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  completion:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24.x
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --prefer-offline
+      - name: Configure fixture Git identity
+        run: |
+          git config --global user.name "Keiyaku CI"
+          git config --global user.email "keiyaku-ci@example.invalid"
+      - name: Check source formatting
+        run: npm run format:check
+      - name: Build
+        run: npm run build
+      - name: Run completion and existing delivery regressions
+        run: >-
+          npm run test:focused -- --test-concurrency=1 --test-reporter=spec
+          tests/completion-progress.test.ts
+          tests/contract-completion.test.ts
+          tests/library-contract-operations.test.ts
+          tests/library-concurrency-placement.test.ts
+          tests/library-verification.test.ts
+          tests/git-delivery.test.ts
+          tests/contract-forwarding-result.test.ts
+          tests/mutation-finality.test.ts

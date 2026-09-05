@@ -11,9 +11,9 @@ import {
 } from "./intent.js";
 import { admitPlacement } from "./placement.js";
 import { reintegrateOperation, type ReintegrationResult } from "./reintegrate.js";
-import type { AcceptedProtocolStep } from "./outcome.js";
+import { beginCompletion, recordCompletionStep, type CompletionProgress, type ContractCheckpoint } from "./progress.js";
 import type { PlacementStop, VerificationStop } from "./operations.js";
-import { mergeAdmissions, placementStop, timestamp, unpackVerificationOutcome } from "./operations.js";
+import { placementStop, timestamp, unpackVerificationOutcome } from "./operations.js";
 
 const MAX_REINTEGRATION_CYCLES = 3;
 
@@ -43,14 +43,21 @@ type CompletionInput = Readonly<{
   actor?: ActorId;
   signal?: AbortSignal;
   verification: VerificationDeclarationPreparation;
-  initial: AcceptedProtocolStep;
+  checkpoint: ContractCheckpoint;
   verifyInitial: boolean;
 }>;
 
-export type CompletionResult = Readonly<{
-  admission: AcceptedProtocolStep;
-  evidence: CompletionEvidence;
-}>;
+export type CompletionResult =
+  | Readonly<{
+      kind: "completed";
+      progress: CompletionProgress;
+      evidence: CompletionEvidence & Readonly<{ completion: CandidateCompletion }>;
+    }>
+  | Readonly<{
+      kind: "stopped";
+      progress: CompletionProgress;
+      evidence: CompletionEvidence & Readonly<{ placement: PlacementStop }>;
+    }>;
 
 type CompletionVerification = Readonly<{
   mode: "ran" | "reused";
@@ -68,19 +75,19 @@ function reintegrationStop(result: Exclude<ReintegrationResult, { kind: "accepte
 
 async function verificationFor(
   input: CompletionInput,
-  admission: AcceptedProtocolStep,
+  progress: CompletionProgress,
   snapshot: SnapshotId,
 ): Promise<
   Readonly<{
-    admission: AcceptedProtocolStep;
+    progress: CompletionProgress;
     evidence: Omit<CompletionEvidence, "placement">;
     completionVerification?: CompletionVerification;
   }>
 > {
-  const current = currentVerifiedAttestation(admission.state);
+  const current = currentVerifiedAttestation(progress.checkpoint.state);
   if (current !== undefined) {
     return {
-      admission,
+      progress,
       evidence: { verificationReuse: current },
       completionVerification: {
         mode: "reused",
@@ -90,7 +97,7 @@ async function verificationFor(
     };
   }
   if (input.verification.kind === "refused") {
-    return { admission, evidence: { verification: { refusal: input.verification.refusal } } };
+    return { progress, evidence: { verification: { refusal: input.verification.refusal } } };
   }
   const result = await verifyDelivery({
     channel: input.channel,
@@ -98,15 +105,15 @@ async function verificationFor(
     contractId: input.contractId,
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     at: timestamp(),
-    state: admission.state,
+    state: progress.checkpoint.state,
     snapshot,
     ...(input.signal === undefined ? {} : { signal: input.signal }),
     ...(input.verification.data === null ? {} : { verification: input.verification.data }),
   });
-  if (result === null) return { admission, evidence: {} };
+  if (result === null) return { progress, evidence: {} };
   const unpacked = unpackVerificationOutcome(result);
   return {
-    admission: unpacked.admission === undefined ? admission : mergeAdmissions(admission, unpacked.admission),
+    progress: unpacked.admission === undefined ? progress : recordCompletionStep(progress, unpacked.admission),
     evidence: {
       ...(unpacked.stop === undefined ? {} : { verification: unpacked.stop }),
       ...(unpacked.counts?.verdict !== "unsatisfied" || unpacked.counts.summary === undefined
@@ -156,25 +163,40 @@ function requiredPlacementStop(result: Parameters<typeof placementStop>[0]): Pla
   return stop;
 }
 
-function acceptedCompletion(
-  admission: AcceptedProtocolStep,
+function completedResult(
+  progress: CompletionProgress,
+  evidence: CompletionEvidence,
   completionVerification: CompletionVerification | undefined,
-): CompletionEvidence {
-  const integration = admission.state.currentIntegration?.snapshot;
+): Extract<CompletionResult, { kind: "completed" }> {
+  const state = progress.checkpoint.state;
+  const integration = state.currentIntegration?.snapshot;
   if (integration === undefined) throw new Error("accepted placement is missing its final integration");
-  const current = completionVerification ?? currentVerifiedAttestation(admission.state);
+  const current = completionVerification ?? currentVerifiedAttestation(state);
   const verification =
     current === undefined
       ? undefined
       : ({ mode: completionVerification?.mode ?? "reused", verdict: current.verdict } as const);
   const summary = current?.summary;
   return {
-    completion: {
-      integration,
-      ...(verification === undefined ? {} : { verification }),
+    kind: "completed",
+    progress,
+    evidence: {
+      ...evidence,
+      completion: {
+        integration,
+        ...(verification === undefined ? {} : { verification }),
+      },
+      ...(verification?.verdict !== "unsatisfied" || summary === undefined ? {} : { verificationSummary: summary }),
     },
-    ...(verification?.verdict !== "unsatisfied" || summary === undefined ? {} : { verificationSummary: summary }),
   };
+}
+
+function stoppedResult(
+  progress: CompletionProgress,
+  evidence: CompletionEvidence,
+  placement: PlacementStop,
+): Extract<CompletionResult, { kind: "stopped" }> {
+  return { kind: "stopped", progress, evidence: { ...evidence, placement } };
 }
 
 async function admitCurrentPlacement(input: CompletionInput) {
@@ -190,29 +212,28 @@ async function admitCurrentPlacement(input: CompletionInput) {
   });
 }
 
+/** Advance a captured contract; an observation alone never becomes an admission. */
 export async function completeCandidate(input: CompletionInput): Promise<CompletionResult> {
-  let admission = input.initial;
+  if (input.checkpoint.state.id !== input.contractId) throw new Error("completion checkpoint contract mismatch");
+  let progress = beginCompletion(input.checkpoint);
   let evidence: CompletionEvidence = {};
   let completionVerification: CompletionVerification | undefined;
   if (input.verifyInitial) {
-    const snapshot = admission.state.currentIntegration?.snapshot;
+    const snapshot = progress.checkpoint.state.currentIntegration?.snapshot;
     if (snapshot === undefined) throw new Error("accepted delivery is missing its current integration");
-    const verified = await verificationFor(input, admission, snapshot);
-    admission = verified.admission;
+    const verified = await verificationFor(input, progress, snapshot);
+    progress = verified.progress;
     evidence = mergeEvidence(evidence, verified.evidence);
     completionVerification = verified.completionVerification;
   }
 
   let placement = await admitCurrentPlacement(input);
   if (placement.kind === "accepted") {
-    admission = mergeAdmissions(admission, placement);
-    return { admission, evidence: mergeEvidence(evidence, acceptedCompletion(admission, completionVerification)) };
+    progress = recordCompletionStep(progress, placement);
+    return completedResult(progress, evidence, completionVerification);
   }
-  if (placement.kind !== "target-moved" || input.target === undefined) {
-    return { admission, evidence: mergeEvidence(evidence, { placement: requiredPlacementStop(placement) }) };
-  }
-  if (placement.observedTreeEqualsCandidate) {
-    return { admission, evidence: mergeEvidence(evidence, { placement: requiredPlacementStop(placement) }) };
+  if (placement.kind !== "target-moved" || input.target === undefined || placement.observedTreeEqualsCandidate) {
+    return stoppedResult(progress, evidence, requiredPlacementStop(placement));
   }
 
   let integratedAt: SnapshotId | undefined;
@@ -225,41 +246,33 @@ export async function completeCandidate(input: CompletionInput): Promise<Complet
       ...(input.actor === undefined ? {} : { actor: input.actor }),
     });
     if (reintegrated.kind !== "accepted") {
-      return { admission, evidence: mergeEvidence(evidence, { placement: reintegrationStop(reintegrated) }) };
+      return stoppedResult(progress, evidence, reintegrationStop(reintegrated));
     }
-    admission = mergeAdmissions(admission, reintegrated);
+    progress = recordCompletionStep(progress, reintegrated);
     integratedAt = reintegrated.value.snapshot;
-    const verified = await verificationFor(input, admission, reintegrated.value.snapshot);
-    admission = verified.admission;
+    const verified = await verificationFor(input, progress, reintegrated.value.snapshot);
+    progress = verified.progress;
     evidence = replaceVerificationEvidence(evidence, verified.evidence);
     completionVerification = verified.completionVerification;
 
     placement = await admitCurrentPlacement(input);
     if (placement.kind === "accepted") {
-      admission = mergeAdmissions(admission, placement);
-      return { admission, evidence: mergeEvidence(evidence, acceptedCompletion(admission, completionVerification)) };
+      progress = recordCompletionStep(progress, placement);
+      return completedResult(progress, evidence, completionVerification);
     }
-    if (placement.kind !== "target-moved") {
-      return { admission, evidence: mergeEvidence(evidence, { placement: requiredPlacementStop(placement) }) };
-    }
-    if (placement.observedTreeEqualsCandidate) {
-      return { admission, evidence: mergeEvidence(evidence, { placement: requiredPlacementStop(placement) }) };
+    if (placement.kind !== "target-moved" || placement.observedTreeEqualsCandidate) {
+      return stoppedResult(progress, evidence, requiredPlacementStop(placement));
     }
     if (attempts === MAX_REINTEGRATION_CYCLES) {
-      return {
-        admission,
-        evidence: mergeEvidence(evidence, {
-          placement: {
-            failure: "target-moved",
-            contractId: input.contractId,
-            target: input.target,
-            integratedAt: integratedAt!,
-            observed: placement.observed,
-            attempts,
-            observedTreeEqualsCandidate: placement.observedTreeEqualsCandidate,
-          },
-        }),
-      };
+      return stoppedResult(progress, evidence, {
+        failure: "target-moved",
+        contractId: input.contractId,
+        target: input.target,
+        integratedAt: integratedAt!,
+        observed: placement.observed,
+        attempts,
+        observedTreeEqualsCandidate: placement.observedTreeEqualsCandidate,
+      });
     }
   }
   throw new Error("reintegration cycle bound was not enforced");
