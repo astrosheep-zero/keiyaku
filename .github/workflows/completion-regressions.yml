@@ -35,7 +35,18 @@ jobs:
         run: |
           git config --global user.name "Keiyaku CI"
           git config --global user.email "keiyaku-ci@example.invalid"
+      - name: Check source formatting
+        run: npm run format:check
       - name: Build
         run: npm run build
-      - name: Run checkpoint and automatic completion regressions
-        run: npm run test:focused -- --test-concurrency=1 --test-reporter=spec tests/completion-progress.test.ts tests/contract-completion.test.ts
+      - name: Run completion and existing delivery regressions
+        run: >-
+          npm run test:focused -- --test-concurrency=1 --test-reporter=spec
+          tests/completion-progress.test.ts
+          tests/contract-completion.test.ts
+          tests/library-contract-operations.test.ts
+          tests/library-concurrency-placement.test.ts
+          tests/library-verification.test.ts
+          tests/git-delivery.test.ts
+          tests/contract-forwarding-result.test.ts
+          tests/mutation-finality.test.ts
