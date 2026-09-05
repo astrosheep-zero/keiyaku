@@ -1,13 +1,13 @@
 import { LineRpcProcess } from "../../../runtime/proc/line-rpc.js";
 import {
   AgentEventChannel,
-  AKUMA_REQUESTS_ENV,
   createProviderAttempt,
   type AttemptCustody,
   type Session,
   type ProviderAdapter,
   type TurnResult,
 } from "../../provider.js";
+import { akumaExecutionEnvironment } from "../execution-environment.js";
 import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
 import { codexNotificationResult, codexObject, codexText, type CodexTurnState } from "./events.js";
 
@@ -143,7 +143,7 @@ async function forkCodex(
   const server = new LineRpcProcess({
     argv: [execution.executable ?? "codex", "app-server", "--listen", "stdio://"],
     cwd: input.cwd,
-    ...(execution.env === undefined ? {} : { env: { ...process.env, ...execution.env } }),
+    env: akumaExecutionEnvironment(process.env, execution.env),
   });
   const closed = new Promise<void>((resolve) => server.onExit(() => resolve()));
   custody.own({
@@ -175,15 +175,7 @@ function codexServer(execution: ProviderExecution, input: StartInput): LineRpcPr
   return new LineRpcProcess({
     argv: [execution.executable ?? "codex", "app-server", "--listen", "stdio://"],
     cwd: input.cwd,
-    ...(execution.env === undefined && input.requests === undefined
-      ? {}
-      : {
-          env: {
-            ...process.env,
-            ...execution.env,
-            ...(input.requests === undefined ? {} : { [AKUMA_REQUESTS_ENV]: input.requests.dir }),
-          },
-        }),
+    env: akumaExecutionEnvironment(process.env, execution.env, input.requests?.dir),
   });
 }
 

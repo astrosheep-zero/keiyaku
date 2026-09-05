@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { abortable } from "../../abort.js";
 import type { Options, Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import {
-  AKUMA_REQUESTS_ENV,
   AgentEventChannel,
   createProviderAttempt,
   type AttemptCustody,
@@ -11,6 +10,7 @@ import {
   type TellReceipt,
   type TurnResult,
 } from "../../provider.js";
+import { akumaExecutionEnvironment } from "../execution-environment.js";
 import type { ProviderOptions } from "../../provider-recipe.js";
 import { emitClaudeMessage, type ClaudeObservationState } from "./events.js";
 import { claudeUserMessage, createClaudeInput, isClaudeTurnEnded, type ClaudeInput } from "./input.js";
@@ -105,15 +105,7 @@ function claudeQueryOptions(
     abortController,
     ...(input.requests === undefined ? {} : { additionalDirectories: [input.requests.dir] }),
     ...(execution.executable === undefined ? {} : { pathToClaudeCodeExecutable: execution.executable }),
-    ...(execution.env === undefined && input.requests === undefined
-      ? {}
-      : {
-          env: {
-            ...process.env,
-            ...execution.env,
-            ...(input.requests === undefined ? {} : { [AKUMA_REQUESTS_ENV]: input.requests.dir }),
-          },
-        }),
+    env: akumaExecutionEnvironment(process.env, execution.env, input.requests?.dir),
     permissionMode: mode,
     ...(mode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
     settingSources: ["user", "project", "local"],

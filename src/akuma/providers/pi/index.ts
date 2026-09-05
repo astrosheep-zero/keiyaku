@@ -11,8 +11,8 @@ import type {
 import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
 import type { ResumeCoordinate } from "../../coordinate.js";
 import { abortable } from "../../abort.js";
+import { akumaExecutionEnvironment } from "../execution-environment.js";
 import {
-  AKUMA_REQUESTS_ENV,
   AgentEventChannel,
   createProviderAttempt,
   type AttemptCustody,
@@ -91,7 +91,7 @@ async function piCreateOptions(sdk: PiSdk, input: PiDriveInput): Promise<CreateA
           (await import("@earendil-works/pi-coding-agent")).createBashToolDefinition(input.cwd, {
             spawnHook: (context) => ({
               ...context,
-              env: { ...context.env, [AKUMA_REQUESTS_ENV]: input.requests.dir },
+              env: akumaExecutionEnvironment(context.env, {}, input.requests.dir, ["PI_SESSION_ID", "PI_SESSION_FILE"]),
             }),
           }) as NonNullable<CreateAgentSessionOptions["customTools"]>[number],
         ];

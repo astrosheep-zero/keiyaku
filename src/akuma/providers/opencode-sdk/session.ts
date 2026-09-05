@@ -1,5 +1,6 @@
 import net from "node:net";
 import { abortable } from "../../abort.js";
+import { akumaExecutionEnvironment } from "../execution-environment.js";
 import { spawnDetachedProcess } from "../../../runtime/proc/run.js";
 import type { OpencodeClient } from "@opencode-ai/sdk";
 import type { ResumeCoordinate } from "../../heart/index.js";
@@ -65,14 +66,21 @@ async function availablePort(): Promise<number> {
 }
 
 export async function loadOpencode(
-  execution: ProviderExecution,
-  cwd: string,
-  signal: AbortSignal,
-  loader?: OpencodeSdkLoader,
-  onRuntime?: (runtime: OpencodeRuntime) => void,
+  input: Readonly<{
+    execution: ProviderExecution;
+    cwd: string;
+    signal: AbortSignal;
+    loader?: OpencodeSdkLoader;
+    onRuntime?: (runtime: OpencodeRuntime) => void;
+    requests?: string;
+  }>,
 ): Promise<OpencodeRuntime> {
+  const { execution, cwd, signal, loader, onRuntime, requests } = input;
   if (loader) {
-    const loaded = await abortable(loader(cwd, execution, signal), signal);
+    const loaded = await abortable(
+      loader(cwd, { ...execution, env: akumaExecutionEnvironment(process.env, execution.env, requests) }, signal),
+      signal,
+    );
     let closing: Promise<void> | undefined;
     const runtime = {
       client: loaded.client,
@@ -95,11 +103,14 @@ export async function loadOpencode(
   const owned = await spawnDetachedProcess({
     argv: [execution.executable ?? "opencode", "serve", "--hostname", "127.0.0.1", "--port", String(port)],
     cwd,
-    env: {
-      ...process.env,
-      ...(execution.config === undefined ? {} : { OPENCODE_CONFIG_CONTENT: JSON.stringify(execution.config) }),
-      ...execution.env,
-    },
+    env: akumaExecutionEnvironment(
+      process.env,
+      {
+        ...(execution.config === undefined ? {} : { OPENCODE_CONFIG_CONTENT: JSON.stringify(execution.config) }),
+        ...execution.env,
+      },
+      requests,
+    ),
     log: `${cwd}/.opencode.log`,
   });
   const { createOpencodeClient } = await import("@opencode-ai/sdk");

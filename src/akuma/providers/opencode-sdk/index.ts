@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import {
-  AKUMA_REQUESTS_ENV,
   AgentEventChannel,
   createProviderAttempt,
   type AttemptCustody,
@@ -248,19 +247,14 @@ async function loadDriveRuntime(
   loader?: OpencodeSdkLoader,
   onRuntime?: (runtime: OpencodeRuntime) => void,
 ): Promise<OpencodeRuntime> {
-  const runtime = await loadOpencode(
-    {
-      ...execution,
-      env: {
-        ...execution.env,
-        ...(input.requests === undefined ? {} : { [AKUMA_REQUESTS_ENV]: input.requests.dir }),
-      },
-    },
-    input.cwd,
+  const runtime = await loadOpencode({
+    execution,
+    cwd: input.cwd,
     signal,
-    loader,
-    onRuntime,
-  );
+    ...(loader === undefined ? {} : { loader }),
+    ...(onRuntime === undefined ? {} : { onRuntime }),
+    ...(input.requests === undefined ? {} : { requests: input.requests.dir }),
+  });
   if (signal.aborted) {
     await runtime.close();
     signal.throwIfAborted();
@@ -417,22 +411,28 @@ export function createOpencodeProvider(
       createProviderAttempt(new AbortController().signal, async (custody) => {
         const sessionId = opencodeSessionId(input.session);
         let close!: () => Promise<void>;
-        const runtime = await loadOpencode(execution, input.cwd, custody.signal, loader, (ready) => {
-          let closing: Promise<void> | undefined;
-          let settleRuntimeClosed!: () => void;
-          let rejectRuntimeClosed!: (reason?: unknown) => void;
-          const runtimeClosed = new Promise<void>((resolve, reject) => {
-            settleRuntimeClosed = resolve;
-            rejectRuntimeClosed = reject;
-          });
-          close = (): Promise<void> => {
-            if (closing === undefined) {
-              closing = ready.close();
-              void closing.then(settleRuntimeClosed, rejectRuntimeClosed);
-            }
-            return closing;
-          };
-          custody.own({ closed: runtimeClosed, abort: close, forceDispose: close });
+        const runtime = await loadOpencode({
+          execution,
+          cwd: input.cwd,
+          signal: custody.signal,
+          ...(loader === undefined ? {} : { loader }),
+          onRuntime: (ready) => {
+            let closing: Promise<void> | undefined;
+            let settleRuntimeClosed!: () => void;
+            let rejectRuntimeClosed!: (reason?: unknown) => void;
+            const runtimeClosed = new Promise<void>((resolve, reject) => {
+              settleRuntimeClosed = resolve;
+              rejectRuntimeClosed = reject;
+            });
+            close = (): Promise<void> => {
+              if (closing === undefined) {
+                closing = ready.close();
+                void closing.then(settleRuntimeClosed, rejectRuntimeClosed);
+              }
+              return closing;
+            };
+            custody.own({ closed: runtimeClosed, abort: close, forceDispose: close });
+          },
         });
         try {
           const result = await runtime.client.session.fork({

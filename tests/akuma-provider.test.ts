@@ -1885,6 +1885,7 @@ function fakeCodex(
   executable: string;
   requests(): readonly Readonly<Record<string, unknown>>[];
   requestEnvironment(): Readonly<{ requests: string; literal: string; actor: string }>;
+  environment(): NodeJS.ProcessEnv;
 }> {
   const executable = join(root, "codex");
   const log = join(root, "requests.jsonl");
@@ -1896,7 +1897,7 @@ function fakeCodex(
       "const fs=require('node:fs');",
       "const readline=require('node:readline');",
       `const log=${JSON.stringify(log)};`,
-      `fs.writeFileSync(${JSON.stringify(environment)},JSON.stringify({requests:process.env.AKUMA_REQUESTS||'',literal:process.env.SETTINGS_LITERAL||'',actor:process.env.KEIYAKU_ACTOR_ID||''}));`,
+      `fs.writeFileSync(${JSON.stringify(environment)},JSON.stringify(process.env));`,
       `const mode=${JSON.stringify(mode)};`,
       "const send=(value)=>process.stdout.write(JSON.stringify(value)+'\\n');",
       "const reply=(message,result)=>send({id:message.id,result});",
@@ -1977,7 +1978,15 @@ function fakeCodex(
         throw error;
       }
     },
-    requestEnvironment: () => JSON.parse(readFileSync(environment, "utf8")),
+    requestEnvironment: () => {
+      const value = JSON.parse(readFileSync(environment, "utf8")) as NodeJS.ProcessEnv;
+      return {
+        requests: value.AKUMA_REQUESTS ?? "",
+        literal: value.SETTINGS_LITERAL ?? "",
+        actor: value.KEIYAKU_ACTOR_ID ?? "",
+      };
+    },
+    environment: () => JSON.parse(readFileSync(environment, "utf8")) as NodeJS.ProcessEnv,
   };
 }
 
@@ -2668,6 +2677,47 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
     });
     assert.deepEqual(fake.requestEnvironment(), { requests: requestDirectory, literal: "from-settings", actor: "" });
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Codex native fork receives an isolated child environment", async () => {
+  const parentHarness = {
+    CLAUDE_CODE_SESSION_ID: "parent-claude",
+    CLAUDE_CODE_CHILD_SESSION: "parent-claude-child",
+    CLAUDECODE: "parent-claude-code",
+    CODEX_THREAD_ID: "parent-codex",
+    OPENCODE_SESSION_ID: "parent-opencode",
+    PI_SESSION_ID: "parent-pi",
+    PI_SESSION_FILE: "/parent/pi.jsonl",
+    PASEO_AGENT_ID: "parent-paseo",
+    SQUARE_PARTICIPANT_NAME: "Parent",
+    AKUMA_REQUESTS: "/parent/requests",
+  } as const;
+  const parentKeys = Object.keys(parentHarness) as Array<keyof typeof parentHarness>;
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-fork-environment-"));
+  const previous = Object.fromEntries(parentKeys.map((key) => [key, process.env[key]]));
+  try {
+    Object.assign(process.env, parentHarness);
+    const fake = fakeCodex(root);
+    const attempt = createCodexAppServerProvider({
+      name: "configured",
+      kind: "codex-app-server",
+      executable: fake.executable,
+      env: { ...parentHarness, API_TOKEN: "provider-credential", SQUARE_LOCATION: "configured-location" },
+    }).fork!({ session: { sessionId: "thread-parent" }, at: "turn-parent", cwd: root });
+    assert.deepEqual(await attempt.result, { session: { sessionId: "thread-child" } });
+    await attempt.closed;
+    const environment = fake.environment();
+    for (const key of parentKeys) assert.equal(environment[key], undefined);
+    assert.equal(environment.API_TOKEN, "provider-credential");
+    assert.equal(environment.SQUARE_LOCATION, "configured-location");
+    assert.equal(process.env.CODEX_THREAD_ID, "parent-codex");
+  } finally {
+    for (const key of parentKeys) {
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
+    }
     rmSync(root, { recursive: true, force: true });
   }
 });

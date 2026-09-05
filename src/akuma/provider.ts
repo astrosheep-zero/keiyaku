@@ -4,7 +4,7 @@ import type { ProviderOptions, ReadonlyRestraint } from "./provider-recipe.js";
 /* eslint-disable max-lines-per-function -- Provider custody is the single owner boundary for its public protocol. */
 export type { ResumeCoordinate } from "./coordinate.js";
 
-export const AKUMA_REQUESTS_ENV = "AKUMA_REQUESTS";
+export { AKUMA_REQUESTS_ENV } from "./providers/execution-environment.js";
 
 export const AGENT_EVENT_TEXT_LIMIT = 16_384;
 export const AGENT_THOUGHT_TEXT_LIMIT = 4_000;

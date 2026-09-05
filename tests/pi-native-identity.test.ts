@@ -10,6 +10,19 @@ import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js";
 
 const PI_SESSION_VARIABLE = "PI_SESSION_ID";
+const PARENT_HARNESS_ENVIRONMENT = {
+  CLAUDE_CODE_SESSION_ID: "ancestor-claude",
+  CLAUDE_CODE_CHILD_SESSION: "ancestor-claude-child",
+  CLAUDECODE: "ancestor-claude-code",
+  CODEX_THREAD_ID: "ancestor-codex",
+  OPENCODE_SESSION_ID: "ancestor-opencode",
+  PI_SESSION_ID: "inherited-ancestor",
+  PI_SESSION_FILE: "/sessions/ancestor.jsonl",
+  PASEO_AGENT_ID: "ancestor-paseo",
+  SQUARE_PARTICIPANT_NAME: "Ancestor",
+  AKUMA_REQUESTS: "/requests/ancestor",
+} as const;
+const PARENT_HARNESS_KEYS = Object.keys(PARENT_HARNESS_ENVIRONMENT) as Array<keyof typeof PARENT_HARNESS_ENVIRONMENT>;
 
 type NativeRequestTool = NonNullable<CreateAgentSessionOptions["customTools"]>[number];
 type NativeToolResult = Awaited<ReturnType<NativeRequestTool["execute"]>>;
@@ -95,12 +108,18 @@ function nativeSessionContext(sessionId: string, sessionFile = `/sessions/${sess
   } as never;
 }
 
-function observedNativeIdentity(result: NativeToolResult): Readonly<{ session: string; requests: string }> {
+function observedNativeIdentity(
+  result: NativeToolResult,
+): Readonly<{ session: string; requests: string; environment: NodeJS.ProcessEnv }> {
   const text = result.content.map((block) => (block.type === "text" ? block.text : "")).join("");
-  const parsed = JSON.parse(text) as { session?: unknown; requests?: unknown };
-  assert.equal(typeof parsed.session, "string");
-  assert.equal(typeof parsed.requests, "string");
-  return { session: parsed.session as string, requests: parsed.requests as string };
+  const environment = JSON.parse(text) as NodeJS.ProcessEnv;
+  assert.equal(typeof environment[PI_SESSION_VARIABLE], "string");
+  assert.equal(typeof environment[AKUMA_REQUESTS_ENV], "string");
+  return {
+    session: environment[PI_SESSION_VARIABLE]!,
+    requests: environment[AKUMA_REQUESTS_ENV]!,
+    environment,
+  };
 }
 
 test("the Pi request channel preserves the native session identity instead of an ancestor value", async (t) => {
@@ -151,13 +170,11 @@ test("composed native tool contexts attribute to their own Square initiator, nev
   t.diagnostic(`Square runtime: ${packageProvenance("@astrosheep/square")}`);
   const root = mkdtempSync(join(tmpdir(), "keiyaku-pi-square-attribution-"));
   const requests = join(root, "requests");
-  const previousSession = process.env[PI_SESSION_VARIABLE];
-  process.env[PI_SESSION_VARIABLE] = "inherited-ancestor";
+  const previous = Object.fromEntries(PARENT_HARNESS_KEYS.map((key) => [key, process.env[key]]));
+  Object.assign(process.env, PARENT_HARNESS_ENVIRONMENT);
   try {
     await withNativeRequestTool({ root, requests }, async (tool) => {
-      const command =
-        `node -e 'process.stdout.write(JSON.stringify({ session: process.env.${PI_SESSION_VARIABLE}, ` +
-        `requests: process.env.${AKUMA_REQUESTS_ENV} }))'`;
+      const command = "node -e 'process.stdout.write(JSON.stringify(process.env))'";
       const observe = async (sessionId: string) =>
         observedNativeIdentity(
           await tool.execute(
@@ -177,6 +194,13 @@ test("composed native tool contexts attribute to their own Square initiator, nev
       assert.equal(child.session, "child-session");
       assert.equal(parent.requests, requests);
       assert.equal(child.requests, requests);
+      for (const key of PARENT_HARNESS_KEYS) {
+        if (key === PI_SESSION_VARIABLE || key === "PI_SESSION_FILE" || key === "AKUMA_REQUESTS") continue;
+        assert.equal(parent.environment[key], undefined);
+        assert.equal(child.environment[key], undefined);
+      }
+      assert.equal(parent.environment.PI_SESSION_FILE, "/sessions/parent-session.jsonl");
+      assert.equal(child.environment.PI_SESSION_FILE, "/sessions/child-session.jsonl");
       assert.equal(process.env[PI_SESSION_VARIABLE], "inherited-ancestor");
 
       const parentName = squareAssignedParticipantName({ [PI_SESSION_VARIABLE]: parent.session });
@@ -195,8 +219,10 @@ test("composed native tool contexts attribute to their own Square initiator, nev
       );
     });
   } finally {
-    if (previousSession === undefined) delete process.env[PI_SESSION_VARIABLE];
-    else process.env[PI_SESSION_VARIABLE] = previousSession;
+    for (const key of PARENT_HARNESS_KEYS) {
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
+    }
     rmSync(root, { recursive: true, force: true });
   }
 });

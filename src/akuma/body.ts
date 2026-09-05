@@ -32,6 +32,7 @@ import {
   type TurnOutcome,
 } from "./heart/index.js";
 import { worldRootForAkumaPaths, type AkumaPaths } from "./identity.js";
+import { akumaExecutionEnvironment } from "./providers/execution-environment.js";
 import { pluginRuntime, type PluginRuntime } from "../plugin/runtime.js";
 import { World, type WorldRoot } from "../world.js";
 import type { ProviderAdapter } from "./provider.js";
@@ -334,7 +335,7 @@ export async function bodyProcessInput(
   return {
     argv: source ? [executable, "--import", import.meta.resolve("tsx"), entry, encoded] : [executable, entry, encoded],
     cwd: await launchCwd(launch),
-    env: { ...process.env, KEIYAKU_ACTOR_ID: actorId },
+    env: akumaExecutionEnvironment(process.env, { KEIYAKU_ACTOR_ID: actorId }),
     log: launch.paths.log,
   };
 }

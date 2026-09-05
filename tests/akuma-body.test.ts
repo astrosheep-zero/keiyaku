@@ -15,7 +15,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { CONTROL_RESPONSE_MS, LEASH_HELD_EXIT, handoffPendingTells } from "../src/akuma/body.js";
+import { bodyProcessInput, CONTROL_RESPONSE_MS, LEASH_HELD_EXIT, handoffPendingTells } from "../src/akuma/body.js";
+import { akumaExecutionEnvironment } from "../src/akuma/providers/execution-environment.js";
 import { driveAkumaBody as runAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import {
@@ -137,6 +138,96 @@ function configureBodyEndPlugin(root: string): void {
     JSON.stringify({ plugins: { observer: { package: "./plugins/observer.mjs" } } }),
   );
 }
+
+const PARENT_HARNESS_ENVIRONMENT = {
+  CLAUDE_CODE_SESSION_ID: "parent-claude",
+  CLAUDE_CODE_CHILD_SESSION: "parent-claude-child",
+  CLAUDECODE: "parent-claude-code",
+  CODEX_THREAD_ID: "parent-codex",
+  OPENCODE_SESSION_ID: "parent-opencode",
+  PI_SESSION_ID: "parent-pi",
+  PI_SESSION_FILE: "/parent/pi.jsonl",
+  PASEO_AGENT_ID: "parent-paseo",
+  SQUARE_PARTICIPANT_NAME: "Parent",
+  AKUMA_REQUESTS: "/parent/requests",
+} as const;
+
+const PARENT_HARNESS_KEYS = Object.keys(PARENT_HARNESS_ENVIRONMENT) as Array<keyof typeof PARENT_HARNESS_ENVIRONMENT>;
+
+test("Body launch and provider setup isolate parent harness identity without mutating concurrent inputs", async () => {
+  const parent = {
+    ...PARENT_HARNESS_ENVIRONMENT,
+    PATH: "/test/path",
+    API_TOKEN: "credential",
+    SQUARE_LOCATION: "configured-location",
+    SENTINEL: "survives",
+  };
+  const overrides = {
+    ...PARENT_HARNESS_ENVIRONMENT,
+    API_TOKEN: "provider-credential",
+    PROVIDER_SENTINEL: "provider-survives",
+  };
+  const [first, second] = await Promise.all([
+    Promise.resolve().then(() => akumaExecutionEnvironment(parent, overrides, "/child/requests")),
+    Promise.resolve().then(() => akumaExecutionEnvironment(parent, overrides, "/child/requests")),
+  ]);
+  assert.deepEqual(first, second);
+  for (const key of PARENT_HARNESS_KEYS) {
+    if (key !== "AKUMA_REQUESTS") assert.equal(first[key], undefined);
+  }
+  assert.equal(first.AKUMA_REQUESTS, "/child/requests");
+  assert.equal(first.PATH, parent.PATH);
+  assert.equal(first.API_TOKEN, "provider-credential");
+  assert.equal(first.SQUARE_LOCATION, parent.SQUARE_LOCATION);
+  assert.equal(first.SENTINEL, parent.SENTINEL);
+  assert.equal(first.PROVIDER_SENTINEL, "provider-survives");
+  assert.deepEqual(parent, {
+    ...PARENT_HARNESS_ENVIRONMENT,
+    PATH: "/test/path",
+    API_TOKEN: "credential",
+    SQUARE_LOCATION: "configured-location",
+    SENTINEL: "survives",
+  });
+  assert.deepEqual(overrides, {
+    ...PARENT_HARNESS_ENVIRONMENT,
+    API_TOKEN: "provider-credential",
+    PROVIDER_SENTINEL: "provider-survives",
+  });
+
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-body-environment-"));
+  const previous = Object.fromEntries(PARENT_HARNESS_KEYS.map((key) => [key, process.env[key]]));
+  try {
+    Object.assign(process.env, PARENT_HARNESS_ENVIRONMENT);
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "e11d0001" });
+    const input = await bodyProcessInput(
+      {
+        paths: allocated.paths,
+        seed: {
+          id: allocated.id,
+          archetype: "claude",
+          provider: { name: "claude", kind: "claude-agent-sdk" },
+          options: {},
+          origin: { kind: "direct" },
+          cwd: root,
+          allowed: ALLOWED_ACTIONS,
+        },
+      },
+      import.meta.url,
+      { recorded: process.execPath },
+    );
+    for (const key of PARENT_HARNESS_KEYS) {
+      assert.equal(input.env[key], undefined);
+    }
+    assert.equal(input.env.KEIYAKU_ACTOR_ID, allocated.id);
+    assert.equal(process.env.AKUMA_REQUESTS, "/parent/requests");
+  } finally {
+    for (const key of PARENT_HARNESS_KEYS) {
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
+    }
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("generic handoff with no pending Tell does not spawn", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-empty-handoff-"));
@@ -736,7 +827,9 @@ test("turn-outcome delivery is awaited by its committed Turn producer", async ()
     mkdirSync(join(root, ".keiyaku"), { recursive: true });
     writeFileSync(
       join(root, ".keiyaku", "settings.json"),
-      JSON.stringify({ plugins: { hanging: { package: "./plugins/hanging.mjs", config: { ready, started, settled } } } }),
+      JSON.stringify({
+        plugins: { hanging: { package: "./plugins/hanging.mjs", config: { ready, started, settled } } },
+      }),
     );
     await pluginRuntime({ world: await World.at(root) });
     await eventually(() => existsSync(ready));
@@ -1050,7 +1143,10 @@ test("a successor Body redelivers a Tell left bound before predecessor delivery"
     );
 
     const recovered = await readTell(allocated.paths, "crash-window-body");
-    assert.deepEqual(starts.map((start) => start.launchTells), [[{ id: "crash-window-body", text: "resume after crash" }]]);
+    assert.deepEqual(
+      starts.map((start) => start.launchTells),
+      [[{ id: "crash-window-body", text: "resume after crash" }]],
+    );
     assert.equal(recovered?.state, "told");
     assert.equal(recovered?.deliveries.length, 1);
     assert.deepEqual(recovered?.deliveries[0]?.route, "launch");

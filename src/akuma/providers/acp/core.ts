@@ -3,13 +3,13 @@ import { Readable, Writable } from "node:stream";
 import { spawnStdioProcess, type StdioProcess } from "../../../runtime/proc/stdio.js";
 import { abortable } from "../../abort.js";
 import {
-  AKUMA_REQUESTS_ENV,
   AgentEventChannel,
   type AttemptCustody,
   type ProviderAdapter,
   type Session,
   type TurnResult,
 } from "../../provider.js";
+import { akumaExecutionEnvironment } from "../execution-environment.js";
 import {
   EMPTY_ACP_EVENT_STATE,
   flushAcpEvents,
@@ -226,11 +226,7 @@ export async function startAcpSession(
   const child = (dependencies.spawnProcess ?? spawnStdioProcess)({
     argv: launch.argv,
     cwd: input.cwd,
-    env: {
-      ...globalThis.process.env,
-      ...launch.env,
-      ...(input.requests === undefined ? {} : { [AKUMA_REQUESTS_ENV]: input.requests.dir }),
-    },
+    env: akumaExecutionEnvironment(globalThis.process.env, launch.env, input.requests?.dir),
   });
   custody?.own({
     closed: child.exited.then(() => undefined),

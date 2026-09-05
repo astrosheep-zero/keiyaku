@@ -19,6 +19,11 @@ initiator. A subsequent Turn takes its own opening input's identity, including
 explicit absence; it never inherits the birth caller or the Body environment.
 This attribution grants no permission and does not affect execution.
 
+A Body begins with ordinary host configuration but establishes an isolated
+execution identity and request transport before provider or plugin setup.
+Native setup may then establish that Body's own session coordinate; a parent
+execution's harness identity or route never attributes child work.
+
 Process custody is a live handle, not a stored pid, process group, start token,
 or reconstructed identity. Graceful cancellation and forced disposal both require
 the current provider attempt's closure proof. If owned provider custody cannot
