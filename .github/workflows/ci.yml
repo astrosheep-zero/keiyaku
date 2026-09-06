@@ -99,6 +99,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Verify isolated runner on the minimum Node version
+        run: npm run test:compile && node scripts/run-tests.mjs --compiled tests/run-tests.test.ts
+
       - name: Run packaged CLI end-to-end test
         run: npm run test:e2e:built
 
@@ -126,6 +129,7 @@ jobs:
         run: npm ci --ignore-scripts --prefer-offline
 
       - name: Build
+        id: build
         run: npm run build
 
       - name: Compile tests once
@@ -168,9 +172,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Run packaged CLI end-to-end test
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: npm run test:e2e:built
 
       - name: Run Git Bash coordinate smoke
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         shell: pwsh
         run: |
           $bash = Join-Path $env:ProgramFiles "Git\bin\bash.exe"
