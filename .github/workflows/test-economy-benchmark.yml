@@ -1,0 +1,74 @@
+name: Test economy paired benchmark
+on:
+  push:
+    branches: [codex/test-economy-20260906]
+    paths: ['.github/workflows/test-economy-benchmark.yml']
+permissions:
+  contents: read
+jobs:
+  paired:
+    if: github.ref == 'refs/heads/codex/test-economy-20260906'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      KNIP_DISABLE_RAW_TRANSFER: '1'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24.x
+          cache: npm
+      - uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.14.1
+      - name: Prepare pinned independent checkouts and locked dependencies
+        run: |
+          git config --global user.name 'Keiyaku benchmark'
+          git config --global user.email 'benchmark@example.invalid'
+          git worktree add --detach "$RUNNER_TEMP/kei-baseline" 515b948ecde880f2f945ec736763039d4f85a601
+          git worktree add --detach "$RUNNER_TEMP/kei-candidate" 15f26b3626e6a4d24c54df34e65be28782d6b6ff
+          (cd "$RUNNER_TEMP/kei-baseline" && npm ci --ignore-scripts --prefer-offline)
+          (cd "$RUNNER_TEMP/kei-candidate" && npm ci --ignore-scripts --prefer-offline)
+          # Common non-performance baseline repairs: existing formatting failure,
+          # and fixture teardown awaiting the actual released child's exit.
+          cp "$RUNNER_TEMP/kei-candidate/src/contract-guidance.ts" "$RUNNER_TEMP/kei-baseline/src/contract-guidance.ts"
+          cp "$RUNNER_TEMP/kei-candidate/tests/windows-akuma-process.test.ts" "$RUNNER_TEMP/kei-baseline/tests/windows-akuma-process.test.ts"
+          git -C "$RUNNER_TEMP/kei-baseline" diff --stat
+      - name: Warm both sides, then measure AB BA AB without overlapping executions
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, platform, statistics, subprocess, time
+          root = pathlib.Path(os.environ['RUNNER_TEMP'])
+          logs = pathlib.Path('benchmark-results'); logs.mkdir()
+          revisions = {'baseline': '515b948ecde880f2f945ec736763039d4f85a601', 'candidate': '15f26b3626e6a4d24c54df34e65be28782d6b6ff'}
+          report = {'revisions': revisions, 'command': 'npm test', 'cpu_count': os.cpu_count(), 'platform': platform.platform(), 'node': subprocess.check_output(['node','--version'], text=True).strip(), 'git': subprocess.check_output(['git','--version'], text=True).strip(), 'normalizations': ['src/contract-guidance.ts formatting only', 'tests/windows-akuma-process.test.ts awaits real released child exit on both sides'], 'runs': []}
+          for index, side in enumerate(['baseline','candidate','baseline','candidate','candidate','baseline','baseline','candidate']):
+            warmup = index < 2
+            name = str(index) + '-' + side
+            start = time.perf_counter()
+            with (logs / (name + '.log')).open('w') as output:
+              run = subprocess.run(['npm','test'], cwd=root / ('kei-' + side), stdout=output, stderr=subprocess.STDOUT)
+            row = {'side': side, 'warmup': warmup, 'seconds': round(time.perf_counter()-start, 3), 'status': run.returncode, 'log': name + '.log'}
+            report['runs'].append(row)
+            (logs/'results.json').write_text(json.dumps(report, indent=2))
+            print(json.dumps(row), flush=True)
+            if run.returncode:
+              print((logs/(name+'.log')).read_text()[-18000:], flush=True)
+              raise SystemExit('A failed run is not a performance sample')
+          medians = {side: statistics.median(r['seconds'] for r in report['runs'] if r['side']==side and not r['warmup']) for side in revisions}
+          report['median_seconds'] = medians
+          report['wall_time_reduction_percent'] = round(100*(1-medians['candidate']/medians['baseline']), 2)
+          (logs/'results.json').write_text(json.dumps(report, indent=2))
+          print(json.dumps(report, indent=2), flush=True)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+            summary.write('```json\n' + json.dumps(report, indent=2) + '\n```\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-economy-paired-results
+          path: benchmark-results/
+          retention-days: 14
