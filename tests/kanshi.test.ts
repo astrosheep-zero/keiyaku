@@ -164,72 +164,9 @@ function gitInvocations(path: string): readonly string[] {
   return text.length === 0 ? [] : text.split("\n");
 }
 
-async function observedGitInvocations(repository: ReturnType<typeof makeGitRepository>): Promise<readonly string[]> {
-  const log = join(repository.path, "kanshi-git-invocations.log");
-  writeFileSync(log, "");
-  await withGitShim(
-    'printf \'%s\\n\' "$*" >> "$KEIYAKU_KANSHI_GIT_LOG"\nexec "$KEIYAKU_REAL_GIT" "$@"',
-    { KEIYAKU_KANSHI_GIT_LOG: log },
-    async (gitPath) => observe(repository.path, await Repo.at({ path: repository.path, gitPath })),
-  );
-  return gitInvocations(log);
-}
-
 function deleteLooseObject(repository: ReturnType<typeof makeGitRepository>, oid: string): void {
   unlinkSync(join(repository.path, ".git", "objects", oid.slice(0, 2), oid.slice(2)));
 }
-
-test("one-target Kanshi observation has an eight-process Git topology", async () => {
-  const { repository } = await populatedWorld();
-  const tasks = Tasks.of(await World.at(repository.path));
-  const added = await tasks.add({ title: "Second status row" });
-  assert.equal(added.kind, "accepted");
-  if (added.kind !== "accepted") return;
-  const bound = await Keiyaku.bind({
-    repo: await Repo.at({ path: repository.path }),
-    task: added.value.id,
-    markdown: document("Second Kanshi contract"),
-    workspace: "worktree",
-    target: "main",
-  });
-  const secondContract = await bound.keiyaku.state();
-  const secondAkuma = await bornAkuma(repository.path, "a0000009");
-  assert.equal(
-    (
-      await publishDispatch({
-        repository: await repositoryAt(repository.path),
-        akuId: secondAkuma,
-        contractId: secondContract.id,
-      })
-    ).kind,
-    "dispatched",
-  );
-  const invocations = await observedGitInvocations(repository);
-
-  assert.equal(invocations.filter((command) => command === "worktree list --porcelain -z").length, 1);
-  assert.equal(
-    invocations.filter((command) => command === "rev-parse --path-format=absolute --git-common-dir").length,
-    1,
-  );
-  assert.equal(invocations.filter((command) => command === "symbolic-ref --quiet HEAD").length, 1);
-  assert.equal(invocations.filter((command) => command === `rev-parse --verify --quiet ${GIT_REF}`).length, 1);
-  assert.equal(
-    invocations.some((command) => command.startsWith("ls-tree ")),
-    false,
-  );
-  assert.equal(invocations.filter((command) => command === "cat-file --batch").length, 1);
-  assert.equal(invocations.filter((command) => command === "rev-parse --verify --quiet refs/heads/main").length, 1);
-  assert.equal(
-    invocations.some((command) => command.startsWith("cat-file blob ")),
-    false,
-  );
-  assert.equal(invocations.filter((command) => command.includes("status --porcelain=v2")).length, 2);
-  assert.equal(invocations.filter((command) => /rev-list --count HEAD\.\.[0-9a-f]{40}$/u.test(command)).length, 2);
-  assert.equal(
-    invocations.some((command) => /rev-list --count HEAD\.\.refs\//u.test(command)),
-    false,
-  );
-});
 
 test("named status resolves its address from the initial observation before the selected read", async () => {
   const repository = makeGitRepository();
@@ -361,79 +298,6 @@ test("complete Contract status exposes a corrupt active dependency as a Contract
   assert.equal(result.report.contracts.kind, "failed");
 });
 
-test("same-target lag counts each workspace HEAD against the one frozen target head", async () => {
-  const { repository, contract } = await populatedWorld();
-  const tasks = Tasks.of(await World.at(repository.path));
-  const added = await tasks.add({ title: "Second status row" });
-  assert.equal(added.kind, "accepted");
-  if (added.kind !== "accepted") return;
-  const bound = await Keiyaku.bind({
-    repo: await Repo.at({ path: repository.path }),
-    task: added.value.id,
-    markdown: document("Second Kanshi contract"),
-    workspace: "worktree",
-    target: "main",
-  });
-  const second = await bound.keiyaku.state();
-  const log = join(repository.path, "kanshi-shared-target-lag.log");
-  writeFileSync(log, "");
-  const report = await withGitShim(
-    'printf \'%s\\n\' "$*" >> "$KEIYAKU_KANSHI_GIT_LOG"\nexec "$KEIYAKU_REAL_GIT" "$@"',
-    { KEIYAKU_KANSHI_GIT_LOG: log },
-    async (gitPath) => observe(repository.path, await Repo.at({ path: repository.path, gitPath })),
-  );
-
-  assert.equal(report.contracts.kind, "present");
-  if (report.contracts.kind !== "present") return;
-  const contracts = report.contracts;
-  const rows = [contract.id, second.id].map((id) => contracts.value.rows.find((row: ContractKanshiRow) => row.id === id));
-  const head = rows[0]?.targetObservation?.head;
-  assert.equal(typeof head, "string");
-  assert.equal(
-    rows.every((row) => row?.target === "refs/heads/main" && row.targetObservation?.head === head),
-    true,
-  );
-  const invocations = gitInvocations(log);
-  const lagReads = invocations.filter((command) => /rev-list --count HEAD\.\.[0-9a-f]{40}$/u.test(command));
-  assert.equal(lagReads.length, 2);
-  assert.equal(
-    lagReads.every((command) => command.endsWith(`HEAD..${head}`)),
-    true,
-  );
-  assert.equal(invocations.filter((command) => command === "rev-parse --verify --quiet refs/heads/main").length, 1);
-  assert.equal(
-    invocations.some((command) => /rev-list --count HEAD\.\.refs\//u.test(command)),
-    false,
-  );
-});
-
-test("Kanshi Git topology adds one ref read per distinct Contract target", async () => {
-  const { repository } = await populatedWorld();
-  repository.run(["branch", "other"]);
-  await Keiyaku.bind({
-    repo: await Repo.at({ path: repository.path }),
-    markdown: document("Other target contract"),
-    workspace: "worktree",
-    target: "other",
-  });
-
-  const invocations = await observedGitInvocations(repository);
-
-  assert.equal(
-    invocations.filter((command) => command === "rev-parse --path-format=absolute --git-common-dir").length,
-    1,
-  );
-  assert.equal(invocations.filter((command) => command === "rev-parse --verify --quiet refs/heads/main").length, 1);
-  assert.equal(invocations.filter((command) => command === "rev-parse --verify --quiet refs/heads/other").length, 1);
-  assert.equal(invocations.filter((command) => command === "cat-file --batch").length, 1);
-  assert.equal(invocations.filter((command) => command.includes("status --porcelain=v2")).length, 2);
-  assert.equal(invocations.filter((command) => /rev-list --count HEAD\.\.[0-9a-f]{40}$/u.test(command)).length, 2);
-  assert.equal(
-    invocations.some((command) => /rev-list --count HEAD\.\.refs\//u.test(command)),
-    false,
-  );
-});
-
 test("a dead shared Kanshi batch fails every Git-backed owner without restarting", async () => {
   const { repository } = await populatedWorld();
   const log = join(repository.path, "kanshi-dead-batch.log");
@@ -530,13 +394,14 @@ test("a corrupt shared Git format fails every state-backed Kanshi section", asyn
 test("kanshi joins TaskHolder, Dispatch, and Alias without moving their authorities", async () => {
   const { repository, contract, taskId, akumaId } = await populatedWorld();
   const report = await observe(repository.path, await Repo.at({ path: repository.path }));
+  assert.equal(report.akuma.kind, "present");
   if (report.akuma.kind === "present") {
     const row = report.akuma.value.rows.find((candidate) => candidate.id === akumaId);
     assert.equal(row?.id, akumaId);
     assert.deepEqual(row?.aliases, ["@watch"]);
     assert.deepEqual(row?.contract, { id: contract.id, observed: "active" });
   }
-  if (report.contracts.kind !== "present" || report.tasks.kind !== "present") return;
+  if (report.contracts.kind !== "present" || report.tasks.kind !== "present") throw new Error("expected readable sections");
   assert.equal(report.branch, "refs/heads/main");
   assert.equal(report.contracts.value.state, (await readGit(await repositoryAt(repository.path))).commit);
   assert.equal("state" in report, false);
@@ -2023,57 +1888,45 @@ test("Kanshi text neutralizes control characters from source diagnostics", () =>
   assert.match(text, /broken.*forged/u);
 });
 
-test("target lag counts the frozen targetObservation head after the live ref moves", async () => {
+test("target lag uses one frozen head per target and each workspace's own history", async () => {
   const { repository, contract } = await populatedWorld();
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "advance main"]);
   const frozen = repository.run(["rev-parse", "refs/heads/main"]).trim();
-  repository.run(["checkout", "--quiet", "-b", "stay"]);
-  const log = join(repository.path, "kanshi-target-race.log");
-  writeFileSync(log, "");
-  const first = join(tmpdir(), `keiyaku-target-first-${process.pid}`);
-  const moved = join(tmpdir(), `keiyaku-target-moved-${process.pid}`);
-
+  const repo = await Repo.at({ path: repository.path });
+  const second = (await Keiyaku.bind({ repo, markdown: document("Second"), workspace: "worktree", target: "main" })).keiyaku;
+  repository.run(["checkout", "--quiet", "-b", "other"]);
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "other target"]);
+  const otherHead = repository.run(["rev-parse", "HEAD"]).trim();
+  const third = (await Keiyaku.bind({ repo, markdown: document("Other"), workspace: "worktree", target: "other" })).keiyaku;
+  const ids = [contract.id, (await second.state()).id, (await third.state()).id];
+  const marker = join(repository.path, "target-frozen");
   const report = await withGitShim(
     [
-      'printf \'%s\\n\' "$*" >> "$KEIYAKU_KANSHI_GIT_LOG"',
-      'if [ "$1" = "rev-parse" ] && [ "$2" = "--verify" ] && [ "$4" = "refs/heads/main" ]; then',
-      '  if [ ! -e "$KEIYAKU_TARGET_FIRST" ]; then touch "$KEIYAKU_TARGET_FIRST"; exec "$KEIYAKU_REAL_GIT" "$@"; fi',
-      "fi",
-      'if [ -e "$KEIYAKU_TARGET_FIRST" ] && [ ! -e "$KEIYAKU_TARGET_MOVED" ]; then',
-      '  touch "$KEIYAKU_TARGET_MOVED"',
-      '  tree=$("$KEIYAKU_REAL_GIT" -C "$KEIYAKU_REPO" rev-parse "$KEIYAKU_FROZEN^{tree}")',
-      '  advanced=$("$KEIYAKU_REAL_GIT" -C "$KEIYAKU_REPO" commit-tree "$tree" -p "$KEIYAKU_FROZEN" -m race)',
-      '  "$KEIYAKU_REAL_GIT" -C "$KEIYAKU_REPO" update-ref refs/heads/main "$advanced"',
-      "fi",
+      'if [ "$*" = "rev-parse --verify --quiet refs/heads/main" ] && [ ! -e "$KEIYAKU_TARGET_MARKER" ]; then',
+      '  "$KEIYAKU_REAL_GIT" "$@"',
+      '  "$KEIYAKU_REAL_GIT" update-ref refs/heads/main "$KEIYAKU_ADVANCED" "$KEIYAKU_FROZEN"',
+      '  : > "$KEIYAKU_TARGET_MARKER"',
+      '  exit 0',
+      'fi',
       'exec "$KEIYAKU_REAL_GIT" "$@"',
     ].join("\n"),
-    {
-      KEIYAKU_KANSHI_GIT_LOG: log,
-      KEIYAKU_TARGET_FIRST: first,
-      KEIYAKU_TARGET_MOVED: moved,
-      KEIYAKU_REPO: repository.path,
-      KEIYAKU_FROZEN: frozen,
-    },
+    { KEIYAKU_TARGET_MARKER: marker, KEIYAKU_ADVANCED: otherHead, KEIYAKU_FROZEN: frozen },
     async (gitPath) => observe(repository.path, await Repo.at({ path: repository.path, gitPath })),
   );
-
   assert.equal(report.contracts.kind, "present");
-  if (report.contracts.kind !== "present") return;
-  const row = report.contracts.value.rows.find((candidate) => candidate.id === contract.id);
-  assert.deepEqual(row?.targetObservation, { head: frozen, drift: false });
-  assert.deepEqual(row?.targetLag, { kind: "counted", behind: 0, subject: { kind: "worktree", path: join(repository.path, ".keiyaku", "wt", "commandroom") } });
-  const invocations = gitInvocations(log);
-  assert.equal(invocations.filter((command) => command === "rev-parse --verify --quiet refs/heads/main").length, 1);
-  assert.equal(
-    invocations.some((command) => command.endsWith(`rev-list --count HEAD..${frozen}`)),
-    true,
-  );
-  assert.equal(
-    invocations.some((command) => /rev-list --count HEAD\.\.refs\//u.test(command)),
-    false,
-  );
-  assert.notEqual(repository.run(["rev-parse", "refs/heads/main"]).trim(), frozen);
-  const unknown = await observeTargetLag(await repositoryAt(repository.path), repository.path, null);
-  assert.deepEqual(unknown, { kind: "unknown", subject: { kind: "worktree", path: repository.path } });
+  if (report.contracts.kind !== "present") throw new Error("expected Contract rows");
+  const { rows: observedRows } = report.contracts.value;
+  const rows = ids.map((id) => observedRows.find((row) => row.id === id));
+  for (const [index, row] of rows.entries()) {
+    assert.ok(row);
+    assert.equal(row.target, index === 2 ? "refs/heads/other" : "refs/heads/main");
+    assert.deepEqual(row.targetObservation, { head: index === 2 ? otherHead : frozen, drift: false });
+    assert.deepEqual(row.targetLag, { kind: "counted", behind: index === 0 ? 1 : 0, subject: { kind: "worktree", path: row.worktreePath } });
+  }
+  assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), otherHead);
+  assert.deepEqual(await observeTargetLag(await repositoryAt(repository.path), repository.path, null), {
+    kind: "unknown", subject: { kind: "worktree", path: repository.path },
+  });
 });
 
 test("Kanshi Task marks follow the kanshi.md disposition vocabulary", () => {

@@ -1,13 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Keiyaku, KeiyakuRefused, Repo } from "../src/index.js";
-import { makeGitRepository, withGitShim } from "./support/git.js";
+import { withGitShim } from "./support/git.js";
+import { document, repositoryWithMain } from "./support/library-verbs.js";
 
 test("package boundary rejects malformed runtime inputs before journal mutation", async () => {
-  const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Boundary Test"]);
-  repository.run(["config", "user.email", "boundary@example.test"]);
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
   const before = (await Keiyaku.list({ repo })).rows;
 
@@ -29,14 +27,14 @@ test("package boundary rejects malformed runtime inputs before journal mutation"
     TypeError,
   );
 
+  for (const gates of [["Invalid"], ["reviewed", "reviewed"]]) {
+    await assert.rejects(() => Keiyaku.bind({ repo, markdown: document(), gates }), TypeError);
+  }
   assert.deepEqual((await Keiyaku.list({ repo })).rows, before);
 });
 
 test("amend validates programmer input before observing a missing contract", async () => {
-  const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Boundary Test"]);
-  repository.run(["config", "user.email", "boundary@example.test"]);
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
   const contract = Keiyaku.of({ repo, id: "kei/missing" as never });
   const before = (await Keiyaku.list({ repo })).rows;
@@ -52,36 +50,12 @@ test("amend validates programmer input before observing a missing contract", asy
 });
 
 test("boundary validation precedes Git and unrepresentable targets stay typed", async () => {
-  const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Boundary Test"]);
-  repository.run(["config", "user.email", "boundary@example.test"]);
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
   await assert.rejects(
     Keiyaku.bind({
       repo,
-      markdown: [
-        "# T",
-        "",
-        "## Context",
-        "C",
-        "",
-        "## Objective",
-        "O",
-        "",
-        "## Design",
-        "D",
-        "",
-        "## Region",
-        "~~~",
-        "src/**",
-        "~~~",
-        "",
-        "## Criteria",
-        "### C",
-        "C",
-        "",
-      ].join("\n"),
+      markdown: document(),
       target: "bad\0target",
       workspace: "worktree",
     }),
@@ -90,28 +64,7 @@ test("boundary validation precedes Git and unrepresentable targets stay typed", 
 
   const bound = await Keiyaku.bind({
     repo,
-    markdown: [
-      "# T",
-      "",
-      "## Context",
-      "C",
-      "",
-      "## Objective",
-      "O",
-      "",
-      "## Design",
-      "D",
-      "",
-      "## Region",
-      "~~~",
-      "src/**",
-      "~~~",
-      "",
-      "## Criteria",
-      "### C",
-      "C",
-      "",
-    ].join("\n"),
+    markdown: document(),
     workspace: "worktree",
     gates: ["security-audited"],
   });

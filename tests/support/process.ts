@@ -4,12 +4,13 @@ export const sourceLoader: readonly string[] = import.meta.url.endsWith(".ts")
   ? ["--import", import.meta.resolve("tsx")]
   : [];
 
-export async function waitForProcessExit(pid: number): Promise<void> {
-  const deadline = performance.now() + 2_000;
+export async function waitForProcessExit(pid: number, timeoutMs = 2_000): Promise<void> {
+  const deadline = performance.now() + timeoutMs;
   while (true) {
     try {
       process.kill(pid, 0);
-    } catch {
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
       return;
     }
     if (performance.now() >= deadline) throw new Error(`process ${pid} survived`);

@@ -13,7 +13,7 @@ for (const file of globSync([
   "scripts/**/*.js",
   "scripts/**/*.mjs",
 ])) {
-  if (file.startsWith("tests/fixtures/consumers/")) continue;
+  if (file.replaceAll("\\", "/").startsWith("tests/fixtures/consumers/")) continue;
   const output = ".test-build/" + file.replace(/\.ts$/u, ".js");
   mkdirSync(dirname(output), { recursive: true });
   if (!file.endsWith(".ts")) {

@@ -170,7 +170,18 @@ test("package-root observe and list carry managed workspace observations", async
   const repository = repositoryWithInitialCommit();
   const repo = await Repo.at({ path: repository.path });
   const bound = await Keiyaku.bind({ repo, markdown: markdown("Managed workspace"), workspace: "worktree" });
-  const boundId = await publicContractId(bound.keiyaku);
+  const state = await bound.keiyaku.state();
+  const boundId = state.id;
+  assert.equal(state.terms.document.bytes, markdown("Managed workspace"));
+  const guidance = await bound.keiyaku.guidance();
+  const appointment = await readManagedWorktreeAppointment(await repositoryAt(repository.path), boundId);
+  assert.equal(appointment.kind, "appointed");
+  if (appointment.kind !== "appointed") throw new Error("expected a managed worktree");
+  assert.equal(readFileSync(join(appointment.path, ".keiyaku", "KEIYAKU.md"), "utf8"), guidance);
+  for (const seat of ["deliver", "review"]) {
+    assert.match(readFileSync(join(appointment.path, ".agents", "skills", `keiyaku-${seat}`, "SKILL.md"), "utf8"),
+      new RegExp(`^---\\nname: keiyaku-${seat}$`, "m"));
+  }
 
   const observed = await Keiyaku.observe({ repo, id: boundId });
   assert.equal(observed.kind, "present");

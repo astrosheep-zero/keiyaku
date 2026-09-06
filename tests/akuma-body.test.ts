@@ -953,6 +953,7 @@ test("a Session without live tell hands off while narration remains open", async
     let aborts = 0;
     let automaticLaunches = 0;
     let released = 0;
+    let successor: ReturnType<typeof driveAkumaBody> | undefined;
     const launches: Array<readonly Readonly<{ id: string; text: string }>[]> = [];
     const successorStart = async (
       input: Parameters<ProviderAdapter["start"]>[0] | Parameters<NonNullable<ProviderAdapter["resume"]>>[0],
@@ -984,7 +985,7 @@ test("a Session without live tell hands off while narration remains open", async
         async spawnBody(launch) {
           automaticLaunches += 1;
           assert.deepEqual(launch, { paths: allocated.paths, refuseIfHeld: true });
-          void driveAkumaBody(
+          successor = driveAkumaBody(
             launch,
             {
               admitOptions(options) {
@@ -1013,9 +1014,8 @@ test("a Session without live tell hands off while narration remains open", async
       recordedAt: "2026-08-08T00:00:01.000Z",
     });
     await expectBodySettles(body, "Body did not hand off pending Tell");
-    while ((await readHeart(allocated.paths)).pending.length > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
+    assert.ok(successor, "handoff must start the successor");
+    await successor;
 
     assert.equal(aborts, 1);
     assert.equal(automaticLaunches, 1);

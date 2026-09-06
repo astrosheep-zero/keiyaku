@@ -292,12 +292,13 @@ test("a released Akuma Body completes through Pi and an OpenAI chat completion e
     restoreEnvironment("OPENAI_API_KEY", environment.openaiApiKey);
     try {
       // Logical idle releases the leash before the process has finished its observers.
-      // Keep exit observation after custody is released; do not delete a live child's cwd/log.
+      // Windows release closes the exit pipe; observe the known fixture child's
+      // disappearance instead of awaiting an unavailable receipt or signalling it.
       if (child !== undefined) {
         let timer: ReturnType<typeof setTimeout> | undefined;
         try {
           await Promise.race([
-            child.exited,
+            process.platform === "win32" ? waitForExit(child.pid, 10_000) : child.exited,
             new Promise<never>((_, reject) => {
               timer = setTimeout(() => reject(new Error("Body did not exit")), 10_000);
             }),
