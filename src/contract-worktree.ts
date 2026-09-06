@@ -6,6 +6,7 @@ import { contractId, type ContractId, type ContractState } from "./core/facts/ty
 import {
   CONTRACT_DELIVERER_SKILL,
   CONTRACT_REVIEWER_SKILL,
+  CONTRACT_ONBOARDING_SKILL,
   renderContractAppointment,
   renderContractGuidance,
 } from "./contract-guidance.js";
@@ -20,6 +21,7 @@ const IGNORE_BYTES = ".gitignore\nKEIYAKU.md\n";
 const PRIMARY_IGNORE_BYTES = "*\n!settings.json\n!tasks/\n!tasks/**\n";
 const SEAT_IGNORE_BYTES = ".gitignore\nSKILL.md\n";
 const SEAT_SKILLS = [
+  ["keiyaku-onboarding", CONTRACT_ONBOARDING_SKILL],
   ["keiyaku-deliver", CONTRACT_DELIVERER_SKILL],
   ["keiyaku-review", CONTRACT_REVIEWER_SKILL],
 ] as const;

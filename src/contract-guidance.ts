@@ -2,6 +2,29 @@ import type { ArcData, ContractId, ContractState } from "./core/facts/types.js";
 
 const APPOINTMENT_DESCRIPTION = "This is a read-only projection. Do not edit manually.";
 
+export const CONTRACT_ONBOARDING_SKILL = [
+  "---",
+  "name: keiyaku-onboarding",
+  "description: MUST READ BEFORE ANYTHING ELSE IN THIS KEIYAKU WORKTREE",
+  "---",
+  "",
+  "# Keiyaku Worktree Onboarding",
+  "",
+  "MUST READ BEFORE ANYTHING ELSE IN THIS WORKTREE.",
+  "",
+  "Read `.keiyaku/KEIYAKU.md` first. It is the canonical Contract guidance for this worktree and contains the admitted terms, current Arc, appointment, and role responsibilities.",
+  "",
+  "The Contract guidance and the skills listed below are the relevant Keiyaku context for this worktree. Do not treat skills as a replacement for the Contract document or as authority to change its terms.",
+  "",
+  "Available Contract skills:",
+  "",
+  "- `.agents/skills/keiyaku-onboarding/SKILL.md` - this entrypoint; read it first.",
+  "- `.agents/skills/keiyaku-deliver/SKILL.md` - Deliverer operating procedure.",
+  "- `.agents/skills/keiyaku-review/SKILL.md` - Reviewer operating procedure.",
+  "",
+  "Skills provide procedure only. Contract terms remain authoritative in `.keiyaku/KEIYAKU.md` and the journal; skills cannot amend terms or gain acceptance authority.",
+].join("\\n").concat("\\n");
+
 export const CONTRACT_DELIVERER_SKILL = [
   "---",
   "name: keiyaku-deliver",
