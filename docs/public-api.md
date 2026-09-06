@@ -85,3 +85,13 @@ CLI grammar, flags, help rows, and literal output are owned by the CLI chapters.
 They are deliberately not copied into this package law. Mutation outcome
 semantics are owned by [public-results.md](public-results.md); lifecycle legality
 is owned by [lifecycle.md](lifecycle.md).
+
+## Cancellation And Confirmed Effects
+
+Review, delivery, and audit carry caller cancellation through their local or
+parent-served execution. A signal is a request to stop further work, not proof
+that publication did not occur. Once a leading act has been accepted, cancellation
+preserves its receipt and identifies the unfinished stage. An unknown Git
+publication is still adjudicated under independent, bounded read custody before
+reporting the known outcome. Resource retirement is not skipped merely because
+the execution signal has already been cancelled.

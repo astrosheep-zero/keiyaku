@@ -90,6 +90,7 @@ async function auditCandidateVerification(
     snapshot,
     ...(input.signal === undefined ? {} : { signal: input.signal }),
     verification: definition,
+    ...(input.progress === undefined ? {} : { progress: input.progress }),
   });
   if (verification === null) throw new Error("audit verification preparation unexpectedly produced no attempt");
   return unpackVerificationOutcome(verification);
@@ -194,6 +195,7 @@ export async function auditOperation(input: AuditOperationInput): Promise<Intent
     },
   );
   if (prepared.kind === "refused") return accepted(state, [], blockedAudit(prepared.refusal));
+  const candidate = await readyAuditCandidate(input.scope, prepared.data, workspace.answer, input.showDiff === true);
   const verified =
     derivation.verification.data === null
       ? undefined
@@ -206,7 +208,7 @@ export async function auditOperation(input: AuditOperationInput): Promise<Intent
   const verification = auditVerificationAnswer(verified);
   const delivery = auditDeliveryRelation(state, prepared.data);
   const value: AuditReport = {
-    candidate: await readyAuditCandidate(input.scope, prepared.data, workspace.answer, input.showDiff === true),
+    candidate,
     verification,
     target:
       verification.kind === "stopped"

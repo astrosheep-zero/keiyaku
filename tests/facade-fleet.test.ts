@@ -1716,6 +1716,10 @@ test("creator testimony appears on Fleet observation carriers", async () => {
       leash?.release();
       leash = undefined;
     }
+    // Interrupt acquires the leash itself; this fixture must not hold its prerequisite lock.
+    const interrupted = await Keiyaku.interrupt({ path: root, akuma: worker.id, body: "stop" });
+    if (interrupted.observation.kind !== "observed") throw new Error(interrupted.observation.diagnostic);
+    assert.deepEqual(interrupted.observation.createdTasks, { kind: "present", rows: workerRows });
     await workerHandle.wait(undefined, { timeoutMs: 2_000 });
   } finally {
     leash?.release();

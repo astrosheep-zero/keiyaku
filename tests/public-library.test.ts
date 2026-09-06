@@ -81,6 +81,20 @@ test("package root exposes only the ruled library values and declarations", () =
   const directory = externalConsumer();
   const source = [
     'import { AuthorityCorruptionError, AkumaWorldScopeError, bodyRequestExecution, Delivery, gatesFrom, Keiyaku, KeiyakuRefused, KeiyakuRetry, projectMutationFinality, Repo, settings, SettingsError, worktreeHooksFrom, World, type AbandonInput, type ActorId, type AkumaHistoryResult, type AkumaObservation, type AkumaWorldScopeRefusal, type AmendInput, type AmendResult, type ArcInput, type AuditInput, type AuditReport, type AttestationVerdict, type BindInput, type BindResult, type ChangeId, type ContractAfterEdge, type ContractBoard, type ContractDependent, type ContractDisposition, type ContractGateCurrent, type ContractGateReport, type ContractHistory, type ContractHistoryEvent, type ContractId, type ContractObservation, type ContractObservationInput, type ContractListInput, type ContractPhase, type ContractRow, type ContractState, type ContractWorkspaceObservation, type CreatedTaskObservation, type DeliverInput, type DeliveryPreparationRefusal, type Fact, type FactKind, type Gate, type HookCommand, type KeiyakuRefusal, type KeiyakuRetryReason, type Lag, type LibraryExecution, type MutationFinality, type MutationFinalityInput, type MutationFinalitySurface, type MutationResult, type NukeConfirmationRefusal, type NukeConfirmationRequiredRefusal, type NukeInput, type NukeResult, type ReconcileReport, type RegionOverlap, type RepoAtInput, type RepoReconcileReport, type Review, type ReviewInput, type Settings, type SettingsEntry, type SettingsNamespaceView, type SettingsScopeState, type SettlementAction, type SettlementLag, type SettlementReport, type SnapshotId, type TaskId, type TopologyEffect, type VerificationReuse, type WorktreeHooks, type WorldResolution, type WorldResolutionInput, type WorldRoot } from "@astrosheep/keiyaku";',
+    'import { executionReceipt, type ExecutionReceipt, type ExecutionCleanup, type ExecutionStop, type MutationOperation } from "@astrosheep/keiyaku";',
+    'const receipt: ExecutionReceipt | undefined = executionReceipt(new TypeError("failure"));',
+    'const operation: MutationOperation = "review";',
+    "const cleanups: readonly ExecutionCleanup[] = []; const stops: readonly ExecutionStop[] = [];",
+    'const cancellableReview: ReviewInput = { verdict: "satisfied", signal: new AbortController().signal };',
+    "declare const completed: MutationResult<Review>;",
+    "const completedOperation: MutationOperation = completed.operation;",
+    "const completedCleanup: readonly ExecutionCleanup[] = completed.cleanup;",
+    "const completedStops: readonly ExecutionStop[] = completed.executionStops;",
+    "// @ts-expect-error cleanup belongs to the invocation, not the node value",
+    "completed.value.cleanup;",
+    "// @ts-expect-error the duplicate singular leak carrier was removed",
+    "completed.leak;",
+    "void receipt; void operation; void cleanups; void stops; void cancellableReview; void completedOperation; void completedCleanup; void completedStops;",
     'import type { AkuId, AkumaAlias, AkumaStatus, AliasBinding, AliasStage, CallInput, CallResult, Dispatch, DispatchFailure, DispatchStage, ForkInput, ForkResult, IntegrationFailure } from "@astrosheep/keiyaku";',
     'const repo = await Repo.at({ path: "." });',
     'import { requireBranchesToBeUpToDateFrom } from "@astrosheep/keiyaku";',
@@ -299,7 +313,7 @@ test("package root exposes only the ruled library values and declarations", () =
   );
   assert.equal(
     output.trim(),
-    "AkumaWorldScopeError,AuthorityCorruptionError,Delivery,Keiyaku,KeiyakuRefused,KeiyakuRetry,NoGitWorldError,Repo,SettingsError,World,WorldError,bodyRequestExecution,gatesFrom,projectMutationFinality,settings,worktreeHooksFrom",
+    "AkumaWorldScopeError,AuthorityCorruptionError,Delivery,Keiyaku,KeiyakuRefused,KeiyakuRetry,NoGitWorldError,Repo,SettingsError,World,WorldError,bodyRequestExecution,executionReceipt,gatesFrom,projectMutationFinality,settings,worktreeHooksFrom",
   );
 });
 

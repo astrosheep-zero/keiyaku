@@ -72,7 +72,7 @@ export type ArcInput = ActorOptions & Readonly<{ markdown: string }>;
 export type ContractListInput = Readonly<{ repo: Repo }>;
 export type ContractObservationInput = Readonly<{ repo: Repo; id: ContractId }>;
 export type KeiyakuOfInput = Readonly<{ repo: Repo; id: ContractId }>;
-export type ReviewInput = Readonly<{ verdict: AttestationVerdict; summary?: string }>;
+export type ReviewInput = Readonly<{ verdict: AttestationVerdict; summary?: string; signal?: AbortSignal }>;
 export type AbandonInput = ActorOptions & Readonly<{ note?: string }>;
 export type DeliverInput = Readonly<{
   message?: string;

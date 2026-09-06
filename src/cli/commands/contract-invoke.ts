@@ -32,6 +32,7 @@ function actorFromEdge(actor: string | undefined, environment: NodeJS.ProcessEnv
   try {
     return resolveActor({ env: environment, ...(actor === undefined ? {} : { actor }) });
   } catch (error) {
+    if (error instanceof Error && "executionReceipt" in error) throw error;
     throw new CliUsageError(error instanceof Error ? error.message : String(error));
   }
 }
@@ -40,6 +41,7 @@ function consumeSettings<T>(run: () => T, ErrorType: new (message: string) => Er
   try {
     return run();
   } catch (error) {
+    if (error instanceof Error && "executionReceipt" in error) throw error;
     if (error instanceof ErrorType) throw new CliUsageError(error.message);
     throw error;
   }
@@ -81,6 +83,7 @@ async function bindDraftReceipt(establishWorld: () => Promise<WorldRoot>, markdo
   try {
     return preserveBindDraft(await establishWorld(), markdown);
   } catch (error) {
+    if (error instanceof Error && "executionReceipt" in error) throw error;
     return draftWarning(error);
   }
 }
@@ -91,6 +94,7 @@ async function bindDraftReceiptAtCwd(input: Readonly<{ processCwd?: string; cwd?
     const { resolveInvocationCwd } = await import("../coordinates.js");
     return await preserveBindDraft(await resolveInvocationCwd(input), markdown);
   } catch (error) {
+    if (error instanceof Error && "executionReceipt" in error) throw error;
     return draftWarning(error);
   }
 }
@@ -102,6 +106,7 @@ export async function admitMarkdownBindSyntax(
     const { parseMarkdownBindDocument } = await import("../../library/contract.js");
     parseMarkdownBindDocument(input.markdown);
   } catch (error) {
+    if (error instanceof Error && "executionReceipt" in error) throw error;
     if (!(error instanceof TypeError)) throw error;
     const { BindDraftError } = await import("../draft.js");
     throw new BindDraftError(error, await bindDraftReceiptAtCwd(input, input.markdown));
@@ -155,6 +160,7 @@ async function invokeBind(input: ContractMutationInput): Promise<InvocationResul
     if (result.kind !== "refused") return result;
     return { ...result, draft: await bindDraftReceipt(establishWorld, markdown) };
   } catch (error) {
+    if (error instanceof Error && "executionReceipt" in error) throw error;
     if (!(error instanceof TypeError)) throw error;
     const { BindDraftError } = await import("../draft.js");
     throw new BindDraftError(error, await bindDraftReceipt(establishWorld, markdown));
@@ -201,6 +207,7 @@ async function invokeDeliver(
     if (!("facts" in delivered)) return delivered;
     return acceptedDeliver(delivered, seat.id);
   } catch (error) {
+    if (error instanceof Error && "executionReceipt" in error) throw error;
     const { KeiyakuRefused, KeiyakuRetry } = await import("../../library/keiyaku.js");
     if (error instanceof KeiyakuRefused) {
       return { kind: "refused", verb: "deliver", contract: seat.id, refusal: deliverRefusal(error.refusal) };

@@ -309,6 +309,8 @@ export async function acquireTargetPlacementFence(
   return await acquireSqliteTransactionLock({
     path: resolve(commonGitDirectory(repository), "keiyaku", "locks", "target-placement", `${locator}.sqlite`),
     mode: "immediate",
+    timeoutMs: 5_000,
+    ...(repository.signal === undefined ? {} : { signal: repository.signal }),
   });
 }
 

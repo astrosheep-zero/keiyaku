@@ -89,7 +89,8 @@ test("architecture policy keeps Kanshi on public-owner composition", () => {
       "export const decode = decodeContractDocument;",
       "export const validate = assertRegionPattern;",
     ].join("\n"),
-    "kanshi/report.ts": 'import type { RegionOverlap } from "../library/region.js"; export type Overlap = RegionOverlap;',
+    "kanshi/report.ts":
+      'import type { RegionOverlap } from "../library/region.js"; export type Overlap = RegionOverlap;',
     "kanshi/select.ts":
       'import { assertRegionPattern } from "../body/region.js"; export const validate = assertRegionPattern;',
   });
@@ -513,5 +514,41 @@ test("architecture source discovery includes executable JS, MJS, and CJS scripts
     assert.equal(runArchitectureCheck(root), 1);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("leading admissions cannot restart completion or perform trailing placement", () => {
+  for (const verb of ["review", "deliver"]) {
+    const allowed = check({
+      "protocol/completion.ts": "export type CompletionEvidence = {};",
+      [`protocol/${verb}.ts`]:
+        'import type { CompletionEvidence } from "./completion.js"; export type Value = CompletionEvidence;',
+    });
+    assert.deepEqual(allowed, []);
+    for (const node of ["completion", "placement", "reintegrate"]) {
+      const rejected = check({
+        [`protocol/${node}.ts`]: "export function advance(): void {}",
+        [`protocol/${verb}.ts`]: `import { advance } from "./${node}.js"; export const operation = advance;`,
+      });
+      assert.deepEqual(rules(rejected), ["architecture/dependency-direction"]);
+    }
+  }
+});
+
+test("local execution and continuation may call the node but not raw admission", () => {
+  for (const owner of ["contract-execution", "continuation"]) {
+    const accepted = check({
+      "protocol/completion.ts": "export function completeCandidate(): void {}",
+      [`library/${owner}.ts`]:
+        'import { completeCandidate } from "../protocol/completion.js"; export const execute = completeCandidate;',
+    });
+    assert.deepEqual(accepted, []);
+    for (const low of ["attempt", "placement", "run"]) {
+      const rejected = check({
+        [`protocol/${low}.ts`]: "export function raw(): void {}",
+        [`library/${owner}.ts`]: `import { raw } from "../protocol/${low}.js"; export const execute = raw;`,
+      });
+      assert.deepEqual(rules(rejected), ["architecture/dependency-direction"]);
+    }
   }
 });

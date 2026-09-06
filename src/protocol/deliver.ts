@@ -32,16 +32,14 @@ import type { ActorId, ContractId, ContractState, DeliverData, JournalEntry, Sna
 import { decideDeliver, type DeliverInput, type DeliverRefusal } from "../core/verbs/deliver.js";
 import { currentVerifiedAttestation, type CurrentVerifiedAttestation } from "./intent.js";
 import { admitDecidedOffer, mintAttempts } from "./attempt.js";
-import { admitted } from "./outcome.js";
-import { completeCandidate, type CompletionEvidence, type CompletionResult } from "./completion.js";
-import { completeLeadingAdmission, contractCheckpoint } from "./progress.js";
+import type { LeadingOutcome } from "./outcome.js";
+import type { CompletionEvidence } from "./completion.js";
 import { appointmentFor, readPlaceRegister, type ManagedWorktreeAppointment } from "../workspace-place.js";
 import type {
   AttemptDecision,
   DeliverConflictRefusal,
   DeliveryPreparationRefusal,
   DocumentDerivation,
-  IntentOutcome,
   IntentRefusal,
   MutationOperationInput,
 } from "./operations.js";
@@ -85,12 +83,6 @@ type DeliveryFailure =
   | DeliveryPreparationRefusal
   | import("../verification/declaration.js").VerificationDeclarationRefusal
   | DeliverRefusal;
-type PreparedDelivery = Readonly<{
-  delivery: DeliveryIdentity;
-  derivation: DocumentDerivation;
-  workspacePath?: string;
-}>;
-
 async function captureAuthorizedDeliveryTender(
   repository: import("../git/process.js").GitRepository,
   stage: Readonly<{
@@ -306,10 +298,7 @@ function worktreeInput(
   );
 }
 
-function hasSupersedingVerification(
-  state: ContractState,
-  journal: readonly JournalEntry[],
-): boolean {
+function hasSupersedingVerification(state: ContractState, journal: readonly JournalEntry[]): boolean {
   if (state.delivery === null) return false;
   const current = currentVerifiedAttestation(state);
   if (current === undefined) return false;
@@ -340,7 +329,12 @@ async function speculateDelivery(input: DeliverOperationInput): Promise<Speculat
     input.includeDirty,
   );
   if (captured.kind === "refused") {
-    return { observation, state, derivation, preparation: { kind: "refused", document: derivation.document, refusal: captured.refusal } };
+    return {
+      observation,
+      state,
+      derivation,
+      preparation: { kind: "refused", document: derivation.document, refusal: captured.refusal },
+    };
   }
   const capturedWorktree = await worktreeInput(input.scope, state, captured.data);
   if (
@@ -386,19 +380,20 @@ async function decideAndAdmitDelivery(
   seat: PrivateStatePublicationSeat,
   observation: GitDecisionObservation,
   speculated: SpeculativeDelivery,
-): Promise<AttemptDecision<PreparedDelivery>> {
+): Promise<AttemptDecision<DeliveryIdentity>> {
   if (speculated.continuation === true) {
     const record = observation.journals.get(input.contractId);
     const state = record?.state;
-    if (record === undefined || state === null || state === undefined || state.delivery === null || speculated.derivation === undefined) {
+    if (record === undefined || state === null || state === undefined || state.delivery === null) {
       return { kind: "redecide" };
     }
+    input.progress?.recordAdmission({ kind: "accepted", facts: [], state, journal: record.entries });
     return {
       kind: "accepted",
       facts: [],
       state,
       journal: record.entries,
-      value: { delivery: state.delivery.data, derivation: speculated.derivation },
+      value: state.delivery.data,
     };
   }
   const preparation = await resolveDeliveryPreparation(input, speculated);
@@ -422,12 +417,12 @@ async function decideAndAdmitDelivery(
     attempt,
     offer: decision.offer,
     primaryContract: input.contractId,
+    ...(input.progress === undefined ? {} : input.progress === undefined ? {} : { progress: input.progress }),
   });
   if (admission.kind !== "accepted") return admission;
-  if (speculated.derivation === undefined) throw new Error("accepted delivery is missing its document derivation");
   return {
     ...admission,
-    value: { delivery: preparation.data, derivation: speculated.derivation },
+    value: preparation.data,
   };
 }
 
@@ -436,7 +431,7 @@ async function deliverAttemptInPrivateStateSeat(
   attempt: AttemptContext,
   seat: PrivateStatePublicationSeat,
   speculated: SpeculativeDelivery,
-): Promise<AttemptDecision<PreparedDelivery>> {
+): Promise<AttemptDecision<DeliveryIdentity>> {
   const observation = await matchingPrivateRootObservation(
     input.scope,
     input.channel,
@@ -457,63 +452,13 @@ async function deliverAttemptInPrivateStateSeat(
 async function deliverAttempt(
   input: DeliverOperationInput,
   attempt: AttemptContext,
-): Promise<AttemptDecision<PreparedDelivery>> {
+): Promise<AttemptDecision<DeliveryIdentity>> {
   const speculated = await speculateDelivery(input);
   return await privateStateSeatAttempt(
     input.scope,
     async (seat) => await deliverAttemptInPrivateStateSeat(input, attempt, seat, speculated),
     attemptDecisionWithSeatClose,
   );
-}
-
-async function completeDelivery(
-  input: DeliverOperationInput,
-  first: Extract<AttemptDecision<PreparedDelivery>, { kind: "accepted" }>,
-): Promise<IntentOutcome<DeliverValue>> {
-  const derivation = first.value.derivation;
-  if (derivation.verification.kind !== "prepared") {
-    throw new Error("accepted delivery is missing its Verification preparation");
-  }
-  const completed = await completeCandidate({
-    channel: input.channel,
-    repository: input.scope,
-    contractId: input.contractId,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
-    ...(first.state.coordinates.target === undefined ? {} : { target: first.state.coordinates.target }),
-    verification: derivation.verification,
-    checkpoint: contractCheckpoint(first),
-    verifyInitial: true,
-  });
-  return admitted(completeLeadingAdmission(first, completed.progress), {
-    ...first.value.delivery,
-    ...completed.evidence,
-  });
-}
-
-export async function continueDeliveryOperation(
-  input: Readonly<{
-    scope: MutationOperationInput["scope"];
-    channel: MutationOperationInput["channel"];
-    state: ContractState;
-    journal: readonly JournalEntry[];
-    deriveDocument: (state: ContractState) => DocumentDerivation;
-    actor?: ActorId;
-    signal?: AbortSignal;
-  }>,
-): Promise<CompletionResult> {
-  const contractId = input.state.id;
-  return await completeCandidate({
-    channel: input.channel,
-    repository: input.scope,
-    contractId,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
-    ...(input.state.coordinates.target === undefined ? {} : { target: input.state.coordinates.target }),
-    verification: input.deriveDocument(input.state).verification,
-    checkpoint: contractCheckpoint(input),
-    verifyInitial: true,
-  });
 }
 
 function isIntegrationConflict(refusal: IntentRefusal): refusal is IntegrationConflictRefusal {
@@ -581,7 +526,7 @@ async function mergeStatePresentRefusal(
 async function materializeDeliverConflict(
   input: DeliverOperationInput,
   refusal: IntegrationConflictRefusal,
-): Promise<IntentOutcome<DeliverValue> | IntegrationConflictMaterialized> {
+): Promise<LeadingOutcome<DeliveryIdentity, IntentRefusal> | IntegrationConflictMaterialized> {
   if (refusal.conflictPaths === undefined) throw new Error("conflicted integration is missing conflict paths");
   const appointed = await appointedDeliverWorkspace(input);
   if ("kind" in appointed) return appointed;
@@ -633,17 +578,17 @@ async function materializeDeliverConflict(
 async function finishDeliverRefusal(
   input: DeliverOperationInput,
   refusal: IntentRefusal,
-): Promise<IntentOutcome<DeliverValue> | IntegrationConflictMaterialized> {
+): Promise<LeadingOutcome<DeliveryIdentity, IntentRefusal> | IntegrationConflictMaterialized> {
   if (!isIntegrationConflict(refusal)) return { kind: "refused", refusal };
   if (input.materializeConflict !== true) return { kind: "refused", refusal: conflictDeliverRefusal(refusal) };
   return await materializeDeliverConflict(input, refusal);
 }
 
-export async function deliverOperation(
+export async function admitDeliveryOperation(
   input: DeliverOperationInput,
-): Promise<IntentOutcome<DeliverValue> | IntegrationConflictMaterialized> {
+): Promise<LeadingOutcome<DeliveryIdentity, IntentRefusal> | IntegrationConflictMaterialized> {
   const attempts = mintAttempts({ entryCount: 2 });
-  let first: Extract<AttemptDecision<PreparedDelivery>, { kind: "accepted" }> | null = null;
+  let first: Extract<AttemptDecision<DeliveryIdentity>, { kind: "accepted" }> | null = null;
   for (let index = 0; index < attempts.length; index += 1) {
     const result = await deliverAttempt(input, attempts[index]!);
     if (result.kind === "accepted") {
@@ -655,5 +600,6 @@ export async function deliverOperation(
     if (result.kind === "collision" && index + 1 === attempts.length) return { kind: "retry", reason: result };
   }
   if (first === null) return { kind: "retry", reason: { kind: "exhausted" } };
-  return await completeDelivery(input, first);
+  input.progress?.recordResidue(input.contractId, first);
+  return first;
 }

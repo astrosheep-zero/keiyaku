@@ -71,6 +71,7 @@ function contractUpstream(processConfiguration: BodyProcessConfiguration): Contr
         contractId: input.contractId,
         requester: input.requester,
         verdict: input.verdict,
+        signal: input.signal,
         ...(input.summary === undefined ? {} : { summary: input.summary }),
         hooks: worktreeHooksFrom({ settings: configuration }),
       });

@@ -47,3 +47,10 @@ are ephemeral process observations. They are useful only when they report an
 actual boundary, never as simulated progress, persisted facts, or a hidden
 alternative protocol. The renderer has no scanner grammar, output schema, or
 private status vocabulary of its own.
+
+When an exceptional Contract execution already confirmed admissions, the CLI
+reports the failure together with those receipts instead of projecting a usage
+error or a no-effect refusal. Text and JSON preserve the same admitted facts and
+failure boundary. Ordinary cancellation and execution stops retain their phase;
+resource cleanup has one invocation-wide carrier with sufficient ownership
+coordinates to distinguish problems from different candidates or dependents.

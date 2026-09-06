@@ -56,6 +56,7 @@ export async function executeForwardedReview(
     requester: ActorId;
     verdict: AttestationVerdict;
     summary?: string;
+    signal?: AbortSignal;
     hooks: Parameters<typeof executeLocalReview>[0]["hooks"];
   }>,
 ): Promise<Readonly<{ result: MutationResult<Review>; reviewFactId?: string }>> {
@@ -66,6 +67,7 @@ export async function executeForwardedReview(
     verdict: input.verdict,
     ...(input.summary === undefined ? {} : { summary: input.summary }),
     hooks: input.hooks,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
   const review = result.facts.find((fact) => fact.kind === "attestation");
   if (review === undefined) throw new Error("accepted review is missing its journal fact");

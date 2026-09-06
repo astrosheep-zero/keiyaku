@@ -29,6 +29,18 @@ lag on the accepted result; it cannot reclassify the leading act as refused or
 hide its facts. Recovery evidence, when cleanup needs it, is transient Git
 custody rather than a new Contract fact or retention promise.
 
+The addressed operation is explicit in an invocation answer. Consumers never
+infer which operation ran from coincidental members of its value. Finality is
+projected once from the operation's conclusions and outstanding work, not from
+a separately transported pending summary.
+
+A programming error or corrupt authority remains exceptional even after a
+leading act was accepted. The exceptional answer retains the original failure
+category and the invocation's confirmed receipts; it is neither a normal
+success nor a refusal proving no effect. Ordinary trailing execution failures
+instead remain explicit stops on the accepted answer. Neither path reconstructs
+invocation ownership by scanning whatever facts happen to exist afterward.
+
 ## Contract Outcomes
 
 Delivery and review may admit their leading fact while verification, placement,
@@ -64,6 +76,11 @@ a successful, non-authoritative planning observation: it neither grants nor
 denies write authority, and failure to collect it does not undo binding or
 amendment.
 
+A continuation reports every dependent it actually attempted: completion or a
+specific semantic, physical, or operational stop. A stopped dependent does not
+hide successful siblings or replace the addressed Contract's head. Discovery
+failure and cancellation retain all earlier confirmed admissions.
+
 ## Audit And Observation
 
 Audit returns one already-adjudicated picture of candidate readiness,
@@ -84,3 +101,10 @@ Verification scratch cleanup or worktree removal can report physical residue
 after admission. Such reports stay on the accepted invocation result, do not
 change its exit meaning, and never become journal facts, cleanup authority, or
 reconciliation input.
+
+Cleanup belongs to the whole invocation, independently of the current candidate.
+All retained resources and failed cleanup attempts keep their known owner and
+candidate coordinates. A newer verification can replace candidate conclusions,
+but cannot overwrite an earlier resource problem or discard a dependent's
+cleanup report. Cleanup reporting has one public carrier; operation values do
+not repeat it as another source of truth.

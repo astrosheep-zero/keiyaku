@@ -14,11 +14,10 @@ import type {
 import { renderAcceptedAudit } from "./audit.js";
 import {
   appendHookPayload,
-  cleanupLines,
+  executionCleanupLines,
+  executionStopLines,
   hookFailureSummary,
-  leakLines,
   outcomeLines,
-  seatCloseLines,
   receiptPayload,
   receiptRow,
   reuseLines,
@@ -214,9 +213,8 @@ function acceptedLagRows(result: AcceptedEnvelope, columns: number): readonly st
   for (const lag of result.settlementLags) {
     pushBlock(obligations, settlementLagRows(lag, columns));
   }
-  if (result.seatClose !== undefined && result.seatClose.length > 0) {
-    pushBlock(obligations, seatCloseLines(result.seatClose, columns));
-  }
+  pushBlock(obligations, executionCleanupLines(result.cleanup ?? [], columns, result.contract));
+  pushBlock(obligations, executionStopLines(result.executionStops ?? [], columns));
   return obligations;
 }
 
@@ -309,8 +307,18 @@ function continuationLines(result: AcceptedDeliverResult | AcceptedReviewResult,
     receiptRow(lines, "✓", "continuation", [{ text: "complete" }, { text: contractId, opaque: true }], columns);
   }
   for (const { contractId, stop } of report.stopped) {
-    if ("kind" in stop) receiptRow(lines, "!", contractId, [{ text: "· already terminal" }], columns);
-    else lines.push(...stopLines(stop, columns, contractId, contractId));
+    if ("kind" in stop && stop.kind === "already-terminal")
+      receiptRow(lines, "!", contractId, [{ text: "already terminal" }], columns);
+    else if ("kind" in stop && stop.kind === "execution-stopped") lines.push(...executionStopLines([stop], columns));
+    else if ("kind" in stop && stop.kind === "physical-lag") {
+      receiptRow(
+        lines,
+        "!",
+        "continuation",
+        [{ text: contractId, opaque: true }, { text: "physical follow stopped" }],
+        columns,
+      );
+    } else lines.push(...stopLines(stop, columns, contractId, contractId));
   }
   return lines;
 }
@@ -355,8 +363,6 @@ function renderAcceptedDeliver(result: AcceptedDeliverResult, columns: number): 
   }
   if (!complete) receiptRow(lines, " ", "candidate", [{ text: "kept" }], columns);
   lines.push(...continuationLines(result, columns));
-  if (result.cleanup !== undefined) pushBlock(lines, cleanupLines(result.cleanup, columns));
-  if (result.leak !== undefined) pushBlock(lines, leakLines(result.leak, columns));
   lines.push(...recordBlock(result, columns));
   return lines.join("\n");
 }
@@ -380,8 +386,6 @@ function renderAcceptedReview(result: AcceptedReviewResult, columns: number): st
   }
   if (!complete) receiptRow(lines, " ", "candidate", [{ text: "kept" }], columns);
   lines.push(...continuationLines(result, columns));
-  if (result.cleanup !== undefined) pushBlock(lines, cleanupLines(result.cleanup, columns));
-  if (result.leak !== undefined) pushBlock(lines, leakLines(result.leak, columns));
   lines.push(...acceptedDeviations(result, columns), ...recordBlock(result, columns));
   return lines.join("\n");
 }

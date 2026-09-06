@@ -64,6 +64,15 @@ transport-only unknown outcome carrying the same logical identity for diagnosis
 only; no safe-retry guarantee is implied, and it is never a claim that the
 request was voided. Requests never enter the idle predicate.
 
+An unproven service may carry an operation-owned exceptional receipt in its
+live diagnostic. Transport retains it as opaque owner failure evidence, and only
+the operation owner decodes its meaning. A known leading Contract admission does
+not prove the whole service completed, and an exception after that admission
+cannot prove the request voided. This live detail does not add replay authority:
+when it is gone, recovery still reports the durable request disposition without
+re-executing the service. Parent cancellation reaches the same local execution
+path, including trailing placement and verification.
+
 ## Cross-owner replay review
 
 Every Body Request review records the following facts in the owning Heart and

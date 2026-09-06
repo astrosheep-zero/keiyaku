@@ -1,3 +1,14 @@
+import { ExecutionProgress, executionStop } from "../protocol/progress.js";
+import {
+  executionCleanupSchema,
+  executionStopSchema,
+  mutationOperationSchema,
+  receiptFromProgress,
+  withExecutionReceipt,
+  type MutationOperation,
+  type ExecutionCleanup,
+  type ExecutionStop,
+} from "./execution-result.js";
 import { decodeJournalEntry } from "../core/facts/codec.js";
 import {
   contractHead,
@@ -7,14 +18,11 @@ import {
   type JournalEntry,
   type SnapshotId,
 } from "../core/facts/types.js";
-import { decodePrivateStateSeatCloseLag, decodeWorktreeLeak } from "../git/result-codec.js";
-import { concatenatePrivateStateSeatClose, type PrivateStateSeatCloseLag } from "../git/private-state-seat.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import type { ReconcileReport } from "../protocol/reconcile.js";
 import type { RepositoryScope } from "../protocol/operations.js";
 import type { IntentOutcome } from "../protocol/operations.js";
 import type { AcceptedObligations } from "../protocol/outcome.js";
-import { decodeVerificationCleanupFailure } from "../protocol/result-codec.js";
 import { decodeSettlementLag } from "../settlement/result-codec.js";
 import type { SettlementReport } from "../settlement/settle.js";
 import type { TaskHolderAdmission } from "../settlement/holder.js";
@@ -35,7 +43,8 @@ export type MutationFinalitySurface =
   | "continuation"
   | "reconciliation"
   | "settlement"
-  | "cleanup";
+  | "cleanup"
+  | "execution";
 
 export type MutationFinality =
   | Readonly<{ kind: "complete" }>
@@ -47,12 +56,12 @@ export type MutationFinality =
 
 type AcceptedFinalityInput = Readonly<{
   kind: "accepted";
+  operation: MutationOperation;
   lags: MutationResult<unknown>["lags"];
   settlementLags: MutationResult<unknown>["settlementLags"];
   value?: unknown;
-  cleanup?: AcceptedObligations["cleanup"];
-  leak?: AcceptedObligations["leak"];
-  seatClose?: AcceptedObligations["seatClose"];
+  cleanup: readonly ExecutionCleanup[];
+  executionStops: readonly ExecutionStop[];
   /** Transport/display convenience only; never finality authority. */
   pending?: readonly MutationPendingSurface[];
 }>;
@@ -80,7 +89,8 @@ export function decodeMutationPendingSurface(value: unknown): MutationPendingSur
     object.surface !== "continuation" &&
     object.surface !== "reconciliation" &&
     object.surface !== "settlement" &&
-    object.surface !== "cleanup"
+    object.surface !== "cleanup" &&
+    object.surface !== "execution"
   )
     throw new Error("malformed pending surface");
   if (typeof object.required !== "boolean") throw new Error("malformed pending surface");
@@ -111,12 +121,15 @@ const materializedConflictSchema = ownerSchema(
   "expected materialized conflict",
 ) satisfies z.ZodType<IntegrationConflictMaterialized>;
 
-export const mutationResultSchema = <Value>(value: z.ZodType<Value>): z.ZodType<MutationResult<Value>> =>
+export const mutationResultSchema = <Value>(
+  operation: MutationOperation,
+  value: z.ZodType<Value>,
+): z.ZodType<MutationResult<Value>> =>
   ownerSchema((input): MutationResult<Value> => {
     if (input === null || typeof input !== "object" || Array.isArray(input))
       throw new Error("malformed mutation result");
     const object = input as Record<string, unknown>;
-    if (object.kind !== "accepted") throw new Error("malformed mutation result");
+    if (object.kind !== "accepted" || object.operation !== operation) throw new Error("malformed mutation result");
     if (typeof object.head !== "string") throw new Error("malformed mutation result");
     const parsedValue = value.safeParse(object.value);
     if (!parsedValue.success) throw new Error("malformed mutation result");
@@ -124,11 +137,14 @@ export const mutationResultSchema = <Value>(value: z.ZodType<Value>): z.ZodType<
       !Array.isArray(object.facts) ||
       !Array.isArray(object.lags) ||
       !Array.isArray(object.settlementLags) ||
+      !Array.isArray(object.cleanup) ||
+      !Array.isArray(object.executionStops) ||
       !Array.isArray(object.pending)
     )
       throw new Error("malformed mutation result");
     const allowed = new Set([
       "kind",
+      "operation",
       "facts",
       "head",
       "value",
@@ -137,12 +153,14 @@ export const mutationResultSchema = <Value>(value: z.ZodType<Value>): z.ZodType<
       "pending",
       "recoverySnapshot",
       "cleanup",
-      "leak",
-      "seatClose",
+      "executionStops",
     ]);
     for (const key of Object.keys(object)) if (!allowed.has(key)) throw new Error("malformed mutation result");
     return {
       kind: "accepted",
+      operation,
+      cleanup: (object.cleanup as unknown[]).map((item) => executionCleanupSchema.parse(item)),
+      executionStops: (object.executionStops as unknown[]).map((item) => executionStopSchema.parse(item)),
       facts: object.facts.map(decodeJournalEntry),
       head: contractHead(object.head),
       value: parsedValue.data,
@@ -152,35 +170,25 @@ export const mutationResultSchema = <Value>(value: z.ZodType<Value>): z.ZodType<
       ...(object.recoverySnapshot === undefined
         ? {}
         : { recoverySnapshot: snapshotId(String(object.recoverySnapshot)) }),
-      ...(object.cleanup === undefined ? {} : { cleanup: decodeVerificationCleanupFailure(object.cleanup) }),
-      ...(object.leak === undefined ? {} : { leak: decodeWorktreeLeak(object.leak) }),
-      ...(object.seatClose === undefined
-        ? {}
-        : {
-            seatClose: Array.isArray(object.seatClose)
-              ? object.seatClose.map(decodePrivateStateSeatCloseLag)
-              : (() => {
-                  throw new Error("malformed mutation result");
-                })(),
-          }),
     };
   }, "expected mutation result");
 
 export const deliveryResultSchema = z.union([
-  mutationResultSchema(deliveryValueSchema),
+  mutationResultSchema("deliver", deliveryValueSchema),
   materializedConflictSchema,
 ]) satisfies z.ZodType<MutationResult<DeliveryValue> | IntegrationConflictMaterialized>;
-export const reviewResultSchema = mutationResultSchema(reviewSchema) satisfies z.ZodType<MutationResult<Review>>;
-export const auditResultSchema = mutationResultSchema(auditReportSchema) satisfies z.ZodType<
+export const reviewResultSchema = mutationResultSchema("review", reviewSchema) satisfies z.ZodType<
+  MutationResult<Review>
+>;
+export const auditResultSchema = mutationResultSchema("audit", auditReportSchema) satisfies z.ZodType<
   MutationResult<AuditReport>
 >;
 
 type ObligationPendingInput = Readonly<{
   lags: MutationResult<unknown>["lags"];
   settlementLags: MutationResult<unknown>["settlementLags"];
-  cleanup?: AcceptedObligations["cleanup"];
-  leak?: AcceptedObligations["leak"];
-  seatClose?: AcceptedObligations["seatClose"];
+  cleanup: readonly ExecutionCleanup[];
+  executionStops: readonly ExecutionStop[];
 }>;
 
 type CompletionPendingValue = Readonly<{
@@ -211,8 +219,13 @@ export function obligationPending(input: ObligationPendingInput): readonly Mutat
   const pending: MutationPendingSurface[] = [];
   if (input.lags.length > 0) pending.push(pendingSurface("reconciliation", true));
   if (input.settlementLags.length > 0) pending.push(pendingSurface("settlement", true));
-  if (input.cleanup !== undefined || input.leak !== undefined || (input.seatClose?.length ?? 0) > 0) {
+  if (input.cleanup.length > 0) {
     pending.push(pendingSurface("cleanup", false));
+  }
+  for (const stop of input.executionStops) {
+    const surface: MutationFinalitySurface =
+      stop.stage === "admission" ? "execution" : stop.stage === "reintegration" ? "placement" : stop.stage;
+    pending.push(pendingSurface(surface, true));
   }
   return pending;
 }
@@ -221,38 +234,23 @@ export function collectAcceptedPending(
   valuePending: readonly MutationPendingSurface[],
   obligations: ObligationPendingInput,
 ): readonly MutationPendingSurface[] {
-  return [...valuePending, ...obligationPending(obligations)];
+  const result = new Map<MutationFinalitySurface, boolean>();
+  for (const pending of [...valuePending, ...obligationPending(obligations)])
+    result.set(pending.surface, pending.required || result.get(pending.surface) === true);
+  return [...result].map(([surface, required]) => ({ surface, required }));
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
-}
-
-function phasePendingFromValue(value: unknown): readonly MutationPendingSurface[] {
-  if (!isRecord(value)) return [];
-  if ("candidate" in value && "verification" in value && "target" in value) {
-    return auditPending(value as AuditReport);
-  }
-  if ("verification" in value || "placement" in value || "continuation" in value) {
-    return completionPending(value as CompletionPendingValue);
-  }
+function phasePendingFromValue(operation: MutationOperation, value: unknown): readonly MutationPendingSurface[] {
+  if (operation === "audit") return auditPending(value as AuditReport);
+  if (operation === "review" || operation === "deliver") return completionPending(value as CompletionPendingValue);
   return [];
-}
-
-function obligationSurfacesFromAccepted(input: AcceptedFinalityInput): ObligationPendingInput {
-  return {
-    lags: input.lags,
-    settlementLags: input.settlementLags,
-    ...(input.cleanup === undefined ? {} : { cleanup: input.cleanup }),
-    ...(input.leak === undefined ? {} : { leak: input.leak }),
-    ...(input.seatClose === undefined || input.seatClose.length === 0 ? {} : { seatClose: input.seatClose }),
-  };
 }
 
 /** Purely projects the leading mutation's finality without changing its details. */
 export function projectMutationFinality(input: MutationFinalityInput): MutationFinality {
-  if (input.kind !== "accepted") return { kind: "not-admitted" };
-  const pending = collectAcceptedPending(phasePendingFromValue(input.value), obligationSurfacesFromAccepted(input));
+  if (input.kind !== "accepted" || !mutationOperationSchema.safeParse(input.operation).success)
+    return { kind: "not-admitted" };
+  const pending = collectAcceptedPending(phasePendingFromValue(input.operation, input.value), input);
   return pending.length === 0 ? { kind: "complete" } : { kind: "accepted-pending", pending };
 }
 
@@ -266,88 +264,98 @@ export type AcceptedIntent<Value> = Readonly<
   } & AcceptedObligations
 >;
 
-export type MutationResult<Value> = Readonly<
-  {
-    kind: "accepted";
-    facts: readonly JournalEntry[];
-    head: ContractHead;
-    value: Value;
-    lags: ReconcileCompletion["lag"];
-    settlementLags: SettlementReport["lags"];
-    recoverySnapshot?: SnapshotId;
-    pending: readonly MutationPendingSurface[];
-  } & AcceptedObligations
->;
+export type MutationResult<Value> = Readonly<{
+  kind: "accepted";
+  operation: MutationOperation;
+  facts: readonly JournalEntry[];
+  head: ContractHead;
+  value: Value;
+  lags: ReconcileCompletion["lag"];
+  settlementLags: SettlementReport["lags"];
+  cleanup: readonly ExecutionCleanup[];
+  executionStops: readonly ExecutionStop[];
+  recoverySnapshot?: SnapshotId;
+  pending: readonly MutationPendingSurface[];
+}>;
 
 type Completion<Value, PublicValue> = Readonly<{
+  operation: MutationOperation;
+  progress?: ExecutionProgress;
   scope: RepositoryScope;
   channel: GitDecodeChannel;
   contractId: ContractId;
   accepted: AcceptedIntent<Value>;
   value: (result: Value) => PublicValue;
-  valuePending?: (value: PublicValue) => readonly MutationPendingSurface[];
   hooks: WorktreeHooks;
 }>;
 
 export function completionInput<Value, PublicValue>(
-  input: Readonly<{
-    scope: RepositoryScope;
-    channel: GitDecodeChannel;
-    contractId: ContractId;
-    value: (result: Value) => PublicValue;
-    hooks: WorktreeHooks;
-    valuePending?: (value: PublicValue) => readonly MutationPendingSurface[];
-  }>,
+  input: Omit<Completion<Value, PublicValue>, "accepted">,
 ): Omit<Completion<Value, PublicValue>, "accepted"> {
-  return { ...input, valuePending: input.valuePending ?? noValuePending };
+  return input;
 }
 
-function concatenateSettlementSeatClose(
-  current: readonly PrivateStateSeatCloseLag[] | undefined,
-  reports: readonly ReconcileCompletion[],
-): readonly PrivateStateSeatCloseLag[] | undefined {
-  return reports.reduce<readonly PrivateStateSeatCloseLag[] | undefined>(
-    (seatClose, report) => concatenatePrivateStateSeatClose(seatClose, report.settlement.seatClose),
-    current,
-  );
+function rememberLeading<Value, PublicValue>(input: Completion<Value, PublicValue>, progress: ExecutionProgress): void {
+  const { accepted, contractId } = input;
+  // An accepted audit may be observational and deliberately contain no new fact.
+  progress.recordPublication(contractId, accepted.head, accepted.facts);
+  progress.recordResidue(contractId, accepted);
+  if (input.progress === undefined) progress.recordVerification(contractId, undefined, accepted);
+}
+
+async function reconcileExecution<Value, PublicValue>(
+  input: Completion<Value, PublicValue>,
+  progress: ExecutionProgress,
+): Promise<readonly ReconcileCompletion[]> {
+  const contracts = [...new Set([input.contractId, ...progress.snapshot().affected])];
+  const reports: ReconcileCompletion[] = [];
+  for (const contractId of contracts) {
+    try {
+      input.scope.signal?.throwIfAborted();
+      const report = await completeReconcile({
+        scope: input.scope,
+        channel: input.channel,
+        contractId,
+        hooks: input.hooks,
+        retryHooks: false,
+      });
+      reports.push(report);
+      progress.recordResidue(contractId, report.settlement);
+    } catch (error) {
+      progress.recordStop(executionStop(contractId, "reconciliation", error, input.scope.signal));
+    }
+  }
+  return reports;
 }
 
 export async function completeMutation<Value, PublicValue>(
   input: Completion<Value, PublicValue>,
 ): Promise<MutationResult<PublicValue>> {
-  const { scope, channel, contractId, accepted, value, hooks } = input;
-  const valuePending = input.valuePending ?? noValuePending;
-  const contracts = [...new Set([contractId, ...accepted.facts.map((fact) => fact.contract)])];
-  const reports: ReconcileCompletion[] = [];
-  for (const affected of contracts) {
-    reports.push(await completeReconcile({ scope, channel, contractId: affected, hooks, retryHooks: false }));
-  }
-  const seatClose = concatenateSettlementSeatClose(accepted.seatClose, reports);
-  const obligations: AcceptedObligations = {
-    ...(accepted.cleanup === undefined ? {} : { cleanup: accepted.cleanup }),
-    ...(accepted.leak === undefined ? {} : { leak: accepted.leak }),
-    ...(seatClose === undefined || seatClose.length === 0 ? {} : { seatClose }),
-  };
-  const effects = [...(accepted.physical?.effects ?? []), ...reports.flatMap((report) => report.effects)];
-  const recoverySnapshot = effects.findLast((effect) => effect.kind === "recovery-snapshot")?.snapshot;
-  const publicValue = value(accepted.value);
-  const lags = [...(accepted.physical?.lag ?? []), ...reports.flatMap((report) => report.lag)];
-  const settlementLags = reports.flatMap((report) => report.settlement.lags);
-  return {
-    kind: "accepted",
-    facts: accepted.facts,
-    head: accepted.head,
-    value: publicValue,
-    lags,
-    settlementLags,
-    pending: collectAcceptedPending(valuePending(publicValue), {
-      lags,
-      settlementLags,
+  const progress = input.progress ?? new ExecutionProgress();
+  rememberLeading(input, progress);
+  try {
+    const reports = await reconcileExecution(input, progress);
+    const snapshot = progress.snapshot();
+    const effects = [...snapshot.physical.effects, ...reports.flatMap((report) => report.effects)];
+    const recoverySnapshot = effects.findLast((effect) => effect.kind === "recovery-snapshot")?.snapshot;
+    const publicValue = input.value(input.accepted.value);
+    const lags = [...snapshot.physical.lag, ...reports.flatMap((report) => report.lag)];
+    const settlementLags = reports.flatMap((report) => report.settlement.lags);
+    const obligations = { lags, settlementLags, cleanup: snapshot.cleanup, executionStops: snapshot.stops };
+    return {
+      kind: "accepted",
+      operation: input.operation,
+      facts: snapshot.facts,
+      head: progress.head(input.contractId) ?? input.accepted.head,
+      value: publicValue,
       ...obligations,
-    }),
-    ...(recoverySnapshot === undefined ? {} : { recoverySnapshot }),
-    ...obligations,
-  };
+      pending: collectAcceptedPending(phasePendingFromValue(input.operation, publicValue), obligations),
+      ...(recoverySnapshot === undefined ? {} : { recoverySnapshot }),
+    };
+  } catch (error) {
+    const receipt = receiptFromProgress(input.operation, input.contractId, progress);
+    throw receipt === undefined ? error : withExecutionReceipt(error, receipt);
+  }
 }
 
 export async function completeHolderMutation<Value, PublicValue, Refusal>(

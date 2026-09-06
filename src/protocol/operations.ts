@@ -1,3 +1,4 @@
+import type { ExecutionProgress } from "./progress.js";
 import { readDeliveryDiff } from "../git/integration.js";
 import type { DirtyWorkspaceRefusal } from "../git/tender.js";
 import { currentBranch, observeContractAt } from "../git/observe.js";
@@ -102,7 +103,8 @@ type OperationInput = Readonly<{
   contractId: ContractId;
   actor?: import("../core/facts/types.js").ActorId;
 }>;
-export type MutationOperationInput = OperationInput & Readonly<{ channel: GitDecodeChannel }>;
+export type MutationOperationInput = OperationInput &
+  Readonly<{ channel: GitDecodeChannel; progress?: ExecutionProgress }>;
 
 export type DocumentDerivation = Readonly<{
   document: DocumentKey;
@@ -210,7 +212,9 @@ export function placementStop(
 export type RepositoryScope = GitRepository;
 
 export function withScopeAbortSignal(scope: RepositoryScope, signal: AbortSignal | undefined): RepositoryScope {
-  return signal === undefined ? scope : { ...scope, signal };
+  return signal === undefined
+    ? scope
+    : { ...scope, signal: scope.signal === undefined ? signal : AbortSignal.any([scope.signal, signal]) };
 }
 
 export async function scopeOperation(

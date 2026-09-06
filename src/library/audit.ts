@@ -1,11 +1,11 @@
 import { decodeContractDocument } from "../body/decode.js";
 import type { ActorId, ContractId } from "../core/facts/types.js";
-import { withGitDecodeChannel } from "../git/read-observation.js";
+import { withContractExecution } from "./contract-execution.js";
 import { auditOperation, type AuditReport } from "../protocol/audit.js";
-import { withScopeAbortSignal, type RepositoryScope } from "../protocol/operations.js";
+import { type RepositoryScope } from "../protocol/operations.js";
 import { worktreeHooksOption, type WorktreeHooks } from "./configuration.js";
 import { documentDerivation } from "./input.js";
-import { auditPending, completeMutation, type MutationResult } from "./mutation.js";
+import { completeMutation, type MutationResult } from "./mutation.js";
 import { requireAccepted } from "./refusal.js";
 
 export type AuditInput = Readonly<{
@@ -36,30 +36,40 @@ export async function auditContract(
   }>,
 ): Promise<MutationResult<AuditReport>> {
   const composition = input.composition;
-  const scope = withScopeAbortSignal(input.scope, input.input.signal);
-  return withGitDecodeChannel(scope, async (channel) => {
-    const accepted = requireAccepted(
-      await auditOperation({
+  return withContractExecution(
+    {
+      scope: input.scope,
+      contractId: input.contractId,
+      hooks: composition?.hooks ?? worktreeHooksOption(undefined),
+      ...(input.input.signal === undefined ? {} : { signal: input.input.signal }),
+    },
+    "audit",
+    async ({ scope, channel, progress }) => {
+      const accepted = requireAccepted(
+        await auditOperation({
+          scope,
+          channel,
+          progress,
+          contractId: input.contractId,
+          deriveDocument: (state) =>
+            documentDerivation(decodeContractDocument(state.terms.document.bytes), state.terms.gates, state.id),
+          includeDirty: input.input.includeDirty,
+          showDiff: input.input.showDiff,
+          requireBranchesToBeUpToDate: composition?.requireBranchesToBeUpToDate ?? false,
+          ...(input.input.signal === undefined ? {} : { signal: input.input.signal }),
+          ...(composition?.actor === undefined ? {} : { actor: composition.actor }),
+        }),
+      );
+      return completeMutation({
+        operation: "audit",
+        progress,
         scope,
         channel,
         contractId: input.contractId,
-        deriveDocument: (state) =>
-          documentDerivation(decodeContractDocument(state.terms.document.bytes), state.terms.gates, state.id),
-        includeDirty: input.input.includeDirty,
-        showDiff: input.input.showDiff,
-        requireBranchesToBeUpToDate: composition?.requireBranchesToBeUpToDate ?? false,
-        ...(input.input.signal === undefined ? {} : { signal: input.input.signal }),
-        ...(composition?.actor === undefined ? {} : { actor: composition.actor }),
-      }),
-    );
-    return completeMutation({
-      scope,
-      channel,
-      contractId: input.contractId,
-      accepted,
-      value: (report: AuditReport) => report,
-      valuePending: auditPending,
-      hooks: composition?.hooks ?? worktreeHooksOption(undefined),
-    });
-  });
+        accepted,
+        value: (report: AuditReport) => report,
+        hooks: composition?.hooks ?? worktreeHooksOption(undefined),
+      });
+    },
+  );
 }

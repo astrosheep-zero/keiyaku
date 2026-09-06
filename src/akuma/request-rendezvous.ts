@@ -12,8 +12,9 @@ export class AkumaBodyRequestError extends Error {
     readonly outcome: "refused" | "voided" | "unproven" | "unknown",
     readonly diagnostic: string,
     readonly requestId: string,
+    options?: ErrorOptions,
   ) {
-    super(`${action} ${outcome === "refused" ? "refused" : outcome}: ${diagnostic}`);
+    super(`${action} ${outcome === "refused" ? "refused" : outcome}: ${diagnostic}`, options);
     this.name = "AkumaBodyRequestError";
   }
 }
@@ -25,16 +26,27 @@ function throwVoidedRequestFailure(
   decodeFailure: ((failure: unknown) => Error | null) | undefined,
   requestId: string,
 ): never {
-  const ownerFailure = decodeVoidedOwnerFailure(failure, decodeFailure);
+  const ownerFailure = decodeOwnerFailure(failure, decodeFailure);
   if (ownerFailure !== null) throw withRequestMetadata(ownerFailure, requestId, action);
   throw new AkumaBodyRequestError(action, "voided", evidence, requestId);
 }
 
-function throwUnprovenRequestFailure(action: string, evidence: string, requestId: string): never {
-  throw new AkumaBodyRequestError(action, "unproven", evidence, requestId);
+function throwUnprovenRequestFailure(
+  action: string,
+  evidence: string,
+  requestId: string,
+  ownerFailure: Error | null,
+): never {
+  throw new AkumaBodyRequestError(
+    action,
+    "unproven",
+    evidence,
+    requestId,
+    ownerFailure === null ? undefined : { cause: ownerFailure },
+  );
 }
 
-function decodeVoidedOwnerFailure(
+function decodeOwnerFailure(
   failure: unknown | undefined,
   decodeFailure: ((failure: unknown) => Error | null) | undefined,
 ): Error | null {
@@ -82,7 +94,14 @@ async function readRequestReceipt<Input, Output, Reference>(
         receipt.id,
       );
     }
-    if (receipt.state === "unproven") throwUnprovenRequestFailure(receipt.action, receipt.evidence, receipt.id);
+    if (receipt.state === "unproven") {
+      throwUnprovenRequestFailure(
+        receipt.action,
+        receipt.evidence,
+        receipt.id,
+        decodeOwnerFailure(receipt.failure, input.command.decodeFailure),
+      );
+    }
     if ("reference" in receipt) {
       let reference: Reference;
       try {

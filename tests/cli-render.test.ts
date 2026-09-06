@@ -299,18 +299,21 @@ test("Verification cleanup action names are safe in text receipts", () => {
     head: contractHead("head"),
     facts: [],
     settlementLags: [],
-    cleanup: {
-      phase: "destroy",
-      name,
-      detail: { kind: "timeout" },
-    },
+    cleanup: [
+      {
+        kind: "verification-cleanup",
+        contractId: contractId("kei/hostile-cleanup-name"),
+        failure: { phase: "destroy", name, detail: { kind: "timeout" } },
+      },
+    ],
   };
 
   const text = renderText(result, { columns: 200, color: false });
   assert.equal(text.includes('name="destroy\\rINJECT\\u001b[2J"'), true);
   assert.doesNotMatch(text, /\rINJECT/u);
   assert.doesNotMatch(text, /\u001b/u);
-  assert.equal(result.cleanup?.name, name);
+  const cleanup = result.cleanup?.[0];
+  assert.equal(cleanup?.kind === "verification-cleanup" ? cleanup.failure.name : undefined, name);
 });
 
 test("Verification text receipts distinguish configured action names", () => {
@@ -401,7 +404,13 @@ test("accepted bind receipts expose confirmed private-state seat close lag", () 
     workspace: { kind: "worktree", path: "/tmp/wt" },
     target: null,
     overlaps: [],
-    seatClose: [{ kind: "private-state-seat-close-failed", diagnostic: "seat close failed after publication" }],
+    cleanup: [
+      {
+        kind: "private-state-seat-close",
+        contractId: contract,
+        failure: { kind: "private-state-seat-close-failed", diagnostic: "seat close failed after publication" },
+      },
+    ],
   };
   assert.equal(
     renderText(result),

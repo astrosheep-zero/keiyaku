@@ -1,3 +1,4 @@
+import type { ExecutionProgress } from "./progress.js";
 import { randomBytes } from "node:crypto";
 import { encodeEntry } from "../core/facts/codec.js";
 import { admit, type PublicationFailed } from "../git/admission.js";
@@ -7,7 +8,7 @@ import {
   type PrivateStatePublicationSeat,
   type PrivateStateSeatCloseLag,
 } from "../git/private-state-seat.js";
-import type { GitDecodeChannel } from "../git/read-observation.js";
+import { withGitDecodeChannel, type GitDecodeChannel } from "../git/read-observation.js";
 import { GIT_REF, readRefs, type GitRefAssertion } from "../git/repository.js";
 import type { GitRepository } from "../git/process.js";
 import type { AttemptContext } from "../core/decide.js";
@@ -166,9 +167,10 @@ export async function admitDecidedOffer<Refusal = never>(
     primaryContract: ContractId;
     assertions?: readonly GitRefAssertion[];
     validateAdmission?: (observation: GitDecisionObservation) => Refusal | undefined | Promise<Refusal | undefined>;
+    progress?: ExecutionProgress;
   }>,
 ): Promise<DecidedOfferResult<Refusal>> {
-  const { channel, repository, decisionObservation, attempt, offer, primaryContract } = input;
+  const { repository, decisionObservation, attempt, offer, primaryContract } = input;
   const assertions = input.assertions ?? [];
   validateOffer(offer, attempt);
   const primary = primaryAppend(offer, primaryContract);
@@ -179,26 +181,35 @@ export async function admitDecidedOffer<Refusal = never>(
   const admission = await admit(repository, offer, decisionObservation.admission, assertions);
   if (admission.kind === "accepted") {
     confirmPrivateStatePublication(input.seat);
-    return {
+    input.progress?.recordPublication(primaryContract, admission.heads[primary.contractId]!, offerEntries(offer));
+    const accepted: AcceptedAdmission = {
       kind: "accepted",
       facts: offerEntries(offer),
       state: snapshotFor(primary, decisionObservation.journals, admission.heads[primary.contractId]!),
       journal: journalFor(primary, decisionObservation.journals),
     };
+    input.progress?.recordAdmission(accepted);
+    return accepted;
   }
   if (admission.kind === "publication-failed") {
     return (await publicationPremiseMoved(repository, decisionObservation, offer, assertions))
       ? { kind: "redecide" }
       : admission;
   }
-  const recovered = await observeContractsForAdmissionAt(
-    repository,
-    channel,
-    offer.facts.map((append) => append.contractId),
+  const recoveryRepository = { ...repository, signal: AbortSignal.timeout(5_000) };
+  const recovered = await withGitDecodeChannel(recoveryRepository, async (recoveryChannel) =>
+    observeContractsForAdmissionAt(
+      recoveryRepository,
+      recoveryChannel,
+      offer.facts.map((append) => append.contractId),
+    ),
   );
   const classification = classifyUnknownAttempt({ contracts: recovered.journals }, offer);
-  if (classification.kind === "accepted")
-    return confirmRecoveredAcceptance(input.seat, { contracts: recovered.journals }, offer, primaryContract);
+  if (classification.kind === "accepted") {
+    const accepted = confirmRecoveredAcceptance(input.seat, { contracts: recovered.journals }, offer, primaryContract);
+    input.progress?.recordAdmission(accepted);
+    return accepted;
+  }
   return classification.kind === "collision" ? { kind: "collision" } : { kind: "redecide" };
 }
 

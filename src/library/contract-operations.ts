@@ -1,5 +1,6 @@
+import { executionReceipt } from "./execution-result.js";
 import { contractId, snapshotId } from "../core/facts/types.js";
-import { requestBodyCommand } from "../akuma/request-rendezvous.js";
+import { AkumaBodyRequestError, requestBodyCommand } from "../akuma/request-rendezvous.js";
 import {
   eraseRequestCommand,
   type ErasedRequestCommand,
@@ -313,6 +314,21 @@ export async function requestForwardedContractLive<Action extends ContractReques
     command,
     value: input.request,
     ...(input.signal === undefined ? {} : { signal: input.signal }),
+  }).catch((error: unknown) => {
+    if (
+      error instanceof AkumaBodyRequestError &&
+      error.outcome === "unproven" &&
+      error.cause instanceof Error &&
+      executionReceipt(error.cause) !== undefined
+    ) {
+      Object.defineProperties(error.cause, {
+        requestId: { value: error.requestId, enumerable: false },
+        action: { value: error.action, enumerable: false },
+        requestOutcome: { value: error.outcome, enumerable: false },
+      });
+      throw error.cause;
+    }
+    throw error;
   });
   if (response.kind === "reference") {
     throw new Error(
