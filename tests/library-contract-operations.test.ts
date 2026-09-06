@@ -276,7 +276,7 @@ async function disjointTargetedDelivery(materializeConflict?: boolean) {
 }
 
 // Each case owns a fresh repository; only sealed fixture templates are shared.
-describe("public Contract operations", { concurrency: 2 }, () => {
+describe("public Contract operations", { concurrency: 4 }, () => {
   test("plain deliver conflict is an executable handoff and does not mutate", async () => {
     const { repository, contract, targetHead, worktree } = await reviewGatedConflictCandidateFixture();
     const git = await cachedRepositoryAt(repository.path);
