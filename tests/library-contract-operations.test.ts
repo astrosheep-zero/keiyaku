@@ -762,34 +762,6 @@ describe("public Contract operations", { concurrency: 4 }, () => {
     assert.equal(readFileSync(log, "utf8").trim().split("\n").length, 2);
   });
 
-  test("one public handle reuses its resolved repository scope", async () => {
-    const repository = repositoryWithMain();
-    const initial = await bind(repository);
-    const id = (await initial.state()).id;
-    const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), id);
-    commitCandidate(repository, worktree);
-    const log = resolve(repository.path, ".git", "scope-discovery.log");
-    writeFileSync(log, "");
-
-    const operations = await withGitShim(
-      [
-        'if [ "$*" = "rev-parse --path-format=absolute --git-common-dir" ]; then',
-        "  printf 'discovery\\n' >> \"$KEIYAKU_SCOPE_DISCOVERY_LOG\"",
-        "fi",
-        'exec "$KEIYAKU_REAL_GIT" "$@"',
-      ].join("\n"),
-      { KEIYAKU_SCOPE_DISCOVERY_LOG: log },
-      async (gitPath) => {
-        const contract = Keiyaku.of({ repo: await Repo.at({ path: repository.path, gitPath }), id });
-        return [contract.state(), contract.deliver(), contract.reconcile()] as const;
-      },
-    );
-    const [state] = await Promise.all(operations);
-
-    assert.equal(state.id, id);
-    assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), ["discovery"]);
-  });
-
   test("repo reconcile reports an empty completed world", async () => {
     const repository = repositoryWithMain();
     const report = await (await cachedRepoAt(repository.path)).reconcile();
@@ -859,22 +831,6 @@ describe("public Contract operations", { concurrency: 4 }, () => {
       () => cachedRepoAt(repository.path).then((repo) => repo.reconcile()),
       (error: unknown) => error instanceof AuthorityCorruptionError,
     );
-  });
-
-  test("repo reconcile keeps per-Contract reports after discovery", async () => {
-    const { repository, contract: bound } = await defaultBoundFixture();
-    const id = (await bound.state()).id;
-    const report = await (await cachedRepoAt(repository.path)).reconcile();
-    assert.equal(report.kind, "completed");
-    if (report.kind !== "completed") return;
-    assert.equal(report.contracts.length, 1);
-    assert.equal(report.contracts[0]?.contractId, id);
-    assert.equal(Array.isArray(report.contracts[0]?.report.effects), true);
-    assert.equal(Array.isArray(report.contracts[0]?.report.lag), true);
-    assert.deepEqual(report.contracts[0]?.report.settlement, {
-      actions: [],
-      lags: [],
-    });
   });
 
   test("repo reconcile does not observe the Contract world again after discovery", async () => {

@@ -114,6 +114,8 @@ test("built package supports Contract, Task, Kanshi and plugin consumers", (cont
       "--moduleResolution",
       "NodeNext",
       "--preserveSymlinks",
+      // Check our consumers, not every transitive dependency declaration again.
+      "--skipLibCheck",
       ...examples,
     ],
     { cwd: directory, encoding: "utf8" },
