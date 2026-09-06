@@ -1,0 +1,22 @@
+name: Test economy resume snapshot
+on:
+  push:
+    branches: [codex/test-economy-20260906]
+    paths: ['.github/workflows/test-economy-resume.yml']
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: git bundle create /tmp/test-economy-resume.bundle HEAD refs/remotes/origin/main
+      - uses: actions/upload-artifact@v4
+        with:
+          name: test-economy-resume
+          path: /tmp/test-economy-resume.bundle
+          retention-days: 1
