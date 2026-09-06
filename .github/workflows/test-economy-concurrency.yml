@@ -1,0 +1,50 @@
+name: Test economy worker contention
+on:
+  push:
+    branches: [codex/test-economy-20260906]
+    paths: ['.github/workflows/test-economy-concurrency.yml']
+permissions:
+  contents: read
+jobs:
+  measure:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: a73939c2c97a121e4812ec56ce9a4f50cb1a920a
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24.x
+          cache: npm
+      - run: npm ci --ignore-scripts --prefer-offline
+      - run: npm run build && npm run test:compile
+      - name: Compare bounded worker counts on the same built suite
+        run: |
+          git config --global user.name 'Keiyaku test benchmark'
+          git config --global user.email 'benchmark@example.invalid'
+          mkdir worker-results
+          python3 - <<'PY'
+          import json, pathlib, subprocess, time
+          output = pathlib.Path('worker-results')
+          results = []
+          for index, workers in enumerate([8, 4, 6, 8]):
+              start = time.perf_counter()
+              log = output / f'{index}-{workers}.log'
+              with log.open('w') as stream:
+                  run = subprocess.run(['/usr/bin/time', '-f', 'REAL %e USER %U SYS %S RSS %M', 'node', 'scripts/run-tests.mjs', '--compiled', f'--test-concurrency={workers}'], stdout=stream, stderr=subprocess.STDOUT)
+              row = {'workers': workers, 'seconds': round(time.perf_counter() - start, 3), 'status': run.returncode}
+              results.append(row)
+              (output / 'results.json').write_text(json.dumps(results, indent=2))
+              print(json.dumps(row), flush=True)
+              if run.returncode:
+                  print(log.read_text()[-16000:])
+                  raise SystemExit('Do not time a failed suite')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-economy-worker-results
+          path: worker-results/
+          retention-days: 14
