@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
     inputs:
@@ -55,16 +56,13 @@ jobs:
         run: npm test
 
       - name: Run packaged CLI end-to-end test
-        run: npm run test:e2e
+        run: npm run test:e2e:built
 
-      - name: Typecheck source, scripts, and scoped semantic tests
-        run: npm run test:typecheck
+      - name: Typecheck tests and scripts (source was checked by build)
+        run: npm run test:typecheck:scoped-tests && npm run test:typecheck:scripts
 
-      - name: Lint source, scripts, and tests
-        run: npm run lint
-
-      - name: Build
-        run: npm run build
+      - name: Lint tests (source and scripts were checked by maintainability)
+        run: npx --no-install eslint tests
 
       - name: Check patch whitespace
         run: git diff --check
@@ -102,16 +100,10 @@ jobs:
         run: npm run build
 
       - name: Run packaged CLI end-to-end test
-        run: npm run test:e2e
-
-      - name: Typecheck source, scripts, and scoped semantic tests
-        run: npm run test:typecheck
-
-      - name: Lint source, scripts, and tests
-        run: npm run lint
+        run: npm run test:e2e:built
 
   windows-native:
-    name: windows-2022 / native behavioral suite
+    name: windows-2022 / native, package, and Git Bash
     runs-on: windows-2022
     timeout-minutes: 20
 
@@ -136,6 +128,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Compile tests once
+        run: npm run test:compile
+
       - name: Run Windows-native behavioral tests
         env:
           WINDOWS_TEST_FILES: ${{ inputs.windows_test_files }}
@@ -143,8 +138,8 @@ jobs:
         shell: pwsh
         run: |
           $nodeArgs = @(
-            "--import", "tsx",
             "scripts/run-tests.mjs",
+            "--compiled",
             "--test-concurrency=1",
             "--test-reporter=spec",
             "--test-timeout=30000"
@@ -157,24 +152,13 @@ jobs:
             $nodeArgs += @($env:WINDOWS_TEST_FILES -split "\s+" | Where-Object { $_ })
           } else {
             $nodeArgs += @(
-              "tests/actor.test.ts",
               "tests/akuma-heart.test.ts",
               "tests/akuma-identity.test.ts",
-              "tests/amend-body.test.ts",
-              "tests/arc.test.ts",
-              "tests/contract-document.test.ts",
-              "tests/dependency-currentness.test.ts",
-              "tests/fold.test.ts",
-              "tests/markdown-ast.test.ts",
-              "tests/model-impact.test.ts",
               "tests/namespace-context.test.ts",
-              "tests/normalized-identity.test.ts",
-              "tests/observation.test.ts",
               "tests/runtime-proc.test.ts",
               "tests/windows-akuma-process.test.ts",
               "tests/settings.test.ts",
               "tests/sqlite-transaction-lock.test.ts",
-              "tests/task-document.test.ts",
               "tests/task-operations.test.ts",
               "tests/world.test.ts",
               "tests/path-coordinates.test.ts"
@@ -183,34 +167,8 @@ jobs:
           & node @nodeArgs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Check patch whitespace
-        run: git diff --check
-
-  windows-msys:
-    name: windows-2022 / Git Bash coordinate smoke
-    runs-on: windows-2022
-    timeout-minutes: 15
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v5
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: 24.x
-          cache: npm
-
-      - name: Set up Zig
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: 0.14.1
-
-      - name: Install locked dependencies
-        run: npm ci --ignore-scripts --prefer-offline
-
-      - name: Build
-        run: npm run build
+      - name: Run packaged CLI end-to-end test
+        run: npm run test:e2e:built
 
       - name: Run Git Bash coordinate smoke
         shell: pwsh
@@ -251,38 +209,8 @@ jobs:
           & $bash --noprofile --norc -lc $script
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-  windows-e2e:
-    name: windows-2022 / packaged CLI e2e
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.windows_test_files == '' }}
-    runs-on: windows-2022
-    timeout-minutes: 15
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v5
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: 24.x
-          cache: npm
-
-      - name: Set up Zig
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: 0.14.1
-
-      - name: Install locked dependencies
-        run: npm ci --ignore-scripts --prefer-offline
-
-      - name: Run packaged CLI end-to-end test
-        run: npm run test:e2e
-
-      - name: Typecheck source, scripts, and scoped semantic tests
-        run: npm run test:typecheck
-
-  macos-e2e:
-    name: macos-14 / packaged CLI e2e
+  macos-native:
+    name: macos-14 / native filesystem and process
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.windows_test_files == '' }}
     runs-on: macos-14
     timeout-minutes: 15
@@ -297,19 +225,14 @@ jobs:
           node-version: 24.x
           cache: npm
 
-      - name: Set up Zig
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: 0.14.1
-
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --prefer-offline
 
-      - name: Run packaged CLI end-to-end test
-        run: npm run test:e2e
+      - name: Build and compile tests
+        run: npm run build && npm run test:compile
 
-      - name: Run filesystem coordinate tests
-        run: npm run test:focused -- tests/path-coordinates.test.ts
-
-      - name: Typecheck source, scripts, and scoped semantic tests
-        run: npm run test:typecheck
+      - name: Run native filesystem, process, and SQLite tests
+        run: >-
+          node scripts/run-tests.mjs --compiled --test-concurrency=2
+          tests/path-coordinates.test.ts tests/world.test.ts
+          tests/runtime-proc.test.ts tests/sqlite-transaction-lock.test.ts
