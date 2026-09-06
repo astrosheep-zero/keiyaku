@@ -29,12 +29,11 @@ jobs:
           git config --global user.name 'Keiyaku benchmark'
           git config --global user.email 'benchmark@example.invalid'
           git worktree add --detach "$RUNNER_TEMP/kei-baseline" 515b948ecde880f2f945ec736763039d4f85a601
-          git worktree add --detach "$RUNNER_TEMP/kei-candidate" a73939c2c97a121e4812ec56ce9a4f50cb1a920a
+          git worktree add --detach "$RUNNER_TEMP/kei-candidate" 3da0f35d4db810b3bff5f3f8d77107bc983faa8d
           (cd "$RUNNER_TEMP/kei-baseline" && npm ci --ignore-scripts --prefer-offline)
           (cd "$RUNNER_TEMP/kei-candidate" && npm ci --ignore-scripts --prefer-offline)
           mkdir -p benchmark-results
-          # Same correctness fixes on both sides. No suite deletion, scheduling,
-          # compilation, timer, or bulk-fixture optimization is copied to baseline.
+          # Symmetric correctness repairs, not performance changes or deleted tests.
           for path in src/contract-guidance.ts src/akuma/akuma-product.ts tests/windows-akuma-process.test.ts tests/support/process.ts tests/akuma-body.test.ts; do
             cp "$RUNNER_TEMP/kei-candidate/$path" "$RUNNER_TEMP/kei-baseline/$path"
           done
@@ -45,7 +44,7 @@ jobs:
           import json, os, pathlib, platform, statistics, subprocess, time
           root = pathlib.Path(os.environ['RUNNER_TEMP'])
           logs = pathlib.Path('benchmark-results')
-          revisions = {'baseline': '515b948ecde880f2f945ec736763039d4f85a601', 'candidate': 'a73939c2c97a121e4812ec56ce9a4f50cb1a920a'}
+          revisions = {'baseline': '515b948ecde880f2f945ec736763039d4f85a601', 'candidate': '3da0f35d4db810b3bff5f3f8d77107bc983faa8d'}
           report = {'revisions': revisions, 'command': 'npm test', 'cpu_count': os.cpu_count(), 'platform': platform.platform(), 'node': subprocess.check_output(['node','--version'], text=True).strip(), 'git': subprocess.check_output(['git','--version'], text=True).strip(), 'environment': {'KNIP_DISABLE_RAW_TRANSFER': '1'}, 'normalizations': ['guidance formatting', 'wait for idle birth before schema Tell', 'await actual released fixture child exit', 'await successor completion instead of pending-queue polling'], 'runs': []}
           for index, side in enumerate(['baseline','candidate','baseline','candidate','candidate','baseline','baseline','candidate']):
             warmup = index < 2
@@ -63,14 +62,17 @@ jobs:
           medians = {side: statistics.median(r['seconds'] for r in report['runs'] if r['side']==side and not r['warmup']) for side in revisions}
           report['median_seconds'] = medians
           report['wall_time_reduction_percent'] = round(100*(1-medians['candidate']/medians['baseline']), 2)
+          report['meets_30_percent_goal'] = medians['candidate'] <= 0.7 * medians['baseline']
           (logs/'results.json').write_text(json.dumps(report, indent=2))
           print(json.dumps(report, indent=2), flush=True)
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
             summary.write('```json\n' + json.dumps(report, indent=2) + '\n```\n')
+          if not report['meets_30_percent_goal']:
+            raise SystemExit('Default suite has not yet reached 30 percent wall-time reduction')
           PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-economy-paired-results
+          name: test-economy-acceptance-results
           path: benchmark-results/
-          retention-days: 14
+          retention-days: 30
