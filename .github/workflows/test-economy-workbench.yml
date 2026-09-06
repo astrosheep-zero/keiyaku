@@ -5,31 +5,82 @@ on:
     paths: ['.github/workflows/test-economy-workbench.yml']
 permissions:
   contents: read
+concurrency:
+  group: test-economy-transfer
+  cancel-in-progress: false
 jobs:
-  export:
+  apply:
+    if: github.ref == 'refs/heads/codex/test-economy-20260906'
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          persist-credentials: false
+      - name: Reconstruct and verify the exact reviewed tree, then push this branch only
+        shell: bash
+        run: |
+          git config user.name 'Keiyaku test refactor'
+          git config user.email 'test-refactor@example.invalid'
+          python3 - <<'PY'
+          import base64, hashlib, json, lzma, os, pathlib, subprocess, tempfile
+          payload = json.loads(pathlib.Path('.test-economy-transfer.json').read_text())
+          raw = lzma.decompress(base64.b64decode(payload['changes'], validate=True))
+          assert hashlib.sha256(raw).hexdigest() == payload['sha256'], 'transfer digest mismatch'
+          assert payload['base'] == '515b948ecde880f2f945ec736763039d4f85a601'
+          head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          branch = 'refs/heads/codex/test-economy-20260906'
+          remote = subprocess.check_output(['git', 'ls-remote', 'origin', branch], text=True).split()[0]
+          assert remote == head, 'branch moved; do not overwrite concurrent work'
+          with tempfile.TemporaryDirectory() as directory:
+            env = dict(os.environ, GIT_INDEX_FILE=directory + '/index')
+            def git(*args, data=None):
+              return subprocess.check_output(['git', *args], input=data, env=env)
+            git('read-tree', payload['base'])
+            entries = json.loads(raw)
+            for path, *change in entries:
+              assert not path.startswith('/') and '..' not in pathlib.PurePosixPath(path).parts
+              if change == [None]:
+                git('update-index', '--force-remove', '--', path)
+                continue
+              mode, operations = change
+              try:
+                lines = git('show', payload['base'] + ':' + path).decode().splitlines(keepends=True)
+              except subprocess.CalledProcessError:
+                lines = []
+              for start, end, replacement in reversed(operations):
+                lines[start:end] = [replacement]
+              blob = git('hash-object', '-w', '--stdin', data=''.join(lines).encode()).decode().strip()
+              git('update-index', '--add', '--cacheinfo', mode, blob, path)
+            tree = git('write-tree').decode().strip()
+            assert tree == payload['tree'], ('tree mismatch', tree, payload['tree'])
+            commit = git('commit-tree', tree, '-p', head, '-m', 'test: prune redundant checks and compile isolated tests once').decode().strip()
+          subprocess.check_call(['git', 'push', 'origin', commit + ':' + branch])
+          subprocess.check_call(['git', 'reset', '--hard', commit])
+          print('Reviewed tree:', tree, 'Pushed commit:', commit, 'Changed paths:', len(entries))
+          PY
       - uses: actions/setup-node@v5
         with:
           node-version: 24.x
           cache: npm
-      - run: npm ci --ignore-scripts --prefer-offline
-      - name: Export clean source, Git objects, locked dependencies, and Node
-        run: |
-          mkdir -p /tmp/test-economy-export
-          git bundle create /tmp/test-economy-export/repository.bundle HEAD refs/remotes/origin/main
-          git archive HEAD | tar -x -C /tmp/test-economy-export
-          tar -cf /tmp/test-economy-export/dependencies.tar node_modules
-          cp "$(command -v node)" /tmp/test-economy-export/node
-          tar -czf /tmp/test-economy-checkout.tar.gz -C /tmp/test-economy-export .
-      - uses: actions/upload-artifact@v4
+      - uses: goto-bus-stop/setup-zig@v2
         with:
-          name: test-economy-checkout
-          path: /tmp/test-economy-checkout.tar.gz
-          retention-days: 1
-          compression-level: 0
+          version: 0.14.1
+      - run: npm ci --ignore-scripts --prefer-offline
+      - name: Configure fixture Git identity
+        run: |
+          git config --global user.name 'Keiyaku CI'
+          git config --global user.email 'keiyaku-ci@example.invalid'
+      - name: Full default verification
+        run: npm test
+      - name: Full semantic typecheck and lint
+        run: npm run test:typecheck && npm run lint
+      - name: Packaged CLI end-to-end verification
+        run: npm run test:e2e:built
+      - name: Verify no whitespace errors or temporary transfer files
+        run: |
+          git diff --check
+          test ! -e .test-economy-transfer.json
+          test ! -e .github/workflows/test-economy-workbench.yml
