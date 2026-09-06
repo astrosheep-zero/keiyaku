@@ -1,5 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { appendFileSync, chmodSync, cpSync, existsSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  chmodSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Repo } from "../../src/index.js";
@@ -97,16 +106,13 @@ export function withGitShim<T>(
     { mode: 0o755 },
   );
   chmodSync(shimPath, 0o755);
-  try {
-    return action(shimPath);
-  } catch (error) {
-    throw error;
-  }
+  return action(shimPath);
 }
 
 function initializedGitRepository(): TestGitRepository {
   const path = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-v4-")));
-  execFileSync("git", ["init", "--quiet", "--initial-branch=main", path]);
+  execFileSync("git", ["init", "--quiet", "--initial-branch=main", "--template=", path]);
+  mkdirSync(join(path, ".git", "info"));
   appendFileSync(
     join(path, ".git", "config"),
     [
