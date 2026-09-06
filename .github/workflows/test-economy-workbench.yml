@@ -1,0 +1,35 @@
+name: Test economy workbench
+on:
+  push:
+    branches: [codex/test-economy-20260906]
+    paths: ['.github/workflows/test-economy-workbench.yml']
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24.x
+          cache: npm
+      - run: npm ci --ignore-scripts --prefer-offline
+      - name: Export clean source, Git objects, locked dependencies, and Node
+        run: |
+          mkdir -p /tmp/test-economy-export
+          git bundle create /tmp/test-economy-export/repository.bundle HEAD refs/remotes/origin/main
+          git archive HEAD | tar -x -C /tmp/test-economy-export
+          tar -cf /tmp/test-economy-export/dependencies.tar node_modules
+          cp "$(command -v node)" /tmp/test-economy-export/node
+          tar -czf /tmp/test-economy-checkout.tar.gz -C /tmp/test-economy-export .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: test-economy-checkout
+          path: /tmp/test-economy-checkout.tar.gz
+          retention-days: 1
+          compression-level: 0
