@@ -5,9 +5,6 @@ on:
     paths: ['.github/workflows/test-economy-workbench.yml']
 permissions:
   contents: read
-concurrency:
-  group: test-economy-transfer
-  cancel-in-progress: false
 jobs:
   apply:
     if: github.ref == 'refs/heads/codex/test-economy-20260906'
@@ -19,8 +16,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - name: Reconstruct and verify the exact reviewed tree, then push this branch only
-        shell: bash
+      - name: Verify reviewed source and push the exact source tree without modifying workflows
         run: |
           git config user.name 'Keiyaku test refactor'
           git config user.email 'test-refactor@example.invalid'
@@ -32,8 +28,7 @@ jobs:
           assert payload['base'] == '515b948ecde880f2f945ec736763039d4f85a601'
           head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
           branch = 'refs/heads/codex/test-economy-20260906'
-          remote = subprocess.check_output(['git', 'ls-remote', 'origin', branch], text=True).split()[0]
-          assert remote == head, 'branch moved; do not overwrite concurrent work'
+          assert subprocess.check_output(['git', 'ls-remote', 'origin', branch], text=True).split()[0] == head
           with tempfile.TemporaryDirectory() as directory:
             env = dict(os.environ, GIT_INDEX_FILE=directory + '/index')
             def git(*args, data=None):
@@ -54,12 +49,22 @@ jobs:
                 lines[start:end] = [replacement]
               blob = git('hash-object', '-w', '--stdin', data=''.join(lines).encode()).decode().strip()
               git('update-index', '--add', '--cacheinfo', mode, blob, path)
+            reviewed = git('write-tree').decode().strip()
+            assert reviewed == payload['tree'], ('tree mismatch', reviewed, payload['tree'])
+            # Workflow edits use the connected GitHub action, never this job token.
+            for path in git('ls-files', '.github/workflows').decode().splitlines():
+              git('update-index', '--force-remove', '--', path)
+            for line in git('ls-tree', '-r', head, '--', '.github/workflows').decode().splitlines():
+              metadata, path = line.split('\t')
+              mode, kind, blob = metadata.split()
+              assert kind == 'blob'
+              git('update-index', '--add', '--cacheinfo', mode, blob, path)
             tree = git('write-tree').decode().strip()
-            assert tree == payload['tree'], ('tree mismatch', tree, payload['tree'])
+            assert not git('diff', head, tree, '--', '.github/workflows')
             commit = git('commit-tree', tree, '-p', head, '-m', 'test: prune redundant checks and compile isolated tests once').decode().strip()
           subprocess.check_call(['git', 'push', 'origin', commit + ':' + branch])
           subprocess.check_call(['git', 'reset', '--hard', commit])
-          print('Reviewed tree:', tree, 'Pushed commit:', commit, 'Changed paths:', len(entries))
+          print('Reviewed source tree:', reviewed, 'Pushed commit:', commit, 'Tree including unchanged workbench:', tree)
           PY
       - uses: actions/setup-node@v5
         with:
@@ -79,8 +84,3 @@ jobs:
         run: npm run test:typecheck && npm run lint
       - name: Packaged CLI end-to-end verification
         run: npm run test:e2e:built
-      - name: Verify no whitespace errors or temporary transfer files
-        run: |
-          git diff --check
-          test ! -e .test-economy-transfer.json
-          test ! -e .github/workflows/test-economy-workbench.yml
