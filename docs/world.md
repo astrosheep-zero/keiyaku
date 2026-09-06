@@ -12,7 +12,8 @@ establish action. Reading resolution never changes the filesystem; establishment
 creates only the selected World marker. Repository invocation selects the
 canonical primary-worktree World, while a non-repository invocation may use the
 nearest existing marker or establish its invocation directory. Home and the
-filesystem root are deliberately never Worlds.
+filesystem root follow the same rules as every other directory; marker
+discovery applies the same nearest-ancestor rule through the filesystem root.
 
 An explicit World construction establishes exactly its selected existing
 directory and never climbs. Exact proof is the read-only capability boundary for
@@ -22,7 +23,8 @@ marker. Outer operations prove raw process, transport, and JavaScript values
 once before any product effect; product constructors consume the minted World
 coordinate and do not resolve paths or inspect the current directory.
 
-The invocation directory is edge input, never persisted identity. Linked and
+The invocation directory is edge input, never persisted identity. Home and the
+filesystem root are ordinary coordinates, not special World kinds. Linked and
 managed worktrees of one repository share their World; no marker can split that
 product identity. Execution working directories remain a separate Akuma concern.
 Different repositories are different Worlds and are never combined into a

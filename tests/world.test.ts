@@ -117,21 +117,20 @@ test("Git reads do not create a marker and Git creation establishes only the pri
   assert.equal(existsSync(join(linked, ".keiyaku")), false);
 });
 
-test("World excludes the user home from locate and exact construction", async () => {
-  assert.equal(await World.locate(homedir()), null);
-  const resolution = await World.resolve(homedir());
-  assert.equal(resolution.candidate, null);
-  await assert.rejects(resolution.establish(), (error) => error instanceof WorldError && error.kind === "home-world");
-  await assert.rejects(World.at(homedir()), (error) => error instanceof WorldError && error.kind === "home-world");
+test("World treats the user home as an ordinary coordinate", async () => {
+  const home = await realpath(homedir());
+  const resolution = await World.resolve(home);
+  assert.equal(resolution.candidate, home);
+  assert.equal(await World.prove(home), home);
+  assert.equal(resolution.root, existsSync(join(home, ".keiyaku")) ? home : null);
 });
 
-test("World excludes the filesystem root from locate and exact construction", async () => {
+test("World treats the filesystem root as an ordinary coordinate", async () => {
   const root = parse(process.cwd()).root;
-  assert.equal(await World.locate(root), null);
   const resolution = await World.resolve(root);
-  assert.equal(resolution.candidate, null);
-  await assert.rejects(resolution.establish(), (error) => error instanceof WorldError && error.kind === "root-world");
-  await assert.rejects(World.at(root), (error) => error instanceof WorldError && error.kind === "root-world");
+  assert.equal(resolution.candidate, root);
+  assert.equal(await World.prove(root), root);
+  assert.equal(resolution.root, existsSync(join(root, ".keiyaku")) ? root : null);
 });
 
 test("World.prove mints only an exact canonical directory without writing", async () => {
@@ -153,14 +152,20 @@ test("World.prove mints only an exact canonical directory without writing", asyn
 
   assert.equal(await World.prove(canonicalRoot), canonicalRoot);
   assert.equal(await World.prove(canonicalNested), canonicalNested);
-  await assert.rejects(World.prove(`${canonicalRoot}/.`), (error) => error instanceof WorldError && error.kind === "invalid-world");
+  await assert.rejects(
+    World.prove(`${canonicalRoot}/.`),
+    (error) => error instanceof WorldError && error.kind === "invalid-world",
+  );
   await assert.rejects(World.prove("."), (error) => error instanceof WorldError && error.kind === "invalid-world");
   await assert.rejects(World.prove(link), (error) => error instanceof WorldError && error.kind === "invalid-world");
   await assert.rejects(World.prove(missing), (error) => error instanceof WorldError && error.kind === "invalid-world");
   await assert.rejects(World.prove(file), (error) => error instanceof WorldError && error.kind === "invalid-world");
-  await assert.rejects(World.prove(markerFile), (error) => error instanceof WorldError && error.kind === "invalid-world");
-  await assert.rejects(World.prove(homedir()), (error) => error instanceof WorldError && error.kind === "home-world");
-  await assert.rejects(World.prove(parse(process.cwd()).root), (error) => error instanceof WorldError && error.kind === "root-world");
+  await assert.rejects(
+    World.prove(markerFile),
+    (error) => error instanceof WorldError && error.kind === "invalid-world",
+  );
+  assert.equal(await World.prove(homedir()), await realpath(homedir()));
+  assert.equal(await World.prove(parse(process.cwd()).root), parse(process.cwd()).root);
   assert.equal(existsSync(nestedMarker), false);
   assert.deepEqual(
     [canonicalRoot, canonicalNested].map((path) => [path, readdirSync(path).sort()]),

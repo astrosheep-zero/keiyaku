@@ -1,5 +1,4 @@
 import { lstat, mkdir, realpath, stat } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join, parse, resolve } from "node:path";
 
 const WORLD_BRAND: unique symbol = Symbol("keiyaku.world");
@@ -16,20 +15,12 @@ export type WorldResolution = Readonly<{
 }>;
 
 export class WorldError extends Error {
-  readonly kind: "invalid-world" | "home-world" | "root-world";
+  readonly kind = "invalid-world" as const;
 
-  constructor(kind: "invalid-world" | "home-world" | "root-world", message: string) {
+  constructor(message: string) {
     super(message);
     this.name = "WorldError";
-    this.kind = kind;
-  }
-}
-
-async function homeRoot(): Promise<string> {
-  try {
-    return await realpath(resolve(homedir()));
-  } catch {
-    return resolve(homedir());
+    this.kind = "invalid-world";
   }
 }
 
@@ -42,12 +33,12 @@ async function directory(input: string, label: string): Promise<string> {
   try {
     real = await realpath(path);
   } catch (error) {
-    throw new WorldError("invalid-world", `world path is not an existing directory: ${path}`);
+    throw new WorldError(`world path is not an existing directory: ${path}`);
   }
   try {
     if (!(await stat(real)).isDirectory()) throw new Error("not a directory");
   } catch {
-    throw new WorldError("invalid-world", `world path is not a directory: ${real}`);
+    throw new WorldError(`world path is not a directory: ${real}`);
   }
   return real;
 }
@@ -60,15 +51,6 @@ function marker(root: string): string {
   return join(root, ".keiyaku");
 }
 
-async function rejectReservedRoot(root: string): Promise<void> {
-  if (root === (await homeRoot())) {
-    throw new WorldError("home-world", "the user home directory cannot be a Keiyaku world");
-  }
-  if (root === parse(root).root) {
-    throw new WorldError("root-world", "the filesystem root cannot be a Keiyaku world");
-  }
-}
-
 async function ensureMarker(root: string): Promise<void> {
   const path = marker(root);
   try {
@@ -76,7 +58,7 @@ async function ensureMarker(root: string): Promise<void> {
     return;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw new WorldError("invalid-world", `world marker is not a directory: ${path}`);
+      throw new WorldError(`world marker is not a directory: ${path}`);
     }
   }
   await mkdir(path, { recursive: true });
@@ -97,20 +79,17 @@ async function inputValues(
 
 async function locateMarker(input: string): Promise<WorldRoot | null> {
   let candidate = input;
-  const home = await homeRoot();
   for (;;) {
     const filesystemRoot = parse(candidate).root;
-    if (candidate !== home && candidate !== filesystemRoot) {
-      try {
-        if (!(await lstat(marker(candidate))).isDirectory()) {
-          throw new WorldError("invalid-world", `world marker is not a directory: ${marker(candidate)}`);
-        }
-        return brand(candidate);
-      } catch (error) {
-        if (error instanceof WorldError) throw error;
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-          throw new WorldError("invalid-world", `world marker is not a directory: ${marker(candidate)}`);
-        }
+    try {
+      if (!(await lstat(marker(candidate))).isDirectory()) {
+        throw new WorldError(`world marker is not a directory: ${marker(candidate)}`);
+      }
+      return brand(candidate);
+    } catch (error) {
+      if (error instanceof WorldError) throw error;
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw new WorldError(`world marker is not a directory: ${marker(candidate)}`);
       }
     }
     const parent = dirname(candidate);
@@ -121,7 +100,6 @@ async function locateMarker(input: string): Promise<WorldRoot | null> {
 
 async function exact(input: string): Promise<WorldRoot> {
   const root = await directory(input, "world");
-  await rejectReservedRoot(root);
   await ensureMarker(root);
   return brand(root);
 }
@@ -130,7 +108,7 @@ async function proved(input: string): Promise<WorldRoot> {
   const resolution = await resolved({ cwd: input, repositoryRoot: input });
   const root = resolution.root;
   if (root === null || input !== root) {
-    throw new WorldError("invalid-world", "world path must be its canonical physical directory coordinate");
+    throw new WorldError("world path must be its canonical physical directory coordinate");
   }
   return root;
 }
@@ -139,19 +117,11 @@ async function resolved(input: WorldInput): Promise<WorldResolution> {
   const values = await inputValues(input, "world location");
   const root = values.repositoryRoot === undefined ? await locateMarker(values.cwd) : brand(values.repositoryRoot);
   const selected = root ?? brand(values.cwd);
-  let candidate: WorldRoot | null = selected;
-  try {
-    await rejectReservedRoot(selected);
-  } catch (error) {
-    if (root !== null || !(error instanceof WorldError)) throw error;
-    candidate = null;
-  }
   return Object.freeze({
     root,
-    candidate,
-    async establish(): Promise<WorldRoot> {
-      const established = candidate ?? brand(values.cwd);
-      await rejectReservedRoot(established);
+    candidate: selected,
+    establish: async (): Promise<WorldRoot> => {
+      const established = selected;
       await ensureMarker(established);
       return established;
     },

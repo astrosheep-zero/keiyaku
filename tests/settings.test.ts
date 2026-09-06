@@ -79,6 +79,26 @@ test("Settings resolves opaque entries by whole-record project shadow", async ()
   }
 });
 
+test("Settings treats equal project and user coordinates as one user scope", async () => {
+  const value = fixture();
+  try {
+    const shared = join(value.root, ".keiyaku");
+    mkdirSync(shared, { recursive: true });
+    writeFileSync(
+      join(shared, "settings.json"),
+      JSON.stringify({ gates: { default: { kind: "bundle", gates: ["reviewed"] } } }),
+    );
+    const loaded = await settings({ root: value.root, home: shared });
+    assert.deepEqual(loaded.scopes.project, { kind: "absent" });
+    assert.equal(loaded.scopes.user.kind, "read");
+    assert.deepEqual(loaded.namespace("gates").entries, [
+      { name: "default", value: { kind: "bundle", gates: ["reviewed"] }, source: "user", shadows: false },
+    ]);
+  } finally {
+    value.close();
+  }
+});
+
 test("Settings ignores inherited namespace names while preserving explicit prototype names", async () => {
   const value = fixture();
   try {

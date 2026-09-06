@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { gateWord } from "./core/facts/types.js";
@@ -150,6 +150,15 @@ function settingsFromScopes(project: LoadedScope, user: LoadedScope): Settings {
   });
 }
 
+async function canonicalCoordinate(path: string): Promise<string> {
+  const resolvedPath = resolve(path);
+  try {
+    return await realpath(resolvedPath);
+  } catch {
+    return resolvedPath;
+  }
+}
+
 export async function settings(input: SettingsInput = {}): Promise<Settings> {
   if (!object(input)) throw new TypeError("settings input must be an object");
   if (input.root !== undefined && (typeof input.root !== "string" || input.root.trim().length === 0)) {
@@ -158,11 +167,14 @@ export async function settings(input: SettingsInput = {}): Promise<Settings> {
   if (input.home !== undefined && (typeof input.home !== "string" || input.home.trim().length === 0)) {
     throw new TypeError("settings home must be a nonblank string");
   }
+  const projectDirectory =
+    input.root === undefined ? undefined : await canonicalCoordinate(join(input.root, ".keiyaku"));
+  const userDirectory = await canonicalCoordinate(input.home ?? join(homedir(), ".keiyaku"));
   const project =
-    input.root === undefined
+    projectDirectory === undefined || projectDirectory === userDirectory
       ? { state: { kind: "absent" as const } }
-      : await readScope(join(resolve(input.root), ".keiyaku", "settings.json"));
-  const user = await readScope(join(resolve(input.home ?? join(homedir(), ".keiyaku")), "settings.json"));
+      : await readScope(join(projectDirectory, "settings.json"));
+  const user = await readScope(join(userDirectory, "settings.json"));
   return settingsFromScopes(project, user);
 }
 

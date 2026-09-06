@@ -8,10 +8,11 @@ entry name, record grammar, default, or admission policy.
 ## Scope and observation
 
 The process edge supplies an already resolved World coordinate and, when
-needed, a user-home coordinate. Settings does not discover a current directory,
-reinterpret a managed worktree as another project scope, load dotenv files, or
-perform environment interpolation. An omitted project coordinate means there
-is no project scope, rather than permission to guess one.
+needed, a user-home coordinate. When the project management directory and user
+configuration directory resolve to the same canonical coordinate, Settings
+reads that file once as user scope and reports project scope as absent. This is
+an equal-coordinate rule, not a home-directory exception. An omitted project
+coordinate means there is no project scope, rather than permission to guess one.
 
 Each scope is independently observed as available, absent, or unavailable.
 Missing configuration is ordinary absence; a read, decoding, or outer-resource
