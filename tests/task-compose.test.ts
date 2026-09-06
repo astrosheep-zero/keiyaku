@@ -42,7 +42,8 @@ test("compose preserves fenced body bytes, aliases new nodes, and plans dependen
   });
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") return;
-  const parentId = await idFor(product, "Parent"), childId = await idFor(product, "Child");
+  const parentId = await idFor(product, "Parent"),
+    childId = await idFor(product, "Child");
   assert.deepEqual(result.admissionOrder, [parentId, childId]);
   assert.deepEqual(result.aliases, [
     { alias: "child", taskId: childId },
@@ -77,12 +78,19 @@ test("compose admits initial state on new nodes and accepts the widest unambiguo
     ].join("\n"),
   });
   assert.equal(result.kind, "accepted");
-  const inProgress = await idFor(product, "In progress"), onHold = await idFor(product, "On hold");
+  const inProgress = await idFor(product, "In progress"),
+    onHold = await idFor(product, "On hold");
   assert.equal((await product.task({ id: inProgress as `task/${string}` }).read())?.task.state, "in_progress");
   assert.equal((await product.task({ id: onHold as `task/${string}` }).read())?.task.state, "on_hold");
   assert.equal((await product.task({ id: onHold as `task/${string}` }).read())?.task.parent, inProgress);
-  assert.equal((await product.task({ id: (await idFor(product, "Done")) as `task/${string}` }).read())?.task.state, "done");
-  assert.equal((await product.task({ id: (await idFor(product, "Dropped")) as `task/${string}` }).read())?.task.state, "drop");
+  assert.equal(
+    (await product.task({ id: (await idFor(product, "Done")) as `task/${string}` }).read())?.task.state,
+    "done",
+  );
+  assert.equal(
+    (await product.task({ id: (await idFor(product, "Dropped")) as `task/${string}` }).read())?.task.state,
+    "drop",
+  );
 
   const invalidAlias = await product.compose({ markdown: "+ Invalid\nas = has space\n" });
   assert.equal(invalidAlias.kind, "refused");
@@ -129,7 +137,14 @@ test("compose supports relation removal and existing body replacement", async ()
   assert.equal(existing.kind, "accepted");
   if (existing.kind !== "accepted") return;
   const result = await product.compose({
-    markdown: [`@${existing.value.id}`, `needs -= @${target.value.id}`, "body <<BODY", "new exact body", "BODY", ""].join("\n"),
+    markdown: [
+      `@${existing.value.id}`,
+      `needs -= @${target.value.id}`,
+      "body <<BODY",
+      "new exact body",
+      "BODY",
+      "",
+    ].join("\n"),
   });
   assert.equal(result.kind, "accepted");
   const detail = await product.task({ id: existing.value.id }).read();
@@ -161,7 +176,13 @@ test("compose reports all planning errors and rejects cycles before writing", as
   assert.equal(second.kind, "accepted");
   if (first.kind !== "accepted" || second.kind !== "accepted") return;
   const cycle = await product.compose({
-    markdown: [`@${first.value.id}`, `needs = @${second.value.id}`, `@${second.value.id}`, `needs = @${first.value.id}`, ""].join("\n"),
+    markdown: [
+      `@${first.value.id}`,
+      `needs = @${second.value.id}`,
+      `@${second.value.id}`,
+      `needs = @${first.value.id}`,
+      "",
+    ].join("\n"),
   });
   assert.equal(cycle.kind, "refused");
   assert.equal((await product.task({ id: first.value.id }).read())?.task.needs.length, 0);
@@ -207,7 +228,7 @@ test("busy compose returns a reusable fenced recovery document", async () => {
   let result;
   try {
     result = await product.compose({
-      markdown: "+ Remaining\nas = remaining\nbody <<BODY\n+ literal\n    indented\nBODY\n",
+      markdown: "+ Remaining\nas = remaining\nstate = on_hold\nbody <<BODY\n+ literal\n    indented\nBODY\n",
     });
   } finally {
     held.close();
@@ -220,27 +241,8 @@ test("busy compose returns a reusable fenced recovery document", async () => {
   assert.equal(replayed.kind, "accepted");
   const detail = await product.task({ id: (await idFor(product, "Remaining")) as `task/${string}` }).read();
   assert.equal(detail?.task.body, "+ literal\n    indented");
-});
-
-test("compose recovery drafts preserve a non-open initial state", async () => {
-  const product = await tasks();
-  const held = await acquireSqliteTransactionLock({
-    path: join(product.root, ".keiyaku", "locks", "task-allocation.sqlite"),
-    mode: "immediate",
-    timeoutMs: 100,
-  });
-  let result;
-  try {
-    result = await product.compose({ markdown: "+ Held\nas = held\nstate = on_hold\n" });
-  } finally {
-    held.close();
-  }
-  assert.equal(result.kind, "incomplete");
-  if (result.kind !== "incomplete") return;
+  assert.equal(detail?.task.state, "on_hold");
   assert.match(result.draft, /state = on_hold/u);
-  const replayed = await product.compose({ markdown: result.draft });
-  assert.equal(replayed.kind, "accepted");
-  assert.equal((await product.task({ id: (await idFor(product, "Held")) as `task/${string}` }).read())?.task.state, "on_hold");
 });
 
 test("compose accepts empty documents without creating authority", async () => {

@@ -1,69 +1,51 @@
-import { spawnSync } from "node:child_process";
-
-const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-
-/** @type {readonly { name: string, args: readonly string[] }[]} */
-const RELEASE_PHASES = [
-  { name: "format:check", args: ["run", "format:check"] },
-  { name: "build", args: ["run", "build"] },
-  { name: "architecture", args: ["run", "test:architecture"] },
-  { name: "maintainability", args: ["run", "test:maintainability"] },
-  { name: "reachability", args: ["run", "test:reachability"] },
-  { name: "test:parallel", args: ["run", "test:parallel"] },
-];
-
-/** @type {readonly { name: string, args: readonly string[] }[]} */
-const DEV_PHASES = [
-  { name: "typecheck", args: ["run", "test:typecheck"] },
-  { name: "architecture", args: ["run", "test:architecture"] },
-  { name: "local", args: ["run", "test:local"] },
-];
-
-/**
- * @param {"test:release" | "test:dev"} mode
- * @param {readonly { name: string, args: readonly string[] }[]} phases
- * @returns {number}
- */
-function runTimedPhases(mode, phases) {
-  for (const phase of phases) {
-    const started = performance.now();
-    const result = spawnSync(npm, [...phase.args], { stdio: "inherit" });
-    if (result.error) throw result.error;
-    const status = result.status ?? 1;
-    console.error(`[${mode}] ${phase.name} ${Math.round(performance.now() - started)} status=${status}`);
-    if (status !== 0) return status;
-  }
-  return 0;
-}
+import spawn from "cross-spawn";
 
 const supplied = process.argv.slice(2);
-const mode = supplied[0] === "--release" ? "release" : supplied[0] === "--dev" ? "dev" : null;
+const mode = supplied[0] === "--dev" ? "dev" : "release";
+const explicitMode = supplied[0] === "--dev" || supplied[0] === "--release";
 
-if (mode !== null) {
-  const remainder = supplied.slice(1);
-  if (remainder.length > 0) {
-    console.error(
-      mode === "dev"
-        ? "test:dev does not accept focused file arguments; use npm test -- <files> or npm run test:focused."
-        : "test:release does not accept focused file arguments; use npm test -- <files> or npm run test:focused.",
-    );
-    process.exit(1);
+/** @param {string} command @param {string[]} args @param {string} name */
+function run(command, args, name) {
+  const started = performance.now();
+  return new Promise((resolve) => {
+    const child = spawn(command, args, { stdio: "inherit" });
+    child.once("error", (error) => {
+      console.error(error);
+      resolve(1);
+    });
+    child.once("close", (code) => {
+      const status = code ?? 1;
+      console.error(`[test:${mode}] ${name} ${Math.round(performance.now() - started)} status=${status}`);
+      resolve(status);
+    });
+  });
+}
+
+if (explicitMode && supplied.length > 1) {
+  console.error(`test:${mode} does not accept focused arguments; use npm test -- <files>.`);
+  process.exitCode = 1;
+} else if (supplied.length > 0 && !explicitMode) {
+  process.exitCode = await run(
+    process.execPath,
+    [
+      "scripts/run-tests.mjs",
+      ...supplied.map((argument) => (argument === "--runInBand" ? "--test-concurrency=1" : argument)),
+    ],
+    "focused",
+  );
+} else {
+  // These checks read source independently. Await every child before running tests
+  // or returning a failure, so an unsuccessful gate never leaves work detached.
+  const preparation =
+    mode === "dev"
+      ? ["test:typecheck", "test:architecture"]
+      : ["format:check", "build", "test:architecture", "test:maintainability"];
+  const statuses = await Promise.all(preparation.map((name) => run("npm", ["run", name], name)));
+  process.exitCode = statuses.find((status) => status !== 0) ?? 0;
+  if (process.exitCode === 0) {
+    // Reachability may inspect generated package exports, so it follows build.
+    const checks = mode === "dev" ? ["test:local"] : ["test:reachability", "test:parallel"];
+    const results = await Promise.all(checks.map((name) => run("npm", ["run", name], name)));
+    process.exitCode = results.find((status) => status !== 0) ?? 0;
   }
-  const status =
-    mode === "release" ? runTimedPhases("test:release", RELEASE_PHASES) : runTimedPhases("test:dev", DEV_PHASES);
-  process.exit(status);
 }
-
-if (supplied.length === 0) {
-  process.exit(runTimedPhases("test:release", RELEASE_PHASES));
-}
-
-const argumentsForFocusedRun = supplied.map((argument) =>
-  argument === "--runInBand" ? "--test-concurrency=1" : argument,
-);
-const result = spawnSync(process.execPath, ["scripts/run-tests.mjs", ...argumentsForFocusedRun], {
-  stdio: "inherit",
-});
-
-if (result.error) throw result.error;
-process.exit(result.status ?? 1);

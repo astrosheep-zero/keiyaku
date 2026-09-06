@@ -1,3 +1,5 @@
+import { spawnSync } from "node:child_process";
+import { sourceLoader } from "./support/process.js";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -304,9 +306,7 @@ test("plugin delivery starts generic call handlers independently and contains ha
     const observed = trace(output);
     assert.equal(observed.includes("fast:aku/example"), true);
     assert.equal(observed.indexOf("slow-start") < observed.indexOf("slow-fail"), true);
-    await eventually(() =>
-      diagnostics.some((value) => value.startsWith("plugin alpha signal: handler failed")),
-    );
+    await eventually(() => diagnostics.some((value) => value.startsWith("plugin alpha signal: handler failed")));
     assert.equal(
       diagnostics.some((value) => value.startsWith("plugin alpha signal: handler failed")),
       true,
@@ -550,6 +550,33 @@ test("hanging handler does not block another handler or emit completion", async 
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error("emit blocked")), 100)),
     ]);
     await eventually(() => trace(output).includes("called"));
+  } finally {
+    value.close();
+  }
+});
+
+test("a completed plugin drain lets its host exit without waiting for the drain deadline", () => {
+  const value = fixture();
+  try {
+    writeFileSync(
+      join(value.home, "settings.json"),
+      JSON.stringify({ plugins: { square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false } } }),
+    );
+    const source = [
+      `import { pluginRuntime } from ${JSON.stringify(new URL("../src/plugin/runtime.js", import.meta.url).href)};`,
+      `import { settings } from ${JSON.stringify(new URL("../src/settings.js", import.meta.url).href)};`,
+      `import { World } from ${JSON.stringify(new URL("../src/world.js", import.meta.url).href)};`,
+      `const root = ${JSON.stringify(value.root)}, home = ${JSON.stringify(value.home)};`,
+      "const runtime = await pluginRuntime({ world: await World.at(root), settings: await settings({ root, home }) });",
+      "await runtime.drain(); process.stdout.write('drained\\n');",
+    ].join("\n");
+    const child = spawnSync(process.execPath, [...sourceLoader, "--input-type=module", "-e", source], {
+      encoding: "utf8",
+      timeout: 3_000,
+    });
+    assert.equal(child.error, undefined, child.stderr);
+    assert.equal(child.status, 0, child.stderr);
+    assert.equal(child.stdout, "drained\n");
   } finally {
     value.close();
   }

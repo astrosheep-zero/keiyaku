@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import test from "node:test";
 import { invoke as invokeRaw } from "../src/cli/invoke.js";
 import { main } from "../src/cli/main.js";
@@ -57,9 +57,9 @@ async function runMain(argv: readonly string[]): Promise<Readonly<{ exit: number
   }
 }
 
-const worktree = resolve(import.meta.dirname, "..");
-const cliEntry = join(worktree, "src", "cli", "index.ts");
-const cliArgv = [process.execPath, "--import", "tsx", cliEntry];
+const worktree = process.cwd();
+const cliEntry = join(worktree, "build", "src", "cli", "index.js");
+const cliArgv = [process.execPath, cliEntry];
 
 type RunResult = Readonly<{ code: number; stdout: string; stderr: string }>;
 
@@ -339,7 +339,9 @@ test("task show matches SDK targeted reads and leaves reverse edges to board que
     needs: readonly { id: string }[];
   };
   const cliShown = (await invoke(parseArgv(["-C", root, "task", "show", blockerAdd.value.id]))) as Detail;
-  const sdkShown = await Tasks.of(await World.at(root)).task({ id: blockerAdd.value.id }).read();
+  const sdkShown = await Tasks.of(await World.at(root))
+    .task({ id: blockerAdd.value.id })
+    .read();
   assert.deepEqual(
     {
       blocks: cliShown.blocks.map((item) => item.id),
@@ -356,10 +358,22 @@ test("task show matches SDK targeted reads and leaves reverse edges to board que
       needs: sdkShown?.needs.map((item) => item.id) ?? null,
     },
   );
-  assert.deepEqual(cliShown.blocks.map((item) => item.id), []);
-  assert.deepEqual(cliShown.children.map((item) => item.id), []);
-  assert.deepEqual(cliShown.supersededBy.map((item) => item.id), []);
-  assert.deepEqual(cliShown.related.map((item) => item.id), []);
+  assert.deepEqual(
+    cliShown.blocks.map((item) => item.id),
+    [],
+  );
+  assert.deepEqual(
+    cliShown.children.map((item) => item.id),
+    [],
+  );
+  assert.deepEqual(
+    cliShown.supersededBy.map((item) => item.id),
+    [],
+  );
+  assert.deepEqual(
+    cliShown.related.map((item) => item.id),
+    [],
+  );
 
   const showCommand = parseArgv(["task", "show", blockerAdd.value.id]).command;
   if (showCommand.command !== "task") throw new Error("not a task command");
@@ -442,15 +456,12 @@ test("task invocation works outside Git and consumes stdin only when selected", 
   assert.equal((shown as { task: { state: string } }).task.state, "on_hold");
   assert.equal((shown as { task: { note: string } }).task.note, "initial");
 
-  const noteUpdate = (await invoke(
-    parseArgv(["-C", root, "task", "update", nativeId, "--note", "replacement"]),
-    {
-      readStdin: async () => {
-        reads += 1;
-        return "unused";
-      },
+  const noteUpdate = (await invoke(parseArgv(["-C", root, "task", "update", nativeId, "--note", "replacement"]), {
+    readStdin: async () => {
+      reads += 1;
+      return "unused";
     },
-  )) as TaskInvocationResult;
+  })) as TaskInvocationResult;
   assert.equal((noteUpdate as { kind: string }).kind, "accepted");
   assert.equal(reads, 1);
   const noteShown = (await invoke(parseArgv(["-C", root, "task", "show", nativeId]))) as TaskInvocationResult;
@@ -468,9 +479,7 @@ test("task invocation works outside Git and consumes stdin only when selected", 
   assert.equal((documentAdd as { kind: string }).kind, "accepted");
   if ((documentAdd as { kind: string }).kind !== "accepted") throw new Error("expected document add");
   const documentId = (documentAdd as { value: { id: string } }).value.id;
-  const documentShown = (await invoke(
-    parseArgv(["-C", root, "task", "show", documentId]),
-  )) as TaskInvocationResult;
+  const documentShown = (await invoke(parseArgv(["-C", root, "task", "show", documentId]))) as TaskInvocationResult;
   assert.equal((documentShown as { task: { state: string } }).task.state, "done");
 
   const priorityOnly = (await invoke(parseArgv(["-C", root, "task", "update", nativeId, "--priority", "1"]), {
@@ -479,9 +488,7 @@ test("task invocation works outside Git and consumes stdin only when selected", 
     },
   })) as TaskInvocationResult;
   assert.equal((priorityOnly as { kind: string }).kind, "accepted");
-  const afterPriority = (await invoke(
-    parseArgv(["-C", root, "task", "show", nativeId]),
-  )) as TaskInvocationResult;
+  const afterPriority = (await invoke(parseArgv(["-C", root, "task", "show", nativeId]))) as TaskInvocationResult;
   assert.equal((afterPriority as { task: { body: string; priority: number } }).task.body, "body from stdin\n");
   assert.equal((afterPriority as { task: { body: string; priority: number } }).task.priority, 1);
 
@@ -497,9 +504,7 @@ test("task invocation works outside Git and consumes stdin only when selected", 
     readStdin: async () => padded,
   })) as TaskInvocationResult;
   assert.equal((paddedUpdate as { kind: string }).kind, "accepted");
-  const paddedShown = (await invoke(
-    parseArgv(["-C", root, "task", "show", nativeId]),
-  )) as TaskInvocationResult;
+  const paddedShown = (await invoke(parseArgv(["-C", root, "task", "show", nativeId]))) as TaskInvocationResult;
   assert.equal((paddedShown as { task: { body: string } }).task.body, padded);
 });
 
@@ -557,9 +562,7 @@ test("Task, Settings, and Kanshi share the primary WorldRoot across Git worktree
   assert.equal((added as { kind: string }).kind, "accepted");
   if ((added as { kind: string }).kind !== "accepted") throw new Error("expected task add");
   const sharedId = (added as { value: { id: string } }).value.id;
-  const shown = (await invoke(
-    parseArgv(["-C", repository.path, "task", "show", sharedId]),
-  )) as TaskInvocationResult;
+  const shown = (await invoke(parseArgv(["-C", repository.path, "task", "show", sharedId]))) as TaskInvocationResult;
   assert.equal((shown as { task: { title: string } }).task.title, "Shared worktree task");
   assert.equal(existsSync(join(linked, ".keiyaku", "tasks")), false);
   await invoke(parseArgv(["-C", linked, "task", "context", "contract/shared"]));
@@ -617,8 +620,8 @@ test("task done note is passed to each independent lifecycle mutation", async ()
     ["accepted", "refused", "accepted"],
   );
   assert.equal(
-    ((await invoke(parseArgv(["-C", root, "task", "show", firstId]))) as { task: { note: string; state: string } })
-      .task.note,
+    ((await invoke(parseArgv(["-C", root, "task", "show", firstId]))) as { task: { note: string; state: string } }).task
+      .note,
     "finished",
   );
   assert.equal(
@@ -911,7 +914,10 @@ test("task doctor renders graph disease and controls exit status", async () => {
   const result = (await invoke(parseArgv(["-C", root, "task", "doctor"]))) as TaskInvocationResult;
   const command = parseArgv(["task", "doctor"]).command;
   if (command.command !== "task") throw new Error("not a task command");
-  assert.match(renderTaskText(command, result), new RegExp(`^1 issue\\n! cycle needs ${first.value.id} ${second.value.id}$`));
+  assert.match(
+    renderTaskText(command, result),
+    new RegExp(`^1 issue\\n! cycle needs ${first.value.id} ${second.value.id}$`),
+  );
   assert.equal(taskExitCode(result), 1);
 });
 
@@ -944,7 +950,10 @@ test("task tree text follows parent children and marks parent cycles", async () 
   const doctor = (await invoke(parseArgv(["-C", root, "task", "doctor"]))) as TaskInvocationResult;
   const doctorCommand = parseArgv(["task", "doctor"]).command;
   if (doctorCommand.command !== "task") throw new Error("not a task command");
-  assert.match(renderTaskText(doctorCommand, doctor), new RegExp(`! cycle parent ${area.value.id} ${child.value.id} ${nested.value.id}`));
+  assert.match(
+    renderTaskText(doctorCommand, doctor),
+    new RegExp(`! cycle parent ${area.value.id} ${child.value.id} ${nested.value.id}`),
+  );
 });
 
 test("built CLI task tree follows parent decomposition at 36 columns", async () => {
@@ -1018,7 +1027,13 @@ test("incomplete compose rendering keeps draft on stdout and diagnostics separat
     kind: "incomplete" as const,
     aliases: [],
     admissionOrder: ["task/a" as import("../src/task/index.js").TaskId],
-    documentChanges: [{ taskId: "task/a" as import("../src/task/index.js").TaskId, kind: "created" as const, documentDiff: "diff bytes" }],
+    documentChanges: [
+      {
+        taskId: "task/a" as import("../src/task/index.js").TaskId,
+        kind: "created" as const,
+        documentDiff: "diff bytes",
+      },
+    ],
     stopped: { kind: "retry" as const, reason: "busy" as const },
     draft: "ns=/\n+ Remaining body=\n",
   };
@@ -1147,9 +1162,12 @@ test("Task list, blocked, show, mutation, and batch text use one scan grammar", 
 
 test("singleton hold, done, and drop keep the batch item grammar", async () => {
   const root = world();
-  const holdId = ((await invoke(parseArgv(["-C", root, "task", "add", "Hold me"]))) as { value: { id: string } }).value.id;
-  const doneId = ((await invoke(parseArgv(["-C", root, "task", "add", "Done me"]))) as { value: { id: string } }).value.id;
-  const dropId = ((await invoke(parseArgv(["-C", root, "task", "add", "Drop me"]))) as { value: { id: string } }).value.id;
+  const holdId = ((await invoke(parseArgv(["-C", root, "task", "add", "Hold me"]))) as { value: { id: string } }).value
+    .id;
+  const doneId = ((await invoke(parseArgv(["-C", root, "task", "add", "Done me"]))) as { value: { id: string } }).value
+    .id;
+  const dropId = ((await invoke(parseArgv(["-C", root, "task", "add", "Drop me"]))) as { value: { id: string } }).value
+    .id;
 
   const holdCommand = parseArgv(["task", "hold", holdId]).command;
   const doneCommand = parseArgv(["task", "done", doneId]).command;
@@ -1201,8 +1219,10 @@ test("singleton hold, done, and drop keep the batch item grammar", async () => {
 
 test("task start accepts multiple IDs while preserving singleton output", async () => {
   const root = world();
-  const first = ((await invoke(parseArgv(["-C", root, "task", "add", "First start"]))) as { value: { id: string } }).value.id;
-  const second = ((await invoke(parseArgv(["-C", root, "task", "add", "Second start"]))) as { value: { id: string } }).value.id;
+  const first = ((await invoke(parseArgv(["-C", root, "task", "add", "First start"]))) as { value: { id: string } })
+    .value.id;
+  const second = ((await invoke(parseArgv(["-C", root, "task", "add", "Second start"]))) as { value: { id: string } })
+    .value.id;
   const singleCommand = parseArgv(["task", "start", first]).command;
   if (singleCommand.command !== "task") throw new Error("not a task command");
   const single = (await invoke(parseArgv(["-C", root, "task", "start", first]))) as TaskInvocationResult;

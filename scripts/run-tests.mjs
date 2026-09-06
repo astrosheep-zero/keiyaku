@@ -4,7 +4,8 @@ import { TEST_MANIFESTS } from "./test-manifests.mjs";
 
 const DEFAULT_TEST_PATTERNS = ["tests/**/*.test.ts", "tests/maintainability.test.js"];
 
-const supplied = process.argv.slice(2);
+const compiled = process.argv.includes("--compiled");
+const supplied = process.argv.slice(2).filter((argument) => argument !== "--compiled");
 const valueOptions = new Set([
   "--test-concurrency",
   "--test-name-pattern",
@@ -73,22 +74,23 @@ if (missingTestFiles.length > 0) {
 const testOptions =
   suiteOption === -1
     ? options
-    : options.filter(
-        (_, index) => index !== suiteOption && !(suiteFlag === "--suite" && index === suiteOption + 1),
-      );
+    : options.filter((_, index) => index !== suiteOption && !(suiteFlag === "--suite" && index === suiteOption + 1));
 const reporterOptions = testOptions.some(
   (option) => option === "--test-reporter" || option.startsWith("--test-reporter="),
 )
   ? []
   : ["--test-reporter=dot"];
+const runtimeFiles = compiled ? testFiles.map((file) => ".test-build/" + file.replace(/\.ts$/u, ".js")) : testFiles;
+const loader = compiled ? ["--enable-source-maps"] : ["--import", "tsx"];
 const environment = { ...process.env };
 delete environment.AKUMA_REQUESTS;
+// This is a new runner, including when invoked by a test of the runner itself.
+delete environment.NODE_TEST_CONTEXT;
 const started = performance.now();
-const result = spawnSync(
-  process.execPath,
-  ["--import", "tsx", "--test", ...reporterOptions, ...testOptions, ...testFiles],
-  { stdio: "inherit", env: environment },
-);
+const result = spawnSync(process.execPath, [...loader, "--test", ...reporterOptions, ...testOptions, ...runtimeFiles], {
+  stdio: "inherit",
+  env: environment,
+});
 
 if (result.error) throw result.error;
 const status = result.status ?? 1;

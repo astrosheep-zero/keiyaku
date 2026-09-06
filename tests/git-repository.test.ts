@@ -3,7 +3,6 @@ import { execFileSync } from "node:child_process";
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
   CANDIDATE_PIN_REF_NAMESPACE,
@@ -92,7 +91,7 @@ test("dependency provisioning links a managed worktree to the registered primary
   execFileSync("git", ["-C", primary, "worktree", "add", "--quiet", "--detach", managed]);
   execFileSync(
     process.execPath,
-    [fileURLToPath(new URL("../scripts/provision-worktree-dependencies.js", import.meta.url))],
+    [resolve("scripts/provision-worktree-dependencies.js")],
     { cwd: managed, encoding: "utf8" },
   );
   const linked = join(managed, "node_modules");

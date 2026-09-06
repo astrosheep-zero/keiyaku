@@ -823,30 +823,36 @@ test("retention uses a bounded settled buffer while pending tells remain pinned"
       bodySequence: body.sequence,
       startedAt: "2026-08-08T00:00:00.000Z",
     });
-    const heart = new DatabaseSync(value.allocated.paths.heart);
-    try {
-      heart.exec("PRAGMA foreign_keys=ON; BEGIN IMMEDIATE");
-      heart
-        .prepare(
-          `WITH RECURSIVE rows(value) AS (
-        VALUES(1) UNION ALL SELECT value + 1 FROM rows WHERE value < 5501
+    const seedHistory = (count: number) => {
+      const heart = new DatabaseSync(value.allocated.paths.heart);
+      try {
+        heart.exec("PRAGMA foreign_keys=ON; BEGIN IMMEDIATE");
+        const before = Number(
+          (heart.prepare("SELECT COALESCE(MAX(sequence), 0) AS n FROM timeline").get() as { n: number }).n,
+        );
+        heart
+          .prepare(
+            `WITH RECURSIVE rows(value) AS (
+        VALUES(1) UNION ALL SELECT value + 1 FROM rows WHERE value < ?
       ) INSERT INTO timeline(kind) SELECT 'activity' FROM rows`,
-        )
-        .run();
-      heart
-        .prepare(
-          `INSERT INTO activity(sequence, turn_sequence, event_json, at)
+          )
+          .run(count);
+        heart
+          .prepare(
+            `INSERT INTO activity(sequence, turn_sequence, event_json, at)
         SELECT sequence, ?, '{"type":"note","text":"buffered"}', '2026-08-08T00:00:01.000Z'
-        FROM timeline WHERE kind = 'activity'`,
-        )
-        .run(turn.sequence);
-      heart.exec("COMMIT");
-    } catch (error) {
-      heart.exec("ROLLBACK");
-      throw error;
-    } finally {
-      heart.close();
-    }
+        FROM timeline WHERE kind = 'activity' AND sequence > ?`,
+          )
+          .run(turn.sequence, before);
+        heart.exec("COMMIT");
+      } catch (error) {
+        heart.exec("ROLLBACK");
+        throw error;
+      } finally {
+        heart.close();
+      }
+    };
+    seedHistory(5_501);
 
     await appendActivity(value.allocated.paths, {
       turnSequence: turn.sequence,
@@ -866,13 +872,12 @@ test("retention uses a bounded settled buffer while pending tells remain pinned"
       kind: "consumed",
       receivedAt: "2026-08-08T00:00:03.000Z",
     });
-    for (let index = 0; index < 501; index += 1) {
-      await appendActivity(value.allocated.paths, {
-        turnSequence: turn.sequence,
-        event: { type: "note", text: `after-${index}` },
-        at: "2026-08-08T00:00:04.000Z",
-      });
-    }
+    seedHistory(500);
+    await appendActivity(value.allocated.paths, {
+      turnSequence: turn.sequence,
+      event: { type: "note", text: "trigger settled compaction" },
+      at: "2026-08-08T00:00:04.000Z",
+    });
     retained = await activitySlice(value.allocated.paths);
     assert.equal(
       retained.rows.some((fact) => "id" in fact && fact.id === "tell-pinned"),
@@ -1149,7 +1154,10 @@ test("a binding-before-delivery crash remains recoverable without predecessor te
     predecessor.release();
 
     const pending = (await readHeart(value.allocated.paths)).pending;
-    assert.deepEqual(drainPendingTells(pending).map((tell) => tell.id), ["crash-window"]);
+    assert.deepEqual(
+      drainPendingTells(pending).map((tell) => tell.id),
+      ["crash-window"],
+    );
     assert.deepEqual(drainPendingTells(pending, [firstTurn.sequence]), []);
 
     const successor = (await HeldAkumaLeash.try(value.allocated.paths))!;

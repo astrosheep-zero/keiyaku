@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { Square } from "@astrosheep/square";
 import squarePlugin from "../plugins/square/index.js";
@@ -143,7 +144,7 @@ test("the host isolates a Square plugin handler failure", async (t) => {
     process.env.SQUARE_HOST_LEDGER_USER = join(root, "user-ledger");
     writeFileSync(
       join(root, "plugins", "square.mjs"),
-      `export { default } from ${JSON.stringify(new URL("../plugins/square/index.js", import.meta.url).href)};\n`,
+      `export { default } from ${JSON.stringify(pathToFileURL(resolve("plugins/square/index.js")).href)};\n`,
     );
     writeFileSync(
       join(root, ".keiyaku", "settings.json"),

@@ -1,3 +1,4 @@
+import { sourceLoader } from "./support/process.js";
 import type { ContinuationStop } from "../src/library/continuation.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -1124,32 +1125,6 @@ test("a stopped continuation does not block an eligible sibling", async () => {
   assert.equal((await blocked.keiyaku.state()).terminal, null);
 });
 
-test("claim continuation walks a retained dependency chain once", async () => {
-  const repository = repositoryWithMain();
-  const repo = await cachedRepoAt(repository.path);
-  const root = await bindRetained(repo, "Root");
-  const rootId = await publicContractId(root.keiyaku);
-  const middle = await bindRetained(repo, "Middle", [rootId]);
-  const middleId = await publicContractId(middle.keiyaku);
-  const leaf = await bindRetained(repo, "Leaf", [middleId]);
-  await leaf.keiyaku.deliver();
-  await middle.keiyaku.deliver();
-  const delivered = expectMutation(await root.keiyaku.deliver());
-  const leafId = await publicContractId(leaf.keiyaku);
-
-  assert.deepEqual(delivered.value.continuation, {
-    claimed: [middleId, leafId],
-    stopped: [],
-  });
-  for (const contract of [middle.keiyaku, leaf.keiyaku]) {
-    const facts = (await contract.history()).events.flatMap((event) =>
-      event.source === "journal" ? [event.fact.kind] : [],
-    );
-    assert.equal(facts.filter((kind) => kind === "deliver").length, 1);
-    assert.equal(facts.filter((kind) => kind === "claimed").length, 1);
-  }
-});
-
 test("a dependent claimed during continuation reports already-terminal", async () => {
   const repository = repositoryWithMain();
   const repo = await cachedRepoAt(repository.path);
@@ -1160,7 +1135,7 @@ test("a dependent claimed during continuation reports already-terminal", async (
   await dependent.keiyaku.deliver();
 
   const reviewScript = [
-    `const { Keiyaku, Repo } = await import(${JSON.stringify(new URL("../src/index.ts", import.meta.url).href)});`,
+    `const { Keiyaku, Repo } = await import(${JSON.stringify(new URL("../src/index.js", import.meta.url).href)});`,
     `const repo = await Repo.at({ path: ${JSON.stringify(repository.path)} });`,
     `await Keiyaku.of({ repo, id: ${JSON.stringify(dependentId)} }).review({ verdict: "satisfied" });`,
   ].join(" ");
@@ -1168,7 +1143,7 @@ test("a dependent claimed during continuation reports already-terminal", async (
   const verification = [
     "## Replace: Verification",
     "~~~bash",
-    `${JSON.stringify(process.execPath)} --import '${new URL("../node_modules/tsx/dist/loader.mjs", import.meta.url).href}' --input-type=module -e 'await eval(Buffer.from("${encoded}", "base64").toString())'`,
+    `${JSON.stringify(process.execPath)} ${sourceLoader.map((argument) => JSON.stringify(argument)).join(" ")} --input-type=module -e 'await eval(Buffer.from("${encoded}", "base64").toString())'`,
     "~~~",
     "",
   ].join("\n");
@@ -1206,6 +1181,7 @@ test("review records before delivery and the same patch can be placed", async ()
     unmergedPaths: [],
   });
   assert.equal(placementRefusalKind(reviewed.value.placement), "delivery-missing");
+  assert.equal(reviewed.value.completion, undefined);
   const subject = (await contract.state()).attestations.at(-1)?.data.subject;
   const testimony = JSON.stringify((await contract.state()).attestations.at(-1)?.data);
   assert.equal(testimony.includes("workspace"), false);
@@ -1216,6 +1192,8 @@ test("review records before delivery and the same patch can be placed", async ()
     delivered.facts.map((fact) => fact.kind),
     ["bound", "deliver", "claimed"],
   );
+  assert.ok(delivered.value.completion);
+  assert.equal(delivered.head, (await contract.state()).head);
   assert.equal((await contract.state()).attestations.at(-1)?.data.subject, subject);
   assert.equal((await contract.state()).terminal?.kind, "claimed");
 });

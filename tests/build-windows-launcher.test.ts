@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
 
-const root = resolve(import.meta.dirname, "..");
+const root = process.cwd();
 const script = resolve(root, "scripts/build-windows-launcher.js");
 
 function missingExecutable(): string {

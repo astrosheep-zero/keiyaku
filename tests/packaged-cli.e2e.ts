@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
 
@@ -20,7 +20,7 @@ type PackageManifest = {
   version: string;
 };
 
-const root = resolve(import.meta.dirname, "..");
+const root = process.cwd();
 
 function command(executable: string, args: readonly string[], cwd: string, shell = false): string {
   return execFileSync(executable, args, {

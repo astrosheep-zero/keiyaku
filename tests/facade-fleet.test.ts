@@ -1,6 +1,7 @@
+import { sourceLoader } from "./support/process.js";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -661,10 +662,19 @@ test("recent Akuma page prunes old custody bounds without changing Heart members
   const oldCount = 490;
   try {
     const oldIds = [];
+    let emptyHeart: { heart: string; leash: string } | undefined;
     for (let index = 0; index < oldCount; index += 1) {
       const suffix = index.toString(16).padStart(8, "0");
       const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "worker", draw: () => suffix });
-      await initializeHeart(allocated.paths);
+      if (emptyHeart === undefined) {
+        await initializeHeart(allocated.paths);
+        emptyHeart = allocated.paths;
+      } else {
+        // Unborn databases have no identity rows. Copy a closed, valid empty pair
+        // rather than executing the same schema 490 times for read-only fixtures.
+        copyFileSync(emptyHeart.heart, allocated.paths.heart);
+        copyFileSync(emptyHeart.leash, allocated.paths.leash);
+      }
       oldIds.push(allocated.id);
       utimesSync(allocated.paths.heart, old, old);
       try {
@@ -1577,11 +1587,10 @@ test("CLI wait and kill expose Contract selector world refusal as typed usage", 
     const child = spawnSync(
       process.execPath,
       [
-        "--import",
-        import.meta.resolve("tsx"),
+        ...sourceLoader,
         "--input-type=module",
         "-e",
-        `import { main } from ${JSON.stringify(new URL("../src/cli/main.ts", import.meta.url).href)}; process.exitCode = await main(JSON.parse(process.env.KEIYAKU_TEST_ARGS));`,
+        `import { main } from ${JSON.stringify(new URL("../src/cli/main.js", import.meta.url).href)}; process.exitCode = await main(JSON.parse(process.env.KEIYAKU_TEST_ARGS));`,
       ],
       {
         cwd: worldB,

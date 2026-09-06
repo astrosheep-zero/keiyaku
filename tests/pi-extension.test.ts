@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
@@ -10,7 +10,7 @@ type PackageJson = {
   pi?: { extensions?: unknown; skills?: unknown };
 };
 
-const rootUrl = new URL("../", import.meta.url);
+const rootUrl = pathToFileURL(process.cwd() + "/");
 const packageJson = JSON.parse(readFileSync(new URL("package.json", rootUrl), "utf8")) as PackageJson;
 const piExtension = packageJson.pi?.extensions;
 if (!Array.isArray(piExtension) || typeof piExtension[0] !== "string") {

@@ -10,6 +10,9 @@ import { spawnOptionsFor, spawnWindowsLauncher } from "../src/runtime/proc/launc
 import { consumeProcessStdout, runProcess, spawnDetachedProcess } from "../src/runtime/proc/run.js";
 import { spawnStdioProcess } from "../src/runtime/proc/stdio.js";
 import { World } from "../src/world.js";
+import { spawnAkumaBody } from "../src/akuma/body.js";
+import { launchAkuma } from "../src/akuma/publication.js";
+import type { OwnedProcess } from "../src/runtime/proc/types.js";
 import { removeTempDirectory, waitForProcessExit as waitForExit } from "./support/process.js";
 
 const IMAGE_SUBSYSTEM_WINDOWS_GUI = 2;
@@ -206,6 +209,7 @@ test("a released Akuma Body completes through Pi and an OpenAI chat completion e
   const home = join(root, "keiyaku-home");
   const piHome = join(root, "pi-home");
   const fixture = await startChatCompletionFixture();
+  let child: OwnedProcess | undefined;
   const environment = {
     agentDir: process.env.PI_CODING_AGENT_DIR,
     offline: process.env.PI_OFFLINE,
@@ -254,7 +258,16 @@ test("a released Akuma Body completes through Pi and an OpenAI chat completion e
     process.env.OPENAI_API_KEY = "fixture";
 
     const world = Akuma.of(await World.at(root), { home });
-    const handle = await world.call({ archetype: "fixture", body: "Return the fixture answer." });
+    const born = await world.beginCall({ archetype: "fixture", body: "Return the fixture answer." }, {});
+    if (born.kind !== "born") throw new Error("expected local birth");
+    await launchAkuma({
+      allocated: born.allocated,
+      launch: async () => {
+        child = await spawnAkumaBody({ paths: born.allocated.paths, seed: born.seed, initialBody: born.initialBody! });
+        return child;
+      },
+    });
+    const handle = world.of({ id: born.allocated.id });
     const status = await handle.wait(undefined, { timeoutMs: 15_000 });
     assert.equal(fixture.requests, 1);
     assert.equal(status.life, "asleep");
@@ -277,7 +290,25 @@ test("a released Akuma Body completes through Pi and an OpenAI chat completion e
     restoreEnvironment("PI_SKIP_VERSION_CHECK", environment.skipVersionCheck);
     restoreEnvironment("PI_TELEMETRY", environment.telemetry);
     restoreEnvironment("OPENAI_API_KEY", environment.openaiApiKey);
-    await fixture.close();
+    try {
+      // Logical idle releases the leash before the process has finished its observers.
+      // Keep exit observation after custody is released; do not delete a live child's cwd/log.
+      if (child !== undefined) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await Promise.race([
+            child.exited,
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(() => reject(new Error("Body did not exit")), 10_000);
+            }),
+          ]);
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+    } finally {
+      await fixture.close();
+    }
     await removeTempDirectory(root);
   }
 });

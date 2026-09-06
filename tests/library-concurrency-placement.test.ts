@@ -1,3 +1,4 @@
+import { sourceLoader } from "./support/process.js";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -15,7 +16,10 @@ import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { appointedWorktreePath, cachedRepoAt, cachedRepositoryAt, withGitShim } from "./support/git.js";
 import { bind, commitCandidate, document, repositoryWithMain } from "./support/library-verbs.js";
 
-type AcceptedDelivery = Exclude<Awaited<ReturnType<KeiyakuHandle["deliver"]>>, { kind: "integration-conflict-materialized" }>;
+type AcceptedDelivery = Exclude<
+  Awaited<ReturnType<KeiyakuHandle["deliver"]>>,
+  { kind: "integration-conflict-materialized" }
+>;
 
 function acceptedDelivery(result: Awaited<ReturnType<KeiyakuHandle["deliver"]>>): AcceptedDelivery {
   if (result.kind === "integration-conflict-materialized") {
@@ -37,23 +41,19 @@ function crossProcessAmend(input: Readonly<{ repository: string; contractId: str
     "const contract = await Keiyaku.of({ repo: await Repo.at({ path: process.env.KEIYAKU_REPOSITORY }), id: process.env.KEIYAKU_CONTRACT });",
     "try { await contract.amend({ markdown: process.env.KEIYAKU_MARKDOWN }); process.stdout.write('accepted\\n'); } catch (error) { process.stdout.write(`failed:${error.reason?.kind ?? error.refusal?.kind ?? error.name}\\n`); }",
   ].join("\n");
-  const child = spawn(
-    process.execPath,
-    ["--import", new URL("../node_modules/tsx/dist/loader.mjs", import.meta.url).href, "--input-type=module", "-e", source],
-    {
-      env: {
-        ...process.env,
-        KEIYAKU_MODULE: new URL("../src/index.ts", import.meta.url).href,
-        KEIYAKU_REPOSITORY_MODULE: new URL("../src/git/repository.ts", import.meta.url).href,
-        KEIYAKU_SEAT_MODULE: new URL("../src/git/private-state-seat.ts", import.meta.url).href,
-        KEIYAKU_LOCK_MODULE: new URL("../src/coordination/sqlite-transaction-lock.ts", import.meta.url).href,
-        KEIYAKU_REPOSITORY: input.repository,
-        KEIYAKU_CONTRACT: input.contractId,
-        KEIYAKU_MARKDOWN: input.markdown,
-      },
-      stdio: ["ignore", "pipe", "pipe"],
+  const child = spawn(process.execPath, [...sourceLoader, "--input-type=module", "-e", source], {
+    env: {
+      ...process.env,
+      KEIYAKU_MODULE: new URL("../src/index.js", import.meta.url).href,
+      KEIYAKU_REPOSITORY_MODULE: new URL("../src/git/repository.js", import.meta.url).href,
+      KEIYAKU_SEAT_MODULE: new URL("../src/git/private-state-seat.js", import.meta.url).href,
+      KEIYAKU_LOCK_MODULE: new URL("../src/coordination/sqlite-transaction-lock.js", import.meta.url).href,
+      KEIYAKU_REPOSITORY: input.repository,
+      KEIYAKU_CONTRACT: input.contractId,
+      KEIYAKU_MARKDOWN: input.markdown,
     },
-  );
+    stdio: ["ignore", "pipe", "pipe"],
+  });
   const ready = new Promise<void>((resolveReady, rejectReady) => {
     child.once("error", rejectReady);
     child.stdout.once("data", (bytes) =>
@@ -84,7 +84,10 @@ test("more independent cross-process mutations than the attempt bound serialize 
   const contracts = [];
   for (let index = 0; index < 4; index += 1) contracts.push(await bind(repository));
   const capability = await cachedRepositoryAt(repository.path);
-  const held = await acquireSqliteTransactionLock({ path: privateStatePublicationSeatPath(capability), mode: "immediate" });
+  const held = await acquireSqliteTransactionLock({
+    path: privateStatePublicationSeatPath(capability),
+    mode: "immediate",
+  });
   const contractIds = await Promise.all(contracts.map(async (contract) => (await contract.state()).id));
   const workers = contracts.map((_, index) =>
     crossProcessAmend({
@@ -101,7 +104,10 @@ test("more independent cross-process mutations than the attempt bound serialize 
   const outcomes = await Promise.all(workers.map(({ completed }) => completed));
   assert.ok(outcomes.every((outcome) => outcome.includes("accepted")));
   for (const [index, contract] of contracts.entries()) {
-    assert.equal(decodeContractDocument((await contract.state()).terms.document.bytes).context.trim(), `writer ${index}`);
+    assert.equal(
+      decodeContractDocument((await contract.state()).terms.document.bytes).context.trim(),
+      `writer ${index}`,
+    );
   }
 });
 
@@ -171,7 +177,10 @@ test("same-Contract cross-process amends decide from the queued fresh state", as
   const repository = repositoryWithMain();
   const contract = await bind(repository);
   const capability = await cachedRepositoryAt(repository.path);
-  const held = await acquireSqliteTransactionLock({ path: privateStatePublicationSeatPath(capability), mode: "immediate" });
+  const held = await acquireSqliteTransactionLock({
+    path: privateStatePublicationSeatPath(capability),
+    mode: "immediate",
+  });
   const workers = [
     crossProcessAmend({
       repository: repository.path,
@@ -335,7 +344,10 @@ test("delivery re-integrates its persisted tender when the target premise moves"
     workspace: "worktree",
     gates: [],
   });
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (await result.keiyaku.state()).id);
+  const worktree = await appointedWorktreePath(
+    await cachedRepositoryAt(repository.path),
+    (await result.keiyaku.state()).id,
+  );
   writeFileSync(resolve(worktree, "candidate.txt"), "captured\n");
   repository.run(["-C", worktree, "add", "candidate.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
@@ -412,7 +424,10 @@ test("reintegration observes and publishes only after the shared private-state s
     workspace: "worktree",
     gates: ["reviewed"],
   });
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (await bound.keiyaku.state()).id);
+  const worktree = await appointedWorktreePath(
+    await cachedRepositoryAt(repository.path),
+    (await bound.keiyaku.state()).id,
+  );
   writeFileSync(resolve(worktree, "candidate.txt"), "captured\n");
   repository.run(["-C", worktree, "add", "candidate.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
@@ -466,7 +481,10 @@ test("equivalent external target movement stops without reintegration or claim",
     workspace: "worktree",
     gates: [],
   });
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (await result.keiyaku.state()).id);
+  const worktree = await appointedWorktreePath(
+    await cachedRepositoryAt(repository.path),
+    (await result.keiyaku.state()).id,
+  );
   writeFileSync(resolve(worktree, "candidate.txt"), "captured\n");
   repository.run(["-C", worktree, "add", "candidate.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
@@ -536,7 +554,10 @@ test("reintegrated delivery does not aggregate Verification from the superseded 
     workspace: "worktree",
     gates: [],
   });
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (await result.keiyaku.state()).id);
+  const worktree = await appointedWorktreePath(
+    await cachedRepositoryAt(repository.path),
+    (await result.keiyaku.state()).id,
+  );
   writeFileSync(resolve(worktree, "candidate.txt"), "candidate\n");
   repository.run(["-C", worktree, "add", "candidate.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
@@ -591,7 +612,10 @@ test("review re-integrates its accepted delivery when the target premise moves",
     workspace: "worktree",
     gates: ["reviewed"],
   });
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (await result.keiyaku.state()).id);
+  const worktree = await appointedWorktreePath(
+    await cachedRepositoryAt(repository.path),
+    (await result.keiyaku.state()).id,
+  );
   writeFileSync(resolve(worktree, "candidate.txt"), "candidate\n");
   repository.run(["-C", worktree, "add", "candidate.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);

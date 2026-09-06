@@ -1,10 +1,10 @@
+import { sourceLoader } from "./support/process.js";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { contractLocator, mintSnapshotId } from "../src/git/identity.js";
@@ -252,15 +252,14 @@ test("a Hook runner outlives its killed reconcile caller and fences immediate re
     destroy: [],
   };
   mkdirSync(worktree);
-  const module = pathToFileURL(join(process.cwd(), "src", "git", "hooks.ts")).href;
+  const module = new URL("../src/git/hooks.js", import.meta.url).href;
   const input = Buffer.from(JSON.stringify({ worktree, administration, hooks }), "utf8").toString("base64url");
   const callerSource = [
     `const { runCreateHooks } = await import(${JSON.stringify(module)});`,
     `const input = JSON.parse(Buffer.from(${JSON.stringify(input)}, "base64url").toString("utf8"));`,
     "await runCreateHooks(input.worktree, input.hooks);",
   ].join(" ");
-  const loader = new URL("../node_modules/tsx/dist/loader.mjs", import.meta.url).href;
-  const caller = spawn(process.execPath, ["--import", loader, "--input-type=module", "-e", callerSource], {
+  const caller = spawn(process.execPath, [...sourceLoader, "--input-type=module", "-e", callerSource], {
     cwd: process.cwd(),
     stdio: ["ignore", "ignore", "pipe"],
   });
@@ -318,8 +317,8 @@ test("reconcile acquires a death-released scratch lock and preserves an actively
   });
   const snapshot = repository.run(["rev-parse", "HEAD"]).trim();
   const pathFile = join(mkdtempSync(join(tmpdir(), "keiyaku-orphan-path-")), "path");
-  const module = pathToFileURL(join(process.cwd(), "src", "git", "scratch.ts")).href;
-  const repositoryModule = pathToFileURL(join(process.cwd(), "src", "git", "repository.ts")).href;
+  const module = new URL("../src/git/scratch.js", import.meta.url).href;
+  const repositoryModule = new URL("../src/git/repository.js", import.meta.url).href;
   const childSource = [
     'import { writeFileSync } from "node:fs";',
     `const { materializeScratchCandidate } = await import(${JSON.stringify(module)});`,
@@ -327,8 +326,7 @@ test("reconcile acquires a death-released scratch lock and preserves an actively
     `const scratch = await materializeScratchCandidate(await repositoryAt(${JSON.stringify(repository.path)}), ${JSON.stringify(snapshot)});`,
     `writeFileSync(${JSON.stringify(pathFile)}, scratch.cwd);`,
   ].join(" ");
-  const loader = new URL("../node_modules/tsx/dist/loader.mjs", import.meta.url).href;
-  const child = spawn(process.execPath, ["--import", loader, "--input-type=module", "-e", childSource], {
+  const child = spawn(process.execPath, [...sourceLoader, "--input-type=module", "-e", childSource], {
     cwd: process.cwd(),
     stdio: ["ignore", "ignore", "pipe"],
   });

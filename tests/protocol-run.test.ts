@@ -6,7 +6,7 @@ import { decodeContractDocument } from "../src/body/decode.js";
 import { decideArc } from "../src/core/verbs/arc.js";
 import { entryUlid } from "../src/core/facts/types.js";
 import { GIT_REF, readGit, updateRefsAtomically, writeCommit } from "../src/git/repository.js";
-import { withPrivateStatePublicationSeat } from "../src/git/private-state-seat.js";
+import { GitPrivateStateSeatContentionError, withPrivateStatePublicationSeat } from "../src/git/private-state-seat.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { documentDerivation } from "../src/library/input.js";
 import { admitDeliveryOperation } from "../src/protocol/deliver.js";
@@ -264,7 +264,7 @@ test("stale review worktree inputs retry without admission or a partial write", 
   );
 });
 
-test("private-state seat contention projects as a publication-failed retry", async () => {
+test("private-state seat contention projects as a publication-failed retry without admission", async () => {
   const repository = repositoryWithHead();
   const bound = await Keiyaku.bind({
     repo: await cachedRepoAt(repository.path),
@@ -274,37 +274,38 @@ test("private-state seat contention projects as a publication-failed retry", asy
   const id = (await bound.keiyaku.state()).id;
   const git = await cachedRepositoryAt(repository.path);
   const before = repository.run(["rev-parse", GIT_REF]).trim();
-  let releaseHolder: (() => void) | undefined;
-  const hold = new Promise<void>((resolve) => {
-    releaseHolder = resolve;
-  });
-  let holding: (() => void) | undefined;
-  const acquired = new Promise<void>((resolve) => {
-    holding = resolve;
-  });
+  const hold = deferred(),
+    acquired = deferred();
   const holder = withPrivateStatePublicationSeat(git, async () => {
-    holding?.();
-    await hold;
+    acquired.resolve();
+    await hold.promise;
   });
-  await acquired;
-  const result = await withGitDecodeChannel(git, (channel) =>
-    runProtocol({
-      input: {
-        contractId: id,
-        at: "2026-09-02T00:00:00Z",
-        data: ARC,
-      },
-      channel,
-      repository: git,
-      contracts: [id],
-      attempts: [{ entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV")] }],
-      decide: decideArc,
-    }),
-  );
-  releaseHolder?.();
-  await holder;
-  assert.equal(result.kind, "publication-failed");
-  if (result.kind !== "publication-failed") throw new Error("expected publication-failed contention");
-  assert.match(result.diagnostic, /timed out/u);
-  assert.equal(repository.run(["rev-parse", GIT_REF]).trim(), before);
+  await acquired.promise;
+  // Real contention reaches the owner boundary. The seat test covers elapsed-time
+  // enforcement; this test independently checks the protocol's no-effect retry.
+  const contended = {
+    ...git,
+    onPrivateStateSeatContention: () => {
+      throw new GitPrivateStateSeatContentionError("timed out");
+    },
+  };
+  try {
+    const result = await withGitDecodeChannel(contended, (channel) =>
+      runProtocol({
+        input: { contractId: id, at: "2026-09-02T00:00:00Z", data: ARC },
+        channel,
+        repository: contended,
+        contracts: [id],
+        attempts: [{ entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV")] }],
+        decide: decideArc,
+      }),
+    );
+    assert.equal(result.kind, "publication-failed");
+    if (result.kind !== "publication-failed") throw new Error("expected publication-failed contention");
+    assert.match(result.diagnostic, /timed out/u);
+    assert.equal(repository.run(["rev-parse", GIT_REF]).trim(), before);
+  } finally {
+    hold.resolve();
+    await holder;
+  }
 });

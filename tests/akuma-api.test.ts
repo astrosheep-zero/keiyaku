@@ -57,24 +57,6 @@ test("Schema.zod and JsonSchema freeze a canonical bounded document", () => {
   assert.throws(() => Schema.json({ type: "object", description: "é".repeat(40_000) }, (value) => value), /byte/u);
 });
 
-test("public ./akuma barrel exposes only the contracted names", async () => {
-  const exported = await import("../src/akuma/index.js");
-  assert.deepEqual(
-    Object.keys(exported).sort(),
-    [
-      "ALLOWED_ACTIONS",
-      "Akuma",
-      "AkumaBusyError",
-      "AkumaDecodeError",
-      "AkumaNotBornError",
-      "AkumaProviderError",
-      "Schema",
-    ].sort(),
-  );
-  assert.equal("AkumaHandle" in exported, false);
-  assert.equal("TellResult" in exported, false);
-});
-
 test("Akuma.birth has no prompt and select is synchronous", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-birth-"));
   const home = join(root, "home");

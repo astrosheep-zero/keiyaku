@@ -1,5 +1,9 @@
 import { rmSync } from "node:fs";
 
+export const sourceLoader: readonly string[] = import.meta.url.endsWith(".ts")
+  ? ["--import", import.meta.resolve("tsx")]
+  : [];
+
 export async function waitForProcessExit(pid: number): Promise<void> {
   const deadline = performance.now() + 2_000;
   while (true) {

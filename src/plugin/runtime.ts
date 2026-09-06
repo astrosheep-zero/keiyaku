@@ -434,7 +434,21 @@ async function createPluginRuntime(input: PluginRuntimeInput): Promise<PluginRun
           await Promise.all(pending);
         }
       };
-      await Promise.race([settle(), new Promise<void>((resolve) => setTimeout(resolve, PLUGIN_DRAIN_TIMEOUT_MS))]);
+      await withDrainDeadline(settle());
     },
   });
+}
+
+async function withDrainDeadline(settled: Promise<void>): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      settled,
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, PLUGIN_DRAIN_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }

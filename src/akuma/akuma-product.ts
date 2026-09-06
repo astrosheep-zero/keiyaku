@@ -264,6 +264,7 @@ class AkumaProduct {
     }
     const published = await launchAkuma({
       allocated: born.allocated,
+      awaitAsleep: born.initialBody === undefined,
       launch: async (allocated) =>
         await spawnAkumaBody({
           paths: allocated.paths,

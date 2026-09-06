@@ -15,7 +15,7 @@ async function fixture() {
   return { repository, contract, state, worktree };
 }
 
-async function dependentFixture(diverged: boolean) {
+async function dependentFixture() {
   const { repository, contract: primary, state: initial } = await fixture();
   const dependent = (
     await Keiyaku.bind({
@@ -28,7 +28,7 @@ async function dependentFixture(diverged: boolean) {
   ).keiyaku;
   const childState = await dependent.state();
   const childPath = await appointedWorktreePath(await cachedRepositoryAt(repository.path), childState.id);
-  if (diverged) {
+  {
     writeFileSync(join(childPath, "dependent.txt"), "dependent\n");
     repository.run(["-C", childPath, "add", "dependent.txt"]);
     repository.run(["-C", childPath, "commit", "--quiet", "-m", "dependent candidate"]);
@@ -43,29 +43,6 @@ async function dependentFixture(diverged: boolean) {
   return { repository, primary, initial, dependent, childState, childPath, childHead };
 }
 
-test("review before delivery records one leading fact and delivery later claims automatically", async () => {
-  const { contract } = await fixture();
-  const review = await contract.review({ verdict: "satisfied" });
-  assert.deepEqual(
-    review.facts.map((fact) => fact.kind),
-    ["attestation"],
-  );
-  assert.equal(review.value.completion, undefined);
-  const placement = review.value.placement;
-  assert.equal(placement && "refusal" in placement ? placement.refusal.kind : undefined, "delivery-missing");
-  const delivered = await contract.deliver();
-  assert.equal(delivered.kind, "accepted");
-  if (delivered.kind !== "accepted") throw new Error("expected an accepted delivery");
-  assert.deepEqual(
-    delivered.facts.map((fact) => fact.kind),
-    ["bound", "deliver", "claimed"],
-  );
-  assert.ok(delivered.value.completion);
-  const state = await contract.state();
-  assert.equal(state.terminal?.kind, "claimed");
-  assert.equal(delivered.head, state.head);
-});
-
 test("review after delivery uses the same completion node without replaying delivery facts", async () => {
   const { contract } = await fixture();
   const delivered = await contract.deliver();
@@ -76,6 +53,14 @@ test("review after delivery uses the same completion node without replaying deli
     delivered.facts.map((fact) => fact.kind),
     ["bound", "deliver"],
   );
+  const unsatisfied = await contract.review({ verdict: "unsatisfied", summary: "not accepted" });
+  assert.deepEqual(
+    unsatisfied.facts.map((fact) => fact.kind),
+    ["attestation"],
+  );
+  assert.equal(unsatisfied.value.completion, undefined);
+  assert.equal(unsatisfied.value.placement, undefined);
+  assert.equal((await contract.state()).terminal, null);
   const review = await contract.review({ verdict: "satisfied" });
   assert.deepEqual(
     review.facts.map((fact) => fact.kind),
@@ -85,38 +70,8 @@ test("review after delivery uses the same completion node without replaying deli
   assert.equal(review.head, (await contract.state()).head);
 });
 
-test("an unsatisfied review never requests trailing placement", async () => {
-  const { contract } = await fixture();
-  await contract.deliver();
-  const review = await contract.review({ verdict: "unsatisfied", summary: "not accepted" });
-  assert.deepEqual(
-    review.facts.map((fact) => fact.kind),
-    ["attestation"],
-  );
-  assert.equal(review.value.completion, undefined);
-  assert.equal(review.value.placement, undefined);
-  assert.equal((await contract.state()).terminal, null);
-});
-
-test("automatic dependent completion retains only new facts and the primary contract head", async () => {
-  const { primary, initial, dependent, childState } = await dependentFixture(false);
-  const review = await primary.review({ verdict: "satisfied" });
-  assert.deepEqual(review.value.continuation?.claimed, [childState.id], JSON.stringify(review.value.continuation));
-  assert.deepEqual(
-    review.facts.filter((fact) => fact.contract === initial.id).map((fact) => fact.kind),
-    ["attestation", "claimed"],
-  );
-  assert.equal(
-    review.facts.some((fact) => fact.kind === "deliver" || fact.kind === "bound"),
-    false,
-  );
-  assert.equal(new Set(review.facts.map((fact) => `${fact.contract}:${fact.entry}`)).size, review.facts.length);
-  assert.equal((await dependent.state()).terminal?.kind, "claimed");
-  assert.equal(review.head, (await primary.state()).head);
-});
-
 test("a diverged dependent keeps its worktree and does not counterfeit completion", async () => {
-  const { repository, primary, initial, dependent, childPath, childHead } = await dependentFixture(true);
+  const { repository, primary, initial, dependent, childPath, childHead } = await dependentFixture();
   const review = await primary.review({ verdict: "satisfied" });
   assert.ok(review.value.completion);
   assert.deepEqual(review.value.continuation?.claimed, []);
@@ -293,7 +248,23 @@ test("diamond continuation revisits unready candidates and admits each dependent
   assert.deepEqual(reviewed.value.continuation?.stopped, []);
   assert.equal(reviewed.facts.filter((fact) => fact.contract === leafId && fact.kind === "claimed").length, 1);
   assert.equal(reviewed.head, (await primary.state()).head);
-  assert.equal((await leaf.state()).terminal?.kind, "claimed");
+  assert.deepEqual(
+    reviewed.facts.filter((fact) => fact.contract === state.id).map((fact) => fact.kind),
+    ["attestation", "claimed"],
+  );
+  assert.equal(
+    reviewed.facts.some((fact) => fact.kind === "deliver" || fact.kind === "bound"),
+    false,
+  );
+  assert.equal(new Set(reviewed.facts.map((fact) => `${fact.contract}:${fact.entry}`)).size, reviewed.facts.length);
+  for (const child of [left, right, leaf]) {
+    assert.equal((await child.state()).terminal?.kind, "claimed");
+    const facts = (await child.history()).events.flatMap((event) =>
+      event.source === "journal" ? [event.fact.kind] : [],
+    );
+    assert.equal(facts.filter((kind) => kind === "deliver").length, 1);
+    assert.equal(facts.filter((kind) => kind === "claimed").length, 1);
+  }
 });
 
 test("dependent verification leaks are accumulated with their owners instead of discarded", async () => {

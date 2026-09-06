@@ -28,7 +28,6 @@ export const LOCAL_TEST_FILES = [
   "tests/region.test.ts",
   "tests/settings.test.ts",
   "tests/task-document.test.ts",
-  "tests/task-repository-authority.test.ts",
   "tests/v4-cut.test.ts",
 ];
 
@@ -68,7 +67,6 @@ export const INTEGRATION_TEST_FILES = [
   "tests/path-coordinates.test.ts",
   "tests/plugin-runtime.test.ts",
   "tests/plugin-square.test.ts",
-  "tests/plugin-types.test.ts",
   "tests/private-state-seat.test.ts",
   "tests/protocol-bind-observe.test.ts",
   "tests/protocol-run.test.ts",

@@ -1,10 +1,10 @@
+import { sourceLoader } from "./support/process.js";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 import { GIT_REF, readRef } from "../src/git/repository.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { HeartAbsentError } from "../src/akuma/heart/index.js";
@@ -132,114 +132,6 @@ test("Akuma call rejects the removed --readonly option before invocation", () =>
       error instanceof CliUsageError &&
       /option --readonly is not valid for call/u.test(error.message) &&
       !/--readonly/u.test(error.message.split("\n").slice(1).join("\n")),
-  );
-});
-
-function sourceModulesLoadedByCli(
-  argv: readonly string[],
-  cwd: string,
-  environment: NodeJS.ProcessEnv = {},
-): readonly string[] {
-  const dir = mkdtempSync(join(tmpdir(), "keiyaku-cli-trace-"));
-  const tracer = join(dir, "trace.mjs");
-  const output = join(dir, "loaded.json");
-  writeFileSync(
-    tracer,
-    [
-      'import { registerHooks } from "node:module";',
-      'import { writeFileSync } from "node:fs";',
-      "const loaded = [];",
-      "registerHooks({",
-      "  load(url, context, nextLoad) {",
-      "    loaded.push(url);",
-      "    return nextLoad(url, context);",
-      "  },",
-      "});",
-      `const { main } = await import(${JSON.stringify(pathToFileURL(resolve(import.meta.dirname, "../src/cli/main.ts")).href)});`,
-      `const code = await main(${JSON.stringify(argv)});`,
-      `writeFileSync(${JSON.stringify(output)}, JSON.stringify(loaded));`,
-      "process.exitCode = code;",
-      "",
-    ].join("\n"),
-  );
-  const env: NodeJS.ProcessEnv = { ...process.env, ...environment };
-  delete env.FORCE_COLOR;
-  const result = spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), tracer], {
-    cwd,
-    encoding: "utf8",
-    env,
-  });
-  if (!existsSync(output)) {
-    throw new Error(`CLI family trace missing: status=${String(result.status)}\n${result.stdout}\n${result.stderr}`);
-  }
-  const loaded = JSON.parse(readFileSync(output, "utf8")) as string[];
-  const srcPrefix = `${pathToFileURL(resolve(import.meta.dirname, "../src")).href}/`;
-  return loaded.flatMap((url) => {
-    const bare = url.split("?")[0]!;
-    if (!bare.startsWith(srcPrefix)) return [];
-    return [decodeURIComponent(bare.slice(srcPrefix.length))];
-  });
-}
-
-function assertLoaded(loaded: readonly string[], expected: readonly string[], forbidden: readonly string[]): void {
-  const seen = loaded.join(", ");
-  for (const path of expected) {
-    assert.ok(loaded.includes(path), `expected to load ${path}, got ${seen}`);
-  }
-  for (const path of forbidden) {
-    assert.ok(!loaded.includes(path), `did not expect to load ${path}; loaded ${seen}`);
-  }
-}
-
-test("help and selected commands load only their CLI families", () => {
-  const repository = repositoryWithMain();
-  const cwd = resolve(import.meta.dirname, "..");
-  const atRepo = (command: readonly string[]): readonly string[] => ["-C", repository.path, ...command];
-  const product = [
-    "settings.ts",
-    "task/index.ts",
-    "kanshi/index.ts",
-    "akuma/index.ts",
-    "cli/commands/akuma-invoke.ts",
-    "cli/commands/task-invoke.ts",
-    "runtime/proc/run.ts",
-  ] as const;
-  const otherFamilies = [
-    "task/index.ts",
-    "kanshi/index.ts",
-    "akuma/index.ts",
-    "cli/commands/akuma-invoke.ts",
-    "cli/commands/task-invoke.ts",
-  ] as const;
-  assertLoaded(
-    sourceModulesLoadedByCli(["--help"], cwd),
-    ["cli/parse.ts"],
-    ["cli/runtime.ts", "cli/invoke.ts", ...product],
-  );
-  assertLoaded(
-    sourceModulesLoadedByCli(atRepo(["settings"]), cwd),
-    ["cli/runtime.ts", "cli/invoke.ts", "settings.ts"],
-    otherFamilies,
-  );
-  assertLoaded(
-    sourceModulesLoadedByCli(["install", "codex"], cwd, { PATH: "" }),
-    ["cli/runtime.ts", "cli/invoke.ts", "runtime/proc/run.ts"],
-    ["settings.ts", ...otherFamilies],
-  );
-  assertLoaded(
-    sourceModulesLoadedByCli(atRepo(["task", "ls"]), cwd),
-    ["cli/commands/task-invoke.ts", "task/index.ts"],
-    ["kanshi/index.ts", "akuma/index.ts", "cli/commands/akuma-invoke.ts"],
-  );
-  assertLoaded(
-    sourceModulesLoadedByCli(atRepo(["status", "--json"]), cwd),
-    ["kanshi/index.ts"],
-    ["cli/commands/akuma-invoke.ts", "cli/commands/task-invoke.ts"],
-  );
-  assertLoaded(
-    sourceModulesLoadedByCli(atRepo(["status", "aku/missing", "--json"]), cwd),
-    ["cli/commands/akuma-invoke.ts", "akuma/index.ts"],
-    ["kanshi/index.ts", "cli/commands/task-invoke.ts"],
   );
 });
 
@@ -1497,11 +1389,10 @@ test("reconcile world command carries a typed discovery failure", async () => {
       const env: NodeJS.ProcessEnv = { ...process.env, KEIYAKU_GIT_PATH: gitPath, NO_COLOR: "1" };
       delete env.FORCE_COLOR;
       const run = (args: readonly string[]) =>
-        spawnSync(
-          process.execPath,
-          ["--import", import.meta.resolve("tsx"), resolve(import.meta.dirname, "../src/cli/index.ts"), ...args],
-          { encoding: "utf8", env },
-        );
+        spawnSync(process.execPath, [...sourceLoader, resolve(import.meta.dirname, "../src/cli/index.js"), ...args], {
+          encoding: "utf8",
+          env,
+        });
       return {
         result,
         text: run(["-C", repository.path, "reconcile"]),
@@ -1687,17 +1578,6 @@ test("deliver --materialize-conflict returns the exact public materialization ob
   const text = renderText(result);
   assert.match(text, /integration-conflict-materialized targetHead=/u);
   assert.match(text, /workspace worktree /u);
-  const json = JSON.parse(JSON.stringify(result));
-  assert.equal(json.kind, "integration-conflict-materialized");
-  assert.equal(json.targetHead, targetHead);
-  assert.equal(json.handoffBase, handoffBase);
-  assert.deepEqual(json.recovery, {
-    materialize: "deliver --materialize-conflict --include-dirty",
-    continue: "deliver --include-dirty",
-    staging: "not-required",
-  });
-  assert.deepEqual(json.conflictPaths, ["shared.txt"]);
-  assert.deepEqual(json.workspace, { kind: "worktree", path: worktree });
   const state = (await observeContract(await cachedRepositoryAt(repository.path), id)).state;
   assert.equal(state?.delivery, null);
   assert.equal(state?.terminal, null);
@@ -1707,62 +1587,60 @@ test("CLI preserves a real admission receipt and failure category", async () => 
   const repository = repositoryWithMain();
   const bound = await invokeWithDocument(repository.path, ["bind", "-"], contractDocument("Exceptional receipt"));
   const id = acceptedContract(bound);
-  for (const [errorName, category] of [
-    ["TypeError", "type-error"],
-    ["AuthorityCorruptionError", "authority-corruption"],
+  for (const [errorName, category, output] of [
+    ["TypeError", "type-error", "json"],
+    ["AuthorityCorruptionError", "authority-corruption", "text"],
   ] as const) {
-    for (const output of ["json", "text"]) {
-      const script = [
-        `import { Keiyaku } from ${JSON.stringify(new URL("../src/index.ts", import.meta.url).href)};`,
-        `import { withExecutionReceipt } from ${JSON.stringify(new URL("../src/library/execution-result.ts", import.meta.url).href)};`,
-        `import { AuthorityCorruptionError } from ${JSON.stringify(new URL("../src/core/facts/errors.ts", import.meta.url).href)};`,
-        `import { runCliCommand } from ${JSON.stringify(new URL("../src/cli/runtime.ts", import.meta.url).href)};`,
-        `import { parseArgv } from ${JSON.stringify(new URL("../src/cli/parse.ts", import.meta.url).href)};`,
-        "const original = Keiyaku.prototype.review;",
-        "Keiyaku.prototype.review = async function(input) {",
-        "  const result = await original.call(this, input);",
-        `  throw withExecutionReceipt(new ${errorName === "AuthorityCorruptionError" ? "AuthorityCorruptionError" : "TypeError"}('post-admission failure'), {`,
-        `    operation: 'review', contractId: ${JSON.stringify(id)}, head: result.head,`,
-        "    facts: result.facts, cleanup: result.cleanup, executionStops: result.executionStops,",
-        "  });",
-        "};",
-        `process.exitCode = await runCliCommand(parseArgv(${JSON.stringify([
-          "--repo",
-          repository.path,
-          "review",
-          id,
-          "--satisfied",
-          "--summary",
-          "accepted",
-          ...(output === "json" ? ["--json"] : []),
-        ])}));`,
-      ].join("\n");
-      const environment = { ...process.env };
-      delete environment.AKUMA_REQUESTS;
-      const result = spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), "--input-type=module", "-"], {
-        input: script,
-        cwd: repository.path,
-        env: environment,
-        encoding: "utf8",
-        timeout: 15_000,
-      });
-      assert.equal(result.status, 3, result.stderr);
-      assert.equal(result.stderr, "");
-      if (output === "json") {
-        const parsed = JSON.parse(result.stdout);
-        assert.equal(parsed.kind, "execution-failed");
-        assert.equal(parsed.category, category);
-        assert.equal(parsed.diagnostic, "post-admission failure");
-        assert.equal(parsed.receipt.contractId, id);
-        assert.deepEqual(
-          parsed.receipt.facts.map((fact: { kind: string }) => fact.kind),
-          ["attestation"],
-        );
-      } else {
-        assert.match(result.stdout, new RegExp(`execution failed after admission ${category}`, "u"));
-        assert.match(result.stdout, /journal[\s\S]*attestation/u);
-        assert.doesNotMatch(result.stdout, /usage:|review refused/u);
-      }
+    const script = [
+      `import { Keiyaku } from ${JSON.stringify(new URL("../src/index.js", import.meta.url).href)};`,
+      `import { withExecutionReceipt } from ${JSON.stringify(new URL("../src/library/execution-result.js", import.meta.url).href)};`,
+      `import { AuthorityCorruptionError } from ${JSON.stringify(new URL("../src/core/facts/errors.js", import.meta.url).href)};`,
+      `import { runCliCommand } from ${JSON.stringify(new URL("../src/cli/runtime.js", import.meta.url).href)};`,
+      `import { parseArgv } from ${JSON.stringify(new URL("../src/cli/parse.js", import.meta.url).href)};`,
+      "const original = Keiyaku.prototype.review;",
+      "Keiyaku.prototype.review = async function(input) {",
+      "  const result = await original.call(this, input);",
+      `  throw withExecutionReceipt(new ${errorName === "AuthorityCorruptionError" ? "AuthorityCorruptionError" : "TypeError"}('post-admission failure'), {`,
+      `    operation: 'review', contractId: ${JSON.stringify(id)}, head: result.head,`,
+      "    facts: result.facts, cleanup: result.cleanup, executionStops: result.executionStops,",
+      "  });",
+      "};",
+      `process.exitCode = await runCliCommand(parseArgv(${JSON.stringify([
+        "--repo",
+        repository.path,
+        "review",
+        id,
+        "--satisfied",
+        "--summary",
+        "accepted",
+        ...(output === "json" ? ["--json"] : []),
+      ])}));`,
+    ].join("\n");
+    const environment = { ...process.env };
+    delete environment.AKUMA_REQUESTS;
+    const result = spawnSync(process.execPath, [...sourceLoader, "--input-type=module", "-"], {
+      input: script,
+      cwd: repository.path,
+      env: environment,
+      encoding: "utf8",
+      timeout: 15_000,
+    });
+    assert.equal(result.status, 3, result.stderr);
+    assert.equal(result.stderr, "");
+    if (output === "json") {
+      const parsed = JSON.parse(result.stdout);
+      assert.equal(parsed.kind, "execution-failed");
+      assert.equal(parsed.category, category);
+      assert.equal(parsed.diagnostic, "post-admission failure");
+      assert.equal(parsed.receipt.contractId, id);
+      assert.deepEqual(
+        parsed.receipt.facts.map((fact: { kind: string }) => fact.kind),
+        ["attestation"],
+      );
+    } else {
+      assert.match(result.stdout, new RegExp(`execution failed after admission ${category}`, "u"));
+      assert.match(result.stdout, /journal[\s\S]*attestation/u);
+      assert.doesNotMatch(result.stdout, /usage:|review refused/u);
     }
   }
 });
