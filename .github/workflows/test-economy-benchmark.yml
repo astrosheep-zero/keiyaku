@@ -29,22 +29,24 @@ jobs:
           git config --global user.name 'Keiyaku benchmark'
           git config --global user.email 'benchmark@example.invalid'
           git worktree add --detach "$RUNNER_TEMP/kei-baseline" 515b948ecde880f2f945ec736763039d4f85a601
-          git worktree add --detach "$RUNNER_TEMP/kei-candidate" 15f26b3626e6a4d24c54df34e65be28782d6b6ff
+          git worktree add --detach "$RUNNER_TEMP/kei-candidate" 944171d3703ccb409c8fc24fcb6bcf7b9c7a31a9
           (cd "$RUNNER_TEMP/kei-baseline" && npm ci --ignore-scripts --prefer-offline)
           (cd "$RUNNER_TEMP/kei-candidate" && npm ci --ignore-scripts --prefer-offline)
-          # Common non-performance baseline repairs: existing formatting failure,
-          # and fixture teardown awaiting the actual released child's exit.
-          cp "$RUNNER_TEMP/kei-candidate/src/contract-guidance.ts" "$RUNNER_TEMP/kei-baseline/src/contract-guidance.ts"
-          cp "$RUNNER_TEMP/kei-candidate/tests/windows-akuma-process.test.ts" "$RUNNER_TEMP/kei-baseline/tests/windows-akuma-process.test.ts"
-          git -C "$RUNNER_TEMP/kei-baseline" diff --stat
+          mkdir -p benchmark-results
+          # Same correctness fixes on both sides. No suite deletion, scheduling,
+          # compilation, timer, or bulk-fixture optimization is copied to baseline.
+          for path in src/contract-guidance.ts src/akuma/akuma-product.ts tests/windows-akuma-process.test.ts tests/support/process.ts tests/akuma-body.test.ts; do
+            cp "$RUNNER_TEMP/kei-candidate/$path" "$RUNNER_TEMP/kei-baseline/$path"
+          done
+          git -C "$RUNNER_TEMP/kei-baseline" diff > benchmark-results/baseline-normalizations.patch
       - name: Warm both sides, then measure AB BA AB without overlapping executions
         run: |
           python3 - <<'PY'
           import json, os, pathlib, platform, statistics, subprocess, time
           root = pathlib.Path(os.environ['RUNNER_TEMP'])
-          logs = pathlib.Path('benchmark-results'); logs.mkdir()
-          revisions = {'baseline': '515b948ecde880f2f945ec736763039d4f85a601', 'candidate': '15f26b3626e6a4d24c54df34e65be28782d6b6ff'}
-          report = {'revisions': revisions, 'command': 'npm test', 'cpu_count': os.cpu_count(), 'platform': platform.platform(), 'node': subprocess.check_output(['node','--version'], text=True).strip(), 'git': subprocess.check_output(['git','--version'], text=True).strip(), 'normalizations': ['src/contract-guidance.ts formatting only', 'tests/windows-akuma-process.test.ts awaits real released child exit on both sides'], 'runs': []}
+          logs = pathlib.Path('benchmark-results')
+          revisions = {'baseline': '515b948ecde880f2f945ec736763039d4f85a601', 'candidate': '944171d3703ccb409c8fc24fcb6bcf7b9c7a31a9'}
+          report = {'revisions': revisions, 'command': 'npm test', 'cpu_count': os.cpu_count(), 'platform': platform.platform(), 'node': subprocess.check_output(['node','--version'], text=True).strip(), 'git': subprocess.check_output(['git','--version'], text=True).strip(), 'environment': {'KNIP_DISABLE_RAW_TRANSFER': '1'}, 'normalizations': ['guidance formatting', 'wait for idle birth before schema Tell', 'await actual released fixture child exit', 'await successor completion instead of pending-queue polling'], 'runs': []}
           for index, side in enumerate(['baseline','candidate','baseline','candidate','candidate','baseline','baseline','candidate']):
             warmup = index < 2
             name = str(index) + '-' + side
