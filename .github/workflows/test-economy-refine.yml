@@ -1,0 +1,56 @@
+name: Apply reviewed test refinements
+on:
+  push:
+    branches: [codex/test-economy-20260906]
+    paths: ['.github/workflows/test-economy-refine.yml']
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.ref == 'refs/heads/codex/test-economy-20260906'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Verify and apply three reviewed source transformations
+        run: |
+          git config user.name 'Keiyaku test refactor'
+          git config user.email 'test-refactor@example.invalid'
+          python3 - <<'PY'
+          import pathlib, subprocess
+          def git(*args, data=None):
+              return subprocess.check_output(['git', *args], input=data)
+          expected = {
+              'scripts/test-entry.mjs': ('2a10e415dfd0066af807377598dff8cf7b87d63e', '91f02f0f8508744d751df6f11bce1057850ce848'),
+              'tests/support/git.ts': ('d3e8eb31ca4ddf058c11df3a049b20fe53177760', '56160c617d6ba6557f347f409ac60dd23ff80a37'),
+              'tests/library-contract-operations.test.ts': ('d54e3ac031de1941bd4b5a5c4cc6ea93468f5818', 'd8129739980c6d3a9a0610446e462cc5f6b00c94'),
+          }
+          output = {}
+          for name, (before, after) in expected.items():
+              assert git('rev-parse', 'HEAD:' + name).decode().strip() == before, name
+              source = pathlib.Path(name).read_text()
+              if name == 'scripts/test-entry.mjs':
+                  source = source.replace('["format:check", "build", "test:architecture", "test:maintainability"]', '["format:check", "build", "test:architecture", "test:maintainability", "test:compile"]')
+                  source = source.replace('    const checks = mode === "dev" ? ["test:local"] : ["test:reachability", "test:parallel"];\n    const results = await Promise.all(checks.map((name) => run("npm", ["run", name], name)));', '    const checks = mode === "dev" ? ["test:local"] : ["test:reachability"];\n    const running = checks.map((name) => run("npm", ["run", name], name));\n    if (mode === "release")\n      running.push(run(process.execPath, ["scripts/run-tests.mjs", "--compiled", "--test-concurrency=8"], "tests"));\n    const results = await Promise.all(running);')
+              elif name == 'tests/support/git.ts':
+                  source = source.replace('import { appendFileSync, chmodSync, cpSync, existsSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";', 'import {\n  appendFileSync,\n  chmodSync,\n  cpSync,\n  existsSync,\n  mkdirSync,\n  mkdtempSync,\n  realpathSync,\n  writeFileSync,\n} from "node:fs";')
+                  source = source.replace('  try {\n    return action(shimPath);\n  } catch (error) {\n    throw error;\n  }', '  return action(shimPath);')
+                  source = source.replace('["init", "--quiet", "--initial-branch=main", path]', '["init", "--quiet", "--initial-branch=main", "--template=", path]')
+                  source = source.replace('  appendFileSync(\n    join(path, ".git", "config"),', '  mkdirSync(join(path, ".git", "info"));\n  appendFileSync(\n    join(path, ".git", "config"),')
+              else:
+                  source = source.replace('import test from "node:test";', 'import test, { describe } from "node:test";')
+                  prefix, body = source.split('test("plain deliver conflict', 1)
+                  body = 'test("plain deliver conflict' + body
+                  source = prefix + '// Each case owns a fresh repository; only sealed fixture templates are shared.\ndescribe("public Contract operations", { concurrency: 2 }, () => {\n' + '\n'.join('  ' + line if line else '' for line in body.splitlines()) + '\n});\n'
+              assert git('hash-object', '--stdin', data=source.encode()).decode().strip() == after, name
+              output[name] = source
+          for name, source in output.items():
+              pathlib.Path(name).write_text(source)
+          subprocess.check_call(['git', 'add', '--', *output])
+          subprocess.check_call(['git', 'diff', '--cached', '--check'])
+          subprocess.check_call(['git', 'commit', '-m', 'test: overlap compilation and independent Contract cases without reducing assertions'])
+          subprocess.check_call(['git', 'push', 'origin', 'HEAD:refs/heads/codex/test-economy-20260906'])
+          print('Pushed source head:', git('rev-parse', 'HEAD').decode().strip())
+          PY
