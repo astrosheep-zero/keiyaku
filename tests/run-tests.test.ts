@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { globSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, globSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { tmpdir } from "node:os";
@@ -108,4 +108,53 @@ test("compiled sweeps schedule large files first without losing isolation or fai
   assert.equal(failed.status, 1, failed.stdout + failed.stderr);
   assert.match(failed.stdout + failed.stderr, /wrong bytes/u);
   assert.equal(readFileSync(order, "utf8"), "zaza");
+});
+
+test("test entry reruns checks and retires bytecode after success and failure", (context) => {
+  const directory = mkdtempSync(join(tmpdir(), "keiyaku-entry-lifecycle-"));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  const phases = ["test:architecture", "test:local", "test:typecheck"];
+  writeFileSync(
+    join(directory, "package.json"),
+    JSON.stringify({
+      type: "module",
+      scripts: Object.fromEntries(phases.map((phase) => [phase, "node phase.mjs"])),
+    }),
+  );
+  writeFileSync(
+    join(directory, "phase.mjs"),
+    [
+      'import { appendFileSync, existsSync } from "node:fs";',
+      'import assert from "node:assert/strict";',
+      "const phase = process.env.npm_lifecycle_event, cache = process.env.NODE_COMPILE_CACHE;",
+      "assert.ok(cache && existsSync(cache));",
+      'appendFileSync("phases.jsonl", JSON.stringify({ phase, cache }) + "\\n");',
+      "if (phase === process.env.FAIL_PHASE) process.exitCode = 7;",
+    ].join("\n"),
+  );
+  const caches: string[] = [];
+  for (const fail of [false, true]) {
+    writeFileSync(join(directory, "phases.jsonl"), "");
+    const result = spawnSync(process.execPath, [resolve(root, "scripts/test-entry.mjs"), "--dev"], {
+      cwd: directory,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        NODE_V8_COVERAGE: undefined,
+        NODE_DISABLE_COMPILE_CACHE: undefined,
+        NODE_COMPILE_CACHE: undefined,
+        FAIL_PHASE: fail ? "test:typecheck" : "",
+      },
+    });
+    assert.equal(result.status, fail ? 7 : 0, result.stdout + result.stderr);
+    const records = readFileSync(join(directory, "phases.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { phase: string; cache: string });
+    assert.deepEqual(records.map(({ phase }) => phase).sort(), fail ? [phases[0], phases[2]] : phases);
+    assert.equal(new Set(records.map(({ cache }) => cache)).size, 1);
+    caches.push(records[0]!.cache);
+    assert.equal(existsSync(records[0]!.cache), false);
+  }
+  assert.notEqual(caches[0], caches[1]);
 });
