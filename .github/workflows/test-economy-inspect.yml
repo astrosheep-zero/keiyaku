@@ -4,20 +4,46 @@ on:
     branches: [codex/test-economy-20260906]
     paths: ['.github/workflows/test-economy-inspect.yml']
 permissions:
-  contents: read
+  contents: write
 jobs:
-  export:
+  apply:
+    if: github.ref == 'refs/heads/codex/test-economy-20260906'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          persist-credentials: false
-      - name: Export repository objects only
-        run: git bundle create /tmp/test-economy-source.bundle HEAD refs/remotes/origin/main
-      - uses: actions/upload-artifact@v4
-        with:
-          name: test-economy-source
-          path: /tmp/test-economy-source.bundle
-          retention-days: 1
+      - name: Validate every before and after blob, then commit source edits only
+        run: |
+          git config user.name 'Keiyaku test refactor'
+          git config user.email 'test-refactor@example.invalid'
+          python3 - <<'PY'
+          import json, pathlib, subprocess
+          payload = json.loads(pathlib.Path('.test-economy-edits.json').read_text())
+          def git(*args, data=None):
+              return subprocess.check_output(['git', *args], input=data)
+          subprocess.check_call(['git', 'merge-base', '--is-ancestor', payload['base'], 'HEAD'])
+          outputs = []
+          for change in payload['files']:
+              path = pathlib.PurePosixPath(change['path'])
+              assert not path.is_absolute() and '..' not in path.parts
+              assert path.parts[0] in ('tests', 'scripts')
+              assert git('rev-parse', 'HEAD:' + str(path)).decode().strip() == change['before']
+              lines = pathlib.Path(path).read_text().splitlines(keepends=True)
+              for start, end, replacement in reversed(change['edits']):
+                  lines[start:end] = [replacement]
+              content = ''.join(lines).encode()
+              assert git('hash-object', '--stdin', data=content).decode().strip() == change['after'], str(path)
+              outputs.append((str(path), content))
+          for path, content in outputs:
+              pathlib.Path(path).write_bytes(content)
+          subprocess.check_call(['git', 'add', '--', *(path for path, _ in outputs)])
+          subprocess.check_call(['git', 'rm', '.test-economy-edits.json'])
+          subprocess.check_call(['git', 'diff', '--cached', '--check'])
+          assert not any(path.startswith('.github/') for path in git('diff', '--cached', '--name-only').decode().splitlines())
+          subprocess.check_call(['git', 'commit', '-m', 'test: schedule large suites first and replace topology snapshots with behavior'])
+          subprocess.check_call(['git', 'push', 'origin', 'HEAD:refs/heads/codex/test-economy-20260906'])
+          print('Applied source head:', git('rev-parse', 'HEAD').decode().strip())
+          print('Applied source tree:', git('rev-parse', 'HEAD^{tree}').decode().strip())
+          PY
