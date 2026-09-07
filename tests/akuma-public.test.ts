@@ -588,6 +588,8 @@ const provider: ProviderAdapter = {
 
 test("turn owner folds a rejected completion while the event stream remains open", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-completion-rejection-")));
+  const deferred = configureDeferredBodyEndPlugin(root);
+  writeFileSync(deferred.release, "release\n");
   let rejectCompletion!: (error: Error) => void;
   const completion = new Promise<never>((_, reject) => {
     rejectCompletion = reject;
@@ -633,11 +635,15 @@ test("turn owner folds a rejected completion while the event stream remains open
       rejecting,
       { now: () => "2026-08-24T00:00:00.000Z" },
     );
+    await waitForFile(deferred.turnStarted);
+    assert.equal(existsSync(deferred.turnSettled), false);
     const rows = (await activitySlice(allocated.paths)).rows;
     const outcome = rows.find((row) => row.kind === "turn-end");
     assert.ok(outcome, JSON.stringify(rows));
     assert.deepEqual(outcome.outcome, { kind: "failed", diagnostic: "completion rejected" });
   } finally {
+    writeFileSync(deferred.turnRelease, "release\n");
+    await waitForFile(deferred.turnSettled);
     await drainPluginRuntime(root);
     rmSync(root, { recursive: true, force: true });
   }
