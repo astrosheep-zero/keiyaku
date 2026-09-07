@@ -203,6 +203,7 @@ async function invokeDeliver(
       ...(parsed.message === undefined ? {} : { message: parsed.message }),
       includeDirty: parsed.includeDirty,
       materializeConflict: parsed.materializeConflict,
+      overwrite: parsed.overwrite,
     });
     if (!("facts" in delivered)) return delivered;
     return acceptedDeliver(delivered, seat.id);

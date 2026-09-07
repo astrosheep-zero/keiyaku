@@ -26,6 +26,7 @@ import {
 } from "../git/target-placement.js";
 import { admitDecidedOffer, mintAttempts, type AcceptedAdmission } from "./attempt.js";
 import { prepareProtocolAttempt, runProtocol, type ProtocolResult, type RunProtocolInput } from "./run.js";
+export { observeTargetPlacement } from "../git/target-placement.js";
 
 export type PlacementExecutionFailure = Readonly<{
   kind: "placement-failed";

@@ -27,7 +27,13 @@ import { decodeSettlementLag } from "../settlement/result-codec.js";
 import type { SettlementReport } from "../settlement/settle.js";
 import type { TaskHolderAdmission } from "../settlement/holder.js";
 import type { WorktreeHooks } from "./configuration.js";
-import { completeReconcile, decodeReconciliationLag, type ReconcileCompletion } from "./reconcile.js";
+import {
+  completeReconcile,
+  decodeReconciliationLag,
+  reconcileLagScope,
+  type ReconcileCompletion,
+  type ReconcileLagScope,
+} from "./reconcile.js";
 import { decodeAuditReport, type AuditReport } from "../protocol/audit.js";
 import { decodeMaterializedConflict, type IntegrationConflictMaterialized } from "../protocol/deliver.js";
 import { decodeReviewValue, type ReviewValue } from "../protocol/review.js";
@@ -53,6 +59,8 @@ export type MutationFinality =
       pending: readonly Readonly<{ surface: MutationFinalitySurface; required: boolean }>[];
     }>
   | Readonly<{ kind: "not-admitted" }>;
+
+export type MutationLag = ReconcileCompletion["lag"][number] & Readonly<{ affects: ReconcileLagScope }>;
 
 type AcceptedFinalityInput = Readonly<{
   kind: "accepted";
@@ -101,6 +109,15 @@ export const mutationPendingSurfaceSchema = ownerSchema(
   decodeMutationPendingSurface,
   "expected pending surface",
 ) satisfies z.ZodType<MutationPendingSurface>;
+
+function decodeMutationLag(value: unknown): MutationLag {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("malformed mutation lag");
+  const { affects, ...withoutScope } = value as Record<string, unknown>;
+  const lag = decodeReconciliationLag(withoutScope);
+  const expected = reconcileLagScope(lag);
+  if (affects !== expected) throw new Error("malformed mutation lag");
+  return { ...lag, affects: expected };
+}
 
 export type Review = ReviewValue & Readonly<{ continuation?: ContinuationReport }>;
 
@@ -164,7 +181,7 @@ export const mutationResultSchema = <Value>(
       facts: object.facts.map(decodeJournalEntry),
       head: contractHead(object.head),
       value: parsedValue.data,
-      lags: object.lags.map(decodeReconciliationLag),
+      lags: object.lags.map(decodeMutationLag),
       settlementLags: object.settlementLags.map(decodeSettlementLag),
       pending: object.pending.map(decodeMutationPendingSurface),
       ...(object.recoverySnapshot === undefined
@@ -185,7 +202,7 @@ export const auditResultSchema = mutationResultSchema("audit", auditReportSchema
 >;
 
 type ObligationPendingInput = Readonly<{
-  lags: MutationResult<unknown>["lags"];
+  lags: readonly MutationLag[];
   settlementLags: MutationResult<unknown>["settlementLags"];
   cleanup: readonly ExecutionCleanup[];
   executionStops: readonly ExecutionStop[];
@@ -205,7 +222,8 @@ export function auditPending(value: AuditReport): readonly MutationPendingSurfac
   return value.verification.kind === "stopped" ? [pendingSurface("verification", true)] : [];
 }
 
-export function completionPending(value: CompletionPendingValue): readonly MutationPendingSurface[] {
+export function completionPending(value: CompletionPendingValue | undefined): readonly MutationPendingSurface[] {
+  if (value === undefined) return [];
   const pending: MutationPendingSurface[] = [];
   if (value.verification !== undefined) pending.push(pendingSurface("verification", true));
   if (value.placement !== undefined) pending.push(pendingSurface("placement", true));
@@ -217,7 +235,12 @@ export function completionPending(value: CompletionPendingValue): readonly Mutat
 
 export function obligationPending(input: ObligationPendingInput): readonly MutationPendingSurface[] {
   const pending: MutationPendingSurface[] = [];
-  if (input.lags.length > 0) pending.push(pendingSurface("reconciliation", true));
+  for (const lag of input.lags) {
+    const affects: ReconcileLagScope = "affects" in lag ? (lag.affects as ReconcileLagScope) : reconcileLagScope(lag);
+    if (affects !== "none" && !pending.some(({ surface }) => surface === affects)) {
+      pending.push(pendingSurface(affects, true));
+    }
+  }
   if (input.settlementLags.length > 0) pending.push(pendingSurface("settlement", true));
   if (input.cleanup.length > 0) {
     pending.push(pendingSurface("cleanup", false));
@@ -270,7 +293,7 @@ export type MutationResult<Value> = Readonly<{
   facts: readonly JournalEntry[];
   head: ContractHead;
   value: Value;
-  lags: ReconcileCompletion["lag"];
+  lags: readonly MutationLag[];
   settlementLags: SettlementReport["lags"];
   cleanup: readonly ExecutionCleanup[];
   executionStops: readonly ExecutionStop[];
@@ -339,7 +362,10 @@ export async function completeMutation<Value, PublicValue>(
     const effects = [...snapshot.physical.effects, ...reports.flatMap((report) => report.effects)];
     const recoverySnapshot = effects.findLast((effect) => effect.kind === "recovery-snapshot")?.snapshot;
     const publicValue = input.value(input.accepted.value);
-    const lags = [...snapshot.physical.lag, ...reports.flatMap((report) => report.lag)];
+    const lags = [...snapshot.physical.lag, ...reports.flatMap((report) => report.lag)].map((lag) => ({
+      ...lag,
+      affects: reconcileLagScope(lag),
+    }));
     const settlementLags = reports.flatMap((report) => report.settlement.lags);
     const obligations = { lags, settlementLags, cleanup: snapshot.cleanup, executionStops: snapshot.stops };
     return {

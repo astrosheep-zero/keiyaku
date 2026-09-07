@@ -121,6 +121,39 @@ test("accepted delivery cleanup and leak residue are optional pending work", () 
   }
 });
 
+test("mutation lag scopes identify the affected pending action", () => {
+  const result = accepted(undefined, {
+    lags: [
+      { kind: "worktree-retained", path: "/tmp/terminal", affects: "none" },
+      { kind: "unsealed-bytes", path: "/tmp/scratch", paths: [], affects: "none" },
+      {
+        kind: "worktree-follow-retained",
+        path: "/tmp/dependent",
+        tender: "tender" as SnapshotId,
+        head: "head" as SnapshotId,
+        reason: "head-moved",
+        affects: "continuation",
+      },
+      {
+        kind: "target-checkout-retained",
+        path: "/tmp/main",
+        target: "refs/heads/main",
+        diagnostic: "dirty",
+        affects: "placement",
+      },
+      { kind: "reconcile-failed", stage: "effect", diagnostic: "busy", affects: "reconciliation" },
+    ],
+  });
+  assert.deepEqual(projectMutationFinality(result), {
+    kind: "accepted-pending",
+    pending: [
+      { surface: "continuation", required: true },
+      { surface: "placement", required: true },
+      { surface: "reconciliation", required: true },
+    ],
+  });
+});
+
 test("public contract handle delivery result is projector input", async () => {
   const repository = repositoryWithMain();
   const bound = await Keiyaku.bind({

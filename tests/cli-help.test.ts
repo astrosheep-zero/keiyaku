@@ -147,6 +147,10 @@ test("deliver leaf help explains candidate capture, placement, review, and confl
   assert.match(help, /shared index\s+is unmerged \(UU\); the branch and real index stay untouched/u);
   assert.match(help, /same captured content\s+continues its non-terminal completion/u);
   assert.match(help, /Only changed candidate content stales earlier review evidence/u);
+  assert.match(help, /no terminal Verification result, delivery recovers/u);
+  assert.match(help, /that admitted candidate instead; --overwrite explicitly replaces it/u);
+  assert.match(help, /--overwrite\s+Replace an admitted candidate/u);
+  assert.match(help, /Deliver never satisfies a review gate/u);
   assert.match(help, /Deliver records no review verdict/u);
   assert.doesNotMatch(help, /Delivering again replaces|first, then|then testify/u);
   assert.match(help, /--materialize-conflict[\s\S]*preserved\s+as the handoff base/u);

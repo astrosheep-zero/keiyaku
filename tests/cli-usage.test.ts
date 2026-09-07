@@ -143,7 +143,6 @@ test("root complete help still documents cwd and repo", () => {
 
 test("blank stdin remains a visible usage diagnostic and performs no operation", async () => {
   const missing = "/absent/keiyaku-usage-blank-stdin";
-  let started = false;
   const parsed = parseArgv(["bind", "-"]);
   if ("help" in parsed) throw new Error("bind parsed as help");
   await assert.rejects(
@@ -152,9 +151,6 @@ test("blank stdin remains a visible usage diagnostic and performs no operation",
         cwd: missing,
         environment: {},
         readStdin: async () => " \n\t",
-        onOperationStart: () => {
-          started = true;
-        },
       }),
     (error: unknown) =>
       error instanceof CliUsageError &&
@@ -163,7 +159,6 @@ test("blank stdin remains a visible usage diagnostic and performs no operation",
       error.message.includes("  accepts  keiyaku bind ") &&
       error.message.includes("  help  keiyaku bind --help"),
   );
-  assert.equal(started, false);
 });
 
 test("settings and duplicate-flag diagnostics stay visible", () => {

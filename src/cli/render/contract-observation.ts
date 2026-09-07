@@ -22,6 +22,12 @@ export function candidateFact(delivery: ContractRow["delivery"]): string {
   return `candidate  ${delivery === null ? "none" : "present"}`;
 }
 
+export function verificationFact(status: ContractRow["verification"]): string | undefined {
+  if (status === undefined) return undefined;
+  if (status.kind === "recorded") return `verification ${status.verdict}`;
+  return `verification ${status.kind}`;
+}
+
 export function afterWording(edge: ContractAfterEdge): string {
   if (edge.endpoint.kind === "claimed") return `after  ${edge.contractId} · claimed`;
   const condition = edge.endpoint.kind === "active" ? edge.endpoint.phase : edge.endpoint.kind;

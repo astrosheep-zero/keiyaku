@@ -115,6 +115,37 @@ test("automatic dependent completion retains only new facts and the primary cont
   assert.equal(review.head, (await primary.state()).head);
 });
 
+test("automatic dependent completion reports a Verification stop without placing", async () => {
+  const { repository, contract: primary, state: initial } = await fixture();
+  const dependent = (
+    await Keiyaku.bind({
+      repo: await Repo.at({ path: repository.path }),
+      markdown: document("kill -TERM $$").replace("# Library verbs", "# Stopped completion dependent"),
+      workspace: "worktree",
+      gates: ["verified"],
+      after: [initial.id],
+    })
+  ).keiyaku;
+  const dependentState = await dependent.state();
+  const first = await dependent.deliver();
+  assert.equal(first.kind, "accepted");
+  if (first.kind !== "accepted") throw new Error("expected an accepted dependent delivery");
+  assert.deepEqual(first.value.verification, { failure: "unknown-exit" });
+  assert.equal(first.value.placement, undefined);
+  await primary.deliver();
+
+  const review = await primary.review({ verdict: "satisfied" });
+  assert.deepEqual(review.value.continuation, {
+    claimed: [],
+    stopped: [{ contractId: dependentState.id, stop: { failure: "unknown-exit" } }],
+  });
+  assert.equal(
+    review.facts.some((fact) => fact.contract === dependentState.id && fact.kind === "claimed"),
+    false,
+  );
+  assert.equal((await dependent.state()).terminal, null);
+});
+
 test("a diverged dependent keeps its worktree and does not counterfeit completion", async () => {
   const { repository, primary, initial, dependent, childPath, childHead } = await dependentFixture(true);
   const review = await primary.review({ verdict: "satisfied" });

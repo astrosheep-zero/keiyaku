@@ -576,7 +576,9 @@ test("reintegrated delivery does not aggregate Verification from the superseded 
 
   const reintegrated = delivered.facts.find((fact) => fact.kind === "reintegrated");
   assert.ok(reintegrated);
-  assert.deepEqual(delivered.value.completion, { integration: reintegrated.data.snapshot });
+  assert.equal(delivered.value.completion, undefined);
+  assert.equal((await result.keiyaku.state()).currentIntegration?.snapshot, reintegrated.data.snapshot);
+  assert.equal((await result.keiyaku.state()).terminal, null);
   assert.deepEqual(delivered.value.verification, { failure: "unknown-exit" });
   assert.equal(delivered.value.verificationSummary, undefined);
 });

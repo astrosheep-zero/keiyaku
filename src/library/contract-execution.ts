@@ -27,6 +27,7 @@ export type DeliveryExecutionInput = CommonExecutionInput &
     requireBranchesToBeUpToDate: boolean;
     includeDirty: boolean;
     materializeConflict: boolean;
+    overwrite?: boolean;
   }>;
 export type AttestationVerdict = "satisfied" | "unsatisfied";
 export type ReviewExecutionInput = CommonExecutionInput & Readonly<{ verdict: AttestationVerdict; summary?: string }>;
@@ -154,16 +155,18 @@ export async function executeLocalDelivery(
 ): Promise<MutationResult<DeliveryValue> | IntegrationConflictMaterialized> {
   return await withContractExecution(input, "deliver", async (context) => {
     let trailing: CompletionEvidence & Pick<DeliveryValue, "continuation"> = {};
+    let leadingValue: DeliveryValue | undefined;
     try {
       context.signal?.throwIfAborted();
       const outcome = await admitDeliveryOperation({ ...input, ...context, deriveDocument: derivedDocument });
       if (outcome.kind === "integration-conflict-materialized") return outcome;
       const leading = requireLeadingAdmission(outcome);
+      leadingValue = leading.value;
       trailing = await advanceAndContinue(context, contractCheckpoint(leading), "verification");
     } catch (error) {
       retainTrailingFailure(context, "deliver", error);
     }
-    const value: DeliveryValue = { ...admittedDeliveryValue(context), ...trailing };
+    const value: DeliveryValue = { ...admittedDeliveryValue(context), ...leadingValue, ...trailing };
     return await completeMutation({
       ...context,
       operation: "deliver",

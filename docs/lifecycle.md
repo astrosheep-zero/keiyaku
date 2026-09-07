@@ -105,6 +105,10 @@ failed publication discards the offer and any retry uses a fresh observation and
 preparation; uncertain outcomes are resolved only from durable journal facts.
 Bounded retries eventually return a typed non-admission outcome. The journal,
 rather than a queue or cache, is the only recovery and handoff receipt.
+An admitted current candidate still awaiting terminal Verification is reused by
+subsequent delivery unless the caller explicitly requests overwrite. Reuse
+references its earlier admission without claiming that the new invocation
+admitted it again. Other redelivery and terminal refusal behavior is unchanged.
 
 Audit judges an active Contract and may create ordinary producer testimony, but
 never requests placement, claims, or moves a target. Once a leading act is

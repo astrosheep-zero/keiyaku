@@ -38,7 +38,7 @@ import { CliUsageError, parseArgv as parseInvocation } from "../src/cli/parse.js
 import { renderText } from "../src/cli/render/text.js";
 import { BindDraftError, preserveBindDraft } from "../src/cli/draft.js";
 import { acceptedDeliver, acceptedReview } from "../src/cli/accepted.js";
-import { changeId, contractHead, contractId, snapshotId } from "../src/core/facts/types.js";
+import { changeId, contractHead, contractId, entryUlid, snapshotId } from "../src/core/facts/types.js";
 import { deliveryHandle } from "../src/library/delivery.js";
 import { Tasks } from "../src/task/index.js";
 import { World } from "../src/world.js";
@@ -365,6 +365,7 @@ test("accepted deliver and review transport completion consequences without reco
     claimed: [contractId("kei/dependent")],
     stopped: [],
   };
+  const leading = { kind: "already-admitted" as const, fact: entryUlid("01K4AJ8F6K7JH8Y6Q5NEPRT41V") };
   const envelope = {
     kind: "accepted" as const,
     operation: "deliver" as const,
@@ -385,6 +386,7 @@ test("accepted deliver and review transport completion consequences without reco
       },
       method: "squash",
       policy: { requireBranchesToBeUpToDate: false },
+      leading,
       completion,
       continuation,
     },
@@ -402,6 +404,7 @@ test("accepted deliver and review transport completion consequences without reco
   );
   assert.strictEqual(delivered.completion, completion);
   assert.strictEqual(delivered.continuation, continuation);
+  assert.strictEqual(delivered.leading, leading);
   assert.equal(delivered.tenderSnapshot, "tender");
   assert.equal(delivered.integration?.changeId, "change");
 
@@ -1447,7 +1450,7 @@ test("a terminal worktree removal failure remains accepted cleanup lag", async (
 
   assert.equal(abandoned.kind, "accepted");
   if (abandoned.kind !== "accepted") return;
-  assert.deepEqual(abandoned.lag, [{ kind: "worktree-retained", path }]);
+  assert.deepEqual(abandoned.lag, [{ kind: "worktree-retained", path, affects: "none" }]);
   assert.equal(existsSync(path), true);
   assert.equal(
     await readRef(await cachedRepositoryAt(repository.path), deliveryRefFor(id)),

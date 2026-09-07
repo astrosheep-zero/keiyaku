@@ -1,7 +1,7 @@
 import type { ContinuationStop } from "../src/library/continuation.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import {
@@ -125,6 +125,43 @@ async function bindRetained(
     gates: reviewed ? ["reviewed"] : [],
     ...(after.length === 0 ? {} : { after }),
   });
+}
+
+async function retainedVerifiedCandidate(
+  repository: ReturnType<typeof repositoryWithMain>,
+  title: string,
+  verification = "true",
+) {
+  const bound = await bindRetained(await cachedRepoAt(repository.path), title, [], true, verification);
+  const contract = bound.keiyaku;
+  const worktree = await appointedWorktreePath(
+    await cachedRepositoryAt(repository.path),
+    await publicContractId(contract),
+  );
+  commitCandidate(repository, worktree);
+  return { contract, worktree };
+}
+
+async function cancelDuringVerification<Value>(
+  marker: string,
+  run: (signal: AbortSignal) => Promise<Value>,
+): Promise<Value> {
+  rmSync(marker, { force: true });
+  const controller = new AbortController();
+  const timer = setInterval(() => {
+    if (existsSync(marker)) controller.abort();
+  }, 1);
+  try {
+    return await run(controller.signal);
+  } finally {
+    clearInterval(timer);
+  }
+}
+
+function blockingVerification(marker: string): string {
+  return `${process.execPath} -e ${JSON.stringify(
+    `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "started"); setTimeout(() => {}, 30000);`,
+  )}`;
 }
 
 async function plantDispatch(
@@ -688,7 +725,7 @@ test("a matching foreign merge is refused without changing Git state", async () 
   };
 
   await assert.rejects(
-    () => contract.deliver({ includeDirty: true, materializeConflict: true }),
+    () => contract.deliver({ includeDirty: true, materializeConflict: true, overwrite: true }),
     refused({
       kind: "merge-state-present",
       contractId: await publicContractId(contract),
@@ -993,12 +1030,8 @@ test("same captured content continues an admitted delivery without another deliv
       gates: ["verified"],
     })
   ).keiyaku;
-  const worktree = await appointedWorktreePath(
-    await cachedRepositoryAt(repository.path),
-    await publicContractId(contract),
-  );
+  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), await publicContractId(contract));
   writeFileSync(join(worktree, "candidate.txt"), "same\n");
-
   const interrupted = expectMutation(await interruptStartedDelivery(contract, marker));
   const admittedState = await contract.state();
   const deliveryEntry = admittedState.delivery?.entry;
@@ -1007,16 +1040,9 @@ test("same captured content continues an admitted delivery without another deliv
   assert.ok(deliveryEntry);
   assert.ok(changeId);
   assert.ok(predecessor);
-  assert.deepEqual(
-    interrupted.facts.map((fact) => fact.kind),
-    ["bound", "deliver"],
-  );
-
+  assert.deepEqual(interrupted.facts.map((fact) => fact.kind), ["bound", "deliver"]);
   const resumed = expectMutation(await contract.deliver({ includeDirty: true }));
-  assert.deepEqual(
-    resumed.facts.map((fact) => fact.kind),
-    ["attestation", "claimed"],
-  );
+  assert.deepEqual(resumed.facts.map((fact) => fact.kind), ["attestation", "claimed"]);
   const finalState = await contract.state();
   assert.equal(finalState.delivery?.entry, deliveryEntry);
   assert.equal(finalState.delivery?.data.integration.changeId, changeId);
@@ -1024,36 +1050,110 @@ test("same captured content continues an admitted delivery without another deliv
   assert.equal(finalState.terminal?.kind, "claimed");
 });
 
-test("changed captured content replaces an admitted delivery candidate", async () => {
+test("an unrecorded candidate reuses its admitted delivery despite changed captured content", async () => {
   const repository = repositoryWithMain();
   const marker = join(repository.path, "verification-started");
   const script = `${process.execPath} -e ${JSON.stringify(
     `const fs=require("node:fs"); const p=${JSON.stringify(marker)}; if (!fs.existsSync(p)) { fs.writeFileSync(p, "started"); setTimeout(() => {}, 30000); }`,
   )}`;
   const contract = await bind(repository, script);
-  const worktree = await appointedWorktreePath(
-    await cachedRepositoryAt(repository.path),
-    await publicContractId(contract),
-  );
+  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), await publicContractId(contract));
   writeFileSync(join(worktree, "candidate.txt"), "first\n");
-
   await interruptStartedDelivery(contract, marker);
   const first = await contract.state();
   const firstEntry = first.delivery?.entry;
   const firstChangeId = first.delivery?.data.integration.changeId;
   assert.ok(firstEntry);
   assert.ok(firstChangeId);
-
   writeFileSync(join(worktree, "candidate.txt"), "changed\n");
-  const replaced = expectMutation(await contract.deliver({ includeDirty: true }));
-  assert.deepEqual(
-    replaced.facts.map((fact) => fact.kind),
-    ["deliver", "attestation", "claimed"],
-  );
+  const resumed = expectMutation(await contract.deliver({ includeDirty: true }));
+  assert.deepEqual(resumed.facts.map((fact) => fact.kind), ["attestation", "claimed"]);
   const finalState = await contract.state();
-  assert.notEqual(finalState.delivery?.entry, firstEntry);
-  assert.notEqual(finalState.delivery?.data.integration.changeId, firstChangeId);
+  assert.equal(finalState.delivery?.entry, firstEntry);
+  assert.equal(finalState.delivery?.data.integration.changeId, firstChangeId);
   assert.equal(finalState.terminal?.kind, "claimed");
+});
+
+test("redelivery recovers an unrecorded candidate without capturing later dirty work", async () => {
+  const repository = repositoryWithMain();
+  const marker = join(repository.path, "verification-started");
+  const verification = blockingVerification(marker);
+  const { contract, worktree } = await retainedVerifiedCandidate(repository, "Interrupted", verification);
+  const first = expectMutation(await cancelDuringVerification(marker, async (signal) => await contract.deliver({ signal })));
+  const delivery = first.facts.find((fact) => fact.kind === "deliver");
+  assert.ok(delivery);
+  assert.equal(first.value.verification && "failure" in first.value.verification, true);
+
+  writeFileSync(join(worktree, "later.txt"), "not part of the admitted candidate\n");
+  const recovered = await withGitShim(
+    [
+      'if [ "$1" = "commit-tree" ]; then printf "unexpected recapture\\n" >&2; exit 97; fi',
+      'exec "$KEIYAKU_REAL_GIT" "$@"',
+    ].join("\n"),
+    {},
+    async (gitPath) => {
+      const routed = Keiyaku.of({
+        repo: await Repo.at({ path: repository.path, gitPath }),
+        id: await publicContractId(contract),
+      });
+      return expectMutation(
+        await cancelDuringVerification(marker, async (signal) => await routed.deliver({ includeDirty: true, signal })),
+      );
+    },
+  );
+  assert.deepEqual(recovered.facts, []);
+  assert.deepEqual(recovered.value.leading, { kind: "already-admitted", fact: delivery!.entry });
+  assert.deepEqual(recovered.value.integration, first.value.integration);
+
+  const audited = await contract.audit({ includeDirty: true });
+  assert.equal(audited.value.delivery?.relation, "differs");
+  assert.equal(audited.value.delivery?.verification.kind, "unrecorded");
+
+  const overwritten = expectMutation(
+    await cancelDuringVerification(marker, async (signal) =>
+      await contract.deliver({ includeDirty: true, overwrite: true, signal }),
+    ),
+  );
+  assert.equal(overwritten.value.leading, undefined);
+  assert.notDeepEqual(overwritten.value.integration, first.value.integration);
+  assert.equal(overwritten.facts.filter((fact) => fact.kind === "deliver").length, 1);
+});
+
+test("terminal Verification lets changed captured content replace the candidate", async () => {
+  const repository = repositoryWithMain();
+  const { contract, worktree } = await retainedVerifiedCandidate(repository, "Terminal");
+  const first = expectMutation(await contract.deliver());
+  writeFileSync(join(worktree, "next.txt"), "replacement\n");
+  repository.run(["-C", worktree, "add", "next.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "replacement"]);
+  const second = expectMutation(await contract.deliver());
+  assert.equal(second.value.leading, undefined);
+  assert.notDeepEqual(second.value.integration, first.value.integration);
+  assert.equal(
+    (await contract.history()).events.filter((event) => event.source === "journal" && event.fact.kind === "deliver")
+      .length,
+    2,
+  );
+});
+
+test("status distinguishes undeclared, unrecorded, and terminal Verification", async () => {
+  const repository = repositoryWithMain();
+  const undeclared = await bind(repository);
+  const marker = join(repository.path, "status-verification-started");
+  const pending = await bind(repository, blockingVerification(marker));
+  const recorded = await bindRetained(await cachedRepoAt(repository.path), "Recorded", [], true, "true");
+  const admitted = expectMutation(
+    await cancelDuringVerification(marker, async (signal) => await pending.deliver({ signal })),
+  );
+  assert.ok(admitted.facts.some((fact) => fact.kind === "deliver"));
+  await recorded.keiyaku.deliver();
+  const rows = (await Keiyaku.list({ repo: await cachedRepoAt(repository.path) })).rows;
+  const undeclaredId = await publicContractId(undeclared);
+  const pendingId = await publicContractId(pending);
+  const recordedId = await publicContractId(recorded.keiyaku);
+  assert.equal(rows.find((row) => row.id === undeclaredId)?.verification?.kind, "undeclared");
+  assert.equal(rows.find((row) => row.id === pendingId)?.verification?.kind, "unrecorded");
+  assert.equal(rows.find((row) => row.id === recordedId)?.verification?.kind, "recorded");
 });
 
 test("delivery terminal refusal outranks a missing managed worktree", async () => {
@@ -1122,7 +1222,10 @@ test("a stopped continuation does not block an eligible sibling", async () => {
   assert.equal(stopped?.length, 1);
   const blockedStop = stopped?.[0];
   assert.equal(blockedStop?.contractId, blockedId);
-  assert.equal(placementRefusalKind(blockedStop?.stop), "gates-unsatisfied");
+  assert.equal(
+    blockedStop !== undefined && "refusal" in blockedStop.stop ? blockedStop.stop.refusal.kind : undefined,
+    "gates-unsatisfied",
+  );
   if (
     blockedStop === undefined ||
     !("refusal" in blockedStop.stop) ||

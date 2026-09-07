@@ -15,6 +15,8 @@ const head = contractHead("head");
 const tender = snapshotId("tender");
 const predecessor = snapshotId("predecessor");
 const snapshot = snapshotId("snapshot");
+const gitTender = snapshotId("0123456789abcdef0123456789abcdef01234567");
+const gitHead = snapshotId("fedcba9876543210fedcba9876543210fedcba98");
 const patch = changeId("change");
 const fact = {
   v: 1 as const,
@@ -65,7 +67,7 @@ test("accepted delivery round-trips owner settlement, verification, placement, c
       },
     },
     {
-      lags: [{ kind: "worktree-retained", path: "/tmp/worktree" }],
+      lags: [{ kind: "worktree-retained", path: "/tmp/worktree", affects: "none" }],
       settlementLags: [
         decodeSettlementLag({
           kind: "settlement-failed",
@@ -108,6 +110,33 @@ test("accepted delivery round-trips owner settlement, verification, placement, c
   assert.deepEqual(parsed, result);
 });
 
+test("forwarded reconciliation lags preserve their repair scope", () => {
+  const result = acceptedDelivery(
+    {},
+    {
+      lags: [
+        {
+          kind: "worktree-follow-retained",
+          path: "/tmp/dependent",
+          tender: gitTender,
+          head: gitHead,
+          reason: "head-moved",
+          affects: "continuation",
+        },
+        {
+          kind: "target-checkout-retained",
+          path: "/tmp/main",
+          target: "refs/heads/main",
+          diagnostic: "dirty",
+          affects: "placement",
+        },
+        { kind: "reconcile-failed", stage: "effect", diagnostic: "busy", affects: "reconciliation" },
+      ],
+    },
+  );
+  assert.deepEqual(deliveryResultSchema.parse(JSON.parse(JSON.stringify(result))), result);
+});
+
 test("malformed settlement lag and extra envelope fields are transport-integrity refusals", () => {
   assert.equal(deliveryResultSchema.safeParse(acceptedDelivery({}, { settlementLags: [{}] })).success, false);
   assert.equal(
@@ -137,6 +166,25 @@ test("malformed settlement lag and extra envelope fields are transport-integrity
   );
   assert.equal(deliveryResultSchema.safeParse({ ...acceptedDelivery(), extra: true }).success, false);
   assert.equal(deliveryResultSchema.safeParse(acceptedDelivery({ extra: true })).success, false);
+  assert.equal(
+    deliveryResultSchema.safeParse(
+      acceptedDelivery(
+        {},
+        {
+          lags: [
+            {
+              kind: "target-checkout-retained",
+              path: "/tmp/main",
+              target: "refs/heads/main",
+              diagnostic: "dirty",
+              affects: "none",
+            },
+          ],
+        },
+      ),
+    ).success,
+    false,
+  );
   assert.equal(
     deliveryResultSchema.safeParse(
       acceptedDelivery({}, { pending: [{ surface: "cleanup", required: false, extra: true }] }),

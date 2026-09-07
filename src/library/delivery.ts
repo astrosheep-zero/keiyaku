@@ -1,7 +1,7 @@
 import { decodeDeliverData } from "../core/facts/codec.js";
 import type { SnapshotId } from "../core/facts/types.js";
 import type { DeliverValue as ProtocolDeliverValue } from "../protocol/deliver.js";
-import { decodeCompletionEvidence } from "../protocol/result-codec.js";
+import { decodeCompletionEvidence, decodeDeliverLeading } from "../protocol/result-codec.js";
 import { decodeContinuationReport, type ContinuationReport } from "./continuation.js";
 import { ownerSchema } from "./result-codec.js";
 import { z } from "zod";
@@ -16,6 +16,7 @@ export function decodeDeliveryValue(value: unknown): DeliveryValue {
     "integration",
     "method",
     "policy",
+    "leading",
     "completion",
     "verification",
     "verificationReuse",
@@ -39,6 +40,7 @@ export function decodeDeliveryValue(value: unknown): DeliveryValue {
   });
   return {
     ...identity,
+    ...(object.leading === undefined ? {} : { leading: decodeDeliverLeading(object.leading) }),
     ...evidence,
     ...(object.continuation === undefined ? {} : { continuation: decodeContinuationReport(object.continuation) }),
   };
@@ -50,6 +52,7 @@ export const deliveryValueSchema = ownerSchema(
 ) satisfies z.ZodType<DeliveryValue>;
 
 class DeliveryHandle {
+  declare readonly leading?: DeliveryValue["leading"];
   declare readonly completion?: DeliveryValue["completion"];
   declare readonly verification?: DeliveryValue["verification"];
   declare readonly verificationReuse?: DeliveryValue["verificationReuse"];
@@ -67,7 +70,13 @@ class DeliveryHandle {
     outcomes: Partial<
       Pick<
         DeliveryValue,
-        "completion" | "verification" | "verificationReuse" | "verificationSummary" | "placement" | "continuation"
+        | "leading"
+        | "completion"
+        | "verification"
+        | "verificationReuse"
+        | "verificationSummary"
+        | "placement"
+        | "continuation"
       >
     > = {},
   ) {

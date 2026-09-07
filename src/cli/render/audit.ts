@@ -69,6 +69,22 @@ function verificationLines(
   return lines;
 }
 
+function admittedCandidateLines(report: AuditReport, columns: number): readonly string[] {
+  const delivery = report.delivery;
+  if (delivery === undefined) return [];
+  const verification = delivery.verification;
+  const detail = verification.kind === "recorded" ? `${verification.kind} ${verification.verdict}` : verification.kind;
+  const lines: string[] = [];
+  receiptRow(
+    lines,
+    verification.kind === "unrecorded" ? "!" : " ",
+    "admitted verification",
+    [{ text: detail }],
+    columns,
+  );
+  return lines;
+}
+
 function targetLines(target: AuditReport["target"], columns: number, addressed: string): readonly string[] {
   const lines: string[] = [];
   if (target.kind === "not-observed") {
@@ -131,6 +147,7 @@ export function renderAcceptedAudit(result: AcceptedAuditResult, context?: TextR
   return [
     ...titleLines("✓", "audit", result.contract, columns),
     ...candidateLines(report, columns, result.contract),
+    ...admittedCandidateLines(report, columns),
     ...verificationLines(report.verification, columns, result.contract),
     ...targetLines(report.target, columns, result.contract),
     ...obligationLines(result, columns),

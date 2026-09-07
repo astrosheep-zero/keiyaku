@@ -4,6 +4,7 @@ import { withGitDecodeChannel } from "../git/read-observation.js";
 import { admitForkBindWithAppointment, prepareMarkdownBind } from "./bind.js";
 import { actorOption, normalizedGates, normalizedList, requireInput, requireMarkdown, taskOption } from "./input.js";
 import { completionInput, completeHolderMutation, completeMutation, type MutationResult } from "./mutation.js";
+import { reconcileLagScope } from "./reconcile.js";
 import { requireAccepted } from "./refusal.js";
 import { observeRegion, type RegionObservation } from "./region.js";
 import { Repo, scopeForRepo } from "./repo.js";
@@ -54,13 +55,14 @@ async function acceptedBindResult<Handle>(
             diagnostic: appointment.kind === "failed" ? appointment.diagnostic : "Place appointment missing",
           },
         ];
+  const scopedAppointmentLag = appointmentLag.map((lag) => ({ ...lag, affects: reconcileLagScope(lag) }));
   return {
     ...base,
     keiyaku,
     ...(appointment.kind !== "appointed" ? {} : { workspace: { kind: "worktree" as const, path: appointment.path } }),
-    lags: [...base.lags, ...appointmentLag],
+    lags: [...base.lags, ...scopedAppointmentLag],
     pending:
-      appointmentLag.length === 0
+      scopedAppointmentLag.length === 0
         ? base.pending
         : [...base.pending, { surface: "reconciliation" as const, required: true }],
     ...region,

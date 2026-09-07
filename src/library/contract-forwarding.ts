@@ -21,6 +21,7 @@ export async function executeForwardedDeliver(
     message?: string;
     includeDirty: boolean;
     materializeConflict: boolean;
+    overwrite?: boolean;
     requireBranchesToBeUpToDate: boolean;
     hooks: Parameters<typeof executeLocalDelivery>[0]["hooks"];
     signal?: AbortSignal;
@@ -36,12 +37,14 @@ export async function executeForwardedDeliver(
     requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
     includeDirty: input.includeDirty,
     materializeConflict: input.materializeConflict,
+    overwrite: input.overwrite ?? false,
     ...(input.signal === undefined ? {} : { signal: input.signal }),
     hooks: input.hooks,
   });
   if (result.kind !== "accepted") return { result };
   const delivery = result.facts.find((fact) => fact.kind === "deliver");
   if (delivery !== undefined) return { result, deliveryFactId: delivery.entry };
+  if (result.value.leading !== undefined) return { result, deliveryFactId: result.value.leading.fact };
   const scope = scopeForRepo(input.repo);
   const record = await withGitDecodeChannel(scope, (channel) => observeContractAt(scope, channel, input.contractId));
   if (record.state?.delivery === null || record.state?.delivery === undefined)

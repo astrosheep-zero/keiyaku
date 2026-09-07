@@ -193,14 +193,14 @@ test("audit showDiff belongs to this attempt and dirty failure is blocked eviden
   assert.ok(shown.value.candidate.scope.paths !== undefined);
 });
 
-test("ready targeted audit reports checkout collisions without placing", async () => {
+test("audit and delivery report checkout collisions alongside stopped Verification without placing", async () => {
   const repository = repositoryWithMain();
   writeFileSync(join(repository.path, "shared.txt"), "base\n");
   repository.run(["add", "shared.txt"]);
   repository.run(["commit", "--quiet", "-m", "base"]);
   const bound = await Keiyaku.bind({
     repo: await cachedRepoAt(repository.path),
-    markdown: document("exit 0"),
+    markdown: document("kill -TERM $$"),
     workspace: "worktree",
     target: "refs/heads/main",
     gates: ["verified"],
@@ -221,6 +221,9 @@ test("ready targeted audit reports checkout collisions without placing", async (
 
   const audited = await bound.keiyaku.audit();
   assert.equal(audited.value.candidate.kind, "ready");
+  assert.equal(audited.value.verification.kind, "stopped");
+  if (audited.value.verification.kind !== "stopped") return;
+  assert.deepEqual(audited.value.verification.stop, { failure: "unknown-exit" });
   assert.equal(audited.value.target.kind, "refused");
   if (audited.value.target.kind !== "refused") return;
   assert.equal(audited.value.target.refusal.kind, "checkout-not-followable");
@@ -232,6 +235,15 @@ test("ready targeted audit reports checkout collisions without placing", async (
     false,
   );
   assert.equal((await bound.keiyaku.state()).delivery, null);
+  assert.equal((await bound.keiyaku.state()).terminal, null);
+  assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), target);
+  assert.equal(repository.run(["diff", "--cached", "--binary"]), indexBefore);
+  assert.equal(repository.run(["status", "--porcelain=v1", "--untracked-files=all"]), worktreeBefore);
+
+  const delivered = acceptedDelivery(await bound.keiyaku.deliver());
+  assert.deepEqual(delivered.value.verification, { failure: "unknown-exit" });
+  assert.deepEqual(delivered.value.placement, { refusal: audited.value.target.refusal });
+  assert.equal(delivered.value.completion, undefined);
   assert.equal((await bound.keiyaku.state()).terminal, null);
   assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), target);
   assert.equal(repository.run(["diff", "--cached", "--binary"]), indexBefore);
@@ -338,27 +350,6 @@ test("moved target wins over placeability", async () => {
   });
 });
 
-test("stopped Verification forces target not-observed", async () => {
-  const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({
-    repo: await cachedRepoAt(repository.path),
-    markdown: document("kill -TERM $$"),
-    workspace: "worktree",
-    target: "refs/heads/main",
-    gates: ["verified"],
-  });
-  commitCandidate(repository);
-
-  const audited = await bound.keiyaku.audit();
-  assert.equal(audited.value.candidate.kind, "ready");
-  assert.equal(audited.value.verification.kind, "stopped");
-  if (audited.value.verification.kind !== "stopped") return;
-  assert.ok("failure" in audited.value.verification.stop);
-  if (!("failure" in audited.value.verification.stop)) return;
-  assert.equal(audited.value.verification.stop.failure, "unknown-exit");
-  assert.equal(audited.value.target.kind, "not-observed");
-});
-
 test("completeMutation preserves accepted cleanup and leak", async () => {
   const repository = repositoryWithMain();
   const contract = await bind(repository, "exit 0");
@@ -444,6 +435,7 @@ test("audit keeps its leading observation when the delivery candidate is unavail
   if (!("diagnostic" in stop)) return;
   assert.match(stop.diagnostic, /worktree add --detach .*forced candidate materialization failure/);
   assert.equal(audited.value.target.kind, "not-observed");
+  assert.equal(audited.value.delivery?.verification.kind, "recorded");
 });
 
 test("public audit refuses a terminal contract before reading its released workspace", async () => {

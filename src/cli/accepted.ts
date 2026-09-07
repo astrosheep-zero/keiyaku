@@ -113,6 +113,7 @@ export function acceptedDeliver(result: MutationResult<Delivery>, coordinate: Co
     verb: "deliver",
     tenderSnapshot: value.tenderSnapshot,
     integration: { changeId: value.integration.changeId },
+    ...(value.leading === undefined ? {} : { leading: value.leading }),
     ...(value.completion === undefined ? {} : { completion: value.completion }),
     ...(verificationVerdict === undefined ? {} : { verificationVerdict }),
     ...(value.verification === undefined ? {} : { verification: value.verification }),

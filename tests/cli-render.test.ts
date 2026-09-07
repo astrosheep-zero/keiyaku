@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { changeId, contractHead, contractId, gate, snapshotId } from "../src/core/facts/types.js";
-import type { InvocationResult } from "../src/cli/result.js";
+import type { InvocationResult, Lag } from "../src/cli/result.js";
 import { renderCatalogText } from "../src/cli/render/catalog.js";
 import { renderText } from "../src/cli/render/text.js";
 import type { Catalog } from "../src/library/catalog.js";
@@ -10,6 +10,15 @@ import type { WorldRoot } from "../src/world.js";
 import { renderHelp } from "../src/cli/parse.js";
 
 const worldRoot = "/world" as WorldRoot;
+
+test("CLI lag scope stays aligned with the public mutation result", () => {
+  const scope: Lag["affects"] = "reconciliation";
+  const placement: Lag["affects"] = "placement";
+  const continuation: Lag["affects"] = "continuation";
+  assert.equal(scope, "reconciliation");
+  assert.equal(placement, "placement");
+  assert.equal(continuation, "continuation");
+});
 
 test("Akuma call help omits the caller readonly flag", () => {
   assert.doesNotMatch(renderHelp({ kind: "akuma", action: "call" }), /--readonly/u);
@@ -220,6 +229,7 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
       {
         ...row,
         phase: "tendered",
+        verification: { kind: "unrecorded" },
         delivery: {
           tenderSnapshot: snap,
           integration: { predecessor: snap, snapshot: snap, changeId: changeId("chg-selected-contract") },
@@ -231,6 +241,7 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
   });
   assert.doesNotMatch(delivered, /^\d+ active · \d+ candidates?$/mu);
   assert.match(delivered, /^  candidate  present\n  target  none$/mu);
+  assert.match(delivered, /^  verification unrecorded$/mu);
   assert.doesNotMatch(delivered, /○ no candidate · ● candidate|satisfied  \[✗\] unsatisfied/u);
   assert.doesNotMatch(delivered, /tender |integration /u);
 
@@ -412,7 +423,7 @@ test("accepted results preserve reconciliation lag without telemetry", () => {
     head: contractHead("record"),
     facts: [],
     lag: [
-      { kind: "worktree-follow-retained" as const, path: "/tmp/wt", tender, head, reason: "head-moved" as const },
+      { kind: "worktree-follow-retained" as const, path: "/tmp/wt", tender, head, reason: "head-moved" as const, affects: "continuation" },
     ] as const,
     settlementLags: [],
   };
@@ -432,6 +443,7 @@ test("accepted results preserve reconciliation lag without telemetry", () => {
     tender,
     head,
     reason: "head-moved",
+    affects: "continuation",
   });
 });
 
@@ -481,9 +493,10 @@ test("accepted receipts omit execution telemetry and retain recovery snapshots",
     contract,
     head,
     facts: [{ contract, entry: "claim", kind: "claimed" }],
-    lag: [{ kind: "unsealed-bytes", path: "/repo/.keiyaku/wt/contract", paths: [] }],
+    lag: [{ kind: "unsealed-bytes", path: "/repo/.keiyaku/wt/contract", paths: [], affects: "none" }],
     settlementLags: [],
     recoverySnapshot: snapshotId("recovery"),
+    leading: { kind: "already-admitted", fact: "01K4AJ8F6K7JH8Y6Q5NEPRT41V" as never },
     tenderSnapshot: snapshotId("tender-commit"),
     integration: { changeId: changeId("content-id") },
     completion: { integration: snapshotId("integration") },
@@ -491,6 +504,7 @@ test("accepted receipts omit execution telemetry and retain recovery snapshots",
 
   const text = renderText(result);
   assert.match(text, /tender commit  tender-commit[\s\S]*content identity \(not commit\)  content-id/u);
+  assert.match(text, /leading\s+already-admitted\s+01K4AJ8F6K7JH8Y6Q5NEPRT41V/u);
   assert.doesNotMatch(text, /journal-blob-oid/u);
   assert.doesNotMatch(text, /ref updated|contract-file|worktree unchanged/u);
   assert.doesNotMatch(text, /ephemeral/u);
@@ -653,7 +667,7 @@ test("completion stops project every checkout-followability refusal fact", () =>
           paths,
         },
       },
-    });
+    } as InvocationResult);
     const renderedLines = rendered.split("\n");
     const start = renderedLines.indexOf("! checkout-not-followable");
     assert.notEqual(start, -1);

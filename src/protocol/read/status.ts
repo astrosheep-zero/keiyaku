@@ -4,7 +4,7 @@ import {
   observeDeliveryTargetAt,
   withContractReadObservationAt,
 } from "../../git/observe.js";
-import { decodeContractDocument } from "../../body/decode.js";
+import { decodeContractDocument, verificationDefinition } from "../../body/decode.js";
 import {
   observeTargetLag,
   observeWorkspace,
@@ -13,11 +13,18 @@ import {
   worktreePath,
 } from "../../git/workspace.js";
 import { appointmentFor, readPlaceRegister, type PlaceRegister } from "../../workspace-place.js";
-import type { ContractTargetLag, ContractWorkspaceObservation } from "../../git/workspace.js";
+import type { ContractTargetLag as GitContractTargetLag, ContractWorkspaceObservation } from "../../git/workspace.js";
 import type { GitRepository } from "../../git/process.js";
 import type { GitDecodeChannel, GitReadObservation } from "../../git/read-observation.js";
-import { gateReports, type GateCurrent } from "../../core/facts/gate.js";
-import type { ContractId, ContractState, DeliverData, JournalEntry, SnapshotId } from "../../core/facts/types.js";
+import { gateReports, latestCurrentAttestations, type GateCurrent } from "../../core/facts/gate.js";
+import {
+  gate,
+  type ContractId,
+  type ContractState,
+  type DeliverData,
+  type JournalEntry,
+  type SnapshotId,
+} from "../../core/facts/types.js";
 import { projectBoundedList, type BoundedList } from "../../bounded-list.js";
 
 export type ContractPhase = "waiting" | "bound" | "tendered" | "claimed" | "abandoned";
@@ -27,7 +34,16 @@ export type ContractGateCurrent = GateCurrent;
 
 export type ContractGateReport = Readonly<{ gate: string; current: ContractGateCurrent }>;
 
-export type { ContractTargetLag, ContractWorkspaceObservation };
+export type ContractVerificationStatus =
+  | Readonly<{ kind: "undeclared" }>
+  | Readonly<{ kind: "unrecorded" }>
+  | Readonly<{ kind: "recorded"; verdict: "satisfied" | "unsatisfied"; at: string }>;
+
+export type ContractTargetLag =
+  | GitContractTargetLag
+  | Readonly<{ kind: "counted"; behind: number; subject: Readonly<{ kind: "worktree"; path: string }> }>
+  | Readonly<{ kind: "unknown"; subject: Readonly<{ kind: "worktree"; path: string }> }>;
+export type { ContractWorkspaceObservation };
 
 export type AfterEndpointObservation =
   | Readonly<{ kind: "claimed" }>
@@ -59,6 +75,7 @@ export type ContractRow = Readonly<{
   targetLag: ContractTargetLag;
   delivery: DeliverData | null;
   targetObservation: Readonly<{ head: SnapshotId | null; drift: boolean }> | null;
+  verification?: ContractVerificationStatus;
   gates: Readonly<{
     reports: readonly ContractGateReport[];
     satisfied: boolean;
@@ -85,13 +102,17 @@ export type ContractObservation =
   | Readonly<{ kind: "missing"; id: ContractId }>
   | Readonly<{ kind: "present"; row: ContractRow }>;
 
-function titleFor(state: ContractState): string | null {
+function documentFor(state: ContractState): ReturnType<typeof decodeContractDocument> | undefined {
   try {
-    return decodeContractDocument(state.terms.document.bytes).title;
+    return decodeContractDocument(state.terms.document.bytes);
   } catch (error) {
-    if (error instanceof TypeError) return null;
+    if (error instanceof TypeError) return undefined;
     throw error;
   }
+}
+
+function titleFor(document: ReturnType<typeof decodeContractDocument> | undefined): string | null {
+  return document?.title ?? null;
 }
 
 function phaseFor(state: ContractState): ContractPhase {
@@ -100,6 +121,18 @@ function phaseFor(state: ContractState): ContractPhase {
   if (state.delivery !== null) return "tendered";
   if (state.bound !== null) return "bound";
   return "waiting";
+}
+
+function verificationFor(
+  state: ContractState,
+  document: ReturnType<typeof decodeContractDocument> | undefined,
+): ContractVerificationStatus | undefined {
+  if (document === undefined) return undefined;
+  if (verificationDefinition(document) === null) return { kind: "undeclared" };
+  const verifiedGate = gate("verified");
+  const current = latestCurrentAttestations(state, new Set([verifiedGate])).get(verifiedGate);
+  if (current !== undefined) return { kind: "recorded", verdict: current.data.verdict, at: current.at };
+  return state.delivery === null ? undefined : { kind: "unrecorded" };
 }
 
 export function phaseAtFor(state: Pick<ContractState, "terminal" | "delivery" | "bound">, bindAt: string): string {
@@ -201,6 +234,8 @@ async function rowFor(input: ContractRowInput): Promise<ContractRow> {
   const { repository, state, bindAt, lastJournalAt, targetObservation, register, after, dependents } = input;
   const workspace = state.coordinates.workspace;
   const gates = gateReports(state);
+  const document = documentFor(state);
+  const verification = verificationFor(state, document);
   const { appointed, workspaceObservation, targetLag } = await managedWorkspaceFacts(
     repository,
     state,
@@ -209,7 +244,7 @@ async function rowFor(input: ContractRowInput): Promise<ContractRow> {
   );
   return {
     id: state.id,
-    title: titleFor(state),
+    title: titleFor(document),
     phase: phaseFor(state),
     phaseAt: phaseAtFor(state, bindAt),
     lastJournalAt,
@@ -224,6 +259,7 @@ async function rowFor(input: ContractRowInput): Promise<ContractRow> {
         ? null
         : { ...state.delivery.data, integration: state.currentIntegration },
     targetObservation,
+    ...(verification === undefined ? {} : { verification }),
     gates: {
       reports: gates.reports.map((report) => ({ gate: report.gate, current: report.current })),
       satisfied: gates.satisfied,

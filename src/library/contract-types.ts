@@ -78,5 +78,6 @@ export type DeliverInput = Readonly<{
   message?: string;
   includeDirty?: boolean;
   materializeConflict?: boolean;
+  overwrite?: boolean;
   signal?: AbortSignal;
 }>;

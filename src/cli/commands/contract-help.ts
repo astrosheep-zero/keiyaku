@@ -69,9 +69,11 @@ export const CONTRACT_COMMAND_SPECS = {
       message: "value",
       "include-dirty": "boolean",
       "materialize-conflict": "boolean",
+      overwrite: "boolean",
       json: "boolean",
     },
-    usage: "deliver [<contract>|@<contract>] [--message <text>] [--include-dirty] [--materialize-conflict] [--json]",
+    usage:
+      "deliver [<contract>|@<contract>] [--message <text>] [--include-dirty] [--materialize-conflict] [--overwrite] [--json]",
     purpose: "Deliver your work as this Contract's candidate.",
     details: [
       "The subject is the whole Contract. An Arc names the chapter you are in — it",
@@ -94,6 +96,10 @@ export const CONTRACT_COMMAND_SPECS = {
       "every declared gate already hold, this same invocation places and the Contract is",
       "claimed; otherwise the candidate stays recorded and the Contract is tendered.",
       "Only changed candidate content stales earlier review evidence.",
+      "When the current candidate has no terminal Verification result, delivery recovers",
+      "that admitted candidate instead; --overwrite explicitly replaces it.",
+      "Deliver never satisfies a review gate — review is someone's independent verdict,",
+      "not a side effect of delivering.",
       "Deliver records no review verdict.",
       "",
       "  --include-dirty         Capture complete non-ignored worktree bytes through a",
@@ -104,6 +110,8 @@ export const CONTRACT_COMMAND_SPECS = {
       "                          as the handoff base before the conflict is projected.",
       "                          --include-dirty reads complete final non-ignored worktree",
       "                          bytes without requiring git add or commit.",
+      "  --overwrite             Replace an admitted candidate that has no terminal",
+      "                          Verification result instead of recovering it.",
     ].join("\n"),
   },
   review: {

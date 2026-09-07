@@ -30,7 +30,15 @@ import {
 } from "./run.js";
 import type { AttemptContext } from "../core/decide.js";
 import { contractState } from "../core/facts/observation.js";
-import type { ActorId, ContractId, ContractState, DeliverData, JournalEntry, SnapshotId } from "../core/facts/types.js";
+import type {
+  ActorId,
+  ContractId,
+  ContractState,
+  DeliverData,
+  EntryUlid,
+  JournalEntry,
+  SnapshotId,
+} from "../core/facts/types.js";
 import { decideDeliver, type DeliverInput, type DeliverRefusal } from "../core/verbs/deliver.js";
 import { currentVerifiedAttestation, type CurrentVerifiedAttestation } from "./intent.js";
 import { admitDecidedOffer, mintAttempts } from "./attempt.js";
@@ -49,7 +57,8 @@ import { attemptDecisionWithSeatClose, timestamp } from "./operations.js";
 
 type DeliveryIdentity = DeliverData;
 export type VerificationReuse = CurrentVerifiedAttestation;
-export type DeliverValue = DeliveryIdentity & CompletionEvidence;
+export type DeliverLeading = Readonly<{ kind: "already-admitted"; fact: EntryUlid }>;
+export type DeliverValue = DeliveryIdentity & CompletionEvidence & Readonly<{ leading?: DeliverLeading }>;
 
 export type AppointedWorkspace = Readonly<{
   kind: "worktree";
@@ -75,6 +84,7 @@ type DeliverOperationInput = MutationOperationInput &
     requireBranchesToBeUpToDate: boolean;
     includeDirty: boolean;
     materializeConflict: boolean;
+    overwrite?: boolean;
     signal?: AbortSignal;
   }>;
 
@@ -323,6 +333,7 @@ async function speculateDelivery(input: DeliverOperationInput): Promise<Speculat
       preparation: { kind: "refused", document: derivation.document, refusal: derivation.verification.refusal },
     };
   }
+  if (reusesCurrentCandidate(input, state, derivation)) return { observation, state, derivation };
   if (input.materializeConflict === true && state.terminal === null) return { observation, state, derivation };
   const captured = await captureAuthorizedDeliveryTender(
     input.scope,
@@ -359,6 +370,21 @@ async function speculateDelivery(input: DeliverOperationInput): Promise<Speculat
     : { observation, state, derivation, preparation: prepared };
 }
 
+function reusesCurrentCandidate(
+  input: DeliverOperationInput,
+  state: ContractState,
+  derivation: DocumentDerivation,
+): boolean {
+  return (
+    input.overwrite !== true &&
+    state.terminal === null &&
+    state.delivery !== null &&
+    derivation.verification.kind === "prepared" &&
+    derivation.verification.data !== null &&
+    currentVerifiedAttestation(state) === undefined
+  );
+}
+
 async function resolveDeliveryPreparation(
   input: DeliverOperationInput,
   speculated: SpeculativeDelivery,
@@ -381,26 +407,46 @@ async function decideAndAdmitDelivery(
   seat: PrivateStatePublicationSeat,
   observation: GitDecisionObservation,
   speculated: SpeculativeDelivery,
-): Promise<AttemptDecision<DeliveryIdentity>> {
+): Promise<AttemptDecision<DeliverValue>> {
+  const currentState = speculated.state;
+  if (
+    currentState !== null &&
+    speculated.derivation !== undefined &&
+    reusesCurrentCandidate(input, currentState, speculated.derivation)
+  ) {
+    const record = observation.journals.get(input.contractId);
+    const delivery = record?.entries.findLast((entry) => entry.kind === "deliver");
+    if (record === undefined || delivery === undefined) throw new Error("current delivery is missing its journal fact");
+    input.progress?.recordAdmission({ kind: "accepted", facts: [], state: currentState, journal: record.entries });
+    return {
+      kind: "accepted",
+      facts: [],
+      state: currentState,
+      journal: record.entries,
+      value: {
+        ...currentState.delivery!.data,
+        leading: { kind: "already-admitted", fact: delivery.entry },
+      },
+    };
+  }
   if (speculated.continuation === true) {
     const record = observation.journals.get(input.contractId);
-    const state = record?.state;
     if (
       record === undefined ||
-      state === null ||
-      state === undefined ||
-      state.delivery === null ||
+      record.state === null ||
+      record.state.delivery === null ||
       speculated.derivation === undefined
     ) {
       return { kind: "redecide" };
     }
+    const state = record.state;
     input.progress?.recordAdmission({ kind: "accepted", facts: [], state, journal: record.entries });
     return {
       kind: "accepted",
       facts: [],
       state,
       journal: record.entries,
-      value: state.delivery.data,
+      value: record.state.delivery.data,
     };
   }
   const preparation = await resolveDeliveryPreparation(input, speculated);
@@ -424,7 +470,7 @@ async function decideAndAdmitDelivery(
     attempt,
     offer: decision.offer,
     primaryContract: input.contractId,
-    ...(input.progress === undefined ? {} : input.progress === undefined ? {} : { progress: input.progress }),
+    ...(input.progress === undefined ? {} : { progress: input.progress }),
   });
   if (admission.kind !== "accepted") return admission;
   return {
@@ -438,7 +484,7 @@ async function deliverAttemptInPrivateStateSeat(
   attempt: AttemptContext,
   seat: PrivateStatePublicationSeat,
   speculated: SpeculativeDelivery,
-): Promise<AttemptDecision<DeliveryIdentity>> {
+): Promise<AttemptDecision<DeliverValue>> {
   const observation = await matchingPrivateRootObservation(
     input.scope,
     input.channel,
@@ -459,7 +505,7 @@ async function deliverAttemptInPrivateStateSeat(
 async function deliverAttempt(
   input: DeliverOperationInput,
   attempt: AttemptContext,
-): Promise<AttemptDecision<DeliveryIdentity>> {
+): Promise<AttemptDecision<DeliverValue>> {
   const speculated = await speculateDelivery(input);
   return await privateStateSeatAttempt(
     input.scope,
@@ -595,9 +641,9 @@ async function finishDeliverRefusal(
 
 export async function admitDeliveryOperation(
   input: DeliverOperationInput,
-): Promise<LeadingOutcome<DeliveryIdentity, IntentRefusal> | IntegrationConflictMaterialized> {
+): Promise<LeadingOutcome<DeliverValue, IntentRefusal> | IntegrationConflictMaterialized> {
   const attempts = mintAttempts({ entryCount: 2 });
-  let first: Extract<AttemptDecision<DeliveryIdentity>, { kind: "accepted" }> | null = null;
+  let first: Extract<AttemptDecision<DeliverValue>, { kind: "accepted" }> | null = null;
   for (let index = 0; index < attempts.length; index += 1) {
     const result = await deliverAttempt(input, attempts[index]!);
     if (result.kind === "accepted") {

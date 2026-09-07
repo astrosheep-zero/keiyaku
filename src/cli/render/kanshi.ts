@@ -8,6 +8,7 @@ import {
   gateFact,
   gitIdsInRow,
   mergeSummary,
+  verificationFact,
   targetFacts,
 } from "./contract-observation.js";
 import {
@@ -232,7 +233,9 @@ function renderSelectedContractRow(
 }
 
 function candidateFacts(row: ContractKanshiRow, abbreviations: ReadonlyMap<string, string>): readonly string[] {
-  if (row.delivery === null) return [candidateFact(row.delivery)];
+  const verification = verificationFact(row.verification);
+  if (row.delivery === null)
+    return [candidateFact(row.delivery), ...(verification === undefined ? [] : [verification])];
   const delivery = row.delivery;
   return [
     candidateFact(delivery),
@@ -240,6 +243,7 @@ function candidateFacts(row: ContractKanshiRow, abbreviations: ReadonlyMap<strin
     `integration commit  ${displayGitId(delivery.integration.snapshot, abbreviations)} · predecessor ${displayGitId(delivery.integration.predecessor, abbreviations)}`,
     `method  ${delivery.method}`,
     `content identity (not commit)  ${delivery.integration.changeId}`,
+    ...(verification === undefined ? [] : [verification]),
   ];
 }
 
@@ -257,6 +261,7 @@ function renderWorldContractRow(
     ...row.after.map(afterWording),
     ...(row.dependents.length === 0 ? [] : [`dependents  ${row.dependents.map(dependentWording).join(" · ")}`]),
     ...row.gates.reports.map(gateFact),
+    ...(verificationFact(row.verification) === undefined ? [] : [verificationFact(row.verification)!]),
   ];
   const linkedFacts = [
     ...(row.holder.kind === "held" ? [linkedTask(report, row.holder.taskId)] : []),

@@ -26,7 +26,10 @@ An explicit no-fact integration handoff likewise projects as not-admitted.
 fact. Their machine-readable code derives from their one structured reason. A
 post-admission physical, reconciliation, or settlement failure remains a typed
 lag on the accepted result; it cannot reclassify the leading act as refused or
-hide its facts. Recovery evidence, when cleanup needs it, is transient Git
+hide its facts. Each lag identifies either no affected next action or the
+specific pending action it affects. Retained residue alone does not imply that
+reconciliation is required; scope neither ranks lags nor prescribes a repair.
+Recovery evidence, when cleanup needs it, is transient Git
 custody rather than a new Contract fact or retention promise.
 
 The addressed operation is explicit in an invocation answer. Consumers never
@@ -47,9 +50,14 @@ Delivery and review may admit their leading fact while verification, placement,
 or dependent continuation reports a distinct typed stop. Those trailing channels
 are independent: a satisfied review can still find no delivery to place, and a
 verification or placement stop cannot undo an accepted delivery or review.
+Recovery names an existing delivery fact as already admitted, reports only this
+invocation's facts, and does not disguise later workspace bytes as a candidate.
 Successful placement is represented once as completion; callers do not rebuild
 it from facts or folded state. Reused Verification evidence is identified as
 reuse, not a cache or a new evidence source.
+An admitted current candidate with declared Verification but no terminal fact
+is `unrecorded`, distinct from undeclared or terminal Verification and implying
+no timeout, liveness, or retry state.
 
 A normal integration conflict is a non-admission refusal. Explicit conflict
 materialization instead returns a handoff result with no admitted fact,
@@ -95,10 +103,11 @@ failure and cancellation retain all earlier confirmed admissions.
 
 Audit returns one already-adjudicated picture of candidate readiness,
 Verification, and target state. A blocked candidate admits no Verification fact;
-a stopped Verification prevents target observation. Audit may record ordinary
-terminal Verification testimony, but never places or moves a target. Candidate
-diffs and scope are requested presentation data, including an empty diff, not
-journal, gate, or cache authority.
+Audit observes target followability independently even when Verification stops.
+Audit may record terminal Verification testimony, but never places or moves a
+target. Its candidate comparison independently reports the admitted candidate's
+Verification status. Candidate diffs and scope are requested presentation data,
+including an empty diff, not journal, gate, or cache authority.
 
 Read-only workspace and board observations are owned by
 [public-api.md](public-api.md), not duplicated here. Nuke confirmation refusals

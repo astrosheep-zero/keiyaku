@@ -218,10 +218,17 @@ export class KeiyakuHandle {
     const values =
       input === undefined
         ? undefined
-        : requireInput(input, "deliver input", ["message", "includeDirty", "materializeConflict", "signal"]);
+        : requireInput(input, "deliver input", [
+            "message",
+            "includeDirty",
+            "materializeConflict",
+            "overwrite",
+            "signal",
+          ]);
     const message = optionalNonblank(values?.message, "deliver message");
     const includeDirty = optionalBoolean(values?.includeDirty, "includeDirty") ?? false;
     const materializeConflict = optionalBoolean(values?.materializeConflict, "materializeConflict") ?? false;
+    const overwrite = optionalBoolean(values?.overwrite, "overwrite") ?? false;
     const signal = optionalSignal(values?.signal);
     const channel = executionChannel(this.execution);
     const result =
@@ -234,6 +241,7 @@ export class KeiyakuHandle {
             requireBranchesToBeUpToDate: this.composition.requireBranchesToBeUpToDate,
             includeDirty,
             materializeConflict,
+            overwrite,
             ...(signal === undefined ? {} : { signal }),
             hooks: this.composition.hooks,
           })
@@ -247,6 +255,7 @@ export class KeiyakuHandle {
               ...(message === undefined ? {} : { message }),
               includeDirty,
               materializeConflict,
+              overwrite,
             },
             ...(signal === undefined ? {} : { signal }),
           });

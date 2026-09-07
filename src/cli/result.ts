@@ -41,7 +41,7 @@ export type AcceptedFact =
         data: Extract<Fact, { kind: "reintegrated" }>["data"];
       }>);
 
-export type Lag = ReconcileReport["lag"][number];
+export type Lag = MutationResult<unknown>["lags"][number];
 
 type MutationEnvelope = Pick<
   MutationResult<unknown>,
@@ -105,6 +105,7 @@ export type AcceptedDeliverResult = AcceptedEnvelope &
     verb: "deliver";
     tenderSnapshot?: Delivery["tenderSnapshot"];
     integration?: Readonly<Pick<Delivery["integration"], "changeId">>;
+    leading?: Delivery["leading"];
     completion?: Delivery["completion"];
     verificationVerdict?: "satisfied" | "unsatisfied";
     verification?: VerificationStop;

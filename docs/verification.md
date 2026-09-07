@@ -42,7 +42,9 @@ chapter.
 Terminal output may be rendered as bounded contextual summary on the
 attestation. It is not a log, artifact, report store, or source for callers to
 parse counts. A stopped producer is a typed public stop. Delivery can still
-perform its independent placement duty; audit leaves target state unobserved.
+report its independently observed placement stop, but does not perform placement
+until Verification and gates permit it. Audit independently observes target
+followability without placing it.
 
 Environment failures from configured scratch hooks preserve the hook's configured
 name and typed failure detail as their public recovery identity; the hook's

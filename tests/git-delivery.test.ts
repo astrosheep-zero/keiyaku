@@ -1806,6 +1806,7 @@ test("abandon retains dirty submodule internals that a recovery snapshot cannot 
       path,
       paths: ["module"],
       head,
+      affects: "none",
     },
   ]);
   assert.equal(existsSync(path), true);

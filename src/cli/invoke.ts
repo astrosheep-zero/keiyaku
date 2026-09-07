@@ -36,7 +36,6 @@ type InvokeRuntime = Readonly<{
   environment?: NodeJS.ProcessEnv;
   readStdin?: () => Promise<string>;
   actor?: ActorId;
-  onOperationStart?: () => void;
 }>;
 
 type NonInstallExecution = Readonly<{
@@ -504,14 +503,12 @@ export async function invoke(
     const command = invocation.command;
     assertExplicitRepoUse(command, invocation.repo);
     if (command.command === "install") {
-      runtime.onOperationStart?.();
       return (await import("./commands/install.js")).installHarnesses(
         command.harnesses,
         runtime.environment ?? process.env,
       );
     }
     const acquiredRuntime = await withAcquiredStdin(command, withResolvedTaskActor(command, runtime));
-    runtime.onOperationStart?.();
     if (command.command === "bind" && command.forkOf === undefined) {
       const markdown = await (acquiredRuntime.readStdin ?? readStdin)();
       const { admitMarkdownBindSyntax } = await import("./commands/contract-invoke.js");

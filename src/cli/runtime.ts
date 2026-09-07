@@ -10,15 +10,6 @@ import { safeText } from "./render/terminal.js";
 import type { InvocationResult } from "./result.js";
 import type { Settings } from "../settings.js";
 
-export function invocationStart(command: ParsedCommand): string | undefined {
-  if (command.output === "json") return undefined;
-  if (command.command === "bind") return "● preparing keiyaku";
-  if (command.command === "deliver") return "● delivering";
-  if (command.command === "audit") return "● auditing";
-  if (command.command === "reconcile") return "● reconciling";
-  return command.command === "install" ? "● installing harness integrations" : undefined;
-}
-
 function writeCliStream(stream: NodeJS.WritableStream, body: string): void {
   stream.write(body.endsWith("\n") ? body : `${body}\n`);
 }
@@ -187,18 +178,8 @@ async function commandFailureText(error: unknown, command: ParsedCommand): Promi
 export async function runCliCommand(invocation: ParsedExecution): Promise<number> {
   const command = invocation.command;
   try {
-    const start = invocationStart(command);
     const { invoke } = await import("./invoke.js");
-    const result = await invoke(invocation, {
-      cwd: process.cwd(),
-      ...(start === undefined
-        ? {}
-        : {
-            onOperationStart: () => {
-              writeCliStream(process.stderr, start);
-            },
-          }),
-    });
+    const result = await invoke(invocation, { cwd: process.cwd() });
     return await writeResult(command, result);
   } catch (error) {
     const { executionReceipt } = await import("../index.js");

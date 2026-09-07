@@ -2,7 +2,7 @@ import type { ActorId, ContractId, EntryUlid, SnapshotId } from "../core/facts/t
 import type { GitRepository } from "../git/process.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import { currentVerifiedAttestation, verifyDelivery, type CurrentVerifiedAttestation } from "./intent.js";
-import { admitPlacement } from "./placement.js";
+import { admitPlacement, observeTargetPlacement } from "./placement.js";
 import { reintegrateOperation, type ReintegrationResult } from "./reintegrate.js";
 import {
   contractCheckpoint,
@@ -52,7 +52,7 @@ export type CompletionResult =
       kind: "stopped";
       checkpoint: ContractCheckpoint;
       evidence: CompletionEvidence;
-      stop: PlacementStop | ExecutionStop;
+      stop: PlacementStop | VerificationStop | ExecutionStop;
     }>;
 
 // A cursor controls this node only; it is neither a receipt nor a persisted lifecycle.
@@ -116,6 +116,27 @@ async function verifyCurrentCandidate(input: CompletionInput, cursor: Completion
   };
 }
 
+async function observeCandidateTarget(
+  input: CompletionInput,
+  cursor: CompletionCursor,
+): Promise<PlacementStop | undefined> {
+  const target = cursor.checkpoint.state.coordinates.target;
+  if (target === undefined) return undefined;
+  const integration = cursor.checkpoint.state.currentIntegration;
+  if (integration === null) return undefined;
+  try {
+    const observed = await observeTargetPlacement(input.repository, {
+      contractId: cursor.checkpoint.state.id,
+      coordinates: { ...cursor.checkpoint.state.coordinates, target },
+      predecessor: integration.predecessor,
+      candidate: integration.snapshot,
+    });
+    return observed.kind === "refused" ? { refusal: observed.refusal } : undefined;
+  } catch (error) {
+    return { failure: "target-placement-failed", diagnostic: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 function completedResult(cursor: CompletionCursor): Extract<CompletionResult, { kind: "completed" }> {
   const state = cursor.checkpoint.state;
   const integration = state.currentIntegration?.snapshot;
@@ -176,8 +197,28 @@ async function placeCurrentCandidate(input: CompletionInput, cursor: CompletionC
   return result;
 }
 
+async function verifyCandidateReadiness(
+  input: CompletionInput,
+  cursor: CompletionCursor,
+): Promise<CompletionResult | undefined> {
+  const observedPlacement = await observeCandidateTarget(input, cursor);
+  await verifyCurrentCandidate(input, cursor);
+  if (cursor.evidence.verification !== undefined || observedPlacement !== undefined) {
+    return {
+      kind: "stopped",
+      checkpoint: cursor.checkpoint,
+      evidence: { ...cursor.evidence, ...(observedPlacement === undefined ? {} : { placement: observedPlacement }) },
+      stop: cursor.evidence.verification ?? observedPlacement!,
+    };
+  }
+  return undefined;
+}
+
 async function advanceCandidate(input: CompletionInput, cursor: CompletionCursor): Promise<CompletionResult> {
-  if (input.start === "verification") await verifyCurrentCandidate(input, cursor);
+  if (input.start === "verification") {
+    const stopped = await verifyCandidateReadiness(input, cursor);
+    if (stopped !== undefined) return stopped;
+  }
   const target = cursor.checkpoint.state.coordinates.target;
   let placement = await placeCurrentCandidate(input, cursor);
   for (let cycles = 0; ; cycles += 1) {
@@ -211,7 +252,8 @@ async function advanceCandidate(input: CompletionInput, cursor: CompletionCursor
     if (reintegrated.kind !== "accepted") return stoppedResult(cursor, reintegrationStop(reintegrated));
     cursor.checkpoint = contractCheckpoint(reintegrated);
     input.progress.recordResidue(reintegrated.state.id, reintegrated);
-    await verifyCurrentCandidate(input, cursor);
+    const stopped = await verifyCandidateReadiness(input, cursor);
+    if (stopped !== undefined) return stopped;
     placement = await placeCurrentCandidate(input, cursor);
   }
 }

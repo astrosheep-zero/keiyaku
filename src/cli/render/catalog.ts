@@ -7,6 +7,7 @@ import {
   displayGitId,
   gateFact,
   gitIdsInRow,
+  verificationFact,
   targetFacts,
 } from "./contract-observation.js";
 import { safeText } from "./terminal.js";
@@ -90,6 +91,7 @@ function renderContractCatalog(catalog: Extract<Catalog, { kind: "contracts" }>)
       `  ${candidateFact(row.delivery)}`,
       ...targetFacts(row, abbreviations).map((fact) => `  ${safeText(fact)}`),
       ...(row.worktreePath === null ? [] : [`  worktree  ${safeText(row.worktreePath)}`]),
+      ...(verificationFact(row.verification) === undefined ? [] : [`  ${verificationFact(row.verification)}`]),
       ...row.after.map((edge) => `  ${afterWording(edge)}`),
       ...(row.dependents.length === 0 ? [] : [`  dependents  ${row.dependents.map(dependentWording).join(" · ")}`]),
       ...(row.gates.reports.length === 0 ? [] : [`  ${row.gates.reports.map(gateFact).join("  ")}`]),

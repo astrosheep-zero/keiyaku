@@ -118,15 +118,17 @@ test("existing selectors are optional and review stdin is a distinct summary sou
       contract: "kei/example",
       includeDirty: true,
       materializeConflict: false,
+      overwrite: false,
       output: "json",
     },
   });
-  assert.deepEqual(parseArgv(["deliver", "kei/example", "--materialize-conflict"]), {
+  assert.deepEqual(parseArgv(["deliver", "kei/example", "--materialize-conflict", "--overwrite"]), {
     command: {
       command: "deliver",
       contract: "kei/example",
       includeDirty: false,
       materializeConflict: true,
+      overwrite: true,
       output: "text",
     },
   });

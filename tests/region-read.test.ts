@@ -340,7 +340,9 @@ test("a malformed active document fails only the selected Region section", async
   const report = await read(repository, { kind: "declarations" });
   assert.equal(report.contracts.kind, "present");
   if (report.contracts.kind !== "present") return;
-  assert.equal(report.contracts.value.rows.find((row) => row.id === id)?.title, null);
+  const row = report.contracts.value.rows.find((candidate) => candidate.id === id);
+  assert.equal(row?.title, null);
+  assert.equal(row?.verification, undefined);
   assert.equal(report.region?.kind, "failed");
   const failed = await invoke(parseArgv(["region"]), { cwd: repository.path, environment: {} });
   assert.equal(failed.kind, "region");

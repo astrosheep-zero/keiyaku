@@ -1418,6 +1418,7 @@ test("world Contract rows make candidate facts self-describing", () => {
   if (row === undefined) throw new Error("fixture Contract must be present");
   const delivered = {
     ...row,
+    verification: { kind: "unrecorded" as const },
     delivery: {
       tenderSnapshot: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       integration: {
@@ -1439,6 +1440,7 @@ test("world Contract rows make candidate facts self-describing", () => {
   assert.doesNotMatch(text, /○ no candidate · ● candidate|satisfied  \[✗\] unsatisfied/u);
   const body = sectionBody(text, "KEIYAKU");
   assert.match(body, /^  candidate  present · target  main @ aaaaaaa · behind 7 · target moved  bbbbbbb -> aaaaaaa$/mu);
+  assert.match(body, /verification unrecorded/u);
   const selected = renderKanshiText(deliveredReport, { columns: 120, color: false }, "contract");
   assert.match(
     selected,

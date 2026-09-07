@@ -37,6 +37,27 @@ export type ReconcileCompletion = Readonly<{
   hookRuns?: readonly { phase: "create" | "destroy"; name: string }[];
 }>;
 
+/**
+ * Identifies the next independently retryable action for a reconciliation lag.
+ * Retained terminal bytes are observable residue, not a blocker for another
+ * action.
+ */
+export type ReconcileLagScope = "none" | "reconciliation" | "placement" | "continuation";
+
+export function reconcileLagScope(lag: ReconcileCompletion["lag"][number]): ReconcileLagScope {
+  switch (lag.kind) {
+    case "worktree-retained":
+    case "unsealed-bytes":
+      return "none";
+    case "worktree-follow-retained":
+      return "continuation";
+    case "target-checkout-retained":
+      return "placement";
+    default:
+      return "reconciliation";
+  }
+}
+
 export function decodeReconciliationLag(value: unknown): ReconcileCompletion["lag"][number] {
   try {
     return decodeGitReconcileLag(value);

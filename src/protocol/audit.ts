@@ -1,10 +1,10 @@
 import { readDeliveryDiff, readDeliveryScope, type DeliveryDiffScope } from "../git/integration.js";
 import { observeContractsForAdmissionAt } from "../git/observe.js";
 import { activeContract, documentIsCurrent } from "../core/facts/observation.js";
-import type { ChangeId, ContractState, DeliverData, SnapshotId } from "../core/facts/types.js";
+import type { ChangeId, ContractState, DeliverData, EntryUlid, SnapshotId } from "../core/facts/types.js";
 import { adjudicateAuditTarget, type AuditTargetAnswer } from "../git/target-placement.js";
 import { readManagedWorktreeAppointment, type ManagedWorktreeAppointment } from "../workspace-place.js";
-import { verifyDelivery } from "./intent.js";
+import { currentVerifiedAttestation, verifyDelivery } from "./intent.js";
 import { accepted, admitted } from "./outcome.js";
 import { prepareDelivery } from "./deliver.js";
 import type {
@@ -39,7 +39,13 @@ export type AuditReport = Readonly<{
     | Readonly<{ kind: "unsatisfied"; passed: number; total: number; summary?: string }>
     | Readonly<{ kind: "stopped"; stop: VerificationStop }>;
   target: Readonly<{ kind: "not-observed" }> | AuditTargetAnswer;
-  delivery?: Readonly<{ changeId: ChangeId; relation: "identical" | "differs" }>;
+  delivery?: Readonly<{
+    changeId: ChangeId;
+    relation: "identical" | "differs";
+    verification:
+      | Readonly<{ kind: "undeclared" | "unrecorded" }>
+      | Readonly<{ kind: "recorded"; verdict: "satisfied" | "unsatisfied"; fact: EntryUlid }>;
+  }>;
 }>;
 
 type AuditOperationInput = MutationOperationInput &
@@ -68,10 +74,23 @@ async function auditWorkspace(
   return { kind: "ready", answer: { kind: "worktree", path: appointed.path }, appointment: appointed };
 }
 
-function auditDeliveryRelation(state: ContractState, candidate: DeliverData): AuditReport["delivery"] {
+function auditDeliveryRelation(
+  state: ContractState,
+  candidate: DeliverData,
+  verificationDeclared: boolean,
+): AuditReport["delivery"] {
   const recorded = state.delivery?.data.integration.changeId;
   if (recorded === undefined) return undefined;
-  return { changeId: recorded, relation: recorded === candidate.integration.changeId ? "identical" : "differs" };
+  const verification = currentVerifiedAttestation(state);
+  return {
+    changeId: recorded,
+    relation: recorded === candidate.integration.changeId ? "identical" : "differs",
+    verification: !verificationDeclared
+      ? { kind: "undeclared" }
+      : verification === undefined
+        ? { kind: "unrecorded" }
+        : { kind: "recorded", verdict: verification.verdict, fact: verification.entry },
+  };
 }
 
 async function auditCandidateVerification(
@@ -206,14 +225,15 @@ export async function auditOperation(input: AuditOperationInput): Promise<Intent
           derivation.verification.data,
         );
   const verification = auditVerificationAnswer(verified);
-  const delivery = auditDeliveryRelation(state, prepared.data);
+  const delivery = auditDeliveryRelation(
+    verified?.admission?.state ?? state,
+    prepared.data,
+    derivation.verification.data !== null,
+  );
   const value: AuditReport = {
     candidate,
     verification,
-    target:
-      verification.kind === "stopped"
-        ? { kind: "not-observed" }
-        : await auditTargetAnswer(input.scope, state, prepared.data),
+    target: await auditTargetAnswer(input.scope, state, prepared.data),
     ...(delivery === undefined ? {} : { delivery }),
   };
   return completedAudit(state, verified, value);

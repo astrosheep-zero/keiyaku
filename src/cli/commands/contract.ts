@@ -53,6 +53,7 @@ export type ParsedDeliver = Output &
     message?: string;
     includeDirty: boolean;
     materializeConflict: boolean;
+    overwrite: boolean;
   }>;
 export type ParsedReview = Output &
   Readonly<{
@@ -210,6 +211,7 @@ function parseDeliver(parts: ParsedContractParts): ParsedDeliver {
     ...(message === undefined ? {} : { message }),
     includeDirty: parts.flags["include-dirty"] === true,
     materializeConflict: parts.flags["materialize-conflict"] === true,
+    overwrite: parts.flags.overwrite === true,
     output: parts.output,
   };
 }

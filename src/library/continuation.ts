@@ -9,14 +9,15 @@ import { contractCheckpoint, executionStop, type ExecutionProgress, type Executi
 import { observeContractAt } from "../git/observe.js";
 import { decodeGitReconcileLag } from "../git/result-codec.js";
 import { executionStopSchema } from "./execution-result.js";
-import type { DocumentDerivation, PlacementStop, RepositoryScope } from "../protocol/operations.js";
-import { decodePlacementStop } from "../protocol/result-codec.js";
+import type { DocumentDerivation, PlacementStop, RepositoryScope, VerificationStop } from "../protocol/operations.js";
+import { decodePlacementStop, decodeVerificationStop } from "../protocol/result-codec.js";
 import { ownerSchema } from "./result-codec.js";
 import { appointmentFor, readPlaceRegister } from "../workspace-place.js";
 import { z } from "zod";
 
 export type ContinuationStop =
   | PlacementStop
+  | VerificationStop
   | ExecutionStop
   | Readonly<{ kind: "already-terminal" }>
   | Readonly<{ kind: "physical-lag"; lags: ReconcileResult["lag"] }>;
@@ -77,7 +78,11 @@ function decodeContinuationStop(value: unknown): ContinuationStop {
       return { kind: "physical-lag", lags: value.lags.map(decodeGitReconcileLag) };
     }
   }
-  return decodePlacementStop(value);
+  try {
+    return decodePlacementStop(value);
+  } catch {
+    return decodeVerificationStop(value);
+  }
 }
 
 type RetainedDependent = Readonly<{ state: ContractState; journal: readonly JournalEntry[] }>;

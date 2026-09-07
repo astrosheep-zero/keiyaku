@@ -24,7 +24,7 @@ import type { VerificationDeclarationRefusal } from "../verification/declaration
 import type { AuditReport } from "./audit.js";
 import { decodeForkSourceMovedRefusal, decodeTargetInputRefusal } from "./bind.js";
 import type { CandidateCompletion, CompletionEvidence } from "./completion.js";
-import type { IntegrationConflictMaterialized } from "./deliver.js";
+import type { DeliverLeading, IntegrationConflictMaterialized } from "./deliver.js";
 import type { CurrentVerifiedAttestation, VerificationCleanupFailure, VerificationRuntimeStop } from "./intent.js";
 import type {
   DeliverConflictRefusal,
@@ -85,6 +85,14 @@ function decodeContractId(value: unknown): ContractId {
 function decodeSnapshotId(value: unknown): SnapshotId {
   try {
     return snapshotId(nonblank(value));
+  } catch {
+    fail();
+  }
+}
+
+function decodeEntryUlid(value: unknown) {
+  try {
+    return entryUlid(nonblank(value));
   } catch {
     fail();
   }
@@ -222,14 +230,8 @@ export function decodeVerificationStop(value: unknown): VerificationStop {
 export function decodeVerificationReuse(value: unknown): CurrentVerifiedAttestation {
   const object = record(value, ["entry", "verdict"], ["summary"]);
   if (object.verdict !== "satisfied" && object.verdict !== "unsatisfied") fail();
-  let entry;
-  try {
-    entry = entryUlid(nonblank(object.entry));
-  } catch {
-    fail();
-  }
   return {
-    entry,
+    entry: decodeEntryUlid(object.entry),
     verdict: object.verdict,
     ...(object.summary === undefined ? {} : { summary: typeof object.summary === "string" ? object.summary : fail() }),
   };
@@ -359,6 +361,12 @@ export function decodeCompletionEvidence(value: unknown): CompletionEvidence {
   };
 }
 
+export function decodeDeliverLeading(value: unknown): DeliverLeading {
+  const object = record(value, ["kind", "fact"]);
+  if (object.kind !== "already-admitted") fail();
+  return { kind: "already-admitted", fact: decodeEntryUlid(object.fact) };
+}
+
 export function decodeMaterializedConflict(value: unknown): IntegrationConflictMaterialized {
   const object = record(value, ["kind", "targetHead", "conflictPaths", "workspace", "handoffBase", "recovery"]);
   if (object.kind !== "integration-conflict-materialized") fail();
@@ -447,25 +455,37 @@ function decodeAuditTarget(value: unknown): AuditReport["target"] {
   return first(value, [decodeNotObservedAuditTarget, decodeAuditTargetAnswer]);
 }
 
+function decodeAuditDelivery(value: unknown): NonNullable<AuditReport["delivery"]> {
+  const delivery = record(value, ["changeId", "relation", "verification"]);
+  if (delivery.relation !== "identical" && delivery.relation !== "differs") fail();
+  const valueVerification = record(delivery.verification, ["kind"], ["fact", "verdict"]);
+  const verification: NonNullable<AuditReport["delivery"]>["verification"] =
+    valueVerification.kind === "undeclared" || valueVerification.kind === "unrecorded"
+      ? Object.keys(valueVerification).length === 1
+        ? { kind: valueVerification.kind }
+        : fail()
+      : valueVerification.kind === "recorded" &&
+          (valueVerification.verdict === "satisfied" || valueVerification.verdict === "unsatisfied")
+        ? {
+            kind: "recorded" as const,
+            verdict: valueVerification.verdict,
+            fact: decodeEntryUlid(valueVerification.fact),
+          }
+        : fail();
+  try {
+    return { changeId: changeId(nonblank(delivery.changeId)), relation: delivery.relation, verification };
+  } catch {
+    fail();
+  }
+}
+
 export function decodeAuditReport(value: unknown): AuditReport {
   const object = record(value, ["candidate", "verification", "target"], ["delivery"]);
   return {
     candidate: first(object.candidate, [decodeAuditBlockedCandidate, decodeAuditReadyCandidate]),
     verification: decodeAuditVerification(object.verification),
     target: decodeAuditTarget(object.target),
-    ...(object.delivery === undefined
-      ? {}
-      : {
-          delivery: (() => {
-            const delivery = record(object.delivery, ["changeId", "relation"]);
-            if (delivery.relation !== "identical" && delivery.relation !== "differs") fail();
-            try {
-              return { changeId: changeId(nonblank(delivery.changeId)), relation: delivery.relation };
-            } catch {
-              fail();
-            }
-          })(),
-        }),
+    ...(object.delivery === undefined ? {} : { delivery: decodeAuditDelivery(object.delivery) }),
   };
 }
 

@@ -62,7 +62,12 @@ const auditRequestSchema = contractRequestBaseSchema
   })
   .transform((request) => ({ action: "contract.audit" as const, ...request }));
 const deliverRequestSchema = contractRequestBaseSchema
-  .extend({ includeDirty: z.boolean(), materializeConflict: z.boolean(), message: nonblankStringSchema.optional() })
+  .extend({
+    includeDirty: z.boolean(),
+    materializeConflict: z.boolean(),
+    overwrite: z.boolean().optional(),
+    message: nonblankStringSchema.optional(),
+  })
   .transform((request) => ({ action: "contract.deliver" as const, ...request }));
 const reviewRequestSchema = contractRequestBaseSchema
   .extend({ verdict: z.enum(["satisfied", "unsatisfied"]), summary: nonblankStringSchema.optional() })
@@ -210,6 +215,7 @@ async function executeContractRequest(
   if (request.action === "contract.deliver") {
     const served = await port.deliver({
       ...request,
+      overwrite: request.overwrite ?? false,
       requester: facts.requester as ContractRequester,
       signal: facts.signal,
     });

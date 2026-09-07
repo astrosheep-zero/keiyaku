@@ -272,11 +272,13 @@ function completionLines(result: AcceptedDeliverResult | AcceptedReviewResult, c
     [
       { text: "->" },
       { text: completion.integration, opaque: true },
-      ...(verification?.verdict === "satisfied" ? [{ text: `· verified (${verification.mode})` }] : []),
+      ...(verification !== undefined && "verdict" in verification && verification.verdict === "satisfied"
+        ? [{ text: `· verified (${verification.mode})` }]
+        : []),
     ],
     columns,
   );
-  if (verification?.verdict === "unsatisfied") {
+  if (verification !== undefined && "verdict" in verification && verification.verdict === "unsatisfied") {
     receiptRow(
       lines,
       "!",
@@ -344,6 +346,15 @@ function renderAcceptedDeliver(result: AcceptedDeliverResult, columns: number): 
   const complete = result.completion !== undefined;
   const title = complete ? "delivered" : "deliver — not complete";
   const lines = titleLines("✓", title, result.contract, columns);
+  if (result.leading !== undefined) {
+    receiptRow(
+      lines,
+      " ",
+      "leading",
+      [{ text: result.leading.kind }, { text: result.leading.fact, opaque: true }],
+      columns,
+    );
+  }
   if (result.tenderSnapshot !== undefined)
     receiptRow(lines, " ", "tender commit", [{ text: result.tenderSnapshot, opaque: true }], columns);
   if (result.integration !== undefined)
