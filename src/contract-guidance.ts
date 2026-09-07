@@ -23,7 +23,9 @@ export const CONTRACT_ONBOARDING_SKILL = [
   "- `.agents/skills/keiyaku-review/SKILL.md` - Reviewer operating procedure.",
   "",
   "Skills provide procedure only. Contract terms remain authoritative in `.keiyaku/KEIYAKU.md` and the journal; skills cannot amend terms or gain acceptance authority.",
-].join("\\n").concat("\\n");
+]
+  .join("\\n")
+  .concat("\\n");
 
 export const CONTRACT_DELIVERER_SKILL = [
   "---",
