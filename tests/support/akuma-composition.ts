@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { createAkumaProduct, type AkumaBornCall } from "../../src/akuma/akuma-product.js";
 import type {
   AkumaCallContext,
@@ -8,6 +9,19 @@ import type {
 } from "../../src/akuma/akuma.js";
 import { AkumaHandle, akumaCallExecution, type LastAnswer } from "../../src/akuma/akuma-handle.js";
 import type { WorldRoot } from "../../src/world.js";
+
+export function isolateSquareFixtureLedger(root: string): () => void {
+  const previousLocal = process.env.SQUARE_HOST_LEDGER_LOCAL;
+  const previousUser = process.env.SQUARE_HOST_LEDGER_USER;
+  process.env.SQUARE_HOST_LEDGER_LOCAL = join(root, "local-ledger");
+  process.env.SQUARE_HOST_LEDGER_USER = join(root, "user-ledger");
+  return () => {
+    if (previousLocal === undefined) delete process.env.SQUARE_HOST_LEDGER_LOCAL;
+    else process.env.SQUARE_HOST_LEDGER_LOCAL = previousLocal;
+    if (previousUser === undefined) delete process.env.SQUARE_HOST_LEDGER_USER;
+    else process.env.SQUARE_HOST_LEDGER_USER = previousUser;
+  };
+}
 
 export class AkumaComposition {
   private constructor(private readonly product: ReturnType<typeof createAkumaProduct>) {}

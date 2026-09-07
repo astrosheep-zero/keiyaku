@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { open } from "node:fs/promises";
@@ -18,7 +18,14 @@ import {
   type ProcessInput,
 } from "../src/runtime/proc/run.js";
 import { terminateOwnedProcess } from "../src/runtime/proc/termination.js";
-import { removeTempDirectory, waitForProcessExit } from "./support/process.js";
+import {
+  cleanupSpawnCapableFixture,
+  installAkumaBodyPidReceipt,
+  processExists,
+  readPidReceipt,
+  removeTempDirectory,
+  waitForProcessExit,
+} from "./support/process.js";
 
 function input(argv: readonly string[], overrides: Partial<ProcessInput> = {}): ProcessInput {
   return {
@@ -31,6 +38,125 @@ function input(argv: readonly string[], overrides: Partial<ProcessInput> = {}): 
 function ownedChild(pid: number): ChildProcess & { pid: number } {
   return Object.assign(new EventEmitter(), { pid, exitCode: null, signalCode: null }) as ChildProcess & { pid: number };
 }
+
+function restoreEnvironment(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
+
+test("spawn-capable fixture cleanup retains both delayed and settled ambiguous failed launches", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-delayed-body-receipt-"));
+  const body = join(root, "akuma-body.mjs");
+  const receipt = join(root, "body-pids");
+  const ready = join(root, "body-start.ready");
+  const previousBarrier = process.env.KEIYAKU_TEST_AKUMA_BODY_PID_RECEIPT_BARRIER;
+  const previousReady = process.env.KEIYAKU_TEST_AKUMA_BODY_PID_RECEIPT_READY;
+  process.env.KEIYAKU_TEST_AKUMA_BODY_PID_RECEIPT_BARRIER = "stdin";
+  process.env.KEIYAKU_TEST_AKUMA_BODY_PID_RECEIPT_READY = ready;
+  const restoreReceipt = installAkumaBodyPidReceipt(receipt);
+  writeFileSync(body, "", "utf8");
+  const child = spawn(process.execPath, [body], { env: process.env, stdio: ["pipe", "ignore", "ignore"] });
+  const exited = new Promise<void>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", () => resolve());
+  });
+  const original = new Error("fixture operation failed after launch");
+  let cleanup: Awaited<ReturnType<typeof cleanupSpawnCapableFixture>> | undefined;
+  try {
+    await waitForFile(ready);
+    assert.equal(existsSync(receipt), false);
+    assert.ok(child.pid !== undefined);
+    assert.equal(processExists(child.pid), true);
+    await assert.rejects(
+      async () => {
+        try {
+          throw original;
+        } finally {
+          cleanup = await cleanupSpawnCapableFixture({
+            fixturePath: root,
+            pidReceiptPath: receipt,
+            timeoutMs: 2_000,
+            operationFailed: true,
+          });
+        }
+      },
+      (error: unknown) => error === original,
+    );
+    assert.deepEqual(cleanup, {
+      kind: "retained",
+      diagnostic: "spawn-capable operation failed before birth proof",
+    });
+    assert.equal(existsSync(root), true);
+    assert.equal(processExists(child.pid), true);
+    child.stdin?.end("release\n");
+    await waitForFile(receipt);
+    const settled = await cleanupSpawnCapableFixture({
+      fixturePath: root,
+      pidReceiptPath: receipt,
+      timeoutMs: 2_000,
+      operationFailed: true,
+    });
+    assert.deepEqual(settled, {
+      kind: "retained",
+      diagnostic: "spawn-capable operation failed without proof that its launch set is closed",
+    });
+    await exited;
+    assert.equal(existsSync(root), true);
+    assert.deepEqual(readPidReceipt(receipt), [child.pid]);
+    assert.equal(processExists(child.pid), false);
+  } finally {
+    restoreReceipt();
+    restoreEnvironment("KEIYAKU_TEST_AKUMA_BODY_PID_RECEIPT_BARRIER", previousBarrier);
+    restoreEnvironment("KEIYAKU_TEST_AKUMA_BODY_PID_RECEIPT_READY", previousReady);
+    if (child.pid !== undefined && processExists(child.pid)) child.kill("SIGKILL");
+    await exited;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("spawn-capable fixture cleanup retains an unproved launch without replacing its failure", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-unproved-body-launch-"));
+  const receipt = join(root, "body-pids");
+  const original = new Error("fixture launch failed without settlement proof");
+  let cleanup: Awaited<ReturnType<typeof cleanupSpawnCapableFixture>> | undefined;
+  try {
+    await assert.rejects(
+      async () => {
+        try {
+          throw original;
+        } finally {
+          cleanup = await cleanupSpawnCapableFixture({
+            fixturePath: root,
+            pidReceiptPath: receipt,
+            timeoutMs: 0,
+            operationFailed: true,
+          });
+        }
+      },
+      (error: unknown) => error === original,
+    );
+    assert.equal(cleanup?.kind, "retained");
+    assert.equal(existsSync(root), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("PID receipts reject malformed nonempty lines and retain failed fixtures", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-malformed-pid-receipt-"));
+  const receipt = join(root, "body-pids");
+  try {
+    writeFileSync(receipt, "123garbage\n", "utf8");
+    assert.throws(() => readPidReceipt(receipt), /malformed fixture child pid receipt/u);
+    assert.deepEqual(
+      await cleanupSpawnCapableFixture({ fixturePath: root, pidReceiptPath: receipt, operationFailed: true }),
+      { kind: "retained", diagnostic: "malformed fixture child pid receipt: 123garbage" },
+    );
+    assert.equal(existsSync(root), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 for (const force of [false, true]) {
   test(`terminateOwnedProcess accepts EPERM after the owned child exits (${force ? "forced" : "graceful"})`, async (t) => {
@@ -262,9 +388,7 @@ async function waitForFile(path: string): Promise<string> {
   return readFileSync(path, "utf8");
 }
 
-async function expectLaterTerminateIsInert(
-  owned: Awaited<ReturnType<typeof spawnDetachedProcess>>,
-): Promise<void> {
+async function expectLaterTerminateIsInert(owned: Awaited<ReturnType<typeof spawnDetachedProcess>>): Promise<void> {
   let signals = 0;
   const originalKill = process.kill;
   const kill = ((pid: number, signal?: NodeJS.Signals | number) => {
@@ -420,7 +544,7 @@ test("Unix natural leader exit cleans a surviving descendant once", async (t) =>
   const descendantPidPath = join(root, "descendant-pid");
   const descendant = [
     `require("node:fs").writeFileSync(${JSON.stringify(descendantPidPath)}, String(process.pid));`,
-    "process.on(\"SIGTERM\", () => {});",
+    'process.on("SIGTERM", () => {});',
     "setInterval(() => {}, 1_000);",
   ].join(" ");
   const parent = [
@@ -470,7 +594,7 @@ test("Unix natural leader exit leaves no stale terminate after descendants are a
   const parent = [
     'const { spawn } = require("node:child_process");',
     `const child = spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: ["ignore", "inherit", "inherit"] });`,
-    "child.on(\"exit\", () => process.exit(0));",
+    'child.on("exit", () => process.exit(0));',
   ].join(" ");
   let owned: Awaited<ReturnType<typeof spawnDetachedProcess>> | undefined;
   let descendantPid: number | undefined;
@@ -507,7 +631,7 @@ test("runProcess timeout settles after cleaning inherited pipes from an owned gr
   const descendantPidPath = join(root, "descendant-pid");
   const descendant = [
     'process.stdout.write("descendant/ready\\n");',
-    "process.on(\"SIGTERM\", () => {});",
+    'process.on("SIGTERM", () => {});',
     "setInterval(() => {}, 1_000);",
   ].join(" ");
   const parent = [

@@ -17,7 +17,12 @@ import test from "node:test";
 import { moveAlias, resolveAlias } from "../src/alias/index.js";
 import { type AkumaCallInput } from "../src/akuma/akuma.js";
 import { Akuma as PublicAkuma, Schema } from "../src/akuma/index.js";
-import { AkumaComposition as Akuma, AkumaHandle, akumaCallExecution } from "./support/akuma-composition.js";
+import {
+  AkumaComposition as Akuma,
+  AkumaHandle,
+  akumaCallExecution,
+  isolateSquareFixtureLedger,
+} from "./support/akuma-composition.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { akumaCallRequestCommands } from "../src/akuma/call-request.js";
 import { AkumaArchetypeError, listArchetypeDefinitions, loadArchetype } from "../src/akuma/archetype.js";
@@ -39,11 +44,12 @@ import {
 } from "../src/git/repository.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { bodyRequestExecution, Keiyaku, Repo, World, settings } from "../src/index.js";
-import { pluginRuntime } from "../src/plugin/runtime.js";
+import { drainPluginRuntime, pluginRuntime } from "../src/plugin/runtime.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import { invoke } from "../src/cli/invoke.js";
 import { parseArgv, type ParsedExecution } from "../src/cli/parse.js";
 import { makeGitRepository } from "./support/git.js";
+import { cleanupSpawnCapableFixture, installAkumaBodyPidReceipt } from "./support/process.js";
 import type { WorldRoot } from "../src/world.js";
 
 function markdown(title: string): string {
@@ -133,7 +139,7 @@ async function directArchetypeSettings(root: string) {
   return { home, value, placement: { home, settings: value } };
 }
 
-test("schema Keiyaku.call births without a prompt and records its body as one public Tell", async () => {
+test("schema Keiyaku.call births without a prompt and records its body as one public Tell", async (t) => {
   const { raw } = await repositoryFixture();
   const world = await World.at(raw.path);
   const configured = await directArchetypeSettings(world);
@@ -141,7 +147,11 @@ test("schema Keiyaku.call births without a prompt and records its body as one pu
     { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
     (value) => value as { ok: boolean },
   );
+  const bodyPidReceipt = join(raw.path, "body-pids");
+  const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
+  const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
   let akumaId: string | undefined;
+  let operationFailed = true;
   try {
     const result = await Keiyaku.call({
       path: world,
@@ -162,12 +172,25 @@ test("schema Keiyaku.call births without a prompt and records its body as one pu
       history.rows.some((row) => row.kind === "call"),
       false,
     );
+    operationFailed = false;
   } finally {
-    if (akumaId !== undefined)
-      await PublicAkuma.select(world, akumaId)
-        .kill()
-        .catch(() => undefined);
-    rmSync(raw.path, { recursive: true, force: true });
+    try {
+      if (akumaId !== undefined)
+        await PublicAkuma.select(world, akumaId)
+          .kill()
+          .catch(() => undefined);
+      await drainPluginRuntime(world);
+      const cleanup = await cleanupSpawnCapableFixture({
+        fixturePath: raw.path,
+        pidReceiptPath: bodyPidReceipt,
+        timeoutMs: 15_000,
+        operationFailed,
+      });
+      if (cleanup.kind === "retained") t.diagnostic(`retained fixture ${raw.path}: ${cleanup.diagnostic}`);
+    } finally {
+      restoreBodyPidReceipt();
+      restoreSquareLedger();
+    }
   }
 });
 
@@ -259,6 +282,12 @@ test("Keiyaku.call dispatches the admitted generic signal without blocking compl
   const world = await World.at(raw.path);
   const trace = join(raw.path, "called.json");
   const ready = join(raw.path, "called.ready");
+  const started = join(raw.path, "called.started");
+  const releaseKey = `__keiyaku_test_called_release_${process.pid}`;
+  const releasePlugin = (): void => {
+    const release = (globalThis as Record<string, unknown>)[releaseKey];
+    if (typeof release === "function") (release as () => void)();
+  };
   mkdirSync(join(raw.path, ".keiyaku"), { recursive: true });
   mkdirSync(join(raw.path, "plugins"), { recursive: true });
   writeFileSync(
@@ -267,13 +296,15 @@ test("Keiyaku.call dispatches the admitted generic signal without blocking compl
       'import { writeFileSync } from "node:fs";',
       "export default {",
       '  manifest: { id: "called", apiVersion: 1 },',
-      '  activate(context) { writeFileSync(context.config.ready, "ready"); return { signals: { "akuma.called": (signal) => writeFileSync(context.config.trace, JSON.stringify(signal)) } }; },',
+      '  activate(context) { writeFileSync(context.config.ready, "ready"); return { signals: { "akuma.called": async (signal) => { await new Promise((resolve) => { globalThis[context.config.releaseKey] = resolve; writeFileSync(context.config.started, "started"); }); delete globalThis[context.config.releaseKey]; writeFileSync(context.config.trace, JSON.stringify(signal)); } } }; },',
       "};",
     ].join("\n"),
   );
   writeFileSync(
     join(raw.path, ".keiyaku", "settings.json"),
-    JSON.stringify({ plugins: { called: { package: "./plugins/called.mjs", config: { trace, ready } } } }),
+    JSON.stringify({
+      plugins: { called: { package: "./plugins/called.mjs", config: { trace, ready, started, releaseKey } } },
+    }),
   );
   const configured = await archetypeSettings(world);
   await pluginRuntime({ world, settings: configured.value });
@@ -297,10 +328,13 @@ test("Keiyaku.call dispatches the admitted generic signal without blocking compl
       mode: "detach",
     });
     const deadline = Date.now() + 1_000;
-    while (!existsSync(trace)) {
-      if (Date.now() >= deadline) throw new Error("timed out waiting for called plugin signal");
+    while (!existsSync(started)) {
+      if (Date.now() >= deadline) throw new Error("timed out waiting for called plugin handler");
       await new Promise<void>((resolve) => setTimeout(resolve, 5));
     }
+    assert.equal(existsSync(trace), false);
+    releasePlugin();
+    await drainPluginRuntime(world);
     assert.deepEqual(JSON.parse(readFileSync(trace, "utf8")), {
       kind: "akuma.called",
       akumaId: result.akuma,
@@ -308,6 +342,9 @@ test("Keiyaku.call dispatches the admitted generic signal without blocking compl
       contractId,
     });
   } finally {
+    releasePlugin();
+    await drainPluginRuntime(world);
+    delete (globalThis as Record<string, unknown>)[releaseKey];
     await pump.close();
     leash.release();
     rmSync(raw.path, { recursive: true, force: true });
@@ -464,12 +501,16 @@ test("managed Contract calls use the appointed Place only when cwd is omitted", 
   }
 });
 
-test("direct Akuma birth reports process cwd and the embedding World fallback", async () => {
+test("direct Akuma birth reports process cwd and the embedding World fallback", async (t) => {
   const { raw } = await repositoryFixture();
   const world = await World.at(raw.path);
   const configured = await directArchetypeSettings(world);
   const previousRequests = process.env[AKUMA_REQUESTS_ENV];
   delete process.env[AKUMA_REQUESTS_ENV];
+  const bodyPidReceipt = join(raw.path, "body-pids");
+  const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
+  const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
+  let operationFailed = true;
   try {
     const akuma = Akuma.of(world, configured);
     const direct = await akuma.call({ archetype: "worker", body: "process" });
@@ -482,10 +523,23 @@ test("direct Akuma birth reports process cwd and the embedding World fallback", 
     assert.deepEqual(akumaCallExecution(fallback), { cwd: world, source: "world" });
     assert.equal((await direct.wait(undefined, { timeoutMs: 2_000 })).life, "asleep");
     assert.equal((await fallback.wait(undefined, { timeoutMs: 2_000 })).life, "asleep");
+    operationFailed = false;
   } finally {
-    if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
-    else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
-    rmSync(raw.path, { recursive: true, force: true });
+    try {
+      await drainPluginRuntime(world);
+      const cleanup = await cleanupSpawnCapableFixture({
+        fixturePath: raw.path,
+        pidReceiptPath: bodyPidReceipt,
+        timeoutMs: 15_000,
+        operationFailed,
+      });
+      if (cleanup.kind === "retained") t.diagnostic(`retained fixture ${raw.path}: ${cleanup.diagnostic}`);
+    } finally {
+      restoreBodyPidReceipt();
+      restoreSquareLedger();
+      if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
+      else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
+    }
   }
 });
 
