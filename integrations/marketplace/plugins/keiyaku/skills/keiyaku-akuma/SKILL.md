@@ -38,10 +38,13 @@ nested call can use only actions permitted by its direct parent Soul.
 
 An Akuma name selects a Markdown file at `~/.keiyaku/akuma/<name>.md`; pass
 the filename without `.md` as `<akuma-name>`. Its frontmatter selects the
-provider and may declare `model`, `effort`, `readonly`, `network`, and
-`description`; the body is an optional system prompt, and an empty body keeps
-the harness default. If none grants the permissions and stance the work needs,
-add a new Akuma name. A born Akuma keeps its selected defaults for its lifetime.
+provider and may declare `model`, `effort`, `readonly`, `network`, `sandbox`,
+and `description`; the body is an optional system prompt, and an empty body
+keeps the harness default. `sandbox: full-access` asks a supporting provider to
+disable its native command sandbox for future births; it does not grant extra
+operating-system permissions and cannot be combined with `readonly: true` or
+`network: disabled`. A born Akuma keeps its selected defaults for its lifetime.
+If none grants the permissions and stance the work needs, add a new Akuma name.
 
 ## Commission And Steer
 

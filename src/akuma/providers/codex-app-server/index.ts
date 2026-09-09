@@ -71,6 +71,7 @@ function sandbox(
   options: ProviderOptions,
   requests?: Readonly<{ dir: string }>,
 ): Readonly<Record<string, unknown>> {
+  if (options.sandbox === "full-access") return { type: "dangerFullAccess" };
   if (options.readonly === true) {
     return { type: "readOnly", networkAccess: options.network === "enabled" };
   }
@@ -268,6 +269,12 @@ export function createCodexAppServerProvider(input: string | ProviderExecution =
     typeof input === "string" ? { name: "codex-app-server", kind: "codex-app-server", executable: input } : input;
   return {
     admitOptions(options) {
+      if (options.sandbox === "full-access" && options.readonly === true) {
+        return { kind: "refused", diagnostic: "Codex full-access sandbox cannot combine with readonly" };
+      }
+      if (options.sandbox === "full-access" && options.network === "disabled") {
+        return { kind: "refused", diagnostic: "Codex full-access sandbox cannot combine with disabled network" };
+      }
       return {
         kind: "admitted",
         options: Object.freeze({ ...options }),

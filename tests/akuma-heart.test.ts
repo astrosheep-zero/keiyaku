@@ -1701,6 +1701,11 @@ test("soul codec decodes canonically, deep-freezes, and round-trips", () => {
     options: { ...historical.options, systemPromptMode: "replace" },
   };
   assert.deepEqual(decodeSoul(JSON.parse(encodeSoul(withMode))), withMode);
+  const withFullAccess: Soul = {
+    ...historical,
+    options: { ...historical.options, sandbox: "full-access" },
+  };
+  assert.deepEqual(decodeSoul(JSON.parse(encodeSoul(withFullAccess))), withFullAccess);
 });
 
 function afterSnapshotQuery(after: () => void): () => void {

@@ -2386,6 +2386,92 @@ test("Codex maps provider-neutral schema JSON to turn/start outputSchema", async
   }
 });
 
+test("only Codex admits the full-access sandbox option", () => {
+  const fullAccess = { sandbox: "full-access" as const };
+  const unsupported = [
+    createAcpProvider({
+      name: "acp",
+      kind: "acp",
+      executable: "agent",
+      config: { argvBefore: [], argvAfter: [] },
+    }),
+    createClaudeProvider(async () => {
+      throw new Error("not started");
+    }),
+    createGrokBuildProvider({ name: "grok-build", kind: "grok-build", executable: "grok" }),
+    createOpencodeProvider(),
+    createPiProvider({ name: "pi", kind: "pi" }),
+  ];
+  for (const provider of unsupported) assert.equal(provider.admitOptions(fullAccess).kind, "refused");
+
+  const codex = createCodexAppServerProvider();
+  assert.deepEqual(codex.admitOptions(fullAccess), { kind: "admitted", options: fullAccess });
+  assert.deepEqual(codex.admitOptions({ ...fullAccess, readonly: true }).kind, "refused");
+  assert.deepEqual(codex.admitOptions({ ...fullAccess, network: "disabled" }).kind, "refused");
+});
+
+test("Codex full-access sandbox emits dangerFullAccess for fresh and resumed turns", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-full-access-"));
+  try {
+    const fake = fakeCodex(root, "complete");
+    const provider = createCodexAppServerProvider(fake.executable);
+    const fullAccess = { sandbox: "full-access" as const };
+    const fresh = await provider.start({
+      ...DRIVE_DEFAULTS,
+      body: "build",
+      launchTells: [],
+      cwd: root,
+      options: fullAccess,
+      session: { kind: "fresh" },
+    }).result;
+    await fresh.completion;
+    const resumed = await provider.resume!({
+      ...DRIVE_DEFAULTS,
+      body: "continue",
+      launchTells: [],
+      cwd: root,
+      options: fullAccess,
+      session: { kind: "resume", coordinate: { sessionId: "thread-resumed" } },
+    }).result;
+    await resumed.completion;
+    const readonly = await provider.start({
+      ...DRIVE_DEFAULTS,
+      body: "inspect",
+      launchTells: [],
+      cwd: root,
+      options: { readonly: true },
+      session: { kind: "fresh" },
+    }).result;
+    await readonly.completion;
+    const omitted = await provider.start({
+      ...DRIVE_DEFAULTS,
+      body: "write",
+      launchTells: [],
+      cwd: root,
+      options: {},
+      session: { kind: "fresh" },
+    }).result;
+    await omitted.completion;
+    const turns = fake.requests()
+      .filter((request) => request.method === "turn/start")
+      .map((request) => request.params as Record<string, unknown>);
+    assert.deepEqual(turns.map((turn) => turn.sandboxPolicy), [
+      { type: "dangerFullAccess" },
+      { type: "dangerFullAccess" },
+      { type: "readOnly", networkAccess: false },
+      {
+        type: "workspaceWrite",
+        writableRoots: [root, "/tmp/akuma-test-requests"],
+        networkAccess: false,
+        excludeTmpdirEnvVar: false,
+        excludeSlashTmp: false,
+      },
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("Codex maps observations without leaking output or unknown payloads", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-observations-"));
   try {

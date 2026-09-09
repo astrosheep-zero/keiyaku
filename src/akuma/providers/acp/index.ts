@@ -7,6 +7,9 @@ import { startAcpSession, type AcpDependencies, type AcpStartInput } from "./cor
 export { decodeAcpConfig, type AcpExecutionConfig } from "./config.js";
 
 function optionAdmission(options: ProviderOptions, config: AcpExecutionConfig): ProviderOptionAdmission {
+  if (options.sandbox !== undefined) {
+    return { kind: "refused", diagnostic: "ACP provider does not support the sandbox option" };
+  }
   if (options.network !== undefined) {
     return { kind: "refused", diagnostic: "ACP provider does not support the network option" };
   }

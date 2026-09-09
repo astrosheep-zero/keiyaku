@@ -5,6 +5,7 @@ export type ProviderOptions = Readonly<{
   effort?: string;
   readonly?: true;
   network?: "disabled" | "enabled";
+  sandbox?: "full-access";
   systemPrompt?: string;
   systemPromptMode?: SystemPromptMode;
 }>;
@@ -59,6 +60,10 @@ export function decodeProviderOptions(value: unknown): ProviderOptions {
   if (network !== undefined && network !== "disabled" && network !== "enabled") {
     throw new TypeError("provider option network must be disabled, enabled");
   }
+  const sandbox = options.sandbox;
+  if (sandbox !== undefined && sandbox !== "full-access") {
+    throw new TypeError("provider option sandbox must be full-access");
+  }
   const systemPrompt = optionText(options, "systemPrompt", "allow");
   const systemPromptMode = options.systemPromptMode;
   if (systemPromptMode !== undefined) {
@@ -74,6 +79,7 @@ export function decodeProviderOptions(value: unknown): ProviderOptions {
     ...(effort === undefined ? {} : { effort }),
     ...(options.readonly === undefined ? {} : { readonly: true as const }),
     ...(network === undefined ? {} : { network }),
+    ...(sandbox === undefined ? {} : { sandbox }),
     ...(systemPrompt === undefined ? {} : { systemPrompt }),
     ...(systemPromptMode === undefined ? {} : { systemPromptMode }),
   });

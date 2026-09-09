@@ -444,6 +444,8 @@ test("Archetype systemPromptMode defaults to append and rejects invalid definiti
 
 test("provider option decoding preserves historical prompts and rejects invalid modes", () => {
   assert.deepEqual(decodeProviderOptions({ systemPrompt: "Work.\n" }), { systemPrompt: "Work.\n" });
+  assert.deepEqual(decodeProviderOptions({ sandbox: "full-access" }), { sandbox: "full-access" });
+  assert.throws(() => decodeProviderOptions({ sandbox: "workspace-write" }), /sandbox must be full-access/u);
   assert.deepEqual(decodeProviderOptions({ systemPrompt: "Work.\n", systemPromptMode: "replace" }), {
     systemPrompt: "Work.\n",
     systemPromptMode: "replace",
@@ -453,6 +455,41 @@ test("provider option decoding preserves historical prompts and rejects invalid 
     () => decodeProviderOptions({ systemPrompt: "Work.\n", systemPromptMode: "merge" }),
     /systemPromptMode must be append, replace/u,
   );
+});
+
+test("Archetype full-access sandbox inherits and refuses conflicting restraints before admission", async () => {
+  const value = fixture();
+  try {
+    writeFileSync(
+      join(value.home, "akuma", "base.md"),
+      "---\nprovider: codex-app-server\nsandbox: full-access\n---\n",
+    );
+    writeFileSync(join(value.home, "akuma", "child.md"), "---\nbase: base\n---\n");
+    assert.deepEqual((await loadNamed(value, "child")).options, { sandbox: "full-access" });
+    await assert.rejects(
+      loadArchetype({
+        name: "child",
+        home: value.home,
+        readonly: true,
+        settings: await settings({ root: value.project, home: value.home }),
+      }),
+      /full-access sandbox cannot combine with readonly/u,
+    );
+    writeFileSync(
+      join(value.home, "akuma", "base.md"),
+      "---\nprovider: codex-app-server\nsandbox: full-access\nreadonly: true\n---\n",
+    );
+    await assert.rejects(loadNamed(value, "child"), /full-access sandbox cannot combine with readonly/u);
+    writeFileSync(
+      join(value.home, "akuma", "base.md"),
+      "---\nprovider: codex-app-server\nsandbox: full-access\nnetwork: disabled\n---\n",
+    );
+    await assert.rejects(loadNamed(value, "child"), /full-access sandbox cannot combine with disabled network/u);
+    writeFileSync(join(value.home, "akuma", "child.md"), "---\nprovider: codex-app-server\nsandbox: unsafe\n---\n");
+    await assert.rejects(loadNamed(value, "child"), /sandbox must be one of full-access/u);
+  } finally {
+    value.close();
+  }
 });
 
 test("generic ACP prompt argument mode matches only the configured mapping", async () => {

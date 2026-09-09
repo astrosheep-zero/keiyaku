@@ -4,7 +4,7 @@ import { refuseRequest, reserveRequest, type Soul } from "./heart/index.js";
 import { archetypeName, parseAkuId, type AkuId, type AkumaPaths } from "./identity.js";
 import { publishAkuma } from "./publication.js";
 import { decodeProviderOptions, decodeReadonlyRestraint } from "./provider-recipe.js";
-import { decodeProviderExecution } from "./providers/index.js";
+import { decodeProviderExecution, resolveProviderExecution } from "./providers/index.js";
 import { requestBodyCommand } from "./request-rendezvous.js";
 import {
   eraseRequestCommand,
@@ -120,12 +120,18 @@ async function executeAkumaCall(
     await refuseRequest(paths, facts.id, `request world ${requestWorld} does not match ${world}`);
     throw new Error(`request world ${requestWorld} does not match ${world}`);
   }
+  const selected = await resolveProviderExecution(request.recipe.provider);
+  const admission = selected.adapter.admitOptions(request.recipe.options);
+  if (admission.kind === "refused") {
+    await refuseRequest(paths, facts.id, admission.diagnostic);
+    throw new Error(admission.diagnostic);
+  }
   const recipe = {
     ...(request.recipe.description === undefined ? {} : { description: request.recipe.description }),
     allowed: clipAllowedActions(request.recipe.allowed, parent.allowed),
-    provider: request.recipe.provider,
-    options: request.recipe.options,
-    ...(request.recipe.readonly === undefined ? {} : { readonly: request.recipe.readonly }),
+    provider: selected.execution,
+    options: admission.options,
+    ...(admission.readonly === undefined ? {} : { readonly: admission.readonly }),
   };
   const published = await publishAkuma({
     worldPath: world,

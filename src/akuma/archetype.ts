@@ -198,6 +198,7 @@ type ArchetypeFields = Readonly<{
   effort?: string;
   readonly?: true;
   network?: "disabled" | "enabled";
+  sandbox?: "full-access";
   description?: string;
   allowed?: AllowedActions;
   allowedPresent: boolean;
@@ -213,6 +214,7 @@ function decodeArchetypeFields(values: Readonly<Record<string, unknown>>): Arche
   const effort = archetypeField(values, "effort");
   const readonly = archetypeReadonly(values);
   const network = archetypeEnum(values, "network", ["disabled", "enabled"] as const);
+  const sandbox = archetypeEnum(values, "sandbox", ["full-access"] as const);
   const description = archetypeField(values, "description");
   const allowedPresent = "allowed" in values;
   const allowed = allowedPresent ? effectiveAllowedActions(values.allowed) : undefined;
@@ -224,6 +226,7 @@ function decodeArchetypeFields(values: Readonly<Record<string, unknown>>): Arche
     ...(effort === undefined ? {} : { effort }),
     ...(readonly === undefined ? {} : { readonly }),
     ...(network === undefined ? {} : { network }),
+    ...(sandbox === undefined ? {} : { sandbox }),
     ...(description === undefined ? {} : { description }),
     ...(allowed === undefined ? {} : { allowed }),
     allowedPresent,
@@ -248,6 +251,7 @@ function decodeArchetype(name: string, path: string, markdown: string): LocalArc
       ...(fields.model === undefined ? {} : { model: fields.model }),
       ...(fields.effort === undefined ? {} : { effort: fields.effort }),
       ...(fields.network === undefined ? {} : { network: fields.network }),
+      ...(fields.sandbox === undefined ? {} : { sandbox: fields.sandbox }),
       ...(systemPrompt.length === 0
         ? {}
         : {

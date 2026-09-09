@@ -18,7 +18,7 @@ import {
   reserveRequest,
   type Soul,
 } from "../src/akuma/heart/index.js";
-import { allocateAkumaDirectory, pathsForAkuId, type AkuId } from "../src/akuma/identity.js";
+import { akumaRunRoot, allocateAkumaDirectory, pathsForAkuId, type AkuId } from "../src/akuma/identity.js";
 import { publishAkuma } from "../src/akuma/publication.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { akumaCallRequestCommands, requestForwardedAkumaCall as requestBodyCall } from "../src/akuma/call-request.js";
@@ -674,6 +674,93 @@ test("Heart clips nested allowed at each direct parent and cannot regain removed
     else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;
+    value.close();
+  }
+});
+
+test("nested akuma.call admits provider options before child publication", async () => {
+  const value = await fixture(["akuma.call"]);
+  let spawns = 0;
+  const pump = await BodyRequestPump.open({
+    paths: value.parent.paths,
+    allowed: value.soul.allowed,
+    bodySequence: 1,
+    now: () => "2026-08-09T00:00:01.000Z",
+    commands: akumaCallRequestCommands({
+      world: value.root,
+      paths: value.parent.paths,
+      parent: value.soul,
+      spawn: async (launch) => {
+        spawns += 1;
+        const leash = (await HeldAkumaLeash.try(launch.paths))!;
+        await leash.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-09T00:00:02.000Z" });
+        leash.release();
+      },
+    }),
+    signal: new AbortController().signal,
+  });
+  const before = readdirSync(akumaRunRoot(value.root)).sort();
+  const refuse = async (
+    id: string,
+    recipe: Parameters<typeof requestBodyCall>[0]["recipe"],
+    diagnostic: RegExp,
+  ): Promise<void> => {
+    await assert.rejects(
+      requestBodyCall({ directory: pump.directory, id, world: value.root, archetype: "worker", recipe }),
+      (error: unknown) =>
+        error instanceof AkumaBodyRequestError && error.outcome === "refused" && diagnostic.test(error.diagnostic),
+    );
+    assert.equal((await readRequest(value.parent.paths, id))?.state, "refused");
+    assert.equal(spawns, 0);
+    assert.deepEqual(readdirSync(akumaRunRoot(value.root)).sort(), before);
+  };
+  try {
+    await refuse(
+      "00000000-0000-4000-8000-000000000101",
+      {
+        provider: { name: "codex", kind: "codex-app-server" },
+        options: { sandbox: "full-access", readonly: true },
+        readonly: { enforcement: "native" },
+        allowed: ["akuma.call"],
+      },
+      /full-access sandbox cannot combine with readonly/u,
+    );
+    await refuse(
+      "00000000-0000-4000-8000-000000000102",
+      {
+        provider: { name: "codex", kind: "codex-app-server" },
+        options: { sandbox: "full-access", network: "disabled" },
+        allowed: ["akuma.call"],
+      },
+      /full-access sandbox cannot combine with disabled network/u,
+    );
+    await refuse(
+      "00000000-0000-4000-8000-000000000103",
+      {
+        provider: { name: "claude", kind: "claude-agent-sdk" },
+        options: { sandbox: "full-access" },
+        allowed: ["akuma.call"],
+      },
+      /does not support the sandbox option/u,
+    );
+    const child = await requestBodyCall({
+      directory: pump.directory,
+      id: "00000000-0000-4000-8000-000000000104",
+      world: value.root,
+      archetype: "worker",
+      recipe: {
+        provider: { name: "codex", kind: "codex-app-server" },
+        options: { sandbox: "full-access" },
+        allowed: ["akuma.call", "task.add"],
+      },
+    });
+    assert.equal(spawns, 1);
+    const soul = await readSoul(pathsForAkuId(value.root, child));
+    assert.deepEqual(soul?.options, { sandbox: "full-access" });
+    assert.deepEqual(soul?.allowed, ["akuma.call"]);
+  } finally {
+    await pump.close();
+    value.leash.release();
     value.close();
   }
 });

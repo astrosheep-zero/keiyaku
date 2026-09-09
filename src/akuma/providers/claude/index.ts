@@ -66,6 +66,9 @@ class ReceiptChannel implements AsyncIterable<TellReceipt> {
 }
 
 function admitClaudeOptions(options: ProviderOptions): ReturnType<ProviderAdapter["admitOptions"]> {
+  if (options.sandbox !== undefined) {
+    return { kind: "refused", diagnostic: "Claude provider does not support the sandbox option" };
+  }
   if (options.network !== undefined) {
     return { kind: "refused", diagnostic: "Claude provider does not support the network option" };
   }

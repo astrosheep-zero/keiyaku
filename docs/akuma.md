@@ -47,6 +47,13 @@ adds a frozen birth restriction; it can never be loosened or toggled later.
 Later Archetype or Settings edits affect only future births. A missing native
 resume promise never authorizes reconstructing one.
 
+An Archetype may explicitly select full host access for a future birth when its
+provider admits that execution choice. It disables only native command
+sandboxing, never operating-system permissions. Full host access and a readonly
+restriction or disabled network are contradictory and refuse before allocation;
+an inherited or caller-added readonly restriction has the same force. The
+selected choice remains frozen through the Akuma's sessions and descendants.
+
 Archetype definitions may come from both the current project and Home. A
 project definition shadows a Home definition with the same canonical name;
 Home remains the fallback when the project has no definition. This precedence

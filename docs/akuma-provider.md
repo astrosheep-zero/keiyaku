@@ -50,6 +50,13 @@ honest admitted gap. Prompt and structured-answer changes apply only when the
 provider begins a new Turn, never as live-tell mutation. Historical persisted
 options retain their former interpretation and are never rewritten.
 
+Explicit full host access is a provider-admitted, frozen execution choice. It
+removes only the provider's command sandbox, never operating-system permission
+boundaries. It cannot coexist with readonly restraint or an explicitly disabled
+network; those contradictory requests refuse before native execution. An
+adapter that cannot realize it refuses the explicit choice rather than ignoring
+or weakening it.
+
 Each drive receives the one Body Request channel as provider transport setup.
 This does not alter Library routing or permit recursive service. New provider
 behavior must fit an existing provider-neutral capability or receive a new owner

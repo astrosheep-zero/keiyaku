@@ -39,6 +39,8 @@ function diagnostic(error: unknown): string {
 }
 
 function admitPiOptions(options: ProviderOptions): ReturnType<ProviderAdapter["admitOptions"]> {
+  if (options.sandbox !== undefined)
+    return { kind: "refused", diagnostic: "Pi provider does not support the sandbox option" };
   if (options.network !== undefined)
     return { kind: "refused", diagnostic: "Pi provider does not support the network option" };
   if (options.model !== undefined && !MODEL_PATTERN.test(options.model)) {
