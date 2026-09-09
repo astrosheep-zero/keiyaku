@@ -225,6 +225,27 @@ test("ordinary placement follows the target checkout in another worktree", async
   assert.equal(repository.run(["-C", checkout, "status", "--porcelain"]), "");
 });
 
+test("operational precheck failure preserves the unclaimed target and foreign index lock", async () => {
+  const { repository, contract } = await ordinaryCandidateFixture();
+  const predecessor = repository.run(["rev-parse", "refs/heads/main"]);
+  const index = readFileSync(resolve(repository.path, ".git", "index"));
+  const lock = resolve(repository.path, ".git", "index.lock");
+  writeFileSync(lock, "foreign writer\n");
+  try {
+    const delivered = acceptedDelivery(await contract.deliver());
+    assert.equal(delivered.value.placement && "failure" in delivered.value.placement
+      ? delivered.value.placement.failure : undefined, "target-placement-failed");
+    assert.equal(repository.run(["rev-parse", "refs/heads/main"]), predecessor);
+    assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "base\n");
+    assert.deepEqual(readFileSync(resolve(repository.path, ".git", "index")), index);
+    assert.equal(readFileSync(lock, "utf8"), "foreign writer\n");
+    const observed = await observeContract(await cachedRepositoryAt(repository.path), (await contract.state()).id);
+    assert.equal(observed.state?.terminal, null);
+  } finally {
+    rmSync(lock);
+  }
+});
+
 test("conflicting target bytes refuse placement before claimed or target movement", async () => {
   const { repository, contract } = await ordinaryCandidateFixture();
   const predecessor = repository.run(["rev-parse", "refs/heads/main"]);
@@ -577,26 +598,4 @@ test("reconcile does not guess after the user changes an interrupted target chec
   assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "changed after publication\n");
   assert.ok(reconciled.lag.some((lag) => lag.kind === "target-checkout-retained"));
   assert.ok(!reconciled.effects.some((effect) => effect.kind === "target-checkout" && effect.action === "recovered"));
-});
-
-
-test("operational precheck failure preserves the unclaimed target and foreign index lock", async () => {
-  const { repository, contract } = await ordinaryCandidateFixture();
-  const predecessor = repository.run(["rev-parse", "refs/heads/main"]);
-  const index = readFileSync(resolve(repository.path, ".git", "index"));
-  const lock = resolve(repository.path, ".git", "index.lock");
-  writeFileSync(lock, "foreign writer\n");
-  try {
-    const delivered = acceptedDelivery(await contract.deliver());
-    assert.equal(delivered.value.placement && "failure" in delivered.value.placement
-      ? delivered.value.placement.failure : undefined, "target-placement-failed");
-    assert.equal(repository.run(["rev-parse", "refs/heads/main"]), predecessor);
-    assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "base\n");
-    assert.deepEqual(readFileSync(resolve(repository.path, ".git", "index")), index);
-    assert.equal(readFileSync(lock, "utf8"), "foreign writer\n");
-    const observed = await observeContract(await cachedRepositoryAt(repository.path), (await contract.state()).id);
-    assert.equal(observed.state?.terminal, null);
-  } finally {
-    rmSync(lock);
-  }
 });
