@@ -170,7 +170,8 @@ export function fleetRequestProtocol(
     decodeReference: (reference) => decodeFleetService(action, reference),
     isPermitted: (allowed) =>
       action === "akuma.wait" ||
-      ((action === "akuma.tell" || action === "akuma.tell-answer") && allowed.includes("akuma.tell")),
+      ((action === "akuma.tell" || action === "akuma.tell-answer") && allowed.includes("akuma.tell")) ||
+      (action === "akuma.kill" && allowed.includes("akuma.kill")),
   };
 }
 

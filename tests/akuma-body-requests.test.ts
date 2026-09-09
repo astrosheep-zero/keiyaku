@@ -215,6 +215,8 @@ test("fleet request permissions stay separated by action", () => {
   assert.equal(fleetRequestProtocol("akuma.wait").isPermitted([]), true);
   assert.equal(fleetRequestProtocol("akuma.tell").isPermitted(["akuma.tell"]), true);
   assert.equal(fleetRequestProtocol("akuma.tell-answer").isPermitted(["akuma.tell"]), true);
+  assert.equal(fleetRequestProtocol("akuma.kill").isPermitted(["akuma.kill"]), true);
+  assert.equal(fleetRequestProtocol("akuma.kill").isPermitted([]), false);
   assert.equal(fleetRequestProtocol("akuma.kill").isPermitted(["akuma.tell"]), false);
 });
 
@@ -1542,6 +1544,39 @@ test("a forwarded Tell writes its transport and the direct parent enters the tel
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("an allowed forwarded kill reaches its direct parent owner once", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-kill-")));
+  const parent = await born(root, "parent", "11111111", ["akuma.kill"]);
+  const target = "aku/worker/22222222" as AkuId;
+  const result = { results: [{ id: target, evidence: "already-stopped" as const }] };
+  let calls = 0;
+  const pump = await openFleetPump(parent, {
+    ...noDeliver(),
+    wait: async () => {
+      throw new Error("unexpected wait");
+    },
+    tell: async () => {
+      throw new Error("unexpected tell");
+    },
+    kill: async (input) => {
+      calls += 1;
+      assert.deepEqual(input.targets, [target]);
+      return result;
+    },
+  });
+  try {
+    assert.deepEqual(
+      await requestBodyKill({ directory: pump.directory, id: randomUUID(), targets: [target] }),
+      { kind: "returned", result },
+    );
+    assert.equal(calls, 1);
+  } finally {
+    await pump.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("forwarded materialization retains and replays its handoff evidence", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-deliver-materialized-")));
   const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
