@@ -69,7 +69,7 @@ export async function settleAkumaKill(
   signal?: AbortSignal,
   retainLeash = false,
 ): Promise<Readonly<{ evidence: KillEvidence; leash?: HeldAkumaLeash }>> {
-  const request = await requestStop(paths, new Date().toISOString());
+  const request = await requestStop(paths, new Date().toISOString(), signal);
   if (request.kind !== "requested") {
     if (!retainLeash) return { evidence: request.kind };
     const leash = await acquireLeash(paths, signal === undefined ? {} : { signal });
@@ -213,7 +213,7 @@ export class AkumaHandle {
     body: string,
     options: Readonly<{ tellId?: string; schemaJson?: string; signal?: AbortSignal; runtime?: TellWakeRuntime }> = {},
   ): Promise<InterruptReceipt> {
-    const request = await requestPause(this.paths, new Date().toISOString());
+    const request = await requestPause(this.paths, new Date().toISOString(), options.signal);
     if (request.kind === "not-born") {
       throw new AkumaNotBornError(this.id);
     }
