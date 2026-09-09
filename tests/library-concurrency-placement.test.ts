@@ -24,18 +24,48 @@ function acceptedDelivery(result: Awaited<ReturnType<KeiyakuHandle["deliver"]>>)
   return result;
 }
 
-function crossProcessAmend(input: Readonly<{ repository: string; contractId: string; markdown: string }>) {
+function crossProcessAmend(
+  input: Readonly<{
+    repository: string;
+    contractId: string;
+    markdown: string;
+    source?: unknown;
+    waitForRelease?: boolean;
+  }>,
+) {
   const source = [
     "const { Keiyaku, Repo } = await import(process.env.KEIYAKU_MODULE);",
     "const { repositoryAt } = await import(process.env.KEIYAKU_REPOSITORY_MODULE);",
     "const { privateStatePublicationSeatPath } = await import(process.env.KEIYAKU_SEAT_MODULE);",
     "const { tryAcquireSqliteTransactionLock } = await import(process.env.KEIYAKU_LOCK_MODULE);",
-    "const capability = await repositoryAt(process.env.KEIYAKU_REPOSITORY);",
+    "const { amendOperation } = await import(process.env.KEIYAKU_AMEND_MODULE);",
+    "const { withGitDecodeChannel } = await import(process.env.KEIYAKU_CHANNEL_MODULE);",
+    "const { applyAmendDocument } = await import(process.env.KEIYAKU_BODY_AMEND_MODULE);",
+    "const { decodeContractDocument } = await import(process.env.KEIYAKU_BODY_DECODE_MODULE);",
+    "const { contractTerms, documentDerivation } = await import(process.env.KEIYAKU_INPUT_MODULE);",
+    "const capability = { ...(await repositoryAt(process.env.KEIYAKU_REPOSITORY)), onPrivateStateSeatContention: () => process.stdout.write('contended\\n') };",
     "const probe = await tryAcquireSqliteTransactionLock({ path: privateStatePublicationSeatPath(capability), mode: 'immediate' });",
     "if (probe !== null) { probe.close(); throw new Error('shared seat was not held'); }",
-    "process.stdout.write('ready\\n');",
-    "const contract = await Keiyaku.of({ repo: await Repo.at({ path: process.env.KEIYAKU_REPOSITORY }), id: process.env.KEIYAKU_CONTRACT });",
-    "try { await contract.amend({ markdown: process.env.KEIYAKU_MARKDOWN }); process.stdout.write('accepted\\n'); } catch (error) { process.stdout.write(`failed:${error.reason?.kind ?? error.refusal?.kind ?? error.name}\\n`); }",
+    "const contractId = process.env.KEIYAKU_CONTRACT;",
+    "const sourceTerms = process.env.KEIYAKU_SOURCE === undefined ? undefined : JSON.parse(process.env.KEIYAKU_SOURCE);",
+    "const intent = sourceTerms === undefined ? undefined : (() => {",
+    "  const amended = applyAmendDocument(process.env.KEIYAKU_MARKDOWN, decodeContractDocument(sourceTerms.document.bytes));",
+    "  const document = decodeContractDocument(amended.document);",
+    "  const terms = contractTerms(document, sourceTerms.gates, sourceTerms.after);",
+    "  return { source: sourceTerms, deriveAmendment: () => ({ terms, verification: documentDerivation(document, terms.gates, contractId).verification }) };",
+    "})();",
+    "process.stdout.write(`ready${intent === undefined ? '' : `:${intent.source.document.key}`}\\n`);",
+    "if (process.env.KEIYAKU_WAIT_FOR_RELEASE === '1') await new Promise((resolve) => process.stdin.once('data', resolve));",
+    "try {",
+    "  if (intent === undefined) {",
+    "    const contract = await Keiyaku.of({ repo: await Repo.at({ path: process.env.KEIYAKU_REPOSITORY }), id: contractId });",
+    "    await contract.amend({ markdown: process.env.KEIYAKU_MARKDOWN });",
+    "    process.stdout.write('accepted\\n');",
+    "  } else {",
+    "    const outcome = await withGitDecodeChannel(capability, (channel) => amendOperation({ scope: capability, channel, contractId, ...intent }));",
+    "    process.stdout.write(outcome.kind === 'accepted' ? 'accepted\\n' : `failed:${outcome.kind === 'refused' ? outcome.refusal.kind : outcome.reason.kind}\\n`);",
+    "  }",
+    "} catch (error) { process.stdout.write(`failed:${error.reason?.kind ?? error.refusal?.kind ?? error.name}\\n`); }",
   ].join("\n");
   const child = spawn(
     process.execPath,
@@ -47,36 +77,89 @@ function crossProcessAmend(input: Readonly<{ repository: string; contractId: str
         KEIYAKU_REPOSITORY_MODULE: new URL("../src/git/repository.js", import.meta.url).href,
         KEIYAKU_SEAT_MODULE: new URL("../src/git/private-state-seat.js", import.meta.url).href,
         KEIYAKU_LOCK_MODULE: new URL("../src/coordination/sqlite-transaction-lock.js", import.meta.url).href,
+        KEIYAKU_AMEND_MODULE: new URL("../src/protocol/amend.js", import.meta.url).href,
+        KEIYAKU_CHANNEL_MODULE: new URL("../src/git/read-observation.js", import.meta.url).href,
+        KEIYAKU_BODY_AMEND_MODULE: new URL("../src/body/amend.js", import.meta.url).href,
+        KEIYAKU_BODY_DECODE_MODULE: new URL("../src/body/decode.js", import.meta.url).href,
+        KEIYAKU_INPUT_MODULE: new URL("../src/library/input.js", import.meta.url).href,
         KEIYAKU_REPOSITORY: input.repository,
         KEIYAKU_CONTRACT: input.contractId,
         KEIYAKU_MARKDOWN: input.markdown,
+        KEIYAKU_WAIT_FOR_RELEASE: input.waitForRelease === true ? "1" : "0",
+        ...(input.source === undefined ? {} : { KEIYAKU_SOURCE: JSON.stringify(input.source) }),
       },
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [input.waitForRelease === true ? "pipe" : "ignore", "pipe", "pipe"],
     },
   );
-  const ready = new Promise<void>((resolveReady, rejectReady) => {
-    child.once("error", rejectReady);
-    child.stdout.once("data", (bytes) =>
-      bytes.toString("utf8").includes("ready") ? resolveReady() : rejectReady(new Error("child did not become ready")),
-    );
+  if (child.stdout === null || child.stderr === null) throw new Error("cross-process amend is missing output streams");
+  const stdout = child.stdout;
+  const stderr = child.stderr;
+  let resolveReady: (key: string) => void;
+  let rejectReady: (error: Error) => void;
+  const ready = new Promise<string>((resolve, reject) => {
+    resolveReady = resolve;
+    rejectReady = reject;
   });
-  const completed = new Promise<string>((resolveCompleted, rejectCompleted) => {
-    let diagnostic = "";
-    let output = "";
-    child.stdout.on("data", (bytes) => {
-      output += bytes.toString("utf8");
-    });
-    child.stderr.on("data", (bytes) => {
-      diagnostic += bytes.toString("utf8");
-    });
-    child.once("error", rejectCompleted);
-    child.once("exit", (code) =>
-      code === 0
-        ? resolveCompleted(output)
-        : rejectCompleted(new Error(`cross-process amend exited ${code}: ${diagnostic}`)),
-    );
+  let resolveContended: () => void;
+  const contended = new Promise<void>((resolve) => {
+    resolveContended = resolve;
   });
-  return { ready, completed };
+  let resolveCompleted: (output: string) => void;
+  let rejectCompleted: (error: Error) => void;
+  const completed = new Promise<string>((resolve, reject) => {
+    resolveCompleted = resolve;
+    rejectCompleted = reject;
+  });
+  let diagnostic = "";
+  let output = "";
+  let lines = "";
+  let becameReady = false;
+  let becameContended = false;
+  stdout.on("data", (bytes) => {
+    const text = bytes.toString("utf8");
+    output += text;
+    lines += text;
+    for (;;) {
+      const newline = lines.indexOf("\n");
+      if (newline < 0) break;
+      const line = lines.slice(0, newline);
+      lines = lines.slice(newline + 1);
+      const match = /^ready(?::(.+))?$/.exec(line);
+      if (match !== null && !becameReady) {
+        becameReady = true;
+        resolveReady(match[1] ?? "");
+      }
+      if (line === "contended" && !becameContended) {
+        becameContended = true;
+        resolveContended();
+      }
+    }
+  });
+  stderr.on("data", (bytes) => {
+    diagnostic += bytes.toString("utf8");
+  });
+  child.once("error", (error) => {
+    rejectReady(error);
+    rejectCompleted(error);
+  });
+  child.once("exit", (code) => {
+    if (!becameReady) rejectReady(new Error("child did not become ready"));
+    code === 0
+      ? resolveCompleted(output)
+      : rejectCompleted(new Error(`cross-process amend exited ${code}: ${diagnostic}`));
+  });
+  let released = false;
+  return {
+    ready,
+    contended,
+    completed,
+    release: () => {
+      if (released) return;
+      released = true;
+      if (child.stdin === null) throw new Error("child does not have a release barrier");
+      child.stdin.end("release\n");
+    },
+  };
 }
 
 test("more independent cross-process mutations than the attempt bound serialize at the private root", async () => {
@@ -170,6 +253,7 @@ test("public amend returns the recovered journal head after unknown recovery", a
 test("same-Contract cross-process amends decide from the queued fresh state", async () => {
   const repository = repositoryWithMain();
   const contract = await bind(repository);
+  const source = (await contract.state()).terms;
   const capability = await cachedRepositoryAt(repository.path);
   const held = await acquireSqliteTransactionLock({ path: privateStatePublicationSeatPath(capability), mode: "immediate" });
   const workers = [
@@ -177,15 +261,23 @@ test("same-Contract cross-process amends decide from the queued fresh state", as
       repository: repository.path,
       contractId: (await contract.state()).id,
       markdown: "## Replace: Context\nfirst source terms\n",
+      source,
     }),
     crossProcessAmend({
       repository: repository.path,
       contractId: (await contract.state()).id,
       markdown: "## Replace: Objective\nsecond source terms\n",
+      source,
     }),
   ];
   try {
-    await Promise.all(workers.map(({ ready }) => ready));
+    assert.deepEqual(await Promise.all(workers.map(({ ready }) => ready)), [source.document.key, source.document.key]);
+    await Promise.race([
+      Promise.any(workers.map(({ contended }) => contended)),
+      Promise.all(workers.map(({ completed }) => completed)).then(() => {
+        throw new Error("cross-process amends completed without private-state seat contention");
+      }),
+    ]);
   } finally {
     held.close();
   }
@@ -194,6 +286,46 @@ test("same-Contract cross-process amends decide from the queued fresh state", as
   assert.equal(outcomes.filter((outcome) => outcome.includes("failed:terms-moved")).length, 1);
   const body = decodeContractDocument((await contract.state()).terms.document.bytes);
   assert.ok(body.context.trim() === "first source terms" || body.objective.trim() === "second source terms");
+
+  const delayed = await bind(repository);
+  const delayedSource = (await delayed.state()).terms;
+  const delayedHeld = await acquireSqliteTransactionLock({ path: privateStatePublicationSeatPath(capability), mode: "immediate" });
+  const delayedWorkers = [
+    crossProcessAmend({
+      repository: repository.path,
+      contractId: (await delayed.state()).id,
+      markdown: "## Replace: Context\nfirst delayed source terms\n",
+      source: delayedSource,
+      waitForRelease: true,
+    }),
+    crossProcessAmend({
+      repository: repository.path,
+      contractId: (await delayed.state()).id,
+      markdown: "## Replace: Objective\nsecond delayed source terms\n",
+      source: delayedSource,
+      waitForRelease: true,
+    }),
+  ];
+  try {
+    try {
+      assert.deepEqual(
+        await Promise.all(delayedWorkers.map(({ ready }) => ready)),
+        [delayedSource.document.key, delayedSource.document.key],
+      );
+    } finally {
+      delayedHeld.close();
+    }
+    delayedWorkers[0]!.release();
+    assert.match(await delayedWorkers[0]!.completed, /accepted/);
+    delayedWorkers[1]!.release();
+    assert.match(await delayedWorkers[1]!.completed, /failed:terms-moved/);
+  } finally {
+    for (const worker of delayedWorkers) worker.release();
+    await Promise.allSettled(delayedWorkers.map(({ completed }) => completed));
+  }
+  const delayedBody = decodeContractDocument((await delayed.state()).terms.document.bytes);
+  assert.equal(delayedBody.context.trim(), "first delayed source terms");
+  assert.notEqual(delayedBody.objective.trim(), "second delayed source terms");
 });
 
 test("a hard publication failure is returned without replaying the operation", async () => {
