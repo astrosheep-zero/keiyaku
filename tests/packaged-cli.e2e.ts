@@ -112,7 +112,7 @@ test("published package installs one keiyaku CLI and runs against a real reposit
   }
   const claudeSdk = join(installed, "node_modules", "@anthropic-ai", "claude-agent-sdk");
   renameSync(claudeSdk, `${claudeSdk}.hidden`);
-  assert.match(installedCommand(["--help"], installed), /^usage: keiyaku /m);
+  assert.match(installedCommand(["--help"], installed), /^usage  keiyaku <command> \[options\]$/mu);
 
   command("git", ["init", "--quiet", "--initial-branch=main", repository], repository);
   command("git", ["config", "user.name", "Keiyaku E2E"], repository);

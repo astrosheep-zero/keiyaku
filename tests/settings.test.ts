@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -551,7 +551,7 @@ test("settings text preserves long paths and opaque provider values at the termi
     );
     const observed = await settings({ root: value.project, home: longHome });
     const text = renderSettingsText(observed, 72);
-    assert.match(text, new RegExp(longPath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+    assert.match(text, new RegExp(realpathSync.native(longPath).replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
     assert.match(text, /LONG_VALUE  "x{100}"/u);
     assert.ok(
       text
