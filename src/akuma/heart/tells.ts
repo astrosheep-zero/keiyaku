@@ -38,9 +38,12 @@ export const tellStateSql = `CASE
   ELSE 'pending'
 END`;
 
-export const pendingTellSequencesSql = `SELECT tells.sequence FROM tells WHERE ${tellStateSql} = 'pending'`;
+// Open decisions retain their exact proof inputs even after a Tell becomes told.
+export const pendingTellSequencesSql = `SELECT tells.sequence FROM tells WHERE ${tellStateSql} = 'pending'
+  UNION SELECT tells.sequence FROM tells JOIN tell_disposition_members m ON m.tell_id = tells.id`;
 export const pendingTellProtectionSql = `SELECT d.turn_sequence FROM tell_deliveries d
-  JOIN tells ON tells.id = d.tell_id WHERE ${tellStateSql} = 'pending'`;
+  JOIN tells ON tells.id = d.tell_id WHERE ${tellStateSql} = 'pending'
+  UNION SELECT d.turn_sequence FROM tell_deliveries d JOIN tell_disposition_members m ON m.tell_id = d.tell_id`;
 
 function tellDeliveries(database: DatabaseSync, id: string): readonly TellDelivery[] {
   const rows = database
@@ -178,14 +181,20 @@ export function pendingTellFacts(database: DatabaseSync): readonly TellFact[] {
   return rows.map((row) => decodeTellRow(database, row));
 }
 
+export function tellDispositionResolved(database: DatabaseSync, bodySequence: number): boolean | null {
+  const row = database
+    .prepare("SELECT resolved_at FROM tell_dispositions WHERE body_sequence = ?")
+    .get(bodySequence) as { resolved_at: string | null } | undefined;
+  return row === undefined ? null : row.resolved_at !== null;
+}
+
 export function openTellDispositionIds(database: DatabaseSync, bodySequence: number): readonly string[] | null {
+  if (tellDispositionResolved(database, bodySequence) !== false) return null;
   const rows = database
-    .prepare(
-      `SELECT tell_id FROM tell_dispositions
-    WHERE body_sequence = ? AND resolved_at IS NULL ORDER BY tell_id`,
-    )
+    .prepare("SELECT tell_id FROM tell_disposition_members WHERE body_sequence = ? ORDER BY tell_id")
     .all(bodySequence) as unknown as readonly { tell_id: string }[];
-  return rows.length === 0 ? null : rows.map((row) => row.tell_id);
+  if (rows.length === 0) throw new HeartAuthorityCorruptionError(`Akuma disposition ${bodySequence} has no members`);
+  return rows.map((row) => row.tell_id);
 }
 
 export function latestOpenTellDisposition(
@@ -208,20 +217,16 @@ export function insertTellDispositionSnapshot(
   tellIds: readonly string[],
   at: string,
 ): void {
-  const insert = database.prepare(
-    `INSERT OR IGNORE INTO tell_dispositions(body_sequence, tell_id, decided_at)
-    VALUES (?, ?, ?)`,
-  );
-  for (const tellId of tellIds) insert.run(bodySequence, tellId, at);
+  database.prepare("INSERT INTO tell_dispositions(body_sequence, decided_at) VALUES (?, ?)").run(bodySequence, at);
+  const insert = database.prepare("INSERT INTO tell_disposition_members(body_sequence, tell_id) VALUES (?, ?)");
+  for (const tellId of tellIds) insert.run(bodySequence, tellId);
 }
 
 export function resolveTellDispositionSnapshot(database: DatabaseSync, bodySequence: number, at: string): void {
   database
-    .prepare(
-      `UPDATE tell_dispositions SET resolved_at = ?
-    WHERE body_sequence = ? AND resolved_at IS NULL`,
-    )
+    .prepare("UPDATE tell_dispositions SET resolved_at = ? WHERE body_sequence = ? AND resolved_at IS NULL")
     .run(at, bodySequence);
+  database.prepare("DELETE FROM tell_disposition_members WHERE body_sequence = ?").run(bodySequence);
 }
 
 function requireDispositionTell(database: DatabaseSync, tellId: string): TellFact {
@@ -232,48 +237,13 @@ function requireDispositionTell(database: DatabaseSync, tellId: string): TellFac
   return tell;
 }
 
-/** Heart proof that a disposition snapshot is held: every frozen Tell-id left pending. */
-export function dispositionSnapshotProven(
-  database: DatabaseSync,
-  disposition: Readonly<{ tellIds: readonly string[] }>,
-): boolean {
-  for (const tellId of disposition.tellIds) {
-    if (requireDispositionTell(database, tellId).state === "pending") return false;
+/** Every frozen Tell must have its own retained delivery or terminal witness. */
+export function dispositionSnapshotProven(database: DatabaseSync, tellIds: readonly string[]): boolean {
+  let proven = true;
+  for (const tellId of tellIds) {
+    if (requireDispositionTell(database, tellId).state === "pending") proven = false;
   }
-  return true;
-}
-
-/**
- * Identify the successor Body that took a disposition snapshot by delivery.
- * Returns that Body sequence when every frozen Tell-id has a delivery on a
- * turn owned by one Body after `bodySequence`; otherwise null. An unqualified
- * newer Body or held leash is not proof. A missing Tell row is Heart corruption.
- */
-export function successorBodyHoldingDisposition(
-  database: DatabaseSync,
-  disposition: Readonly<{ bodySequence: number; tellIds: readonly string[] }>,
-): number | null {
-  let successor: number | null = null;
-  for (const tellId of disposition.tellIds) {
-    const tell = requireDispositionTell(database, tellId);
-    if (tell.state === "pending") return null;
-    const row = database
-      .prepare(
-        `SELECT t.body_sequence AS body_sequence
-      FROM tell_deliveries d
-      JOIN turns t ON t.sequence = d.turn_sequence
-      WHERE d.tell_id = ? AND t.body_sequence > ?
-      ORDER BY t.body_sequence ASC LIMIT 1`,
-      )
-      .get(tellId, disposition.bodySequence) as { body_sequence: number } | undefined;
-    if (row === undefined) {
-      // Terminal witness without successor delivery (e.g. undelivered) is not successor custody.
-      return null;
-    }
-    if (successor === null) successor = row.body_sequence;
-    else if (successor !== row.body_sequence) return null;
-  }
-  return successor;
+  return proven;
 }
 
 export function insertUndeliveredTellReceipts(database: DatabaseSync, tellIds: readonly string[], at: string): void {
