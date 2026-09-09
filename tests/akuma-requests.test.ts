@@ -737,15 +737,54 @@ test("nested akuma.call admits provider options before child publication", async
     await refuse(
       "00000000-0000-4000-8000-000000000103",
       {
-        provider: { name: "claude", kind: "claude-agent-sdk" },
+        provider: {
+          name: "acp",
+          kind: "acp",
+          executable: "agent",
+          config: { argvBefore: [], argvAfter: [] },
+        },
         options: { sandbox: "full-access" },
         allowed: ["akuma.call"],
       },
       /does not support the sandbox option/u,
     );
+    await refuse(
+      "00000000-0000-4000-8000-000000000104",
+      {
+        provider: { name: "claude", kind: "claude-agent-sdk" },
+        options: { sandbox: "full-access", readonly: true },
+        readonly: { enforcement: "native" },
+        allowed: ["akuma.call"],
+      },
+      /full-access sandbox cannot combine with readonly/u,
+    );
+    await refuse(
+      "00000000-0000-4000-8000-000000000105",
+      {
+        provider: { name: "claude", kind: "claude-agent-sdk" },
+        options: { sandbox: "full-access", network: "disabled" },
+        allowed: ["akuma.call"],
+      },
+      /full-access sandbox cannot combine with disabled network/u,
+    );
+    const claudeChild = await requestBodyCall({
+      directory: pump.directory,
+      id: "00000000-0000-4000-8000-000000000106",
+      world: value.root,
+      archetype: "worker",
+      recipe: {
+        provider: { name: "claude", kind: "claude-agent-sdk" },
+        options: { sandbox: "full-access" },
+        allowed: ["akuma.call", "task.add"],
+      },
+    });
+    assert.equal(spawns, 1);
+    const claudeSoul = await readSoul(pathsForAkuId(value.root, claudeChild));
+    assert.deepEqual(claudeSoul?.options, { sandbox: "full-access" });
+    assert.deepEqual(claudeSoul?.allowed, ["akuma.call"]);
     const child = await requestBodyCall({
       directory: pump.directory,
-      id: "00000000-0000-4000-8000-000000000104",
+      id: "00000000-0000-4000-8000-000000000107",
       world: value.root,
       archetype: "worker",
       recipe: {
@@ -754,7 +793,7 @@ test("nested akuma.call admits provider options before child publication", async
         allowed: ["akuma.call", "task.add"],
       },
     });
-    assert.equal(spawns, 1);
+    assert.equal(spawns, 2);
     const soul = await readSoul(pathsForAkuId(value.root, child));
     assert.deepEqual(soul?.options, { sandbox: "full-access" });
     assert.deepEqual(soul?.allowed, ["akuma.call"]);

@@ -66,8 +66,11 @@ class ReceiptChannel implements AsyncIterable<TellReceipt> {
 }
 
 function admitClaudeOptions(options: ProviderOptions): ReturnType<ProviderAdapter["admitOptions"]> {
-  if (options.sandbox !== undefined) {
-    return { kind: "refused", diagnostic: "Claude provider does not support the sandbox option" };
+  if (options.sandbox === "full-access" && options.readonly === true) {
+    return { kind: "refused", diagnostic: "Claude full-access sandbox cannot combine with readonly" };
+  }
+  if (options.sandbox === "full-access" && options.network === "disabled") {
+    return { kind: "refused", diagnostic: "Claude full-access sandbox cannot combine with disabled network" };
   }
   if (options.network !== undefined) {
     return { kind: "refused", diagnostic: "Claude provider does not support the network option" };
@@ -114,6 +117,7 @@ function claudeQueryOptions(
     permissionMode: mode,
     ...(mode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
     settingSources: ["user", "project", "local"],
+    ...(input.options.sandbox === "full-access" ? { sandbox: { enabled: false } } : {}),
     ...(input.options.model === undefined ? {} : { model: input.options.model }),
     ...(input.options.effort === undefined ? {} : { effort: input.options.effort as NonNullable<Options["effort"]> }),
     ...(input.options.systemPrompt === undefined || input.options.systemPrompt.length === 0

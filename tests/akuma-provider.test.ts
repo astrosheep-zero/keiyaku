@@ -2292,6 +2292,201 @@ test("Claude adapter admits the native session before returning its answer", asy
   assert.equal(nativeOptions.env?.AKUMA_REQUESTS, "/tmp/akuma-test-requests");
 });
 
+test("Claude full-access fresh turns disable the native sandbox", async () => {
+  let seen: Record<string, unknown> | undefined;
+  const provider = createClaudeProvider(async () => ({
+    query(input) {
+      seen = input.options as Record<string, unknown> | undefined;
+      return fakeQuery(
+        [
+          { type: "system", subtype: "init", session_id: "session-full-access-fresh" } as unknown as SDKMessage,
+          {
+            type: "result",
+            subtype: "success",
+            session_id: "session-full-access-fresh",
+            result: "done",
+          } as unknown as SDKMessage,
+        ],
+        input.prompt as AsyncIterable<unknown>,
+      );
+    },
+  }));
+  const drive = await provider.start({
+    ...DRIVE_DEFAULTS,
+    body: "build",
+    launchTells: [],
+    cwd: "/work",
+    options: { sandbox: "full-access" },
+    session: { kind: "fresh" },
+  }).result;
+  await drive.completion;
+
+  assert.deepEqual(seen?.sandbox, { enabled: false });
+  assert.equal(seen?.permissionMode, "bypassPermissions");
+  assert.equal(seen?.allowDangerouslySkipPermissions, true);
+});
+
+test("Claude full-access resumed turns disable the native sandbox", async () => {
+  let seen: Record<string, unknown> | undefined;
+  const provider = createClaudeProvider(async () => ({
+    query(input) {
+      seen = input.options as Record<string, unknown> | undefined;
+      return fakeQuery(
+        [
+          { type: "system", subtype: "init", session_id: "session-full-access-resume" } as unknown as SDKMessage,
+          {
+            type: "result",
+            subtype: "success",
+            session_id: "session-full-access-resume",
+            result: "done",
+          } as unknown as SDKMessage,
+        ],
+        input.prompt as AsyncIterable<unknown>,
+      );
+    },
+  }));
+  const drive = await provider.resume!({
+    ...DRIVE_DEFAULTS,
+    body: "continue",
+    launchTells: [],
+    cwd: "/work",
+    options: { sandbox: "full-access" },
+    session: { kind: "resume", coordinate: { sessionId: "session-to-resume" } },
+  }).result;
+  await drive.completion;
+
+  assert.deepEqual(seen?.sandbox, { enabled: false });
+  assert.equal(seen?.resume, "session-to-resume");
+  assert.equal(seen?.permissionMode, "bypassPermissions");
+  assert.equal(seen?.allowDangerouslySkipPermissions, true);
+});
+
+test("Claude full-access overrides an enabled sandbox in execution config", async () => {
+  let seen: Record<string, unknown> | undefined;
+  const provider = createClaudeProvider(
+    async () => ({
+      query(input) {
+        seen = input.options as Record<string, unknown> | undefined;
+        return fakeQuery(
+          [
+            { type: "system", subtype: "init", session_id: "session-full-access-config" } as unknown as SDKMessage,
+            {
+              type: "result",
+              subtype: "success",
+              session_id: "session-full-access-config",
+              result: "done",
+            } as unknown as SDKMessage,
+          ],
+          input.prompt as AsyncIterable<unknown>,
+        );
+      },
+    }),
+    { config: { sandbox: { enabled: true, autoAllowBashIfSandboxed: true } } },
+  );
+  const drive = await provider.start({
+    ...DRIVE_DEFAULTS,
+    body: "build",
+    launchTells: [],
+    cwd: "/work",
+    options: { sandbox: "full-access" },
+    session: { kind: "fresh" },
+  }).result;
+  await drive.completion;
+
+  assert.deepEqual(seen?.sandbox, { enabled: false });
+});
+
+test("Claude omitted sandbox preserves execution config for writable turns", async () => {
+  let seen: Record<string, unknown> | undefined;
+  const provider = createClaudeProvider(
+    async () => ({
+      query(input) {
+        seen = input.options as Record<string, unknown> | undefined;
+        return fakeQuery(
+          [
+            { type: "system", subtype: "init", session_id: "session-default-config" } as unknown as SDKMessage,
+            {
+              type: "result",
+              subtype: "success",
+              session_id: "session-default-config",
+              result: "done",
+            } as unknown as SDKMessage,
+          ],
+          input.prompt as AsyncIterable<unknown>,
+        );
+      },
+    }),
+    { config: { sandbox: { enabled: true } } },
+  );
+  const drive = await provider.start({
+    ...DRIVE_DEFAULTS,
+    body: "build",
+    launchTells: [],
+    cwd: "/work",
+    options: {},
+    session: { kind: "fresh" },
+  }).result;
+  await drive.completion;
+
+  assert.deepEqual(seen?.sandbox, { enabled: true });
+  assert.equal(seen?.permissionMode, "bypassPermissions");
+});
+
+test("Claude readonly preserves execution config and plan permissions", async () => {
+  let seen: Record<string, unknown> | undefined;
+  const provider = createClaudeProvider(
+    async () => ({
+      query(input) {
+        seen = input.options as Record<string, unknown> | undefined;
+        return fakeQuery(
+          [
+            { type: "system", subtype: "init", session_id: "session-readonly-config" } as unknown as SDKMessage,
+            {
+              type: "result",
+              subtype: "success",
+              session_id: "session-readonly-config",
+              result: "done",
+            } as unknown as SDKMessage,
+          ],
+          input.prompt as AsyncIterable<unknown>,
+        );
+      },
+    }),
+    { config: { sandbox: { enabled: true } } },
+  );
+  const drive = await provider.start({
+    ...DRIVE_DEFAULTS,
+    body: "inspect",
+    launchTells: [],
+    cwd: "/work",
+    options: { readonly: true },
+    session: { kind: "fresh" },
+  }).result;
+  await drive.completion;
+
+  assert.deepEqual(seen?.sandbox, { enabled: true });
+  assert.equal(seen?.permissionMode, "plan");
+  assert.equal(seen?.allowDangerouslySkipPermissions, undefined);
+});
+
+test("Claude full-access refuses readonly and disabled network conflicts", () => {
+  const provider = createClaudeProvider(async () => {
+    throw new Error("native Claude query must not start");
+  });
+  assert.deepEqual(provider.admitOptions({ sandbox: "full-access", readonly: true }), {
+    kind: "refused",
+    diagnostic: "Claude full-access sandbox cannot combine with readonly",
+  });
+  assert.deepEqual(provider.admitOptions({ sandbox: "full-access", network: "disabled" }), {
+    kind: "refused",
+    diagnostic: "Claude full-access sandbox cannot combine with disabled network",
+  });
+  assert.deepEqual(provider.admitOptions({ network: "enabled" }), {
+    kind: "refused",
+    diagnostic: "Claude provider does not support the network option",
+  });
+});
+
 test("Claude closes the terminal gate before a delayed Query iterator tail", async () => {
   const late = deferred<void>();
   const iteratorEnded = deferred<void>();
@@ -2500,7 +2695,7 @@ test("Codex maps provider-neutral schema JSON to turn/start outputSchema", async
   }
 });
 
-test("only Codex admits the full-access sandbox option", () => {
+test("unsupported providers refuse full-access while Codex and Claude admit it", () => {
   const fullAccess = { sandbox: "full-access" as const };
   const unsupported = [
     createAcpProvider({
@@ -2509,14 +2704,16 @@ test("only Codex admits the full-access sandbox option", () => {
       executable: "agent",
       config: { argvBefore: [], argvAfter: [] },
     }),
-    createClaudeProvider(async () => {
-      throw new Error("not started");
-    }),
     createGrokBuildProvider({ name: "grok-build", kind: "grok-build", executable: "grok" }),
     createOpencodeProvider(),
     createPiProvider({ name: "pi", kind: "pi" }),
   ];
   for (const provider of unsupported) assert.equal(provider.admitOptions(fullAccess).kind, "refused");
+
+  const claude = createClaudeProvider(async () => {
+    throw new Error("not started");
+  });
+  assert.deepEqual(claude.admitOptions(fullAccess), { kind: "admitted", options: fullAccess });
 
   const codex = createCodexAppServerProvider();
   assert.deepEqual(codex.admitOptions(fullAccess), { kind: "admitted", options: fullAccess });

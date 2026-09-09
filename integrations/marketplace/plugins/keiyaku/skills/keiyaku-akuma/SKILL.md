@@ -57,7 +57,10 @@ AkuIds. Choose different names for different capabilities, not merely to run
 work in parallel.
 
 Each name fixes its own capability stance — provider, model, permissions —
-and a born Akuma keeps those selected defaults for its lifetime. `keiyaku ls
+and a born Akuma keeps those selected defaults for its lifetime. A name may
+also ask for full host access, which disables only its provider's native
+command sandbox and never grants extra operating-system permissions; it
+cannot combine with a readonly restriction or a disabled network. `keiyaku ls
 aku/` lists the available names with their providers and descriptions. If none
 grants the permissions and stance the work needs, add a new Akuma name;
 `keiyaku settings --help` says where Akuma definitions live and what they may
