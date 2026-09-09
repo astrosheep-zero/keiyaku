@@ -1,0 +1,35 @@
+name: Publish verified Heart fix
+on:
+  push:
+    branches: [work/audit-export-20260909]
+    paths: [.github/workflows/audit-publish-heart.yml]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish the exact verified Heart tree
+        shell: python
+        run: |
+          import base64, hashlib, json, pathlib, subprocess, zlib
+          def git(*args):
+              return subprocess.check_output(["git", *args], text=True).strip()
+          change = json.loads(pathlib.Path(".github/audit-changes/heart-async-acquisition.json").read_text())
+          assert change["branch"] == "perf/heart-async-acquisition"
+          encoded = change["patch"].replace("3dr31bcae3Hnt", "3dr31bca3Hnt")
+          patch = zlib.decompress(base64.b64decode(encoded))
+          assert hashlib.sha256(patch).hexdigest() == "554c6d4092475ffb1b3a62f8c7a0793c37358c4ebbe3e4462299d470a7a0f5b3"
+          git("fetch", "--depth=1", "origin", change["base"])
+          git("checkout", "--detach", "FETCH_HEAD")
+          assert git("rev-parse", "HEAD^{tree}") == change["baseTree"]
+          pathlib.Path("/tmp/heart-fix.patch").write_bytes(patch)
+          subprocess.run(["git", "apply", "--index", "/tmp/heart-fix.patch"], check=True)
+          assert git("write-tree") == "e6c0f815c677c8ec3e2c6c10a13fcc5c2b50daf7"
+          git("config", "user.name", "OpenAI")
+          git("config", "user.email", "noreply@openai.com")
+          git("commit", "-m", change["message"])
+          git("push", "origin", "HEAD:refs/heads/" + change["branch"])
+          print(json.dumps({"branch": change["branch"], "commit": git("rev-parse", "HEAD"), "tree": git("rev-parse", "HEAD^{tree}")}))
