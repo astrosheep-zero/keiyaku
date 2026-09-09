@@ -1,3 +1,4 @@
+import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import {
   chmodSync,
@@ -46,27 +47,13 @@ function acceptedDelivery(result: Awaited<ReturnType<KeiyakuHandle["deliver"]>>)
 }
 
 function contractBody(): string {
-  return [
-    "# Delivery patch identity",
-    "",
-    "## Context",
-    "Exercise Git-backed delivery preparation.",
-    "",
-    "## Objective",
-    "Keep patch-content identity independent of commit identity.",
-    "",
-    "## Design",
-    "Prepare a targetless delivery from the current worktree.",
-    "",
-    "## Region",
-    "~~~",
-    "src/git/**",
-    "~~~",
-    "",
-    "## Criteria",
-    "### Patch identity",
-    "Equal patch bytes have one ChangeId.",
-  ].join("\n");
+  return contractMarkdown("Delivery patch identity", {
+    Context: "Exercise Git-backed delivery preparation.",
+    Objective: "Keep patch-content identity independent of commit identity.",
+    Design: "Prepare a targetless delivery from the current worktree.",
+    Region: "~~~\nsrc/git/**\n~~~",
+    Criteria: "### Patch identity\nEqual patch bytes have one ChangeId.",
+  });
 }
 
 function preparationCoordinates(state: NonNullable<Awaited<ReturnType<typeof observeContract>>["state"]>) {

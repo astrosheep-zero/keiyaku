@@ -1,3 +1,4 @@
+import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
@@ -31,7 +32,7 @@ import {
 } from "../src/workspace-place.js";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import { contractId } from "../src/core/facts/types.js";
-import { worktreePath } from "../src/git/workspace.js";
+import * as workspace from "../src/git/workspace.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { resolveContextualContract } from "../src/cli/selectors.js";
 import { invoke as invokeRaw, type InvocationResult } from "../src/cli/invoke.js";
@@ -375,28 +376,13 @@ function placeAt(index: number) {
 }
 
 function contractBody(title: string): string {
-  return [
-    `# ${title}`,
-    "",
-    "## Context",
-    "Place worktree.",
-    "",
-    "## Objective",
-    "Keep Place appointments.",
-    "",
-    "## Design",
-    "Use the appointed Place path.",
-    "",
-    "## Region",
-    "```",
-    "src/**",
-    "```",
-    "",
-    "## Criteria",
-    "### Result",
-    "The appointed Place is reused.",
-    "",
-  ].join("\n");
+  return contractMarkdown(title, {
+    Context: "Place worktree.",
+    Objective: "Keep Place appointments.",
+    Design: "Use the appointed Place path.",
+    Region: "```\nsrc/**\n```",
+    Criteria: "### Result\nThe appointed Place is reused.\n",
+  });
 }
 
 test("a 10000-appointment observation decodes the register once", async () => {

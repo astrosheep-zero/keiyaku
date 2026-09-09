@@ -1,3 +1,4 @@
+import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -33,28 +34,13 @@ async function invoke(invocation: Parameters<typeof invokeRaw>[0], runtime?: Par
 }
 
 function document(title: string, patterns: readonly string[]): string {
-  return [
-    `# ${title}`,
-    "",
-    "## Context",
-    "Current declarations.",
-    "",
-    "## Objective",
-    "Read Region declarations.",
-    "",
-    "## Design",
-    "Use the Region owner.",
-    "",
-    "## Region",
-    "~~~",
-    ...patterns,
-    "~~~",
-    "",
-    "## Criteria",
-    "### Reads declarations",
-    "The read is typed.",
-    "",
-  ].join("\n");
+  return contractMarkdown(title, {
+    Context: "Current declarations.",
+    Objective: "Read Region declarations.",
+    Design: "Use the Region owner.",
+    Region: ["~~~", ...patterns, "~~~"].join("\n"),
+    Criteria: "### Reads declarations\nThe read is typed.\n",
+  });
 }
 
 async function bind(repository: ReturnType<typeof repositoryWithMain>, title: string, patterns: readonly string[]) {

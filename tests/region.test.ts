@@ -1,3 +1,4 @@
+import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { applyAmendDocument } from "../src/body/amend.js";
@@ -15,27 +16,13 @@ function region(patterns: readonly string[], info = ""): readonly string[] {
 }
 
 function contract(pattern: string, regionInfo = ""): string {
-  return [
-    "# Region",
-    "",
-    "## Context",
-    "context",
-    "",
-    "## Objective",
-    "objective",
-    "",
-    "## Design",
-    "design",
-    "",
-    "## Region",
-    `~~~${regionInfo}`,
-    pattern,
-    "~~~",
-    "",
-    "## Criteria",
-    "### Criterion",
-    "criterion",
-  ].join("\n");
+  return contractMarkdown("Region", {
+    Context: "context",
+    Objective: "objective",
+    Design: "design",
+    Region: [`~~~${regionInfo}`, pattern, "~~~"].join("\n"),
+    Criteria: "### Criterion\ncriterion",
+  });
 }
 
 test("Region accepts only its closed positive path grammar", () => {

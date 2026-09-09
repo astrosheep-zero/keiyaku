@@ -1,3 +1,4 @@
+import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
@@ -53,28 +54,13 @@ import { cleanupSpawnCapableFixture, installAkumaBodyPidReceipt } from "./suppor
 import type { WorldRoot } from "../src/world.js";
 
 function markdown(title: string): string {
-  return [
-    `# ${title}`,
-    "",
-    "## Context",
-    "context",
-    "",
-    "## Objective",
-    "objective",
-    "",
-    "## Design",
-    "design",
-    "",
-    "## Region",
-    "~~~",
-    "src/**",
-    "~~~",
-    "",
-    "## Criteria",
-    "### C1",
-    "criterion",
-    "",
-  ].join("\n");
+  return contractMarkdown(title, {
+    Context: "context",
+    Objective: "objective",
+    Design: "design",
+    Region: "~~~\nsrc/**\n~~~",
+    Criteria: "### C1\ncriterion\n",
+  });
 }
 
 function executable(argv: readonly string[]): ParsedExecution {

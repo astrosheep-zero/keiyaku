@@ -1,6 +1,7 @@
+import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,28 +22,13 @@ import { repositoryWithMain } from "./support/library-verbs.js";
 const EMPTY_HOOKS: WorktreeHooks = { create: [], destroy: [] };
 
 function contractBody(title: string): string {
-  return [
-    `# ${title}`,
-    "",
-    "## Context",
-    "Exercise managed worktree hooks.",
-    "",
-    "## Objective",
-    "Keep hook effects serialized and recoverable.",
-    "",
-    "## Design",
-    "Use the Git-owned worktree effect marker.",
-    "",
-    "## Region",
-    "```",
-    "src/**",
-    "```",
-    "",
-    "## Criteria",
-    "### Hook result",
-    "Each effect is visible exactly as specified.",
-    "",
-  ].join("\n");
+  return contractMarkdown(title, {
+    Context: "Exercise managed worktree hooks.",
+    Objective: "Keep hook effects serialized and recoverable.",
+    Design: "Use the Git-owned worktree effect marker.",
+    Region: "```\nsrc/**\n```",
+    Criteria: "### Hook result\nEach effect is visible exactly as specified.\n",
+  });
 }
 
 function appendCommand(path: string, value: string, delayMs = 0): HookCommand {

@@ -1,10 +1,11 @@
+import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { appointManagedWorktrees } from "../src/workspace-place.js";
-import { appointedWorktreePath, type TestGitRepository, withGitShim } from "./support/git.js";
+import { protocolContractId } from "./support/git.js";
 import { repositoryWithMain } from "./support/library-verbs.js";
 import {
   GIT_REF,
@@ -43,28 +44,13 @@ function firstJournalAt(repository: TestGitRepository, id: ContractId): string {
 
 function terms(title: string, after: readonly ContractId[] = []) {
   const document = decodeContractDocument(
-    [
-      `# ${title}`,
-      "",
-      "## Context",
-      "Exercise the repository-level protocol reads.",
-      "",
-      "## Objective",
-      "Expose one pinned scope and snapshot-backed status.",
-      "",
-      "## Design",
-      "The protocol owns git observation and effects.",
-      "",
-      "## Region",
-      "```",
-      "src/**",
-      "```",
-      "",
-      "## Criteria",
-      "### Protocol result",
-      "The operation returns only plain data.",
-      "",
-    ].join("\n"),
+    contractMarkdown(title, {
+      Context: "Exercise the repository-level protocol reads.",
+      Objective: "Expose one pinned scope and snapshot-backed status.",
+      Design: "The protocol owns git observation and effects.",
+      Region: "```\nsrc/**\n```",
+      Criteria: "### Protocol result\nThe operation returns only plain data.\n",
+    }),
   );
   return { document: document.document, segments: document.segments, gates: [], after };
 }

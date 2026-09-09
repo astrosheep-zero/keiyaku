@@ -1,3 +1,4 @@
+import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -18,29 +19,18 @@ import { appointedWorktreePath, type TestGitRepository } from "./support/git.js"
 import { refused, repositoryWithMain } from "./support/library-verbs.js";
 
 function verificationBody(script: string | null = "exit 1"): string {
-  return [
-    "# Audit",
-    "",
-    "## Context",
-    "Exercise the audit reader.",
-    "",
-    "## Objective",
-    "Keep reports derived and compact.",
-    "",
-    "## Design",
-    "Run the stored Verification.",
-    "",
-    "## Region",
-    "~~~",
-    "src/**",
-    "~~~",
-    "",
-    "## Criteria",
-    "### Audit",
-    "The report follows the journal.",
-    ...(script === null ? [] : ["", "## Verification", "~~~bash", script, "~~~"]),
-    "",
-  ].join("\n");
+  return contractMarkdown("Audit", {
+    Context: "Exercise the audit reader.",
+    Objective: "Keep reports derived and compact.",
+    Design: "Run the stored Verification.",
+    Region: "~~~\nsrc/**\n~~~",
+    Criteria: [
+      "### Audit",
+      "The report follows the journal.",
+      ...(script === null ? [] : ["", "## Verification", "~~~bash", script, "~~~"]),
+      "",
+    ].join("\n"),
+  });
 }
 
 async function failedStoredVerification(): Promise<

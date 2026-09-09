@@ -1,60 +1,44 @@
+import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { renderContractBody } from "../src/body/render.js";
 
 function document(extra = "", regionInfo = ""): string {
-  return [
-    "# Day One",
-    "",
-    "## Context",
-    "Current facts.",
-    "",
-    "## Objective",
-    "Ship the CLI.",
-    "",
-    "## Design",
-    "Keep one input adapter.",
-    "",
-    "## Region",
-    `~~~${regionInfo}`,
-    "src/cli/**",
-    "tests/**",
-    "~~~",
-    "",
-    "## Criteria",
-    "### Parses the document",
-    "The body is decoded once.",
-    "",
-    "### Retains extensions",
-    "Unknown sections remain visible.",
-    "",
-    extra,
-  ].join("\n");
+  return contractMarkdown("Day One", {
+    Context: "Current facts.",
+    Objective: "Ship the CLI.",
+    Design: "Keep one input adapter.",
+    Region: [`~~~${regionInfo}`, "src/cli/**", "tests/**", "~~~"].join("\n"),
+    Criteria: [
+      "### Parses the document",
+      "The body is decoded once.",
+      "",
+      "### Retains extensions",
+      "Unknown sections remain visible.",
+      "",
+      extra,
+    ].join("\n"),
+  });
 }
 
 function withCriteria(criteria: string): string {
-  return [
-    "# Day One",
-    "",
-    "## Context",
-    "facts.",
-    "",
-    "## Objective",
-    "ship.",
-    "",
-    "## Design",
-    "adapter.",
-    "",
-    "## Region",
-    "~~~",
-    "src/**",
-    "~~~",
-    "",
-    "## Criteria",
-    criteria,
-  ].join("\n");
+  return contractMarkdown("Day One", {
+    Context: "facts.",
+    Objective: "ship.",
+    Design: "adapter.",
+    Region: "~~~\nsrc/**\n~~~",
+    Criteria: [criteria].join("\n"),
+  });
 }
+
+test("fixture Markdown preserves section order, fence bytes, and trailing newlines", () => {
+  assert.equal(
+    contractMarkdown("Fixture", { Region: "~~~txt\nsrc/**\n~~~", Criteria: "### one\nbody\n" }),
+    "# Fixture\n\n## Region\n~~~txt\nsrc/**\n~~~\n\n## Criteria\n### one\nbody\n",
+  );
+  assert.equal(contractMarkdown("Empty", {}), "# Empty");
+});
 
 test("contract Markdown decodes core fields and retains unknown H2 bytes", () => {
   const body = decodeContractDocument(document("## Rollout Notes\nfirst\n\n- second\n"));

@@ -1,3 +1,4 @@
+import { contractMarkdown } from "./support/markdown.js";
 import { completeCandidate } from "../src/protocol/completion.js";
 import { ExecutionProgress, contractCheckpoint } from "../src/protocol/progress.js";
 import { documentDerivation } from "../src/library/input.js";
@@ -62,27 +63,13 @@ function repository() {
 }
 
 function document(title: string): string {
-  return [
-    `# ${title}`,
-    "",
-    "## Context",
-    "Exercise Contract-to-Task settlement.",
-    "",
-    "## Objective",
-    "Keep Contract and Task authority independent.",
-    "",
-    "## Design",
-    "Project accepted facts through settlement.",
-    "",
-    "## Region",
-    "~~~",
-    "src/**",
-    "~~~",
-    "",
-    "## Criteria",
-    "### Settlement",
-    "The expected Task state is visible.",
-  ].join("\n");
+  return contractMarkdown(title, {
+    Context: "Exercise Contract-to-Task settlement.",
+    Objective: "Keep Contract and Task authority independent.",
+    Design: "Project accepted facts through settlement.",
+    Region: "~~~\nsrc/**\n~~~",
+    Criteria: "### Settlement\nThe expected Task state is visible.",
+  });
 }
 
 async function task(path: string, title: string, state: "open" | "done" | "drop" = "open") {

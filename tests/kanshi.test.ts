@@ -1,3 +1,4 @@
+import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -38,7 +39,7 @@ import { contractNamespace } from "../src/task/identity.js";
 import { projectTaskBoardObservation } from "../src/task/board.js";
 import { Tasks } from "../src/task/index.js";
 import { authorityPath, readBoard } from "../src/task/store.js";
-import { World } from "../src/world.js";
+import type { WorldRoot } from "../src/world.js";
 import type { WorldRoot } from "../src/world.js";
 import type { AkumaAlias } from "../src/identity/selector.js";
 import { moveAlias } from "../src/alias/index.js";
@@ -64,28 +65,13 @@ async function observe(path: string, repo?: Repo) {
 }
 
 function document(title = "Kanshi contract"): string {
-  return [
-    `# ${title}`,
-    "",
-    "## Context",
-    "status",
-    "",
-    "## Objective",
-    "render",
-    "",
-    "## Design",
-    "project public values",
-    "",
-    "## Region",
-    "```",
-    "src/**",
-    "```",
-    "",
-    "## Criteria",
-    "### Visible",
-    "The status row is visible.",
-    "",
-  ].join("\n");
+  return contractMarkdown(title, {
+    Context: "status",
+    Objective: "render",
+    Design: "project public values",
+    Region: "```\nsrc/**\n```",
+    Criteria: "### Visible\nThe status row is visible.\n",
+  });
 }
 
 async function bornAkuma(root: string, suffix: string, createdAt = "2026-08-09T00:00:00.000Z", settle = false) {

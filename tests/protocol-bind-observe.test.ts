@@ -1,3 +1,4 @@
+import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -277,27 +278,13 @@ test("refuses malformed structured bind observations", async () => {
 });
 
 function contractBody(): string {
-  return [
-    "# Targeted observation",
-    "",
-    "## Context",
-    "Test one-contract observation.",
-    "",
-    "## Objective",
-    "Avoid decoding unrelated journals.",
-    "",
-    "## Design",
-    "Use the requested contract primitive.",
-    "",
-    "## Region",
-    "~~~",
-    "src/**",
-    "~~~",
-    "",
-    "## Criteria",
-    "### C1",
-    "The local operation ignores unrelated malformed journals.",
-  ].join("\n");
+  return contractMarkdown("Targeted observation", {
+    Context: "Test one-contract observation.",
+    Objective: "Avoid decoding unrelated journals.",
+    Design: "Use the requested contract primitive.",
+    Region: "~~~\nsrc/**\n~~~",
+    Criteria: "### C1\nThe local operation ignores unrelated malformed journals.",
+  });
 }
 
 async function publishMalformedJournal(

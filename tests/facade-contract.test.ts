@@ -1,3 +1,4 @@
+import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import test from "node:test";
@@ -8,28 +9,13 @@ import { kanshi } from "../src/kanshi/index.js";
 import { cachedRepositoryAt, makeGitRepository, withGitShim } from "./support/git.js";
 
 function markdown(title: string): string {
-  return [
-    `# ${title}`,
-    "",
-    "## Context",
-    "Exercise Contract catalogue observation.",
-    "",
-    "## Objective",
-    "Keep the Contract catalogue bounded.",
-    "",
-    "## Design",
-    "Read Contract authority through its public owner.",
-    "",
-    "## Region",
-    "~~~",
-    "src/**",
-    "~~~",
-    "",
-    "## Criteria",
-    "### Catalogue",
-    "The catalogue preserves Contract facts.",
-    "",
-  ].join("\n");
+  return contractMarkdown(title, {
+    Context: "Exercise Contract catalogue observation.",
+    Objective: "Keep the Contract catalogue bounded.",
+    Design: "Read Contract authority through its public owner.",
+    Region: "~~~\nsrc/**\n~~~",
+    Criteria: "### Catalogue\nThe catalogue preserves Contract facts.\n",
+  });
 }
 
 function compareRecent(

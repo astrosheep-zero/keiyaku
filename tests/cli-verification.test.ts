@@ -1,3 +1,4 @@
+import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -35,29 +36,18 @@ async function repositoryWithCandidate() {
 }
 
 function document(script?: string): string {
-  return [
-    "# CLI Verification",
-    "",
-    "## Context",
-    "Facts.",
-    "",
-    "## Objective",
-    "Verify.",
-    "",
-    "## Design",
-    "Run.",
-    "",
-    "## Region",
-    "~~~",
-    "src/**",
-    "~~~",
-    "",
-    "## Criteria",
-    "### Check",
-    "The check runs.",
-    ...(script === undefined ? [] : ["", "## Verification", "```bash", script, "```"]),
-    "",
-  ].join("\n");
+  return contractMarkdown("CLI Verification", {
+    Context: "Facts.",
+    Objective: "Verify.",
+    Design: "Run.",
+    Region: "~~~\nsrc/**\n~~~",
+    Criteria: [
+      "### Check",
+      "The check runs.",
+      ...(script === undefined ? [] : ["", "## Verification", "```bash", script, "```"]),
+      "",
+    ].join("\n"),
+  });
 }
 
 async function bindAndDeliver(script?: string, gates: readonly string[] = ["verified"]) {
