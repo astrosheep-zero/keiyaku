@@ -1,0 +1,20 @@
+name: Review workbench
+on:
+  push:
+    branches: [codex/review-workbench-20260910]
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: git bundle create /tmp/review.bundle --all
+      - uses: actions/upload-artifact@v4
+        with:
+          name: review-history
+          path: /tmp/review.bundle
+          retention-days: 2
