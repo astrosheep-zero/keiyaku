@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { Keiyaku, Repo, type Keiyaku as KeiyakuHandle } from "../src/index.js";
@@ -225,6 +225,27 @@ test("ordinary placement follows the target checkout in another worktree", async
 
   assert.equal(readFileSync(resolve(checkout, "delivered.txt"), "utf8"), "candidate\n");
   assert.equal(repository.run(["-C", checkout, "status", "--porcelain"]), "");
+});
+
+test("operational precheck failure preserves the unclaimed target and foreign index lock", async () => {
+  const { repository, contract } = await ordinaryCandidateFixture();
+  const predecessor = repository.run(["rev-parse", "refs/heads/main"]);
+  const index = readFileSync(resolve(repository.path, ".git", "index"));
+  const lock = resolve(repository.path, ".git", "index.lock");
+  writeFileSync(lock, "foreign writer\n");
+  try {
+    const delivered = acceptedDelivery(await contract.deliver());
+    assert.equal(delivered.value.placement && "failure" in delivered.value.placement
+      ? delivered.value.placement.failure : undefined, "target-placement-failed");
+    assert.equal(repository.run(["rev-parse", "refs/heads/main"]), predecessor);
+    assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "base\n");
+    assert.deepEqual(readFileSync(resolve(repository.path, ".git", "index")), index);
+    assert.equal(readFileSync(lock, "utf8"), "foreign writer\n");
+    const observed = await observeContract(await cachedRepositoryAt(repository.path), (await contract.state()).id);
+    assert.equal(observed.state?.terminal, null);
+  } finally {
+    rmSync(lock);
+  }
 });
 
 test("conflicting target bytes refuse placement before claimed or target movement", async () => {
