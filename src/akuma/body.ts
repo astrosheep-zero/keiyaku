@@ -16,14 +16,12 @@ import {
   isHeartAbsent,
   probeLeash,
   projectTell,
-  provePendingTellDispositionCustody,
   readHeart,
   readOpenBoundTurns,
   readOpenPendingTellDisposition,
   readTell,
   readTurn,
   readNonterminalRequests,
-  recordUndeliveredPendingTells,
   resolvePendingTellDisposition,
   type PendingTellDisposition,
   type BodyEnd,
@@ -509,15 +507,11 @@ async function settleUndeliveredDisposition(
   await projectUndeliveredPendingTellEvidence(paths, error);
   if (!(await heartExists(paths))) return;
   const at = new Date().toISOString();
-  await recordUndeliveredPendingTells(paths, at, disposition.tellIds);
-  await resolvePendingTellDisposition(paths, disposition.bodySequence, at);
+  await resolvePendingTellDisposition(paths, disposition.bodySequence, at, "undelivered");
 }
 
 async function consumeProvenDisposition(paths: AkumaPaths, disposition: PendingTellDisposition): Promise<boolean> {
-  const proof = await provePendingTellDispositionCustody(paths, disposition);
-  if (proof.kind !== "proven") return false;
-  await resolvePendingTellDisposition(paths, disposition.bodySequence, new Date().toISOString());
-  return true;
+  return await resolvePendingTellDisposition(paths, disposition.bodySequence, new Date().toISOString());
 }
 
 /**
@@ -532,7 +526,7 @@ async function awaitDispositionCustody(
   schedule: (milliseconds: number, signal: AbortSignal) => Promise<void>,
 ): Promise<TellWake | Readonly<{ kind: "proven" }>> {
   for (;;) {
-    if ((await provePendingTellDispositionCustody(paths, disposition)).kind === "proven") {
+    if (await consumeProvenDisposition(paths, disposition)) {
       child.release();
       return { kind: "proven" };
     }
@@ -549,7 +543,7 @@ async function awaitDispositionCustody(
     if (winner.kind === "timer") continue;
     timerController.abort();
     await timer.catch(() => undefined);
-    if ((await provePendingTellDispositionCustody(paths, disposition)).kind === "proven") {
+    if (await consumeProvenDisposition(paths, disposition)) {
       child.release();
       return { kind: "proven" };
     }
@@ -570,10 +564,7 @@ async function resolveDecidedPendingTellDisposition(
       await spawn({ paths, refuseIfHeld: true }),
       abortableDelay,
     );
-    if (wake.kind === "proven") {
-      await resolvePendingTellDisposition(paths, disposition.bodySequence, new Date().toISOString());
-      return;
-    }
+    if (wake.kind === "proven") return;
     // Predecessor still holds the leash: leave the Heart disposition open.
     if (wake.kind === "held") return;
     await settleUndeliveredDisposition(

@@ -19,6 +19,8 @@ import {
   bindTellsToTurn,
   breakBody,
   decidePendingTellDisposition,
+  resolvePendingTellDisposition,
+  readOpenPendingTellDisposition,
   drainPendingTells,
   endTurn,
   finishBodyIfIdle,
@@ -959,7 +961,7 @@ test("unknown Body Request state is authority corruption", async () => {
   }
 });
 
-test("heart schema version 26 and leash schema version 4 hard-refuse old authority", async () => {
+test("heart schema version 27 and leash schema version 4 hard-refuse old authority", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-schema-cut-"));
   const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "30000000" });
   try {
@@ -973,7 +975,7 @@ test("heart schema version 26 and leash schema version 4 hard-refuse old authori
       "CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)",
     );
     leash.close();
-    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 26/u);
+    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 27/u);
     await assert.rejects(HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -1803,7 +1805,7 @@ test("Heart reverse references use indexed lookups during retained-group deletio
       ["tell_bindings", "turn_sequence"], ["tell_bindings", "tell_id"],
       ["tell_deliveries", "turn_sequence"], ["tell_deliveries", "tell_id"],
       ["tell_receipts", "turn_sequence"], ["tell_receipts", "tell_id"],
-      ["tell_dispositions", "tell_id"],
+      ["tell_disposition_members", "tell_id"],
     ]) {
       const plan = database.prepare(`EXPLAIN QUERY PLAN SELECT rowid FROM ${table} WHERE ${column} = ?`).all(1) as { detail: string }[];
       assert.ok(plan.some(({ detail }) => detail.startsWith(`SEARCH ${table} USING `)),
@@ -1814,6 +1816,96 @@ test("Heart reverse references use indexed lookups during retained-group deletio
     assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
   } finally {
     database.close();
+    value.close();
+  }
+});
+
+function seedClosedHistoryActivity(paths: Parameters<typeof readHeart>[0], turnSequence: number, count: number): void {
+  const database = new DatabaseSync(paths.heart);
+  try {
+    database.exec("PRAGMA foreign_keys=ON; BEGIN IMMEDIATE");
+    const latest = database.prepare("SELECT COALESCE(MAX(sequence), 0) AS value FROM timeline").get() as { value: number };
+    database.prepare(`WITH RECURSIVE rows(value) AS (
+      VALUES(1) UNION ALL SELECT value + 1 FROM rows WHERE value < ?
+    ) INSERT INTO timeline(kind) SELECT 'activity' FROM rows`).run(count);
+    database.prepare(`INSERT INTO activity(sequence, turn_sequence, event_json, at)
+      SELECT sequence, ?, '{"type":"note","text":"old history"}', '2026-08-08T00:00:10.000Z'
+      FROM timeline WHERE sequence > ?`).run(turnSequence, latest.value);
+    database.exec("COMMIT");
+  } finally {
+    database.close();
+  }
+}
+
+test("open disposition pins witnessed Tells until atomic resolution, then pruning releases the members", async () => {
+  const value = await fixture();
+  const paths = value.allocated.paths;
+  const at = value.soul.createdAt;
+  let leash = (await HeldAkumaLeash.try(paths))!;
+  try {
+    await leash.birth(paths, value.soul);
+    const predecessor = await leash.recordBody(paths, { leashTakenAt: at });
+    await recordTell(paths, { id: "frozen", body: "continue", recordedAt: at });
+    const disposition = await decidePendingTellDisposition(paths, {
+      bodySequence: predecessor.sequence, at, handoff: true,
+    });
+    assert.deepEqual(disposition?.tellIds, ["frozen"]);
+    assert.equal(await resolvePendingTellDisposition(paths, predecessor.sequence, at), false);
+    leash.release();
+    leash = (await HeldAkumaLeash.try(paths))!;
+    const successor = await leash.recordBody(paths, { leashTakenAt: at });
+    const delivered = await beginTurn(paths, { bodySequence: successor.sequence, startedAt: at });
+    await recordTellDeliveries(paths, [{
+      tellId: "frozen", route: "launch", turnSequence: delivered.sequence, fence: "delivered", deliveredAt: at,
+    }]);
+    await endTurn(paths, { turnSequence: delivered.sequence, outcome: { kind: "failed", diagnostic: "fixture end" }, completedAt: at });
+    const active = await beginTurn(paths, { bodySequence: successor.sequence, startedAt: at });
+    seedClosedHistoryActivity(paths, active.sequence, 5501);
+    await appendActivity(paths, { turnSequence: active.sequence, event: { type: "note", text: "prune while open" }, at });
+    assert.equal((await readTell(paths, "frozen"))?.state, "told");
+    assert.ok(await readTurn(paths, delivered.sequence), "the delivery witness must survive while the decision is open");
+    assert.deepEqual(await readOpenPendingTellDisposition(paths), disposition);
+    assert.deepEqual(await Promise.all([
+      resolvePendingTellDisposition(paths, predecessor.sequence, at),
+      resolvePendingTellDisposition(paths, predecessor.sequence, at),
+    ]), [true, true]);
+    assert.equal(await readOpenPendingTellDisposition(paths), null);
+    seedClosedHistoryActivity(paths, active.sequence, 501);
+    await appendActivity(paths, { turnSequence: active.sequence, event: { type: "note", text: "prune after consumption" }, at });
+    assert.equal(await readTell(paths, "frozen"), null);
+    assert.equal(await readTurn(paths, delivered.sequence), null);
+    assert.equal(await resolvePendingTellDisposition(paths, predecessor.sequence, at), true, "late resolution uses the resolved decision, not retired Tells");
+    const database = new DatabaseSync(paths.heart);
+    try {
+      assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
+      assert.equal(database.prepare("SELECT COUNT(*) AS count FROM tell_disposition_members").get()?.count, 0);
+    } finally { database.close(); }
+  } finally {
+    leash.release();
+    value.close();
+  }
+});
+
+test("undelivered disposition settles only its persisted snapshot and cannot decide twice", async () => {
+  const value = await fixture();
+  const paths = value.allocated.paths;
+  const at = value.soul.createdAt;
+  const leash = (await HeldAkumaLeash.try(paths))!;
+  try {
+    await leash.birth(paths, value.soul);
+    const body = await leash.recordBody(paths, { leashTakenAt: at });
+    await recordTell(paths, { id: "before", body: "frozen", recordedAt: at });
+    await decidePendingTellDisposition(paths, { bodySequence: body.sequence, at, handoff: true });
+    await recordTell(paths, { id: "after", body: "not this decision", recordedAt: at });
+    assert.equal(await resolvePendingTellDisposition(paths, body.sequence, at, "undelivered"), true);
+    assert.equal((await readTell(paths, "before"))?.state, "told");
+    assert.equal((await readTell(paths, "after"))?.state, "pending");
+    assert.equal(await decidePendingTellDisposition(paths, { bodySequence: body.sequence, at, handoff: true }), null);
+    assert.equal(await resolvePendingTellDisposition(paths, body.sequence, at, "undelivered"), true);
+    assert.equal((await readTell(paths, "after"))?.state, "pending");
+    await assert.rejects(resolvePendingTellDisposition(paths, body.sequence + 100, at), /disposition .* is missing/);
+  } finally {
+    leash.release();
     value.close();
   }
 });
