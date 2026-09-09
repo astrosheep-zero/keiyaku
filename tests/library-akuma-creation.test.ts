@@ -19,12 +19,21 @@ import { type AkumaCallInput } from "../src/akuma/akuma.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { AkumaArchetypeError, listArchetypeDefinitions, loadArchetype } from "../src/akuma/archetype.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
-import { akumaCallRequestCommands } from "../src/akuma/call-request.js";
-import { HeldAkumaLeash, initializeHeart, readSoul, type Soul } from "../src/akuma/heart/index.js";
-import { akumaRunRoot, allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
+import { akumaCallRequestCommands, type AkumaCallRequestChildLaunch } from "../src/akuma/call-request.js";
+import {
+  finishBodyIfIdle,
+  HeldAkumaLeash,
+  initializeHeart,
+  readHeart,
+  readSoul,
+  type Soul,
+} from "../src/akuma/heart/index.js";
+import { akumaRunRoot, allocateAkumaDirectory, parseAkuId, pathsForAkuId } from "../src/akuma/identity.js";
 import { Akuma as PublicAkuma, Schema } from "../src/akuma/index.js";
-import { AKUMA_REQUESTS_ENV, createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
+import { AKUMA_REQUESTS_ENV, createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
+import { fleetRequestCommands, type FleetRequestPort } from "../src/akuma/fleet-request.js";
+import { composeRequestCommands } from "../src/akuma/request-wire.js";
 import { BodyRequestPump } from "../src/akuma/request-serve.js";
 import { moveAlias, resolveAlias } from "../src/alias/index.js";
 import { invoke } from "../src/cli/invoke.js";
@@ -43,6 +52,13 @@ import { parseAkumaAlias } from "../src/identity/selector.js";
 import { Keiyaku, Repo, World, bodyRequestExecution, settings } from "../src/index.js";
 import { drainPluginRuntime, pluginRuntime } from "../src/plugin/runtime.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
+import {
+  cleanupSpawnCapableFixture,
+  installAkumaBodyEmptyPublicationBarrier,
+  installAkumaBodyPidReceipt,
+  waitForFixtureFile,
+} from "./support/process.js";
+import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import type { WorldRoot } from "../src/world.js";
 import {
   AkumaComposition as Akuma,
@@ -124,7 +140,54 @@ async function directArchetypeSettings(root: string) {
   return { home, value, placement: { home, settings: value } };
 }
 
-test("schema Keiyaku.call births without a prompt and records its body as one public Tell", async (t) => {
+function slowEmptyPublicationBody() {
+  let held:
+    | Readonly<{
+        bodySequence: number;
+        leash: HeldAkumaLeash;
+        paths: AkumaCallRequestChildLaunch["paths"];
+        resolveExit: (exit: Awaited<OwnedProcess["exited"]>) => void;
+      }>
+    | undefined;
+  let resolveStarted!: (value: Readonly<{ paths: AkumaCallRequestChildLaunch["paths"]; bodySequence: number }>) => void;
+  const started = new Promise<Readonly<{ paths: AkumaCallRequestChildLaunch["paths"]; bodySequence: number }>>(
+    (resolve) => {
+      resolveStarted = resolve;
+    },
+  );
+  let released = false;
+  const release = async (): Promise<void> => {
+    if (released || held === undefined) return;
+    released = true;
+    await finishBodyIfIdle(held.paths, { sequence: held.bodySequence, at: "2026-09-10T00:00:02.000Z" });
+    held.leash.release();
+    held.resolveExit({ code: 0, signal: null, log: { path: "/tmp/slow-empty-body.log", from: 0, to: 0 } });
+  };
+
+  return {
+    started,
+    spawn: async (launch: AkumaCallRequestChildLaunch): Promise<OwnedProcess> => {
+      const leash = (await HeldAkumaLeash.try(launch.paths))!;
+      await leash.birth(launch.paths, { ...launch.seed, createdAt: "2026-09-10T00:00:00.000Z" });
+      const body = await leash.recordBody(launch.paths, { leashTakenAt: "2026-09-10T00:00:01.000Z" });
+      let resolveExit!: (exit: Awaited<OwnedProcess["exited"]>) => void;
+      const exited = new Promise<Awaited<OwnedProcess["exited"]>>((resolve) => {
+        resolveExit = resolve;
+      });
+      held = { paths: launch.paths, bodySequence: body.sequence, leash, resolveExit };
+      resolveStarted({ paths: launch.paths, bodySequence: body.sequence });
+      return {
+        pid: 4242,
+        exited,
+        terminate: async () => await release(),
+        release: () => {},
+      };
+    },
+    release,
+  };
+}
+
+test("local schema Keiyaku.call waits for its held empty Body before admitting its Tell", async (t) => {
   const { raw } = await repositoryFixture();
   const world = await World.at(raw.path);
   const configured = await directArchetypeSettings(world);
@@ -133,7 +196,10 @@ test("schema Keiyaku.call births without a prompt and records its body as one pu
     (value) => value as { ok: boolean },
   );
   const bodyPidReceipt = join(raw.path, "body-pids");
+  const emptyPublicationBarrier = join(raw.path, "empty-publication-barrier");
+  mkdirSync(emptyPublicationBarrier);
   const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
+  const restoreEmptyPublicationBarrier = installAkumaBodyEmptyPublicationBarrier(emptyPublicationBarrier);
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
   let akumaId: string | undefined;
   let operationFailed = true;
@@ -150,7 +216,7 @@ test("schema Keiyaku.call births without a prompt and records its body as one pu
     return await tell.apply(this, args);
   });
   try {
-    const result = await Keiyaku.call({
+    const pending = Keiyaku.call({
       path: world,
       archetype: "worker",
       body: "schema-call",
@@ -158,6 +224,23 @@ test("schema Keiyaku.call births without a prompt and records its body as one pu
       ...configured.placement,
       schema,
     });
+    void pending.catch(() => undefined);
+    let result: Awaited<typeof pending>;
+    try {
+      const readyPath = join(emptyPublicationBarrier, "ready");
+      await waitForFixtureFile(readyPath);
+      const held = JSON.parse(readFileSync(readyPath, "utf8")) as { id: string };
+      const whileHeld = await readHeart(pathsForAkuId(world, parseAkuId(held.id).id));
+      assert.equal(whileHeld.latestBody?.end, undefined);
+      assert.deepEqual(whileHeld.pending, []);
+
+      writeFileSync(join(emptyPublicationBarrier, "release"), "release\n");
+      result = await pending;
+    } finally {
+      const releasePath = join(emptyPublicationBarrier, "release");
+      if (!existsSync(releasePath)) writeFileSync(releasePath, "release\n");
+      await pending.catch(() => undefined);
+    }
     akumaId = result.akuma;
     assert.deepEqual(result.schemaAnswer, { ok: true });
     const history = await PublicAkuma.select(world, result.akuma).history();
@@ -165,6 +248,7 @@ test("schema Keiyaku.call births without a prompt and records its body as one pu
     assert.equal(tells.length, 1);
     assert.equal(tells[0]?.kind, "tell");
     if (tells[0]?.kind === "tell") assert.equal(tells[0].text, "schema-call");
+    assert.equal(history.rows.filter((row) => row.kind === "turn").length, 1);
     assert.equal(
       history.rows.some((row) => row.kind === "call"),
       false,
@@ -185,6 +269,77 @@ test("schema Keiyaku.call births without a prompt and records its body as one pu
       });
       if (cleanup.kind === "retained") t.diagnostic(`retained fixture ${raw.path}: ${cleanup.diagnostic}`);
     } finally {
+      restoreEmptyPublicationBarrier();
+      restoreBodyPidReceipt();
+      restoreSquareLedger();
+    }
+  }
+});
+
+test("forwarded schema Keiyaku.call waits for its empty Body before admitting its Tell", async (t) => {
+  const { raw } = await repositoryFixture();
+  const world = await World.at(raw.path);
+  const configured = await directArchetypeSettings(world);
+  const schema = Schema.json(
+    { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
+    (value) => value as { ok: boolean },
+  );
+  const slow = slowEmptyPublicationBody();
+  const { pump, leash } = await requestPump(world, slow.spawn);
+  const routedKeiyaku = Keiyaku.withExecution({ execution: bodyRequestExecution({ directory: pump.directory }) });
+  const bodyPidReceipt = join(raw.path, "body-pids");
+  const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
+  const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
+  let akumaId: string | undefined;
+  let operationFailed = true;
+  try {
+    const pending = routedKeiyaku.call({
+      path: world,
+      archetype: "worker",
+      body: "forwarded-schema-call",
+      cwd: world,
+      ...configured.placement,
+      schema,
+    });
+    const body = await slow.started;
+    const whileHeld = await readHeart(body.paths);
+    assert.equal(whileHeld.latestBody?.sequence, body.bodySequence);
+    assert.equal(whileHeld.latestBody?.end, undefined);
+    assert.deepEqual(whileHeld.pending, []);
+
+    await slow.release();
+    const result = await pending;
+    akumaId = result.akuma;
+    assert.deepEqual(result.schemaAnswer, { ok: true });
+    const history = await PublicAkuma.select(world, result.akuma).history();
+    const tells = history.rows.filter((row) => row.kind === "tell");
+    assert.equal(tells.length, 1);
+    assert.equal(tells[0]?.kind, "tell");
+    if (tells[0]?.kind === "tell") assert.equal(tells[0].text, "forwarded-schema-call");
+    assert.equal(history.rows.filter((row) => row.kind === "turn").length, 1);
+    assert.equal(
+      history.rows.some((row) => row.kind === "call"),
+      false,
+    );
+    operationFailed = false;
+  } finally {
+    try {
+      await slow.release();
+      if (akumaId !== undefined)
+        await PublicAkuma.select(world, akumaId)
+          .kill()
+          .catch(() => undefined);
+      await drainPluginRuntime(world);
+      const cleanup = await cleanupSpawnCapableFixture({
+        fixturePath: raw.path,
+        pidReceiptPath: bodyPidReceipt,
+        timeoutMs: 15_000,
+        operationFailed,
+      });
+      if (cleanup.kind === "retained") t.diagnostic(`retained fixture ${raw.path}: ${cleanup.diagnostic}`);
+    } finally {
+      await pump.close();
+      leash.release();
       restoreBodyPidReceipt();
       restoreSquareLedger();
     }
@@ -201,7 +356,15 @@ async function directBirthSoul(akuma: ReturnType<typeof Akuma.of>, input: AkumaC
   return soul!;
 }
 
-async function requestPump(root: WorldRoot) {
+async function defaultRequestSpawn(launch: AkumaCallRequestChildLaunch): Promise<void> {
+  const child = (await HeldAkumaLeash.try(launch.paths))!;
+  await child.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-11T00:00:02.000Z" });
+  child.release();
+}
+
+type RequestSpawn = (launch: AkumaCallRequestChildLaunch) => Promise<OwnedProcess | void>;
+
+async function requestPump(root: WorldRoot, spawn: RequestSpawn = defaultRequestSpawn) {
   const parent = await allocateAkumaDirectory({ worldRoot: root, archetype: "parent", draw: () => "1234abcd" });
   await initializeHeart(parent.paths);
   const soul: Soul = {
@@ -222,16 +385,25 @@ async function requestPump(root: WorldRoot) {
     bodySequence: 1,
     now: () => "2026-08-11T00:00:01.000Z",
     signal: new AbortController().signal,
-    commands: akumaCallRequestCommands({
-      world: root,
-      paths: parent.paths,
-      parent: soul,
-      spawn: async (launch) => {
-        const child = (await HeldAkumaLeash.try(launch.paths))!;
-        await child.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-11T00:00:02.000Z" });
-        child.release();
-      },
-    }),
+    commands: composeRequestCommands(
+      akumaCallRequestCommands({ world: root, paths: parent.paths, parent: soul, spawn }),
+      fleetRequestCommands({
+        wait: async () => {
+          throw new Error("unexpected forwarded wait");
+        },
+        tell: async () => {
+          throw new Error("unexpected forwarded Tell");
+        },
+        tellAnswer: async (input) =>
+          await PublicAkuma.select(root, input.target).tell(input.body, {
+            schema: Schema.json(JSON.parse(input.schemaJson) as Record<string, unknown>, (value) => value),
+            ...(input.interrupt === undefined ? {} : { interrupt: input.interrupt }),
+          }),
+        kill: async () => {
+          throw new Error("unexpected forwarded kill");
+        },
+      } satisfies FleetRequestPort),
+    ),
   });
   return { pump, leash };
 }

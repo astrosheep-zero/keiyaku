@@ -78,6 +78,7 @@ const akumaCallPayloadSchema = z
     world: absolutePathSchema,
     archetype: archetypeSchema,
     body: z.string().optional(),
+    awaitAsleep: z.literal(true).optional(),
     cwd: absolutePathSchema.optional(),
     recipe: akumaCallRecipeSchema,
   })
@@ -137,6 +138,7 @@ async function executeAkumaCall(
     worldPath: world,
     archetype: request.archetype,
     signal: facts.signal,
+    ...(request.awaitAsleep === undefined ? {} : { awaitAsleep: request.awaitAsleep }),
     launch: async (allocated) => {
       if (!facts.admissionOpen()) throw new Error("body closed request admission");
       await reserveRequest(paths, facts.id, allocated.id);

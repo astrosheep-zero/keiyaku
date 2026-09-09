@@ -38,6 +38,7 @@ export type BornAkumaCall = Readonly<{
     Readonly<{ id: AllocatedAkuma["id"]; archetype: string; cwd: string; origin: { kind: "direct" } }>;
   initialBody?: string;
   initialSchemaJson?: string;
+  awaitAsleep?: true;
   execution: BornExecution;
 }>;
 
@@ -77,6 +78,7 @@ async function admitBodyRequest(input: {
     world: input.path,
     archetype: input.name,
     ...(input.call.body === undefined ? {} : { body: input.call.body }),
+    ...(input.call.schema === undefined ? {} : { awaitAsleep: true }),
     ...(cwd === undefined ? {} : { cwd }),
     recipe: input.recipe,
   });
@@ -115,6 +117,7 @@ async function admitDirect(input: {
     },
     ...(input.call.body === undefined ? {} : { initialBody: input.call.body }),
     ...(input.call.schema === undefined ? {} : { initialSchemaJson: schemaJsonText(input.call.schema) }),
+    ...(input.call.schema === undefined ? {} : { awaitAsleep: true }),
     execution: {
       cwd,
       source: input.call.cwd !== undefined ? "input" : initiatorCwd === undefined ? "world" : "process",
@@ -264,6 +267,7 @@ class AkumaProduct {
     }
     const published = await launchAkuma({
       allocated: born.allocated,
+      ...(born.awaitAsleep === undefined ? {} : { awaitAsleep: born.awaitAsleep }),
       launch: async (allocated) =>
         await spawnAkumaBody({
           paths: allocated.paths,
