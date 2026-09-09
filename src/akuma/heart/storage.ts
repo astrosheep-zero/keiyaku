@@ -32,7 +32,7 @@ import { insertSoulFact, soulFact } from "./soul.js";
 
 const ACTIVITY_LIMIT = 5_000;
 const SQLITE_CANTOPEN = 14;
-const WRITE_ACQUISITION_MS = 5_000;
+const TRANSACTION_ACQUISITION_MS = 5_000;
 
 export class HeartAbsentError extends Error {
   constructor(
@@ -98,16 +98,20 @@ export async function classifyHeartSchema(paths: AkumaPaths): Promise<"current" 
   }
 }
 
-async function beginWrite(database: DatabaseSync, signal?: AbortSignal): Promise<void> {
-  const deadline = performance.now() + WRITE_ACQUISITION_MS;
+async function beginTransaction(database: DatabaseSync, mode: "read" | "write", signal?: AbortSignal): Promise<void> {
+  const deadline = performance.now() + TRANSACTION_ACQUISITION_MS;
   let delay = 10;
   for (;;) {
     signal?.throwIfAborted();
     try {
-      database.exec("BEGIN IMMEDIATE");
+      database.exec(mode === "write" ? "BEGIN IMMEDIATE" : "BEGIN DEFERRED");
+      // DEFERRED acquires its snapshot on the first read, not on BEGIN. WAL
+      // recovery and last-connection cleanup can make this read busy too.
+      assertHeartSchemaVersion(database);
       return;
     } catch (error) {
-      // Only a failed acquisition can be retried: no business statement ran.
+      rollbackTransaction(database);
+      // Only failed admission can be retried: no caller statement has run.
       const remaining = deadline - performance.now();
       if (!isBusy(error) || remaining <= 0) throw error;
       await setTimeout(Math.min(delay, remaining), undefined, { signal }).catch((error: unknown) => {
@@ -120,10 +124,15 @@ async function beginWrite(database: DatabaseSync, signal?: AbortSignal): Promise
   }
 }
 
-export async function withReadOnlyHeart<T>(paths: AkumaPaths, body: (database: DatabaseSync) => T): Promise<T> {
+export async function withReadOnlyHeart<T>(
+  paths: AkumaPaths,
+  body: (database: DatabaseSync) => T,
+  signal?: AbortSignal,
+): Promise<T> {
+  signal?.throwIfAborted();
   const database = await openHeart(paths.heart, "ro");
   try {
-    database.exec("BEGIN DEFERRED");
+    await beginTransaction(database, "read", signal);
     return finishTransaction(database, body);
   } finally {
     database.close();
@@ -138,25 +147,28 @@ export async function withHeartTransaction<T>(
   signal?.throwIfAborted();
   const database = await openHeart(paths.heart, "rw");
   try {
-    await beginWrite(database, signal);
+    await beginTransaction(database, "write", signal);
     return finishTransaction(database, body);
   } finally {
     database.close();
   }
 }
 
+function rollbackTransaction(database: DatabaseSync): void {
+  try {
+    database.exec("ROLLBACK");
+  } catch {
+    /* preserve the failure that caused rollback */
+  }
+}
+
 function finishTransaction<T>(database: DatabaseSync, body: (database: DatabaseSync) => T): T {
   try {
-    assertHeartSchemaVersion(database);
     const result = body(database);
     database.exec("COMMIT");
     return result;
   } catch (error) {
-    try {
-      database.exec("ROLLBACK");
-    } catch {
-      /* preserve the original failure */
-    }
+    rollbackTransaction(database);
     throw error;
   }
 }
