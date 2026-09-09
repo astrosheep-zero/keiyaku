@@ -36,28 +36,38 @@ type StreamCursor = Readonly<{
 
 function streamCursor(stream: NodeJS.ReadableStream): StreamCursor {
   const iterator = (stream as NodeJS.ReadableStream & AsyncIterable<string | Buffer>)[Symbol.asyncIterator]();
-  let buffer = Buffer.alloc(0);
+  let buffer: Buffer = Buffer.alloc(0);
+  let offset = 0;
   const pull = async (expected: string): Promise<void> => {
     const next = await iterator.next();
     if (next.done) throw new Error(`git cat-file --batch ended while reading ${expected}`);
-    const chunk = Buffer.from(next.value);
-    buffer = buffer.length === 0 ? chunk : Buffer.concat([buffer, chunk]);
+    buffer = typeof next.value === "string" ? Buffer.from(next.value) : next.value;
+    offset = 0;
   };
   const line = async (): Promise<Buffer> => {
+    const parts: Buffer[] = [];
+    let length = 0;
     for (;;) {
-      const newline = buffer.indexOf(0x0a);
-      if (newline >= 0) {
-        const value = buffer.subarray(0, newline);
-        buffer = buffer.subarray(newline + 1);
-        return value;
-      }
-      await pull("line");
+      if (offset === buffer.length) await pull("line");
+      const newline = buffer.indexOf(0x0a, offset);
+      const part = buffer.subarray(offset, newline < 0 ? buffer.length : newline);
+      offset = newline < 0 ? buffer.length : newline + 1;
+      if (newline >= 0 && parts.length === 0) return part;
+      parts.push(part);
+      length += part.length;
+      if (newline >= 0) return Buffer.concat(parts, length);
     }
   };
   const exact = async (length: number): Promise<Buffer> => {
-    while (buffer.length < length) await pull(`${length} bytes`);
-    const value = buffer.subarray(0, length);
-    buffer = buffer.subarray(length);
+    const value = Buffer.allocUnsafe(length);
+    let filled = 0;
+    while (filled < length) {
+      if (offset === buffer.length) await pull(`${length} bytes`);
+      const count = Math.min(length - filled, buffer.length - offset);
+      buffer.copy(value, filled, offset, offset + count);
+      offset += count;
+      filled += count;
+    }
     return value;
   };
   return { line, exact };
