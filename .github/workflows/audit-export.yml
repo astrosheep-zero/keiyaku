@@ -1,0 +1,32 @@
+name: Audit workspace export
+on:
+  push:
+    branches: [work/audit-export-20260909]
+    paths: [.github/workflows/audit-export.yml]
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 517274f81657f16e4d2fdd3dd04b99b97e9138e0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci --ignore-scripts --prefer-offline
+      - name: Package source and locked verification dependencies
+        run: |
+          git archive --format=tar HEAD > /tmp/keiyaku-source.tar
+          mkdir -p /tmp/audit-runtime
+          cp "$(command -v node)" /tmp/audit-runtime/node
+          tar -czf /tmp/keiyaku-audit-workspace.tar.gz node_modules -C /tmp keiyaku-source.tar audit-runtime
+      - uses: actions/upload-artifact@v4
+        with:
+          name: keiyaku-audit-workspace
+          path: /tmp/keiyaku-audit-workspace.tar.gz
+          retention-days: 1
+          compression-level: 0
