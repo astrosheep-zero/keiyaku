@@ -10,6 +10,7 @@ export const PI_EVENT_DISPOSITIONS = {
   agent_start: "drop",
   auto_retry_end: "drop",
   auto_retry_start: "note",
+  bash_execution_update: "drop",
   compaction_end: "note",
   compaction_start: "drop",
   entry_appended: "drop",
@@ -18,6 +19,9 @@ export const PI_EVENT_DISPOSITIONS = {
   message_update: "drop",
   queue_update: "drop",
   session_info_changed: "drop",
+  summarization_retry_attempt_start: "drop",
+  summarization_retry_finished: "drop",
+  summarization_retry_scheduled: "note",
   thinking_level_changed: "drop",
   tool_execution_end: "tool-end",
   tool_execution_start: "tool-start",
@@ -124,12 +128,15 @@ export type PiEventState = {
   tools: Map<string, Readonly<{ name: string; call: ToolCall }>>;
 };
 
-function translateNote(
-  event: Extract<AgentSessionEvent, { type: "auto_retry_start" | "compaction_end" }>,
-): readonly AgentEvent[] {
-  if (event.type === "auto_retry_start")
-    return [noteEvent(`Retrying request ${event.attempt}/${event.maxAttempts}: ${event.errorMessage}`)];
-  return event.errorMessage === undefined ? [] : [noteEvent(event.errorMessage)];
+type PiNoteEvent = Extract<
+  AgentSessionEvent,
+  { type: "auto_retry_start" | "compaction_end" | "summarization_retry_scheduled" }
+>;
+
+function translateNote(event: PiNoteEvent): readonly AgentEvent[] {
+  if (event.type === "compaction_end") return event.errorMessage === undefined ? [] : [noteEvent(event.errorMessage)];
+  const subject = event.type === "auto_retry_start" ? "request" : "summarization";
+  return [noteEvent(`Retrying ${subject} ${event.attempt}/${event.maxAttempts}: ${event.errorMessage}`)];
 }
 
 function translateToolStart(
@@ -193,8 +200,7 @@ function translateMessage(
 export function translatePiEvent(event: AgentSessionEvent, state: PiEventState): readonly AgentEvent[] {
   const disposition = PI_EVENT_DISPOSITIONS[event.type];
   if (disposition === "drop") return [];
-  if (disposition === "note")
-    return translateNote(event as Extract<AgentSessionEvent, { type: "auto_retry_start" | "compaction_end" }>);
+  if (disposition === "note") return translateNote(event as PiNoteEvent);
   if (disposition === "tool-start")
     return translateToolStart(event as Extract<AgentSessionEvent, { type: "tool_execution_start" }>, state);
   if (disposition === "tool-end")

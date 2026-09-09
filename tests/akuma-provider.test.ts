@@ -1394,11 +1394,54 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
     { command: `printf %s "$${AKUMA_REQUESTS_ENV}"` },
     new AbortController().signal,
     undefined,
-    {} as never,
+    {
+      sessionManager: {
+        getSessionId: () => "pi-session",
+        getSessionFile: () => "/sessions/pi.jsonl",
+      },
+    } as never,
   );
   assert.deepEqual(result.content, [{ type: "text", text: "/work/requests" }]);
   assert.equal(fake.seen.disposed, 1);
   await attempt.closed;
+});
+
+test("Pi retains summarization retry evidence without progress deltas or premature failure", async () => {
+  const fake = fakePiSdk({
+    events: [
+      {
+        type: "summarization_retry_scheduled",
+        attempt: 1,
+        maxAttempts: 3,
+        delayMs: 1000,
+        errorMessage: "temporarily unavailable",
+      },
+      { type: "summarization_retry_attempt_start", source: "compaction", reason: "threshold" },
+      { type: "summarization_retry_attempt_start", source: "branchSummary" },
+      { type: "summarization_retry_finished" },
+      { type: "bash_execution_update", id: "bash-1", delta: "private partial output" },
+      { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "done" }] } },
+    ],
+  });
+  const attempt = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start({
+    ...DRIVE_DEFAULTS,
+    body: "work",
+    launchTells: [],
+    cwd: "/work",
+    options: {},
+    session: { kind: "fresh" },
+  });
+  const drive = await attempt.result;
+  const events: AgentEvent[] = [];
+  for await (const event of drive.events) events.push(event);
+  assert.deepEqual(events, [
+    { type: "session", coordinate: { sessionFile: "/sessions/pi.jsonl", sessionId: "pi-session" } },
+    { type: "note", text: "Retrying summarization 1/3: temporarily unavailable" },
+    { type: "assistant", text: "done" },
+  ]);
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "done", historyId: "entry-final" });
+  await attempt.closed;
+  assert.equal(fake.seen.disposed, 1);
 });
 
 test("Pi appends JSON Schema text when native structured output is unavailable", async () => {
