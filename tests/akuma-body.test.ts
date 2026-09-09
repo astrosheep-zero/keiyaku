@@ -56,7 +56,7 @@ import {
 import { requestForwardedAkumaCall as requestBodyCall } from "../src/akuma/call-request.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import type { PluginSignal } from "../src/plugin/public.js";
-import { pluginRuntime } from "../src/plugin/runtime.js";
+import { drainPluginRuntime, pluginRuntime } from "../src/plugin/runtime.js";
 import { createCodexAppServerProvider } from "../src/akuma/providers/codex-app-server/index.js";
 import { World } from "../src/world.js";
 
@@ -244,6 +244,11 @@ async function driveAkumaBody(
   const normalized = normalizeLaunch(launch);
   if (adapter === undefined) await runAkumaBody(normalized, undefined, runtime);
   else await runAkumaBody(normalized, bodyAdapter(adapter), runtime);
+}
+
+async function removeDrivenBodyFixture(root: string): Promise<void> {
+  await drainPluginRuntime(await World.at(root));
+  rmSync(root, { recursive: true, force: true });
 }
 
 async function recordTell(
@@ -477,7 +482,7 @@ test("body births, admits native session, records the turn, and exits only when 
     assert.deepEqual(second.pending, []);
     assert.equal(second.latestBody?.end, "exited");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeDrivenBodyFixture(root);
   }
 });
 
@@ -803,7 +808,7 @@ test("live receipt persistence waits for its Body-scoped delivery mapping", asyn
     await body;
     assert.deepEqual((await readHeart(allocated.paths)).pending, []);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeDrivenBodyFixture(root);
   }
 });
 
@@ -880,7 +885,7 @@ test("a receipt-free live acknowledgement settles the tell in the current Body",
     await body;
     assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, 1);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeDrivenBodyFixture(root);
   }
 });
 
@@ -968,7 +973,7 @@ test("a Session without live tell hands off while narration remains open", async
     assert.deepEqual((await readHeart(allocated.paths)).pending, []);
     assert.equal((await outcomes(allocated.paths)).length, 1);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeDrivenBodyFixture(root);
   }
 });
 
@@ -1034,7 +1039,7 @@ test("a successor Body redelivers a Tell left bound before predecessor delivery"
     assert.equal(predecessorRow?.end, null);
     assert.equal(predecessorRow?.hung_diagnostic, null);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeDrivenBodyFixture(root);
   }
 });
 
@@ -1069,7 +1074,7 @@ test("a failed release recovery spawn records Heart undelivered disposition", as
     assert.equal(await readOpenPendingTellDisposition(allocated.paths), null);
     assert.match(readFileSync(allocated.paths.log, "utf8"), /pending Tell disposition undelivered: spawn denied/);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeDrivenBodyFixture(root);
   }
 });
 
@@ -1109,7 +1114,7 @@ test("a new Tell arriving while spawn fails stays pending for its own wake", asy
     assert.equal((await readTell(allocated.paths, "tell-concurrent"))?.state, "pending");
     assert.equal(await readOpenPendingTellDisposition(allocated.paths), null);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeDrivenBodyFixture(root);
   }
 });
 
@@ -1149,7 +1154,7 @@ test("unproven successor custody records Heart undelivered disposition", async (
       /pending Tell disposition undelivered: pre-admission exit 1/,
     );
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeDrivenBodyFixture(root);
   }
 });
 
@@ -1200,7 +1205,7 @@ test("duplicate wake after a recorded successor disposition does not create a se
     assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, 2);
     assert.deepEqual((await readHeart(allocated.paths)).pending, []);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeDrivenBodyFixture(root);
   }
 });
 
@@ -1256,7 +1261,7 @@ test("successor Body record before admission failure yields Heart undelivered fo
       /pending Tell disposition undelivered: pre-admission exit 1/,
     );
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeDrivenBodyFixture(root);
   }
 });
 
@@ -1485,7 +1490,7 @@ test("a provider admission failure ends the Body without spawning a successor fo
     assert.deepEqual((await readHeart(allocated.paths)).pending, []);
     assert.equal((await readHeart(allocated.paths)).latestBody?.end, "exited");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeDrivenBodyFixture(root);
   }
 });
 
@@ -1521,7 +1526,7 @@ test("Body persists the original Codex admission diagnostic as the failed Turn r
       false,
     );
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeDrivenBodyFixture(root);
   }
 });
 
@@ -1618,7 +1623,7 @@ test("a Tell after Session terminality stays pending without replacing the answe
     assert.deepEqual((await readHeart(allocated.paths)).pending, []);
     assert.equal((await readHeart(allocated.paths)).latestBody?.end, "exited");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeDrivenBodyFixture(root);
   }
 });
 
@@ -1673,7 +1678,7 @@ test("receipt persistence failure aborts the Session and terminates the Body", a
       diagnostic: "tell receipt has no delivery mapping",
     });
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeDrivenBodyFixture(root);
   }
 });
 
@@ -1730,7 +1735,7 @@ test("request-pump failure aborts the Session and closes request transport", asy
       diagnostic: "ENOTDIR: not a directory, scandir '" + directory + "'",
     });
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeDrivenBodyFixture(root);
   }
 });
 
@@ -1792,7 +1797,7 @@ test("request-pump failure aborts pending ProviderAdapter.start and closes trans
       diagnostic: "ENOTDIR: not a directory, scandir '" + directory + "'",
     });
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeDrivenBodyFixture(root);
   }
 });
 
@@ -1911,7 +1916,7 @@ test("a drive drains Body Requests before recording its terminal turn", async ()
   } finally {
     if (priorHome === undefined) delete process.env.HOME;
     else process.env.HOME = priorHome;
-    rmSync(root, { recursive: true, force: true });
+    await removeDrivenBodyFixture(root);
   }
 });
 
@@ -1987,7 +1992,7 @@ test("a fork-born body sleeps without a turn and its first tell resumes the chil
       session: { sessionId: "native-child" },
     });
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeDrivenBodyFixture(root);
   }
 });
 
@@ -2014,7 +2019,7 @@ test("the soul retains the summon cwd before native session admission", async ()
       diagnostic: "failed before session",
     });
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeDrivenBodyFixture(root);
   }
 });
 
@@ -2040,7 +2045,7 @@ test("an answer without an admitted or resumed session is retained as a failed t
     });
     assert.equal((await readHeart(allocated.paths)).latestBody?.end, "broke-off");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeDrivenBodyFixture(root);
   }
 });
 
@@ -2103,7 +2108,7 @@ test("a successor admits through the leash without reconstructing custody of an 
     });
     assert.equal(snapshot.latestBody?.end, "exited");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeDrivenBodyFixture(root);
   }
 });
 
@@ -2148,7 +2153,7 @@ test("pause aborts stalled provider setup and records clean Body settlement", as
     assert.deepEqual(await outcomes(allocated.paths), []);
     assert.equal(await probeLeash(allocated.paths), "free");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeDrivenBodyFixture(root);
   }
 });
 
@@ -2222,7 +2227,7 @@ test("pause interrupts pre-drive reserved-request recovery", async () => {
       childLeash.release();
     }
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeDrivenBodyFixture(root);
   }
 });
 
@@ -2281,7 +2286,7 @@ test("pause aborts the current drive and records the body as put down", async ()
     assert.equal(await pauseRequested(allocated.paths), true);
     assert.equal(await probeLeash(allocated.paths), "free");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeDrivenBodyFixture(root);
   }
 });
 
@@ -2328,7 +2333,7 @@ test("forced disposal failure records hung and broke-off before the Body returns
     assert.equal(heart.latestBody?.end, "broke-off");
     assert.equal(await probeLeash(allocated.paths), "free");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeDrivenBodyFixture(root);
   }
 });
 
@@ -2388,7 +2393,7 @@ test("provider closure failure enters Body supervision before session completion
     });
     assert.equal(heart.latestBody?.end, "broke-off");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeDrivenBodyFixture(root);
   }
 });
 
@@ -2479,7 +2484,7 @@ test("a stalled Tell is fenced by Body cancellation before leash release", async
     assert.equal((await readHeart(allocated.paths)).pending.length, 1);
   } finally {
     releaseTell?.();
-    rmSync(root, { recursive: true, force: true });
+    await removeDrivenBodyFixture(root);
   }
 });
 
@@ -2563,7 +2568,7 @@ test("successor drain binds admission-order Tells and keeps a later schema Tell 
     assert.notEqual(firstTell?.binding?.turnSequence, undefined);
     assert.equal(schemaTell?.binding, undefined);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeDrivenBodyFixture(root);
   }
 });
 
@@ -2644,7 +2649,7 @@ test("schema Turn malformed JSON is invalid-output and open bound Turns fail whe
     const failed = bound?.binding === undefined ? null : await readTurn(allocated.paths, bound.binding.turnSequence);
     assert.equal(failed?.end?.outcome.kind, "failed");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeDrivenBodyFixture(root);
   }
 });
 
@@ -2692,5 +2697,5 @@ test("heart loss wakes a Body stalled on provider observation", async () => {
   ]);
   assert.equal(aborted, true);
   assert.equal(existsSync(allocated.paths.heart), false);
-  rmSync(root, { recursive: true, force: true });
+  await removeDrivenBodyFixture(root);
 });
