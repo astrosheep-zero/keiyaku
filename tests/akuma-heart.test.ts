@@ -961,7 +961,7 @@ test("unknown Body Request state is authority corruption", async () => {
   }
 });
 
-test("heart schema version 27 and leash schema version 4 hard-refuse old authority", async () => {
+test("heart schema version 28 and leash schema version 4 hard-refuse old authority", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-schema-cut-"));
   const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "30000000" });
   try {
@@ -975,7 +975,7 @@ test("heart schema version 27 and leash schema version 4 hard-refuse old authori
       "CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)",
     );
     leash.close();
-    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 27/u);
+    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 28/u);
     await assert.rejects(HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -1904,6 +1904,77 @@ test("undelivered disposition settles only its persisted snapshot and cannot dec
     assert.equal(await resolvePendingTellDisposition(paths, body.sequence, at, "undelivered"), true);
     assert.equal((await readTell(paths, "after"))?.state, "pending");
     await assert.rejects(resolvePendingTellDisposition(paths, body.sequence + 100, at), /disposition .* is missing/);
+  } finally {
+    leash.release();
+    value.close();
+  }
+});
+
+test("protected backlog does not repeat unchanged sweeps and releasing a Tell triggers reclamation", async (t) => {
+  const value = await fixture();
+  const paths = value.allocated.paths;
+  const at = value.soul.createdAt;
+  const leash = (await HeldAkumaLeash.try(paths))!;
+  try {
+    await leash.birth(paths, value.soul);
+    const body = await leash.recordBody(paths, { leashTakenAt: at });
+    const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: at });
+    const database = new DatabaseSync(paths.heart);
+    try {
+      database.exec("PRAGMA foreign_keys=ON; BEGIN IMMEDIATE");
+      const insert = database.prepare("INSERT INTO timeline(kind) VALUES ('tell')");
+      const tell = database.prepare("INSERT INTO tells(id, sequence, body, recorded_at) VALUES (?, ?, 'pending', ?)");
+      for (let index = 0; index < 5501; index += 1) tell.run(`pending-${index}`, insert.run().lastInsertRowid, at);
+      database.exec("COMMIT");
+    } finally { database.close(); }
+    const prepare = DatabaseSync.prototype.prepare;
+    let sweeps = 0;
+    let fullCounts = 0;
+    t.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {
+      if (sql.includes("DELETE FROM timeline")) sweeps += 1;
+      if (/COUNT\(\*\).*FROM timeline/i.test(sql)) fullCounts += 1;
+      return prepare.call(this, sql);
+    });
+    // Each append reopens Heart, so the assertion also proves the maintenance
+    // cursor survives connection lifetimes rather than being an in-memory cache.
+    for (let index = 0; index < 20; index += 1) await appendActivity(paths, {
+      turnSequence: turn.sequence, event: { type: "note", text: `update-${index}` }, at,
+    });
+    assert.equal(sweeps, 1, "protected-only sweeps are not repeated for every append");
+    assert.equal(fullCounts, 0, "the append path must not count the full retained timeline");
+    await recordTellReceipt(paths, { evidence: "exact", tellId: "pending-0", kind: "consumed", receivedAt: at });
+    assert.equal(sweeps, 2, "releasing protection creates a reclamation opportunity without 500 new events");
+    assert.equal(await readTell(paths, "pending-0"), null);
+    assert.equal((await readTell(paths, "pending-1"))?.state, "pending");
+    const retained = await readHeart(paths);
+    assert.equal(retained.pending.length, 5500);
+  } finally {
+    leash.release();
+    value.close();
+  }
+});
+
+test("retention window counts retained facts rather than gaps in their sequence", async () => {
+  const value = await fixture();
+  const paths = value.allocated.paths;
+  const at = value.soul.createdAt;
+  const leash = (await HeldAkumaLeash.try(paths))!;
+  try {
+    await leash.birth(paths, value.soul);
+    const body = await leash.recordBody(paths, { leashTakenAt: at });
+    const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: at });
+    const database = new DatabaseSync(paths.heart);
+    try {
+      database.exec("PRAGMA foreign_keys=ON; BEGIN IMMEDIATE");
+      database.exec(`WITH RECURSIVE rows(value) AS (
+        VALUES(1) UNION ALL SELECT value + 1 FROM rows WHERE value < 5501
+      ) INSERT INTO timeline(sequence, kind) SELECT 100000 + value * 10, 'activity' FROM rows`);
+      database.prepare(`INSERT INTO activity(sequence, turn_sequence, event_json, at)
+        SELECT sequence, ?, '{"type":"note","text":"sparse"}', ? FROM timeline WHERE kind='activity'`).run(turn.sequence, at);
+      database.exec("COMMIT");
+    } finally { database.close(); }
+    await appendActivity(paths, { turnSequence: turn.sequence, event: { type: "note", text: "trigger" }, at });
+    assert.equal((await activitySlice(paths)).rows.filter((row) => row.kind === "activity").length, 5000);
   } finally {
     leash.release();
     value.close();

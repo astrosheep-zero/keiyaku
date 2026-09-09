@@ -114,7 +114,7 @@ export function tellFact(database: DatabaseSync, id: string): TellFact | null {
   return row === undefined ? null : decodeTellRow(database, row);
 }
 
-export function insertTellDeliveryFact(database: DatabaseSync, input: TellDeliveryInput): void {
+export function insertTellDeliveryFact(database: DatabaseSync, input: TellDeliveryInput): boolean {
   const result = database
     .prepare(
       `INSERT OR IGNORE INTO tell_deliveries(
@@ -142,10 +142,11 @@ export function insertTellDeliveryFact(database: DatabaseSync, input: TellDelive
   ) {
     throw new Error(`tell delivery ${input.tellId} has conflicting evidence`);
   }
+  return result.changes !== 0;
 }
 
-export function insertTellReceiptFact(database: DatabaseSync, input: TellReceiptInput): void {
-  database
+export function insertTellReceiptFact(database: DatabaseSync, input: TellReceiptInput): boolean {
+  const result = database
     .prepare(
       `INSERT OR IGNORE INTO tell_receipts(
     evidence, tell_id, turn_sequence, fence, kind, received_at
@@ -159,6 +160,7 @@ export function insertTellReceiptFact(database: DatabaseSync, input: TellReceipt
       input.kind,
       input.receivedAt,
     );
+  return result.changes !== 0;
 }
 
 export function tellIdsForFence(database: DatabaseSync, turnSequence: number, fence: string): readonly string[] {
