@@ -1,0 +1,72 @@
+name: Test economy 50 benchmark
+
+on:
+  push:
+    branches:
+      - codex/test-performance-benchmark-20260910
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24.x
+          cache: npm
+      - uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.14.1
+      - name: Prepare pinned worktrees
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config --global user.name "Keiyaku CI"
+          git config --global user.email "keiyaku-ci@example.invalid"
+          git worktree add --detach /tmp/keiyaku-baseline 7e8619c9594b412dfa4e404775e9c59332f7d55e
+          git worktree add --detach /tmp/keiyaku-candidate 12f23c1751fb1fa7ad18afceec79265410cd8c2b
+          npm --prefix /tmp/keiyaku-baseline ci --ignore-scripts --prefer-offline
+          npm --prefix /tmp/keiyaku-candidate ci --ignore-scripts --prefer-offline
+      - name: Run paired full-command benchmark
+        shell: bash
+        env:
+          KNIP_DISABLE_RAW_TRANSFER: "1"
+        run: |
+          set -euo pipefail
+          : > /tmp/times.tsv
+          run_one() {
+            label="$1"; dir="$2"; measured="$3"
+            start=$(date +%s%3N)
+            (cd "$dir" && npm test)
+            end=$(date +%s%3N)
+            elapsed=$((end-start))
+            echo "$label $measured $elapsed"
+            if [ "$measured" = measured ]; then printf '%s\t%s\n' "$label" "$elapsed" >> /tmp/times.tsv; fi
+          }
+          run_one baseline /tmp/keiyaku-baseline warmup
+          run_one candidate /tmp/keiyaku-candidate warmup
+          run_one baseline /tmp/keiyaku-baseline measured
+          run_one candidate /tmp/keiyaku-candidate measured
+          run_one candidate /tmp/keiyaku-candidate measured
+          run_one baseline /tmp/keiyaku-baseline measured
+          run_one baseline /tmp/keiyaku-baseline measured
+          run_one candidate /tmp/keiyaku-candidate measured
+          python3 - <<'PY'
+          import statistics
+          rows=[line.split() for line in open('/tmp/times.tsv') if line.strip()]
+          data={k:[] for k in ('baseline','candidate')}
+          for label, ms in rows: data[label].append(int(ms))
+          b=statistics.median(data['baseline']); c=statistics.median(data['candidate'])
+          improvement=1-c/b
+          print('baseline_ms', data['baseline'], 'median', b)
+          print('candidate_ms', data['candidate'], 'median', c)
+          print('improvement_pct', improvement*100)
+          if improvement < 0.50:
+              raise SystemExit(f'performance target not met: {improvement*100:.2f}% < 50%')
+          PY
