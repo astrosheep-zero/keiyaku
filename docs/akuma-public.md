@@ -53,6 +53,12 @@ unavailability evidence. Hung, untidy, and resume-unsupported state preserve
 their durable cause and available facts; the surface does not prescribe the
 flagship's next action.
 
+Lifecycle observation must not manufacture an unclean end by combining old
+running evidence with a Body's later leash release. A free-seat judgment uses
+fresh Heart evidence protected against succession for that bounded observation;
+it neither mutates lifecycle facts nor retains execution custody afterward.
+This is not a frozen view of subsequent activity or a barrier to future Bodies.
+
 The fleet is a compact bounded recent-activity roster, not a smaller status
 view. Its order is the later of each readable Heart's life and activity evidence,
 with complete identity breaking equal activity and untimestamped rows following

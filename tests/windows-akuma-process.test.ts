@@ -230,7 +230,7 @@ test("a released Akuma Body completes through Pi and an OpenAI chat completion e
         .filter((line) => line.length > 0),
       ["request"],
     );
-    assert.equal(status.life, "asleep");
+    assert.equal(status.life, "asleep", JSON.stringify(status));
     assert.equal(status.timeline.kind === "idle" && status.timeline.outcome?.outcome.kind === "answered", true);
     const history = await handle.history();
     assert.ok("rows" in history);

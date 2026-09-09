@@ -1,5 +1,6 @@
 import {
   activitySlice,
+  HeldAkumaLeash,
   isHeartAbsent,
   life,
   lifeAt,
@@ -25,7 +26,7 @@ import { AkumaNotBornError } from "./akuma-errors.js";
 
 export async function fleetListRow(paths: AkumaPaths, expected: AkuId): Promise<AkumaListRow | UnbornAkumaListRow> {
   const snapshot = await readHeart(paths);
-  if (snapshot.soul !== null) return await bornListRow(paths, expected, snapshot);
+  if (snapshot.soul !== null) return (await bornObservation(paths, expected, snapshot)).row;
   try {
     if ((await probeLeash(paths)) === "held") return { id: expected, life: "unborn" };
     const seal = await readSeal(paths);
@@ -36,20 +37,38 @@ export async function fleetListRow(paths: AkumaPaths, expected: AkuId): Promise<
   }
 }
 
-async function bornListRow(paths: AkumaPaths, expected: AkuId, snapshot?: HeartSnapshot): Promise<AkumaListRow> {
+async function bornObservation(paths: AkumaPaths, expected: AkuId, snapshot?: HeartSnapshot) {
   snapshot ??= await readHeart(paths);
   if (snapshot.soul === null) throw new AkumaNotBornError(expected);
-  if (snapshot.soul.id !== expected) throw new Error("Akuma soul does not match its coordinate");
-  const currentLife = life({ leash: await probeLeash(paths), body: snapshot.latestBody, kill: snapshot.latestKill });
-  return {
-    id: snapshot.soul.id,
-    archetype: snapshot.soul.archetype,
-    ...(snapshot.soul.description === undefined ? {} : { description: snapshot.soul.description }),
-    life: currentLife,
-    lifeAt: lifeAt(currentLife, snapshot.latestBody, snapshot.latestKill, snapshot.soul.createdAt),
-    lastActivityAt: snapshot.lastActivityAt,
-    pending: snapshot.pending.map((tell) => tell.id),
-  };
+  const claim = await HeldAkumaLeash.try(paths);
+  try {
+    // A Body may finish after the first read. Refresh under the free seat so
+    // neither its release nor a successor can manufacture an untidy observation.
+    if (claim !== null) snapshot = await readHeart(paths);
+    const soul = snapshot.soul;
+    if (soul === null) throw new AkumaNotBornError(expected);
+    if (soul.id !== expected) throw new Error("Akuma soul does not match its coordinate");
+    const currentLife = life({
+      leash: claim === null ? "held" : "free",
+      body: snapshot.latestBody,
+      kill: snapshot.latestKill,
+    });
+    return {
+      snapshot,
+      soul,
+      row: {
+        id: soul.id,
+        archetype: soul.archetype,
+        ...(soul.description === undefined ? {} : { description: soul.description }),
+        life: currentLife,
+        lifeAt: lifeAt(currentLife, snapshot.latestBody, snapshot.latestKill, soul.createdAt),
+        lastActivityAt: snapshot.lastActivityAt,
+        pending: snapshot.pending.map((tell) => tell.id),
+      } satisfies AkumaListRow,
+    };
+  } finally {
+    claim?.release();
+  }
 }
 
 export type BudgetedStatusObservation = Readonly<{ status: AkumaStatus; ordinarySelected: number }>;
@@ -61,13 +80,11 @@ export async function bornStatus(
 ): Promise<BudgetedStatusObservation> {
   if (input.ordinaryBudget !== undefined && (!Number.isSafeInteger(input.ordinaryBudget) || input.ordinaryBudget < 0))
     throw new TypeError("ordinary budget must be a nonnegative safe integer");
-  const snapshot = await readHeart(paths);
-  if (snapshot.soul === null) throw new AkumaNotBornError(expected);
-  const current = await bornListRow(paths, expected, snapshot);
+  const { snapshot, soul, row: current } = await bornObservation(paths, expected);
   const resumeUnsupported =
     current.life === "stranded" &&
-    snapshot.latestSession?.provider === snapshot.soul.provider.name &&
-    (await resolveProviderExecution(snapshot.soul.provider)).adapter.resume === undefined;
+    snapshot.latestSession?.provider === soul.provider.name &&
+    (await resolveProviderExecution(soul.provider)).adapter.resume === undefined;
   const slice = await activitySlice(paths);
   const selected = selectSnapshot(projectTurns(slice.rows), {
     aperture: input.aperture,
@@ -78,7 +95,7 @@ export async function bornStatus(
     status: {
       id: current.id,
       life: current.life,
-      ...(snapshot.soul.readonly === undefined ? {} : { readonly: snapshot.soul.readonly }),
+      ...(soul.readonly === undefined ? {} : { readonly: soul.readonly }),
       ...(resumeUnsupported ? { strandedReason: "resume-unsupported" as const } : {}),
       timeline: selected.snapshot,
     },

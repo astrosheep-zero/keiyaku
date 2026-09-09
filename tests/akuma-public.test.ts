@@ -26,6 +26,7 @@ import {
   appendActivity,
   beginTurn,
   breakBody,
+  endTurn,
   finishBodyIfIdle,
   HeldAkumaLeash,
   initializeHeart,
@@ -491,6 +492,68 @@ test("public fleet rows wire every Heart life to its source timestamp", async ()
     assert.equal("lifeAt" in rows.find((entry) => entry.id === stillborn.id)!, false);
   } finally {
     for (const holder of holders) holder.release();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+for (const observation of ["status", "wait", "fleet"] as const) {
+  test(`${observation} observes a Body that finishes between Heart read and leash probe`, async (t) => {
+    const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-observe-end-"));
+    const value = await bornHistoryHandle(root, "f0000009");
+    const originalTry = HeldAkumaLeash.try;
+    const target = value.allocated.paths.leash.replace(/^\/private/u, "");
+    let finished = false;
+    const mockedTry = t.mock.method(HeldAkumaLeash, "try", async (paths: typeof value.allocated.paths) => {
+      if (!finished && paths.leash.replace(/^\/private/u, "") === target) {
+        finished = true;
+        await endTurn(paths, {
+          turnSequence: value.turn.sequence,
+          outcome: { kind: "answered", answer: "finished", session: { sessionId: "observation-fixture" } },
+          completedAt: "2026-08-12T00:05:00.000Z",
+        });
+        await finishBodyIfIdle(paths, { sequence: value.turn.bodySequence, at: "2026-08-12T00:05:00.000Z" });
+        value.holder.release();
+      }
+      return await originalTry(paths);
+    });
+    try {
+      const result =
+        observation === "fleet"
+          ? (await (await akumaAt(root)).list()).rows.find((row) => row.id === value.allocated.id)
+          : observation === "wait"
+            ? await value.handle.wait(undefined, { timeoutMs: 1_000 })
+            : await value.handle.status();
+      assert.equal(finished, true);
+      assert.equal(result?.life, "asleep");
+      if (result !== undefined && "lifeAt" in result) assert.equal(result.lifeAt, "2026-08-12T00:05:00.000Z");
+      if (result !== undefined && "timeline" in result) {
+        assert.equal(result.timeline.kind, "idle");
+        if (result.timeline.kind === "idle") assert.equal(result.timeline.outcome?.outcome.kind, "answered");
+      }
+    } finally {
+      mockedTry.mock.restore();
+      value.holder.release();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("a failed Heart refresh releases the observation's free leash claim", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-observe-corrupt-"));
+  const value = await bornHistoryHandle(root, "f000000a");
+  value.holder.release();
+  const originalTry = HeldAkumaLeash.try;
+  const mockedTry = t.mock.method(HeldAkumaLeash, "try", async (paths: typeof value.allocated.paths) => {
+    const claim = await originalTry(paths);
+    if (claim !== null) writeFileSync(paths.heart, "not a database");
+    return claim;
+  });
+  try {
+    await assert.rejects(value.handle.status(), /not a database/u);
+    mockedTry.mock.restore();
+    assert.equal(await probeLeash(value.allocated.paths), "free");
+  } finally {
+    mockedTry.mock.restore();
     rmSync(root, { recursive: true, force: true });
   }
 });
