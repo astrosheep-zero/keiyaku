@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { CallFact, TellFact, TurnEndFact, TurnFact, TurnStartFact } from "./facts.js";
+import type { CallFact, TellFact, TurnEndFact, TurnStartFact } from "./facts.js";
 import {
   decodeActivityRow,
   decodeCallRow,
@@ -9,7 +9,7 @@ import {
   type CallRow,
   type TurnRow,
 } from "./rows.js";
-import { decodeTellAtSequence, pendingTellProtectionSql, pendingTellSequencesSql } from "./tells.js";
+import { tellFactsAtSequences, tellStateSql, pendingTellProtectionSql, pendingTellSequencesSql } from "./tells.js";
 
 export type TimelineFact = TurnStartFact | CallFact | ActivityFact | TellFact | TurnEndFact;
 export type ActivityFactSlice = Readonly<{
@@ -82,63 +82,80 @@ type TimelineRow = Readonly<{
   kind: "turn-start" | "call" | "activity" | "tell" | "turn-end";
 }>;
 
-function turn(database: DatabaseSync, sequence: number): TurnFact {
-  const row = database
+function decodeTimelineRows(database: DatabaseSync, rows: readonly TimelineRow[]): readonly TimelineFact[] {
+  const sequences = (kind: TimelineRow["kind"]) =>
+    JSON.stringify(rows.filter((row) => row.kind === kind).map((row) => row.sequence));
+  const facts = new Map<number, TimelineFact>();
+  const turns = database
     .prepare(
       `SELECT sequence, body_sequence, started_at, end_sequence, outcome,
-    history_id, session_json, answer, answer_json, schema_json, diagnostic, completed_at FROM turns WHERE sequence = ?`,
+    history_id, session_json, answer, answer_json, schema_json, diagnostic, completed_at FROM turns
+    WHERE sequence IN (SELECT value FROM json_each(?)) OR end_sequence IN (SELECT value FROM json_each(?))`,
     )
-    .get(sequence) as TurnRow | undefined;
-  if (row === undefined) throw new Error(`Akuma timeline references missing Turn ${sequence}`);
-  return decodeTurnRow(row);
-}
-
-function turnStart(database: DatabaseSync, sequence: number): TurnStartFact {
-  const row = database
-    .prepare("SELECT sequence, body_sequence, started_at, schema_json FROM turns WHERE sequence = ?")
-    .get(sequence) as
-    | {
-        sequence: number;
-        body_sequence: number;
-        started_at: string;
-        schema_json: string | null;
-      }
-    | undefined;
-  if (row === undefined) throw new Error(`Akuma timeline references missing Turn ${sequence}`);
-  return {
-    kind: "turn-start",
-    sequence: row.sequence,
-    bodySequence: row.body_sequence,
-    startedAt: row.started_at,
-    ...(row.schema_json === null ? {} : { schemaJson: row.schema_json }),
-  };
-}
-
-function decodeTimelineRow(database: DatabaseSync, row: TimelineRow): TimelineFact {
-  if (row.kind === "turn-start") return turnStart(database, row.sequence);
-  if (row.kind === "turn-end") {
-    const source = database.prepare("SELECT sequence FROM turns WHERE end_sequence = ?").get(row.sequence) as
-      | { sequence: number }
-      | undefined;
-    const fact = source === undefined ? undefined : turn(database, source.sequence).end;
-    if (fact === undefined) throw new Error(`Akuma timeline references missing Turn end ${row.sequence}`);
+    .all(sequences("turn-start"), sequences("turn-end")) as unknown as readonly TurnRow[];
+  for (const row of turns) {
+    const { end, ...start } = decodeTurnRow(row);
+    facts.set(start.sequence, start);
+    if (end !== undefined) facts.set(end.sequence, end);
+  }
+  const calls = database
+    .prepare(
+      `SELECT sequence, turn_sequence, body, at FROM calls
+    WHERE sequence IN (SELECT value FROM json_each(?))`,
+    )
+    .all(sequences("call")) as unknown as readonly CallRow[];
+  for (const row of calls) facts.set(row.sequence, decodeCallRow(row));
+  const activity = database
+    .prepare(
+      `SELECT sequence, turn_sequence, event_json, at FROM activity
+    WHERE sequence IN (SELECT value FROM json_each(?))`,
+    )
+    .all(sequences("activity")) as unknown as readonly ActivityRow[];
+  for (const row of activity) facts.set(row.sequence, decodeActivityRow(row));
+  const tells = tellFactsAtSequences(
+    database,
+    rows.filter((row) => row.kind === "tell").map((row) => row.sequence),
+  );
+  for (const fact of tells) facts.set(fact.sequence, fact);
+  return rows.map((row) => {
+    const fact = facts.get(row.sequence);
+    if (fact === undefined || fact.kind !== row.kind)
+      throw new Error(`Akuma timeline references missing ${row.kind} ${row.sequence}`);
     return fact;
-  }
-  if (row.kind === "call") {
-    const value = database
-      .prepare("SELECT sequence, turn_sequence, body, at FROM calls WHERE sequence = ?")
-      .get(row.sequence) as CallRow | undefined;
-    if (value === undefined) throw new Error(`Akuma timeline references missing call ${row.sequence}`);
-    return decodeCallRow(value);
-  }
-  if (row.kind === "activity") {
-    const value = database
-      .prepare("SELECT sequence, turn_sequence, event_json, at FROM activity WHERE sequence = ?")
-      .get(row.sequence) as ActivityRow | undefined;
-    if (value === undefined) throw new Error(`Akuma timeline references missing activity ${row.sequence}`);
-    return decodeActivityRow(value);
-  }
-  return decodeTellAtSequence(database, row.sequence);
+  });
+}
+
+export type StatusFactInput = Readonly<{ aperture: "monitoring" | "receipt"; admittedTellId?: string }>;
+
+/** Select the frontier and Tell pins, not an arbitrary tail of raw events. */
+export function statusFacts(database: DatabaseSync, input: StatusFactInput): readonly TimelineFact[] {
+  const frontier = database.prepare("SELECT sequence FROM turns ORDER BY sequence DESC LIMIT 1").get() as
+    | { sequence: number }
+    | undefined;
+  const rows = database
+    .prepare(
+      `WITH selected(sequence) AS (
+      SELECT sequence FROM turns WHERE sequence = ?
+      UNION SELECT end_sequence FROM turns WHERE sequence = ? AND end_sequence IS NOT NULL
+      UNION SELECT sequence FROM calls WHERE turn_sequence = ?
+      UNION SELECT sequence FROM activity WHERE turn_sequence = ?
+      UNION SELECT MAX(end_sequence) FROM turns
+      UNION SELECT sequence FROM tells WHERE id = ?
+      UNION SELECT sequence FROM tells WHERE ? AND ${tellStateSql} = 'pending'
+      UNION SELECT MAX(sequence) FROM tells WHERE ? AND ${tellStateSql} = 'told'
+      UNION SELECT MAX(sequence) FROM tells
+    ) SELECT timeline.sequence, timeline.kind FROM timeline JOIN selected USING(sequence) ORDER BY sequence`,
+    )
+    .all(
+      frontier?.sequence ?? null,
+      frontier?.sequence ?? null,
+      frontier?.sequence ?? null,
+      frontier?.sequence ?? null,
+      input.admittedTellId ?? null,
+      input.aperture === "monitoring" || input.admittedTellId === undefined ? 1 : 0,
+      input.aperture === "monitoring" ? 1 : 0,
+    ) as unknown as readonly TimelineRow[];
+  return decodeTimelineRows(database, rows);
 }
 
 export function activityFactSlice(database: DatabaseSync): ActivityFactSlice {
@@ -150,7 +167,7 @@ export function activityFactSlice(database: DatabaseSync): ActivityFactSlice {
     .prepare("SELECT sequence, kind FROM timeline ORDER BY sequence")
     .all() as unknown as readonly TimelineRow[];
   return {
-    rows: rows.map((row) => decodeTimelineRow(database, row)),
+    rows: decodeTimelineRows(database, rows),
     lowestRetained: bounds.lowest,
     highest: bounds.highest,
   };

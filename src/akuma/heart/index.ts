@@ -51,6 +51,7 @@ import {
   openBoundTurns,
   openTellDispositionIds,
   pendingTellFacts,
+  hasPendingTell,
   resolveTellDispositionSnapshot,
   tellDispositionResolved,
   tellFact,
@@ -58,6 +59,8 @@ import {
 } from "./tells.js";
 import {
   activityFactSlice,
+  statusFacts,
+  type StatusFactInput,
   lastActivityAt as readLastActivityAt,
   pruneActivityFacts,
   type ActivityFactSlice,
@@ -170,6 +173,30 @@ export type { TimelineFact } from "./timeline.js";
 
 export async function activitySlice(paths: AkumaPaths): Promise<ActivitySlice> {
   return await withReadOnlyHeart(paths, (heart) => activityFactSlice(heart));
+}
+
+export async function readStatusFacts(paths: AkumaPaths, input: StatusFactInput): Promise<ActivitySlice["rows"]> {
+  return await withReadOnlyHeart(paths, (heart) => statusFacts(heart, input));
+}
+
+type LifeSnapshot = Pick<HeartSnapshot, "soul" | "latestBody" | "latestSession" | "latestKill"> &
+  Readonly<{ hasPendingTell: boolean }>;
+
+/** Lifecycle probes do not load narration, Tell bodies, or delivery histories. */
+export async function readLifeSnapshot(paths: AkumaPaths): Promise<LifeSnapshot> {
+  try {
+    return await withReadOnlyHeart(paths, (heart) => ({
+      soul: soulFact(heart),
+      latestBody: latestBodyFact(heart),
+      latestSession: latestSessionFact(heart),
+      latestKill: latestKillFact(heart),
+      hasPendingTell: hasPendingTell(heart),
+    }));
+  } catch (error) {
+    if (isHeartAbsent(error))
+      return { soul: null, latestBody: null, latestSession: null, latestKill: null, hasPendingTell: false };
+    throw error;
+  }
 }
 
 function sameTellInput(
