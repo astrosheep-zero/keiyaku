@@ -1,21 +1,28 @@
-name: Test workbench export
+name: Publish checked test slices
 on:
   push:
     branches: [codex/test-workbench-20260909]
 permissions:
-  contents: read
+  contents: write
 jobs:
-  export:
+  publish:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - name: Export pinned repository history
-        run: git bundle create /tmp/keiyaku.bundle --all
-      - uses: actions/upload-artifact@v4
+      - uses: actions/setup-node@v5
         with:
-          name: repository-history
-          path: /tmp/keiyaku.bundle
-          retention-days: 1
+          node-version: 24.20.0
+      - name: Reproduce and publish checked consumer slice
+        run: |
+          cp .workbench/consumers.py /tmp/consumers.py
+          git checkout --detach 708334cb99e93147a0c572a2ebaa1d63e6b00620
+          npm ci --ignore-scripts --prefer-offline
+          python3 /tmp/consumers.py
+          npx prettier --write --print-width 120 tests/public-library.test.ts 'tests/fixtures/consumers/*.ts'
+          git add tests scripts/test-manifests.mjs tsconfig.tests.json
+          test "$(git write-tree)" = 200a75dbe180fb96b9597985430a433df58d88d3
+          echo 'dHJlZSAyMDBhNzVkYmUxODBmYjk2Yjk1OTc5ODU0MzBhNDMzZGY1OGQ4OGQzCnBhcmVudCA3MDgzMzRjYjk5ZTkzMTQ3YTBjNTcyYTJlYmFhMWQ2M2U2YjAwNjIwCmF1dGhvciBPcGVuQUkgPG5vcmVwbHlAb3BlbmFpLmNvbT4gMTc4ODk2NjEwMSArMDAwMApjb21taXR0ZXIgT3BlbkFJIDxub3JlcGx5QG9wZW5haS5jb20+IDE3ODg5NjYxMDEgKzAwMDAKCnRlc3Q6IGNvbnNvbGlkYXRlIGV4dGVybmFsIHBhY2thZ2UgY29uc3VtZXJzIGFuZCByZW1vdmUgZXhwb3J0IGludmVudG9yaWVzCg==' | base64 -d | git hash-object -t commit -w --stdin
+          git push origin f736135c7a0de4a3c02374ab3a860f830f4fef42:refs/heads/codex/test-package-consumers-20260909
