@@ -15,7 +15,7 @@ jobs:
           ref: main
           fetch-depth: 0
           persist-credentials: false
-      - name: Export source history without credentials
+      - name: Export current final-fix bases without credentials
         run: git bundle create /tmp/keiyaku-audit-source.bundle --all
       - uses: actions/upload-artifact@v4
         with:
