@@ -1,0 +1,38 @@
+name: Publish individual audit fixes
+on:
+  push:
+    branches: [work/audit-export-20260909]
+    paths: [.github/audit-changes/*.json]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Publish exact locally verified trees
+        shell: python
+        run: |
+          import base64, hashlib, json, pathlib, subprocess, zlib
+          def git(*args):
+              return subprocess.check_output(["git", *args], text=True).strip()
+          paths = git("diff", "--name-only", "HEAD^", "HEAD", "--", ".github/audit-changes/").splitlines()
+          changes = [json.loads(pathlib.Path(path).read_text()) for path in paths]
+          for change in changes:
+              assert change["branch"].startswith(("fix/", "perf/"))
+              git("fetch", "--depth=1", "origin", change["base"])
+              git("checkout", "--detach", "FETCH_HEAD")
+              assert git("rev-parse", "HEAD^{tree}") == change["baseTree"], "base changed"
+              patch = zlib.decompress(base64.b64decode(change["patch"]))
+              assert hashlib.sha256(patch).hexdigest() == change["sha256"]
+              pathlib.Path("/tmp/audit-fix.patch").write_bytes(patch)
+              subprocess.run(["git", "apply", "--index", "--binary", "/tmp/audit-fix.patch"], check=True)
+              assert git("write-tree") == change["tree"], "tree differs from locally verified files"
+              git("config", "user.name", "OpenAI")
+              git("config", "user.email", "noreply@openai.com")
+              git("commit", "-m", change["message"])
+              git("push", "origin", "HEAD:refs/heads/" + change["branch"])
+              print(json.dumps({"branch": change["branch"], "commit": git("rev-parse", "HEAD"), "tree": change["tree"]}))
