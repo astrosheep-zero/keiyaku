@@ -31,9 +31,12 @@ test("help resolves the longest legal command-word prefix before syntax scanning
 
 test("namespace and leaf help identify an executable command", () => {
   assert.match(renderRootHelp(), /^usage  keiyaku <command> \[options\]$/mu);
+  assert.match(renderRootHelp(), /--workdir <path>/u);
   assert.match(renderInstallHelp(), /install/u);
   assert.match(renderTaskHelp("add"), /usage  keiyaku task add/u);
   assert.match(renderAkumaHelp("tell"), /usage  keiyaku tell/u);
+  assert.match(renderAkumaHelp("call"), /\[--workdir <path>\]/u);
+  assert.match(renderAkumaHelp("call"), /relative path is relative to the invocation cwd/u);
   assert.match(renderContractHelp("bind"), /stdin is Contract Markdown/u);
 });
 

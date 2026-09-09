@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -20,7 +21,7 @@ import { AkumaArchetypeError, listArchetypeDefinitions, loadArchetype } from "..
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { akumaCallRequestCommands } from "../src/akuma/call-request.js";
 import { HeldAkumaLeash, initializeHeart, readSoul, type Soul } from "../src/akuma/heart/index.js";
-import { allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
+import { akumaRunRoot, allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
 import { Akuma as PublicAkuma, Schema } from "../src/akuma/index.js";
 import { AKUMA_REQUESTS_ENV, createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
@@ -375,7 +376,21 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
     const executionCwd = join(raw.path, "nested-worktree");
     mkdirSync(executionCwd);
     const invoked = await invoke(
-      executable(["-C", executionCwd, "call", "worker", "--repo", "..", "--contract", owner, "--alias", alias, "-"]),
+      executable([
+        "-C",
+        executionCwd,
+        "call",
+        "worker",
+        "--repo",
+        "..",
+        "--contract",
+        owner,
+        "--workdir",
+        ".",
+        "--alias",
+        alias,
+        "-",
+      ]),
       {
         environment: { ...process.env, KEIYAKU_HOME: configured.home },
         readStdin: async () => "associated",
@@ -394,6 +409,7 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
       previous: null,
     });
     assert.equal(associated.observation.kind, "observed");
+    assert.deepEqual(associated.execution, { cwd: realpathSync(executionCwd), source: "input" });
     assert.equal((await readSoul(pathsForAkuId(world, associated.akuma)))?.cwd, realpathSync(executionCwd));
 
     writeFileSync(join(raw.path, ".keiyaku", "akuma", "alias.json"), "broken\n");
@@ -467,7 +483,7 @@ test("managed Contract calls use the appointed Place only when cwd is omitted", 
     assert.equal(appointment.kind, "appointed");
     if (appointment.kind !== "appointed") return;
 
-    const invoked = await invoke(executable(["call", "worker", "--contract", managedId, "-"]), {
+    const invoked = await invoke(executable(["-C", ".", "call", "worker", "--contract", managedId, "-"]), {
       cwd: raw.path,
       environment: { ...process.env, KEIYAKU_HOME: configured.home },
       readStdin: async () => "implicit",
@@ -477,6 +493,75 @@ test("managed Contract calls use the appointed Place only when cwd is omitted", 
     const implicit = invoked.result;
     assert.deepEqual(implicit.execution, { cwd: appointment.path, source: "contract-worktree" });
     assert.equal((await readSoul(pathsForAkuId(world, implicit.akuma)))?.cwd, appointment.path);
+
+    const nested = join(raw.path, "nested-invocation");
+    const relative = join(nested, "relative-workdir");
+    mkdirSync(relative, { recursive: true });
+    const main = realpathSync(raw.path);
+    const births = () => readdirSync(akumaRunRoot(world)).sort();
+    const fromInvocation = await invoke(executable(["-C", "nested-invocation", "call", "worker", "-"]), {
+      cwd: raw.path,
+      environment: { ...process.env, KEIYAKU_HOME: configured.home },
+      readStdin: async () => "from invocation",
+    });
+    assert.equal("kind" in fromInvocation && fromInvocation.kind, "akuma");
+    if (!("kind" in fromInvocation) || fromInvocation.kind !== "akuma" || fromInvocation.action !== "call") return;
+    assert.deepEqual(fromInvocation.result.execution, { cwd: realpathSync(nested), source: "input" });
+
+    const fromRelativeWorkdir = await invoke(
+      executable(["-C", "nested-invocation", "call", "worker", "--workdir", "relative-workdir", "-"]),
+      {
+        cwd: raw.path,
+        environment: { ...process.env, KEIYAKU_HOME: configured.home },
+        readStdin: async () => "relative workdir",
+      },
+    );
+    assert.equal("kind" in fromRelativeWorkdir && fromRelativeWorkdir.kind, "akuma");
+    if (!("kind" in fromRelativeWorkdir) || fromRelativeWorkdir.kind !== "akuma" || fromRelativeWorkdir.action !== "call") return;
+    assert.deepEqual(fromRelativeWorkdir.result.execution, { cwd: realpathSync(relative), source: "input" });
+
+    const wholeLoop = await invoke(
+      executable(["-C", "nested-invocation", "call", "worker", "--contract", managedId, "--workdir", main, "-"]),
+      {
+        cwd: raw.path,
+        environment: { ...process.env, KEIYAKU_HOME: configured.home },
+        readStdin: async () => "whole loop in main",
+      },
+    );
+    assert.equal("kind" in wholeLoop && wholeLoop.kind, "akuma");
+    if (!("kind" in wholeLoop) || wholeLoop.kind !== "akuma" || wholeLoop.action !== "call") return;
+    assert.deepEqual(wholeLoop.result.execution, { cwd: main, source: "input" });
+    assert.equal((await readSoul(pathsForAkuId(world, wholeLoop.result.akuma)))?.cwd, main);
+
+    const unavailableBefore = births();
+    await assert.rejects(
+      () =>
+        invoke(executable(["call", "worker", "--workdir", "absent-workdir", "-"]), {
+          cwd: raw.path,
+          environment: { ...process.env, KEIYAKU_HOME: configured.home },
+          readStdin: async () => "unavailable",
+        }),
+      /workdir is not an existing directory: absent-workdir/u,
+    );
+    assert.deepEqual(births(), unavailableBefore);
+
+    const nonDirectory = join(nested, "not-a-directory");
+    writeFileSync(nonDirectory, "not a directory\n");
+    const nonDirectoryBefore = births();
+    await assert.rejects(
+      () =>
+        invoke(executable(["-C", "nested-invocation", "call", "worker", "--workdir", "not-a-directory", "-"]), {
+          cwd: raw.path,
+          environment: { ...process.env, KEIYAKU_HOME: configured.home },
+          readStdin: async () => "not a directory",
+        }),
+      /workdir is not an existing directory: not-a-directory/u,
+    );
+    assert.deepEqual(births(), nonDirectoryBefore);
+
+    const missingValueBefore = births();
+    assert.throws(() => executable(["call", "worker", "--workdir"]), /--workdir requires a path/u);
+    assert.deepEqual(births(), missingValueBefore);
 
     const explicit = await Keiyaku.call({
       path: world,

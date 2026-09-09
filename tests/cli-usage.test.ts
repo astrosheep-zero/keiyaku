@@ -140,6 +140,7 @@ test("root complete help still documents cwd and repo", () => {
   const help = renderRootHelp();
   assert.match(help, /-C, --cwd <path>  Set the invocation working directory\./u);
   assert.match(help, /--repo <path>     Select the Git repository coordinate\./u);
+  assert.match(help, /--workdir <path>  Set the execution directory for call only\./u);
   assert.match(help, /^usage  keiyaku <command> \[options\]$/mu);
 });
 

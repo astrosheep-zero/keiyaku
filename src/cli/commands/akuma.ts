@@ -59,12 +59,14 @@ const AKUMA_COMMAND_SPECS = {
       schema: "value",
     },
     usage:
-      "call <akuma-name> [--contract <kei/...>] [--alias @name] [--allowed <product.action>]... [--schema <file>] [--wait <duration> | -d | --detach] [--json] (<prompt> | -)",
+      "call <akuma-name> [--contract <kei/...>] [--workdir <path>] [--alias @name] [--allowed <product.action>]... [--schema <file>] [--wait <duration> | -d | --detach] [--json] (<prompt> | -)",
     purpose: "Birth an Akuma from <akuma-name> with one prompt.",
     details: [
       "Give <prompt> as one argument, or use - to read stdin.",
       "Default: --wait 5m. An explicit --wait replaces that duration; -d and --detach return after birth.",
       "--contract dispatches the born Akuma to that Contract.",
+      "--workdir selects the execution directory; a relative path is relative to the invocation cwd.",
+      "Without --workdir, a Contract call uses its appointed worktree; an unassociated call uses the invocation cwd.",
       "--alias assigns the world-local @name selector to the born Akuma.",
       `Legal actions: ${ALLOWED_ACTIONS.join(", ")}.`,
       "Repeated --allowed adds actions to the selected Akuma's defaults; it never narrows them.",

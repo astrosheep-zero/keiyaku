@@ -76,7 +76,7 @@ export type AkumaInvocationResult =
 
 type InvokeInput = Readonly<{
   path: WorldRoot;
-  statedCwd?: string;
+  executionCwd?: string;
   home?: string;
   settings?: Settings;
   contract?: KeiyakuContract;
@@ -269,7 +269,7 @@ export async function invokeAkuma(command: InvokedAkumaCommand, input: InvokeInp
         body,
         ...(input.home === undefined ? {} : { home: input.home }),
         ...(input.settings === undefined ? {} : { settings: input.settings }),
-        ...(input.statedCwd === undefined ? {} : { cwd: input.statedCwd }),
+        ...(input.executionCwd === undefined ? {} : { cwd: input.executionCwd }),
         mode: command.mode,
         ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
         ...(input.contract === undefined ? {} : { contract: input.contract }),

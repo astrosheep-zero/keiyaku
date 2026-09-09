@@ -22,6 +22,12 @@ or splice facts from two Worlds into one report. The edge supplies environment
 or current-directory facts only as explicit process inputs. Libraries do not
 rediscover them.
 
+Akuma call execution is a separate coordinate from invocation scope. An
+explicit call execution directory takes precedence; otherwise a Contract call
+retains its workspace appointment, and an unassociated call uses the effective
+invocation directory. Selecting the invocation directory, including explicitly
+selecting the same directory, does not displace a Contract appointment.
+
 Help is dependency-light, read-only, and available without an existing World.
 It explains a command's purpose and its literal usage, never guesses missing
 input or prompts for authority-bearing facts. User-facing text is a projection

@@ -76,11 +76,12 @@ a provider refuse before allocation. Refusals identify the reference chain
 and the paths searched.
 
 All worktrees of one repository share one Akuma World, fleet, Alias authority,
-and Heart storage. Soul cwd is execution input, not World identity. Akuma state
-lives in the World rather than a Contract worktree, so ordinary worktree cleanup
-cannot erase it. Home supplies Archetype configuration only, never runtime
-authority. The accepted risk of force-cleaning repository-local management
-state is not hidden by a second store or automatic defense.
+and Heart storage. Soul cwd is execution input, not World identity. A Contract
+appointment supplies that input only when the caller did not select one. Akuma
+state lives in the World rather than a Contract worktree, so ordinary worktree
+cleanup cannot erase it. Home supplies Archetype configuration only, never
+runtime authority. The accepted risk of force-cleaning repository-local
+management state is not hidden by a second store or automatic defense.
 
 Confirmed World reset stops and retains each recognized Akuma's leash through
 deletion of its known custody. It removes only known management material and

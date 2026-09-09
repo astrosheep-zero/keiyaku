@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { resolveActor } from "./actor.js";
 import { isParsedAkumaCommand, type InvokedAkumaCommand } from "./commands/akuma.js";
 import type { AkumaInvocationResult } from "./commands/akuma-invoke.js";
@@ -21,6 +22,7 @@ import type { WorktreeHooks } from "../library/configuration.js";
 import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
 import { AKUMA_REQUESTS_ENV } from "../akuma/provider.js";
+import { canonicalBirthCwd } from "../akuma/call-input.js";
 import {
   bodyRequestExecution,
   executionChannel,
@@ -41,6 +43,7 @@ type InvokeRuntime = Readonly<{
 type NonInstallExecution = Readonly<{
   cwd?: string;
   repo?: string;
+  workdir?: string;
   command: Exclude<ParsedCommand, { command: "install" }>;
 }>;
 type InvocationEdge = Readonly<{
@@ -179,8 +182,7 @@ type AkumaEdgeInput = Readonly<{
   located: WorldRoot | null;
   candidate: WorldRoot | null;
   establish: () => Promise<WorldRoot>;
-  statedCwd?: string;
-  invocationCwd: string;
+  executionCwd?: string;
   repo?: Repo;
   home?: string;
   edge: InvocationEdge;
@@ -189,7 +191,7 @@ type AkumaEdgeInput = Readonly<{
 
 async function invokeAkumaFromEdge(parsed: InvokedAkumaCommand, input: AkumaEdgeInput) {
   try {
-    const { statedCwd, repo, edge } = input;
+    const { executionCwd, repo, edge } = input;
     const path = await akumaWorldFor(parsed, input.located, input.candidate, input.establish);
     const home = parsed.command === "call" ? input.home : undefined;
     const configuration = parsed.command === "call" ? await settingsAt(path, home) : undefined;
@@ -203,7 +205,7 @@ async function invokeAkumaFromEdge(parsed: InvokedAkumaCommand, input: AkumaEdge
         : undefined;
     return await invokeAkuma(parsed, {
       path,
-      ...(statedCwd === undefined ? {} : { statedCwd }),
+      ...(executionCwd === undefined ? {} : { executionCwd }),
       ...(home === undefined ? {} : { home }),
       ...(configuration === undefined ? {} : { settings: configuration }),
       ...(contract === undefined ? (repo === undefined ? {} : { repo }) : { contract }),
@@ -402,6 +404,48 @@ async function resolveInvocationCoordinates(invocation: NonInstallExecution, run
   });
 }
 
+async function callExecutionCwd(input: Readonly<{ command: InvokedAkumaCommand; cwd: string; workdir?: string }>) {
+  if (input.command.command !== "call") return undefined;
+  if (input.workdir !== undefined) {
+    return await canonicalBirthCwd(
+      resolve(input.cwd, input.workdir),
+      `workdir is not an existing directory: ${input.workdir}`,
+    );
+  }
+  return input.command.contract === undefined ? input.cwd : undefined;
+}
+
+async function invokeParsedAkuma(
+  input: Readonly<{
+    parsed: InvokedAkumaCommand;
+    cwd: string;
+    workdir?: string;
+    world: WorldRoot | null;
+    candidate: WorldRoot | null;
+    establish: () => Promise<WorldRoot>;
+    repo?: Repo;
+    home?: string;
+    edge: InvocationEdge;
+    execution: ExecutionContext;
+  }>,
+) {
+  const executionCwd = await callExecutionCwd({
+    command: input.parsed,
+    cwd: input.cwd,
+    ...(input.workdir === undefined ? {} : { workdir: input.workdir }),
+  });
+  return await invokeAkumaFromEdge(input.parsed, {
+    located: input.world,
+    candidate: input.candidate,
+    establish: input.establish,
+    ...(executionCwd === undefined ? {} : { executionCwd }),
+    ...(input.repo === undefined ? {} : { repo: input.repo }),
+    ...(input.home === undefined ? {} : { home: input.home }),
+    edge: input.edge,
+    execution: input.execution,
+  });
+}
+
 // eslint-disable-next-line complexity -- command dispatch keeps the CLI's existing boundary in one place.
 async function invokeParsed(
   invocation: NonInstallExecution,
@@ -410,7 +454,7 @@ async function invokeParsed(
   const environment = runtime.environment ?? process.env;
   const execution = executionForEnvironment(environment);
   const coordinates = await resolveInvocationCoordinates(invocation, runtime);
-  const { cwd, cwdSource, repo, world, candidateWorld, establishWorld, taskContext } = coordinates;
+  const { cwd, repo, world, candidateWorld, establishWorld, taskContext } = coordinates;
   const edge: InvocationEdge = { environment, readStdin: runtime.readStdin ?? readStdin };
   const parsed = invocation.command;
   const mapped = edge.environment.KEIYAKU_HOME?.trim();
@@ -433,19 +477,19 @@ async function invokeParsed(
     });
   }
   if (parsed.command === "history" && "contract" in parsed) return await invokeContractHistory(repo, parsed.contract);
-  if (isParsedAkumaCommand(parsed)) {
-    return await invokeAkumaFromEdge(parsed, {
-      located: world,
+  if (isParsedAkumaCommand(parsed))
+    return await invokeParsedAkuma({
+      parsed,
+      cwd,
+      ...(invocation.workdir === undefined ? {} : { workdir: invocation.workdir }),
+      world,
       candidate: candidateWorld,
       establish: coordinates.establishWorld,
-      invocationCwd: cwd,
-      ...(cwdSource === "input" ? { statedCwd: cwd } : {}),
       ...(repo === undefined ? {} : { repo }),
       ...(home === undefined ? {} : { home }),
       edge,
       execution,
     });
-  }
   if (parsed.command === "ls") return await invokeCatalog(parsed, world, repo, home);
   if (parsed.command === "status") return await invokeStatus(parsed, world, repo);
   if (repo === undefined) throw new Error(`${parsed.command} requires a resolved Repo`);
@@ -522,6 +566,7 @@ export async function invoke(
       {
         ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
         ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),
+        ...(invocation.workdir === undefined ? {} : { workdir: invocation.workdir }),
         command,
       },
       acquiredRuntime,

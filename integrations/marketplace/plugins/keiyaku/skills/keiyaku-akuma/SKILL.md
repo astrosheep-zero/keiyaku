@@ -15,7 +15,7 @@ is accepted; the identity underneath never changes.
 ## Start One
 
 ```bash
-keiyaku -C <cwd> call <akuma-name> [--alias @name] [--allowed <product.action>]... [--schema <file>] [--wait <duration> | -d | --detach] [--json] (<prompt> | -)
+keiyaku -C <cwd> call <akuma-name> [--workdir <path>] [--alias @name] [--allowed <product.action>]... [--schema <file>] [--wait <duration> | -d | --detach] [--json] (<prompt> | -)
 ```
 
 Give the worker's initial prompt as one argument (quote it when it contains
@@ -28,8 +28,10 @@ exclusive. Decide up front whether you will stay:
   work outlives your attention; come back with `wait`.
 
 `--alias @name` assigns that world-local selector to the born Akuma. If the
-Alias already points elsewhere, it moves to the born Akuma. The worker's
-execution cwd is exactly `-C <path>`, or your own cwd when `-C` is omitted.
+Alias already points elsewhere, it moves to the born Akuma. `-C` selects the
+invocation World; `--workdir <path>` selects the worker execution cwd relative
+to that invocation directory. Without `--workdir`, an unassociated call uses
+the invocation cwd, while a `--contract` call uses its appointed worktree.
 
 Repeated `--allowed` values add actions to the selected Akuma's defaults; they
 never narrow them. An omitted Archetype default permits the complete action
@@ -74,6 +76,13 @@ Aku with the Contract association, forward the actions the loop needs —
 including nested calls, which stay under this Soul's ceiling — and state the
 loop as the question. Steering that delegation afterwards goes to the holder,
 not around it.
+
+When that whole-loop worker must operate in the main repository rather than its
+Contract worktree, make that execution choice explicit:
+
+```bash
+keiyaku -C <repo> call worker --contract <kei/...> --workdir <repo> --allowed contract.deliver -d "Own this Contract loop."
+```
 
 ## Watch
 

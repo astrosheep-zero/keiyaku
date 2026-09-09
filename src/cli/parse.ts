@@ -67,6 +67,8 @@ const ROOT_USAGE = [
   "      keiyaku <command> --help   shows that command's complete usage",
 ].join("\n");
 
+const INVOCATION_PATH_OPTIONS = new Set(["-C", "--cwd", "--repo", "--workdir"]);
+
 export function renderRootHelp(columns?: number): string {
   return renderHelpText(
     [
@@ -92,6 +94,7 @@ export function renderRootHelp(columns?: number): string {
       "Global options:",
       "  -C, --cwd <path>  Set the invocation working directory.",
       "  --repo <path>     Select the Git repository coordinate.",
+      "  --workdir <path>  Set the execution directory for call only.",
     ].join("\n"),
     columns,
   );
@@ -175,7 +178,7 @@ export type CliHelpCoordinate =
   | Readonly<{ kind: "install" }>
   | Readonly<{ kind: "akuma"; action: AkumaAction }>;
 
-export type ParsedExecution = Readonly<{ cwd?: string; repo?: string; command: ParsedCommand }>;
+export type ParsedExecution = Readonly<{ cwd?: string; repo?: string; workdir?: string; command: ParsedCommand }>;
 export type ParsedInvocation = ParsedExecution | Readonly<{ help: CliHelpCoordinate }>;
 
 type RepoUse = "none" | "optional" | "required";
@@ -317,35 +320,45 @@ function scanArgv(argv: readonly string[]): ParsedContractParts {
 
 function invocationOptions(
   argv: readonly string[],
-): Readonly<{ cwd?: string; repo?: string; commandArgv: readonly string[] }> {
+): Readonly<{ cwd?: string; repo?: string; workdir?: string; commandArgv: readonly string[] }> {
   let cwd: string | undefined;
   let repo: string | undefined;
+  let workdir: string | undefined;
   const commandArgv: string[] = [];
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index]!;
-    if (token !== "-C" && token !== "--cwd" && token !== "--repo") {
+    if (!INVOCATION_PATH_OPTIONS.has(token)) {
       commandArgv.push(token);
       continue;
     }
     if (token === "--repo" && repo !== undefined) {
       throw new CliUsageError("--repo may appear only once", ROOT_USAGE_GUIDE);
     }
-    if (token !== "--repo" && cwd !== undefined) {
+    if ((token === "-C" || token === "--cwd") && cwd !== undefined) {
       throw new CliUsageError("-C/--cwd may appear only once", ROOT_USAGE_GUIDE);
     }
+    if (token === "--workdir" && workdir !== undefined) {
+      throw new CliUsageError("--workdir may appear only once", ROOT_USAGE_GUIDE);
+    }
     const value = argv[index + 1];
-    if (value === undefined || value === "-" || value.startsWith("-") || isBlankInput(value)) {
+    if (invalidInvocationPath(value)) {
       throw new CliUsageError(`${token} requires a path`, ROOT_USAGE_GUIDE);
     }
     if (token === "--repo") repo = value;
+    else if (token === "--workdir") workdir = value;
     else cwd = value;
     index += 1;
   }
   return {
     ...(cwd === undefined ? {} : { cwd }),
     ...(repo === undefined ? {} : { repo }),
+    ...(workdir === undefined ? {} : { workdir }),
     commandArgv,
   };
+}
+
+function invalidInvocationPath(value: string | undefined): boolean {
+  return value === undefined || value === "-" || value.startsWith("-") || isBlankInput(value);
 }
 
 function helpCoordinate(argv: readonly string[]): CliHelpCoordinate | null {
@@ -380,9 +393,14 @@ export function parseArgv(argv: readonly string[]): ParsedInvocation {
   const install =
     invocation.commandArgv[0] === "install" ? parseInstallCommand(invocation.commandArgv.slice(1)) : undefined;
   const akuma = isAkumaAction(invocation.commandArgv[0]) ? parseAkumaCommand(invocation.commandArgv) : undefined;
+  const command = task ?? akuma ?? install ?? parseContractCommand(scanArgv(invocation.commandArgv));
+  if (invocation.workdir !== undefined && command.command !== "call") {
+    throw new CliUsageError(`option --workdir is not valid for ${command.command}`, usageGuideForCommand(command));
+  }
   return {
     ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
     ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),
-    command: task ?? akuma ?? install ?? parseContractCommand(scanArgv(invocation.commandArgv)),
+    ...(invocation.workdir === undefined ? {} : { workdir: invocation.workdir }),
+    command,
   };
 }

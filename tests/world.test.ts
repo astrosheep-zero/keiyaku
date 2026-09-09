@@ -35,6 +35,24 @@ test("CLI coordinates retain explicit versus ambient cwd statedness", async () =
   assert.equal(stated.cwd, await realpath(explicit));
 });
 
+test("an explicit Contract repository does not retarget the invocation World", async () => {
+  const invocation = makeGitRepository();
+  const contract = makeGitRepository();
+  for (const repository of [invocation, contract]) {
+    repository.run(["config", "user.name", "Keiyaku Test"]);
+    repository.run(["config", "user.email", "keiyaku@example.invalid"]);
+    repository.run(["commit", "--quiet", "--allow-empty", "-m", "initial"]);
+  }
+  const parsed = parseArgv(["call", "worker", "--contract", "kei/example", "body"]);
+  const coordinates = await resolveCliCoordinates({
+    processCwd: invocation.path,
+    repo: contract.path,
+    command: parsed.command,
+  });
+  assert.equal(coordinates.world, await realpath(invocation.path));
+  assert.equal(coordinates.repo?.root, await realpath(contract.path));
+});
+
 test("World.locate selects the nearest marker without creating one", async () => {
   const outer = temporary(),
     nested = join(outer, "a"),

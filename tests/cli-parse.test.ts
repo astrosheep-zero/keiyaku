@@ -70,8 +70,17 @@ test("global coordinates are independent of command position", () => {
     repo: "../delivery",
     command: { command: "status", output: "text" },
   });
+  assert.deepEqual(parseArgv(["call", "worker", "--workdir", "work", "body"]), {
+    workdir: "work",
+    command: { command: "call", archetype: "worker", mode: "wait", prompt: { kind: "argument", value: "body" }, output: "text" },
+  });
   assert.throws(() => parseArgv(["status", "--repo"]), /--repo requires a path/u);
   assert.throws(() => parseArgv(["--repo", "/one", "status", "--repo", "/two"]), /--repo may appear only once/u);
+  assert.throws(() => parseArgv(["call", "worker", "--workdir", "one", "--workdir", "two", "body"]), /--workdir may appear only once/u);
+  assert.throws(() => parseArgv(["call", "worker", "--workdir", "body"]), /call requires a prompt argument or stdin/u);
+  assert.throws(() => parseArgv(["call", "worker", "--workdir", " ", "body"]), /--workdir requires a path/u);
+  assert.throws(() => parseArgv(["tell", "@worker", "--workdir", "work", "body"]), /option --workdir is not valid for tell/u);
+  assert.throws(() => parseArgv(["fork", "aku/worker/1234abcd", "--at", "turn/1", "--workdir", "work"]), /option --workdir is not valid for fork/u);
 });
 
 test("global path tokens remain opaque at the parser edge", () => {
