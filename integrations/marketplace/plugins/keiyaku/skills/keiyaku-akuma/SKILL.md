@@ -36,6 +36,11 @@ nested call can use only actions permitted by its direct parent Soul.
 
 ## Akuma Names
 
+An Akuma name selects a reusable worker configuration, not an individual worker.
+Calling the same name multiple times creates independent workers with distinct
+AkuIds. Choose different names for different capabilities, not merely to run
+work in parallel.
+
 An Akuma name selects a Markdown file at `~/.keiyaku/akuma/<name>.md`; pass
 the filename without `.md` as `<akuma-name>`. Its frontmatter selects the
 provider and may declare `model`, `effort`, `readonly`, `network`, `sandbox`,
@@ -81,9 +86,11 @@ a mode. When observing multiple Akuma, prefer one plural wait over separate
 waits and choose exactly one mode:
 
 ```bash
-keiyaku -C <cwd> wait @worker-a --timeout 5m
-keiyaku -C <cwd> wait @worker-a @worker-b --all --timeout 5m
-keiyaku -C <cwd> wait @worker-a @worker-b --any --timeout 5m
+keiyaku -C <cwd> call worker --alias @projection -d "Inspect the projection."
+keiyaku -C <cwd> call worker --alias @host-boundary -d "Inspect the host boundary."
+keiyaku -C <cwd> wait @projection --timeout 5m
+keiyaku -C <cwd> wait @projection @host-boundary --all --timeout 5m
+keiyaku -C <cwd> wait @projection @host-boundary --any --timeout 5m
 ```
 
 `--all` waits until every selected Akuma stops running. `--any` returns when the
