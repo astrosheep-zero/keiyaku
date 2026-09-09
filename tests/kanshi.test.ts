@@ -39,7 +39,7 @@ import { contractNamespace } from "../src/task/identity.js";
 import { projectTaskBoardObservation } from "../src/task/board.js";
 import { Tasks } from "../src/task/index.js";
 import { authorityPath, readBoard } from "../src/task/store.js";
-import type { WorldRoot } from "../src/world.js";
+import { World } from "../src/world.js";
 import type { WorldRoot } from "../src/world.js";
 import type { AkumaAlias } from "../src/identity/selector.js";
 import { moveAlias } from "../src/alias/index.js";

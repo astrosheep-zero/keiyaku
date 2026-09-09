@@ -32,7 +32,7 @@ import {
 } from "../src/workspace-place.js";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import { contractId } from "../src/core/facts/types.js";
-import * as workspace from "../src/git/workspace.js";
+import { worktreePath } from "../src/git/workspace.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { resolveContextualContract } from "../src/cli/selectors.js";
 import { invoke as invokeRaw, type InvocationResult } from "../src/cli/invoke.js";

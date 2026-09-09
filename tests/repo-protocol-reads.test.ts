@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { appointManagedWorktrees } from "../src/workspace-place.js";
-import { protocolContractId } from "./support/git.js";
+import { appointedWorktreePath, type TestGitRepository, withGitShim } from "./support/git.js";
 import { repositoryWithMain } from "./support/library-verbs.js";
 import {
   GIT_REF,
