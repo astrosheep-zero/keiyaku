@@ -1,4 +1,4 @@
-import { access } from "node:fs/promises";
+import { lstat } from "node:fs/promises";
 import { isKeiyakuOwnedRef, readRef, writeCommit, type GitOid } from "./repository.js";
 import { gitObjectIdForSnapshot, mintSnapshotId } from "./identity.js";
 import type { ContractState, SnapshotId } from "../core/facts/types.js";
@@ -15,11 +15,15 @@ import { GitPlumbingError, runGit, type GitRepository } from "./process.js";
 import { worktreePath } from "./workspace.js";
 import type { Effect, ReconcileAccumulation, ReconcileLag, ReconcileResult, WorktreeTopology } from "./reconcile.js";
 
-const pathExists = (path: string) =>
-  access(path).then(
-    () => true,
-    () => false,
-  );
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await lstat(path);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
 
 type TerminalReconcileInput = Readonly<{
   repository: GitRepository;
@@ -59,18 +63,15 @@ async function removeTerminalWorktree(
   if (!registered) {
     return { retained: await pathExists(path) };
   }
-  if (!(await pathExists(path))) {
-    await runGit(repository, ["worktree", "remove", path]);
-    topology.paths.delete(path);
-    return { effect: { kind: "worktree", path, action: "removed" }, retained: false };
-  }
+  const present = await pathExists(path);
   try {
-    await runGit(repository, ["worktree", "remove", "--force", path]);
+    await runGit(repository, ["worktree", "remove", ...(present ? ["--force"] : []), path]);
   } catch {
     return { effect: { kind: "worktree", path, action: "unchanged" }, retained: true };
   }
   topology.paths.delete(path);
-  return { effect: { kind: "worktree", path, action: "removed" }, retained: false };
+  const retained = await pathExists(path);
+  return { effect: { kind: "worktree", path, action: retained ? "unchanged" : "removed" }, retained };
 }
 
 export async function updateRef(repository: GitRepository, ref: string, desired: SnapshotId): Promise<Effect> {

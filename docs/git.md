@@ -114,6 +114,12 @@ of later lifecycle authority. Physical removal precedes Place release and ref
 cleanup. A retained path or nonredundant ref is visible lag, never reversal of
 an accepted outcome.
 
+The seal protects tracked and non-ignored candidate content. Ignored,
+worktree-local runtime artifacts are incidental to the disposable checkout:
+their presence alone does not retain it, and they may disappear with it without
+an archive promise. This does not exempt authored content from the seal or
+expand deletion authority beyond the managed worktree.
+
 Target-placement fence acquisition is bounded and cancellable without breaking
 its current holder. Cancellation does not replace the expected-reference proof
 or undo a confirmed publication. Resolving an uncertain publication uses its

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -151,6 +151,48 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     } finally {
       await square.close();
     }
+  } finally {
+    restoreEnvironment(prior);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the Square plugin keeps its default local ledger under PWD rather than World", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-pwd-"));
+  const world = join(root, "world");
+  const cwd = join(root, "execution");
+  const prior = {
+    PWD: process.env.PWD,
+    SQUARE_REGISTRY: process.env.SQUARE_REGISTRY,
+    SQUARE_HOST_LEDGER_LOCAL: process.env.SQUARE_HOST_LEDGER_LOCAL,
+    SQUARE_HOST_LEDGER_USER: process.env.SQUARE_HOST_LEDGER_USER,
+    SQUARE_PARTICIPANT_NAME: process.env.SQUARE_PARTICIPANT_NAME,
+  };
+  try {
+    mkdirSync(join(world, ".square"), { recursive: true });
+    mkdirSync(cwd);
+    process.env.PWD = cwd;
+    delete process.env.SQUARE_REGISTRY;
+    delete process.env.SQUARE_HOST_LEDGER_LOCAL;
+    process.env.SQUARE_PARTICIPANT_NAME = "fixture-pwd";
+    process.env.SQUARE_HOST_LEDGER_USER = join(root, "user-ledger");
+    const instance = await squarePlugin.activate({
+      world: world as unknown as WorldRoot,
+      config: undefined,
+      writablePath: () => join(world, ".square"),
+    });
+    const handler = instance.signals?.["akuma.called"];
+    assert.ok(handler);
+    await handler({
+      kind: "akuma.called",
+      akumaId: "aku/pwd-local",
+    });
+    const presence = join(cwd, ".square", "host-ledger", "presence.ndjsonl");
+    assert.equal(existsSync(presence), true);
+    assert.match(readFileSync(presence, "utf8"), /fixture-pwd/u);
+    assert.equal(existsSync(join(world, ".square", "host-ledger")), false);
+    assert.equal(existsSync(squarePath(world)), true);
+    assert.equal(existsSync(squarePath(cwd)), false);
   } finally {
     restoreEnvironment(prior);
     rmSync(root, { recursive: true, force: true });

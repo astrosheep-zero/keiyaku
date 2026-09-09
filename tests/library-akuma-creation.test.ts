@@ -494,6 +494,7 @@ test("managed Contract calls use the appointed Place only when cwd is omitted", 
     await managed.keiyaku.abandon({ hooks: { create: [], destroy: [] } });
   } finally {
     await pump.close();
+    await drainPluginRuntime(world);
     leash.release();
     if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
     else process.env[AKUMA_REQUESTS_ENV] = previousRequests;

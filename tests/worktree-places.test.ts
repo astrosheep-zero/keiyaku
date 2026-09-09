@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
+  appendFileSync,
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -38,7 +40,7 @@ import { readContractObservationAt } from "../src/protocol/read/status.js";
 import { Keiyaku, Repo, type ContractBoard, type ContractId } from "../src/index.js";
 import { Tasks } from "../src/task/index.js";
 import { World } from "../src/world.js";
-import { cachedRepositoryAt, makeGitRepository } from "./support/git.js";
+import { cachedRepositoryAt, makeGitRepository, withGitShim } from "./support/git.js";
 
 const repositoryAt = cachedRepositoryAt;
 import * as workspace from "../src/git/workspace.js";
@@ -97,6 +99,23 @@ function repositoryWithCommit() {
   repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   return repository;
+}
+
+function configureSharedSquareIgnore(repository: ReturnType<typeof makeGitRepository>): void {
+  appendFileSync(join(repository.path, ".git", "info", "exclude"), "\n/.square/\n");
+}
+
+function writeSquareRuntime(repositoryPath: string, worktreePath: string): void {
+  const runtime = join(worktreePath, ".square");
+  mkdirSync(join(runtime, "host-ledger"), { recursive: true });
+  writeFileSync(join(runtime, "KEIYAKU.square"), "square runtime\n");
+  writeFileSync(join(runtime, "KEIYAKU.square.lock"), "lock\n");
+  writeFileSync(join(runtime, "host-ledger", "presence.ndjsonl"), '{"host":"test"}\n');
+  writeFileSync(join(runtime, "host-ledger", "presence.ndjsonl.lock"), "lock\n");
+
+  const primaryRuntime = join(repositoryPath, ".square");
+  mkdirSync(primaryRuntime, { recursive: true });
+  writeFileSync(join(primaryRuntime, "global-sibling.ndjsonl"), "primary\n");
 }
 
 function registerOf(appointments: readonly { place: ReturnType<typeof place>; contract: ContractId }[]) {
@@ -541,6 +560,237 @@ test("terminal cleanup releases the Place only after hooks and removal succeed",
   assert.deepEqual(released.lag, []);
   assert.equal(existsSync(appointment.path), false);
   assert.deepEqual(await readManagedWorktreeAppointment(git, (await bound.keiyaku.state()).id), { kind: "unappointed" });
+});
+
+test("sealed abandonment removes ignored PWD-local Square runtime with the disposable worktree", async () => {
+  const repository = repositoryWithCommit();
+  configureSharedSquareIgnore(repository);
+  const bound = await Keiyaku.bind({
+    repo: await Repo.at({ path: repository.path }),
+    markdown: contractBody("Ignored Square runtime"),
+    workspace: "worktree",
+    hooks: { create: [], destroy: [] },
+  });
+  const git = await repositoryAt(repository.path);
+  const state = await bound.keiyaku.state();
+  const appointment = await readManagedWorktreeAppointment(git, state.id);
+  assert.equal(appointment.kind, "appointed");
+  if (appointment.kind !== "appointed") throw new Error("expected appointment");
+  writeSquareRuntime(repository.path, appointment.path);
+
+  const abandoned = await bound.keiyaku.abandon();
+
+  assert.deepEqual(abandoned.lags, []);
+  assert.equal(existsSync(appointment.path), false);
+  assert.equal(existsSync(join(appointment.path, ".square", "KEIYAKU.square")), false);
+  assert.equal(readFileSync(join(repository.path, ".square", "global-sibling.ndjsonl"), "utf8"), "primary\n");
+  assert.deepEqual(await readManagedWorktreeAppointment(git, state.id), { kind: "unappointed" });
+});
+
+test("claimed cleanup removes ignored PWD-local Square runtime while preserving primary siblings", async () => {
+  const repository = repositoryWithCommit();
+  configureSharedSquareIgnore(repository);
+  const bound = await Keiyaku.bind({
+    repo: await Repo.at({ path: repository.path }),
+    markdown: contractBody("Claimed Square runtime"),
+    workspace: "worktree",
+    target: "refs/heads/main",
+    gates: ["reviewed"],
+    hooks: { create: [], destroy: [] },
+  });
+  const git = await repositoryAt(repository.path);
+  const state = await bound.keiyaku.state();
+  const appointment = await readManagedWorktreeAppointment(git, state.id);
+  assert.equal(appointment.kind, "appointed");
+  if (appointment.kind !== "appointed") throw new Error("expected appointment");
+  writeSquareRuntime(repository.path, appointment.path);
+  writeFileSync(join(appointment.path, "candidate.txt"), "candidate\n");
+  repository.run(["-C", appointment.path, "add", "candidate.txt"]);
+  repository.run(["-C", appointment.path, "commit", "--quiet", "-m", "candidate"]);
+
+  await bound.keiyaku.deliver();
+  const reviewed = await bound.keiyaku.review({ verdict: "satisfied" });
+
+  assert.deepEqual(reviewed.lags, []);
+  assert.equal(existsSync(appointment.path), false);
+  assert.equal(existsSync(join(appointment.path, ".square", "host-ledger", "presence.ndjsonl")), false);
+  assert.equal(readFileSync(join(repository.path, ".square", "global-sibling.ndjsonl"), "utf8"), "primary\n");
+  assert.deepEqual(await readManagedWorktreeAppointment(git, state.id), { kind: "unappointed" });
+});
+
+test("authored source still retains a managed worktree alongside ignored Square runtime", async () => {
+  const repository = repositoryWithCommit();
+  configureSharedSquareIgnore(repository);
+  const bound = await Keiyaku.bind({
+    repo: await Repo.at({ path: repository.path }),
+    markdown: contractBody("Authored source protection"),
+    workspace: "worktree",
+    gates: ["reviewed"],
+    hooks: { create: [], destroy: [] },
+  });
+  const git = await repositoryAt(repository.path);
+  const state = await bound.keiyaku.state();
+  const appointment = await readManagedWorktreeAppointment(git, state.id);
+  assert.equal(appointment.kind, "appointed");
+  if (appointment.kind !== "appointed") throw new Error("expected appointment");
+  writeSquareRuntime(repository.path, appointment.path);
+  writeFileSync(join(appointment.path, "authored.ts"), "export const authored = false;\n");
+  repository.run(["-C", appointment.path, "add", "authored.ts"]);
+  repository.run(["-C", appointment.path, "commit", "--quiet", "-m", "candidate"]);
+  await bound.keiyaku.deliver();
+
+  const shim = [
+    'if [ "$1" = "worktree" ] && [ "$2" = "remove" ]; then exit 1; fi',
+    'exec "$KEIYAKU_REAL_GIT" "$@"',
+  ].join("\n");
+  await withGitShim(shim, {}, async (gitPath) => {
+    const reviewed = await Keiyaku.of({ repo: await Repo.at({ path: repository.path, gitPath }), id: state.id })
+      .review({ verdict: "satisfied" });
+    assert.ok(reviewed.lags.some((lag) => lag.kind === "worktree-retained"));
+  });
+  assert.equal((await bound.keiyaku.state()).terminal?.kind, "claimed");
+  writeFileSync(join(appointment.path, "authored.ts"), "export const authored = true;\n");
+
+  const reconciled = await bound.keiyaku.reconcile();
+
+  assert.ok(reconciled.lag.some((lag) => lag.kind === "unsealed-bytes"));
+  assert.equal(existsSync(appointment.path), true);
+  assert.equal(readFileSync(join(appointment.path, "authored.ts"), "utf8"), "export const authored = true;\n");
+  assert.equal(readFileSync(join(appointment.path, ".square", "KEIYAKU.square"), "utf8"), "square runtime\n");
+  assert.deepEqual(await readManagedWorktreeAppointment(git, state.id), appointment);
+});
+
+test("Git removal failure retains custody and a fresh reconcile retries successfully", async () => {
+  const repository = repositoryWithCommit();
+  const bound = await Keiyaku.bind({
+    repo: await Repo.at({ path: repository.path }),
+    markdown: contractBody("Retry removal"),
+    workspace: "worktree",
+    hooks: { create: [], destroy: [] },
+  });
+  const git = await repositoryAt(repository.path);
+  const state = await bound.keiyaku.state();
+  const appointment = await readManagedWorktreeAppointment(git, state.id);
+  assert.equal(appointment.kind, "appointed");
+  if (appointment.kind !== "appointed") throw new Error("expected appointment");
+  const custody = ["for-each-ref", "refs/keiyaku/delivery", "refs/keiyaku/candidate"];
+  const beforeRefs = repository.run(custody);
+  assert.notEqual(beforeRefs, "");
+  const marker = join(repository.path, ".git", "remove-failed-once");
+  const shim = [
+    'if [ "$1" = "worktree" ] && [ "$2" = "remove" ] && [ ! -e "$KEIYAKU_REMOVE_MARKER" ]; then',
+    '  : > "$KEIYAKU_REMOVE_MARKER"',
+    '  printf "forced worktree removal failure\\n" >&2',
+    "  exit 1",
+    "fi",
+    'exec "$KEIYAKU_REAL_GIT" "$@"',
+  ].join("\n");
+
+  await withGitShim(shim, { KEIYAKU_REMOVE_MARKER: marker }, async (gitPath) => {
+    const first = await Keiyaku.of({ repo: await Repo.at({ path: repository.path, gitPath }), id: state.id }).abandon();
+    assert.ok(first.lags.some((lag) => lag.kind === "worktree-retained"));
+    assert.equal(repository.run(custody), beforeRefs);
+    assert.equal(existsSync(appointment.path), true);
+    assert.deepEqual(await readManagedWorktreeAppointment(git, state.id), appointment);
+    const second = await Keiyaku.of({ repo: await Repo.at({ path: repository.path, gitPath }), id: state.id }).reconcile();
+    assert.deepEqual(second.lag, []);
+  });
+
+  assert.equal(existsSync(appointment.path), false);
+  assert.deepEqual(await readManagedWorktreeAppointment(git, state.id), { kind: "unappointed" });
+});
+
+test("successful Git removal followed by a recreated path retains custody and foreign residue", async () => {
+  const repository = repositoryWithCommit();
+  const bound = await Keiyaku.bind({
+    repo: await Repo.at({ path: repository.path }),
+    markdown: contractBody("Recreated path"),
+    workspace: "worktree",
+    hooks: { create: [], destroy: [] },
+  });
+  const git = await repositoryAt(repository.path);
+  const state = await bound.keiyaku.state();
+  const appointment = await readManagedWorktreeAppointment(git, state.id);
+  assert.equal(appointment.kind, "appointed");
+  if (appointment.kind !== "appointed") throw new Error("expected appointment");
+  const custody = ["for-each-ref", "refs/keiyaku/delivery", "refs/keiyaku/candidate"];
+  const beforeRefs = repository.run(custody);
+  assert.notEqual(beforeRefs, "");
+  const shim = [
+    'if [ "$1" = "worktree" ] && [ "$2" = "remove" ]; then',
+    '  "$KEIYAKU_REAL_GIT" "$@"',
+    '  status=$?',
+    '  if [ "$status" -eq 0 ]; then mkdir -p "$KEIYAKU_RECREATE_PATH"; printf "foreign\\n" > "$KEIYAKU_RECREATE_PATH/foreign.txt"; fi',
+    '  exit "$status"',
+    "fi",
+    'exec "$KEIYAKU_REAL_GIT" "$@"',
+  ].join("\n");
+
+  await withGitShim(
+    shim,
+    { KEIYAKU_RECREATE_PATH: appointment.path },
+    async (gitPath) => {
+      const retained = await Keiyaku.of({ repo: await Repo.at({ path: repository.path, gitPath }), id: state.id }).abandon();
+      assert.ok(retained.lags.some((lag) => lag.kind === "worktree-retained"));
+      assert.equal(repository.run(custody), beforeRefs);
+      assert.equal(readFileSync(join(appointment.path, "foreign.txt"), "utf8"), "foreign\n");
+      assert.deepEqual(await readManagedWorktreeAppointment(git, state.id), appointment);
+      const replay = await Keiyaku.of({ repo: await Repo.at({ path: repository.path, gitPath }), id: state.id }).reconcile();
+      assert.ok(replay.lag.some((lag) => lag.kind === "worktree-retained"));
+      assert.equal(replay.effects.some((effect) => effect.kind === "worktree" && effect.action === "removed"), false);
+      assert.equal(repository.run(custody), beforeRefs);
+      assert.equal(readFileSync(join(appointment.path, "foreign.txt"), "utf8"), "foreign\n");
+      assert.deepEqual(await readManagedWorktreeAppointment(git, state.id), appointment);
+    },
+  );
+});
+
+test("a dangling symlink recreated after Git removal is retained as physical residue", async () => {
+  const repository = repositoryWithCommit();
+  const bound = await Keiyaku.bind({
+    repo: await Repo.at({ path: repository.path }),
+    markdown: contractBody("Dangling path"),
+    workspace: "worktree",
+    hooks: { create: [], destroy: [] },
+  });
+  const git = await repositoryAt(repository.path);
+  const state = await bound.keiyaku.state();
+  const appointment = await readManagedWorktreeAppointment(git, state.id);
+  assert.equal(appointment.kind, "appointed");
+  if (appointment.kind !== "appointed") throw new Error("expected appointment");
+  const custody = ["for-each-ref", "refs/keiyaku/delivery", "refs/keiyaku/candidate"];
+  const beforeRefs = repository.run(custody);
+  assert.notEqual(beforeRefs, "");
+  const shim = [
+    'if [ "$1" = "worktree" ] && [ "$2" = "remove" ]; then',
+    '  "$KEIYAKU_REAL_GIT" "$@"',
+    '  status=$?',
+    '  if [ "$status" -eq 0 ]; then ln -s "$KEIYAKU_MISSING_TARGET" "$KEIYAKU_RECREATE_PATH"; fi',
+    '  exit "$status"',
+    "fi",
+    'exec "$KEIYAKU_REAL_GIT" "$@"',
+  ].join("\n");
+
+  await withGitShim(
+    shim,
+    {
+      KEIYAKU_MISSING_TARGET: join(repository.path, "missing-foreign-target"),
+      KEIYAKU_RECREATE_PATH: appointment.path,
+    },
+    async (gitPath) => {
+      const retained = await Keiyaku.of({ repo: await Repo.at({ path: repository.path, gitPath }), id: state.id }).abandon();
+      assert.ok(retained.lags.some((lag) => lag.kind === "worktree-retained"));
+      assert.equal(lstatSync(appointment.path).isSymbolicLink(), true);
+      assert.equal(repository.run(custody), beforeRefs);
+      assert.deepEqual(await readManagedWorktreeAppointment(git, state.id), appointment);
+      const replay = await bound.keiyaku.reconcile();
+      assert.ok(replay.lag.some((lag) => lag.kind === "worktree-retained"));
+      assert.equal(replay.effects.some((effect) => effect.kind === "worktree" && effect.action === "removed"), false);
+      assert.equal(lstatSync(appointment.path).isSymbolicLink(), true);
+      assert.equal(repository.run(custody), beforeRefs);
+      assert.deepEqual(await readManagedWorktreeAppointment(git, state.id), appointment);
+    },
+  );
 });
 
 test("corrupt Place register fails mutation and isolates the Contract status section", async () => {

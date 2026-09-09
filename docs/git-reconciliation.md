@@ -55,6 +55,15 @@ cleanup applies Git's sealed-byte and surviving-custodian law from
 physical replay. A worktree is removed before its appointment or redundant refs
 are released. Retention is a lag, not a changed acceptance result.
 
+Successful Git removal alone does not prove that the filesystem path is gone.
+Cleanup confirms physical absence before reporting removal and releasing
+custody. Observation failure or a leftover or recreated path retains custody
+and reports lag; an unregistered residual path is not adopted merely to delete
+it. Reconciliation re-observes such lag on retry, without a background deletion
+queue or repeated destructive attempts in one invocation. Cleanup is not a
+cross-process writer barrier, and runtime files or lock-file presence alone do
+not establish whether another process is writing.
+
 ## Hooks And Scratch
 
 Managed-worktree create and destroy hooks are physical effects, not Contract
