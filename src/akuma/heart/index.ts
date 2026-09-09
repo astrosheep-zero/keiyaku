@@ -224,8 +224,9 @@ export async function recordTellDeliveries(paths: AkumaPaths, inputs: readonly T
         const current = tellFact(heart, input.tellId);
         if (current === null) throw new Error(`unknown tell ${input.tellId}`);
       }
-      for (const input of inputs) insertTellDeliveryFact(heart, input);
-      pruneActivityFacts(heart, ACTIVITY_LIMIT);
+      let changed = false;
+      for (const input of inputs) changed = insertTellDeliveryFact(heart, input) || changed;
+      pruneActivityFacts(heart, ACTIVITY_LIMIT, changed);
     }),
   );
 }
@@ -236,8 +237,8 @@ export async function recordTellReceipt(paths: AkumaPaths, input: TellReceiptInp
       const tellIds =
         input.evidence === "exact" ? [input.tellId] : tellIdsForFence(heart, input.turnSequence, input.fence);
       if (tellIds.length === 0) throw new Error("tell receipt has no delivery mapping");
-      insertTellReceiptFact(heart, input);
-      pruneActivityFacts(heart, ACTIVITY_LIMIT);
+      const changed = insertTellReceiptFact(heart, input);
+      pruneActivityFacts(heart, ACTIVITY_LIMIT, changed);
     }),
   );
 }
@@ -293,7 +294,7 @@ export async function resolvePendingTellDisposition(
       if (outcome === "undelivered") insertUndeliveredTellReceipts(heart, tellIds, at);
       if (!dispositionSnapshotProven(heart, tellIds)) return false;
       resolveTellDispositionSnapshot(heart, bodySequence, at);
-      pruneActivityFacts(heart, ACTIVITY_LIMIT);
+      pruneActivityFacts(heart, ACTIVITY_LIMIT, true);
       return true;
     }),
   );
@@ -409,7 +410,7 @@ export async function failOpenBoundTurns(
           completedAt: input.completedAt,
         });
       }
-      pruneActivityFacts(heart, ACTIVITY_LIMIT);
+      pruneActivityFacts(heart, ACTIVITY_LIMIT, sequences.length > 0);
       return sequences;
     }),
   );
@@ -426,7 +427,7 @@ export async function endTurn(
   return await withHeart(paths, (heart) =>
     transaction(heart, () => {
       const fact = insertTurnEndFact(heart, { kind: "turn-end", ...input });
-      pruneActivityFacts(heart, ACTIVITY_LIMIT);
+      pruneActivityFacts(heart, ACTIVITY_LIMIT, true);
       return fact;
     }),
   );

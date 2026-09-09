@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-const HEART_SCHEMA_VERSION = 27;
+const HEART_SCHEMA_VERSION = 28;
 const LEASH_SCHEMA_VERSION = 4;
 
 function assertSchemaVersion(database: DatabaseSync, table: "akuma_schema" | "leash_schema", expected: number): void {
@@ -86,6 +86,11 @@ export const HEART_SCHEMA = `
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
     kind TEXT NOT NULL CHECK (kind IN ('turn-start', 'call', 'activity', 'tell', 'turn-end'))
   ) STRICT;
+  CREATE TABLE IF NOT EXISTS activity_retention (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    checked_sequence INTEGER NOT NULL
+  ) STRICT;
+  INSERT OR IGNORE INTO activity_retention(singleton, checked_sequence) VALUES (1, 0);
   CREATE TABLE IF NOT EXISTS calls (
     sequence INTEGER PRIMARY KEY REFERENCES timeline(sequence) ON DELETE CASCADE,
     turn_sequence INTEGER NOT NULL REFERENCES turns(sequence) ON DELETE CASCADE,
