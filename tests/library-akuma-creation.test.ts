@@ -49,8 +49,8 @@ import {
   writeCommit,
 } from "../src/git/repository.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
-import { Keiyaku, Repo, World, bodyRequestExecution, settings } from "../src/index.js";
-import { drainPluginRuntime, pluginRuntime } from "../src/plugin/runtime.js";
+import { bodyRequestExecution, Keiyaku, Repo, World, settings } from "../src/index.js";
+import { pluginRuntime } from "../src/plugin/runtime.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import {
   cleanupSpawnCapableFixture,
@@ -68,7 +68,6 @@ import {
 } from "./support/akuma-composition.js";
 import { makeGitRepository } from "./support/git.js";
 import { contractMarkdown } from "./support/markdown.js";
-import { cleanupSpawnCapableFixture, installAkumaBodyPidReceipt } from "./support/process.js";
 
 function markdown(title: string): string {
   return contractMarkdown(title, {
@@ -260,7 +259,6 @@ test("local schema Keiyaku.call waits for its held empty Body before admitting i
         await PublicAkuma.select(world, akumaId)
           .kill()
           .catch(() => undefined);
-      await drainPluginRuntime(world);
       const cleanup = await cleanupSpawnCapableFixture({
         fixturePath: raw.path,
         pidReceiptPath: bodyPidReceipt,
@@ -329,7 +327,6 @@ test("forwarded schema Keiyaku.call waits for its empty Body before admitting it
         await PublicAkuma.select(world, akumaId)
           .kill()
           .catch(() => undefined);
-      await drainPluginRuntime(world);
       const cleanup = await cleanupSpawnCapableFixture({
         fixturePath: raw.path,
         pidReceiptPath: bodyPidReceipt,
@@ -446,7 +443,7 @@ test("package-root World inputs reject a forged JavaScript coordinate before eff
   }
 });
 
-test("Keiyaku.call dispatches the admitted generic signal without blocking completion", async () => {
+test("Keiyaku.call awaits admitted generic signal delivery after admission", async () => {
   const { raw, repo } = await repositoryFixture();
   const world = await World.at(raw.path);
   const trace = join(raw.path, "called.json");
@@ -487,7 +484,7 @@ test("Keiyaku.call dispatches the admitted generic signal without blocking compl
   const bound = await Keiyaku.bind({ repo, markdown: markdown("Call plugin signal"), workspace: "worktree" });
   const contractId = (await bound.keiyaku.state()).id;
   try {
-    const result = await routedKeiyaku.call({
+    const pending = routedKeiyaku.call({
       path: world,
       archetype: "worker",
       body: "called",
@@ -501,9 +498,14 @@ test("Keiyaku.call dispatches the admitted generic signal without blocking compl
       if (Date.now() >= deadline) throw new Error("timed out waiting for called plugin handler");
       await new Promise<void>((resolve) => setTimeout(resolve, 5));
     }
-    assert.equal(existsSync(trace), false);
+    let completed = false;
+    void pending.then(() => {
+      completed = true;
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    assert.equal(completed, false);
     releasePlugin();
-    await drainPluginRuntime(world);
+    const result = await pending;
     assert.deepEqual(JSON.parse(readFileSync(trace, "utf8")), {
       kind: "akuma.called",
       akumaId: result.akuma,
@@ -512,10 +514,8 @@ test("Keiyaku.call dispatches the admitted generic signal without blocking compl
     });
   } finally {
     releasePlugin();
-    await drainPluginRuntime(world);
     delete (globalThis as Record<string, unknown>)[releaseKey];
     await pump.close();
-    await drainPluginRuntime(world);
     leash.release();
     rmSync(raw.path, { recursive: true, force: true });
   }
@@ -628,7 +628,6 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
     );
   } finally {
     await pump.close();
-    await drainPluginRuntime(world);
     leash.release();
     if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
     else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
@@ -749,7 +748,6 @@ test("managed Contract calls use the appointed Place only when cwd is omitted", 
     await managed.keiyaku.abandon({ hooks: { create: [], destroy: [] } });
   } finally {
     await pump.close();
-    await drainPluginRuntime(world);
     leash.release();
     if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
     else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
@@ -782,7 +780,6 @@ test("direct Akuma birth reports process cwd and the embedding World fallback", 
     operationFailed = false;
   } finally {
     try {
-      await drainPluginRuntime(world);
       const cleanup = await cleanupSpawnCapableFixture({
         fixturePath: raw.path,
         pidReceiptPath: bodyPidReceipt,
@@ -1234,7 +1231,6 @@ test("Keiyaku.call carries the CallResult restraint on detached and failed obser
   } finally {
     AkumaHandle.prototype.wait = originalWait;
     await pump.close();
-    await drainPluginRuntime(world);
     leash.release();
     if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
     else process.env[AKUMA_REQUESTS_ENV] = previousRequests;

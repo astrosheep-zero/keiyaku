@@ -8,17 +8,41 @@ import { pluginRuntime } from "../src/plugin/runtime.js";
 import { settings } from "../src/settings.js";
 import { World } from "../src/world.js";
 
+const SQUARE_SESSION_ENVIRONMENT = [
+  "CLAUDE_CODE_SESSION_ID",
+  "CODEX_THREAD_ID",
+  "OPENCODE_SESSION_ID",
+  "SQUARE_PI_SESSION_ID",
+  "SQUARE_PARTICIPANT_NAME",
+  "PASEO_AGENT_ID",
+] as const;
+
+function isolateSquareSessionEnvironment(): () => void {
+  const previous = new Map(SQUARE_SESSION_ENVIRONMENT.map((name) => [name, process.env[name]]));
+  for (const name of SQUARE_SESSION_ENVIRONMENT) delete process.env[name];
+  return () => {
+    for (const [name, value] of previous) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  };
+}
+
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-plugin-runtime-"));
   const home = join(root, "home");
   const plugins = join(root, "plugins");
+  const restoreSquareSessionEnvironment = isolateSquareSessionEnvironment();
   mkdirSync(home, { recursive: true });
   mkdirSync(plugins, { recursive: true });
   return {
     root,
     home,
     plugins,
-    close: () => rmSync(root, { recursive: true, force: true }),
+    close: () => {
+      restoreSquareSessionEnvironment();
+      rmSync(root, { recursive: true, force: true });
+    },
   };
 }
 
@@ -305,9 +329,7 @@ test("plugin delivery starts generic call handlers independently and contains ha
     const observed = trace(output);
     assert.equal(observed.includes("fast:aku/example"), true);
     assert.equal(observed.indexOf("slow-start") < observed.indexOf("slow-fail"), true);
-    await eventually(() =>
-      diagnostics.some((value) => value.startsWith("plugin alpha signal: handler failed")),
-    );
+    await eventually(() => diagnostics.some((value) => value.startsWith("plugin alpha signal: handler failed")));
     assert.equal(
       diagnostics.some((value) => value.startsWith("plugin alpha signal: handler failed")),
       true,
@@ -317,7 +339,7 @@ test("plugin delivery starts generic call handlers independently and contains ha
   }
 });
 
-test("plugin runtime drain waits for in-flight signal handlers", async () => {
+test("plugin runtime emit waits for its signal handlers", async () => {
   const value = fixture();
   try {
     const output = join(value.root, "trace.txt");
@@ -347,8 +369,6 @@ test("plugin runtime drain waits for in-flight signal handlers", async () => {
       outcome: { kind: "answered", text: "done" },
     });
 
-    assert.deepEqual(trace(output), ["start"]);
-    await runtime.drain();
     assert.deepEqual(trace(output), ["start", "done"]);
   } finally {
     value.close();
@@ -460,7 +480,7 @@ test("plugin writable paths reject traversal, management custody, duplicate name
   }
 });
 
-test("hanging activation does not block runtime availability or another plugin", async () => {
+test("hanging activation is bounded independently and does not replay an emission", async () => {
   const value = fixture();
   try {
     const output = join(value.root, "trace.txt");
@@ -468,9 +488,10 @@ test("hanging activation does not block runtime availability or another plugin",
       value.root,
       "hanging",
       [
+        'import { appendFileSync } from "node:fs";',
         "export default {",
         '  manifest: { id: "hanging", apiVersion: 1 },',
-        "  activate() { return new Promise(() => {}); },",
+        '  activate(context, cancellation) { return new Promise((resolve) => cancellation.addEventListener("abort", () => { appendFileSync(context.config.trace, "activation-aborted\\n"); resolve({}); }, { once: true })); },',
         "};",
       ].join("\n"),
     );
@@ -490,25 +511,30 @@ test("hanging activation does not block runtime availability or another plugin",
       join(value.root, ".keiyaku", "settings.json"),
       JSON.stringify({
         plugins: {
-          hanging: { package: "./plugins/hanging.mjs" },
+          hanging: { package: "./plugins/hanging.mjs", config: { trace: output } },
           working: { package: "./plugins/working.mjs", config: { trace: output } },
         },
       }),
     );
 
+    const diagnostics: string[] = [];
     const runtime = await Promise.race([
-      pluginRuntime({ world: await World.at(value.root) }),
+      pluginRuntime({ world: await World.at(value.root), reportDiagnostic: (value) => diagnostics.push(value) }),
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error("runtime blocked")), 100)),
     ]);
     await eventually(() => trace(output).includes("activated"));
-    await runtime.emit({ kind: "akuma.called", akumaId: "aku/example" });
-    await eventually(() => trace(output).includes("called"));
+    await runtime.emit({ kind: "akuma.called", akumaId: "aku/example" }, (value) => diagnostics.push(value));
+    assert.deepEqual(trace(output), ["activated", "activation-aborted", "called"]);
+    assert.equal(
+      diagnostics.some((value) => value.startsWith("plugin hanging activation: timed out after 5000ms")),
+      true,
+    );
   } finally {
     value.close();
   }
 });
 
-test("hanging handler does not block another handler or emit completion", async () => {
+test("hanging handler is cancelled at the delivery bound without blocking another handler", async () => {
   const value = fixture();
   try {
     const output = join(value.root, "trace.txt");
@@ -516,9 +542,10 @@ test("hanging handler does not block another handler or emit completion", async 
       value.root,
       "hanging",
       [
+        'import { appendFileSync } from "node:fs";',
         "export default {",
         '  manifest: { id: "hanging", apiVersion: 1 },',
-        '  activate() { return { signals: { "akuma.called": () => new Promise(() => {}) } }; },',
+        '  activate(context) { return { signals: { "akuma.called": (_signal, cancellation) => new Promise((_resolve, reject) => cancellation.addEventListener("abort", () => { appendFileSync(context.config.trace, "cancelled\\n"); reject(new Error("late handler rejection")); }, { once: true })) } }; },',
         "};",
       ].join("\n"),
     );
@@ -538,20 +565,82 @@ test("hanging handler does not block another handler or emit completion", async 
       join(value.root, ".keiyaku", "settings.json"),
       JSON.stringify({
         plugins: {
-          hanging: { package: "./plugins/hanging.mjs" },
+          hanging: { package: "./plugins/hanging.mjs", config: { trace: output } },
           working: { package: "./plugins/working.mjs", config: { trace: output } },
         },
       }),
     );
 
+    const diagnostics: string[] = [];
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", observeUnhandled);
     const runtime = await pluginRuntime({ world: await World.at(value.root) });
-    await eventually(() => trace(output).includes("activated"));
-    await Promise.race([
-      runtime.emit({ kind: "akuma.called", akumaId: "aku/example" }),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("emit blocked")), 100)),
-    ]);
-    await eventually(() => trace(output).includes("called"));
+    try {
+      await eventually(() => trace(output).includes("activated"));
+      const started = Date.now();
+      await runtime.emit({ kind: "akuma.called", akumaId: "aku/example" }, (value) => diagnostics.push(value));
+      assert.equal(Date.now() - started >= 4_500, true);
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+      assert.deepEqual(trace(output), ["activated", "called", "cancelled"]);
+      assert.equal(
+        diagnostics.some((value) => value.startsWith("plugin hanging signal: timed out after 5000ms")),
+        true,
+      );
+      assert.deepEqual(unhandled, []);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
   } finally {
+    value.close();
+  }
+});
+
+test("a timed-out handler does not share cancellation with another handler", async () => {
+  const value = fixture();
+  const cancellationKey = `keiyaku-plugin-cancellation-${Date.now()}`;
+  try {
+    const output = join(value.root, "trace.txt");
+    writePlugin(
+      value.root,
+      "first",
+      [
+        'import { appendFileSync } from "node:fs";',
+        "export default {",
+        '  manifest: { id: "first", apiVersion: 1 },',
+        '  activate(context) { return { signals: { "akuma.called": (_signal, cancellation) => new Promise((resolve) => cancellation.addEventListener("abort", () => { appendFileSync(context.config.trace, `first:${globalThis[context.config.cancellationKey].aborted}\\n`); resolve(); }, { once: true })) } }; },',
+        "};",
+      ].join("\n"),
+    );
+    writePlugin(
+      value.root,
+      "second",
+      [
+        'import { appendFileSync } from "node:fs";',
+        "export default {",
+        '  manifest: { id: "second", apiVersion: 1 },',
+        '  activate(context) { return { signals: { "akuma.called": (_signal, cancellation) => new Promise((resolve) => { globalThis[context.config.cancellationKey] = cancellation; cancellation.addEventListener("abort", () => { appendFileSync(context.config.trace, "second\\n"); resolve(); }, { once: true }); }) } }; },',
+        "};",
+      ].join("\n"),
+    );
+    mkdirSync(join(value.root, ".keiyaku"), { recursive: true });
+    writeFileSync(
+      join(value.root, ".keiyaku", "settings.json"),
+      JSON.stringify({
+        plugins: {
+          first: { package: "./plugins/first.mjs", config: { trace: output, cancellationKey } },
+          second: { package: "./plugins/second.mjs", config: { trace: output, cancellationKey } },
+        },
+      }),
+    );
+
+    const runtime = await pluginRuntime({ world: await World.at(value.root) });
+    await runtime.emit({ kind: "akuma.called", akumaId: "aku/example" });
+    assert.deepEqual(trace(output), ["first:false", "second"]);
+  } finally {
+    delete (globalThis as Record<string, unknown>)[cancellationKey];
     value.close();
   }
 });

@@ -1,6 +1,5 @@
 import { activityFact, claudeBodyLaunch, turnEndFact } from "./support/akuma-fixtures.js";
 import assert from "node:assert/strict";
-import { drainPluginRuntime } from "../src/plugin/runtime.js";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { waitForFixtureFile as waitForFile } from "./support/process.js";
 import { tmpdir } from "node:os";
@@ -710,7 +709,6 @@ test("turn owner folds a rejected completion while the event stream remains open
   } finally {
     writeFileSync(deferred.turnRelease, "release\n");
     await waitForFile(deferred.turnSettled);
-    await drainPluginRuntime(root);
     rmSync(root, { recursive: true, force: true });
   }
 });

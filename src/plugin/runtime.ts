@@ -15,7 +15,7 @@ import type {
 } from "./public.js";
 
 const DIAGNOSTIC_LIMIT = 500;
-const PLUGIN_DRAIN_TIMEOUT_MS = 5_000;
+const PLUGIN_ATTEMPT_TIMEOUT_MS = 5_000;
 const PLUGIN_NAMESPACE = "plugins";
 const SQUARE_PLUGIN_PACKAGE = "@astrosheep/keiyaku-plugin-square";
 const BUILTIN_PLUGINS: readonly SelectedPlugin[] = Object.freeze([
@@ -39,7 +39,6 @@ type RegisteredHandler = Readonly<{
 
 export type PluginRuntime = Readonly<{
   emit(signal: PluginSignal, reportDiagnostic?: PluginDiagnostic): Promise<void>;
-  drain(kind?: keyof PluginSignalMap): Promise<void>;
 }>;
 
 type SelectedPlugin = Readonly<{
@@ -47,6 +46,27 @@ type SelectedPlugin = Readonly<{
   package: string;
   config: unknown;
 }>;
+
+type Attempt<T> =
+  | Readonly<{ kind: "settled"; value: T }>
+  | Readonly<{ kind: "failed"; error: unknown }>
+  | Readonly<{ kind: "timed-out" }>;
+
+type Activation = Readonly<{
+  handlers: readonly RegisteredHandler[];
+  timedOut: boolean;
+}>;
+
+type ActivationInput = Readonly<{
+  selected: SelectedPlugin;
+  world: WorldRoot;
+  activated: Set<string>;
+  report: PluginDiagnostic | undefined;
+  cancellation: AbortSignal;
+  onStarted: () => void;
+}>;
+
+const ABORTED = Symbol("plugin attempt aborted");
 
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -62,6 +82,48 @@ function diagnostic(report: PluginDiagnostic | undefined, subject: string, stage
     report(`plugin ${subject} ${stage}: ${message(error)}`.slice(0, DIAGNOSTIC_LIMIT));
   } catch {
     // Diagnostics are optional side effects too.
+  }
+}
+
+function timeoutError(): Error {
+  return new Error(`timed out after ${PLUGIN_ATTEMPT_TIMEOUT_MS}ms`);
+}
+
+async function boundedAttempt<T>(
+  attempt: (cancellation: AbortSignal) => Promise<T> | T,
+  timeoutMs = PLUGIN_ATTEMPT_TIMEOUT_MS,
+): Promise<Attempt<T>> {
+  if (timeoutMs <= 0) return { kind: "timed-out" };
+  const controller = new AbortController();
+  let timeout: NodeJS.Timeout | undefined;
+  const completed = Promise.resolve()
+    .then(() => attempt(controller.signal))
+    .then(
+      (value): Attempt<T> => ({ kind: "settled", value }),
+      (error: unknown): Attempt<T> => ({ kind: "failed", error }),
+    );
+  const expired = new Promise<Attempt<T>>((resolve) => {
+    timeout = setTimeout(() => {
+      controller.abort(timeoutError());
+      resolve({ kind: "timed-out" });
+    }, timeoutMs);
+  });
+  const result = await Promise.race([completed, expired]);
+  if (timeout !== undefined) clearTimeout(timeout);
+  return result;
+}
+
+async function settleBefore<T>(promise: Promise<T>, cancellation: AbortSignal): Promise<T | typeof ABORTED> {
+  if (cancellation.aborted) return ABORTED;
+  let releaseAbort!: () => void;
+  const aborted = new Promise<typeof ABORTED>((resolve) => {
+    releaseAbort = () => resolve(ABORTED);
+    cancellation.addEventListener("abort", releaseAbort, { once: true });
+  });
+  try {
+    return await Promise.race([promise, aborted]);
+  } finally {
+    cancellation.removeEventListener("abort", releaseAbort);
   }
 }
 
@@ -254,13 +316,8 @@ async function importFromWorld(world: WorldRoot, packageName: string): Promise<R
   }
 }
 
-async function activate(
-  selected: SelectedPlugin,
-  world: WorldRoot,
-  activated: Set<string>,
-  report: PluginDiagnostic | undefined,
-  onStarted: () => void,
-): Promise<readonly RegisteredHandler[]> {
+async function activate(input: ActivationInput): Promise<readonly RegisteredHandler[]> {
+  const { selected, world, activated, report, cancellation, onStarted } = input;
   let started = false;
   const markStarted = () => {
     if (started) return;
@@ -273,6 +330,10 @@ async function activate(
   } catch (error) {
     markStarted();
     diagnostic(report, selected.id, "import", error);
+    return [];
+  }
+  if (cancellation.aborted) {
+    markStarted();
     return [];
   }
 
@@ -306,10 +367,15 @@ async function activate(
     diagnostic(report, selected.id, "validation", error);
     return [];
   }
+  if (cancellation.aborted) {
+    markStarted();
+    return [];
+  }
 
   markStarted();
   try {
-    const instance = await candidate.activate(context);
+    const instance = await candidate.activate(context, cancellation);
+    if (cancellation.aborted) return [];
     const registered = handlers(candidate.manifest.id, instance);
     activated.add(candidate.manifest.id);
     return registered;
@@ -319,34 +385,15 @@ async function activate(
   }
 }
 
-function deliver(
+async function deliver(
   entry: RegisteredHandler,
   signal: PluginSignal,
   reportDiagnostic: PluginDiagnostic | undefined,
-  inFlight: Map<keyof PluginSignalMap, Set<Promise<void>>>,
-): void {
-  try {
-    const delivery = Promise.resolve(entry.handler(signal as never)).catch((error) =>
-      diagnostic(reportDiagnostic, entry.pluginId, "signal", error),
-    );
-    const deliveries = inFlight.get(signal.kind) ?? new Set<Promise<void>>();
-    deliveries.add(delivery);
-    inFlight.set(signal.kind, deliveries);
-    void delivery.finally(() => deliveries.delete(delivery));
-  } catch (error) {
-    diagnostic(reportDiagnostic, entry.pluginId, "signal", error);
-  }
-}
-
-function deliverTo(
-  handlers: readonly RegisteredHandler[],
-  signal: PluginSignal,
-  reportDiagnostic: PluginDiagnostic | undefined,
-  inFlight: Map<keyof PluginSignalMap, Set<Promise<void>>>,
-): void {
-  for (const entry of handlers) {
-    if (entry.kind === signal.kind) deliver(entry, signal, reportDiagnostic, inFlight);
-  }
+  timeoutMs: number,
+): Promise<void> {
+  const result = await boundedAttempt((cancellation) => entry.handler(signal as never, cancellation), timeoutMs);
+  if (result.kind === "timed-out") diagnostic(reportDiagnostic, entry.pluginId, "signal", timeoutError());
+  if (result.kind === "failed") diagnostic(reportDiagnostic, entry.pluginId, "signal", result.error);
 }
 
 export async function pluginRuntime(input: PluginRuntimeInput): Promise<PluginRuntime> {
@@ -358,97 +405,57 @@ export async function pluginRuntime(input: PluginRuntimeInput): Promise<PluginRu
   return await runtime;
 }
 
-export async function drainPluginRuntime(world: WorldRoot): Promise<void> {
-  const runtime = PROCESS_RUNTIMES.get(world);
-  if (runtime !== undefined) await (await runtime).drain();
-}
-
-async function drainWithDeadline(pending: Promise<void>): Promise<void> {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    await Promise.race([
-      pending,
-      new Promise<void>((resolve) => {
-        timeout = setTimeout(resolve, PLUGIN_DRAIN_TIMEOUT_MS);
-      }),
-    ]);
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
 async function createPluginRuntime(input: PluginRuntimeInput): Promise<PluginRuntime> {
   const report = input.reportDiagnostic;
   const selected = selectedPlugins(input.settings ?? (await settings({ root: input.world })), report);
   const activated = new Set<string>();
-  const registered = new Map<number, readonly RegisteredHandler[]>();
-  const settled = new Set<number>();
-  const pending = new Map<number, PluginSignal[]>();
-  const settledPromises: Promise<void>[] = [];
-  const inFlight = new Map<keyof PluginSignalMap, Set<Promise<void>>>();
   let previousStarted = Promise.resolve();
-  for (const [index, entry] of selected.entries()) {
+  const activations = selected.map((entry) => {
     let releaseStarted!: () => void;
-    let releaseSettled!: () => void;
     const started = new Promise<void>((resolve) => {
       releaseStarted = resolve;
     });
-    settledPromises.push(
-      new Promise<void>((resolve) => {
-        releaseSettled = resolve;
-      }),
-    );
-    void previousStarted.then(async () => {
-      try {
-        const handlers = await activate(entry, input.world, activated, report, releaseStarted);
-        if (handlers.length > 0) registered.set(index, handlers);
-        settled.add(index);
-        const queued = pending.get(index);
-        if (queued !== undefined) {
-          pending.delete(index);
-          for (const signal of queued) deliverTo(handlers, signal, report, inFlight);
-        }
-      } catch (error) {
-        diagnostic(report, entry.id, "activation", error);
-        settled.add(index);
-        pending.delete(index);
-      } finally {
-        releaseStarted();
-        releaseSettled();
-      }
+    const activation = previousStarted.then(async () => {
+      const result = await boundedAttempt((cancellation) =>
+        activate({ selected: entry, world: input.world, activated, report, cancellation, onStarted: releaseStarted }),
+      );
+      releaseStarted();
+      if (result.kind === "settled") return { handlers: result.value, timedOut: false } satisfies Activation;
+      diagnostic(report, entry.id, "activation", result.kind === "failed" ? result.error : timeoutError());
+      return { handlers: [], timedOut: result.kind === "timed-out" } satisfies Activation;
     });
     previousStarted = started;
-  }
+    return activation;
+  });
 
   return Object.freeze({
-    emit(signal: PluginSignal, reportDiagnostic: PluginDiagnostic | undefined = report): Promise<void> {
-      const deliveries = [...registered.entries()]
-        .sort(([left], [right]) => left - right)
-        .flatMap(([, handlers]) => handlers)
-        .filter((handler) => handler.kind === signal.kind);
-      for (const [index] of selected.entries()) {
-        if (!settled.has(index)) {
-          const queue = pending.get(index);
-          if (queue === undefined) pending.set(index, [signal]);
-          else queue.push(signal);
-        }
+    async emit(signal: PluginSignal, reportDiagnostic: PluginDiagnostic | undefined = report): Promise<void> {
+      const deadline = performance.now() + PLUGIN_ATTEMPT_TIMEOUT_MS;
+      const activated = await boundedAttempt(async (cancellation) => {
+        const handlers = await Promise.all(
+          activations.map(async (activation, index) => {
+            const activatedHandlers = await settleBefore(activation, cancellation);
+            if (activatedHandlers !== ABORTED) {
+              if (activatedHandlers.timedOut)
+                diagnostic(reportDiagnostic, selected[index]!.id, "signal", timeoutError());
+              return activatedHandlers.handlers;
+            }
+            diagnostic(reportDiagnostic, selected[index]!.id, "signal", timeoutError());
+            return [];
+          }),
+        );
+        return handlers.flat();
+      });
+      if (activated.kind === "failed") {
+        diagnostic(reportDiagnostic, "runtime", "signal", activated.error);
+        return;
       }
-      for (const entry of deliveries) deliver(entry, signal, reportDiagnostic, inFlight);
-      return Promise.resolve();
-    },
-    async drain(kind?: keyof PluginSignalMap): Promise<void> {
-      const settle = async (): Promise<void> => {
-        await Promise.all(settledPromises);
-        for (;;) {
-          const pending =
-            kind === undefined
-              ? [...inFlight.values()].flatMap((deliveries) => [...deliveries])
-              : [...(inFlight.get(kind) ?? [])];
-          if (pending.length === 0) return;
-          await Promise.all(pending);
-        }
-      };
-      await drainWithDeadline(settle());
+      if (activated.kind === "timed-out") return;
+      await Promise.all(
+        activated.value
+          .filter((entry) => entry.kind === signal.kind)
+          .map((entry) => deliver(entry, signal, reportDiagnostic, Math.max(0, deadline - performance.now()))),
+      );
     },
   });
 }

@@ -341,18 +341,15 @@ async function recoverBodyRequests(input: BodyExecution): Promise<boolean> {
 
 type TurnOutcomeEmitter = Readonly<{
   emit(turnSequence: number, outcome: CommittedOutcome): Promise<void>;
-  drain(): Promise<void>;
 }>;
 
 function turnOutcomeEmitter(launch: BodyLaunch, soul: Soul): TurnOutcomeEmitter {
   let plugins: Promise<PluginRuntime> | undefined;
-  const pending = new Set<Promise<void>>();
   const reportDiagnostic = (message: string): void => {
     void recordPluginDiagnostic(launch.paths, "turn outcome", message);
   };
-  const emit = (turnSequence: number, outcome: CommittedOutcome): Promise<void> => {
-    let delivery!: Promise<void>;
-    delivery = (async () => {
+  return {
+    async emit(turnSequence: number, outcome: CommittedOutcome): Promise<void> {
       try {
         plugins ??= pluginRuntime({
           world: await World.at(worldRootForAkumaPaths(launch.paths)),
@@ -376,15 +373,8 @@ function turnOutcomeEmitter(launch: BodyLaunch, soul: Soul): TurnOutcomeEmitter 
       } catch (error) {
         await recordPluginDiagnostic(launch.paths, "turn outcome", error);
       }
-    })().finally(() => pending.delete(delivery));
-    pending.add(delivery);
-    return delivery;
+    },
   };
-  const drain = async (): Promise<void> => {
-    while (pending.size > 0) await Promise.all([...pending]);
-    if (plugins !== undefined) await (await plugins).drain("akuma.turn-outcome");
-  };
-  return { emit, drain };
 }
 
 function bodyEndEmitter(
@@ -414,7 +404,6 @@ function bodyEndEmitter(
           },
           reportDiagnostic,
         );
-        await (await plugins).drain("akuma.body-ended");
       } catch (error) {
         await recordPluginDiagnostic(launch.paths, "body end", error);
       }
@@ -480,7 +469,7 @@ async function runBodyTurns(input: BodyExecution): Promise<BodyTurnEnd> {
       return;
     }
     const outcome = await persistTurn(launch.paths, result.turnSequence, result, runtime.now());
-    void turnOutcome.emit(result.turnSequence, outcome);
+    await turnOutcome.emit(result.turnSequence, outcome);
     if (outcome.outcome === "failed") {
       await failOpenBoundTurnsIfPresent(launch.paths, bodySequence, outcome.diagnostic, runtime.now());
       await breakBody(launch.paths, { sequence: bodySequence, end: "broke-off", at: runtime.now() });
@@ -676,7 +665,6 @@ export async function driveAkumaBody(
     if (finished.decided !== null)
       await resolveDecidedPendingTellDisposition(launch.paths, finished.decided, runtime.spawnBody ?? spawnAkumaBody);
     if (finished.notification !== undefined) await finished.notification;
-    void emitTurnOutcome?.drain();
   }
 }
 
@@ -689,11 +677,7 @@ export async function runAkumaBody(
   world: WorldRoot,
   externalCommands: Readonly<Record<string, ErasedRequestCommand>>,
 ): Promise<"held" | void> {
-  try {
-    return await driveAkumaBody(launch, undefined, { world, externalCommands });
-  } finally {
-    await (await pluginRuntime({ world })).drain();
-  }
+  return await driveAkumaBody(launch, undefined, { world, externalCommands });
 }
 
 const DIRECT_TELL_WAKE: TellWakeRuntime = {

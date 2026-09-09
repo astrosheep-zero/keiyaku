@@ -9,7 +9,6 @@ import { spawnOptionsFor, spawnWindowsLauncher } from "../src/runtime/proc/launc
 import { consumeProcessStdout, runProcess, spawnDetachedProcess } from "../src/runtime/proc/run.js";
 import { spawnStdioProcess } from "../src/runtime/proc/stdio.js";
 import { World } from "../src/world.js";
-import { drainPluginRuntime } from "../src/plugin/runtime.js";
 import {
   appendNodeOptionsImport,
   cleanupSpawnCapableFixture,
@@ -247,7 +246,6 @@ test("a released Akuma Body completes through Pi and an OpenAI chat completion e
     operationFailed = false;
   } finally {
     try {
-      await drainPluginRuntime(worldRoot);
       const cleanup = await cleanupSpawnCapableFixture({
         fixturePath: root,
         pidReceiptPath: bodyPidReceipt,

@@ -36,7 +36,10 @@ export type PluginSignal = {
 }[keyof PluginSignalMap];
 
 export type PluginHooks = Readonly<{
-  [K in keyof PluginSignalMap]?: (signal: Readonly<{ kind: K }> & PluginSignalMap[K]) => Promise<void> | void;
+  [K in keyof PluginSignalMap]?: (
+    signal: Readonly<{ kind: K }> & PluginSignalMap[K],
+    cancellation?: AbortSignal,
+  ) => Promise<void> | void;
 }>;
 
 export type PluginContext = Readonly<{
@@ -47,7 +50,7 @@ export type PluginContext = Readonly<{
 
 export type KeiyakuPlugin = Readonly<{
   manifest: PluginManifest;
-  activate(context: PluginContext): Promise<PluginInstance> | PluginInstance;
+  activate(context: PluginContext, cancellation?: AbortSignal): Promise<PluginInstance> | PluginInstance;
 }>;
 
 export type PluginInstance = Readonly<{

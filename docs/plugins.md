@@ -58,19 +58,25 @@ identity or a plugin-specific cleanup hook.
 Activation is all-or-nothing for each plugin. The host validates a package and
 its declarations, then activates it before retaining any handlers. Import,
 validation, activation, or handler failure is attributed to that plugin through
-the producing process's diagnostic channel, is bounded, and does not prevent
-other selected plugins from proceeding. A signal that arrives while a selected
-plugin is still activating remains eligible for that plugin's one delivery once
-activation settles; a failed activation drops that signal.
+the producing process's diagnostic channel, is bounded by the five-second
+attempt limit, and does not prevent other selected plugins from proceeding. The
+host supplies each activation and handler attempt its own cancellation signal; a
+non-cooperative attempt that outlives its limit loses all authority except its
+diagnostic evidence. A signal that arrives while a selected plugin is still
+activating remains eligible only when that activation settles successfully
+within the signal producer's own bounded delivery; otherwise it is dropped with
+a diagnostic and is never replayed.
 
 ## Signals And Boundaries
 
-A process emits a complete owned signal at most once for that occurrence. It
-starts each applicable handler independently and waits only for their settled
-attempts. Handler failure is non-authoritative silence apart from its diagnostic:
-it changes neither Heart truth, lifecycle, leash, public result, nor later Tell
-semantics. Keiyaku creates no retry queue, persistence record, compensating
-action, or generic event bus for plugins.
+A process emits a complete owned signal at most once for that occurrence. Its
+producer awaits one bounded delivery invocation: applicable handlers begin
+independently and that invocation settles after every one succeeds, fails, or
+times out. No later process-finally drain or cross-signal ownership remains.
+Handler failure or timeout is non-authoritative silence apart from its
+diagnostic: it changes neither Heart truth, lifecycle, leash, public result, nor
+later Tell semantics. Keiyaku creates no retry queue, persistence record,
+compensating action, or generic event bus for plugins.
 
 An admitted Akuma call emits `akuma.called` after admission and before any
 outcome observation. It identifies the called Akuma, its calling Akuma when

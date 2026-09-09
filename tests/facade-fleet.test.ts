@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test, { type TestContext } from "node:test";
 import { boundedMap, PAGE_POOL_SIZE } from "../src/akuma/akuma-product.js";
-import { AkumaNotBornError } from "../src/akuma/akuma.js";
+import { AkumaNotBornError, akumaStatusSchema, type AkumaStatus } from "../src/akuma/akuma.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { appendActivity, beginTurn, initializeHeart, readHeart, recordTell } from "../src/akuma/heart/index.js";
@@ -19,10 +19,10 @@ import { parseAkumaAlias } from "../src/identity/selector.js";
 import { AkumaWorldScopeError, Keiyaku, Repo, type Catalog, type WorldRoot } from "../src/index.js";
 import { observeKanshi } from "../src/kanshi/read.js";
 import { addressAkumaSet, resolveNamedAddress } from "../src/library/address.js";
-import { drainPluginRuntime } from "../src/plugin/runtime.js";
-import { projectTaskBoardObservation } from "../src/task/board.js";
+import { projectTaskBoardObservation, taskRowsSchema, type TaskRow } from "../src/task/board.js";
 import { serializeTaskDocument, type TaskDocument } from "../src/task/document.js";
 import { Tasks, type TaskId } from "../src/task/index.js";
+import { formatTaskId } from "../src/task/identity.js";
 import { authorityPath, readBoard } from "../src/task/store.js";
 import { World } from "../src/world.js";
 import { AkumaComposition as Akuma } from "./support/akuma-composition.js";
@@ -434,7 +434,6 @@ test("facade ls reads exactly one selected identity directory", async (t) => {
     );
     assert.deepEqual((await Keiyaku.ls({ query: { kind: "akuma", archetype: "reviewer" }, path: root })).rows, []);
   } finally {
-    await drainPluginRuntime(root);
     rmSync(root, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
   }

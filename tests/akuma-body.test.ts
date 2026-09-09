@@ -56,7 +56,7 @@ import {
 import { requestForwardedAkumaCall as requestBodyCall } from "../src/akuma/call-request.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import type { PluginSignal } from "../src/plugin/public.js";
-import { drainPluginRuntime, pluginRuntime } from "../src/plugin/runtime.js";
+import { pluginRuntime } from "../src/plugin/runtime.js";
 import { createCodexAppServerProvider } from "../src/akuma/providers/codex-app-server/index.js";
 import { World } from "../src/world.js";
 
@@ -247,7 +247,6 @@ async function driveAkumaBody(
 }
 
 async function removeDrivenBodyFixture(root: string): Promise<void> {
-  await drainPluginRuntime(await World.at(root));
   rmSync(root, { recursive: true, force: true });
 }
 
@@ -518,7 +517,6 @@ test("body-ended plugins observe the durable terminal Body fact", async () => {
       { now: () => "2026-08-08T00:00:00.000Z" },
     );
 
-    await eventually(() => recorder.observations.length === 1);
     assert.deepEqual(recorder.observations, [
       {
         signal: {
@@ -689,12 +687,14 @@ test("turn-outcome plugins observe a committed failed Turn without changing it",
   }
 });
 
-test("a hanging turn-outcome handler cannot hold Body supervisor close or the leash", async () => {
+test("turn-outcome delivery is awaited by its committed Turn producer", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-plugin-hanging-handler-"));
   try {
     const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abda" });
     await initializeHeart(allocated.paths);
     const ready = join(root, "plugin.ready");
+    const started = join(root, "plugin.started");
+    const settled = join(root, "plugin.settled");
     mkdirSync(join(root, "plugins"), { recursive: true });
     writeFileSync(
       join(root, "plugins", "hanging.mjs"),
@@ -702,14 +702,14 @@ test("a hanging turn-outcome handler cannot hold Body supervisor close or the le
         'import { writeFileSync } from "node:fs";',
         "export default {",
         '  manifest: { id: "hanging", apiVersion: 1 },',
-        '  activate(context) { writeFileSync(context.config.ready, "ready"); return { signals: { "akuma.turn-outcome": () => new Promise(() => {}) } }; },',
+        '  activate(context) { writeFileSync(context.config.ready, "ready"); return { signals: { "akuma.turn-outcome": async () => { writeFileSync(context.config.started, "started"); await new Promise((resolve) => setTimeout(resolve, 25)); writeFileSync(context.config.settled, "settled"); } } }; },',
         "};",
       ].join("\n"),
     );
     mkdirSync(join(root, ".keiyaku"), { recursive: true });
     writeFileSync(
       join(root, ".keiyaku", "settings.json"),
-      JSON.stringify({ plugins: { hanging: { package: "./plugins/hanging.mjs", config: { ready } } } }),
+      JSON.stringify({ plugins: { hanging: { package: "./plugins/hanging.mjs", config: { ready, started, settled } } } }),
     );
     await pluginRuntime({ world: await World.at(root) });
     await eventually(() => existsSync(ready));
@@ -723,12 +723,12 @@ test("a hanging turn-outcome handler cannot hold Body supervisor close or the le
       }),
       { now: () => "2026-08-08T00:00:00.000Z" },
     );
-    await Promise.race([
-      body,
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Body did not close")), 1_000)),
-    ]);
+    await eventually(() => existsSync(started));
+    assert.equal(await probeLeash(allocated.paths), "held");
+    await body;
 
     assert.equal(await probeLeash(allocated.paths), "free");
+    assert.equal(existsSync(settled), true);
     assert.equal((await readHeart(allocated.paths)).latestBody?.end, "exited");
     assert.deepEqual(await outcomes(allocated.paths), [
       {
