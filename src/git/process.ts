@@ -1,4 +1,5 @@
-import { consumeProcessStdout, spawnCancellableProcess } from "../runtime/proc/run.js";
+import { pipeline } from "node:stream/promises";
+import { consumeProcessStdout, spawnCancellableProcess, type CancellableProcess } from "../runtime/proc/run.js";
 
 export type GitRepository = Readonly<{
   /** The executable selected when this repository capability is created. */
@@ -170,4 +171,89 @@ export async function runGitWithEnvironment(
   environment: NodeJS.ProcessEnv,
 ): Promise<Buffer> {
   return await executeGit(repository, args, input, environment);
+}
+
+/** Observe one side of a finite Git pipe; only the consumer has captured output. */
+function pipeExit(owned: CancellableProcess, args: readonly string[], capture: boolean): Promise<Buffer> {
+  const { child } = owned;
+  const stdout: Buffer[] = [];
+  const stderr: Buffer[] = [];
+  let outputBytes = 0;
+  let errorBytes = 0;
+  const ended = new Promise<Buffer>((resolve, reject) => {
+    child.stderr!.on("data", (chunk: Buffer) => {
+      const kept = chunk.subarray(0, Math.max(0, GIT_STDERR_BYTES - errorBytes));
+      if (kept.length > 0) stderr.push(kept);
+      errorBytes += kept.length;
+    });
+    if (capture)
+      child.stdout!.on("data", (chunk: Buffer) => {
+        outputBytes += chunk.length;
+        if (outputBytes > GIT_STDERR_BYTES) {
+          reject(commandError(args, { message: "Git pipe result exceeds its bounded output", status: null }));
+        } else stdout.push(chunk);
+      });
+    child.once("error", (error) => reject(commandError(args, error)));
+    child.stdin!.on("error", (error) => reject(commandError(args, error)));
+    child.stdout!.on("error", (error) => reject(commandError(args, error)));
+    child.stderr!.on("error", (error) => reject(commandError(args, error)));
+    child.once("close", (code) => {
+      if (code === 0 && !owned.cancelled()) resolve(Buffer.concat(stdout));
+      else
+        reject(
+          commandError(args, {
+            message: owned.cancelled() ? "git process cancelled" : `git exited with status ${code ?? "unknown"}`,
+            stderr: Buffer.concat(stderr),
+            status: code,
+            pid: child.pid,
+          }),
+        );
+    });
+  });
+  return Promise.race([ended, owned.terminationFailure]);
+}
+
+/** A two-command pipe with bounded result/diagnostics and one owner for both children. */
+export async function runGitPipe(
+  repository: GitRepository,
+  producer: readonly string[],
+  consumer: readonly string[],
+): Promise<Buffer> {
+  if (repository.signal?.aborted) throw commandError(producer, { message: "git process cancelled" });
+  const children: CancellableProcess[] = [];
+  const pending: Promise<unknown>[] = [];
+  try {
+    const start = (args: readonly string[], capture: boolean): CancellableProcess => {
+      const owned = spawnCancellableProcess({
+        argv: [repository.gitPath, ...args],
+        cwd: repository.effectiveCwd,
+        ...(repository.signal === undefined ? {} : { signal: repository.signal }),
+      });
+      children.push(owned);
+      const terminal = pipeExit(owned, args, capture);
+      void terminal.catch(() => undefined);
+      pending.push(terminal);
+      return owned;
+    };
+    const sink = start(consumer, true);
+    const source = start(producer, false);
+    const transferring = pipeline(source.child.stdout!, sink.child.stdin!);
+    pending.push(transferring);
+    source.child.stdin!.end();
+    const [output] = await Promise.all(pending);
+    return output as Buffer;
+  } catch (error) {
+    for (const { child } of children) {
+      child.stdin?.destroy();
+      child.stdout?.destroy();
+    }
+    const cleanup = await Promise.allSettled(children.map((child) => child.terminate(true)));
+    await Promise.allSettled(pending);
+    const failed = cleanup.find((result) => result.status === "rejected");
+    if (failed?.status === "rejected") throw new AggregateError([error, failed.reason], "Git pipe cleanup failed");
+    if (error instanceof GitPlumbingError) throw error;
+    throw commandError([...producer, "|", ...consumer], error);
+  } finally {
+    await Promise.all(children.map((child) => child.waitTermination()));
+  }
 }

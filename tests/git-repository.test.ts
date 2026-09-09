@@ -285,3 +285,49 @@ test("Repo capability pins an absolute Git executable across normal and streamed
     /^git version /u,
   );
 });
+
+test("Git pipe applies backpressure and never accepts an upstream failure or early consumer exit", async () => {
+  const { writeFileSync } = await import("node:fs");
+  const { runGitPipe } = await import("../src/git/process.js");
+  const repository = makeGitRepository();
+  const fixture = join(repository.path, "pipe-fixture.mjs");
+  writeFileSync(fixture, `
+    import { once } from 'node:events';
+    const [side, mode] = process.argv.slice(2);
+    if (side === 'source') {
+      if (mode === 'blocked') setInterval(()=>{},1000);
+      else {
+        const chunk = Buffer.alloc(64*1024,120);
+        for(let i=0;i<512;i++) if(!process.stdout.write(chunk)) await once(process.stdout,'drain');
+        process.exitCode = mode === 'failed-source' ? 71 : 0;
+      }
+    } else if(mode === 'early-sink') { process.stdout.write('apparently-valid-id'); }
+    else if(mode === 'failed-sink') { process.exitCode=72; }
+    else if(mode === 'oversized') { process.stdout.write('x'.repeat(32768)); }
+    else {
+      let count=0;
+      for await(const chunk of process.stdin) count+=chunk.length;
+      process.stdout.write(String(count));
+    }
+  `);
+  await withGitShim(
+    'exec "$KEIYAKU_TEST_NODE" "$KEIYAKU_PIPE_FIXTURE" "$@"',
+    { KEIYAKU_TEST_NODE: process.execPath, KEIYAKU_PIPE_FIXTURE: fixture },
+    async (gitPath) => {
+      const base = await repositoryAt(repository.path);
+      const git = { ...base, gitPath };
+      assert.equal((await runGitPipe(git, ["source", "ok"], ["sink", "ok"])).toString(), String(32*1024*1024));
+      await assert.rejects(runGitPipe(git, ["source", "failed-source"], ["sink", "ok"]),
+        (error: unknown) => error instanceof GitPlumbingError && error.status === 71);
+      await assert.rejects(runGitPipe(git, ["source", "ok"], ["sink", "early-sink"]));
+      await assert.rejects(runGitPipe(git, ["source", "blocked"], ["sink", "failed-sink"]), /status 72/);
+      await assert.rejects(runGitPipe(git, ["source", "blocked"], ["sink", "oversized"]), /bounded output/);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 40);
+      try {
+        await assert.rejects(runGitPipe(withGitAbortSignal(git, controller.signal), ["source", "blocked"], ["sink", "ok"]));
+      } finally { clearTimeout(timer); }
+      await assert.rejects(runGitPipe({ ...git, gitPath: join(repository.path, "missing-git") }, ["source"], ["sink"]), /ENOENT/);
+    },
+  );
+});

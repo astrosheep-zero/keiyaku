@@ -1974,3 +1974,32 @@ test("verification materializes the protocol-selected candidate snapshot", async
     await prepared.dispose();
   }
 });
+
+test("ChangeId streams a large binary patch while preserving exact Git patch identity", async (t) => {
+  const { randomBytes } = await import("node:crypto");
+  const { runGit } = await import("../src/git/process.js");
+  const { gitObjectId } = await import("../src/git/identity.js");
+  const { worktreeChangeId } = await import("../src/git/integration.js");
+  const { contractIdFromSegment } = await import("../src/core/facts/types.js");
+  const repository = deliveryFixture();
+  const start = mintSnapshotId(repository.run(["rev-parse", "HEAD"]).trim());
+  writeFileSync(join(repository.path, "binary.dat"), randomBytes(8*1024*1024));
+  repository.run(["add", "binary.dat"]);
+  const tree = gitObjectId(repository.run(["write-tree"]).trim(), "candidate");
+  const git = await cachedRepositoryAt(repository.path);
+  const patch = await runGit(git, ["diff", "--binary", "--full-index", start, tree]);
+  const expected = (await runGit(git, ["patch-id", "--verbatim"], patch)).toString().trim().split(/\s/,1)[0];
+  let largestConcatenation = 0;
+  const concat = Buffer.concat;
+  const spy = t.mock.method(Buffer, "concat", (chunks: readonly Uint8Array[], length?: number) => {
+    largestConcatenation = Math.max(largestConcatenation, length ?? chunks.reduce((n,b)=>n+b.length,0));
+    return concat(chunks, length);
+  });
+  try {
+    const id = await worktreeChangeId(git, {
+      contractId: contractIdFromSegment("binary-pipe"), coordinates: { start, workspace: "worktree" },
+    }, { tree, head: start, at: new Date().toISOString(), dirty: true, changes: {staged: [], unstaged: [], untracked: [], submodules: []} });
+    assert.equal(id, expected);
+    assert.ok(largestConcatenation < 1024*1024, `retained an intermediate patch buffer: ${largestConcatenation}`);
+  } finally { spy.mock.restore(); }
+});
