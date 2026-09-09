@@ -1,0 +1,50 @@
+name: Recover verified Heart patch transport
+on:
+  push:
+    branches: [work/audit-export-20260909]
+    paths: [.github/workflows/audit-republish-heart.yml]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate exact patch and tree before publication
+        shell: python
+        run: |
+          import base64, hashlib, json, pathlib, subprocess, zlib
+          def git(*args):
+              return subprocess.check_output(["git", *args], text=True).strip()
+          change = json.loads(pathlib.Path(".github/audit-changes/heart-async-contention.json").read_text())
+          pathlib.Path("/tmp/received-heart.json").write_text(json.dumps(change))
+          for before, after in [
+              ("O36ra6dudp", "O36ra6udp"),
+              ("o98pa/7ggy", "o98pa/ggy"),
+              ("4hHRD4WJ4o", "4hHRD4W4o"),
+              ("w+dvF81dnb07eJnb07l", "w+dvF81dnb07l"),
+              ("l9OSG6XuX8", "l9OSG6X8"),
+          ]:
+              assert change["patch"].count(before) == 1, before
+              change["patch"] = change["patch"].replace(before, after)
+          patch = zlib.decompress(base64.b64decode(change["patch"]))
+          assert hashlib.sha256(patch).hexdigest() == change["sha256"]
+          git("fetch", "--depth=1", "origin", change["base"])
+          git("checkout", "--detach", "FETCH_HEAD")
+          assert git("rev-parse", "HEAD^{tree}") == change["baseTree"]
+          pathlib.Path("/tmp/verified-heart.patch").write_bytes(patch)
+          subprocess.run(["git", "apply", "--index", "--binary", "/tmp/verified-heart.patch"], check=True)
+          assert git("write-tree") == change["tree"]
+          assert change["branch"] == "perf/heart-async-contention"
+          git("config", "user.name", "OpenAI")
+          git("config", "user.email", "noreply@openai.com")
+          git("commit", "-m", change["message"])
+          git("push", "origin", "HEAD:refs/heads/" + change["branch"])
+          print(json.dumps({"commit": git("rev-parse", "HEAD"), "tree": change["tree"]}))
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: received-heart-patch
+          path: /tmp/received-heart.json
+          retention-days: 1
