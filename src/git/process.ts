@@ -1,4 +1,5 @@
 import { consumeProcessStdout, spawnCancellableProcess } from "../runtime/proc/run.js";
+import { pipeline } from "node:stream/promises";
 
 export type GitRepository = Readonly<{
   /** The executable selected when this repository capability is created. */
@@ -130,6 +131,85 @@ export async function runGit(
   input?: string | Uint8Array,
 ): Promise<Buffer> {
   return await executeGit(repository, args, input);
+}
+
+/** Connect two owned Git commands without materializing the intermediate output. */
+export async function runGitPipe(
+  repository: GitRepository,
+  sourceArgs: readonly string[],
+  sinkArgs: readonly string[],
+): Promise<Buffer> {
+  if (repository.signal?.aborted) throw commandError(sourceArgs, { message: "git process cancelled" });
+  const processes: ReturnType<typeof spawnCancellableProcess>[] = [];
+  const pending: Promise<unknown>[] = [];
+  const start = (args: readonly string[]) => {
+    const owned = spawnCancellableProcess({
+      argv: [repository.gitPath, ...args],
+      cwd: repository.effectiveCwd,
+      ...(repository.signal === undefined ? {} : { signal: repository.signal }),
+    });
+    processes.push(owned);
+    const { child } = owned;
+    const stderr: Buffer[] = [];
+    let bytes = 0;
+    child.stderr!.on("data", (chunk: Buffer) => {
+      const kept = chunk.subarray(0, GIT_STDERR_BYTES - bytes);
+      if (kept.length > 0) stderr.push(kept);
+      bytes += kept.length;
+    });
+    const terminal = new Promise<void>((resolve, reject) => {
+      const fail = (error: unknown): void =>
+        reject(
+          commandError(args, {
+            message: owned.cancelled() ? "git process cancelled" : (error as Error).message,
+            stderr: Buffer.concat(stderr),
+            status: child.exitCode,
+            pid: child.pid,
+          }),
+        );
+      child.once("error", fail);
+      child.stdin!.on("error", fail);
+      child.once("close", (code) => {
+        if (code === 0 && !owned.cancelled()) resolve();
+        else fail(new Error(`git exited with status ${code ?? "unknown"}`));
+      });
+    });
+    const completed = Promise.race([terminal, owned.terminationFailure]);
+    pending.push(completed);
+    // A later spawn can fail synchronously before the common await is installed.
+    void completed.catch(() => undefined);
+    return child;
+  };
+  try {
+    const source = start(sourceArgs);
+    const sink = start(sinkArgs);
+    const stdout: Buffer[] = [];
+    sink.stdout!.on("data", (chunk: Buffer) => stdout.push(chunk));
+    pending.push(pipeline(source.stdout!, sink.stdin!));
+    source.stdin!.end();
+    await Promise.all(pending);
+    await Promise.all(processes.map((owned) => owned.waitTermination()));
+    return Buffer.concat(stdout);
+  } catch (error) {
+    const cleanup = await Promise.allSettled(
+      processes.map(async (owned) => {
+        try {
+          await owned.terminate(true);
+        } finally {
+          await owned.waitTermination();
+        }
+      }),
+    );
+    // A failed termination cannot promise that the pipes will ever close.
+    const failures = cleanup.flatMap((result) => (result.status === "rejected" ? [result.reason] : []));
+    if (failures.length > 0) {
+      void Promise.allSettled(pending);
+      throw new AggregateError([error, ...failures], "Git pipeline failed and could not retire its processes");
+    }
+    await Promise.allSettled(pending);
+    if (error instanceof GitPlumbingError) throw error;
+    throw commandError([...sourceArgs, "|", ...sinkArgs], error);
+  }
 }
 
 export async function consumeGitStdout(
