@@ -1980,3 +1980,103 @@ test("retention window counts retained facts rather than gaps in their sequence"
     value.close();
   }
 });
+
+test("Heart write contention yields to the event loop and single-statement writers share the transaction boundary", async (t) => {
+  const f = await fixture();
+  const leash = await HeldAkumaLeash.try(f.allocated.paths);
+  assert.ok(leash);
+  let locked: DatabaseSync | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await leash.birth(f.allocated.paths, f.soul);
+    const body = await leash.recordBody(f.allocated.paths, { leashTakenAt: f.soul.createdAt });
+    const turn = await beginTurn(f.allocated.paths, { bodySequence: body.sequence, startedAt: f.soul.createdAt });
+    locked = new DatabaseSync(f.allocated.paths.heart);
+    locked.exec("BEGIN IMMEDIATE");
+    let released = false;
+    let commits = 0;
+    const exec = DatabaseSync.prototype.exec;
+    const spy = t.mock.method(DatabaseSync.prototype, "exec", function(this: DatabaseSync, sql: string) {
+      assert.ok(!sql.includes("busy_timeout=5000"), "SQLite must not sleep inside a synchronous call");
+      assert.ok(!sql.includes("journal_mode=WAL"), "ordinary connections must not reconfigure the journal");
+      if (sql === "COMMIT") commits++;
+      return exec.call(this, sql);
+    });
+    timer = setTimeout(() => { locked!.exec("ROLLBACK"); released = true; }, 20);
+    const sequence = await appendActivity(f.allocated.paths, {
+      turnSequence: turn.sequence, event: { type: "note", text: "after lock" }, at: f.soul.createdAt,
+    });
+    assert.equal(released, true, "the same event loop must release the competing writer");
+    assert.equal(commits, 1);
+    await leash.clearPause(f.allocated.paths);
+    await leash.clearStop(f.allocated.paths);
+    assert.equal(commits, 3, "single SQL mutations also acquire a write transaction");
+    spy.mock.restore();
+    assert.equal((await activitySlice(f.allocated.paths)).rows.filter(row => row.sequence === sequence).length, 1);
+  } finally {
+    if (timer) clearTimeout(timer);
+    locked?.close(); leash.release(); f.close();
+  }
+});
+
+test("cancelled Heart narration does not execute after waiting for a writer", async () => {
+  const f = await fixture();
+  const locked = new DatabaseSync(f.allocated.paths.heart);
+  const controller = new AbortController();
+  const reason = new Error("stop narration");
+  locked.exec("BEGIN IMMEDIATE");
+  const timer = setTimeout(() => controller.abort(reason), 10);
+  try {
+    await assert.rejects(appendActivity(f.allocated.paths, {
+      turnSequence: 123, event: {}, at: f.soul.createdAt,
+    }, controller.signal), error => error === reason);
+    locked.exec("ROLLBACK");
+    assert.deepEqual((await activitySlice(f.allocated.paths)).rows, []);
+  } finally { clearTimeout(timer); locked.close(); f.close(); }
+});
+
+test("Heart does not replay a mutation or COMMIT when either fails with a busy-shaped error", async (t) => {
+  const f = await fixture();
+  const leash = await HeldAkumaLeash.try(f.allocated.paths);
+  assert.ok(leash);
+  try {
+    await leash.birth(f.allocated.paths, f.soul);
+    const body = await leash.recordBody(f.allocated.paths, { leashTakenAt: f.soul.createdAt });
+    const turn = await beginTurn(f.allocated.paths, { bodySequence: body.sequence, startedAt: f.soul.createdAt });
+    const before = await activitySlice(f.allocated.paths);
+    for (const stage of ["body", "commit"] as const) {
+      const failure = Object.assign(new Error("database is busy"), { errcode: 5 });
+      let begins = 0; let commits = 0; let serializations = 0;
+      const exec = DatabaseSync.prototype.exec;
+      const spy = t.mock.method(DatabaseSync.prototype, "exec", function(this: DatabaseSync, sql: string) {
+        if (sql === "BEGIN IMMEDIATE") begins++;
+        if (sql === "COMMIT") { commits++; throw failure; }
+        return exec.call(this, sql);
+      });
+      await assert.rejects(appendActivity(f.allocated.paths, {
+        turnSequence: turn.sequence, at: f.soul.createdAt,
+        event: { toJSON() { serializations++; if (stage === "body") throw failure; return { type: "note", text: "rollback" }; } },
+      }), error => error === failure);
+      spy.mock.restore();
+      assert.equal(begins, 1); assert.equal(serializations, 1);
+      assert.equal(commits, stage === "commit" ? 1 : 0);
+      assert.deepEqual(await activitySlice(f.allocated.paths), before);
+    }
+  } finally { leash.release(); f.close(); }
+});
+
+test("Heart acquisition deadline expires without executing the mutation", async (t) => {
+  const f = await fixture();
+  const locked = new DatabaseSync(f.allocated.paths.heart);
+  locked.exec("BEGIN IMMEDIATE");
+  let reads = 0;
+  const clock = t.mock.method(performance, "now", () => reads++ === 0 ? 0 : 5001);
+  try {
+    await assert.rejects(appendActivity(f.allocated.paths, {
+      turnSequence: 123, event: {}, at: f.soul.createdAt,
+    }), /database is (locked|busy)/);
+    clock.mock.restore();
+    locked.exec("ROLLBACK");
+    assert.deepEqual((await activitySlice(f.allocated.paths)).rows, []);
+  } finally { clock.mock.restore(); locked.close(); f.close(); }
+});

@@ -156,7 +156,11 @@ async function writeProviderEvent(input: DriveTurnInput, active: ActiveTurn, eve
       admittedAt: at,
     });
   }
-  await appendActivity(input.paths, { turnSequence: active.turnSequence, event: encodeAgentEvent(event), at });
+  await appendActivity(
+    input.paths,
+    { turnSequence: active.turnSequence, event: encodeAgentEvent(event), at },
+    input.supervisor.signal,
+  );
 }
 
 async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
