@@ -20,7 +20,7 @@ function parseExecution(argv: readonly string[]): ParsedExecution {
 const command = parseExecution(["call", "worker", "-d", "prompt"]).command;
 
 function detachedCall(
-  result: Pick<CallResult, "dispatch" | "alias">,
+  result: Pick<CallResult, "dispatch" | "alias" | "readonly">,
 ): Extract<AkumaInvocationResult, { action: "call" }> {
   return {
     kind: "akuma",
@@ -37,11 +37,16 @@ function detachedCall(
 }
 
 function renderedWait(result: Parameters<typeof renderAkumaText>[1]): string {
-  return renderAkumaText(command, result).split("\n").at(-1)!;
+  const lines = renderAkumaText(command, result).split("\n");
+  assert.equal(lines.at(-1), "to wait");
+  assert.equal(lines.at(-3), "-----");
+  const handle = lines.at(-2)!;
+  assert.ok(handle.startsWith("$ "));
+  return handle;
 }
 
 function posixArgv(line: string): string[] {
-  const parsed = spawnSync("bash", ["-c", `set -- ${line.slice("  wait  ".length)}; printf '%s\\0' "$@"`], {
+  const parsed = spawnSync("bash", ["-c", `set -- ${line.slice("$ ".length)}; printf '%s\\0' "$@"`], {
     encoding: "utf8",
   });
   assert.equal(parsed.status, 0, parsed.stderr);
@@ -50,10 +55,10 @@ function posixArgv(line: string): string[] {
 
 test("detached wait keeps Windows cwd separate from its POSIX-copyable handle", () => {
   const result = detachedCall({ dispatch: { kind: "none" }, alias: { kind: "none" } });
-  assert.ok(renderAkumaText(command, result).split("\n").includes(`cwd  ${world}`));
+  assert.ok(renderAkumaText(command, result).split("\n").includes(`  \u{1f4c1} ${world}`));
   const argv = posixArgv(renderedWait(result));
   assert.deepEqual(argv, ["keiyaku", "wait", akuma, "--timeout", "5m"]);
-  assert.doesNotMatch(renderedWait(result), /-C |--cwd |\$ /u);
+  assert.doesNotMatch(renderedWait(result), /-C |--cwd /u);
 });
 
 test("detached wait command keeps alias, timeout, failed silence, and JSON", () => {
@@ -63,12 +68,36 @@ test("detached wait command keeps alias, timeout, failed silence, and JSON", () 
   });
   assert.deepEqual(posixArgv(renderedWait(aliased)), ["keiyaku", "wait", "@ship", "--timeout", "5m"]);
 
-  const failed = detachedCall({
-    dispatch: { kind: "failed", failure: { kind: "infrastructure", diagnostic: "busy" } },
-    alias: { kind: "skipped", reason: "dispatch-failed" },
-  });
-  assert.doesNotMatch(renderAkumaText(command, failed), /keiyaku wait/u);
-  assert.equal(renderAkumaJson(failed), JSON.stringify(failed.result));
+  const failures = [
+    {
+      result: detachedCall({
+        dispatch: { kind: "failed", failure: { kind: "infrastructure", diagnostic: "busy" } },
+        alias: { kind: "skipped", reason: "dispatch-failed" },
+      }),
+      diagnostic: "dispatch failed infrastructure busy",
+    },
+    {
+      result: detachedCall({
+        dispatch: { kind: "none" },
+        alias: { kind: "failed", failure: { kind: "infrastructure", diagnostic: "locked" } },
+      }),
+      diagnostic: "alias failed infrastructure locked",
+    },
+    {
+      result: detachedCall({
+        dispatch: { kind: "none" },
+        alias: { kind: "none" },
+        readonly: { enforcement: "none", diagnostic: "readonly unsupported" },
+      }),
+      diagnostic: "! readonly unsupported",
+    },
+  ];
+  for (const { result, diagnostic } of failures) {
+    const text = renderAkumaText(command, result);
+    assert.ok(text.split("\n").includes(diagnostic));
+    assert.doesNotMatch(text, /keiyaku wait|to wait|-----/u);
+    assert.equal(renderAkumaJson(result), JSON.stringify(result.result));
+  }
 
   const successful = detachedCall({ dispatch: { kind: "none" }, alias: { kind: "none" } });
   assert.equal(renderAkumaJson(successful), JSON.stringify(successful.result));

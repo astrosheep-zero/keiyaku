@@ -57,6 +57,16 @@ report. Shared presentation changes preserve the Akuma timeline's activity,
 time, continuity, and running-tool distinctions; they do not restyle that
 surface into ordinary fact rows.
 
+Detached call receipts foreground the complete Akuma identity with any alias
+as a parenthetical supplement. Compact resource marks distinguish the associated
+Contract from the actual execution directory; the invocation World is not an
+additional text fact. An available wait handle is separated from those facts
+and carries a subordinate purpose caption, not a prescribed next step. Muted
+emphasis remains optional, and the receipt does not claim a live worker state
+or completed work. Dispatch, alias, and restraint problems retain their evidence
+without the ordinary wait footer. This receipt does not restyle observation
+timelines or raw answers.
+
 Tell delivery has one text carrier: its corresponding timeline row. A held or
 pursuing delivery does not add a separate wake or receipt-status line. A
 failed delivery may add one prominent failure fact to that same carrier.

@@ -14,7 +14,7 @@ import {
   tellText,
   waitText,
 } from "./akuma-activity.js";
-import { safeText, type TextRenderContext } from "./terminal.js";
+import { safeText, tone, type TextRenderContext } from "./terminal.js";
 
 export { akumaRawAnswer } from "./akuma-activity.js";
 
@@ -44,12 +44,9 @@ function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, co
   const cwd = executionCwdLine(result.result);
   if (result.result.observation.kind === "detached") {
     const lines = [
-      ...snapshotHeading(
-        result.result.akuma,
-        alias,
-        contractId === undefined ? { kind: "none" } : { kind: "associated", contractId },
-      ),
-      ...cwd,
+      associatedIdentity(result.result.akuma, alias),
+      ...(contractId === undefined ? [] : [`  \u{1f4dc} ${safeText(contractId)}`]),
+      `  \u{1f4c1} ${safeText(result.result.execution.cwd)}`,
       ...restraint,
       ...facts,
     ];
@@ -61,8 +58,11 @@ function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, co
       )
     ) {
       const selector = result.result.alias.kind === "aliased" ? result.result.alias.alias.alias : result.result.akuma;
-      if (result.world !== result.result.execution.cwd) lines.push(`  world  ${safeText(result.world)}`);
-      lines.push(`  wait  keiyaku wait ${selector} --timeout 5m`);
+      lines.push(
+        tone("-----", "dim", context.color),
+        `$ keiyaku wait ${selector} --timeout 5m`,
+        tone("to wait", "dim", context.color),
+      );
     }
     return lines.join("\n");
   }

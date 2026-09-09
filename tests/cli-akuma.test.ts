@@ -16,7 +16,7 @@ import { composeRequestCommands } from "../src/akuma/request-wire.js";
 import type { ActivityHistory, ActivityRow } from "../src/akuma/akuma.js";
 import { executeKillAkuma, executeTellAkuma, executeWaitAkuma } from "../src/akuma/fleet-execution.js";
 import { fleetRequestCommands, type FleetRequestPort } from "../src/akuma/fleet-request.js";
-import { type AkumaObservation } from "../src/index.js";
+import { type AkumaObservation, type ContractId } from "../src/index.js";
 import { World, type WorldRoot } from "../src/world.js";
 import { invoke } from "../src/cli/invoke.js";
 import type { AkumaInvocationResult } from "../src/cli/commands/akuma-invoke.js";
@@ -131,7 +131,7 @@ test("call separates one cwd fact from exact answer bytes for every execution so
   }
 });
 
-test("detached call exposes a cwd-free wait handle and separate coordinates", () => {
+test("detached call exposes its directory and a captioned cwd-free wait handle without a World row", () => {
   const result: Extract<AkumaInvocationResult, { action: "call" }> = {
     kind: "akuma",
     action: "call",
@@ -150,13 +150,49 @@ test("detached call exposes a cwd-free wait handle and separate coordinates", ()
     output,
     [
       fixtureAkuId,
-      "────────────────",
-      "cwd  /world/worktree",
-      "  world  /world",
-      `  wait  keiyaku wait ${fixtureAkuId} --timeout 5m`,
+      "  \u{1f4c1} /world/worktree",
+      "-----",
+      `$ keiyaku wait ${fixtureAkuId} --timeout 5m`,
+      "to wait",
     ].join("\n"),
   );
-  assert.doesNotMatch(output, /-C |--cwd |next|please/u);
+  assert.doesNotMatch(output, /-C |--cwd |next|please|detached|world  /u);
+  assert.equal(renderAkumaJson(result), JSON.stringify(result.result));
+});
+
+test("detached call preserves full resource identities and dims only its footer framing", () => {
+  const akuma = "aku/worker-b/70210a74" as AkuId;
+  const alias = "@recovery-cli-merge" as AkumaAlias;
+  const contractId = "kei/report-independent-readiness-and-recover-admitte" as ContractId;
+  const cwd = "/Users/astrosheep/Developer/keiyaku-v4/.keiyaku/wt/namek";
+  const command = parseExecution(["call", "worker-b", "--detach", "work"]).command;
+  const result: Extract<AkumaInvocationResult, { action: "call" }> = {
+    kind: "akuma",
+    action: "call",
+    world: "/Users/astrosheep/Developer/keiyaku-v4" as WorldRoot,
+    result: {
+      kind: "called",
+      akuma,
+      execution: { cwd, source: "input" },
+      dispatch: { kind: "dispatched", dispatch: { akuId: akuma, contractId, dispatchedAt: "2026-09-07T00:00:00Z" } },
+      alias: { kind: "aliased", alias: { alias, akuId: akuma }, previous: null },
+      observation: { kind: "detached" },
+    },
+  };
+  for (const columns of [40, 120]) {
+    const facts = [`${akuma} (${alias})`, `  \u{1f4dc} ${contractId}`, `  \u{1f4c1} ${cwd}`];
+    const handle = `$ keiyaku wait ${alias} --timeout 5m`;
+    assert.equal(
+      renderAkumaText(command, result, { columns, color: false }),
+      [...facts, "-----", handle, "to wait"].join("\n"),
+    );
+    assert.equal(
+      renderAkumaText(command, result, { columns, color: true }),
+      [...facts, "\u001b[2m-----\u001b[0m", handle, "\u001b[2mto wait\u001b[0m"].join("\n"),
+    );
+  }
+  assert.equal(renderAkumaJson(result), JSON.stringify(result.result));
+  assert.equal(akumaExitCode(result), 0);
 });
 
 test("Akuma CLI parses root verbs without the removed namespace", () => {
