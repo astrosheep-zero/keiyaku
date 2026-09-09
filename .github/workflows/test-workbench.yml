@@ -1,0 +1,21 @@
+name: Test workbench export
+on:
+  push:
+    branches: [codex/test-workbench-20260909]
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Export pinned repository history
+        run: git bundle create /tmp/keiyaku.bundle --all
+      - uses: actions/upload-artifact@v4
+        with:
+          name: repository-history
+          path: /tmp/keiyaku.bundle
+          retention-days: 1
