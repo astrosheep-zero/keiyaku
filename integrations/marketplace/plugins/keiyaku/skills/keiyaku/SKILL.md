@@ -51,3 +51,9 @@ Repeated `--allowed` values add actions to the selected Akuma's defaults. A
 nested call can use only actions permitted by its direct parent Soul.
 
 Use text by default; add `--json` when a script needs structured output.
+
+`deliver`, `review`, and `audit` may take time after their leading admission.
+Their witnessed progress is ephemeral stderr output; stdout remains one final
+text or JSON result. Ctrl-C asks the owned operation to stop and waits for its
+truthful final receipt, so it is not evidence that an already admitted action
+was rolled back.

@@ -1,4 +1,5 @@
 import { decodeContractDocument } from "../body/decode.js";
+import type { ExecutionObserver } from "../protocol/execution-observation.js";
 import type { ActorId, ContractId, ContractState } from "../core/facts/types.js";
 import { withGitDecodeChannel, type GitDecodeChannel } from "../git/read-observation.js";
 import { admitDeliveryOperation, type IntegrationConflictMaterialized } from "../protocol/deliver.js";
@@ -20,6 +21,7 @@ type CommonExecutionInput = Readonly<{
   actor?: ActorId;
   signal?: AbortSignal;
   hooks: WorktreeHooks;
+  observe?: ExecutionObserver;
 }>;
 export type DeliveryExecutionInput = CommonExecutionInput &
   Readonly<{
@@ -53,7 +55,7 @@ export async function withContractExecution<Result extends MutationResult<unknow
   operation: MutationOperation,
   run: (context: ExecutionContext) => Promise<Result>,
 ): Promise<Result> {
-  const progress = new ExecutionProgress();
+  const progress = new ExecutionProgress(input.observe);
   const scope = withScopeAbortSignal(input.scope, input.signal);
   let produced: Result | undefined;
   try {
@@ -100,6 +102,13 @@ async function advanceAndContinue(
     ...(context.actor === undefined ? {} : { actor: context.actor }),
     ...(context.signal === undefined ? {} : { signal: context.signal }),
   });
+  if (result.kind === "completed")
+    context.progress.observe({
+      kind: "stage",
+      contractId: context.contractId,
+      stage: "continuation",
+      state: "started",
+    });
   const continuation =
     result.kind !== "completed"
       ? undefined
@@ -108,6 +117,13 @@ async function advanceAndContinue(
           completed: result,
           deriveDocument: derivedDocument,
         });
+  if (result.kind === "completed")
+    context.progress.observe({
+      kind: "stage",
+      contractId: context.contractId,
+      stage: "continuation",
+      state: "finished",
+    });
   return { ...result.evidence, ...(continuation === undefined ? {} : { continuation }) };
 }
 

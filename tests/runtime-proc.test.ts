@@ -12,6 +12,7 @@ import { LineRpcProcess } from "../src/runtime/proc/line-rpc.js";
 import { spawnStdioProcess } from "../src/runtime/proc/stdio.js";
 import {
   consumeProcessStdout,
+  runCrossPlatformProcess,
   runProcess,
   spawnCancellableProcess,
   spawnDetachedProcess,
@@ -487,6 +488,83 @@ test("runProcess returns terminal diagnostics from both streams", async () => {
   });
 });
 
+test("runProcess observes split UTF-8 output before the child completes while retaining its tail", async () => {
+  let observed = "";
+  let ready!: () => void;
+  const liveOutput = new Promise<void>((resolve) => {
+    ready = resolve;
+  });
+  let settled = false;
+  const pending = runProcess(
+    input(
+      [
+        process.execPath,
+        "-e",
+        [
+          'process.stdout.write("ready\\n");',
+          "setTimeout(() => process.stdout.write(Buffer.from([0xe2])), 20);",
+          "setTimeout(() => process.stdout.write(Buffer.from([0x82])), 40);",
+          "setTimeout(() => process.stdout.write(Buffer.from([0xac])), 60);",
+          "setTimeout(() => process.exit(0), 200);",
+        ].join(" "),
+      ],
+      {
+        onOutput: ({ stream, text }) => {
+          if (stream !== "stdout") return;
+          observed += text;
+          if (observed.includes("ready\n")) ready();
+        },
+      },
+    ),
+  );
+  void pending.then(() => {
+    settled = true;
+  });
+
+  await liveOutput;
+  assert.equal(settled, false);
+  assert.deepEqual(await pending, {
+    kind: "terminal",
+    code: 0,
+    stdout: "ready\n€",
+    stderr: "",
+    truncated: false,
+  });
+  assert.equal(observed, "ready\n€");
+});
+
+test("runProcess isolates an observation consumer failure and still cleans up cancellation", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-runtime-observer-failure-"));
+  const pidPath = join(root, "child-pid");
+  const controller = new AbortController();
+  let childPid: number | undefined;
+  try {
+    const outcome = await runProcess(
+      input(
+        [
+          process.execPath,
+          "-e",
+          `require("node:fs").writeFileSync(${JSON.stringify(pidPath)}, String(process.pid)); process.stdout.write("before"); setInterval(() => {}, 1_000);`,
+        ],
+        {
+          signal: controller.signal,
+          onOutput: () => {
+            controller.abort();
+            throw new Error("observer refused output");
+          },
+        },
+      ),
+    );
+
+    assert.deepEqual(outcome, { kind: "cancelled", stdout: "before", stderr: "", truncated: false });
+    childPid = Number.parseInt(readFileSync(pidPath, "utf8"), 10);
+    await waitForProcessExit(childPid);
+  } finally {
+    if (childPid !== undefined && processExists(childPid)) process.kill(childPid, "SIGKILL");
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("runProcess retains only the final 16 KiB of each stream", async () => {
   const outcome = await runProcess(
     input([
@@ -509,6 +587,35 @@ test("runProcess retains only the final 16 KiB of each stream", async () => {
   assert.equal(outcome.stderr.endsWith("stderr-tail"), true);
   assert.equal(outcome.truncated, true);
 });
+
+for (const [name, run] of [
+  ["runProcess", runProcess],
+  ["runCrossPlatformProcess", runCrossPlatformProcess],
+] as const) {
+  test(`${name} retains truncated output on timeout`, async () => {
+    const outcome = await run(
+      input([
+        process.execPath,
+        "-e",
+        [
+          'process.stdout.write("a".repeat(20 * 1024));',
+          'process.stdout.write("stdout-tail");',
+          'process.stderr.write("b".repeat(20 * 1024));',
+          'process.stderr.write("stderr-tail");',
+          "setInterval(() => {}, 1_000);",
+        ].join(" "),
+      ]),
+    );
+
+    assert.equal(outcome.kind, "timeout");
+    if (outcome.kind !== "timeout") return;
+    assert.equal(Buffer.byteLength(outcome.stdout), 16 * 1024);
+    assert.equal(Buffer.byteLength(outcome.stderr), 16 * 1024);
+    assert.equal(outcome.stdout.endsWith("stdout-tail"), true);
+    assert.equal(outcome.stderr.endsWith("stderr-tail"), true);
+    assert.equal(outcome.truncated, true);
+  });
+}
 
 test("consumeProcessStdout drains output without retaining it", async () => {
   let consumed = 0;
@@ -541,17 +648,25 @@ test("consumeProcessStdout terminates after a consumer failure", async () => {
   assert.deepEqual(result.outcome, {
     kind: "stream-error",
     diagnostic: "consumer refused output",
+    stderr: "",
+    truncated: false,
   });
 });
 
 test("runProcess reports unknown exits", async () => {
-  const outcome = await runProcess(input([process.execPath, "-e", 'process.kill(process.pid, "SIGTERM");']));
+  const outcome = await runProcess(
+    input([
+      process.execPath,
+      "-e",
+      'require("node:fs").writeSync(1, "out"); require("node:fs").writeSync(2, "err"); process.kill(process.pid, "SIGTERM");',
+    ]),
+  );
 
   assert.deepEqual(
     outcome,
     process.platform === "win32"
-      ? { kind: "terminal", code: 1, stdout: "", stderr: "", truncated: false }
-      : { kind: "unknown-exit" },
+      ? { kind: "terminal", code: 1, stdout: "out", stderr: "err", truncated: false }
+      : { kind: "unknown-exit", stdout: "out", stderr: "err", truncated: false },
   );
 });
 
@@ -715,7 +830,9 @@ test("runProcess timeout settles after cleaning inherited pipes from an owned gr
     pending = runProcess({ ...input([process.execPath, "-e", parent]), cwd: root, timeoutMs: 1_000 });
     descendantPid = Number.parseInt(await waitForFile(descendantPidPath), 10);
     const started = performance.now();
-    assert.deepEqual(await pending, { kind: "timeout" });
+    const outcome = await pending;
+    assert.equal(outcome.kind, "timeout");
+    if (outcome.kind === "timeout") assert.match(outcome.stdout, /descendant\/ready/u);
     assert.ok(performance.now() - started < 3_000);
     await waitForProcessExit(descendantPid);
   } finally {
@@ -758,7 +875,7 @@ test("runProcess cancellation closes the directly-owned helper boundary", async 
     );
     await ready.wait;
     controller.abort();
-    assert.deepEqual((await pending).outcome, { kind: "cancelled" });
+    assert.deepEqual((await pending).outcome, { kind: "cancelled", stdout: "", stderr: "", truncated: false });
     if (process.platform === "win32") assert.doesNotMatch(output.join(""), /descendant\/exited/);
     else assert.match(output.join(""), /descendant\/exited/);
   } finally {

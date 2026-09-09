@@ -20,7 +20,15 @@ import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { AkumaBodyRequestError, requestBodyCommand } from "../src/akuma/requests.js";
 import { BodyRequestPump, settleBodyRequests } from "../src/akuma/request-serve.js";
 import { BodyRequestPump as LifecycleBodyRequestPump } from "../src/akuma/request-lifecycle.js";
-import { atomicJson, composeRequestCommands } from "../src/akuma/request-wire.js";
+import {
+  atomicJson,
+  composeRequestCommands,
+  eraseRequestCommand,
+  type ExecutionFacts,
+  type RequestProtocol,
+  type ServiceRequestCommand,
+} from "../src/akuma/request-wire.js";
+import { REQUEST_PROGRESS_WINDOW, publishRequestProgress, readRequestProgress } from "../src/akuma/request-observation.js";
 import { executeTellAkuma } from "../src/akuma/fleet-execution.js";
 import {
   fleetRequestCommand,
@@ -211,6 +219,59 @@ async function requestBodyKill(input: Readonly<{ directory: string; id?: string;
 
 const emptyWaitResult = { completion: "all" as const, observations: [], unobserved: [] };
 
+const progressProtocol = (supportsCancellation = false): RequestProtocol<string, string, string> => ({
+  action: "test.progress",
+  ...(supportsCancellation ? { supportsCancellation: true } : {}),
+  encodeRequest: (value) => value,
+  decodeRequest: (value) => (typeof value === "string" ? value : null),
+  encodeResult: (value) => value,
+  decodeResult: (value) => {
+    if (typeof value !== "string") throw new Error("invalid test progress result");
+    return value;
+  },
+  decodeReference: (value) => {
+    if (typeof value !== "string") throw new Error("invalid test progress reference");
+    return value;
+  },
+  isPermitted: () => true,
+});
+
+function progressCommand(
+  execute: (value: string, facts: ExecutionFacts) => Promise<Readonly<{ result: string; service: string }>>,
+  supportsCancellation = false,
+) {
+  const command: ServiceRequestCommand<string, string, string, string> = {
+    completion: "service",
+    protocol: progressProtocol(supportsCancellation),
+    encodeService: (value) => value,
+    decodeService: (value) => {
+      if (typeof value !== "string") throw new Error("invalid test progress service");
+      return value;
+    },
+    projectService: (value) => value,
+    execute,
+  };
+  return eraseRequestCommand(command);
+}
+
+async function openProgressPump(
+  parent: Awaited<ReturnType<typeof born>>,
+  command: ReturnType<typeof progressCommand>,
+): Promise<BodyRequestPump> {
+  return await BodyRequestPump.open({
+    paths: parent.paths,
+    allowed: parent.soul.allowed,
+    bodySequence: 1,
+    now: () => "2026-09-09T00:00:01.000Z",
+    commands: { "test.progress": command },
+    signal: new AbortController().signal,
+  });
+}
+
+async function waitFor(condition: () => boolean): Promise<void> {
+  while (!condition()) await new Promise((resolve) => setTimeout(resolve, 5));
+}
+
 test("fleet request permissions stay separated by action", () => {
   assert.equal(fleetRequestProtocol("akuma.wait").isPermitted([]), true);
   assert.equal(fleetRequestProtocol("akuma.tell").isPermitted(["akuma.tell"]), true);
@@ -342,6 +403,179 @@ test("request command composition rejects a duplicate action", () => {
     () => composeRequestCommands(fleetRequestCommands(unusedFleetPort), fleetRequestCommands(unusedFleetPort)),
     /duplicate request command action: akuma\.wait/u,
   );
+});
+
+test("request transport exposes gated opaque progress before its final receipt", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-request-progress-")));
+  const parent = await born(root, "parent", "76543210");
+  let started!: () => void;
+  const executionStarted = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const pump = await openProgressPump(
+    parent,
+    progressCommand(async (_value, facts) => {
+      facts.progress?.({ phase: "gated" });
+      started();
+      await gate;
+      facts.progress?.({ phase: "done" });
+      return { result: "complete", service: "complete" };
+    }),
+  );
+  const progress: unknown[] = [];
+  try {
+    const request = requestBodyCommand({
+      directory: pump.directory,
+      command: progressProtocol(),
+      value: "run",
+      onProgress: (value) => progress.push(value),
+    });
+    await executionStarted;
+    await waitFor(() => progress.length === 1);
+    assert.deepEqual(progress, [{ phase: "gated" }]);
+    release();
+    const result = await request;
+    assert.equal(result.kind, "returned");
+    assert.equal(result.result, "complete");
+    assert.equal(result.action, "test.progress");
+    assert.equal(typeof result.requestId, "string");
+  } finally {
+    await pump.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("request progress retains a bounded window and makes discarded sequences explicit", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "keiyaku-request-progress-window-"));
+  const transportId = randomUUID();
+  const id = randomUUID();
+  const publication = publishRequestProgress({ directory, transportId, id, action: "test.progress" });
+  try {
+    for (let value = 1; value <= REQUEST_PROGRESS_WINDOW + 3; value += 1) publication.progress(value);
+    await publication.flush();
+    const snapshot = await readRequestProgress({ directory, transportId, id, action: "test.progress" });
+    assert.equal(snapshot?.nextSequence, REQUEST_PROGRESS_WINDOW + 4);
+    assert.equal(snapshot?.events.length, REQUEST_PROGRESS_WINDOW);
+    assert.deepEqual(snapshot?.events.at(0), { sequence: 4, value: 4 });
+  } finally {
+    await publication.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("request progress consumers receive the sequence-derived retained-window gap", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-request-progress-gap-")));
+  const parent = await born(root, "parent", "65432109");
+  let started!: () => void;
+  const published = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const pump = await openProgressPump(
+    parent,
+    progressCommand(async (_value, facts) => {
+      for (let value = 1; value <= REQUEST_PROGRESS_WINDOW + 3; value += 1) facts.progress?.(value);
+      started();
+      await gate;
+      return { result: "complete", service: "complete" };
+    }),
+  );
+  const gaps: number[] = [];
+  try {
+    const request = requestBodyCommand({
+      directory: pump.directory,
+      command: progressProtocol(),
+      value: "run",
+      onProgressGap: (count) => gaps.push(count),
+    });
+    await published;
+    await waitFor(() => gaps.length === 1);
+    assert.deepEqual(gaps, [3]);
+    release();
+    assert.equal((await request).kind, "returned");
+  } finally {
+    await pump.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("progress observation failures and absent observers do not hold service completion", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-request-progress-observer-")));
+  const parent = await born(root, "parent", "87654321");
+  const pump = await openProgressPump(
+    parent,
+    progressCommand(async (_value, facts) => {
+      facts.progress?.("first");
+      facts.progress?.("second");
+      return { result: "complete", service: "complete" };
+    }),
+  );
+  try {
+    const ignored = await requestBodyCommand({ directory: pump.directory, command: progressProtocol(), value: "run" });
+    assert.equal(ignored.kind, "returned");
+    const observed = await requestBodyCommand({
+      directory: pump.directory,
+      command: progressProtocol(),
+      value: "run-again",
+      onProgress: async () => {
+        throw new Error("observer failure");
+      },
+    });
+    assert.equal(observed.kind, "returned");
+  } finally {
+    await pump.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an opted-in request forwards post-publication abort to its live service and retains its terminal result", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-request-cancel-service-")));
+  const parent = await born(root, "parent", "98765432");
+  let started!: () => void;
+  const executionStarted = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const pump = await openProgressPump(
+    parent,
+    progressCommand(
+      async (_value, facts) =>
+        await new Promise((resolve) => {
+          facts.signal.addEventListener(
+            "abort",
+            () => resolve({ result: "cancelled", service: "cancelled" }),
+            { once: true },
+          );
+          started();
+        }),
+      true,
+    ),
+  );
+  const controller = new AbortController();
+  try {
+    const request = requestBodyCommand({
+      directory: pump.directory,
+      command: progressProtocol(true),
+      value: "run",
+      signal: controller.signal,
+    });
+    await executionStarted;
+    controller.abort(new Error("cancel service"));
+    const result = await request;
+    assert.equal(result.kind, "returned");
+    assert.equal(result.result, "cancelled");
+    assert.equal(result.action, "test.progress");
+    assert.equal(typeof result.requestId, "string");
+  } finally {
+    await pump.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("initial request publication loss is unknown with its request identity", async () => {
@@ -1701,12 +1935,16 @@ test("forwarded materialization retains and replays its handoff evidence", async
   }
 });
 
-import { executeForwardedReview, requestForwardedContractLive } from "../src/library/contract-operations.js";
+import {
+  executeForwardedDeliver,
+  executeForwardedReview,
+  requestForwardedContractLive,
+} from "../src/library/contract-operations.js";
 import { withExecutionReceipt, executionReceipt } from "../src/library/execution-result.js";
 import { entryUlid } from "../src/core/facts/types.js";
 import { acquireTargetPlacementFence } from "../src/git/target-placement.js";
 import { EMPTY_WORKTREE_HOOKS } from "../src/git/hooks.js";
-import { document as completionDocument, repositoryWithMain } from "./support/library-verbs.js";
+import { commitCandidate, document as completionDocument, repositoryWithMain } from "./support/library-verbs.js";
 
 // A partial owner receipt does not turn Heart's unproven service into a voided request.
 test("forwarded fatal receipts survive unproven transport without claiming no product effect", async () => {
@@ -1760,7 +1998,7 @@ test("forwarded fatal receipts survive unproven transport without claiming no pr
   }
 });
 
-test("closing a Body pump cancels a real forwarded review waiting for target placement", async () => {
+test("a parent-served Contract forwards progress and caller cancellation to a real review", async () => {
   const raw = repositoryWithMain(),
     repo = await Repo.at({ path: raw.path });
   const root = await World.at(raw.path);
@@ -1781,7 +2019,8 @@ test("closing a Body pump cancels a real forwarded review waiting for target pla
   const started = new Promise<void>((resolve) => {
     markStarted = resolve;
   });
-  const requestId = randomUUID();
+  const controller = new AbortController();
+  const progress: unknown[] = [];
   const pump = await openContractPump(parent, {
     ...unusedContractPort,
     review: async (input) => {
@@ -1793,31 +2032,123 @@ test("closing a Body pump cancels a real forwarded review waiting for target pla
         verdict: input.verdict,
         signal: input.signal,
         hooks: EMPTY_WORKTREE_HOOKS,
+        ...(input.observe === undefined ? {} : { observe: input.observe }),
       });
     },
   });
-  const pending = requestBodyCommand({
+  const pending = requestForwardedContractLive({
     directory: pump.directory,
-    id: requestId,
-    command: contractRequestProtocol("contract.review"),
-    value: { action: "contract.review", repoRoot: raw.path, contractId: state.id, verdict: "satisfied" },
-  }).catch((error: unknown) => error);
+    action: "contract.review",
+    signal: controller.signal,
+    observe: (event) => progress.push(event),
+    request: { action: "contract.review", repoRoot: raw.path, contractId: state.id, verdict: "satisfied" },
+  });
   try {
     await started;
-    // Observe the committed leading fact, not elapsed wall-clock time.
-    for (let attempt = 0; ; attempt += 1) {
-      if ((await primary.state()).attestations.length > 0) break;
-      assert.ok(attempt < 100, "review never admitted its leading fact");
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-    await pump.close();
-    const fact = await readRequest(parent.paths, requestId);
-    assert.equal(fact?.state, "served");
+    await waitFor(() => progress.some((event) => typeof event === "object" && event !== null && "kind" in event && event.kind === "admitted"));
+    controller.abort(new Error("caller cancelled review"));
+    const result = await pending;
+    assert.equal(result.kind, "accepted");
+    assert.ok(result.executionStops.some((stop) => stop.reason === "cancelled" && stop.stage === "placement"));
+    assert.deepEqual(
+      progress
+        .filter(
+          (event): event is { kind: "stage"; stage: string; state: string } =>
+            typeof event === "object" && event !== null && "kind" in event && event.kind === "stage",
+        )
+        .map((event) => `${event.stage}:${event.state}`),
+      ["placement:started", "placement:finished"],
+    );
     assert.equal((await primary.state()).terminal, null);
     assert.equal((await primary.state()).attestations.length, 1);
   } finally {
     held.close();
-    await pending;
+    await pump.close();
+  }
+});
+
+test("a parent-served Verification cancellation retains its bounded forwarded output tail", async () => {
+  const raw = repositoryWithMain(),
+    repo = await Repo.at({ path: raw.path });
+  const root = await World.at(raw.path);
+  const primary = (
+    await Keiyaku.bind({
+      repo,
+      markdown: completionDocument(
+        "node -e 'process.stdout.write(\"x\".repeat(20 * 1024)); process.stdout.write(\"forwarded-tail\\n\"); setInterval(() => {}, 1_000)'",
+      ),
+      workspace: "worktree",
+      target: "refs/heads/main",
+      gates: ["verified"],
+    })
+  ).keiyaku;
+  const state = await primary.state();
+  commitCandidate(raw, await appointedWorktreePath(await repositoryAt(raw.path), state.id));
+  const parent = await born(root, "parent", "22222222", ["contract.deliver"]);
+  const controller = new AbortController();
+  const progress: unknown[] = [];
+  const pump = await openContractPump(parent, {
+    ...unusedContractPort,
+    deliver: async (input) =>
+      await executeForwardedDeliver({
+        repo,
+        contractId: input.contractId,
+        requester: input.requester,
+        includeDirty: input.includeDirty,
+        materializeConflict: input.materializeConflict,
+        requireBranchesToBeUpToDate: false,
+        hooks: EMPTY_WORKTREE_HOOKS,
+        signal: input.signal,
+        ...(input.message === undefined ? {} : { message: input.message }),
+        ...(input.observe === undefined ? {} : { observe: input.observe }),
+      }),
+  });
+  const pending = requestForwardedContractLive({
+    directory: pump.directory,
+    action: "contract.deliver",
+    signal: controller.signal,
+    observe: (event) => progress.push(event),
+    request: {
+      action: "contract.deliver",
+      repoRoot: raw.path,
+      contractId: state.id,
+      includeDirty: false,
+      materializeConflict: false,
+    },
+  });
+  try {
+    await waitFor(() =>
+      progress.some((event) => {
+        if (
+          event === null ||
+          typeof event !== "object" ||
+          !("kind" in event) ||
+          event.kind !== "verification" ||
+          !("observation" in event)
+        )
+          return false;
+        const observation = event.observation;
+        return (
+          observation !== null &&
+          typeof observation === "object" &&
+          "kind" in observation &&
+          observation.kind === "output" &&
+          "text" in observation &&
+          typeof observation.text === "string" &&
+          observation.text.includes("forwarded-tail")
+        );
+      }),
+    );
+    controller.abort(new Error("caller cancelled after Verification output"));
+    const result = await pending;
+    assert.equal(result.kind, "accepted");
+    const stop = result.value.verification;
+    if (stop === undefined || !("failure" in stop)) throw new Error("expected a Verification runtime stop");
+    assert.equal(stop.failure, "cancelled");
+    assert.equal(stop.truncated, true);
+    assert.ok(stop.stdout?.endsWith("forwarded-tail\n"));
+    assert.ok(Buffer.byteLength(stop.stdout ?? "") <= 16 * 1024);
+  } finally {
     await pump.close();
   }
 });

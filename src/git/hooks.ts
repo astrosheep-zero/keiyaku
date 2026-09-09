@@ -8,9 +8,9 @@ export type WorktreeHooks = Readonly<{
 }>;
 export type HookFailure =
   | Readonly<{ kind: "exit"; code: number; stdout: string; stderr: string; truncated: boolean }>
-  | Readonly<{ kind: "timeout" }>
+  | Readonly<{ kind: "timeout"; stdout?: string; stderr?: string; truncated?: boolean }>
   | Readonly<{ kind: "spawn-error"; diagnostic: string }>
-  | Readonly<{ kind: "unknown-exit" }>;
+  | Readonly<{ kind: "unknown-exit"; stdout?: string; stderr?: string; truncated?: boolean }>;
 export type WorktreeHookLag = Readonly<{
   kind: "worktree-hook-failed";
   phase: HookPhase;
@@ -127,7 +127,7 @@ function failedOutcome(outcome: Exclude<ProcessOutcome, { kind: "cancelled" }>):
 
 export type HookCommandRun =
   | Readonly<{ kind: "ok" }>
-  | Readonly<{ kind: "cancelled" }>
+  | Readonly<{ kind: "cancelled"; stdout?: string; stderr?: string; truncated?: boolean }>
   | Readonly<{
       kind: "failed";
       name: string;
@@ -140,6 +140,7 @@ export async function runHookCommands(
   commands: readonly HookCommand[],
   signal?: AbortSignal,
   environment?: NodeJS.ProcessEnv,
+  onOutput?: (output: Readonly<{ stream: "stdout" | "stderr"; text: string }>) => void,
 ): Promise<HookCommandRun> {
   for (const value of commands) {
     const outcome = await runProcess({
@@ -148,6 +149,7 @@ export async function runHookCommands(
       cwd: worktree,
       ...(signal === undefined ? {} : { signal }),
       ...(environment === undefined ? {} : { env: environment }),
+      ...(onOutput === undefined ? {} : { onOutput }),
     });
     if (outcome.kind === "cancelled") return outcome;
     const failure = failedOutcome(outcome);

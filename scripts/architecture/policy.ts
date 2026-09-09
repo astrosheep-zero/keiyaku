@@ -162,6 +162,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("git/**"),
         any("protocol/**"),
         any("settings.ts"),
+        any("workspace-place.ts"),
         any("verification/declaration.ts", ["VERIFIED", "VerificationDefinition"]),
         any("verification/execution.ts"),
       ],
@@ -239,6 +240,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("library/**"),
         types("protocol/audit.ts"),
         types("protocol/deliver.ts"),
+        any("protocol/execution-observation.ts"),
         types("protocol/review.ts"),
       ],
       deny: [
@@ -252,10 +254,31 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       ],
     },
     {
+      source: "library/audit.ts",
+      allow: [...libraryOwner.allow, types("protocol/execution-observation.ts")],
+      deny: libraryOwner.deny,
+    },
+    {
       source: "library/contract-execution.ts",
-      allow: [...contractOwner.allow, any("protocol/completion.ts"), any("protocol/progress.ts")],
+      allow: [
+        ...contractOwner.allow,
+        any("protocol/completion.ts"),
+        types("protocol/execution-observation.ts"),
+        any("protocol/progress.ts"),
+      ],
       deny: contractOwner.deny,
     },
+    {
+      source: "library/contract-forwarding.ts",
+      allow: [...contractOwner.allow, types("protocol/execution-observation.ts")],
+      deny: contractOwner.deny,
+    },
+    {
+      source: "library/contract-handle.ts",
+      allow: [...contractOwner.allow, types("protocol/execution-observation.ts")],
+      deny: contractOwner.deny,
+    },
+    { source: "library/execution.ts", allow: [any("library/**"), types("protocol/execution-observation.ts")] },
     {
       source: "library/continuation.ts",
       allow: [...libraryOwner.allow, any("protocol/completion.ts"), any("protocol/progress.ts")],

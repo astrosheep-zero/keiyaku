@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { open } from "node:fs/promises";
+import { StringDecoder } from "node:string_decoder";
 import crossSpawn from "cross-spawn";
 import { spawnOptionsFor, type DetachedProcessInput } from "./launch.js";
 import { detachedExitStatus, retainDetachedExitEvidence } from "./process-exit.js";
@@ -18,6 +19,8 @@ type ProcessLaunch = Readonly<{
   readonly cwd?: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly signal?: AbortSignal;
+  /** @internal Mechanical output observation only; it does not affect process ownership or outcome. */
+  readonly onOutput?: (output: Readonly<{ stream: "stdout" | "stderr"; text: string }>) => void;
 }>;
 
 type ProcessSpawnOptions = Readonly<{
@@ -103,22 +106,23 @@ type ProcessTerminal = Readonly<{
   readonly truncated: boolean;
 }>;
 
-type ProcessTimeout = Readonly<{
-  readonly kind: "timeout";
+type ProcessCapture = Readonly<{
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly truncated: boolean;
 }>;
+
+type ProcessTimeout = Readonly<{ readonly kind: "timeout" }> & ProcessCapture;
 
 type ProcessSpawnError = Readonly<{
   readonly kind: "spawn-error";
   readonly diagnostic: string;
-}>;
+}> &
+  ProcessCapture;
 
-type ProcessUnknownExit = Readonly<{
-  readonly kind: "unknown-exit";
-}>;
+type ProcessUnknownExit = Readonly<{ readonly kind: "unknown-exit" }> & ProcessCapture;
 
-type ProcessCancelled = Readonly<{
-  readonly kind: "cancelled";
-}>;
+type ProcessCancelled = Readonly<{ readonly kind: "cancelled" }> & ProcessCapture;
 
 export type ProcessOutcome =
   | ProcessTerminal
@@ -130,6 +134,8 @@ export type ProcessOutcome =
 type ProcessStreamError = Readonly<{
   readonly kind: "stream-error";
   readonly diagnostic: string;
+  readonly stderr: string;
+  readonly truncated: boolean;
 }>;
 
 export type ProcessConsumption = Readonly<{
@@ -160,7 +166,9 @@ function tailCapture(limit: number) {
       const start = total > limit ? cursor : 0;
       const value =
         start === 0 ? bytes.subarray(0, size) : Buffer.concat([bytes.subarray(start), bytes.subarray(0, start)]);
-      return { text: value.toString("utf8"), truncated: total > limit };
+      let startAt = 0;
+      while (startAt < value.length && (value[startAt]! & 0xc0) === 0x80) startAt += 1;
+      return { text: value.subarray(startAt).toString("utf8"), truncated: total > limit };
     },
   };
 }
@@ -226,18 +234,52 @@ export async function spawnDetachedProcess(input: DetachedProcessInput): Promise
   }
 }
 
-function terminalOutcome(
-  code: number,
+function capturedOutput(
   stdout: Readonly<{ text: string; truncated: boolean }>,
   stderr: Readonly<{ text: string; truncated: boolean }>,
   consuming: boolean,
-): ProcessTerminal {
+): ProcessCapture {
   return {
-    kind: "terminal",
-    code,
     stdout: consuming ? "" : stdout.text,
     stderr: stderr.text,
     truncated: (consuming ? false : stdout.truncated) || stderr.truncated,
+  };
+}
+
+function outputObservation(
+  input: ProcessLaunch,
+  consumingStdout: boolean,
+): Readonly<{
+  observe(stream: "stdout" | "stderr", chunk: Buffer): void;
+  finish(): void;
+}> {
+  const decoders =
+    input.onOutput === undefined
+      ? undefined
+      : {
+          ...(consumingStdout ? {} : { stdout: new StringDecoder("utf8") }),
+          stderr: new StringDecoder("utf8"),
+        };
+  const report = (stream: "stdout" | "stderr", text: string): void => {
+    if (text.length === 0) return;
+    try {
+      input.onOutput?.({ stream, text });
+    } catch {
+      // Observation is not process ownership: a consumer cannot strand the owned child.
+    }
+  };
+  return {
+    observe(stream, chunk): void {
+      const decoder = decoders?.[stream];
+      if (decoder !== undefined) report(stream, decoder.write(chunk));
+    },
+    finish(): void {
+      if (decoders === undefined) return;
+      for (const stream of ["stdout", "stderr"] as const) {
+        const decoder = decoders[stream];
+        if (decoder !== undefined) report(stream, decoder.end());
+      }
+    },
   };
 }
 
@@ -247,10 +289,13 @@ async function executeProcess(
   consumeStdout?: (chunk: Buffer) => void,
   spawnProcess: ProcessSpawner = spawn,
 ): Promise<ProcessConsumption> {
-  if (input.signal?.aborted === true) return { outcome: { kind: "cancelled" }, pid: null };
+  if (input.signal?.aborted === true) {
+    return { outcome: { kind: "cancelled", stdout: "", stderr: "", truncated: false }, pid: null };
+  }
   const child = spawnProcess(input.argv[0]!, input.argv.slice(1), spawnOptionsFor(input, ["ignore", "pipe", "pipe"]));
   const stdout = tailCapture(STREAM_TAIL_BYTES);
   const stderr = tailCapture(STREAM_TAIL_BYTES);
+  const output = outputObservation(input, consumeStdout !== undefined);
 
   let stop: "timeout" | "cancelled" | undefined;
   let streamError: unknown;
@@ -273,15 +318,19 @@ async function executeProcess(
   child.stdout!.on("data", (chunk: Buffer) => {
     if (consumeStdout === undefined) {
       stdout.append(chunk);
-      return;
+    } else {
+      try {
+        consumeStdout(chunk);
+      } catch (error) {
+        failStream(error);
+      }
     }
-    try {
-      consumeStdout(chunk);
-    } catch (error) {
-      failStream(error);
-    }
+    output.observe("stdout", chunk);
   });
-  child.stderr!.on("data", (chunk: Buffer) => stderr.append(chunk));
+  child.stderr!.on("data", (chunk: Buffer) => {
+    stderr.append(chunk);
+    output.observe("stderr", chunk);
+  });
   if (consumeStdout !== undefined) {
     child.stdout!.once("error", failStream);
     child.stderr!.once("error", failStream);
@@ -295,28 +344,27 @@ async function executeProcess(
   input.signal?.removeEventListener("abort", cancel);
   if (terminal.kind === "termination-error") throw terminal.error;
   await termination;
+  output.finish();
 
   const pid = child.pid ?? null;
+  const capture = capturedOutput(stdout.result(), stderr.result(), consumeStdout !== undefined);
   if (terminal.kind === "spawn-error") {
-    return { outcome: { kind: "spawn-error", diagnostic: terminal.error.message }, pid };
+    return { outcome: { kind: "spawn-error", diagnostic: terminal.error.message, ...capture }, pid };
   }
   if (streamError !== undefined) {
     return {
       outcome: {
         kind: "stream-error",
         diagnostic: streamError instanceof Error ? streamError.message : String(streamError),
+        stderr: capture.stderr,
+        truncated: capture.truncated,
       },
       pid,
     };
   }
-  if (stop !== undefined) return { outcome: { kind: stop }, pid };
-  if (terminal.code === null) return { outcome: { kind: "unknown-exit" }, pid };
-  const capturedStdout = stdout.result();
-  const capturedStderr = stderr.result();
-  return {
-    outcome: terminalOutcome(terminal.code, capturedStdout, capturedStderr, consumeStdout !== undefined),
-    pid,
-  };
+  if (stop !== undefined) return { outcome: { kind: stop, ...capture }, pid };
+  if (terminal.code === null) return { outcome: { kind: "unknown-exit", ...capture }, pid };
+  return { outcome: { kind: "terminal", code: terminal.code, ...capture }, pid };
 }
 
 export async function runProcess(input: ProcessInput): Promise<ProcessOutcome> {

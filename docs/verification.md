@@ -16,18 +16,25 @@ dependency selection remain attempt-local and are never core terms, cache,
 producer registry, or durable execution authority.
 
 Deliver and audit run the selected declarations against the exact integration
-snapshot in a disposable, snapshot-provisioned environment. Caller-current
-settings, user state, lockfiles, and installed dependencies cannot substitute
-for that snapshot authority. Each declaration and scratch setup or cleanup
-hook inherits the caller process environment through the shared runtime. That
-ambient environment is execution input only: it is intentionally not captured
-in evidence or made part of Contract/Core authority. Matching snapshot and
-declaration subjects may therefore reuse testimony; this is an accepted
-product tradeoff, not a reproducibility claim. Declarations run in order even
-after a failing command. A terminal run records one ordinary `verified`
-attestation with a satisfied or unsatisfied verdict. A timeout is terminal unsatisfied evidence;
-candidate unavailability, environment setup failure, spawn failure, unknown
-exit, and caller cancellation admit no attestation.
+snapshot in a disposable per-attempt environment. The Contract's appointed
+worktree is the explicit environment source: Git-classified ignored and
+untracked execution state may be copied from it, while candidate tracked bytes
+and ancestors always win. Source tracked bytes, deleted candidate paths, Git
+metadata, and Keiyaku authority or guidance never substitute for candidate
+custody. Inherited regular files are independent writable copies. Safe internal
+links may be relocated; escaping links, special files, unsafe nested repository
+state, and an observed changing source are typed environment failure rather
+than an invitation to follow, install, infer an ecosystem, or share a mutable
+cache. This is execution convenience, not an atomic filesystem snapshot,
+dependency-freshness policy, or reproducibility claim.
+
+Each declaration and scratch setup or cleanup hook inherits the caller process
+environment through the shared runtime. Candidate-owned settings remain the
+only settings authority for those hooks. Declarations run in order even after a
+failing command. A terminal run records one ordinary `verified` attestation
+with a satisfied or unsatisfied verdict. A timeout is terminal unsatisfied
+evidence; candidate unavailability, environment/setup failure, spawn failure,
+unknown exit, and caller cancellation admit no attestation.
 
 The producer captures its subject before execution, and admission never
 retargets it. A completed older observation remains truthful history even when
@@ -49,6 +56,13 @@ followability without placing it.
 Environment failures from configured scratch hooks preserve the hook's configured
 name and typed failure detail as their public recovery identity; the hook's
 private array position is never exposed.
+
+An attempt can emit ephemeral observations for materialization, inherited
+environment, configured setup and cleanup, declarations, and their stdout or
+stderr. They name only witnessed phases and known execution/source directories;
+they neither claim liveness nor become testimony, a run log, or replay
+authority. Stopped process outcomes retain bounded output tails and explicit
+truncation facts. Observer failure cannot affect child custody or final result.
 
 ## Process And Cleanup Boundary
 
@@ -72,6 +86,10 @@ happens after any admitted fact: a failed destroy action or leaked disposable
 worktree is reported separately and cannot reverse acceptance. Reconciliation
 may remove only a scratch path it can prove is no longer owned; it never recovers
 the run or executes candidate commands.
+
+Cancellation requests termination only for work still owned by this attempt;
+it stops later owned phases and still awaits independently bounded retirement.
+It never erases a confirmed leading admission or its cleanup residue.
 
 ## Ownership
 

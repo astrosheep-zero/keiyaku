@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { resolveActor } from "./actor.js";
+import type { ExecutionEvent } from "../library/execution.js";
 import { isParsedAkumaCommand, type InvokedAkumaCommand } from "./commands/akuma.js";
 import type { AkumaInvocationResult } from "./commands/akuma-invoke.js";
 import { invokeContractMutation } from "./commands/contract-invoke.js";
@@ -38,6 +39,8 @@ type InvokeRuntime = Readonly<{
   environment?: NodeJS.ProcessEnv;
   readStdin?: () => Promise<string>;
   actor?: ActorId;
+  signal?: AbortSignal;
+  progress?: (events: AsyncIterable<ExecutionEvent>) => Promise<void>;
 }>;
 
 type NonInstallExecution = Readonly<{
@@ -49,6 +52,8 @@ type NonInstallExecution = Readonly<{
 type InvocationEdge = Readonly<{
   environment: NodeJS.ProcessEnv;
   readStdin: () => Promise<string>;
+  signal?: AbortSignal;
+  progress?: (events: AsyncIterable<ExecutionEvent>) => Promise<void>;
 }>;
 
 async function readStdin(): Promise<string> {
@@ -404,6 +409,28 @@ async function resolveInvocationCoordinates(invocation: NonInstallExecution, run
   });
 }
 
+async function invokeTask(
+  parsed: Extract<NonInstallExecution["command"], { command: "task" }>,
+  runtime: InvokeRuntime,
+  edge: InvocationEdge,
+  execution: LibraryExecution,
+  coordinates: Awaited<ReturnType<typeof resolveInvocationCoordinates>>,
+): Promise<TaskInvocationResult> {
+  const actor = taskActor(parsed, runtime, edge.environment);
+  return await (
+    await import("./commands/task-invoke.js")
+  ).invokeTaskFromEdge({
+    parsed,
+    world: coordinates.world,
+    candidate: coordinates.candidateWorld,
+    context: coordinates.taskContext,
+    establish: coordinates.establishWorld,
+    readStdin: edge.readStdin,
+    actor,
+    execution,
+  });
+}
+
 async function callExecutionCwd(input: Readonly<{ command: InvokedAkumaCommand; cwd: string; workdir?: string }>) {
   if (input.command.command !== "call") return undefined;
   if (input.workdir !== undefined) {
@@ -454,28 +481,19 @@ async function invokeParsed(
   const environment = runtime.environment ?? process.env;
   const execution = executionForEnvironment(environment);
   const coordinates = await resolveInvocationCoordinates(invocation, runtime);
-  const { cwd, repo, world, candidateWorld, establishWorld, taskContext } = coordinates;
-  const edge: InvocationEdge = { environment, readStdin: runtime.readStdin ?? readStdin };
+  const { cwd, repo, world, candidateWorld, establishWorld } = coordinates;
+  const edge: InvocationEdge = {
+    environment,
+    readStdin: runtime.readStdin ?? readStdin,
+    ...(runtime.signal === undefined ? {} : { signal: runtime.signal }),
+    ...(runtime.progress === undefined ? {} : { progress: runtime.progress }),
+  };
   const parsed = invocation.command;
   const mapped = edge.environment.KEIYAKU_HOME?.trim();
   const home = mapped === undefined || mapped.length === 0 ? undefined : mapped;
   if (parsed.command === "settings") return { kind: "settings", value: await settingsAt(world ?? undefined, home) };
   if (parsed.command === "nuke") return await (await import("./commands/nuke.js")).invokeNuke(parsed, world);
-  if (parsed.command === "task") {
-    const actor = taskActor(parsed, runtime, edge.environment);
-    return await (
-      await import("./commands/task-invoke.js")
-    ).invokeTaskFromEdge({
-      parsed,
-      world,
-      candidate: candidateWorld,
-      context: taskContext,
-      establish: coordinates.establishWorld,
-      readStdin: edge.readStdin,
-      actor,
-      execution,
-    });
-  }
+  if (parsed.command === "task") return await invokeTask(parsed, runtime, edge, execution, coordinates);
   if (parsed.command === "history" && "contract" in parsed) return await invokeContractHistory(repo, parsed.contract);
   if (isParsedAkumaCommand(parsed))
     return await invokeParsedAkuma({

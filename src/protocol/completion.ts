@@ -179,17 +179,34 @@ function stoppedResult(
 async function placeCurrentCandidate(input: CompletionInput, cursor: CompletionCursor) {
   cursor.stage = "placement";
   input.signal?.throwIfAborted();
-  const result = await admitPlacement({
-    channel: input.channel,
-    repository: input.repository,
-    progress: input.progress,
-    target: cursor.checkpoint.state.coordinates.target,
-    placement: {
-      contractId: cursor.checkpoint.state.id,
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
-      at: timestamp(),
-    },
+  input.progress.observe({
+    kind: "stage",
+    contractId: cursor.checkpoint.state.id,
+    stage: "placement",
+    state: "started",
   });
+  const result = await (async () => {
+    try {
+      return await admitPlacement({
+        channel: input.channel,
+        repository: input.repository,
+        progress: input.progress,
+        target: cursor.checkpoint.state.coordinates.target,
+        placement: {
+          contractId: cursor.checkpoint.state.id,
+          ...(input.actor === undefined ? {} : { actor: input.actor }),
+          at: timestamp(),
+        },
+      });
+    } finally {
+      input.progress.observe({
+        kind: "stage",
+        contractId: cursor.checkpoint.state.id,
+        stage: "placement",
+        state: "finished",
+      });
+    }
+  })();
   if (result.kind === "accepted") {
     cursor.checkpoint = contractCheckpoint(result);
     input.progress.recordResidue(result.state.id, result);

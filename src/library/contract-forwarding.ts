@@ -1,4 +1,5 @@
 import type { ActorId, ContractId } from "../core/facts/types.js";
+import type { ExecutionObserver } from "../protocol/execution-observation.js";
 import type { IntegrationConflictMaterialized } from "../protocol/deliver.js";
 import type { AuditReport } from "../protocol/audit.js";
 import { auditContract, type AuditComposition } from "./audit.js";
@@ -25,6 +26,7 @@ export async function executeForwardedDeliver(
     requireBranchesToBeUpToDate: boolean;
     hooks: Parameters<typeof executeLocalDelivery>[0]["hooks"];
     signal?: AbortSignal;
+    observe?: ExecutionObserver;
   }>,
 ): Promise<
   Readonly<{ result: MutationResult<DeliveryValue> | IntegrationConflictMaterialized; deliveryFactId?: string }>
@@ -40,6 +42,7 @@ export async function executeForwardedDeliver(
     overwrite: input.overwrite ?? false,
     ...(input.signal === undefined ? {} : { signal: input.signal }),
     hooks: input.hooks,
+    ...(input.observe === undefined ? {} : { observe: input.observe }),
   });
   if (result.kind !== "accepted") return { result };
   const delivery = result.facts.find((fact) => fact.kind === "deliver");
@@ -61,6 +64,7 @@ export async function executeForwardedReview(
     summary?: string;
     signal?: AbortSignal;
     hooks: Parameters<typeof executeLocalReview>[0]["hooks"];
+    observe?: ExecutionObserver;
   }>,
 ): Promise<Readonly<{ result: MutationResult<Review>; reviewFactId?: string }>> {
   const result = await executeLocalReview({
@@ -70,6 +74,7 @@ export async function executeForwardedReview(
     verdict: input.verdict,
     ...(input.summary === undefined ? {} : { summary: input.summary }),
     hooks: input.hooks,
+    ...(input.observe === undefined ? {} : { observe: input.observe }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
   const review = result.facts.find((fact) => fact.kind === "attestation");
@@ -87,11 +92,13 @@ export async function executeForwardedAudit(
     requireBranchesToBeUpToDate: boolean;
     hooks: NonNullable<AuditComposition["hooks"]>;
     signal?: AbortSignal;
+    observe?: ExecutionObserver;
   }>,
 ): Promise<Readonly<{ result: MutationResult<AuditReport>; auditReport?: AuditReport }>> {
   const result = await auditContract({
     scope: scopeForRepo(input.repo),
     contractId: input.contractId,
+    ...(input.observe === undefined ? {} : { observe: input.observe }),
     input: {
       includeDirty: input.includeDirty,
       showDiff: input.showDiff,

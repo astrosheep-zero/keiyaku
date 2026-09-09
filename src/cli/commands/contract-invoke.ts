@@ -1,4 +1,5 @@
 import { resolveActor } from "../actor.js";
+import type { ContractExecution, ExecutionEvent } from "../../library/execution.js";
 import { CliUsageError } from "../usage.js";
 import type { InvocationResult } from "../result.js";
 import type { ParsedCommand } from "../parse.js";
@@ -15,7 +16,23 @@ type ContractMutation = Extract<
   { command: "bind" | "amend" | "deliver" | "review" | "arc" | "abandon" | "audit" }
 >;
 type ExistingCommand = Exclude<ContractMutation, { command: "bind" }>;
-type InvocationEdge = Readonly<{ environment: NodeJS.ProcessEnv; readStdin: () => Promise<string> }>;
+type InvocationEdge = Readonly<{
+  environment: NodeJS.ProcessEnv;
+  readStdin: () => Promise<string>;
+  signal?: AbortSignal;
+  progress?: (events: AsyncIterable<ExecutionEvent>) => Promise<void>;
+}>;
+
+async function consumeExecution<Result>(execution: ContractExecution<Result>, edge: InvocationEdge): Promise<Result> {
+  const observation =
+    edge.progress === undefined ? undefined : Promise.resolve().then(() => edge.progress!(execution.progress));
+  void observation?.catch(() => undefined);
+  try {
+    return await execution.result;
+  } finally {
+    await observation?.catch(() => undefined);
+  }
+}
 
 export type ContractMutationInput = Readonly<{
   parsed: ContractMutation;
@@ -196,15 +213,20 @@ async function existingSeat(
 async function invokeDeliver(
   parsed: Extract<ExistingCommand, { command: "deliver" }>,
   seat: ExistingSeat,
+  edge: InvocationEdge,
 ): Promise<InvocationResult> {
   const { acceptedDeliver } = await import("../accepted.js");
   try {
-    const delivered = await seat.contract.deliver({
-      ...(parsed.message === undefined ? {} : { message: parsed.message }),
-      includeDirty: parsed.includeDirty,
-      materializeConflict: parsed.materializeConflict,
-      overwrite: parsed.overwrite,
-    });
+    const delivered = await consumeExecution(
+      seat.contract.startDelivery({
+        ...(parsed.message === undefined ? {} : { message: parsed.message }),
+        includeDirty: parsed.includeDirty,
+        materializeConflict: parsed.materializeConflict,
+        overwrite: parsed.overwrite,
+        ...(edge.signal === undefined ? {} : { signal: edge.signal }),
+      }),
+      edge,
+    );
     if (!("facts" in delivered)) return delivered;
     return acceptedDeliver(delivered, seat.id);
   } catch (error) {
@@ -222,17 +244,18 @@ async function invokeDeliver(
 async function invokeReview(
   parsed: Extract<ExistingCommand, { command: "review" }>,
   seat: ExistingSeat,
-  readStdin: () => Promise<string>,
+  edge: InvocationEdge,
 ): Promise<InvocationResult> {
-  const summary = parsed.summaryFromStdin === true ? await readStdin() : parsed.summary;
+  const summary = parsed.summaryFromStdin === true ? await edge.readStdin() : parsed.summary;
   const { acceptedReview, resultFromMutationCall } = await import("../accepted.js");
+  const input = {
+    verdict: parsed.verdict,
+    ...(summary === undefined ? {} : { summary }),
+    ...(edge.signal === undefined ? {} : { signal: edge.signal }),
+  };
   return resultFromMutationCall(
     "review",
-    () =>
-      seat.contract.review({
-        verdict: parsed.verdict,
-        ...(summary === undefined ? {} : { summary }),
-      }),
+    () => consumeExecution(seat.contract.startReview(input), edge),
     (result) => acceptedReview(result, seat.id),
     { coordinate: seat.id },
   );
@@ -284,9 +307,9 @@ export async function invokeContractMutation(input: ContractMutationInput): Prom
       );
     }
     case "deliver":
-      return invokeDeliver(parsed, seat);
+      return invokeDeliver(parsed, seat, edge);
     case "review":
-      return invokeReview(parsed, seat, edge.readStdin);
+      return invokeReview(parsed, seat, edge);
     case "arc": {
       const markdown = await edge.readStdin();
       const { acceptedArc, resultFromMutationCall } = await import("../accepted.js");
@@ -321,10 +344,14 @@ export async function invokeContractMutation(input: ContractMutationInput): Prom
       return resultFromMutationCall(
         "audit",
         () =>
-          contract.audit({
-            includeDirty: parsed.includeDirty,
-            showDiff: parsed.showDiff,
-          }),
+          consumeExecution(
+            contract.startAudit({
+              includeDirty: parsed.includeDirty,
+              showDiff: parsed.showDiff,
+              ...(edge.signal === undefined ? {} : { signal: edge.signal }),
+            }),
+            edge,
+          ),
         (result) => acceptedAudit(result, id),
         { coordinate: id },
       );

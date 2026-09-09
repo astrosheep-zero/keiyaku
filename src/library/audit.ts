@@ -1,4 +1,5 @@
 import { decodeContractDocument } from "../body/decode.js";
+import type { ExecutionObserver } from "../protocol/execution-observation.js";
 import type { ActorId, ContractId } from "../core/facts/types.js";
 import { withContractExecution } from "./contract-execution.js";
 import { auditOperation, type AuditReport } from "../protocol/audit.js";
@@ -33,6 +34,7 @@ export async function auditContract(
     contractId: ContractId;
     input: AuditOptions;
     composition?: AuditComposition;
+    observe?: ExecutionObserver;
   }>,
 ): Promise<MutationResult<AuditReport>> {
   const composition = input.composition;
@@ -40,6 +42,7 @@ export async function auditContract(
     {
       scope: input.scope,
       contractId: input.contractId,
+      ...(input.observe === undefined ? {} : { observe: input.observe }),
       hooks: composition?.hooks ?? worktreeHooksOption(undefined),
       ...(input.input.signal === undefined ? {} : { signal: input.input.signal }),
     },

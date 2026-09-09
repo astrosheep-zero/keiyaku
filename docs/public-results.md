@@ -121,6 +121,13 @@ after admission. Such reports stay on the accepted invocation result, do not
 change its exit meaning, and never become journal facts, cleanup authority, or
 reconciliation input.
 
+Ephemeral execution observations are separate from this final result boundary.
+They can expose a confirmed leading fact before later work settles, but neither
+missing observation nor a reported gap changes admission, cancellation,
+Verification stop, cleanup residue, or forwarded recovery. A stopped process's
+captured output remains part of its typed stop rather than an implied terminal
+verdict.
+
 Cleanup belongs to the whole invocation, independently of the current candidate.
 All retained resources and failed cleanup attempts keep their known owner and
 candidate coordinates. A newer verification can replace candidate conclusions,

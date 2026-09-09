@@ -335,13 +335,20 @@ async function reconcileExecution<Value, PublicValue>(
   for (const contractId of contracts) {
     try {
       input.scope.signal?.throwIfAborted();
-      const report = await completeReconcile({
-        scope: input.scope,
-        channel: input.channel,
-        contractId,
-        hooks: input.hooks,
-        retryHooks: false,
-      });
+      progress.observe({ kind: "stage", contractId, stage: "reconciliation", state: "started" });
+      const report = await (async () => {
+        try {
+          return await completeReconcile({
+            scope: input.scope,
+            channel: input.channel,
+            contractId,
+            hooks: input.hooks,
+            retryHooks: false,
+          });
+        } finally {
+          progress.observe({ kind: "stage", contractId, stage: "reconciliation", state: "finished" });
+        }
+      })();
       reports.push(report);
       progress.recordResidue(contractId, report.settlement);
     } catch (error) {

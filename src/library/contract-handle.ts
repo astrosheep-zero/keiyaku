@@ -1,5 +1,7 @@
 /** @architectureCompositionRoot */
 import { documentDiff } from "../markdown/diff.js";
+import { startContractExecution, type ContractExecution } from "./execution.js";
+import type { ExecutionObserver } from "../protocol/execution-observation.js";
 import { applyAmendDocument } from "../body/amend.js";
 import { decodeArcDocument } from "../body/arc.js";
 import { decodeContractDocument } from "../body/decode.js";
@@ -214,7 +216,18 @@ export class KeiyakuHandle {
     };
   }
 
+  startDelivery(input?: DeliverInput): ContractExecution<MutationResult<Delivery> | IntegrationConflictMaterialized> {
+    return startContractExecution((observe) => this.runDelivery(input, observe));
+  }
+
   async deliver(input?: DeliverInput): Promise<MutationResult<Delivery> | IntegrationConflictMaterialized> {
+    return this.startDelivery(input).result;
+  }
+
+  private async runDelivery(
+    input: DeliverInput | undefined,
+    observe: ExecutionObserver,
+  ): Promise<MutationResult<Delivery> | IntegrationConflictMaterialized> {
     const values =
       input === undefined
         ? undefined
@@ -244,10 +257,12 @@ export class KeiyakuHandle {
             overwrite,
             ...(signal === undefined ? {} : { signal }),
             hooks: this.composition.hooks,
+            observe,
           })
         : await requestForwardedContractLive({
             directory: channel.directory,
             action: "contract.deliver",
+            observe,
             request: {
               action: "contract.deliver",
               repoRoot: this.scope.primaryWorktree,
@@ -262,7 +277,15 @@ export class KeiyakuHandle {
     return "facts" in result ? { ...result, value: this.deliveryHandle(result.value) } : result;
   }
 
+  startReview(input: ReviewInput): ContractExecution<MutationResult<Review>> {
+    return startContractExecution((observe) => this.runReview(input, observe));
+  }
+
   async review(input: ReviewInput): Promise<MutationResult<Review>> {
+    return this.startReview(input).result;
+  }
+
+  private async runReview(input: ReviewInput, observe: ExecutionObserver): Promise<MutationResult<Review>> {
     const values = requireInput(input, "review input", ["verdict", "summary", "signal"]);
     const verdict = values.verdict;
     if (verdict !== "satisfied" && verdict !== "unsatisfied") {
@@ -275,6 +298,7 @@ export class KeiyakuHandle {
       return await requestForwardedContractLive({
         directory: channel.directory,
         action: "contract.review",
+        observe,
         ...(signal === undefined ? {} : { signal }),
         request: {
           action: "contract.review",
@@ -292,6 +316,7 @@ export class KeiyakuHandle {
       verdict,
       ...(summary === undefined ? {} : { summary }),
       hooks: this.composition.hooks,
+      observe,
       ...(signal === undefined ? {} : { signal }),
     });
   }
@@ -358,7 +383,18 @@ export class KeiyakuHandle {
     });
   }
 
+  startAudit(input?: AuditInput): ContractExecution<MutationResult<AuditReport>> {
+    return startContractExecution((observe) => this.runAudit(input, observe));
+  }
+
   async audit(input?: AuditInput): Promise<MutationResult<AuditReport>> {
+    return this.startAudit(input).result;
+  }
+
+  private async runAudit(
+    input: AuditInput | undefined,
+    observe: ExecutionObserver,
+  ): Promise<MutationResult<AuditReport>> {
     const values =
       input === undefined ? undefined : requireInput(input, "audit input", ["includeDirty", "showDiff", "signal"]);
     const includeDirty = optionalBoolean(values?.includeDirty, "includeDirty") ?? false;
@@ -374,6 +410,7 @@ export class KeiyakuHandle {
       return await requestForwardedContractLive({
         directory: channel.directory,
         action: "contract.audit",
+        observe,
         request: {
           action: "contract.audit",
           repoRoot: this.scope.primaryWorktree,
@@ -389,6 +426,7 @@ export class KeiyakuHandle {
       contractId: this.id,
       input: auditInput,
       composition: this.composition,
+      observe,
     });
   }
 

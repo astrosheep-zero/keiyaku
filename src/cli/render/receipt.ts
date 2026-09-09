@@ -70,7 +70,7 @@ export function appendHookPayload(lines: string[], failure: HookFailure): void {
   if (failure.kind === "spawn-error") receiptPayload(lines, "diagnostic", failure.diagnostic);
   if (!("stdout" in failure)) return;
   if (failure.stdout.length > 0) receiptPayload(lines, "stdout", failure.stdout);
-  if (failure.stderr.length > 0) receiptPayload(lines, "stderr", failure.stderr);
+  if (failure.stderr !== undefined && failure.stderr.length > 0) receiptPayload(lines, "stderr", failure.stderr);
 }
 
 export function reuseLines(reuse: VerificationReuse | undefined, columns: number): readonly string[] {

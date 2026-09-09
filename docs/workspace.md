@@ -36,6 +36,11 @@ Writers serialize a fresh read and durable replacement; corrupt or unavailable s
 
 After admission, composition appoints before Git realizes the worktree and retries use that Place. Release waits for Git to prove the path absent; failures retain the appointment, so no reusable Place hides managed bytes. Bind returns the appointed path, and target lag identifies that worktree subject.
 
+The same live appointment is the sole explicit source of optional Verification
+execution state. It grants no additional Contract authority: the candidate is
+still materialized from recorded Git custody, and derived guidance remains
+excluded from any inherited execution state.
+
 ## Derived Files And Cleanup
 
 The workspace owner atomically creates or repairs its guidance, namespace

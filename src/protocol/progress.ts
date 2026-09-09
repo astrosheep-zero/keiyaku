@@ -8,6 +8,7 @@ import type { WorktreeLeak } from "../git/scratch.js";
 import type { PrivateStateSeatCloseLag } from "../git/private-state-seat.js";
 import type { VerificationCleanupFailure } from "./intent.js";
 import type { AcceptedProtocolStep, IntentOutcome } from "./outcome.js";
+import { observeExecution, type ExecutionEvent, type ExecutionObserver } from "./execution-observation.js";
 
 /** A captured interpretation is not an invocation's admission receipt. */
 export type ContractCheckpoint = Readonly<{ state: ContractState; journal: readonly JournalEntry[] }>;
@@ -74,8 +75,13 @@ export type ExecutionSnapshot = Readonly<{
 
 type Residue = Readonly<{ physical?: ReconcileResult; seatClose?: readonly PrivateStateSeatCloseLag[] }>;
 
-/** Invocation-local receipts only: no persistence, scheduling, callbacks, or authority reads. */
+/** Invocation-local receipts and ephemeral observations; no scheduling or authority reads. */
 export class ExecutionProgress {
+  constructor(private readonly observer?: ExecutionObserver) {}
+
+  observe(event: ExecutionEvent): void {
+    observeExecution(this.observer, event);
+  }
   private readonly entries = new Map<string, string>();
   private readonly admittedFacts: JournalEntry[] = [];
   private readonly admittedHeads = new Map<ContractId, ContractHead>();
@@ -103,6 +109,7 @@ export class ExecutionProgress {
       if (this.entries.has(key)) continue;
       this.entries.set(key, bytes);
       this.admittedFacts.push(fact);
+      this.observe({ kind: "admitted", contractId, fact });
       this.affectedContracts.add(fact.contract);
       fresh = true;
     }

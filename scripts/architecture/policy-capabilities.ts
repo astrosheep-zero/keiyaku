@@ -4,7 +4,16 @@ export const capabilityPolicy = {
   sensitiveImports: [
     { module: "node:module", owners: [{ source: "plugin/runtime.ts" }] },
     { module: "module", owners: [] },
-    { module: "zod", owners: [{ source: "akuma/**" }, { source: "library/**" }, { source: "task/**" }] },
+    {
+      module: "zod",
+      owners: [
+        { source: "akuma/**" },
+        { source: "library/**" },
+        { source: "protocol/execution-observation.ts" },
+        { source: "task/**" },
+        { source: "verification/observation.ts" },
+      ],
+    },
     {
       module: "node:child_process",
       owners: [{ source: "git/**" }, { source: "runtime/proc/**" }, { source: "scripts/**" }],
@@ -15,6 +24,7 @@ export const capabilityPolicy = {
       owners: [
         { source: "cli/draft.ts" },
         { source: "coordination/**" },
+        { source: "git/**" },
         { source: "scripts/**" },
         { source: "task/store.ts" },
       ],

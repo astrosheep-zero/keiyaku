@@ -142,4 +142,5 @@ export const Keiyaku = Object.freeze({
 });
 
 export { executionReceipt } from "./execution-result.js";
+export type { ContractExecution, ExecutionEvent } from "./execution.js";
 export type { ExecutionCleanup, ExecutionStop, ExecutionReceipt, MutationOperation } from "./execution-result.js";

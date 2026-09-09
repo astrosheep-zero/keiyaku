@@ -41,6 +41,7 @@ function contractUpstream(processConfiguration: BodyProcessConfiguration): Contr
       const [repo, configuration] = await contractDependencies(input.repoRoot, processConfiguration);
       return await executeForwardedAudit({
         repo,
+        ...(input.observe === undefined ? {} : { observe: input.observe }),
         contractId: input.contractId,
         requester: input.requester,
         includeDirty: input.includeDirty,
@@ -54,6 +55,7 @@ function contractUpstream(processConfiguration: BodyProcessConfiguration): Contr
       const [repo, configuration] = await contractDependencies(input.repoRoot, processConfiguration);
       return await executeForwardedDeliver({
         repo,
+        ...(input.observe === undefined ? {} : { observe: input.observe }),
         contractId: input.contractId,
         requester: input.requester,
         ...(input.message === undefined ? {} : { message: input.message }),
@@ -68,6 +70,7 @@ function contractUpstream(processConfiguration: BodyProcessConfiguration): Contr
       const [repo, configuration] = await contractDependencies(input.repoRoot, processConfiguration);
       return await executeForwardedReview({
         repo,
+        ...(input.observe === undefined ? {} : { observe: input.observe }),
         contractId: input.contractId,
         requester: input.requester,
         verdict: input.verdict,

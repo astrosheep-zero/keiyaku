@@ -69,6 +69,16 @@ The diff may be unavailable when Git can no longer supply the recorded bytes;
 that absence is not a lifecycle error and the diff is never persisted, gated, or
 cached as authority.
 
+Delivery, review, and audit also offer eager observation forms alongside their
+existing promise operations. Each form returns one invocation-local final
+result and one optional bounded progress subscription. Starting does not depend
+on subscribing; leaving that subscription only stops observation, while the
+caller's explicit cancellation signal is the only cancellation request. The
+stream reports confirmed admission and witnessed trailing verification,
+placement, continuation, or reconciliation transitions, including explicit
+observation gaps. It is not a scheduler, journal verb, durable timeline, or
+second result model, and its consumer cannot change the final outcome.
+
 ## Product Boundaries
 
 Settings are an explicit shared resource. Contract operations retain derived

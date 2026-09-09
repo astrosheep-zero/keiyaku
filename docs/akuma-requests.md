@@ -73,6 +73,14 @@ when it is gone, recovery still reports the durable request disposition without
 re-executing the service. Parent cancellation reaches the same local execution
 path, including trailing placement and verification.
 
+An opted-in Contract service request may also carry bounded ephemeral ordered
+progress after publication and before its final receipt. Sequence gaps are
+explicit; progress is flushed before receipt projection but is neither durable
+service evidence nor replay data. Its caller may request cancellation after
+publication, while a channel loss remains an unknown transport outcome rather
+than proof of rollback. Other request descriptors retain their existing
+cancellation behavior.
+
 ## Cross-owner replay review
 
 Every Body Request review records the following facts in the owning Heart and

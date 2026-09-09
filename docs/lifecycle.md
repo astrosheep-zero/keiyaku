@@ -116,3 +116,9 @@ admitted, later verification, placement, continuation, cleanup, reconciliation,
 and settlement are independent obligations: their stops or lags cannot reverse
 the admission or conceal the Contract. Their public representation is owned by
 [public-results.md](public-results.md).
+
+An invocation may expose its confirmed leading admission while its owned
+Verification, placement, continuation, reconciliation, or cleanup work is
+still proceeding. Cancellation can stop remaining owned work but cannot undo
+that admission; only the final result adjudicates its trailing stops and
+residue.

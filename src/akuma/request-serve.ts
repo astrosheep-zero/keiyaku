@@ -17,6 +17,7 @@ import {
   type ExecutionFacts,
   type RequestEnvelope,
 } from "./request-wire.js";
+import { observeRequestCancellation, publishRequestProgress } from "./request-observation.js";
 import {
   BodyRequestPump as LifecycleBodyRequestPump,
   settleReserved,
@@ -35,6 +36,7 @@ export type ServeInput = Omit<PumpInput, "bodySequence"> &
 
 type ResolvedRequest = Readonly<{
   payloadJson: string;
+  supportsCancellation: boolean;
   isPermitted(allowed: readonly string[]): boolean;
   encodeFailure(error: unknown): unknown | null;
 }>;
@@ -131,16 +133,38 @@ async function serveResolvedCommand(
     return true;
   }
   try {
+    const progress = publishRequestProgress({
+      directory: input.directory,
+      transportId: input.transportId,
+      id: fact.id,
+      action: fact.action,
+    });
+    const cancellation =
+      command.completion === "service" && request.supportsCancellation
+        ? observeRequestCancellation({
+            directory: input.directory,
+            transportId: input.transportId,
+            id: fact.id,
+            action: fact.action,
+          })
+        : undefined;
     const facts: ExecutionFacts = {
       id: fact.id,
       admittedAt: fact.admittedAt,
       requester: fact.requester,
-      signal: input.signal,
+      signal: cancellation === undefined ? input.signal : AbortSignal.any([input.signal, cancellation.signal]),
       admissionOpen: input.admissionOpen,
+      progress: progress.progress,
     };
-    const served = await execute(fact, facts);
-    fact = served.fact;
-    await projectCommandReceipt(input, fact, command, served.outcome);
+    try {
+      const served = await execute(fact, facts);
+      fact = served.fact;
+      await progress.flush();
+      await projectCommandReceipt(input, fact, command, served.outcome);
+    } finally {
+      await progress.close();
+      await cancellation?.close();
+    }
   } catch (error) {
     const failure = encodedFailure(request, error);
     const current = await readRequest(input.paths, fact.id);

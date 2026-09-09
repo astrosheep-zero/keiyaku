@@ -53,6 +53,8 @@ export type RequestEnvelope = z.infer<typeof requestEnvelopeSchema>;
  */
 export type RequestProtocol<Input, Output, Reference> = Readonly<{
   action: string;
+  /** An opted-in service request accepts cancellation after publication. */
+  supportsCancellation?: boolean;
   encodeRequest(input: Input): unknown;
   decodeRequest(payload: unknown): Input | null;
   encodeResult(result: Output): unknown;
@@ -69,6 +71,8 @@ export type ExecutionFacts = Readonly<{
   requester: string;
   signal: AbortSignal;
   admissionOpen(): boolean;
+  /** Best-effort, ephemeral progress for this one live request. */
+  progress?(value: unknown): void;
 }>;
 
 export type ChildRequestCommand<Input, Output, Reference> = Readonly<{
@@ -89,6 +93,7 @@ export type ServiceRequestCommand<Input, Output, Service, Reference> = Readonly<
 
 type ErasedRequest = Readonly<{
   payloadJson: string;
+  supportsCancellation: boolean;
   isPermitted(allowed: readonly string[]): boolean;
   encodeFailure(error: unknown): unknown | null;
 }>;
@@ -139,6 +144,7 @@ export function eraseRequestCommand<Input, Output, Service, Reference>(
           if (input === null) return null;
           return {
             payloadJson: JSON.stringify(protocol.encodeRequest(input)),
+            supportsCancellation: protocol.supportsCancellation === true,
             isPermitted: (allowed) => protocol.isPermitted(allowed),
             execute: async (facts) => {
               const served = await command.execute(input, facts);
@@ -158,6 +164,7 @@ export function eraseRequestCommand<Input, Output, Service, Reference>(
           if (input === null) return null;
           return {
             payloadJson: JSON.stringify(protocol.encodeRequest(input)),
+            supportsCancellation: protocol.supportsCancellation === true,
             isPermitted: (allowed) => protocol.isPermitted(allowed),
             execute: async (facts) => {
               const served = await command.execute(input, facts);

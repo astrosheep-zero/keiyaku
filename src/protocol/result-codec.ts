@@ -59,6 +59,11 @@ function nonblank(value: unknown): string {
   return value;
 }
 
+function nonempty(value: unknown): string {
+  if (typeof value !== "string" || value.length === 0) fail();
+  return value;
+}
+
 function integer(value: unknown): number {
   if (typeof value !== "number" || !Number.isInteger(value)) fail();
   return value;
@@ -187,15 +192,26 @@ export function decodeIntentRefusal(value: unknown): IntentRefusal {
   ]);
 }
 
+function decodeCapturedVerificationOutput(
+  object: Readonly<Record<string, unknown>>,
+): Readonly<{ stdout?: string; stderr?: string; truncated?: true }> {
+  return {
+    ...("stdout" in object ? { stdout: nonempty(object.stdout) } : {}),
+    ...("stderr" in object ? { stderr: nonempty(object.stderr) } : {}),
+    ...("truncated" in object ? (object.truncated === true ? { truncated: true as const } : fail()) : {}),
+  };
+}
+
 export function decodeVerificationRuntimeStop(value: unknown): VerificationRuntimeStop {
-  const object = record(value, ["failure"], ["diagnostic", "name", "detail"]);
+  const object = record(value, ["failure"], ["diagnostic", "name", "detail", "stdout", "stderr", "truncated"]);
+  const output = decodeCapturedVerificationOutput(object);
   if (object.failure === "unknown-exit" || object.failure === "cancelled") {
     if ("diagnostic" in object || "name" in object || "detail" in object) fail();
-    return { failure: object.failure };
+    return { failure: object.failure, ...output };
   }
   if (object.failure === "candidate-unavailable" || object.failure === "spawn-error") {
     if ("name" in object || "detail" in object) fail();
-    return { failure: object.failure, diagnostic: nonblank(object.diagnostic) };
+    return { failure: object.failure, diagnostic: nonblank(object.diagnostic), ...output };
   }
   if (object.failure !== "environment-failure") fail();
   if ("name" in object || "detail" in object) {
@@ -204,9 +220,10 @@ export function decodeVerificationRuntimeStop(value: unknown): VerificationRunti
       failure: "environment-failure",
       name: nonblank(object.name),
       detail: decodeHookFailure(object.detail),
+      ...output,
     };
   }
-  return { failure: "environment-failure", diagnostic: nonblank(object.diagnostic) };
+  return { failure: "environment-failure", diagnostic: nonblank(object.diagnostic), ...output };
 }
 
 function decodeVerificationStepRefusal(

@@ -1,4 +1,5 @@
 import { executionReceipt } from "./execution-result.js";
+import { decodeExecutionEvent, observeExecution, type ExecutionObserver } from "../protocol/execution-observation.js";
 import { contractId, snapshotId } from "../core/facts/types.js";
 import { AkumaBodyRequestError, requestBodyCommand } from "../akuma/request-rendezvous.js";
 import {
@@ -142,13 +143,14 @@ export type ContractService = z.infer<typeof contractServiceSchema>;
 type ContractReference = ContractService | z.infer<typeof materializedHandoffReferenceSchema>;
 export type ContractRequestPort = Readonly<{
   audit(
-    input: AuditRequest & Readonly<{ requester: ContractRequester; signal: AbortSignal }>,
+    input: AuditRequest & Readonly<{ requester: ContractRequester; signal: AbortSignal; observe?: ExecutionObserver }>,
   ): Promise<Readonly<{ result: AuditResult; auditReport?: AuditReport }>>;
   deliver(
-    input: DeliverRequest & Readonly<{ requester: ContractRequester; signal: AbortSignal }>,
+    input: DeliverRequest &
+      Readonly<{ requester: ContractRequester; signal: AbortSignal; observe?: ExecutionObserver }>,
   ): Promise<Readonly<{ result: DeliveryResult; deliveryFactId?: string }>>;
   review(
-    input: ReviewRequest & Readonly<{ requester: ContractRequester; signal: AbortSignal }>,
+    input: ReviewRequest & Readonly<{ requester: ContractRequester; signal: AbortSignal; observe?: ExecutionObserver }>,
   ): Promise<Readonly<{ result: ReviewResult; reviewFactId?: string }>>;
 }>;
 function decodeContractRequest(action: ContractRequest["action"], value: unknown): ContractRequest | null {
@@ -189,14 +191,21 @@ function decodeContractReference(action: ContractRequest["action"], value: unkno
   return parsed.data;
 }
 
+function executionObservation(facts: ExecutionFacts): Readonly<{ observe?: ExecutionObserver }> {
+  if (facts.progress === undefined) return {};
+  return { observe: (event) => facts.progress?.(event) };
+}
+
 async function executeContractRequest(
   request: ContractRequest,
   facts: ExecutionFacts,
   port: ContractRequestPort,
 ): Promise<Readonly<{ result: ContractResult; service: ContractService }>> {
+  const observation = executionObservation(facts);
   if (request.action === "contract.audit") {
     const served = await port.audit({
       ...request,
+      ...observation,
       requester: facts.requester as ContractRequester,
       signal: facts.signal,
     });
@@ -215,6 +224,7 @@ async function executeContractRequest(
   if (request.action === "contract.deliver") {
     const served = await port.deliver({
       ...request,
+      ...observation,
       overwrite: request.overwrite ?? false,
       requester: facts.requester as ContractRequester,
       signal: facts.signal,
@@ -248,6 +258,7 @@ async function executeContractRequest(
   }
   const served = await port.review({
     ...request,
+    ...observation,
     requester: facts.requester as ContractRequester,
     signal: facts.signal,
   });
@@ -281,6 +292,7 @@ export function contractRequestProtocol(
 ): RequestProtocol<ContractRequest, ContractResult, ContractReference> {
   return {
     action,
+    supportsCancellation: true,
     encodeRequest: (request) => {
       const { action: _action, ...payload } = request;
       return payload;
@@ -325,6 +337,7 @@ export async function requestForwardedContractLive<Action extends ContractReques
     action: Action;
     request: ContractRequestFor<Action>;
     signal?: AbortSignal;
+    observe?: ExecutionObserver;
   }>,
 ): Promise<ContractResultFor<Action>> {
   const command = contractRequestProtocol(input.action);
@@ -332,6 +345,14 @@ export async function requestForwardedContractLive<Action extends ContractReques
     directory: input.directory,
     command,
     value: input.request,
+    onProgress: (value) => {
+      try {
+        observeExecution(input.observe, decodeExecutionEvent(value));
+      } catch {
+        observeExecution(input.observe, { kind: "progress-dropped", count: 1 });
+      }
+    },
+    onProgressGap: (count) => observeExecution(input.observe, { kind: "progress-dropped", count }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   }).catch((error: unknown) => {
     if (

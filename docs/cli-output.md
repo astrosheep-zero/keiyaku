@@ -88,6 +88,13 @@ actual boundary, never as simulated progress, persisted facts, or a hidden
 alternative protocol. The renderer has no scanner grammar, output schema, or
 private status vocabulary of its own.
 
+For delivery, review, and audit, witnessed execution progress is written to
+stderr while one complete final text or JSON result remains on stdout. Live
+output presentation is bounded and names its truncation; a quiet interval never
+claims that a command is hung or alive. Terminal cancellation asks the owned
+operation to stop and waits for its truthful final receipt and cleanup boundary
+instead of replacing that result with an early CLI exit.
+
 When an exceptional Contract execution already confirmed admissions, the CLI
 reports the failure together with those receipts instead of projecting a usage
 error or a no-effect refusal. Text and JSON preserve the same admitted facts and

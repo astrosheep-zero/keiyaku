@@ -80,6 +80,7 @@ export const CONTRACT_COMMAND_SPECS = {
       "frames the work, it never shrinks what the Contract accepts. Finishing a chapter",
       "is progress; deliver is the different claim that the worktree, as it stands, is",
       "the Contract's candidate.",
+      "Verification, placement, and cleanup progress is printed to stderr; stdout stays one final text or JSON result.",
       "",
       "A clean worktree delivers its HEAD. --include-dirty captures the complete final",
       "non-ignored worktree bytes through a private index, even while the shared index",
@@ -141,6 +142,7 @@ export const CONTRACT_COMMAND_SPECS = {
       "--summary is your testimony, not decoration. Satisfied: the conclusion that the",
       "whole Contract is complete, and the evidence it rests on. Unsatisfied: the specific",
       "blocker, missing evidence, or unmet term.",
+      "Confirmed admission and later work are shown on stderr; stdout remains one final result.",
     ].join("\n"),
   },
   arc: {
@@ -184,7 +186,7 @@ export const CONTRACT_COMMAND_SPECS = {
     stdin: "none",
     flags: { "include-dirty": "boolean", diff: "boolean", json: "boolean" },
     usage: "audit [<contract>|@<contract>] [--include-dirty] [--diff] [--json]",
-    purpose: "Ask what candidate preparation, Verification, and target placement would do.",
+    purpose: "Ask what candidate preparation, Verification, and target placement would do; progress is on stderr.",
   },
   reconcile: {
     positional: "optional",

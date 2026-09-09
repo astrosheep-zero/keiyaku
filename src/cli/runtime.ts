@@ -9,9 +9,30 @@ import { renderUsageMessage } from "./usage.js";
 import { safeText } from "./render/terminal.js";
 import type { InvocationResult } from "./result.js";
 import type { Settings } from "../settings.js";
+import type { ExecutionEvent } from "../library/execution.js";
 
 function writeCliStream(stream: NodeJS.WritableStream, body: string): void {
   stream.write(body.endsWith("\n") ? body : `${body}\n`);
+}
+
+async function writeExecutionProgress(events: AsyncIterable<ExecutionEvent>): Promise<void> {
+  const { executionProgressLines } = await import("./render/execution-progress.js");
+  for await (const event of events)
+    writeCliStream(process.stderr, executionProgressLines(event, displayContext()).join("\n"));
+}
+
+function cliCancellation(): Readonly<{ signal: AbortSignal; close(): void }> {
+  const controller = new AbortController();
+  const cancel = (): void => controller.abort(new Error("CLI cancellation requested"));
+  process.once("SIGINT", cancel);
+  process.once("SIGTERM", cancel);
+  return {
+    signal: controller.signal,
+    close(): void {
+      process.removeListener("SIGINT", cancel);
+      process.removeListener("SIGTERM", cancel);
+    },
+  };
 }
 
 export async function writeTask(
@@ -177,9 +198,14 @@ async function commandFailureText(error: unknown, command: ParsedCommand): Promi
 
 export async function runCliCommand(invocation: ParsedExecution): Promise<number> {
   const command = invocation.command;
+  const cancellation = cliCancellation();
   try {
     const { invoke } = await import("./invoke.js");
-    const result = await invoke(invocation, { cwd: process.cwd() });
+    const result = await invoke(invocation, {
+      cwd: process.cwd(),
+      signal: cancellation.signal,
+      progress: writeExecutionProgress,
+    });
     return await writeResult(command, result);
   } catch (error) {
     const { executionReceipt } = await import("../index.js");
@@ -212,5 +238,7 @@ export async function runCliCommand(invocation: ParsedExecution): Promise<number
     }
     writeCliStream(process.stderr, await commandFailureText(error, command));
     return error instanceof CliUsageError ? 1 : 3;
+  } finally {
+    cancellation.close();
   }
 }

@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { access, readFile } from "node:fs/promises";
 import { abortableDelay } from "./abort.js";
+import {
+  publishRequestCancellation,
+  readRequestProgress,
+  type RequestProgressSnapshot,
+} from "./request-observation.js";
 import { atomicJson, decodeReceiptEnvelope, receiptPath, requestPath, type RequestProtocol } from "./request-wire.js";
 
 const POLL_MS = 100;
@@ -74,6 +79,16 @@ type RequestResponse<Output, Reference> =
   | Readonly<{ kind: "returned"; result: Output; requestId: string; action: string }>
   | Readonly<{ kind: "reference"; reference: Reference; requestId: string; action: string }>;
 
+type RequestCommandInput<Input, Output, Reference> = Readonly<{
+  directory: string;
+  id?: string;
+  command: RequestProtocol<Input, Output, Reference>;
+  value: Input;
+  signal?: AbortSignal;
+  onProgress?(value: unknown): void;
+  onProgressGap?(dropped: number): void;
+}>;
+
 async function readRequestReceipt<Input, Output, Reference>(
   input: Readonly<{ command: RequestProtocol<Input, Output, Reference> }>,
   path: string,
@@ -136,13 +151,7 @@ async function readRequestReceipt<Input, Output, Reference>(
 
 /** Generic rendezvous only: operation owners supply their own request and result codecs. */
 export async function requestBodyCommand<Input, Output, Reference>(
-  input: Readonly<{
-    directory: string;
-    id?: string;
-    command: RequestProtocol<Input, Output, Reference>;
-    value: Input;
-    signal?: AbortSignal;
-  }>,
+  input: RequestCommandInput<Input, Output, Reference>,
 ): Promise<RequestResponse<Output, Reference>> {
   const id = input.id ?? randomUUID();
   input.signal?.throwIfAborted();
@@ -169,34 +178,100 @@ export async function requestBodyCommand<Input, Output, Reference>(
     );
   }
   const path = receiptPath(input.directory, transportId);
-  for (;;) {
-    const response = await readRequestReceipt(input, path, id);
-    if (response !== undefined) return response;
-    if (
-      !(await access(input.directory).then(
-        () => true,
-        () => false,
-      ))
-    ) {
-      throw new AkumaBodyRequestError(
-        input.command.action,
-        "unknown",
-        "parent request channel closed before a receipt",
-        id,
-      );
-    }
-    try {
-      await abortableDelay(POLL_MS, input.signal);
-    } catch (error) {
-      if (input.signal?.aborted) {
+  return await observePublishedRequest(input, id, transportId, path);
+}
+
+async function observePublishedRequest<Input, Output, Reference>(
+  input: RequestCommandInput<Input, Output, Reference>,
+  id: string,
+  transportId: string,
+  path: string,
+): Promise<RequestResponse<Output, Reference>> {
+  let observedSequence = 0;
+  const consumeProgress = async (): Promise<void> => {
+    const snapshot = await readRequestProgress({
+      directory: input.directory,
+      transportId,
+      id,
+      action: input.command.action,
+    });
+    observedSequence = consumeSnapshot(snapshot, observedSequence, input.onProgress, input.onProgressGap);
+  };
+  const publishCancellation = (): void => {
+    void publishRequestCancellation({ directory: input.directory, transportId, id, action: input.command.action });
+  };
+  const cancellable = input.command.supportsCancellation === true;
+  if (cancellable && input.signal !== undefined) {
+    input.signal.addEventListener("abort", publishCancellation, { once: true });
+    if (input.signal.aborted) publishCancellation();
+  }
+  try {
+    for (;;) {
+      // The service flushes this bounded snapshot before its receipt, including fast commands.
+      await consumeProgress();
+      const response = await readRequestReceipt(input, path, id);
+      if (response !== undefined) return response;
+      if (
+        !(await access(input.directory).then(
+          () => true,
+          () => false,
+        ))
+      ) {
         throw new AkumaBodyRequestError(
           input.command.action,
           "unknown",
-          "request was cancelled after publication and before a receipt",
+          "parent request channel closed before a receipt",
           id,
         );
       }
-      throw error;
+      try {
+        await abortableDelay(POLL_MS, cancellable ? undefined : input.signal);
+      } catch (error) {
+        if (input.signal?.aborted) {
+          throw new AkumaBodyRequestError(
+            input.command.action,
+            "unknown",
+            "request was cancelled after publication and before a receipt",
+            id,
+          );
+        }
+        throw error;
+      }
     }
+  } finally {
+    if (cancellable && input.signal !== undefined) input.signal.removeEventListener("abort", publishCancellation);
+  }
+}
+
+function consumeSnapshot(
+  snapshot: RequestProgressSnapshot | undefined,
+  observedSequence: number,
+  onProgress: ((value: unknown) => void) | undefined,
+  onProgressGap: ((dropped: number) => void) | undefined,
+): number {
+  if (snapshot === undefined) return observedSequence;
+  const events = snapshot.events.filter((event) => event.sequence > observedSequence);
+  const latestSequence = snapshot.nextSequence - 1;
+  const firstAvailable = events[0]?.sequence ?? latestSequence + 1;
+  const gap = firstAvailable - observedSequence - 1;
+  if (gap > 0) {
+    notifyObserver(onProgressGap, gap);
+  }
+  if (events.length === 0) return Math.max(observedSequence, latestSequence);
+  for (const event of events) {
+    observedSequence = event.sequence;
+    notifyObserver(onProgress, event.value);
+  }
+  return observedSequence;
+}
+
+function notifyObserver<Value>(observer: ((value: Value) => void) | undefined, value: Value): void {
+  if (observer === undefined) return;
+  try {
+    void Promise.resolve(observer(value)).catch(() => {
+      // A caller observation failure cannot affect its in-flight request.
+    });
+  } catch {
+    // A caller observation failure cannot affect its in-flight request.
   }
 }

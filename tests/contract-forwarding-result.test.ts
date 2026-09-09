@@ -8,6 +8,7 @@ import {
   KeiyakuRetry,
 } from "../src/library/refusal.js";
 import { changeId, contractHead, contractId, entryUlid, snapshotId } from "../src/core/facts/types.js";
+import { decodeVerificationRuntimeStop } from "../src/protocol/result-codec.js";
 import { decodeSettlementLag } from "../src/settlement/settle.js";
 
 const contract = contractId("kei/forwarding-codec");
@@ -58,7 +59,12 @@ test("accepted delivery round-trips owner settlement, verification, placement, c
   const result = acceptedDelivery(
     {
       completion: { integration: snapshot, verification: { mode: "ran", verdict: "satisfied" } },
-      verification: { failure: "cancelled" },
+      verification: {
+        failure: "cancelled",
+        stdout: "forwarded delivery tail",
+        stderr: "delivery diagnostic",
+        truncated: true,
+      },
       verificationReuse: { entry: fact.entry, verdict: "unsatisfied", summary: "reuse" },
       verificationSummary: "ran",
       continuation: {
@@ -217,7 +223,7 @@ test("refusal, retry, review, audit, and materialized conflict variants round-tr
         shortStat: { filesChanged: 1, insertions: 1, deletions: 0 },
         unmergedPaths: [],
       },
-      verification: { retry: { kind: "exhausted" } },
+      verification: { failure: "unknown-exit", stdout: "forwarded review tail" },
       continuation: {
         claimed: [contract],
         stopped: [{ contractId: contract, stop: { kind: "already-terminal" } }],
@@ -238,7 +244,10 @@ test("refusal, retry, review, audit, and materialized conflict variants round-tr
     head,
     value: {
       candidate: { kind: "blocked", refusal: { kind: "target-missing", contractId: contract } },
-      verification: { kind: "stopped", stop: { failure: "cancelled" } },
+      verification: {
+        kind: "stopped",
+        stop: { failure: "spawn-error", diagnostic: "spawn refused", stderr: "forwarded audit tail", truncated: true },
+      },
       target: { kind: "not-observed" },
     },
     lags: [],
@@ -260,6 +269,41 @@ test("refusal, retry, review, audit, and materialized conflict variants round-tr
     workspace: { kind: "worktree", path: "/tmp/worktree" },
   };
   assert.deepEqual(deliveryResultSchema.parse(JSON.parse(JSON.stringify(conflict))), conflict);
+});
+
+test("Verification runtime stops preserve only canonical captured output fields", () => {
+  assert.deepEqual(decodeVerificationRuntimeStop({ failure: "cancelled", stdout: "tail", truncated: true }), {
+    failure: "cancelled",
+    stdout: "tail",
+    truncated: true,
+  });
+  assert.deepEqual(decodeVerificationRuntimeStop({ failure: "unknown-exit", stderr: " " }), {
+    failure: "unknown-exit",
+    stderr: " ",
+  });
+  assert.deepEqual(
+    decodeVerificationRuntimeStop({
+      failure: "environment-failure",
+      name: "setup",
+      detail: { kind: "timeout" },
+      stderr: "hook tail",
+    }),
+    {
+      failure: "environment-failure",
+      name: "setup",
+      detail: { kind: "timeout" },
+      stderr: "hook tail",
+    },
+  );
+  assert.throws(() => decodeVerificationRuntimeStop({ failure: "cancelled", stdout: "" }), /malformed protocol result/u);
+  assert.throws(
+    () => decodeVerificationRuntimeStop({ failure: "cancelled", truncated: false }),
+    /malformed protocol result/u,
+  );
+  assert.throws(
+    () => decodeVerificationRuntimeStop({ failure: "cancelled", diagnostic: "not this variant" }),
+    /malformed protocol result/u,
+  );
 });
 
 test("accepted mutation refuses a missing head", () => {
