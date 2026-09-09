@@ -959,7 +959,7 @@ test("unknown Body Request state is authority corruption", async () => {
   }
 });
 
-test("heart schema version 25 and leash schema version 4 hard-refuse old authority", async () => {
+test("heart schema version 26 and leash schema version 4 hard-refuse old authority", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-schema-cut-"));
   const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "30000000" });
   try {
@@ -973,7 +973,7 @@ test("heart schema version 25 and leash schema version 4 hard-refuse old authori
       "CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)",
     );
     leash.close();
-    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 25/u);
+    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 26/u);
     await assert.rejects(HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -1789,6 +1789,31 @@ test("readHeart returns one related Heart-fact epoch", async () => {
       writer.close();
     }
   } finally {
+    value.close();
+  }
+});
+
+
+test("Heart reverse references use indexed lookups during retained-group deletion", async () => {
+  const value = await fixture();
+  const database = new DatabaseSync(value.allocated.paths.heart);
+  try {
+    for (const [table, column] of [
+      ["calls", "turn_sequence"], ["activity", "turn_sequence"],
+      ["tell_bindings", "turn_sequence"], ["tell_bindings", "tell_id"],
+      ["tell_deliveries", "turn_sequence"], ["tell_deliveries", "tell_id"],
+      ["tell_receipts", "turn_sequence"], ["tell_receipts", "tell_id"],
+      ["tell_dispositions", "tell_id"],
+    ]) {
+      const plan = database.prepare(`EXPLAIN QUERY PLAN SELECT rowid FROM ${table} WHERE ${column} = ?`).all(1) as { detail: string }[];
+      assert.ok(plan.some(({ detail }) => detail.startsWith(`SEARCH ${table} USING `)),
+        `${table}.${column}: ${JSON.stringify(plan)}`);
+      assert.ok(!plan.some(({ detail }) => detail.startsWith(`SCAN ${table}`)));
+    }
+    database.exec("PRAGMA foreign_keys=ON");
+    assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
+  } finally {
+    database.close();
     value.close();
   }
 });
