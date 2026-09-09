@@ -262,8 +262,17 @@ async function indexMatchesTreeOnPaths(
   paths: readonly string[],
 ): Promise<boolean> {
   return (
-    (await gitPaths(repository, path, ["diff-index", "--cached", "--name-only", "-z", tree, "--", ...paths])).length ===
-    0
+    (
+      await gitPaths(repository, path, [
+        "diff-index",
+        "--cached",
+        "--name-only",
+        "-z",
+        tree,
+        "--",
+        ...paths.map(literalPath),
+      ])
+    ).length === 0
   );
 }
 
@@ -275,7 +284,17 @@ async function workspaceMatchesTreeOnPaths(
   paths: readonly string[],
 ): Promise<boolean> {
   return (
-    (await gitPaths(repository, path, ["diff", "--name-only", "-z", tree, workspaceTree, "--", ...paths])).length === 0
+    (
+      await gitPaths(repository, path, [
+        "diff",
+        "--name-only",
+        "-z",
+        tree,
+        workspaceTree,
+        "--",
+        ...paths.map(literalPath),
+      ])
+    ).length === 0
   );
 }
 
