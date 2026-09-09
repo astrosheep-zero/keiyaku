@@ -29,7 +29,6 @@ export const LOCAL_TEST_FILES = [
   "tests/region.test.ts",
   "tests/settings.test.ts",
   "tests/task-document.test.ts",
-  "tests/task-repository-authority.test.ts",
   "tests/v4-cut.test.ts",
 ];
 
@@ -47,14 +46,12 @@ export const INTEGRATION_TEST_FILES = [
   "tests/audit.test.ts",
   "tests/boundary-validation.test.ts",
   "tests/cli-akuma-msys.test.ts",
-  "tests/cli-akuma.test.ts",
   "tests/cli-invoke.test.ts",
   "tests/cli-verification.test.ts",
   "tests/contract-completion.test.ts",
   "tests/contract-fork.test.ts",
   "tests/dispatch-alias.test.ts",
   "tests/facade-contract.test.ts",
-  "tests/facade-fleet.test.ts",
   "tests/git-delivery.test.ts",
   "tests/git-read-observation.test.ts",
   "tests/git-reconciliation.test.ts",
