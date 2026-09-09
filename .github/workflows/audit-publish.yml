@@ -1,0 +1,33 @@
+name: Publish verified audit fix
+on:
+  push:
+    branches: [work/audit-export-20260909]
+    paths: [.github/workflows/audit-publish.yml]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 517274f81657f16e4d2fdd3dd04b99b97e9138e0
+      - name: Apply exact reviewed tree on its pinned base
+        shell: python
+        run: |
+          import base64, hashlib, json, pathlib, subprocess, zlib
+          change = json.loads(r'''{"branch": "fix/literal-checkout-paths", "base": "517274f81657f16e4d2fdd3dd04b99b97e9138e0", "baseTree": "00d5f10d68fc3487e1801036c3549a23e3b3fb6c", "tree": "4dbfac33b7ed2fb2ad087adbe5901627c74004c8", "message": "fix(git): compare checkout paths literally", "patch": "eNrFV11v2zYUffevuDOGQpolxXHi2HHnrkG6bn0oFiwB+pAZCC3RNheJVEkqjmvkv++SlGzZcb6WDoMBmSIvzz28H4d2wiYTCMMp00D2lIz3cLSniZxSHeYpiWlGuY60gvFjqw3GE3oLhLQ7x5OjKDoYd4677UPYb7ePDg8bYRg+jt5otVpPeHj/HsLOUSfoQ8t87fcAZ4ha8BgmBY81Exwsi89ExzOqLiSlf/AzomfKawBAbkYDkJQkgqcLUFoyPr0cBQ3wB3AmRcYU/XksREoJfwdLs0dSXUgOXiPEF/DInGCYkKBDlTQXimkhF4FFD+CymWA4Q0ujGUAzDGOCXBI35iSjofFtX7/hUyNHu4TjKIosxZHvRynlUz2D4XDoPLcbLUvAfQE8TaSyBNigVJtec9uYrJGsz3+rv1raG7vqq9VBoozkXso0lSQ1PP2Vzch3o/pB8Yxm5m0D7hrgkt3rBj1Mdv9wd7LnQl6rHCvkf0/44+ld8bx4MtuvT/Trs7lJ9z/NclLXHk2VVlXnYz7ja1HoUNJY8JilNDLrToeeaVlqUufguN07plHUj7u9Tre/qUnPxXL69FxrU777+8ERtPDZN7XLslxIDUsgScb0J65R1eAOJliF0Iwiq3y5FFrEIt1jdjn6WzUxUKudYqyovKGngmtJYq0+CnmCYEphM5zcAzMyWu7YBpozPTuT7IZoeq7xcVaMUxYT01TnlOxEyp15qLR9olUJ2mitYDOkfc5JrmZCf0p2obAEj8X0wu1tbZ/swsb1tAzr+YzkdBfKvcthx/F+Y/oDZiWhpzPCOU134RhhCJ1re/YtHFOoJM+FSUbyBZvC9Imp8MCmt9vrBwfQ6vbbwUHHZNjk3muuagESQRVwgd1bUKWATLBFQM8oFOgRYuQ1RQNiLi1ckUWObsCdDUxpWf8KbXUkrr0VbhKlZBopkVHPw5EPw3dgZq6x2m2HNe+XpyaMo9D7pu/qoD/UUOlkQrGoSmT3ZsHd8GH8Jrx5UxkRp8zWzGDfUFn5vcNHy3xcnKrdoGyaY5HlRGI8SiWBCZIy4qUCG0MrNTmNgd7maGZKXqGKuhvBszyXRm3wOEqD3QhDwIaK0TjCUtETITNHbM74QacJv6B4X5JRpG91cwSD2htq9E/VYODR2zgtEuqXzJz9W+MMIcFbewQxcZ59x6VisxZtpLR++YJl+hkT4y3tYfGmWsKl2T8aQHNMFP2LGwLEOsSpBOO5wDksZRvLtQOMCC7iQZHPcKsNa1dGJAvuXWJebkKMtaIG/fdfTz40R36EV2Pm+RXsXOJZPyKpcwwvIiiR3tA6krt7DFkfQWLCE5agMCC7CuKeW5KUv4JImqLHh8ywEFAfneXXglE3zMyzKo2VuzWMi8Nq4ftEoQLNyZihb5M9dx27301/riBP9HZsNiFciQ/LOn1Y7Ly1rwCLwQAN4F7Ua9kOakcu+2tnUDGDZSDDGZEmDzWQVRBLXaBfC5KWv3wsc8/kuOxmMk5NxK5+XJrk3w02am/d05qlKXBKE4VNkqZifvUdS+tf8VwHarxABapRdH8aXskzFTFWZoHZJlOaPJ9sqcxbEbUFgmiSonAhQ4duiV+9sMFe4d95ddFZ+352ia0iPnphTEvJMwS3QvByfXn0+ObSSaneLBQCmfk7gf8UYJqKMWSFkXe8ghi39wAaWCUuE3HXaJnO+wdg6ONp", "sha256": "09c78c873e18319a1e8d018b6a60a75d0bc6298752f1a40321dad11b5faa9dfd"}''')
+          def git(*args):
+              return subprocess.check_output(["git", *args], text=True).strip()
+          assert git("rev-parse", "HEAD^{tree}") == change["baseTree"], "base changed"
+          patch = zlib.decompress(base64.b64decode(change["patch"]))
+          assert hashlib.sha256(patch).hexdigest() == change["sha256"]
+          pathlib.Path("/tmp/audit-fix.patch").write_bytes(patch)
+          subprocess.run(["git", "apply", "--index", "--binary", "/tmp/audit-fix.patch"], check=True)
+          assert git("write-tree") == change["tree"], "tree differs from locally verified files"
+          git("config", "user.name", "OpenAI")
+          git("config", "user.email", "noreply@openai.com")
+          git("commit", "-m", change["message"])
+          git("push", "origin", "HEAD:refs/heads/" + change["branch"])
+          print(json.dumps({"branch": change["branch"], "commit": git("rev-parse", "HEAD"), "tree": change["tree"]}))
