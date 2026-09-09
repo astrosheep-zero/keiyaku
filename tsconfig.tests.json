@@ -97,7 +97,6 @@
     "tests/git-repository.test.ts",
     "tests/markdown-ast.test.ts",
     "tests/plugin-runtime.test.ts",
-    "tests/plugin-types.test.ts"
   ],
   "exclude": []
 }

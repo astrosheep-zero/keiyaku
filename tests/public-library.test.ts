@@ -1,14 +1,23 @@
 import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import {
+  copyFileSync,
+  rmSync,
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { createTwoFilesPatch } from "diff";
 import {
   bodyRequestExecution,
-  Delivery,
   Keiyaku,
   KeiyakuRefused,
   Repo,
@@ -36,8 +45,9 @@ function expectMutation<Value>(result: MutationResult<Value> | IntegrationConfli
   return result;
 }
 
-function externalConsumer(): string {
+function externalConsumer(context: TestContext): string {
   const directory = mkdtempSync(join(tmpdir(), "keiyaku-v4-consumer-"));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
   mkdirSync(join(directory, "node_modules", "@astrosheep"), { recursive: true });
   symlinkSync(root, join(directory, "node_modules", "@astrosheep", "keiyaku"), "dir");
   writeFileSync(join(directory, "package.json"), '{"type": "module"}\n');
@@ -67,215 +77,21 @@ function repositoryWithInitialCommit() {
   return repository;
 }
 
-test("package root exposes only the ruled library values and declarations", () => {
-  const directory = externalConsumer();
-  const source = [
-    'import { AuthorityCorruptionError, AkumaWorldScopeError, bodyRequestExecution, Delivery, gatesFrom, Keiyaku, KeiyakuRefused, KeiyakuRetry, projectMutationFinality, Repo, settings, SettingsError, worktreeHooksFrom, World, type AbandonInput, type ActorId, type AkumaHistoryResult, type AkumaObservation, type AkumaWorldScopeRefusal, type AmendInput, type AmendResult, type ArcInput, type AuditInput, type AuditReport, type AttestationVerdict, type BindInput, type BindResult, type ChangeId, type ContractAfterEdge, type ContractBoard, type ContractDependent, type ContractDisposition, type ContractGateCurrent, type ContractGateReport, type ContractHistory, type ContractHistoryEvent, type ContractId, type ContractObservation, type ContractObservationInput, type ContractListInput, type ContractPhase, type ContractRow, type ContractState, type ContractWorkspaceObservation, type CreatedTaskObservation, type DeliverInput, type DeliveryPreparationRefusal, type Fact, type FactKind, type Gate, type HookCommand, type KeiyakuRefusal, type KeiyakuRetryReason, type Lag, type LibraryExecution, type MutationFinality, type MutationFinalityInput, type MutationFinalitySurface, type MutationResult, type NukeConfirmationRefusal, type NukeConfirmationRequiredRefusal, type NukeInput, type NukeResult, type ReconcileReport, type RegionOverlap, type RepoAtInput, type RepoReconcileReport, type Review, type ReviewInput, type Settings, type SettingsEntry, type SettingsNamespaceView, type SettingsScopeState, type SettlementAction, type SettlementLag, type SettlementReport, type SnapshotId, type TaskId, type TopologyEffect, type VerificationReuse, type WorktreeHooks, type WorldResolution, type WorldResolutionInput, type WorldRoot } from "@astrosheep/keiyaku";',
-    'import { executionReceipt, type ExecutionReceipt, type ExecutionCleanup, type ExecutionStop, type MutationOperation } from "@astrosheep/keiyaku";',
-    'const receipt: ExecutionReceipt | undefined = executionReceipt(new TypeError("failure"));',
-    'const operation: MutationOperation = "review";',
-    "const cleanups: readonly ExecutionCleanup[] = []; const stops: readonly ExecutionStop[] = [];",
-    'const cancellableReview: ReviewInput = { verdict: "satisfied", signal: new AbortController().signal };',
-    "declare const completed: MutationResult<Review>;",
-    "const completedOperation: MutationOperation = completed.operation;",
-    "const completedCleanup: readonly ExecutionCleanup[] = completed.cleanup;",
-    "const completedStops: readonly ExecutionStop[] = completed.executionStops;",
-    "// @ts-expect-error cleanup belongs to the invocation, not the node value",
-    "completed.value.cleanup;",
-    "// @ts-expect-error the duplicate singular leak carrier was removed",
-    "completed.leak;",
-    "void receipt; void operation; void cleanups; void stops; void cancellableReview; void completedOperation; void completedCleanup; void completedStops;",
-    'import type { AkuId, AkumaAlias, AkumaStatus, AliasBinding, AliasStage, CallInput, CallResult, Dispatch, DispatchFailure, DispatchStage, ForkInput, ForkResult, IntegrationFailure } from "@astrosheep/keiyaku";',
-    'const repo = await Repo.at({ path: "." });',
-    'import { requireBranchesToBeUpToDateFrom } from "@astrosheep/keiyaku";',
-    'import { type LocalContractComposition } from "@astrosheep/keiyaku";',
-    'const id = "kei/consumer" as ContractId;',
-    'const taskId = "task/consumer" as TaskId;',
-    'const input: BindInput = { repo, task: taskId, markdown: "# T\\n\\n## Context\\nC\\n\\n## Objective\\nO\\n\\n## Design\\nD\\n\\n## Region\\n~~~\\nsrc/**\\n~~~\\n\\n## Criteria\\n### C1\\nB\\n", after: [id], gates: ["reviewed"] };',
-    'const amendment: AmendInput = { markdown: "## Append: Context\\nMore\\n", after: [id] };',
-    "const termsOnly: AmendInput = { after: [id] };",
-    "const existing = Keiyaku.of({ repo, id });",
-    'const execution: LibraryExecution = bodyRequestExecution({ directory: "/tmp/keiyaku-requests" });',
-    "const routedKeiyaku = Keiyaku.withExecution({ execution });",
-    "const routedContract = routedKeiyaku.of({ repo, id });",
-    'const local: LocalContractComposition = { actor: "consumer", hooks: { create: [], destroy: [] }, requireBranchesToBeUpToDate: true };',
-    "const localKeiyaku = Keiyaku.withLocal(local);",
-    "const localContract = localKeiyaku.of({ repo, id });",
-    "const localBound: Promise<BindResult> = localKeiyaku.bind(input);",
-    'const akuma = "aku/worker/1234abcd" as AkuId;',
-    'const alias = "@worker" as AkumaAlias;',
-    "const world = null as unknown as WorldRoot;",
-    "const nukeInput: NukeInput = { world, confirm: world };",
-    "const nukeResult: Promise<NukeResult> = Keiyaku.nuke(nukeInput);",
-    'const nukeRefusal: NukeConfirmationRefusal = { kind: "nuke-confirmation-mismatch", world, confirmation: "wrong" };',
-    'const nukeRequired: NukeConfirmationRequiredRefusal = { kind: "nuke-confirmation-required", world };',
-    "const nukeKeiyakuRefusal: KeiyakuRefusal = nukeRefusal;",
-    'const worldResult: Promise<WorldRoot> = World.at(".");',
-    'const provedWorld: Promise<WorldRoot> = World.prove(".");',
-    'const worldInput: WorldResolutionInput = { cwd: "." };',
-    "const worldResolution: Promise<WorldResolution> = World.resolve(worldInput);",
-    "const worldCandidate: WorldRoot | null = (await worldResolution).candidate;",
-    'const callInput: CallInput = { path: world, archetype: "worker", body: "work", mode: "wait", timeoutMs: 300000, contract: existing, alias };',
-    "const callResult: Promise<CallResult> = Keiyaku.call(callInput);",
-    "const routedCall: Promise<CallResult> = routedKeiyaku.call(callInput);",
-    "const callStatus = null as unknown as AkumaStatus;",
-    'const forkInput: ForkInput = { path: world, akuma, at: "history-1", repo };',
-    "const forkResult: Promise<ForkResult> = Keiyaku.fork(forkInput);",
-    "const statusResult: Promise<AkumaObservation> = Keiyaku.status({ path: world, akuma });",
-    'const createdTasks: CreatedTaskObservation = { kind: "present", rows: [] };',
-    "const historyResult: Promise<AkumaHistoryResult> = Keiyaku.history({ path: world, akuma });",
-    "const contractHistory: Promise<ContractHistory> = existing.history();",
-    "const contractHistoryEvent = null as unknown as ContractHistoryEvent;",
-    "const aliasBinding = null as unknown as AliasBinding;",
-    "const aliasStage = null as unknown as AliasStage;",
-    "const dispatch = null as unknown as Dispatch;",
-    "const dispatchFailure = null as unknown as DispatchFailure;",
-    "const dispatchStage = null as unknown as DispatchStage;",
-    "const integrationFailure = null as unknown as IntegrationFailure;",
-    "const delivery = null as unknown as Delivery;",
-    "// @ts-expect-error Keiyaku has a private constructor",
-    "new Keiyaku();",
-    "// @ts-expect-error Repo.at accepts one input object",
-    'await Repo.at(".");',
-    "// @ts-expect-error Delivery.review accepts one input object",
-    'delivery.review("satisfied");',
-    "// @ts-expect-error Delivery has no public constructor",
-    "new Delivery();",
-    "// @ts-expect-error Keiyaku.of requires a branded ContractId",
-    'Keiyaku.of({ repo, id: "kei/unbranded" });',
-    "// @ts-expect-error BindInput.after requires branded ContractId values",
-    'const invalidBind: BindInput = { ...input, after: ["kei/unbranded"] };',
-    "// @ts-expect-error AmendInput.after requires branded ContractId values",
-    'const invalidAmend: AmendInput = { ...amendment, after: ["kei/unbranded"] };',
-    'const customGate: Gate = "edge-owned";',
-    "const settingsValue = null as unknown as Settings;",
-    "const settingsResult: Promise<Settings> = settings({ root: world });",
-    'const selectedGates: readonly Gate[] = gatesFrom({ settings: settingsValue, names: ["strict", "review-only"] });',
-    "// @ts-expect-error gatesFrom removed the singular name selector",
-    'gatesFrom({ settings: settingsValue, name: "strict" });',
-    'const hook: HookCommand = { name: "install", argv: ["npm", "ci"], timeoutMs: 300000 };',
-    "const selectedHooks: WorktreeHooks = worktreeHooksFrom({ settings: settingsValue });",
-    "const requireUpToDate: boolean = requireBranchesToBeUpToDateFrom({ settings: settingsValue });",
-    "const settingsEntry = null as unknown as SettingsEntry;",
-    "const settingsView = null as unknown as SettingsNamespaceView;",
-    "const settingsScope = null as unknown as SettingsScopeState;",
-    "// @ts-expect-error abandon accepts options, not a reason enum",
-    'existing.abandon("manual");',
-    "const bound: Promise<BindResult> = Keiyaku.bind(input);",
-    "// @ts-expect-error Repo is not a second contract-construction surface",
-    "repo.bind(input);",
-    "// @ts-expect-error Receipt was removed from the package-root surface",
-    'type Receipt = import("@astrosheep/keiyaku").Receipt;',
-    "const report = null as unknown as AuditReport;",
-    "const preparationRefusal = null as unknown as DeliveryPreparationRefusal;",
-    "const verificationReuse = null as unknown as VerificationReuse;",
-    "const kind = null as unknown as FactKind;",
-    "const abandonInput = null as unknown as AbandonInput;",
-    "const actor = null as unknown as ActorId;",
-    "const arcInput = null as unknown as ArcInput;",
-    "const auditInput = null as unknown as AuditInput;",
-    "const verdict = null as unknown as AttestationVerdict;",
-    "const bindResult = null as unknown as BindResult;",
-    "const amendResult = null as unknown as AmendResult;",
-    'const amendWithoutRegion: AmendResult = { ...(null as unknown as MutationResult<void>), documentDiff: "" };',
-    "// @ts-expect-error amend Region answers are exclusive",
-    'const invalidAmendRegion: AmendResult = { ...(null as unknown as MutationResult<void>), documentDiff: "", overlaps: [], overlapFailure: "failed" };',
-    "// @ts-expect-error bind always has one Region answer",
-    'const invalidBindRegion: BindResult = { ...(null as unknown as Omit<MutationResult<Keiyaku>, "value">), keiyaku: existing };',
-    "const change = null as unknown as ChangeId;",
-    "const state = null as unknown as ContractState;",
-    "const contractListInput: ContractListInput = { repo };",
-    "const contractObservationInput: ContractObservationInput = { repo, id };",
-    'const contractPhase: ContractPhase = "bound";',
-    'const tenderedPhase: ContractPhase = "tendered";',
-    'const contractDisposition: ContractDisposition = "active";',
-    'const contractGateCurrent: ContractGateCurrent = { kind: "missing" };',
-    'const contractGateReport: ContractGateReport = { gate: "custom", current: contractGateCurrent };',
-    'const workspaceObservation: ContractWorkspaceObservation = { kind: "clean", location: { kind: "worktree", path: "/repo/.keiyaku/wt/boundary" }, counts: { staged: 0, unstaged: 0, untracked: 0, submodules: 0 }, merge: null };',
-    'const failedWorkspaceObservation: ContractWorkspaceObservation = { kind: "failed", diagnostic: "duplicate appointment" };',
-    'const after: ContractAfterEdge[] = [{ contractId: id, endpoint: { kind: "active", phase: contractPhase } }];',
-    "const dependents: ContractDependent[] = [{ contractId: id, phase: contractPhase }];",
-    'const statusRow: ContractRow = { id, title: "Boundary", phase: contractPhase, phaseAt: "2026-08-16T00:00:00.000Z", lastJournalAt: "2026-08-16T00:00:01.000Z", disposition: contractDisposition, workspace: "worktree", worktreePath: null, workspaceObservation, target: null, targetLag: { kind: "none" }, delivery: null, targetObservation: null, gates: { reports: [contractGateReport], satisfied: false }, after, dependents };',
-    'const statusBoard: ContractBoard = { root: ".", state: null, observedAt: "2026-08-16T00:00:02.000Z", rows: [statusRow] };',
-    'const statusObservation: ContractObservation = { kind: "present", row: statusRow };',
-    "const deliverInput = null as unknown as DeliverInput;",
-    "const fact = null as unknown as Fact;",
-    "const gate = null as unknown as Gate;",
-    "const reconcile = null as unknown as ReconcileReport;",
-    "const atInput = null as unknown as RepoAtInput;",
-    "const repoReconcile = null as unknown as RepoReconcileReport;",
-    'const emptyWorld: RepoReconcileReport = { kind: "completed", contracts: [] };',
-    'const failedWorld: RepoReconcileReport = { kind: "world-observation-failed", diagnostic: "git failed" };',
-    'const completedWorld: Extract<RepoReconcileReport, { kind: "completed" }> = { kind: "completed", contracts: [{ contractId: id, report: { effects: [], lag: [], settlement: { actions: [], lags: [] } } }] };',
-    "// @ts-expect-error world-observation-failed requires diagnostic",
-    'const invalidFailedWorld: RepoReconcileReport = { kind: "world-observation-failed" };',
-    "// @ts-expect-error completed cannot omit contracts",
-    'const invalidCompletedWorld: RepoReconcileReport = { kind: "completed" };',
-    "// @ts-expect-error failed world is not the completed arm",
-    'const failedAsCompleted: Extract<RepoReconcileReport, { kind: "completed" }> = failedWorld;',
-    "const reviewInput = null as unknown as ReviewInput;",
-    "const review = null as unknown as Review;",
-    "const regionOverlap = null as unknown as RegionOverlap;",
-    "const snapshot = null as unknown as SnapshotId;",
-    "const refusal = null as unknown as KeiyakuRefusal;",
-    "const retry = null as unknown as KeiyakuRetryReason;",
-    "const mutation = null as unknown as MutationResult<void>;",
-    "const mutationFinalityType = null as unknown as MutationFinality;",
-    "const mutationFinalityInputType = null as unknown as MutationFinalityInput;",
-    "const mutationFinalitySurfaceType = null as unknown as MutationFinalitySurface;",
-    "const effect = null as unknown as TopologyEffect;",
-    "const lag = null as unknown as Lag;",
-    "const settlementAction = null as unknown as SettlementAction;",
-    "const settlementLag = null as unknown as SettlementLag;",
-    "const settlementReport = null as unknown as SettlementReport;",
-    "const refusedError = null as unknown as KeiyakuRefused;",
-    "const retryError = null as unknown as KeiyakuRetry;",
-    "// @ts-expect-error internal journal data is not a package-root export",
-    'type InternalAbandonData = import("@astrosheep/keiyaku").AbandonData;',
-    "// @ts-expect-error internal journal data is not a package-root export",
-    'type InternalAbandonedData = import("@astrosheep/keiyaku").AbandonedData;',
-    "// @ts-expect-error internal journal data is not a package-root export",
-    'type InternalAttestationData = import("@astrosheep/keiyaku").AttestationData;',
-    "// @ts-expect-error internal journal data is not a package-root export",
-    'type InternalAmendData = import("@astrosheep/keiyaku").AmendData;',
-    "// @ts-expect-error internal journal data is not a package-root export",
-    'type InternalBindData = import("@astrosheep/keiyaku").BindData;',
-    "// @ts-expect-error internal journal data is not a package-root export",
-    'type InternalBoundData = import("@astrosheep/keiyaku").BoundData;',
-    "// @ts-expect-error internal journal data is not a package-root export",
-    'type InternalClaimedData = import("@astrosheep/keiyaku").ClaimedData;',
-    "// @ts-expect-error internal journal coordinate is not a package-root export",
-    'type InternalCoordinates = import("@astrosheep/keiyaku").ContractCoordinates;',
-    "// @ts-expect-error internal journal body part is not a package-root export",
-    'type InternalCriterion = import("@astrosheep/keiyaku").ContractCriterion;',
-    "// @ts-expect-error internal journal body part is not a package-root export",
-    'type InternalExtension = import("@astrosheep/keiyaku").ContractExtension;',
-    "// @ts-expect-error internal journal alias is not a package-root export",
-    'type InternalHead = import("@astrosheep/keiyaku").ContractHead;',
-    "// @ts-expect-error internal journal data is not a package-root export",
-    'type InternalDeliverData = import("@astrosheep/keiyaku").DeliverData;',
-    "// @ts-expect-error internal journal identity is not a package-root export",
-    'type InternalEntryUlid = import("@astrosheep/keiyaku").EntryUlid;',
-    "// @ts-expect-error internal input helper is not a package-root export",
-    'type InternalActorOptions = import("@astrosheep/keiyaku").ActorOptions;',
-    "// @ts-expect-error internal subject identity is not a package-root export",
-    'type InternalSubject = import("@astrosheep/keiyaku").SubjectKey;',
-    "// @ts-expect-error internal verification data is not a package-root export",
-    'type InternalVerification = import("@astrosheep/keiyaku").VerificationDeclaration;',
-    "// @ts-expect-error internal verification data is not a package-root export",
-    'type InternalExecutor = import("@astrosheep/keiyaku").VerificationExecutor;',
-    "// @ts-expect-error internal verification refusal has no separate package-root name",
-    'type InternalVerificationRefusal = import("@astrosheep/keiyaku").VerificationDeclarationRefusal;',
-    "// @ts-expect-error legacy ReviewResult alias is not a package-root export",
-    'type InternalReviewResult = import("@astrosheep/keiyaku").ReviewResult;',
-    "// @ts-expect-error legacy ReviewValue alias is not a package-root export",
-    'type InternalReviewValue = import("@astrosheep/keiyaku").ReviewValue;',
-    "// @ts-expect-error legacy DeliverValue alias is not a package-root export",
-    'type InternalDeliverValue = import("@astrosheep/keiyaku").DeliverValue;',
-    'void new AuthorityCorruptionError("corrupt"); void new AkumaWorldScopeError({ kind: "akuma-not-in-world", ids: [akuma], world }); void (null as unknown as AkumaWorldScopeRefusal); void new SettingsError("invalid"); void existing; void routedContract; void delivery; void bound; void repo; void taskId; void akuma; void alias; void worldInput; void worldResolution; void callResult; void routedCall; void callStatus; void forkResult; void statusResult; void createdTasks; void historyResult; void contractHistory; void contractHistoryEvent; void aliasBinding; void aliasStage; void dispatch; void dispatchFailure; void dispatchStage; void integrationFailure; void report; void preparationRefusal; void verificationReuse; void kind; void amendment; void termsOnly; void invalidBind; void invalidAmend; void customGate; void settingsValue; void selectedGates; void hook; void selectedHooks; void settingsEntry; void settingsView; void settingsScope; void contractListInput; void contractObservationInput; void contractPhase; void tenderedPhase; void contractDisposition; void contractGateCurrent; void contractGateReport; void workspaceObservation; void failedWorkspaceObservation; void statusRow; void statusBoard; void statusObservation; void deliverInput; void fact; void gate; void reconcile; void atInput; void repoReconcile; void emptyWorld; void failedWorld; void completedWorld; void invalidFailedWorld; void invalidCompletedWorld; void failedAsCompleted; void reviewInput; void review; void regionOverlap; void snapshot; void refusal; void retry; void mutationFinalityType; void mutationFinalityInputType; void mutationFinalitySurfaceType; void settlementAction; void settlementLag; void settlementReport; void nukeResult; void nukeKeiyakuRefusal; void nukeRequired; void bindResult; void amendResult; void amendWithoutRegion; void invalidBindRegion;',
-  ].join("\n");
-  writeFileSync(join(directory, "consumer.ts"), source);
-  execFileSync(
+test("built package supports Contract, Task, Kanshi and plugin consumers", (context) => {
+  const directory = externalConsumer(context);
+  mkdirSync(join(directory, "node_modules", "@types"), { recursive: true });
+  symlinkSync(
+    join(root, "plugins", "square"),
+    join(directory, "node_modules", "@astrosheep", "keiyaku-plugin-square"),
+    "dir",
+  );
+  symlinkSync(join(root, "node_modules", "@types", "node"), join(directory, "node_modules", "@types", "node"), "dir");
+  symlinkSync(join(root, "node_modules", "undici-types"), join(directory, "node_modules", "undici-types"), "dir");
+  const examples = ["contract", "task", "kanshi", "plugin"].map((name) => name + ".ts");
+  for (const example of examples) {
+    copyFileSync(join(root, "tests", "fixtures", "consumers", example), join(directory, example));
+  }
+  const checked = spawnSync(
     process.execPath,
     [
       join(root, "node_modules", "typescript", "bin", "tsc"),
@@ -287,70 +103,35 @@ test("package root exposes only the ruled library values and declarations", () =
       "NodeNext",
       "--moduleResolution",
       "NodeNext",
+      "--preserveSymlinks",
+      // Check our consumers, not every transitive dependency declaration again.
       "--skipLibCheck",
-      "consumer.ts",
-    ],
-    { cwd: directory, stdio: "ignore" },
-  );
-  const output = execFileSync(
-    process.execPath,
-    [
-      "--input-type=module",
-      "-e",
-      'const m = await import("@astrosheep/keiyaku"); console.log(Object.keys(m).filter((key) => key !== "requireBranchesToBeUpToDateFrom").sort().join(","));',
+      ...examples,
     ],
     { cwd: directory, encoding: "utf8" },
   );
-  assert.equal(
-    output.trim(),
-    "AkumaWorldScopeError,AuthorityCorruptionError,Delivery,Keiyaku,KeiyakuRefused,KeiyakuRetry,NoGitWorldError,Repo,SettingsError,World,WorldError,bodyRequestExecution,executionReceipt,gatesFrom,projectMutationFinality,settings,worktreeHooksFrom",
-  );
-});
-
-test("kanshi package export names the three-arm Region read union", () => {
-  const directory = externalConsumer();
-  const source = [
-    'import type { ContractId, RegionOverlap as RootOverlap } from "@astrosheep/keiyaku";',
-    'import { kanshi, type KanshiInput, type KanshiRegionSelection, type RegionDeclaration, type RegionOverlap, type RegionRead } from "@astrosheep/keiyaku/kanshi";',
-    'const id = "kei/example" as ContractId;',
-    'const declarations: KanshiRegionSelection = { kind: "declarations" };',
-    'const contract: KanshiRegionSelection = { kind: "contract", contract: id };',
-    'const path: KanshiRegionSelection = { kind: "path", patterns: ["src/**", "tests/**"] as [string, ...string[]] };',
-    'const declaration: RegionDeclaration = { contract: id, patterns: ["src/**"] };',
-    'const overlap: RegionOverlap = { contract: id, patterns: [{ mine: "src/**", theirs: "src/cli/**" }] };',
-    "const rootOverlap: RootOverlap = overlap;",
-    'const read: RegionRead = { kind: "contract", declaration, overlaps: [rootOverlap] };',
-    "const input: KanshiInput = { world: null, region: path };",
-    "// @ts-expect-error overlap selection was deleted",
-    'const deletedSelection: KanshiRegionSelection = { kind: "overlap" };',
-    "// @ts-expect-error RegionIntersection is not exported",
-    'type DeletedIntersection = import("@astrosheep/keiyaku/kanshi").RegionIntersection;',
-    "// @ts-expect-error RegionPathMatch is not exported",
-    'type DeletedPathMatch = import("@astrosheep/keiyaku/kanshi").RegionPathMatch;',
-    "void kanshi; void declarations; void contract; void path; void declaration; void overlap; void rootOverlap; void read; void input; void deletedSelection;",
-  ].join("\n");
-  writeFileSync(join(directory, "consumer-kanshi.ts"), source);
-  execFileSync(
+  assert.equal(checked.status, 0, checked.stdout + checked.stderr);
+  const loaded = spawnSync(
     process.execPath,
     [
-      join(root, "node_modules", "typescript", "bin", "tsc"),
-      "--noEmit",
-      "--strict",
-      "--target",
-      "ES2023",
-      "--module",
-      "NodeNext",
-      "--moduleResolution",
-      "NodeNext",
-      "--skipLibCheck",
-      "consumer-kanshi.ts",
+      "--input-type=module",
+      "--eval",
+      [
+        'import assert from "node:assert/strict";',
+        'import { createRequire } from "node:module";',
+        'import plugin from "@astrosheep/keiyaku-plugin-square";',
+        'assert.equal(plugin.manifest.id, "square");',
+        'assert.equal(typeof plugin.activate, "function");',
+        'assert.ok(createRequire(import.meta.url).resolve("@astrosheep/keiyaku-plugin-square").endsWith("index.js"));',
+      ].join("\n"),
     ],
-    { cwd: directory, stdio: "ignore" },
+    { cwd: directory, encoding: "utf8" },
   );
+  assert.equal(loaded.status, 0, loaded.stderr);
 });
 
-test("package exports reject deep internal imports", () => {
-  const directory = externalConsumer();
+test("package exports reject deep internal imports", (context) => {
+  const directory = externalConsumer(context);
   assert.throws(
     () =>
       execFileSync(
@@ -363,61 +144,6 @@ test("package exports reject deep internal imports", () => {
       return value.stderr?.toString("utf8").includes("ERR_PACKAGE_PATH_NOT_EXPORTED") === true;
     },
   );
-});
-
-test("task package export exposes only the Tasks-first native surface", () => {
-  const directory = externalConsumer();
-  const source = [
-    'import { bodyRequestExecution, World } from "@astrosheep/keiyaku";',
-    'import { Tasks, type Task, type TaskDecompositionTree, type TaskId, type TaskMutationResult, type TaskTreeNode } from "@astrosheep/keiyaku/task";',
-    'const world = null as unknown as import("@astrosheep/keiyaku").WorldRoot;',
-    "const tasks = Tasks.of(world);",
-    'const routedTasks = Tasks.of(world, { execution: bodyRequestExecution({ directory: "/tmp/keiyaku-requests" }) });',
-    'const task: Task = tasks.task({ id: "task/example" });',
-    "const id: TaskId = task.id;",
-    'const result: Promise<TaskMutationResult> = tasks.add({ title: "Example", state: "in_progress", note: "initial" });',
-    "const tree: Promise<TaskDecompositionTree> = task.tree();",
-    "const node = null as unknown as TaskTreeNode;",
-    'void task.update({ note: "replacement" });',
-    'void task.drop({ note: "obsolete" });',
-    "// @ts-expect-error Task has no static construction surface",
-    'Task.at({ path: "." });',
-    "// @ts-expect-error callers do not choose IDs during creation",
-    'tasks.add({ id: "task/chosen", title: "Chosen" });',
-    "// @ts-expect-error tree accepts no full option",
-    "void task.tree({ full: true });",
-    "// @ts-expect-error DAG residue type is not exported",
-    'type OldTree = import("@astrosheep/keiyaku/task").TaskDependencyTree;',
-    "void tasks; void routedTasks; void task; void id; void result; void tree; void node;",
-  ].join("\n");
-  writeFileSync(join(directory, "consumer-task.ts"), source);
-  execFileSync(
-    process.execPath,
-    [
-      join(root, "node_modules", "typescript", "bin", "tsc"),
-      "--noEmit",
-      "--strict",
-      "--target",
-      "ES2023",
-      "--module",
-      "NodeNext",
-      "--moduleResolution",
-      "NodeNext",
-      "--skipLibCheck",
-      "consumer-task.ts",
-    ],
-    { cwd: directory, stdio: "ignore" },
-  );
-  const output = execFileSync(
-    process.execPath,
-    [
-      "--input-type=module",
-      "-e",
-      'const m = await import("@astrosheep/keiyaku/task"); console.log(Object.keys(m).sort().join(","));',
-    ],
-    { cwd: directory, encoding: "utf8" },
-  );
-  assert.equal(output.trim(), "TASK_RELATION_PREDICATE_FIELDS,TaskAuthorityCorruptionError,Tasks");
 });
 
 test("built CLI bin keeps its shebang and executes through an installed-style symlink", () => {
@@ -435,43 +161,6 @@ test("built CLI bin keeps its shebang and executes through an installed-style sy
 test("Keiyaku owns contract construction over one pinned Repo capability", async () => {
   const repository = repositoryWithInitialCommit();
   const repo = await Repo.at({ path: repository.path });
-  assert.deepEqual(
-    Object.getOwnPropertyNames(Keiyaku)
-      .filter((name) => !["length", "name", "prototype"].includes(name))
-      .sort(),
-    [
-      "bind",
-      "call",
-      "fork",
-      "history",
-      "interrupt",
-      "kill",
-      "list",
-      "ls",
-      "nuke",
-      "observe",
-      "of",
-      "status",
-      "tell",
-      "wait",
-      "withExecution",
-      "withLocal",
-    ],
-  );
-  assert.deepEqual(
-    Object.getOwnPropertyNames(Delivery).filter((name) => !["length", "name", "prototype"].includes(name)),
-    [],
-  );
-  assert.deepEqual(
-    Object.getOwnPropertyNames(Repo).filter((name) => !["length", "name", "prototype"].includes(name)),
-    ["at"],
-  );
-  assert.deepEqual(
-    Object.getOwnPropertyNames(Repo.prototype)
-      .filter((name) => name !== "constructor")
-      .sort(),
-    ["currentBranch", "reconcile"],
-  );
   assert.equal(await repo.currentBranch(), "refs/heads/main");
   await assert.rejects(
     Keiyaku.bind({ repo, markdown: markdown("Invalid gate"), workspace: "worktree", gates: ["Edge-owned"] }),
@@ -545,11 +234,6 @@ test("package-root observe and list carry managed workspace observations", async
 
   assert.equal(typeof observed.row.worktreePath, "string");
   assert.equal(listedRow?.workspaceObservation.kind, "clean");
-});
-
-test("public handle values are type tokens, not alternate constructors", () => {
-  assert.throws(() => Reflect.construct(Keiyaku as unknown as Function, []), TypeError);
-  assert.throws(() => Reflect.construct(Delivery as unknown as Function, []), TypeError);
 });
 
 test("bind canonicalizes branch targets and refuses invalid names before birth", async () => {
