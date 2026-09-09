@@ -52,17 +52,19 @@
     "test:release": "node scripts/test-entry.mjs --release",
     "test:dev": "node scripts/test-entry.mjs --dev",
     "test:architecture": "node --import tsx scripts/check-architecture.ts",
-    "test:e2e": "npm run build && node scripts/run-tests.mjs tests/packaged-cli.e2e.ts",
+    "test:e2e": "npm run build && npm run test:e2e:built",
     "test:local": "node scripts/run-tests.mjs --suite local",
     "test:integration": "node scripts/run-tests.mjs --suite integration",
-    "test:parallel": "node scripts/run-tests.mjs --suite local --test-concurrency=8 && node scripts/run-tests.mjs --suite integration --test-concurrency=8",
+    "test:parallel": "npm run test:compile && node scripts/run-tests.mjs --compiled --test-concurrency=8",
     "test:maintainability": "node scripts/check-maintainability.js",
     "test:focused": "node scripts/run-tests.mjs",
     "test:focused:serial": "node scripts/run-tests.mjs --test-concurrency=1",
     "test:reachability": "knip --include files,dependencies,unlisted,unresolved,duplicates",
     "test:typecheck": "tsc -p tsconfig.json --noEmit && npm run test:typecheck:scoped-tests && npm run test:typecheck:scripts",
     "test:typecheck:scoped-tests": "tsc -p tsconfig.tests.json",
-    "test:typecheck:scripts": "tsc -p tsconfig.scripts.json"
+    "test:typecheck:scripts": "tsc -p tsconfig.scripts.json",
+    "test:compile": "node scripts/compile-tests.mjs",
+    "test:e2e:built": "node scripts/run-tests.mjs tests/packaged-cli.e2e.ts"
   },
   "devDependencies": {
     "@types/cross-spawn": "^6.0.6",

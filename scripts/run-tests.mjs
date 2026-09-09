@@ -1,10 +1,11 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, globSync } from "node:fs";
+import { existsSync, globSync, statSync } from "node:fs";
 import { TEST_MANIFESTS } from "./test-manifests.mjs";
 
 const DEFAULT_TEST_PATTERNS = ["tests/**/*.test.ts", "tests/maintainability.test.js"];
 
-const supplied = process.argv.slice(2);
+const compiled = process.argv.includes("--compiled");
+const supplied = process.argv.slice(2).filter((argument) => argument !== "--compiled");
 const valueOptions = new Set([
   "--test-concurrency",
   "--test-name-pattern",
@@ -73,28 +74,54 @@ if (missingTestFiles.length > 0) {
 const testOptions =
   suiteOption === -1
     ? options
-    : options.filter(
-        (_, index) => index !== suiteOption && !(suiteFlag === "--suite" && index === suiteOption + 1),
-      );
+    : options.filter((_, index) => index !== suiteOption && !(suiteFlag === "--suite" && index === suiteOption + 1));
 const reporterOptions = testOptions.some(
   (option) => option === "--test-reporter" || option.startsWith("--test-reporter="),
 )
   ? []
   : ["--test-reporter=dot"];
+const runtimeFiles = compiled ? testFiles.map((file) => ".test-build/" + file.replace(/\.ts$/u, ".js")) : testFiles;
+const loader = compiled ? ["--enable-source-maps"] : ["--import", "tsx"];
 const environment = { ...process.env };
 delete environment.AKUMA_REQUESTS;
+// This is a new runner, including when invoked by a test of the runner itself.
+delete environment.NODE_TEST_CONTEXT;
 const started = performance.now();
-const result = spawnSync(
-  process.execPath,
-  ["--import", "tsx", "--test", ...reporterOptions, ...testOptions, ...testFiles],
-  { stdio: "inherit", env: environment },
-);
-
-if (result.error) throw result.error;
-const status = result.status ?? 1;
+// The CLI sorts its glob results. Use the public files API only for the ordinary
+// compiled sweep so larger files can start first, without changing native focused
+// flags, reporters, filtering, or sharding. Every file still has its own process.
+if (compiled && files.length === 0 && testOptions.every((option) => /^--test-concurrency=\d+$/u.test(option))) {
+  const { run } = await import("node:test");
+  const { spec } = await import("node:test/reporters");
+  const ordered = testFiles.map((file) => ({ file, size: statSync(file).size }));
+  ordered.sort((left, right) => right.size - left.size || left.file.localeCompare(right.file));
+  delete process.env.AKUMA_REQUESTS;
+  delete process.env.NODE_TEST_CONTEXT;
+  const stream = run({
+    files: ordered.map(({ file }) => ".test-build/" + file.replace(/\.ts$/u, ".js")),
+    concurrency: Number(testOptions.at(-1)?.split("=")[1] ?? 8),
+    execArgv: loader,
+  });
+  stream.on("test:fail", () => {
+    process.exitCode = 1;
+  });
+  stream.compose(spec).pipe(process.stdout);
+} else {
+  const result = spawnSync(
+    process.execPath,
+    [...loader, "--test", ...reporterOptions, ...testOptions, ...runtimeFiles],
+    {
+      stdio: "inherit",
+      env: environment,
+    },
+  );
+  if (result.error) throw result.error;
+  process.exitCode = result.status ?? 1;
+}
 if (suite !== undefined) {
-  console.error(
-    `[run-tests] suite=${suite} files=${testFiles.length} elapsed=${Math.round(performance.now() - started)} status=${status}`,
+  process.once("beforeExit", () =>
+    console.error(
+      `[run-tests] suite=${suite} files=${testFiles.length} elapsed=${Math.round(performance.now() - started)} status=${process.exitCode ?? 0}`,
+    ),
   );
 }
-process.exit(status);
