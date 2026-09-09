@@ -31,8 +31,11 @@ exclusive. Decide up front whether you will stay:
 Alias already points elsewhere, it moves to the born Akuma. The worker's
 execution cwd is exactly `-C <path>`, or your own cwd when `-C` is omitted.
 
-Repeated `--allowed` values add actions to the selected Akuma's defaults. A
-nested call can use only actions permitted by its direct parent Soul.
+Repeated `--allowed` values add actions to the selected Akuma's defaults; they
+never narrow them. An omitted Archetype default permits the complete action
+vocabulary, while an explicit empty default permits none. A nested call can use
+only actions permitted by its direct parent Soul. Use `status <aku/...|@alias>`
+to inspect the born worker's frozen effective actions.
 
 ## Akuma Names
 

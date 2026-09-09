@@ -283,6 +283,7 @@ type SnapshotView = Readonly<{
 type SnapshotCoreOptions = Readonly<{
   alias?: string;
   facts?: readonly string[];
+  showAllowed?: boolean;
 }>;
 
 function snapshotCore(
@@ -302,6 +303,7 @@ function snapshotCore(
         )
       : groupedEntries(snapshot.entries, context);
   const facts = [
+    ...(options.showAllowed === true ? [`allowed  ${view.status.allowed.join(", ") || "none"}`] : []),
     ...(view.status.readonly?.enforcement === "none" ? [`! ${safeText(view.status.readonly.diagnostic)}`] : []),
     ...contractFacts(view.contract),
     ...(options.facts ?? []),

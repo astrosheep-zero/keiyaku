@@ -288,6 +288,23 @@ test("Contract owner codecs reject malformed live, failure, and service payloads
 });
 
 test("Fleet owner codecs reject malformed live and service payloads", () => {
+  const forwarded = {
+    completion: "all" as const,
+    observations: [
+      {
+        status: {
+          id: "aku/worker/1234abcd",
+          life: "asleep" as const,
+          allowed: ["akuma.call"],
+          timeline: { kind: "idle" as const, entries: [], omitted: 0, reportedChanges: [], reportedChangesOmitted: 0 },
+        },
+        contract: { kind: "none" as const },
+        createdTasks: { kind: "present" as const, rows: [] },
+      },
+    ],
+    unobserved: [],
+  };
+  assert.deepEqual(fleetRequestProtocol("akuma.wait").decodeResult(forwarded), forwarded);
   assert.throws(
     () => fleetRequestProtocol("akuma.wait").decodeResult({ completion: "all", observations: [], unobserved: [{}] }),
     /invalid live result for akuma\.wait/u,

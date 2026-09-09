@@ -105,6 +105,7 @@ export async function bornStatus(
     status: {
       id: soul.id,
       life: currentLife,
+      allowed: soul.allowed,
       ...(soul.readonly === undefined ? {} : { readonly: soul.readonly }),
       ...(resumeUnsupported ? { strandedReason: "resume-unsupported" as const } : {}),
       timeline: selected.snapshot,

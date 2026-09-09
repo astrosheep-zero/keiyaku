@@ -1668,6 +1668,7 @@ test("fork publishes a sleeping child with lineage and its native birth session"
     assert.match(receipt.child, /^aku\/claude\/[0-9a-f]{8}$/u);
     const child = world.of({ id: receipt.child });
     assert.equal((await child.status()).life, "asleep");
+    assert.deepEqual((await child.status()).allowed, []);
     const childPaths = pathsForAkuId(root, receipt.child);
     const snapshot = await readHeart(childPaths);
     assert.deepEqual(snapshot.soul?.origin, { kind: "fork", parent: source.id, at: "turn/1" });
@@ -1947,7 +1948,7 @@ test("tell after an already stopped Body wakes the same Akuma through its retain
           provider: CLAUDE_EXECUTION,
           options: { model: "fixture-model" },
           origin: { kind: "direct" },
-          allowed: [],
+          allowed: ["akuma.call"],
           cwd: seat,
         },
         initialBody: "first",
@@ -2024,6 +2025,7 @@ test("tell after an already stopped Body wakes the same Akuma through its retain
     );
     assert.equal((await handle.status()).life, "asleep");
     const finalStatus = await handle.status();
+    assert.deepEqual(finalStatus.allowed, ["akuma.call"]);
     assert.equal(
       finalStatus.timeline.kind === "idle" && finalStatus.timeline.outcome?.outcome.kind === "answered",
       true,

@@ -4,7 +4,7 @@ import { parseAkuId, type AkuId } from "./identity.js";
 import { activitySnapshotSchema } from "./projection.js";
 import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
-import type { AllowedAction } from "./allowed.js";
+import { allowedActionsSchema, type AllowedAction } from "./allowed.js";
 import type { ExecutionContext } from "./requests.js";
 import { z } from "zod";
 import type { BoundedList } from "../bounded-list.js";
@@ -44,6 +44,7 @@ export const akumaStatusSchema = z
   .object({
     id: akumaIdSchema,
     life: z.enum(["running", "asleep", "stranded", "hung", "untidy", "killed"]),
+    allowed: allowedActionsSchema,
     readonly: readonlySchema.optional(),
     timeline: activitySnapshotSchema,
     strandedReason: z.literal("resume-unsupported").optional(),

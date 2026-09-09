@@ -555,6 +555,7 @@ test("direct birth recipes freeze Archetype defaults and additive allowed values
 
     const restricted = await directBirthSoul(akuma, { archetype: "restricted", body: "default" });
     assert.deepEqual(restricted.allowed, ["task.add"]);
+    assert.deepEqual((await PublicAkuma.select(world, restricted.id).status()).allowed, ["task.add"]);
 
     const added = await directBirthSoul(akuma, {
       archetype: "restricted",
@@ -578,6 +579,12 @@ test("direct birth recipes freeze Archetype defaults and additive allowed values
       allowed: ["akuma.call"],
     });
     assert.deepEqual(emptyWithAddition.allowed, ["akuma.call"]);
+
+    writeFileSync(
+      join(configured.home, "akuma", "restricted.md"),
+      "---\nprovider: local\nallowed:\n  - contract.deliver\n---\nChanged.\n",
+    );
+    assert.deepEqual((await PublicAkuma.select(world, restricted.id).status()).allowed, ["task.add"]);
 
     writeFileSync(
       join(configured.home, "akuma", "reviewer.md"),

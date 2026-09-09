@@ -105,7 +105,10 @@ export function renderAkumaText(
     case "call":
       return callText(result, context);
     case "status":
-      return snapshotText(result.status, context, { ...(result.alias === undefined ? {} : { alias: result.alias }) });
+      return snapshotText(result.status, context, {
+        ...(result.alias === undefined ? {} : { alias: result.alias }),
+        showAllowed: true,
+      });
     case "wait":
       return waitText(result, context);
     case "tell":

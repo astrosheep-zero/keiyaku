@@ -77,6 +77,10 @@ test("deliver and review leaf help retain their distinct recovery and placement 
 
 test("Akuma call and tell help expose schema files", () => {
   assert.match(renderAkumaHelp("call"), /--schema <file>/u);
+  assert.match(renderAkumaHelp("call"), /Legal actions: akuma\.call, akuma\.kill, akuma\.tell/u);
+  assert.match(renderAkumaHelp("call"), /adds actions.*never narrows/u);
+  assert.match(renderAkumaHelp("call"), /omitted Archetype default permits every legal action; an explicit empty default permits none/u);
+  assert.match(renderAkumaHelp("call"), /direct parent's frozen actions\. status <aku\/\.\.\.\|@alias> shows/u);
   assert.match(renderAkumaHelp("tell"), /--schema <file>/u);
   assert.match(renderAkumaHelp("tell"), /stdin remains the prompt source/u);
 });

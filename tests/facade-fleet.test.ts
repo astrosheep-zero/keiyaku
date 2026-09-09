@@ -99,6 +99,35 @@ function taskCatalogDocument(id: TaskId, updatedAt: string): TaskDocument {
   };
 }
 
+test("Akuma and Task owner schemas strictly decode Fleet projections", () => {
+  const status: AkumaStatus = {
+    id: akuId({ archetype: "worker", suffix: "00000001" }),
+    life: "running",
+    allowed: ["akuma.call"],
+    timeline: { kind: "unborn", entries: [], omitted: 0, reportedChanges: [], reportedChangesOmitted: 0 },
+  };
+  const row: TaskRow = {
+    id: formatTaskId({ namespace: [], localId: "fleet-row" }),
+    title: "Fleet row",
+    state: "open",
+    priority: 2,
+    disposition: "ready",
+    updatedAt: "2026-08-29T00:00:00.000Z",
+    bodyPresent: false,
+  };
+
+  assert.deepEqual(akumaStatusSchema.parse(status), status);
+  assert.deepEqual(akumaStatusSchema.parse({ ...status, allowed: ["task.add", "akuma.call"] }).allowed, [
+    "akuma.call",
+    "task.add",
+  ]);
+  assert.equal(akumaStatusSchema.safeParse({ ...status, allowed: ["akuma.call", "akuma.call"] }).success, false);
+  assert.equal(akumaStatusSchema.safeParse({ id: status.id, life: status.life, timeline: status.timeline }).success, false);
+  assert.deepEqual(taskRowsSchema.parse([row]), [row]);
+  assert.equal(akumaStatusSchema.safeParse({ ...status, undeclared: true }).success, false);
+  assert.equal(taskRowsSchema.safeParse([{ ...row, undeclared: true }]).success, false);
+});
+
 async function openOrdinary(
   paths: Parameters<typeof beginTurn>[0],
   stamp: string,

@@ -15,6 +15,9 @@ product; those concerns do not become Akuma handle methods.
 
 Status and history derive from one retained Heart timeline in durable sequence
 order. They do not join outcomes by timestamp or read a second Turn projection.
+A born status also observes the Soul's frozen action authority, so callers can
+inspect the granted extent without reconstructing it from mutable Archetype
+configuration or private custody.
 A status snapshot shows current actionable work: the open Turn when present,
 active tools, pending tells, and otherwise the latest outcome. Bounded ordinary
 detail can become typed gaps, but active work and actionable tells remain

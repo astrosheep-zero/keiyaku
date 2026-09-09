@@ -1,4 +1,5 @@
 import { TASK_MUTATION_ACTIONS } from "../task/mutation.js";
+import { z } from "zod";
 
 export const ALLOWED_ACTIONS = Object.freeze([
   "akuma.call",
@@ -29,6 +30,16 @@ export function decodeAllowedActions(value: unknown, label = "allowed"): Allowed
   }
   return Object.freeze([...seen].sort());
 }
+
+/** Public codecs retain the Soul's canonical, duplicate-free action membership. */
+export const allowedActionsSchema = z.array(z.enum(ALLOWED_ACTIONS)).transform((value, context): AllowedActions => {
+  try {
+    return decodeAllowedActions(value);
+  } catch (error) {
+    context.addIssue({ code: "custom", message: error instanceof Error ? error.message : String(error) });
+    return z.NEVER;
+  }
+});
 
 export function effectiveAllowedActions(value: unknown): AllowedActions {
   return value === undefined ? ALLOWED_ACTIONS : decodeAllowedActions(value);
