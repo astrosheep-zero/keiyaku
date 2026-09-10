@@ -947,30 +947,7 @@ test("retention uses a bounded settled buffer while pending tells remain pinned"
       bodySequence: body.sequence,
       startedAt: "2026-08-08T00:00:00.000Z",
     });
-    const heart = new DatabaseSync(value.allocated.paths.heart);
-    try {
-      heart.exec("PRAGMA foreign_keys=ON; BEGIN IMMEDIATE");
-      heart
-        .prepare(
-          `WITH RECURSIVE rows(value) AS (
-        VALUES(1) UNION ALL SELECT value + 1 FROM rows WHERE value < 5501
-      ) INSERT INTO timeline(kind) SELECT 'activity' FROM rows`,
-        )
-        .run();
-      heart
-        .prepare(
-          `INSERT INTO activity(sequence, turn_sequence, event_json, at)
-        SELECT sequence, ?, '{"type":"note","text":"buffered"}', '2026-08-08T00:00:01.000Z'
-        FROM timeline WHERE kind = 'activity'`,
-        )
-        .run(turn.sequence);
-      heart.exec("COMMIT");
-    } catch (error) {
-      heart.exec("ROLLBACK");
-      throw error;
-    } finally {
-      heart.close();
-    }
+    seedClosedHistoryActivity(value.allocated.paths, turn.sequence, 5_501);
 
     await appendActivity(value.allocated.paths, {
       turnSequence: turn.sequence,
@@ -990,13 +967,12 @@ test("retention uses a bounded settled buffer while pending tells remain pinned"
       kind: "consumed",
       receivedAt: "2026-08-08T00:00:03.000Z",
     });
-    for (let index = 0; index < 501; index += 1) {
-      await appendActivity(value.allocated.paths, {
-        turnSequence: turn.sequence,
-        event: { type: "note", text: `after-${index}` },
-        at: "2026-08-08T00:00:04.000Z",
-      });
-    }
+    seedClosedHistoryActivity(value.allocated.paths, turn.sequence, 501);
+    await appendActivity(value.allocated.paths, {
+      turnSequence: turn.sequence,
+      event: { type: "note", text: "trigger post-receipt compaction" },
+      at: "2026-08-08T00:00:04.000Z",
+    });
     retained = await activitySlice(value.allocated.paths);
     assert.equal(
       retained.rows.some((fact) => "id" in fact && fact.id === "tell-pinned"),
