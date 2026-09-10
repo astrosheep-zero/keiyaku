@@ -133,7 +133,10 @@ export async function runGit(
   return await executeGit(repository, args, input);
 }
 
-function boundedPipeOutput(child: ReturnType<typeof spawnCancellableProcess>["child"], args: readonly string[]): Promise<Buffer> {
+function boundedPipeOutput(
+  child: ReturnType<typeof spawnCancellableProcess>["child"],
+  args: readonly string[],
+): Promise<Buffer> {
   const stdout: Buffer[] = [];
   let bytes = 0;
   let settled = false;
