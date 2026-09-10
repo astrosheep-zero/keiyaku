@@ -36,28 +36,38 @@ type StreamCursor = Readonly<{
 
 function streamCursor(stream: NodeJS.ReadableStream): StreamCursor {
   const iterator = (stream as NodeJS.ReadableStream & AsyncIterable<string | Buffer>)[Symbol.asyncIterator]();
-  let buffer = Buffer.alloc(0);
+  let buffer: Buffer = Buffer.alloc(0);
+  let offset = 0;
   const pull = async (expected: string): Promise<void> => {
     const next = await iterator.next();
     if (next.done) throw new Error(`git cat-file --batch ended while reading ${expected}`);
-    const chunk = Buffer.from(next.value);
-    buffer = buffer.length === 0 ? chunk : Buffer.concat([buffer, chunk]);
+    buffer = typeof next.value === "string" ? Buffer.from(next.value) : next.value;
+    offset = 0;
   };
   const line = async (): Promise<Buffer> => {
+    const parts: Buffer[] = [];
+    let length = 0;
     for (;;) {
-      const newline = buffer.indexOf(0x0a);
-      if (newline >= 0) {
-        const value = buffer.subarray(0, newline);
-        buffer = buffer.subarray(newline + 1);
-        return value;
-      }
-      await pull("line");
+      if (offset === buffer.length) await pull("line");
+      const newline = buffer.indexOf(0x0a, offset);
+      const part = buffer.subarray(offset, newline < 0 ? buffer.length : newline);
+      offset = newline < 0 ? buffer.length : newline + 1;
+      if (newline >= 0 && parts.length === 0) return part;
+      parts.push(part);
+      length += part.length;
+      if (newline >= 0) return Buffer.concat(parts, length);
     }
   };
   const exact = async (length: number): Promise<Buffer> => {
-    while (buffer.length < length) await pull(`${length} bytes`);
-    const value = buffer.subarray(0, length);
-    buffer = buffer.subarray(length);
+    const value = Buffer.allocUnsafe(length);
+    let filled = 0;
+    while (filled < length) {
+      if (offset === buffer.length) await pull(`${length} bytes`);
+      const count = Math.min(length - filled, buffer.length - offset);
+      buffer.copy(value, filled, offset, offset + count);
+      offset += count;
+      filled += count;
+    }
     return value;
   };
   return { line, exact };
@@ -67,16 +77,6 @@ type BatchObjectReader = Readonly<{
   objects(oids: readonly GitOid[]): Promise<ReadonlyMap<GitOid, GitObjectResult>>;
   close(): Promise<void>;
 }>;
-
-async function batchObjects(
-  oids: readonly GitOid[],
-  object: (oid: GitOid) => Promise<GitObjectResult>,
-): Promise<ReadonlyMap<GitOid, GitObjectResult>> {
-  const unique = [...new Set(oids)];
-  for (const oid of unique) gitObjectId(oid, "Git object");
-  const entries = await Promise.all(unique.map(async (oid) => [oid, await object(oid)] as const));
-  return new Map(entries);
-}
 
 function batchChild(repository: GitRepository) {
   return spawnCancellableProcess({
@@ -120,6 +120,30 @@ async function closeBatchProcess(
   }
 }
 
+async function readBatchObject(cursor: StreamCursor, oid: GitOid): Promise<GitObjectResult> {
+  const header = (await cursor.line()).toString("ascii").split(" ");
+  if (header.length === 2 && header[0] === oid && header[1] === "missing") return { kind: "missing" };
+  if (header.length !== 3 || header[0] !== oid || header[1] === undefined || header[2] === undefined) {
+    throw new Error(`unexpected header for ${oid}`);
+  }
+  if (!/^(0|[1-9][0-9]*)$/.test(header[2])) throw new Error(`invalid size for ${oid}`);
+  const size = Number(header[2]);
+  if (!Number.isSafeInteger(size)) throw new Error(`unsafe size for ${oid}`);
+  const bytes = await cursor.exact(size);
+  const delimiter = await cursor.exact(1);
+  if (delimiter[0] !== 0x0a) throw new Error(`missing content delimiter for ${oid}`);
+  return { kind: "present", type: header[1], bytes };
+}
+
+async function writeBatchRequests(child: ChildProcessWithoutNullStreams, oids: readonly GitOid[]): Promise<void> {
+  for (let index = 0; index < oids.length; index += 256) {
+    const request = `${oids.slice(index, index + 256).join("\n")}\n`;
+    await new Promise<void>((resolve, reject) => {
+      child.stdin.write(request, (error) => (error == null ? resolve() : reject(error)));
+    });
+  }
+}
+
 function batchObjectReader(repository: GitRepository): BatchObjectReader {
   const process = batchChild(repository);
   const child = process.child as ChildProcessWithoutNullStreams;
@@ -140,30 +164,23 @@ function batchObjectReader(repository: GitRepository): BatchObjectReader {
     spawnError ??= error;
   });
 
-  const write = async (value: string): Promise<void> => {
-    if (spawnError !== null) throw spawnError;
-    await new Promise<void>((resolve, reject) => {
-      child.stdin.write(value, (error) => (error === null || error === undefined ? resolve() : reject(error)));
-    });
-  };
-  const read = async (oid: GitOid): Promise<GitObjectResult> => {
+  const batch = async (oids: readonly GitOid[]): Promise<ReadonlyMap<GitOid, GitObjectResult>> => {
     if (failure !== null) throw failure;
+    // Feed bounded request chunks while the single parser drains responses.
+    const sending = writeBatchRequests(child, oids);
+    const receiving = (async () => {
+      const results = new Map<GitOid, GitObjectResult>();
+      for (const oid of oids) results.set(oid, await readBatchObject(cursor, oid));
+      return results;
+    })();
     try {
-      await write(`${oid}\n`);
-      const header = (await cursor.line()).toString("ascii").split(" ");
-      if (header.length === 2 && header[0] === oid && header[1] === "missing") return { kind: "missing" };
-      if (header.length !== 3 || header[0] !== oid || header[1] === undefined || header[2] === undefined) {
-        throw new Error(`unexpected header for ${oid}`);
-      }
-      if (!/^(0|[1-9][0-9]*)$/.test(header[2])) throw new Error(`invalid size for ${oid}`);
-      const size = Number(header[2]);
-      if (!Number.isSafeInteger(size)) throw new Error(`unsafe size for ${oid}`);
-      const bytes = await cursor.exact(size);
-      const delimiter = await cursor.exact(1);
-      if (delimiter[0] !== 0x0a) throw new Error(`missing content delimiter for ${oid}`);
-      return { kind: "present", type: header[1], bytes };
+      const [, results] = await Promise.race([Promise.all([sending, receiving]), process.terminationFailure]);
+      return results;
     } catch (error) {
-      if (failure !== null) throw failure;
+      child.stdin.destroy();
+      child.stdout.destroy();
+      await Promise.allSettled([sending, receiving]);
+      failure = batchError(child, stderr, process.cancelled() ? "git process cancelled" : String(error), null);
       await process.terminate(true);
       await closed;
       await process.waitTermination();
@@ -176,18 +193,24 @@ function batchObjectReader(repository: GitRepository): BatchObjectReader {
       throw failure;
     }
   };
-  const object = (oid: GitOid): Promise<GitObjectResult> => {
-    const cached = cache.get(oid);
-    if (cached !== undefined) return cached;
-    const requested = tail.then(async () => await read(oid));
-    tail = requested.then(
-      () => undefined,
-      () => undefined,
-    );
-    cache.set(oid, requested);
-    return requested;
+  const objects = async (oids: readonly GitOid[]): Promise<ReadonlyMap<GitOid, GitObjectResult>> => {
+    const unique = [...new Set(oids)];
+    for (const oid of unique) gitObjectId(oid, "Git object");
+    const uncached = unique.filter((oid) => !cache.has(oid));
+    if (uncached.length > 0) {
+      const requested = tail.then(() => batch(uncached));
+      tail = requested.then(
+        () => undefined,
+        () => undefined,
+      );
+      for (const oid of uncached)
+        cache.set(
+          oid,
+          requested.then((results) => results.get(oid)!),
+        );
+    }
+    return new Map(await Promise.all(unique.map(async (oid) => [oid, await cache.get(oid)!] as const)));
   };
-  const objects = (oids: readonly GitOid[]) => batchObjects(oids, object);
   const close = async (): Promise<void> => {
     await tail.catch(() => undefined);
     if (failure !== null) {

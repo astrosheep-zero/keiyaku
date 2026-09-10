@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-const HEART_SCHEMA_VERSION = 25;
+const HEART_SCHEMA_VERSION = 28;
 const LEASH_SCHEMA_VERSION = 4;
 
 function assertSchemaVersion(database: DatabaseSync, table: "akuma_schema" | "leash_schema", expected: number): void {
@@ -86,6 +86,11 @@ export const HEART_SCHEMA = `
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
     kind TEXT NOT NULL CHECK (kind IN ('turn-start', 'call', 'activity', 'tell', 'turn-end'))
   ) STRICT;
+  CREATE TABLE IF NOT EXISTS activity_retention (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    checked_sequence INTEGER NOT NULL
+  ) STRICT;
+  INSERT OR IGNORE INTO activity_retention(singleton, checked_sequence) VALUES (1, 0);
   CREATE TABLE IF NOT EXISTS calls (
     sequence INTEGER PRIMARY KEY REFERENCES timeline(sequence) ON DELETE CASCADE,
     turn_sequence INTEGER NOT NULL REFERENCES turns(sequence) ON DELETE CASCADE,
@@ -137,16 +142,24 @@ export const HEART_SCHEMA = `
     )
   ) STRICT;
   CREATE UNIQUE INDEX IF NOT EXISTS tell_receipts_exact
-    ON tell_receipts(tell_id, kind) WHERE evidence = 'exact';
+    ON tell_receipts(tell_id, kind);
   CREATE UNIQUE INDEX IF NOT EXISTS tell_receipts_fence
-    ON tell_receipts(turn_sequence, fence, kind) WHERE evidence = 'fence';
+    ON tell_receipts(turn_sequence, fence, kind);
   CREATE TABLE IF NOT EXISTS tell_dispositions (
-    body_sequence INTEGER NOT NULL REFERENCES bodies(sequence),
-    tell_id TEXT NOT NULL REFERENCES tells(id),
+    body_sequence INTEGER PRIMARY KEY REFERENCES bodies(sequence),
     decided_at TEXT NOT NULL,
-    resolved_at TEXT,
+    resolved_at TEXT
+  ) STRICT;
+  CREATE TABLE IF NOT EXISTS tell_disposition_members (
+    body_sequence INTEGER NOT NULL REFERENCES tell_dispositions(body_sequence) ON DELETE CASCADE,
+    tell_id TEXT NOT NULL REFERENCES tells(id),
     PRIMARY KEY (body_sequence, tell_id)
   ) STRICT;
+  CREATE INDEX IF NOT EXISTS calls_by_turn ON calls(turn_sequence);
+  CREATE INDEX IF NOT EXISTS activity_by_turn ON activity(turn_sequence);
+  CREATE INDEX IF NOT EXISTS tell_bindings_by_turn ON tell_bindings(turn_sequence);
+  CREATE INDEX IF NOT EXISTS tell_deliveries_by_turn ON tell_deliveries(turn_sequence);
+  CREATE INDEX IF NOT EXISTS tell_disposition_members_by_tell ON tell_disposition_members(tell_id);
   CREATE TABLE IF NOT EXISTS requests (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
     id TEXT NOT NULL UNIQUE,

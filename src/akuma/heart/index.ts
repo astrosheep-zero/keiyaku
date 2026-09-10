@@ -52,7 +52,7 @@ import {
   openTellDispositionIds,
   pendingTellFacts,
   resolveTellDispositionSnapshot,
-  successorBodyHoldingDisposition,
+  tellDispositionResolved,
   tellFact,
   tellIdsForFence,
 } from "./tells.js";
@@ -71,7 +71,7 @@ import {
   withReadOnlyHeart,
 } from "./storage.js";
 import { soulFact } from "./soul.js";
-import { AkumaBusyError } from "./facts.js";
+import { AkumaBusyError, HeartAuthorityCorruptionError } from "./facts.js";
 export {
   HeartAbsentError,
   HeldAkumaLeash,
@@ -224,8 +224,9 @@ export async function recordTellDeliveries(paths: AkumaPaths, inputs: readonly T
         const current = tellFact(heart, input.tellId);
         if (current === null) throw new Error(`unknown tell ${input.tellId}`);
       }
-      for (const input of inputs) insertTellDeliveryFact(heart, input);
-      pruneActivityFacts(heart, ACTIVITY_LIMIT);
+      let changed = false;
+      for (const input of inputs) changed = insertTellDeliveryFact(heart, input) || changed;
+      pruneActivityFacts(heart, ACTIVITY_LIMIT, changed);
     }),
   );
 }
@@ -236,8 +237,8 @@ export async function recordTellReceipt(paths: AkumaPaths, input: TellReceiptInp
       const tellIds =
         input.evidence === "exact" ? [input.tellId] : tellIdsForFence(heart, input.turnSequence, input.fence);
       if (tellIds.length === 0) throw new Error("tell receipt has no delivery mapping");
-      insertTellReceiptFact(heart, input);
-      pruneActivityFacts(heart, ACTIVITY_LIMIT);
+      const changed = insertTellReceiptFact(heart, input);
+      pruneActivityFacts(heart, ACTIVITY_LIMIT, changed);
     }),
   );
 }
@@ -255,6 +256,7 @@ export async function decidePendingTellDisposition(
     transaction(heart, () => {
       const body = latestBodyFact(heart);
       if (body === null || body.sequence !== input.bodySequence) return null;
+      if (tellDispositionResolved(heart, input.bodySequence) === true) return null;
       const existing = openTellDispositionIds(heart, input.bodySequence);
       if (existing !== null) return { bodySequence: input.bodySequence, tellIds: existing };
       const pending = pendingTellFacts(heart);
@@ -277,50 +279,23 @@ export async function readOpenPendingTellDisposition(paths: AkumaPaths): Promise
   return await withHeart(paths, (heart) => readTransaction(heart, () => latestOpenTellDisposition(heart)));
 }
 
+/** Prove and consume the persisted decision in one transaction, never a caller's stale member list. */
 export async function resolvePendingTellDisposition(
   paths: AkumaPaths,
   bodySequence: number,
   at: string,
-): Promise<void> {
-  await withHeart(paths, (heart) =>
-    transaction(heart, () => {
-      resolveTellDispositionSnapshot(heart, bodySequence, at);
-      pruneActivityFacts(heart, ACTIVITY_LIMIT);
-    }),
-  );
-}
-
-/**
- * Heart-owned disposition custody proof. Sequence growth, spawn resolution, and
- * an unqualified held leash are never proof. Returns the successor Body sequence
- * when that exact Body took the frozen Tell-id snapshot by delivery, or true when
- * the snapshot is already fully settled (no longer pending).
- */
-export async function provePendingTellDispositionCustody(
-  paths: AkumaPaths,
-  disposition: PendingTellDisposition,
-): Promise<Readonly<{ kind: "proven"; successorBodySequence?: number } | { kind: "unproven" }>> {
+  outcome: "custody" | "undelivered" = "custody",
+): Promise<boolean> {
   return await withHeart(paths, (heart) =>
-    readTransaction(heart, () => {
-      if (!dispositionSnapshotProven(heart, disposition)) return { kind: "unproven" as const };
-      const successorBodySequence = successorBodyHoldingDisposition(heart, disposition);
-      return successorBodySequence === null
-        ? { kind: "proven" as const }
-        : { kind: "proven" as const, successorBodySequence };
-    }),
-  );
-}
-
-export async function recordUndeliveredPendingTells(
-  paths: AkumaPaths,
-  at: string,
-  tellIds: readonly string[],
-): Promise<void> {
-  if (tellIds.length === 0) return;
-  await withHeart(paths, (heart) =>
     transaction(heart, () => {
-      insertUndeliveredTellReceipts(heart, tellIds, at);
-      pruneActivityFacts(heart, ACTIVITY_LIMIT);
+      if (tellDispositionResolved(heart, bodySequence) === true) return true;
+      const tellIds = openTellDispositionIds(heart, bodySequence);
+      if (tellIds === null) throw new HeartAuthorityCorruptionError(`Akuma disposition ${bodySequence} is missing`);
+      if (outcome === "undelivered") insertUndeliveredTellReceipts(heart, tellIds, at);
+      if (!dispositionSnapshotProven(heart, tellIds)) return false;
+      resolveTellDispositionSnapshot(heart, bodySequence, at);
+      pruneActivityFacts(heart, ACTIVITY_LIMIT, true);
+      return true;
     }),
   );
 }
@@ -435,7 +410,7 @@ export async function failOpenBoundTurns(
           completedAt: input.completedAt,
         });
       }
-      pruneActivityFacts(heart, ACTIVITY_LIMIT);
+      pruneActivityFacts(heart, ACTIVITY_LIMIT, sequences.length > 0);
       return sequences;
     }),
   );
@@ -452,7 +427,7 @@ export async function endTurn(
   return await withHeart(paths, (heart) =>
     transaction(heart, () => {
       const fact = insertTurnEndFact(heart, { kind: "turn-end", ...input });
-      pruneActivityFacts(heart, ACTIVITY_LIMIT);
+      pruneActivityFacts(heart, ACTIVITY_LIMIT, true);
       return fact;
     }),
   );

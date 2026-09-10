@@ -41,9 +41,19 @@ export function lastActivityAt(database: DatabaseSync): string | null {
   return row.at;
 }
 
-export function pruneActivityFacts(database: DatabaseSync, limit: number): void {
-  const count = database.prepare("SELECT COUNT(*) AS count FROM timeline").get() as { count: number };
-  if (count.count <= limit + 500) return;
+export function pruneActivityFacts(database: DatabaseSync, limit: number, protectionReleased = false): void {
+  const highest = database.prepare("SELECT COALESCE(MAX(sequence), 0) AS value FROM timeline").get() as {
+    value: number;
+  };
+  const checked = database.prepare("SELECT checked_sequence FROM activity_retention WHERE singleton = 1").get() as
+    | { checked_sequence: number }
+    | undefined;
+  if (!protectionReleased && highest.value <= Math.max(limit + 500, (checked?.checked_sequence ?? 0) + 500)) return;
+  // This cursor records attempted maintenance, including sweeps that delete no
+  // protected facts. It never determines the retention window or lifecycle.
+  database
+    .prepare("INSERT OR REPLACE INTO activity_retention(singleton, checked_sequence) VALUES (1, ?)")
+    .run(highest.value);
   const cutoff = database
     .prepare(`SELECT sequence FROM timeline ORDER BY sequence DESC LIMIT 1 OFFSET ?`)
     .get(limit - 1) as { sequence: number } | undefined;

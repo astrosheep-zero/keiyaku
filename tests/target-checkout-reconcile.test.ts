@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { Keiyaku, Repo, type Keiyaku as KeiyakuHandle } from "../src/index.js";
@@ -11,6 +11,8 @@ import { admitIntent } from "../src/protocol/intent.js";
 import { observeContractsForAdmissionAt } from "../src/git/observe.js";
 import { withPrivateStatePublicationSeat } from "../src/git/private-state-seat.js";
 
+import { mintSnapshotId } from "../src/git/identity.js";
+import { observeTargetCheckoutShape } from "../src/git/target-placement.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import {
   appointedWorktreePath,
@@ -223,6 +225,27 @@ test("ordinary placement follows the target checkout in another worktree", async
 
   assert.equal(readFileSync(resolve(checkout, "delivered.txt"), "utf8"), "candidate\n");
   assert.equal(repository.run(["-C", checkout, "status", "--porcelain"]), "");
+});
+
+test("operational precheck failure preserves the unclaimed target and foreign index lock", async () => {
+  const { repository, contract } = await ordinaryCandidateFixture();
+  const predecessor = repository.run(["rev-parse", "refs/heads/main"]);
+  const index = readFileSync(resolve(repository.path, ".git", "index"));
+  const lock = resolve(repository.path, ".git", "index.lock");
+  writeFileSync(lock, "foreign writer\n");
+  try {
+    const delivered = acceptedDelivery(await contract.deliver());
+    assert.equal(delivered.value.placement && "failure" in delivered.value.placement
+      ? delivered.value.placement.failure : undefined, "target-placement-failed");
+    assert.equal(repository.run(["rev-parse", "refs/heads/main"]), predecessor);
+    assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "base\n");
+    assert.deepEqual(readFileSync(resolve(repository.path, ".git", "index")), index);
+    assert.equal(readFileSync(lock, "utf8"), "foreign writer\n");
+    const observed = await observeContract(await cachedRepositoryAt(repository.path), (await contract.state()).id);
+    assert.equal(observed.state?.terminal, null);
+  } finally {
+    rmSync(lock);
+  }
 });
 
 test("conflicting target bytes refuse placement before claimed or target movement", async () => {
@@ -577,4 +600,33 @@ test("reconcile does not guess after the user changes an interrupted target chec
   assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "changed after publication\n");
   assert.ok(reconciled.lag.some((lag) => lag.kind === "target-checkout-retained"));
   assert.ok(!reconciled.effects.some((effect) => effect.kind === "target-checkout" && effect.action === "recovered"));
+});
+
+
+test("checkout shape compares literal filenames, not pathspec expressions", async () => {
+  const names = process.platform === "win32" ? ["[a].txt"] : ["[a].txt", "*.txt", ":(exclude)literal.txt"];
+  for (const name of names) {
+    const repository = repositoryWithMain({ files: { [name]: "base\n", "a.txt": "decoy\n" } });
+    const predecessor = mintSnapshotId(repository.run(["rev-parse", "HEAD"]).trim());
+    writeFileSync(resolve(repository.path, name), "candidate\n");
+    repository.run(["add", "--all"]);
+    repository.run(["commit", "--quiet", "-m", "literal candidate"]);
+    const candidate = mintSnapshotId(repository.run(["rev-parse", "HEAD"]).trim());
+    const capability = await cachedRepositoryAt(repository.path);
+    const shape = () => observeTargetCheckoutShape(capability, { path: repository.path, predecessor, candidate });
+
+    repository.run(["reset", "--hard", predecessor]);
+    assert.equal(await shape(), "recoverable", `${name}: predecessor checkout still needs follow`);
+    writeFileSync(resolve(repository.path, name), "candidate\n");
+    assert.equal(await shape(), "recoverable", `${name}: candidate bytes still need index follow`);
+    writeFileSync(resolve(repository.path, name), "local unstaged\n");
+    assert.equal(await shape(), "retained", `${name}: preserve unrelated local bytes`);
+    repository.run(["add", "--all"]);
+    assert.equal(await shape(), "retained", `${name}: preserve local index bytes`);
+
+    repository.run(["reset", "--hard", candidate]);
+    writeFileSync(resolve(repository.path, "a.txt"), "unrelated local\n");
+    repository.run(["add", "--all"]);
+    assert.equal(await shape(), "complete", `${name}: a matching glob must not include a decoy`);
+  }
 });

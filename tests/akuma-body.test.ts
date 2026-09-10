@@ -27,7 +27,7 @@ import {
   initializeHeart,
   pauseRequested,
   probeLeash,
-  provePendingTellDispositionCustody,
+  resolvePendingTellDisposition,
   readHeart,
   readOpenPendingTellDisposition,
   readRequest,
@@ -1348,7 +1348,7 @@ test("concurrent handoff before ending-body leash release does not consume the s
     });
     assert.deepEqual(decided?.tellIds, ["tell-concurrent-leash"]);
     assert.equal(await probeLeash(allocated.paths), "held");
-    assert.equal((await provePendingTellDispositionCustody(allocated.paths, decided!)).kind, "unproven");
+    assert.equal(await resolvePendingTellDisposition(allocated.paths, decided!.bodySequence, seed.createdAt), false);
     let spawnAttempts = 0;
     await handoffPendingTells(allocated.paths, async () => {
       spawnAttempts += 1;
@@ -1421,7 +1421,7 @@ test("open disposition referencing a missing Tell is Heart corruption, not prove
     heart.close();
 
     await assert.rejects(
-      provePendingTellDispositionCustody(allocated.paths, decided!),
+      resolvePendingTellDisposition(allocated.paths, decided!.bodySequence, seed.createdAt),
       /Akuma disposition references missing tell tell-missing-row/u,
     );
     await assert.rejects(

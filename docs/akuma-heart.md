@@ -26,7 +26,16 @@ and an answer without such a point remain non-forkable.
 
 Activity is bounded retained provider narration, not a raw payload log or a
 recovery authority. Compaction retains open work, pending tells, and required
-structure, while old closed groups can become permanently unavailable. The public
+structure, while old closed groups can become permanently unavailable. An open
+pending-Tell disposition retains its frozen Tell identities and the delivery
+structure needed to prove them, including Tells already witnessed as told.
+Proof consumption and release of those dependencies are one Heart mutation.
+The resolved decision remains evidence of that Body's one decision; duplicate
+resolution does not reread retired members or capture later Tells. A protected
+backlog is not itself a new reason to compact: maintenance is amortized over new
+history and runs when protected work is released. Maintenance progress can only
+avoid repeated work; it cannot decide a fact's liveness or replace the retained
+history window. The public
 timeline projector is pure and derives snapshots, gaps, history loss, activity
 selection, and reported changes from this one sequence. These projections never
 become facts or cursors of a second store.
