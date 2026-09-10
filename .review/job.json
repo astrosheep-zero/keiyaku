@@ -1,1 +1,1 @@
-{"parent":"a822667cb0db10b8ac69de202f81f98cd9296201","tree":"3fa91c0168fcbec08db2a3263176981ffe11aa16","branch":"codex/perf-plugin-drain-deadline-20260910","message":"perf: retire plugin drain deadlines after successful settlement"}
+{"parent":"a3cfdfc8d53184ea9ba1fc56df3537081a273a4b","tree":"5b80c10310651e2c8e92d7c559669f158df800a3","branch":"codex/test-heart-retention-batch-20260910","message":"test: batch Heart retention history instead of reopening SQLite 501 times"}
