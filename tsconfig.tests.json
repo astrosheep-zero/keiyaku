@@ -20,6 +20,8 @@
     "tests/akuma-physical.test.ts",
     "tests/plugin-square.test.ts",
     "tests/cli-akuma-msys.test.ts",
+    "tests/cli-akuma-packaged.test.ts",
+    "tests/cli-adaptation.test.ts",
     "tests/library-contract-operations.test.ts",
     "tests/public-library.test.ts",
     "tests/facade-contract.test.ts",
