@@ -52,7 +52,7 @@
     "test:release": "node scripts/test-entry.mjs --release",
     "test:dev": "node scripts/test-entry.mjs --dev",
     "test:architecture": "node --import tsx scripts/check-architecture.ts",
-    "test:e2e": "npm run build && node scripts/run-tests.mjs tests/packaged-cli.e2e.ts",
+    "test:e2e": "npm run build && node scripts/run-tests.mjs tests/packaged-cli.e2e.ts tests/cli-akuma-packaged.e2e.ts",
     "test:local": "node scripts/run-tests.mjs --suite local",
     "test:integration": "node scripts/run-tests.mjs --suite integration",
     "test:parallel": "node scripts/run-tests.mjs --suite local --test-concurrency=8 && node scripts/run-tests.mjs --suite integration --test-concurrency=8",

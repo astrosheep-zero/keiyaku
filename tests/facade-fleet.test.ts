@@ -1,48 +1,32 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import test from "node:test";
-import { moveAlias } from "../src/alias/index.js";
-import { akumaStatusSchema, type AkumaStatus } from "../src/akuma/akuma.js";
+import test, { type TestContext } from "node:test";
 import { boundedMap, PAGE_POOL_SIZE } from "../src/akuma/akuma-product.js";
-import { driveAkumaBody, LEASH_HELD_EXIT, type TellWakeRuntime } from "../src/akuma/body.js";
-import {
-  HeldAkumaLeash,
-  appendActivity,
-  beginTurn,
-  endTurn,
-  initializeHeart,
-  readHeart,
-  recordSession,
-  recordTell,
-} from "../src/akuma/heart/index.js";
-import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
-import { allocateAkumaDirectory, akuId } from "../src/akuma/identity.js";
-import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import { AkumaNotBornError } from "../src/akuma/akuma.js";
-import { AkumaComposition as Akuma, AkumaHandle } from "./support/akuma-composition.js";
+import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
+import { driveAkumaBody } from "../src/akuma/body.js";
+import { appendActivity, beginTurn, initializeHeart, readHeart, recordTell } from "../src/akuma/heart/index.js";
+import { akuId, allocateAkumaDirectory } from "../src/akuma/identity.js";
+import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
+import { moveAlias } from "../src/alias/index.js";
+import { contractId } from "../src/core/facts/types.js";
+import { publishDispatch } from "../src/dispatch/index.js";
+import { repositoryAt } from "../src/git/repository.js";
+import { parseAkumaAlias } from "../src/identity/selector.js";
 import { AkumaWorldScopeError, Keiyaku, Repo, type Catalog, type WorldRoot } from "../src/index.js";
-import { invoke } from "../src/cli/invoke.js";
-import type { InvocationResult } from "../src/cli/invoke.js";
-import { main } from "../src/cli/main.js";
-import { parseArgv as parseInvocation, type ParsedExecution } from "../src/cli/parse.js";
-import { projectTaskBoardObservation, taskRowsSchema, type TaskRow } from "../src/task/board.js";
-import { Tasks, type TaskId } from "../src/task/index.js";
-import { formatTaskId } from "../src/task/identity.js";
+import { observeKanshi } from "../src/kanshi/read.js";
+import { addressAkumaSet, resolveNamedAddress } from "../src/library/address.js";
+import { drainPluginRuntime } from "../src/plugin/runtime.js";
+import { projectTaskBoardObservation } from "../src/task/board.js";
 import { serializeTaskDocument, type TaskDocument } from "../src/task/document.js";
+import { Tasks, type TaskId } from "../src/task/index.js";
 import { authorityPath, readBoard } from "../src/task/store.js";
 import { World } from "../src/world.js";
+import { AkumaComposition as Akuma } from "./support/akuma-composition.js";
 import { makeGitRepository } from "./support/git.js";
-import { matchesAkumaGlob, parseAkumaAlias, parseAkumaGlob } from "../src/identity/selector.js";
-import { addressAkumaSet, resolveNamedAddress } from "../src/library/address.js";
-import { observeKanshi } from "../src/kanshi/read.js";
-import { publishDispatch } from "../src/dispatch/index.js";
-import { drainPluginRuntime } from "../src/plugin/runtime.js";
-import { repositoryAt } from "../src/git/repository.js";
-import { contractId } from "../src/core/facts/types.js";
 import { taskDocument as creatorTask, writeTaskAuthority as writeCreatorTask } from "./support/task.js";
 
 let fixtureHistory = 0;
@@ -87,82 +71,15 @@ const provider: ProviderAdapter = {
   resume: fixtureSession,
 };
 
-async function settleFixtureBodies(bodies: readonly Promise<unknown>[]): Promise<void> {
-  await Promise.all(bodies.map((body) => body.catch(() => undefined)));
-}
-
-function fixtureRuntime(bodies: Promise<unknown>[], fixtures: ReadonlyMap<string, ProviderAdapter>): TellWakeRuntime {
-  return {
-    async spawn(paths) {
-      const adapter = fixtures.get(paths.directory);
-      if (adapter === undefined) throw new Error(`missing Fleet fixture adapter for ${paths.directory}`);
-      const body = driveAkumaBody({ paths, refuseIfHeld: true }, adapter, {
-        now: () => "2026-08-11T00:00:00.000Z",
-      });
-      bodies.push(body);
-      return {
-        pid: 0,
-        exited: body.then(
-          (result) => ({
-            code: result === "held" ? LEASH_HELD_EXIT : 0,
-            signal: null,
-            log: { path: paths.log, from: 0, to: 0 },
-          }),
-          () => ({ code: 1, signal: null, log: { path: paths.log, from: 0, to: 0 } }),
-        ),
-        async terminate() {},
-        release() {},
-      };
-    },
-  };
-}
-
-const fixtureRuntimes = new Map<WorldRoot, TellWakeRuntime>();
-const originalTell = AkumaHandle.prototype.tell;
-const originalInterrupt = AkumaHandle.prototype.interrupt;
-AkumaHandle.prototype.tell = function (body, tellId, recordedAt, existingRuntime, schemaJson) {
-  const runtime = fixtureRuntimes.get((this as unknown as { worldPath: WorldRoot }).worldPath);
-  return originalTell.call(this, body, tellId, recordedAt, existingRuntime ?? runtime, schemaJson);
-};
-AkumaHandle.prototype.interrupt = function (body, options = {}) {
-  const runtime = fixtureRuntimes.get((this as unknown as { worldPath: WorldRoot }).worldPath);
-  return originalInterrupt.call(
-    this,
-    body,
-    options.runtime !== undefined || runtime === undefined ? options : { ...options, runtime },
-  );
-};
-
-function registerTellRuntime(
-  root: WorldRoot,
-  bodies: Promise<unknown>[],
-  fixtures: ReadonlyMap<string, ProviderAdapter>,
-) {
-  const runtime = fixtureRuntime(bodies, fixtures);
-  fixtureRuntimes.set(root, runtime);
-  return () => fixtureRuntimes.delete(root);
-}
-
-function fixtureRoot(prefix: string): WorldRoot {
-  return realpathSync(mkdtempSync(join(tmpdir(), prefix))) as WorldRoot;
-}
-
-function parseArgv(argv: readonly string[]): ParsedExecution {
-  const parsed = parseInvocation(argv);
-  if ("help" in parsed) throw new Error("expected executable command");
-  return parsed;
+function fixtureRoot(t: TestContext, prefix: string): WorldRoot {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), prefix))) as WorldRoot;
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  return root;
 }
 
 function catalogOf<K extends Catalog["kind"]>(catalog: Catalog, kind: K): Extract<Catalog, { kind: K }> {
   if (catalog.kind !== kind) throw new Error(`expected ${kind} catalogue`);
   return catalog as Extract<Catalog, { kind: K }>;
-}
-
-async function invokeCommand(
-  invocation: ParsedExecution,
-  runtime?: Parameters<typeof invoke>[1],
-): Promise<InvocationResult> {
-  return (await invoke(invocation, runtime)) as InvocationResult;
 }
 
 function taskCatalogDocument(id: TaskId, updatedAt: string): TaskDocument {
@@ -180,38 +97,6 @@ function taskCatalogDocument(id: TaskId, updatedAt: string): TaskDocument {
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt,
   };
-}
-
-test("Akuma and Task owner schemas strictly decode Fleet projections", () => {
-  const status: AkumaStatus = {
-    id: akuId({ archetype: "worker", suffix: "00000001" }),
-    life: "running",
-    timeline: { kind: "unborn", entries: [], omitted: 0, reportedChanges: [], reportedChangesOmitted: 0 },
-  };
-  const row: TaskRow = {
-    id: formatTaskId({ namespace: [], localId: "fleet-row" }),
-    title: "Fleet row",
-    state: "open",
-    priority: 2,
-    disposition: "ready",
-    updatedAt: "2026-08-29T00:00:00.000Z",
-    bodyPresent: false,
-  };
-
-  assert.deepEqual(akumaStatusSchema.parse(status), status);
-  assert.deepEqual(taskRowsSchema.parse([row]), [row]);
-  assert.equal(akumaStatusSchema.safeParse({ ...status, undeclared: true }).success, false);
-  assert.equal(taskRowsSchema.safeParse([{ ...row, undeclared: true }]).success, false);
-});
-
-async function completeTurn(
-  paths: Parameters<typeof beginTurn>[0],
-  bodySequence: number,
-  outcome: Parameters<typeof endTurn>[1]["outcome"],
-  completedAt: string,
-): Promise<void> {
-  const turn = await beginTurn(paths, { bodySequence, startedAt: completedAt });
-  await endTurn(paths, { turnSequence: turn.sequence, outcome, completedAt });
 }
 
 async function openOrdinary(
@@ -320,242 +205,164 @@ function corruptHeart(root: string, suffix: string) {
   return id;
 }
 
-test("facade snapshots aliases and globs with stable dedupe for wait and kill", async () => {
-  const root = fixtureRoot("keiyaku-facade-fleet-");
-  try {
-    const worker = await answered(root, "worker", "00000002");
-    const reviewer = await answered(root, "reviewer", "00000001");
-    await moveAlias({ world: root, alias: parseAkumaAlias("@review"), akuId: reviewer.id });
+test("facade snapshots aliases and globs with stable dedupe for wait and kill", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-fleet-");
+  const worker = await answered(root, "worker", "00000002");
+  const reviewer = await answered(root, "reviewer", "00000001");
+  await moveAlias({ world: root, alias: parseAkumaAlias("@review"), akuId: reviewer.id });
 
-    assert.equal((await Keiyaku.status({ path: root, akuma: "@review" })).status.id, reviewer.id);
-    const waited = await Keiyaku.wait({
-      path: root,
-      akuma: ["aku/*/*", "@review", worker.id],
-      completion: "all",
-      timeoutMs: 0,
-    });
-    assert.deepEqual(
-      waited.observations.map((view) => view.status.id),
-      [reviewer.id, worker.id],
-    );
+  assert.equal((await Keiyaku.status({ path: root, akuma: "@review" })).status.id, reviewer.id);
+  const waited = await Keiyaku.wait({
+    path: root,
+    akuma: ["aku/*/*", "@review", worker.id],
+    completion: "all",
+    timeoutMs: 0,
+  });
+  assert.deepEqual(
+    waited.observations.map((view) => view.status.id),
+    [reviewer.id, worker.id],
+  );
 
-    const killed = await Keiyaku.kill({ path: root, akuma: ["@review", worker.id] });
-    assert.deepEqual(
-      killed.results.map((member) => member.id),
-      [reviewer.id, worker.id],
-    );
-    assert.deepEqual(
-      killed.results.map((member) => member.evidence),
-      ["already-stopped", "already-stopped"],
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+  const killed = await Keiyaku.kill({ path: root, akuma: ["@review", worker.id] });
+  assert.deepEqual(
+    killed.results.map((member) => member.id),
+    [reviewer.id, worker.id],
+  );
+  assert.deepEqual(
+    killed.results.map((member) => member.evidence),
+    ["already-stopped", "already-stopped"],
+  );
 });
 
-test("facade requires an explicit completion mode for a plural wait", async () => {
-  const root = fixtureRoot("keiyaku-facade-wait-mode-");
-  try {
-    const one = await answered(root, "worker", "00000001");
-    const two = await answered(root, "worker", "00000002");
-    await assert.rejects(
-      Keiyaku.wait({ path: root, akuma: [one.id, two.id], timeoutMs: 0 }),
-      /completion must be any or all/u,
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+test("facade requires an explicit completion mode for a plural wait", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-wait-mode-");
+  const one = await answered(root, "worker", "00000001");
+  const two = await answered(root, "worker", "00000002");
+  await assert.rejects(
+    Keiyaku.wait({ path: root, akuma: [one.id, two.id], timeoutMs: 0 }),
+    /completion must be any or all/u,
+  );
 });
 
-test("plural wait skips an earlier unreadable member without spending its shared budget", async () => {
-  const root = fixtureRoot("keiyaku-facade-wait-budget-");
-  try {
-    const unreadable = corruptHeart(root, "00000000");
-    const sources = [];
-    for (let member = 1; member <= 5; member += 1) {
-      const source = await answered(root, "worker", String(member).padStart(8, "0"));
-      await openOrdinary(source.paths, `2026-08-11T00:0${member}:00.000Z`, {
-        prefix: `member-${member}`,
-        voices: 5,
-        notes: 2,
-        ...(member === 5 ? { tool: true, tellId: "complete-pending" } : {}),
-      });
-      sources.push(source);
-    }
-    const exhausted = await answered(root, "worker", "00000006");
-    await openOrdinary(exhausted.paths, "2026-08-11T00:06:00.000Z", {
-      prefix: "exhausted",
-      notes: 2,
-      tool: true,
-      tellId: "pending",
-    });
-    sources.push(exhausted);
-
-    const waited = await Keiyaku.wait({
-      path: root,
-      akuma: [unreadable, ...sources.map((source) => source.id)],
-      completion: "all",
-      timeoutMs: 0,
-    });
-    const ordinary = waited.observations.flatMap(ordinaryEntries);
-    assert.equal(ordinary.length, 30);
-    assert.deepEqual(
-      waited.observations.slice(0, 5).map((view) => ordinaryEntries(view).length),
-      [6, 6, 6, 6, 6],
-    );
-    assert.equal(
-      waited.observations.every((view) => toldEntries(view).length === 0),
-      true,
-    );
-    assert.equal(hasPinned(waited.observations[4]!), true);
-    assert.equal(waited.observations[5]!.status.timeline.kind, "open");
-    assert.equal(ordinaryEntries(waited.observations[5]!).length, 0);
-    assert.equal(hasPinned(waited.observations[5]!), true);
-    assert.deepEqual(
-      waited.observations[5]!.status.timeline.entries.map((entry) =>
-        entry.kind === "gap" ? `gap:${entry.count}` : entry.row.kind,
-      ),
-      ["gap:2", "tool", "tell"],
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("plural wait carries unused allowance and keeps pins after exhaustion", async () => {
-  const root = fixtureRoot("keiyaku-facade-wait-budget-flow-");
-  try {
-    const sparse = await answered(root, "worker", "00000001");
-    await openOrdinary(sparse.paths, "2026-08-11T00:01:00.000Z", { prefix: "sparse", notes: 2 });
-    const complete = [];
-    for (let member = 2; member <= 5; member += 1) {
-      const source = await answered(root, "worker", String(member).padStart(8, "0"));
-      await openOrdinary(source.paths, `2026-08-11T00:0${member}:00.000Z`, {
-        prefix: `member-${member}`,
-        voices: 5,
-        notes: 2,
-      });
-      complete.push(source);
-    }
-    const partial = await answered(root, "worker", "00000006");
-    await openOrdinary(partial.paths, "2026-08-11T00:06:00.000Z", {
-      prefix: "partial",
+test("plural wait skips an earlier unreadable member without spending its shared budget", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-wait-budget-");
+  const unreadable = corruptHeart(root, "00000000");
+  const sources = [];
+  for (let member = 1; member <= 5; member += 1) {
+    const source = await answered(root, "worker", String(member).padStart(8, "0"));
+    await openOrdinary(source.paths, `2026-08-11T00:0${member}:00.000Z`, {
+      prefix: `member-${member}`,
       voices: 5,
       notes: 2,
-      tool: true,
-      tellId: "partial-pending",
+      ...(member === 5 ? { tool: true, tellId: "complete-pending" } : {}),
     });
-    const exhausted = await answered(root, "worker", "00000007");
-    await openOrdinary(exhausted.paths, "2026-08-11T00:07:00.000Z", {
-      prefix: "exhausted",
+    sources.push(source);
+  }
+  const exhausted = await answered(root, "worker", "00000006");
+  await openOrdinary(exhausted.paths, "2026-08-11T00:06:00.000Z", {
+    prefix: "exhausted",
+    notes: 2,
+    tool: true,
+    tellId: "pending",
+  });
+  sources.push(exhausted);
+
+  const waited = await Keiyaku.wait({
+    path: root,
+    akuma: [unreadable, ...sources.map((source) => source.id)],
+    completion: "all",
+    timeoutMs: 0,
+  });
+  const ordinary = waited.observations.flatMap(ordinaryEntries);
+  assert.equal(ordinary.length, 30);
+  assert.deepEqual(
+    waited.observations.slice(0, 5).map((view) => ordinaryEntries(view).length),
+    [6, 6, 6, 6, 6],
+  );
+  assert.equal(
+    waited.observations.every((view) => toldEntries(view).length === 0),
+    true,
+  );
+  assert.equal(hasPinned(waited.observations[4]!), true);
+  assert.equal(waited.observations[5]!.status.timeline.kind, "open");
+  assert.equal(ordinaryEntries(waited.observations[5]!).length, 0);
+  assert.equal(hasPinned(waited.observations[5]!), true);
+  assert.deepEqual(
+    waited.observations[5]!.status.timeline.entries.map((entry) =>
+      entry.kind === "gap" ? `gap:${entry.count}` : entry.row.kind,
+    ),
+    ["gap:2", "tool", "tell"],
+  );
+});
+
+test("plural wait carries unused allowance and keeps pins after exhaustion", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-wait-budget-flow-");
+  const sparse = await answered(root, "worker", "00000001");
+  await openOrdinary(sparse.paths, "2026-08-11T00:01:00.000Z", { prefix: "sparse", notes: 2 });
+  const complete = [];
+  for (let member = 2; member <= 5; member += 1) {
+    const source = await answered(root, "worker", String(member).padStart(8, "0"));
+    await openOrdinary(source.paths, `2026-08-11T00:0${member}:00.000Z`, {
+      prefix: `member-${member}`,
       voices: 5,
       notes: 2,
-      tool: true,
-      tellId: "exhausted-pending",
     });
-
-    const waited = await Keiyaku.wait({
-      path: root,
-      akuma: [sparse.id, ...complete.map((source) => source.id), partial.id, exhausted.id],
-      completion: "all",
-      timeoutMs: 0,
-    });
-    assert.equal(waited.observations.flatMap(ordinaryEntries).length, 30);
-    assert.equal(ordinaryEntries(waited.observations[0]!).length, 2);
-    assert.deepEqual(
-      waited.observations.slice(1, 5).map((view) => ordinaryEntries(view).length),
-      [6, 6, 6, 6],
-    );
-    assert.equal(
-      waited.observations.every((view) => toldEntries(view).length === 0),
-      true,
-    );
-    const later = waited.observations[5]!;
-    assert.deepEqual(
-      ordinaryEntries(later).map((entry) =>
-        entry.kind === "row" && (entry.row.kind === "said" || entry.row.kind === "note") ? entry.row.text : entry.kind,
-      ),
-      ["partial-voice-3", "partial-voice-4", "partial-note-0", "partial-note-1"],
-    );
-    assert.equal(hasPinned(later), true);
-    assert.equal(ordinaryEntries(waited.observations[6]!).length, 0);
-    assert.equal(hasPinned(waited.observations[6]!), true);
-    assert.equal(waited.observations[6]!.status.timeline.kind, "open");
-    assert.deepEqual(
-      waited.observations[6]!.status.timeline.entries.map((entry) =>
-        entry.kind === "gap" ? `gap:${entry.count}` : entry.row.kind,
-      ),
-      ["gap:7", "tool", "tell"],
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
+    complete.push(source);
   }
+  const partial = await answered(root, "worker", "00000006");
+  await openOrdinary(partial.paths, "2026-08-11T00:06:00.000Z", {
+    prefix: "partial",
+    voices: 5,
+    notes: 2,
+    tool: true,
+    tellId: "partial-pending",
+  });
+  const exhausted = await answered(root, "worker", "00000007");
+  await openOrdinary(exhausted.paths, "2026-08-11T00:07:00.000Z", {
+    prefix: "exhausted",
+    voices: 5,
+    notes: 2,
+    tool: true,
+    tellId: "exhausted-pending",
+  });
+
+  const waited = await Keiyaku.wait({
+    path: root,
+    akuma: [sparse.id, ...complete.map((source) => source.id), partial.id, exhausted.id],
+    completion: "all",
+    timeoutMs: 0,
+  });
+  assert.equal(waited.observations.flatMap(ordinaryEntries).length, 30);
+  assert.equal(ordinaryEntries(waited.observations[0]!).length, 2);
+  assert.deepEqual(
+    waited.observations.slice(1, 5).map((view) => ordinaryEntries(view).length),
+    [6, 6, 6, 6],
+  );
+  assert.equal(
+    waited.observations.every((view) => toldEntries(view).length === 0),
+    true,
+  );
+  const later = waited.observations[5]!;
+  assert.deepEqual(
+    ordinaryEntries(later).map((entry) =>
+      entry.kind === "row" && (entry.row.kind === "said" || entry.row.kind === "note") ? entry.row.text : entry.kind,
+    ),
+    ["partial-voice-3", "partial-voice-4", "partial-note-0", "partial-note-1"],
+  );
+  assert.equal(hasPinned(later), true);
+  assert.equal(ordinaryEntries(waited.observations[6]!).length, 0);
+  assert.equal(hasPinned(waited.observations[6]!), true);
+  assert.equal(waited.observations[6]!.status.timeline.kind, "open");
+  assert.deepEqual(
+    waited.observations[6]!.status.timeline.entries.map((entry) =>
+      entry.kind === "gap" ? `gap:${entry.count}` : entry.row.kind,
+    ),
+    ["gap:7", "tool", "tell"],
+  );
 });
 
-test("status and wait do not fabricate a settled Tell; tell and kill do not carry observations", async () => {
-  const root = fixtureRoot("keiyaku-facade-tell-pin-");
-  const bodies: Promise<unknown>[] = [];
-  const fixtures = new Map<string, ProviderAdapter>();
-  const restoreTellRuntime = registerTellRuntime(root, bodies, fixtures);
-  let held: HeldAkumaLeash | undefined;
-  try {
-    const source = await answered(root, "worker", "00000001");
-    fixtures.set(source.paths.directory, provider);
-    const hasTold = (entries: Awaited<ReturnType<typeof Keiyaku.status>>["status"]["timeline"]["entries"]) =>
-      entries.some((entry) => entry.kind === "row" && entry.row.kind === "tell" && entry.row.state === "told");
-    const status = await Keiyaku.status({ path: root, akuma: source.id });
-    assert.equal(hasTold(status.status.timeline.entries), false);
-    const waited = await Keiyaku.wait({ path: root, akuma: [source.id], timeoutMs: 0 });
-    assert.equal(hasTold(waited.observations[0]!.status.timeline.entries), false);
-    const killed = await Keiyaku.kill({ path: root, akuma: [source.id] });
-    assert.equal("observation" in killed.results[0]!, false);
-    held = (await HeldAkumaLeash.try(source.paths))!;
-    const told = await Keiyaku.tell({ path: root, akuma: source.id, body: "continue" });
-    assert.equal("observation" in told, false);
-  } finally {
-    held?.release();
-    restoreTellRuntime();
-    await settleFixtureBodies(bodies);
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("facade tell preserves its primary mutation authority", async () => {
-  const root = fixtureRoot("keiyaku-facade-tell-");
-  const bodies: Promise<unknown>[] = [];
-  const fixtures = new Map<string, ProviderAdapter>();
-  const restoreTellRuntime = registerTellRuntime(root, bodies, fixtures);
-  let held: HeldAkumaLeash | undefined;
-  try {
-    const source = await answered(root, "worker", "00000001");
-    fixtures.set(source.paths.directory, provider);
-    held = (await HeldAkumaLeash.try(source.paths))!;
-    const result = await Keiyaku.tell({ path: root, akuma: source.id, body: "continue" });
-    assert.equal(result.akuma, source.id);
-    assert.equal(result.tell.admission.fact, "recorded");
-    assert.equal(typeof result.tell.admission.tellId, "string");
-    assert.deepEqual(result.tell.row, {
-      kind: "tell",
-      sequence: result.tell.row.sequence,
-      at: result.tell.row.at,
-      tellId: result.tell.admission.tellId,
-      text: "continue",
-      state: "pending",
-      deliveries: [],
-    });
-    assert.equal("observation" in result, false);
-    assert.equal("receipt" in result, false);
-    assert.equal("status" in result, false);
-  } finally {
-    held?.release();
-    restoreTellRuntime();
-    await settleFixtureBodies(bodies);
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("facade ls reads exactly one selected identity directory", async () => {
-  const root = fixtureRoot("keiyaku-facade-catalog-");
+test("facade ls reads exactly one selected identity directory", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-catalog-");
   const home = mkdtempSync(join(tmpdir(), "keiyaku-facade-catalog-home-"));
   try {
     const source = await answered(root, "worker", "00000001");
@@ -604,60 +411,56 @@ test("facade ls reads exactly one selected identity directory", async () => {
   }
 });
 
-test("facade Akuma catalog returns bounded Heart activity in semantic order", async () => {
-  const root = fixtureRoot("keiyaku-facade-akuma-page-");
-  try {
-    const first = await answered(root, "worker", "00000003");
-    const tiedFirst = await answered(root, "worker", "00000001");
-    const tiedSecond = await answered(root, "worker", "00000002");
-    const reviewer = await answered(root, "reviewer", "00000001");
-    await appendActivity(first.paths, {
+test("facade Akuma catalog returns bounded Heart activity in semantic order", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-akuma-page-");
+  const first = await answered(root, "worker", "00000003");
+  const tiedFirst = await answered(root, "worker", "00000001");
+  const tiedSecond = await answered(root, "worker", "00000002");
+  const reviewer = await answered(root, "reviewer", "00000001");
+  await appendActivity(first.paths, {
+    turnSequence: 1,
+    event: { type: "activity", event: { provider: "fixture" } },
+    at: "2026-08-11T00:00:01.000Z",
+  });
+  for (const source of [tiedFirst, tiedSecond]) {
+    await appendActivity(source.paths, {
       turnSequence: 1,
       event: { type: "activity", event: { provider: "fixture" } },
-      at: "2026-08-11T00:00:01.000Z",
+      at: "2026-08-11T00:00:02.000Z",
     });
-    for (const source of [tiedFirst, tiedSecond]) {
-      await appendActivity(source.paths, {
-        turnSequence: 1,
-        event: { type: "activity", event: { provider: "fixture" } },
-        at: "2026-08-11T00:00:02.000Z",
-      });
-    }
-    await appendActivity(reviewer.paths, {
-      turnSequence: 1,
-      event: { type: "activity", event: { provider: "fixture" } },
-      at: "2026-08-11T00:00:03.000Z",
-    });
-
-    const page = await Keiyaku.ls({ query: { kind: "akuma", archetype: "worker", limit: 2 }, path: root });
-    assert.equal(page.kind, "akuma");
-    assert.deepEqual(
-      page.rows.map((row) => row.id),
-      [tiedFirst.id, tiedSecond.id],
-    );
-    assert.equal(page.hasMore, true);
-    const originalPrepare = DatabaseSync.prototype.prepare;
-    let custodyReads = 0;
-    DatabaseSync.prototype.prepare = function (...args) {
-      custodyReads += 1;
-      return originalPrepare.apply(this, args);
-    };
-    try {
-      await assert.rejects(
-        Keiyaku.ls({ query: { kind: "akuma", limit: 501 }, path: root }),
-        /limit must be an integer from 1 to 500/u,
-      );
-    } finally {
-      DatabaseSync.prototype.prepare = originalPrepare;
-    }
-    assert.equal(custodyReads, 0);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
   }
+  await appendActivity(reviewer.paths, {
+    turnSequence: 1,
+    event: { type: "activity", event: { provider: "fixture" } },
+    at: "2026-08-11T00:00:03.000Z",
+  });
+
+  const page = await Keiyaku.ls({ query: { kind: "akuma", archetype: "worker", limit: 2 }, path: root });
+  assert.equal(page.kind, "akuma");
+  assert.deepEqual(
+    page.rows.map((row) => row.id),
+    [tiedFirst.id, tiedSecond.id],
+  );
+  assert.equal(page.hasMore, true);
+  const originalPrepare = DatabaseSync.prototype.prepare;
+  let custodyReads = 0;
+  DatabaseSync.prototype.prepare = function (...args) {
+    custodyReads += 1;
+    return originalPrepare.apply(this, args);
+  };
+  try {
+    await assert.rejects(
+      Keiyaku.ls({ query: { kind: "akuma", limit: 501 }, path: root }),
+      /limit must be an integer from 1 to 500/u,
+    );
+  } finally {
+    DatabaseSync.prototype.prepare = originalPrepare;
+  }
+  assert.equal(custodyReads, 0);
 });
 
-test("recent Akuma page prunes old custody bounds without changing Heart membership", async () => {
-  const root = fixtureRoot("keiyaku-facade-akuma-page-scale-");
+test("recent Akuma page prunes old custody bounds without changing Heart membership", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-akuma-page-scale-");
   const old = new Date("2000-01-01T00:00:00.000Z");
   const originalPrepare = DatabaseSync.prototype.prepare;
   const oldCount = 490;
@@ -735,8 +538,8 @@ test("recent Akuma page prunes old custody bounds without changing Heart members
   }
 });
 
-test("all-null Akuma fallback retains exact membership through the fixed Heart read pool", async () => {
-  const root = fixtureRoot("keiyaku-facade-akuma-page-null-");
+test("all-null Akuma fallback retains exact membership through the fixed Heart read pool", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-akuma-page-null-");
   const originalPrepare = DatabaseSync.prototype.prepare;
   try {
     const allocated = [];
@@ -782,345 +585,161 @@ test("all-null Akuma fallback retains exact membership through the fixed Heart r
   }
 });
 
-test("Task catalog uses the shared bounded-list default", async () => {
-  const root = fixtureRoot("keiyaku-facade-catalog-page-");
-  try {
-    const first = await Tasks.of(await World.at(root)).add({ title: "Catalog 000" });
-    assert.equal(first.kind, "accepted");
-    for (let index = 1; index <= 50; index += 1) {
-      const suffix = String(index).padStart(3, "0");
-      const id = `task/catalog-${suffix}` as TaskId;
-      writeFileSync(
-        authorityPath(await World.at(root), id),
-        serializeTaskDocument({
-          id,
-          title: `Catalog ${suffix}`,
-          body: "",
-          note: "",
-          state: "open",
-          priority: 2,
-          needs: [],
-          parent: null,
-          supersedes: [],
-          relates: [],
-          createdAt: "2026-08-14T00:00:00.000Z",
-          updatedAt: "2026-08-14T00:00:00.000Z",
-        }),
-      );
-    }
-
-    const catalog = await Keiyaku.ls({ query: { kind: "tasks" }, path: root });
-    assert.equal(catalog.kind, "tasks");
-    assert.equal(catalog.rows.length, 50);
-    assert.equal(catalog.hasMore, true);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("recent Task catalog projects the complete authoritative selection", async () => {
-  const root = fixtureRoot("keiyaku-facade-task-catalog-scale-");
-  try {
-    mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });
-    const world = await World.at(root);
-    const old = new Date("2000-01-01T00:00:00.000Z");
-    const recent = new Date("2099-01-01T00:00:00.000Z");
-    const documents: TaskDocument[] = [
-      taskCatalogDocument("task/old-0000", "2026-01-01T00:00:00.000Z"),
-      ...Array.from({ length: 11 }, (_, index) =>
-        taskCatalogDocument(
-          `task/recent-${String(index).padStart(2, "0")}`,
-          `2026-08-31T00:00:${String(index).padStart(2, "0")}.000Z`,
-        ),
-      ),
-    ];
-    for (const document of documents) {
-      const path = authorityPath(world, document.id);
-      writeFileSync(path, serializeTaskDocument(document));
-      utimesSync(
-        path,
-        document.id.startsWith("task/recent-") ? recent : old,
-        document.id.startsWith("task/recent-") ? recent : old,
-      );
-    }
-
-    const catalog = await Keiyaku.ls({ query: { kind: "tasks", limit: 10 }, path: root });
-
-    const reference = [...documents].sort(
-      (left, right) =>
-        right.updatedAt.localeCompare(left.updatedAt) || Buffer.compare(Buffer.from(left.id), Buffer.from(right.id)),
-    );
-    assert.equal(catalog.kind, "tasks");
-    assert.deepEqual(
-      catalog.rows.map((row) => row.id),
-      reference.slice(0, 10).map((document) => document.id),
-    );
-    assert.equal(catalog.hasMore, true);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("recent Task catalog returns newer canonical activity despite an older mtime", async () => {
-  const root = fixtureRoot("keiyaku-facade-task-catalog-mtime-");
-  try {
-    mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });
-    const world = await World.at(root);
-    const canonicalNew = taskCatalogDocument("task/canonical-new", "2026-08-31T00:00:00.000Z");
-    const mtimeNew = taskCatalogDocument("task/mtime-new", "2026-08-01T00:00:00.000Z");
-    for (const [document, bound] of [
-      [canonicalNew, new Date("2000-01-01T00:00:00.000Z")],
-      [mtimeNew, new Date("2099-01-01T00:00:00.000Z")],
-    ] as const) {
-      const path = authorityPath(world, document.id);
-      writeFileSync(path, serializeTaskDocument(document));
-      utimesSync(path, bound, bound);
-    }
-
-    const catalog = await Keiyaku.ls({ query: { kind: "tasks", limit: 1 }, path: root });
-    assert.equal(catalog.kind, "tasks");
-    assert.deepEqual(
-      catalog.rows.map((row) => row.id),
-      [canonicalNew.id],
-    );
-    assert.equal(catalog.hasMore, true);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("recent Task catalog does not skip older-mtime malformed authority", async () => {
-  const root = fixtureRoot("keiyaku-facade-task-catalog-malformed-");
-  try {
-    mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });
-    const world = await World.at(root);
-    const older = authorityPath(world, "task/older-malformed");
-    const newer = taskCatalogDocument("task/newer-valid", "2026-08-31T00:00:00.000Z");
-    writeFileSync(older, "not a task document\n");
-    utimesSync(older, new Date("2000-01-01T00:00:00.000Z"), new Date("2000-01-01T00:00:00.000Z"));
-    writeFileSync(authorityPath(world, newer.id), serializeTaskDocument(newer));
-    utimesSync(
-      authorityPath(world, newer.id),
-      new Date("2099-01-01T00:00:00.000Z"),
-      new Date("2099-01-01T00:00:00.000Z"),
-    );
-
-    await assert.rejects(Keiyaku.ls({ query: { kind: "tasks", limit: 1 }, path: root }), /front matter/u);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("bare Kanshi uses the 10-row recent Task catalogue", async () => {
-  const root = fixtureRoot("keiyaku-kanshi-task-window-");
-  try {
-    mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });
-    const world = await World.at(root);
+test("Task catalog uses the shared bounded-list default", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-catalog-page-");
+  const first = await Tasks.of(await World.at(root)).add({ title: "Catalog 000" });
+  assert.equal(first.kind, "accepted");
+  for (let index = 1; index <= 50; index += 1) {
+    const suffix = String(index).padStart(3, "0");
+    const id = `task/catalog-${suffix}` as TaskId;
     writeFileSync(
-      authorityPath(world, "task/old-0000" as TaskId),
-      serializeTaskDocument(taskCatalogDocument("task/old-0000", "2026-01-01T00:00:00.000Z")),
+      authorityPath(await World.at(root), id),
+      serializeTaskDocument({
+        id,
+        title: `Catalog ${suffix}`,
+        body: "",
+        note: "",
+        state: "open",
+        priority: 2,
+        needs: [],
+        parent: null,
+        supersedes: [],
+        relates: [],
+        createdAt: "2026-08-14T00:00:00.000Z",
+        updatedAt: "2026-08-14T00:00:00.000Z",
+      }),
     );
-    const documents = Array.from({ length: 11 }, (_, index) =>
+  }
+
+  const catalog = await Keiyaku.ls({ query: { kind: "tasks" }, path: root });
+  assert.equal(catalog.kind, "tasks");
+  assert.equal(catalog.rows.length, 50);
+  assert.equal(catalog.hasMore, true);
+});
+
+test("recent Task catalog projects the complete authoritative selection", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-task-catalog-scale-");
+  mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });
+  const world = await World.at(root);
+  const old = new Date("2000-01-01T00:00:00.000Z");
+  const recent = new Date("2099-01-01T00:00:00.000Z");
+  const documents: TaskDocument[] = [
+    taskCatalogDocument("task/old-0000", "2026-01-01T00:00:00.000Z"),
+    ...Array.from({ length: 11 }, (_, index) =>
       taskCatalogDocument(
         `task/recent-${String(index).padStart(2, "0")}`,
         `2026-08-31T00:00:${String(index).padStart(2, "0")}.000Z`,
       ),
+    ),
+  ];
+  for (const document of documents) {
+    const path = authorityPath(world, document.id);
+    writeFileSync(path, serializeTaskDocument(document));
+    utimesSync(
+      path,
+      document.id.startsWith("task/recent-") ? recent : old,
+      document.id.startsWith("task/recent-") ? recent : old,
     );
-    for (const document of documents) {
-      writeFileSync(authorityPath(world, document.id), serializeTaskDocument(document));
-    }
-
-    const { report } = await observeKanshi({ world });
-
-    assert.equal(report.tasks.kind, "present");
-    if (report.tasks.kind !== "present") return;
-    assert.deepEqual(
-      report.tasks.value.rows.map((row) => row.id),
-      [...documents]
-        .sort(
-          (left, right) =>
-            right.updatedAt.localeCompare(left.updatedAt) ||
-            Buffer.compare(Buffer.from(left.id), Buffer.from(right.id)),
-        )
-        .slice(0, 10)
-        .map((document) => document.id),
-    );
-    assert.equal(report.tasks.value.hasMore, true);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
   }
+
+  const catalog = await Keiyaku.ls({ query: { kind: "tasks", limit: 10 }, path: root });
+
+  const reference = [...documents].sort(
+    (left, right) =>
+      right.updatedAt.localeCompare(left.updatedAt) || Buffer.compare(Buffer.from(left.id), Buffer.from(right.id)),
+  );
+  assert.equal(catalog.kind, "tasks");
+  assert.deepEqual(
+    catalog.rows.map((row) => row.id),
+    reference.slice(0, 10).map((document) => document.id),
+  );
+  assert.equal(catalog.hasMore, true);
 });
 
-test("Task catalog namespace queries distinguish omitted, root, and named scope", async () => {
-  const root = fixtureRoot("keiyaku-facade-catalog-namespace-");
-  try {
-    const tasks = Tasks.of(await World.at(root));
-    const rootTask = await tasks.add({ title: "Catalog root", namespace: [] });
-    const featureTask = await tasks.add({ title: "Catalog feature", namespace: ["feature"] });
-    const nestedTask = await tasks.add({ title: "Catalog nested", namespace: ["feature", "ui"] });
-    assert.equal(rootTask.kind, "accepted");
-    assert.equal(featureTask.kind, "accepted");
-    assert.equal(nestedTask.kind, "accepted");
-    if (rootTask.kind !== "accepted" || featureTask.kind !== "accepted" || nestedTask.kind !== "accepted") return;
-    const rootId = rootTask.value.id;
-    const featureId = featureTask.value.id;
-    const nestedId = nestedTask.value.id;
-    const all = catalogOf(await Keiyaku.ls({ query: { kind: "tasks" }, path: root }), "tasks");
-    const rootOnly = catalogOf(await Keiyaku.ls({ query: { kind: "tasks", namespace: [] }, path: root }), "tasks");
-    const featureOnly = catalogOf(
-      await Keiyaku.ls({ query: { kind: "tasks", namespace: ["feature"] }, path: root }),
-      "tasks",
-    );
-    assert.deepEqual(
-      all.rows.map((row) => row.id),
-      [nestedId, featureId, rootId],
-    );
-    assert.equal(all.hasMore, false);
-    assert.deepEqual(
-      rootOnly.rows.map((row) => row.id),
-      [rootId],
-    );
-    assert.deepEqual(
-      featureOnly.rows.map((row) => row.id),
-      [featureId],
-    );
-    await assert.rejects(
-      () => Keiyaku.ls({ query: { kind: "tasks", namespace: ["bad/segment"] }, path: root }),
-      /canonical segments/u,
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
+test("recent Task catalog returns newer canonical activity despite an older mtime", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-task-catalog-mtime-");
+  mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });
+  const world = await World.at(root);
+  const canonicalNew = taskCatalogDocument("task/canonical-new", "2026-08-31T00:00:00.000Z");
+  const mtimeNew = taskCatalogDocument("task/mtime-new", "2026-08-01T00:00:00.000Z");
+  for (const [document, bound] of [
+    [canonicalNew, new Date("2000-01-01T00:00:00.000Z")],
+    [mtimeNew, new Date("2099-01-01T00:00:00.000Z")],
+  ] as const) {
+    const path = authorityPath(world, document.id);
+    writeFileSync(path, serializeTaskDocument(document));
+    utimesSync(path, bound, bound);
   }
+
+  const catalog = await Keiyaku.ls({ query: { kind: "tasks", limit: 1 }, path: root });
+  assert.equal(catalog.kind, "tasks");
+  assert.deepEqual(
+    catalog.rows.map((row) => row.id),
+    [canonicalNew.id],
+  );
+  assert.equal(catalog.hasMore, true);
 });
 
-test("CLI ls invokes each selected identity directory and emits selected JSON", async () => {
-  const repository = makeGitRepository();
+test("recent Task catalog does not skip older-mtime malformed authority", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-task-catalog-malformed-");
+  mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });
+  const world = await World.at(root);
+  const older = authorityPath(world, "task/older-malformed");
+  const newer = taskCatalogDocument("task/newer-valid", "2026-08-31T00:00:00.000Z");
+  writeFileSync(older, "not a task document\n");
+  utimesSync(older, new Date("2000-01-01T00:00:00.000Z"), new Date("2000-01-01T00:00:00.000Z"));
+  writeFileSync(authorityPath(world, newer.id), serializeTaskDocument(newer));
+  utimesSync(
+    authorityPath(world, newer.id),
+    new Date("2099-01-01T00:00:00.000Z"),
+    new Date("2099-01-01T00:00:00.000Z"),
+  );
+
+  await assert.rejects(Keiyaku.ls({ query: { kind: "tasks", limit: 1 }, path: root }), /front matter/u);
+});
+
+test("Task catalog namespace queries distinguish omitted, root, and named scope", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-catalog-namespace-");
+  const tasks = Tasks.of(await World.at(root));
+  const rootTask = await tasks.add({ title: "Catalog root", namespace: [] });
+  const featureTask = await tasks.add({ title: "Catalog feature", namespace: ["feature"] });
+  const nestedTask = await tasks.add({ title: "Catalog nested", namespace: ["feature", "ui"] });
+  assert.equal(rootTask.kind, "accepted");
+  assert.equal(featureTask.kind, "accepted");
+  assert.equal(nestedTask.kind, "accepted");
+  if (rootTask.kind !== "accepted" || featureTask.kind !== "accepted" || nestedTask.kind !== "accepted") return;
+  const rootId = rootTask.value.id;
+  const featureId = featureTask.value.id;
+  const nestedId = nestedTask.value.id;
+  const all = catalogOf(await Keiyaku.ls({ query: { kind: "tasks" }, path: root }), "tasks");
+  const rootOnly = catalogOf(await Keiyaku.ls({ query: { kind: "tasks", namespace: [] }, path: root }), "tasks");
+  const featureOnly = catalogOf(
+    await Keiyaku.ls({ query: { kind: "tasks", namespace: ["feature"] }, path: root }),
+    "tasks",
+  );
+  assert.deepEqual(
+    all.rows.map((row) => row.id),
+    [nestedId, featureId, rootId],
+  );
+  assert.equal(all.hasMore, false);
+  assert.deepEqual(
+    rootOnly.rows.map((row) => row.id),
+    [rootId],
+  );
+  assert.deepEqual(
+    featureOnly.rows.map((row) => row.id),
+    [featureId],
+  );
+  await assert.rejects(
+    () => Keiyaku.ls({ query: { kind: "tasks", namespace: ["bad/segment"] }, path: root }),
+    /canonical segments/u,
+  );
+});
+
+test("named Address resolution refuses a Contract short-id shared with an Alias", async (t) => {
+  const repository = fixtureRepository(t);
   const repo = await Repo.at({ path: repository.path });
-  const home = mkdtempSync(join(tmpdir(), "keiyaku-cli-ls-home-"));
-  try {
-    repository.run(["config", "user.name", "Test User"]);
-    repository.run(["config", "user.email", "test@example.com"]);
-    repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-    const world = await World.at(repository.path);
-    const task = await Tasks.of(world).add({ title: "Listed task" });
-    assert.equal(task.kind, "accepted");
-    const bound = await Keiyaku.bind({
-      repo,
-      workspace: "worktree",
-      markdown: [
-        "# Listed Contract",
-        "",
-        "## Context",
-        "List it.",
-        "",
-        "## Objective",
-        "Expose it.",
-        "",
-        "## Design",
-        "Use the selected Contract board.",
-        "",
-        "## Region",
-        "```",
-        "src/**",
-        "```",
-        "",
-        "## Criteria",
-        "### Visible",
-        "The identity is listed.",
-        "",
-      ].join("\n"),
-    });
-    const contract = (await bound.keiyaku.state()).id;
-    mkdirSync(join(home, "akuma"));
-    writeFileSync(
-      join(home, "akuma", "reviewer.md"),
-      [
-        "---",
-        "provider: codex",
-        "model: review-model",
-        "description: Full review description.",
-        "---",
-        "Review.",
-        "",
-      ].join("\n"),
-    );
-    const worker = await allocateAkumaDirectory({ worldRoot: world, archetype: "worker", draw: () => "00000001" });
-    const reviewer = await allocateAkumaDirectory({ worldRoot: world, archetype: "reviewer", draw: () => "00000002" });
-    await initializeHeart(worker.paths);
-    await initializeHeart(reviewer.paths);
 
-    const command = (path: string) =>
-      invokeCommand(parseArgv(["-C", repository.path, "ls", path]), {
-        environment: { KEIYAKU_HOME: home },
-      });
-    const tasks = await command("task/");
-    const contracts = await command("kei/");
-    const archetypes = await command("aku/");
-    const reviewers = await command("aku/reviewer/");
-    const allAkuma = await command("aku/*/*");
-    assert.equal(
-      tasks.kind === "catalog" && tasks.catalog.kind === "tasks" && tasks.catalog.rows[0]?.id,
-      task.kind === "accepted" ? task.value.id : null,
-    );
-    assert.equal(
-      contracts.kind === "catalog" &&
-        contracts.catalog.kind === "contracts" &&
-        contracts.catalog.rows.some((row) => row.id === contract),
-      true,
-    );
-    assert.deepEqual(archetypes.kind === "catalog" ? archetypes.catalog : null, {
-      kind: "archetypes",
-      rows: [{ name: "reviewer", model: "review-model", description: "Full review description." }],
-    });
-    assert.deepEqual(
-      reviewers.kind === "catalog" && reviewers.catalog.kind === "akuma"
-        ? reviewers.catalog.rows.map((row) => row.id)
-        : [],
-      [reviewer.id],
-    );
-    assert.deepEqual(
-      allAkuma.kind === "catalog" && allAkuma.catalog.kind === "akuma"
-        ? allAkuma.catalog.rows.map((row) => row.id)
-        : [],
-      [reviewer.id, worker.id],
-    );
-
-    let stdout = "";
-    const writeStdout = process.stdout.write;
-    process.stdout.write = ((chunk: string | Uint8Array) => {
-      stdout += String(chunk);
-      return true;
-    }) as typeof process.stdout.write;
-    try {
-      assert.equal(await main(["-C", repository.path, "ls", "aku/reviewer/", "--json"]), 0);
-    } finally {
-      process.stdout.write = writeStdout;
-    }
-    const json = JSON.parse(stdout) as {
-      kind: string;
-      archetype: string | null;
-      rows: readonly { id: string }[];
-      hasMore: boolean;
-    };
-    assert.deepEqual(
-      { kind: json.kind, archetype: json.archetype, rows: json.rows.map((row) => row.id), hasMore: json.hasMore },
-      {
-        kind: "akuma",
-        archetype: "reviewer",
-        rows: [reviewer.id],
-        hasMore: false,
-      },
-    );
-  } finally {
-    rmSync(home, { recursive: true, force: true });
-  }
-});
-
-test("named Address resolution refuses a Contract short-id shared with an Alias", async () => {
-  const repository = makeGitRepository();
-  const repo = await Repo.at({ path: repository.path });
-  repository.run(["config", "user.name", "Test User"]);
-  repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const bound = await Keiyaku.bind({
     repo,
@@ -1158,142 +777,47 @@ test("named Address resolution refuses a Contract short-id shared with an Alias"
   );
 });
 
-test("named Address refuses failed Kanshi Contract and Alias observations", async () => {
-  const root = fixtureRoot("keiyaku-named-kanshi-failed-");
-  try {
-    const observation = await observeKanshi({ world: root });
-    const failure = { kind: "failed" as const, failure: { message: "unavailable" } };
-    assert.throws(
-      () =>
-        resolveNamedAddress({
-          selector: "@missing",
-          report: { ...observation.report, contracts: failure },
-          aliases: observation.aliases,
-        }),
-      /Contract world is failed/u,
-    );
-    assert.throws(
-      () => resolveNamedAddress({ selector: "@missing", report: observation.report, aliases: failure }),
-      /Alias authority is failed/u,
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+test("named Address refuses failed Kanshi Contract and Alias observations", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-named-kanshi-failed-");
+  const observation = await observeKanshi({ world: root });
+  const failure = { kind: "failed" as const, failure: { message: "unavailable" } };
+  assert.throws(
+    () =>
+      resolveNamedAddress({
+        selector: "@missing",
+        report: { ...observation.report, contracts: failure },
+        aliases: observation.aliases,
+      }),
+    /Contract world is failed/u,
+  );
+  assert.throws(
+    () => resolveNamedAddress({ selector: "@missing", report: observation.report, aliases: failure }),
+    /Alias authority is failed/u,
+  );
 });
 
-test("named Address resolves a retained Alias outside Kanshi fleet rows", async () => {
-  const root = fixtureRoot("keiyaku-named-kanshi-alias-");
-  try {
-    const id = akuId({ archetype: "worker", suffix: "deadbeef" });
-    await moveAlias({ world: root, alias: parseAkumaAlias("@outside"), akuId: id });
-    const observation = await observeKanshi({ world: root });
-    assert.equal(observation.report.akuma.kind, "present");
-    assert.equal(
-      observation.report.akuma.kind === "present" && observation.report.akuma.value.rows.some((row) => row.id === id),
-      false,
-    );
-    assert.deepEqual(
-      resolveNamedAddress({ selector: "@outside", report: observation.report, aliases: observation.aliases }),
-      {
-        kind: "akuma",
-        id,
-      },
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+test("named Address resolves a retained Alias outside Kanshi fleet rows", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-named-kanshi-alias-");
+  const id = akuId({ archetype: "worker", suffix: "deadbeef" });
+  await moveAlias({ world: root, alias: parseAkumaAlias("@outside"), akuId: id });
+  const observation = await observeKanshi({ world: root });
+  assert.equal(observation.report.akuma.kind, "present");
+  assert.equal(
+    observation.report.akuma.kind === "present" && observation.report.akuma.value.rows.some((row) => row.id === id),
+    false,
+  );
+  assert.deepEqual(
+    resolveNamedAddress({ selector: "@outside", report: observation.report, aliases: observation.aliases }),
+    {
+      kind: "akuma",
+      id,
+    },
+  );
 });
 
-test("history last bypasses activity and glob grammar follows normalized archetypes", async () => {
-  const root = fixtureRoot("keiyaku-facade-last-");
-  try {
-    const source = await answered(root, "worker", "00000001");
-    await appendActivity(source.paths, {
-      turnSequence: 1,
-      event: { type: "activity", event: { provider: "legacy" } },
-      at: "2026-08-11T00:00:01.000Z",
-    });
-    assert.deepEqual(await Keiyaku.history({ path: root, akuma: source.id, last: true }), {
-      kind: "last",
-      id: source.id,
-      answer: "done",
-      contract: { kind: "none" },
-    });
-    await assert.rejects(() => Keiyaku.history({ path: root, akuma: source.id }), /invalid event shape/u);
+test("same-World Contract selector wait keeps Dispatch order and completion", async (t) => {
+  const repository = fixtureRepository(t);
 
-    const glob = parseAkumaGlob("aku/审查-👁️*/1234*");
-    assert.equal(matchesAkumaGlob(glob, "aku/审查-👁️/1234abcd"), true);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("history last selects exactly one latest answered TurnFact by durable sequence", async () => {
-  const root = fixtureRoot("keiyaku-facade-last-sequence-");
-  try {
-    const source = await allocateAkumaDirectory({ worldRoot: root, archetype: "worker", draw: () => "00000001" });
-    await initializeHeart(source.paths);
-    const bodyLeash = (await HeldAkumaLeash.try(source.paths))!;
-    const body = await bodyLeash.recordBody(source.paths, {
-      leashTakenAt: "2026-08-11T00:00:00.000Z",
-    });
-    bodyLeash.release();
-    for (const sessionId of ["session-1", "session-2", "session-3"]) {
-      await recordSession(source.paths, {
-        provider: "claude",
-        coordinate: { sessionId },
-        cwd: root,
-        options: {},
-        admittedAt: "2026-08-11T00:00:00.000Z",
-      });
-    }
-    const last = async () => Keiyaku.history({ path: root, akuma: source.id, last: true });
-
-    assert.deepEqual(await last(), { kind: "no-answer", id: source.id, contract: { kind: "none" } });
-    await completeTurn(
-      source.paths,
-      body.sequence,
-      { kind: "failed", diagnostic: "first failure" },
-      "2026-08-11T00:00:01.000Z",
-    );
-    assert.deepEqual(await last(), { kind: "no-answer", id: source.id, contract: { kind: "none" } });
-    await completeTurn(
-      source.paths,
-      body.sequence,
-      { kind: "answered", answer: "first", historyId: "history-1", session: { sessionId: "session-1" } },
-      "2026-08-11T00:00:02.000Z",
-    );
-    assert.deepEqual(await last(), { kind: "last", id: source.id, answer: "first", contract: { kind: "none" } });
-    await completeTurn(
-      source.paths,
-      body.sequence,
-      { kind: "answered", answer: "second", historyId: "history-2", session: { sessionId: "session-2" } },
-      "2026-08-11T00:00:03.000Z",
-    );
-    assert.deepEqual(await last(), { kind: "last", id: source.id, answer: "second", contract: { kind: "none" } });
-    await completeTurn(
-      source.paths,
-      body.sequence,
-      { kind: "failed", diagnostic: "later failure" },
-      "2026-08-11T00:00:04.000Z",
-    );
-    assert.deepEqual(await last(), { kind: "last", id: source.id, answer: "second", contract: { kind: "none" } });
-    await completeTurn(
-      source.paths,
-      body.sequence,
-      { kind: "answered", answer: "", historyId: "history-3", session: { sessionId: "session-3" } },
-      "2026-08-11T00:00:05.000Z",
-    );
-    assert.deepEqual(await last(), { kind: "last", id: source.id, answer: "", contract: { kind: "none" } });
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("same-World Contract selector wait keeps Dispatch order and completion", async () => {
-  const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Test User"]);
-  repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const world = await World.at(repository.path);
   const later = await answered(world, "worker", "bbbbbbbb");
@@ -1326,12 +850,10 @@ test("same-World Contract selector wait keeps Dispatch order and completion", as
   assert.equal(any.observations.length, 2);
 });
 
-test("cross-World Contract selector wait and kill refuse before operating", async () => {
-  const rawA = makeGitRepository();
-  const rawB = makeGitRepository();
+test("cross-World Contract selector wait and kill refuse before operating", async (t) => {
+  const rawA = fixtureRepository(t);
+  const rawB = fixtureRepository(t);
   for (const repository of [rawA, rawB]) {
-    repository.run(["config", "user.name", "Test User"]);
-    repository.run(["config", "user.email", "test@example.com"]);
     repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   }
   const worldA = await World.at(rawA.path);
@@ -1367,35 +889,26 @@ test("cross-World Contract selector wait and kill refuse before operating", asyn
   );
 });
 
-test("direct missing Aku remains AkumaNotBornError", async () => {
-  const root = fixtureRoot("keiyaku-direct-missing-");
-  try {
-    const missing = akuId({ archetype: "worker", suffix: "deadbeef" });
-    await assert.rejects(Keiyaku.status({ path: root, akuma: missing }), AkumaNotBornError);
-    await assert.rejects(Keiyaku.wait({ path: root, akuma: [missing], timeoutMs: 0 }), AkumaNotBornError);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+test("direct missing Aku remains AkumaNotBornError", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-direct-missing-");
+  const missing = akuId({ archetype: "worker", suffix: "deadbeef" });
+  await assert.rejects(Keiyaku.status({ path: root, akuma: missing }), AkumaNotBornError);
+  await assert.rejects(Keiyaku.wait({ path: root, akuma: [missing], timeoutMs: 0 }), AkumaNotBornError);
 });
 
-test("plural wait preserves a missing direct AkuId error", async () => {
-  const root = fixtureRoot("keiyaku-plural-direct-missing-");
-  try {
-    const missing = akuId({ archetype: "worker", suffix: "00000001" });
-    const readable = await answered(root, "worker", "00000002");
-    await assert.rejects(
-      Keiyaku.wait({ path: root, akuma: [missing, readable.id], completion: "all", timeoutMs: 0 }),
-      (error: unknown) => error instanceof AkumaNotBornError && error.id === missing,
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+test("plural wait preserves a missing direct AkuId error", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-plural-direct-missing-");
+  const missing = akuId({ archetype: "worker", suffix: "00000001" });
+  const readable = await answered(root, "worker", "00000002");
+  await assert.rejects(
+    Keiyaku.wait({ path: root, akuma: [missing, readable.id], completion: "all", timeoutMs: 0 }),
+    (error: unknown) => error instanceof AkumaNotBornError && error.id === missing,
+  );
 });
 
-test("Contract selector preserves Dispatch membership skipped by compact fleet", async () => {
-  const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Test User"]);
-  repository.run(["config", "user.email", "test@example.com"]);
+test("Contract selector preserves Dispatch membership skipped by compact fleet", async (t) => {
+  const repository = fixtureRepository(t);
+
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const world = await World.at(repository.path);
   const missing = akuId({ archetype: "worker", suffix: "deadbeef" });
@@ -1423,10 +936,9 @@ test("Contract selector preserves Dispatch membership skipped by compact fleet",
   );
 });
 
-test("one-member Contract selector retains a corrupt Heart diagnostic", async () => {
-  const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Test User"]);
-  repository.run(["config", "user.email", "test@example.com"]);
+test("one-member Contract selector retains a corrupt Heart diagnostic", async (t) => {
+  const repository = fixtureRepository(t);
+
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const world = await World.at(repository.path);
   const unreadable = corruptHeart(world, "deadbeef");
@@ -1448,10 +960,9 @@ test("one-member Contract selector retains a corrupt Heart diagnostic", async ()
   await assert.rejects(Keiyaku.wait({ path: world, akuma: ["kei/review"], repo, timeoutMs: 0 }), corruptDiagnostic);
 });
 
-test("Contract plural wait omits unreadable Heart observations for all and any", async () => {
-  const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Test User"]);
-  repository.run(["config", "user.email", "test@example.com"]);
+test("Contract plural wait omits unreadable Heart observations for all and any", async (t) => {
+  const repository = fixtureRepository(t);
+
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const world = await World.at(repository.path);
   const unreadable = corruptHeart(world, "aaaaaaaa");
@@ -1479,38 +990,33 @@ test("Contract plural wait omits unreadable Heart observations for all and any",
   }
 });
 
-test("plural wait returns no observations when every status is unreadable", async () => {
-  const root = fixtureRoot("keiyaku-facade-wait-unreadable-");
-  try {
-    const earlier = corruptHeart(root, "00000001");
-    const later = corruptHeart(root, "00000002");
-    for (const completion of ["all", "any"] as const) {
-      assert.deepEqual(
-        await Keiyaku.wait({
-          path: root,
-          akuma: [earlier, later],
-          completion,
-          timeoutMs: 0,
-        }),
-        {
-          completion,
-          observations: [],
-          unobserved: [
-            { id: earlier, diagnostic: "file is not a database" },
-            { id: later, diagnostic: "file is not a database" },
-          ],
-        },
-      );
-    }
-  } finally {
-    rmSync(root, { recursive: true, force: true });
+test("plural wait returns no observations when every status is unreadable", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-wait-unreadable-");
+  const earlier = corruptHeart(root, "00000001");
+  const later = corruptHeart(root, "00000002");
+  for (const completion of ["all", "any"] as const) {
+    assert.deepEqual(
+      await Keiyaku.wait({
+        path: root,
+        akuma: [earlier, later],
+        completion,
+        timeoutMs: 0,
+      }),
+      {
+        completion,
+        observations: [],
+        unobserved: [
+          { id: earlier, diagnostic: "file is not a database" },
+          { id: later, diagnostic: "file is not a database" },
+        ],
+      },
+    );
   }
 });
 
-test("fleet status projects Dispatch association without changing Akuma core", async () => {
-  const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Test User"]);
-  repository.run(["config", "user.email", "test@example.com"]);
+test("fleet status projects Dispatch association without changing Akuma core", async (t) => {
+  const repository = fixtureRepository(t);
+
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const source = await answered(repository.path, "worker", "deadbeef");
   const owner = contractId("kei/provider-core");
@@ -1540,319 +1046,89 @@ test("fleet status projects Dispatch association without changing Akuma core", a
   assert.deepEqual(waited.observations[0]!.contract, { kind: "associated", contractId: owner });
 });
 
-test("CLI wait and kill expose Contract selector world refusal as typed usage", async () => {
-  const rawA = makeGitRepository();
-  const rawB = makeGitRepository();
-  for (const repository of [rawA, rawB]) {
-    repository.run(["config", "user.name", "Test User"]);
-    repository.run(["config", "user.email", "test@example.com"]);
-    repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  }
-  const worldA = await World.at(rawA.path);
-  const worldB = await World.at(rawB.path);
-  const born = await answered(worldA, "worker", "deadbeef");
+test("exact set selection does not read unrelated Alias authority", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-exact-address-");
+  mkdirSync(join(root, ".keiyaku", "akuma"), { recursive: true });
+  writeFileSync(join(root, ".keiyaku", "akuma", "alias.json"), "broken\n");
+  const id = akuId({ archetype: "worker", suffix: "deadbeef" });
+  assert.deepEqual((await addressAkumaSet({ path: root, akuma: [id] })).ids, [id]);
+});
+
+test("multi-member wait and kill project every member from one Task board snapshot", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-created-set-");
+  const worker = await answered(root, "worker", "00000001");
+  const reviewer = await answered(root, "reviewer", "00000002");
+  const world = await World.at(root);
+  writeCreatorTask(
+    world,
+    creatorTask({
+      id: "task/from-worker",
+      title: "From worker",
+      createdBy: worker.id,
+      priority: 1,
+    }),
+  );
+  writeCreatorTask(
+    world,
+    creatorTask({
+      id: "task/from-reviewer",
+      title: "From reviewer",
+      createdBy: reviewer.id,
+      priority: 0,
+      state: "drop",
+    }),
+  );
+  const expected = projectTaskBoardObservation((await readBoard(world)).board);
+  const waited = await Keiyaku.wait({
+    path: root,
+    akuma: [worker.id, reviewer.id],
+    completion: "all",
+    timeoutMs: 0,
+  });
+  assert.deepEqual(
+    waited.observations.map((observation) => observation.status.id),
+    [reviewer.id, worker.id],
+  );
+  assert.deepEqual(
+    waited.observations.map((observation) => observation.createdTasks),
+    [
+      { kind: "present", rows: expected.selectCreatedBy(reviewer.id) },
+      { kind: "present", rows: expected.selectCreatedBy(worker.id) },
+    ],
+  );
+  const killed = await Keiyaku.kill({ path: root, akuma: [worker.id, reviewer.id] });
+  assert.deepEqual(
+    killed.results.map((member) => member.id),
+    [reviewer.id, worker.id],
+  );
   assert.equal(
-    (
-      await publishDispatch({
-        repository: await repositoryAt(worldB),
-        akuId: born.id,
-        contractId: contractId("kei/foreign"),
-      })
-    ).kind,
-    "dispatched",
+    killed.results.every((member) => !("observation" in member)),
+    true,
   );
-  const argv = ["-C", worldB, "--repo", worldB, "wait", "kei/foreign", "--timeout", "0ms"];
-  await assert.rejects(
-    () => invoke(parseArgv(argv), { cwd: worldB, environment: {} }),
-    (error: unknown) => {
-      assert.ok(error instanceof AkumaWorldScopeError);
-      assert.deepEqual(error.refusal, { kind: "akuma-not-in-world", ids: [born.id], world: worldB });
-      return true;
-    },
-  );
-  await assert.rejects(
-    () => invoke(parseArgv(["-C", worldB, "--repo", worldB, "kill", "kei/foreign"]), { cwd: worldB, environment: {} }),
-    AkumaWorldScopeError,
-  );
-
-  const capture = async (args: readonly string[]) => {
-    const child = spawnSync(
-      process.execPath,
-      [
-        "--import",
-        import.meta.resolve("tsx"),
-        "--input-type=module",
-        "-e",
-        `import { main } from ${JSON.stringify(new URL("../src/cli/main.ts", import.meta.url).href)}; process.exitCode = await main(JSON.parse(process.env.KEIYAKU_TEST_ARGS));`,
-      ],
-      {
-        cwd: worldB,
-        env: { ...process.env, KEIYAKU_TEST_ARGS: JSON.stringify(args) },
-        encoding: "utf8",
-      },
-    );
-    return { code: child.status ?? 1, stdout: child.stdout, stderr: child.stderr };
-  };
-  const text = await capture(["-C", worldB, "--repo", worldB, "wait", "kei/foreign", "--timeout", "0ms"]);
-  assert.equal(text.code, 1);
-  assert.equal(text.stdout, "");
-  assert.equal(
-    text.stderr,
-    `✕ selector  akuma-not-in-world\n  world  ${worldB}\n  given  ${born.id}\n  accepts  keiyaku wait <akuma-selector>... [--any | --all] [--timeout <duration>] [--json]\n  help  keiyaku wait --help\n`,
-  );
-  assert.doesNotMatch(text.stderr, /is not born/u);
-  const json = await capture(["-C", worldB, "--repo", worldB, "wait", "kei/foreign", "--json", "--timeout", "0ms"]);
-  assert.equal(json.code, 1);
-  assert.equal(json.stdout, "");
-  assert.deepEqual(JSON.parse(json.stderr), { kind: "akuma-not-in-world", ids: [born.id], world: worldB });
-  assert.doesNotMatch(json.stderr, /is not born/u);
-  const killText = await capture(["-C", worldB, "--repo", worldB, "kill", "kei/foreign"]);
-  assert.equal(killText.code, 1);
-  assert.equal(killText.stdout, "");
-  assert.equal(
-    killText.stderr,
-    `✕ selector  akuma-not-in-world\n  world  ${worldB}\n  given  ${born.id}\n  accepts  keiyaku kill <akuma-selector>... [--json]\n  help  keiyaku kill --help\n`,
-  );
-  assert.doesNotMatch(killText.stderr, /is not born/u);
-  const killJson = await capture(["-C", worldB, "--repo", worldB, "kill", "kei/foreign", "--json"]);
-  assert.equal(killJson.code, 1);
-  assert.equal(killJson.stdout, "");
-  assert.deepEqual(JSON.parse(killJson.stderr), { kind: "akuma-not-in-world", ids: [born.id], world: worldB });
-  assert.doesNotMatch(killJson.stderr, /is not born/u);
 });
 
-test("exact set selection does not read unrelated Alias authority", async () => {
-  const root = fixtureRoot("keiyaku-exact-address-");
-  try {
-    mkdirSync(join(root, ".keiyaku", "akuma"), { recursive: true });
-    writeFileSync(join(root, ".keiyaku", "akuma", "alias.json"), "broken\n");
-    const id = akuId({ archetype: "worker", suffix: "deadbeef" });
-    assert.deepEqual((await addressAkumaSet({ path: root, akuma: [id] })).ids, [id]);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
+function fixtureRepository(t: TestContext) {
+  const repository = makeGitRepository();
+  t.after(() => rmSync(repository.path, { recursive: true, force: true }));
+  return repository;
+}
 
-test("creator testimony appears on Fleet observation carriers", async () => {
-  const root = fixtureRoot("keiyaku-facade-created-tasks-");
-  const bodies: Promise<unknown>[] = [];
-  const fixtures = new Map<string, ProviderAdapter>();
-  const restoreTellRuntime = registerTellRuntime(root, bodies, fixtures);
-  let leash: HeldAkumaLeash | undefined;
-  try {
-    const worker = await answered(root, "worker", "00000001");
-    fixtures.set(worker.paths.directory, provider);
-    const workerHandle = Akuma.of(await World.at(root)).of({ id: worker.id });
-    const reviewer = await answered(root, "reviewer", "00000002");
-    fixtures.set(reviewer.paths.directory, provider);
-    const world = await World.at(root);
-    writeCreatorTask(
-      world,
-      creatorTask({
-        id: "task/match-high",
-        title: "Match high",
-        createdBy: worker.id,
-        priority: 0,
-        state: "done",
-      }),
-    );
-    writeCreatorTask(
-      world,
-      creatorTask({
-        id: "task/match-low",
-        title: "Match low",
-        createdBy: worker.id,
-        priority: 3,
-        state: "open",
-      }),
-    );
-    writeCreatorTask(
-      world,
-      creatorTask({
-        id: "task/reviewer-only",
-        title: "Reviewer only",
-        createdBy: reviewer.id,
-        priority: 1,
-      }),
-    );
-    writeCreatorTask(
-      world,
-      creatorTask({
-        id: "task/unsigned",
-        title: "Unsigned",
-      }),
-    );
-    writeCreatorTask(
-      world,
-      creatorTask({
-        id: "task/near-miss",
-        title: "Near miss",
-        createdBy: `${worker.id} `,
-      }),
-    );
-    const expected = projectTaskBoardObservation((await readBoard(world)).board);
-    const workerRows = expected.selectCreatedBy(worker.id);
-    const reviewerRows = expected.selectCreatedBy(reviewer.id);
-    assert.deepEqual(
-      workerRows.map((row) => row.id),
-      ["task/match-high", "task/match-low"],
-    );
-    assert.deepEqual(
-      reviewerRows.map((row) => row.id),
-      ["task/reviewer-only"],
-    );
-
-    const status = await Keiyaku.status({ path: root, akuma: worker.id });
-    assert.deepEqual(status.createdTasks, { kind: "present", rows: workerRows });
-    const waited = await Keiyaku.wait({ path: root, akuma: [worker.id], timeoutMs: 0 });
-    assert.deepEqual(waited.observations[0]!.createdTasks, { kind: "present", rows: workerRows });
-    const acquired = await HeldAkumaLeash.try(worker.paths);
-    assert.notEqual(acquired, null);
-    if (acquired === null) return;
-    leash = acquired;
-    try {
-      const told = await Keiyaku.tell({ path: root, akuma: worker.id, body: "continue" });
-      assert.equal("observation" in told, false);
-      acquired.release();
-      leash = undefined;
-      const interrupted = await Keiyaku.interrupt({ path: root, akuma: worker.id, body: "stop" });
-      if (interrupted.observation.kind !== "observed") throw new Error(interrupted.observation.diagnostic);
-      assert.deepEqual(interrupted.observation.createdTasks, { kind: "present", rows: workerRows });
-      const killed = await Keiyaku.kill({ path: root, akuma: [worker.id] });
-      assert.equal("observation" in killed.results[0]!, false);
-    } finally {
-      leash?.release();
-      leash = undefined;
-    }
-    // Interrupt acquires the leash itself; this fixture must not hold its prerequisite lock.
-    const interrupted = await Keiyaku.interrupt({ path: root, akuma: worker.id, body: "stop" });
-    if (interrupted.observation.kind !== "observed") throw new Error(interrupted.observation.diagnostic);
-    assert.deepEqual(interrupted.observation.createdTasks, { kind: "present", rows: workerRows });
-    await workerHandle.wait(undefined, { timeoutMs: 2_000 });
-  } finally {
-    leash?.release();
-    restoreTellRuntime();
-    await settleFixtureBodies(bodies);
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("multi-member wait and kill project every member from one Task board snapshot", async () => {
-  const root = fixtureRoot("keiyaku-facade-created-set-");
-  try {
-    const worker = await answered(root, "worker", "00000001");
-    const reviewer = await answered(root, "reviewer", "00000002");
-    const world = await World.at(root);
-    writeCreatorTask(
-      world,
-      creatorTask({
-        id: "task/from-worker",
-        title: "From worker",
-        createdBy: worker.id,
-        priority: 1,
-      }),
-    );
-    writeCreatorTask(
-      world,
-      creatorTask({
-        id: "task/from-reviewer",
-        title: "From reviewer",
-        createdBy: reviewer.id,
-        priority: 0,
-        state: "drop",
-      }),
-    );
-    const expected = projectTaskBoardObservation((await readBoard(world)).board);
-    const waited = await Keiyaku.wait({
-      path: root,
-      akuma: [worker.id, reviewer.id],
-      completion: "all",
-      timeoutMs: 0,
-    });
-    assert.deepEqual(
-      waited.observations.map((observation) => observation.status.id),
-      [reviewer.id, worker.id],
-    );
-    assert.deepEqual(
-      waited.observations.map((observation) => observation.createdTasks),
-      [
-        { kind: "present", rows: expected.selectCreatedBy(reviewer.id) },
-        { kind: "present", rows: expected.selectCreatedBy(worker.id) },
-      ],
-    );
-    const killed = await Keiyaku.kill({ path: root, akuma: [worker.id, reviewer.id] });
-    assert.deepEqual(
-      killed.results.map((member) => member.id),
-      [reviewer.id, worker.id],
-    );
-    assert.equal(
-      killed.results.every((member) => !("observation" in member)),
-      true,
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("Task board failure keeps Fleet status and aggregate members", async () => {
-  const root = fixtureRoot("keiyaku-facade-created-failed-");
-  const bodies: Promise<unknown>[] = [];
-  const fixtures = new Map<string, ProviderAdapter>();
-  const restoreTellRuntime = registerTellRuntime(root, bodies, fixtures);
-  let leash: HeldAkumaLeash | undefined;
-  try {
-    const worker = await answered(root, "worker", "00000001");
-    fixtures.set(worker.paths.directory, provider);
-    const workerHandle = Akuma.of(await World.at(root)).of({ id: worker.id });
-    const reviewer = await answered(root, "reviewer", "00000002");
-    fixtures.set(reviewer.paths.directory, provider);
-    mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });
-    writeFileSync(join(root, ".keiyaku", "tasks", "bad.md"), "not a task document\n");
-    const status = await Keiyaku.status({ path: root, akuma: worker.id });
-    assert.equal(status.status.id, worker.id);
-    assert.equal(status.createdTasks.kind, "failed");
-    if (status.createdTasks.kind === "failed") assert.match(status.createdTasks.diagnostic, /front matter/u);
-    const waited = await Keiyaku.wait({
-      path: root,
-      akuma: [worker.id, reviewer.id],
-      completion: "all",
-      timeoutMs: 0,
-    });
-    assert.deepEqual(
-      waited.observations.map((observation) => observation.status.id),
-      [reviewer.id, worker.id],
-    );
-    assert.equal(
-      waited.observations.every((observation) => observation.createdTasks.kind === "failed"),
-      true,
-    );
-    assert.deepEqual(
-      waited.observations.map((observation) => observation.createdTasks),
-      [status.createdTasks, status.createdTasks],
-    );
-    const acquired = await HeldAkumaLeash.try(worker.paths);
-    assert.notEqual(acquired, null);
-    if (acquired === null) return;
-    leash = acquired;
-    try {
-      const told = await Keiyaku.tell({ path: root, akuma: worker.id, body: "continue" });
-      assert.equal(told.akuma, worker.id);
-      assert.equal(told.tell.admission.fact, "recorded");
-      assert.equal(typeof told.tell.admission.tellId, "string");
-      assert.equal("observation" in told, false);
-      const killed = await Keiyaku.kill({ path: root, akuma: [reviewer.id] });
-      assert.equal(killed.results[0]!.id, reviewer.id);
-      assert.equal(killed.results[0]!.evidence, "already-stopped");
-      assert.equal("observation" in killed.results[0]!, false);
-    } finally {
-      leash?.release();
-      leash = undefined;
-    }
-    await workerHandle.wait(undefined, { timeoutMs: 2_000 });
-  } finally {
-    leash?.release();
-    restoreTellRuntime();
-    await settleFixtureBodies(bodies);
-    rmSync(root, { recursive: true, force: true });
-  }
+test("failed Task associations do not hide readable Fleet members or kill evidence", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-fleet-task-failure-");
+  const a = await answered(root, "worker", "a0000001");
+  const b = await answered(root, "worker", "a0000002");
+  mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });
+  writeFileSync(join(root, ".keiyaku", "tasks", "bad.md"), "not Task authority\n");
+  const status = await Keiyaku.status({ path: root, akuma: a.id });
+  assert.equal(status.status.id, a.id);
+  assert.equal(status.createdTasks.kind, "failed");
+  const waited = await Keiyaku.wait({ path: root, akuma: [a.id, b.id], completion: "all", timeoutMs: 0 });
+  assert.deepEqual(waited.observations.map((view) => view.status.id).sort(), [a.id, b.id]);
+  assert.deepEqual(
+    waited.observations.map((view) => view.createdTasks),
+    [status.createdTasks, status.createdTasks],
+  );
+  const killed = await Keiyaku.kill({ path: root, akuma: [a.id, b.id] });
+  assert.deepEqual(killed.results.map((member) => member.id).sort(), [a.id, b.id]);
+  assert.ok(killed.results.every((member) => member.evidence === "already-stopped" && !("observation" in member)));
 });
