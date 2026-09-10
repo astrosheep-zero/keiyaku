@@ -23,6 +23,7 @@
     "tests/library-contract-operations.test.ts",
     "tests/public-library.test.ts",
     "tests/facade-contract.test.ts",
+    "tests/facade-fleet.test.ts",
     "tests/cli-verification.test.ts",
     "tests/git-delivery.test.ts",
     "tests/private-state-seat.test.ts",
