@@ -66,9 +66,9 @@ if (testFiles.length === 0) {
   console.error("No test files matched the default test patterns.");
   process.exit(1);
 }
-const missingTestFiles = suite ? testFiles.filter((file) => !existsSync(file)) : [];
+const missingTestFiles = testFiles.filter((file) => !existsSync(file) && globSync(file).length === 0);
 if (missingTestFiles.length > 0) {
-  console.error(`Test manifest contains missing file(s): ${missingTestFiles.join(", ")}`);
+  console.error(`Test selection contains missing file(s): ${missingTestFiles.join(", ")}`);
   process.exit(1);
 }
 const testOptions =
@@ -80,7 +80,14 @@ const reporterOptions = testOptions.some(
 )
   ? []
   : ["--test-reporter=dot"];
-const runtimeFiles = compiled ? testFiles.map((file) => ".test-build/" + file.replace(/\.ts$/u, ".js")) : testFiles;
+const selectedFiles = [...new Set(testFiles.flatMap((file) => (existsSync(file) ? [file] : globSync(file))))];
+const runtimeFiles = compiled
+  ? selectedFiles.map((file) => ".test-build/" + file.replace(/\.ts$/u, ".js"))
+  : selectedFiles;
+if (compiled && runtimeFiles.some((file) => !existsSync(file))) {
+  console.error("Compiled test files are missing; run npm run test:compile first.");
+  process.exit(1);
+}
 const loader = compiled ? ["--enable-source-maps"] : ["--import", "tsx"];
 const environment = { ...process.env };
 delete environment.AKUMA_REQUESTS;
