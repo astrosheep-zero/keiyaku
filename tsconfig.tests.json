@@ -55,7 +55,6 @@
     "tests/cli-help.test.ts",
     "tests/cli-install.test.ts",
     "tests/cli-parse.test.ts",
-    "tests/cli-progress.test.ts",
     "tests/cli-projection-evidence.test.ts",
     "tests/cli-render.test.ts",
     "tests/cli-selectors.test.ts",
@@ -66,7 +65,6 @@
     "tests/runtime-proc.test.ts",
     "tests/packaged-cli.e2e.ts",
     "tests/support/task.ts",
-    "tests/task-compose-recovery.test.ts",
     "tests/task-document.test.ts",
     "tests/task-store.test.ts",
     "tests/namespace-context.test.ts",
@@ -83,7 +81,13 @@
     "tests/git-repository.test.ts",
     "tests/markdown-ast.test.ts",
     "tests/plugin-runtime.test.ts",
-    "tests/plugin-types.test.ts"
+    "tests/facade-fleet.test.ts",
+    "tests/kanshi.test.ts",
+    "tests/library-akuma-creation.test.ts",
+    "tests/library-contract-operations.test.ts",
+    "tests/package-consumers.test.ts",
+    "tests/task-compose.test.ts",
+    "tests/contract-fork.test.ts"
   ],
   "exclude": []
 }
