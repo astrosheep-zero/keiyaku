@@ -15,6 +15,12 @@ creating it; only a true absence becomes absence. Corruption and unsupported
 schema are hard failures, never partial reading, silent repair, migration, or
 compatibility decoding.
 
+Contended mutation admission waits without blocking unrelated observations or
+control handling, within a bounded acquisition interval. Cancellation may stop
+that wait before admission; it never replays or retracts an entered transaction.
+Once acquired, the owner executes its mutation once and preserves any execution
+or commit failure rather than treating it as permission to repeat business work.
+
 The retained timeline is the sole durable execution order. A Body can drive
 multiple Turns; every admitted Turn starts before provider work and either ends
 once with an answer or typed failure, or remains open after interruption or

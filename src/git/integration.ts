@@ -3,7 +3,7 @@ import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { ChangeId, ContractCoordinates, ContractId, SnapshotId } from "../core/facts/types.js";
 import { gitObjectId, gitObjectIdForSnapshot, mintChangeId, mintSnapshotId, type GitObjectId } from "./identity.js";
 import { decodeGitNameOnly, decodeGitNumstat, readRef } from "./repository.js";
-import { GitPlumbingError, runGit, runGitWithEnvironment, type GitRepository } from "./process.js";
+import { GitPlumbingError, runGit, runGitPipe, runGitWithEnvironment, type GitRepository } from "./process.js";
 import type { DeliveryCommitMetadata, TenderCapture } from "./tender.js";
 import { workspaceMergeStatePresent } from "./workspace.js";
 
@@ -56,40 +56,43 @@ export async function worktreeChangeId(
   input: IntegrationCoordinates,
   tender: TenderCapture,
 ): Promise<ChangeId> {
-  const patch = await runGit(repository, [
-    "-c",
-    "core.quotePath=false",
-    "-c",
-    "core.abbrev=40",
-    "-c",
-    "diff.algorithm=myers",
-    "-c",
-    "diff.renames=false",
-    "-c",
-    "diff.indentHeuristic=false",
-    "-c",
-    "diff.suppressBlankEmpty=false",
-    "diff",
-    "--no-ext-diff",
-    "--no-textconv",
-    "--no-indent-heuristic",
-    "--no-renames",
-    "--full-index",
-    "--binary",
-    "--no-color",
-    "--diff-algorithm=myers",
-    "--unified=3",
-    "--src-prefix=a/",
-    "--dst-prefix=b/",
-    "--inter-hunk-context=0",
-    "--no-relative",
-    "--ignore-submodules=none",
-    "--submodule=short",
-    gitObjectIdForSnapshot(input.coordinates.start),
-    tender.tree,
-  ]);
-  const id =
-    (await runGit(repository, ["patch-id", "--verbatim"], patch)).toString("utf8").trim().split(/\s/, 1)[0] ?? "";
+  const result = await runGitPipe(
+    repository,
+    [
+      "-c",
+      "core.quotePath=false",
+      "-c",
+      "core.abbrev=40",
+      "-c",
+      "diff.algorithm=myers",
+      "-c",
+      "diff.renames=false",
+      "-c",
+      "diff.indentHeuristic=false",
+      "-c",
+      "diff.suppressBlankEmpty=false",
+      "diff",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--no-indent-heuristic",
+      "--no-renames",
+      "--full-index",
+      "--binary",
+      "--no-color",
+      "--diff-algorithm=myers",
+      "--unified=3",
+      "--src-prefix=a/",
+      "--dst-prefix=b/",
+      "--inter-hunk-context=0",
+      "--no-relative",
+      "--ignore-submodules=none",
+      "--submodule=short",
+      gitObjectIdForSnapshot(input.coordinates.start),
+      tender.tree,
+    ],
+    ["patch-id", "--verbatim"],
+  );
+  const id = result.toString("utf8").trim().split(/\s/, 1)[0] ?? "";
   return mintChangeId(id === "" ? "0000000000000000000000000000000000000000" : id);
 }
 
