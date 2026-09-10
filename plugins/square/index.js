@@ -1,4 +1,4 @@
-import { createHostLedgerPort, Square, squareAssignedParticipantName } from "@astrosheep/square";
+import { createDefaultWakeTransport, createHostLedgerPort, Square, squareAssignedParticipantName, } from "@astrosheep/square";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 const DUPLICATE_HINT = "ignore if you have already seen this.";
@@ -21,19 +21,19 @@ function hostLedger(environment) {
 function errorCode(error) {
     return typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
 }
-async function openSquare(path, environment, ledger) {
+async function openSquare(path, environment, ledger, wakeTransport) {
     try {
-        return await Square.at({ path, env: environment, hostLedger: ledger });
+        return await Square.at({ path, env: environment, hostLedger: ledger, wakeTransport });
     }
     catch (error) {
         if (errorCode(error) !== "ENOENT" && errorCode(error) !== "unavailable")
             throw error;
         try {
-            return await Square.build({ path, markdown: "", env: environment, hostLedger: ledger });
+            return await Square.build({ path, markdown: "", env: environment, hostLedger: ledger, wakeTransport });
         }
         catch (buildError) {
             try {
-                return await Square.at({ path, env: environment, hostLedger: ledger });
+                return await Square.at({ path, env: environment, hostLedger: ledger, wakeTransport });
             }
             catch {
                 throw buildError;
@@ -63,10 +63,11 @@ const plugin = {
         apiVersion: 1,
         writablePaths: [{ name: "square", path: ".square" }],
     },
-    activate(context) {
+    async activate(context) {
         const path = join(context.writablePath("square"), "KEIYAKU.square");
         const environment = squareEnvironment(process.env, path);
         const ledger = hostLedger(environment);
+        const wakeTransport = await createDefaultWakeTransport(ledger, Date.now, environment);
         let caller;
         try {
             caller = squareAssignedParticipantName(environment);
@@ -77,7 +78,7 @@ const plugin = {
                 async "akuma.called"(signal) {
                     if (caller === undefined)
                         return;
-                    const square = await openSquare(path, environment, ledger);
+                    const square = await openSquare(path, environment, ledger, wakeTransport);
                     try {
                         const joined = await square.implicitJoin(caller);
                         if (joined.state === "done" || joined.participant === undefined)
@@ -89,7 +90,7 @@ const plugin = {
                     }
                 },
                 async "akuma.turn-outcome"(signal) {
-                    const square = await openSquare(path, environment, ledger);
+                    const square = await openSquare(path, environment, ledger, wakeTransport);
                     try {
                         const joined = await square.implicitJoin(signal.akumaId);
                         if (joined.state === "done" || joined.participant === undefined)

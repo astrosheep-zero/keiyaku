@@ -45,10 +45,15 @@ adopts them. They are not Heart facts, Git facts, Settlement facts, Contract
 worktree material, or reset targets merely because a plugin uses them.
 
 The Square observer keeps its execution-directory-local runtime data local;
-worktree disposal does not relocate it to the primary World. Such generated
-data has no implicit retention or archival promise beyond that directory's
-lifetime. Managed-worktree byte protection and removal remain governed by
-[git.md](git.md), not by plugin identity or a plugin-specific cleanup hook.
+worktree disposal does not relocate it to the primary World. When an admitted
+call has a current Square caller, the observer establishes that caller's
+callable route while handling `akuma.called`, before a later Turn outcome can
+address it. Addressed outcomes use Square's wake-capable delivery boundary in
+the producing process; native host hooks remain recovery boundaries rather
+than the first delivery attempt. Such generated data has no implicit retention
+or archival promise beyond that directory's lifetime. Managed-worktree byte
+protection and removal remain governed by [git.md](git.md), not by plugin
+identity or a plugin-specific cleanup hook.
 
 Activation is all-or-nothing for each plugin. The host validates a package and
 its declarations, then activates it before retaining any handlers. Import,

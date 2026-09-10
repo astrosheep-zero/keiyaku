@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -40,9 +40,13 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     CLAUDE_CODE_SESSION_ID: process.env.CLAUDE_CODE_SESSION_ID,
     OPENCODE_SESSION_ID: process.env.OPENCODE_SESSION_ID,
     SQUARE_PI_SESSION_ID: process.env.SQUARE_PI_SESSION_ID,
+    PASEO_AGENT_ID: process.env.PASEO_AGENT_ID,
     SQUARE_PARTICIPANT_NAME: process.env.SQUARE_PARTICIPANT_NAME,
     SQUARE_HOST_LEDGER_LOCAL: process.env.SQUARE_HOST_LEDGER_LOCAL,
     SQUARE_HOST_LEDGER_USER: process.env.SQUARE_HOST_LEDGER_USER,
+    SQUARE_CODEX_BOUNDARIES: process.env.SQUARE_CODEX_BOUNDARIES,
+    SQUARE_CODEX_BIN: process.env.SQUARE_CODEX_BIN,
+    SQUARE_CODEX_QUEUE_LOG: process.env.SQUARE_CODEX_QUEUE_LOG,
   };
   try {
     assert.deepEqual(squarePlugin.manifest, {
@@ -53,9 +57,25 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     mkdirSync(join(root, ".square"), { recursive: true });
     process.env.CODEX_THREAD_ID = "caller";
     process.env.SQUARE_PI_SESSION_ID = "fixture-pi-session";
+    process.env.PASEO_AGENT_ID = "";
     process.env.SQUARE_PARTICIPANT_NAME = "Alice";
     process.env.SQUARE_HOST_LEDGER_LOCAL = join(root, "local-ledger");
     process.env.SQUARE_HOST_LEDGER_USER = join(root, "user-ledger");
+    process.env.SQUARE_CODEX_BOUNDARIES = join(root, "codex-boundaries.json");
+    const codexQueueLog = join(root, "codex-queue.log");
+    if (process.platform !== "win32") {
+      const fakeCodex = join(root, "fake-codex");
+      writeFileSync(
+        fakeCodex,
+        [
+          "#!/usr/bin/env node",
+          "require('node:fs').appendFileSync(process.env.SQUARE_CODEX_QUEUE_LOG, JSON.stringify(process.argv.slice(2)) + '\\n');",
+        ].join("\n"),
+      );
+      chmodSync(fakeCodex, 0o755);
+      process.env.SQUARE_CODEX_BIN = fakeCodex;
+      process.env.SQUARE_CODEX_QUEUE_LOG = codexQueueLog;
+    }
     const instance = await squarePlugin.activate({
       world: root as unknown as WorldRoot,
       config: undefined,
@@ -72,6 +92,12 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
       callerAkumaId: "aku/caller",
       contractId: "kei/example",
     });
+    if (process.platform !== "win32") {
+      writeFileSync(
+        process.env.SQUARE_CODEX_BOUNDARIES,
+        `${JSON.stringify({ v: 1, nextSequence: 1, threads: { caller: { lastStop: 1, lastNonStop: 0 } } })}\n`,
+      );
+    }
     await handler({
       kind: "akuma.turn-outcome",
       akumaId: "aku/answered",
@@ -100,6 +126,25 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
         mentions: ["Alice"],
       },
     ]);
+    if (process.platform !== "win32") {
+      const queued = readFileSync(codexQueueLog, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as string[]);
+      assert.equal(queued.length, 2);
+      assert.deepEqual(queued[0]?.slice(0, 3), ["queue", "--thread", "caller"]);
+      assert.match(queued[0]?.at(-1) ?? "", /attention: act\/\d+ for Alice from aku\/answered/u);
+      const evidence = readFileSync(join(root, "user-ledger", "evidence.ndjsonl"), "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { kind: string; outcome: string; participant: string });
+      assert.equal(
+        evidence.filter(
+          (row) => row.kind === "wake" && row.outcome === "accepted" && row.participant === "Alice",
+        ).length,
+        2,
+      );
+    }
 
     delete process.env.CODEX_THREAD_ID;
     delete process.env.CLAUDE_CODE_SESSION_ID;
