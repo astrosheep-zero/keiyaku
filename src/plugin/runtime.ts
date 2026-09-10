@@ -363,6 +363,20 @@ export async function drainPluginRuntime(world: WorldRoot): Promise<void> {
   if (runtime !== undefined) await (await runtime).drain();
 }
 
+async function drainWithDeadline(pending: Promise<void>): Promise<void> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      pending,
+      new Promise<void>((resolve) => {
+        timeout = setTimeout(resolve, PLUGIN_DRAIN_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function createPluginRuntime(input: PluginRuntimeInput): Promise<PluginRuntime> {
   const report = input.reportDiagnostic;
   const selected = selectedPlugins(input.settings ?? (await settings({ root: input.world })), report);
@@ -434,7 +448,7 @@ async function createPluginRuntime(input: PluginRuntimeInput): Promise<PluginRun
           await Promise.all(pending);
         }
       };
-      await Promise.race([settle(), new Promise<void>((resolve) => setTimeout(resolve, PLUGIN_DRAIN_TIMEOUT_MS))]);
+      await drainWithDeadline(settle());
     },
   });
 }

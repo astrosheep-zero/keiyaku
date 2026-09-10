@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -553,4 +554,27 @@ test("hanging handler does not block another handler or emit completion", async 
   } finally {
     value.close();
   }
+});
+
+
+test("completed plugin drains leave no timeout keeping their process alive", (context) => {
+  const value = fixture();
+  context.after(value.close);
+  mkdirSync(join(value.root, ".keiyaku"));
+  writeFileSync(join(value.root, ".keiyaku", "settings.json"), '{"plugins":{}}');
+  const source = `
+    import { pluginRuntime } from ${JSON.stringify(new URL("../src/plugin/runtime.js", import.meta.url).href)};
+    import { World } from ${JSON.stringify(new URL("../src/world.js", import.meta.url).href)};
+    const runtime = await pluginRuntime({ world: await World.at(${JSON.stringify(value.root)}) });
+    await runtime.drain();
+    await runtime.drain("akuma.body-ended");
+    console.log(JSON.stringify(process.getActiveResourcesInfo().filter((kind) => kind === "Timeout")));
+    process.exit(0);
+  `;
+  const output = execFileSync(
+    process.execPath,
+    ["--import", import.meta.resolve("tsx"), "--input-type=module", "--eval", source],
+    { encoding: "utf8", timeout: 10_000 },
+  );
+  assert.deepEqual(JSON.parse(output), []);
 });
