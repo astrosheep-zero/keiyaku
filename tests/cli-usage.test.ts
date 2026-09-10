@@ -121,7 +121,7 @@ test("unmatched Contract selectors preserve exit and JSON behavior while exposin
         "✕ selector  keiyaku show",
         "  diagnostic  Keiyaku refused: contract-missing",
         "  given  kei/missing",
-        "  accepts  keiyaku show [<contract>|@<contract>] [--json]",
+        "  accepts  keiyaku show [<contract>|@<contract>]",
         "  help  keiyaku show --help",
         "",
       ].join("\n"),

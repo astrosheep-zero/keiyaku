@@ -38,6 +38,11 @@ test("namespace and leaf help identify an executable command", () => {
   assert.match(renderAkumaHelp("call"), /\[--workdir <path>\]/u);
   assert.match(renderAkumaHelp("call"), /relative path is relative to the invocation cwd/u);
   assert.match(renderContractHelp("bind"), /stdin is Contract Markdown/u);
+  const settingsHelp = renderContractHelp("settings");
+  assert.match(settingsHelp, /^Akuma definitions are Markdown files, one per name:$/mu);
+  assert.match(settingsHelp, /^  user      ~\/\.keiyaku\/akuma\/<name>\.md$/mu);
+  assert.match(settingsHelp, /^  project   <WorldRoot>\/\.keiyaku\/akuma\/<name>\.md$/mu);
+  assert.match(settingsHelp, /^usage  keiyaku settings$/mu);
 });
 
 test("help projections reflow at the requested terminal width without splitting tokens", () => {
@@ -60,7 +65,7 @@ test("amend leaf help enumerates the operation grammar", () => {
   const help = renderContractHelp("amend");
   assert.match(
     help,
-    /usage  keiyaku amend \[<contract>\|@<contract>\] \[--after <kei\/\.\.\.> \.\.\. \| --clear-after\] \[--gates <name,\.\.\.>\] \[--actor <actor>\] \[--json\] \[-\]/u,
+    /usage  keiyaku amend \[<contract>\|@<contract>\] \[--after <kei\/\.\.\.> \.\.\. \| --clear-after\] \[--gates <name,\.\.\.>\] \[--actor <actor>\] \[-\]/u,
   );
   assert.match(help, /## Replace: Context\|Objective\|Design\|Region\|Criteria\|Verification\|<extension>/u);
   assert.match(help, /## Append: Context\|Objective\|Design\|Criteria\|<extension>/u);
@@ -88,15 +93,22 @@ test("Akuma call and tell help expose schema files", () => {
   assert.match(renderAkumaHelp("tell"), /stdin remains the prompt source/u);
 });
 
-test("help contains no Markdown file pointers", () => {
+test("help contains no Markdown file pointers outside the settings Akuma block", () => {
   const help = [
     renderRootHelp(),
-    ...Object.keys(CONTRACT_COMMAND_SPECS).map((command) => renderContractHelp(command as ContractCommand)),
+    ...Object.keys(CONTRACT_COMMAND_SPECS)
+      .filter((command) => command !== "settings")
+      .map((command) => renderContractHelp(command as ContractCommand)),
     renderTaskHelp(),
     ...(["tell", "history"] as const).map((action) => renderAkumaHelp(action)),
     renderInstallHelp(),
   ].join("\n");
   assert.doesNotMatch(help, /(?:docs\/|\.md\b)/u);
+  const settingsOutsideAkumaBlock = renderContractHelp("settings")
+    .split("\n")
+    .filter((line) => !line.includes(".keiyaku/akuma/"))
+    .join("\n");
+  assert.doesNotMatch(settingsOutsideAkumaBlock, /(?:docs\/|\.md\b)/u);
 });
 
 test("help is stdout zero and does not enter an absent world", async () => {

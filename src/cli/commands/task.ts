@@ -73,39 +73,39 @@ const TASK_COMMAND_SPECS: Readonly<Record<TaskAction, TaskCommandSpec>> = {
       note: "value",
       actor: "value",
     },
-    usage: `task add <TITLE> [--namespace <ns>] [--priority 0..3] [--json]
+    usage: `task add <TITLE> [--namespace <ns>] [--priority 0..3]
   [--state open|in_progress|on_hold|done|drop]
   [--note <text>] [--actor <actor>]
   [--needs <TaskId>]... [--parent <TaskId>]
   [--supersedes <TaskId>]... [--relates <TaskId>]...
   [--body <text>]
-task add [--namespace <ns>] [--actor <actor>] [--json] -`,
+task add [--namespace <ns>] [--actor <actor>] -`,
     purpose: "Create one Task from flags or a canonical stdin document.",
   },
   show: {
     arity: [1, Number.POSITIVE_INFINITY],
     flags: COMMON,
-    usage: "task show <TaskId>... [--json]",
+    usage: "task show <TaskId>...",
     purpose: "Read one or more Tasks and their relationships.",
   },
   ls: {
     arity: [0, 1],
     flags: { ...COMMON, closed: "boolean", all: "boolean", world: "boolean", limit: "value" },
-    usage: "task ls [<namespace-selector>] [--closed | --all] [--world] [--limit <n>] [--json]",
+    usage: "task ls [<namespace-selector>] [--closed | --all] [--world] [--limit <n>]",
     purpose: "List Tasks in the selected scope.",
     details: "--world lists every namespace in the current Task world.",
   },
   ready: {
     arity: [0, 0],
     flags: { ...COMMON, world: "boolean", parent: "value", limit: "value" },
-    usage: "task ready [--world] [--parent <TaskId>] [--limit <n>] [--json]",
+    usage: "task ready [--world] [--parent <TaskId>] [--limit <n>]",
     purpose: "List open Tasks whose every need is terminal.",
     details: "--world lists every namespace in the current Task world.",
   },
   blocked: {
     arity: [0, 0],
     flags: { ...COMMON, world: "boolean", parent: "value", limit: "value" },
-    usage: "task blocked [--world] [--parent <TaskId>] [--limit <n>] [--json]",
+    usage: "task blocked [--world] [--parent <TaskId>] [--limit <n>]",
     purpose: "List Tasks blocked by dependencies.",
     details: "--world lists every namespace in the current Task world.",
   },
@@ -113,7 +113,7 @@ task add [--namespace <ns>] [--actor <actor>] [--json] -`,
     arity: [0, 0],
     flags: { ...COMMON, where: "value", world: "boolean", sort: "value", limit: "value" },
     usage: `task query [--where <expression>] [--world]
-  [--sort priority|created|updated|id] [--limit <n>] [--json]`,
+  [--sort priority|created|updated|id] [--limit <n>]`,
     purpose: "Query Task facts with a typed boolean expression.",
     details: [
       "fields: state priority title id parent under needs blocks ready blocked created updated",
@@ -127,13 +127,13 @@ task add [--namespace <ns>] [--actor <actor>] [--json] -`,
   tree: {
     arity: [1, 1],
     flags: COMMON,
-    usage: "task tree <TaskId> [--json]",
+    usage: "task tree <TaskId>",
     purpose: "Read one Task parent decomposition tree.",
   },
   doctor: {
     arity: [0, 0],
     flags: COMMON,
-    usage: "task doctor [--json]",
+    usage: "task doctor",
     purpose: "Inspect Task authority without repairing it.",
   },
   update: {
@@ -159,56 +159,56 @@ task add [--namespace <ns>] [--actor <actor>] [--json] -`,
   [--priority 0..3] [--needs <TaskId>]... [--drop-needs <TaskId>]...
   [--parent <TaskId> | --no-parent]
   [--supersedes <TaskId>]... [--drop-supersedes <TaskId>]...
-  [--relates <TaskId>]... [--drop-relates <TaskId>]... [--json]`,
+  [--relates <TaskId>]... [--drop-relates <TaskId>]...`,
     purpose: "Apply one or more patches to a Task.",
   },
   start: {
     arity: [1, Number.POSITIVE_INFINITY],
     flags: COMMON,
-    usage: "task start <TaskId>... [--json]",
+    usage: "task start <TaskId>...",
     purpose: "Move one or more open Tasks into progress.",
   },
   stop: {
     arity: [1, 1],
     flags: COMMON,
-    usage: "task stop <TaskId> [--json]",
+    usage: "task stop <TaskId>",
     purpose: "Return one in-progress Task to open.",
   },
   hold: {
     arity: [1, Number.POSITIVE_INFINITY],
     flags: COMMON,
-    usage: "task hold <TaskId>... [--json]",
+    usage: "task hold <TaskId>...",
     purpose: "Put one or more Tasks on hold.",
   },
   resume: {
     arity: [1, 1],
     flags: COMMON,
-    usage: "task resume <TaskId> [--json]",
+    usage: "task resume <TaskId>",
     purpose: "Return one held Task to open.",
   },
   done: {
     arity: [1, Number.POSITIVE_INFINITY],
     flags: { ...COMMON, note: "value" },
-    usage: "task done <TaskId>... [--note <text>] [--json]",
+    usage: "task done <TaskId>... [--note <text>]",
     purpose: "Mark one or more Tasks done.",
   },
   drop: {
     arity: [1, Number.POSITIVE_INFINITY],
     flags: { ...COMMON, note: "value" },
-    usage: "task drop <TaskId>... [--note <text>] [--json]",
+    usage: "task drop <TaskId>... [--note <text>]",
     purpose: "Drop one or more Tasks.",
   },
   context: {
     arity: [0, 1],
     flags: COMMON,
-    usage: "task context [<namespace>] [--json]",
+    usage: "task context [<namespace>]",
     purpose: "Read or replace the directory Task context.",
   },
   compose: {
     arity: [0, 0],
     stdin: "compose",
     flags: { ...COMMON, actor: "value", plan: "boolean" },
-    usage: "task compose [--actor <actor>] [--plan] [--json] -",
+    usage: "task compose [--actor <actor>] [--plan] -",
     purpose: "Plan or admit one explicit Task composition.",
     details: [
       "nodes: + <Title> creates; @task/<id> modifies a pre-existing Task",

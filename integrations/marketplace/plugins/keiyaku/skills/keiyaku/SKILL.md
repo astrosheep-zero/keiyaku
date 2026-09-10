@@ -36,7 +36,7 @@ keiyaku -C <repo> review [<contract>|@<contract>] --satisfied
 ```
 
 ```bash
-keiyaku -C <cwd> call <akuma-name> [--contract <kei/...>] [--workdir <path>] [--alias @name] [--allowed <product.action>]... [--schema <file>] [--wait <duration> | -d | --detach] [--json] (<prompt> | -)
+keiyaku -C <cwd> call <akuma-name> [--contract <kei/...>] [--workdir <path>] [--alias @name] [--allowed <product.action>]... [--schema <file>] [--wait <duration> | -d | --detach] (<prompt> | -)
 keiyaku -C <repo> wait <akuma-selector>... [--any | --all]
 keiyaku -C <repo> tell <aku/...|@alias> (<prompt> | -)
 ```
@@ -49,8 +49,6 @@ unassociated call uses the invocation cwd.
 
 Repeated `--allowed` values add actions to the selected Akuma's defaults. A
 nested call can use only actions permitted by its direct parent Soul.
-
-Use text by default; add `--json` when a script needs structured output.
 
 `deliver`, `review`, and `audit` may take time after their leading admission.
 Their witnessed progress is ephemeral stderr output; stdout remains one final

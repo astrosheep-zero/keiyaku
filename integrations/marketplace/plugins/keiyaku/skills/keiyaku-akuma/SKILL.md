@@ -15,7 +15,7 @@ is accepted; the identity underneath never changes.
 ## Start One
 
 ```bash
-keiyaku -C <cwd> call <akuma-name> [--workdir <path>] [--alias @name] [--allowed <product.action>]... [--schema <file>] [--wait <duration> | -d | --detach] [--json] (<prompt> | -)
+keiyaku -C <cwd> call <akuma-name> [--workdir <path>] [--alias @name] [--allowed <product.action>]... [--schema <file>] [--wait <duration> | -d | --detach] (<prompt> | -)
 ```
 
 Give the worker's initial prompt as one argument (quote it when it contains
@@ -46,15 +46,12 @@ Calling the same name multiple times creates independent workers with distinct
 AkuIds. Choose different names for different capabilities, not merely to run
 work in parallel.
 
-An Akuma name selects a Markdown file at `~/.keiyaku/akuma/<name>.md`; pass
-the filename without `.md` as `<akuma-name>`. Its frontmatter selects the
-provider and may declare `model`, `effort`, `readonly`, `network`, `sandbox`,
-and `description`; the body is an optional system prompt, and an empty body
-keeps the harness default. `sandbox: full-access` asks a supporting provider to
-disable its native command sandbox for future births; it does not grant extra
-operating-system permissions and cannot be combined with `readonly: true` or
-`network: disabled`. A born Akuma keeps its selected defaults for its lifetime.
-If none grants the permissions and stance the work needs, add a new Akuma name.
+Each name fixes its own capability stance — provider, model, permissions —
+and a born Akuma keeps those selected defaults for its lifetime. `keiyaku ls
+aku/` lists the available names with their providers and descriptions. If none
+grants the permissions and stance the work needs, add a new Akuma name;
+`keiyaku settings --help` says where Akuma definitions live and what they may
+declare.
 
 ## Commission And Steer
 

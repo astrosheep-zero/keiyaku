@@ -59,7 +59,7 @@ const AKUMA_COMMAND_SPECS = {
       schema: "value",
     },
     usage:
-      "call <akuma-name> [--contract <kei/...>] [--workdir <path>] [--alias @name] [--allowed <product.action>]... [--schema <file>] [--wait <duration> | -d | --detach] [--json] (<prompt> | -)",
+      "call <akuma-name> [--contract <kei/...>] [--workdir <path>] [--alias @name] [--allowed <product.action>]... [--schema <file>] [--wait <duration> | -d | --detach] (<prompt> | -)",
     purpose: "Birth an Akuma from <akuma-name> with one prompt.",
     details: [
       "Give <prompt> as one argument, or use - to read stdin.",
@@ -80,14 +80,14 @@ const AKUMA_COMMAND_SPECS = {
     arity: "one-or-more",
     stdin: false,
     flags: { any: "boolean", all: "boolean", timeout: "value", json: "boolean" },
-    usage: "wait <akuma-selector>... [--any | --all] [--timeout <duration>] [--json]",
+    usage: "wait <akuma-selector>... [--any | --all] [--timeout <duration>]",
     purpose: "Wait for one Akuma or an explicitly selected Akuma set.",
   },
   tell: {
     arity: 1,
     stdin: true,
     flags: { interrupt: "boolean", schema: "value", json: "boolean" },
-    usage: "tell <aku/...|@alias> [--interrupt] [--schema <file>] [--json] (<prompt> | -)",
+    usage: "tell <aku/...|@alias> [--interrupt] [--schema <file>] (<prompt> | -)",
     purpose: "Send one prompt to an existing Akuma and wake it.",
     details: [
       "Give <prompt> as one argument, or use - to read stdin.",
@@ -100,21 +100,21 @@ const AKUMA_COMMAND_SPECS = {
     stdin: false,
     flags: { id: "value", before: "value", since: "value", limit: "value", last: "boolean", json: "boolean" },
     usage:
-      "history <aku/...|@alias> [--id <historyId> | --before <index> | --since <index>] [--limit <count>] [--last] [--json]\nhistory <kei/...> [--json]",
+      "history <aku/...|@alias> [--id <historyId> | --before <index> | --since <index>] [--limit <count>] [--last]\nhistory <kei/...>",
     purpose: "Read Akuma execution history or one complete Contract journal and Dispatch timeline.",
   },
   fork: {
     arity: 1,
     stdin: false,
     flags: { at: "value", json: "boolean" },
-    usage: "fork <aku/...|@alias> --at <historyId> [--json]",
+    usage: "fork <aku/...|@alias> --at <historyId>",
     purpose: "Fork one Akuma at a retained answered history point.",
   },
   kill: {
     arity: "one-or-more",
     stdin: false,
     flags: { json: "boolean" },
-    usage: "kill <akuma-selector>... [--json]",
+    usage: "kill <akuma-selector>...",
     purpose: "Put down the current Body of an Akuma selector snapshot.",
   },
 } as const satisfies Readonly<Record<string, AkumaCommandSpec>>;

@@ -62,7 +62,6 @@ keiyaku task update <task-id> --title <text>
 keiyaku task context [<namespace>]
 ```
 
-Use `--json` on any command when a script must inspect the typed result.
 Relations are explicit facts: `needs` orders work, `parent` groups it,
 `supersedes` navigates replacement, and `relates` does not affect readiness.
 `task start` accepts one or more complete TaskIds. A single ID keeps the
