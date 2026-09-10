@@ -45,31 +45,38 @@ export const pendingTellProtectionSql = `SELECT d.turn_sequence FROM tell_delive
   JOIN tells ON tells.id = d.tell_id WHERE ${tellStateSql} = 'pending'
   UNION SELECT d.turn_sequence FROM tell_deliveries d JOIN tell_disposition_members m ON m.tell_id = d.tell_id`;
 
-function tellDeliveries(database: DatabaseSync, id: string): readonly TellDelivery[] {
-  const rows = database
+function decodeTellRows(database: DatabaseSync, rows: readonly TellRow[]): readonly TellFact[] {
+  if (rows.length === 0) return [];
+  const ids = JSON.stringify(rows.map((row) => row.id));
+  const deliveries = new Map<string, TellDelivery[]>();
+  const deliveryRows = database
     .prepare(
-      `SELECT turn_sequence, route, receipt, delivered_at FROM tell_deliveries
-    WHERE tell_id = ? ORDER BY sequence`,
+      `SELECT tell_id, turn_sequence, route, receipt, delivered_at
+    FROM tell_deliveries WHERE tell_id IN (SELECT value FROM json_each(?)) ORDER BY sequence`,
     )
-    .all(id) as unknown as readonly TellDeliveryRow[];
-  return rows.map(
-    (row): TellDelivery =>
-      row.receipt == null
-        ? { turnSequence: row.turn_sequence, route: row.route, deliveredAt: row.delivered_at }
-        : { turnSequence: row.turn_sequence, route: row.route, receipt: row.receipt, deliveredAt: row.delivered_at },
-  );
-}
-
-function tellBinding(database: DatabaseSync, id: string): TellBinding | undefined {
-  const row = database
-    .prepare("SELECT turn_sequence, bound_at FROM tell_bindings WHERE tell_id = ? ORDER BY sequence DESC LIMIT 1")
-    .get(id) as { turn_sequence: number; bound_at: string } | undefined;
-  return row === undefined ? undefined : { turnSequence: row.turn_sequence, boundAt: row.bound_at };
-}
-
-function decodeTellRow(database: DatabaseSync, row: TellRow): TellFact {
-  const binding = tellBinding(database, row.id);
-  return {
+    .all(ids) as unknown as readonly (TellDeliveryRow & { tell_id: string })[];
+  for (const row of deliveryRows) {
+    const group = deliveries.get(row.tell_id) ?? [];
+    group.push({
+      turnSequence: row.turn_sequence,
+      route: row.route,
+      deliveredAt: row.delivered_at,
+      ...(row.receipt == null ? {} : { receipt: row.receipt }),
+    });
+    deliveries.set(row.tell_id, group);
+  }
+  const bindings = new Map<string, TellBinding>();
+  const bindingRows = database
+    .prepare(
+      `SELECT tell_id, turn_sequence, bound_at FROM tell_bindings
+    WHERE sequence IN (
+      SELECT MAX(sequence) FROM tell_bindings
+      WHERE tell_id IN (SELECT value FROM json_each(?)) GROUP BY tell_id
+    )`,
+    )
+    .all(ids) as unknown as readonly { tell_id: string; turn_sequence: number; bound_at: string }[];
+  for (const row of bindingRows) bindings.set(row.tell_id, { turnSequence: row.turn_sequence, boundAt: row.bound_at });
+  return rows.map((row) => ({
     kind: "tell",
     sequence: row.sequence,
     id: row.id,
@@ -77,20 +84,24 @@ function decodeTellRow(database: DatabaseSync, row: TellRow): TellFact {
     ...(row.schema_json === null ? {} : { schemaJson: row.schema_json }),
     state: row.state,
     recordedAt: row.recorded_at,
-    deliveries: tellDeliveries(database, row.id),
-    ...(binding === undefined ? {} : { binding }),
-  };
+    deliveries: deliveries.get(row.id) ?? [],
+    ...(bindings.has(row.id) ? { binding: bindings.get(row.id)! } : {}),
+  }));
 }
 
-export function decodeTellAtSequence(database: DatabaseSync, sequence: number): TellFact {
-  const row = database
+export function tellFactsAtSequences(database: DatabaseSync, sequences: readonly number[]): readonly TellFact[] {
+  if (sequences.length === 0) return [];
+  const rows = database
     .prepare(
       `SELECT sequence, id, body, schema_json, recorded_at, ${tellStateSql} AS state
-    FROM tells WHERE sequence = ?`,
+    FROM tells WHERE sequence IN (SELECT value FROM json_each(?)) ORDER BY sequence`,
     )
-    .get(sequence) as TellRow | undefined;
-  if (row === undefined) throw new Error(`Akuma timeline references missing tell ${sequence}`);
-  return decodeTellRow(database, row);
+    .all(JSON.stringify(sequences)) as unknown as readonly TellRow[];
+  return decodeTellRows(database, rows);
+}
+
+export function hasPendingTell(database: DatabaseSync): boolean {
+  return database.prepare(`SELECT 1 FROM tells WHERE ${tellStateSql} = 'pending' LIMIT 1`).get() !== undefined;
 }
 
 export function insertTellFact(
@@ -111,7 +122,7 @@ export function tellFact(database: DatabaseSync, id: string): TellFact | null {
     FROM tells WHERE id = ?`,
     )
     .get(id) as TellRow | undefined;
-  return row === undefined ? null : decodeTellRow(database, row);
+  return row === undefined ? null : decodeTellRows(database, [row])[0]!;
 }
 
 export function insertTellDeliveryFact(database: DatabaseSync, input: TellDeliveryInput): boolean {
@@ -180,7 +191,7 @@ export function pendingTellFacts(database: DatabaseSync): readonly TellFact[] {
     WHERE ${tellStateSql} = 'pending' ORDER BY sequence`,
     )
     .all() as unknown as readonly TellRow[];
-  return rows.map((row) => decodeTellRow(database, row));
+  return decodeTellRows(database, rows);
 }
 
 export function tellDispositionResolved(database: DatabaseSync, bodySequence: number): boolean | null {
