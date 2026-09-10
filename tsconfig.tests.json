@@ -11,6 +11,7 @@
     "tests/actor.test.ts",
     "tests/completion-progress.test.ts",
     "tests/contract-completion.test.ts",
+    "tests/contract-forwarding-result.test.ts",
     "tests/akuma-api.test.ts",
     "tests/akuma-public.test.ts",
     "tests/akuma-provider.test.ts",
@@ -54,7 +55,6 @@
     "tests/cli-help.test.ts",
     "tests/cli-install.test.ts",
     "tests/cli-parse.test.ts",
-    "tests/cli-progress.test.ts",
     "tests/cli-projection-evidence.test.ts",
     "tests/cli-render.test.ts",
     "tests/cli-selectors.test.ts",
@@ -81,7 +81,13 @@
     "tests/git-repository.test.ts",
     "tests/markdown-ast.test.ts",
     "tests/plugin-runtime.test.ts",
-    "tests/plugin-types.test.ts"
+    "tests/facade-fleet.test.ts",
+    "tests/kanshi.test.ts",
+    "tests/library-akuma-creation.test.ts",
+    "tests/library-contract-operations.test.ts",
+    "tests/package-consumers.test.ts",
+    "tests/task-compose.test.ts",
+    "tests/contract-fork.test.ts"
   ],
   "exclude": []
 }
