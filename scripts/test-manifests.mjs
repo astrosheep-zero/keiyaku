@@ -46,6 +46,7 @@ export const INTEGRATION_TEST_FILES = [
   "tests/audit.test.ts",
   "tests/boundary-validation.test.ts",
   "tests/cli-akuma-msys.test.ts",
+  "tests/cli-akuma-packaged.test.ts",
   "tests/cli-invoke.test.ts",
   "tests/cli-verification.test.ts",
   "tests/contract-completion.test.ts",
