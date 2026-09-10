@@ -1,1 +1,1 @@
-{"parent":"a1d40429af2fcf4d0bf60b037f15aaf781ca6986","tree":"0fdcda34c5e25ac4b25276c01b9a553c4eabd103","branch":"codex/fix-schema-call-birth-order-20260910","message":"fix: await prompt-free birth before schema call admission"}
+{"parent":"a822667cb0db10b8ac69de202f81f98cd9296201","tree":"3fa91c0168fcbec08db2a3263176981ffe11aa16","branch":"codex/perf-plugin-drain-deadline-20260910","message":"perf: retire plugin drain deadlines after successful settlement"}
