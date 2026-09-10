@@ -36,8 +36,11 @@ creates an additional public result arm; [plugins.md](plugins.md) owns their
 process-local lifetime and diagnostics.
 
 Schema-bearing call and tell inputs are composed through the public Akuma
-surface. The schema is frozen at input admission and does not create a second
-route or alter ordinary lifecycle, wait, history, or kill behavior.
+surface. A schema-bearing call waits for its own prompt-free birth Body to
+settle before submitting its initial Tell. This does not relax the busy refusal
+for schema Tells sent to an existing running Akuma. The schema is frozen at input
+admission and does not create a second route or alter ordinary lifecycle,
+history, or kill behavior.
 
 ## Address, Fleet, And Catalog
 
