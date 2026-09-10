@@ -136,6 +136,18 @@ test("schema Keiyaku.call births without a prompt and records its body as one pu
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
   let akumaId: string | undefined;
   let operationFailed = true;
+  let birthSettled = false;
+  const wait = AkumaHandle.prototype.wait;
+  const tell = PublicAkuma.prototype.tell;
+  t.mock.method(AkumaHandle.prototype, "wait", async function (this: AkumaHandle, ...args: Parameters<typeof wait>) {
+    const status = await wait.apply(this, args);
+    birthSettled = true;
+    return status;
+  });
+  t.mock.method(PublicAkuma.prototype, "tell", async function (this: PublicAkuma, ...args: Parameters<typeof tell>) {
+    assert.equal(birthSettled, true, "schema Tell must await the prompt-free birth Body");
+    return await tell.apply(this, args);
+  });
   try {
     const result = await Keiyaku.call({
       path: world,

@@ -456,7 +456,9 @@ async function publishCall(born: BornCall, execution: ExecutionContext): Promise
   let schemaAnswer: unknown;
   if (born.schemaTell !== undefined) {
     const tell = born.schemaTell;
-    const pending =
+    // Birth publishes Soul before its prompt-free Body has necessarily settled.
+    // Schema admission still belongs to Tell, after that initial Body is idle.
+    const pending = handle.wait().then(() =>
       execution.channel.kind === "body-request"
         ? requestForwardedFleetTellAnswer({
             directory: execution.channel.directory,
@@ -464,7 +466,8 @@ async function publishCall(born: BornCall, execution: ExecutionContext): Promise
             body: tell.body,
             schema: tell.schema,
           })
-        : PublicAkuma.select(born.path, handle.id).tell(tell.body, { schema: tell.schema });
+        : PublicAkuma.select(born.path, handle.id).tell(tell.body, { schema: tell.schema }),
+    );
     if (born.mode === "detach") void pending.catch(() => undefined);
     else schemaAnswer = await pending;
   }
