@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, globSync, statSync } from "node:fs";
 import { TEST_MANIFESTS } from "./test-manifests.mjs";
 
@@ -94,25 +94,36 @@ delete environment.AKUMA_REQUESTS;
 // This is a new runner, including when invoked by a test of the runner itself.
 delete environment.NODE_TEST_CONTEXT;
 const started = performance.now();
-// The CLI sorts its glob results. Use the public files API only for the ordinary
-// compiled sweep so larger files can start first, without changing native focused
-// flags, reporters, filtering, or sharding. Every file still has its own process.
+// Keep the ordinary compiled sweep large-first without relying on node:test.run(),
+// whose embedding process can lose liveness while isolated child files are still
+// pending. Each file remains a native `node --test` process.
 if (compiled && files.length === 0 && testOptions.every((option) => /^--test-concurrency=\d+$/u.test(option))) {
-  const { run } = await import("node:test");
-  const { spec } = await import("node:test/reporters");
-  const ordered = testFiles.map((file) => ({ file, size: statSync(file).size }));
-  ordered.sort((left, right) => right.size - left.size || left.file.localeCompare(right.file));
-  delete process.env.AKUMA_REQUESTS;
-  delete process.env.NODE_TEST_CONTEXT;
-  const stream = run({
-    files: ordered.map(({ file }) => ".test-build/" + file.replace(/\.ts$/u, ".js")),
-    concurrency: Number(testOptions.at(-1)?.split("=")[1] ?? 8),
-    execArgv: loader,
-  });
-  stream.on("test:fail", () => {
-    process.exitCode = 1;
-  });
-  stream.compose(spec).pipe(process.stdout);
+  const executionFiles = selectedFiles
+    .map((file) => ({ file, size: statSync(file).size }))
+    .sort((left, right) => right.size - left.size || left.file.localeCompare(right.file))
+    .map(({ file }) => ".test-build/" + file.replace(/\.ts$/u, ".js"));
+  const concurrency = Math.max(1, Number(testOptions.at(-1)?.split("=")[1] ?? 8));
+  let next = 0;
+  let failed = false;
+  const worker = async () => {
+    for (;;) {
+      const index = next;
+      next += 1;
+      const file = executionFiles[index];
+      if (file === undefined) return;
+      const status = await new Promise((resolve) => {
+        const child = spawn(process.execPath, [...loader, "--test", ...reporterOptions, file], {
+          stdio: "inherit",
+          env: environment,
+        });
+        child.once("error", () => resolve(1));
+        child.once("close", (code) => resolve(code ?? 1));
+      });
+      if (status !== 0) failed = true;
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, executionFiles.length) }, worker));
+  process.exitCode = failed ? 1 : 0;
 } else {
   const result = spawnSync(
     process.execPath,
