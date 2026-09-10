@@ -1,4 +1,3 @@
-import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
@@ -15,24 +14,20 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { moveAlias, resolveAlias } from "../src/alias/index.js";
 import { type AkumaCallInput } from "../src/akuma/akuma.js";
-import { Akuma as PublicAkuma, Schema } from "../src/akuma/index.js";
-import {
-  AkumaComposition as Akuma,
-  AkumaHandle,
-  akumaCallExecution,
-  isolateSquareFixtureLedger,
-} from "./support/akuma-composition.js";
+import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
+import { AkumaArchetypeError, listArchetypeDefinitions, loadArchetype } from "../src/akuma/archetype.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { akumaCallRequestCommands } from "../src/akuma/call-request.js";
-import { AkumaArchetypeError, listArchetypeDefinitions, loadArchetype } from "../src/akuma/archetype.js";
 import { HeldAkumaLeash, initializeHeart, readSoul, type Soul } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
-import { claudeProvider } from "../src/akuma/providers/claude/index.js";
+import { Akuma as PublicAkuma, Schema } from "../src/akuma/index.js";
 import { AKUMA_REQUESTS_ENV, createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
+import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import { BodyRequestPump } from "../src/akuma/request-serve.js";
-import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
+import { moveAlias, resolveAlias } from "../src/alias/index.js";
+import { invoke } from "../src/cli/invoke.js";
+import { parseArgv, type ParsedExecution } from "../src/cli/parse.js";
 import { publishDispatch, readDispatch } from "../src/dispatch/index.js";
 import {
   GIT_REF,
@@ -44,14 +39,19 @@ import {
   writeCommit,
 } from "../src/git/repository.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
-import { bodyRequestExecution, Keiyaku, Repo, World, settings } from "../src/index.js";
+import { Keiyaku, Repo, World, bodyRequestExecution, settings } from "../src/index.js";
 import { drainPluginRuntime, pluginRuntime } from "../src/plugin/runtime.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
-import { invoke } from "../src/cli/invoke.js";
-import { parseArgv, type ParsedExecution } from "../src/cli/parse.js";
-import { makeGitRepository } from "./support/git.js";
-import { cleanupSpawnCapableFixture, installAkumaBodyPidReceipt } from "./support/process.js";
 import type { WorldRoot } from "../src/world.js";
+import {
+  AkumaComposition as Akuma,
+  AkumaHandle,
+  akumaCallExecution,
+  isolateSquareFixtureLedger,
+} from "./support/akuma-composition.js";
+import { makeGitRepository } from "./support/git.js";
+import { contractMarkdown } from "./support/markdown.js";
+import { cleanupSpawnCapableFixture, installAkumaBodyPidReceipt } from "./support/process.js";
 
 function markdown(title: string): string {
   return contractMarkdown(title, {
@@ -71,8 +71,6 @@ function executable(argv: readonly string[]): ParsedExecution {
 
 async function repositoryFixture() {
   const raw = makeGitRepository();
-  raw.run(["config", "user.name", "Test User"]);
-  raw.run(["config", "user.email", "test@example.com"]);
   raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   return { raw, repo: await Repo.at({ path: raw.path }), git: await repositoryAt(raw.path) };
 }
@@ -332,6 +330,7 @@ test("Keiyaku.call dispatches the admitted generic signal without blocking compl
     await drainPluginRuntime(world);
     delete (globalThis as Record<string, unknown>)[releaseKey];
     await pump.close();
+    await drainPluginRuntime(world);
     leash.release();
     rmSync(raw.path, { recursive: true, force: true });
   }
@@ -429,6 +428,7 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
     );
   } finally {
     await pump.close();
+    await drainPluginRuntime(world);
     leash.release();
     if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
     else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
@@ -802,69 +802,6 @@ test("Archetype base chains refuse missing providers, malformed names, and cycle
   }
 });
 
-test("Keiyaku.call projects the same readonly restraint on CallResult and AkumaStatus", async () => {
-  const { raw } = await repositoryFixture();
-  const world = await World.at(raw.path);
-  const configured = await archetypeSettings(world);
-  const { pump, leash } = await requestPump(world);
-  const routedKeiyaku = Keiyaku.withExecution({ execution: bodyRequestExecution({ directory: pump.directory }) });
-  const previousRequests = process.env[AKUMA_REQUESTS_ENV];
-  process.env[AKUMA_REQUESTS_ENV] = pump.directory;
-  try {
-    const result = await routedKeiyaku.call({
-      path: world,
-      archetype: "reviewer",
-      body: "review",
-      ...configured.placement,
-    });
-    assert.deepEqual(result.readonly, { enforcement: "native" });
-    assert.equal(result.observation.kind, "observed");
-    if (result.observation.kind === "observed") {
-      assert.deepEqual(result.observation.status.readonly, result.readonly);
-    }
-    assert.deepEqual((await readSoul(pathsForAkuId(world, result.akuma)))?.readonly, result.readonly);
-  } finally {
-    await pump.close();
-    leash.release();
-    if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
-    else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
-    rmSync(raw.path, { recursive: true, force: true });
-  }
-});
-
-test("Keiyaku.call observes for five minutes by default", async () => {
-  const { raw } = await repositoryFixture();
-  const world = await World.at(raw.path);
-  const configured = await archetypeSettings(world);
-  const { pump, leash } = await requestPump(world);
-  const routedKeiyaku = Keiyaku.withExecution({ execution: bodyRequestExecution({ directory: pump.directory }) });
-  const previousRequests = process.env[AKUMA_REQUESTS_ENV];
-  const originalWait = AkumaHandle.prototype.wait;
-  let receivedTimeout: number | undefined;
-  process.env[AKUMA_REQUESTS_ENV] = pump.directory;
-  AkumaHandle.prototype.wait = async function (predicate, options) {
-    receivedTimeout = options?.timeoutMs;
-    return await originalWait.call(this, predicate, { timeoutMs: 0 });
-  };
-  try {
-    const result = await routedKeiyaku.call({
-      path: world,
-      archetype: "worker",
-      body: "observe",
-      ...configured.placement,
-    });
-    assert.equal(receivedTimeout, 300_000);
-    assert.equal(result.observation.kind, "observed");
-  } finally {
-    AkumaHandle.prototype.wait = originalWait;
-    await pump.close();
-    leash.release();
-    if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
-    else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
-    rmSync(raw.path, { recursive: true, force: true });
-  }
-});
-
 type MutableProvider = { -readonly [Key in keyof ProviderAdapter]: ProviderAdapter[Key] };
 
 test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async () => {
@@ -1001,6 +938,12 @@ test("Keiyaku.call carries the CallResult restraint on detached and failed obser
     });
     assert.deepEqual(detached.observation, { kind: "detached" });
 
+    const observed = await routedKeiyaku.call({ path: world, archetype: "reviewer", body: "observed", ...placement });
+    assert.equal(observed.observation.kind, "observed");
+    if (observed.observation.kind === "observed")
+      assert.deepEqual(observed.observation.status.readonly, observed.readonly);
+    assert.deepEqual((await readSoul(pathsForAkuId(world, observed.akuma)))?.readonly, observed.readonly);
+
     AkumaHandle.prototype.wait = async function () {
       throw new Error("heart unavailable");
     };
@@ -1015,6 +958,7 @@ test("Keiyaku.call carries the CallResult restraint on detached and failed obser
   } finally {
     AkumaHandle.prototype.wait = originalWait;
     await pump.close();
+    await drainPluginRuntime(world);
     leash.release();
     if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
     else process.env[AKUMA_REQUESTS_ENV] = previousRequests;

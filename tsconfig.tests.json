@@ -22,9 +22,6 @@
     "tests/cli-akuma-msys.test.ts",
     "tests/cli-adaptation.test.ts",
     "tests/cli-akuma-packaged.e2e.ts",
-    "tests/library-contract-operations.test.ts",
-    "tests/public-library.test.ts",
-    "tests/package-consumers.test.ts",
     "tests/facade-contract.test.ts",
     "tests/cli-verification.test.ts",
     "tests/git-delivery.test.ts",
@@ -46,7 +43,6 @@
     "tests/akuma-heart.test.ts",
     "tests/akuma-requests.test.ts",
     "tests/windows-akuma-process.test.ts",
-    "tests/library-akuma-creation.test.ts",
     "tests/region-read.test.ts",
     "tests/region-observation.test.ts",
     "tests/region.test.ts",
@@ -97,7 +93,10 @@
     "tests/markdown-ast.test.ts",
     "tests/plugin-runtime.test.ts",
     "tests/facade-fleet.test.ts",
-    "tests/kanshi.test.ts"
+    "tests/kanshi.test.ts",
+    "tests/library-akuma-creation.test.ts",
+    "tests/library-contract-operations.test.ts",
+    "tests/package-consumers.test.ts"
   ],
   "exclude": []
 }
