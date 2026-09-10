@@ -66,6 +66,15 @@ test("amend leaf help enumerates the operation grammar", () => {
   assert.match(help, /## Remove: <existing-extension-title>/u);
 });
 
+test("deliver and review leaf help retain their distinct recovery and placement facts", () => {
+  const deliver = renderContractHelp("deliver");
+  assert.match(deliver, /--materialize-conflict[\s\S]*preserved\s+as the handoff base/u);
+
+  const review = renderContractHelp("review");
+  assert.match(review, /Pre-delivery review is real\s+testimony[\s\S]*without a delivered\s+candidate it can never place/u);
+  assert.match(review, /A blocked placement leaves the verdict recorded and the Contract active/u);
+});
+
 test("Akuma call and tell help expose schema files", () => {
   assert.match(renderAkumaHelp("call"), /--schema <file>/u);
   assert.match(renderAkumaHelp("tell"), /--schema <file>/u);

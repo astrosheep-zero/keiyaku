@@ -28,7 +28,7 @@ import { resolveProviderExecution } from "./providers/index.js";
 import { publishAkuma } from "./publication.js";
 import { spawnAkumaBody } from "./body.js";
 import { AkumaNotBornError } from "./akuma-errors.js";
-import { bornStatus } from "./akuma-observe.js";
+import { bornStatus, defaultWaitComplete, readWaitComplete } from "./akuma-observe.js";
 import type { AkumaCallExecution, AkumaStatus, ForkReceipt, InterruptReceipt } from "./akuma.js";
 import type { WorldRoot } from "../world.js";
 const CALL_EXECUTION: unique symbol = Symbol("akuma-call-execution");
@@ -36,14 +36,6 @@ const POLL_MS = 100;
 const wait = (milliseconds: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
 function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-function defaultWaitComplete(status: AkumaStatus): boolean {
-  return (
-    status.life !== "running" &&
-    !status.timeline.entries.some(
-      (entry) => entry.kind === "row" && entry.row.kind === "tell" && entry.row.state === "pending",
-    )
-  );
 }
 async function takeLeashUntilSignal(
   paths: AkumaPaths,
@@ -69,7 +61,7 @@ export async function settleAkumaKill(
   signal?: AbortSignal,
   retainLeash = false,
 ): Promise<Readonly<{ evidence: KillEvidence; leash?: HeldAkumaLeash }>> {
-  const request = await requestStop(paths, new Date().toISOString());
+  const request = await requestStop(paths, new Date().toISOString(), signal);
   if (request.kind !== "requested") {
     if (!retainLeash) return { evidence: request.kind };
     const leash = await acquireLeash(paths, signal === undefined ? {} : { signal });
@@ -185,8 +177,14 @@ export class AkumaHandle {
     }
     const deadline = options.timeoutMs === undefined ? undefined : performance.now() + options.timeoutMs;
     for (;;) {
-      const status = await this.status();
-      if (predicate(status) || (deadline !== undefined && performance.now() >= deadline)) return status;
+      if (
+        predicate !== defaultWaitComplete ||
+        (deadline !== undefined && performance.now() >= deadline) ||
+        (await readWaitComplete(this.worldPath, this.id))
+      ) {
+        const status = await this.status();
+        if (predicate(status) || (deadline !== undefined && performance.now() >= deadline)) return status;
+      }
       await wait(deadline === undefined ? POLL_MS : Math.min(POLL_MS, Math.max(0, deadline - performance.now())));
     }
   }
@@ -213,7 +211,7 @@ export class AkumaHandle {
     body: string,
     options: Readonly<{ tellId?: string; schemaJson?: string; signal?: AbortSignal; runtime?: TellWakeRuntime }> = {},
   ): Promise<InterruptReceipt> {
-    const request = await requestPause(this.paths, new Date().toISOString());
+    const request = await requestPause(this.paths, new Date().toISOString(), options.signal);
     if (request.kind === "not-born") {
       throw new AkumaNotBornError(this.id);
     }
