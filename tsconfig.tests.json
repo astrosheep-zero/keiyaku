@@ -4,7 +4,9 @@
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
-      "@astrosheep/keiyaku/plugin": ["src/plugin/public.ts"]
+      "@astrosheep/keiyaku/plugin": [
+        "src/plugin/public.ts"
+      ]
     }
   },
   "include": [
@@ -17,15 +19,13 @@
     "tests/akuma-identity.test.ts",
     "tests/akuma-physical.test.ts",
     "tests/plugin-square.test.ts",
-    "tests/task-cli.test.ts",
-    "tests/cli-invoke.test.ts",
     "tests/cli-akuma-msys.test.ts",
+    "tests/cli-adaptation.test.ts",
     "tests/cli-akuma-packaged.e2e.ts",
     "tests/library-contract-operations.test.ts",
     "tests/public-library.test.ts",
     "tests/package-consumers.test.ts",
     "tests/facade-contract.test.ts",
-    "tests/facade-fleet.test.ts",
     "tests/cli-verification.test.ts",
     "tests/git-delivery.test.ts",
     "tests/private-state-seat.test.ts",
@@ -47,7 +47,6 @@
     "tests/akuma-requests.test.ts",
     "tests/windows-akuma-process.test.ts",
     "tests/library-akuma-creation.test.ts",
-    "tests/kanshi.test.ts",
     "tests/region-read.test.ts",
     "tests/region-observation.test.ts",
     "tests/region.test.ts",
@@ -97,6 +96,8 @@
     "tests/git-repository.test.ts",
     "tests/markdown-ast.test.ts",
     "tests/plugin-runtime.test.ts",
+    "tests/facade-fleet.test.ts",
+    "tests/kanshi.test.ts"
   ],
   "exclude": []
 }
