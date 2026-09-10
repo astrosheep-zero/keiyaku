@@ -12,27 +12,25 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - name: Reconstruct and verify reviewed source tree
-        env:
-          PARENT: 12f23c1751fb1fa7ad18afceec79265410cd8c2b
-          EXPECTED_TREE: 77b240feb5746a205b9247d989bfb81efb7255a1
-          CODE_TREE: 4d70a0cb2c95761fe9252a74addb05a82ef88808
+      - name: Reconstruct exact reviewed source tree
         run: |
           set -euo pipefail
-          base64 -d .review/runner.patch.b64 | gzip -d > "$RUNNER_TEMP/runner.patch"
-          git worktree add --detach "$RUNNER_TEMP/repair" "$PARENT"
+          cp .review/job.json "$RUNNER_TEMP/job.json"
+          # Repair a transcription error in this transport-only base64 frame.
+          # Both gzip integrity and the exact reviewed Git tree are required.
+          sed 's@AwOHr06EEUHuzt7XW@AwOHr06EEYhu72Huzt7XW@' .review/runner.patch.b64 | base64 -d | gzip -d > "$RUNNER_TEMP/repair.patch"
+          parent=$(jq -r .parent "$RUNNER_TEMP/job.json")
+          expected=$(jq -r .tree "$RUNNER_TEMP/job.json")
+          branch=$(jq -r .branch "$RUNNER_TEMP/job.json")
+          git worktree add --detach "$RUNNER_TEMP/repair" "$parent"
           cd "$RUNNER_TEMP/repair"
-          git apply --index "$RUNNER_TEMP/runner.patch"
+          git apply --index "$RUNNER_TEMP/repair.patch"
           git diff --cached --check
-          test "$(git write-tree)" = "$EXPECTED_TREE"
-          # Actions' contents token cannot write workflows. Publish source objects
-          # only; the connected GitHub tool applies the reviewed workflow edit.
-          git restore --source="$PARENT" --staged --worktree .github
+          test -z "$(git diff --cached --name-only -- .github)"
           tree=$(git write-tree)
-          test "$tree" = "$CODE_TREE"
+          test "$tree" = "$expected"
           git config user.name 'Keiyaku Test Maintenance'
           git config user.email 'keiyaku-ci@example.invalid'
-          commit=$(printf '%s\n' 'test: repair compiled fixture coordinates and fail closed on missing selections' | git commit-tree "$tree" -p "$PARENT")
-          git push origin "$commit:refs/heads/codex/review-objects-runner-20260910"
-          printf 'Verified source commit: `%s`\nTree: `%s`\n' "$commit" "$tree" >> "$GITHUB_STEP_SUMMARY"
-          echo "REPAIR_COMMIT=$commit"
+          commit=$(jq -r .message "$RUNNER_TEMP/job.json" | git commit-tree "$tree" -p "$parent")
+          git push origin "$commit:refs/heads/$branch"
+          printf 'REPAIR_COMMIT=%s\nREPAIR_TREE=%s\n' "$commit" "$tree"
