@@ -27,6 +27,7 @@ export const LOCAL_TEST_FILES = [
   "tests/pi-extension.test.ts",
   "tests/region.test.ts",
   "tests/settings.test.ts",
+  "tests/task-compose-recovery.test.ts",
   "tests/task-document.test.ts",
   "tests/v4-cut.test.ts",
 ];
@@ -46,6 +47,7 @@ export const INTEGRATION_TEST_FILES = [
   "tests/boundary-validation.test.ts",
   "tests/cli-akuma-msys.test.ts",
   "tests/contract-completion.test.ts",
+  "tests/contract-forwarding-result.test.ts",
   "tests/dispatch-alias.test.ts",
   "tests/git-delivery.test.ts",
   "tests/git-read-observation.test.ts",
