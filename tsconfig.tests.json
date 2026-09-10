@@ -4,7 +4,9 @@
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
-      "@astrosheep/keiyaku/plugin": ["src/plugin/public.ts"]
+      "@astrosheep/keiyaku/plugin": [
+        "src/plugin/public.ts"
+      ]
     }
   },
   "include": [
@@ -91,7 +93,9 @@
     "tests/git-repository.test.ts",
     "tests/markdown-ast.test.ts",
     "tests/plugin-runtime.test.ts",
-    "tests/plugin-types.test.ts"
+    "tests/plugin-types.test.ts",
+    "tests/facade-fleet.test.ts",
+    "tests/kanshi.test.ts"
   ],
   "exclude": []
 }
