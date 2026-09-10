@@ -1,3 +1,4 @@
+import { StringDecoder } from "node:string_decoder";
 import { lstat } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
@@ -102,33 +103,65 @@ type CheckoutObservation = Readonly<{
   path: string;
   predecessor: GitObjectId;
   candidate: GitObjectId;
+  changes: TargetPlacementChanges;
 }>;
 
-async function changedPaths(
+export type TargetPlacementChanges = Readonly<{
+  predecessor: SnapshotId;
+  candidate: SnapshotId;
+  paths: readonly string[];
+  writes: readonly Readonly<{ path: string; blob: boolean }>[];
+}>;
+
+/** Only immutable commit contents are prepared outside the publication seat. */
+export async function prepareTargetPlacementChanges(
   repository: GitRepository,
-  path: string,
-  predecessor: GitObjectId,
-  candidate: GitObjectId,
-  filter?: string,
-): Promise<readonly string[]> {
-  return await gitPaths(repository, path, [
-    "diff",
-    "--name-only",
-    "--no-renames",
-    ...(filter === undefined ? [] : [`--diff-filter=${filter}`]),
-    "-z",
-    predecessor,
-    candidate,
-  ]);
+  target: RefOperation,
+): Promise<TargetPlacementChanges> {
+  const records = (
+    await runGit(repository, [
+      "diff",
+      "--raw",
+      "--no-renames",
+      "--no-abbrev",
+      "-z",
+      gitObjectIdForSnapshot(target.expectedOid),
+      gitObjectIdForSnapshot(target.newOid),
+      "--",
+    ])
+  )
+    .toString("utf8")
+    .split("\0");
+  const paths: string[] = [];
+  const writes: { path: string; blob: boolean }[] = [];
+  if (records.pop() !== "" || records.length % 2 !== 0) throw new Error("malformed target change records");
+  for (let index = 0; index < records.length; index += 2) {
+    const fields = records[index]!.split(" ");
+    const path = records[index + 1]!;
+    const mode = fields[1];
+    const status = fields[4];
+    if (
+      fields.length !== 5 ||
+      !/^:[0-7]{6}$/.test(fields[0]!) ||
+      !/^[0-7]{6}$/.test(mode ?? "") ||
+      !/^[ACDMT]$/.test(status ?? "") ||
+      path.length === 0
+    )
+      throw new Error("malformed target change record");
+    paths.push(path);
+    if (status !== "D") writes.push({ path, blob: mode !== "160000" });
+  }
+  paths.sort();
+  writes.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
+  return { predecessor: target.expectedOid, candidate: target.newOid, paths, writes };
 }
 
 async function dryRunRefusal(
   input: CheckoutObservation,
   scopes: readonly PhysicalScope[],
 ): Promise<CheckoutNotFollowableRefusal | null> {
-  const { repository, contractId, target, path, predecessor, candidate } = input;
-  const changed = await changedPaths(repository, path, predecessor, candidate);
-  const pathspecs = changed.map(literalPath);
+  const { repository, contractId, target, path, predecessor, changes } = input;
+  const pathspecs = changes.paths.map(literalPath);
   if (pathspecs.length === 0) return null;
 
   const unmerged = await gitPaths(repository, path, [
@@ -163,53 +196,41 @@ type PhysicalScope = Readonly<{
   kind: "leaf" | "directory";
 }>;
 
-async function physicalScope(worktree: string, candidatePath: string): Promise<PhysicalScope | null> {
+async function physicalScope(
+  candidatePath: string,
+  metadata: (path: string) => Promise<Awaited<ReturnType<typeof lstat>> | null>,
+): Promise<PhysicalScope | null> {
   const components = candidatePath.split("/");
   for (let index = 0; index < components.length; index += 1) {
     const scope = components.slice(0, index + 1).join("/");
-    let stat: Awaited<ReturnType<typeof lstat>>;
-    try {
-      stat = await lstat(resolve(worktree, ...components.slice(0, index + 1)));
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code === "ENOENT" || code === "ENOTDIR") return null;
-      throw error;
-    }
+    const stat = await metadata(scope);
+    if (stat === null) return null;
     if (!stat.isDirectory()) return { path: scope, kind: "leaf" };
     if (index + 1 === components.length) return { path: scope, kind: "directory" };
   }
   return null;
 }
 
-async function candidateEntryIsBlob(
-  repository: GitRepository,
-  path: string,
-  snapshot: GitObjectId,
-  candidatePath: string,
-): Promise<boolean> {
-  const output = await runGit(repository, ["-C", path, "ls-tree", "-z", snapshot, "--", literalPath(candidatePath)]);
-  const records = output
-    .toString("utf8")
-    .split("\0")
-    .filter((record) => record.length > 0);
-  if (records.length !== 1) throw new Error(`candidate path has no unique Git entry: ${candidatePath}`);
-  const separator = records[0]!.indexOf("\t");
-  if (separator < 0) throw new Error(`candidate path has a malformed Git entry: ${candidatePath}`);
-  const fields = records[0]!.slice(0, separator).split(" ");
-  return fields[1] === "blob";
-}
-
 async function destructionScopes(
-  repository: GitRepository,
-  path: string,
-  snapshot: GitObjectId,
-  writes: readonly string[],
+  worktree: string,
+  writes: TargetPlacementChanges["writes"],
 ): Promise<readonly PhysicalScope[]> {
   const scopes = new Map<string, PhysicalScope>();
+  const metadata = new Map<string, Promise<Awaited<ReturnType<typeof lstat>> | null>>();
+  const read = (path: string) => {
+    let result = metadata.get(path);
+    if (result === undefined) {
+      result = lstat(resolve(worktree, path)).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT" || error.code === "ENOTDIR") return null;
+        throw error;
+      });
+      metadata.set(path, result);
+    }
+    return result;
+  };
   for (const write of writes) {
-    const scope = await physicalScope(path, write);
-    if (scope === null) continue;
-    if (scope.kind === "directory" && !(await candidateEntryIsBlob(repository, path, snapshot, write))) continue;
+    const scope = await physicalScope(write.path, read);
+    if (scope === null || (scope.kind === "directory" && !write.blob)) continue;
     scopes.set(scope.path, scope);
   }
   return [...scopes.values()].sort((left, right) => left.path.localeCompare(right.path));
@@ -244,15 +265,32 @@ async function untrackedRefusalWithinScopes(
     if (collisions.length > 0) return checkoutRefusal(contractId, target, path, "untracked", collisions);
   }
 
-  for (const scope of scopes) {
-    if (scope.kind !== "directory") continue;
-    let found = false;
-    await consumeGitStdout(repository, ["-C", path, ...args, "--", literalPath(scope.path)], (chunk) => {
-      if (chunk.length > 0) found = true;
-    });
-    if (found) return checkoutRefusal(contractId, target, path, "untracked", [scope.path]);
-  }
-  return null;
+  const directories = scopes.filter((scope) => scope.kind === "directory");
+  if (directories.length === 0) return null;
+  const selected = new Set(directories.map((scope) => scope.path));
+  const found = new Set<string>();
+  const decoder = new StringDecoder("utf8");
+  let pending = "";
+  await consumeGitStdout(
+    repository,
+    ["-C", path, ...args, "--", ...directories.map((scope) => literalPath(scope.path))],
+    (chunk) => {
+      const records = (pending + decoder.write(chunk)).split("\0");
+      pending = records.pop()!;
+      for (const record of records) {
+        let ancestor = record.replace(/\/$/, "");
+        for (;;) {
+          if (selected.has(ancestor)) found.add(ancestor);
+          const slash = ancestor.lastIndexOf("/");
+          if (slash < 0) break;
+          ancestor = ancestor.slice(0, slash);
+        }
+      }
+    },
+  );
+  if (pending + decoder.end() !== "") throw new Error("unterminated untracked path");
+  const first = directories.find((scope) => found.has(scope.path));
+  return first === undefined ? null : checkoutRefusal(contractId, target, path, "untracked", [first.path]);
 }
 
 async function indexMatchesTreeOnPaths(
@@ -303,10 +341,11 @@ async function ordinaryPrecheck(
   contractId: ContractId,
   target: RefOperation,
   path: string,
+  changes: TargetPlacementChanges,
 ): Promise<CheckoutNotFollowableRefusal | null> {
   const predecessor = gitObjectIdForSnapshot(target.expectedOid);
   const candidate = gitObjectIdForSnapshot(target.newOid);
-  const observation = { repository, contractId, target, path, predecessor, candidate };
+  const observation = { repository, contractId, target, path, predecessor, candidate, changes };
   let dryRunError: GitPlumbingError | undefined;
   try {
     await runGit(repository, ["-C", path, "read-tree", "--dry-run", "-m", "-u", predecessor, candidate]);
@@ -314,8 +353,7 @@ async function ordinaryPrecheck(
     if (!(error instanceof GitPlumbingError) || repository.signal?.aborted === true) throw error;
     dryRunError = error;
   }
-  const writes = await changedPaths(repository, path, predecessor, candidate, "ACMRT");
-  const scopes = await destructionScopes(repository, path, candidate, writes);
+  const scopes = await destructionScopes(path, changes.writes);
   if (dryRunError !== undefined) {
     const refusal = await dryRunRefusal(observation, scopes);
     if (refusal !== null) return refusal;
@@ -354,18 +392,22 @@ export type TargetPlacementObservation =
 export async function observeTargetPlacement(
   repository: GitRepository,
   input: TargetPlacementObservationInput,
+  changes?: TargetPlacementChanges,
 ): Promise<TargetPlacementObservation> {
   const target: RefOperation = {
     target: input.coordinates.target,
     expectedOid: input.predecessor,
     newOid: input.candidate,
   };
+  changes ??= await prepareTargetPlacementChanges(repository, target);
+  if (changes.predecessor !== target.expectedOid || changes.candidate !== target.newOid)
+    throw new Error("target changes do not match the observed movement");
   const worktrees = (await registeredWorktrees(repository))
     .filter((worktree) => worktree.branch === target.target)
     .sort((left, right) => left.path.localeCompare(right.path));
   const arms: FollowArm[] = [];
   for (const worktree of worktrees) {
-    const refusal = await ordinaryPrecheck(repository, input.contractId, target, worktree.path);
+    const refusal = await ordinaryPrecheck(repository, input.contractId, target, worktree.path, changes);
     if (refusal !== null) return { kind: "refused", refusal };
     arms.push({ kind: "ordinary", path: worktree.path });
   }
@@ -404,16 +446,21 @@ export async function prepareTargetPlacement(
   repository: GitRepository,
   state: ContractState,
   target: RefOperation,
+  changes?: TargetPlacementChanges,
 ): Promise<TargetPlacementPreparation> {
   if (state.coordinates.target !== target.target || state.currentIntegration?.snapshot !== target.newOid) {
     throw new Error("placement state does not match its offered target movement");
   }
-  const observation = await observeTargetPlacement(repository, {
-    contractId: state.id,
-    coordinates: { ...state.coordinates, target: target.target },
-    predecessor: target.expectedOid,
-    candidate: target.newOid,
-  });
+  const observation = await observeTargetPlacement(
+    repository,
+    {
+      contractId: state.id,
+      coordinates: { ...state.coordinates, target: target.target },
+      predecessor: target.expectedOid,
+      candidate: target.newOid,
+    },
+    changes,
+  );
   return observation.kind === "refused"
     ? observation
     : { kind: "prepared", placement: { target, arms: observation.arms } };

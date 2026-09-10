@@ -20,41 +20,28 @@ const { TEST_MANIFESTS } = (await import(
 const root = process.cwd();
 
 test("test runner removes ambient Akuma requests and preserves unrelated environment", () => {
-  const result = spawnSync(
-    process.execPath,
-    [
-      resolve(root, "scripts/run-tests.mjs"),
-      ...(import.meta.url.endsWith(".js") ? ["--compiled"] : []),
-      "tests/fixtures/run-tests-environment.test.mjs",
-    ],
-    {
-      cwd: root,
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        AKUMA_REQUESTS: resolve(root, ".keiyaku", "ambient-requests"),
-        KEIYAKU_TEST_SENTINEL: "sentinel bytes",
-      },
-    },
-  );
-
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  const failing = spawnSync(
-    process.execPath,
-    [
-      resolve(root, "scripts/run-tests.mjs"),
-      ...(import.meta.url.endsWith(".js") ? ["--compiled"] : []),
-      "--test-reporter=spec",
-      "tests/fixtures/run-tests-environment.test.mjs",
-    ],
-    {
-      cwd: root,
-      encoding: "utf8",
-      env: { ...process.env, KEIYAKU_TEST_SENTINEL: "wrong bytes" },
-    },
-  );
-  assert.equal(failing.status, 1, failing.stderr || failing.stdout);
-  assert.match(failing.stdout + failing.stderr, /wrong bytes/);
+  for (const sentinel of ["sentinel bytes", "wrong sentinel"]) {
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      AKUMA_REQUESTS: resolve(root, ".keiyaku", "ambient-requests"),
+      KEIYAKU_TEST_SENTINEL: sentinel,
+    };
+    // A deliberately nested runner must not inherit Node's recursion guard.
+    delete env.NODE_TEST_CONTEXT;
+    const result = spawnSync(
+      process.execPath,
+      [
+        resolve(root, "scripts/run-tests.mjs"),
+        ...(import.meta.url.endsWith(".js") ? ["--compiled"] : []),
+        "--test-reporter=tap",
+        "tests/fixtures/run-tests-environment.test.mjs",
+      ],
+      { cwd: root, encoding: "utf8", env },
+    );
+    assert.equal(result.status, sentinel === "sentinel bytes" ? 0 : 1, result.stderr || result.stdout);
+    assert.match(result.stdout + result.stderr, /repository test environment is isolated from Akuma request forwarding/u);
+    assert.match(result.stdout + result.stderr, /# tests 1/u);
+  }
 });
 
 test("test runner suite selection is explicit and fail-closed", () => {
@@ -108,6 +95,35 @@ test("compiled sweeps schedule large files first without losing isolation or fai
   assert.equal(failed.status, 1, failed.stdout + failed.stderr);
   assert.match(failed.stdout + failed.stderr, /wrong bytes/u);
   assert.equal(readFileSync(order, "utf8"), "zaza");
+});
+
+test("compiled sweeps await delayed files even when a sibling fails", (context) => {
+  const directory = mkdtempSync(join(tmpdir(), "keiyaku-test-runner-delayed-"));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  mkdirSync(join(directory, "tests"));
+  mkdirSync(join(directory, ".test-build", "tests"), { recursive: true });
+  const marker = join(directory, "completed");
+  writeFileSync(join(directory, "tests", "failure.test.ts"), "// source\n".repeat(100));
+  writeFileSync(join(directory, "tests", "delayed.test.ts"), "// source\n");
+  writeFileSync(
+    join(directory, ".test-build", "tests", "failure.test.js"),
+    "const test = require('node:test'); const assert = require('node:assert/strict'); test('failure', () => assert.fail('chosen failure'));",
+  );
+  writeFileSync(
+    join(directory, ".test-build", "tests", "delayed.test.js"),
+    [
+      "const { writeFileSync } = require('node:fs');",
+      "const test = require('node:test');",
+      `test('delayed completion', async () => { await new Promise((resolve) => setTimeout(resolve, 150)); writeFileSync(${JSON.stringify(marker)}, 'done'); });`,
+    ].join("\n"),
+  );
+  const result = spawnSync(
+    process.execPath,
+    [resolve(root, "scripts/run-tests.mjs"), "--compiled", "--test-concurrency=2"],
+    { cwd: directory, encoding: "utf8" },
+  );
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.equal(existsSync(marker), true, result.stdout + result.stderr);
 });
 
 test("test entry reruns checks and retires bytecode after success and failure", (context) => {

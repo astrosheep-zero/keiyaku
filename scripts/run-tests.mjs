@@ -94,9 +94,9 @@ delete environment.AKUMA_REQUESTS;
 // This is a new runner, including when invoked by a test of the runner itself.
 delete environment.NODE_TEST_CONTEXT;
 const started = performance.now();
-// Keep the ordinary compiled sweep large-first without relying on node:test.run(),
-// whose embedding process can lose liveness while isolated child files are still
-// pending. Each file remains a native `node --test` process.
+// Keep the ordinary compiled sweep large-first while owning every isolated native
+// child through terminal settlement. The embedded node:test runner does not give
+// this process custody of those children.
 if (compiled && files.length === 0 && testOptions.every((option) => /^--test-concurrency=\d+$/u.test(option))) {
   const executionFiles = selectedFiles
     .map((file) => ({ file, size: statSync(file).size }))
@@ -107,9 +107,7 @@ if (compiled && files.length === 0 && testOptions.every((option) => /^--test-con
   let failed = false;
   const worker = async () => {
     for (;;) {
-      const index = next;
-      next += 1;
-      const file = executionFiles[index];
+      const file = executionFiles[next++];
       if (file === undefined) return;
       const status = await new Promise((resolve) => {
         const child = spawn(process.execPath, [...loader, "--test", ...reporterOptions, file], {

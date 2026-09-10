@@ -205,6 +205,128 @@ test("session admission survives before turn completion", async () => {
   }
 });
 
+test("contended Heart mutations yield to observations and timers before executing once", async () => {
+  const value = await fixture();
+  const paths = value.allocated.paths;
+  const at = value.soul.createdAt;
+  const leash = (await HeldAkumaLeash.try(paths))!;
+  const blocker = new DatabaseSync(paths.heart);
+  try {
+    await leash.birth(paths, value.soul);
+    const body = await leash.recordBody(paths, { leashTakenAt: at });
+    const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: at });
+    blocker.exec("BEGIN IMMEDIATE");
+    let settled = false;
+    const writing = Promise.allSettled([
+      appendActivity(paths, { turnSequence: turn.sequence, event: { type: "note", text: "once" }, at }),
+      recordSession(paths, {
+        provider: "claude",
+        options: value.soul.options,
+        coordinate: { sessionId: "contended" },
+        cwd: value.root,
+        admittedAt: at,
+      }),
+      requestPause(paths, at),
+    ]).then((results) => {
+      settled = true;
+      return results;
+    });
+    const beforeRelease = await new Promise<boolean>((resolve) => setTimeout(() => resolve(settled), 20));
+    const observed = await readHeart(paths);
+    blocker.exec("ROLLBACK");
+    const results = await writing;
+    assert.equal(beforeRelease, false, "mutations must still await the held writer, not block the timer then fail");
+    assert.equal(observed.lastActivityAt, at);
+    assert.equal(observed.latestSession, null);
+    assert.equal(observed.pause, null);
+    assert.ok(
+      results.every((result) => result.status === "fulfilled"),
+      JSON.stringify(results),
+    );
+    assert.equal(blocker.prepare("SELECT COUNT(*) AS n FROM activity").get()?.n, 1);
+    assert.equal(blocker.prepare("SELECT COUNT(*) AS n FROM sessions").get()?.n, 1);
+    assert.equal(await pauseRequested(paths), true);
+  } finally {
+    blocker.close();
+    leash.release();
+    value.close();
+  }
+});
+
+test("control cancellation while waiting for Heart admission leaves no stop or pause", async () => {
+  const value = await fixture();
+  const paths = value.allocated.paths;
+  const leash = (await HeldAkumaLeash.try(paths))!;
+  const blocker = new DatabaseSync(paths.heart);
+  try {
+    await leash.birth(paths, value.soul);
+    await leash.recordBody(paths, { leashTakenAt: value.soul.createdAt });
+    blocker.exec("BEGIN IMMEDIATE");
+    const controller = new AbortController();
+    const reason = new Error("caller stopped waiting");
+    const handle = new AkumaHandle(value.allocated.id, value.root);
+    const results = Promise.allSettled([
+      handle.interrupt("not admitted", { signal: controller.signal }),
+      handle.kill({ signal: controller.signal }),
+    ]);
+    const timer = setTimeout(() => controller.abort(reason), 20);
+    try {
+      for (const result of await results) {
+        assert.equal(result.status, "rejected");
+        if (result.status === "rejected") assert.equal(result.reason, reason);
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+    blocker.exec("ROLLBACK");
+    const heart = await readHeart(paths);
+    assert.equal(heart.stop, null);
+    assert.equal(heart.pause, null);
+    assert.deepEqual(heart.pending, []);
+  } finally {
+    blocker.close();
+    leash.release();
+    value.close();
+  }
+});
+
+test("a commit failure rolls back the Heart mutation without replaying it", async (context) => {
+  const value = await fixture();
+  const paths = value.allocated.paths;
+  const at = value.soul.createdAt;
+  const leash = (await HeldAkumaLeash.try(paths))!;
+  try {
+    await leash.birth(paths, value.soul);
+    const body = await leash.recordBody(paths, { leashTakenAt: at });
+    const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: at });
+    const failure = Object.assign(new Error("commit busy"), { errcode: 5 });
+    const exec = DatabaseSync.prototype.exec;
+    let commits = 0;
+    let begins = 0;
+    const injected = context.mock.method(DatabaseSync.prototype, "exec", function (this: DatabaseSync, sql: string) {
+      if (sql === "BEGIN IMMEDIATE") begins++;
+      if (sql === "COMMIT") {
+        commits++;
+        throw failure;
+      }
+      return exec.call(this, sql);
+    });
+    await assert.rejects(
+      appendActivity(paths, { turnSequence: turn.sequence, event: { type: "note", text: "rollback" }, at }),
+      (error) => error === failure,
+    );
+    injected.mock.restore();
+    assert.equal(begins, 1);
+    assert.equal(commits, 1);
+    assert.equal((await activitySlice(paths)).rows.filter((fact) => fact.kind === "activity").length, 0);
+    await appendActivity(paths, { turnSequence: turn.sequence, event: { type: "note", text: "next call" }, at });
+    assert.equal((await activitySlice(paths)).rows.filter((fact) => fact.kind === "activity").length, 1);
+  } finally {
+    leash.release();
+    value.close();
+  }
+});
+
 test("provider session cwd does not replace the Soul execution cwd", async () => {
   const value = await fixture();
   try {
