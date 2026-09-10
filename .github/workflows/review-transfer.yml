@@ -1,0 +1,33 @@
+name: Publish reviewed repair objects
+on:
+  push:
+    branches: [codex/review-repairs-transfer-20260910]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Reconstruct and verify reviewed tree
+        env:
+          PARENT: 12f23c1751fb1fa7ad18afceec79265410cd8c2b
+          EXPECTED_TREE: 77b240feb5746a205b9247d989bfb81efb7255a1
+        run: |
+          set -euo pipefail
+          base64 -d .review/runner.patch.b64 | gzip -d > "$RUNNER_TEMP/runner.patch"
+          git worktree add --detach "$RUNNER_TEMP/repair" "$PARENT"
+          cd "$RUNNER_TEMP/repair"
+          git apply --index "$RUNNER_TEMP/runner.patch"
+          git diff --cached --check
+          tree=$(git write-tree)
+          test "$tree" = "$EXPECTED_TREE"
+          git config user.name 'Keiyaku Test Maintenance'
+          git config user.email 'keiyaku-ci@example.invalid'
+          commit=$(printf '%s\n' 'test: repair compiled fixture coordinates and fail closed on missing selections' | git commit-tree "$tree" -p "$PARENT")
+          git push origin "$commit:refs/heads/codex/review-objects-runner-20260910"
+          printf 'Verified repair commit: `%s`\nTree: `%s`\n' "$commit" "$tree" >> "$GITHUB_STEP_SUMMARY"
+          echo "REPAIR_COMMIT=$commit"
