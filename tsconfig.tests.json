@@ -24,6 +24,7 @@
     "tests/cli-akuma-packaged.e2e.ts",
     "tests/library-contract-operations.test.ts",
     "tests/public-library.test.ts",
+    "tests/package-consumers.test.ts",
     "tests/facade-contract.test.ts",
     "tests/cli-verification.test.ts",
     "tests/git-delivery.test.ts",
@@ -95,7 +96,6 @@
     "tests/git-repository.test.ts",
     "tests/markdown-ast.test.ts",
     "tests/plugin-runtime.test.ts",
-    "tests/plugin-types.test.ts",
     "tests/facade-fleet.test.ts",
     "tests/kanshi.test.ts"
   ],
