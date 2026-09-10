@@ -39,14 +39,14 @@ function crossProcessAmend(input: Readonly<{ repository: string; contractId: str
   ].join("\n");
   const child = spawn(
     process.execPath,
-    ["--import", new URL("../node_modules/tsx/dist/loader.mjs", import.meta.url).href, "--input-type=module", "-e", source],
+    ["--import", import.meta.resolve("tsx"), "--input-type=module", "-e", source],
     {
       env: {
         ...process.env,
-        KEIYAKU_MODULE: new URL("../src/index.ts", import.meta.url).href,
-        KEIYAKU_REPOSITORY_MODULE: new URL("../src/git/repository.ts", import.meta.url).href,
-        KEIYAKU_SEAT_MODULE: new URL("../src/git/private-state-seat.ts", import.meta.url).href,
-        KEIYAKU_LOCK_MODULE: new URL("../src/coordination/sqlite-transaction-lock.ts", import.meta.url).href,
+        KEIYAKU_MODULE: new URL("../src/index.js", import.meta.url).href,
+        KEIYAKU_REPOSITORY_MODULE: new URL("../src/git/repository.js", import.meta.url).href,
+        KEIYAKU_SEAT_MODULE: new URL("../src/git/private-state-seat.js", import.meta.url).href,
+        KEIYAKU_LOCK_MODULE: new URL("../src/coordination/sqlite-transaction-lock.js", import.meta.url).href,
         KEIYAKU_REPOSITORY: input.repository,
         KEIYAKU_CONTRACT: input.contractId,
         KEIYAKU_MARKDOWN: input.markdown,

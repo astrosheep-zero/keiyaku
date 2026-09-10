@@ -9,3 +9,4 @@ coverage/
 .keiyaku/response/
 .keiyaku/runtime/
 .keiyaku/wt/
+.test-build/
