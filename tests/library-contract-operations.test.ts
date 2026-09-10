@@ -1105,7 +1105,9 @@ test("redelivery recovers an unrecorded candidate without capturing later dirty 
   assert.deepEqual(recovered.value.leading, { kind: "already-admitted", fact: delivery!.entry });
   assert.deepEqual(recovered.value.integration, first.value.integration);
 
-  const audited = await contract.audit({ includeDirty: true });
+  const audited = await cancelDuringVerification(marker, (signal) =>
+    contract.audit({ includeDirty: true, signal }),
+  );
   assert.equal(audited.value.delivery?.relation, "differs");
   assert.equal(audited.value.delivery?.verification.kind, "unrecorded");
 
