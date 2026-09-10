@@ -85,6 +85,7 @@ export const INTEGRATION_TEST_FILES = [
   "tests/settlement.test.ts",
   "tests/sqlite-transaction-lock.test.ts",
   "tests/target-checkout-reconcile.test.ts",
+  "tests/target-placement-preparation.test.ts",
   "tests/task-cli.test.ts",
   "tests/task-compose.test.ts",
   "tests/task-operations.test.ts",
