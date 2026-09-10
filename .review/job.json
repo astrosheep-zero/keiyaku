@@ -1,1 +1,1 @@
-{"parent":"b0074adac257b02815c88f02d69b6be455fd72a8","tree":"1711394b5961ebc0bf80895c13da0e4494d61906","branch":"codex/review-objects-fleet-20260910","message":"test: retain independent Fleet composition and selector regressions"}
+{"parent":"f2bb946cedcebbc4057ee43f6109f66cf0d0d98b","tree":"699aaff77cb521fd5f27801de5d8d7bca6ea5d69","branch":"codex/review-objects-kanshi-20260910","message":"test: preserve Kanshi composition failures and bounded association semantics"}

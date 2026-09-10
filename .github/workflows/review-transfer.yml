@@ -16,15 +16,38 @@ jobs:
         run: |
           set -euo pipefail
           cp .review/job.json "$RUNNER_TEMP/job.json"
-          # Repair a transcription error in this transport-only base64 frame.
-          # Both gzip integrity and the exact reviewed Git tree are required.
-          sed 's@AwOHr06EEUHuzt7XW@AwOHr06EEYhu72Huzt7XW@' .review/runner.patch.b64 | base64 -d | gzip -d > "$RUNNER_TEMP/repair.patch"
+          cp .review/runner.patch.b64 "$RUNNER_TEMP/changes.b64"
           parent=$(jq -r .parent "$RUNNER_TEMP/job.json")
           expected=$(jq -r .tree "$RUNNER_TEMP/job.json")
           branch=$(jq -r .branch "$RUNNER_TEMP/job.json")
           git worktree add --detach "$RUNNER_TEMP/repair" "$parent"
           cd "$RUNNER_TEMP/repair"
-          git apply --index "$RUNNER_TEMP/repair.patch"
+          python3 - <<'PY'
+          import base64, gzip, hashlib, json, os, pathlib, subprocess
+          changes = json.loads(gzip.decompress(base64.b64decode(pathlib.Path(os.environ['RUNNER_TEMP'], 'changes.b64').read_text(), validate=True)))
+          paths = []
+          for change in changes:
+              path = pathlib.Path(change['path'])
+              assert not path.is_absolute() and '..' not in path.parts and path.parts[0] not in ('.git', '.github')
+              paths.append(str(path))
+              if change.get('delete'):
+                  path.unlink()
+                  continue
+              if 'text' in change:
+                  text = change['text']
+              else:
+                  text = subprocess.check_output(['git', 'cat-file', 'blob', change['blob']]).decode()
+                  previous = len(text)
+                  for start, end, replacement in reversed(change['edits']):
+                      assert 0 <= start <= end <= previous
+                      text = text[:start] + replacement + text[end:]
+                      previous = start
+              data = text.encode()
+              assert hashlib.sha256(data).hexdigest() == change['sha256'], str(path)
+              path.parent.mkdir(parents=True, exist_ok=True)
+              path.write_bytes(data)
+          subprocess.run(['git', 'add', '--', *paths], check=True)
+          PY
           git diff --cached --check
           test -z "$(git diff --cached --name-only -- .github)"
           tree=$(git write-tree)
