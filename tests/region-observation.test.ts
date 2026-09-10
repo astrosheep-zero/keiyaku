@@ -1,3 +1,4 @@
+import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import test from "node:test";
@@ -13,28 +14,13 @@ function repositoryWithHead(): TestGitRepository {
 }
 
 function document(title: string, region: readonly string[]): string {
-  return [
-    `# ${title}`,
-    "",
-    "## Context",
-    "Observe the current Region.",
-    "",
-    "## Objective",
-    "Expose non-authoritative overlap witnesses.",
-    "",
-    "## Design",
-    "Read all live documents from one snapshot.",
-    "",
-    "## Region",
-    "~~~",
-    ...region,
-    "~~~",
-    "",
-    "## Criteria",
-    "### C1",
-    "The operation keeps its admission result.",
-    "",
-  ].join("\n");
+  return contractMarkdown(title, {
+    Context: "Observe the current Region.",
+    Objective: "Expose non-authoritative overlap witnesses.",
+    Design: "Read all live documents from one snapshot.",
+    Region: ["~~~", ...region, "~~~"].join("\n"),
+    Criteria: "### C1\nThe operation keeps its admission result.\n",
+  });
 }
 
 async function bind(repository: TestGitRepository, title: string, region: readonly string[]) {

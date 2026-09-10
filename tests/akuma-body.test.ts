@@ -1,3 +1,4 @@
+import { claudeBodyLaunch } from "./support/akuma-fixtures.js";
 import assert from "node:assert/strict";
 import {
   chmodSync,
@@ -503,18 +504,7 @@ test("body-ended plugins observe the durable terminal Body fact", async () => {
     await eventually(() => recorder.activations === 1);
 
     await driveAkumaBody(
-      {
-        paths: allocated.paths,
-        seed: {
-          id: allocated.id,
-          archetype: "claude",
-          provider: { name: "claude", kind: "claude-agent-sdk" },
-          options: {},
-          origin: { kind: "direct" },
-          cwd: root,
-        },
-        initialBody: "build it",
-      },
+      claudeBodyLaunch(allocated, root, "build it"),
       adapter({
         starts: [],
         events: [{ type: "session", coordinate: { sessionId: "body-ended-session" } }],
@@ -558,19 +548,9 @@ test("turn-outcome plugins observe every committed answered Turn exactly once", 
     turnOutcomePluginGlobal.__keiyakuTurnOutcomePluginRecorder = recorder;
     await pluginRuntime({ world: await World.at(root) });
     await eventually(() => recorder.activations === 1);
-    const launch: FixtureBodyLaunch = {
-      paths: allocated.paths,
-      seed: {
-        id: allocated.id,
-        archetype: "claude",
-        provider: { name: "claude", kind: "claude-agent-sdk" },
-        options: {},
-        origin: { kind: "direct" },
-        cwd: root,
-      },
-      initialBody: "build it",
+    const launch: FixtureBodyLaunch = claudeBodyLaunch(allocated, root, "build it", {
       completion: { contractId: "kei/example" },
-    };
+    });
     assert.deepEqual(Object.keys(JSON.parse(JSON.stringify(launch))).sort(), [
       "completion",
       "initialBody",
@@ -678,18 +658,7 @@ test("turn-outcome plugins observe a committed failed Turn without changing it",
     await eventually(() => recorder.activations === 1);
 
     await driveAkumaBody(
-      {
-        paths: allocated.paths,
-        seed: {
-          id: allocated.id,
-          archetype: "claude",
-          provider: { name: "claude", kind: "claude-agent-sdk" },
-          options: {},
-          origin: { kind: "direct" },
-          cwd: root,
-        },
-        initialBody: "build it",
-      },
+      claudeBodyLaunch(allocated, root, "build it"),
       adapter({ starts: [], events: [], result: { kind: "failed", diagnostic: "provider failed" } }),
       { now: () => "2026-08-08T00:00:00.000Z" },
     );
@@ -741,18 +710,7 @@ test("a hanging turn-outcome handler cannot hold Body supervisor close or the le
     await eventually(() => existsSync(ready));
 
     const body = driveAkumaBody(
-      {
-        paths: allocated.paths,
-        seed: {
-          id: allocated.id,
-          archetype: "claude",
-          provider: { name: "claude", kind: "claude-agent-sdk" },
-          options: {},
-          origin: { kind: "direct" },
-          cwd: root,
-        },
-        initialBody: "work",
-      },
+      claudeBodyLaunch(allocated, root, "work"),
       adapter({
         starts: [],
         events: [{ type: "session", coordinate: { sessionId: "hanging-handler-session" } }],
@@ -830,24 +788,9 @@ test("live receipt persistence waits for its Body-scoped delivery mapping", asyn
         };
       },
     };
-    const body = driveAkumaBody(
-      {
-        paths: allocated.paths,
-        seed: {
-          id: allocated.id,
-          archetype: "claude",
-          provider: { name: "claude", kind: "claude-agent-sdk" },
-          options: {},
-          origin: { kind: "direct" },
-          cwd: root,
-        },
-        initialBody: "work",
-      },
-      live,
-      {
-        now: () => "2026-08-08T00:00:00.000Z",
-      },
-    );
+    const body = driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), live, {
+      now: () => "2026-08-08T00:00:00.000Z",
+    });
     while ((await readHeart(allocated.paths)).latestBody === null)
       await new Promise((resolve) => setTimeout(resolve, 5));
     await recordTell(allocated.paths, {
@@ -1690,18 +1633,7 @@ test("receipt persistence failure aborts the Session and terminates the Body", a
       releaseEvents = resolve;
     });
     const body = driveAkumaBody(
-      {
-        paths: allocated.paths,
-        seed: {
-          id: allocated.id,
-          archetype: "claude",
-          provider: { name: "claude", kind: "claude-agent-sdk" },
-          options: {},
-          origin: { kind: "direct" },
-          cwd: root,
-        },
-        initialBody: "work",
-      },
+      claudeBodyLaunch(allocated, root, "work"),
       {
         admitOptions(options) {
           return { kind: "admitted", options };
@@ -1757,18 +1689,7 @@ test("request-pump failure aborts the Session and closes request transport", asy
       releaseEvents = resolve;
     });
     const body = driveAkumaBody(
-      {
-        paths: allocated.paths,
-        seed: {
-          id: allocated.id,
-          archetype: "claude",
-          provider: { name: "claude", kind: "claude-agent-sdk" },
-          options: {},
-          origin: { kind: "direct" },
-          cwd: root,
-        },
-        initialBody: "work",
-      },
+      claudeBodyLaunch(allocated, root, "work"),
       {
         admitOptions(options) {
           return { kind: "admitted", options };
@@ -1829,18 +1750,7 @@ test("request-pump failure aborts pending ProviderAdapter.start and closes trans
     });
     let setupAbortReason: unknown;
     const body = driveAkumaBody(
-      {
-        paths: allocated.paths,
-        seed: {
-          id: allocated.id,
-          archetype: "claude",
-          provider: { name: "claude", kind: "claude-agent-sdk" },
-          options: {},
-          origin: { kind: "direct" },
-          cwd: root,
-        },
-        initialBody: "work",
-      },
+      claudeBodyLaunch(allocated, root, "work"),
       {
         admitOptions(options) {
           return { kind: "admitted", options };
@@ -2086,18 +1996,7 @@ test("the soul retains the summon cwd before native session admission", async ()
   try {
     const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "87654321" });
     await initializeHeart(allocated.paths);
-    const launch: FixtureBodyLaunch = {
-      paths: allocated.paths,
-      seed: {
-        id: allocated.id,
-        archetype: "claude",
-        provider: { name: "claude", kind: "claude-agent-sdk" },
-        options: {},
-        origin: { kind: "direct" },
-        cwd: join(root, "custom-seat"),
-      },
-      initialBody: "start",
-    };
+    const launch: FixtureBodyLaunch = claudeBodyLaunch(allocated, join(root, "custom-seat"), "start");
     await driveAkumaBody(
       launch,
       adapter({
@@ -2125,18 +2024,7 @@ test("an answer without an admitted or resumed session is retained as a failed t
     const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "decafbad" });
     await initializeHeart(allocated.paths);
     await driveAkumaBody(
-      {
-        paths: allocated.paths,
-        seed: {
-          id: allocated.id,
-          archetype: "claude",
-          provider: { name: "claude", kind: "claude-agent-sdk" },
-          options: {},
-          origin: { kind: "direct" },
-          cwd: root,
-        },
-        initialBody: "start",
-      },
+      claudeBodyLaunch(allocated, root, "start"),
       adapter({
         starts: [],
         events: [],
@@ -2229,18 +2117,7 @@ test("pause aborts stalled provider setup and records clean Body settlement", as
       setupStarted = resolve;
     });
     const body = driveAkumaBody(
-      {
-        paths: allocated.paths,
-        seed: {
-          id: allocated.id,
-          archetype: "claude",
-          provider: { name: "claude", kind: "claude-agent-sdk" },
-          options: {},
-          origin: { kind: "direct" },
-          cwd: root,
-        },
-        initialBody: "work",
-      },
+      claudeBodyLaunch(allocated, root, "work"),
       {
         admitOptions(options) {
           return { kind: "admitted", options };
@@ -2387,24 +2264,9 @@ test("pause aborts the current drive and records the body as put down", async ()
         };
       },
     };
-    const body = driveAkumaBody(
-      {
-        paths: allocated.paths,
-        seed: {
-          id: allocated.id,
-          archetype: "claude",
-          provider: { name: "claude", kind: "claude-agent-sdk" },
-          options: {},
-          origin: { kind: "direct" },
-          cwd: root,
-        },
-        initialBody: "work",
-      },
-      running,
-      {
-        now: () => "2026-08-08T00:00:00.000Z",
-      },
-    );
+    const body = driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), running, {
+      now: () => "2026-08-08T00:00:00.000Z",
+    });
     while ((await readHeart(allocated.paths)).latestBody === null)
       await new Promise((resolve) => setTimeout(resolve, 5));
     const current = (await readHeart(allocated.paths)).latestBody!;
@@ -2429,18 +2291,7 @@ test("forced disposal failure records hung and broke-off before the Body returns
     const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "c0ffee06" });
     await initializeHeart(allocated.paths);
     const body = driveAkumaBody(
-      {
-        paths: allocated.paths,
-        seed: {
-          id: allocated.id,
-          archetype: "claude",
-          provider: { name: "claude", kind: "claude-agent-sdk" },
-          options: {},
-          origin: { kind: "direct" },
-          cwd: root,
-        },
-        initialBody: "work",
-      },
+      claudeBodyLaunch(allocated, root, "work"),
       {
         admitOptions(options) {
           return { kind: "admitted", options };
@@ -2495,18 +2346,7 @@ test("provider closure failure enters Body supervision before session completion
       markStarted = resolve;
     });
     const body = driveAkumaBody(
-      {
-        paths: allocated.paths,
-        seed: {
-          id: allocated.id,
-          archetype: "claude",
-          provider: { name: "claude", kind: "claude-agent-sdk" },
-          options: {},
-          origin: { kind: "direct" },
-          cwd: root,
-        },
-        initialBody: "work",
-      },
+      claudeBodyLaunch(allocated, root, "work"),
       {
         admitOptions(options) {
           return { kind: "admitted", options };
@@ -2576,18 +2416,7 @@ test("a stalled Tell is fenced by Body cancellation before leash release", async
     });
     let successorSpawns = 0;
     const body = driveAkumaBody(
-      {
-        paths: allocated.paths,
-        seed: {
-          id: allocated.id,
-          archetype: "claude",
-          provider: { name: "claude", kind: "claude-agent-sdk" },
-          options: {},
-          origin: { kind: "direct" },
-          cwd: root,
-        },
-        initialBody: "work",
-      },
+      claudeBodyLaunch(allocated, root, "work"),
       {
         admitOptions(options) {
           return { kind: "admitted", options };
@@ -2829,18 +2658,7 @@ test("heart loss wakes a Body stalled on provider observation", async () => {
     markStarted = resolve;
   });
   const body = driveAkumaBody(
-    {
-      paths: allocated.paths,
-      seed: {
-        id: allocated.id,
-        archetype: "claude",
-        provider: { name: "claude", kind: "claude-agent-sdk" },
-        options: {},
-        origin: { kind: "direct" },
-        cwd: root,
-      },
-      initialBody: "start",
-    },
+    claudeBodyLaunch(allocated, root, "start"),
     {
       admitOptions(options) {
         return { kind: "admitted", options };

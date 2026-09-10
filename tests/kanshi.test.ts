@@ -1,3 +1,4 @@
+import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -64,28 +65,13 @@ async function observe(path: string, repo?: Repo) {
 }
 
 function document(title = "Kanshi contract"): string {
-  return [
-    `# ${title}`,
-    "",
-    "## Context",
-    "status",
-    "",
-    "## Objective",
-    "render",
-    "",
-    "## Design",
-    "project public values",
-    "",
-    "## Region",
-    "```",
-    "src/**",
-    "```",
-    "",
-    "## Criteria",
-    "### Visible",
-    "The status row is visible.",
-    "",
-  ].join("\n");
+  return contractMarkdown(title, {
+    Context: "status",
+    Objective: "render",
+    Design: "project public values",
+    Region: "```\nsrc/**\n```",
+    Criteria: "### Visible\nThe status row is visible.\n",
+  });
 }
 
 async function bornAkuma(root: string, suffix: string, createdAt = "2026-08-09T00:00:00.000Z", settle = false) {

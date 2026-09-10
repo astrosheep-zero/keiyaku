@@ -1,3 +1,4 @@
+import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -31,28 +32,13 @@ const TARGET_FILES = {
 };
 
 function document(title = "Target checkout placement"): string {
-  return [
-    `# ${title}`,
-    "",
-    "## Context",
-    "A target branch may already be checked out.",
-    "",
-    "## Objective",
-    "Keep the checked-out target coherent with placement.",
-    "",
-    "## Design",
-    "Fence publication and Git-native follow.",
-    "",
-    "## Region",
-    "~~~",
-    "delivered.txt",
-    "~~~",
-    "",
-    "## Criteria",
-    "### Preserve bytes",
-    "Refuse before publication when local content conflicts.",
-    "",
-  ].join("\n");
+  return contractMarkdown(title, {
+    Context: "A target branch may already be checked out.",
+    Objective: "Keep the checked-out target coherent with placement.",
+    Design: "Fence publication and Git-native follow.",
+    Region: "~~~\ndelivered.txt\n~~~",
+    Criteria: "### Preserve bytes\nRefuse before publication when local content conflicts.\n",
+  });
 }
 
 type GeneratedWorktreeFile = Readonly<{ path: string; bytes: Buffer; mode: number }>;
@@ -601,7 +587,6 @@ test("reconcile does not guess after the user changes an interrupted target chec
   assert.ok(reconciled.lag.some((lag) => lag.kind === "target-checkout-retained"));
   assert.ok(!reconciled.effects.some((effect) => effect.kind === "target-checkout" && effect.action === "recovered"));
 });
-
 
 test("checkout shape compares literal filenames, not pathspec expressions", async () => {
   const names = process.platform === "win32" ? ["[a].txt"] : ["[a].txt", "*.txt", ":(exclude)literal.txt"];

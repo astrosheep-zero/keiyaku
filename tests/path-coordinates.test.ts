@@ -1,3 +1,4 @@
+import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -74,28 +75,13 @@ test("registered worktrees retain a prunable record below a regular-file parent"
 });
 
 function contractDocument(title: string): string {
-  return [
-    `# ${title}`,
-    "",
-    "## Context",
-    "Path input reaches the native CLI boundary.",
-    "",
-    "## Objective",
-    "Create one managed worktree.",
-    "",
-    "## Design",
-    "Keep filesystem coordinates native.",
-    "",
-    "## Region",
-    "~~~",
-    "src/**",
-    "~~~",
-    "",
-    "## Criteria",
-    "### Coordinate accepted",
-    "The contract binds through the CLI.",
-    "",
-  ].join("\n");
+  return contractMarkdown(title, {
+    Context: "Path input reaches the native CLI boundary.",
+    Objective: "Create one managed worktree.",
+    Design: "Keep filesystem coordinates native.",
+    Region: "~~~\nsrc/**\n~~~",
+    Criteria: "### Coordinate accepted\nThe contract binds through the CLI.\n",
+  });
 }
 
 test("CLI accepts native repository coordinate spellings through managed worktree creation", async () => {

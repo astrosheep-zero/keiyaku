@@ -1,3 +1,4 @@
+import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { decodeArcDocument } from "../src/body/arc.js";
@@ -73,28 +74,13 @@ function arcDocument(title = "Chapter One"): string {
 }
 
 function contractDocument(title: string): string {
-  return [
-    `# ${title}`,
-    "",
-    "## Context",
-    "Current facts.",
-    "",
-    "## Objective",
-    "Ship the Arc path.",
-    "",
-    "## Design",
-    "Use the admitted fact path.",
-    "",
-    "## Region",
-    "~~~",
-    "src/**",
-    "~~~",
-    "",
-    "## Criteria",
-    "### Keeps one lifecycle",
-    "Arc remains narrative only.",
-    "",
-  ].join("\n");
+  return contractMarkdown(title, {
+    Context: "Current facts.",
+    Objective: "Ship the Arc path.",
+    Design: "Use the admitted fact path.",
+    Region: "~~~\nsrc/**\n~~~",
+    Criteria: "### Keeps one lifecycle\nArc remains narrative only.\n",
+  });
 }
 
 test("Arc Markdown accepts only a title, Objective, and Brief", () => {

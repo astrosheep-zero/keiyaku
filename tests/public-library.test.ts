@@ -1,3 +1,4 @@
+import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -44,29 +45,18 @@ function externalConsumer(): string {
 }
 
 function markdown(title = "Boundary", verification?: string): string {
-  return [
-    `# ${title}`,
-    "",
-    "## Context",
-    "context",
-    "",
-    "## Objective",
-    "objective",
-    "",
-    "## Design",
-    "design",
-    "",
-    "## Region",
-    "~~~",
-    "src/**",
-    "~~~",
-    "",
-    "## Criteria",
-    "### C1",
-    "criterion",
-    ...(verification === undefined ? [] : ["", "## Verification", "~~~bash", verification, "~~~"]),
-    "",
-  ].join("\n");
+  return contractMarkdown(title, {
+    Context: "context",
+    Objective: "objective",
+    Design: "design",
+    Region: "~~~\nsrc/**\n~~~",
+    Criteria: [
+      "### C1",
+      "criterion",
+      ...(verification === undefined ? [] : ["", "## Verification", "~~~bash", verification, "~~~"]),
+      "",
+    ].join("\n"),
+  });
 }
 
 function repositoryWithInitialCommit() {

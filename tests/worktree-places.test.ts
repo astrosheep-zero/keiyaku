@@ -1,3 +1,4 @@
+import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
@@ -375,28 +376,13 @@ function placeAt(index: number) {
 }
 
 function contractBody(title: string): string {
-  return [
-    `# ${title}`,
-    "",
-    "## Context",
-    "Place worktree.",
-    "",
-    "## Objective",
-    "Keep Place appointments.",
-    "",
-    "## Design",
-    "Use the appointed Place path.",
-    "",
-    "## Region",
-    "```",
-    "src/**",
-    "```",
-    "",
-    "## Criteria",
-    "### Result",
-    "The appointed Place is reused.",
-    "",
-  ].join("\n");
+  return contractMarkdown(title, {
+    Context: "Place worktree.",
+    Objective: "Keep Place appointments.",
+    Design: "Use the appointed Place path.",
+    Region: "```\nsrc/**\n```",
+    Criteria: "### Result\nThe appointed Place is reused.\n",
+  });
 }
 
 test("a 10000-appointment observation decodes the register once", async () => {

@@ -1,3 +1,4 @@
+import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
@@ -67,29 +68,13 @@ function candidatePinRefFor(contract: ContractId): string {
 }
 
 function contractDocument(title: string, extra = ""): string {
-  return [
-    `# ${title}`,
-    "",
-    "## Context",
-    "Current facts.",
-    "",
-    "## Objective",
-    "Ship the edge.",
-    "",
-    "## Design",
-    "Decode once.",
-    "",
-    "## Region",
-    "~~~",
-    "src/**",
-    "~~~",
-    "",
-    "## Criteria",
-    "### Uses one document",
-    "The typed body reaches the journal.",
-    "",
-    extra,
-  ].join("\n");
+  return contractMarkdown(title, {
+    Context: "Current facts.",
+    Objective: "Ship the edge.",
+    Design: "Decode once.",
+    Region: "~~~\nsrc/**\n~~~",
+    Criteria: ["### Uses one document", "The typed body reaches the journal.", "", extra].join("\n"),
+  });
 }
 
 async function invokeWithDocument(

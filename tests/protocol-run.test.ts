@@ -1,3 +1,4 @@
+import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -44,27 +45,13 @@ function repositoryWithHead() {
 }
 
 function contractBody(): string {
-  return [
-    "# Protocol run seat",
-    "",
-    "## Context",
-    "Exercise speculative private-state preparation.",
-    "",
-    "## Objective",
-    "Keep admission on a matching private-root observation.",
-    "",
-    "## Design",
-    "Bind one Contract and admit an arc.",
-    "",
-    "## Region",
-    "~~~",
-    "src/protocol/**",
-    "~~~",
-    "",
-    "## Criteria",
-    "### Custody",
-    "Stale preparation does not write.",
-  ].join("\n");
+  return contractMarkdown("Protocol run seat", {
+    Context: "Exercise speculative private-state preparation.",
+    Objective: "Keep admission on a matching private-root observation.",
+    Design: "Bind one Contract and admit an arc.",
+    Region: "~~~\nsrc/protocol/**\n~~~",
+    Criteria: "### Custody\nStale preparation does not write.",
+  });
 }
 
 test("slow protocol preparation does not serialize an unrelated admission", async () => {

@@ -1,3 +1,4 @@
+import { activityFact, claudeBodyLaunch, turnEndFact } from "./support/akuma-fixtures.js";
 import assert from "node:assert/strict";
 import { drainPluginRuntime } from "../src/plugin/runtime.js";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
@@ -177,6 +178,30 @@ async function bornHistoryHandle(root: string, suffix: string) {
 function toolRow(rows: readonly { kind: string; sequence: number; state?: unknown }[]) {
   return rows.filter((row) => row.kind === "tool");
 }
+
+test("fixture carriers preserve caller facts and allocate fresh mutable launch options", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-fixture-shape-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "d0000001" });
+  const event = { type: "note", text: "explicit bytes" } as const;
+  const outcome = { kind: "failed", diagnostic: "explicit failure" } as const;
+  assert.deepEqual(activityFact(7, 3, "activity time", event), {
+    kind: "activity", sequence: 7, turnSequence: 3, at: "activity time", event,
+  });
+  assert.deepEqual(turnEndFact(8, 3, "end time", outcome), {
+    kind: "turn-end", sequence: 8, turnSequence: 3, completedAt: "end time", outcome,
+  });
+  const launch = claudeBodyLaunch(allocated, root, "exact input");
+  assert.deepEqual(launch, {
+    paths: allocated.paths,
+    seed: {
+      id: allocated.id, archetype: "claude", provider: { name: "claude", kind: "claude-agent-sdk" },
+      options: {}, origin: { kind: "direct" }, allowed: ALLOWED_ACTIONS, cwd: root,
+    },
+    initialBody: "exact input",
+  });
+  assert.notEqual(launch.seed!.options, claudeBodyLaunch(allocated, root, "other").seed!.options);
+});
 
 test("malformed public history IDs refuse before Heart reads", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-history-id-"));
@@ -365,18 +390,10 @@ test("Heart activity reads do not take public history cursors", async () => {
 
 test("forward history reports a pruned interval after its cursor", async () => {
   const history = selectHistory(
-    projectTurns(
-      [
-        {
-          kind: "activity",
-          sequence: 9,
-          turnSequence: 1,
-          event: { type: "note", text: "retained" },
-          at: "2026-08-08T00:00:09.000Z",
-        },
-      ],
-      { lowestRetained: 1, highest: 9 },
-    ),
+    projectTurns([activityFact(9, 1, "2026-08-08T00:00:09.000Z", { type: "note", text: "retained" })], {
+      lowestRetained: 1,
+      highest: 9,
+    }),
     { since: 4, limit: 50 },
   );
 
@@ -681,23 +698,9 @@ test("turn owner folds a rejected completion while the event stream remains open
     const world = await World.at(root);
     const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "deadbeef" });
     await initializeHeart(allocated.paths);
-    await driveAkumaBody(
-      {
-        paths: allocated.paths,
-        seed: {
-          id: allocated.id,
-          archetype: "claude",
-          provider: CLAUDE_EXECUTION,
-          options: {},
-          cwd: world,
-          origin: { kind: "direct" },
-          allowed: ALLOWED_ACTIONS,
-        },
-        initialBody: "work",
-      },
-      rejecting,
-      { now: () => "2026-08-24T00:00:00.000Z" },
-    );
+    await driveAkumaBody(claudeBodyLaunch(allocated, world, "work"), rejecting, {
+      now: () => "2026-08-24T00:00:00.000Z",
+    });
     await waitForFile(deferred.turnStarted);
     assert.equal(existsSync(deferred.turnSettled), false);
     const rows = (await activitySlice(allocated.paths)).rows;
@@ -779,29 +782,21 @@ function snapshot(
 test("snapshot selects one current focus while history keeps honest tool lifecycle", () => {
   const facts: readonly TimelineFact[] = [
     { kind: "turn-start" as const, sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
-    {
-      kind: "activity" as const,
-      sequence: 2,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:02.000Z",
-      event: { type: "tool", phase: "started", id: "old", name: "Bash", call: { kind: "run", command: "old" } },
-    },
-    {
-      kind: "turn-end" as const,
-      sequence: 3,
-      turnSequence: 1,
-      completedAt: "2026-08-10T00:00:03.000Z",
-      outcome: { kind: "answered", answer: "old answer", session: { sessionId: "session" } },
-    },
+    activityFact(2, 1, "2026-08-10T00:00:02.000Z", {
+      type: "tool",
+      phase: "started",
+      id: "old",
+      name: "Bash",
+      call: { kind: "run", command: "old" },
+    }),
+    turnEndFact(3, 1, "2026-08-10T00:00:03.000Z", {
+      kind: "answered",
+      answer: "old answer",
+      session: { sessionId: "session" },
+    }),
     { kind: "turn-start" as const, sequence: 4, bodySequence: 1, startedAt: "2026-08-10T00:00:04.000Z" },
     { kind: "call" as const, sequence: 5, turnSequence: 4, at: "2026-08-10T00:00:04.000Z", body: "current" },
-    {
-      kind: "activity" as const,
-      sequence: 6,
-      turnSequence: 4,
-      at: "2026-08-10T00:00:05.000Z",
-      event: { type: "note", text: "checking" },
-    },
+    activityFact(6, 4, "2026-08-10T00:00:05.000Z", { type: "note", text: "checking" }),
     {
       kind: "tell" as const,
       sequence: 7,
@@ -811,13 +806,13 @@ test("snapshot selects one current focus while history keeps honest tool lifecyc
       state: "pending" as const,
       deliveries: [],
     },
-    {
-      kind: "activity" as const,
-      sequence: 8,
-      turnSequence: 4,
-      at: "2026-08-10T00:00:07.000Z",
-      event: { type: "tool", phase: "started", id: "current", name: "Search", call: { kind: "search", query: "TODO" } },
-    },
+    activityFact(8, 4, "2026-08-10T00:00:07.000Z", {
+      type: "tool",
+      phase: "started",
+      id: "current",
+      name: "Search",
+      call: { kind: "search", query: "TODO" },
+    }),
   ];
   const ledger = projectTurns(facts);
   const selected = snapshot(ledger, { tail: 1 });
@@ -853,20 +848,12 @@ test("snapshot selects one current focus while history keeps honest tool lifecyc
 
   const closed = projectTurns([
     ...facts,
-    {
-      kind: "activity" as const,
-      sequence: 9,
-      turnSequence: 4,
-      at: "2026-08-10T00:00:08.000Z",
-      event: { type: "assistant", text: "done" },
-    },
-    {
-      kind: "turn-end" as const,
-      sequence: 10,
-      turnSequence: 4,
-      completedAt: "2026-08-10T00:00:09.000Z",
-      outcome: { kind: "answered", answer: "done", session: { sessionId: "session" } },
-    },
+    activityFact(9, 4, "2026-08-10T00:00:08.000Z", { type: "assistant", text: "done" }),
+    turnEndFact(10, 4, "2026-08-10T00:00:09.000Z", {
+      kind: "answered",
+      answer: "done",
+      session: { sessionId: "session" },
+    }),
   ]);
   const idle = snapshot(closed);
   assert.equal(idle.kind, "idle");
@@ -894,21 +881,15 @@ test("snapshot selects one current focus while history keeps honest tool lifecyc
 
   const mixedLedger = projectTurns([
     { kind: "turn-start", sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
-    {
-      kind: "activity",
-      sequence: 2,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:02.000Z",
-      event: { type: "tool", phase: "started", id: "abandoned", name: "Bash", call: { kind: "run", command: "old" } },
-    },
+    activityFact(2, 1, "2026-08-10T00:00:02.000Z", {
+      type: "tool",
+      phase: "started",
+      id: "abandoned",
+      name: "Bash",
+      call: { kind: "run", command: "old" },
+    }),
     { kind: "turn-start", sequence: 3, bodySequence: 2, startedAt: "2026-08-10T00:00:03.000Z" },
-    {
-      kind: "turn-end",
-      sequence: 4,
-      turnSequence: 3,
-      completedAt: "2026-08-10T00:00:04.000Z",
-      outcome: { kind: "failed", diagnostic: "latest failed" },
-    },
+    turnEndFact(4, 3, "2026-08-10T00:00:04.000Z", { kind: "failed", diagnostic: "latest failed" }),
   ]);
   assert.equal(mixedLedger.turns[0]?.kind, "open");
   assert.equal(mixedLedger.turns[1]?.kind, "closed");
@@ -936,111 +917,79 @@ test("reported file changes follow the open or latest closed frontier and aggreg
   const activeCall = { kind: "fileChange" as const, changes: [{ op: "delete" as const, path: "src/active.ts" }] };
   const facts = [
     { kind: "turn-start" as const, sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
-    {
-      kind: "activity" as const,
-      sequence: 2,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:02.000Z",
-      event: { type: "tool" as const, phase: "started" as const, id: "earlier", name: "Write", call: earlierCall },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 3,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:03.000Z",
-      event: {
-        type: "tool" as const,
-        phase: "completed" as const,
-        id: "earlier",
-        name: "Write",
-        call: earlierCall,
-        result: { status: "ok" as const },
-      },
-    },
-    {
-      kind: "turn-end" as const,
-      sequence: 4,
-      turnSequence: 1,
-      completedAt: "2026-08-10T00:00:04.000Z",
-      outcome: { kind: "answered" as const, answer: "earlier", session: { sessionId: "earlier" } },
-    },
+    activityFact(2, 1, "2026-08-10T00:00:02.000Z", {
+      type: "tool" as const,
+      phase: "started" as const,
+      id: "earlier",
+      name: "Write",
+      call: earlierCall,
+    }),
+    activityFact(3, 1, "2026-08-10T00:00:03.000Z", {
+      type: "tool" as const,
+      phase: "completed" as const,
+      id: "earlier",
+      name: "Write",
+      call: earlierCall,
+      result: { status: "ok" as const },
+    }),
+    turnEndFact(4, 1, "2026-08-10T00:00:04.000Z", {
+      kind: "answered" as const,
+      answer: "earlier",
+      session: { sessionId: "earlier" },
+    }),
     { kind: "turn-start" as const, sequence: 5, bodySequence: 1, startedAt: "2026-08-10T00:00:05.000Z" },
-    {
-      kind: "activity" as const,
-      sequence: 6,
-      turnSequence: 5,
-      at: "2026-08-10T00:00:06.000Z",
-      event: { type: "tool" as const, phase: "started" as const, id: "frontier", name: "Write", call: frontierCall },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 7,
-      turnSequence: 5,
-      at: "2026-08-10T00:00:07.000Z",
-      event: {
-        type: "tool" as const,
-        phase: "completed" as const,
-        id: "frontier",
-        name: "Write",
-        call: frontierCall,
-        result: { status: "ok" as const },
-      },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 8,
-      turnSequence: 5,
-      at: "2026-08-10T00:00:08.000Z",
-      event: { type: "tool" as const, phase: "started" as const, id: "failed", name: "Write", call: failedCall },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 9,
-      turnSequence: 5,
-      at: "2026-08-10T00:00:09.000Z",
-      event: {
-        type: "tool" as const,
-        phase: "completed" as const,
-        id: "failed",
-        name: "Write",
-        call: failedCall,
-        result: { status: "error" as const },
-      },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 10,
-      turnSequence: 5,
-      at: "2026-08-10T00:00:10.000Z",
-      event: { type: "tool" as const, phase: "started" as const, id: "active", name: "Write", call: activeCall },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 11,
-      turnSequence: 5,
-      at: "2026-08-10T00:00:11.000Z",
-      event: {
-        type: "tool" as const,
-        phase: "started" as const,
-        id: "run",
-        name: "Bash",
-        call: { kind: "run" as const, command: "touch src/non-file.ts" },
-      },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 12,
-      turnSequence: 5,
-      at: "2026-08-10T00:00:12.000Z",
-      event: {
-        type: "tool" as const,
-        phase: "completed" as const,
-        id: "run",
-        name: "Bash",
-        call: { kind: "run" as const, command: "touch src/non-file.ts" },
-        result: { status: "ok" as const },
-      },
-    },
+    activityFact(6, 5, "2026-08-10T00:00:06.000Z", {
+      type: "tool" as const,
+      phase: "started" as const,
+      id: "frontier",
+      name: "Write",
+      call: frontierCall,
+    }),
+    activityFact(7, 5, "2026-08-10T00:00:07.000Z", {
+      type: "tool" as const,
+      phase: "completed" as const,
+      id: "frontier",
+      name: "Write",
+      call: frontierCall,
+      result: { status: "ok" as const },
+    }),
+    activityFact(8, 5, "2026-08-10T00:00:08.000Z", {
+      type: "tool" as const,
+      phase: "started" as const,
+      id: "failed",
+      name: "Write",
+      call: failedCall,
+    }),
+    activityFact(9, 5, "2026-08-10T00:00:09.000Z", {
+      type: "tool" as const,
+      phase: "completed" as const,
+      id: "failed",
+      name: "Write",
+      call: failedCall,
+      result: { status: "error" as const },
+    }),
+    activityFact(10, 5, "2026-08-10T00:00:10.000Z", {
+      type: "tool" as const,
+      phase: "started" as const,
+      id: "active",
+      name: "Write",
+      call: activeCall,
+    }),
+    activityFact(11, 5, "2026-08-10T00:00:11.000Z", {
+      type: "tool" as const,
+      phase: "started" as const,
+      id: "run",
+      name: "Bash",
+      call: { kind: "run" as const, command: "touch src/non-file.ts" },
+    }),
+    activityFact(12, 5, "2026-08-10T00:00:12.000Z", {
+      type: "tool" as const,
+      phase: "completed" as const,
+      id: "run",
+      name: "Bash",
+      call: { kind: "run" as const, command: "touch src/non-file.ts" },
+      result: { status: "ok" as const },
+    }),
   ];
   const reported = (view: ActivitySnapshot) =>
     view.reportedChanges.map((change) => ({
@@ -1087,13 +1036,11 @@ test("reported file changes follow the open or latest closed frontier and aggreg
 
   const closedLedger = projectTurns([
     ...facts,
-    {
-      kind: "turn-end" as const,
-      sequence: 13,
-      turnSequence: 5,
-      completedAt: "2026-08-10T00:00:13.000Z",
-      outcome: { kind: "answered" as const, answer: "frontier", session: { sessionId: "frontier" } },
-    },
+    turnEndFact(13, 5, "2026-08-10T00:00:13.000Z", {
+      kind: "answered" as const,
+      answer: "frontier",
+      session: { sessionId: "frontier" },
+    }),
   ]);
   const closedFrontier = closedLedger.turns.at(-1);
   assert.ok(closedFrontier?.kind === "closed");
@@ -1130,69 +1077,39 @@ test("reported file changes keep the newest five independently of ordinary omiss
   };
   const ledger = projectTurns([
     { kind: "turn-start" as const, sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
-    {
-      kind: "activity" as const,
-      sequence: 2,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:02.000Z",
-      event: { type: "tool" as const, phase: "started" as const, id: "first", name: "Write", call: firstCall },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 3,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:03.000Z",
-      event: {
-        type: "tool" as const,
-        phase: "completed" as const,
-        id: "first",
-        name: "Write",
-        call: firstCall,
-        result: { status: "ok" as const },
-      },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 4,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:04.000Z",
-      event: { type: "note" as const, text: "ordinary one" },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 5,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:05.000Z",
-      event: { type: "tool" as const, phase: "started" as const, id: "second", name: "Write", call: secondCall },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 6,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:06.000Z",
-      event: {
-        type: "tool" as const,
-        phase: "completed" as const,
-        id: "second",
-        name: "Write",
-        call: secondCall,
-        result: { status: "ok" as const },
-      },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 7,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:07.000Z",
-      event: { type: "note" as const, text: "ordinary two" },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 8,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:08.000Z",
-      event: { type: "note" as const, text: "ordinary three" },
-    },
+    activityFact(2, 1, "2026-08-10T00:00:02.000Z", {
+      type: "tool" as const,
+      phase: "started" as const,
+      id: "first",
+      name: "Write",
+      call: firstCall,
+    }),
+    activityFact(3, 1, "2026-08-10T00:00:03.000Z", {
+      type: "tool" as const,
+      phase: "completed" as const,
+      id: "first",
+      name: "Write",
+      call: firstCall,
+      result: { status: "ok" as const },
+    }),
+    activityFact(4, 1, "2026-08-10T00:00:04.000Z", { type: "note" as const, text: "ordinary one" }),
+    activityFact(5, 1, "2026-08-10T00:00:05.000Z", {
+      type: "tool" as const,
+      phase: "started" as const,
+      id: "second",
+      name: "Write",
+      call: secondCall,
+    }),
+    activityFact(6, 1, "2026-08-10T00:00:06.000Z", {
+      type: "tool" as const,
+      phase: "completed" as const,
+      id: "second",
+      name: "Write",
+      call: secondCall,
+      result: { status: "ok" as const },
+    }),
+    activityFact(7, 1, "2026-08-10T00:00:07.000Z", { type: "note" as const, text: "ordinary two" }),
+    activityFact(8, 1, "2026-08-10T00:00:08.000Z", { type: "note" as const, text: "ordinary three" }),
   ]);
   const view = snapshot(ledger, { tail: 0, voice: 0 });
   assert.equal(view.kind, "open");
@@ -1214,27 +1131,9 @@ test("reported file changes keep the newest five independently of ordinary omiss
 test("open snapshot independently retains pre-tail voice and actionable pins", () => {
   const ledger = projectTurns([
     { kind: "turn-start" as const, sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
-    {
-      kind: "activity" as const,
-      sequence: 2,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:02.000Z",
-      event: { type: "assistant", text: "voice one" },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 3,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:03.000Z",
-      event: { type: "note", text: "hidden between voices" },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 4,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:04.000Z",
-      event: { type: "thought", text: "voice two" },
-    },
+    activityFact(2, 1, "2026-08-10T00:00:02.000Z", { type: "assistant", text: "voice one" }),
+    activityFact(3, 1, "2026-08-10T00:00:03.000Z", { type: "note", text: "hidden between voices" }),
+    activityFact(4, 1, "2026-08-10T00:00:04.000Z", { type: "thought", text: "voice two" }),
     {
       kind: "call" as const,
       sequence: 5,
@@ -1242,27 +1141,15 @@ test("open snapshot independently retains pre-tail voice and actionable pins", (
       at: "2026-08-10T00:00:05.000Z",
       body: "hidden between voices",
     },
-    {
-      kind: "activity" as const,
-      sequence: 6,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:06.000Z",
-      event: { type: "assistant", text: "voice three" },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 7,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:07.000Z",
-      event: { type: "note", text: "hidden before pin" },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 8,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:08.000Z",
-      event: { type: "tool", phase: "started", id: "pinned", name: "Search", call: { kind: "search", query: "pin" } },
-    },
+    activityFact(6, 1, "2026-08-10T00:00:06.000Z", { type: "assistant", text: "voice three" }),
+    activityFact(7, 1, "2026-08-10T00:00:07.000Z", { type: "note", text: "hidden before pin" }),
+    activityFact(8, 1, "2026-08-10T00:00:08.000Z", {
+      type: "tool",
+      phase: "started",
+      id: "pinned",
+      name: "Search",
+      call: { kind: "search", query: "pin" },
+    }),
     {
       kind: "tell" as const,
       sequence: 9,
@@ -1272,27 +1159,9 @@ test("open snapshot independently retains pre-tail voice and actionable pins", (
       state: "pending" as const,
       deliveries: [],
     },
-    {
-      kind: "activity" as const,
-      sequence: 10,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:10.000Z",
-      event: { type: "note", text: "tail note" },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 11,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:11.000Z",
-      event: { type: "assistant", text: "tail voice" },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 12,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:12.000Z",
-      event: { type: "thought", text: "tail thought" },
-    },
+    activityFact(10, 1, "2026-08-10T00:00:10.000Z", { type: "note", text: "tail note" }),
+    activityFact(11, 1, "2026-08-10T00:00:11.000Z", { type: "assistant", text: "tail voice" }),
+    activityFact(12, 1, "2026-08-10T00:00:12.000Z", { type: "thought", text: "tail thought" }),
   ]);
 
   const view = snapshot(ledger, { tail: 3, voice: 3 });
@@ -1322,41 +1191,17 @@ test("budgeted snapshot spends newest tail first under the public 3 + 3 proporti
 
   const ledger = projectTurns([
     { kind: "turn-start" as const, sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
-    {
-      kind: "activity" as const,
-      sequence: 2,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:02.000Z",
-      event: { type: "assistant", text: "old voice" },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 3,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:03.000Z",
-      event: { type: "assistant", text: "kept voice" },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 4,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:04.000Z",
-      event: { type: "note", text: "tail note" },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 5,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:05.000Z",
-      event: { type: "note", text: "newest note" },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 6,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:06.000Z",
-      event: { type: "tool", phase: "started", id: "pin", name: "Search", call: { kind: "search", query: "pin" } },
-    },
+    activityFact(2, 1, "2026-08-10T00:00:02.000Z", { type: "assistant", text: "old voice" }),
+    activityFact(3, 1, "2026-08-10T00:00:03.000Z", { type: "assistant", text: "kept voice" }),
+    activityFact(4, 1, "2026-08-10T00:00:04.000Z", { type: "note", text: "tail note" }),
+    activityFact(5, 1, "2026-08-10T00:00:05.000Z", { type: "note", text: "newest note" }),
+    activityFact(6, 1, "2026-08-10T00:00:06.000Z", {
+      type: "tool",
+      phase: "started",
+      id: "pin",
+      name: "Search",
+      call: { kind: "search", query: "pin" },
+    }),
     {
       kind: "tell" as const,
       sequence: 7,
@@ -1380,75 +1225,21 @@ test("budgeted snapshot spends newest tail first under the public 3 + 3 proporti
 test("a newer running tool does not displace a complete 3 + 3 ordinary selection", () => {
   const ledger = projectTurns([
     { kind: "turn-start" as const, sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
-    {
-      kind: "activity" as const,
-      sequence: 2,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:02.000Z",
-      event: { type: "assistant", text: "hidden voice" },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 3,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:03.000Z",
-      event: { type: "note", text: "hidden note" },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 4,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:04.000Z",
-      event: { type: "assistant", text: "voice one" },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 5,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:05.000Z",
-      event: { type: "thought", text: "voice two" },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 6,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:06.000Z",
-      event: { type: "assistant", text: "voice three" },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 7,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:07.000Z",
-      event: { type: "note", text: "tail one" },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 8,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:08.000Z",
-      event: { type: "note", text: "tail two" },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 9,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:09.000Z",
-      event: { type: "note", text: "tail three" },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 10,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:10.000Z",
-      event: {
-        type: "tool",
-        phase: "started",
-        id: "running",
-        name: "Bash",
-        call: { kind: "run", command: "npm test" },
-      },
-    },
+    activityFact(2, 1, "2026-08-10T00:00:02.000Z", { type: "assistant", text: "hidden voice" }),
+    activityFact(3, 1, "2026-08-10T00:00:03.000Z", { type: "note", text: "hidden note" }),
+    activityFact(4, 1, "2026-08-10T00:00:04.000Z", { type: "assistant", text: "voice one" }),
+    activityFact(5, 1, "2026-08-10T00:00:05.000Z", { type: "thought", text: "voice two" }),
+    activityFact(6, 1, "2026-08-10T00:00:06.000Z", { type: "assistant", text: "voice three" }),
+    activityFact(7, 1, "2026-08-10T00:00:07.000Z", { type: "note", text: "tail one" }),
+    activityFact(8, 1, "2026-08-10T00:00:08.000Z", { type: "note", text: "tail two" }),
+    activityFact(9, 1, "2026-08-10T00:00:09.000Z", { type: "note", text: "tail three" }),
+    activityFact(10, 1, "2026-08-10T00:00:10.000Z", {
+      type: "tool",
+      phase: "started",
+      id: "running",
+      name: "Bash",
+      call: { kind: "run", command: "npm test" },
+    }),
     {
       kind: "tell" as const,
       sequence: 11,
@@ -1487,13 +1278,11 @@ test("monitoring snapshots pin the latest settled Tell outside the ordinary budg
       state: "told" as const,
       deliveries: [],
     },
-    {
-      kind: "turn-end" as const,
-      sequence: 3,
-      turnSequence: 1,
-      completedAt: "2026-08-10T00:00:03.000Z",
-      outcome: { kind: "answered" as const, answer: "first", session: { sessionId: "session" } },
-    },
+    turnEndFact(3, 1, "2026-08-10T00:00:03.000Z", {
+      kind: "answered" as const,
+      answer: "first",
+      session: { sessionId: "session" },
+    }),
     { kind: "turn-start" as const, sequence: 4, bodySequence: 1, startedAt: "2026-08-10T00:00:04.000Z" },
     {
       kind: "tell" as const,
@@ -1504,34 +1293,10 @@ test("monitoring snapshots pin the latest settled Tell outside the ordinary budg
       state: "told" as const,
       deliveries: [],
     },
-    {
-      kind: "activity" as const,
-      sequence: 6,
-      turnSequence: 4,
-      at: "2026-08-10T00:00:06.000Z",
-      event: { type: "note" as const, text: "hidden" },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 7,
-      turnSequence: 4,
-      at: "2026-08-10T00:00:07.000Z",
-      event: { type: "note" as const, text: "tail one" },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 8,
-      turnSequence: 4,
-      at: "2026-08-10T00:00:08.000Z",
-      event: { type: "note" as const, text: "tail two" },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 9,
-      turnSequence: 4,
-      at: "2026-08-10T00:00:09.000Z",
-      event: { type: "note" as const, text: "tail three" },
-    },
+    activityFact(6, 4, "2026-08-10T00:00:06.000Z", { type: "note" as const, text: "hidden" }),
+    activityFact(7, 4, "2026-08-10T00:00:07.000Z", { type: "note" as const, text: "tail one" }),
+    activityFact(8, 4, "2026-08-10T00:00:08.000Z", { type: "note" as const, text: "tail two" }),
+    activityFact(9, 4, "2026-08-10T00:00:09.000Z", { type: "note" as const, text: "tail three" }),
     {
       kind: "tell" as const,
       sequence: 10,
@@ -1580,13 +1345,11 @@ test("monitoring snapshots pin the latest settled Tell outside the ordinary budg
 
   const closed = projectTurns([
     ...facts,
-    {
-      kind: "turn-end" as const,
-      sequence: 11,
-      turnSequence: 4,
-      completedAt: "2026-08-10T00:00:11.000Z",
-      outcome: { kind: "answered" as const, answer: "second", session: { sessionId: "session" } },
-    },
+    turnEndFact(11, 4, "2026-08-10T00:00:11.000Z", {
+      kind: "answered" as const,
+      answer: "second",
+      session: { sessionId: "session" },
+    }),
   ]);
   const idleMonitoring = selectSnapshot(closed, { aperture: "monitoring" });
   assert.equal(idleMonitoring.snapshot.kind, "idle");
@@ -1613,27 +1376,9 @@ test("tell receipt pins only its admitted Tell when another Tell is pending", ()
       state: "pending" as const,
       deliveries: [],
     },
-    {
-      kind: "activity" as const,
-      sequence: 3,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:03.000Z",
-      event: { type: "note" as const, text: "ordinary one" },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 4,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:04.000Z",
-      event: { type: "note" as const, text: "ordinary two" },
-    },
-    {
-      kind: "activity" as const,
-      sequence: 5,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:05.000Z",
-      event: { type: "note" as const, text: "ordinary three" },
-    },
+    activityFact(3, 1, "2026-08-10T00:00:03.000Z", { type: "note" as const, text: "ordinary one" }),
+    activityFact(4, 1, "2026-08-10T00:00:04.000Z", { type: "note" as const, text: "ordinary two" }),
+    activityFact(5, 1, "2026-08-10T00:00:05.000Z", { type: "note" as const, text: "ordinary three" }),
     {
       kind: "tell" as const,
       sequence: 6,
@@ -1643,13 +1388,7 @@ test("tell receipt pins only its admitted Tell when another Tell is pending", ()
       state: "told" as const,
       deliveries: [],
     },
-    {
-      kind: "activity" as const,
-      sequence: 7,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:07.000Z",
-      event: { type: "note" as const, text: "ordinary four" },
-    },
+    activityFact(7, 1, "2026-08-10T00:00:07.000Z", { type: "note" as const, text: "ordinary four" }),
   ]);
   const selected = selectSnapshot(ledger, {
     aperture: "receipt",
@@ -1677,20 +1416,12 @@ test("tell receipt pins only its admitted Tell when another Tell is pending", ()
 test("outcome folding preserves a truncated final voice equal to the answer", () => {
   const ledger = projectTurns([
     { kind: "turn-start", sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
-    {
-      kind: "activity",
-      sequence: 2,
-      turnSequence: 1,
-      at: "2026-08-10T00:00:02.000Z",
-      event: { type: "assistant", text: "same answer", truncated: true },
-    },
-    {
-      kind: "turn-end",
-      sequence: 3,
-      turnSequence: 1,
-      completedAt: "2026-08-10T00:00:03.000Z",
-      outcome: { kind: "answered", answer: "same answer", session: { sessionId: "session" } },
-    },
+    activityFact(2, 1, "2026-08-10T00:00:02.000Z", { type: "assistant", text: "same answer", truncated: true }),
+    turnEndFact(3, 1, "2026-08-10T00:00:03.000Z", {
+      kind: "answered",
+      answer: "same answer",
+      session: { sessionId: "session" },
+    }),
   ]);
 
   assert.equal(
