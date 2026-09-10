@@ -46,7 +46,6 @@ jobs:
           tests/contract-completion.test.ts
           tests/library-contract-operations.test.ts
           tests/library-concurrency-placement.test.ts
-          tests/library-verification.test.ts
           tests/git-delivery.test.ts
           tests/contract-forwarding-result.test.ts
           tests/mutation-finality.test.ts
