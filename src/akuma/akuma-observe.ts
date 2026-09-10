@@ -1,5 +1,6 @@
 import {
-  activitySlice,
+  readStatusFacts,
+  readLifeSnapshot,
   HeldAkumaLeash,
   isHeartAbsent,
   life,
@@ -26,7 +27,23 @@ import { AkumaNotBornError } from "./akuma-errors.js";
 
 export async function fleetListRow(paths: AkumaPaths, expected: AkuId): Promise<AkumaListRow | UnbornAkumaListRow> {
   const snapshot = await readHeart(paths);
-  if (snapshot.soul !== null) return (await bornObservation(paths, expected, snapshot)).row;
+  if (snapshot.soul !== null) {
+    const observed = await bornObservation(paths, expected, () => readHeart(paths), snapshot);
+    return {
+      id: observed.soul.id,
+      archetype: observed.soul.archetype,
+      ...(observed.soul.description === undefined ? {} : { description: observed.soul.description }),
+      life: observed.currentLife,
+      lifeAt: lifeAt(
+        observed.currentLife,
+        observed.snapshot.latestBody,
+        observed.snapshot.latestKill,
+        observed.soul.createdAt,
+      ),
+      lastActivityAt: observed.snapshot.lastActivityAt,
+      pending: observed.snapshot.pending.map((tell) => tell.id),
+    };
+  }
   try {
     if ((await probeLeash(paths)) === "held") return { id: expected, life: "unborn" };
     const seal = await readSeal(paths);
@@ -37,14 +54,19 @@ export async function fleetListRow(paths: AkumaPaths, expected: AkuId): Promise<
   }
 }
 
-async function bornObservation(paths: AkumaPaths, expected: AkuId, snapshot?: HeartSnapshot) {
-  snapshot ??= await readHeart(paths);
+async function bornObservation<T extends Pick<HeartSnapshot, "soul" | "latestBody" | "latestKill">>(
+  paths: AkumaPaths,
+  expected: AkuId,
+  read: () => Promise<T>,
+  snapshot?: T,
+) {
+  snapshot ??= await read();
   if (snapshot.soul === null) throw new AkumaNotBornError(expected);
   const claim = await HeldAkumaLeash.try(paths);
   try {
     // A Body may finish after the first read. Refresh under the free seat so
     // neither its release nor a successor can manufacture an untidy observation.
-    if (claim !== null) snapshot = await readHeart(paths);
+    if (claim !== null) snapshot = await read();
     const soul = snapshot.soul;
     if (soul === null) throw new AkumaNotBornError(expected);
     if (soul.id !== expected) throw new Error("Akuma soul does not match its coordinate");
@@ -53,19 +75,7 @@ async function bornObservation(paths: AkumaPaths, expected: AkuId, snapshot?: He
       body: snapshot.latestBody,
       kill: snapshot.latestKill,
     });
-    return {
-      snapshot,
-      soul,
-      row: {
-        id: soul.id,
-        archetype: soul.archetype,
-        ...(soul.description === undefined ? {} : { description: soul.description }),
-        life: currentLife,
-        lifeAt: lifeAt(currentLife, snapshot.latestBody, snapshot.latestKill, soul.createdAt),
-        lastActivityAt: snapshot.lastActivityAt,
-        pending: snapshot.pending.map((tell) => tell.id),
-      } satisfies AkumaListRow,
-    };
+    return { snapshot, soul, currentLife };
   } finally {
     claim?.release();
   }
@@ -80,21 +90,21 @@ export async function bornStatus(
 ): Promise<BudgetedStatusObservation> {
   if (input.ordinaryBudget !== undefined && (!Number.isSafeInteger(input.ordinaryBudget) || input.ordinaryBudget < 0))
     throw new TypeError("ordinary budget must be a nonnegative safe integer");
-  const { snapshot, soul, row: current } = await bornObservation(paths, expected);
+  const { snapshot, soul, currentLife } = await bornObservation(paths, expected, () => readLifeSnapshot(paths));
   const resumeUnsupported =
-    current.life === "stranded" &&
+    currentLife === "stranded" &&
     snapshot.latestSession?.provider === soul.provider.name &&
     (await resolveProviderExecution(soul.provider)).adapter.resume === undefined;
-  const slice = await activitySlice(paths);
-  const selected = selectSnapshot(projectTurns(slice.rows), {
+  const facts = await readStatusFacts(paths, input);
+  const selected = selectSnapshot(projectTurns(facts), {
     aperture: input.aperture,
     budget: ordinarySnapshotBudget(input.ordinaryBudget),
     ...(input.admittedTellId === undefined ? {} : { admittedTellId: input.admittedTellId }),
   });
   return {
     status: {
-      id: current.id,
-      life: current.life,
+      id: soul.id,
+      life: currentLife,
       ...(soul.readonly === undefined ? {} : { readonly: soul.readonly }),
       ...(resumeUnsupported ? { strandedReason: "resume-unsupported" as const } : {}),
       timeline: selected.snapshot,
@@ -109,6 +119,25 @@ export async function readBudgetedStatus(
   input: Readonly<{ aperture: "monitoring" | "receipt"; ordinaryBudget?: number; admittedTellId?: string }>,
 ): Promise<BudgetedStatusObservation> {
   return await bornStatus(pathsForAkuId(worldPath, id), id, input);
+}
+
+function complete(life: AkumaStatus["life"], pending: boolean): boolean {
+  return life !== "running" && !pending;
+}
+
+export function defaultWaitComplete(status: AkumaStatus): boolean {
+  return complete(
+    status.life,
+    status.timeline.entries.some(
+      (entry) => entry.kind === "row" && entry.row.kind === "tell" && entry.row.state === "pending",
+    ),
+  );
+}
+
+export async function readWaitComplete(worldPath: WorldRoot, id: AkuId): Promise<boolean> {
+  const paths = pathsForAkuId(worldPath, id);
+  const observed = await bornObservation(paths, id, () => readLifeSnapshot(paths));
+  return complete(observed.currentLife, observed.snapshot.hasPendingTell);
 }
 
 export async function readAkumaBirthCwd(worldPath: WorldRoot, id: AkuId): Promise<string> {
