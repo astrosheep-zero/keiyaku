@@ -64,7 +64,7 @@
     "test:typecheck:scoped-tests": "tsc -p tsconfig.tests.json",
     "test:typecheck:scripts": "tsc -p tsconfig.scripts.json",
     "test:compile": "node scripts/compile-tests.mjs",
-    "test:e2e:built": "node scripts/run-tests.mjs tests/packaged-cli.e2e.ts tests/cli-akuma-packaged.test.ts"
+    "test:e2e:built": "node scripts/run-tests.mjs tests/packaged-cli.e2e.ts tests/cli-akuma-packaged.e2e.ts"
   },
   "devDependencies": {
     "@types/cross-spawn": "^6.0.6",
