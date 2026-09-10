@@ -262,8 +262,17 @@ async function indexMatchesTreeOnPaths(
   paths: readonly string[],
 ): Promise<boolean> {
   return (
-    (await gitPaths(repository, path, ["diff-index", "--cached", "--name-only", "-z", tree, "--", ...paths])).length ===
-    0
+    (
+      await gitPaths(repository, path, [
+        "diff-index",
+        "--cached",
+        "--name-only",
+        "-z",
+        tree,
+        "--",
+        ...paths.map(literalPath),
+      ])
+    ).length === 0
   );
 }
 
@@ -275,7 +284,17 @@ async function workspaceMatchesTreeOnPaths(
   paths: readonly string[],
 ): Promise<boolean> {
   return (
-    (await gitPaths(repository, path, ["diff", "--name-only", "-z", tree, workspaceTree, "--", ...paths])).length === 0
+    (
+      await gitPaths(repository, path, [
+        "diff",
+        "--name-only",
+        "-z",
+        tree,
+        workspaceTree,
+        "--",
+        ...paths.map(literalPath),
+      ])
+    ).length === 0
   );
 }
 
@@ -288,16 +307,20 @@ async function ordinaryPrecheck(
   const predecessor = gitObjectIdForSnapshot(target.expectedOid);
   const candidate = gitObjectIdForSnapshot(target.newOid);
   const observation = { repository, contractId, target, path, predecessor, candidate };
-  let dryRunFailed = false;
+  let dryRunError: GitPlumbingError | undefined;
   try {
     await runGit(repository, ["-C", path, "read-tree", "--dry-run", "-m", "-u", predecessor, candidate]);
   } catch (error) {
-    if (!(error instanceof GitPlumbingError)) throw error;
-    dryRunFailed = true;
+    if (!(error instanceof GitPlumbingError) || repository.signal?.aborted === true) throw error;
+    dryRunError = error;
   }
   const writes = await changedPaths(repository, path, predecessor, candidate, "ACMRT");
   const scopes = await destructionScopes(repository, path, candidate, writes);
-  if (dryRunFailed) return await dryRunRefusal(observation, scopes);
+  if (dryRunError !== undefined) {
+    const refusal = await dryRunRefusal(observation, scopes);
+    if (refusal !== null) return refusal;
+    throw dryRunError;
+  }
   return await untrackedRefusalWithinScopes(observation, scopes, true);
 }
 
