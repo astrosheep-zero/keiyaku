@@ -20,41 +20,28 @@ const { TEST_MANIFESTS } = (await import(
 const root = process.cwd();
 
 test("test runner removes ambient Akuma requests and preserves unrelated environment", () => {
-  const result = spawnSync(
-    process.execPath,
-    [
-      resolve(root, "scripts/run-tests.mjs"),
-      ...(import.meta.url.endsWith(".js") ? ["--compiled"] : []),
-      "tests/fixtures/run-tests-environment.test.mjs",
-    ],
-    {
-      cwd: root,
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        AKUMA_REQUESTS: resolve(root, ".keiyaku", "ambient-requests"),
-        KEIYAKU_TEST_SENTINEL: "sentinel bytes",
-      },
-    },
-  );
-
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  const failing = spawnSync(
-    process.execPath,
-    [
-      resolve(root, "scripts/run-tests.mjs"),
-      ...(import.meta.url.endsWith(".js") ? ["--compiled"] : []),
-      "--test-reporter=spec",
-      "tests/fixtures/run-tests-environment.test.mjs",
-    ],
-    {
-      cwd: root,
-      encoding: "utf8",
-      env: { ...process.env, KEIYAKU_TEST_SENTINEL: "wrong bytes" },
-    },
-  );
-  assert.equal(failing.status, 1, failing.stderr || failing.stdout);
-  assert.match(failing.stdout + failing.stderr, /wrong bytes/);
+  for (const sentinel of ["sentinel bytes", "wrong sentinel"]) {
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      AKUMA_REQUESTS: resolve(root, ".keiyaku", "ambient-requests"),
+      KEIYAKU_TEST_SENTINEL: sentinel,
+    };
+    // A deliberately nested runner must not inherit Node's recursion guard.
+    delete env.NODE_TEST_CONTEXT;
+    const result = spawnSync(
+      process.execPath,
+      [
+        resolve(root, "scripts/run-tests.mjs"),
+        ...(import.meta.url.endsWith(".js") ? ["--compiled"] : []),
+        "--test-reporter=tap",
+        "tests/fixtures/run-tests-environment.test.mjs",
+      ],
+      { cwd: root, encoding: "utf8", env },
+    );
+    assert.equal(result.status, sentinel === "sentinel bytes" ? 0 : 1, result.stderr || result.stdout);
+    assert.match(result.stdout + result.stderr, /repository test environment is isolated from Akuma request forwarding/u);
+    assert.match(result.stdout + result.stderr, /# tests 1/u);
+  }
 });
 
 test("test runner suite selection is explicit and fail-closed", () => {
