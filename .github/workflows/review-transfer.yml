@@ -12,10 +12,11 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - name: Reconstruct and verify reviewed tree
+      - name: Reconstruct and verify reviewed source tree
         env:
           PARENT: 12f23c1751fb1fa7ad18afceec79265410cd8c2b
           EXPECTED_TREE: 77b240feb5746a205b9247d989bfb81efb7255a1
+          CODE_TREE: 4d70a0cb2c95761fe9252a74addb05a82ef88808
         run: |
           set -euo pipefail
           base64 -d .review/runner.patch.b64 | gzip -d > "$RUNNER_TEMP/runner.patch"
@@ -23,11 +24,15 @@ jobs:
           cd "$RUNNER_TEMP/repair"
           git apply --index "$RUNNER_TEMP/runner.patch"
           git diff --cached --check
+          test "$(git write-tree)" = "$EXPECTED_TREE"
+          # Actions' contents token cannot write workflows. Publish source objects
+          # only; the connected GitHub tool applies the reviewed workflow edit.
+          git restore --source="$PARENT" --staged --worktree .github
           tree=$(git write-tree)
-          test "$tree" = "$EXPECTED_TREE"
+          test "$tree" = "$CODE_TREE"
           git config user.name 'Keiyaku Test Maintenance'
           git config user.email 'keiyaku-ci@example.invalid'
           commit=$(printf '%s\n' 'test: repair compiled fixture coordinates and fail closed on missing selections' | git commit-tree "$tree" -p "$PARENT")
           git push origin "$commit:refs/heads/codex/review-objects-runner-20260910"
-          printf 'Verified repair commit: `%s`\nTree: `%s`\n' "$commit" "$tree" >> "$GITHUB_STEP_SUMMARY"
+          printf 'Verified source commit: `%s`\nTree: `%s`\n' "$commit" "$tree" >> "$GITHUB_STEP_SUMMARY"
           echo "REPAIR_COMMIT=$commit"
