@@ -175,6 +175,46 @@ test("test entry reruns checks and retires bytecode after success and failure", 
   assert.notEqual(caches[0], caches[1]);
 });
 
+test("release test entry completes build before parallel preparation and stops after build failure", (context) => {
+  const directory = mkdtempSync(join(tmpdir(), "keiyaku-release-entry-"));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  const preparation = ["format:check", "test:architecture", "test:maintainability", "test:compile"];
+  const phases = ["build", ...preparation, "test:reachability"];
+  writeFileSync(
+    join(directory, "package.json"),
+    JSON.stringify({ type: "module", scripts: Object.fromEntries(phases.map((phase) => [phase, "node phase.mjs"])) }),
+  );
+  mkdirSync(join(directory, "scripts"));
+  writeFileSync(
+    join(directory, "phase.mjs"),
+    [
+      'import { appendFileSync } from "node:fs";',
+      "const phase = process.env.npm_lifecycle_event;",
+      'appendFileSync("phases.jsonl", phase + "\\n");',
+      'if (phase === process.env.FAIL_PHASE) process.exitCode = 7;',
+    ].join("\n"),
+  );
+  writeFileSync(join(directory, "scripts", "run-tests.mjs"), 'import { appendFileSync } from "node:fs"; appendFileSync("phases.jsonl", "tests\\n");');
+
+  for (const fail of ["", "build"]) {
+    writeFileSync(join(directory, "phases.jsonl"), "");
+    const result = spawnSync(process.execPath, [resolve(root, "scripts/test-entry.mjs"), "--release"], {
+      cwd: directory,
+      encoding: "utf8",
+      env: { ...process.env, NODE_DISABLE_COMPILE_CACHE: "1", FAIL_PHASE: fail },
+    });
+    assert.equal(result.status, fail === "build" ? 7 : 0, result.stdout + result.stderr);
+    const records = readFileSync(join(directory, "phases.jsonl"), "utf8").trim().split("\n");
+    assert.equal(records[0], "build");
+    if (fail === "build") {
+      assert.deepEqual(records, ["build"]);
+    } else {
+      assert.deepEqual(records.slice(1, 5).sort(), [...preparation].sort());
+      assert.deepEqual(records.slice(5).sort(), ["test:reachability", "tests"]);
+    }
+  }
+});
+
 test("explicit test selections reject missing files and unmatched patterns before executing", (context) => {
   const directory = mkdtempSync(join(tmpdir(), "keiyaku-runner-missing-"));
   context.after(() => rmSync(directory, { recursive: true, force: true }));
