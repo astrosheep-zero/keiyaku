@@ -1,1 +1,1 @@
-{"parent":"f736135c7a0de4a3c02374ab3a860f830f4fef42","tree":"3c50d92654b1c1a84235cc627fad3483deae8deb","branch":"codex/review-objects-consumers-20260910","message":"test: keep external consumers in a dedicated surviving test entry"}
+{"parent":"bc5407cb674c71e252c69ab1cce8f7a210537753","tree":"0172d025effb062fada780e374c895c97d558f54","branch":"codex/review-objects-library-20260910","message":"test: retain candidate recovery and partial creation results with standalone consumers"}
