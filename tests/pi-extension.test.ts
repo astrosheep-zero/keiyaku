@@ -10,7 +10,7 @@ type PackageJson = {
   pi?: { extensions?: unknown; skills?: unknown };
 };
 
-const rootUrl = new URL("../", import.meta.url);
+const rootUrl = new URL(import.meta.url.endsWith(".js") ? "../../" : "../", import.meta.url);
 const packageJson = JSON.parse(readFileSync(new URL("package.json", rootUrl), "utf8")) as PackageJson;
 const piExtension = packageJson.pi?.extensions;
 if (!Array.isArray(piExtension) || typeof piExtension[0] !== "string") {

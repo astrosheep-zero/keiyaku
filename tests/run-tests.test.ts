@@ -158,3 +158,34 @@ test("test entry reruns checks and retires bytecode after success and failure", 
   }
   assert.notEqual(caches[0], caches[1]);
 });
+
+test("explicit test selections reject missing files and unmatched patterns before executing", (context) => {
+  const directory = mkdtempSync(join(tmpdir(), "keiyaku-runner-missing-"));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  const marker = join(directory, "ran");
+  const fixture = join(directory, "present.test.mjs");
+  writeFileSync(fixture, `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(marker)}, 'ran');`);
+  for (const missing of ["absent.test.mjs", "absent-*.test.mjs"]) {
+    const result = spawnSync(
+      process.execPath,
+      [resolve(root, "scripts/run-tests.mjs"), fixture, join(directory, missing)],
+      {
+        cwd: root,
+        encoding: "utf8",
+      },
+    );
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stderr, /Test selection contains missing file/);
+    assert.equal(existsSync(marker), false);
+  }
+  const matched = spawnSync(
+    process.execPath,
+    [resolve(root, "scripts/run-tests.mjs"), join(directory, "present*.test.mjs")],
+    {
+      cwd: root,
+      encoding: "utf8",
+    },
+  );
+  assert.equal(matched.status, 0, matched.stdout + matched.stderr);
+  assert.equal(readFileSync(marker, "utf8"), "ran");
+});

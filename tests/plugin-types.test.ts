@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
-const root = resolve(import.meta.dirname, "..");
+const root = resolve(import.meta.dirname, import.meta.url.endsWith(".js") ? "../.." : "..");
 
 test("package root, plugin subpath, and Square plugin expose the typed plugin contract", () => {
   const directory = mkdtempSync(join(tmpdir(), "keiyaku-plugin-types-"));
