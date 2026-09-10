@@ -47,12 +47,20 @@ if (explicitMode && supplied.length > 1) {
   try {
     // These checks read source independently. Await every child before running tests
     // or returning a failure, so an unsuccessful gate never leaves work detached.
+    // Build is the heaviest release preparation step. Running it beside four
+    // other CPU-heavy Node/TypeScript checks made the build several times slower
+    // on small CI runners. Give it the machine first, then overlap only the
+    // independent static/transpile checks.
+    const buildStatus = mode === "release" ? await run("npm", ["run", "build"], "build", environment) : 0;
     const preparation =
       mode === "dev"
         ? ["test:typecheck", "test:architecture"]
-        : ["format:check", "build", "test:architecture", "test:maintainability", "test:compile"];
-    const statuses = await Promise.all(preparation.map((name) => run("npm", ["run", name], name, environment)));
-    process.exitCode = statuses.find((status) => status !== 0) ?? 0;
+        : ["format:check", "test:architecture", "test:maintainability", "test:compile"];
+    const statuses =
+      buildStatus === 0
+        ? await Promise.all(preparation.map((name) => run("npm", ["run", name], name, environment)))
+        : [buildStatus];
+    process.exitCode = buildStatus || statuses.find((status) => status !== 0) || 0;
     if (process.exitCode === 0) {
       // Reachability may inspect generated package exports, so it follows build.
       const checks = mode === "dev" ? ["test:local"] : ["test:reachability"];
