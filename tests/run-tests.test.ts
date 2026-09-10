@@ -110,6 +110,35 @@ test("compiled sweeps schedule large files first without losing isolation or fai
   assert.equal(readFileSync(order, "utf8"), "zaza");
 });
 
+test("compiled sweeps await delayed files even when a sibling fails", (context) => {
+  const directory = mkdtempSync(join(tmpdir(), "keiyaku-test-runner-delayed-"));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  mkdirSync(join(directory, "tests"));
+  mkdirSync(join(directory, ".test-build", "tests"), { recursive: true });
+  const marker = join(directory, "completed");
+  writeFileSync(join(directory, "tests", "failure.test.ts"), "// source\n".repeat(100));
+  writeFileSync(join(directory, "tests", "delayed.test.ts"), "// source\n");
+  writeFileSync(
+    join(directory, ".test-build", "tests", "failure.test.js"),
+    "const test = require('node:test'); const assert = require('node:assert/strict'); test('failure', () => assert.fail('chosen failure'));",
+  );
+  writeFileSync(
+    join(directory, ".test-build", "tests", "delayed.test.js"),
+    [
+      "const { writeFileSync } = require('node:fs');",
+      "const test = require('node:test');",
+      `test('delayed completion', async () => { await new Promise((resolve) => setTimeout(resolve, 150)); writeFileSync(${JSON.stringify(marker)}, 'done'); });`,
+    ].join("\n"),
+  );
+  const result = spawnSync(
+    process.execPath,
+    [resolve(root, "scripts/run-tests.mjs"), "--compiled", "--test-concurrency=2"],
+    { cwd: directory, encoding: "utf8" },
+  );
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.equal(existsSync(marker), true, result.stdout + result.stderr);
+});
+
 test("test entry reruns checks and retires bytecode after success and failure", (context) => {
   const directory = mkdtempSync(join(tmpdir(), "keiyaku-entry-lifecycle-"));
   context.after(() => rmSync(directory, { recursive: true, force: true }));
