@@ -23,6 +23,7 @@
     "tests/cli-akuma.test.ts",
     "tests/library-contract-operations.test.ts",
     "tests/public-library.test.ts",
+    "tests/package-consumers.test.ts",
     "tests/facade-contract.test.ts",
     "tests/cli-verification.test.ts",
     "tests/git-delivery.test.ts",

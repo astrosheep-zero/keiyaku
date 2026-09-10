@@ -66,6 +66,7 @@ export const INTEGRATION_TEST_FILES = [
   "tests/library-contract-operations.test.ts",
   "tests/library-verification.test.ts",
   "tests/nuke.test.ts",
+  "tests/package-consumers.test.ts",
   "tests/path-coordinates.test.ts",
   "tests/plugin-runtime.test.ts",
   "tests/plugin-square.test.ts",
