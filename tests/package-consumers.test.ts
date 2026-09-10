@@ -58,7 +58,10 @@ test("built package supports Contract, Task, Kanshi and plugin consumers", (cont
       [
         'import assert from "node:assert/strict";',
         'import { createRequire } from "node:module";',
+        'import { Delivery, Keiyaku } from "@astrosheep/keiyaku";',
         'import plugin from "@astrosheep/keiyaku-plugin-square";',
+        'assert.throws(() => Reflect.construct(Keiyaku, []), TypeError);',
+        'assert.throws(() => Reflect.construct(Delivery, []), TypeError);',
         'assert.equal(plugin.manifest.id, "square");',
         'assert.equal(typeof plugin.activate, "function");',
         'assert.ok(createRequire(import.meta.url).resolve("@astrosheep/keiyaku-plugin-square").endsWith("index.js"));',

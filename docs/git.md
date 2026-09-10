@@ -59,6 +59,12 @@ It returns mechanical data or typed failures; it does not judge Contract
 lifecycle or decode Contract documents. Document bytes used for delivery are
 opaque Git inputs, and Git never judges their currentness.
 
+Content identity consumes the complete canonical patch without retaining that
+intermediate patch in the caller. A producer failure, consumer failure, or
+cancelled transfer yields no identity, even when partial output resembles one.
+A failed transfer awaits retirement of both owned commands and preserves any
+retirement failure.
+
 Delivery normally requires a clean managed worktree. Explicit dirty delivery
 captures the complete non-ignored final tree without rewriting the caller's
 checkout; it does not authorize dirty submodule internals. When conflict
