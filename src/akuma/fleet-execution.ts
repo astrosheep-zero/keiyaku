@@ -1,6 +1,6 @@
 import { AkumaNotBornError, defaultWaitComplete, type AkumaStatus } from "./akuma.js";
 import { createAkumaProduct } from "./akuma-product.js";
-import { readBudgetedStatus } from "./akuma.js";
+import { readBudgetedStatus, readWaitComplete } from "./akuma-observe.js";
 import { NO_DISPATCH_ASSOCIATION } from "./dispatch-association.js";
 import { EMPTY_CREATED_TASK_OBSERVATION } from "../task/created-observation.js";
 import type { WorldRoot } from "../world.js";
@@ -66,6 +66,30 @@ async function observeWaitRound(
   return { statuses, unobserved };
 }
 
+async function probeWaitRound(input: WaitExecutionInput): Promise<boolean> {
+  let observed = 0;
+  let complete = 0;
+  for (const id of input.ids) {
+    input.signal?.throwIfAborted();
+    try {
+      if (await readWaitComplete(input.path, id)) complete += 1;
+      observed += 1;
+    } catch (error) {
+      if (input.ids.length <= 1 || error instanceof AkumaNotBornError) throw error;
+      // Plural wait retries unreadable members; final rendering owns diagnostics.
+    }
+  }
+  return observed > 0 && (input.completion === "any" ? complete > 0 : complete === input.ids.length);
+}
+
+function roundComplete(round: WaitRound, completion: "any" | "all"): boolean {
+  const settled = round.statuses.map(defaultWaitComplete);
+  return (
+    settled.length > 0 &&
+    (completion === "any" ? settled.some(Boolean) : round.unobserved.length === 0 && settled.every(Boolean))
+  );
+}
+
 function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     let timer: ReturnType<typeof setTimeout>;
@@ -95,17 +119,17 @@ export type WaitExecutionInput = Readonly<{
 export async function executeWaitAkuma(input: WaitExecutionInput): Promise<AkumaWaitResult> {
   const deadline = input.timeoutMs === undefined ? undefined : performance.now() + input.timeoutMs;
   for (;;) {
-    const round = await observeWaitRound(input.path, input.ids, input.signal);
-    const settled = round.statuses.map(defaultWaitComplete);
-    const completed =
-      round.statuses.length > 0 &&
-      (input.completion === "any" ? settled.some(Boolean) : round.unobserved.length === 0 && settled.every(Boolean));
-    if (completed || (deadline !== undefined && performance.now() >= deadline)) {
-      return fleetResultSchemas.wait.parse({
-        completion: input.completion,
-        observations: round.statuses.map(akumaOnlyObservation),
-        unobserved: round.unobserved,
-      });
+    if ((deadline !== undefined && performance.now() >= deadline) || (await probeWaitRound(input))) {
+      const round = await observeWaitRound(input.path, input.ids, input.signal);
+      input.signal?.throwIfAborted();
+      // The probe is not a completion receipt. Judge the actual returned values.
+      if (roundComplete(round, input.completion) || (deadline !== undefined && performance.now() >= deadline)) {
+        return fleetResultSchemas.wait.parse({
+          completion: input.completion,
+          observations: round.statuses.map(akumaOnlyObservation),
+          unobserved: round.unobserved,
+        });
+      }
     }
     await delay(
       deadline === undefined ? POLL_MS : Math.min(POLL_MS, Math.max(0, deadline - performance.now())),
