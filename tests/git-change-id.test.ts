@@ -77,6 +77,14 @@ test("a Git pipe rejects either failed command even if its sink emits an identit
     ),
     GitPlumbingError,
   );
+  await assert.rejects(
+    runGitPipe(
+      git,
+      ["-e", "process.stdout.write('patch')"],
+      ["-e", "process.stdin.resume(); process.stdin.on('end', () => process.stdout.write('x'.repeat(16385)))"],
+    ),
+    /Git pipe result exceeds its bounded output/u,
+  );
   const pid = Number(readFileSync(pidFile, "utf8"));
   assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
 });

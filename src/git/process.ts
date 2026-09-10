@@ -133,6 +133,31 @@ export async function runGit(
   return await executeGit(repository, args, input);
 }
 
+function boundedPipeOutput(child: ReturnType<typeof spawnCancellableProcess>["child"], args: readonly string[]): Promise<Buffer> {
+  const stdout: Buffer[] = [];
+  let bytes = 0;
+  let settled = false;
+  return new Promise<Buffer>((resolve, reject) => {
+    const fail = (error: unknown): void => {
+      if (settled) return;
+      settled = true;
+      reject(error instanceof GitPlumbingError ? error : commandError(args, error));
+    };
+    child.stdout!.on("data", (chunk: Buffer) => {
+      bytes += chunk.length;
+      if (bytes > GIT_STDERR_BYTES) {
+        fail(commandError(args, { message: "Git pipe result exceeds its bounded output", status: null }));
+      } else stdout.push(chunk);
+    });
+    child.stdout!.once("error", fail);
+    child.once("close", () => {
+      if (settled) return;
+      settled = true;
+      resolve(Buffer.concat(stdout));
+    });
+  });
+}
+
 /** Connect two owned Git commands without materializing the intermediate output. */
 export async function runGitPipe(
   repository: GitRepository,
@@ -183,13 +208,14 @@ export async function runGitPipe(
   try {
     const source = start(sourceArgs);
     const sink = start(sinkArgs);
-    const stdout: Buffer[] = [];
-    sink.stdout!.on("data", (chunk: Buffer) => stdout.push(chunk));
+    const output = boundedPipeOutput(sink, sinkArgs);
+    void output.catch(() => undefined);
+    pending.push(output);
     pending.push(pipeline(source.stdout!, sink.stdin!));
     source.stdin!.end();
     await Promise.all(pending);
     await Promise.all(processes.map((owned) => owned.waitTermination()));
-    return Buffer.concat(stdout);
+    return await output;
   } catch (error) {
     const cleanup = await Promise.allSettled(
       processes.map(async (owned) => {
