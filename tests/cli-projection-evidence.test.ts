@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { namedValueLines } from "../src/cli/render/value.js";
 import { renderObservation } from "../src/cli/render/board.js";
-import { renderRefusalFacts, renderConflictMaterialized } from "../src/cli/render/refusal.js";
+import { renderSettingsText } from "../src/cli/render/settings.js";
+import { renderBindDraftReceipt, renderRefusalFacts, renderConflictMaterialized } from "../src/cli/render/refusal.js";
 import { gateFact } from "../src/cli/render/contract-observation.js";
+import { entityLines, plumbFacts } from "../src/cli/render/terminal.js";
 import {
   actorId,
   changeId,
+  contractHead,
   contractId,
   documentKey,
   entryUlid,
@@ -14,6 +18,7 @@ import {
 } from "../src/core/facts/types.js";
 import type { ContractHistory, Fact } from "../src/library/contract-types.js";
 import { renderText } from "../src/cli/render/text.js";
+import type { Settings } from "../src/settings.js";
 
 test("opaque text retains exact keys, types, empty collections, and array member boundaries", () => {
   assert.equal(
@@ -83,6 +88,33 @@ test("observation preserves outer ownership and does not assert success", () => 
   assert.equal(result.report.kind, "failed");
 });
 
+test("settings text retains shadow provenance and exact configuration names", () => {
+  const value: Settings = {
+    scopes: {
+      user: { kind: "read", path: "/user/settings.json", namespaces: ["providers"] },
+      project: { kind: "read", path: "/repo/settings.json", namespaces: ["providers"] },
+    },
+    namespace: (name) => ({
+      kind: "read",
+      name,
+      entries: [{ name: "local", source: "project", shadows: true, value: { env: { LONG_VALUE: "false" } } }],
+    }),
+  };
+  assert.equal(
+    renderSettingsText(value),
+    [
+      "settings",
+      "  user  read  /user/settings.json",
+      "  project  read  /repo/settings.json",
+      "  namespace  providers  read",
+      "    entry  local · project · shadows user",
+      "      value  object (1)",
+      "        env  object (1)",
+      '          LONG_VALUE  "false"',
+    ].join("\n"),
+  );
+});
+
 test("all four gate bracket states keep the declared gate identity", () => {
   assert.deepEqual(
     [
@@ -92,6 +124,45 @@ test("all four gate bracket states keep the declared gate identity", () => {
       gateFact({ gate: "customGate", current: { kind: "missing" } }),
     ],
     ["[✓] reviewed", "[✗] verified", "[~] security (stale)", "[ ] customGate"],
+  );
+});
+
+test("narrow entities retain deliberate layout and compact facts never split a path", () => {
+  assert.deepEqual(
+    entityLines({
+      mark: "●",
+      identity: "kei/long-complete-identity",
+      state: "bound · 1h",
+      title: "Example contract",
+      facts: ["candidate  none"],
+      context: { columns: 24, color: false },
+    }),
+    ["● bound · 1h", "  kei/long-complete-identity", "  Example contract", "  candidate  none"],
+  );
+  const path = `/repo/${"long-directory/".repeat(10)}`;
+  assert.deepEqual(plumbFacts(["candidate  none", "target  main", `worktree  ${path}`], 80), [
+    "  candidate  none · target  main",
+    `  worktree  ${path}`,
+  ]);
+});
+
+test("confirmation mismatch keeps the world and caller value separately labeled", () => {
+  assert.deepEqual(
+    renderRefusalFacts(
+      {
+        kind: "nuke-confirmation-mismatch",
+        world: "/repo",
+        confirmation: "/other",
+      },
+      "  ",
+      120,
+    ),
+    [
+      "  nuke confirmation mismatch",
+      "  world  /repo",
+      "  confirmation  /other",
+      "  nuke  keiyaku nuke --confirm '/repo'",
+    ],
   );
 });
 
@@ -117,6 +188,16 @@ test("dirty refusal describes available capture without asserting a current unme
   assert.doesNotMatch(blocked.join("\n"), /captures complete/u);
 });
 
+test("integration refusal keeps its reason distinct from the target coordinate", () => {
+  const target = snapshotId("c".repeat(40));
+  const lines = renderRefusalFacts(
+    { kind: "integration-failed", contractId: contractId("kei/conflict"), reason: "conflict", targetHead: target },
+    "  ",
+    120,
+  );
+  assert.deepEqual(lines, ["  integration-failed  kei/conflict", "  reason  conflict", `  target  ${target}`]);
+});
+
 test("materialized conflict keeps copyable handoff and target coordinates", () => {
   const base = snapshotId("a".repeat(40));
   const target = snapshotId("b".repeat(40));
@@ -139,6 +220,27 @@ test("materialized conflict keeps copyable handoff and target coordinates", () =
   assert.ok(output.split("\n").includes(`  handoff base  ${base}`));
   assert.ok(output.split("\n").includes("  deliver  deliver --include-dirty · reads worktree bytes, not index"));
   assert.doesNotMatch(output, /-C |--cwd |please|next/u);
+});
+
+test("bind draft facts preserve optional evidence without a separate text dialect", () => {
+  const path = "/tmp/long draft directory/input.md";
+  assert.equal(renderBindDraftReceipt({ path, warning: "disk full" }), `  draft  ${path}\n! draft warning  disk full`);
+  assert.equal(renderBindDraftReceipt({ path }), `  draft  ${path}`);
+  assert.equal(renderBindDraftReceipt({ warning: "disk full" }), "! draft warning  disk full");
+  assert.doesNotMatch(renderBindDraftReceipt({ warning: "disk full" }), /draft preserved|:\s|next|please/u);
+});
+
+test("narrow confirmation handles preserve shell-sensitive World coordinates", () => {
+  const world = "D:\\dev\\it's a $TAG; repository";
+  const lines = renderRefusalFacts({ kind: "nuke-confirmation-required", world }, "  ", 20);
+  assert.equal(lines.length, 3);
+  assert.equal(lines[1], `  world  ${world}`);
+  assert.ok(lines[2]!.startsWith("  nuke  "));
+  const handle = lines[2]!.slice("  nuke  ".length);
+  const parsed = spawnSync("bash", ["-c", `set -- ${handle}; printf '%s\\0' "$@"`], { encoding: "utf8" });
+  assert.equal(parsed.status, 0, parsed.stderr);
+  assert.deepEqual(parsed.stdout.split("\0").slice(0, -1), ["keiyaku", "nuke", "--confirm", world]);
+  assert.doesNotMatch(handle, /-C |--cwd |next|please/u);
 });
 
 test("Contract history keeps event evidence and commit labels without exposing document blobs", () => {
@@ -207,4 +309,77 @@ test("Contract history keeps event evidence and commit labels without exposing d
   );
   assert.doesNotMatch(output, /private-|\bdocument\b|^\s+(?:snapshot|change) |next|then|please|key=/mu);
   assert.equal(JSON.parse(JSON.stringify(history)).events[0].fact.data.terms.document.key, "private-document-blob");
+});
+
+test("audit separates its observation outcome from complete candidate coordinates", () => {
+  const path = `src/${"long-directory/".repeat(8)}file.ts`;
+  const output = renderText(
+    {
+      kind: "accepted",
+      verb: "audit",
+      contract: contractId("kei/audit"),
+      head: contractHead("private-head"),
+      facts: [],
+      settlementLags: [],
+      report: {
+        candidate: {
+          kind: "ready",
+          workspace: { kind: "worktree", path: "/worktree" },
+          identity: {
+            tenderSnapshot: snapshotId("a".repeat(40)),
+            integration: {
+              predecessor: snapshotId("b".repeat(40)),
+              snapshot: snapshotId("c".repeat(40)),
+              changeId: changeId("d".repeat(40)),
+            },
+            method: "squash",
+            policy: { requireBranchesToBeUpToDate: false },
+          },
+          scope: { filesChanged: 1, insertions: 2, deletions: 3, paths: [path] },
+        },
+        verification: { kind: "not-run" },
+        target: { kind: "not-observed" },
+      },
+    },
+    { columns: 80, color: false },
+  );
+  assert.equal(
+    output,
+    [
+      "✓ audit  kei/audit",
+      "  candidate  ready",
+      `  tender commit  ${"a".repeat(40)}`,
+      `  integration commit  ${"c".repeat(40)}`,
+      `  content identity (not commit)  ${"d".repeat(40)}`,
+      "  workspace  worktree",
+      "  worktree  /worktree",
+      "  1 file changed, 2 insertions(+), 3 deletions(-)",
+      `  ${path}`,
+      "  verification  not-run",
+      "  target  not-observed",
+    ].join("\n"),
+  );
+  assert.doesNotMatch(output, /private-head|^[{[]|^✓ (?:candidate|verification|target)|next|then|please|key=/mu);
+});
+
+test("narrow conflict output keeps its label, paths and handles whole", () => {
+  const path = `src/${"long-directory/".repeat(8)}file.ts`;
+  const output = renderConflictMaterialized(
+    {
+      kind: "integration-conflict-materialized",
+      handoffBase: snapshotId("a".repeat(40)),
+      targetHead: snapshotId("b".repeat(40)),
+      workspace: { kind: "worktree", path: "/worktree" },
+      conflictPaths: [path],
+      recovery: {
+        continue: "deliver --include-dirty",
+        materialize: "deliver --materialize-conflict --include-dirty",
+        staging: "not-required",
+      },
+    },
+    { columns: 30, color: false },
+  );
+  assert.equal(output.split("\n")[0], "! integration-conflict-materialized");
+  assert.ok(output.split("\n").includes(`    ${path}`));
+  assert.equal(output.split("\n").at(-1), "  deliver  deliver --include-dirty · reads worktree bytes, not index");
 });

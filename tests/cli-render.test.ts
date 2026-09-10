@@ -1,14 +1,28 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { changeId, contractHead, contractId, snapshotId } from "../src/core/facts/types.js";
-import type { InvocationResult } from "../src/cli/result.js";
+import { changeId, contractHead, contractId, gate, snapshotId } from "../src/core/facts/types.js";
+import type { InvocationResult, Lag } from "../src/cli/result.js";
 import { renderCatalogText } from "../src/cli/render/catalog.js";
 import { renderText } from "../src/cli/render/text.js";
 import type { Catalog } from "../src/library/catalog.js";
 import type { ContractRow } from "../src/protocol/read/status.js";
 import type { WorldRoot } from "../src/world.js";
+import { renderHelp } from "../src/cli/parse.js";
 
 const worldRoot = "/world" as WorldRoot;
+
+test("CLI lag scope stays aligned with the public mutation result", () => {
+  const scope: Lag["affects"] = "reconciliation";
+  const placement: Lag["affects"] = "placement";
+  const continuation: Lag["affects"] = "continuation";
+  assert.equal(scope, "reconciliation");
+  assert.equal(placement, "placement");
+  assert.equal(continuation, "continuation");
+});
+
+test("Akuma call help omits the caller readonly flag", () => {
+  assert.doesNotMatch(renderHelp({ kind: "akuma", action: "call" }), /--readonly/u);
+});
 
 test("catalog text renders only the selected identity layer", () => {
   assert.equal(
@@ -80,6 +94,22 @@ test("root Task catalogue marks every disposition without inventing waiting stat
   );
 });
 
+test("pre-delivery review records testimony without claiming a retained candidate", () => {
+  for (const verdict of ["satisfied", "unsatisfied"] as const) {
+    const output = renderText({
+      kind: "accepted",
+      verb: "review",
+      contract: contractId("kei/not-delivered"),
+      head: contractHead("head"),
+      facts: [],
+      settlementLags: [],
+      verdict,
+    });
+    assert.equal(output, `✓ review ${verdict} recorded  kei/not-delivered\n  record`);
+    assert.doesNotMatch(output, /candidate|not complete|placement/u);
+  }
+});
+
 test("scoped Akuma catalog text preserves bounded membership and marks further rows", () => {
   const catalog: Extract<Catalog, { kind: "akuma" }> = {
     kind: "akuma",
@@ -103,6 +133,28 @@ test("scoped Akuma catalog text preserves bounded membership and marks further r
     JSON.parse(JSON.stringify(catalog)).rows.map((row: { id: string }) => row.id),
     catalog.rows.map((row) => row.id),
   );
+});
+
+test("Akuma catalog renders future ages as now", () => {
+  const futureRow = {
+    id: "aku/worker/future" as never,
+    archetype: "worker",
+    life: "unborn" as const,
+    lifeAt: "2026-08-12T00:00:01.000Z",
+    lastActivityAt: null,
+    pending: [],
+  };
+  const text = renderCatalogText({
+    kind: "akuma",
+    root: worldRoot,
+    archetype: "worker",
+    observedAt: "2026-08-12T00:00:00.000Z",
+    rows: [futureRow],
+    searched: [],
+    hasMore: false,
+  });
+  assert.match(text, /○ aku\/worker\/future · unborn · now/u);
+  assert.doesNotMatch(text, /0s/u);
 });
 
 test("Contract catalog keeps domain IDs complete and makes every gate state legible", () => {
@@ -242,6 +294,125 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
   );
 });
 
+test("observation text keeps the command and view data together", () => {
+  const result: InvocationResult = { kind: "observation", command: "status", contracts: [] };
+  assert.equal(renderText(result), "observation  status\n  contracts  list (0)");
+});
+
+test("world reconcile text keeps a completed report under report", () => {
+  const result: InvocationResult = {
+    kind: "observation",
+    command: "reconcile",
+    report: { kind: "completed", contracts: [] },
+  };
+  assert.equal(
+    renderText(result),
+    'observation  reconcile\n  report  object (2)\n    kind  "completed"\n    contracts  list (0)',
+  );
+});
+
+test("world observation failure text is exact", () => {
+  const result: InvocationResult = {
+    kind: "observation",
+    command: "reconcile",
+    report: { kind: "world-observation-failed", diagnostic: "git failed" },
+  };
+  assert.equal(renderText(result), "✕ observation  reconcile\n  diagnostic  git failed");
+});
+
+test("Verification create action names are safe in text receipts", () => {
+  const name = "prepare\nINJECT\u001b[31m";
+  const result: InvocationResult = {
+    kind: "accepted",
+    verb: "deliver",
+    contract: contractId("kei/hostile-create-name"),
+    head: contractHead("head"),
+    facts: [],
+    settlementLags: [],
+    verification: {
+      failure: "environment-failure",
+      name,
+      detail: { kind: "exit", code: 17, stdout: "", stderr: "", truncated: false },
+    },
+  };
+
+  const text = renderText(result, { columns: 200, color: false });
+  assert.equal(text.includes('name "prepare\\nINJECT\\u001b[31m"'), true);
+  assert.doesNotMatch(text, /\nINJECT/u);
+  assert.doesNotMatch(text, /\u001b/u);
+  const verification = result.verification;
+  assert.equal(verification !== undefined && "name" in verification ? verification.name : undefined, name);
+});
+
+test("Verification cleanup action names are safe in text receipts", () => {
+  const name = "destroy\rINJECT\u001b[2J";
+  const result: InvocationResult = {
+    kind: "accepted",
+    verb: "deliver",
+    contract: contractId("kei/hostile-cleanup-name"),
+    head: contractHead("head"),
+    facts: [],
+    settlementLags: [],
+    cleanup: [
+      {
+        kind: "verification-cleanup",
+        contractId: contractId("kei/hostile-cleanup-name"),
+        failure: { phase: "destroy", name, detail: { kind: "timeout" } },
+      },
+    ],
+  };
+
+  const text = renderText(result, { columns: 200, color: false });
+  assert.equal(text.includes('name "destroy\\rINJECT\\u001b[2J"'), true);
+  assert.doesNotMatch(text, /\rINJECT/u);
+  assert.doesNotMatch(text, /\u001b/u);
+  const cleanup = result.cleanup?.[0];
+  assert.equal(cleanup?.kind === "verification-cleanup" ? cleanup.failure.name : undefined, name);
+});
+
+test("Verification text receipts distinguish configured action names", () => {
+  const receipt = (name: string) =>
+    renderText(
+      {
+        kind: "accepted",
+        verb: "deliver",
+        contract: contractId("kei/action-name-collision"),
+        head: contractHead("head"),
+        facts: [],
+        settlementLags: [],
+        verification: {
+          failure: "environment-failure",
+          name,
+          detail: { kind: "timeout" },
+        },
+      },
+      { columns: 200, color: false },
+    );
+
+  const newline = receipt("prepare\nx");
+  const space = receipt("prepare x");
+  assert.equal(newline.includes('name "prepare\\nx"'), true);
+  assert.equal(space.includes('name "prepare x"'), true);
+  assert.notEqual(newline, space);
+});
+
+test("amend text omits an absent Region observation", () => {
+  const contract = contractId("kei/no-amend-region-observation");
+  const result: InvocationResult = {
+    kind: "accepted",
+    verb: "amend",
+    contract,
+    head: contractHead("head"),
+    facts: [],
+    settlementLags: [],
+    diff: "",
+  };
+  assert.equal(
+    renderText(result),
+    ["✓ terms replaced  kei/no-amend-region-observation", "  terms diff", "", "", "", "  record"].join("\n"),
+  );
+});
+
 test("accepted results preserve reconciliation lag without telemetry", () => {
   const contract = contractId("kei/followed");
   const tender = snapshotId("tender");
@@ -274,6 +445,72 @@ test("accepted results preserve reconciliation lag without telemetry", () => {
     reason: "head-moved",
     affects: "continuation",
   });
+});
+
+test("accepted bind receipts expose confirmed private-state seat close lag", () => {
+  const contract = contractId("kei/bound");
+  const result: InvocationResult = {
+    kind: "accepted",
+    verb: "bind",
+    contract,
+    head: contractHead("head"),
+    facts: [{ contract, entry: "bind", kind: "bound" }],
+    settlementLags: [],
+    workspace: { kind: "worktree", path: "/tmp/wt" },
+    target: null,
+    overlaps: [],
+    cleanup: [
+      {
+        kind: "private-state-seat-close",
+        contractId: contract,
+        failure: { kind: "private-state-seat-close-failed", diagnostic: "seat close failed after publication" },
+      },
+    ],
+  };
+  assert.equal(
+    renderText(result),
+    [
+      "✓ bound  kei/bound",
+      "  workspace  worktree  /tmp/wt",
+      "  no target",
+      "  record",
+      "    journal  bind  · bound",
+      "  ! lag  private-state-seat-close-failed",
+      "  diagnostic",
+      "",
+      "seat close failed after publication",
+      "",
+    ].join("\n"),
+  );
+});
+
+test("accepted receipts omit execution telemetry and retain recovery snapshots", () => {
+  const contract = contractId("kei/unchanged-mechanics");
+  const head = contractHead("journal-blob-oid");
+  const result: InvocationResult = {
+    kind: "accepted",
+    verb: "deliver",
+    contract,
+    head,
+    facts: [{ contract, entry: "claim", kind: "claimed" }],
+    lag: [{ kind: "unsealed-bytes", path: "/repo/.keiyaku/wt/contract", paths: [], affects: "none" }],
+    settlementLags: [],
+    recoverySnapshot: snapshotId("recovery"),
+    leading: { kind: "already-admitted", fact: "01K4AJ8F6K7JH8Y6Q5NEPRT41V" as never },
+    tenderSnapshot: snapshotId("tender-commit"),
+    integration: { changeId: changeId("content-id") },
+    completion: { integration: snapshotId("integration") },
+  };
+
+  const text = renderText(result);
+  assert.match(text, /tender commit  tender-commit[\s\S]*content identity \(not commit\)  content-id/u);
+  assert.match(text, /leading\s+already-admitted\s+01K4AJ8F6K7JH8Y6Q5NEPRT41V/u);
+  assert.doesNotMatch(text, /journal-blob-oid/u);
+  assert.doesNotMatch(text, /ref updated|contract-file|worktree unchanged/u);
+  assert.doesNotMatch(text, /ephemeral/u);
+  assert.match(text, /recovery snapshot  recovery/u);
+  assert.match(text, /unsealed-bytes \/repo\/\.keiyaku\/wt\/contract/u);
+  assert.equal(JSON.parse(JSON.stringify(result)).recoverySnapshot, result.recoverySnapshot);
 });
 
 test("direct placement stops render the public unmet prerequisites in order", () => {
@@ -322,6 +559,168 @@ test("direct placement stops render the public unmet prerequisites in order", ()
   );
 });
 
+test("direct gate stops render the sole placement report without another read", () => {
+  const contract = contractId("kei/waiting-on-gates");
+  assert.equal(
+    renderText({
+      kind: "accepted",
+      verb: "deliver",
+      contract,
+      head: contractHead("head"),
+      facts: [],
+      settlementLags: [],
+      placement: {
+        refusal: {
+          kind: "gates-unsatisfied",
+          contractId: contract,
+          unmet: [
+            {
+              gate: gate("verified"),
+              current: {
+                kind: "attested",
+                verdict: "unsatisfied",
+                summary: "[1 bash exit 1]",
+                at: "2026-08-01T00:00:00.000Z",
+              },
+            },
+            { gate: gate("reviewed"), current: { kind: "stale", priorVerdict: "satisfied" } },
+            { gate: gate("manual"), current: { kind: "missing" } },
+          ],
+        },
+      },
+    }),
+    [
+      "✓ deliver — not complete  kei/waiting-on-gates",
+      "! gates unsatisfied",
+      "  gate  verified  ·  unsatisfied  · at 2026-08-01T00:00:00.000Z",
+      "  summary verified",
+      "",
+      "[1 bash exit 1]",
+      "",
+      "  gate  reviewed  · stale  · prior satisfied",
+      "  gate  manual  · missing",
+      "  candidate  kept",
+      "  record",
+    ].join("\n"),
+  );
+});
+
+test("completion stops project every checkout-followability refusal fact", () => {
+  const contract = contractId("kei/checkout-followability");
+  const envelope = {
+    kind: "accepted" as const,
+    contract,
+    head: contractHead("head"),
+    facts: [],
+    settlementLags: [],
+  };
+  const cases = [
+    {
+      reason: "staged" as const,
+      paths: ["staged.ts", 'quote"path.ts'],
+      text: [
+        "! checkout-not-followable",
+        "  checkout  /repo/checkout",
+        "  target  refs/heads/main",
+        "  reason  staged",
+        "  paths",
+        "    staged.ts",
+        '    quote"path.ts',
+      ],
+    },
+    {
+      reason: "dirty-tracked" as const,
+      paths: ["conflict.ts"],
+      text: [
+        "! checkout-not-followable",
+        "  checkout  /repo/checkout",
+        "  target  refs/heads/main",
+        "  reason  dirty-tracked",
+        "  paths",
+        "    conflict.ts",
+      ],
+    },
+    {
+      reason: "untracked" as const,
+      paths: [],
+      text: [
+        "! checkout-not-followable",
+        "  checkout  /repo/checkout",
+        "  target  refs/heads/main",
+        "  reason  untracked",
+        "  paths  none",
+      ],
+    },
+  ];
+
+  for (const { reason, paths, text } of cases) {
+    const rendered = renderText({
+      ...envelope,
+      verb: "deliver",
+      placement: {
+        refusal: {
+          kind: "checkout-not-followable",
+          contractId: contract,
+          target: "refs/heads/main",
+          path: "/repo/checkout",
+          reason,
+          paths,
+        },
+      },
+    } as InvocationResult);
+    const renderedLines = rendered.split("\n");
+    const start = renderedLines.indexOf("! checkout-not-followable");
+    assert.notEqual(start, -1);
+    assert.deepEqual(renderedLines.slice(start, start + text.length), text);
+  }
+});
+
+test("continuation checkout stop keeps its exact block after the dependent context", () => {
+  const contract = contractId("kei/prerequisite-checkout");
+  const dependent = contractId("kei/stopped-checkout-dependent");
+  assert.equal(
+    renderText({
+      kind: "accepted",
+      verb: "deliver",
+      contract,
+      head: contractHead("head"),
+      facts: [],
+      settlementLags: [],
+      completion: { integration: snapshotId("integration") },
+      continuation: {
+        claimed: [],
+        stopped: [
+          {
+            contractId: dependent,
+            stop: {
+              refusal: {
+                kind: "checkout-not-followable",
+                contractId: dependent,
+                target: "refs/heads/main",
+                path: "/repo/checkout",
+                reason: "untracked",
+                paths: ['quote"path.ts'],
+              },
+            },
+          },
+        ],
+      },
+    }),
+    [
+      "✓ delivered  kei/prerequisite-checkout",
+      "  target  ->  integration",
+      "! continuation  kei/stopped-checkout-dependent",
+      "! checkout-not-followable",
+      "  checkout  /repo/checkout",
+      "  target  refs/heads/main",
+      "  reason  untracked",
+      "  paths",
+      '    quote"path.ts',
+      "  record",
+    ].join("\n"),
+  );
+});
+
 test("deliver projects a ran Verification completion", () => {
   const contract = contractId("kei/completion");
   const integration = snapshotId("integration-1");
@@ -341,6 +740,91 @@ test("deliver projects a ran Verification completion", () => {
     [
       "✓ delivered  kei/completion",
       "  target  ->  integration-1  · verified (ran)",
+      "  record",
+      "    journal  claim  · claimed",
+    ].join("\n"),
+  );
+});
+
+test("deliver renders claimed and stopped continuations from the accepted result", () => {
+  const contract = contractId("kei/prerequisite");
+  const claimed = contractId("kei/claimed-dependent");
+  const stopped = contractId("kei/stopped-dependent");
+  assert.equal(
+    renderText({
+      kind: "accepted",
+      verb: "deliver",
+      contract,
+      head: contractHead("head"),
+      facts: [],
+      settlementLags: [],
+      completion: { integration: snapshotId("integration") },
+      continuation: {
+        claimed: [claimed],
+        stopped: [
+          {
+            contractId: stopped,
+            stop: {
+              refusal: {
+                kind: "gates-unsatisfied",
+                contractId: stopped,
+                unmet: [{ gate: gate("reviewed"), current: { kind: "missing" } }],
+              },
+            },
+          },
+        ],
+      },
+    }),
+    [
+      "✓ delivered  kei/prerequisite",
+      "  target  ->  integration",
+      "✓ continuation  complete  kei/claimed-dependent",
+      "! kei/stopped-dependent  ·  gates unsatisfied",
+      "  gate  reviewed  · missing",
+      "  record",
+    ].join("\n"),
+  );
+});
+
+test("deliver projects no Verification and an unsatisfied non-gating Verification", () => {
+  const contract = contractId("kei/completion-states");
+  const integration = snapshotId("integration-2");
+  const envelope = {
+    kind: "accepted" as const,
+    contract,
+    head: contractHead("head"),
+    facts: [{ contract, entry: "claim", kind: "claimed" as const }],
+    settlementLags: [],
+  };
+  assert.equal(
+    renderText({
+      ...envelope,
+      verb: "deliver",
+      completion: { integration },
+    }),
+    [
+      "✓ delivered  kei/completion-states",
+      "  target  ->  integration-2",
+      "  record",
+      "    journal  claim  · claimed",
+    ].join("\n"),
+  );
+
+  assert.equal(
+    renderText({
+      ...envelope,
+      verb: "deliver",
+      completion: { integration, verification: { mode: "ran", verdict: "unsatisfied" } },
+      verificationSummary: "[1 bash exit 1]",
+    }),
+    [
+      "✓ delivered  kei/completion-states",
+      "  target  ->  integration-2",
+      "! verification  unsatisfied  (ran)  · not required by Contract gates",
+      "  summary",
+      "",
+      "[1 bash exit 1]",
+      "",
       "  record",
       "    journal  claim  · claimed",
     ].join("\n"),
@@ -370,6 +854,40 @@ test("review projects reused Verification and distinguishes placement from testi
       "  target  ->  integration-3  · verified (reused)",
       "  placement  complete",
       "  integration commit  integration-3",
+      "  record",
+      "    journal  claim  · claimed",
+    ].join("\n"),
+  );
+});
+
+test("review projects a reused unsatisfied Verification as non-gating completion", () => {
+  const contract = contractId("kei/review-completion-unsatisfied");
+  const integration = snapshotId("integration-4");
+  const envelope = {
+    kind: "accepted" as const,
+    contract,
+    head: contractHead("head"),
+    facts: [{ contract, entry: "claim", kind: "claimed" as const }],
+    settlementLags: [],
+  };
+  assert.equal(
+    renderText({
+      ...envelope,
+      verb: "review",
+      verdict: "satisfied",
+      completion: { integration, verification: { mode: "reused", verdict: "unsatisfied" } },
+      verificationSummary: "[reused bash exit 1]",
+    }),
+    [
+      "✓ review satisfied recorded  kei/review-completion-unsatisfied",
+      "  target  ->  integration-4",
+      "! verification  unsatisfied  (reused)  · not required by Contract gates",
+      "  summary",
+      "",
+      "[reused bash exit 1]",
+      "",
+      "  placement  complete",
+      "  integration commit  integration-4",
       "  record",
       "    journal  claim  · claimed",
     ].join("\n"),
@@ -446,6 +964,19 @@ test("movement projects its deviation and reintegration coordinates", () => {
       "    journal  reintegration  · reintegrated  target-1  ->  integration-2",
       "    journal  reintegration-2  · reintegrated  target-3  ->  integration-4",
     ].join("\n"),
+  );
+});
+
+test("unmerged index paths render as a complete public refusal", () => {
+  const contract = contractId("kei/conflicted");
+  assert.equal(
+    renderText({
+      kind: "refused",
+      verb: "deliver",
+      contract,
+      refusal: { kind: "unmerged-paths", contractId: contract, paths: ["a.txt", "z.txt"] },
+    }),
+    ["✕ deliver refused  kei/conflicted", "  unmerged-paths", "  paths", "    a.txt", "    z.txt"].join("\n"),
   );
 });
 
