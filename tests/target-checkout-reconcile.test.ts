@@ -11,6 +11,8 @@ import { admitIntent } from "../src/protocol/intent.js";
 import { observeContractsForAdmissionAt } from "../src/git/observe.js";
 import { withPrivateStatePublicationSeat } from "../src/git/private-state-seat.js";
 
+import { mintSnapshotId } from "../src/git/identity.js";
+import { observeTargetCheckoutShape } from "../src/git/target-placement.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import {
   appointedWorktreePath,
@@ -598,4 +600,33 @@ test("reconcile does not guess after the user changes an interrupted target chec
   assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "changed after publication\n");
   assert.ok(reconciled.lag.some((lag) => lag.kind === "target-checkout-retained"));
   assert.ok(!reconciled.effects.some((effect) => effect.kind === "target-checkout" && effect.action === "recovered"));
+});
+
+
+test("checkout shape compares literal filenames, not pathspec expressions", async () => {
+  const names = process.platform === "win32" ? ["[a].txt"] : ["[a].txt", "*.txt", ":(exclude)literal.txt"];
+  for (const name of names) {
+    const repository = repositoryWithMain({ files: { [name]: "base\n", "a.txt": "decoy\n" } });
+    const predecessor = mintSnapshotId(repository.run(["rev-parse", "HEAD"]).trim());
+    writeFileSync(resolve(repository.path, name), "candidate\n");
+    repository.run(["add", "--all"]);
+    repository.run(["commit", "--quiet", "-m", "literal candidate"]);
+    const candidate = mintSnapshotId(repository.run(["rev-parse", "HEAD"]).trim());
+    const capability = await cachedRepositoryAt(repository.path);
+    const shape = () => observeTargetCheckoutShape(capability, { path: repository.path, predecessor, candidate });
+
+    repository.run(["reset", "--hard", predecessor]);
+    assert.equal(await shape(), "recoverable", `${name}: predecessor checkout still needs follow`);
+    writeFileSync(resolve(repository.path, name), "candidate\n");
+    assert.equal(await shape(), "recoverable", `${name}: candidate bytes still need index follow`);
+    writeFileSync(resolve(repository.path, name), "local unstaged\n");
+    assert.equal(await shape(), "retained", `${name}: preserve unrelated local bytes`);
+    repository.run(["add", "--all"]);
+    assert.equal(await shape(), "retained", `${name}: preserve local index bytes`);
+
+    repository.run(["reset", "--hard", candidate]);
+    writeFileSync(resolve(repository.path, "a.txt"), "unrelated local\n");
+    repository.run(["add", "--all"]);
+    assert.equal(await shape(), "complete", `${name}: a matching glob must not include a decoy`);
+  }
 });

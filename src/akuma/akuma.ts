@@ -55,15 +55,7 @@ export function parseAkumaStatus(value: unknown): AkumaStatus {
   return akumaStatusSchema.parse(value);
 }
 
-/** The default completion judgment over one complete status snapshot. */
-export function defaultWaitComplete(status: AkumaStatus): boolean {
-  return (
-    status.life !== "running" &&
-    !status.timeline.entries.some(
-      (entry) => entry.kind === "row" && entry.row.kind === "tell" && entry.row.state === "pending",
-    )
-  );
-}
+export { defaultWaitComplete } from "./akuma-observe.js";
 
 export type { ReadonlyRestraint } from "./provider-recipe.js";
 export type * from "./projection.js";

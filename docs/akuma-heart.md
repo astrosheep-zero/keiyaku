@@ -15,6 +15,12 @@ creating it; only a true absence becomes absence. Corruption and unsupported
 schema are hard failures, never partial reading, silent repair, migration, or
 compatibility decoding.
 
+Contended mutation admission waits without blocking unrelated observations or
+control handling, within a bounded acquisition interval. Cancellation may stop
+that wait before admission; it never replays or retracts an entered transaction.
+Once acquired, the owner executes its mutation once and preserves any execution
+or commit failure rather than treating it as permission to repeat business work.
+
 The retained timeline is the sole durable execution order. A Body can drive
 multiple Turns; every admitted Turn starts before provider work and either ends
 once with an answer or typed failure, or remains open after interruption or
@@ -26,7 +32,16 @@ and an answer without such a point remain non-forkable.
 
 Activity is bounded retained provider narration, not a raw payload log or a
 recovery authority. Compaction retains open work, pending tells, and required
-structure, while old closed groups can become permanently unavailable. The public
+structure, while old closed groups can become permanently unavailable. An open
+pending-Tell disposition retains its frozen Tell identities and the delivery
+structure needed to prove them, including Tells already witnessed as told.
+Proof consumption and release of those dependencies are one Heart mutation.
+The resolved decision remains evidence of that Body's one decision; duplicate
+resolution does not reread retired members or capture later Tells. A protected
+backlog is not itself a new reason to compact: maintenance is amortized over new
+history and runs when protected work is released. Maintenance progress can only
+avoid repeated work; it cannot decide a fact's liveness or replace the retained
+history window. The public
 timeline projector is pure and derives snapshots, gaps, history loss, activity
 selection, and reported changes from this one sequence. These projections never
 become facts or cursors of a second store.
