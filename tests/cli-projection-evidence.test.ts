@@ -20,6 +20,14 @@ import {
 import type { ContractHistory, Fact } from "../src/library/contract-types.js";
 import { renderText } from "../src/cli/render/text.js";
 import type { Settings } from "../src/settings.js";
+import {
+  activityAkumaRow,
+  akumaWorldReport,
+  completedTool,
+  openAkumaSnapshot,
+  reportedFileChange,
+  snapshotRow,
+} from "./support/kanshi-activity.js";
 
 test("opaque text retains exact keys, types, empty collections, and array member boundaries", () => {
   assert.equal(
@@ -386,56 +394,12 @@ test("narrow conflict output keeps its label, paths and handles whole", () => {
 });
 
 test("World roster keeps concrete activity evidence without duplicating snapshot sections", () => {
-  const at = "2026-01-01T10:00:00.000Z";
   const command = "keiyaku audit kei/reuse-snapshot-activity-rendering";
-  const snapshot = {
-    kind: "open",
-    turn: { kind: "turn", sequence: 1, turnSequence: 1, bodySequence: 1, at },
-    entries: [
-      {
-        kind: "row",
-        row: {
-          kind: "tool",
-          sequence: 5,
-          turnSequence: 1,
-          at,
-          name: "bash",
-          call: { kind: "run", command },
-          state: { status: "ok" },
-        },
-      },
-    ],
-    omitted: 0,
-    reportedChanges: [{ sequence: 5, at, op: "update", path: "src/cli/render/kanshi-akuma.ts" }],
-    reportedChangesOmitted: 0,
-  } as never;
-  const report = {
-    root: null,
-    observedAt: "2026-01-01T10:00:05.000Z",
-    branch: null,
-    contracts: { kind: "absent" },
-    tasks: { kind: "absent" },
-    akuma: {
-      kind: "present",
-      value: {
-        observedAt: at,
-        searched: [],
-        hasMore: false,
-        rows: [
-          {
-            id: "aku/worker/ffff",
-            archetype: "worker",
-            life: "running",
-            lifeAt: at,
-            lastActivityAt: at,
-            pending: [],
-            aliases: [],
-            snapshot,
-          },
-        ],
-      },
-    },
-  } as never;
+  const snapshot = openAkumaSnapshot(
+    [snapshotRow(completedTool(5, "bash", { kind: "run", command }))],
+    [reportedFileChange(5, "update", "src/cli/render/kanshi-akuma.ts")],
+  );
+  const report = akumaWorldReport([activityAkumaRow("aku/worker/ffff0001", "running", snapshot)]);
   const text = renderKanshiText(report, { columns: 120, color: false });
   assert.match(text, /✓ run    \$ keiyaku audit kei\/reuse-snapshot-activity-rendering/u);
   assert.doesNotMatch(text, /activity "|\bdocument\b|please|next|then/u);

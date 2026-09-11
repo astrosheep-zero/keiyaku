@@ -6,8 +6,19 @@ import { renderCatalogText } from "../src/cli/render/catalog.js";
 import { snapshotActivityLines } from "../src/cli/render/akuma-activity.js";
 import { renderAkuma } from "../src/cli/render/kanshi-akuma.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
-import type { AkumaKanshiRow, KanshiReport } from "../src/kanshi/index.js";
 import { renderText } from "../src/cli/render/text.js";
+import {
+  activeTool,
+  activityAkumaRow,
+  akumaWorldReport,
+  answeredOutcome,
+  completedTool,
+  idleAkumaSnapshot,
+  openAkumaSnapshot,
+  snapshotRow,
+  AKUMA_ACTIVITY_AT,
+  type ActivityToolCall,
+} from "./support/kanshi-activity.js";
 import type { Catalog } from "../src/library/catalog.js";
 import type { ContractRow } from "../src/protocol/read/status.js";
 import type { WorldRoot } from "../src/world.js";
@@ -1017,76 +1028,8 @@ test("materialized conflict text keeps the exact recovery projection", () => {
   assert.doesNotMatch(renderText(result), /staging|not-required|UU|please|next|then/u);
 });
 
-type AkumaSnapshot = NonNullable<AkumaKanshiRow["snapshot"]>;
-
-const AKUMA_AT = "2026-01-01T10:00:00.000Z";
-
-function snapshotRowEntry(row: unknown): unknown {
-  return { kind: "row", row };
-}
-
-function openAkumaSnapshot(entries: readonly unknown[]): AkumaSnapshot {
-  return {
-    kind: "open",
-    turn: { kind: "turn", sequence: 1, turnSequence: 1, bodySequence: 1, at: AKUMA_AT },
-    entries,
-    omitted: 0,
-    reportedChanges: [],
-    reportedChangesOmitted: 0,
-  } as unknown as AkumaSnapshot;
-}
-
-function idleAkumaSnapshot(entries: readonly unknown[], outcome: unknown): AkumaSnapshot {
-  return {
-    kind: "idle",
-    entries,
-    outcome,
-    omitted: 0,
-    reportedChanges: [],
-    reportedChangesOmitted: 0,
-  } as unknown as AkumaSnapshot;
-}
-
-function settledAkumaTool(sequence: number, name: string, call: unknown): unknown {
-  return { kind: "tool", sequence, turnSequence: 1, at: AKUMA_AT, name, call, state: { status: "ok" } };
-}
-
-function endedAkumaOutcome(sequence: number, answer: string): unknown {
-  return {
-    kind: "outcome",
-    sequence,
-    turnSequence: 1,
-    at: AKUMA_AT,
-    outcome: { kind: "answered", historyId: "history-1", answer },
-  };
-}
-
-function rosterAkumaRow(id: string, life: "running" | "asleep", snapshot: AkumaSnapshot): AkumaKanshiRow {
-  return {
-    id: id as AkumaKanshiRow["id"],
-    archetype: "worker",
-    life,
-    lifeAt: AKUMA_AT,
-    lastActivityAt: AKUMA_AT,
-    pending: [],
-    aliases: [],
-    snapshot,
-  } as AkumaKanshiRow;
-}
-
-function akumaRosterReport(rows: readonly AkumaKanshiRow[]): KanshiReport {
-  return {
-    root: null,
-    observedAt: "2026-01-01T10:00:05.000Z",
-    branch: null,
-    contracts: { kind: "absent" },
-    tasks: { kind: "absent" },
-    akuma: { kind: "present", value: { observedAt: AKUMA_AT, searched: [], hasMore: false, rows } },
-  } as KanshiReport;
-}
-
 test("World roster reuses snapshot activity rendering for concrete tool work", () => {
-  const calls = [
+  const calls: readonly Readonly<{ name: string; call: ActivityToolCall; evidence: string }>[] = [
     { name: "read", call: { kind: "read", path: "src/a.ts", offset: 10, limit: 5 }, evidence: "src/a.ts · L10-14" },
     {
       name: "grep",
@@ -1105,11 +1048,11 @@ test("World roster reuses snapshot activity rendering for concrete tool work", (
     },
   ];
   const snapshot = openAkumaSnapshot(
-    calls.map((member, index) => snapshotRowEntry(settledAkumaTool(index + 1, member.name, member.call))),
+    calls.map((member, index) => snapshotRow(completedTool(index + 1, member.name, member.call))),
   );
   const targeted = snapshotActivityLines(snapshot, { columns: 118, color: false });
   for (const member of calls) assert.ok(targeted.some((line) => line.includes(member.evidence)), member.evidence);
-  const roster = renderAkuma(akumaRosterReport([rosterAkumaRow("aku/worker/aaaa", "running", snapshot)]), {
+  const roster = renderAkuma(akumaWorldReport([activityAkumaRow("aku/worker/aaaa0001", "running", snapshot)]), {
     columns: 120,
     color: false,
   });
@@ -1121,10 +1064,10 @@ test("World roster reuses snapshot activity rendering for concrete tool work", (
 
 test("World roster selects an idle outcome newer than a retained tool entry", () => {
   const snapshot = idleAkumaSnapshot(
-    [snapshotRowEntry(settledAkumaTool(5, "bash", { kind: "run", command: "stale-command" }))],
-    endedAkumaOutcome(9, "fresh answer with detail"),
+    [snapshotRow(completedTool(5, "bash", { kind: "run", command: "stale-command" }))],
+    answeredOutcome(9, "fresh answer with detail"),
   );
-  const roster = renderAkuma(akumaRosterReport([rosterAkumaRow("aku/worker/bbbb", "asleep", snapshot)]), {
+  const roster = renderAkuma(akumaWorldReport([activityAkumaRow("aku/worker/bbbb0002", "asleep", snapshot)]), {
     columns: 120,
     color: false,
   }).join("\n");
@@ -1134,10 +1077,10 @@ test("World roster selects an idle outcome newer than a retained tool entry", ()
 
 test("World roster keeps the honest fallback for unknown tool calls", () => {
   const snapshot = openAkumaSnapshot([
-    snapshotRowEntry(settledAkumaTool(1, "mystery", { kind: "other", display: "Mystery Tool" })),
-    snapshotRowEntry(settledAkumaTool(2, "custom-tool", { kind: "other", display: "" })),
+    snapshotRow(completedTool(1, "mystery", { kind: "other", display: "Mystery Tool" })),
+    snapshotRow(completedTool(2, "custom-tool", { kind: "other", display: "" })),
   ]);
-  const roster = renderAkuma(akumaRosterReport([rosterAkumaRow("aku/worker/cccc", "running", snapshot)]), {
+  const roster = renderAkuma(akumaWorldReport([activityAkumaRow("aku/worker/cccc0003", "running", snapshot)]), {
     columns: 120,
     color: false,
   }).join("\n");
@@ -1146,10 +1089,10 @@ test("World roster keeps the honest fallback for unknown tool calls", () => {
 
 test("World roster never substitutes a trailing gap for the latest semantic entry", () => {
   const snapshot = openAkumaSnapshot([
-    snapshotRowEntry(settledAkumaTool(5, "bash", { kind: "run", command: "kept-command" })),
+    snapshotRow(completedTool(5, "bash", { kind: "run", command: "kept-command" })),
     { kind: "gap", count: 4 },
   ]);
-  const roster = renderAkuma(akumaRosterReport([rosterAkumaRow("aku/worker/dddd", "running", snapshot)]), {
+  const roster = renderAkuma(akumaWorldReport([activityAkumaRow("aku/worker/dddd0004", "running", snapshot)]), {
     columns: 120,
     color: false,
   }).join("\n");
@@ -1159,9 +1102,9 @@ test("World roster never substitutes a trailing gap for the latest semantic entr
 
 test("World roster activity stays width-aware without embedding complete snapshot sections", () => {
   const snapshot = openAkumaSnapshot([
-    snapshotRowEntry(settledAkumaTool(5, "bash", { kind: "run", command: `npm test -- ${"focused/".repeat(20)}case.ts` })),
+    snapshotRow(completedTool(5, "bash", { kind: "run", command: `npm test -- ${"focused/".repeat(20)}case.ts` })),
   ]);
-  const report = akumaRosterReport([rosterAkumaRow("aku/worker/eeee", "running", snapshot)]);
+  const report = akumaWorldReport([activityAkumaRow("aku/worker/eeee0005", "running", snapshot)]);
   for (const columns of [60, 80, 120]) {
     const lines = renderAkuma(report, { columns, color: false });
     for (const line of lines) assert.ok(displayColumns(line) <= columns, `${columns}: ${line}`);
@@ -1172,17 +1115,9 @@ test("World roster activity stays width-aware without embedding complete snapsho
 
 test("World roster keeps active, error and truncated activity marks truthful", () => {
   const active = openAkumaSnapshot([
-    snapshotRowEntry({
-      kind: "tool",
-      sequence: 1,
-      turnSequence: 1,
-      at: AKUMA_AT,
-      name: "bash",
-      call: { kind: "run", command: "keiyaku wait --all" },
-      state: "active",
-    }),
+    snapshotRow(activeTool(1, "bash", { kind: "run", command: "keiyaku wait --all" })),
   ]);
-  const activeRoster = renderAkuma(akumaRosterReport([rosterAkumaRow("aku/worker/gggg", "running", active)]), {
+  const activeRoster = renderAkuma(akumaWorldReport([activityAkumaRow("aku/worker/aabb0006", "running", active)]), {
     columns: 120,
     color: false,
   }).join("\n");
@@ -1190,29 +1125,23 @@ test("World roster keeps active, error and truncated activity marks truthful", (
   assert.doesNotMatch(activeRoster, /— ok/u);
 
   const failed = openAkumaSnapshot([
-    snapshotRowEntry({
-      kind: "tool",
-      sequence: 2,
-      turnSequence: 1,
-      at: AKUMA_AT,
-      name: "bash",
-      call: { kind: "run", command: "npm test" },
-      state: { status: "error", exitCode: 1 },
-    }),
+    snapshotRow(completedTool(2, "bash", { kind: "run", command: "npm test" }, { status: "error", exitCode: 1 })),
   ]);
-  const failedRoster = renderAkuma(akumaRosterReport([rosterAkumaRow("aku/worker/hhhh", "running", failed)]), {
+  const failedRoster = renderAkuma(akumaWorldReport([activityAkumaRow("aku/worker/ccdd0007", "running", failed)]), {
     columns: 120,
     color: false,
   }).join("\n");
   assert.match(failedRoster, /! run    \$ npm test — exit 1/u);
 
   const truncated = openAkumaSnapshot([
-    snapshotRowEntry({ kind: "said", sequence: 3, turnSequence: 1, at: AKUMA_AT, text: "x".repeat(400) }),
+    snapshotRow({ kind: "said", sequence: 3, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "x".repeat(400) }),
   ]);
-  const truncatedRoster = renderAkuma(akumaRosterReport([rosterAkumaRow("aku/worker/iiii", "running", truncated)]), {
-    columns: 120,
-    color: false,
-  });
-  assert.equal(truncatedRoster.length, 5);
-  assert.match(truncatedRoster.join("\n"), /…”/u);
+  const truncatedActivity = snapshotActivityLines(truncated, { columns: 120, color: false });
+  assert.equal(truncatedActivity.length, 2, "a said row renders within its bounded line budget");
+  const truncatedRoster = renderAkuma(
+    akumaWorldReport([activityAkumaRow("aku/worker/eeff0008", "running", truncated)]),
+    { columns: 120, color: false },
+  ).join("\n");
+  assert.match(truncatedRoster, /…”/u);
+  assert.ok(!truncatedRoster.includes("x".repeat(200)), "truncation bounds retained said text");
 });
