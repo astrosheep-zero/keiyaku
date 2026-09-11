@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
+import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { defaultWaitComplete } from "../src/akuma/akuma.js";
 import { AkumaHandle } from "../src/akuma/akuma-handle.js";
@@ -26,6 +27,7 @@ import { World } from "../src/world.js";
 import { bornStatus } from "../src/akuma/akuma-observe.js";
 import { executeWaitAkuma } from "../src/akuma/fleet-execution.js";
 import { ordinarySnapshotBudget, projectTurns, selectSnapshot } from "../src/akuma/projection.js";
+import { translatePiEvent, type PiEventState } from "../src/akuma/providers/pi/events.js";
 
 async function fixture() {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-observation-")));
@@ -328,6 +330,84 @@ test("wait rechecks its final status when a completed probe acquires a new pendi
         (entry) => entry.kind === "row" && entry.row.kind === "tell" && entry.row.tellId === "new-pending",
       ),
     );
+  } finally {
+    leash.release();
+    value.close();
+  }
+});
+
+test("reported changes retain native Pi writes and aggregate a write-then-edit path", async () => {
+  const value = await fixture();
+  const { paths } = value.allocated;
+  const leash = (await HeldAkumaLeash.try(paths))!;
+  try {
+    await leash.birth(paths, value.soul);
+    const body = await leash.recordBody(paths, { leashTakenAt: value.soul.createdAt });
+    const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: value.soul.createdAt });
+    const state: PiEventState = { answer: "", assistantSeen: false, tools: new Map() };
+    let ticks = 0;
+    const observe = async (event: AgentSessionEvent): Promise<void> => {
+      for (const translated of translatePiEvent(event, state))
+        await appendActivity(paths, {
+          turnSequence: turn.sequence,
+          at: new Date(Date.parse(value.soul.createdAt) + (ticks += 1) * 1_000).toISOString(),
+          event: translated,
+        });
+    };
+    const write = async (id: string, path: string): Promise<void> => {
+      await observe({ type: "tool_execution_start", toolCallId: id, toolName: "write", args: { path, content: "x\n" } });
+      await observe({
+        type: "tool_execution_end",
+        toolCallId: id,
+        toolName: "write",
+        isError: false,
+        result: { content: [{ type: "text", text: `Successfully wrote to ${path}` }] },
+      });
+    };
+    await write("write-create", "src/created.ts");
+    await write("write-overwrite", "src/overwritten.ts");
+    await observe({
+      type: "tool_execution_start",
+      toolCallId: "write-failed",
+      toolName: "write",
+      args: { path: "src/failed.ts", content: "x\n" },
+    });
+    await observe({
+      type: "tool_execution_end",
+      toolCallId: "write-failed",
+      toolName: "write",
+      isError: true,
+      result: { content: [{ type: "text", text: "EPERM: operation not permitted" }] },
+    });
+    await write("write-then-edit", "src/mixed.ts");
+    await observe({
+      type: "tool_execution_start",
+      toolCallId: "edit-mixed",
+      toolName: "edit",
+      args: { path: "src/mixed.ts", edits: [{ oldText: "x", newText: "y" }] },
+    });
+    await observe({
+      type: "tool_execution_end",
+      toolCallId: "edit-mixed",
+      toolName: "edit",
+      isError: false,
+      result: { details: { patch: "@@ -1 +1,2 @@\n-x\n+y\n+z" } },
+    });
+    const snapshot = selectSnapshot(projectTurns((await activitySlice(paths)).rows), { aperture: "monitoring" }).snapshot;
+    assert.equal(snapshot.kind, "open");
+    const reported = snapshot.reportedChanges.map((change) => ({
+      op: change.op,
+      path: change.path,
+      ...(change.diffstat === undefined ? {} : { diffstat: change.diffstat }),
+    }));
+    assert.deepEqual(reported, [
+      { op: "update", path: "src/created.ts" },
+      { op: "update", path: "src/overwritten.ts" },
+      // A write then an edit on one path stay one summary; the write's unknown
+      // diffstat leaves the aggregated group without fabricated numbers.
+      { op: "update", path: "src/mixed.ts" },
+    ]);
+    assert.equal(reported.some((change) => change.path === "src/failed.ts"), false);
   } finally {
     leash.release();
     value.close();

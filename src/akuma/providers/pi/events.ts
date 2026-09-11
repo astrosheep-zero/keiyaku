@@ -98,7 +98,9 @@ function searchCall(name: string, value: Readonly<Record<string, unknown>>): Too
 }
 
 function fileChangeCall(name: string, value: Readonly<Record<string, unknown>>): ToolCall | undefined {
-  if (name !== "edit" || typeof value.path !== "string") return undefined;
+  // Native write cannot prove creation versus overwrite and reports no patch, so
+  // it joins the conservative update operation with unknown diffstat.
+  if ((name !== "edit" && name !== "write") || typeof value.path !== "string") return undefined;
   return { kind: "fileChange", changes: [{ op: "update", path: value.path }] };
 }
 

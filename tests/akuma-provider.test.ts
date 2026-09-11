@@ -1406,6 +1406,120 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
   await attempt.closed;
 });
 
+test("Pi retains write targets as conservative file changes without inventing diffstat", async () => {
+  const patch = ["@@ -1,2 +1,3 @@", " keep", "-old", "+new", "+extra"].join("\n");
+  const fake = fakePiSdk({
+    events: [
+      {
+        type: "tool_execution_start",
+        toolCallId: "write-create",
+        toolName: "write",
+        args: { path: "src/created.ts", content: "a\n" },
+      },
+      {
+        type: "tool_execution_end",
+        toolCallId: "write-create",
+        toolName: "write",
+        isError: false,
+        result: { content: [{ type: "text", text: "Successfully wrote to src/created.ts" }] },
+      },
+      {
+        type: "tool_execution_start",
+        toolCallId: "write-overwrite",
+        toolName: "write",
+        args: { path: "src/overwritten.ts", content: "b\n" },
+      },
+      {
+        type: "tool_execution_end",
+        toolCallId: "write-overwrite",
+        toolName: "write",
+        isError: false,
+        result: { content: [{ type: "text", text: "Successfully wrote to src/overwritten.ts" }] },
+      },
+      {
+        type: "tool_execution_start",
+        toolCallId: "write-failed",
+        toolName: "write",
+        args: { path: "src/failed.ts", content: "c\n" },
+      },
+      {
+        type: "tool_execution_end",
+        toolCallId: "write-failed",
+        toolName: "write",
+        isError: true,
+        result: { content: [{ type: "text", text: "EPERM: operation not permitted" }] },
+      },
+      {
+        type: "tool_execution_start",
+        toolCallId: "edit-one",
+        toolName: "edit",
+        args: { path: "src/edited.ts", edits: [{ oldText: "old", newText: "new" }] },
+      },
+      { type: "tool_execution_end", toolCallId: "edit-one", toolName: "edit", isError: false, result: { details: { patch } } },
+      { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "done" }] } },
+    ],
+  });
+  const attempt = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start({
+    ...DRIVE_DEFAULTS,
+    body: "work",
+    launchTells: [],
+    cwd: tmpdir(),
+    options: {},
+    session: { kind: "fresh" },
+  });
+  const drive = await attempt.result;
+  const events: AgentEvent[] = [];
+  for await (const event of drive.events) events.push(event);
+  const write = (path: string) => ({ kind: "fileChange" as const, changes: [{ op: "update" as const, path }] });
+  assert.deepEqual(
+    events.filter((event) => event.type === "tool"),
+    [
+      { type: "tool", phase: "started", id: "write-create", name: "write", call: write("src/created.ts") },
+      {
+        type: "tool",
+        phase: "completed",
+        id: "write-create",
+        name: "write",
+        call: write("src/created.ts"),
+        result: { status: "ok" },
+      },
+      { type: "tool", phase: "started", id: "write-overwrite", name: "write", call: write("src/overwritten.ts") },
+      {
+        type: "tool",
+        phase: "completed",
+        id: "write-overwrite",
+        name: "write",
+        call: write("src/overwritten.ts"),
+        result: { status: "ok" },
+      },
+      { type: "tool", phase: "started", id: "write-failed", name: "write", call: write("src/failed.ts") },
+      {
+        type: "tool",
+        phase: "completed",
+        id: "write-failed",
+        name: "write",
+        call: write("src/failed.ts"),
+        result: { status: "error" },
+      },
+      { type: "tool", phase: "started", id: "edit-one", name: "edit", call: write("src/edited.ts") },
+      {
+        type: "tool",
+        phase: "completed",
+        id: "edit-one",
+        name: "edit",
+        call: {
+          kind: "fileChange",
+          changes: [{ op: "update", path: "src/edited.ts", diffstat: { added: 2, removed: 1 } }],
+        },
+        result: { status: "ok" },
+      },
+    ],
+  );
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "done", historyId: "entry-final" });
+  await attempt.closed;
+  assert.equal(fake.seen.disposed, 1);
+});
+
 test("Pi retains summarization retry evidence without progress deltas or premature failure", async () => {
   const fake = fakePiSdk({
     events: [
