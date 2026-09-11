@@ -26,7 +26,7 @@ import {
 import { observeTargetLag } from "../src/git/workspace.js";
 import type { AkumaAlias } from "../src/identity/selector.js";
 import { Keiyaku, Repo } from "../src/index.js";
-import { kanshi, selectKanshi, type ContractKanshiRow } from "../src/kanshi/index.js";
+import { kanshi, selectKanshi, type ContractKanshiRow, type KanshiReport } from "../src/kanshi/index.js";
 import { projectTaskBoardObservation } from "../src/task/board.js";
 import { contractNamespace } from "../src/task/identity.js";
 import { Tasks } from "../src/task/index.js";
@@ -131,6 +131,138 @@ async function populatedWorld(t: TestContext) {
   await moveAlias({ world: repository.path as WorldRoot, alias: "@watch" as AkumaAlias, akuId: akumaId });
   return { repository, contract, keiyaku: bound.keiyaku, taskId: added.value.id, akumaId };
 }
+
+/** Compare only the observation that a selected status entry answers for, not read clocks. */
+function selectedContractSection(report: KanshiReport) {
+  const section = report.contracts;
+  if (section.kind !== "present") return section;
+  const { observedAt, ...value } = section.value;
+  return { kind: "present" as const, value };
+}
+
+async function pluralStatusReport(repositoryPath: string, selectors: readonly string[]) {
+  const result = await invoke(parseArgv(["-C", repositoryPath, "status", ...selectors]));
+  assert.equal(result.kind, "status-set");
+  if (result.kind !== "status-set") throw new Error("expected a status set");
+  return result;
+}
+
+async function singleStatusReport(repositoryPath: string, selector: string) {
+  const result = await invoke(parseArgv(["-C", repositoryPath, "status", selector]));
+  assert.equal(result.kind, "status");
+  if (result.kind !== "status") throw new Error("expected a status result");
+  return result;
+}
+
+async function assertPluralContractParity(repositoryPath: string, selectors: readonly string[]): Promise<void> {
+  const plural = await pluralStatusReport(repositoryPath, selectors);
+  for (const [index, selector] of selectors.entries()) {
+    const entry = plural.entries[index];
+    assert.equal(entry?.kind, "contract", selector);
+    if (entry?.kind !== "contract") throw new Error("expected a Contract entry");
+    const single = await singleStatusReport(repositoryPath, selector);
+    assert.deepEqual(selectedContractSection(entry.report), selectedContractSection(single.report), selector);
+  }
+}
+
+async function terminalStatusContracts(t: TestContext) {
+  const repository = fixtureRepository(t);
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const repo = await Repo.at({ path: repository.path });
+
+  const claimedBound = await Keiyaku.bind({
+    repo,
+    markdown: document("Claimed parity"),
+    workspace: "worktree",
+    gates: ["reviewed"],
+  });
+  const claimedWorktree = claimedBound.workspace?.path;
+  if (claimedWorktree === undefined) throw new Error("claimed Contract workspace was not appointed");
+  writeFileSync(join(claimedWorktree, "candidate.txt"), "candidate\n");
+  repository.run(["-C", claimedWorktree, "add", "candidate.txt"]);
+  repository.run(["-C", claimedWorktree, "commit", "--quiet", "-m", "candidate"]);
+  assert.equal((await claimedBound.keiyaku.deliver()).kind, "accepted");
+  assert.equal((await claimedBound.keiyaku.review({ verdict: "satisfied" })).kind, "accepted");
+  const claimedId = (await claimedBound.keiyaku.state()).id;
+  assert.equal((await claimedBound.keiyaku.state()).terminal?.kind, "claimed");
+
+  const abandonedBound = await Keiyaku.bind({
+    repo,
+    markdown: document("Abandoned parity"),
+    workspace: "worktree",
+  });
+  await abandonedBound.keiyaku.abandon();
+  const abandonedId = (await abandonedBound.keiyaku.state()).id;
+  assert.equal((await abandonedBound.keiyaku.state()).terminal?.kind, "abandoned");
+
+  return { repository, claimedId, abandonedId };
+}
+
+test("plural Contract status matches single-selection reads for claimed and abandoned Contracts", async (t) => {
+  const { repository, claimedId, abandonedId } = await terminalStatusContracts(t);
+  const bare = await kanshi({
+    world: await World.at(repository.path),
+    repo: await Repo.at({ path: repository.path }),
+  });
+  assert.equal(bare.contracts.kind, "present");
+  if (bare.contracts.kind === "present") {
+    assert.equal(
+      bare.contracts.value.rows.some((row) => row.id === claimedId || row.id === abandonedId),
+      false,
+    );
+  }
+  await assertPluralContractParity(repository.path, [claimedId, abandonedId]);
+});
+
+test("plural Contract status matches single-selection reads outside the bounded World aperture", async (t) => {
+  const { repository, contract } = await populatedWorld(t);
+  await publishNewerActiveContractCopies(repository, contract.id);
+  const bare = await kanshi({
+    world: await World.at(repository.path),
+    repo: await Repo.at({ path: repository.path }),
+  });
+  assert.equal(bare.contracts.kind, "present");
+  if (bare.contracts.kind !== "present") return;
+  assert.equal(bare.contracts.value.hasMore, true);
+  assert.equal(
+    bare.contracts.value.rows.some((row) => row.id === contract.id),
+    false,
+  );
+  const visible = bare.contracts.value.rows[0];
+  assert.notEqual(visible, undefined);
+  await assertPluralContractParity(repository.path, [contract.id, visible!.id]);
+});
+
+test("plural Contract status matches single-selection reads for actually missing IDs", async (t) => {
+  const { repository } = await populatedWorld(t);
+  const missing = ["kei/absent-parity-one", "kei/absent-parity-two"] as const;
+  for (const id of missing) {
+    const single = selectedContractSection((await singleStatusReport(repository.path, id)).report);
+    assert.equal(single.kind, "present");
+    if (single.kind === "present") assert.deepEqual(single.value.rows, []);
+  }
+  await assertPluralContractParity(repository.path, missing);
+});
+
+test("plural status preserves mixed Contract/Akuma and alias selections", async (t) => {
+  const { repository, contract, akumaId } = await populatedWorld(t);
+  const segment = contract.id.slice("kei/".length);
+  const plural = await pluralStatusReport(repository.path, [contract.id, `@${segment}`, "@watch"]);
+  assert.equal(plural.entries.length, 3);
+  const [canonical, aliased, akuma] = plural.entries;
+  assert.equal(canonical?.kind, "contract");
+  assert.equal(aliased?.kind, "contract");
+  assert.equal(akuma?.kind, "akuma");
+  if (canonical?.kind !== "contract" || aliased?.kind !== "contract" || akuma?.kind !== "akuma") return;
+  assert.deepEqual(
+    selectedContractSection(canonical.report),
+    selectedContractSection((await singleStatusReport(repository.path, contract.id)).report),
+  );
+  assert.deepEqual(selectedContractSection(aliased.report), selectedContractSection(canonical.report));
+  assert.equal(aliased.selector, `@${segment}`);
+  assert.equal(akuma.alias, "@watch");
+  assert.equal(akuma.status.status.id, akumaId);
+});
 
 async function publishNewerActiveContractCopies(
   repository: ReturnType<typeof makeGitRepository>,

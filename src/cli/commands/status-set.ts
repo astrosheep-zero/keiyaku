@@ -25,33 +25,34 @@ async function statusSetAkuma(
   };
 }
 
+async function statusSetContract(
+  selector: string,
+  id: string,
+  world: WorldRoot | null,
+  repo: Repo | undefined,
+): Promise<StatusSetEntry> {
+  if (repo === undefined) throw new CliUsageError("cannot select a contract while the Contract world is absent");
+  const observation = await (
+    await import("../../kanshi/index.js")
+  ).observeKanshi({ world, repo, contract: canonicalContractSelector(id) });
+  return { selector, kind: "contract", report: observation.report };
+}
+
 async function statusSetEntry(
   selector: string,
   world: WorldRoot | null,
   repo: Repo | undefined,
-  observed: NamedStatusObservation | undefined,
+  named: NamedStatusObservation | undefined,
 ): Promise<StatusSetEntry> {
-  let resolved = selector;
-  let alias: string | undefined;
   if (selector.startsWith("@")) {
-    if (observed === undefined) throw new CliUsageError("cannot resolve a named status selector");
+    if (named === undefined) throw new CliUsageError("cannot resolve a named status selector");
     const { resolveNamedAddress } = await import("../../library/address.js");
-    const address = resolveNamedAddress({ selector, report: observed.report, aliases: observed.aliases });
+    const address = resolveNamedAddress({ selector, report: named.report, aliases: named.aliases });
     if (address.kind === "akuma") return await statusSetAkuma(selector, address.id, selector, world, repo);
-    resolved = address.id;
-    alias = selector;
+    return await statusSetContract(selector, address.id, world, repo);
   }
-  if (resolved.startsWith("aku/")) return await statusSetAkuma(selector, resolved, alias, world, repo);
-  if (repo === undefined) throw new CliUsageError("cannot select a contract while the Contract world is absent");
-  if (observed === undefined) throw new CliUsageError("cannot observe Contract status without a Kanshi report");
-  return {
-    selector,
-    kind: "contract",
-    report: (await import("../../kanshi/index.js")).selectKanshi({
-      report: observed.report,
-      contract: canonicalContractSelector(resolved),
-    }),
-  };
+  if (selector.startsWith("aku/")) return await statusSetAkuma(selector, selector, undefined, world, repo);
+  return await statusSetContract(selector, selector, world, repo);
 }
 
 export async function invokeStatusSet(
@@ -63,8 +64,7 @@ export async function invokeStatusSet(
   if (selectors.some((selector) => !selector.startsWith("aku/") && !selector.startsWith("@")) && repo === undefined) {
     throw new CliUsageError("cannot select a contract while the Contract world is absent");
   }
-  const needsKanshi = selectors.some((selector) => !selector.startsWith("aku/"));
-  const observed = needsKanshi
+  const named = selectors.some((selector) => selector.startsWith("@"))
     ? await (
         await import("../../kanshi/index.js")
       ).observeKanshi({
@@ -73,6 +73,6 @@ export async function invokeStatusSet(
       })
     : undefined;
   const entries: StatusSetEntry[] = [];
-  for (const selector of selectors) entries.push(await statusSetEntry(selector, world, repo, observed));
+  for (const selector of selectors) entries.push(await statusSetEntry(selector, world, repo, named));
   return { kind: "status-set", entries };
 }
