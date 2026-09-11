@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, chmodSync, cpSync, existsSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { after } from "node:test";
 import { Repo } from "../../src/index.js";
 import { readManagedWorktreeAppointment } from "../../src/workspace-place.js";
 import type { ContractId } from "../../src/core/facts/types.js";
@@ -11,6 +12,33 @@ import type { GitRepository } from "../../src/git/process.js";
 import { repositoryAt as productionRepositoryAt } from "../../src/git/repository.js";
 import { contractIdFromSegment } from "../../src/core/facts/types.js";
 import { fitIdentityStem, normalizeIdentityStem } from "../../src/identity/normalize.js";
+import { removeTempDirectory } from "./process.js";
+
+const ownedFixtureRoots = new Set<string>();
+
+function ownFixtureRoot(path: string): string {
+  ownedFixtureRoots.add(path);
+  return path;
+}
+
+// Every helper-owned temporary root is registered the moment it is created and retired by
+// this test file's teardown hook, so a root stays usable across the tests that share it and
+// no individual test retires a directory another consumer still reads. The hook is created
+// while this module is evaluated, so helpers must be imported at file scope: a dynamic import
+// from inside a running test would bind any later teardown registration to that test instead.
+// Cleanup failures fail the file instead of passing silently.
+after(async () => {
+  const failures: string[] = [];
+  for (const path of ownedFixtureRoots) {
+    try {
+      await removeTempDirectory(path);
+    } catch (error) {
+      failures.push(`${path}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  ownedFixtureRoots.clear();
+  if (failures.length > 0) throw new Error(`fixture directory cleanup failed: ${failures.join("; ")}`);
+});
 
 const repositoryCapabilities = new Map<string, Promise<GitRepository>>();
 const repositoryTemplateHasTrackedEntries = new WeakMap<TestGitRepository, boolean>();
@@ -84,28 +112,25 @@ export function withGitShim<T>(
   variables: Readonly<Record<string, string>>,
   action: (gitPath: string) => T | Promise<T>,
 ): T | Promise<T> {
-  const directory = mkdtempSync(join(tmpdir(), "keiyaku-v4-git-shim-"));
+  // Registered before executable setup so a failing locator, write, or chmod still retires its shim.
+  const directory = ownFixtureRoot(mkdtempSync(join(tmpdir(), "keiyaku-v4-git-shim-")));
   const realGit = gitExecutablePath();
   const shimPath = join(directory, "git");
   const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
-  const assignments = Object.entries({ KEIYAKU_REAL_GIT: realGit, ...variables })
+  const environment = { KEIYAKU_REAL_GIT: realGit, ...variables };
+  const assignments = Object.entries(environment)
     .map(([key, value]) => `${key}=${shellQuote(value)}`)
     .join("\n");
-  writeFileSync(
-    shimPath,
-    `#!/bin/sh\n${assignments}\nexport ${Object.keys({ KEIYAKU_REAL_GIT: realGit, ...variables }).join(" ")}\n${body}\n`,
-    { mode: 0o755 },
-  );
+  writeFileSync(shimPath, `#!/bin/sh\n${assignments}\nexport ${Object.keys(environment).join(" ")}\n${body}\n`, {
+    mode: 0o755,
+  });
   chmodSync(shimPath, 0o755);
-  try {
-    return action(shimPath);
-  } catch (error) {
-    throw error;
-  }
+  return action(shimPath);
 }
 
 function initializedGitRepository(): TestGitRepository {
-  const path = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-v4-")));
+  const directory = ownFixtureRoot(mkdtempSync(join(tmpdir(), "keiyaku-v4-")));
+  const path = realpathSync(directory);
   execFileSync("git", ["init", "--quiet", "--initial-branch=main", path]);
   appendFileSync(
     join(path, ".git", "config"),
@@ -136,8 +161,8 @@ export function makeGitRepository(): TestGitRepository {
 }
 
 export function snapshotGitRepository(source: TestGitRepository): TestGitRepository {
-  const directory = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-v4-snapshot-")));
-  const path = join(directory, "repository");
+  const directory = ownFixtureRoot(mkdtempSync(join(tmpdir(), "keiyaku-v4-snapshot-")));
+  const path = join(realpathSync(directory), "repository");
   cpSync(source.path, path, { recursive: true, dereference: false, preserveTimestamps: true, verbatimSymlinks: true });
   let hasTrackedEntries = repositoryTemplateHasTrackedEntries.get(source);
   if (hasTrackedEntries === undefined) {
@@ -153,7 +178,8 @@ export function snapshotGitRepository(source: TestGitRepository): TestGitReposit
 }
 
 export function cloneGitRepository(source: TestGitRepository): TestGitRepository {
-  const path = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-v4-clone-")));
+  const directory = ownFixtureRoot(mkdtempSync(join(tmpdir(), "keiyaku-v4-clone-")));
+  const path = realpathSync(directory);
   execFileSync("git", ["clone", "--quiet", source.path, path]);
   execFileSync("git", ["-C", path, "fetch", "--quiet", "origin", "refs/heads/keiyaku-state:refs/heads/keiyaku-state"]);
   const run = (args: readonly string[], input?: string | Uint8Array): string =>
@@ -162,7 +188,7 @@ export function cloneGitRepository(source: TestGitRepository): TestGitRepository
 }
 
 export function gitRepositoryPath(): string {
-  return realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-v4-")));
+  return realpathSync(ownFixtureRoot(mkdtempSync(join(tmpdir(), "keiyaku-v4-"))));
 }
 
 export function observeContract(repository: GitRepository, id: ContractId) {

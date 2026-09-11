@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, globSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, globSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { tmpdir } from "node:os";
@@ -18,6 +18,131 @@ const { TEST_MANIFESTS } = (await import(
 )) as TestManifestsModule;
 
 const root = process.cwd();
+
+const compiledTestModules = import.meta.url.endsWith(".js");
+const gitFixtureModuleUrl = new URL(compiledTestModules ? "./support/git.js" : "./support/git.ts", import.meta.url).href;
+const externalSentinel = "external symlink target sentinel\n";
+
+function sharedGitFixtureChildSource(): string {
+  return [
+    'import assert from "node:assert/strict";',
+    'import { existsSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";',
+    'import { tmpdir } from "node:os";',
+    'import { join } from "node:path";',
+    'import test from "node:test";',
+    `import { cloneGitRepository, gitRepositoryPath, makeGitRepository, snapshotGitRepository, withGitShim } from ${JSON.stringify(gitFixtureModuleUrl)};`,
+    "",
+    "const receipt = process.env.KEIYAKU_FIXTURE_RECEIPT;",
+    "const external = process.env.KEIYAKU_FIXTURE_EXTERNAL;",
+    "const mode = process.env.KEIYAKU_FIXTURE_MODE;",
+    'const shimBody = \'exec "$KEIYAKU_REAL_GIT" "$@"\';',
+    "const fixtures = {};",
+    "let shims = [];",
+    "",
+    "function shimDirectories() {",
+    "  const root = tmpdir();",
+    '  return readdirSync(root)',
+    '    .filter((name) => name.startsWith("keiyaku-v4-git-shim-"))',
+    "    .map((name) => realpathSync(join(root, name)));",
+    "}",
+    "",
+    "function createOwnedFixtures() {",
+    "  const template = makeGitRepository();",
+    '  template.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);',
+    '  template.run(["update-ref", "refs/heads/keiyaku-state", "HEAD"]);',
+    "  const snapshot = snapshotGitRepository(template);",
+    "  const clone = cloneGitRepository(template);",
+    "  const raw = gitRepositoryPath();",
+    '  symlinkSync(external, join(raw, "external-link"), process.platform === "win32" ? "junction" : "dir");',
+    "  return { template: template.path, snapshot: snapshot.path, clone: clone.path, raw };",
+    "}",
+    "",
+    "function exerciseScopedShims() {",
+    "  const before = shimDirectories().length;",
+    "  const syncShim = withGitShim(shimBody, {}, (gitPath) => gitPath);",
+    '  assert.equal(existsSync(syncShim), true, "synchronous shim remains owned until terminal teardown");',
+    '  assert.throws(() => withGitShim(shimBody, {}, () => { throw new Error("scoped synchronous failure"); }), /scoped synchronous failure/u);',
+    "  const setupFailure = {};",
+    '  Object.defineProperty(setupFailure, "KEIYAKU_SETUP_FAILURE", {',
+    "    enumerable: true,",
+    '    get() { throw new Error("shim setup failure"); },',
+    "  });",
+    '  assert.throws(() => withGitShim(shimBody, setupFailure, () => {}), /shim setup failure/u);',
+    "  return async () => {",
+    "    const asyncShim = await withGitShim(shimBody, {}, async (gitPath) => gitPath);",
+    '    assert.equal(existsSync(asyncShim), true, "asynchronous shim remains owned until terminal teardown");',
+    "    await assert.rejects(",
+    '      withGitShim(shimBody, {}, async () => { throw new Error("scoped asynchronous failure"); }),',
+    "      /scoped asynchronous failure/u,",
+    "    );",
+    "    const created = shimDirectories();",
+    '    assert.equal(created.length, before + 5, "every scoped call created one owned shim directory");',
+    "    return created;",
+    "  };",
+    "}",
+    "",
+    'test("shared Git fixtures are created and scoped shims settle", async () => {',
+    "  Object.assign(fixtures, createOwnedFixtures());",
+    "  writeFileSync(receipt, JSON.stringify({ fixtures, shims }));",
+    '  if (mode === "fail") assert.fail("chosen child fixture failure");',
+    "  shims = await exerciseScopedShims()();",
+    "  writeFileSync(receipt, JSON.stringify({ fixtures, shims }));",
+    "});",
+    "",
+    'test("a later test still sees the shared fixtures", () => {',
+    "  for (const path of [...Object.values(fixtures), ...shims]) {",
+    '    assert.equal(existsSync(path), true, "shared fixture retained across tests: " + path);',
+    "  }",
+    '  assert.equal(existsSync(external), true, "external symlink target survives while live");',
+    "});",
+    "",
+  ].join("\n");
+}
+
+function runSharedGitFixtureChild(
+  directory: string,
+  mode: "live" | "fail",
+): { status: number | null; output: string; paths: string[]; external: string; sentinel: string; temporary: string } {
+  const temporary = join(directory, `${mode}-tmp`);
+  const external = join(directory, `${mode}-external`);
+  mkdirSync(temporary, { recursive: true });
+  mkdirSync(external, { recursive: true });
+  const sentinel = join(external, "sentinel.txt");
+  writeFileSync(sentinel, externalSentinel);
+  const receipt = join(directory, `${mode}-receipt.json`);
+  const fixture = join(directory, `${mode}.test.mjs`);
+  writeFileSync(fixture, sharedGitFixtureChildSource());
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    TMPDIR: temporary,
+    TMP: temporary,
+    TEMP: temporary,
+    KEIYAKU_FIXTURE_RECEIPT: receipt,
+    KEIYAKU_FIXTURE_EXTERNAL: external,
+    KEIYAKU_FIXTURE_MODE: mode,
+  };
+  // An isolated child runner must not inherit Node's recursion guard.
+  delete env.NODE_TEST_CONTEXT;
+  const result = spawnSync(
+    process.execPath,
+    ["--import", import.meta.resolve("tsx"), "--test", "--test-reporter=tap", fixture],
+    { cwd: root, encoding: "utf8", env },
+  );
+  const output = `${result.stdout}${result.stderr}`;
+  if (!existsSync(receipt)) throw new Error(`child never wrote its fixture receipt\n${output}`);
+  const recorded = JSON.parse(readFileSync(receipt, "utf8")) as {
+    fixtures: Record<string, string>;
+    shims: string[];
+  };
+  return {
+    status: result.status,
+    output,
+    paths: [...Object.values(recorded.fixtures), ...recorded.shims],
+    external,
+    sentinel,
+    temporary,
+  };
+}
 
 test("test runner removes ambient Akuma requests and preserves unrelated environment", () => {
   for (const sentinel of ["sentinel bytes", "wrong sentinel"]) {
@@ -60,6 +185,37 @@ test("test runner suite selection is explicit and fail-closed", () => {
   });
   assert.notEqual(unknown.status, 0);
   assert.match(unknown.stderr, /Unknown test suite/);
+});
+
+test("shared Git test fixtures remain owned across a file and retire at terminal teardown", (context) => {
+  const directory = mkdtempSync(join(tmpdir(), "keiyaku-fixture-lifetime-"));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  const live = runSharedGitFixtureChild(directory, "live");
+  assert.equal(live.status, 0, live.output);
+  const realTemporary = realpathSync(live.temporary);
+  for (const path of live.paths) {
+    assert.ok(path.startsWith(realTemporary), `fixture ${path} lives under the child temp root ${realTemporary}`);
+    assert.equal(existsSync(path), false, `terminal teardown removed ${path}\n${live.output}`);
+  }
+  assert.equal(existsSync(live.external), true, "external symlink target survives terminal teardown");
+  assert.equal(readFileSync(live.sentinel, "utf8"), externalSentinel, "external target contents survive terminal teardown");
+  assert.deepEqual(
+    readdirSync(live.temporary).filter((name) => name.startsWith("keiyaku-v4-")),
+    [],
+    "no helper-owned temporary roots remain",
+  );
+});
+
+test("failed child test files still retire shared Git fixtures", (context) => {
+  const directory = mkdtempSync(join(tmpdir(), "keiyaku-fixture-failure-"));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  const failed = runSharedGitFixtureChild(directory, "fail");
+  assert.notEqual(failed.status, 0, failed.output);
+  assert.match(failed.output, /chosen child fixture failure/u);
+  for (const path of failed.paths) {
+    assert.equal(existsSync(path), false, `failed-file teardown removed ${path}\n${failed.output}`);
+  }
+  assert.equal(readFileSync(failed.sentinel, "utf8"), externalSentinel, "external target contents survive failed-file teardown");
 });
 
 test("compiled sweeps schedule large files first without losing isolation or failures", (context) => {
