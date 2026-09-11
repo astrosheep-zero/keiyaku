@@ -3,10 +3,11 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { namedValueLines } from "../src/cli/render/value.js";
 import { renderObservation } from "../src/cli/render/board.js";
+import { renderKanshiText } from "../src/cli/render/kanshi.js";
 import { renderSettingsText } from "../src/cli/render/settings.js";
 import { renderBindDraftReceipt, renderRefusalFacts, renderConflictMaterialized } from "../src/cli/render/refusal.js";
 import { gateFact } from "../src/cli/render/contract-observation.js";
-import { entityLines, plumbFacts } from "../src/cli/render/terminal.js";
+import { entityLines, displayColumns, plumbFacts } from "../src/cli/render/terminal.js";
 import {
   actorId,
   changeId,
@@ -382,4 +383,63 @@ test("narrow conflict output keeps its label, paths and handles whole", () => {
   assert.equal(output.split("\n")[0], "! integration-conflict-materialized");
   assert.ok(output.split("\n").includes(`    ${path}`));
   assert.equal(output.split("\n").at(-1), "  deliver  deliver --include-dirty · reads worktree bytes, not index");
+});
+
+test("World roster keeps concrete activity evidence without duplicating snapshot sections", () => {
+  const at = "2026-01-01T10:00:00.000Z";
+  const command = "keiyaku audit kei/reuse-snapshot-activity-rendering";
+  const snapshot = {
+    kind: "open",
+    turn: { kind: "turn", sequence: 1, turnSequence: 1, bodySequence: 1, at },
+    entries: [
+      {
+        kind: "row",
+        row: {
+          kind: "tool",
+          sequence: 5,
+          turnSequence: 1,
+          at,
+          name: "bash",
+          call: { kind: "run", command },
+          state: { status: "ok" },
+        },
+      },
+    ],
+    omitted: 0,
+    reportedChanges: [{ sequence: 5, at, op: "update", path: "src/cli/render/kanshi-akuma.ts" }],
+    reportedChangesOmitted: 0,
+  } as never;
+  const report = {
+    root: null,
+    observedAt: "2026-01-01T10:00:05.000Z",
+    branch: null,
+    contracts: { kind: "absent" },
+    tasks: { kind: "absent" },
+    akuma: {
+      kind: "present",
+      value: {
+        observedAt: at,
+        searched: [],
+        hasMore: false,
+        rows: [
+          {
+            id: "aku/worker/ffff",
+            archetype: "worker",
+            life: "running",
+            lifeAt: at,
+            lastActivityAt: at,
+            pending: [],
+            aliases: [],
+            snapshot,
+          },
+        ],
+      },
+    },
+  } as never;
+  const text = renderKanshiText(report, { columns: 120, color: false });
+  assert.match(text, /✓ run    \$ keiyaku audit kei\/reuse-snapshot-activity-rendering/u);
+  assert.doesNotMatch(text, /activity "|\bdocument\b|please|next|then/u);
+  assert.doesNotMatch(text, /──|tasks \d|changes \d|came back|STILL RUNNING|killed/u);
+  for (const line of renderKanshiText(report, { columns: 60, color: false }).split("\n"))
+    assert.ok(displayColumns(line) <= 60, line);
 });

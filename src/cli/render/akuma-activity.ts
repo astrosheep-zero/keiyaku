@@ -213,6 +213,31 @@ function groupedRows(rows: readonly RenderRow[], context: TextRenderContext, his
   );
 }
 
+/** Ordered entry stream of one retained snapshot; an idle outcome keeps its sequence position. */
+function orderedSnapshotEntries(snapshot: RenderedSnapshot): readonly RenderEntry[] {
+  if (snapshot.kind === "idle" && snapshot.outcome !== undefined) {
+    return [...snapshot.entries.filter((entry) => entry.kind === "row").map((entry) => entry.row), snapshot.outcome]
+      .sort((left, right) => left.sequence - right.sequence)
+      .map((row) => ({ kind: "row" as const, row }));
+  }
+  return snapshot.entries;
+}
+
+/**
+ * Shared snapshot activity rendering. `latest` bounds selection to the newest semantic entry,
+ * so a compact caller reuses this renderer instead of reinterpreting the snapshot itself.
+ */
+export function snapshotActivityLines(
+  snapshot: RenderedSnapshot,
+  context: TextRenderContext,
+  selection: Readonly<{ latest?: boolean }> = {},
+): readonly string[] {
+  const entries = orderedSnapshotEntries(snapshot);
+  if (selection.latest !== true) return groupedEntries(entries, context);
+  const latest = entries.filter((entry) => entry.kind === "row").at(-1);
+  return latest === undefined ? [] : groupedEntries([latest], context);
+}
+
 type CreatedTaskRow = Extract<CreatedTaskObservation, { kind: "present" }>["rows"][number];
 
 function taskDispositionMark(disposition: CreatedTaskRow["disposition"]): string {
@@ -291,17 +316,7 @@ function snapshotCore(
   context: TextRenderContext,
   options: SnapshotCoreOptions,
 ): Readonly<{ activity: readonly string[]; lines: readonly string[] }> {
-  const snapshot = view.status.timeline;
-  const activity =
-    snapshot.kind === "idle" && snapshot.outcome !== undefined
-      ? groupedRows(
-          [
-            ...snapshot.entries.filter((entry) => entry.kind === "row").map((entry) => entry.row),
-            snapshot.outcome,
-          ].sort((left, right) => left.sequence - right.sequence),
-          context,
-        )
-      : groupedEntries(snapshot.entries, context);
+  const activity = snapshotActivityLines(view.status.timeline, context);
   const facts = [
     ...(options.showAllowed === true ? [`allowed  ${view.status.allowed.join(", ") || "none"}`] : []),
     ...(view.status.readonly?.enforcement === "none" ? [`! ${safeText(view.status.readonly.diagnostic)}`] : []),

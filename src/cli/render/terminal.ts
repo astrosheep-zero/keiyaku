@@ -224,11 +224,6 @@ export function tone(value: string, kind: SemanticTone, color: boolean): string 
   return `\u001b[${code}m${value}\u001b[0m`;
 }
 
-export function boundedActivity(value: string, columns: number, prefix: string): string {
-  const budget = Math.max(1, columns - displayColumns(prefix));
-  return `activity "${truncateDisplayText(value, Math.max(1, budget - displayColumns('activity ""')))}` + `"`;
-}
-
 export function plumbFacts(facts: readonly string[], columns: number): readonly string[] {
   const lines: string[] = [];
   let current = "  ";

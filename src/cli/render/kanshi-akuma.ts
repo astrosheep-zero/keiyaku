@@ -1,10 +1,9 @@
 import type { AkumaKanshiRow, KanshiReport } from "../../kanshi/index.js";
+import { snapshotActivityLines } from "./akuma-activity.js";
 import {
-  boundedActivity,
   elapsedMilliseconds,
   entityLines,
   identityLine,
-  plumbFacts,
   RECENT_TONE_MS,
   renderSectionBlock,
   safeText,
@@ -14,6 +13,7 @@ import {
 } from "./terminal.js";
 
 const NARROW_COLUMNS = 72;
+const ACTIVITY_INDENT = "  ";
 
 function mostRecentTimestamp(...values: readonly (string | null | undefined)[]): string | null {
   return values.reduce<string | null>((latest, value) => {
@@ -45,18 +45,13 @@ function akumaMark(life: string): string {
           : "?";
 }
 
-function activitySnapshotLine(row: AkumaKanshiRow): string | undefined {
-  const snapshot = row.snapshot;
-  if (snapshot === undefined) return undefined;
-  const latest = snapshot.entries.flatMap((entry) => (entry.kind === "row" ? [entry.row] : [])).at(-1);
-  if (latest === undefined) {
-    if (snapshot.kind !== "idle" || snapshot.outcome === undefined) return undefined;
-    return snapshot.outcome.outcome.kind === "answered"
-      ? snapshot.outcome.outcome.answer
-      : snapshot.outcome.outcome.diagnostic;
-  }
-  if (latest.kind === "tool") return latest.name;
-  return "text" in latest ? latest.text : "activity";
+/** Bounded latest semantic entry, rendered by the same activity renderer as a targeted snapshot. */
+function latestActivityLines(
+  snapshot: NonNullable<AkumaKanshiRow["snapshot"]>,
+  context: TextRenderContext,
+): readonly string[] {
+  const bounded = { ...context, columns: Math.max(1, context.columns - ACTIVITY_INDENT.length) };
+  return snapshotActivityLines(snapshot, bounded, { latest: true }).map((line) => `${ACTIVITY_INDENT}${line}`);
 }
 
 function akumaLabel(row: AkumaKanshiRow): string {
@@ -92,13 +87,12 @@ function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly
         ? [life, ...activity, "resume unsupported"]
         : [life, ...activity];
     const relation = row.contract === undefined ? ["unbound"] : [endpointFact(row.contract.id, row.contract.observed)];
-    const snapshot = activitySnapshotLine(row);
+    const snapshot = row.snapshot;
+    const snapshotLines = snapshot === undefined ? [] : latestActivityLines(snapshot, context);
     const aliases = akumaLabel(row);
     if (context.columns > NARROW_COLUMNS) {
       const lines = [identityLine(mark, row.id, `${aliases} · ${[...key, ...relation].join(" · ")}`.trim())];
-      return snapshot === undefined
-        ? lines
-        : [...lines, ...plumbFacts([boundedActivity(snapshot, context.columns, "  ")], context.columns)];
+      return [...lines, ...snapshotLines];
     }
     const identity = aliases.length === 0 ? row.id : `${row.id} ${aliases}`;
     const lines = entityLines({
@@ -109,9 +103,7 @@ function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly
       facts: [...key.slice(1), ...relation],
       context,
     });
-    return snapshot === undefined
-      ? lines
-      : [...lines, ...plumbFacts([boundedActivity(snapshot, context.columns, "  ")], context.columns)];
+    return [...lines, ...snapshotLines];
   });
   const rendered = renderSectionBlock({
     name: "AKUMA",
