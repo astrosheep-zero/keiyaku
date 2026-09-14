@@ -33,6 +33,16 @@ Tell pending for a later ordinary interaction; no daemon guarantees recovery.
 Successors never reconstruct predecessor custody. They may continue from clean
 history, but hung permanently refuses them and untidy remains conservative.
 
+The runtime a wake launches is a live process coordinate, resolved anew each
+wake. The recorded runtime path wins while it still names a live runtime. When
+it is gone, wake takes the current process executable while that is a different
+live value, then the recorded executable basename through the present PATH.
+When no runtime resolves, wake refuses with a typed stale-runtime diagnostic
+naming the stale path and the remedy to kill and call a fresh Akuma, and never
+falls through to a bare launch absence. Re-resolution changes no identity,
+session, pending Tell, history, or Soul interpretation, and adds no daemon,
+watcher, or periodic repair.
+
 Normal session completion is distinct from admission-failure termination. When a
 Body ends a live session normally with pending Tell and no live tell channel, that
 ending Body decides exactly one disposition once. Heart records that decision in

@@ -59,11 +59,13 @@ is returned.
 
 Soul freezes birth identity, recipe, cwd, origin, restraint, and permissions.
 Body facts name lifecycle custody but persist no process coordinate or
-reconstructable signal authority. A seal shares the leash's atomic birth judge,
-closing a coordinate permanently. Stop and pause are distinct transient control
-facts; a later leash holder can clear abandoned control but cannot claim physical
-custody of its predecessor. Kill witnesses one exact, explicitly settled Body;
-a successor supersedes its life projection without deleting history.
+reconstructable signal authority: a launch runtime is a live coordinate of the
+waking process, never durable Heart authority. A seal shares the leash's atomic
+birth judge, closing a coordinate permanently. Stop and pause are distinct
+transient control facts; a later leash holder can clear abandoned control but
+cannot claim physical custody of its predecessor. Kill witnesses one exact,
+explicitly settled Body; a successor supersedes its life projection without
+deleting history.
 
 Hung evidence records failure of a Body's owned provider custody to retire. It
 permanently gates same-identity succession and never clears, changes sessions,

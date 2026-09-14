@@ -1,4 +1,5 @@
-import { appendFile } from "node:fs/promises";
+import { appendFile, stat } from "node:fs/promises";
+import { basename, delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { abortableDelay } from "./abort.js";
 import { BodySupervisor } from "./body-supervisor.js";
@@ -243,16 +244,95 @@ const DEFAULT_RUNTIME: Omit<BodyRuntime, "world"> = {
   spawnBody: spawnAkumaBody,
 };
 
-export async function bodyProcessInput(launch: BodyLaunch, bodyModuleUrl = import.meta.url) {
+/**
+ * The runtime executable this process recorded at its birth. A package-manager
+ * upgrade can remove the file under a live process, so a wake re-resolves that
+ * record instead of surfacing a bare missing-file launch failure.
+ */
+const RECORDED_RUNTIME = process.execPath;
+
+type RuntimeEnvironment = Readonly<{
+  /** The current process executable, preferred only while it is a different live value. */
+  current?: string;
+  /** The present PATH used to resolve the recorded executable basename. */
+  path?: string | undefined;
+  exists?: (path: string) => boolean | Promise<boolean>;
+}>;
+
+/** One Body launch's runtime input: the runtime recorded for it and its resolution environment. */
+export type BodyLaunchRuntime = Readonly<{
+  recorded?: string;
+  environment?: RuntimeEnvironment;
+}>;
+
+async function runtimeFileExists(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+async function runtimeCommandOnPath(
+  command: string,
+  path: string | undefined,
+  exists: (path: string) => boolean | Promise<boolean>,
+): Promise<string | null> {
+  if (command.length === 0 || command.includes("/") || command.includes("\\")) return null;
+  for (const directory of (path ?? "").split(delimiter)) {
+    if (directory.length === 0) continue;
+    const candidate = join(directory, command);
+    if (await exists(candidate)) return candidate;
+  }
+  return null;
+}
+
+class StaleRuntimeError extends Error {
+  constructor(recorded: string, current: string, command: string) {
+    super(
+      `recorded Body runtime ${recorded} no longer exists and re-resolution failed: neither this process executable ` +
+        `${current} nor the command "${command}" on PATH names an existing file; kill this Akuma and call a fresh one`,
+    );
+    this.name = "StaleRuntimeError";
+  }
+}
+
+/**
+ * Resolve the runtime executable a Body spawn will use. The path recorded for
+ * this process's birth wins while it exists. Once it is gone, wake re-resolves
+ * the runtime before any spawn can fail: the current process executable while
+ * that is a different live value, then the recorded executable basename on the
+ * present PATH. An unresolvable runtime refuses with the stale record, the
+ * failed re-resolution, and the kill-and-call-fresh remedy.
+ */
+export async function resolveRuntimeExecutable(
+  recorded: string = RECORDED_RUNTIME,
+  environment: RuntimeEnvironment = {},
+): Promise<string> {
+  const exists = environment.exists ?? runtimeFileExists;
+  if (await exists(recorded)) return recorded;
+  const current = environment.current ?? process.execPath;
+  const command = basename(recorded);
+  const reResolved =
+    (current !== recorded && (await exists(current)) ? current : null) ??
+    (await runtimeCommandOnPath(command, environment.path ?? process.env.PATH, exists));
+  if (reResolved === null) throw new StaleRuntimeError(recorded, current, command);
+  return reResolved;
+}
+
+export async function bodyProcessInput(
+  launch: BodyLaunch,
+  bodyModuleUrl = import.meta.url,
+  runtime: BodyLaunchRuntime = {},
+) {
   const encoded = Buffer.from(JSON.stringify(launch), "utf8").toString("base64url");
   const actorId = launch.seed?.id ?? (await readHeart(launch.paths)).soul?.id;
   if (actorId === undefined) throw new Error("Akuma wake has no born soul");
+  const executable = await resolveRuntimeExecutable(runtime.recorded, runtime.environment);
   const source = bodyModuleUrl.endsWith(".ts");
   const entry = fileURLToPath(new URL(source ? "../akuma-body.ts" : "../akuma-body.js", bodyModuleUrl));
   return {
-    argv: source
-      ? [process.execPath, "--import", import.meta.resolve("tsx"), entry, encoded]
-      : [process.execPath, entry, encoded],
+    argv: source ? [executable, "--import", import.meta.resolve("tsx"), entry, encoded] : [executable, entry, encoded],
     cwd: await launchCwd(launch),
     env: { ...process.env, KEIYAKU_ACTOR_ID: actorId },
     log: launch.paths.log,
@@ -672,8 +752,8 @@ export async function driveAkumaBody(
   }
 }
 
-export async function spawnAkumaBody(launch: BodyLaunch): Promise<OwnedProcess> {
-  return await spawnDetachedProcess(await bodyProcessInput(launch));
+export async function spawnAkumaBody(launch: BodyLaunch, runtime: BodyLaunchRuntime = {}): Promise<OwnedProcess> {
+  return await spawnDetachedProcess(await bodyProcessInput(launch, import.meta.url, runtime));
 }
 
 export async function runAkumaBody(

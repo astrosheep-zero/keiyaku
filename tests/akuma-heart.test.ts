@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -8,7 +8,7 @@ import test from "node:test";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { killAkumaWithRecovery } from "../src/akuma/akuma.js";
 import { AkumaHandle } from "../src/akuma/akuma-handle.js";
-import { LEASH_HELD_EXIT } from "../src/akuma/body.js";
+import { LEASH_HELD_EXIT, resolveRuntimeExecutable, spawnAkumaBody } from "../src/akuma/body.js";
 import {
   HeldAkumaLeash,
   admitRequest,
@@ -515,6 +515,141 @@ test("Tell reports spawn failure and leaves the Tell pending", async () => {
       (await readHeart(value.allocated.paths)).pending.map((tell) => tell.id),
       ["tell-observation-denied"],
     );
+  } finally {
+    value.close();
+  }
+});
+
+test("runtime resolution re-resolves a displaced record and refuses with the stale path and remedy", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-stale-runtime-"));
+  const bin = join(root, "bin");
+  const replaced = join(bin, "node");
+  const displaced = join(root, "retired-runtime", "node");
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(replaced, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  try {
+    const live = (path: string) => path === replaced;
+    // A record still on disk wins as it stands.
+    assert.equal(await resolveRuntimeExecutable(replaced, { current: displaced, path: bin, exists: live }), replaced);
+    // A displaced record re-resolves to the current process executable...
+    assert.equal(await resolveRuntimeExecutable(displaced, { current: replaced, path: bin, exists: live }), replaced);
+    // ...and, when the current process executable is that same vanished value, to the recorded
+    // command name on the present PATH instead of the gone value again.
+    assert.equal(await resolveRuntimeExecutable(displaced, { current: displaced, path: bin, exists: live }), replaced);
+    // A record with no live file and no PATH command refuses with the stale path, the failed
+    // re-resolution, and the kill-and-call-fresh remedy, never a bare launch absence.
+    const vanished = join(root, "vanished-runtime", "keiyaku-body");
+    await assert.rejects(
+      resolveRuntimeExecutable(vanished, { current: vanished, path: bin, exists: live }),
+      (error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        assert.match(message, /no longer exists/);
+        assert.match(message, /re-resolution failed/);
+        assert.match(message, /kill this Akuma and call a fresh one/);
+        assert.doesNotMatch(message, /ENOENT/);
+        return true;
+      },
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("wake re-resolves a vanished recorded runtime through the production spawn input", async () => {
+  const value = await fixture();
+  const retired = join(value.root, "retired-runtime");
+  const runtimeBin = join(value.root, "runtime-bin");
+  const vanished = join(retired, "node");
+  const replacement = join(runtimeBin, "node");
+  const proof = join(runtimeBin, "proof");
+  mkdirSync(retired, { recursive: true });
+  mkdirSync(runtimeBin, { recursive: true });
+  // The installed runtime of the same command name reports the executable it was launched from.
+  writeFileSync(replacement, `#!/bin/sh\nprintf '%s\\n' "$0" > "${proof}"\n`, { mode: 0o755 });
+  writeFileSync(vanished, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  try {
+    const born = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await born.birth(value.allocated.paths, value.soul);
+    born.release();
+    const before = await readHeart(value.allocated.paths);
+    // The runtime every process of this Akuma recorded at its birth is gone before the wake.
+    unlinkSync(vanished);
+    let successor: number | undefined;
+    const result = await tellFixture(value, {
+      body: "continue",
+      tellId: "tell-vanished-runtime",
+      recordedAt: value.soul.createdAt,
+      runtime: {
+        async spawn(paths): Promise<OwnedProcess> {
+          const leash = (await HeldAkumaLeash.try(paths))!;
+          successor = (await leash.recordBody(paths, { leashTakenAt: value.soul.createdAt })).sequence;
+          leash.release();
+          // The production launch resolves the runtime from the vanished record before spawning.
+          return await spawnAkumaBody(
+            { paths, refuseIfHeld: true },
+            { recorded: vanished, environment: { current: vanished, path: runtimeBin } },
+          );
+        },
+      },
+    });
+    assert.deepEqual(result.admission, { tellId: "tell-vanished-runtime", fact: "recorded" });
+    assert.deepEqual(result.wake, { kind: "pursuing", bodySequence: successor });
+    const deadline = performance.now() + 5_000;
+    while (!existsSync(proof) && performance.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(readFileSync(proof, "utf8").trim(), replacement);
+    const after = await readHeart(value.allocated.paths);
+    assert.deepEqual(after.soul, before.soul);
+    assert.deepEqual(after.latestSession, before.latestSession);
+    assert.deepEqual(
+      after.pending.map((tell) => tell.id),
+      ["tell-vanished-runtime"],
+    );
+    assert.equal(after.latestBody?.sequence, successor);
+    assert.equal((await readTell(value.allocated.paths, "tell-vanished-runtime"))?.state, "pending");
+    const tells = (await activitySlice(value.allocated.paths)).rows.filter((fact) => fact.kind === "tell");
+    assert.equal(tells.length, 1);
+    assert.equal(tells[0]?.state, "pending");
+  } finally {
+    value.close();
+  }
+});
+
+test("wake reports the typed stale-runtime refusal instead of a bare launch absence", async () => {
+  const value = await fixture();
+  const vanished = join(value.root, "vanished-runtime", "keiyaku-body");
+  const emptyBin = join(value.root, "empty-bin");
+  mkdirSync(emptyBin, { recursive: true });
+  try {
+    const born = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await born.birth(value.allocated.paths, value.soul);
+    born.release();
+    const result = await tellFixture(value, {
+      body: "continue",
+      tellId: "tell-unresolvable-runtime",
+      recordedAt: value.soul.createdAt,
+      runtime: {
+        async spawn(paths): Promise<OwnedProcess> {
+          // The production launch refuses when no runtime resolves, before any spawn happens.
+          return await spawnAkumaBody(
+            { paths, refuseIfHeld: true },
+            { recorded: vanished, environment: { current: vanished, path: emptyBin } },
+          );
+        },
+      },
+    });
+    assert.equal(result.wake.kind, "failed");
+    const diagnostic = result.wake.kind === "failed" ? result.wake.diagnostic : "";
+    assert.ok(diagnostic.includes(vanished), diagnostic);
+    assert.match(diagnostic, /no longer exists/);
+    assert.match(diagnostic, /re-resolution failed/);
+    assert.match(diagnostic, /kill this Akuma and call a fresh one/);
+    assert.doesNotMatch(diagnostic, /ENOENT/);
+    const heart = await readHeart(value.allocated.paths);
+    assert.deepEqual(
+      heart.pending.map((tell) => tell.id),
+      ["tell-unresolvable-runtime"],
+    );
+    assert.equal(heart.latestBody, null);
   } finally {
     value.close();
   }
@@ -1278,7 +1413,10 @@ test("a binding-before-delivery crash remains recoverable without predecessor te
     predecessor.release();
 
     const pending = (await readHeart(value.allocated.paths)).pending;
-    assert.deepEqual(drainPendingTells(pending).map((tell) => tell.id), ["crash-window"]);
+    assert.deepEqual(
+      drainPendingTells(pending).map((tell) => tell.id),
+      ["crash-window"],
+    );
     assert.deepEqual(drainPendingTells(pending, [firstTurn.sequence]), []);
 
     const successor = (await HeldAkumaLeash.try(value.allocated.paths))!;
@@ -1927,21 +2065,28 @@ test("readHeart returns one related Heart-fact epoch", async () => {
   }
 });
 
-
 test("Heart reverse references use indexed lookups during retained-group deletion", async () => {
   const value = await fixture();
   const database = new DatabaseSync(value.allocated.paths.heart);
   try {
     for (const [table, column] of [
-      ["calls", "turn_sequence"], ["activity", "turn_sequence"],
-      ["tell_bindings", "turn_sequence"], ["tell_bindings", "tell_id"],
-      ["tell_deliveries", "turn_sequence"], ["tell_deliveries", "tell_id"],
-      ["tell_receipts", "turn_sequence"], ["tell_receipts", "tell_id"],
+      ["calls", "turn_sequence"],
+      ["activity", "turn_sequence"],
+      ["tell_bindings", "turn_sequence"],
+      ["tell_bindings", "tell_id"],
+      ["tell_deliveries", "turn_sequence"],
+      ["tell_deliveries", "tell_id"],
+      ["tell_receipts", "turn_sequence"],
+      ["tell_receipts", "tell_id"],
       ["tell_disposition_members", "tell_id"],
     ]) {
-      const plan = database.prepare(`EXPLAIN QUERY PLAN SELECT rowid FROM ${table} WHERE ${column} = ?`).all(1) as { detail: string }[];
-      assert.ok(plan.some(({ detail }) => detail.startsWith(`SEARCH ${table} USING `)),
-        `${table}.${column}: ${JSON.stringify(plan)}`);
+      const plan = database.prepare(`EXPLAIN QUERY PLAN SELECT rowid FROM ${table} WHERE ${column} = ?`).all(1) as {
+        detail: string;
+      }[];
+      assert.ok(
+        plan.some(({ detail }) => detail.startsWith(`SEARCH ${table} USING `)),
+        `${table}.${column}: ${JSON.stringify(plan)}`,
+      );
       assert.ok(!plan.some(({ detail }) => detail.startsWith(`SCAN ${table}`)));
     }
     database.exec("PRAGMA foreign_keys=ON");
@@ -1956,13 +2101,23 @@ function seedClosedHistoryActivity(paths: Parameters<typeof readHeart>[0], turnS
   const database = new DatabaseSync(paths.heart);
   try {
     database.exec("PRAGMA foreign_keys=ON; BEGIN IMMEDIATE");
-    const latest = database.prepare("SELECT COALESCE(MAX(sequence), 0) AS value FROM timeline").get() as { value: number };
-    database.prepare(`WITH RECURSIVE rows(value) AS (
+    const latest = database.prepare("SELECT COALESCE(MAX(sequence), 0) AS value FROM timeline").get() as {
+      value: number;
+    };
+    database
+      .prepare(
+        `WITH RECURSIVE rows(value) AS (
       VALUES(1) UNION ALL SELECT value + 1 FROM rows WHERE value < ?
-    ) INSERT INTO timeline(kind) SELECT 'activity' FROM rows`).run(count);
-    database.prepare(`INSERT INTO activity(sequence, turn_sequence, event_json, at)
+    ) INSERT INTO timeline(kind) SELECT 'activity' FROM rows`,
+      )
+      .run(count);
+    database
+      .prepare(
+        `INSERT INTO activity(sequence, turn_sequence, event_json, at)
       SELECT sequence, ?, '{"type":"note","text":"old history"}', '2026-08-08T00:00:10.000Z'
-      FROM timeline WHERE sequence > ?`).run(turnSequence, latest.value);
+      FROM timeline WHERE sequence > ?`,
+      )
+      .run(turnSequence, latest.value);
     database.exec("COMMIT");
   } finally {
     database.close();
@@ -1979,7 +2134,9 @@ test("open disposition pins witnessed Tells until atomic resolution, then prunin
     const predecessor = await leash.recordBody(paths, { leashTakenAt: at });
     await recordTell(paths, { id: "frozen", body: "continue", recordedAt: at });
     const disposition = await decidePendingTellDisposition(paths, {
-      bodySequence: predecessor.sequence, at, handoff: true,
+      bodySequence: predecessor.sequence,
+      at,
+      handoff: true,
     });
     assert.deepEqual(disposition?.tellIds, ["frozen"]);
     assert.equal(await resolvePendingTellDisposition(paths, predecessor.sequence, at), false);
@@ -1987,31 +2144,61 @@ test("open disposition pins witnessed Tells until atomic resolution, then prunin
     leash = (await HeldAkumaLeash.try(paths))!;
     const successor = await leash.recordBody(paths, { leashTakenAt: at });
     const delivered = await beginTurn(paths, { bodySequence: successor.sequence, startedAt: at });
-    await recordTellDeliveries(paths, [{
-      tellId: "frozen", route: "launch", turnSequence: delivered.sequence, fence: "delivered", deliveredAt: at,
-    }]);
-    await endTurn(paths, { turnSequence: delivered.sequence, outcome: { kind: "failed", diagnostic: "fixture end" }, completedAt: at });
+    await recordTellDeliveries(paths, [
+      {
+        tellId: "frozen",
+        route: "launch",
+        turnSequence: delivered.sequence,
+        fence: "delivered",
+        deliveredAt: at,
+      },
+    ]);
+    await endTurn(paths, {
+      turnSequence: delivered.sequence,
+      outcome: { kind: "failed", diagnostic: "fixture end" },
+      completedAt: at,
+    });
     const active = await beginTurn(paths, { bodySequence: successor.sequence, startedAt: at });
     seedClosedHistoryActivity(paths, active.sequence, 5501);
-    await appendActivity(paths, { turnSequence: active.sequence, event: { type: "note", text: "prune while open" }, at });
+    await appendActivity(paths, {
+      turnSequence: active.sequence,
+      event: { type: "note", text: "prune while open" },
+      at,
+    });
     assert.equal((await readTell(paths, "frozen"))?.state, "told");
-    assert.ok(await readTurn(paths, delivered.sequence), "the delivery witness must survive while the decision is open");
+    assert.ok(
+      await readTurn(paths, delivered.sequence),
+      "the delivery witness must survive while the decision is open",
+    );
     assert.deepEqual(await readOpenPendingTellDisposition(paths), disposition);
-    assert.deepEqual(await Promise.all([
-      resolvePendingTellDisposition(paths, predecessor.sequence, at),
-      resolvePendingTellDisposition(paths, predecessor.sequence, at),
-    ]), [true, true]);
+    assert.deepEqual(
+      await Promise.all([
+        resolvePendingTellDisposition(paths, predecessor.sequence, at),
+        resolvePendingTellDisposition(paths, predecessor.sequence, at),
+      ]),
+      [true, true],
+    );
     assert.equal(await readOpenPendingTellDisposition(paths), null);
     seedClosedHistoryActivity(paths, active.sequence, 501);
-    await appendActivity(paths, { turnSequence: active.sequence, event: { type: "note", text: "prune after consumption" }, at });
+    await appendActivity(paths, {
+      turnSequence: active.sequence,
+      event: { type: "note", text: "prune after consumption" },
+      at,
+    });
     assert.equal(await readTell(paths, "frozen"), null);
     assert.equal(await readTurn(paths, delivered.sequence), null);
-    assert.equal(await resolvePendingTellDisposition(paths, predecessor.sequence, at), true, "late resolution uses the resolved decision, not retired Tells");
+    assert.equal(
+      await resolvePendingTellDisposition(paths, predecessor.sequence, at),
+      true,
+      "late resolution uses the resolved decision, not retired Tells",
+    );
     const database = new DatabaseSync(paths.heart);
     try {
       assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
       assert.equal(database.prepare("SELECT COUNT(*) AS count FROM tell_disposition_members").get()?.count, 0);
-    } finally { database.close(); }
+    } finally {
+      database.close();
+    }
   } finally {
     leash.release();
     value.close();
@@ -2058,7 +2245,9 @@ test("protected backlog does not repeat unchanged sweeps and releasing a Tell tr
       const tell = database.prepare("INSERT INTO tells(id, sequence, body, recorded_at) VALUES (?, ?, 'pending', ?)");
       for (let index = 0; index < 5501; index += 1) tell.run(`pending-${index}`, insert.run().lastInsertRowid, at);
       database.exec("COMMIT");
-    } finally { database.close(); }
+    } finally {
+      database.close();
+    }
     const prepare = DatabaseSync.prototype.prepare;
     let sweeps = 0;
     let fullCounts = 0;
@@ -2069,9 +2258,12 @@ test("protected backlog does not repeat unchanged sweeps and releasing a Tell tr
     });
     // Each append reopens Heart, so the assertion also proves the maintenance
     // cursor survives connection lifetimes rather than being an in-memory cache.
-    for (let index = 0; index < 20; index += 1) await appendActivity(paths, {
-      turnSequence: turn.sequence, event: { type: "note", text: `update-${index}` }, at,
-    });
+    for (let index = 0; index < 20; index += 1)
+      await appendActivity(paths, {
+        turnSequence: turn.sequence,
+        event: { type: "note", text: `update-${index}` },
+        at,
+      });
     assert.equal(sweeps, 1, "protected-only sweeps are not repeated for every append");
     assert.equal(fullCounts, 0, "the append path must not count the full retained timeline");
     await recordTellReceipt(paths, { evidence: "exact", tellId: "pending-0", kind: "consumed", receivedAt: at });
@@ -2101,10 +2293,16 @@ test("retention window counts retained facts rather than gaps in their sequence"
       database.exec(`WITH RECURSIVE rows(value) AS (
         VALUES(1) UNION ALL SELECT value + 1 FROM rows WHERE value < 5501
       ) INSERT INTO timeline(sequence, kind) SELECT 100000 + value * 10, 'activity' FROM rows`);
-      database.prepare(`INSERT INTO activity(sequence, turn_sequence, event_json, at)
-        SELECT sequence, ?, '{"type":"note","text":"sparse"}', ? FROM timeline WHERE kind='activity'`).run(turn.sequence, at);
+      database
+        .prepare(
+          `INSERT INTO activity(sequence, turn_sequence, event_json, at)
+        SELECT sequence, ?, '{"type":"note","text":"sparse"}', ? FROM timeline WHERE kind='activity'`,
+        )
+        .run(turn.sequence, at);
       database.exec("COMMIT");
-    } finally { database.close(); }
+    } finally {
+      database.close();
+    }
     await appendActivity(paths, { turnSequence: turn.sequence, event: { type: "note", text: "trigger" }, at });
     assert.equal((await activitySlice(paths)).rows.filter((row) => row.kind === "activity").length, 5000);
   } finally {
