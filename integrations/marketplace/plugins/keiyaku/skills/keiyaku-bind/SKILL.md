@@ -1,8 +1,8 @@
 ---
 name: keiyaku-bind
 description: >-
-  Binding a Keiyaku: writing down what a bounded piece of work must deliver and
-  how it will be judged, so it can be handed off.
+  Use when deciding what must be in one Keiyaku Contract and how its work
+  is divided into Arcs, or when writing or binding that Contract.
 ---
 
 # Keiyaku Bind

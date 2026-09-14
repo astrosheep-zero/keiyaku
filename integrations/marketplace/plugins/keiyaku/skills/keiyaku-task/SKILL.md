@@ -1,9 +1,8 @@
 ---
 name: keiyaku-task
 description: >-
-  Organizing, tracking progress and status, or binding work of three or more
-  steps as a Keiyaku Task: what to do, in what order, what depends on what,
-  what is done and what is blocked.
+  Use for task management: organizing work of three or more steps and
+  tracking it as it progresses.
 ---
 
 # Keiyaku Task

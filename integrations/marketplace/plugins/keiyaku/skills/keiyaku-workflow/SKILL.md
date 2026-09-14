@@ -1,9 +1,9 @@
 ---
 name: keiyaku-workflow
 description: >-
-  The Keiyaku workflow: how work moves through Keiyaku from planning through
-  binding, commissioning, delivery, review, and landing, and what you decide
-  at each stage.
+  Use when deciding whether Keiyaku work needs a Contract or Arcs, how to
+  delegate it, or what to do next after a handoff: steer, assess a delivery,
+  request another round, or land.
 ---
 
 # Holding a fulfillment loop
