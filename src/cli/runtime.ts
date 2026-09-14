@@ -1,5 +1,3 @@
-import { Readable } from "node:stream";
-import { pipeline } from "node:stream/promises";
 import { isParsedAkumaCommand } from "./commands/akuma.js";
 import type { InvokedAkumaCommand } from "./commands/akuma.js";
 import type { InstallInvocationResult } from "./commands/install.js";
@@ -21,14 +19,15 @@ export async function writeExecutionProgress(
   events: AsyncIterable<ExecutionEvent>,
   stream: NodeJS.WritableStream = process.stderr,
 ): Promise<void> {
-  const { executionProgressLines } = await import("./render/execution-progress.js");
-  await pipeline(
-    Readable.from(events, { highWaterMark: 1 }).map(
-      (event: ExecutionEvent) => `${executionProgressLines(event, displayContext()).join("\n")}\n`,
-    ),
-    stream,
-    { end: false },
-  );
+  const { renderExecutionProgress } = await import("./render/execution-progress.js");
+  const terminal = stream as NodeJS.WritableStream & Readonly<{ isTTY?: boolean; columns?: number }>;
+  await renderExecutionProgress(events, {
+    stream: terminal,
+    context: {
+      columns: terminal.isTTY === true && Number.isInteger(terminal.columns) ? (terminal.columns ?? 80) : 80,
+      color: false,
+    },
+  });
 }
 
 function cliCancellation(): Readonly<{ signal: AbortSignal; close(): void }> {
