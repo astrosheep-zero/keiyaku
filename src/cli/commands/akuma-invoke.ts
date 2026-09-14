@@ -1,4 +1,6 @@
 import { readFile } from "node:fs/promises";
+import { squareAssignedParticipantName } from "@astrosheep/square";
+import { emitInitiatingPluginSignal } from "../../plugin/akuma-signals.js";
 import { type AkuId } from "../../akuma/identity.js";
 import { type ActivityHistory } from "../../akuma/akuma.js";
 import {
@@ -125,6 +127,25 @@ async function invokeWait(
   };
 }
 
+async function inputInitiator(input: InvokeInput): Promise<Readonly<{ initiator?: string }>> {
+  let initiator: string | undefined;
+  try {
+    initiator = squareAssignedParticipantName(input.environment);
+  } catch {}
+  if (initiator === undefined) return {};
+  try {
+    await emitInitiatingPluginSignal({
+      world: input.path,
+      ...(input.settings === undefined ? {} : { settings: input.settings }),
+      initiator,
+      reportDiagnostic: (message) => process.stderr.write(`${message}\n`),
+    });
+  } catch (error) {
+    process.stderr.write(`! plugin initiation: ${error instanceof Error ? error.message : String(error)}\n`);
+  }
+  return { initiator };
+}
+
 async function invokeTell(
   command: Extract<InvokedAkumaCommand, { command: "tell" }>,
   input: InvokeInput,
@@ -137,6 +158,7 @@ async function invokeTell(
       akuma: command.akuma,
       ...(input.repo === undefined ? {} : { repo: input.repo }),
     });
+    const initiator = await inputInitiator(input);
     const channel = executionChannel(input.execution);
     const answer =
       channel.kind === "body-request"
@@ -146,9 +168,11 @@ async function invokeTell(
             body,
             schema,
             interrupt: command.interrupt,
+            ...initiator,
           })
         : await Akuma.select(addressed.path, addressed.id).tell(body, {
             schema,
+            ...initiator,
             ...(command.interrupt ? { interrupt: true } : {}),
           });
     const alias = inputAlias(command.akuma);
@@ -161,8 +185,10 @@ async function invokeTell(
       ...(alias === undefined ? {} : { alias }),
     };
   }
+  const initiator = await inputInitiator(input);
   if (command.interrupt) {
     const result = await Keiyaku.interrupt({
+      ...initiator,
       path: input.path,
       akuma: command.akuma,
       body,
@@ -180,6 +206,7 @@ async function invokeTell(
   }
   const result = await tellAkuma(
     {
+      ...initiator,
       path: input.path,
       akuma: command.akuma,
       body,
@@ -264,6 +291,7 @@ export async function invokeAkuma(command: InvokedAkumaCommand, input: InvokeInp
       const schema = command.schema === undefined ? undefined : await schemaFromFile(command.schema);
       const caller = input.execution === undefined ? Keiyaku : Keiyaku.withExecution({ execution: input.execution });
       const result = await caller.call({
+        ...(await inputInitiator(input)),
         path: input.path,
         archetype: command.archetype,
         body,

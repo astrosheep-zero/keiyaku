@@ -12,6 +12,13 @@ leaves interrupted or lost Turns open rather than inventing a result. A Body
 uses the persisted Soul and latest valid session recipe; Heart loss makes it
 retire only provider custody it directly owns and exit.
 
+An input may carry its submitting initiator for outcome addressing. A Turn
+freezes that identity from its opening call or, without a call, its first
+launch Tell. Later coalesced inputs and live steering do not replace the Turn's
+initiator. A subsequent Turn takes its own opening input's identity, including
+explicit absence; it never inherits the birth caller or the Body environment.
+This attribution grants no permission and does not affect execution.
+
 Process custody is a live handle, not a stored pid, process group, start token,
 or reconstructed identity. Graceful cancellation and forced disposal both require
 the current provider attempt's closure proof. If owned provider custody cannot

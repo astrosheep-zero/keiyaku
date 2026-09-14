@@ -38,7 +38,7 @@ export type AkumaWaitInput = AkumaSetAddressInput &
     timeoutMs?: number;
   }>;
 
-export type AkumaTellInput = AkumaAddressInput & Readonly<{ body: string }>;
+export type AkumaTellInput = AkumaAddressInput & Readonly<{ body: string; initiator?: string }>;
 export type { TellResult, TellWake } from "../akuma/akuma.js";
 export type { CreatedTaskObservation } from "../task/created-observation.js";
 export type { DispatchAssociation } from "../dispatch/association.js";
@@ -50,7 +50,7 @@ export type {
   AkumaUnobserved,
   AkumaWaitResult,
 } from "../akuma/fleet-observation.js";
-export type AkumaInterruptInput = AkumaAddressInput & Readonly<{ body: string }>;
+export type AkumaInterruptInput = AkumaAddressInput & Readonly<{ body: string; initiator?: string }>;
 export type AkumaInterruptResult = Readonly<{
   id: AkumaStatus["id"];
   receipt: InterruptReceipt;
@@ -263,7 +263,7 @@ export async function tellAkuma(
 ): Promise<AkumaTellResult> {
   const values = requireInput(input, "Keiyaku.tell input");
   for (const key of Object.keys(values)) {
-    if (!["path", "akuma", "body", "repo"].includes(key)) {
+    if (!["path", "akuma", "body", "repo", "initiator"].includes(key)) {
       throw new TypeError(`Keiyaku.tell input has unknown field: ${key}`);
     }
   }
@@ -275,26 +275,31 @@ export async function tellAkuma(
       directory: channel.directory,
       target: addressed.id,
       body: values.body,
+      ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
     });
   }
   return await executeTellAkuma({
     path: addressed.path,
     id: addressed.id,
     body: values.body,
+    ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
   });
 }
 
 export async function interruptAkuma(input: AkumaInterruptInput): Promise<AkumaInterruptResult> {
   const values = requireInput(input, "Keiyaku.interrupt input");
   for (const key of Object.keys(values)) {
-    if (!["path", "akuma", "body", "repo"].includes(key)) {
+    if (!["path", "akuma", "body", "repo", "initiator"].includes(key)) {
       throw new TypeError(`Keiyaku.interrupt input has unknown field: ${key}`);
     }
   }
   if (typeof values.body !== "string") throw new TypeError("body must be a string");
   const addressed = await addressAkuma(directAddress(values));
   const handle = source(addressed.path).selectHandle({ id: addressed.id });
-  const receipt = await handle.interrupt(values.body);
+  const receipt = await handle.interrupt(
+    values.body,
+    input.initiator === undefined ? {} : { initiator: input.initiator },
+  );
   const observation = await observeAkumaStage(addressed.path, addressed.id, values.repo as Repo | undefined);
   return { id: addressed.id, receipt, observation };
 }

@@ -61,6 +61,18 @@ test("help projections reflow at the requested terminal width without splitting 
   assert.match(history, /--last/u);
 });
 
+test("gate help explains mixed selection, explicit clearing, and omitted defaults", () => {
+  const bind = renderContractHelp("bind");
+  const amend = renderContractHelp("amend");
+  for (const help of [bind, amend]) {
+    assert.match(help, /gate words and configured bundle names/u);
+    assert.match(help, /matching bundle expands; otherwise the name is a literal gate/u);
+    assert.match(help, /--gates ""/u);
+  }
+  assert.match(bind, /gates.default, or reviewed/u);
+  assert.match(amend, /Omitting --gates leaves gates unchanged/u);
+});
+
 test("amend leaf help enumerates the operation grammar", () => {
   const help = renderContractHelp("amend");
   assert.match(

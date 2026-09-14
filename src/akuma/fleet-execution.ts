@@ -144,16 +144,20 @@ export type TellExecutionInput = Readonly<{
   body: string;
   tellId?: string;
   recordedAt?: string;
+  initiator?: string;
   signal?: AbortSignal;
 }>;
 
 export async function executeTellAkuma(input: TellExecutionInput): Promise<AkumaTellResult> {
   input.signal?.throwIfAborted();
   const handle = source(input.path).selectHandle({ id: input.id });
-  const tell =
-    input.tellId === undefined
-      ? await handle.tell(input.body)
-      : await handle.tell(input.body, input.tellId, input.recordedAt);
+  const tell = await handle.tell(
+    input.body,
+    input.tellId,
+    input.recordedAt,
+    undefined,
+    input.initiator === undefined ? {} : { initiator: input.initiator },
+  );
   input.signal?.throwIfAborted();
   return fleetResultSchemas.tell.parse({
     akuma: input.id,

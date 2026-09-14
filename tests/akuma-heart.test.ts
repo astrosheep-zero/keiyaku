@@ -147,6 +147,35 @@ test("existing non-database Heart paths preserve the SQLite open failure", async
   }
 });
 
+test("Tell attribution is durable and part of stable input identity", async () => {
+  const value = await fixture();
+  const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
+  try {
+    await leash.birth(value.allocated.paths, value.soul);
+    const tell = {
+      kind: "tell" as const,
+      id: "attributed-tell",
+      body: "continue",
+      initiator: "Bob",
+      recordedAt: value.soul.createdAt,
+    };
+    await heartRecordTell(value.allocated.paths, tell);
+    assert.equal((await readTell(value.allocated.paths, tell.id))?.initiator, "Bob");
+    assert.equal((await readHeart(value.allocated.paths)).pending[0]?.initiator, "Bob");
+    assert.deepEqual(await heartRecordTell(value.allocated.paths, tell), {
+      kind: "recorded",
+      tell: await readTell(value.allocated.paths, tell.id),
+    });
+    await assert.rejects(
+      heartRecordTell(value.allocated.paths, { ...tell, initiator: "Alice" }),
+      /reused different input/u,
+    );
+  } finally {
+    leash.release();
+    value.close();
+  }
+});
+
 test("birth and seal share the child's leash adjudicator", async () => {
   const value = await fixture();
   try {
@@ -1059,7 +1088,7 @@ test("unknown Body Request state is authority corruption", async () => {
   }
 });
 
-test("heart schema version 28 and leash schema version 4 hard-refuse old authority", async () => {
+test("heart schema version 29 and leash schema version 4 hard-refuse old authority", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-schema-cut-"));
   const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "30000000" });
   try {
@@ -1073,7 +1102,7 @@ test("heart schema version 28 and leash schema version 4 hard-refuse old authori
       "CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)",
     );
     leash.close();
-    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 28/u);
+    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 29/u);
     await assert.rejects(HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
   } finally {
     rmSync(root, { recursive: true, force: true });

@@ -481,7 +481,13 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     {
       source: "index.ts",
-      allow: [any("library/keiyaku.ts"), any("settings.ts"), any("world.ts"), types("plugin/public.ts")],
+      allow: [
+        any("akuma/index.ts"),
+        any("library/keiyaku.ts"),
+        any("settings.ts"),
+        any("world.ts"),
+        types("plugin/public.ts"),
+      ],
     },
     {
       source: "*.ts",
@@ -511,6 +517,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("index.ts"),
         any("kanshi/**"),
         any("library/**"),
+        any("plugin/akuma-signals.ts", ["emitInitiatingPluginSignal"]),
         any("runtime/proc/**"),
         any("settings.ts"),
         any("task/**"),

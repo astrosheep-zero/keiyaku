@@ -82,14 +82,16 @@ function configureDeferredBodyEndPlugin(root: string): DeferredBodyEnd {
       "}",
       "export default {",
       '  manifest: { id: "square", apiVersion: 1, writablePaths: [{ name: "square", path: ".square" }] },',
-      "  activate(context) {",
+      "  async activate(context) {",
       "    const previousUser = process.env.SQUARE_HOST_LEDGER_USER;",
       "    const previousLocal = process.env.SQUARE_HOST_LEDGER_LOCAL;",
       "    process.env.SQUARE_HOST_LEDGER_USER = context.config.ledgerUser;",
       "    process.env.SQUARE_HOST_LEDGER_LOCAL = context.config.ledgerLocal;",
-      "    const actual = square.activate(context);",
-      "    if (previousUser === undefined) delete process.env.SQUARE_HOST_LEDGER_USER; else process.env.SQUARE_HOST_LEDGER_USER = previousUser;",
-      "    if (previousLocal === undefined) delete process.env.SQUARE_HOST_LEDGER_LOCAL; else process.env.SQUARE_HOST_LEDGER_LOCAL = previousLocal;",
+      "    let actual;",
+      "    try { actual = await square.activate(context); } finally {",
+      "      if (previousUser === undefined) delete process.env.SQUARE_HOST_LEDGER_USER; else process.env.SQUARE_HOST_LEDGER_USER = previousUser;",
+      "      if (previousLocal === undefined) delete process.env.SQUARE_HOST_LEDGER_LOCAL; else process.env.SQUARE_HOST_LEDGER_LOCAL = previousLocal;",
+      "    }",
       '    const handler = actual.signals?.["akuma.turn-outcome"];',
       '    if (handler === undefined) throw new Error("Square plugin has no turn-outcome handler");',
       '    return { signals: { ...(actual.signals ?? {}), "akuma.turn-outcome": async (signal) => { appendFileSync(context.config.turnStarted, "turn-outcome\\n"); await waitForRelease(context.config.turnRelease); try { await handler(signal); } finally { appendFileSync(context.config.turnSettled, "turn-outcome\\n"); } } } };',
@@ -693,13 +695,15 @@ test("turn owner folds a rejected completion while the event stream remains open
       });
     },
   };
+  let driving: ReturnType<typeof driveAkumaBody> | undefined;
   try {
     const world = await World.at(root);
     const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "deadbeef" });
     await initializeHeart(allocated.paths);
-    await driveAkumaBody(claudeBodyLaunch(allocated, world, "work"), rejecting, {
+    driving = driveAkumaBody(claudeBodyLaunch(allocated, world, "work"), rejecting, {
       now: () => "2026-08-24T00:00:00.000Z",
     });
+    void driving.catch(() => undefined);
     await waitForFile(deferred.turnStarted);
     assert.equal(existsSync(deferred.turnSettled), false);
     const rows = (await activitySlice(allocated.paths)).rows;
@@ -708,6 +712,7 @@ test("turn owner folds a rejected completion while the event stream remains open
     assert.deepEqual(outcome.outcome, { kind: "failed", diagnostic: "completion rejected" });
   } finally {
     writeFileSync(deferred.turnRelease, "release\n");
+    await driving;
     await waitForFile(deferred.turnSettled);
     rmSync(root, { recursive: true, force: true });
   }

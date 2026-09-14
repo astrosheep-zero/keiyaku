@@ -58,6 +58,7 @@ export type CallInput = Readonly<{
   alias?: AkumaAlias;
   allowed?: readonly AllowedAction[];
   schema?: Schema<unknown>;
+  initiator?: string;
 }>;
 
 export type CallObservation =
@@ -89,7 +90,7 @@ export type BornCall = Readonly<{
   timeoutMs: number;
   dispatch: DispatchStage;
   alias: AliasStage;
-  schemaTell?: Readonly<{ body: string; schema: Schema<unknown> }>;
+  schemaTell?: Readonly<{ body: string; schema: Schema<unknown>; initiator?: string }>;
 }>;
 
 export type ForkInput = Readonly<{
@@ -373,30 +374,30 @@ async function resolveAliasStage(
   }
 }
 
+const CALL_INPUT_KEYS = [
+  "path",
+  "archetype",
+  "body",
+  "cwd",
+  "readonly",
+  "mode",
+  "timeoutMs",
+  "home",
+  "settings",
+  "contract",
+  "alias",
+  "allowed",
+  "schema",
+  "initiator",
+] as const;
+
 async function prepareCall(input: CallInput, context: ExecutionContext): Promise<BornCall> {
   const values = requireInput(input, "Keiyaku.call input");
-  onlyKeys(
-    values,
-    [
-      "path",
-      "archetype",
-      "body",
-      "cwd",
-      "readonly",
-      "mode",
-      "timeoutMs",
-      "home",
-      "settings",
-      "contract",
-      "alias",
-      "allowed",
-      "schema",
-    ],
-    "Keiyaku.call input",
-  );
+  onlyKeys(values, CALL_INPUT_KEYS, "Keiyaku.call input");
   const path = await World.prove(nonblank(values.path, "path"));
   const archetype = nonblank(values.archetype, "archetype");
   const body = text(values.body, "body");
+  const initiator = values.initiator === undefined ? undefined : text(values.initiator, "initiator");
   const readonlyRequested = callReadonly(values.readonly, "readonly must be true").readonly;
   const cwd = values.cwd === undefined ? undefined : nonblank(values.cwd, "cwd");
   const mode = callMode(values.mode);
@@ -415,6 +416,7 @@ async function prepareCall(input: CallInput, context: ExecutionContext): Promise
   const call = {
     archetype,
     ...(values.schema === undefined ? { body } : {}),
+    ...(initiator === undefined ? {} : { initiator }),
     ...(readonlyRequested === undefined ? {} : { readonly: readonlyRequested }),
     ...(values.allowed === undefined ? {} : { allowed: values.allowed as readonly AllowedAction[] }),
     ...(values.schema === undefined ? {} : { schema: values.schema as Schema<unknown> }),
@@ -442,7 +444,15 @@ async function prepareCall(input: CallInput, context: ExecutionContext): Promise
     timeoutMs,
     dispatch,
     alias: aliasStage,
-    ...(values.schema === undefined ? {} : { schemaTell: { body, schema: values.schema as Schema<unknown> } }),
+    ...(values.schema === undefined
+      ? {}
+      : {
+          schemaTell: {
+            body,
+            schema: values.schema as Schema<unknown>,
+            ...(initiator === undefined ? {} : { initiator }),
+          },
+        }),
   };
 }
 
@@ -465,8 +475,12 @@ async function publishCall(born: BornCall, execution: ExecutionContext): Promise
             target: handle.id,
             body: tell.body,
             schema: tell.schema,
+            ...(tell.initiator === undefined ? {} : { initiator: tell.initiator }),
           })
-        : PublicAkuma.select(born.path, handle.id).tell(tell.body, { schema: tell.schema }),
+        : PublicAkuma.select(born.path, handle.id).tell(tell.body, {
+            schema: tell.schema,
+            ...(tell.initiator === undefined ? {} : { initiator: tell.initiator }),
+          }),
     );
     if (born.mode === "detach") void pending.catch(() => undefined);
     else schemaAnswer = await pending;

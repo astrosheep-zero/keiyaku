@@ -20,9 +20,9 @@ loop to one Aku in a single commission; the harness serves both styles
 equally. See `keiyaku-workflow` for the loop, `keiyaku-bind` for authoring,
 `keiyaku-akuma` for invocation.
 
-Settings owns named gate bundles. Omitting `--gates` selects `gates.default`,
-or freezes `["reviewed"]` when that entry is absent. `--gates <name,...>`
-selects configured bundles in order; it does not add literal gate words.
+Gate selections accept literal gate words and configured bundles together;
+`--gates ""` explicitly selects no gates. Consult `bind --help` and
+`amend --help` for expansion, defaults, and replacement semantics.
 
 ## Quick Start
 

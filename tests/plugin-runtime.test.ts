@@ -601,6 +601,8 @@ test("hanging handler is cancelled at the delivery bound without blocking anothe
 test("a timed-out handler does not share cancellation with another handler", async () => {
   const value = fixture();
   const cancellationKey = `keiyaku-plugin-cancellation-${Date.now()}`;
+  const cancellations: Record<string, AbortSignal> = {};
+  (globalThis as Record<string, unknown>)[cancellationKey] = cancellations;
   try {
     const output = join(value.root, "trace.txt");
     writePlugin(
@@ -610,7 +612,7 @@ test("a timed-out handler does not share cancellation with another handler", asy
         'import { appendFileSync } from "node:fs";',
         "export default {",
         '  manifest: { id: "first", apiVersion: 1 },',
-        '  activate(context) { return { signals: { "akuma.called": (_signal, cancellation) => new Promise((resolve) => cancellation.addEventListener("abort", () => { appendFileSync(context.config.trace, `first:${globalThis[context.config.cancellationKey].aborted}\\n`); resolve(); }, { once: true })) } }; },',
+        '  activate(context) { return { signals: { "akuma.called": (_signal, cancellation) => new Promise((resolve) => { const signals = globalThis[context.config.cancellationKey]; signals.first = cancellation; cancellation.addEventListener("abort", () => { appendFileSync(context.config.trace, `first:${signals.second.aborted}\\n`); resolve(); }, { once: true }); }) } }; },',
         "};",
       ].join("\n"),
     );
@@ -621,7 +623,7 @@ test("a timed-out handler does not share cancellation with another handler", asy
         'import { appendFileSync } from "node:fs";',
         "export default {",
         '  manifest: { id: "second", apiVersion: 1 },',
-        '  activate(context) { return { signals: { "akuma.called": (_signal, cancellation) => new Promise((resolve) => { globalThis[context.config.cancellationKey] = cancellation; cancellation.addEventListener("abort", () => { appendFileSync(context.config.trace, "second\\n"); resolve(); }, { once: true }); }) } }; },',
+        '  activate(context) { return { signals: { "akuma.called": (_signal, cancellation) => new Promise((resolve) => { const signals = globalThis[context.config.cancellationKey]; signals.second = cancellation; cancellation.addEventListener("abort", () => { appendFileSync(context.config.trace, `second:${signals.first.aborted}\\n`); resolve(); }, { once: true }); }) } }; },',
         "};",
       ].join("\n"),
     );
@@ -638,7 +640,13 @@ test("a timed-out handler does not share cancellation with another handler", asy
 
     const runtime = await pluginRuntime({ world: await World.at(value.root) });
     await runtime.emit({ kind: "akuma.called", akumaId: "aku/example" });
-    assert.deepEqual(trace(output), ["first:false", "second"]);
+    assert.notEqual(cancellations.first, cancellations.second);
+    assert.equal(cancellations.first?.aborted, true);
+    assert.equal(cancellations.second?.aborted, true);
+    const observed = trace(output);
+    assert.deepEqual(observed.map((row) => row.split(":")[0]).sort(), ["first", "second"]);
+    // Either independent deadline may fire first; it must leave the other signal live.
+    assert.deepEqual(observed.map((row) => row.split(":")[1]), ["false", "true"]);
   } finally {
     delete (globalThis as Record<string, unknown>)[cancellationKey];
     value.close();
@@ -646,19 +654,35 @@ test("a timed-out handler does not share cancellation with another handler", asy
 });
 
 
-test("completed plugin drains leave no timeout keeping their process alive", (context) => {
+test("completed plugin emissions leave no timeout keeping their process alive", (context) => {
   const value = fixture();
   context.after(value.close);
+  const outputPath = join(value.root, "trace.txt");
+  writePlugin(
+    value.root,
+    "completed",
+    [
+      'import { appendFileSync } from "node:fs";',
+      'export default { manifest: { id: "completed", apiVersion: 1 }, activate(context) { return { signals: { "akuma.called": async () => { appendFileSync(context.config.trace, "called\\n"); }, "akuma.body-ended": () => { appendFileSync(context.config.trace, "body-ended\\n"); } } }; } };',
+    ].join("\n"),
+  );
   mkdirSync(join(value.root, ".keiyaku"));
-  writeFileSync(join(value.root, ".keiyaku", "settings.json"), '{"plugins":{}}');
+  writeFileSync(
+    join(value.root, ".keiyaku", "settings.json"),
+    JSON.stringify({
+      plugins: {
+        square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false },
+        completed: { package: "./plugins/completed.mjs", config: { trace: outputPath } },
+      },
+    }),
+  );
   const source = `
     import { pluginRuntime } from ${JSON.stringify(new URL("../src/plugin/runtime.js", import.meta.url).href)};
     import { World } from ${JSON.stringify(new URL("../src/world.js", import.meta.url).href)};
     const runtime = await pluginRuntime({ world: await World.at(${JSON.stringify(value.root)}) });
-    await runtime.drain();
-    await runtime.drain("akuma.body-ended");
+    await runtime.emit({ kind: "akuma.called", akumaId: "aku/example" });
+    await runtime.emit({ kind: "akuma.body-ended", akumaId: "aku/example", bodySequence: 1, end: "exited" });
     console.log(JSON.stringify(process.getActiveResourcesInfo().filter((kind) => kind === "Timeout")));
-    process.exit(0);
   `;
   const output = execFileSync(
     process.execPath,
@@ -666,4 +690,5 @@ test("completed plugin drains leave no timeout keeping their process alive", (co
     { encoding: "utf8", timeout: 10_000 },
   );
   assert.deepEqual(JSON.parse(output), []);
+  assert.deepEqual(trace(outputPath), ["called", "body-ended"]);
 });

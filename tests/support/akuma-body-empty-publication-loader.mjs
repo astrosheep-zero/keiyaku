@@ -27,7 +27,7 @@ async function __keiyakuAwaitEmptyPublicationBarrier(launch) {
 
 export async function load(url, context, nextLoad) {
   const loaded = await nextLoad(url, context);
-  if (!url.endsWith("/src/akuma/body.ts")) return loaded;
+  if (!/\/src\/akuma\/body\.(?:js|ts)$/u.test(url)) return loaded;
   const source = typeof loaded.source === "string" ? loaded.source : Buffer.from(loaded.source).toString("utf8");
   if (!source.includes(marker)) throw new Error("Akuma Body test barrier could not find the empty publication boundary");
   return {

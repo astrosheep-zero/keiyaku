@@ -54,6 +54,7 @@ export type BodyLaunch = Readonly<{
   seed?: Omit<Soul, "createdAt">;
   birthSession?: Omit<SessionFact, "sequence">;
   initialBody?: string;
+  initiator?: string;
   initialSchemaJson?: string;
   refuseIfHeld?: boolean;
   completion?: Readonly<{ contractId?: string }>;
@@ -351,6 +352,7 @@ function turnOutcomeEmitter(launch: BodyLaunch, soul: Soul): TurnOutcomeEmitter 
   return {
     async emit(turnSequence: number, outcome: CommittedOutcome): Promise<void> {
       try {
+        const initiator = (await readTurn(launch.paths, turnSequence))?.initiator;
         plugins ??= pluginRuntime({
           world: await World.at(worldRootForAkumaPaths(launch.paths)),
           reportDiagnostic,
@@ -362,6 +364,7 @@ function turnOutcomeEmitter(launch: BodyLaunch, soul: Soul): TurnOutcomeEmitter 
             kind: "akuma.turn-outcome",
             akumaId: soul.id,
             turnSequence,
+            ...(initiator === undefined ? {} : { initiator }),
             outcome:
               outcome.outcome === "answered"
                 ? { kind: "answered", text: outcome.answer }
@@ -443,6 +446,7 @@ async function runBodyTurns(input: BodyExecution): Promise<BodyTurnEnd> {
       runtimeSpawn: runtime.spawnChild ?? spawnAkumaBody,
       body: initial ?? "",
       ...(initial === undefined ? {} : { call: initial }),
+      ...(launch.initiator === undefined ? {} : { initiator: launch.initiator }),
       launchTells,
       ...(schema === undefined ? {} : { schemaJson: schema }),
       world: runtime.world,

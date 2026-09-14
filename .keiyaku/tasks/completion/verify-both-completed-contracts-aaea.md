@@ -1,0 +1,23 @@
+---
+id: task/completion/verify-both-completed-contracts-aaea
+title: Verify completed Contracts and temporary-root fix on main
+state: open
+priority: 2
+needs:
+  - task/completion/finish-verification-action-abee
+  - task/completion/finish-readiness-and-admitted-8d5a
+parent: null
+supersedes: []
+relates: []
+note: ""
+createdAt: 2026-09-05T05:12:40.248Z
+updatedAt: 2026-09-05T12:34:55.005Z
+---
+Inspect accepted diffs, confirm both Contracts claimed, run npm test, npm run test:typecheck, npm run build on main while preserving pre-existing unrelated dirty files.
+User added a separate root-cause Contract kei/prevent-akuma-fork-test-temporary-directory-resu. Final verification also requires its independent review and verified landing; existing local ignore entries are only temporary isolation, not its acceptance.
+User requested delegated lane decisions with global oversight. Recovery owner @finish-recovery and temporary-root owner @fork-temp-root-cause now coordinate their candidate/verification/reviewer repair loops; Warden retains cross-lane dependencies, host-only Git integration, landing slots and final main gates. Shared baseline five-file repair returned and is in final independent review by @baseline-race-review. Identity awaits that baseline. Original three-Contract aggregate net deletion remains an explicit unmet acceptance constraint, not waived; temporary-root Contract is additional independent work. Preserve unrelated root integration and CLI edits.
+LATEST USER DECISION: line count is no longer an acceptance constraint. Host journaled amendments removing size/net-deletion requirements from both active original Contracts (identity 01M1R72N6N1FBWA4Y5XQW6WKEB; recovery 01M1R72NAED29Y32RZZCN8KED2), preserving functional criteria and all gates. This supersedes earlier task notes about aggregate deletion. User also advanced main via PR #2 to 4fdb5e34a; all candidates must integrate/preserve new completion checkpoint behavior before final preparation and review.
+Shared baseline independently satisfied and committed main7c9c7ff55; five-file scope only, unrelated root CLI/integration edits preserved. All three candidates now include PR#2 main4fdb5e34a plus baseline. Recovery conflict integration checkpoint7de652188 preserves completion checkpoints/receipts and new suites; final semantic reviewer resumed. Identity currently owns exclusive full npm test/build gate slot. Temporary-root candidate checkpoint83fa329fa passed provisional independent review, but user explicitly challenged preserved .tmp-probe-akuma-fork-pdkf4D lock; its zero-byte0644 creator remains unknown and @fork-temp-root-cause is resolving that exact acceptance discrepancy before delivery. Exact local excludes preserve evidence without admitting it to candidates; not counted as fixes.
+User goal: finish all three Contracts end to end. Shared blocker repair37db49961 and reversible identity checkpoint922ef0313 are integrated. Identity owns authoritative audit/Verification first, recovery next; historical-root work is independent. Native Square implementation/review loop is delegated in /Users/astrosheep/Developer/square to @fix-stale-index-root (aku/expert-akuma/06a0b2a9). Preserve the original artifact and do not claim historical linkage. Host requested permission to temporarily stash only pre-existing tracked main-worktree changes before conflicting placements and restore them afterward; no such custody change has been performed.
+User authorized committing all pre-existing tracked main changes. Main commits now include7cba03d08,53a5e7229 plus shared fixes37db49961 and observerbbdab1f0. Square native root fix independently committed in /Users/astrosheep/Developer/square asc775327 with reviewer SATISFIED and npm test331 pass/0 fail/1 skipped; its cli-process11 failures were unrelated pre-existing. Evidence copies preserved at /Users/astrosheep/Developer/keiyaku-evidence-20260905.iGdw6E. Identity candidate contains final main and must run fresh authoritative audit; recovery candidate is clean at da77e1d75 awaiting its next slot. User goal remains all three Contracts finished; no historical creator attribution claimed for pdkf4D.
+Shared gate repair continued: facade-fleet fixture cleanup landed82b596fab with independent SATISFIED review and37/37 exit0. Final audit then exposed two mechanical baseline drifts: integration manifest omitted tests/akuma-api.test.ts and nuke.test expected Heart schema24 while authority is25. Independent reviewer SATISFIED; exact tests exit0; committed main e0cce23a0. Candidates must merge final main and rerun authoritative Verification.

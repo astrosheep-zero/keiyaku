@@ -11,6 +11,9 @@ export type PluginOutcome = Readonly<{ kind: "answered"; text: string }> | Reado
 export type PluginBodyEnd = "exited" | "broke-off" | "put-down" | "hung";
 
 export type PluginSignalMap = Readonly<{
+  "akuma.initiating": Readonly<{
+    initiator: string;
+  }>;
   "akuma.called": Readonly<{
     akumaId: string;
     callerAkumaId?: string;
@@ -19,6 +22,7 @@ export type PluginSignalMap = Readonly<{
   "akuma.turn-outcome": Readonly<{
     akumaId: string;
     turnSequence: number;
+    initiator?: string;
     outcome: PluginOutcome;
     contractId?: string;
   }>;

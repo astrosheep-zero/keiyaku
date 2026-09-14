@@ -99,12 +99,14 @@ function fleetRequestPort(world: Awaited<ReturnType<typeof World.prove>>): Fleet
         body: input.body,
         tellId: input.tellId,
         recordedAt: input.recordedAt,
+        ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
         signal: input.signal,
       }),
     tellAnswer: async (input) =>
       await PublicAkuma.select(world, input.target).tell(input.body, {
         schema: Schema.json(JSON.parse(input.schemaJson) as Record<string, unknown>, (value) => value),
         ...(input.interrupt === undefined ? {} : { interrupt: input.interrupt }),
+        ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
       }),
     kill: async (input) => {
       const result = await executeKillAkuma({ path: world, ids: input.targets, signal: input.signal });

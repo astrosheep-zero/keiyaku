@@ -149,12 +149,14 @@ test("Settings isolates malformed namespaces but never falls through a failed hi
     loaded = await settings({ root: value.project, home: value.home });
     assert.equal(loaded.namespace("gates").kind, "failed");
     assert.throws(() => gatesFrom({ settings: loaded }), SettingsError);
+    assert.throws(() => gatesFrom({ settings: loaded, names: ["reviewed"] }), SettingsError);
+    assert.deepEqual(gatesFrom({ settings: loaded, names: [] }), []);
   } finally {
     value.close();
   }
 });
 
-test("gatesFrom expands selected bundles, deduplicates stably, and defaults to reviewed", async () => {
+test("gatesFrom expands mixed gates and bundles, deduplicates stably, and defaults to reviewed", async () => {
   const value = fixture();
   try {
     writeFileSync(
@@ -173,17 +175,28 @@ test("gatesFrom expands selected bundles, deduplicates stably, and defaults to r
     assert.deepEqual(gatesFrom({ settings: loaded, names: [] }), []);
     assert.deepEqual(gatesFrom({ settings: loaded, names: ["empty"] }), []);
     assert.deepEqual(gatesFrom({ settings: loaded, names: ["first", "second", "first"] }), ["reviewed", "verified"]);
+    assert.deepEqual(
+      gatesFrom({ settings: loaded, names: ["verified", "first", "security-audited", "verified"] }),
+      ["verified", "reviewed", "security-audited"],
+    );
+    assert.deepEqual(gatesFrom({ settings: loaded, names: ["reviewed"] }), ["reviewed"]);
+    assert.deepEqual(gatesFrom({ settings: loaded, names: ["default"] }), ["default"]);
+    for (const name of ["", " ", "Security", "reviewed,verified"]) {
+      assert.throws(() => gatesFrom({ settings: loaded, names: [name] }), /gate or bundle name/u);
+    }
 
     writeFileSync(
       join(value.home, "settings.json"),
       JSON.stringify({
         gates: {
           default: { kind: "bundle", gates: [] },
+          reviewed: { kind: "bundle", gates: ["verified"] },
         },
       }),
     );
     loaded = await settings({ home: value.home });
     assert.deepEqual(gatesFrom({ settings: loaded }), []);
+    assert.deepEqual(gatesFrom({ settings: loaded, names: ["reviewed"] }), ["verified"]);
   } finally {
     value.close();
   }
@@ -201,18 +214,18 @@ test("gatesFrom validates only selected bundle records and hard-rejects the old 
           legacy: ["reviewed"],
           extra: { kind: "bundle", gates: ["reviewed"], note: true },
           invalid: { kind: "bundle", gates: ["Security"] },
-          unavailable: { kind: "bundle", gates: ["security-audited"] },
+          custom: { kind: "bundle", gates: ["security-audited"] },
         },
       }),
     );
     const loaded = await settings({ home: value.home });
     assert.deepEqual(gatesFrom({ settings: loaded, names: ["good"] }), ["reviewed"]);
-    assert.throws(() => gatesFrom({ settings: loaded, names: ["missing"] }), /unknown gate bundle/u);
+    assert.deepEqual(gatesFrom({ settings: loaded, names: ["missing"] }), ["missing"]);
     assert.throws(() => gatesFrom({ settings: loaded, names: ["future"] }), /unsupported kind/u);
     assert.throws(() => gatesFrom({ settings: loaded, names: ["legacy"] }), /must be an object/u);
     assert.throws(() => gatesFrom({ settings: loaded, names: ["extra"] }), /unknown field/u);
     assert.throws(() => gatesFrom({ settings: loaded, names: ["invalid"] }), /invalid gate word/u);
-    assert.throws(() => gatesFrom({ settings: loaded, names: ["unavailable"] }), /without a producer/u);
+    assert.deepEqual(gatesFrom({ settings: loaded, names: ["custom"] }), ["security-audited"]);
   } finally {
     value.close();
   }

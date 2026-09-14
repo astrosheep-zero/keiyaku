@@ -75,6 +75,20 @@ test("public ./akuma barrel exposes only the contracted names", async () => {
   assert.equal("TellResult" in exported, false);
 });
 
+test("package root exposes the same public Akuma values without private mechanisms", async () => {
+  const subpath = await import("../src/akuma/index.js");
+  const root: typeof subpath = await import("../src/index.js");
+  for (const name of Object.keys(subpath) as Array<keyof typeof subpath>) {
+    assert.strictEqual(root[name], subpath[name], name);
+  }
+  for (const name of ["AkumaHandle", "HeldAkumaLeash", "driveAkumaBody", "readHeart"]) {
+    assert.equal(name in root, false, name);
+  }
+  const schema: import("../src/index.js").Schema<{ ok: boolean }> = root.Schema.zod(z.object({ ok: z.boolean() }));
+  const options: import("../src/index.js").AkumaTellOptions<{ ok: boolean }> = { schema };
+  assert.deepEqual(options.schema.decode({ ok: true }), { ok: true });
+});
+
 test("Akuma.birth has no prompt and select is synchronous", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-birth-"));
   const home = join(root, "home");

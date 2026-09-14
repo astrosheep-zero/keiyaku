@@ -37,6 +37,7 @@ export type BornAkumaCall = Readonly<{
   seed: AkumaCallRecipe &
     Readonly<{ id: AllocatedAkuma["id"]; archetype: string; cwd: string; origin: { kind: "direct" } }>;
   initialBody?: string;
+  initiator?: string;
   initialSchemaJson?: string;
   awaitAsleep?: true;
   execution: BornExecution;
@@ -78,6 +79,7 @@ async function admitBodyRequest(input: {
     world: input.path,
     archetype: input.name,
     ...(input.call.body === undefined ? {} : { body: input.call.body }),
+    ...(input.call.initiator === undefined ? {} : { initiator: input.call.initiator }),
     ...(input.call.schema === undefined ? {} : { awaitAsleep: true }),
     ...(cwd === undefined ? {} : { cwd }),
     recipe: input.recipe,
@@ -116,6 +118,7 @@ async function admitDirect(input: {
       origin: { kind: "direct" },
     },
     ...(input.call.body === undefined ? {} : { initialBody: input.call.body }),
+    ...(input.call.initiator === undefined ? {} : { initiator: input.call.initiator }),
     ...(input.call.schema === undefined ? {} : { initialSchemaJson: schemaJsonText(input.call.schema) }),
     ...(input.call.schema === undefined ? {} : { awaitAsleep: true }),
     execution: {
@@ -273,6 +276,7 @@ class AkumaProduct {
           paths: allocated.paths,
           seed: born.seed,
           ...(born.initialBody === undefined ? {} : { initialBody: born.initialBody }),
+          ...(born.initiator === undefined ? {} : { initiator: born.initiator }),
           ...(born.initialSchemaJson === undefined ? {} : { initialSchemaJson: born.initialSchemaJson }),
           ...(Object.keys(completion).length === 0 ? {} : { completion }),
         }),

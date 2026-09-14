@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-const HEART_SCHEMA_VERSION = 28;
+const HEART_SCHEMA_VERSION = 29;
 const LEASH_SCHEMA_VERSION = 4;
 
 function assertSchemaVersion(database: DatabaseSync, table: "akuma_schema" | "leash_schema", expected: number): void {
@@ -62,6 +62,7 @@ export const HEART_SCHEMA = `
     sequence INTEGER PRIMARY KEY REFERENCES timeline(sequence) ON DELETE CASCADE,
     body_sequence INTEGER NOT NULL REFERENCES bodies(sequence),
     started_at TEXT NOT NULL,
+    initiator TEXT,
     end_sequence INTEGER UNIQUE REFERENCES timeline(sequence) ON DELETE SET NULL,
     outcome TEXT CHECK (outcome IN ('answered', 'failed', 'invalid-output')),
     history_id TEXT UNIQUE,
@@ -107,6 +108,7 @@ export const HEART_SCHEMA = `
     id TEXT PRIMARY KEY,
     sequence INTEGER NOT NULL UNIQUE REFERENCES timeline(sequence) ON DELETE CASCADE,
     body TEXT NOT NULL,
+    initiator TEXT,
     schema_json TEXT CHECK (schema_json IS NULL OR json_valid(schema_json)),
     recorded_at TEXT NOT NULL
   ) STRICT;

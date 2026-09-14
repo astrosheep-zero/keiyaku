@@ -207,9 +207,13 @@ async function observePublishedRequest<Input, Output, Reference>(
   }
   try {
     for (;;) {
-      // The service flushes this bounded snapshot before its receipt, including fast commands.
-      await consumeProgress();
-      const response = await readRequestReceipt(input, path, id);
+      let response: RequestResponse<Output, Reference> | undefined;
+      try {
+        response = await readRequestReceipt(input, path, id);
+      } finally {
+        // A visible receipt guarantees its final progress was already published, even on failure.
+        await consumeProgress();
+      }
       if (response !== undefined) return response;
       if (
         !(await access(input.directory).then(

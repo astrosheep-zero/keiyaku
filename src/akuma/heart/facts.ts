@@ -80,6 +80,7 @@ export type TurnStartFact = Readonly<{
   sequence: number;
   bodySequence: number;
   startedAt: string;
+  initiator?: string;
   schemaJson?: string;
 }>;
 
@@ -118,6 +119,7 @@ export type TellFact = Readonly<{
   sequence: number;
   id: string;
   body: string;
+  initiator?: string;
   schemaJson?: string;
   recordedAt: string;
   state: "pending" | "told";

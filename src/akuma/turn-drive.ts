@@ -83,6 +83,7 @@ export type DriveTurnInput = Readonly<{
   body: string;
   call?: string;
   launchTells: readonly TellFact[];
+  initiator?: string;
   schemaJson?: string;
   supervisor: BodySupervisor;
   runtimeSpawn(launch: AkumaCallRequestChildLaunch): Promise<OwnedProcess | void>;
@@ -164,7 +165,9 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
   if (session !== undefined && input.adapter.resume === undefined) return { kind: "resume-unsupported" };
   const boundTells = drainPendingTells(input.launchTells);
   const schemaJson = input.schemaJson ?? boundTells.find((tell) => tell.schemaJson !== undefined)?.schemaJson;
+  const initiator = input.call === undefined ? boundTells[0]?.initiator : input.initiator;
   const turn = await beginTurn(input.paths, {
+    ...(initiator === undefined ? {} : { initiator }),
     bodySequence: input.bodySequence,
     startedAt: input.now(),
     ...(input.call === undefined ? {} : { call: input.call }),

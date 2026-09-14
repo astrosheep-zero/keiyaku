@@ -20,7 +20,6 @@ function phaseCoordinates(
 ): readonly string[] {
   return [
     ...(observation.cwd === undefined ? [] : [`cwd=${safeText(observation.cwd)}`]),
-    ...(observation.source === undefined ? [] : [`source=${safeText(observation.source)}`]),
     ...(observation.name === undefined ? [] : [`hook=${safeText(observation.name)}`]),
     ...(observation.index === undefined ? [] : [`declaration=${observation.index}/${observation.total ?? "?"}`]),
   ];

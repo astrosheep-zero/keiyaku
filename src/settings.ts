@@ -209,9 +209,6 @@ function bundleGates(name: string, value: unknown): readonly Gate[] {
     if (!gateWord(gate)) {
       throw new SettingsError(`gate bundle '${name}' contains an invalid gate word`);
     }
-    if (gate !== "reviewed" && gate !== "verified") {
-      throw new SettingsError(`gate bundle '${name}' contains a gate without a producer: ${gate}`);
-    }
     return gate;
   });
 }
@@ -223,23 +220,18 @@ export function gatesFrom(input: GatesFromInput): readonly Gate[] {
   }
   const names = input.names ?? ["default"];
   for (const name of names) {
-    if (!gateWord(name)) throw new SettingsError("gate bundle name must match ^[a-z][a-z0-9-]{0,63}$");
+    if (!gateWord(name)) throw new SettingsError("gate or bundle name must match ^[a-z][a-z0-9-]{0,63}$");
   }
+  if (names.length === 0) return Object.freeze([]);
   const view = input.settings.namespace("gates");
   if (view.kind === "failed") namespaceFailure(view);
   const expanded: Gate[] = [];
   const seen = new Set<Gate>();
   for (const name of names) {
     const selected = view.entries.find((entry) => entry.name === name);
-    if (selected === undefined) {
-      if (input.names === undefined) {
-        if (!seen.has("reviewed")) expanded.push("reviewed");
-        seen.add("reviewed");
-        continue;
-      }
-      throw new SettingsError(`unknown gate bundle: ${name}`);
-    }
-    for (const gate of bundleGates(name, selected.value)) {
+    const gates =
+      selected === undefined ? [input.names === undefined ? "reviewed" : name] : bundleGates(name, selected.value);
+    for (const gate of gates) {
       if (seen.has(gate)) continue;
       seen.add(gate);
       expanded.push(gate);

@@ -194,13 +194,15 @@ export class AkumaHandle {
     tellId: string = randomUUID(),
     recordedAt = new Date().toISOString(),
     runtime?: TellWakeRuntime,
-    schemaJson?: string,
+    options: Readonly<{ schemaJson?: string; initiator?: string }> = {},
   ): Promise<TellResult> {
+    const { schemaJson, initiator } = options;
     const admitted = await recordTell(this.paths, {
       kind: "tell",
       id: tellId,
       body,
       recordedAt,
+      ...(initiator === undefined ? {} : { initiator }),
       ...(schemaJson === undefined ? {} : { schemaJson }),
     });
     if (admitted.kind === "not-born") throw new AkumaNotBornError(this.id);
@@ -209,7 +211,13 @@ export class AkumaHandle {
 
   async interrupt(
     body: string,
-    options: Readonly<{ tellId?: string; schemaJson?: string; signal?: AbortSignal; runtime?: TellWakeRuntime }> = {},
+    options: Readonly<{
+      tellId?: string;
+      schemaJson?: string;
+      initiator?: string;
+      signal?: AbortSignal;
+      runtime?: TellWakeRuntime;
+    }> = {},
   ): Promise<InterruptReceipt> {
     const request = await requestPause(this.paths, new Date().toISOString(), options.signal);
     if (request.kind === "not-born") {
@@ -246,6 +254,7 @@ export class AkumaHandle {
         id: options.tellId ?? id,
         body,
         recordedAt: new Date().toISOString(),
+        ...(options.initiator === undefined ? {} : { initiator: options.initiator }),
         ...(options.schemaJson === undefined ? {} : { schemaJson: options.schemaJson }),
       });
       if (admitted.kind === "not-born") throw new AkumaNotBornError(this.id);

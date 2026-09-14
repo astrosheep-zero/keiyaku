@@ -92,16 +92,25 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
       callerAkumaId: "aku/caller",
       contractId: "kei/example",
     });
+    process.env.CODEX_THREAD_ID = "teller";
+    process.env.SQUARE_PARTICIPANT_NAME = "Bob";
+    const teller = await squarePlugin.activate({
+      world: root as WorldRoot,
+      config: undefined,
+      writablePath: () => join(root, ".square"),
+    });
+    await teller.signals?.["akuma.initiating"]?.({ kind: "akuma.initiating", initiator: "Bob" });
     if (process.platform !== "win32") {
       writeFileSync(
         process.env.SQUARE_CODEX_BOUNDARIES,
-        `${JSON.stringify({ v: 1, nextSequence: 1, threads: { caller: { lastStop: 1, lastNonStop: 0 } } })}\n`,
+        `${JSON.stringify({ v: 1, nextSequence: 1, threads: { caller: { lastStop: 1, lastNonStop: 0 }, teller: { lastStop: 1, lastNonStop: 0 } } })}\n`,
       );
     }
     await handler({
       kind: "akuma.turn-outcome",
       akumaId: "aku/answered",
       turnSequence: 1,
+      initiator: "Alice",
       outcome: { kind: "answered", text: "done" },
       contractId: "kei/example",
     });
@@ -109,6 +118,7 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
       kind: "akuma.turn-outcome",
       akumaId: "aku/answered",
       turnSequence: 2,
+      initiator: "Bob",
       outcome: { kind: "answered", text: "adjusted" },
       contractId: "kei/example",
     });
@@ -122,8 +132,8 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
       },
       {
         actor: "aku/answered",
-        body: "aku/answered turn/2 (@Alice) kei/example\n✓ came back\nignore if you have already seen this.",
-        mentions: ["Alice"],
+        body: "aku/answered turn/2 (@Bob) kei/example\n✓ came back\nignore if you have already seen this.",
+        mentions: ["Bob"],
       },
     ]);
     if (process.platform !== "win32") {
@@ -133,15 +143,15 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
         .map((line) => JSON.parse(line) as string[]);
       assert.equal(queued.length, 2);
       assert.deepEqual(queued[0]?.slice(0, 3), ["queue", "--thread", "caller"]);
+      assert.deepEqual(queued[1]?.slice(0, 3), ["queue", "--thread", "teller"]);
       assert.match(queued[0]?.at(-1) ?? "", /attention: act\/\d+ for Alice from aku\/answered/u);
       const evidence = readFileSync(join(root, "user-ledger", "evidence.ndjsonl"), "utf8")
         .trim()
         .split("\n")
         .map((line) => JSON.parse(line) as { kind: string; outcome: string; participant: string });
       assert.equal(
-        evidence.filter(
-          (row) => row.kind === "wake" && row.outcome === "accepted" && row.participant === "Alice",
-        ).length,
+        evidence.filter((row) => row.kind === "wake" && row.outcome === "accepted" && ["Alice", "Bob"].includes(row.participant))
+          .length,
         2,
       );
     }
@@ -177,8 +187,8 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
       },
       {
         actor: "aku/answered",
-        body: "aku/answered turn/2 (@Alice) kei/example\n✓ came back\nignore if you have already seen this.",
-        mentions: ["Alice"],
+        body: "aku/answered turn/2 (@Bob) kei/example\n✓ came back\nignore if you have already seen this.",
+        mentions: ["Bob"],
       },
       {
         actor: "aku/failed",
@@ -190,12 +200,54 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     try {
       assert.deepEqual((await square.participants()).map(({ name }) => name).sort(), [
         "Alice",
+        "Bob",
         "aku/answered",
         "aku/failed",
       ]);
     } finally {
       await square.close();
     }
+  } finally {
+    restoreEnvironment(prior);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Turn mentions follow the signal initiator, never the Body environment", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-initiator-"));
+  const prior = { SQUARE_PARTICIPANT_NAME: process.env.SQUARE_PARTICIPANT_NAME };
+  try {
+    mkdirSync(join(root, ".square"), { recursive: true });
+    for (const initiator of ["Alice", "Bob"]) {
+      process.env.SQUARE_PARTICIPANT_NAME = initiator;
+      const submitter = await squarePlugin.activate({
+        world: root as WorldRoot,
+        config: undefined,
+        writablePath: () => join(root, ".square"),
+      });
+      await submitter.signals?.["akuma.initiating"]?.({ kind: "akuma.initiating", initiator });
+    }
+    process.env.SQUARE_PARTICIPANT_NAME = "OriginalCaller";
+    const instance = await squarePlugin.activate({
+      world: root as WorldRoot,
+      config: undefined,
+      writablePath: () => join(root, ".square"),
+    });
+    const handler = instance.signals?.["akuma.turn-outcome"];
+    assert.ok(handler);
+    for (const [index, initiator] of ["Alice", "Bob", undefined].entries()) {
+      await handler({
+        kind: "akuma.turn-outcome",
+        akumaId: "aku/worker",
+        turnSequence: index + 1,
+        ...(initiator === undefined ? {} : { initiator }),
+        outcome: { kind: "failed", reason: "fixture failure" },
+      });
+    }
+    assert.deepEqual(
+      (await expressions(squarePath(root))).map(({ mentions }) => mentions),
+      [["Alice"], ["Bob"], []],
+    );
   } finally {
     restoreEnvironment(prior);
     rmSync(root, { recursive: true, force: true });

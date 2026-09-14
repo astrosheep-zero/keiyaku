@@ -15,18 +15,15 @@ executable specifications. The declaration set, its preparation, and its
 dependency selection remain attempt-local and are never core terms, cache,
 producer registry, or durable execution authority.
 
-Deliver and audit run the selected declarations against the exact integration
-snapshot in a disposable per-attempt environment. The Contract's appointed
-worktree is the explicit environment source: Git-classified ignored and
-untracked execution state may be copied from it, while candidate tracked bytes
-and ancestors always win. Source tracked bytes, deleted candidate paths, Git
-metadata, and Keiyaku authority or guidance never substitute for candidate
-custody. Inherited regular files are independent writable copies. Safe internal
-links may be relocated; escaping links, special files, unsafe nested repository
-state, and an observed changing source are typed environment failure rather
-than an invitation to follow, install, infer an ecosystem, or share a mutable
-cache. This is execution convenience, not an atomic filesystem snapshot,
-dependency-freshness policy, or reproducibility claim.
+Verification runs the selected declarations against the exact integration
+snapshot in a clean disposable worktree for each attempt. Project-configured
+setup prepares that worktree before declarations, and configured cleanup runs
+before its removal, including after setup or declaration failure. Mutable
+ignored and untracked state from another checkout is not automatically copied
+or linked into the scratch. Dependency installation and any intentional reuse
+belong to the project's hooks, not ecosystem inference by Keiyaku. This is a
+local execution convenience, not a permission sandbox, dependency-freshness
+policy, or reproducibility claim.
 
 Each declaration and scratch setup or cleanup hook inherits the caller process
 environment through the shared runtime. Candidate-owned settings remain the
@@ -57,10 +54,10 @@ Environment failures from configured scratch hooks preserve the hook's configure
 name and typed failure detail as their public recovery identity; the hook's
 private array position is never exposed.
 
-An attempt can emit ephemeral observations for materialization, inherited
-environment, configured setup and cleanup, declarations, and their stdout or
-stderr. They name only witnessed phases and known execution/source directories;
-they neither claim liveness nor become testimony, a run log, or replay
+An attempt can emit ephemeral observations for materialization, configured
+setup and cleanup, declarations, and their stdout or stderr. They name only
+witnessed phases and known execution directories; they neither claim liveness
+nor become testimony, a run log, or replay
 authority. Stopped process outcomes retain bounded output tails and explicit
 truncation facts. Observer failure cannot affect child custody or final result.
 

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { readdir, readFile, writeFile } from "node:fs/promises";
+import fsPromises, { readdir, readFile, writeFile } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -272,6 +273,34 @@ async function waitFor(condition: () => boolean): Promise<void> {
   while (!condition()) await new Promise((resolve) => setTimeout(resolve, 5));
 }
 
+test("forwarded ordinary and schema Tells retain the submitting initiator at the service port", async () => {
+  const received: Array<string | undefined> = [];
+  const port: FleetRequestPort = {
+    ...unusedFleetPort,
+    tell: async (input) => { received.push(input.initiator); return {} as never; },
+    tellAnswer: async (input) => { received.push(input.initiator); return "answer"; },
+  };
+  const facts: ExecutionFacts = {
+    id: "request-initiator",
+    admittedAt: "2026-09-09T00:00:01.000Z",
+    requester: "aku/parent/11111111",
+    signal: new AbortController().signal,
+    admissionOpen: () => true,
+  };
+  for (const action of ["akuma.tell", "akuma.tell-answer"] as const) {
+    const command = fleetRequestCommand(action, port);
+    const request = command.protocol.decodeRequest({
+      target: "aku/worker/22222222",
+      body: "continue",
+      initiator: "Bob",
+      ...(action === "akuma.tell-answer" ? { schemaJson: "{}" } : {}),
+    });
+    assert.ok(request);
+    await command.execute(request, facts);
+  }
+  assert.deepEqual(received, ["Bob", "Bob"]);
+});
+
 test("fleet request permissions stay separated by action", () => {
   assert.equal(fleetRequestProtocol("akuma.wait").isPermitted([]), true);
   assert.equal(fleetRequestProtocol("akuma.tell").isPermitted(["akuma.tell"]), true);
@@ -446,6 +475,57 @@ test("request transport exposes gated opaque progress before its final receipt",
   } finally {
     await pump.close();
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("request progress includes the final snapshot published between progress and receipt reads", async (t) => {
+  for (const failed of [false, true]) {
+    await t.test(failed ? "failed receipt" : "successful receipt", async (t) => {
+      const directory = mkdtempSync(join(tmpdir(), "keiyaku-request-final-progress-"));
+      const id = randomUUID();
+      const command = progressProtocol();
+      const originalRead = fsPromises.readFile;
+      let published = false;
+      const seen: unknown[] = [];
+      const mock = t.mock.method(fsPromises, "readFile", async (...args: Parameters<typeof readFile>) => {
+        const path = String(args[0]);
+        if (!path.startsWith(directory)) return originalRead(...args);
+        if (path.endsWith(".receipt.json")) {
+          published = true;
+          return JSON.stringify({
+            id,
+            action: command.action,
+            state: "served",
+            outcome: failed
+              ? { kind: "failed", failure: { kind: "failed", diagnostic: "service failed" } }
+              : { kind: "returned", result: "complete" },
+          });
+        }
+        if (path.endsWith(".progress.json")) {
+          if (!published) throw Object.assign(new Error("not yet published"), { code: "ENOENT" });
+          return JSON.stringify({
+            id,
+            action: command.action,
+            nextSequence: 2,
+            events: [{ sequence: 1, value: "final output" }],
+          });
+        }
+        return originalRead(...args);
+      });
+      syncBuiltinESMExports();
+      try {
+        const request = requestBodyCommand({
+          directory, id, command, value: "run", onProgress: (value) => seen.push(value),
+        });
+        if (failed) await assert.rejects(request, /service failed/u);
+        else assert.equal((await request).kind, "returned");
+        assert.deepEqual(seen, ["final output"]);
+      } finally {
+        mock.mock.restore();
+        syncBuiltinESMExports();
+        rmSync(directory, { recursive: true, force: true });
+      }
+    });
   }
 });
 

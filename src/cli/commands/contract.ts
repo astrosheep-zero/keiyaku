@@ -137,12 +137,13 @@ function refuse(command: ContractCommand, message: string): never {
   throw new CliUsageError(message, commandGuide(command, CONTRACT_COMMAND_SPECS[command].usage));
 }
 
-function parseGateBundleNames(parts: ParsedContractParts, command: "bind" | "amend"): readonly string[] | undefined {
+function parseGateNames(parts: ParsedContractParts, command: "bind" | "amend"): readonly string[] | undefined {
   const value = optionalFlag(parts.flags, "gates");
   if (value === undefined) return undefined;
+  if (value === "") return [];
   const names = value.split(",");
   if (names.some((name) => name.length === 0)) {
-    refuse(command, "--gates requires nonempty comma-separated names");
+    refuse(command, '--gates requires comma-separated names or "" to clear gates');
   }
   return names;
 }
@@ -168,7 +169,7 @@ function parseBind(parts: ParsedContractParts): ParsedBind {
   const target = optionalFlag(parts.flags, "target");
   const after =
     parts.flags.after === undefined ? [] : Array.isArray(parts.flags.after) ? parts.flags.after : [parts.flags.after];
-  const gates = parseGateBundleNames(parts, "bind");
+  const gates = parseGateNames(parts, "bind");
   return {
     command: "bind",
     ...(task === undefined ? {} : { task }),
@@ -186,7 +187,7 @@ function parseAmend(parts: ParsedContractParts): ParsedAmend {
     parts.flags.after === undefined ? [] : Array.isArray(parts.flags.after) ? parts.flags.after : [parts.flags.after];
   if (parts.flags["clear-after"] === true && after.length > 0)
     refuse("amend", "--clear-after and --after are mutually exclusive");
-  const gates = parseGateBundleNames(parts, "amend");
+  const gates = parseGateNames(parts, "amend");
   if (!parts.stdin && parts.flags.after === undefined && parts.flags["clear-after"] !== true && gates === undefined) {
     refuse("amend", "amend requires stdin or --after, --clear-after, or --gates");
   }

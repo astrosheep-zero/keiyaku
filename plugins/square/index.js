@@ -41,11 +41,11 @@ async function openSquare(path, environment, ledger, wakeTransport) {
         }
     }
 }
-function outcomeExpression(signal, caller) {
+function outcomeExpression(signal) {
     const header = [
         signal.akumaId,
         `turn/${signal.turnSequence}`,
-        caller === undefined ? undefined : `(@${caller})`,
+        signal.initiator === undefined ? undefined : `(@${signal.initiator})`,
         signal.contractId,
     ]
         .filter((value) => value !== undefined)
@@ -75,6 +75,15 @@ const plugin = {
         catch { }
         return {
             signals: {
+                async "akuma.initiating"(signal) {
+                    const square = await openSquare(path, environment, ledger, wakeTransport);
+                    try {
+                        await square.implicitJoin(signal.initiator);
+                    }
+                    finally {
+                        await square.close();
+                    }
+                },
                 async "akuma.called"(signal) {
                     if (caller === undefined)
                         return;
@@ -95,7 +104,7 @@ const plugin = {
                         const joined = await square.implicitJoin(signal.akumaId);
                         if (joined.state === "done" || joined.participant === undefined)
                             return;
-                        await joined.participant.express(outcomeExpression(signal, caller), caller === undefined ? {} : { mentions: [caller] });
+                        await joined.participant.express(outcomeExpression(signal), signal.initiator === undefined ? {} : { mentions: [signal.initiator] });
                     }
                     finally {
                         await square.close();

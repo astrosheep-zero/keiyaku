@@ -70,3 +70,9 @@ The call and tell edges may acquire a JSON Schema from a caller-selected file;
 the file is decoded once at the edge and passed to the public Akuma surface.
 Schema acquisition failures are usage or input failures, while ordinary call,
 tell, wait, history, and kill behavior remains unchanged.
+
+Call and Tell capture the submitting process's assigned Square identity at the
+invocation edge and pass it as optional input attribution, including through a
+direct-parent request. Missing or unusable Square identity leaves attribution
+absent and never refuses the operation. The Body does not rediscover the caller
+from its own environment.

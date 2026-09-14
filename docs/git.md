@@ -64,13 +64,11 @@ intermediate patch in the caller. A producer failure, consumer failure, or
 cancelled transfer yields no identity, even when partial output resembles one.
 A failed transfer awaits retirement of both owned commands and preserves any
 retirement failure.
-For each Verification attempt Git materializes the exact candidate first, then
-copies only permitted execution state from the explicit appointed worktree into
-that independent scratch. Candidate tracked paths have precedence over copied
-state, including directory ancestors and candidate deletions. This copy neither
-changes the source worktree nor becomes a source snapshot, install mechanism,
-or reusable dependency cache; an unsafe or inconsistent transfer is a typed
-failure.
+For each Verification attempt Git materializes the exact candidate in an
+independent disposable worktree without importing mutable execution state from
+another checkout. Preparation and command execution belong to
+[verification.md](verification.md); Git owns the scratch's byte custody and
+physical removal.
 
 Delivery normally requires a clean managed worktree. Explicit dirty delivery
 captures the complete non-ignored final tree without rewriting the caller's

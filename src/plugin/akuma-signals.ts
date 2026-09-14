@@ -11,6 +11,22 @@ type CalledPluginSignalInput = Readonly<{
   contractId?: string;
 }>;
 
+export async function emitInitiatingPluginSignal(
+  input: Readonly<{
+    world: WorldRoot;
+    settings?: Settings;
+    initiator: string;
+    reportDiagnostic: (message: string) => void;
+  }>,
+): Promise<void> {
+  const runtime = await pluginRuntime({
+    world: input.world,
+    ...(input.settings === undefined ? {} : { settings: input.settings }),
+    reportDiagnostic: input.reportDiagnostic,
+  });
+  await runtime.emit({ kind: "akuma.initiating", initiator: input.initiator }, input.reportDiagnostic);
+}
+
 export async function emitCalledPluginSignal(input: CalledPluginSignalInput): Promise<void> {
   const runtime = await pluginRuntime({
     world: input.world,

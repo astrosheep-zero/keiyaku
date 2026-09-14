@@ -106,6 +106,16 @@ test("the bundled plugin contains all six skills", () => {
   }
 });
 
+test("the bundled Akuma skill links to its packaged automation guide", () => {
+  const skill = join(installAssetsRoot(), "plugins", "keiyaku", "skills", "keiyaku-akuma");
+  const index = readFileSync(join(skill, "SKILL.md"), "utf8");
+  assert.ok(index.includes("(references/automation.md)"));
+  const guide = readFileSync(join(skill, "references", "automation.md"), "utf8");
+  assert.match(guide, /^# Automation With The Akuma API/mu);
+  assert.ok(guide.includes('from "@astrosheep/keiyaku"'));
+  assert.ok(guide.includes("Schema.zod"));
+});
+
 test("bundled instructions keep facade and standalone Akuma call surfaces distinct", () => {
   const plugin = join(installAssetsRoot(), "plugins", "keiyaku", "skills");
   const call = renderAkumaUsage("call").slice("usage  keiyaku ".length);

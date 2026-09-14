@@ -4,7 +4,6 @@ import type { MaterializedScratchCandidate, WorktreeLeak } from "../git/scratch.
 import type { GitRepository } from "../git/process.js";
 import type { Settings } from "../settings.js";
 import { runProcess, type ProcessOutcome } from "../runtime/proc/run.js";
-import { inheritVerificationEnvironment } from "../git/verification-environment.js";
 import type { VerificationObservation } from "./observation.js";
 import type { VerificationDeclaration } from "./declaration.js";
 
@@ -62,7 +61,6 @@ export type ExecuteVerificationInput = Readonly<{
     candidate: SnapshotId,
   ) => Promise<MaterializedScratchCandidate>;
   projectSettings: (root: string) => Promise<Settings>;
-  environmentSource?: string;
   observe?: (event: VerificationObservation) => void;
   signal?: AbortSignal;
 }>;
@@ -225,28 +223,6 @@ async function materializeScratch(
   }
 }
 
-async function inheritEnvironment(input: ExecuteVerificationInput, cwd: string): Promise<void> {
-  const coordinate = {
-    phase: "environment" as const,
-    cwd,
-    ...(input.environmentSource === undefined ? {} : { source: input.environmentSource }),
-  };
-  observe(input, { kind: "phase", ...coordinate, state: "started" });
-  try {
-    if (input.environmentSource !== undefined)
-      await inheritVerificationEnvironment(input.repository, input.environmentSource, cwd, input.signal);
-    observe(input, { kind: "phase", ...coordinate, state: "finished", outcome: "ok" });
-  } catch (error) {
-    observe(input, {
-      kind: "phase",
-      ...coordinate,
-      state: "finished",
-      outcome: input.signal?.aborted ? "cancelled" : "failed",
-    });
-    throw error;
-  }
-}
-
 type PreparedScratchExecution = Readonly<{
   outcome: VerificationTerminalOutcome | VerificationExecutionStop;
   destroy?: readonly HookCommand[];
@@ -258,7 +234,6 @@ async function runScratch(
 ): Promise<PreparedScratchExecution> {
   try {
     input.signal?.throwIfAborted();
-    await inheritEnvironment(input, scratch.cwd);
     const hooks = worktreeHooksFrom({ settings: await input.projectSettings(scratch.cwd) });
     const readiness = await observedHooks({
       execution: input,

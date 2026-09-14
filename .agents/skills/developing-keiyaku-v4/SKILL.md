@@ -61,10 +61,9 @@ When a real Task already owns the plan, its loop is `task add` → `task start`
 TaskHolder. Contract claim settles the current held Task to `done`, while
 abandon releases it. Otherwise bind the Contract without `--task`.
 
-Contract gates come from the Settings `gates` namespace. Omitting `--gates`
-selects `gates.default`, or freezes `["reviewed"]` when that entry is absent.
-`--gates <name,...>` selects named bundles in order; the values do not name
-literal gate words.
+Contract gate selections accept literal gates and configured bundles together.
+Use `--gates ""` for an explicit empty selection. Read `bind --help` and
+`amend --help` for defaults, expansion, and replacement semantics.
 
 ## Akuma dispatch
 

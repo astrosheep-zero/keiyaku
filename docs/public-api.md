@@ -3,8 +3,12 @@
 The ESM package root is the sole public Contract import surface. It exposes the
 world/repository construction, Contract handles and operations, delivery view,
 settings construction, plugin contract types, and their public errors and
-values. Task, Kanshi, Akuma, and Plugin remain named product subpaths with their
-own owner chapters. There is no legacy package compatibility export or generic
+values. The root also exposes the public Akuma product without wrapping it:
+its handles, schema construction, errors, and values are identical to those
+available through the Akuma subpath. Import choice changes neither product
+ownership nor execution semantics and exposes no private execution or storage
+mechanism. Task, Kanshi, Akuma, and Plugin retain their named product subpaths
+and owner chapters. There is no legacy package compatibility export or generic
 orchestration surface.
 
 ## Composition Boundary
@@ -82,9 +86,18 @@ second result model, and its consumer cannot change the final outcome.
 ## Product Boundaries
 
 Settings are an explicit shared resource. Contract operations retain derived
-values, not a live Settings observation. World construction and destructive
-world reset are owned by [world.md](world.md); this package surface provides the
-public entry and result without adding another reset authority.
+values, not a live Settings observation. Gate selection accepts literal opaque
+gates and named bundles together: a configured name expands its bundle, while
+an unconfigured name remains a literal gate. Expansion preserves first-seen
+order without duplicates and does not infer producer availability. A malformed
+selected bundle or unavailable configuration is a failure, not literal fallback.
+An explicit empty selection needs no bundle lookup and freezes no obligations;
+omission retains the operation's default or existing terms. Later configuration
+changes never rewrite admitted gates.
+
+World construction and destructive world reset are owned by
+[world.md](world.md); this package surface provides the public entry and result
+without adding another reset authority.
 
 The separate Akuma product owns its own identity, execution, and public handles.
 Package-root composition may connect Contract-facing capabilities to it but

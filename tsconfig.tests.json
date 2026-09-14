@@ -90,7 +90,8 @@
     "tests/library-contract-operations.test.ts",
     "tests/package-consumers.test.ts",
     "tests/task-compose.test.ts",
-    "tests/contract-fork.test.ts"
+    "tests/contract-fork.test.ts",
+    "tests/duration.test.ts"
   ],
   "exclude": []
 }

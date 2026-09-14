@@ -12,6 +12,16 @@ An Akuma is a durable callable worker. Its complete identity is
 later. An Alias is a movable world-local selector usable wherever a direct id
 is accepted; the identity underneath never changes.
 
+## Automated Orchestration
+
+For task-specific JavaScript orchestration with the public Akuma API, read
+[Automation With The Akuma API](references/automation.md). It covers structured
+answers, semantic ranking and tournaments, adversarial verification, learning
+from corrections, bounded parallelism, and failure/reconnection handling.
+Use it when the flagship should write and run a program for this task rather
+than coordinate every delegation in conversation. The examples are adaptable
+techniques, not a fixed workflow or a built-in workflow runtime.
+
 ## Start One
 
 ```bash

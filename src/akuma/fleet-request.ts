@@ -43,7 +43,7 @@ const waitRequestSchema = z
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
   }));
 const tellRequestSchema = z
-  .object({ target: akumaIdSchema, body: z.string() })
+  .object({ target: akumaIdSchema, body: z.string(), initiator: nonblankTextSchema.optional() })
   .strict()
   .transform((request) => ({ action: "akuma.tell" as const, ...request }));
 const tellAnswerRequestSchema = z
@@ -51,6 +51,7 @@ const tellAnswerRequestSchema = z
     target: akumaIdSchema,
     body: z.string(),
     schemaJson: nonblankTextSchema,
+    initiator: nonblankTextSchema.optional(),
     interrupt: z.boolean().optional(),
   })
   .strict()
@@ -96,6 +97,7 @@ export type FleetRequestPort = Readonly<{
       body: string;
       tellId: string;
       recordedAt: string;
+      initiator?: string;
       signal: AbortSignal;
     }>,
   ): Promise<AkumaTellResult>;
@@ -104,6 +106,7 @@ export type FleetRequestPort = Readonly<{
       target: AkumaStatus["id"];
       body: string;
       schemaJson: string;
+      initiator?: string;
       interrupt?: boolean;
       signal: AbortSignal;
     }>,
@@ -198,6 +201,7 @@ export function fleetRequestCommand(
             target: request.target,
             body: request.body,
             tellId: facts.id,
+            ...(request.initiator === undefined ? {} : { initiator: request.initiator }),
             recordedAt: facts.admittedAt,
             signal: facts.signal,
           }),
@@ -211,6 +215,7 @@ export function fleetRequestCommand(
             target: request.target,
             body: request.body,
             schemaJson: request.schemaJson,
+            ...(request.initiator === undefined ? {} : { initiator: request.initiator }),
             ...(request.interrupt === undefined ? {} : { interrupt: request.interrupt }),
             signal: facts.signal,
           }),
@@ -245,6 +250,7 @@ export async function requestForwardedFleetTellAnswer(
     target: AkumaStatus["id"];
     body: string;
     schema: Schema<unknown>;
+    initiator?: string;
     interrupt?: boolean;
     signal?: AbortSignal;
   }>,
@@ -257,6 +263,7 @@ export async function requestForwardedFleetTellAnswer(
       target: input.target,
       body: input.body,
       schemaJson: schemaJsonText(input.schema),
+      ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
       ...(input.interrupt === undefined ? {} : { interrupt: input.interrupt }),
     },
     ...(input.signal === undefined ? {} : { signal: input.signal }),
@@ -326,13 +333,19 @@ export async function requestForwardedFleetTell(
     directory: string;
     target: AkumaStatus["id"];
     body: string;
+    initiator?: string;
     signal?: AbortSignal;
   }>,
 ): Promise<AkumaTellResult> {
   const response = await requestBodyCommand({
     directory: input.directory,
     command: fleetRequestProtocol("akuma.tell"),
-    value: { action: "akuma.tell", target: input.target, body: input.body },
+    value: {
+      action: "akuma.tell",
+      target: input.target,
+      body: input.body,
+      ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+    },
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
   return forwardedFleetCommandResult(response, "akuma.tell");

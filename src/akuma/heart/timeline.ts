@@ -89,7 +89,7 @@ function decodeTimelineRows(database: DatabaseSync, rows: readonly TimelineRow[]
   const turns = database
     .prepare(
       `SELECT sequence, body_sequence, started_at, end_sequence, outcome,
-    history_id, session_json, answer, answer_json, schema_json, diagnostic, completed_at FROM turns
+    history_id, session_json, answer, answer_json, schema_json, initiator, diagnostic, completed_at FROM turns
     WHERE sequence IN (SELECT value FROM json_each(?)) OR end_sequence IN (SELECT value FROM json_each(?))`,
     )
     .all(sequences("turn-start"), sequences("turn-end")) as unknown as readonly TurnRow[];

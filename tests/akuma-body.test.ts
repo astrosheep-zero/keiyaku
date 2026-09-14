@@ -252,7 +252,7 @@ async function removeDrivenBodyFixture(root: string): Promise<void> {
 
 async function recordTell(
   paths: Parameters<typeof heartRecordTell>[0],
-  tell: Readonly<{ id: string; body: string; recordedAt: string }>,
+  tell: Readonly<{ id: string; body: string; recordedAt: string; initiator?: string }>,
 ) {
   return await heartRecordTell(paths, { kind: "tell", ...tell });
 }
@@ -553,10 +553,12 @@ test("turn-outcome plugins observe every committed answered Turn exactly once", 
     await eventually(() => recorder.activations === 1);
     const launch: FixtureBodyLaunch = claudeBodyLaunch(allocated, root, "build it", {
       completion: { contractId: "kei/example" },
+      initiator: "Alice",
     });
     assert.deepEqual(Object.keys(JSON.parse(JSON.stringify(launch))).sort(), [
       "completion",
       "initialBody",
+      "initiator",
       "paths",
       "seed",
     ]);
@@ -580,6 +582,7 @@ test("turn-outcome plugins observe every committed answered Turn exactly once", 
           akumaId: allocated.id,
           turnSequence: 1,
           outcome: { kind: "answered", text: "done" },
+          initiator: "Alice",
           contractId: "kei/example",
         },
         outcomes: [
@@ -595,10 +598,17 @@ test("turn-outcome plugins observe every committed answered Turn exactly once", 
     await recordTell(allocated.paths, {
       id: "plugin-tell",
       body: "adjust it",
+      initiator: "Bob",
       recordedAt: "2026-08-08T00:00:01.000Z",
     });
+    await recordTell(allocated.paths, {
+      id: "plugin-coalesced-tell",
+      body: "also check tests",
+      initiator: "Carol",
+      recordedAt: "2026-08-08T00:00:01.001Z",
+    });
     await driveAkumaBody(
-      { paths: allocated.paths },
+      { paths: allocated.paths, initiator: "Alice" },
       adapter({
         starts: [],
         events: [{ type: "session", coordinate: { sessionId: "plugin-session-2" } }],
@@ -622,6 +632,7 @@ test("turn-outcome plugins observe every committed answered Turn exactly once", 
         akumaId: allocated.id,
         turnSequence: sequences[1],
         outcome: { kind: "answered", text: "adjusted" },
+        initiator: "Bob",
       },
       outcomes: [
         {
@@ -637,6 +648,22 @@ test("turn-outcome plugins observe every committed answered Turn exactly once", 
         },
       ],
     });
+    await recordTell(allocated.paths, {
+      id: "plugin-unattributed-tell",
+      body: "continue without attribution",
+      recordedAt: "2026-08-08T00:00:03.000Z",
+    });
+    await driveAkumaBody(
+      { paths: allocated.paths, initiator: "Alice" },
+      adapter({
+        starts: [],
+        events: [{ type: "session", coordinate: { sessionId: "plugin-session-3" } }],
+        result: { kind: "answered", answer: "unattributed" },
+      }),
+      { now: () => "2026-08-08T00:00:04.000Z" },
+    );
+    assert.equal(recorder.observations.length, 3);
+    assert.equal("initiator" in recorder.observations[2]!.signal, false);
   } finally {
     delete turnOutcomePluginGlobal.__keiyakuTurnOutcomePluginRecorder;
     rmSync(root, { recursive: true, force: true });

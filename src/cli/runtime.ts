@@ -1,3 +1,5 @@
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { isParsedAkumaCommand } from "./commands/akuma.js";
 import type { InvokedAkumaCommand } from "./commands/akuma.js";
 import type { InstallInvocationResult } from "./commands/install.js";
@@ -15,10 +17,18 @@ function writeCliStream(stream: NodeJS.WritableStream, body: string): void {
   stream.write(body.endsWith("\n") ? body : `${body}\n`);
 }
 
-async function writeExecutionProgress(events: AsyncIterable<ExecutionEvent>): Promise<void> {
+export async function writeExecutionProgress(
+  events: AsyncIterable<ExecutionEvent>,
+  stream: NodeJS.WritableStream = process.stderr,
+): Promise<void> {
   const { executionProgressLines } = await import("./render/execution-progress.js");
-  for await (const event of events)
-    writeCliStream(process.stderr, executionProgressLines(event, displayContext()).join("\n"));
+  await pipeline(
+    Readable.from(events, { highWaterMark: 1 }).map(
+      (event: ExecutionEvent) => `${executionProgressLines(event, displayContext()).join("\n")}\n`,
+    ),
+    stream,
+    { end: false },
+  );
 }
 
 function cliCancellation(): Readonly<{ signal: AbortSignal; close(): void }> {

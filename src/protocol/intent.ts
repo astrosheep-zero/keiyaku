@@ -6,7 +6,6 @@ import type { GitRefAssertion } from "../git/repository.js";
 import { materializeScratchCandidate, type WorktreeLeak } from "../git/scratch.js";
 import type { HookFailure } from "../git/hooks.js";
 import { projectSettings } from "../settings.js";
-import { readManagedWorktreeAppointment } from "../workspace-place.js";
 import type { DecideInput, OfferDecision } from "../core/decide.js";
 import { dependencyKeySet } from "../core/subject.js";
 import type {
@@ -228,22 +227,12 @@ export async function verifyDelivery(input: VerifyDeliveryInput): Promise<Verifi
     { kind: "segment", value: input.verification.segment },
   ]);
 
-  const appointment = await readManagedWorktreeAppointment(input.repository, input.contractId);
-  if (appointment.kind !== "appointed")
-    return {
-      step: {
-        failure: "environment-failure",
-        diagnostic:
-          appointment.kind === "failed" ? appointment.diagnostic : "Verification environment source is not appointed",
-      },
-    };
   const execution = await executeVerification({
     repository: input.repository,
     candidate: snapshot,
     declarations: input.verification.declarations,
     materializeScratchCandidate,
     projectSettings,
-    environmentSource: appointment.path,
     observe: (observation) =>
       input.progress?.observe({ kind: "verification", contractId: input.contractId, snapshot, observation }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),

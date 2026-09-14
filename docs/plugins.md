@@ -45,10 +45,17 @@ adopts them. They are not Heart facts, Git facts, Settlement facts, Contract
 worktree material, or reset targets merely because a plugin uses them.
 
 The Square observer keeps its execution-directory-local runtime data local;
-worktree disposal does not relocate it to the primary World. When an admitted
-call has a current Square caller, the observer establishes that caller's
-callable route while handling `akuma.called`, before a later Turn outcome can
-address it. Addressed outcomes use Square's wake-capable delivery boundary in
+worktree disposal does not relocate it to the primary World. Before a submitting
+process sends an attributed Akuma input, the optional initiation observation
+lets Square establish that initiator's callable route
+in the submitting session. This is identity preparation, not evidence of
+successful admission; a later refusal may leave the participant standing.
+When an admitted call has a current Square caller, the call observation also
+establishes that caller's route before later outcome observation. Turn outcomes
+address only the initiator carried by that Turn's signal, never a caller
+captured from the producing process. An absent initiator
+produces an unaddressed outcome rather than a fallback mention.
+Addressed outcomes use Square's wake-capable delivery boundary in
 the producing process; native host hooks remain recovery boundaries rather
 than the first delivery attempt. Such generated data has no implicit retention
 or archival promise beyond that directory's lifetime. Managed-worktree byte
@@ -78,6 +85,12 @@ diagnostic: it changes neither Heart truth, lifecycle, leash, public result, nor
 later Tell semantics. Keiyaku creates no retry queue, persistence record,
 compensating action, or generic event bus for plugins.
 
+The input-submitting edge may emit `akuma.initiating` before submitting a Call
+or Tell. It identifies only the initiator, carries no operation contents, and
+makes no admission claim. Forwarded submissions prepare that identity before
+crossing the request channel, not in the serving parent's session. This bounded
+observation is optional and cannot gate input admission.
+
 An admitted Akuma call emits `akuma.called` after admission and before any
 outcome observation. It identifies the called Akuma, its calling Akuma when
 there is one, and any Contract association already known at admission. It
@@ -86,8 +99,9 @@ The call-admission producer owns this signal's delivery.
 
 Every committed terminal Akuma Turn emits `akuma.turn-outcome` after its outcome
 is durable, including Turns driven by later Tells. The signal identifies the
-Akuma and Turn sequence and carries the committed answered or failed outcome;
-it does not expose provider or continuation custody. Plugins cannot participate
+Akuma and Turn sequence and carries the committed answered or failed outcome
+and the Turn's optional initiator; it does not expose provider or continuation
+custody. Plugins cannot participate
 in providers, generic lifecycle verbs, operation inputs, or Settlement. In
 particular, plugin delivery does not make birth reversible, add a pre-Body
 listener, or create rollback or cross-process continuation behavior.

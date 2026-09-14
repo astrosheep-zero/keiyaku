@@ -204,7 +204,10 @@ function sameTellInput(
   tell: Omit<TellFact, "sequence" | "state" | "deliveries" | "binding">,
 ): boolean {
   return (
-    existing.body === tell.body && existing.recordedAt === tell.recordedAt && existing.schemaJson === tell.schemaJson
+    existing.body === tell.body &&
+    existing.recordedAt === tell.recordedAt &&
+    existing.schemaJson === tell.schemaJson &&
+    existing.initiator === tell.initiator
   );
 }
 
@@ -379,7 +382,7 @@ export async function breakBody(
 
 export async function beginTurn(
   paths: AkumaPaths,
-  input: Readonly<{ bodySequence: number; startedAt: string; call?: string; schemaJson?: string }>,
+  input: Readonly<{ bodySequence: number; startedAt: string; call?: string; schemaJson?: string; initiator?: string }>,
 ): Promise<TurnStartFact> {
   return await withHeartTransaction(paths, (heart) => {
     const fact = insertTurnStartFact(heart, input);

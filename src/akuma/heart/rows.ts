@@ -47,6 +47,7 @@ export type TurnRow = Readonly<{
   answer: string | null;
   answer_json: string | null;
   schema_json: string | null;
+  initiator: string | null;
   diagnostic: string | null;
   completed_at: string | null;
 }>;
@@ -155,6 +156,7 @@ export function decodeTurnRow(row: TurnRow): TurnFact {
     bodySequence: row.body_sequence,
     startedAt: row.started_at,
     ...(row.schema_json === null || row.schema_json === undefined ? {} : { schemaJson: row.schema_json }),
+    ...(row.initiator == null ? {} : { initiator: row.initiator }),
   };
   if (row.outcome === null) return start;
   const end: TurnEndFact = {
@@ -305,12 +307,12 @@ export function markBodyHung(
 
 export function insertTurnStartFact(
   database: DatabaseSync,
-  input: Readonly<{ bodySequence: number; startedAt: string; call?: string; schemaJson?: string }>,
+  input: Readonly<{ bodySequence: number; startedAt: string; call?: string; schemaJson?: string; initiator?: string }>,
 ): TurnStartFact {
   const sequence = Number(database.prepare("INSERT INTO timeline(kind) VALUES ('turn-start')").run().lastInsertRowid);
   database
-    .prepare("INSERT INTO turns(sequence, body_sequence, started_at, schema_json) VALUES (?, ?, ?, ?)")
-    .run(sequence, input.bodySequence, input.startedAt, input.schemaJson ?? null);
+    .prepare("INSERT INTO turns(sequence, body_sequence, started_at, schema_json, initiator) VALUES (?, ?, ?, ?, ?)")
+    .run(sequence, input.bodySequence, input.startedAt, input.schemaJson ?? null, input.initiator ?? null);
   if (input.call !== undefined) {
     const callSequence = Number(database.prepare("INSERT INTO timeline(kind) VALUES ('call')").run().lastInsertRowid);
     database
@@ -322,6 +324,7 @@ export function insertTurnStartFact(
     sequence,
     bodySequence: input.bodySequence,
     startedAt: input.startedAt,
+    ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
     ...(input.schemaJson === undefined ? {} : { schemaJson: input.schemaJson }),
   };
 }
@@ -444,7 +447,7 @@ export function lastAnsweredTurnFact(database: DatabaseSync): TurnFact | null {
   const row = database
     .prepare(
       `SELECT sequence, body_sequence, started_at, end_sequence, outcome, history_id,
-    session_json, answer, answer_json, schema_json, diagnostic, completed_at FROM turns WHERE outcome = 'answered' ORDER BY end_sequence DESC LIMIT 1`,
+    session_json, answer, answer_json, schema_json, initiator, diagnostic, completed_at FROM turns WHERE outcome = 'answered' ORDER BY end_sequence DESC LIMIT 1`,
     )
     .get() as TurnRow | undefined;
   return row === undefined ? null : decodeTurnRow(row);
@@ -454,7 +457,7 @@ export function answeredTurnFact(database: DatabaseSync, turnSequence: number): 
   const row = database
     .prepare(
       `SELECT sequence, body_sequence, started_at, end_sequence, outcome, history_id,
-    session_json, answer, answer_json, schema_json, diagnostic, completed_at FROM turns WHERE outcome = 'answered' AND sequence = ?`,
+    session_json, answer, answer_json, schema_json, initiator, diagnostic, completed_at FROM turns WHERE outcome = 'answered' AND sequence = ?`,
     )
     .get(turnSequence) as TurnRow | undefined;
   return row === undefined ? null : decodeTurnRow(row);
@@ -464,7 +467,7 @@ export function turnFact(database: DatabaseSync, turnSequence: number): TurnFact
   const row = database
     .prepare(
       `SELECT sequence, body_sequence, started_at, end_sequence, outcome, history_id,
-    session_json, answer, answer_json, schema_json, diagnostic, completed_at FROM turns WHERE sequence = ?`,
+    session_json, answer, answer_json, schema_json, initiator, diagnostic, completed_at FROM turns WHERE sequence = ?`,
     )
     .get(turnSequence) as TurnRow | undefined;
   return row === undefined ? null : decodeTurnRow(row);

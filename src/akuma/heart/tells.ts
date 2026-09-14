@@ -13,6 +13,7 @@ type TellRow = Readonly<{
   id: string;
   body: string;
   schema_json: string | null;
+  initiator: string | null;
   recorded_at: string;
   state: TellFact["state"];
 }>;
@@ -81,6 +82,7 @@ function decodeTellRows(database: DatabaseSync, rows: readonly TellRow[]): reado
     sequence: row.sequence,
     id: row.id,
     body: row.body,
+    ...(row.initiator === null ? {} : { initiator: row.initiator }),
     ...(row.schema_json === null ? {} : { schemaJson: row.schema_json }),
     state: row.state,
     recordedAt: row.recorded_at,
@@ -93,7 +95,7 @@ export function tellFactsAtSequences(database: DatabaseSync, sequences: readonly
   if (sequences.length === 0) return [];
   const rows = database
     .prepare(
-      `SELECT sequence, id, body, schema_json, recorded_at, ${tellStateSql} AS state
+      `SELECT sequence, id, body, initiator, schema_json, recorded_at, ${tellStateSql} AS state
     FROM tells WHERE sequence IN (SELECT value FROM json_each(?)) ORDER BY sequence`,
     )
     .all(JSON.stringify(sequences)) as unknown as readonly TellRow[];
@@ -110,15 +112,15 @@ export function insertTellFact(
 ): number {
   const sequence = Number(database.prepare("INSERT INTO timeline(kind) VALUES ('tell')").run().lastInsertRowid);
   database
-    .prepare("INSERT INTO tells(id, sequence, body, schema_json, recorded_at) VALUES (?, ?, ?, ?, ?)")
-    .run(tell.id, sequence, tell.body, tell.schemaJson ?? null, tell.recordedAt);
+    .prepare("INSERT INTO tells(id, sequence, body, initiator, schema_json, recorded_at) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(tell.id, sequence, tell.body, tell.initiator ?? null, tell.schemaJson ?? null, tell.recordedAt);
   return sequence;
 }
 
 export function tellFact(database: DatabaseSync, id: string): TellFact | null {
   const row = database
     .prepare(
-      `SELECT sequence, id, body, schema_json, recorded_at, ${tellStateSql} AS state
+      `SELECT sequence, id, body, initiator, schema_json, recorded_at, ${tellStateSql} AS state
     FROM tells WHERE id = ?`,
     )
     .get(id) as TellRow | undefined;
@@ -187,7 +189,7 @@ export function tellIdsForFence(database: DatabaseSync, turnSequence: number, fe
 export function pendingTellFacts(database: DatabaseSync): readonly TellFact[] {
   const rows = database
     .prepare(
-      `SELECT sequence, id, body, schema_json, recorded_at, ${tellStateSql} AS state FROM tells
+      `SELECT sequence, id, body, initiator, schema_json, recorded_at, ${tellStateSql} AS state FROM tells
     WHERE ${tellStateSql} = 'pending' ORDER BY sequence`,
     )
     .all() as unknown as readonly TellRow[];

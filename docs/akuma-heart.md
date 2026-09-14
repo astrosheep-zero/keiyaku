@@ -70,6 +70,11 @@ permanently gates same-identity succession and never clears, changes sessions,
 pending tells, requests, or history. Elapsed time, a held leash alone, provider
 events, or observer inference cannot manufacture it.
 
+Tell admission retains its optional submitting initiator alongside its input;
+reusing the same Tell identity cannot replace that attribution. Turn admission
+retains the opening input's initiator independently of later Tell retention,
+Body succession, or the process producing its outcome.
+
 Tell facts retain admission and only named delivery/terminal-receipt witnesses.
 They fold to `pending` or `told`; these are read models, not durable stages.
 Pending selection is governed by the absence of a terminal receipt, not by
