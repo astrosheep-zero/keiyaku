@@ -9,13 +9,13 @@ import type {
 const GIT_OBJECT_ID = /^[0-9a-f]{40}$/iu;
 
 export function gateGlyph(report: ContractGateReport): string {
-  if (report.current.kind === "stale") return "[~]";
-  if (report.current.kind === "missing") return "[ ]";
-  return report.current.verdict === "satisfied" ? "[✓]" : "[✗]";
+  if (report.current.kind === "stale") return "!";
+  if (report.current.kind === "missing") return "?";
+  return report.current.verdict === "satisfied" ? "✓" : "!";
 }
 
 export function gateFact(report: ContractGateReport): string {
-  return `${gateGlyph(report)} ${report.gate}${report.current.kind === "stale" ? " (stale)" : ""}`;
+  return `${gateGlyph(report)} ${report.gate}${report.current.kind === "stale" ? " · stale" : ""}`;
 }
 
 export function candidateFact(delivery: ContractRow["delivery"]): string {
@@ -70,7 +70,8 @@ export function gitIdsInRow(row: ContractRow): readonly string[] {
 }
 
 export function displayGitId(value: string, abbreviations: ReadonlyMap<string, string>): string {
-  return abbreviations.get(value) ?? value;
+  const rendered = abbreviations.get(value) ?? value;
+  return GIT_OBJECT_ID.test(rendered) ? rendered.slice(0, 7) : rendered;
 }
 
 export function targetFacts(row: ContractRow, abbreviations: ReadonlyMap<string, string>): readonly string[] {

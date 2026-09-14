@@ -15,7 +15,7 @@ export function worldObservationFailureText(result: ObservationResult): string |
   ) {
     return undefined;
   }
-  return `✕ observation  ${result.command}\n  diagnostic  ${report.diagnostic}`;
+  return `× observation  ${result.command}\n  diagnostic  ${report.diagnostic}`;
 }
 
 export function renderObservation(result: ObservationResult): string {

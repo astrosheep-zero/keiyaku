@@ -4,7 +4,6 @@ import {
   afterWording,
   candidateFact,
   dependentWording,
-  displayGitId,
   gateFact,
   gitIdsInRow,
   verificationFact,
@@ -16,7 +15,7 @@ import { taskMark } from "./task.js";
 function akumaMark(life: string): string {
   if (life === "running") return "●";
   if (life === "asleep" || life === "unborn") return "○";
-  if (life === "killed") return "✕";
+  if (life === "killed") return "×";
   if (life === "stillborn") return "!";
   return "?";
 }
@@ -56,7 +55,7 @@ function renderAkumaCatalog(catalog: Extract<Catalog, { kind: "akuma" }>): strin
 
 function catalogMark(row: ContractRow): string {
   if (row.phase === "claimed") return "✓";
-  if (row.phase === "abandoned") return "✕";
+  if (row.phase === "abandoned") return "×";
   if (row.title === null) return "?";
   if (row.gates.reports.some((gate) => gate.current.kind === "attested" && gate.current.verdict === "unsatisfied"))
     return "!";
@@ -81,16 +80,13 @@ function renderContractCatalog(catalog: Extract<Catalog, { kind: "contracts" }>)
     ...catalog.rows.flatMap(gitIdsInRow),
   ]);
   const rows = catalog.rows;
-  const header =
-    catalog.state === null
-      ? `observedAt  ${catalog.observedAt}`
-      : `contract state  ${displayGitId(catalog.state, abbreviations)} · observedAt  ${catalog.observedAt}`;
+  const header = `observed  ${catalog.observedAt}`;
   const blocks = rows.map((row) => {
     const lines = [
       `${catalogMark(row)} ${safeText(row.id)} · ${row.phase} · ${formatAge(row.phaseAt, catalog.observedAt)} · ${safeText(row.title ?? "title unavailable")}`,
       `  ${candidateFact(row.delivery)}`,
       ...targetFacts(row, abbreviations).map((fact) => `  ${safeText(fact)}`),
-      ...(row.worktreePath === null ? [] : [`  worktree  ${safeText(row.worktreePath)}`]),
+      ...[],
       ...(verificationFact(row.verification) === undefined ? [] : [`  ${verificationFact(row.verification)}`]),
       ...row.after.map((edge) => `  ${afterWording(edge)}`),
       ...(row.dependents.length === 0 ? [] : [`  dependents  ${row.dependents.map(dependentWording).join(" · ")}`]),
@@ -113,7 +109,7 @@ export function renderCatalogText(catalog: Catalog): string {
   if (catalog.kind === "contracts") return renderContractCatalog(catalog);
   if (catalog.kind === "archetypes") {
     return [
-      `available Akuma  ${catalog.rows.length}`,
+      `available Akuma`,
       "",
       ...catalog.rows.flatMap((row) => [
         `${safeText(row.name)}${row.model === undefined ? "" : `  ${safeText(row.model)}`}`,

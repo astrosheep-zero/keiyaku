@@ -8,7 +8,7 @@ export function renderNukeText(result: NukeResult): string {
   if (result.kind === "success") {
     return [`✓ nuke  ${result.world}`, ...seatClose].join("\n");
   }
-  return [`✕ nuke  ${result.world}`, `  diagnostic  ${result.diagnostic}`, ...seatClose].join("\n");
+  return [`× nuke  ${result.world}`, `  diagnostic  ${result.diagnostic}`, ...seatClose].join("\n");
 }
 
 export function nukeExitCode(result: NukeResult): number {

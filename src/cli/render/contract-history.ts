@@ -12,7 +12,11 @@ function journalHead(fact: Fact): string {
 }
 
 function listFact(label: string, values: readonly string[]): readonly string[] {
-  return values.length === 0 ? [`  ${label}  0`] : [`  ${label}  ${values.join(" · ")}`];
+  return values.length === 0 ? [] : [`  ${label}  ${values.join(" · ")}`];
+}
+
+function shortId(value: string): string {
+  return /^[0-9a-f]{40}$/iu.test(value) ? value.slice(0, 7) : value;
 }
 
 function journalBody(fact: Fact): readonly string[] {
@@ -20,7 +24,7 @@ function journalBody(fact: Fact): readonly string[] {
     case "bind": {
       const { coordinates, terms } = fact.data;
       return [
-        `  start commit  ${coordinates.start}`,
+        `  start commit  ${shortId(coordinates.start)}`,
         ...(coordinates.target === undefined ? [] : [`  target  ${coordinates.target}`]),
         `  workspace  ${coordinates.workspace}`,
         ...listFact("gates", terms.gates),
@@ -34,23 +38,26 @@ function journalBody(fact: Fact): readonly string[] {
     case "deliver": {
       const { tenderSnapshot, integration, method, policy } = fact.data;
       return [
-        `  tender commit  ${tenderSnapshot}`,
-        `  predecessor commit  ${integration.predecessor}`,
-        `  integration commit  ${integration.snapshot}`,
+        `  tender commit  ${shortId(tenderSnapshot)}`,
+        `  predecessor commit  ${shortId(integration.predecessor)}`,
+        `  integration commit  ${shortId(integration.snapshot)}`,
         `  content identity (not commit)  ${integration.changeId}`,
         `  method  ${method}`,
         `  require-branches-to-be-up-to-date  ${String(policy.requireBranchesToBeUpToDate)}`,
       ];
     }
     case "reintegrated":
-      return [`  predecessor commit  ${fact.data.predecessor}`, `  integration commit  ${fact.data.snapshot}`];
+      return [`  predecessor commit  ${shortId(fact.data.predecessor)}`, `  integration commit  ${shortId(fact.data.snapshot)}`];
     case "attestation": {
       const lines = [
         `  gate  ${fact.data.gate}`,
         `  verdict  ${fact.data.verdict}`,
-        `  subject identity  ${fact.data.subject}`,
+        `  subject  verification · snapshot ${shortId(fact.data.subject)}`,
       ];
-      if (fact.data.summary !== undefined) receiptPayload(lines, "summary", fact.data.summary);
+      if (fact.data.summary !== undefined) {
+        const clipped = fact.data.summary.length > 4096 ? `${fact.data.summary.slice(0, 4096)}\n[truncated]` : fact.data.summary;
+        receiptPayload(lines, "summary", clipped);
+      }
       return lines;
     }
     case "claimed":

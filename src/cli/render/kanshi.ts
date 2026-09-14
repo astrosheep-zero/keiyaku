@@ -53,7 +53,7 @@ function contractStatusTone(row: ContractKanshiRow, observedAt: string): Semanti
 
 function contractMark(row: ContractKanshiRow): string {
   if (row.phase === "claimed") return "✓";
-  if (row.phase === "abandoned") return "✕";
+  if (row.phase === "abandoned") return "×";
   if (row.title === null) return "?";
   if (
     row.gates.reports.some((report) => report.current.kind === "attested" && report.current.verdict === "unsatisfied")
@@ -66,9 +66,9 @@ function contractMark(row: ContractKanshiRow): string {
 
 function taskMark(row: TaskKanshiRow): string {
   if (row.disposition === "done") return "✓";
-  if (row.disposition === "drop") return "✕";
-  if (row.disposition === "on_hold") return "⧗";
-  return row.disposition === "in_progress" ? "●" : row.disposition === "blocked" ? "‖" : "○";
+  if (row.disposition === "drop") return "×";
+  if (row.disposition === "on_hold") return "○";
+  return row.disposition === "in_progress" ? "●" : row.disposition === "blocked" ? "!" : "○";
 }
 
 function gitAbbreviations(report: KanshiReport): ReadonlyMap<string, string> {
@@ -162,11 +162,9 @@ function linkedAkumaSummary(row: ContractKanshiRow, report: KanshiReport): strin
   return facts.join(" · ");
 }
 
-function semanticBlock(name: string, facts: readonly string[], _context: TextRenderContext): readonly string[] {
+function semanticBlock(_name: string, facts: readonly string[], _context: TextRenderContext): readonly string[] {
   if (facts.length === 0) return [];
-  const lines = [`  ${name}`];
-  for (const fact of facts) lines.push(`    ${safeText(fact)}`);
-  return lines;
+  return facts.map((fact) => `  ${safeText(fact)}`);
 }
 
 function namespaceTaskFacts(row: ContractKanshiRow): readonly string[] {
@@ -256,7 +254,7 @@ function renderWorldContractRow(
   const contractFacts = [
     candidateFact(row.delivery),
     ...targetFacts(row, gitAbbreviations(report)),
-    ...(row.worktreePath === null ? [] : [`worktree  ${row.worktreePath}`]),
+    ...[],
     ...(linkedAkumaSummary(row, report) === undefined ? [] : [linkedAkumaSummary(row, report)!]),
     ...row.after.map(afterWording),
     ...(row.dependents.length === 0 ? [] : [`dependents  ${row.dependents.map(dependentWording).join(" · ")}`]),
@@ -348,8 +346,6 @@ export function renderKanshiText(
 ): string {
   if (selection === "contract") return renderSelectedContract(report, context).join("\n");
   return [
-    `${tone("契", "alert", context.color)} KEIYAKU // WORLD`,
-    "",
     ...renderContracts(report, context),
     "",
     ...renderAkuma(report, context),

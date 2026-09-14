@@ -218,17 +218,6 @@ function acceptedLagRows(result: AcceptedEnvelope, columns: number): readonly st
   return obligations;
 }
 
-function indentRecord(lines: readonly string[]): readonly string[] {
-  let payload = false;
-  return lines.map((line) => {
-    if (line.length === 0) {
-      payload = !payload;
-      return line;
-    }
-    return payload ? line : `  ${line}`;
-  });
-}
-
 function acceptedDeviations(
   result: AcceptedBindResult | AcceptedAmendResult | AcceptedReviewResult,
   columns: number,
@@ -257,7 +246,7 @@ function recordBlock(
   columns: number,
 ): readonly string[] {
   const rows = [...acceptedRecord(result, columns), ...acceptedLagRows(result, columns)];
-  return ["  record", ...indentRecord(rows)];
+  return rows;
 }
 
 function completionLines(result: AcceptedDeliverResult | AcceptedReviewResult, columns: number): readonly string[] {
@@ -337,7 +326,8 @@ function renderAcceptedBind(result: AcceptedBindResult, columns: number): string
 
 function renderAcceptedAmend(result: AcceptedAmendResult, columns: number): string {
   const lines = titleLines("✓", "terms replaced", result.contract, columns);
-  receiptPayload(lines, "  terms diff", result.diff);
+  if (result.diff.length === 0) lines.push("  terms unchanged", "");
+  else receiptPayload(lines, "  terms diff", result.diff);
   lines.push(...acceptedDeviations(result, columns), ...recordBlock(result, columns));
   return lines.join("\n");
 }

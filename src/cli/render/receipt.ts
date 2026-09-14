@@ -36,11 +36,11 @@ export function receiptRow(
 }
 
 export function receiptPayload(lines: string[], label: string, payload: string): void {
-  lines.push(label, "", payload, "");
+  lines.push(label, ...renderOpaqueBlock(payload, "  ", 80), "");
 }
 
 export function outcomeLines(
-  mark: "✓" | "✕" | "!" | "?",
+  mark: "✓" | "×" | "!" | "?",
   verb: string,
   word: "accepted" | "refused" | "retry",
   contract: string | undefined,
@@ -75,7 +75,7 @@ export function appendHookPayload(lines: string[], failure: HookFailure): void {
 
 export function reuseLines(reuse: VerificationReuse | undefined, columns: number): readonly string[] {
   if (reuse === undefined) return [];
-  return renderOpaqueBlock(`reuse verification ${reuse.entry} ${reuse.verdict}`, "   ", columns);
+  return renderOpaqueBlock(`reuse  verified · ${reuse.verdict} · ${reuse.entry}`, "  ", columns);
 }
 
 function prerequisiteRows(stop: VerificationStop | PlacementStop, columns: number): readonly string[] {

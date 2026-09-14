@@ -59,11 +59,11 @@ function isWorldObservation(result: TaskInvocationResult): result is TaskWorldOb
 export function taskMark(word: string): string {
   if (word === "in_progress") return "●";
   if (word === "ready" || word === "open") return "○";
-  if (word === "blocked") return "‖";
+  if (word === "blocked") return "!";
   if (word === "missing") return "!";
-  if (word === "on_hold") return "⧗";
+  if (word === "on_hold") return "○";
   if (word === "done") return "✓";
-  if (word === "drop") return "✕";
+  if (word === "drop") return "×";
   return "?";
 }
 
@@ -118,7 +118,7 @@ function renderFailure(verb: string, result: TaskFailure, columns: number): stri
   if (result.kind === "retry") {
     return [...outcomeLines("?", verb, "retry", undefined, columns), result.reason].join("\n");
   }
-  const lines = [...outcomeLines("✕", verb, "refused", undefined, columns)];
+  const lines = [...outcomeLines("×", verb, "refused", undefined, columns)];
   const facts = projectRefusal(result.refusal);
   lines.push(facts.line);
   appendDiagnostic(lines, facts.diagnostic);
@@ -275,7 +275,7 @@ function renderBatchItem(verb: string, item: TaskBatchResult["items"][number]): 
   if (item.outcome.kind === "accepted") return `✓ ${verb}  ${item.id}`;
   if (item.outcome.kind === "retry") return `? ${verb}  ${item.id}  ${item.outcome.reason}`;
   const facts = projectRefusal(item.outcome.refusal);
-  const lines = [`✕ ${verb}  ${item.id}  ${facts.line}`];
+  const lines = [`× ${verb}  ${item.id}  ${facts.line}`];
   appendDiagnostic(lines, facts.diagnostic);
   return lines.join("\n");
 }
@@ -294,7 +294,7 @@ function composeDiffs(
 function stoppedLines(stopped: ComposeStop): string[] {
   if (stopped.kind === "retry") return [`? stopped ${stopped.reason}`];
   const facts = projectRefusal(stopped);
-  const lines = [`✕ stopped  ${facts.line}`];
+  const lines = [`× stopped  ${facts.line}`];
   appendDiagnostic(lines, facts.diagnostic);
   return lines;
 }

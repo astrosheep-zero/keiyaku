@@ -1,6 +1,14 @@
 import type { Settings, SettingsScopeState } from "../../settings.js";
 import { displayColumns, renderTextBlock } from "./terminal.js";
-import { fieldName, namedValueLines } from "./value.js";
+import { fieldName } from "./value.js";
+
+function settingValueLines(name: string, value: unknown, indent: string): readonly string[] {
+  const secret = /(?:key|token|secret|password|credential)/iu.test(name);
+  if (secret && value !== undefined && value !== null && String(value).length > 0) return [`${indent}${fieldName(name)}  [redacted]`];
+  if (value === null || typeof value !== "object") return [`${indent}${fieldName(name)}  ${String(value)}`];
+  if (Array.isArray(value)) return value.flatMap((item, index) => settingValueLines(`${name}.${index}`, item, indent));
+  return Object.entries(value).flatMap(([key, item]) => settingValueLines(`${name}.${key}`, item, indent));
+}
 
 function namespaceNames(value: Settings): readonly string[] {
   return [
@@ -43,7 +51,7 @@ export function renderSettingsText(value: Settings, columns = 80): string {
     }
     for (const entry of view.entries) {
       lines.push(`    entry  ${fieldName(entry.name)} · ${entry.source}${entry.shadows ? " · shadows user" : ""}`);
-      lines.push(...namedValueLines("value", entry.value, "      "));
+      lines.push(...settingValueLines("value", entry.value, "      "));
     }
   }
   return lines.join("\n");

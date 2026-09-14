@@ -23,7 +23,7 @@ function wrap(lines: string[], text: string, indent: string, columns: number): v
 }
 
 function collectionLines(name: string, members: readonly string[], indent: string): readonly string[] {
-  if (members.length === 0) return [`${indent}${name}  0`];
+  if (members.length === 0) return [];
   return [`${indent}${name}`, ...members.map((member) => `${indent}  ${safeText(member)}`)];
 }
 
@@ -119,7 +119,7 @@ export function renderRefusalFacts(
 
 export function renderRefusal(result: RefusedResult, context?: TextRenderContext): string {
   const columns = context?.columns ?? 80;
-  const base = `✕ ${result.verb} refused`;
+  const base = `× ${result.verb} refused`;
   const lines =
     result.contract === undefined
       ? [base]
@@ -141,7 +141,7 @@ export function renderConflictMaterialized(
   return [
     "! integration-conflict-materialized",
     `${indent}target  ${safeText(result.targetHead)}`,
-    `${indent}recorded  no delivery`,
+    `${indent}delivery  none`,
     `${indent}index  unmerged`,
     `${indent}saved  worktree bytes before projection`,
     `${indent}handoff base  ${safeText(result.handoffBase)}`,

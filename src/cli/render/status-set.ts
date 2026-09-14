@@ -23,7 +23,7 @@ export function renderStatusSetText(
               },
               context,
             );
-      return [`status  ${entry.selector}`, body].join("\n");
+      return body;
     })
     .join("\n\n");
 }

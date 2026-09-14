@@ -138,7 +138,7 @@ function recordLines(result: AcceptedAuditResult, columns: number): readonly str
   for (const fact of result.facts) {
     receiptRow(rows, " ", "journal", [{ text: fact.entry, opaque: true }, { text: `· ${fact.kind}` }], columns);
   }
-  return ["  record", ...rows.map((line) => `  ${line}`)];
+  return rows;
 }
 
 export function renderAcceptedAudit(result: AcceptedAuditResult, context?: TextRenderContext): string {

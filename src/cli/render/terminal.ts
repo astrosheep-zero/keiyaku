@@ -283,7 +283,7 @@ export function renderSectionBlock({
   rows: readonly (readonly string[])[];
   hasMore?: boolean;
 }>): readonly string[] {
-  const lines = [`[ ${name} ]`, "", ...rows.flat()];
+  const lines = [`${name}`, "", ...rows.flat()];
   if (hasMore) lines.push("…");
   return lines;
 }
