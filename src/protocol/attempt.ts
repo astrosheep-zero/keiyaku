@@ -76,6 +76,7 @@ export type AttemptTerminal = Readonly<{ kind: "collision" }> | PublicationFaile
 export type DecidedOfferResult<Refusal = never> =
   | AcceptedAdmission
   | AttemptTerminal
+  | Readonly<{ kind: "stale" }>
   | Readonly<{ kind: "redecide" }>
   | Readonly<{ kind: "refused"; refusal: Refusal }>;
 

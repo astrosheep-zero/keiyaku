@@ -143,6 +143,7 @@ export type AttemptDecision<Value, Refusal = IntentRefusal> =
   | (AcceptedAdmission & Readonly<{ value: Value }>)
   | Readonly<{ kind: "refused"; refusal: Refusal }>
   | Readonly<{ kind: "redecide" }>
+  | Readonly<{ kind: "stale" }>
   | Readonly<{ kind: "collision" }>
   | Extract<DecidedOfferResult, { kind: "publication-failed" }>;
 

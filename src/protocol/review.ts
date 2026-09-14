@@ -10,10 +10,12 @@ import { observeContractsForAdmissionAt, type GitDecisionObservation } from "../
 import { unmergedWorkspacePaths, worktreePath } from "../git/workspace.js";
 import { type PrivateStatePublicationSeat } from "../git/private-state-seat.js";
 import {
-  matchingPrivateRootObservation,
+  contractStateWitness,
   privateStateSeatAttempt,
-  sameSpeculativeWorktreeInput,
-  type SpeculativeWorktreeInput,
+  sameWorktreeWitness,
+  STALE_PRIVATE_STATE_PREPARATION,
+  type ContractStateWitness,
+  type WorktreeWitness,
 } from "./run.js";
 import { dependencyKeySet } from "../core/subject.js";
 import { contractState } from "../core/facts/observation.js";
@@ -129,26 +131,38 @@ export async function prepareReview(
   };
 }
 
-type SpeculativeReview = Readonly<{
-  observation: GitDecisionObservation;
-  preparation?: AttestationInput<ReviewRefusal>["preparation"];
-  workspace?: ReviewWorkspaceEvidence;
-  tender?: TenderCapture;
-  worktree?: SpeculativeWorktreeInput;
-}>;
+/**
+ * Physical review work prepared outside custody. The reviewable subject is recomputed from the fresh
+ * in-custody Contract, and the captured worktree stays usable only while its witness still holds.
+ */
+type ReviewArtifacts =
+  | Readonly<{ kind: "refused"; refusal: ReviewPreparationRefusal }>
+  | Readonly<{ kind: "captured"; workspace?: ReviewWorkspaceEvidence; worktree: WorktreeWitness }>;
+
+type ExternalReviewPreparation =
+  | Readonly<{ kind: "unavailable" }>
+  | Readonly<{ kind: "artifacts"; witness: ContractStateWitness; artifacts: ReviewArtifacts }>;
+
+type AssembledReview =
+  | Readonly<{ kind: "stale" }>
+  | Readonly<{
+      kind: "assembled";
+      preparation?: AttestationInput<ReviewRefusal>["preparation"];
+      workspace?: ReviewWorkspaceEvidence;
+    }>;
 
 function preparedReviewCapture(
   input: ReviewOperationInput,
   state: ContractState,
-  prepared: Extract<Awaited<ReturnType<typeof captureReviewableWorktree>>, { kind: "prepared" }>,
-): SpeculativeReview["preparation"] {
+  changeId: DeliverData["integration"]["changeId"],
+): AttestationInput<ReviewRefusal>["preparation"] {
   return {
     kind: "prepared",
     data: {
       gate: REVIEWED,
       subject: dependencyKeySet([
         { kind: "document", value: state.terms.document.key },
-        { kind: "change", value: prepared.data.changeId },
+        { kind: "change", value: changeId },
       ]),
       verdict: input.verdict,
       ...(input.summary === undefined ? {} : { summary: input.summary }),
@@ -158,7 +172,7 @@ function preparedReviewCapture(
 
 function reviewWorktreeInput(
   prepared: Extract<Awaited<ReturnType<typeof captureReviewableWorktree>>, { kind: "prepared" }>,
-): SpeculativeWorktreeInput {
+): WorktreeWitness {
   return {
     tree: prepared.data.tender.tree,
     head: prepared.data.tender.head,
@@ -171,7 +185,7 @@ function reviewWorktreeInput(
 async function recaptureReviewWorktree(
   input: ReviewOperationInput,
   state: ContractState,
-): Promise<SpeculativeWorktreeInput | undefined> {
+): Promise<WorktreeWitness | undefined> {
   const prepared = await captureReviewableWorktree(input.scope, {
     contractId: state.id,
     coordinates: state.coordinates,
@@ -179,22 +193,49 @@ async function recaptureReviewWorktree(
   return prepared.kind === "prepared" ? reviewWorktreeInput(prepared) : undefined;
 }
 
-async function speculateReview(input: ReviewOperationInput): Promise<SpeculativeReview> {
+/** Capture the reviewable worktree from one non-authoritative private-state read. */
+async function prepareExternalReview(input: ReviewOperationInput): Promise<ExternalReviewPreparation> {
   const observation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
   const state = contractState(observation.decision, input.contractId);
-  if (state === null) return { observation };
+  if (state === null) return { kind: "unavailable" };
   const prepared = await captureReviewableWorktree(input.scope, {
     contractId: state.id,
     coordinates: state.coordinates,
   });
-  if (prepared.kind === "refused") {
-    return { observation, preparation: { kind: "refused", refusal: prepared.refusal } };
+  return {
+    kind: "artifacts",
+    witness: contractStateWitness(state),
+    artifacts:
+      prepared.kind === "refused"
+        ? { kind: "refused", refusal: prepared.refusal }
+        : {
+            kind: "captured",
+            ...(prepared.data.workspace === undefined ? {} : { workspace: prepared.data.workspace }),
+            worktree: reviewWorktreeInput(prepared),
+          },
+  };
+}
+
+/** Assemble the in-custody attestation input from the fresh Contract and validated artifacts. */
+async function assembleReviewAttempt(
+  input: ReviewOperationInput,
+  observation: GitDecisionObservation,
+  external: ExternalReviewPreparation,
+): Promise<AssembledReview> {
+  const state = contractState(observation.decision, input.contractId);
+  if (external.kind === "unavailable") return state === null ? { kind: "assembled" } : { kind: "stale" };
+  if (state === null) return { kind: "stale" };
+  if (external.witness.head !== state.head) return { kind: "stale" };
+  if (external.artifacts.kind === "refused") {
+    return { kind: "assembled", preparation: { kind: "refused", refusal: external.artifacts.refusal } };
+  }
+  if (!sameWorktreeWitness(external.artifacts.worktree, await recaptureReviewWorktree(input, state))) {
+    return { kind: "stale" };
   }
   return {
-    observation,
-    preparation: preparedReviewCapture(input, state, prepared),
-    ...(prepared.data.workspace === undefined ? {} : { workspace: prepared.data.workspace }),
-    worktree: reviewWorktreeInput(prepared),
+    kind: "assembled",
+    preparation: preparedReviewCapture(input, state, external.artifacts.worktree.changeId),
+    ...(external.artifacts.workspace === undefined ? {} : { workspace: external.artifacts.workspace }),
   };
 }
 
@@ -203,14 +244,14 @@ async function decideAndAdmitReview(
   attempt: AttemptContext,
   seat: PrivateStatePublicationSeat,
   observation: GitDecisionObservation,
-  speculated: SpeculativeReview,
+  assembled: Extract<AssembledReview, { kind: "assembled" }>,
 ): Promise<AttemptDecision<PreparedReview, ReviewRefusal>> {
   const decision = decideAttestation({
     input: {
       contractId: input.contractId,
       ...(input.actor === undefined ? {} : { actor: input.actor }),
       at: timestamp(),
-      ...(speculated.preparation === undefined ? {} : { preparation: speculated.preparation }),
+      ...(assembled.preparation === undefined ? {} : { preparation: assembled.preparation }),
     },
     attempt,
     observation: observation.decision,
@@ -224,48 +265,34 @@ async function decideAndAdmitReview(
     attempt,
     offer: decision.offer,
     primaryContract: input.contractId,
-    ...(input.progress === undefined ? {} : input.progress === undefined ? {} : { progress: input.progress }),
+    ...(input.progress === undefined ? {} : { progress: input.progress }),
   });
   if (admission.kind !== "accepted") return admission;
   return {
     ...admission,
     value: {
-      ...(speculated.workspace === undefined ? {} : { workspace: speculated.workspace }),
+      ...(assembled.workspace === undefined ? {} : { workspace: assembled.workspace }),
     },
   };
 }
 
-async function reviewAttemptInPrivateStateSeat(
-  input: ReviewOperationInput,
-  attempt: AttemptContext,
-  seat: PrivateStatePublicationSeat,
-  speculated: SpeculativeReview,
-): Promise<AttemptDecision<PreparedReview, ReviewRefusal>> {
-  const observation = await matchingPrivateRootObservation(
-    input.scope,
-    input.channel,
-    input.contractId,
-    speculated.observation,
-    async (fresh) => {
-      if (speculated.worktree === undefined) return true;
-      const state = contractState(fresh.decision, input.contractId);
-      if (state === null) return false;
-      return sameSpeculativeWorktreeInput(speculated.worktree, await recaptureReviewWorktree(input, state));
-    },
-  );
-  return "kind" in observation
-    ? observation
-    : await decideAndAdmitReview(input, attempt, seat, observation, speculated);
-}
-
+/**
+ * One review attempt: the repeatable worktree capture happens outside custody, then a single
+ * in-custody observation, witness validation, subject assembly, decision, and publication.
+ */
 async function reviewAttempt(
   input: ReviewOperationInput,
   attempt: AttemptContext,
 ): Promise<AttemptDecision<PreparedReview, ReviewRefusal>> {
-  const speculated = await speculateReview(input);
+  const external = await prepareExternalReview(input);
   return await privateStateSeatAttempt(
     input.scope,
-    async (seat) => await reviewAttemptInPrivateStateSeat(input, attempt, seat, speculated),
+    async (seat) => {
+      const observation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
+      const assembled = await assembleReviewAttempt(input, observation, external);
+      if (assembled.kind === "stale") return STALE_PRIVATE_STATE_PREPARATION;
+      return await decideAndAdmitReview(input, attempt, seat, observation, assembled);
+    },
     attemptDecisionWithSeatClose,
   );
 }
@@ -282,6 +309,7 @@ export async function admitReviewOperation(
       break;
     }
     if (result.kind === "publication-failed") return { kind: "retry", reason: result };
+    if (result.kind === "stale" || result.kind === "redecide") continue;
     if (result.kind === "collision" && index + 1 === attempts.length) return { kind: "retry", reason: result };
   }
   if (review === null) return { kind: "retry", reason: { kind: "exhausted" } };

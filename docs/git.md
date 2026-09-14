@@ -29,7 +29,13 @@ cache, second index, or independently updated current-state snapshot.
 Cooperating private-state writers share one repository-local publication seat.
 It coordinates writers but does not decide acceptance: atomic compare-and-swap
 and exact durable read-back remain the only currentness and unknown-outcome
-judges. Target placement and workspace appointment keep their own outer custody
+judges. Repeatable, state-independent preparation (physical capture and pure
+derivation) happens outside custody and carries only artifacts and currentness
+witnesses. Fresh observation, witness validation, state-dependent preparation,
+decision, companionship, atomic admission, and exact read-back then happen in one
+seat-custody cycle.
+
+Target placement and workspace appointment keep their own outer custody
 boundaries. Waiting to acquire the seat has a default bound and never a held
 deadline; a timed-out wait is typed contention, not a broken lock. The seat is
 not reentrant: same-context reacquisition is an invariant failure, not a wait.

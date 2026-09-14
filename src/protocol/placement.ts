@@ -78,6 +78,7 @@ function expectedPlacementFailure(error: unknown): PlacementExecutionFailure {
 
 type ChangedPreparation =
   | Readonly<{ kind: "changed-preparation"; target: RefOperation }>
+  | Readonly<{ kind: "stale" }>
   | Readonly<{ kind: "redecide" }>;
 
 function placementResultWithSeatClose<ExtraRefusal = never>(
@@ -120,7 +121,7 @@ async function runFencedPlacement(
       await withPrivateStatePublicationSeat(repository, async (seat) => {
         // The hint carries no acceptance authority. Form a fresh semantic offer under the seat.
         const prepared = await prepareProtocolAttempt(protocol, protocol.attempts[index]!);
-        if (prepared.kind === "refused") return prepared;
+        if (prepared.kind !== "offered") return prepared;
         const state = contractState(prepared.observation.decision, input.contractId);
         if (state === null) throw new Error("placement offer has no contract state");
         const target = prepared.offer.target;
@@ -136,6 +137,8 @@ async function runFencedPlacement(
             observedTreeEqualsCandidate: await observedTreeEqualsCandidate(repository, observed, target.newOid),
           };
         if (changes?.predecessor !== target.expectedOid || changes.candidate !== target.newOid)
+          // A target preparation computed before custody is spent once the fresh offer names another
+          // movement. Re-derive it on the next attempt; never publish a preparation for stale bytes.
           return { kind: "changed-preparation" as const, target };
         const physical = await prepareTargetPlacement(repository, state, target, changes);
         if (physical.kind === "refused") return physical;
@@ -158,6 +161,7 @@ async function runFencedPlacement(
       continue;
     }
     if (result.kind === "redecide") continue;
+    if (result.kind === "stale") continue;
     if (result.kind === "collision" && index + 1 < protocol.attempts.length) continue;
     if (result.kind !== "accepted") return result;
     if (preparedPhysical === undefined) throw new Error("accepted placement has no prepared target checkout");

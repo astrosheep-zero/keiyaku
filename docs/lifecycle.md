@@ -98,10 +98,16 @@ Protocol alone joins that decision to Git observation and admission. It holds
 the necessary publication custody, submits at most one decision offer, and Git
 atomically proves its expected durable state. Mechanical preparation cannot
 override lifecycle legality. Custody binds observation, decision, and admission;
-preparation may precede that custody when it declares the observed inputs it
-used, and those inputs must match the in-custody observation. A mismatched
-artifact is a stale preparation of the same class as a failed publication. A
-failed publication discards the offer and any retry uses a fresh observation and
+repeatable preparation may precede that custody when it carries the observed
+currentness witnesses it used, and those witnesses must still hold against the
+in-custody observation. A preparation whose witnesses no longer hold is spent: it
+is discarded and the whole cycle restarts from fresh observation and fresh
+preparation under a new attempt identity, never replaying the spent offer. A
+spent preparation is never a publication failure and never a public business
+refusal. A real publication failure keeps its own typed meaning (seat
+contention, Git publication failure, unconfirmable outcome); it is never
+re-described as a spent preparation and is never answered by republishing the
+same offer. It discards the offer, and any retry uses a fresh observation and
 preparation; uncertain outcomes are resolved only from durable journal facts.
 Bounded retries eventually return a typed non-admission outcome. The journal,
 rather than a queue or cache, is the only recovery and handoff receipt.

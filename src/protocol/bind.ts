@@ -1,7 +1,11 @@
-import { normalizeTargetBranch, observeBindCoordinates, type BindTargetSelection } from "../git/observe.js";
+import {
+  normalizeTargetBranch,
+  observeBindCoordinates,
+  type BindCoordinatesObservation,
+  type BindTargetSelection,
+} from "../git/observe.js";
 export type { BindTargetSelection };
 import { gitObjectIdForSnapshot } from "../git/identity.js";
-import type { GitRefAssertion } from "../git/repository.js";
 import type { GitRepository } from "../git/process.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import { contractId, type BindData, type ActorId, type ContractId } from "../core/facts/types.js";
@@ -11,9 +15,9 @@ import type {
   VerificationDeclarationPreparation,
   VerificationDeclarationRefusal,
 } from "../verification/declaration.js";
-import { admitIntent } from "./intent.js";
+import { admitPreparedIntent } from "./intent.js";
 import { complete, type IntentOutcome } from "./outcome.js";
-import type { CompanionDecorator } from "./run.js";
+import type { ExternalProtocolPreparation, InCustodyProtocolPreparation, CompanionDecorator } from "./run.js";
 export type TargetInputRefusal =
   | Readonly<{ kind: "invalid-target" }>
   | Readonly<{ kind: "target-missing" }>
@@ -65,31 +69,57 @@ type BindOperationInput = Readonly<{
 
 type BindRefusalUnion = BindRefusal | TargetInputRefusal | VerificationDeclarationRefusal | ForkSourceMovedRefusal;
 type BindSeed = Readonly<{ contractId: ContractId; actor?: ActorId; at: string }>;
+type RefusedVerificationDeclaration = Extract<VerificationDeclarationPreparation, Readonly<{ kind: "refused" }>>;
 
-async function bindPreparation(
+/** What one seat-external coordinate acquisition proves about the mutable Git coordinates. */
+type BindCoordinatesPreparation =
+  | Readonly<{ kind: "resolved"; observed: BindCoordinatesObservation }>
+  | Readonly<{ kind: "unresolved"; reason: "target-missing" | "unborn-head" }>
+  | Readonly<{ kind: "declaration-refused"; preparation: RefusedVerificationDeclaration }>;
+
+/**
+ * Acquire the repeatable Git coordinates outside the publication seat. The artifact carries the
+ * observed start/target plus the expected ref assertions that publication must still confirm.
+ */
+async function prepareBindCoordinates(
+  input: BindOperationInput,
+  selection: BindTargetSelection,
+): Promise<ExternalProtocolPreparation<BindCoordinatesPreparation, BindRefusalUnion>> {
+  if (input.verification.kind === "refused") {
+    return { kind: "prepared", prepared: { kind: "declaration-refused", preparation: input.verification } };
+  }
+  const observed = await observeBindCoordinates(input.scope, selection);
+  if (observed === null) return { kind: "prepared", prepared: { kind: "unresolved", reason: "target-missing" } };
+  if ("kind" in observed) return { kind: "prepared", prepared: { kind: "unresolved", reason: "unborn-head" } };
+  return {
+    kind: "prepared",
+    prepared: { kind: "resolved", observed },
+    ...(input.coordinates === undefined
+      ? { assertions: [{ ref: observed.target ?? "HEAD", oid: gitObjectIdForSnapshot(observed.start) }] }
+      : {}),
+  };
+}
+
+/**
+ * Assemble the decision input from the fresh in-custody observation. Coordinates fixed by the
+ * invocation are never replaced; mutable coordinate disappearance is read again as current evidence.
+ */
+async function assembleBindInput(
   input: BindOperationInput,
   selection: BindTargetSelection,
   seed: BindSeed,
-): Promise<
-  | Readonly<{
-      kind: "prepared";
-      input: BindInput<VerificationDeclarationRefusal>;
-      assertions?: readonly GitRefAssertion[];
-    }>
-  | Readonly<{ kind: "refused"; refusal: BindRefusalUnion }>
-> {
-  if (input.verification.kind === "refused") {
-    return { kind: "prepared", input: { ...seed, preparation: input.verification } };
+  prepared: BindCoordinatesPreparation,
+): Promise<InCustodyProtocolPreparation<BindInput<VerificationDeclarationRefusal>, BindRefusalUnion>> {
+  if (prepared.kind === "declaration-refused") {
+    return { kind: "prepared", input: { ...seed, preparation: prepared.preparation } };
   }
-  const observed = await observeBindCoordinates(input.scope, selection);
-  if (observed === null) return { kind: "refused", refusal: { kind: "target-missing" } };
-  if (!("start" in observed)) {
-    return { kind: "refused", refusal: { kind: "unborn-head" } };
+  if (prepared.kind === "unresolved") {
+    const current = await observeBindCoordinates(input.scope, selection);
+    if (current === null) return { kind: "refused", refusal: { kind: "target-missing" } };
+    if ("kind" in current) return { kind: "refused", refusal: { kind: "unborn-head" } };
+    return { kind: "stale" };
   }
-  const start = input.coordinates?.start ?? observed.start;
-  const oid = gitObjectIdForSnapshot(input.coordinates === undefined ? start : observed.start);
-  const assertions: GitRefAssertion[] =
-    input.coordinates === undefined ? [{ ref: observed.target ?? "HEAD", oid }] : [];
+  const observed = prepared.observed;
   return {
     kind: "prepared",
     input: {
@@ -98,7 +128,7 @@ async function bindPreparation(
         kind: "prepared",
         data: {
           coordinates: {
-            start,
+            start: input.coordinates?.start ?? observed.start,
             ...(observed.target === undefined ? {} : { target: observed.target }),
             workspace: input.workspace,
           },
@@ -106,7 +136,6 @@ async function bindPreparation(
         },
       },
     },
-    assertions,
   };
 }
 
@@ -127,7 +156,12 @@ export async function bindOperation(
   const at = new Date().toISOString();
   const id = input.contractId;
   return complete(
-    await admitIntent<BindInput<VerificationDeclarationRefusal>, BindRefusalUnion, BindSeed>(
+    await admitPreparedIntent<
+      BindInput<VerificationDeclarationRefusal>,
+      BindRefusalUnion,
+      BindSeed,
+      BindCoordinatesPreparation
+    >(
       input.channel,
       input.scope,
       {
@@ -138,7 +172,11 @@ export async function bindOperation(
       decideBind,
       {
         observedContracts: [id, ...input.terms.after, ...(input.source === undefined ? [] : [input.source.contractId])],
-        prepareInput: async (_observation, original) => bindPreparation(input, selection, original),
+        preparation: {
+          external: async () => await prepareBindCoordinates(input, selection),
+          assemble: async (_observation, original, prepared) =>
+            await assembleBindInput(input, selection, original, prepared),
+        },
         ...(input.source === undefined
           ? {}
           : {

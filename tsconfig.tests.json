@@ -27,6 +27,7 @@
     "tests/git-reconciliation.test.ts",
     "tests/library-concurrency-placement.test.ts",
     "tests/protocol-bind-observe.test.ts",
+    "tests/protocol-concurrent-publication.test.ts",
     "tests/settlement.test.ts",
     "tests/target-checkout-reconcile.test.ts",
     "tests/task-operations.test.ts",

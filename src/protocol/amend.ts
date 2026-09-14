@@ -55,16 +55,17 @@ export async function amendOperation(
     const initial = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
     source = contractState(initial.decision, input.contractId)?.terms;
   }
+  // Deriving the caller-stamped document is pure: it never depends on the latest Contract.
+  const amendment =
+    source === undefined || input.deriveAmendment === undefined
+      ? undefined
+      : { source, ...input.deriveAmendment(source) };
   return intentOutcomeWithSeatClose(
     await withPrivateStatePublicationSeat(input.scope, async (seat) => {
       const attempts = mintAttempts({ entryCount: 1 });
       for (let index = 0; index < attempts.length; index += 1) {
         let observation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
         const state = contractState(observation.decision, input.contractId);
-        const amendment =
-          source === undefined || input.deriveAmendment === undefined
-            ? undefined
-            : { source, ...input.deriveAmendment(source) };
         if (amendment !== undefined) {
           observation = await extendPrerequisiteClosureAt(input.channel, observation, [
             ...new Set([...(state?.terms.after ?? []), ...amendment.terms.after]),
