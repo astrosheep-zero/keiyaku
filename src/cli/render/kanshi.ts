@@ -299,11 +299,19 @@ function renderSelectedContract(report: KanshiReport, context: TextRenderContext
     : renderSelectedContractRow(row, report, context, gitAbbreviations(report));
 }
 
+function taskFailureFact(failure: Readonly<{ message: string; coordinate?: string }>): string {
+  return failure.coordinate === undefined ? failure.message : `${failure.coordinate} · failed ${failure.message}`;
+}
+
 function renderTasks(report: KanshiReport, context: TextRenderContext): readonly string[] {
   const section = report.tasks;
   if (section.kind === "absent") return ["TASKS // absent", "", "  tasks absent"];
   if (section.kind === "failed")
-    return ["TASKS // unavailable", "", tone(`! ${safeText(section.failure.message)}`, "alert", context.color)];
+    return [
+      "TASKS // unavailable",
+      "",
+      tone(`! ${safeText(taskFailureFact(section.failure))}`, "alert", context.color),
+    ];
   const rows = section.value.rows;
   const rowLines: readonly (readonly string[])[] = rows.map((row) => {
     const relation = row.contract === undefined ? ["unbound"] : [endpointFact(row.contract.id, row.contract.observed)];

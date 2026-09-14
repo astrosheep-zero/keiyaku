@@ -631,7 +631,10 @@ test("kanshi reports malformed Task authority as a failed section", async (t) =>
   writeFileSync(join(root, ".keiyaku", "tasks", "bad.md"), "not a task document\n");
   const report = await observe(root);
   assert.equal(report.tasks.kind, "failed");
-  if (report.tasks.kind === "failed") assert.match(report.tasks.failure.message, /front matter/u);
+  if (report.tasks.kind === "failed") {
+    assert.equal(report.tasks.failure.coordinate, "task/bad");
+    assert.match(report.tasks.failure.message, /front matter/u);
+  }
   assert.deepEqual(report.contracts, { kind: "absent" });
 });
 
@@ -1082,7 +1085,7 @@ test("Contract namespace Tasks come from one Task board observation", async (t) 
   assert.doesNotMatch(selectedText, /──\[ (?:KEIYAKU|TASK|FLEET) \]/u);
 });
 
-test("Task board failure fails namespace context without suppressing Contract or Akuma", async (t) => {
+test("Task board failure names the malformed document once without suppressing Contract or Akuma", async (t) => {
   const { repository, contract, akumaId } = await populatedWorld(t);
   writeFileSync(join(repository.path, ".keiyaku", "tasks", "bad.md"), "not a task document\n");
   const report = await kanshi({
@@ -1095,9 +1098,7 @@ test("Task board failure fails namespace context without suppressing Contract or
   assert.equal(report.tasks.kind, "failed");
   if (report.contracts.kind !== "present" || report.akuma.kind !== "present") return;
   const row = report.contracts.value.rows.find((candidate) => candidate.id === contract.id);
-  if (row === undefined || row.namespaceTasks === undefined) throw new Error("fixture namespace tasks must be present");
-  assert.equal(row.namespaceTasks.kind, "failed");
-  if (row.namespaceTasks.kind === "failed") assert.match(row.namespaceTasks.failure.message, /front matter/u);
+  assert.equal(row?.namespaceTasks, undefined);
   assert.equal(
     report.akuma.value.rows.some((candidate) => candidate.id === akumaId),
     true,
@@ -1107,6 +1108,8 @@ test("Task board failure fails namespace context without suppressing Contract or
     { columns: 80, color: false },
     "contract",
   );
-  assert.match(selected, /  failed task document must begin with YAML front matter/u);
+  assert.doesNotMatch(selected, /failed task document must begin with YAML front matter/u);
+  const worldText = renderKanshiText(report, { columns: 80, color: false });
+  assert.equal((worldText.match(/task\/bad · failed task document must begin with YAML front matter/gu) ?? []).length, 1);
   assert.doesNotMatch(selected, /──\[ (?:KEIYAKU|TASK|FLEET) \]/u);
 });

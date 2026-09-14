@@ -13,7 +13,7 @@ export type { RegionOverlap };
 export type Section<Value> =
   | Readonly<{ kind: "present"; value: Value }>
   | Readonly<{ kind: "absent" }>
-  | Readonly<{ kind: "failed"; failure: Readonly<{ message: string }> }>;
+  | Readonly<{ kind: "failed"; failure: Readonly<{ message: string; coordinate?: string }> }>;
 
 export type ContractEndpointObservation = ContractDisposition | "missing" | "unavailable";
 

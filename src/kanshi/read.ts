@@ -16,7 +16,7 @@ import { readDocuments, type ContractDocumentProjection } from "../protocol/read
 import { contractId } from "../core/facts/types.js";
 import { selectKanshi, selectRegion } from "./select.js";
 import { FLEET_SNAPSHOT_ROWS, FLEET_VISIBLE_ROWS } from "./fleet.js";
-import { observeRecentTaskStatus, type TaskRow } from "../task/index.js";
+import { observeRecentTaskStatus, TaskAuthorityCorruptionError, type TaskRow } from "../task/index.js";
 import type {
   AkumaKanshiWorld,
   ContractEndpointObservation,
@@ -275,23 +275,37 @@ function joinTasks(
 type TaskWorldRead =
   | Readonly<{ kind: "absent" }>
   | Readonly<{ kind: "present"; observation: Awaited<ReturnType<typeof observeTaskBoard>> }>
-  | Readonly<{ kind: "failed"; failure: Readonly<{ message: string }> }>;
+  | Readonly<{ kind: "failed"; failure: Readonly<{ message: string; coordinate?: string }> }>;
+
+/** Attribute a Task board failure to the malformed document that caused it, when one is known. */
+function taskFailure(error: unknown): Readonly<{ message: string; coordinate?: string }> {
+  return {
+    message: diagnostic(error),
+    ...(error instanceof TaskAuthorityCorruptionError && error.coordinate !== undefined
+      ? { coordinate: error.coordinate }
+      : {}),
+  };
+}
 
 async function readTaskWorld(path: WorldRoot | null): Promise<TaskWorldRead> {
   if (path === null) return { kind: "absent" };
   try {
     return { kind: "present", observation: await observeTaskBoard(path) };
   } catch (error) {
-    return { kind: "failed", failure: { message: diagnostic(error) } };
+    return { kind: "failed", failure: taskFailure(error) };
   }
 }
 
+/**
+ * A selected Contract's own Task namespace view. A failed Task board is reported once by the
+ * board's Task section, so the entity block omits it rather than repeating the same row.
+ */
 function namespaceTaskSection(
   board: TaskWorldRead,
   id: ContractBoard["rows"][number]["id"],
-): Section<readonly TaskRow[]> {
+): Section<readonly TaskRow[]> | undefined {
   if (board.kind === "absent") return { kind: "absent" };
-  if (board.kind === "failed") return { kind: "failed", failure: board.failure };
+  if (board.kind === "failed") return undefined;
   return { kind: "present", value: board.observation.selectNamespace(contractNamespace(id)) };
 }
 
@@ -306,7 +320,7 @@ async function readTasks(
       kind: "present" as const,
       value: { root: path, hasMore: recent.hasMore, rows: joinTasks(recent.rows, holders, observeContract) },
     }),
-    (error: unknown) => ({ kind: "failed" as const, failure: { message: diagnostic(error) } }),
+    (error: unknown) => ({ kind: "failed" as const, failure: taskFailure(error) }),
   );
 }
 

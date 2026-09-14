@@ -21,9 +21,13 @@ export type TaskDocument = Readonly<{
 export type TaskCreationDocument = Omit<TaskDocument, "id" | "createdBy" | "createdAt" | "updatedAt">;
 
 export class TaskAuthorityCorruptionError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
+  /** The Task document whose bytes failed decode, when the reader knew its coordinate. */
+  readonly coordinate?: TaskId;
+
+  constructor(message: string, options?: ErrorOptions & { coordinate?: TaskId }) {
     super(message, options);
     this.name = "TaskAuthorityCorruptionError";
+    if (options?.coordinate !== undefined) this.coordinate = options.coordinate;
   }
 }
 
@@ -129,8 +133,9 @@ function fields(
 }
 
 export function parseTaskDocument(bytes: Uint8Array, expected: TaskCoordinate): TaskDocument {
+  const coordinate = formatTaskId(expected);
   const fail = (message: string, cause?: unknown): never => {
-    throw new TaskAuthorityCorruptionError(message, cause === undefined ? {} : { cause });
+    throw new TaskAuthorityCorruptionError(message, { coordinate, ...(cause === undefined ? {} : { cause }) });
   };
   const { value, body } = frontMatter(Buffer.from(bytes).toString("utf8"), fail);
   closed(value, STORED_KEYS, REQUIRED_STORED_KEYS, fail);
