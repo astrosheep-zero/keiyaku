@@ -18,7 +18,6 @@ import {
 } from "./terminal.js";
 
 export const DEFAULT_CONTEXT: TextRenderContext = { columns: 80, color: false };
-const SNAPSHOT_RULER = "────────────────";
 const TIME_WIDTH = 5;
 const VERB_WIDTH = 6;
 
@@ -38,9 +37,8 @@ function associatedContractId(contract: DispatchAssociation): string | undefined
   return contract.kind === "associated" ? contract.contractId : undefined;
 }
 
-export function associatedIdentity(id: string, alias?: string, contract?: DispatchAssociation): string {
-  const contractId = contract === undefined ? undefined : associatedContractId(contract);
-  return `${identity(id, alias)}${contractId === undefined ? "" : ` [${contractId}]`}`;
+export function associatedIdentity(id: string, alias?: string, _contract?: DispatchAssociation): string {
+  return identity(id, alias);
 }
 
 export function snapshotHeading(
@@ -49,11 +47,11 @@ export function snapshotHeading(
   contract: DispatchAssociation | undefined,
 ): readonly string[] {
   const contractId = contract === undefined ? undefined : associatedContractId(contract);
-  return [identity(id, alias), contractId === undefined ? SNAPSHOT_RULER : `└─ ${contractId}`];
+  return [identity(id, alias), ...(contractId === undefined ? [] : [`-> ${contractId}`])];
 }
 
 function answeredHeading(id: string, alias: string | undefined): string {
-  return [`✓ came back ${identity(id, alias)}`, SNAPSHOT_RULER].join("\n");
+  return `✓ answered ${identity(id, alias)}`;
 }
 
 function contractFacts(contract: DispatchAssociation): readonly string[] {
@@ -65,10 +63,11 @@ function unobservedText(id: string, diagnostic: string): string {
 }
 
 function lifeLabel(life: AkumaObservation["status"]["life"]): string {
-  if (life === "running") return "● STILL RUNNING";
-  if (life === "asleep") return "✓ came back";
-  if (life === "killed") return "✕ killed";
-  return `? ${life}`;
+  if (life === "running") return "● running";
+  if (life === "asleep") return "✓ asleep";
+  if (life === "killed") return "× killed";
+  if (life === "hung") return "? hung";
+  return "! stranded";
 }
 
 function clock(at: string): string {
@@ -90,12 +89,12 @@ function label(row: RenderRow): string {
   return toolRepr(row).label;
 }
 
-function mark(row: RenderRow): "│" | "✓" | "!" | "⧖" | "⧗" | "?" {
+function mark(row: RenderRow): "│" | "●" | "○" | "✓" | "!" | "?" {
   if (row.kind === "outcome") return row.outcome.kind === "answered" ? "✓" : "!";
   if (row.kind === "tell" && row.state === "told") return "✓";
-  if (row.kind === "tell" && row.state === "pending") return "⧗";
+  if (row.kind === "tell" && row.state === "pending") return "○";
   if (row.kind === "tool") {
-    if (row.state === "active") return "⧖";
+    if (row.state === "active") return "●";
     if (row.state === "unsettled") return "?";
     return row.state.status === "ok" ? "✓" : "!";
   }
@@ -242,10 +241,10 @@ type CreatedTaskRow = Extract<CreatedTaskObservation, { kind: "present" }>["rows
 
 function taskDispositionMark(disposition: CreatedTaskRow["disposition"]): string {
   if (disposition === "done") return "✓";
-  if (disposition === "drop") return "✕";
-  if (disposition === "on_hold") return "⧗";
+  if (disposition === "drop") return "×";
+  if (disposition === "on_hold") return "○";
   if (disposition === "in_progress") return "●";
-  return disposition === "blocked" ? "‖" : "○";
+  return disposition === "blocked" ? "!" : "○";
 }
 
 function changeStat(change: RenderedFileChange): string {
@@ -253,6 +252,7 @@ function changeStat(change: RenderedFileChange): string {
 }
 
 function renderReportedChangeLines(snapshot: RenderedSnapshot): readonly string[] {
+  if (snapshot.reportedChanges.length === 0 && snapshot.reportedChangesOmitted === 0) return [];
   const width = snapshot.reportedChanges.reduce((max, change) => Math.max(max, changeStat(change).length), 0);
   return [
     `changes ${snapshot.reportedChanges.length + snapshot.reportedChangesOmitted}`,
@@ -277,6 +277,7 @@ function renderTaskRow(row: CreatedTaskRow, columns: number): readonly string[] 
 function renderTaskContextLines(created: CreatedTaskObservation | undefined, columns: number): readonly string[] {
   if (created === undefined) return [];
   if (created.kind === "failed") return [`! tasks failed ${safeText(created.diagnostic)}`];
+  if (created.rows.length === 0) return [];
   return [`tasks ${created.rows.length}`, ...created.rows.flatMap((row) => renderTaskRow(row, columns))];
 }
 
@@ -445,10 +446,11 @@ export function historyText(
   }
   if (command.last) return result.mode === "last" ? result.answer : "no answer retained";
   if (result.mode !== "page") throw new Error("history result lacks page");
-  return [
-    ...snapshotHeading(result.akuma, result.alias, result.historyResult.contract),
-    ...groupedRows(result.history.rows, context, true),
-  ].join("\n");
+  const rows = groupedRows(result.history.rows, context, true);
+  const paging = result.history.omitted > 0
+    ? [`  ⋮ ${result.history.omitted} earlier turns · showing last ${result.history.rows.length}`]
+    : [];
+  return [...snapshotHeading(result.akuma, result.alias, result.historyResult.contract), ...paging, ...rows].join("\n");
 }
 
 export function tellText(
@@ -460,7 +462,8 @@ export function tellText(
   const row = groupedRows([result.result.tell.row], context).join("\n");
   if (wake.kind === "failed") {
     const child = "child" in wake ? wake.child : undefined;
-    return `${target}\n${SNAPSHOT_RULER}\n${row}\n! tell delivery failed · ${safeText(wake.diagnostic)}${child === undefined ? "" : ` · log ${child.log.path} ${child.log.from}..${child.log.to}`}`;
+    const failure = `! tell delivery failed · ${safeText(wake.diagnostic)}${child === undefined ? "" : ` · log ${child.log.path} ${child.log.from}..${child.log.to}`}`;
+    return `${target}\n${row}\n${renderBoundedTextBlock(failure, { first: "", continuation: "  ", columns: context.columns, lines: Number.MAX_SAFE_INTEGER }).join("\n")}`;
   }
-  return `${target}\n${SNAPSHOT_RULER}\n${row}`;
+  return `${target}\n${row}`;
 }

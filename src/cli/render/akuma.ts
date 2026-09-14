@@ -14,7 +14,7 @@ import {
   tellText,
   waitText,
 } from "./akuma-activity.js";
-import { safeText, tone, type TextRenderContext } from "./terminal.js";
+import { safeText, type TextRenderContext } from "./terminal.js";
 
 export { akumaRawAnswer } from "./akuma-activity.js";
 
@@ -45,25 +45,11 @@ function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, co
   if (result.result.observation.kind === "detached") {
     const lines = [
       associatedIdentity(result.result.akuma, alias),
-      ...(contractId === undefined ? [] : [`  \u{1f4dc} ${safeText(contractId)}`]),
-      `  \u{1f4c1} ${safeText(result.result.execution.cwd)}`,
+      ...(contractId === undefined ? [] : [`  -> ${safeText(contractId)}`]),
+      `  cwd  ${safeText(result.result.execution.cwd)}`,
       ...restraint,
       ...facts,
     ];
-    if (
-      !(
-        result.result.dispatch.kind === "failed" ||
-        result.result.alias.kind === "failed" ||
-        result.result.readonly?.enforcement === "none"
-      )
-    ) {
-      const selector = result.result.alias.kind === "aliased" ? result.result.alias.alias.alias : result.result.akuma;
-      lines.push(
-        tone("-----", "dim", context.color),
-        `$ keiyaku wait ${selector} --timeout 5m`,
-        tone("to wait", "dim", context.color),
-      );
-    }
     return lines.join("\n");
   }
   if (result.result.observation.kind === "failed") {

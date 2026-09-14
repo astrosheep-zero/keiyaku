@@ -41,8 +41,10 @@ function akumaMark(life: string): string {
       : life === "asleep"
         ? "○"
         : life === "killed"
-          ? "✕"
-          : "?";
+        ? "×"
+          : life === "stranded" || life === "stillborn" || life === "untidy"
+            ? "!"
+            : "?";
 }
 
 /** Bounded latest semantic entry, rendered by the same activity renderer as a targeted snapshot. */

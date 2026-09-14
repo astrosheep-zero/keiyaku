@@ -36,15 +36,6 @@ function detachedCall(
   };
 }
 
-function renderedWait(result: Parameters<typeof renderAkumaText>[1]): string {
-  const lines = renderAkumaText(command, result).split("\n");
-  assert.equal(lines.at(-1), "to wait");
-  assert.equal(lines.at(-3), "-----");
-  const handle = lines.at(-2)!;
-  assert.ok(handle.startsWith("$ "));
-  return handle;
-}
-
 function posixArgv(line: string): string[] {
   const parsed = spawnSync("bash", ["-c", `set -- ${line.slice("$ ".length)}; printf '%s\\0' "$@"`], {
     encoding: "utf8",
@@ -55,10 +46,9 @@ function posixArgv(line: string): string[] {
 
 test("detached wait keeps Windows cwd separate from its POSIX-copyable handle", () => {
   const result = detachedCall({ dispatch: { kind: "none" }, alias: { kind: "none" } });
-  assert.ok(renderAkumaText(command, result).split("\n").includes(`  \u{1f4c1} ${world}`));
-  const argv = posixArgv(renderedWait(result));
-  assert.deepEqual(argv, ["keiyaku", "wait", akuma, "--timeout", "5m"]);
-  assert.doesNotMatch(renderedWait(result), /-C |--cwd /u);
+  const text = renderAkumaText(command, result);
+  assert.ok(text.split("\n").includes(`  cwd  ${world}`));
+  assert.doesNotMatch(text, /keiyaku wait|to wait|-----|📁/u);
 });
 
 test("detached wait command keeps alias, timeout, failed silence, and JSON", () => {
@@ -66,7 +56,7 @@ test("detached wait command keeps alias, timeout, failed silence, and JSON", () 
     dispatch: { kind: "none" },
     alias: { kind: "aliased", alias: { alias: "@ship" as AkumaAlias, akuId: akuma }, previous: null },
   });
-  assert.deepEqual(posixArgv(renderedWait(aliased)), ["keiyaku", "wait", "@ship", "--timeout", "5m"]);
+  assert.match(renderAkumaText(command, aliased), /aku\/worker\/1234abcd \(@ship\)/u);
 
   const failures = [
     {

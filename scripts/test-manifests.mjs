@@ -10,6 +10,7 @@ export const LOCAL_TEST_FILES = [
   "tests/cli-progress.test.ts",
   "tests/cli-projection-evidence.test.ts",
   "tests/cli-render.test.ts",
+  "tests/cli-akuma-render.test.ts",
   "tests/cli-selectors.test.ts",
   "tests/cli-usage.test.ts",
   "tests/completion-progress.test.ts",
