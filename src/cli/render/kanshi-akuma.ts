@@ -41,7 +41,7 @@ function akumaMark(life: string): string {
       : life === "asleep"
         ? "○"
         : life === "killed"
-        ? "×"
+          ? "×"
           : life === "stranded" || life === "stillborn" || life === "untidy"
             ? "!"
             : "?";

@@ -447,9 +447,10 @@ export function historyText(
   if (command.last) return result.mode === "last" ? result.answer : "no answer retained";
   if (result.mode !== "page") throw new Error("history result lacks page");
   const rows = groupedRows(result.history.rows, context, true);
-  const paging = result.history.omitted > 0
-    ? [`  ⋮ ${result.history.omitted} earlier turns · showing last ${result.history.rows.length}`]
-    : [];
+  const paging =
+    result.history.omitted > 0
+      ? [`  ⋮ ${result.history.omitted} earlier turns · showing last ${result.history.rows.length}`]
+      : [];
   return [...snapshotHeading(result.akuma, result.alias, result.historyResult.contract), ...paging, ...rows].join("\n");
 }
 
