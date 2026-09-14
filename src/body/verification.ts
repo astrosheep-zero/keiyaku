@@ -15,6 +15,7 @@ export class VerificationDocumentError extends Error {
 export function decodeVerificationDeclarations(
   document: DocumentNode,
   section: SectionNode,
+  options: Readonly<{ requireTimeout?: boolean }> = {},
 ): readonly VerificationDeclaration[] {
   const blocks = directChildren(section, "code_block");
   if (blocks.length === 0)
@@ -42,6 +43,9 @@ export function decodeVerificationDeclarations(
     }
     if (duration?.kind === "parsed" && duration.milliseconds === 0) {
       throw new VerificationDocumentError("Verification timeout must be positive");
+    }
+    if (options.requireTimeout === true && duration === undefined) {
+      throw new VerificationDocumentError("Verification declarations must specify timeout=<duration>");
     }
     return {
       executor: info[1] as VerificationDeclaration["executor"],

@@ -50,7 +50,7 @@ function output(text: string): ExecutionEvent {
   } as ExecutionEvent;
 }
 
-test("TTY progress refreshes one ticking line, returns after output, and persists the verification summary", () => {
+test("TTY progress refreshes one ticking line, returns after output, and persists the verification summary", async () => {
   const stream = new CapturedStream(true);
   let now = 0;
   let tick: (() => void) | undefined;
@@ -65,12 +65,12 @@ test("TTY progress refreshes one ticking line, returns after output, and persist
     cancel: () => undefined,
   });
 
-  renderer.consume(phase("started", { phase: "setup", name: "npm ci" }));
+  await renderer.consume(phase("started", { phase: "setup", name: "npm ci" }));
   now = 42_000;
   tick?.();
-  renderer.consume(output("hello\n"));
-  renderer.consume(phase("started", { phase: "declaration", index: 1, total: 1 }));
-  renderer.consume(
+  await renderer.consume(output("hello\n"));
+  await renderer.consume(phase("started", { phase: "declaration", index: 1, total: 1 }));
+  await renderer.consume(
     phase("finished", { phase: "declaration", index: 1, total: 1, outcome: "exit 0", elapsedMs: 2_000 }),
   );
   renderer.finish();

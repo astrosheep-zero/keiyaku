@@ -26,7 +26,7 @@ function markdown(script: string): string {
     Objective: "Keep verification and audit adaptation visible.",
     Design: "Invoke the public Contract operation once.",
     Region: "~~~\nsrc/**\n~~~",
-    Criteria: `### Check\nThe verification runs.\n\n## Verification\n~~~bash\n${script}\n~~~`,
+    Criteria: `### Check\nThe verification runs.\n\n## Verification\n~~~bash timeout=5m\n${script}\n~~~`,
   });
 }
 
@@ -81,9 +81,9 @@ test("deliver adapts a successful Verification result through the CLI", async ()
   );
   const repository = await repositoryAt(raw.path);
   assert.equal((await observeContract(repository, id)).state?.terminal?.kind, "claimed");
-  assert.match(progress, /verification declaration started/u);
+  assert.match(progress, /● declaration 1\/1/u);
   assert.match(progress, /delivery-live-output/u);
-  assert.match(progress, /verification declaration finished/u);
+  assert.match(progress, /✓ declaration 1\/1/u);
 });
 
 test("review prints Verification progress when target movement requires reintegration", async () => {
@@ -99,9 +99,9 @@ test("review prints Verification progress when target movement requires reintegr
       progress: output.progress,
     });
     assert.ok("kind" in result && result.kind === "accepted");
-    assert.match(output.text(), /verification declaration started/u);
+    assert.match(output.text(), /● declaration 1\/1/u);
     assert.match(output.text(), /review-live-output/u);
-    assert.match(output.text(), /verification declaration finished/u);
+    assert.match(output.text(), /✓ declaration 1\/1/u);
     assert.equal((await observeContract(await repositoryAt(raw.path), id)).state?.terminal?.kind, "claimed");
   } finally {
     output.stream.destroy();

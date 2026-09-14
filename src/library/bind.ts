@@ -121,7 +121,7 @@ export async function admitForkBindWithAppointment(
     /^\s*#\s*[^\r\n]*(?:\r?\n|$)/u,
     `# Fork · ${sourceDocument.title}${sourceDocument.document.bytes.includes("\r\n") ? "\r\n" : "\n"}`,
   );
-  const document = decodeContractDocument(markdown);
+  const document = decodeContractDocument(markdown, { requireTimeout: true });
   const terms = contractTerms(document, source.terms.gates, source.terms.after);
   const admission = await attemptCandidates({
     scope: input.scope,

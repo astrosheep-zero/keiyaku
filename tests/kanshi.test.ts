@@ -1077,8 +1077,7 @@ test("Contract namespace Tasks come from one Task board observation", async (t) 
   const selectedText = renderKanshiText(selected, { columns: 120, color: false }, "contract");
   assert.doesNotMatch(sectionBody(worldText, "KEIYAKU"), /namespace tasks /u);
   assert.match(selectedText, new RegExp(String.raw`● ${taskId} · in_progress`, "u"));
-  assert.match(selectedText, /  namespace tasks\n/u);
-  assert.match(selectedText, new RegExp(String.raw`⧗ task/kei/${segment}/zeta · on_hold · P0 · Namespace zeta`, "u"));
+  assert.match(selectedText, new RegExp(String.raw`○ task/kei/${segment}/zeta · on_hold · P0 · Namespace zeta`, "u"));
   assert.match(selectedText, new RegExp(String.raw`✓ task/kei/${segment}/alpha · done · P3 · Namespace alpha`, "u"));
   assert.doesNotMatch(selectedText, /──\[ (?:KEIYAKU|TASK|FLEET) \]/u);
 });
@@ -1108,6 +1107,6 @@ test("Task board failure fails namespace context without suppressing Contract or
     { columns: 80, color: false },
     "contract",
   );
-  assert.match(selected, /  namespace tasks\n    failed /u);
+  assert.match(selected, /  failed task document must begin with YAML front matter/u);
   assert.doesNotMatch(selected, /──\[ (?:KEIYAKU|TASK|FLEET) \]/u);
 });

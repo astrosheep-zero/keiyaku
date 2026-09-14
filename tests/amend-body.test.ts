@@ -46,7 +46,7 @@ test("amend H2 operations form one complete body replacement", () => {
       "second",
       "",
       "## Replace: Verification",
-      "```zsh",
+      "```zsh timeout=5m",
       "print ok",
       "```",
       "",
@@ -63,7 +63,7 @@ test("amend H2 operations form one complete body replacement", () => {
       { title: "Added", body: "added" },
     ],
   );
-  assert.deepEqual(amended.verification, [{ executor: "zsh", script: "print ok" }]);
+  assert.deepEqual(amended.verification, [{ executor: "zsh", script: "print ok", timeoutMs: 300_000 }]);
   assert.deepEqual(
     amended.extensions.map(({ title, content }) => ({ title, content: content.trim() })),
     [{ title: "Notes", content: "first\n\nsecond" }],
@@ -81,7 +81,7 @@ test("bare amend H2 headings replace existing sections and add new extensions", 
       "bare criterion body",
       "",
       "## Verification",
-      "```bash",
+      "```bash timeout=5m",
       "echo bare",
       "```",
       "",
@@ -100,13 +100,21 @@ test("bare amend H2 headings replace existing sections and add new extensions", 
     amended.criteria.map(({ title, body }) => ({ title, body: body.trim() })),
     [{ title: "Bare criterion", body: "bare criterion body" }],
   );
-  assert.deepEqual(amended.verification, [{ executor: "bash", script: "echo bare" }]);
+  assert.deepEqual(amended.verification, [{ executor: "bash", script: "echo bare", timeoutMs: 300_000 }]);
   assert.deepEqual(
     amended.extensions.map(({ title, content }) => ({ title, content: content.trim() })),
     [
       { title: "Notes", content: "bare notes" },
       { title: "Fresh notes", content: "new extension" },
     ],
+  );
+});
+
+test("amend requires a timeout for new Verification declarations", () => {
+  const current = decodeContractDocument(renderContractBody(body));
+  assert.throws(
+    () => applyAmendDocument("## Replace: Verification\n~~~bash\ntrue\n~~~\n", current),
+    /must specify timeout=<duration>/,
   );
 });
 
@@ -149,7 +157,7 @@ test("amend supports every ruled core, criterion, and extension operation", () =
       "added",
       "",
       "## Replace: Verification",
-      "```pwsh",
+      "```pwsh timeout=5m",
       "Write-Output ok",
       "```",
       "",
@@ -183,7 +191,7 @@ test("amend supports every ruled core, criterion, and extension operation", () =
       { title: "Add me", body: "added" },
     ],
   );
-  assert.deepEqual(amended.verification, [{ executor: "pwsh", script: "Write-Output ok" }]);
+  assert.deepEqual(amended.verification, [{ executor: "pwsh", script: "Write-Output ok", timeoutMs: 300_000 }]);
   assert.deepEqual(
     amended.extensions.map(({ title, content }) => ({ title, content: content.trim() })),
     [{ title: "Notes", content: "updated extension" }],

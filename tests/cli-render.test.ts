@@ -64,7 +64,7 @@ test("catalog text renders only the selected identity layer", () => {
       kind: "archetypes",
       rows: [{ name: "reviewer", model: "codex-5", description: "Read the complete change without truncation." }],
     }),
-    ["available Akuma  1", "", "reviewer  codex-5", "  Read the complete change without truncation."].join("\n"),
+    ["available Akuma", "", "reviewer  codex-5", "  Read the complete change without truncation."].join("\n"),
   );
   assert.equal(
     renderCatalogText({
@@ -84,10 +84,10 @@ test("root Task catalogue marks every disposition without inventing waiting stat
   const cases = [
     ["ready", "○"],
     ["in_progress", "●"],
-    ["blocked", "‖"],
-    ["on_hold", "⧗"],
+    ["blocked", "!"],
+    ["on_hold", "○"],
     ["done", "✓"],
-    ["drop", "✕"],
+    ["drop", "×"],
   ] as const;
   const catalog: Extract<Catalog, { kind: "tasks" }> = {
     kind: "tasks",
@@ -120,7 +120,7 @@ test("pre-delivery review records testimony without claiming a retained candidat
       settlementLags: [],
       verdict,
     });
-    assert.equal(output, `✓ review ${verdict} recorded  kei/not-delivered\n  record`);
+    assert.equal(output, `✓ review ${verdict} recorded  kei/not-delivered`);
     assert.doesNotMatch(output, /candidate|not complete|placement/u);
   }
 });
@@ -221,13 +221,13 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
   const text = renderCatalogText(catalog);
 
   assert.doesNotMatch(text, /^\d+ active · \d+ candidates?$/mu);
-  assert.match(text, /contract state  aaaaaaa · observedAt  2026-08-12T00:00:00.000Z/u);
+  assert.match(text, /observed  2026-08-12T00:00:00.000Z/u);
   assert.match(text, /! kei\/selected-contract · waiting · 0s · Selected Contract/u);
   assert.match(text, /^  candidate  none\n  target  none$/mu);
   assert.doesNotMatch(text, /○ no candidate · ● candidate|satisfied  \[✗\] unsatisfied/u);
   assert.doesNotMatch(text, /worktree clean|tender |integration |merge /u);
   assert.doesNotMatch(text, new RegExp(state, "u"));
-  assert.match(text, /\[✓\] reviewed  \[✗\] verified  \[~\] security \(stale\)  \[ \] manual/u);
+  assert.match(text, /✓ reviewed  ! verified  ! security · stale  ○ manual/u);
   assert.match(text, /after  kei\/claimed-prerequisite · claimed/u);
   assert.match(text, /blocked by  kei\/active-prerequisite · waiting/u);
   assert.match(text, /blocked by  kei\/abandoned-prerequisite · abandoned/u);
@@ -332,7 +332,7 @@ test("world observation failure text is exact", () => {
     command: "reconcile",
     report: { kind: "world-observation-failed", diagnostic: "git failed" },
   };
-  assert.equal(renderText(result), "✕ observation  reconcile\n  diagnostic  git failed");
+  assert.equal(renderText(result), "× observation  reconcile\n  diagnostic  git failed");
 });
 
 test("Verification create action names are safe in text receipts", () => {
@@ -424,7 +424,7 @@ test("amend text omits an absent Region observation", () => {
   };
   assert.equal(
     renderText(result),
-    ["✓ terms replaced  kei/no-amend-region-observation", "  terms diff", "", "", "", "  record"].join("\n"),
+    ["✓ terms replaced  kei/no-amend-region-observation", "  terms unchanged", ""].join("\n"),
   );
 });
 
@@ -438,7 +438,14 @@ test("accepted results preserve reconciliation lag without telemetry", () => {
     head: contractHead("record"),
     facts: [],
     lag: [
-      { kind: "worktree-follow-retained" as const, path: "/tmp/wt", tender, head, reason: "head-moved" as const, affects: "continuation" },
+      {
+        kind: "worktree-follow-retained" as const,
+        path: "/tmp/wt",
+        tender,
+        head,
+        reason: "head-moved" as const,
+        affects: "continuation",
+      },
     ] as const,
     settlementLags: [],
   };
@@ -447,9 +454,8 @@ test("accepted results preserve reconciliation lag without telemetry", () => {
     [
       "✓ deliver — not complete  kei/followed",
       "  candidate  kept",
-      "  record",
-      "  ! lag",
-      "    worktree-follow-retained reason head-moved tender tender head head path /tmp/wt",
+      "! lag",
+      "  worktree-follow-retained reason head-moved tender tender head head path /tmp/wt",
     ].join("\n"),
   );
   assert.deepEqual(envelope.lag[0], {
@@ -488,12 +494,10 @@ test("accepted bind receipts expose confirmed private-state seat close lag", () 
       "✓ bound  kei/bound",
       "  workspace  worktree  /tmp/wt",
       "  no target",
-      "  record",
-      "    journal  bind  · bound",
-      "  ! lag  private-state-seat-close-failed",
-      "  diagnostic",
-      "",
-      "seat close failed after publication",
+      "  journal  bind  · bound",
+      "! lag  private-state-seat-close-failed",
+      "diagnostic",
+      "  seat close failed after publication",
       "",
     ].join("\n"),
   );
@@ -556,7 +560,6 @@ test("direct placement stops render the public unmet prerequisites in order", ()
       "  prerequisite  kei/abandoned-prerequisite  ·  abandoned",
       "  prerequisite  kei/missing-prerequisite  ·  missing",
       "  candidate  kept",
-      "  record",
     ].join("\n"),
   );
 
@@ -569,7 +572,6 @@ test("direct placement stops render the public unmet prerequisites in order", ()
       "  prerequisite  kei/active-prerequisite  ·  active",
       "  prerequisite  kei/abandoned-prerequisite  ·  abandoned",
       "  prerequisite  kei/missing-prerequisite  ·  missing",
-      "  record",
     ].join("\n"),
   );
 });
@@ -609,13 +611,11 @@ test("direct gate stops render the sole placement report without another read", 
       "! gates unsatisfied",
       "  gate  verified  ·  unsatisfied  · at 2026-08-01T00:00:00.000Z",
       "  summary verified",
-      "",
-      "[1 bash exit 1]",
+      "  [1 bash exit 1]",
       "",
       "  gate  reviewed  · stale  · prior satisfied",
       "  gate  manual  · missing",
       "  candidate  kept",
-      "  record",
     ].join("\n"),
   );
 });
@@ -731,7 +731,6 @@ test("continuation checkout stop keeps its exact block after the dependent conte
       "  reason  untracked",
       "  paths",
       '    quote"path.ts',
-      "  record",
     ].join("\n"),
   );
 });
@@ -755,8 +754,7 @@ test("deliver projects a ran Verification completion", () => {
     [
       "✓ delivered  kei/completion",
       "  target  ->  integration-1  · verified (ran)",
-      "  record",
-      "    journal  claim  · claimed",
+      "  journal  claim  · claimed",
     ].join("\n"),
   );
 });
@@ -796,7 +794,6 @@ test("deliver renders claimed and stopped continuations from the accepted result
       "✓ continuation  complete  kei/claimed-dependent",
       "! kei/stopped-dependent  ·  gates unsatisfied",
       "  gate  reviewed  · missing",
-      "  record",
     ].join("\n"),
   );
 });
@@ -817,12 +814,7 @@ test("deliver projects no Verification and an unsatisfied non-gating Verificatio
       verb: "deliver",
       completion: { integration },
     }),
-    [
-      "✓ delivered  kei/completion-states",
-      "  target  ->  integration-2",
-      "  record",
-      "    journal  claim  · claimed",
-    ].join("\n"),
+    ["✓ delivered  kei/completion-states", "  target  ->  integration-2", "  journal  claim  · claimed"].join("\n"),
   );
 
   assert.equal(
@@ -837,11 +829,9 @@ test("deliver projects no Verification and an unsatisfied non-gating Verificatio
       "  target  ->  integration-2",
       "! verification  unsatisfied  (ran)  · not required by Contract gates",
       "  summary",
+      "  [1 bash exit 1]",
       "",
-      "[1 bash exit 1]",
-      "",
-      "  record",
-      "    journal  claim  · claimed",
+      "  journal  claim  · claimed",
     ].join("\n"),
   );
 });
@@ -869,8 +859,7 @@ test("review projects reused Verification and distinguishes placement from testi
       "  target  ->  integration-3  · verified (reused)",
       "  placement  complete",
       "  integration commit  integration-3",
-      "  record",
-      "    journal  claim  · claimed",
+      "  journal  claim  · claimed",
     ].join("\n"),
   );
 });
@@ -898,13 +887,11 @@ test("review projects a reused unsatisfied Verification as non-gating completion
       "  target  ->  integration-4",
       "! verification  unsatisfied  (reused)  · not required by Contract gates",
       "  summary",
-      "",
-      "[reused bash exit 1]",
+      "  [reused bash exit 1]",
       "",
       "  placement  complete",
       "  integration commit  integration-4",
-      "  record",
-      "    journal  claim  · claimed",
+      "  journal  claim  · claimed",
     ].join("\n"),
   );
 });
@@ -948,10 +935,9 @@ test("movement projects its deviation and reintegration coordinates", () => {
       "✓ delivered  kei/reintegrated",
       "! target  moved · re-integrated x2",
       "  target  ->  integration-4",
-      "  record",
-      "    journal  reintegration  · reintegrated  target-1  ->  integration-2",
-      "    journal  reintegration-2  · reintegrated  target-3  ->  integration-4",
-      "    journal  claim  · claimed",
+      "  journal  reintegration  · reintegrated  target-1  ->  integration-2",
+      "  journal  reintegration-2  · reintegrated  target-3  ->  integration-4",
+      "  journal  claim  · claimed",
     ].join("\n"),
   );
 
@@ -975,9 +961,8 @@ test("movement projects its deviation and reintegration coordinates", () => {
       "! target  moved · re-integrated x2",
       "! target moved  refs/heads/main  integration-2 -> null  attempts 3",
       "  candidate  kept",
-      "  record",
-      "    journal  reintegration  · reintegrated  target-1  ->  integration-2",
-      "    journal  reintegration-2  · reintegrated  target-3  ->  integration-4",
+      "  journal  reintegration  · reintegrated  target-1  ->  integration-2",
+      "  journal  reintegration-2  · reintegrated  target-3  ->  integration-4",
     ].join("\n"),
   );
 });
@@ -991,7 +976,7 @@ test("unmerged index paths render as a complete public refusal", () => {
       contract,
       refusal: { kind: "unmerged-paths", contractId: contract, paths: ["a.txt", "z.txt"] },
     }),
-    ["✕ deliver refused  kei/conflicted", "  unmerged-paths", "  paths", "    a.txt", "    z.txt"].join("\n"),
+    ["× deliver refused  kei/conflicted", "  unmerged-paths", "  paths", "    a.txt", "    z.txt"].join("\n"),
   );
 });
 
@@ -1012,11 +997,11 @@ test("materialized conflict text keeps the exact recovery projection", () => {
     renderText(result),
     [
       "! integration-conflict-materialized",
-      `  target  ${"b".repeat(40)}`,
-      "  recorded  no delivery",
+      "  target  bbbbbbb",
+      "  delivery  none",
       "  index  unmerged",
       "  saved  worktree bytes before projection",
-      `  handoff base  ${"a".repeat(40)}`,
+      "  handoff base  aaaaaaa",
       "  conflicts",
       "    a.txt",
       "    b.txt",
@@ -1051,13 +1036,20 @@ test("World roster reuses snapshot activity rendering for concrete tool work", (
     calls.map((member, index) => snapshotRow(completedTool(index + 1, member.name, member.call))),
   );
   const targeted = snapshotActivityLines(snapshot, { columns: 118, color: false });
-  for (const member of calls) assert.ok(targeted.some((line) => line.includes(member.evidence)), member.evidence);
+  for (const member of calls)
+    assert.ok(
+      targeted.some((line) => line.includes(member.evidence)),
+      member.evidence,
+    );
   const roster = renderAkuma(akumaWorldReport([activityAkumaRow("aku/worker/aaaa0001", "running", snapshot)]), {
     columns: 120,
     color: false,
   });
   const bounded = snapshotActivityLines(snapshot, { columns: 118, color: false }, { latest: true });
-  assert.deepEqual(roster.slice(-bounded.length), bounded.map((line) => `  ${line}`));
+  assert.deepEqual(
+    roster.slice(-bounded.length),
+    bounded.map((line) => `  ${line}`),
+  );
   assert.match(roster.at(-1)!, /✓ run    \$ npm test -- tests\/cli-render\.test\.ts/u);
   assert.doesNotMatch(roster.join("\n"), /src\/a\.ts|activity "/u);
 });

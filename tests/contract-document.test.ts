@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { renderContractBody } from "../src/body/render.js";
+import { parseMarkdownBindDocument } from "../src/library/contract-bind.js";
 
 function document(extra = "", regionInfo = ""): string {
   return contractMarkdown("Day One", {
@@ -120,6 +121,12 @@ test("Verification uses direct fenced executors and reserved H2s are refused", (
         error.message.includes(`${name.toLowerCase()} is not a contract Markdown section`),
     );
   }
+});
+
+test("new binds require Verification timeouts while historical documents remain readable", () => {
+  const historical = `${document()}\n## Verification\n~~~bash\ntrue\n~~~\n`;
+  assert.deepEqual(decodeContractDocument(historical).verification, [{ executor: "bash", script: "true" }]);
+  assert.throws(() => parseMarkdownBindDocument(historical), /must specify timeout=<duration>/);
 });
 
 test("criteria bodies keep exact bytes through nested structure; duplicate titles are refused", () => {

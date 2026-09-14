@@ -61,16 +61,19 @@ function criteria(document: DocumentNode, section: SectionNode): readonly Contra
   });
 }
 
-function verification(document: DocumentNode, section: SectionNode) {
+function verification(document: DocumentNode, section: SectionNode, options: Readonly<{ requireTimeout?: boolean }>) {
   try {
-    return decodeVerificationDeclarations(document, section);
+    return decodeVerificationDeclarations(document, section, options);
   } catch (error) {
     if (error instanceof VerificationDocumentError) refusal(error.message);
     throw error;
   }
 }
 
-export function decodeContractDocument(source: string): DecodedContractDocument {
+export function decodeContractDocument(
+  source: string,
+  options: Readonly<{ requireTimeout?: boolean }> = {},
+): DecodedContractDocument {
   let envelope: ReturnType<typeof decodeDocumentEnvelope>;
   try {
     envelope = decodeDocumentEnvelope(source, "contract");
@@ -97,7 +100,7 @@ export function decodeContractDocument(source: string): DecodedContractDocument 
     design: prose(document, requiredSection(sections, "design")),
     region: region(document, requiredSection(sections, "region")),
     criteria: criteria(document, requiredSection(sections, "criteria")),
-    verification: verificationSection === undefined ? [] : verification(document, verificationSection),
+    verification: verificationSection === undefined ? [] : verification(document, verificationSection, options),
     extensions,
   };
   const segments = sectionNodes.map((section) => mintDocumentSegmentKey(document.source, section.span));

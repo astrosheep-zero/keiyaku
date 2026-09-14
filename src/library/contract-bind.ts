@@ -118,7 +118,7 @@ export async function bindKeiyaku<Handle>(
 }
 
 export function parseMarkdownBindDocument(markdown: string) {
-  return decodeContractDocument(requireMarkdown(markdown));
+  return decodeContractDocument(requireMarkdown(markdown), { requireTimeout: true });
 }
 
 /** Internal CLI composition; not exported from the package root. */

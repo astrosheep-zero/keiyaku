@@ -4,7 +4,8 @@ import { fieldName } from "./value.js";
 
 function settingValueLines(name: string, value: unknown, indent: string): readonly string[] {
   const secret = /(?:key|token|secret|password|credential)/iu.test(name);
-  if (secret && value !== undefined && value !== null && String(value).length > 0) return [`${indent}${fieldName(name)}  [redacted]`];
+  if (secret && value !== undefined && value !== null && String(value).length > 0)
+    return [`${indent}${fieldName(name)}  [redacted]`];
   if (value === null || typeof value !== "object") return [`${indent}${fieldName(name)}  ${String(value)}`];
   if (Array.isArray(value)) return value.flatMap((item, index) => settingValueLines(`${name}.${index}`, item, indent));
   return Object.entries(value).flatMap(([key, item]) => settingValueLines(`${name}.${key}`, item, indent));

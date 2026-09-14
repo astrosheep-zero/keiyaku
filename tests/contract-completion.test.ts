@@ -342,7 +342,7 @@ test("dependent verification leaks are accumulated with their owners instead of 
       })
     ).keiyaku;
     await child.deliver();
-    await child.amend({ markdown: "## Replace: Verification\n~~~bash\nprintf fresh\n~~~\n" });
+    await child.amend({ markdown: "## Replace: Verification\n~~~bash timeout=5m\nprintf fresh\n~~~\n" });
     children.push(child);
   }
   await primary.deliver();

@@ -7,6 +7,7 @@ export const LOCAL_TEST_FILES = [
   "tests/cli-help.test.ts",
   "tests/cli-install.test.ts",
   "tests/cli-parse.test.ts",
+  "tests/cli-progress.test.ts",
   "tests/cli-projection-evidence.test.ts",
   "tests/cli-render.test.ts",
   "tests/cli-selectors.test.ts",

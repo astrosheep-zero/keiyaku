@@ -41,7 +41,7 @@ test("CLI binds mixed gate selections and amends or binds an explicit empty sele
             Design: "Resolve the selection before binding or amending.",
             Region: "~~~\nsrc/**\n~~~",
             Criteria: "### Gates\nThe selected obligations are retained.",
-            Verification: "~~~bash\nexit 0\n~~~",
+            Verification: "~~~bash timeout=5m\nexit 0\n~~~",
           }),
       },
     );

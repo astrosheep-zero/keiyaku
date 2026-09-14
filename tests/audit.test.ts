@@ -27,7 +27,7 @@ function verificationBody(script: string | null = "exit 1"): string {
     Criteria: [
       "### Audit",
       "The report follows the journal.",
-      ...(script === null ? [] : ["", "## Verification", "~~~bash", script, "~~~"]),
+      ...(script === null ? [] : ["", "## Verification", "~~~bash timeout=5m", script, "~~~"]),
       "",
     ].join("\n"),
   });
@@ -258,7 +258,7 @@ test("audit blocks an unresolved materialized merge with the delivery refusal", 
 test("audit accepts an attestation refusal as a stopped answer without facts", async () => {
   const { contract } = await failedStoredVerification();
   await contract.amend({
-    markdown: ["## Replace: Verification", "~~~bash", "sleep 0.2", "~~~", ""].join("\n"),
+    markdown: ["## Replace: Verification", "~~~bash timeout=5m", "sleep 0.2", "~~~", ""].join("\n"),
   });
 
   const pending = contract.audit();
@@ -287,7 +287,7 @@ test("audit accepts an attestation refusal as a stopped answer without facts", a
 test("audit admits Verification testimony for its captured old subject", async () => {
   const { contract } = await failedStoredVerification();
   await contract.amend({
-    markdown: ["## Replace: Verification", "~~~bash", "sleep 0.2", "~~~", ""].join("\n"),
+    markdown: ["## Replace: Verification", "~~~bash timeout=5m", "sleep 0.2", "~~~", ""].join("\n"),
   });
   const state = await contract.state();
   const definition = verificationDefinition(decodeContractDocument(state.terms.document.bytes));
@@ -297,7 +297,7 @@ test("audit admits Verification testimony for its captured old subject", async (
   const amended = new Promise<void>((resolve, reject) => {
     setTimeout(() => {
       void contract
-        .amend({ markdown: ["## Replace: Verification", "~~~bash", "exit 0", "~~~", ""].join("\n") })
+        .amend({ markdown: ["## Replace: Verification", "~~~bash timeout=5m", "exit 0", "~~~", ""].join("\n") })
         .then(() => {
           try {
             resolve();

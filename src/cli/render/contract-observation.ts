@@ -10,7 +10,7 @@ const GIT_OBJECT_ID = /^[0-9a-f]{40}$/iu;
 
 export function gateGlyph(report: ContractGateReport): string {
   if (report.current.kind === "stale") return "!";
-  if (report.current.kind === "missing") return "?";
+  if (report.current.kind === "missing") return "○";
   return report.current.verdict === "satisfied" ? "✓" : "!";
 }
 

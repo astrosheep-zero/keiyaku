@@ -47,7 +47,10 @@ function journalBody(fact: Fact): readonly string[] {
       ];
     }
     case "reintegrated":
-      return [`  predecessor commit  ${shortId(fact.data.predecessor)}`, `  integration commit  ${shortId(fact.data.snapshot)}`];
+      return [
+        `  predecessor commit  ${shortId(fact.data.predecessor)}`,
+        `  integration commit  ${shortId(fact.data.snapshot)}`,
+      ];
     case "attestation": {
       const lines = [
         `  gate  ${fact.data.gate}`,
@@ -55,7 +58,8 @@ function journalBody(fact: Fact): readonly string[] {
         `  subject  verification · snapshot ${shortId(fact.data.subject)}`,
       ];
       if (fact.data.summary !== undefined) {
-        const clipped = fact.data.summary.length > 4096 ? `${fact.data.summary.slice(0, 4096)}\n[truncated]` : fact.data.summary;
+        const clipped =
+          fact.data.summary.length > 4096 ? `${fact.data.summary.slice(0, 4096)}\n[truncated]` : fact.data.summary;
         receiptPayload(lines, "summary", clipped);
       }
       return lines;

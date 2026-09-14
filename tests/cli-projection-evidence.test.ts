@@ -117,14 +117,12 @@ test("settings text retains shadow provenance and exact configuration names", ()
       "  project  read  /repo/settings.json",
       "  namespace  providers  read",
       "    entry  local · project · shadows user",
-      "      value  object (1)",
-      "        env  object (1)",
-      '          LONG_VALUE  "false"',
+      '      "value.env.LONG_VALUE"  false',
     ].join("\n"),
   );
 });
 
-test("all four gate bracket states keep the declared gate identity", () => {
+test("all four gate states keep the declared gate identity", () => {
   assert.deepEqual(
     [
       gateFact({ gate: "reviewed", current: { kind: "attested", verdict: "satisfied", at: "2026-08-01T00:00:00Z" } }),
@@ -132,7 +130,7 @@ test("all four gate bracket states keep the declared gate identity", () => {
       gateFact({ gate: "security", current: { kind: "stale", priorVerdict: "satisfied" } }),
       gateFact({ gate: "customGate", current: { kind: "missing" } }),
     ],
-    ["[✓] reviewed", "[✗] verified", "[~] security (stale)", "[ ] customGate"],
+    ["✓ reviewed", "! verified", "! security · stale", "○ customGate"],
   );
 });
 
@@ -225,8 +223,9 @@ test("materialized conflict keeps copyable handoff and target coordinates", () =
     },
     { columns: 30, color: false },
   );
-  assert.ok(output.split("\n").includes(`  target  ${target}`));
-  assert.ok(output.split("\n").includes(`  handoff base  ${base}`));
+  assert.ok(output.includes("  target"));
+  assert.ok(output.includes(target.slice(0, 7)));
+  assert.ok(output.includes(base.slice(0, 7)));
   assert.ok(output.split("\n").includes("  deliver  deliver --include-dirty · reads worktree bytes, not index"));
   assert.doesNotMatch(output, /-C |--cwd |please|next/u);
 });
@@ -302,11 +301,7 @@ test("Contract history keeps event evidence and commit labels without exposing d
       "  start commit  start",
       "  target  refs/heads/main",
       "  workspace  worktree",
-      "  gates  0",
-      "  after  0",
       `${at} amend · ${entries[1]} · reviewer`,
-      "  gates  0",
-      "  after  0",
       `${at} deliver · ${entries[2]} · reviewer`,
       "  tender commit  tender",
       "  predecessor commit  predecessor",

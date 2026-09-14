@@ -27,6 +27,10 @@ function collectionLines(name: string, members: readonly string[], indent: strin
   return [`${indent}${name}`, ...members.map((member) => `${indent}  ${safeText(member)}`)];
 }
 
+function shortGitId(value: string): string {
+  return /^[0-9a-f]{40}$/iu.test(value) ? value.slice(0, 7) : value;
+}
+
 function skipAddressedContract(addressed: string | undefined, contractId: string | undefined): boolean {
   return addressed !== undefined && contractId === addressed;
 }
@@ -140,11 +144,11 @@ export function renderConflictMaterialized(
   const indent = "  ";
   return [
     "! integration-conflict-materialized",
-    `${indent}target  ${safeText(result.targetHead)}`,
+    `${indent}target  ${shortGitId(result.targetHead)}`,
     `${indent}delivery  none`,
     `${indent}index  unmerged`,
     `${indent}saved  worktree bytes before projection`,
-    `${indent}handoff base  ${safeText(result.handoffBase)}`,
+    `${indent}handoff base  ${shortGitId(result.handoffBase)}`,
     ...collectionLines("conflicts", result.conflictPaths, indent),
     `${indent}workspace  ${safeText(result.workspace.path)}`,
     `${indent}deliver  ${safeText(result.recovery.continue)} · reads worktree bytes, not index`,

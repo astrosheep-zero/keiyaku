@@ -98,12 +98,12 @@ export class ExecutionProgressRenderer {
     this.status = new StatusLine(input.stream, input);
   }
 
-  consume(event: ExecutionEvent): void {
+  async consume(event: ExecutionEvent): Promise<void> {
     if (event.kind === "verification") {
-      this.consumeVerification(event);
+      await this.consumeVerification(event);
       return;
     }
-    this.write(executionProgressLines(event, this.input.context));
+    await this.write(executionProgressLines(event, this.input.context));
   }
 
   finish(): void {
@@ -118,17 +118,17 @@ export class ExecutionProgressRenderer {
     this.status.finish(`verify  ${this.finalMark()} · ${duration}`);
   }
 
-  private consumeVerification(event: Extract<ExecutionEvent, { kind: "verification" }>): void {
+  private async consumeVerification(event: Extract<ExecutionEvent, { kind: "verification" }>): Promise<void> {
     const observation = event.observation;
     if (observation.kind === "output") {
-      this.write(outputLines(observation, this.input.context));
+      await this.write(outputLines(observation, this.input.context));
       return;
     }
     if (observation.state === "started") {
       this.verificationStartedAt ??= (this.input.now ?? (() => performance.now()))();
       if (this.status.isTTY)
         this.status.show((duration) => `verify  ● ${phaseDetail(observation)} · ${elapsed(duration)}`);
-      else this.write([phaseStartLine(observation)]);
+      else await this.write([phaseStartLine(observation)]);
       return;
     }
     const mark = phaseMark(observation.outcome);
@@ -142,12 +142,15 @@ export class ExecutionProgressRenderer {
     }
     if (this.status.isTTY)
       this.status.show((duration) => `verify  ${mark} ${phaseDetail(observation)} · ${elapsed(duration)}`);
-    else this.write([phaseFinishLine(observation)]);
+    else await this.write([phaseFinishLine(observation)]);
   }
 
-  private write(lines: readonly string[]): void {
-    if (this.status.isTTY) this.status.writeBlock(lines);
-    else this.input.stream.write(`${lines.join("\n")}\n`);
+  private write(lines: readonly string[]): Promise<void> {
+    if (this.status.isTTY) {
+      this.status.writeBlock(lines);
+      return Promise.resolve();
+    }
+    return writeChunk(this.input.stream, `${lines.join("\n")}\n`);
   }
 
   private finalMark(): "✓" | "×" | "?" {
@@ -160,6 +163,43 @@ export async function renderExecutionProgress(
   input: ExecutionProgressOptions,
 ): Promise<void> {
   const renderer = new ExecutionProgressRenderer(input);
-  for await (const event of events) renderer.consume(event);
-  renderer.finish();
+  const destination = watchDestination(input.stream);
+  const iterator = events[Symbol.asyncIterator]();
+  try {
+    for (;;) {
+      const next = await Promise.race([iterator.next(), destination.promise]);
+      if (next.done === true) break;
+      await renderer.consume(next.value);
+    }
+    renderer.finish();
+  } finally {
+    destination.detach();
+  }
+}
+
+/** Reject when the destination dies while the producer is still owned. */
+function watchDestination(stream: NodeJS.WritableStream): Readonly<{ promise: Promise<never>; detach(): void }> {
+  let detach = () => undefined;
+  const promise = new Promise<never>((_, reject) => {
+    const onError = (error: Error) => reject(error);
+    const onClose = () =>
+      reject(
+        Object.assign(new Error("write on prematurely closed destination"), { code: "ERR_STREAM_PREMATURE_CLOSE" }),
+      );
+    stream.once("error", onError);
+    stream.once("close", onClose);
+    detach = () => {
+      stream.off("error", onError);
+      stream.off("close", onClose);
+    };
+  });
+  promise.catch(() => undefined);
+  return { promise, detach };
+}
+
+/** Await one destination write: backpressure and error propagation in one callback. */
+function writeChunk(stream: NodeJS.WritableStream, text: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    stream.write(text, (error) => (error ? reject(error) : resolve()));
+  });
 }

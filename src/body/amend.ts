@@ -101,7 +101,7 @@ function criteria(document: DocumentNode, section: SectionNode): readonly Contra
 
 function verification(document: DocumentNode, section: SectionNode): readonly VerificationDeclaration[] {
   try {
-    return decodeVerificationDeclarations(document, section);
+    return decodeVerificationDeclarations(document, section, { requireTimeout: true });
   } catch (error) {
     if (error instanceof VerificationDocumentError) refusal(error.message);
     throw error;

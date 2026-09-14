@@ -68,7 +68,7 @@ export function document(verification?: string): string {
     "## Criteria",
     "### Public path",
     "The public path preserves fact payloads.",
-    ...(verification === undefined ? [] : ["", "## Verification", "~~~bash", verification, "~~~"]),
+    ...(verification === undefined ? [] : ["", "## Verification", "~~~bash timeout=5m", verification, "~~~"]),
     "",
   ].join("\n");
 }
