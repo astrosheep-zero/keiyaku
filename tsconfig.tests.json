@@ -84,6 +84,7 @@
     "tests/git-repository.test.ts",
     "tests/markdown-ast.test.ts",
     "tests/plugin-runtime.test.ts",
+    "tests/pi-native-identity.test.ts",
     "tests/facade-fleet.test.ts",
     "tests/kanshi.test.ts",
     "tests/library-akuma-creation.test.ts",

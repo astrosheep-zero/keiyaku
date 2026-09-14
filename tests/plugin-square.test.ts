@@ -11,6 +11,18 @@ import { World } from "../src/world.js";
 
 const squarePath = (root: string): string => join(root, ".square", "KEIYAKU.square");
 
+// The Square plugin reads process.env directly, so the surrounding harness must not
+// be able to contribute a caller identity the fixture did not choose.
+const SESSION_IDENTITY_VARIABLE = /_SESSION_ID$|_THREAD_ID$|^PASEO_AGENT_ID$|^SQUARE_PARTICIPANT_NAME$/u;
+
+function ambientSessionIdentity(): Readonly<Record<string, string | undefined>> {
+  return Object.fromEntries(
+    Object.keys(process.env)
+      .filter((name) => SESSION_IDENTITY_VARIABLE.test(name))
+      .map((name) => [name, process.env[name]]),
+  );
+}
+
 function restoreEnvironment(values: Readonly<Record<string, string | undefined>>): void {
   for (const [name, value] of Object.entries(values)) {
     if (value === undefined) delete process.env[name];
@@ -35,11 +47,13 @@ async function expressions(
 
 test("the Square plugin attributes calls to their caller and expresses every Turn outcome", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-plugin-square-"));
+  const ambient = ambientSessionIdentity();
   const prior = {
+    ...ambient,
     CODEX_THREAD_ID: process.env.CODEX_THREAD_ID,
     CLAUDE_CODE_SESSION_ID: process.env.CLAUDE_CODE_SESSION_ID,
     OPENCODE_SESSION_ID: process.env.OPENCODE_SESSION_ID,
-    SQUARE_PI_SESSION_ID: process.env.SQUARE_PI_SESSION_ID,
+    PI_SESSION_ID: process.env.PI_SESSION_ID,
     PASEO_AGENT_ID: process.env.PASEO_AGENT_ID,
     SQUARE_PARTICIPANT_NAME: process.env.SQUARE_PARTICIPANT_NAME,
     SQUARE_HOST_LEDGER_LOCAL: process.env.SQUARE_HOST_LEDGER_LOCAL,
@@ -48,6 +62,7 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     SQUARE_CODEX_BIN: process.env.SQUARE_CODEX_BIN,
     SQUARE_CODEX_QUEUE_LOG: process.env.SQUARE_CODEX_QUEUE_LOG,
   };
+  for (const name of Object.keys(ambient)) delete process.env[name];
   try {
     assert.deepEqual(squarePlugin.manifest, {
       id: "square",
@@ -56,7 +71,7 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     });
     mkdirSync(join(root, ".square"), { recursive: true });
     process.env.CODEX_THREAD_ID = "caller";
-    process.env.SQUARE_PI_SESSION_ID = "fixture-pi-session";
+    process.env.PI_SESSION_ID = "fixture-pi-session";
     process.env.PASEO_AGENT_ID = "";
     process.env.SQUARE_PARTICIPANT_NAME = "Alice";
     process.env.SQUARE_HOST_LEDGER_LOCAL = join(root, "local-ledger");
@@ -159,7 +174,7 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     delete process.env.CODEX_THREAD_ID;
     delete process.env.CLAUDE_CODE_SESSION_ID;
     delete process.env.OPENCODE_SESSION_ID;
-    delete process.env.SQUARE_PI_SESSION_ID;
+    delete process.env.PI_SESSION_ID;
     delete process.env.SQUARE_PARTICIPANT_NAME;
     const fallback = await squarePlugin.activate({
       world: root as unknown as WorldRoot,

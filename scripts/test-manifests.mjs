@@ -71,6 +71,7 @@ export const INTEGRATION_TEST_FILES = [
   "tests/nuke.test.ts",
   "tests/package-consumers.test.ts",
   "tests/path-coordinates.test.ts",
+  "tests/pi-native-identity.test.ts",
   "tests/plugin-runtime.test.ts",
   "tests/plugin-square.test.ts",
   "tests/private-state-seat.test.ts",
