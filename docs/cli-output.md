@@ -25,7 +25,16 @@ and operational failure. Contract text labels tender and target integration as `
 
 Renderers show complete public identity and decision-relevant evidence without
 inventing status, hiding section failure as zero, or turning unknown evidence
-into a positive result. Recording review testimony and completing placement
+into a positive result. The text vocabulary is closed: six marks `● ○ ✓ × ! ?`
+cover moving, calmly waiting, done, refused-or-failed, attention, and unknown;
+the word after a mark carries the detail. Facts are label-value rows joined
+with ` · `; `key=value`, decorative rulers, banners, and bracket state
+alphabets are not text vocabulary. Git identities render at 7 characters in
+text and full length in JSON. Paths stay absolute and copyable where they are
+the answer, and stay out of board and catalogue rows where they are not.
+Absent facts are absent rows; zero counts and empty containers print nothing.
+Multi-line payloads sit directly under their label, bounded, and name their
+own truncation. Recording review testimony and completing placement
 remain distinct facts; absence of completion does not establish a candidate. They may make a terminal-readable view denser, wrap
 prose, and use non-semantic terminal emphasis, but cannot truncate a copyable
 identity or replace a public discriminant with decoration.
@@ -58,14 +67,11 @@ time, continuity, and running-tool distinctions; they do not restyle that
 surface into ordinary fact rows.
 
 Detached call receipts foreground the complete Akuma identity with any alias
-as a parenthetical supplement. Compact resource marks distinguish the associated
-Contract from the actual execution directory; the invocation World is not an
-additional text fact. An available wait handle is separated from those facts
-and carries a subordinate purpose caption, not a prescribed next step. Muted
-emphasis remains optional, and the receipt does not claim a live worker state
-or completed work. Dispatch, alias, and restraint problems retain their evidence
-without the ordinary wait footer. This receipt does not restyle observation
-timelines or raw answers.
+as a parenthetical supplement. Compact resource rows name the associated
+Contract and the actual execution directory; the invocation World is not an
+additional text fact. Dispatch, alias, and restraint problems retain their
+evidence as attention rows. The receipt stops at facts: it neither claims a
+live worker state nor prescribes a follow-up command.
 
 Tell delivery has one text carrier: its corresponding timeline row. A held or
 pursuing delivery does not add a separate wake or receipt-status line. A
@@ -89,11 +95,14 @@ alternative protocol. The renderer has no scanner grammar, output schema, or
 private status vocabulary of its own.
 
 For delivery, review, and audit, witnessed execution progress is written to
-stderr while one complete final text or JSON result remains on stdout. Live
-output presentation is bounded and names its truncation; a quiet interval never
-claims that a command is hung or alive. Terminal cancellation asks the owned
-operation to stop and waits for its truthful final receipt and cleanup boundary
-instead of replacing that result with an early CLI exit.
+stderr while one complete final text or JSON result remains on stdout. On a
+terminal, progress is one status line refreshed in place — current phase, unit,
+and ticking elapsed — with bounded output blocks appended beneath it; the
+ticking elapsed is the only liveness evidence, and a quiet interval never
+claims that a command is hung or alive. Off a terminal, progress degrades to
+sparse phase-boundary lines without repeated coordinates. Terminal cancellation
+asks the owned operation to stop and waits for its truthful final receipt and
+cleanup boundary instead of replacing that result with an early CLI exit.
 
 When an exceptional Contract execution already confirmed admissions, the CLI
 reports the failure together with those receipts instead of projecting a usage
