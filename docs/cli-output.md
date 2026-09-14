@@ -104,6 +104,14 @@ sparse phase-boundary lines without repeated coordinates. Terminal cancellation
 asks the owned operation to stop and waits for its truthful final receipt and
 cleanup boundary instead of replacing that result with an early CLI exit.
 
+An observing call reports the same kind of progress. A call that waits, renders
+text, and carries no answer contract announces the identity its birth already
+established and then each timeline row once it has settled, on the progress
+channel as the window advances, while its one complete final result stays on
+stdout. The stream restates the timeline's own rows in their final form rather
+than inventing a private vocabulary or standing in for the final result; a call
+that answers a schema, renders JSON, or detaches has no such stream.
+
 When an exceptional Contract execution already confirmed admissions, the CLI
 reports the failure together with those receipts instead of projecting a usage
 error or a no-effect refusal. Text and JSON preserve the same admitted facts and

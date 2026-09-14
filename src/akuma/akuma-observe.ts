@@ -141,6 +141,34 @@ export async function readWaitComplete(worldPath: WorldRoot, id: AkuId): Promise
   return complete(observed.currentLife, observed.snapshot.hasPendingTell);
 }
 
+const OBSERVATION_POLL_MS = 100;
+
+function observeDelay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+/**
+ * Successive status observations of one already born Akuma until its
+ * observation window closes. Every status observed while the window is open is
+ * reported to `observe`; the window's last status is returned. A window that is
+ * already closed, or an Akuma already at its completion judgment, reports
+ * nothing and returns the current status.
+ */
+export async function observeAkumaStatus(
+  worldPath: WorldRoot,
+  expected: AkuId,
+  input: Readonly<{ timeoutMs: number; observe: (status: AkumaStatus) => void }>,
+): Promise<AkumaStatus> {
+  const paths = pathsForAkuId(worldPath, expected);
+  const deadline = performance.now() + input.timeoutMs;
+  for (;;) {
+    const status = (await bornStatus(paths, expected, { aperture: "monitoring" })).status;
+    if (defaultWaitComplete(status) || performance.now() >= deadline) return status;
+    input.observe(status);
+    await observeDelay(Math.min(OBSERVATION_POLL_MS, Math.max(0, deadline - performance.now())));
+  }
+}
+
 export async function readAkumaBirthCwd(worldPath: WorldRoot, id: AkuId): Promise<string> {
   const soul = await readSoul(pathsForAkuId(worldPath, id));
   if (soul === null) throw new AkumaNotBornError(id);

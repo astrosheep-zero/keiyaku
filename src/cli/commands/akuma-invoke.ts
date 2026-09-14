@@ -2,19 +2,27 @@ import { readFile } from "node:fs/promises";
 import { squareAssignedParticipantName } from "@astrosheep/square";
 import { emitInitiatingPluginSignal } from "../../plugin/akuma-signals.js";
 import { type AkuId } from "../../akuma/identity.js";
-import { type ActivityHistory } from "../../akuma/akuma.js";
+import { type ActivityHistory, type AkumaStatus } from "../../akuma/akuma.js";
+import { observeAkumaStatus } from "../../akuma/akuma-observe.js";
 import {
+  AuthorityCorruptionError,
   Keiyaku,
   type AkumaKillResult,
   type AkumaHistoryResult,
   type AkumaObservation,
   type AkumaTellResult,
   type AkumaWaitResult,
+  type CallInput,
+  type CallObservation,
   type CallResult,
   type ForkResult,
+  type IntegrationFailure,
   type Keiyaku as KeiyakuContract,
   type Repo,
 } from "../../index.js";
+import { snapshotActivityLines } from "../render/akuma-activity.js";
+import { renderAkumaText } from "../render/akuma.js";
+import type { TextRenderContext } from "../render/terminal.js";
 import type { Settings } from "../../settings.js";
 import type { WorldRoot } from "../../world.js";
 import type { AkumaPromptSource, InvokedAkumaCommand } from "./akuma.js";
@@ -87,6 +95,92 @@ type InvokeInput = Readonly<{
   readStdin(): Promise<string>;
   execution?: ExecutionContext;
 }>;
+
+/** The window a call observes for when the caller gives no `--wait` duration. */
+const CALL_TIMEOUT_MS = 300_000;
+
+/** The call the CLI makes once its prompt, schema, and placement are resolved. */
+type CallRequest = Omit<CallInput, "mode" | "timeoutMs">;
+
+function integrationFailure(error: unknown): IntegrationFailure {
+  return {
+    kind: error instanceof AuthorityCorruptionError ? "authority-corruption" : "infrastructure",
+    diagnostic: error instanceof Error ? error.message : String(error),
+  };
+}
+
+/** The display context the command result renders with, so live rows match it. */
+function resultContext(): TextRenderContext {
+  return {
+    columns: process.stdout.isTTY === true && Number.isInteger(process.stdout.columns) ? process.stdout.columns : 80,
+    color: process.stdout.isTTY === true && process.env.NO_COLOR === undefined,
+  };
+}
+
+function writeProgress(body: string): void {
+  process.stderr.write(body.endsWith("\n") ? body : `${body}\n`);
+}
+
+/** The projection the shared snapshot renderer consumes. */
+type StreamedTimeline = Parameters<typeof snapshotActivityLines>[0];
+
+/**
+ * One status' timeline without its newest entry. The newest entry is still
+ * moving, and the window's last observation renders it as the command result.
+ */
+function settledTimeline(timeline: StreamedTimeline): StreamedTimeline {
+  switch (timeline.kind) {
+    case "unborn":
+      return timeline;
+    case "open":
+      return { ...timeline, entries: timeline.entries.slice(0, -1) };
+    case "idle":
+      return { ...timeline, entries: timeline.entries.slice(0, -1) };
+  }
+}
+
+/**
+ * The live half of an observe-mode call: the birth receipt prints as soon as the
+ * identity exists, and every later observation prints the transcript rows that
+ * have settled. Rows are rendered by the shared snapshot renderer, so what the
+ * stream shows is always a prefix of the transcript the closing window renders.
+ */
+function callObservationStream(
+  command: Extract<InvokedAkumaCommand, { command: "call" }>,
+  input: InvokeInput,
+  born: CallResult,
+): (status: AkumaStatus) => void {
+  const context = resultContext();
+  const receipt = renderAkumaText(command, { kind: "akuma", action: "call", result: born, world: input.path }, context);
+  let opened = false;
+  let printedRows = 0;
+  return (status) => {
+    if (!opened) {
+      opened = true;
+      writeProgress(receipt);
+    }
+    const settled = snapshotActivityLines(settledTimeline(status.timeline), context);
+    if (settled.length <= printedRows) return;
+    writeProgress(settled.slice(printedRows).join("\n"));
+    printedRows = settled.length;
+  };
+}
+
+async function observeCallUntilComplete(
+  command: Extract<InvokedAkumaCommand, { command: "call" }>,
+  input: InvokeInput,
+  born: CallResult,
+): Promise<CallObservation> {
+  try {
+    const status = await observeAkumaStatus(input.path, born.akuma, {
+      timeoutMs: command.timeoutMs ?? CALL_TIMEOUT_MS,
+      observe: callObservationStream(command, input, born),
+    });
+    return { kind: "observed", status };
+  } catch (error) {
+    return { kind: "failed", failure: integrationFailure(error) };
+  }
+}
 
 async function schemaFromFile(path: string): Promise<Schema<unknown>> {
   try {
@@ -290,7 +384,7 @@ export async function invokeAkuma(command: InvokedAkumaCommand, input: InvokeInp
       const body = await promptBody(command, input);
       const schema = command.schema === undefined ? undefined : await schemaFromFile(command.schema);
       const caller = input.execution === undefined ? Keiyaku : Keiyaku.withExecution({ execution: input.execution });
-      const result = await caller.call({
+      const request: CallRequest = {
         ...(await inputInitiator(input)),
         path: input.path,
         archetype: command.archetype,
@@ -298,13 +392,22 @@ export async function invokeAkuma(command: InvokedAkumaCommand, input: InvokeInp
         ...(input.home === undefined ? {} : { home: input.home }),
         ...(input.settings === undefined ? {} : { settings: input.settings }),
         ...(input.executionCwd === undefined ? {} : { cwd: input.executionCwd }),
-        mode: command.mode,
-        ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
         ...(input.contract === undefined ? {} : { contract: input.contract }),
         ...(command.alias === undefined ? {} : { alias: command.alias }),
         ...(command.allowed === undefined ? {} : { allowed: command.allowed }),
         ...(schema === undefined ? {} : { schema }),
-      });
+      };
+      const observing = schema === undefined && command.mode === "wait" && command.output === "text";
+      const born = await caller.call(
+        observing
+          ? { ...request, mode: "detach" }
+          : {
+              ...request,
+              mode: command.mode,
+              ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
+            },
+      );
+      const result = observing ? { ...born, observation: await observeCallUntilComplete(command, input, born) } : born;
       if (schema !== undefined && command.mode === "wait" && result.schemaAnswer !== undefined) {
         return { kind: "akuma", action: "call", result, world: input.path, schemaAnswer: result.schemaAnswer };
       }

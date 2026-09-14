@@ -21,6 +21,8 @@ import { AkumaArchetypeError, listArchetypeDefinitions, loadArchetype } from "..
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { akumaCallRequestCommands, type AkumaCallRequestChildLaunch } from "../src/akuma/call-request.js";
 import {
+  appendActivity,
+  beginTurn,
   finishBodyIfIdle,
   HeldAkumaLeash,
   initializeHeart,
@@ -627,6 +629,76 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
       /timeoutMs is not valid in detach mode/u,
     );
   } finally {
+    await pump.close();
+    leash.release();
+    if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
+    else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
+    rmSync(raw.path, { recursive: true, force: true });
+  }
+});
+
+test("CLI call prints its worker identity at birth and streams settled rows while it runs", async () => {
+  const { raw } = await repositoryFixture();
+  const world = await World.at(raw.path);
+  const configured = await archetypeSettings(world);
+  const slow = slowEmptyPublicationBody();
+  const { pump, leash } = await requestPump(world, slow.spawn);
+  const previousRequests = process.env[AKUMA_REQUESTS_ENV];
+  process.env[AKUMA_REQUESTS_ENV] = pump.directory;
+  const writeStderr = process.stderr.write;
+  let live = "";
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    live += String(chunk);
+    return true;
+  }) as typeof process.stderr.write;
+  const waitForLive = async (predicate: () => boolean): Promise<void> => {
+    const deadline = Date.now() + 5_000;
+    while (!predicate()) {
+      if (Date.now() >= deadline) throw new Error(`timed out waiting for streamed observation:\n${live}`);
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+  };
+  let akumaId: string | undefined;
+  try {
+    const pending = invoke(executable(["-C", raw.path, "call", "worker", "--wait", "30s", "streamed-call"]), {
+      environment: { ...process.env, KEIYAKU_HOME: configured.home },
+      readStdin: async () => "",
+    });
+    const body = await slow.started;
+    await waitForLive(() => /\baku\/worker\/[0-9a-f]{8}\b/u.test(live));
+    assert.equal(live.includes("● running"), false);
+
+    const turn = await beginTurn(body.paths, {
+      bodySequence: body.bodySequence,
+      startedAt: "2026-09-10T00:00:03.000Z",
+    });
+    await appendActivity(body.paths, {
+      turnSequence: turn.sequence,
+      event: { type: "note", text: "first-live-row" },
+      at: "2026-09-10T00:00:04.000Z",
+    });
+    assert.equal(live.includes("first-live-row"), false);
+    await appendActivity(body.paths, {
+      turnSequence: turn.sequence,
+      event: { type: "note", text: "second-live-row" },
+      at: "2026-09-10T00:00:05.000Z",
+    });
+    await waitForLive(() => /note\s+first-live-row/u.test(live));
+    assert.equal(live.includes("second-live-row"), false);
+
+    await slow.release();
+    const invoked = await pending;
+    assert.equal("kind" in invoked && invoked.kind, "akuma");
+    if (!("kind" in invoked) || invoked.kind !== "akuma" || invoked.action !== "call") return;
+    akumaId = invoked.result.akuma;
+    assert.equal(invoked.result.observation.kind, "observed");
+    assert.ok(live.includes(akumaId));
+  } finally {
+    process.stderr.write = writeStderr;
+    if (akumaId !== undefined)
+      await PublicAkuma.select(world, akumaId)
+        .kill()
+        .catch(() => undefined);
     await pump.close();
     leash.release();
     if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
