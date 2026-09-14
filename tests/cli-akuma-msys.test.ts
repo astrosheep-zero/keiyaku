@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import test from "node:test";
 import type { AkuId } from "../src/akuma/identity.js";
 import type { AkumaAlias } from "../src/identity/selector.js";
@@ -34,14 +33,6 @@ function detachedCall(
       ...result,
     },
   };
-}
-
-function posixArgv(line: string): string[] {
-  const parsed = spawnSync("bash", ["-c", `set -- ${line.slice("$ ".length)}; printf '%s\\0' "$@"`], {
-    encoding: "utf8",
-  });
-  assert.equal(parsed.status, 0, parsed.stderr);
-  return parsed.stdout.split("\0").slice(0, -1);
 }
 
 test("detached wait keeps Windows cwd separate from its POSIX-copyable handle", () => {
