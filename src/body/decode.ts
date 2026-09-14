@@ -16,14 +16,65 @@ function refusal(message: string): never {
   throw new TypeError(message);
 }
 
-function requireSections(sections: ReadonlyMap<string, SectionNode>): void {
+function requireSections(sections: ReadonlyMap<string, SectionNode>): string[] {
+  const diagnostics: string[] = [];
   for (const [name, spec] of Object.entries(CONTRACT_SECTIONS)) {
-    if (spec.required && !sections.has(name)) refusal(`contract document is missing ## ${spec.title}`);
+    if (spec.required && !sections.has(name)) diagnostics.push(`contract document is missing ## ${spec.title}`);
   }
+  return diagnostics;
 }
 
 function requiredSection(sections: ReadonlyMap<string, SectionNode>, name: RequiredSectionName): SectionNode {
   return sections.get(name)!;
+}
+
+function regionStructure(document: DocumentNode, section: SectionNode): string | null {
+  const blocks = directChildren(section, "code_block");
+  if (blocks.length !== 1 || !blocks[0]!.closed || (blocks[0]!.info !== "" && blocks[0]!.info !== "txt")) {
+    return "Region must contain one closed fence with no info string or the exact 'txt' info string";
+  }
+  const other = section.children.filter(
+    (node) => node !== blocks[0] && rawSlice(document, node.span).trim().length > 0,
+  );
+  return other.length === 0 ? null : "Region may contain only its fenced declaration";
+}
+
+function criteriaStructure(document: DocumentNode, section: SectionNode): string | null {
+  const headings = directChildren(section, "heading").filter((heading) => heading.level === 3);
+  if (headings.length === 0) return "Criteria must contain one or more H3 entries";
+  const before = rawSlice(document, { start: section.contentStart, end: headings[0]!.span.start });
+  return before.trim().length === 0 ? null : "Criteria may contain only H3 entries";
+}
+
+function verificationStructure(document: DocumentNode, section: SectionNode): string | null {
+  const blocks = directChildren(section, "code_block");
+  if (blocks.length === 0) return "Verification must contain one or more fenced executor declarations";
+  const other = section.children.filter(
+    (node) => node.type !== "code_block" && rawSlice(document, node.span).trim().length > 0,
+  );
+  return other.length === 0 ? null : "Verification may contain only fenced executor declarations";
+}
+
+// Independent structural rules collect together; each predicate mirrors the
+// fence, heading, or reserved-name check its decoder already enforces so a
+// document with several violations is refused once with every diagnostic.
+function structuralDiagnostics(document: DocumentNode, sections: ReadonlyMap<string, SectionNode>): string[] {
+  const diagnostics = requireSections(sections);
+  for (const name of RESERVED_SECTIONS) {
+    if (sections.has(name)) diagnostics.push(`${name} is not a contract Markdown section`);
+  }
+  const checks = [
+    ["region", regionStructure],
+    ["criteria", criteriaStructure],
+    ["verification", verificationStructure],
+  ] as const;
+  for (const [name, check] of checks) {
+    const section = sections.get(name);
+    if (section === undefined) continue;
+    const diagnostic = check(document, section);
+    if (diagnostic !== null) diagnostics.push(diagnostic);
+  }
+  return diagnostics;
 }
 
 function prose(document: DocumentNode, section: SectionNode): string {
@@ -42,10 +93,9 @@ function region(document: DocumentNode, section: SectionNode): readonly string[]
 }
 
 function criteria(document: DocumentNode, section: SectionNode): readonly ContractCriterion[] {
+  const structural = criteriaStructure(document, section);
+  if (structural !== null) refusal(structural);
   const headings = directChildren(section, "heading").filter((heading) => heading.level === 3);
-  if (headings.length === 0) refusal("Criteria must contain one or more H3 entries");
-  const before = rawSlice(document, { start: section.contentStart, end: headings[0]!.span.start });
-  if (before.trim().length > 0) refusal("Criteria may contain only H3 entries");
   const seen = new Set<string>();
   return headings.map((heading, index) => {
     const title = heading.text.trim();
@@ -81,10 +131,9 @@ export function decodeContractDocument(
     refusal(error instanceof Error ? error.message : String(error));
   }
   const { document, title, sections, sectionNodes } = envelope;
-  requireSections(sections);
-  for (const name of RESERVED_SECTIONS) {
-    if (sections.has(name)) refusal(`${name} is not a contract Markdown section`);
-  }
+  const structural = structuralDiagnostics(document, sections);
+  if (structural.length > 0) refusal(structural.join("\n"));
+  const verificationSection = sections.get("verification");
   const extensions = [...sections.entries()]
     .filter(([name]) => !Object.hasOwn(CONTRACT_SECTIONS, name))
     .map(([, section]) => {
@@ -92,7 +141,6 @@ export function decodeContractDocument(
       if (content.trim().length === 0) refusal(`extension '${section.title}' is empty`);
       return { title: section.title, content };
     });
-  const verificationSection = sections.get("verification");
   const body: ContractBody = {
     title: title.title,
     context: prose(document, requiredSection(sections, "context")),

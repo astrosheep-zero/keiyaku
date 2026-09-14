@@ -91,6 +91,86 @@ test("contract Markdown rejects frontmatter, duplicate sections, and missing str
   );
 });
 
+test("contract Markdown reports independent structural diagnostics together", () => {
+  const malformed = [
+    "# Broken",
+    "",
+    "## Context",
+    "facts.",
+    "",
+    "## Objective",
+    "ship.",
+    "",
+    "## Region",
+    "~~~",
+    "src/**",
+    "~~~",
+    "prose outside the fence",
+    "",
+    "## Criteria",
+    "- flat criterion",
+    "",
+    "## Verification",
+    "prose instead of a fence",
+    "",
+    "## Gates",
+    "reserved",
+  ].join("\n");
+  assert.throws(
+    () => decodeContractDocument(malformed),
+    (error: unknown) => {
+      if (!(error instanceof TypeError)) return false;
+      assert.equal(
+        error.message,
+        [
+          "contract document is missing ## Design",
+          "gates is not a contract Markdown section",
+          "Region may contain only its fenced declaration",
+          "Criteria must contain one or more H3 entries",
+          "Verification must contain one or more fenced executor declarations",
+        ].join("\n"),
+      );
+      return true;
+    },
+  );
+});
+
+test("a single structural violation keeps its one-sentence refusal", () => {
+  assert.throws(
+    () => decodeContractDocument(withCriteria("- flat criterion")),
+    (error: unknown) => error instanceof TypeError && error.message === "Criteria must contain one or more H3 entries",
+  );
+});
+
+test("structure-dependent diagnostics stay fail-first behind the aggregated layer", () => {
+  const malformedRegion = contractMarkdown("Day One", {
+    Context: "facts.",
+    Objective: "ship.",
+    Design: "adapter.",
+    Region: ["~~~", "src//", "~~~", "~~~", "tests/**", "~~~"].join("\n"),
+    Criteria: "### One\nbody",
+  });
+  assert.throws(
+    () => decodeContractDocument(malformedRegion),
+    (error: unknown) =>
+      error instanceof TypeError &&
+      error.message === "Region must contain one closed fence with no info string or the exact 'txt' info string",
+  );
+
+  const malformedCriteria = contractMarkdown("Day One", {
+    Context: "facts.",
+    Objective: "ship.",
+    Design: "adapter.",
+    Region: "~~~\nsrc/**\n~~~",
+    Criteria: "- flat criterion",
+    Verification: "~~~ruby\ntrue\n~~~",
+  });
+  assert.throws(
+    () => decodeContractDocument(malformedCriteria),
+    (error: unknown) => error instanceof TypeError && error.message === "Criteria must contain one or more H3 entries",
+  );
+});
+
 test("Verification uses direct fenced executors and reserved H2s are refused", () => {
   const verified = decodeContractDocument(`${document()}\n## Verification\n\`\`\`bash\ntrue\n\`\`\`\n`);
   assert.deepEqual(verified.verification, [{ executor: "bash", script: "true" }]);

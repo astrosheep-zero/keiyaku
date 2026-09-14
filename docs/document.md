@@ -10,8 +10,10 @@ their identities, never a decoded body, section tree, or Markdown grammar.
 A Contract document communicates its context, objective, design, intended
 write Region, acceptance criteria, and optional Verification declarations.
 Those required terms must be structurally valid and nonempty where meaningful;
-invalid documents are rejected before a lifecycle attempt. Extensions may carry
-additional author terms without becoming core vocabulary.
+invalid documents are rejected before a lifecycle attempt. Independent
+structural failures are refused together in one attempt, while validation whose
+input depends on a well-formed structure keeps its order after them. Extensions
+may carry additional author terms without becoming core vocabulary.
 
 `Region` is planning evidence. It lets callers see likely interaction among
 active Contracts, but grants no filesystem authority, predicts no eventual
