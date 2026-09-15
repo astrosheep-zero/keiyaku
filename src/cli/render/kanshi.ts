@@ -177,8 +177,7 @@ function namespaceTaskFacts(row: ContractKanshiRow): readonly string[] {
     return [`failed ${row.namespaceTasks.failure.message}`];
   }
   return row.namespaceTasks.value.map(
-    (task) =>
-      `${taskMark(task)} ${task.id} · ${dispositionText(task.disposition)} · P${task.priority} · ${task.title}`,
+    (task) => `${taskMark(task)} ${task.id} · ${dispositionText(task.disposition)} · P${task.priority} · ${task.title}`,
   );
 }
 

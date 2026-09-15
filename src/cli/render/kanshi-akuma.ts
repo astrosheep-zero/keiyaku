@@ -79,9 +79,7 @@ function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly
     const lifeAge = formatAge(lifeAt, report.observedAt);
     const life = `${row.life} · ${lifeAge}`;
     const activityAge =
-      "lastActivityAt" in row && row.lastActivityAt !== null
-        ? formatAge(row.lastActivityAt, report.observedAt)
-        : null;
+      "lastActivityAt" in row && row.lastActivityAt !== null ? formatAge(row.lastActivityAt, report.observedAt) : null;
     const activity = activityAge === null || activityAge === lifeAge ? [] : [`activity ${activityAge}`];
     const key =
       row.life === "stranded" && "strandedReason" in row && row.strandedReason === "resume-unsupported"

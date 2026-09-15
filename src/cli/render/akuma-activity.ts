@@ -103,15 +103,17 @@ function mark(row: RenderRow): "│" | "⧖" | "⧗" | "✓" | "!" | "?" {
 
 /** Strip Markdown decoration from preview prose without rewriting the words. */
 function undecorated(text: string): string {
-  return text
-    .replace(/^ {0,3}#{1,6}[ \t]+/gmu, "")
-    .replace(/^ {0,3}(?:[-*+]|\d+\.)[ \t]+/gmu, "")
-    .replace(/\*\*([^*\n]+?)\*\*/gu, "$1")
-    // A single pair of asterisks is emphasis only when it does not sit inside a word, path, or glob.
-    .replace(/(?<![\w*/\\])\*([^\s*/\\](?:[^*/\\\n]*[^\s*/\\])?)\*(?![\w*/\\])/gu, "$1")
-    .replace(/`([^`\n]+?)`/gu, "$1")
-    .replace(/\s+/gu, " ")
-    .trim();
+  return (
+    text
+      .replace(/^ {0,3}#{1,6}[ \t]+/gmu, "")
+      .replace(/^ {0,3}(?:[-*+]|\d+\.)[ \t]+/gmu, "")
+      .replace(/\*\*([^*\n]+?)\*\*/gu, "$1")
+      // A single pair of asterisks is emphasis only when it does not sit inside a word, path, or glob.
+      .replace(/(?<![\w*/\\])\*([^\s*/\\](?:[^*/\\\n]*[^\s*/\\])?)\*(?![\w*/\\])/gu, "$1")
+      .replace(/`([^`\n]+?)`/gu, "$1")
+      .replace(/\s+/gu, " ")
+      .trim()
+  );
 }
 
 function rowText(row: RenderRow): Readonly<{ text: string; lines: number; middle?: true; suffix?: string }> {
