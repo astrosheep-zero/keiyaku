@@ -141,7 +141,7 @@ test("Arc CLI admits explicit chapters without changing the status result shape"
   };
   const command = (argv: readonly string[], source = "") => {
     const parsed = parseArgv(argv);
-    if ("help" in parsed) throw new Error("arc test command parsed as help");
+    if (!("command" in parsed)) throw new Error("arc test command did not parse as executable");
     return invoke(parsed, {
       ...runtime,
       readStdin: async () => source,

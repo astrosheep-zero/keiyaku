@@ -29,9 +29,11 @@ invocation directory. Selecting the invocation directory, including explicitly
 selecting the same directory, does not displace a Contract appointment.
 
 Help is dependency-light, read-only, and available without an existing World.
-It explains a command's purpose and its literal usage, never guesses missing
-input or prompts for authority-bearing facts. User-facing text is a projection
-of public results; it never becomes a second decision layer.
+Package identification likewise reads the running package's own metadata before
+any World or product runtime is initialized. Help explains a command's purpose
+and its literal usage, never guesses missing input or prompts for
+authority-bearing facts. User-facing text is a projection of public results; it
+never becomes a second decision layer.
 
 ## Public command adaptation
 

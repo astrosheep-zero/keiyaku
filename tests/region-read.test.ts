@@ -25,7 +25,7 @@ import {
 
 function parseArgv(argv: readonly string[]): ParsedExecution {
   const parsed = parseInvocation(argv);
-  if ("help" in parsed) throw new Error("expected executable command");
+  if (!("command" in parsed)) throw new Error("expected executable command");
   return parsed;
 }
 

@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import test from "node:test";
 import { main } from "../src/cli/main.js";
 import { CONTRACT_COMMAND_SPECS, type ContractCommand } from "../src/cli/commands/contract.js";
@@ -32,6 +34,7 @@ test("help resolves the longest legal command-word prefix before syntax scanning
 test("namespace and leaf help identify an executable command", () => {
   assert.match(renderRootHelp(), /^usage  keiyaku <command> \[options\]$/mu);
   assert.match(renderRootHelp(), /--workdir <path>/u);
+  assert.match(renderRootHelp(), /--version\s+Print the running package version\./u);
   assert.match(renderInstallHelp(), /install/u);
   assert.match(renderTaskHelp("add"), /usage  keiyaku task add/u);
   assert.match(renderAkumaHelp("tell"), /usage  keiyaku tell/u);
@@ -158,6 +161,34 @@ test("help is stdout zero and does not enter an absent world", async () => {
   assert.match(stdout, /^usage  keiyaku task <command>/u);
   assert.equal(stderr, "");
   assert.doesNotMatch(stdout, /^\{/u);
+});
+
+test("version is stdout zero and does not enter an absent world", async () => {
+  const manifest = JSON.parse(readFileSync(resolve(import.meta.dirname, "..", "package.json"), "utf8")) as {
+    name: string;
+    version: string;
+  };
+  assert.equal(manifest.name, "@astrosheep/keiyaku");
+  let stdout = "";
+  let stderr = "";
+  const writeStdout = process.stdout.write;
+  const writeStderr = process.stderr.write;
+  process.stdout.write = ((chunk: string | Uint8Array) => {
+    stdout += String(chunk);
+    return true;
+  }) as typeof process.stdout.write;
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    stderr += String(chunk);
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    assert.equal(await main(["-C", "/definitely/absent/keiyaku-world", "--version"]), 0);
+  } finally {
+    process.stdout.write = writeStdout;
+    process.stderr.write = writeStderr;
+  }
+  assert.equal(stdout, `${manifest.version}\n`);
+  assert.equal(stderr, "");
 });
 
 test("amend help resolves at the parser edge for an absent world", () => {

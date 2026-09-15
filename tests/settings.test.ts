@@ -575,7 +575,7 @@ test("settings CLI maps KEIYAKU_HOME only at the process edge", async () => {
       }),
     );
     const parsed = parseArgv(["-C", value.project, "settings"]);
-    if ("help" in parsed) throw new Error("unexpected help");
+    if (!("command" in parsed)) throw new Error("unexpected non-executable invocation");
     const result = await invoke(parsed, { cwd: value.project, environment: { KEIYAKU_HOME: value.home } });
     const observed = result as SettingsInvocationResult;
     assert.equal(observed.kind, "settings");

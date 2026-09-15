@@ -93,7 +93,7 @@ test("fork CLI reads no stdin and keeps its form disjoint", async () => {
   });
   const sourceId = (await source.keiyaku.state()).id;
   const parsed = parseArgv(["bind", "--fork-of", sourceId]);
-  if ("help" in parsed) throw new Error("fork bind parsed as help");
+  if (!("command" in parsed)) throw new Error("fork bind did not parse as executable");
   const result = await invoke(parsed, {
     cwd: repository.path,
     environment: {},

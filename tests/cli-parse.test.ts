@@ -83,6 +83,26 @@ test("global coordinates are independent of command position", () => {
   assert.throws(() => parseArgv(["fork", "aku/worker/1234abcd", "--at", "turn/1", "--workdir", "work"]), /option --workdir is not valid for fork/u);
 });
 
+test("root version is recognized only after coordinates and help", () => {
+  assert.deepEqual(parseArgv(["--version"]), { version: true });
+  assert.deepEqual(parseArgv(["-C", "/definitely/absent/keiyaku-world", "--version"]), { version: true });
+  assert.deepEqual(parseArgv(["--version", "--help"]), { help: { kind: "root" } });
+  assert.throws(
+    () => parseArgv(["--version", "status"]),
+    (error: unknown) => error instanceof CliUsageError && error.guide?.given === "--version",
+  );
+  assert.throws(
+    () => parseArgv(["call", "worker", "--version"]),
+    (error: unknown) =>
+      error instanceof CliUsageError && error.message.includes("option --version is not valid for call"),
+  );
+  assert.throws(
+    () => parseArgv(["tell", "@worker", "--version"]),
+    (error: unknown) =>
+      error instanceof CliUsageError && error.message.includes("option --version is not valid for tell"),
+  );
+});
+
 test("global path tokens remain opaque at the parser edge", () => {
   assert.deepEqual(parseArgv(["-C", "C:\\work tree", "status", "--repo", "..\\delivery"]), {
     cwd: "C:\\work tree",

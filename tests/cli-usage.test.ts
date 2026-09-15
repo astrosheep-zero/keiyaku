@@ -147,7 +147,7 @@ test("root complete help still documents cwd and repo", () => {
 test("blank stdin remains a visible usage diagnostic and performs no operation", async () => {
   const missing = "/absent/keiyaku-usage-blank-stdin";
   const parsed = parseArgv(["bind", "-"]);
-  if ("help" in parsed) throw new Error("bind parsed as help");
+  if (!("command" in parsed)) throw new Error("bind did not parse as executable");
   await assert.rejects(
     () =>
       invoke(parsed, {

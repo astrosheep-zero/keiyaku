@@ -91,6 +91,9 @@ export function renderRootHelp(columns?: number): string {
       `  install   ${INSTALL_ROOT_PURPOSE}`,
       `  settings  ${CONTRACT_COMMAND_SPECS.settings.purpose}`,
       "",
+      "Package",
+      "  --version  Print the running package version.",
+      "",
       "Global options:",
       "  -C, --cwd <path>  Set the invocation working directory.",
       "  --repo <path>     Select the Git repository coordinate.",
@@ -179,7 +182,7 @@ export type CliHelpCoordinate =
   | Readonly<{ kind: "akuma"; action: AkumaAction }>;
 
 export type ParsedExecution = Readonly<{ cwd?: string; repo?: string; workdir?: string; command: ParsedCommand }>;
-export type ParsedInvocation = ParsedExecution | Readonly<{ help: CliHelpCoordinate }>;
+export type ParsedInvocation = ParsedExecution | Readonly<{ help: CliHelpCoordinate }> | Readonly<{ version: true }>;
 
 type RepoUse = "none" | "optional" | "required";
 export type CommandRepoPolicy = Readonly<{ use: RepoUse; acceptsExplicit: boolean }>;
@@ -382,6 +385,7 @@ export function parseArgv(argv: readonly string[]): ParsedInvocation {
   const invocation = invocationOptions(argv);
   const help = helpCoordinate(invocation.commandArgv);
   if (help !== null) return { help };
+  if (invocation.commandArgv.length === 1 && invocation.commandArgv[0] === "--version") return { version: true };
   if (
     invocation.commandArgv[0] === "ls" &&
     (invocation.commandArgv.length === 1 ||

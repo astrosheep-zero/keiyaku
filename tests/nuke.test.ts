@@ -699,7 +699,7 @@ test("CLI renders confirmation-required and confirmation-mismatch refusals", asy
   try {
     const bare = parseArgv(["-C", world, "nuke"]);
     const mismatch = parseArgv(["-C", world, "nuke", "--confirm", "wrong"]);
-    if ("help" in bare || "help" in mismatch) throw new Error("nuke invocation parsed as help");
+    if (!("command" in bare) || !("command" in mismatch)) throw new Error("nuke invocation did not parse as executable");
     const required = await invoke(bare, { cwd: world });
     const rejected = await invoke(mismatch, { cwd: world });
     if (!("kind" in required) || required.kind !== "refused") throw new Error("nuke did not return a refusal");

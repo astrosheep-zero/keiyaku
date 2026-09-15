@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
   copyFileSync,
+  existsSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -17,6 +18,7 @@ import test from "node:test";
 
 type PackageManifest = {
   dependencies?: Readonly<Record<string, string>>;
+  name: string;
   version: string;
 };
 
@@ -101,6 +103,7 @@ test("published package installs one keiyaku CLI and runs against a real reposit
   const installedPackage = JSON.parse(
     readFileSync(join(installed, "node_modules", "@astrosheep", "keiyaku", "package.json"), "utf8"),
   ) as { name: string; version: string; bin: Record<string, string> };
+  assert.equal(packageManifest.name, "@astrosheep/keiyaku");
   assert.equal(installedPackage.name, "@astrosheep/keiyaku");
   assert.equal(installedPackage.version, packageManifest.version);
   assert.deepEqual(installedPackage.bin, { keiyaku: "build/src/cli/index.js" });
@@ -113,6 +116,17 @@ test("published package installs one keiyaku CLI and runs against a real reposit
   const claudeSdk = join(installed, "node_modules", "@anthropic-ai", "claude-agent-sdk");
   renameSync(claudeSdk, `${claudeSdk}.hidden`);
   assert.match(installedCommand(["--help"], installed), /^usage  keiyaku <command> \[options\]$/mu);
+  writeFileSync(
+    join(installed, "package.json"),
+    `${JSON.stringify({ name: "misleading-consumer", version: "0.0.0-misleading" })}\n`,
+  );
+  assert.equal(installedCommand(["--version"], installed), `${packageManifest.version}\n`);
+  writeFileSync(
+    join(installed, "node_modules", "@astrosheep", "keiyaku", "package.json"),
+    `${JSON.stringify({ ...installedPackage, version: "4.5.20-fresh" })}\n`,
+  );
+  assert.equal(installedCommand(["--version"], installed), "4.5.20-fresh\n");
+  assert.equal(existsSync(join(installed, ".keiyaku")), false);
 
   command("git", ["init", "--quiet", "--initial-branch=main", repository], repository);
   command("git", ["config", "user.name", "Keiyaku E2E"], repository);

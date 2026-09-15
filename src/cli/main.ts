@@ -1,4 +1,5 @@
 import { CliUsageError, parseArgv, renderHelp } from "./parse.js";
+import { installedPackageVersion } from "./version.js";
 
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<number> {
   try {
@@ -8,6 +9,10 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
         process.stdout.isTTY === true && Number.isInteger(process.stdout.columns) ? process.stdout.columns : undefined;
       const help = renderHelp(parsed.help, columns);
       process.stdout.write(help.endsWith("\n") ? help : `${help}\n`);
+      return 0;
+    }
+    if ("version" in parsed) {
+      process.stdout.write(`${installedPackageVersion()}\n`);
       return 0;
     }
     return await (await import("./runtime.js")).runCliCommand(parsed);

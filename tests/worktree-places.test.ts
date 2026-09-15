@@ -48,7 +48,7 @@ import * as workspace from "../src/git/workspace.js";
 
 function parseArgv(argv: readonly string[]) {
   const parsed = parseInvocation(argv);
-  if ("help" in parsed) throw new Error("expected executable command");
+  if (!("command" in parsed)) throw new Error("expected executable command");
   return parsed;
 }
 
