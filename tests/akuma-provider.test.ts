@@ -1674,6 +1674,42 @@ test("Pi preserves thinking-only and explicit empty assistant answers", async ()
   assert.deepEqual(await emptyDrive.completion, { kind: "answered", answer: "", historyId: "entry-final" });
 });
 
+test("Pi omits Gemini's empty tool-use text placeholder from narration", async () => {
+  const fake = fakePiSdk({
+    events: [
+      {
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking: "inspect" },
+            { type: "toolCall", id: "call-1", name: "read", arguments: { path: "SOUL.md" } },
+            { type: "text", text: "" },
+          ],
+          stopReason: "toolUse",
+        },
+      },
+      { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "done" }] } },
+    ],
+  });
+  const drive = await createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start({
+    ...DRIVE_DEFAULTS,
+    body: "wait",
+    launchTells: [],
+    cwd: "/work",
+    options: {},
+    session: { kind: "fresh" },
+  }).result;
+  const events = [];
+  for await (const event of drive.events) events.push(event);
+  assert.deepEqual(events, [
+    { type: "session", coordinate: { sessionFile: "/sessions/pi.jsonl", sessionId: "pi-session" } },
+    { type: "thought", text: "inspect" },
+    { type: "assistant", text: "done" },
+  ]);
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "done", historyId: "entry-final" });
+});
+
 test("Pi adapter resumes and forks only exact sessionFile coordinates", async () => {
   const fake = fakePiSdk({
     events: [{ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "resumed" }] } }],

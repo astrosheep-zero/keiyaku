@@ -193,7 +193,10 @@ function translateMessage(
   }
   const text = textContent(message.content);
   state.answer = text;
-  if (hasTextContent(message.content)) {
+  // Gemini emits an empty text block alongside every tool-use message. It is
+  // transport scaffolding, not narration; an ordinary terminal empty answer
+  // remains public evidence.
+  if (hasTextContent(message.content) && !(message.stopReason === "toolUse" && text.length === 0)) {
     translated.push({ type: "assistant", text });
   }
   return translated;
