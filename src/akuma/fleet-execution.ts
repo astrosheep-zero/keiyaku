@@ -1,8 +1,9 @@
 import { AkumaNotBornError, defaultWaitComplete, type AkumaStatus } from "./akuma.js";
 import { createAkumaProduct } from "./akuma-product.js";
 import { readBudgetedStatus, readWaitComplete } from "./akuma-observe.js";
-import { NO_DISPATCH_ASSOCIATION } from "./dispatch-association.js";
+import { NO_DISPATCH_ASSOCIATION, type DispatchAssociation } from "./dispatch-association.js";
 import { EMPTY_CREATED_TASK_OBSERVATION } from "../task/created-observation.js";
+import type { AkumaAlias } from "../identity/selector.js";
 import type { WorldRoot } from "../world.js";
 import {
   fleetResultSchemas,
@@ -108,24 +109,56 @@ function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+export type WaitIdentityFacts = Readonly<{
+  /** The alias currently addressing this Akuma in its world, when one is bound to it. */
+  alias?: AkumaAlias;
+  /** This Akuma's Dispatch association, read from the observing repository. */
+  contract: DispatchAssociation;
+}>;
+
+/** One observed Akuma as a live wait viewer sees it: its status plus its identity facts. */
+export type WaitObservedAkuma = Readonly<{ status: AkumaStatus }> & WaitIdentityFacts;
+
 export type WaitExecutionInput = Readonly<{
   path: WorldRoot;
   ids: readonly AkumaStatus["id"][];
   completion: "any" | "all";
   timeoutMs?: number;
   signal?: AbortSignal;
+  /** Resolves one Akuma's identity facts; consulted only for an Akuma a viewer first sees. */
+  identity?: (id: AkumaStatus["id"]) => Promise<WaitIdentityFacts>;
   /** Reports every observation round to a live viewer; absent keeps the cheap completion probe. */
-  observe?: (statuses: readonly AkumaStatus[]) => void;
+  observe?: (observed: readonly WaitObservedAkuma[]) => void;
 }>;
 
 export async function executeWaitAkuma(input: WaitExecutionInput): Promise<AkumaWaitResult> {
   const deadline = input.timeoutMs === undefined ? undefined : performance.now() + input.timeoutMs;
+  // Identity facts are read once per observed Akuma, not once per 100ms round.
+  const facts = new Map<AkumaStatus["id"], WaitIdentityFacts>();
+  const observeRound = async (statuses: readonly AkumaStatus[]): Promise<void> => {
+    if (input.observe === undefined) return;
+    const observed: WaitObservedAkuma[] = [];
+    for (const status of statuses) {
+      input.signal?.throwIfAborted();
+      let known = facts.get(status.id);
+      if (known === undefined && input.identity !== undefined) {
+        known = await input.identity(status.id);
+        facts.set(status.id, known);
+      }
+      if (known === undefined) {
+        observed.push({ status, contract: NO_DISPATCH_ASSOCIATION });
+        continue;
+      }
+      observed.push({ status, ...known });
+    }
+    input.observe(observed);
+  };
   for (;;) {
     const expired = deadline !== undefined && performance.now() >= deadline;
     if (expired || input.observe !== undefined || (await probeWaitRound(input))) {
       const round = await observeWaitRound(input.path, input.ids, input.signal);
       input.signal?.throwIfAborted();
-      input.observe?.(round.statuses);
+      await observeRound(round.statuses);
       // The probe is not a completion receipt. Judge the actual returned values.
       if (roundComplete(round, input.completion) || (deadline !== undefined && performance.now() >= deadline)) {
         return fleetResultSchemas.wait.parse({

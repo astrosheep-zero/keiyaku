@@ -57,9 +57,11 @@ gate is not generic attention. `│` is the neutral continuation and ordinary-ro
 mark and carries no state; `NAME // qualifier` frames a catalogue section
 rather than a banner. Facts are label-value rows joined
 with `·`; `key=value`, banners, and bracket state alphabets are not text
-vocabulary. The horizontal rule is a run of ASCII hyphens, structure rather
+vocabulary. The horizontal rule is a run of U+2500 `─` whose length equals the
+terminal-column width of the frame head's widest line, structure rather
 than decoration, with one blessed use: it is the boundary of an observation frame between that frame's
-identity and its content, and content otherwise stays mark-and-fact based. Git identities render at 7 characters in
+identity and its content, and content otherwise stays mark-and-fact based. A
+Contract association inside a frame head renders as `└─ kei/<id>`. Git identities render at 7 characters in
 text and full length in JSON. Paths stay absolute and copyable where they are
 the answer, and stay out of board and catalogue rows where they are not.
 Absent facts are absent rows; zero counts and empty containers print nothing.
@@ -164,7 +166,22 @@ renderer, while its one complete final result stays on stdout; a wait that
 renders JSON, or one forwarded to a Body, has no such stream. A live stream
 never re-renders a settled row: when one observation cycle settles more tool
 rows than its streaming budget allows, the surplus folds in place as the same
-omission marker, and narrative rows always appear in order.
+omission marker, and narrative rows always appear in order. Every observed
+Akuma's stream opens with its identity frame before any row — carrying the
+alias currently addressing that Akuma and the Contract association it holds —
+and an already settled Akuma prints that frame while replaying no backlog. The
+wait ends with one conclusion row per observed Akuma in
+`<clock> <mark> <verb> — <duration>` grammar, so an unfinished wait replays no
+activity snapshot. A multi-target conclusion row names its target after the
+mark — the alias addressing that Akuma when one exists, otherwise its bare
+identity — and the first one opens a new paragraph. For a streamed wait, stdout
+carries the answer bytes exactly once for a single answered target and is empty
+otherwise, including every multi-target wait; the blank line separating that
+answer from the stream belongs to the progress channel. A non-streamed text wait
+keeps its own frame-and-answer or snapshot result, with the plural-target
+completion count it has always carried; that count is what the streamed wait's
+scoreboard replaces. JSON mode keeps its
+result shape.
 
 When an exceptional Contract execution already confirmed admissions, the CLI
 reports the failure together with those receipts instead of projecting a usage

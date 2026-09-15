@@ -15,7 +15,10 @@ import {
   requestForwardedFleetWait,
 } from "../akuma/fleet-request.js";
 import { executeKillAkuma, executeTellAkuma, executeWaitAkuma } from "../akuma/fleet-execution.js";
+import type { WaitIdentityFacts, WaitObservedAkuma } from "../akuma/fleet-execution.js";
+import { readAliases } from "../alias/index.js";
 import { observeDispatchAssociation, type DispatchAssociation } from "../dispatch/index.js";
+import type { AkumaAlias } from "../identity/selector.js";
 import { observeCreatedTaskObservations, type CreatedTaskObservation } from "../task/created-observation.js";
 import type { WorldRoot } from "../world.js";
 import { addressAkuma, addressAkumaSet, type AkumaAddressInput, type AkumaSetAddressInput } from "./address.js";
@@ -96,6 +99,29 @@ async function createdTasksFor(
     path,
     statuses.map((status) => status.id),
   );
+}
+
+/**
+ * One wait's identity-fact resolver: the alias bound to an Akuma in its world and
+ * its Dispatch association. The alias index is read once, on the first observed
+ * Akuma, and each Akuma's alias is the first binding the canonical order offers.
+ */
+function waitIdentityFacts(
+  path: WorldRoot,
+  repo: Repo | undefined,
+): (id: AkumaStatus["id"]) => Promise<WaitIdentityFacts> {
+  let aliases: ReadonlyMap<AkumaStatus["id"], AkumaAlias> | undefined;
+  return async (id) => {
+    if (aliases === undefined) {
+      const bound = new Map<AkumaStatus["id"], AkumaAlias>();
+      for (const binding of await readAliases(path)) {
+        if (!bound.has(binding.akuId)) bound.set(binding.akuId, binding.alias);
+      }
+      aliases = bound;
+    }
+    const alias = aliases.get(id);
+    return { ...(alias === undefined ? {} : { alias }), contract: await dispatchAssociation(repo, id) };
+  };
 }
 
 async function observeAkuma(status: AkumaStatus, path: WorldRoot, repo?: Repo): Promise<AkumaObservation> {
@@ -196,7 +222,7 @@ export async function statusAkuma(input: AkumaAddressInput): Promise<AkumaObserv
 export async function waitAkuma(
   input: AkumaWaitInput,
   execution: ExecutionContext = localExecutionContext(),
-  observe?: (statuses: readonly AkumaStatus[]) => void,
+  observe?: (observed: readonly WaitObservedAkuma[]) => void,
 ): Promise<AkumaWaitResult> {
   const values = requireInput(input, "Keiyaku.wait input");
   for (const key of Object.keys(values)) {
@@ -236,6 +262,7 @@ export async function waitAkuma(
       ids: addressed.ids,
       completion: selected,
       ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      identity: waitIdentityFacts(addressed.path, repo),
       ...(observe === undefined ? {} : { observe }),
     }),
   );

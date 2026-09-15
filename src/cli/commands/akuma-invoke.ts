@@ -3,6 +3,7 @@ import { squareAssignedParticipantName } from "@astrosheep/square";
 import { emitInitiatingPluginSignal } from "../../plugin/akuma-signals.js";
 import { type AkuId } from "../../akuma/identity.js";
 import { type ActivityHistory, type AkumaStatus } from "../../akuma/akuma.js";
+import type { WaitObservedAkuma } from "../../akuma/fleet-execution.js";
 import { observeAkumaStatus } from "../../akuma/akuma-observe.js";
 import {
   AuthorityCorruptionError,
@@ -36,7 +37,7 @@ import { requestForwardedFleetTellAnswer } from "../../akuma/fleet-request.js";
 export type AkumaInvocationResult =
   | Readonly<{ kind: "akuma"; action: "call"; result: CallResult; world: WorldRoot; schemaAnswer?: unknown }>
   | Readonly<{ kind: "akuma"; action: "status"; status: AkumaObservation; alias?: string }>
-  | Readonly<{ kind: "akuma"; action: "wait"; result: AkumaWaitResult; alias?: string }>
+  | Readonly<{ kind: "akuma"; action: "wait"; result: AkumaWaitResult; alias?: string; streamed?: boolean }>
   | Readonly<{ kind: "akuma"; action: "tell"; mode: "ordinary"; result: AkumaTellResult; body: string; alias?: string }>
   | Readonly<{ kind: "akuma"; action: "tell"; mode: "schema"; result: unknown; body: string; alias?: string }>
   | Readonly<{
@@ -180,14 +181,15 @@ async function promptBody(command: Readonly<{ prompt: AkumaPromptSource }>, inpu
 }
 
 /**
- * The live half of a local wait: each observation round prints rows that
- * settled since the previous round. The first sighting of an Akuma only
- * establishes its baseline, so an already settled Akuma prints nothing extra.
+ * The live half of a local wait: each observation round opens every newly seen
+ * Akuma with its identity frame, then prints only the rows that settled since
+ * the previous round. The first sighting of an Akuma only establishes its
+ * baseline, so an already settled Akuma prints no backlog rows. When the wait
+ * ends, `conclude` prints its closing scoreboard on the same channel.
  */
-function waitProgressStream(): (statuses: readonly AkumaStatus[]) => void {
-  const render = waitObservationStream(resultContext());
-  return (statuses) => {
-    const lines = render(statuses);
+function writeWaitObservationStream(stream: ReturnType<typeof waitObservationStream>) {
+  return (observed: readonly WaitObservedAkuma[]): void => {
+    const lines = stream.observe(observed);
     if (lines.length > 0) writeProgress(lines.join("\n"));
   };
 }
@@ -197,20 +199,33 @@ async function invokeWait(
   input: InvokeInput,
 ): Promise<AkumaInvocationResult> {
   const alias = command.akuma.length === 1 ? inputAlias(command.akuma[0]!) : undefined;
+  const stream = command.output === "text" ? waitObservationStream(resultContext()) : undefined;
+  const result = await waitAkuma(
+    {
+      path: input.path,
+      akuma: command.akuma,
+      ...(input.repo === undefined ? {} : { repo: input.repo }),
+      ...(command.completion === undefined ? {} : { completion: command.completion }),
+      ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
+    },
+    input.execution ?? localExecutionContext(),
+    stream === undefined ? undefined : writeWaitObservationStream(stream),
+  );
+  if (stream !== undefined && stream.streamed()) {
+    const closing = stream.conclude(result);
+    if (closing.length > 0) writeProgress(closing);
+    return {
+      kind: "akuma",
+      action: "wait",
+      result,
+      streamed: true,
+      ...(alias === undefined ? {} : { alias }),
+    };
+  }
   return {
     kind: "akuma",
     action: "wait",
-    result: await waitAkuma(
-      {
-        path: input.path,
-        akuma: command.akuma,
-        ...(input.repo === undefined ? {} : { repo: input.repo }),
-        ...(command.completion === undefined ? {} : { completion: command.completion }),
-        ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
-      },
-      input.execution ?? localExecutionContext(),
-      command.output === "text" ? waitProgressStream() : undefined,
-    ),
+    result,
     ...(alias === undefined ? {} : { alias }),
   };
 }

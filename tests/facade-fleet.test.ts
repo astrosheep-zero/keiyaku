@@ -19,6 +19,8 @@ import { parseAkumaAlias } from "../src/identity/selector.js";
 import { AkumaWorldScopeError, Keiyaku, Repo, type Catalog, type WorldRoot } from "../src/index.js";
 import { observeKanshi } from "../src/kanshi/read.js";
 import { addressAkumaSet, resolveNamedAddress } from "../src/library/address.js";
+import { waitAkuma } from "../src/library/fleet.js";
+import type { WaitObservedAkuma } from "../src/akuma/fleet-execution.js";
 import { projectTaskBoardObservation, taskRowsSchema, type TaskRow } from "../src/task/board.js";
 import { serializeTaskDocument, type TaskDocument } from "../src/task/document.js";
 import { Tasks, type TaskId } from "../src/task/index.js";
@@ -261,6 +263,36 @@ test("facade snapshots aliases and globs with stable dedupe for wait and kill", 
     killed.results.map((member) => member.evidence),
     ["already-stopped", "already-stopped"],
   );
+});
+
+test("a wait's live observation carries each observed Akuma's alias and Dispatch association", async (t) => {
+  const repository = fixtureRepository(t);
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const world = await World.at(repository.path);
+  const worker = await answered(world, "worker", "dddddddd");
+  const owner = contractId("kei/observed");
+  assert.equal(
+    (await publishDispatch({ repository: await repositoryAt(world), akuId: worker.id, contractId: owner })).kind,
+    "dispatched",
+  );
+  await moveAlias({ world, alias: parseAkumaAlias("@observed"), akuId: worker.id });
+  const rounds: (readonly WaitObservedAkuma[])[] = [];
+  await waitAkuma(
+    {
+      path: world,
+      akuma: [worker.id],
+      repo: await Repo.at({ path: world }),
+      completion: "all",
+      timeoutMs: 0,
+    },
+    undefined,
+    (observed) => rounds.push(observed),
+  );
+  assert.equal(rounds.length, 1);
+  const [single] = rounds[0]!;
+  assert.equal(single?.status.id, worker.id);
+  assert.equal(single?.alias, "@observed");
+  assert.deepEqual(single?.contract, { kind: "associated", contractId: owner });
 });
 
 test("facade requires an explicit completion mode for a plural wait", async (t) => {

@@ -7,6 +7,7 @@ import type {
 } from "../../index.js";
 import { parseAkumaStatus } from "../../akuma/akuma.js";
 import type { AkumaInvocationResult } from "../commands/akuma-invoke.js";
+import type { WaitObservedAkuma } from "../../akuma/fleet-execution.js";
 import type { ParsedCommand } from "../parse.js";
 import { toolRepr } from "./akuma-tool.js";
 import {
@@ -21,8 +22,14 @@ export const DEFAULT_CONTEXT: TextRenderContext = { columns: 80, color: false };
 const TIME_WIDTH = 5;
 const VERB_WIDTH = 6;
 
-/** The one blessed ruler, in ASCII: the boundary between an observation frame and its content. */
-export const FRAME_RULE = "----------------";
+/**
+ * The one blessed ruler: a run of U+2500 exactly as wide as the frame head's
+ * widest line, marking the boundary between an observation frame and its content.
+ */
+export function frameRule(headLines: readonly string[]): string {
+  const width = headLines.reduce((widest, line) => Math.max(widest, displayColumns(line)), 0);
+  return "─".repeat(width);
+}
 
 /** Tool rows one observation cycle may print before the rest fold in place. */
 const STREAM_TOOL_BUDGET = 3;
@@ -53,11 +60,13 @@ export function snapshotHeading(
   contract: DispatchAssociation | undefined,
 ): readonly string[] {
   const contractId = contract === undefined ? undefined : associatedContractId(contract);
-  return [identity(id, alias), ...(contractId === undefined ? [] : [`-> ${contractId}`]), FRAME_RULE];
+  const head = [identity(id, alias), ...(contractId === undefined ? [] : [`└─ ${contractId}`])];
+  return [...head, frameRule(head)];
 }
 
-function answeredHeading(id: string, alias: string | undefined): string {
-  return `✓ came back ${identity(id, alias)}`;
+function answeredHeading(id: string, alias: string | undefined): readonly string[] {
+  const heading = `✓ came back ${identity(id, alias)}`;
+  return [heading, frameRule([heading])];
 }
 
 function contractFacts(contract: DispatchAssociation): readonly string[] {
@@ -321,29 +330,124 @@ export function activityStream(context: TextRenderContext): (snapshot: RenderedS
   };
 }
 
+/** What a wait conclusion renders over: its observed and unobserved members. */
+export type WaitConclusionResult = Readonly<{
+  observations: readonly AkumaObservation[];
+  unobserved: readonly Readonly<{ id: string; diagnostic: string }>[];
+}>;
+
+export type WaitObservationStream = Readonly<{
+  /** One observation round; returns the head frames and newly settled rows to print. */
+  observe: (observed: readonly WaitObservedAkuma[]) => readonly string[];
+  /** The wait's closing scoreboard, or the empty string when there is nothing to print. */
+  conclude: (result: WaitConclusionResult) => string;
+  streamed: () => boolean;
+}>;
+
+function conclusionMarkVerb(
+  status: AkumaObservation["status"],
+  answered: boolean,
+): Readonly<{ mark: string; verb: string; waited: boolean }> {
+  if (status.life === "running") return { mark: "●", verb: "still running", waited: true };
+  if (answered) return { mark: "✓", verb: "answered", waited: false };
+  if (status.life === "asleep") return { mark: "!", verb: "failed", waited: false };
+  if (status.life === "killed") return { mark: "×", verb: "killed", waited: false };
+  if (status.life === "hung") return { mark: "?", verb: "hung", waited: false };
+  if (status.life === "untidy") return { mark: "!", verb: "untidy", waited: false };
+  return { mark: "!", verb: "stranded", waited: false };
+}
+
+/**
+ * The durable moment an Akuma settled, read from the outcome row its own timeline
+ * retained. Absent for an ending that leaves no outcome row, so the caller falls
+ * back to the observation that noticed it.
+ */
+function settleMoment(status: AkumaObservation["status"]): number | undefined {
+  const outcome = status.timeline.kind === "idle" ? status.timeline.outcome : undefined;
+  if (outcome === undefined) return undefined;
+  const at = new Date(outcome.at).getTime();
+  return Number.isFinite(at) ? at : undefined;
+}
+
+function clockFromMs(at: number): string {
+  return clock(new Date(at).toISOString());
+}
+
+function durationText(durationMs: number): string {
+  const seconds = Math.max(0, Math.round(durationMs / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m${String(seconds % 60)}s`;
+}
+
 /**
  * Live view over a wait's successive observation rounds, one append-only
- * stream per selected Akuma. The first sighting of an Akuma only establishes
- * its baseline, so an already settled Akuma streams nothing.
+ * stream per selected Akuma. Each Akuma's stream opens with its identity frame
+ * — the identity and Contract association the observed facts carry — before any
+ * row; an already settled Akuma prints that frame and never replays backlog
+ * rows. `conclude` renders the closing rows once the wait ends: one row per
+ * observed Akuma in `<clock> <mark> <verb> — <duration>` grammar, with a target
+ * named for a multi-target scoreboard and no activity replay.
  */
 export function waitObservationStream(
   context: TextRenderContext,
-): (statuses: readonly AkumaObservation["status"][]) => readonly string[] {
+  options: Readonly<{ now?: () => number }> = {},
+): WaitObservationStream {
+  const now = options.now ?? ((): number => Date.now());
+  const startedAt = now();
   const streams = new Map<string, (snapshot: RenderedSnapshot) => readonly string[]>();
-  return (statuses) => {
+  const attributed = new Map<string, string | undefined>();
+  const settledAt = new Map<string, number>();
+  let opened = false;
+  let observed = false;
+
+  const observe = (round: readonly WaitObservedAkuma[]): readonly string[] => {
+    observed = true;
     const lines: string[] = [];
-    for (const status of statuses) {
+    for (const { status, alias, contract } of round) {
       const known = streams.get(status.id);
-      if (known !== undefined) {
+      if (known === undefined) {
+        if (opened) lines.push("");
+        lines.push(...snapshotHeading(status.id, alias, contract));
+        opened = true;
+        attributed.set(status.id, alias);
+        const stream = activityStream(context);
+        streams.set(status.id, stream);
+        stream(status.timeline);
+      } else {
         lines.push(...known(status.timeline));
-        continue;
       }
-      const stream = activityStream(context);
-      streams.set(status.id, stream);
-      stream(status.timeline);
+      if (!settledAt.has(status.id) && waitComplete(status)) settledAt.set(status.id, settleMoment(status) ?? now());
     }
     return lines;
   };
+
+  const conclude = (result: WaitConclusionResult): string => {
+    const end = now();
+    const total = result.observations.length + result.unobserved.length;
+    const multi = total > 1;
+    const conclusions = result.observations.map((observation) => {
+      const status = observation.status;
+      const answered = statusAnswer(observation) !== undefined;
+      const complete = waitComplete(status);
+      const at = complete ? (settledAt.get(status.id) ?? end) : end;
+      const durationMs = Math.max(0, at - startedAt);
+      const { mark, verb, waited } = conclusionMarkVerb(status, answered);
+      const target = multi ? ` ${attributed.get(status.id) ?? status.id}` : "";
+      return `${clockFromMs(at)} ${mark}${target} ${verb} — ${waited ? "waited " : ""}${durationText(durationMs)}`;
+    });
+    const unobservedLines = result.unobserved.map((member) => unobservedText(member.id, member.diagnostic));
+    const answeredSingle =
+      !multi && result.observations.length === 1 && statusAnswer(result.observations[0]!) !== undefined;
+    const blocks = [
+      ...(unobservedLines.length > 0 ? [unobservedLines.join("\n")] : []),
+      ...(conclusions.length > 0 ? [(multi ? [""] : []).concat(conclusions).join("\n")] : []),
+    ];
+    const body = blocks.join("\n");
+    // One blank line keeps the bare stdout answer visually separate from the stream.
+    return answeredSingle ? `${body}\n\n` : body;
+  };
+
+  return { observe, conclude, streamed: () => observed };
 }
 
 type CreatedTaskRow = Extract<CreatedTaskObservation, { kind: "present" }>["rows"][number];
@@ -403,7 +507,7 @@ function answeredBlock(
   alias: string | undefined,
   columns: number,
 ): string {
-  const frame = `${answeredHeading(observation.status.id, alias)}\n${FRAME_RULE}`;
+  const frame = answeredHeading(observation.status.id, alias).join("\n");
   const context = answerContextLines(observation, columns).join("\n");
   if (context.length === 0) return `${frame}\n${answer}`;
   const separator = answer.endsWith("\n") ? "\n" : "\n\n";
@@ -514,8 +618,13 @@ export function akumaRawAnswer(result: AkumaInvocationResult): string | undefine
     if (answerCallFailed(result.result) || result.result.observation.kind !== "observed") return undefined;
     return statusAnswer({ status: parseAkumaStatus(result.result.observation.status) });
   }
-  if (result.action === "wait" && result.result.observations.length === 1)
-    return statusAnswer(result.result.observations[0]!);
+  if (result.action === "wait") {
+    if (result.streamed === true) {
+      const single = result.result.observations.length === 1 ? result.result.observations[0] : undefined;
+      return single === undefined ? "" : (statusAnswer(single) ?? "");
+    }
+    if (result.result.observations.length === 1) return statusAnswer(result.result.observations[0]!);
+  }
   if (result.action === "history" && result.mode === "exact" && result.historyResult.kind === "exact") {
     return result.historyResult.outcome.outcome.kind === "answered"
       ? result.historyResult.outcome.outcome.answer
