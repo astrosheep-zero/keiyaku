@@ -15,7 +15,7 @@ import {
   requestForwardedFleetWait,
 } from "../akuma/fleet-request.js";
 import { executeKillAkuma, executeTellAkuma, executeWaitAkuma } from "../akuma/fleet-execution.js";
-import type { WaitIdentityFacts, WaitObservedAkuma } from "../akuma/fleet-execution.js";
+import type { WaitIdentityFacts, WaitObserver } from "../akuma/fleet-execution.js";
 import { readAliases } from "../alias/index.js";
 import { observeDispatchAssociation, type DispatchAssociation } from "../dispatch/index.js";
 import type { AkumaAlias } from "../identity/selector.js";
@@ -222,7 +222,7 @@ export async function statusAkuma(input: AkumaAddressInput): Promise<AkumaObserv
 export async function waitAkuma(
   input: AkumaWaitInput,
   execution: ExecutionContext = localExecutionContext(),
-  observe?: (observed: readonly WaitObservedAkuma[]) => void,
+  observer?: WaitObserver,
 ): Promise<AkumaWaitResult> {
   const values = requireInput(input, "Keiyaku.wait input");
   for (const key of Object.keys(values)) {
@@ -263,7 +263,8 @@ export async function waitAkuma(
       completion: selected,
       ...(timeoutMs === undefined ? {} : { timeoutMs }),
       identity: waitIdentityFacts(addressed.path, repo),
-      ...(observe === undefined ? {} : { observe }),
+      ...(observer?.selected === undefined ? {} : { onSelected: observer.selected }),
+      ...(observer?.observe === undefined ? {} : { observe: observer.observe }),
     }),
   );
 }

@@ -153,12 +153,19 @@ asks the owned operation to stop and waits for its truthful final receipt and
 cleanup boundary instead of replacing that result with an early CLI exit.
 
 An observing call reports the same kind of progress. A call that waits, renders
-text, and carries no answer contract announces the identity its birth already
-established and then each timeline row once it has settled, on the progress
-channel as the window advances, while its one complete final result stays on
-stdout. The stream restates the timeline's own rows in their final form rather
-than inventing a private vocabulary or standing in for the final result; a call
-that answers a schema, renders JSON, or detaches has no such stream.
+text, and carries no answer contract opens one identity frame on the progress
+channel — the same identity-and-association notation and frame rule every
+observation uses, without the birth receipt's working-directory row — and then
+each timeline row once it has settled, as the window advances, while its one
+complete final result stays on stdout. When the call returns, it closes the
+stream with one conclusion row in the same conclusion wording and order a
+wait's own closing row uses, stating an answer, a still-running elapsed wait,
+or truthful terminal-failure evidence. The stream restates the timeline's own
+rows in their final form rather than inventing a private vocabulary or standing
+in for the final result, and it never replays its own activity as a final
+snapshot. A failure that leaves no answer keeps its diagnostic on the progress
+channel, so empty stdout never hides it. A call that answers a schema, renders
+JSON, or detaches has no such stream and keeps its ordinary receipt.
 
 A wait reports the same kind of progress. It announces no birth and streams
 each newly settled timeline row on the progress channel through the same
@@ -170,18 +177,24 @@ omission marker, and narrative rows always appear in order. Every observed
 Akuma's stream opens with its identity frame before any row — carrying the
 alias currently addressing that Akuma and the Contract association it holds —
 and an already settled Akuma prints that frame while replaying no backlog. The
-wait ends with one conclusion row per observed Akuma in
-`<clock> <mark> <verb> — <duration>` grammar, so an unfinished wait replays no
-activity snapshot. A multi-target conclusion row names its target after the
-mark — the alias addressing that Akuma when one exists, otherwise its bare
-identity — and the first one opens a new paragraph. For a streamed wait, stdout
-carries the answer bytes exactly once for a single answered target and is empty
+wait ends with one conclusion row per observed Akuma, attributed to its source
+the same way the activity above it is, so an unfinished wait replays no
+activity snapshot; the first row of a multi-target scoreboard opens a new
+paragraph. A wait observing more than one Akuma gives its activity rows one
+shared source attribution rather than one per row: the frozen alias addressing
+that Akuma when one exists, otherwise its complete identity, resolved from the
+observation seam rather than a renderer reading of the world. A wrapped row's
+continuations carry no time or source of their own, an omission marker keeps
+its source, and the frozen selected set fixes the attribution width before the
+first row, so the whole stream and its scoreboard share one alignment. Width
+is counted in terminal cells for whole grapheme clusters, so a joined emoji,
+flag, or combined mark never shifts a row. For a streamed wait, stdout carries
+the answer bytes exactly once for a single answered target and is empty
 otherwise, including every multi-target wait; the blank line separating that
-answer from the stream belongs to the progress channel. A non-streamed text wait
-keeps its own frame-and-answer or snapshot result, with the plural-target
+answer from the stream belongs to the progress channel. A non-streamed text
+wait keeps its own frame-and-answer or snapshot result, with the plural-target
 completion count it has always carried; that count is what the streamed wait's
-scoreboard replaces. JSON mode keeps its
-result shape.
+scoreboard replaces. JSON mode keeps its result shape.
 
 Region overlap in bind and amend receipts remains supporting evidence, not a
 warning or a separate report. It groups shared scope beneath each related

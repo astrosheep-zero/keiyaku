@@ -20,7 +20,7 @@ import { AkumaWorldScopeError, Keiyaku, Repo, type Catalog, type WorldRoot } fro
 import { observeKanshi } from "../src/kanshi/read.js";
 import { addressAkumaSet, resolveNamedAddress } from "../src/library/address.js";
 import { waitAkuma } from "../src/library/fleet.js";
-import type { WaitObservedAkuma } from "../src/akuma/fleet-execution.js";
+import type { WaitObservedAkuma, WaitSelectedAkuma } from "../src/akuma/fleet-execution.js";
 import { projectTaskBoardObservation, taskRowsSchema, type TaskRow } from "../src/task/board.js";
 import { serializeTaskDocument, type TaskDocument } from "../src/task/document.js";
 import { Tasks, type TaskId } from "../src/task/index.js";
@@ -277,6 +277,7 @@ test("a wait's live observation carries each observed Akuma's alias and Dispatch
   );
   await moveAlias({ world, alias: parseAkumaAlias("@observed"), akuId: worker.id });
   const rounds: (readonly WaitObservedAkuma[])[] = [];
+  const selected: (readonly WaitSelectedAkuma[])[] = [];
   await waitAkuma(
     {
       path: world,
@@ -286,8 +287,15 @@ test("a wait's live observation carries each observed Akuma's alias and Dispatch
       timeoutMs: 0,
     },
     undefined,
-    (observed) => rounds.push(observed),
+    {
+      selected: (members) => selected.push(members),
+      observe: (observed) => rounds.push(observed),
+    },
   );
+  assert.equal(selected.length, 1);
+  assert.deepEqual(selected[0], [
+    { id: worker.id, alias: "@observed", contract: { kind: "associated", contractId: owner } },
+  ]);
   assert.equal(rounds.length, 1);
   const [single] = rounds[0]!;
   assert.equal(single?.status.id, worker.id);

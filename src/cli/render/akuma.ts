@@ -13,6 +13,7 @@ import {
   snapshotText,
   tellText,
   waitText,
+  type ObservedCallHead,
 } from "./akuma-activity.js";
 import { safeText, type TextRenderContext } from "./terminal.js";
 
@@ -25,6 +26,32 @@ function dispatchLines(stage: DispatchStage): readonly string[] {
   }
   if (stage.failure.kind === "conflict") return [`dispatch failed conflict ${stage.failure.current.contractId}`];
   return [`dispatch failed ${stage.failure.kind} ${safeText(stage.failure.diagnostic)}`];
+}
+
+/**
+ * The head a streamed observing call opens with: the identity its birth already
+ * established, its Contract association, and the birth's diagnostics. The
+ * detached receipt's cwd row deliberately stays out; the observation stream
+ * owns this call's presentation.
+ */
+export function callObservationHead(
+  result: Extract<AkumaInvocationResult, { action: "call" }>["result"],
+): ObservedCallHead {
+  const alias = result.alias.kind === "aliased" ? result.alias.alias.alias : undefined;
+  const contractId = result.dispatch.kind === "dispatched" ? result.dispatch.dispatch.contractId : undefined;
+  const facts = [
+    ...dispatchLines(result.dispatch),
+    ...(result.readonly?.enforcement === "none" ? [`! ${safeText(result.readonly.diagnostic)}`] : []),
+    ...(result.alias.kind === "failed"
+      ? [`alias failed ${result.alias.failure.kind} ${safeText(result.alias.failure.diagnostic)}`]
+      : []),
+  ];
+  return {
+    id: result.akuma,
+    ...(alias === undefined ? {} : { alias }),
+    contract: contractId === undefined ? { kind: "none" } : { kind: "associated", contractId },
+    facts,
+  };
 }
 
 function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, context: TextRenderContext): string {

@@ -6,6 +6,7 @@ import { renderCatalogText } from "../src/cli/render/catalog.js";
 import {
   activityStream,
   akumaRawAnswer,
+  callObservationStream,
   frameRule,
   snapshotActivityLines,
   snapshotText,
@@ -13,13 +14,13 @@ import {
   waitText,
 } from "../src/cli/render/akuma-activity.js";
 import type { AkumaInvocationResult } from "../src/cli/commands/akuma-invoke.js";
-import { parseAkumaStatus, type AkumaStatus } from "../src/akuma/akuma.js";
+import { parseAkumaStatus, type AkumaStatus, type OutcomeRow } from "../src/akuma/akuma.js";
 import type { WaitObservedAkuma } from "../src/akuma/fleet-execution.js";
 import type { DispatchAssociation } from "../src/index.js";
 import { parseAkumaAlias, type AkumaAlias } from "../src/identity/selector.js";
 import { renderAkuma } from "../src/cli/render/kanshi-akuma.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
-import { displayColumns } from "../src/cli/render/terminal.js";
+import { displayColumns, takeDisplayColumns } from "../src/cli/render/terminal.js";
 import { renderText } from "../src/cli/render/text.js";
 import {
   activeTool,
@@ -1680,7 +1681,7 @@ test("a streamed multi-target wait scoreboards without a count while a non-strea
   const scoreboard = stream.conclude(conclusion);
   assert.equal(
     scoreboard,
-    `\n${clockAt(settledAtMs)} ✓ @scout-a answered — 3m12s\n${clockAt(settledAtMs + 8_000)} ● ${second} still running — waited 3m20s`,
+    `\n${clockAt(settledAtMs)} @scout-a            ✓ answered — 3m12s\n${clockAt(settledAtMs + 8_000)} ${second} ● still running — waited 3m20s`,
   );
   assert.doesNotMatch(scoreboard, /of \d+ done/u);
 
@@ -1743,4 +1744,294 @@ test("a streamed wait keeps stdout byte-pure while a forwarded wait keeps its fr
     "",
   );
   assert.equal(akumaRawAnswer(wait([running("aku/worker/aaa00005")])), undefined);
+});
+
+test("a plural wait attributes every row to its own aligned source", () => {
+  const first = "aku/worker/abcd0020";
+  const second = "aku/worker/abcd0021";
+  const running = (id: string, entries: Parameters<typeof openAkumaSnapshot>[0]) =>
+    parseAkumaStatus({ id, life: "running", allowed: [], timeline: openAkumaSnapshot(entries) });
+  const tool = (sequence: number, command: string) =>
+    snapshotRow(completedTool(sequence, "bash", { kind: "run", command }));
+  const facts = { alias: parseAkumaAlias("@a"), contract: { kind: "none" as const } };
+  const stream = waitObservationStream({ columns: 120, color: false }, { now: () => 0 });
+  stream.select([{ id: first, alias: "@a" }, { id: second }]);
+
+  // The baseline round opens each head frame and settles no row of its own.
+  const opening = stream.observe([
+    observed(running(first, [tool(1, "one")]), facts),
+    observed(running(second, [tool(1, "two")])),
+  ]);
+  const head = `${first} (@a)`;
+  assert.deepEqual(opening.slice(0, 2), [head, frameRule([head])]);
+  assert.doesNotMatch(opening.join("\n"), /✓ run/u);
+
+  const text2 = stream
+    .observe([
+      observed(running(first, [tool(1, "one"), tool(2, "three")]), facts),
+      observed(running(second, [tool(1, "two"), tool(2, "four")])),
+    ])
+    .join("\n");
+  assert.match(text2, /@a +✓ run +\$ one/u);
+  assert.match(text2, /aku\/worker\/abcd0021 +✓ run +\$ two/u);
+  assert.ok(!text2.includes(head), "headers do not recur");
+
+  const text3 = stream
+    .observe([
+      observed(running(first, [tool(1, "one"), tool(2, "three"), tool(3, "five")]), facts),
+      observed(running(second, [tool(1, "two"), tool(2, "four"), tool(3, "six")])),
+    ])
+    .join("\n");
+  assert.match(text3, /@a +✓ run +\$ three/u);
+  assert.match(text3, /aku\/worker\/abcd0021 +✓ run +\$ four/u);
+  // Every semantic row puts its mark in the same source-aligned column.
+  const marks = [text2, text3]
+    .flatMap((block) => block.split("\n"))
+    .filter((line) => line.includes("✓ run"))
+    .map((line) => displayColumns(line.slice(0, line.indexOf("✓"))));
+  assert.deepEqual(new Set(marks), new Set([26]));
+});
+
+test("a plural wait freezes its source column from the selected set before the first row", () => {
+  const first = "aku/worker/abcd0023";
+  const second = "aku/worker/abcd0024";
+  const stream = waitObservationStream({ columns: 120, color: false }, { now: () => 0 });
+  stream.select([{ id: first, alias: "@shorter" }, { id: second, alias: "@a-very-long-alias" }]);
+  const tool = (sequence: number, command: string) =>
+    snapshotRow(completedTool(sequence, "bash", { kind: "run", command }));
+  const status = (entries: Parameters<typeof openAkumaSnapshot>[0]) =>
+    parseAkumaStatus({ id: first, life: "running", allowed: [], timeline: openAkumaSnapshot(entries) });
+  const facts = { alias: parseAkumaAlias("@shorter"), contract: { kind: "none" as const } };
+  // The baseline round settles nothing, so the first rendered row still uses the frozen width.
+  stream.observe([observed(status([tool(1, "solo")]), facts)]);
+  const row = stream
+    .observe([observed(status([tool(1, "solo"), tool(2, "later")]), facts)])
+    .find((line) => line.includes("solo"));
+  assert.ok(row !== undefined);
+  assert.equal(displayColumns(row.slice(0, row.indexOf("✓"))), 5 + 1 + displayColumns("@a-very-long-alias") + 1);
+});
+
+test("a plural wait keeps source attribution on omission markers and continuations", () => {
+  const id = "aku/worker/abcd0025";
+  const alias = "@longer-name";
+  const stream = waitObservationStream({ columns: 60, color: false }, { now: () => 0 });
+  // A plural wait freezes every selected identity, even one this round never observes.
+  stream.select([
+    { id, alias },
+    { id: "aku/worker/abcd0027", alias: "@other" },
+  ]);
+  const tools = [1, 2, 3, 4, 5].map((sequence) =>
+    snapshotRow(completedTool(sequence, "bash", { kind: "run", command: `c${sequence}` })),
+  );
+  const note = (sequence: number, text: string) =>
+    snapshotRow({ kind: "note", sequence, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text });
+  const status = (entries: Parameters<typeof openAkumaSnapshot>[0]) =>
+    parseAkumaStatus({ id, life: "running", allowed: [], timeline: openAkumaSnapshot(entries) });
+  const facts = { alias: parseAkumaAlias(alias), contract: { kind: "none" as const } };
+  // The baseline round settles nothing; the next round settles the tool burst and one long note.
+  stream.observe([observed(status([tools[0]!]), facts)]);
+  const lines = stream.observe([
+    observed(
+      status([
+        ...tools,
+        note(6, "alpha beta gamma delta epsilon zeta eta theta iota"),
+        note(7, "still open"),
+      ]),
+      facts,
+    ),
+  ]);
+  const marker = lines.find((line) => line.includes("⋮ 2 omitted"));
+  assert.ok(marker !== undefined);
+  assert.ok(marker.startsWith(`${" ".repeat(5)} ${alias.padEnd(displayColumns(alias))} ⋮ 2 omitted`));
+  assert.ok(
+    lines.some((line) => line.startsWith(`${" ".repeat(5)} ${" ".repeat(displayColumns(alias))} │`)),
+    "continuations blank the time and source columns",
+  );
+});
+
+test("a single-target wait stream keeps the plain row grammar", () => {
+  const id = "aku/worker/abcd0026";
+  const stream = waitObservationStream({ columns: 120, color: false }, { now: () => 0 });
+  stream.select([{ id, alias: "@solo" }]);
+  const tool = (sequence: number, command: string) =>
+    snapshotRow(completedTool(sequence, "bash", { kind: "run", command }));
+  const running = (entries: Parameters<typeof openAkumaSnapshot>[0]) =>
+    parseAkumaStatus({ id, life: "running", allowed: [], timeline: openAkumaSnapshot(entries) });
+  const facts = { alias: parseAkumaAlias("@solo"), contract: { kind: "none" as const } };
+  // The baseline round settles nothing, so the next round streams the row it held open.
+  stream.observe([observed(running([tool(1, "solo")]), facts)]);
+  const text = stream.observe([observed(running([tool(1, "solo"), tool(2, "later")]), facts)]).join("\n");
+  assert.match(text, /✓ run +\$ solo/u);
+  assert.doesNotMatch(text, /@solo/u, "a single target carries no source column");
+  const row = text.split("\n").find((line) => line.includes("✓ run"))!;
+  assert.equal(
+    displayColumns(row.slice(0, row.indexOf("✓"))),
+    5 + 1,
+    "the mark sits where the plain row grammar puts it",
+  );
+});
+
+test("terminal width counts grapheme clusters rather than code points", () => {
+  const family = "👨‍👩‍👧‍👦";
+  assert.equal([...family].length, 7, "a ZWJ family is seven code points in one cluster");
+  assert.equal(displayColumns(family), 2, "a ZWJ sequence occupies one cell group");
+  assert.equal(displayColumns("©"), 1, "a plain text symbol stays narrow");
+  assert.equal(displayColumns("©️"), 2, "the emoji selector widens the same symbol");
+  assert.equal(displayColumns("™"), 1, "an unselected letterlike symbol stays narrow");
+  assert.equal(displayColumns("♥"), 1, "a text-presentation heart stays narrow");
+  assert.equal(displayColumns("☀"), 1, "a text-presentation sun stays narrow");
+  assert.equal(displayColumns("❤"), 1, "an emoji without its selector stays text width");
+  assert.equal(displayColumns("✅"), 2, "an emoji that is wide by default needs no selector");
+  assert.equal(displayColumns("🇺🇸"), 2, "a flag is one pair of regional indicators");
+  assert.equal(displayColumns("❤️"), 2, "an emoji presentation selector widens its base");
+  assert.equal(displayColumns("1️⃣"), 2, "a keycap is one cluster");
+  assert.equal(displayColumns("👍🏽"), 2, "a skin tone modifier adds no cells");
+  assert.equal(displayColumns("é"), 1, "a precomposed accented letter is one cell");
+  assert.equal(displayColumns("e\u0301"), 1, "a combining mark adds no cell");
+  assert.equal(displayColumns("\u0301"), 0, "an isolated mark occupies no cell");
+  assert.equal(displayColumns(`a${family}b`), 4, "narrow text around a cluster keeps its cells");
+  assert.equal(displayColumns("plain ascii"), 11, "ASCII keeps its own measure");
+  assert.deepEqual(takeDisplayColumns(`a${family}b`, 3), { text: `a${family}`, rest: "b" });
+  assert.deepEqual(takeDisplayColumns("🇺🇸x", 1), { text: "", rest: "🇺🇸x" }, "a cluster never splits");
+  assert.deepEqual(takeDisplayColumns("e\u0301x", 1), { text: "e\u0301", rest: "x" });
+});
+
+test("a plural wait aligns a source label wider than its code-unit length and quotes only body text", () => {
+  const id = "aku/worker/abcd0031";
+  const alias = "@👨‍👩‍👧‍👦x";
+  const stream = waitObservationStream({ columns: 60, color: false }, { now: () => 0 });
+  stream.select([{ id, alias }, { id: "aku/worker/abcd0032", alias: "@other" }]);
+  const status = (entries: Parameters<typeof openAkumaSnapshot>[0]) =>
+    parseAkumaStatus({ id, life: "running", allowed: [], timeline: openAkumaSnapshot(entries) });
+  const said = (sequence: number, text: string) =>
+    snapshotRow({ kind: "said", sequence, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text });
+  const words = "alpha beta gamma delta epsilon zeta eta theta iota kappa";
+  const facts = { alias: alias as AkumaAlias, contract: { kind: "none" as const } };
+  // The baseline round opens the head frame; the next round settles the short row and holds the
+  // long quoted row open, so the round after that is the one that streams it wrapped.
+  stream.observe([observed(status([said(1, "first words")]), facts)]);
+  stream.observe([observed(status([said(1, "first words"), said(2, words)]), facts)]);
+  const lines = stream.observe([
+    observed(status([said(1, "first words"), said(2, words), said(3, "closing words")]), facts),
+  ]);
+  assert.ok(lines.length > 1, `the long row wraps into continuation lines:\n${lines.join("\n")}`);
+  const marks = lines.map((line) => displayColumns(line.slice(0, line.indexOf("│"))));
+  assert.equal(
+    new Set(marks).size,
+    1,
+    `every line of the row aligns under the same source label:\n${lines.join("\n")}`,
+  );
+  assert.equal(
+    marks[0],
+    5 + 1 + Math.max(displayColumns(alias), displayColumns("@other")) + 1,
+    "the frozen label width sets the mark column",
+  );
+  const quoted = lines.map((line) => line.slice(line.indexOf("“"))).join(" ");
+  assert.equal(
+    lines.filter((line) => line.includes("“")).length,
+    lines.length,
+    `every wrapped line quotes its own body:\n${lines.join("\n")}`,
+  );
+  for (const word of words.split(" ")) {
+    assert.ok(quoted.includes(word), `the quote keeps ${word}:\n${lines.join("\n")}`);
+  }
+  const scoreLine = stream
+    .conclude({
+      observations: [
+        {
+          status: status([said(1, "first words"), said(2, words)]),
+          contract: { kind: "none" as const },
+          createdTasks: { kind: "present" as const, rows: [] },
+        },
+        {
+          status: parseAkumaStatus({
+            id: "aku/worker/abcd0032",
+            life: "running",
+            allowed: [],
+            timeline: openAkumaSnapshot([]),
+          }),
+          contract: { kind: "none" as const },
+          createdTasks: { kind: "present" as const, rows: [] },
+        },
+      ],
+      unobserved: [],
+    })
+    .split("\n")
+    .find((line) => line.includes("👨‍👩‍👧‍👦") && line.includes("● still running"))!;
+  assert.equal(
+    displayColumns(scoreLine.slice(0, scoreLine.indexOf("●"))),
+    marks[0],
+    `the scoreboard shares the activity mark column:\n${scoreLine}`,
+  );
+});
+
+test("a streamed observing call opens one framed head and never replays a settled snapshot", () => {
+  const id = "aku/worker/abcd0030";
+  const settledAtMs = Date.parse(AKUMA_ACTIVITY_AT);
+  let now = settledAtMs - 4_000;
+  const head = {
+    id,
+    alias: "@scout",
+    contract: { kind: "associated" as const, contractId: contractId("kei/demo") },
+    facts: [],
+  };
+  const stream = callObservationStream({ columns: 100, color: false }, head, { now: () => now });
+  const running = (entries: Parameters<typeof openAkumaSnapshot>[0]) =>
+    parseAkumaStatus({ id, life: "running", allowed: [], timeline: openAkumaSnapshot(entries) });
+  const tool = (sequence: number, command: string) =>
+    snapshotRow(completedTool(sequence, "bash", { kind: "run", command }));
+  const headLines = [`${id} (@scout)`, "└─ kei/demo"];
+  const opening = stream.observe(running([tool(1, "first")]));
+  assert.deepEqual(opening, [...headLines, frameRule(headLines)], "the head opens once before any row");
+  assert.doesNotMatch(opening.join("\n"), /cwd|✓ run/u);
+  const growing = running([tool(1, "first"), tool(2, "second")]);
+  const text = stream.observe(growing).join("\n");
+  assert.deepEqual(stream.observe(growing), [], "a settled row never streams twice");
+  assert.match(text, /✓ run +\$ first/u);
+  assert.doesNotMatch(text, /second|@scout|└─ kei\/demo/u, "the head never recurs and the newest row is still moving");
+
+  now = settledAtMs + 1_000;
+  const answered = parseAkumaStatus({
+    id,
+    life: "asleep",
+    allowed: [],
+    timeline: idleAkumaSnapshot([], answeredOutcome(2, "the answer")),
+  });
+  const conclusion = stream.conclude({ kind: "observed", status: answered });
+  assert.equal(conclusion, `${clockAt(settledAtMs)} ✓ answered — 4s`);
+  assert.doesNotMatch(conclusion, /the answer|└─ kei\/demo|@scout/u, "no head or answer replay");
+});
+
+test("a streamed observing call concludes truthfully when its stream never opened", () => {
+  const id = "aku/worker/abcd0031";
+  const head = { id, contract: { kind: "none" as const }, facts: [] };
+  let now = 10_000;
+  const runningStream = callObservationStream({ columns: 80, color: false }, head, { now: () => now });
+  now = 40_000;
+  const running = parseAkumaStatus({ id, life: "running", allowed: [], timeline: openAkumaSnapshot([]) });
+  const opened = runningStream.conclude({ kind: "observed", status: running }).split("\n");
+  assert.deepEqual(opened.slice(0, 2), [id, frameRule([id])]);
+  assert.equal(opened.at(-1), `${clockAt(40_000)} ● still running — waited 30s`);
+
+  const failedStream = callObservationStream({ columns: 80, color: false }, head, { now: () => 0 });
+  const failed = failedStream
+    .conclude({ kind: "failed", failure: { kind: "infrastructure", diagnostic: "window lost" } })
+    .split("\n");
+  assert.deepEqual(failed.slice(0, 2), [id, frameRule([id])]);
+  assert.equal(failed.at(-1), "! error window lost");
+
+  const failedOutcome: OutcomeRow = {
+    kind: "outcome",
+    sequence: 2,
+    turnSequence: 1,
+    at: AKUMA_ACTIVITY_AT,
+    outcome: { kind: "failed", historyId: "history-1", diagnostic: "provider 503" },
+  };
+  const outcomeStream = callObservationStream({ columns: 80, color: false }, head, { now: () => 0 });
+  const outcomeText = outcomeStream.conclude({
+    kind: "observed",
+    status: parseAkumaStatus({ id, life: "asleep", allowed: [], timeline: idleAkumaSnapshot([], failedOutcome) }),
+  });
+  assert.match(outcomeText, /! failed — /u);
+  assert.match(outcomeText, /! error provider 503/u);
 });

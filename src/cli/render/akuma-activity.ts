@@ -1,4 +1,5 @@
-import type { ActivityRow, KillEvidence, ReportedFileChange } from "../../akuma/akuma.js";
+import type { ActivityRow, AkumaStatus, KillEvidence, ReportedFileChange } from "../../akuma/akuma.js";
+import type { CallObservation } from "../../library/akuma-creation.js";
 import type {
   AkumaObservation,
   AkumaObservationStage,
@@ -14,6 +15,7 @@ import {
   displayColumns,
   renderBoundedTextBlock,
   safeText,
+  takeDisplayColumns,
   truncateMiddleDisplayText,
   type TextRenderContext,
 } from "./terminal.js";
@@ -168,6 +170,42 @@ function continuationPrefix(): string {
   return eventPrefix("│", "");
 }
 
+/** Pad to a terminal-column width; raw string length is never the measuring stick. */
+function padToDisplay(text: string, width: number): string {
+  const remaining = width - displayColumns(text);
+  return remaining > 0 ? `${text}${" ".repeat(remaining)}` : text;
+}
+
+/**
+ * The one place row prefixes live: time, optional source, mark, verb, content.
+ * A plain layout is the single-target grammar; a source layout adds the frozen
+ * source column a plural wait aligns across its selected set.
+ */
+type RowLayout = Readonly<{
+  head: (time: string | undefined, glyph: string, verb: string) => string;
+  continuation: () => string;
+  marker: (count: number) => string;
+}>;
+
+function plainLayout(): RowLayout {
+  return {
+    head: (time, glyph, verb) => eventPrefix(glyph, verb, time),
+    continuation: continuationPrefix,
+    marker: (count) => `${" ".repeat(TIME_WIDTH)} ⋮ ${count} omitted`,
+  };
+}
+
+function sourceLayout(source: string, width: () => number): RowLayout {
+  const gutter = (): string => `${" ".repeat(TIME_WIDTH)} ${padToDisplay(source, width())} `;
+  return {
+    head: (time, glyph, verb) =>
+      `${time === undefined ? " ".repeat(TIME_WIDTH) : time.padEnd(TIME_WIDTH)} ${padToDisplay(source, width())} ${glyph} ${verb.padEnd(VERB_WIDTH)} `,
+    // Continuations blank the time and source columns and align under the mark.
+    continuation: () => `${" ".repeat(TIME_WIDTH)} ${" ".repeat(width())} │ ${" ".repeat(VERB_WIDTH)} `,
+    marker: (count) => `${gutter()}⋮ ${count} omitted`,
+  };
+}
+
 function quotedBody(row: RenderRow): boolean {
   return (
     row.kind === "said" ||
@@ -177,12 +215,13 @@ function quotedBody(row: RenderRow): boolean {
   );
 }
 
+/** Quote every rendered body line, slicing each line's prefix by its display width. */
 function quoteLines(lines: readonly string[], prefix: string): readonly string[] {
-  const prefixWidth = prefix.length;
+  const prefixWidth = displayColumns(prefix);
   return lines.map((line) => {
-    const body = line.slice(prefixWidth);
+    const { text: head, rest: body } = takeDisplayColumns(line, prefixWidth);
     if (body.length === 0) return line;
-    return `${line.slice(0, prefixWidth)}“${body}”`;
+    return `${head}“${body}”`;
   });
 }
 
@@ -196,7 +235,13 @@ function renderMiddleEllipsis(first: string, text: string, suffix: string, colum
   return `${first}${truncateMiddleDisplayText(text, Math.max(0, showSuffix ? withSuffix : remaining))}${showSuffix ? suffix : ""}`;
 }
 
-function renderRow(row: RenderRow, context: TextRenderContext, history: boolean, first: string): readonly string[] {
+function renderRow(
+  row: RenderRow,
+  context: TextRenderContext,
+  history: boolean,
+  first: string,
+  continuation: string,
+): readonly string[] {
   const value = rowText(row);
   const quoted = quotedBody(row);
   const quoteWidth = quoted ? 2 : 0;
@@ -205,7 +250,7 @@ function renderRow(row: RenderRow, context: TextRenderContext, history: boolean,
   }
   const lines = renderBoundedTextBlock(value.text, {
     first,
-    continuation: continuationPrefix(),
+    continuation,
     columns: context.columns - quoteWidth,
     lines: history ? Number.MAX_SAFE_INTEGER : value.lines,
     ...("truncated" in row && row.truncated === true ? { truncated: true } : {}),
@@ -217,28 +262,43 @@ function groupedEntries(
   entries: readonly RenderEntry[],
   context: TextRenderContext,
   history = false,
+  layout: RowLayout = plainLayout(),
 ): readonly string[] {
   const lines: string[] = [];
   let previousClock: string | undefined;
   for (const entry of entries) {
     if (entry.kind === "gap") {
-      lines.push(`${" ".repeat(TIME_WIDTH)} ⋮ ${entry.count} omitted`);
+      lines.push(layout.marker(entry.count));
       continue;
     }
     const row = entry.row;
     const at = clock(row.at);
     const changed = previousClock === undefined || at !== previousClock;
-    lines.push(...renderRow(row, context, history, eventPrefix(mark(row), label(row), changed ? at : undefined)));
+    lines.push(
+      ...renderRow(
+        row,
+        context,
+        history,
+        layout.head(changed ? at : undefined, mark(row), label(row)),
+        layout.continuation(),
+      ),
+    );
     previousClock = at;
   }
   return lines;
 }
 
-function groupedRows(rows: readonly RenderRow[], context: TextRenderContext, history = false): readonly string[] {
+function groupedRows(
+  rows: readonly RenderRow[],
+  context: TextRenderContext,
+  history = false,
+  layout: RowLayout = plainLayout(),
+): readonly string[] {
   return groupedEntries(
     rows.filter((row) => row.kind !== "turn").map((row) => ({ kind: "row", row })),
     context,
     history,
+    layout,
   );
 }
 
@@ -287,33 +347,34 @@ function settledTimeline(snapshot: RenderedSnapshot): RenderedSnapshot {
 
 /**
  * Append-only live view over successive settled snapshots of one Akuma. Each
- * call reports the entries that settled since the previous call — never
+ * call reports the rows that settled since the previous call — never
  * re-rendering an earlier row — and folds each tool burst beyond the streaming
- * budget into one in-place omission marker, so a marker never grows.
+ * budget into one in-place omission marker, so a marker never grows. The
+ * observation window slides over a busy Akuma, so a retained row's own sequence
+ * — not its position in the window — is what says whether it is new; a row that
+ * left the window before this call has already streamed.
  */
-export function activityStream(context: TextRenderContext): (snapshot: RenderedSnapshot) => readonly string[] {
-  let emitted = 0;
+export function activityStream(
+  context: TextRenderContext,
+  layout: RowLayout = plainLayout(),
+): (snapshot: RenderedSnapshot) => readonly string[] {
+  let newestSequence: number | undefined;
   let previousClock: string | undefined;
   return (snapshot) => {
-    const entries = orderedSnapshotEntries(settledTimeline(snapshot));
-    const delta = entries.slice(emitted);
-    emitted = entries.length;
-    if (delta.length === 0) return [];
+    const rows = orderedSnapshotEntries(settledTimeline(snapshot))
+      .flatMap((entry) => (entry.kind === "row" ? [entry.row] : []))
+      .filter((row) => newestSequence === undefined || row.sequence > newestSequence);
+    if (rows.length === 0) return [];
+    newestSequence = rows.reduce((newest, row) => Math.max(newest, row.sequence), newestSequence ?? rows[0]!.sequence);
     const lines: string[] = [];
     let budget = STREAM_TOOL_BUDGET;
     let omitted = 0;
     const flushOmitted = (): void => {
       if (omitted === 0) return;
-      lines.push(`${" ".repeat(TIME_WIDTH)} ⋮ ${omitted} omitted`);
+      lines.push(layout.marker(omitted));
       omitted = 0;
     };
-    for (const entry of delta) {
-      if (entry.kind === "gap") {
-        flushOmitted();
-        lines.push(`${" ".repeat(TIME_WIDTH)} ⋮ ${entry.count} omitted`);
-        continue;
-      }
-      const row = entry.row;
+    for (const row of rows) {
       if (row.kind === "tool" && budget === 0) {
         omitted += 1;
         continue;
@@ -322,7 +383,15 @@ export function activityStream(context: TextRenderContext): (snapshot: RenderedS
       if (row.kind === "tool") budget -= 1;
       const at = clock(row.at);
       const changed = previousClock === undefined || at !== previousClock;
-      lines.push(...renderRow(row, context, false, eventPrefix(mark(row), label(row), changed ? at : undefined)));
+      lines.push(
+        ...renderRow(
+          row,
+          context,
+          false,
+          layout.head(changed ? at : undefined, mark(row), label(row)),
+          layout.continuation(),
+        ),
+      );
       previousClock = at;
     }
     flushOmitted();
@@ -336,7 +405,12 @@ export type WaitConclusionResult = Readonly<{
   unobserved: readonly Readonly<{ id: string; diagnostic: string }>[];
 }>;
 
+/** One selected Akuma's frozen identity, resolved before the first observation round. */
+export type WaitSelectedIdentity = Readonly<{ id: string; alias?: string }>;
+
 export type WaitObservationStream = Readonly<{
+  /** Freeze the selected set's identities so the source column is stable before the first row. */
+  select: (selected: readonly WaitSelectedIdentity[]) => void;
   /** One observation round; returns the head frames and newly settled rows to print. */
   observe: (observed: readonly WaitObservedAkuma[]) => readonly string[];
   /** The wait's closing scoreboard, or the empty string when there is nothing to print. */
@@ -396,12 +470,32 @@ export function waitObservationStream(
   const startedAt = now();
   const streams = new Map<string, (snapshot: RenderedSnapshot) => readonly string[]>();
   const attributed = new Map<string, string | undefined>();
+  const sources = new Map<string, string>();
   const settledAt = new Map<string, number>();
+  let sourceWidth = 0;
   let opened = false;
   let observed = false;
 
+  const registerSource = (id: string, alias: string | undefined): void => {
+    if (sources.has(id)) return;
+    const label = alias ?? id;
+    sources.set(id, label);
+    sourceWidth = Math.max(sourceWidth, displayColumns(label));
+  };
+
+  const select = (selected: readonly WaitSelectedIdentity[]): void => {
+    for (const member of selected) {
+      const label = member.alias ?? member.id;
+      if (sources.has(member.id)) continue;
+      sources.set(member.id, label);
+      sourceWidth = Math.max(sourceWidth, displayColumns(label));
+    }
+  };
+
   const observe = (round: readonly WaitObservedAkuma[]): readonly string[] => {
     observed = true;
+    // Establish the whole round's sources before any row so widths stay aligned within it.
+    for (const member of round) registerSource(member.status.id, member.alias);
     const lines: string[] = [];
     for (const { status, alias, contract } of round) {
       const known = streams.get(status.id);
@@ -410,7 +504,11 @@ export function waitObservationStream(
         lines.push(...snapshotHeading(status.id, alias, contract));
         opened = true;
         attributed.set(status.id, alias);
-        const stream = activityStream(context);
+        // Only a plural wait attributes its rows; a single-target stream keeps the plain row grammar.
+        const stream = activityStream(
+          context,
+          sources.size > 1 ? sourceLayout(sources.get(status.id) ?? status.id, () => sourceWidth) : plainLayout(),
+        );
         streams.set(status.id, stream);
         stream(status.timeline);
       } else {
@@ -432,8 +530,8 @@ export function waitObservationStream(
       const at = complete ? (settledAt.get(status.id) ?? end) : end;
       const durationMs = Math.max(0, at - startedAt);
       const { mark, verb, waited } = conclusionMarkVerb(status, answered);
-      const target = multi ? ` ${attributed.get(status.id) ?? status.id}` : "";
-      return `${clockFromMs(at)} ${mark}${target} ${verb} — ${waited ? "waited " : ""}${durationText(durationMs)}`;
+      const target = multi ? ` ${padToDisplay(sources.get(status.id) ?? status.id, sourceWidth)}` : "";
+      return `${clockFromMs(at)}${target} ${mark} ${verb} — ${waited ? "waited " : ""}${durationText(durationMs)}`;
     });
     const unobservedLines = result.unobserved.map((member) => unobservedText(member.id, member.diagnostic));
     const answeredSingle =
@@ -447,7 +545,75 @@ export function waitObservationStream(
     return answeredSingle ? `${body}\n\n` : body;
   };
 
-  return { observe, conclude, streamed: () => observed };
+  return { select, observe, conclude, streamed: () => observed };
+}
+
+/** The identity a streamed observing call's head frame renders from its resolved birth. */
+export type ObservedCallHead = Readonly<{
+  id: string;
+  alias?: string;
+  contract: DispatchAssociation;
+  facts: readonly string[];
+}>;
+
+export type CallObservationStream = Readonly<{
+  observe: (status: AkumaStatus) => readonly string[];
+  conclude: (observation: CallObservation) => string;
+  opened: () => boolean;
+}>;
+
+function failedOutcomeDiagnostic(status: AkumaStatus): string | undefined {
+  const outcome = status.timeline.kind === "idle" ? status.timeline.outcome : undefined;
+  return outcome !== undefined && outcome.outcome.kind === "failed" ? outcome.outcome.diagnostic : undefined;
+}
+
+/**
+ * Live view over one observing call: its identity frame and birth diagnostics
+ * open the stream once, settled rows follow as they arrive, and the return
+ * appends one conclusion in single-target wait grammar. The stream never
+ * replays its own activity as a final snapshot, and it never carries the
+ * birth receipt's cwd row.
+ */
+export function callObservationStream(
+  context: TextRenderContext,
+  head: ObservedCallHead,
+  options: Readonly<{ now?: () => number }> = {},
+): CallObservationStream {
+  const now = options.now ?? ((): number => Date.now());
+  const startedAt = now();
+  const stream = activityStream(context);
+  let opened = false;
+  const open = (lines: string[]): void => {
+    if (opened) return;
+    opened = true;
+    lines.push(...snapshotHeading(head.id, head.alias, head.contract), ...head.facts);
+  };
+  const observe = (status: AkumaStatus): readonly string[] => {
+    const lines: string[] = [];
+    open(lines);
+    lines.push(...stream(status.timeline));
+    return lines;
+  };
+  const conclude = (observation: CallObservation): string => {
+    const lines: string[] = [];
+    open(lines);
+    if (observation.kind === "failed") {
+      lines.push(`! error ${safeText(observation.failure.diagnostic)}`);
+      return lines.join("\n");
+    }
+    if (observation.kind !== "observed") return lines.join("\n");
+    const end = now();
+    const status = observation.status;
+    const answered = statusAnswer({ status }) !== undefined;
+    const at = waitComplete(status) ? (settleMoment(status) ?? end) : end;
+    const durationMs = Math.max(0, at - startedAt);
+    const { mark, verb, waited } = conclusionMarkVerb(status, answered);
+    lines.push(`${clockFromMs(at)} ${mark} ${verb} — ${waited ? "waited " : ""}${durationText(durationMs)}`);
+    const failure = failedOutcomeDiagnostic(status);
+    if (failure !== undefined) lines.push(`! error ${safeText(failure)}`);
+    return lines.join("\n");
+  };
+  return { observe, conclude, opened: () => opened };
 }
 
 type CreatedTaskRow = Extract<CreatedTaskObservation, { kind: "present" }>["rows"][number];
@@ -615,12 +781,19 @@ function answerCallFailed(result: Extract<AkumaInvocationResult, { action: "call
 
 export function akumaRawAnswer(result: AkumaInvocationResult): string | undefined {
   if (result.action === "call") {
+    if (result.streamed === true) {
+      // A streamed call's stdout is its answer or nothing; diagnostics belong to stderr.
+      if (answerCallFailed(result.result) || result.result.observation.kind !== "observed") return "";
+      return statusAnswer({ status: parseAkumaStatus(result.result.observation.status) }) ?? "";
+    }
     if (answerCallFailed(result.result) || result.result.observation.kind !== "observed") return undefined;
     return statusAnswer({ status: parseAkumaStatus(result.result.observation.status) });
   }
   if (result.action === "wait") {
     if (result.streamed === true) {
-      const single = result.result.observations.length === 1 ? result.result.observations[0] : undefined;
+      // Plural waits leave stdout empty so one answer can never be mistaken for the whole result.
+      const total = result.result.observations.length + result.result.unobserved.length;
+      const single = total === 1 ? result.result.observations[0] : undefined;
       return single === undefined ? "" : (statusAnswer(single) ?? "");
     }
     if (result.result.observations.length === 1) return statusAnswer(result.result.observations[0]!);

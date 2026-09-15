@@ -17,6 +17,16 @@ export function gitShortStat(stat: GitShortStat): string {
 }
 
 const GRAPHEMES = new Intl.Segmenter("und", { granularity: "grapheme" });
+const NON_ASCII = /[^\x20-\x7e]/u;
+const MARK = /\p{Mark}/u;
+const PICTOGRAPHIC = /\p{Extended_Pictographic}/u;
+const EMOJI_DEFAULT = /\p{Emoji_Presentation}/u;
+const ZWJ = 0x200d;
+const TEXT_PRESENTATION = 0xfe0e;
+const EMOJI_PRESENTATION = 0xfe0f;
+const REGIONAL_FIRST = 0x1f1e6;
+const REGIONAL_LAST = 0x1f1ff;
+const ZERO_WIDTH = new Set([0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x2060, 0xfeff]);
 
 const WIDE_RANGES = [
   [0x1100, 0x115f],
@@ -32,30 +42,50 @@ const WIDE_RANGES = [
   [0x20000, 0x3fffd],
 ] as const;
 
-function characterColumns(character: string): number {
-  const point = character.codePointAt(0);
-  if (point === undefined || point === 0 || /\p{Mark}/u.test(character) || point === 0xfe0f) return 0;
-  if (point < 0x20 || (point >= 0x7f && point < 0xa0)) return 0;
+/** Columns one code point occupies when its grapheme cluster gives it no wider form. */
+function baseColumns(point: number): number {
+  if (point === 0 || point < 0x20 || (point >= 0x7f && point < 0xa0)) return 0;
+  if (ZERO_WIDTH.has(point) || MARK.test(String.fromCodePoint(point))) return 0;
   if (point === 0x303f) return 1;
   return WIDE_RANGES.some(([first, last]) => point >= first && point <= last) ? 2 : 1;
 }
 
+/**
+ * Columns one grapheme cluster occupies. A cluster is one terminal cell group even
+ * when it is built from many code points, so ZWJ sequences, flags, keycaps and
+ * variation selectors never count the width of their parts.
+ */
+function graphemeColumns(cluster: string): number {
+  const points = [...cluster].map((character) => character.codePointAt(0)!);
+  if (points.every((point) => point === EMOJI_PRESENTATION || point === TEXT_PRESENTATION)) return 0;
+  const first = points[0]!;
+  if (points.length > 1 && points.every((point) => point >= REGIONAL_FIRST && point <= REGIONAL_LAST)) return 2;
+  // A presentation selector decides a text-default symbol: text stays narrow, emoji widens it.
+  if (points.includes(TEXT_PRESENTATION)) return baseColumns(first);
+  if (points.includes(EMOJI_PRESENTATION)) return 2;
+  // A joined pictographic sequence is one wide cluster; a plain text symbol is not.
+  if (points.includes(ZWJ) && PICTOGRAPHIC.test(cluster)) return 2;
+  if (EMOJI_DEFAULT.test(cluster)) return 2;
+  return baseColumns(first);
+}
+
 export function displayColumns(value: string): number {
+  if (!NON_ASCII.test(value)) return value.length;
   let columns = 0;
-  for (const character of value) columns += characterColumns(character);
+  for (const { segment } of GRAPHEMES.segment(value)) columns += graphemeColumns(segment);
   return columns;
 }
 
 export function takeDisplayColumns(value: string, maximum: number): Readonly<{ text: string; rest: string }> {
-  const characters = [...GRAPHEMES.segment(value)].map(({ segment }) => segment);
+  const clusters = [...GRAPHEMES.segment(value)].map(({ segment }) => segment);
   let columns = 0;
   let index = 0;
-  for (; index < characters.length; index += 1) {
-    const width = displayColumns(characters[index]!);
+  for (; index < clusters.length; index += 1) {
+    const width = graphemeColumns(clusters[index]!);
     if (columns + width > maximum) break;
     columns += width;
   }
-  return { text: characters.slice(0, index).join(""), rest: characters.slice(index).join("") };
+  return { text: clusters.slice(0, index).join(""), rest: clusters.slice(index).join("") };
 }
 
 export function truncateDisplayText(value: string, maximum: number): string {
