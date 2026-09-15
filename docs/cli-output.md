@@ -170,8 +170,10 @@ channel, so empty stdout never hides it. A call that answers a schema, renders
 JSON, or detaches has no such stream and keeps its ordinary receipt.
 
 A wait reports the same kind of progress. It announces no birth and streams
-each newly settled timeline row on the progress channel through the same
-renderer; that channel also carries the closing conclusion, while stdout
+eligible newly settled timeline rows on the progress channel through the same
+renderer; default live progress omits internal thought narration, while
+snapshot, status, and history retain that activity through their own
+projections; that channel also carries the closing conclusion, while stdout
 carries only an answer, never progress, and a plural wait leaves it
 empty; a wait that renders JSON, or one forwarded to a Body, has no such
 stream. A live stream

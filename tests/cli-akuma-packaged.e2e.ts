@@ -137,9 +137,9 @@ function headFrameCount(stderr: string, archetype: string, alias: string): numbe
   return stderr.match(new RegExp(`^aku/${archetype}/[0-9a-f]{8} \\(${alias}\\)$`, "gmu"))?.length ?? 0;
 }
 
-/** Ascending note numbers rendered in one attributed source's rows. */
-function attributedNoteNumbers(stderr: string, alias: string): readonly number[] {
-  return [...stderr.matchAll(new RegExp(`^.*${alias} +\\S+ +think +“retry note (\\d+)”`, "gmu"))].map((match) =>
+/** Ascending message numbers rendered in one attributed source's rows. */
+function attributedAttemptNumbers(stderr: string, alias: string): readonly number[] {
+  return [...stderr.matchAll(new RegExp(`^.*${alias} +\\S+ +say +“attempt (\\d+)”`, "gmu"))].map((match) =>
     Number(match[1]!),
   );
 }
@@ -159,10 +159,11 @@ test("packaged observing calls stream one framed session and one conclusion per 
     assert.equal(lines[1], ruleFor(lines[0]!), "the shared rule underlines the identity head");
     assert.doesNotMatch(unfinished.stderr, /cwd/u, "the observing receipt never shows a detached cwd row");
     assert.equal(unfinished.stderr.match(/● still running — waited /gu)?.length, 1, "one truthful conclusion");
-    const notes = [...unfinished.stderr.matchAll(/retry note (\d+)/gu)].map((match) => Number(match[1]!));
-    assert.ok(notes.length >= 1, `a settled note streams while the call waits:\n${unfinished.stderr}`);
-    assert.equal(new Set(notes).size, notes.length, "no settled note streams twice");
-    assert.deepEqual(notes, [...notes].sort((left, right) => left - right), "a settled note streams after its predecessors");
+    const attempts = [...unfinished.stderr.matchAll(/attempt (\d+)/gu)].map((match) => Number(match[1]!));
+    assert.doesNotMatch(unfinished.stderr, /retry note/u, "thought narration stays out of default live progress");
+    assert.ok(attempts.length >= 1, `a settled message streams while the call waits:\n${unfinished.stderr}`);
+    assert.equal(new Set(attempts).size, attempts.length, "no settled message streams twice");
+    assert.deepEqual(attempts, [...attempts].sort((left, right) => left - right), "messages stream after their predecessors");
     await runPackagedCli(["-C", world, "kill", "@notes"], { cwd: world, env });
 
     const answered = await runPackagedCli(["-C", world, "call", "finisher", "--wait", "20s", "prompt"], {
@@ -235,7 +236,8 @@ test("packaged plural waits attribute activity and close every target", { timeou
     assert.equal(any.stdout, "", "an --any plural wait writes no stdout");
     assert.equal(headFrameCount(any.stderr, "worker", "@notes"), 1, `one head frame per observed Akuma:\n${any.stderr}`);
     assert.equal(headFrameCount(any.stderr, "slowcoach", "@slow"), 1, `one head frame per observed Akuma:\n${any.stderr}`);
-    assert.match(any.stderr, /@notes +│ (?:think|say)/u, `--any attributed an activity row to its source:\n${any.stderr}`);
+    assert.match(any.stderr, /@notes +│ say/u, `--any attributed an activity row to its source:\n${any.stderr}`);
+    assert.doesNotMatch(any.stderr, /retry note/u, "--any omits thought narration");
     assert.match(any.stderr, /@slow +✓ answered — /u, "--any scored the answered target");
     assert.match(any.stderr, /@notes +● still running — waited \d+s/u, "--any scored the running target");
     const anyLines = any.stderr.split("\n");
@@ -245,10 +247,10 @@ test("packaged plural waits attribute activity and close every target", { timeou
     for (const row of anyRows) {
       assert.equal(markColumn(row, "│"), markColumn(anyScore, "●"), `rows share the scoreboard mark column:\n${any.stderr}`);
     }
-    const anyNotes = attributedNoteNumbers(any.stderr, "@notes");
-    assert.ok(anyNotes.length >= 1, `--any streamed notes for its source:\n${any.stderr}`);
-    assert.equal(new Set(anyNotes).size, anyNotes.length, "no settled note streams twice");
-    assert.deepEqual(anyNotes, [...anyNotes].sort((left, right) => left - right), "notes stream in order");
+    const anyAttempts = attributedAttemptNumbers(any.stderr, "@notes");
+    assert.ok(anyAttempts.length >= 1, `--any streamed messages for its source:\n${any.stderr}`);
+    assert.equal(new Set(anyAttempts).size, anyAttempts.length, "no settled message streams twice");
+    assert.deepEqual(anyAttempts, [...anyAttempts].sort((left, right) => left - right), "messages stream in order");
 
     // `--all` outlives the running target: the already settled and the running one both close.
     const all = await runPackagedCli(["-C", world, "wait", "@notes", "@done", "--all", "--timeout", "2s"], {
@@ -259,7 +261,8 @@ test("packaged plural waits attribute activity and close every target", { timeou
     assert.equal(all.stdout, "", "an --all plural wait writes no stdout");
     assert.equal(headFrameCount(all.stderr, "worker", "@notes"), 1, `one head frame per observed Akuma:\n${all.stderr}`);
     assert.equal(headFrameCount(all.stderr, "finisher", "@done"), 1, `one head frame per observed Akuma:\n${all.stderr}`);
-    assert.match(all.stderr, /@notes +│ (?:think|say)/u, `--all attributed an activity row to its source:\n${all.stderr}`);
+    assert.match(all.stderr, /@notes +│ say/u, `--all attributed an activity row to its source:\n${all.stderr}`);
+    assert.doesNotMatch(all.stderr, /retry note/u, "--all omits thought narration");
     assert.match(all.stderr, /@done +✓ answered — /u, "--all scored the already settled target");
     assert.match(all.stderr, /@notes +● still running — waited 2s/u, "--all scored the running target");
     const allLines = all.stderr.split("\n");

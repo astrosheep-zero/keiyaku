@@ -1500,6 +1500,26 @@ test("the live stream keeps opening tools live and flushes the actual final tail
   assert.deepEqual(stream.flush(), [], "a second final flush has no duplicate activity");
 });
 
+test("live activity omits thought rows before preserving the whole-command tool budget", () => {
+  const thought = (sequence: number) =>
+    snapshotRow({ kind: "thought", sequence, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: `internal-${sequence}` });
+  const tool = (sequence: number, command: string) =>
+    snapshotRow(completedTool(sequence, "bash", { kind: "run", command }));
+  const snapshot = idleAkumaSnapshot(
+    Array.from({ length: 9 }, (_, index) => [thought(index * 2 + 1), tool(index * 2 + 2, `c${index + 1}`)]).flat(),
+  );
+  const stream = activityStream({ columns: 120, color: false });
+  const lines = [...stream(snapshot), ...stream.flush()];
+  const text = lines.join("\n");
+
+  assert.match(snapshotActivityLines(snapshot, { columns: 120, color: false }).join("\n"), /internal-1/u);
+  assert.doesNotMatch(text, /internal-/u);
+  assert.deepEqual(lines.filter((line) => line.includes("⋮")), [`${" ".repeat(5)} ⋮ 4 omitted`]);
+  for (const command of ["c1", "c2", "c3", "c8", "c9"])
+    assert.equal(lines.filter((line) => line.includes(command)).length, 1, `${command} keeps its tool slot`);
+  assert.doesNotMatch(text, /c4|c5|c6|c7/u);
+});
+
 test("whole-command tool selection is independent of poll partitioning", () => {
   const tool = (sequence: number) =>
     snapshotRow(completedTool(sequence, "bash", { kind: "run", command: `c${sequence}` }));
@@ -1668,6 +1688,51 @@ test("a wait flushes a known target when its final result becomes unobserved", (
   const text = stream.conclude({ observations: [], unobserved: [{ id, diagnostic: "window lost" }] });
   assert.match(text, /⋮ 4 omitted[\s\S]*\$ c8[\s\S]*\$ c9/u);
   assert.match(text, /unobserved: window lost/u);
+});
+
+test("streamed waits and observing calls omit thought rows", () => {
+  const thought = (sequence: number) =>
+    snapshotRow({ kind: "thought", sequence, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "internal narration" });
+  const said = (sequence: number, text: string) =>
+    snapshotRow({ kind: "said", sequence, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text });
+  const running = (id: string, entries: Parameters<typeof openAkumaSnapshot>[0]) =>
+    parseAkumaStatus({ id, life: "running", allowed: [], timeline: openAkumaSnapshot(entries) });
+
+  const callId = "aku/worker/abcd0038";
+  const call = callObservationStream(
+    { columns: 120, color: false },
+    { id: callId, contract: { kind: "none" }, facts: [] },
+    { now: () => 0 },
+  );
+  const callOpening = call.observe(running(callId, [thought(1), snapshotRow(activeTool(2, "bash", { kind: "run", command: "open" }))]));
+  const callRows = call
+    .observe(
+      running(callId, [
+        thought(1),
+        said(2, "call message"),
+        snapshotRow(activeTool(3, "bash", { kind: "run", command: "open" })),
+      ]),
+    )
+    .join("\n");
+  assert.doesNotMatch([...callOpening, callRows].join("\n"), /internal narration/u);
+  assert.match(callRows, /say +“call message”/u);
+
+  const waitId = "aku/worker/abcd0039";
+  const wait = waitObservationStream({ columns: 120, color: false }, { now: () => 0 });
+  wait.observe([observed(running(waitId, [snapshotRow(activeTool(1, "bash", { kind: "run", command: "open" }))]))]);
+  const waitRows = wait
+    .observe([
+      observed(
+        running(waitId, [
+          thought(1),
+          said(2, "wait message"),
+          snapshotRow(activeTool(3, "bash", { kind: "run", command: "open" })),
+        ]),
+      ),
+    ])
+    .join("\n");
+  assert.doesNotMatch(waitRows, /internal narration/u);
+  assert.match(waitRows, /say +“wait message”/u);
 });
 
 test("an observing call flushes its deferred tail before reporting an observation failure", () => {

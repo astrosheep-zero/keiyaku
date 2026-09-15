@@ -438,9 +438,10 @@ function observeActivitySnapshot(
   context: TextRenderContext,
   layout: RowLayout,
 ): readonly string[] {
-  const rows = settledRows(snapshot).filter(
-    (row) => state.newestSequence === undefined || row.sequence > state.newestSequence,
-  );
+  const rows = settledRows(snapshot)
+    .filter((row) => state.newestSequence === undefined || row.sequence > state.newestSequence)
+    // Thoughts remain retained activity, but are ineligible for default live progress.
+    .filter((row) => row.kind !== "thought");
   if (rows.length === 0) return [];
   state.newestSequence = rows.reduce(
     (newest, row) => Math.max(newest, row.sequence),
