@@ -33,7 +33,7 @@ export function frameRule(headLines: readonly string[]): string {
   return "─".repeat(width);
 }
 
-/** Tool rows one observation cycle may print before the rest fold in place. */
+/** Newest tool rows one observation batch keeps; older ones fold in place. */
 const STREAM_TOOL_BUDGET = 3;
 
 type FleetTimeline = AkumaObservation["status"]["timeline"];
@@ -348,8 +348,9 @@ function settledTimeline(snapshot: RenderedSnapshot): RenderedSnapshot {
 /**
  * Append-only live view over successive settled snapshots of one Akuma. Each
  * call reports the rows that settled since the previous call — never
- * re-rendering an earlier row — and folds each tool burst beyond the streaming
- * budget into one in-place omission marker, so a marker never grows. The
+ * re-rendering an earlier row — and, inside that batch, keeps the newest tool
+ * rows while folding the older ones in place as omission markers, so bounded
+ * live tool evidence favors recent work and a marker never grows. The
  * observation window slides over a busy Akuma, so a retained row's own sequence
  * — not its position in the window — is what says whether it is new; a row that
  * left the window before this call has already streamed.
@@ -366,8 +367,10 @@ export function activityStream(
       .filter((row) => newestSequence === undefined || row.sequence > newestSequence);
     if (rows.length === 0) return [];
     newestSequence = rows.reduce((newest, row) => Math.max(newest, row.sequence), newestSequence ?? rows[0]!.sequence);
+    // Recency wins within a batch: the newest tool rows stream, older ones fold at their own position.
+    const tools = rows.filter((row) => row.kind === "tool");
+    const retainedTools = new Set(tools.slice(Math.max(0, tools.length - STREAM_TOOL_BUDGET)));
     const lines: string[] = [];
-    let budget = STREAM_TOOL_BUDGET;
     let omitted = 0;
     const flushOmitted = (): void => {
       if (omitted === 0) return;
@@ -375,12 +378,11 @@ export function activityStream(
       omitted = 0;
     };
     for (const row of rows) {
-      if (row.kind === "tool" && budget === 0) {
+      if (row.kind === "tool" && !retainedTools.has(row)) {
         omitted += 1;
         continue;
       }
       flushOmitted();
-      if (row.kind === "tool") budget -= 1;
       const at = clock(row.at);
       const changed = previousClock === undefined || at !== previousClock;
       lines.push(

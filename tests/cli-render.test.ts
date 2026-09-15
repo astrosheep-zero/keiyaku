@@ -1481,7 +1481,7 @@ test("an observation frame places the rule between the frame and its content", (
   ]);
 });
 
-test("the live stream folds a tool burst and never drops a narrative row", () => {
+test("the live stream keeps the newest tools and never drops a narrative row", () => {
   const lines = activityStream({ columns: 120, color: false })(
     idleAkumaSnapshot([
       snapshotRow(completedTool(1, "bash", { kind: "run", command: "first" })),
@@ -1489,31 +1489,78 @@ test("the live stream folds a tool burst and never drops a narrative row", () =>
       snapshotRow(completedTool(3, "bash", { kind: "run", command: "third" })),
       snapshotRow(completedTool(4, "bash", { kind: "run", command: "fourth" })),
       snapshotRow({ kind: "said", sequence: 5, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "kept prose" }),
-      snapshotRow(completedTool(6, "bash", { kind: "run", command: "sixth" })),
-      snapshotRow(completedTool(7, "bash", { kind: "run", command: "seventh" })),
+      snapshotRow(completedTool(6, "bash", { kind: "run", command: "fifth" })),
+      snapshotRow(completedTool(7, "bash", { kind: "run", command: "sixth" })),
     ]),
   );
   const text = lines.join("\n");
-  assert.match(text, /first/u);
-  assert.match(text, /third/u);
-  assert.doesNotMatch(text, /fourth|sixth|seventh/u);
-  assert.match(text, /⋮ 1 omitted/u);
-  assert.match(text, /⋮ 2 omitted/u);
-  assert.ok(text.indexOf("kept prose") > text.indexOf("⋮ 1 omitted"));
-  assert.ok(text.indexOf("kept prose") < text.indexOf("⋮ 2 omitted"));
+  assert.doesNotMatch(text, /first|second|third/u, "older tool rows fold instead of streaming");
+  assert.match(text, /⋮ 3 omitted/u);
+  assert.ok(text.indexOf("⋮ 3 omitted") < text.indexOf("fourth"), "the marker sits where the omitted run began");
+  assert.ok(text.indexOf("fourth") < text.indexOf("kept prose"), "the narrative keeps its order");
+  assert.ok(text.indexOf("kept prose") < text.indexOf("fifth"));
+  assert.ok(text.indexOf("fifth") < text.indexOf("sixth"));
+});
+
+test("the live stream marks each older contiguous tool run at its own position", () => {
+  const tool = (sequence: number, command: string) =>
+    snapshotRow(completedTool(sequence, "bash", { kind: "run", command }));
+  const lines = activityStream({ columns: 120, color: false })(
+    idleAkumaSnapshot([
+      tool(1, "a1"),
+      tool(2, "a2"),
+      snapshotRow({ kind: "note", sequence: 3, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "between" }),
+      tool(4, "b1"),
+      tool(5, "b2"),
+      tool(6, "c1"),
+      tool(7, "c2"),
+      tool(8, "c3"),
+    ]),
+  );
+  const text = lines.join("\n");
+  // The final three tools stay; the two older runs fold around the narrative, each at its own position.
+  assert.deepEqual(lines.filter((line) => line.includes("⋮")), [
+    `${" ".repeat(5)} ⋮ 2 omitted`,
+    `${" ".repeat(5)} ⋮ 2 omitted`,
+  ]);
+  assert.doesNotMatch(text, /a1|a2|b1|b2/u);
+  assert.ok(text.indexOf("⋮ 2 omitted") < text.indexOf("between"));
+  assert.ok(text.indexOf("between") < text.lastIndexOf("⋮ 2 omitted"));
+  assert.ok(text.lastIndexOf("⋮ 2 omitted") < text.indexOf("c1"));
+  assert.ok(text.indexOf("c1") < text.indexOf("c2") && text.indexOf("c2") < text.indexOf("c3"));
+});
+
+test("the live stream keeps up to three settled tools fully visible", () => {
+  const tool = (sequence: number) =>
+    snapshotRow(completedTool(sequence, "bash", { kind: "run", command: `c${sequence}` }));
+  for (const count of [0, 1, 2, 3]) {
+    const lines = activityStream({ columns: 120, color: false })(
+      idleAkumaSnapshot(Array.from({ length: count }, (_, index) => tool(index + 1))),
+    );
+    assert.doesNotMatch(lines.join("\n"), /omitted/u, `${count} tools fit the budget`);
+    for (let sequence = 1; sequence <= count; sequence += 1) {
+      assert.match(lines.join("\n"), new RegExp(`c${sequence}`, "u"));
+    }
+  }
 });
 
 test("the live stream appends each settled chunk once and never regrows a marker", () => {
   const stream = activityStream({ columns: 120, color: false });
   const tool = (sequence: number) => snapshotRow(completedTool(sequence, "bash", { kind: "run", command: `c${sequence}` }));
   const first = stream(idleAkumaSnapshot([tool(1), tool(2), tool(3), tool(4)]));
-  assert.match(first.join("\n"), /⋮ 1 omitted/u);
-  assert.equal(first.filter((line) => line.includes("c1")).length, 1);
+  const firstText = first.join("\n");
+  assert.match(firstText, /⋮ 1 omitted/u, "only the oldest row of the batch folds");
+  assert.doesNotMatch(firstText, /c1/u);
+  assert.equal(first.filter((line) => line.includes("c2")).length, 1);
+  assert.equal(first.filter((line) => line.includes("c4")).length, 1);
 
-  const second = stream(idleAkumaSnapshot([tool(1), tool(2), tool(3), tool(4), tool(5), tool(6)]));
-  assert.doesNotMatch(second.join("\n"), /c1|c2|c3|c4|omitted/u);
-  assert.match(second.join("\n"), /c5/u);
-  assert.match(second.join("\n"), /c6/u);
+  // A later batch selects its own final three, so the per-batch budget never becomes a global cap.
+  const second = stream(idleAkumaSnapshot([tool(1), tool(2), tool(3), tool(4), tool(5), tool(6), tool(7)]));
+  const secondText = second.join("\n");
+  assert.doesNotMatch(secondText, /c1|c2|c3|c4|omitted/u, "a later batch replays nothing and regrows no marker");
+  assert.match(secondText, /c5/u);
+  assert.match(secondText, /c6/u);
+  assert.match(secondText, /c7/u);
 });
 
 test("the live stream settles rows without rendering the outcome row", () => {
@@ -1843,6 +1890,11 @@ test("a plural wait keeps source attribution on omission markers and continuatio
   const marker = lines.find((line) => line.includes("⋮ 2 omitted"));
   assert.ok(marker !== undefined);
   assert.ok(marker.startsWith(`${" ".repeat(5)} ${alias.padEnd(displayColumns(alias))} ⋮ 2 omitted`));
+  const toolRow = lines.find((line) => line.includes("✓ run"));
+  assert.ok(
+    toolRow !== undefined && toolRow.includes(alias),
+    `retained tool rows keep their source column:\n${lines.join("\n")}`,
+  );
   assert.ok(
     lines.some((line) => line.startsWith(`${" ".repeat(5)} ${" ".repeat(displayColumns(alias))} │`)),
     "continuations blank the time and source columns",
