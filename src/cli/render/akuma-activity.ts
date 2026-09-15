@@ -33,8 +33,9 @@ export function frameRule(headLines: readonly string[]): string {
   return "─".repeat(width);
 }
 
-/** Newest tool rows one observation batch keeps; older ones fold in place. */
-const STREAM_TOOL_BUDGET = 3;
+/** Tool rows one observation batch keeps at each end; the surplus between them folds in place. */
+const STREAM_OPENING_TOOL_BUDGET = 3;
+const STREAM_RECENT_TOOL_BUDGET = 2;
 
 type FleetTimeline = AkumaObservation["status"]["timeline"];
 type FleetTimelineEntry = FleetTimeline["entries"][number];
@@ -348,9 +349,10 @@ function settledTimeline(snapshot: RenderedSnapshot): RenderedSnapshot {
 /**
  * Append-only live view over successive settled snapshots of one Akuma. Each
  * call reports the rows that settled since the previous call — never
- * re-rendering an earlier row — and, inside that batch, keeps the newest tool
- * rows while folding the older ones in place as omission markers, so bounded
- * live tool evidence favors recent work and a marker never grows. The
+ * re-rendering an earlier row — and, inside that batch, keeps the opening and
+ * newest tool rows while folding the ones between them in place as omission
+ * markers, so bounded live tool evidence keeps both ends of the batch and a
+ * marker never grows. The
  * observation window slides over a busy Akuma, so a retained row's own sequence
  * — not its position in the window — is what says whether it is new; a row that
  * left the window before this call has already streamed.
@@ -367,9 +369,14 @@ export function activityStream(
       .filter((row) => newestSequence === undefined || row.sequence > newestSequence);
     if (rows.length === 0) return [];
     newestSequence = rows.reduce((newest, row) => Math.max(newest, row.sequence), newestSequence ?? rows[0]!.sequence);
-    // Recency wins within a batch: the newest tool rows stream, older ones fold at their own position.
+    // Both ends of a batch win: its opening tool rows and its newest ones stream, and the middle
+    // tools fold at their own position. A batch of at most the two budgets retains every tool once.
     const tools = rows.filter((row) => row.kind === "tool");
-    const retainedTools = new Set(tools.slice(Math.max(0, tools.length - STREAM_TOOL_BUDGET)));
+    const retainedTools = new Set(
+      tools.length <= STREAM_OPENING_TOOL_BUDGET + STREAM_RECENT_TOOL_BUDGET
+        ? tools
+        : [...tools.slice(0, STREAM_OPENING_TOOL_BUDGET), ...tools.slice(-STREAM_RECENT_TOOL_BUDGET)],
+    );
     const lines: string[] = [];
     let omitted = 0;
     const flushOmitted = (): void => {

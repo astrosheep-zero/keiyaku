@@ -176,9 +176,10 @@ carries only an answer, never progress, and a plural wait leaves it
 empty; a wait that renders JSON, or one forwarded to a Body, has no such
 stream. A live stream
 never re-renders a settled row: when one observation cycle settles more tool
-rows than its streaming budget allows, bounded live tool evidence favors the
-most recent work — the newest tool rows in that batch stream and the older ones
-fold in place as the same omission marker — and narrative rows always appear in
+rows than its streaming budget allows, bounded live tool evidence keeps both
+ends of that batch — its opening tool rows and its most recent ones stream in
+their own order while the surplus between them folds in place as the same
+omission marker — and narrative rows always appear in
 order. Every observed
 Akuma's stream opens with its identity frame before any row — carrying the
 alias currently addressing that Akuma and the Contract association it holds —
