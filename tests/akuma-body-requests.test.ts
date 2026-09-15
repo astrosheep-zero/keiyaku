@@ -18,7 +18,7 @@ import {
 } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory, type AkuId } from "../src/akuma/identity.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
-import { AkumaBodyRequestError, requestBodyCommand } from "../src/akuma/requests.js";
+import { AkumaBodyRequestError, bodyRequestExecutionContext, requestBodyCommand } from "../src/akuma/requests.js";
 import { BodyRequestPump, settleBodyRequests } from "../src/akuma/request-serve.js";
 import { BodyRequestPump as LifecycleBodyRequestPump } from "../src/akuma/request-lifecycle.js";
 import {
@@ -31,6 +31,7 @@ import {
 } from "../src/akuma/request-wire.js";
 import { REQUEST_PROGRESS_WINDOW, publishRequestProgress, readRequestProgress } from "../src/akuma/request-observation.js";
 import { executeTellAkuma } from "../src/akuma/fleet-execution.js";
+import { waitAkuma } from "../src/library/fleet.js";
 import {
   fleetRequestCommand,
   fleetRequestProtocol,
@@ -1763,6 +1764,35 @@ test("Heart leaves wait unkeyed and refuses disabled mutations before their exec
         error instanceof AkumaBodyRequestError && error.diagnostic === "not-allowed: contract.deliver",
     );
     assert.deepEqual(calls, ["wait"]);
+  } finally {
+    await pump.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a forwarded wait omits its mode and reaches the parent as any", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-forwarded-wait-")));
+  const parent = await born(root, "parent", "42424242");
+  const completions: ("any" | "all")[] = [];
+  const pump = await openFleetPump(parent, {
+    wait: async (input) => {
+      completions.push(input.completion);
+      return { completion: input.completion, observations: [], unobserved: [] };
+    },
+    tell: async () => {
+      throw new Error("unexpected tell");
+    },
+    kill: async () => {
+      throw new Error("unexpected kill");
+    },
+  });
+  try {
+    const result = await waitAkuma(
+      { path: root, akuma: ["aku/worker/00000001" as AkuId, "aku/worker/00000002" as AkuId] },
+      bodyRequestExecutionContext(pump.directory),
+    );
+    assert.deepEqual(completions, ["any"]);
+    assert.equal(result.completion, "any");
   } finally {
     await pump.close();
     rmSync(root, { recursive: true, force: true });

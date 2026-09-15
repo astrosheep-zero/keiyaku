@@ -56,10 +56,16 @@ catalogue.
 Fleet composes public Akuma handles after address expansion. It preserves the
 raw Akuma status and mutation evidence, adding separate read-only Dispatch and
 Task associations where available; it never intersects them into Akuma state or
-re-evaluates lifecycle. Wait and kill freeze their subject set at entry. Plural
-wait retries transient unreadable members during observation, but final output
-honestly distinguishes observed and unobserved subjects without fabricating
-completion. Tell and kill return their primary evidence; interrupt retains its
+re-evaluates lifecycle. Wait and kill freeze their subject set at entry. An
+omitted completion mode is any: the wait returns when any selected member
+already satisfies, or comes to satisfy during observation, the existing
+completion judgment, and an already completed member counts immediately, so
+repeating the same selection can return at once. Explicit all waits for the
+entire selected set. The mode changes completion criteria only; it never
+changes the frozen subject set, observation retries, or the honest
+distinguishing of observed and unobserved subjects. Plural wait retries
+transient unreadable members during observation, but final output never
+fabricates completion. Tell and kill return their primary evidence; interrupt retains its
 separate post-action observation.
 
 The catalog invokes exactly one selected product owner. Its Akuma catalogue is

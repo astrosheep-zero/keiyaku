@@ -298,6 +298,33 @@ test("abandon accepts a note but no caller-selected reason", () => {
   assert.throws(() => parseArgv(["abandon", "kei/example", "--reason", "manual"]), CliUsageError);
 });
 
+test("wait accepts a plural selection without an explicit completion mode", () => {
+  assert.deepEqual(command(["wait", "aku/claude/1234abcd", "aku/claude/5678ef90"]), {
+    command: "wait",
+    akuma: ["aku/claude/1234abcd", "aku/claude/5678ef90"],
+    output: "text",
+  });
+  assert.deepEqual(command(["wait", "aku/claude/1234abcd", "@peer", "--timeout", "5m"]), {
+    command: "wait",
+    akuma: ["aku/claude/1234abcd", "@peer"],
+    timeoutMs: 300_000,
+    output: "text",
+  });
+  assert.deepEqual(command(["wait", "aku/*/*", "--all"]), {
+    command: "wait",
+    akuma: ["aku/*/*"],
+    completion: "all",
+    output: "text",
+  });
+  assert.deepEqual(command(["wait", "aku/*/*", "--any"]), {
+    command: "wait",
+    akuma: ["aku/*/*"],
+    completion: "any",
+    output: "text",
+  });
+  assert.throws(() => parseArgv(["wait", "@one", "@two", "--any", "--all"]), /mutually exclusive/u);
+});
+
 test("flag specs preserve value and boolean option behavior", () => {
   assert.throws(() => parseArgv(["bind", "--gates", "strict", "--gates", "default", "-"]), /duplicate option: --gates/);
   assert.throws(

@@ -82,8 +82,16 @@ const AKUMA_COMMAND_SPECS = {
     stdin: false,
     flags: { any: "boolean", all: "boolean", timeout: "value", json: "boolean" },
     usage: "wait <akuma-selector>... [--any | --all] [--timeout <duration>]",
-    purpose: "Wait for one Akuma or an explicitly selected Akuma set.",
-    details: "Settled timeline rows stream on stderr as they settle; the final result stays on stdout.",
+    purpose: "Wait for one Akuma or a selected Akuma set.",
+    details: [
+      "Without --any or --all the mode is any: the wait returns when any selected Akuma completes.",
+      "--all waits until every selected Akuma completes.",
+      "An already completed member counts immediately, so repeating a selection can return at once.",
+      "Identity frames, settled rows, and the closing scoreboard stream on stderr.",
+      "A streamed plural wait leaves stdout empty, and so does a single wait with no answer.",
+      "Only a single selected Akuma that answered writes to stdout, exactly its answer.",
+      "With --json nothing streams and stdout carries the result document.",
+    ].join("\n"),
   },
   tell: {
     arity: 1,
@@ -251,9 +259,6 @@ function parseWait(
   fail: (message: string) => never,
 ): ParsedAkumaCommand {
   if (flags.any === true && flags.all === true) fail("wait --any and --all are mutually exclusive");
-  if (rawSelectors.length > 1 && flags.any !== true && flags.all !== true) {
-    fail("wait requires --any or --all when selecting multiple Akuma");
-  }
   const completion = flags.any === true ? ("any" as const) : flags.all === true ? ("all" as const) : undefined;
   return {
     command: "wait",

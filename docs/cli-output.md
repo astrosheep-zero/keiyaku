@@ -156,8 +156,10 @@ An observing call reports the same kind of progress. A call that waits, renders
 text, and carries no answer contract opens one identity frame on the progress
 channel — the same identity-and-association notation and frame rule every
 observation uses, without the birth receipt's working-directory row — and then
-each timeline row once it has settled, as the window advances, while its one
-complete final result stays on stdout. When the call returns, it closes the
+each timeline row once it has settled, as the window advances; progress rows
+and the closing conclusion stay on the progress channel, and stdout carries
+only the call's answer, written once when it has one, so an unanswered call
+leaves stdout empty. When the call returns, it closes the
 stream with one conclusion row in the same conclusion wording and order a
 wait's own closing row uses, stating an answer, a still-running elapsed wait,
 or truthful terminal-failure evidence. The stream restates the timeline's own
@@ -169,8 +171,10 @@ JSON, or detaches has no such stream and keeps its ordinary receipt.
 
 A wait reports the same kind of progress. It announces no birth and streams
 each newly settled timeline row on the progress channel through the same
-renderer, while its one complete final result stays on stdout; a wait that
-renders JSON, or one forwarded to a Body, has no such stream. A live stream
+renderer; that channel also carries the closing conclusion, while stdout
+carries only an answer, never progress, and a plural wait leaves it
+empty; a wait that renders JSON, or one forwarded to a Body, has no such
+stream. A live stream
 never re-renders a settled row: when one observation cycle settles more tool
 rows than its streaming budget allows, the surplus folds in place as the same
 omission marker, and narrative rows always appear in order. Every observed
@@ -180,10 +184,11 @@ and an already settled Akuma prints that frame while replaying no backlog. The
 wait ends with one conclusion row per observed Akuma, attributed to its source
 the same way the activity above it is, so an unfinished wait replays no
 activity snapshot; the first row of a multi-target scoreboard opens a new
-paragraph. A wait observing more than one Akuma gives its activity rows one
-shared source attribution rather than one per row: the frozen alias addressing
-that Akuma when one exists, otherwise its complete identity, resolved from the
-observation seam rather than a renderer reading of the world. A wrapped row's
+paragraph. A wait observing more than one Akuma identifies the source of every
+semantic activity row in a consistently aligned source column: the frozen
+alias addressing that Akuma when one exists, otherwise its complete identity,
+resolved from the observation seam rather than a renderer reading of the
+world. A wrapped row's
 continuations carry no time or source of their own, an omission marker keeps
 its source, and the frozen selected set fixes the attribution width before the
 first row, so the whole stream and its scoreboard share one alignment. Width

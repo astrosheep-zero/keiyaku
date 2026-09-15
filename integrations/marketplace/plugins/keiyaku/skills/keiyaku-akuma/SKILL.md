@@ -103,21 +103,22 @@ keiyaku ls aku/                           # shallow catalog; also aku/<akuma>/ a
 keiyaku wait <selector>... [--any | --all] [--timeout <duration>]
 ```
 
-`wait` accepts complete ids, aliases, and Akuma globs. Wait on one Akuma without
-a mode. When observing multiple Akuma, prefer one plural wait over separate
-waits and choose exactly one mode:
+`wait` accepts complete ids, aliases, and Akuma globs. Prefer one plural wait
+over separate waits. The default mode is any: the wait returns when any
+selected Akuma completes, and a member that already completed counts right
+away, so waiting again can return at once. Use `--all` to wait until every
+selected Akuma completes:
 
 ```bash
 keiyaku -C <cwd> call worker --alias @projection -d "Inspect the projection."
 keiyaku -C <cwd> call worker --alias @host-boundary -d "Inspect the host boundary."
 keiyaku -C <cwd> wait @projection --timeout 5m
+keiyaku -C <cwd> wait @projection @host-boundary --timeout 5m   # returns when either completes
 keiyaku -C <cwd> wait @projection @host-boundary --all --timeout 5m
-keiyaku -C <cwd> wait @projection @host-boundary --any --timeout 5m
 ```
 
-`--all` waits until every selected Akuma stops running. `--any` returns when the
-first one stops and leaves the others alone. When the timeout expires, `wait`
-returns their current status without stopping them.
+Omitted mode behaves as `--any` and leaves the others alone. When the timeout
+expires, `wait` returns their current status without stopping them.
 
 ## Steer
 

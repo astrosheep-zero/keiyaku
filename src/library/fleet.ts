@@ -232,13 +232,11 @@ export async function waitAkuma(
   }
   const addressed = await addressAkumaSet(setAddress(values));
   const completion = values.completion;
-  if (addressed.ids.length > 1 && completion !== "any" && completion !== "all") {
-    throw new TypeError("completion must be any or all when waiting for multiple Akuma");
-  }
   if (completion !== undefined && completion !== "any" && completion !== "all") {
     throw new TypeError("completion must be any or all");
   }
-  const selected = completion ?? "all";
+  // An omitted mode is any: a plural wait returns when any selected Akuma is complete.
+  const selected = completion ?? "any";
   const timeoutMs = timeout(values.timeoutMs);
   const channel = executionChannel(execution);
   const repo = values.repo as Repo | undefined;

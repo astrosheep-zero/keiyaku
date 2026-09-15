@@ -303,12 +303,43 @@ test("a wait's live observation carries each observed Akuma's alias and Dispatch
   assert.deepEqual(single?.contract, { kind: "associated", contractId: owner });
 });
 
-test("facade requires an explicit completion mode for a plural wait", async (t) => {
+test("a facade wait defaults an omitted completion mode to any and counts an already complete member", async (t) => {
   const root = fixtureRoot(t, "keiyaku-facade-wait-mode-");
+  const complete = await answered(root, "worker", "00000001");
+  const running = await answered(root, "worker", "00000002");
+  await openOrdinary(running.paths, "2026-08-11T00:01:00.000Z", { prefix: "runner", tellId: "pending" });
+
+  // The completed member satisfies any on the first round, so this does not wait for the runner.
+  const waited = await Keiyaku.wait({ path: root, akuma: [complete.id, running.id], timeoutMs: 2_000 });
+  assert.equal(waited.completion, "any");
+  assert.deepEqual(
+    waited.observations.map((view) => view.status.id),
+    [complete.id, running.id],
+  );
+
+  // A glob resolving to the same plural set takes the same default.
+  const globbed = await Keiyaku.wait({ path: root, akuma: ["aku/worker/*"], timeoutMs: 0 });
+  assert.equal(globbed.completion, "any");
+  assert.deepEqual(
+    globbed.observations.map((view) => view.status.id),
+    [complete.id, running.id],
+  );
+
+  // The already completed member still counts, so waiting again can return at once.
+  const again = await Keiyaku.wait({ path: root, akuma: [complete.id, running.id], timeoutMs: 0 });
+  assert.equal(again.completion, "any");
+  assert.deepEqual(
+    again.observations.map((view) => view.status.id),
+    [complete.id, running.id],
+  );
+});
+
+test("a facade wait still refuses an invalid completion mode", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-wait-invalid-mode-");
   const one = await answered(root, "worker", "00000001");
   const two = await answered(root, "worker", "00000002");
   await assert.rejects(
-    Keiyaku.wait({ path: root, akuma: [one.id, two.id], timeoutMs: 0 }),
+    Keiyaku.wait({ path: root, akuma: [one.id, two.id], completion: "service" as never, timeoutMs: 0 }),
     /completion must be any or all/u,
   );
 });

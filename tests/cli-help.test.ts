@@ -105,6 +105,18 @@ test("Akuma call and tell help expose schema files", () => {
   assert.match(renderAkumaHelp("tell"), /stdin remains the prompt source/u);
 });
 
+test("Akuma wait help identifies any as the default and all as explicit", () => {
+  const help = renderAkumaHelp("wait");
+  assert.match(help, /usage  keiyaku wait/u);
+  assert.match(help, /Without --any or --all the mode is any/u);
+  assert.match(help, /--all waits until every selected Akuma completes/u);
+  assert.match(help, /already completed member counts immediately/u);
+  assert.match(help, /Identity frames, settled rows, and the closing scoreboard stream on stderr/u);
+  assert.match(help, /streamed plural wait leaves stdout empty/u);
+  assert.match(help, /Only a single selected Akuma that answered writes to stdout, exactly its answer/u);
+  assert.match(help, /With --json nothing streams and stdout carries the result document/u);
+});
+
 test("help contains no Markdown file pointers outside the settings Akuma block", () => {
   const help = [
     renderRootHelp(),
