@@ -33,9 +33,9 @@ export function frameRule(headLines: readonly string[]): string {
   return "─".repeat(width);
 }
 
-/** Tool rows one command keeps at its opening and final end; the surplus folds in place. */
-const STREAM_OPENING_TOOL_BUDGET = 3;
-const STREAM_RECENT_TOOL_BUDGET = 2;
+/** Tool rows one focused activity view keeps at its opening and final end; the surplus folds in place. */
+const OPENING_TOOL_BUDGET = 3;
+const RECENT_TOOL_BUDGET = 2;
 
 type FleetTimeline = AkumaObservation["status"]["timeline"];
 type FleetTimelineEntry = FleetTimeline["entries"][number];
@@ -305,17 +305,55 @@ function groupedRows(
 
 /** Ordered entry stream of one retained snapshot; an idle outcome keeps its sequence position. */
 function orderedSnapshotEntries(snapshot: RenderedSnapshot): readonly RenderEntry[] {
-  if (snapshot.kind === "idle" && snapshot.outcome !== undefined) {
-    return [...snapshot.entries.filter((entry) => entry.kind === "row").map((entry) => entry.row), snapshot.outcome]
-      .sort((left, right) => left.sequence - right.sequence)
-      .map((row) => ({ kind: "row" as const, row }));
+  if (snapshot.kind !== "idle" || snapshot.outcome === undefined) return snapshot.entries;
+  const entries: RenderEntry[] = [];
+  let outcomeInserted = false;
+  for (const entry of snapshot.entries) {
+    if (!outcomeInserted && entry.kind === "row" && entry.row.sequence > snapshot.outcome.sequence) {
+      entries.push({ kind: "row", row: snapshot.outcome });
+      outcomeInserted = true;
+    }
+    entries.push(entry);
   }
-  return snapshot.entries;
+  if (!outcomeInserted) entries.push({ kind: "row", row: snapshot.outcome });
+  return entries;
 }
 
 /**
- * Shared snapshot activity rendering. `latest` bounds selection to the newest semantic entry,
- * so a compact caller reuses this renderer instead of reinterpreting the snapshot itself.
+ * Focus one complete snapshot without making its provider-side gaps mean more
+ * than they do. Thought rows disappear; known tool rows use the same opening
+ * and recent budgets as live activity, while every other row keeps its place.
+ */
+function focusedSnapshotEntries(entries: readonly RenderEntry[]): readonly RenderEntry[] {
+  const tools = entries.filter((entry) => entry.kind === "row" && entry.row.kind === "tool");
+  const focused: RenderEntry[] = [];
+  let toolIndex = 0;
+  let omittedTools = 0;
+  const flushOmittedTools = (): void => {
+    if (omittedTools > 0) focused.push({ kind: "gap", count: omittedTools });
+    omittedTools = 0;
+  };
+
+  for (const entry of entries) {
+    if (entry.kind === "row" && entry.row.kind === "thought") continue;
+    if (entry.kind !== "row" || entry.row.kind !== "tool") {
+      flushOmittedTools();
+      focused.push(entry);
+      continue;
+    }
+    const keep = toolIndex < OPENING_TOOL_BUDGET || toolIndex >= tools.length - RECENT_TOOL_BUDGET;
+    toolIndex += 1;
+    if (keep) flushOmittedTools();
+    else omittedTools += 1;
+    if (keep) focused.push(entry);
+  }
+  flushOmittedTools();
+  return focused;
+}
+
+/**
+ * Shared snapshot activity rendering. Full snapshots focus known tool evidence;
+ * `latest` preserves compact callers' established newest-entry selection.
  */
 export function snapshotActivityLines(
   snapshot: RenderedSnapshot,
@@ -323,7 +361,7 @@ export function snapshotActivityLines(
   selection: Readonly<{ latest?: boolean }> = {},
 ): readonly string[] {
   const entries = orderedSnapshotEntries(snapshot);
-  if (selection.latest !== true) return groupedEntries(entries, context);
+  if (selection.latest !== true) return groupedEntries(focusedSnapshotEntries(entries), context);
   const latest = entries.filter((entry) => entry.kind === "row").at(-1);
   return latest === undefined ? [] : groupedEntries([latest], context);
 }
@@ -449,7 +487,7 @@ function observeActivitySnapshot(
   );
   const lines: string[] = [];
   for (const row of rows) {
-    if (row.kind === "tool" && state.openingTools < STREAM_OPENING_TOOL_BUDGET) {
+    if (row.kind === "tool" && state.openingTools < OPENING_TOOL_BUDGET) {
       state.openingTools += 1;
       renderStreamRow(state, row, lines, context, layout);
       continue;
@@ -461,7 +499,7 @@ function observeActivitySnapshot(
     state.deferred.push({ kind: "row", row });
     if (row.kind === "tool") {
       const pendingTools = state.deferred.filter((entry) => entry.kind === "row" && entry.row.kind === "tool").length;
-      if (pendingTools > STREAM_RECENT_TOOL_BUDGET) omitOldestDeferredTool(state);
+      if (pendingTools > RECENT_TOOL_BUDGET) omitOldestDeferredTool(state);
     }
     flushSafeActivityPrefix(state, lines, context, layout);
   }

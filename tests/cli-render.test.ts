@@ -37,7 +37,8 @@ import {
 import type { Catalog } from "../src/library/catalog.js";
 import type { ContractRow } from "../src/protocol/read/status.js";
 import type { WorldRoot } from "../src/world.js";
-import { renderHelp } from "../src/cli/parse.js";
+import { parseArgv, renderHelp } from "../src/cli/parse.js";
+import { renderAkumaText } from "../src/cli/render/akuma.js";
 
 const worldRoot = "/world" as WorldRoot;
 
@@ -1512,12 +1513,124 @@ test("live activity omits thought rows before preserving the whole-command tool 
   const lines = [...stream(snapshot), ...stream.flush()];
   const text = lines.join("\n");
 
-  assert.match(snapshotActivityLines(snapshot, { columns: 120, color: false }).join("\n"), /internal-1/u);
+  assert.doesNotMatch(snapshotActivityLines(snapshot, { columns: 120, color: false }).join("\n"), /internal-1/u);
   assert.doesNotMatch(text, /internal-/u);
   assert.deepEqual(lines.filter((line) => line.includes("⋮")), [`${" ".repeat(5)} ⋮ 4 omitted`]);
   for (const command of ["c1", "c2", "c3", "c8", "c9"])
     assert.equal(lines.filter((line) => line.includes(command)).length, 1, `${command} keeps its tool slot`);
   assert.doesNotMatch(text, /c4|c5|c6|c7/u);
+});
+
+test("status snapshots focus tool evidence without changing history or compact selection", () => {
+  const id = "aku/worker/abcd0040";
+  const thought = { kind: "thought" as const, sequence: 1, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "internal thought" };
+  const completed = (sequence: number, command: string) => completedTool(sequence, "bash", { kind: "run", command });
+  const active = (sequence: number, command: string) => activeTool(sequence, "bash", { kind: "run", command });
+
+  for (const count of [0, 1, 2, 3, 4, 5]) {
+    const lines = snapshotActivityLines(
+      openAkumaSnapshot(Array.from({ length: count }, (_, index) => snapshotRow(completed(index + 1, `small-${index + 1}`)))),
+      { columns: 120, color: false },
+    );
+    assert.doesNotMatch(lines.join("\n"), /omitted/u, `${count} tools fit the focused snapshot budget`);
+    for (let sequence = 1; sequence <= count; sequence += 1)
+      assert.equal(lines.filter((line) => line.includes(`small-${sequence}`)).length, 1, `tool ${sequence} renders once`);
+  }
+
+  const providerGaps = snapshotActivityLines(
+    openAkumaSnapshot([
+      ...Array.from({ length: 4 }, (_, index) => snapshotRow(completed(index + 1, `gap-${index + 1}`))),
+      { kind: "gap", count: 2 },
+      ...Array.from({ length: 5 }, (_, index) => snapshotRow(completed(index + 5, `gap-${index + 5}`))),
+    ]),
+    { columns: 120, color: false },
+  );
+  assert.deepEqual(providerGaps.filter((line) => line.includes("omitted")), [
+    `${" ".repeat(5)} ⋮ 1 omitted`,
+    `${" ".repeat(5)} ⋮ 2 omitted`,
+    `${" ".repeat(5)} ⋮ 3 omitted`,
+  ]);
+
+  const focusedEntries = [
+    snapshotRow(thought),
+    snapshotRow(completed(2, "c1")),
+    snapshotRow(completed(3, "c2")),
+    snapshotRow(completed(4, "c3")),
+    snapshotRow(completed(5, "c4")),
+    snapshotRow({ kind: "note" as const, sequence: 6, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "between" }),
+    snapshotRow(completed(7, "c5")),
+    snapshotRow(completed(8, "c6")),
+    snapshotRow(completed(9, "c7")),
+    snapshotRow({ kind: "said" as const, sequence: 10, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "after" }),
+    snapshotRow(completed(11, "c8")),
+    snapshotRow(active(12, "c9")),
+  ];
+  const snapshot = openAkumaSnapshot(focusedEntries);
+  const status = parseAkumaStatus({ id, life: "running", allowed: [], timeline: snapshot });
+  const statusInvocation = parseArgv(["status", id]);
+  assert.ok("command" in statusInvocation);
+  const statusText = renderAkumaText(statusInvocation.command, {
+    kind: "akuma",
+    action: "status",
+    status: { status, contract: { kind: "none" }, createdTasks: { kind: "present", rows: [] } },
+  });
+  assert.doesNotMatch(statusText, /internal thought|\$ c[4-7]/u);
+  for (const command of ["c1", "c2", "c3", "c8", "c9"]) assert.equal((statusText.match(new RegExp(`\\$ ${command}`, "gu")) ?? []).length, 1);
+  assert.match(statusText, /⧖ run    \$ c9/u, "the active final tool remains visible");
+  assert.deepEqual(statusText.match(/⋮ \d+ omitted/gu), ["⋮ 1 omitted", "⋮ 3 omitted"]);
+  assert.ok(statusText.indexOf("⋮ 1 omitted") < statusText.indexOf("between"));
+  assert.ok(statusText.indexOf("between") < statusText.indexOf("⋮ 3 omitted"));
+  assert.ok(statusText.indexOf("⋮ 3 omitted") < statusText.indexOf("after"));
+  assert.ok(statusText.indexOf("after") < statusText.indexOf("$ c8"));
+
+  const compact = snapshotActivityLines(snapshot, { columns: 120, color: false }, { latest: true }).join("\n");
+  assert.match(compact, /\$ c9/u);
+  assert.doesNotMatch(compact, /c1|omitted/u, "latest-only callers keep their compact selection");
+
+  const outcomeSnapshot = idleAkumaSnapshot(
+    [
+      snapshotRow(completed(2, "c1")),
+      snapshotRow(completed(3, "c2")),
+      snapshotRow(completed(4, "c3")),
+      snapshotRow(completed(5, "c4")),
+      snapshotRow({ kind: "note" as const, sequence: 6, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "between" }),
+      snapshotRow(completed(7, "c5")),
+      snapshotRow(completed(8, "c6")),
+      snapshotRow(completed(9, "c7")),
+      snapshotRow({ kind: "said" as const, sequence: 10, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "after" }),
+      snapshotRow(completed(11, "c8")),
+      snapshotRow(completed(12, "c9")),
+    ],
+    answeredOutcome(13, "final outcome"),
+  );
+  const outcomeText = snapshotText(
+    { status: parseAkumaStatus({ id, life: "asleep", allowed: [], timeline: outcomeSnapshot }), contract: { kind: "none" } },
+    { columns: 120, color: false },
+  );
+  assert.match(outcomeText, /final outcome/u, "an outcome remains visible after focused tools");
+
+  const historyInvocation = parseArgv(["history", id]);
+  assert.ok("command" in historyInvocation);
+  const history = {
+    rows: focusedEntries.flatMap((entry) => (entry.kind === "row" ? [entry.row] : [])),
+    omitted: 0,
+    hasEarlier: false,
+    hasLater: false,
+    historyLost: false,
+    lowestRetained: 1,
+    highest: 12,
+  };
+  const historyText = renderAkumaText(historyInvocation.command, {
+    kind: "akuma",
+    action: "history",
+    akuma: status.id,
+    mode: "page",
+    history,
+    historyResult: { kind: "history", id: status.id, history, contract: { kind: "none" } },
+  });
+  assert.match(historyText, /internal thought/u, "history keeps retained thought narration");
+  for (const command of ["c4", "c5", "c6", "c7"])
+    assert.match(historyText, new RegExp(`\\$ ${command}`, "u"), `history keeps intermediate tool ${command}`);
 });
 
 test("whole-command tool selection is independent of poll partitioning", () => {
