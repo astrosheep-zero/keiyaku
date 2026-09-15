@@ -44,6 +44,16 @@ function fakeAgentSource(): string {
     '        await chunk("agent_message_chunk", "attempt " + index);',
     "      }",
     "    }",
+    '    if (mode === "tools") {',
+    "      for (let index = 1; index <= 9; index += 1) {",
+    '        await new Promise((resolve) => setTimeout(resolve, 180));',
+    '        await client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: { sessionUpdate: "tool_call", toolCallId: "tool-" + index, title: "tool " + index, kind: "execute", rawInput: { command: "tool-" + index }, status: "in_progress" } });',
+    '        await client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "tool-" + index, status: "completed" } });',
+    "      }",
+    '      await client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: { sessionUpdate: "plan", entries: [{ content: "terminal boundary", priority: "low", status: "completed" }] } });',
+    '      // Keep the completed boundary observable through at least one polling turn before ending the session.',
+    '      await new Promise((resolve) => setTimeout(resolve, 1000));',
+    "    }",
     '    if (mode === "answer" || mode === "slow") await chunk("agent_message_chunk", "the answer");',
     '    return { stopReason: "end_turn" };',
     "  })",
@@ -54,7 +64,7 @@ function fakeAgentSource(): string {
 }
 
 /** One fake ACP provider recipe whose agent runs the given mode. */
-function acpRecipe(agent: string, mode: "notes" | "slow" | "answer" | "empty"): Readonly<Record<string, unknown>> {
+function acpRecipe(agent: string, mode: "notes" | "slow" | "tools" | "answer" | "empty"): Readonly<Record<string, unknown>> {
   return {
     kind: "acp",
     executable: process.execPath,
@@ -82,6 +92,7 @@ function observingWorld(): Readonly<{ root: string; world: string; env: NodeJS.P
   for (const [archetype, provider] of [
     ["worker", "fake-notes"],
     ["slowcoach", "fake-slow"],
+    ["toolbox", "fake-tools"],
     ["finisher", "fake-answer"],
     ["silent", "fake-empty"],
   ] as const) {
@@ -94,6 +105,7 @@ function observingWorld(): Readonly<{ root: string; world: string; env: NodeJS.P
         providers: {
           "fake-notes": acpRecipe(agent, "notes"),
           "fake-slow": acpRecipe(agent, "slow"),
+          "fake-tools": acpRecipe(agent, "tools"),
           "fake-answer": acpRecipe(agent, "answer"),
           "fake-empty": acpRecipe(agent, "empty"),
         },
@@ -169,6 +181,26 @@ test("packaged observing calls stream one framed session and one conclusion per 
     assert.equal(silent.code, 0, silent.stderr);
     assert.equal(silent.stdout, "", "a valid empty answer writes zero stdout bytes");
     assert.match(silent.stderr, /✓ answered — \d+s/u, "the conclusion distinguishes an empty answer from silence");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("packaged observing call bounds nine eligible tools across polling callbacks", { timeout: 120_000 }, async () => {
+  assert.equal(existsSync(packagedCli), true, "npm run build must produce the packaged CLI before this test");
+  const { root, world, env } = observingWorld();
+  try {
+    const result = await runPackagedCli(["-C", world, "call", "toolbox", "--wait", "20s", "prompt"], { cwd: world, env });
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.stdout, "", "an empty answer leaves stdout empty");
+    const tools = [...result.stderr.matchAll(/\$ tool-(\d+)/gu)].map((match) => Number(match[1]!));
+    // The terminal plan note advances the open frontier; its preceding nine completed tools are
+    // eligible during the following polling turn, while the current frontier itself is not rendered.
+    assert.deepEqual(tools, [1, 2, 3, 8, 9], `one command keeps only its opening and final tools:\n${result.stderr}`);
+    assert.equal(result.stderr.match(/⋮ 4 omitted/gu)?.length, 1, result.stderr);
+    assert.ok(result.stderr.indexOf("$ tool-3") < result.stderr.indexOf("⋮ 4 omitted"));
+    assert.ok(result.stderr.indexOf("⋮ 4 omitted") < result.stderr.indexOf("$ tool-8"));
+    assert.match(result.stderr, /✓ answered — \d+s/u, "the final conclusion remains on stderr");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

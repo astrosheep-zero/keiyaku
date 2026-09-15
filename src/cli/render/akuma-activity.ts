@@ -33,7 +33,7 @@ export function frameRule(headLines: readonly string[]): string {
   return "─".repeat(width);
 }
 
-/** Tool rows one observation batch keeps at each end; the surplus between them folds in place. */
+/** Tool rows one command keeps at its opening and final end; the surplus folds in place. */
 const STREAM_OPENING_TOOL_BUDGET = 3;
 const STREAM_RECENT_TOOL_BUDGET = 2;
 
@@ -346,66 +346,126 @@ function settledTimeline(snapshot: RenderedSnapshot): RenderedSnapshot {
   }
 }
 
+/** One command's append-only activity view, with a baseline and a final tail flush. */
+export type ActivityStream = ((snapshot: RenderedSnapshot) => readonly string[]) &
+  Readonly<{
+    /** Seed the sequence cursor without spending the command's live evidence budget. */
+    seed: (snapshot: RenderedSnapshot) => void;
+    /** Emit the deferred tail exactly once before the command's conclusion. */
+    flush: () => readonly string[];
+  }>;
+
+type DeferredActivityEntry = Readonly<{ kind: "gap"; count: number }> | Readonly<{ kind: "row"; row: RenderRow }>;
+
 /**
- * Append-only live view over successive settled snapshots of one Akuma. Each
- * call reports the rows that settled since the previous call — never
- * re-rendering an earlier row — and, inside that batch, keeps the opening and
- * newest tool rows while folding the ones between them in place as omission
- * markers, so bounded live tool evidence keeps both ends of the batch and a
- * marker never grows. The
- * observation window slides over a busy Akuma, so a retained row's own sequence
- * — not its position in the window — is what says whether it is new; a row that
- * left the window before this call has already streamed.
+ * Append-only live view over one command's successive settled snapshots. The
+ * first three tools stream immediately; later tools wait in a two-row tail
+ * until the command ends. As a newer tool displaces an older tail candidate,
+ * its body becomes an in-place omission count. Narrative waits only while a
+ * preceding tail tool still decides its position.
  */
-export function activityStream(
-  context: TextRenderContext,
-  layout: RowLayout = plainLayout(),
-): (snapshot: RenderedSnapshot) => readonly string[] {
+export function activityStream(context: TextRenderContext, layout: RowLayout = plainLayout()): ActivityStream {
   let newestSequence: number | undefined;
   let previousClock: string | undefined;
-  return (snapshot) => {
-    const rows = orderedSnapshotEntries(settledTimeline(snapshot))
-      .flatMap((entry) => (entry.kind === "row" ? [entry.row] : []))
-      .filter((row) => newestSequence === undefined || row.sequence > newestSequence);
-    if (rows.length === 0) return [];
-    newestSequence = rows.reduce((newest, row) => Math.max(newest, row.sequence), newestSequence ?? rows[0]!.sequence);
-    // Both ends of a batch win: its opening tool rows and its newest ones stream, and the middle
-    // tools fold at their own position. A batch of at most the two budgets retains every tool once.
-    const tools = rows.filter((row) => row.kind === "tool");
-    const retainedTools = new Set(
-      tools.length <= STREAM_OPENING_TOOL_BUDGET + STREAM_RECENT_TOOL_BUDGET
-        ? tools
-        : [...tools.slice(0, STREAM_OPENING_TOOL_BUDGET), ...tools.slice(-STREAM_RECENT_TOOL_BUDGET)],
+  let openingTools = 0;
+  let deferred: DeferredActivityEntry[] = [];
+
+  const settledRows = (snapshot: RenderedSnapshot): readonly RenderRow[] =>
+    orderedSnapshotEntries(settledTimeline(snapshot)).flatMap((entry) => (entry.kind === "row" ? [entry.row] : []));
+
+  const render = (row: RenderRow, lines: string[]): void => {
+    const at = clock(row.at);
+    const changed = previousClock === undefined || at !== previousClock;
+    lines.push(
+      ...renderRow(
+        row,
+        context,
+        false,
+        layout.head(changed ? at : undefined, mark(row), label(row)),
+        layout.continuation(),
+      ),
     );
-    const lines: string[] = [];
-    let omitted = 0;
-    const flushOmitted = (): void => {
-      if (omitted === 0) return;
-      lines.push(layout.marker(omitted));
-      omitted = 0;
-    };
-    for (const row of rows) {
-      if (row.kind === "tool" && !retainedTools.has(row)) {
-        omitted += 1;
+    previousClock = at;
+  };
+
+  const coalesceGaps = (): void => {
+    deferred = deferred.reduce<DeferredActivityEntry[]>((entries, entry) => {
+      const previous = entries.at(-1);
+      if (entry.kind === "gap" && previous?.kind === "gap") {
+        entries[entries.length - 1] = { kind: "gap", count: previous.count + entry.count };
+      } else {
+        entries.push(entry);
+      }
+      return entries;
+    }, []);
+  };
+
+  const pendingTools = (): number =>
+    deferred.filter((entry) => entry.kind === "row" && entry.row.kind === "tool").length;
+
+  const omitOldestPendingTool = (): void => {
+    const index = deferred.findIndex((entry) => entry.kind === "row" && entry.row.kind === "tool");
+    if (index === -1) throw new Error("activity tail lost its pending tool");
+    deferred[index] = { kind: "gap", count: 1 };
+    coalesceGaps();
+  };
+
+  /** Emit only a prefix whose omission runs can no longer join an unresolved tail tool. */
+  const flushSafePrefix = (lines: string[]): void => {
+    for (;;) {
+      const first = deferred[0];
+      if (first === undefined || (first.kind === "row" && first.row.kind === "tool")) return;
+      if (first.kind === "row") {
+        deferred.shift();
+        render(first.row, lines);
         continue;
       }
-      flushOmitted();
-      const at = clock(row.at);
-      const changed = previousClock === undefined || at !== previousClock;
-      lines.push(
-        ...renderRow(
-          row,
-          context,
-          false,
-          layout.head(changed ? at : undefined, mark(row), label(row)),
-          layout.continuation(),
-        ),
-      );
-      previousClock = at;
+      const next = deferred[1];
+      if (next === undefined || (next.kind === "row" && next.row.kind === "tool")) return;
+      deferred.shift();
+      lines.push(layout.marker(first.count));
     }
-    flushOmitted();
+  };
+
+  const seed = (snapshot: RenderedSnapshot): void => {
+    const rows = settledRows(snapshot);
+    if (rows.length === 0) return;
+    newestSequence = rows.reduce((newest, row) => Math.max(newest, row.sequence), rows[0]!.sequence);
+  };
+
+  const observe = (snapshot: RenderedSnapshot): readonly string[] => {
+    const rows = settledRows(snapshot).filter((row) => newestSequence === undefined || row.sequence > newestSequence);
+    if (rows.length === 0) return [];
+    newestSequence = rows.reduce((newest, row) => Math.max(newest, row.sequence), newestSequence ?? rows[0]!.sequence);
+    const lines: string[] = [];
+    for (const row of rows) {
+      if (row.kind === "tool" && openingTools < STREAM_OPENING_TOOL_BUDGET) {
+        openingTools += 1;
+        render(row, lines);
+        continue;
+      }
+      if (row.kind !== "tool" && deferred.length === 0) {
+        render(row, lines);
+        continue;
+      }
+      deferred.push({ kind: "row", row });
+      if (row.kind === "tool" && pendingTools() > STREAM_RECENT_TOOL_BUDGET) omitOldestPendingTool();
+      flushSafePrefix(lines);
+    }
     return lines;
   };
+
+  const flush = (): readonly string[] => {
+    const lines: string[] = [];
+    for (const entry of deferred) {
+      if (entry.kind === "gap") lines.push(layout.marker(entry.count));
+      else render(entry.row, lines);
+    }
+    deferred = [];
+    return lines;
+  };
+
+  return Object.assign(observe, { seed, flush });
 }
 
 /** What a wait conclusion renders over: its observed and unobserved members. */
@@ -477,7 +537,7 @@ export function waitObservationStream(
 ): WaitObservationStream {
   const now = options.now ?? ((): number => Date.now());
   const startedAt = now();
-  const streams = new Map<string, (snapshot: RenderedSnapshot) => readonly string[]>();
+  const streams = new Map<string, ActivityStream>();
   const attributed = new Map<string, string | undefined>();
   const sources = new Map<string, string>();
   const settledAt = new Map<string, number>();
@@ -519,7 +579,8 @@ export function waitObservationStream(
           sources.size > 1 ? sourceLayout(sources.get(status.id) ?? status.id, () => sourceWidth) : plainLayout(),
         );
         streams.set(status.id, stream);
-        stream(status.timeline);
+        // A wait starts at the current settled frontier: its backlog is neither evidence nor budget.
+        stream.seed(status.timeline);
       } else {
         lines.push(...known(status.timeline));
       }
@@ -529,6 +590,15 @@ export function waitObservationStream(
   };
 
   const conclude = (result: WaitConclusionResult): string => {
+    const tail: string[] = [];
+    // The returned observation can be newer than the final callback. Advance every known stream
+    // before flushing it, while still flushing members that became unobserved at the end.
+    for (const observation of result.observations) {
+      const stream = streams.get(observation.status.id);
+      if (stream !== undefined) tail.push(...stream(observation.status.timeline));
+    }
+    for (const stream of streams.values()) tail.push(...stream.flush());
+
     const end = now();
     const total = result.observations.length + result.unobserved.length;
     const multi = total > 1;
@@ -549,7 +619,7 @@ export function waitObservationStream(
       ...(unobservedLines.length > 0 ? [unobservedLines.join("\n")] : []),
       ...(conclusions.length > 0 ? [(multi ? [""] : []).concat(conclusions).join("\n")] : []),
     ];
-    const body = blocks.join("\n");
+    const body = [...tail, ...blocks].join("\n");
     // One blank line keeps the bare stdout answer visually separate from the stream.
     return answeredSingle ? `${body}\n\n` : body;
   };
@@ -606,6 +676,8 @@ export function callObservationStream(
   const conclude = (observation: CallObservation): string => {
     const lines: string[] = [];
     open(lines);
+    if (observation.kind === "observed") lines.push(...stream(observation.status.timeline));
+    lines.push(...stream.flush());
     if (observation.kind === "failed") {
       lines.push(`! error ${safeText(observation.failure.diagnostic)}`);
       return lines.join("\n");

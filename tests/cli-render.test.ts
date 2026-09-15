@@ -1481,127 +1481,214 @@ test("an observation frame places the rule between the frame and its content", (
   ]);
 });
 
-test("the live stream keeps a batch's opening and newest tools and never drops a narrative row", () => {
-  const lines = activityStream({ columns: 120, color: false })(
-    idleAkumaSnapshot([
-      snapshotRow(completedTool(1, "bash", { kind: "run", command: "first" })),
-      snapshotRow(completedTool(2, "bash", { kind: "run", command: "second" })),
-      snapshotRow(completedTool(3, "bash", { kind: "run", command: "third" })),
-      snapshotRow(completedTool(4, "bash", { kind: "run", command: "fourth" })),
-      snapshotRow({ kind: "said", sequence: 5, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "kept prose" }),
-      snapshotRow(completedTool(6, "bash", { kind: "run", command: "fifth" })),
-      snapshotRow(completedTool(7, "bash", { kind: "run", command: "sixth" })),
-    ]),
+test("the live stream keeps opening tools live and flushes the actual final tail in order", () => {
+  const tool = (sequence: number) =>
+    snapshotRow(completedTool(sequence, "bash", { kind: "run", command: `c${sequence}` }));
+  const stream = activityStream({ columns: 120, color: false });
+  const live = Array.from({ length: 9 }, (_, index) =>
+    stream(idleAkumaSnapshot(Array.from({ length: index + 1 }, (_, toolIndex) => tool(toolIndex + 1)))),
   );
+  assert.match(live.slice(0, 3).flat().join("\n"), /c1[\s\S]*c2[\s\S]*c3/u);
+  assert.doesNotMatch(live.slice(3).flat().join("\n"), /c[4-9]/u, "tail candidates stay deferred while observing");
+
+  const lines = [...live.flat(), ...stream.flush()];
   const text = lines.join("\n");
-  assert.match(text, /first/u);
-  assert.match(text, /second/u);
-  assert.match(text, /third/u);
-  assert.doesNotMatch(text, /fourth/u, "the batch's only middle tool folds instead of streaming");
-  assert.match(text, /⋮ 1 omitted/u, "six tools omit exactly the one between the two ends");
-  assert.ok(text.indexOf("third") < text.indexOf("⋮ 1 omitted"), "the marker sits where the omitted run began");
-  assert.ok(text.indexOf("⋮ 1 omitted") < text.indexOf("kept prose"), "the narrative follows the run it split");
-  assert.ok(text.indexOf("kept prose") < text.indexOf("fifth"));
-  assert.ok(text.indexOf("fifth") < text.indexOf("sixth"));
+  assert.deepEqual(lines.filter((line) => line.includes("⋮")), [`${" ".repeat(5)} ⋮ 4 omitted`]);
+  assert.doesNotMatch(text, /c4|c5|c6|c7/u);
+  for (const command of ["c1", "c2", "c3", "c8", "c9"])
+    assert.equal(lines.filter((line) => line.includes(command)).length, 1, `${command} renders exactly once`);
+  assert.deepEqual(stream.flush(), [], "a second final flush has no duplicate activity");
 });
 
-test("the live stream marks each folded middle run at its own position around narrative rows", () => {
+test("whole-command tool selection is independent of poll partitioning", () => {
+  const tool = (sequence: number) =>
+    snapshotRow(completedTool(sequence, "bash", { kind: "run", command: `c${sequence}` }));
+  const render = (partitions: readonly number[]): string => {
+    const stream = activityStream({ columns: 120, color: false });
+    let seen = 0;
+    const lines = partitions.flatMap((count) => {
+      seen += count;
+      return stream(idleAkumaSnapshot(Array.from({ length: seen }, (_, index) => tool(index + 1))));
+    });
+    return [...lines, ...stream.flush()].join("\n");
+  };
+  assert.equal(render([9]), render([1, 1, 1, 1, 1, 1, 1, 1, 1]));
+});
+
+test("deferred tool omissions split around narrative without losing its position", () => {
   const tool = (sequence: number, command: string) =>
     snapshotRow(completedTool(sequence, "bash", { kind: "run", command }));
-  const lines = activityStream({ columns: 120, color: false })(
+  const stream = activityStream({ columns: 120, color: false });
+  const live = stream(
     idleAkumaSnapshot([
       tool(1, "a1"),
       tool(2, "a2"),
       tool(3, "a3"),
-      snapshotRow({ kind: "note", sequence: 4, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "between" }),
-      tool(5, "b1"),
-      tool(6, "b2"),
-      snapshotRow({ kind: "note", sequence: 7, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "middle" }),
-      tool(8, "c1"),
-      tool(9, "c2"),
-      tool(10, "c3"),
+      tool(4, "b1"),
+      tool(5, "b2"),
+      snapshotRow({ kind: "note", sequence: 6, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "between" }),
+      tool(7, "c1"),
+      tool(8, "c2"),
+      snapshotRow({ kind: "note", sequence: 9, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "middle" }),
+      tool(10, "d1"),
+      tool(11, "d2"),
     ]),
   );
+  const lines = [...live, ...stream.flush()];
   const text = lines.join("\n");
-  // The opening three and the newest two stay; the middle folds as two prose-separated runs.
   assert.deepEqual(lines.filter((line) => line.includes("⋮")), [
     `${" ".repeat(5)} ⋮ 2 omitted`,
-    `${" ".repeat(5)} ⋮ 1 omitted`,
+    `${" ".repeat(5)} ⋮ 2 omitted`,
   ]);
-  assert.doesNotMatch(text, /b1|b2|c1/u);
-  assert.ok(text.indexOf("a1") < text.indexOf("a2") && text.indexOf("a2") < text.indexOf("a3"));
-  assert.ok(text.indexOf("a3") < text.indexOf("between"));
-  assert.ok(text.indexOf("between") < text.indexOf("⋮ 2 omitted"));
-  assert.ok(text.indexOf("⋮ 2 omitted") < text.indexOf("middle"));
-  assert.ok(text.indexOf("middle") < text.indexOf("⋮ 1 omitted"));
-  assert.ok(text.indexOf("⋮ 1 omitted") < text.indexOf("c2"));
-  assert.ok(text.indexOf("c2") < text.indexOf("c3"));
+  const firstGap = text.indexOf("⋮ 2 omitted");
+  const secondGap = text.indexOf("⋮ 2 omitted", firstGap + 1);
+  assert.ok(text.indexOf("a3") < firstGap);
+  assert.ok(firstGap < text.indexOf("between"));
+  assert.ok(text.indexOf("between") < secondGap);
+  assert.ok(secondGap < text.indexOf("middle"));
+  assert.ok(text.indexOf("middle") < text.indexOf("d1"));
 });
 
-test("the live stream keeps every tool of a batch at or below the two budgets exactly once", () => {
+test("the final flush retains every command with at most five tools", () => {
   const tool = (sequence: number) =>
     snapshotRow(completedTool(sequence, "bash", { kind: "run", command: `c${sequence}` }));
   for (const count of [0, 1, 2, 3, 4, 5]) {
-    const lines = activityStream({ columns: 120, color: false })(
-      idleAkumaSnapshot(Array.from({ length: count }, (_, index) => tool(index + 1))),
-    );
-    assert.doesNotMatch(lines.join("\n"), /omitted/u, `${count} tools fit the budgets`);
-    for (let sequence = 1; sequence <= count; sequence += 1) {
-      assert.equal(
-        lines.filter((line) => line.includes(`c${sequence}`)).length,
-        1,
-        `tool ${sequence} of ${count} streams exactly once`,
-      );
-    }
+    const stream = activityStream({ columns: 120, color: false });
+    const lines = [...stream(idleAkumaSnapshot(Array.from({ length: count }, (_, index) => tool(index + 1)))), ...stream.flush()];
+    assert.doesNotMatch(lines.join("\n"), /omitted/u, `${count} tools fit the command budget`);
+    for (let sequence = 1; sequence <= count; sequence += 1)
+      assert.equal(lines.filter((line) => line.includes(`c${sequence}`)).length, 1, `tool ${sequence} renders once`);
   }
 });
 
-test("the live stream bounds a nine-tool batch to its opening three and newest two", () => {
-  const tool = (sequence: number) =>
-    snapshotRow(completedTool(sequence, "bash", { kind: "run", command: `c${sequence}` }));
-  const lines = activityStream({ columns: 120, color: false })(
-    idleAkumaSnapshot(Array.from({ length: 9 }, (_, index) => tool(index + 1))),
-  );
-  const text = lines.join("\n");
-  assert.deepEqual(lines.filter((line) => line.includes("⋮")), [`${" ".repeat(5)} ⋮ 4 omitted`]);
-  assert.doesNotMatch(text, /c4|c5|c6|c7/u, "only the middle four fold");
-  for (const command of ["c1", "c2", "c3", "c8", "c9"]) {
-    assert.equal(lines.filter((line) => line.includes(command)).length, 1, `${command} streams exactly once`);
-  }
-  assert.ok(text.indexOf("c3") < text.indexOf("⋮ 4 omitted"));
-  assert.ok(text.indexOf("⋮ 4 omitted") < text.indexOf("c8"), "one marker sits at the omitted run's position");
-});
-
-test("each settled chunk streams once and a later batch selects its own ends", () => {
-  const stream = activityStream({ columns: 120, color: false });
+test("narrative selection is partition-invariant and repeated pending snapshots do not replay", () => {
   const tool = (sequence: number) => snapshotRow(completedTool(sequence, "bash", { kind: "run", command: `c${sequence}` }));
-  const first = stream(idleAkumaSnapshot([tool(1), tool(2), tool(3)]));
-  assert.doesNotMatch(first.join("\n"), /omitted/u, "a batch inside the budgets folds nothing");
-  for (const command of ["c1", "c2", "c3"]) {
-    assert.equal(first.filter((line) => line.includes(command)).length, 1);
-  }
+  const rows = [
+    tool(1),
+    tool(2),
+    tool(3),
+    tool(4),
+    snapshotRow({ kind: "note", sequence: 5, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "between" }),
+    tool(6),
+    tool(7),
+    snapshotRow({ kind: "said", sequence: 8, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "after" }),
+    tool(9),
+    tool(10),
+  ];
+  const render = (partitions: readonly number[]): readonly string[] => {
+    const stream = activityStream({ columns: 120, color: false });
+    let seen = 0;
+    const lines = partitions.flatMap((count) => {
+      seen += count;
+      return stream(idleAkumaSnapshot(rows.slice(0, seen)));
+    });
+    assert.deepEqual(stream(idleAkumaSnapshot(rows.slice(0, seen))), [], "an identical pending snapshot replays nothing");
+    return [...lines, ...stream.flush()];
+  };
+  assert.deepEqual(render([rows.length]), render([4, 1, 2, 1, 2]));
+});
 
-  // A later batch selects its own opening and newest tools, so the per-batch budgets never become a
-  // global cap and nothing already displayed or folded comes back.
-  const second = stream(idleAkumaSnapshot([1, 2, 3, 4, 5, 6, 7, 8, 9].map(tool)));
-  const secondText = second.join("\n");
-  assert.doesNotMatch(secondText, /c1|c2|c3/u, "a later batch replays no displayed row");
-  assert.match(secondText, /⋮ 1 omitted/u, "only the batch's own middle tool folds");
-  assert.doesNotMatch(secondText, /c7/u);
-  for (const command of ["c4", "c5", "c6", "c8", "c9"]) {
-    assert.equal(second.filter((line) => line.includes(command)).length, 1, `${command} streams exactly once`);
-  }
-  assert.ok(secondText.indexOf("c6") < secondText.indexOf("⋮ 1 omitted"));
-  assert.ok(secondText.indexOf("⋮ 1 omitted") < secondText.indexOf("c8"));
+test("a wait baseline seeds only its cursor, leaving a full command budget for later tools", () => {
+  const id = "aku/worker/abcd0033";
+  const tool = (sequence: number) => snapshotRow(completedTool(sequence, "bash", { kind: "run", command: `new-${sequence}` }));
+  const status = (completed: number) =>
+    parseAkumaStatus({
+      id,
+      life: "running",
+      allowed: [],
+      timeline: openAkumaSnapshot([...Array.from({ length: completed }, (_, index) => tool(index + 1)), snapshotRow(activeTool(completed + 1, "bash", { kind: "run", command: "open" }))]),
+    });
+  const stream = waitObservationStream({ columns: 120, color: false }, { now: () => 0 });
+  stream.observe([observed(status(5))]);
+  const live = stream.observe([observed(status(14))]);
+  const conclusion = stream.conclude({
+    observations: [{ status: status(14), contract: { kind: "none" }, createdTasks: { kind: "present", rows: [] } }],
+    unobserved: [],
+  });
+  const text = [...live, conclusion].join("\n");
+  assert.doesNotMatch(text, /new-[1-5](?!\d)/u, "the settled baseline neither prints nor spends the budget");
+  for (const sequence of [6, 7, 8, 13, 14]) assert.match(text, new RegExp(`new-${sequence}`, "u"));
+  assert.doesNotMatch(text, /new-(?:9|10|11|12)/u);
+  assert.match(text, /⋮ 4 omitted/u);
+});
 
-  // The folded row is settled, not deferred: observing the same snapshot again streams nothing at all.
-  assert.deepEqual(stream(idleAkumaSnapshot([1, 2, 3, 4, 5, 6, 7, 8, 9].map(tool))), []);
+test("a plural wait gives each target its own whole-command tool budget", () => {
+  const first = "aku/worker/abcd0034";
+  const second = "aku/worker/abcd0035";
+  const stream = waitObservationStream({ columns: 120, color: false }, { now: () => 0 });
+  stream.select([{ id: first, alias: "@first" }, { id: second, alias: "@second" }]);
+  const status = (id: string, prefix: string, completed: number) =>
+    parseAkumaStatus({
+      id,
+      life: "running",
+      allowed: [],
+      timeline: openAkumaSnapshot([
+        ...Array.from({ length: completed }, (_, index) => snapshotRow(completedTool(index + 1, "bash", { kind: "run", command: `${prefix}${index + 1}` }))),
+        snapshotRow(activeTool(completed + 1, "bash", { kind: "run", command: "open" })),
+      ]),
+    });
+  const firstStatus = status(first, "a", 9);
+  const secondStatus = status(second, "b", 9);
+  stream.observe([observed(status(first, "a", 0)), observed(status(second, "b", 0))]);
+  const later = stream.observe([observed(firstStatus), observed(secondStatus)]);
+  const conclusion = stream.conclude({
+    observations: [
+      { status: firstStatus, contract: { kind: "none" }, createdTasks: { kind: "present", rows: [] } },
+      { status: secondStatus, contract: { kind: "none" }, createdTasks: { kind: "present", rows: [] } },
+    ],
+    unobserved: [],
+  });
+  const text = [...later, conclusion].join("\n");
+  for (const prefix of ["a", "b"])
+    for (const sequence of [1, 2, 3, 8, 9]) assert.match(text, new RegExp(`\\$ ${prefix}${sequence}`, "u"));
+  assert.doesNotMatch(text, /\$ [ab][4-7]/u);
+  assert.equal((text.match(/⋮ 4 omitted/gu) ?? []).length, 2);
+});
 
-  // Even when the window grows further, the batch that folded never resumes: only its own new row streams.
-  const third = stream(idleAkumaSnapshot([1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(tool)));
-  const thirdText = third.join("\n");
-  assert.doesNotMatch(thirdText, /c6|c7|c8|c9|omitted/u, "a folded or displayed row never comes back");
-  assert.equal(third.filter((line) => line.includes("c10")).length, 1, "the third batch streams c10 exactly once");
+test("a wait flushes a known target when its final result becomes unobserved", () => {
+  const id = "aku/worker/abcd0036";
+  const stream = waitObservationStream({ columns: 120, color: false }, { now: () => 0 });
+  const status = parseAkumaStatus({
+    id,
+    life: "running",
+    allowed: [],
+    timeline: openAkumaSnapshot([
+      ...Array.from({ length: 9 }, (_, index) => snapshotRow(completedTool(index + 1, "bash", { kind: "run", command: `c${index + 1}` }))),
+      snapshotRow(activeTool(10, "bash", { kind: "run", command: "open" })),
+    ]),
+  });
+  const baseline = parseAkumaStatus({
+    id,
+    life: "running",
+    allowed: [],
+    timeline: openAkumaSnapshot([snapshotRow(activeTool(1, "bash", { kind: "run", command: "open" }))]),
+  });
+  stream.observe([observed(baseline)]);
+  stream.observe([observed(status)]);
+  const text = stream.conclude({ observations: [], unobserved: [{ id, diagnostic: "window lost" }] });
+  assert.match(text, /⋮ 4 omitted[\s\S]*\$ c8[\s\S]*\$ c9/u);
+  assert.match(text, /unobserved: window lost/u);
+});
+
+test("an observing call flushes its deferred tail before reporting an observation failure", () => {
+  const id = "aku/worker/abcd0037";
+  const stream = callObservationStream(
+    { columns: 120, color: false },
+    { id, contract: { kind: "none" }, facts: [] },
+    { now: () => 0 },
+  );
+  const status = parseAkumaStatus({
+    id,
+    life: "running",
+    allowed: [],
+    timeline: openAkumaSnapshot([
+      ...Array.from({ length: 9 }, (_, index) => snapshotRow(completedTool(index + 1, "bash", { kind: "run", command: `c${index + 1}` }))),
+      snapshotRow(activeTool(10, "bash", { kind: "run", command: "open" })),
+    ]),
+  });
+  stream.observe(status);
+  const text = stream.conclude({ kind: "failed", failure: { kind: "infrastructure", diagnostic: "window lost" } });
+  assert.match(text, /⋮ 4 omitted[\s\S]*\$ c8[\s\S]*\$ c9[\s\S]*! error window lost/u);
 });
 
 test("the live stream settles rows without rendering the outcome row", () => {
@@ -1918,16 +2005,20 @@ test("a plural wait keeps source attribution on omission markers and continuatio
   const facts = { alias: parseAkumaAlias(alias), contract: { kind: "none" as const } };
   // The baseline round settles nothing; the next round settles the tool burst and one long note.
   stream.observe([observed(status([tools[0]!]), facts)]);
-  const lines = stream.observe([
-    observed(
-      status([
-        ...tools,
-        note(7, "alpha beta gamma delta epsilon zeta eta theta iota"),
-        note(8, "still open"),
-      ]),
-      facts,
-    ),
+  const final = status([
+    ...tools,
+    note(7, "alpha beta gamma delta epsilon zeta eta theta iota"),
+    note(8, "still open"),
   ]);
+  const lines = [
+    ...stream.observe([observed(final, facts)]),
+    ...stream
+      .conclude({
+        observations: [{ status: final, contract: { kind: "none" }, createdTasks: { kind: "present", rows: [] } }],
+        unobserved: [],
+      })
+      .split("\n"),
+  ];
   const marker = lines.find((line) => line.includes("⋮ 1 omitted"));
   assert.ok(marker !== undefined);
   assert.ok(marker.startsWith(`${" ".repeat(5)} ${alias.padEnd(displayColumns(alias))} ⋮ 1 omitted`));
