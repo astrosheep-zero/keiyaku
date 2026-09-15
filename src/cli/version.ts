@@ -1,8 +1,8 @@
-import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 const PACKAGE_NAME = "@astrosheep/keiyaku";
 
-export function installedPackageVersion(): string {
-  const manifest = JSON.parse(readFileSync(owningManifestUrl(), "utf8")) as unknown;
+export async function installedPackageVersion(): Promise<string> {
+  const manifest = JSON.parse(await readFile(owningManifestUrl(), "utf8")) as unknown;
   if (!isOwningManifest(manifest)) {
     throw new Error(`Keiyaku package manifest must name ${PACKAGE_NAME} and contain a nonempty version`);
   }

@@ -12,7 +12,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
       return 0;
     }
     if ("version" in parsed) {
-      process.stdout.write(`${installedPackageVersion()}\n`);
+      process.stdout.write(`${await installedPackageVersion()}\n`);
       return 0;
     }
     return await (await import("./runtime.js")).runCliCommand(parsed);
