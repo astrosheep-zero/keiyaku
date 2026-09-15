@@ -12,7 +12,7 @@ import { appendActivity, beginTurn, initializeHeart, readHeart, recordTell } fro
 import { akuId, allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import { moveAlias } from "../src/alias/index.js";
-import { contractId } from "../src/core/facts/types.js";
+import { contractId, contractSegment } from "../src/core/facts/types.js";
 import { publishDispatch } from "../src/dispatch/index.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
@@ -794,13 +794,15 @@ test("named Address resolution refuses a Contract short-id shared with an Alias"
       "",
     ].join("\n"),
   });
-  assert.equal((await bound.keiyaku.state()).id, "kei/review");
+  const boundId = (await bound.keiyaku.state()).id;
+  assert.match(boundId, /^kei\/review-[0-9a-f]{4}$/u);
+  const alias = parseAkumaAlias(`@${contractSegment(boundId)}`);
   const source = await answered(repository.path, "worker", "00000001");
   const path = await World.at(repository.path);
-  await moveAlias({ world: path, alias: parseAkumaAlias("@review"), akuId: source.id });
+  await moveAlias({ world: path, alias, akuId: source.id });
   const observation = await observeKanshi({ world: path, repo });
   assert.throws(
-    () => resolveNamedAddress({ selector: "@review", report: observation.report, aliases: observation.aliases }),
+    () => resolveNamedAddress({ selector: alias, report: observation.report, aliases: observation.aliases }),
     /ambiguous selector matches Contract and Akuma/u,
   );
 });

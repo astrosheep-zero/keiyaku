@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { contractId, contractIdFromSegment, contractSegment } from "../src/core/facts/types.js";
 import { identityCoordinate, identitySegments } from "../src/identity/coordinates.js";
-import { fitIdentityStem, normalizeIdentityStem } from "../src/identity/normalize.js";
+import { mintIdentitySegment } from "../src/identity/mint.js";
+import { fitIdentityStem, fitIdentityStemWords, normalizeIdentityStem } from "../src/identity/normalize.js";
 
 test("contract identity construction and parsing own the kei family prefix", () => {
   const id = contractIdFromSegment("example");
@@ -43,4 +44,65 @@ test("identity normalization is idempotent and removes filename punctuation", ()
 
 test("identity fitting reserves suffix bytes without splitting a grapheme", () => {
   assert.equal(fitIdentityStem({ stem: "甲乙👩‍💻丙", maxBytes: 10, suffix: "abc" }), "甲乙-abc");
+});
+
+test("word fitting keeps whole words within the code point budget", () => {
+  assert.equal(
+    fitIdentityStemWords({ stem: "one-two-three-four-five-six-seven-eight-nine-ten", maxCodePoints: 32 }),
+    "one-two-three-four-five-six",
+  );
+  assert.equal(fitIdentityStemWords({ stem: "single-word", maxCodePoints: 32 }), "single-word");
+  assert.equal(fitIdentityStemWords({ stem: "👩‍💻-修复", maxCodePoints: 32 }), "👩‍💻-修复");
+});
+
+test("word fitting truncates an oversize head grapheme-safely and never yields empty", () => {
+  const fitted = fitIdentityStemWords({ stem: "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz", maxCodePoints: 32 });
+  assert.equal(fitted, "abcdefghijklmnopqrstuvwxyzabcdef");
+  assert.equal([...fitted].length, 32);
+  assert.throws(() => fitIdentityStemWords({ stem: "甲乙", maxCodePoints: 0 }), /positive safe integer/u);
+});
+
+test("identity minting redraws a fresh suffix after a collision and stays bounded", async () => {
+  const attempts: string[] = [];
+  const suffixes = ["0000", "0001", "0002"];
+  const accepted = await mintIdentitySegment({
+    stem: "example",
+    attempts: 3,
+    drawSuffix: () => suffixes[attempts.length]!,
+    attempt: async (segment) => {
+      attempts.push(segment);
+      return { segment, collision: segment !== "example-0002" };
+    },
+    collision: (value) => value.collision,
+  });
+  assert.deepEqual(attempts, ["example-0000", "example-0001", "example-0002"]);
+  assert.equal(accepted.segment, "example-0002");
+
+  const exhausted: string[] = [];
+  const refused = await mintIdentitySegment({
+    stem: "example",
+    attempts: 2,
+    drawSuffix: () => "ffff",
+    attempt: async (segment) => {
+      exhausted.push(segment);
+      return { segment, collision: true };
+    },
+    collision: (value) => value.collision,
+  });
+  assert.deepEqual(exhausted, ["example-ffff", "example-ffff"]);
+  assert.equal(refused.segment, "example-ffff");
+});
+
+test("identity minting rejects a suffix outside four lowercase hex digits", async () => {
+  await assert.rejects(
+    () =>
+      mintIdentitySegment({
+        stem: "example",
+        attempts: 1,
+        drawSuffix: () => "ABCDE",
+        attempt: async (segment) => segment,
+        collision: () => false,
+      }),
+    /four lowercase hexadecimal digits/u,
+  );
 });

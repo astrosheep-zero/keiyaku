@@ -33,7 +33,7 @@ import { Tasks } from "../src/task/index.js";
 import { authorityPath, readBoard } from "../src/task/store.js";
 import type { WorldRoot } from "../src/world.js";
 import { World } from "../src/world.js";
-import { makeGitRepository, withGitShim } from "./support/git.js";
+import { appointedWorktreePath, cachedRepositoryAt, makeGitRepository, withGitShim } from "./support/git.js";
 import { contractMarkdown } from "./support/markdown.js";
 import { taskDocument, writeTaskAuthority } from "./support/task.js";
 
@@ -916,6 +916,7 @@ test("Kanshi selection is a projection that preserves source presence", async (t
 
 test("target lag counts the frozen targetObservation head after the live ref moves", async (t) => {
   const { repository, contract } = await populatedWorld(t);
+  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), contract.id);
   const frozen = repository.run(["rev-parse", "refs/heads/main"]).trim();
   repository.run(["checkout", "--quiet", "-b", "stay"]);
   const log = join(repository.path, "kanshi-target-race.log");
@@ -954,7 +955,7 @@ test("target lag counts the frozen targetObservation head after the live ref mov
   assert.deepEqual(row?.targetLag, {
     kind: "counted",
     behind: 0,
-    subject: { kind: "worktree", path: join(repository.path, ".keiyaku", "wt", "commandroom") },
+    subject: { kind: "worktree", path: worktree },
   });
   const invocations = gitInvocations(log);
   assert.equal(invocations.filter((command) => command === "rev-parse --verify --quiet refs/heads/main").length, 1);

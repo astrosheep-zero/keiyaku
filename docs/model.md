@@ -43,8 +43,13 @@ later observation and cannot be replaced by another Contract's completion.
 
 Public coordinates are complete, prefixed identities. Each product family owns
 its constructor, validation, collision policy, and persistence; consumers do
-not repair a bare or partial identity. Human-facing identity construction is
-stable and portable, while physical filesystem names remain Git's concern.
+not repair a bare or partial identity. Contract identity mints from the bound
+title as a word-boundary-fitted stem joined to a freshly drawn short random
+suffix; a collision redraws the suffix under a bounded attempt budget and then
+refuses rather than lengthening the identity. Acceptance is historical, not
+constructive: every Contract identity minted under an earlier shape stays valid
+everywhere, and no stored fact is rewritten. Human-facing identity construction
+is stable and portable, while physical filesystem names remain Git's concern.
 Aliases, globs, and other convenience selectors are read-time library input and
 are never persisted as another identity.
 

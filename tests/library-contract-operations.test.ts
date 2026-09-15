@@ -5,7 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import test, { after } from "node:test";
 import { encodeEntry } from "../src/core/facts/codec.js";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
-import { changeId, contractId, entryUlid, snapshotId, type ContractId } from "../src/core/facts/types.js";
+import { changeId, contractId, contractSegment, entryUlid, snapshotId, type ContractId } from "../src/core/facts/types.js";
 import { contractJournalPath } from "../src/git/identity.js";
 import { materializeJudgedConflict } from "../src/git/integration.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
@@ -302,6 +302,26 @@ function mergeHead(repository: ReturnType<typeof repositoryWithMain>, worktree: 
     return null;
   }
 }
+
+test("newly bound Contract identities carry a word-fitted stem and a four-hex suffix", async () => {
+  const repository = repositoryWithMain();
+  const plain = await bind(repository);
+  assert.match((await plain.state()).id, /^kei\/library-verbs-[0-9a-f]{4}$/u);
+
+  const long = await Keiyaku.bind({
+    repo: await cachedRepoAt(repository.path),
+    markdown: document().replace(
+      "# Library verbs",
+      "# one two three four five six seven eight nine ten eleven twelve",
+    ),
+    workspace: "worktree",
+  });
+  const longId = (await long.keiyaku.state()).id;
+  assert.match(longId, /^kei\/one-two-three-four-five-six-[0-9a-f]{4}$/u);
+  const segment = contractSegment(longId);
+  const stem = segment.slice(0, segment.lastIndexOf("-"));
+  assert.ok([...stem].length <= 32, `stem ${stem} exceeds the code point budget`);
+});
 
 test("plain deliver conflict is an executable handoff and does not mutate", async () => {
   const { repository, contract, targetHead, worktree } = await reviewGatedConflictCandidateFixture();

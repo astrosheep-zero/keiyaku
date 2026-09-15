@@ -3,7 +3,8 @@ import { decodeContractDocument } from "../body/decode.js";
 import { contractIdFromSegment, type ActorId, type ContractId } from "../core/facts/types.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
-import { fitIdentityStem, normalizeIdentityStem } from "../identity/normalize.js";
+import { mintIdentitySegment } from "../identity/mint.js";
+import { fitIdentityStemWords, normalizeIdentityStem } from "../identity/normalize.js";
 import { bindOperation, type BindTargetSelection } from "../protocol/bind.js";
 import { stateOperation, type IntentOutcome, type RepositoryScope } from "../protocol/operations.js";
 import { claimTaskHolder, claimTaskHolderWithFence } from "../settlement/holder.js";
@@ -26,10 +27,11 @@ type BindAttemptInput = Readonly<{
   actor?: ActorId;
 }>;
 
-function candidateId(title: string, collision: number): ContractId {
-  const stem = fitIdentityStem({ stem: normalizeIdentityStem({ source: title }) || "contract", maxBytes: 48 });
-  const suffix = collision === 0 ? "" : `-${randomBytes(8).toString("hex")}`;
-  return contractIdFromSegment(`${stem}${suffix}`);
+const CONTRACT_ID_CODE_POINTS = 32;
+const CONTRACT_ID_ATTEMPTS = 4;
+
+function drawContractSuffix(): string {
+  return randomBytes(2).toString("hex");
 }
 
 async function attempt(input: BindAttemptInput, id: ContractId) {
@@ -55,14 +57,17 @@ async function attempt(input: BindAttemptInput, id: ContractId) {
 async function attemptCandidates(
   input: BindAttemptInput,
 ): Promise<IntentOutcome<Readonly<{ contractId: ContractId }>, KeiyakuRefusal>> {
-  let result!: IntentOutcome<Readonly<{ contractId: ContractId }>, KeiyakuRefusal>;
-  for (let collision = 0; collision <= 3; collision += 1) {
-    const id = candidateId(input.title, collision);
-    result = await attempt(input, id);
-    if (result.kind === "accepted") return result;
-    if (result.kind !== "refused" || result.refusal.kind !== "contract-exists") return result;
-  }
-  return result;
+  const stem = fitIdentityStemWords({
+    stem: normalizeIdentityStem({ source: input.title }) || "contract",
+    maxCodePoints: CONTRACT_ID_CODE_POINTS,
+  });
+  return await mintIdentitySegment({
+    stem,
+    attempts: CONTRACT_ID_ATTEMPTS,
+    drawSuffix: drawContractSuffix,
+    attempt: (segment) => attempt(input, contractIdFromSegment(segment)),
+    collision: (result) => result.kind === "refused" && result.refusal.kind === "contract-exists",
+  });
 }
 
 export async function admitBindWithAppointment(input: BindAttemptInput) {

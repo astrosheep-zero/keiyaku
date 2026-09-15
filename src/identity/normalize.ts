@@ -23,6 +23,40 @@ export function normalizeIdentityStem(input: Readonly<{ source: string }>): stri
   return result;
 }
 
+export function fitIdentityStemWords(
+  input: Readonly<{
+    stem: string;
+    maxCodePoints: number;
+  }>,
+): string {
+  if (!Number.isSafeInteger(input.maxCodePoints) || input.maxCodePoints < 1) {
+    throw new Error("identity stem code point budget must be a positive safe integer");
+  }
+  const words = input.stem.split("-");
+  let fitted = truncateGraphemes(words[0]!, input.maxCodePoints);
+  let count = [...fitted].length;
+  for (const word of words.slice(1)) {
+    const candidate = count + 1 + [...word].length;
+    if (candidate > input.maxCodePoints) break;
+    fitted += `-${word}`;
+    count = candidate;
+  }
+  if (fitted.length === 0) throw new Error("identity stem is empty after fitting");
+  return fitted;
+}
+
+function truncateGraphemes(value: string, maxCodePoints: number): string {
+  let result = "";
+  let count = 0;
+  for (const { segment } of GRAPHEMES.segment(value)) {
+    const size = [...segment].length;
+    if (count + size > maxCodePoints) break;
+    result += segment;
+    count += size;
+  }
+  return result;
+}
+
 export function fitIdentityStem(
   input: Readonly<{
     stem: string;
