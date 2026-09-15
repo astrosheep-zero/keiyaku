@@ -21,8 +21,8 @@ export const DEFAULT_CONTEXT: TextRenderContext = { columns: 80, color: false };
 const TIME_WIDTH = 5;
 const VERB_WIDTH = 6;
 
-/** The one blessed ruler: the boundary between an observation frame and its content. */
-export const FRAME_RULE = "────────────────";
+/** The one blessed ruler, in ASCII: the boundary between an observation frame and its content. */
+export const FRAME_RULE = "----------------";
 
 /** Tool rows one observation cycle may print before the rest fold in place. */
 const STREAM_TOOL_BUDGET = 3;

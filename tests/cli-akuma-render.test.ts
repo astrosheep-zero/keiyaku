@@ -11,7 +11,7 @@ test("Akuma presentation uses the settled six-mark vocabulary", () => {
 });
 
 test("Akuma associations use one arrow notation and one frame rule", () => {
-  assert.equal(FRAME_RULE, "─".repeat(16));
+  assert.equal(FRAME_RULE, "-".repeat(16));
   assert.equal(associatedIdentity("aku/worker/1234abcd", "@ship"), "aku/worker/1234abcd (@ship)");
   assert.deepEqual(snapshotHeading("aku/worker/1234abcd", undefined, { kind: "associated", contractId: "kei/demo" }), [
     "aku/worker/1234abcd",

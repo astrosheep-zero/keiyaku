@@ -56,9 +56,9 @@ presence and attention is reversed: waiting is not absence, and an unsatisfied
 gate is not generic attention. `│` is the neutral continuation and ordinary-row
 mark and carries no state; `NAME // qualifier` frames a catalogue section
 rather than a banner. Facts are label-value rows joined
-with ` · `; `key=value`, banners, and bracket state alphabets are not text
-vocabulary. The horizontal rule is structure rather than decoration, with one
-blessed use: it is the boundary of an observation frame between that frame's
+with `·`; `key=value`, banners, and bracket state alphabets are not text
+vocabulary. The horizontal rule is a run of ASCII hyphens, structure rather
+than decoration, with one blessed use: it is the boundary of an observation frame between that frame's
 identity and its content, and content otherwise stays mark-and-fact based. Git identities render at 7 characters in
 text and full length in JSON. Paths stay absolute and copyable where they are
 the answer, and stay out of board and catalogue rows where they are not.
