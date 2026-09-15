@@ -24,7 +24,7 @@ import {
   stopLines,
   titleLines,
 } from "./receipt.js";
-import { renderOpaqueBlock, type TextRenderContext } from "./terminal.js";
+import { renderOpaqueBlock, safeText, tone, type TextRenderContext } from "./terminal.js";
 
 const HANG = "  ";
 
@@ -107,20 +107,30 @@ function settlementLagRows(lag: AcceptedEnvelope["settlementLags"][number], colu
   return lines;
 }
 
-function overlapRows(overlaps: readonly RegionOverlap[], columns: number): readonly string[] {
-  const lines: string[] = [];
+function overlapRows(overlaps: readonly RegionOverlap[], color: boolean): readonly string[] {
+  const groups = new Map<string, Map<string, RegionOverlap["patterns"][number]>>();
   for (const overlap of overlaps) {
-    for (const pattern of overlap.patterns) {
-      receiptRow(
-        lines,
-        " ",
-        "overlap",
-        [
-          { text: overlap.contract, opaque: true },
-          { text: `${pattern.mine} ~ ${pattern.theirs}`, opaque: true },
-        ],
-        columns,
-      );
+    let patterns = groups.get(overlap.contract);
+    if (patterns === undefined) {
+      patterns = new Map();
+      groups.set(overlap.contract, patterns);
+    }
+    for (const pattern of overlap.patterns) patterns.set(JSON.stringify([pattern.mine, pattern.theirs]), pattern);
+  }
+  if (groups.size === 0) return [];
+  const lines = ["", `  ${tone("overlap", "dim", color)}`];
+  for (const [contract, patterns] of groups) {
+    if (lines.length > 2) lines.push("");
+    const identity = safeText(contract);
+    lines.push(`  ${tone("└─", "dim", color)} ${color ? `\u001b[1m${identity}\u001b[0m` : identity}`);
+    let first = true;
+    for (const { mine, theirs } of patterns.values()) {
+      if (mine === theirs) lines.push(`       ${safeText(mine)}`);
+      else {
+        if (!first) lines.push("");
+        lines.push(`       this   ${safeText(mine)}`, `       other  ${safeText(theirs)}`);
+      }
+      first = false;
     }
   }
   return lines;
@@ -163,9 +173,13 @@ function acceptedLagRows(result: AcceptedEnvelope, columns: number): readonly st
   return obligations;
 }
 
-function acceptedDeviations(result: AcceptedBindResult | AcceptedAmendResult, columns: number): readonly string[] {
+function acceptedDeviations(
+  result: AcceptedBindResult | AcceptedAmendResult,
+  columns: number,
+  color: boolean,
+): readonly string[] {
   const deviations: string[] = [];
-  if (result.overlaps !== undefined) pushBlock(deviations, overlapRows(result.overlaps, columns));
+  if (result.overlaps !== undefined) pushBlock(deviations, overlapRows(result.overlaps, color));
   if (result.overlapFailure !== undefined) {
     receiptRow(deviations, "!", "overlap", [{ text: "unavailable" }], columns);
     receiptPayload(deviations, "diagnostic", result.overlapFailure);
@@ -294,22 +308,22 @@ function continuationLines(result: AcceptedDeliverResult | AcceptedReviewResult,
   return lines;
 }
 
-function renderAcceptedBind(result: AcceptedBindResult, columns: number): string {
+function renderAcceptedBind(result: AcceptedBindResult, columns: number, color: boolean): string {
   const lines = titleLines("✓", "bound", result.contract, columns);
   if (result.workspace !== undefined)
     receiptRow(lines, " ", "workspace", [{ text: "worktree" }, { text: result.workspace.path, opaque: true }], columns);
   if (result.target === null) receiptRow(lines, " ", "no target", [], columns);
   else receiptRow(lines, " ", "target", [{ text: result.target, opaque: true }], columns);
   for (const warning of result.warnings ?? []) receiptRow(lines, "!", "region warning", [{ text: warning }], columns);
-  lines.push(...acceptedDeviations(result, columns), ...recordBlock(result, columns));
+  lines.push(...acceptedDeviations(result, columns, color), ...recordBlock(result, columns));
   return lines.join("\n");
 }
 
-function renderAcceptedAmend(result: AcceptedAmendResult, columns: number): string {
+function renderAcceptedAmend(result: AcceptedAmendResult, columns: number, color: boolean): string {
   const changed = result.diff.length > 0;
   const lines = titleLines("✓", changed ? "terms replaced" : "terms unchanged", result.contract, columns);
   if (changed) receiptPayload(lines, "  terms diff", result.diff);
-  lines.push(...acceptedDeviations(result, columns), ...recordBlock(result, columns));
+  lines.push(...acceptedDeviations(result, columns, color), ...recordBlock(result, columns));
   return lines.join("\n");
 }
 
@@ -384,9 +398,9 @@ export function renderAccepted(result: AcceptedResult, context?: TextRenderConte
     case "audit":
       return renderAcceptedAudit(result, context);
     case "bind":
-      return renderAcceptedBind(result, columns);
+      return renderAcceptedBind(result, columns, context?.color === true);
     case "amend":
-      return renderAcceptedAmend(result, columns);
+      return renderAcceptedAmend(result, columns, context?.color === true);
     case "review":
       return renderAcceptedReview(result, columns);
     case "arc":

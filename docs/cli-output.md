@@ -183,6 +183,13 @@ completion count it has always carried; that count is what the streamed wait's
 scoreboard replaces. JSON mode keeps its
 result shape.
 
+Region overlap in bind and amend receipts remains supporting evidence, not a
+warning or a separate report. It groups shared scope beneath each related
+Contract, distinguishing the Contract identity from its subordinate patterns.
+Identical patterns appear once; differing patterns retain which Contract each
+belongs to. Terminal emphasis reinforces this hierarchy without carrying facts
+that disappear in plain text. Overlap does not itself assert a code conflict.
+
 When an exceptional Contract execution already confirmed admissions, the CLI
 reports the failure together with those receipts instead of projecting a usage
 error or a no-effect refusal. Text and JSON preserve the same admitted facts and
