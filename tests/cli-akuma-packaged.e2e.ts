@@ -173,7 +173,7 @@ test("packaged observing calls stream one framed session and one conclusion per 
     assert.equal(answered.code, 0, answered.stderr);
     assert.equal(answered.stdout, "the answer", "an answered observing call writes its bytes exactly once");
     assert.match(answered.stderr, /✓ answered — \d+s/u);
-    assert.doesNotMatch(answered.stderr, /the answer|│/u, "the stream never replays the settled snapshot");
+    assert.doesNotMatch(answered.stderr, /the answer/u, "the stream never replays the settled answer");
 
     const silent = await runPackagedCli(["-C", world, "call", "silent", "--wait", "20s", "prompt"], {
       cwd: world,

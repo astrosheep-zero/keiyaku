@@ -1633,6 +1633,106 @@ test("status snapshots focus tool evidence without changing history or compact s
     assert.match(historyText, new RegExp(`\\$ ${command}`, "u"), `history keeps intermediate tool ${command}`);
 });
 
+test("current attempt boundaries lead focused snapshots and live streams exactly once", () => {
+  const context = { columns: 120, color: false } as const;
+  const call = snapshotRow({
+    kind: "call" as const,
+    sequence: 2,
+    turnSequence: 1,
+    at: AKUMA_ACTIVITY_AT,
+    text: "initial commission",
+  });
+  const tool = snapshotRow(completedTool(1, "bash", { kind: "run", command: "before-boundary" }));
+  const active = snapshotRow(activeTool(3, "bash", { kind: "run", command: "still-running" }));
+  const initial = openAkumaSnapshot([tool, call, active]);
+  const snapshot = snapshotActivityLines(initial, context).join("\n");
+  assert.match(snapshot, /^\d{2}:\d{2} │ call +initial commission/mu);
+  assert.ok(snapshot.indexOf("initial commission") < snapshot.indexOf("before-boundary"));
+  assert.equal((snapshot.match(/initial commission/gu) ?? []).length, 1);
+  assert.match(snapshotActivityLines(initial, context, { latest: true }).join("\n"), /still-running/u);
+
+  const live = activityStream(context);
+  const liveRows = [...live(initial), ...live(initial), ...live.flush()].join("\n");
+  assert.match(liveRows, /^\d{2}:\d{2} │ call +initial commission/mu);
+  assert.ok(liveRows.indexOf("initial commission") < liveRows.indexOf("before-boundary"));
+  assert.equal((liveRows.match(/initial commission/gu) ?? []).length, 1);
+
+  const lateBoundary = activityStream(context);
+  lateBoundary(openAkumaSnapshot([tool, active]));
+  const newlyVisibleBoundary = lateBoundary(initial).join("\n");
+  assert.match(newlyVisibleBoundary, /initial commission/u);
+  assert.doesNotMatch(newlyVisibleBoundary, /before-boundary/u);
+
+  const id = "aku/worker/abcd0101";
+  const status = parseAkumaStatus({ id, life: "running", allowed: [], timeline: initial });
+  const statusText = snapshotText({ status, contract: { kind: "none" } }, context);
+  assert.ok(statusText.indexOf("initial commission") < statusText.indexOf("before-boundary"));
+
+  const wait = waitObservationStream(context, { now: () => 0 });
+  const opening = wait.observe([observed(status)]).join("\n");
+  assert.match(opening, /initial commission/u);
+  assert.doesNotMatch(opening, /before-boundary/u, "the wait baseline keeps its ordinary rows out of the live budget");
+  assert.equal((opening.match(/initial commission/gu) ?? []).length, 1);
+
+  const wake = snapshotRow({
+    kind: "tell" as const,
+    sequence: 5,
+    at: AKUMA_ACTIVITY_AT,
+    tellId: "tell/wake",
+    text: "resume with the new direction",
+    state: "told" as const,
+    deliveries: [{ route: "launch" as const, turnSequence: 1, deliveredAt: AKUMA_ACTIVITY_AT }],
+  });
+  const woken = openAkumaSnapshot([
+    snapshotRow(completedTool(4, "bash", { kind: "run", command: "before-wake" })),
+    wake,
+    snapshotRow(activeTool(6, "bash", { kind: "run", command: "waking" })),
+  ]);
+  const wakeSnapshot = snapshotActivityLines(woken, context).join("\n");
+  assert.match(wakeSnapshot, /^\d{2}:\d{2} ✓ told +“resume with the new direction”/mu);
+  assert.ok(wakeSnapshot.indexOf("resume with the new direction") < wakeSnapshot.indexOf("before-wake"));
+  assert.equal((wakeSnapshot.match(/resume with the new direction/gu) ?? []).length, 1);
+  const wakeStatusText = snapshotText(
+    {
+      status: parseAkumaStatus({ id: "aku/worker/abcd0102", life: "running", allowed: [], timeline: woken }),
+      contract: { kind: "none" },
+    },
+    context,
+  );
+  assert.ok(wakeStatusText.indexOf("resume with the new direction") < wakeStatusText.indexOf("before-wake"));
+
+  const wakeWait = waitObservationStream(context, { now: () => 0 });
+  const wakeOpening = wakeWait
+    .observe([observed(parseAkumaStatus({ id: "aku/worker/abcd0102", life: "running", allowed: [], timeline: woken }))])
+    .join("\n");
+  assert.match(wakeOpening, /✓ told +“resume with the new direction”/u);
+  assert.doesNotMatch(wakeOpening, /before-wake/u);
+});
+
+test("a Tell delivered to a pursuing Body remains ordinary activity, not a current-turn boundary", () => {
+  const context = { columns: 120, color: false } as const;
+  const snapshot = openAkumaSnapshot([
+    snapshotRow(completedTool(1, "bash", { kind: "run", command: "already-pursuing" })),
+    snapshotRow({
+      kind: "tell" as const,
+      sequence: 2,
+      at: AKUMA_ACTIVITY_AT,
+      tellId: "tell/live",
+      text: "ordinary live steer",
+      state: "told" as const,
+      deliveries: [{ route: "live" as const, turnSequence: 1, deliveredAt: AKUMA_ACTIVITY_AT }],
+    }),
+    snapshotRow(activeTool(3, "bash", { kind: "run", command: "still-pursuing" })),
+  ]);
+  const text = snapshotActivityLines(snapshot, context).join("\n");
+  assert.ok(text.indexOf("already-pursuing") < text.indexOf("ordinary live steer"));
+  const noBoundary = snapshotActivityLines(
+    openAkumaSnapshot([snapshotRow(completedTool(1, "bash", { kind: "run", command: "no-boundary" }))]),
+    context,
+  ).join("\n");
+  assert.doesNotMatch(noBoundary, /\bcall\b|\btold\b/u);
+});
+
 test("whole-command tool selection is independent of poll partitioning", () => {
   const tool = (sequence: number) =>
     snapshotRow(completedTool(sequence, "bash", { kind: "run", command: `c${sequence}` }));

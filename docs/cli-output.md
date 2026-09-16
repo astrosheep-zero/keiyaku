@@ -175,6 +175,10 @@ renderer; default live progress and full snapshots, including status, omit
 internal thought narration. A full snapshot keeps its opening three and final
 two known tool rows, with counted omissions in their original positions;
 narrative and outcome rows remain in order without spending that tool budget.
+For a current open attempt, default live activity and full snapshots first
+render one retained boundary: the initial commission, or the settled wake that
+started the attempt. A Tell delivered to an already pursuing Body is ordinary
+activity, and absence of either durable boundary produces no synthetic row.
 History retains its requested thought and tool activity through its own
 projection. That channel also carries the closing conclusion, while stdout
 carries only an answer, never progress, and a plural wait leaves it

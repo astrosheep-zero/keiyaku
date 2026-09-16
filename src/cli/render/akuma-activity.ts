@@ -44,6 +44,7 @@ type RenderRow = ActivityRow | Extract<FleetTimelineEntry, { kind: "row" }>["row
 type RenderEntry = Readonly<{ kind: "gap"; count: number }> | Readonly<{ kind: "row"; row: RenderRow }>;
 type RenderedSnapshot = FleetTimeline;
 type RenderedFileChange = ReportedFileChange | FleetReportedFileChange;
+type CurrentTurnBoundary = Readonly<{ row: RenderRow; turnSequence: number }>;
 
 function identity(id: string, alias?: string): string {
   return `${id}${alias === undefined ? "" : ` (${alias})`}`;
@@ -320,6 +321,33 @@ function orderedSnapshotEntries(snapshot: RenderedSnapshot): readonly RenderEntr
 }
 
 /**
+ * The current open turn starts from either its initial commission or a Tell
+ * delivered when the Body launched it. A live Tell belongs to an already
+ * pursuing turn and is not its boundary.
+ */
+function currentTurnBoundary(snapshot: RenderedSnapshot): CurrentTurnBoundary | undefined {
+  if (snapshot.kind !== "open") return undefined;
+  const rows = snapshot.entries.flatMap((entry) => (entry.kind === "row" ? [entry.row] : []));
+  const wake = rows.findLast(
+    (row) =>
+      row.kind === "tell" &&
+      row.state === "told" &&
+      row.deliveries.some((delivery) => delivery.route === "launch" && delivery.turnSequence === snapshot.turn.turnSequence),
+  );
+  if (wake !== undefined) return { row: wake, turnSequence: snapshot.turn.turnSequence };
+  const call = rows.find((row) => row.kind === "call" && row.turnSequence === snapshot.turn.turnSequence);
+  return call === undefined ? undefined : { row: call, turnSequence: snapshot.turn.turnSequence };
+}
+
+/** Move the visible current-turn boundary ahead of activity without duplicating it. */
+function boundaryFirstSnapshotEntries(snapshot: RenderedSnapshot): readonly RenderEntry[] {
+  const entries = orderedSnapshotEntries(snapshot);
+  const boundary = currentTurnBoundary(snapshot);
+  if (boundary === undefined) return entries;
+  return [{ kind: "row", row: boundary.row }, ...entries.filter((entry) => entry.kind !== "row" || entry.row !== boundary.row)];
+}
+
+/**
  * Focus one complete snapshot without making its provider-side gaps mean more
  * than they do. Thought rows disappear; known tool rows use the same opening
  * and recent budgets as live activity, while every other row keeps its place.
@@ -361,7 +389,7 @@ export function snapshotActivityLines(
   selection: Readonly<{ latest?: boolean }> = {},
 ): readonly string[] {
   const entries = orderedSnapshotEntries(snapshot);
-  if (selection.latest !== true) return groupedEntries(focusedSnapshotEntries(entries), context);
+  if (selection.latest !== true) return groupedEntries(focusedSnapshotEntries(boundaryFirstSnapshotEntries(snapshot)), context);
   const latest = entries.filter((entry) => entry.kind === "row").at(-1);
   return latest === undefined ? [] : groupedEntries([latest], context);
 }
@@ -388,7 +416,7 @@ function settledTimeline(snapshot: RenderedSnapshot): RenderedSnapshot {
 export type ActivityStream = ((snapshot: RenderedSnapshot) => readonly string[]) &
   Readonly<{
     /** Seed the sequence cursor without spending the command's live evidence budget. */
-    seed: (snapshot: RenderedSnapshot) => void;
+    seed: (snapshot: RenderedSnapshot) => readonly string[];
     /** Emit the deferred tail exactly once before the command's conclusion. */
     flush: () => readonly string[];
   }>;
@@ -398,6 +426,7 @@ type DeferredActivityEntry = Readonly<{ kind: "gap"; count: number }> | Readonly
 type ActivityStreamState = {
   newestSequence: number | undefined;
   previousClock: string | undefined;
+  renderedBoundaries: Set<number>;
   openingTools: number;
   deferred: DeferredActivityEntry[];
 };
@@ -470,22 +499,39 @@ function flushSafeActivityPrefix(
   }
 }
 
+function renderCurrentTurnBoundary(
+  state: ActivityStreamState,
+  snapshot: RenderedSnapshot,
+  lines: string[],
+  context: TextRenderContext,
+  layout: RowLayout,
+): CurrentTurnBoundary | undefined {
+  const boundary = currentTurnBoundary(snapshot);
+  if (boundary !== undefined && !state.renderedBoundaries.has(boundary.turnSequence)) {
+    renderStreamRow(state, boundary.row, lines, context, layout);
+    state.renderedBoundaries.add(boundary.turnSequence);
+  }
+  return boundary;
+}
+
 function observeActivitySnapshot(
   state: ActivityStreamState,
   snapshot: RenderedSnapshot,
   context: TextRenderContext,
   layout: RowLayout,
 ): readonly string[] {
+  const lines: string[] = [];
+  const boundary = renderCurrentTurnBoundary(state, snapshot, lines, context, layout);
   const rows = settledRows(snapshot)
+    .filter((row) => row !== boundary?.row)
     .filter((row) => state.newestSequence === undefined || row.sequence > state.newestSequence)
     // Thoughts remain retained activity, but are ineligible for default live progress.
     .filter((row) => row.kind !== "thought");
-  if (rows.length === 0) return [];
+  if (rows.length === 0) return lines;
   state.newestSequence = rows.reduce(
     (newest, row) => Math.max(newest, row.sequence),
     state.newestSequence ?? rows[0]!.sequence,
   );
-  const lines: string[] = [];
   for (const row of rows) {
     if (row.kind === "tool" && state.openingTools < OPENING_TOOL_BUDGET) {
       state.openingTools += 1;
@@ -531,13 +577,17 @@ export function activityStream(context: TextRenderContext, layout: RowLayout = p
   const state: ActivityStreamState = {
     newestSequence: undefined,
     previousClock: undefined,
+    renderedBoundaries: new Set(),
     openingTools: 0,
     deferred: [],
   };
-  const seed = (snapshot: RenderedSnapshot): void => {
+  const seed = (snapshot: RenderedSnapshot): readonly string[] => {
+    const lines: string[] = [];
+    renderCurrentTurnBoundary(state, snapshot, lines, context, layout);
     const rows = settledRows(snapshot);
     if (rows.length > 0)
       state.newestSequence = rows.reduce((newest, row) => Math.max(newest, row.sequence), rows[0]!.sequence);
+    return lines;
   };
   const observe = (snapshot: RenderedSnapshot): readonly string[] =>
     observeActivitySnapshot(state, snapshot, context, layout);
@@ -654,7 +704,7 @@ function observeWaitRound(
       );
       state.streams.set(status.id, stream);
       // A wait starts at the current settled frontier: its backlog is neither evidence nor budget.
-      stream.seed(status.timeline);
+      lines.push(...stream.seed(status.timeline));
     } else {
       lines.push(...known(status.timeline));
     }
