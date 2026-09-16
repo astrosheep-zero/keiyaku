@@ -347,41 +347,30 @@ function boundaryFirstSnapshotEntries(snapshot: RenderedSnapshot): readonly Rend
   return [{ kind: "row", row: boundary.row }, ...entries.filter((entry) => entry.kind !== "row" || entry.row !== boundary.row)];
 }
 
-/**
- * Focus one complete snapshot without making its provider-side gaps mean more
- * than they do. Thought rows disappear; known tool rows use the same opening
- * and recent budgets as live activity, while every other row keeps its place.
- */
-function focusedSnapshotEntries(entries: readonly RenderEntry[]): readonly RenderEntry[] {
-  const tools = entries.filter((entry) => entry.kind === "row" && entry.row.kind === "tool");
-  const focused: RenderEntry[] = [];
-  let toolIndex = 0;
-  let omittedTools = 0;
-  const flushOmittedTools = (): void => {
-    if (omittedTools > 0) focused.push({ kind: "gap", count: omittedTools });
-    omittedTools = 0;
-  };
+/** Open status hides internal thought narration without selecting a second activity window. */
+function visibleOpenSnapshotEntries(snapshot: Extract<RenderedSnapshot, { kind: "open" }>): readonly RenderEntry[] {
+  return boundaryFirstSnapshotEntries(snapshot).filter(
+    (entry) => entry.kind !== "row" || entry.row.kind !== "thought",
+  );
+}
 
-  for (const entry of entries) {
-    if (entry.kind === "row" && entry.row.kind === "thought") continue;
-    if (entry.kind !== "row" || entry.row.kind !== "tool") {
-      flushOmittedTools();
-      focused.push(entry);
-      continue;
+/** Adjacent omitted spans are one continuous unknown portion of the retained timeline. */
+function coalesceAdjacentGaps(entries: readonly RenderEntry[]): readonly RenderEntry[] {
+  return entries.reduce<RenderEntry[]>((coalesced, entry) => {
+    const previous = coalesced.at(-1);
+    if (entry.kind === "gap" && previous?.kind === "gap") {
+      coalesced[coalesced.length - 1] = { kind: "gap", count: previous.count + entry.count };
+    } else {
+      coalesced.push(entry);
     }
-    const keep = toolIndex < OPENING_TOOL_BUDGET || toolIndex >= tools.length - RECENT_TOOL_BUDGET;
-    toolIndex += 1;
-    if (keep) flushOmittedTools();
-    else omittedTools += 1;
-    if (keep) focused.push(entry);
-  }
-  flushOmittedTools();
-  return focused;
+    return coalesced;
+  }, []);
 }
 
 /**
- * Shared snapshot activity rendering. Full snapshots focus known tool evidence;
- * `latest` preserves compact callers' established newest-entry selection.
+ * Shared snapshot activity rendering. Full snapshots render the selected
+ * activity evidence; an idle snapshot is settled evidence. `latest` preserves
+ * compact callers' established newest-entry selection.
  */
 export function snapshotActivityLines(
   snapshot: RenderedSnapshot,
@@ -389,7 +378,10 @@ export function snapshotActivityLines(
   selection: Readonly<{ latest?: boolean }> = {},
 ): readonly string[] {
   const entries = orderedSnapshotEntries(snapshot);
-  if (selection.latest !== true) return groupedEntries(focusedSnapshotEntries(boundaryFirstSnapshotEntries(snapshot)), context);
+  if (selection.latest !== true) {
+    const full = snapshot.kind === "open" ? visibleOpenSnapshotEntries(snapshot) : entries;
+    return groupedEntries(coalesceAdjacentGaps(full), context);
+  }
   const latest = entries.filter((entry) => entry.kind === "row").at(-1);
   return latest === undefined ? [] : groupedEntries([latest], context);
 }

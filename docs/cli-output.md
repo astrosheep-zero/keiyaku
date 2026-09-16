@@ -171,11 +171,14 @@ JSON, or detaches has no such stream and keeps its ordinary receipt.
 
 A wait reports the same kind of progress. It announces no birth and streams
 eligible newly settled timeline rows on the progress channel through the same
-renderer; default live progress and full snapshots, including status, omit
-internal thought narration. A full snapshot keeps its opening three and final
-two known tool rows, with counted omissions in their original positions;
-narrative and outcome rows remain in order without spending that tool budget.
-For a current open attempt, default live activity and full snapshots first
+renderer; default live progress and full snapshots of an open attempt,
+including status, omit internal thought narration. An open full snapshot keeps
+its retained boundary and bounded selected activity in its original evidence
+order; it does not select another activity window. An idle full status instead
+retains its activity and outcome as settled evidence, including its answer or
+failure diagnostic. Adjacent omitted spans render as one cumulative omission,
+while visible activity keeps separate spans distinct. For a current open
+attempt, default live activity and full snapshots first
 render one retained boundary: the initial commission, or the settled wake that
 started the attempt. A Tell delivered to an already pursuing Body is ordinary
 activity, and absence of either durable boundary produces no synthetic row.
