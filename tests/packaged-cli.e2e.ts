@@ -3,10 +3,12 @@ import { execFileSync } from "node:child_process";
 import {
   copyFileSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   statSync,
   unlinkSync,
   writeFileSync,
@@ -23,20 +25,6 @@ type PackageManifest = {
 };
 
 const root = resolve(import.meta.dirname, "..");
-
-async function copyFileWithRetry(source: string, destination: string): Promise<void> {
-  const deadline = performance.now() + 2_000;
-  for (;;) {
-    try {
-      copyFileSync(source, destination);
-      return;
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if ((code !== "EBUSY" && code !== "EPERM") || performance.now() >= deadline) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-  }
-}
 
 function command(executable: string, args: readonly string[], cwd: string, shell = false): string {
   return execFileSync(executable, args, {
@@ -218,23 +206,23 @@ test("published package installs one keiyaku CLI and runs against a real reposit
   );
 });
 
-test("Windows packaging refuses a missing or corrupt launcher artifact", async (t) => {
-  if (process.platform !== "win32") {
-    t.skip("the native release guard runs on Windows");
-    return;
-  }
-  const artifact = join(root, "build", "src", "runtime", "proc", "windows-launch.exe");
-  const backup = join(mkdtempSync(join(tmpdir(), "keiyaku-launcher-backup-")), "windows-launch.exe");
-  const packed = mkdtempSync(join(tmpdir(), "keiyaku-launcher-refusal-"));
-  copyFileSync(artifact, backup);
+test("packaging refuses a missing or corrupt Windows launcher artifact", () => {
+  const fixture = mkdtempSync(join(tmpdir(), "keiyaku-launcher-refusal-"));
+  const artifact = join(fixture, "build", "src", "runtime", "proc", "windows-launch.exe");
+  const packed = join(fixture, "packed");
+  mkdirSync(join(fixture, "scripts"), { recursive: true });
+  mkdirSync(join(fixture, "build", "src", "runtime", "proc"), { recursive: true });
+  mkdirSync(packed);
+  copyFileSync(join(root, "package.json"), join(fixture, "package.json"));
+  copyFileSync(join(root, "scripts", "verify-package.js"), join(fixture, "scripts", "verify-package.js"));
   try {
     writeFileSync(artifact, "corrupt");
-    assert.throws(() => npmCommand(["pack", "--pack-destination", packed], root), /not a PE image/u);
+    assert.throws(() => npmCommand(["pack", "--pack-destination", packed], fixture), /not a PE image/u);
     assert.equal(readdirSync(packed).filter((name) => name.endsWith(".tgz")).length, 0);
     unlinkSync(artifact);
-    assert.throws(() => npmCommand(["pack", "--pack-destination", packed], root), /artifact is missing/u);
+    assert.throws(() => npmCommand(["pack", "--pack-destination", packed], fixture), /artifact is missing/u);
     assert.equal(readdirSync(packed).filter((name) => name.endsWith(".tgz")).length, 0);
   } finally {
-    await copyFileWithRetry(backup, artifact);
+    rmSync(fixture, { recursive: true, force: true });
   }
 });
