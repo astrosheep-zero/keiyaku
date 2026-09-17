@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { z } from "zod";
 import { Akuma, Schema, type StandardSchemaV1 } from "../src/akuma/index.js";
+import { schemaFromStandard } from "../src/akuma/schema.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { AkumaHandle } from "../src/akuma/akuma-handle.js";
 import { driveAkumaBody, type TellWakeRuntime } from "../src/akuma/body.js";
@@ -269,6 +270,33 @@ test("a foreign standard schema without a projection refuses naming vendor and e
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("a schema normalized from a Standard Schema value is a genuine Schema instance", () => {
+  const foreign = foreignSchema("acme", { ok: true }, (value) => value as { ok: boolean }, objectAnswer());
+  const normalized = schemaFromStandard(foreign);
+  assert.ok(normalized instanceof Schema);
+  assert.ok(Schema.standard(foreign) instanceof Schema);
+  const own = Schema.json({ type: "object" }, (value) => value);
+  assert.equal(schemaFromStandard(own), own);
+});
+
+test("an asynchronously validating vendor refuses at decode instead of decoding", () => {
+  const foreign = {
+    "~standard": {
+      version: 1,
+      vendor: "async-vendor",
+      validate: async () => ({ value: { ok: true } }),
+      types: { input: null, output: { ok: true } },
+      jsonSchema: { output: objectAnswer() },
+    },
+  } satisfies StandardSchemaV1<{ ok: boolean }>;
+  const schema = schemaFromStandard(foreign);
+  assert.throws(
+    () => schema.decode({}),
+    (error: unknown) =>
+      error instanceof TypeError && /async-vendor/u.test(error.message) && /asynchronously/u.test(error.message),
+  );
 });
 
 test("the simplicity guard refuses unsupported keywords and names them", () => {

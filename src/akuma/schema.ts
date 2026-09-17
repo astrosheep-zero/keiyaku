@@ -201,23 +201,30 @@ export class Schema<T> {
     const canonical = canonicalDocument(document, "JSON Schema");
     return new Schema(canonical.json, decode);
   }
+
+  /**
+   * Bless a Standard Schema v1 value as a real Schema: validate the marker,
+   * project a JSON Schema document, refuse shapes outside the simple
+   * vocabulary, and decode at the boundary. The class owns this path so every
+   * normalized schema is born through the constructor rather than around it.
+   */
+  static standard<Output>(value: StandardSchemaV1<Output>): Schema<Output> {
+    const marker = standardMarker<Output>(value);
+    const payload = projectStandardSchema(value, marker);
+    assertSimpleSchema(payload, "$");
+    const canonical = canonicalDocument(payload, `${marker.vendor} JSON Schema`);
+    return new Schema(canonical.json, (input: unknown) => decodeStandard(input, marker));
+  }
 }
 
 /**
  * Normalize a Tell answer contract to the internal Schema. The package's own
- * Schema passes through; a Standard Schema value is projected, guarded, and
- * decoded at the boundary so inferred output types keep flowing.
+ * Schema passes through; anything else delegates to the class's own blessing
+ * path, so inferred output types keep flowing from a genuine Schema instance.
  */
 export function schemaFromStandard<T>(value: SchemaLike<T>): Schema<T> {
   if (value instanceof Schema) return value;
-  const marker = standardMarker<T>(value);
-  const payload = projectStandardSchema(value, marker);
-  assertSimpleSchema(payload, "$");
-  const canonical = canonicalDocument(payload, `${marker.vendor} JSON Schema`);
-  return Object.freeze({
-    jsonSchema: canonical.json,
-    decode: (input: unknown) => decodeStandard(input, marker),
-  }) as Schema<T>;
+  return Schema.standard(value);
 }
 
 /** Internal neutral serialization for Heart/provider forwarding. */
