@@ -1,3 +1,4 @@
+import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
@@ -347,10 +348,7 @@ test("packaged Akuma call, wait, and history cross the request boundary", async 
     },
     start() {
       return createProviderAttempt(undefined, async () => {
-        let finishEvents!: () => void;
-        const eventsFinished = new Promise<void>((resolve) => {
-          finishEvents = resolve;
-        });
+        const { promise: eventsFinished, resolve: finishEvents } = promiseBarrier<void>();
         return {
           admission: { fence: "packaged-akuma" },
           events: {

@@ -1,3 +1,4 @@
+import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -94,22 +95,9 @@ function crossProcessAmend(
   if (child.stdout === null || child.stderr === null) throw new Error("cross-process amend is missing output streams");
   const stdout = child.stdout;
   const stderr = child.stderr;
-  let resolveReady: (key: string) => void;
-  let rejectReady: (error: Error) => void;
-  const ready = new Promise<string>((resolve, reject) => {
-    resolveReady = resolve;
-    rejectReady = reject;
-  });
-  let resolveContended: () => void;
-  const contended = new Promise<void>((resolve) => {
-    resolveContended = resolve;
-  });
-  let resolveCompleted: (output: string) => void;
-  let rejectCompleted: (error: Error) => void;
-  const completed = new Promise<string>((resolve, reject) => {
-    resolveCompleted = resolve;
-    rejectCompleted = reject;
-  });
+  const { promise: ready, resolve: resolveReady, reject: rejectReady } = promiseBarrier<string>();
+  const { promise: contended, resolve: resolveContended } = promiseBarrier<void>();
+  const { promise: completed, resolve: resolveCompleted, reject: rejectCompleted } = promiseBarrier<string>();
   let diagnostic = "";
   let output = "";
   let lines = "";

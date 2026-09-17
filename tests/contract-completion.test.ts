@@ -1,3 +1,4 @@
+import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -35,8 +36,7 @@ async function dependentFixture(diverged: boolean) {
   }
   const childHead = repository.run(["-C", childPath, "rev-parse", "HEAD"]).trim();
   const delivered = await dependent.deliver();
-  assert.equal(delivered.kind, "accepted");
-  if (delivered.kind !== "accepted") throw new Error("expected an accepted dependent delivery");
+  assert.ok(delivered.kind === "accepted", "expected delivered.kind = \"accepted\"");
   const placement = delivered.value.placement;
   assert.equal(placement && "refusal" in placement ? placement.refusal.kind : undefined, "prerequisites-unsatisfied");
   await primary.deliver();
@@ -54,8 +54,7 @@ test("review before delivery records one leading fact and delivery later claims 
   const placement = review.value.placement;
   assert.equal(placement && "refusal" in placement ? placement.refusal.kind : undefined, "delivery-missing");
   const delivered = await contract.deliver();
-  assert.equal(delivered.kind, "accepted");
-  if (delivered.kind !== "accepted") throw new Error("expected an accepted delivery");
+  assert.ok(delivered.kind === "accepted", "expected delivered.kind = \"accepted\"");
   assert.deepEqual(
     delivered.facts.map((fact) => fact.kind),
     ["bound", "deliver", "claimed"],
@@ -69,8 +68,7 @@ test("review before delivery records one leading fact and delivery later claims 
 test("review after delivery uses the same completion node without replaying delivery facts", async () => {
   const { contract } = await fixture();
   const delivered = await contract.deliver();
-  assert.equal(delivered.kind, "accepted");
-  if (delivered.kind !== "accepted") throw new Error("expected an accepted delivery");
+  assert.ok(delivered.kind === "accepted", "expected delivered.kind = \"accepted\"");
   assert.equal(delivered.value.completion, undefined);
   assert.deepEqual(
     delivered.facts.map((fact) => fact.kind),
@@ -128,8 +126,7 @@ test("automatic dependent completion reports a Verification stop without placing
   ).keiyaku;
   const dependentState = await dependent.state();
   const first = await dependent.deliver();
-  assert.equal(first.kind, "accepted");
-  if (first.kind !== "accepted") throw new Error("expected an accepted dependent delivery");
+  assert.ok(first.kind === "accepted", "expected first.kind = \"accepted\"");
   assert.deepEqual(first.value.verification, { failure: "unknown-exit" });
   assert.equal(first.value.placement, undefined);
   await primary.deliver();
@@ -173,10 +170,7 @@ import { EMPTY_WORKTREE_HOOKS } from "../src/git/hooks.js";
 import { type ContractId } from "../src/core/facts/types.js";
 
 function deferred() {
-  let resolve!: () => void;
-  const promise = new Promise<void>((done) => {
-    resolve = done;
-  });
+  const { promise: promise, resolve } = promiseBarrier<void>();
   return { promise, resolve };
 }
 
@@ -475,8 +469,7 @@ test("reintegrated candidates retain every scratch leak instead of replacing the
     { RACED: raced, EXTERNAL_HEAD: repository.run(["rev-parse", "HEAD"]).trim() },
     async (gitPath) => Keiyaku.of({ repo: await Repo.at({ path: repository.path, gitPath }), id }).deliver(),
   );
-  assert.equal(delivered.kind, "accepted");
-  if (delivered.kind !== "accepted") throw new Error("expected delivery");
+  assert.ok(delivered.kind === "accepted", "expected delivered.kind = \"accepted\"");
   const leaked = delivered.cleanup.filter((issue) => issue.kind === "worktree-leak");
   try {
     assert.equal(leaked.length, 2);

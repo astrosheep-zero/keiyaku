@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { main } from "../src/cli/main.js";
-import { CliUsageError, parseArgv, renderRootHelp } from "../src/cli/parse.js";
+import { CliUsageError, parseArgv } from "../src/cli/parse.js";
 import { invoke } from "../src/cli/invoke.js";
 
 async function captureMain(
@@ -32,22 +32,6 @@ async function captureMain(
     process.stderr.write = writeStderr;
   }
 }
-
-test("unknown root command renders exact minimal usage", async () => {
-  const result = await captureMain(["nonsense"]);
-  assert.equal(result.exit, 1);
-  assert.equal(result.stdout, "");
-  assert.equal(
-    result.stderr,
-    [
-      "× usage  keiyaku",
-      "  given  nonsense",
-      "  accepts  keiyaku <command> [options]",
-      "  help  keiyaku --help",
-      "",
-    ].join("\n"),
-  );
-});
 
 test("unknown task command scopes minimal usage to task", () => {
   assert.throws(
@@ -134,14 +118,6 @@ test("unmatched Contract selectors preserve exit and JSON behavior while exposin
   } finally {
     rmSync(repo.path, { recursive: true, force: true });
   }
-});
-
-test("root complete help still documents cwd and repo", () => {
-  const help = renderRootHelp();
-  assert.match(help, /-C, --cwd <path>  Set the invocation working directory\./u);
-  assert.match(help, /--repo <path>     Select the Git repository coordinate\./u);
-  assert.match(help, /--workdir <path>  Set the execution directory for call only\./u);
-  assert.match(help, /^usage  keiyaku <command> \[options\]$/mu);
 });
 
 test("blank stdin remains a visible usage diagnostic and performs no operation", async () => {

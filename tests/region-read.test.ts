@@ -6,7 +6,7 @@ import test from "node:test";
 import { invoke as invokeRaw, type InvocationResult } from "../src/cli/invoke.js";
 import { CliUsageError, parseArgv as parseInvocation, type ParsedExecution } from "../src/cli/parse.js";
 import { renderText } from "../src/cli/render/text.js";
-import { Keiyaku, Repo, type ContractId } from "../src/index.js";
+import { Keiyaku, Repo } from "../src/index.js";
 import { kanshi } from "../src/kanshi/index.js";
 import { repositoryWithMain } from "./support/library-verbs.js";
 import { World } from "../src/world.js";
@@ -226,21 +226,6 @@ test("CLI Region renders grouped overlaps, empty facts, and refuses deleted dial
   );
 });
 
-test("Kanshi Region path results contain no delivery or audit path facts", async () => {
-  const repository = repositoryWithMain();
-  const { id } = await bind(repository, "No actual paths", ["src/**"]);
-  const report = await read(repository, { kind: "path", patterns: ["src/file.ts"] });
-  assert.equal(report.region?.kind, "present");
-  if (report.region?.kind !== "present") return;
-  assert.deepEqual(report.region.value, {
-    kind: "path",
-    patterns: ["src/file.ts"],
-    overlaps: [{ contract: id as ContractId, patterns: [{ mine: "src/file.ts", theirs: "src/**" }] }],
-  });
-  assert.equal(JSON.stringify(report.region.value).includes("diff"), false);
-  assert.equal(JSON.stringify(report.region.value).includes("conflict"), false);
-});
-
 test("Kanshi validates Region selections and query patterns", async () => {
   const repository = repositoryWithMain();
   const { id } = await bind(repository, "Literal paths", ["docs/**"]);
@@ -324,8 +309,7 @@ test("a malformed active document fails only the selected Region section", async
     "published",
   );
   const report = await read(repository, { kind: "declarations" });
-  assert.equal(report.contracts.kind, "present");
-  if (report.contracts.kind !== "present") return;
+  assert.ok(report.contracts.kind === "present", "expected report.contracts.kind = \"present\"");
   const row = report.contracts.value.rows.find((candidate) => candidate.id === id);
   assert.equal(row?.title, null);
   assert.equal(row?.verification, undefined);

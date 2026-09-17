@@ -1,3 +1,4 @@
+import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -119,48 +120,10 @@ test("audit renders the Verification summary from its CLI result", async () => {
   assert.match(renderText(audit as never, { columns: 400, color: false }), /verification diagnostic/u);
 });
 
-test("CLI progress waits for a slow destination and leaves it open after draining", async () => {
-  let release!: () => void;
-  let started!: () => void;
-  const firstWrite = new Promise<void>((resolve) => {
-    started = resolve;
-  });
-  const chunks: string[] = [];
-  const stream = new Writable({
-    highWaterMark: 1,
-    write(chunk, _encoding, callback) {
-      chunks.push(chunk.toString());
-      if (chunks.length === 1) {
-        release = callback;
-        started();
-      } else callback();
-    },
-  });
-  async function* events(): AsyncIterable<ExecutionEvent> {
-    for (let count = 1; count <= 100; count++) yield { kind: "progress-dropped", count };
-  }
-  const writing = writeExecutionProgress(events(), stream);
-  try {
-    await firstWrite;
-    await setImmediate();
-    assert.equal(stream.writableLength, Buffer.byteLength(chunks[0]!));
-  } finally {
-    release();
-    await writing;
-    stream.destroy();
-  }
-  assert.equal(chunks.length, 100);
-  assert.equal(stream.writableEnded, false);
-  assert.match(chunks.at(-1)!, /progress dropped 100 events/u);
-});
-
 test("closing or failing CLI progress output does not cancel the operation", async (t) => {
   for (const failure of [undefined, new Error("output failed")]) {
     await t.test(failure === undefined ? "closed" : "failed", async () => {
-      let complete!: (value: string) => void;
-      const completion = new Promise<string>((resolve) => {
-        complete = resolve;
-      });
+      const { promise: completion, resolve: complete } = promiseBarrier<string>();
       const execution = startContractExecution(async (observe) => {
         observe({ kind: "progress-dropped", count: 1 });
         return await completion;

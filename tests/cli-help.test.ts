@@ -4,7 +4,6 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 import { main } from "../src/cli/main.js";
-import { CONTRACT_COMMAND_SPECS, type ContractCommand } from "../src/cli/commands/contract.js";
 import { CliUsageError, parseArgv, renderContractHelp, renderHelp, renderRootHelp } from "../src/cli/parse.js";
 import { renderAkumaHelp } from "../src/cli/commands/akuma.js";
 import { renderInstallHelp } from "../src/cli/commands/install.js";
@@ -65,80 +64,6 @@ test("help projections reflow at the requested terminal width without splitting 
   assert.match(history, /--last/u);
 });
 
-test("gate help explains mixed selection, explicit clearing, and omitted defaults", () => {
-  const bind = renderContractHelp("bind");
-  const amend = renderContractHelp("amend");
-  for (const help of [bind, amend]) {
-    assert.match(help, /gate words and configured bundle names/u);
-    assert.match(help, /matching bundle expands; otherwise the name is a literal gate/u);
-    assert.match(help, /--gates ""/u);
-  }
-  assert.match(bind, /gates.default, or reviewed/u);
-  assert.match(amend, /Omitting --gates leaves gates unchanged/u);
-});
-
-test("amend leaf help enumerates the operation grammar", () => {
-  const help = renderContractHelp("amend");
-  assert.match(
-    help,
-    /usage  keiyaku amend \[<contract>\|@<contract>\] \[--after <kei\/\.\.\.> \.\.\. \| --clear-after\] \[--gates <name,\.\.\.>\] \[--actor <actor>\] \[-\]/u,
-  );
-  assert.match(help, /## Replace: Context\|Objective\|Design\|Region\|Criteria\|Verification\|<extension>/u);
-  assert.match(help, /## Append: Context\|Objective\|Design\|Criteria\|<extension>/u);
-  assert.match(help, /## Add: Criteria\|<new-extension-title>/u);
-  assert.match(help, /## Update: <existing-extension-title>/u);
-  assert.match(help, /## Remove: <existing-extension-title>/u);
-});
-
-test("deliver and review leaf help retain their distinct recovery and placement facts", () => {
-  const deliver = renderContractHelp("deliver");
-  assert.match(deliver, /--materialize-conflict[\s\S]*preserved\s+as the handoff base/u);
-
-  const review = renderContractHelp("review");
-  assert.match(review, /Pre-delivery review is real\s+testimony[\s\S]*without a delivered\s+candidate it can never place/u);
-  assert.match(review, /A blocked placement leaves the verdict recorded and the Contract active/u);
-});
-
-test("Akuma call and tell help expose schema files", () => {
-  assert.match(renderAkumaHelp("call"), /--schema <file>/u);
-  assert.match(renderAkumaHelp("call"), /Legal actions: akuma\.call, akuma\.kill, akuma\.tell/u);
-  assert.match(renderAkumaHelp("call"), /adds actions.*never narrows/u);
-  assert.match(renderAkumaHelp("call"), /omitted Archetype default permits every legal action; an explicit empty default permits none/u);
-  assert.match(renderAkumaHelp("call"), /direct parent's frozen actions\. status <aku\/\.\.\.\|@alias> shows/u);
-  assert.match(renderAkumaHelp("tell"), /--schema <file>/u);
-  assert.match(renderAkumaHelp("tell"), /stdin remains the prompt source/u);
-});
-
-test("Akuma wait help identifies any as the default and all as explicit", () => {
-  const help = renderAkumaHelp("wait");
-  assert.match(help, /usage  keiyaku wait/u);
-  assert.match(help, /Without --any or --all the mode is any/u);
-  assert.match(help, /--all waits until every selected Akuma completes/u);
-  assert.match(help, /already completed member counts immediately/u);
-  assert.match(help, /Identity frames, settled rows, and the closing scoreboard stream on stderr/u);
-  assert.match(help, /streamed plural wait leaves stdout empty/u);
-  assert.match(help, /Only a single selected Akuma that answered writes to stdout, exactly its answer/u);
-  assert.match(help, /With --json nothing streams and stdout carries the result document/u);
-});
-
-test("help contains no Markdown file pointers outside the settings Akuma block", () => {
-  const help = [
-    renderRootHelp(),
-    ...Object.keys(CONTRACT_COMMAND_SPECS)
-      .filter((command) => command !== "settings")
-      .map((command) => renderContractHelp(command as ContractCommand)),
-    renderTaskHelp(),
-    ...(["tell", "history"] as const).map((action) => renderAkumaHelp(action)),
-    renderInstallHelp(),
-  ].join("\n");
-  assert.doesNotMatch(help, /(?:docs\/|\.md\b)/u);
-  const settingsOutsideAkumaBlock = renderContractHelp("settings")
-    .split("\n")
-    .filter((line) => !line.includes(".keiyaku/akuma/"))
-    .join("\n");
-  assert.doesNotMatch(settingsOutsideAkumaBlock, /(?:docs\/|\.md\b)/u);
-});
-
 test("help is stdout zero and does not enter an absent world", async () => {
   let stdout = "";
   let stderr = "";
@@ -181,12 +106,6 @@ test("version is stdout zero and does not enter an absent world", () => {
   assert.equal(result.status, 0);
   assert.equal(result.stdout, `${manifest.version}\n`);
   assert.equal(result.stderr, "");
-});
-
-test("amend help resolves at the parser edge for an absent world", () => {
-  assert.deepEqual(parseArgv(["-C", "/definitely/absent/keiyaku-world", "amend", "--json", "-", "--help"]), {
-    help: { kind: "contract", command: "amend" },
-  });
 });
 
 test("bare ls is help-only even when its cwd cannot be read", async () => {

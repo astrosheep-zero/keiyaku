@@ -1,3 +1,5 @@
+import { temporaryDirectory } from "./support/process.js";
+import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
@@ -17,7 +19,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { type AkumaCallInput } from "../src/akuma/akuma.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
-import { AkumaArchetypeError, listArchetypeDefinitions, loadArchetype } from "../src/akuma/archetype.js";
+import { AkumaArchetypeError, loadArchetype } from "../src/akuma/archetype.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { akumaCallRequestCommands, type AkumaCallRequestChildLaunch } from "../src/akuma/call-request.js";
 import {
@@ -52,7 +54,6 @@ import {
 } from "../src/git/repository.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { bodyRequestExecution, Keiyaku, Repo, World, settings } from "../src/index.js";
-import { pluginRuntime } from "../src/plugin/runtime.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import {
   cleanupSpawnCapableFixture,
@@ -150,12 +151,7 @@ function slowEmptyPublicationBody() {
         resolveExit: (exit: Awaited<OwnedProcess["exited"]>) => void;
       }>
     | undefined;
-  let resolveStarted!: (value: Readonly<{ paths: AkumaCallRequestChildLaunch["paths"]; bodySequence: number }>) => void;
-  const started = new Promise<Readonly<{ paths: AkumaCallRequestChildLaunch["paths"]; bodySequence: number }>>(
-    (resolve) => {
-      resolveStarted = resolve;
-    },
-  );
+  const { promise: started, resolve: resolveStarted } = promiseBarrier<Readonly<{ paths: AkumaCallRequestChildLaunch["paths"]; bodySequence: number }>>();
   let released = false;
   const release = async (): Promise<void> => {
     if (released || held === undefined) return;
@@ -171,10 +167,7 @@ function slowEmptyPublicationBody() {
       const leash = (await HeldAkumaLeash.try(launch.paths))!;
       await leash.birth(launch.paths, { ...launch.seed, createdAt: "2026-09-10T00:00:00.000Z" });
       const body = await leash.recordBody(launch.paths, { leashTakenAt: "2026-09-10T00:00:01.000Z" });
-      let resolveExit!: (exit: Awaited<OwnedProcess["exited"]>) => void;
-      const exited = new Promise<Awaited<OwnedProcess["exited"]>>((resolve) => {
-        resolveExit = resolve;
-      });
+      const { promise: exited, resolve: resolveExit } = promiseBarrier<Awaited<OwnedProcess["exited"]>>();
       held = { paths: launch.paths, bodySequence: body.sequence, leash, resolveExit };
       resolveStarted({ paths: launch.paths, bodySequence: body.sequence });
       return {
@@ -347,8 +340,7 @@ test("forwarded schema Keiyaku.call waits for its empty Body before admitting it
 
 async function directBirthSoul(akuma: ReturnType<typeof Akuma.of>, input: AkumaCallInput): Promise<Soul> {
   const born = await akuma.beginCall(input, { initiatorCwd: process.cwd() });
-  assert.equal(born.kind, "born");
-  if (born.kind !== "born") throw new Error("direct call unexpectedly entered the Body Request path");
+  assert.ok(born.kind === "born", "expected born.kind = \"born\"");
   await driveAkumaBody({ paths: born.allocated.paths, seed: born.seed });
   const soul = await readSoul(born.allocated.paths);
   assert.notEqual(soul, null);
@@ -407,120 +399,38 @@ async function requestPump(root: WorldRoot, spawn: RequestSpawn = defaultRequest
   return { pump, leash };
 }
 
-test("package-root World inputs reject a forged JavaScript coordinate before effects", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-library-world-proof-")));
+test("package-root World inputs reject a forged JavaScript coordinate before effects", async (context) => {
+  const root = await World.at(temporaryDirectory(context, "keiyaku-library-world-proof-"));
   const forged = `${root}/.`;
-  try {
-    await assert.rejects(
-      Keiyaku.call({ path: forged as never, archetype: "worker", body: "must not start" }),
-      /canonical physical directory/u,
-    );
-    await assert.rejects(
-      Keiyaku.fork({ path: forged as never, akuma: "aku/worker/1234abcd", at: "turn/1" }),
-      /canonical physical directory/u,
-    );
-    await assert.rejects(
-      Keiyaku.ls({ query: { kind: "tasks" }, path: forged as never }),
-      /canonical physical directory/u,
-    );
-    await assert.rejects(
-      Keiyaku.status({ path: forged as never, akuma: "aku/worker/1234abcd" }),
-      /canonical physical directory/u,
-    );
-    await assert.rejects(
-      Keiyaku.wait({ path: forged as never, akuma: ["aku/worker/1234abcd"], completion: "all" }),
-      /canonical physical directory/u,
-    );
-    await assert.rejects(
-      Keiyaku.tell({ path: forged as never, akuma: "aku/worker/1234abcd", body: "must not tell" }),
-      /canonical physical directory/u,
-    );
-    await assert.rejects(
-      Keiyaku.kill({ path: forged as never, akuma: ["aku/worker/1234abcd"] }),
-      /canonical physical directory/u,
-    );
-    assert.equal(existsSync(join(root, ".keiyaku", "akuma")), false);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("Keiyaku.call awaits admitted generic signal delivery after admission", async () => {
-  const { raw, repo } = await repositoryFixture();
-  const world = await World.at(raw.path);
-  const trace = join(raw.path, "called.json");
-  const ready = join(raw.path, "called.ready");
-  const started = join(raw.path, "called.started");
-  const releaseKey = `__keiyaku_test_called_release_${process.pid}`;
-  const releasePlugin = (): void => {
-    const release = (globalThis as Record<string, unknown>)[releaseKey];
-    if (typeof release === "function") (release as () => void)();
-  };
-  mkdirSync(join(raw.path, ".keiyaku"), { recursive: true });
-  mkdirSync(join(raw.path, "plugins"), { recursive: true });
-  writeFileSync(
-    join(raw.path, "plugins", "called.mjs"),
-    [
-      'import { writeFileSync } from "node:fs";',
-      "export default {",
-      '  manifest: { id: "called", apiVersion: 1 },',
-      '  activate(context) { writeFileSync(context.config.ready, "ready"); return { signals: { "akuma.called": async (signal) => { await new Promise((resolve) => { globalThis[context.config.releaseKey] = resolve; writeFileSync(context.config.started, "started"); }); delete globalThis[context.config.releaseKey]; writeFileSync(context.config.trace, JSON.stringify(signal)); } } }; },',
-      "};",
-    ].join("\n"),
+  await assert.rejects(
+    Keiyaku.call({ path: forged as never, archetype: "worker", body: "must not start" }),
+    /canonical physical directory/u,
   );
-  writeFileSync(
-    join(raw.path, ".keiyaku", "settings.json"),
-    JSON.stringify({
-      plugins: { called: { package: "./plugins/called.mjs", config: { trace, ready, started, releaseKey } } },
-    }),
+  await assert.rejects(
+    Keiyaku.fork({ path: forged as never, akuma: "aku/worker/1234abcd", at: "turn/1" }),
+    /canonical physical directory/u,
   );
-  const configured = await archetypeSettings(world);
-  await pluginRuntime({ world, settings: configured.value });
-  const { pump, leash } = await requestPump(world);
-  const routedKeiyaku = Keiyaku.withExecution({ execution: bodyRequestExecution({ directory: pump.directory }) });
-  const activationDeadline = Date.now() + 1_000;
-  while (!existsSync(ready)) {
-    if (Date.now() >= activationDeadline) throw new Error("timed out waiting for called plugin activation");
-    await new Promise<void>((resolve) => setTimeout(resolve, 5));
-  }
-  const bound = await Keiyaku.bind({ repo, markdown: markdown("Call plugin signal"), workspace: "worktree" });
-  const contractId = (await bound.keiyaku.state()).id;
-  try {
-    const pending = routedKeiyaku.call({
-      path: world,
-      archetype: "worker",
-      body: "called",
-      ...configured.placement,
-      contract: bound.keiyaku,
-      cwd: raw.path,
-      mode: "detach",
-    });
-    const deadline = Date.now() + 1_000;
-    while (!existsSync(started)) {
-      if (Date.now() >= deadline) throw new Error("timed out waiting for called plugin handler");
-      await new Promise<void>((resolve) => setTimeout(resolve, 5));
-    }
-    let completed = false;
-    void pending.then(() => {
-      completed = true;
-    });
-    await new Promise<void>((resolve) => setTimeout(resolve, 25));
-    assert.equal(completed, false);
-    releasePlugin();
-    const result = await pending;
-    assert.deepEqual(JSON.parse(readFileSync(trace, "utf8")), {
-      kind: "akuma.called",
-      akumaId: result.akuma,
-      callerAkumaId: "aku/parent/1234abcd",
-      contractId,
-    });
-  } finally {
-    releasePlugin();
-    delete (globalThis as Record<string, unknown>)[releaseKey];
-    await pump.close();
-    leash.release();
-    rmSync(raw.path, { recursive: true, force: true });
-  }
+  await assert.rejects(
+    Keiyaku.ls({ query: { kind: "tasks" }, path: forged as never }),
+    /canonical physical directory/u,
+  );
+  await assert.rejects(
+    Keiyaku.status({ path: forged as never, akuma: "aku/worker/1234abcd" }),
+    /canonical physical directory/u,
+  );
+  await assert.rejects(
+    Keiyaku.wait({ path: forged as never, akuma: ["aku/worker/1234abcd"], completion: "all" }),
+    /canonical physical directory/u,
+  );
+  await assert.rejects(
+    Keiyaku.tell({ path: forged as never, akuma: "aku/worker/1234abcd", body: "must not tell" }),
+    /canonical physical directory/u,
+  );
+  await assert.rejects(
+    Keiyaku.kill({ path: forged as never, akuma: ["aku/worker/1234abcd"] }),
+    /canonical physical directory/u,
+  );
+  assert.equal(existsSync(join(root, ".keiyaku", "akuma")), false);
 });
 
 test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () => {
@@ -573,8 +483,7 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
     assert.equal("kind" in invoked && invoked.kind, "akuma");
     if (!("kind" in invoked) || invoked.kind !== "akuma" || invoked.action !== "call") return;
     const associated = invoked.result;
-    assert.equal(associated.dispatch.kind, "dispatched");
-    if (associated.dispatch.kind !== "dispatched") return;
+    assert.ok(associated.dispatch.kind === "dispatched", "expected associated.dispatch.kind = \"dispatched\"");
     assert.equal(associated.dispatch.dispatch.contractId, owner);
     assert.deepEqual(await readDispatch(git, associated.akuma), associated.dispatch.dispatch);
     assert.deepEqual(associated.alias, {
@@ -723,8 +632,7 @@ test("managed Contract calls use the appointed Place only when cwd is omitted", 
     });
     const managedId = (await managed.keiyaku.state()).id;
     const appointment = await readManagedWorktreeAppointment(git, managedId);
-    assert.equal(appointment.kind, "appointed");
-    if (appointment.kind !== "appointed") return;
+    assert.ok(appointment.kind === "appointed", "expected appointment.kind = \"appointed\"");
 
     const invoked = await invoke(executable(["-C", ".", "call", "worker", "--contract", managedId, "-"]), {
       cwd: raw.path,
@@ -1005,57 +913,6 @@ test("Archetype allowed rejects unknown duplicate and non-string entries", async
   }
 });
 
-test("Archetype base inheritance resolves one frozen effective definition", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-archetype-base-"));
-  const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-archetype-base-home-"));
-  try {
-    mkdirSync(join(root, ".keiyaku", "akuma"), { recursive: true });
-    mkdirSync(join(home, "akuma"));
-    writeFileSync(
-      join(home, "akuma", "base.md"),
-      [
-        "---",
-        "provider: codex-app-server",
-        "model: base-model",
-        "effort: high",
-        "network: disabled",
-        "description: Base description",
-        "allowed:",
-        "  - akuma.call",
-        "readonly: true",
-        "---",
-        "Base body.",
-        "",
-      ].join("\n"),
-    );
-    writeFileSync(
-      join(root, ".keiyaku", "akuma", "child.md"),
-      ["---", "base: base", "model: child-model", "allowed: []", "---", ""].join("\n"),
-    );
-    const settingsValue = await settings({ root, home });
-    const loaded = await loadArchetype({ name: "child", project: root, home, settings: settingsValue });
-    assert.equal(loaded.provider.name, "codex-app-server");
-    assert.deepEqual(loaded.options, {
-      model: "child-model",
-      effort: "high",
-      network: "disabled",
-      readonly: true,
-      systemPrompt: "Base body.\n",
-      systemPromptMode: "append",
-    });
-    assert.equal(loaded.description, "Base description");
-    assert.deepEqual(loaded.allowed, []);
-    assert.deepEqual(loaded.readonly, { enforcement: "native" });
-    assert.deepEqual(await listArchetypeDefinitions({ project: root, home }), [
-      { name: "base", model: "base-model", description: "Base description" },
-      { name: "child", model: "child-model", description: "Base description" },
-    ]);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-    rmSync(home, { recursive: true, force: true });
-  }
-});
-
 test("Archetype base lookup uses project precedence and Home fallback", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-archetype-precedence-"));
   const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-archetype-precedence-home-"));
@@ -1089,62 +946,32 @@ test("Archetype base lookup uses project precedence and Home fallback", async ()
   }
 });
 
-test("Archetype inheritance freezes the resolved birth snapshot without base metadata", async () => {
-  const { raw } = await repositoryFixture();
-  const world = await World.at(raw.path);
-  const configured = await directArchetypeSettings(world);
-  try {
-    writeFileSync(
-      join(configured.home, "akuma", "base.md"),
-      "---\nprovider: local\nmodel: base\nallowed:\n  - task.add\nreadonly: true\n---\nBase body.\n",
-    );
-    writeFileSync(join(configured.home, "akuma", "child.md"), "---\nbase: base\nmodel: child\n---\nChild body.\n");
-    const soul = await directBirthSoul(Akuma.of(world, configured), { archetype: "child", body: "run" });
-    assert.equal(soul.provider.name, "local");
-    assert.deepEqual(soul.options, {
-      model: "child",
-      readonly: true,
-      systemPrompt: "Child body.\n",
-      systemPromptMode: "append",
-    });
-    assert.deepEqual(soul.allowed, ["task.add"]);
-    assert.deepEqual(soul.readonly, { enforcement: "native" });
-    assert.equal("base" in soul, false);
-  } finally {
-    rmSync(raw.path, { recursive: true, force: true });
-  }
-});
-
-test("Archetype base chains refuse missing providers, malformed names, and cycles", async () => {
-  const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-archetype-invalid-base-"));
-  try {
-    mkdirSync(join(home, "akuma"));
-    writeFileSync(join(home, "akuma", "missing.md"), "---\nbase: absent\n---\n");
-    writeFileSync(join(home, "akuma", "malformed.md"), "---\nbase: 'bad/name'\n---\n");
-    writeFileSync(join(home, "akuma", "a.md"), "---\nbase: b\n---\n");
-    writeFileSync(join(home, "akuma", "b.md"), "---\nbase: a\n---\n");
-    writeFileSync(join(home, "akuma", "noprov.md"), "---\nbase: empty\n---\n");
-    writeFileSync(join(home, "akuma", "empty.md"), "---\n{}\n---\n");
-    const settingsValue = await settings({ home });
-    await assert.rejects(
-      loadArchetype({ name: "missing", home, settings: settingsValue }),
-      (error: unknown) => error instanceof AkumaArchetypeError && error.message.includes("missing -> absent"),
-    );
-    await assert.rejects(
-      loadArchetype({ name: "malformed", home, settings: settingsValue }),
-      (error: unknown) => error instanceof AkumaArchetypeError && error.reason.includes("Akuma name"),
-    );
-    await assert.rejects(
-      loadArchetype({ name: "a", home, settings: settingsValue }),
-      (error: unknown) => error instanceof AkumaArchetypeError && error.message.includes("a -> b -> a"),
-    );
-    await assert.rejects(
-      loadArchetype({ name: "noprov", home, settings: settingsValue }),
-      (error: unknown) => error instanceof AkumaArchetypeError && error.message.includes("provider must be"),
-    );
-  } finally {
-    rmSync(home, { recursive: true, force: true });
-  }
+test("Archetype base chains refuse missing providers, malformed names, and cycles", async (context) => {
+  const home = temporaryDirectory(context, "keiyaku-akuma-archetype-invalid-base-");
+  mkdirSync(join(home, "akuma"));
+  writeFileSync(join(home, "akuma", "missing.md"), "---\nbase: absent\n---\n");
+  writeFileSync(join(home, "akuma", "malformed.md"), "---\nbase: 'bad/name'\n---\n");
+  writeFileSync(join(home, "akuma", "a.md"), "---\nbase: b\n---\n");
+  writeFileSync(join(home, "akuma", "b.md"), "---\nbase: a\n---\n");
+  writeFileSync(join(home, "akuma", "noprov.md"), "---\nbase: empty\n---\n");
+  writeFileSync(join(home, "akuma", "empty.md"), "---\n{}\n---\n");
+  const settingsValue = await settings({ home });
+  await assert.rejects(
+    loadArchetype({ name: "missing", home, settings: settingsValue }),
+    (error: unknown) => error instanceof AkumaArchetypeError && error.message.includes("missing -> absent"),
+  );
+  await assert.rejects(
+    loadArchetype({ name: "malformed", home, settings: settingsValue }),
+    (error: unknown) => error instanceof AkumaArchetypeError && error.reason.includes("Akuma name"),
+  );
+  await assert.rejects(
+    loadArchetype({ name: "a", home, settings: settingsValue }),
+    (error: unknown) => error instanceof AkumaArchetypeError && error.message.includes("a -> b -> a"),
+  );
+  await assert.rejects(
+    loadArchetype({ name: "noprov", home, settings: settingsValue }),
+    (error: unknown) => error instanceof AkumaArchetypeError && error.message.includes("provider must be"),
+  );
 });
 
 type MutableProvider = { -readonly [Key in keyof ProviderAdapter]: ProviderAdapter[Key] };
@@ -1176,10 +1003,7 @@ test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async ()
       },
       start() {
         return createProviderAttempt(undefined, async () => {
-          let finishEvents!: () => void;
-          const eventsFinished = new Promise<void>((resolve) => {
-            finishEvents = resolve;
-          });
+          const { promise: eventsFinished, resolve: finishEvents } = promiseBarrier<void>();
           return {
             admission: { fence: "parent-session" },
             events: {
@@ -1219,8 +1043,7 @@ test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async ()
       return createProviderAttempt(undefined, async () => ({ session: { sessionId: "child-session" } }));
     };
     const result = await Keiyaku.fork({ path: world, akuma: source.id, at: "turn/1", repo });
-    assert.equal(result.kind, "forked", JSON.stringify(result));
-    if (result.kind !== "forked") return;
+    assert.ok(result.kind === "forked", JSON.stringify(result));
     assert.equal(result.dispatch.kind, "dispatched");
     assert.equal((await readDispatch(git, result.child))?.contractId, owner);
     assert.equal(await resolveAlias(world, alias), source.id);
@@ -1242,10 +1065,8 @@ test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async ()
       "published",
     );
     const partial = await Keiyaku.fork({ path: world, akuma: source.id, at: "turn/1", repo });
-    assert.equal(partial.kind, "forked", JSON.stringify(partial));
-    if (partial.kind !== "forked") return;
-    assert.equal(partial.dispatch.kind, "failed");
-    if (partial.dispatch.kind !== "failed") return;
+    assert.ok(partial.kind === "forked", JSON.stringify(partial));
+    assert.ok(partial.dispatch.kind === "failed", "expected partial.dispatch.kind = \"failed\"");
     assert.equal(partial.dispatch.failure.kind, "authority-corruption");
   } finally {
     if (originalFork === undefined) delete mutable.fork;

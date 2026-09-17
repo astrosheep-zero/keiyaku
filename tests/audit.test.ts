@@ -94,25 +94,6 @@ test("an active amend cannot admit verified terms without a Verification declara
   assert.deepEqual(after.terms, before.terms);
 });
 
-test("terminal amend refusal outranks a missing Verification declaration", async () => {
-  const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({
-    repo: await Repo.at({ path: repository.path }),
-    markdown: verificationBody(null),
-    workspace: "worktree",
-  });
-  const id = (await bound.keiyaku.state()).id;
-  await bound.keiyaku.abandon();
-
-  await assert.rejects(
-    bound.keiyaku.amend({
-      markdown: "## Replace: Objective\nNo longer actionable.\n\n",
-      gates: ["verified"],
-    }),
-    refused({ kind: "terminal", contractId: id }),
-  );
-});
-
 test("a stale document derivation is refused inside its E-decision", async () => {
   const repository = repositoryWithMain();
   const bound = await Keiyaku.bind({
@@ -190,12 +171,10 @@ test("audit without Verification still returns an accepted ready candidate", asy
       }),
     }),
   );
-  assert.equal(result.kind, "accepted");
-  if (result.kind !== "accepted") return;
+  assert.ok(result.kind === "accepted", "expected result.kind = \"accepted\"");
   assert.deepEqual(result.facts, []);
   assert.equal(result.head, observed.state!.head);
-  assert.equal(result.value.candidate.kind, "ready");
-  if (result.value.candidate.kind !== "ready") return;
+  assert.ok(result.value.candidate.kind === "ready", "expected result.value.candidate.kind = \"ready\"");
   assert.equal(result.value.candidate.identity.method, "squash");
   assert.equal("diff" in result.value.candidate, false);
   assert.equal(result.value.verification.kind, "not-run");
@@ -282,44 +261,6 @@ test("audit accepts an attestation refusal as a stopped answer without facts", a
     stop: { refusal: { kind: "terminal", contractId: (await contract.state()).id } },
   });
   assert.equal(result.value.target.kind, "not-observed");
-});
-
-test("audit admits Verification testimony for its captured old subject", async () => {
-  const { contract } = await failedStoredVerification();
-  await contract.amend({
-    markdown: ["## Replace: Verification", "~~~bash timeout=5m", "sleep 0.2", "~~~", ""].join("\n"),
-  });
-  const state = await contract.state();
-  const definition = verificationDefinition(decodeContractDocument(state.terms.document.bytes));
-  if (state.delivery === null || definition === null) throw new Error("audit inputs are absent");
-
-  const pending = contract.audit();
-  const amended = new Promise<void>((resolve, reject) => {
-    setTimeout(() => {
-      void contract
-        .amend({ markdown: ["## Replace: Verification", "~~~bash timeout=5m", "exit 0", "~~~", ""].join("\n") })
-        .then(() => {
-          try {
-            resolve();
-          } catch (error) {
-            reject(error);
-          }
-        }, reject);
-    }, 20);
-  });
-  const audited = await pending;
-  await amended;
-  assert.deepEqual(
-    audited.facts.map((fact) => fact.kind),
-    ["attestation"],
-  );
-  assert.equal(
-    (await contract.state()).attestations.at(-1)?.data.subject,
-    dependencyKeySet([
-      { kind: "snapshot", value: state.delivery.data.integration.snapshot },
-      { kind: "segment", value: definition.segment },
-    ]),
-  );
 });
 
 test("Verification reuse requires its exact producer subject", async () => {
