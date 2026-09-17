@@ -1,6 +1,6 @@
 {
   "name": "@astrosheep/keiyaku",
-  "version": "4.5.23",
+  "version": "4.5.24",
   "workspaces": [
     "plugins/*"
   ],
