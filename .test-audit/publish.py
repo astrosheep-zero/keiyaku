@@ -9,7 +9,7 @@ def git(*args):
     return subprocess.check_output(['git', *args], text=True).strip()
 
 
-branches = {1: 'test-diet/04-unit-boundaries', 2: 'test-diet/05-akuma-lifecycle', 3: 'test-diet/06-git-cli-composition', 4: 'test-diet/07-owner-boundary-tests', 5: 'test-diet/08-native-runner-fixtures'}
+branches = {1: 'test-diet/04-unit-boundaries', 2: 'test-diet/05-akuma-lifecycle', 3: 'test-diet/06-git-cli-composition', 4: 'test-diet/07-owner-boundary-tests', 5: 'test-diet/08-native-runner-fixtures', 6: 'test-diet/09-smaller-integration-witnesses'}
 allowed_scripts = {'scripts/compile-tests.mjs', 'scripts/run-tests.mjs', 'scripts/architecture/policy-capabilities.ts'}
 for recipe_file in sorted(Path(sys.argv[1]).glob('batch-*.json')):
     recipe = json.loads(recipe_file.read_text())
