@@ -6,18 +6,27 @@ import { AkumaHandle } from "../../src/akuma/akuma-handle.js";
 import { driveAkumaBody, type TellWakeRuntime } from "../../src/akuma/body.js";
 import { HeldAkumaLeash, initializeHeart } from "../../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../../src/akuma/identity.js";
-import { createProviderAttempt, type ProviderAdapter, type Session } from "../../src/akuma/provider.js";
+import {
+  createProviderAttempt,
+  type DriveInput,
+  type ProviderAdapter,
+  type Session,
+} from "../../src/akuma/provider.js";
 import { World } from "../../src/world.js";
 
 type FixtureSession = Omit<Session, "admission" | "forceDispose"> &
   Readonly<{ admission?: Session["admission"]; forceDispose?: Session["forceDispose"] }>;
 
-export function fixtureAttempt(input: Readonly<{ signal: AbortSignal }>, establish: () => Promise<FixtureSession>) {
+export function fixtureAttempt(
+  input: Readonly<{ signal: AbortSignal }>,
+  establish: () => Promise<FixtureSession>,
+  fence = "tell-fixture-turn",
+) {
   return createProviderAttempt(input.signal, async (custody) => {
     const fixture = await establish();
     const session: Session = {
       ...fixture,
-      admission: fixture.admission ?? { fence: "tell-fixture-turn" },
+      admission: fixture.admission ?? { fence },
       forceDispose: fixture.forceDispose ?? fixture.abort,
     };
     let settleClosed!: () => void;
@@ -119,4 +128,12 @@ export async function bornWorld(root: string, suffix: string) {
     holder.release();
   }
   return { world, allocated, akuma: Akuma.select(world, allocated.id) };
+}
+
+/** A fresh admitting adapter; session custody still uses the real ProviderAttempt. */
+export function fixtureAdapter(establish: (input: DriveInput) => Promise<FixtureSession>): ProviderAdapter {
+  return {
+    admitOptions: (options) => ({ kind: "admitted", options }),
+    start: (input) => fixtureAttempt(input, () => establish(input)),
+  };
 }

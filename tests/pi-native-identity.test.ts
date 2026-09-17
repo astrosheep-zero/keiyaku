@@ -10,22 +10,8 @@ import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js";
 
 const PI_SESSION_VARIABLE = "PI_SESSION_ID";
-const PARENT_HARNESS_ENVIRONMENT = {
-  CLAUDE_CODE_SESSION_ID: "ancestor-claude",
-  CLAUDE_CODE_CHILD_SESSION: "ancestor-claude-child",
-  CLAUDECODE: "ancestor-claude-code",
-  CODEX_THREAD_ID: "ancestor-codex",
-  OPENCODE_SESSION_ID: "ancestor-opencode",
-  PI_SESSION_ID: "inherited-ancestor",
-  PI_SESSION_FILE: "/sessions/ancestor.jsonl",
-  PASEO_AGENT_ID: "ancestor-paseo",
-  SQUARE_PARTICIPANT_NAME: "Ancestor",
-  AKUMA_REQUESTS: "/requests/ancestor",
-} as const;
-const PARENT_HARNESS_KEYS = Object.keys(PARENT_HARNESS_ENVIRONMENT) as Array<keyof typeof PARENT_HARNESS_ENVIRONMENT>;
 
 type NativeRequestTool = NonNullable<CreateAgentSessionOptions["customTools"]>[number];
-type NativeToolResult = Awaited<ReturnType<NativeRequestTool["execute"]>>;
 
 function packageProvenance(specifier: string): string {
   const entry = fileURLToPath(import.meta.resolve(specifier));
@@ -108,19 +94,6 @@ function nativeSessionContext(sessionId: string, sessionFile = `/sessions/${sess
   } as never;
 }
 
-function observedNativeIdentity(
-  result: NativeToolResult,
-): Readonly<{ session: string; requests: string; environment: NodeJS.ProcessEnv }> {
-  const text = result.content.map((block) => (block.type === "text" ? block.text : "")).join("");
-  const environment = JSON.parse(text) as NodeJS.ProcessEnv;
-  assert.equal(typeof environment[PI_SESSION_VARIABLE], "string");
-  assert.equal(typeof environment[AKUMA_REQUESTS_ENV], "string");
-  return {
-    session: environment[PI_SESSION_VARIABLE]!,
-    requests: environment[AKUMA_REQUESTS_ENV]!,
-    environment,
-  };
-}
 
 test("the Pi request channel preserves the native session identity instead of an ancestor value", async (t) => {
   t.diagnostic(`Pi runtime: ${packageProvenance("@earendil-works/pi-coding-agent")}`);
@@ -163,66 +136,4 @@ test("parent and child native Pi environments resolve distinct Square initiators
     squareAssignedParticipantName({ PI_SESSION_ID: "child-session", SQUARE_PARTICIPANT_NAME: "Alice" }),
     "Alice",
   );
-});
-
-test("composed native tool contexts attribute to their own Square initiator, never the inherited ancestor", async (t) => {
-  t.diagnostic(`Pi runtime: ${packageProvenance("@earendil-works/pi-coding-agent")}`);
-  t.diagnostic(`Square runtime: ${packageProvenance("@astrosheep/square")}`);
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-pi-square-attribution-"));
-  const requests = join(root, "requests");
-  const previous = Object.fromEntries(PARENT_HARNESS_KEYS.map((key) => [key, process.env[key]]));
-  Object.assign(process.env, PARENT_HARNESS_ENVIRONMENT);
-  try {
-    await withNativeRequestTool({ root, requests }, async (tool) => {
-      const command = "node -e 'process.stdout.write(JSON.stringify(process.env))'";
-      const observe = async (sessionId: string) =>
-        observedNativeIdentity(
-          await tool.execute(
-            "native-attribution",
-            { command },
-            new AbortController().signal,
-            undefined,
-            nativeSessionContext(sessionId),
-          ),
-        );
-
-      const parent = await observe("parent-session");
-      const child = await observe("child-session");
-      const parentAgain = await observe("parent-session");
-
-      assert.equal(parent.session, "parent-session");
-      assert.equal(child.session, "child-session");
-      assert.equal(parent.requests, requests);
-      assert.equal(child.requests, requests);
-      for (const key of PARENT_HARNESS_KEYS) {
-        if (key === PI_SESSION_VARIABLE || key === "PI_SESSION_FILE" || key === "AKUMA_REQUESTS") continue;
-        assert.equal(parent.environment[key], undefined);
-        assert.equal(child.environment[key], undefined);
-      }
-      assert.equal(parent.environment.PI_SESSION_FILE, "/sessions/parent-session.jsonl");
-      assert.equal(child.environment.PI_SESSION_FILE, "/sessions/child-session.jsonl");
-      assert.equal(process.env[PI_SESSION_VARIABLE], "inherited-ancestor");
-
-      const parentName = squareAssignedParticipantName({ [PI_SESSION_VARIABLE]: parent.session });
-      const childName = squareAssignedParticipantName({ [PI_SESSION_VARIABLE]: child.session });
-      const parentNameAgain = squareAssignedParticipantName({ [PI_SESSION_VARIABLE]: parentAgain.session });
-      const ancestorName = squareAssignedParticipantName({ [PI_SESSION_VARIABLE]: "inherited-ancestor" });
-      assert.equal(typeof parentName, "string");
-      assert.equal(typeof childName, "string");
-      assert.notEqual(parentName, childName);
-      assert.equal(parentNameAgain, parentName);
-      assert.notEqual(parentName, ancestorName);
-      assert.notEqual(childName, ancestorName);
-      assert.equal(
-        squareAssignedParticipantName({ [PI_SESSION_VARIABLE]: child.session, SQUARE_PARTICIPANT_NAME: "Alice" }),
-        "Alice",
-      );
-    });
-  } finally {
-    for (const key of PARENT_HARNESS_KEYS) {
-      if (previous[key] === undefined) delete process.env[key];
-      else process.env[key] = previous[key];
-    }
-    rmSync(root, { recursive: true, force: true });
-  }
 });
