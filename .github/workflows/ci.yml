@@ -1,4 +1,4 @@
-name: Publish pinned test-diet candidates
+name: Publish checked test scheduling batch
 on:
   push:
     branches: [chore/publish-test-diet-20260918]
@@ -13,12 +13,11 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - name: Preserve exact candidate recipes outside the checkout
+      - name: Preserve exact reviewed patch outside checkout
         run: cp -R .test-audit "$RUNNER_TEMP/test-diet-publish"
-      - name: Publish only new review branches, never main
+      - name: Publish only the new review branch
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git checkout --detach 2b98e8eb509424ebc59739baab459f4479d3fd24
-          git cherry-pick ecadd1847385f8e74f7645fcb1d37c180e66aa74
-          python3 "$RUNNER_TEMP/test-diet-publish/publish.py" "$RUNNER_TEMP/test-diet-publish"
+          git checkout --detach 4a5dccaa7c6d577a4ffc6b05bf26d6c9d02e84d8
+          python3 "$RUNNER_TEMP/test-diet-publish/publish-next.py" "$RUNNER_TEMP/test-diet-publish/next.json"
