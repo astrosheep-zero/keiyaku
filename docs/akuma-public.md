@@ -69,6 +69,17 @@ unavailability evidence. Hung, untidy, and resume-unsupported state preserve
 their durable cause and available facts; the surface does not prescribe the
 flagship's next action.
 
+A Schema-bearing Tell carries a provider answer contract. The contract may be
+the package's own schema value or any Standard Schema v1 value; a vendor value
+is normalized at admission, and decoding stays a caller-side operation over the
+exact answer. The contract remains inside simple JSON shape vocabulary: a
+projected document that steps outside it refuses at submission, naming the
+offending keyword, so a fragile or unrepresentable constraint surfaces before
+provider work rather than as a mysterious answer. A caller who owns an arbitrary
+JSON Schema and its decoder signs that waiver explicitly and is not subject to
+the refusal. Schema construction only makes a shape machine-usable; it never
+makes the answer true.
+
 Lifecycle observation must not manufacture an unclean end by combining old
 running evidence with a Body's later leash release. A free-seat judgment uses
 fresh Heart evidence protected against succession for that bounded observation;

@@ -87,7 +87,8 @@ test("package root exposes the same public Akuma values without private mechanis
   }
   const schema: import("../src/index.js").Schema<{ ok: boolean }> = root.Schema.zod(z.object({ ok: z.boolean() }));
   const options: import("../src/index.js").AkumaTellOptions<{ ok: boolean }> = { schema };
-  assert.deepEqual(options.schema.decode({ ok: true }), { ok: true });
+  assert.strictEqual(options.schema, schema);
+  assert.deepEqual(schema.decode({ ok: true }), { ok: true });
 });
 
 test("Akuma.birth has no prompt and select is synchronous", async () => {

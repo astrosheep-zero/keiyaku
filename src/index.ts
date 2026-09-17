@@ -19,6 +19,8 @@ export type {
   KillEvidence,
   JsonSchema,
   JsonSchemaDocument,
+  StandardSchemaV1,
+  SchemaLike,
   AkuId,
   AkumaStatus,
   ActivityHistory,
@@ -27,6 +29,7 @@ export type {
   AllowedActions,
 } from "./akuma/index.js";
 export { settings } from "./settings.js";
+export { z } from "zod";
 export { World, WorldError } from "./world.js";
 export type { WorldResolution, WorldResolutionInput, WorldRoot } from "./world.js";
 export type {

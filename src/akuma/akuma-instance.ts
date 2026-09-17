@@ -17,7 +17,7 @@ import { projectTurns, selectHistory, type ActivityHistory } from "./projection.
 import { settings as readSettings } from "../settings.js";
 import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
-import { schemaJsonText, type Schema } from "./schema.js";
+import { schemaFromStandard, schemaJsonText, type Schema, type StandardSchemaV1 } from "./schema.js";
 import { abortable } from "./abort.js";
 
 const HISTORY_LIMIT = 12;
@@ -43,7 +43,7 @@ export type AkumaBirthInput = Readonly<{
 }>;
 
 export type AkumaTellOptions<T> = Readonly<{
-  schema: Schema<T>;
+  schema: Schema<T> | StandardSchemaV1<T>;
   interrupt?: boolean;
   initiator?: string;
 }>;
@@ -99,16 +99,18 @@ async function recordSchemaTell<T>(
     id: AkuId;
     body: string;
     tellId: string;
-    options: AkumaTellOptions<T>;
+    schema: Schema<T>;
+    interrupt?: boolean;
+    initiator?: string;
     root: WorldRoot;
   }>,
 ): Promise<TellAdmission> {
-  const { id, body, tellId, options, root } = input;
-  if (options.interrupt === true) {
+  const { id, body, tellId, schema, root } = input;
+  if (input.interrupt === true) {
     const interrupted = await new AkumaHandle(id, root).interrupt(body, {
       tellId,
-      schemaJson: schemaJsonText(options.schema),
-      ...(options.initiator === undefined ? {} : { initiator: options.initiator }),
+      schemaJson: schemaJsonText(schema),
+      ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
     });
     if (interrupted.kind === "unavailable") {
       throw new AkumaProviderError(`schema interrupt unavailable: ${interrupted.evidence}`);
@@ -116,8 +118,8 @@ async function recordSchemaTell<T>(
     return recordedTell(interrupted.tell);
   }
   const admitted = await new AkumaHandle(id, root).tell(body, tellId, undefined, undefined, {
-    schemaJson: schemaJsonText(options.schema),
-    ...(options.initiator === undefined ? {} : { initiator: options.initiator }),
+    schemaJson: schemaJsonText(schema),
+    ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
   });
   return recordedTell(admitted);
 }
@@ -205,19 +207,23 @@ export class Akuma {
   async tell<T>(text: string, options?: AkumaTellOptions<T> | Readonly<{ initiator?: string }>): Promise<string | T> {
     if (typeof text !== "string") throw new TypeError("Akuma tell text must be a string");
     const tellId = randomUUID();
+    const schemaOptions = options !== undefined && "schema" in options ? options : undefined;
+    const schema = schemaOptions === undefined ? undefined : schemaFromStandard(schemaOptions.schema);
     const recorded =
-      options === undefined || !("schema" in options)
+      schemaOptions === undefined || schema === undefined
         ? await recordPlainTell(this.id, this.root, text, tellId, options?.initiator)
         : await recordSchemaTell({
             id: this.id,
             body: text,
             tellId,
-            options,
+            schema,
             root: this.root,
+            ...(schemaOptions.interrupt === undefined ? {} : { interrupt: schemaOptions.interrupt }),
+            ...(schemaOptions.initiator === undefined ? {} : { initiator: schemaOptions.initiator }),
           });
     const outcome = await awaitTellOutcome(this.paths, recorded.tellId);
     if (outcome.kind !== "answered") outcomeError(outcome);
-    if (options === undefined || !("schema" in options)) return outcome.answer;
+    if (schema === undefined) return outcome.answer;
     const raw = outcome.answerJson ?? outcome.answer;
     let parsed: unknown;
     try {
@@ -226,7 +232,7 @@ export class Akuma {
       throw new AkumaDecodeError(error instanceof Error ? error.message : "Answer is not valid JSON", outcome.answer);
     }
     try {
-      return options.schema.decode(parsed);
+      return schema.decode(parsed);
     } catch (error) {
       throw new AkumaDecodeError(
         error instanceof Error ? error.message : "Answer failed schema decode",

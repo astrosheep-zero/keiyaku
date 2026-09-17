@@ -49,6 +49,24 @@ vocabulary, while an explicit empty default permits none. A nested call can use
 only actions permitted by its direct parent Soul. Use `status <aku/...|@alias>`
 to inspect the born worker's frozen effective actions.
 
+## Answer Schemas
+
+For a schema-bearing call or tell through the public API, pass the schema
+directly — `{ schema: z.object({ claim: z.string() }) }` — importing `z` from
+the package root next to `Akuma`. Any Standard Schema v1 value works the same
+way, and the explicit `Schema.zod(...)` and `Schema.json(...)` forms remain
+available for callers who want them.
+
+Keep an answer contract inside simple JSON shape vocabulary: objects, arrays,
+strings, numbers, booleans, enums, literals, and optional or nullable fields.
+Do not attach `.max`, `.min`, `.regex`, `.refine`, `.transform`, or other
+constraint methods. The provider must satisfy the contract, and a fragile or
+unrepresentable constraint fails the loop after submission; the seam refuses
+such a schema at submission and names the offending keyword instead. Enforce
+bounds, formats, and cross-field rules in ordinary caller code after the answer
+arrives, and treat a full JSON Schema through `Schema.json(...)` as the explicit
+waiver a caller signs only when it owns that risk.
+
 ## Akuma Names
 
 An Akuma name selects a reusable worker configuration, not an individual worker.

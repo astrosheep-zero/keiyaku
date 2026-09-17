@@ -9,7 +9,7 @@ export type {
 } from "./akuma-instance.js";
 export type { InterruptReceipt, KillEvidence } from "./akuma.js";
 export { Schema } from "./schema.js";
-export type { JsonSchema, JsonSchemaDocument } from "./schema.js";
+export type { JsonSchema, JsonSchemaDocument, StandardSchemaV1, SchemaLike } from "./schema.js";
 export type { AkuId } from "./identity.js";
 export type { AkumaStatus } from "./akuma.js";
 export type { ActivityHistory, ActivityRow } from "./projection.js";

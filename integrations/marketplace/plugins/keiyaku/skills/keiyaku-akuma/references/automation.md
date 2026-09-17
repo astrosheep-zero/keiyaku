@@ -53,14 +53,13 @@ investigation, not as a supposedly fresh judge of its own earlier answer.
 ## Public Entry And A Single Structured Turn
 
 Run an ESM script (`.mjs`) in a project where `@astrosheep/keiyaku` resolves.
-The Zod examples also need `zod` available to the script. A globally installed
-CLI alone does not establish Node package resolution for an arbitrary script.
+Import `z` from the package root; a globally installed CLI alone does not
+establish Node package resolution for an arbitrary script.
 Use `keiyaku ls aku/` to select an available Archetype; names and upstream model
 availability are installation-specific.
 
 ```js
-import { Akuma, Schema, World } from "@astrosheep/keiyaku";
-import { z } from "zod";
+import { Akuma, World, z } from "@astrosheep/keiyaku";
 
 const root = await World.at(process.cwd());
 const archetype = process.env.AKUMA_ARCHETYPE;
@@ -74,11 +73,11 @@ const worker = await Akuma.birth(archetype, {
 console.error("worker", worker.id); // Keep the complete AkuId.
 await worker.idle(); // Let the prompt-free birth Body settle before a schema Tell.
 
-const Finding = Schema.zod(z.object({
+const Finding = z.object({
   claim: z.string(),
   evidence: z.array(z.object({ path: z.string(), observation: z.string() })),
   unknowns: z.array(z.string()),
-}).strict());
+});
 
 const finding = await worker.tell(
   "Read the repository guidance and relevant owner documents. Read only; " +
@@ -90,9 +89,19 @@ console.log(JSON.stringify(finding, null, 2));
 ```
 
 `birth` does not submit a prompt. Plain `tell` returns answer text; schema
-`tell` returns the decoded value, not a JSON string to scrape. For a JSON
-Schema and a custom decoder, use `Schema.json(document, decode)` instead of
-`Schema.zod(...)`.
+`tell` returns the decoded value, not a JSON string to scrape. Pass the schema
+directly; any Standard Schema v1 value works the same way. The explicit
+`Schema.zod(...)` wrapper still works, and `Schema.json(document, decode)` is
+the escape hatch for a caller-owned JSON Schema and custom decoder.
+
+Keep an answer contract inside simple JSON shape vocabulary: objects, arrays,
+strings, numbers, booleans, enums, literals, and optional or nullable fields.
+Do not attach `.max`, `.min`, `.regex`, `.refine`, `.transform`, or other
+constraint methods. The provider must satisfy the contract, and a fragile or
+unrepresentable constraint fails the loop after submission; the seam refuses
+such a schema at submission and names the offending keyword instead. Enforce
+bounds, formats, and cross-field rules in ordinary caller code after the answer
+arrives.
 
 Schema makes shape machine-usable, not claims true. Include evidence and
 unknowns in the requested value; acceptance still needs a suitable judge.
@@ -106,14 +115,14 @@ the prompts, schemas, routing, and selection to the task rather than always
 running this exact pipeline.
 
 ```js
-const Claims = Schema.zod(z.object({
-  claims: z.array(z.object({ id: z.string(), text: z.string() })).max(12),
-}).strict());
-const Verdict = Schema.zod(z.object({
+const Claims = z.object({
+  claims: z.array(z.object({ id: z.string(), text: z.string() })),
+});
+const Verdict = z.object({
   verdict: z.enum(["supported", "contradicted", "unknown"]),
   evidence: z.array(z.object({ path: z.string(), observation: z.string() })),
   reason: z.string(),
-}).strict());
+});
 
 // Caller-owned concurrency helper, not a Keiyaku API.
 async function mapSettled(items, concurrency, run) {
@@ -144,6 +153,9 @@ const { claims } = await worker.tell(
 );
 if (new Set(claims.map(c => c.id)).size !== claims.length) {
   throw new Error("Duplicate claim ids");
+}
+if (claims.length > 12) {
+  throw new Error("Claim list exceeded the 12-claim budget");
 }
 
 async function freshJudge(prompt) {
