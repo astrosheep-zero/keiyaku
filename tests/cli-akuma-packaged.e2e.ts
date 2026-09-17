@@ -283,7 +283,7 @@ function runPackagedCli(
   input: Readonly<{ cwd: string; env?: NodeJS.ProcessEnv; stdin?: string }>,
 ): Promise<Readonly<{ code: number; stdout: string; stderr: string }>> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ["--no-warnings", packagedCli, ...args], {
+    const child = spawn(process.execPath, [packagedCli, ...args], {
       cwd: input.cwd,
       env: input.env ?? process.env,
       stdio: ["pipe", "pipe", "pipe"],

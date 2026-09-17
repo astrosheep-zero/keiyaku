@@ -66,6 +66,7 @@ import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { insertTellFact } from "../src/akuma/heart/tells.js";
 import { turnRecipe } from "../src/akuma/turn-drive.js";
 import { World } from "../src/world.js";
+import { removeTempDirectory } from "./support/process.js";
 
 async function fixture() {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-heart-")));
@@ -633,7 +634,7 @@ test("wake re-resolves a vanished recorded runtime through the production spawn 
     assert.equal(tells[0]?.state, "pending");
   } finally {
     await launched?.terminate(true).catch(() => undefined);
-    value.close();
+    await removeTempDirectory(value.root);
   }
 });
 
