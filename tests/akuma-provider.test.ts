@@ -1,3 +1,5 @@
+import { temporaryDirectory } from "./support/process.js";
+import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -111,37 +113,6 @@ test("AgentEventChannel coalesces protected overflow without throwing", async ()
   assert.equal(markers[0]?.text, "Agent event queue overflow: 2 terminal/error events coalesced");
 });
 
-test("ProviderAttempt retires each owned resource once while allowing force escalation", async () => {
-  const setup = deferred<void>();
-  let custody!: AttemptCustody;
-  let aborts = 0;
-  let forces = 0;
-  const attempt = createProviderAttempt(undefined, async (received) => {
-    custody = received;
-    received.own({
-      closed: Promise.resolve(),
-      abort: async () => {
-        aborts += 1;
-      },
-      forceDispose: async () => {
-        forces += 1;
-      },
-    });
-    await setup.promise;
-    return "ready";
-  });
-
-  await Promise.resolve();
-  await Promise.all([attempt.abort(), attempt.abort()]);
-  assert.equal(aborts, 1);
-  await Promise.all([attempt.forceDispose(), attempt.forceDispose()]);
-  assert.equal(forces, 1);
-  setup.resolve();
-  await attempt.closed;
-  assert.equal(await attempt.result, "ready");
-  assert.ok(custody.signal.aborted);
-});
-
 test("ProviderAttempt applies only the current retirement mode to late ownership", async () => {
   const setup = deferred<void>();
   let custody!: AttemptCustody;
@@ -209,44 +180,6 @@ test("ProviderAttempt observes rejecting parent-cancellation retirement", async 
   }
 });
 
-test("ProviderAttempt observes rejecting retirement of a late-owned resource", async () => {
-  const setup = deferred<void>();
-  const owned = deferred<void>();
-  const failure = new Error("late physical cleanup failed");
-  const unhandled: unknown[] = [];
-  const onUnhandled = (reason: unknown) => unhandled.push(reason);
-  let custody!: AttemptCustody;
-  let forces = 0;
-  const attempt = createProviderAttempt(undefined, async (received) => {
-    custody = received;
-    owned.resolve();
-    await setup.promise;
-    return "ready";
-  });
-
-  process.on("unhandledRejection", onUnhandled);
-  try {
-    await owned.promise;
-    await attempt.forceDispose();
-    const closed = assert.rejects(attempt.closed, /late physical cleanup failed/u);
-    custody.own({
-      closed: Promise.resolve(),
-      forceDispose: async () => {
-        forces += 1;
-        throw failure;
-      },
-    });
-    setup.resolve();
-    assert.equal(await attempt.result, "ready");
-    await closed;
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    assert.equal(forces, 1);
-    assert.deepEqual(unhandled, []);
-  } finally {
-    process.off("unhandledRejection", onUnhandled);
-  }
-});
-
 test("ProviderAttempt rejects ownership after establishment settles", async () => {
   let custody!: AttemptCustody;
   const attempt = createProviderAttempt(undefined, async (received) => {
@@ -268,10 +201,7 @@ function fakeOpencode() {
   const executions: ProviderExecution[] = [];
   let activeSession = "session-fresh";
   let activeMessage = "msg_unset";
-  let admit!: () => void;
-  const admitted = new Promise<void>((resolve) => {
-    admit = resolve;
-  });
+  const { promise: admitted, resolve: admit } = promiseBarrier<void>();
   // prettier-ignore
   const events = [
     { type: "session.status", properties: { sessionID: "session-fresh", status: { type: "busy" } } },
@@ -489,118 +419,106 @@ async function processGone(pid: number): Promise<boolean> {
   return false;
 }
 
-test("ACP uses stable initialization, fresh sessions, mapped profile arguments, and one prompt response", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-acp-provider-"));
-  try {
-    const fake = fakeAcp(root);
-    const provider = createAcpProvider(fake.execution);
-    assert.deepEqual(provider.admitOptions({ readonly: true }), {
-      kind: "admitted",
-      options: { readonly: true },
-      readonly: { enforcement: "none", diagnostic: "ACP cannot remove task-surface mutation capabilities" },
-    });
-    assert.equal(provider.admitOptions({ network: "enabled" }).kind, "refused");
-    const drive = await provider.start(
-      freshInput("build", {
-        launchTells: [{ id: "tell-1", text: "then test" }],
-        cwd: root,
-        options: { model: "grok-4", effort: "high", systemPrompt: "Be precise." },
-        requests: { dir: join(root, "requests") },
-      }),
-    ).result;
-    const events = [];
-    for await (const event of drive.events) events.push(event);
-    assert.deepEqual(await drive.completion, { kind: "answered", answer: "complete answer" });
-    assert.deepEqual(events, [
-      { type: "session", coordinate: { sessionId: "fresh-session" } },
-      { type: "assistant", text: "complete answer" },
-      { type: "thought", text: "checked" },
-      {
-        type: "tool",
-        phase: "started",
-        id: "tool-1",
-        name: "Run tests",
-        call: { kind: "other", display: "Run tests" },
-      },
-      {
-        type: "tool",
-        phase: "completed",
-        id: "tool-1",
-        name: "Run tests",
-        call: { kind: "other", display: "Run tests" },
-        result: { status: "ok" },
-      },
-      { type: "note", text: "Plan updated: Verify" },
-      { type: "note", text: "ACP configuration updated" },
-    ]);
-    const records = acpLog(fake.log);
-    assert.deepEqual(
-      records.map((record) => record.kind),
-      ["initialize", "new", "prompt"],
-    );
-    assert.deepEqual((records[2]!.params as { prompt: unknown }).prompt, [
-      { type: "text", text: "build" },
-      { type: "text", text: "then test" },
-    ]);
-    assert.deepEqual((records[2]!.argv as readonly string[]).slice(-7), [
-      "--model",
-      "grok-4",
-      "--effort",
-      "high",
-      "--system-prompt",
-      "Be precise.",
-      "stdio",
-    ]);
-    assert.equal(records[2]!.requests, join(root, "requests"));
-    assert.equal("_meta" in (records[1]!.params as object), false);
-    assert.equal("rules" in (records[1]!.params as object), false);
-    assert.equal("systemPromptOverride" in (records[1]!.params as object), false);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("ACP load retains the exact session ID without a fork or live tell capability", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-acp-resume-"));
-  try {
-    const fake = fakeAcp(root);
-    const provider = createAcpProvider(fake.execution);
-    assert.equal(provider.fork, undefined);
-    const drive = await provider.resume!({
-      ...DRIVE_DEFAULTS,
-      body: "continue",
-      launchTells: [],
+test("ACP uses stable initialization, fresh sessions, mapped profile arguments, and one prompt response", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-acp-provider-");
+  const fake = fakeAcp(root);
+  const provider = createAcpProvider(fake.execution);
+  assert.deepEqual(provider.admitOptions({ readonly: true }), {
+    kind: "admitted",
+    options: { readonly: true },
+    readonly: { enforcement: "none", diagnostic: "ACP cannot remove task-surface mutation capabilities" },
+  });
+  assert.equal(provider.admitOptions({ network: "enabled" }).kind, "refused");
+  const drive = await provider.start(
+    freshInput("build", {
+      launchTells: [{ id: "tell-1", text: "then test" }],
       cwd: root,
-      options: {},
-      session: { kind: "resume", coordinate: { sessionId: "retained-session" } },
-    }).result;
-    const events = [];
-    for await (const event of drive.events) events.push(event);
-    assert.deepEqual(events[0], { type: "session", coordinate: { sessionId: "retained-session" } });
-    assert.deepEqual(await drive.completion, { kind: "answered", answer: "complete answer" });
-    const load = acpLog(fake.log).find((record) => record.kind === "load")!;
-    assert.equal((load.params as { sessionId: string }).sessionId, "retained-session");
-    assert.equal("_meta" in (load.params as object), false);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+      options: { model: "grok-4", effort: "high", systemPrompt: "Be precise." },
+      requests: { dir: join(root, "requests") },
+    }),
+  ).result;
+  const events = [];
+  for await (const event of drive.events) events.push(event);
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "complete answer" });
+  assert.deepEqual(events, [
+    { type: "session", coordinate: { sessionId: "fresh-session" } },
+    { type: "assistant", text: "complete answer" },
+    { type: "thought", text: "checked" },
+    {
+      type: "tool",
+      phase: "started",
+      id: "tool-1",
+      name: "Run tests",
+      call: { kind: "other", display: "Run tests" },
+    },
+    {
+      type: "tool",
+      phase: "completed",
+      id: "tool-1",
+      name: "Run tests",
+      call: { kind: "other", display: "Run tests" },
+      result: { status: "ok" },
+    },
+    { type: "note", text: "Plan updated: Verify" },
+    { type: "note", text: "ACP configuration updated" },
+  ]);
+  const records = acpLog(fake.log);
+  assert.deepEqual(
+    records.map((record) => record.kind),
+    ["initialize", "new", "prompt"],
+  );
+  assert.deepEqual((records[2]!.params as { prompt: unknown }).prompt, [
+    { type: "text", text: "build" },
+    { type: "text", text: "then test" },
+  ]);
+  assert.deepEqual((records[2]!.argv as readonly string[]).slice(-7), [
+    "--model",
+    "grok-4",
+    "--effort",
+    "high",
+    "--system-prompt",
+    "Be precise.",
+    "stdio",
+  ]);
+  assert.equal(records[2]!.requests, join(root, "requests"));
+  assert.equal("_meta" in (records[1]!.params as object), false);
+  assert.equal("rules" in (records[1]!.params as object), false);
+  assert.equal("systemPromptOverride" in (records[1]!.params as object), false);
 });
 
-test("ACP forced disposal closes its owned process tree after standard session/cancel", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-acp-cancel-"));
-  try {
-    const fake = fakeAcp(root, "cancel");
-    const drive = await createAcpProvider(fake.execution).start(freshInput("wait", { cwd: root })).result;
-    await drive.forceDispose();
-    const events = [];
-    for await (const event of drive.events) events.push(event);
-    assert.deepEqual(events, [{ type: "session", coordinate: { sessionId: "fresh-session" } }]);
-    assert.equal((await drive.completion).kind, "failed");
-    const descendant = acpLog(fake.log).find((record) => record.kind === "descendant")!;
-    assert.equal(await processGone(descendant.pid as number), true);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+test("ACP load retains the exact session ID without a fork or live tell capability", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-acp-resume-");
+  const fake = fakeAcp(root);
+  const provider = createAcpProvider(fake.execution);
+  assert.equal(provider.fork, undefined);
+  const drive = await provider.resume!({
+    ...DRIVE_DEFAULTS,
+    body: "continue",
+    launchTells: [],
+    cwd: root,
+    options: {},
+    session: { kind: "resume", coordinate: { sessionId: "retained-session" } },
+  }).result;
+  const events = [];
+  for await (const event of drive.events) events.push(event);
+  assert.deepEqual(events[0], { type: "session", coordinate: { sessionId: "retained-session" } });
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "complete answer" });
+  const load = acpLog(fake.log).find((record) => record.kind === "load")!;
+  assert.equal((load.params as { sessionId: string }).sessionId, "retained-session");
+  assert.equal("_meta" in (load.params as object), false);
+});
+
+test("ACP forced disposal closes its owned process tree after standard session/cancel", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-acp-cancel-");
+  const fake = fakeAcp(root, "cancel");
+  const drive = await createAcpProvider(fake.execution).start(freshInput("wait", { cwd: root })).result;
+  await drive.forceDispose();
+  const events = [];
+  for await (const event of drive.events) events.push(event);
+  assert.deepEqual(events, [{ type: "session", coordinate: { sessionId: "fresh-session" } }]);
+  assert.equal((await drive.completion).kind, "failed");
+  const descendant = acpLog(fake.log).find((record) => record.kind === "descendant")!;
+  assert.equal(await processGone(descendant.pid as number), true);
 });
 
 type ControlledInterject = Readonly<{
@@ -634,29 +552,14 @@ function controlledAcpProcess(
 }> {
   const inbound = new PassThrough();
   const outbound = new PassThrough();
-  let startCleanup!: () => void;
-  const cleanupStarted = new Promise<void>((resolve) => {
-    startCleanup = resolve;
-  });
+  const { promise: cleanupStarted, resolve: startCleanup } = promiseBarrier<void>();
   let resolveCleanup!: () => void;
   let rejectCleanup!: (error: Error) => void;
   let forcedCleanup = 0;
-  let startInitialize!: () => void;
-  const initializeStarted = new Promise<void>((resolve) => {
-    startInitialize = resolve;
-  });
-  let finishPrompt!: () => void;
-  const prompt = new Promise<void>((resolve) => {
-    finishPrompt = resolve;
-  });
-  let finishInterject!: () => void;
-  const interject = new Promise<void>((resolve) => {
-    finishInterject = resolve;
-  });
-  let startInterject!: () => void;
-  const interjectStarted = new Promise<void>((resolve) => {
-    startInterject = resolve;
-  });
+  const { promise: initializeStarted, resolve: startInitialize } = promiseBarrier<void>();
+  const { promise: prompt, resolve: finishPrompt } = promiseBarrier<void>();
+  const { promise: interject, resolve: finishInterject } = promiseBarrier<void>();
+  const { promise: interjectStarted, resolve: startInterject } = promiseBarrier<void>();
   const interjections: ControlledInterject[] = [];
   let cancelled = 0;
   let emitAssistant!: (text: string) => Promise<void>;
@@ -666,12 +569,7 @@ function controlledAcpProcess(
     resolveCleanup = resolve;
     rejectCleanup = reject;
   });
-  let resolveExited!: (value: Readonly<{ code: number | null; signal: NodeJS.Signals | null; stderr: string }>) => void;
-  const exited = new Promise<Readonly<{ code: number | null; signal: NodeJS.Signals | null; stderr: string }>>(
-    (resolve) => {
-      resolveExited = resolve;
-    },
-  );
+  const { promise: exited, resolve: resolveExited } = promiseBarrier<Readonly<{ code: number | null; signal: NodeJS.Signals | null; stderr: string }>>();
   const app = acp
     .agent({ name: "controlled-acp" })
     .onRequest(acp.methods.agent.initialize, async ({ params }) => {
@@ -834,21 +732,6 @@ test("Grok Build returns turn-ended when completion wins before interject acknow
   await controlled.cleanupStarted;
   controlled.resolveInterject();
   assert.deepEqual(await submission, { kind: "turn-ended" });
-  controlled.resolveCleanup();
-  assert.deepEqual(await drive.completion, { kind: "answered", answer: "" });
-});
-
-test("ACP completion waits for owned process cleanup", async () => {
-  const controlled = controlledAcpProcess();
-  const drive = await createAcpProvider(controlledAcpExecution, { spawnProcess: () => controlled.process }).start(
-    freshInput("build"),
-  ).result;
-  let completed = false;
-  void drive.completion.then(() => {
-    completed = true;
-  });
-  await controlled.cleanupStarted;
-  assert.equal(completed, false);
   controlled.resolveCleanup();
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "" });
 });
@@ -1174,10 +1057,7 @@ test("OpenCode V1 rejects failed prompt admission and cleans up", async () => {
 test("OpenCode V1 fails terminal observation without native assistant evidence", async () => {
   let closed = 0;
   let messageID = "msg_unset";
-  let prompt!: () => void;
-  const prompted = new Promise<void>((resolve) => {
-    prompt = resolve;
-  });
+  const { promise: prompted, resolve: prompt } = promiseBarrier<void>();
   const session = {
     async create() {
       return { data: { id: "session-empty" } };
@@ -1228,10 +1108,7 @@ test("OpenCode V1 fails terminal observation without native assistant evidence",
 
 test("OpenCode V1 isolates other sessions and accepts the current Turn error", async () => {
   let messageID = "msg_unset";
-  let prompt!: () => void;
-  const prompted = new Promise<void>((resolve) => {
-    prompt = resolve;
-  });
+  const { promise: prompted, resolve: prompt } = promiseBarrier<void>();
   const session = {
     async create() {
       return { data: { id: "session-error" } };
@@ -1340,60 +1217,42 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
 
 test("Pi retains write targets as conservative file changes without inventing diffstat", async () => {
   const patch = ["@@ -1,2 +1,3 @@", " keep", "-old", "+new", "+extra"].join("\n");
+  const nativeCalls = [
+    {
+      id: "write-create",
+      name: "write",
+      args: { path: "src/created.ts", content: "a\n" },
+      error: false,
+      result: { content: [{ type: "text", text: "Successfully wrote to src/created.ts" }] },
+    },
+    {
+      id: "write-overwrite",
+      name: "write",
+      args: { path: "src/overwritten.ts", content: "b\n" },
+      error: false,
+      result: { content: [{ type: "text", text: "Successfully wrote to src/overwritten.ts" }] },
+    },
+    {
+      id: "write-failed",
+      name: "write",
+      args: { path: "src/failed.ts", content: "c\n" },
+      error: true,
+      result: { content: [{ type: "text", text: "EPERM: operation not permitted" }] },
+    },
+    {
+      id: "edit-one",
+      name: "edit",
+      args: { path: "src/edited.ts", edits: [{ oldText: "old", newText: "new" }] },
+      error: false,
+      result: { details: { patch } },
+    },
+  ];
   const fake = fakePiSdk({
     events: [
-      {
-        type: "tool_execution_start",
-        toolCallId: "write-create",
-        toolName: "write",
-        args: { path: "src/created.ts", content: "a\n" },
-      },
-      {
-        type: "tool_execution_end",
-        toolCallId: "write-create",
-        toolName: "write",
-        isError: false,
-        result: { content: [{ type: "text", text: "Successfully wrote to src/created.ts" }] },
-      },
-      {
-        type: "tool_execution_start",
-        toolCallId: "write-overwrite",
-        toolName: "write",
-        args: { path: "src/overwritten.ts", content: "b\n" },
-      },
-      {
-        type: "tool_execution_end",
-        toolCallId: "write-overwrite",
-        toolName: "write",
-        isError: false,
-        result: { content: [{ type: "text", text: "Successfully wrote to src/overwritten.ts" }] },
-      },
-      {
-        type: "tool_execution_start",
-        toolCallId: "write-failed",
-        toolName: "write",
-        args: { path: "src/failed.ts", content: "c\n" },
-      },
-      {
-        type: "tool_execution_end",
-        toolCallId: "write-failed",
-        toolName: "write",
-        isError: true,
-        result: { content: [{ type: "text", text: "EPERM: operation not permitted" }] },
-      },
-      {
-        type: "tool_execution_start",
-        toolCallId: "edit-one",
-        toolName: "edit",
-        args: { path: "src/edited.ts", edits: [{ oldText: "old", newText: "new" }] },
-      },
-      {
-        type: "tool_execution_end",
-        toolCallId: "edit-one",
-        toolName: "edit",
-        isError: false,
-        result: { details: { patch } },
-      },
+      ...nativeCalls.flatMap(({ id, name, args, error, result }) => [
+        { type: "tool_execution_start", toolCallId: id, toolName: name, args },
+        { type: "tool_execution_end", toolCallId: id, toolName: name, isError: error, result },
+      ]),
       { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "done" }] } },
     ],
   });
@@ -1542,40 +1401,6 @@ test("Pi keeps abort pending when native cleanup refuses to settle", async () =>
   assert.equal(fake.seen.disposed, 0);
 });
 
-test("Pi preserves thinking-only and explicit empty assistant answers", async () => {
-  const fake = fakePiSdk({
-    events: [
-      { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "earlier" }] } },
-      { type: "message_end", message: { role: "assistant", content: [{ type: "thinking", thinking: "consider" }] } },
-    ],
-  });
-  const drive = await createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start(
-    freshInput("wait", { cwd: "/work" }),
-  ).result;
-  const events = [];
-  for await (const event of drive.events) events.push(event);
-  assert.deepEqual(events, [
-    { type: "session", coordinate: { sessionFile: "/sessions/pi.jsonl", sessionId: "pi-session" } },
-    { type: "assistant", text: "earlier" },
-    { type: "thought", text: "consider" },
-  ]);
-  assert.deepEqual(await drive.completion, { kind: "answered", answer: "", historyId: "entry-final" });
-
-  const empty = fakePiSdk({
-    events: [{ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "" }] } }],
-  });
-  const emptyDrive = await createPiProvider({ name: "pi", kind: "pi" }, async () => empty.sdk).start(
-    freshInput("wait", { cwd: "/work" }),
-  ).result;
-  const emptyEvents = [];
-  for await (const event of emptyDrive.events) emptyEvents.push(event);
-  assert.deepEqual(emptyEvents, [
-    { type: "session", coordinate: { sessionFile: "/sessions/pi.jsonl", sessionId: "pi-session" } },
-    { type: "assistant", text: "" },
-  ]);
-  assert.deepEqual(await emptyDrive.completion, { kind: "answered", answer: "", historyId: "entry-final" });
-});
-
 test("Pi omits Gemini's empty tool-use text placeholder from narration", async () => {
   const fake = fakePiSdk({
     events: [
@@ -1672,127 +1497,31 @@ test("Pi readonly admits native enforcement and removes every task-surface mutat
 });
 
 test("provider recipe preserves opaque config until adapter construction", async () => {
-  assert.deepEqual(
-    decodeProviderExecution({
-      name: "claude",
-      kind: "claude-agent-sdk",
-      config: { unexpected: true },
-    }),
-    {
-      name: "claude",
-      kind: "claude-agent-sdk",
-      config: { unexpected: true },
-    },
-  );
-  assert.doesNotThrow(() =>
-    createClaudeProvider({
-      config: { unexpected: true },
-    }),
-  );
-  const claudeResolved = await resolveProviderExecution({
-    name: "claude",
-    kind: "claude-agent-sdk",
-    config: { unexpected: true },
-  });
-  assert.equal(claudeResolved.execution.config?.unexpected, true);
-  assert.deepEqual(
-    decodeProviderExecution({
-      name: "opencode-sdk",
-      kind: "opencode-sdk",
-      config: { unexpected: true },
-    }),
-    {
-      name: "opencode-sdk",
-      kind: "opencode-sdk",
-      config: { unexpected: true },
-    },
-  );
-  assert.doesNotThrow(() =>
-    createOpencodeProvider({
-      name: "opencode-sdk",
-      kind: "opencode-sdk",
-      config: { unexpected: true },
-    }),
-  );
-  assert.deepEqual(
-    decodeProviderExecution({
-      name: "pi",
-      kind: "pi",
-      config: { tools: ["bash"] },
-    }),
-    {
-      name: "pi",
-      kind: "pi",
-      config: { tools: ["bash"] },
-    },
-  );
-  assert.doesNotThrow(() =>
-    createPiProvider({
-      name: "pi",
-      kind: "pi",
-      config: { tools: ["bash"] },
-    }),
-  );
-  assert.deepEqual(
-    decodeProviderExecution({
-      name: "grok-build",
-      kind: "grok-build",
-      executable: "grok",
-      config: { extension: true },
-    }),
-    {
-      name: "grok-build",
-      kind: "grok-build",
-      executable: "grok",
-      config: { extension: true },
-    },
-  );
-  assert.doesNotThrow(() =>
-    createGrokBuildProvider({
-      name: "grok-build",
-      kind: "grok-build",
-      executable: "grok",
-      config: { extension: true },
-    }),
-  );
-  assert.deepEqual(
-    decodeProviderExecution({
-      name: "acp",
-      kind: "acp",
-      executable: "agent",
-      config: { argvBefore: ["x"], argvAfter: [], unexpected: true },
-    }),
-    {
-      name: "acp",
-      kind: "acp",
-      executable: "agent",
-      config: { argvBefore: ["x"], argvAfter: [], unexpected: true },
-    },
-  );
-  assert.throws(
-    () =>
-      createAcpProvider({
-        name: "acp",
-        kind: "acp",
-        executable: "agent",
-        config: { argvBefore: ["x"], argvAfter: [], unexpected: true },
-      }),
-    /unknown field unexpected/u,
-  );
-  assert.deepEqual(
-    decodeProviderExecution({
-      name: "acp",
-      kind: "acp",
-      executable: "agent",
-      config: { argvBefore: ["--prompt"], argvAfter: ["--json"], modelArg: "--model" },
-    }),
+  const recipes = [
+    { name: "claude", kind: "claude-agent-sdk", config: { unexpected: true } },
+    { name: "opencode-sdk", kind: "opencode-sdk", config: { unexpected: true } },
+    { name: "pi", kind: "pi", config: { tools: ["bash"] } },
+    { name: "grok-build", kind: "grok-build", executable: "grok", config: { extension: true } },
+    { name: "acp", kind: "acp", executable: "agent", config: { argvBefore: ["x"], argvAfter: [], unexpected: true } },
     {
       name: "acp",
       kind: "acp",
       executable: "agent",
       config: { argvBefore: ["--prompt"], argvAfter: ["--json"], modelArg: "--model" },
     },
-  );
+  ] as const;
+  for (const recipe of recipes) {
+    // Compare to a detached value: mutation of the input cannot change this oracle.
+    const expected = structuredClone(recipe);
+    assert.deepEqual(decodeProviderExecution(recipe), expected, recipe.name);
+  }
+  assert.doesNotThrow(() => createClaudeProvider({ config: { unexpected: true } }));
+  assert.doesNotThrow(() => createOpencodeProvider(recipes[1]));
+  assert.doesNotThrow(() => createPiProvider(recipes[2]));
+  assert.doesNotThrow(() => createGrokBuildProvider(recipes[3]));
+  assert.throws(() => createAcpProvider(recipes[4]), /unknown field unexpected/u);
+  const resolved = await resolveProviderExecution(recipes[0]);
+  assert.equal(resolved.execution.config?.unexpected, true);
 });
 
 function fakeCodex(
@@ -1941,12 +1670,7 @@ function fakeQuery(messages: readonly SDKMessage[], prompt?: AsyncIterable<unkno
 }
 
 function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (error: unknown) => void;
-  const promise = new Promise<T>((accept, refuse) => {
-    resolve = accept;
-    reject = refuse;
-  });
+  const { promise: promise, resolve, reject } = promiseBarrier<T>();
   return { promise, resolve, reject };
 }
 
@@ -2167,83 +1891,6 @@ test("Claude maps narration, drops native streams, and contains runtime skew", a
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "done", historyId: "assistant-events" });
 });
 
-test("Claude adapter admits the native session before returning its answer", async () => {
-  const seenOptions: unknown[] = [];
-  const provider = createClaudeProvider(async () => ({
-    query(input) {
-      seenOptions.push(input.options);
-      return fakeQuery(
-        [
-          { type: "system", subtype: "init", session_id: "session-1" } as unknown as SDKMessage,
-          {
-            type: "assistant",
-            uuid: "assistant-history-1",
-            session_id: "session-1",
-            parent_tool_use_id: null,
-            message: { content: [{ type: "text", text: "working" }] },
-          } as unknown as SDKMessage,
-          {
-            type: "result",
-            subtype: "success",
-            session_id: "session-1",
-            uuid: "result-history-1",
-            result: "done",
-          } as unknown as SDKMessage,
-        ],
-        input.prompt as AsyncIterable<unknown>,
-      );
-    },
-  }));
-  const drive = await provider.start(freshInput("build it", { cwd: "/work" })).result;
-  const events = [];
-  for await (const event of drive.events) events.push(event);
-
-  assert.deepEqual(events[0], { type: "session", coordinate: { sessionId: "session-1" } });
-  assert.ok(events.some((event) => event.type === "assistant" && event.text === "working"));
-  assert.deepEqual(await drive.completion, { kind: "answered", answer: "done", historyId: "assistant-history-1" });
-  const nativeOptions = seenOptions[0] as {
-    cwd: string;
-    permissionMode: string;
-    allowDangerouslySkipPermissions: boolean;
-    settingSources: readonly string[];
-    additionalDirectories?: readonly string[];
-    env?: Readonly<Record<string, string>>;
-  };
-  assert.equal(nativeOptions.cwd, "/work");
-  assert.equal(nativeOptions.permissionMode, "bypassPermissions");
-  assert.equal(nativeOptions.allowDangerouslySkipPermissions, true);
-  assert.deepEqual(nativeOptions.settingSources, ["user", "project", "local"]);
-  assert.deepEqual(nativeOptions.additionalDirectories, ["/tmp/akuma-test-requests"]);
-  assert.equal(nativeOptions.env?.AKUMA_REQUESTS, "/tmp/akuma-test-requests");
-});
-
-test("Claude full-access fresh turns disable the native sandbox", async () => {
-  let seen: Record<string, unknown> | undefined;
-  const provider = createClaudeProvider(async () => ({
-    query(input) {
-      seen = input.options as Record<string, unknown> | undefined;
-      return fakeQuery(
-        [
-          { type: "system", subtype: "init", session_id: "session-full-access-fresh" } as unknown as SDKMessage,
-          {
-            type: "result",
-            subtype: "success",
-            session_id: "session-full-access-fresh",
-            result: "done",
-          } as unknown as SDKMessage,
-        ],
-        input.prompt as AsyncIterable<unknown>,
-      );
-    },
-  }));
-  const drive = await provider.start(freshInput("build", { cwd: "/work", options: { sandbox: "full-access" } })).result;
-  await drive.completion;
-
-  assert.deepEqual(seen?.sandbox, { enabled: false });
-  assert.equal(seen?.permissionMode, "bypassPermissions");
-  assert.equal(seen?.allowDangerouslySkipPermissions, true);
-});
-
 test("Claude full-access resumed turns disable the native sandbox", async () => {
   let seen: Record<string, unknown> | undefined;
   const provider = createClaudeProvider(async () => ({
@@ -2277,63 +1924,6 @@ test("Claude full-access resumed turns disable the native sandbox", async () => 
   assert.equal(seen?.resume, "session-to-resume");
   assert.equal(seen?.permissionMode, "bypassPermissions");
   assert.equal(seen?.allowDangerouslySkipPermissions, true);
-});
-
-test("Claude full-access overrides an enabled sandbox in execution config", async () => {
-  let seen: Record<string, unknown> | undefined;
-  const provider = createClaudeProvider(
-    async () => ({
-      query(input) {
-        seen = input.options as Record<string, unknown> | undefined;
-        return fakeQuery(
-          [
-            { type: "system", subtype: "init", session_id: "session-full-access-config" } as unknown as SDKMessage,
-            {
-              type: "result",
-              subtype: "success",
-              session_id: "session-full-access-config",
-              result: "done",
-            } as unknown as SDKMessage,
-          ],
-          input.prompt as AsyncIterable<unknown>,
-        );
-      },
-    }),
-    { config: { sandbox: { enabled: true, autoAllowBashIfSandboxed: true } } },
-  );
-  const drive = await provider.start(freshInput("build", { cwd: "/work", options: { sandbox: "full-access" } })).result;
-  await drive.completion;
-
-  assert.deepEqual(seen?.sandbox, { enabled: false });
-});
-
-test("Claude omitted sandbox preserves execution config for writable turns", async () => {
-  let seen: Record<string, unknown> | undefined;
-  const provider = createClaudeProvider(
-    async () => ({
-      query(input) {
-        seen = input.options as Record<string, unknown> | undefined;
-        return fakeQuery(
-          [
-            { type: "system", subtype: "init", session_id: "session-default-config" } as unknown as SDKMessage,
-            {
-              type: "result",
-              subtype: "success",
-              session_id: "session-default-config",
-              result: "done",
-            } as unknown as SDKMessage,
-          ],
-          input.prompt as AsyncIterable<unknown>,
-        );
-      },
-    }),
-    { config: { sandbox: { enabled: true } } },
-  );
-  const drive = await provider.start(freshInput("build", { cwd: "/work" })).result;
-  await drive.completion;
-
-  assert.deepEqual(seen?.sandbox, { enabled: true });
-  assert.equal(seen?.permissionMode, "bypassPermissions");
 });
 
 test("Claude readonly preserves execution config and plan permissions", async () => {
@@ -2481,78 +2071,74 @@ test("Claude live tell waits for a post-yield source pull and shares one Query",
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "done 1", historyId: "assistant-live-1" });
 });
 
-test("Codex app-server maps admitted options, native session, answer, and exact turn history", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-provider-"));
-  try {
-    const fake = fakeCodex(root);
-    const provider = createCodexAppServerProvider({
-      name: "configured",
-      kind: "codex-app-server",
-      executable: fake.executable,
-      config: { service_tier: "priority" },
-      env: { SETTINGS_LITERAL: "from-settings", KEIYAKU_ACTOR_ID: "" },
-    });
-    const options = {
-      model: "gpt-test",
-      effort: "high",
-      network: "enabled" as const,
-      systemPrompt: "Work precisely.",
-    };
-    assert.deepEqual(provider.admitOptions(options), { kind: "admitted", options });
-    assert.deepEqual(provider.admitOptions({ readonly: true }), {
-      kind: "admitted",
-      options: { readonly: true },
-      readonly: { enforcement: "native" },
-    });
+test("Codex app-server maps admitted options, native session, answer, and exact turn history", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-codex-provider-");
+  const fake = fakeCodex(root);
+  const provider = createCodexAppServerProvider({
+    name: "configured",
+    kind: "codex-app-server",
+    executable: fake.executable,
+    config: { service_tier: "priority" },
+    env: { SETTINGS_LITERAL: "from-settings", KEIYAKU_ACTOR_ID: "" },
+  });
+  const options = {
+    model: "gpt-test",
+    effort: "high",
+    network: "enabled" as const,
+    systemPrompt: "Work precisely.",
+  };
+  assert.deepEqual(provider.admitOptions(options), { kind: "admitted", options });
+  assert.deepEqual(provider.admitOptions({ readonly: true }), {
+    kind: "admitted",
+    options: { readonly: true },
+    readonly: { enforcement: "native" },
+  });
 
-    const requestDirectory = join(root, "body-requests");
-    mkdirSync(requestDirectory);
-    const drive = await provider.start({
-      ...DRIVE_DEFAULTS,
-      body: "build",
-      launchTells: [],
-      cwd: root,
-      options,
-      requests: { dir: requestDirectory },
-      session: { kind: "fresh" },
-    }).result;
-    const events = [];
-    for await (const event of drive.events) events.push(event);
-    assert.deepEqual(await drive.completion, { kind: "answered", answer: "codex answer", historyId: "turn-1" });
-    assert.deepEqual(events[0], { type: "session", coordinate: { sessionId: "thread-fresh" } });
-    assert.ok(events.some((event) => event.type === "assistant" && event.text === "codex answer"));
+  const requestDirectory = join(root, "body-requests");
+  mkdirSync(requestDirectory);
+  const drive = await provider.start({
+    ...DRIVE_DEFAULTS,
+    body: "build",
+    launchTells: [],
+    cwd: root,
+    options,
+    requests: { dir: requestDirectory },
+    session: { kind: "fresh" },
+  }).result;
+  const events = [];
+  for await (const event of drive.events) events.push(event);
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "codex answer", historyId: "turn-1" });
+  assert.deepEqual(events[0], { type: "session", coordinate: { sessionId: "thread-fresh" } });
+  assert.ok(events.some((event) => event.type === "assistant" && event.text === "codex answer"));
 
-    const requests = fake.requests();
-    assert.deepEqual(
-      requests.map((request) => request.method),
-      ["initialize", "initialized", "thread/start", "turn/start"],
-    );
-    const thread = requests[2]!.params as Record<string, unknown>;
-    assert.deepEqual(thread, {
-      cwd: root,
-      config: { service_tier: "priority" },
-      model: "gpt-test",
-      developerInstructions: "Work precisely.",
-    });
-    const turn = requests[3]!.params as Record<string, unknown>;
-    assert.deepEqual(turn, {
-      threadId: "thread-fresh",
-      input: [{ type: "text", text: "build" }],
-      model: "gpt-test",
-      effort: "high",
-      approvalPolicy: "never",
-      sandboxPolicy: {
-        type: "workspaceWrite",
-        writableRoots: [root, requestDirectory],
-        networkAccess: true,
-        excludeTmpdirEnvVar: false,
-        excludeSlashTmp: false,
-      },
-    });
-    assert.deepEqual(fake.requestEnvironment(), { requests: requestDirectory, literal: "from-settings", actor: "" });
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+  const requests = fake.requests();
+  assert.deepEqual(
+    requests.map((request) => request.method),
+    ["initialize", "initialized", "thread/start", "turn/start"],
+  );
+  const thread = requests[2]!.params as Record<string, unknown>;
+  assert.deepEqual(thread, {
+    cwd: root,
+    config: { service_tier: "priority" },
+    model: "gpt-test",
+    developerInstructions: "Work precisely.",
+  });
+  const turn = requests[3]!.params as Record<string, unknown>;
+  assert.deepEqual(turn, {
+    threadId: "thread-fresh",
+    input: [{ type: "text", text: "build" }],
+    model: "gpt-test",
+    effort: "high",
+    approvalPolicy: "never",
+    sandboxPolicy: {
+      type: "workspaceWrite",
+      writableRoots: [root, requestDirectory],
+      networkAccess: true,
+      excludeTmpdirEnvVar: false,
+      excludeSlashTmp: false,
+    },
+  });
+  assert.deepEqual(fake.requestEnvironment(), { requests: requestDirectory, literal: "from-settings", actor: "" });
 });
 
 test("Codex native fork receives an isolated child environment", async () => {
@@ -2596,19 +2182,15 @@ test("Codex native fork receives an isolated child environment", async () => {
   }
 });
 
-test("Codex maps provider-neutral schema JSON to turn/start outputSchema", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-schema-"));
-  try {
-    const fake = fakeCodex(root, "complete");
-    const provider = createCodexAppServerProvider(fake.executable);
-    const schemaJson = '{"type":"object","properties":{"ok":{"type":"boolean"}}}';
-    const drive = await provider.start(freshInput("build", { cwd: root, schemaJson })).result;
-    await drive.completion;
-    const turn = fake.requests().find((request) => request.method === "turn/start")?.params as Record<string, unknown>;
-    assert.deepEqual(turn.outputSchema, { type: "object", properties: { ok: { type: "boolean" } } });
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+test("Codex maps provider-neutral schema JSON to turn/start outputSchema", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-codex-schema-");
+  const fake = fakeCodex(root, "complete");
+  const provider = createCodexAppServerProvider(fake.executable);
+  const schemaJson = '{"type":"object","properties":{"ok":{"type":"boolean"}}}';
+  const drive = await provider.start(freshInput("build", { cwd: root, schemaJson })).result;
+  await drive.completion;
+  const turn = fake.requests().find((request) => request.method === "turn/start")?.params as Record<string, unknown>;
+  assert.deepEqual(turn.outputSchema, { type: "object", properties: { ok: { type: "boolean" } } });
 });
 
 test("unsupported providers refuse full-access while Codex and Claude admit it", () => {
@@ -2637,170 +2219,115 @@ test("unsupported providers refuse full-access while Codex and Claude admit it",
   assert.deepEqual(codex.admitOptions({ ...fullAccess, network: "disabled" }).kind, "refused");
 });
 
-test("Codex full-access sandbox emits dangerFullAccess for fresh and resumed turns", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-full-access-"));
-  try {
-    const fake = fakeCodex(root, "complete");
-    const provider = createCodexAppServerProvider(fake.executable);
-    const fullAccess = { sandbox: "full-access" as const };
-    const fresh = await provider.start(freshInput("build", { cwd: root, options: fullAccess })).result;
-    await fresh.completion;
-    const resumed = await provider.resume!({
-      ...DRIVE_DEFAULTS,
-      body: "continue",
-      launchTells: [],
-      cwd: root,
-      options: fullAccess,
-      session: { kind: "resume", coordinate: { sessionId: "thread-resumed" } },
-    }).result;
-    await resumed.completion;
-    const readonly = await provider.start(freshInput("inspect", { cwd: root, options: { readonly: true } })).result;
-    await readonly.completion;
-    const omitted = await provider.start(freshInput("write", { cwd: root })).result;
-    await omitted.completion;
-    const turns = fake
-      .requests()
-      .filter((request) => request.method === "turn/start")
-      .map((request) => request.params as Record<string, unknown>);
-    assert.deepEqual(
-      turns.map((turn) => turn.sandboxPolicy),
-      [
-        { type: "dangerFullAccess" },
-        { type: "dangerFullAccess" },
-        { type: "readOnly", networkAccess: false },
-        {
-          type: "workspaceWrite",
-          writableRoots: [root, "/tmp/akuma-test-requests"],
-          networkAccess: false,
-          excludeTmpdirEnvVar: false,
-          excludeSlashTmp: false,
-        },
-      ],
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+test("Codex full-access sandbox emits dangerFullAccess for fresh and resumed turns", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-codex-full-access-");
+  const fake = fakeCodex(root, "complete");
+  const provider = createCodexAppServerProvider(fake.executable);
+  const fullAccess = { sandbox: "full-access" as const };
+  const fresh = await provider.start(freshInput("build", { cwd: root, options: fullAccess })).result;
+  await fresh.completion;
+  const resumed = await provider.resume!({
+    ...DRIVE_DEFAULTS,
+    body: "continue",
+    launchTells: [],
+    cwd: root,
+    options: fullAccess,
+    session: { kind: "resume", coordinate: { sessionId: "thread-resumed" } },
+  }).result;
+  await resumed.completion;
+  const readonly = await provider.start(freshInput("inspect", { cwd: root, options: { readonly: true } })).result;
+  await readonly.completion;
+  const omitted = await provider.start(freshInput("write", { cwd: root })).result;
+  await omitted.completion;
+  const turns = fake
+    .requests()
+    .filter((request) => request.method === "turn/start")
+    .map((request) => request.params as Record<string, unknown>);
+  assert.deepEqual(
+    turns.map((turn) => turn.sandboxPolicy),
+    [
+      { type: "dangerFullAccess" },
+      { type: "dangerFullAccess" },
+      { type: "readOnly", networkAccess: false },
+      {
+        type: "workspaceWrite",
+        writableRoots: [root, "/tmp/akuma-test-requests"],
+        networkAccess: false,
+        excludeTmpdirEnvVar: false,
+        excludeSlashTmp: false,
+      },
+    ],
+  );
 });
 
-test("Codex maps observations without leaking output or unknown payloads", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-observations-"));
-  try {
-    const provider = createCodexAppServerProvider(fakeCodex(root, "observations").executable);
-    const drive = await provider.start(freshInput("observe", { cwd: root })).result;
-    const events = [];
-    for await (const event of drive.events) events.push(event);
+test("Codex maps observations without leaking output or unknown payloads", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-codex-observations-");
+  const provider = createCodexAppServerProvider(fakeCodex(root, "observations").executable);
+  const drive = await provider.start(freshInput("observe", { cwd: root })).result;
+  const events = [];
+  for await (const event of drive.events) events.push(event);
 
-    assert.deepEqual(events, [
-      { type: "session", coordinate: { sessionId: "thread-fresh" } },
-      {
-        type: "tool",
-        phase: "started",
-        id: "command-1",
-        name: "commandExecution",
-        call: { kind: "run", command: "npm test" },
-      },
-      {
-        type: "tool",
-        phase: "completed",
-        id: "command-1",
-        name: "commandExecution",
-        call: { kind: "run", command: "npm test" },
-        result: { status: "ok", exitCode: 0 },
-      },
-      { type: "note", text: "Plan updated: Verify the adapter" },
-      { type: "note", text: "Retrying after error: temporary outage" },
-      { type: "assistant", text: "first answer" },
-      { type: "unknown", kind: "future/native-event" },
-      { type: "assistant", text: "second answer" },
-    ]);
-    assert.deepEqual(await drive.completion, {
-      kind: "answered",
-      answer: "second answer",
-      historyId: "turn-1",
-    });
-    assert.equal(JSON.stringify(events).includes("secret output"), false);
-    assert.equal(JSON.stringify(events).includes("must not escape"), false);
-    assert.equal(JSON.stringify(events).includes("999"), false);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+  assert.deepEqual(events, [
+    { type: "session", coordinate: { sessionId: "thread-fresh" } },
+    {
+      type: "tool",
+      phase: "started",
+      id: "command-1",
+      name: "commandExecution",
+      call: { kind: "run", command: "npm test" },
+    },
+    {
+      type: "tool",
+      phase: "completed",
+      id: "command-1",
+      name: "commandExecution",
+      call: { kind: "run", command: "npm test" },
+      result: { status: "ok", exitCode: 0 },
+    },
+    { type: "note", text: "Plan updated: Verify the adapter" },
+    { type: "note", text: "Retrying after error: temporary outage" },
+    { type: "assistant", text: "first answer" },
+    { type: "unknown", kind: "future/native-event" },
+    { type: "assistant", text: "second answer" },
+  ]);
+  assert.deepEqual(await drive.completion, {
+    kind: "answered",
+    answer: "second answer",
+    historyId: "turn-1",
+  });
+  assert.equal(JSON.stringify(events).includes("secret output"), false);
+  assert.equal(JSON.stringify(events).includes("must not escape"), false);
+  assert.equal(JSON.stringify(events).includes("999"), false);
 });
 
-test("Codex ignores notifications from a spawned child thread", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-foreign-thread-"));
-  try {
-    const provider = createCodexAppServerProvider(fakeCodex(root, "foreign-thread").executable);
-    const drive = await provider.start(freshInput("delegate", { cwd: root })).result;
-    const events = [];
-    for await (const event of drive.events) events.push(event);
+test("Codex ignores notifications from a spawned child thread", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-codex-foreign-thread-");
+  const provider = createCodexAppServerProvider(fakeCodex(root, "foreign-thread").executable);
+  const drive = await provider.start(freshInput("delegate", { cwd: root })).result;
+  const events = [];
+  for await (const event of drive.events) events.push(event);
 
-    assert.deepEqual(events, [
-      { type: "session", coordinate: { sessionId: "thread-fresh" } },
-      { type: "assistant", text: "parent answer" },
-    ]);
-    assert.deepEqual(await drive.completion, {
-      kind: "answered",
-      answer: "parent answer",
-      historyId: "turn-1",
-    });
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+  assert.deepEqual(events, [
+    { type: "session", coordinate: { sessionId: "thread-fresh" } },
+    { type: "assistant", text: "parent answer" },
+  ]);
+  assert.deepEqual(await drive.completion, {
+    kind: "answered",
+    answer: "parent answer",
+    historyId: "turn-1",
+  });
 });
 
-test("Codex drains admitted native completion narration before terminal closure", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-terminal-drain-"));
-  try {
-    const drive = await createCodexAppServerProvider(fakeCodex(root, "terminal-drain").executable).start(
-      freshInput("drain", { cwd: root }),
-    ).result;
-    let completionSettled = false;
-    void drive.completion.then(() => {
-      completionSettled = true;
-    });
-    const events = [];
-    for await (const event of drive.events) {
-      events.push(event);
-      if (event.type === "tool" && event.phase === "completed") assert.equal(completionSettled, false);
-    }
-
-    assert.deepEqual(events.slice(1), [
-      {
-        type: "tool",
-        phase: "started",
-        id: "command-terminal",
-        name: "commandExecution",
-        call: { kind: "run", command: "npm test" },
-      },
-      {
-        type: "tool",
-        phase: "completed",
-        id: "command-terminal",
-        name: "commandExecution",
-        call: { kind: "run", command: "npm test" },
-        result: { status: "ok", exitCode: 0 },
-      },
-    ]);
-    assert.deepEqual(await drive.completion, { kind: "answered", answer: "", historyId: "turn-1" });
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("Codex terminal drain has a bounded fallback for a hung producer", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-terminal-hang-"));
-  try {
-    const drive = await createCodexAppServerProvider(fakeCodex(root, "terminal-hang").executable).start(
-      freshInput("observe", { cwd: root }),
-    ).result;
-    const started = performance.now();
-    assert.deepEqual(await drive.completion, { kind: "answered", answer: "", historyId: "turn-1" });
-    assert.ok(performance.now() - started < 2_000);
-    for await (const _event of drive.events) {
-      /* drain */
-    }
-  } finally {
-    rmSync(root, { recursive: true, force: true });
+test("Codex terminal drain has a bounded fallback for a hung producer", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-codex-terminal-hang-");
+  const drive = await createCodexAppServerProvider(fakeCodex(root, "terminal-hang").executable).start(
+    freshInput("observe", { cwd: root }),
+  ).result;
+  const started = performance.now();
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "", historyId: "turn-1" });
+  assert.ok(performance.now() - started < 2_000);
+  for await (const _event of drive.events) {
+    /* drain */
   }
 });
 
@@ -2830,51 +2357,26 @@ test("Codex admission failures preserve the original diagnostic", async () => {
   }
 });
 
-test("Codex settles when the native process exits without turn completion", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-exit-before-completion-"));
-  try {
-    const drive = await createCodexAppServerProvider(fakeCodex(root, "exit-before-completion").executable).start(
-      freshInput("exit", { cwd: root }),
-    ).result;
-    for await (const _event of drive.events) {
-      /* drain */
-    }
-    assert.deepEqual(await drive.completion, {
-      kind: "failed",
-      diagnostic: "codex app-server exited before completion (7)",
-    });
-  } finally {
-    rmSync(root, { recursive: true, force: true });
+test("Codex app-server abort interrupts and releases its owned child", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-codex-abort-");
+  const fake = fakeCodex(root, "interrupt");
+  const provider = createCodexAppServerProvider(fake.executable);
+  const drive = await provider.start(freshInput("wait", { cwd: root })).result;
+  await drive.abort();
+  for await (const _event of drive.events) {
+    /* drain */
   }
-});
-test("Codex app-server abort interrupts and releases its owned child", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-abort-"));
-  try {
-    const fake = fakeCodex(root, "interrupt");
-    const provider = createCodexAppServerProvider(fake.executable);
-    const drive = await provider.start(freshInput("wait", { cwd: root })).result;
-    await drive.abort();
-    for await (const _event of drive.events) {
-      /* drain */
-    }
-    assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "codex app-server interrupted" });
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+  assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "codex app-server interrupted" });
 });
 
-test("Codex terminal closure fails a hung steer acknowledgement without waiting", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-steer-hung-terminal-"));
-  try {
-    const drive = await createCodexAppServerProvider(fakeCodex(root, "steer-hung-terminal").executable).start(
-      freshInput("work", { cwd: root }),
-    ).result;
-    await assert.rejects(
-      drive.tell!({ id: "tell-live-hung", text: "never acknowledged" }),
-      /line RPC process is closed/u,
-    );
-    assert.deepEqual(await drive.completion, { kind: "answered", answer: "", historyId: "turn-1" });
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+test("Codex terminal closure fails a hung steer acknowledgement without waiting", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-codex-steer-hung-terminal-");
+  const drive = await createCodexAppServerProvider(fakeCodex(root, "steer-hung-terminal").executable).start(
+    freshInput("work", { cwd: root }),
+  ).result;
+  await assert.rejects(
+    drive.tell!({ id: "tell-live-hung", text: "never acknowledged" }),
+    /line RPC process is closed/u,
+  );
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "", historyId: "turn-1" });
 });

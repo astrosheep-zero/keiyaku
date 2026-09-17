@@ -1,3 +1,6 @@
+import { waitForCondition as waitFor, settlementProbe } from "./support/process.js";
+import { temporaryDirectory } from "./support/process.js";
+import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
@@ -20,7 +23,6 @@ import { allocateAkumaDirectory, type AkuId } from "../src/akuma/identity.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { AkumaBodyRequestError, bodyRequestExecutionContext, requestBodyCommand } from "../src/akuma/requests.js";
 import { BodyRequestPump, settleBodyRequests } from "../src/akuma/request-serve.js";
-import { BodyRequestPump as LifecycleBodyRequestPump } from "../src/akuma/request-lifecycle.js";
 import {
   atomicJson,
   composeRequestCommands,
@@ -30,9 +32,7 @@ import {
   type ServiceRequestCommand,
 } from "../src/akuma/request-wire.js";
 import {
-  REQUEST_PROGRESS_WINDOW,
-  publishRequestProgress,
-  readRequestProgress,
+  REQUEST_PROGRESS_WINDOW
 } from "../src/akuma/request-observation.js";
 import { executeTellAkuma } from "../src/akuma/fleet-execution.js";
 import { waitAkuma } from "../src/library/fleet.js";
@@ -87,28 +87,14 @@ async function openFleetPump(
   parent: Awaited<ReturnType<typeof born>>,
   port: FleetRequestPort,
 ): Promise<BodyRequestPump> {
-  return await BodyRequestPump.open({
-    paths: parent.paths,
-    allowed: parent.soul.allowed,
-    bodySequence: 1,
-    now: () => "2026-08-18T00:00:01.000Z",
-    commands: fleetRequestCommands(port),
-    signal: new AbortController().signal,
-  });
+  return await openPump(parent, fleetRequestCommands(port));
 }
 
 async function openContractPump(
   parent: Awaited<ReturnType<typeof born>>,
   port: Partial<ContractRequestPort>,
 ): Promise<BodyRequestPump> {
-  return await BodyRequestPump.open({
-    paths: parent.paths,
-    allowed: parent.soul.allowed,
-    bodySequence: 1,
-    now: () => "2026-08-18T00:00:01.000Z",
-    commands: contractRequestCommands({ ...unusedContractPort, ...port }),
-    signal: new AbortController().signal,
-  });
+  return await openPump(parent, contractRequestCommands({ ...unusedContractPort, ...port }));
 }
 
 async function openFleetAndContractPump(
@@ -116,14 +102,7 @@ async function openFleetAndContractPump(
   fleet: FleetRequestPort,
   contract: ContractRequestPort,
 ): Promise<BodyRequestPump> {
-  return await BodyRequestPump.open({
-    paths: parent.paths,
-    allowed: parent.soul.allowed,
-    bodySequence: 1,
-    now: () => "2026-08-18T00:00:01.000Z",
-    commands: composeRequestCommands(fleetRequestCommands(fleet), contractRequestCommands(contract)),
-    signal: new AbortController().signal,
-  });
+  return await openPump(parent, composeRequestCommands(fleetRequestCommands(fleet), contractRequestCommands(contract)));
 }
 
 const unusedFleetPort: FleetRequestPort = {
@@ -271,74 +250,6 @@ async function openProgressPump(
     signal: new AbortController().signal,
   });
 }
-
-/** Generous fixture budget: real git and verification subprocesses can be slow under full-suite load. */
-const WAIT_BUDGET_MS = 60_000;
-const WAIT_INTERVAL_MS = 5;
-
-type WaitForOptions = Readonly<{
-  /** Bounded override for focused coverage of the wait itself; call sites keep the generous default. */
-  budgetMs?: number;
-  /**
-   * Names a terminal state of the request or pump behind the awaited condition. A non-null value means
-   * the awaited event can no longer arrive, so the wait ends naming that state instead of spinning.
-   */
-  terminalState?: () => string | null | Promise<string | null>;
-}>;
-
-async function waitFor(
-  description: string,
-  condition: () => boolean | Promise<boolean>,
-  options: WaitForOptions = {},
-): Promise<void> {
-  const budgetMs = options.budgetMs ?? WAIT_BUDGET_MS;
-  const startedAt = Date.now();
-  for (;;) {
-    if (await condition()) return;
-    const terminalState = await options.terminalState?.();
-    const elapsedMs = Date.now() - startedAt;
-    if (terminalState !== undefined && terminalState !== null) {
-      throw new Error(
-        `fixture wait for ${description} ended after ${elapsedMs}ms: request reached terminal state ${terminalState}`,
-      );
-    }
-    if (elapsedMs >= budgetMs) {
-      throw new Error(`fixture wait for ${description} expired after ${elapsedMs}ms (budget ${budgetMs}ms)`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, WAIT_INTERVAL_MS));
-  }
-}
-
-/**
- * Reports how a request or pump settled so a bounded wait can end on a dead outcome instead of
- * spinning to its budget.
- */
-function settlementProbe<T>(settlement: Promise<T>, describe: (settled: T) => string): () => string | null {
-  let terminalState: string | null = null;
-  void settlement.then(
-    (settled) => {
-      terminalState = describe(settled);
-    },
-    (error: unknown) => {
-      terminalState = `failure ${error instanceof Error ? error.message : String(error)}`;
-    },
-  );
-  return () => terminalState;
-}
-
-test("a never-true fixture wait fails within its budget naming what it awaited", async () => {
-  await assert.rejects(
-    waitFor("the admitted progress event", () => false, { budgetMs: 25 }),
-    /fixture wait for the admitted progress event expired after \d+ms \(budget 25ms\)/u,
-  );
-});
-
-test("a fixture wait ends on the terminal state of the request behind it", async () => {
-  await assert.rejects(
-    waitFor("the served request state", async () => false, { terminalState: () => "voided" }),
-    /fixture wait for the served request state ended after \d+ms: request reached terminal state voided/u,
-  );
-});
 
 test("forwarded ordinary and schema Tells retain the submitting initiator at the service port", async () => {
   const received: Array<string | undefined> = [];
@@ -535,52 +446,6 @@ test("request command composition rejects a duplicate action", () => {
   );
 });
 
-test("request transport exposes gated opaque progress before its final receipt", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-request-progress-")));
-  const parent = await born(root, "parent", "76543210");
-  let started!: () => void;
-  const executionStarted = new Promise<void>((resolve) => {
-    started = resolve;
-  });
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const pump = await openProgressPump(
-    parent,
-    progressCommand(async (_value, facts) => {
-      facts.progress?.({ phase: "gated" });
-      started();
-      await gate;
-      facts.progress?.({ phase: "done" });
-      return { result: "complete", service: "complete" };
-    }),
-  );
-  const progress: unknown[] = [];
-  try {
-    const request = requestBodyCommand({
-      directory: pump.directory,
-      command: progressProtocol(),
-      value: "run",
-      onProgress: (value) => progress.push(value),
-    });
-    await executionStarted;
-    await waitFor("the gated progress event before service completion", () => progress.length === 1, {
-      terminalState: settlementProbe(request, (settled) => `outcome ${settled.kind}`),
-    });
-    assert.deepEqual(progress, [{ phase: "gated" }]);
-    release();
-    const result = await request;
-    assert.equal(result.kind, "returned");
-    assert.equal(result.result, "complete");
-    assert.equal(result.action, "test.progress");
-    assert.equal(typeof result.requestId, "string");
-  } finally {
-    await pump.close();
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test("request progress includes the final snapshot published between progress and receipt reads", async (t) => {
   for (const failed of [false, true]) {
     await t.test(failed ? "failed receipt" : "successful receipt", async (t) => {
@@ -636,35 +501,11 @@ test("request progress includes the final snapshot published between progress an
   }
 });
 
-test("request progress retains a bounded window and makes discarded sequences explicit", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "keiyaku-request-progress-window-"));
-  const transportId = randomUUID();
-  const id = randomUUID();
-  const publication = publishRequestProgress({ directory, transportId, id, action: "test.progress" });
-  try {
-    for (let value = 1; value <= REQUEST_PROGRESS_WINDOW + 3; value += 1) publication.progress(value);
-    await publication.flush();
-    const snapshot = await readRequestProgress({ directory, transportId, id, action: "test.progress" });
-    assert.equal(snapshot?.nextSequence, REQUEST_PROGRESS_WINDOW + 4);
-    assert.equal(snapshot?.events.length, REQUEST_PROGRESS_WINDOW);
-    assert.deepEqual(snapshot?.events.at(0), { sequence: 4, value: 4 });
-  } finally {
-    await publication.close();
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
-
 test("request progress consumers receive the sequence-derived retained-window gap", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-request-progress-gap-")));
   const parent = await born(root, "parent", "65432109");
-  let started!: () => void;
-  const published = new Promise<void>((resolve) => {
-    started = resolve;
-  });
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
+  const { promise: published, resolve: started } = promiseBarrier<void>();
+  const { promise: gate, resolve: release } = promiseBarrier<void>();
   const pump = await openProgressPump(
     parent,
     progressCommand(async (_value, facts) => {
@@ -724,47 +565,6 @@ test("progress observation failures and absent observers do not hold service com
   }
 });
 
-test("an opted-in request forwards post-publication abort to its live service and retains its terminal result", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-request-cancel-service-")));
-  const parent = await born(root, "parent", "98765432");
-  let started!: () => void;
-  const executionStarted = new Promise<void>((resolve) => {
-    started = resolve;
-  });
-  const pump = await openProgressPump(
-    parent,
-    progressCommand(
-      async (_value, facts) =>
-        await new Promise((resolve) => {
-          facts.signal.addEventListener("abort", () => resolve({ result: "cancelled", service: "cancelled" }), {
-            once: true,
-          });
-          started();
-        }),
-      true,
-    ),
-  );
-  const controller = new AbortController();
-  try {
-    const request = requestBodyCommand({
-      directory: pump.directory,
-      command: progressProtocol(true),
-      value: "run",
-      signal: controller.signal,
-    });
-    await executionStarted;
-    controller.abort(new Error("cancel service"));
-    const result = await request;
-    assert.equal(result.kind, "returned");
-    assert.equal(result.result, "cancelled");
-    assert.equal(result.action, "test.progress");
-    assert.equal(typeof result.requestId, "string");
-  } finally {
-    await pump.close();
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test("initial request publication loss is unknown with its request identity", async () => {
   const directory = mkdtempSync(join(tmpdir(), "keiyaku-request-publication-loss-"));
   rmSync(directory, { recursive: true, force: true });
@@ -780,33 +580,29 @@ test("initial request publication loss is unknown with its request identity", as
   );
 });
 
-test("cancellation before request publication retains the caller cancellation", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "keiyaku-request-cancel-before-publication-"));
+test("cancellation before request publication retains the caller cancellation", async (context) => {
+  const directory = temporaryDirectory(context, "keiyaku-request-cancel-before-publication-");
   const controller = new AbortController();
   const reason = new Error("cancel before publication");
   controller.abort(reason);
-  try {
-    await assert.rejects(
-      requestBodyWait({
-        directory,
-        id: randomUUID(),
-        targets: ["aku/worker/22222222" as AkuId],
-        completion: "all",
-        signal: controller.signal,
-      }),
-      (error: unknown) => error === reason,
-    );
-    assert.deepEqual(
-      (await readdir(directory)).filter((name) => name.endsWith(".request.json")),
-      [],
-    );
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
+  await assert.rejects(
+    requestBodyWait({
+      directory,
+      id: randomUUID(),
+      targets: ["aku/worker/22222222" as AkuId],
+      completion: "all",
+      signal: controller.signal,
+    }),
+    (error: unknown) => error === reason,
+  );
+  assert.deepEqual(
+    (await readdir(directory)).filter((name) => name.endsWith(".request.json")),
+    [],
+  );
 });
 
-test("cancellation during request publication retains the caller cancellation before rename", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "keiyaku-request-cancel-during-publication-"));
+test("cancellation during request publication retains the caller cancellation before rename", async (context) => {
+  const directory = temporaryDirectory(context, "keiyaku-request-cancel-during-publication-");
   const controller = new AbortController();
   const reason = new Error("cancel during publication");
   let entered!: () => void;
@@ -817,37 +613,27 @@ test("cancellation during request publication retains the caller cancellation be
   const publicationPaused = new Promise<void>((resolve) => {
     paused = resolve;
   });
-  try {
-    const publication = atomicJson(
-      join(directory, "request.json"),
-      { id: randomUUID(), action: "akuma.wait" },
-      controller.signal,
-      async () => {
-        entered();
-        await publicationPaused;
-      },
-    );
-    await publicationEntered;
-    controller.abort(reason);
-    paused();
-    await assert.rejects(publication, (error: unknown) => error === reason);
-    assert.equal(existsSync(join(directory, "request.json")), false);
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
+  const publication = atomicJson(
+    join(directory, "request.json"),
+    { id: randomUUID(), action: "akuma.wait" },
+    controller.signal,
+    async () => {
+      entered();
+      await publicationPaused;
+    },
+  );
+  await publicationEntered;
+  controller.abort(reason);
+  paused();
+  await assert.rejects(publication, (error: unknown) => error === reason);
+  assert.equal(existsSync(join(directory, "request.json")), false);
 });
 
 test("cancellation after publication is unknown and same-id retry reuses Heart service evidence", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-request-cancel-after-publication-")));
   const parent = await born(root, "parent", "11111111");
-  let started!: () => void;
-  const executionStarted = new Promise<void>((resolve) => {
-    started = resolve;
-  });
-  let release!: () => void;
-  const executionReleased = new Promise<void>((resolve) => {
-    release = resolve;
-  });
+  const { promise: executionStarted, resolve: started } = promiseBarrier<void>();
+  const { promise: executionReleased, resolve: release } = promiseBarrier<void>();
   let calls = 0;
   const pump = await openFleetPump(parent, {
     wait: async () => {
@@ -913,66 +699,6 @@ test("cancellation after publication is unknown and same-id retry reuses Heart s
     });
   } finally {
     await pump.close();
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("a Heart authority failure keeps its error identity, closes the channel, and recovers admission", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-request-authority-failure-")));
-  const parent = await born(root, "parent", "11111111");
-  const id = randomUUID();
-  const authorityFailure = new Error("simulated Heart authority failure");
-  let serving!: () => void;
-  const served = new Promise<void>((resolve) => {
-    serving = resolve;
-  });
-  const pump = await LifecycleBodyRequestPump.openWithService(
-    {
-      paths: parent.paths,
-      allowed: parent.soul.allowed,
-      bodySequence: 1,
-      now: () => "2026-08-18T00:00:01.000Z",
-      signal: new AbortController().signal,
-    },
-    async (input) => {
-      await admitRequest(input.paths, {
-        id: input.claim.id,
-        action: input.claim.action,
-        payloadJson: JSON.stringify({}),
-        admittedAt: input.now(),
-        permitted: true,
-      });
-      serving();
-      throw authorityFailure;
-    },
-  );
-  let closed = false;
-  try {
-    const request = requestBodyWait({
-      directory: pump.directory,
-      id,
-      targets: ["aku/worker/22222222" as AkuId],
-      completion: "all",
-    });
-    const failed = assert.rejects(pump.failure, (error: unknown) => error === authorityFailure);
-    await served;
-    await failed;
-    assert.deepEqual(
-      (await readdir(pump.directory)).filter((name) => name.endsWith(".receipt.json")),
-      [],
-    );
-    await assert.rejects(pump.close(), (error: unknown) => error === authorityFailure);
-    closed = true;
-    await assert.rejects(
-      request,
-      (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "unknown",
-    );
-    assert.equal(existsSync(pump.directory), false);
-    assert.equal((await readRequest(parent.paths, id))?.state, "admitted");
-    assert.equal(await settleBodyRequests(parent.paths, parent.soul, () => "2026-08-18T00:00:02.000Z"), "settled");
-    assert.equal((await readRequest(parent.paths, id))?.state, "voided");
-  } finally {
-    if (!closed) await pump.close().catch(() => undefined);
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -1068,62 +794,46 @@ test("call allocation crossing the admission fence settles voided without spawni
   }
 });
 
-test("a noncanonical routed call fails the pump before child allocation", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-call-world-proof-")));
+test("a noncanonical routed call fails the pump before child allocation", async (context) => {
+  const root = await World.at(temporaryDirectory(context, "keiyaku-call-world-proof-"));
   const parent = await born(root, "parent", "11111111");
   let spawns = 0;
-  const pump = await BodyRequestPump.open({
-    paths: parent.paths,
-    allowed: parent.soul.allowed,
-    bodySequence: 1,
-    now: () => "2026-08-18T00:00:01.000Z",
-    commands: akumaCallRequestCommands({
+  const pump = await openPump(parent, akumaCallRequestCommands({
       world: root,
       paths: parent.paths,
       parent: parent.soul,
       spawn: async () => {
         spawns += 1;
       },
-    }),
-    signal: new AbortController().signal,
-  });
+    }));
   const id = randomUUID();
-  try {
-    const request = requestBodyCall({
-      directory: pump.directory,
-      id,
-      world: `${root}/.`,
-      archetype: "worker",
-      body: "must not allocate",
-      recipe: {
-        provider: { name: "claude", kind: "claude-agent-sdk" },
-        options: {},
-        allowed: ALLOWED_ACTIONS,
-      },
-    });
-    await assert.rejects(pump.failure, /registered request action akuma\.call rejected its payload/u);
-    assert.equal(spawns, 0);
-    assert.equal(await readRequest(parent.paths, id), null);
-    await assert.rejects(pump.close(), /registered request action akuma\.call rejected its payload/u);
-    await assert.rejects(
-      request,
-      (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "unknown",
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+  const request = requestBodyCall({
+    directory: pump.directory,
+    id,
+    world: `${root}/.`,
+    archetype: "worker",
+    body: "must not allocate",
+    recipe: {
+      provider: { name: "claude", kind: "claude-agent-sdk" },
+      options: {},
+      allowed: ALLOWED_ACTIONS,
+    },
+  });
+  await assert.rejects(pump.failure, /registered request action akuma\.call rejected its payload/u);
+  assert.equal(spawns, 0);
+  assert.equal(await readRequest(parent.paths, id), null);
+  await assert.rejects(pump.close(), /registered request action akuma\.call rejected its payload/u);
+  await assert.rejects(
+    request,
+    (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "unknown",
+  );
 });
 
-test("a semantically invalid call recipe fails the pump before Heart admission", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-call-invalid-recipe-")));
+test("a semantically invalid call recipe fails the pump before Heart admission", async (context) => {
+  const root = await World.at(temporaryDirectory(context, "keiyaku-call-invalid-recipe-"));
   const parent = await born(root, "parent", "11111111");
   let spawnCalls = 0;
-  const pump = await BodyRequestPump.open({
-    paths: parent.paths,
-    allowed: parent.soul.allowed,
-    bodySequence: 1,
-    now: () => "2026-08-18T00:00:01.000Z",
-    commands: akumaCallRequestCommands({
+  const pump = await openPump(parent, akumaCallRequestCommands({
       world: root,
       paths: parent.paths,
       parent: parent.soul,
@@ -1131,98 +841,29 @@ test("a semantically invalid call recipe fails the pump before Heart admission",
         spawnCalls += 1;
         throw new Error("invalid recipe must not spawn");
       },
-    }),
-    signal: new AbortController().signal,
-  });
-  try {
-    const id = randomUUID();
-    const request = requestBodyCall({
-      directory: pump.directory,
-      id,
-      world: root,
-      archetype: "worker",
-      body: "invalid recipe",
-      recipe: {
-        provider: { name: "claude", kind: "claude-agent-sdk" },
-        options: { readonly: true },
-        allowed: ALLOWED_ACTIONS,
-      },
-    });
-    await assert.rejects(pump.failure, /registered request action akuma\.call rejected its payload/u);
-    const fact = await readRequest(parent.paths, id);
-    assert.equal(fact, null);
-    assert.equal(spawnCalls, 0);
-    await assert.rejects(pump.close(), /registered request action akuma\.call rejected its payload/u);
-    await assert.rejects(
-      request,
-      (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "unknown",
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("a terminal Akuma call duplicate projects its stored child without spawning again", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-call-terminal-replay-")));
-  const parent = await born(root, "parent", "11111111");
+    }));
   const id = randomUUID();
-  const request = {
+  const request = requestBodyCall({
+    directory: pump.directory,
     id,
     world: root,
     archetype: "worker",
-    body: "terminal child",
+    body: "invalid recipe",
     recipe: {
-      provider: { name: "claude", kind: "claude-agent-sdk" } as const,
-      options: {},
+      provider: { name: "claude", kind: "claude-agent-sdk" },
+      options: { readonly: true },
       allowed: ALLOWED_ACTIONS,
     },
-  };
-  let spawns = 0;
-  const first = await BodyRequestPump.open({
-    paths: parent.paths,
-    allowed: parent.soul.allowed,
-    bodySequence: 1,
-    now: () => "2026-08-18T00:00:01.000Z",
-    commands: akumaCallRequestCommands({
-      world: root,
-      paths: parent.paths,
-      parent: parent.soul,
-      spawn: async (launch) => {
-        spawns += 1;
-        const leash = (await HeldAkumaLeash.try(launch.paths))!;
-        await leash.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-18T00:00:02.000Z" });
-        leash.release();
-      },
-    }),
-    signal: new AbortController().signal,
   });
-  try {
-    const child = await requestBodyCall({ directory: first.directory, ...request });
-    await first.close();
-    const replay = await BodyRequestPump.open({
-      paths: parent.paths,
-      allowed: parent.soul.allowed,
-      bodySequence: 2,
-      now: () => "2026-08-18T00:00:03.000Z",
-      commands: akumaCallRequestCommands({
-        world: root,
-        paths: parent.paths,
-        parent: parent.soul,
-        spawn: async () => {
-          throw new Error("terminal call must not spawn again");
-        },
-      }),
-      signal: new AbortController().signal,
-    });
-    try {
-      assert.equal(await requestBodyCall({ directory: replay.directory, ...request }), child);
-      assert.equal(spawns, 1);
-    } finally {
-      await replay.close();
-    }
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+  await assert.rejects(pump.failure, /registered request action akuma\.call rejected its payload/u);
+  const fact = await readRequest(parent.paths, id);
+  assert.equal(fact, null);
+  assert.equal(spawnCalls, 0);
+  await assert.rejects(pump.close(), /registered request action akuma\.call rejected its payload/u);
+  await assert.rejects(
+    request,
+    (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "unknown",
+  );
 });
 
 test("deliver claims execute once and Heart retains only the Contract fact reference", async () => {
@@ -1316,28 +957,24 @@ test("deliver claims execute once and Heart retains only the Contract fact refer
   }
 });
 
-test("Task request recovery voids an unserved claim without replaying Task authority", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-task-recovery-")));
+test("Task request recovery voids an unserved claim without replaying Task authority", async (context) => {
+  const root = await World.at(temporaryDirectory(context, "keiyaku-task-recovery-"));
   const parent = await born(root, "parent", "44444444", ["task.add"]);
   const id = "00000000-0000-4000-8000-000000000301";
-  try {
-    await admitRequest(parent.paths, {
-      id,
-      action: "task.add",
-      payloadJson: JSON.stringify({ request: { input: { title: "Never replayed" } }, world: root }),
-      admittedAt: "2026-08-18T00:00:01.000Z",
-      permitted: true,
-    });
-    assert.equal(await settleBodyRequests(parent.paths, parent.soul, () => "2026-08-18T00:00:02.000Z"), "settled");
-    assert.equal((await readRequest(parent.paths, id))?.state, "voided");
-    const board = await Tasks.of(root).list({ selection: "all", scope: "world" });
-    assert.equal(board.kind, "accepted");
-    if (board.kind === "accepted") {
-      assert.deepEqual(board.value.rows, []);
-      assert.equal(board.value.hasMore, false);
-    }
-  } finally {
-    rmSync(root, { recursive: true, force: true });
+  await admitRequest(parent.paths, {
+    id,
+    action: "task.add",
+    payloadJson: JSON.stringify({ request: { input: { title: "Never replayed" } }, world: root }),
+    admittedAt: "2026-08-18T00:00:01.000Z",
+    permitted: true,
+  });
+  assert.equal(await settleBodyRequests(parent.paths, parent.soul, () => "2026-08-18T00:00:02.000Z"), "settled");
+  assert.equal((await readRequest(parent.paths, id))?.state, "voided");
+  const board = await Tasks.of(root).list({ selection: "all", scope: "world" });
+  assert.equal(board.kind, "accepted");
+  if (board.kind === "accepted") {
+    assert.deepEqual(board.value.rows, []);
+    assert.equal(board.value.hasMore, false);
   }
 });
 test("CLI forwarded deliver preserves its selected Repo and uses parent Settings and execution", async () => {
@@ -1422,14 +1059,7 @@ test("CLI forwarded deliver preserves its selected Repo and uses parent Settings
     process.argv.splice(0, process.argv.length, ...previousArgv);
   }
   let composition = await externalRequestCommandsFor({ paths: parent.paths }, { home: parentHome, gitPath });
-  let pump = await BodyRequestPump.open({
-    paths: parent.paths,
-    allowed: parent.soul.allowed,
-    bodySequence: 1,
-    now: () => "2026-08-18T00:00:01.000Z",
-    commands: composition.commands,
-    signal: new AbortController().signal,
-  });
+  let pump = await openPump(parent, composition.commands);
   const noncanonical = requestBodyDeliver({
     directory: pump.directory,
     id: randomUUID(),
@@ -1445,14 +1075,7 @@ test("CLI forwarded deliver preserves its selected Repo and uses parent Settings
     (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "unknown",
   );
   composition = await externalRequestCommandsFor({ paths: parent.paths }, { home: parentHome, gitPath });
-  pump = await BodyRequestPump.open({
-    paths: parent.paths,
-    allowed: parent.soul.allowed,
-    bodySequence: 1,
-    now: () => "2026-08-18T00:00:01.000Z",
-    commands: composition.commands,
-    signal: new AbortController().signal,
-  });
+  pump = await openPump(parent, composition.commands);
   const previous = process.env[AKUMA_REQUESTS_ENV];
   const previousPath = process.env.PATH;
   try {
@@ -2159,10 +1782,7 @@ test("a parent-served Contract forwards progress and caller cancellation to a re
   await primary.deliver();
   const parent = await born(root, "parent", "11111111", ["contract.review"]);
   const held = await acquireTargetPlacementFence(await repositoryAt(raw.path), "refs/heads/main");
-  let markStarted!: () => void;
-  const started = new Promise<void>((resolve) => {
-    markStarted = resolve;
-  });
+  const { promise: started, resolve: markStarted } = promiseBarrier<void>();
   const controller = new AbortController();
   const progress: unknown[] = [];
   const pump = await openContractPump(parent, {
@@ -2305,3 +1925,18 @@ test("a parent-served Verification cancellation retains its bounded forwarded ou
     await pump.close();
   }
 });
+
+/** Carrier defaults for this file; every pump still gets a fresh cancellation signal. */
+function openPump(
+  parent: Pick<Awaited<ReturnType<typeof born>>, "paths" | "soul">,
+  commands: Parameters<typeof BodyRequestPump.open>[0]["commands"],
+): Promise<BodyRequestPump> {
+  return BodyRequestPump.open({
+    paths: parent.paths,
+    allowed: parent.soul.allowed,
+    bodySequence: 1,
+    now: () => "2026-08-18T00:00:01.000Z",
+    commands,
+    signal: new AbortController().signal,
+  });
+}

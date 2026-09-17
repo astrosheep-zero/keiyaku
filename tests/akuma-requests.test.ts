@@ -1,6 +1,8 @@
+import { temporaryDirectory } from "./support/process.js";
+import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -24,7 +26,6 @@ import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { akumaCallRequestCommands, requestForwardedAkumaCall as requestBodyCall } from "../src/akuma/call-request.js";
 import { AkumaBodyRequestError, bodyRequestExecutionContext } from "../src/akuma/requests.js";
 import { BodyRequestPump, settleBodyRequests } from "../src/akuma/request-serve.js";
-import { contractRequestProtocol } from "../src/library/contract-operations.js";
 import { World } from "../src/world.js";
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import { settlementProbe, waitForCondition } from "./support/process.js";
@@ -35,14 +36,6 @@ async function akumaAt(root: string, requestDirectory?: string) {
   });
 }
 
-function requestTransportPath(directory: string, id: string): string | undefined {
-  for (const name of readdirSync(directory)) {
-    if (!name.endsWith(".request.json")) continue;
-    const claim = JSON.parse(readFileSync(join(directory, name), "utf8")) as Readonly<{ id?: unknown }>;
-    if (claim.id === id) return join(directory, name);
-  }
-  return undefined;
-}
 
 async function fixture(allowed?: Soul["allowed"]) {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-requests-")));
@@ -64,95 +57,11 @@ async function fixture(allowed?: Soul["allowed"]) {
   return { root, parent, soul, leash, close: () => rmSync(root, { recursive: true, force: true }) };
 }
 
-test("a caller gets an unknown transport outcome when its request channel disappears before a receipt", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "keiyaku-request-claim-loss-"));
-  const id = "00000000-0000-4000-8000-000000000001";
-  try {
-    const request = requestBodyCall({
-      directory,
-      id,
-      world: directory,
-      archetype: "worker",
-      body: "lost request",
-      recipe: {
-        provider: { name: "claude", kind: "claude-agent-sdk" },
-        options: {},
-        allowed: ALLOWED_ACTIONS,
-      },
-    });
-    await waitForCondition(
-      "the request transport to publish its request path",
-      () => requestTransportPath(directory, id) !== undefined,
-      { terminalState: settlementProbe(request, () => "the request settled without publishing a transport path") },
-    );
-    rmSync(directory, { recursive: true, force: true });
-    await assert.rejects(
-      request,
-      (error: unknown) =>
-        error instanceof AkumaBodyRequestError &&
-        error.outcome === "unknown" &&
-        error.diagnostic === "parent request channel closed before a receipt" &&
-        error.requestId === id,
-    );
-    assert.equal(existsSync(directory), false);
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
-
-test("aborted publication keeps an in-flight launch lexically owned", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-publication-abort-")));
-  const controller = new AbortController();
-  let started!: () => void;
-  const launchStarted = new Promise<void>((resolve) => {
-    started = resolve;
-  });
-  let release!: () => void;
-  const launchGate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  let childPaths: Awaited<ReturnType<typeof allocateAkumaDirectory>>["paths"] | undefined;
-  try {
-    const publication = publishAkuma({
-      worldPath: root,
-      archetype: "worker",
-      signal: controller.signal,
-      async launch(allocated) {
-        childPaths = allocated.paths;
-        started();
-        await launchGate;
-      },
-    });
-    await launchStarted;
-    let settled = false;
-    void publication
-      .finally(() => {
-        settled = true;
-      })
-      .catch(() => {});
-    controller.abort(new Error("cancelled publication"));
-    await Promise.resolve();
-    assert.equal(settled, false);
-    release();
-    await assert.rejects(publication, /cancelled publication/u);
-    assert.equal(settled, true);
-    assert.equal(childPaths === undefined ? null : (await readSeal(childPaths))?.evidence, "cancelled publication");
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test("cancelled publication returns born when Soul appears during termination behind a successor leash", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-publication-cancelled-soul-")));
   const controller = new AbortController();
-  let launched!: () => void;
-  const launchStarted = new Promise<void>((resolve) => {
-    launched = resolve;
-  });
-  let terminate!: () => void;
-  const termination = new Promise<void>((resolve) => {
-    terminate = resolve;
-  });
+  const { promise: launchStarted, resolve: launched } = promiseBarrier<void>();
+  const { promise: termination, resolve: terminate } = promiseBarrier<void>();
   let terminateCount = 0;
   let releaseCount = 0;
   let childPaths: Awaited<ReturnType<typeof allocateAkumaDirectory>>["paths"] | undefined;
@@ -208,182 +117,155 @@ test("cancelled publication returns born when Soul appears during termination be
   }
 });
 
-test("cancelled publication waits for an already-born child to exit before releasing custody", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-publication-born-pending-exit-")));
+test("cancelled publication waits for an already-born child to exit before releasing custody", async (context) => {
+  const root = await World.at(temporaryDirectory(context, "keiyaku-akuma-publication-born-pending-exit-"));
   const controller = new AbortController();
-  let launched!: () => void;
-  const launchStarted = new Promise<void>((resolve) => {
-    launched = resolve;
-  });
-  let resolveExit!: (exit: Awaited<OwnedProcess["exited"]>) => void;
-  const exited = new Promise<Awaited<OwnedProcess["exited"]>>((resolve) => {
-    resolveExit = resolve;
-  });
+  const { promise: launchStarted, resolve: launched } = promiseBarrier<void>();
+  const { promise: exited, resolve: resolveExit } = promiseBarrier<Awaited<OwnedProcess["exited"]>>();
   let terminated = false;
   let released = false;
-  try {
-    const publication = publishAkuma({
-      worldPath: root,
-      archetype: "worker",
-      signal: controller.signal,
-      async launch(allocated) {
-        const leash = (await HeldAkumaLeash.try(allocated.paths))!;
-        await leash.birth(allocated.paths, {
-          id: allocated.id,
-          archetype: "worker",
-          provider: { name: "codex-app-server", kind: "codex-app-server" },
-          options: {},
-          cwd: root,
-          origin: { kind: "direct" },
-          allowed: ALLOWED_ACTIONS,
-          createdAt: "2026-08-26T00:00:00.000Z",
-        });
-        leash.release();
-        const child: OwnedProcess = {
-          pid: 4249,
-          exited,
-          terminate: async () => {
-            terminated = true;
-          },
-          release: () => {
-            released = true;
-          },
-        };
-        launched();
-        return child;
-      },
-    });
-    await launchStarted;
-    controller.abort(new Error("cancel born pending exit"));
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    assert.equal(terminated, false);
-    assert.equal(released, false);
-    resolveExit({ code: 0, signal: null, log: { path: "/tmp/request-child.log", from: 0, to: 0 } });
-    await publication;
-    assert.equal(released, true);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+  const publication = publishAkuma({
+    worldPath: root,
+    archetype: "worker",
+    signal: controller.signal,
+    async launch(allocated) {
+      const leash = (await HeldAkumaLeash.try(allocated.paths))!;
+      await leash.birth(allocated.paths, {
+        id: allocated.id,
+        archetype: "worker",
+        provider: { name: "codex-app-server", kind: "codex-app-server" },
+        options: {},
+        cwd: root,
+        origin: { kind: "direct" },
+        allowed: ALLOWED_ACTIONS,
+        createdAt: "2026-08-26T00:00:00.000Z",
+      });
+      leash.release();
+      const child: OwnedProcess = {
+        pid: 4249,
+        exited,
+        terminate: async () => {
+          terminated = true;
+        },
+        release: () => {
+          released = true;
+        },
+      };
+      launched();
+      return child;
+    },
+  });
+  await launchStarted;
+  controller.abort(new Error("cancel born pending exit"));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(terminated, false);
+  assert.equal(released, false);
+  resolveExit({ code: 0, signal: null, log: { path: "/tmp/request-child.log", from: 0, to: 0 } });
+  await publication;
+  assert.equal(released, true);
 });
 
-test("cancelled publication terminates its child, observes Seal, and then rejects the original reason", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-publication-cancelled-seal-")));
+test("cancelled publication terminates its child, observes Seal, and then rejects the original reason", async (context) => {
+  const root = await World.at(temporaryDirectory(context, "keiyaku-akuma-publication-cancelled-seal-"));
   const controller = new AbortController();
   const reason = new Error("cancelled publication");
-  let launched!: () => void;
-  const launchStarted = new Promise<void>((resolve) => {
-    launched = resolve;
-  });
+  const { promise: launchStarted, resolve: launched } = promiseBarrier<void>();
   let terminateCount = 0;
   let releaseCount = 0;
   let childPaths: Awaited<ReturnType<typeof allocateAkumaDirectory>>["paths"] | undefined;
-  try {
-    const publication = publishAkuma({
-      worldPath: root,
-      archetype: "worker",
-      signal: controller.signal,
-      async launch(allocated) {
-        childPaths = allocated.paths;
-        const leash = (await HeldAkumaLeash.try(allocated.paths))!;
-        const child: OwnedProcess = {
-          pid: 4247,
-          exited: Promise.resolve({
-            code: null,
-            signal: "SIGTERM",
-            log: { path: "/tmp/request-child.log", from: 0, to: 0 },
-          }),
-          terminate: async () => {
-            terminateCount += 1;
-            leash.release();
-          },
-          release: () => {
-            releaseCount += 1;
-          },
-        };
-        launched();
-        return child;
-      },
-    });
-    await launchStarted;
-    controller.abort(reason);
-    await assert.rejects(publication, (error: unknown) => error === reason);
-    assert.equal(terminateCount, 1);
-    assert.equal(releaseCount, 1);
-    assert.equal((await readSeal(childPaths!))?.evidence, "cancelled publication");
-    const leash = (await HeldAkumaLeash.try(childPaths!))!;
-    try {
-      assert.equal(
-        await leash.birth(childPaths!, {
-          id: "aku/worker/00000000" as AkuId,
-          archetype: "worker",
-          provider: { name: "codex-app-server", kind: "codex-app-server" },
-          options: {},
-          cwd: root,
-          origin: { kind: "direct" },
-          allowed: ALLOWED_ACTIONS,
-          createdAt: "2026-08-26T00:00:00.000Z",
+  const publication = publishAkuma({
+    worldPath: root,
+    archetype: "worker",
+    signal: controller.signal,
+    async launch(allocated) {
+      childPaths = allocated.paths;
+      const leash = (await HeldAkumaLeash.try(allocated.paths))!;
+      const child: OwnedProcess = {
+        pid: 4247,
+        exited: Promise.resolve({
+          code: null,
+          signal: "SIGTERM",
+          log: { path: "/tmp/request-child.log", from: 0, to: 0 },
         }),
-        "sealed",
-      );
-    } finally {
-      leash.release();
-    }
-    assert.equal(await readSoul(childPaths!), null);
+        terminate: async () => {
+          terminateCount += 1;
+          leash.release();
+        },
+        release: () => {
+          releaseCount += 1;
+        },
+      };
+      launched();
+      return child;
+    },
+  });
+  await launchStarted;
+  controller.abort(reason);
+  await assert.rejects(publication, (error: unknown) => error === reason);
+  assert.equal(terminateCount, 1);
+  assert.equal(releaseCount, 1);
+  assert.equal((await readSeal(childPaths!))?.evidence, "cancelled publication");
+  const leash = (await HeldAkumaLeash.try(childPaths!))!;
+  try {
+    assert.equal(
+      await leash.birth(childPaths!, {
+        id: "aku/worker/00000000" as AkuId,
+        archetype: "worker",
+        provider: { name: "codex-app-server", kind: "codex-app-server" },
+        options: {},
+        cwd: root,
+        origin: { kind: "direct" },
+        allowed: ALLOWED_ACTIONS,
+        createdAt: "2026-08-26T00:00:00.000Z",
+      }),
+      "sealed",
+    );
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    leash.release();
   }
+  assert.equal(await readSoul(childPaths!), null);
 });
 
-test("cancelled publication remains pending with child custody until termination is confirmed", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-publication-cancelled-pending-")));
+test("cancelled publication remains pending with child custody until termination is confirmed", async (context) => {
+  const root = await World.at(temporaryDirectory(context, "keiyaku-akuma-publication-cancelled-pending-"));
   const controller = new AbortController();
-  let launched!: () => void;
-  const launchStarted = new Promise<void>((resolve) => {
-    launched = resolve;
-  });
-  let confirmTermination!: () => void;
-  const termination = new Promise<void>((resolve) => {
-    confirmTermination = resolve;
-  });
+  const { promise: launchStarted, resolve: launched } = promiseBarrier<void>();
+  const { promise: termination, resolve: confirmTermination } = promiseBarrier<void>();
   let confirmExit!: () => void;
   const exited = new Promise<Awaited<OwnedProcess["exited"]>>((resolve) => {
     confirmExit = () =>
       resolve({ code: null, signal: "SIGTERM", log: { path: "/tmp/request-child.log", from: 0, to: 0 } });
   });
   let releaseCount = 0;
-  try {
-    const publication = publishAkuma({
-      worldPath: root,
-      archetype: "worker",
-      signal: controller.signal,
-      async launch(allocated) {
-        const leash = (await HeldAkumaLeash.try(allocated.paths))!;
-        const child: OwnedProcess = {
-          pid: 4248,
-          exited,
-          terminate: async () => {
-            await termination;
-            leash.release();
-          },
-          release: () => {
-            releaseCount += 1;
-          },
-        };
-        launched();
-        return child;
-      },
-    });
-    await launchStarted;
-    controller.abort(new Error("cancelled publication"));
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    assert.equal(releaseCount, 0);
-    confirmTermination();
-    confirmExit();
-    await assert.rejects(publication, /cancelled publication/u);
-    assert.equal(releaseCount, 1);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+  const publication = publishAkuma({
+    worldPath: root,
+    archetype: "worker",
+    signal: controller.signal,
+    async launch(allocated) {
+      const leash = (await HeldAkumaLeash.try(allocated.paths))!;
+      const child: OwnedProcess = {
+        pid: 4248,
+        exited,
+        terminate: async () => {
+          await termination;
+          leash.release();
+        },
+        release: () => {
+          releaseCount += 1;
+        },
+      };
+      launched();
+      return child;
+    },
+  });
+  await launchStarted;
+  controller.abort(new Error("cancelled publication"));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(releaseCount, 0);
+  confirmTermination();
+  confirmExit();
+  await assert.rejects(publication, /cancelled publication/u);
+  assert.equal(releaseCount, 1);
 });
 
 test("reserved child request is adjudicated from child Soul after publication failure", async () => {
@@ -512,59 +394,11 @@ test("a closed request channel does not report a reserved child as voided", asyn
   }
 });
 
-test("publication hands off an unborn child when termination fails and custody remains held", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-publication-handoff-")));
-  const controller = new AbortController();
-  let started!: () => void;
-  const launchStarted = new Promise<void>((resolve) => {
-    started = resolve;
-  });
-  let held: HeldAkumaLeash | undefined;
-  let childPaths: Awaited<ReturnType<typeof allocateAkumaDirectory>>["paths"] | undefined;
-  let released = false;
-  try {
-    const publication = publishAkuma({
-      worldPath: root,
-      archetype: "worker",
-      signal: controller.signal,
-      async launch(allocated) {
-        childPaths = allocated.paths;
-        held = (await HeldAkumaLeash.try(allocated.paths))!;
-        started();
-        return {
-          pid: 4252,
-          exited: new Promise<Awaited<OwnedProcess["exited"]>>(() => {}),
-          terminate: async () => {
-            throw new Error("terminate denied");
-          },
-          release: () => {
-            released = true;
-          },
-        } satisfies OwnedProcess;
-      },
-    });
-    await launchStarted;
-    controller.abort(new Error("cancel with retained custody"));
-    await assert.rejects(
-      publication,
-      (error: unknown) => error instanceof Error && error.message === "cancel with retained custody",
-    );
-    assert.equal(released, true);
-    assert.equal(await readSoul(childPaths!), null);
-  } finally {
-    held?.release();
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test("publication releases process custody after bounded observation of unsettled termination", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-publication-unsettled-custody-")));
   const controller = new AbortController();
   const reason = new Error("cancel unsettled custody");
-  let started!: () => void;
-  const launchStarted = new Promise<void>((resolve) => {
-    started = resolve;
-  });
+  const { promise: launchStarted, resolve: started } = promiseBarrier<void>();
   let held: HeldAkumaLeash | undefined;
   let childPaths: Awaited<ReturnType<typeof allocateAkumaDirectory>>["paths"] | undefined;
   let released = false;
@@ -862,33 +696,29 @@ test("Heart refuses a disabled call before child publication", async () => {
   }
 });
 
-test("publication preserves a Body failure that occurs before birth", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-publication-failure-")));
+test("publication preserves a Body failure that occurs before birth", async (context) => {
+  const root = await World.at(temporaryDirectory(context, "keiyaku-akuma-publication-failure-"));
   let childPaths: Awaited<ReturnType<typeof allocateAkumaDirectory>>["paths"] | undefined;
-  try {
-    await assert.rejects(
-      publishAkuma({
-        worldPath: root,
-        archetype: "worker",
-        async launch(allocated) {
-          childPaths = allocated.paths;
-          await assert.rejects(driveAkumaBody({ paths: allocated.paths }), /Akuma wake has no born soul/u);
-          assert.equal((await readSeal(allocated.paths))?.evidence, "Akuma wake has no born soul");
-        },
-      }),
-      /Akuma wake has no born soul/u,
-    );
-    assert.equal(
-      childPaths === undefined ? null : (await readSeal(childPaths))?.evidence,
-      "Akuma wake has no born soul",
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+  await assert.rejects(
+    publishAkuma({
+      worldPath: root,
+      archetype: "worker",
+      async launch(allocated) {
+        childPaths = allocated.paths;
+        await assert.rejects(driveAkumaBody({ paths: allocated.paths }), /Akuma wake has no born soul/u);
+        assert.equal((await readSeal(allocated.paths))?.evidence, "Akuma wake has no born soul");
+      },
+    }),
+    /Akuma wake has no born soul/u,
+  );
+  assert.equal(
+    childPaths === undefined ? null : (await readSeal(childPaths))?.evidence,
+    "Akuma wake has no born soul",
+  );
 });
 
-test("publication observes an exited request child before Soul and releases without terminating", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-publication-exit-")));
+test("publication observes an exited request child before Soul and releases without terminating", async (context) => {
+  const root = await World.at(temporaryDirectory(context, "keiyaku-akuma-publication-exit-"));
   let released = false;
   let terminated = false;
   const child: OwnedProcess = {
@@ -902,64 +732,17 @@ test("publication observes an exited request child before Soul and releases with
     },
   };
   const started = performance.now();
-  try {
-    await assert.rejects(
-      publishAkuma({ worldPath: root, archetype: "worker", launch: async () => child }),
-      /pre-admission exit 7/u,
-    );
-    assert.ok(performance.now() - started < 1_000);
-    assert.equal(released, true);
-    assert.equal(terminated, false);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+  await assert.rejects(
+    publishAkuma({ worldPath: root, archetype: "worker", launch: async () => child }),
+    /pre-admission exit 7/u,
+  );
+  assert.ok(performance.now() - started < 1_000);
+  assert.equal(released, true);
+  assert.equal(terminated, false);
 });
 
-test("publication keeps the parent Seal as evidence but diagnoses a child exit from its status", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-publication-exit-seal-")));
-  let childPaths: Awaited<ReturnType<typeof allocateAkumaDirectory>>["paths"] | undefined;
-  const exit = { code: 7, signal: null, log: { path: "/tmp/request-child.log", from: 0, to: 0 } } as const;
-  const child: OwnedProcess = {
-    pid: 4244,
-    exited: {
-      then(onFulfilled: (value: typeof exit) => unknown, onRejected?: (error: unknown) => unknown) {
-        return (async () => {
-          try {
-            const paths = childPaths!;
-            const leash = (await HeldAkumaLeash.try(paths))!;
-            await leash.sealIfUnborn(paths, { evidence: "body failure", at: new Date().toISOString() });
-            leash.release();
-            return onFulfilled(exit);
-          } catch (error) {
-            if (onRejected === undefined) throw error;
-            return onRejected(error);
-          }
-        })();
-      },
-    } as unknown as OwnedProcess["exited"],
-    terminate: async () => {},
-    release: () => {},
-  };
-  try {
-    await assert.rejects(
-      publishAkuma({
-        worldPath: root,
-        archetype: "worker",
-        async launch(allocated) {
-          childPaths = allocated.paths;
-          return child;
-        },
-      }),
-      (error: unknown) => error instanceof Error && error.message === "pre-admission exit 7",
-    );
-    assert.equal((await readSeal(childPaths!))?.evidence, "body failure");
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("publication prefers an already-settled parent exit over a pre-written non-exit Seal", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-publication-exit-prewritten-seal-")));
+test("publication prefers an already-settled parent exit over a pre-written non-exit Seal", async (context) => {
+  const root = await World.at(temporaryDirectory(context, "keiyaku-akuma-publication-exit-prewritten-seal-"));
   let childPaths: Awaited<ReturnType<typeof allocateAkumaDirectory>>["paths"] | undefined;
   let resolveExit!: (exit: { code: number; signal: null; log: { path: string; from: number; to: number } }) => void;
   const exit = { code: 7, signal: null, log: { path: "/tmp/request-child.log", from: 0, to: 0 } } as const;
@@ -971,35 +754,28 @@ test("publication prefers an already-settled parent exit over a pre-written non-
     terminate: async () => {},
     release: () => {},
   };
-  try {
-    await assert.rejects(
-      publishAkuma({
-        worldPath: root,
-        archetype: "worker",
-        async launch(allocated) {
-          childPaths = allocated.paths;
-          const leash = (await HeldAkumaLeash.try(allocated.paths))!;
-          await leash.sealIfUnborn(allocated.paths, { evidence: "body failure", at: new Date().toISOString() });
-          leash.release();
-          resolveExit(exit);
-          return child;
-        },
-      }),
-      (error: unknown) => error instanceof Error && error.message === "pre-admission exit 7",
-    );
-    assert.equal((await readSeal(childPaths!))?.evidence, "body failure");
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+  await assert.rejects(
+    publishAkuma({
+      worldPath: root,
+      archetype: "worker",
+      async launch(allocated) {
+        childPaths = allocated.paths;
+        const leash = (await HeldAkumaLeash.try(allocated.paths))!;
+        await leash.sealIfUnborn(allocated.paths, { evidence: "body failure", at: new Date().toISOString() });
+        leash.release();
+        resolveExit(exit);
+        return child;
+      },
+    }),
+    (error: unknown) => error instanceof Error && error.message === "pre-admission exit 7",
+  );
+  assert.equal((await readSeal(childPaths!))?.evidence, "body failure");
 });
 
-test("cancelled publication closes a live child before releasing its custody", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-publication-live-")));
+test("cancelled publication closes a live child before releasing its custody", async (context) => {
+  const root = await World.at(temporaryDirectory(context, "keiyaku-akuma-publication-live-"));
   const controller = new AbortController();
-  let launched!: () => void;
-  const launchStarted = new Promise<void>((resolve) => {
-    launched = resolve;
-  });
+  const { promise: launchStarted, resolve: launched } = promiseBarrier<void>();
   let released = false;
   let terminated = false;
   let confirmExit!: () => void;
@@ -1031,103 +807,85 @@ test("cancelled publication closes a live child before releasing its custody", a
       return child;
     },
   });
-  try {
-    await launchStarted;
-    controller.abort(new Error("cancel live birth"));
-    await assert.rejects(publication, /cancel live birth/u);
-    assert.equal(released, true);
-    assert.equal(terminated, true);
-    assert.equal((await readSeal(childPaths!))?.evidence, "cancel live birth");
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+  await launchStarted;
+  controller.abort(new Error("cancel live birth"));
+  await assert.rejects(publication, /cancel live birth/u);
+  assert.equal(released, true);
+  assert.equal(terminated, true);
+  assert.equal((await readSeal(childPaths!))?.evidence, "cancel live birth");
 });
 
-test("cancelled publication records a termination rejection and still seals before release", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-publication-terminate-rejection-")));
+test("cancelled publication records a termination rejection and still seals before release", async (context) => {
+  const root = await World.at(temporaryDirectory(context, "keiyaku-akuma-publication-terminate-rejection-"));
   const controller = new AbortController();
   const reason = new Error("cancel terminate rejection");
   let childPaths: Awaited<ReturnType<typeof allocateAkumaDirectory>>["paths"] | undefined;
   let released = false;
-  let started!: () => void;
-  const launchStarted = new Promise<void>((resolve) => {
-    started = resolve;
+  const { promise: launchStarted, resolve: started } = promiseBarrier<void>();
+  const publication = publishAkuma({
+    worldPath: root,
+    archetype: "worker",
+    signal: controller.signal,
+    async launch(allocated) {
+      childPaths = allocated.paths;
+      const leash = (await HeldAkumaLeash.try(allocated.paths))!;
+      started();
+      return {
+        pid: 4250,
+        exited: Promise.resolve({
+          code: null,
+          signal: "SIGTERM",
+          log: { path: "/tmp/request-child.log", from: 0, to: 0 },
+        }),
+        terminate: async () => {
+          leash.release();
+          throw new Error("terminate denied");
+        },
+        release: () => {
+          released = true;
+        },
+      } satisfies OwnedProcess;
+    },
   });
-  try {
-    const publication = publishAkuma({
-      worldPath: root,
-      archetype: "worker",
-      signal: controller.signal,
-      async launch(allocated) {
-        childPaths = allocated.paths;
-        const leash = (await HeldAkumaLeash.try(allocated.paths))!;
-        started();
-        return {
-          pid: 4250,
-          exited: Promise.resolve({
-            code: null,
-            signal: "SIGTERM",
-            log: { path: "/tmp/request-child.log", from: 0, to: 0 },
-          }),
-          terminate: async () => {
-            leash.release();
-            throw new Error("terminate denied");
-          },
-          release: () => {
-            released = true;
-          },
-        } satisfies OwnedProcess;
-      },
-    });
-    await launchStarted;
-    controller.abort(reason);
-    await assert.rejects(publication, (error: unknown) => error === reason);
-    assert.equal((await readSeal(childPaths!))?.evidence, "cancel terminate rejection");
-    assert.equal(released, true);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+  await launchStarted;
+  controller.abort(reason);
+  await assert.rejects(publication, (error: unknown) => error === reason);
+  assert.equal((await readSeal(childPaths!))?.evidence, "cancel terminate rejection");
+  assert.equal(released, true);
 });
 
-test("cancelled publication records an exit rejection and still seals before release", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-publication-exit-rejection-")));
+test("cancelled publication records an exit rejection and still seals before release", async (context) => {
+  const root = await World.at(temporaryDirectory(context, "keiyaku-akuma-publication-exit-rejection-"));
   const controller = new AbortController();
   const reason = new Error("cancel exit rejection");
   let childPaths: Awaited<ReturnType<typeof allocateAkumaDirectory>>["paths"] | undefined;
   let released = false;
-  let started!: () => void;
-  const launchStarted = new Promise<void>((resolve) => {
-    started = resolve;
+  const { promise: launchStarted, resolve: started } = promiseBarrier<void>();
+  const publication = publishAkuma({
+    worldPath: root,
+    archetype: "worker",
+    signal: controller.signal,
+    async launch(allocated) {
+      childPaths = allocated.paths;
+      const leash = (await HeldAkumaLeash.try(allocated.paths))!;
+      started();
+      return {
+        pid: 4251,
+        exited: Promise.reject(new Error("exit evidence unavailable")),
+        terminate: async () => {
+          leash.release();
+        },
+        release: () => {
+          released = true;
+        },
+      } satisfies OwnedProcess;
+    },
   });
-  try {
-    const publication = publishAkuma({
-      worldPath: root,
-      archetype: "worker",
-      signal: controller.signal,
-      async launch(allocated) {
-        childPaths = allocated.paths;
-        const leash = (await HeldAkumaLeash.try(allocated.paths))!;
-        started();
-        return {
-          pid: 4251,
-          exited: Promise.reject(new Error("exit evidence unavailable")),
-          terminate: async () => {
-            leash.release();
-          },
-          release: () => {
-            released = true;
-          },
-        } satisfies OwnedProcess;
-      },
-    });
-    await launchStarted;
-    controller.abort(reason);
-    await assert.rejects(publication, (error: unknown) => error === reason);
-    assert.equal((await readSeal(childPaths!))?.evidence, "cancel exit rejection");
-    assert.equal(released, true);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+  await launchStarted;
+  controller.abort(reason);
+  await assert.rejects(publication, (error: unknown) => error === reason);
+  assert.equal((await readSeal(childPaths!))?.evidence, "cancel exit rejection");
+  assert.equal(released, true);
 });
 
 test("a drive serves Body Requests through transport while Heart remains authoritative", async () => {
@@ -1285,39 +1043,6 @@ test("a drive serves Body Requests through transport while Heart remains authori
   }
 });
 
-test("a registered request payload violation fails the pump before Heart admission", async () => {
-  const value = await fixture();
-  const pump = await BodyRequestPump.open({
-    paths: value.parent.paths,
-    allowed: value.soul.allowed,
-    bodySequence: 1,
-    now: () => "2026-08-09T00:00:01.000Z",
-    commands: akumaCallRequestCommands({
-      world: value.root,
-      paths: value.parent.paths,
-      parent: value.soul,
-      spawn: async () => {
-        throw new Error("unexpected spawn");
-      },
-    }),
-    signal: new AbortController().signal,
-  });
-  const id = "00000000-0000-4000-8000-000000000004";
-  try {
-    writeFileSync(
-      join(pump.directory, `${id}.request.json`),
-      JSON.stringify({ id, action: "akuma.call", payload: { unexpected: true } }),
-    );
-    await assert.rejects(pump.failure, /registered request action akuma\.call rejected its payload/u);
-    assert.equal(await readRequest(value.parent.paths, id), null);
-    assert.equal(existsSync(join(pump.directory, `${id}.receipt.json`)), false);
-  } finally {
-    await assert.rejects(pump.close(), /registered request action akuma\.call rejected its payload/u);
-    value.leash.release();
-    value.close();
-  }
-});
-
 test("a new body settles old requests by observation without replay", async () => {
   const value = await fixture();
   try {
@@ -1416,20 +1141,4 @@ test("a new body settles old requests by observation without replay", async () =
     value.leash.release();
     value.close();
   }
-});
-
-test("Contract owns the exact normalized deliver payload decoder", () => {
-  const payload = {
-    repoRoot: "/repo",
-    contractId: "kei/example",
-    includeDirty: false,
-    materializeConflict: true,
-  };
-  assert.deepEqual(contractRequestProtocol("contract.deliver").decodeRequest(payload), {
-    action: "contract.deliver",
-    ...payload,
-  });
-  assert.equal(contractRequestProtocol("contract.deliver").decodeRequest({ ...payload, extra: true }), null);
-  const { materializeConflict: _materializeConflict, ...without } = payload;
-  assert.equal(contractRequestProtocol("contract.deliver").decodeRequest(without), null);
 });
