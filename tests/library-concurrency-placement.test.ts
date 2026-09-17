@@ -9,7 +9,7 @@ import { privateStatePublicationSeatPath } from "../src/git/private-state-seat.j
 import { Keiyaku, KeiyakuRetry, Repo, type Keiyaku as KeiyakuHandle } from "../src/index.js";
 import { appointedWorktreePath, cachedRepoAt, cachedRepositoryAt, withGitShim } from "./support/git.js";
 import { bind, document, repositoryWithMain } from "./support/library-verbs.js";
-import { deferred as promiseBarrier } from "./support/process.js";
+import { fixtureNodeOptions, deferred as promiseBarrier } from "./support/process.js";
 
 type AcceptedDelivery = Exclude<
   Awaited<ReturnType<KeiyakuHandle["deliver"]>>,
@@ -66,7 +66,7 @@ function crossProcessAmend(
     "  }",
     "} catch (error) { process.stdout.write(`failed:${error.reason?.kind ?? error.refusal?.kind ?? error.name}\\n`); }",
   ].join("\n");
-  const child = spawn(process.execPath, ["--import", import.meta.resolve("tsx"), "--input-type=module", "-e", source], {
+  const child = spawn(process.execPath, [...fixtureNodeOptions, "--input-type=module", "-e", source], {
     env: {
       ...process.env,
       KEIYAKU_MODULE: new URL("../src/index.js", import.meta.url).href,

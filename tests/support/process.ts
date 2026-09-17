@@ -1,9 +1,7 @@
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { TestContext } from "node:test";
-import { existsSync, readFileSync, rmSync } from "node:fs";
-import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const PROCESS_EXIT_POLL_MS = 20;
@@ -245,3 +243,8 @@ export function temporaryDirectory(context: TestContext, prefix: string): string
   context.after(() => rmSync(directory, { recursive: true, force: true }));
   return directory;
 }
+
+/** Compiled fixture children execute release JavaScript; focused source runs still need tsx. */
+export const fixtureNodeOptions: readonly string[] = Object.freeze(
+  import.meta.url.endsWith(".js") ? [] : ["--import", import.meta.resolve("tsx")],
+);

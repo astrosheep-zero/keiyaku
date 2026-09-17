@@ -4,6 +4,15 @@ import { join, resolve } from "node:path";
 import { TEST_MANIFESTS } from "./test-manifests.mjs";
 
 const DEFAULT_TEST_PATTERNS = ["tests/**/*.test.ts", "tests/maintainability.test.js"];
+// These compact suites are expensive because they coordinate real Git/process work.
+// They otherwise start near the end of a size-ordered sweep and dominate its tail.
+// This only changes start order: discovery, isolation and failure reporting stay intact.
+const LONG_RUNNING_TEST_FILES = new Set([
+  "tests/contract-completion.test.ts",
+  "tests/library-concurrency-placement.test.ts",
+  "tests/target-checkout-reconcile.test.ts",
+  "tests/run-tests.test.ts",
+]);
 const STILL_RUNNING_THRESHOLD_MS = 60_000;
 const STILL_RUNNING_INTERVAL_MS = 60_000;
 
@@ -129,8 +138,17 @@ if (compiled && files.length === 0 && testOptions.every((option) => /^--test-con
   // Print the artifact directory before any child starts so a hanging sweep is diagnosable.
   console.log(`[run-tests] per-file logs: ${logDirectory}`);
   const executionEntries = selectedFiles
-    .map((file) => ({ file, size: statSync(file).size }))
-    .sort((left, right) => right.size - left.size || left.file.localeCompare(right.file))
+    .map((file) => ({
+      file,
+      size: statSync(file).size,
+      longRunning: LONG_RUNNING_TEST_FILES.has(file.replaceAll("\\", "/")),
+    }))
+    .sort(
+      (left, right) =>
+        Number(right.longRunning) - Number(left.longRunning) ||
+        right.size - left.size ||
+        left.file.localeCompare(right.file),
+    )
     .map(({ file }) => ".test-build/" + file.replace(/\.ts$/u, ".js"))
     .map((file, index) => ({
       file,
@@ -176,6 +194,9 @@ if (compiled && files.length === 0 && testOptions.every((option) => /^--test-con
           [
             ...loader,
             "--test",
+            // This process owns exactly one file. Do not fork a second test worker
+            // inside it; cross-file process isolation remains with the outer pool.
+            "--experimental-test-isolation=none",
             ...reporterOptions,
             "--test-reporter-destination=stdout",
             "--test-reporter=spec",

@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { mkdtempSync, rmSync } from "node:fs";
-import { makeGitRepository } from "./support/git.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
+import { invoke } from "../src/cli/invoke.js";
 import { main } from "../src/cli/main.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
-import { invoke } from "../src/cli/invoke.js";
+import { makeGitRepository } from "./support/git.js";
+import { fixtureNodeOptions } from "./support/process.js";
 
 async function captureMain(
   argv: readonly string[],
@@ -82,8 +83,7 @@ test("unmatched Contract selectors preserve exit and JSON behavior while exposin
     spawnSync(
       process.execPath,
       [
-        "--import",
-        "tsx",
+        ...fixtureNodeOptions,
         fileURLToPath(
           new URL(import.meta.url.endsWith(".js") ? "../src/cli/index.js" : "../src/cli/index.ts", import.meta.url),
         ),

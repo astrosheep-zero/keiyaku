@@ -1,17 +1,13 @@
-import { temporaryDirectory } from "./support/process.js";
-import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { open } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { pathToFileURL } from "node:url";
+import { join } from "node:path";
 import test from "node:test";
 import { createProcessLifecycle } from "../src/runtime/proc/lifecycle.js";
 import { LineRpcProcess } from "../src/runtime/proc/line-rpc.js";
-import { spawnStdioProcess } from "../src/runtime/proc/stdio.js";
 import {
   consumeProcessStdout,
   runCrossPlatformProcess,
@@ -20,14 +16,18 @@ import {
   spawnDetachedProcess,
   type ProcessInput,
 } from "../src/runtime/proc/run.js";
+import { spawnStdioProcess } from "../src/runtime/proc/stdio.js";
 import { terminateOwnedProcess } from "../src/runtime/proc/termination.js";
 import {
   cleanupSpawnCapableFixture,
+  fixtureNodeOptions,
   installAkumaBodyPidReceipt,
   processExists,
+  deferred as promiseBarrier,
   readPidReceipt,
   removeTempDirectory,
   settlementProbe,
+  temporaryDirectory,
   waitForCondition,
   waitForFixtureFile,
   waitForProcessExit,
@@ -595,7 +595,7 @@ test("runProcess retains only the final 16 KiB of each stream", async () => {
     ]),
   );
 
-  assert.ok(outcome.kind === "terminal", "expected outcome.kind = \"terminal\"");
+  assert.ok(outcome.kind === "terminal", 'expected outcome.kind = "terminal"');
   assert.equal(Buffer.byteLength(outcome.stdout), 16 * 1024);
   assert.equal(Buffer.byteLength(outcome.stderr), 16 * 1024);
   assert.equal(outcome.stdout.endsWith("stdout-tail"), true);
@@ -622,7 +622,7 @@ for (const [name, run] of [
       ]),
     );
 
-    assert.ok(outcome.kind === "timeout", "expected outcome.kind = \"timeout\"");
+    assert.ok(outcome.kind === "timeout", 'expected outcome.kind = "timeout"');
     assert.equal(Buffer.byteLength(outcome.stdout), 16 * 1024);
     assert.equal(Buffer.byteLength(outcome.stderr), 16 * 1024);
     assert.equal(outcome.stdout.endsWith("stdout-tail"), true);
@@ -687,7 +687,7 @@ test("runProcess reports unknown exits", async () => {
 test("runProcess reports spawn errors", async () => {
   const outcome = await runProcess(input(["keiyaku-v4-no-such-executable"]));
 
-  assert.ok(outcome.kind === "spawn-error", "expected outcome.kind = \"spawn-error\"");
+  assert.ok(outcome.kind === "spawn-error", 'expected outcome.kind = "spawn-error"');
   assert.match(outcome.diagnostic, /ENOENT/);
 });
 
@@ -747,7 +747,7 @@ test("Unix natural leader exit cleans a surviving descendant once", async (t) =>
     'const { spawn } = require("node:child_process");',
     'const { existsSync } = require("node:fs");',
     `spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: ["ignore", "inherit", "inherit"] });`,
-    'const deadline = Date.now() + 60000;',
+    "const deadline = Date.now() + 60000;",
     `while (!existsSync(${JSON.stringify(descendantPidPath)})) { if (Date.now() >= deadline) { console.error("fixture wait for the descendant pid receipt expired after 60000ms"); process.exit(1); } }`,
     "process.exit(0);",
   ].join(" ");
@@ -1282,7 +1282,7 @@ test("release lets the parent reach beforeExit while the detached child continue
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-owned-process-before-exit-"));
   const childPidPath = join(root, "child-pid");
   try {
-    const runtime = pathToFileURL(join(process.cwd(), "src/runtime/proc/run.ts")).href;
+    const runtime = new URL("../src/runtime/proc/run.js", import.meta.url).href;
     const script = [
       `import { spawnDetachedProcess } from ${JSON.stringify(runtime)};`,
       `const owned = await spawnDetachedProcess({ argv: [process.execPath, "-e", ${JSON.stringify(`require("node:fs").writeFileSync(${JSON.stringify(childPidPath)}, String(process.pid)); setTimeout(() => {}, 1000)`)}], cwd: ${JSON.stringify(root)}, log: ${JSON.stringify(join(root, "stdio.log"))} });`,
@@ -1292,7 +1292,7 @@ test("release lets the parent reach beforeExit while the detached child continue
     const env: NodeJS.ProcessEnv = { ...process.env, NO_COLOR: "1" };
     delete env.FORCE_COLOR;
     const outcome = await runProcess(
-      input([process.execPath, "--import", "tsx", "--input-type=module", "-e", script], { env }),
+      input([process.execPath, ...fixtureNodeOptions, "--input-type=module", "-e", script], { env }),
     );
     assert.deepEqual(outcome, { kind: "terminal", code: 0, stdout: "before-exit\n", stderr: "", truncated: false });
   } finally {

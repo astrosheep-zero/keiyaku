@@ -1,10 +1,21 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, globSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  globSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
-import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
+import { fixtureNodeOptions } from "./support/process.js";
 
 type TestManifestsModule = {
   TEST_MANIFESTS: {
@@ -20,7 +31,8 @@ const { TEST_MANIFESTS } = (await import(
 const root = process.cwd();
 
 const compiledTestModules = import.meta.url.endsWith(".js");
-const gitFixtureModuleUrl = new URL(compiledTestModules ? "./support/git.js" : "./support/git.ts", import.meta.url).href;
+const gitFixtureModuleUrl = new URL(compiledTestModules ? "./support/git.js" : "./support/git.ts", import.meta.url)
+  .href;
 const externalSentinel = "external symlink target sentinel\n";
 
 function sharedGitFixtureChildSource(): string {
@@ -41,7 +53,7 @@ function sharedGitFixtureChildSource(): string {
     "",
     "function shimDirectories() {",
     "  const root = tmpdir();",
-    '  return readdirSync(root)',
+    "  return readdirSync(root)",
     '    .filter((name) => name.startsWith("keiyaku-v4-git-shim-"))',
     "    .map((name) => realpathSync(join(root, name)));",
     "}",
@@ -67,7 +79,7 @@ function sharedGitFixtureChildSource(): string {
     "    enumerable: true,",
     '    get() { throw new Error("shim setup failure"); },',
     "  });",
-    '  assert.throws(() => withGitShim(shimBody, setupFailure, () => {}), /shim setup failure/u);',
+    "  assert.throws(() => withGitShim(shimBody, setupFailure, () => {}), /shim setup failure/u);",
     "  return async () => {",
     "    const asyncShim = await withGitShim(shimBody, {}, async (gitPath) => gitPath);",
     '    assert.equal(existsSync(asyncShim), true, "asynchronous shim remains owned until terminal teardown");',
@@ -123,11 +135,11 @@ function runSharedGitFixtureChild(
   };
   // An isolated child runner must not inherit Node's recursion guard.
   delete env.NODE_TEST_CONTEXT;
-  const result = spawnSync(
-    process.execPath,
-    ["--import", import.meta.resolve("tsx"), "--test", "--test-reporter=tap", fixture],
-    { cwd: root, encoding: "utf8", env },
-  );
+  const result = spawnSync(process.execPath, [...fixtureNodeOptions, "--test", "--test-reporter=tap", fixture], {
+    cwd: root,
+    encoding: "utf8",
+    env,
+  });
   const output = `${result.stdout}${result.stderr}`;
   if (!existsSync(receipt)) throw new Error(`child never wrote its fixture receipt\n${output}`);
   const recorded = JSON.parse(readFileSync(receipt, "utf8")) as {
@@ -164,7 +176,10 @@ test("test runner removes ambient Akuma requests and preserves unrelated environ
       { cwd: root, encoding: "utf8", env },
     );
     assert.equal(result.status, sentinel === "sentinel bytes" ? 0 : 1, result.stderr || result.stdout);
-    assert.match(result.stdout + result.stderr, /repository test environment is isolated from Akuma request forwarding/u);
+    assert.match(
+      result.stdout + result.stderr,
+      /repository test environment is isolated from Akuma request forwarding/u,
+    );
     assert.match(result.stdout + result.stderr, /# tests 1/u);
   }
 });
@@ -198,7 +213,11 @@ test("shared Git test fixtures remain owned across a file and retire at terminal
     assert.equal(existsSync(path), false, `terminal teardown removed ${path}\n${live.output}`);
   }
   assert.equal(existsSync(live.external), true, "external symlink target survives terminal teardown");
-  assert.equal(readFileSync(live.sentinel, "utf8"), externalSentinel, "external target contents survive terminal teardown");
+  assert.equal(
+    readFileSync(live.sentinel, "utf8"),
+    externalSentinel,
+    "external target contents survive terminal teardown",
+  );
   assert.deepEqual(
     readdirSync(live.temporary).filter((name) => name.startsWith("keiyaku-v4-")),
     [],
@@ -215,21 +234,25 @@ test("failed child test files still retire shared Git fixtures", (context) => {
   for (const path of failed.paths) {
     assert.equal(existsSync(path), false, `failed-file teardown removed ${path}\n${failed.output}`);
   }
-  assert.equal(readFileSync(failed.sentinel, "utf8"), externalSentinel, "external target contents survive failed-file teardown");
+  assert.equal(
+    readFileSync(failed.sentinel, "utf8"),
+    externalSentinel,
+    "external target contents survive failed-file teardown",
+  );
 });
 
-test("compiled sweeps schedule large files first without losing isolation or failures", (context) => {
+test("compiled sweeps start compact slow suites first, then size-order the rest without losing isolation or failures", (context) => {
   const directory = mkdtempSync(join(tmpdir(), "keiyaku-test-runner-"));
   context.after(() => rmSync(directory, { recursive: true, force: true }));
   mkdirSync(join(directory, "tests"));
   mkdirSync(join(directory, ".test-build", "tests"), { recursive: true });
   const order = join(directory, "order");
-  for (const name of ["a", "z"]) {
+  for (const name of ["a", "z", "contract-completion"]) {
     writeFileSync(join(directory, "tests", `${name}.test.ts`), "// source\n".repeat(name === "z" ? 100 : 1));
     writeFileSync(
       join(directory, ".test-build", "tests", `${name}.test.js`),
       [
-        `require('node:fs').appendFileSync(${JSON.stringify(order)}, '${name}');`,
+        `require('node:fs').appendFileSync(${JSON.stringify(order)}, '${name},');`,
         "require('node:test')('isolated fixture', () => {",
         "  require('node:assert/strict').equal(process.env.AKUMA_REQUESTS, undefined);",
         "  require('node:assert/strict').equal(process.env.KEIYAKU_TEST_SENTINEL, 'sentinel');",
@@ -246,11 +269,11 @@ test("compiled sweeps schedule large files first without losing isolation or fai
     });
   const passed = run("sentinel");
   assert.equal(passed.status, 0, passed.stdout + passed.stderr);
-  assert.equal(readFileSync(order, "utf8"), "za");
+  assert.equal(readFileSync(order, "utf8"), "contract-completion,z,a,");
   const failed = run("wrong bytes");
   assert.equal(failed.status, 1, failed.stdout + failed.stderr);
   assert.match(failed.stdout + failed.stderr, /wrong bytes/u);
-  assert.equal(readFileSync(order, "utf8"), "zaza");
+  assert.equal(readFileSync(order, "utf8"), "contract-completion,z,a,contract-completion,z,a,");
 });
 
 test("compiled sweeps await delayed files even when a sibling fails", (context) => {
@@ -453,10 +476,13 @@ test("release test entry completes build before parallel preparation and stops a
       'import { appendFileSync } from "node:fs";',
       "const phase = process.env.npm_lifecycle_event;",
       'appendFileSync("phases.jsonl", phase + "\\n");',
-      'if (phase === process.env.FAIL_PHASE) process.exitCode = 7;',
+      "if (phase === process.env.FAIL_PHASE) process.exitCode = 7;",
     ].join("\n"),
   );
-  writeFileSync(join(directory, "scripts", "run-tests.mjs"), 'import { appendFileSync } from "node:fs"; appendFileSync("phases.jsonl", "tests\\n");');
+  writeFileSync(
+    join(directory, "scripts", "run-tests.mjs"),
+    'import { appendFileSync } from "node:fs"; appendFileSync("phases.jsonl", "tests\\n");',
+  );
 
   for (const fail of ["", "build"]) {
     writeFileSync(join(directory, "phases.jsonl"), "");

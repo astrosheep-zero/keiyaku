@@ -1,22 +1,22 @@
-import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
-import { contractLocator, mintSnapshotId } from "../src/git/identity.js";
 import { normalizedWorktreeHooks, runCreateHooks, type HookCommand, type WorktreeHooks } from "../src/git/hooks.js";
-import { appointedWorktreePath } from "./support/git.js";
+import { contractLocator, mintSnapshotId } from "../src/git/identity.js";
+import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { commonGitDirectory, repositoryAt, worktreeGitDirectory } from "../src/git/repository.js";
 import { materializeScratchCandidate } from "../src/git/scratch.js";
-import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { Keiyaku, Repo } from "../src/index.js";
 import { abandonOperation } from "../src/protocol/abandon.js";
 import { scopeOperation } from "../src/protocol/operations.js";
+import { appointedWorktreePath } from "./support/git.js";
 import { repositoryWithMain } from "./support/library-verbs.js";
+import { contractMarkdown } from "./support/markdown.js";
+import { fixtureNodeOptions } from "./support/process.js";
 
 const EMPTY_HOOKS: WorktreeHooks = { create: [], destroy: [] };
 
@@ -35,7 +35,6 @@ function appendCommand(path: string, value: string, delayMs = 0): HookCommand {
   const source = delayMs === 0 ? append : `setTimeout(() => { ${append}; }, ${delayMs})`;
   return { name: "append", argv: [process.execPath, "-e", source], timeoutMs: 5_000 };
 }
-
 
 function lockPath(
   repository: Awaited<ReturnType<typeof repositoryAt>>,
@@ -210,8 +209,7 @@ test("a Hook runner outlives its killed reconcile caller and fences immediate re
     `const input = JSON.parse(Buffer.from(${JSON.stringify(input)}, "base64url").toString("utf8"));`,
     "await runCreateHooks(input.worktree, input.hooks);",
   ].join(" ");
-  const loader = import.meta.resolve("tsx");
-  const caller = spawn(process.execPath, ["--import", loader, "--input-type=module", "-e", callerSource], {
+  const caller = spawn(process.execPath, [...fixtureNodeOptions, "--input-type=module", "-e", callerSource], {
     cwd: process.cwd(),
     stdio: ["ignore", "ignore", "pipe"],
   });
@@ -278,8 +276,7 @@ test("reconcile acquires a death-released scratch lock and preserves an actively
     `const scratch = await materializeScratchCandidate(await repositoryAt(${JSON.stringify(repository.path)}), ${JSON.stringify(snapshot)});`,
     `writeFileSync(${JSON.stringify(pathFile)}, scratch.cwd);`,
   ].join(" ");
-  const loader = import.meta.resolve("tsx");
-  const child = spawn(process.execPath, ["--import", loader, "--input-type=module", "-e", childSource], {
+  const child = spawn(process.execPath, [...fixtureNodeOptions, "--input-type=module", "-e", childSource], {
     cwd: process.cwd(),
     stdio: ["ignore", "ignore", "pipe"],
   });
