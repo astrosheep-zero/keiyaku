@@ -1,3 +1,4 @@
+import { boundedListLimit, projectBoundedList } from "../src/bounded-list.js";
 import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
 import { constants, copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
@@ -302,12 +303,13 @@ test("facade Akuma catalog returns bounded Heart activity in semantic order", as
   assert.equal(custodyReads, 0);
 });
 
-test("recent Akuma page prunes old custody bounds without changing Heart membership", async (t) => {
+test("recent Akuma page prunes physical reads and preserves complete membership", async (t) => {
   const root = fixtureRoot(t, "keiyaku-facade-akuma-page-scale-");
   const old = new Date("2000-01-01T00:00:00.000Z");
   const originalPrepare = DatabaseSync.prototype.prepare;
   let template: Parameters<typeof initializeHeart>[0] | undefined;
-  const oldCount = 490;
+  // Physical pruning needs more than one page, not 501 real databases.
+  const oldCount = 50;
   try {
     const oldIds = [];
     for (let index = 0; index < oldCount; index += 1) {
@@ -339,10 +341,18 @@ test("recent Akuma page prunes old custody bounds without changing Heart members
     };
     const world = Akuma.of(await World.at(root));
     const page = await world.list({ limit: 10 });
+    const pagePrepares = prepareCalls;
     DatabaseSync.prototype.prepare = originalPrepare;
     const defaultPage = await world.list();
     const maximumPage = await world.list({ limit: 500 });
+    prepareCalls = 0;
+    DatabaseSync.prototype.prepare = function (...args) {
+      prepareCalls += 1;
+      return originalPrepare.apply(this, args);
+    };
     const complete = await world.listComplete();
+    const completePrepares = prepareCalls;
+    DatabaseSync.prototype.prepare = originalPrepare;
     const reference = complete.rows.map((row) => row.id);
     const completeGlob = await addressAkumaSet({ path: root, akuma: ["aku/*/*"] });
 
@@ -369,14 +379,14 @@ test("recent Akuma page prunes old custody bounds without changing Heart members
         .slice(0, 10)
         .map((row) => row.id),
     );
-    assert.ok(prepareCalls < 500, `expected a bounded Heart read pool, received ${prepareCalls} database prepares`);
+    assert.ok(pagePrepares < completePrepares, `pruned page ${pagePrepares} must read less than complete ${completePrepares}`);
     assert.equal(defaultPage.rows.length, 50);
     assert.equal(defaultPage.hasMore, true);
     assert.deepEqual(
       maximumPage.rows.map((row) => row.id),
-      reference.slice(0, 500),
+      reference,
     );
-    assert.equal(maximumPage.hasMore, true);
+    assert.equal(maximumPage.hasMore, false);
   } finally {
     DatabaseSync.prototype.prepare = originalPrepare;
     rmSync(root, { recursive: true, force: true });
@@ -679,4 +689,20 @@ test("failed Task associations do not hide readable Fleet members or kill eviden
   const killed = await Keiyaku.kill({ path: root, akuma: [a.id, b.id] });
   assert.deepEqual(killed.results.map((member) => member.id).sort(), [a.id, b.id]);
   assert.ok(killed.results.every((member) => member.evidence === "already-stopped" && !("observation" in member)));
+});
+
+// Keep the exact maximum boundary at the pagination owner, independent of filesystem scale.
+test("bounded list defaults, maximum and one-past-maximum are explicit", () => {
+  assert.equal(boundedListLimit(), 50);
+  assert.equal(boundedListLimit(500), 500);
+  for (const invalid of [0, -1, 1.5, 501, NaN, Infinity, "50", null]) {
+    assert.throws(() => boundedListLimit(invalid), /limit must be an integer from 1 to 500/u);
+  }
+  for (const [count, limit, expected, more] of [[0, 50, 0, false], [50, 50, 50, false], [51, 50, 50, true], [499, 500, 499, false], [500, 500, 500, false], [501, 500, 500, true]] as const) {
+    const rows = Array.from({ length: count }, (_, index) => `row-${index}`);
+    const before = rows.slice();
+    const page = projectBoundedList(rows, limit);
+    assert.deepEqual(page, { rows: before.slice(0, expected), hasMore: more });
+    assert.deepEqual(rows, before, "projection must not mutate its input");
+  }
 });

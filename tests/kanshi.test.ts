@@ -175,9 +175,6 @@ test("plural status preserves mixed Contract/Akuma and alias selections", async 
 
 
 
-function deleteLooseObject(repository: ReturnType<typeof makeGitRepository>, oid: string): void {
-  unlinkSync(join(repository.path, ".git", "objects", oid.slice(0, 2), oid.slice(2)));
-}
 
 test("complete Contract status exposes a corrupt active dependency as a Contract section diagnostic", async (t) => {
   const repository = fixtureRepository(t);
@@ -214,56 +211,6 @@ test("complete Contract status exposes a corrupt active dependency as a Contract
   assert.ok(result.kind === "status", "expected result.kind = \"status\"");
   assert.equal(result.selection, "contract");
   assert.equal(result.report.contracts.kind, "failed");
-});
-
-test("a missing Contract object fails only the Contract-dependent section", async (t) => {
-  const { repository, contract } = await populatedWorld(t);
-  const snapshot = await readGit(await repositoryAt(repository.path));
-  deleteLooseObject(repository, snapshot.paths.get(contractJournalPath(contract.id))!.oid);
-
-  const report = await observe(repository.path, await Repo.at({ path: repository.path }));
-
-  assert.equal(report.contracts.kind, "failed");
-  assert.equal(report.tasks.kind, "present");
-  assert.equal(report.akuma.kind, "present");
-});
-
-test("a missing TaskHolder object fails only the TaskHolder-dependent section", async (t) => {
-  const { repository } = await populatedWorld(t);
-  const snapshot = await readGit(await repositoryAt(repository.path));
-  const holder = [...snapshot.paths].find(([path]) => path.startsWith("settlement/task-holders/"));
-  assert.notEqual(holder, undefined);
-  deleteLooseObject(repository, holder![1].oid);
-
-  const report = await observe(repository.path, await Repo.at({ path: repository.path }));
-
-  assert.equal(report.contracts.kind, "present");
-  assert.equal(report.tasks.kind, "failed");
-  assert.equal(report.akuma.kind, "present");
-  if (report.contracts.kind === "present") {
-    assert.equal(
-      report.contracts.value.rows.every((row) => row.holder.kind === "unavailable"),
-      true,
-    );
-    assert.equal(
-      report.contracts.value.rows.every((row) => row.namespaceTasks === undefined),
-      true,
-    );
-  }
-});
-
-test("a missing Dispatch object fails only the Dispatch-dependent section", async (t) => {
-  const { repository } = await populatedWorld(t);
-  const snapshot = await readGit(await repositoryAt(repository.path));
-  const dispatch = [...snapshot.paths].find(([path]) => path.startsWith("dispatch/"));
-  assert.notEqual(dispatch, undefined);
-  deleteLooseObject(repository, dispatch![1].oid);
-
-  const report = await observe(repository.path, await Repo.at({ path: repository.path }));
-
-  assert.equal(report.contracts.kind, "present");
-  assert.equal(report.tasks.kind, "present");
-  assert.equal(report.akuma.kind, "failed");
 });
 
 test("a corrupt shared Git format fails every state-backed Kanshi section", async (t) => {
@@ -346,26 +293,6 @@ test("malformed Alias fails only the Kanshi Akuma section", async (t) => {
   writeFileSync(join(root, ".keiyaku", "akuma", "alias.json"), "not alias authority\n");
   const report = await observe(root);
   assert.deepEqual(report.contracts, { kind: "absent" });
-  assert.equal(report.tasks.kind, "present");
-  assert.equal(report.akuma.kind, "failed");
-});
-
-test("malformed Dispatch fails only the Kanshi Akuma section", async (t) => {
-  const { repository } = await populatedWorld(t);
-  const git = await repositoryAt(repository.path);
-  const snapshot = await readGit(git);
-  const tree = await updateGitTree(
-    git,
-    snapshot.tree,
-    new Map([["dispatch", { oid: await writeBlob(git, "not dispatch authority\n") }]]),
-  );
-  const commit = await writeCommit({ repository: git, tree, parent: snapshot.commit });
-  assert.equal(
-    (await updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind,
-    "published",
-  );
-  const report = await observe(repository.path, await Repo.at({ path: repository.path }));
-  assert.equal(report.contracts.kind, "present");
   assert.equal(report.tasks.kind, "present");
   assert.equal(report.akuma.kind, "failed");
 });

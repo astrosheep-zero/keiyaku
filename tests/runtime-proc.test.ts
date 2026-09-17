@@ -607,27 +607,44 @@ for (const [name, run] of [
   ["runProcess", runProcess],
   ["runCrossPlatformProcess", runCrossPlatformProcess],
 ] as const) {
-  test(`${name} retains truncated output on timeout`, async () => {
-    const outcome = await run(
-      input([
-        process.execPath,
-        "-e",
-        [
-          'process.stdout.write("a".repeat(20 * 1024));',
-          'process.stdout.write("stdout-tail");',
-          'process.stderr.write("b".repeat(20 * 1024));',
-          'process.stderr.write("stderr-tail");',
-          "setInterval(() => {}, 1_000);",
-        ].join(" "),
-      ]),
-    );
-
-    assert.ok(outcome.kind === "timeout", "expected outcome.kind = \"timeout\"");
-    assert.equal(Buffer.byteLength(outcome.stdout), 16 * 1024);
-    assert.equal(Buffer.byteLength(outcome.stderr), 16 * 1024);
-    assert.equal(outcome.stdout.endsWith("stdout-tail"), true);
-    assert.equal(outcome.stderr.endsWith("stderr-tail"), true);
-    assert.equal(outcome.truncated, true);
+  test(`${name} retains truncated output at its exact timeout`, { timeout: 10_000 }, async (context) => {
+    const controller = new AbortController();
+    const { promise: outputReady, resolve: ready } = promiseBarrier<void>();
+    const observed = { stdout: "", stderr: "" };
+    let settled = false;
+    context.mock.timers.enable({ apis: ["setTimeout"] });
+    const pending = run(input([
+      process.execPath, "-e",
+      'process.stdout.write("a".repeat(20 * 1024) + "stdout-tail"); process.stderr.write("b".repeat(20 * 1024) + "stderr-tail"); setInterval(() => {}, 1000);',
+    ], {
+      timeoutMs: 2_000,
+      signal: controller.signal,
+      onOutput: ({ stream, text }) => {
+        observed[stream] += text;
+        if (observed.stdout.endsWith("stdout-tail") && observed.stderr.endsWith("stderr-tail")) ready();
+      },
+    }));
+    const finished = pending.then((outcome) => { settled = true; return outcome; });
+    try {
+      await Promise.race([outputReady, finished.then(() => { throw new Error("process ended before producing both tails"); })]);
+      context.mock.timers.tick(1_999);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.equal(settled, false, "deadline must not fire early");
+      context.mock.timers.tick(1);
+      // Termination and OS child custody use real time after the tested deadline fires.
+      context.mock.timers.reset();
+      const outcome = await finished;
+      assert.ok(outcome.kind === "timeout");
+      assert.equal(Buffer.byteLength(outcome.stdout), 16 * 1024);
+      assert.equal(Buffer.byteLength(outcome.stderr), 16 * 1024);
+      assert.equal(outcome.stdout.endsWith("stdout-tail"), true);
+      assert.equal(outcome.stderr.endsWith("stderr-tail"), true);
+      assert.equal(outcome.truncated, true);
+    } finally {
+      context.mock.timers.reset();
+      controller.abort();
+      await pending.catch(() => undefined);
+    }
   });
 }
 

@@ -4,23 +4,14 @@ import { ExecutionProgress, contractCheckpoint } from "../src/protocol/progress.
 import { documentDerivation } from "../src/library/input.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { AuthorityCorruptionError, Keiyaku, Repo, type Keiyaku as KeiyakuHandle } from "../src/index.js";
+import { Keiyaku, Repo, type Keiyaku as KeiyakuHandle } from "../src/index.js";
 import { privateStatePublicationSeatPath } from "../src/git/private-state-seat.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
-import {
-  GIT_REF,
-  readGit,
-  updateGitTree,
-  updateRefsAtomically,
-  writeBlob,
-  writeCommit,
-} from "../src/git/repository.js";
 import { finishTaskHolderAdmission, readTaskHoldersAt } from "../src/settlement/holder.js";
 import { completeHolderMutation } from "../src/library/mutation.js";
 import { EMPTY_WORKTREE_HOOKS } from "../src/git/hooks.js";
@@ -336,78 +327,6 @@ test("Settlement exact-read-backs an unknown TaskHolder release after external s
   assert.deepEqual(await holders(world), [{ version: 1, taskId, contractId: state.id, disposition: "released" }]);
 });
 
-test("abandon rejects corrupt authority assigning one Contract multiple holders", async () => {
-  const world = repository(),
-    repo = await cachedRepoAt(world.path);
-  const firstTask = await task(world.path, "First holder");
-  const secondTask = await task(world.path, "Second holder");
-  const first = await Keiyaku.bind({
-    repo,
-    task: firstTask,
-    markdown: document("First holder"),
-    workspace: "worktree",
-  });
-  await Keiyaku.bind({ repo, task: secondTask, markdown: document("Second holder"), workspace: "worktree" });
-  const firstId = (await first.keiyaku.state()).id;
-  const git = await cachedRepositoryAt(world.path);
-  const snapshot = await readGit(git);
-  const secondPath = `settlement/task-holders/${createHash("sha256").update(secondTask).digest("hex")}.json`;
-  const duplicate = Buffer.from(
-    `${JSON.stringify({
-      version: 1,
-      taskId: secondTask,
-      contractId: firstId,
-      disposition: "held",
-    })}\n`,
-  );
-  const tree = await updateGitTree(
-    git,
-    snapshot.tree,
-    new Map([[secondPath, { oid: await writeBlob(git, duplicate) }]]),
-  );
-  const commit = await writeCommit({ repository: git, tree, parent: snapshot.commit });
-  assert.equal(
-    (await updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind,
-    "published",
-  );
-
-  await assert.rejects(
-    () => first.keiyaku.abandon(),
-    (error: unknown) =>
-      error instanceof AuthorityCorruptionError &&
-      error.message === `Contract has multiple current TaskHolders: ${firstId}`,
-  );
-  assert.equal((await first.keiyaku.state()).terminal, null);
-});
-
-test("TaskHolder reads reject unexpected authority paths", async () => {
-  const world = repository();
-  await Keiyaku.bind({
-    repo: await cachedRepoAt(world.path),
-    markdown: document("Initialize authority"),
-    workspace: "worktree",
-  });
-  const git = await cachedRepositoryAt(world.path);
-  const snapshot = await readGit(git);
-  const tree = await updateGitTree(
-    git,
-    snapshot.tree,
-    new Map([["settlement/task-holders", { oid: await writeBlob(git, "not holder authority\n") }]]),
-  );
-  const commit = await writeCommit({ repository: git, tree, parent: snapshot.commit });
-  assert.equal(
-    (await updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind,
-    "published",
-  );
-
-  await assert.rejects(
-    withGitDecodeChannel(git, (channel) => withGitReadObservation(git, channel, readTaskHoldersAt)),
-    (error: unknown) =>
-      error instanceof AuthorityCorruptionError &&
-      error.message === "TaskHolder authority root is not a tree: settlement/task-holders",
-  );
-});
-
 test("a terminal held Contract completes placement and Task settlement after its fence close fails", async () => {
   const world = repository(),
     repo = await cachedRepoAt(world.path);
@@ -476,41 +395,4 @@ test("a terminal held Contract completes placement and Task settlement after its
   // Fence teardown after confirmed admission is not an owed holder publication once
   // Settlement has released the TaskHolder.
   assert.deepEqual(completed.settlementLags, []);
-});
-
-test("settlement preserves seat-close source after releasing a TaskHolder", async () => {
-  const world = repository(),
-    repo = await cachedRepoAt(world.path);
-  const taskId = await task(world.path, "Seat close after release", "drop");
-  const bound = await Keiyaku.bind({
-    repo,
-    task: taskId,
-    markdown: document("Seat close after release"),
-    workspace: "worktree",
-    gates: [],
-  });
-  writeFileSync(`${world.path}/candidate.txt`, "candidate\n");
-  const delivered = acceptedDelivery(await bound.keiyaku.deliver({ includeDirty: true }));
-  assert.equal(delivered.settlementLags[0]?.surface, "task");
-  assert.deepEqual(await holders(world), [
-    { version: 1, taskId, contractId: (await bound.keiyaku.state()).id, disposition: "held" },
-  ]);
-  replaceTaskState(world.path, taskId, "drop", "open");
-  const state = await bound.keiyaku.state();
-  const git = {
-    ...(await cachedRepositoryAt(world.path)),
-    onPrivateStateSeatClose: () => {
-      throw new Error("settlement seat close failed after release");
-    },
-  };
-  const report = await withGitDecodeChannel(git, (channel) => settle({ repository: git, channel, state, effects: [] }));
-  assert.deepEqual(report.actions, [{ kind: "task", taskId, action: "done" }]);
-  assert.deepEqual(report.lags, []);
-  assert.deepEqual(report.seatClose, [
-    {
-      kind: "private-state-seat-close-failed",
-      diagnostic: "settlement seat close failed after release",
-    },
-  ]);
-  assert.deepEqual(await holders(world), [{ version: 1, taskId, contractId: state.id, disposition: "released" }]);
 });

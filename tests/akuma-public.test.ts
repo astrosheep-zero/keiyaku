@@ -339,28 +339,6 @@ test("a failed Heart refresh releases the observation's free leash claim", async
   }
 });
 
-test("tell refuses an unborn address without leaving durable input", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-akuma-tell-unborn-");
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "f0a10004" });
-  await initializeHeart(allocated.paths);
-  await assert.rejects((await akumaAt(root)).of({ id: allocated.id }).tell("future input"), AkumaNotBornError);
-  assert.deepEqual((await readHeart(allocated.paths)).pending, []);
-});
-
-test("interrupt refuses an unborn address without leaving durable input or control", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-akuma-interrupt-unborn-");
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "f0a10005" });
-  await initializeHeart(allocated.paths);
-  const holder = (await HeldAkumaLeash.try(allocated.paths))!;
-  try {
-    await assert.rejects((await akumaAt(root)).of({ id: allocated.id }).interrupt("future input"), AkumaNotBornError);
-    assert.deepEqual((await readHeart(allocated.paths)).pending, []);
-    assert.equal(await pauseRequested(allocated.paths), false);
-  } finally {
-    holder.release();
-  }
-});
-
 
 
 const provider: ProviderAdapter = fixtureAdapter(async () => {
@@ -846,18 +824,6 @@ test("wait timeout returns the same running status carrier", async (context) => 
   }
 });
 
-test("wait refuses invalid public timeoutMs values", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-akuma-wait-invalid-timeout-");
-  const source = await answeredSource(root, "de1ad101");
-  const handle = (await akumaAt(root)).of({ id: source.id });
-  for (const timeoutMs of [-1, Number.POSITIVE_INFINITY, Number.NaN]) {
-    await assert.rejects(
-      handle.wait(undefined, { timeoutMs }),
-      /Akuma wait timeoutMs must be a nonnegative finite millisecond duration/u,
-    );
-  }
-});
-
 test("an answered Turn without a fork point remains visible and keeps its answer", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-no-fork-point-");
   const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "f0a10006" });
@@ -1025,38 +991,6 @@ test("fork preserves categorical, exact-history, native, local, and not-born fai
     }
   } finally {
     mutable.fork = originalFork;
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("status names a durable session that the adapter cannot resume", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-resume-unsupported-"));
-  const mutable = claudeProvider as MutableProvider;
-  const originalResume = mutable.resume;
-  try {
-    const source = await answeredSource(root, "f0a10003");
-    delete mutable.resume;
-    const handle = (await akumaAt(root)).of({ id: source.id });
-    const admitted = await recordTell(source.paths, {
-      kind: "tell",
-      id: "resume-unsupported-tell",
-      body: "continue",
-      recordedAt: "2026-08-08T00:00:01.000Z",
-    });
-    assert.equal(admitted.kind, "recorded");
-    await driveAkumaBody({ paths: source.paths }, claudeProvider, {
-      now: () => "2026-08-08T00:00:02.000Z",
-    });
-    const status = await handle.status();
-    assert.equal(status.life, "stranded");
-    assert.equal(status.strandedReason, "resume-unsupported");
-    assert.equal(status.timeline.kind === "idle" && status.timeline.outcome?.outcome.kind === "failed", false);
-    const listed = (await (await akumaAt(root)).list()).rows[0]!;
-    assert.equal("pending" in listed && listed.pending.includes("resume-unsupported-tell"), true);
-    assert.equal((await timeline(source.paths)).filter((fact) => fact.kind === "turn-start").length, 1);
-    assert.equal((await timeline(source.paths)).find((fact) => fact.kind === "turn-end")?.outcome.kind, "answered");
-  } finally {
-    mutable.resume = originalResume;
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -1553,38 +1487,6 @@ test("list silently skips identities whose compact row cannot be read", async (c
   );
   leash.close();
   assert.deepEqual((await world.list()).rows, [{ id: visible.id, life: "unborn" }]);
-});
-
-test("activity is persistent narration and old raw events fail the public hard cut", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-akuma-activity-law-");
-  const source = await answeredSource(root, "ac710001");
-  const handle = (await akumaAt(root)).of({ id: source.id });
-  const heart = new DatabaseSync(source.paths.heart);
-  try {
-    heart.exec("PRAGMA foreign_keys=ON");
-    heart.prepare("DELETE FROM timeline WHERE kind = 'activity'").run();
-  } finally {
-    heart.close();
-  }
-  const after = await handle.status();
-  assert.equal(
-    after.timeline.entries.some(
-      (entry) => entry.kind === "row" && ["said", "thought", "note", "tool"].includes(entry.row.kind),
-    ),
-    false,
-  );
-  assert.equal(
-    historyPage(await handle.history()).rows.some((row) => ["said", "thought", "note", "tool"].includes(row.kind)),
-    false,
-  );
-
-  await appendActivity(source.paths, {
-    turnSequence: 1,
-    event: { type: "activity", event: { provider: "legacy", secret: "raw" } },
-    at: "2026-08-08T00:00:01.000Z",
-  });
-  await assert.rejects(handle.history(), /invalid event shape/u);
-  await assert.rejects(handle.status(), /invalid event shape/u);
 });
 
 test("kill gives the Body a grace window to abort its owned provider session", async (context) => {

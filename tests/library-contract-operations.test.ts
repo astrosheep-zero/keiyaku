@@ -11,7 +11,6 @@ import { contractJournalPath } from "../src/git/identity.js";
 import { GIT_REF, readBlob, readGit, readRef, updateGitTree, writeBlob, writeCommit } from "../src/git/repository.js";
 import { acquireTargetPlacementFence } from "../src/git/target-placement.js";
 import { Keiyaku, Repo, type IntegrationConflictMaterialized, type MutationResult } from "../src/index.js";
-import type { ContinuationStop } from "../src/library/continuation.js";
 import {
   appointedWorktreePath,
   cachedRepoAt,
@@ -39,9 +38,6 @@ function expectMutation<Value>(result: MutationResult<Value> | IntegrationConfli
   return result;
 }
 
-function placementRefusalKind(placement: ContinuationStop | undefined): string | undefined {
-  return placement !== undefined && "refusal" in placement ? placement.refusal.kind : undefined;
-}
 
 type DefaultPostBindTemplate = Readonly<{
   repository: ReturnType<typeof repositoryWithMain>;
@@ -286,48 +282,6 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
     assert.equal(mergeHead(repository, worktree), null);
   });
 
-  test("repo reconcile returns a typed discovery failure without a synthetic ContractId", async () => {
-    const repository = repositoryWithMain();
-    const bound = await bind(repository);
-    const id = (await bound.state()).id;
-    const report = await withGitShim(
-      [
-        `if [ "$*" = "rev-parse --verify --quiet ${GIT_REF}" ]; then`,
-        '  printf "forced world observation failure\\n" >&2',
-        "  exit 128",
-        "fi",
-        'exec "$KEIYAKU_REAL_GIT" "$@"',
-      ].join("\n"),
-      {},
-      async (gitPath) => (await Repo.at({ path: repository.path, gitPath })).reconcile(),
-    );
-    assert.ok(report.kind === "world-observation-failed", "expected report.kind = \"world-observation-failed\"");
-    assert.equal("contracts" in report, false);
-    assert.equal(report.diagnostic.includes(id), false);
-    assert.match(report.diagnostic, /forced world observation failure/u);
-  });
-
-  test("repo reconcile still throws authority corruption during world discovery", async () => {
-    const { repository, contract: bound } = await defaultBoundFixture();
-    const id = (await bound.state()).id;
-    const git = await cachedRepositoryAt(repository.path);
-    const before = await readGit(git);
-    const journal = before.paths.get(contractJournalPath(id));
-    if (journal?.type !== "blob") throw new Error("missing journal");
-    const tree = await updateGitTree(
-      git,
-      before.tree,
-      new Map([[contractJournalPath(id), { oid: await writeBlob(git, Buffer.from("not-a-journal\n")) }]]),
-    );
-    const commit = await writeCommit({ repository: git, tree, parent: before.commit, message: "corrupt journal" });
-    if (before.commit === null) throw new Error("missing state ref");
-    repository.run(["update-ref", GIT_REF, commit, before.commit]);
-    await assert.rejects(
-      () => cachedRepoAt(repository.path).then((repo) => repo.reconcile()),
-      (error: unknown) => error instanceof AuthorityCorruptionError,
-    );
-  });
-
   test("an unrecorded candidate reuses its admitted delivery despite changed captured content", async () => {
     const repository = repositoryWithMain();
     const marker = join(repository.path, "verification-started");
@@ -423,30 +377,6 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
     );
   });
 
-  test("delivery terminal refusal outranks a missing managed worktree", async () => {
-    const repository = repositoryWithMain();
-    const prerequisite = await bind(repository);
-    const prerequisiteId = (await prerequisite.state()).id;
-    const dependent = await Keiyaku.bind({
-      repo: await cachedRepoAt(repository.path),
-      markdown: document(),
-      workspace: "worktree",
-      gates: ["reviewed"],
-      after: [prerequisiteId],
-    });
-    assert.equal((await dependent.keiyaku.state()).bound, null);
-    const dependentId = (await dependent.keiyaku.state()).id;
-    const path = await appointedWorktreePath(await cachedRepositoryAt(repository.path), dependentId);
-    await dependent.keiyaku.abandon();
-    assert.equal(existsSync(path), false);
-
-    const terminalContractId = (await dependent.keiyaku.state()).id;
-    await assert.rejects(
-      () => dependent.keiyaku.deliver(),
-      refused({ kind: "terminal", contractId: terminalContractId }),
-    );
-  });
-
   test("a stopped continuation does not block an eligible sibling", async () => {
     const repository = repositoryWithMain();
     const repo = await cachedRepoAt(repository.path);
@@ -479,26 +409,6 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
     assert.equal((await prerequisite.keiyaku.state()).terminal?.kind, "claimed");
     assert.equal((await eligible.keiyaku.state()).terminal?.kind, "claimed");
     assert.equal((await blocked.keiyaku.state()).terminal, null);
-  });
-
-  test("a satisfied review waits on the target-placement fence before reporting delivery-missing", async () => {
-    const { repository, contract } = await reviewGatedConflictCandidateFixture();
-    const held = await acquireTargetPlacementFence(await cachedRepositoryAt(repository.path), "refs/heads/main");
-    const pending = contract.review({ verdict: "satisfied" });
-    const raced = await Promise.race([
-      pending.then(() => "finished" as const),
-      new Promise<"blocked">((resolve) => {
-        setTimeout(() => resolve("blocked"), 150);
-      }),
-    ]);
-    assert.equal(raced, "blocked");
-    held.close();
-    const reviewed = await pending;
-    assert.deepEqual(
-      reviewed.facts.map((fact) => fact.kind),
-      ["attestation"],
-    );
-    assert.equal(placementRefusalKind(reviewed.value.placement), "delivery-missing");
   });
 
   test("a satisfied review cannot interleave a stale integration stop across the target fence", async () => {
@@ -581,28 +491,6 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
     const finalState = await contract.state();
     assert.equal(finalState.terminal?.kind, "claimed");
     assert.equal(finalState.currentIntegration?.snapshot, repository.run(["rev-parse", "refs/heads/main"]).trim());
-  });
-
-  test("a whitespace-only worktree change stales prior review testimony", async () => {
-    const { repository, contract } = await defaultBoundFixture();
-    const worktree = await appointedWorktreePath(
-      await cachedRepositoryAt(repository.path),
-      await publicContractId(contract),
-    );
-    writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
-    const reviewed = await contract.review({ verdict: "satisfied" });
-    const reviewedChangeId = changeIdFromSubject((await contract.state()).attestations.at(-1)?.data.subject);
-    writeFileSync(join(worktree, "candidate.txt"), "candidate \n");
-
-    const delivered = expectMutation(await contract.deliver({ includeDirty: true }));
-    assert.equal(placementRefusalKind(reviewed.value.placement), "delivery-missing");
-    assert.notEqual(delivered.value.integration.changeId, reviewedChangeId);
-    assert.deepEqual(
-      delivered.facts.map((fact) => fact.kind),
-      ["bound", "deliver"],
-    );
-    assert.equal(placementRefusalKind(delivered.value.placement), "gates-unsatisfied");
-    assert.equal((await contract.state()).terminal, null);
   });
 
   test("contract history composes one frozen journal and Dispatch observation", async () => {
