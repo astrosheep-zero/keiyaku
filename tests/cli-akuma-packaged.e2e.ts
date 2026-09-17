@@ -17,7 +17,7 @@ import { World } from "../src/world.js";
 import { removeTempDirectory } from "./support/process.js";
 
 const packagedCli = fileURLToPath(new URL("../build/src/cli/index.js", import.meta.url));
-const acpSdk = fileURLToPath(new URL("../node_modules/@agentclientprotocol/sdk/dist/acp.js", import.meta.url));
+const acpSdk = new URL("../node_modules/@agentclientprotocol/sdk/dist/acp.js", import.meta.url).href;
 
 /** The ACP agent every observing-call scenario in this file drives through a real CLI process. */
 function fakeAgentSource(): string {
@@ -283,7 +283,7 @@ function runPackagedCli(
   input: Readonly<{ cwd: string; env?: NodeJS.ProcessEnv; stdin?: string }>,
 ): Promise<Readonly<{ code: number; stdout: string; stderr: string }>> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [packagedCli, ...args], {
+    const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", packagedCli, ...args], {
       cwd: input.cwd,
       env: input.env ?? process.env,
       stdio: ["pipe", "pipe", "pipe"],
