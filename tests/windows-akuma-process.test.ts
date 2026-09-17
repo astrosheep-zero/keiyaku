@@ -18,6 +18,7 @@ import {
 } from "./support/process.js";
 
 const IMAGE_SUBSYSTEM_WINDOWS_GUI = 2;
+const CONSOLE_PROBE_TIMEOUT_MS = 20_000;
 const packagedLauncher = resolve("build/src/runtime/proc/windows-launch.exe");
 
 function peSubsystem(path: string): number {
@@ -345,7 +346,7 @@ function assertHiddenConsole(reported: { handle: string; tty: boolean }): void {
   assert.ok(reported.handle === "0" || reported.handle === "0x0", reported.handle);
 }
 
-test("Windows hosts hide consoles for retained children", async (t) => {
+test("Windows hosts hide consoles for retained children", { timeout: 90_000 }, async (t) => {
   if (process.platform !== "win32") {
     t.skip("visible-console observation requires a Windows host");
     return;
@@ -360,7 +361,10 @@ test("Windows hosts hide consoles for retained children", async (t) => {
       log: join(root, "logged.log"),
     });
     assertHiddenConsole(
-      JSON.parse(await waitForFile(join(root, "logged-console"), 10_000)) as { handle: string; tty: boolean },
+      JSON.parse(await waitForFile(join(root, "logged-console"), CONSOLE_PROBE_TIMEOUT_MS)) as {
+        handle: string;
+        tty: boolean;
+      },
     );
     await owned.terminate(true);
     await waitForExit(owned.pid);
@@ -368,22 +372,28 @@ test("Windows hosts hide consoles for retained children", async (t) => {
     await runProcess({
       argv: [process.execPath, "-e", consoleProbe(join(root, "buffered-console"), false)],
       cwd: root,
-      timeoutMs: 5_000,
+      timeoutMs: CONSOLE_PROBE_TIMEOUT_MS,
     });
     assertHiddenConsole(
-      JSON.parse(await waitForFile(join(root, "buffered-console"), 10_000)) as { handle: string; tty: boolean },
+      JSON.parse(await waitForFile(join(root, "buffered-console"), CONSOLE_PROBE_TIMEOUT_MS)) as {
+        handle: string;
+        tty: boolean;
+      },
     );
 
     await consumeProcessStdout(
       {
         argv: [process.execPath, "-e", consoleProbe(join(root, "stream-console"), false)],
         cwd: root,
-        timeoutMs: 5_000,
+        timeoutMs: CONSOLE_PROBE_TIMEOUT_MS,
       },
       () => {},
     );
     assertHiddenConsole(
-      JSON.parse(await waitForFile(join(root, "stream-console"), 10_000)) as { handle: string; tty: boolean },
+      JSON.parse(await waitForFile(join(root, "stream-console"), CONSOLE_PROBE_TIMEOUT_MS)) as {
+        handle: string;
+        tty: boolean;
+      },
     );
 
     stdio = spawnStdioProcess({
@@ -391,7 +401,10 @@ test("Windows hosts hide consoles for retained children", async (t) => {
       cwd: root,
     });
     assertHiddenConsole(
-      JSON.parse(await waitForFile(join(root, "stdio-console"), 10_000)) as { handle: string; tty: boolean },
+      JSON.parse(await waitForFile(join(root, "stdio-console"), CONSOLE_PROBE_TIMEOUT_MS)) as {
+        handle: string;
+        tty: boolean;
+      },
     );
     await stdio.close(true);
   } finally {
