@@ -3,12 +3,12 @@ import type { ContractBoard, ContractCatalogue, ContractDisposition } from "../l
 import { scopeForRepo } from "../library/repo.js";
 import { observeTaskBoard } from "../task/operations.js";
 import { contractNamespace } from "../task/identity.js";
-import { readAkumaCatalog, readAkumaTimeline } from "../akuma/akuma.js";
+import { readAkumaCatalog, readAkumaTimeline, withoutReportedChanges } from "../akuma/akuma.js";
 import { readAliases, type AliasBinding } from "../alias/index.js";
 import { readDispatchesAt, type Dispatch } from "../dispatch/index.js";
 import { readTaskHolderProjectionAt, type TaskHolderProjection } from "../settlement/holder.js";
 import { observeCurrentPhysicalIssue } from "../protocol/read/observation.js";
-import { readContractBoard, readContractCatalogue } from "../protocol/read/status.js";
+import { readContractBoard, readContractCatalogue, readContractPhase } from "../protocol/read/status.js";
 import { withGitDecodeChannel, withGitReadObservation, type GitReadObservation } from "../git/read-observation.js";
 import { decodeContractDocument } from "../body/decode.js";
 import { assertRegionPattern } from "../body/region.js";
@@ -324,9 +324,34 @@ async function readTasks(
   );
 }
 
+/**
+ * Placement discharge for the observed fleet snapshots: an associated Contract
+ * whose own observation proves it claimed has placed the candidate those
+ * reported changes describe, so the composite report no longer presents them
+ * as pending. An unproven or failed Contract read keeps the changes.
+ */
+async function claimedAssociatedContracts(
+  observation: GitReadObservation,
+  dispatches: readonly Dispatch[],
+): Promise<ReadonlySet<string>> {
+  const ids = [...new Set(dispatches.map((dispatch) => dispatch.contractId))];
+  const claimed = new Set<string>();
+  await Promise.all(
+    ids.map(async (id) => {
+      try {
+        if ((await readContractPhase(observation, id)) === "claimed") claimed.add(id);
+      } catch {
+        /* unproven placement keeps reported changes */
+      }
+    }),
+  );
+  return claimed;
+}
+
 async function joinAkuma(
   path: WorldRoot,
   observeContract: ObserveContractEndpoint,
+  isContractClaimed: (id: string) => boolean,
   dispatches: readonly Dispatch[],
   aliases: Section<readonly AliasBinding[]>,
 ): Promise<Section<AkumaKanshiWorld>> {
@@ -370,7 +395,9 @@ async function joinAkuma(
         ...source,
         rows: rows.map((row) => {
           const snapshot = snapshots.get(row.id);
-          return snapshot === undefined ? row : { ...row, snapshot };
+          if (snapshot === undefined) return row;
+          const placed = row.contract !== undefined && isContractClaimed(row.contract.id);
+          return { ...row, snapshot: placed ? withoutReportedChanges(snapshot) : snapshot };
         }),
       },
     };
@@ -406,7 +433,8 @@ async function observeWithoutRepo(
   const observeContract = contractEndpointObserver(contracts);
   const tasks = world === null ? { kind: "absent" as const } : await readTasks(world, holders, observeContract);
   const aliases = world === null ? { kind: "absent" as const } : await readAliasBindings(world);
-  const akuma = world === null ? { kind: "absent" as const } : await joinAkuma(world, observeContract, [], aliases);
+  const akuma =
+    world === null ? { kind: "absent" as const } : await joinAkuma(world, observeContract, () => false, [], aliases);
   return {
     report: {
       root: world,
@@ -454,12 +482,16 @@ async function observeRepo(input: RepoObservationInput): Promise<KanshiObservati
         const observeContract = contractEndpointObserver(contracts);
         const aliases = world === null ? { kind: "absent" as const } : await readAliasBindings(world);
         const tasks = world === null ? { kind: "absent" as const } : await readTasks(world, holders, observeContract);
+        const claimed =
+          dispatches.kind === "present"
+            ? await claimedAssociatedContracts(observation, dispatches.value)
+            : new Set<string>();
         const akuma =
           world === null
             ? { kind: "absent" as const }
             : dispatches.kind === "failed"
               ? dispatches
-              : await joinAkuma(world, observeContract, dispatches.value, aliases);
+              : await joinAkuma(world, observeContract, (id) => claimed.has(id), dispatches.value, aliases);
         const assembled = {
           root: world,
           observedAt,

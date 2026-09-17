@@ -410,6 +410,20 @@ export async function readContractCatalogue(
   };
 }
 
+/**
+ * Observe only a Contract's phase from one immutable git observation, without
+ * workspace or target reads.
+ */
+export async function readContractPhase(
+  observation: GitReadObservation,
+  id: ContractId,
+): Promise<ContractPhase | null> {
+  const observed = await observeContractsForAdmissionInObservationAt(observation, [id]);
+  const record = observed.journals.get(id);
+  if (record === undefined) throw new Error(`missing requested Contract observation: ${id}`);
+  return record.state === null ? null : phaseFor(record.state);
+}
+
 /** Observe one Contract and its target from one fresh ref epoch. */
 export async function readContractObservation(
   observation: GitReadObservation,

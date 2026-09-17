@@ -22,10 +22,12 @@ import {
   answeredTurnFact,
   endBodyFact,
   finishBodyFact,
+  deleteStopControl,
   insertActivityFact,
   insertTurnEndFact,
   insertTurnStartFact,
   insertPauseControl,
+  insertKillFact,
   insertSessionFact,
   insertStopControl,
   killFactForBody,
@@ -321,6 +323,7 @@ export async function requestStop(
   signal?: AbortSignal,
 ): Promise<
   | Readonly<{ kind: "requested"; body: BodyFact }>
+  | Readonly<{ kind: "witnessed"; body: BodyFact }>
   | Readonly<{ kind: "already-killed" | "already-stopped"; body: BodyFact }>
 > {
   return await withHeartTransaction(
@@ -329,7 +332,17 @@ export async function requestStop(
       const body = latestBodyFact(heart);
       if (body === null) throw new Error("Akuma has no Body to kill");
       if (latestKillFact(heart)?.bodySequence === body.sequence) return { kind: "already-killed", body };
-      if (body.end !== undefined) return { kind: "already-stopped", body };
+      if (body.end !== undefined) {
+        // A stranded Body is already explicitly settled: kill witnesses it in
+        // place rather than requesting a stop from a dead process. A normally
+        // exited Body remains already-stopped, and hung custody is untouched.
+        if (body.hung === undefined && body.end !== "exited") {
+          insertKillFact(heart, body.sequence, at);
+          if (stopFact(heart)?.bodySequence === body.sequence) deleteStopControl(heart);
+          return { kind: "witnessed", body };
+        }
+        return { kind: "already-stopped", body };
+      }
       const existing = stopFact(heart);
       if (existing !== null && existing.bodySequence !== body.sequence) {
         throw new Error("Akuma stop target is not the latest Body");

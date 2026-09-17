@@ -63,9 +63,12 @@ export async function settleAkumaKill(
 ): Promise<Readonly<{ evidence: KillEvidence; leash?: HeldAkumaLeash }>> {
   const request = await requestStop(paths, new Date().toISOString(), signal);
   if (request.kind !== "requested") {
-    if (!retainLeash) return { evidence: request.kind };
+    // A witnessed Body was already settled: the kill witness Heart recorded is
+    // the kill evidence, not a stop outcome.
+    const evidence: KillEvidence = request.kind === "witnessed" ? "killed" : request.kind;
+    if (!retainLeash) return { evidence };
     const leash = await acquireLeash(paths, signal === undefined ? {} : { signal });
-    return leash === null ? { evidence: "unavailable" } : { evidence: request.kind, leash };
+    return leash === null ? { evidence: "unavailable" } : { evidence, leash };
   }
   const target = request.body;
   const waited = await takeLeashUntilSignal(paths, target.sequence, signal);

@@ -27,6 +27,16 @@ recently changed files. Repeated edits to one path become one summary with
 accumulated known diffstat and the latest event identity; omitted counts refer
 to files, not events. They are never a file ledger or fact.
 
+Placement discharges reported changes at the observation composition. While the
+Akuma's dispatch-associated Contract is active, a composed status surfaces them
+as above; once that Contract is claimed, the same observation presents no
+reported changes — the candidate they described is placed and preserved in Git.
+The discharge is derived at read time from the existing Dispatch association
+and the Contract's phase; it writes no fact and never alters the Heart
+projection. A dropped or failed Contract, an absent or failed association, and
+an unproven Contract read all keep the reported changes: unplaced work still
+matters.
+
 History pages the same projected ledger and is the sole public execution-history
 read. It retains exact answered outcome bytes, including an empty answer, and
 the public history identity for a retained answered Turn. A fork accepts only

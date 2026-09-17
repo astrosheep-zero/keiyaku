@@ -72,6 +72,12 @@ permanently gates same-identity succession and never clears, changes sessions,
 pending tells, requests, or history. Elapsed time, a held leash alone, provider
 events, or observer inference cannot manufacture it.
 
+Kill admission classifies the latest Body in one transaction. A Body already
+settled without a witness — a stranded life — is witnessed in place and its
+matching stop control is consumed, so no stop is ever requested of a dead
+process. A normally exited Body remains already stopped without a witness, and
+a witnessed Body remains already killed.
+
 Tell admission retains its optional submitting initiator alongside its input;
 reusing the same Tell identity cannot replace that attribution. Turn admission
 retains the opening input's initiator independently of later Tell retention,

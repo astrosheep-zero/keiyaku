@@ -6,6 +6,7 @@ import {
   type AkumaStatus,
   type InterruptReceipt,
   readBudgetedStatus,
+  withoutReportedChanges,
 } from "../akuma/akuma.js";
 import { createAkumaProduct } from "../akuma/akuma-product.js";
 import { executionChannel, localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
@@ -18,6 +19,8 @@ import { executeKillAkuma, executeTellAkuma, executeWaitAkuma } from "../akuma/f
 import type { WaitIdentityFacts, WaitObserver } from "../akuma/fleet-execution.js";
 import { readAliases } from "../alias/index.js";
 import { observeDispatchAssociation, type DispatchAssociation } from "../dispatch/index.js";
+import { observeContractAt } from "../git/observe.js";
+import { withGitDecodeChannel } from "../git/read-observation.js";
 import type { AkumaAlias } from "../identity/selector.js";
 import { observeCreatedTaskObservations, type CreatedTaskObservation } from "../task/created-observation.js";
 import type { WorldRoot } from "../world.js";
@@ -91,6 +94,45 @@ async function dispatchAssociation(repo: Repo | undefined, id: AkumaStatus["id"]
   return await observeDispatchAssociation(repo === undefined ? undefined : scopeForRepo(repo), id);
 }
 
+/**
+ * Read-time placement discharge. Reported changes describe a candidate that a
+ * claimed Contract has already placed in Git, so once the associated Contract
+ * is claimed the composed observation no longer presents them as pending. The
+ * judgment derives only from existing facts — the Dispatch association and the
+ * Contract journal's terminal — and writes none. An unassociated Akuma, an
+ * active or abandoned Contract, and an unproven Contract read all keep the
+ * reported changes: unplaced work still matters.
+ */
+function placementDischarged(repo: Repo | undefined): (contract: DispatchAssociation) => Promise<boolean> {
+  const cache = new Map<string, boolean>();
+  return async (contract) => {
+    if (repo === undefined || contract.kind !== "associated") return false;
+    const known = cache.get(contract.contractId);
+    if (known !== undefined) return known;
+    let claimed = false;
+    try {
+      const scope = scopeForRepo(repo);
+      claimed = await withGitDecodeChannel(
+        scope,
+        async (channel) =>
+          (await observeContractAt(scope, channel, contract.contractId)).state?.terminal?.kind === "claimed",
+      );
+    } catch {
+      claimed = false;
+    }
+    cache.set(contract.contractId, claimed);
+    return claimed;
+  };
+}
+
+async function composeObservation(
+  status: AkumaStatus,
+  contract: DispatchAssociation,
+  discharged: (contract: DispatchAssociation) => Promise<boolean>,
+): Promise<AkumaStatus> {
+  return (await discharged(contract)) ? { ...status, timeline: withoutReportedChanges(status.timeline) } : status;
+}
+
 async function createdTasksFor(
   path: WorldRoot,
   statuses: readonly AkumaStatus[],
@@ -152,14 +194,16 @@ async function observeAkumaSet(
   repo?: Repo,
 ): Promise<readonly AkumaObservation[]> {
   const created = await createdTasksFor(path, statuses);
+  const discharged = placementDischarged(repo);
   return await Promise.all(
-    statuses.map(async (status, index) =>
-      parseAkumaObservation({
-        status,
-        contract: await dispatchAssociation(repo, status.id),
+    statuses.map(async (status, index) => {
+      const contract = await dispatchAssociation(repo, status.id);
+      return parseAkumaObservation({
+        status: await composeObservation(status, contract, discharged),
+        contract,
         createdTasks: created[index]!,
-      }),
-    ),
+      });
+    }),
   );
 }
 
@@ -180,16 +224,18 @@ async function attachWaitAssociations(
     path,
     result.observations.map((observation) => observation.status),
   );
+  const discharged = placementDischarged(repo);
   return fleetResultSchemas.wait.parse({
     ...result,
     observations: await Promise.all(
-      result.observations.map(async (observation, index) =>
-        parseAkumaObservation({
-          status: observation.status,
-          contract: await dispatchAssociation(repo, observation.status.id),
+      result.observations.map(async (observation, index) => {
+        const contract = await dispatchAssociation(repo, observation.status.id);
+        return parseAkumaObservation({
+          status: await composeObservation(observation.status, contract, discharged),
+          contract,
           createdTasks: created[index]!,
-        }),
-      ),
+        });
+      }),
     ),
   });
 }

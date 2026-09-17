@@ -1077,6 +1077,105 @@ test("kill witnesses one stopped Body without burning pending work", async () =>
   }
 });
 
+test("kill admission witnesses a stranded settled Body instead of requesting a stop", async () => {
+  const value = await fixture();
+  try {
+    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await leash.birth(value.allocated.paths, value.soul);
+    const body = await leash.recordBody(value.allocated.paths, {
+      leashTakenAt: "2026-08-08T00:00:00.000Z",
+    });
+    await breakBody(value.allocated.paths, {
+      sequence: body.sequence,
+      end: "broke-off",
+      at: "2026-08-08T00:00:01.000Z",
+    });
+    leash.release();
+
+    assert.deepEqual(await requestStop(value.allocated.paths, "2026-08-08T00:00:02.000Z"), {
+      kind: "witnessed",
+      body: { ...body, end: "broke-off", endedAt: "2026-08-08T00:00:01.000Z" },
+    });
+    const snapshot = await readHeart(value.allocated.paths);
+    assert.deepEqual(snapshot.latestKill, {
+      sequence: snapshot.latestKill!.sequence,
+      bodySequence: body.sequence,
+      evidence: "killed",
+      at: "2026-08-08T00:00:02.000Z",
+    });
+    assert.equal(snapshot.stop, null);
+    assert.equal(await stopRequested(value.allocated.paths), false);
+    assert.equal(
+      life({ leash: "free", body: snapshot.latestBody, kill: snapshot.latestKill }),
+      "killed",
+    );
+    assert.equal(
+      (await requestStop(value.allocated.paths, "2026-08-08T00:00:03.000Z")).kind,
+      "already-killed",
+    );
+  } finally {
+    value.close();
+  }
+});
+
+test("kill admission of a put-down stranded Body consumes its stop control", async () => {
+  const value = await fixture();
+  try {
+    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await leash.birth(value.allocated.paths, value.soul);
+    const body = await leash.recordBody(value.allocated.paths, {
+      leashTakenAt: "2026-08-08T00:00:00.000Z",
+    });
+    assert.deepEqual(await requestStop(value.allocated.paths, "2026-08-08T00:00:01.000Z"), {
+      kind: "requested",
+      body,
+    });
+    await breakBody(value.allocated.paths, {
+      sequence: body.sequence,
+      end: "put-down",
+      at: "2026-08-08T00:00:02.000Z",
+    });
+    leash.release();
+
+    // The first kill caller vanished before settling; a later kill witnesses
+    // the already settled Body and consumes the lingering stop control.
+    assert.equal((await requestStop(value.allocated.paths, "2026-08-08T00:00:03.000Z")).kind, "witnessed");
+    assert.equal(await stopRequested(value.allocated.paths), false);
+    assert.equal(
+      (await readHeart(value.allocated.paths)).latestKill?.bodySequence,
+      body.sequence,
+    );
+  } finally {
+    value.close();
+  }
+});
+
+test("kill of a normally exited Body stays already stopped without a witness", async () => {
+  const value = await fixture();
+  try {
+    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await leash.birth(value.allocated.paths, value.soul);
+    const body = await leash.recordBody(value.allocated.paths, {
+      leashTakenAt: "2026-08-08T00:00:00.000Z",
+    });
+    await finishBodyIfIdle(value.allocated.paths, { sequence: body.sequence, at: "2026-08-08T00:00:01.000Z" });
+    leash.release();
+
+    assert.equal((await requestStop(value.allocated.paths, "2026-08-08T00:00:02.000Z")).kind, "already-stopped");
+    assert.equal((await readHeart(value.allocated.paths)).latestKill, null);
+    assert.equal(
+      life({
+        leash: "free",
+        body: (await readHeart(value.allocated.paths)).latestBody,
+        kill: null,
+      }),
+      "asleep",
+    );
+  } finally {
+    value.close();
+  }
+});
+
 test("kill evaluates stranded pending Tell recovery exactly once", async () => {
   const value = await fixture();
   try {
@@ -1108,8 +1207,9 @@ test("kill evaluates stranded pending Tell recovery exactly once", async () => {
           recoveryFinished();
         }
       }),
-      "already-stopped",
+      "killed",
     );
+    assert.equal((await readHeart(value.allocated.paths)).latestKill?.bodySequence, body.sequence);
     assert.equal(recoveries, 1);
     await recoveryDone;
   } finally {

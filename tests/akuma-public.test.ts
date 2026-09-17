@@ -2074,7 +2074,7 @@ test("kill returns before its successor recovery settles", async () => {
         resolve();
       };
     });
-    assert.equal(await killAkumaWithRecovery(allocated.paths, async () => await recovery), "already-stopped");
+    assert.equal(await killAkumaWithRecovery(allocated.paths, async () => await recovery), "killed");
     assert.equal(recoverySettled, false);
     recoveryReleased();
     await recovery;
@@ -2112,12 +2112,47 @@ test("failed kill recovery leaves its pending Tell unchanged", async () => {
       await killAkumaWithRecovery(allocated.paths, async () => {
         throw new Error("spawn denied");
       }),
-      "already-stopped",
+      "killed",
     );
     assert.deepEqual(
       (await readHeart(allocated.paths)).pending.map((tell) => tell.id),
       ["kill-recovery-failure"],
     );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("kill settles a stranded dead Body and later observation presents the killed life", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-kill-stranded-"));
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1d1e0012" });
+    await initializeHeart(allocated.paths);
+    const holder = (await HeldAkumaLeash.try(allocated.paths))!;
+    await holder.birth(allocated.paths, {
+      id: allocated.id,
+      archetype: "claude",
+      provider: CLAUDE_EXECUTION,
+      options: {},
+      origin: { kind: "direct" },
+      allowed: [],
+      cwd: root,
+      createdAt: "2026-08-10T00:00:00.000Z",
+    });
+    const body = await holder.recordBody(allocated.paths, { leashTakenAt: "2026-08-10T00:00:00.000Z" });
+    await breakBody(allocated.paths, { sequence: body.sequence, end: "broke-off", at: "2026-08-10T00:00:01.000Z" });
+    holder.release();
+
+    const world = await akumaAt(root);
+    const handle = world.of({ id: allocated.id });
+    assert.equal((await handle.status()).life, "stranded");
+    assert.equal(await handle.kill(), "killed");
+    const status = await handle.status();
+    assert.equal(status.life, "killed");
+    assert.equal("strandedReason" in status, false);
+    const listed = (await world.list()).rows.find((row) => row.id === allocated.id);
+    assert.equal(listed !== undefined && "life" in listed && listed.life, "killed");
+    assert.equal(await handle.kill(), "already-killed");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

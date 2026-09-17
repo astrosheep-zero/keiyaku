@@ -57,6 +57,7 @@ export function parseAkumaStatus(value: unknown): AkumaStatus {
 }
 
 export { defaultWaitComplete } from "./akuma-observe.js";
+export { withoutReportedChanges } from "./projection.js";
 
 export type { ReadonlyRestraint } from "./provider-recipe.js";
 export type * from "./projection.js";

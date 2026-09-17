@@ -513,4 +513,4 @@ export function projectTurns(
   return finishLedger(state, retained);
 }
 
-export { ordinarySnapshotBudget, selectHistory, selectSnapshot } from "./projection-read.js";
+export { ordinarySnapshotBudget, selectHistory, selectSnapshot, withoutReportedChanges } from "./projection-read.js";

@@ -95,9 +95,15 @@ elapsed time while that settlement is in progress; it may stop waiting through
 its own signal. Hung remains a Body/provider-custody fact, and a settled or hung
 Body is reported through the existing structured unavailable evidence.
 Kill similarly requires explicit settlement of the exact stopped Body before it
-can record a witness. Hung, untidy, held, or changed custody returns the existing
-unavailable evidence and never authorizes external signaling. Pause and stop are
-distinct control facts.
+can record a witness. A Body that is already explicitly settled without a kill
+witness — a stranded life whose process is gone — needs no stop request: kill
+witnesses that exact settled Body in place, receipts the kill, and later status
+and fleet observation present the killed life instead of stranded. A genuinely
+running or asleep Body keeps its semantics: the running Body is asked to stop
+and is witnessed only after settlement, the asleep Body receipts already
+stopped, and only an already witnessed Body receipts already killed. Hung,
+untidy, held, or changed custody returns the existing unavailable evidence and
+never authorizes external signaling. Pause and stop are distinct control facts.
 
 Fork reads one exact retained answered Turn with its native fork point. It never
 substitutes a nearby turn, latest session, or emulation. A provider without fork

@@ -24,6 +24,11 @@ type ReportedChangeSummary = Readonly<{
 
 const EMPTY_REPORTED: ReportedChangeSummary = { reportedChanges: [], reportedChangesOmitted: 0 };
 
+/** Present the same snapshot without its reported-change summary. */
+export function withoutReportedChanges(snapshot: ActivitySnapshot): ActivitySnapshot {
+  return { ...snapshot, reportedChanges: [], reportedChangesOmitted: 0 };
+}
+
 import type { HistoryCursor, HistoryPage } from "./projection.js";
 
 function assembleEntries<Row extends SnapshotRow>(
