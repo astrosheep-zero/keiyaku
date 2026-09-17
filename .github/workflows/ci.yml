@@ -1,23 +1,35 @@
-name: Test diet working snapshot
+name: Publish test scenario consolidation
 on:
   push:
     branches: [chore/test-diet-snapshot-20260918]
 permissions:
-  contents: read
+  contents: write
 jobs:
-  snapshot:
+  publish:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: 14233098195c2f2897e9626e0f5159e66e1194ad
           fetch-depth: 0
-          persist-credentials: false
-      - name: Preserve repository objects for offline test optimization
-        run: git bundle create /tmp/keiyaku-pr42.bundle --all
-      - uses: actions/upload-artifact@v4
+      - name: Apply the locally checked transform to its pinned base
+        run: |
+          cp .test-audit/batch09.py /tmp/batch09.py
+          git checkout --detach 14233098195c2f2897e9626e0f5159e66e1194ad
+          python3 /tmp/batch09.py
+      - uses: actions/setup-node@v5
         with:
-          name: keiyaku-pr42-source
-          path: /tmp/keiyaku-pr42.bundle
-          retention-days: 1
+          node-version: 24.x
+          cache: npm
+      - run: npm ci --ignore-scripts --prefer-offline
+      - name: Verify exact tree and publish a new review branch
+        run: |
+          node node_modules/prettier/bin/prettier.cjs --write --print-width 120 tests/facade-fleet.test.ts tests/library-akuma-creation.test.ts tests/contract-completion.test.ts
+          git add tests/facade-fleet.test.ts tests/library-akuma-creation.test.ts tests/contract-completion.test.ts
+          git diff --cached --check
+          test "$(git write-tree)" = a4c9c4f857b7efbf5b34849dffc0b31d3bf27946
+          test -z "$(git ls-remote --heads origin refs/heads/test-diet/09-merge-expensive-scenarios)"
+          git config user.name 'Keiyaku Test Optimization'
+          git config user.email 'keiyaku-test@example.invalid'
+          git commit -m 'test: merge cross-product checks and right-size pagination fixtures'
+          git push origin HEAD:refs/heads/test-diet/09-merge-expensive-scenarios
