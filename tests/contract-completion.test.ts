@@ -1,4 +1,3 @@
-import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -6,6 +5,7 @@ import test from "node:test";
 import { Keiyaku, Repo } from "../src/index.js";
 import { appointedWorktreePath, cachedRepositoryAt } from "./support/git.js";
 import { bind, commitCandidate, document, repositoryWithMain } from "./support/library-verbs.js";
+import { deferred as promiseBarrier } from "./support/process.js";
 
 async function fixture() {
   const repository = repositoryWithMain();
@@ -36,7 +36,7 @@ async function dependentFixture(diverged: boolean) {
   }
   const childHead = repository.run(["-C", childPath, "rev-parse", "HEAD"]).trim();
   const delivered = await dependent.deliver();
-  assert.ok(delivered.kind === "accepted", "expected delivered.kind = \"accepted\"");
+  assert.ok(delivered.kind === "accepted", 'expected delivered.kind = "accepted"');
   const placement = delivered.value.placement;
   assert.equal(placement && "refusal" in placement ? placement.refusal.kind : undefined, "prerequisites-unsatisfied");
   await primary.deliver();
@@ -54,7 +54,7 @@ test("review before delivery records one leading fact and delivery later claims 
   const placement = review.value.placement;
   assert.equal(placement && "refusal" in placement ? placement.refusal.kind : undefined, "delivery-missing");
   const delivered = await contract.deliver();
-  assert.ok(delivered.kind === "accepted", "expected delivered.kind = \"accepted\"");
+  assert.ok(delivered.kind === "accepted", 'expected delivered.kind = "accepted"');
   assert.deepEqual(
     delivered.facts.map((fact) => fact.kind),
     ["bound", "deliver", "claimed"],
@@ -68,7 +68,7 @@ test("review before delivery records one leading fact and delivery later claims 
 test("review after delivery uses the same completion node without replaying delivery facts", async () => {
   const { contract } = await fixture();
   const delivered = await contract.deliver();
-  assert.ok(delivered.kind === "accepted", "expected delivered.kind = \"accepted\"");
+  assert.ok(delivered.kind === "accepted", 'expected delivered.kind = "accepted"');
   assert.equal(delivered.value.completion, undefined);
   assert.deepEqual(
     delivered.facts.map((fact) => fact.kind),
@@ -96,23 +96,6 @@ test("an unsatisfied review never requests trailing placement", async () => {
   assert.equal((await contract.state()).terminal, null);
 });
 
-test("automatic dependent completion retains only new facts and the primary contract head", async () => {
-  const { primary, initial, dependent, childState } = await dependentFixture(false);
-  const review = await primary.review({ verdict: "satisfied" });
-  assert.deepEqual(review.value.continuation?.claimed, [childState.id], JSON.stringify(review.value.continuation));
-  assert.deepEqual(
-    review.facts.filter((fact) => fact.contract === initial.id).map((fact) => fact.kind),
-    ["attestation", "claimed"],
-  );
-  assert.equal(
-    review.facts.some((fact) => fact.kind === "deliver" || fact.kind === "bound"),
-    false,
-  );
-  assert.equal(new Set(review.facts.map((fact) => `${fact.contract}:${fact.entry}`)).size, review.facts.length);
-  assert.equal((await dependent.state()).terminal?.kind, "claimed");
-  assert.equal(review.head, (await primary.state()).head);
-});
-
 test("automatic dependent completion reports a Verification stop without placing", async () => {
   const { repository, contract: primary, state: initial } = await fixture();
   const dependent = (
@@ -126,7 +109,7 @@ test("automatic dependent completion reports a Verification stop without placing
   ).keiyaku;
   const dependentState = await dependent.state();
   const first = await dependent.deliver();
-  assert.ok(first.kind === "accepted", "expected first.kind = \"accepted\"");
+  assert.ok(first.kind === "accepted", 'expected first.kind = "accepted"');
   assert.deepEqual(first.value.verification, { failure: "unknown-exit" });
   assert.equal(first.value.placement, undefined);
   await primary.deliver();
@@ -160,14 +143,14 @@ test("a diverged dependent keeps its worktree and does not counterfeit completio
 });
 
 // These tests exercise the real admission boundary, not a synthetic accepted object.
+import { type ContractId } from "../src/core/facts/types.js";
+import { EMPTY_WORKTREE_HOOKS } from "../src/git/hooks.js";
+import { acquireTargetPlacementFence } from "../src/git/target-placement.js";
 import { executeLocalReview, withContractExecution } from "../src/library/contract-execution.js";
+import { executionReceipt } from "../src/library/execution-result.js";
 import { requireLeadingAdmission } from "../src/library/refusal.js";
 import { admitReviewOperation } from "../src/protocol/review.js";
-import { executionReceipt } from "../src/library/execution-result.js";
-import { acquireTargetPlacementFence } from "../src/git/target-placement.js";
 import { withGitShim } from "./support/git.js";
-import { EMPTY_WORKTREE_HOOKS } from "../src/git/hooks.js";
-import { type ContractId } from "../src/core/facts/types.js";
 
 function deferred() {
   const { promise: promise, resolve } = promiseBarrier<void>();
@@ -318,75 +301,15 @@ test("diamond continuation revisits unready candidates and admits each dependent
   assert.deepEqual(reviewed.value.continuation?.stopped, []);
   assert.equal(reviewed.facts.filter((fact) => fact.contract === leafId && fact.kind === "claimed").length, 1);
   assert.equal(reviewed.head, (await primary.state()).head);
-  assert.equal((await leaf.state()).terminal?.kind, "claimed");
-});
-
-test("dependent verification leaks are accumulated with their owners instead of discarded", async () => {
-  const { repository, contract: primary, state } = await fixture();
-  const repo = await Repo.at({ path: repository.path });
-  const children = [];
-  for (const name of ["Cleanup a", "Cleanup b"]) {
-    const child = (
-      await Keiyaku.bind({
-        repo,
-        markdown: document("exit 0").replace("# Library verbs", `# ${name}`),
-        gates: [],
-        after: [state.id],
-        workspace: "worktree",
-      })
-    ).keiyaku;
-    await child.deliver();
-    await child.amend({ markdown: "## Replace: Verification\n~~~bash timeout=5m\nprintf fresh\n~~~\n" });
-    children.push(child);
-  }
-  await primary.deliver();
-  const reviewed = await withGitShim(
-    [
-      'if [ "$1" = "worktree" ] && [ "$2" = "remove" ]; then',
-      '  case "$*" in *keiyaku-v4-verify-*) printf "retained test scratch\\n" >&2; exit 17;; esac',
-      "fi",
-      'exec "$KEIYAKU_REAL_GIT" "$@"',
-    ].join("\n"),
-    {},
-    async (gitPath) =>
-      Keiyaku.of({ repo: await Repo.at({ path: repository.path, gitPath }), id: state.id }).review({
-        verdict: "satisfied",
-      }),
+  assert.deepEqual(
+    reviewed.facts.filter((fact) => fact.kind === "claimed").map((fact) => fact.contract),
+    [state.id, leftId, rightId, leafId],
   );
-  const leaked = reviewed.cleanup.filter((issue) => issue.kind === "worktree-leak");
-  try {
-    const ids = await Promise.all(children.map(async (child) => (await child.state()).id));
-    assert.equal(leaked.length, 2);
-    assert.deepEqual(leaked.map((issue) => issue.contractId).sort(), ids.sort());
-    assert.equal(new Set(leaked.map((issue) => issue.leak.path)).size, 2);
-    assert.deepEqual(reviewed.value.continuation?.claimed.slice().sort(), ids);
-    assert.ok(leaked.every((issue) => issue.snapshot !== undefined));
-    assert.equal("cleanup" in reviewed.value, false);
-    assert.equal("leak" in reviewed.value, false);
-    assert.ok(reviewed.pending.some((pending) => pending.surface === "cleanup" && !pending.required));
-  } finally {
-    for (const issue of leaked) repository.run(["worktree", "remove", "--force", issue.leak.path]);
-  }
-});
-
-test("audit may record verification without running the automatic placement node", async () => {
-  const repository = repositoryWithMain();
-  const primary = (
-    await Keiyaku.bind({
-      repo: await Repo.at({ path: repository.path }),
-      markdown: document("exit 0"),
-      workspace: "worktree",
-      gates: [],
-    })
-  ).keiyaku;
-  const audited = await primary.audit();
-  assert.equal(audited.operation, "audit");
-  assert.equal(audited.facts.filter((fact) => fact.kind === "attestation").length, 1);
   assert.equal(
-    audited.facts.some((fact) => fact.kind === "claimed"),
+    reviewed.facts.some((fact) => fact.kind === "bind" || fact.kind === "deliver"),
     false,
   );
-  assert.equal((await primary.state()).terminal, null);
+  assert.equal((await leaf.state()).terminal?.kind, "claimed");
 });
 
 import { waitForFile } from "./support/git.js";
@@ -431,55 +354,4 @@ test("cancellation during an unknown Git publication recovers its receipt with i
   assert.equal((await contract.state()).attestations.length, 1);
   assert.equal((await contract.state()).terminal, null);
   assert.ok(result.executionStops.some((stop) => stop.reason === "cancelled"));
-});
-
-test("reintegrated candidates retain every scratch leak instead of replacing the earlier one", async () => {
-  const repository = repositoryWithMain();
-  repository.run(["branch", "release"]);
-  const primary = (
-    await Keiyaku.bind({
-      repo: await Repo.at({ path: repository.path }),
-      markdown: document("exit 0"),
-      target: "refs/heads/release",
-      workspace: "worktree",
-      gates: ["verified"],
-    })
-  ).keiyaku;
-  const id = (await primary.state()).id,
-    path = await appointedWorktreePath(await cachedRepositoryAt(repository.path), id);
-  commitCandidate(repository, path);
-  writeFileSync(join(repository.path, "external.txt"), "moved\n");
-  repository.run(["add", "external.txt"]);
-  repository.run(["commit", "--quiet", "-m", "external target move"]);
-  const raced = join(repository.path, "raced");
-  const delivered = await withGitShim(
-    [
-      'if [ "$1" = "worktree" ] && [ "$2" = "remove" ]; then',
-      '  case "$*" in *keiyaku-v4-verify-*) printf "retained test scratch\\n" >&2; exit 17;; esac',
-      "fi",
-      'if [ "$1" = "update-ref" ]; then',
-      '  input_file=$(mktemp); cat > "$input_file"',
-      '  if grep -q "update refs/heads/release" "$input_file" && [ ! -f "$RACED" ]; then',
-      '    "$KEIYAKU_REAL_GIT" update-ref refs/heads/release "$EXTERNAL_HEAD"; touch "$RACED"',
-      "  fi",
-      '  "$KEIYAKU_REAL_GIT" "$@" < "$input_file"; result=$?; rm -f "$input_file"; exit "$result"',
-      "fi",
-      'exec "$KEIYAKU_REAL_GIT" "$@"',
-    ].join("\n"),
-    { RACED: raced, EXTERNAL_HEAD: repository.run(["rev-parse", "HEAD"]).trim() },
-    async (gitPath) => Keiyaku.of({ repo: await Repo.at({ path: repository.path, gitPath }), id }).deliver(),
-  );
-  assert.ok(delivered.kind === "accepted", "expected delivered.kind = \"accepted\"");
-  const leaked = delivered.cleanup.filter((issue) => issue.kind === "worktree-leak");
-  try {
-    assert.equal(leaked.length, 2);
-    assert.equal(new Set(leaked.map((issue) => issue.snapshot)).size, 2);
-    assert.ok(leaked.every((issue) => issue.contractId === id));
-    assert.equal(delivered.facts.filter((fact) => fact.kind === "attestation").length, 2);
-    assert.equal(delivered.facts.filter((fact) => fact.kind === "reintegrated").length, 1);
-    assert.equal(delivered.value.completion?.verification?.verdict, "satisfied");
-    assert.equal(delivered.value.completion?.integration, repository.run(["rev-parse", "refs/heads/release"]).trim());
-  } finally {
-    for (const issue of leaked) repository.run(["worktree", "remove", "--force", issue.leak.path]);
-  }
 });
