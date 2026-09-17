@@ -82,8 +82,7 @@ test("a preparation spent by a concurrent publication restarts with a fresh atte
       decide: decideArc,
     }),
   );
-  assert.equal(result.kind, "accepted");
-  if (result.kind !== "accepted") throw new Error("spent preparation did not restart");
+  assert.ok(result.kind === "accepted", "expected result.kind = \"accepted\"");
   assert.deepEqual(
     result.facts.map((fact) => fact.entry),
     [freshAttempt],

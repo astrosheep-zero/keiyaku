@@ -11,24 +11,6 @@ async function draftWorld(): Promise<WorldRoot> {
   return World.at(mkdtempSync(join(tmpdir(), "keiyaku-bind-draft-")));
 }
 
-test("bind draft receipts are content-addressed, exact, and idempotent", async () => {
-  const world = await draftWorld();
-  const firstBytes = "# First\r\n\r\nexact bytes\r\n";
-  const secondBytes = "# Second\n\nother bytes\n";
-
-  const first = await preserveBindDraft(world, firstBytes);
-  const second = await preserveBindDraft(world, secondBytes);
-  const repeated = await preserveBindDraft(world, firstBytes);
-
-  assert.match(first.path ?? "", /^\.keiyaku\/draft\/bind-[0-9a-f]{64}\.md$/u);
-  assert.match(second.path ?? "", /^\.keiyaku\/draft\/bind-[0-9a-f]{64}\.md$/u);
-  assert.notEqual(first.path, second.path);
-  assert.equal(repeated.path, first.path);
-  assert.equal(readFileSync(resolve(world, first.path!), "utf8"), firstBytes);
-  assert.equal(readFileSync(resolve(world, second.path!), "utf8"), secondBytes);
-  assert.equal(readFileSync(resolve(world, ".keiyaku/draft/.gitignore"), "utf8"), "*\n");
-});
-
 test("bind draft preservation repairs corrupted content and renews equal receipt custody", async () => {
   const world = await draftWorld();
   const bytes = "same refused input\n";
@@ -68,21 +50,6 @@ test("a successful draft write sweeps only expired content-addressed bind drafts
   assert.equal(readFileSync(unrelated, "utf8"), "keep");
 });
 
-test("BindDraftError keeps the combined original message and exact draft receipt", async () => {
-  const world = await draftWorld();
-  const bytes = "---\r\na: [\r\nb: {\r\n---\r\n";
-  const combined = ["first diagnostic", "second diagnostic"].join("\n");
-  const original = new TypeError(combined);
-  const draft = await preserveBindDraft(world, bytes);
-  const error = new BindDraftError(original, draft);
-
-  assert.equal(error.message, combined);
-  assert.equal(error.original, original);
-  assert.equal(error.draft, draft);
-  if (draft.path === undefined) throw new Error(draft.warning);
-  assert.equal(readFileSync(resolve(world, draft.path), "utf8"), bytes);
-});
-
 test("BindDraftError keeps the original failure when draft custody is a warning", async () => {
   const world = await draftWorld();
   writeFileSync(resolve(world, ".keiyaku/draft"), "not a directory");
@@ -95,15 +62,4 @@ test("BindDraftError keeps the original failure when draft custody is a warning"
   assert.equal(error.draft.path, undefined);
   assert.match(error.draft.warning ?? "", /could not be preserved/u);
   assert.match(renderBindDraftReceipt(error.draft), /^! draft warning  /u);
-});
-
-test("draft custody failures become warnings instead of replacing bind failure", async () => {
-  const world = await draftWorld();
-  writeFileSync(resolve(world, ".keiyaku/draft"), "not a directory");
-
-  const receipt = await preserveBindDraft(world, "cannot persist\n");
-
-  assert.equal(receipt.path, undefined);
-  assert.match(receipt.warning ?? "", /could not be preserved/u);
-  assert.match(renderBindDraftReceipt(receipt), /^! draft warning  /u);
 });

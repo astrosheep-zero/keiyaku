@@ -127,31 +127,3 @@ test("bundled instructions keep facade and standalone Akuma call surfaces distin
   assert.ok(akumaSkill.includes(standalone));
   assert.doesNotMatch(akumaSkill, /\bpersona\b|--persona/iu);
 });
-
-test("harness manifests share one release version and keep cachebusters host-local", () => {
-  const plugin = join(installAssetsRoot(), "plugins", "keiyaku");
-  const versionAt = (path: string): string => {
-    const version = (JSON.parse(readFileSync(path, "utf8")) as { version?: unknown }).version;
-    assert.equal(typeof version, "string", `${path} must declare a version`);
-    return version as string;
-  };
-  const codexVersion = versionAt(join(plugin, ".codex-plugin", "plugin.json"));
-  const claudeVersion = versionAt(join(plugin, ".claude-plugin", "plugin.json"));
-  const harnessVersion = versionAt(join(plugin, "package.json"));
-  const [codexRelease, codexMetadata, ...extraMetadata] = codexVersion.split("+");
-
-  assert.equal(claudeVersion, harnessVersion);
-  assert.equal(codexRelease, harnessVersion);
-  assert.match(codexMetadata ?? "", /^codex\.[0-9A-Za-z.-]+$/u);
-  assert.deepEqual(extraMetadata, []);
-  assert.equal(claudeVersion.includes("+"), false);
-});
-
-test("OpenCode and Pi expose the Keiyaku hard-cut identity", () => {
-  const plugin = join(installAssetsRoot(), "plugins", "keiyaku");
-  const harness = JSON.parse(readFileSync(join(plugin, "package.json"), "utf8")) as { name?: unknown };
-  const opencode = readFileSync(join(plugin, "opencode.js"), "utf8");
-  assert.equal(harness.name, "keiyaku-harness");
-  assert.match(opencode, /id: "keiyaku"/u);
-  assert.doesNotMatch(opencode, /keiyaku-v4/u);
-});

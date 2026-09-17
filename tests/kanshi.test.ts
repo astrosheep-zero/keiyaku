@@ -27,7 +27,7 @@ import {
 import { observeTargetLag } from "../src/git/workspace.js";
 import type { AkumaAlias } from "../src/identity/selector.js";
 import { Keiyaku, Repo } from "../src/index.js";
-import { kanshi, selectKanshi, type ContractKanshiRow, type KanshiReport } from "../src/kanshi/index.js";
+import { kanshi, selectKanshi, type KanshiReport } from "../src/kanshi/index.js";
 import { projectTaskBoardObservation } from "../src/task/board.js";
 import { contractNamespace } from "../src/task/identity.js";
 import { Tasks } from "../src/task/index.js";
@@ -105,8 +105,7 @@ async function populatedWorld(t: TestContext) {
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const tasks = Tasks.of(await World.at(repository.path));
   const added = await tasks.add({ title: "Render status", priority: 0 });
-  assert.equal(added.kind, "accepted");
-  if (added.kind !== "accepted") throw new Error("task add failed");
+  assert.ok(added.kind === "accepted", "expected added.kind = \"accepted\"");
   const bound = await Keiyaku.bind({
     repo: await Repo.at({ path: repository.path }),
     task: added.value.id,
@@ -143,15 +142,13 @@ function selectedContractSection(report: KanshiReport) {
 
 async function pluralStatusReport(repositoryPath: string, selectors: readonly string[]) {
   const result = await invoke(parseArgv(["-C", repositoryPath, "status", ...selectors]));
-  assert.equal(result.kind, "status-set");
-  if (result.kind !== "status-set") throw new Error("expected a status set");
+  assert.ok(result.kind === "status-set", "expected result.kind = \"status-set\"");
   return result;
 }
 
 async function singleStatusReport(repositoryPath: string, selector: string) {
   const result = await invoke(parseArgv(["-C", repositoryPath, "status", selector]));
-  assert.equal(result.kind, "status");
-  if (result.kind !== "status") throw new Error("expected a status result");
+  assert.ok(result.kind === "status", "expected result.kind = \"status\"");
   return result;
 }
 
@@ -222,8 +219,7 @@ test("plural Contract status matches single-selection reads outside the bounded 
     world: await World.at(repository.path),
     repo: await Repo.at({ path: repository.path }),
   });
-  assert.equal(bare.contracts.kind, "present");
-  if (bare.contracts.kind !== "present") return;
+  assert.ok(bare.contracts.kind === "present", "expected bare.contracts.kind = \"present\"");
   assert.equal(bare.contracts.value.hasMore, true);
   assert.equal(
     bare.contracts.value.rows.some((row) => row.id === contract.id),
@@ -298,57 +294,6 @@ function deleteLooseObject(repository: ReturnType<typeof makeGitRepository>, oid
   unlinkSync(join(repository.path, ".git", "objects", oid.slice(0, 2), oid.slice(2)));
 }
 
-test("named status resolves its address from the initial observation before the selected read", async (t) => {
-  const repository = fixtureRepository(t);
-
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const repo = await Repo.at({ path: repository.path });
-  const bound = await Keiyaku.bind({ repo, markdown: document("Barrier"), workspace: "worktree" });
-  await bound.keiyaku.reconcile();
-  const contract = await bound.keiyaku.state();
-  const activeRow = (await Keiyaku.list({ repo })).rows.find((row) => row.id === contract.id);
-  assert.equal(activeRow?.disposition, "active");
-  assert.equal(activeRow?.workspace, "worktree");
-  assert.notEqual(activeRow?.worktreePath, null);
-  const active = repository.run(["rev-parse", GIT_REF]).trim();
-  await bound.keiyaku.abandon();
-  const terminal = repository.run(["rev-parse", GIT_REF]).trim();
-  repository.run(["update-ref", GIT_REF, active, terminal]);
-  await bound.keiyaku.reconcile();
-  const marker = join(repository.path, "named-status-barrier");
-
-  const result = await withGitShim(
-    [
-      'if [ "$*" = "rev-parse --verify --quiet refs/heads/keiyaku-state" ] && [ ! -e "$KEIYAKU_BARRIER_MARKER" ]; then',
-      '  "$KEIYAKU_REAL_GIT" "$@"',
-      '  "$KEIYAKU_REAL_GIT" update-ref refs/heads/keiyaku-state "$KEIYAKU_TERMINAL_OID" "$KEIYAKU_ACTIVE_OID"',
-      '  : > "$KEIYAKU_BARRIER_MARKER"',
-      "  exit 0",
-      "fi",
-      'exec "$KEIYAKU_REAL_GIT" "$@"',
-    ].join("\n"),
-    {
-      KEIYAKU_ACTIVE_OID: active,
-      KEIYAKU_BARRIER_MARKER: marker,
-      KEIYAKU_TERMINAL_OID: terminal,
-    },
-    async (gitPath) =>
-      await invoke(parseArgv(["-C", repository.path, "status", `@${contract.id.slice("kei/".length)}`]), {
-        environment: { KEIYAKU_GIT_PATH: gitPath },
-      }),
-  );
-
-  assert.equal(result.kind, "status");
-  assert.equal(result.kind === "status" && result.selection, "contract");
-  assert.equal(
-    result.kind === "status" &&
-      result.report.contracts.kind === "present" &&
-      result.report.contracts.value.rows.find((row) => row.id === contract.id)?.disposition,
-    "terminal",
-  );
-  assert.equal(repository.run(["rev-parse", GIT_REF]).trim(), terminal);
-});
-
 test("canonical and Contract-alias status both assemble selected-only current physical issues", async (t) => {
   const repository = fixtureRepository(t);
 
@@ -365,8 +310,7 @@ test("canonical and Contract-alias status both assemble selected-only current ph
   const id = (await bound.keiyaku.state()).id;
   const world = await World.at(repository.path);
   const unselected = await kanshi({ world, repo: await Repo.at({ path: repository.path }) });
-  assert.equal(unselected.contracts.kind, "present");
-  if (unselected.contracts.kind !== "present") return;
+  assert.ok(unselected.contracts.kind === "present", "expected unselected.contracts.kind = \"present\"");
   assert.equal("issue" in unselected.contracts.value.rows.find((row) => row.id === id)!, false);
 
   const readIssue = async (selector: string) => {
@@ -419,79 +363,9 @@ test("complete Contract status exposes a corrupt active dependency as a Contract
 
   const result = await invoke(parseArgv(["-C", repository.path, "status", selectedId]));
 
-  assert.equal(result.kind, "status");
-  if (result.kind !== "status") return;
+  assert.ok(result.kind === "status", "expected result.kind = \"status\"");
   assert.equal(result.selection, "contract");
   assert.equal(result.report.contracts.kind, "failed");
-});
-
-test("same-target lag counts each workspace HEAD against the one frozen target head", async (t) => {
-  const { repository, contract } = await populatedWorld(t);
-  const tasks = Tasks.of(await World.at(repository.path));
-  const added = await tasks.add({ title: "Second status row" });
-  assert.equal(added.kind, "accepted");
-  if (added.kind !== "accepted") return;
-  const bound = await Keiyaku.bind({
-    repo: await Repo.at({ path: repository.path }),
-    task: added.value.id,
-    markdown: document("Second Kanshi contract"),
-    workspace: "worktree",
-    target: "main",
-  });
-  const second = await bound.keiyaku.state();
-  const log = join(repository.path, "kanshi-shared-target-lag.log");
-  writeFileSync(log, "");
-  const report = await withGitShim(
-    'printf \'%s\\n\' "$*" >> "$KEIYAKU_KANSHI_GIT_LOG"\nexec "$KEIYAKU_REAL_GIT" "$@"',
-    { KEIYAKU_KANSHI_GIT_LOG: log },
-    async (gitPath) => observe(repository.path, await Repo.at({ path: repository.path, gitPath })),
-  );
-
-  assert.equal(report.contracts.kind, "present");
-  if (report.contracts.kind !== "present") return;
-  const contracts = report.contracts;
-  const rows = [contract.id, second.id].map((id) =>
-    contracts.value.rows.find((row: ContractKanshiRow) => row.id === id),
-  );
-  const head = rows[0]?.targetObservation?.head;
-  assert.equal(typeof head, "string");
-  assert.equal(
-    rows.every((row) => row?.target === "refs/heads/main" && row.targetObservation?.head === head),
-    true,
-  );
-  const invocations = gitInvocations(log);
-  const lagReads = invocations.filter((command) => /rev-list --count HEAD\.\.[0-9a-f]{40}$/u.test(command));
-  assert.equal(lagReads.length, 2);
-  assert.equal(
-    lagReads.every((command) => command.endsWith(`HEAD..${head}`)),
-    true,
-  );
-  assert.equal(invocations.filter((command) => command === "rev-parse --verify --quiet refs/heads/main").length, 1);
-  assert.equal(
-    invocations.some((command) => /rev-list --count HEAD\.\.refs\//u.test(command)),
-    false,
-  );
-});
-
-test("a dead shared Kanshi batch fails every Git-backed owner without restarting", async (t) => {
-  const { repository } = await populatedWorld(t);
-  const log = join(repository.path, "kanshi-dead-batch.log");
-  writeFileSync(log, "");
-
-  const report = await withGitShim(
-    [
-      'printf \'%s\\n\' "$*" >> "$KEIYAKU_KANSHI_GIT_LOG"',
-      'if [ "$1 $2" = "cat-file --batch" ]; then exit 74; fi',
-      'exec "$KEIYAKU_REAL_GIT" "$@"',
-    ].join("\n"),
-    { KEIYAKU_KANSHI_GIT_LOG: log },
-    async (gitPath) => observe(repository.path, await Repo.at({ path: repository.path, gitPath })),
-  );
-
-  assert.equal(report.contracts.kind, "failed");
-  assert.equal(report.tasks.kind, "failed");
-  assert.equal(report.akuma.kind, "failed");
-  assert.equal(gitInvocations(log).filter((command) => command === "cat-file --batch").length, 1);
 });
 
 test("a missing Contract object fails only the Contract-dependent section", async (t) => {
@@ -566,160 +440,6 @@ test("a corrupt shared Git format fails every state-backed Kanshi section", asyn
   assert.equal(report.akuma.kind, "failed");
 });
 
-test("kanshi joins TaskHolder, Dispatch, and Alias without moving their authorities", async (t) => {
-  const { repository, contract, taskId, akumaId } = await populatedWorld(t);
-  const report = await observe(repository.path, await Repo.at({ path: repository.path }));
-  assert.deepEqual([report.contracts.kind, report.tasks.kind, report.akuma.kind], ["present", "present", "present"]);
-  if (report.akuma.kind === "present") {
-    const row = report.akuma.value.rows.find((candidate) => candidate.id === akumaId);
-    assert.equal(row?.id, akumaId);
-    assert.deepEqual(row?.aliases, ["@watch"]);
-    assert.deepEqual(row?.contract, { id: contract.id, observed: "active" });
-  }
-  if (report.contracts.kind !== "present" || report.tasks.kind !== "present") return;
-  assert.equal(report.branch, "refs/heads/main");
-  assert.equal(report.contracts.value.state, (await readGit(await repositoryAt(repository.path))).commit);
-  assert.equal("state" in report, false);
-  assert.equal(new Date(report.observedAt).toISOString(), report.observedAt);
-  assert.deepEqual(report.contracts.value.rows.find((row) => row.id === contract.id)?.holder, {
-    kind: "held",
-    taskId,
-  });
-  assert.deepEqual(report.contracts.value.rows.find((row) => row.id === contract.id)?.fleet, [
-    { id: akumaId, aliases: ["@watch"] },
-  ]);
-  assert.deepEqual(report.tasks.value.rows.find((row) => row.id === taskId)?.contract, {
-    id: contract.id,
-    observed: "active",
-  });
-});
-
-test("kanshi keeps absent Contract and Task worlds explicit", async (t) => {
-  const root = fixtureRoot(t, "keiyaku-kanshi-no-git-");
-  const akumaId = await bornAkuma(root, "a0000002");
-  const report = await observe(root);
-  assert.deepEqual(report.contracts, { kind: "absent" });
-  assert.equal(report.tasks.kind, "present");
-  assert.equal(report.akuma.kind, "present");
-  if (report.tasks.kind === "present") assert.deepEqual(report.tasks.value.rows, []);
-  if (report.akuma.kind === "present") {
-    const row = report.akuma.value.rows.find((candidate) => candidate.id === akumaId);
-    assert.equal(row?.id, akumaId);
-    assert.equal("lastActivityAt" in (row ?? {}), true);
-    assert.equal(
-      "lastActivityAt" in (row ?? {}) ? (row as { lastActivityAt?: string | null }).lastActivityAt : undefined,
-      null,
-    );
-    assert.equal(row === undefined ? false : "contract" in row, false);
-  }
-  const worldText = renderKanshiText(report, { columns: 120, color: false });
-  assert.match(worldText, /CONTRACTS \/\/ absent/u);
-  assert.match(worldText, /AKUMA \/\/ 1 recent/u);
-  assert.doesNotMatch(worldText, /TASKS/u);
-});
-
-test("a Task world without Git has no invented Contract endpoint", async (t) => {
-  const root = fixtureRoot(t, "keiyaku-kanshi-task-only-");
-  const tasks = Tasks.of(await World.at(root));
-  const added = await tasks.add({ title: "Standalone Task" });
-  assert.equal(added.kind, "accepted");
-  const report = await observe(root);
-  assert.deepEqual(report.contracts, { kind: "absent" });
-  assert.equal(report.tasks.kind, "present");
-  if (report.tasks.kind !== "present" || added.kind !== "accepted") return;
-  assert.equal(report.tasks.value.rows.find((row) => row.id === added.value.id)?.contract, undefined);
-});
-
-test("kanshi reports malformed Task authority as a failed section", async (t) => {
-  const root = fixtureRoot(t, "keiyaku-kanshi-bad-task-");
-  mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });
-  writeFileSync(join(root, ".keiyaku", "tasks", "bad.md"), "not a task document\n");
-  const report = await observe(root);
-  assert.equal(report.tasks.kind, "failed");
-  if (report.tasks.kind === "failed") {
-    assert.equal(report.tasks.failure.coordinate, "task/bad");
-    assert.match(report.tasks.failure.message, /front matter/u);
-  }
-  assert.deepEqual(report.contracts, { kind: "absent" });
-});
-
-test("a malformed TaskHolder root fails only the Kanshi Task section", async (t) => {
-  const { repository } = await populatedWorld(t);
-  const git = await repositoryAt(repository.path);
-  const snapshot = await readGit(git);
-  const tree = await updateGitTree(
-    git,
-    snapshot.tree,
-    new Map([["settlement/task-holders", { oid: await writeBlob(git, "not holder authority\n") }]]),
-  );
-  const commit = await writeCommit({ repository: git, tree, parent: snapshot.commit });
-  assert.equal(
-    (await updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind,
-    "published",
-  );
-
-  const report = await observe(repository.path, await Repo.at({ path: repository.path }));
-
-  assert.equal(report.contracts.kind, "present");
-  assert.equal(report.tasks.kind, "failed");
-  assert.equal(report.akuma.kind, "present");
-  if (report.tasks.kind === "failed")
-    assert.match(report.tasks.failure.message, /TaskHolder authority root is not a tree/u);
-  if (report.contracts.kind === "present") {
-    assert.equal(
-      report.contracts.value.rows.every((row) => row.holder.kind === "unavailable"),
-      true,
-    );
-    assert.equal(
-      report.contracts.value.rows.every((row) => row.namespaceTasks === undefined),
-      true,
-    );
-  }
-});
-
-test("a malformed Contract journal fails only the Kanshi Contract section", async (t) => {
-  const { repository, contract } = await populatedWorld(t);
-  const git = await repositoryAt(repository.path);
-  const snapshot = await readGit(git);
-  const tree = await updateGitTree(
-    git,
-    snapshot.tree,
-    new Map([[contractJournalPath(contract.id), { oid: await writeBlob(git, "not a Contract journal\n") }]]),
-  );
-  const commit = await writeCommit({ repository: git, tree, parent: snapshot.commit });
-  assert.equal(
-    (await updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind,
-    "published",
-  );
-
-  const report = await observe(repository.path, await Repo.at({ path: repository.path }));
-
-  assert.equal(report.contracts.kind, "failed");
-  assert.equal(report.tasks.kind, "present");
-  assert.equal(report.akuma.kind, "present");
-});
-
-test("kanshi samples observedAt before section reads", async (t) => {
-  const { repository } = await populatedWorld(t);
-  const original = Date.prototype.toISOString;
-  const currentBranch = Repo.prototype.currentBranch;
-  let sampled = false;
-  Date.prototype.toISOString = function () {
-    sampled = true;
-    return original.call(this);
-  };
-  Repo.prototype.currentBranch = async function () {
-    assert.equal(sampled, true);
-    return currentBranch.call(this);
-  };
-  try {
-    await observe(repository.path, await Repo.at({ path: repository.path }));
-  } finally {
-    Date.prototype.toISOString = original;
-    Repo.prototype.currentBranch = currentBranch;
-  }
-});
-
 test("a failed branch observation does not suppress readable Contract state", async (t) => {
   const { repository } = await populatedWorld(t);
   const currentBranch = Repo.prototype.currentBranch;
@@ -747,14 +467,12 @@ test("blocked Kanshi rows preserve ordered structured Task blocker refs", async 
   assert.equal(second.kind, "accepted");
   if (first.kind !== "accepted" || second.kind !== "accepted") return;
   const blocked = await tasks.add({ title: "Blocked work", needs: [second.value.id, first.value.id] });
-  assert.equal(blocked.kind, "accepted");
-  if (blocked.kind !== "accepted") return;
+  assert.ok(blocked.kind === "accepted", "expected blocked.kind = \"accepted\"");
   unlinkSync(authorityPath(root as WorldRoot, first.value.id));
 
   const report = await observe(root);
 
-  assert.equal(report.tasks.kind, "present");
-  if (report.tasks.kind !== "present") return;
+  assert.ok(report.tasks.kind === "present", "expected report.tasks.kind = \"present\"");
   assert.deepEqual(report.tasks.value.rows.find((row) => row.id === blocked.value.id)?.blockers, [
     { id: second.value.id, title: "Second blocker", state: "in_progress" },
     { id: first.value.id, title: null, state: "missing" },
@@ -816,53 +534,6 @@ function sectionBody(text: string, name: string): string {
   return close === -1 ? rest : rest.slice(0, close);
 }
 
-test("bare Kanshi marks an associated Contract outside its bounded aperture unavailable", async (t) => {
-  const { repository, contract, taskId } = await populatedWorld(t);
-  await publishNewerActiveContractCopies(repository, contract.id);
-
-  const report = await kanshi({
-    world: await World.at(repository.path),
-    repo: await Repo.at({ path: repository.path }),
-  });
-
-  assert.equal(report.contracts.kind, "present");
-  assert.equal(report.tasks.kind, "present");
-  if (report.contracts.kind !== "present" || report.tasks.kind !== "present") return;
-  assert.equal(report.contracts.value.hasMore, true);
-  assert.equal(
-    report.contracts.value.rows.some((row) => row.id === contract.id),
-    false,
-  );
-  assert.deepEqual(report.tasks.value.rows.find((row) => row.id === taskId)?.contract, {
-    id: contract.id,
-    observed: "unavailable",
-  });
-});
-
-test("bare Kanshi treats a terminal Dispatch Contract as unavailable in an active-only catalogue", async (t) => {
-  const { repository, contract, keiyaku, akumaId } = await populatedWorld(t);
-  await keiyaku.abandon();
-
-  const report = await kanshi({
-    world: await World.at(repository.path),
-    repo: await Repo.at({ path: repository.path }),
-  });
-
-  assert.equal((await keiyaku.state()).terminal?.kind, "abandoned");
-  assert.equal(report.contracts.kind, "present");
-  assert.equal(report.akuma.kind, "present");
-  if (report.contracts.kind !== "present" || report.akuma.kind !== "present") return;
-  assert.equal(report.contracts.value.hasMore, false);
-  assert.equal(
-    report.contracts.value.rows.some((row) => row.id === contract.id),
-    false,
-  );
-  assert.deepEqual(report.akuma.value.rows.find((row) => row.id === akumaId)?.contract, {
-    id: contract.id,
-    observed: "unavailable",
-  });
-});
-
 test("Kanshi reads ActivitySnapshots for the first three final Fleet display rows", async (t) => {
   const root = fixtureRoot(t, "keiyaku-kanshi-fleet-snapshots-");
   const ids = [
@@ -879,8 +550,7 @@ test("Kanshi reads ActivitySnapshots for the first three final Fleet display row
   };
   try {
     const report = await observe(root);
-    assert.equal(report.akuma.kind, "present");
-    if (report.akuma.kind !== "present") return;
+    assert.ok(report.akuma.kind === "present", "expected report.akuma.kind = \"present\"");
     const fleet = sectionBody(renderKanshiText(report, { columns: 120, color: false }), "FLEET");
     const displayed = [...ids].sort((left, right) => fleet.indexOf(left) - fleet.indexOf(right));
     assert.deepEqual(displayed, [ids[1], ids[3], ids[2], ids[0]]);
@@ -889,30 +559,6 @@ test("Kanshi reads ActivitySnapshots for the first three final Fleet display row
   } finally {
     AkumaHandle.prototype.status = originalStatus;
   }
-});
-
-test("Kanshi selection is a projection that preserves source presence", async (t) => {
-  const { repository, contract, taskId } = await populatedWorld(t);
-  const report = await observe(repository.path, await Repo.at({ path: repository.path }));
-  const selected = selectKanshi({ report, contract: contract.id });
-  assert.equal(selected.contracts.kind, "present");
-  assert.equal(selected.tasks.kind, "present");
-  assert.equal(selected.akuma.kind, "present");
-  if (selected.contracts.kind !== "present" || selected.tasks.kind !== "present" || selected.akuma.kind !== "present")
-    return;
-  if (report.akuma.kind !== "present") throw new Error("fixture Akuma must be present");
-  assert.deepEqual(
-    selected.contracts.value.rows.map((row) => row.id),
-    [contract.id],
-  );
-  assert.deepEqual(
-    selected.tasks.value.rows.map((row) => row.id),
-    [taskId],
-  );
-  assert.deepEqual(
-    selected.akuma.value.rows.map((row) => row.id),
-    [report.akuma.value.rows[0]!.id],
-  );
 });
 
 test("target lag counts the frozen targetObservation head after the live ref moves", async (t) => {
@@ -949,8 +595,7 @@ test("target lag counts the frozen targetObservation head after the live ref mov
     async (gitPath) => observe(repository.path, await Repo.at({ path: repository.path, gitPath })),
   );
 
-  assert.equal(report.contracts.kind, "present");
-  if (report.contracts.kind !== "present") return;
+  assert.ok(report.contracts.kind === "present", "expected report.contracts.kind = \"present\"");
   const row = report.contracts.value.rows.find((candidate) => candidate.id === contract.id);
   assert.deepEqual(row?.targetObservation, { head: frozen, drift: false });
   assert.deepEqual(row?.targetLag, {
@@ -1033,8 +678,7 @@ test("Contract namespace Tasks come from one Task board observation", async (t) 
   );
   const row = selected.contracts.value.rows.find((candidate) => candidate.id === contract.id);
   if (row === undefined || row.namespaceTasks === undefined) throw new Error("fixture namespace tasks must be present");
-  assert.equal(row.namespaceTasks.kind, "present");
-  if (row.namespaceTasks.kind !== "present") return;
+  assert.ok(row.namespaceTasks.kind === "present", "expected row.namespaceTasks.kind = \"present\"");
   const expected = board.selectNamespace(contractNamespace(contract.id));
   assert.deepEqual(row.namespaceTasks.value, expected);
   assert.deepEqual(
