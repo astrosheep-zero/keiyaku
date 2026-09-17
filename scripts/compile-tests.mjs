@@ -1,10 +1,12 @@
 import { copyFileSync, globSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { stripTypeScriptTypes } from "node:module";
 import { dirname, resolve } from "node:path";
-import ts from "typescript";
+import { pathToFileURL } from "node:url";
 
 rmSync(".test-build", { recursive: true, force: true });
-// The typecheck command owns semantic checking. Like tsx's focused mode, this
-// pass only transpiles, once per invocation rather than in every isolated worker.
+// Semantic checking belongs to test:typecheck. Native stripping preserves source
+// positions without running the TypeScript emitter on every erasable test module.
+// Keep the existing emitter for parameter properties and other non-erasable syntax.
 for (const file of globSync([
   "tests/**/*.ts",
   "tests/**/*.js",
@@ -20,19 +22,30 @@ for (const file of globSync([
     copyFileSync(file, output);
     continue;
   }
-  const result = ts.transpileModule(readFileSync(file, "utf8"), {
+  const source = readFileSync(file, "utf8");
+  try {
+    writeFileSync(output, stripTypeScriptTypes(source, { sourceUrl: pathToFileURL(resolve(file)).href }));
+    continue;
+  } catch (error) {
+    if (!(error instanceof Error) || !("code" in error) || error.code !== "ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX") {
+      throw new Error(`Cannot compile ${file}`, { cause: error });
+    }
+  }
+  const typescript = (await import("typescript")).default;
+  const result = typescript.transpileModule(source, {
     fileName: file,
     reportDiagnostics: true,
     compilerOptions: {
-      target: ts.ScriptTarget.ES2023,
-      module: ts.ModuleKind.ESNext,
+      target: typescript.ScriptTarget.ES2023,
+      module: typescript.ModuleKind.ESNext,
       sourceMap: true,
       sourceRoot: dirname(resolve(file)),
     },
   });
-  const errors = result.diagnostics?.filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error) ?? [];
+  const errors =
+    result.diagnostics?.filter((diagnostic) => diagnostic.category === typescript.DiagnosticCategory.Error) ?? [];
   if (errors.length > 0)
-    throw new Error(errors.map((error) => ts.flattenDiagnosticMessageText(error.messageText, "\n")).join("\n"));
+    throw new Error(errors.map((error) => typescript.flattenDiagnosticMessageText(error.messageText, "\n")).join("\n"));
   writeFileSync(output, result.outputText);
   if (result.sourceMapText !== undefined) writeFileSync(output + ".map", result.sourceMapText);
 }

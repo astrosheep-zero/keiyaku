@@ -460,11 +460,11 @@ test("test entry reruns checks and retires bytecode after success and failure", 
   assert.notEqual(caches[0], caches[1]);
 });
 
-test("release test entry completes build before parallel preparation and stops after build failure", (context) => {
+test("release entry completes build and compile before overlapping and draining all remaining checks", (context) => {
   const directory = mkdtempSync(join(tmpdir(), "keiyaku-release-entry-"));
   context.after(() => rmSync(directory, { recursive: true, force: true }));
-  const preparation = ["format:check", "test:architecture", "test:maintainability", "test:compile"];
-  const phases = ["build", ...preparation, "test:reachability"];
+  const checks = ["format:check", "test:architecture", "test:maintainability", "test:reachability"];
+  const phases = ["build", "test:compile", ...checks];
   writeFileSync(
     join(directory, "package.json"),
     JSON.stringify({ type: "module", scripts: Object.fromEntries(phases.map((phase) => [phase, "node phase.mjs"])) }),
@@ -473,33 +473,51 @@ test("release test entry completes build before parallel preparation and stops a
   writeFileSync(
     join(directory, "phase.mjs"),
     [
-      'import { appendFileSync } from "node:fs";',
+      'import { appendFileSync, existsSync } from "node:fs";',
+      'import { setTimeout } from "node:timers/promises";',
       "const phase = process.env.npm_lifecycle_event;",
       'appendFileSync("phases.jsonl", phase + "\\n");',
+      'if (phase === "test:maintainability") {',
+      "  const deadline = Date.now() + 5000;",
+      '  while (!existsSync("tests-started")) {',
+      '    if (Date.now() >= deadline) throw new Error("behavioral tests were serialized behind static checks");',
+      "    await setTimeout(5);",
+      "  }",
+      "}",
+      'appendFileSync("phases.jsonl", "end:" + phase + "\\n");',
       "if (phase === process.env.FAIL_PHASE) process.exitCode = 7;",
     ].join("\n"),
   );
   writeFileSync(
     join(directory, "scripts", "run-tests.mjs"),
-    'import { appendFileSync } from "node:fs"; appendFileSync("phases.jsonl", "tests\\n");',
+    [
+      'import { appendFileSync, writeFileSync } from "node:fs";',
+      'import { setTimeout } from "node:timers/promises";',
+      'appendFileSync("phases.jsonl", "tests\\n");',
+      'writeFileSync("tests-started", "started");',
+      "await setTimeout(100);",
+      'appendFileSync("phases.jsonl", "end:tests\\n");',
+    ].join("\n"),
   );
-
-  for (const fail of ["", "build"]) {
+  for (const fail of ["", "build", "test:compile", "test:maintainability"]) {
     writeFileSync(join(directory, "phases.jsonl"), "");
+    rmSync(join(directory, "tests-started"), { force: true });
     const result = spawnSync(process.execPath, [resolve(root, "scripts/test-entry.mjs"), "--release"], {
       cwd: directory,
       encoding: "utf8",
       env: { ...process.env, NODE_DISABLE_COMPILE_CACHE: "1", FAIL_PHASE: fail },
     });
-    assert.equal(result.status, fail === "build" ? 7 : 0, result.stdout + result.stderr);
+    assert.equal(result.status, fail === "" ? 0 : 7, result.stdout + result.stderr);
     const records = readFileSync(join(directory, "phases.jsonl"), "utf8").trim().split("\n");
-    assert.equal(records[0], "build");
-    if (fail === "build") {
-      assert.deepEqual(records, ["build"]);
-    } else {
-      assert.deepEqual(records.slice(1, 5).sort(), [...preparation].sort());
-      assert.deepEqual(records.slice(5).sort(), ["test:reachability", "tests"]);
-    }
+    const expected =
+      fail === "build" ? ["build"] : fail === "test:compile" ? ["build", "test:compile"] : [...phases, "tests"];
+    assert.deepEqual(records.slice(0, 2), ["build", "end:build"]);
+    if (fail !== "build") assert.deepEqual(records.slice(2, 4), ["test:compile", "end:test:compile"]);
+    assert.deepEqual(records.filter((phase) => !phase.startsWith("end:")).sort(), [...expected].sort());
+    assert.deepEqual(
+      records.filter((phase) => phase.startsWith("end:")).sort(),
+      expected.map((phase) => "end:" + phase).sort(),
+    );
   }
 });
 
@@ -532,4 +550,46 @@ test("explicit test selections reject missing files and unmatched patterns befor
   );
   assert.equal(matched.status, 0, matched.stdout + matched.stderr);
   assert.equal(readFileSync(marker, "utf8"), "ran");
+});
+
+test("test compilation preserves native source locations, transformed syntax and syntax failures", (context) => {
+  const directory = mkdtempSync(join(tmpdir(), "keiyaku-test-compile-"));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  mkdirSync(join(directory, "tests"));
+  mkdirSync(join(directory, ".test-build"));
+  writeFileSync(join(directory, "package.json"), '{"type":"module"}');
+  writeFileSync(join(directory, ".test-build", "stale.js"), "stale");
+  const native = join(directory, "tests", "native.ts");
+  writeFileSync(native, "const value: number = 41;\nthrow new Error(`native oracle ${value}`);\n");
+  writeFileSync(
+    join(directory, "tests", "transformed.ts"),
+    [
+      'import assert from "node:assert/strict";',
+      "class Holder { constructor(readonly value: number) {} }",
+      "assert.equal(new Holder(42).value, 42);",
+    ].join("\n"),
+  );
+  const compile = () =>
+    spawnSync(process.execPath, [resolve(root, "scripts/compile-tests.mjs")], {
+      cwd: directory,
+      encoding: "utf8",
+    });
+  const result = compile();
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(existsSync(join(directory, ".test-build", "stale.js")), false);
+  const execute = (name: string) =>
+    spawnSync(process.execPath, ["--enable-source-maps", join(directory, ".test-build", "tests", name)], {
+      cwd: directory,
+      encoding: "utf8",
+    });
+  const failed = execute("native.js");
+  assert.notEqual(failed.status, 0);
+  assert.match(failed.stderr, /native oracle 41/u);
+  assert.ok(failed.stderr.includes("native.ts:2"), failed.stderr);
+  const transformed = execute("transformed.js");
+  assert.equal(transformed.status, 0, transformed.stdout + transformed.stderr);
+  writeFileSync(native, "const broken: = ;");
+  const invalid = compile();
+  assert.notEqual(invalid.status, 0);
+  assert.match(invalid.stderr, /native\.ts/u);
 });

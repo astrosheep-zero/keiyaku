@@ -45,17 +45,11 @@ if (explicitMode && supplied.length > 1) {
       : mkdtempSync(join(tmpdir(), "keiyaku-test-bytecode-"));
   const environment = cache === undefined ? process.env : { ...process.env, NODE_COMPILE_CACHE: cache };
   try {
-    // These checks read source independently. Await every child before running tests
-    // or returning a failure, so an unsuccessful gate never leaves work detached.
-    // Build is the heaviest release preparation step. Running it beside four
-    // other CPU-heavy Node/TypeScript checks made the build several times slower
-    // on small CI runners. Give it the machine first, then overlap only the
-    // independent static/transpile checks.
+    // Build and transpilation own the artifacts tests consume. Give these stages
+    // the machine first, then overlap source-only checks with the behavioral sweep.
+    // Every check still runs on every invocation; await every child even on failure.
     const buildStatus = mode === "release" ? await run("npm", ["run", "build"], "build", environment) : 0;
-    const preparation =
-      mode === "dev"
-        ? ["test:typecheck", "test:architecture"]
-        : ["format:check", "test:architecture", "test:maintainability", "test:compile"];
+    const preparation = mode === "dev" ? ["test:typecheck", "test:architecture"] : ["test:compile"];
     const statuses =
       buildStatus === 0
         ? await Promise.all(preparation.map((name) => run("npm", ["run", name], name, environment)))
@@ -63,7 +57,10 @@ if (explicitMode && supplied.length > 1) {
     process.exitCode = buildStatus || statuses.find((status) => status !== 0) || 0;
     if (process.exitCode === 0) {
       // Reachability may inspect generated package exports, so it follows build.
-      const checks = mode === "dev" ? ["test:local"] : ["test:reachability"];
+      const checks =
+        mode === "dev"
+          ? ["test:local"]
+          : ["format:check", "test:architecture", "test:maintainability", "test:reachability"];
       const running = checks.map((name) => run("npm", ["run", name], name, environment));
       if (mode === "release")
         running.push(
