@@ -3,6 +3,7 @@ export type {
   AkumaBirthInput,
   AkumaHistoryOptions,
   AkumaIdleOptions,
+  AkumaIdleResult,
   AkumaSignalOptions,
   AkumaTellOptions,
 } from "./akuma-instance.js";

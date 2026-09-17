@@ -11,6 +11,7 @@ import {
   AkumaNotBornError,
   AkumaProviderError,
   Schema,
+  type AkumaIdleResult,
 } from "../src/akuma/index.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { AkumaHandle } from "../src/akuma/akuma-handle.js";
@@ -425,6 +426,154 @@ test("schema tell on a running Body is busy unless interrupt is set", async () =
     release?.();
     await body?.catch(() => undefined);
     await successorBody?.catch(() => undefined);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("idle resolves the settling life with the final status", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-idle-"));
+  const bodies: Promise<unknown>[] = [];
+  const fixtures = new Map<string, Readonly<{ adapter: ProviderAdapter; now: string }>>();
+  const restoreTellRuntime = installTellRuntime(fixtureRuntime(bodies, fixtures));
+  try {
+    const { allocated, akuma } = await bornWorld(root, "a1000008");
+    fixtures.set(allocated.paths.directory, { adapter: answering("done"), now: "2026-08-10T00:00:01.000Z" });
+    await akuma.tell("hello");
+    await settleFixtureBodies(bodies);
+    const settled: AkumaIdleResult = await akuma.idle();
+    assert.equal(settled.kind, "idle");
+    if (settled.kind !== "idle") return;
+    assert.equal(settled.reason, "asleep");
+    assert.equal(settled.status.life, "asleep");
+    assert.equal(settled.status.id, allocated.id);
+  } finally {
+    restoreTellRuntime();
+    await settleFixtureBodies(bodies);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("idle after kill names the killed life", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-idle-killed-"));
+  let release: (() => void) | undefined;
+  let body: Promise<unknown> | undefined;
+  try {
+    const { allocated, akuma } = await bornWorld(root, "a1000011");
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const hanging: ProviderAdapter = {
+      admitOptions(options) {
+        return { kind: "admitted", options };
+      },
+      start(input) {
+        return fixtureAttempt(input, async () => ({
+          admission: { fence: "api-hang" },
+          events: {
+            async *[Symbol.asyncIterator]() {
+              yield { type: "session" as const, coordinate: { sessionId: "api-idle-kill" } };
+              await held;
+            },
+          },
+          completion: held.then(() => ({ kind: "answered" as const, answer: "late", historyId: "hang" })),
+          async abort() {
+            release?.();
+          },
+        }));
+      },
+    };
+    await recordTell(allocated.paths, {
+      kind: "tell",
+      id: "seed",
+      body: "start",
+      recordedAt: "2026-08-10T00:00:01.000Z",
+    });
+    body = driveAkumaBody({ paths: allocated.paths }, hanging, { now: () => "2026-08-10T00:00:02.000Z" });
+    while ((await readTell(allocated.paths, "seed"))?.binding === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.equal(await akuma.kill(), "killed");
+    await body;
+    body = undefined;
+    const killed = await akuma.idle();
+    assert.equal(killed.kind, "idle");
+    if (killed.kind !== "idle") return;
+    assert.equal(killed.reason, "killed");
+    assert.equal(killed.status.life, "killed");
+    assert.equal(killed.status.id, allocated.id);
+  } finally {
+    release?.();
+    await body?.catch(() => undefined);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("idle timeout names the outstanding conditions with the final status", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-idle-timeout-"));
+  let release: (() => void) | undefined;
+  let body: Promise<unknown> | undefined;
+  try {
+    const { allocated, akuma } = await bornWorld(root, "a1000009");
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const hanging: ProviderAdapter = {
+      admitOptions(options) {
+        return { kind: "admitted", options };
+      },
+      start(input) {
+        return fixtureAttempt(input, async () => ({
+          admission: { fence: "api-hang" },
+          events: {
+            async *[Symbol.asyncIterator]() {
+              yield { type: "session" as const, coordinate: { sessionId: "api-idle-hang" } };
+              await held;
+            },
+          },
+          completion: held.then(() => ({ kind: "answered" as const, answer: "late", historyId: "hang" })),
+          async abort() {},
+        }));
+      },
+    };
+    await recordTell(allocated.paths, {
+      kind: "tell",
+      id: "seed",
+      body: "start",
+      recordedAt: "2026-08-10T00:00:01.000Z",
+    });
+    body = driveAkumaBody({ paths: allocated.paths }, hanging, { now: () => "2026-08-10T00:00:02.000Z" });
+    while ((await readTell(allocated.paths, "seed"))?.binding === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    const timed = await akuma.idle({ timeoutMs: 100 });
+    assert.equal(timed.kind, "timeout");
+    if (timed.kind !== "timeout") return;
+    assert.deepEqual(timed.reason, { running: true, pendingTell: false });
+    assert.equal(timed.status.life, "running");
+    assert.equal(timed.status.id, allocated.id);
+  } finally {
+    release?.();
+    await body?.catch(() => undefined);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("idle timeout with a pending tell reports pendingTell", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-idle-pending-"));
+  try {
+    const { allocated, akuma } = await bornWorld(root, "a1000010");
+    await recordTell(allocated.paths, {
+      kind: "tell",
+      id: "queued",
+      body: "later",
+      recordedAt: "2026-08-10T00:00:01.000Z",
+    });
+    const timed = await akuma.idle({ timeoutMs: 100 });
+    assert.equal(timed.kind, "timeout");
+    if (timed.kind !== "timeout") return;
+    assert.deepEqual(timed.reason, { running: false, pendingTell: true });
+    assert.equal(timed.status.id, allocated.id);
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });

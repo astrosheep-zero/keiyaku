@@ -12,6 +12,7 @@ export type {
   AkumaBirthInput,
   AkumaHistoryOptions,
   AkumaIdleOptions,
+  AkumaIdleResult,
   AkumaSignalOptions,
   AkumaTellOptions,
   InterruptReceipt,

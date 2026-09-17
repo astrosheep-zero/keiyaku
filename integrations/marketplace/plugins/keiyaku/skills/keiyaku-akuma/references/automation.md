@@ -200,6 +200,13 @@ pairwise comparisons, experiment queues, or adaptive sampling instead.
 - `idle({ timeoutMs })` stops waiting at its timeout, not the worker. A
   `Promise.race` timeout also does not cancel a Tell. Use explicit lifecycle
   operations when you intend to interrupt or stop work.
+- `idle()` resolves an `AkumaIdleResult` saying why it returned, so there is
+  no need to re-poll `status()` to distinguish the outcomes. A completed wait
+  resolves `{ kind: "idle", status, reason }` with `reason` naming the settled
+  life (`"asleep"`, `"killed"`, `"hung"`, `"untidy"`, or `"stranded"`); a
+  passed deadline resolves `{ kind: "timeout", status, reason }` with `reason`
+  naming what was still outstanding as `{ running, pendingTell }`. Both arms
+  carry the final observed `status`.
 - Keep input ids, AkuIds, terminal results, failures, and completed stages in
   caller-owned artifacts if the run must survive its orchestrator process.
   On return, `Akuma.select(root, savedId)` reconnects synchronously; `status()`

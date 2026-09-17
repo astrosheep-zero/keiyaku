@@ -23,6 +23,13 @@ import { abortable } from "./abort.js";
 const HISTORY_LIMIT = 12;
 
 export type AkumaIdleOptions = Readonly<{ timeoutMs?: number }>;
+export type AkumaIdleResult =
+  | Readonly<{ kind: "idle"; status: AkumaStatus; reason: Exclude<AkumaStatus["life"], "running"> }>
+  | Readonly<{
+      kind: "timeout";
+      status: AkumaStatus;
+      reason: Readonly<{ running: boolean; pendingTell: boolean }>;
+    }>;
 export type AkumaHistoryOptions = Readonly<{ before?: number; since?: number; limit?: number }>;
 export type AkumaSignalOptions = Readonly<{ signal?: AbortSignal }>;
 
@@ -51,6 +58,18 @@ function signalOption(value: unknown): AbortSignal | undefined {
 
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function pendingTellOf(status: AkumaStatus): boolean {
+  return status.timeline.entries.some(
+    (entry) => entry.kind === "row" && entry.row.kind === "tell" && entry.row.state === "pending",
+  );
+}
+
+function idleResult(status: AkumaStatus): AkumaIdleResult {
+  const pendingTell = pendingTellOf(status);
+  if (status.life !== "running" && !pendingTell) return { kind: "idle", status, reason: status.life };
+  return { kind: "timeout", status, reason: { running: status.life === "running", pendingTell } };
 }
 
 function recordedTell(result: TellResult): TellAdmission {
@@ -237,7 +256,7 @@ export class Akuma {
     return await abortable(operation, signal ?? new AbortController().signal);
   }
 
-  async idle(options: AkumaIdleOptions = {}): Promise<void> {
+  async idle(options: AkumaIdleOptions = {}): Promise<AkumaIdleResult> {
     if (typeof options !== "object" || options === null || Array.isArray(options)) {
       throw new TypeError("Akuma idle options must be an object");
     }
@@ -249,7 +268,9 @@ export class Akuma {
     const deadline = options.timeoutMs === undefined ? undefined : performance.now() + options.timeoutMs;
     for (;;) {
       const observed = await bornStatus(this.paths, this.id, { aperture: "monitoring" });
-      if (defaultWaitComplete(observed.status) || (deadline !== undefined && performance.now() >= deadline)) return;
+      if (defaultWaitComplete(observed.status) || (deadline !== undefined && performance.now() >= deadline)) {
+        return idleResult(observed.status);
+      }
       await wait(deadline === undefined ? POLL_MS : Math.min(POLL_MS, Math.max(0, deadline - performance.now())));
     }
   }

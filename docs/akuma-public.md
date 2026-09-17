@@ -60,8 +60,11 @@ of a new Tell and exposes its settlement receipt; kill exposes its kill evidence
 Interrupt control has no local elapsed-time failure boundary: it waits for leash
 custody or durable Body settlement, unless the caller's signal stops waiting.
 Wait observes status until its Akuma-owned default completion judgment or a
-caller override; timeout returns a current observation rather than manufacturing
-a timeout lifecycle arm. Interrupt and kill expose only honest settlement or
+caller deadline, and the idle result says why it returned: a completed wait
+names the settled non-running life, while a passed deadline names the
+conditions still outstanding — a running life, a pending tell, or both.
+Either arm carries the final observed status; a deadline outcome remains a
+current observation rather than manufacturing a timeout lifecycle arm. Interrupt and kill expose only honest settlement or
 unavailability evidence. Hung, untidy, and resume-unsupported state preserve
 their durable cause and available facts; the surface does not prescribe the
 flagship's next action.
