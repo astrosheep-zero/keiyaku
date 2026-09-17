@@ -22,7 +22,7 @@ function packageProvenance(specifier: string): string {
   return `${manifest.name}@${manifest.version} (${entry})`;
 }
 
-function nativePiSdk(): { sdk: PiSdk; options: () => Record<string, unknown> | undefined } {
+async function nativePiSdk(): Promise<{ sdk: PiSdk; options: () => Record<string, unknown> | undefined }> {
   let captured: Record<string, unknown> | undefined;
   const manager = {
     getLeafId: () => null,
@@ -40,6 +40,7 @@ function nativePiSdk(): { sdk: PiSdk; options: () => Record<string, unknown> | u
   return {
     options: () => captured,
     sdk: {
+      createBashToolDefinition: (await import("@earendil-works/pi-coding-agent")).createBashToolDefinition,
       createAgentSession: async (options) => {
         captured = options as unknown as Record<string, unknown>;
         return { session } as never;
@@ -63,7 +64,7 @@ async function withNativeRequestTool<T>(
   input: Readonly<{ root: string; requests: string }>,
   body: (tool: NativeRequestTool) => Promise<T>,
 ): Promise<T> {
-  const fake = nativePiSdk();
+  const fake = await nativePiSdk();
   const provider = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk);
   const attempt = provider.start({
     body: "work",
@@ -93,7 +94,6 @@ function nativeSessionContext(sessionId: string, sessionFile = `/sessions/${sess
     sessionManager: { getSessionId: () => sessionId, getSessionFile: () => sessionFile },
   } as never;
 }
-
 
 test("the Pi request channel preserves the native session identity instead of an ancestor value", async (t) => {
   t.diagnostic(`Pi runtime: ${packageProvenance("@earendil-works/pi-coding-agent")}`);

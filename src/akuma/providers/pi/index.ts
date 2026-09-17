@@ -1,5 +1,6 @@
 import type {
   createAgentSession,
+  createBashToolDefinition,
   DefaultResourceLoader,
   getAgentDir,
   ModelRuntime,
@@ -24,6 +25,7 @@ import { piTerminalFailure, translatePiEvent, type PiEventState } from "./events
 
 export type PiSdk = Readonly<{
   createAgentSession(options?: CreateAgentSessionOptions): ReturnType<typeof createAgentSession>;
+  createBashToolDefinition: typeof createBashToolDefinition;
   DefaultResourceLoader: typeof DefaultResourceLoader;
   getAgentDir: typeof getAgentDir;
   ModelRuntime: typeof ModelRuntime;
@@ -88,7 +90,7 @@ async function piCreateOptions(sdk: PiSdk, input: PiDriveInput): Promise<CreateA
     input.requests === undefined || input.options.readonly === true
       ? undefined
       : [
-          (await import("@earendil-works/pi-coding-agent")).createBashToolDefinition(input.cwd, {
+          sdk.createBashToolDefinition(input.cwd, {
             spawnHook: (context) => ({
               ...context,
               env: akumaExecutionEnvironment(context.env, {}, input.requests.dir, ["PI_SESSION_ID", "PI_SESSION_FILE"]),
@@ -282,6 +284,7 @@ async function loadPiSdk(): Promise<PiSdk> {
   const sdk = await import("@earendil-works/pi-coding-agent");
   return {
     createAgentSession: sdk.createAgentSession,
+    createBashToolDefinition: sdk.createBashToolDefinition,
     DefaultResourceLoader: sdk.DefaultResourceLoader,
     getAgentDir: sdk.getAgentDir,
     ModelRuntime: sdk.ModelRuntime,
