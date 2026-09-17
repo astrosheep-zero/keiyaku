@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { constants, copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -77,6 +77,17 @@ function fixtureRoot(t: TestContext, prefix: string): WorldRoot {
   const root = realpathSync(mkdtempSync(join(tmpdir(), prefix))) as WorldRoot;
   t.after(() => rmSync(root, { recursive: true, force: true }));
   return root;
+}
+
+// The template is a closed, unborn database pair: no Soul or identity-bound facts.
+// Copy bytes, never hard-link them, so every catalog member keeps independent custody.
+async function initializeUnbornFixture(
+  paths: Parameters<typeof initializeHeart>[0],
+  template: Parameters<typeof initializeHeart>[0] | undefined,
+): Promise<void> {
+  if (template === undefined) return initializeHeart(paths);
+  copyFileSync(template.heart, paths.heart, constants.COPYFILE_EXCL);
+  copyFileSync(template.leash, paths.leash, constants.COPYFILE_EXCL);
 }
 
 function catalogOf<K extends Catalog["kind"]>(catalog: Catalog, kind: K): Extract<Catalog, { kind: K }> {
@@ -562,13 +573,15 @@ test("recent Akuma page prunes old custody bounds without changing Heart members
   const root = fixtureRoot(t, "keiyaku-facade-akuma-page-scale-");
   const old = new Date("2000-01-01T00:00:00.000Z");
   const originalPrepare = DatabaseSync.prototype.prepare;
+  let template: Parameters<typeof initializeHeart>[0] | undefined;
   const oldCount = 490;
   try {
     const oldIds = [];
     for (let index = 0; index < oldCount; index += 1) {
       const suffix = index.toString(16).padStart(8, "0");
       const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "worker", draw: () => suffix });
-      await initializeHeart(allocated.paths);
+      await initializeUnbornFixture(allocated.paths, template);
+      template ??= allocated.paths;
       oldIds.push(allocated.id);
       utimesSync(allocated.paths.heart, old, old);
       try {
@@ -640,12 +653,14 @@ test("recent Akuma page prunes old custody bounds without changing Heart members
 test("all-null Akuma fallback retains exact membership through the fixed Heart read pool", async (t) => {
   const root = fixtureRoot(t, "keiyaku-facade-akuma-page-null-");
   const originalPrepare = DatabaseSync.prototype.prepare;
+  let template: Parameters<typeof initializeHeart>[0] | undefined;
   try {
     const allocated = [];
     for (let index = 0; index < PAGE_POOL_SIZE * 2 + 1; index += 1) {
       const suffix = index.toString(16).padStart(8, "0");
       const value = await allocateAkumaDirectory({ worldRoot: root, archetype: "worker", draw: () => suffix });
-      await initializeHeart(value.paths);
+      await initializeUnbornFixture(value.paths, template);
+      template ??= value.paths;
       allocated.push(value);
     }
 
