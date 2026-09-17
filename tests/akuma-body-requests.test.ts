@@ -270,9 +270,73 @@ async function openProgressPump(
   });
 }
 
-async function waitFor(condition: () => boolean): Promise<void> {
-  while (!condition()) await new Promise((resolve) => setTimeout(resolve, 5));
+/** Generous fixture budget: real git and verification subprocesses can be slow under full-suite load. */
+const WAIT_BUDGET_MS = 60_000;
+const WAIT_INTERVAL_MS = 5;
+
+type WaitForOptions = Readonly<{
+  /** Bounded override for focused coverage of the wait itself; call sites keep the generous default. */
+  budgetMs?: number;
+  /**
+   * Names a terminal state of the request or pump behind the awaited condition. A non-null value means
+   * the awaited event can no longer arrive, so the wait ends naming that state instead of spinning.
+   */
+  terminalState?: () => string | null | Promise<string | null>;
+}>;
+
+async function waitFor(
+  description: string,
+  condition: () => boolean | Promise<boolean>,
+  options: WaitForOptions = {},
+): Promise<void> {
+  const budgetMs = options.budgetMs ?? WAIT_BUDGET_MS;
+  const startedAt = Date.now();
+  for (;;) {
+    if (await condition()) return;
+    const terminalState = await options.terminalState?.();
+    const elapsedMs = Date.now() - startedAt;
+    if (terminalState !== undefined && terminalState !== null) {
+      throw new Error(
+        `fixture wait for ${description} ended after ${elapsedMs}ms: request reached terminal state ${terminalState}`,
+      );
+    }
+    if (elapsedMs >= budgetMs) {
+      throw new Error(`fixture wait for ${description} expired after ${elapsedMs}ms (budget ${budgetMs}ms)`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, WAIT_INTERVAL_MS));
+  }
 }
+
+/**
+ * Reports how a request or pump settled so a bounded wait can end on a dead outcome instead of
+ * spinning to its budget.
+ */
+function settlementProbe<T>(settlement: Promise<T>, describe: (settled: T) => string): () => string | null {
+  let terminalState: string | null = null;
+  void settlement.then(
+    (settled) => {
+      terminalState = describe(settled);
+    },
+    (error: unknown) => {
+      terminalState = `failure ${error instanceof Error ? error.message : String(error)}`;
+    },
+  );
+  return () => terminalState;
+}
+
+test("a never-true fixture wait fails within its budget naming what it awaited", async () => {
+  await assert.rejects(
+    waitFor("the admitted progress event", () => false, { budgetMs: 25 }),
+    /fixture wait for the admitted progress event expired after \d+ms \(budget 25ms\)/u,
+  );
+});
+
+test("a fixture wait ends on the terminal state of the request behind it", async () => {
+  await assert.rejects(
+    waitFor("the served request state", async () => false, { terminalState: () => "voided" }),
+    /fixture wait for the served request state ended after \d+ms: request reached terminal state voided/u,
+  );
+});
 
 test("forwarded ordinary and schema Tells retain the submitting initiator at the service port", async () => {
   const received: Array<string | undefined> = [];
@@ -493,7 +557,9 @@ test("request transport exposes gated opaque progress before its final receipt",
       onProgress: (value) => progress.push(value),
     });
     await executionStarted;
-    await waitFor(() => progress.length === 1);
+    await waitFor("the gated progress event before service completion", () => progress.length === 1, {
+      terminalState: settlementProbe(request, (settled) => `outcome ${settled.kind}`),
+    });
     assert.deepEqual(progress, [{ phase: "gated" }]);
     release();
     const result = await request;
@@ -605,7 +671,9 @@ test("request progress consumers receive the sequence-derived retained-window ga
       onProgressGap: (count) => gaps.push(count),
     });
     await published;
-    await waitFor(() => gaps.length === 1);
+    await waitFor("the retained-window progress gap", () => gaps.length === 1, {
+      terminalState: settlementProbe(request, (settled) => `outcome ${settled.kind}`),
+    });
     assert.deepEqual(gaps, [3]);
     release();
     assert.equal((await request).kind, "returned");
@@ -808,8 +876,17 @@ test("cancellation after publication is unknown and same-id retry reuses Heart s
     );
 
     release();
-    while ((await readRequest(parent.paths, id))?.state !== "served")
-      await new Promise((resolve) => setTimeout(resolve, 5));
+    const requestState = async () => (await readRequest(parent.paths, id))?.state ?? null;
+    await waitFor(
+      "the served request state for the released executor",
+      async () => (await requestState()) === "served",
+      {
+        terminalState: async () => {
+          const state = await requestState();
+          return state === "refused" || state === "unproven" || state === "voided" ? state : null;
+        },
+      },
+    );
     assert.deepEqual(
       await requestBodyWait({
         directory: pump.directory,
@@ -2183,7 +2260,14 @@ test("a parent-served Contract forwards progress and caller cancellation to a re
   });
   try {
     await started;
-    await waitFor(() => progress.some((event) => typeof event === "object" && event !== null && "kind" in event && event.kind === "admitted"));
+    await waitFor(
+      "the admitted progress event from the forwarded review",
+      () =>
+        progress.some(
+          (event) => typeof event === "object" && event !== null && "kind" in event && event.kind === "admitted",
+        ),
+      { terminalState: settlementProbe(pending, (settled) => `outcome ${settled.kind}`) },
+    );
     controller.abort(new Error("caller cancelled review"));
     const result = await pending;
     assert.equal(result.kind, "accepted");
@@ -2255,7 +2339,7 @@ test("a parent-served Verification cancellation retains its bounded forwarded ou
     },
   });
   try {
-    await waitFor(() =>
+    const sawForwardedTail = () =>
       progress.some((event) => {
         if (
           event === null ||
@@ -2275,8 +2359,10 @@ test("a parent-served Verification cancellation retains its bounded forwarded ou
           typeof observation.text === "string" &&
           observation.text.includes("forwarded-tail")
         );
-      }),
-    );
+      });
+    await waitFor("the forwarded-tail Verification output from the forwarded delivery", sawForwardedTail, {
+      terminalState: settlementProbe(pending, (settled) => `outcome ${settled.kind}`),
+    });
     controller.abort(new Error("caller cancelled after Verification output"));
     const result = await pending;
     assert.equal(result.kind, "accepted");
