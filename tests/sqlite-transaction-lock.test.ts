@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
-import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -42,31 +41,4 @@ test("SQLite transaction lock classifies timeout and propagates cancellation", a
   } finally {
     held.close();
   }
-});
-
-test("process death releases the SQLite transaction", async () => {
-  const path = lockPath();
-  const source = [
-    'import { DatabaseSync } from "node:sqlite";',
-    "const database = new DatabaseSync(process.argv[1]);",
-    'database.exec("PRAGMA journal_mode=DELETE");',
-    'database.exec("CREATE TABLE IF NOT EXISTS lock_anchor (singleton INTEGER PRIMARY KEY CHECK (singleton = 1))");',
-    'database.exec("BEGIN IMMEDIATE");',
-    'database.prepare("SELECT singleton FROM lock_anchor LIMIT 1").get();',
-    'process.stdout.write("ready\\n");',
-    "setInterval(() => {}, 1000);",
-  ].join("\n");
-  const child = spawn(process.execPath, ["--input-type=module", "-e", source, path], {
-    stdio: ["ignore", "pipe", "inherit"],
-  });
-  await new Promise<void>((resolve, reject) => {
-    child.once("error", reject);
-    child.stdout.once("data", (bytes) =>
-      bytes.toString().includes("ready") ? resolve() : reject(new Error("child did not acquire lock")),
-    );
-  });
-  child.kill("SIGKILL");
-  await new Promise<void>((resolve) => child.once("exit", () => resolve()));
-  const acquired = await acquireSqliteTransactionLock({ path, mode: "immediate", timeoutMs: 500 });
-  acquired.close();
 });

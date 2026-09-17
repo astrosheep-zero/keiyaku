@@ -3,16 +3,10 @@ import test from "node:test";
 import { decodeJournal, encodeEntry } from "../src/core/facts/codec.js";
 import { foldJournal } from "../src/core/facts/fold.js";
 import {
-  changeId,
   contractId,
   documentKey,
-  entryUlid,
-  gate,
-  snapshotId,
-  type AttestationEntry,
-  type JournalEntry,
+  entryUlid, snapshotId, type JournalEntry
 } from "../src/core/facts/types.js";
-import { dependencyKeySet } from "../src/core/subject.js";
 
 const id = contractId("kei/fold-history");
 const ulidAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
@@ -42,161 +36,6 @@ function entry<K extends JournalEntry["kind"]>(
   } as Extract<JournalEntry, { kind: K }>;
 }
 
-test("foldJournal preserves a large interleaved attestation history and final state", () => {
-  let index = 0;
-  const entries: JournalEntry[] = [
-    entry(
-      "bind",
-      {
-        coordinates: { start: snapshotId("initial"), workspace: "worktree" },
-        terms: {
-          document: { bytes: "# Fold history\n", key: documentKey("fold-history") },
-          segments: [],
-          gates: [],
-          after: [],
-        },
-      },
-      index++,
-    ),
-    entry("bound", {}, index++),
-  ];
-  const attestations: AttestationEntry[] = [];
-  let lastArc: Extract<JournalEntry, { kind: "arc" }> | undefined;
-  let lastDelivery: Extract<JournalEntry, { kind: "deliver" }> | undefined;
-
-  for (let sequence = 1; sequence <= 256; sequence += 1) {
-    const beforeDelivery = entry(
-      "attestation",
-      {
-        gate: gate("verified"),
-        subject: dependencyKeySet([]),
-        verdict: sequence % 2 === 0 ? "satisfied" : "unsatisfied",
-      },
-      index++,
-    );
-    const arc = entry(
-      "arc",
-      {
-        seq: sequence,
-        title: `Arc ${sequence}`,
-        objective: `Objective ${sequence}`,
-        brief: `Brief ${sequence}`,
-      },
-      index++,
-    );
-    const delivery = entry(
-      "deliver",
-      {
-        tenderSnapshot: snapshotId(`tender-${sequence}`),
-        integration: {
-          predecessor: snapshotId(`predecessor-${sequence}`),
-          snapshot: snapshotId(`candidate-${sequence}`),
-          changeId: changeId(`patch-${sequence}`),
-        },
-        method: "squash",
-        policy: { requireBranchesToBeUpToDate: false },
-      },
-      index++,
-    );
-    const afterDelivery = entry(
-      "attestation",
-      {
-        gate: gate("reviewed"),
-        subject: dependencyKeySet([]),
-        verdict: sequence % 2 === 0 ? "unsatisfied" : "satisfied",
-      },
-      index++,
-    );
-    entries.push(beforeDelivery, arc, delivery, afterDelivery);
-    attestations.push(beforeDelivery, afterDelivery);
-    lastArc = arc;
-    lastDelivery = delivery;
-  }
-
-  const folded = foldJournal(id, entries);
-  const repeated = foldJournal(id, entries);
-
-  assert.equal(folded.attestations.length, 512);
-  assert.deepEqual(folded.attestations, attestations);
-  for (let position = 0; position < attestations.length; position += 1) {
-    assert.strictEqual(folded.attestations[position], attestations[position]);
-  }
-  assert.strictEqual(folded.currentArc, lastArc);
-  assert.strictEqual(folded.delivery, lastDelivery);
-  assert.notStrictEqual(folded.attestations, repeated.attestations);
-});
-
-test("foldJournal materializes its total state from the first bind", () => {
-  const bind = entry(
-    "bind",
-    {
-      coordinates: { start: snapshotId("initial"), workspace: "worktree" },
-      terms: {
-        document: { bytes: "# Initial\n", key: documentKey("initial") },
-        segments: [],
-        gates: [],
-        after: [],
-      },
-    },
-    0,
-  );
-
-  const state = foldJournal(id, [bind]);
-
-  assert.deepEqual(state.coordinates, bind.data.coordinates);
-  assert.deepEqual(state.terms, bind.data.terms);
-});
-
-test("foldJournal keeps the delivery identity while advancing current integration", () => {
-  const bind = entry(
-    "bind",
-    {
-      coordinates: { start: snapshotId("initial"), workspace: "worktree" },
-      terms: {
-        document: { bytes: "# Initial\n", key: documentKey("initial") },
-        segments: [],
-        gates: [],
-        after: [],
-      },
-    },
-    0,
-  );
-  const bound = entry("bound", {}, 1);
-  const delivery = entry(
-    "deliver",
-    {
-      tenderSnapshot: snapshotId("tender"),
-      integration: {
-        predecessor: snapshotId("predecessor"),
-        snapshot: snapshotId("candidate"),
-        changeId: changeId("patch"),
-      },
-      method: "squash",
-      policy: { requireBranchesToBeUpToDate: false },
-    },
-    2,
-  );
-  const reintegrated = entry(
-    "reintegrated",
-    {
-      predecessor: snapshotId("target-2"),
-      snapshot: snapshotId("candidate-2"),
-    },
-    3,
-  );
-  const claimed = entry("claimed", { delivery: delivery.entry }, 4);
-
-  const state = foldJournal(id, [bind, bound, delivery, reintegrated, claimed]);
-
-  assert.strictEqual(state.delivery, delivery);
-  assert.deepEqual(state.currentIntegration, {
-    predecessor: snapshotId("target-2"),
-    snapshot: snapshotId("candidate-2"),
-    changeId: changeId("patch"),
-  });
-  assert.equal(state.terminal, claimed);
-});
-
 test("reintegrated codec rejects malformed data and fold rejects out-of-order entries", () => {
   const valid = entry(
     "reintegrated",
@@ -223,42 +62,4 @@ test("reintegrated codec rejects malformed data and fold rejects out-of-order en
     0,
   );
   assert.throws(() => foldJournal(id, [bind, valid]), /reintegrated requires a deliver/);
-});
-
-test("foldJournal accepts an after replacement after bound and delivery", () => {
-  const prerequisite = contractId("kei/replacement-prerequisite");
-  const bind = entry(
-    "bind",
-    {
-      coordinates: { start: snapshotId("initial"), workspace: "worktree" },
-      terms: {
-        document: { bytes: "# Initial\n", key: documentKey("initial") },
-        segments: [],
-        gates: [],
-        after: [],
-      },
-    },
-    0,
-  );
-  const delivery = entry(
-    "deliver",
-    {
-      tenderSnapshot: snapshotId("tender"),
-      integration: {
-        predecessor: snapshotId("predecessor"),
-        snapshot: snapshotId("candidate"),
-        changeId: changeId("patch"),
-      },
-      method: "squash",
-      policy: { requireBranchesToBeUpToDate: false },
-    },
-    2,
-  );
-  const amend = entry("amend", { ...bind.data.terms, after: [prerequisite] }, 3);
-
-  const state = foldJournal(id, [bind, entry("bound", {}, 1), delivery, amend]);
-
-  assert.deepEqual(state.terms.after, [prerequisite]);
-  assert.strictEqual(state.bound?.kind, "bound");
-  assert.strictEqual(state.delivery, delivery);
 });

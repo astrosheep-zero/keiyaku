@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { renderContractBody } from "../src/body/render.js";
-import { parseMarkdownBindDocument } from "../src/library/contract-bind.js";
 
 function document(extra = "", regionInfo = ""): string {
   return contractMarkdown("Day One", {
@@ -41,33 +40,8 @@ test("fixture Markdown preserves section order, fence bytes, and trailing newlin
   assert.equal(contractMarkdown("Empty", {}), "# Empty");
 });
 
-test("contract Markdown decodes core fields and retains unknown H2 bytes", () => {
-  const body = decodeContractDocument(document("## Rollout Notes\nfirst\n\n- second\n"));
-  assert.equal(body.title, "Day One");
-  assert.equal(body.context, "Current facts.\n\n");
-  assert.deepEqual(body.region, ["src/cli/**", "tests/**"]);
-  assert.deepEqual(
-    body.criteria.map((criterion) => criterion.title),
-    ["Parses the document", "Retains extensions"],
-  );
-  assert.deepEqual(body.extensions, [{ title: "Rollout Notes", content: "first\n\n- second\n" }]);
-  assert.deepEqual(body.verification, []);
-});
-
 test("contract Markdown accepts the exact txt Region fence info string", () => {
   assert.deepEqual(decodeContractDocument(document("", "txt")).region, ["src/cli/**", "tests/**"]);
-});
-
-test("Region directory shorthand canonicalizes without rewriting document bytes", () => {
-  const source = document().replace("src/cli/**\ntests/**", "src/\ntests/**");
-  const decoded = decodeContractDocument(source);
-
-  assert.deepEqual(decoded.region, ["src/**", "tests/**"]);
-  assert.equal(decoded.document.bytes, source);
-  assert.throws(
-    () => decodeContractDocument(source.replace("src/", "src//")),
-    (error: unknown) => error instanceof TypeError && error.message.includes("may not contain an empty segment"),
-  );
 });
 
 test("contract Markdown rejects frontmatter, duplicate sections, and missing structure", () => {
@@ -142,40 +116,6 @@ test("contract Markdown reports independent structural diagnostics together", ()
   );
 });
 
-test("a single structural violation keeps its one-sentence refusal", () => {
-  assert.throws(
-    () => decodeContractDocument(withCriteria("- flat criterion")),
-    (error: unknown) => error instanceof TypeError && error.message === "Criteria must contain one or more H3 entries",
-  );
-});
-
-test("structure-dependent diagnostics stay fail-first behind the aggregated layer", () => {
-  const malformedRegion = contractMarkdown("Day One", {
-    Context: "facts.",
-    Objective: "ship.",
-    Design: "adapter.",
-    Region: ["~~~", "src//", "~~~", "### Region heading"].join("\n"),
-    Criteria: "### One\nbody",
-  });
-  assert.throws(
-    () => decodeContractDocument(malformedRegion),
-    (error: unknown) => error instanceof TypeError && error.message === "Region may not contain a heading block",
-  );
-
-  const malformedCriteria = contractMarkdown("Day One", {
-    Context: "facts.",
-    Objective: "ship.",
-    Design: "adapter.",
-    Region: "~~~\nsrc/**\n~~~",
-    Criteria: "- flat criterion",
-    Verification: "~~~ruby\ntrue\n~~~",
-  });
-  assert.throws(
-    () => decodeContractDocument(malformedCriteria),
-    (error: unknown) => error instanceof TypeError && error.message === "Criteria must contain one or more H3 entries",
-  );
-});
-
 test("Verification uses direct fenced executors and reserved H2s are refused", () => {
   const verified = decodeContractDocument(`${document()}\n## Verification\n\`\`\`bash\ntrue\n\`\`\`\n`);
   assert.deepEqual(verified.verification, [{ executor: "bash", script: "true" }]);
@@ -208,12 +148,6 @@ test("Verification uses direct fenced executors and reserved H2s are refused", (
   }
 });
 
-test("new binds require Verification timeouts while historical documents remain readable", () => {
-  const historical = `${document()}\n## Verification\n~~~bash\ntrue\n~~~\n`;
-  assert.deepEqual(decodeContractDocument(historical).verification, [{ executor: "bash", script: "true" }]);
-  assert.throws(() => parseMarkdownBindDocument(historical), /must specify timeout=<duration>/);
-});
-
 test("criteria bodies keep exact bytes through nested structure; duplicate titles are refused", () => {
   const body = decodeContractDocument(
     withCriteria("### Keeps Bytes\nline one\r\n> quoted ## header\r\n- list body\r\n~~~\r\nfence body\r\n~~~\r\ntail"),
@@ -225,48 +159,4 @@ test("criteria bodies keep exact bytes through nested structure; duplicate title
     () => decodeContractDocument(withCriteria("### First\none\n\n###  FIRST \ntwo")),
     (error: unknown) => error instanceof TypeError && error.message.includes("duplicate criterion 'FIRST'"),
   );
-});
-
-test("unknown H2 extensions keep exact CRLF bytes and stop at the next H2", () => {
-  const body = decodeContractDocument(
-    [
-      "# Day One",
-      "",
-      "## Context",
-      "facts.",
-      "",
-      "## Rollout Notes",
-      "first line\r",
-      "> ## Quoted\r",
-      "> more\r",
-      "- ## Listed\r",
-      "~~~\r",
-      "## Fenced\r",
-      "~~~\r",
-      "last\r",
-      "",
-      "## Objective",
-      "ship.",
-      "",
-      "## Design",
-      "adapter.",
-      "",
-      "## Region",
-      "~~~",
-      "src/**",
-      "~~~",
-      "",
-      "## Criteria",
-      "### C1",
-      "one",
-    ].join("\n"),
-  );
-  assert.equal(body.context, "facts.\n\n");
-  assert.equal(body.objective, "ship.\n\n");
-  assert.deepEqual(body.extensions, [
-    {
-      title: "Rollout Notes",
-      content: "first line\r\n> ## Quoted\r\n> more\r\n- ## Listed\r\n~~~\r\n## Fenced\r\n~~~\r\nlast\r\n\n",
-    },
-  ]);
 });

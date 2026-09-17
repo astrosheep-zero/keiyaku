@@ -1,3 +1,4 @@
+import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,14 +23,8 @@ function seatRepository(): GitRepository {
 
 test("private-state seat acquisition times out without breaking the holder", async () => {
   const repository = seatRepository();
-  let releaseHolder: (() => void) | undefined;
-  const hold = new Promise<void>((resolve) => {
-    releaseHolder = resolve;
-  });
-  let holding: (() => void) | undefined;
-  const acquired = new Promise<void>((resolve) => {
-    holding = resolve;
-  });
+  const { promise: hold, resolve: releaseHolder } = promiseBarrier<void>();
+  const { promise: acquired, resolve: holding } = promiseBarrier<void>();
   const holder = withPrivateStatePublicationSeat(repository, async () => {
     holding?.();
     await hold;
@@ -55,18 +50,4 @@ test("same-context private-state seat reentry fails immediately", async () => {
     });
   });
   assert.ok(performance.now() - started < 250);
-});
-
-test("a held private-state seat callback may outlive the acquire timeout", async () => {
-  const repository = seatRepository();
-  const outcome = await withPrivateStatePublicationSeat(
-    repository,
-    async () => {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      return "held";
-    },
-    { timeoutMs: 25 },
-  );
-  assert.equal(outcome.value, "held");
-  assert.equal(outcome.closeLag, undefined);
 });

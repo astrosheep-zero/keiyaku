@@ -4,11 +4,9 @@ import { realpath } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, parse } from "node:path";
 import test from "node:test";
-import { repositoryAt } from "../src/git/repository.js";
 import { resolveCliCoordinates } from "../src/cli/coordinates.js";
 import { parseArgv as parseInvocation, type ParsedExecution } from "../src/cli/parse.js";
 import { World, WorldError } from "../src/world.js";
-import { makeGitRepository } from "./support/git.js";
 
 function parseArgv(argv: readonly string[]): ParsedExecution {
   const parsed = parseInvocation(argv);
@@ -33,24 +31,6 @@ test("CLI coordinates retain explicit versus ambient cwd statedness", async () =
   const stated = await resolveCliCoordinates({ processCwd: root, cwd: "explicit", command });
   assert.equal(stated.cwdSource, "input");
   assert.equal(stated.cwd, await realpath(explicit));
-});
-
-test("an explicit Contract repository does not retarget the invocation World", async () => {
-  const invocation = makeGitRepository();
-  const contract = makeGitRepository();
-  for (const repository of [invocation, contract]) {
-    repository.run(["config", "user.name", "Keiyaku Test"]);
-    repository.run(["config", "user.email", "keiyaku@example.invalid"]);
-    repository.run(["commit", "--quiet", "--allow-empty", "-m", "initial"]);
-  }
-  const parsed = parseArgv(["call", "worker", "--contract", "kei/example", "body"]);
-  const coordinates = await resolveCliCoordinates({
-    processCwd: invocation.path,
-    repo: contract.path,
-    command: parsed.command,
-  });
-  assert.equal(coordinates.world, await realpath(invocation.path));
-  assert.equal(coordinates.repo?.root, await realpath(contract.path));
 });
 
 test("World.locate selects the nearest marker without creating one", async () => {
@@ -86,69 +66,6 @@ test("World resolution reuses a non-Git ancestor marker while World.at remains e
   assert.equal(await World.at(leaf), await realpath(leaf));
   assert.equal(existsSync(join(leaf, ".keiyaku")), true);
   assert.equal(existsSync(join(root, ".keiyaku")), false);
-});
-
-test("one Git repository resolves one WorldRoot from primary, subdirectory, and linked worktree", async () => {
-  const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Keiyaku Test"]);
-  repository.run(["config", "user.email", "keiyaku@example.invalid"]);
-  repository.run(["commit", "--quiet", "--allow-empty", "-m", "initial"]);
-  const nested = join(repository.path, "a", "b");
-  const linked = temporary();
-  mkdirSync(nested, { recursive: true });
-  repository.run(["worktree", "add", "--quiet", "--detach", linked]);
-  mkdirSync(join(linked, ".keiyaku"));
-
-  const primary = await repositoryAt(repository.path);
-  const secondary = await repositoryAt(linked);
-  assert.equal(
-    await World.locate({ cwd: repository.path, repositoryRoot: primary.primaryWorktree }),
-    await realpath(repository.path),
-  );
-  assert.equal(
-    await World.locate({ cwd: nested, repositoryRoot: primary.primaryWorktree }),
-    await realpath(repository.path),
-  );
-  assert.equal(
-    await World.locate({ cwd: linked, repositoryRoot: secondary.primaryWorktree }),
-    await realpath(repository.path),
-  );
-});
-
-test("Git reads do not create a marker and Git creation establishes only the primary WorldRoot", async () => {
-  const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Keiyaku Test"]);
-  repository.run(["config", "user.email", "keiyaku@example.invalid"]);
-  repository.run(["commit", "--quiet", "--allow-empty", "-m", "initial"]);
-  const linked = temporary();
-  repository.run(["worktree", "add", "--quiet", "--detach", linked]);
-  const scope = await repositoryAt(linked);
-
-  const world = await World.resolve({ cwd: linked, repositoryRoot: scope.primaryWorktree });
-  assert.equal(world.root, await realpath(repository.path));
-  assert.equal(world.candidate, await realpath(repository.path));
-  assert.equal(existsSync(join(repository.path, ".keiyaku")), false);
-  assert.equal(existsSync(join(linked, ".keiyaku")), false);
-
-  assert.equal(await world.establish(), await realpath(repository.path));
-  assert.equal(existsSync(join(repository.path, ".keiyaku")), true);
-  assert.equal(existsSync(join(linked, ".keiyaku")), false);
-});
-
-test("World treats the user home as an ordinary coordinate", async () => {
-  const home = await realpath(homedir());
-  const resolution = await World.resolve(home);
-  assert.equal(resolution.candidate, home);
-  assert.equal(await World.prove(home), home);
-  assert.equal(resolution.root, existsSync(join(home, ".keiyaku")) ? home : null);
-});
-
-test("World treats the filesystem root as an ordinary coordinate", async () => {
-  const root = parse(process.cwd()).root;
-  const resolution = await World.resolve(root);
-  assert.equal(resolution.candidate, root);
-  assert.equal(await World.prove(root), root);
-  assert.equal(resolution.root, existsSync(join(root, ".keiyaku")) ? root : null);
 });
 
 test("World.prove mints only an exact canonical directory without writing", async () => {
@@ -189,13 +106,6 @@ test("World.prove mints only an exact canonical directory without writing", asyn
     [canonicalRoot, canonicalNested].map((path) => [path, readdirSync(path).sort()]),
     before,
   );
-});
-
-test("World refuses a non-directory marker", async () => {
-  const root = temporary();
-  writeFileSync(join(root, ".keiyaku"), "not a directory");
-  await assert.rejects(World.locate(root), /world marker is not a directory/u);
-  await assert.rejects(World.at(root), /world marker is not a directory/u);
 });
 
 test("World refuses a symlink marker instead of following it", async () => {

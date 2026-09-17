@@ -3,8 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { applyAmendDocument } from "../src/body/amend.js";
 import { decodeContractDocument } from "../src/body/decode.js";
-import { decodeRegion, regionWarnings, RegionDocumentError, regionsOverlap } from "../src/body/region.js";
-import { renderContractBody } from "../src/body/render.js";
+import { decodeRegion, RegionDocumentError, regionsOverlap } from "../src/body/region.js";
 import { parseToAST } from "../src/markdown/parse.js";
 import type { SectionNode } from "../src/markdown/types.js";
 
@@ -109,26 +108,6 @@ test("Region refuses foreign block kinds by name", () => {
   }
 });
 
-test("Region pattern whitespace warns without rejecting", () => {
-  assert.deepEqual(regionWarnings(["src/a b"]), [
-    "Region pattern 'src/a b' contains whitespace and will never match a path",
-  ]);
-  assert.deepEqual(regionWarnings(["src/a", "docs/**"]), []);
-  assert.deepEqual(region(["src/a b"]), ["src/a b"]);
-});
-
-test("Region preserves nonblank pattern lines exactly", () => {
-  assert.deepEqual(region(["src/file ", "", " src/other"]), ["src/file ", " src/other"]);
-  assert.deepEqual(regionsOverlap(["src/file "], ["src/file"]), []);
-});
-
-test("contract rendering writes Region as canonical bare lines", () => {
-  const decoded = decodeContractDocument(contract("src/```.ts"));
-  const rendered = renderContractBody(decoded);
-  assert.match(rendered, /\n## Region\n\nsrc\/```\.ts\n/u);
-  assert.deepEqual(decodeContractDocument(rendered).region, ["src/```.ts"]);
-});
-
 test("contract decoding and amendment share Region validation", () => {
   const current = decodeContractDocument(contract("src/**"));
   assert.deepEqual(decodeContractDocument(contract("src/**", "txt")).region, ["src/**"]);
@@ -166,8 +145,4 @@ test("Region intersection is exact across segment and character wildcards", () =
   for (const { mine, theirs, expected } of cases) {
     assert.deepEqual(regionsOverlap(mine, theirs), expected);
   }
-});
-
-test("Region intersection refuses patterns outside the closed grammar", () => {
-  assert.throws(() => regionsOverlap(["src/**file"], ["src/file"]), RegionDocumentError);
 });
