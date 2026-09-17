@@ -1,4 +1,4 @@
-"""Reproduce pinned test-only patches; require exact Git trees before publishing."""
+"""Reproduce pinned test changes; require exact Git trees before publishing new review branches."""
 import json
 from pathlib import Path
 import subprocess
@@ -9,7 +9,8 @@ def git(*args):
     return subprocess.check_output(['git', *args], text=True).strip()
 
 
-branches = {1: 'test-diet/04-unit-boundaries', 2: 'test-diet/05-akuma-lifecycle', 3: 'test-diet/06-git-cli-composition', 4: 'test-diet/07-owner-boundary-tests'}
+branches = {1: 'test-diet/04-unit-boundaries', 2: 'test-diet/05-akuma-lifecycle', 3: 'test-diet/06-git-cli-composition', 4: 'test-diet/07-owner-boundary-tests', 5: 'test-diet/08-native-runner-fixtures'}
+allowed_scripts = {'scripts/compile-tests.mjs', 'scripts/run-tests.mjs', 'scripts/architecture/policy-capabilities.ts'}
 for recipe_file in sorted(Path(sys.argv[1]).glob('batch-*.json')):
     recipe = json.loads(recipe_file.read_text())
     number = int(recipe_file.stem.split('-')[1])
@@ -17,7 +18,7 @@ for recipe_file in sorted(Path(sys.argv[1]).glob('batch-*.json')):
     assert git('rev-parse', 'HEAD^{tree}') == recipe['parent_tree'], 'unexpected parent tree'
     for name, edits in recipe['changes'].items():
         path = Path(name)
-        assert path.parts[0] == 'tests' and '..' not in path.parts, name
+        assert (path.parts[0] == 'tests' or name in allowed_scripts) and '..' not in path.parts, name
         old = path.read_text().splitlines(keepends=True) if path.exists() else []
         lines = old[:]
         for first, last, pieces in reversed(edits):
@@ -33,7 +34,7 @@ for recipe_file in sorted(Path(sys.argv[1]).glob('batch-*.json')):
             lines[first:last] = ''.join(replacement).splitlines(keepends=True)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(''.join(lines))
-    subprocess.run(['git', 'add', '--', 'tests'], check=True)
+    subprocess.run(['git', 'add', '--', *recipe['changes']], check=True)
     subprocess.run(['git', 'diff', '--cached', '--check'], check=True)
     tree = git('write-tree')
     assert tree == recipe['tree'], f'candidate differs from validated patch: {tree}'
