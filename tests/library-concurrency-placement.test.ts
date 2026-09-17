@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import test from "node:test";
+import test, { describe } from "node:test";
 import { Keiyaku, Repo, type Keiyaku as KeiyakuHandle } from "../src/index.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { privateStatePublicationSeatPath } from "../src/git/private-state-seat.js";
@@ -67,7 +67,7 @@ function crossProcessAmend(
   ].join("\n");
   const child = spawn(
     process.execPath,
-    ["--import", import.meta.resolve("tsx"), "--input-type=module", "-e", source],
+    [...(import.meta.url.endsWith(".js") ? [] : ["--import", import.meta.resolve("tsx")]), "--input-type=module", "-e", source],
     {
       env: {
         ...process.env,
@@ -147,342 +147,403 @@ function crossProcessAmend(
   };
 }
 
-test("more independent cross-process mutations than the attempt bound serialize at the private root", async () => {
-  const repository = repositoryWithMain();
-  const contracts = [];
-  for (let index = 0; index < 4; index += 1) contracts.push(await bind(repository));
-  const capability = await cachedRepositoryAt(repository.path);
-  const held = await acquireSqliteTransactionLock({ path: privateStatePublicationSeatPath(capability), mode: "immediate" });
-  const contractIds = await Promise.all(contracts.map(async (contract) => (await contract.state()).id));
-  const workers = contracts.map((_, index) =>
-    crossProcessAmend({
-      repository: repository.path,
-      contractId: contractIds[index]!,
-      markdown: `## Replace: Context\nwriter ${index}\n`,
-    }),
-  );
-  try {
-    await Promise.all(workers.map(({ ready }) => ready));
-  } finally {
-    held.close();
-  }
-  const outcomes = await Promise.all(workers.map(({ completed }) => completed));
-  assert.ok(outcomes.every((outcome) => outcome.includes("accepted")));
-  for (const [index, contract] of contracts.entries()) {
-    assert.equal(decodeContractDocument((await contract.state()).terms.document.bytes).context.trim(), `writer ${index}`);
-  }
-});
+// Each case owns a separate repository and scoped fault injection, never a process-wide mock.
+describe("library-concurrency-placement isolated repositories", { concurrency: 4 }, () => {
 
-test("same-Contract cross-process amends decide from the queued fresh state", async () => {
-  const repository = repositoryWithMain();
-  const contract = await bind(repository);
-  const source = (await contract.state()).terms;
-  const capability = await cachedRepositoryAt(repository.path);
-  const held = await acquireSqliteTransactionLock({ path: privateStatePublicationSeatPath(capability), mode: "immediate" });
-  const workers = [
-    crossProcessAmend({
-      repository: repository.path,
-      contractId: (await contract.state()).id,
-      markdown: "## Replace: Context\nfirst source terms\n",
-      source,
-    }),
-    crossProcessAmend({
-      repository: repository.path,
-      contractId: (await contract.state()).id,
-      markdown: "## Replace: Objective\nsecond source terms\n",
-      source,
-    }),
-  ];
-  try {
-    assert.deepEqual(await Promise.all(workers.map(({ ready }) => ready)), [source.document.key, source.document.key]);
-    await Promise.race([
-      Promise.any(workers.map(({ contended }) => contended)),
-      Promise.all(workers.map(({ completed }) => completed)).then(() => {
-        throw new Error("cross-process amends completed without private-state seat contention");
+  test("more independent cross-process mutations than the attempt bound serialize at the private root", async () => {
+    const repository = repositoryWithMain();
+    const contracts = [];
+    for (let index = 0; index < 4; index += 1) contracts.push(await bind(repository));
+    const capability = await cachedRepositoryAt(repository.path);
+    const held = await acquireSqliteTransactionLock({ path: privateStatePublicationSeatPath(capability), mode: "immediate" });
+    const contractIds = await Promise.all(contracts.map(async (contract) => (await contract.state()).id));
+    const workers = contracts.map((_, index) =>
+      crossProcessAmend({
+        repository: repository.path,
+        contractId: contractIds[index]!,
+        markdown: `## Replace: Context\nwriter ${index}\n`,
       }),
-    ]);
-  } finally {
-    held.close();
-  }
-  const outcomes = await Promise.all(workers.map(({ completed }) => completed));
-  assert.equal(outcomes.filter((outcome) => outcome.includes("accepted")).length, 1);
-  assert.equal(outcomes.filter((outcome) => outcome.includes("failed:terms-moved")).length, 1);
-  const body = decodeContractDocument((await contract.state()).terms.document.bytes);
-  assert.ok(body.context.trim() === "first source terms" || body.objective.trim() === "second source terms");
-
-  const delayed = await bind(repository);
-  const delayedSource = (await delayed.state()).terms;
-  const delayedHeld = await acquireSqliteTransactionLock({ path: privateStatePublicationSeatPath(capability), mode: "immediate" });
-  const delayedWorkers = [
-    crossProcessAmend({
-      repository: repository.path,
-      contractId: (await delayed.state()).id,
-      markdown: "## Replace: Context\nfirst delayed source terms\n",
-      source: delayedSource,
-      waitForRelease: true,
-    }),
-    crossProcessAmend({
-      repository: repository.path,
-      contractId: (await delayed.state()).id,
-      markdown: "## Replace: Objective\nsecond delayed source terms\n",
-      source: delayedSource,
-      waitForRelease: true,
-    }),
-  ];
-  try {
+    );
     try {
-      assert.deepEqual(
-        await Promise.all(delayedWorkers.map(({ ready }) => ready)),
-        [delayedSource.document.key, delayedSource.document.key],
-      );
+      await Promise.all(workers.map(({ ready }) => ready));
     } finally {
-      delayedHeld.close();
+      held.close();
     }
-    delayedWorkers[0]!.release();
-    assert.match(await delayedWorkers[0]!.completed, /accepted/);
-    delayedWorkers[1]!.release();
-    assert.match(await delayedWorkers[1]!.completed, /failed:terms-moved/);
-  } finally {
-    for (const worker of delayedWorkers) worker.release();
-    await Promise.allSettled(delayedWorkers.map(({ completed }) => completed));
-  }
-  const delayedBody = decodeContractDocument((await delayed.state()).terms.document.bytes);
-  assert.equal(delayedBody.context.trim(), "first delayed source terms");
-  assert.notEqual(delayedBody.objective.trim(), "second delayed source terms");
-});
-
-test("delivery re-integrates its persisted tender when the target premise moves", async () => {
-  const repository = repositoryWithMain();
-  repository.run(["branch", "release"]);
-  const result = await Keiyaku.bind({
-    repo: await cachedRepoAt(repository.path),
-    markdown: document(),
-    target: "refs/heads/release",
-    workspace: "worktree",
-    gates: [],
+    const outcomes = await Promise.all(workers.map(({ completed }) => completed));
+    assert.ok(outcomes.every((outcome) => outcome.includes("accepted")));
+    for (const [index, contract] of contracts.entries()) {
+      assert.equal(decodeContractDocument((await contract.state()).terms.document.bytes).context.trim(), `writer ${index}`);
+    }
   });
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (await result.keiyaku.state()).id);
-  writeFileSync(resolve(worktree, "candidate.txt"), "captured\n");
-  repository.run(["-C", worktree, "add", "candidate.txt"]);
-  repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
-  writeFileSync(resolve(repository.path, "target.txt"), "moved\n");
-  repository.run(["add", "target.txt"]);
-  repository.run(["commit", "--quiet", "-m", "move target"]);
 
-  const raced = `${repository.path}/target-raced.marker`;
-  const delivered = await withGitShim(
-    [
-      'if [ "$1" = "update-ref" ]; then',
-      "  input_file=$(mktemp)",
-      '  cat >"$input_file"',
-      '  if grep -q "update refs/heads/release" "$input_file" && [ ! -e "$KEIYAKU_TARGET_RACED" ]; then',
-      '    "$KEIYAKU_REAL_GIT" update-ref refs/heads/release "$KEIYAKU_TARGET_HEAD"',
-      '    printf "changed after capture\\n" > "$KEIYAKU_CANDIDATE_PATH"',
-      '    touch "$KEIYAKU_TARGET_RACED"',
-      "  fi",
-      '  "$KEIYAKU_REAL_GIT" "$@" <"$input_file"',
-      "  status=$?",
-      '  rm -f "$input_file"',
-      '  exit "$status"',
-      "fi",
-      'exec "$KEIYAKU_REAL_GIT" "$@"',
-    ].join("\n"),
-    {
-      KEIYAKU_CANDIDATE_PATH: resolve(worktree, "candidate.txt"),
-      KEIYAKU_TARGET_HEAD: repository.run(["rev-parse", "HEAD"]).trim(),
-      KEIYAKU_TARGET_RACED: raced,
-    },
-    async (gitPath) =>
-      acceptedDelivery(
-        await Keiyaku.of({
-          repo: await Repo.at({ path: repository.path, gitPath }),
-          id: (await result.keiyaku.state()).id,
-        }).deliver({ message: "preserve this subject" }),
-      ),
-  );
+  test("same-Contract cross-process amends decide from the queued fresh state", async () => {
+    const repository = repositoryWithMain();
+    const contract = await bind(repository);
+    const source = (await contract.state()).terms;
+    const capability = await cachedRepositoryAt(repository.path);
+    const held = await acquireSqliteTransactionLock({ path: privateStatePublicationSeatPath(capability), mode: "immediate" });
+    const workers = [
+      crossProcessAmend({
+        repository: repository.path,
+        contractId: (await contract.state()).id,
+        markdown: "## Replace: Context\nfirst source terms\n",
+        source,
+      }),
+      crossProcessAmend({
+        repository: repository.path,
+        contractId: (await contract.state()).id,
+        markdown: "## Replace: Objective\nsecond source terms\n",
+        source,
+      }),
+    ];
+    try {
+      assert.deepEqual(await Promise.all(workers.map(({ ready }) => ready)), [source.document.key, source.document.key]);
+      await Promise.race([
+        Promise.any(workers.map(({ contended }) => contended)),
+        Promise.all(workers.map(({ completed }) => completed)).then(() => {
+          throw new Error("cross-process amends completed without private-state seat contention");
+        }),
+      ]);
+    } finally {
+      held.close();
+    }
+    const outcomes = await Promise.all(workers.map(({ completed }) => completed));
+    assert.equal(outcomes.filter((outcome) => outcome.includes("accepted")).length, 1);
+    assert.equal(outcomes.filter((outcome) => outcome.includes("failed:terms-moved")).length, 1);
+    const body = decodeContractDocument((await contract.state()).terms.document.bytes);
+    assert.ok(body.context.trim() === "first source terms" || body.objective.trim() === "second source terms");
 
-  assert.deepEqual(
-    delivered.facts.map((fact) => fact.kind),
-    ["bound", "deliver", "reintegrated", "claimed"],
-  );
-  const reintegrated = delivered.facts.find((fact) => fact.kind === "reintegrated");
-  assert.ok(reintegrated);
-  assert.equal(repository.run(["show", "refs/heads/release:candidate.txt"]), "captured\n");
-  assert.equal(readFileSync(resolve(worktree, "candidate.txt"), "utf8"), "changed after capture\n");
-  const metadata = ["show", "-s", "--format=%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI%x00%B"] as const;
-  assert.equal(
-    repository.run([...metadata, reintegrated.data.snapshot]),
-    repository.run([...metadata, delivered.value.integration.snapshot]),
-  );
-  assert.equal(
-    repository.run(["show", "-s", "--format=%s", delivered.value.integration.snapshot]).trim(),
-    "preserve this subject",
-  );
-  assert.equal(repository.run(["rev-parse", "refs/heads/release"]).trim(), reintegrated.data.snapshot);
-  assert.deepEqual(delivered.value.completion, {
-    integration: reintegrated.data.snapshot,
-    predecessor: reintegrated.data.predecessor,
-    target: "refs/heads/release",
+    const delayed = await bind(repository);
+    const delayedSource = (await delayed.state()).terms;
+    const delayedHeld = await acquireSqliteTransactionLock({ path: privateStatePublicationSeatPath(capability), mode: "immediate" });
+    const delayedWorkers = [
+      crossProcessAmend({
+        repository: repository.path,
+        contractId: (await delayed.state()).id,
+        markdown: "## Replace: Context\nfirst delayed source terms\n",
+        source: delayedSource,
+        waitForRelease: true,
+      }),
+      crossProcessAmend({
+        repository: repository.path,
+        contractId: (await delayed.state()).id,
+        markdown: "## Replace: Objective\nsecond delayed source terms\n",
+        source: delayedSource,
+        waitForRelease: true,
+      }),
+    ];
+    try {
+      try {
+        assert.deepEqual(
+          await Promise.all(delayedWorkers.map(({ ready }) => ready)),
+          [delayedSource.document.key, delayedSource.document.key],
+        );
+      } finally {
+        delayedHeld.close();
+      }
+      delayedWorkers[0]!.release();
+      assert.match(await delayedWorkers[0]!.completed, /accepted/);
+      delayedWorkers[1]!.release();
+      assert.match(await delayedWorkers[1]!.completed, /failed:terms-moved/);
+    } finally {
+      for (const worker of delayedWorkers) worker.release();
+      await Promise.allSettled(delayedWorkers.map(({ completed }) => completed));
+    }
+    const delayedBody = decodeContractDocument((await delayed.state()).terms.document.bytes);
+    assert.equal(delayedBody.context.trim(), "first delayed source terms");
+    assert.notEqual(delayedBody.objective.trim(), "second delayed source terms");
   });
-  const current = await result.keiyaku.delivery();
-  assert.equal(current?.tenderSnapshot, delivered.value.tenderSnapshot);
-  assert.equal(current?.integration.predecessor, reintegrated.data.predecessor);
-  assert.equal(current?.integration.snapshot, reintegrated.data.snapshot);
-  assert.equal(current?.integration.changeId, delivered.value.integration.changeId);
-  assert.match((await current?.diff()) ?? "", /candidate\.txt/u);
-});
 
-test("reintegration observes and publishes only after the shared private-state seat", async () => {
-  const repository = repositoryWithMain();
-  repository.run(["branch", "release"]);
-  const bound = await Keiyaku.bind({
-    repo: await cachedRepoAt(repository.path),
-    markdown: document(),
-    target: "refs/heads/release",
-    workspace: "worktree",
-    gates: ["reviewed"],
-  });
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (await bound.keiyaku.state()).id);
-  writeFileSync(resolve(worktree, "candidate.txt"), "captured\n");
-  repository.run(["-C", worktree, "add", "candidate.txt"]);
-  repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
-  await bound.keiyaku.deliver();
-  writeFileSync(resolve(repository.path, "target.txt"), "moved\n");
-  repository.run(["add", "target.txt"]);
-  repository.run(["commit", "--quiet", "-m", "move target"]);
-  repository.run(["update-ref", "refs/heads/release", repository.run(["rev-parse", "HEAD"]).trim()]);
-  const writers = [];
-  for (let index = 0; index < 3; index += 1) writers.push(await bind(repository));
-  const before = repository.run(["rev-parse", "refs/heads/keiyaku-state"]).trim();
-  const capability = await cachedRepositoryAt(repository.path);
-  const held = await acquireSqliteTransactionLock({
-    path: privateStatePublicationSeatPath(capability),
-    mode: "immediate",
-  });
-  const writerIds = await Promise.all(writers.map(async (contract) => (await contract.state()).id));
-  const racingWriters = writers.map((_, index) =>
-    crossProcessAmend({
-      repository: repository.path,
-      contractId: writerIds[index]!,
-      markdown: `## Replace: Context\nracing writer ${index}\n`,
-    }),
-  );
-  const reintegration = withGitDecodeChannel(capability, async (channel) =>
-    reintegrateOperation({
-      channel,
-      repository: capability,
-      contractId: (await bound.keiyaku.state()).id,
+  test("delivery re-integrates its persisted tender when the target premise moves", async () => {
+    const repository = repositoryWithMain();
+    repository.run(["branch", "release"]);
+    const result = await Keiyaku.bind({
+      repo: await cachedRepoAt(repository.path),
+      markdown: document(),
       target: "refs/heads/release",
-    }),
-  );
-  try {
-    await Promise.all(racingWriters.map(({ ready }) => ready));
-    assert.equal(repository.run(["rev-parse", "refs/heads/keiyaku-state"]).trim(), before);
-  } finally {
-    held.close();
-  }
-  assert.equal((await reintegration).kind, "accepted");
-  const outcomes = await Promise.all(racingWriters.map(({ completed }) => completed));
-  assert.ok(outcomes.every((outcome) => outcome.includes("accepted")));
-});
+      workspace: "worktree",
+      gates: [],
+    });
+    const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (await result.keiyaku.state()).id);
+    writeFileSync(resolve(worktree, "candidate.txt"), "captured\n");
+    repository.run(["-C", worktree, "add", "candidate.txt"]);
+    repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
+    writeFileSync(resolve(repository.path, "target.txt"), "moved\n");
+    repository.run(["add", "target.txt"]);
+    repository.run(["commit", "--quiet", "-m", "move target"]);
 
-test("equivalent external target movement stops without reintegration or claim", async () => {
-  const repository = repositoryWithMain();
-  repository.run(["branch", "release"]);
-  const result = await Keiyaku.bind({
-    repo: await cachedRepoAt(repository.path),
-    markdown: document(),
-    target: "refs/heads/release",
-    workspace: "worktree",
-    gates: [],
-  });
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (await result.keiyaku.state()).id);
-  writeFileSync(resolve(worktree, "candidate.txt"), "captured\n");
-  repository.run(["-C", worktree, "add", "candidate.txt"]);
-  repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
-  const raced = `${repository.path}/equivalent-target-raced.marker`;
-  const delivered = await withGitShim(
-    [
-      'if [ "$1" = "update-ref" ]; then',
-      "  input_file=$(mktemp)",
-      '  cat >"$input_file"',
-      '  if grep -q "update refs/heads/release" "$input_file" && [ ! -e "$KEIYAKU_TARGET_RACED" ]; then',
-      '    expected=$(awk \'$1 == "update" && $2 == "refs/heads/release" { print $4 }\' "$input_file")',
-      '    candidate=$(awk \'$1 == "update" && $2 == "refs/heads/release" { print $3 }\' "$input_file")',
-      '    tree=$("$KEIYAKU_REAL_GIT" rev-parse "$candidate^{tree}")',
-      '    external=$("$KEIYAKU_REAL_GIT" commit-tree "$tree" -p "$expected" -m "external equivalent")',
-      '    "$KEIYAKU_REAL_GIT" update-ref refs/heads/release "$external" "$expected"',
-      '    touch "$KEIYAKU_TARGET_RACED"',
-      "  fi",
-      '  "$KEIYAKU_REAL_GIT" "$@" <"$input_file"',
-      "  status=$?",
-      '  rm -f "$input_file"',
-      '  exit "$status"',
-      "fi",
-      'exec "$KEIYAKU_REAL_GIT" "$@"',
-    ].join("\n"),
-    { KEIYAKU_TARGET_RACED: raced },
-    async (gitPath) =>
-      acceptedDelivery(
-        await Keiyaku.of({
-          repo: await Repo.at({ path: repository.path, gitPath }),
-          id: (await result.keiyaku.state()).id,
-        }).deliver(),
-      ),
-  );
-
-  assert.deepEqual(
-    delivered.facts.map((fact) => fact.kind),
-    ["bound", "deliver"],
-  );
-  assert.equal(delivered.value.completion, undefined);
-  const placement = delivered.value.placement;
-  assert.ok(placement);
-  if (!("failure" in placement) || placement.failure !== "target-moved")
-    assert.fail("expected target-moved placement failure");
-  assert.equal(placement.observedTreeEqualsCandidate, true);
-  assert.notEqual(placement.observed, null);
-  assert.equal(repository.run(["rev-parse", "refs/heads/release"]).trim(), placement.observed);
-  assert.equal((await result.keiyaku.state()).terminal, null);
-});
-
-test("reintegrated delivery does not aggregate Verification from the superseded integration", async () => {
-  const repository = repositoryWithMain();
-  repository.run(["branch", "release"]);
-  const marker = `${repository.path}/first-verification.marker`;
-  const result = await Keiyaku.bind({
-    repo: await cachedRepoAt(repository.path),
-    markdown: document(
+    const raced = `${repository.path}/target-raced.marker`;
+    const delivered = await withGitShim(
       [
-        `if [ -f ${JSON.stringify(marker)} ]; then`,
-        "  kill -TERM $$",
+        'if [ "$1" = "update-ref" ]; then',
+        "  input_file=$(mktemp)",
+        '  cat >"$input_file"',
+        '  if grep -q "update refs/heads/release" "$input_file" && [ ! -e "$KEIYAKU_TARGET_RACED" ]; then',
+        '    "$KEIYAKU_REAL_GIT" update-ref refs/heads/release "$KEIYAKU_TARGET_HEAD"',
+        '    printf "changed after capture\\n" > "$KEIYAKU_CANDIDATE_PATH"',
+        '    touch "$KEIYAKU_TARGET_RACED"',
+        "  fi",
+        '  "$KEIYAKU_REAL_GIT" "$@" <"$input_file"',
+        "  status=$?",
+        '  rm -f "$input_file"',
+        '  exit "$status"',
         "fi",
-        `touch ${JSON.stringify(marker)}`,
-        'printf "first verification" >&2',
-        "exit 1",
+        'exec "$KEIYAKU_REAL_GIT" "$@"',
       ].join("\n"),
-    ),
-    target: "refs/heads/release",
-    workspace: "worktree",
-    gates: [],
-  });
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (await result.keiyaku.state()).id);
-  writeFileSync(resolve(worktree, "candidate.txt"), "candidate\n");
-  repository.run(["-C", worktree, "add", "candidate.txt"]);
-  repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
-  writeFileSync(resolve(repository.path, "target.txt"), "moved\n");
-  repository.run(["add", "target.txt"]);
-  repository.run(["commit", "--quiet", "-m", "move target"]);
+      {
+        KEIYAKU_CANDIDATE_PATH: resolve(worktree, "candidate.txt"),
+        KEIYAKU_TARGET_HEAD: repository.run(["rev-parse", "HEAD"]).trim(),
+        KEIYAKU_TARGET_RACED: raced,
+      },
+      async (gitPath) =>
+        acceptedDelivery(
+          await Keiyaku.of({
+            repo: await Repo.at({ path: repository.path, gitPath }),
+            id: (await result.keiyaku.state()).id,
+          }).deliver({ message: "preserve this subject" }),
+        ),
+    );
 
-  const raced = `${repository.path}/target-raced.marker`;
-  const delivered = await withGitShim(
-    [
+    assert.deepEqual(
+      delivered.facts.map((fact) => fact.kind),
+      ["bound", "deliver", "reintegrated", "claimed"],
+    );
+    const reintegrated = delivered.facts.find((fact) => fact.kind === "reintegrated");
+    assert.ok(reintegrated);
+    assert.equal(repository.run(["show", "refs/heads/release:candidate.txt"]), "captured\n");
+    assert.equal(readFileSync(resolve(worktree, "candidate.txt"), "utf8"), "changed after capture\n");
+    const metadata = ["show", "-s", "--format=%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI%x00%B"] as const;
+    assert.equal(
+      repository.run([...metadata, reintegrated.data.snapshot]),
+      repository.run([...metadata, delivered.value.integration.snapshot]),
+    );
+    assert.equal(
+      repository.run(["show", "-s", "--format=%s", delivered.value.integration.snapshot]).trim(),
+      "preserve this subject",
+    );
+    assert.equal(repository.run(["rev-parse", "refs/heads/release"]).trim(), reintegrated.data.snapshot);
+    assert.deepEqual(delivered.value.completion, {
+      integration: reintegrated.data.snapshot,
+      predecessor: reintegrated.data.predecessor,
+      target: "refs/heads/release",
+    });
+    const current = await result.keiyaku.delivery();
+    assert.equal(current?.tenderSnapshot, delivered.value.tenderSnapshot);
+    assert.equal(current?.integration.predecessor, reintegrated.data.predecessor);
+    assert.equal(current?.integration.snapshot, reintegrated.data.snapshot);
+    assert.equal(current?.integration.changeId, delivered.value.integration.changeId);
+    assert.match((await current?.diff()) ?? "", /candidate\.txt/u);
+  });
+
+  test("reintegration observes and publishes only after the shared private-state seat", async () => {
+    const repository = repositoryWithMain();
+    repository.run(["branch", "release"]);
+    const bound = await Keiyaku.bind({
+      repo: await cachedRepoAt(repository.path),
+      markdown: document(),
+      target: "refs/heads/release",
+      workspace: "worktree",
+      gates: ["reviewed"],
+    });
+    const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (await bound.keiyaku.state()).id);
+    writeFileSync(resolve(worktree, "candidate.txt"), "captured\n");
+    repository.run(["-C", worktree, "add", "candidate.txt"]);
+    repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
+    await bound.keiyaku.deliver();
+    writeFileSync(resolve(repository.path, "target.txt"), "moved\n");
+    repository.run(["add", "target.txt"]);
+    repository.run(["commit", "--quiet", "-m", "move target"]);
+    repository.run(["update-ref", "refs/heads/release", repository.run(["rev-parse", "HEAD"]).trim()]);
+    const writers = [];
+    for (let index = 0; index < 3; index += 1) writers.push(await bind(repository));
+    const before = repository.run(["rev-parse", "refs/heads/keiyaku-state"]).trim();
+    const capability = await cachedRepositoryAt(repository.path);
+    const held = await acquireSqliteTransactionLock({
+      path: privateStatePublicationSeatPath(capability),
+      mode: "immediate",
+    });
+    const writerIds = await Promise.all(writers.map(async (contract) => (await contract.state()).id));
+    const racingWriters = writers.map((_, index) =>
+      crossProcessAmend({
+        repository: repository.path,
+        contractId: writerIds[index]!,
+        markdown: `## Replace: Context\nracing writer ${index}\n`,
+      }),
+    );
+    const reintegration = withGitDecodeChannel(capability, async (channel) =>
+      reintegrateOperation({
+        channel,
+        repository: capability,
+        contractId: (await bound.keiyaku.state()).id,
+        target: "refs/heads/release",
+      }),
+    );
+    try {
+      await Promise.all(racingWriters.map(({ ready }) => ready));
+      assert.equal(repository.run(["rev-parse", "refs/heads/keiyaku-state"]).trim(), before);
+    } finally {
+      held.close();
+    }
+    assert.equal((await reintegration).kind, "accepted");
+    const outcomes = await Promise.all(racingWriters.map(({ completed }) => completed));
+    assert.ok(outcomes.every((outcome) => outcome.includes("accepted")));
+  });
+
+  test("equivalent external target movement stops without reintegration or claim", async () => {
+    const repository = repositoryWithMain();
+    repository.run(["branch", "release"]);
+    const result = await Keiyaku.bind({
+      repo: await cachedRepoAt(repository.path),
+      markdown: document(),
+      target: "refs/heads/release",
+      workspace: "worktree",
+      gates: [],
+    });
+    const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (await result.keiyaku.state()).id);
+    writeFileSync(resolve(worktree, "candidate.txt"), "captured\n");
+    repository.run(["-C", worktree, "add", "candidate.txt"]);
+    repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
+    const raced = `${repository.path}/equivalent-target-raced.marker`;
+    const delivered = await withGitShim(
+      [
+        'if [ "$1" = "update-ref" ]; then',
+        "  input_file=$(mktemp)",
+        '  cat >"$input_file"',
+        '  if grep -q "update refs/heads/release" "$input_file" && [ ! -e "$KEIYAKU_TARGET_RACED" ]; then',
+        '    expected=$(awk \'$1 == "update" && $2 == "refs/heads/release" { print $4 }\' "$input_file")',
+        '    candidate=$(awk \'$1 == "update" && $2 == "refs/heads/release" { print $3 }\' "$input_file")',
+        '    tree=$("$KEIYAKU_REAL_GIT" rev-parse "$candidate^{tree}")',
+        '    external=$("$KEIYAKU_REAL_GIT" commit-tree "$tree" -p "$expected" -m "external equivalent")',
+        '    "$KEIYAKU_REAL_GIT" update-ref refs/heads/release "$external" "$expected"',
+        '    touch "$KEIYAKU_TARGET_RACED"',
+        "  fi",
+        '  "$KEIYAKU_REAL_GIT" "$@" <"$input_file"',
+        "  status=$?",
+        '  rm -f "$input_file"',
+        '  exit "$status"',
+        "fi",
+        'exec "$KEIYAKU_REAL_GIT" "$@"',
+      ].join("\n"),
+      { KEIYAKU_TARGET_RACED: raced },
+      async (gitPath) =>
+        acceptedDelivery(
+          await Keiyaku.of({
+            repo: await Repo.at({ path: repository.path, gitPath }),
+            id: (await result.keiyaku.state()).id,
+          }).deliver(),
+        ),
+    );
+
+    assert.deepEqual(
+      delivered.facts.map((fact) => fact.kind),
+      ["bound", "deliver"],
+    );
+    assert.equal(delivered.value.completion, undefined);
+    const placement = delivered.value.placement;
+    assert.ok(placement);
+    if (!("failure" in placement) || placement.failure !== "target-moved")
+      assert.fail("expected target-moved placement failure");
+    assert.equal(placement.observedTreeEqualsCandidate, true);
+    assert.notEqual(placement.observed, null);
+    assert.equal(repository.run(["rev-parse", "refs/heads/release"]).trim(), placement.observed);
+    assert.equal((await result.keiyaku.state()).terminal, null);
+  });
+
+  test("reintegrated delivery does not aggregate Verification from the superseded integration", async () => {
+    const repository = repositoryWithMain();
+    repository.run(["branch", "release"]);
+    const marker = `${repository.path}/first-verification.marker`;
+    const result = await Keiyaku.bind({
+      repo: await cachedRepoAt(repository.path),
+      markdown: document(
+        [
+          `if [ -f ${JSON.stringify(marker)} ]; then`,
+          "  kill -TERM $$",
+          "fi",
+          `touch ${JSON.stringify(marker)}`,
+          'printf "first verification" >&2',
+          "exit 1",
+        ].join("\n"),
+      ),
+      target: "refs/heads/release",
+      workspace: "worktree",
+      gates: [],
+    });
+    const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (await result.keiyaku.state()).id);
+    writeFileSync(resolve(worktree, "candidate.txt"), "candidate\n");
+    repository.run(["-C", worktree, "add", "candidate.txt"]);
+    repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
+    writeFileSync(resolve(repository.path, "target.txt"), "moved\n");
+    repository.run(["add", "target.txt"]);
+    repository.run(["commit", "--quiet", "-m", "move target"]);
+
+    const raced = `${repository.path}/target-raced.marker`;
+    const delivered = await withGitShim(
+      [
+        'if [ "$1" = "update-ref" ]; then',
+        "  input_file=$(mktemp)",
+        '  cat >"$input_file"',
+        '  if grep -q "update refs/heads/release" "$input_file" && [ ! -e "$KEIYAKU_TARGET_RACED" ]; then',
+        '    "$KEIYAKU_REAL_GIT" update-ref refs/heads/release "$KEIYAKU_TARGET_HEAD"',
+        '    touch "$KEIYAKU_TARGET_RACED"',
+        "  fi",
+        '  "$KEIYAKU_REAL_GIT" "$@" <"$input_file"',
+        "  status=$?",
+        '  rm -f "$input_file"',
+        '  exit "$status"',
+        "fi",
+        'exec "$KEIYAKU_REAL_GIT" "$@"',
+      ].join("\n"),
+      {
+        KEIYAKU_TARGET_HEAD: repository.run(["rev-parse", "HEAD"]).trim(),
+        KEIYAKU_TARGET_RACED: raced,
+      },
+      async (gitPath) =>
+        acceptedDelivery(
+          await Keiyaku.of({
+            repo: await Repo.at({ path: repository.path, gitPath }),
+            id: (await result.keiyaku.state()).id,
+          }).deliver(),
+        ),
+    );
+
+    const reintegrated = delivered.facts.find((fact) => fact.kind === "reintegrated");
+    assert.ok(reintegrated);
+    assert.equal(delivered.value.completion, undefined);
+    assert.equal((await result.keiyaku.state()).currentIntegration?.snapshot, reintegrated.data.snapshot);
+    assert.equal((await result.keiyaku.state()).terminal, null);
+    assert.deepEqual(delivered.value.verification, { failure: "unknown-exit" });
+    assert.equal(delivered.value.verificationSummary, undefined);
+  });
+
+  test("review re-integrates its accepted delivery when the target premise moves", async () => {
+    const repository = repositoryWithMain();
+    repository.run(["branch", "release"]);
+    const result = await Keiyaku.bind({
+      repo: await cachedRepoAt(repository.path),
+      markdown: document(),
+      target: "refs/heads/release",
+      workspace: "worktree",
+      gates: ["reviewed"],
+    });
+    const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (await result.keiyaku.state()).id);
+    writeFileSync(resolve(worktree, "candidate.txt"), "candidate\n");
+    repository.run(["-C", worktree, "add", "candidate.txt"]);
+    repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
+    const delivered = acceptedDelivery(await result.keiyaku.deliver());
+    writeFileSync(resolve(repository.path, "different-target.txt"), "different target\n");
+    repository.run(["add", "different-target.txt"]);
+    repository.run(["commit", "--quiet", "-m", "move target differently"]);
+
+    const failed = `${repository.path}/publication-failed.marker`;
+    const shim = [
       'if [ "$1" = "update-ref" ]; then',
       "  input_file=$(mktemp)",
       '  cat >"$input_file"',
-      '  if grep -q "update refs/heads/release" "$input_file" && [ ! -e "$KEIYAKU_TARGET_RACED" ]; then',
-      '    "$KEIYAKU_REAL_GIT" update-ref refs/heads/release "$KEIYAKU_TARGET_HEAD"',
-      '    touch "$KEIYAKU_TARGET_RACED"',
+      '  if grep -q "update refs/heads/release" "$input_file" && [ ! -e "$KEIYAKU_PUBLICATION_FAILED" ]; then',
+      '    candidate=$("$KEIYAKU_REAL_GIT" rev-parse HEAD)',
+      '    "$KEIYAKU_REAL_GIT" update-ref refs/heads/release "$candidate"',
+      '    touch "$KEIYAKU_PUBLICATION_FAILED"',
       "  fi",
       '  "$KEIYAKU_REAL_GIT" "$@" <"$input_file"',
       "  status=$?",
@@ -490,95 +551,38 @@ test("reintegrated delivery does not aggregate Verification from the superseded 
       '  exit "$status"',
       "fi",
       'exec "$KEIYAKU_REAL_GIT" "$@"',
-    ].join("\n"),
-    {
-      KEIYAKU_TARGET_HEAD: repository.run(["rev-parse", "HEAD"]).trim(),
-      KEIYAKU_TARGET_RACED: raced,
-    },
-    async (gitPath) =>
-      acceptedDelivery(
-        await Keiyaku.of({
-          repo: await Repo.at({ path: repository.path, gitPath }),
-          id: (await result.keiyaku.state()).id,
-        }).deliver(),
-      ),
-  );
-
-  const reintegrated = delivered.facts.find((fact) => fact.kind === "reintegrated");
-  assert.ok(reintegrated);
-  assert.equal(delivered.value.completion, undefined);
-  assert.equal((await result.keiyaku.state()).currentIntegration?.snapshot, reintegrated.data.snapshot);
-  assert.equal((await result.keiyaku.state()).terminal, null);
-  assert.deepEqual(delivered.value.verification, { failure: "unknown-exit" });
-  assert.equal(delivered.value.verificationSummary, undefined);
-});
-
-test("review re-integrates its accepted delivery when the target premise moves", async () => {
-  const repository = repositoryWithMain();
-  repository.run(["branch", "release"]);
-  const result = await Keiyaku.bind({
-    repo: await cachedRepoAt(repository.path),
-    markdown: document(),
-    target: "refs/heads/release",
-    workspace: "worktree",
-    gates: ["reviewed"],
+    ].join("\n");
+    const reviewed = await withGitShim(
+      shim,
+      {
+        KEIYAKU_PUBLICATION_FAILED: failed,
+      },
+      async (gitPath) =>
+        (
+          await Keiyaku.of({
+            repo: await Repo.at({ path: repository.path, gitPath }),
+            id: (await result.keiyaku.state()).id,
+          })
+        ).review({ verdict: "satisfied" }),
+    );
+    assert.equal(reviewed.value.placement, undefined);
+    assert.deepEqual(
+      reviewed.facts.map((fact) => fact.kind),
+      ["attestation", "reintegrated", "claimed"],
+    );
+    const reintegrated = reviewed.facts.find((fact) => fact.kind === "reintegrated");
+    assert.ok(reintegrated);
+    assert.deepEqual(reviewed.value.completion, {
+      integration: reintegrated.data.snapshot,
+      predecessor: reintegrated.data.predecessor,
+      target: "refs/heads/release",
+    });
+    assert.equal(reintegrated?.data.predecessor, repository.run(["rev-parse", "HEAD"]).trim());
+    const state = await result.keiyaku.state();
+    assert.equal(state.attestations.at(-1)?.data.verdict, "satisfied");
+    assert.equal(state.terminal?.kind, "claimed");
+    assert.deepEqual(state.delivery?.data.integration, delivered.value.integration);
+    assert.equal(state.currentIntegration?.snapshot, reintegrated?.data.snapshot);
+    assert.equal(repository.run(["rev-parse", "refs/heads/release"]).trim(), state.currentIntegration?.snapshot);
   });
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (await result.keiyaku.state()).id);
-  writeFileSync(resolve(worktree, "candidate.txt"), "candidate\n");
-  repository.run(["-C", worktree, "add", "candidate.txt"]);
-  repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
-  const delivered = acceptedDelivery(await result.keiyaku.deliver());
-  writeFileSync(resolve(repository.path, "different-target.txt"), "different target\n");
-  repository.run(["add", "different-target.txt"]);
-  repository.run(["commit", "--quiet", "-m", "move target differently"]);
-
-  const failed = `${repository.path}/publication-failed.marker`;
-  const shim = [
-    'if [ "$1" = "update-ref" ]; then',
-    "  input_file=$(mktemp)",
-    '  cat >"$input_file"',
-    '  if grep -q "update refs/heads/release" "$input_file" && [ ! -e "$KEIYAKU_PUBLICATION_FAILED" ]; then',
-    '    candidate=$("$KEIYAKU_REAL_GIT" rev-parse HEAD)',
-    '    "$KEIYAKU_REAL_GIT" update-ref refs/heads/release "$candidate"',
-    '    touch "$KEIYAKU_PUBLICATION_FAILED"',
-    "  fi",
-    '  "$KEIYAKU_REAL_GIT" "$@" <"$input_file"',
-    "  status=$?",
-    '  rm -f "$input_file"',
-    '  exit "$status"',
-    "fi",
-    'exec "$KEIYAKU_REAL_GIT" "$@"',
-  ].join("\n");
-  const reviewed = await withGitShim(
-    shim,
-    {
-      KEIYAKU_PUBLICATION_FAILED: failed,
-    },
-    async (gitPath) =>
-      (
-        await Keiyaku.of({
-          repo: await Repo.at({ path: repository.path, gitPath }),
-          id: (await result.keiyaku.state()).id,
-        })
-      ).review({ verdict: "satisfied" }),
-  );
-  assert.equal(reviewed.value.placement, undefined);
-  assert.deepEqual(
-    reviewed.facts.map((fact) => fact.kind),
-    ["attestation", "reintegrated", "claimed"],
-  );
-  const reintegrated = reviewed.facts.find((fact) => fact.kind === "reintegrated");
-  assert.ok(reintegrated);
-  assert.deepEqual(reviewed.value.completion, {
-    integration: reintegrated.data.snapshot,
-    predecessor: reintegrated.data.predecessor,
-    target: "refs/heads/release",
-  });
-  assert.equal(reintegrated?.data.predecessor, repository.run(["rev-parse", "HEAD"]).trim());
-  const state = await result.keiyaku.state();
-  assert.equal(state.attestations.at(-1)?.data.verdict, "satisfied");
-  assert.equal(state.terminal?.kind, "claimed");
-  assert.deepEqual(state.delivery?.data.integration, delivered.value.integration);
-  assert.equal(state.currentIntegration?.snapshot, reintegrated?.data.snapshot);
-  assert.equal(repository.run(["rev-parse", "refs/heads/release"]).trim(), state.currentIntegration?.snapshot);
 });

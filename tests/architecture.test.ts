@@ -116,6 +116,8 @@ for (const [owner, edges, prefix, allowed] of compositionCases) {
 
 for (const [owner, module, symbol, rule] of [
   ["runtime/proc/run.ts", "node:child_process", "spawn", ""],
+  ["scripts/compile-tests.mjs", "node:module", "stripTypeScriptTypes", ""],
+  ["scripts/compile-tests.mjs", "node:module", "createRequire", "capability-import"],
   ["core/verbs/bind.ts", "node:child_process", "spawn", "capability-import"],
   ["core/verbs/bind.ts", "node:fs", "readFileSync", "capability-import"],
   ["akuma/providers/opencode-sdk/client.ts", "@opencode-ai/sdk", "client", ""],

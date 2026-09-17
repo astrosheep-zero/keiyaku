@@ -2,7 +2,13 @@ import type { ArchitecturePolicy } from "./engine.js";
 
 export const capabilityPolicy = {
   sensitiveImports: [
-    { module: "node:module", owners: [{ source: "plugin/runtime.ts" }] },
+    {
+      module: "node:module",
+      owners: [
+        { source: "plugin/runtime.ts" },
+        { source: "scripts/compile-tests.mjs", symbols: ["stripTypeScriptTypes"] },
+      ],
+    },
     { module: "module", owners: [] },
     {
       module: "zod",

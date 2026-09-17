@@ -1,6 +1,7 @@
 import { copyFileSync, globSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import ts from "typescript";
+import { stripTypeScriptTypes } from "node:module";
+import { pathToFileURL } from "node:url";
 
 rmSync(".test-build", { recursive: true, force: true });
 // The typecheck command owns semantic checking. Like tsx's focused mode, this
@@ -20,21 +21,13 @@ for (const file of globSync([
     copyFileSync(file, output);
     continue;
   }
-  const result = ts.transpileModule(readFileSync(file, "utf8"), {
-    fileName: file,
-    reportDiagnostics: true,
-    compilerOptions: {
-      target: ts.ScriptTarget.ES2023,
-      module: ts.ModuleKind.ESNext,
-      sourceMap: true,
-      sourceRoot: dirname(resolve(file)),
-    },
-  });
-  const errors = result.diagnostics?.filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error) ?? [];
-  if (errors.length > 0)
-    throw new Error(errors.map((error) => ts.flattenDiagnosticMessageText(error.messageText, "\n")).join("\n"));
-  writeFileSync(output, result.outputText);
-  if (result.sourceMapText !== undefined) writeFileSync(output + ".map", result.sourceMapText);
+  // Semantic checking stays in test:typecheck. Native transform also handles enums
+  // and parameter properties; its inline map points back to the original test.
+  writeFileSync(output, stripTypeScriptTypes(readFileSync(file, "utf8"), {
+    mode: "transform",
+    sourceMap: true,
+    sourceUrl: pathToFileURL(resolve(file)).href,
+  }));
 }
 // Execute the actual release modules and plugin, not a second source compilation.
 for (const directory of ["src", "plugins"]) {

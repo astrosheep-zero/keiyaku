@@ -176,6 +176,8 @@ if (compiled && files.length === 0 && testOptions.every((option) => /^--test-con
           [
             ...loader,
             "--test",
+            // This worker already owns exactly one file in its own native process.
+            "--experimental-test-isolation=none",
             ...reporterOptions,
             "--test-reporter-destination=stdout",
             "--test-reporter=spec",

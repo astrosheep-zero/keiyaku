@@ -125,7 +125,7 @@ function runSharedGitFixtureChild(
   delete env.NODE_TEST_CONTEXT;
   const result = spawnSync(
     process.execPath,
-    ["--import", import.meta.resolve("tsx"), "--test", "--test-reporter=tap", fixture],
+    [...(compiledTestModules ? [] : ["--import", import.meta.resolve("tsx")]), "--test", "--test-reporter=tap", fixture],
     { cwd: root, encoding: "utf8", env },
   );
   const output = `${result.stdout}${result.stderr}`;
@@ -506,4 +506,29 @@ test("explicit test selections reject missing files and unmatched patterns befor
   );
   assert.equal(matched.status, 0, matched.stdout + matched.stderr);
   assert.equal(readFileSync(marker, "utf8"), "ran");
+});
+
+
+test("native test compilation transforms syntax, maps original sources, and rejects invalid syntax", async (context) => {
+  const directory = mkdtempSync(join(tmpdir(), "keiyaku-test-compile-"));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  mkdirSync(join(directory, "tests"));
+  mkdirSync(join(directory, "build", "src"), { recursive: true });
+  mkdirSync(join(directory, "plugins"));
+  writeFileSync(join(directory, "package.json"), '{"type":"module"}');
+  const source = join(directory, "tests", "transform.test.ts");
+  writeFileSync(source, "enum Flag { Yes = 7 }\nclass Box { constructor(readonly value: number) {} }\nexport const value = new Box(Flag.Yes).value;\n");
+  const compile = () => spawnSync(process.execPath, [resolve(root, "scripts/compile-tests.mjs")], {
+    cwd: directory, encoding: "utf8",
+  });
+  const result = compile();
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const output = join(directory, ".test-build", "tests", "transform.test.js");
+  assert.equal((await import(pathToFileURL(output).href)).value, 7);
+  const encoded = readFileSync(output, "utf8").match(/sourceMappingURL=data:application\/json[^,]*;base64,([^\s]+)/u)?.[1];
+  assert.ok(encoded, "compiled tests must retain original-source diagnostics");
+  const map = JSON.parse(Buffer.from(encoded, "base64").toString("utf8")) as { sources: string[] };
+  assert.deepEqual(map.sources, [pathToFileURL(source).href]);
+  writeFileSync(source, "export const broken: = ;");
+  assert.notEqual(compile().status, 0, "invalid input must not silently produce executable tests");
 });
