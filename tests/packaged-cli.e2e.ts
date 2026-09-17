@@ -24,6 +24,20 @@ type PackageManifest = {
 
 const root = resolve(import.meta.dirname, "..");
 
+async function copyFileWithRetry(source: string, destination: string): Promise<void> {
+  const deadline = performance.now() + 2_000;
+  for (;;) {
+    try {
+      copyFileSync(source, destination);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if ((code !== "EBUSY" && code !== "EPERM") || performance.now() >= deadline) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+}
+
 function command(executable: string, args: readonly string[], cwd: string, shell = false): string {
   return execFileSync(executable, args, {
     cwd,
@@ -204,7 +218,7 @@ test("published package installs one keiyaku CLI and runs against a real reposit
   );
 });
 
-test("Windows packaging refuses a missing or corrupt launcher artifact", (t) => {
+test("Windows packaging refuses a missing or corrupt launcher artifact", async (t) => {
   if (process.platform !== "win32") {
     t.skip("the native release guard runs on Windows");
     return;
@@ -221,6 +235,6 @@ test("Windows packaging refuses a missing or corrupt launcher artifact", (t) => 
     assert.throws(() => npmCommand(["pack", "--pack-destination", packed], root), /artifact is missing/u);
     assert.equal(readdirSync(packed).filter((name) => name.endsWith(".tgz")).length, 0);
   } finally {
-    copyFileSync(backup, artifact);
+    await copyFileWithRetry(backup, artifact);
   }
 });
