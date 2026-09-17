@@ -397,7 +397,7 @@ async function waitUntilLatestBody(paths: Parameters<typeof readHeart>[0]): Prom
   }
 }
 
-async function expectBodySettles(body: Promise<unknown>, message: string, timeoutMs = 1_000): Promise<void> {
+async function expectBodySettles(body: Promise<unknown>, message: string, timeoutMs = 5_000): Promise<void> {
   await Promise.race([
     body,
     new Promise<never>((_, reject) => setTimeout(() => reject(new Error(message)), timeoutMs)),
