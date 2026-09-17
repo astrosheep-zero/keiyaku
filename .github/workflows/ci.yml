@@ -1,4 +1,4 @@
-name: Publish reviewed test fixture cleanup
+name: Publish and benchmark test performance batch
 
 on:
   push:
@@ -9,32 +9,86 @@ permissions:
   contents: write
 
 jobs:
-  publish:
+  benchmark:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - name: Prepare the pinned source and reviewed transform
+      - name: Preserve the reviewed transform and use pinned source
         run: |
-          cp .test-audit/publish-cleanup.mjs /tmp/publish-cleanup.mjs
+          cp .test-audit/publish-speed.py /tmp/publish-speed.py
           git checkout --detach bc1b478d8738d546e32e73790ab53565dc7cffc0
       - uses: actions/setup-node@v5
         with:
           node-version: 24.x
           cache: npm
+      - uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.14.1
       - run: npm ci --ignore-scripts --prefer-offline
-      - name: Reproduce the locally validated patch
+      - name: Reproduce and publish the independently reviewed test-only change
         run: |
-          node /tmp/publish-cleanup.mjs
-          node node_modules/prettier/bin/prettier.cjs --write --print-width 120 tests/akuma-provider.test.ts tests/akuma-body-requests.test.ts tests/akuma-api.test.ts tests/akuma-schema.test.ts tests/support/akuma-tell.ts
-          git add tests
+          git config user.name 'astrosheep'
+          git config user.email 'robot.koc@outlook.com'
+          git config --global user.name 'Keiyaku CI'
+          git config --global user.email 'keiyaku-ci@example.invalid'
+          python3 /tmp/publish-speed.py
+          git add tests/facade-fleet.test.ts tests/plugin-runtime.test.ts
           git diff --cached --check
-          test "$(git write-tree)" = 0511747a37366bb53682b8295d540bf4339ccbaa
-          git diff --cached --stat
-      - name: Publish a new review branch, never main
+          test "$(git write-tree)" = 4e58ba7536851b7fb4174c728be243bbe472f338
+          test -z "$(git ls-remote --heads origin refs/heads/test-diet/03-fixture-deadlines)"
+          git commit -m 'test: reuse closed unborn fixtures and control plugin deadlines'
+          git push origin HEAD:refs/heads/test-diet/03-fixture-deadlines
+      - name: Construct the combined candidate without changing main
         run: |
-          test -z "$(git ls-remote --heads origin refs/heads/test-diet/02-dedupe-fixtures)"
-          git -c user.name='astrosheep' -c user.email='robot.koc@outlook.com' commit -m 'test: consolidate repeated provider and Tell fixtures'
-          git push origin HEAD:refs/heads/test-diet/02-dedupe-fixtures
+          git checkout --detach 2b98e8eb509424ebc59739baab459f4479d3fd24
+          python3 /tmp/publish-speed.py
+          git add tests/facade-fleet.test.ts tests/plugin-runtime.test.ts
+          git commit -m 'temporary benchmark: combine independent test batches'
+          echo "CANDIDATE_REF=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          mkdir -p /tmp/test-diet-results
+          git diff bc1b478d8738d546e32e73790ab53565dc7cffc0 HEAD > /tmp/test-diet-results/candidate.patch
+      - name: Verify semantic types and lint
+        run: |
+          npm run test:typecheck
+          npm run lint
+      - name: Prime only compiler artifacts equally before paired trials
+        run: npm run build
+      - name: Alternate three complete baseline and candidate test runs on this runner
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, re, statistics, subprocess, time
+          output = pathlib.Path('/tmp/test-diet-results')
+          base = 'bc1b478d8738d546e32e73790ab53565dc7cffc0'
+          candidate = os.environ['CANDIDATE_REF']
+          metadata = {'baseline': base, 'candidate': candidate, 'node': subprocess.check_output(['node', '--version'], text=True).strip(), 'cpus': os.cpu_count(), 'build_cache': 'primed; no test-result cache', 'command': 'npm test'}
+          rows = []
+          def save():
+              (output / 'results.json').write_text(json.dumps({'environment': metadata, 'runs': rows}, indent=2))
+          for label, index in [('baseline', 1), ('candidate', 1), ('candidate', 2), ('baseline', 2), ('baseline', 3), ('candidate', 3)]:
+              subprocess.run(['git', 'checkout', '--detach', base if label == 'baseline' else candidate], check=True)
+              log = output / f'{label}-{index}.log'
+              started = time.monotonic()
+              with log.open('w') as stream:
+                  result = subprocess.run(['npm', 'test'], stdout=stream, stderr=subprocess.STDOUT)
+              elapsed = time.monotonic() - started
+              text = log.read_text()
+              match = re.search(r'\[test:release\] tests (\d+) status=(\d+)', text)
+              rows.append({'variant': label, 'trial': index, 'wall_seconds': round(elapsed, 3), 'tests_seconds': int(match[1]) / 1000 if match else None, 'status': result.returncode})
+              save()
+              print(json.dumps(rows[-1]), flush=True)
+              if result.returncode != 0 or match is None or match[2] != '0':
+                  raise SystemExit('failed trial; do not use this run as a speed claim')
+          medians = {label: {metric: statistics.median(row[metric] for row in rows if row['variant'] == label) for metric in ['wall_seconds', 'tests_seconds']} for label in ['baseline', 'candidate']}
+          summary = {'medians': medians, 'reduction_percent': {metric: round(100 * (1 - medians['candidate'][metric] / medians['baseline'][metric]), 2) for metric in ['wall_seconds', 'tests_seconds']}}
+          (output / 'summary.json').write_text(json.dumps(summary, indent=2))
+          print(json.dumps(summary, indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-diet-paired-benchmark
+          path: /tmp/test-diet-results/
+          retention-days: 7
