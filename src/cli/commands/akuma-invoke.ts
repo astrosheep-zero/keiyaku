@@ -21,7 +21,7 @@ import {
   type Keiyaku as KeiyakuContract,
   type Repo,
 } from "../../index.js";
-import { callObservationStream, waitObservationStream } from "../render/akuma-activity.js";
+import { callObservationStream, waitObservationStream, type WaitSelectedIdentity } from "../render/akuma-activity.js";
 import { callObservationHead } from "../render/akuma.js";
 import type { TextRenderContext } from "../render/terminal.js";
 import type { Settings } from "../../settings.js";
@@ -44,7 +44,17 @@ export type AkumaInvocationResult =
       streamed?: boolean;
     }>
   | Readonly<{ kind: "akuma"; action: "status"; status: AkumaObservation; alias?: string }>
-  | Readonly<{ kind: "akuma"; action: "wait"; result: AkumaWaitResult; alias?: string; streamed?: boolean }>
+  | Readonly<{
+      kind: "akuma";
+      action: "wait";
+      result: AkumaWaitResult;
+      alias?: string;
+      streamed?: boolean;
+      /** The moment this invocation began waiting, so a non-streamed scoreboard asserts real waiting. */
+      startedAt?: number;
+      /** The frozen selected set, so a non-streamed render names each target as the caller selected it. */
+      selection?: readonly WaitSelectedIdentity[];
+    }>
   | Readonly<{ kind: "akuma"; action: "tell"; mode: "ordinary"; result: AkumaTellResult; body: string; alias?: string }>
   | Readonly<{ kind: "akuma"; action: "tell"; mode: "schema"; result: unknown; body: string; alias?: string }>
   | Readonly<{
@@ -185,9 +195,15 @@ async function promptBody(command: Readonly<{ prompt: AkumaPromptSource }>, inpu
  * baseline, so an already settled Akuma prints no backlog rows. When the wait
  * ends, `conclude` prints its closing scoreboard on the same channel.
  */
-function waitObserver(stream: ReturnType<typeof waitObservationStream>): WaitObserver {
+function waitObserver(
+  stream: ReturnType<typeof waitObservationStream>,
+  onSelected?: (selected: readonly WaitSelectedIdentity[]) => void,
+): WaitObserver {
   return {
-    selected: (selected) => stream.select(selected),
+    selected: (selected) => {
+      onSelected?.(selected);
+      stream.select(selected);
+    },
     observe: (observed) => {
       const lines = stream.observe(observed);
       if (lines.length > 0) writeProgress(lines.join("\n"));
@@ -201,6 +217,14 @@ async function invokeWait(
 ): Promise<AkumaInvocationResult> {
   const alias = command.akuma.length === 1 ? inputAlias(command.akuma[0]!) : undefined;
   const stream = command.output === "text" ? waitObservationStream(resultContext()) : undefined;
+  const startedAt = Date.now();
+  let selection: readonly WaitSelectedIdentity[] | undefined;
+  const observer =
+    stream === undefined
+      ? undefined
+      : waitObserver(stream, (selected) => {
+          selection = selected;
+        });
   const result = await waitAkuma(
     {
       path: input.path,
@@ -210,8 +234,12 @@ async function invokeWait(
       ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
     },
     input.execution ?? localExecutionContext(),
-    stream === undefined ? undefined : waitObserver(stream),
+    observer,
   );
+  const frozen = {
+    startedAt,
+    ...(selection === undefined ? {} : { selection }),
+  };
   if (stream !== undefined && stream.streamed()) {
     const closing = stream.conclude(result);
     if (closing.length > 0) writeProgress(closing);
@@ -221,6 +249,7 @@ async function invokeWait(
       result,
       streamed: true,
       ...(alias === undefined ? {} : { alias }),
+      ...frozen,
     };
   }
   return {
@@ -228,6 +257,7 @@ async function invokeWait(
     action: "wait",
     result,
     ...(alias === undefined ? {} : { alias }),
+    ...frozen,
   };
 }
 

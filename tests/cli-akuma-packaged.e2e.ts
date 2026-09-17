@@ -126,12 +126,12 @@ function ruleFor(...headLines: readonly string[]): string {
   return "─".repeat(headLines.reduce((widest, line) => Math.max(widest, displayColumns(line)), 0));
 }
 
-/** Assert one plural wait's aggregate frame head opens the progress stream before any activity row. */
+/** Assert one plural wait's aggregate frame head opens the progress stream in caller order. */
 function assertAggregateHead(stderr: string, labels: readonly string[]): void {
   const rule = ruleFor(...labels);
   const lines = stderr.split("\n");
   const head = lines.slice(0, labels.length);
-  assert.deepEqual([...head].sort(), [...labels].sort(), `the aggregate head names the selected set:\n${stderr}`);
+  assert.deepEqual(head, labels, `the aggregate head names the selected set in caller order:\n${stderr}`);
   assert.equal(lines[labels.length], rule, `one rule closes the aggregate head:\n${stderr}`);
   assert.equal(
     stderr.match(new RegExp(`^${rule}$`, "gmu"))?.length,
@@ -281,14 +281,14 @@ test("packaged plural waits attribute activity and close every target", { timeou
     );
     assert.match(all.stderr, /@notes +│ say/u, `--all attributed an activity row to its source:\n${all.stderr}`);
     assert.doesNotMatch(all.stderr, /retry note/u, "--all omits thought narration");
-    assert.match(all.stderr, /@done +✓ answered — /u, "--all scored the already settled target");
+    assert.match(all.stderr, /@done +✓ answered$/mu, "--all scored the already settled target without inventing a duration");
     assert.match(all.stderr, /@notes +● still running — waited 2s/u, "--all scored the running target");
     const allLines = all.stderr.split("\n");
     const allScore = allLines.find((line) => /@notes +● still running — waited /u.test(line))!;
     for (const row of allLines.filter((line) => /@notes +│ /u.test(line))) {
       assert.equal(markColumn(row, "│"), markColumn(allScore, "●"), `rows share the scoreboard mark column:\n${all.stderr}`);
     }
-    assert.equal(all.stderr.match(/✓ answered — /gu)?.length, 1, "every target closes exactly once");
+    assert.equal(all.stderr.match(/✓ answered/gu)?.length, 1, "every target closes exactly once");
     await runPackagedCli(["-C", world, "kill", "@notes"], { cwd: world, env });
   } finally {
     await removeTempDirectory(root);

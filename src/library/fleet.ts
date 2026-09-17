@@ -261,6 +261,7 @@ export async function waitAkuma(
       completion: selected,
       ...(timeoutMs === undefined ? {} : { timeoutMs }),
       identity: waitIdentityFacts(addressed.path, repo),
+      selectionOrder: addressed.orderedIds,
       ...(observer?.selected === undefined ? {} : { onSelected: observer.selected }),
       ...(observer?.observe === undefined ? {} : { observe: observer.observe }),
     }),

@@ -200,7 +200,10 @@ async function refuseForeignContractMembers(
 export async function addressAkumaSet(input: UncheckedAkumaAddressInput): Promise<
   Readonly<{
     path: WorldRoot;
+    /** The complete selected set in canonical order: the durable result order. */
     ids: readonly AkuId[];
+    /** The same set in the caller's selector order, for surfaces that name the selection as chosen. */
+    orderedIds: readonly AkuId[];
   }>
 > {
   const values = requireInput(input, "Akuma set address input");
@@ -229,8 +232,9 @@ export async function addressAkumaSet(input: UncheckedAkumaAddressInput): Promis
   const contractMembers = new Set<AkuId>();
   const sources = { fleetIds, aliases, dispatches };
   for (const selector of selectors) addSelectorIds(selector, sources, selected, contractMembers);
+  const orderedIds = [...selected];
   const ids = [...selected].sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
   if (ids.length === 0) throw new TypeError("Akuma selector snapshot is empty");
   await refuseForeignContractMembers(path, ids, contractMembers);
-  return { path, ids };
+  return { path, ids, orderedIds };
 }

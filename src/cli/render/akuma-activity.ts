@@ -69,7 +69,7 @@ export function snapshotHeading(
 }
 
 function answeredHeading(id: string, alias: string | undefined): readonly string[] {
-  const heading = `✓ came back ${identity(id, alias)}`;
+  const heading = `✓ answered ${identity(id, alias)}`;
   return [heading, frameRule([heading])];
 }
 
@@ -597,7 +597,11 @@ export type WaitConclusionResult = Readonly<{
 }>;
 
 /** One selected Akuma's frozen identity, resolved before the first observation round. */
-export type WaitSelectedIdentity = Readonly<{ id: string; alias?: string }>;
+export type WaitSelectedIdentity = Readonly<{
+  id: string;
+  alias?: string;
+  contract?: DispatchAssociation;
+}>;
 
 export type WaitObservationStream = Readonly<{
   /** Freeze the selected set's identities so the source column is stable before the first row. */
@@ -612,14 +616,14 @@ export type WaitObservationStream = Readonly<{
 function conclusionMarkVerb(
   status: AkumaObservation["status"],
   answered: boolean,
-): Readonly<{ mark: string; verb: string; waited: boolean }> {
-  if (status.life === "running") return { mark: "●", verb: "still running", waited: true };
-  if (answered) return { mark: "✓", verb: "answered", waited: false };
-  if (status.life === "asleep") return { mark: "!", verb: "failed", waited: false };
-  if (status.life === "killed") return { mark: "×", verb: "killed", waited: false };
-  if (status.life === "hung") return { mark: "?", verb: "hung", waited: false };
-  if (status.life === "untidy") return { mark: "!", verb: "untidy", waited: false };
-  return { mark: "!", verb: "stranded", waited: false };
+): Readonly<{ mark: string; verb: string }> {
+  if (status.life === "running") return { mark: "●", verb: "still running" };
+  if (answered) return { mark: "✓", verb: "answered" };
+  if (status.life === "asleep") return { mark: "!", verb: "failed" };
+  if (status.life === "killed") return { mark: "×", verb: "killed" };
+  if (status.life === "hung") return { mark: "?", verb: "hung" };
+  if (status.life === "untidy") return { mark: "!", verb: "untidy" };
+  return { mark: "!", verb: "stranded" };
 }
 
 /**
@@ -647,6 +651,7 @@ function durationText(durationMs: number): string {
 type WaitObservationStreamState = {
   streams: Map<string, ActivityStream>;
   sources: Map<string, string>;
+  contracts: Map<string, DispatchAssociation>;
   settledAt: Map<string, number>;
   sourceWidth: number;
   /** Whether this wait observes a plural selected set; undefined until a selection or first round fixes it. */
@@ -659,6 +664,7 @@ function createWaitObservationState(): WaitObservationStreamState {
   return {
     streams: new Map<string, ActivityStream>(),
     sources: new Map<string, string>(),
+    contracts: new Map<string, DispatchAssociation>(),
     settledAt: new Map<string, number>(),
     sourceWidth: 0,
     plural: undefined,
@@ -668,20 +674,32 @@ function createWaitObservationState(): WaitObservationStreamState {
 }
 
 /** Register one selected or newly observed source; the set freezes the column before the first row. */
-function registerWaitSource(state: WaitObservationStreamState, id: string, alias: string | undefined): void {
+function registerWaitSource(
+  state: WaitObservationStreamState,
+  id: string,
+  alias: string | undefined,
+  contract?: DispatchAssociation,
+): void {
   if (state.sources.has(id)) return;
   const label = alias ?? id;
   state.sources.set(id, label);
+  if (contract !== undefined) state.contracts.set(id, contract);
   if (!state.headerEmitted) state.sourceWidth = Math.max(state.sourceWidth, displayColumns(label));
 }
 
 /**
- * The one aggregate head a plural wait prints before any activity row: every
+ * The one aggregate head a plural wait prints before any activity row: each
  * selected target named by the alias addressing it, otherwise its complete
- * identity, closed by the frame's single rule.
+ * identity, with its `└─ kei/<contract>` association line when one exists,
+ * closed by the frame's single rule.
  */
-function aggregateHeading(sources: Iterable<string>): readonly string[] {
-  const head = [...sources];
+function aggregateHeading(state: WaitObservationStreamState): readonly string[] {
+  const head: string[] = [];
+  for (const [id, label] of state.sources) {
+    head.push(label);
+    const contractId = associatedContractId(state.contracts.get(id) ?? { kind: "none" });
+    if (contractId !== undefined) head.push(`└─ ${contractId}`);
+  }
   return [...head, frameRule(head)];
 }
 
@@ -693,7 +711,7 @@ function observeWaitRound(
 ): readonly string[] {
   state.observed = true;
   // Establish the whole round's sources before any row so widths stay aligned within it.
-  for (const member of round) registerWaitSource(state, member.status.id, member.alias);
+  for (const member of round) registerWaitSource(state, member.status.id, member.alias, member.contract);
   const lines: string[] = [];
   // The observation subject opens once: an aggregate head for a plural set, the observed
   // identity frame for a single target. Every later round only appends attributed rows.
@@ -701,7 +719,7 @@ function observeWaitRound(
     state.headerEmitted = true;
     state.plural ??= state.sources.size > 1;
     if (state.plural) {
-      lines.push(...aggregateHeading(state.sources.values()));
+      lines.push(...aggregateHeading(state));
     } else {
       const sole = round[0]!;
       lines.push(...snapshotHeading(sole.status.id, sole.alias, sole.contract));
@@ -729,6 +747,35 @@ function observeWaitRound(
   return lines;
 }
 
+/**
+ * A conclusion clause asserts real waiting: a target that settled at or after
+ * this wait began keeps its duration, a target already settled names no
+ * duration, and an unfinished target carries the elapsed wait.
+ */
+function conclusionClause(at: number, startedAt: number, complete: boolean, end: number): string {
+  if (!complete) return ` — waited ${durationText(Math.max(0, end - startedAt))}`;
+  return at >= startedAt ? ` — ${durationText(Math.max(0, at - startedAt))}` : "";
+}
+
+/** Present ids in frozen selection order, then any result member the selection never named. */
+function orderedWaitIds(state: WaitObservationStreamState, result: WaitConclusionResult): readonly string[] {
+  const ids = [...state.sources.keys()];
+  const known = new Set(ids);
+  for (const observation of result.observations) {
+    if (!known.has(observation.status.id)) {
+      known.add(observation.status.id);
+      ids.push(observation.status.id);
+    }
+  }
+  for (const member of result.unobserved) {
+    if (!known.has(member.id)) {
+      known.add(member.id);
+      ids.push(member.id);
+    }
+  }
+  return ids;
+}
+
 function concludeWaitStream(
   state: WaitObservationStreamState,
   result: WaitConclusionResult,
@@ -745,19 +792,29 @@ function concludeWaitStream(
   for (const stream of state.streams.values()) tail.push(...stream.flush());
 
   const end = now();
-  const total = result.observations.length + result.unobserved.length;
-  const multi = total > 1;
-  const conclusions = result.observations.map((observation) => {
+  const order = orderedWaitIds(state, result);
+  const multi = order.length > 1;
+  const observationById = new Map<string, AkumaObservation>(
+    result.observations.map((observation) => [observation.status.id, observation]),
+  );
+  const unobservedById = new Map<string, Readonly<{ id: string; diagnostic: string }>>(
+    result.unobserved.map((member) => [member.id, member]),
+  );
+  // A multi-target scoreboard names the frozen source label; a single target keeps the bare diagnostic.
+  const label = (id: string): string => (multi ? (state.sources.get(id) ?? id) : id);
+  const unobservedLines = order
+    .filter((id) => unobservedById.has(id))
+    .map((id) => unobservedText(label(id), unobservedById.get(id)!.diagnostic));
+  const conclusions = order.flatMap((id) => {
+    const observation = observationById.get(id);
+    if (observation === undefined) return [];
     const status = observation.status;
-    const answered = statusAnswer(observation) !== undefined;
     const complete = waitComplete(status);
-    const at = complete ? (state.settledAt.get(status.id) ?? end) : end;
-    const durationMs = Math.max(0, at - startedAt);
-    const { mark, verb, waited } = conclusionMarkVerb(status, answered);
-    const target = multi ? ` ${padToDisplay(state.sources.get(status.id) ?? status.id, state.sourceWidth)}` : "";
-    return `${clockFromMs(at)}${target} ${mark} ${verb} — ${waited ? "waited " : ""}${durationText(durationMs)}`;
+    const at = complete ? (state.settledAt.get(id) ?? end) : end;
+    const { mark, verb } = conclusionMarkVerb(status, statusAnswer(observation) !== undefined);
+    const target = multi ? ` ${padToDisplay(state.sources.get(id) ?? id, state.sourceWidth)}` : "";
+    return [`${clockFromMs(at)}${target} ${mark} ${verb}${conclusionClause(at, startedAt, complete, end)}`];
   });
-  const unobservedLines = result.unobserved.map((member) => unobservedText(member.id, member.diagnostic));
   const answeredSingle =
     !multi && result.observations.length === 1 && statusAnswer(result.observations[0]!) !== undefined;
   const blocks = [
@@ -788,7 +845,7 @@ export function waitObservationStream(
   const startedAt = now();
   const state = createWaitObservationState();
   const select = (selected: readonly WaitSelectedIdentity[]): void => {
-    for (const member of selected) registerWaitSource(state, member.id, member.alias);
+    for (const member of selected) registerWaitSource(state, member.id, member.alias, member.contract);
     state.plural ??= selected.length > 1;
   };
   const observe = (round: readonly WaitObservedAkuma[]): readonly string[] =>
@@ -856,10 +913,10 @@ export function callObservationStream(
     const end = now();
     const status = observation.status;
     const answered = statusAnswer({ status }) !== undefined;
-    const at = waitComplete(status) ? (settleMoment(status) ?? end) : end;
-    const durationMs = Math.max(0, at - startedAt);
-    const { mark, verb, waited } = conclusionMarkVerb(status, answered);
-    lines.push(`${clockFromMs(at)} ${mark} ${verb} — ${waited ? "waited " : ""}${durationText(durationMs)}`);
+    const complete = waitComplete(status);
+    const at = complete ? (settleMoment(status) ?? end) : end;
+    const { mark, verb } = conclusionMarkVerb(status, answered);
+    lines.push(`${clockFromMs(at)} ${mark} ${verb}${conclusionClause(at, startedAt, complete, end)}`);
     const failure = failedOutcomeDiagnostic(status);
     if (failure !== undefined) lines.push(`! error ${safeText(failure)}`);
     return lines.join("\n");
@@ -1062,18 +1119,69 @@ export function waitText(
   context: TextRenderContext,
 ): string {
   const alias = result.alias;
-  const total = result.result.observations.length + result.result.unobserved.length;
-  const done = result.result.observations.filter((observation) => waitComplete(observation.status)).length;
+  const observations = result.result.observations;
+  const unobserved = result.result.unobserved;
+  const total = observations.length + unobserved.length;
+  if (total <= 1) {
+    const single = [
+      ...observations.map((observation) => {
+        const answer = statusAnswer(observation);
+        if (answer !== undefined) return answeredBlock(observation, answer, alias, context.columns);
+        return snapshotText(observation, context, { ...(alias === undefined ? {} : { alias }) });
+      }),
+      ...unobserved.map((member) => unobservedText(member.id, member.diagnostic)),
+    ];
+    return single.join("\n\n");
+  }
+  const end = Date.now();
+  const startedAt = result.startedAt ?? end;
+  const order: string[] = [];
+  const labels = new Map<string, string>();
+  const remember = (id: string, frozenAlias?: string): void => {
+    if (labels.has(id)) return;
+    labels.set(id, frozenAlias ?? id);
+    order.push(id);
+  };
+  for (const member of result.selection ?? []) remember(member.id, member.alias);
+  for (const observation of observations) remember(observation.status.id);
+  for (const member of unobserved) remember(member.id);
+  const label = (id: string): string => labels.get(id) ?? id;
+  const observationById = new Map<string, AkumaObservation>(
+    observations.map((observation) => [observation.status.id, observation]),
+  );
+  const unobservedById = new Map<string, Readonly<{ id: string; diagnostic: string }>>(
+    unobserved.map((member) => [member.id, member]),
+  );
+  const sourceWidth = order.reduce((width, id) => Math.max(width, displayColumns(label(id))), 0);
   const blocks = [
-    ...result.result.observations.map((observation) => {
+    ...order.flatMap((id) => {
+      const observation = observationById.get(id);
+      if (observation === undefined) return [];
       const answer = statusAnswer(observation);
-      if (answer !== undefined) return answeredBlock(observation, answer, alias, context.columns);
-      return snapshotText(observation, context, { ...(alias === undefined ? {} : { alias }) });
+      if (answer !== undefined) return [answeredBlock(observation, answer, undefined, context.columns)];
+      return [snapshotText(observation, context)];
     }),
-    ...result.result.unobserved.map((member) => unobservedText(member.id, member.diagnostic)),
+    ...(unobserved.length > 0
+      ? [
+          order
+            .filter((id) => unobservedById.has(id))
+            .map((id) => unobservedText(label(id), unobservedById.get(id)!.diagnostic))
+            .join("\n"),
+        ]
+      : []),
   ];
-  if (total <= 1) return blocks.join("\n\n");
-  return [...blocks, `${done} of ${total} done`].join("\n\n");
+  const rows = order.flatMap((id) => {
+    const observation = observationById.get(id);
+    if (observation === undefined) return [];
+    const status = observation.status;
+    const complete = waitComplete(status);
+    const at = complete ? (settleMoment(status) ?? end) : end;
+    const { mark, verb } = conclusionMarkVerb(status, statusAnswer(observation) !== undefined);
+    return [
+      `${clockFromMs(at)} ${padToDisplay(label(id), sourceWidth)} ${mark} ${verb}${conclusionClause(at, startedAt, complete, end)}`,
+    ];
+  });
+  return rows.length > 0 ? [...blocks, rows.join("\n")].join("\n\n") : blocks.join("\n\n");
 }
 
 export function historyText(

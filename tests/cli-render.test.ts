@@ -1428,7 +1428,7 @@ test("World roster previews strip markdown decoration without rewording", () => 
   assert.match(roster, /Source — src\/a\.ts Heading italic and src\/\*\*\/\*\.ts/u);
 });
 
-test("a sleeping worker reports its return as an event", () => {
+test("a sleeping worker reports its return as a status life footer, not an outcome frame", () => {
   const sleeping = parseAkumaStatus({
     id: "aku/worker/abcd0001",
     life: "asleep",
@@ -1450,7 +1450,8 @@ test("a sleeping worker reports its return as an event", () => {
     },
     { columns: 80, color: false },
   );
-  assert.match(returned, /^✓ came back aku\/worker\/abcd0001$/mu);
+  assert.match(returned, /^✓ answered aku\/worker\/abcd0001$/mu, "an outcome surface uses an outcome verb");
+  assert.doesNotMatch(returned, /came back/u, "the life label survives only in a status footer");
 });
 
 test("an observation frame places the rule between the frame and its content", () => {
@@ -1476,8 +1477,8 @@ test("an observation frame places the rule between the frame and its content", (
     { columns: 80, color: false },
   );
   assert.deepEqual(returned.split("\n").slice(0, 3), [
-    "✓ came back aku/worker/abcd0001",
-    frameRule(["✓ came back aku/worker/abcd0001"]),
+    "✓ answered aku/worker/abcd0001",
+    frameRule(["✓ answered aku/worker/abcd0001"]),
     "the answer",
   ]);
 });
@@ -2205,7 +2206,7 @@ test("an unfinished wait concludes with the running mark and waited duration, ne
   assert.equal(stream.conclude(conclusion), `${clockAt(46_000)} ● still running — waited 45s`);
 });
 
-test("a streamed multi-target wait scoreboards without a count while a non-streamed wait keeps its own", () => {
+test("a streamed multi-target wait scoreboards without a count while a non-streamed one closes the same way", () => {
   const settledAtMs = Date.parse(AKUMA_ACTIVITY_AT);
   let now = settledAtMs - 192_000;
   const stream = waitObservationStream({ columns: 120, color: false }, { now: () => now });
@@ -2245,18 +2246,164 @@ test("a streamed multi-target wait scoreboards without a count while a non-strea
     {
       kind: "akuma",
       action: "wait",
+      startedAt: settledAtMs - 192_000,
+      selection: [{ id: first, alias: parseAkumaAlias("@scout-a") }, { id: second }],
       result: {
         completion: "all",
         observations: [
           { status: answered(first), contract: { kind: "none" }, createdTasks: { kind: "present", rows: [] } },
-          { status: answered(second), contract: { kind: "none" }, createdTasks: { kind: "present", rows: [] } },
+          { status: running(second), contract: { kind: "none" }, createdTasks: { kind: "present", rows: [] } },
         ],
         unobserved: [],
       },
     },
     { columns: 120, color: false },
   );
-  assert.match(multiText, /\n\n2 of 2 done$/u);
+  assert.doesNotMatch(multiText, /of \d+ done/u, "the bare completion count is replaced");
+  assert.match(multiText, /^✓ answered aku\/worker\/abcd0006$/mu, "the detail blocks stay");
+  const multiLines = multiText.split("\n");
+  assert.match(multiLines.at(-1)!, /● still running — waited \d+/u, "an unfinished row carries the elapsed wait");
+  assert.match(
+    multiLines.at(-2)!,
+    new RegExp(`^${clockAt(settledAtMs)} @scout-a +✓ answered — 3m12s$`, "u"),
+    "the scoreboard shares the streamed grammar and order",
+  );
+});
+
+test("a plural aggregate head carries each selected target's Contract association", () => {
+  const first = "aku/worker/abcd0040";
+  const second = "aku/worker/abcd0041";
+  const running = (id: string) =>
+    parseAkumaStatus({ id, life: "running", allowed: [], timeline: openAkumaSnapshot([]) });
+  const stream = waitObservationStream({ columns: 120, color: false }, { now: () => 0 });
+  const association = { kind: "associated", contractId: contractId("kei/alpha") } as const;
+  stream.select([
+    { id: first, alias: parseAkumaAlias("@a"), contract: association },
+    { id: second, contract: { kind: "none" } },
+  ]);
+  const head = ["@a", "└─ kei/alpha", second];
+  assert.deepEqual(
+    stream.observe([observed(running(first), { alias: parseAkumaAlias("@a"), contract: association })]),
+    [...head, frameRule(head)],
+    "each target keeps one identity line and its association line under one rule",
+  );
+});
+
+test("a plural wait keeps the caller's selection order in its head and scoreboard", () => {
+  const first = "aku/worker/abcd0042";
+  const second = "aku/worker/abcd0043";
+  const running = (id: string) =>
+    parseAkumaStatus({ id, life: "running", allowed: [], timeline: openAkumaSnapshot([]) });
+  const stream = waitObservationStream({ columns: 120, color: false }, { now: () => 0 });
+  stream.select([{ id: second }, { id: first }]);
+  assert.deepEqual(
+    stream.observe([observed(running(second)), observed(running(first))]),
+    [second, first, frameRule([second, first])],
+    "the aggregate head follows the frozen selection",
+  );
+  const scoreboard = stream
+    .conclude({
+      observations: [
+        { status: running(first), contract: { kind: "none" }, createdTasks: { kind: "present", rows: [] } },
+        { status: running(second), contract: { kind: "none" }, createdTasks: { kind: "present", rows: [] } },
+      ],
+      unobserved: [],
+    })
+    .split("\n")
+    .filter((line) => line.includes("● still running"));
+  assert.ok(scoreboard[0]!.includes(second), `the first scoreboard row is the first selected target:\n${scoreboard.join("\n")}`);
+  assert.ok(scoreboard[1]!.includes(first), `the second scoreboard row is the second selected target:\n${scoreboard.join("\n")}`);
+});
+
+test("conclusion durations assert real waiting", () => {
+  const settledAtMs = Date.parse(AKUMA_ACTIVITY_AT);
+  const id = "aku/worker/abcd0044";
+  const observation = (status: ReturnType<typeof parseAkumaStatus>) => ({
+    status,
+    contract: { kind: "none" as const },
+    createdTasks: { kind: "present" as const, rows: [] },
+  });
+  const running = (at: string) =>
+    parseAkumaStatus({
+      id,
+      life: "running",
+      allowed: [],
+      timeline: openAkumaSnapshot([snapshotRow({ kind: "said", sequence: 1, turnSequence: 1, at, text: "working" })]),
+    });
+  const answered = parseAkumaStatus({
+    id,
+    life: "asleep",
+    allowed: [],
+    timeline: idleAkumaSnapshot([], answeredOutcome(1, "the answer")),
+  });
+
+  // Already settled before the wait began: the settle clock is real, the duration is not fabricated.
+  let now = settledAtMs + 10_000;
+  const already = waitObservationStream({ columns: 120, color: false }, { now: () => now });
+  already.observe([observed(answered)]);
+  assert.equal(already.conclude({ observations: [observation(answered)], unobserved: [] }), `${clockAt(settledAtMs)} ✓ answered\n\n`);
+
+  // Settles during the wait: the clause states the real wait.
+  now = settledAtMs - 5_000;
+  const during = waitObservationStream({ columns: 120, color: false }, { now: () => now });
+  during.observe([observed(running(AKUMA_ACTIVITY_AT))]);
+  now = settledAtMs + 1_000;
+  during.observe([observed(answered)]);
+  assert.equal(during.conclude({ observations: [observation(answered)], unobserved: [] }), `${clockAt(settledAtMs)} ✓ answered — 5s\n\n`);
+
+  // Unfinished: the row keeps its elapsed wait.
+  now = 1_000;
+  const unfinished = waitObservationStream({ columns: 120, color: false }, { now: () => now });
+  const open = running(AKUMA_ACTIVITY_AT);
+  unfinished.observe([observed(open)]);
+  now = 46_000;
+  assert.equal(unfinished.conclude({ observations: [observation(open)], unobserved: [] }), `${clockAt(46_000)} ● still running — waited 45s`);
+
+  // The observing call shares the rule: a call already answered at its first look names no duration.
+  const call = callObservationStream(
+    { columns: 120, color: false },
+    { id, contract: { kind: "none" }, facts: [] },
+    { now: () => settledAtMs + 10_000 },
+  );
+  assert.equal(call.conclude({ kind: "observed", status: answered }).split("\n").at(-1), `${clockAt(settledAtMs)} ✓ answered`);
+});
+
+test("unobserved diagnostics use the frozen label in streamed and non-streamed plural waits", () => {
+  const id = parseAkumaStatus({
+    id: "aku/worker/abcd0045",
+    life: "running",
+    allowed: [],
+    timeline: openAkumaSnapshot([]),
+  }).id;
+  const alias = parseAkumaAlias("@gone");
+  const other = "aku/worker/abcd0046";
+  const running = (target: string) =>
+    parseAkumaStatus({ id: target, life: "running", allowed: [], timeline: openAkumaSnapshot([]) });
+  const stream = waitObservationStream({ columns: 120, color: false }, { now: () => 0 });
+  stream.select([{ id, alias }, { id: other }]);
+  stream.observe([observed(running(other))]);
+  const streamed = stream.conclude({ observations: [], unobserved: [{ id, diagnostic: "window lost" }] });
+  assert.match(streamed, /^! @gone unobserved: window lost$/mu, "the streamed diagnostic names the frozen alias");
+  assert.doesNotMatch(streamed, new RegExp(`${id} unobserved`, "u"));
+
+  const nonStreamed = waitText(
+    {
+      kind: "akuma",
+      action: "wait",
+      startedAt: 0,
+      selection: [{ id, alias }, { id: other }],
+      result: {
+        completion: "all",
+        observations: [
+          { status: running(other), contract: { kind: "none" }, createdTasks: { kind: "present", rows: [] } },
+        ],
+        unobserved: [{ id, diagnostic: "window lost" }],
+      },
+    },
+    { columns: 120, color: false },
+  );
+  assert.match(nonStreamed, /^! @gone unobserved: window lost$/mu, "the non-streamed diagnostic names the frozen alias");
+  assert.doesNotMatch(nonStreamed, new RegExp(`${id} unobserved`, "u"));
 });
 
 test("a single non-streamed text wait keeps its snapshot without a completion count", () => {

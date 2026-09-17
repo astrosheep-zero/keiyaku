@@ -136,26 +136,50 @@ export type WaitExecutionInput = Readonly<{
   signal?: AbortSignal;
   /** Resolves one Akuma's identity facts; consulted once per Akuma a viewer first sees. */
   identity?: (id: AkumaStatus["id"]) => Promise<WaitIdentityFacts>;
+  /** The selected set in the caller's order; a viewer's head and scoreboard follow it. */
+  selectionOrder?: readonly AkumaStatus["id"][];
   /** Reports the frozen selected set before the first round, so a viewer can fix its layout. */
   onSelected?: (selected: readonly WaitSelectedAkuma[]) => void;
   /** Reports every observation round to a live viewer; absent keeps the cheap completion probe. */
   observe?: (observed: readonly WaitObservedAkuma[]) => void;
 }>;
 
+/** Canonical ids in the caller's selection order, appending any id the caller never named. */
+function selectionOrderedIds(
+  ids: readonly AkumaStatus["id"][],
+  order: readonly AkumaStatus["id"][],
+): readonly AkumaStatus["id"][] {
+  const present = new Set(ids);
+  const seen = new Set<AkumaStatus["id"]>();
+  const ordered: AkumaStatus["id"][] = [];
+  for (const id of order) {
+    if (present.has(id) && !seen.has(id)) {
+      seen.add(id);
+      ordered.push(id);
+    }
+  }
+  for (const id of ids) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      ordered.push(id);
+    }
+  }
+  return ordered;
+}
+
 export async function executeWaitAkuma(input: WaitExecutionInput): Promise<AkumaWaitResult> {
   const deadline = input.timeoutMs === undefined ? undefined : performance.now() + input.timeoutMs;
   // Identity facts are read once per observed Akuma, not once per 100ms round.
   const facts = new Map<AkumaStatus["id"], WaitIdentityFacts>();
   if (input.onSelected !== undefined) {
-    const selected: WaitSelectedAkuma[] = [];
     for (const id of input.ids) {
       input.signal?.throwIfAborted();
       const known = input.identity === undefined ? undefined : await input.identity(id);
-      const resolved = known ?? { contract: NO_DISPATCH_ASSOCIATION };
-      facts.set(id, resolved);
-      selected.push({ id, ...resolved });
+      facts.set(id, known ?? { contract: NO_DISPATCH_ASSOCIATION });
     }
-    input.onSelected(selected);
+    const ordered =
+      input.selectionOrder === undefined ? input.ids : selectionOrderedIds(input.ids, input.selectionOrder);
+    input.onSelected(ordered.map((id) => ({ id, ...facts.get(id)! })));
   }
   const observeRound = async (statuses: readonly AkumaStatus[]): Promise<void> => {
     if (input.observe === undefined) return;

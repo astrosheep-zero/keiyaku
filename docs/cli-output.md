@@ -199,15 +199,23 @@ association it holds — and an already settled Akuma prints that frame while
 replaying no backlog. A wait observing more than one Akuma instead opens one
 aggregate frame for its selected set before any activity row, naming each
 selected target by the alias addressing it, otherwise its complete identity,
+adding that target's `└─ kei/<contract>` association line when it holds one,
 and closes that head with a single rule; no per-target identity frame follows
-it during observation. The wait ends with one conclusion row per observed
-Akuma, attributed to its source the same way the activity above it is, so an
-unfinished wait replays no activity snapshot; the first row of a multi-target
-scoreboard opens a new paragraph. A plural wait identifies the source of every
-semantic activity row in a consistently aligned source column: the frozen
-alias addressing that Akuma when one exists, otherwise its complete identity,
-resolved from the observation seam rather than a renderer reading of the
-world. A wrapped row's
+it during observation. The aggregate head and its conclusion scoreboard follow
+the order the caller selected the targets, and a target is named the same way
+in the head, the diagnostics, and the scoreboard. The wait ends with one
+conclusion row per observed Akuma, attributed to its source the same way the
+activity above it is, so an unfinished wait replays no activity snapshot; the
+first row of a multi-target scoreboard opens a new paragraph. A plural wait
+identifies the source of every semantic activity row in a consistently aligned
+source column: the frozen alias addressing that Akuma when one exists,
+otherwise its complete identity, resolved from the observation seam rather
+than a renderer reading of the world. An unobserved diagnostic names its
+target by that same frozen label. A conclusion row states a duration only when
+the target became complete after the wait began: a target already settled at
+the wait's first observation names its settle moment without a fabricated
+duration, while an unfinished target states its elapsed wait. Outcome surfaces
+use outcome verbs, and a life label stays in a status footer. A wrapped row's
 continuations carry no time or source of their own, an omission marker keeps
 its source, and the frozen selected set fixes the attribution width before the
 first row, so the whole stream and its scoreboard share one alignment. Width
@@ -216,9 +224,11 @@ flag, or combined mark never shifts a row. For a streamed wait, stdout carries
 the answer bytes exactly once for a single answered target and is empty
 otherwise, including every multi-target wait; the blank line separating that
 answer from the stream belongs to the progress channel. A non-streamed text
-wait keeps its own frame-and-answer or snapshot result, with the plural-target
-completion count it has always carried; that count is what the streamed wait's
-scoreboard replaces. JSON mode keeps its result shape.
+wait keeps its own frame-and-answer or snapshot result; a plural non-streamed
+wait closes with the same attributed scoreboard grammar and ordering a
+streamed wait uses, while a single-target non-streamed wait keeps its ordinary
+snapshot and its answered frame states the outcome verb. JSON mode keeps its
+result shape.
 
 Region overlap in bind and amend receipts remains supporting evidence, not a
 warning or a separate report. It groups shared scope beneath each related
