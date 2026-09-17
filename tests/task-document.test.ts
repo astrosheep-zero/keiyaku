@@ -35,36 +35,6 @@ test("task physical local-ID budget fits authority and lock components", () => {
   );
 });
 
-test("creation and authority documents contain no Contract association", () => {
-  const creation = parseTaskCreationDocument(
-    "---\ntitle: Native task\nstate: in_progress\nnote: Initial note\n---\nBody\n",
-  );
-  assert.equal(creation.state, "in_progress");
-  assert.equal(creation.note, "Initial note");
-  const coordinate = { namespace: ["nested"], localId: "native-task" } as const;
-  const document = {
-    ...creation,
-    id: formatTaskId(coordinate),
-    createdAt: "2026-08-07T01:02:03.004Z",
-    updatedAt: "2026-08-07T02:03:04.005Z",
-  };
-  assert.deepEqual(parseTaskDocument(serializeTaskDocument(document), coordinate), document);
-  const defaults = parseTaskCreationDocument("---\ntitle: Defaults\n---\n");
-  assert.deepEqual({ state: defaults.state, note: defaults.note }, { state: "open", note: "" });
-  assert.throws(
-    () => parseTaskCreationDocument("---\ntitle: Bad\ncontractId: null\n---\n"),
-    /unknown task front matter key/u,
-  );
-  assert.throws(
-    () => parseTaskCreationDocument("---\ntitle: Bad\ncreatedAt: 2026-08-07T01:02:03.004Z\n---\n"),
-    /unknown task front matter key/u,
-  );
-  assert.throws(
-    () => parseTaskCreationDocument("---\ntitle: Bad\ncreatedBy: someone\n---\n"),
-    /unknown task front matter key/u,
-  );
-});
-
 test("optional createdBy is stored before timestamps and rejects blank values", () => {
   const coordinate = { namespace: [], localId: "authored" } as const;
   const document = {

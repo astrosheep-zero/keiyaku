@@ -1,3 +1,7 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { TestContext } from "node:test";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -217,15 +221,27 @@ export async function removeTempDirectory(path: string): Promise<void> {
       // A departing fixture process can still hold or repopulate the tree; retry
       // the transient filesystem races on every platform until the tree is gone.
       const code = (error as NodeJS.ErrnoException).code;
-      if (
-        code !== "ENOTEMPTY" &&
-        code !== "EACCES" &&
-        code !== "EBUSY" &&
-        code !== "EPERM"
-      )
-        throw error;
+      if (code !== "ENOTEMPTY" && code !== "EACCES" && code !== "EBUSY" && code !== "EPERM") throw error;
       if (performance.now() >= deadline) throw error;
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
   }
+}
+
+/** A fresh one-shot barrier; tests own when it resolves or rejects. */
+export function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
+
+/** Register cleanup before fixture setup, including setup failures. No directory is shared. */
+export function temporaryDirectory(context: TestContext, prefix: string): string {
+  const directory = mkdtempSync(join(tmpdir(), prefix));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  return directory;
 }

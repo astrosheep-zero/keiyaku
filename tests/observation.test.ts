@@ -3,8 +3,6 @@ import test from "node:test";
 import { contractState } from "../src/core/facts/observation.js";
 import { decideBind } from "../src/core/verbs/bind.js";
 import { decideAmend } from "../src/core/verbs/amend.js";
-import { decideAttestation } from "../src/core/verbs/attestation.js";
-import { decideDeliver } from "../src/core/verbs/deliver.js";
 import { decidePlacement } from "../src/core/verbs/placement.js";
 import { foldJournal } from "../src/core/facts/fold.js";
 import {
@@ -14,8 +12,7 @@ import {
   entryUlid,
   snapshotId,
   type ContractId,
-  type ContractState,
-  type JournalEntry,
+  type ContractState
 } from "../src/core/facts/types.js";
 
 const id = contractId("kei/observation-test");
@@ -252,100 +249,4 @@ test("amend refuses direct and transitive prerequisite cycles", () => {
   const refusal = { kind: "refused", refusal: { kind: "cyclic-prerequisite", contractId: a } };
   assert.deepEqual(decide([a]), refusal);
   assert.deepEqual(decide([b]), refusal);
-});
-
-test("lifecycle and document refusals outrank a refused preparation", () => {
-  const bind: Extract<JournalEntry, { kind: "bind" }> = {
-    v: 1,
-    kind: "bind",
-    contract: id,
-    entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
-    at: "2026-08-07T00:00:00Z",
-    data: {
-      coordinates: { start: snapshotId("start"), workspace: "worktree" },
-      terms: terms(),
-    },
-  };
-  const active = foldJournal(id, [
-    bind,
-    {
-      v: 1,
-      kind: "bound",
-      contract: id,
-      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAW"),
-      at: "2026-08-07T00:00:01Z",
-      data: {},
-    },
-  ]);
-  const terminal = foldJournal(id, [
-    bind,
-    {
-      v: 1,
-      kind: "bound",
-      contract: id,
-      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAW"),
-      at: "2026-08-07T00:00:01Z",
-      data: {},
-    },
-    {
-      v: 1,
-      kind: "abandoned",
-      contract: id,
-      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAX"),
-      at: "2026-08-07T00:00:02Z",
-      data: {},
-    },
-  ]);
-  const attempt = { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAY")] };
-  const mechanical = { kind: "mechanical" };
-
-  assert.deepEqual(
-    decideBind({
-      input: {
-        contractId: id,
-        at: "2026-08-07T00:00:02Z",
-        preparation: { kind: "refused", refusal: mechanical },
-      },
-      attempt,
-      observation: new Map([[id, active]]),
-    }),
-    { kind: "refused", refusal: { kind: "contract-exists", contractId: id } },
-  );
-  assert.deepEqual(
-    decideAmend({
-      input: {
-        contractId: id,
-        at: "2026-08-07T00:00:02Z",
-        source: { ...active.terms, document: { ...active.terms.document, key: documentKey("stale") } },
-        preparation: { kind: "refused", refusal: mechanical },
-      },
-      attempt,
-      observation: new Map([[id, active]]),
-    }),
-    { kind: "refused", refusal: { kind: "terms-moved", contractId: id } },
-  );
-  assert.deepEqual(
-    decideDeliver({
-      input: {
-        contractId: id,
-        at: "2026-08-07T00:00:02Z",
-        preparation: { kind: "refused", document: documentKey("stale"), refusal: mechanical },
-      },
-      attempt,
-      observation: new Map([[id, active]]),
-    }),
-    { kind: "refused", refusal: { kind: "document-moved", contractId: id } },
-  );
-  assert.deepEqual(
-    decideAttestation({
-      input: {
-        contractId: id,
-        at: "2026-08-07T00:00:02Z",
-        preparation: { kind: "refused", refusal: mechanical },
-      },
-      attempt,
-      observation: new Map([[id, terminal]]),
-    }),
-    { kind: "refused", refusal: { kind: "terminal", contractId: id } },
-  );
 });

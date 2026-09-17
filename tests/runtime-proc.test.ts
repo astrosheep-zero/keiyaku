@@ -1,3 +1,5 @@
+import { temporaryDirectory } from "./support/process.js";
+import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
@@ -48,19 +50,15 @@ function restoreEnvironment(name: string, value: string | undefined): void {
   else process.env[name] = value;
 }
 
-test("fixture file barriers observe present and later files and reject missing evidence", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-file-barrier-"));
+test("fixture file barriers observe present and later files and reject missing evidence", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-v4-file-barrier-");
   const file = join(root, "ready");
-  try {
-    await assert.rejects(waitForFixtureFile(file, 0), /timed out waiting for barrier file/u);
-    const waiting = waitForFixtureFile(file);
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    writeFileSync(file, "ready");
-    await waiting;
-    await waitForFixtureFile(file, 0);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+  await assert.rejects(waitForFixtureFile(file, 0), /timed out waiting for barrier file/u);
+  const waiting = waitForFixtureFile(file);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  writeFileSync(file, "ready");
+  await waiting;
+  await waitForFixtureFile(file, 0);
 });
 
 test("a never-true bounded fixture wait expires naming what it awaited and a terminal state ends it early", async () => {
@@ -211,48 +209,40 @@ test("spawn-capable fixture cleanup retains both delayed and settled ambiguous f
   }
 });
 
-test("spawn-capable fixture cleanup retains an unproved launch without replacing its failure", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-unproved-body-launch-"));
+test("spawn-capable fixture cleanup retains an unproved launch without replacing its failure", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-v4-unproved-body-launch-");
   const receipt = join(root, "body-pids");
   const original = new Error("fixture launch failed without settlement proof");
   let cleanup: Awaited<ReturnType<typeof cleanupSpawnCapableFixture>> | undefined;
-  try {
-    await assert.rejects(
-      async () => {
-        try {
-          throw original;
-        } finally {
-          cleanup = await cleanupSpawnCapableFixture({
-            fixturePath: root,
-            pidReceiptPath: receipt,
-            timeoutMs: 0,
-            operationFailed: true,
-          });
-        }
-      },
-      (error: unknown) => error === original,
-    );
-    assert.equal(cleanup?.kind, "retained");
-    assert.equal(existsSync(root), true);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+  await assert.rejects(
+    async () => {
+      try {
+        throw original;
+      } finally {
+        cleanup = await cleanupSpawnCapableFixture({
+          fixturePath: root,
+          pidReceiptPath: receipt,
+          timeoutMs: 0,
+          operationFailed: true,
+        });
+      }
+    },
+    (error: unknown) => error === original,
+  );
+  assert.equal(cleanup?.kind, "retained");
+  assert.equal(existsSync(root), true);
 });
 
-test("PID receipts reject malformed nonempty lines and retain failed fixtures", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-malformed-pid-receipt-"));
+test("PID receipts reject malformed nonempty lines and retain failed fixtures", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-v4-malformed-pid-receipt-");
   const receipt = join(root, "body-pids");
-  try {
-    writeFileSync(receipt, "123garbage\n", "utf8");
-    assert.throws(() => readPidReceipt(receipt), /malformed fixture child pid receipt/u);
-    assert.deepEqual(
-      await cleanupSpawnCapableFixture({ fixturePath: root, pidReceiptPath: receipt, operationFailed: true }),
-      { kind: "retained", diagnostic: "malformed fixture child pid receipt: 123garbage" },
-    );
-    assert.equal(existsSync(root), true);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+  writeFileSync(receipt, "123garbage\n", "utf8");
+  assert.throws(() => readPidReceipt(receipt), /malformed fixture child pid receipt/u);
+  assert.deepEqual(
+    await cleanupSpawnCapableFixture({ fixturePath: root, pidReceiptPath: receipt, operationFailed: true }),
+    { kind: "retained", diagnostic: "malformed fixture child pid receipt: 123garbage" },
+  );
+  assert.equal(existsSync(root), true);
 });
 
 for (const force of [false, true]) {
@@ -519,10 +509,7 @@ test("runProcess returns terminal diagnostics from both streams", async () => {
 
 test("runProcess observes split UTF-8 output before the child completes while retaining its tail", async () => {
   let observed = "";
-  let ready!: () => void;
-  const liveOutput = new Promise<void>((resolve) => {
-    ready = resolve;
-  });
+  const { promise: liveOutput, resolve: ready } = promiseBarrier<void>();
   let settled = false;
   const pending = runProcess(
     input(
@@ -608,8 +595,7 @@ test("runProcess retains only the final 16 KiB of each stream", async () => {
     ]),
   );
 
-  assert.equal(outcome.kind, "terminal");
-  if (outcome.kind !== "terminal") return;
+  assert.ok(outcome.kind === "terminal", "expected outcome.kind = \"terminal\"");
   assert.equal(Buffer.byteLength(outcome.stdout), 16 * 1024);
   assert.equal(Buffer.byteLength(outcome.stderr), 16 * 1024);
   assert.equal(outcome.stdout.endsWith("stdout-tail"), true);
@@ -636,8 +622,7 @@ for (const [name, run] of [
       ]),
     );
 
-    assert.equal(outcome.kind, "timeout");
-    if (outcome.kind !== "timeout") return;
+    assert.ok(outcome.kind === "timeout", "expected outcome.kind = \"timeout\"");
     assert.equal(Buffer.byteLength(outcome.stdout), 16 * 1024);
     assert.equal(Buffer.byteLength(outcome.stderr), 16 * 1024);
     assert.equal(outcome.stdout.endsWith("stdout-tail"), true);
@@ -702,8 +687,7 @@ test("runProcess reports unknown exits", async () => {
 test("runProcess reports spawn errors", async () => {
   const outcome = await runProcess(input(["keiyaku-v4-no-such-executable"]));
 
-  assert.equal(outcome.kind, "spawn-error");
-  if (outcome.kind !== "spawn-error") return;
+  assert.ok(outcome.kind === "spawn-error", "expected outcome.kind = \"spawn-error\"");
   assert.match(outcome.diagnostic, /ENOENT/);
 });
 
@@ -1137,63 +1121,55 @@ test("a direct spawner terminates through its live owned-process handle", async 
   }
 });
 
-test("a direct spawner retains its waitpid result and bounded shared-log reference", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-owned-process-exit-"));
-  try {
-    const log = join(root, "stdio.log");
-    writeFileSync(log, "prior stdout\n");
-    const owned = await spawnDetachedProcess({
-      argv: [process.execPath, "-e", "process.exit(7)"],
-      cwd: root,
-      log,
-    });
-    const exit = await owned.exited;
-    assert.deepEqual({ code: exit.code, signal: exit.signal }, { code: 7, signal: null });
-    assert.deepEqual(exit.log, { path: log, from: "prior stdout\n".length, to: readFileSync(log).length });
-    assert.match(readFileSync(log, "utf8"), /prior stdout/u);
-    assert.match(readFileSync(log, "utf8"), /\[child exit 7\]/u);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+test("a direct spawner retains its waitpid result and bounded shared-log reference", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-v4-owned-process-exit-");
+  const log = join(root, "stdio.log");
+  writeFileSync(log, "prior stdout\n");
+  const owned = await spawnDetachedProcess({
+    argv: [process.execPath, "-e", "process.exit(7)"],
+    cwd: root,
+    log,
+  });
+  const exit = await owned.exited;
+  assert.deepEqual({ code: exit.code, signal: exit.signal }, { code: 7, signal: null });
+  assert.deepEqual(exit.log, { path: log, from: "prior stdout\n".length, to: readFileSync(log).length });
+  assert.match(readFileSync(log, "utf8"), /prior stdout/u);
+  assert.match(readFileSync(log, "utf8"), /\[child exit 7\]/u);
 });
 
 test("a direct spawner retains a short exit marker write before its exit receipt", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-owned-process-boundary-"));
-  try {
-    const log = join(root, "stdio.log");
-    const handle = await open(log, "a");
-    type WritableHandle = { write(...args: unknown[]): Promise<{ bytesWritten: number }> };
-    const prototype = Object.getPrototypeOf(handle) as WritableHandle;
-    const originalWrite = prototype.write;
-    let shortened = false;
-    t.mock.method(prototype, "write", async function (this: WritableHandle, ...args: unknown[]) {
-      if (
-        !shortened &&
-        Buffer.isBuffer(args[0]) &&
-        typeof args[1] === "number" &&
-        typeof args[2] === "number" &&
-        args[2] > 1
-      ) {
-        shortened = true;
-        return Reflect.apply(originalWrite, this, [args[0], args[1], 1, args[3]]);
-      }
-      return Reflect.apply(originalWrite, this, args);
-    });
-    await handle.close();
+  const root = temporaryDirectory(t, "keiyaku-v4-owned-process-boundary-");
+  const log = join(root, "stdio.log");
+  const handle = await open(log, "a");
+  type WritableHandle = { write(...args: unknown[]): Promise<{ bytesWritten: number }> };
+  const prototype = Object.getPrototypeOf(handle) as WritableHandle;
+  const originalWrite = prototype.write;
+  let shortened = false;
+  t.mock.method(prototype, "write", async function (this: WritableHandle, ...args: unknown[]) {
+    if (
+      !shortened &&
+      Buffer.isBuffer(args[0]) &&
+      typeof args[1] === "number" &&
+      typeof args[2] === "number" &&
+      args[2] > 1
+    ) {
+      shortened = true;
+      return Reflect.apply(originalWrite, this, [args[0], args[1], 1, args[3]]);
+    }
+    return Reflect.apply(originalWrite, this, args);
+  });
+  await handle.close();
 
-    const owned = await spawnDetachedProcess({
-      argv: [process.execPath, "-e", "process.exit(0)"],
-      cwd: root,
-      log,
-    });
-    const exit = await owned.exited;
-    const content = readFileSync(log, "utf8");
-    assert.equal(shortened, true);
-    assert.match(content, /\[child exit 0\]\n$/u);
-    assert.equal(exit.log.to, content.length);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+  const owned = await spawnDetachedProcess({
+    argv: [process.execPath, "-e", "process.exit(0)"],
+    cwd: root,
+    log,
+  });
+  const exit = await owned.exited;
+  const content = readFileSync(log, "utf8");
+  assert.equal(shortened, true);
+  assert.match(content, /\[child exit 0\]\n$/u);
+  assert.equal(exit.log.to, content.length);
 });
 
 test("a direct spawner rejects exit evidence when its run-log path disappears", async (t) => {
@@ -1201,19 +1177,15 @@ test("a direct spawner rejects exit evidence when its run-log path disappears", 
     t.skip("Windows inherited log handles cannot be unlinked while the child is alive");
     return;
   }
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-owned-process-missing-log-"));
-  try {
-    const log = join(root, "stdio.log");
-    const owned = await spawnDetachedProcess({
-      argv: [process.execPath, "-e", "setTimeout(() => process.exit(7), 50)"],
-      cwd: root,
-      log,
-    });
-    rmSync(log);
-    await assert.rejects(owned.exited, /pre-admission exit 7: run-log evidence unavailable/u);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+  const root = temporaryDirectory(t, "keiyaku-v4-owned-process-missing-log-");
+  const log = join(root, "stdio.log");
+  const owned = await spawnDetachedProcess({
+    argv: [process.execPath, "-e", "setTimeout(() => process.exit(7), 50)"],
+    cwd: root,
+    log,
+  });
+  rmSync(log);
+  await assert.rejects(owned.exited, /pre-admission exit 7: run-log evidence unavailable/u);
 });
 
 test("Unix natural exit followed by terminate emits no signal", async (t) => {
@@ -1221,19 +1193,15 @@ test("Unix natural exit followed by terminate emits no signal", async (t) => {
     t.skip("POSIX group signals only");
     return;
   }
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-owned-process-natural-exit-"));
-  try {
-    const owned = await spawnDetachedProcess({
-      argv: [process.execPath, "-e", "process.exit(0)"],
-      cwd: root,
-      log: join(root, "stdio.log"),
-    });
-    const exit = await owned.exited;
-    assert.deepEqual({ code: exit.code, signal: exit.signal }, { code: 0, signal: null });
-    await expectLaterTerminateIsInert(owned);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+  const root = temporaryDirectory(t, "keiyaku-v4-owned-process-natural-exit-");
+  const owned = await spawnDetachedProcess({
+    argv: [process.execPath, "-e", "process.exit(0)"],
+    cwd: root,
+    log: join(root, "stdio.log"),
+  });
+  const exit = await owned.exited;
+  assert.deepEqual({ code: exit.code, signal: exit.signal }, { code: 0, signal: null });
+  await expectLaterTerminateIsInert(owned);
 });
 
 test("an owned process capability is inert after termination and repeated terminate", async () => {
