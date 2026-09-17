@@ -29,7 +29,11 @@ import {
   type RequestProtocol,
   type ServiceRequestCommand,
 } from "../src/akuma/request-wire.js";
-import { REQUEST_PROGRESS_WINDOW, publishRequestProgress, readRequestProgress } from "../src/akuma/request-observation.js";
+import {
+  REQUEST_PROGRESS_WINDOW,
+  publishRequestProgress,
+  readRequestProgress,
+} from "../src/akuma/request-observation.js";
 import { executeTellAkuma } from "../src/akuma/fleet-execution.js";
 import { waitAkuma } from "../src/library/fleet.js";
 import {
@@ -95,16 +99,14 @@ async function openFleetPump(
 
 async function openContractPump(
   parent: Awaited<ReturnType<typeof born>>,
-  port: Pick<ContractRequestPort, "deliver"> &
-    Partial<Pick<ContractRequestPort, "audit" | "review">> &
-    Partial<FleetRequestPort>,
+  port: Partial<ContractRequestPort>,
 ): Promise<BodyRequestPump> {
   return await BodyRequestPump.open({
     paths: parent.paths,
     allowed: parent.soul.allowed,
     bodySequence: 1,
     now: () => "2026-08-18T00:00:01.000Z",
-    commands: contractRequestCommands(port as ContractRequestPort),
+    commands: contractRequestCommands({ ...unusedContractPort, ...port }),
     signal: new AbortController().signal,
   });
 }
@@ -342,8 +344,14 @@ test("forwarded ordinary and schema Tells retain the submitting initiator at the
   const received: Array<string | undefined> = [];
   const port: FleetRequestPort = {
     ...unusedFleetPort,
-    tell: async (input) => { received.push(input.initiator); return {} as never; },
-    tellAnswer: async (input) => { received.push(input.initiator); return "answer"; },
+    tell: async (input) => {
+      received.push(input.initiator);
+      return {} as never;
+    },
+    tellAnswer: async (input) => {
+      received.push(input.initiator);
+      return "answer";
+    },
   };
   const facts: ExecutionFacts = {
     id: "request-initiator",
@@ -610,7 +618,11 @@ test("request progress includes the final snapshot published between progress an
       syncBuiltinESMExports();
       try {
         const request = requestBodyCommand({
-          directory, id, command, value: "run", onProgress: (value) => seen.push(value),
+          directory,
+          id,
+          command,
+          value: "run",
+          onProgress: (value) => seen.push(value),
         });
         if (failed) await assert.rejects(request, /service failed/u);
         else assert.equal((await request).kind, "returned");
@@ -724,11 +736,9 @@ test("an opted-in request forwards post-publication abort to its live service an
     progressCommand(
       async (_value, facts) =>
         await new Promise((resolve) => {
-          facts.signal.addEventListener(
-            "abort",
-            () => resolve({ result: "cancelled", service: "cancelled" }),
-            { once: true },
-          );
+          facts.signal.addEventListener("abort", () => resolve({ result: "cancelled", service: "cancelled" }), {
+            once: true,
+          });
           started();
         }),
       true,
@@ -1221,15 +1231,6 @@ test("deliver claims execute once and Heart retains only the Contract fact refer
   const contractId = "kei/forwarded-delivery";
   let calls = 0;
   const pump = await openContractPump(parent, {
-    wait: async () => {
-      throw new Error("unexpected wait");
-    },
-    tell: async () => {
-      throw new Error("unexpected tell");
-    },
-    kill: async () => {
-      throw new Error("unexpected kill");
-    },
     deliver: async (input) => {
       calls += 1;
       assert.equal(input.requester, parent.id);
@@ -1282,15 +1283,6 @@ test("deliver claims execute once and Heart retains only the Contract fact refer
 
     await pump.close();
     const replayPump = await openContractPump(parent, {
-      wait: async () => {
-        throw new Error("unexpected wait");
-      },
-      tell: async () => {
-        throw new Error("unexpected tell");
-      },
-      kill: async () => {
-        throw new Error("unexpected kill");
-      },
       deliver: async () => {
         calls += 1;
         throw new Error("delivery must not replay");
@@ -1527,15 +1519,6 @@ test("deliver returns without a durable reference and settles Heart voided", asy
   const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
   const id = randomUUID();
   const pump = await openContractPump(parent, {
-    wait: async () => {
-      throw new Error("unexpected wait");
-    },
-    tell: async () => {
-      throw new Error("unexpected tell");
-    },
-    kill: async () => {
-      throw new Error("unexpected kill");
-    },
     deliver: async () => {
       throw new KeiyakuRefused({ kind: "contract-missing", contractId: makeContractId("kei/not-accepted") });
     },
@@ -1561,15 +1544,6 @@ test("deliver returns without a durable reference and settles Heart voided", asy
   }
 
   const replay = await openContractPump(parent, {
-    wait: async () => {
-      throw new Error("unexpected wait");
-    },
-    tell: async () => {
-      throw new Error("unexpected tell");
-    },
-    kill: async () => {
-      throw new Error("unexpected kill");
-    },
     deliver: async () => {
       throw new Error("voided deliver must not replay");
     },
@@ -1598,15 +1572,6 @@ test("an executor throw settles its begun request unproven", async () => {
   const id = randomUUID();
   let calls = 0;
   const pump = await openContractPump(parent, {
-    wait: async () => {
-      throw new Error("unexpected wait");
-    },
-    tell: async () => {
-      throw new Error("unexpected tell");
-    },
-    kill: async () => {
-      throw new Error("unexpected kill");
-    },
     deliver: async (input) => {
       calls += 1;
       assert.equal((await readRequest(parent.paths, id))?.state, "begun");
@@ -1668,15 +1633,6 @@ test("completion fences admission but drains a returned delivery reference", asy
   );
   const id = randomUUID();
   const pump = await openContractPump(parent, {
-    wait: async () => {
-      throw new Error("unexpected wait");
-    },
-    tell: async () => {
-      throw new Error("unexpected tell");
-    },
-    kill: async () => {
-      throw new Error("unexpected kill");
-    },
     deliver: async (input) => {
       started();
       const result = await executorReleased;
@@ -1728,15 +1684,6 @@ test("a vanished live receipt does not fail durable request settlement", async (
   });
   const id = randomUUID();
   const pump = await openContractPump(parent, {
-    wait: async () => {
-      throw new Error("unexpected wait");
-    },
-    tell: async () => {
-      throw new Error("unexpected tell");
-    },
-    kill: async () => {
-      throw new Error("unexpected kill");
-    },
     deliver: async () => {
       started();
       await executorReleased;
@@ -2032,10 +1979,10 @@ test("an allowed forwarded kill reaches its direct parent owner once", async () 
     },
   });
   try {
-    assert.deepEqual(
-      await requestBodyKill({ directory: pump.directory, id: randomUUID(), targets: [target] }),
-      { kind: "returned", result },
-    );
+    assert.deepEqual(await requestBodyKill({ directory: pump.directory, id: randomUUID(), targets: [target] }), {
+      kind: "returned",
+      result,
+    });
     assert.equal(calls, 1);
   } finally {
     await pump.close();
@@ -2060,15 +2007,6 @@ test("forwarded materialization retains and replays its handoff evidence", async
   };
   let calls = 0;
   const pump = await openContractPump(parent, {
-    wait: async () => {
-      throw new Error("unexpected wait");
-    },
-    tell: async () => {
-      throw new Error("unexpected tell");
-    },
-    kill: async () => {
-      throw new Error("unexpected kill");
-    },
     deliver: async (input) => {
       calls += 1;
       assert.equal(input.materializeConflict, true);
@@ -2114,15 +2052,6 @@ test("forwarded materialization retains and replays its handoff evidence", async
 
     await pump.close();
     const replayPump = await openContractPump(parent, {
-      wait: async () => {
-        throw new Error("unexpected wait");
-      },
-      tell: async () => {
-        throw new Error("unexpected tell");
-      },
-      kill: async () => {
-        throw new Error("unexpected kill");
-      },
       deliver: async () => {
         calls += 1;
         throw new Error("materialization must not replay");
@@ -2297,7 +2226,7 @@ test("a parent-served Verification cancellation retains its bounded forwarded ou
     await Keiyaku.bind({
       repo,
       markdown: completionDocument(
-        "node -e 'process.stdout.write(\"x\".repeat(20 * 1024)); process.stdout.write(\"forwarded-tail\\n\"); setInterval(() => {}, 1_000)'",
+        'node -e \'process.stdout.write("x".repeat(20 * 1024)); process.stdout.write("forwarded-tail\\n"); setInterval(() => {}, 1_000)\'',
       ),
       workspace: "worktree",
       target: "refs/heads/main",

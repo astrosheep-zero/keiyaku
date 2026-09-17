@@ -17,6 +17,7 @@ import {
   type AttemptCustody,
   type ProviderAttempt,
   type TurnResult,
+  type DriveInput,
 } from "../src/akuma/provider.js";
 import { type ProviderExecution } from "../src/akuma/provider-recipe.js";
 import { createClaudeProvider } from "../src/akuma/providers/claude/index.js";
@@ -35,6 +36,14 @@ const DRIVE_DEFAULTS = {
   signal: new AbortController().signal,
   requests: { dir: "/tmp/akuma-test-requests" },
 } as const;
+
+/** Fresh carrier objects; non-default recipe and admission inputs remain at each call site. */
+function freshInput(
+  body: string,
+  extra: Partial<Omit<DriveInput, "session">> = {},
+): DriveInput & { session: { kind: "fresh" } } {
+  return { ...DRIVE_DEFAULTS, body, launchTells: [], cwd: "/tmp", options: {}, ...extra, session: { kind: "fresh" } };
+}
 
 function attemptResult<Result>(attempt: ProviderAttempt<Result>): Promise<Result> {
   return attempt.result;
@@ -491,15 +500,14 @@ test("ACP uses stable initialization, fresh sessions, mapped profile arguments, 
       readonly: { enforcement: "none", diagnostic: "ACP cannot remove task-surface mutation capabilities" },
     });
     assert.equal(provider.admitOptions({ network: "enabled" }).kind, "refused");
-    const drive = await provider.start({
-      ...DRIVE_DEFAULTS,
-      body: "build",
-      launchTells: [{ id: "tell-1", text: "then test" }],
-      cwd: root,
-      options: { model: "grok-4", effort: "high", systemPrompt: "Be precise." },
-      session: { kind: "fresh" },
-      requests: { dir: join(root, "requests") },
-    }).result;
+    const drive = await provider.start(
+      freshInput("build", {
+        launchTells: [{ id: "tell-1", text: "then test" }],
+        cwd: root,
+        options: { model: "grok-4", effort: "high", systemPrompt: "Be precise." },
+        requests: { dir: join(root, "requests") },
+      }),
+    ).result;
     const events = [];
     for await (const event of drive.events) events.push(event);
     assert.deepEqual(await drive.completion, { kind: "answered", answer: "complete answer" });
@@ -582,14 +590,7 @@ test("ACP forced disposal closes its owned process tree after standard session/c
   const root = mkdtempSync(join(tmpdir(), "keiyaku-acp-cancel-"));
   try {
     const fake = fakeAcp(root, "cancel");
-    const drive = await createAcpProvider(fake.execution).start({
-      ...DRIVE_DEFAULTS,
-      body: "wait",
-      launchTells: [],
-      cwd: root,
-      options: {},
-      session: { kind: "fresh" },
-    }).result;
+    const drive = await createAcpProvider(fake.execution).start(freshInput("wait", { cwd: root })).result;
     await drive.forceDispose();
     const events = [];
     for await (const event of drive.events) events.push(event);
@@ -788,14 +789,7 @@ test("Grok Build uses fixed launch arguments and admits queued interject on the 
       diagnostic: "Grok Build cannot remove task-surface mutation capabilities",
     },
   });
-  const drive = await provider.start({
-    ...DRIVE_DEFAULTS,
-    body: "build",
-    launchTells: [],
-    cwd: "/tmp",
-    options: { model: "grok-4.6", effort: "high" },
-    session: { kind: "fresh" },
-  }).result;
+  const drive = await provider.start(freshInput("build", { options: { model: "grok-4.6", effort: "high" } })).result;
   assert.deepEqual((controlled.sessionNew as { _meta?: Readonly<Record<string, unknown>> })._meta, {
     custom: "preserved",
     askUserQuestion: false,
@@ -833,8 +827,7 @@ test("Grok Build returns turn-ended when completion wins before interject acknow
   const controlled = controlledAcpProcess({ stallPrompt: true, interject: "pending" });
   const drive = await createGrokBuildProvider(controlledGrokExecution, {
     spawnProcess: () => controlled.process,
-  }).start({ ...DRIVE_DEFAULTS, body: "build", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" } })
-    .result;
+  }).start(freshInput("build")).result;
   const submission = drive.tell!({ id: "tell-late", text: "too late" });
   await controlled.interjectStarted;
   controlled.resolvePrompt();
@@ -847,14 +840,9 @@ test("Grok Build returns turn-ended when completion wins before interject acknow
 
 test("ACP completion waits for owned process cleanup", async () => {
   const controlled = controlledAcpProcess();
-  const drive = await createAcpProvider(controlledAcpExecution, { spawnProcess: () => controlled.process }).start({
-    ...DRIVE_DEFAULTS,
-    body: "build",
-    launchTells: [],
-    cwd: "/tmp",
-    options: {},
-    session: { kind: "fresh" },
-  }).result;
+  const drive = await createAcpProvider(controlledAcpExecution, { spawnProcess: () => controlled.process }).start(
+    freshInput("build"),
+  ).result;
   let completed = false;
   void drive.completion.then(() => {
     completed = true;
@@ -867,14 +855,9 @@ test("ACP completion waits for owned process cleanup", async () => {
 
 test("ACP cleanup failure settles a typed failed Turn", async () => {
   const controlled = controlledAcpProcess();
-  const drive = await createAcpProvider(controlledAcpExecution, { spawnProcess: () => controlled.process }).start({
-    ...DRIVE_DEFAULTS,
-    body: "build",
-    launchTells: [],
-    cwd: "/tmp",
-    options: {},
-    session: { kind: "fresh" },
-  }).result;
+  const drive = await createAcpProvider(controlledAcpExecution, { spawnProcess: () => controlled.process }).start(
+    freshInput("build"),
+  ).result;
   await controlled.cleanupStarted;
   controlled.rejectCleanup(new Error("drain failed"));
   assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "ACP cleanup failed: drain failed" });
@@ -883,15 +866,9 @@ test("ACP cleanup failure settles a typed failed Turn", async () => {
 test("ACP setup abort closes a child stalled during initialization", async () => {
   const controlled = controlledAcpProcess({ stallInitialize: true });
   const controller = new AbortController();
-  const setup = createAcpProvider(controlledAcpExecution, { spawnProcess: () => controlled.process }).start({
-    ...DRIVE_DEFAULTS,
-    body: "build",
-    launchTells: [],
-    cwd: "/tmp",
-    options: {},
-    session: { kind: "fresh" },
-    signal: controller.signal,
-  });
+  const setup = createAcpProvider(controlledAcpExecution, { spawnProcess: () => controlled.process }).start(
+    freshInput("build", { signal: controller.signal }),
+  );
   assert.equal("result" in setup && "closed" in setup, true);
   await controlled.initializeStarted;
   controller.abort(new Error("controlled setup cancellation"));
@@ -902,14 +879,9 @@ test("ACP setup abort closes a child stalled during initialization", async () =>
 
 test("ACP ignores assistant updates after terminal prompt evidence", async () => {
   const controlled = controlledAcpProcess({ assistant: "before" });
-  const drive = await createAcpProvider(controlledAcpExecution, { spawnProcess: () => controlled.process }).start({
-    ...DRIVE_DEFAULTS,
-    body: "build",
-    launchTells: [],
-    cwd: "/tmp",
-    options: {},
-    session: { kind: "fresh" },
-  }).result;
+  const drive = await createAcpProvider(controlledAcpExecution, { spawnProcess: () => controlled.process }).start(
+    freshInput("build"),
+  ).result;
   const events = (async () => {
     const observed = [];
     for await (const event of drive.events) observed.push(event);
@@ -1036,15 +1008,9 @@ test("OpenCode V1 adapter admits with promptAsync and completes from terminal ev
   const fake = fakeOpencode();
   const provider = createOpencodeProvider({ loader: fake.loader });
   assert.equal(provider.admitOptions({ network: "enabled" }).kind, "refused");
-  const drive = await provider.start({
-    ...DRIVE_DEFAULTS,
-    body: "build",
-    launchTells: [{ id: "tell-1", text: "also check" }],
-    cwd: "/tmp",
-    options: {},
-    session: { kind: "fresh" },
-    requests: { dir: "/tmp/requests" },
-  }).result;
+  const drive = await provider.start(
+    freshInput("build", { launchTells: [{ id: "tell-1", text: "also check" }], requests: { dir: "/tmp/requests" } }),
+  ).result;
   assert.equal(drive.admission.fence, "session-fresh");
   const observed = [];
   for await (const event of drive.events) observed.push(event);
@@ -1074,14 +1040,7 @@ test("OpenCode start and resume reject closed when readiness cleanup fails", asy
     });
     const attempt =
       mode === "start"
-        ? provider.start({
-            ...DRIVE_DEFAULTS,
-            body: "wait",
-            launchTells: [],
-            cwd: "/tmp",
-            options: {},
-            session: { kind: "fresh" },
-          })
+        ? provider.start(freshInput("wait"))
         : provider.resume!({
             ...DRIVE_DEFAULTS,
             body: "wait",
@@ -1208,19 +1167,7 @@ test("OpenCode V1 rejects failed prompt admission and cleans up", async () => {
       },
     }),
   });
-  await assert.rejects(
-    attemptResult(
-      provider.start({
-        ...DRIVE_DEFAULTS,
-        body: "fail",
-        launchTells: [],
-        cwd: "/tmp",
-        options: {},
-        session: { kind: "fresh" },
-      }),
-    ),
-    /prompt rejected/u,
-  );
+  await assert.rejects(attemptResult(provider.start(freshInput("fail"))), /prompt rejected/u);
   assert.equal(closed, 1);
 });
 
@@ -1271,14 +1218,7 @@ test("OpenCode V1 fails terminal observation without native assistant evidence",
       },
     }),
   });
-  const drive = await provider.start({
-    ...DRIVE_DEFAULTS,
-    body: "idle",
-    launchTells: [],
-    cwd: "/tmp",
-    options: {},
-    session: { kind: "fresh" },
-  }).result;
+  const drive = await provider.start(freshInput("idle")).result;
   assert.deepEqual(await drive.completion, {
     kind: "failed",
     diagnostic: "OpenCode completed without a native assistant answer",
@@ -1328,14 +1268,7 @@ test("OpenCode V1 isolates other sessions and accepts the current Turn error", a
       },
     }),
   });
-  const drive = await provider.start({
-    ...DRIVE_DEFAULTS,
-    body: "fail",
-    launchTells: [],
-    cwd: "/tmp",
-    options: {},
-    session: { kind: "fresh" },
-  }).result;
+  const drive = await provider.start(freshInput("fail")).result;
   assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "native failed" });
 });
 
@@ -1360,15 +1293,13 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
     ],
   });
   const provider = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk);
-  const attempt = provider.start({
-    ...DRIVE_DEFAULTS,
-    body: "work",
-    launchTells: [{ id: "tell-1", text: "also" }],
-    cwd: tmpdir(),
-    options: {},
-    session: { kind: "fresh" },
-    requests: { dir: "/work/requests" },
-  });
+  const attempt = provider.start(
+    freshInput("work", {
+      launchTells: [{ id: "tell-1", text: "also" }],
+      cwd: tmpdir(),
+      requests: { dir: "/work/requests" },
+    }),
+  );
   const drive = await attempt.result;
   assert.equal(drive.tell, undefined);
   const events = [];
@@ -1456,18 +1387,19 @@ test("Pi retains write targets as conservative file changes without inventing di
         toolName: "edit",
         args: { path: "src/edited.ts", edits: [{ oldText: "old", newText: "new" }] },
       },
-      { type: "tool_execution_end", toolCallId: "edit-one", toolName: "edit", isError: false, result: { details: { patch } } },
+      {
+        type: "tool_execution_end",
+        toolCallId: "edit-one",
+        toolName: "edit",
+        isError: false,
+        result: { details: { patch } },
+      },
       { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "done" }] } },
     ],
   });
-  const attempt = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start({
-    ...DRIVE_DEFAULTS,
-    body: "work",
-    launchTells: [],
-    cwd: tmpdir(),
-    options: {},
-    session: { kind: "fresh" },
-  });
+  const attempt = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start(
+    freshInput("work", { cwd: tmpdir() }),
+  );
   const drive = await attempt.result;
   const events: AgentEvent[] = [];
   for await (const event of drive.events) events.push(event);
@@ -1538,14 +1470,9 @@ test("Pi retains summarization retry evidence without progress deltas or prematu
       { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "done" }] } },
     ],
   });
-  const attempt = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start({
-    ...DRIVE_DEFAULTS,
-    body: "work",
-    launchTells: [],
-    cwd: "/work",
-    options: {},
-    session: { kind: "fresh" },
-  });
+  const attempt = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start(
+    freshInput("work", { cwd: "/work" }),
+  );
   const drive = await attempt.result;
   const events: AgentEvent[] = [];
   for await (const event of drive.events) events.push(event);
@@ -1569,15 +1496,9 @@ test("Pi appends JSON Schema text when native structured output is unavailable",
     ],
   });
   const schemaJson = '{"type":"object","properties":{"ok":{"type":"boolean"}}}';
-  const drive = await createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start({
-    ...DRIVE_DEFAULTS,
-    body: "work",
-    launchTells: [],
-    cwd: tmpdir(),
-    options: {},
-    session: { kind: "fresh" },
-    schemaJson,
-  }).result;
+  const drive = await createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start(
+    freshInput("work", { cwd: tmpdir(), schemaJson }),
+  ).result;
   await drive.completion;
   assert.match(fake.seen.prompt ?? "", /Respond with JSON matching this JSON Schema/u);
   assert.match(fake.seen.prompt ?? "", /"ok"/u);
@@ -1586,14 +1507,9 @@ test("Pi appends JSON Schema text when native structured output is unavailable",
 test("Pi attempt disposal closes events and completion before its sole closed proof", async () => {
   for (const dispose of ["abort", "forceDispose"] as const) {
     const fake = fakePiSdk({ promptNeverSettles: true });
-    const attempt = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start({
-      ...DRIVE_DEFAULTS,
-      body: "wait",
-      launchTells: [],
-      cwd: "/work",
-      options: {},
-      session: { kind: "fresh" },
-    });
+    const attempt = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start(
+      freshInput("wait", { cwd: "/work" }),
+    );
     const drive = await attempt.result;
     const events: AgentEvent[] = [];
     const draining = (async () => {
@@ -1613,14 +1529,9 @@ test("Pi attempt disposal closes events and completion before its sole closed pr
 
 test("Pi keeps abort pending when native cleanup refuses to settle", async () => {
   const fake = fakePiSdk({ promptNeverSettles: true, abortNeverSettles: true });
-  const drive = await createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start({
-    ...DRIVE_DEFAULTS,
-    body: "wait",
-    launchTells: [],
-    cwd: "/work",
-    options: {},
-    session: { kind: "fresh" },
-  }).result;
+  const drive = await createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start(
+    freshInput("wait", { cwd: "/work" }),
+  ).result;
   let settled = false;
   void drive.abort().then(() => {
     settled = true;
@@ -1638,14 +1549,9 @@ test("Pi preserves thinking-only and explicit empty assistant answers", async ()
       { type: "message_end", message: { role: "assistant", content: [{ type: "thinking", thinking: "consider" }] } },
     ],
   });
-  const drive = await createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start({
-    ...DRIVE_DEFAULTS,
-    body: "wait",
-    launchTells: [],
-    cwd: "/work",
-    options: {},
-    session: { kind: "fresh" },
-  }).result;
+  const drive = await createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start(
+    freshInput("wait", { cwd: "/work" }),
+  ).result;
   const events = [];
   for await (const event of drive.events) events.push(event);
   assert.deepEqual(events, [
@@ -1658,14 +1564,9 @@ test("Pi preserves thinking-only and explicit empty assistant answers", async ()
   const empty = fakePiSdk({
     events: [{ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "" }] } }],
   });
-  const emptyDrive = await createPiProvider({ name: "pi", kind: "pi" }, async () => empty.sdk).start({
-    ...DRIVE_DEFAULTS,
-    body: "wait",
-    launchTells: [],
-    cwd: "/work",
-    options: {},
-    session: { kind: "fresh" },
-  }).result;
+  const emptyDrive = await createPiProvider({ name: "pi", kind: "pi" }, async () => empty.sdk).start(
+    freshInput("wait", { cwd: "/work" }),
+  ).result;
   const emptyEvents = [];
   for await (const event of emptyDrive.events) emptyEvents.push(event);
   assert.deepEqual(emptyEvents, [
@@ -1693,14 +1594,9 @@ test("Pi omits Gemini's empty tool-use text placeholder from narration", async (
       { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "done" }] } },
     ],
   });
-  const drive = await createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start({
-    ...DRIVE_DEFAULTS,
-    body: "wait",
-    launchTells: [],
-    cwd: "/work",
-    options: {},
-    session: { kind: "fresh" },
-  }).result;
+  const drive = await createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start(
+    freshInput("wait", { cwd: "/work" }),
+  ).result;
   const events = [];
   for await (const event of drive.events) events.push(event);
   assert.deepEqual(events, [
@@ -1759,15 +1655,9 @@ test("Pi readonly admits native enforcement and removes every task-surface mutat
     events: [{ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "ok" }] } }],
   });
   const provider = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk);
-  const drive = await provider.start({
-    ...DRIVE_DEFAULTS,
-    body: "inspect",
-    launchTells: [],
-    cwd: "/work",
-    options: { readonly: true },
-    session: { kind: "fresh" },
-    requests: { dir: "/work/requests" },
-  }).result;
+  const drive = await provider.start(
+    freshInput("inspect", { cwd: "/work", options: { readonly: true }, requests: { dir: "/work/requests" } }),
+  ).result;
   for await (const _event of drive.events) {
     /* drain */
   }
@@ -2157,35 +2047,27 @@ test("Claude maps provider-neutral schema JSON to outputFormat json_schema", asy
       seen = input.options as Record<string, unknown> | undefined;
       return fakeQuery(
         [
-        { type: "system", subtype: "init", session_id: "session-schema" } as unknown as SDKMessage,
-        {
-          type: "assistant",
-          uuid: "assistant-schema",
-          session_id: "session-schema",
-          parent_tool_use_id: null,
-          message: { content: [{ type: "text", text: '{"ok":true}' }] },
-        } as unknown as SDKMessage,
-        {
-          type: "result",
-          subtype: "success",
-          session_id: "session-schema",
-          result: '{"ok":true}',
-        } as unknown as SDKMessage,
+          { type: "system", subtype: "init", session_id: "session-schema" } as unknown as SDKMessage,
+          {
+            type: "assistant",
+            uuid: "assistant-schema",
+            session_id: "session-schema",
+            parent_tool_use_id: null,
+            message: { content: [{ type: "text", text: '{"ok":true}' }] },
+          } as unknown as SDKMessage,
+          {
+            type: "result",
+            subtype: "success",
+            session_id: "session-schema",
+            result: '{"ok":true}',
+          } as unknown as SDKMessage,
         ],
         input.prompt as AsyncIterable<unknown>,
       );
     },
   }));
   const schemaJson = '{"type":"object","properties":{"ok":{"type":"boolean"}}}';
-  const drive = await provider.start({
-    ...DRIVE_DEFAULTS,
-    body: "structured",
-    launchTells: [],
-    cwd: "/work",
-    options: {},
-    session: { kind: "fresh" },
-    schemaJson,
-  }).result;
+  const drive = await provider.start(freshInput("structured", { cwd: "/work", schemaJson })).result;
   await drive.completion;
   assert.deepEqual(seen?.outputFormat, {
     type: "json_schema",
@@ -2254,14 +2136,7 @@ test("Claude maps narration, drops native streams, and contains runtime skew", a
       );
     },
   }));
-  const drive = await provider.start({
-    ...DRIVE_DEFAULTS,
-    body: "observe",
-    launchTells: [],
-    cwd: "/work",
-    options: {},
-    session: { kind: "fresh" },
-  }).result;
+  const drive = await provider.start(freshInput("observe", { cwd: "/work" })).result;
   assert.equal(typeof drive.tell, "function");
   const events = [];
   for await (const event of drive.events) events.push(event);
@@ -2319,14 +2194,7 @@ test("Claude adapter admits the native session before returning its answer", asy
       );
     },
   }));
-  const drive = await provider.start({
-    ...DRIVE_DEFAULTS,
-    body: "build it",
-    launchTells: [],
-    cwd: "/work",
-    options: {},
-    session: { kind: "fresh" },
-  }).result;
+  const drive = await provider.start(freshInput("build it", { cwd: "/work" })).result;
   const events = [];
   for await (const event of drive.events) events.push(event);
 
@@ -2368,14 +2236,7 @@ test("Claude full-access fresh turns disable the native sandbox", async () => {
       );
     },
   }));
-  const drive = await provider.start({
-    ...DRIVE_DEFAULTS,
-    body: "build",
-    launchTells: [],
-    cwd: "/work",
-    options: { sandbox: "full-access" },
-    session: { kind: "fresh" },
-  }).result;
+  const drive = await provider.start(freshInput("build", { cwd: "/work", options: { sandbox: "full-access" } })).result;
   await drive.completion;
 
   assert.deepEqual(seen?.sandbox, { enabled: false });
@@ -2440,14 +2301,7 @@ test("Claude full-access overrides an enabled sandbox in execution config", asyn
     }),
     { config: { sandbox: { enabled: true, autoAllowBashIfSandboxed: true } } },
   );
-  const drive = await provider.start({
-    ...DRIVE_DEFAULTS,
-    body: "build",
-    launchTells: [],
-    cwd: "/work",
-    options: { sandbox: "full-access" },
-    session: { kind: "fresh" },
-  }).result;
+  const drive = await provider.start(freshInput("build", { cwd: "/work", options: { sandbox: "full-access" } })).result;
   await drive.completion;
 
   assert.deepEqual(seen?.sandbox, { enabled: false });
@@ -2475,14 +2329,7 @@ test("Claude omitted sandbox preserves execution config for writable turns", asy
     }),
     { config: { sandbox: { enabled: true } } },
   );
-  const drive = await provider.start({
-    ...DRIVE_DEFAULTS,
-    body: "build",
-    launchTells: [],
-    cwd: "/work",
-    options: {},
-    session: { kind: "fresh" },
-  }).result;
+  const drive = await provider.start(freshInput("build", { cwd: "/work" })).result;
   await drive.completion;
 
   assert.deepEqual(seen?.sandbox, { enabled: true });
@@ -2511,14 +2358,7 @@ test("Claude readonly preserves execution config and plan permissions", async ()
     }),
     { config: { sandbox: { enabled: true } } },
   );
-  const drive = await provider.start({
-    ...DRIVE_DEFAULTS,
-    body: "inspect",
-    launchTells: [],
-    cwd: "/work",
-    options: { readonly: true },
-    session: { kind: "fresh" },
-  }).result;
+  const drive = await provider.start(freshInput("inspect", { cwd: "/work", options: { readonly: true } })).result;
   await drive.completion;
 
   assert.deepEqual(seen?.sandbox, { enabled: true });
@@ -2590,14 +2430,7 @@ test("Claude closes the terminal gate before a delayed Query iterator tail", asy
       })() as unknown as Query;
     },
   }));
-  const drive = await provider.start({
-    ...DRIVE_DEFAULTS,
-    body: "initial",
-    launchTells: [],
-    cwd: "/work",
-    options: {},
-    session: { kind: "fresh" },
-  }).result;
+  const drive = await provider.start(freshInput("initial", { cwd: "/work" })).result;
 
   const completion = await Promise.race([
     drive.completion,
@@ -2626,14 +2459,7 @@ test("Claude live tell waits for a post-yield source pull and shares one Query",
       return harness.sdk.query(input);
     },
   }));
-  const drive = await provider.start({
-    ...DRIVE_DEFAULTS,
-    body: "initial",
-    launchTells: [],
-    cwd: "/work",
-    options: {},
-    session: { kind: "fresh" },
-  }).result;
+  const drive = await provider.start(freshInput("initial", { cwd: "/work" })).result;
   assert.equal(queries, 1);
   let resolved = false;
   const submission = drive.tell!({ id: "tell-live-1", text: "steer now" }).then((value) => {
@@ -2776,15 +2602,7 @@ test("Codex maps provider-neutral schema JSON to turn/start outputSchema", async
     const fake = fakeCodex(root, "complete");
     const provider = createCodexAppServerProvider(fake.executable);
     const schemaJson = '{"type":"object","properties":{"ok":{"type":"boolean"}}}';
-    const drive = await provider.start({
-      ...DRIVE_DEFAULTS,
-      body: "build",
-      launchTells: [],
-      cwd: root,
-      options: {},
-      session: { kind: "fresh" },
-      schemaJson,
-    }).result;
+    const drive = await provider.start(freshInput("build", { cwd: root, schemaJson })).result;
     await drive.completion;
     const turn = fake.requests().find((request) => request.method === "turn/start")?.params as Record<string, unknown>;
     assert.deepEqual(turn.outputSchema, { type: "object", properties: { ok: { type: "boolean" } } });
@@ -2825,14 +2643,7 @@ test("Codex full-access sandbox emits dangerFullAccess for fresh and resumed tur
     const fake = fakeCodex(root, "complete");
     const provider = createCodexAppServerProvider(fake.executable);
     const fullAccess = { sandbox: "full-access" as const };
-    const fresh = await provider.start({
-      ...DRIVE_DEFAULTS,
-      body: "build",
-      launchTells: [],
-      cwd: root,
-      options: fullAccess,
-      session: { kind: "fresh" },
-    }).result;
+    const fresh = await provider.start(freshInput("build", { cwd: root, options: fullAccess })).result;
     await fresh.completion;
     const resumed = await provider.resume!({
       ...DRIVE_DEFAULTS,
@@ -2843,39 +2654,29 @@ test("Codex full-access sandbox emits dangerFullAccess for fresh and resumed tur
       session: { kind: "resume", coordinate: { sessionId: "thread-resumed" } },
     }).result;
     await resumed.completion;
-    const readonly = await provider.start({
-      ...DRIVE_DEFAULTS,
-      body: "inspect",
-      launchTells: [],
-      cwd: root,
-      options: { readonly: true },
-      session: { kind: "fresh" },
-    }).result;
+    const readonly = await provider.start(freshInput("inspect", { cwd: root, options: { readonly: true } })).result;
     await readonly.completion;
-    const omitted = await provider.start({
-      ...DRIVE_DEFAULTS,
-      body: "write",
-      launchTells: [],
-      cwd: root,
-      options: {},
-      session: { kind: "fresh" },
-    }).result;
+    const omitted = await provider.start(freshInput("write", { cwd: root })).result;
     await omitted.completion;
-    const turns = fake.requests()
+    const turns = fake
+      .requests()
       .filter((request) => request.method === "turn/start")
       .map((request) => request.params as Record<string, unknown>);
-    assert.deepEqual(turns.map((turn) => turn.sandboxPolicy), [
-      { type: "dangerFullAccess" },
-      { type: "dangerFullAccess" },
-      { type: "readOnly", networkAccess: false },
-      {
-        type: "workspaceWrite",
-        writableRoots: [root, "/tmp/akuma-test-requests"],
-        networkAccess: false,
-        excludeTmpdirEnvVar: false,
-        excludeSlashTmp: false,
-      },
-    ]);
+    assert.deepEqual(
+      turns.map((turn) => turn.sandboxPolicy),
+      [
+        { type: "dangerFullAccess" },
+        { type: "dangerFullAccess" },
+        { type: "readOnly", networkAccess: false },
+        {
+          type: "workspaceWrite",
+          writableRoots: [root, "/tmp/akuma-test-requests"],
+          networkAccess: false,
+          excludeTmpdirEnvVar: false,
+          excludeSlashTmp: false,
+        },
+      ],
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -2885,14 +2686,7 @@ test("Codex maps observations without leaking output or unknown payloads", async
   const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-observations-"));
   try {
     const provider = createCodexAppServerProvider(fakeCodex(root, "observations").executable);
-    const drive = await provider.start({
-      ...DRIVE_DEFAULTS,
-      body: "observe",
-      launchTells: [],
-      cwd: root,
-      options: {},
-      session: { kind: "fresh" },
-    }).result;
+    const drive = await provider.start(freshInput("observe", { cwd: root })).result;
     const events = [];
     for await (const event of drive.events) events.push(event);
 
@@ -2936,14 +2730,7 @@ test("Codex ignores notifications from a spawned child thread", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-foreign-thread-"));
   try {
     const provider = createCodexAppServerProvider(fakeCodex(root, "foreign-thread").executable);
-    const drive = await provider.start({
-      ...DRIVE_DEFAULTS,
-      body: "delegate",
-      launchTells: [],
-      cwd: root,
-      options: {},
-      session: { kind: "fresh" },
-    }).result;
+    const drive = await provider.start(freshInput("delegate", { cwd: root })).result;
     const events = [];
     for await (const event of drive.events) events.push(event);
 
@@ -2964,14 +2751,9 @@ test("Codex ignores notifications from a spawned child thread", async () => {
 test("Codex drains admitted native completion narration before terminal closure", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-terminal-drain-"));
   try {
-    const drive = await createCodexAppServerProvider(fakeCodex(root, "terminal-drain").executable).start({
-      ...DRIVE_DEFAULTS,
-      body: "drain",
-      launchTells: [],
-      cwd: root,
-      options: {},
-      session: { kind: "fresh" },
-    }).result;
+    const drive = await createCodexAppServerProvider(fakeCodex(root, "terminal-drain").executable).start(
+      freshInput("drain", { cwd: root }),
+    ).result;
     let completionSettled = false;
     void drive.completion.then(() => {
       completionSettled = true;
@@ -3008,14 +2790,9 @@ test("Codex drains admitted native completion narration before terminal closure"
 test("Codex terminal drain has a bounded fallback for a hung producer", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-terminal-hang-"));
   try {
-    const drive = await createCodexAppServerProvider(fakeCodex(root, "terminal-hang").executable).start({
-      ...DRIVE_DEFAULTS,
-      body: "observe",
-      launchTells: [],
-      cwd: root,
-      options: {},
-      session: { kind: "fresh" },
-    }).result;
+    const drive = await createCodexAppServerProvider(fakeCodex(root, "terminal-hang").executable).start(
+      freshInput("observe", { cwd: root }),
+    ).result;
     const started = performance.now();
     assert.deepEqual(await drive.completion, { kind: "answered", answer: "", historyId: "turn-1" });
     assert.ok(performance.now() - started < 2_000);
@@ -3038,14 +2815,9 @@ test("Codex admission failures preserve the original diagnostic", async () => {
     try {
       await assert.rejects(
         attemptResult(
-          createCodexAppServerProvider(fakeCodex(root, fixture.mode).executable).start({
-            ...DRIVE_DEFAULTS,
-            body: "build",
-            launchTells: [],
-            cwd: root,
-            options: {},
-            session: { kind: "fresh" },
-          }),
+          createCodexAppServerProvider(fakeCodex(root, fixture.mode).executable).start(
+            freshInput("build", { cwd: root }),
+          ),
         ),
         (error: unknown) =>
           error instanceof Error &&
@@ -3061,14 +2833,9 @@ test("Codex admission failures preserve the original diagnostic", async () => {
 test("Codex settles when the native process exits without turn completion", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-exit-before-completion-"));
   try {
-    const drive = await createCodexAppServerProvider(fakeCodex(root, "exit-before-completion").executable).start({
-      ...DRIVE_DEFAULTS,
-      body: "exit",
-      launchTells: [],
-      cwd: root,
-      options: {},
-      session: { kind: "fresh" },
-    }).result;
+    const drive = await createCodexAppServerProvider(fakeCodex(root, "exit-before-completion").executable).start(
+      freshInput("exit", { cwd: root }),
+    ).result;
     for await (const _event of drive.events) {
       /* drain */
     }
@@ -3085,14 +2852,7 @@ test("Codex app-server abort interrupts and releases its owned child", async () 
   try {
     const fake = fakeCodex(root, "interrupt");
     const provider = createCodexAppServerProvider(fake.executable);
-    const drive = await provider.start({
-      ...DRIVE_DEFAULTS,
-      body: "wait",
-      launchTells: [],
-      cwd: root,
-      options: {},
-      session: { kind: "fresh" },
-    }).result;
+    const drive = await provider.start(freshInput("wait", { cwd: root })).result;
     await drive.abort();
     for await (const _event of drive.events) {
       /* drain */
@@ -3106,14 +2866,9 @@ test("Codex app-server abort interrupts and releases its owned child", async () 
 test("Codex terminal closure fails a hung steer acknowledgement without waiting", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-steer-hung-terminal-"));
   try {
-    const drive = await createCodexAppServerProvider(fakeCodex(root, "steer-hung-terminal").executable).start({
-      ...DRIVE_DEFAULTS,
-      body: "work",
-      launchTells: [],
-      cwd: root,
-      options: {},
-      session: { kind: "fresh" },
-    }).result;
+    const drive = await createCodexAppServerProvider(fakeCodex(root, "steer-hung-terminal").executable).start(
+      freshInput("work", { cwd: root }),
+    ).result;
     await assert.rejects(
       drive.tell!({ id: "tell-live-hung", text: "never acknowledged" }),
       /line RPC process is closed/u,
