@@ -614,9 +614,7 @@ test("wake re-resolves a vanished recorded runtime through the production spawn 
     assert.deepEqual(result.admission, { tellId: "tell-vanished-runtime", fact: "recorded" });
     assert.deepEqual(result.wake, { kind: "pursuing", bodySequence: successor });
     assert.ok(launched !== undefined && Number.isSafeInteger(launched.pid) && launched.pid > 0);
-    if (process.platform === "win32") {
-      await launched.exited;
-    } else {
+    if (process.platform !== "win32") {
       const deadline = performance.now() + 5_000;
       while (!existsSync(proof) && performance.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
       assert.equal(readFileSync(proof, "utf8").trim(), replacement);
@@ -634,6 +632,7 @@ test("wake re-resolves a vanished recorded runtime through the production spawn 
     assert.equal(tells.length, 1);
     assert.equal(tells[0]?.state, "pending");
   } finally {
+    await launched?.terminate(true).catch(() => undefined);
     value.close();
   }
 });
