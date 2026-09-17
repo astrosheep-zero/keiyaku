@@ -1,0 +1,206 @@
+diff --git a/src/akuma/providers/pi/index.ts b/src/akuma/providers/pi/index.ts
+index 8a58d1ef..257f6741 100644
+--- a/src/akuma/providers/pi/index.ts
++++ b/src/akuma/providers/pi/index.ts
+@@ -1,5 +1,6 @@
+ import type {
+   createAgentSession,
++  createBashToolDefinition,
+   DefaultResourceLoader,
+   getAgentDir,
+   ModelRuntime,
+@@ -24,6 +25,7 @@ import { piTerminalFailure, translatePiEvent, type PiEventState } from "./events
+ 
+ export type PiSdk = Readonly<{
+   createAgentSession(options?: CreateAgentSessionOptions): ReturnType<typeof createAgentSession>;
++  createBashToolDefinition: typeof createBashToolDefinition;
+   DefaultResourceLoader: typeof DefaultResourceLoader;
+   getAgentDir: typeof getAgentDir;
+   ModelRuntime: typeof ModelRuntime;
+@@ -88,7 +90,7 @@ async function piCreateOptions(sdk: PiSdk, input: PiDriveInput): Promise<CreateA
+     input.requests === undefined || input.options.readonly === true
+       ? undefined
+       : [
+-          (await import("@earendil-works/pi-coding-agent")).createBashToolDefinition(input.cwd, {
++          sdk.createBashToolDefinition(input.cwd, {
+             spawnHook: (context) => ({
+               ...context,
+               env: akumaExecutionEnvironment(context.env, {}, input.requests.dir, ["PI_SESSION_ID", "PI_SESSION_FILE"]),
+@@ -282,6 +284,7 @@ async function loadPiSdk(): Promise<PiSdk> {
+   const sdk = await import("@earendil-works/pi-coding-agent");
+   return {
+     createAgentSession: sdk.createAgentSession,
++    createBashToolDefinition: sdk.createBashToolDefinition,
+     DefaultResourceLoader: sdk.DefaultResourceLoader,
+     getAgentDir: sdk.getAgentDir,
+     ModelRuntime: sdk.ModelRuntime,
+diff --git a/tests/akuma-provider.test.ts b/tests/akuma-provider.test.ts
+index 4a8cf8a7..d01dfa13 100644
+--- a/tests/akuma-provider.test.ts
++++ b/tests/akuma-provider.test.ts
+@@ -8,7 +8,6 @@ import { PassThrough, Readable, Writable } from "node:stream";
+ import test from "node:test";
+ import type { Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+ import * as acp from "@agentclientprotocol/sdk";
+-import type { CreateAgentSessionOptions } from "@earendil-works/pi-coding-agent";
+ import {
+   AKUMA_REQUESTS_ENV,
+   AGENT_EVENT_QUEUE_LIMIT,
+@@ -569,7 +568,8 @@ function controlledAcpProcess(
+     resolveCleanup = resolve;
+     rejectCleanup = reject;
+   });
+-  const { promise: exited, resolve: resolveExited } = promiseBarrier<Readonly<{ code: number | null; signal: NodeJS.Signals | null; stderr: string }>>();
++  const { promise: exited, resolve: resolveExited } =
++    promiseBarrier<Readonly<{ code: number | null; signal: NodeJS.Signals | null; stderr: string }>>();
+   const app = acp
+     .agent({ name: "controlled-acp" })
+     .onRequest(acp.methods.agent.initialize, async ({ params }) => {
+@@ -793,6 +793,21 @@ test("ACP mapper preserves buffered state for an unknown runtime update discrimi
+   });
+ });
+ 
++type FakePiObservation = {
++  options?: Record<string, unknown>;
++  loader?: Record<string, unknown>;
++  opened?: string;
++  branched?: string;
++  aborted: number;
++  disposed: number;
++  prompt?: string;
++  bash?: {
++    cwd: string;
++    options: Parameters<PiSdk["createBashToolDefinition"]>[1];
++    tool: ReturnType<PiSdk["createBashToolDefinition"]>;
++  };
++};
++
+ function fakePiSdk(
+   input: {
+     events?: readonly Record<string, unknown>[];
+@@ -802,26 +817,8 @@ function fakePiSdk(
+     promptNeverSettles?: boolean;
+     abortNeverSettles?: boolean;
+   } = {},
+-): {
+-  sdk: PiSdk;
+-  seen: {
+-    options?: Record<string, unknown>;
+-    opened?: string;
+-    branched?: string;
+-    aborted: number;
+-    disposed: number;
+-    prompt?: string;
+-  };
+-} {
+-  const seen = { aborted: 0, disposed: 0 } as {
+-    options?: Record<string, unknown>;
+-    loader?: Record<string, unknown>;
+-    opened?: string;
+-    branched?: string;
+-    aborted: number;
+-    disposed: number;
+-    prompt?: string;
+-  };
++): { sdk: PiSdk; seen: FakePiObservation } {
++  const seen: FakePiObservation = { aborted: 0, disposed: 0 };
+   const manager = {
+     getLeafId: () => (input.historyId === undefined ? "entry-final" : input.historyId),
+     createBranchedSession: (id: string) => {
+@@ -869,6 +866,12 @@ function fakePiSdk(
+   return {
+     seen,
+     sdk: {
++      createBashToolDefinition: (cwd, options) => {
++        // Opaque SDK value: the adapter must forward it, not execute or reconstruct it.
++        const tool = Object.freeze({ name: "fixture-bash" }) as ReturnType<PiSdk["createBashToolDefinition"]>;
++        seen.bash = { cwd, options, tool };
++        return tool;
++      },
+       createAgentSession: async (options) => {
+         seen.options = options as Record<string, unknown>;
+         return { session } as never;
+@@ -1197,20 +1200,31 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
+     { type: "unknown", kind: "future_event" },
+   ]);
+   assert.deepEqual(await drive.completion, { kind: "answered", answer: "done", historyId: "entry-final" });
+-  const customTools = fake.seen.options?.customTools as NonNullable<CreateAgentSessionOptions["customTools"]>;
+-  const result = await customTools[0]!.execute(
+-    "request-env",
+-    { command: `printf %s "$${AKUMA_REQUESTS_ENV}"` },
+-    new AbortController().signal,
+-    undefined,
+-    {
+-      sessionManager: {
+-        getSessionId: () => "pi-session",
+-        getSessionFile: () => "/sessions/pi.jsonl",
+-      },
+-    } as never,
+-  );
+-  assert.deepEqual(result.content, [{ type: "text", text: "/work/requests" }]);
++  const bash = fake.seen.bash;
++  assert.ok(bash);
++  assert.equal(bash.cwd, tmpdir());
++  assert.deepEqual(fake.seen.options?.customTools, [bash.tool]);
++  assert.ok(bash.options?.spawnHook);
++  const context = {
++    cwd: tmpdir(),
++    command: "echo native request",
++    env: Object.freeze({
++      SAFE: "keep",
++      AKUMA_REQUESTS: "ancestor-requests",
++      PI_SESSION_ID: "native-session",
++      PI_SESSION_FILE: "native-session-file",
++      CODEX_THREAD_ID: "ancestor-codex",
++    }),
++  };
++  assert.deepEqual(bash.options.spawnHook(context), {
++    ...context,
++    env: {
++      SAFE: "keep",
++      AKUMA_REQUESTS: "/work/requests",
++      PI_SESSION_ID: "native-session",
++      PI_SESSION_FILE: "native-session-file",
++    },
++  });
+   assert.equal(fake.seen.disposed, 1);
+   await attempt.closed;
+ });
+diff --git a/tests/pi-native-identity.test.ts b/tests/pi-native-identity.test.ts
+index 2d7103e7..eaac7053 100644
+--- a/tests/pi-native-identity.test.ts
++++ b/tests/pi-native-identity.test.ts
+@@ -22,7 +22,7 @@ function packageProvenance(specifier: string): string {
+   return `${manifest.name}@${manifest.version} (${entry})`;
+ }
+ 
+-function nativePiSdk(): { sdk: PiSdk; options: () => Record<string, unknown> | undefined } {
++async function nativePiSdk(): Promise<{ sdk: PiSdk; options: () => Record<string, unknown> | undefined }> {
+   let captured: Record<string, unknown> | undefined;
+   const manager = {
+     getLeafId: () => null,
+@@ -40,6 +40,7 @@ function nativePiSdk(): { sdk: PiSdk; options: () => Record<string, unknown> | u
+   return {
+     options: () => captured,
+     sdk: {
++      createBashToolDefinition: (await import("@earendil-works/pi-coding-agent")).createBashToolDefinition,
+       createAgentSession: async (options) => {
+         captured = options as unknown as Record<string, unknown>;
+         return { session } as never;
+@@ -63,7 +64,7 @@ async function withNativeRequestTool<T>(
+   input: Readonly<{ root: string; requests: string }>,
+   body: (tool: NativeRequestTool) => Promise<T>,
+ ): Promise<T> {
+-  const fake = nativePiSdk();
++  const fake = await nativePiSdk();
+   const provider = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk);
+   const attempt = provider.start({
+     body: "work",
+@@ -94,7 +95,6 @@ function nativeSessionContext(sessionId: string, sessionFile = `/sessions/${sess
+   } as never;
+ }
+ 
+-
+ test("the Pi request channel preserves the native session identity instead of an ancestor value", async (t) => {
+   t.diagnostic(`Pi runtime: ${packageProvenance("@earendil-works/pi-coding-agent")}`);
+   const root = mkdtempSync(join(tmpdir(), "keiyaku-pi-native-identity-"));

@@ -1,4 +1,4 @@
-name: Publish deliberate integration pruning
+name: Publish Pi SDK boundary optimization
 on:
   push:
     branches: [chore/test-diet-snapshot-20260918]
@@ -12,25 +12,15 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - name: Preserve reviewed transform and select pinned parent
+      - name: Reproduce and publish the checked Pi SDK boundary patch
         run: |
-          cp .test-audit/batch11.mjs /tmp/batch11.mjs
-          cp .test-audit/batch11-maintainability.js /tmp/batch11-maintainability.js
-          git checkout --detach 192a18007a1f3cedf865bac3214bb97b8b7496f7
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24.x
-          cache: npm
-      - run: npm ci --ignore-scripts --prefer-offline
-      - name: Reproduce exact local tree and publish review branch
-        run: |
-          node /tmp/batch11.mjs
-          node node_modules/prettier/bin/prettier.cjs --write --print-width 120 $(git diff --name-only)
-          git add tests
+          cp .test-audit/batch12.patch /tmp/batch12.patch
+          git checkout --detach cb1c27d39e2cd6beed24f97e80d59d44b082b5c1
+          git apply --index /tmp/batch12.patch
           git diff --cached --check
-          test "$(git write-tree)" = fb0cceceb10c7202f1c5a3ebb73091cefa4b082f
-          test -z "$(git ls-remote --heads origin refs/heads/test-diet/11-prune-composite-overlays)"
+          test "$(git write-tree)" = da27ce3700f60e4e1e51b0266d65ca75931b86de
+          test -z "$(git ls-remote --heads origin refs/heads/test-diet/12-pi-sdk-test-boundary)"
           git config user.name 'Keiyaku Test Optimization'
           git config user.email 'keiyaku-test@example.invalid'
-          git commit -m 'test: retire composite overlays and isolate maintainability CLI fixtures'
-          git push origin HEAD:refs/heads/test-diet/11-prune-composite-overlays
+          git commit -m 'test: isolate Pi adapter mapping from native SDK loading'
+          git push origin HEAD:refs/heads/test-diet/12-pi-sdk-test-boundary
