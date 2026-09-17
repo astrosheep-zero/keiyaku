@@ -1,0 +1,255 @@
+diff --git a/scripts/architecture/policy-capabilities.ts b/scripts/architecture/policy-capabilities.ts
+index 1bb46ec8..2cb88668 100644
+--- a/scripts/architecture/policy-capabilities.ts
++++ b/scripts/architecture/policy-capabilities.ts
+@@ -2,7 +2,13 @@ import type { ArchitecturePolicy } from "./engine.js";
+ 
+ export const capabilityPolicy = {
+   sensitiveImports: [
+-    { module: "node:module", owners: [{ source: "plugin/runtime.ts" }] },
++    {
++      module: "node:module",
++      owners: [
++        { source: "plugin/runtime.ts" },
++        { source: "scripts/compile-tests.mjs", symbols: ["stripTypeScriptTypes"] },
++      ],
++    },
+     { module: "module", owners: [] },
+     {
+       module: "zod",
+diff --git a/scripts/compile-tests.mjs b/scripts/compile-tests.mjs
+index b5fad01f..b024fea5 100644
+--- a/scripts/compile-tests.mjs
++++ b/scripts/compile-tests.mjs
+@@ -1,10 +1,12 @@
+ import { copyFileSync, globSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
++import { stripTypeScriptTypes } from "node:module";
+ import { dirname, resolve } from "node:path";
+-import ts from "typescript";
++import { pathToFileURL } from "node:url";
+ 
+ rmSync(".test-build", { recursive: true, force: true });
+-// The typecheck command owns semantic checking. Like tsx's focused mode, this
+-// pass only transpiles, once per invocation rather than in every isolated worker.
++// Semantic checking belongs to test:typecheck. Native stripping preserves source
++// positions without running the TypeScript emitter on every erasable test module.
++// Keep the existing emitter for parameter properties and other non-erasable syntax.
+ for (const file of globSync([
+   "tests/**/*.ts",
+   "tests/**/*.js",
+@@ -20,19 +22,30 @@ for (const file of globSync([
+     copyFileSync(file, output);
+     continue;
+   }
+-  const result = ts.transpileModule(readFileSync(file, "utf8"), {
++  const source = readFileSync(file, "utf8");
++  try {
++    writeFileSync(output, stripTypeScriptTypes(source, { sourceUrl: pathToFileURL(resolve(file)).href }));
++    continue;
++  } catch (error) {
++    if (!(error instanceof Error) || !("code" in error) || error.code !== "ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX") {
++      throw new Error(`Cannot compile ${file}`, { cause: error });
++    }
++  }
++  const typescript = (await import("typescript")).default;
++  const result = typescript.transpileModule(source, {
+     fileName: file,
+     reportDiagnostics: true,
+     compilerOptions: {
+-      target: ts.ScriptTarget.ES2023,
+-      module: ts.ModuleKind.ESNext,
++      target: typescript.ScriptTarget.ES2023,
++      module: typescript.ModuleKind.ESNext,
+       sourceMap: true,
+       sourceRoot: dirname(resolve(file)),
+     },
+   });
+-  const errors = result.diagnostics?.filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error) ?? [];
++  const errors =
++    result.diagnostics?.filter((diagnostic) => diagnostic.category === typescript.DiagnosticCategory.Error) ?? [];
+   if (errors.length > 0)
+-    throw new Error(errors.map((error) => ts.flattenDiagnosticMessageText(error.messageText, "\n")).join("\n"));
++    throw new Error(errors.map((error) => typescript.flattenDiagnosticMessageText(error.messageText, "\n")).join("\n"));
+   writeFileSync(output, result.outputText);
+   if (result.sourceMapText !== undefined) writeFileSync(output + ".map", result.sourceMapText);
+ }
+diff --git a/scripts/test-entry.mjs b/scripts/test-entry.mjs
+index 9e7b2a19..d4132fa2 100644
+--- a/scripts/test-entry.mjs
++++ b/scripts/test-entry.mjs
+@@ -45,17 +45,11 @@ if (explicitMode && supplied.length > 1) {
+       : mkdtempSync(join(tmpdir(), "keiyaku-test-bytecode-"));
+   const environment = cache === undefined ? process.env : { ...process.env, NODE_COMPILE_CACHE: cache };
+   try {
+-    // These checks read source independently. Await every child before running tests
+-    // or returning a failure, so an unsuccessful gate never leaves work detached.
+-    // Build is the heaviest release preparation step. Running it beside four
+-    // other CPU-heavy Node/TypeScript checks made the build several times slower
+-    // on small CI runners. Give it the machine first, then overlap only the
+-    // independent static/transpile checks.
++    // Build and transpilation own the artifacts tests consume. Give these stages
++    // the machine first, then overlap source-only checks with the behavioral sweep.
++    // Every check still runs on every invocation; await every child even on failure.
+     const buildStatus = mode === "release" ? await run("npm", ["run", "build"], "build", environment) : 0;
+-    const preparation =
+-      mode === "dev"
+-        ? ["test:typecheck", "test:architecture"]
+-        : ["format:check", "test:architecture", "test:maintainability", "test:compile"];
++    const preparation = mode === "dev" ? ["test:typecheck", "test:architecture"] : ["test:compile"];
+     const statuses =
+       buildStatus === 0
+         ? await Promise.all(preparation.map((name) => run("npm", ["run", name], name, environment)))
+@@ -63,7 +57,10 @@ if (explicitMode && supplied.length > 1) {
+     process.exitCode = buildStatus || statuses.find((status) => status !== 0) || 0;
+     if (process.exitCode === 0) {
+       // Reachability may inspect generated package exports, so it follows build.
+-      const checks = mode === "dev" ? ["test:local"] : ["test:reachability"];
++      const checks =
++        mode === "dev"
++          ? ["test:local"]
++          : ["format:check", "test:architecture", "test:maintainability", "test:reachability"];
+       const running = checks.map((name) => run("npm", ["run", name], name, environment));
+       if (mode === "release")
+         running.push(
+diff --git a/tests/architecture.test.ts b/tests/architecture.test.ts
+index 52846af8..ffea2363 100644
+--- a/tests/architecture.test.ts
++++ b/tests/architecture.test.ts
+@@ -117,6 +117,8 @@ for (const [owner, edges, prefix, allowed] of compositionCases) {
+ for (const [owner, module, symbol, rule] of [
+   ["runtime/proc/run.ts", "node:child_process", "spawn", ""],
+   ["core/verbs/bind.ts", "node:child_process", "spawn", "capability-import"],
++  ["scripts/compile-tests.mjs", "node:module", "stripTypeScriptTypes", ""],
++  ["scripts/compile-tests.mjs", "node:module", "createRequire", "capability-import"],
+   ["core/verbs/bind.ts", "node:fs", "readFileSync", "capability-import"],
+   ["akuma/providers/opencode-sdk/client.ts", "@opencode-ai/sdk", "client", ""],
+   ["protocol/attempt.ts", "@opencode-ai/sdk", "client", "provider-sdk-boundary"],
+diff --git a/tests/run-tests.test.ts b/tests/run-tests.test.ts
+index 93a45d16..1b6f6582 100644
+--- a/tests/run-tests.test.ts
++++ b/tests/run-tests.test.ts
+@@ -460,11 +460,11 @@ test("test entry reruns checks and retires bytecode after success and failure",
+   assert.notEqual(caches[0], caches[1]);
+ });
+ 
+-test("release test entry completes build before parallel preparation and stops after build failure", (context) => {
++test("release entry completes build and compile before overlapping and draining all remaining checks", (context) => {
+   const directory = mkdtempSync(join(tmpdir(), "keiyaku-release-entry-"));
+   context.after(() => rmSync(directory, { recursive: true, force: true }));
+-  const preparation = ["format:check", "test:architecture", "test:maintainability", "test:compile"];
+-  const phases = ["build", ...preparation, "test:reachability"];
++  const checks = ["format:check", "test:architecture", "test:maintainability", "test:reachability"];
++  const phases = ["build", "test:compile", ...checks];
+   writeFileSync(
+     join(directory, "package.json"),
+     JSON.stringify({ type: "module", scripts: Object.fromEntries(phases.map((phase) => [phase, "node phase.mjs"])) }),
+@@ -473,33 +473,51 @@ test("release test entry completes build before parallel preparation and stops a
+   writeFileSync(
+     join(directory, "phase.mjs"),
+     [
+-      'import { appendFileSync } from "node:fs";',
++      'import { appendFileSync, existsSync } from "node:fs";',
++      'import { setTimeout } from "node:timers/promises";',
+       "const phase = process.env.npm_lifecycle_event;",
+       'appendFileSync("phases.jsonl", phase + "\\n");',
++      'if (phase === "test:maintainability") {',
++      "  const deadline = Date.now() + 5000;",
++      '  while (!existsSync("tests-started")) {',
++      '    if (Date.now() >= deadline) throw new Error("behavioral tests were serialized behind static checks");',
++      "    await setTimeout(5);",
++      "  }",
++      "}",
++      'appendFileSync("phases.jsonl", "end:" + phase + "\\n");',
+       "if (phase === process.env.FAIL_PHASE) process.exitCode = 7;",
+     ].join("\n"),
+   );
+   writeFileSync(
+     join(directory, "scripts", "run-tests.mjs"),
+-    'import { appendFileSync } from "node:fs"; appendFileSync("phases.jsonl", "tests\\n");',
++    [
++      'import { appendFileSync, writeFileSync } from "node:fs";',
++      'import { setTimeout } from "node:timers/promises";',
++      'appendFileSync("phases.jsonl", "tests\\n");',
++      'writeFileSync("tests-started", "started");',
++      "await setTimeout(100);",
++      'appendFileSync("phases.jsonl", "end:tests\\n");',
++    ].join("\n"),
+   );
+-
+-  for (const fail of ["", "build"]) {
++  for (const fail of ["", "build", "test:compile", "test:maintainability"]) {
+     writeFileSync(join(directory, "phases.jsonl"), "");
++    rmSync(join(directory, "tests-started"), { force: true });
+     const result = spawnSync(process.execPath, [resolve(root, "scripts/test-entry.mjs"), "--release"], {
+       cwd: directory,
+       encoding: "utf8",
+       env: { ...process.env, NODE_DISABLE_COMPILE_CACHE: "1", FAIL_PHASE: fail },
+     });
+-    assert.equal(result.status, fail === "build" ? 7 : 0, result.stdout + result.stderr);
++    assert.equal(result.status, fail === "" ? 0 : 7, result.stdout + result.stderr);
+     const records = readFileSync(join(directory, "phases.jsonl"), "utf8").trim().split("\n");
+-    assert.equal(records[0], "build");
+-    if (fail === "build") {
+-      assert.deepEqual(records, ["build"]);
+-    } else {
+-      assert.deepEqual(records.slice(1, 5).sort(), [...preparation].sort());
+-      assert.deepEqual(records.slice(5).sort(), ["test:reachability", "tests"]);
+-    }
++    const expected =
++      fail === "build" ? ["build"] : fail === "test:compile" ? ["build", "test:compile"] : [...phases, "tests"];
++    assert.deepEqual(records.slice(0, 2), ["build", "end:build"]);
++    if (fail !== "build") assert.deepEqual(records.slice(2, 4), ["test:compile", "end:test:compile"]);
++    assert.deepEqual(records.filter((phase) => !phase.startsWith("end:")).sort(), [...expected].sort());
++    assert.deepEqual(
++      records.filter((phase) => phase.startsWith("end:")).sort(),
++      expected.map((phase) => "end:" + phase).sort(),
++    );
+   }
+ });
+ 
+@@ -533,3 +551,45 @@ test("explicit test selections reject missing files and unmatched patterns befor
+   assert.equal(matched.status, 0, matched.stdout + matched.stderr);
+   assert.equal(readFileSync(marker, "utf8"), "ran");
+ });
++
++test("test compilation preserves native source locations, transformed syntax and syntax failures", (context) => {
++  const directory = mkdtempSync(join(tmpdir(), "keiyaku-test-compile-"));
++  context.after(() => rmSync(directory, { recursive: true, force: true }));
++  mkdirSync(join(directory, "tests"));
++  mkdirSync(join(directory, ".test-build"));
++  writeFileSync(join(directory, "package.json"), '{"type":"module"}');
++  writeFileSync(join(directory, ".test-build", "stale.js"), "stale");
++  const native = join(directory, "tests", "native.ts");
++  writeFileSync(native, "const value: number = 41;\nthrow new Error(`native oracle ${value}`);\n");
++  writeFileSync(
++    join(directory, "tests", "transformed.ts"),
++    [
++      'import assert from "node:assert/strict";',
++      "class Holder { constructor(readonly value: number) {} }",
++      "assert.equal(new Holder(42).value, 42);",
++    ].join("\n"),
++  );
++  const compile = () =>
++    spawnSync(process.execPath, [resolve(root, "scripts/compile-tests.mjs")], {
++      cwd: directory,
++      encoding: "utf8",
++    });
++  const result = compile();
++  assert.equal(result.status, 0, result.stdout + result.stderr);
++  assert.equal(existsSync(join(directory, ".test-build", "stale.js")), false);
++  const execute = (name: string) =>
++    spawnSync(process.execPath, ["--enable-source-maps", join(directory, ".test-build", "tests", name)], {
++      cwd: directory,
++      encoding: "utf8",
++    });
++  const failed = execute("native.js");
++  assert.notEqual(failed.status, 0);
++  assert.match(failed.stderr, /native oracle 41/u);
++  assert.ok(failed.stderr.includes("native.ts:2"), failed.stderr);
++  const transformed = execute("transformed.js");
++  assert.equal(transformed.status, 0, transformed.stdout + transformed.stderr);
++  writeFileSync(native, "const broken: = ;");
++  const invalid = compile();
++  assert.notEqual(invalid.status, 0);
++  assert.match(invalid.stderr, /native\.ts/u);
++});

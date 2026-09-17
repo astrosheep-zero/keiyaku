@@ -1,4 +1,4 @@
-name: Publish test scenario consolidation
+name: Publish native test compilation
 on:
   push:
     branches: [chore/test-diet-snapshot-20260918]
@@ -12,24 +12,15 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - name: Apply the locally checked transform to its pinned base
+      - name: Reproduce the locally verified tree on its pinned parent
         run: |
-          cp .test-audit/batch09.py /tmp/batch09.py
-          git checkout --detach 14233098195c2f2897e9626e0f5159e66e1194ad
-          python3 /tmp/batch09.py
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24.x
-          cache: npm
-      - run: npm ci --ignore-scripts --prefer-offline
-      - name: Verify exact tree and publish a new review branch
-        run: |
-          node node_modules/prettier/bin/prettier.cjs --write --print-width 120 tests/facade-fleet.test.ts tests/library-akuma-creation.test.ts tests/contract-completion.test.ts
-          git add tests/facade-fleet.test.ts tests/library-akuma-creation.test.ts tests/contract-completion.test.ts
+          cp .test-audit/batch10.patch /tmp/batch10.patch
+          git checkout --detach bb110c2ab295674c5862f4a729e24ae6dfa00b9b
+          git apply --index /tmp/batch10.patch
           git diff --cached --check
-          test "$(git write-tree)" = a4c9c4f857b7efbf5b34849dffc0b31d3bf27946
-          test -z "$(git ls-remote --heads origin refs/heads/test-diet/09-merge-expensive-scenarios)"
+          test "$(git write-tree)" = e06649a3173b11bf0a14d58902dc8fabb73902e4
+          test -z "$(git ls-remote --heads origin refs/heads/test-diet/10-native-compile-pipeline)"
           git config user.name 'Keiyaku Test Optimization'
           git config user.email 'keiyaku-test@example.invalid'
-          git commit -m 'test: merge cross-product checks and right-size pagination fixtures'
-          git push origin HEAD:refs/heads/test-diet/09-merge-expensive-scenarios
+          git commit -m 'test: strip erasable TypeScript natively and overlap independent checks'
+          git push origin HEAD:refs/heads/test-diet/10-native-compile-pipeline
