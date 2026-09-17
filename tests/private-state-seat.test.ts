@@ -38,10 +38,10 @@ test("private-state seat acquisition times out without breaking the holder", asy
   await acquired;
   const started = performance.now();
   await assert.rejects(
-    withPrivateStatePublicationSeat(repository, async () => "waiter"),
+    withPrivateStatePublicationSeat(repository, async () => "waiter", { timeoutMs: 100 }),
     (error: unknown) => error instanceof GitPrivateStateSeatContentionError && error.reason === "timeout",
   );
-  assert.ok(performance.now() - started < 8_000);
+  assert.ok(performance.now() - started < 1_000);
   releaseHolder?.();
   assert.equal((await holder).value, "held");
 });
@@ -59,10 +59,14 @@ test("same-context private-state seat reentry fails immediately", async () => {
 
 test("a held private-state seat callback may outlive the acquire timeout", async () => {
   const repository = seatRepository();
-  const outcome = await withPrivateStatePublicationSeat(repository, async () => {
-    await new Promise((resolve) => setTimeout(resolve, 5_100));
-    return "held";
-  });
+  const outcome = await withPrivateStatePublicationSeat(
+    repository,
+    async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      return "held";
+    },
+    { timeoutMs: 25 },
+  );
   assert.equal(outcome.value, "held");
   assert.equal(outcome.closeLag, undefined);
 });

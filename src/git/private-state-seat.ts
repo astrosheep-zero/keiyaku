@@ -4,7 +4,7 @@ import { acquireSqliteTransactionLock, SqliteTransactionLockError } from "../coo
 import type { GitRepository } from "./process.js";
 
 const PRIVATE_STATE_SEAT = "private-state.sqlite";
-const PRIVATE_STATE_SEAT_ACQUIRE_TIMEOUT_MS = 5_000;
+const PRIVATE_STATE_SEAT_ACQUIRE_TIMEOUT_MS = 15_000;
 const privateStateSeat: unique symbol = Symbol("private-state-seat");
 const confirmedPublications = new WeakSet<PrivateStatePublicationSeat>();
 const heldPrivateStateSeats = new AsyncLocalStorage<ReadonlySet<string>>();

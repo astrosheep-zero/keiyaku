@@ -1,5 +1,14 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -559,14 +568,23 @@ test("wake re-resolves a vanished recorded runtime through the production spawn 
   const value = await fixture();
   const retired = join(value.root, "retired-runtime");
   const runtimeBin = join(value.root, "runtime-bin");
-  const vanished = join(retired, "node");
-  const replacement = join(runtimeBin, "node");
+  const runtimeName = process.platform === "win32" ? "hostname.exe" : "node";
+  const vanished = join(retired, runtimeName);
+  const replacement = join(runtimeBin, runtimeName);
   const proof = join(runtimeBin, "proof");
   mkdirSync(retired, { recursive: true });
   mkdirSync(runtimeBin, { recursive: true });
-  // The installed runtime of the same command name reports the executable it was launched from.
-  writeFileSync(replacement, `#!/bin/sh\nprintf '%s\\n' "$0" > "${proof}"\n`, { mode: 0o755 });
-  writeFileSync(vanished, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  // Use a real native executable on Windows: CreateProcess cannot launch a POSIX shell fixture.
+  if (process.platform === "win32") {
+    const hostname = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "hostname.exe");
+    copyFileSync(hostname, replacement);
+    copyFileSync(hostname, vanished);
+  } else {
+    // The installed runtime of the same command name reports the executable it was launched from.
+    writeFileSync(replacement, `#!/bin/sh\nprintf '%s\\n' "$0" > "${proof}"\n`, { mode: 0o755 });
+    writeFileSync(vanished, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  }
+  let launched: OwnedProcess | undefined;
   try {
     const born = (await HeldAkumaLeash.try(value.allocated.paths))!;
     await born.birth(value.allocated.paths, value.soul);
@@ -585,18 +603,24 @@ test("wake re-resolves a vanished recorded runtime through the production spawn 
           successor = (await leash.recordBody(paths, { leashTakenAt: value.soul.createdAt })).sequence;
           leash.release();
           // The production launch resolves the runtime from the vanished record before spawning.
-          return await spawnAkumaBody(
+          launched = await spawnAkumaBody(
             { paths, refuseIfHeld: true },
             { recorded: vanished, environment: { current: vanished, path: runtimeBin } },
           );
+          return launched;
         },
       },
     });
     assert.deepEqual(result.admission, { tellId: "tell-vanished-runtime", fact: "recorded" });
     assert.deepEqual(result.wake, { kind: "pursuing", bodySequence: successor });
-    const deadline = performance.now() + 5_000;
-    while (!existsSync(proof) && performance.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
-    assert.equal(readFileSync(proof, "utf8").trim(), replacement);
+    assert.ok(launched !== undefined && Number.isSafeInteger(launched.pid) && launched.pid > 0);
+    if (process.platform === "win32") {
+      await launched.exited;
+    } else {
+      const deadline = performance.now() + 5_000;
+      while (!existsSync(proof) && performance.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+      assert.equal(readFileSync(proof, "utf8").trim(), replacement);
+    }
     const after = await readHeart(value.allocated.paths);
     assert.deepEqual(after.soul, before.soul);
     assert.deepEqual(after.latestSession, before.latestSession);

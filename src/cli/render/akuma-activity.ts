@@ -332,7 +332,9 @@ function currentTurnBoundary(snapshot: RenderedSnapshot): CurrentTurnBoundary | 
     (row) =>
       row.kind === "tell" &&
       row.state === "told" &&
-      row.deliveries.some((delivery) => delivery.route === "launch" && delivery.turnSequence === snapshot.turn.turnSequence),
+      row.deliveries.some(
+        (delivery) => delivery.route === "launch" && delivery.turnSequence === snapshot.turn.turnSequence,
+      ),
   );
   if (wake !== undefined) return { row: wake, turnSequence: snapshot.turn.turnSequence };
   const call = rows.find((row) => row.kind === "call" && row.turnSequence === snapshot.turn.turnSequence);
@@ -344,14 +346,15 @@ function boundaryFirstSnapshotEntries(snapshot: RenderedSnapshot): readonly Rend
   const entries = orderedSnapshotEntries(snapshot);
   const boundary = currentTurnBoundary(snapshot);
   if (boundary === undefined) return entries;
-  return [{ kind: "row", row: boundary.row }, ...entries.filter((entry) => entry.kind !== "row" || entry.row !== boundary.row)];
+  return [
+    { kind: "row", row: boundary.row },
+    ...entries.filter((entry) => entry.kind !== "row" || entry.row !== boundary.row),
+  ];
 }
 
 /** Open status hides internal thought narration without selecting a second activity window. */
 function visibleOpenSnapshotEntries(snapshot: Extract<RenderedSnapshot, { kind: "open" }>): readonly RenderEntry[] {
-  return boundaryFirstSnapshotEntries(snapshot).filter(
-    (entry) => entry.kind !== "row" || entry.row.kind !== "thought",
-  );
+  return boundaryFirstSnapshotEntries(snapshot).filter((entry) => entry.kind !== "row" || entry.row.kind !== "thought");
 }
 
 /** Adjacent omitted spans are one continuous unknown portion of the retained timeline. */

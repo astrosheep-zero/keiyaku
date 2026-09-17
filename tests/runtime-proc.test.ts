@@ -450,11 +450,12 @@ function waitForOutputLine(
 
 async function waitForFile(path: string): Promise<string> {
   const deadline = performance.now() + 2_000;
-  while (!existsSync(path)) {
-    if (performance.now() >= deadline) throw new Error(`missing ${path}`);
+  for (;;) {
+    const contents = existsSync(path) ? readFileSync(path, "utf8") : "";
+    if (contents.endsWith("\n")) return contents;
+    if (performance.now() >= deadline) throw new Error(`missing complete line in ${path}`);
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
-  return readFileSync(path, "utf8");
 }
 
 async function expectLaterTerminateIsInert(owned: Awaited<ReturnType<typeof spawnDetachedProcess>>): Promise<void> {
@@ -726,7 +727,7 @@ test("Unix natural leader exit cleans a surviving descendant once", async (t) =>
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-runtime-leader-exit-"));
   const descendantPidPath = join(root, "descendant-pid");
   const descendant = [
-    `require("node:fs").writeFileSync(${JSON.stringify(descendantPidPath)}, String(process.pid));`,
+    `require("node:fs").writeFileSync(${JSON.stringify(descendantPidPath)}, String(process.pid) + "\\n");`,
     'process.on("SIGTERM", () => {});',
     "setInterval(() => {}, 1_000);",
   ].join(" ");
@@ -771,7 +772,7 @@ test("Unix natural leader exit leaves no stale terminate after descendants are a
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-runtime-leader-gone-descendants-"));
   const descendantPidPath = join(root, "descendant-pid");
   const descendant = [
-    `require("node:fs").writeFileSync(${JSON.stringify(descendantPidPath)}, String(process.pid));`,
+    `require("node:fs").writeFileSync(${JSON.stringify(descendantPidPath)}, String(process.pid) + "\\n");`,
     "setTimeout(() => process.exit(0), 200);",
   ].join(" ");
   const parent = [
@@ -821,7 +822,7 @@ test("runProcess timeout settles after cleaning inherited pipes from an owned gr
     'const { spawn } = require("node:child_process");',
     'const { writeFileSync } = require("node:fs");',
     `const descendant = spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: ["ignore", "inherit", "inherit"] });`,
-    `writeFileSync(${JSON.stringify(descendantPidPath)}, String(descendant.pid));`,
+    `writeFileSync(${JSON.stringify(descendantPidPath)}, String(descendant.pid) + "\\n");`,
     "process.exit(0);",
   ].join(" ");
   let pending: ReturnType<typeof runProcess> | undefined;

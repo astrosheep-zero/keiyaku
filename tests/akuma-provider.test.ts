@@ -1914,6 +1914,7 @@ function fakeCodex(
     | "terminal-hang"
     | "exit-before-completion"
     | "exit-before-admit"
+    | "foreign-thread"
     | "rpc-reject"
     | "missing-turn-id"
     | "steer-hung-terminal" = "complete",
@@ -1980,6 +1981,15 @@ function fakeCodex(
       "      send({method:'future/native-event',params:{secret:'must not escape'}});",
       "      send({method:'item/completed',params:{item:{id:'answer-2',type:'agentMessage',text:'second answer'}}});",
       "      send({method:'thread/tokenUsage/updated',params:{tokens:999}});",
+      "      send({method:'turn/completed',params:{threadId:message.params.threadId,turn:{id:'turn-1',status:'completed'}}});",
+      "    }",
+      "    if(mode==='foreign-thread'){",
+      "      send({method:'item/started',params:{threadId:'thread-child',turnId:'turn-child',item:{id:'child-command',type:'commandExecution',command:'child command'}}});",
+      "      send({method:'item/completed',params:{threadId:'thread-child',turnId:'turn-child',item:{id:'child-answer',type:'agentMessage',text:'child answer'}}});",
+      "      send({method:'error',params:{threadId:'thread-child',turnId:'turn-child',error:{message:'child error'},willRetry:false}});",
+      "      send({method:'future/child-event',params:{threadId:'thread-child',turnId:'turn-child'}});",
+      "      send({method:'turn/completed',params:{threadId:'thread-child',turn:{id:'turn-child',status:'completed'}}});",
+      "      send({method:'item/completed',params:{threadId:message.params.threadId,turnId:'turn-1',item:{id:'parent-answer',type:'agentMessage',text:'parent answer'}}});",
       "      send({method:'turn/completed',params:{threadId:message.params.threadId,turn:{id:'turn-1',status:'completed'}}});",
       "    }",
       "    return;",
@@ -2915,6 +2925,35 @@ test("Codex maps observations without leaking output or unknown payloads", async
     assert.equal(JSON.stringify(events).includes("secret output"), false);
     assert.equal(JSON.stringify(events).includes("must not escape"), false);
     assert.equal(JSON.stringify(events).includes("999"), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Codex ignores notifications from a spawned child thread", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-foreign-thread-"));
+  try {
+    const provider = createCodexAppServerProvider(fakeCodex(root, "foreign-thread").executable);
+    const drive = await provider.start({
+      ...DRIVE_DEFAULTS,
+      body: "delegate",
+      launchTells: [],
+      cwd: root,
+      options: {},
+      session: { kind: "fresh" },
+    }).result;
+    const events = [];
+    for await (const event of drive.events) events.push(event);
+
+    assert.deepEqual(events, [
+      { type: "session", coordinate: { sessionId: "thread-fresh" } },
+      { type: "assistant", text: "parent answer" },
+    ]);
+    assert.deepEqual(await drive.completion, {
+      kind: "answered",
+      answer: "parent answer",
+      historyId: "turn-1",
+    });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

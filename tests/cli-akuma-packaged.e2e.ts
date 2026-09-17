@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -14,6 +14,7 @@ import { BodyRequestPump } from "../src/akuma/request-serve.js";
 import { composeRequestCommands } from "../src/akuma/request-wire.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
 import { World } from "../src/world.js";
+import { removeTempDirectory } from "./support/process.js";
 
 const packagedCli = fileURLToPath(new URL("../build/src/cli/index.js", import.meta.url));
 const acpSdk = fileURLToPath(new URL("../node_modules/@agentclientprotocol/sdk/dist/acp.js", import.meta.url));
@@ -183,7 +184,7 @@ test("packaged observing calls stream one framed session and one conclusion per 
     assert.equal(silent.stdout, "", "a valid empty answer writes zero stdout bytes");
     assert.match(silent.stderr, /✓ answered — \d+s/u, "the conclusion distinguishes an empty answer from silence");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeTempDirectory(root);
   }
 });
 
@@ -203,7 +204,7 @@ test("packaged observing call bounds nine eligible tools across polling callback
     assert.ok(result.stderr.indexOf("⋮ 4 omitted") < result.stderr.indexOf("$ tool-8"));
     assert.match(result.stderr, /✓ answered — \d+s/u, "the final conclusion remains on stderr");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeTempDirectory(root);
   }
 });
 
@@ -273,7 +274,7 @@ test("packaged plural waits attribute activity and close every target", { timeou
     assert.equal(all.stderr.match(/✓ answered — /gu)?.length, 1, "every target closes exactly once");
     await runPackagedCli(["-C", world, "kill", "@notes"], { cwd: world, env });
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await removeTempDirectory(root);
   }
 });
 
@@ -284,7 +285,7 @@ function runPackagedCli(
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [packagedCli, ...args], {
       cwd: input.cwd,
-      env: input.env ?? process.env,
+      env: { ...(input.env ?? process.env), NODE_NO_WARNINGS: "1" },
       stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";
@@ -303,7 +304,7 @@ function runPackagedCli(
 
 test("packaged Akuma call, wait, and history cross the request boundary", async () => {
   assert.equal(existsSync(packagedCli), true, "npm run build must produce the packaged CLI before this test");
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-packaged-akuma-")));
+  const root = (await World.resolve(mkdtempSync(join(tmpdir(), "keiyaku-packaged-akuma-")))).candidate!;
   const world = await World.prove(root);
   const home = join(root, ".home");
   mkdirSync(join(home, "akuma"), { recursive: true });
@@ -388,6 +389,6 @@ test("packaged Akuma call, wait, and history cross the request boundary", async 
   } finally {
     await pump.close();
     leash.release();
-    rmSync(root, { recursive: true, force: true });
+    await removeTempDirectory(root);
   }
 });

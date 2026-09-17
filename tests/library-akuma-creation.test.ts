@@ -1250,7 +1250,7 @@ test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async ()
   } finally {
     if (originalFork === undefined) delete mutable.fork;
     else mutable.fork = originalFork;
-    rmSync(raw.path, { recursive: true, force: true });
+    rmSync(raw.path, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 });
   }
 });
 

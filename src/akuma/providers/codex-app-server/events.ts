@@ -382,12 +382,16 @@ export function codexNotificationResult(
   events: AgentEventChannel,
 ): TurnResult | undefined {
   const method = notification.method;
+  const params = codexObject(notification.params) ?? {};
+  const notificationThreadId = codexText(params.threadId);
+  if (state.threadId !== undefined && notificationThreadId !== undefined && notificationThreadId !== state.threadId) {
+    return undefined;
+  }
   if (!Object.hasOwn(CODEX_NOTIFICATION_DISPOSITIONS, method)) {
     events.emit(unknownEvent(method));
     return undefined;
   }
   const disposition = CODEX_NOTIFICATION_DISPOSITIONS[method as keyof typeof CODEX_NOTIFICATION_DISPOSITIONS];
-  const params = codexObject(notification.params) ?? {};
   switch (disposition) {
     case "drop":
       return undefined;
