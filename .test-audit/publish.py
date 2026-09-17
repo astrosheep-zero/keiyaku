@@ -1,4 +1,4 @@
-"""Reproduce previously supplied test-only patches; require exact Git trees before publishing."""
+"""Reproduce pinned test-only patches; require exact Git trees before publishing."""
 import json
 from pathlib import Path
 import subprocess
@@ -9,10 +9,10 @@ def git(*args):
     return subprocess.check_output(['git', *args], text=True).strip()
 
 
+branches = {1: 'test-diet/04-unit-boundaries', 2: 'test-diet/05-akuma-lifecycle', 3: 'test-diet/06-git-cli-composition', 4: 'test-diet/07-owner-boundary-tests'}
 for recipe_file in sorted(Path(sys.argv[1]).glob('batch-*.json')):
     recipe = json.loads(recipe_file.read_text())
     number = int(recipe_file.stem.split('-')[1])
-    branches = {1: 'test-diet/04-unit-boundaries', 2: 'test-diet/05-akuma-lifecycle', 3: 'test-diet/06-git-cli-composition'}
     branch = branches[number]
     assert git('rev-parse', 'HEAD^{tree}') == recipe['parent_tree'], 'unexpected parent tree'
     for name, edits in recipe['changes'].items():
@@ -36,7 +36,7 @@ for recipe_file in sorted(Path(sys.argv[1]).glob('batch-*.json')):
     subprocess.run(['git', 'add', '--', 'tests'], check=True)
     subprocess.run(['git', 'diff', '--cached', '--check'], check=True)
     tree = git('write-tree')
-    assert tree == recipe['tree'], f'candidate differs from supplied patch: {tree}'
+    assert tree == recipe['tree'], f'candidate differs from validated patch: {tree}'
     existing = git('ls-remote', '--heads', 'origin', f'refs/heads/{branch}')
     if existing:
         remote_sha = existing.split()[0]
@@ -44,6 +44,6 @@ for recipe_file in sorted(Path(sys.argv[1]).glob('batch-*.json')):
         assert git('rev-parse', remote_sha + '^{tree}') == tree, 'refusing to replace an existing branch'
         subprocess.run(['git', 'reset', '--hard', remote_sha], check=True)
     else:
-        subprocess.run(['git', 'commit', '-m', f'test: publish test-diet candidate batch {number + 3}'], check=True)
+        subprocess.run(['git', 'commit', '-m', f'test: focus test-diet candidate batch {number + 3}'], check=True)
         subprocess.run(['git', 'push', 'origin', f'HEAD:refs/heads/{branch}'], check=True)
     print(json.dumps({'branch': branch, 'sha': git('rev-parse', 'HEAD'), 'tree': tree}), flush=True)
