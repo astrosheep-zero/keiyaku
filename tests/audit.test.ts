@@ -175,7 +175,7 @@ test("Verification reuse requires its exact producer subject", async () => {
 
 // Test declaration admission at its owner, without binding two complete worktrees.
 test("verified terms require a declaration at both unbound and identified boundaries", () => {
-  for (const id of [undefined, contractId("verify-boundary")]) {
+  for (const id of [undefined, contractId("kei/verify-boundary")]) {
     assert.deepEqual(prepareVerificationDeclaration({ gates: [gate("verified")], definition: null, ...(id === undefined ? {} : { contractId: id }) }), {
       kind: "refused",
       refusal: { kind: "verification-declaration-invalid", ...(id === undefined ? {} : { contractId: id }) },
