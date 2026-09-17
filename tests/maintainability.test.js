@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
@@ -42,25 +42,35 @@ test("Markdown character checks exclude runtime and reference trees", (context) 
   ]);
 });
 
-test("maintainability command prints diagnostics and fails only when errors remain", () => {
+test("maintainability CLI distinguishes warning-only fixtures from actual lint and Markdown errors", (context) => {
+  const directory = mkdtempSync(join(tmpdir(), "keiyaku-maintainability-cli-"));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  mkdirSync(join(directory, "scripts"));
+  mkdirSync(join(directory, "src"));
+  copyFileSync(maintainabilityCommand, join(directory, "scripts", "check-maintainability.js"));
+  symlinkSync(resolve("node_modules"), join(directory, "node_modules"), "junction");
+  writeFileSync(join(directory, "package.json"), '{"type":"module"}');
+  writeFileSync(
+    join(directory, "eslint.config.js"),
+    'export default [{ files: ["src/**/*.js"], rules: { "no-constant-condition": "error" } }];',
+  );
   const env = { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" };
-  const result = spawnSync(process.execPath, [maintainabilityCommand], { cwd: root, encoding: "utf8", env });
-  const output = `${result.stdout}${result.stderr}`.replace(/\u001b\[[0-9;]*m/gu, "");
-  const findings = markdownCharacterFindings(root);
-  const markdownErrors = findings.filter((finding) => finding.severity === "error");
-  const stylishErrors = output.match(/^\s+\d+:\d+\s+error\b/gmu) ?? [];
-  if (findings.length > 0) {
+  for (const errors of [false, true]) {
+    writeFileSync(join(directory, "limit.md"), "a".repeat(errors ? 30_001 : 20_001));
+    writeFileSync(join(directory, "src", "probe.js"), errors ? 'if (true) console.log("bad");' : 'console.log("ok");');
+    const result = spawnSync(process.execPath, [join(directory, "scripts", "check-maintainability.js")], {
+      cwd: directory,
+      encoding: "utf8",
+      env,
+    });
+    const output = `${result.stdout}${result.stderr}`.replace(/\u001b\[[0-9;]*m/gu, "");
+    assert.equal(result.status, errors ? 1 : 0, output);
     assert.match(output, /markdown character limits:/u);
-    for (const finding of findings) {
-      assert.equal(
-        output.includes(`${finding.severity}: ${finding.file} has ${finding.characters} characters`),
-        true,
-      );
-    }
+    assert.ok(
+      output.includes(`${errors ? "error" : "warning"}: limit.md has ${errors ? 30_001 : 20_001} characters`),
+      output,
+    );
+    if (errors) assert.match(output, /no-constant-condition/u);
+    else assert.doesNotMatch(output, /no-constant-condition/u);
   }
-  if (stylishErrors.length > 0) {
-    assert.match(output, /[✖x]\s+\d+\s+problem/u);
-  }
-  assert.equal(result.status, markdownErrors.length > 0 || stylishErrors.length > 0 ? 1 : 0);
-  assert.notEqual(result.status, null);
 });

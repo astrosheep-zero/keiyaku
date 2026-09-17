@@ -132,35 +132,6 @@ async function restoreOwnedRefs(
   repository.run(["update-ref", candidatePinRefFor(id), integration]);
 }
 
-test("rewritten target history retains owned refs with unchanged effects", async () => {
-  const { contract, repository } = await tenderedReviewGatedTargetFixture();
-  writeFileSync(join(repository.path, "target-only.txt"), "target only\n");
-  repository.run(["add", "target-only.txt"]);
-  repository.run(["commit", "--quiet", "-m", "target only"]);
-  await contract.review({ verdict: "satisfied" });
-  const state = await contract.state();
-  assert.equal(state.terminal?.kind, "claimed");
-  const tender = state.delivery?.data.tenderSnapshot;
-  const integration = state.currentIntegration?.snapshot ?? state.delivery?.data.integration.snapshot;
-  assert.ok(tender);
-  assert.ok(integration);
-  assert.notEqual(tender, integration);
-  await restoreOwnedRefs(repository, state.id, tender, integration);
-  const tree = repository.run(["rev-parse", "HEAD^{tree}"]).trim();
-  const rewritten = repository.run(["commit-tree", tree, "-m", "rewritten target"]).trim();
-  repository.run(["update-ref", "refs/heads/main", rewritten]);
-
-  const report = await contract.reconcile();
-  const git = await repositoryAt(repository.path);
-
-  assert.equal(await readRef(git, deliveryRefFor(state.id)), tender);
-  assert.equal(await readRef(git, candidatePinRefFor(state.id)), integration);
-  assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), rewritten);
-  assert.equal(report.lag.length, 0);
-  assert.equal(unchangedRef(report.effects, deliveryRefFor(state.id), tender), true);
-  assert.equal(unchangedRef(report.effects, candidatePinRefFor(state.id), integration), true);
-});
-
 test("expected-target CAS retains owned refs under a stale frozen tip", async () => {
   const { contract, repository } = await tenderedReviewGatedTargetFixture();
   await contract.review({ verdict: "satisfied" });

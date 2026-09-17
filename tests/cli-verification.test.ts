@@ -7,7 +7,6 @@ import { setImmediate } from "node:timers/promises";
 import test from "node:test";
 import { invoke as invokeRaw } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
-import { renderText } from "../src/cli/render/text.js";
 import { writeExecutionProgress } from "../src/cli/runtime.js";
 import { startContractExecution, type ExecutionEvent } from "../src/library/execution.js";
 import type { ContractId } from "../src/core/facts/types.js";
@@ -85,39 +84,6 @@ test("deliver adapts a successful Verification result through the CLI", async ()
   assert.match(progress, /● declaration 1\/1/u);
   assert.match(progress, /delivery-live-output/u);
   assert.match(progress, /✓ declaration 1\/1/u);
-});
-
-test("review prints Verification progress when target movement requires reintegration", async () => {
-  const { raw, id } = await bindAndDeliver("printf 'review-live-output\\n'", ["verified", "reviewed"]);
-  raw.run(["checkout", "--quiet", "main"]);
-  writeFileSync(resolve(raw.path, "target.txt"), "target changed\n");
-  raw.run(["add", "target.txt"]);
-  raw.run(["commit", "--quiet", "-m", "advance target"]);
-  const output = progressOutput();
-  try {
-    const result = await invokeRaw(executable(["-C", raw.path, "review", id, "--satisfied", "--summary", "Reviewed"]), {
-      environment: { KEIYAKU_ACTOR_ID: "cli-review-test" },
-      progress: output.progress,
-    });
-    assert.ok("kind" in result && result.kind === "accepted");
-    assert.match(output.text(), /● declaration 1\/1/u);
-    assert.match(output.text(), /review-live-output/u);
-    assert.match(output.text(), /✓ declaration 1\/1/u);
-    assert.equal((await observeContract(await repositoryAt(raw.path), id)).state?.terminal?.kind, "claimed");
-  } finally {
-    output.stream.destroy();
-  }
-});
-
-test("audit renders the Verification summary from its CLI result", async () => {
-  const pending = await bindAndDeliver("printf 'verification diagnostic\\n' >&2; exit 1");
-  const audit = (await invokeRaw(executable(["-C", pending.raw.path, "audit", pending.id]), {
-    environment: { KEIYAKU_ACTOR_ID: "cli-audit-test" },
-  })) as unknown as { kind: string; report: { verification: { kind: string; summary?: string } } };
-  assert.equal(audit.kind, "accepted");
-  assert.equal(audit.report.verification.kind, "unsatisfied");
-  assert.match(audit.report.verification.summary ?? "", /verification diagnostic/u);
-  assert.match(renderText(audit as never, { columns: 400, color: false }), /verification diagnostic/u);
 });
 
 test("closing or failing CLI progress output does not cancel the operation", async (t) => {

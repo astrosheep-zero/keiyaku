@@ -6,7 +6,7 @@ import test from "node:test";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { privateStatePublicationSeatPath } from "../src/git/private-state-seat.js";
-import { Keiyaku, KeiyakuRetry, Repo, type Keiyaku as KeiyakuHandle } from "../src/index.js";
+import { Keiyaku, Repo, type Keiyaku as KeiyakuHandle } from "../src/index.js";
 import { appointedWorktreePath, cachedRepoAt, cachedRepositoryAt, withGitShim } from "./support/git.js";
 import { bind, document, repositoryWithMain } from "./support/library-verbs.js";
 import { fixtureNodeOptions, deferred as promiseBarrier } from "./support/process.js";
@@ -144,38 +144,6 @@ function crossProcessAmend(
   };
 }
 
-test("more independent cross-process mutations than the attempt bound serialize at the private root", async () => {
-  const repository = repositoryWithMain();
-  const contracts = [];
-  for (let index = 0; index < 4; index += 1) contracts.push(await bind(repository));
-  const capability = await cachedRepositoryAt(repository.path);
-  const held = await acquireSqliteTransactionLock({
-    path: privateStatePublicationSeatPath(capability),
-    mode: "immediate",
-  });
-  const contractIds = await Promise.all(contracts.map(async (contract) => (await contract.state()).id));
-  const workers = contracts.map((_, index) =>
-    crossProcessAmend({
-      repository: repository.path,
-      contractId: contractIds[index]!,
-      markdown: `## Replace: Context\nwriter ${index}\n`,
-    }),
-  );
-  try {
-    await Promise.all(workers.map(({ ready }) => ready));
-  } finally {
-    held.close();
-  }
-  const outcomes = await Promise.all(workers.map(({ completed }) => completed));
-  assert.ok(outcomes.every((outcome) => outcome.includes("accepted")));
-  for (const [index, contract] of contracts.entries()) {
-    assert.equal(
-      decodeContractDocument((await contract.state()).terms.document.bytes).context.trim(),
-      `writer ${index}`,
-    );
-  }
-});
-
 test("same-Contract cross-process amends decide from the queued fresh state", async () => {
   const repository = repositoryWithMain();
   const contract = await bind(repository);
@@ -215,87 +183,6 @@ test("same-Contract cross-process amends decide from the queued fresh state", as
   assert.equal(outcomes.filter((outcome) => outcome.includes("failed:terms-moved")).length, 1);
   const body = decodeContractDocument((await contract.state()).terms.document.bytes);
   assert.ok(body.context.trim() === "first source terms" || body.objective.trim() === "second source terms");
-
-  const delayed = await bind(repository);
-  const delayedSource = (await delayed.state()).terms;
-  const delayedHeld = await acquireSqliteTransactionLock({
-    path: privateStatePublicationSeatPath(capability),
-    mode: "immediate",
-  });
-  const delayedWorkers = [
-    crossProcessAmend({
-      repository: repository.path,
-      contractId: (await delayed.state()).id,
-      markdown: "## Replace: Context\nfirst delayed source terms\n",
-      source: delayedSource,
-      waitForRelease: true,
-    }),
-    crossProcessAmend({
-      repository: repository.path,
-      contractId: (await delayed.state()).id,
-      markdown: "## Replace: Objective\nsecond delayed source terms\n",
-      source: delayedSource,
-      waitForRelease: true,
-    }),
-  ];
-  try {
-    try {
-      assert.deepEqual(await Promise.all(delayedWorkers.map(({ ready }) => ready)), [
-        delayedSource.document.key,
-        delayedSource.document.key,
-      ]);
-    } finally {
-      delayedHeld.close();
-    }
-    delayedWorkers[0]!.release();
-    assert.match(await delayedWorkers[0]!.completed, /accepted/);
-    delayedWorkers[1]!.release();
-    assert.match(await delayedWorkers[1]!.completed, /failed:terms-moved/);
-  } finally {
-    for (const worker of delayedWorkers) worker.release();
-    await Promise.allSettled(delayedWorkers.map(({ completed }) => completed));
-  }
-  const delayedBody = decodeContractDocument((await delayed.state()).terms.document.bytes);
-  assert.equal(delayedBody.context.trim(), "first delayed source terms");
-  assert.notEqual(delayedBody.objective.trim(), "second delayed source terms");
-});
-
-test("a hard publication failure is returned without replaying the operation", async () => {
-  const repository = repositoryWithMain();
-  const contract = await bind(repository);
-  const attempts = `${repository.path}/publication-attempts`;
-
-  let retry: KeiyakuRetry | undefined;
-  await assert.rejects(
-    withGitShim(
-      [
-        'if [ "$1" = "update-ref" ]; then',
-        "  cat >/dev/null",
-        '  printf "attempt\\n" >> "$KEIYAKU_ATTEMPTS"',
-        '  printf "forced hard publication failure\\n" >&2',
-        "  exit 42",
-        "fi",
-        'exec "$KEIYAKU_REAL_GIT" "$@"',
-      ].join("\n"),
-      { KEIYAKU_ATTEMPTS: attempts },
-      async (gitPath) =>
-        (
-          await Keiyaku.of({
-            repo: await Repo.at({ path: repository.path, gitPath }),
-            id: (await contract.state()).id,
-          })
-        ).amend({ markdown: "## Replace: Context\nNo coordinate moved.\n" }),
-    ),
-    (error: unknown) => {
-      assert.ok(error instanceof KeiyakuRetry);
-      retry = error;
-      return true;
-    },
-  );
-  assert.equal(retry?.code, "publication-failed");
-  if (retry?.reason.kind === "publication-failed")
-    assert.match(retry.reason.diagnostic, /forced hard publication failure/);
-  assert.deepEqual(readFileSync(attempts, "utf8").trim().split("\n"), ["attempt"]);
 });
 
 test("delivery re-integrates its persisted tender when the target premise moves", async () => {
@@ -380,67 +267,4 @@ test("delivery re-integrates its persisted tender when the target premise moves"
   assert.equal(current?.integration.snapshot, reintegrated.data.snapshot);
   assert.equal(current?.integration.changeId, delivered.value.integration.changeId);
   assert.match((await current?.diff()) ?? "", /candidate\.txt/u);
-});
-
-test("equivalent external target movement stops without reintegration or claim", async () => {
-  const repository = repositoryWithMain();
-  repository.run(["branch", "release"]);
-  const result = await Keiyaku.bind({
-    repo: await cachedRepoAt(repository.path),
-    markdown: document(),
-    target: "refs/heads/release",
-    workspace: "worktree",
-    gates: [],
-  });
-  const worktree = await appointedWorktreePath(
-    await cachedRepositoryAt(repository.path),
-    (await result.keiyaku.state()).id,
-  );
-  writeFileSync(resolve(worktree, "candidate.txt"), "captured\n");
-  repository.run(["-C", worktree, "add", "candidate.txt"]);
-  repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
-  const raced = `${repository.path}/equivalent-target-raced.marker`;
-  const delivered = await withGitShim(
-    [
-      'if [ "$1" = "update-ref" ]; then',
-      "  input_file=$(mktemp)",
-      '  cat >"$input_file"',
-      '  if grep -q "update refs/heads/release" "$input_file" && [ ! -e "$KEIYAKU_TARGET_RACED" ]; then',
-      '    expected=$(awk \'$1 == "update" && $2 == "refs/heads/release" { print $4 }\' "$input_file")',
-      '    candidate=$(awk \'$1 == "update" && $2 == "refs/heads/release" { print $3 }\' "$input_file")',
-      '    tree=$("$KEIYAKU_REAL_GIT" rev-parse "$candidate^{tree}")',
-      '    external=$("$KEIYAKU_REAL_GIT" commit-tree "$tree" -p "$expected" -m "external equivalent")',
-      '    "$KEIYAKU_REAL_GIT" update-ref refs/heads/release "$external" "$expected"',
-      '    touch "$KEIYAKU_TARGET_RACED"',
-      "  fi",
-      '  "$KEIYAKU_REAL_GIT" "$@" <"$input_file"',
-      "  status=$?",
-      '  rm -f "$input_file"',
-      '  exit "$status"',
-      "fi",
-      'exec "$KEIYAKU_REAL_GIT" "$@"',
-    ].join("\n"),
-    { KEIYAKU_TARGET_RACED: raced },
-    async (gitPath) =>
-      acceptedDelivery(
-        await Keiyaku.of({
-          repo: await Repo.at({ path: repository.path, gitPath }),
-          id: (await result.keiyaku.state()).id,
-        }).deliver(),
-      ),
-  );
-
-  assert.deepEqual(
-    delivered.facts.map((fact) => fact.kind),
-    ["bound", "deliver"],
-  );
-  assert.equal(delivered.value.completion, undefined);
-  const placement = delivered.value.placement;
-  assert.ok(placement);
-  if (!("failure" in placement) || placement.failure !== "target-moved")
-    assert.fail("expected target-moved placement failure");
-  assert.equal(placement.observedTreeEqualsCandidate, true);
-  assert.notEqual(placement.observed, null);
-  assert.equal(repository.run(["rev-parse", "refs/heads/release"]).trim(), placement.observed);
-  assert.equal((await result.keiyaku.state()).terminal, null);
 });

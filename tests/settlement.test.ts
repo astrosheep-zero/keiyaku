@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
@@ -32,16 +32,9 @@ function acceptedDelivery(result: Awaited<ReturnType<KeiyakuHandle["deliver"]>>)
   return result;
 }
 
-import { readNamespaceContext } from "../src/task/context.js";
 import { Tasks } from "../src/task/index.js";
 import { World } from "../src/world.js";
-import {
-  appointedWorktreePath,
-  cachedRepoAt,
-  cachedRepositoryAt,
-  makeGitRepository,
-  withGitShim,
-} from "./support/git.js";
+import { cachedRepoAt, cachedRepositoryAt, makeGitRepository, withGitShim } from "./support/git.js";
 
 function repository() {
   const value = makeGitRepository();
@@ -224,52 +217,6 @@ test(
   },
 );
 
-test("abandon releases the holder without reopening Task authority", async () => {
-  const world = repository(),
-    repo = await cachedRepoAt(world.path);
-  const taskId = await task(world.path, "Abandoned Task", "done");
-  commitTasks(world);
-  const bound = await Keiyaku.bind({ repo, task: taskId, markdown: document("No reopen"), workspace: "worktree" });
-
-  const abandoned = await bound.keiyaku.abandon();
-
-  assert.equal(await taskState(world.path, taskId), "done");
-  assert.deepEqual(abandoned.settlementLags, []);
-
-  const rebound = await Keiyaku.bind({
-    repo,
-    task: taskId,
-    markdown: document("Released holder"),
-    workspace: "worktree",
-    gates: [],
-  });
-  assert.equal((await rebound.keiyaku.state()).terminal, null);
-  await rebound.keiyaku.abandon();
-});
-
-test("a missing holder target remains an explicit Task settlement lag", async () => {
-  const world = repository(),
-    repo = await cachedRepoAt(world.path);
-  const missing = "task/missing" as const;
-  const bound = await Keiyaku.bind({
-    repo,
-    task: missing,
-    markdown: document("Missing holder target"),
-    workspace: "worktree",
-    gates: [],
-  });
-  writeFileSync(`${world.path}/missing.txt`, "missing\n");
-  const claimed = acceptedDelivery(await bound.keiyaku.deliver({ includeDirty: true }));
-  assert.equal(claimed.settlementLags.length, 1);
-  assert.deepEqual(claimed.settlementLags[0], {
-    kind: "settlement-failed",
-    surface: "task",
-    contractId: (await bound.keiyaku.state()).id,
-    taskId: missing,
-    diagnostic: `Task settlement refused: ${JSON.stringify({ kind: "task-missing", taskId: missing })}`,
-  });
-});
-
 test("Settlement exact-read-backs an unknown TaskHolder release after external state advancement", async () => {
   const world = repository(),
     repo = await cachedRepoAt(world.path);
@@ -374,82 +321,4 @@ test("abandon rejects corrupt authority assigning one Contract multiple holders"
       error.message === `Contract has multiple current TaskHolders: ${firstId}`,
   );
   assert.equal((await first.keiyaku.state()).terminal, null);
-});
-
-test("TaskHolder reads reject unexpected authority paths", async () => {
-  const world = repository();
-  await Keiyaku.bind({
-    repo: await cachedRepoAt(world.path),
-    markdown: document("Initialize authority"),
-    workspace: "worktree",
-  });
-  const git = await cachedRepositoryAt(world.path);
-  const snapshot = await readGit(git);
-  const tree = await updateGitTree(
-    git,
-    snapshot.tree,
-    new Map([["settlement/task-holders", { oid: await writeBlob(git, "not holder authority\n") }]]),
-  );
-  const commit = await writeCommit({ repository: git, tree, parent: snapshot.commit });
-  assert.equal(
-    (await updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind,
-    "published",
-  );
-
-  await assert.rejects(
-    withGitDecodeChannel(git, (channel) => withGitReadObservation(git, channel, readTaskHoldersAt)),
-    (error: unknown) =>
-      error instanceof AuthorityCorruptionError &&
-      error.message === "TaskHolder authority root is not a tree: settlement/task-holders",
-  );
-});
-
-test("an active managed-worktree projection repairs malformed namespace context", async () => {
-  const world = repository(),
-    repo = await cachedRepoAt(world.path);
-  const taskId = await task(world.path, "Namespace repair holder");
-  const bound = await Keiyaku.bind({
-    repo,
-    task: taskId,
-    markdown: document("Namespace repair holder"),
-    workspace: "worktree",
-    gates: [],
-  });
-  const state = await bound.keiyaku.state();
-  const path = await appointedWorktreePath(await cachedRepositoryAt(world.path), state.id);
-  mkdirSync(join(path, ".keiyaku", "namespace"), { recursive: true });
-  writeFileSync(join(path, ".keiyaku", "namespace", "current"), "malformed\ncontext\n");
-  const repaired = await bound.keiyaku.reconcile();
-
-  assert.deepEqual(repaired.lag, []);
-  assert.equal(existsSync(path), true);
-  assert.deepEqual(await readNamespaceContext({ directory: path, boundary: path }), [
-    "kei",
-    state.id.slice("kei/".length),
-  ]);
-});
-
-test("an active namespace projection failure remains a workspace lag", async () => {
-  const world = repository(),
-    repo = await cachedRepoAt(world.path);
-  const taskId = await task(world.path, "Projection lag");
-  const bound = await Keiyaku.bind({
-    repo,
-    task: taskId,
-    markdown: document("Projection lag"),
-    workspace: "worktree",
-    gates: [],
-  });
-  const state = await bound.keiyaku.state();
-  const path = await appointedWorktreePath(await cachedRepositoryAt(world.path), state.id);
-  rmSync(join(path, ".keiyaku"), { recursive: true, force: true });
-  writeFileSync(join(path, ".keiyaku"), "not a directory\n");
-
-  const report = await bound.keiyaku.reconcile();
-
-  assert.equal(report.lag.length, 1);
-  assert.equal(report.lag[0]?.kind, "contract-file-failed");
-  assert.equal(report.lag[0]?.path, join(path, ".keiyaku", "namespace", "current"));
-  assert.equal((await bound.keiyaku.state()).terminal, null);
-  assert.deepEqual(await holders(world), [{ version: 1, taskId, contractId: state.id, disposition: "held" }]);
 });

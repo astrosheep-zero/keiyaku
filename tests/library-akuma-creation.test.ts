@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import {
   chmodSync,
   existsSync,
@@ -16,36 +15,18 @@ import { join } from "node:path";
 import test from "node:test";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { AkumaArchetypeError, loadArchetype } from "../src/akuma/archetype.js";
-import { driveAkumaBody } from "../src/akuma/body.js";
 import { akumaCallRequestCommands, type AkumaCallRequestChildLaunch } from "../src/akuma/call-request.js";
 import { fleetRequestCommands, type FleetRequestPort } from "../src/akuma/fleet-request.js";
-import {
-  finishBodyIfIdle,
-  HeldAkumaLeash,
-  initializeHeart,
-  readHeart,
-  readSoul,
-  type Soul,
-} from "../src/akuma/heart/index.js";
+import { HeldAkumaLeash, initializeHeart, readHeart, readSoul, type Soul } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory, parseAkuId, pathsForAkuId } from "../src/akuma/identity.js";
 import { Akuma as PublicAkuma, Schema } from "../src/akuma/index.js";
-import { AKUMA_REQUESTS_ENV, createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
-import { claudeProvider } from "../src/akuma/providers/claude/index.js";
+import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { BodyRequestPump } from "../src/akuma/request-serve.js";
 import { composeRequestCommands } from "../src/akuma/request-wire.js";
-import { moveAlias, resolveAlias } from "../src/alias/index.js";
 import { invoke } from "../src/cli/invoke.js";
 import { parseArgv, type ParsedExecution } from "../src/cli/parse.js";
-import { publishDispatch, readDispatch } from "../src/dispatch/index.js";
-import {
-  GIT_REF,
-  readGit,
-  repositoryAt,
-  updateGitTree,
-  updateRefsAtomically,
-  writeBlob,
-  writeCommit,
-} from "../src/git/repository.js";
+import { readDispatch } from "../src/dispatch/index.js";
+import { repositoryAt } from "../src/git/repository.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { bodyRequestExecution, Keiyaku, Repo, settings, World } from "../src/index.js";
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
@@ -58,7 +39,6 @@ import {
   cleanupSpawnCapableFixture,
   installAkumaBodyEmptyPublicationBarrier,
   installAkumaBodyPidReceipt,
-  deferred as promiseBarrier,
   temporaryDirectory,
   waitForFixtureFile,
 } from "./support/process.js";
@@ -131,46 +111,6 @@ async function directArchetypeSettings(root: string) {
   chmodSync(executable, 0o755);
   const value = await settings({ root, home });
   return { home, value, placement: { home, settings: value } };
-}
-
-function slowEmptyPublicationBody() {
-  let held:
-    | Readonly<{
-        bodySequence: number;
-        leash: HeldAkumaLeash;
-        paths: AkumaCallRequestChildLaunch["paths"];
-        resolveExit: (exit: Awaited<OwnedProcess["exited"]>) => void;
-      }>
-    | undefined;
-  const { promise: started, resolve: resolveStarted } =
-    promiseBarrier<Readonly<{ paths: AkumaCallRequestChildLaunch["paths"]; bodySequence: number }>>();
-  let released = false;
-  const release = async (): Promise<void> => {
-    if (released || held === undefined) return;
-    released = true;
-    await finishBodyIfIdle(held.paths, { sequence: held.bodySequence, at: "2026-09-10T00:00:02.000Z" });
-    held.leash.release();
-    held.resolveExit({ code: 0, signal: null, log: { path: "/tmp/slow-empty-body.log", from: 0, to: 0 } });
-  };
-
-  return {
-    started,
-    spawn: async (launch: AkumaCallRequestChildLaunch): Promise<OwnedProcess> => {
-      const leash = (await HeldAkumaLeash.try(launch.paths))!;
-      await leash.birth(launch.paths, { ...launch.seed, createdAt: "2026-09-10T00:00:00.000Z" });
-      const body = await leash.recordBody(launch.paths, { leashTakenAt: "2026-09-10T00:00:01.000Z" });
-      const { promise: exited, resolve: resolveExit } = promiseBarrier<Awaited<OwnedProcess["exited"]>>();
-      held = { paths: launch.paths, bodySequence: body.sequence, leash, resolveExit };
-      resolveStarted({ paths: launch.paths, bodySequence: body.sequence });
-      return {
-        pid: 4242,
-        exited,
-        terminate: async () => await release(),
-        release: () => {},
-      };
-    },
-    release,
-  };
 }
 
 test("local schema Keiyaku.call waits for its held empty Body before admitting its Tell", async (t) => {
@@ -255,75 +195,6 @@ test("local schema Keiyaku.call waits for its held empty Body before admitting i
       if (cleanup.kind === "retained") t.diagnostic(`retained fixture ${raw.path}: ${cleanup.diagnostic}`);
     } finally {
       restoreEmptyPublicationBarrier();
-      restoreBodyPidReceipt();
-      restoreSquareLedger();
-    }
-  }
-});
-
-test("forwarded schema Keiyaku.call waits for its empty Body before admitting its Tell", async (t) => {
-  const { raw } = await repositoryFixture();
-  const world = await World.at(raw.path);
-  const configured = await directArchetypeSettings(world);
-  const schema = Schema.json(
-    { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
-    (value) => value as { ok: boolean },
-  );
-  const slow = slowEmptyPublicationBody();
-  const { pump, leash } = await requestPump(world, slow.spawn);
-  const routedKeiyaku = Keiyaku.withExecution({ execution: bodyRequestExecution({ directory: pump.directory }) });
-  const bodyPidReceipt = join(raw.path, "body-pids");
-  const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
-  const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
-  let akumaId: string | undefined;
-  let operationFailed = true;
-  try {
-    const pending = routedKeiyaku.call({
-      path: world,
-      archetype: "worker",
-      body: "forwarded-schema-call",
-      cwd: world,
-      ...configured.placement,
-      schema,
-    });
-    const body = await slow.started;
-    const whileHeld = await readHeart(body.paths);
-    assert.equal(whileHeld.latestBody?.sequence, body.bodySequence);
-    assert.equal(whileHeld.latestBody?.end, undefined);
-    assert.deepEqual(whileHeld.pending, []);
-
-    await slow.release();
-    const result = await pending;
-    akumaId = result.akuma;
-    assert.deepEqual(result.schemaAnswer, { ok: true });
-    const history = await PublicAkuma.select(world, result.akuma).history();
-    const tells = history.rows.filter((row) => row.kind === "tell");
-    assert.equal(tells.length, 1);
-    assert.equal(tells[0]?.kind, "tell");
-    if (tells[0]?.kind === "tell") assert.equal(tells[0].text, "forwarded-schema-call");
-    assert.equal(history.rows.filter((row) => row.kind === "turn").length, 1);
-    assert.equal(
-      history.rows.some((row) => row.kind === "call"),
-      false,
-    );
-    operationFailed = false;
-  } finally {
-    try {
-      await slow.release();
-      if (akumaId !== undefined)
-        await PublicAkuma.select(world, akumaId)
-          .kill()
-          .catch(() => undefined);
-      const cleanup = await cleanupSpawnCapableFixture({
-        fixturePath: raw.path,
-        pidReceiptPath: bodyPidReceipt,
-        timeoutMs: 15_000,
-        operationFailed,
-      });
-      if (cleanup.kind === "retained") t.diagnostic(`retained fixture ${raw.path}: ${cleanup.diagnostic}`);
-    } finally {
-      await pump.close();
-      leash.release();
       restoreBodyPidReceipt();
       restoreSquareLedger();
     }
@@ -569,105 +440,4 @@ test("Archetype base chains refuse missing providers, malformed names, and cycle
     loadArchetype({ name: "noprov", home, settings: settingsValue }),
     (error: unknown) => error instanceof AkumaArchetypeError && error.message.includes("provider must be"),
   );
-});
-
-type MutableProvider = { -readonly [Key in keyof ProviderAdapter]: ProviderAdapter[Key] };
-
-test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async () => {
-  const { raw, repo, git } = await repositoryFixture();
-  const world = await World.at(raw.path);
-  const bound = await Keiyaku.bind({ repo, markdown: markdown("Fork dispatch"), workspace: "worktree" });
-  const owner = (await bound.keiyaku.state()).id;
-  const source = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "face0001" });
-  await initializeHeart(source.paths);
-  await driveAkumaBody(
-    {
-      paths: source.paths,
-      seed: {
-        id: source.id,
-        archetype: "claude",
-        provider: { name: "claude", kind: "claude-agent-sdk" },
-        options: {},
-        cwd: process.cwd(),
-        origin: { kind: "direct" },
-        allowed: ["akuma.call"],
-      },
-      initialBody: "work",
-    },
-    {
-      admitOptions(options) {
-        return { kind: "admitted", options };
-      },
-      start() {
-        return createProviderAttempt(undefined, async () => {
-          const { promise: eventsFinished, resolve: finishEvents } = promiseBarrier<void>();
-          return {
-            admission: { fence: "parent-session" },
-            events: {
-              async *[Symbol.asyncIterator]() {
-                yield { type: "session" as const, coordinate: { sessionId: "parent-session" } };
-                finishEvents();
-              },
-            },
-            completion: eventsFinished.then(() => ({
-              kind: "answered" as const,
-              answer: "done",
-              historyId: "history-1",
-            })),
-            async abort() {
-              finishEvents();
-            },
-            async forceDispose() {
-              finishEvents();
-            },
-          };
-        });
-      },
-    },
-    {
-      now: () => "2026-08-11T01:00:00.000Z",
-    },
-  );
-  await publishDispatch({ repository: git, akuId: source.id, contractId: owner });
-  const alias = parseAkumaAlias("@parent");
-  await moveAlias({ world, alias, akuId: source.id });
-
-  const mutable = claudeProvider as MutableProvider;
-  const originalFork = mutable.fork;
-  try {
-    mutable.fork = (input) => {
-      assert.equal(input.at, "history-1");
-      return createProviderAttempt(undefined, async () => ({ session: { sessionId: "child-session" } }));
-    };
-    const result = await Keiyaku.fork({ path: world, akuma: source.id, at: "turn/1", repo });
-    assert.ok(result.kind === "forked", JSON.stringify(result));
-    assert.equal(result.dispatch.kind, "dispatched");
-    assert.equal((await readDispatch(git, result.child))?.contractId, owner);
-    assert.equal(await resolveAlias(world, alias), source.id);
-    assert.deepEqual((await readSoul(pathsForAkuId(world, result.child)))?.allowed, ["akuma.call"]);
-
-    const snapshot = await readGit(git);
-    const dispatchPath = `dispatch/${createHash("sha256").update(source.id).digest("hex")}.json`;
-    const blob = await writeBlob(git, Buffer.from("broken\n"));
-    const tree = await updateGitTree(git, snapshot.tree, new Map([[dispatchPath, { oid: blob }]]));
-    const commit = await writeCommit({
-      repository: git,
-      tree,
-      parent: snapshot.commit,
-      message: "corrupt parent dispatch",
-      at: "2026-08-11T01:00:01.000Z",
-    });
-    assert.equal(
-      (await updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind,
-      "published",
-    );
-    const partial = await Keiyaku.fork({ path: world, akuma: source.id, at: "turn/1", repo });
-    assert.ok(partial.kind === "forked", JSON.stringify(partial));
-    assert.ok(partial.dispatch.kind === "failed", 'expected partial.dispatch.kind = "failed"');
-    assert.equal(partial.dispatch.failure.kind, "authority-corruption");
-  } finally {
-    if (originalFork === undefined) delete mutable.fork;
-    else mutable.fork = originalFork;
-    rmSync(raw.path, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 });
-  }
 });

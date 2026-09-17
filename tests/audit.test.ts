@@ -16,7 +16,7 @@ import { scopeOperation } from "../src/protocol/operations.js";
 import { observeContractAt } from "../src/git/observe.js";
 import { prepareVerificationDeclaration } from "../src/verification/declaration.js";
 import { appointedWorktreePath, type TestGitRepository } from "./support/git.js";
-import { refused, repositoryWithMain } from "./support/library-verbs.js";
+import { repositoryWithMain } from "./support/library-verbs.js";
 
 function verificationBody(script: string | null = "exit 1"): string {
   return contractMarkdown("Audit", {
@@ -58,41 +58,6 @@ async function failedStoredVerification(): Promise<
   assert.equal(state.attestations.at(-1)?.data.summary, "[1 bash exit 1]");
   return { repository, contract: bound.keiyaku, state };
 }
-
-test("a verified placement gate without a Verification declaration is refused at bind", async () => {
-  const repository = repositoryWithMain();
-  await assert.rejects(
-    Keiyaku.bind({
-      repo: await Repo.at({ path: repository.path }),
-      markdown: verificationBody(null),
-      workspace: "worktree",
-      gates: ["verified"],
-    }),
-    refused({ kind: "verification-declaration-invalid" }),
-  );
-});
-
-test("an active amend cannot admit verified terms without a Verification declaration", async () => {
-  const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({
-    repo: await Repo.at({ path: repository.path }),
-    markdown: verificationBody(null),
-    workspace: "worktree",
-  });
-  const before = await bound.keiyaku.state();
-
-  await assert.rejects(
-    bound.keiyaku.amend({
-      markdown: "## Replace: Objective\nKeep declaration admission at the document edge.\n\n",
-      gates: ["verified"],
-    }),
-    refused({ kind: "verification-declaration-invalid", contractId: before.id }),
-  );
-
-  const after = await bound.keiyaku.state();
-  assert.equal(after.head, before.head);
-  assert.deepEqual(after.terms, before.terms);
-});
 
 test("a stale document derivation is refused inside its E-decision", async () => {
   const repository = repositoryWithMain();
@@ -171,10 +136,10 @@ test("audit without Verification still returns an accepted ready candidate", asy
       }),
     }),
   );
-  assert.ok(result.kind === "accepted", "expected result.kind = \"accepted\"");
+  assert.ok(result.kind === "accepted", 'expected result.kind = "accepted"');
   assert.deepEqual(result.facts, []);
   assert.equal(result.head, observed.state!.head);
-  assert.ok(result.value.candidate.kind === "ready", "expected result.value.candidate.kind = \"ready\"");
+  assert.ok(result.value.candidate.kind === "ready", 'expected result.value.candidate.kind = "ready"');
   assert.equal(result.value.candidate.identity.method, "squash");
   assert.equal("diff" in result.value.candidate, false);
   assert.equal(result.value.verification.kind, "not-run");

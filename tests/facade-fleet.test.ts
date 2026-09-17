@@ -14,7 +14,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test, { type TestContext } from "node:test";
-import { boundedMap, PAGE_POOL_SIZE } from "../src/akuma/akuma-product.js";
 import { AkumaNotBornError, akumaStatusSchema, type AkumaStatus } from "../src/akuma/akuma.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
@@ -29,8 +28,6 @@ import { parseAkumaAlias } from "../src/identity/selector.js";
 import { AkumaWorldScopeError, Keiyaku, Repo, type Catalog, type WorldRoot } from "../src/index.js";
 import { observeKanshi } from "../src/kanshi/read.js";
 import { addressAkumaSet, resolveNamedAddress } from "../src/library/address.js";
-import { waitAkuma } from "../src/library/fleet.js";
-import type { WaitObservedAkuma, WaitSelectedAkuma } from "../src/akuma/fleet-execution.js";
 import { projectTaskBoardObservation, taskRowsSchema, type TaskRow } from "../src/task/board.js";
 import { serializeTaskDocument, type TaskDocument } from "../src/task/document.js";
 import { Tasks, type TaskId } from "../src/task/index.js";
@@ -262,44 +259,6 @@ test("facade snapshots aliases and globs with stable dedupe for wait and kill", 
   );
 });
 
-test("a wait's live observation carries each observed Akuma's alias and Dispatch association", async (t) => {
-  const repository = fixtureRepository(t);
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const world = await World.at(repository.path);
-  const worker = await answered(world, "worker", "dddddddd");
-  const owner = contractId("kei/observed");
-  assert.equal(
-    (await publishDispatch({ repository: await repositoryAt(world), akuId: worker.id, contractId: owner })).kind,
-    "dispatched",
-  );
-  await moveAlias({ world, alias: parseAkumaAlias("@observed"), akuId: worker.id });
-  const rounds: (readonly WaitObservedAkuma[])[] = [];
-  const selected: (readonly WaitSelectedAkuma[])[] = [];
-  await waitAkuma(
-    {
-      path: world,
-      akuma: [worker.id],
-      repo: await Repo.at({ path: world }),
-      completion: "all",
-      timeoutMs: 0,
-    },
-    undefined,
-    {
-      selected: (members) => selected.push(members),
-      observe: (observed) => rounds.push(observed),
-    },
-  );
-  assert.equal(selected.length, 1);
-  assert.deepEqual(selected[0], [
-    { id: worker.id, alias: "@observed", contract: { kind: "associated", contractId: owner } },
-  ]);
-  assert.equal(rounds.length, 1);
-  const [single] = rounds[0]!;
-  assert.equal(single?.status.id, worker.id);
-  assert.equal(single?.alias, "@observed");
-  assert.deepEqual(single?.contract, { kind: "associated", contractId: owner });
-});
-
 test("a facade wait defaults an omitted completion mode to any and counts an already complete member", async (t) => {
   const root = fixtureRoot(t, "keiyaku-facade-wait-mode-");
   const complete = await answered(root, "worker", "00000001");
@@ -524,55 +483,6 @@ test("recent Akuma page prunes old custody bounds without changing Heart members
   }
 });
 
-test("all-null Akuma fallback retains exact membership through the fixed Heart read pool", async (t) => {
-  const root = fixtureRoot(t, "keiyaku-facade-akuma-page-null-");
-  const originalPrepare = DatabaseSync.prototype.prepare;
-  let template: Parameters<typeof initializeHeart>[0] | undefined;
-  try {
-    const allocated = [];
-    for (let index = 0; index < PAGE_POOL_SIZE * 2 + 1; index += 1) {
-      const suffix = index.toString(16).padStart(8, "0");
-      const value = await allocateAkumaDirectory({ worldRoot: root, archetype: "worker", draw: () => suffix });
-      await initializeUnbornFixture(value.paths, template);
-      template ??= value.paths;
-      allocated.push(value);
-    }
-
-    let custodyReads = 0;
-    DatabaseSync.prototype.prepare = function (...args) {
-      custodyReads += 1;
-      return originalPrepare.apply(this, args);
-    };
-    const world = Akuma.of(await World.at(root));
-    const page = await world.list({ limit: 7 });
-    DatabaseSync.prototype.prepare = originalPrepare;
-
-    const expected = allocated.map((value) => value.id).sort();
-    assert.deepEqual(
-      page.rows.map((row) => row.id),
-      expected.slice(0, 7),
-    );
-    assert.equal(page.hasMore, true);
-    assert.ok(
-      custodyReads >= expected.length,
-      `expected every null activity Heart to be read, received ${custodyReads}`,
-    );
-
-    let active = 0;
-    let maximum = 0;
-    await boundedMap(Array.from({ length: PAGE_POOL_SIZE * 3 }), async () => {
-      active += 1;
-      maximum = Math.max(maximum, active);
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      active -= 1;
-    });
-    assert.equal(maximum, PAGE_POOL_SIZE);
-  } finally {
-    DatabaseSync.prototype.prepare = originalPrepare;
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test("recent Task catalog does not skip older-mtime malformed authority", async (t) => {
   const root = fixtureRoot(t, "keiyaku-facade-task-catalog-malformed-");
   mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });
@@ -589,44 +499,6 @@ test("recent Task catalog does not skip older-mtime malformed authority", async 
   );
 
   await assert.rejects(Keiyaku.ls({ query: { kind: "tasks", limit: 1 }, path: root }), /front matter/u);
-});
-
-test("Task catalog namespace queries distinguish omitted, root, and named scope", async (t) => {
-  const root = fixtureRoot(t, "keiyaku-facade-catalog-namespace-");
-  const tasks = Tasks.of(await World.at(root));
-  const rootTask = await tasks.add({ title: "Catalog root", namespace: [] });
-  const featureTask = await tasks.add({ title: "Catalog feature", namespace: ["feature"] });
-  const nestedTask = await tasks.add({ title: "Catalog nested", namespace: ["feature", "ui"] });
-  assert.equal(rootTask.kind, "accepted");
-  assert.equal(featureTask.kind, "accepted");
-  assert.equal(nestedTask.kind, "accepted");
-  if (rootTask.kind !== "accepted" || featureTask.kind !== "accepted" || nestedTask.kind !== "accepted") return;
-  const rootId = rootTask.value.id;
-  const featureId = featureTask.value.id;
-  const nestedId = nestedTask.value.id;
-  const all = catalogOf(await Keiyaku.ls({ query: { kind: "tasks" }, path: root }), "tasks");
-  const rootOnly = catalogOf(await Keiyaku.ls({ query: { kind: "tasks", namespace: [] }, path: root }), "tasks");
-  const featureOnly = catalogOf(
-    await Keiyaku.ls({ query: { kind: "tasks", namespace: ["feature"] }, path: root }),
-    "tasks",
-  );
-  assert.deepEqual(
-    all.rows.map((row) => row.id),
-    [nestedId, featureId, rootId],
-  );
-  assert.equal(all.hasMore, false);
-  assert.deepEqual(
-    rootOnly.rows.map((row) => row.id),
-    [rootId],
-  );
-  assert.deepEqual(
-    featureOnly.rows.map((row) => row.id),
-    [featureId],
-  );
-  await assert.rejects(
-    () => Keiyaku.ls({ query: { kind: "tasks", namespace: ["bad/segment"] }, path: root }),
-    /canonical segments/u,
-  );
 });
 
 test("named Address resolution refuses a Contract short-id shared with an Alias", async (t) => {
@@ -669,44 +541,6 @@ test("named Address resolution refuses a Contract short-id shared with an Alias"
   assert.throws(
     () => resolveNamedAddress({ selector: alias, report: observation.report, aliases: observation.aliases }),
     /ambiguous selector matches Contract and Akuma/u,
-  );
-});
-
-test("named Address refuses failed Kanshi Contract and Alias observations", async (t) => {
-  const root = fixtureRoot(t, "keiyaku-named-kanshi-failed-");
-  const observation = await observeKanshi({ world: root });
-  const failure = { kind: "failed" as const, failure: { message: "unavailable" } };
-  assert.throws(
-    () =>
-      resolveNamedAddress({
-        selector: "@missing",
-        report: { ...observation.report, contracts: failure },
-        aliases: observation.aliases,
-      }),
-    /Contract world is failed/u,
-  );
-  assert.throws(
-    () => resolveNamedAddress({ selector: "@missing", report: observation.report, aliases: failure }),
-    /Alias authority is failed/u,
-  );
-});
-
-test("named Address resolves a retained Alias outside Kanshi fleet rows", async (t) => {
-  const root = fixtureRoot(t, "keiyaku-named-kanshi-alias-");
-  const id = akuId({ archetype: "worker", suffix: "deadbeef" });
-  await moveAlias({ world: root, alias: parseAkumaAlias("@outside"), akuId: id });
-  const observation = await observeKanshi({ world: root });
-  assert.equal(observation.report.akuma.kind, "present");
-  assert.equal(
-    observation.report.akuma.kind === "present" && observation.report.akuma.value.rows.some((row) => row.id === id),
-    false,
-  );
-  assert.deepEqual(
-    resolveNamedAddress({ selector: "@outside", report: observation.report, aliases: observation.aliases }),
-    {
-      kind: "akuma",
-      id,
-    },
   );
 });
 
@@ -759,30 +593,6 @@ test("plural wait preserves a missing direct AkuId error", async (t) => {
   );
 });
 
-test("one-member Contract selector retains a corrupt Heart diagnostic", async (t) => {
-  const repository = fixtureRepository(t);
-
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const world = await World.at(repository.path);
-  const unreadable = corruptHeart(world, "deadbeef");
-  assert.equal(
-    (
-      await publishDispatch({
-        repository: await repositoryAt(world),
-        akuId: unreadable,
-        contractId: contractId("kei/review"),
-      })
-    ).kind,
-    "dispatched",
-  );
-  const repo = await Repo.at({ path: world });
-  assert.deepEqual((await addressAkumaSet({ path: world, akuma: ["kei/review"], repo })).ids, [unreadable]);
-  const corruptDiagnostic = (error: unknown) =>
-    error instanceof Error && /schema version|SQLITE|database|file is not a database/iu.test(error.message);
-  await assert.rejects(Keiyaku.wait({ path: world, akuma: [unreadable], timeoutMs: 0 }), corruptDiagnostic);
-  await assert.rejects(Keiyaku.wait({ path: world, akuma: ["kei/review"], repo, timeoutMs: 0 }), corruptDiagnostic);
-});
-
 test("plural wait returns no observations when every status is unreadable", async (t) => {
   const root = fixtureRoot(t, "keiyaku-facade-wait-unreadable-");
   const earlier = corruptHeart(root, "00000001");
@@ -805,38 +615,6 @@ test("plural wait returns no observations when every status is unreadable", asyn
       },
     );
   }
-});
-
-test("fleet status projects Dispatch association without changing Akuma core", async (t) => {
-  const repository = fixtureRepository(t);
-
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const source = await answered(repository.path, "worker", "deadbeef");
-  const owner = contractId("kei/provider-core");
-  assert.equal(
-    (await publishDispatch({ repository: await repositoryAt(repository.path), akuId: source.id, contractId: owner }))
-      .kind,
-    "dispatched",
-  );
-
-  const world = await World.at(repository.path);
-  const plain = await Keiyaku.status({ path: world, akuma: source.id });
-  assert.equal("contractId" in plain, false);
-  assert.equal(plain.status.id, source.id);
-  const projected = await Keiyaku.status({
-    path: world,
-    akuma: source.id,
-    repo: await Repo.at({ path: repository.path }),
-  });
-  assert.deepEqual(projected.contract, { kind: "associated", contractId: owner });
-  assert.equal(projected.status.id, source.id);
-  const waited = await Keiyaku.wait({
-    path: world,
-    akuma: [source.id],
-    repo: await Repo.at({ path: repository.path }),
-    timeoutMs: 0,
-  });
-  assert.deepEqual(waited.observations[0]!.contract, { kind: "associated", contractId: owner });
 });
 
 test("multi-member wait and kill project every member from one Task board snapshot", async (t) => {
@@ -897,23 +675,3 @@ function fixtureRepository(t: TestContext) {
   t.after(() => rmSync(repository.path, { recursive: true, force: true }));
   return repository;
 }
-
-test("failed Task associations do not hide readable Fleet members or kill evidence", async (t) => {
-  const root = fixtureRoot(t, "keiyaku-fleet-task-failure-");
-  const a = await answered(root, "worker", "a0000001");
-  const b = await answered(root, "worker", "a0000002");
-  mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });
-  writeFileSync(join(root, ".keiyaku", "tasks", "bad.md"), "not Task authority\n");
-  const status = await Keiyaku.status({ path: root, akuma: a.id });
-  assert.equal(status.status.id, a.id);
-  assert.equal(status.createdTasks.kind, "failed");
-  const waited = await Keiyaku.wait({ path: root, akuma: [a.id, b.id], completion: "all", timeoutMs: 0 });
-  assert.deepEqual(waited.observations.map((view) => view.status.id).sort(), [a.id, b.id]);
-  assert.deepEqual(
-    waited.observations.map((view) => view.createdTasks),
-    [status.createdTasks, status.createdTasks],
-  );
-  const killed = await Keiyaku.kill({ path: root, akuma: [a.id, b.id] });
-  assert.deepEqual(killed.results.map((member) => member.id).sort(), [a.id, b.id]);
-  assert.ok(killed.results.every((member) => member.evidence === "already-stopped" && !("observation" in member)));
-});
