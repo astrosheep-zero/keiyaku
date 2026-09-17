@@ -5,6 +5,9 @@ import { pathToFileURL } from "node:url";
 const PROCESS_EXIT_POLL_MS = 20;
 const PROCESS_EXIT_TIMEOUT_MS = 2_000;
 const TEMP_DIRECTORY_TIMEOUT_MS = 2_000;
+/** Generous fixture budget: real Body, request, and Verification subprocesses can be slow under full-suite load. */
+const CONDITION_WAIT_BUDGET_MS = 60_000;
+const CONDITION_WAIT_POLL_MS = 5;
 
 function isMissingProcess(error: unknown): boolean {
   return (error as NodeJS.ErrnoException).code === "ESRCH";
@@ -35,6 +38,62 @@ export async function waitForFixtureFile(path: string, timeoutMs = 5_000): Promi
     if (performance.now() >= deadline) throw new Error(`timed out waiting for barrier file: ${path}`);
     await new Promise((resolve) => setTimeout(resolve, PROCESS_EXIT_POLL_MS));
   }
+}
+
+export type WaitForConditionOptions = Readonly<{
+  /** Bounded override for focused coverage of the wait itself; call sites keep the generous default. */
+  budgetMs?: number;
+  /**
+   * Names a terminal state of the request, pump, or process behind the awaited condition. A non-null
+   * value means the awaited event can no longer arrive, so the wait ends naming that state instead
+   * of spinning.
+   */
+  terminalState?: () => string | null | Promise<string | null>;
+}>;
+
+/**
+ * Bounded fixture wait over external state (a Heart read, file probe, or process observation).
+ * Expiry names what was awaited, the budget, and the elapsed time; a terminal-state probe ends the
+ * wait early when a settlement behind the condition makes it unreachable.
+ */
+export async function waitForCondition(
+  description: string,
+  condition: () => boolean | Promise<boolean>,
+  options: WaitForConditionOptions = {},
+): Promise<void> {
+  const budgetMs = options.budgetMs ?? CONDITION_WAIT_BUDGET_MS;
+  const startedAt = Date.now();
+  for (;;) {
+    if (await condition()) return;
+    const terminalState = await options.terminalState?.();
+    const elapsedMs = Date.now() - startedAt;
+    if (terminalState !== undefined && terminalState !== null) {
+      throw new Error(
+        `fixture wait for ${description} ended after ${elapsedMs}ms: reached terminal state ${terminalState}`,
+      );
+    }
+    if (elapsedMs >= budgetMs) {
+      throw new Error(`fixture wait for ${description} expired after ${elapsedMs}ms (budget ${budgetMs}ms)`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, CONDITION_WAIT_POLL_MS));
+  }
+}
+
+/**
+ * Reports how a request, pump, or Body settled so a bounded wait can end on a dead outcome
+ * instead of spinning to its budget.
+ */
+export function settlementProbe<T>(settlement: Promise<T>, describe: (settled: T) => string): () => string | null {
+  let terminalState: string | null = null;
+  void settlement.then(
+    (settled) => {
+      terminalState = describe(settled);
+    },
+    (error: unknown) => {
+      terminalState = `failure ${error instanceof Error ? error.message : String(error)}`;
+    },
+  );
+  return () => terminalState;
 }
 
 export function akumaBodyPidReceiptImport(): string {

@@ -26,6 +26,7 @@ import { appointManagedWorktrees, placeRegisterPath, readPlaceRegister } from ".
 import { contractId } from "../src/core/facts/types.js";
 import { Tasks } from "../src/task/index.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
+import { settlementProbe, waitForCondition } from "./support/process.js";
 
 const CLAUDE_EXECUTION = { name: "claude", kind: "claude-agent-sdk" } as const;
 
@@ -129,7 +130,11 @@ async function runningAkuma(world: Awaited<ReturnType<typeof testWorld>>) {
     initialBody: "keep working",
   };
   const body = driveAkumaBody(launch, provider, { now: () => "2026-08-19T00:00:00.000Z" });
-  while ((await readHeart(allocated.paths)).latestBody === null) await new Promise((resolve) => setTimeout(resolve, 5));
+  await waitForCondition(
+    "the first Body recorded in Heart",
+    async () => (await readHeart(allocated.paths)).latestBody !== null,
+    { terminalState: settlementProbe(body, () => "the driving Body pump settled without a recorded Body") },
+  );
   return { allocated, body };
 }
 

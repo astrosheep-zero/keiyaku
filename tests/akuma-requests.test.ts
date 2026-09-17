@@ -27,6 +27,7 @@ import { BodyRequestPump, settleBodyRequests } from "../src/akuma/request-serve.
 import { contractRequestProtocol } from "../src/library/contract-operations.js";
 import { World } from "../src/world.js";
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
+import { settlementProbe, waitForCondition } from "./support/process.js";
 
 async function akumaAt(root: string, requestDirectory?: string) {
   return Akuma.of(await World.at(root), {
@@ -79,8 +80,11 @@ test("a caller gets an unknown transport outcome when its request channel disapp
         allowed: ALLOWED_ACTIONS,
       },
     });
-    while (requestTransportPath(directory, id) === undefined)
-      await new Promise((resolve) => setTimeout(resolve, 5));
+    await waitForCondition(
+      "the request transport to publish its request path",
+      () => requestTransportPath(directory, id) !== undefined,
+      { terminalState: settlementProbe(request, () => "the request settled without publishing a transport path") },
+    );
     rmSync(directory, { recursive: true, force: true });
     await assert.rejects(
       request,
@@ -482,9 +486,16 @@ test("a closed request channel does not report a reserved child as voided", asyn
         allowed: ALLOWED_ACTIONS,
       },
     });
-    while ((await readRequest(value.parent.paths, id))?.state !== "reserved") {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
+    await waitForCondition(
+      "the child request to reach the reserved state",
+      async () => (await readRequest(value.parent.paths, id))?.state === "reserved",
+      {
+        terminalState: async () => {
+          const state = (await readRequest(value.parent.paths, id))?.state;
+          return state === "refused" || state === "unproven" || state === "voided" ? state : null;
+        },
+      },
+    );
     const pumpFailure = assert.rejects(pump.failure, /Body request pump closed/u);
     await pump.close().catch(() => undefined);
     await pumpFailure;
@@ -1213,7 +1224,11 @@ test("a drive serves Body Requests through transport while Heart remains authori
       }),
     );
     const malformedPath = join(pump.directory, `${malformedId}.request.json`);
-    while (existsSync(malformedPath)) await new Promise((resolve) => setTimeout(resolve, 5));
+    await waitForCondition(
+      "the request pump to consume the malformed request file",
+      () => !existsSync(malformedPath),
+      { terminalState: settlementProbe(pump.failure, () => "the request pump closed") },
+    );
     assert.equal(existsSync(join(pump.directory, `${malformedId}.receipt.json`)), false);
     const other = join(value.root, "other");
     mkdirSync(other);

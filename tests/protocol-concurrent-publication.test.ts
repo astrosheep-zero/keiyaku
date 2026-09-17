@@ -103,7 +103,7 @@ test("a bind stalled in its seat-external preparation does not hold the publicat
     [
       'if [ "$1" = "for-each-ref" ]; then',
       '  : > "$KEIYAKU_STALLING"',
-      '  while [ ! -e "$KEIYAKU_RELEASE" ]; do sleep 0.02; done',
+      '  i=0; while [ ! -e "$KEIYAKU_RELEASE" ]; do i=$((i + 1)); if [ "$i" -ge 3000 ]; then echo "fixture wait for $KEIYAKU_RELEASE expired after 60s" >&2; exit 1; fi; sleep 0.02; done',
       "fi",
       'exec "$KEIYAKU_REAL_GIT" "$@"',
     ].join("\n"),

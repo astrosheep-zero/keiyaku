@@ -1,4 +1,5 @@
 import { claudeBodyLaunch } from "./support/akuma-fixtures.js";
+import { settlementProbe, waitForCondition } from "./support/process.js";
 import assert from "node:assert/strict";
 import {
   chmodSync,
@@ -391,10 +392,17 @@ function acpLaunch(allocated: Awaited<ReturnType<typeof allocateAkumaDirectory>>
   };
 }
 
-async function waitUntilLatestBody(paths: Parameters<typeof readHeart>[0]): Promise<void> {
-  while ((await readHeart(paths)).latestBody === null) {
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
+async function waitUntilLatestBody(
+  paths: Parameters<typeof readHeart>[0],
+  settlement?: Promise<unknown>,
+): Promise<void> {
+  await waitForCondition(
+    "the first Body recorded in Heart",
+    async () => (await readHeart(paths)).latestBody !== null,
+    settlement === undefined
+      ? {}
+      : { terminalState: settlementProbe(settlement, () => "the driving Body pump settled without a recorded Body") },
+  );
 }
 
 async function expectBodySettles(body: Promise<unknown>, message: string, timeoutMs = 5_000): Promise<void> {
@@ -916,8 +924,7 @@ test("live receipt persistence waits for its Body-scoped delivery mapping", asyn
     const body = driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), live, {
       now: () => "2026-08-08T00:00:00.000Z",
     });
-    while ((await readHeart(allocated.paths)).latestBody === null)
-      await new Promise((resolve) => setTimeout(resolve, 5));
+    await waitUntilLatestBody(allocated.paths, body);
     await recordTell(allocated.paths, {
       id: "tell-live",
       body: "steer",
@@ -990,16 +997,18 @@ test("a receipt-free live acknowledgement settles the tell in the current Body",
         now: () => "2026-08-08T00:00:00.000Z",
       },
     );
-    while ((await readHeart(allocated.paths)).latestBody === null)
-      await new Promise((resolve) => setTimeout(resolve, 5));
+    await waitUntilLatestBody(allocated.paths, body);
     await recordTell(allocated.paths, {
       id: "tell-live",
       body: "steer",
       recordedAt: "2026-08-08T00:00:01.000Z",
     });
     await observed;
-    while ((await readHeart(allocated.paths)).pending.length > 0)
-      await new Promise((resolve) => setTimeout(resolve, 5));
+    await waitForCondition(
+      "the live acknowledgement to settle the pending Tell",
+      async () => (await readHeart(allocated.paths)).pending.length === 0,
+      { terminalState: settlementProbe(body, () => "the driving Body pump settled with the Tell still pending") },
+    );
     assert.deepEqual((await readHeart(allocated.paths)).pending, []);
     releaseEvents();
     await body;
@@ -1075,7 +1084,7 @@ test("a Session without live tell hands off while narration remains open", async
         },
       },
     );
-    await waitUntilLatestBody(allocated.paths);
+    await waitUntilLatestBody(allocated.paths, body);
     await recordTell(allocated.paths, {
       id: "tell-handoff",
       body: "continue promptly",
@@ -1183,7 +1192,7 @@ test("a failed release recovery spawn records Heart undelivered disposition", as
         throw new Error("spawn denied");
       },
     });
-    await waitUntilLatestBody(allocated.paths);
+    await waitUntilLatestBody(allocated.paths, body);
     await recordTell(allocated.paths, {
       id: "release-spawn-failure",
       body: "continue",
@@ -1221,7 +1230,7 @@ test("a new Tell arriving while spawn fails stays pending for its own wake", asy
         throw new Error("spawn denied after concurrent tell");
       },
     });
-    await waitUntilLatestBody(allocated.paths);
+    await waitUntilLatestBody(allocated.paths, body);
     await recordTell(allocated.paths, {
       id: "tell-snapshot",
       body: "continue",
@@ -1260,7 +1269,7 @@ test("unproven successor custody records Heart undelivered disposition", async (
         } satisfies OwnedProcess;
       },
     });
-    await waitUntilLatestBody(allocated.paths);
+    await waitUntilLatestBody(allocated.paths, body);
     await recordTell(allocated.paths, {
       id: "tell-unproven",
       body: "continue",
@@ -1302,19 +1311,19 @@ test("duplicate wake after a recorded successor disposition does not create a se
         } satisfies OwnedProcess;
       },
     });
-    await waitUntilLatestBody(allocated.paths);
+    await waitUntilLatestBody(allocated.paths, body);
     await recordTell(allocated.paths, {
       id: "tell-duplicate",
       body: "once",
       recordedAt: "2026-08-08T00:00:01.000Z",
     });
     await expectBodySettles(body, "Body did not dispose pending Tell");
-    while ((await readHeart(allocated.paths)).latestBody?.sequence !== 2) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-    while ((await readTell(allocated.paths, "tell-duplicate"))?.state === "pending") {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
+    await waitForCondition("the successor Body recorded after the duplicate wake", async () => {
+      return (await readHeart(allocated.paths)).latestBody?.sequence === 2;
+    });
+    await waitForCondition("the duplicate Tell to reach a terminal delivery", async () => {
+      return (await readTell(allocated.paths, "tell-duplicate"))?.state !== "pending";
+    });
     assert.equal(spawnCount, 1);
     assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, 2);
     assert.equal((await readHeart(allocated.paths)).latestBody?.end, undefined);
@@ -1365,7 +1374,7 @@ test("successor Body record before admission failure yields Heart undelivered fo
         } satisfies OwnedProcess;
       },
     });
-    await waitUntilLatestBody(allocated.paths);
+    await waitUntilLatestBody(allocated.paths, body);
     await recordTell(allocated.paths, {
       id: "tell-admission-fail",
       body: "continue",
@@ -1845,7 +1854,11 @@ test("request-pump failure aborts the Session and closes request transport", asy
       },
     );
 
-    while (directory === undefined) await new Promise((resolve) => setTimeout(resolve, 5));
+    await waitForCondition(
+      "the provider launch to publish its request directory",
+      () => directory !== undefined,
+      { terminalState: settlementProbe(body, () => "the driving Body pump settled without publishing a request directory") },
+    );
     rmSync(directory, { recursive: true, force: true });
     writeFileSync(directory, "request transport is unavailable");
     await body;
@@ -2395,8 +2408,7 @@ test("pause aborts the current drive and records the body as put down", async ()
     const body = driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), running, {
       now: () => "2026-08-08T00:00:00.000Z",
     });
-    while ((await readHeart(allocated.paths)).latestBody === null)
-      await new Promise((resolve) => setTimeout(resolve, 5));
+    await waitUntilLatestBody(allocated.paths, body);
     const current = (await readHeart(allocated.paths)).latestBody!;
     assert.deepEqual(await requestPause(allocated.paths, "2026-08-08T00:00:01.000Z"), {
       kind: "requested",
@@ -2444,8 +2456,7 @@ test("forced disposal failure records hung and broke-off before the Body returns
       },
       { now: () => "2026-08-08T00:00:00.000Z" },
     );
-    while ((await readHeart(allocated.paths)).latestBody === null)
-      await new Promise((resolve) => setTimeout(resolve, 5));
+    await waitUntilLatestBody(allocated.paths, body);
     await requestPause(allocated.paths, "2026-08-08T00:00:01.000Z");
     await body;
     const heart = await readHeart(allocated.paths);
@@ -2501,8 +2512,7 @@ test("provider closure failure enters Body supervision before session completion
       },
       { now: () => "2026-08-08T00:00:00.000Z" },
     );
-    while ((await readHeart(allocated.paths)).latestBody === null)
-      await new Promise((resolve) => setTimeout(resolve, 5));
+    await waitUntilLatestBody(allocated.paths, body);
     await started;
     rejectClosed(new Error("provider resource close failed"));
     await Promise.race([
@@ -2588,8 +2598,7 @@ test("a stalled Tell is fenced by Body cancellation before leash release", async
         },
       },
     );
-    while ((await readHeart(allocated.paths)).latestBody === null)
-      await new Promise((resolve) => setTimeout(resolve, 5));
+    await waitUntilLatestBody(allocated.paths, body);
     await recordTell(allocated.paths, {
       id: "violating-live-tell",
       body: "steer",
@@ -2809,9 +2818,7 @@ test("heart loss wakes a Body stalled on provider observation", async () => {
     },
     { now: () => "2026-08-08T00:00:00.000Z" },
   );
-  while ((await readHeart(allocated.paths)).latestBody === null) {
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
+  await waitUntilLatestBody(allocated.paths, body);
   await started;
   unlinkSync(allocated.paths.heart);
   await Promise.race([

@@ -110,7 +110,7 @@ test("immutable placement preparation leaves the publication seat free and reche
         '  *" --no-renames "*)',
         '    if [ ! -e "$SHAPE_STARTED" ]; then',
         '      touch "$SHAPE_STARTED"',
-        '      while [ ! -e "$SHAPE_RELEASE" ]; do sleep 0.01; done',
+        '      i=0; while [ ! -e "$SHAPE_RELEASE" ]; do i=$((i + 1)); if [ "$i" -ge 6000 ]; then echo "fixture wait for $SHAPE_RELEASE expired after 60s" >&2; exit 1; fi; sleep 0.01; done',
         "    fi ;;",
         "esac",
         'exec "$KEIYAKU_REAL_GIT" "$@"',

@@ -25,6 +25,8 @@ import {
   processExists,
   readPidReceipt,
   removeTempDirectory,
+  settlementProbe,
+  waitForCondition,
   waitForFixtureFile,
   waitForProcessExit,
 } from "./support/process.js";
@@ -58,6 +60,32 @@ test("fixture file barriers observe present and later files and reject missing e
     await waitForFixtureFile(file, 0);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a never-true bounded fixture wait expires naming what it awaited and a terminal state ends it early", async () => {
+  let ready = false;
+  const released = setTimeout(() => {
+    ready = true;
+  }, 10);
+  try {
+    await waitForCondition("the delayed fixture readiness", () => ready, { budgetMs: 2_000 });
+    await assert.rejects(
+      waitForCondition("the admitted progress event", () => false, { budgetMs: 25 }),
+      /fixture wait for the admitted progress event expired after \d+ms \(budget 25ms\)/u,
+    );
+    await assert.rejects(
+      waitForCondition("the served request state", async () => false, { terminalState: () => "voided" }),
+      /fixture wait for the served request state ended after \d+ms: reached terminal state voided/u,
+    );
+    await assert.rejects(
+      waitForCondition("the settled pump state", async () => false, {
+        terminalState: settlementProbe(Promise.reject(new Error("pump closed")), () => "returned"),
+      }),
+      /fixture wait for the settled pump state ended after \d+ms: reached terminal state failure pump closed/u,
+    );
+  } finally {
+    clearTimeout(released);
   }
 });
 
@@ -735,7 +763,8 @@ test("Unix natural leader exit cleans a surviving descendant once", async (t) =>
     'const { spawn } = require("node:child_process");',
     'const { existsSync } = require("node:fs");',
     `spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: ["ignore", "inherit", "inherit"] });`,
-    `while (!existsSync(${JSON.stringify(descendantPidPath)})) {}`,
+    'const deadline = Date.now() + 60000;',
+    `while (!existsSync(${JSON.stringify(descendantPidPath)})) { if (Date.now() >= deadline) { console.error("fixture wait for the descendant pid receipt expired after 60000ms"); process.exit(1); } }`,
     "process.exit(0);",
   ].join(" ");
   let owned: Awaited<ReturnType<typeof spawnDetachedProcess>> | undefined;

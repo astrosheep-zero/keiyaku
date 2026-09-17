@@ -29,6 +29,7 @@ import { createGrokBuildProvider } from "../src/akuma/providers/grok-build/index
 import { decodeProviderExecution, resolveProviderExecution } from "../src/akuma/providers/index.js";
 import { EMPTY_ACP_EVENT_STATE, mapAcpUpdate } from "../src/akuma/providers/acp/events.js";
 import type { StdioProcess } from "../src/runtime/proc/stdio.js";
+import { waitForCondition } from "./support/process.js";
 
 const DRIVE_DEFAULTS = {
   signal: new AbortController().signal,
@@ -2127,7 +2128,8 @@ function controlledClaude() {
       },
     },
     async receiveInput() {
-      while (pendingInput === undefined) await new Promise((resolve) => setImmediate(resolve));
+      await waitForCondition("the provider input iterator to pull its first message", () => pendingInput !== undefined);
+      if (pendingInput === undefined) throw new Error("provider input iterator never pulled its first message");
       return await pendingInput;
     },
     acknowledgeInput() {

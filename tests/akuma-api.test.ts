@@ -20,6 +20,7 @@ import { HeldAkumaLeash, initializeHeart, readTell, readTurn, recordTell } from 
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { createProviderAttempt, type ProviderAdapter, type Session } from "../src/akuma/provider.js";
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
+import { settlementProbe, waitForCondition } from "./support/process.js";
 import { schemaJsonText } from "../src/akuma/schema.js";
 import { World } from "../src/world.js";
 
@@ -31,6 +32,30 @@ function freezeWalk(value: unknown): void {
     return;
   }
   for (const entry of Object.values(value)) freezeWalk(entry);
+}
+
+/**
+ * Bounds the seed-Tell binding wait and ends it on a dead outcome: a settled driving pump, a missing
+ * Tell, or a terminal delivery that never bound a Turn.
+ */
+async function waitForSeedBinding(
+  paths: Parameters<typeof readTell>[0],
+  driven: Promise<unknown>,
+): Promise<void> {
+  const bodySettled = settlementProbe(driven, () => "the driving Body pump settled without binding the seed Tell");
+  await waitForCondition(
+    "the seed Tell to bind to its running Turn",
+    async () => (await readTell(paths, "seed"))?.binding !== undefined,
+    {
+      terminalState: async () => {
+        const tell = await readTell(paths, "seed");
+        if (tell === null) return "the recorded seed Tell is missing from Heart";
+        if (tell.state === "told" && tell.binding === undefined)
+          return "the seed Tell reached terminal delivery without a Turn binding";
+        return bodySettled();
+      },
+    },
+  );
 }
 
 test("Schema.zod and JsonSchema freeze a canonical bounded document", () => {
@@ -353,9 +378,7 @@ test("schema tell on a running Body is busy unless interrupt is set", async () =
       recordedAt: "2026-08-10T00:00:01.000Z",
     });
     body = driveAkumaBody({ paths: allocated.paths }, hanging, { now: () => "2026-08-10T00:00:02.000Z" });
-    while ((await readTell(allocated.paths, "seed"))?.binding === undefined) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
+    await waitForSeedBinding(allocated.paths, body);
     await assert.rejects(akuma.tell("structured", { schema }), AkumaBusyError);
     const successor: ProviderAdapter = {
       admitOptions(options) {
@@ -490,9 +513,7 @@ test("idle after kill names the killed life", async () => {
       recordedAt: "2026-08-10T00:00:01.000Z",
     });
     body = driveAkumaBody({ paths: allocated.paths }, hanging, { now: () => "2026-08-10T00:00:02.000Z" });
-    while ((await readTell(allocated.paths, "seed"))?.binding === undefined) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
+    await waitForSeedBinding(allocated.paths, body);
     assert.equal(await akuma.kill(), "killed");
     await body;
     body = undefined;
@@ -543,9 +564,7 @@ test("idle timeout names the outstanding conditions with the final status", asyn
       recordedAt: "2026-08-10T00:00:01.000Z",
     });
     body = driveAkumaBody({ paths: allocated.paths }, hanging, { now: () => "2026-08-10T00:00:02.000Z" });
-    while ((await readTell(allocated.paths, "seed"))?.binding === undefined) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
+    await waitForSeedBinding(allocated.paths, body);
     const timed = await akuma.idle({ timeoutMs: 100 });
     assert.equal(timed.kind, "timeout");
     if (timed.kind !== "timeout") return;

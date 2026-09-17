@@ -1,7 +1,7 @@
 import { activityFact, claudeBodyLaunch, turnEndFact } from "./support/akuma-fixtures.js";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
-import { waitForFixtureFile as waitForFile } from "./support/process.js";
+import { settlementProbe, waitForCondition, waitForFixtureFile as waitForFile } from "./support/process.js";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -78,7 +78,11 @@ function configureDeferredBodyEndPlugin(root: string): DeferredBodyEnd {
       'import { appendFileSync, existsSync } from "node:fs";',
       "async function waitForRelease(path) {",
       "  if (existsSync(path)) return;",
-      "  while (!existsSync(path)) await new Promise((resolve) => setImmediate(resolve));",
+      "  const deadline = Date.now() + 60000;",
+      "  while (!existsSync(path)) {",
+      "    if (Date.now() >= deadline) throw new Error(`fixture wait for ${path} expired after 60000ms`);",
+      "    await new Promise((resolve) => setImmediate(resolve));",
+      "  }",
       "}",
       "export default {",
       '  manifest: { id: "square", apiVersion: 1, writablePaths: [{ name: "square", path: ".square" }] },',
@@ -105,7 +109,11 @@ function configureDeferredBodyEndPlugin(root: string): DeferredBodyEnd {
       'import { appendFileSync, existsSync } from "node:fs";',
       "async function waitForRelease(path) {",
       "  if (existsSync(path)) return Promise.resolve();",
-      "  while (!existsSync(path)) await new Promise((resolve) => setImmediate(resolve));",
+      "  const deadline = Date.now() + 60000;",
+      "  while (!existsSync(path)) {",
+      "    if (Date.now() >= deadline) throw new Error(`fixture wait for ${path} expired after 60000ms`);",
+      "    await new Promise((resolve) => setImmediate(resolve));",
+      "  }",
       "}",
       "export default {",
       '  manifest: { id: "deferred", apiVersion: 1 },',
@@ -2258,8 +2266,11 @@ test("interrupt waits for a running body to self-abort before recording the tell
         now: () => "2026-08-08T00:00:00.000Z",
       },
     );
-    while ((await readHeart(allocated.paths)).latestBody === null)
-      await new Promise((resolve) => setTimeout(resolve, 5));
+    await waitForCondition(
+      "the first Body recorded in Heart",
+      async () => (await readHeart(allocated.paths)).latestBody !== null,
+      { terminalState: settlementProbe(body, () => "the driving Body pump settled without a recorded Body") },
+    );
     rmSync(seat, { recursive: true, force: true });
 
     const handle = (await akumaAt(root)).of({ id: allocated.id });
@@ -2973,8 +2984,11 @@ test("kill gives the Body a grace window to abort its owned provider session", a
     const body = driveAkumaBody(launch, running, {
       now: () => "2026-08-08T00:00:00.000Z",
     });
-    while ((await readHeart(allocated.paths)).latestBody === null)
-      await new Promise((resolve) => setTimeout(resolve, 5));
+    await waitForCondition(
+      "the first Body recorded in Heart",
+      async () => (await readHeart(allocated.paths)).latestBody !== null,
+      { terminalState: settlementProbe(body, () => "the driving Body pump settled without a recorded Body") },
+    );
 
     const handle = (await akumaAt(root)).of({ id: allocated.id });
     const waited = handle.wait();
