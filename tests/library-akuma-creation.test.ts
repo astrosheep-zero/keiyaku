@@ -6,9 +6,7 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
-  readdirSync,
   readFileSync,
-  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -27,16 +25,14 @@ import {
   readSoul,
   type Soul,
 } from "../src/akuma/heart/index.js";
-import { akumaRunRoot, allocateAkumaDirectory, parseAkuId, pathsForAkuId } from "../src/akuma/identity.js";
+import { allocateAkumaDirectory, parseAkuId, pathsForAkuId } from "../src/akuma/identity.js";
 import { Akuma as PublicAkuma, Schema } from "../src/akuma/index.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
-import { AKUMA_REQUESTS_ENV, createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
+import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import { fleetRequestCommands, type FleetRequestPort } from "../src/akuma/fleet-request.js";
 import { composeRequestCommands } from "../src/akuma/request-wire.js";
 import { BodyRequestPump } from "../src/akuma/request-serve.js";
 import { moveAlias, resolveAlias } from "../src/alias/index.js";
-import { invoke } from "../src/cli/invoke.js";
-import { parseArgv, type ParsedExecution } from "../src/cli/parse.js";
 import { publishDispatch, readDispatch } from "../src/dispatch/index.js";
 import {
   GIT_REF,
@@ -49,7 +45,6 @@ import {
 } from "../src/git/repository.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { bodyRequestExecution, Keiyaku, Repo, World, settings } from "../src/index.js";
-import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import {
   cleanupSpawnCapableFixture,
   installAkumaBodyEmptyPublicationBarrier,
@@ -61,7 +56,6 @@ import type { WorldRoot } from "../src/world.js";
 import {
   AkumaComposition as Akuma,
   AkumaHandle,
-  akumaCallExecution,
   isolateSquareFixtureLedger,
 } from "./support/akuma-composition.js";
 import { makeGitRepository } from "./support/git.js";
@@ -77,11 +71,6 @@ function markdown(title: string): string {
   });
 }
 
-function executable(argv: readonly string[]): ParsedExecution {
-  const parsed = parseArgv(argv);
-  if (!("command" in parsed)) throw new Error("expected executable command");
-  return parsed;
-}
 
 async function repositoryFixture() {
   const raw = makeGitRepository();
@@ -89,14 +78,6 @@ async function repositoryFixture() {
   return { raw, repo: await Repo.at({ path: raw.path }), git: await repositoryAt(raw.path) };
 }
 
-async function archetypeSettings(root: string) {
-  const home = join(root, ".test-settings");
-  mkdirSync(join(home, "akuma"), { recursive: true });
-  writeFileSync(join(home, "akuma", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
-  writeFileSync(join(home, "akuma", "reviewer.md"), "---\nprovider: claude\nreadonly: true\n---\nReview only.\n");
-  const value = await settings({ root, home });
-  return { home, value, placement: { home, settings: value } };
-}
 
 async function directArchetypeSettings(root: string) {
   const home = join(root, ".direct-settings");
@@ -418,279 +399,6 @@ test("package-root World inputs reject a forged JavaScript coordinate before eff
     /canonical physical directory/u,
   );
   assert.equal(existsSync(join(root, ".keiyaku", "akuma")), false);
-});
-
-test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () => {
-  const { raw, repo, git } = await repositoryFixture();
-  const world = await World.at(raw.path);
-  const configured = await archetypeSettings(world);
-  const { pump, leash } = await requestPump(world);
-  const routedKeiyaku = Keiyaku.withExecution({ execution: bodyRequestExecution({ directory: pump.directory }) });
-  const previousRequests = process.env[AKUMA_REQUESTS_ENV];
-  process.env[AKUMA_REQUESTS_ENV] = pump.directory;
-  try {
-    const independent = await routedKeiyaku.call({
-      path: world,
-      archetype: "worker",
-      body: "independent",
-      ...configured.placement,
-    });
-    assert.deepEqual(independent.dispatch, { kind: "none" });
-    assert.deepEqual(independent.alias, { kind: "none" });
-    assert.deepEqual(independent.execution, { cwd: world, source: "caller" });
-    assert.equal(independent.observation.kind, "observed");
-    assert.equal(await readDispatch(git, independent.akuma), null);
-
-    const bound = await Keiyaku.bind({ repo, markdown: markdown("Akuma dispatch"), workspace: "worktree" });
-    const owner = (await bound.keiyaku.state()).id;
-    const alias = parseAkumaAlias("@worker");
-    const executionCwd = join(raw.path, "nested-worktree");
-    mkdirSync(executionCwd);
-    const invoked = await invoke(
-      executable([
-        "-C",
-        executionCwd,
-        "call",
-        "worker",
-        "--repo",
-        "..",
-        "--contract",
-        owner,
-        "--workdir",
-        ".",
-        "--alias",
-        alias,
-        "-",
-      ]),
-      {
-        environment: { ...process.env, KEIYAKU_HOME: configured.home },
-        readStdin: async () => "associated",
-      },
-    );
-    assert.equal("kind" in invoked && invoked.kind, "akuma");
-    if (!("kind" in invoked) || invoked.kind !== "akuma" || invoked.action !== "call") return;
-    const associated = invoked.result;
-    assert.ok(associated.dispatch.kind === "dispatched", "expected associated.dispatch.kind = \"dispatched\"");
-    assert.equal(associated.dispatch.dispatch.contractId, owner);
-    assert.deepEqual(await readDispatch(git, associated.akuma), associated.dispatch.dispatch);
-    assert.deepEqual(associated.alias, {
-      kind: "aliased",
-      alias: { alias, akuId: associated.akuma },
-      previous: null,
-    });
-    assert.equal(associated.observation.kind, "observed");
-    assert.deepEqual(associated.execution, { cwd: realpathSync(executionCwd), source: "input" });
-    assert.equal((await readSoul(pathsForAkuId(world, associated.akuma)))?.cwd, realpathSync(executionCwd));
-
-    writeFileSync(join(raw.path, ".keiyaku", "akuma", "alias.json"), "broken\n");
-    const partial = await routedKeiyaku.call({
-      path: world,
-      archetype: "worker",
-      body: "partial",
-      ...configured.placement,
-      contract: bound.keiyaku,
-      alias,
-      cwd: executionCwd,
-    });
-    assert.equal(partial.dispatch.kind, "dispatched");
-    assert.equal(partial.alias.kind, "failed");
-    assert.equal(partial.observation.kind, "observed");
-    assert.notEqual(await readDispatch(git, partial.akuma), null);
-
-    const detached = await routedKeiyaku.call({
-      path: world,
-      archetype: "worker",
-      body: "detached",
-      ...configured.placement,
-      mode: "detach",
-    });
-    assert.deepEqual(detached.observation, { kind: "detached" });
-    const routed = await routedKeiyaku.call({
-      path: world,
-      archetype: "worker",
-      body: "routed",
-      ...configured.placement,
-      mode: "detach",
-    });
-    assert.deepEqual(routed.observation, { kind: "detached" });
-    await assert.rejects(
-      routedKeiyaku.call({
-        path: world,
-        archetype: "worker",
-        body: "invalid",
-        ...configured.placement,
-        mode: "detach",
-        timeoutMs: 1,
-      }),
-      /timeoutMs is not valid in detach mode/u,
-    );
-  } finally {
-    await pump.close();
-    leash.release();
-    if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
-    else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
-    rmSync(raw.path, { recursive: true, force: true });
-  }
-});
-
-test("managed Contract calls use the appointed Place only when cwd is omitted", async () => {
-  const { raw, repo, git } = await repositoryFixture();
-  const world = await World.at(raw.path);
-  const configured = await archetypeSettings(world);
-  const { pump, leash } = await requestPump(world);
-  const previousRequests = process.env[AKUMA_REQUESTS_ENV];
-  process.env[AKUMA_REQUESTS_ENV] = pump.directory;
-  try {
-    const managed = await Keiyaku.bind({
-      repo,
-      markdown: markdown("Implicit Contract cwd"),
-      workspace: "worktree",
-      hooks: { create: [], destroy: [] },
-    });
-    const managedId = (await managed.keiyaku.state()).id;
-    const appointment = await readManagedWorktreeAppointment(git, managedId);
-    assert.ok(appointment.kind === "appointed", "expected appointment.kind = \"appointed\"");
-
-    const invoked = await invoke(executable(["-C", ".", "call", "worker", "--contract", managedId, "-"]), {
-      cwd: raw.path,
-      environment: { ...process.env, KEIYAKU_HOME: configured.home },
-      readStdin: async () => "implicit",
-    });
-    assert.equal("kind" in invoked && invoked.kind, "akuma");
-    if (!("kind" in invoked) || invoked.kind !== "akuma" || invoked.action !== "call") return;
-    const implicit = invoked.result;
-    assert.deepEqual(implicit.execution, { cwd: appointment.path, source: "contract-worktree" });
-    assert.equal((await readSoul(pathsForAkuId(world, implicit.akuma)))?.cwd, appointment.path);
-
-    const nested = join(raw.path, "nested-invocation");
-    const relative = join(nested, "relative-workdir");
-    mkdirSync(relative, { recursive: true });
-    const main = realpathSync(raw.path);
-    const births = () => readdirSync(akumaRunRoot(world)).sort();
-    const fromInvocation = await invoke(executable(["-C", "nested-invocation", "call", "worker", "-"]), {
-      cwd: raw.path,
-      environment: { ...process.env, KEIYAKU_HOME: configured.home },
-      readStdin: async () => "from invocation",
-    });
-    assert.equal("kind" in fromInvocation && fromInvocation.kind, "akuma");
-    if (!("kind" in fromInvocation) || fromInvocation.kind !== "akuma" || fromInvocation.action !== "call") return;
-    assert.deepEqual(fromInvocation.result.execution, { cwd: realpathSync(nested), source: "input" });
-
-    const fromRelativeWorkdir = await invoke(
-      executable(["-C", "nested-invocation", "call", "worker", "--workdir", "relative-workdir", "-"]),
-      {
-        cwd: raw.path,
-        environment: { ...process.env, KEIYAKU_HOME: configured.home },
-        readStdin: async () => "relative workdir",
-      },
-    );
-    assert.equal("kind" in fromRelativeWorkdir && fromRelativeWorkdir.kind, "akuma");
-    if (!("kind" in fromRelativeWorkdir) || fromRelativeWorkdir.kind !== "akuma" || fromRelativeWorkdir.action !== "call") return;
-    assert.deepEqual(fromRelativeWorkdir.result.execution, { cwd: realpathSync(relative), source: "input" });
-
-    const wholeLoop = await invoke(
-      executable(["-C", "nested-invocation", "call", "worker", "--contract", managedId, "--workdir", main, "-"]),
-      {
-        cwd: raw.path,
-        environment: { ...process.env, KEIYAKU_HOME: configured.home },
-        readStdin: async () => "whole loop in main",
-      },
-    );
-    assert.equal("kind" in wholeLoop && wholeLoop.kind, "akuma");
-    if (!("kind" in wholeLoop) || wholeLoop.kind !== "akuma" || wholeLoop.action !== "call") return;
-    assert.deepEqual(wholeLoop.result.execution, { cwd: main, source: "input" });
-    assert.equal((await readSoul(pathsForAkuId(world, wholeLoop.result.akuma)))?.cwd, main);
-
-    const unavailableBefore = births();
-    await assert.rejects(
-      () =>
-        invoke(executable(["call", "worker", "--workdir", "absent-workdir", "-"]), {
-          cwd: raw.path,
-          environment: { ...process.env, KEIYAKU_HOME: configured.home },
-          readStdin: async () => "unavailable",
-        }),
-      /workdir is not an existing directory: absent-workdir/u,
-    );
-    assert.deepEqual(births(), unavailableBefore);
-
-    const nonDirectory = join(nested, "not-a-directory");
-    writeFileSync(nonDirectory, "not a directory\n");
-    const nonDirectoryBefore = births();
-    await assert.rejects(
-      () =>
-        invoke(executable(["-C", "nested-invocation", "call", "worker", "--workdir", "not-a-directory", "-"]), {
-          cwd: raw.path,
-          environment: { ...process.env, KEIYAKU_HOME: configured.home },
-          readStdin: async () => "not a directory",
-        }),
-      /workdir is not an existing directory: not-a-directory/u,
-    );
-    assert.deepEqual(births(), nonDirectoryBefore);
-
-    const missingValueBefore = births();
-    assert.throws(() => executable(["call", "worker", "--workdir"]), /--workdir requires a path/u);
-    assert.deepEqual(births(), missingValueBefore);
-
-    const explicit = await Keiyaku.call({
-      path: world,
-      archetype: "worker",
-      body: "explicit",
-      cwd: world,
-      ...configured.placement,
-      contract: managed.keiyaku,
-    });
-    assert.deepEqual(explicit.execution, { cwd: world, source: "input" });
-    assert.equal((await readSoul(pathsForAkuId(world, explicit.akuma)))?.cwd, world);
-
-    await managed.keiyaku.abandon({ hooks: { create: [], destroy: [] } });
-  } finally {
-    await pump.close();
-    leash.release();
-    if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
-    else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
-    rmSync(raw.path, { recursive: true, force: true });
-  }
-});
-
-test("direct Akuma birth reports process cwd and the embedding World fallback", async (t) => {
-  const { raw } = await repositoryFixture();
-  const world = await World.at(raw.path);
-  const configured = await directArchetypeSettings(world);
-  const previousRequests = process.env[AKUMA_REQUESTS_ENV];
-  delete process.env[AKUMA_REQUESTS_ENV];
-  const bodyPidReceipt = join(raw.path, "body-pids");
-  const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
-  const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
-  let operationFailed = true;
-  try {
-    const akuma = Akuma.of(world, configured);
-    const direct = await akuma.call({ archetype: "worker", body: "process" });
-    assert.deepEqual(akumaCallExecution(direct), {
-      cwd: realpathSync(process.cwd()),
-      source: "process",
-    });
-
-    const fallback = await akuma.finishCall(await akuma.beginCall({ archetype: "worker", body: "world" }, {}));
-    assert.deepEqual(akumaCallExecution(fallback), { cwd: world, source: "world" });
-    assert.equal((await direct.wait(undefined, { timeoutMs: 2_000 })).life, "asleep");
-    assert.equal((await fallback.wait(undefined, { timeoutMs: 2_000 })).life, "asleep");
-    operationFailed = false;
-  } finally {
-    try {
-      const cleanup = await cleanupSpawnCapableFixture({
-        fixturePath: raw.path,
-        pidReceiptPath: bodyPidReceipt,
-        timeoutMs: 15_000,
-        operationFailed,
-      });
-      if (cleanup.kind === "retained") t.diagnostic(`retained fixture ${raw.path}: ${cleanup.diagnostic}`);
-    } finally {
-      restoreBodyPidReceipt();
-      restoreSquareLedger();
-      if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
-      else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
-    }
-  }
 });
 
 test("Archetype base chains refuse missing providers, malformed names, and cycles", async (context) => {

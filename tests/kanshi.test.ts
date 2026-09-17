@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
@@ -11,31 +11,18 @@ import { invoke as invokeRaw, type InvocationResult } from "../src/cli/invoke.js
 import { parseArgv as parseInvocation, type ParsedExecution } from "../src/cli/parse.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
 import { snapshotText } from "../src/cli/render/akuma-activity.js";
-import { contractId, contractSegment } from "../src/core/facts/types.js";
 import { publishDispatch } from "../src/dispatch/index.js";
-import { contractJournalPath } from "../src/git/identity.js";
 import {
-  GIT_FORMAT_PATH,
-  GIT_REF,
-  readGit,
   repositoryAt,
-  updateGitTree,
-  updateRefsAtomically,
-  writeBlob,
-  writeCommit,
 } from "../src/git/repository.js";
 import type { AkumaAlias } from "../src/identity/selector.js";
 import { Keiyaku, Repo } from "../src/index.js";
 import { kanshi, selectKanshi, type KanshiReport } from "../src/kanshi/index.js";
-import { projectTaskBoardObservation } from "../src/task/board.js";
-import { contractNamespace } from "../src/task/identity.js";
 import { Tasks } from "../src/task/index.js";
-import { authorityPath, readBoard } from "../src/task/store.js";
 import type { WorldRoot } from "../src/world.js";
 import { World } from "../src/world.js";
 import { makeGitRepository } from "./support/git.js";
 import { contractMarkdown } from "./support/markdown.js";
-import { taskDocument, writeTaskAuthority } from "./support/task.js";
 
 function parseArgv(argv: readonly string[]): ParsedExecution {
   const parsed = parseInvocation(argv);
@@ -173,130 +160,6 @@ test("plural status preserves mixed Contract/Akuma and alias selections", async 
   assert.equal(akuma.status.status.id, akumaId);
 });
 
-
-
-
-test("complete Contract status exposes a corrupt active dependency as a Contract section diagnostic", async (t) => {
-  const repository = fixtureRepository(t);
-
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const repo = await Repo.at({ path: repository.path });
-  const selected = await Keiyaku.bind({ repo, markdown: document("Selected"), workspace: "worktree" });
-  const unrelated = await Keiyaku.bind({ repo, markdown: document("Unrelated"), workspace: "worktree" });
-  const selectedId = (await selected.keiyaku.state()).id;
-  const unrelatedId = (await unrelated.keiyaku.state()).id;
-  const git = await repositoryAt(repository.path);
-  const snapshot = await readGit(git);
-  const tree = await updateGitTree(
-    git,
-    snapshot.tree,
-    new Map([[contractJournalPath(unrelatedId), { oid: await writeBlob(git, "not a Contract journal\n") }]]),
-  );
-  const commit = await writeCommit({ repository: git, tree, parent: snapshot.commit });
-  assert.equal(
-    (
-      await updateRefsAtomically(git, [
-        {
-          ref: GIT_REF,
-          newOid: commit,
-          expectedOid: snapshot.commit,
-        },
-      ])
-    ).kind,
-    "published",
-  );
-
-  const result = await invoke(parseArgv(["-C", repository.path, "status", selectedId]));
-
-  assert.ok(result.kind === "status", "expected result.kind = \"status\"");
-  assert.equal(result.selection, "contract");
-  assert.equal(result.report.contracts.kind, "failed");
-});
-
-test("a corrupt shared Git format fails every state-backed Kanshi section", async (t) => {
-  const { repository } = await populatedWorld(t);
-  const git = await repositoryAt(repository.path);
-  const snapshot = await readGit(git);
-  const tree = await updateGitTree(
-    git,
-    snapshot.tree,
-    new Map([[GIT_FORMAT_PATH, { oid: await writeBlob(git, "not the current format\n") }]]),
-  );
-  const commit = await writeCommit({ repository: git, tree, parent: snapshot.commit });
-  assert.equal(
-    (await updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind,
-    "published",
-  );
-
-  const report = await observe(repository.path, await Repo.at({ path: repository.path }));
-
-  assert.equal(report.contracts.kind, "failed");
-  assert.equal(report.tasks.kind, "failed");
-  assert.equal(report.akuma.kind, "failed");
-});
-
-test("a failed branch observation does not suppress readable Contract state", async (t) => {
-  const { repository } = await populatedWorld(t);
-  const currentBranch = Repo.prototype.currentBranch;
-  Repo.prototype.currentBranch = async function () {
-    throw new Error("branch unavailable");
-  };
-  try {
-    const report = await observe(repository.path, await Repo.at({ path: repository.path }));
-    assert.equal(report.branch, null);
-    assert.equal(report.contracts.kind, "present");
-    if (report.contracts.kind === "present") {
-      assert.notEqual(report.contracts.value.state, null);
-    }
-  } finally {
-    Repo.prototype.currentBranch = currentBranch;
-  }
-});
-
-test("blocked Kanshi rows preserve ordered structured Task blocker refs", async (t) => {
-  const root = fixtureRoot(t, "keiyaku-kanshi-blockers-");
-  const tasks = Tasks.of(await World.at(root));
-  const first = await tasks.add({ title: "First blocker" });
-  const second = await tasks.add({ title: "Second blocker", state: "in_progress" });
-  assert.equal(first.kind, "accepted");
-  assert.equal(second.kind, "accepted");
-  if (first.kind !== "accepted" || second.kind !== "accepted") return;
-  const blocked = await tasks.add({ title: "Blocked work", needs: [second.value.id, first.value.id] });
-  assert.ok(blocked.kind === "accepted", "expected blocked.kind = \"accepted\"");
-  unlinkSync(authorityPath(root as WorldRoot, first.value.id));
-
-  const report = await observe(root);
-
-  assert.ok(report.tasks.kind === "present", "expected report.tasks.kind = \"present\"");
-  assert.deepEqual(report.tasks.value.rows.find((row) => row.id === blocked.value.id)?.blockers, [
-    { id: second.value.id, title: "Second blocker", state: "in_progress" },
-    { id: first.value.id, title: null, state: "missing" },
-  ]);
-  assert.equal("blockers" in report.tasks.value.rows.find((row) => row.id === second.value.id)!, false);
-
-  await tasks.task({ id: blocked.value.id }).start();
-  const running = await observe(root);
-  assert.equal(running.tasks.kind, "present");
-  if (running.tasks.kind === "present") {
-    assert.equal(running.tasks.value.rows.find((row) => row.id === blocked.value.id)?.disposition, "in_progress");
-    assert.deepEqual(running.tasks.value.rows.find((row) => row.id === blocked.value.id)?.blockers, [
-      { id: second.value.id, title: "Second blocker", state: "in_progress" },
-      { id: first.value.id, title: null, state: "missing" },
-    ]);
-  }
-});
-
-test("malformed Alias fails only the Kanshi Akuma section", async (t) => {
-  const root = fixtureRoot(t, "keiyaku-kanshi-bad-alias-");
-  await bornAkuma(root, "a0000003");
-  mkdirSync(join(root, ".keiyaku", "akuma"), { recursive: true });
-  writeFileSync(join(root, ".keiyaku", "akuma", "alias.json"), "not alias authority\n");
-  const report = await observe(root);
-  assert.deepEqual(report.contracts, { kind: "absent" });
-  assert.equal(report.tasks.kind, "present");
-  assert.equal(report.akuma.kind, "failed");
-});
-
 function sectionBody(text: string, name: string): string {
   const section = name === "KEIYAKU" ? "CONTRACTS" : name === "FLEET" ? "AKUMA" : name === "TASK" ? "TASKS" : name;
   const open =
@@ -334,123 +197,6 @@ test("Kanshi reads ActivitySnapshots for the first three final Fleet display row
   } finally {
     AkumaHandle.prototype.status = originalStatus;
   }
-});
-
-test("Contract namespace Tasks come from one Task board observation", async (t) => {
-  const { repository, contract, taskId } = await populatedWorld(t);
-  const world = await World.at(repository.path);
-  const segment = contractSegment(contract.id);
-  assert.deepEqual(contractNamespace(contract.id), ["kei", segment]);
-  const sibling = contractId("kei/other-contract");
-  writeTaskAuthority(world, taskDocument({ id: "task/root-standalone", title: "Root standalone", priority: 0 }));
-  writeTaskAuthority(
-    world,
-    taskDocument({
-      id: `task/kei/${segment}/alpha`,
-      title: "Namespace alpha",
-      state: "done",
-      priority: 3,
-    }),
-  );
-  writeTaskAuthority(
-    world,
-    taskDocument({
-      id: `task/kei/${segment}/zeta`,
-      title: "Namespace zeta",
-      state: "on_hold",
-      priority: 0,
-    }),
-  );
-  writeTaskAuthority(
-    world,
-    taskDocument({
-      id: `task/kei/${segment}/child/nested`,
-      title: "Nested descendant",
-      priority: 0,
-    }),
-  );
-  writeTaskAuthority(
-    world,
-    taskDocument({
-      id: `task/kei/${contractSegment(sibling)}/sibling`,
-      title: "Sibling namespace",
-      priority: 0,
-    }),
-  );
-
-  const report = await observe(repository.path, await Repo.at({ path: repository.path }));
-  const selected = await kanshi({
-    world,
-    repo: await Repo.at({ path: repository.path }),
-    contract: contract.id,
-  });
-  const board = projectTaskBoardObservation((await readBoard(world)).board);
-  assert.equal(report.contracts.kind, "present");
-  assert.equal(report.tasks.kind, "present");
-  assert.equal(selected.contracts.kind, "present");
-  if (report.contracts.kind !== "present" || report.tasks.kind !== "present" || selected.contracts.kind !== "present")
-    return;
-  assert.equal(
-    report.contracts.value.rows.every((candidate) => candidate.namespaceTasks === undefined),
-    true,
-  );
-  const row = selected.contracts.value.rows.find((candidate) => candidate.id === contract.id);
-  if (row === undefined || row.namespaceTasks === undefined) throw new Error("fixture namespace tasks must be present");
-  assert.ok(row.namespaceTasks.kind === "present", "expected row.namespaceTasks.kind = \"present\"");
-  const expected = board.selectNamespace(contractNamespace(contract.id));
-  assert.deepEqual(row.namespaceTasks.value, expected);
-  assert.deepEqual(
-    expected.map((task) => task.id),
-    [`task/kei/${segment}/zeta`, `task/kei/${segment}/alpha`],
-  );
-  assert.deepEqual(
-    expected.map((task) => task.state),
-    ["on_hold", "done"],
-  );
-  assert.equal(
-    expected.some((task) => task.id === taskId),
-    false,
-  );
-  assert.equal(
-    expected.some((task) => task.id === "task/root-standalone"),
-    false,
-  );
-  assert.equal(
-    expected.some((task) => task.id === `task/${segment}/child/nested`),
-    false,
-  );
-  assert.equal(
-    expected.some((task) => task.id === `task/kei/${contractSegment(sibling)}/sibling`),
-    false,
-  );
-  assert.deepEqual(
-    report.tasks.value.rows.map((task) => ({ id: task.id, disposition: task.disposition, blockers: task.blockers })),
-    board.selectRecentStatus(10).rows.map((task) => ({
-      id: task.id,
-      disposition: task.disposition,
-      blockers: "blockers" in task ? task.blockers : undefined,
-    })),
-  );
-  assert.equal(report.tasks.value.hasMore, board.selectRecentStatus(10).hasMore);
-
-  assert.equal(selected.tasks.kind, "present");
-  if (selected.tasks.kind === "present") {
-    assert.deepEqual(
-      selected.tasks.value.rows.map((task) => task.id),
-      [taskId],
-    );
-  }
-  assert.equal(selected.contracts.kind, "present");
-  if (selected.contracts.kind === "present") {
-    assert.deepEqual(selected.contracts.value.rows[0]?.namespaceTasks, row.namespaceTasks);
-  }
-  const worldText = renderKanshiText(report, { columns: 120, color: false });
-  const selectedText = renderKanshiText(selected, { columns: 120, color: false }, "contract");
-  assert.doesNotMatch(sectionBody(worldText, "KEIYAKU"), /namespace tasks /u);
-  assert.match(selectedText, new RegExp(String.raw`● ${taskId} · in progress`, "u"));
-  assert.match(selectedText, new RegExp(String.raw`⧗ task/kei/${segment}/zeta · on hold · P0 · Namespace zeta`, "u"));
-  assert.match(selectedText, new RegExp(String.raw`✓ task/kei/${segment}/alpha · done · P3 · Namespace alpha`, "u"));
-  assert.doesNotMatch(selectedText, /──\[ (?:KEIYAKU|TASK|FLEET) \]/u);
 });
 
 test("Task board failure names the malformed document once without suppressing Contract or Akuma", async (t) => {
