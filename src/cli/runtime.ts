@@ -185,7 +185,7 @@ function writeWorldScopeRefusal(
 async function commandFailureText(error: unknown, command: ParsedCommand): Promise<string> {
   const diagnostic = error instanceof Error ? error.message : String(error);
   if (command.output === "json" || error instanceof CliUsageError) return diagnostic;
-  const { KeiyakuRefused } = await import("../index.js");
+  const { KeiyakuRefused } = await import("../library/refusal.js");
   if (error instanceof KeiyakuRefused) {
     if (error.refusal.kind === "contract-missing") {
       return renderUsageMessage(
@@ -217,7 +217,7 @@ export async function runCliCommand(invocation: ParsedExecution): Promise<number
     });
     return await writeResult(command, result);
   } catch (error) {
-    const { executionReceipt } = await import("../index.js");
+    const { executionReceipt } = await import("../library/execution-result.js");
     const receipt = executionReceipt(error);
     if (receipt !== undefined) {
       const diagnostic = error instanceof Error ? error.message : String(error);

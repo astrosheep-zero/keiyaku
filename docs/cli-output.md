@@ -193,14 +193,17 @@ evidence waits until the observation ends so the stream can retain the actual
 end of the command; intermediate tool evidence is represented by counted
 omission markers.
 Narrative remains in its original order around that deferred evidence.
-Every observed
-Akuma's stream opens with its identity frame before any row — carrying the
-alias currently addressing that Akuma and the Contract association it holds —
-and an already settled Akuma prints that frame while replaying no backlog. The
-wait ends with one conclusion row per observed Akuma, attributed to its source
-the same way the activity above it is, so an unfinished wait replays no
-activity snapshot; the first row of a multi-target scoreboard opens a new
-paragraph. A wait observing more than one Akuma identifies the source of every
+A single-target wait's stream opens with that Akuma's identity frame before
+any row — carrying the alias currently addressing it and the Contract
+association it holds — and an already settled Akuma prints that frame while
+replaying no backlog. A wait observing more than one Akuma instead opens one
+aggregate frame for its selected set before any activity row, naming each
+selected target by the alias addressing it, otherwise its complete identity,
+and closes that head with a single rule; no per-target identity frame follows
+it during observation. The wait ends with one conclusion row per observed
+Akuma, attributed to its source the same way the activity above it is, so an
+unfinished wait replays no activity snapshot; the first row of a multi-target
+scoreboard opens a new paragraph. A plural wait identifies the source of every
 semantic activity row in a consistently aligned source column: the frozen
 alias addressing that Akuma when one exists, otherwise its complete identity,
 resolved from the observation seam rather than a renderer reading of the

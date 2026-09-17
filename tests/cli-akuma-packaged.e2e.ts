@@ -122,8 +122,22 @@ function observingWorld(): Readonly<{ root: string; world: string; env: NodeJS.P
 }
 
 /** The run of U+2500 a frame head of these lines draws, measured in display columns. */
-function ruleFor(headLine: string): string {
-  return "─".repeat(displayColumns(headLine));
+function ruleFor(...headLines: readonly string[]): string {
+  return "─".repeat(headLines.reduce((widest, line) => Math.max(widest, displayColumns(line)), 0));
+}
+
+/** Assert one plural wait's aggregate frame head opens the progress stream before any activity row. */
+function assertAggregateHead(stderr: string, labels: readonly string[]): void {
+  const rule = ruleFor(...labels);
+  const lines = stderr.split("\n");
+  const head = lines.slice(0, labels.length);
+  assert.deepEqual([...head].sort(), [...labels].sort(), `the aggregate head names the selected set:\n${stderr}`);
+  assert.equal(lines[labels.length], rule, `one rule closes the aggregate head:\n${stderr}`);
+  assert.equal(
+    stderr.match(new RegExp(`^${rule}$`, "gmu"))?.length,
+    1,
+    `exactly one aggregate frame rule:\n${stderr}`,
+  );
 }
 
 /** The display column at which the first occurrence of one mark starts. */
@@ -131,11 +145,6 @@ function markColumn(line: string, mark: string): number {
   const index = line.indexOf(mark);
   assert.notEqual(index, -1, `expected ${mark} in ${line}`);
   return displayColumns(line.slice(0, index));
-}
-
-/** One identity-frame head line for the given archetype and alias, if present. */
-function headFrameCount(stderr: string, archetype: string, alias: string): number {
-  return stderr.match(new RegExp(`^aku/${archetype}/[0-9a-f]{8} \\(${alias}\\)$`, "gmu"))?.length ?? 0;
 }
 
 /** Ascending message numbers rendered in one attributed source's rows. */
@@ -235,8 +244,12 @@ test("packaged plural waits attribute activity and close every target", { timeou
     });
     assert.equal(any.code, 0, any.stderr);
     assert.equal(any.stdout, "", "an --any plural wait writes no stdout");
-    assert.equal(headFrameCount(any.stderr, "worker", "@notes"), 1, `one head frame per observed Akuma:\n${any.stderr}`);
-    assert.equal(headFrameCount(any.stderr, "slowcoach", "@slow"), 1, `one head frame per observed Akuma:\n${any.stderr}`);
+    assertAggregateHead(any.stderr, ["@notes", "@slow"]);
+    assert.doesNotMatch(
+      any.stderr,
+      /aku\/(?:worker|slowcoach)\/[0-9a-f]{8} \(@/u,
+      `no per-target identity frame follows the aggregate head:\n${any.stderr}`,
+    );
     assert.match(any.stderr, /@notes +│ say/u, `--any attributed an activity row to its source:\n${any.stderr}`);
     assert.doesNotMatch(any.stderr, /retry note/u, "--any omits thought narration");
     assert.match(any.stderr, /@slow +✓ answered — /u, "--any scored the answered target");
@@ -260,8 +273,12 @@ test("packaged plural waits attribute activity and close every target", { timeou
     });
     assert.equal(all.code, 0, all.stderr);
     assert.equal(all.stdout, "", "an --all plural wait writes no stdout");
-    assert.equal(headFrameCount(all.stderr, "worker", "@notes"), 1, `one head frame per observed Akuma:\n${all.stderr}`);
-    assert.equal(headFrameCount(all.stderr, "finisher", "@done"), 1, `one head frame per observed Akuma:\n${all.stderr}`);
+    assertAggregateHead(all.stderr, ["@notes", "@done"]);
+    assert.doesNotMatch(
+      all.stderr,
+      /aku\/(?:worker|finisher)\/[0-9a-f]{8} \(@/u,
+      `no per-target identity frame follows the aggregate head:\n${all.stderr}`,
+    );
     assert.match(all.stderr, /@notes +│ say/u, `--all attributed an activity row to its source:\n${all.stderr}`);
     assert.doesNotMatch(all.stderr, /retry note/u, "--all omits thought narration");
     assert.match(all.stderr, /@done +✓ answered — /u, "--all scored the already settled target");

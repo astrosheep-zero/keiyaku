@@ -155,7 +155,16 @@ export async function removeTempDirectory(path: string): Promise<void> {
       rmSync(path, { recursive: true, force: true });
       return;
     } catch (error) {
-      if (process.platform !== "win32" || (error as NodeJS.ErrnoException).code !== "EPERM") throw error;
+      // A departing fixture process can still hold or repopulate the tree; retry
+      // the transient filesystem races on every platform until the tree is gone.
+      const code = (error as NodeJS.ErrnoException).code;
+      if (
+        code !== "ENOTEMPTY" &&
+        code !== "EACCES" &&
+        code !== "EBUSY" &&
+        code !== "EPERM"
+      )
+        throw error;
       if (performance.now() >= deadline) throw error;
       await new Promise((resolve) => setTimeout(resolve, 25));
     }

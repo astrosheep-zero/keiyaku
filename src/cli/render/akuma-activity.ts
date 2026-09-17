@@ -646,31 +646,43 @@ function durationText(durationMs: number): string {
 
 type WaitObservationStreamState = {
   streams: Map<string, ActivityStream>;
-  attributed: Map<string, string | undefined>;
   sources: Map<string, string>;
   settledAt: Map<string, number>;
   sourceWidth: number;
-  opened: boolean;
+  /** Whether this wait observes a plural selected set; undefined until a selection or first round fixes it. */
+  plural: boolean | undefined;
+  headerEmitted: boolean;
   observed: boolean;
 };
 
 function createWaitObservationState(): WaitObservationStreamState {
   return {
     streams: new Map<string, ActivityStream>(),
-    attributed: new Map<string, string | undefined>(),
     sources: new Map<string, string>(),
     settledAt: new Map<string, number>(),
     sourceWidth: 0,
-    opened: false,
+    plural: undefined,
+    headerEmitted: false,
     observed: false,
   };
 }
 
+/** Register one selected or newly observed source; the set freezes the column before the first row. */
 function registerWaitSource(state: WaitObservationStreamState, id: string, alias: string | undefined): void {
   if (state.sources.has(id)) return;
   const label = alias ?? id;
   state.sources.set(id, label);
-  state.sourceWidth = Math.max(state.sourceWidth, displayColumns(label));
+  if (!state.headerEmitted) state.sourceWidth = Math.max(state.sourceWidth, displayColumns(label));
+}
+
+/**
+ * The one aggregate head a plural wait prints before any activity row: every
+ * selected target named by the alias addressing it, otherwise its complete
+ * identity, closed by the frame's single rule.
+ */
+function aggregateHeading(sources: Iterable<string>): readonly string[] {
+  const head = [...sources];
+  return [...head, frameRule(head)];
 }
 
 function observeWaitRound(
@@ -683,25 +695,33 @@ function observeWaitRound(
   // Establish the whole round's sources before any row so widths stay aligned within it.
   for (const member of round) registerWaitSource(state, member.status.id, member.alias);
   const lines: string[] = [];
-  for (const { status, alias, contract } of round) {
+  // The observation subject opens once: an aggregate head for a plural set, the observed
+  // identity frame for a single target. Every later round only appends attributed rows.
+  if (!state.headerEmitted && round.length > 0) {
+    state.headerEmitted = true;
+    state.plural ??= state.sources.size > 1;
+    if (state.plural) {
+      lines.push(...aggregateHeading(state.sources.values()));
+    } else {
+      const sole = round[0]!;
+      lines.push(...snapshotHeading(sole.status.id, sole.alias, sole.contract));
+    }
+  }
+  for (const { status } of round) {
     const known = state.streams.get(status.id);
-    if (known === undefined) {
-      if (state.opened) lines.push("");
-      lines.push(...snapshotHeading(status.id, alias, contract));
-      state.opened = true;
-      state.attributed.set(status.id, alias);
+    if (known !== undefined) {
+      lines.push(...known(status.timeline));
+    } else {
       // Only a plural wait attributes its rows; a single-target stream keeps the plain row grammar.
       const stream = activityStream(
         context,
-        state.sources.size > 1
+        state.plural === true
           ? sourceLayout(state.sources.get(status.id) ?? status.id, () => state.sourceWidth)
           : plainLayout(),
       );
       state.streams.set(status.id, stream);
       // A wait starts at the current settled frontier: its backlog is neither evidence nor budget.
       lines.push(...stream.seed(status.timeline));
-    } else {
-      lines.push(...known(status.timeline));
     }
     if (!state.settledAt.has(status.id) && waitComplete(status))
       state.settledAt.set(status.id, settleMoment(status) ?? now());
@@ -751,9 +771,11 @@ function concludeWaitStream(
 
 /**
  * Live view over a wait's successive observation rounds, one append-only
- * stream per selected Akuma. Each Akuma's stream opens with its identity frame
- * — the identity and Contract association the observed facts carry — before any
- * row; an already settled Akuma prints that frame and never replays backlog
+ * stream per selected Akuma. A plural wait opens one aggregate frame naming
+ * its selected set before any activity row and never opens a per-target frame
+ * during observation; a single-target wait opens that Akuma's own identity
+ * frame — the identity and Contract association the observed facts carry —
+ * and an already settled Akuma prints that frame while replaying no backlog
  * rows. `conclude` renders the closing rows once the wait ends: one row per
  * observed Akuma in `<clock> <mark> <verb> — <duration>` grammar, with a target
  * named for a multi-target scoreboard and no activity replay.
@@ -767,6 +789,7 @@ export function waitObservationStream(
   const state = createWaitObservationState();
   const select = (selected: readonly WaitSelectedIdentity[]): void => {
     for (const member of selected) registerWaitSource(state, member.id, member.alias);
+    state.plural ??= selected.length > 1;
   };
   const observe = (round: readonly WaitObservedAkuma[]): readonly string[] =>
     observeWaitRound(state, round, context, now);

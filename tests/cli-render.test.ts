@@ -2039,17 +2039,19 @@ test("a wait stream opens an already settled Akuma with its head frame and no ba
   assert.deepEqual(stream.observe([observed(settled)]), []);
 });
 
-test("a wait stream prints only rows that settle after its baseline and opens a new head per Akuma", () => {
+test("a plural wait opens one aggregate head and streams only rows that settle after its baseline", () => {
   const running = (id: string, entries: Parameters<typeof openAkumaSnapshot>[0]) =>
     parseAkumaStatus({ id, life: "running", allowed: [], timeline: openAkumaSnapshot(entries) });
   const first = "aku/worker/abcd0002";
   const second = "aku/worker/abcd0003";
   const stream = waitObservationStream({ columns: 120, color: false }, { now: () => 0 });
+  stream.select([{ id: first }, { id: second }]);
+  const head = [first, second];
   assert.deepEqual(
     stream.observe([
       observed(running(first, [snapshotRow(completedTool(1, "bash", { kind: "run", command: "first" }))])),
     ]),
-    [first, frameRule([first])],
+    [...head, frameRule(head)],
   );
   const streamed = stream
     .observe([
@@ -2064,7 +2066,7 @@ test("a wait stream prints only rows that settle after its baseline and opens a 
     .join("\n");
   assert.match(streamed, /first/u);
   assert.doesNotMatch(streamed, /second|elsewhere/u);
-  assert.ok(streamed.includes(`\n\n${second}\n${frameRule([second])}`), "a later head frame opens a new paragraph");
+  assert.ok(!streamed.includes(frameRule(head)), "the aggregate frame never recurs for a later target");
 });
 
 test("a single answered wait concludes at its durable settle moment, not the poll that noticed it", () => {
@@ -2094,19 +2096,73 @@ test("a single answered wait concludes at its durable settle moment, not the pol
   assert.equal(stream.streamed(), true);
 });
 
-test("two Akuma first sighted in one round each open their own paragraph", () => {
+test("two Akuma first sighted in one round share one aggregate frame", () => {
   const stream = waitObservationStream({ columns: 120, color: false }, { now: () => 0 });
   const first = "aku/worker/abcd0010";
   const second = "aku/worker/abcd0011";
   const running = (id: string) =>
     parseAkumaStatus({ id, life: "running", allowed: [], timeline: openAkumaSnapshot([]) });
+  const head = [first, second];
   assert.deepEqual(stream.observe([observed(running(first)), observed(running(second))]), [
-    first,
-    frameRule([first]),
-    "",
-    second,
-    frameRule([second]),
+    ...head,
+    frameRule(head),
   ]);
+});
+
+test("a plural wait emits one aggregate header before any activity row and no later per-target frame", () => {
+  const context = { columns: 120, color: false } as const;
+  const first = "aku/worker/abcd0014";
+  const second = "aku/worker/abcd0015";
+  const stream = waitObservationStream(context, { now: () => 0 });
+  stream.select([{ id: first, alias: "@one" }, { id: second }]);
+  const tool = (sequence: number, command: string) =>
+    snapshotRow(completedTool(sequence, "bash", { kind: "run", command }));
+  const running = (id: string, entries: Parameters<typeof openAkumaSnapshot>[0]) =>
+    parseAkumaStatus({ id, life: "running", allowed: [], timeline: openAkumaSnapshot(entries) });
+  const facts = { alias: parseAkumaAlias("@one"), contract: { kind: "none" as const } };
+  const head = ["@one", second];
+
+  const opening = stream.observe([
+    observed(running(first, [tool(1, "one")]), facts),
+    observed(running(second, [tool(1, "two")])),
+  ]);
+  assert.deepEqual(opening, [...head, frameRule(head)], "the aggregate head opens before any activity row");
+
+  const later = [
+    ...stream.observe([
+      observed(running(first, [tool(1, "one"), tool(2, "three")]), facts),
+      observed(running(second, [tool(1, "two"), tool(2, "four")])),
+    ]),
+    ...stream.observe([
+      observed(running(first, [tool(1, "one"), tool(2, "three"), tool(3, "five")]), facts),
+      observed(running(second, [tool(1, "two"), tool(2, "four"), tool(3, "six")])),
+    ]),
+  ];
+  assert.ok(later.some((line) => line.includes("✓ run")), "activity rows follow the head");
+  assert.equal(later.filter((line) => head.includes(line)).length, 0, "no per-target identity frame follows the head");
+  assert.equal(later.filter((line) => /^─+$/u.test(line)).length, 0, "no additional frame rule is emitted");
+
+  const scoreboard = stream.conclude({
+    observations: [
+      {
+        status: running(first, [tool(1, "one"), tool(2, "three")]),
+        contract: { kind: "none" },
+        createdTasks: { kind: "present", rows: [] },
+      },
+      {
+        status: running(second, [tool(1, "two"), tool(2, "four")]),
+        contract: { kind: "none" },
+        createdTasks: { kind: "present", rows: [] },
+      },
+    ],
+    unobserved: [],
+  });
+  const scoreLines = scoreboard.split("\n");
+  assert.equal(scoreLines[0], "", "the scoreboard opens a new paragraph");
+  const marks = scoreLines
+    .filter((line) => line.includes("● still running"))
+    .map((line) => displayColumns(line.slice(0, line.indexOf("●"))));
+  assert.deepEqual(new Set(marks), new Set([5 + 1 + displayColumns(second) + 1]), "the scoreboard shares the source column");
 });
 
 test("a wait stream head renders the alias and Contract association its observation carries", () => {
@@ -2257,13 +2313,13 @@ test("a plural wait attributes every row to its own aligned source", () => {
   const stream = waitObservationStream({ columns: 120, color: false }, { now: () => 0 });
   stream.select([{ id: first, alias: "@a" }, { id: second }]);
 
-  // The baseline round opens each head frame and settles no row of its own.
+  // The baseline round opens the aggregate head and settles no row of its own.
   const opening = stream.observe([
     observed(running(first, [tool(1, "one")]), facts),
     observed(running(second, [tool(1, "two")])),
   ]);
-  const head = `${first} (@a)`;
-  assert.deepEqual(opening.slice(0, 2), [head, frameRule([head])]);
+  const head = ["@a", second];
+  assert.deepEqual(opening, [...head, frameRule(head)]);
   assert.doesNotMatch(opening.join("\n"), /✓ run/u);
 
   const text2 = stream
@@ -2274,7 +2330,11 @@ test("a plural wait attributes every row to its own aligned source", () => {
     .join("\n");
   assert.match(text2, /@a +✓ run +\$ one/u);
   assert.match(text2, /aku\/worker\/abcd0021 +✓ run +\$ two/u);
-  assert.ok(!text2.includes(head), "headers do not recur");
+  assert.equal(
+    text2.split("\n").filter((line) => head.includes(line)).length,
+    0,
+    "the aggregate head does not recur",
+  );
 
   const text3 = stream
     .observe([
@@ -2302,8 +2362,9 @@ test("a plural wait freezes its source column from the selected set before the f
   const status = (entries: Parameters<typeof openAkumaSnapshot>[0]) =>
     parseAkumaStatus({ id: first, life: "running", allowed: [], timeline: openAkumaSnapshot(entries) });
   const facts = { alias: parseAkumaAlias("@shorter"), contract: { kind: "none" as const } };
-  // The baseline round settles nothing, so the first rendered row still uses the frozen width.
-  stream.observe([observed(status([tool(1, "solo")]), facts)]);
+  // The baseline round opens the aggregate head for the whole selected set and settles nothing.
+  const head = ["@shorter", "@a-very-long-alias"];
+  assert.deepEqual(stream.observe([observed(status([tool(1, "solo")]), facts)]), [...head, frameRule(head)]);
   const row = stream
     .observe([observed(status([tool(1, "solo"), tool(2, "later")]), facts)])
     .find((line) => line.includes("solo"));
