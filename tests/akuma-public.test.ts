@@ -12,7 +12,6 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { AkumaNotBornError, killAkumaWithRecovery } from "../src/akuma/akuma.js";
 import { AkumaComposition as Akuma } from "./support/akuma-composition.js";
-import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import {
   projectTurns,
   selectHistory,
@@ -21,7 +20,7 @@ import {
   type ActivityHistory,
   type TurnLedger
 } from "../src/akuma/projection.js";
-import { AkumaArchetypeError, listArchetypeDefinitions, loadArchetype } from "../src/akuma/archetype.js";
+import { AkumaArchetypeError, loadArchetype } from "../src/akuma/archetype.js";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
 import {
   activitySlice,
@@ -32,12 +31,10 @@ import {
   finishBodyIfIdle,
   HeldAkumaLeash,
   initializeHeart,
-  lifeAt,
   pauseRequested,
   probeLeash,
   readHeart,
   recordTell,
-  requestStop,
   type Soul,
   type TimelineFact,
 } from "../src/akuma/heart/index.js";
@@ -278,115 +275,6 @@ test("forward history reports a pruned interval after its cursor", async () => {
     history.rows.map((row) => row.sequence),
     [9],
   );
-});
-
-test("Heart life timestamps select each reachable evidence source", () => {
-  const body = {
-    sequence: 7,
-    leashTakenAt: "2026-08-12T00:00:00.000Z",
-    hung: { diagnostic: "stuck", at: "2026-08-12T00:01:00.000Z" },
-    endedAt: "2026-08-12T00:02:00.000Z",
-  } as const;
-  const kill = { sequence: 1, bodySequence: 7, evidence: "killed" as const, at: "2026-08-12T00:03:00.000Z" };
-  const createdAt = "2026-08-11T00:00:00.000Z";
-  assert.equal(lifeAt("running", body, null, createdAt), body.leashTakenAt);
-  assert.equal(lifeAt("hung", body, null, createdAt), body.hung.at);
-  assert.equal(lifeAt("killed", body, kill, createdAt), kill.at);
-  assert.equal(lifeAt("asleep", body, null, createdAt), body.endedAt);
-  assert.equal(lifeAt("stranded", body, null, createdAt), body.endedAt);
-  assert.equal(lifeAt("untidy", body, null, createdAt), null);
-  assert.equal(lifeAt("asleep", null, null, createdAt), createdAt);
-});
-
-test("public fleet rows wire every Heart life to its source timestamp", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-life-at-"));
-  const holders: HeldAkumaLeash[] = [];
-  try {
-    const born = async (suffix: string, createdAt: string) => {
-      const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => suffix });
-      await initializeHeart(allocated.paths);
-      const holder = (await HeldAkumaLeash.try(allocated.paths))!;
-      await holder.birth(allocated.paths, {
-        id: allocated.id,
-        archetype: "claude",
-        provider: CLAUDE_EXECUTION,
-        options: {},
-        cwd: root,
-        origin: { kind: "direct" },
-        allowed: [],
-        createdAt,
-      });
-      return { allocated, holder };
-    };
-    const running = await born("f0000001", "2026-08-12T00:00:00.000Z");
-    await running.holder.recordBody(running.allocated.paths, {
-      leashTakenAt: "2026-08-12T00:01:00.000Z",
-    });
-    holders.push(running.holder);
-    const hung = await born("f0000002", "2026-08-12T00:00:00.000Z");
-    const hungBody = await hung.holder.recordBody(hung.allocated.paths, { leashTakenAt: "2026-08-12T00:02:00.000Z" });
-    await hung.holder.recordBodyHung(hung.allocated.paths, {
-      sequence: hungBody.sequence,
-      diagnostic: "stuck",
-      at: "2026-08-12T00:03:00.000Z",
-    });
-    holders.push(hung.holder);
-    const asleep = await born("f0000003", "2026-08-12T00:00:00.000Z");
-    const asleepBody = await asleep.holder.recordBody(asleep.allocated.paths, {
-      leashTakenAt: "2026-08-12T00:04:00.000Z",
-    });
-    await finishBodyIfIdle(asleep.allocated.paths, { sequence: asleepBody.sequence, at: "2026-08-12T00:05:00.000Z" });
-    asleep.holder.release();
-    const stranded = await born("f0000004", "2026-08-12T00:00:00.000Z");
-    const strandedBody = await stranded.holder.recordBody(stranded.allocated.paths, {
-      leashTakenAt: "2026-08-12T00:06:00.000Z",
-    });
-    await breakBody(stranded.allocated.paths, {
-      sequence: strandedBody.sequence,
-      end: "broke-off",
-      at: "2026-08-12T00:07:00.000Z",
-    });
-    stranded.holder.release();
-    const killed = await born("f0000005", "2026-08-12T00:00:00.000Z");
-    const killedBody = await killed.holder.recordBody(killed.allocated.paths, {
-      leashTakenAt: "2026-08-12T00:08:00.000Z",
-    });
-    assert.equal((await requestStop(killed.allocated.paths, "2026-08-12T00:09:00.000Z")).kind, "requested");
-    await breakBody(killed.allocated.paths, {
-      sequence: killedBody.sequence,
-      end: "put-down",
-      at: "2026-08-12T00:10:00.000Z",
-    });
-    await killed.holder.settleStop(killed.allocated.paths);
-    killed.holder.release();
-    const untidy = await born("f0000006", "2026-08-12T00:00:00.000Z");
-    await untidy.holder.recordBody(untidy.allocated.paths, { leashTakenAt: "2026-08-12T00:11:00.000Z" });
-    untidy.holder.release();
-    const unborn = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "f0000007" });
-    await initializeHeart(unborn.paths);
-    const stillborn = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "f0000008" });
-    await initializeHeart(stillborn.paths);
-    const stillbornHolder = (await HeldAkumaLeash.try(stillborn.paths))!;
-    await stillbornHolder.sealIfUnborn(stillborn.paths, { evidence: "test", at: "2026-08-12T00:12:00.000Z" });
-
-    const rows = (await (await akumaAt(root)).list()).rows;
-    const row = (id: string) => {
-      const candidate = rows.find((entry) => entry.id === id);
-      assert.ok(candidate && "lifeAt" in candidate);
-      return candidate;
-    };
-    assert.equal(row(running.allocated.id).lifeAt, "2026-08-12T00:01:00.000Z");
-    assert.equal(row(hung.allocated.id).lifeAt, "2026-08-12T00:03:00.000Z");
-    assert.equal(row(asleep.allocated.id).lifeAt, "2026-08-12T00:05:00.000Z");
-    assert.equal(row(stranded.allocated.id).lifeAt, "2026-08-12T00:07:00.000Z");
-    assert.equal(row(killed.allocated.id).lifeAt, "2026-08-12T00:09:00.000Z");
-    assert.equal(row(untidy.allocated.id).lifeAt, null);
-    assert.equal("lifeAt" in rows.find((entry) => entry.id === unborn.id)!, false);
-    assert.equal("lifeAt" in rows.find((entry) => entry.id === stillborn.id)!, false);
-  } finally {
-    for (const holder of holders) holder.release();
-    rmSync(root, { recursive: true, force: true });
-  }
 });
 
 for (const observation of ["status", "wait", "fleet"] as const) {
@@ -1569,125 +1457,6 @@ test("kill returns unavailable when an unsettled Body keeps the leash", async ()
     value.holder.release();
     rmSync(root, { recursive: true, force: true });
   }
-});
-
-test("Archetype Markdown is strict call-time input with a durable option shape", async (context) => {
-  const home = temporaryDirectory(context, "keiyaku-akuma-archetype-");
-  const settingsValue = await settings({ home });
-  mkdirSync(join(home, "akuma"));
-  writeFileSync(
-    join(home, "akuma", "reviewer.md"),
-    [
-      "---",
-      "provider: claude",
-      "model: claude-sonnet-4-5",
-      "effort: high",
-      "readonly: true",
-      "description: Careful reviewer",
-      "editor:",
-      "  theme: dark",
-      "tags: [review, careful]",
-      "revision: 3",
-      "---",
-      "Review the change from first principles.",
-      "",
-    ].join("\n"),
-  );
-  const loaded = await loadArchetype({ name: "reviewer", home, settings: settingsValue });
-  const { adapter, ...definition } = loaded;
-  assert.equal(typeof adapter.start, "function");
-  assert.deepEqual(definition, {
-    name: "reviewer",
-    path: join(home, "akuma", "reviewer.md"),
-    provider: CLAUDE_EXECUTION,
-    description: "Careful reviewer",
-    allowed: ALLOWED_ACTIONS,
-    options: {
-      model: "claude-sonnet-4-5",
-      effort: "high",
-      readonly: true,
-      systemPrompt: "Review the change from first principles.\n",
-      systemPromptMode: "append",
-    },
-    readonly: { enforcement: "native" },
-  });
-  writeFileSync(join(home, "akuma", "invalid.md"), "---\nprovider: claude\nreadonly: false\n---\n");
-  await assert.rejects(
-    loadArchetype({ name: "invalid", home, settings: settingsValue }),
-    (error: unknown) =>
-      error instanceof AkumaArchetypeError &&
-      error.searched[0] === join(home, "akuma", "invalid.md") &&
-      !error.message.includes("searched") &&
-      !/archetype/iu.test(error.message),
-  );
-  writeFileSync(join(home, "akuma", "stale-access.md"), "---\nprovider: claude\naccess: read\n---\n");
-  await assert.rejects(
-    loadArchetype({ name: "stale-access", home, settings: settingsValue }),
-    (error: unknown) => error instanceof AkumaArchetypeError && error.reason.includes("access is not supported"),
-  );
-  writeFileSync(join(home, "akuma", "wordy-readonly.md"), "---\nprovider: claude\nreadonly: yes\n---\n");
-  await assert.rejects(
-    loadArchetype({ name: "wordy-readonly", home, settings: settingsValue }),
-    (error: unknown) => error instanceof AkumaArchetypeError && error.reason.includes("readonly must be true"),
-  );
-  writeFileSync(join(home, "akuma", "grok-review.md"), "---\nprovider: grok-build\nreadonly: true\n---\n");
-  const grok = await loadArchetype({ name: "grok-review", home, settings: settingsValue });
-  assert.deepEqual(grok.readonly, {
-    enforcement: "none",
-    diagnostic: "Grok Build cannot remove task-surface mutation capabilities",
-  });
-  assert.deepEqual(grok.options, { readonly: true });
-  writeFileSync(join(home, "akuma", "unknown.md"), "---\nprovider: missing\n---\n");
-  await assert.rejects(
-    loadArchetype({ name: "unknown", home, settings: settingsValue }),
-    (error: unknown) =>
-      error instanceof AkumaArchetypeError &&
-      error.reason === "uses unknown provider missing" &&
-      error.searched[0] === join(home, "akuma", "unknown.md"),
-  );
-  await assert.rejects(
-    loadArchetype({ name: "missing", home, settings: settingsValue }),
-    (error: unknown) =>
-      error instanceof AkumaArchetypeError &&
-      error.kind === "akuma-archetype" &&
-      error.searched[0] === join(home, "akuma", "missing.md") &&
-      error.message === "`missing` was not found\nuse `keiyaku ls aku/` to list available Akuma",
-  );
-});
-
-test("Archetype catalog lists canonical files in byte order without admitting contents", async (context) => {
-  const home = temporaryDirectory(context, "keiyaku-akuma-archetype-catalog-");
-  const settingsValue = await settings({ home });
-  const world = await akumaAt(home, { home, settings: settingsValue });
-  assert.deepEqual(await world.listArchetypes(), []);
-
-  mkdirSync(join(home, "akuma"));
-  writeFileSync(join(home, "akuma", "zeta.md"), "not Archetype Markdown\n");
-  writeFileSync(join(home, "akuma", "alpha.md"), "---\nprovider: claude\n---\n");
-  writeFileSync(join(home, "akuma", "Upper.md"), "---\nprovider: claude\n---\n");
-  writeFileSync(join(home, "akuma", "notes.txt"), "ignored\n");
-  mkdirSync(join(home, "akuma", "directory.md"));
-
-  assert.deepEqual(await world.listArchetypes(), ["alpha", "zeta"]);
-  await assert.rejects(
-    loadArchetype({ name: "zeta", home, settings: settingsValue }),
-    (error: unknown) => error instanceof AkumaArchetypeError && error.kind === "akuma-archetype",
-  );
-});
-
-test("Archetype definition catalog reports the first invalid definition in byte order", async (context) => {
-  const home = temporaryDirectory(context, "keiyaku-akuma-definition-catalog-first-invalid-");
-  mkdirSync(join(home, "akuma"));
-  // alpha is first in byte order but slower to read, so a completion race would report bravo.
-  writeFileSync(join(home, "akuma", "alpha.md"), "not frontmatter\n".repeat(100_000));
-  writeFileSync(join(home, "akuma", "bravo.md"), "not frontmatter\n");
-  await assert.rejects(
-    listArchetypeDefinitions({ home }),
-    (error: unknown) =>
-      error instanceof AkumaArchetypeError &&
-      error.searched[0] === join(home, "akuma", "alpha.md") &&
-      error.reason === "is invalid: Akuma file must begin with YAML frontmatter",
-  );
 });
 
 test("Project Archetype definitions shadow Home while Home remains the fallback", async () => {

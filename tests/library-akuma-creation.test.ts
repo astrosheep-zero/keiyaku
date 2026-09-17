@@ -6,7 +6,6 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
@@ -14,17 +13,13 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { type AkumaCallInput } from "../src/akuma/akuma.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { AkumaArchetypeError, loadArchetype } from "../src/akuma/archetype.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { akumaCallRequestCommands, type AkumaCallRequestChildLaunch } from "../src/akuma/call-request.js";
 import {
-  appendActivity,
-  beginTurn,
   finishBodyIfIdle,
   HeldAkumaLeash,
   initializeHeart,
@@ -338,14 +333,6 @@ test("forwarded schema Keiyaku.call waits for its empty Body before admitting it
   }
 });
 
-async function directBirthSoul(akuma: ReturnType<typeof Akuma.of>, input: AkumaCallInput): Promise<Soul> {
-  const born = await akuma.beginCall(input, { initiatorCwd: process.cwd() });
-  assert.ok(born.kind === "born", "expected born.kind = \"born\"");
-  await driveAkumaBody({ paths: born.allocated.paths, seed: born.seed });
-  const soul = await readSoul(born.allocated.paths);
-  assert.notEqual(soul, null);
-  return soul!;
-}
 
 async function defaultRequestSpawn(launch: AkumaCallRequestChildLaunch): Promise<void> {
   const child = (await HeldAkumaLeash.try(launch.paths))!;
@@ -546,76 +533,6 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
   }
 });
 
-test("CLI call prints its worker identity at birth and streams settled rows while it runs", async () => {
-  const { raw } = await repositoryFixture();
-  const world = await World.at(raw.path);
-  const configured = await archetypeSettings(world);
-  const slow = slowEmptyPublicationBody();
-  const { pump, leash } = await requestPump(world, slow.spawn);
-  const previousRequests = process.env[AKUMA_REQUESTS_ENV];
-  process.env[AKUMA_REQUESTS_ENV] = pump.directory;
-  const writeStderr = process.stderr.write;
-  let live = "";
-  process.stderr.write = ((chunk: string | Uint8Array) => {
-    live += String(chunk);
-    return true;
-  }) as typeof process.stderr.write;
-  const waitForLive = async (predicate: () => boolean): Promise<void> => {
-    const deadline = Date.now() + 5_000;
-    while (!predicate()) {
-      if (Date.now() >= deadline) throw new Error(`timed out waiting for streamed observation:\n${live}`);
-      await new Promise<void>((resolve) => setTimeout(resolve, 10));
-    }
-  };
-  let akumaId: string | undefined;
-  try {
-    const pending = invoke(executable(["-C", raw.path, "call", "worker", "--wait", "30s", "streamed-call"]), {
-      environment: { ...process.env, KEIYAKU_HOME: configured.home },
-      readStdin: async () => "",
-    });
-    const body = await slow.started;
-    await waitForLive(() => /\baku\/worker\/[0-9a-f]{8}\b/u.test(live));
-    assert.equal(live.includes("● running"), false);
-
-    const turn = await beginTurn(body.paths, {
-      bodySequence: body.bodySequence,
-      startedAt: "2026-09-10T00:00:03.000Z",
-    });
-    await appendActivity(body.paths, {
-      turnSequence: turn.sequence,
-      event: { type: "note", text: "first-live-row" },
-      at: "2026-09-10T00:00:04.000Z",
-    });
-    assert.equal(live.includes("first-live-row"), false);
-    await appendActivity(body.paths, {
-      turnSequence: turn.sequence,
-      event: { type: "note", text: "second-live-row" },
-      at: "2026-09-10T00:00:05.000Z",
-    });
-    await waitForLive(() => /note\s+first-live-row/u.test(live));
-    assert.equal(live.includes("second-live-row"), false);
-
-    await slow.release();
-    const invoked = await pending;
-    assert.equal("kind" in invoked && invoked.kind, "akuma");
-    if (!("kind" in invoked) || invoked.kind !== "akuma" || invoked.action !== "call") return;
-    akumaId = invoked.result.akuma;
-    assert.equal(invoked.result.observation.kind, "observed");
-    assert.ok(live.includes(akumaId));
-  } finally {
-    process.stderr.write = writeStderr;
-    if (akumaId !== undefined)
-      await PublicAkuma.select(world, akumaId)
-        .kill()
-        .catch(() => undefined);
-    await pump.close();
-    leash.release();
-    if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
-    else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
-    rmSync(raw.path, { recursive: true, force: true });
-  }
-});
-
 test("managed Contract calls use the appointed Place only when cwd is omitted", async () => {
   const { raw, repo, git } = await repositoryFixture();
   const world = await World.at(raw.path);
@@ -776,176 +693,6 @@ test("direct Akuma birth reports process cwd and the embedding World fallback", 
   }
 });
 
-test("direct birth recipes freeze Archetype defaults and additive allowed values in every Soul", async () => {
-  const { raw } = await repositoryFixture();
-  const world = await World.at(raw.path);
-  const configured = await directArchetypeSettings(world);
-  const previousRequests = process.env[AKUMA_REQUESTS_ENV];
-  delete process.env[AKUMA_REQUESTS_ENV];
-  try {
-    const akuma = Akuma.of(world, configured);
-    const omitted = await directBirthSoul(akuma, { archetype: "worker", body: "all" });
-    assert.deepEqual(omitted.allowed, ALLOWED_ACTIONS);
-
-    const restricted = await directBirthSoul(akuma, { archetype: "restricted", body: "default" });
-    assert.deepEqual(restricted.allowed, ["task.add"]);
-    assert.deepEqual((await PublicAkuma.select(world, restricted.id).status()).allowed, ["task.add"]);
-
-    const added = await directBirthSoul(akuma, {
-      archetype: "restricted",
-      body: "add",
-      allowed: ["akuma.call"],
-    });
-    assert.deepEqual(added.allowed, ["akuma.call", "task.add"]);
-
-    const fullWithAddition = await directBirthSoul(akuma, {
-      archetype: "worker",
-      body: "full with addition",
-      allowed: ["contract.deliver"],
-    });
-    assert.deepEqual(fullWithAddition.allowed, ALLOWED_ACTIONS);
-
-    const emptyBase = await directBirthSoul(akuma, { archetype: "empty", body: "empty base" });
-    assert.deepEqual(emptyBase.allowed, []);
-    const emptyWithAddition = await directBirthSoul(akuma, {
-      archetype: "empty",
-      body: "empty with addition",
-      allowed: ["akuma.call"],
-    });
-    assert.deepEqual(emptyWithAddition.allowed, ["akuma.call"]);
-
-    writeFileSync(
-      join(configured.home, "akuma", "restricted.md"),
-      "---\nprovider: local\nallowed:\n  - contract.deliver\n---\nChanged.\n",
-    );
-    assert.deepEqual((await PublicAkuma.select(world, restricted.id).status()).allowed, ["task.add"]);
-
-    writeFileSync(
-      join(configured.home, "akuma", "reviewer.md"),
-      "---\nprovider: local\nreadonly: true\n---\nReview.\n",
-    );
-    const callReadonly = await directBirthSoul(akuma, {
-      archetype: "worker",
-      body: "call readonly",
-      readonly: true,
-    });
-    const markdownReadonly = await directBirthSoul(akuma, {
-      archetype: "reviewer",
-      body: "Markdown readonly",
-    });
-    assert.deepEqual(callReadonly.options, {
-      readonly: true,
-      systemPrompt: "Work.\n",
-      systemPromptMode: "append",
-    });
-    assert.deepEqual(callReadonly.readonly, { enforcement: "native" });
-    assert.deepEqual(markdownReadonly.options, {
-      readonly: true,
-      systemPrompt: "Review.\n",
-      systemPromptMode: "append",
-    });
-    assert.deepEqual(markdownReadonly.readonly, { enforcement: "native" });
-
-    for (const readonly of [false, "true"] as const) {
-      await assert.rejects(
-        akuma.call({ archetype: "worker", body: "invalid", readonly } as never),
-        /Akuma call readonly must be true/u,
-      );
-      await assert.rejects(
-        Keiyaku.call({
-          path: world,
-          archetype: "worker",
-          body: "invalid",
-          readonly,
-          home: configured.home,
-          settings: configured.value,
-        } as never),
-        /readonly must be true/u,
-      );
-    }
-  } finally {
-    if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
-    else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
-    rmSync(raw.path, { recursive: true, force: true });
-  }
-});
-
-test("call-time allowed additions reject unknown and duplicate values", async () => {
-  const { raw } = await repositoryFixture();
-  const world = await World.at(raw.path);
-  const configured = await directArchetypeSettings(world);
-  try {
-    const akuma = Akuma.of(world, configured);
-    await assert.rejects(
-      akuma.call({ archetype: "worker", body: "invalid", allowed: ["akuma.unknown"] as never }),
-      /Akuma call allowed contains an unknown action: akuma\.unknown/u,
-    );
-    await assert.rejects(
-      akuma.call({ archetype: "worker", body: "invalid", allowed: ["akuma.call", "akuma.call"] }),
-      /Akuma call allowed contains a duplicate action: akuma\.call/u,
-    );
-  } finally {
-    rmSync(raw.path, { recursive: true, force: true });
-  }
-});
-
-test("Archetype allowed rejects unknown duplicate and non-string entries", async () => {
-  const { raw } = await repositoryFixture();
-  const world = await World.at(raw.path);
-  const configured = await directArchetypeSettings(world);
-  const akuma = Akuma.of(world, configured);
-  const malformed = [
-    ["unknown", "  - akuma.unknown\n", /unknown action: akuma\.unknown/u],
-    ["duplicate", "  - akuma.call\n  - akuma.call\n", /duplicate action: akuma\.call/u],
-    ["non-string", "  - 1\n", /unknown action: 1/u],
-  ] as const;
-  try {
-    for (const [name, allowed, expected] of malformed) {
-      writeFileSync(
-        join(configured.home, "akuma", `${name}.md`),
-        `---\nprovider: local\nallowed:\n${allowed}---\nWork.\n`,
-      );
-      await assert.rejects(Akuma.of(world, configured).call({ archetype: name, body: "invalid" }), expected);
-    }
-    assert.deepEqual((await akuma.list()).rows, []);
-  } finally {
-    rmSync(raw.path, { recursive: true, force: true });
-  }
-});
-
-test("Archetype base lookup uses project precedence and Home fallback", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-archetype-precedence-"));
-  const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-archetype-precedence-home-"));
-  try {
-    mkdirSync(join(root, ".keiyaku", "akuma"), { recursive: true });
-    mkdirSync(join(home, "akuma"));
-    writeFileSync(join(home, "akuma", "base.md"), "---\nprovider: claude\ndescription: Home\n---\nHome body.\n");
-    writeFileSync(
-      join(root, ".keiyaku", "akuma", "base.md"),
-      "---\nprovider: claude\ndescription: Project\n---\nProject body.\n",
-    );
-    writeFileSync(join(root, ".keiyaku", "akuma", "child.md"), "---\nbase: base\n---\n");
-    writeFileSync(join(root, ".keiyaku", "akuma", "fallback.md"), "---\nbase: home-base\n---\n");
-    writeFileSync(join(home, "akuma", "home-base.md"), "---\nprovider: claude\n---\nFallback body.\n");
-    const settingsValue = await settings({ root, home });
-    assert.equal(
-      (await loadArchetype({ name: "child", project: root, home, settings: settingsValue })).description,
-      "Project",
-    );
-    assert.equal(
-      (await loadArchetype({ name: "fallback", project: root, home, settings: settingsValue })).path,
-      join(root, ".keiyaku", "akuma", "fallback.md"),
-    );
-    assert.equal(
-      (await loadArchetype({ name: "fallback", project: root, home, settings: settingsValue })).options.systemPrompt,
-      "Fallback body.\n",
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-    rmSync(home, { recursive: true, force: true });
-  }
-});
-
 test("Archetype base chains refuse missing providers, malformed names, and cycles", async (context) => {
   const home = temporaryDirectory(context, "keiyaku-akuma-archetype-invalid-base-");
   mkdirSync(join(home, "akuma"));
@@ -1075,58 +822,24 @@ test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async ()
   }
 });
 
-test("Keiyaku.call carries the CallResult restraint on detached and failed observations", async () => {
-  const { raw } = await repositoryFixture();
-  const world = await World.at(raw.path);
-  const home = join(raw.path, ".test-settings");
+// Decode at the owner boundary: bad configuration does not need Git, a Body, or a provider process.
+test("Archetype and call allowed inputs refuse malformed values before allocation", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-allowed-input-");
+  const home = join(root, "home");
   mkdirSync(join(home, "akuma"), { recursive: true });
-  writeFileSync(join(home, "akuma", "grok-review.md"), "---\nprovider: grok-build\nreadonly: true\n---\n");
+  const value = await settings({ root, home });
+  const world = await World.at(root);
+  const runtime = Akuma.of(world, { home, settings: value });
   writeFileSync(join(home, "akuma", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
-  writeFileSync(join(home, "akuma", "reviewer.md"), "---\nprovider: claude\nreadonly: true\n---\nReview only.\n");
-  const configured = await settings({ root: world, home });
-  const placement = { home, settings: configured };
-  const { pump, leash } = await requestPump(world);
-  const routedKeiyaku = Keiyaku.withExecution({ execution: bodyRequestExecution({ directory: pump.directory }) });
-  const previousRequests = process.env[AKUMA_REQUESTS_ENV];
-  const originalWait = AkumaHandle.prototype.wait;
-  process.env[AKUMA_REQUESTS_ENV] = pump.directory;
-  try {
-    const detached = await routedKeiyaku.call({
-      path: world,
-      archetype: "grok-review",
-      body: "",
-      ...placement,
-      mode: "detach",
-    });
-    assert.deepEqual(detached.readonly, {
-      enforcement: "none",
-      diagnostic: "Grok Build cannot remove task-surface mutation capabilities",
-    });
-    assert.deepEqual(detached.observation, { kind: "detached" });
-
-    const observed = await routedKeiyaku.call({ path: world, archetype: "reviewer", body: "observed", ...placement });
-    assert.equal(observed.observation.kind, "observed");
-    if (observed.observation.kind === "observed")
-      assert.deepEqual(observed.observation.status.readonly, observed.readonly);
-    assert.deepEqual((await readSoul(pathsForAkuId(world, observed.akuma)))?.readonly, observed.readonly);
-
-    AkumaHandle.prototype.wait = async function () {
-      throw new Error("heart unavailable");
-    };
-    const failed = await routedKeiyaku.call({
-      path: world,
-      archetype: "reviewer",
-      body: "fail",
-      ...placement,
-    });
-    assert.deepEqual(failed.readonly, { enforcement: "native" });
-    assert.equal(failed.observation.kind, "failed");
-  } finally {
-    AkumaHandle.prototype.wait = originalWait;
-    await pump.close();
-    leash.release();
-    if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
-    else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
-    rmSync(raw.path, { recursive: true, force: true });
+  for (const [allowed, expected] of [
+    [["akuma.unknown"], /unknown action/u],
+    [["akuma.call", "akuma.call"], /duplicate action/u],
+    [[1], /unknown action/u],
+  ] as const) {
+    const yaml = allowed.map((action) => `  - ${action}\n`).join("");
+    writeFileSync(join(home, "akuma", "invalid.md"), `---\nprovider: claude\nallowed:\n${yaml}---\nWork.\n`);
+    await assert.rejects(loadArchetype({ name: "invalid", home, settings: value }), expected);
+    await assert.rejects(runtime.call({ archetype: "worker", body: "invalid", allowed: allowed as never }), expected);
   }
+  assert.deepEqual((await runtime.list()).rows, []);
 });

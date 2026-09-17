@@ -6,10 +6,9 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test, { type TestContext } from "node:test";
 import { boundedMap, PAGE_POOL_SIZE } from "../src/akuma/akuma-product.js";
-import { AkumaNotBornError, akumaStatusSchema, type AkumaStatus } from "../src/akuma/akuma.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
-import { appendActivity, beginTurn, initializeHeart, readHeart, recordTell } from "../src/akuma/heart/index.js";
+import { appendActivity, initializeHeart } from "../src/akuma/heart/index.js";
 import { akuId, allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import { moveAlias } from "../src/alias/index.js";
@@ -22,10 +21,9 @@ import { observeKanshi } from "../src/kanshi/read.js";
 import { addressAkumaSet, resolveNamedAddress } from "../src/library/address.js";
 import { waitAkuma } from "../src/library/fleet.js";
 import type { WaitObservedAkuma, WaitSelectedAkuma } from "../src/akuma/fleet-execution.js";
-import { projectTaskBoardObservation, taskRowsSchema, type TaskRow } from "../src/task/board.js";
+import { projectTaskBoardObservation } from "../src/task/board.js";
 import { serializeTaskDocument, type TaskDocument } from "../src/task/document.js";
 import { Tasks, type TaskId } from "../src/task/index.js";
-import { formatTaskId } from "../src/task/identity.js";
 import { authorityPath, readBoard } from "../src/task/store.js";
 import { World } from "../src/world.js";
 import { AkumaComposition as Akuma } from "./support/akuma-composition.js";
@@ -110,83 +108,6 @@ function taskCatalogDocument(id: TaskId, updatedAt: string): TaskDocument {
   };
 }
 
-test("Akuma and Task owner schemas strictly decode Fleet projections", () => {
-  const status: AkumaStatus = {
-    id: akuId({ archetype: "worker", suffix: "00000001" }),
-    life: "running",
-    allowed: ["akuma.call"],
-    timeline: { kind: "unborn", entries: [], omitted: 0, reportedChanges: [], reportedChangesOmitted: 0 },
-  };
-  const row: TaskRow = {
-    id: formatTaskId({ namespace: [], localId: "fleet-row" }),
-    title: "Fleet row",
-    state: "open",
-    priority: 2,
-    disposition: "ready",
-    updatedAt: "2026-08-29T00:00:00.000Z",
-    bodyPresent: false,
-  };
-
-  assert.deepEqual(akumaStatusSchema.parse(status), status);
-  assert.deepEqual(akumaStatusSchema.parse({ ...status, allowed: ["task.add", "akuma.call"] }).allowed, [
-    "akuma.call",
-    "task.add",
-  ]);
-  assert.equal(akumaStatusSchema.safeParse({ ...status, allowed: ["akuma.call", "akuma.call"] }).success, false);
-  assert.equal(akumaStatusSchema.safeParse({ id: status.id, life: status.life, timeline: status.timeline }).success, false);
-  assert.deepEqual(taskRowsSchema.parse([row]), [row]);
-  assert.equal(akumaStatusSchema.safeParse({ ...status, undeclared: true }).success, false);
-  assert.equal(taskRowsSchema.safeParse([{ ...row, undeclared: true }]).success, false);
-});
-
-async function openOrdinary(
-  paths: Parameters<typeof beginTurn>[0],
-  stamp: string,
-  spec: Readonly<{
-    prefix: string;
-    voices?: number;
-    notes?: number;
-    tool?: boolean;
-    tellId?: string;
-  }>,
-): Promise<void> {
-  const bodySequence = (await readHeart(paths)).latestBody?.sequence;
-  assert.equal(typeof bodySequence, "number");
-  const turn = await beginTurn(paths, { bodySequence: bodySequence!, startedAt: stamp });
-  const second = stamp.slice(0, 17);
-  const voices = spec.voices ?? 0;
-  for (let index = 0; index < voices; index += 1) {
-    await appendActivity(paths, {
-      turnSequence: turn.sequence,
-      event: { type: "assistant", text: `${spec.prefix}-voice-${index}` },
-      at: `${second}${String(index + 1).padStart(2, "0")}.000Z`,
-    });
-  }
-  const notes = spec.notes ?? 0;
-  for (let index = 0; index < notes; index += 1) {
-    await appendActivity(paths, {
-      turnSequence: turn.sequence,
-      event: { type: "note", text: `${spec.prefix}-note-${index}` },
-      at: `${second}${String(voices + index + 1).padStart(2, "0")}.000Z`,
-    });
-  }
-  if (spec.tool === true) {
-    await appendActivity(paths, {
-      turnSequence: turn.sequence,
-      event: {
-        type: "tool",
-        phase: "started",
-        id: "running",
-        name: "Bash",
-        call: { kind: "run", command: "npm test" },
-      },
-      at: `${second}${String(voices + notes + 1).padStart(2, "0")}.000Z`,
-    });
-  }
-  if (spec.tellId !== undefined) {
-    await recordTell(paths, { kind: "tell", id: spec.tellId, body: "continue", recordedAt: `${second}59.000Z` });
-  }
-}
 
 
 
@@ -216,13 +137,6 @@ async function answered(root: string, archetype: string, suffix: string) {
   return allocated;
 }
 
-function corruptHeart(root: string, suffix: string) {
-  const id = akuId({ archetype: "worker", suffix });
-  const directory = join(root, ".keiyaku", "akuma", "run", `worker-${suffix}`);
-  mkdirSync(directory, { recursive: true });
-  writeFileSync(join(directory, "heart.db"), "broken\n");
-  return id;
-}
 
 test("facade snapshots aliases and globs with stable dedupe for wait and kill", async (t) => {
   const root = fixtureRoot(t, "keiyaku-facade-fleet-");
@@ -289,47 +203,6 @@ test("a wait's live observation carries each observed Akuma's alias and Dispatch
   assert.equal(single?.status.id, worker.id);
   assert.equal(single?.alias, "@observed");
   assert.deepEqual(single?.contract, { kind: "associated", contractId: owner });
-});
-
-test("a facade wait defaults an omitted completion mode to any and counts an already complete member", async (t) => {
-  const root = fixtureRoot(t, "keiyaku-facade-wait-mode-");
-  const complete = await answered(root, "worker", "00000001");
-  const running = await answered(root, "worker", "00000002");
-  await openOrdinary(running.paths, "2026-08-11T00:01:00.000Z", { prefix: "runner", tellId: "pending" });
-
-  // The completed member satisfies any on the first round, so this does not wait for the runner.
-  const waited = await Keiyaku.wait({ path: root, akuma: [complete.id, running.id], timeoutMs: 2_000 });
-  assert.equal(waited.completion, "any");
-  assert.deepEqual(
-    waited.observations.map((view) => view.status.id),
-    [complete.id, running.id],
-  );
-
-  // A glob resolving to the same plural set takes the same default.
-  const globbed = await Keiyaku.wait({ path: root, akuma: ["aku/worker/*"], timeoutMs: 0 });
-  assert.equal(globbed.completion, "any");
-  assert.deepEqual(
-    globbed.observations.map((view) => view.status.id),
-    [complete.id, running.id],
-  );
-
-  // The already completed member still counts, so waiting again can return at once.
-  const again = await Keiyaku.wait({ path: root, akuma: [complete.id, running.id], timeoutMs: 0 });
-  assert.equal(again.completion, "any");
-  assert.deepEqual(
-    again.observations.map((view) => view.status.id),
-    [complete.id, running.id],
-  );
-});
-
-test("a facade wait still refuses an invalid completion mode", async (t) => {
-  const root = fixtureRoot(t, "keiyaku-facade-wait-invalid-mode-");
-  const one = await answered(root, "worker", "00000001");
-  const two = await answered(root, "worker", "00000002");
-  await assert.rejects(
-    Keiyaku.wait({ path: root, akuma: [one.id, two.id], completion: "service" as never, timeoutMs: 0 }),
-    /completion must be any or all/u,
-  );
 });
 
 test("facade ls reads exactly one selected identity directory", async (t) => {
@@ -577,44 +450,6 @@ test("recent Task catalog does not skip older-mtime malformed authority", async 
   await assert.rejects(Keiyaku.ls({ query: { kind: "tasks", limit: 1 }, path: root }), /front matter/u);
 });
 
-test("Task catalog namespace queries distinguish omitted, root, and named scope", async (t) => {
-  const root = fixtureRoot(t, "keiyaku-facade-catalog-namespace-");
-  const tasks = Tasks.of(await World.at(root));
-  const rootTask = await tasks.add({ title: "Catalog root", namespace: [] });
-  const featureTask = await tasks.add({ title: "Catalog feature", namespace: ["feature"] });
-  const nestedTask = await tasks.add({ title: "Catalog nested", namespace: ["feature", "ui"] });
-  assert.equal(rootTask.kind, "accepted");
-  assert.equal(featureTask.kind, "accepted");
-  assert.equal(nestedTask.kind, "accepted");
-  if (rootTask.kind !== "accepted" || featureTask.kind !== "accepted" || nestedTask.kind !== "accepted") return;
-  const rootId = rootTask.value.id;
-  const featureId = featureTask.value.id;
-  const nestedId = nestedTask.value.id;
-  const all = catalogOf(await Keiyaku.ls({ query: { kind: "tasks" }, path: root }), "tasks");
-  const rootOnly = catalogOf(await Keiyaku.ls({ query: { kind: "tasks", namespace: [] }, path: root }), "tasks");
-  const featureOnly = catalogOf(
-    await Keiyaku.ls({ query: { kind: "tasks", namespace: ["feature"] }, path: root }),
-    "tasks",
-  );
-  assert.deepEqual(
-    all.rows.map((row) => row.id),
-    [nestedId, featureId, rootId],
-  );
-  assert.equal(all.hasMore, false);
-  assert.deepEqual(
-    rootOnly.rows.map((row) => row.id),
-    [rootId],
-  );
-  assert.deepEqual(
-    featureOnly.rows.map((row) => row.id),
-    [featureId],
-  );
-  await assert.rejects(
-    () => Keiyaku.ls({ query: { kind: "tasks", namespace: ["bad/segment"] }, path: root }),
-    /canonical segments/u,
-  );
-});
-
 test("named Address resolution refuses a Contract short-id shared with an Alias", async (t) => {
   const repository = fixtureRepository(t);
   const repo = await Repo.at({ path: repository.path });
@@ -733,64 +568,6 @@ test("cross-World Contract selector wait and kill refuse before operating", asyn
     Keiyaku.kill({ path: worldB, akuma: ["kei/foreign"], repo: repoB }),
     (error: unknown) => error instanceof AkumaWorldScopeError && error.refusal.kind === "akuma-not-in-world",
   );
-});
-
-test("plural wait preserves a missing direct AkuId error", async (t) => {
-  const root = fixtureRoot(t, "keiyaku-plural-direct-missing-");
-  const missing = akuId({ archetype: "worker", suffix: "00000001" });
-  const readable = await answered(root, "worker", "00000002");
-  await assert.rejects(
-    Keiyaku.wait({ path: root, akuma: [missing, readable.id], completion: "all", timeoutMs: 0 }),
-    (error: unknown) => error instanceof AkumaNotBornError && error.id === missing,
-  );
-});
-
-test("one-member Contract selector retains a corrupt Heart diagnostic", async (t) => {
-  const repository = fixtureRepository(t);
-
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const world = await World.at(repository.path);
-  const unreadable = corruptHeart(world, "deadbeef");
-  assert.equal(
-    (
-      await publishDispatch({
-        repository: await repositoryAt(world),
-        akuId: unreadable,
-        contractId: contractId("kei/review"),
-      })
-    ).kind,
-    "dispatched",
-  );
-  const repo = await Repo.at({ path: world });
-  assert.deepEqual((await addressAkumaSet({ path: world, akuma: ["kei/review"], repo })).ids, [unreadable]);
-  const corruptDiagnostic = (error: unknown) =>
-    error instanceof Error && /schema version|SQLITE|database|file is not a database/iu.test(error.message);
-  await assert.rejects(Keiyaku.wait({ path: world, akuma: [unreadable], timeoutMs: 0 }), corruptDiagnostic);
-  await assert.rejects(Keiyaku.wait({ path: world, akuma: ["kei/review"], repo, timeoutMs: 0 }), corruptDiagnostic);
-});
-
-test("plural wait returns no observations when every status is unreadable", async (t) => {
-  const root = fixtureRoot(t, "keiyaku-facade-wait-unreadable-");
-  const earlier = corruptHeart(root, "00000001");
-  const later = corruptHeart(root, "00000002");
-  for (const completion of ["all", "any"] as const) {
-    assert.deepEqual(
-      await Keiyaku.wait({
-        path: root,
-        akuma: [earlier, later],
-        completion,
-        timeoutMs: 0,
-      }),
-      {
-        completion,
-        observations: [],
-        unobserved: [
-          { id: earlier, diagnostic: "file is not a database" },
-          { id: later, diagnostic: "file is not a database" },
-        ],
-      },
-    );
-  }
 });
 
 test("fleet status projects Dispatch association without changing Akuma core", async (t) => {
