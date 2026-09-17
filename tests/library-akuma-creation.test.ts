@@ -416,7 +416,7 @@ test("package-root World inputs reject a forged JavaScript coordinate before eff
   assert.equal(existsSync(join(root, ".keiyaku", "akuma")), false);
 });
 
-test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () => {
+test("Keiyaku.call preserves dispatch, alias failure, and managed versus explicit cwd", async () => {
   const { raw, repo, git } = await repositoryFixture();
   const world = await World.at(raw.path);
   const configured = await archetypeSettings(world);
@@ -439,25 +439,13 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
 
     const bound = await Keiyaku.bind({ repo, markdown: markdown("Akuma dispatch"), workspace: "worktree" });
     const owner = (await bound.keiyaku.state()).id;
+    const appointment = await readManagedWorktreeAppointment(git, owner);
+    assert.ok(appointment.kind === "appointed", 'expected appointment.kind = "appointed"');
     const alias = parseAkumaAlias("@worker");
     const executionCwd = join(raw.path, "nested-worktree");
     mkdirSync(executionCwd);
     const invoked = await invoke(
-      executable([
-        "-C",
-        executionCwd,
-        "call",
-        "worker",
-        "--repo",
-        "..",
-        "--contract",
-        owner,
-        "--workdir",
-        ".",
-        "--alias",
-        alias,
-        "-",
-      ]),
+      executable(["-C", executionCwd, "call", "worker", "--repo", "..", "--contract", owner, "--alias", alias, "-"]),
       {
         environment: { ...process.env, KEIYAKU_HOME: configured.home },
         readStdin: async () => "associated",
@@ -474,8 +462,8 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
       previous: null,
     });
     assert.equal(associated.observation.kind, "observed");
-    assert.deepEqual(associated.execution, { cwd: realpathSync(executionCwd), source: "input" });
-    assert.equal((await readSoul(pathsForAkuId(world, associated.akuma)))?.cwd, realpathSync(executionCwd));
+    assert.deepEqual(associated.execution, { cwd: appointment.path, source: "contract-worktree" });
+    assert.equal((await readSoul(pathsForAkuId(world, associated.akuma)))?.cwd, appointment.path);
 
     writeFileSync(join(raw.path, ".keiyaku", "akuma", "alias.json"), "broken\n");
     const partial = await routedKeiyaku.call({
@@ -491,6 +479,8 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
     assert.equal(partial.alias.kind, "failed");
     assert.equal(partial.observation.kind, "observed");
     assert.notEqual(await readDispatch(git, partial.akuma), null);
+    assert.deepEqual(partial.execution, { cwd: realpathSync(executionCwd), source: "input" });
+    assert.equal((await readSoul(pathsForAkuId(world, partial.akuma)))?.cwd, realpathSync(executionCwd));
 
     const detached = await routedKeiyaku.call({
       path: world,
@@ -500,14 +490,6 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
       mode: "detach",
     });
     assert.deepEqual(detached.observation, { kind: "detached" });
-    const routed = await routedKeiyaku.call({
-      path: world,
-      archetype: "worker",
-      body: "routed",
-      ...configured.placement,
-      mode: "detach",
-    });
-    assert.deepEqual(routed.observation, { kind: "detached" });
     await assert.rejects(
       routedKeiyaku.call({
         path: world,
@@ -519,55 +501,6 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
       }),
       /timeoutMs is not valid in detach mode/u,
     );
-  } finally {
-    await pump.close();
-    leash.release();
-    if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
-    else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
-    rmSync(raw.path, { recursive: true, force: true });
-  }
-});
-
-test("managed Contract calls use the appointed Place only when cwd is omitted", async () => {
-  const { raw, repo, git } = await repositoryFixture();
-  const world = await World.at(raw.path);
-  const configured = await archetypeSettings(world);
-  const { pump, leash } = await requestPump(world);
-  const previousRequests = process.env[AKUMA_REQUESTS_ENV];
-  process.env[AKUMA_REQUESTS_ENV] = pump.directory;
-  try {
-    const managed = await Keiyaku.bind({
-      repo,
-      markdown: markdown("Implicit Contract cwd"),
-      workspace: "worktree",
-      hooks: { create: [], destroy: [] },
-    });
-    const managedId = (await managed.keiyaku.state()).id;
-    const appointment = await readManagedWorktreeAppointment(git, managedId);
-    assert.ok(appointment.kind === "appointed", 'expected appointment.kind = "appointed"');
-
-    const invoked = await invoke(executable(["-C", ".", "call", "worker", "--contract", managedId, "-"]), {
-      cwd: raw.path,
-      environment: { ...process.env, KEIYAKU_HOME: configured.home },
-      readStdin: async () => "implicit",
-    });
-    assert.ok("kind" in invoked && invoked.kind === "akuma" && invoked.action === "call");
-    const implicit = invoked.result;
-    assert.deepEqual(implicit.execution, { cwd: appointment.path, source: "contract-worktree" });
-    assert.equal((await readSoul(pathsForAkuId(world, implicit.akuma)))?.cwd, appointment.path);
-
-    const explicit = await Keiyaku.call({
-      path: world,
-      archetype: "worker",
-      body: "explicit",
-      cwd: world,
-      ...configured.placement,
-      contract: managed.keiyaku,
-    });
-    assert.deepEqual(explicit.execution, { cwd: world, source: "input" });
-    assert.equal((await readSoul(pathsForAkuId(world, explicit.akuma)))?.cwd, world);
-
-    await managed.keiyaku.abandon({ hooks: { create: [], destroy: [] } });
   } finally {
     await pump.close();
     leash.release();

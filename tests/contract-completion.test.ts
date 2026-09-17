@@ -65,7 +65,7 @@ test("review before delivery records one leading fact and delivery later claims 
   assert.equal(delivered.head, state.head);
 });
 
-test("review after delivery uses the same completion node without replaying delivery facts", async () => {
+test("review after delivery can reject then complete without replaying delivery facts", async () => {
   const { contract } = await fixture();
   const delivered = await contract.deliver();
   assert.ok(delivered.kind === "accepted", 'expected delivered.kind = "accepted"');
@@ -74,6 +74,15 @@ test("review after delivery uses the same completion node without replaying deli
     delivered.facts.map((fact) => fact.kind),
     ["bound", "deliver"],
   );
+  const rejected = await contract.review({ verdict: "unsatisfied", summary: "not accepted" });
+  assert.deepEqual(
+    rejected.facts.map((fact) => fact.kind),
+    ["attestation"],
+  );
+  assert.equal(rejected.value.completion, undefined);
+  assert.equal(rejected.value.placement, undefined);
+  assert.equal((await contract.state()).terminal, null);
+
   const review = await contract.review({ verdict: "satisfied" });
   assert.deepEqual(
     review.facts.map((fact) => fact.kind),
@@ -81,19 +90,6 @@ test("review after delivery uses the same completion node without replaying deli
   );
   assert.ok(review.value.completion);
   assert.equal(review.head, (await contract.state()).head);
-});
-
-test("an unsatisfied review never requests trailing placement", async () => {
-  const { contract } = await fixture();
-  await contract.deliver();
-  const review = await contract.review({ verdict: "unsatisfied", summary: "not accepted" });
-  assert.deepEqual(
-    review.facts.map((fact) => fact.kind),
-    ["attestation"],
-  );
-  assert.equal(review.value.completion, undefined);
-  assert.equal(review.value.placement, undefined);
-  assert.equal((await contract.state()).terminal, null);
 });
 
 test("automatic dependent completion reports a Verification stop without placing", async () => {

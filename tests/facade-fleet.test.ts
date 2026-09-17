@@ -1,6 +1,15 @@
 import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
-import { constants, copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  constants,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -133,7 +142,10 @@ test("Akuma and Task owner schemas strictly decode Fleet projections", () => {
     "task.add",
   ]);
   assert.equal(akumaStatusSchema.safeParse({ ...status, allowed: ["akuma.call", "akuma.call"] }).success, false);
-  assert.equal(akumaStatusSchema.safeParse({ id: status.id, life: status.life, timeline: status.timeline }).success, false);
+  assert.equal(
+    akumaStatusSchema.safeParse({ id: status.id, life: status.life, timeline: status.timeline }).success,
+    false,
+  );
   assert.deepEqual(taskRowsSchema.parse([row]), [row]);
   assert.equal(akumaStatusSchema.safeParse({ ...status, undeclared: true }).success, false);
   assert.equal(taskRowsSchema.safeParse([{ ...row, undeclared: true }]).success, false);
@@ -187,9 +199,6 @@ async function openOrdinary(
     await recordTell(paths, { kind: "tell", id: spec.tellId, body: "continue", recordedAt: `${second}59.000Z` });
   }
 }
-
-
-
 
 async function answered(root: string, archetype: string, suffix: string) {
   const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype, draw: () => suffix });
@@ -434,7 +443,8 @@ test("recent Akuma page prunes old custody bounds without changing Heart members
   const old = new Date("2000-01-01T00:00:00.000Z");
   const originalPrepare = DatabaseSync.prototype.prepare;
   let template: Parameters<typeof initializeHeart>[0] | undefined;
-  const oldCount = 490;
+  // Fifty-one members cross the default page boundary without a 501-database stress fixture.
+  const oldCount = 40;
   try {
     const oldIds = [];
     for (let index = 0; index < oldCount; index += 1) {
@@ -466,10 +476,13 @@ test("recent Akuma page prunes old custody bounds without changing Heart members
     };
     const world = Akuma.of(await World.at(root));
     const page = await world.list({ limit: 10 });
+    const pageReads = prepareCalls;
+    prepareCalls = 0;
+    const complete = await world.listComplete();
+    const completeReads = prepareCalls;
     DatabaseSync.prototype.prepare = originalPrepare;
     const defaultPage = await world.list();
     const maximumPage = await world.list({ limit: 500 });
-    const complete = await world.listComplete();
     const reference = complete.rows.map((row) => row.id);
     const completeGlob = await addressAkumaSet({ path: root, akuma: ["aku/*/*"] });
 
@@ -496,14 +509,15 @@ test("recent Akuma page prunes old custody bounds without changing Heart members
         .slice(0, 10)
         .map((row) => row.id),
     );
-    assert.ok(prepareCalls < 500, `expected a bounded Heart read pool, received ${prepareCalls} database prepares`);
+    assert.ok(pageReads > 0, "the page must read actual Hearts");
+    assert.ok(pageReads < completeReads, `page reads ${pageReads} must prune the full ${completeReads} reads`);
     assert.equal(defaultPage.rows.length, 50);
     assert.equal(defaultPage.hasMore, true);
     assert.deepEqual(
       maximumPage.rows.map((row) => row.id),
       reference.slice(0, 500),
     );
-    assert.equal(maximumPage.hasMore, true);
+    assert.equal(maximumPage.hasMore, false);
   } finally {
     DatabaseSync.prototype.prepare = originalPrepare;
     rmSync(root, { recursive: true, force: true });
