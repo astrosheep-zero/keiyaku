@@ -346,10 +346,15 @@ async function waitUntilLatestBody(
 }
 
 async function expectBodySettles(body: Promise<unknown>, message: string, timeoutMs = 5_000): Promise<void> {
-  await Promise.race([
-    body,
-    new Promise<never>((_, reject) => setTimeout(() => reject(new Error(message)), timeoutMs)),
-  ]);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      body,
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(message)), timeoutMs); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function eventually(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
@@ -1259,10 +1264,7 @@ test("pause aborts stalled provider setup and records clean Body settlement", as
     const current = (await readHeart(allocated.paths)).latestBody!;
     const requestedAt = performance.now();
     await requestPause(allocated.paths, "2026-08-08T00:00:01.000Z");
-    await Promise.race([
-      body,
-      new Promise((_, reject) => setTimeout(() => reject(new Error("Body did not abort stalled setup")), 500)),
-    ]);
+    await expectBodySettles(body, "Body did not abort stalled setup", 500);
     assert.ok(performance.now() - requestedAt < CONTROL_RESPONSE_MS);
     assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, current.sequence);
     assert.equal((await readHeart(allocated.paths)).latestBody?.end, "put-down");
@@ -1329,12 +1331,7 @@ test("pause interrupts pre-drive reserved-request recovery", async () => {
       ]);
       const requestedAt = performance.now();
       await requestPause(allocated.paths, new Date().toISOString());
-      await Promise.race([
-        body,
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Body did not interrupt request settlement")), 500),
-        ),
-      ]);
+      await expectBodySettles(body, "Body did not interrupt request settlement", 500);
       assert.ok(performance.now() - requestedAt < CONTROL_RESPONSE_MS);
       assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, current.sequence);
       assert.equal((await readHeart(allocated.paths)).latestBody?.end, "put-down");
@@ -1486,10 +1483,7 @@ test("provider closure failure enters Body supervision before session completion
     await waitUntilLatestBody(allocated.paths, body);
     await started;
     rejectClosed(new Error("provider resource close failed"));
-    await Promise.race([
-      body,
-      new Promise((_, reject) => setTimeout(() => reject(new Error("Body did not supervise provider closure")), 1_000)),
-    ]);
+    await expectBodySettles(body, "Body did not supervise provider closure", 1_000);
     const heart = await readHeart(allocated.paths);
     assert.deepEqual(heart.latestBody?.hung, {
       diagnostic: "provider resource close failed",
