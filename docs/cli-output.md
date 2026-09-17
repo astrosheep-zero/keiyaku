@@ -61,7 +61,9 @@ vocabulary. The horizontal rule is a run of U+2500 `─` whose length equals the
 terminal-column width of the frame head's widest line, structure rather
 than decoration, with one blessed use: it is the boundary of an observation frame between that frame's
 identity and its content, and content otherwise stays mark-and-fact based. A
-Contract association inside a frame head renders as `└─ kei/<id>`. Git identities render at 7 characters in
+Contract association inside one target's identity head renders as `└─ kei/<id>`; a
+plural head is a list of its targets instead and keeps the same association
+inline, as `· kei/<id>`. Git identities render at 7 characters in
 text and full length in JSON. Paths stay absolute and copyable where they are
 the answer, and stay out of board and catalogue rows where they are not.
 Absent facts are absent rows; zero counts and empty containers print nothing.
@@ -197,11 +199,12 @@ A single-target wait's stream opens with that Akuma's identity frame before
 any row — carrying the alias currently addressing it and the Contract
 association it holds — and an already settled Akuma prints that frame while
 replaying no backlog. A wait observing more than one Akuma instead opens one
-aggregate frame for its selected set before any activity row, naming each
-selected target by the alias addressing it, otherwise its complete identity,
-adding that target's `└─ kei/<contract>` association line when it holds one,
-and closes that head with a single rule; no per-target identity frame follows
-it during observation. The aggregate head and its conclusion scoreboard follow
+aggregate frame for its selected set before any activity row: that head is a
+list of the set, one line per selected target, each named by the alias
+addressing it, otherwise its complete identity, with its `· kei/<contract>`
+association inline when it holds one and nothing after its label when it does
+not, closed by one rule; no per-target identity frame follows it during
+observation. The aggregate head and its conclusion scoreboard follow
 the order the caller selected the targets, and a target is named the same way
 in the head, the diagnostics, and the scoreboard. The wait ends with one
 conclusion row per observed Akuma, attributed to its source the same way the

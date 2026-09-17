@@ -688,18 +688,16 @@ function registerWaitSource(
 }
 
 /**
- * The one aggregate head a plural wait prints before any activity row: each
- * selected target named by the alias addressing it, otherwise its complete
- * identity, with its `└─ kei/<contract>` association line when one exists,
- * closed by the frame's single rule.
+ * The one aggregate head a plural wait prints before any activity row: the
+ * selected set read as a list, each target on its own line named by the alias
+ * addressing it, otherwise its complete identity, with its `· kei/<contract>`
+ * association inline when one exists, all closed by the frame's single rule.
  */
 function aggregateHeading(state: WaitObservationStreamState): readonly string[] {
-  const head: string[] = [];
-  for (const [id, label] of state.sources) {
-    head.push(label);
+  const head = [...state.sources].map(([id, label]) => {
     const contractId = associatedContractId(state.contracts.get(id) ?? { kind: "none" });
-    if (contractId !== undefined) head.push(`└─ ${contractId}`);
-  }
+    return contractId === undefined ? label : `${label} · ${contractId}`;
+  });
   return [...head, frameRule(head)];
 }
 

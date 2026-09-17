@@ -2270,7 +2270,7 @@ test("a streamed multi-target wait scoreboards without a count while a non-strea
   );
 });
 
-test("a plural aggregate head carries each selected target's Contract association", () => {
+test("a plural aggregate head reads its selected set as one line per target with the association inline", () => {
   const first = "aku/worker/abcd0040";
   const second = "aku/worker/abcd0041";
   const running = (id: string) =>
@@ -2281,12 +2281,15 @@ test("a plural aggregate head carries each selected target's Contract associatio
     { id: first, alias: parseAkumaAlias("@a"), contract: association },
     { id: second, contract: { kind: "none" } },
   ]);
-  const head = ["@a", "└─ kei/alpha", second];
+  const head = ["@a · kei/alpha", second];
+  const opening = stream.observe([observed(running(first), { alias: parseAkumaAlias("@a"), contract: association })]);
   assert.deepEqual(
-    stream.observe([observed(running(first), { alias: parseAkumaAlias("@a"), contract: association })]),
+    opening,
     [...head, frameRule(head)],
-    "each target keeps one identity line and its association line under one rule",
+    "each target keeps one line, association inline, under one rule",
   );
+  assert.doesNotMatch(opening.join("\n"), /└─/u, "the plural head is a list, not stacked title cards");
+  assert.ok(opening.includes(second), "an unassociated target carries no dangling separator");
 });
 
 test("a plural wait keeps the caller's selection order in its head and scoreboard", () => {
