@@ -1,4 +1,4 @@
-name: Publish and measure representative test coverage
+name: Publish native test workers
 on:
   push:
     branches: [test-diet/publish-20260918]
@@ -8,28 +8,25 @@ jobs:
   publish:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    outputs:
-      candidate: ${{ steps.publish.outputs.candidate }}
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - name: Reconstruct checked test-only tree
-        id: publish
+      - name: Reconstruct exact reviewed test runner tree
         shell: bash
         run: |
-          cp .test-diet-publish/batch7.json /tmp/test-diet-batch7.json
+          cp .test-diet-publish/batch8.json /tmp/test-diet-batch8.json
           git config user.name 'Test Diet'
           git config user.email 'test-diet@example.invalid'
-          git checkout --detach 7aedb4b98d59295d7c2117deff48a7048e3d19a0
+          git checkout --detach ec5bf0a5221bdc4238c112486c6946da0125be27
           python3 - <<'PY'
-          import json, pathlib, subprocess
-          recipe = json.loads(pathlib.Path('/tmp/test-diet-batch7.json').read_text())
+          import json, pathlib
+          recipe = json.loads(pathlib.Path('/tmp/test-diet-batch8.json').read_text())
           inputs = {}
           def safe(path):
               p = pathlib.PurePosixPath(path)
-              if not path.startswith('tests/') or '..' in p.parts or p.is_absolute():
-                  raise SystemExit('Only test paths allowed')
+              if (not path.startswith('tests/') and path != 'scripts/run-tests.mjs') or '..' in p.parts or p.is_absolute():
+                  raise SystemExit('Unexpected output path')
               return path
           for path, pieces in recipe.items():
               safe(path)
@@ -46,92 +43,14 @@ jobs:
                   source, start, end, indentation = piece
                   lines = inputs[source or path]
                   if not 0 <= start <= end <= len(lines):
-                      raise SystemExit('Invalid span')
+                      raise SystemExit('Invalid source span')
                   for line in lines[start:end]:
                       output.append(line if not line.strip() else (' ' * indentation + line if indentation >= 0 else line[-indentation:]))
               pathlib.Path(path).write_text(''.join(output))
           PY
-          git add tests
+          git add tests scripts/run-tests.mjs
           git diff --cached --check
-          test "$(git write-tree)" = f3dffb3d45ca12e68eb2612b9bb7ad4ebd049f74
-          test -z "$(git ls-remote --heads origin refs/heads/test-diet/07-representative-integration)"
-          git commit -m 'test: focus expensive integration coverage on representative owner boundaries'
-          git push origin HEAD:refs/heads/test-diet/07-representative-integration
-          echo "candidate=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-  benchmark:
-    needs: publish
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-          ref: ${{ needs.publish.outputs.candidate }}
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24.x
-          cache: npm
-      - uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: 0.14.1
-      - run: npm ci --ignore-scripts --prefer-offline
-      - name: Configure fixture identity and validate candidate types
-        run: |
-          git config --global user.name 'Keiyaku CI'
-          git config --global user.email 'keiyaku-ci@example.invalid'
-          npm run test:typecheck
-          npm run lint
-          npm run build
-      - name: Alternate complete baseline and candidate trials
-        env:
-          CANDIDATE: ${{ needs.publish.outputs.candidate }}
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          import json, os, pathlib, re, signal, statistics, subprocess, time
-          output = pathlib.Path('/tmp/test-diet-measurement'); output.mkdir(exist_ok=True)
-          baseline = 'bc1b478d8738d546e32e73790ab53565dc7cffc0'
-          candidate = os.environ['CANDIDATE']
-          rows = []
-          metadata = {'baseline': baseline, 'candidate': candidate, 'node': subprocess.check_output(['node','--version'], text=True).strip(), 'cpus': os.cpu_count(), 'command':'npm test', 'compiler_cache':'equally warm; every trial rebuilds; no result cache'}
-          for label, trial in [('baseline',1),('candidate',1),('candidate',2),('baseline',2),('baseline',3),('candidate',3)]:
-              subprocess.run(['git','checkout','--detach',baseline if label == 'baseline' else candidate],check=True)
-              name = f'{label}-{trial}'
-              started = time.monotonic()
-              with (output / f'{name}.log').open('w') as log:
-                  child = subprocess.Popen(['npm','test'], stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
-                  expired = False
-                  try:
-                      status = child.wait(timeout=240)
-                  except subprocess.TimeoutExpired:
-                      expired = True
-                      os.killpg(child.pid, signal.SIGTERM)
-                      try: child.wait(timeout=5)
-                      except subprocess.TimeoutExpired:
-                          os.killpg(child.pid, signal.SIGKILL); child.wait()
-                      status = 124
-              text = (output / f'{name}.log').read_text()
-              match = re.search(r'\[test:release\] tests (\d+) status=(\d+)', text)
-              rows.append({'variant':label,'trial':trial,'wall_seconds':round(time.monotonic()-started,3),'tests_seconds':int(match[1])/1000 if match else None,'status':status,'timed_out':expired,'full_test_phase':bool(match),'failed_files':re.findall(r'FAIL (\S+)',text)})
-              (output/'results.json').write_text(json.dumps({'environment':metadata,'runs':rows},indent=2))
-              print(json.dumps(rows[-1]),flush=True)
-              subprocess.run(['git','diff','--check'],check=True)
-              if expired:
-                  print('Timeout is not speed evidence; stop instead of benchmarking alongside leaked workers.',flush=True)
-                  break
-          valid = len(rows)==6 and all(row['status']==0 and row['tests_seconds'] is not None for row in rows)
-          summary = {'valid_successful_pairs': valid}
-          if valid:
-              medians = {label:{metric:statistics.median(row[metric] for row in rows if row['variant']==label) for metric in ['wall_seconds','tests_seconds']} for label in ['baseline','candidate']}
-              summary.update({'medians':medians,'reduction_percent':{metric:round(100*(1-medians['candidate'][metric]/medians['baseline'][metric]),2) for metric in ['wall_seconds','tests_seconds']}})
-          (output/'summary.json').write_text(json.dumps(summary,indent=2))
-          print(json.dumps(summary),flush=True)
-          PY
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: test-diet-batch7-measurement
-          path: /tmp/test-diet-measurement/
-          retention-days: 7
+          test "$(git write-tree)" = bacad91c9a64c06d53bcac3fee14f0e9514bc639
+          test -z "$(git ls-remote --heads origin refs/heads/test-diet/08-native-test-workers)"
+          git commit -m 'test: remove nested worker forks and repeated fixture TypeScript loaders'
+          git push origin HEAD:refs/heads/test-diet/08-native-test-workers
