@@ -1,4 +1,4 @@
-name: Test audit source snapshot
+name: Test audit baseline environment
 
 on:
   push:
@@ -9,18 +9,47 @@ permissions:
   contents: read
 
 jobs:
-  snapshot:
+  baseline:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
         with:
           ref: bc1b478d8738d546e32e73790ab53565dc7cffc0
           persist-credentials: false
-      - name: Archive the pinned public source for test analysis
-        run: git archive --format=tar.gz --output=keiyaku-baseline.tar.gz HEAD
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24.x
+          cache: npm
+      - uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.14.1
+      - run: npm ci --ignore-scripts --prefer-offline
+      - name: Archive locked dependencies and Node for offline test audit
+        run: |
+          mkdir -p /tmp/keiyaku-test-tools
+          cp "$(command -v node)" /tmp/keiyaku-test-tools/node
+          tar -czf keiyaku-test-tools.tar.gz -C /tmp keiyaku-test-tools
+          tar -czf keiyaku-test-dependencies.tar.gz node_modules
       - uses: actions/upload-artifact@v4
         with:
-          name: keiyaku-test-audit-baseline-source
-          path: keiyaku-baseline.tar.gz
+          name: keiyaku-test-audit-environment
+          path: |
+            keiyaku-test-tools.tar.gz
+            keiyaku-test-dependencies.tar.gz
+          compression-level: 0
+          retention-days: 1
+      - name: Measure pinned baseline
+        run: |
+          git config --global user.name 'Keiyaku CI'
+          git config --global user.email 'keiyaku-ci@example.invalid'
+          /usr/bin/time -p npm test 2>&1 | tee /tmp/keiyaku-baseline.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: keiyaku-test-audit-baseline-results
+          path: |
+            /tmp/keiyaku-baseline.log
+            .test-logs/
+          include-hidden-files: true
           retention-days: 1
