@@ -1,8 +1,35 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, globSync, statSync } from "node:fs";
+import { existsSync, globSync, mkdirSync, mkdtempSync, statSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { TEST_MANIFESTS } from "./test-manifests.mjs";
 
 const DEFAULT_TEST_PATTERNS = ["tests/**/*.test.ts", "tests/maintainability.test.js"];
+const STILL_RUNNING_THRESHOLD_MS = 60_000;
+const STILL_RUNNING_INTERVAL_MS = 60_000;
+
+/** @param {string | undefined} value @param {number} fallback @returns {number} */
+function positiveMilliseconds(value, fallback) {
+  if (value === undefined) return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+/** @param {number} milliseconds @returns {string} */
+function formatElapsed(milliseconds) {
+  const total = Math.max(0, Math.round(milliseconds));
+  if (total < 1000) return `${total}ms`;
+  const seconds = total / 1000;
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m${String(Math.round(seconds - minutes * 60)).padStart(2, "0")}s`;
+}
+
+/** A fresh directory under the stable, gitignored parent that owns per-file logs. @returns {string} */
+function makeSweepLogDirectory() {
+  const parent = resolve(".test-logs");
+  mkdirSync(parent, { recursive: true });
+  return mkdtempSync(join(parent, "sweep-"));
+}
 
 const compiled = process.argv.includes("--compiled");
 const supplied = process.argv.slice(2).filter((argument) => argument !== "--compiled");
@@ -98,29 +125,73 @@ const started = performance.now();
 // child through terminal settlement. The embedded node:test runner does not give
 // this process custody of those children.
 if (compiled && files.length === 0 && testOptions.every((option) => /^--test-concurrency=\d+$/u.test(option))) {
-  const executionFiles = selectedFiles
+  const logDirectory = makeSweepLogDirectory();
+  // Print the artifact directory before any child starts so a hanging sweep is diagnosable.
+  console.log(`[run-tests] per-file logs: ${logDirectory}`);
+  const executionEntries = selectedFiles
     .map((file) => ({ file, size: statSync(file).size }))
     .sort((left, right) => right.size - left.size || left.file.localeCompare(right.file))
-    .map(({ file }) => ".test-build/" + file.replace(/\.ts$/u, ".js"));
+    .map(({ file }) => ".test-build/" + file.replace(/\.ts$/u, ".js"))
+    .map((file, index) => ({
+      file,
+      log: join(logDirectory, `${String(index).padStart(3, "0")}-${file.replace(/[/\\]+/gu, "_")}.log`),
+    }));
+  const stillRunningThresholdMs = positiveMilliseconds(
+    process.env.KEIYAKU_TEST_STILL_RUNNING_MS,
+    STILL_RUNNING_THRESHOLD_MS,
+  );
+  const stillRunningIntervalMs = positiveMilliseconds(
+    process.env.KEIYAKU_TEST_STILL_RUNNING_INTERVAL_MS,
+    STILL_RUNNING_INTERVAL_MS,
+  );
   const concurrency = Math.max(1, Number(testOptions.at(-1)?.split("=")[1] ?? 8));
   let next = 0;
   let failed = false;
   const worker = async () => {
     for (;;) {
-      const file = executionFiles[next++];
-      if (file === undefined) return;
+      const entry = executionEntries[next++];
+      if (entry === undefined) return;
+      const { file, log } = entry;
+      const fileStarted = performance.now();
+      console.log(`RUNS ${file}`);
       const status = await new Promise((resolve) => {
-        const child = spawn(process.execPath, [...loader, "--test", ...reporterOptions, file], {
-          stdio: "inherit",
-          env: environment,
-        });
-        child.once("error", () => resolve(1));
-        child.once("close", (code) => resolve(code ?? 1));
+        let stopAnnouncements = () => {};
+        const threshold = setTimeout(() => {
+          console.log(`still running: ${file} (${formatElapsed(performance.now() - fileStarted)})`);
+          const interval = setInterval(() => {
+            console.log(`still running: ${file} (${formatElapsed(performance.now() - fileStarted)})`);
+          }, stillRunningIntervalMs);
+          stopAnnouncements = () => clearInterval(interval);
+        }, stillRunningThresholdMs);
+        /** @param {number} code */
+        const settle = (code) => {
+          clearTimeout(threshold);
+          stopAnnouncements();
+          resolve(code);
+        };
+        // Node pairs each reporter with its own destination; keep the stdout
+        // reporter exactly as the outer path chose it, then add the spec log.
+        const child = spawn(
+          process.execPath,
+          [
+            ...loader,
+            "--test",
+            ...reporterOptions,
+            "--test-reporter-destination=stdout",
+            "--test-reporter=spec",
+            `--test-reporter-destination=${log}`,
+            file,
+          ],
+          { stdio: "inherit", env: environment },
+        );
+        child.once("error", () => settle(1));
+        child.once("close", (code) => settle(code ?? 1));
       });
+      console.log(`${status === 0 ? "PASS" : "FAIL"} ${file} (${formatElapsed(performance.now() - fileStarted)})`);
       if (status !== 0) failed = true;
     }
   };
-  await Promise.all(Array.from({ length: Math.min(concurrency, executionFiles.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(concurrency, executionEntries.length) }, worker));
   process.exitCode = failed ? 1 : 0;
 } else {
   const result = spawnSync(

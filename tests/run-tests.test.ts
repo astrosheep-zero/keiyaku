@@ -282,6 +282,112 @@ test("compiled sweeps await delayed files even when a sibling fails", (context) 
   assert.equal(existsSync(marker), true, result.stdout + result.stderr);
 });
 
+test("compiled sweeps name every file and keep a per-file spec log", (context) => {
+  const directory = mkdtempSync(join(tmpdir(), "keiyaku-test-runner-logs-"));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  mkdirSync(join(directory, "tests"));
+  mkdirSync(join(directory, ".test-build", "tests"), { recursive: true });
+  for (const name of ["alpha", "beta"]) {
+    writeFileSync(join(directory, "tests", `${name}.test.ts`), "// source\n");
+    writeFileSync(
+      join(directory, ".test-build", "tests", `${name}.test.js`),
+      `require('node:test')(${JSON.stringify(`${name} behaviour`)}, () => {});\n`,
+    );
+  }
+  const result = spawnSync(
+    process.execPath,
+    [resolve(root, "scripts/run-tests.mjs"), "--compiled", "--test-concurrency=2"],
+    { cwd: directory, encoding: "utf8" },
+  );
+  const output = result.stdout + result.stderr;
+  assert.equal(result.status, 0, output);
+  const lines = output.split("\n");
+  for (const name of ["alpha", "beta"]) {
+    const file = `.test-build/tests/${name}.test.js`;
+    assert.equal(lines.filter((line) => line.includes(`RUNS ${file}`)).length, 1, output);
+    assert.equal(
+      lines.filter((line) => line.includes(`PASS ${file} (`) || line.includes(`FAIL ${file} (`)).length,
+      1,
+      output,
+    );
+  }
+  const printed = /\[run-tests\] per-file logs: (.+)/u.exec(output);
+  assert.ok(printed, output);
+  const logDirectory = printed[1]!.trim();
+  assert.equal(existsSync(logDirectory), true, output);
+  const logs = readdirSync(logDirectory);
+  assert.equal(logs.length, 2, output);
+  for (const name of ["alpha", "beta"]) {
+    const log = logs.find((entry) => entry.includes(`${name}.test.js`));
+    assert.ok(log, `a spec log names ${name}\n${output}`);
+    assert.match(readFileSync(join(logDirectory, log), "utf8"), new RegExp(`${name} behaviour`, "u"));
+  }
+  assert.match(readFileSync(resolve(root, ".gitignore"), "utf8"), /^\.test-logs\/$/mu);
+});
+
+test("compiled sweeps announce still-running files without killing them", (context) => {
+  const directory = mkdtempSync(join(tmpdir(), "keiyaku-test-runner-slow-"));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  mkdirSync(join(directory, "tests"));
+  mkdirSync(join(directory, ".test-build", "tests"), { recursive: true });
+  const marker = join(directory, "slow-completed");
+  writeFileSync(join(directory, "tests", "slow.test.ts"), "// source\n");
+  writeFileSync(
+    join(directory, ".test-build", "tests", "slow.test.js"),
+    [
+      "const { writeFileSync } = require('node:fs');",
+      "const test = require('node:test');",
+      `test('slow behaviour', async () => { await new Promise((resolve) => setTimeout(resolve, 400)); writeFileSync(${JSON.stringify(marker)}, 'completed'); });`,
+    ].join("\n"),
+  );
+  const result = spawnSync(
+    process.execPath,
+    [resolve(root, "scripts/run-tests.mjs"), "--compiled", "--test-concurrency=1"],
+    {
+      cwd: directory,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        KEIYAKU_TEST_STILL_RUNNING_MS: "80",
+        KEIYAKU_TEST_STILL_RUNNING_INTERVAL_MS: "80",
+      },
+    },
+  );
+  const output = result.stdout + result.stderr;
+  assert.equal(result.status, 0, output);
+  const file = ".test-build/tests/slow.test.js";
+  const announcements = output.split("\n").filter((line) => line.includes(`still running: ${file} (`));
+  assert.ok(announcements.length >= 2, output);
+  assert.equal(
+    output.split("\n").some((line) => line.includes(`PASS ${file} (`)),
+    true,
+    `the announced child settled with a pass\n${output}`,
+  );
+  assert.equal(existsSync(marker), true, "the slow child finished instead of being killed");
+});
+
+test("focused runs stay on the single-spawn path without sweep artifacts", (context) => {
+  const directory = mkdtempSync(join(tmpdir(), "keiyaku-test-runner-focused-"));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  mkdirSync(join(directory, "tests"));
+  mkdirSync(join(directory, ".test-build", "tests"), { recursive: true });
+  writeFileSync(join(directory, "tests", "focused.test.ts"), "// source\n");
+  writeFileSync(
+    join(directory, ".test-build", "tests", "focused.test.js"),
+    "require('node:test')('focused behaviour', () => {});\n",
+  );
+  const result = spawnSync(
+    process.execPath,
+    [resolve(root, "scripts/run-tests.mjs"), "--compiled", "tests/focused.test.ts"],
+    { cwd: directory, encoding: "utf8" },
+  );
+  const output = result.stdout + result.stderr;
+  assert.equal(result.status, 0, output);
+  assert.doesNotMatch(output, /RUNS /u);
+  assert.doesNotMatch(output, /per-file logs:/u);
+  assert.equal(existsSync(join(directory, ".test-logs")), false, output);
+});
+
 test("test entry reruns checks and retires bytecode after success and failure", (context) => {
   const directory = mkdtempSync(join(tmpdir(), "keiyaku-entry-lifecycle-"));
   context.after(() => rmSync(directory, { recursive: true, force: true }));
