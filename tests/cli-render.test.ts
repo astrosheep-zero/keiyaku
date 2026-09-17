@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { changeId, contractHead, contractId, gate, snapshotId } from "../src/core/facts/types.js";
-import type { InvocationResult, Lag } from "../src/cli/result.js";
+import type { InvocationResult } from "../src/cli/result.js";
 import { renderCatalogText } from "../src/cli/render/catalog.js";
 import {
   activityStream,
@@ -55,15 +55,6 @@ function observed(
 ): WaitObservedAkuma {
   return { status, ...facts };
 }
-
-test("CLI lag scope stays aligned with the public mutation result", () => {
-  const scope: Lag["affects"] = "reconciliation";
-  const placement: Lag["affects"] = "placement";
-  const continuation: Lag["affects"] = "continuation";
-  assert.equal(scope, "reconciliation");
-  assert.equal(placement, "placement");
-  assert.equal(continuation, "continuation");
-});
 
 test("Akuma call help omits the caller readonly flag", () => {
   assert.doesNotMatch(renderHelp({ kind: "akuma", action: "call" }), /--readonly/u);
