@@ -347,10 +347,7 @@ test("schema tell on a running Body is busy unless interrupt is set", async () =
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
-    let signalAbort!: () => void;
-    const aborted = new Promise<void>((resolve) => {
-      signalAbort = resolve;
-    });
+    let abortObserved = false;
     const hanging: ProviderAdapter = {
       admitOptions(options) {
         return { kind: "admitted", options };
@@ -366,7 +363,7 @@ test("schema tell on a running Body is busy unless interrupt is set", async () =
           },
           completion: held.then(() => ({ kind: "answered" as const, answer: '{"ok":true}', historyId: "hang" })),
           async abort() {
-            signalAbort();
+            abortObserved = true;
           },
         }));
       },
@@ -424,7 +421,17 @@ test("schema tell on a running Body is busy unless interrupt is set", async () =
     };
     try {
       const interrupting = akuma.tell("structured", { schema, interrupt: true });
-      await aborted;
+      await waitForCondition(
+        "the predecessor provider abort callback that releases the held completion",
+        () => abortObserved,
+        {
+          terminalState: settlementProbe(
+            interrupting,
+            (settled) =>
+              `the interrupt Tell settled with decoded ${JSON.stringify(settled)} before the predecessor provider aborted`,
+          ),
+        },
+      );
       release?.();
       release = undefined;
       await assert.rejects(interrupting, AkumaDecodeError);
