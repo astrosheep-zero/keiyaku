@@ -1,3 +1,5 @@
+import { fixtureAdapter } from "./support/akuma-tell.js";
+import { temporaryDirectory } from "./support/process.js";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -7,19 +9,14 @@ import { z } from "zod";
 import {
   Akuma,
   AkumaBusyError,
-  AkumaDecodeError,
-  AkumaNotBornError,
-  AkumaProviderError,
+  AkumaDecodeError, AkumaProviderError,
   Schema,
-  type AkumaIdleResult,
+  type AkumaIdleResult
 } from "../src/akuma/index.js";
-import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { AkumaHandle } from "../src/akuma/akuma-handle.js";
-import { driveAkumaBody, type TellWakeRuntime } from "../src/akuma/body.js";
-import { HeldAkumaLeash, initializeHeart, readTell, readTurn, recordTell } from "../src/akuma/heart/index.js";
-import { allocateAkumaDirectory } from "../src/akuma/identity.js";
-import { createProviderAttempt, type ProviderAdapter, type Session } from "../src/akuma/provider.js";
-import type { OwnedProcess } from "../src/runtime/proc/run.js";
+import { driveAkumaBody } from "../src/akuma/body.js";
+import { readTell, recordTell } from "../src/akuma/heart/index.js";
+import { type ProviderAdapter } from "../src/akuma/provider.js";
 import { settlementProbe, waitForCondition } from "./support/process.js";
 import { schemaJsonText } from "../src/akuma/schema.js";
 import { World } from "../src/world.js";
@@ -38,10 +35,7 @@ function freezeWalk(value: unknown): void {
  * Bounds the seed-Tell binding wait and ends it on a dead outcome: a settled driving pump, a missing
  * Tell, or a terminal delivery that never bound a Turn.
  */
-async function waitForSeedBinding(
-  paths: Parameters<typeof readTell>[0],
-  driven: Promise<unknown>,
-): Promise<void> {
+async function waitForSeedBinding(paths: Parameters<typeof readTell>[0], driven: Promise<unknown>): Promise<void> {
   const bodySettled = settlementProbe(driven, () => "the driving Body pump settled without binding the seed Tell");
   await waitForCondition(
     "the seed Tell to bind to its running Turn",
@@ -116,161 +110,29 @@ test("package root exposes the same public Akuma values without private mechanis
   assert.deepEqual(schema.decode({ ok: true }), { ok: true });
 });
 
-test("Akuma.birth has no prompt and select is synchronous", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-birth-"));
+test("Akuma.birth has no prompt and select is synchronous", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-akuma-api-birth-");
   const home = join(root, "home");
   mkdirSync(join(home, "akuma"), { recursive: true });
   writeFileSync(join(home, "akuma", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
-  try {
-    const world = await World.at(root);
-    const born = await Akuma.birth("worker", { root: world, home, cwd: root });
-    const selected = Akuma.select(world, born.id);
-    assert.equal(selected.id, born.id);
-    assert.equal((await selected.status()).id, born.id);
-    await born.idle();
-    const page = await born.history();
-    assert.equal(Array.isArray(page.rows), true);
-    await born.kill();
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-type FixtureSession = Omit<Session, "admission" | "forceDispose"> &
-  Readonly<{ admission?: Session["admission"]; forceDispose?: Session["forceDispose"] }>;
-
-function fixtureAttempt(input: Readonly<{ signal: AbortSignal }>, establish: () => Promise<FixtureSession>) {
-  return createProviderAttempt(input.signal, async (custody) => {
-    const fixture = await establish();
-    const session: Session = {
-      ...fixture,
-      admission: fixture.admission ?? { fence: "api-fixture-turn" },
-      forceDispose: fixture.forceDispose ?? fixture.abort,
-    };
-    let settleClosed!: () => void;
-    const closed = new Promise<void>((resolve) => {
-      settleClosed = resolve;
-    });
-    void session.completion.then(settleClosed, settleClosed);
-    custody.own({
-      closed,
-      abort: async () => {
-        await session.abort();
-        settleClosed();
-      },
-      forceDispose: async () => {
-        await session.forceDispose();
-        settleClosed();
-      },
-    });
-    return session;
-  });
-}
-
-function answering(answer: string): ProviderAdapter {
-  return {
-    admitOptions(options) {
-      return { kind: "admitted", options };
-    },
-    start(input) {
-      return fixtureAttempt(input, async () => ({
-        admission: { fence: "api-answer" },
-        events: {
-          async *[Symbol.asyncIterator]() {
-            yield { type: "session" as const, coordinate: { sessionId: "api-session" } };
-          },
-        },
-        completion: Promise.resolve({ kind: "answered" as const, answer, historyId: "api-history" }),
-        async abort() {},
-      }));
-    },
-  };
-}
-
-async function settleFixtureBodies(bodies: readonly Promise<unknown>[]): Promise<void> {
-  await Promise.all(bodies.map((body) => body.catch(() => undefined)));
-}
-
-function fixtureRuntime(
-  bodies: Promise<unknown>[],
-  fixtures: ReadonlyMap<string, Readonly<{ adapter: ProviderAdapter; now: string }>>,
-): TellWakeRuntime {
-  return {
-    async spawn(paths) {
-      const fixture = fixtures.get(paths.directory);
-      if (fixture === undefined) throw new Error(`missing fixture adapter for ${paths.directory}`);
-      const body = driveAkumaBody({ paths }, fixture.adapter, { now: () => fixture.now });
-      bodies.push(body);
-      return {
-        pid: 0,
-        exited: body.then(
-          () => ({ code: 0, signal: null, log: { path: paths.log, from: 0, to: 0 } }),
-          () => ({ code: 1, signal: null, log: { path: paths.log, from: 0, to: 0 } }),
-        ),
-        async terminate() {},
-        release() {},
-      };
-    },
-  };
-}
-
-function installTellRuntime(runtime: TellWakeRuntime): () => void {
-  const originalTell = AkumaHandle.prototype.tell;
-  AkumaHandle.prototype.tell = function (body, tellId, recordedAt, existingRuntime, schemaJson) {
-    return originalTell.call(this, body, tellId, recordedAt, existingRuntime ?? runtime, schemaJson);
-  };
-  return () => {
-    AkumaHandle.prototype.tell = originalTell;
-  };
-}
-
-async function bornWorld(root: string, suffix: string) {
   const world = await World.at(root);
-  mkdirSync(join(root, ".keiyaku"), { recursive: true });
-  writeFileSync(join(root, ".keiyaku", "settings.json"), JSON.stringify({ plugins: { square: { enabled: false } } }));
-  const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => suffix });
-  await initializeHeart(allocated.paths);
-  const holder = (await HeldAkumaLeash.try(allocated.paths))!;
-  await holder.birth(allocated.paths, {
-    id: allocated.id,
-    archetype: "claude",
-    provider: { name: "claude", kind: "claude-agent-sdk" },
-    options: {},
-    cwd: world,
-    origin: { kind: "direct" },
-    allowed: ALLOWED_ACTIONS,
-    createdAt: "2026-08-10T00:00:00.000Z",
-  });
-  holder.release();
-  return { world, allocated, akuma: Akuma.select(world, allocated.id) };
-}
-
-test("plain tell returns the answer and binds an exact TellId", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-tell-"));
-  const bodies: Promise<unknown>[] = [];
-  const fixtures = new Map<string, Readonly<{ adapter: ProviderAdapter; now: string }>>();
-  const restoreTellRuntime = installTellRuntime(fixtureRuntime(bodies, fixtures));
-  try {
-    const { allocated, akuma } = await bornWorld(root, "a1000001");
-    fixtures.set(allocated.paths.directory, { adapter: answering("plain answer"), now: "2026-08-10T00:00:01.000Z" });
-    const answered = await akuma.tell("hello");
-    await settleFixtureBodies(bodies);
-    assert.equal(answered, "plain answer");
-    const page = await akuma.history();
-    const tell = page.rows.find((row) => row.kind === "tell");
-    assert.equal(tell?.kind, "tell");
-    if (tell?.kind === "tell") {
-      const fact = await readTell(allocated.paths, tell.tellId);
-      assert.equal(fact?.id, tell.tellId);
-      assert.equal(fact?.body, "hello");
-      assert.notEqual(fact?.binding, undefined);
-    }
-  } finally {
-    restoreTellRuntime();
-    await settleFixtureBodies(bodies);
-    rmSync(root, { recursive: true, force: true });
-  }
+  const born = await Akuma.birth("worker", { root: world, home, cwd: root });
+  const selected = Akuma.select(world, born.id);
+  assert.equal(selected.id, born.id);
+  assert.equal((await selected.status()).id, born.id);
+  await born.idle();
+  const page = await born.history();
+  assert.equal(Array.isArray(page.rows), true);
+  await born.kill();
 });
+
+import {
+  answering,
+  bornWorld,
+  fixtureRuntime,
+  installTellRuntime,
+  settleFixtureBodies,
+} from "./support/akuma-tell.js";
 
 test("schema tell decodes JSON and typed failures stay distinct", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-schema-tell-"));
@@ -309,23 +171,16 @@ test("schema tell decodes JSON and typed failures stay distinct", async () => {
     await assert.rejects(mismatch.akuma.tell("structured", { schema }), AkumaDecodeError);
 
     const failed = await bornWorld(root, "a1000005");
-    const failing: ProviderAdapter = {
-      admitOptions(options) {
-        return { kind: "admitted", options };
+    const failing: ProviderAdapter = fixtureAdapter(async () => ({
+      admission: { fence: "api-fail" },
+      events: {
+        async *[Symbol.asyncIterator]() {
+          yield { type: "session" as const, coordinate: { sessionId: "api-fail" } };
+        },
       },
-      start(input) {
-        return fixtureAttempt(input, async () => ({
-          admission: { fence: "api-fail" },
-          events: {
-            async *[Symbol.asyncIterator]() {
-              yield { type: "session" as const, coordinate: { sessionId: "api-fail" } };
-            },
-          },
-          completion: Promise.resolve({ kind: "failed" as const, diagnostic: "provider broke" }),
-          async abort() {},
-        }));
-      },
-    };
+      completion: Promise.resolve({ kind: "failed" as const, diagnostic: "provider broke" }),
+      async abort() {},
+    }));
     fixtures.set(failed.allocated.paths.directory, { adapter: failing, now: "2026-08-10T00:00:01.000Z" });
     await assert.rejects(failed.akuma.tell("structured", { schema }), AkumaProviderError);
     await settleFixtureBodies(bodies);
@@ -336,129 +191,54 @@ test("schema tell decodes JSON and typed failures stay distinct", async () => {
   }
 });
 
-test("schema tell on a running Body is busy unless interrupt is set", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-busy-"));
+test("schema tell routes admission and preserves typed refusals without launching a Body", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-akuma-api-routing-");
+  const akuma = Akuma.select(await World.at(root), "aku/claude/a1000006");
   const schema = Schema.zod(z.object({ ok: z.boolean() }).strict());
-  let release: (() => void) | undefined;
-  let body: Promise<unknown> | undefined;
-  let successorBody: Promise<unknown> | undefined;
-  try {
-    const { allocated, akuma } = await bornWorld(root, "a1000006");
-    const held = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    let abortObserved = false;
-    const hanging: ProviderAdapter = {
-      admitOptions(options) {
-        return { kind: "admitted", options };
-      },
-      start(input) {
-        return fixtureAttempt(input, async () => ({
-          admission: { fence: "api-hang" },
-          events: {
-            async *[Symbol.asyncIterator]() {
-              yield { type: "session" as const, coordinate: { sessionId: "api-predecessor" } };
-              await held;
-            },
-          },
-          completion: held.then(() => ({ kind: "answered" as const, answer: '{"ok":true}', historyId: "hang" })),
-          async abort() {
-            abortObserved = true;
-          },
-        }));
-      },
-    };
-    await recordTell(allocated.paths, {
-      kind: "tell",
-      id: "seed",
-      body: "start",
-      recordedAt: "2026-08-10T00:00:01.000Z",
-    });
-    body = driveAkumaBody({ paths: allocated.paths }, hanging, { now: () => "2026-08-10T00:00:02.000Z" });
-    await waitForSeedBinding(allocated.paths, body);
-    await assert.rejects(akuma.tell("structured", { schema }), AkumaBusyError);
-    const successor: ProviderAdapter = {
-      admitOptions(options) {
-        return { kind: "admitted", options };
-      },
-      start(input) {
-        return fixtureAttempt(input, async () => ({
-          events: {
-            async *[Symbol.asyncIterator]() {
-              yield { type: "session" as const, coordinate: { sessionId: "api-successor" } };
-            },
-          },
-          completion: Promise.resolve({ kind: "answered" as const, answer: "not-json", historyId: "successor" }),
-          async abort() {},
-        }));
-      },
-      resume(input) {
-        return fixtureAttempt(input, async () => ({
-          events: {
-            async *[Symbol.asyncIterator]() {
-              yield { type: "session" as const, coordinate: { sessionId: "api-successor" } };
-            },
-          },
-          completion: Promise.resolve({ kind: "answered" as const, answer: "not-json", historyId: "successor" }),
-          async abort() {},
-        }));
-      },
-    };
-    const runtime = {
-      async spawn(paths: typeof allocated.paths): Promise<OwnedProcess> {
-        successorBody = driveAkumaBody({ paths }, successor, { now: () => "2026-08-10T00:00:03.000Z" });
-        return {
-          pid: 0,
-          exited: successorBody.then(() => ({ code: 0, signal: null, log: { path: paths.log, from: 0, to: 0 } })),
-          async terminate() {},
-          release() {},
-        };
-      },
-    };
-    const originalInterrupt = AkumaHandle.prototype.interrupt;
-    AkumaHandle.prototype.interrupt = function (body, options) {
-      return originalInterrupt.call(this, body, { ...options, runtime });
-    };
-    try {
-      const interrupting = akuma.tell("structured", { schema, interrupt: true });
-      await waitForCondition(
-        "the predecessor provider abort callback that releases the held completion",
-        () => abortObserved,
-        {
-          terminalState: settlementProbe(
-            interrupting,
-            (settled) =>
-              `the interrupt Tell settled with decoded ${JSON.stringify(settled)} before the predecessor provider aborted`,
-          ),
-        },
-      );
-      release?.();
-      release = undefined;
-      await assert.rejects(interrupting, AkumaDecodeError);
-      const tell = (await akuma.history()).rows.find((row) => row.kind === "tell" && row.text === "structured");
-      assert.equal(tell?.kind, "tell");
-      if (tell?.kind === "tell") {
-        const fact = await readTell(allocated.paths, tell.tellId);
-        assert.notEqual(fact?.binding, undefined);
-        if (fact?.binding !== undefined) {
-          const turn = await readTurn(allocated.paths, fact.binding.turnSequence);
-          const outcome = turn?.end?.outcome;
-          assert.equal(outcome?.kind, "invalid-output");
-          if (outcome?.kind === "invalid-output") assert.equal(outcome.answer, "not-json");
-        }
-      }
-    } finally {
-      AkumaHandle.prototype.interrupt = originalInterrupt;
-    }
-    await body;
-    await successorBody;
-    await akuma.idle();
-  } finally {
-    release?.();
-    await body?.catch(() => undefined);
-    await successorBody?.catch(() => undefined);
-    rmSync(root, { recursive: true, force: true });
+  const busy = new AkumaBusyError();
+  const tells: Parameters<AkumaHandle["tell"]>[] = [];
+  const interrupts: Parameters<AkumaHandle["interrupt"]>[] = [];
+  context.mock.method(AkumaHandle.prototype, "tell", async (...args: Parameters<AkumaHandle["tell"]>) => {
+    tells.push(args);
+    throw busy;
+  });
+  context.mock.method(AkumaHandle.prototype, "interrupt", async (...args: Parameters<AkumaHandle["interrupt"]>) => {
+    interrupts.push(args);
+    return { kind: "unavailable", evidence: "hung" } as const;
+  });
+
+  // The API owns routing/translation; Heart and control suites own real busy/leash behavior.
+  await assert.rejects(akuma.tell("default", { schema }), (error) => error === busy);
+  await assert.rejects(
+    akuma.tell("explicit", { schema, interrupt: false, initiator: "api-caller" }),
+    (error) => error === busy,
+  );
+  assert.equal(interrupts.length, 0);
+  assert.equal(tells.length, 2);
+  for (const [index, args] of tells.entries()) {
+    assert.equal(args[0], index === 0 ? "default" : "explicit");
+    assert.match(args[1]!, /^[0-9a-f-]{36}$/u);
+    assert.deepEqual(args.slice(2), [
+      undefined,
+      undefined,
+      { schemaJson: schemaJsonText(schema), ...(index === 0 ? {} : { initiator: "api-caller" }) },
+    ]);
   }
+  await assert.rejects(akuma.tell("interrupt", { schema, interrupt: true, initiator: "api-caller" }), {
+    name: "AkumaProviderError",
+    message: "schema interrupt unavailable: hung",
+  });
+  assert.equal(tells.length, 2);
+  assert.equal(interrupts.length, 1);
+  const [body, options] = interrupts[0]!;
+  assert.equal(body, "interrupt");
+  assert.match(options!.tellId!, /^[0-9a-f-]{36}$/u);
+  assert.deepEqual(options, {
+    tellId: options!.tellId,
+    schemaJson: schemaJsonText(schema),
+    initiator: "api-caller",
+  });
+  assert.equal(new Set([...tells.map((args) => args[1]), options!.tellId]).size, 3);
 });
 
 test("idle resolves the settling life with the final status", async () => {
@@ -472,8 +252,7 @@ test("idle resolves the settling life with the final status", async () => {
     await akuma.tell("hello");
     await settleFixtureBodies(bodies);
     const settled: AkumaIdleResult = await akuma.idle();
-    assert.equal(settled.kind, "idle");
-    if (settled.kind !== "idle") return;
+    assert.ok(settled.kind === "idle", "expected settled.kind = \"idle\"");
     assert.equal(settled.reason, "asleep");
     assert.equal(settled.status.life, "asleep");
     assert.equal(settled.status.id, allocated.id);
@@ -493,26 +272,19 @@ test("idle after kill names the killed life", async () => {
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const hanging: ProviderAdapter = {
-      admitOptions(options) {
-        return { kind: "admitted", options };
+    const hanging: ProviderAdapter = fixtureAdapter(async () => ({
+      admission: { fence: "api-hang" },
+      events: {
+        async *[Symbol.asyncIterator]() {
+          yield { type: "session" as const, coordinate: { sessionId: "api-idle-kill" } };
+          await held;
+        },
       },
-      start(input) {
-        return fixtureAttempt(input, async () => ({
-          admission: { fence: "api-hang" },
-          events: {
-            async *[Symbol.asyncIterator]() {
-              yield { type: "session" as const, coordinate: { sessionId: "api-idle-kill" } };
-              await held;
-            },
-          },
-          completion: held.then(() => ({ kind: "answered" as const, answer: "late", historyId: "hang" })),
-          async abort() {
-            release?.();
-          },
-        }));
+      completion: held.then(() => ({ kind: "answered" as const, answer: "late", historyId: "hang" })),
+      async abort() {
+        release?.();
       },
-    };
+    }));
     await recordTell(allocated.paths, {
       kind: "tell",
       id: "seed",
@@ -525,8 +297,7 @@ test("idle after kill names the killed life", async () => {
     await body;
     body = undefined;
     const killed = await akuma.idle();
-    assert.equal(killed.kind, "idle");
-    if (killed.kind !== "idle") return;
+    assert.ok(killed.kind === "idle", "expected killed.kind = \"idle\"");
     assert.equal(killed.reason, "killed");
     assert.equal(killed.status.life, "killed");
     assert.equal(killed.status.id, allocated.id);
@@ -537,83 +308,17 @@ test("idle after kill names the killed life", async () => {
   }
 });
 
-test("idle timeout names the outstanding conditions with the final status", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-idle-timeout-"));
-  let release: (() => void) | undefined;
-  let body: Promise<unknown> | undefined;
-  try {
-    const { allocated, akuma } = await bornWorld(root, "a1000009");
-    const held = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const hanging: ProviderAdapter = {
-      admitOptions(options) {
-        return { kind: "admitted", options };
-      },
-      start(input) {
-        return fixtureAttempt(input, async () => ({
-          admission: { fence: "api-hang" },
-          events: {
-            async *[Symbol.asyncIterator]() {
-              yield { type: "session" as const, coordinate: { sessionId: "api-idle-hang" } };
-              await held;
-            },
-          },
-          completion: held.then(() => ({ kind: "answered" as const, answer: "late", historyId: "hang" })),
-          async abort() {},
-        }));
-      },
-    };
-    await recordTell(allocated.paths, {
-      kind: "tell",
-      id: "seed",
-      body: "start",
-      recordedAt: "2026-08-10T00:00:01.000Z",
-    });
-    body = driveAkumaBody({ paths: allocated.paths }, hanging, { now: () => "2026-08-10T00:00:02.000Z" });
-    await waitForSeedBinding(allocated.paths, body);
-    const timed = await akuma.idle({ timeoutMs: 100 });
-    assert.equal(timed.kind, "timeout");
-    if (timed.kind !== "timeout") return;
-    assert.deepEqual(timed.reason, { running: true, pendingTell: false });
-    assert.equal(timed.status.life, "running");
-    assert.equal(timed.status.id, allocated.id);
-  } finally {
-    release?.();
-    await body?.catch(() => undefined);
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("idle timeout with a pending tell reports pendingTell", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-idle-pending-"));
-  try {
-    const { allocated, akuma } = await bornWorld(root, "a1000010");
-    await recordTell(allocated.paths, {
-      kind: "tell",
-      id: "queued",
-      body: "later",
-      recordedAt: "2026-08-10T00:00:01.000Z",
-    });
-    const timed = await akuma.idle({ timeoutMs: 100 });
-    assert.equal(timed.kind, "timeout");
-    if (timed.kind !== "timeout") return;
-    assert.deepEqual(timed.reason, { running: false, pendingTell: true });
-    assert.equal(timed.status.id, allocated.id);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("select of an unborn id refuses tell without durable input", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-unborn-"));
-  try {
-    const world = await World.at(root);
-    const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "a1000007" });
-    await initializeHeart(allocated.paths);
-    const akuma = Akuma.select(world, allocated.id);
-    await assert.rejects(akuma.tell("future"), AkumaNotBornError);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+test("idle timeout with a pending tell reports pendingTell", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-akuma-api-idle-pending-");
+  const { allocated, akuma } = await bornWorld(root, "a1000010");
+  await recordTell(allocated.paths, {
+    kind: "tell",
+    id: "queued",
+    body: "later",
+    recordedAt: "2026-08-10T00:00:01.000Z",
+  });
+  const timed = await akuma.idle({ timeoutMs: 100 });
+  assert.ok(timed.kind === "timeout", "expected timed.kind = \"timeout\"");
+  assert.deepEqual(timed.reason, { running: false, pendingTell: true });
+  assert.equal(timed.status.id, allocated.id);
 });

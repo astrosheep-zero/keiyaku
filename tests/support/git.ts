@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { appendFileSync, chmodSync, cpSync, existsSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { after } from "node:test";
 import { Repo } from "../../src/index.js";
 import { readManagedWorktreeAppointment } from "../../src/workspace-place.js";
@@ -201,4 +201,31 @@ export async function appointedWorktreePath(repository: GitRepository, contract:
     throw new Error(`expected appointed Place for ${contract}, got ${appointment.kind}`);
   }
   return appointment.path;
+}
+
+export type WorktreeFixtureFile = Readonly<{ path: string; bytes: Buffer; mode: number }>;
+
+/** Snapshot generated guidance only. Each restored worktree gets independent files. */
+export function captureWorktreeFiles(
+  worktree: string,
+  paths: readonly string[] = [
+    ".keiyaku/.gitignore", ".keiyaku/KEIYAKU.md",
+    ".agents/skills/keiyaku-deliver/.gitignore", ".agents/skills/keiyaku-deliver/SKILL.md",
+    ".agents/skills/keiyaku-review/.gitignore", ".agents/skills/keiyaku-review/SKILL.md",
+  ],
+): readonly WorktreeFixtureFile[] {
+  return paths.map((path) => ({
+    path,
+    bytes: readFileSync(join(worktree, path)),
+    mode: statSync(join(worktree, path)).mode & 0o777,
+  }));
+}
+
+export function restoreWorktreeFiles(worktree: string, files: readonly WorktreeFixtureFile[]): void {
+  for (const generated of files) {
+    const path = join(worktree, generated.path);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, generated.bytes);
+    chmodSync(path, generated.mode);
+  }
 }

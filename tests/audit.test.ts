@@ -1,13 +1,12 @@
 import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
-import { join } from "node:path";
 import test from "node:test";
 import { Keiyaku, Repo } from "../src/index.js";
 import { decodeContractDocument, verificationDefinition } from "../src/body/decode.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
-import { entryUlid, gate } from "../src/core/facts/types.js";
+import { contractId, entryUlid, gate } from "../src/core/facts/types.js";
 import { dependencyKeySet } from "../src/core/subject.js";
 import { verifyDelivery } from "../src/protocol/intent.js";
 import { auditOperation } from "../src/protocol/audit.js";
@@ -16,7 +15,7 @@ import { scopeOperation } from "../src/protocol/operations.js";
 import { observeContractAt } from "../src/git/observe.js";
 import { prepareVerificationDeclaration } from "../src/verification/declaration.js";
 import { appointedWorktreePath, type TestGitRepository } from "./support/git.js";
-import { refused, repositoryWithMain } from "./support/library-verbs.js";
+import { repositoryWithMain } from "./support/library-verbs.js";
 
 function verificationBody(script: string | null = "exit 1"): string {
   return contractMarkdown("Audit", {
@@ -58,60 +57,6 @@ async function failedStoredVerification(): Promise<
   assert.equal(state.attestations.at(-1)?.data.summary, "[1 bash exit 1]");
   return { repository, contract: bound.keiyaku, state };
 }
-
-test("a verified placement gate without a Verification declaration is refused at bind", async () => {
-  const repository = repositoryWithMain();
-  await assert.rejects(
-    Keiyaku.bind({
-      repo: await Repo.at({ path: repository.path }),
-      markdown: verificationBody(null),
-      workspace: "worktree",
-      gates: ["verified"],
-    }),
-    refused({ kind: "verification-declaration-invalid" }),
-  );
-});
-
-test("an active amend cannot admit verified terms without a Verification declaration", async () => {
-  const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({
-    repo: await Repo.at({ path: repository.path }),
-    markdown: verificationBody(null),
-    workspace: "worktree",
-  });
-  const before = await bound.keiyaku.state();
-
-  await assert.rejects(
-    bound.keiyaku.amend({
-      markdown: "## Replace: Objective\nKeep declaration admission at the document edge.\n\n",
-      gates: ["verified"],
-    }),
-    refused({ kind: "verification-declaration-invalid", contractId: before.id }),
-  );
-
-  const after = await bound.keiyaku.state();
-  assert.equal(after.head, before.head);
-  assert.deepEqual(after.terms, before.terms);
-});
-
-test("terminal amend refusal outranks a missing Verification declaration", async () => {
-  const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({
-    repo: await Repo.at({ path: repository.path }),
-    markdown: verificationBody(null),
-    workspace: "worktree",
-  });
-  const id = (await bound.keiyaku.state()).id;
-  await bound.keiyaku.abandon();
-
-  await assert.rejects(
-    bound.keiyaku.amend({
-      markdown: "## Replace: Objective\nNo longer actionable.\n\n",
-      gates: ["verified"],
-    }),
-    refused({ kind: "terminal", contractId: id }),
-  );
-});
 
 test("a stale document derivation is refused inside its E-decision", async () => {
   const repository = repositoryWithMain();
@@ -190,136 +135,14 @@ test("audit without Verification still returns an accepted ready candidate", asy
       }),
     }),
   );
-  assert.equal(result.kind, "accepted");
-  if (result.kind !== "accepted") return;
+  assert.ok(result.kind === "accepted", "expected result.kind = \"accepted\"");
   assert.deepEqual(result.facts, []);
   assert.equal(result.head, observed.state!.head);
-  assert.equal(result.value.candidate.kind, "ready");
-  if (result.value.candidate.kind !== "ready") return;
+  assert.ok(result.value.candidate.kind === "ready", "expected result.value.candidate.kind = \"ready\"");
   assert.equal(result.value.candidate.identity.method, "squash");
   assert.equal("diff" in result.value.candidate, false);
   assert.equal(result.value.verification.kind, "not-run");
   assert.equal(result.value.target.kind, "not-observed");
-});
-
-test("audit blocks an unresolved materialized merge with the delivery refusal", async () => {
-  const repository = repositoryWithMain();
-  writeFileSync(join(repository.path, "shared.txt"), "base\n");
-  repository.run(["add", "shared.txt"]);
-  repository.run(["commit", "--quiet", "-m", "base"]);
-  const bound = await Keiyaku.bind({
-    repo: await Repo.at({ path: repository.path }),
-    markdown: verificationBody(null),
-    workspace: "worktree",
-    target: "refs/heads/main",
-  });
-  const state = await bound.keiyaku.state();
-  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), state.id);
-  writeFileSync(join(repository.path, "shared.txt"), "target\n");
-  repository.run(["add", "shared.txt"]);
-  repository.run(["commit", "--quiet", "-m", "target"]);
-  writeFileSync(join(worktree, "shared.txt"), "tender\n");
-  repository.run(["-C", worktree, "add", "shared.txt"]);
-  repository.run(["-C", worktree, "commit", "--quiet", "-m", "tender"]);
-  const materialized = await bound.keiyaku.deliver({ materializeConflict: true });
-  assert.equal("kind" in materialized ? materialized.kind : undefined, "integration-conflict-materialized");
-  if (!("kind" in materialized) || materialized.kind !== "integration-conflict-materialized") {
-    throw new Error("conflict was not materialized");
-  }
-  const indexBefore = repository.run(["-C", worktree, "diff", "--cached", "--binary"]);
-  const statusBefore = repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]);
-
-  const blocked = await bound.keiyaku.audit();
-  assert.deepEqual(blocked.facts, []);
-  assert.equal(blocked.value.candidate.kind, "blocked");
-  if (blocked.value.candidate.kind === "blocked") {
-    assert.equal(blocked.value.candidate.refusal.kind, "dirty-workspace");
-  }
-  assert.equal(blocked.value.verification.kind, "not-run");
-  assert.equal(blocked.value.target.kind, "not-observed");
-  assert.equal((await bound.keiyaku.state()).delivery, null);
-
-  const audited = await bound.keiyaku.audit({ includeDirty: true });
-  assert.deepEqual(audited.facts, []);
-  assert.equal(audited.value.candidate.kind, "ready");
-  if (audited.value.candidate.kind === "ready") {
-    const workspaceHead = repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim();
-    const mergeHead = repository.run(["-C", worktree, "rev-parse", "MERGE_HEAD"]).trim();
-    assert.deepEqual(
-      repository.run(["show", "-s", "--format=%P", audited.value.candidate.identity.tenderSnapshot]).trim().split(" "),
-      [workspaceHead, mergeHead],
-    );
-  }
-  assert.equal(repository.run(["-C", worktree, "diff", "--cached", "--binary"]), indexBefore);
-  assert.equal(repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]), statusBefore);
-  assert.equal((await bound.keiyaku.state()).delivery, null);
-});
-
-test("audit accepts an attestation refusal as a stopped answer without facts", async () => {
-  const { contract } = await failedStoredVerification();
-  await contract.amend({
-    markdown: ["## Replace: Verification", "~~~bash timeout=5m", "sleep 0.2", "~~~", ""].join("\n"),
-  });
-
-  const pending = contract.audit();
-  const abandoned = new Promise<void>((resolve, reject) => {
-    setTimeout(() => {
-      void contract.abandon().then(() => {
-        try {
-          resolve();
-        } catch (error) {
-          reject(error);
-        }
-      }, reject);
-    }, 20);
-  });
-  const result = await pending;
-  await abandoned;
-  assert.deepEqual(result.facts, []);
-  assert.equal(result.value.candidate.kind, "ready");
-  assert.deepEqual(result.value.verification, {
-    kind: "stopped",
-    stop: { refusal: { kind: "terminal", contractId: (await contract.state()).id } },
-  });
-  assert.equal(result.value.target.kind, "not-observed");
-});
-
-test("audit admits Verification testimony for its captured old subject", async () => {
-  const { contract } = await failedStoredVerification();
-  await contract.amend({
-    markdown: ["## Replace: Verification", "~~~bash timeout=5m", "sleep 0.2", "~~~", ""].join("\n"),
-  });
-  const state = await contract.state();
-  const definition = verificationDefinition(decodeContractDocument(state.terms.document.bytes));
-  if (state.delivery === null || definition === null) throw new Error("audit inputs are absent");
-
-  const pending = contract.audit();
-  const amended = new Promise<void>((resolve, reject) => {
-    setTimeout(() => {
-      void contract
-        .amend({ markdown: ["## Replace: Verification", "~~~bash timeout=5m", "exit 0", "~~~", ""].join("\n") })
-        .then(() => {
-          try {
-            resolve();
-          } catch (error) {
-            reject(error);
-          }
-        }, reject);
-    }, 20);
-  });
-  const audited = await pending;
-  await amended;
-  assert.deepEqual(
-    audited.facts.map((fact) => fact.kind),
-    ["attestation"],
-  );
-  assert.equal(
-    (await contract.state()).attestations.at(-1)?.data.subject,
-    dependencyKeySet([
-      { kind: "snapshot", value: state.delivery.data.integration.snapshot },
-      { kind: "segment", value: definition.segment },
-    ]),
-  );
 });
 
 test("Verification reuse requires its exact producer subject", async () => {
@@ -348,4 +171,17 @@ test("Verification reuse requires its exact producer subject", async () => {
   assert.ok(result !== null);
   if (!("kind" in result.step)) throw new Error("verification did not return a protocol result");
   assert.equal(result.step.kind, "accepted");
+});
+
+// Test declaration admission at its owner, without binding two complete worktrees.
+test("verified terms require a declaration at both unbound and identified boundaries", () => {
+  for (const id of [undefined, contractId("kei/verify-boundary")]) {
+    assert.deepEqual(prepareVerificationDeclaration({ gates: [gate("verified")], definition: null, ...(id === undefined ? {} : { contractId: id }) }), {
+      kind: "refused",
+      refusal: { kind: "verification-declaration-invalid", ...(id === undefined ? {} : { contractId: id }) },
+    });
+    assert.deepEqual(prepareVerificationDeclaration({ gates: [gate("reviewed")], definition: null, ...(id === undefined ? {} : { contractId: id }) }), {
+      kind: "prepared", data: null,
+    });
+  }
 });

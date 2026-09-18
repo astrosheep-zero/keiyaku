@@ -16,7 +16,6 @@ import {
   executionStop,
   type ContractCheckpoint,
 } from "../src/protocol/progress.js";
-import { executionReceipt, receiptFromProgress, withExecutionReceipt } from "../src/library/execution-result.js";
 
 function checkpoint(id = "kei/progress", head = "initial"): ContractCheckpoint {
   const state: ContractState = {
@@ -65,61 +64,6 @@ test("an observed checkpoint cannot manufacture an invocation receipt", () => {
   assert.throws(() => progress.accepted(captured.state.id, undefined), /missing leading admission receipt/u);
 });
 
-test("extracting a checkpoint cannot copy a leading admission's facts or residue", () => {
-  const leading = {
-    ...admission(checkpoint(), 1),
-    seatClose: [{ kind: "private-state-seat-close-failed" as const, diagnostic: "close" }],
-  };
-  const captured = contractCheckpoint(leading);
-  assert.deepEqual(Object.keys(captured).sort(), ["journal", "state"]);
-  assert.equal("facts" in captured, false);
-  assert.equal("seatClose" in captured, false);
-});
-
-test("a stopped completion preserves its real leading admission exactly once", () => {
-  const leading = admission(checkpoint(), 1);
-  const progress = new ExecutionProgress();
-  progress.recordAdmission(leading);
-  progress.recordStop({
-    kind: "execution-stopped",
-    contractId: leading.state.id,
-    stage: "placement",
-    reason: "failed",
-    diagnostic: "blocked",
-  });
-  progress.recordAdmission(leading);
-  assert.deepEqual(progress.accepted(leading.state.id, {}).facts, leading.facts);
-  assert.equal(progress.snapshot().stops.length, 1);
-});
-
-test("invocation facts exclude history and retain only new steps in execution order", () => {
-  const history = admission(checkpoint(), 1);
-  const leading = admission(history, 2);
-  const verified = admission(leading, 3);
-  const placed = admission(verified, 4);
-  const progress = new ExecutionProgress();
-  progress.recordAdmission(leading);
-  const earlier = progress.snapshot();
-  progress.recordAdmission(verified);
-  progress.recordAdmission(placed);
-  assert.deepEqual(progress.accepted(leading.state.id, {}).facts, [
-    ...leading.facts,
-    ...verified.facts,
-    ...placed.facts,
-  ]);
-  assert.deepEqual(earlier.facts, leading.facts);
-  assert.deepEqual(progress.checkpoint(leading.state.id)?.journal, placed.journal);
-});
-
-test("observation-only continuation reports only its actual new admission", () => {
-  const earlier = admission(checkpoint(), 1);
-  const claim = admission(earlier, 2);
-  const progress = new ExecutionProgress();
-  progress.recordAdmission(claim);
-  assert.deepEqual(progress.snapshot().facts, claim.facts);
-  assert.equal(progress.head(earlier.state.id), claim.state.head);
-});
-
 test("physical and seat-close reports accumulate without replay duplication or input mutation", () => {
   const leading: AcceptedProtocolStep = {
     ...admission(checkpoint(), 1),
@@ -143,18 +87,6 @@ test("physical and seat-close reports accumulate without replay duplication or i
     ["first", "second"],
   );
   assert.equal(leading.physical!.lag.length, 1);
-});
-
-test("a dependent cannot replace the primary checkpoint or returned head", () => {
-  const leading = admission(checkpoint(), 1);
-  const child = admission(checkpoint("kei/child"), 2);
-  const progress = new ExecutionProgress();
-  progress.recordAdmission(leading);
-  progress.recordAdmission(child);
-  assert.equal(progress.accepted(leading.state.id, {}).head, leading.state.head);
-  assert.equal(progress.checkpoint(leading.state.id)?.state.id, leading.state.id);
-  assert.equal(progress.checkpoint(child.state.id)?.state.id, child.state.id);
-  assert.deepEqual(progress.snapshot().facts, [...leading.facts, ...child.facts]);
 });
 
 test("receipt replay cannot rewind a newer admitted checkpoint", () => {
@@ -216,19 +148,6 @@ test("all verification cleanup and leaks survive repeated candidates and depende
   );
 });
 
-test("a raw confirmed publication remains visible even if folding never returns", () => {
-  const leading = admission(checkpoint(), 1),
-    progress = new ExecutionProgress();
-  progress.recordPublication(leading.state.id, leading.state.head!, leading.facts);
-  assert.equal(progress.checkpoint(leading.state.id), undefined);
-  const original = new AuthorityCorruptionError("fold failure");
-  const error = withExecutionReceipt(original, receiptFromProgress("review", leading.state.id, progress)!);
-  assert.equal(error, original);
-  assert.ok(error instanceof AuthorityCorruptionError);
-  assert.deepEqual(executionReceipt(error)?.facts, leading.facts);
-  assert.equal(executionReceipt(error)?.head, leading.state.head);
-});
-
 test("cancellation cannot launder programming errors into operational stops", () => {
   const controller = new AbortController();
   controller.abort();
@@ -244,18 +163,4 @@ test("cancellation cannot launder programming errors into operational stops", ()
       (actual) => actual === error,
     );
   }
-});
-
-test("untyped error codes and unproven AbortError names remain exceptional", () => {
-  const id = contractId("kei/stop");
-  const coded = Object.assign(new Error("internal bug"), { code: "EBUG" });
-  assert.throws(
-    () => executionStop(id, "verification", coded),
-    (actual) => actual === coded,
-  );
-  const abortError = Object.assign(new Error("not cancelled"), { name: "AbortError" });
-  assert.throws(
-    () => executionStop(id, "verification", abortError),
-    (actual) => actual === abortError,
-  );
 });

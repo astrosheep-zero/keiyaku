@@ -1,3 +1,4 @@
+import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -74,10 +75,7 @@ test("Pi command runs one text status and does not refresh when dismissed", asyn
     return { stdout: "Contract status\nAkuma status\n", stderr: "", code: 0, killed: false };
   });
   let overlay: Overlay | undefined;
-  let closeOverlay!: () => void;
-  const closed = new Promise<void>((resolve) => {
-    closeOverlay = resolve;
-  });
+  const { promise: closed, resolve: closeOverlay } = promiseBarrier<void>();
   const context = {
     hasUI: true,
     ui: {

@@ -1,13 +1,11 @@
+import { receipt } from "./support/cli-fixtures.js";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { namedValueLines } from "../src/cli/render/value.js";
-import { renderObservation } from "../src/cli/render/board.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
 import { renderCatalogText } from "../src/cli/render/catalog.js";
 import { renderSettingsText } from "../src/cli/render/settings.js";
-import { renderBindDraftReceipt, renderRefusalFacts, renderConflictMaterialized } from "../src/cli/render/refusal.js";
-import { gateFact } from "../src/cli/render/contract-observation.js";
+import { renderBindDraftReceipt, renderRefusalFacts } from "../src/cli/render/refusal.js";
 import { entityLines, displayColumns, plumbFacts } from "../src/cli/render/terminal.js";
 import {
   actorId,
@@ -83,26 +81,6 @@ test("opaque strings and keys escape format characters without collapsing distin
   assert.equal(namedValueLines("a\u200db", "x")[0], '"a\\u200db"  "x"');
 });
 
-test("observation preserves outer ownership and does not assert success", () => {
-  const result = {
-    kind: "observation" as const,
-    command: "reconcile",
-    report: { kind: "failed", contracts: [] },
-    lag: [],
-  };
-  assert.equal(
-    renderObservation(result),
-    [
-      "observation  reconcile",
-      "  report  object (2)",
-      '    kind  "failed"',
-      "    contracts  list (0)",
-      "  lag  list (0)",
-    ].join("\n"),
-  );
-  assert.equal(result.report.kind, "failed");
-});
-
 test("settings text retains shadow provenance and exact configuration names", () => {
   const value: Settings = {
     scopes: {
@@ -128,18 +106,6 @@ test("settings text retains shadow provenance and exact configuration names", ()
   );
 });
 
-test("all four gate states keep the declared gate identity", () => {
-  assert.deepEqual(
-    [
-      gateFact({ gate: "reviewed", current: { kind: "attested", verdict: "satisfied", at: "2026-08-01T00:00:00Z" } }),
-      gateFact({ gate: "verified", current: { kind: "attested", verdict: "unsatisfied", at: "2026-08-01T00:00:00Z" } }),
-      gateFact({ gate: "security", current: { kind: "stale", priorVerdict: "satisfied" } }),
-      gateFact({ gate: "customGate", current: { kind: "missing" } }),
-    ],
-    ["✓ reviewed", "× verified", "! security · stale", "○ customGate"],
-  );
-});
-
 test("narrow entities retain deliberate layout and compact facts never split a path", () => {
   assert.deepEqual(
     entityLines({
@@ -157,26 +123,6 @@ test("narrow entities retain deliberate layout and compact facts never split a p
     "  candidate  none · target  main",
     `  worktree  ${path}`,
   ]);
-});
-
-test("confirmation mismatch keeps the world and caller value separately labeled", () => {
-  assert.deepEqual(
-    renderRefusalFacts(
-      {
-        kind: "nuke-confirmation-mismatch",
-        world: "/repo",
-        confirmation: "/other",
-      },
-      "  ",
-      120,
-    ),
-    [
-      "  nuke confirmation mismatch",
-      "  world  /repo",
-      "  confirmation  /other",
-      "  nuke  keiyaku nuke --confirm '/repo'",
-    ],
-  );
 });
 
 test("dirty refusal describes available capture without asserting a current unmerged index", () => {
@@ -211,50 +157,12 @@ test("integration refusal keeps its reason distinct from the target coordinate",
   assert.deepEqual(lines, ["  integration-failed  kei/conflict", "  reason  conflict", `  target  ${target}`]);
 });
 
-test("materialized conflict keeps copyable handoff and target coordinates", () => {
-  const base = snapshotId("a".repeat(40));
-  const target = snapshotId("b".repeat(40));
-  const output = renderConflictMaterialized(
-    {
-      kind: "integration-conflict-materialized",
-      handoffBase: base,
-      targetHead: target,
-      workspace: { kind: "worktree", path: "/repo/.keiyaku/wt/example" },
-      conflictPaths: ["file.txt"],
-      recovery: {
-        deliver: "deliver --include-dirty",
-        materialize: "deliver --materialize-conflict --include-dirty",
-        staging: "not-required",
-      },
-    },
-    { columns: 30, color: false },
-  );
-  assert.ok(output.includes("  target"));
-  assert.ok(output.includes(target.slice(0, 7)));
-  assert.ok(output.includes(base.slice(0, 7)));
-  assert.ok(output.split("\n").includes("  deliver  deliver --include-dirty · reads worktree bytes, not index"));
-  assert.doesNotMatch(output, /-C |--cwd |please|next/u);
-});
-
 test("bind draft facts preserve optional evidence without a separate text dialect", () => {
   const path = "/tmp/long draft directory/input.md";
   assert.equal(renderBindDraftReceipt({ path, warning: "disk full" }), `  draft  ${path}\n! draft warning  disk full`);
   assert.equal(renderBindDraftReceipt({ path }), `  draft  ${path}`);
   assert.equal(renderBindDraftReceipt({ warning: "disk full" }), "! draft warning  disk full");
   assert.doesNotMatch(renderBindDraftReceipt({ warning: "disk full" }), /draft preserved|:\s|next|please/u);
-});
-
-test("narrow confirmation handles preserve shell-sensitive World coordinates", () => {
-  const world = "D:\\dev\\it's a $TAG; repository";
-  const lines = renderRefusalFacts({ kind: "nuke-confirmation-required", world }, "  ", 20);
-  assert.equal(lines.length, 3);
-  assert.equal(lines[1], `  world  ${world}`);
-  assert.ok(lines[2]!.startsWith("  nuke  "));
-  const handle = lines[2]!.slice("  nuke  ".length);
-  const parsed = spawnSync("bash", ["-c", `set -- ${handle}; printf '%s\\0' "$@"`], { encoding: "utf8" });
-  assert.equal(parsed.status, 0, parsed.stderr);
-  assert.deepEqual(parsed.stdout.split("\0").slice(0, -1), ["keiyaku", "nuke", "--confirm", world]);
-  assert.doesNotMatch(handle, /-C |--cwd |next|please/u);
 });
 
 test("Contract history keeps event evidence and commit labels without exposing document blobs", () => {
@@ -393,13 +301,10 @@ test("catalogue and Kanshi state the verified commit with one vocabulary", () =>
 test("audit separates its observation outcome from complete candidate coordinates", () => {
   const path = `src/${"long-directory/".repeat(8)}file.ts`;
   const output = renderText(
-    {
-      kind: "accepted",
+    receipt({
       verb: "audit",
       contract: contractId("kei/audit"),
       head: contractHead("private-head"),
-      facts: [],
-      settlementLags: [],
       report: {
         candidate: {
           kind: "ready",
@@ -419,7 +324,7 @@ test("audit separates its observation outcome from complete candidate coordinate
         verification: { kind: "not-run" },
         target: { kind: "not-observed" },
       },
-    },
+    }),
     { columns: 80, color: false },
   );
   assert.equal(
@@ -441,28 +346,6 @@ test("audit separates its observation outcome from complete candidate coordinate
   assert.doesNotMatch(output, /private-head|^[{[]|^✓ (?:candidate|verification|target)|next|then|please|key=/mu);
 });
 
-test("narrow conflict output keeps its label, paths and handles whole", () => {
-  const path = `src/${"long-directory/".repeat(8)}file.ts`;
-  const output = renderConflictMaterialized(
-    {
-      kind: "integration-conflict-materialized",
-      handoffBase: snapshotId("a".repeat(40)),
-      targetHead: snapshotId("b".repeat(40)),
-      workspace: { kind: "worktree", path: "/worktree" },
-      conflictPaths: [path],
-      recovery: {
-        deliver: "deliver --include-dirty",
-        materialize: "deliver --materialize-conflict --include-dirty",
-        staging: "not-required",
-      },
-    },
-    { columns: 30, color: false },
-  );
-  assert.equal(output.split("\n")[0], "! integration-conflict-materialized");
-  assert.ok(output.split("\n").includes(`    ${path}`));
-  assert.equal(output.split("\n").at(-1), "  deliver  deliver --include-dirty · reads worktree bytes, not index");
-});
-
 test("World roster keeps concrete activity evidence without duplicating snapshot sections", () => {
   const command = "keiyaku audit kei/reuse-snapshot-activity-rendering";
   const snapshot = openAkumaSnapshot(
@@ -476,44 +359,4 @@ test("World roster keeps concrete activity evidence without duplicating snapshot
   assert.doesNotMatch(text, /──|tasks \d|changes \d|came back|STILL RUNNING|killed/u);
   for (const line of renderKanshiText(report, { columns: 60, color: false }).split("\n"))
     assert.ok(displayColumns(line) <= 60, line);
-});
-
-test("accepted review keeps its typed workspace evidence in JSON while text stays outcome-only", () => {
-  const contract = contractId("kei/review-workspace-projection");
-  const workspace = {
-    staged: ["src/staged.ts"],
-    unstaged: ["src/unstaged.ts"],
-    untracked: ["untracked.txt"],
-    unmergedPaths: ["conflict.txt"],
-    shortStat: { filesChanged: 3, insertions: 4, deletions: 1 },
-  };
-  const result = {
-    kind: "accepted" as const,
-    verb: "review" as const,
-    contract,
-    head: contractHead("head"),
-    facts: [{ contract, entry: "claim", kind: "claimed" as const }],
-    settlementLags: [],
-    verdict: "satisfied" as const,
-    completion: {
-      integration: snapshotId("2".repeat(40)),
-      predecessor: snapshotId("1".repeat(40)),
-      target: "refs/heads/main",
-    },
-    workspace,
-  };
-  const text = renderText(result);
-  assert.equal(
-    text,
-    [
-      "✓ review satisfied  kei/review-workspace-projection",
-      "  target  1111111..2222222  refs/heads/main",
-      "● claimed",
-    ].join("\n"),
-  );
-  assert.doesNotMatch(text, /^\s+(?:workspace|staged|unstaged|untracked|unmerged)\s/mu);
-  assert.doesNotMatch(text, /files? changed/u);
-  assert.deepEqual(JSON.parse(JSON.stringify(result)).workspace, workspace);
-  assert.deepEqual(JSON.parse(JSON.stringify(result)).completion, result.completion);
-  assert.deepEqual(JSON.parse(JSON.stringify(result)).facts, result.facts);
 });

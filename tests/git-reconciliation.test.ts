@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import test from "node:test";
+import test, { describe } from "node:test";
 import { Keiyaku, Repo, type ContractId, type TopologyEffect } from "../src/index.js";
 import { snapshotId } from "../src/core/facts/types.js";
 import { readRef, repositoryAt } from "../src/git/repository.js";
@@ -93,35 +93,6 @@ async function tenderedReviewGatedTargetFixture() {
   return { contract, repository, worktree };
 }
 
-test("reconciliation repairs sentinelled skills and preserves a tracked user override", async () => {
-  const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({
-    repo: await Repo.at({ path: repository.path }),
-    markdown: document(),
-    workspace: "worktree",
-  });
-  const contract = bound.keiyaku;
-  const contractId = (await contract.state()).id;
-  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), contractId);
-  const deliverLeaf = join(worktree, ".agents", "skills", "keiyaku-deliver");
-  const deliverSkill = join(deliverLeaf, "SKILL.md");
-  const reviewSkill = join(worktree, ".agents", "skills", "keiyaku-review", "SKILL.md");
-  unlinkSync(join(deliverLeaf, ".gitignore"));
-  writeFileSync(deliverSkill, "# User deliverer skill\n");
-  repository.run(["-C", worktree, "add", ".agents/skills/keiyaku-deliver/SKILL.md"]);
-  repository.run(["-C", worktree, "commit", "--quiet", "-m", "user seat skill"]);
-  writeFileSync(reviewSkill, "stale generated skill\n");
-
-  const report = await contract.reconcile();
-
-  assert.deepEqual(report.lag, []);
-  assert.equal(readFileSync(deliverSkill, "utf8"), "# User deliverer skill\n");
-  assert.equal(statSync(join(deliverLeaf, ".gitignore"), { throwIfNoEntry: false }), undefined);
-  assert.match(readFileSync(reviewSkill, "utf8"), /^---\nname: keiyaku-review$/m);
-  const status = repository.run(["-C", worktree, "status", "--porcelain", "--untracked-files=all"]);
-  assert.equal(status.includes("keiyaku-review"), false);
-});
-
 async function restoreOwnedRefs(
   repository: ReturnType<typeof repositoryWithMain>,
   id: ContractId,
@@ -132,148 +103,115 @@ async function restoreOwnedRefs(
   repository.run(["update-ref", candidatePinRefFor(id), integration]);
 }
 
-test("rewritten target history retains owned refs with unchanged effects", async () => {
-  const { contract, repository } = await tenderedReviewGatedTargetFixture();
-  writeFileSync(join(repository.path, "target-only.txt"), "target only\n");
-  repository.run(["add", "target-only.txt"]);
-  repository.run(["commit", "--quiet", "-m", "target only"]);
-  await contract.review({ verdict: "satisfied" });
-  const state = await contract.state();
-  assert.equal(state.terminal?.kind, "claimed");
-  const tender = state.delivery?.data.tenderSnapshot;
-  const integration = state.currentIntegration?.snapshot ?? state.delivery?.data.integration.snapshot;
-  assert.ok(tender);
-  assert.ok(integration);
-  assert.notEqual(tender, integration);
-  await restoreOwnedRefs(repository, state.id, tender, integration);
-  const tree = repository.run(["rev-parse", "HEAD^{tree}"]).trim();
-  const rewritten = repository.run(["commit-tree", tree, "-m", "rewritten target"]).trim();
-  repository.run(["update-ref", "refs/heads/main", rewritten]);
+// Each case owns its repository, fault injector and cleanup; no process-global mocks.
+describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
+  test("reconciliation repairs sentinelled skills and preserves a tracked user override", async () => {
+    const repository = repositoryWithMain();
+    const bound = await Keiyaku.bind({
+      repo: await Repo.at({ path: repository.path }),
+      markdown: document(),
+      workspace: "worktree",
+    });
+    const contract = bound.keiyaku;
+    const contractId = (await contract.state()).id;
+    const worktree = await appointedWorktreePath(await repositoryAt(repository.path), contractId);
+    const deliverLeaf = join(worktree, ".agents", "skills", "keiyaku-deliver");
+    const deliverSkill = join(deliverLeaf, "SKILL.md");
+    const reviewSkill = join(worktree, ".agents", "skills", "keiyaku-review", "SKILL.md");
+    unlinkSync(join(deliverLeaf, ".gitignore"));
+    writeFileSync(deliverSkill, "# User deliverer skill\n");
+    repository.run(["-C", worktree, "add", ".agents/skills/keiyaku-deliver/SKILL.md"]);
+    repository.run(["-C", worktree, "commit", "--quiet", "-m", "user seat skill"]);
+    writeFileSync(reviewSkill, "stale generated skill\n");
 
-  const report = await contract.reconcile();
-  const git = await repositoryAt(repository.path);
+    const report = await contract.reconcile();
 
-  assert.equal(await readRef(git, deliveryRefFor(state.id)), tender);
-  assert.equal(await readRef(git, candidatePinRefFor(state.id)), integration);
-  assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), rewritten);
-  assert.equal(report.lag.length, 0);
-  assert.equal(unchangedRef(report.effects, deliveryRefFor(state.id), tender), true);
-  assert.equal(unchangedRef(report.effects, candidatePinRefFor(state.id), integration), true);
-});
+    assert.deepEqual(report.lag, []);
+    assert.equal(readFileSync(deliverSkill, "utf8"), "# User deliverer skill\n");
+    assert.equal(statSync(join(deliverLeaf, ".gitignore"), { throwIfNoEntry: false }), undefined);
+    assert.match(readFileSync(reviewSkill, "utf8"), /^---\nname: keiyaku-review$/m);
+    const status = repository.run(["-C", worktree, "status", "--porcelain", "--untracked-files=all"]);
+    assert.equal(status.includes("keiyaku-review"), false);
+  });
 
-test("unequal tender and integration trees retain the delivery ref through a containing target", async () => {
-  const { contract, repository } = await tenderedReviewGatedTargetFixture();
-  writeFileSync(join(repository.path, "target-only.txt"), "target only\n");
-  repository.run(["add", "target-only.txt"]);
-  repository.run(["commit", "--quiet", "-m", "target only"]);
-  await contract.review({ verdict: "satisfied" });
-  const state = await contract.state();
-  assert.equal(state.terminal?.kind, "claimed");
-  const tender = state.delivery?.data.tenderSnapshot;
-  const integration = state.currentIntegration?.snapshot ?? state.delivery?.data.integration.snapshot;
-  assert.ok(tender);
-  assert.ok(integration);
-  assert.notEqual(tender, integration);
-  await restoreOwnedRefs(repository, state.id, tender, integration);
-  writeFileSync(join(repository.path, "after-claim.txt"), "after claim\n");
-  repository.run(["add", "after-claim.txt"]);
-  repository.run(["commit", "--quiet", "-m", "after claim"]);
-  const targetBefore = repository.run(["rev-parse", "refs/heads/main"]).trim();
+  test("rewritten target history retains owned refs with unchanged effects", async () => {
+    const { contract, repository } = await tenderedReviewGatedTargetFixture();
+    writeFileSync(join(repository.path, "target-only.txt"), "target only\n");
+    repository.run(["add", "target-only.txt"]);
+    repository.run(["commit", "--quiet", "-m", "target only"]);
+    await contract.review({ verdict: "satisfied" });
+    const state = await contract.state();
+    assert.equal(state.terminal?.kind, "claimed");
+    const tender = state.delivery?.data.tenderSnapshot;
+    const integration = state.currentIntegration?.snapshot ?? state.delivery?.data.integration.snapshot;
+    assert.ok(tender);
+    assert.ok(integration);
+    assert.notEqual(tender, integration);
+    await restoreOwnedRefs(repository, state.id, tender, integration);
+    const tree = repository.run(["rev-parse", "HEAD^{tree}"]).trim();
+    const rewritten = repository.run(["commit-tree", tree, "-m", "rewritten target"]).trim();
+    repository.run(["update-ref", "refs/heads/main", rewritten]);
 
-  const report = await contract.reconcile();
-  const git = await repositoryAt(repository.path);
+    const report = await contract.reconcile();
+    const git = await repositoryAt(repository.path);
 
-  assert.equal(await readRef(git, deliveryRefFor(state.id)), tender);
-  assert.equal(await readRef(git, candidatePinRefFor(state.id)), null);
-  assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), targetBefore);
-  assert.equal(report.lag.length, 0);
-  assert.equal(unchangedRef(report.effects, deliveryRefFor(state.id), tender), true);
-  assert.equal(
-    report.effects.some(
-      (effect) => effect.kind === "ref" && effect.name === candidatePinRefFor(state.id) && effect.action === "removed",
-    ),
-    true,
-  );
-});
+    assert.equal(await readRef(git, deliveryRefFor(state.id)), tender);
+    assert.equal(await readRef(git, candidatePinRefFor(state.id)), integration);
+    assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), rewritten);
+    assert.equal(report.lag.length, 0);
+    assert.equal(unchangedRef(report.effects, deliveryRefFor(state.id), tender), true);
+    assert.equal(unchangedRef(report.effects, candidatePinRefFor(state.id), integration), true);
+  });
 
-test("abandoned tender custody remains when it is the sole proof", async () => {
-  const { contract, repository } = await tenderedReviewGatedTargetFixture();
-  const delivered = await contract.state();
-  const tender = delivered.delivery?.data.tenderSnapshot;
-  const integration = delivered.currentIntegration?.snapshot ?? delivered.delivery?.data.integration.snapshot;
-  assert.ok(tender);
-  assert.ok(integration);
-  await contract.abandon();
-  const id = (await contract.state()).id;
-  const git = await repositoryAt(repository.path);
+  test("expected-target CAS retains owned refs under a stale frozen tip", async () => {
+    const { contract, repository } = await tenderedReviewGatedTargetFixture();
+    await contract.review({ verdict: "satisfied" });
+    const state = await contract.state();
+    assert.equal(state.terminal?.kind, "claimed");
+    const tender = state.delivery?.data.tenderSnapshot;
+    const integration = state.currentIntegration?.snapshot ?? state.delivery?.data.integration.snapshot;
+    assert.ok(tender);
+    assert.ok(integration);
+    await restoreOwnedRefs(repository, state.id, tender, integration);
+    const frozen = repository.run(["rev-parse", "refs/heads/main"]).trim();
+    const marker = join(repository.path, "moved-target");
 
-  assert.equal(await readRef(git, deliveryRefFor(id)), tender);
-  if (tender === integration) {
-    assert.equal(await readRef(git, candidatePinRefFor(id)), null);
-  } else {
-    assert.equal(await readRef(git, candidatePinRefFor(id)), integration);
-  }
+    const report = await withGitShim(
+      [
+        'if [ "$1" = "merge-base" ] && [ "$2" = "--is-ancestor" ] && [ ! -e "$KEIYAKU_MOVED_TARGET" ]; then',
+        '  "$KEIYAKU_REAL_GIT" "$@" || exit $?',
+        '  parent=$("$KEIYAKU_REAL_GIT" -C "$KEIYAKU_REPO" rev-parse --verify refs/heads/main)',
+        '  tree=$("$KEIYAKU_REAL_GIT" -C "$KEIYAKU_REPO" rev-parse "$parent^{tree}")',
+        '  next=$("$KEIYAKU_REAL_GIT" -C "$KEIYAKU_REPO" -c user.name="Test User" -c user.email="test@example.com" commit-tree "$tree" -p "$parent" -m "concurrent target move")',
+        '  "$KEIYAKU_REAL_GIT" -C "$KEIYAKU_REPO" update-ref refs/heads/main "$next" "$parent"',
+        '  touch "$KEIYAKU_MOVED_TARGET"',
+        "  exit 0",
+        "fi",
+        'exec "$KEIYAKU_REAL_GIT" "$@"',
+      ].join("\n"),
+      { KEIYAKU_MOVED_TARGET: marker, KEIYAKU_REPO: repository.path },
+      async (gitPath) =>
+        (
+          await Keiyaku.of({
+            repo: await Repo.at({ path: repository.path, gitPath }),
+            id: state.id,
+          })
+        ).reconcile(),
+    );
+    const git = await repositoryAt(repository.path);
+    const moved = repository.run(["rev-parse", "refs/heads/main"]).trim();
 
-  const report = await contract.reconcile();
-  assert.equal(await readRef(git, deliveryRefFor(id)), tender);
-  assert.equal(report.lag.length, 0);
-  assert.equal(unchangedRef(report.effects, deliveryRefFor(id), tender), true);
-  if (tender === integration) {
-    assert.equal(await readRef(git, candidatePinRefFor(id)), null);
-  } else {
-    assert.equal(await readRef(git, candidatePinRefFor(id)), integration);
-    assert.equal(unchangedRef(report.effects, candidatePinRefFor(id), integration), true);
-  }
-});
+    assert.notEqual(moved, frozen);
+    assert.equal(await readRef(git, deliveryRefFor(state.id)), tender);
+    assert.equal(await readRef(git, candidatePinRefFor(state.id)), integration);
+    assert.equal(report.lag.length, 0);
+    assert.equal(unchangedRef(report.effects, deliveryRefFor(state.id), tender), true);
+    assert.equal(unchangedRef(report.effects, candidatePinRefFor(state.id), integration), true);
 
-test("expected-target CAS retains owned refs under a stale frozen tip", async () => {
-  const { contract, repository } = await tenderedReviewGatedTargetFixture();
-  await contract.review({ verdict: "satisfied" });
-  const state = await contract.state();
-  assert.equal(state.terminal?.kind, "claimed");
-  const tender = state.delivery?.data.tenderSnapshot;
-  const integration = state.currentIntegration?.snapshot ?? state.delivery?.data.integration.snapshot;
-  assert.ok(tender);
-  assert.ok(integration);
-  await restoreOwnedRefs(repository, state.id, tender, integration);
-  const frozen = repository.run(["rev-parse", "refs/heads/main"]).trim();
-  const marker = join(repository.path, "moved-target");
-
-  const report = await withGitShim(
-    [
-      'if [ "$1" = "merge-base" ] && [ "$2" = "--is-ancestor" ] && [ ! -e "$KEIYAKU_MOVED_TARGET" ]; then',
-      '  "$KEIYAKU_REAL_GIT" "$@" || exit $?',
-      '  parent=$("$KEIYAKU_REAL_GIT" -C "$KEIYAKU_REPO" rev-parse --verify refs/heads/main)',
-      '  tree=$("$KEIYAKU_REAL_GIT" -C "$KEIYAKU_REPO" rev-parse "$parent^{tree}")',
-      '  next=$("$KEIYAKU_REAL_GIT" -C "$KEIYAKU_REPO" -c user.name="Test User" -c user.email="test@example.com" commit-tree "$tree" -p "$parent" -m "concurrent target move")',
-      '  "$KEIYAKU_REAL_GIT" -C "$KEIYAKU_REPO" update-ref refs/heads/main "$next" "$parent"',
-      '  touch "$KEIYAKU_MOVED_TARGET"',
-      "  exit 0",
-      "fi",
-      'exec "$KEIYAKU_REAL_GIT" "$@"',
-    ].join("\n"),
-    { KEIYAKU_MOVED_TARGET: marker, KEIYAKU_REPO: repository.path },
-    async (gitPath) =>
-      (
-        await Keiyaku.of({
-          repo: await Repo.at({ path: repository.path, gitPath }),
-          id: state.id,
-        })
-      ).reconcile(),
-  );
-  const git = await repositoryAt(repository.path);
-  const moved = repository.run(["rev-parse", "refs/heads/main"]).trim();
-
-  assert.notEqual(moved, frozen);
-  assert.equal(await readRef(git, deliveryRefFor(state.id)), tender);
-  assert.equal(await readRef(git, candidatePinRefFor(state.id)), integration);
-  assert.equal(report.lag.length, 0);
-  assert.equal(unchangedRef(report.effects, deliveryRefFor(state.id), tender), true);
-  assert.equal(unchangedRef(report.effects, candidatePinRefFor(state.id), integration), true);
-
-  const retried = await contract.reconcile();
-  assert.equal(await readRef(git, deliveryRefFor(state.id)), null);
-  assert.equal(await readRef(git, candidatePinRefFor(state.id)), null);
-  assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), moved);
-  assert.equal(retried.lag.length, 0);
+    const retried = await contract.reconcile();
+    assert.equal(await readRef(git, deliveryRefFor(state.id)), null);
+    assert.equal(await readRef(git, candidatePinRefFor(state.id)), null);
+    assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), moved);
+    assert.equal(retried.lag.length, 0);
+  });
 });

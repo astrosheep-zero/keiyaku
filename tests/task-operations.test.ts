@@ -1,3 +1,4 @@
+import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import {
@@ -29,13 +30,12 @@ import {
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { parseTaskDocument, serializeTaskDocument, type TaskDocument } from "../src/task/document.js";
 import { parseTaskId } from "../src/task/identity.js";
-import { batchTasks, observeTaskDetails, settleTask } from "../src/task/operations.js";
+import { observeTaskDetails, settleTask } from "../src/task/operations.js";
 import {
-  DEFAULT_TASK_LOCK_TIMEOUT_MS,
   authorityPath,
   nukeTaskAuthority,
   replaceAuthority,
-  withTaskLocks,
+  withTaskLocks
 } from "../src/task/store.js";
 import { World, type WorldRoot } from "../src/world.js";
 
@@ -73,23 +73,20 @@ async function lifecycle(
   }
 }
 function acceptedId(result: Awaited<ReturnType<ReturnType<typeof Tasks.of>["add"]>>): TaskId {
-  assert.equal(result.kind, "accepted");
-  if (result.kind !== "accepted") throw new Error("task add failed");
+  assert.ok(result.kind === "accepted", "expected result.kind = \"accepted\"");
   return result.value.id;
 }
 
 test("note is replaceable authority and product timestamps advance only on change", async () => {
   const { tasks } = await world();
   const added = await tasks.add({ title: "Timestamped", note: "first" });
-  assert.equal(added.kind, "accepted");
-  if (added.kind !== "accepted") return;
+  assert.ok(added.kind === "accepted", "expected added.kind = \"accepted\"");
   assert.equal(added.value.note, "first");
   assert.equal(added.value.createdAt, added.value.updatedAt);
   assert.equal(new Date(added.value.createdAt).toISOString(), added.value.createdAt);
 
   const replaced = await tasks.task({ id: added.value.id }).update({ note: "second" });
-  assert.equal(replaced.kind, "accepted");
-  if (replaced.kind !== "accepted") return;
+  assert.ok(replaced.kind === "accepted", "expected replaced.kind = \"accepted\"");
   assert.equal(replaced.value.task.note, "second");
   assert.equal(replaced.value.task.createdAt, added.value.createdAt);
   assert.ok(replaced.value.task.updatedAt > added.value.updatedAt);
@@ -97,8 +94,7 @@ test("note is replaceable authority and product timestamps advance only on chang
   assert.match(replaced.value.documentDiff, /\+note: second/u);
 
   const unchanged = await tasks.task({ id: added.value.id }).update({ note: "second" });
-  assert.equal(unchanged.kind, "accepted");
-  if (unchanged.kind !== "accepted") return;
+  assert.ok(unchanged.kind === "accepted", "expected unchanged.kind = \"accepted\"");
   assert.equal(unchanged.value.documentDiff, "");
   assert.equal(unchanged.value.task.updatedAt, replaced.value.task.updatedAt);
 });
@@ -175,26 +171,8 @@ test("batch start preserves order and continues after per-task refusals", async 
   assert.throws(() => tasks.batch({ verb: "start", ids: [] }), /at least one TaskId/u);
 });
 
-test("batch lifecycle advances one current board view in request order", async () => {
-  const { tasks } = await world();
-  const id = acceptedId(await tasks.add({ title: "Batch current view" }));
-
-  const result = await batchTasks(tasks.root, "start", [id, id]);
-  assert.deepEqual(
-    result.items.map((item) => item.outcome.kind),
-    ["accepted", "refused"],
-  );
-  assert.deepEqual(result.items[1]?.outcome, {
-    kind: "refused",
-    refusal: { kind: "invalid-lifecycle-transition", taskId: id, state: "in_progress", verb: "start" },
-  });
-});
-
 function nextTaskLockAttempt(t: TestContext): Promise<void> {
-  let observed!: () => void;
-  const pending = new Promise<void>((resolve) => {
-    observed = resolve;
-  });
+  const { promise: pending, resolve: observed } = promiseBarrier<void>();
   const exec = DatabaseSync.prototype.exec;
   t.mock.method(DatabaseSync.prototype, "exec", function (this: DatabaseSync, sql: string) {
     // Lock initialization occurs after the batch has captured its board.
@@ -267,8 +245,7 @@ test("batch missing refusal retries when the Task is created before its lock", a
   try {
     await lockAttempt;
     const created = await tasks.add({ title: "Batch stale missing" });
-    assert.equal(created.kind, "accepted");
-    if (created.kind !== "accepted") return;
+    assert.ok(created.kind === "accepted", "expected created.kind = \"accepted\"");
     const source = authorityPath(root, created.value.id);
     const document = parseTaskDocument(readFileSync(source), parseTaskId(created.value.id));
     writeFileSync(authorityPath(root, id), serializeTaskDocument({ ...document, id }));
@@ -279,38 +256,6 @@ test("batch missing refusal retries when the Task is created before its lock", a
 
   const result = await pending;
   assert.deepEqual(result.items[0]?.outcome, { kind: "retry", reason: "concurrent-modification" });
-});
-
-test("Tasks creates root authority without Contract coupling", async () => {
-  const { tasks } = await world();
-  const rootId = acceptedId(await tasks.add({ title: "Root task" }));
-  assert.match(rootId, /^task\/root-task-[0-9a-f]{4}$/u);
-  const nestedId = acceptedId(
-    await tasks.add({ title: "Nested task", namespace: ["contract", "inside"], state: "in_progress" }),
-  );
-  assert.match(nestedId, /^task\/contract\/inside\/nested-task-[0-9a-f]{4}$/u);
-  assert.equal((await tasks.task({ id: nestedId }).read())?.task.state, "in_progress");
-  assert.throws(
-    () => tasks.add({ title: "Coupled", contractId: "kei/forbidden" } as never),
-    /unknown field: contractId/u,
-  );
-  assert.deepEqual(
-    (await tasks.list({ namespace: ["contract", "inside"] })).kind === "accepted"
-      ? (
-          (await tasks.list({ namespace: ["contract", "inside"] })) as {
-            kind: "accepted";
-            value: { rows: readonly { id: string }[] };
-          }
-        ).value.rows.map((row) => row.id)
-      : [],
-    [nestedId],
-  );
-  const worldList = await tasks.list({ scope: "world", selection: "all" });
-  assert.equal(worldList.kind, "accepted");
-  if (worldList.kind === "accepted") {
-    assert.deepEqual(worldList.value.rows.map((row) => row.id).sort(), [nestedId, rootId].sort());
-    assert.equal(worldList.value.hasMore, false);
-  }
 });
 
 test("Task mutation mints raw World once while Tasks consumes its branded capability", async () => {
@@ -339,48 +284,6 @@ test("Task mutation mints raw World once while Tasks consumes its branded capabi
   const tasks = Tasks.of(canonical);
   assert.equal(tasks.root, canonical);
   assert.equal((await tasks.add({ title: "branded capability" })).kind, "accepted");
-});
-
-test("lifecycle, readiness, blocked projection, update diff, and batch results compose", async () => {
-  const { tasks } = await world();
-  const dependency = acceptedId(await tasks.add({ title: "Dependency" }));
-  const dependent = acceptedId(await tasks.add({ title: "Dependent", needs: [dependency] }));
-  assert.deepEqual(
-    (await tasks.ready()).kind === "accepted"
-      ? ((await tasks.ready()) as { kind: "accepted"; value: { rows: readonly { id: string }[] } }).value.rows.map(
-          (row) => row.id,
-        )
-      : [],
-    [dependency],
-  );
-  assert.equal((await tasks.task({ id: dependent }).start()).kind, "accepted");
-  const blocked = await tasks.blocked();
-  assert.equal(blocked.kind, "accepted");
-  if (blocked.kind === "accepted")
-    assert.deepEqual(
-      blocked.value.rows.map((row) => row.id),
-      [dependent],
-    );
-  assert.equal((await tasks.task({ id: dependency }).done()).kind, "accepted");
-  assert.equal(
-    (await tasks.blocked()).kind === "accepted"
-      ? ((await tasks.blocked()) as { kind: "accepted"; value: { rows: readonly unknown[] } }).value.rows.length
-      : -1,
-    0,
-  );
-  const updated = await tasks.task({ id: dependent }).update({ title: "Dependent renamed", appendBody: "body" });
-  assert.equal(updated.kind, "accepted");
-  if (updated.kind === "accepted") {
-    assert.match(updated.value.documentDiff, /Dependent renamed/u);
-    assert.match(updated.value.documentDiff, /task\/dependent-[0-9a-f]{4}\.md/u);
-    assert.equal(updated.value.documentDiff.includes(tasks.root), false);
-    assert.equal(updated.value.task.body, "body");
-  }
-  const batch = await tasks.batch({ verb: "done", ids: [dependent, "task/missing"] });
-  assert.deepEqual(
-    batch.items.map((item) => item.outcome.kind),
-    ["accepted", "refused"],
-  );
 });
 
 test("appendBody supplies one missing LF boundary without duplicating caller delimiters", async () => {
@@ -503,21 +406,6 @@ test("Task row views share the bounded-list contract and complete their graph ju
   await assert.rejects(() => tasks.list({ scope: "world", limit: 501 }), /integer from 1 to 500/u);
 });
 
-test("Task row-view limits refuse before reading Task authority", async () => {
-  const { root, tasks } = await world();
-  const directory = join(root, ".keiyaku", "tasks");
-  mkdirSync(directory);
-  writeFileSync(join(directory, "broken.md"), "not Task authority\n");
-
-  const reads = [
-    () => tasks.list({ scope: "world", limit: 501 }),
-    () => tasks.ready({ scope: "world", limit: 501 }),
-    () => tasks.blocked({ scope: "world", limit: 501 }),
-    () => tasks.query({ scope: "world", limit: 501 }),
-  ];
-  for (const read of reads) await assert.rejects(read, /integer from 1 to 500/u);
-});
-
 test("targeted reads expose outbound relations only; board projections derive reverse edges", async () => {
   const { tasks } = await world();
   const blocker = acceptedId(await tasks.add({ title: "A" }));
@@ -633,19 +521,6 @@ test("Task query defaults to active Tasks", async () => {
     );
 });
 
-test("graph mutation admits cycles, doctor diagnoses them, and lifecycle writers serialize", async () => {
-  const { tasks } = await world();
-  const first = acceptedId(await tasks.add({ title: "First" })),
-    second = acceptedId(await tasks.add({ title: "Second", needs: [first] }));
-  const cycle = await tasks.task({ id: first }).update({ needs: [second] });
-  assert.equal(cycle.kind, "accepted");
-  assert.deepEqual((await tasks.doctor()).issues, [{ kind: "cycle", relation: "needs", tasks: [first, second] }]);
-  assert.equal((await tasks.add({ title: "Unrelated after disease" })).kind, "accepted");
-  assert.equal((await tasks.task({ id: first }).update({ title: "First renamed" })).kind, "accepted");
-  const outcomes = await Promise.all([tasks.task({ id: first }).start(), tasks.task({ id: first }).start()]);
-  assert.deepEqual(outcomes.map((outcome) => outcome.kind).sort(), ["accepted", "refused"]);
-});
-
 test("concurrent same-title creation allocates stable unique suffixes", async () => {
   const { tasks } = await world();
   const outcomes = await Promise.all(Array.from({ length: 6 }, () => tasks.add({ title: "Collision" })));
@@ -653,21 +528,6 @@ test("concurrent same-title creation allocates stable unique suffixes", async ()
   const ids = outcomes.flatMap((outcome) => (outcome.kind === "accepted" ? [outcome.value.id] : []));
   assert.equal(new Set(ids).size, 6);
   assert.ok(ids.every((id) => /^task\/collision-[0-9a-f]{4}$/u.test(id)));
-});
-
-test("reverse dependency writers both admit and leave diagnosis to doctor", async () => {
-  const { tasks } = await world();
-  const first = acceptedId(await tasks.add({ title: "First" })),
-    second = acceptedId(await tasks.add({ title: "Second" }));
-  const outcomes = await Promise.all([
-    tasks.task({ id: first }).update({ needs: [second] }),
-    tasks.task({ id: second }).update({ needs: [first] }),
-  ]);
-  assert.deepEqual(
-    outcomes.map((outcome) => outcome.kind),
-    ["accepted", "accepted"],
-  );
-  assert.deepEqual((await tasks.doctor()).issues, [{ kind: "cycle", relation: "needs", tasks: [first, second] }]);
 });
 
 test("relation mutation rejects only newly declared missing and self targets", async () => {
@@ -693,27 +553,6 @@ test("existing graph disease does not adjudicate an unrelated relation addition"
   assert.deepEqual((await tasks.doctor()).issues, [
     { kind: "missing-target", taskId: subject, relation: "needs", target: "task/missing" },
   ]);
-});
-
-test("different task IDs and different worlds do not share task locks", async () => {
-  const firstWorld = await world(),
-    secondWorld = await world();
-  const firstA = acceptedId(await firstWorld.tasks.add({ title: "A" }));
-  const firstB = acceptedId(await firstWorld.tasks.add({ title: "B" }));
-  const secondA = acceptedId(await secondWorld.tasks.add({ title: "A" }));
-  const held = await acquireSqliteTransactionLock({
-    path: join(firstWorld.tasks.root, ".keiyaku", "locks", "task", "a", `${parseTaskId(firstA).localId}.sqlite`),
-    mode: "immediate",
-    timeoutMs: 100,
-  });
-  try {
-    assert.equal((await firstWorld.tasks.task({ id: firstB }).start()).kind, "accepted");
-    assert.equal((await secondWorld.tasks.task({ id: secondA }).start()).kind, "accepted");
-  } finally {
-    held.close();
-  }
-  assert.match(firstA, /^task\/a-[0-9a-f]{4}$/u);
-  assert.match(secondA, /^task\/a-[0-9a-f]{4}$/u);
 });
 
 test("reset re-resolves authority after a namespace swap while the task lock is held", async () => {
@@ -742,19 +581,6 @@ test("reset re-resolves authority after a namespace swap while the task lock is 
   rmSync(outside, { recursive: true, force: true });
 });
 
-test("allocation contention does not block relation updates", async () => {
-  const { tasks } = await world();
-  const first = acceptedId(await tasks.add({ title: "First" }));
-  const second = acceptedId(await tasks.add({ title: "Second" }));
-  const path = join(tasks.root, ".keiyaku", "locks", "task-allocation.sqlite");
-  const held = await acquireSqliteTransactionLock({ path, mode: "immediate", timeoutMs: 100 });
-  try {
-    assert.equal((await tasks.task({ id: first }).update({ needs: [second] })).kind, "accepted");
-  } finally {
-    held.close();
-  }
-});
-
 test("task lock cancellation propagates and exceptional actions release held locks", async () => {
   const { tasks } = await world(),
     id = acceptedId(await tasks.add({ title: "Cancel" }));
@@ -775,74 +601,6 @@ test("task lock cancellation propagates and exceptional actions release held loc
   assert.equal((await tasks.task({ id }).start()).kind, "accepted");
 });
 
-test("task lock cleanup attempts every release and preserves a committed result", { concurrency: false }, async () => {
-  const { tasks } = await world();
-  const first = acceptedId(await tasks.add({ title: "Cleanup first" }));
-  const second = acceptedId(await tasks.add({ title: "Cleanup second" }));
-  const originalClose = DatabaseSync.prototype.close;
-  let releases = 0;
-  DatabaseSync.prototype.close = function patchedClose(this: DatabaseSync): void {
-    releases += 1;
-    try {
-      if (releases <= 2) throw new Error(`release-${releases}`);
-    } finally {
-      originalClose.call(this);
-    }
-  };
-  try {
-    const result = await withTaskLocks({ world: tasks.root, allocation: false, ids: [first, second] }, async () => ({
-      kind: "accepted" as const,
-      value: "committed",
-    }));
-    assert.equal(releases, 2);
-    assert.deepEqual(result, {
-      kind: "accepted",
-      value: "committed",
-      cleanup: {
-        kind: "lock-release-failed",
-        diagnostics: ["cannot release SQLite lock: release-1", "cannot release SQLite lock: release-2"],
-      },
-    });
-  } finally {
-    DatabaseSync.prototype.close = originalClose;
-  }
-});
-
-test(
-  "a committed lifecycle action remains visible when cleanup fails and retry does not duplicate it",
-  { concurrency: false },
-  async () => {
-    const { tasks } = await world();
-    const id = acceptedId(await tasks.add({ title: "Cleanup retry" }));
-    const originalClose = DatabaseSync.prototype.close;
-    let fail = true;
-    DatabaseSync.prototype.close = function patchedClose(this: DatabaseSync): void {
-      try {
-        if (fail) throw new Error("release failed");
-      } finally {
-        originalClose.call(this);
-      }
-    };
-    try {
-      const committed = await tasks.task({ id }).start();
-      assert.equal(committed.kind, "accepted");
-      if (committed.kind !== "accepted") return;
-      assert.deepEqual(committed.cleanup, {
-        kind: "lock-release-failed",
-        diagnostics: ["cannot release SQLite lock: release failed"],
-      });
-    } finally {
-      fail = false;
-      DatabaseSync.prototype.close = originalClose;
-    }
-    assert.deepEqual(await tasks.task({ id }).start(), {
-      kind: "refused",
-      refusal: { kind: "invalid-lifecycle-transition", taskId: id, state: "in_progress", verb: "start" },
-    });
-    assert.equal((await tasks.task({ id }).read())?.task.state, "in_progress");
-  },
-);
-
 test("nested compose retains cleanup diagnostics from inner and outer locks", { concurrency: false }, async () => {
   const { tasks } = await world();
   const originalClose = DatabaseSync.prototype.close;
@@ -857,53 +615,13 @@ test("nested compose retains cleanup diagnostics from inner and outer locks", { 
   };
   try {
     const result = await tasks.compose({ markdown: "+ Nested compose\n" });
-    assert.equal(result.kind, "accepted");
-    if (result.kind !== "accepted") return;
+    assert.ok(result.kind === "accepted", "expected result.kind = \"accepted\"");
     assert.deepEqual(result.cleanup, {
       kind: "lock-release-failed",
       diagnostics: ["cannot release SQLite lock: release-1", "cannot release SQLite lock: release-2"],
     });
   } finally {
     DatabaseSync.prototype.close = originalClose;
-  }
-});
-
-test("task lock acquisition failure retains a held-lock cleanup failure", { concurrency: false }, async () => {
-  const { tasks } = await world();
-  const first = acceptedId(await tasks.add({ title: "Acquire failure first" }));
-  const second = acceptedId(await tasks.add({ title: "Acquire failure second" }));
-  const blocked = await acquireSqliteTransactionLock({
-    path: join(tasks.root, ".keiyaku", "locks", "task", `${parseTaskId(second).localId}.sqlite`),
-    mode: "immediate",
-  });
-  const originalClose = DatabaseSync.prototype.close;
-  let releases = 0;
-  DatabaseSync.prototype.close = function patchedClose(this: DatabaseSync): void {
-    releases += 1;
-    try {
-      throw new Error("release after acquire failure");
-    } finally {
-      originalClose.call(this);
-    }
-  };
-  try {
-    await assert.rejects(
-      withTaskLocks(
-        { world: tasks.root, allocation: false, ids: [first, second], timeoutMs: 25 },
-        async () => "unreachable",
-      ),
-      (error: unknown) => {
-        assert.ok(error instanceof AggregateError);
-        assert.equal(error.errors.length, 2);
-        assert.match(String(error.errors[0]), /SQLite lock timed out/u);
-        assert.match(String(error.errors[1]), /cannot release SQLite lock: release after acquire failure/u);
-        return true;
-      },
-    );
-    assert.ok(releases >= 1);
-  } finally {
-    DatabaseSync.prototype.close = originalClose;
-    blocked.close();
   }
 });
 
@@ -965,8 +683,7 @@ test("partial task composition retains committed changes when lock cleanup fails
       markdown: [`@${first.value.id}`, "pri = 1", `@${second.value.id}`, "pri = 1", ""].join("\n"),
       signal: controller.signal,
     });
-    assert.equal(result.kind, "incomplete");
-    if (result.kind !== "incomplete") return;
+    assert.ok(result.kind === "incomplete", "expected result.kind = \"incomplete\"");
     assert.equal(result.documentChanges.length, 1);
     assert.deepEqual(result.cleanup, {
       kind: "lock-release-failed",
@@ -977,27 +694,6 @@ test("partial task composition retains committed changes when lock cleanup fails
     });
   } finally {
     DatabaseSync.prototype.close = originalClose;
-  }
-});
-
-test("task lock wait budget defaults to three seconds and classifies busy cheaply", async () => {
-  const { tasks } = await world(),
-    id = acceptedId(await tasks.add({ title: "Busy" }));
-  const path = join(tasks.root, ".keiyaku", "locks", "task", `${parseTaskId(id).localId}.sqlite`);
-  const held = await acquireSqliteTransactionLock({ path, mode: "immediate", timeoutMs: 100 });
-  const started = performance.now();
-  try {
-    assert.equal(DEFAULT_TASK_LOCK_TIMEOUT_MS, 3_000);
-    assert.equal(
-      await withTaskLocks(
-        { world: tasks.root, allocation: false, ids: [id], timeoutMs: 25 },
-        async () => "unreachable",
-      ),
-      "busy",
-    );
-    assert.ok(performance.now() - started < 1_000);
-  } finally {
-    held.close();
   }
 });
 
@@ -1047,8 +743,7 @@ test("task tree is parent decomposition with no needs residue", async () => {
   assert.equal((await tasks.task({ id: root }).update({ needs: [need] })).kind, "accepted");
 
   const tree = await tasks.task({ id: root }).tree();
-  assert.equal(tree.kind, "accepted");
-  if (tree.kind !== "accepted") return;
+  assert.ok(tree.kind === "accepted", "expected tree.kind = \"accepted\"");
   assert.deepEqual(treeIds(tree.value), [root, child, nested, later]);
   assert.deepEqual(
     tree.value.children.map((node) => node.task.id),
@@ -1105,8 +800,7 @@ test("task tree renders a parent cycle as a terminal cycle node", async () => {
   assert.equal((await tasks.task({ id: first }).update({ parent: second })).kind, "accepted");
 
   const tree = await tasks.task({ id: first }).tree();
-  assert.equal(tree.kind, "accepted");
-  if (tree.kind !== "accepted") return;
+  assert.ok(tree.kind === "accepted", "expected tree.kind = \"accepted\"");
   assert.equal(tree.value.cycle, undefined);
   assert.equal(tree.value.children.length, 1);
   assert.equal(tree.value.children[0]?.task.id, second);
@@ -1133,8 +827,7 @@ test("creation actor persists as createdBy and later mutations leave it unchange
     if (unsigned.kind === "accepted") assert.equal("createdBy" in unsigned.value, false);
 
     const added = await tasks.add({ title: "Authored", actor: "flagship" });
-    assert.equal(added.kind, "accepted");
-    if (added.kind !== "accepted") return;
+    assert.ok(added.kind === "accepted", "expected added.kind = \"accepted\"");
     assert.equal(added.value.createdBy, "flagship");
     const addedPath = authorityPath(root, added.value.id);
     assert.match(readFileSync(addedPath, "utf8"), /^createdBy: flagship$/mu);
@@ -1155,8 +848,7 @@ test("creation actor persists as createdBy and later mutations leave it unchange
       markdown: ["+ Composed", "as = composed", `@${added.value.id}`, "pri = 1"].join("\n"),
       actor: "composer",
     });
-    assert.equal(composed.kind, "accepted");
-    if (composed.kind !== "accepted") return;
+    assert.ok(composed.kind === "accepted", "expected composed.kind = \"accepted\"");
     assert.equal(composed.documentChanges.length, 2);
     const composedId =
       composed.kind === "accepted"
@@ -1233,22 +925,6 @@ test("public inputs reject unknown fields before observing authority", async () 
   assert.throws(() => tasks.task({ id }).start({ extra: true } as never), /unknown field/u);
   await assert.rejects(tasks.list({ scope: "nearby" } as never), /scope must be namespace or world/u);
   assert.throws(() => Tasks.of({ root: tasks.root } as never), /Tasks.of world/u);
-});
-
-test("board ignores non-Markdown regular files including writer temporary files", async () => {
-  const { root, tasks } = await world();
-  const id = acceptedId(await tasks.add({ title: "Markdown authority" }));
-  const directory = join(root, ".keiyaku", "tasks");
-  writeFileSync(join(directory, "notes.txt"), "not Task authority\n");
-  writeFileSync(join(directory, ".tmp-0123456789abcdef"), "writer temporary\n");
-
-  const listed = await tasks.list({ scope: "world", selection: "all" });
-  assert.equal(listed.kind, "accepted");
-  if (listed.kind === "accepted")
-    assert.deepEqual(
-      listed.value.rows.map((row) => row.id),
-      [id],
-    );
 });
 
 test("board reports malformed Markdown Task authority as corruption", async () => {

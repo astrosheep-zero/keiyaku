@@ -2,6 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, globSync, mkdirSync, mkdtempSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { TEST_MANIFESTS } from "./test-manifests.mjs";
+import { orderSweepEntries } from "./test-plan.mjs";
 
 const DEFAULT_TEST_PATTERNS = ["tests/**/*.test.ts", "tests/maintainability.test.js"];
 const STILL_RUNNING_THRESHOLD_MS = 60_000;
@@ -121,16 +122,14 @@ delete environment.AKUMA_REQUESTS;
 // This is a new runner, including when invoked by a test of the runner itself.
 delete environment.NODE_TEST_CONTEXT;
 const started = performance.now();
-// Keep the ordinary compiled sweep large-first while owning every isolated native
+// Keep the ordinary compiled sweep expensive-first while owning every isolated native
 // child through terminal settlement. The embedded node:test runner does not give
 // this process custody of those children.
 if (compiled && files.length === 0 && testOptions.every((option) => /^--test-concurrency=\d+$/u.test(option))) {
   const logDirectory = makeSweepLogDirectory();
   // Print the artifact directory before any child starts so a hanging sweep is diagnosable.
   console.log(`[run-tests] per-file logs: ${logDirectory}`);
-  const executionEntries = selectedFiles
-    .map((file) => ({ file, size: statSync(file).size }))
-    .sort((left, right) => right.size - left.size || left.file.localeCompare(right.file))
+  const executionEntries = orderSweepEntries(selectedFiles.map((file) => ({ file, size: statSync(file).size })))
     .map(({ file }) => ".test-build/" + file.replace(/\.ts$/u, ".js"))
     .map((file, index) => ({
       file,
@@ -176,6 +175,8 @@ if (compiled && files.length === 0 && testOptions.every((option) => /^--test-con
           [
             ...loader,
             "--test",
+            // This worker already owns exactly one file in its own native process.
+            "--experimental-test-isolation=none",
             ...reporterOptions,
             "--test-reporter-destination=stdout",
             "--test-reporter=spec",

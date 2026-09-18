@@ -52,8 +52,7 @@ test("Task nuke re-enumerates after the allocation lock so a Task created while 
   try {
     const tasks = Tasks.of(root);
     const ownedTask = await tasks.add({ title: "Already owned" });
-    assert.equal(ownedTask.kind, "accepted");
-    if (ownedTask.kind !== "accepted") return;
+    assert.ok(ownedTask.kind === "accepted", "expected ownedTask.kind = \"accepted\"");
     const existing = authorityPath(root, ownedTask.value.id);
     const created = join(root, ".keiyaku", "tasks", "created-while-waiting.md");
     const held = await acquireSqliteTransactionLock({
@@ -95,8 +94,7 @@ test("nested Task authority remains discoverable after a fresh World observation
   try {
     const first = Tasks.of(root);
     const added = await first.add({ title: "Nested durable", namespace: ["deep", "inside"] });
-    assert.equal(added.kind, "accepted");
-    if (added.kind !== "accepted") return;
+    assert.ok(added.kind === "accepted", "expected added.kind = \"accepted\"");
 
     const second = Tasks.of(await World.at(root));
     const read = await second.task({ id: added.value.id }).read();

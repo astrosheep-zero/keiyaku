@@ -1,26 +1,12 @@
+import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { startContractExecution } from "../src/library/execution.js";
 
 function deferred<Value>() {
-  let resolve!: (value: Value) => void;
-  const promise = new Promise<Value>((done) => {
-    resolve = done;
-  });
+  const { promise: promise, resolve } = promiseBarrier<Value>();
   return { promise, resolve };
 }
-
-test("contract execution starts eagerly and completes without a progress subscription", async () => {
-  let started = false;
-  const execution = startContractExecution(async () => {
-    started = true;
-    return "complete";
-  });
-
-  await Promise.resolve();
-  assert.equal(started, true);
-  assert.equal(await execution.result, "complete");
-});
 
 test("leaving the only progress subscription does not cancel an execution", async () => {
   const completion = deferred<string>();

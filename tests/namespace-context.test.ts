@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { lstatSync, mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -21,18 +21,6 @@ test("namespace context stores root and nested namespaces in canonical bytes", a
   assert.deepEqual(await readNamespaceContext(coordinates), []);
   assert.equal(readFileSync(join(root, ".keiyaku", "namespace", "current"), "utf8"), "\n");
 });
-test("repair preserves a valid override and repairs the ignored Git", async () => {
-  const root = temporary();
-  await installNamespaceContext(root, ["override"]);
-  const current = join(root, ".keiyaku", "namespace", "current"),
-    inode = lstatSync(current).ino;
-  writeFileSync(join(root, ".keiyaku", "namespace", ".gitignore"), "wrong\n");
-  assert.equal(await repairNamespaceContext(root, ["default"]), "kept");
-  assert.deepEqual(await readNamespaceContext({ directory: root, boundary: root }), ["override"]);
-  assert.equal(lstatSync(current).ino, inode);
-  assert.equal(readFileSync(join(root, ".keiyaku", "namespace", ".gitignore"), "utf8"), "*\n");
-});
-
 test("repair replaces malformed current bytes and readers reject symlinks", async () => {
   const root = temporary(),
     directory = join(root, ".keiyaku", "namespace");

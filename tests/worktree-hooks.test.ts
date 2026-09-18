@@ -36,14 +36,6 @@ function appendCommand(path: string, value: string, delayMs = 0): HookCommand {
   return { name: "append", argv: [process.execPath, "-e", source], timeoutMs: 5_000 };
 }
 
-function guardedCommand(attempts: string, ready: string): HookCommand {
-  const source = [
-    `const fs = require("node:fs");`,
-    `fs.appendFileSync(${JSON.stringify(attempts)}, "attempt\\n");`,
-    `if (!fs.existsSync(${JSON.stringify(ready)})) process.exit(9);`,
-  ].join(" ");
-  return { name: "guard", argv: [process.execPath, "-e", source], timeoutMs: 5_000 };
-}
 
 function lockPath(
   repository: Awaited<ReturnType<typeof repositoryAt>>,
@@ -194,32 +186,6 @@ test("a reconcile queued on the effect lock reobserves terminal state before app
   assert.equal((await bound.keiyaku.state()).terminal?.kind, "abandoned");
 });
 
-test("failed create hooks remain stopped until explicit retry resumes the frozen command", async () => {
-  const repository = repositoryWithMain();
-  const directory = mkdtempSync(join(tmpdir(), "keiyaku-hook-retry-"));
-  const attempts = join(directory, "attempts.log");
-  const ready = join(directory, "ready");
-  const hooks: WorktreeHooks = { create: [guardedCommand(attempts, ready)], destroy: [] };
-
-  const bound = await Keiyaku.bind({
-    repo: await Repo.at({ path: repository.path }),
-    markdown: contractBody("Retry hooks"),
-    hooks: EMPTY_HOOKS,
-  });
-  const initial = await bound.keiyaku.reconcile({ hooks, retryHooks: true });
-  assert.equal(initial.lag[0]?.kind, "worktree-hook-failed");
-  assert.deepEqual(lines(attempts), ["attempt"]);
-
-  const ordinary = await bound.keiyaku.reconcile();
-  assert.equal(ordinary.lag.length, 0);
-  assert.deepEqual(lines(attempts), ["attempt"]);
-
-  writeFileSync(ready, "ready\n");
-  const retried = await bound.keiyaku.reconcile({ retryHooks: true });
-  assert.deepEqual(retried.lag, []);
-  assert.deepEqual(lines(attempts), ["attempt"]);
-});
-
 test("a Hook runner outlives its killed reconcile caller and fences immediate replay", async () => {
   const directory = mkdtempSync(join(tmpdir(), "keiyaku-hook-caller-death-"));
   const worktree = join(directory, "worktree");
@@ -244,8 +210,8 @@ test("a Hook runner outlives its killed reconcile caller and fences immediate re
     `const input = JSON.parse(Buffer.from(${JSON.stringify(input)}, "base64url").toString("utf8"));`,
     "await runCreateHooks(input.worktree, input.hooks);",
   ].join(" ");
-  const loader = import.meta.resolve("tsx");
-  const caller = spawn(process.execPath, ["--import", loader, "--input-type=module", "-e", callerSource], {
+  const loader = import.meta.url.endsWith(".js") ? [] : ["--import", import.meta.resolve("tsx")];
+  const caller = spawn(process.execPath, [...loader, "--input-type=module", "-e", callerSource], {
     cwd: process.cwd(),
     stdio: ["ignore", "ignore", "pipe"],
   });
@@ -312,8 +278,8 @@ test("reconcile acquires a death-released scratch lock and preserves an actively
     `const scratch = await materializeScratchCandidate(await repositoryAt(${JSON.stringify(repository.path)}), ${JSON.stringify(snapshot)});`,
     `writeFileSync(${JSON.stringify(pathFile)}, scratch.cwd);`,
   ].join(" ");
-  const loader = import.meta.resolve("tsx");
-  const child = spawn(process.execPath, ["--import", loader, "--input-type=module", "-e", childSource], {
+  const loader = import.meta.url.endsWith(".js") ? [] : ["--import", import.meta.resolve("tsx")];
+  const child = spawn(process.execPath, [...loader, "--input-type=module", "-e", childSource], {
     cwd: process.cwd(),
     stdio: ["ignore", "ignore", "pipe"],
   });

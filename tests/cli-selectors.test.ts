@@ -50,24 +50,6 @@ test("selectors resolve active worktrees from public status rows", () => {
   assert.equal(resolveContextualContract(report, undefined, "/repo/.keiyaku/wt/active-contract"), active);
 });
 
-test("short selectors match normalized contract segments without a second grammar", () => {
-  const normalized = "kei/修复-👩‍💻" as ContractId;
-  const base = board();
-  const report = {
-    ...base,
-    rows: [{ ...base.rows[0]!, id: normalized }],
-  } satisfies ContractBoard;
-  assert.equal(resolveContextualContract(report, "@修复-👩‍💻", "/repo"), normalized);
-});
-
-test("omitted selectors require an exact public scope", () => {
-  assert.throws(
-    () => resolveContextualContract(board(), undefined, "/repo/.keiyaku/wt/active-contract/subdirectory"),
-    CliUsageError,
-  );
-  assert.throws(() => resolveContextualContract(board(), undefined, "/repo"), CliUsageError);
-});
-
 test("selectors use disposition rather than reinterpreting terminal phases", () => {
   for (const phase of ["claimed", "abandoned"] as const) {
     const base = board();

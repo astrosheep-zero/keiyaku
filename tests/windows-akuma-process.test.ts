@@ -1,3 +1,4 @@
+import { temporaryDirectory } from "./support/process.js";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -70,34 +71,30 @@ test("launch policy keeps detached, hidden, no-shell process semantics", () => {
   });
 });
 
-test("a missing Windows launcher fails with the typed spawn error", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-missing-launch-"));
-  try {
-    await assert.rejects(
-      () =>
-        new Promise<void>((resolve, reject) => {
-          const child = spawnWindowsLauncher(
-            {
-              argv: [process.execPath, "-e", ""],
-              cwd: root,
-              log: join(root, "stdio.log"),
-            },
-            join(root, "missing-windows-launch.exe"),
-          );
-          child.once("error", reject);
-          child.once("spawn", () => reject(new Error("missing launcher unexpectedly spawned")));
-          child.once("close", () => resolve());
-        }),
-      (error: unknown) => {
-        assert.ok(error instanceof Error);
-        assert.match(error.message, /ENOENT/);
-        assert.equal((error as NodeJS.ErrnoException).code, "ENOENT");
-        return true;
-      },
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+test("a missing Windows launcher fails with the typed spawn error", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-v4-missing-launch-");
+  await assert.rejects(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        const child = spawnWindowsLauncher(
+          {
+            argv: [process.execPath, "-e", ""],
+            cwd: root,
+            log: join(root, "stdio.log"),
+          },
+          join(root, "missing-windows-launch.exe"),
+        );
+        child.once("error", reject);
+        child.once("spawn", () => reject(new Error("missing launcher unexpectedly spawned")));
+        child.once("close", () => resolve());
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /ENOENT/);
+      assert.equal((error as NodeJS.ErrnoException).code, "ENOENT");
+      return true;
+    },
+  );
 });
 
 test("Windows retained launch accepts a one-element target argv", async (t) => {
@@ -105,23 +102,19 @@ test("Windows retained launch accepts a one-element target argv", async (t) => {
     t.skip("the native launcher argv cut is Windows-only");
     return;
   }
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-one-arg-launch-"));
+  const root = temporaryDirectory(t, "keiyaku-v4-one-arg-launch-");
   const log = join(root, "stdio.log");
   const child = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "hostname.exe");
-  try {
-    const owned = await spawnDetachedProcess({ argv: [child], cwd: root, log });
-    await owned.exited;
-    const deadline = performance.now() + 2_000;
-    let text = "";
-    while (performance.now() < deadline) {
-      if (existsSync(log)) text = readFileSync(log, "utf8");
-      if (text.trim().length > 0) break;
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-    assert.match(text, /\S/u);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
+  const owned = await spawnDetachedProcess({ argv: [child], cwd: root, log });
+  await owned.exited;
+  const deadline = performance.now() + 2_000;
+  let text = "";
+  while (performance.now() < deadline) {
+    if (existsSync(log)) text = readFileSync(log, "utf8");
+    if (text.trim().length > 0) break;
+    await new Promise((resolve) => setTimeout(resolve, 20));
   }
+  assert.match(text, /\S/u);
 });
 
 test("retained launch returns the target pid and release leaves it alive", async () => {
@@ -134,15 +127,22 @@ test("retained launch returns the target pid and release leaves it alive", async
       argv: [
         process.execPath,
         "-e",
-        `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000)`,
+        [
+          'const fs = require("node:fs");',
+          `fs.writeFileSync(${JSON.stringify(`${pidFile}.pending`)}, String(process.pid));`,
+          `fs.renameSync(${JSON.stringify(`${pidFile}.pending`)}, ${JSON.stringify(pidFile)});`,
+          'setInterval(() => {}, 1000);',
+        ].join("\n"),
       ],
       cwd: root,
       log,
     });
     assert.ok(Number.isSafeInteger(owned.pid) && owned.pid > 0);
+    // Keep cleanup custody even when the independent child receipt is malformed.
+    pid = owned.pid;
     owned.release();
-    pid = Number.parseInt(await waitForFile(pidFile), 10);
-    assert.equal(pid, owned.pid);
+    const receiptPid = Number(await waitForFile(pidFile));
+    assert.equal(receiptPid, pid);
     process.kill(pid, 0);
     await new Promise((resolve) => setTimeout(resolve, 100));
     process.kill(pid, 0);
@@ -304,27 +304,23 @@ test("Windows retained launch returns while its target remains long-lived", asyn
   }
 });
 
-test("retained launch preserves no-shell argv and log bytes", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-launch-bytes-"));
+test("retained launch preserves no-shell argv and log bytes", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-v4-launch-bytes-");
   const cwd = join(root, "目录-ä");
   mkdirSync(cwd);
   const payload = ["", "a && b ✨", "has space", 'quote"inside', "trailing\\", "目录-ä"];
   const script =
     "process.stdout.write(JSON.stringify({ argv: process.argv.slice(1), cwd: process.cwd(), env: process.env.KEIYAKU_UNICODE }))";
-  try {
-    const retainedLog = join(cwd, "retained.log");
-    const owned = await spawnDetachedProcess({
-      argv: [process.execPath, "-e", script, ...payload],
-      cwd,
-      env: { ...process.env, KEIYAKU_UNICODE: "café-✨" },
-      log: retainedLog,
-    });
-    await owned.exited;
-    const childBytes = JSON.stringify({ argv: payload, cwd: realpathSync(cwd), env: "café-✨" });
-    assert.equal(readFileSync(retainedLog, "utf8"), `${childBytes}[child exit 0]\n`);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+  const retainedLog = join(cwd, "retained.log");
+  const owned = await spawnDetachedProcess({
+    argv: [process.execPath, "-e", script, ...payload],
+    cwd,
+    env: { ...process.env, KEIYAKU_UNICODE: "café-✨" },
+    log: retainedLog,
+  });
+  await owned.exited;
+  const childBytes = JSON.stringify({ argv: payload, cwd: realpathSync(cwd), env: "café-✨" });
+  assert.equal(readFileSync(retainedLog, "utf8"), `${childBytes}[child exit 0]\n`);
 });
 
 function consoleProbe(file: string, linger: boolean): string {

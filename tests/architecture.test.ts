@@ -16,351 +16,124 @@ function rules(diagnostics: readonly Diagnostic[]): readonly string[] {
   return diagnostics.map((diagnostic) => diagnostic.rule);
 }
 
-test("architecture policy accepts internal owner topology changes", () => {
-  const renamed = check({
-    "git/repository.ts": 'import { readOwnerState } from "./owner-state.js"; export const read = readOwnerState;',
-    "git/owner-state.ts": "export const readOwnerState = 1;",
-  });
-  const moved = check({
-    "git/repository.ts":
-      'import { readOwnerState } from "./internal/owner-state.js"; export const read = readOwnerState;',
-    "git/internal/owner-state.ts": "export const readOwnerState = 1;",
-  });
+type Edge = readonly [target: string, symbol: string, typeOnly?: boolean];
 
-  assert.deepEqual(renamed, []);
-  assert.deepEqual(moved, []);
-});
+function graph(owner: string, edges: readonly Edge[], prefix = ""): readonly Diagnostic[] {
+  const files: Record<string, string> = {};
+  const source = [prefix];
+  for (const [index, [target, symbol, typeOnly]] of edges.entries()) {
+    files[target] = (files[target] ?? "") + (typeOnly
+      ? `export type ${symbol} = {};\n`
+      : `export function ${symbol}(): void {}\n`);
+    let relative = path.posix.relative(path.posix.dirname(owner), target).replace(/\.ts$/u, ".js");
+    if (!relative.startsWith(".")) relative = `./${relative}`;
+    source.push(`import ${typeOnly ? "type " : ""}{ ${symbol} as edge${index} } from ${JSON.stringify(relative)};`);
+    source.push(typeOnly ? `export type Value${index} = edge${index};` : `export const value${index} = edge${index};`);
+  }
+  files[owner] = source.join("\n");
+  return check(files);
+}
 
-test("architecture policy permits Body's turn-outcome plugin runtime delivery", () => {
-  const diagnostics = check({
-    "plugin/runtime.ts":
-      "export type PluginRuntime = {}; export function pluginRuntime(): PluginRuntime { return {}; }",
-    "akuma/body.ts": [
-      'import { pluginRuntime, type PluginRuntime } from "../plugin/runtime.js";',
-      "export const runtime: PluginRuntime = pluginRuntime();",
-    ].join("\n"),
+const directionCases: readonly (readonly [owner: string, edge: Edge, allowed: boolean])[] = [
+  ["git/repository.ts", ["git/owner-state.ts", "readOwnerState"], true],
+  ["git/repository.ts", ["git/internal/owner-state.ts", "readOwnerState"], true],
+  ["akuma/body.ts", ["plugin/runtime.ts", "pluginRuntime"], true],
+  ["akuma/body.ts", ["plugin/runtime.ts", "PluginRuntime", true], true],
+  ["cli/commands/bind.ts", ["core/verbs/bind.ts", "decideBind"], false],
+  ["library/audit.ts", ["git/target-placement.ts", "observeTargetPlacement"], false],
+  ["core/facts/fold.ts", ["git/repository.ts", "repositoryAt"], false],
+  ["library/contract.ts", ["git/repository.ts", "repositoryAt"], false],
+  ["library/contract.ts", ["protocol/attempt.ts", "admitDecidedOffer"], false],
+  ["library/contract.ts", ["protocol/review.ts", "reviewOperation"], true],
+  ["kanshi/read.ts", ["git/read-observation.ts", "withGitReadObservation"], true],
+  ["kanshi/read.ts", ["body/decode.ts", "decodeContractDocument"], true],
+  ["kanshi/read.ts", ["body/region.ts", "assertRegionPattern"], true],
+  ["kanshi/report.ts", ["library/region.ts", "RegionOverlap", true], true],
+  ["kanshi/select.ts", ["body/region.ts", "assertRegionPattern"], true],
+  ["kanshi/read.ts", ["git/read-observation.ts", "withGitTargetedReadObservation"], false],
+  ["kanshi/read.ts", ["library/region.ts", "regionOverlaps"], false],
+  ["kanshi/select.ts", ["library/region.ts", "regionOverlaps"], false],
+  ["library/contract-operations.ts", ["protocol/attempt.ts", "admitDecidedOffer"], false],
+  ["library/contract-operations.ts", ["protocol/placement.ts", "place"], false],
+  ["library/contract-operations.ts", ["protocol/result-codec.ts", "decodeAuditReport"], false],
+  ["library/contract/moved-owner.ts", ["library/akuma-creation.ts", "createAkuma"], false],
+  ["library/contract/moved-owner.ts", ["library/bind.ts", "bind"], false],
+  ["library/contract/moved-owner.ts", ["protocol/audit.ts", "auditOperation"], false],
+  ["akuma/providers/example/adapter.ts", ["akuma/heart/index.ts", "Heart", true], true],
+  ["akuma/providers/example/adapter.ts", ["akuma/heart/index.ts", "writeFact"], false],
+  ["protocol/operations.ts", ["git/target-placement.ts", "TargetPlacementRefusal", true], true],
+  ["protocol/run.ts", ["git/target-placement.ts", "prepareTargetPlacement"], false],
+  ["akuma/akuma.ts", ["library/contract.ts", "contract"], false],
+  ["akuma/akuma.ts", ["library/contract.ts", "Contract", true], false],
+  ["protocol/intent.ts", ["core/facts/gate.ts", "latestCurrentAttestations"], true],
+  ["protocol/intent.ts", ["verification/declaration.ts", "VERIFIED"], true],
+  ["protocol/intent.ts", ["core/facts/gate.ts", "gateReports"], false],
+];
+for (const [owner, edge, allowed] of directionCases) {
+  test(`owner edge ${owner} -> ${edge[0]}:${edge[1]} (${edge[2] ? "type" : "value"})`, () => {
+    assert.deepEqual(rules(graph(owner, [edge])), allowed ? [] : ["architecture/dependency-direction"]);
   });
+}
 
-  assert.deepEqual(diagnostics, []);
-});
-
-test("architecture policy rejects reverse owner edges", () => {
-  const diagnostics = check({
-    "core/facts/types.ts": "export type ContractId = string;",
-    "core/verbs/bind.ts": "export function decideBind(): void {}",
-    "git/repository.ts": "export function repositoryAt(): void {}",
-    "git/target-placement.ts": "export function observeTargetPlacement(): void {}",
-    "cli/commands/bind.ts": 'import { decideBind } from "../../core/verbs/bind.js"; export const bind = decideBind;',
-    "library/audit.ts":
-      'import { observeTargetPlacement } from "../git/target-placement.js"; export const audit = observeTargetPlacement;',
-    "core/facts/fold.ts": 'import { repositoryAt } from "../../git/repository.js"; export const fold = repositoryAt;',
+for (const verb of ["review", "deliver"]) {
+  test(`${verb} admits completion types, never completion effects`, () => {
+    assert.deepEqual(graph(`protocol/${verb}.ts`, [["protocol/completion.ts", "CompletionEvidence", true]]), []);
+    for (const node of ["completion", "placement", "reintegrate"]) {
+      assert.deepEqual(rules(graph(`protocol/${verb}.ts`, [[`protocol/${node}.ts`, "advance"]])), ["architecture/dependency-direction"]);
+    }
   });
-
-  assert.equal(rules(diagnostics).filter((rule) => rule === "architecture/dependency-direction").length, 3);
-});
-
-test("architecture policy keeps the Contract handle on its public neighbors", () => {
-  const diagnostics = check({
-    "git/repository.ts": "export function repositoryAt(): void {}",
-    "protocol/attempt.ts": "export function admitDecidedOffer(): void {}",
-    "protocol/review.ts": "export function reviewOperation(): void {}",
-    "library/contract.ts": [
-      'import { repositoryAt } from "../git/repository.js";',
-      'import { admitDecidedOffer } from "../protocol/attempt.js";',
-      'import { reviewOperation } from "../protocol/review.js";',
-      "export const facade = [repositoryAt, admitDecidedOffer, reviewOperation];",
-    ].join("\n"),
+}
+for (const owner of ["contract-execution", "continuation"]) {
+  test(`${owner} calls completion, never raw admission`, () => {
+    assert.deepEqual(graph(`library/${owner}.ts`, [["protocol/completion.ts", "completeCandidate"]]), []);
+    for (const low of ["attempt", "placement", "run"]) {
+      assert.deepEqual(rules(graph(`library/${owner}.ts`, [[`protocol/${low}.ts`, "raw"]])), ["architecture/dependency-direction"]);
+    }
   });
+}
 
-  assert.deepEqual(rules(diagnostics), ["architecture/dependency-direction", "architecture/dependency-direction"]);
-});
+const marker = "/** @architectureCompositionRoot */";
+const akuma: Edge = ["akuma/akuma.ts", "runtime"];
+const tasks: Edge = ["task/index.ts", "tasks"];
+const catalog: Edge = ["task/catalog.ts", "catalog"];
+const compositionCases: readonly (readonly [string, readonly Edge[], string, boolean])[] = [
+  ["library/composition.ts", [["akuma/requests.ts", "executionChannel"], ["library/contract.ts", "contract"]], marker, true],
+  ["library/catalog.ts", [akuma, catalog], marker, true],
+  ["library/catalog/index.ts", [akuma, catalog], marker, true],
+  ["library/fleet.js", [akuma, ["dispatch/index.ts", "observeDispatch"], ["task/created-observation.ts", "observeCreatedTask"]], marker, true],
+  ["library/moved-root.ts", [akuma, tasks], marker, true],
+  ["library/catalog.ts", [akuma, catalog], "", false],
+  ["library/rogue-composition.ts", [akuma, tasks], "", false],
+  ["library/rogue.ts", [akuma, tasks, ["workspace-place.ts", "appoint"]], "", false],
+  ["library/fleet-extra.ts", [akuma, tasks], "", false],
+  ["library/nested-marker.ts", [akuma, tasks], `export const architectureCompositionRoot = true;\n${marker}\nexport function nested(): void {}`, false],
+];
+for (const [owner, edges, prefix, allowed] of compositionCases) {
+  test(`composition boundary ${owner} (${allowed ? "marked" : "unmarked"})`, () => {
+    assert.deepEqual(rules(graph(owner, edges, prefix)), allowed ? [] : ["architecture/composition-boundary"]);
+  });
+}
 
-test("architecture policy keeps Kanshi on public-owner composition", () => {
-  const accepted = check({
-    "git/read-observation.ts": "export function withGitReadObservation(): void {}",
-    "body/decode.ts": "export function decodeContractDocument(): { region: string[] } { return { region: [] }; }",
-    "body/region.ts": "export function assertRegionPattern(pattern: string): string { return pattern; }",
-    "library/region.ts": "export type RegionOverlap = { contract: string };",
-    "kanshi/read.ts": [
-      'import { withGitReadObservation } from "../git/read-observation.js";',
-      'import { decodeContractDocument } from "../body/decode.js";',
-      'import { assertRegionPattern } from "../body/region.js";',
-      "export const read = withGitReadObservation;",
-      "export const decode = decodeContractDocument;",
-      "export const validate = assertRegionPattern;",
-    ].join("\n"),
-    "kanshi/report.ts":
-      'import type { RegionOverlap } from "../library/region.js"; export type Overlap = RegionOverlap;',
-    "kanshi/select.ts":
-      'import { assertRegionPattern } from "../body/region.js"; export const validate = assertRegionPattern;',
+for (const [owner, module, symbol, rule] of [
+  ["runtime/proc/run.ts", "node:child_process", "spawn", ""],
+  ["scripts/compile-tests.mjs", "node:module", "stripTypeScriptTypes", ""],
+  ["scripts/compile-tests.mjs", "node:module", "createRequire", "capability-import"],
+  ["core/verbs/bind.ts", "node:child_process", "spawn", "capability-import"],
+  ["core/verbs/bind.ts", "node:fs", "readFileSync", "capability-import"],
+  ["akuma/providers/opencode-sdk/client.ts", "@opencode-ai/sdk", "client", ""],
+  ["protocol/attempt.ts", "@opencode-ai/sdk", "client", "provider-sdk-boundary"],
+]) {
+  test(`capability ${owner} imports ${module}`, () => {
+    const found = check({ [owner!]: `import { ${symbol} } from ${JSON.stringify(module)}; ${owner === "core/verbs/bind.ts" ? `export function decideBind(): void { void ${symbol}; }` : `export const value = ${symbol};`}` });
+    assert.deepEqual(rules(found), rule ? [`architecture/${rule}`] : []);
   });
-  const rejected = check({
-    "git/read-observation.ts": "export function withGitTargetedReadObservation(): void {}",
-    "library/region.ts": "export function regionOverlaps(): never[] { return []; }",
-    "kanshi/read.ts": [
-      'import { withGitTargetedReadObservation } from "../git/read-observation.js";',
-      'import { regionOverlaps } from "../library/region.js";',
-      "export const read = withGitTargetedReadObservation;",
-      "export const overlaps = regionOverlaps;",
-    ].join("\n"),
-    "kanshi/select.ts":
-      'import { regionOverlaps } from "../library/region.js"; export const overlaps = regionOverlaps;',
+}
+for (const [owner, allowed] of [["protocol/intent.ts", false], ["verification/execution.ts", true], ["core/facts/state.ts", false]] as const) {
+  test(`ambient environment in ${owner}`, () => {
+    assert.deepEqual(rules(check({ [owner]: "export const environment = process.env;" })), allowed ? [] : ["architecture/capability-use"]);
   });
+}
 
-  assert.deepEqual(accepted, []);
-  assert.deepEqual(rules(rejected), [
-    "architecture/dependency-direction",
-    "architecture/dependency-direction",
-    "architecture/dependency-direction",
-  ]);
-});
-
-test("architecture policy keeps Contract request transport off lifecycle implementation", () => {
-  const diagnostics = check({
-    "protocol/attempt.ts": "export function admitDecidedOffer(): void {}",
-    "protocol/placement.ts": "export function place(): void {}",
-    "protocol/result-codec.ts": "export function decodeAuditReport(): void {}",
-    "library/contract-operations.ts": [
-      'import { admitDecidedOffer } from "../protocol/attempt.js";',
-      'import { place } from "../protocol/placement.js";',
-      'import { decodeAuditReport } from "../protocol/result-codec.js";',
-      "export const transport = [admitDecidedOffer, place, decodeAuditReport];",
-    ].join("\n"),
-  });
-
-  assert.deepEqual(rules(diagnostics), Array(3).fill("architecture/dependency-direction"));
-});
-
-test("architecture policy keeps Contract edges forbidden after a move", () => {
-  const diagnostics = check({
-    "library/akuma-creation.ts": "export function createAkuma(): void {}",
-    "library/bind.ts": "export function bind(): void {}",
-    "protocol/audit.ts": "export function auditOperation(): void {}",
-    "library/contract/moved-owner.ts": [
-      'import { createAkuma } from "../akuma-creation.js";',
-      'import { bind } from "../bind.js";',
-      'import { auditOperation } from "../../protocol/audit.js";',
-      "export const contract = [createAkuma, bind, auditOperation];",
-    ].join("\n"),
-  });
-
-  assert.deepEqual(rules(diagnostics), Array(3).fill("architecture/dependency-direction"));
-});
-
-test("architecture policy keeps provider adapters out of Heart writes", () => {
-  const accepted = check({
-    "akuma/heart/index.ts": "export type Heart = {};",
-    "akuma/providers/example/adapter.ts":
-      'import type { Heart } from "../../heart/index.js"; export type Adapter = Heart;',
-  });
-  const rejected = check({
-    "akuma/heart/index.ts": "export function writeFact(): void {}",
-    "akuma/providers/example/adapter.ts":
-      'import { writeFact } from "../../heart/index.js"; export const adapter = writeFact;',
-  });
-
-  assert.deepEqual(accepted, []);
-  assert.deepEqual(rules(rejected), ["architecture/dependency-direction"]);
-});
-
-test("architecture policy assigns process and filesystem capabilities to their owners", () => {
-  const accepted = check({
-    "runtime/proc/run.ts": 'import { spawn } from "node:child_process"; export const run = spawn;',
-  });
-  const rejected = check({
-    "core/verbs/bind.ts": [
-      'import { spawn } from "node:child_process";',
-      'import { readFileSync } from "node:fs";',
-      "export function decideBind(): void { void spawn; void readFileSync; }",
-    ].join("\n"),
-  });
-
-  assert.deepEqual(accepted, []);
-  assert.deepEqual(rules(rejected), ["architecture/capability-import", "architecture/capability-import"]);
-});
-
-test("architecture policy keeps ambient process environments out of protocol", () => {
-  const diagnostics = check({
-    "protocol/intent.ts": "export const environment = process.env;",
-  });
-
-  assert.ok(rules(diagnostics).includes("architecture/capability-use"));
-});
-
-test("architecture policy accepts Verification process-environment use and rejects unrelated owners", () => {
-  const accepted = check({
-    "verification/execution.ts": "export const environment = process.env;",
-  });
-  const rejected = check({
-    "core/facts/state.ts": "export const environment = process.env;",
-  });
-
-  assert.deepEqual(accepted, []);
-  assert.deepEqual(rules(rejected), ["architecture/capability-use"]);
-});
-
-test("architecture policy keeps generic Protocol runtime away from target placement", () => {
-  const accepted = check({
-    "git/target-placement.ts": "export type TargetPlacementRefusal = { kind: string };",
-    "protocol/operations.ts":
-      'import type { TargetPlacementRefusal } from "../git/target-placement.js"; export type Refusal = TargetPlacementRefusal;',
-  });
-  const diagnostics = check({
-    "git/target-placement.ts": "export function prepareTargetPlacement(): void {}",
-    "protocol/run.ts":
-      'import { prepareTargetPlacement } from "../git/target-placement.js"; export const run = prepareTargetPlacement;',
-  });
-
-  assert.deepEqual(accepted, []);
-  assert.deepEqual(rules(diagnostics), ["architecture/dependency-direction"]);
-});
-
-test("architecture policy keeps Akuma runtime away from generic Library", () => {
-  const diagnostics = check({
-    "library/contract.ts": "export function contract(): void {}",
-    "akuma/akuma.ts": 'import { contract } from "../library/contract.js"; export const runtime = contract;',
-  });
-
-  assert.deepEqual(rules(diagnostics), ["architecture/dependency-direction"]);
-});
-
-test("architecture policy keeps denied Akuma Library edges closed for type imports", () => {
-  const diagnostics = check({
-    "library/contract.ts": "export type Contract = string;",
-    "akuma/akuma.ts": 'import type { Contract } from "../library/contract.js"; export type RuntimeContract = Contract;',
-  });
-
-  assert.deepEqual(rules(diagnostics), ["architecture/dependency-direction"]);
-});
-
-test("architecture policy keeps cross-product wiring in marked Library composition roots", () => {
-  const compositionRoot = check({
-    "akuma/requests.ts": "export function executionChannel(): void {}",
-    "library/contract.ts": "export function contract(): void {}",
-    "library/composition.ts": [
-      "/** @architectureCompositionRoot */",
-      'import { executionChannel } from "../akuma/requests.js";',
-      'import { contract } from "./contract.js";',
-      "export const compose = [executionChannel, contract];",
-    ].join("\n"),
-  });
-  const catalogRoot = check({
-    "akuma/akuma.ts": "export function runtime(): void {}",
-    "task/catalog.ts": "export function catalog(): void {}",
-    "library/catalog.ts": [
-      "/** @architectureCompositionRoot */",
-      'import { runtime } from "../akuma/akuma.js";',
-      'import { catalog } from "../task/catalog.js";',
-      "export const list = [runtime, catalog];",
-    ].join("\n"),
-  });
-  const movedCatalogRoot = check({
-    "akuma/akuma.ts": "export function runtime(): void {}",
-    "task/catalog.ts": "export function catalog(): void {}",
-    "library/catalog/index.ts": [
-      "/** @architectureCompositionRoot */",
-      'import { runtime } from "../../akuma/akuma.js";',
-      'import { catalog } from "../../task/catalog.js";',
-      "export const list = [runtime, catalog];",
-    ].join("\n"),
-  });
-  const renamedFleetRoot = check({
-    "akuma/akuma.ts": "export function runtime(): void {}",
-    "dispatch/index.ts": "export function observeDispatch(): void {}",
-    "task/created-observation.ts": "export function observeCreatedTask(): void {}",
-    "library/fleet.js": [
-      "/** @architectureCompositionRoot */",
-      'import { runtime } from "../akuma/akuma.js";',
-      'import { observeDispatch } from "../dispatch/index.js";',
-      'import { observeCreatedTask } from "../task/created-observation.js";',
-      "export const fleet = [runtime, observeDispatch, observeCreatedTask];",
-    ].join("\n"),
-  });
-  const relocatedMarkedRoot = check({
-    "akuma/akuma.ts": "export function runtime(): void {}",
-    "task/index.ts": "export function tasks(): void {}",
-    "library/moved-root.ts": [
-      "/** @architectureCompositionRoot */",
-      'import { runtime } from "../akuma/akuma.js";',
-      'import { tasks } from "../task/index.js";',
-      "export const compose = [runtime, tasks];",
-    ].join("\n"),
-  });
-
-  const unmarkedHistoricalPath = check({
-    "akuma/akuma.ts": "export function runtime(): void {}",
-    "task/catalog.ts": "export function catalog(): void {}",
-    "library/catalog.ts": [
-      'import { runtime } from "../akuma/akuma.js";',
-      'import { catalog } from "../task/catalog.js";',
-      "export const list = [runtime, catalog];",
-    ].join("\n"),
-  });
-  const unregisteredComposition = check({
-    "akuma/akuma.ts": "export function runtime(): void {}",
-    "task/index.ts": "export function tasks(): void {}",
-    "library/rogue-composition.ts": [
-      'import { runtime } from "../akuma/akuma.js";',
-      'import { tasks } from "../task/index.js";',
-      "export const compose = [runtime, tasks];",
-    ].join("\n"),
-  });
-  const ordinaryDiagnostics = check({
-    "akuma/akuma.ts": "export function runtime(): void {}",
-    "task/index.ts": "export function tasks(): void {}",
-    "workspace-place.ts": "export function appoint(): void {}",
-    "library/rogue.ts": [
-      'import { runtime } from "../akuma/akuma.js";',
-      'import { tasks } from "../task/index.js";',
-      'import { appoint } from "../workspace-place.js";',
-      "export const compose = [runtime, tasks, appoint];",
-    ].join("\n"),
-  });
-  const rootPrefixEscape = check({
-    "akuma/akuma.ts": "export function runtime(): void {}",
-    "task/index.ts": "export function tasks(): void {}",
-    "library/fleet-extra.ts": [
-      'import { runtime } from "../akuma/akuma.js";',
-      'import { tasks } from "../task/index.js";',
-      "export const compose = [runtime, tasks];",
-    ].join("\n"),
-  });
-  const nestedMarkerEscape = check({
-    "akuma/akuma.ts": "export function runtime(): void {}",
-    "task/index.ts": "export function tasks(): void {}",
-    "library/nested-marker.ts": [
-      "export const architectureCompositionRoot = true;",
-      "/** @architectureCompositionRoot */",
-      "export function nested(): void {}",
-      'import { runtime } from "../akuma/akuma.js";',
-      'import { tasks } from "../task/index.js";',
-    ].join("\n"),
-  });
-
-  assert.deepEqual(compositionRoot, []);
-  assert.deepEqual(catalogRoot, []);
-  assert.deepEqual(movedCatalogRoot, []);
-  assert.deepEqual(renamedFleetRoot, []);
-  assert.deepEqual(relocatedMarkedRoot, []);
-  assert.deepEqual(rules(unmarkedHistoricalPath), ["architecture/composition-boundary"]);
-  assert.deepEqual(rules(unregisteredComposition), ["architecture/composition-boundary"]);
-  assert.deepEqual(rules(ordinaryDiagnostics), ["architecture/composition-boundary"]);
-  assert.deepEqual(rules(rootPrefixEscape), ["architecture/composition-boundary"]);
-  assert.deepEqual(rules(nestedMarkerEscape), ["architecture/composition-boundary"]);
-});
-
-test("architecture policy keeps provider SDKs inside their adapter owners", () => {
-  const accepted = check({
-    "akuma/providers/opencode-sdk/client.ts":
-      'import { client } from "@opencode-ai/sdk"; export const adapter = client;',
-  });
-  const rejected = check({
-    "protocol/attempt.ts": 'import { client } from "@opencode-ai/sdk"; export const attempt = client;',
-  });
-
-  assert.deepEqual(accepted, []);
-  assert.deepEqual(rules(rejected), ["architecture/provider-sdk-boundary"]);
-});
 
 test("architecture policy keeps runtime cycles and undeclared source visible", () => {
   const diagnostics = check({
@@ -385,25 +158,6 @@ test("architecture policy keeps durable source and model refusals", () => {
   assert.ok(found.has("architecture/forbidden-source-pattern"));
   assert.ok(found.has("architecture/forbidden-module"));
   assert.ok(found.has("architecture/removed-declaration"));
-});
-
-test("architecture policy reserves Verification currentness for its protocol owner", () => {
-  const accepted = check({
-    "core/facts/gate.ts": "export function latestCurrentAttestations(): void {}",
-    "verification/declaration.ts": 'export const VERIFIED = "verified";',
-    "protocol/intent.ts": [
-      'import { latestCurrentAttestations } from "../core/facts/gate.js";',
-      'import { VERIFIED } from "../verification/declaration.js";',
-      "export function current(): void { latestCurrentAttestations(); void VERIFIED; }",
-    ].join("\n"),
-  });
-  const rejected = check({
-    "core/facts/gate.ts": "export function gateReports(): void {}",
-    "protocol/intent.ts": 'import { gateReports } from "../core/facts/gate.js"; export const current = gateReports;',
-  });
-
-  assert.deepEqual(accepted, []);
-  assert.deepEqual(rules(rejected), ["architecture/dependency-direction"]);
 });
 
 test("architecture analysis covers executable JS, MJS, and CJS capability uses", () => {
@@ -514,41 +268,5 @@ test("architecture source discovery includes executable JS, MJS, and CJS scripts
     assert.equal(runArchitectureCheck(root), 1);
   } finally {
     rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("leading admissions cannot restart completion or perform trailing placement", () => {
-  for (const verb of ["review", "deliver"]) {
-    const allowed = check({
-      "protocol/completion.ts": "export type CompletionEvidence = {};",
-      [`protocol/${verb}.ts`]:
-        'import type { CompletionEvidence } from "./completion.js"; export type Value = CompletionEvidence;',
-    });
-    assert.deepEqual(allowed, []);
-    for (const node of ["completion", "placement", "reintegrate"]) {
-      const rejected = check({
-        [`protocol/${node}.ts`]: "export function advance(): void {}",
-        [`protocol/${verb}.ts`]: `import { advance } from "./${node}.js"; export const operation = advance;`,
-      });
-      assert.deepEqual(rules(rejected), ["architecture/dependency-direction"]);
-    }
-  }
-});
-
-test("local execution and continuation may call the node but not raw admission", () => {
-  for (const owner of ["contract-execution", "continuation"]) {
-    const accepted = check({
-      "protocol/completion.ts": "export function completeCandidate(): void {}",
-      [`library/${owner}.ts`]:
-        'import { completeCandidate } from "../protocol/completion.js"; export const execute = completeCandidate;',
-    });
-    assert.deepEqual(accepted, []);
-    for (const low of ["attempt", "placement", "run"]) {
-      const rejected = check({
-        [`protocol/${low}.ts`]: "export function raw(): void {}",
-        [`library/${owner}.ts`]: `import { raw } from "../protocol/${low}.js"; export const execute = raw;`,
-      });
-      assert.deepEqual(rules(rejected), ["architecture/dependency-direction"]);
-    }
   }
 });

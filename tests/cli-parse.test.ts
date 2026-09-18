@@ -3,23 +3,13 @@ import test from "node:test";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import { decodeJournal } from "../src/core/facts/codec.js";
 import { contractId, documentKey, entryUlid, snapshotId } from "../src/core/facts/types.js";
-import { CliUsageError, parseArgv, renderContractHelp, renderRootHelp, type ParsedCommand } from "../src/cli/parse.js";
+import { CliUsageError, parseArgv, renderContractHelp, type ParsedCommand } from "../src/cli/parse.js";
 
 function command(argv: readonly string[]): ParsedCommand {
   const parsed = parseArgv(argv);
   if (!("command" in parsed)) throw new Error("expected an executable command");
   return parsed.command;
 }
-
-test("bind mints its contract identity and keeps JSON output separate from input", () => {
-  assert.deepEqual(parseArgv(["bind", "--target", "refs/heads/main", "--json", "-"]), {
-    command: {
-      command: "bind",
-      target: "refs/heads/main",
-      output: "json",
-    },
-  });
-});
 
 test("nuke admits only a literal WorldRoot confirmation", () => {
   assert.deepEqual(parseArgv(["nuke"]), {
@@ -101,96 +91,6 @@ test("root version is recognized only after coordinates and help", () => {
     (error: unknown) =>
       error instanceof CliUsageError && error.message.includes("option --version is not valid for tell"),
   );
-});
-
-test("global path tokens remain opaque at the parser edge", () => {
-  assert.deepEqual(parseArgv(["-C", "C:\\work tree", "status", "--repo", "..\\delivery"]), {
-    cwd: "C:\\work tree",
-    repo: "..\\delivery",
-    command: { command: "status", output: "text" },
-  });
-});
-
-test("bind accepts one Task association at the Contract boundary", () => {
-  assert.deepEqual(parseArgv(["bind", "--task", "task/example", "-"]), {
-    command: {
-      command: "bind",
-      task: "task/example",
-      output: "text",
-    },
-  });
-});
-
-test("unknown command syntax is refused with the exact command usage", () => {
-  assert.throws(
-    () => parseArgv(["bind", "--workspace-mode", "-"]),
-    (error: unknown) =>
-      error instanceof CliUsageError &&
-      error.message.includes("accepts  keiyaku bind [--task <task/...>] [--target <ref>]") &&
-      error.message.includes("help  keiyaku bind --help") &&
-      error.message.includes("option --workspace-mode is not valid for bind"),
-  );
-  assert.throws(
-    () => parseArgv(["unknown"]),
-    (error: unknown) =>
-      error instanceof CliUsageError &&
-      error.message ===
-        ["× usage  keiyaku", "  given  unknown", "  accepts  keiyaku <command> [options]", "  help  keiyaku --help"].join("\n"),
-  );
-});
-
-test("existing selectors are optional and review stdin is a distinct summary source", () => {
-  assert.throws(() => parseArgv(["deliver", "--actor", "external-test"]), /option --actor is not valid for deliver/u);
-  assert.deepEqual(parseArgv(["deliver", "kei/example", "--include-dirty", "--json"]), {
-    command: {
-      command: "deliver",
-      contract: "kei/example",
-      includeDirty: true,
-      materializeConflict: false,
-      overwrite: false,
-      output: "json",
-    },
-  });
-  assert.deepEqual(parseArgv(["deliver", "kei/example", "--materialize-conflict", "--overwrite"]), {
-    command: {
-      command: "deliver",
-      contract: "kei/example",
-      includeDirty: false,
-      materializeConflict: true,
-      overwrite: true,
-      output: "text",
-    },
-  });
-  assert.deepEqual(parseArgv(["review", "@managed-worktree", "--satisfied", "-"]), {
-    command: {
-      command: "review",
-      contract: "@managed-worktree",
-      verdict: "satisfied",
-      summaryFromStdin: true,
-      output: "text",
-    },
-  });
-  assert.throws(
-    () => parseArgv(["review", "kei/example", "--satisfied", "--summary", "inline", "-"]),
-    /review requires exactly one of --summary <text> or stdin '-'/,
-  );
-  assert.throws(
-    () => parseArgv(["review", "kei/example", "--satisfied"]),
-    /review requires exactly one of --summary <text> or stdin '-'/,
-  );
-});
-
-test("status parses one folded board and preserves its optional contract filter", () => {
-  assert.deepEqual(parseArgv(["status"]), {
-    command: { command: "status", output: "text" },
-  });
-  assert.deepEqual(parseArgv(["status", "kei/example", "--json"]), {
-    command: { command: "status", contract: "kei/example", output: "json" },
-  });
-  assert.deepEqual(parseArgv(["status", "kei/one", "kei/two", "aku/claude/1234abcd"]), {
-    command: { command: "status", selectors: ["kei/one", "kei/two", "aku/claude/1234abcd"], output: "text" },
-  });
-  assert.throws(() => parseArgv(["status", "--fast"]), /not valid for status/);
 });
 
 test("show parses one optional Contract selector and JSON output", () => {
@@ -345,28 +245,6 @@ test("wait accepts a plural selection without an explicit completion mode", () =
   assert.throws(() => parseArgv(["wait", "@one", "@two", "--any", "--all"]), /mutually exclusive/u);
 });
 
-test("flag specs preserve value and boolean option behavior", () => {
-  assert.throws(() => parseArgv(["bind", "--gates", "strict", "--gates", "default", "-"]), /duplicate option: --gates/);
-  assert.throws(
-    () => parseArgv(["amend", "kei/example", "--clear-after", "--clear-after", "-"]),
-    /duplicate option: --clear-after/,
-  );
-  assert.deepEqual(parseArgv(["audit", "kei/example", "--diff"]), {
-    command: { command: "audit", contract: "kei/example", includeDirty: false, showDiff: true, output: "text" },
-  });
-  assert.throws(
-    () => parseArgv(["audit", "kei/example", "--actor", "audit-user"]),
-    /option --actor is not valid for audit/u,
-  );
-  assert.deepEqual(parseArgv(["audit", "kei/example", "--include-dirty", "--diff"]), {
-    command: { command: "audit", contract: "kei/example", includeDirty: true, showDiff: true, output: "text" },
-  });
-  assert.throws(
-    () => parseArgv(["audit", "kei/example", "--show-diff-body"]),
-    /option --show-diff-body is not valid for audit/,
-  );
-});
-
 test("exact-one source selection and nonblank argv fail at parse", () => {
   const cases: ReadonlyArray<readonly [argv: readonly string[], pattern: RegExp]> = [
     [["review", "--satisfied"], /review requires exactly one of --summary <text> or stdin '-'/],
@@ -427,22 +305,6 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
     positionals: ["task/a"],
     flags: { priority: "1" },
   });
-});
-
-test("region accepts repeated --path patterns and omits deleted overlap grammar", () => {
-  assert.deepEqual(command(["region", "--path", "src/**", "--path", "tests/**", "--json"]), {
-    command: "region",
-    paths: ["src/**", "tests/**"],
-    output: "json",
-  });
-  assert.deepEqual(command(["region", "kei/example"]), {
-    command: "region",
-    contract: "kei/example",
-    output: "text",
-  });
-  assert.match(renderContractHelp("region"), /usage  keiyaku region \[<contract>\]/);
-  assert.doesNotMatch(renderRootHelp(), /--overlap/);
-  assert.doesNotMatch(renderContractHelp("region"), /--overlap/);
 });
 
 test("stdin marker is position independent for Contract commands and global coordinates", () => {

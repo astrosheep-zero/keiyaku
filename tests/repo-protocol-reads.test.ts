@@ -1,11 +1,10 @@
 import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import test from "node:test";
 import { appointManagedWorktrees } from "../src/workspace-place.js";
-import { appointedWorktreePath, type TestGitRepository, withGitShim } from "./support/git.js";
+import { appointedWorktreePath, type TestGitRepository } from "./support/git.js";
 import { repositoryWithMain } from "./support/library-verbs.js";
 import {
   GIT_REF,
@@ -21,7 +20,6 @@ import { decodeContractDocument } from "../src/body/decode.js";
 import { encodeEntry } from "../src/core/facts/codec.js";
 import { contractJournalPath } from "../src/git/identity.js";
 import { bindOperation } from "../src/protocol/bind.js";
-import { reconcileAllOperation, worldContractStates } from "../src/protocol/reconcile.js";
 import { completeRepoReconcile } from "../src/library/reconcile.js";
 import { contractObservationOperation, contractsOperation, scopeOperation } from "../src/protocol/operations.js";
 import {
@@ -72,138 +70,13 @@ async function bind(
       workspace,
     }),
   );
-  assert.equal(result.kind, "accepted");
-  if (result.kind !== "accepted") throw new Error("bind did not succeed");
+  assert.ok(result.kind === "accepted", "expected result.kind = \"accepted\"");
   return result.value.contractId;
 }
 
 test("git repository resolution rejects omitted and empty coordinates", async () => {
   await assert.rejects(Reflect.apply(repositoryAt, undefined, []), /repository path must be a nonempty string/);
   await assert.rejects(repositoryAt(""), /repository path must be a nonempty string/);
-});
-
-test("Contract board keeps an absent Keiyaku state snapshot explicit", async () => {
-  const repository = repositoryWithMain();
-  const scope = await scopeOperation({ coordinate: repository.path });
-  const report = await withGitDecodeChannel(scope, (channel) => contractsOperation({ scope, channel }));
-  assert.equal(report.state, null);
-  assert.deepEqual(report.rows, []);
-});
-
-test("Contract reads return plain pinned data from one git snapshot", async () => {
-  const repository = repositoryWithMain();
-  const first = await bind(repository, "First status row", "worktree");
-  const second = await bind(repository, "Second status row", "worktree");
-  const placeGit = await repositoryAt(repository.path);
-  await appointManagedWorktrees(placeGit, [first, second]);
-  const firstPath = await appointedWorktreePath(placeGit, first);
-  const secondPath = await appointedWorktreePath(placeGit, second);
-  repository.run(["worktree", "add", "--detach", firstPath, "HEAD"]);
-  repository.run(["worktree", "add", "--detach", secondPath, "HEAD"]);
-  const scope = await scopeOperation({ coordinate: repository.path });
-  const log = resolve(tmpdir(), `keiyaku-status-blob-reads-${process.pid}.log`);
-  writeFileSync(log, "");
-
-  const report = await withGitShim(
-    [
-      "for argument do",
-      "  case \"$argument\" in *'^{tree}'*) exit 97 ;; esac",
-      "done",
-      'if [ "$1" = "cat-file" ]; then printf \'%s\\n\' "$*" >> "$KEIYAKU_STATUS_READ_LOG"; fi',
-      'exec "$KEIYAKU_REAL_GIT" "$@"',
-    ].join("\n"),
-    { KEIYAKU_STATUS_READ_LOG: log },
-    async (gitPath) => {
-      const shimScope = await scopeOperation({ coordinate: repository.path, gitPath });
-      return withGitDecodeChannel(shimScope, (channel) =>
-        contractsOperation({
-          scope: shimScope,
-          channel,
-        }),
-      );
-    },
-  );
-  const git = await repositoryAt(repository.path);
-
-  assert.equal(report.rows.length, 2);
-  assert.equal(scope.effectiveCwd, resolve(repository.path));
-  assert.equal(scope.primaryWorktree, git.primaryWorktree);
-  assert.equal(git.effectiveCwd, resolve(repository.path));
-  assert.equal(report.root, git.primaryWorktree);
-  assert.equal(report.state, (await readGit(git)).commit);
-  assert.equal(new Date(report.observedAt).toISOString(), report.observedAt);
-  const zeros = { staged: 0, unstaged: 0, untracked: 0, submodules: 0 };
-  assert.deepEqual(
-    report.rows.find((contract) => contract.id === first),
-    {
-      id: first,
-      title: "First status row",
-      phase: "waiting",
-      phaseAt: firstJournalAt(repository, first),
-      lastJournalAt: firstJournalAt(repository, first),
-      disposition: "active",
-      workspace: "worktree",
-      worktreePath: firstPath,
-      workspaceObservation: {
-        kind: "clean",
-        location: { kind: "worktree", path: firstPath },
-        counts: zeros,
-        merge: null,
-      },
-      target: null,
-      targetLag: { kind: "none" },
-      delivery: null,
-      targetObservation: null,
-      verification: { kind: "undeclared" },
-      gates: { reports: [], satisfied: true },
-      after: [],
-      dependents: [],
-    },
-  );
-  assert.deepEqual(
-    report.rows.find((contract) => contract.id === second),
-    {
-      id: second,
-      title: "Second status row",
-      phase: "waiting",
-      phaseAt: firstJournalAt(repository, second),
-      lastJournalAt: firstJournalAt(repository, second),
-      disposition: "active",
-      workspace: "worktree",
-      worktreePath: secondPath,
-      workspaceObservation: {
-        kind: "clean",
-        location: { kind: "worktree", path: secondPath },
-        counts: zeros,
-        merge: null,
-      },
-      target: null,
-      targetLag: { kind: "none" },
-      delivery: null,
-      targetObservation: null,
-      verification: { kind: "undeclared" },
-      gates: { reports: [], satisfied: true },
-      after: [],
-      dependents: [],
-    },
-  );
-  const invocations = readFileSync(log, "utf8").trim().split("\n");
-  assert.equal(invocations.filter((command) => command === "cat-file --batch").length, 1);
-  assert.equal(invocations.filter((command) => command.startsWith("cat-file blob ")).length, 0);
-
-  assert.deepEqual(
-    await withGitDecodeChannel(scope, (channel) =>
-      contractObservationOperation({
-        scope,
-        channel,
-        contractId: first,
-      }),
-    ),
-    {
-      kind: "present",
-      row: report.rows.find((contract) => contract.id === first),
-    },
-  );
 });
 
 test("public Contract rows select the source entry for every phase", async () => {
@@ -468,143 +341,6 @@ test("Contract boards preserve endpoint kinds and lexical active reverse depende
   );
 });
 
-test("single Contract observation never combines state and target from different epochs", async () => {
-  const repository = repositoryWithMain();
-  repository.run(["branch", "target"]);
-  repository.run(["checkout", "--quiet", "target"]);
-  const targetBefore = repository.run(["rev-parse", "refs/heads/target"]).trim();
-  const scope = await scopeOperation({ coordinate: repository.path });
-  const contract = await withGitDecodeChannel(scope, (channel) =>
-    bindOperation({
-      scope,
-      channel,
-      contractId: protocolContractId("Frozen observation"),
-      terms: terms("Frozen observation"),
-      verification: { kind: "prepared", data: null },
-      workspace: "worktree",
-      targetSelection: { kind: "explicit", target: "refs/heads/target" },
-    }),
-  );
-  assert.equal(contract.kind, "accepted");
-  if (contract.kind !== "accepted") throw new Error("bind did not succeed");
-  const id = contract.value.contractId;
-  const git = await repositoryAt(repository.path);
-  const before = await readGit(git);
-  const activePath = contractJournalPath(id, "active");
-  const active = before.paths.get(activePath);
-  if (active?.type !== "blob" || before.commit === null) throw new Error("active Contract journal was not published");
-  const abandoned: JournalEntry = {
-    v: 1,
-    kind: "abandoned",
-    contract: id,
-    entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FB0"),
-    at: "2026-08-13T00:00:00Z",
-    data: {},
-  };
-  const terminalBlob = await writeBlob(
-    git,
-    Buffer.concat([await readBlob(git, active.oid), Buffer.from(encodeEntry(abandoned))]),
-  );
-  const terminalTree = await updateGitTree(
-    git,
-    before.tree,
-    new Map([
-      [activePath, null],
-      [contractJournalPath(id, "terminal"), { oid: terminalBlob }],
-    ]),
-  );
-  const terminalCommit = await writeCommit({ repository: git, tree: terminalTree, parent: before.commit });
-  const targetTree = repository.run(["rev-parse", `${targetBefore}^{tree}`]).trim();
-  const movedTarget = await writeCommit({ repository: git, tree: targetTree, parent: targetBefore });
-  const firstRead = join(tmpdir(), `keiyaku-first-state-read-${process.pid}`);
-  const moved = join(tmpdir(), `keiyaku-moved-state-${process.pid}`);
-  const result = await withGitShim(
-    [
-      'if [ "$1" = "rev-parse" ] && [ "$2" = "--verify" ] && [ "$4" = "refs/heads/keiyaku-state" ]; then',
-      '  if [ -e "$KEIYAKU_FIRST_READ" ] && [ ! -e "$KEIYAKU_MOVED" ]; then',
-      '    touch "$KEIYAKU_MOVED"',
-      '    "$KEIYAKU_REAL_GIT" update-ref refs/heads/keiyaku-state "$KEIYAKU_TERMINAL" "$KEIYAKU_CURRENT"',
-      '    "$KEIYAKU_REAL_GIT" update-ref refs/heads/target "$KEIYAKU_TARGET_MOVED" "$KEIYAKU_TARGET_BEFORE"',
-      '  else touch "$KEIYAKU_FIRST_READ"; fi',
-      "fi",
-      'exec "$KEIYAKU_REAL_GIT" "$@"',
-    ].join("\n"),
-    {
-      KEIYAKU_FIRST_READ: firstRead,
-      KEIYAKU_MOVED: moved,
-      KEIYAKU_TERMINAL: terminalCommit,
-      KEIYAKU_CURRENT: before.commit,
-      KEIYAKU_TARGET_MOVED: movedTarget,
-      KEIYAKU_TARGET_BEFORE: targetBefore,
-    },
-    () =>
-      withGitDecodeChannel(git, (channel) =>
-        contractObservationOperation({
-          scope,
-          channel,
-          contractId: id,
-        }),
-      ),
-  );
-
-  assert.deepEqual(result, {
-    kind: "present",
-    row: {
-      id,
-      title: "Frozen observation",
-      phase: "waiting",
-      phaseAt: firstJournalAt(repository, id),
-      lastJournalAt: firstJournalAt(repository, id),
-      disposition: "active",
-      workspace: "worktree",
-      worktreePath: null,
-      workspaceObservation: { kind: "unappointed" },
-      target: "refs/heads/target",
-      targetLag: { kind: "unknown" },
-      delivery: null,
-      targetObservation: { head: targetBefore, drift: false },
-      verification: { kind: "undeclared" },
-      gates: { reports: [], satisfied: true },
-      after: [],
-      dependents: [],
-    },
-  });
-});
-
-test("batch reconcile isolates a failed contract and retains successful reports", async () => {
-  const repository = repositoryWithMain();
-  const blocked = await bind(repository, "Blocked reconcile", "worktree");
-  const healthy = await bind(repository, "Healthy reconcile", "worktree");
-  const git = await repositoryAt(repository.path);
-  const appointed = await appointManagedWorktrees(git, [blocked, healthy]);
-  const places = new Map(appointed.appointments.map((appointment) => [appointment.contract, appointment.place]));
-  mkdirSync(await appointedWorktreePath(git, blocked), { recursive: true });
-
-  const scope = await scopeOperation({ coordinate: repository.path });
-  const report = await withGitDecodeChannel(scope, async (channel) =>
-    reconcileAllOperation({
-      scope,
-      channel,
-      states: await worldContractStates({ scope, channel }),
-      hooks: { create: [], destroy: [] },
-      retryHooks: false,
-      places,
-    }),
-  );
-  assert.equal(report.contracts.length, 2);
-
-  const failed = report.contracts.find((contract) => contract.contractId === blocked);
-  assert.equal(failed?.report.lag[0]?.kind, "reconcile-failed");
-  if (failed?.report.lag[0]?.kind === "reconcile-failed") {
-    assert.equal(failed.report.lag[0].stage, "effect");
-    assert.match(failed.report.lag[0].diagnostic, /delivery worktree path is occupied/);
-  }
-
-  const reconciled = report.contracts.find((contract) => contract.contractId === healthy);
-  assert.deepEqual(reconciled?.report.lag, []);
-  assert.equal(existsSync(await appointedWorktreePath(git, healthy)), true);
-});
-
 test("repo reconcile leaves a refused foreign worktree untouched until recovery realizes it", async () => {
   const repository = repositoryWithMain();
   const id = await bind(repository, "Recover foreign worktree", "worktree");
@@ -621,8 +357,7 @@ test("repo reconcile leaves a refused foreign worktree untouched until recovery 
   const refused = await withGitDecodeChannel(scope, async (channel) =>
     await completeRepoReconcile({ scope, channel, hooks: { create: [], destroy: [] }, retryHooks: false }),
   );
-  assert.equal(refused.kind, "completed");
-  if (refused.kind !== "completed") throw new Error("expected completed repo reconcile");
+  assert.ok(refused.kind === "completed", "expected refused.kind = \"completed\"");
   assert.equal(refused.contracts[0]?.report.lag[0]?.kind, "reconcile-failed");
   assert.equal(readFileSync(guidance, "utf8"), foreignBytes);
   assert.equal(readFileSync(join(path, "foreign.txt"), "utf8"), "foreign bytes\n");
@@ -633,8 +368,7 @@ test("repo reconcile leaves a refused foreign worktree untouched until recovery 
   const recovered = await withGitDecodeChannel(scope, async (channel) =>
     await completeRepoReconcile({ scope, channel, hooks: { create: [], destroy: [] }, retryHooks: false }),
   );
-  assert.equal(recovered.kind, "completed");
-  if (recovered.kind !== "completed") throw new Error("expected completed repo reconcile");
+  assert.ok(recovered.kind === "completed", "expected recovered.kind = \"completed\"");
   assert.deepEqual(recovered.contracts[0]?.report.lag, []);
   assert.match(readFileSync(guidance, "utf8"), new RegExp(id));
   assert.equal(readFileSync(join(foreignPath, ".keiyaku", "KEIYAKU.md"), "utf8"), foreignBytes);

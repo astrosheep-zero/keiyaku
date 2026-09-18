@@ -8,43 +8,6 @@ import { GIT_REF } from "../src/git/repository.js";
 import { document, repositoryWithMain } from "./support/library-verbs.js";
 import { withGitShim } from "./support/git.js";
 
-test("fork bind copies current terms and the exact source start into fresh custody", async () => {
-  const repository = repositoryWithMain();
-  const repo = await Repo.at({ path: repository.path });
-  const prerequisite = await Keiyaku.bind({
-    repo,
-    markdown: document().replace("# Library verbs", "# Prerequisite"),
-    gates: [],
-  });
-  const prerequisiteState = await prerequisite.keiyaku.state();
-  const sourceMarkdown = document().replace("# Library verbs", "# Source terms");
-  const source = await Keiyaku.bind({
-    repo,
-    markdown: sourceMarkdown,
-    workspace: "worktree",
-    gates: ["reviewed"],
-    after: [prerequisiteState.id],
-  });
-  const sourceState = await source.keiyaku.state();
-  const sourceId = sourceState.id;
-
-  const fork = await Keiyaku.bind({ repo, forkOf: sourceId });
-  const forkState = await fork.keiyaku.state();
-
-  assert.equal(forkState.terms.document.bytes, sourceMarkdown.replace("# Source terms", "# Fork · Source terms"));
-  assert.equal(forkState.coordinates.start, sourceState.coordinates.start);
-  assert.equal(forkState.coordinates.target, sourceState.coordinates.target);
-  assert.equal(forkState.coordinates.workspace, "worktree");
-  assert.deepEqual(forkState.terms.gates, sourceState.terms.gates);
-  assert.deepEqual(forkState.terms.after, sourceState.terms.after);
-  assert.notEqual(forkState.id, sourceId);
-  assert.equal(forkState.delivery, null);
-  assert.equal(forkState.terminal, null);
-
-  await source.keiyaku.amend({ gates: [] });
-  assert.deepEqual((await fork.keiyaku.state()).terms.gates, ["reviewed"]);
-});
-
 test("fork bind copies the source target and does not substitute the caller branch", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });

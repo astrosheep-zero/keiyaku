@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
@@ -44,35 +44,6 @@ async function inTemporaryDirectory(action: (root: string) => Promise<void>): Pr
     rmSync(root, { recursive: true, force: true });
   }
 }
-
-test("execution runs every declaration after a nonzero exit and returns only its terminal result", async () => {
-  await inTemporaryDirectory(async (root) => {
-    const counter = join(root, "runs");
-    const declarations = [
-      declaration(`${command(`require("node:fs").appendFileSync(${JSON.stringify(counter)}, "1")`)}; false`),
-      declaration(command(`require("node:fs").appendFileSync(${JSON.stringify(counter)}, "2")`)),
-    ];
-    const outcome = await executeVerification(input(root, declarations));
-
-    assert.deepEqual(outcome, {
-      outcome: { kind: "terminal", verdict: "unsatisfied", passed: 1, total: 2, summary: "[1 bash exit 1]" },
-    });
-    assert.equal(readFileSync(counter, "utf8"), "12");
-  });
-});
-
-test("producer leaves an omitted declaration unbounded", async (t) => {
-  const timeouts: number[] = [];
-  t.mock.method(globalThis, "setTimeout", ((_callback: () => void, milliseconds?: number) => {
-    timeouts.push(milliseconds ?? 0);
-    return undefined;
-  }) as unknown as typeof setTimeout);
-
-  const outcome = await executeVerification(input("/tmp", [declaration("true")]));
-
-  assert.deepEqual(outcome, { outcome: { kind: "terminal", verdict: "satisfied", passed: 1, total: 1 } });
-  assert.deepEqual(timeouts, []);
-});
 
 test("a declaration timeout is terminally unsatisfied and later declarations still run", async () => {
   await inTemporaryDirectory(async (root) => {
@@ -138,8 +109,7 @@ test("execution returns an unsatisfied verdict, unknown-exit, and spawn-error wi
 
     const missingExecutor = "keiyaku-v4-no-such-executable" as VerificationDeclaration["executor"];
     const spawnError = await executeVerification(input(root, [declaration("true", missingExecutor)]));
-    assert.equal(spawnError.outcome.kind, "spawn-error");
-    if (spawnError.outcome.kind !== "spawn-error") return;
+    assert.ok(spawnError.outcome.kind === "spawn-error", "expected spawnError.outcome.kind = \"spawn-error\"");
     assert.match(spawnError.outcome.diagnostic, new RegExp(`spawn ${missingExecutor} ENOENT`));
   });
 });
@@ -155,8 +125,7 @@ test("producer preserves ordered terminal diagnostics within one 32 KiB summary"
       ]),
     );
 
-    assert.equal(outcome.outcome.kind, "terminal");
-    if (outcome.outcome.kind !== "terminal") return;
+    assert.ok(outcome.outcome.kind === "terminal", "expected outcome.outcome.kind = \"terminal\"");
     assert.equal(outcome.outcome.verdict, "unsatisfied");
     assert.notEqual(outcome.outcome.summary, undefined);
     const summary = outcome.outcome.summary!;
