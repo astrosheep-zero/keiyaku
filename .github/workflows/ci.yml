@@ -1,4 +1,4 @@
-name: Publish API test boundary
+name: Publish bounded test source queue
 on:
   push:
     branches: [test-diet/publish-api-boundary-20260918]
@@ -12,75 +12,23 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - name: Reproduce the checked test-only tree
+      - name: Checksum the locally verified patch
         run: |
-          git checkout --detach fe689c5381b1ccdfc55a3c435a481d44adb7dc9c
           python3 - <<'PY'
-          from pathlib import Path
-          p=Path('tests/akuma-api.test.ts')
-          s=p.read_text()
-          a=s.index('test("schema tell on a running Body is busy unless interrupt is set"')
-          b=s.index('\ntest("idle resolves the settling life',a)
-          replacement='''test("schema tell routes admission and preserves typed refusals without launching a Body", async (context) => {
-            const root = temporaryDirectory(context, "keiyaku-akuma-api-routing-");
-            const akuma = Akuma.select(await World.at(root), "aku/claude/a1000006");
-            const schema = Schema.zod(z.object({ ok: z.boolean() }).strict());
-            const busy = new AkumaBusyError();
-            const tells: Parameters<AkumaHandle["tell"]>[] = [];
-            const interrupts: Parameters<AkumaHandle["interrupt"]>[] = [];
-            context.mock.method(AkumaHandle.prototype, "tell", async (...args: Parameters<AkumaHandle["tell"]>) => {
-              tells.push(args);
-              throw busy;
-            });
-            context.mock.method(AkumaHandle.prototype, "interrupt", async (...args: Parameters<AkumaHandle["interrupt"]>) => {
-              interrupts.push(args);
-              return { kind: "unavailable", evidence: "hung" } as const;
-            });
-          
-            // The API owns routing/translation; Heart and control suites own real busy/leash behavior.
-            await assert.rejects(akuma.tell("default", { schema }), (error) => error === busy);
-            await assert.rejects(
-              akuma.tell("explicit", { schema, interrupt: false, initiator: "api-caller" }),
-              (error) => error === busy,
-            );
-            assert.equal(interrupts.length, 0);
-            assert.equal(tells.length, 2);
-            for (const [index, args] of tells.entries()) {
-              assert.equal(args[0], index === 0 ? "default" : "explicit");
-              assert.match(args[1]!, /^[0-9a-f-]{36}$/u);
-              assert.deepEqual(args.slice(2), [
-                undefined,
-                undefined,
-                { schemaJson: schemaJsonText(schema), ...(index === 0 ? {} : { initiator: "api-caller" }) },
-              ]);
-            }
-            await assert.rejects(akuma.tell("interrupt", { schema, interrupt: true, initiator: "api-caller" }), {
-              name: "AkumaProviderError",
-              message: "schema interrupt unavailable: hung",
-            });
-            assert.equal(tells.length, 2);
-            assert.equal(interrupts.length, 1);
-            const [body, options] = interrupts[0]!;
-            assert.equal(body, "interrupt");
-            assert.match(options!.tellId!, /^[0-9a-f-]{36}$/u);
-            assert.deepEqual(options, {
-              tellId: options!.tellId,
-              schemaJson: schemaJsonText(schema),
-              initiator: "api-caller",
-            });
-            assert.equal(new Set([...tells.map((args) => args[1]), options!.tellId]).size, 3);
-          });
-          '''
-          s=s[:a]+replacement+s[b:]
-          s=s.replace('readTell, readTurn, recordTell','readTell, recordTell').replace('import type { OwnedProcess } from "../src/runtime/proc/run.js";\n','').replace('  fixtureAttempt,\n','')
-          p.write_text(s)
+          import base64, hashlib, pathlib, zlib
+          data=zlib.decompress(base64.b64decode(pathlib.Path('.test-audit/batch13.patch.zlib64').read_text()))
+          assert hashlib.sha256(data).hexdigest() == '1b85e64037590d6cd77ffadfb20b7f6e87af786c114fc3398ccdb425dedc82dc'
+          pathlib.Path('/tmp/batch13.patch').write_bytes(data)
           PY
-          git add tests/akuma-api.test.ts
+      - name: Publish the exact checked tree
+        run: |
+          git checkout --detach d87815d350476fb12f8dbcaa0ae0940372f62a39
+          git apply --index /tmp/batch13.patch
           git diff --cached --check
-          test "$(git write-tree)" = e5344e7754ec2ae63283b79d29be11a14bcaf570
+          test "$(git write-tree)" = 584d90e908a2a72cb7d4d8d544a88aaf934ca7a1
           git config user.name 'Keiyaku Test Maintenance'
           git config user.email 'keiyaku-ci@example.invalid'
-          git commit -m 'test: replace interrupted API lifecycle overlay with routing boundaries'
-          test -z "$(git ls-remote --heads origin refs/heads/test-diet/12-api-routing-boundary)"
-          git push origin HEAD:refs/heads/test-diet/12-api-routing-boundary
+          git commit -m 'test: overlap a bounded source-gate queue with verified runtime preparation'
+          test -z "$(git ls-remote --heads origin refs/heads/test-diet/13-bounded-static-queue)"
+          git push origin HEAD:refs/heads/test-diet/13-bounded-static-queue
           git rev-parse HEAD HEAD^{tree}
