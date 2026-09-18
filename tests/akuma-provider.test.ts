@@ -8,7 +8,6 @@ import { PassThrough, Readable, Writable } from "node:stream";
 import test from "node:test";
 import type { Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import * as acp from "@agentclientprotocol/sdk";
-import type { CreateAgentSessionOptions } from "@earendil-works/pi-coding-agent";
 import {
   AKUMA_REQUESTS_ENV,
   AGENT_EVENT_QUEUE_LIMIT,
@@ -793,6 +792,21 @@ test("ACP mapper preserves buffered state for an unknown runtime update discrimi
   });
 });
 
+type FakePiObservation = {
+  options?: Record<string, unknown>;
+  loader?: Record<string, unknown>;
+  opened?: string;
+  branched?: string;
+  aborted: number;
+  disposed: number;
+  prompt?: string;
+  bash?: {
+    cwd: string;
+    options: Parameters<PiSdk["createBashToolDefinition"]>[1];
+    tool: ReturnType<PiSdk["createBashToolDefinition"]>;
+  };
+};
+
 function fakePiSdk(
   input: {
     events?: readonly Record<string, unknown>[];
@@ -802,26 +816,8 @@ function fakePiSdk(
     promptNeverSettles?: boolean;
     abortNeverSettles?: boolean;
   } = {},
-): {
-  sdk: PiSdk;
-  seen: {
-    options?: Record<string, unknown>;
-    opened?: string;
-    branched?: string;
-    aborted: number;
-    disposed: number;
-    prompt?: string;
-  };
-} {
-  const seen = { aborted: 0, disposed: 0 } as {
-    options?: Record<string, unknown>;
-    loader?: Record<string, unknown>;
-    opened?: string;
-    branched?: string;
-    aborted: number;
-    disposed: number;
-    prompt?: string;
-  };
+): { sdk: PiSdk; seen: FakePiObservation } {
+  const seen: FakePiObservation = { aborted: 0, disposed: 0 };
   const manager = {
     getLeafId: () => (input.historyId === undefined ? "entry-final" : input.historyId),
     createBranchedSession: (id: string) => {
@@ -869,6 +865,12 @@ function fakePiSdk(
   return {
     seen,
     sdk: {
+      createBashToolDefinition: (cwd, options) => {
+        // Opaque SDK value: the adapter must forward it, not execute or reconstruct it.
+        const tool = Object.freeze({ name: "fixture-bash" }) as ReturnType<PiSdk["createBashToolDefinition"]>;
+        seen.bash = { cwd, options, tool };
+        return tool;
+      },
       createAgentSession: async (options) => {
         seen.options = options as Record<string, unknown>;
         return { session } as never;
@@ -1197,20 +1199,31 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
     { type: "unknown", kind: "future_event" },
   ]);
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "done", historyId: "entry-final" });
-  const customTools = fake.seen.options?.customTools as NonNullable<CreateAgentSessionOptions["customTools"]>;
-  const result = await customTools[0]!.execute(
-    "request-env",
-    { command: `printf %s "$${AKUMA_REQUESTS_ENV}"` },
-    new AbortController().signal,
-    undefined,
-    {
-      sessionManager: {
-        getSessionId: () => "pi-session",
-        getSessionFile: () => "/sessions/pi.jsonl",
-      },
-    } as never,
-  );
-  assert.deepEqual(result.content, [{ type: "text", text: "/work/requests" }]);
+  const bash = fake.seen.bash;
+  assert.ok(bash);
+  assert.equal(bash.cwd, tmpdir());
+  assert.deepEqual(fake.seen.options?.customTools, [bash.tool]);
+  assert.ok(bash.options?.spawnHook);
+  const context = {
+    cwd: tmpdir(),
+    command: "echo native request",
+    env: Object.freeze({
+      SAFE: "keep",
+      AKUMA_REQUESTS: "ancestor-requests",
+      PI_SESSION_ID: "native-session",
+      PI_SESSION_FILE: "native-session-file",
+      CODEX_THREAD_ID: "ancestor-codex",
+    }),
+  };
+  assert.deepEqual(bash.options.spawnHook(context), {
+    ...context,
+    env: {
+      SAFE: "keep",
+      AKUMA_REQUESTS: "/work/requests",
+      PI_SESSION_ID: "native-session",
+      PI_SESSION_FILE: "native-session-file",
+    },
+  });
   assert.equal(fake.seen.disposed, 1);
   await attempt.closed;
 });
