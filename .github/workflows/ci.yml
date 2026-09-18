@@ -1,29 +1,53 @@
-name: Test diet final paired verification
+name: Publish and verify analysis runtime batch
 on:
   push:
     branches: [work/test-diet-publish-20260918]
 permissions:
   contents: read
 jobs:
-  benchmark:
+  publish:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      candidate: ${{ steps.publish.outputs.candidate }}
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - name: Export the exact published candidate and repository history
+      - id: publish
+        name: Publish the exact reviewed patch before verification
+        shell: bash
         run: |
-          mkdir -p "$RUNNER_TEMP/test-diet-snapshot"
-          git archive --format=tar.gz 773b9de8ae9da0b7c27bd22b4fc174038c11679f > "$RUNNER_TEMP/test-diet-snapshot/candidate.tar.gz"
-          git bundle create "$RUNNER_TEMP/test-diet-snapshot/repository.bundle" --all
-      - uses: actions/upload-artifact@v4
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, hashlib, pathlib, os, zlib
+          patch = zlib.decompress(base64.b64decode(pathlib.Path('.test-audit/batch16.patch.b64').read_text(), validate=True))
+          assert hashlib.sha256(patch).hexdigest() == 'b4479e6841257d44d1bbd551d9dea57fa071a915a378936a6127473252040009'
+          pathlib.Path(os.environ['RUNNER_TEMP'], 'batch16.patch').write_bytes(patch)
+          PY
+          git checkout --detach 773b9de8ae9da0b7c27bd22b4fc174038c11679f
+          git apply --index "$RUNNER_TEMP/batch16.patch"
+          git diff --cached --check
+          test "$(git write-tree)" = 1f70837f660596dd85efd6e8427f474a0b82b75c
+          git config user.name 'Test Suite Maintenance'
+          git config user.email 'test-maintenance@example.invalid'
+          test -z "$(git ls-remote --heads origin refs/heads/test-diet/16-reuse-analysis-runtime)"
+          git commit -m 'test: reuse model analysis libraries and native fixture modules (batch 16)'
+          git push origin HEAD:refs/heads/test-diet/16-reuse-analysis-runtime
+          echo "candidate=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  benchmark:
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CANDIDATE_REF: ${{ needs.publish.outputs.candidate }}
+    steps:
+      - uses: actions/checkout@v5
         with:
-          name: test-diet-published-source
-          path: ${{ runner.temp }}/test-diet-snapshot
-          retention-days: 7
-      - name: Select the pinned baseline
-        run: git checkout --detach bc1b478d8738d546e32e73790ab53565dc7cffc0
+          fetch-depth: 0
+          ref: ${{ needs.publish.outputs.candidate }}
       - uses: actions/setup-node@v5
         with:
           node-version: 24.20.0
@@ -32,7 +56,12 @@ jobs:
         with:
           version: 0.14.1
       - run: npm ci --ignore-scripts --prefer-offline
-      - name: Set fixture identity and prime the unchanged compiler cache
+      - name: Verify types and lint
+        run: |
+          npm run test:typecheck
+          npm run lint
+          git diff --check
+      - name: Set fixture identity and equally prime compiler artifacts
         run: |
           git config --global user.name 'Keiyaku CI'
           git config --global user.email 'keiyaku-ci@example.invalid'
@@ -41,21 +70,21 @@ jobs:
         shell: bash
         run: |
           python3 -u - <<'PY'
-          import json, os, pathlib, re, signal, statistics, subprocess, time
+          import json, os, pathlib, re, signal, statistics, subprocess, time, shutil
           out = pathlib.Path(os.environ['RUNNER_TEMP']) / 'paired-results'
           out.mkdir()
-          refs = {'baseline': 'bc1b478d8738d546e32e73790ab53565dc7cffc0', 'candidate': '773b9de8ae9da0b7c27bd22b4fc174038c11679f'}
+          refs = {'baseline': 'bc1b478d8738d546e32e73790ab53565dc7cffc0', 'candidate': os.environ['CANDIDATE_REF']}
           report = {'refs': refs, 'command': 'npm test', 'node': subprocess.check_output(['node', '--version'], text=True).strip(), 'cpus': os.cpu_count(), 'runs': []}
           for label, trial in [('baseline', 1), ('candidate', 1), ('candidate', 2), ('baseline', 2), ('baseline', 3), ('candidate', 3)]:
               subprocess.run(['git', 'checkout', '--detach', refs[label]], check=True)
               with (out / f'{label}-{trial}.log').open('w') as log:
                   start = time.monotonic()
                   child = subprocess.Popen(['npm', 'test'], stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
-                  timeout = False
+                  timed_out = False
                   try:
                       code = child.wait(timeout=240)
                   except subprocess.TimeoutExpired:
-                      timeout = True
+                      timed_out = True
                       os.killpg(child.pid, signal.SIGTERM)
                       try:
                           child.wait(timeout=5)
@@ -66,13 +95,12 @@ jobs:
                   elapsed = time.monotonic() - start
               text = (out / f'{label}-{trial}.log').read_text()
               match = re.search(r'\[test:release\] tests (\d+) status=(\d+)', text)
-              row = {'variant': label, 'trial': trial, 'wall_seconds': round(elapsed, 3), 'tests_seconds': int(match[1]) / 1000 if match else None, 'exit_code': code, 'timed_out': timeout, 'completed_test_phase': bool(match)}
+              row = {'variant': label, 'trial': trial, 'wall_seconds': round(elapsed, 3), 'tests_seconds': int(match[1]) / 1000 if match else None, 'exit_code': code, 'timed_out': timed_out, 'completed_test_phase': bool(match)}
               report['runs'].append(row)
               (out / 'results.json').write_text(json.dumps(report, indent=2))
               print(json.dumps(row), flush=True)
               logs = pathlib.Path('.test-logs')
               if logs.exists():
-                  import shutil
                   shutil.copytree(logs, out / f'{label}-{trial}-per-file', dirs_exist_ok=True)
                   shutil.rmtree(logs)
           complete = all(r['completed_test_phase'] and not r['timed_out'] for r in report['runs'])
@@ -88,6 +116,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-diet-final-paired-results
+          name: test-diet-batch16-paired-results
           path: ${{ runner.temp }}/paired-results
           retention-days: 7
