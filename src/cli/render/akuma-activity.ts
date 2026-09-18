@@ -306,25 +306,13 @@ function orderedSnapshotEntries(snapshot: RenderedSnapshot): readonly RenderEntr
   return entries;
 }
 
-/**
- * The current open turn starts from either its initial commission or a Tell
- * delivered when the Body launched it. A live Tell belongs to an already
- * pursuing turn and is not its boundary.
- */
+/** The public projection names the current-Turn boundary when it is retained. */
 function currentTurnBoundary(snapshot: RenderedSnapshot): CurrentTurnBoundary | undefined {
-  if (snapshot.kind !== "open") return undefined;
-  const rows = snapshot.entries.flatMap((entry) => (entry.kind === "row" ? [entry.row] : []));
-  const wake = rows.findLast(
-    (row) =>
-      row.kind === "tell" &&
-      row.state === "told" &&
-      row.deliveries.some(
-        (delivery) => delivery.route === "launch" && delivery.turnSequence === snapshot.turn.turnSequence,
-      ),
+  if (snapshot.kind !== "open" || snapshot.openingSequence === undefined) return undefined;
+  const entry = snapshot.entries.find(
+    (candidate) => candidate.kind === "row" && candidate.row.sequence === snapshot.openingSequence,
   );
-  if (wake !== undefined) return { row: wake, turnSequence: snapshot.turn.turnSequence };
-  const call = rows.find((row) => row.kind === "call" && row.turnSequence === snapshot.turn.turnSequence);
-  return call === undefined ? undefined : { row: call, turnSequence: snapshot.turn.turnSequence };
+  return entry?.kind === "row" ? { row: entry.row, turnSequence: snapshot.turn.turnSequence } : undefined;
 }
 
 /** Move the visible current-turn boundary ahead of activity without duplicating it. */

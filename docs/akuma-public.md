@@ -27,6 +27,23 @@ recently changed files. Repeated edits to one path become one summary with
 accumulated known diffstat and the latest event identity; omitted counts refer
 to files, not events. They are never a file ledger or fact.
 
+For an open Turn, the public timeline projector selects and retains its opening
+input as current work independently of the ordinary-detail budget. Its retained
+call wins; only without that call, the earliest retained settled Tell delivered
+at launch for that Turn is selected. A live delivery is ordinary activity, not
+an opening input. Both monitoring and receipt observations retain that one
+sequence-ordered evidence row without duplicating it; no opening input is
+invented when its qualifying evidence is unavailable. Consumers receive the
+selected row's typed identity and do not reconstruct Turn ownership from its
+content or delivery metadata.
+
+The ordinary current-work window is the open Turn's call and provider activity
+along with its retained settled delivered Tells, all in durable sequence order.
+Only the selected opening input and the existing active, pending, and
+receipt-specific evidence remain pins; a later or unrelated settled Tell gains
+no global status privilege. Its omission gaps therefore describe only that
+current window, never an earlier Turn or unrelated Tell.
+
 Placement discharges reported changes at the observation composition. While the
 Akuma's dispatch-associated Contract is active, a composed status surfaces them
 as above; once that Contract is claimed, the same observation presents no

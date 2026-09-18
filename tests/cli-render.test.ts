@@ -1368,7 +1368,7 @@ test("current attempt boundaries lead focused snapshots and live streams exactly
   });
   const tool = snapshotRow(completedTool(1, "bash", { kind: "run", command: "before-boundary" }));
   const active = snapshotRow(activeTool(3, "bash", { kind: "run", command: "still-running" }));
-  const initial = openAkumaSnapshot([tool, call, active]);
+  const initial = { ...openAkumaSnapshot([tool, call, active]), openingSequence: 2 };
   const snapshot = snapshotActivityLines(initial, context).join("\n");
   assert.match(snapshot, /^\d{2}:\d{2} │ call +initial commission/mu);
   assert.ok(snapshot.indexOf("initial commission") < snapshot.indexOf("before-boundary"));
@@ -1407,11 +1407,14 @@ test("current attempt boundaries lead focused snapshots and live streams exactly
     state: "told" as const,
     deliveries: [{ route: "launch" as const, turnSequence: 1, deliveredAt: AKUMA_ACTIVITY_AT }],
   });
-  const woken = openAkumaSnapshot([
-    snapshotRow(completedTool(4, "bash", { kind: "run", command: "before-wake" })),
-    wake,
-    snapshotRow(activeTool(6, "bash", { kind: "run", command: "waking" })),
-  ]);
+  const woken = {
+    ...openAkumaSnapshot([
+      snapshotRow(completedTool(4, "bash", { kind: "run", command: "before-wake" })),
+      wake,
+      snapshotRow(activeTool(6, "bash", { kind: "run", command: "waking" })),
+    ]),
+    openingSequence: 5,
+  };
   const wakeSnapshot = snapshotActivityLines(woken, context).join("\n");
   assert.match(wakeSnapshot, /^\d{2}:\d{2} ✓ told +“resume with the new direction”/mu);
   assert.ok(wakeSnapshot.indexOf("resume with the new direction") < wakeSnapshot.indexOf("before-wake"));
@@ -1431,6 +1434,35 @@ test("current attempt boundaries lead focused snapshots and live streams exactly
     .join("\n");
   assert.match(wakeOpening, /✓ told +“resume with the new direction”/u);
   assert.doesNotMatch(wakeOpening, /before-wake/u);
+});
+
+test("current attempt boundaries consume the projection opening identity", () => {
+  const context = { columns: 120, color: false } as const;
+  const earlier = snapshotRow(completedTool(1, "bash", { kind: "run", command: "earlier" }));
+  const named = snapshotRow({
+    kind: "call" as const,
+    sequence: 2,
+    turnSequence: 1,
+    at: AKUMA_ACTIVITY_AT,
+    text: "named opening",
+  });
+  const laterLaunch = snapshotRow({
+    kind: "tell" as const,
+    sequence: 3,
+    at: AKUMA_ACTIVITY_AT,
+    tellId: "tell/later-launch",
+    text: "later launch",
+    state: "told" as const,
+    deliveries: [{ route: "launch" as const, turnSequence: 1, deliveredAt: AKUMA_ACTIVITY_AT }],
+  });
+  const namedSnapshot = { ...openAkumaSnapshot([earlier, named, laterLaunch]), openingSequence: 2 };
+  const namedText = snapshotActivityLines(namedSnapshot, context).join("\n");
+  assert.ok(namedText.indexOf("named opening") < namedText.indexOf("earlier"));
+  assert.ok(namedText.indexOf("named opening") < namedText.indexOf("later launch"));
+
+  const unnamedText = snapshotActivityLines(openAkumaSnapshot([earlier, named, laterLaunch]), context).join("\n");
+  assert.ok(unnamedText.indexOf("earlier") < unnamedText.indexOf("named opening"));
+  assert.ok(unnamedText.indexOf("named opening") < unnamedText.indexOf("later launch"));
 });
 
 test("narrative selection is partition-invariant and repeated pending snapshots do not replay", () => {

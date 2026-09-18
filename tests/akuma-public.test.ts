@@ -16,6 +16,7 @@ import {
   projectTurns,
   selectHistory,
   selectSnapshot,
+  activitySnapshotSchema,
   type ActivitySnapshot,
   type ActivityHistory,
   type TurnLedger
@@ -482,9 +483,9 @@ test("snapshot selects one current focus while history keeps honest tool lifecyc
   assert.ok(selected.kind === "open", "expected selected.kind = \"open\"");
   assert.deepEqual(
     selected.entries.map((entry) => (entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence)),
-    ["gap:1", 6, 7, 8],
+    [5, 6, 7, 8],
   );
-  assert.equal(selected.omitted, 1);
+  assert.equal(selected.omitted, 0);
   assert.equal(
     selected.entries.some((entry) => entry.kind === "row" && entry.row.kind === "tool" && entry.row.state === "active"),
     true,
@@ -560,6 +561,242 @@ test("snapshot selects one current focus while history keeps honest tool lifecyc
     true,
   );
   assert.equal(snapshot(mixedLedger).kind, "idle");
+});
+
+function snapshotSequences(snapshot: ActivitySnapshot): readonly (number | `gap:${number}`)[] {
+  return snapshot.entries.map((entry) => (entry.kind === "gap" ? (`gap:${entry.count}` as `gap:${number}`) : entry.row.sequence));
+}
+
+test("open snapshots retain one current-Turn opening input outside the ordinary budget", () => {
+  const callLedger = projectTurns([
+    { kind: "turn-start" as const, sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
+    { kind: "call" as const, sequence: 2, turnSequence: 1, at: "2026-08-10T00:00:02.000Z", body: "earlier" },
+    turnEndFact(3, 1, "2026-08-10T00:00:03.000Z", {
+      kind: "answered",
+      answer: "earlier",
+      session: { sessionId: "earlier" },
+    }),
+    { kind: "turn-start" as const, sequence: 4, bodySequence: 1, startedAt: "2026-08-10T00:00:04.000Z" },
+    { kind: "call" as const, sequence: 5, turnSequence: 4, at: "2026-08-10T00:00:05.000Z", body: "current" },
+    activityFact(6, 4, "2026-08-10T00:00:06.000Z", { type: "assistant", text: "one" }),
+    activityFact(7, 4, "2026-08-10T00:00:07.000Z", { type: "thought", text: "two" }),
+    activityFact(8, 4, "2026-08-10T00:00:08.000Z", { type: "note", text: "three" }),
+    activityFact(9, 4, "2026-08-10T00:00:09.000Z", { type: "assistant", text: "four" }),
+    activityFact(10, 4, "2026-08-10T00:00:10.000Z", { type: "thought", text: "five" }),
+    activityFact(11, 4, "2026-08-10T00:00:11.000Z", { type: "note", text: "six" }),
+  ]);
+  const zero = selectSnapshot(callLedger, { aperture: "receipt", budget: { tail: 0, voice: 0 } });
+  assert.equal(zero.snapshot.kind, "open");
+  if (zero.snapshot.kind === "open") {
+    assert.equal(zero.snapshot.openingSequence, 5);
+    assert.deepEqual(snapshotSequences(zero.snapshot), [5, "gap:6"]);
+    assert.equal(zero.snapshot.omitted, 6);
+  }
+  assert.equal(zero.ordinaryCount, 0);
+
+  const defaultBudget = selectSnapshot(callLedger, { aperture: "receipt" });
+  assert.equal(defaultBudget.snapshot.kind, "open");
+  if (defaultBudget.snapshot.kind === "open") {
+    assert.equal(defaultBudget.snapshot.openingSequence, 5);
+    assert.equal(snapshotSequences(defaultBudget.snapshot).filter((sequence) => sequence === 5).length, 1);
+    assert.equal(snapshotSequences(defaultBudget.snapshot).includes(2), false);
+  }
+  assert.equal(defaultBudget.ordinaryCount, 5);
+});
+
+test("open snapshots select the retained launch Tell only without a current-Turn call", () => {
+  const facts: readonly TimelineFact[] = [
+    {
+      kind: "tell",
+      sequence: 1,
+      id: "opening",
+      body: "wake this Turn",
+      recordedAt: "2026-08-10T00:00:01.000Z",
+      state: "told",
+      deliveries: [
+        { route: "launch", turnSequence: 4, deliveredAt: "2026-08-10T00:00:02.000Z" },
+      ],
+    },
+    {
+      kind: "tell",
+      sequence: 2,
+      id: "later-launch",
+      body: "also at launch",
+      recordedAt: "2026-08-10T00:00:02.000Z",
+      state: "told",
+      deliveries: [
+        { route: "launch", turnSequence: 4, deliveredAt: "2026-08-10T00:00:03.000Z" },
+      ],
+    },
+    { kind: "turn-start", sequence: 4, bodySequence: 1, startedAt: "2026-08-10T00:00:04.000Z" },
+    activityFact(5, 4, "2026-08-10T00:00:05.000Z", { type: "assistant", text: "working" }),
+    {
+      kind: "tell",
+      sequence: 6,
+      id: "other-turn",
+      body: "old launch",
+      recordedAt: "2026-08-10T00:00:06.000Z",
+      state: "told",
+      deliveries: [
+        { route: "launch", turnSequence: 1, deliveredAt: "2026-08-10T00:00:06.000Z" },
+      ],
+    },
+    {
+      kind: "tell",
+      sequence: 7,
+      id: "live",
+      body: "steer current work",
+      recordedAt: "2026-08-10T00:00:07.000Z",
+      state: "told",
+      deliveries: [
+        { route: "live", turnSequence: 4, receipt: "required", deliveredAt: "2026-08-10T00:00:07.000Z" },
+      ],
+    },
+    activityFact(8, 4, "2026-08-10T00:00:08.000Z", { type: "note", text: "still working" }),
+  ];
+  const launch = selectSnapshot(projectTurns(facts), { aperture: "receipt", budget: { tail: 0, voice: 0 } });
+  assert.equal(launch.snapshot.kind, "open");
+  if (launch.snapshot.kind === "open") {
+    assert.equal(launch.snapshot.openingSequence, 1);
+    assert.deepEqual(snapshotSequences(launch.snapshot), [1, "gap:4"]);
+    assert.equal(launch.snapshot.entries.filter((entry) => entry.kind === "row" && entry.row.sequence === 1).length, 1);
+    assert.equal(launch.snapshot.entries.some((entry) => entry.kind === "row" && entry.row.sequence === 6), false);
+    assert.equal(launch.snapshot.entries.some((entry) => entry.kind === "row" && entry.row.sequence === 7), false);
+    assert.equal(launch.snapshot.entries.some((entry) => entry.kind === "row" && entry.row.sequence === 2), false);
+  }
+
+  const callWins = selectSnapshot(
+    projectTurns([
+      {
+        kind: "tell" as const,
+        sequence: 1,
+        id: "launch",
+        body: "launch input",
+        recordedAt: "2026-08-10T00:00:01.000Z",
+        state: "told" as const,
+        deliveries: [{ route: "launch" as const, turnSequence: 2, deliveredAt: "2026-08-10T00:00:01.000Z" }],
+      },
+      { kind: "turn-start" as const, sequence: 2, bodySequence: 1, startedAt: "2026-08-10T00:00:02.000Z" },
+      { kind: "call" as const, sequence: 3, turnSequence: 2, at: "2026-08-10T00:00:03.000Z", body: "call wins" },
+    ]),
+    { aperture: "receipt", budget: { tail: 0, voice: 0 } },
+  ).snapshot;
+  assert.equal(callWins.kind, "open");
+  if (callWins.kind === "open") assert.equal(callWins.openingSequence, 3);
+
+  const liveOnly = selectSnapshot(
+    projectTurns(facts.filter((fact) => fact.kind !== "tell" || fact.id === "other-turn" || fact.id === "live")),
+    { aperture: "receipt", budget: { tail: 0, voice: 0 } },
+  ).snapshot;
+  assert.equal(liveOnly.kind, "open");
+  if (liveOnly.kind === "open") assert.equal(liveOnly.openingSequence, undefined);
+});
+
+test("opening input composes with existing actionable and receipt pins without a second copy", () => {
+  const ledger = projectTurns([
+    {
+      kind: "tell" as const,
+      sequence: 1,
+      id: "opening",
+      body: "wake this Turn",
+      recordedAt: "2026-08-10T00:00:01.000Z",
+      state: "told" as const,
+      deliveries: [{ route: "launch" as const, turnSequence: 2, deliveredAt: "2026-08-10T00:00:01.000Z" }],
+    },
+    { kind: "turn-start" as const, sequence: 2, bodySequence: 1, startedAt: "2026-08-10T00:00:02.000Z" },
+    activityFact(3, 2, "2026-08-10T00:00:03.000Z", { type: "assistant", text: "one" }),
+    activityFact(4, 2, "2026-08-10T00:00:04.000Z", { type: "note", text: "two" }),
+    activityFact(5, 2, "2026-08-10T00:00:05.000Z", {
+      type: "tool",
+      phase: "started",
+      id: "active",
+      name: "Search",
+      call: { kind: "search", query: "TODO" },
+    }),
+    { kind: "tell" as const, sequence: 6, id: "pending", body: "keep going", recordedAt: "2026-08-10T00:00:06.000Z", state: "pending" as const, deliveries: [] },
+    {
+      kind: "tell" as const,
+      sequence: 7,
+      id: "receipt",
+      body: "receipt evidence",
+      recordedAt: "2026-08-10T00:00:07.000Z",
+      state: "told" as const,
+      deliveries: [{ route: "live" as const, turnSequence: 2, receipt: "required" as const, deliveredAt: "2026-08-10T00:00:07.000Z" }],
+    },
+  ]);
+  const monitoring = selectSnapshot(ledger, { aperture: "monitoring", budget: { tail: 0, voice: 0 } });
+  assert.equal(monitoring.snapshot.kind, "open");
+  if (monitoring.snapshot.kind === "open") {
+    assert.equal(monitoring.snapshot.openingSequence, 1);
+    assert.deepEqual(snapshotSequences(monitoring.snapshot), [1, "gap:2", 5, 6, "gap:1"]);
+  }
+  assert.equal(monitoring.ordinaryCount, 0);
+  const budgeted = selectSnapshot(ledger, { aperture: "monitoring", budget: { tail: 1, voice: 0 } });
+  assert.equal(budgeted.snapshot.kind, "open");
+  if (budgeted.snapshot.kind === "open") assert.deepEqual(snapshotSequences(budgeted.snapshot), [1, "gap:2", 5, 6, 7]);
+  assert.equal(budgeted.ordinaryCount, 1);
+  const receipt = selectSnapshot(ledger, {
+    aperture: "receipt",
+    admittedTellId: "receipt",
+    budget: { tail: 0, voice: 0 },
+  }).snapshot;
+  assert.equal(receipt.kind, "open");
+  if (receipt.kind === "open") {
+    assert.equal(receipt.openingSequence, 1);
+    assert.deepEqual(snapshotSequences(receipt), [1, "gap:2", 5, 7]);
+    assert.equal(receipt.entries.filter((entry) => entry.kind === "row" && entry.row.sequence === 1).length, 1);
+  }
+});
+
+test("opening identity is positive and names exactly one open snapshot entry", () => {
+  const open = activitySnapshotSchema.parse({
+    kind: "open",
+    turn: { kind: "turn", sequence: 1, turnSequence: 1, bodySequence: 1, at: "2026-08-10T00:00:01.000Z" },
+    entries: [
+      {
+        kind: "row",
+        row: { kind: "call", sequence: 1, turnSequence: 1, at: "2026-08-10T00:00:01.000Z", text: "opening" },
+      },
+    ],
+    omitted: 0,
+    openingSequence: 1,
+    reportedChanges: [],
+    reportedChangesOmitted: 0,
+  });
+  assert.equal(open.kind, "open");
+  assert.throws(() =>
+    activitySnapshotSchema.parse({
+      kind: "open",
+      turn: { kind: "turn", sequence: 1, turnSequence: 1, bodySequence: 1, at: "2026-08-10T00:00:01.000Z" },
+      entries: [],
+      omitted: 0,
+      openingSequence: 1,
+      reportedChanges: [],
+      reportedChangesOmitted: 0,
+    }),
+  );
+  assert.throws(() =>
+    activitySnapshotSchema.parse({
+      kind: "open",
+      turn: { kind: "turn", sequence: 1, turnSequence: 1, bodySequence: 1, at: "2026-08-10T00:00:01.000Z" },
+      entries: [
+        {
+          kind: "row",
+          row: { kind: "call", sequence: 1, turnSequence: 1, at: "2026-08-10T00:00:01.000Z", text: "opening" },
+        },
+      ],
+      omitted: 0,
+      openingSequence: 0,
+      reportedChanges: [],
+      reportedChangesOmitted: 0,
+    }),
+  );
+  assert.throws(() =>
+    activitySnapshotSchema.parse({ kind: "unborn", entries: [], omitted: 0, openingSequence: 1, reportedChanges: [], reportedChangesOmitted: 0 }),
+  );
+  assert.throws(() =>
+    activitySnapshotSchema.parse({ kind: "idle", entries: [], omitted: 0, openingSequence: 1, reportedChanges: [], reportedChangesOmitted: 0 }),
+  );
 });
 
 test("reported file changes follow the open or latest closed frontier and aggregate files", () => {

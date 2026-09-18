@@ -17,7 +17,9 @@ import {
   endTurn,
   initializeHeart,
   recordTell as heartRecordTell,
+  recordTellDeliveries,
   recordTellReceipt,
+  readStatusFacts,
   type Soul,
 } from "../src/akuma/heart/index.js";
 import { insertActivityFact } from "../src/akuma/heart/rows.js";
@@ -280,6 +282,93 @@ test("reported changes retain native Pi writes and aggregate a write-then-edit p
   }
 });
 
+test("status reads retain delivered frontier Tells without a global told substitution", async () => {
+  const value = await fixture();
+  const { paths, id } = value.allocated;
+  const leash = (await HeldAkumaLeash.try(paths))!;
+  const at = "2026-08-08T00:00:00.000Z";
+  try {
+    await leash.birth(paths, value.soul);
+    const body = await leash.recordBody(paths, { leashTakenAt: at });
+    const earlier = await beginTurn(paths, { bodySequence: body.sequence, startedAt: at, call: "earlier work" });
+    await endTurn(paths, {
+      turnSequence: earlier.sequence,
+      outcome: { kind: "failed", diagnostic: "earlier finished" },
+      completedAt: at,
+    });
+    const opening = await recordTell(paths, { id: "opening", body: "wake frontier", recordedAt: at });
+    assert.ok(opening.kind === "recorded");
+    const frontier = await beginTurn(paths, { bodySequence: body.sequence, startedAt: at });
+    await recordTellDeliveries(paths, [
+      {
+        tellId: opening.tell.id,
+        route: "launch",
+        turnSequence: frontier.sequence,
+        fence: "opening-launch",
+        deliveredAt: at,
+      },
+    ]);
+    const live = await recordTell(paths, { id: "live", body: "steer frontier", recordedAt: at });
+    assert.ok(live.kind === "recorded");
+    await recordTellDeliveries(paths, [
+      {
+        tellId: live.tell.id,
+        route: "live",
+        receipt: "unavailable",
+        turnSequence: frontier.sequence,
+        fence: "frontier-live",
+        deliveredAt: at,
+      },
+    ]);
+    const unrelated = await recordTell(paths, { id: "unrelated", body: "old work", recordedAt: at });
+    assert.ok(unrelated.kind === "recorded");
+    await recordTellDeliveries(paths, [
+      {
+        tellId: unrelated.tell.id,
+        route: "launch",
+        turnSequence: earlier.sequence,
+        fence: "earlier-launch",
+        deliveredAt: at,
+      },
+    ]);
+
+    const facts = await readStatusFacts(paths, { aperture: "monitoring" });
+    assert.deepEqual(
+      facts.filter((fact) => fact.kind === "tell").map((fact) => fact.id),
+      [opening.tell.id, live.tell.id],
+    );
+    const zero = await bornStatus(paths, id, { aperture: "monitoring", ordinaryBudget: 0 });
+    assert.equal(zero.status.timeline.kind, "open");
+    if (zero.status.timeline.kind === "open") {
+      assert.equal(zero.status.timeline.openingSequence, opening.tell.sequence);
+      assert.deepEqual(
+        zero.status.timeline.entries.map((entry) => (entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence)),
+        [opening.tell.sequence, "gap:1"],
+      );
+    }
+    assert.equal(zero.ordinarySelected, 0);
+
+    const budgeted = await bornStatus(paths, id, { aperture: "monitoring", ordinaryBudget: 1 });
+    assert.equal(budgeted.status.timeline.kind, "open");
+    if (budgeted.status.timeline.kind === "open") {
+      assert.deepEqual(
+        budgeted.status.timeline.entries.map((entry) => (entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence)),
+        [opening.tell.sequence, live.tell.sequence],
+      );
+      assert.equal(
+        budgeted.status.timeline.entries.some(
+          (entry) => entry.kind === "row" && entry.row.kind === "tell" && entry.row.tellId === unrelated.tell.id,
+        ),
+        false,
+      );
+    }
+    assert.equal(budgeted.ordinarySelected, 1);
+  } finally {
+    leash.release();
+    value.close();
+  }
+});
+
 test("status preserves unborn and Tell-only apertures without a Turn", async () => {
   const value = await fixture();
   const { paths, id } = value.allocated;
@@ -296,13 +385,18 @@ test("status preserves unborn and Tell-only apertures without a Turn", async () 
           kind: "undelivered",
           receivedAt: value.soul.createdAt,
         });
-      const ledger = projectTurns((await activitySlice(paths)).rows);
       for (const aperture of ["monitoring", "receipt"] as const) {
         for (const admittedTellId of [undefined, "only-tell", "absent"]) {
           const input = { aperture, ...(admittedTellId === undefined ? {} : { admittedTellId }) };
           const observed = await bornStatus(paths, id, input);
-          assert.deepEqual(observed.status.timeline, selectSnapshot(ledger, input).snapshot);
-          assert.equal(observed.status.timeline.kind, phase === "empty" ? "unborn" : "idle");
+          assert.deepEqual(observed.status.timeline, selectSnapshot(projectTurns(await readStatusFacts(paths, input)), input).snapshot);
+          assert.equal(
+            observed.status.timeline.kind,
+            (phase === "pending" && (aperture === "monitoring" || admittedTellId !== "absent")) ||
+              (phase === "told" && admittedTellId === "only-tell")
+              ? "idle"
+              : "unborn",
+          );
         }
       }
     }

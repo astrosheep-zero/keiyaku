@@ -143,11 +143,38 @@ function frontierReportedChanges(ledger: TurnLedger): ReportedChangeSummary {
 function isPendingTell(row: ActivityRow): row is TellRow {
   return row.kind === "tell" && row.state === "pending";
 }
-function isToldTell(row: ActivityRow): row is TellRow {
-  return row.kind === "tell" && row.state === "told";
-}
 function isActiveTool(row: ActivityRow): boolean {
   return row.kind === "tool" && row.state === "active";
+}
+
+function isSettledTellDeliveredTo(row: ActivityRow, turnSequence: number): row is TellRow {
+  return (
+    row.kind === "tell" &&
+    row.state === "told" &&
+    row.deliveries.some((delivery) => delivery.turnSequence === turnSequence)
+  );
+}
+
+function currentTurnWindow(ledger: TurnLedger): readonly ActivityRow[] {
+  const turn = ledger.openTurn;
+  if (turn === undefined) return [];
+  const turnRows = new Set<ActivityRow>(turn.rows);
+  return ledger.rows.filter((row) => turnRows.has(row) || isSettledTellDeliveredTo(row, turn.turn.turnSequence));
+}
+
+function openingInput(ledger: TurnLedger): ActivityRow | undefined {
+  const turn = ledger.openTurn;
+  if (turn === undefined) return undefined;
+  const call = turn.rows.find((row) => row.kind === "call");
+  if (call !== undefined) return call;
+  return ledger.rows.find(
+    (row) =>
+      row.kind === "tell" &&
+      row.state === "told" &&
+      row.deliveries.some(
+        (delivery) => delivery.route === "launch" && delivery.turnSequence === turn.turn.turnSequence,
+      ),
+  );
 }
 
 export function selectSnapshot(
@@ -162,7 +189,6 @@ export function selectSnapshot(
   if (ledger.turns.length === 0 && !ledger.rows.some((row) => row.kind === "tell"))
     return { snapshot: { kind: "unborn", entries: [], omitted: 0, ...EMPTY_REPORTED }, ordinaryCount: 0 };
   const pending = ledger.rows.filter(isPendingTell);
-  const latestTold = input.aperture === "monitoring" ? ledger.rows.findLast(isToldTell) : undefined;
   const admittedTell =
     input.aperture === "receipt" && input.admittedTellId !== undefined
       ? ledger.rows.find((row) => row.kind === "tell" && row.tellId === input.admittedTellId)
@@ -172,11 +198,16 @@ export function selectSnapshot(
       ? admittedTell === undefined
         ? []
         : [admittedTell]
-      : [...pending, ...(latestTold === undefined ? [] : [latestTold])];
+      : pending;
   const reported = frontierReportedChanges(ledger);
   if (ledger.openTurn !== undefined) {
-    const window = ledger.openTurn.rows;
-    const pinSet = new Set<ActivityRow>([...window.filter(isActiveTool), ...pins]);
+    const window = currentTurnWindow(ledger);
+    const opening = openingInput(ledger);
+    const pinSet = new Set<ActivityRow>([
+      ...window.filter(isActiveTool),
+      ...pins,
+      ...(opening === undefined ? [] : [opening]),
+    ]);
     const ordinary = window.filter((row) => !pinSet.has(row));
     const tailCount = Math.max(0, budget.tail);
     const tail = tailCount === 0 ? [] : ordinary.slice(-tailCount);
@@ -194,6 +225,7 @@ export function selectSnapshot(
         turn: ledger.openTurn.turn,
         entries: assembleEntries<OpenSnapshotRow>(ledger, window, selected),
         omitted,
+        ...(opening === undefined ? {} : { openingSequence: opening.sequence }),
         ...reported,
       },
       ordinaryCount: tail.length + voice.length,

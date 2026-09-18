@@ -5,6 +5,7 @@ import { z } from "zod";
 
 const nonblankTextSchema = z.string().refine((value) => value.trim() !== "");
 const countSchema = z.number().int().nonnegative();
+const sequenceSchema = z.number().int().positive();
 const timestampSchema = z.string().refine((value) => Number.isFinite(Date.parse(value)), "expected timestamp");
 const diffstatSchema = z.object({ added: countSchema, removed: countSchema }).strict();
 const fileChangeSchema = z
@@ -166,6 +167,30 @@ const reportedChangeFields = {
   reportedChanges: z.array(reportedFileChangeSchema).readonly(),
   reportedChangesOmitted: countSchema,
 };
+const openActivitySnapshotSchema = z
+  .object({
+    kind: z.literal("open"),
+    turn: turnRowSchema,
+    entries: z.array(snapshotEntrySchema(openSnapshotRowSchema)).readonly(),
+    omitted: countSchema,
+    openingSequence: sequenceSchema.optional(),
+    ...reportedChangeFields,
+  })
+  .strict()
+  .superRefine((snapshot, context) => {
+    if (snapshot.openingSequence === undefined) return;
+    const matches = snapshot.entries.filter(
+      (entry) => entry.kind === "row" && entry.row.sequence === snapshot.openingSequence,
+    );
+    if (matches.length !== 1) {
+      context.addIssue({
+        code: "custom",
+        path: ["openingSequence"],
+        message: "openingSequence must name exactly one snapshot entry",
+      });
+    }
+  });
+
 export const activitySnapshotSchema = z.union([
   z
     .object({
@@ -175,15 +200,7 @@ export const activitySnapshotSchema = z.union([
       ...reportedChangeFields,
     })
     .strict(),
-  z
-    .object({
-      kind: z.literal("open"),
-      turn: turnRowSchema,
-      entries: z.array(snapshotEntrySchema(openSnapshotRowSchema)).readonly(),
-      omitted: countSchema,
-      ...reportedChangeFields,
-    })
-    .strict(),
+  openActivitySnapshotSchema,
   z
     .object({
       kind: z.literal("idle"),

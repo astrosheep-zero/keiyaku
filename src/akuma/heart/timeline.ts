@@ -127,7 +127,7 @@ function decodeTimelineRows(database: DatabaseSync, rows: readonly TimelineRow[]
 
 export type StatusFactInput = Readonly<{ aperture: "monitoring" | "receipt"; admittedTellId?: string }>;
 
-/** Select the frontier and Tell pins, not an arbitrary tail of raw events. */
+/** Select the frontier and its delivered Tells, plus aperture-required Tell pins. */
 export function statusFacts(database: DatabaseSync, input: StatusFactInput): readonly TimelineFact[] {
   const frontier = database.prepare("SELECT sequence FROM turns ORDER BY sequence DESC LIMIT 1").get() as
     | { sequence: number }
@@ -139,11 +139,11 @@ export function statusFacts(database: DatabaseSync, input: StatusFactInput): rea
       UNION SELECT end_sequence FROM turns WHERE sequence = ? AND end_sequence IS NOT NULL
       UNION SELECT sequence FROM calls WHERE turn_sequence = ?
       UNION SELECT sequence FROM activity WHERE turn_sequence = ?
-      UNION SELECT MAX(end_sequence) FROM turns
+      UNION SELECT tells.sequence FROM tells
+      JOIN tell_deliveries ON tell_deliveries.tell_id = tells.id
+      WHERE tell_deliveries.turn_sequence = ?
       UNION SELECT sequence FROM tells WHERE id = ?
       UNION SELECT sequence FROM tells WHERE ? AND ${tellStateSql} = 'pending'
-      UNION SELECT MAX(sequence) FROM tells WHERE ? AND ${tellStateSql} = 'told'
-      UNION SELECT MAX(sequence) FROM tells
     ) SELECT timeline.sequence, timeline.kind FROM timeline JOIN selected USING(sequence) ORDER BY sequence`,
     )
     .all(
@@ -151,9 +151,9 @@ export function statusFacts(database: DatabaseSync, input: StatusFactInput): rea
       frontier?.sequence ?? null,
       frontier?.sequence ?? null,
       frontier?.sequence ?? null,
+      frontier?.sequence ?? null,
       input.admittedTellId ?? null,
       input.aperture === "monitoring" || input.admittedTellId === undefined ? 1 : 0,
-      input.aperture === "monitoring" ? 1 : 0,
     ) as unknown as readonly TimelineRow[];
   return decodeTimelineRows(database, rows);
 }
