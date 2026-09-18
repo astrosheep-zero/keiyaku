@@ -315,20 +315,9 @@ function currentTurnBoundary(snapshot: RenderedSnapshot): CurrentTurnBoundary | 
   return entry?.kind === "row" ? { row: entry.row, turnSequence: snapshot.turn.turnSequence } : undefined;
 }
 
-/** Move the visible current-turn boundary ahead of activity without duplicating it. */
-function boundaryFirstSnapshotEntries(snapshot: RenderedSnapshot): readonly RenderEntry[] {
-  const entries = orderedSnapshotEntries(snapshot);
-  const boundary = currentTurnBoundary(snapshot);
-  if (boundary === undefined) return entries;
-  return [
-    { kind: "row", row: boundary.row },
-    ...entries.filter((entry) => entry.kind !== "row" || entry.row !== boundary.row),
-  ];
-}
-
 /** Open status hides internal thought narration without selecting a second activity window. */
 function visibleOpenSnapshotEntries(snapshot: Extract<RenderedSnapshot, { kind: "open" }>): readonly RenderEntry[] {
-  return boundaryFirstSnapshotEntries(snapshot).filter((entry) => entry.kind !== "row" || entry.row.kind !== "thought");
+  return snapshot.entries.filter((entry) => entry.kind !== "row" || entry.row.kind !== "thought");
 }
 
 /** Adjacent omitted spans are one continuous unknown portion of the retained timeline. */

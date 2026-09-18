@@ -182,10 +182,10 @@ window. An idle full status instead
 retains its activity and outcome as settled evidence, including its answer or
 failure diagnostic. Adjacent omitted spans render as one cumulative omission,
 while visible activity keeps separate spans distinct. For a current open
-attempt, default live activity and full snapshots first
-render one retained boundary: the initial commission, or the settled wake that
-started the attempt. A Tell delivered to an already pursuing Body is ordinary
-activity, and absence of either durable boundary produces no synthetic row.
+attempt, default live activity first renders one retained boundary: the initial
+commission, or the settled wake that started the attempt. A Tell delivered to
+an already pursuing Body is ordinary activity, and absence of either durable
+boundary produces no synthetic row.
 The Turn outcome is the closing result, never a streamed activity row; an
 answered closing result is labeled `answer`, never `say`. That channel also
 carries the closing conclusion, while stdout
