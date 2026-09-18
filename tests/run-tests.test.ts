@@ -437,42 +437,117 @@ test("test entry reruns checks and retires bytecode after success and failure", 
   assert.notEqual(caches[0], caches[1]);
 });
 
-test("release test entry completes build before parallel preparation and stops after build failure", (context) => {
+test("release plan overlaps one source gate with build and awaits all owned phases", async () => {
+  const { runReleasePlan } = await import(pathToFileURL(resolve(root, "scripts/test-plan.mjs")).href) as {
+    runReleasePlan(run: (name: string) => Promise<number>): Promise<number>;
+  };
+  const pending = new Map<string, (status: number) => void>();
+  const started: string[] = [];
+  let cleanup = false;
+  const running = runReleasePlan((name) => {
+    started.push(name);
+    if (cleanup) return Promise.resolve(1);
+    return new Promise<number>((resolve) => pending.set(name, resolve));
+  });
+  let settled = false;
+  void running.then(() => { settled = true; });
+  const progress = () => new Promise<void>((resolve) => setImmediate(resolve));
+  const finish = async (name: string) => {
+    const release = pending.get(name);
+    assert.ok(release, `phase not running: ${name}`);
+    pending.delete(name);
+    release(0);
+    await progress();
+  };
+  try {
+    await progress();
+    assert.deepEqual(started, ["build", "format:check"]);
+    await finish("format:check");
+    assert.deepEqual([...pending.keys()], ["build", "test:architecture"]);
+    await finish("build");
+    assert.deepEqual([...pending.keys()], ["test:architecture", "test:compile"]);
+    await finish("test:compile");
+    assert.deepEqual([...pending.keys()], ["test:architecture", "test:reachability", "tests"]);
+    await finish("test:reachability");
+    await finish("tests");
+    assert.equal(settled, false, "runtime completion must not detach a source gate");
+    await finish("test:architecture");
+    assert.deepEqual([...pending.keys()], ["test:maintainability"]);
+    await finish("test:maintainability");
+    assert.equal(await running, 0);
+    assert.equal(new Set(started).size, started.length);
+  } finally {
+    cleanup = true;
+    for (const release of pending.values()) release(1);
+    await running;
+  }
+});
+
+test("release plan propagates every failure without skipping independent gates", async (context) => {
+  const { runReleasePlan } = await import(pathToFileURL(resolve(root, "scripts/test-plan.mjs")).href) as {
+    runReleasePlan(run: (name: string) => Promise<number>): Promise<number>;
+  };
+  const source = ["format:check", "test:architecture", "test:maintainability"];
+  const phases = ["build", "test:compile", ...source, "test:reachability", "tests"];
+  for (const failed of phases) {
+    const seen: string[] = [];
+    assert.equal(await runReleasePlan(async (name) => {
+      seen.push(name);
+      return name === failed ? 7 : 0;
+    }), 7, failed);
+    assert.deepEqual(seen.filter((name) => source.includes(name)), source, failed);
+    const expected = failed === "build" ? ["build", ...source]
+      : failed === "test:compile" ? ["build", "test:compile", ...source] : phases;
+    assert.deepEqual([...seen].sort(), [...expected].sort(), failed);
+  }
+  const diagnostics: unknown[][] = [];
+  context.mock.method(console, "error", (...args: unknown[]) => diagnostics.push(args));
+  assert.equal(await runReleasePlan(async (name) => {
+    if (name === "test:architecture") throw new Error("broken source gate");
+    return 0;
+  }), 1);
+  assert.match(String(diagnostics[0]?.[0]), /test:architecture/u);
+});
+
+test("release entry gates runtime on build and compile while retaining all source checks", (context) => {
   const directory = mkdtempSync(join(tmpdir(), "keiyaku-release-entry-"));
   context.after(() => rmSync(directory, { recursive: true, force: true }));
-  const preparation = ["format:check", "test:architecture", "test:maintainability", "test:compile"];
-  const phases = ["build", ...preparation, "test:reachability"];
-  writeFileSync(
-    join(directory, "package.json"),
-    JSON.stringify({ type: "module", scripts: Object.fromEntries(phases.map((phase) => [phase, "node phase.mjs"])) }),
-  );
+  const source = ["format:check", "test:architecture", "test:maintainability"];
+  const phases = ["build", ...source, "test:compile", "test:reachability"];
+  writeFileSync(join(directory, "package.json"), JSON.stringify({
+    type: "module", scripts: Object.fromEntries(phases.map((phase) => [phase, "node phase.mjs"])),
+  }));
   mkdirSync(join(directory, "scripts"));
-  writeFileSync(
-    join(directory, "phase.mjs"),
-    [
-      'import { appendFileSync } from "node:fs";',
-      "const phase = process.env.npm_lifecycle_event;",
-      'appendFileSync("phases.jsonl", phase + "\\n");',
-      'if (phase === process.env.FAIL_PHASE) process.exitCode = 7;',
-    ].join("\n"),
-  );
-  writeFileSync(join(directory, "scripts", "run-tests.mjs"), 'import { appendFileSync } from "node:fs"; appendFileSync("phases.jsonl", "tests\\n");');
-
+  writeFileSync(join(directory, "phase.mjs"), [
+    'import { appendFileSync, existsSync, writeFileSync } from "node:fs";',
+    'import assert from "node:assert/strict";',
+    'const phase = process.env.npm_lifecycle_event;',
+    'appendFileSync("phases.jsonl", phase + "\\n");',
+    'if (phase === process.env.FAIL_PHASE) process.exitCode = 7;',
+    'else if (phase === "build") writeFileSync("built", "ok");',
+    'else if (phase === "test:compile") { assert.ok(existsSync("built")); writeFileSync("compiled", "ok"); }',
+    'else if (phase === "test:reachability") assert.ok(existsSync("built"));',
+  ].join("\n"));
+  writeFileSync(join(directory, "scripts", "run-tests.mjs"), [
+    'import { appendFileSync, existsSync } from "node:fs";',
+    'import assert from "node:assert/strict";',
+    'assert.ok(existsSync("compiled"));',
+    'appendFileSync("phases.jsonl", "tests\\n");',
+  ].join("\n"));
   for (const fail of ["", "build"]) {
+    for (const file of ["built", "compiled"]) rmSync(join(directory, file), { force: true });
     writeFileSync(join(directory, "phases.jsonl"), "");
     const result = spawnSync(process.execPath, [resolve(root, "scripts/test-entry.mjs"), "--release"], {
-      cwd: directory,
-      encoding: "utf8",
+      cwd: directory, encoding: "utf8",
       env: { ...process.env, NODE_DISABLE_COMPILE_CACHE: "1", FAIL_PHASE: fail },
     });
     assert.equal(result.status, fail === "build" ? 7 : 0, result.stdout + result.stderr);
-    const records = readFileSync(join(directory, "phases.jsonl"), "utf8").trim().split("\n");
-    assert.equal(records[0], "build");
-    if (fail === "build") {
-      assert.deepEqual(records, ["build"]);
-    } else {
-      assert.deepEqual(records.slice(1, 5).sort(), [...preparation].sort());
-      assert.deepEqual(records.slice(5).sort(), ["test:reachability", "tests"]);
+    const seen = readFileSync(join(directory, "phases.jsonl"), "utf8").trim().split("\n");
+    assert.deepEqual(seen.filter((name) => source.includes(name)), source);
+    assert.deepEqual([...seen].sort(), (fail === "build" ? ["build", ...source] : [...phases, "tests"]).sort());
+    if (fail === "") {
+      assert.ok(seen.indexOf("build") < seen.indexOf("test:compile"));
+      assert.ok(seen.indexOf("test:compile") < seen.indexOf("tests"));
     }
   }
 });
