@@ -19,8 +19,6 @@ const { TEST_MANIFESTS } = (await import(
 
 const root = process.cwd();
 
-const compiledTestModules = import.meta.url.endsWith(".js");
-
 test("test runner removes ambient Akuma requests and preserves unrelated environment", () => {
   for (const sentinel of ["sentinel bytes", "wrong sentinel"]) {
     const env: NodeJS.ProcessEnv = {
