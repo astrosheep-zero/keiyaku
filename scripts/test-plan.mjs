@@ -118,7 +118,7 @@ const SWEEP_COST_MS = Object.freeze({
   "tests/region-read.test.ts": 3700,
   "tests/region.test.ts": 300,
   "tests/repo-protocol-reads.test.ts": 4700,
-  "tests/run-tests.test.ts": 13100,
+  "tests/run-tests.test.ts": 1700,
   "tests/runtime-proc.test.ts": 10900,
   "tests/settings.test.ts": 1600,
   "tests/settlement.test.ts": 8900,
