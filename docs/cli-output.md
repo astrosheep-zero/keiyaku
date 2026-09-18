@@ -173,9 +173,10 @@ channel, so empty stdout never hides it. A call that answers a schema, renders
 JSON, or detaches has no such stream and keeps its ordinary receipt.
 
 A wait reports the same kind of progress. It announces no birth and streams
-eligible newly settled `say`, `think`, `note`, `call`, `tell`, and tool rows
-once in retained sequence order on the progress channel through the same
-renderer. An open full snapshot keeps its retained boundary and bounded selected
+eligible newly settled `say`, `note`, `call`, `tell`, and tool rows once in
+retained sequence order on the progress channel through the same renderer. Text
+live call and wait activity never contains thought narration; history retains
+requested thought and tool activity through its own projection. An open full snapshot keeps its retained boundary and bounded selected
 activity in its original evidence order; it does not select another activity
 window. An idle full status instead
 retains its activity and outcome as settled evidence, including its answer or
@@ -186,8 +187,8 @@ render one retained boundary: the initial commission, or the settled wake that
 started the attempt. A Tell delivered to an already pursuing Body is ordinary
 activity, and absence of either durable boundary produces no synthetic row.
 The Turn outcome is the closing result, never a streamed activity row; an
-answered closing result is labeled `answer`, never `say`. History retains its requested thought and tool activity through its own
-projection. That channel also carries the closing conclusion, while stdout
+answered closing result is labeled `answer`, never `say`. That channel also
+carries the closing conclusion, while stdout
 carries only an answer, never progress, and a plural wait leaves it
 empty; a wait that renders JSON, or one forwarded to a Body, has no such
 stream. A live stream

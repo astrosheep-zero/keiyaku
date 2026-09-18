@@ -175,6 +175,12 @@ test("packaged observing calls stream one framed session and one conclusion per 
     assert.ok(attempts.length >= 1, `a settled message streams while the call waits:\n${unfinished.stderr}`);
     assert.equal(new Set(attempts).size, attempts.length, "no settled message streams twice");
     assert.deepEqual(attempts, [...attempts].sort((left, right) => left - right), "messages stream after their predecessors");
+
+    const single = await runPackagedCli(["-C", world, "wait", "@notes", "--timeout", "1s"], { cwd: world, env });
+    assert.equal(single.code, 0, single.stderr);
+    assert.equal(single.stdout, "", "an unfinished single wait writes no stdout");
+    assert.doesNotMatch(single.stderr, /retry note/u, "single waits omit thought narration");
+    assert.match(single.stderr, /attempt \d+/u, `a single wait still streams eligible activity:\n${single.stderr}`);
     await runPackagedCli(["-C", world, "kill", "@notes"], { cwd: world, env });
 
     const answered = await runPackagedCli(["-C", world, "call", "finisher", "--wait", "20s", "prompt"], {

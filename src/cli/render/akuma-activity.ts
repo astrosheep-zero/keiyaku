@@ -477,8 +477,8 @@ function renderCurrentTurnBoundary(
 ): CurrentTurnBoundary | undefined {
   const boundary = currentTurnBoundary(snapshot);
   if (boundary !== undefined && !state.renderedBoundaries.has(boundary.turnSequence)) {
-    renderStreamRow(state, boundary.row, lines, context, layout);
     state.renderedBoundaries.add(boundary.turnSequence);
+    if (boundary.row.kind !== "thought") renderStreamRow(state, boundary.row, lines, context, layout);
   }
   return boundary;
 }
@@ -491,14 +491,15 @@ function observeActivitySnapshot(
 ): readonly string[] {
   const lines: string[] = [];
   const boundary = renderCurrentTurnBoundary(state, snapshot, lines, context, layout);
-  const rows = settledRows(snapshot)
+  const observedRows = settledRows(snapshot)
     .filter((row) => row !== boundary?.row)
     .filter((row) => state.newestSequence === undefined || row.sequence > state.newestSequence);
-  if (rows.length === 0) return lines;
-  state.newestSequence = rows.reduce(
+  if (observedRows.length === 0) return lines;
+  state.newestSequence = observedRows.reduce(
     (newest, row) => Math.max(newest, row.sequence),
-    state.newestSequence ?? rows[0]!.sequence,
+    state.newestSequence ?? observedRows[0]!.sequence,
   );
+  const rows = observedRows.filter((row) => row.kind !== "thought");
   for (const row of rows) {
     if (row.kind === "tool" && state.openingTools < OPENING_TOOL_BUDGET) {
       state.openingTools += 1;

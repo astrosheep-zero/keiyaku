@@ -1473,12 +1473,14 @@ test("narrative selection is partition-invariant and repeated pending snapshots 
     tool(2),
     tool(3),
     tool(4),
-    snapshotRow({ kind: "note", sequence: 5, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "between" }),
-    tool(6),
+    snapshotRow({ kind: "thought", sequence: 5, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "hidden between" }),
+    snapshotRow({ kind: "note", sequence: 6, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "between" }),
     tool(7),
-    snapshotRow({ kind: "said", sequence: 8, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "after" }),
-    tool(9),
-    tool(10),
+    tool(8),
+    snapshotRow({ kind: "thought", sequence: 9, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "hidden after" }),
+    snapshotRow({ kind: "said", sequence: 10, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "after" }),
+    tool(11),
+    tool(12),
   ];
   const render = (partitions: readonly number[]): readonly string[] => {
     const stream = activityStream({ columns: 120, color: false });
@@ -1494,10 +1496,10 @@ test("narrative selection is partition-invariant and repeated pending snapshots 
     );
     return [...lines, ...stream.flush()];
   };
-  assert.deepEqual(render([rows.length]), render([4, 1, 2, 1, 2]));
+  assert.deepEqual(render([rows.length]), render([4, 1, 2, 1, 2, 2]));
 });
 
-test("a live activity stream retains each newly settled narrative row exactly once, including thoughts", () => {
+test("a live activity stream skips thoughts while advancing its sequence cursor", () => {
   const rows = [
     snapshotRow({ kind: "said" as const, sequence: 1, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "say-sentinel" }),
     snapshotRow({
@@ -1522,18 +1524,41 @@ test("a live activity stream retains each newly settled narrative row exactly on
   ];
   const stream = activityStream({ columns: 120, color: false });
   stream.seed(openAkumaSnapshot([]));
+  const initial = stream(idleAkumaSnapshot(rows.slice(0, 1), answeredOutcome(1, "outcome-sentinel")));
+  assert.match(initial.join("\n"), /say-sentinel/u, "eligible predecessors still stream");
+  const thoughtOnly = idleAkumaSnapshot(rows.slice(0, 2), answeredOutcome(1, "outcome-sentinel"));
+  assert.deepEqual(stream(thoughtOnly), [], "a thought-only update advances the durable cursor");
   const updated = idleAkumaSnapshot(rows, answeredOutcome(1, "outcome-sentinel"));
-  const text = [...stream(updated), ...stream(updated), ...stream.flush()].join("\n");
-  for (const sentinel of [
-    "say-sentinel",
-    "think-sentinel",
-    "note-sentinel",
-    "call-sentinel",
-    "tell-sentinel",
-    "tool-sentinel",
-  ])
+  const text = [...initial, ...stream(updated), ...stream(updated), ...stream.flush()].join("\n");
+  for (const sentinel of ["say-sentinel", "note-sentinel", "call-sentinel", "tell-sentinel", "tool-sentinel"])
     assert.equal((text.match(new RegExp(sentinel, "gu")) ?? []).length, 1, `${sentinel} streams once`);
+  assert.doesNotMatch(text, /think-sentinel/u, "thought narration is never live evidence");
   assert.doesNotMatch(text, /outcome-sentinel/u, "outcomes remain conclusion evidence, not live narration");
+});
+
+test("thoughts do not consume a live stream's tool or omission budgets", () => {
+  const tool = (sequence: number) =>
+    snapshotRow(completedTool(sequence, "bash", { kind: "run", command: `tool-${sequence}` }));
+  const rows = [
+    tool(1),
+    snapshotRow({ kind: "thought" as const, sequence: 2, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "hidden-1" }),
+    tool(3),
+    tool(4),
+    snapshotRow({ kind: "thought" as const, sequence: 5, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "hidden-2" }),
+    tool(6),
+    tool(7),
+    tool(8),
+    snapshotRow({ kind: "thought" as const, sequence: 9, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "hidden-3" }),
+    tool(10),
+    tool(11),
+    tool(12),
+  ];
+  const stream = activityStream({ columns: 120, color: false });
+  const text = [...stream(idleAkumaSnapshot(rows)), ...stream.flush()].join("\n");
+  for (const sequence of [1, 3, 4, 11, 12]) assert.match(text, new RegExp(`\\$ tool-${sequence}`, "u"));
+  for (const sequence of [6, 7, 8, 10]) assert.doesNotMatch(text, new RegExp(`\\$ tool-${sequence}`, "u"));
+  assert.equal((text.match(/⋮ 4 omitted/gu) ?? []).length, 1, "only four eligible tools are omitted");
+  assert.doesNotMatch(text, /hidden-[123]/u);
 });
 
 test("a plural wait gives each target its own whole-command tool budget", () => {
