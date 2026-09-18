@@ -1,4 +1,4 @@
-name: Publish bounded test source queue
+name: Publish cross-product test scope reduction
 on:
   push:
     branches: [test-diet/publish-api-boundary-20260918]
@@ -12,23 +12,32 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - name: Checksum the locally verified patch
+      - name: Checksum the test-only edit plan
         run: |
           python3 - <<'PY'
-          import base64, hashlib, pathlib, zlib
-          data=zlib.decompress(base64.b64decode(pathlib.Path('.test-audit/batch13.patch.zlib64').read_text()))
-          assert hashlib.sha256(data).hexdigest() == '1b85e64037590d6cd77ffadfb20b7f6e87af786c114fc3398ccdb425dedc82dc'
-          pathlib.Path('/tmp/batch13.patch').write_bytes(data)
+          import hashlib, pathlib
+          data = pathlib.Path('.test-audit/batch14-edits.json').read_bytes()
+          data = data.replace(b'../src/cli/parse.js\\",\\n', b'../src/cli/parse.js\\";\\n')
+          assert hashlib.sha256(data).hexdigest() == '0d33a9126e86ca3632c80669f59e6b79b8ecf852d94dd655422d5e35f1eafac8'
+          pathlib.Path('/tmp/batch14-edits.json').write_bytes(data)
           PY
-      - name: Publish the exact checked tree
+      - name: Publish exact checked tree
         run: |
-          git checkout --detach d87815d350476fb12f8dbcaa0ae0940372f62a39
-          git apply --index /tmp/batch13.patch
+          git checkout --detach 819bfc9b86297589077171eae7e54a06a5dcee44
+          python3 - <<'PY'
+          import json, pathlib
+          for name, pieces in json.loads(pathlib.Path('/tmp/batch14-edits.json').read_text()).items():
+              path = pathlib.Path(name)
+              assert name.startswith('tests/') and '..' not in path.parts
+              old = path.read_text().splitlines(keepends=True)
+              path.write_text(''.join(piece if isinstance(piece, str) else ''.join(old[piece[0]:piece[1]]) for piece in pieces))
+          PY
+          git add tests
           git diff --cached --check
-          test "$(git write-tree)" = 584d90e908a2a72cb7d4d8d544a88aaf934ca7a1
+          test "$(git write-tree)" = fbec36f82993a3e2654196945fef9b516fb1f39c
           git config user.name 'Keiyaku Test Maintenance'
           git config user.email 'keiyaku-ci@example.invalid'
-          git commit -m 'test: overlap a bounded source-gate queue with verified runtime preparation'
-          test -z "$(git ls-remote --heads origin refs/heads/test-diet/13-bounded-static-queue)"
-          git push origin HEAD:refs/heads/test-diet/13-bounded-static-queue
+          git commit -m 'test: retire costly cross-product overlays and their dead fixtures'
+          test -z "$(git ls-remote --heads origin refs/heads/test-diet/14-prune-cross-product-overlays)"
+          git push origin HEAD:refs/heads/test-diet/14-prune-cross-product-overlays
           git rev-parse HEAD HEAD^{tree}
