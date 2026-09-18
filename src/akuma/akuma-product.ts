@@ -39,7 +39,6 @@ export type BornAkumaCall = Readonly<{
   initialBody?: string;
   initiator?: string;
   initialSchemaJson?: string;
-  awaitAsleep?: true;
   execution: BornExecution;
 }>;
 
@@ -80,9 +79,9 @@ async function admitBodyRequest(input: {
     archetype: input.name,
     ...(input.call.body === undefined ? {} : { body: input.call.body }),
     ...(input.call.initiator === undefined ? {} : { initiator: input.call.initiator }),
-    ...(input.call.schema === undefined ? {} : { awaitAsleep: true }),
     ...(cwd === undefined ? {} : { cwd }),
     recipe: input.recipe,
+    ...(input.call.signal === undefined ? {} : { signal: input.call.signal }),
   });
   const bornCwd = await readAkumaBirthCwd(input.path, child);
   return {
@@ -106,7 +105,11 @@ async function admitDirect(input: {
     input.call.cwd !== undefined && input.context.cwdCanonical === true
       ? input.call.cwd
       : await canonicalBirthCwd(selectedCwd);
-  const allocated = await birthAkuma({ worldPath: input.path, archetype: input.archetype.name });
+  const allocated = await birthAkuma({
+    worldPath: input.path,
+    archetype: input.archetype.name,
+    ...(input.call.signal === undefined ? {} : { signal: input.call.signal }),
+  });
   return {
     kind: "born",
     allocated,
@@ -120,7 +123,6 @@ async function admitDirect(input: {
     ...(input.call.body === undefined ? {} : { initialBody: input.call.body }),
     ...(input.call.initiator === undefined ? {} : { initiator: input.call.initiator }),
     ...(input.call.schema === undefined ? {} : { initialSchemaJson: schemaJsonText(input.call.schema) }),
-    ...(input.call.schema === undefined ? {} : { awaitAsleep: true }),
     execution: {
       cwd,
       source: input.call.cwd !== undefined ? "input" : initiatorCwd === undefined ? "world" : "process",
@@ -264,13 +266,17 @@ class AkumaProduct {
       return await admitBodyRequest({ call: input, context, path: this.path, name, recipe: requestRecipe, execution });
     return await admitDirect({ call: input, context, path: this.path, archetype, recipe: requestRecipe });
   }
-  async publish(born: AkumaBornCall, completion: Readonly<{ contractId?: string }> = {}): Promise<AkumaHandle> {
+  async publish(
+    born: AkumaBornCall,
+    completion: Readonly<{ contractId?: string }> = {},
+    signal?: AbortSignal,
+  ): Promise<AkumaHandle> {
     if (born.kind === "requested") {
       return new AkumaHandle(born.id, this.path, { cwd: born.cwd, source: born.execution.source });
     }
     const published = await launchAkuma({
       allocated: born.allocated,
-      ...(born.awaitAsleep === undefined ? {} : { awaitAsleep: born.awaitAsleep }),
+      ...(signal === undefined ? {} : { signal }),
       launch: async (allocated) =>
         await spawnAkumaBody({
           paths: allocated.paths,

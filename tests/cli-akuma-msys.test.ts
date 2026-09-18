@@ -70,7 +70,7 @@ test("an observing call writes its answer once without repeating cwd or the outc
     allowed: [],
     timeline: idleAkumaSnapshot([], answeredOutcome(1, "final answer")),
   });
-  const text = renderAkumaText(waitingCommand, observingCall({ kind: "observed", status }));
+  const text = renderAkumaText(waitingCommand, observingCall({ kind: "observed", reason: "completed", status }));
   assert.equal(text, "final answer");
   assert.doesNotMatch(text, /cwd/u);
 });

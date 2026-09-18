@@ -107,9 +107,10 @@ association carries a parenthetical only when the read established a reason a
 person can act on, as `missing` does from a complete observation; an
 association a bounded or failed read could not resolve prints none. A row
 prints its activity age only when that age differs from the state age.
-Activity previews strip emphasis asterisks, code backticks,
-heading hashes, and list bullets and collapse whitespace while keeping their
-width-aware truncation, undecorating the content without rewording it. A
+Activity previews keep observed source punctuation, including Markdown headings,
+list markers, backticks, and emphasis. They apply only terminal-safe handling,
+whitespace folding for wrapping, and width-aware truncation; a preview never
+rewrites what an Akuma said. A
 present but empty world-status section omits its header entirely instead of
 printing a bare heading, while a fully empty view keeps whatever empty state
 the law already blesses. Task dispositions render as words — `in progress`,
@@ -172,11 +173,11 @@ channel, so empty stdout never hides it. A call that answers a schema, renders
 JSON, or detaches has no such stream and keeps its ordinary receipt.
 
 A wait reports the same kind of progress. It announces no birth and streams
-eligible newly settled timeline rows on the progress channel through the same
-renderer; default live progress and full snapshots of an open attempt,
-including status, omit internal thought narration. An open full snapshot keeps
-its retained boundary and bounded selected activity in its original evidence
-order; it does not select another activity window. An idle full status instead
+eligible newly settled `say`, `think`, `note`, `call`, `tell`, and tool rows
+once in retained sequence order on the progress channel through the same
+renderer. An open full snapshot keeps its retained boundary and bounded selected
+activity in its original evidence order; it does not select another activity
+window. An idle full status instead
 retains its activity and outcome as settled evidence, including its answer or
 failure diagnostic. Adjacent omitted spans render as one cumulative omission,
 while visible activity keeps separate spans distinct. For a current open
@@ -184,7 +185,8 @@ attempt, default live activity and full snapshots first
 render one retained boundary: the initial commission, or the settled wake that
 started the attempt. A Tell delivered to an already pursuing Body is ordinary
 activity, and absence of either durable boundary produces no synthetic row.
-History retains its requested thought and tool activity through its own
+The Turn outcome is the closing result, never a streamed activity row; an
+answered closing result is labeled `answer`, never `say`. History retains its requested thought and tool activity through its own
 projection. That channel also carries the closing conclusion, while stdout
 carries only an answer, never progress, and a plural wait leaves it
 empty; a wait that renders JSON, or one forwarded to a Body, has no such

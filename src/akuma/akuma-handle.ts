@@ -28,12 +28,16 @@ import { resolveProviderExecution } from "./providers/index.js";
 import { publishAkuma } from "./publication.js";
 import { spawnAkumaBody } from "./body.js";
 import { AkumaNotBornError } from "./akuma-errors.js";
-import { bornStatus, defaultWaitComplete, readWaitComplete } from "./akuma-observe.js";
+import {
+  bornStatus,
+  defaultWaitComplete,
+  readWaitComplete,
+  waitForObservation,
+  type WaitReason,
+} from "./akuma-observe.js";
 import type { AkumaCallExecution, AkumaStatus, ForkReceipt, InterruptReceipt } from "./akuma.js";
 import type { WorldRoot } from "../world.js";
 const CALL_EXECUTION: unique symbol = Symbol("akuma-call-execution");
-const POLL_MS = 100;
-const wait = (milliseconds: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
 function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -171,25 +175,30 @@ export class AkumaHandle {
     });
   }
 
-  async wait(
+  async waitReceipt(
     predicate: (status: AkumaStatus) => boolean = defaultWaitComplete,
-    options: Readonly<{ timeoutMs?: number }> = {},
-  ): Promise<AkumaStatus> {
+    options: Readonly<{ timeoutMs?: number; signal?: AbortSignal }> = {},
+  ): Promise<Readonly<{ reason: WaitReason; status: AkumaStatus }>> {
     if (options.timeoutMs !== undefined && (!Number.isFinite(options.timeoutMs) || options.timeoutMs < 0)) {
       throw new TypeError("Akuma wait timeoutMs must be a nonnegative finite millisecond duration");
     }
-    const deadline = options.timeoutMs === undefined ? undefined : performance.now() + options.timeoutMs;
-    for (;;) {
-      if (
-        predicate !== defaultWaitComplete ||
-        (deadline !== undefined && performance.now() >= deadline) ||
-        (await readWaitComplete(this.worldPath, this.id))
-      ) {
-        const status = await this.status();
-        if (predicate(status) || (deadline !== undefined && performance.now() >= deadline)) return status;
-      }
-      await wait(deadline === undefined ? POLL_MS : Math.min(POLL_MS, Math.max(0, deadline - performance.now())));
-    }
+    const waited = await waitForObservation({
+      ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+      ...(predicate === defaultWaitComplete
+        ? { probe: async () => await readWaitComplete(this.worldPath, this.id) }
+        : {}),
+      observe: async () => await this.status(),
+      complete: predicate,
+    });
+    return { reason: waited.reason, status: waited.value };
+  }
+
+  async wait(
+    predicate: (status: AkumaStatus) => boolean = defaultWaitComplete,
+    options: Readonly<{ timeoutMs?: number; signal?: AbortSignal }> = {},
+  ): Promise<AkumaStatus> {
+    return (await this.waitReceipt(predicate, options)).status;
   }
 
   async tell(
@@ -197,9 +206,9 @@ export class AkumaHandle {
     tellId: string = randomUUID(),
     recordedAt = new Date().toISOString(),
     runtime?: TellWakeRuntime,
-    options: Readonly<{ schemaJson?: string; initiator?: string }> = {},
+    options: Readonly<{ schemaJson?: string; initiator?: string; signal?: AbortSignal }> = {},
   ): Promise<TellResult> {
-    const { schemaJson, initiator } = options;
+    const { schemaJson, initiator, signal } = options;
     const admitted = await recordTell(this.paths, {
       kind: "tell",
       id: tellId,
@@ -209,7 +218,7 @@ export class AkumaHandle {
       ...(schemaJson === undefined ? {} : { schemaJson }),
     });
     if (admitted.kind === "not-born") throw new AkumaNotBornError(this.id);
-    return await wakeRecordedTell(this.paths, admitted.tell.id, runtime);
+    return await wakeRecordedTell(this.paths, admitted.tell.id, runtime, signal);
   }
 
   async interrupt(
@@ -268,7 +277,7 @@ export class AkumaHandle {
     return {
       kind: "interrupted",
       putDown,
-      tell: await wakeRecordedTell(this.paths, recorded.tellId, options.runtime),
+      tell: await wakeRecordedTell(this.paths, recorded.tellId, options.runtime, options.signal),
     };
   }
 

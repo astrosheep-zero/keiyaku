@@ -7,6 +7,7 @@ import type {
   DispatchAssociation,
 } from "../../index.js";
 import { parseAkumaStatus } from "../../akuma/akuma.js";
+import { defaultWaitComplete } from "../../akuma/akuma-observe.js";
 import type { AkumaInvocationResult } from "../commands/akuma-invoke.js";
 import type { WaitObservedAkuma } from "../../akuma/fleet-execution.js";
 import type { ParsedCommand } from "../parse.js";
@@ -102,7 +103,7 @@ function label(row: RenderRow): string {
   if (row.kind === "note") return "note";
   if (row.kind === "call") return "call";
   if (row.kind === "tell") return row.state === "told" ? "told" : "tell";
-  if (row.kind === "outcome") return row.outcome.kind === "answered" ? "say" : "error";
+  if (row.kind === "outcome") return row.outcome.kind === "answered" ? "answer" : "error";
   if (row.kind === "turn") return "call";
   if (row.kind !== "tool") return row.kind;
   return toolRepr(row).label;
@@ -120,21 +121,6 @@ function mark(row: RenderRow): "│" | "⧖" | "⧗" | "✓" | "!" | "?" {
   return "│";
 }
 
-/** Strip Markdown decoration from preview prose without rewriting the words. */
-function undecorated(text: string): string {
-  return (
-    text
-      .replace(/^ {0,3}#{1,6}[ \t]+/gmu, "")
-      .replace(/^ {0,3}(?:[-*+]|\d+\.)[ \t]+/gmu, "")
-      .replace(/\*\*([^*\n]+?)\*\*/gu, "$1")
-      // A single pair of asterisks is emphasis only when it does not sit inside a word, path, or glob.
-      .replace(/(?<![\w*/\\])\*([^\s*/\\](?:[^*/\\\n]*[^\s*/\\])?)\*(?![\w*/\\])/gu, "$1")
-      .replace(/`([^`\n]+?)`/gu, "$1")
-      .replace(/\s+/gu, " ")
-      .trim()
-  );
-}
-
 function rowText(row: RenderRow): Readonly<{ text: string; lines: number; middle?: true; suffix?: string }> {
   if (
     row.kind === "said" ||
@@ -144,13 +130,13 @@ function rowText(row: RenderRow): Readonly<{ text: string; lines: number; middle
     row.kind === "tell"
   ) {
     return {
-      text: undecorated(row.text),
+      text: row.text,
       lines: row.kind === "said" || row.kind === "thought" ? 2 : row.kind === "tell" || row.kind === "call" ? 1 : 2,
     };
   }
   if (row.kind === "outcome")
     return row.outcome.kind === "answered"
-      ? { text: undecorated(row.outcome.answer), lines: 3 }
+      ? { text: row.outcome.answer, lines: 3 }
       : { text: row.outcome.diagnostic, lines: 2 };
   if (row.kind === "turn") return { text: "", lines: 1 };
   if (row.kind !== "tool") return { text: "", lines: 1 };
@@ -519,9 +505,7 @@ function observeActivitySnapshot(
   const boundary = renderCurrentTurnBoundary(state, snapshot, lines, context, layout);
   const rows = settledRows(snapshot)
     .filter((row) => row !== boundary?.row)
-    .filter((row) => state.newestSequence === undefined || row.sequence > state.newestSequence)
-    // Thoughts remain retained activity, but are ineligible for default live progress.
-    .filter((row) => row.kind !== "thought");
+    .filter((row) => state.newestSequence === undefined || row.sequence > state.newestSequence);
   if (rows.length === 0) return lines;
   state.newestSequence = rows.reduce(
     (newest, row) => Math.max(newest, row.sequence),
@@ -592,6 +576,7 @@ export function activityStream(context: TextRenderContext, layout: RowLayout = p
 
 /** What a wait conclusion renders over: its observed and unobserved members. */
 export type WaitConclusionResult = Readonly<{
+  reason: "completed" | "deadline";
   observations: readonly AkumaObservation[];
   unobserved: readonly Readonly<{ id: string; diagnostic: string }>[];
 }>;
@@ -617,9 +602,13 @@ function conclusionMarkVerb(
   status: AkumaObservation["status"],
   answered: boolean,
 ): Readonly<{ mark: string; verb: string }> {
-  if (status.life === "running") return { mark: "●", verb: "still running" };
+  if (failedOutcomeDiagnostic(status) !== undefined) return { mark: "!", verb: "failed" };
   if (answered) return { mark: "✓", verb: "answered" };
-  if (status.life === "asleep") return { mark: "!", verb: "failed" };
+  if (status.life === "running") return { mark: "●", verb: "still running" };
+  if (!defaultWaitComplete(status)) {
+    return { mark: "⧗", verb: "pending tell" };
+  }
+  if (status.life === "asleep") return { mark: "✓", verb: "completed" };
   if (status.life === "killed") return { mark: "×", verb: "killed" };
   if (status.life === "hung") return { mark: "?", verb: "hung" };
   if (status.life === "untidy") return { mark: "!", verb: "untidy" };
@@ -739,7 +728,7 @@ function observeWaitRound(
       // A wait starts at the current settled frontier: its backlog is neither evidence nor budget.
       lines.push(...stream.seed(status.timeline));
     }
-    if (!state.settledAt.has(status.id) && waitComplete(status))
+    if (!state.settledAt.has(status.id) && defaultWaitComplete(status))
       state.settledAt.set(status.id, settleMoment(status) ?? now());
   }
   return lines;
@@ -807,7 +796,7 @@ function concludeWaitStream(
     const observation = observationById.get(id);
     if (observation === undefined) return [];
     const status = observation.status;
-    const complete = waitComplete(status);
+    const complete = defaultWaitComplete(status);
     const at = complete ? (state.settledAt.get(id) ?? end) : end;
     const { mark, verb } = conclusionMarkVerb(status, statusAnswer(observation) !== undefined);
     const target = multi ? ` ${padToDisplay(state.sources.get(id) ?? id, state.sourceWidth)}` : "";
@@ -911,7 +900,7 @@ export function callObservationStream(
     const end = now();
     const status = observation.status;
     const answered = statusAnswer({ status }) !== undefined;
-    const complete = waitComplete(status);
+    const complete = defaultWaitComplete(status);
     const at = complete ? (settleMoment(status) ?? end) : end;
     const { mark, verb } = conclusionMarkVerb(status, answered);
     lines.push(`${clockFromMs(at)} ${mark} ${verb}${conclusionClause(at, startedAt, complete, end)}`);
@@ -1064,21 +1053,12 @@ export function mutationObservationStageText(
 }
 
 export function statusAnswer(view: Readonly<{ status: AkumaObservation["status"] }>): string | undefined {
-  if (!waitComplete(view.status)) return undefined;
+  if (!defaultWaitComplete(view.status)) return undefined;
   if (view.status.life !== "asleep") return undefined;
   if (view.status.readonly?.enforcement === "none") return undefined;
   const timeline = view.status.timeline;
   if (timeline.kind !== "idle" || timeline.outcome?.outcome.kind !== "answered") return undefined;
   return timeline.outcome.outcome.answer;
-}
-
-function waitComplete(status: AkumaObservation["status"]): boolean {
-  return (
-    status.life !== "running" &&
-    !status.timeline.entries.some(
-      (entry) => entry.kind === "row" && entry.row.kind === "tell" && entry.row.state === "pending",
-    )
-  );
 }
 
 function answerCallFailed(result: Extract<AkumaInvocationResult, { action: "call" }>["result"]): boolean {
@@ -1102,7 +1082,8 @@ export function akumaRawAnswer(result: AkumaInvocationResult): string | undefine
       const single = total === 1 ? result.result.observations[0] : undefined;
       return single === undefined ? "" : (statusAnswer(single) ?? "");
     }
-    if (result.result.observations.length === 1) return statusAnswer(result.result.observations[0]!);
+    const total = result.result.observations.length + result.result.unobserved.length;
+    if (total === 1) return statusAnswer(result.result.observations[0]!);
   }
   if (result.action === "history" && result.mode === "exact" && result.historyResult.kind === "exact") {
     return result.historyResult.outcome.outcome.kind === "answered"
@@ -1172,7 +1153,7 @@ export function waitText(
     const observation = observationById.get(id);
     if (observation === undefined) return [];
     const status = observation.status;
-    const complete = waitComplete(status);
+    const complete = defaultWaitComplete(status);
     const at = complete ? (settleMoment(status) ?? end) : end;
     const { mark, verb } = conclusionMarkVerb(status, statusAnswer(observation) !== undefined);
     return [

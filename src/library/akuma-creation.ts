@@ -1,7 +1,7 @@
 /** @architectureCompositionRoot */
 import { appendFile } from "node:fs/promises";
 import { moveAlias, type AliasBinding } from "../alias/index.js";
-import { type AkumaStatus, type ForkReceipt, type ReadonlyRestraint } from "../akuma/akuma.js";
+import { defaultWaitComplete, type AkumaStatus, type ForkReceipt, type ReadonlyRestraint } from "../akuma/akuma.js";
 import { createAkumaProduct, type AkumaBornCall } from "../akuma/akuma-product.js";
 import { pathsForAkuId, type AkumaPaths, type AkuId } from "../akuma/identity.js";
 import { readSoul } from "../akuma/heart/index.js";
@@ -59,11 +59,12 @@ export type CallInput = Readonly<{
   allowed?: readonly AllowedAction[];
   schema?: Schema<unknown>;
   initiator?: string;
+  signal?: AbortSignal;
 }>;
 
 export type CallObservation =
   | Readonly<{ kind: "detached" }>
-  | Readonly<{ kind: "observed"; status: AkumaStatus }>
+  | Readonly<{ kind: "observed"; reason: "completed" | "deadline"; status: AkumaStatus }>
   | Readonly<{ kind: "failed"; failure: IntegrationFailure }>;
 
 export type CallResult = Readonly<{
@@ -88,6 +89,7 @@ export type BornCall = Readonly<{
   execution: CallExecution;
   mode: "wait" | "detach";
   timeoutMs: number;
+  signal?: AbortSignal;
   dispatch: DispatchStage;
   alias: AliasStage;
   schemaTell?: Readonly<{ body: string; schema: Schema<unknown>; initiator?: string }>;
@@ -172,6 +174,12 @@ function callTimeout(value: unknown, mode: "wait" | "detach"): number {
   return value;
 }
 
+function callSignal(value: unknown): AbortSignal | undefined {
+  if (value === undefined) return undefined;
+  if (!(value instanceof AbortSignal)) throw new TypeError("signal must be an AbortSignal");
+  return value;
+}
+
 function callSeat(contract: unknown) {
   if (contract === undefined) return undefined;
   const seat = seatForKeiyaku(contract);
@@ -183,13 +191,16 @@ async function observeCall(
   handle: ReturnType<ReturnType<typeof createAkumaProduct>["selectHandle"]>,
   mode: "wait" | "detach",
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<CallObservation> {
   if (mode === "detach") {
     return { kind: "detached" };
   }
   try {
-    return { kind: "observed", status: await handle.wait(undefined, { timeoutMs }) };
+    const observed = await handle.waitReceipt(undefined, { timeoutMs, ...(signal === undefined ? {} : { signal }) });
+    return { kind: "observed", reason: observed.reason, status: observed.status };
   } catch (error) {
+    if (signal?.aborted) throw error;
     return { kind: "failed", failure: integrationFailure(error) };
   }
 }
@@ -389,9 +400,27 @@ const CALL_INPUT_KEYS = [
   "allowed",
   "schema",
   "initiator",
+  "signal",
 ] as const;
 
-async function prepareCall(input: CallInput, context: ExecutionContext): Promise<BornCall> {
+type ParsedCallInput = Readonly<{
+  values: Record<string, unknown>;
+  path: WorldRoot;
+  archetype: string;
+  body: string;
+  initiator?: string;
+  readonlyRequested?: true;
+  cwd?: string;
+  mode: "wait" | "detach";
+  timeoutMs: number;
+  signal?: AbortSignal;
+  home?: string;
+  settings?: Settings;
+  alias?: AkumaAlias;
+  seat: ReturnType<typeof callSeat>;
+}>;
+
+async function parseCallInput(input: CallInput): Promise<ParsedCallInput> {
   const values = requireInput(input, "Keiyaku.call input");
   onlyKeys(values, CALL_INPUT_KEYS, "Keiyaku.call input");
   const path = await World.prove(nonblank(values.path, "path"));
@@ -402,90 +431,143 @@ async function prepareCall(input: CallInput, context: ExecutionContext): Promise
   const cwd = values.cwd === undefined ? undefined : nonblank(values.cwd, "cwd");
   const mode = callMode(values.mode);
   const timeoutMs = callTimeout(values.timeoutMs, mode);
+  const signal = callSignal(values.signal);
   const home = homeOption(values.home);
   const settings = settingsOption(values.settings);
   const alias: AkumaAlias | undefined =
     values.alias === undefined ? undefined : parseAkumaAlias(nonblank(values.alias, "alias"));
   const seat = callSeat(values.contract);
-  const execution = await resolveCallExecution({
+  return {
+    values,
     path,
-    ...(cwd === undefined ? {} : { cwd }),
-    ...(seat === undefined ? {} : { contract: values.contract as Keiyaku }),
-  });
-  const world = akumaWorld(path, home, settings, context);
-  const call = {
     archetype,
-    ...(values.schema === undefined ? { body } : {}),
+    body,
     ...(initiator === undefined ? {} : { initiator }),
-    ...(readonlyRequested === undefined ? {} : { readonly: readonlyRequested }),
-    ...(values.allowed === undefined ? {} : { allowed: values.allowed as readonly AllowedAction[] }),
-    ...(values.schema === undefined ? {} : { schema: values.schema as Schema<unknown> }),
-    ...(execution === undefined ? {} : { cwd: execution.cwd }),
-  };
-  const { born, akuma } = await admitCall({
-    path,
-    world,
-    call: call as Parameters<ReturnType<typeof createAkumaProduct>["invoke"]>[0],
-    context: execution === undefined ? {} : { cwdCanonical: true },
+    ...(readonlyRequested === undefined ? {} : { readonlyRequested }),
+    ...(cwd === undefined ? {} : { cwd }),
+    mode,
+    timeoutMs,
+    ...(signal === undefined ? {} : { signal }),
+    ...(home === undefined ? {} : { home }),
     ...(settings === undefined ? {} : { settings }),
-    ...(seat === undefined ? {} : { contractId: seat.id }),
+    ...(alias === undefined ? {} : { alias }),
+    seat,
+  };
+}
+
+function callAdmissionInput(input: ParsedCallInput, execution: CallExecution | undefined) {
+  return {
+    archetype: input.archetype,
+    ...(input.values.schema === undefined ? { body: input.body } : {}),
+    ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+    ...(input.readonlyRequested === undefined ? {} : { readonly: input.readonlyRequested }),
+    ...(input.values.allowed === undefined ? {} : { allowed: input.values.allowed as readonly AllowedAction[] }),
+    ...(input.values.schema === undefined ? {} : { schema: input.values.schema as Schema<unknown> }),
+    ...(execution === undefined ? {} : { cwd: execution.cwd }),
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  };
+}
+
+function schemaTell(input: ParsedCallInput): BornCall["schemaTell"] {
+  if (input.values.schema === undefined) return undefined;
+  return {
+    body: input.body,
+    schema: input.values.schema as Schema<unknown>,
+    ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+  };
+}
+
+async function prepareCall(input: CallInput, context: ExecutionContext): Promise<BornCall> {
+  const parsed = await parseCallInput(input);
+  const execution = await resolveCallExecution({
+    path: parsed.path,
+    ...(parsed.cwd === undefined ? {} : { cwd: parsed.cwd }),
+    ...(parsed.seat === undefined ? {} : { contract: parsed.values.contract as Keiyaku }),
+  });
+  const world = akumaWorld(parsed.path, parsed.home, parsed.settings, context);
+  const { born, akuma } = await admitCall({
+    path: parsed.path,
+    world,
+    call: callAdmissionInput(parsed, execution) as Parameters<ReturnType<typeof createAkumaProduct>["invoke"]>[0],
+    context: execution === undefined ? {} : { cwdCanonical: true },
+    ...(parsed.settings === undefined ? {} : { settings: parsed.settings }),
+    ...(parsed.seat === undefined ? {} : { contractId: parsed.seat.id }),
   });
   const completedExecution = execution ?? born.execution;
   const dispatch: DispatchStage =
-    seat === undefined
+    parsed.seat === undefined
       ? { kind: "none" }
-      : await dispatchStage({ repository: seat.scope, akuId: akuma, contractId: seat.id });
-  const aliasStage = await resolveAliasStage(path, alias, dispatch, akuma);
+      : await dispatchStage({ repository: parsed.seat.scope, akuId: akuma, contractId: parsed.seat.id });
+  const aliasStage = await resolveAliasStage(parsed.path, parsed.alias, dispatch, akuma);
+  const initialSchemaTell = schemaTell(parsed);
   return {
-    path,
+    path: parsed.path,
     born,
     execution: completedExecution,
-    mode,
-    timeoutMs,
+    mode: parsed.mode,
+    timeoutMs: parsed.timeoutMs,
+    ...(parsed.signal === undefined ? {} : { signal: parsed.signal }),
     dispatch,
     alias: aliasStage,
-    ...(values.schema === undefined
-      ? {}
-      : {
-          schemaTell: {
-            body,
-            schema: values.schema as Schema<unknown>,
-            ...(initiator === undefined ? {} : { initiator }),
-          },
-        }),
+    ...(initialSchemaTell === undefined ? {} : { schemaTell: initialSchemaTell }),
   };
 }
 
 async function publishCall(born: BornCall, execution: ExecutionContext): Promise<CallResult> {
   const world = akumaWorld(born.path);
   const contractId = born.dispatch.kind === "dispatched" ? born.dispatch.dispatch.contractId : undefined;
-  const handle = await world.publish(born.born, {
-    ...(contractId === undefined ? {} : { contractId }),
-  });
+  const handle = await world.publish(
+    born.born,
+    {
+      ...(contractId === undefined ? {} : { contractId }),
+    },
+    born.signal,
+  );
+  const deadline = born.mode === "wait" ? performance.now() + born.timeoutMs : undefined;
+  const remaining = (): number => (deadline === undefined ? born.timeoutMs : Math.max(0, deadline - performance.now()));
+  const schemaSignal = (): AbortSignal | undefined => {
+    if (deadline === undefined) return born.signal;
+    const timeout = AbortSignal.timeout(Math.ceil(remaining()));
+    return born.signal === undefined ? timeout : AbortSignal.any([born.signal, timeout]);
+  };
   const readonly = (await handle.status()).readonly;
   let schemaAnswer: unknown;
   if (born.schemaTell !== undefined) {
     const tell = born.schemaTell;
     // Birth publishes Soul before its prompt-free Body has necessarily settled.
     // Schema admission still belongs to Tell, after that initial Body is idle.
-    const pending = handle.wait().then(() =>
-      execution.channel.kind === "body-request"
-        ? requestForwardedFleetTellAnswer({
-            directory: execution.channel.directory,
-            target: handle.id,
-            body: tell.body,
-            schema: tell.schema,
-            ...(tell.initiator === undefined ? {} : { initiator: tell.initiator }),
-          })
-        : PublicAkuma.select(born.path, handle.id).tell(tell.body, {
-            schema: tell.schema,
-            ...(tell.initiator === undefined ? {} : { initiator: tell.initiator }),
-          }),
-    );
+    const pending = handle
+      .wait(undefined, {
+        timeoutMs: remaining(),
+        ...(born.signal === undefined ? {} : { signal: born.signal }),
+      })
+      .then(async (initial) => {
+        if (!defaultWaitComplete(initial) || (deadline !== undefined && remaining() <= 0)) return undefined;
+        const signal = schemaSignal();
+        try {
+          return execution.channel.kind === "body-request"
+            ? await requestForwardedFleetTellAnswer({
+                directory: execution.channel.directory,
+                target: handle.id,
+                body: tell.body,
+                schema: tell.schema,
+                ...(tell.initiator === undefined ? {} : { initiator: tell.initiator }),
+                ...(signal === undefined ? {} : { signal }),
+              })
+            : await PublicAkuma.select(born.path, handle.id).tell(tell.body, {
+                schema: tell.schema,
+                ...(tell.initiator === undefined ? {} : { initiator: tell.initiator }),
+                ...(signal === undefined ? {} : { signal }),
+              });
+        } catch (error) {
+          if (born.signal?.aborted || deadline === undefined || remaining() > 0) throw error;
+          return undefined;
+        }
+      });
     if (born.mode === "detach") void pending.catch(() => undefined);
     else schemaAnswer = await pending;
   }
-  const observation = await observeCall(handle, born.mode, born.timeoutMs);
+  const observation = await observeCall(handle, born.mode, remaining(), born.signal);
   return {
     kind: "called",
     akuma: handle.id,

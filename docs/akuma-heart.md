@@ -45,6 +45,9 @@ history window. The public
 timeline projector is pure and derives snapshots, gaps, history loss, activity
 selection, and reported changes from this one sequence. These projections never
 become facts or cursors of a second store.
+When a complete Turn's exact final non-truncated narration equals its answered
+outcome, that projector omits only that projected duplicate. Heart retains both
+source facts; renderers never decide this fold.
 
 Recent fleet observations derive their activity order and bounded extent solely
 from that Heart projection. Custody metadata may conservatively bound which

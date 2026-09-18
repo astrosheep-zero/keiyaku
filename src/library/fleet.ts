@@ -42,9 +42,10 @@ export type AkumaWaitInput = AkumaSetAddressInput &
   Readonly<{
     completion?: "any" | "all";
     timeoutMs?: number;
+    signal?: AbortSignal;
   }>;
 
-export type AkumaTellInput = AkumaAddressInput & Readonly<{ body: string; initiator?: string }>;
+export type AkumaTellInput = AkumaAddressInput & Readonly<{ body: string; initiator?: string; signal?: AbortSignal }>;
 export type { TellResult, TellWake } from "../akuma/akuma.js";
 export type { CreatedTaskObservation } from "../task/created-observation.js";
 export type { DispatchAssociation } from "../dispatch/association.js";
@@ -56,7 +57,9 @@ export type {
   AkumaUnobserved,
   AkumaWaitResult,
 } from "../akuma/fleet-observation.js";
-export type AkumaInterruptInput = AkumaAddressInput & Readonly<{ body: string; initiator?: string }>;
+export type AkumaInterruptInput = AkumaAddressInput &
+  Readonly<{ body: string; initiator?: string; signal?: AbortSignal }>;
+export type AkumaKillInput = AkumaSetAddressInput & Readonly<{ signal?: AbortSignal }>;
 export type AkumaInterruptResult = Readonly<{
   id: AkumaStatus["id"];
   receipt: InterruptReceipt;
@@ -215,6 +218,12 @@ function timeout(value: unknown): number | undefined {
   return value;
 }
 
+function signal(value: unknown): AbortSignal | undefined {
+  if (value === undefined) return undefined;
+  if (!(value instanceof AbortSignal)) throw new TypeError("signal must be an AbortSignal");
+  return value;
+}
+
 async function attachWaitAssociations(
   path: WorldRoot,
   repo: Repo | undefined,
@@ -272,7 +281,7 @@ export async function waitAkuma(
 ): Promise<AkumaWaitResult> {
   const values = requireInput(input, "Keiyaku.wait input");
   for (const key of Object.keys(values)) {
-    if (!["path", "akuma", "repo", "completion", "timeoutMs"].includes(key)) {
+    if (!["path", "akuma", "repo", "completion", "timeoutMs", "signal"].includes(key)) {
       throw new TypeError(`Keiyaku.wait input has unknown field: ${key}`);
     }
   }
@@ -284,6 +293,7 @@ export async function waitAkuma(
   // An omitted mode is any: a plural wait returns when any selected Akuma is complete.
   const selected = completion ?? "any";
   const timeoutMs = timeout(values.timeoutMs);
+  const callerSignal = signal(values.signal);
   const channel = executionChannel(execution);
   const repo = values.repo as Repo | undefined;
   if (channel.kind === "body-request") {
@@ -292,9 +302,10 @@ export async function waitAkuma(
       repo,
       await requestForwardedFleetWait({
         directory: channel.directory,
-        targets: addressed.ids,
+        targets: addressed.orderedIds,
         completion: selected,
         ...(timeoutMs === undefined ? {} : { timeoutMs }),
+        ...(callerSignal === undefined ? {} : { signal: callerSignal }),
       }),
     );
   }
@@ -303,9 +314,10 @@ export async function waitAkuma(
     repo,
     await executeWaitAkuma({
       path: addressed.path,
-      ids: addressed.ids,
+      ids: addressed.orderedIds,
       completion: selected,
       ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      ...(callerSignal === undefined ? {} : { signal: callerSignal }),
       identity: waitIdentityFacts(addressed.path, repo),
       selectionOrder: addressed.orderedIds,
       ...(observer?.selected === undefined ? {} : { onSelected: observer.selected }),
@@ -315,20 +327,29 @@ export async function waitAkuma(
 }
 
 export async function killAkuma(
-  input: AkumaSetAddressInput,
+  input: AkumaKillInput,
   execution: ExecutionContext = localExecutionContext(),
 ): Promise<AkumaKillResult> {
-  const addressed = await addressAkumaSet(input);
+  const values = requireInput(input, "Keiyaku.kill input");
+  for (const key of Object.keys(values)) {
+    if (!["path", "akuma", "repo", "signal"].includes(key)) {
+      throw new TypeError(`Keiyaku.kill input has unknown field: ${key}`);
+    }
+  }
+  const callerSignal = signal(values.signal);
+  const addressed = await addressAkumaSet(setAddress(values));
   const channel = executionChannel(execution);
   if (channel.kind === "body-request") {
     return await requestForwardedFleetKill({
       directory: channel.directory,
-      targets: addressed.ids,
+      targets: addressed.orderedIds,
+      ...(callerSignal === undefined ? {} : { signal: callerSignal }),
     });
   }
   return await executeKillAkuma({
     path: addressed.path,
-    ids: addressed.ids,
+    ids: addressed.orderedIds,
+    ...(callerSignal === undefined ? {} : { signal: callerSignal }),
   });
 }
 
@@ -338,11 +359,12 @@ export async function tellAkuma(
 ): Promise<AkumaTellResult> {
   const values = requireInput(input, "Keiyaku.tell input");
   for (const key of Object.keys(values)) {
-    if (!["path", "akuma", "body", "repo", "initiator"].includes(key)) {
+    if (!["path", "akuma", "body", "repo", "initiator", "signal"].includes(key)) {
       throw new TypeError(`Keiyaku.tell input has unknown field: ${key}`);
     }
   }
   if (typeof values.body !== "string") throw new TypeError("body must be a string");
+  const callerSignal = signal(values.signal);
   const addressed = await addressAkuma(directAddress(values));
   const channel = executionChannel(execution);
   if (channel.kind === "body-request") {
@@ -351,6 +373,7 @@ export async function tellAkuma(
       target: addressed.id,
       body: values.body,
       ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+      ...(callerSignal === undefined ? {} : { signal: callerSignal }),
     });
   }
   return await executeTellAkuma({
@@ -358,23 +381,25 @@ export async function tellAkuma(
     id: addressed.id,
     body: values.body,
     ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+    ...(callerSignal === undefined ? {} : { signal: callerSignal }),
   });
 }
 
 export async function interruptAkuma(input: AkumaInterruptInput): Promise<AkumaInterruptResult> {
   const values = requireInput(input, "Keiyaku.interrupt input");
   for (const key of Object.keys(values)) {
-    if (!["path", "akuma", "body", "repo", "initiator"].includes(key)) {
+    if (!["path", "akuma", "body", "repo", "initiator", "signal"].includes(key)) {
       throw new TypeError(`Keiyaku.interrupt input has unknown field: ${key}`);
     }
   }
   if (typeof values.body !== "string") throw new TypeError("body must be a string");
+  const callerSignal = signal(values.signal);
   const addressed = await addressAkuma(directAddress(values));
   const handle = source(addressed.path).selectHandle({ id: addressed.id });
-  const receipt = await handle.interrupt(
-    values.body,
-    input.initiator === undefined ? {} : { initiator: input.initiator },
-  );
+  const receipt = await handle.interrupt(values.body, {
+    ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+    ...(callerSignal === undefined ? {} : { signal: callerSignal }),
+  });
   const observation = await observeAkumaStage(addressed.path, addressed.id, values.repo as Repo | undefined);
   return { id: addressed.id, receipt, observation };
 }

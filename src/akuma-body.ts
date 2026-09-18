@@ -107,6 +107,7 @@ function fleetRequestPort(world: Awaited<ReturnType<typeof World.prove>>): Fleet
         schema: Schema.json(JSON.parse(input.schemaJson) as Record<string, unknown>, (value) => value),
         ...(input.interrupt === undefined ? {} : { interrupt: input.interrupt }),
         ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+        signal: input.signal,
       }),
     kill: async (input) => {
       const result = await executeKillAkuma({ path: world, ids: input.targets, signal: input.signal });

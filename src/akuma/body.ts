@@ -1,7 +1,7 @@
 import { appendFile, stat } from "node:fs/promises";
 import { basename, delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { abortableDelay } from "./abort.js";
+import { abortable, abortableDelay } from "./abort.js";
 import { BodySupervisor } from "./body-supervisor.js";
 import type { AkumaCallRequestChildLaunch } from "./call-request.js";
 import { driveTurn, turnRecipe, type DrivenTurn } from "./turn-drive.js";
@@ -801,36 +801,47 @@ function failedChild(exit: DetachedProcessExit): Extract<TellWake, { kind: "fail
 
 async function awaitWake(
   paths: AkumaPaths,
-  tellId: string | undefined,
-  after: number,
-  child: OwnedProcess,
-  schedule: (milliseconds: number, signal: AbortSignal) => Promise<void>,
+  input: Readonly<{
+    tellId?: string;
+    after: number;
+    child: OwnedProcess;
+    schedule: (milliseconds: number, signal: AbortSignal) => Promise<void>;
+    signal?: AbortSignal;
+  }>,
 ): Promise<TellWake> {
-  for (;;) {
-    const settled = await settledWake(paths, tellId, after);
-    if (settled !== null) {
-      child.release();
-      return settled;
-    }
-    const timerController = new AbortController();
-    const timer = schedule(WAKE_REREAD_MS, timerController.signal).then(() => ({ kind: "timer" as const }));
-    let winner: Awaited<typeof timer> | { kind: "exited"; exit: DetachedProcessExit };
-    try {
-      winner = await Promise.race([child.exited.then((exit) => ({ kind: "exited" as const, exit })), timer]);
-    } catch (error) {
+  const { tellId, after, child, schedule, signal } = input;
+  try {
+    for (;;) {
+      signal?.throwIfAborted();
+      const settled = await settledWake(paths, tellId, after);
+      if (settled !== null) {
+        child.release();
+        return settled;
+      }
+      const timerController = new AbortController();
+      const timer = schedule(WAKE_REREAD_MS, timerController.signal).then(() => ({ kind: "timer" as const }));
+      let winner: Awaited<typeof timer> | { kind: "exited"; exit: DetachedProcessExit };
+      try {
+        const waited = Promise.race([child.exited.then((exit) => ({ kind: "exited" as const, exit })), timer]);
+        winner = signal === undefined ? await waited : await abortable(waited, signal);
+      } catch (error) {
+        timerController.abort();
+        await timer.catch(() => undefined);
+        throw error;
+      }
+      if (winner.kind === "timer") continue;
       timerController.abort();
       await timer.catch(() => undefined);
-      throw error;
+      const final = await settledWake(paths, tellId, after);
+      if (final !== null) {
+        child.release();
+        return final;
+      }
+      return winner.exit.code === LEASH_HELD_EXIT ? { kind: "held" } : failedChild(winner.exit);
     }
-    if (winner.kind === "timer") continue;
-    timerController.abort();
-    await timer.catch(() => undefined);
-    const final = await settledWake(paths, tellId, after);
-    if (final !== null) {
-      child.release();
-      return final;
-    }
-    return winner.exit.code === LEASH_HELD_EXIT ? { kind: "held" } : failedChild(winner.exit);
+  } catch (error) {
+    child.release();
+    throw error;
   }
 }
 
@@ -838,13 +849,22 @@ async function wakePendingTells(
   paths: AkumaPaths,
   tellId: string | undefined,
   runtime: TellWakeRuntime,
+  signal?: AbortSignal,
 ): Promise<TellWake | null> {
   try {
+    signal?.throwIfAborted();
     const beforeHeart = await readHeart(paths);
     if (tellId === undefined && beforeHeart.pending.length === 0) return null;
     const before = beforeHeart.latestBody?.sequence ?? 0;
-    return await awaitWake(paths, tellId, before, await runtime.spawn(paths), runtime.schedule ?? abortableDelay);
+    return await awaitWake(paths, {
+      ...(tellId === undefined ? {} : { tellId }),
+      after: before,
+      child: await runtime.spawn(paths),
+      schedule: runtime.schedule ?? abortableDelay,
+      ...(signal === undefined ? {} : { signal }),
+    });
   } catch (error) {
+    if (signal?.aborted) throw error;
     return { kind: "failed", diagnostic: diagnostic(error) };
   }
 }
@@ -853,8 +873,9 @@ export async function wakeRecordedTell(
   paths: AkumaPaths,
   tellId: string,
   runtime: TellWakeRuntime = DIRECT_TELL_WAKE,
+  signal?: AbortSignal,
 ): Promise<TellResult> {
-  const wake = (await wakePendingTells(paths, tellId, runtime))!;
+  const wake = (await wakePendingTells(paths, tellId, runtime, signal))!;
   const tell = await readTell(paths, tellId);
   if (tell === null) throw new Error(`recorded Tell ${tellId} is missing from Heart`);
   return {

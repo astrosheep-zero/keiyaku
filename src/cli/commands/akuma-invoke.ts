@@ -112,6 +112,7 @@ type InvokeInput = Readonly<{
   environment: NodeJS.ProcessEnv;
   readStdin(): Promise<string>;
   execution?: ExecutionContext;
+  signal?: AbortSignal;
 }>;
 
 /** The window a call observes for when the caller gives no `--wait` duration. */
@@ -119,6 +120,10 @@ const CALL_TIMEOUT_MS = 300_000;
 
 /** The call the CLI makes once its prompt, schema, and placement are resolved. */
 type CallRequest = Omit<CallInput, "mode" | "timeoutMs">;
+
+function callSignalOption(signal: AbortSignal | undefined): Pick<CallRequest, "signal"> {
+  return signal === undefined ? {} : { signal };
+}
 
 function integrationFailure(error: unknown): IntegrationFailure {
   return {
@@ -153,17 +158,19 @@ async function observeCallUntilComplete(
 ): Promise<CallObservation> {
   const stream = callObservationStream(resultContext(), callObservationHead(born));
   try {
-    const status = await observeAkumaStatus(input.path, born.akuma, {
+    const observed = await observeAkumaStatus(input.path, born.akuma, {
       timeoutMs: command.timeoutMs ?? CALL_TIMEOUT_MS,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
       observe: (observed) => {
         const lines = stream.observe(observed);
         if (lines.length > 0) writeProgress(lines.join("\n"));
       },
     });
-    const conclusion = stream.conclude({ kind: "observed", status });
+    const conclusion = stream.conclude({ kind: "observed", reason: observed.reason, status: observed.status });
     if (conclusion.length > 0) writeProgress(conclusion);
-    return { kind: "observed", status };
+    return { kind: "observed", reason: observed.reason, status: observed.status };
   } catch (error) {
+    if (input.signal?.aborted) throw error;
     const failure = integrationFailure(error);
     const conclusion = stream.conclude({ kind: "failed", failure });
     if (conclusion.length > 0) writeProgress(conclusion);
@@ -232,6 +239,7 @@ async function invokeWait(
       ...(input.repo === undefined ? {} : { repo: input.repo }),
       ...(command.completion === undefined ? {} : { completion: command.completion }),
       ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
     },
     input.execution ?? localExecutionContext(),
     observer,
@@ -303,11 +311,13 @@ async function invokeTell(
             schema,
             interrupt: command.interrupt,
             ...initiator,
+            ...(input.signal === undefined ? {} : { signal: input.signal }),
           })
         : await Akuma.select(addressed.path, addressed.id).tell(body, {
             schema,
             ...initiator,
             ...(command.interrupt ? { interrupt: true } : {}),
+            ...(input.signal === undefined ? {} : { signal: input.signal }),
           });
     const alias = inputAlias(command.akuma);
     return {
@@ -327,6 +337,7 @@ async function invokeTell(
       akuma: command.akuma,
       body,
       ...(input.repo === undefined ? {} : { repo: input.repo }),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
     const alias = inputAlias(command.akuma);
     return {
@@ -345,6 +356,7 @@ async function invokeTell(
       akuma: command.akuma,
       body,
       ...(input.repo === undefined ? {} : { repo: input.repo }),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
     },
     input.execution ?? localExecutionContext(),
   );
@@ -411,6 +423,7 @@ async function invokeKill(
         path: input.path,
         akuma: command.akuma,
         ...(input.repo === undefined ? {} : { repo: input.repo }),
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
       },
       input.execution ?? localExecutionContext(),
     ),
@@ -436,6 +449,7 @@ export async function invokeAkuma(command: InvokedAkumaCommand, input: InvokeInp
         ...(command.alias === undefined ? {} : { alias: command.alias }),
         ...(command.allowed === undefined ? {} : { allowed: command.allowed }),
         ...(schema === undefined ? {} : { schema }),
+        ...callSignalOption(input.signal),
       };
       const observing = schema === undefined && command.mode === "wait" && command.output === "text";
       const born = await caller.call(

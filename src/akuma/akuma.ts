@@ -94,6 +94,7 @@ export type AkumaCallInput = Readonly<{
   allowed?: readonly AllowedAction[];
   schema?: Schema<unknown>;
   initiator?: string;
+  signal?: AbortSignal;
 }>;
 export type AkumaCallContext = Readonly<{
   initiatorCwd?: string;

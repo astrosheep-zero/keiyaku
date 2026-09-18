@@ -9,13 +9,14 @@ import { z } from "zod";
 import {
   Akuma,
   AkumaBusyError,
-  AkumaDecodeError, AkumaProviderError,
+  AkumaDecodeError,
+  AkumaProviderError,
   Schema,
-  type AkumaIdleResult
+  type AkumaIdleResult,
 } from "../src/akuma/index.js";
 import { AkumaHandle } from "../src/akuma/akuma-handle.js";
-import { driveAkumaBody } from "../src/akuma/body.js";
-import { readTell, recordTell } from "../src/akuma/heart/index.js";
+import { driveAkumaBody, type TellWakeRuntime } from "../src/akuma/body.js";
+import { readHeart, readTell, recordTell } from "../src/akuma/heart/index.js";
 import { type ProviderAdapter } from "../src/akuma/provider.js";
 import { settlementProbe, waitForCondition } from "./support/process.js";
 import { schemaJsonText } from "../src/akuma/schema.js";
@@ -126,13 +127,7 @@ test("Akuma.birth has no prompt and select is synchronous", async (context) => {
   await born.kill();
 });
 
-import {
-  answering,
-  bornWorld,
-  fixtureRuntime,
-  installTellRuntime,
-  settleFixtureBodies,
-} from "./support/akuma-tell.js";
+import { answering, bornWorld, fixtureRuntime, installTellRuntime, settleFixtureBodies } from "./support/akuma-tell.js";
 
 test("schema tell decodes JSON and typed failures stay distinct", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-schema-tell-"));
@@ -241,6 +236,83 @@ test("schema tell routes admission and preserves typed refusals without launchin
   assert.equal(new Set([...tells.map((args) => args[1]), options!.tellId]).size, 3);
 });
 
+test("schema interrupt carries caller cancellation into its held control admission", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-akuma-api-schema-interrupt-cancel-");
+  const akuma = Akuma.select(await World.at(root), "aku/claude/a1000007");
+  const schema = Schema.zod(z.object({ ok: z.boolean() }).strict());
+  const controller = new AbortController();
+  const reason = new Error("cancel held schema interrupt");
+  let received: AbortSignal | undefined;
+  context.mock.method(AkumaHandle.prototype, "interrupt", async (...args: Parameters<AkumaHandle["interrupt"]>) => {
+    const options = args[1];
+    assert.ok(options);
+    received = options.signal;
+    return await new Promise<never>((_resolve, reject) => {
+      options.signal?.addEventListener("abort", () => reject(options.signal!.reason), { once: true });
+    });
+  });
+  const pending = akuma.tell("interrupt", { schema, interrupt: true, signal: controller.signal });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  controller.abort(reason);
+  await assert.rejects(pending, (error: unknown) => error === reason);
+  assert.strictEqual(received, controller.signal);
+});
+
+test("plain Tell preserves its admission while caller cancellation releases the wake wait", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-tell-wake-cancel-"));
+  const { allocated, akuma } = await bornWorld(root, "a1000009");
+  const controller = new AbortController();
+  const reason = new Error("cancel pending wake");
+  let polls = 0;
+  let released = false;
+  const runtime: TellWakeRuntime = {
+    async spawn() {
+      return {
+        pid: 0,
+        exited: new Promise(() => undefined),
+        async terminate() {},
+        release() {
+          released = true;
+        },
+      };
+    },
+    async schedule(milliseconds, signal) {
+      polls += 1;
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, milliseconds);
+        signal.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(timer);
+            reject(signal.reason);
+          },
+          { once: true },
+        );
+      });
+    },
+  };
+  const restoreTellRuntime = installTellRuntime(runtime);
+  try {
+    const pending = akuma.tell("remain admitted", { signal: controller.signal });
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    assert.ok(polls > 0, "wake polling must have started before cancellation");
+    controller.abort(reason);
+    await assert.rejects(pending, (error: unknown) => error === reason);
+    const stoppedAt = polls;
+    await new Promise<void>((resolve) => setTimeout(resolve, 120));
+    assert.equal(polls, stoppedAt, "caller cancellation stops wake polling");
+    assert.equal(released, true, "caller cancellation releases the wake child");
+    assert.deepEqual(
+      (await readHeart(allocated.paths)).pending.map((tell) => tell.body),
+      ["remain admitted"],
+      "cancellation does not revoke the already admitted Tell",
+    );
+  } finally {
+    restoreTellRuntime();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("idle resolves the settling life with the final status", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-idle-"));
   const bodies: Promise<unknown>[] = [];
@@ -252,8 +324,7 @@ test("idle resolves the settling life with the final status", async () => {
     await akuma.tell("hello");
     await settleFixtureBodies(bodies);
     const settled: AkumaIdleResult = await akuma.idle();
-    assert.ok(settled.kind === "idle", "expected settled.kind = \"idle\"");
-    assert.equal(settled.reason, "asleep");
+    assert.equal(settled.reason, "completed");
     assert.equal(settled.status.life, "asleep");
     assert.equal(settled.status.id, allocated.id);
   } finally {
@@ -297,8 +368,7 @@ test("idle after kill names the killed life", async () => {
     await body;
     body = undefined;
     const killed = await akuma.idle();
-    assert.ok(killed.kind === "idle", "expected killed.kind = \"idle\"");
-    assert.equal(killed.reason, "killed");
+    assert.equal(killed.reason, "completed");
     assert.equal(killed.status.life, "killed");
     assert.equal(killed.status.id, allocated.id);
   } finally {
@@ -318,7 +388,6 @@ test("idle timeout with a pending tell reports pendingTell", async (context) => 
     recordedAt: "2026-08-10T00:00:01.000Z",
   });
   const timed = await akuma.idle({ timeoutMs: 100 });
-  assert.ok(timed.kind === "timeout", "expected timed.kind = \"timeout\"");
-  assert.deepEqual(timed.reason, { running: false, pendingTell: true });
+  assert.equal(timed.reason, "deadline");
   assert.equal(timed.status.id, allocated.id);
 });

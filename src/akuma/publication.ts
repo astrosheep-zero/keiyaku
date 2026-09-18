@@ -210,8 +210,11 @@ async function settleLaunch(
   return "sealed";
 }
 
-async function awaitAsleepBirth(paths: AkumaPaths): Promise<void> {
-  const leash = await acquireLeash(paths, { deadline: performance.now() + BIRTH_TIMEOUT_MS });
+async function awaitAsleepBirth(paths: AkumaPaths, signal?: AbortSignal): Promise<void> {
+  const leash = await acquireLeash(paths, {
+    deadline: performance.now() + BIRTH_TIMEOUT_MS,
+    ...(signal === undefined ? {} : { signal }),
+  });
   if (leash === null) throw new Error("Forked Akuma did not finish its birth body");
   try {
     if ((await readHeart(paths)).latestBody?.end !== "exited") {
@@ -261,7 +264,7 @@ export async function launchAkuma(input: LaunchInput): Promise<AllocatedAkuma> {
     input.signal?.throwIfAborted();
     const soul = await awaitBirth(allocated.paths, owned ?? undefined, input.signal);
     if (soul.id !== allocated.id) throw new Error("Akuma birth returned a different identity");
-    if (input.awaitAsleep === true) await awaitAsleepBirth(allocated.paths);
+    if (input.awaitAsleep === true) await awaitAsleepBirth(allocated.paths, input.signal);
     owned?.release();
     return allocated;
   } catch (error) {
@@ -273,7 +276,7 @@ export async function launchAkuma(input: LaunchInput): Promise<AllocatedAkuma> {
         owned.release();
       }
       if (outcome === "born" && input.signal?.aborted && error === input.signal.reason) {
-        if (input.awaitAsleep === true) await awaitAsleepBirth(allocated.paths);
+        if (input.awaitAsleep === true) await awaitAsleepBirth(allocated.paths, input.signal);
         return allocated;
       }
       throw error;

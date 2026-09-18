@@ -5,10 +5,9 @@ import { decodeAllowedActions, unionAllowedActions } from "./allowed.js";
 import type { AllowedAction } from "./allowed.js";
 import { AkumaDecodeError, AkumaProviderError } from "./akuma-errors.js";
 import { AkumaHandle } from "./akuma-handle.js";
-import { POLL_MS, defaultWaitComplete } from "./akuma.js";
 import type { AkumaStatus } from "./akuma.js";
 import type { InterruptReceipt, KillEvidence } from "./akuma.js";
-import { bornStatus } from "./akuma-observe.js";
+import { bornStatus, defaultWaitComplete, waitForObservation, type WaitReason } from "./akuma-observe.js";
 import { loadArchetype } from "./archetype.js";
 import { activitySlice, readTell, readTurn, type TellFact, type TurnOutcome } from "./heart/index.js";
 import { parseAkuId, pathsForAkuId, type AkuId, type AkumaPaths } from "./identity.js";
@@ -22,14 +21,8 @@ import { abortable } from "./abort.js";
 
 const HISTORY_LIMIT = 12;
 
-export type AkumaIdleOptions = Readonly<{ timeoutMs?: number }>;
-export type AkumaIdleResult =
-  | Readonly<{ kind: "idle"; status: AkumaStatus; reason: Exclude<AkumaStatus["life"], "running"> }>
-  | Readonly<{
-      kind: "timeout";
-      status: AkumaStatus;
-      reason: Readonly<{ running: boolean; pendingTell: boolean }>;
-    }>;
+export type AkumaIdleOptions = Readonly<{ timeoutMs?: number; signal?: AbortSignal }>;
+export type AkumaIdleResult = Readonly<{ reason: WaitReason; status: AkumaStatus }>;
 export type AkumaHistoryOptions = Readonly<{ before?: number; since?: number; limit?: number }>;
 export type AkumaSignalOptions = Readonly<{ signal?: AbortSignal }>;
 
@@ -56,42 +49,47 @@ function signalOption(value: unknown): AbortSignal | undefined {
   return value;
 }
 
-function wait(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
-function pendingTellOf(status: AkumaStatus): boolean {
-  return status.timeline.entries.some(
-    (entry) => entry.kind === "row" && entry.row.kind === "tell" && entry.row.state === "pending",
-  );
-}
-
-function idleResult(status: AkumaStatus): AkumaIdleResult {
-  const pendingTell = pendingTellOf(status);
-  if (status.life !== "running" && !pendingTell) return { kind: "idle", status, reason: status.life };
-  return { kind: "timeout", status, reason: { running: status.life === "running", pendingTell } };
-}
-
 function recordedTell(result: TellResult): TellAdmission {
   if (result.wake.kind === "failed") throw new AkumaProviderError(result.wake.diagnostic);
   return { tellId: result.admission.tellId };
 }
 
 async function recordPlainTell(
-  id: AkuId,
-  root: WorldRoot,
-  body: string,
-  tellId: string,
-  initiator?: string,
+  input: Readonly<{
+    id: AkuId;
+    root: WorldRoot;
+    body: string;
+    tellId: string;
+    initiator?: string;
+    signal?: AbortSignal;
+  }>,
 ): Promise<TellAdmission> {
-  const admitted = await new AkumaHandle(id, root).tell(
-    body,
-    tellId,
-    undefined,
-    undefined,
-    initiator === undefined ? {} : { initiator },
-  );
+  const { id, root, body, tellId, initiator, signal } = input;
+  const admitted = await new AkumaHandle(id, root).tell(body, tellId, undefined, undefined, {
+    ...(initiator === undefined ? {} : { initiator }),
+    ...(signal === undefined ? {} : { signal }),
+  });
   return recordedTell(admitted);
+}
+
+function plainTellInput(
+  input: Readonly<{
+    id: AkuId;
+    root: WorldRoot;
+    body: string;
+    tellId: string;
+    options: Readonly<{ initiator?: string }> | undefined;
+    signal: AbortSignal | undefined;
+  }>,
+): Parameters<typeof recordPlainTell>[0] {
+  return {
+    id: input.id,
+    root: input.root,
+    body: input.body,
+    tellId: input.tellId,
+    ...(input.options?.initiator === undefined ? {} : { initiator: input.options.initiator }),
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  };
 }
 
 async function recordSchemaTell<T>(
@@ -103,6 +101,7 @@ async function recordSchemaTell<T>(
     interrupt?: boolean;
     initiator?: string;
     root: WorldRoot;
+    signal?: AbortSignal;
   }>,
 ): Promise<TellAdmission> {
   const { id, body, tellId, schema, root } = input;
@@ -111,6 +110,7 @@ async function recordSchemaTell<T>(
       tellId,
       schemaJson: schemaJsonText(schema),
       ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
     if (interrupted.kind === "unavailable") {
       throw new AkumaProviderError(`schema interrupt unavailable: ${interrupted.evidence}`);
@@ -120,6 +120,7 @@ async function recordSchemaTell<T>(
   const admitted = await new AkumaHandle(id, root).tell(body, tellId, undefined, undefined, {
     schemaJson: schemaJsonText(schema),
     ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
   return recordedTell(admitted);
 }
@@ -135,17 +136,19 @@ async function boundOutcome(paths: AkumaPaths, tell: TellFact): Promise<TurnOutc
   return turn?.end?.outcome ?? null;
 }
 
-async function awaitTellOutcome(paths: AkumaPaths, tellId: string): Promise<TurnOutcome> {
-  for (;;) {
-    const tell = await readTell(paths, tellId);
-    if (tell === null) throw new AkumaProviderError(`recorded Tell ${tellId} is missing from Heart`);
-    const outcome = await boundOutcome(paths, tell);
-    if (outcome !== null) return outcome;
-    if (tell.state === "told" && tell.binding === undefined) {
-      throw new AkumaProviderError(`recorded Tell ${tellId} reached a terminal delivery without a Turn binding`);
-    }
-    await wait(POLL_MS);
-  }
+async function awaitTellOutcome(paths: AkumaPaths, tellId: string, signal?: AbortSignal): Promise<TurnOutcome> {
+  const waited = await waitForObservation({
+    ...(signal === undefined ? {} : { signal }),
+    observe: async () => {
+      const tell = await readTell(paths, tellId);
+      if (tell === null) throw new AkumaProviderError(`recorded Tell ${tellId} is missing from Heart`);
+      const outcome = await boundOutcome(paths, tell);
+      return { outcome, terminalWithoutTurn: tell.state === "told" && tell.binding === undefined };
+    },
+    complete: (observed) => observed.outcome !== null || observed.terminalWithoutTurn,
+  });
+  if (waited.value.outcome !== null) return waited.value.outcome;
+  throw new AkumaProviderError(`recorded Tell ${tellId} reached a terminal delivery without a Turn binding`);
 }
 
 export class Akuma {
@@ -202,16 +205,30 @@ export class Akuma {
     return new Akuma(parseAkuId(selector).id, root);
   }
 
-  async tell(text: string, options?: Readonly<{ initiator?: string }>): Promise<string>;
-  async tell<T>(text: string, options: AkumaTellOptions<T>): Promise<T>;
-  async tell<T>(text: string, options?: AkumaTellOptions<T> | Readonly<{ initiator?: string }>): Promise<string | T> {
+  async tell(text: string, options?: Readonly<{ initiator?: string; signal?: AbortSignal }>): Promise<string>;
+  async tell<T>(text: string, options: AkumaTellOptions<T> & AkumaSignalOptions): Promise<T>;
+  async tell<T>(
+    text: string,
+    options?: (AkumaTellOptions<T> & AkumaSignalOptions) | Readonly<{ initiator?: string; signal?: AbortSignal }>,
+  ): Promise<string | T> {
     if (typeof text !== "string") throw new TypeError("Akuma tell text must be a string");
+    const signal = signalOption(options?.signal);
+    signal?.throwIfAborted();
     const tellId = randomUUID();
     const schemaOptions = options !== undefined && "schema" in options ? options : undefined;
     const schema = schemaOptions === undefined ? undefined : schemaFromStandard(schemaOptions.schema);
     const recorded =
       schemaOptions === undefined || schema === undefined
-        ? await recordPlainTell(this.id, this.root, text, tellId, options?.initiator)
+        ? await recordPlainTell(
+            plainTellInput({
+              id: this.id,
+              root: this.root,
+              body: text,
+              tellId,
+              options,
+              signal,
+            }),
+          )
         : await recordSchemaTell({
             id: this.id,
             body: text,
@@ -220,8 +237,9 @@ export class Akuma {
             root: this.root,
             ...(schemaOptions.interrupt === undefined ? {} : { interrupt: schemaOptions.interrupt }),
             ...(schemaOptions.initiator === undefined ? {} : { initiator: schemaOptions.initiator }),
+            ...(signal === undefined ? {} : { signal }),
           });
-    const outcome = await awaitTellOutcome(this.paths, recorded.tellId);
+    const outcome = await awaitTellOutcome(this.paths, recorded.tellId, signal);
     if (outcome.kind !== "answered") outcomeError(outcome);
     if (schema === undefined) return outcome.answer;
     const raw = outcome.answerJson ?? outcome.answer;
@@ -266,19 +284,19 @@ export class Akuma {
     if (typeof options !== "object" || options === null || Array.isArray(options)) {
       throw new TypeError("Akuma idle options must be an object");
     }
-    const unknown = Object.keys(options).find((key) => key !== "timeoutMs");
+    const unknown = Object.keys(options).find((key) => key !== "timeoutMs" && key !== "signal");
     if (unknown !== undefined) throw new TypeError(`Akuma idle options has unknown field: ${unknown}`);
     if (options.timeoutMs !== undefined && (!Number.isFinite(options.timeoutMs) || options.timeoutMs < 0)) {
       throw new TypeError("Akuma idle timeoutMs must be a nonnegative finite millisecond duration");
     }
-    const deadline = options.timeoutMs === undefined ? undefined : performance.now() + options.timeoutMs;
-    for (;;) {
-      const observed = await bornStatus(this.paths, this.id, { aperture: "monitoring" });
-      if (defaultWaitComplete(observed.status) || (deadline !== undefined && performance.now() >= deadline)) {
-        return idleResult(observed.status);
-      }
-      await wait(deadline === undefined ? POLL_MS : Math.min(POLL_MS, Math.max(0, deadline - performance.now())));
-    }
+    const signal = signalOption(options.signal);
+    const waited = await waitForObservation({
+      ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+      ...(signal === undefined ? {} : { signal }),
+      observe: async () => (await bornStatus(this.paths, this.id, { aperture: "monitoring" })).status,
+      complete: defaultWaitComplete,
+    });
+    return { reason: waited.reason, status: waited.value };
   }
 
   async history(options: AkumaHistoryOptions = {}): Promise<ActivityHistory> {

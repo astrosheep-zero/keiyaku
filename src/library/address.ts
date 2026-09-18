@@ -84,12 +84,6 @@ export function resolveNamedAddress(input: NamedAddressInput): NamedAddress {
   if (selector.startsWith("kei/")) return { kind: "contract", id: contractId(selector) };
   if (selector.startsWith("aku/")) return { kind: "akuma", id: parseAkuId(selector).id };
   const alias = parseAkumaAlias(selector);
-  if (input.report.contracts.kind === "failed") {
-    throw new TypeError("cannot resolve a named selector while the Contract world is failed");
-  }
-  if (input.aliases.kind === "failed") {
-    throw new TypeError("cannot resolve a named selector while Alias authority is failed");
-  }
   const contractMatches = (input.report.contracts.kind === "present" ? input.report.contracts.value.rows : []).filter(
     (row) =>
       row.disposition === "active" &&
@@ -103,9 +97,17 @@ export function resolveNamedAddress(input: NamedAddressInput): NamedAddress {
       : null;
   if (contractMatches.length > 0 && aliasId !== null)
     throw new TypeError(`ambiguous selector matches Contract and Akuma: ${selector}`);
+  // A readable alias selects its Akuma independently. Contract composition can
+  // enrich the subsequent observation, but cannot erase this core address.
+  if (aliasId !== null) return { kind: "akuma", id: aliasId };
   if (contractMatches.length === 1) return { kind: "contract", id: contractMatches[0]!.id };
   if (contractMatches.length > 1) throw new TypeError(`ambiguous Contract selector: ${selector}`);
-  if (aliasId !== null) return { kind: "akuma", id: aliasId };
+  if (input.report.contracts.kind === "failed") {
+    throw new TypeError("cannot resolve a named selector while the Contract world is failed");
+  }
+  if (input.aliases.kind === "failed") {
+    throw new TypeError("cannot resolve a named selector while Alias authority is failed");
+  }
   throw new TypeError(`unknown selector: ${selector}`);
 }
 
@@ -200,7 +202,7 @@ async function refuseForeignContractMembers(
 export async function addressAkumaSet(input: UncheckedAkumaAddressInput): Promise<
   Readonly<{
     path: WorldRoot;
-    /** The complete selected set in canonical order: the durable result order. */
+    /** The complete selected set in canonical order. */
     ids: readonly AkuId[];
     /** The same set in the caller's selector order, for surfaces that name the selection as chosen. */
     orderedIds: readonly AkuId[];

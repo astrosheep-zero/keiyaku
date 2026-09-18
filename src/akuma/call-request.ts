@@ -79,7 +79,6 @@ const akumaCallPayloadSchema = z
     archetype: archetypeSchema,
     body: z.string().optional(),
     initiator: z.string().min(1).optional(),
-    awaitAsleep: z.literal(true).optional(),
     cwd: absolutePathSchema.optional(),
     recipe: akumaCallRecipeSchema,
   })
@@ -140,7 +139,6 @@ async function executeAkumaCall(
     worldPath: world,
     archetype: request.archetype,
     signal: facts.signal,
-    ...(request.awaitAsleep === undefined ? {} : { awaitAsleep: request.awaitAsleep }),
     launch: async (allocated) => {
       if (!facts.admissionOpen()) throw new Error("body closed request admission");
       await reserveRequest(paths, facts.id, allocated.id);
@@ -164,6 +162,7 @@ async function executeAkumaCall(
 export function akumaCallRequestProtocol(): RequestProtocol<AkumaCallRequest, AkuId, AkuId> {
   return {
     action: "akuma.call",
+    supportsCancellation: true,
     encodeRequest: callPayload,
     decodeRequest: decodeAkumaCallRequest,
     encodeResult: (result) => result,

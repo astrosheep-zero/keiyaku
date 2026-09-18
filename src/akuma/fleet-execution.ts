@@ -1,6 +1,6 @@
 import { AkumaNotBornError, defaultWaitComplete, type AkumaStatus } from "./akuma.js";
 import { createAkumaProduct } from "./akuma-product.js";
-import { readBudgetedStatus, readWaitComplete } from "./akuma-observe.js";
+import { readBudgetedStatus, waitForObservation } from "./akuma-observe.js";
 import { NO_DISPATCH_ASSOCIATION, type DispatchAssociation } from "./dispatch-association.js";
 import { EMPTY_CREATED_TASK_OBSERVATION } from "../task/created-observation.js";
 import type { AkumaAlias } from "../identity/selector.js";
@@ -23,7 +23,6 @@ function observationDiagnostic(error: unknown): string {
 }
 
 const SHARED_ORDINARY_BUDGET = 30;
-const POLL_MS = 100;
 
 type WaitRound = Readonly<{
   statuses: readonly AkumaStatus[];
@@ -67,46 +66,12 @@ async function observeWaitRound(
   return { statuses, unobserved };
 }
 
-async function probeWaitRound(input: WaitExecutionInput): Promise<boolean> {
-  let observed = 0;
-  let complete = 0;
-  for (const id of input.ids) {
-    input.signal?.throwIfAborted();
-    try {
-      if (await readWaitComplete(input.path, id)) complete += 1;
-      observed += 1;
-    } catch (error) {
-      if (input.ids.length <= 1 || error instanceof AkumaNotBornError) throw error;
-      // Plural wait retries unreadable members; final rendering owns diagnostics.
-    }
-  }
-  return observed > 0 && (input.completion === "any" ? complete > 0 : complete === input.ids.length);
-}
-
 function roundComplete(round: WaitRound, completion: "any" | "all"): boolean {
   const settled = round.statuses.map(defaultWaitComplete);
   return (
     settled.length > 0 &&
     (completion === "any" ? settled.some(Boolean) : round.unobserved.length === 0 && settled.every(Boolean))
   );
-}
-
-function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    let timer: ReturnType<typeof setTimeout>;
-    const done = (): void => {
-      signal?.removeEventListener("abort", abort);
-      resolve();
-    };
-    const abort = (): void => {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", abort);
-      reject(signal?.reason ?? new Error("upstream request aborted"));
-    };
-    timer = setTimeout(done, milliseconds);
-    if (signal?.aborted) abort();
-    else signal?.addEventListener("abort", abort, { once: true });
-  });
 }
 
 export type WaitIdentityFacts = Readonly<{
@@ -168,7 +133,6 @@ function selectionOrderedIds(
 }
 
 export async function executeWaitAkuma(input: WaitExecutionInput): Promise<AkumaWaitResult> {
-  const deadline = input.timeoutMs === undefined ? undefined : performance.now() + input.timeoutMs;
   // Identity facts are read once per observed Akuma, not once per 100ms round.
   const facts = new Map<AkumaStatus["id"], WaitIdentityFacts>();
   if (input.onSelected !== undefined) {
@@ -199,26 +163,19 @@ export async function executeWaitAkuma(input: WaitExecutionInput): Promise<Akuma
     }
     input.observe(observed);
   };
-  for (;;) {
-    const expired = deadline !== undefined && performance.now() >= deadline;
-    if (expired || input.observe !== undefined || (await probeWaitRound(input))) {
-      const round = await observeWaitRound(input.path, input.ids, input.signal);
-      input.signal?.throwIfAborted();
-      await observeRound(round.statuses);
-      // The probe is not a completion receipt. Judge the actual returned values.
-      if (roundComplete(round, input.completion) || (deadline !== undefined && performance.now() >= deadline)) {
-        return fleetResultSchemas.wait.parse({
-          completion: input.completion,
-          observations: round.statuses.map(akumaOnlyObservation),
-          unobserved: round.unobserved,
-        });
-      }
-    }
-    await delay(
-      deadline === undefined ? POLL_MS : Math.min(POLL_MS, Math.max(0, deadline - performance.now())),
-      input.signal,
-    );
-  }
+  const waited = await waitForObservation({
+    ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+    observe: async () => await observeWaitRound(input.path, input.ids, input.signal),
+    complete: (round) => roundComplete(round, input.completion),
+    onObserve: async (round) => await observeRound(round.statuses),
+  });
+  return fleetResultSchemas.wait.parse({
+    mode: input.completion,
+    reason: waited.reason,
+    observations: waited.value.statuses.map(akumaOnlyObservation),
+    unobserved: waited.value.unobserved,
+  });
 }
 
 export type TellExecutionInput = Readonly<{
@@ -234,13 +191,10 @@ export type TellExecutionInput = Readonly<{
 export async function executeTellAkuma(input: TellExecutionInput): Promise<AkumaTellResult> {
   input.signal?.throwIfAborted();
   const handle = source(input.path).selectHandle({ id: input.id });
-  const tell = await handle.tell(
-    input.body,
-    input.tellId,
-    input.recordedAt,
-    undefined,
-    input.initiator === undefined ? {} : { initiator: input.initiator },
-  );
+  const tell = await handle.tell(input.body, input.tellId, input.recordedAt, undefined, {
+    ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
   input.signal?.throwIfAborted();
   return fleetResultSchemas.tell.parse({
     akuma: input.id,

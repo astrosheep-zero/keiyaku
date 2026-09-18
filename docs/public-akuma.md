@@ -49,14 +49,17 @@ The Address facet is the sole selector interpreter. It resolves complete Akuma
 identity, Alias, glob, and Contract selection from one frozen owner observation,
 and refuses an ambiguous human selector. Akuma itself remains unaware of Alias,
 Dispatch, Contract, glob, and repository coordinates. A resolved selector is
-not resolved again downstream. Address may use the explicit advanced complete
-library observation for this frozen expansion; it never becomes a second public
-catalogue.
+not resolved again downstream. A readable Alias remains an Akuma address when
+optional Contract composition is unavailable; that degradation stays explicit
+in the separate association context rather than concealing the core Akuma.
+Address may use the explicit advanced complete library observation for this
+frozen expansion; it never becomes a second public catalogue.
 
 Fleet composes public Akuma handles after address expansion. It preserves the
 raw Akuma status and mutation evidence, adding separate read-only Dispatch and
 Task associations where available; it never intersects them into Akuma state or
-re-evaluates lifecycle. Wait and kill freeze their subject set at entry. An
+re-evaluates lifecycle. Wait and kill freeze their subject set at entry in the
+caller's deduplicated selection order. An
 omitted completion mode is any: the wait returns when any selected member
 already satisfies, or comes to satisfy during observation, the existing
 completion judgment, and an already completed member counts immediately, so
@@ -65,7 +68,8 @@ entire selected set. The mode changes completion criteria only; it never
 changes the frozen subject set, observation retries, or the honest
 distinguishing of observed and unobserved subjects. Plural wait retries
 transient unreadable members during observation, but final output never
-fabricates completion. Tell and kill return their primary evidence; interrupt retains its
+fabricates completion. A wait reports its requested mode separately from its
+completed-or-deadline return reason. Tell and kill return their primary evidence; interrupt retains its
 separate post-action observation.
 
 The catalog invokes exactly one selected product owner. Its Akuma catalogue is

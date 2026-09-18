@@ -217,6 +217,7 @@ async function invokeAkumaFromEdge(parsed: InvokedAkumaCommand, input: AkumaEdge
       environment: edge.environment,
       readStdin: edge.readStdin,
       execution: input.execution,
+      ...(edge.signal === undefined ? {} : { signal: edge.signal }),
     });
   } catch (error) {
     if (error instanceof Error && "executionReceipt" in error) throw error;

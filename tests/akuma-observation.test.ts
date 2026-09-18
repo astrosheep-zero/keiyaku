@@ -24,7 +24,7 @@ import { insertActivityFact } from "../src/akuma/heart/rows.js";
 import { insertTellFact } from "../src/akuma/heart/tells.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { World } from "../src/world.js";
-import { bornStatus } from "../src/akuma/akuma-observe.js";
+import { bornStatus, waitForObservation } from "../src/akuma/akuma-observe.js";
 import { executeWaitAkuma } from "../src/akuma/fleet-execution.js";
 import { ordinarySnapshotBudget, projectTurns, selectSnapshot } from "../src/akuma/projection.js";
 import { translatePiEvent, type PiEventState } from "../src/akuma/providers/pi/events.js";
@@ -53,6 +53,39 @@ async function recordTell(
 ) {
   return await heartRecordTell(paths, { kind: "tell", ...tell });
 }
+
+test("shared observation returns one final deadline snapshot and propagates caller abort", async () => {
+  let reads = 0;
+  const deadline = await waitForObservation({
+    timeoutMs: 0,
+    observe: async () => {
+      reads += 1;
+      return "running" as const;
+    },
+    complete: (status) => status === "settled",
+  });
+  assert.deepEqual(deadline, { reason: "deadline", value: "running" });
+  assert.equal(reads, 1);
+
+  const completed = await waitForObservation({
+    timeoutMs: 0,
+    observe: async () => "settled" as const,
+    complete: (status) => status === "settled",
+  });
+  assert.deepEqual(completed, { reason: "completed", value: "settled" });
+
+  const controller = new AbortController();
+  const reason = new Error("caller cancelled observation");
+  controller.abort(reason);
+  await assert.rejects(
+    waitForObservation({
+      signal: controller.signal,
+      observe: async () => "running" as const,
+      complete: () => false,
+    }),
+    (error: unknown) => error === reason,
+  );
+});
 
 test("timeline decoding batches Tell witnesses and rejects missing retained facts", async (context) => {
   const value = await fixture();
@@ -178,7 +211,12 @@ test("reported changes retain native Pi writes and aggregate a write-then-edit p
         });
     };
     const write = async (id: string, path: string): Promise<void> => {
-      await observe({ type: "tool_execution_start", toolCallId: id, toolName: "write", args: { path, content: "x\n" } });
+      await observe({
+        type: "tool_execution_start",
+        toolCallId: id,
+        toolName: "write",
+        args: { path, content: "x\n" },
+      });
       await observe({
         type: "tool_execution_end",
         toolCallId: id,
@@ -216,7 +254,9 @@ test("reported changes retain native Pi writes and aggregate a write-then-edit p
       isError: false,
       result: { details: { patch: "@@ -1 +1,2 @@\n-x\n+y\n+z" } },
     });
-    const snapshot = selectSnapshot(projectTurns((await activitySlice(paths)).rows), { aperture: "monitoring" }).snapshot;
+    const snapshot = selectSnapshot(projectTurns((await activitySlice(paths)).rows), {
+      aperture: "monitoring",
+    }).snapshot;
     assert.equal(snapshot.kind, "open");
     const reported = snapshot.reportedChanges.map((change) => ({
       op: change.op,
@@ -230,7 +270,10 @@ test("reported changes retain native Pi writes and aggregate a write-then-edit p
       // diffstat leaves the aggregated group without fabricated numbers.
       { op: "update", path: "src/mixed.ts" },
     ]);
-    assert.equal(reported.some((change) => change.path === "src/failed.ts"), false);
+    assert.equal(
+      reported.some((change) => change.path === "src/failed.ts"),
+      false,
+    );
   } finally {
     leash.release();
     value.close();

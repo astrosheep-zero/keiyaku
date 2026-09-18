@@ -27,8 +27,8 @@ const fleetTargetsSchema = z
   .array(akumaIdSchema)
   .min(1)
   .superRefine((ids, context) => {
-    if (ids.some((id, index) => index > 0 && ids[index - 1]! >= id))
-      context.addIssue({ code: "custom", message: "expected a strictly ordered target set" });
+    if (new Set(ids).size !== ids.length)
+      context.addIssue({ code: "custom", message: "expected a deduplicated target set" });
   });
 const waitRequestSchema = z
   .object({
@@ -163,6 +163,7 @@ export function fleetRequestProtocol(
 ): RequestProtocol<FleetRequest, unknown, FleetService> {
   return {
     action,
+    supportsCancellation: true,
     encodeRequest: (request) => {
       const { action: _action, ...payload } = request;
       return payload;

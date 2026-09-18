@@ -21,6 +21,7 @@ import {
   type ActivitySnapshot,
 } from "./projection.js";
 import { resolveProviderExecution } from "./providers/index.js";
+import { abortableDelay } from "./abort.js";
 import type { WorldRoot } from "../world.js";
 import type { AkumaListRow, AkumaStatus, UnbornAkumaListRow } from "./akuma.js";
 import { AkumaNotBornError } from "./akuma-errors.js";
@@ -141,10 +142,50 @@ export async function readWaitComplete(worldPath: WorldRoot, id: AkuId): Promise
   return complete(observed.currentLife, observed.snapshot.hasPendingTell);
 }
 
+export type WaitReason = "completed" | "deadline";
 const OBSERVATION_POLL_MS = 100;
 
-function observeDelay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+/**
+ * The one deadline-aware observation loop for public Akuma waiting.  It always
+ * reads once before judging a passed deadline, so a zero-duration wait remains
+ * an honest final snapshot and completion wins at the deadline edge.
+ */
+export async function waitForObservation<T>(
+  input: Readonly<{
+    timeoutMs?: number;
+    signal?: AbortSignal;
+    probe?(): Promise<boolean>;
+    observe(): Promise<T>;
+    complete(value: T): boolean;
+    onObserve?(value: T): void | Promise<void>;
+  }>,
+): Promise<Readonly<{ reason: WaitReason; value: T }>> {
+  const deadline = input.timeoutMs === undefined ? undefined : performance.now() + input.timeoutMs;
+  for (;;) {
+    input.signal?.throwIfAborted();
+    const ready = input.probe === undefined || (await input.probe());
+    input.signal?.throwIfAborted();
+    if (!ready && (deadline === undefined || performance.now() < deadline)) {
+      await abortableDelay(
+        deadline === undefined
+          ? OBSERVATION_POLL_MS
+          : Math.min(OBSERVATION_POLL_MS, Math.max(0, deadline - performance.now())),
+        input.signal,
+      );
+      continue;
+    }
+    const value = await input.observe();
+    input.signal?.throwIfAborted();
+    await input.onObserve?.(value);
+    if (input.complete(value)) return { reason: "completed", value };
+    if (deadline !== undefined && performance.now() >= deadline) return { reason: "deadline", value };
+    await abortableDelay(
+      deadline === undefined
+        ? OBSERVATION_POLL_MS
+        : Math.min(OBSERVATION_POLL_MS, Math.max(0, deadline - performance.now())),
+      input.signal,
+    );
+  }
 }
 
 /**
@@ -157,16 +198,17 @@ function observeDelay(milliseconds: number): Promise<void> {
 export async function observeAkumaStatus(
   worldPath: WorldRoot,
   expected: AkuId,
-  input: Readonly<{ timeoutMs: number; observe: (status: AkumaStatus) => void }>,
-): Promise<AkumaStatus> {
+  input: Readonly<{ timeoutMs: number; signal?: AbortSignal; observe: (status: AkumaStatus) => void }>,
+): Promise<Readonly<{ reason: WaitReason; status: AkumaStatus }>> {
   const paths = pathsForAkuId(worldPath, expected);
-  const deadline = performance.now() + input.timeoutMs;
-  for (;;) {
-    const status = (await bornStatus(paths, expected, { aperture: "monitoring" })).status;
-    if (defaultWaitComplete(status) || performance.now() >= deadline) return status;
-    input.observe(status);
-    await observeDelay(Math.min(OBSERVATION_POLL_MS, Math.max(0, deadline - performance.now())));
-  }
+  const waited = await waitForObservation({
+    timeoutMs: input.timeoutMs,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+    observe: async () => (await bornStatus(paths, expected, { aperture: "monitoring" })).status,
+    complete: defaultWaitComplete,
+    onObserve: input.observe,
+  });
+  return { reason: waited.reason, status: waited.value };
 }
 
 export async function readAkumaBirthCwd(worldPath: WorldRoot, id: AkuId): Promise<string> {

@@ -1,34 +1,19 @@
 import { temporaryDirectory } from "./support/process.js";
 import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { AkumaArchetypeError, loadArchetype } from "../src/akuma/archetype.js";
 import { akumaCallRequestCommands, type AkumaCallRequestChildLaunch } from "../src/akuma/call-request.js";
-import {
-  finishBodyIfIdle,
-  HeldAkumaLeash,
-  initializeHeart,
-  readHeart,
-  type Soul,
-} from "../src/akuma/heart/index.js";
+import { finishBodyIfIdle, HeldAkumaLeash, initializeHeart, readHeart, type Soul } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory, parseAkuId, pathsForAkuId } from "../src/akuma/identity.js";
 import { Akuma as PublicAkuma, Schema } from "../src/akuma/index.js";
 import { fleetRequestCommands, type FleetRequestPort } from "../src/akuma/fleet-request.js";
 import { composeRequestCommands } from "../src/akuma/request-wire.js";
 import { BodyRequestPump } from "../src/akuma/request-serve.js";
-import {
-  repositoryAt,
-} from "../src/git/repository.js";
+import { repositoryAt } from "../src/git/repository.js";
 import { bodyRequestExecution, Keiyaku, Repo, World, settings } from "../src/index.js";
 import {
   cleanupSpawnCapableFixture,
@@ -38,21 +23,14 @@ import {
 } from "./support/process.js";
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import type { WorldRoot } from "../src/world.js";
-import {
-  AkumaComposition as Akuma,
-  AkumaHandle,
-  isolateSquareFixtureLedger,
-} from "./support/akuma-composition.js";
+import { AkumaComposition as Akuma, AkumaHandle, isolateSquareFixtureLedger } from "./support/akuma-composition.js";
 import { makeGitRepository } from "./support/git.js";
-
-
 
 async function repositoryFixture() {
   const raw = makeGitRepository();
   raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   return { raw, repo: await Repo.at({ path: raw.path }), git: await repositoryAt(raw.path) };
 }
-
 
 async function directArchetypeSettings(root: string) {
   const home = join(root, ".direct-settings");
@@ -102,7 +80,8 @@ function slowEmptyPublicationBody() {
         resolveExit: (exit: Awaited<OwnedProcess["exited"]>) => void;
       }>
     | undefined;
-  const { promise: started, resolve: resolveStarted } = promiseBarrier<Readonly<{ paths: AkumaCallRequestChildLaunch["paths"]; bodySequence: number }>>();
+  const { promise: started, resolve: resolveStarted } =
+    promiseBarrier<Readonly<{ paths: AkumaCallRequestChildLaunch["paths"]; bodySequence: number }>>();
   let released = false;
   const release = async (): Promise<void> => {
     if (released || held === undefined) return;
@@ -220,6 +199,60 @@ test("local schema Keiyaku.call waits for its held empty Body before admitting i
   }
 });
 
+test("local schema Keiyaku.call starts its zero observation budget after birth", async (t) => {
+  const { raw } = await repositoryFixture();
+  const world = await World.at(raw.path);
+  const configured = await directArchetypeSettings(world);
+  const schema = Schema.json(
+    { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
+    (value) => value as { ok: boolean },
+  );
+  const bodyPidReceipt = join(raw.path, "body-pids");
+  const emptyPublicationBarrier = join(raw.path, "empty-publication-barrier");
+  mkdirSync(emptyPublicationBarrier);
+  const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
+  const restoreEmptyPublicationBarrier = installAkumaBodyEmptyPublicationBarrier(emptyPublicationBarrier);
+  const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
+  let operationFailed = true;
+  try {
+    const pending = Keiyaku.call({
+      path: world,
+      archetype: "worker",
+      body: "zero-budget-after-birth",
+      cwd: world,
+      ...configured.placement,
+      schema,
+      timeoutMs: 0,
+    });
+    void pending.catch(() => undefined);
+    const readyPath = join(emptyPublicationBarrier, "ready");
+    await waitForFixtureFile(readyPath);
+    const held = JSON.parse(readFileSync(readyPath, "utf8")) as { id: string };
+    const result = await pending;
+    assert.deepEqual(result.observation.kind, "observed");
+    if (result.observation.kind === "observed") assert.equal(result.observation.reason, "deadline");
+    assert.equal(result.schemaAnswer, undefined);
+    assert.equal((await readHeart(pathsForAkuId(world, parseAkuId(held.id).id))).latestBody?.end, undefined);
+    operationFailed = false;
+  } finally {
+    try {
+      const releasePath = join(emptyPublicationBarrier, "release");
+      if (!existsSync(releasePath)) writeFileSync(releasePath, "release\n");
+      const cleanup = await cleanupSpawnCapableFixture({
+        fixturePath: raw.path,
+        pidReceiptPath: bodyPidReceipt,
+        timeoutMs: 15_000,
+        operationFailed,
+      });
+      if (cleanup.kind === "retained") t.diagnostic(`retained fixture ${raw.path}: ${cleanup.diagnostic}`);
+    } finally {
+      restoreEmptyPublicationBarrier();
+      restoreBodyPidReceipt();
+      restoreSquareLedger();
+    }
+  }
+});
+
 test("forwarded schema Keiyaku.call waits for its empty Body before admitting its Tell", async (t) => {
   const { raw } = await repositoryFixture();
   const world = await World.at(raw.path);
@@ -289,6 +322,98 @@ test("forwarded schema Keiyaku.call waits for its empty Body before admitting it
   }
 });
 
+test("forwarded schema Keiyaku.call's deadline cancels its held birth Body request", async () => {
+  const { raw } = await repositoryFixture();
+  const world = await World.at(raw.path);
+  const configured = await directArchetypeSettings(world);
+  const schema = Schema.json(
+    { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
+    (value) => value as { ok: boolean },
+  );
+  const slow = slowEmptyPublicationBody();
+  const { pump, leash } = await requestPump(world, slow.spawn);
+  const routedKeiyaku = Keiyaku.withExecution({ execution: bodyRequestExecution({ directory: pump.directory }) });
+  const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
+  try {
+    const pending = routedKeiyaku.call({
+      path: world,
+      archetype: "worker",
+      body: "forwarded-deadline-before-birth-body-settles",
+      cwd: world,
+      ...configured.placement,
+      schema,
+      timeoutMs: 20,
+    });
+    const body = await slow.started;
+    const result = await pending;
+    assert.deepEqual(result.observation.kind, "observed");
+    if (result.observation.kind === "observed") assert.equal(result.observation.reason, "deadline");
+    assert.equal(result.schemaAnswer, undefined);
+    assert.equal((await readHeart(body.paths)).latestBody?.end, undefined);
+  } finally {
+    try {
+      await slow.release();
+      rmSync(raw.path, { recursive: true, force: true });
+    } finally {
+      await pump.close();
+      leash.release();
+      restoreSquareLedger();
+    }
+  }
+});
+
+test("schema Keiyaku.call spends its one deadline through a delayed schema answer", async (t) => {
+  const { raw } = await repositoryFixture();
+  const world = await World.at(raw.path);
+  const configured = await directArchetypeSettings(world);
+  const schema = Schema.json(
+    { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
+    (value) => value as { ok: boolean },
+  );
+  const bodyPidReceipt = join(raw.path, "body-pids");
+  const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
+  const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
+  const tell = PublicAkuma.prototype.tell;
+  let schemaSignal: AbortSignal | undefined;
+  t.mock.method(PublicAkuma.prototype, "tell", async function (this: PublicAkuma, ...args: Parameters<typeof tell>) {
+    const options = args[1];
+    schemaSignal = options !== undefined && "signal" in options ? options.signal : undefined;
+    assert.ok(schemaSignal instanceof AbortSignal, "bounded schema Tell must receive the call deadline signal");
+    return await new Promise<never>((_resolve, reject) => {
+      schemaSignal!.addEventListener("abort", () => reject(schemaSignal!.reason), { once: true });
+    });
+  });
+  let operationFailed = true;
+  try {
+    const result = await Keiyaku.call({
+      path: world,
+      archetype: "worker",
+      body: "schema-deadline",
+      cwd: world,
+      ...configured.placement,
+      schema,
+      timeoutMs: 5_000,
+    });
+    assert.equal(result.schemaAnswer, undefined);
+    assert.deepEqual(result.observation.kind, "observed");
+    if (result.observation.kind === "observed") assert.equal(result.observation.reason, "completed");
+    assert.equal(schemaSignal?.aborted, true);
+    operationFailed = false;
+  } finally {
+    try {
+      const cleanup = await cleanupSpawnCapableFixture({
+        fixturePath: raw.path,
+        pidReceiptPath: bodyPidReceipt,
+        timeoutMs: 15_000,
+        operationFailed,
+      });
+      if (cleanup.kind === "retained") t.diagnostic(`retained fixture ${raw.path}: ${cleanup.diagnostic}`);
+    } finally {
+      restoreBodyPidReceipt();
+      restoreSquareLedger();
+    }
+  }
+});
 
 async function defaultRequestSpawn(launch: AkumaCallRequestChildLaunch): Promise<void> {
   const child = (await HeldAkumaLeash.try(launch.paths))!;
@@ -403,7 +528,6 @@ test("Archetype base chains refuse missing providers, malformed names, and cycle
     (error: unknown) => error instanceof AkumaArchetypeError && error.message.includes("provider must be"),
   );
 });
-
 
 // Decode at the owner boundary: bad configuration does not need Git, a Body, or a provider process.
 test("Archetype and call allowed inputs refuse malformed values before allocation", async (context) => {

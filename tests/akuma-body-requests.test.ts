@@ -194,7 +194,7 @@ async function requestBodyKill(input: Readonly<{ directory: string; id?: string;
   });
 }
 
-const emptyWaitResult = { completion: "all" as const, observations: [], unobserved: [] };
+const emptyWaitResult = { mode: "all" as const, reason: "completed" as const, observations: [], unobserved: [] };
 
 const progressProtocol = (supportsCancellation = false): RequestProtocol<string, string, string> => ({
   action: "test.progress",
@@ -385,7 +385,8 @@ test("Contract owner codecs reject malformed live, failure, and service payloads
 
 test("Fleet owner codecs reject malformed live and service payloads", () => {
   const forwarded = {
-    completion: "all" as const,
+    mode: "all" as const,
+    reason: "completed" as const,
     observations: [
       {
         status: {
@@ -402,7 +403,7 @@ test("Fleet owner codecs reject malformed live and service payloads", () => {
   };
   assert.deepEqual(fleetRequestProtocol("akuma.wait").decodeResult(forwarded), forwarded);
   assert.throws(
-    () => fleetRequestProtocol("akuma.wait").decodeResult({ completion: "all", observations: [], unobserved: [{}] }),
+    () => fleetRequestProtocol("akuma.wait").decodeResult({ mode: "all", reason: "completed", observations: [], unobserved: [{}] }),
     /invalid live result for akuma\.wait/u,
   );
   assert.throws(
@@ -623,18 +624,27 @@ test("cancellation during request publication retains the caller cancellation be
   assert.equal(existsSync(join(directory, "request.json")), false);
 });
 
-test("cancellation after publication is unknown and same-id retry reuses Heart service evidence", async () => {
+test("cancellation after publication aborts the served operation and frees the serial request slot", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-request-cancel-after-publication-")));
   const parent = await born(root, "parent", "11111111");
   const { promise: executionStarted, resolve: started } = promiseBarrier<void>();
-  const { promise: executionReleased, resolve: release } = promiseBarrier<void>();
+  const { promise: executionCancelled, resolve: cancelled } = promiseBarrier<void>();
   let calls = 0;
   const pump = await openFleetPump(parent, {
-    wait: async () => {
+    wait: async (input) => {
       calls += 1;
+      if (calls > 1) return emptyWaitResult;
       started();
-      await executionReleased;
-      return emptyWaitResult;
+      return await new Promise<never>((_resolve, reject) => {
+        input.signal.addEventListener(
+          "abort",
+          () => {
+            cancelled();
+            reject(input.signal.reason);
+          },
+          { once: true },
+        );
+      });
     },
     tell: async () => {
       throw new Error("unexpected tell");
@@ -660,37 +670,21 @@ test("cancellation after publication is unknown and same-id retry reuses Heart s
       request,
       (error: unknown) =>
         error instanceof AkumaBodyRequestError &&
-        error.outcome === "unknown" &&
+        error.outcome === "unproven" &&
         error.requestId === id &&
         error.action === "akuma.wait",
     );
-
-    release();
-    const requestState = async () => (await readRequest(parent.paths, id))?.state ?? null;
-    await waitFor(
-      "the served request state for the released executor",
-      async () => (await requestState()) === "served",
-      {
-        terminalState: async () => {
-          const state = await requestState();
-          return state === "refused" || state === "unproven" || state === "voided" ? state : null;
-        },
-      },
-    );
+    await executionCancelled;
     assert.deepEqual(
       await requestBodyWait({
         directory: pump.directory,
-        id,
+        id: randomUUID(),
         targets: ["aku/worker/22222222" as AkuId],
         completion: "all",
       }),
-      { kind: "reference", reference: { action: "akuma.wait" } },
+      { kind: "returned", result: emptyWaitResult },
     );
-    assert.equal(calls, 1);
-    const fact = await readRequest(parent.paths, id);
-    assert.deepEqual(fact?.state === "served" && "serviceJson" in fact ? JSON.parse(fact.serviceJson) : null, {
-      action: "akuma.wait",
-    });
+    assert.equal(calls, 2);
   } finally {
     await pump.close();
     rmSync(root, { recursive: true, force: true });
@@ -1259,7 +1253,7 @@ test("a forwarded wait omits its mode and reaches the parent as any", async () =
   const pump = await openFleetPump(parent, {
     wait: async (input) => {
       completions.push(input.completion);
-      return { completion: input.completion, observations: [], unobserved: [] };
+      return { mode: input.completion, reason: "completed", observations: [], unobserved: [] };
     },
     tell: async () => {
       throw new Error("unexpected tell");
@@ -1274,7 +1268,7 @@ test("a forwarded wait omits its mode and reaches the parent as any", async () =
       bodyRequestExecutionContext(pump.directory),
     );
     assert.deepEqual(completions, ["any"]);
-    assert.equal(result.completion, "any");
+    assert.equal(result.mode, "any");
   } finally {
     await pump.close();
     rmSync(root, { recursive: true, force: true });

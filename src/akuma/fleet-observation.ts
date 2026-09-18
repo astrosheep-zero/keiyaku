@@ -53,7 +53,8 @@ const akumaUnobservedSchema = z.object({ id: akumaIdSchema, diagnostic: z.string
 const akumaKillResultItemSchema = z.object({ id: akumaIdSchema, evidence: killEvidenceSchema }).strict();
 const akumaWaitResultSchema = z
   .object({
-    completion: z.enum(["any", "all"]),
+    mode: z.enum(["any", "all"]),
+    reason: z.enum(["completed", "deadline"]),
     observations: z.array(akumaObservationSchema),
     unobserved: z.array(akumaUnobservedSchema),
   })

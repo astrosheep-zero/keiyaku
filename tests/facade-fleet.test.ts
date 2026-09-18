@@ -12,7 +12,7 @@ import { driveAkumaBody } from "../src/akuma/body.js";
 import { appendActivity, initializeHeart } from "../src/akuma/heart/index.js";
 import { akuId, allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
-import { moveAlias } from "../src/alias/index.js";
+import { moveAlias, readAliases } from "../src/alias/index.js";
 import { contractId, contractSegment } from "../src/core/facts/types.js";
 import { publishDispatch } from "../src/dispatch/index.js";
 import { repositoryAt } from "../src/git/repository.js";
@@ -498,6 +498,18 @@ test("named Address refuses failed Kanshi Contract and Alias observations", asyn
   const root = fixtureRoot(t, "keiyaku-named-kanshi-failed-");
   const observation = await observeKanshi({ world: root });
   const failure = { kind: "failed" as const, failure: { message: "unavailable" } };
+  const source = await answered(root, "worker", "00000002");
+  const alias = parseAkumaAlias("@readable");
+  await moveAlias({ world: root, alias, akuId: source.id });
+  assert.deepEqual(
+    resolveNamedAddress({
+      selector: alias,
+      report: { ...observation.report, contracts: failure },
+      aliases: { kind: "present", value: await readAliases(root) },
+    }),
+    { kind: "akuma", id: source.id },
+    "a readable Alias remains an Akuma address when optional Contract composition is degraded",
+  );
   assert.throws(
     () =>
       resolveNamedAddress({
@@ -636,19 +648,19 @@ test("multi-member wait and kill project every member from one Task board snapsh
   });
   assert.deepEqual(
     waited.observations.map((observation) => observation.status.id),
-    [reviewer.id, worker.id],
+    [worker.id, reviewer.id],
   );
   assert.deepEqual(
     waited.observations.map((observation) => observation.createdTasks),
     [
-      { kind: "present", rows: expected.selectCreatedBy(reviewer.id) },
       { kind: "present", rows: expected.selectCreatedBy(worker.id) },
+      { kind: "present", rows: expected.selectCreatedBy(reviewer.id) },
     ],
   );
   const killed = await Keiyaku.kill({ path: root, akuma: [worker.id, reviewer.id] });
   assert.deepEqual(
     killed.results.map((member) => member.id),
-    [reviewer.id, worker.id],
+    [worker.id, reviewer.id],
   );
   assert.equal(
     killed.results.every((member) => !("observation" in member)),
